@@ -10,6 +10,9 @@ import {
 } from 'playcanvas';
 import type { CameraComponent } from 'playcanvas';
 
+import { Picker } from './picker';
+import type { Global } from './types';
+
 const tmpV1 = new Vec3();
 const tmpV2 = new Vec3();
 
@@ -66,9 +69,7 @@ const screenToWorld = (camera: CameraComponent, dx: number, dy: number, dz: numb
     return out;
 };
 
-class AppController {
-    private _camera: CameraComponent;
-
+class InputController {
     private _state = {
         axis: new Vec3(),
         mouse: [0, 0, 0],
@@ -85,6 +86,8 @@ class AppController {
 
     private _gamepadInput = new GamepadSource();
 
+    global: Global;
+
     frame = new InputFrame({
         move: [0, 0, 0],
         rotate: [0, 0, 0]
@@ -96,7 +99,7 @@ class AppController {
     } = { base: null, stick: null };
 
     // this gets overridden by the viewer based on scene size
-    moveSpeed: number = 1;
+    moveSpeed: number = 4;
 
     orbitSpeed: number = 18;
 
@@ -104,16 +107,13 @@ class AppController {
 
     wheelSpeed: number = 0.06;
 
-    /**
-     * @param element - the element to attach the input to
-     * @param camera - the camera component to control
-     */
-    constructor(element: HTMLElement, camera: CameraComponent) {
-        this._desktopInput.attach(element);
-        this._orbitInput.attach(element);
-        this._flyInput.attach(element);
+    constructor(global: Global) {
+        const { app, camera, events, state } = global;
+        const canvas = app.graphicsDevice.canvas as HTMLCanvasElement;
 
-        this._camera = camera;
+        this._desktopInput.attach(canvas);
+        this._orbitInput.attach(canvas);
+        this._flyInput.attach(canvas);
 
         // convert events to joystick state
         this._flyInput.on('joystick:position:left', ([bx, by, sx, sy]) => {
@@ -125,6 +125,79 @@ class AppController {
             this.joystick.base = [bx, by];
             this.joystick.stick = [sx - bx, sy - by];
         });
+
+        this.global = global;
+
+        // Generate input events
+        ['wheel', 'pointerdown', 'contextmenu', 'keydown'].forEach((eventName) => {
+            canvas.addEventListener(eventName, (event) => {
+                events.fire('inputEvent', 'interrupt', event);
+            });
+        });
+
+        canvas.addEventListener('pointermove', (event) => {
+            events.fire('inputEvent', 'interact', event);
+        });
+
+        // Detect double taps manually because iOS doesn't send dblclick events
+        const lastTap = { time: 0, x: 0, y: 0 };
+        canvas.addEventListener('pointerdown', (event) => {
+            const now = Date.now();
+            const delay = Math.max(0, now - lastTap.time);
+            if (delay < 300 &&
+                Math.abs(event.clientX - lastTap.x) < 8 &&
+                Math.abs(event.clientY - lastTap.y) < 8) {
+                events.fire('inputEvent', 'dblclick', event);
+                lastTap.time = 0;
+            } else {
+                lastTap.time = now;
+                lastTap.x = event.clientX;
+                lastTap.y = event.clientY;
+            }
+        });
+
+        // Calculate pick location on double click
+        let picker: Picker | null = null;
+        events.on('inputEvent', async (eventName, event) => {
+            switch (eventName) {
+                case 'dblclick': {
+                    if (!picker) {
+                        picker = new Picker(app, camera);
+                    }
+                    const result = await picker.pick(event.offsetX, event.offsetY);
+                    if (result) {
+                        events.fire('pick', result);
+                    }
+                    break;
+                }
+            }
+        });
+
+        // update input mode based on pointer event
+        ['pointerdown', 'pointermove'].forEach((eventName) => {
+            window.addEventListener(eventName, (event: PointerEvent) => {
+                state.inputMode = event.pointerType === 'touch' ? 'touch' : 'desktop';
+            });
+        });
+
+        // handle keyboard events
+        window.addEventListener('keydown', (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                events.fire('inputEvent', 'cancel', event);
+            } else if (!event.ctrlKey && !event.altKey && !event.metaKey) {
+                switch (event.key) {
+                    case 'f':
+                        events.fire('inputEvent', 'frame', event);
+                        break;
+                    case 'r':
+                        events.fire('inputEvent', 'reset', event);
+                        break;
+                    case ' ':
+                        events.fire('inputEvent', 'playPause', event);
+                        break;
+                }
+            }
+        });
     }
 
     /**
@@ -133,13 +206,16 @@ class AppController {
      * @param state.cameraMode - the current camera mode
      * @param distance - the distance to the camera target
      */
-    update(dt: number, state: { cameraMode: 'anim' | 'fly' | 'orbit' }, distance: number) {
+    update(dt: number, distance: number) {
         const { keyCode } = KeyboardMouseSource;
 
         const { key, button, mouse, wheel } = this._desktopInput.read();
         const { touch, pinch, count } = this._orbitInput.read();
         const { leftInput, rightInput } = this._flyInput.read();
         const { leftStick, rightStick } = this._gamepadInput.read();
+
+        const { events, state } = this.global;
+        const { camera } = this.global.camera;
 
         // update state
         this._state.axis.add(tmpV1.set(
@@ -163,7 +239,7 @@ class AppController {
         const double = +(this._state.touches > 1);
         const pan = this._state.mouse[2] || +(button[2] === -1) || double;
 
-        const orbitFactor = fly ? this._camera.fov / 120 : 1;
+        const orbitFactor = fly ? camera.fov / 120 : 1;
 
         const { deltas } = this.frame;
 
@@ -171,7 +247,7 @@ class AppController {
         const v = tmpV1.set(0, 0, 0);
         const keyMove = this._state.axis.clone().normalize();
         v.add(keyMove.mulScalar(fly * this.moveSpeed * (this._state.shift ? 4 : this._state.ctrl ? 0.25 : 1) * dt));
-        const panMove = screenToWorld(this._camera, mouse[0], mouse[1], distance);
+        const panMove = screenToWorld(camera, mouse[0], mouse[1], distance);
         v.add(panMove.mulScalar(pan));
         const wheelMove = new Vec3(0, 0, -wheel[0]);
         v.add(wheelMove.mulScalar(this.wheelSpeed * dt));
@@ -186,7 +262,7 @@ class AppController {
 
         // mobile move
         v.set(0, 0, 0);
-        const orbitMove = screenToWorld(this._camera, touch[0], touch[1], distance);
+        const orbitMove = screenToWorld(camera, touch[0], touch[1], distance);
         v.add(orbitMove.mulScalar(orbit * pan));
         const flyMove = new Vec3(leftInput[0], 0, -leftInput[1]);
         v.add(flyMove.mulScalar(fly * this.moveSpeed * dt));
@@ -213,7 +289,12 @@ class AppController {
         const stickRotate = new Vec3(rightStick[0], rightStick[1], 0);
         v.add(stickRotate.mulScalar(this.orbitSpeed * orbitFactor * dt));
         deltas.rotate.append([v.x, v.y, v.z]);
+
+        // update touch joystick UI
+        if (state.cameraMode === 'fly') {
+            events.fire('touchJoystickUpdate', this.joystick.base, this.joystick.stick);
+        }
     }
 }
 
-export { AppController };
+export { InputController };
