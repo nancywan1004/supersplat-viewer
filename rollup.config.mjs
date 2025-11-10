@@ -9,6 +9,7 @@ import sass from 'sass';
 import terser from '@rollup/plugin-terser';
 import { execSync } from 'child_process';
 import fs from 'fs';
+import path from 'path';
 
 // 判断是否需要生成完整 package
 const isPackageBuild = process.env.BUILD_PACKAGE === 'true';
@@ -33,7 +34,7 @@ const packagePlugin = () => ({
     // 3️⃣ 复制并调整 package.json
     const pkg = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
     delete pkg.devDependencies;
-    pkg.main = 'dist/index.min.js';
+    pkg.main = 'dist/index.js';
     pkg.types = 'dist/index.d.ts';
     pkg.private = false;
 
@@ -88,23 +89,60 @@ const buildPublic = {
   ],
 };
 
-// --- Dist 构建（模块发布用） ---
-const buildDist = {
-  input: 'src/module/index.ts',
-  external: ['playcanvas'],
-  output: {
-    file: 'dist/index.min.js',
-    format: 'esm',
-    sourcemap: false,
+const input = process.env.INPUT || 'src/module/index.ts';
+const baseName = path.basename(input, path.extname(input));
+const dtsSource = `src/module/${baseName}.d.ts`;
+
+// --- 自定义插件：复制并重命名 .d.ts 文件，并清理其他 .d.ts ---
+const copyDtsPlugin = () => ({
+  name: 'copy-dts',
+  writeBundle() {
+    if (fs.existsSync(dtsSource)) {
+      const destPath = 'dist/index.d.ts';
+      fs.mkdirSync('dist', { recursive: true });
+      fs.copyFileSync(dtsSource, destPath);
+      console.log(`✅ 已复制 ${dtsSource} -> ${destPath}`);
+      
+      // 清理 dist 目录下除了 index.d.ts 之外的所有 .d.ts 文件
+      const distFiles = fs.readdirSync('dist');
+      distFiles.forEach(file => {
+        if (file.endsWith('.d.ts') && file !== 'index.d.ts') {
+          const filePath = path.join('dist', file);
+          fs.unlinkSync(filePath);
+          console.log(`🗑️  已删除多余文件: ${filePath}`);
+        }
+      });
+    } else {
+      console.warn(`⚠️  未找到源文件: ${dtsSource}`);
+    }
   },
+});
+
+// --- Dist 构建（模块发布用 - 完整导出版本） ---
+const buildDist = {
+  input: input,
+  external: ['playcanvas'],
+  output: [
+    {
+      file: 'dist/index.js',
+      format: 'esm',
+      sourcemap: true,
+    },
+    {
+      file: 'dist/index.min.js',
+      format: 'esm',
+      sourcemap: false,
+      plugins: [terser()],
+    }
+  ],
   plugins: [
     resolve(),
     string({ include: ['**/*.html', '**/*.css', '**/*.js'] }),
-    typescript(),
-    terser(),
-    copy({
-      targets: [{ src: 'src/module/index.d.ts', dest: 'dist' }],
+    typescript({
+      declaration: false,
+      declarationMap: false,
     }),
+    copyDtsPlugin(),
     packagePlugin(),
   ],
 };
