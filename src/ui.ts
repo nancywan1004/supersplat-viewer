@@ -36,7 +36,7 @@ const initUI = (global: Global) => {
         'settings', 'settingsPanel',
         'orbitCamera', 'flyCamera',
         'hqCheck', 'hqOption', 'lqCheck', 'lqOption',
-        'revealType', 'revealRestart',
+        'revealPanel', 'revealType', 'revealRestart',
         'reset', 'frame',
         'loadingText', 'loadingBar',
         'joystickBase', 'joystick',
@@ -147,6 +147,17 @@ const initUI = (global: Global) => {
     dom.revealRestart?.addEventListener('click', () => {
         events.fire('revealRestart');
     });
+
+    // Show/hide reveal controls based on hasRevealEffect state
+    const updateRevealControls = () => {
+        const hasReveal = state.hasRevealEffect;
+        if (dom.revealPanel) {
+            dom.revealPanel.classList[hasReveal ? 'remove' : 'add']('hidden');
+        }
+    };
+
+    events.on('hasRevealEffect:changed', updateRevealControls);
+    updateRevealControls();
 
     // Info panel
     const updateInfoTab = (tab: 'desktop' | 'touch') => {

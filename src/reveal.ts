@@ -19,7 +19,7 @@ export class RevealController {
 
     constructor(global: Global, bbox: BoundingBox, gsplatEntity: Entity) {
         this.global = global;
-        const { settings, events } = global;
+        const { settings, events, state } = global;
         this.gsplatEntity = gsplatEntity;
         
         // Check if revealEffect is empty or has no type
@@ -29,6 +29,7 @@ export class RevealController {
         
         if (!hasRevealEffect) {
             console.log('No reveal effect specified, skipping reveal initialization.');
+            state.hasRevealEffect = false;
             return;
         }
 
@@ -41,6 +42,9 @@ export class RevealController {
         };
 
         console.log('RevealController initialized with config:', this.config);
+        
+        // Set state to indicate reveal effect is available
+        state.hasRevealEffect = true;
 
         // 监听配置变化
         events.on('revealConfigChanged', (newConfig: Partial<RevealConfig>) => {

@@ -157,18 +157,20 @@
                     <div id="lqCheck" class="checkMark">✓</div>
                     <div id="lqOption">Low Quality Render</div>
                 </div>
-                <div class="divider"></div>
-                <div class="settingsRow">
-                    <select id="revealType">
-                        <option value="radial">Radial</option>
-                        <option value="rain">Rain</option>
-                        <option value="grid">Grid (Coming Soon)</option>
-                    </select>
+                <div id="revealPanel" class="hidden">
+                    <div class="divider"></div>
+                    <div class="settingsRow">
+                        <select id="revealType">
+                            <option value="radial">Radial</option>
+                            <option value="rain">Rain</option>
+                            <option value="grid">Grid (Coming Soon)</option>
+                        </select>
+                    </div>
+                    <div class="settingsRow">
+                        <button id="revealRestart">Start Reveal</button>
+                    </div>
+                    <div class="divider"></div>
                 </div>
-                <div class="settingsRow">
-                    <button id="revealRestart">Start Reveal</button>
-                </div>
-                <div class="divider"></div>
                 <div class="settingsRow">
                     <button id="frame">Frame</button>
                     <button id="reset">Reset</button>
