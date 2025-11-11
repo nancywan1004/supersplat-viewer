@@ -89,7 +89,8 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         hasAR: false,
         hasVR: false,
         isFullscreen: false,
-        controlsHidden: false
+        controlsHidden: false,
+        revealEnabled: false
     });
 
     const global: Global = {

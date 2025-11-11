@@ -14,6 +14,7 @@ import { Camera } from './cameras/camera';
 import { nearlyEquals } from './core/math';
 import { InputController } from './input-controller';
 import type { Global } from './types';
+import { RevealController } from './reveal';
 
 // override global pick to pack depth instead of meshInstance id
 const pickDepthGlsl = /* glsl */ `
@@ -41,6 +42,8 @@ class Viewer {
     global: Global;
 
     inputController: InputController;
+
+    revealController: RevealController;
 
     cameraManager: CameraManager;
 
@@ -156,6 +159,8 @@ class Viewer {
             this.annotations = new Annotations(global);
 
             this.inputController = new InputController(global);
+
+            this.revealController = new RevealController(global, bbox, gsplat);
 
             this.cameraManager = new CameraManager(global, bbox);
             applyCamera(this.cameraManager.camera);

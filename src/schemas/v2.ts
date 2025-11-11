@@ -1,3 +1,5 @@
+import type { RevealEffect } from "./v2-custom";
+
 type AnimTrack = {
     name: string,
     duration: number,
@@ -89,7 +91,9 @@ type ExperienceSettings = {
     cameras: Camera[],
     annotations: Annotation[],
 
-    cameraStartMode: 'default' | 'animTrack' | 'annotation'
+    cameraStartMode: 'default' | 'animTrack' | 'annotation',
+
+    revealEffect: RevealEffect
 };
 
-export type { AnimTrack, Camera, Annotation, PostEffectSettings, ExperienceSettings };
+export type { AnimTrack, Camera, Annotation, PostEffectSettings, RevealEffect, ExperienceSettings };

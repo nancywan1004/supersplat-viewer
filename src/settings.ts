@@ -62,7 +62,8 @@ const migrateV2 = (v1: V1): V2 => {
             }
         }],
         annotations: [],
-        cameraStartMode: v1.camera.startAnim === 'animTrack' ? 'animTrack' : 'default'
+        cameraStartMode: v1.camera.startAnim === 'animTrack' ? 'animTrack' : 'default',
+        revealEffect: {}
     }
 };
 
@@ -85,6 +86,6 @@ const importSettings = (settings: any): V2 => {
 };
 
 // export the latest/current schema types
-export type { AnimTrack, Camera, Annotation, PostEffectSettings, ExperienceSettings } from './schemas/v2';
+export type { AnimTrack, Camera, Annotation, PostEffectSettings, RevealEffect, ExperienceSettings } from './schemas/v2';
 
 export { importSettings };

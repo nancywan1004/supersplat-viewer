@@ -21,6 +21,32 @@ declare module 'playcanvas/scripts/esm/xr-navigation.mjs' {
     export { XrNavigation };
 }
 
+// declare module 'playcanvas/scripts/esm/gsplat/reveal-radial.mjs' {
+//     const GsplatRevealRadial: any;
+//     export { GsplatRevealRadial };
+// }
+
+// declare module 'playcanvas/scripts/esm/gsplat/reveal-rain.mjs' {
+//     const GsplatRevealRain: any;
+//     export { GsplatRevealRain };
+// }
+
+// Local script modules
+declare module '*/gsplat-reveal-radial.ts' {
+    const GsplatRevealRadial: any;
+    export { GsplatRevealRadial };
+}
+
+declare module '*/gsplat-reveal-rain.ts' {
+    const GsplatRevealRain: any;
+    export { GsplatRevealRain };
+}
+
+declare module '*/gsplat-shader-effect.ts' {
+    const GsplatShaderEffect: any;
+    export { GsplatShaderEffect };
+}
+
 declare module '*.html' {
     const content: string;
     export default content;
