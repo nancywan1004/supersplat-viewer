@@ -140,7 +140,7 @@ const initUI = (global: Global) => {
     // Reveal mode
     dom.revealType?.addEventListener('change', (event) => {
         const target = event.target as HTMLSelectElement;
-        const revealType = target.value as 'radial' | 'rain' | 'grid';
+        const revealType = target.value as 'radial' | 'rain' | 'smooth';
         events.fire('revealConfigChanged', { type: revealType });
     });
 
@@ -155,6 +155,9 @@ const initUI = (global: Global) => {
             dom.revealPanel.classList[hasReveal ? 'remove' : 'add']('hidden');
         }
     };
+
+    events.on('hasRevealEffect:changed', updateRevealControls);
+    updateRevealControls();
 
     events.on('hasRevealEffect:changed', updateRevealControls);
     updateRevealControls();

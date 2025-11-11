@@ -50,21 +50,23 @@ const packagePlugin = () => ({
 
 // --- CSS 构建 ---
 const buildCss = {
-  input: 'src/index.scss',
-  output: { dir: 'public' },
-  plugins: [
-    scss({
-      exclude: ['static/**/*'],
-      fileName: 'index.min.css',
-      sourceMap: false,
-      runtime: sass,
-      outputStyle: 'compressed',
-      processor: (css) =>
-        postcss([autoprefixer])
-          .process(css, { from: undefined })
-          .then((result) => result.css),
-    }),
-  ],
+    input: 'src/index.scss',
+    output: {
+        dir: 'public'
+    },
+    plugins: [
+        scss({
+            exclude: ['static/**/*'],
+            fileName: 'index.css',
+            sourceMap: true,
+            runtime: sass,
+            processor: (css) => {
+                return postcss([autoprefixer])
+                .process(css, { from: undefined })
+                .then(result => result.css);
+            }
+        })
+    ]
 };
 
 // --- Public 构建 ---

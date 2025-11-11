@@ -249,7 +249,7 @@ button {
     color: $clr-text;
     background-color: $clr-bkg;
 
-    > .settingsRow {
+    .settingsRow {
         display: flex;
         gap: 4px;
         width: 100%;
@@ -265,6 +265,25 @@ button {
 
             &:hover {
                 color: $clr-text-light;
+            }
+        }
+
+        > select {
+            flex-grow: 1;
+            padding: 10px 20px;
+            border: 0;
+            cursor: pointer;
+            border-radius: 4px;
+
+            color: $clr-text;
+            background-color: $clr-bkg-darkest;
+
+            &:hover {
+                color: $clr-text-light;
+            }
+
+            &:focus {
+                outline: 1px solid $clr-accent;
             }
         }
 
@@ -288,12 +307,19 @@ button {
         }
     }
 
-    > .divider {
+    .divider {
         width: 100%;
         height: 1px;
         margin: 8px 0;
 
         background-color: $clr-text-darkest;
+    }
+
+    #revealPanel {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        width: 100%;
     }
 }
 

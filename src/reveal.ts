@@ -1,8 +1,9 @@
 import type { Entity, BoundingBox } from 'playcanvas';
-import { GsplatRevealRadial } from './gsplat-reveal-radial';
-import { GsplatRevealRain } from './gsplat-reveal-rain';
+import { GsplatRevealRadial } from './reveal-effect/gsplat-reveal-radial';
+import { GsplatRevealRain } from './reveal-effect/gsplat-reveal-rain';
 import { Global } from './types';
 import { RevealEffect as RevealConfig } from './settings';
+import { GsplatRevealSmooth } from './reveal-effect/gsplat-reveal-smooth';
 // import { GsplatRevealRadial } from 'playcanvas/scripts/esm/gsplat/reveal-radial.mjs';
 // import { GsplatRevealRain } from 'playcanvas/scripts/esm/gsplat/reveal-rain.mjs';
 
@@ -149,18 +150,42 @@ export class RevealController {
     }
 
     /**
-     * 创建grid reveal script - 预留给未来实现
+     * 创建smooth reveal script
      */
-    private createGridScript() {
-        console.warn('Grid reveal script not implemented yet');
-        // 回退到radial
-        return this.createRadialScript();
+    private createSmoothScript() {
+        if (!this.gsplatEntity || !this.gsplatEntity.script) {
+            console.warn('Cannot create radial script - entity or script component not ready');
+            return null;
+        }
+
+        console.log('Creating radial reveal script');
+
+        try {
+            const script = this.gsplatEntity.script.create(GsplatRevealSmooth) as any;
+            if (script) {
+                // 配置script属性 - 类似原始实现
+                script.center.set(this.config.center[0], this.config.center[1], this.config.center[2]);
+                
+                // 初始状态设为禁用，等待手动启动
+                script.enabled = true;
+                
+                console.log('Smooth script created with config:', {
+                    center: script.center,
+                    endRadius: script.maxRadius
+                });
+            }
+            return script;
+        } catch (error) {
+            console.error('Failed to create smooth script:', error);
+            return null;
+        }
+
     }
 
     /**
      * 创建指定类型的reveal效果 - 类似原始实现中的createEffect函数
      */
-    private createEffect(effectName: 'radial' | 'rain' | 'grid') {
+    private createEffect(effectName: 'radial' | 'rain' | 'smooth') {
         if (!this.gsplatEntity || !this.config) {
             console.log('Cannot create effect - entity not ready or config not set');
             return;
@@ -192,8 +217,8 @@ export class RevealController {
             case 'rain':
                 script = this.createRainScript();
                 break;
-            case 'grid':
-                script = this.createGridScript();
+            case 'smooth':
+                script = this.createSmoothScript();
                 break;
             default:
                 console.warn('Unknown effect type:', effectName);
@@ -224,7 +249,7 @@ export class RevealController {
     }
 
     /**
-     * 销毁所有reveal scripts - 类似原始实现
+     * 销毁所有reveal scripts
      */
     private destroyAllRevealScripts() {
         if (!this.gsplatEntity || !this.gsplatEntity.script) {
@@ -237,6 +262,7 @@ export class RevealController {
             // 销毁所有类型的reveal scripts
             this.gsplatEntity.script.destroy('gsplatRevealRadial');
             this.gsplatEntity.script.destroy('gsplatRevealRain');
+            this.gsplatEntity.script.destroy('gsplatRevealSmooth');
             // 未来可以添加更多类型
         } catch (error) {
             console.warn('Error destroying reveal scripts:', error);
