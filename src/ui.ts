@@ -36,7 +36,7 @@ const initUI = (global: Global) => {
         'settings', 'settingsPanel',
         'orbitCamera', 'flyCamera',
         'hqCheck', 'hqOption', 'lqCheck', 'lqOption',
-        'revealCheck', 'revealOption', 'revealType', 'revealRestart',
+        'revealType', 'revealRestart',
         'reset', 'frame',
         'loadingText', 'loadingBar',
         'joystickBase', 'joystick',
@@ -138,11 +138,6 @@ const initUI = (global: Global) => {
     vrChanged();
 
     // Reveal mode
-    dom.revealOption?.addEventListener('click', () => {
-        state.revealEnabled = !state.revealEnabled;
-        events.fire('revealConfigChanged', { enabled: state.revealEnabled });
-    });
-
     dom.revealType?.addEventListener('change', (event) => {
         const target = event.target as HTMLSelectElement;
         const revealType = target.value as 'radial' | 'rain' | 'grid';
@@ -152,18 +147,6 @@ const initUI = (global: Global) => {
     dom.revealRestart?.addEventListener('click', () => {
         events.fire('revealRestart');
     });
-
-    const updateReveal = () => {
-        if (dom.revealCheck) {
-            dom.revealCheck.classList[state.revealEnabled ? 'add' : 'remove']('active');
-        }
-    };
-
-    events.on('revealEnabled:changed', () => {
-        updateReveal();
-    });
-    
-    updateReveal();
 
     // Info panel
     const updateInfoTab = (tab: 'desktop' | 'touch') => {

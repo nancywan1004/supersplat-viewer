@@ -33,7 +33,6 @@ type State = {
     hasVR: boolean;
     isFullscreen: boolean;
     controlsHidden: boolean;
-    revealEnabled: boolean;
 };
 
 type Global = {

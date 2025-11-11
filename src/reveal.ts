@@ -19,21 +19,26 @@ export class RevealController {
 
     constructor(global: Global, bbox: BoundingBox, gsplatEntity: Entity) {
         this.global = global;
-        const { app, settings, events } = global;
+        const { settings, events } = global;
         this.gsplatEntity = gsplatEntity;
-        this.config = {
-            enabled: (settings.revealEffect as any).enabled ?? true,
-            type: (settings.revealEffect as any).type ?? 'radial',
-            duration: (settings.revealEffect as any).duration ?? 3.0,
-            center: (settings.revealEffect as any).center ?? [0, 0, 0],
-            radius: (settings.revealEffect as any).radius ?? 10,
-            autoStart: (settings.revealEffect as any).autoStart ?? true
-        };
-
-        if (!this.config) {
-            console.log('No reveal effect specified, default to none.')
+        
+        // Check if revealEffect is empty or has no type
+        const hasRevealEffect = settings.revealEffect && 
+                                Object.keys(settings.revealEffect).length > 0 && 
+                                settings.revealEffect.type;
+        
+        if (!hasRevealEffect) {
+            console.log('No reveal effect specified, skipping reveal initialization.');
             return;
         }
+
+        this.config = {
+            type: settings.revealEffect.type ?? 'radial',
+            duration: settings.revealEffect.duration ?? 3.0,
+            center: settings.revealEffect.center ?? [0, 0, 0],
+            radius: settings.revealEffect.radius ?? 10,
+            autoStart: settings.revealEffect.autoStart ?? true
+        };
 
         console.log('RevealController initialized with config:', this.config);
 
@@ -50,6 +55,9 @@ export class RevealController {
         });
 
         this.setRevealCenter(bbox.center.toArray());
+        
+        // 创建初始效果
+        this.createEffect(this.config.type);
     }
 
     /**
@@ -77,7 +85,7 @@ export class RevealController {
                 script.endRadius = this.config.radius;
                 
                 // 初始状态设为禁用，等待手动启动
-                script.enabled = false;
+                script.enabled = true;
                 
                 console.log('Radial script created with config:', {
                     center: script.center,
@@ -121,7 +129,7 @@ export class RevealController {
                 script.endRadius = this.config.radius;
                 
                 // 初始状态设为禁用，等待手动启动
-                script.enabled = false;
+                script.enabled = true;
                 
                 console.log('Rain script created with config:', {
                     center: script.center,
@@ -149,8 +157,8 @@ export class RevealController {
      * 创建指定类型的reveal效果 - 类似原始实现中的createEffect函数
      */
     private createEffect(effectName: 'radial' | 'rain' | 'grid') {
-        if (!this.gsplatEntity || !this.config.enabled) {
-            console.log('Cannot create effect - entity not ready or disabled');
+        if (!this.gsplatEntity || !this.config) {
+            console.log('Cannot create effect - entity not ready or config not set');
             return;
         }
 
@@ -190,19 +198,24 @@ export class RevealController {
 
         this.currentScript = script;
 
-        // 如果script创建成功且配置为自动启动，则启用script
-        if (script && this.config.autoStart) {
-            console.log('Auto-starting reveal effect by enabling script');
-            setTimeout(() => {
-                if (script) {
-                    script.enabled = true;
-                    console.log('Script enabled, effect should start. Script details:', {
-                        enabled: script.enabled,
-                        initialized: script.initialized,
-                        materialsApplied: script.materialsApplied?.size || 0
-                    });
-                }
-            }, 1000); // 增加延迟确保gsplat完全加载
+        // 如果script创建成功
+        if (script) {
+            if (this.config.autoStart) {
+                console.log('Auto-starting reveal effect by enabling script');
+                setTimeout(() => {
+                    if (script) {
+                        script.enabled = true;
+                        console.log('Script enabled, effect should start. Script details:', {
+                            enabled: script.enabled,
+                            initialized: script.initialized,
+                            materialsApplied: script.materialsApplied?.size || 0
+                        });
+                    }
+                }, 1000); // 增加延迟确保gsplat完全加载
+            } else {
+                console.log('Reveal effect created but not auto-started. Click "Start Reveal" button to begin.');
+                script.enabled = false;
+            }
         }
     }
 
@@ -218,8 +231,8 @@ export class RevealController {
 
         try {
             // 销毁所有类型的reveal scripts
-            this.gsplatEntity.script.destroy(typeof GsplatRevealRadial);
-            this.gsplatEntity.script.destroy(typeof GsplatRevealRain);
+            this.gsplatEntity.script.destroy('gsplatRevealRadial');
+            this.gsplatEntity.script.destroy('gsplatRevealRain');
             // 未来可以添加更多类型
         } catch (error) {
             console.warn('Error destroying reveal scripts:', error);
@@ -230,7 +243,6 @@ export class RevealController {
 
     updateConfig(newConfig: Partial<RevealConfig>) {
         const oldType = this.config.type;
-        const wasEnabled = this.config.enabled;
         
         Object.assign(this.config, newConfig);
         
@@ -240,14 +252,7 @@ export class RevealController {
         if (newConfig.type && newConfig.type !== oldType) {
             this.createEffect(newConfig.type);
         }
-        // 如果启用状态改变，重新创建效果
-        else if (newConfig.enabled !== undefined && newConfig.enabled !== wasEnabled) {
-            if (newConfig.enabled) {
-                this.createEffect(this.config.type);
-            } else {
-                this.destroyAllRevealScripts();
-            }
-        }
+
         // 更新现有script的配置
         else if (this.currentScript) {
             this.updateCurrentScriptConfig(newConfig);
@@ -274,48 +279,27 @@ export class RevealController {
             if (newConfig.duration !== undefined) {
                 this.currentScript.duration = newConfig.duration;
             }
-            if (newConfig.enabled !== undefined) {
-                this.currentScript.revealEnabled = newConfig.enabled;
-            }
         } catch (error) {
             console.warn('Error updating script config:', error);
         }
     }
 
-    // 公共方法 - 启动和停止效果
-    startReveal() {
-        console.log('Manual start reveal requested');
-        if (!this.config.enabled || !this.currentScript) {
-            console.log('Cannot start reveal - not enabled or no script');
+    restart() {
+        if (!this.config) {
+            console.log('No reveal config, cannot start reveal');
             return;
         }
-
-        try {
-            // 启用script来开始效果
-            this.currentScript.enabled = true;
-            console.log('Script enabled manually');
-        } catch (error) {
-            console.error('Failed to start reveal:', error);
-        }
-    }
-
-    stopReveal() {
-        console.log('Manual stop reveal requested');
-        if (!this.currentScript) return;
-
-        try {
-            // 禁用script来停止效果
-            this.currentScript.enabled = false;
-            console.log('Script disabled manually');
-        } catch (error) {
-            console.error('Failed to stop reveal:', error);
-        }
-    }
-
-    restart() {
-        console.log('Manual restart reveal requested - recreating effect');
-        // 类似原始实现的restart - 重新创建效果
+        
+        console.log('Manual start/restart reveal requested - recreating effect');
+        // 临时设置 autoStart 为 true 以启动效果
+        const originalAutoStart = this.config.autoStart;
+        this.config.autoStart = true;
+        
+        // 重新创建效果
         this.createEffect(this.config.type);
+        
+        // 恢复原始设置
+        this.config.autoStart = originalAutoStart;
     }
 
     // 公共方法
@@ -324,8 +308,8 @@ export class RevealController {
     }
 
     getProgress(): number {
-        if (!this.currentScript) {
-            return this.config.enabled ? 1 : 0;
+        if (!this.currentScript || !this.config) {
+            return this.config ? 1 : 0;
         }
         
         try {
@@ -336,6 +320,11 @@ export class RevealController {
     }
 
     setRevealCenter(center: number[]) {
+        if (!this.config) {
+            console.warn('Cannot set reveal center - no config');
+            return;
+        }
+        
         this.config.center = [...center];
         console.log('Reveal center set to:', center);
         
