@@ -37,7 +37,6 @@ export class RevealController {
         this.config = {
             type: settings.revealEffect.type ?? 'radial',
             duration: settings.revealEffect.duration ?? 3.0,
-            center: settings.revealEffect.center ?? [0, 0, 0],
             radius: settings.revealEffect.radius ?? 10,
             autoStart: settings.revealEffect.autoStart ?? true
         };
@@ -59,7 +58,10 @@ export class RevealController {
             this.restart();
         });
 
-        this.setRevealCenter(bbox.center.toArray());
+        // 使用相机的 look target 作为默认 reveal center，如果没有则使用 bbox.center
+        const cameraTarget = settings.cameras?.[0]?.initialPose?.target;
+        const revealCenter = cameraTarget ? cameraTarget : bbox.center.toArray();
+        this.setRevealCenter(revealCenter);
         
         // 创建初始效果
         this.createEffect(this.config.type);
@@ -80,7 +82,6 @@ export class RevealController {
             const script = this.gsplatEntity.script.create(GsplatRevealRadial) as any;
             if (script) {
                 // 配置script属性 - 类似原始实现
-                script.center.set(this.config.center[0], this.config.center[1], this.config.center[2]);
                 script.speed = 5;
                 script.acceleration = 0;
                 script.delay = 0.5; // 减少延迟以便更快看到效果
@@ -120,7 +121,6 @@ export class RevealController {
             const script = this.gsplatEntity.script.create(GsplatRevealRain) as any;
             if (script) {
                 // 配置script属性 - 类似原始实现
-                script.center.set(this.config.center[0], this.config.center[1], this.config.center[2]);
                 script.distance = 30;
                 script.speed = 3;
                 script.acceleration = 0;
@@ -164,7 +164,6 @@ export class RevealController {
             const script = this.gsplatEntity.script.create(GsplatRevealSmooth) as any;
             if (script) {
                 // 配置script属性 - 类似原始实现
-                script.center.set(this.config.center[0], this.config.center[1], this.config.center[2]);
                 
                 // 初始状态设为禁用，等待手动启动
                 script.enabled = true;
@@ -298,10 +297,6 @@ export class RevealController {
         console.log('Updating current script config');
 
         try {
-            if (newConfig.center) {
-                this.currentScript.setCenter?.(newConfig.center) || 
-                this.currentScript.center?.copy(newConfig.center);
-            }
             if (newConfig.radius !== undefined) {
                 this.currentScript.setRadius?.(newConfig.radius) || 
                 (this.currentScript.radius = newConfig.radius);
@@ -354,8 +349,6 @@ export class RevealController {
             console.warn('Cannot set reveal center - no config');
             return;
         }
-        
-        this.config.center = [...center];
         console.log('Reveal center set to:', center);
         
         // 更新当前script的中心点

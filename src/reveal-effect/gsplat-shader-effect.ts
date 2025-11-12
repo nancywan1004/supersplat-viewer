@@ -322,6 +322,12 @@ class GsplatShaderEffect extends Script {
 
         // Let subclass update the effect
         this.updateEffect(this.effectTime, dt);
+        
+        // Request render on next frame when effect is active
+        // This ensures the reveal effect updates even when camera is not moving
+        if (this.enabled && this.materialsApplied.size > 0) {
+            this.app.renderNextFrame = true;
+        }
     }
 
     destroy() {
@@ -365,6 +371,9 @@ class GsplatShaderEffect extends Script {
         this.materialsApplied.forEach((material) => {
             material.setParameter(name, value);
         });
+        
+        // Request render on next frame when uniforms change
+        this.app.renderNextFrame = true;
     }
 
     /**
