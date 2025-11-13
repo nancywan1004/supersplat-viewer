@@ -33,7 +33,7 @@ class FlyController implements CameraController {
         camera.distance = pose.distance;
     }
 
-    onExit(camera: Camera): void {
+    onExit(_camera: Camera): void {
 
     }
 

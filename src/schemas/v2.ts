@@ -84,7 +84,7 @@ type ExperienceSettings = {
 
     hasStartPose?: boolean,
 
-    revealEffect: RevealEffect
+    revealEffect?: RevealEffect
 };
 
 export type { AnimTrack, Camera, Annotation, PostEffectSettings, RevealEffect, ExperienceSettings };

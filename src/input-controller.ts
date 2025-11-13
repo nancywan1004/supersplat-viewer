@@ -10,6 +10,7 @@ import {
 } from 'playcanvas';
 import type { CameraComponent } from 'playcanvas';
 
+import { MobileFlyInput } from './cameras/mobile-fly-input';
 import { Picker } from './picker';
 import type { Global } from './types';
 
@@ -75,7 +76,9 @@ class InputController {
         mouse: [0, 0, 0],
         shift: 0,
         ctrl: 0,
-        touches: 0
+        touches: 0,
+        lastTouchCount: 0,
+        twoFingerTapTimer: 0
     };
 
     private _desktopInput: KeyboardMouseSource = new KeyboardMouseSource();
@@ -83,6 +86,8 @@ class InputController {
     private _orbitInput = new MultiTouchSource();
 
     private _flyInput = new DualGestureSource();
+
+    private _mobileFlyInput: MobileFlyInput | null = null;
 
     private _gamepadInput = new GamepadSource();
 
@@ -114,8 +119,37 @@ class InputController {
         this._desktopInput.attach(canvas);
         this._orbitInput.attach(canvas);
         this._flyInput.attach(canvas);
+        
+        // Initialize custom mobile fly input
+        this._mobileFlyInput = new MobileFlyInput(canvas);
+        
+        // Try to find and attach joystick element immediately
+        const joystickElement = document.getElementById('joystickBase');
+        if (joystickElement) {
+            console.log('InputController: Found joystick element immediately', joystickElement);
+            this._mobileFlyInput.attachJoystickElement(joystickElement);
+        } else {
+            console.log('InputController: Joystick element not found, waiting for event');
+        }
+        
+        // Also listen for the event in case it comes later
+        events.on('joystickElementReady', (element: HTMLElement) => {
+            console.log('InputController: Received joystickElementReady event', element);
+            if (this._mobileFlyInput) {
+                this._mobileFlyInput.attachJoystickElement(element);
+            } else {
+                console.error('InputController: _mobileFlyInput is null!');
+            }
+        });
+        
+        // Reset mobile fly input when switching away from fly mode
+        events.on('cameraModeChanged', (newMode, _prevMode) => {
+            if (newMode !== 'fly' && this._mobileFlyInput) {
+                this._mobileFlyInput.reset();
+            }
+        });
 
-        // convert events to joystick state
+        // convert events to joystick state - always show in bottom left
         this._flyInput.on('joystick:position:left', ([bx, by, sx, sy]) => {
             if (bx < 0 || by < 0 || sx < 0 || sy < 0) {
                 this.joystick.base = null;
@@ -124,6 +158,35 @@ class InputController {
             }
             this.joystick.base = [bx, by];
             this.joystick.stick = [sx - bx, sy - by];
+        });
+
+        // Track touch count changes for two-finger detection
+        let lastTouchCount = 0;
+        let twoFingerStartTime = 0;
+        
+        canvas.addEventListener('touchstart', (event) => {
+            const currentTouchCount = event.touches.length;
+            
+            // Detect two-finger tap
+            if (currentTouchCount === 2 && lastTouchCount < 2) {
+                twoFingerStartTime = Date.now();
+            }
+            
+            lastTouchCount = currentTouchCount;
+        });
+
+        canvas.addEventListener('touchend', (event) => {
+            const currentTouchCount = event.touches.length;
+            
+            // Two-finger tap completed (quick tap < 200ms)
+            if (lastTouchCount === 2 && currentTouchCount < 2) {
+                const tapDuration = Date.now() - twoFingerStartTime;
+                if (tapDuration < 200) {
+                    events.fire('twoFingerTap');
+                }
+            }
+            
+            lastTouchCount = currentTouchCount;
         });
 
         this.global = global;
@@ -140,6 +203,7 @@ class InputController {
         });
 
         // Detect double taps manually because iOS doesn't send dblclick events
+        // Single finger double tap will switch to orbit mode and pick target
         const lastTap = { time: 0, x: 0, y: 0 };
         canvas.addEventListener('pointerdown', (event) => {
             const now = Date.now();
@@ -147,7 +211,17 @@ class InputController {
             if (delay < 300 &&
                 Math.abs(event.clientX - lastTap.x) < 8 &&
                 Math.abs(event.clientY - lastTap.y) < 8) {
-                events.fire('inputEvent', 'dblclick', event);
+                // Check if tap is not in joystick area (for mobile)
+                let isInJoystickArea = false;
+                if (this._mobileFlyInput && state.inputMode === 'touch') {
+                    isInJoystickArea = this._mobileFlyInput.isPointInJoystickArea(event.clientX, event.clientY);
+                }
+                
+                // Only fire dblclick if not in joystick area
+                // This will trigger pick event and switch to orbit mode
+                if (!isInJoystickArea) {
+                    events.fire('inputEvent', 'dblclick', event);
+                }
                 lastTap.time = 0;
             } else {
                 lastTap.time = now;
@@ -223,7 +297,19 @@ class InputController {
             (key[keyCode.E] - key[keyCode.Q]),
             (key[keyCode.W] - key[keyCode.S]) + (key[keyCode.UP] - key[keyCode.DOWN])
         ));
-        this._state.touches += count[0];
+        
+        const currentTouchCount = count[0];
+        this._state.touches += currentTouchCount;
+        
+        // Detect two-finger pan gesture - switch to orbit mode
+        if (currentTouchCount >= 2 && this._state.lastTouchCount < 2) {
+            if (state.cameraMode !== 'orbit') {
+                events.fire('switchToOrbit', 'twoFingerPan');
+            }
+        }
+        
+        this._state.lastTouchCount = currentTouchCount;
+        
         for (let i = 0; i < button.length; i++) {
             this._state.mouse[i] += button[i];
         }
@@ -264,8 +350,19 @@ class InputController {
         v.set(0, 0, 0);
         const orbitMove = screenToWorld(camera, touch[0], touch[1], distance);
         v.add(orbitMove.mulScalar(orbit * pan));
-        const flyMove = new Vec3(leftInput[0], 0, -leftInput[1]);
-        v.add(flyMove.mulScalar(fly * this.moveSpeed * dt));
+        
+        // Fly mode: use custom mobile fly input for separated joystick and look
+        // Also works on desktop for debugging
+        if (this._mobileFlyInput) {
+            const { moveInput } = this._mobileFlyInput;
+            const flyMove = new Vec3(moveInput.x, 0, -moveInput.y);
+            v.add(flyMove.mulScalar(fly * this.moveSpeed * dt));
+        } else {
+            // Fallback to DualGestureSource only if MobileFlyInput is not available
+            const flyMove = new Vec3(leftInput[0], 0, -leftInput[1]);
+            v.add(flyMove.mulScalar(fly * this.moveSpeed * dt));
+        }
+        
         const pinchMove = new Vec3(0, 0, pinch[0]);
         v.add(pinchMove.mulScalar(orbit * double * this.pinchSpeed * dt));
         deltas.move.append([v.x, v.y, v.z]);
@@ -274,8 +371,18 @@ class InputController {
         v.set(0, 0, 0);
         const orbitRotate = new Vec3(touch[0], touch[1], 0);
         v.add(orbitRotate.mulScalar(orbit * (1 - pan) * this.orbitSpeed * dt));
-        const flyRotate = new Vec3(rightInput[0], rightInput[1], 0);
-        v.add(flyRotate.mulScalar(fly * this.orbitSpeed * orbitFactor * dt));
+        
+        // Fly mode: use custom mobile fly input for look around
+        // Also works on desktop for debugging
+        if (this._mobileFlyInput) {
+            const { lookInput } = this._mobileFlyInput;
+            const flyRotate = new Vec3(lookInput.x, lookInput.y, 0);
+            v.add(flyRotate.mulScalar(fly * this.orbitSpeed * orbitFactor * dt * 0.5)); // Scale down for smoother control
+        } else {
+            // Fallback to DualGestureSource only if MobileFlyInput is not available
+            const flyRotate = new Vec3(rightInput[0], rightInput[1], 0);
+            v.add(flyRotate.mulScalar(fly * this.orbitSpeed * orbitFactor * dt));
+        }
         deltas.rotate.append([v.x, v.y, v.z]);
 
         // gamepad move
@@ -290,9 +397,27 @@ class InputController {
         v.add(stickRotate.mulScalar(this.orbitSpeed * orbitFactor * dt));
         deltas.rotate.append([v.x, v.y, v.z]);
 
-        // update touch joystick UI
-        if (state.cameraMode === 'fly') {
-            events.fire('touchJoystickUpdate', this.joystick.base, this.joystick.stick);
+        // update touch joystick UI - always show when using joystick
+        // Auto-switch to fly mode when joystick is used
+        // Works on both touch and desktop (for debugging)
+        if (this._mobileFlyInput) {
+            const { moveInput } = this._mobileFlyInput;
+            const isUsingJoystick = moveInput.x !== 0 || moveInput.y !== 0;
+            
+            if (isUsingJoystick && state.cameraMode !== 'fly') {
+                state.cameraMode = 'fly';
+            }
+            
+            // Update joystick visual position
+            const joystickPos = this._mobileFlyInput.getJoystickVisualPosition();
+            if (joystickPos) {
+                events.fire('touchJoystickUpdate', 
+                    [joystickPos.baseX, joystickPos.baseY], 
+                    [joystickPos.stickX, joystickPos.stickY]
+                );
+            } else {
+                events.fire('touchJoystickUpdate', null, null);
+            }
         }
     }
 }

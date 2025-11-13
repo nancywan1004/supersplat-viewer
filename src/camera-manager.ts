@@ -166,6 +166,9 @@ class CameraManager {
 
             // reset camera transition timer
             transitionTimer = 0;
+            
+            // notify input controller about mode change
+            events.fire('cameraModeChanged', value, prev);
         });
 
         // handle user scrubbing the animation timeline
@@ -182,9 +185,23 @@ class CameraManager {
             // switch to orbit camera on pick
             state.cameraMode = 'orbit';
 
-            // construct camera
+            // construct camera - move directly to target position
             tmpCamera.copy(this.camera);
-            tmpCamera.look(this.camera.position, position);
+            
+            // Calculate direction from camera to picked point
+            const direction = tmpv.copy(position).sub(this.camera.position).normalize();
+            
+            // Move camera directly to the picked position for "look around" effect
+            // Keep the same viewing direction but position at target
+            tmpCamera.position.copy(position);
+            
+            // Maintain a minimum distance for orbit controller to preserve pan functionality
+            // This creates the "look around" feel instead of "orbit around a point"
+            const minDistance = 0; // Minimum focal distance for smooth orbit behavior and pan
+            tmpCamera.distance = minDistance;
+            
+            // Keep the current viewing angles for natural transition
+            // This makes it feel like you're standing at the target looking in the same direction
 
             controllers.orbit.goto(tmpCamera);
         });
@@ -203,6 +220,20 @@ class CameraManager {
             );
 
             controllers.orbit.goto(tmpCamera);
+        });
+
+        // Handle two-finger tap to switch to orbit
+        events.on('twoFingerTap', () => {
+            if (state.cameraMode !== 'orbit') {
+                state.cameraMode = 'orbit';
+            }
+        });
+
+        // Handle two-finger pan to switch to orbit
+        events.on('switchToOrbit', (_reason: string) => {
+            if (state.cameraMode !== 'orbit') {
+                state.cameraMode = 'orbit';
+            }
         });
     }
 }

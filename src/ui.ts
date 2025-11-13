@@ -337,8 +337,11 @@ const initUI = (global: Global) => {
 
     // update UI based on touch joystick updates
     events.on('touchJoystickUpdate', (base, stick) => {
-        if (base === null) {
-            dom.joystickBase.classList.add('hidden');
+        if (base === null || stick === null) {
+            // Reset joystick to center when not in use
+            dom.joystick.style.left = '48px';
+            dom.joystick.style.top = '48px';
+            dom.joystickBase.classList.remove('active');
         } else {
             v.set(stick[0], stick[1], 0).mulScalar(1 / 48);
             if (v.length() > 1) {
@@ -346,13 +349,36 @@ const initUI = (global: Global) => {
             }
             v.mulScalar(48);
 
-            dom.joystickBase.classList.remove('hidden');
-            dom.joystickBase.style.left = `${base[0]}px`;
-            dom.joystickBase.style.top = `${base[1]}px`;
+            dom.joystickBase.classList.add('active');
             dom.joystick.style.left = `${48 + v.x}px`;
             dom.joystick.style.top = `${48 + v.y}px`;
         }
     });
+
+    // Show joystick on touch devices and desktop (for debugging)
+    // Always show joystick for better UX
+    //dom.joystickBase.classList.remove('hidden');
+    
+    console.log('UI: Joystick element ready', dom.joystickBase);
+    
+    // Notify that joystick element is ready for attachment
+    events.fire('joystickElementReady', dom.joystickBase);
+    
+    // Optional: hide on desktop if not needed
+    // Uncomment the following code to hide joystick on desktop
+    
+    if (state.inputMode === 'touch') {
+        dom.joystickBase.classList.remove('hidden');
+    }
+
+    events.on('inputMode:changed', (mode) => {
+        if (mode === 'touch') {
+            dom.joystickBase.classList.remove('hidden');
+        } else {
+            dom.joystickBase.classList.add('hidden');
+        }
+    });
+    
 
     // Hide all UI (poster, loading bar, controls)
     if (config.noui) {
