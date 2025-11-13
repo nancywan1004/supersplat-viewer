@@ -59,7 +59,7 @@ export class RevealController {
         });
 
         // 使用相机的 look target 作为默认 reveal center，如果没有则使用 bbox.center
-        const cameraTarget = settings.cameras?.[0]?.initialPose?.target;
+        const cameraTarget = settings.cameras?.[0]?.initial?.target;
         const revealCenter = cameraTarget ? cameraTarget : bbox.center.toArray();
         this.setRevealCenter(revealCenter);
         
