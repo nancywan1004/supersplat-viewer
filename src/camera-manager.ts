@@ -9,8 +9,8 @@ import { Camera, type CameraFrame, type CameraController } from './cameras/camer
 import { FlyController } from './cameras/fly-controller';
 import { OrbitController } from './cameras/orbit-controller';
 import { easeOut } from './core/math';
-import { CameraMode, Global } from './types';
 import { Annotation } from './settings';
+import { CameraMode, Global } from './types';
 
 const tmpCamera = new Camera();
 const tmpv = new Vec3();
@@ -41,19 +41,15 @@ class CameraManager {
     constructor(global: Global, bbox: BoundingBox) {
         const { events, settings, state } = global;
 
-        const camera0 = settings.cameras[0].initialPose;
+        const camera0 = settings.cameras[0].initial;
         const frameCamera = createFrameCamera(bbox, camera0.fov);
-        const resetCamera = createCamera(
-            new Vec3(camera0.position ?? [2, 1, 2]),
-            new Vec3(camera0.target ?? [0, 0, 0]),
-            camera0.fov
-        );
+        const resetCamera = createCamera(new Vec3(camera0.position), new Vec3(camera0.target), camera0.fov);
 
         const getAnimTrack = (initial: Camera, isObjectExperience: boolean) => {
             const { animTracks } = settings;
 
             // extract the camera animation track from settings
-            if (animTracks?.length > 0 && settings.cameraStartMode === 'animTrack') {
+            if (animTracks?.length > 0 && settings.startMode === 'animTrack') {
                 // use the first animTrack
                 return animTracks[0];
             } else if (isObjectExperience) {
@@ -66,7 +62,7 @@ class CameraManager {
 
         // object experience starts outside the bounding box
         const isObjectExperience = !bbox.containsPoint(resetCamera.position);
-        const animTrack = getAnimTrack(resetCamera, isObjectExperience);
+        const animTrack = getAnimTrack(settings.hasStartPose ? resetCamera : frameCamera, isObjectExperience);
 
         const controllers = {
             orbit: new OrbitController(),
@@ -197,13 +193,13 @@ class CameraManager {
             // switch to orbit camera on pick
             state.cameraMode = 'orbit';
 
-            const { initialPose } = annotation.camera;
+            const { initial } = annotation.camera;
 
             // construct camera
-            tmpCamera.fov = initialPose.fov;
+            tmpCamera.fov = initial.fov;
             tmpCamera.look(
-                new Vec3(initialPose.position),
-                new Vec3(initialPose.target)
+                new Vec3(initial.position),
+                new Vec3(initial.target)
             );
 
             controllers.orbit.goto(tmpCamera);

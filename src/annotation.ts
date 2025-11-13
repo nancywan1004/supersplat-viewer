@@ -14,12 +14,24 @@ import {
     StandardMaterial,
     Texture,
     type Quat,
-    type Vec3,
+    Vec3,
     BLENDEQUATION_ADD,
     BLENDMODE_ONE,
     BLENDMODE_ONE_MINUS_SRC_ALPHA,
     BLENDMODE_SRC_ALPHA
 } from 'playcanvas';
+
+// clamp the vertices of the hotspot so it is never clipped by the near or far plane
+const depthClamp = `
+    float f = gl_Position.z / gl_Position.w;
+    if (f > 1.0) {
+        gl_Position.z = gl_Position.w;
+    } else if (f < -1.0) {
+        gl_Position.z = -gl_Position.w;
+    }
+`;
+
+const vec = new Vec3();
 
 /**
  * A script for creating interactive 3D annotations in a scene. Each annotation consists of:
@@ -57,6 +69,8 @@ export class Annotation extends Script {
     static activeAnnotation: Annotation | null = null;
 
     static hoverAnnotation: Annotation | null = null;
+
+    static opacity = 1.0;
 
     /**
      * @attribute
@@ -215,10 +229,8 @@ export class Annotation extends Script {
     /**
      * Creates a circular hotspot texture.
      * @param {AppBase} app - The PlayCanvas AppBase
-     * @param {number} [alpha] - The opacity of the hotspot
+     * @param {string} label - Label text to draw on the hotspot
      * @param {number} [size] - The texture size (should be power of 2)
-     * @param {string} [fillColor] - The circle fill color
-     * @param {string} [strokeColor] - The border color
      * @param {number} [borderWidth] - The border width in pixels
      * @returns {Texture} The hotspot texture
      * @private
@@ -231,7 +243,7 @@ export class Annotation extends Script {
         const ctx = canvas.getContext('2d');
 
         // First clear with stroke color at zero alpha
-        ctx.fillStyle = `white`;
+        ctx.fillStyle = 'white';
         ctx.globalAlpha = 0;
         ctx.fillRect(0, 0, size, size);
         ctx.globalAlpha = 1.0;
@@ -251,11 +263,11 @@ export class Annotation extends Script {
         ctx.beginPath();
         ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
         ctx.lineWidth = borderWidth;
-        ctx.strokeStyle = `white`;
+        ctx.strokeStyle = 'white';
         ctx.stroke();
 
         // Draw text
-        ctx.font = "bold 32px Arial";
+        ctx.font = 'bold 32px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = 'white';
@@ -304,7 +316,7 @@ export class Annotation extends Script {
 
         // Base properties
         material.diffuse = Color.BLACK;
-        material.emissive = new Color(0.8, 0.8, 0.8);
+        material.emissive.copy(Annotation.hotspotColor);
         material.emissiveMap = texture;
         material.opacityMap = texture;
 
@@ -324,6 +336,10 @@ export class Annotation extends Script {
         // Rendering properties
         material.cull = CULLFACE_NONE;
         material.useLighting = false;
+
+        material.shaderChunks.glsl.add({
+            'litUserMainEndVS': depthClamp
+        });
 
         material.update();
         return material;
@@ -351,15 +367,19 @@ export class Annotation extends Script {
         ];
 
         const base = new Entity('base');
+        const baseMi = new MeshInstance(Annotation.mesh, this.materials[0]);
+        baseMi.cull = false;
         base.addComponent('render', {
             layers: [Annotation.layers[0].id],
-            meshInstances: [new MeshInstance(Annotation.mesh, this.materials[0])]
+            meshInstances: [baseMi]
         });
 
         const overlay = new Entity('overlay');
+        const overlayMi = new MeshInstance(Annotation.mesh, this.materials[1]);
+        overlayMi.cull = false;
         overlay.addComponent('render', {
             layers: [Annotation.layers[1].id],
-            meshInstances: [new MeshInstance(Annotation.mesh, this.materials[1])]
+            meshInstances: [overlayMi]
         });
 
         this.entity.addChild(base);
@@ -419,18 +439,28 @@ export class Annotation extends Script {
             const position = this.entity.getPosition();
             const screenPos = Annotation.camera.camera.worldToScreen(position);
 
-            if (screenPos.z <= 0) {
+            const { viewMatrix } = Annotation.camera.camera;
+            viewMatrix.transformPoint(position, vec);
+            if (vec.z >= 0) {
                 this._hideElements();
                 return;
             }
 
             this._updatePositions(screenPos);
             this._updateRotationAndScale();
+
+            // update material opacity and also directly on the uniform so we
+            // can avoid a full material update
+            this.materials[0].opacity = Annotation.opacity;
+            this.materials[1].opacity = 0.25 * Annotation.opacity;
+            this.materials[0].setParameter('material_opacity', Annotation.opacity);
+            this.materials[1].setParameter('material_opacity', 0.25 * Annotation.opacity);
         });
     }
 
     /**
      * Set the hover state of the annotation.
+     * @param hover - Whether the annotation is hovered
      * @private
      */
     setHover(hover: boolean) {

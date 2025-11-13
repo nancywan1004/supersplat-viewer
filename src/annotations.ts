@@ -1,22 +1,34 @@
 import { Entity } from 'playcanvas';
 
-import type { Global } from './types';
-import type { Annotation as AnnotationSettings } from './settings';
 import { Annotation } from './annotation';
+import type { Annotation as AnnotationSettings } from './settings';
+import type { Global } from './types';
 
 class Annotations {
     annotations: AnnotationSettings[];
 
-    dom: HTMLElement;
+    parentDom: HTMLElement;
 
-    constructor(global: Global) {
-        this.annotations = global.settings.annotations;
-
+    constructor(global: Global, hasCameraFrame: boolean) {
         // create dom parent
-        this.dom = document.createElement('div');
-        this.dom.id = 'annotations';
-        document.body.appendChild(this.dom);
-        Annotation.parentDom = this.dom;
+        const parentDom = document.createElement('div');
+        parentDom.id = 'annotations';
+        Annotation.parentDom = parentDom;
+        document.querySelector('#ui').appendChild(parentDom);
+
+        global.events.on('controlsHidden:changed', (value) => {
+            parentDom.style.display = value ? 'none' : 'block';
+            Annotation.opacity = value ? 0.0 : 1.0;
+            global.app.renderNextFrame = true;
+        });
+
+        this.annotations = global.settings.annotations;
+        this.parentDom = parentDom;
+
+        if (hasCameraFrame) {
+            Annotation.hotspotColor.gamma();
+            Annotation.hoverColor.gamma();
+        }
 
         // create annotation entities
         const parent = global.app.root;
@@ -47,6 +59,6 @@ class Annotations {
             });
         }
     }
-};
+}
 
 export { Annotations };
