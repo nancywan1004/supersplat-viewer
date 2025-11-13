@@ -1,5 +1,6 @@
 import {
     type BoundingBox,
+    Pose,
     Vec3
 } from 'playcanvas';
 
@@ -113,6 +114,20 @@ class CameraManager {
                 this.camera.copy(target);
             }
 
+            // Auto-switch from orbit to fly when zoomed to minimum distance
+            // This allows seamless transition when user wants to get closer
+            // Check target.distance (updated by orbit controller) not this.camera.distance
+            if (state.cameraMode === 'orbit' && transitionTimer >= 1) {
+                const minZoomThreshold = 0.55; // Just above the minimum zoom range (0.5)
+                
+                // Switch to fly mode when at minimum zoom distance
+                // This allows user to continue moving closer
+                if (target.distance <= minZoomThreshold) {
+                    console.log('Auto-switching to fly mode: target.distance =', target.distance);
+                    state.cameraMode = 'fly';
+                }
+            }
+
             // update animation timeline
             if (state.cameraMode === 'anim') {
                 state.animationTime = controllers.anim.animState.cursor.value;
@@ -160,6 +175,21 @@ class CameraManager {
             const prevController = getController(prev);
             prevController.onExit(this.camera);
 
+            // Adjust distance when switching from fly to orbit
+            // Fly mode uses very small distance, but orbit needs a reasonable distance
+            // to define the focus point. We keep the camera position unchanged and just
+            // adjust the distance to set where the orbit focus point will be.
+            if (prev === 'fly' && value === 'orbit') {
+                // Use a distance that's above the minimum zoom range (0.5) to avoid
+                // the orbit controller trying to adjust the camera position
+                const minOrbitDistance = 3.0;
+                if (this.camera.distance < minOrbitDistance) {
+                    // Only adjust distance, camera position stays the same
+                    // The focus point will be calculated as: position + direction * distance
+                    this.camera.distance = minOrbitDistance;
+                }
+            }
+
             // enter new controller
             const newController = getController(value);
             newController.onEnter(this.camera);
@@ -182,28 +212,39 @@ class CameraManager {
 
         // handle user picking in the scene
         events.on('pick', (position: Vec3) => {
-            // switch to orbit camera on pick
+            // Always switch to orbit mode on double-tap
             state.cameraMode = 'orbit';
 
-            // construct camera - move directly to target position
+            // construct camera - look at the picked target from current position
             tmpCamera.copy(this.camera);
             
             // Calculate direction from camera to picked point
             const direction = tmpv.copy(position).sub(this.camera.position).normalize();
             
-            // Move camera directly to the picked position for "look around" effect
-            // Keep the same viewing direction but position at target
-            tmpCamera.position.copy(position);
+            // Calculate a good viewing distance (move closer to target)
+            const currentDistance = position.distance(this.camera.position);
+            const targetDistance = Math.max(3.0, currentDistance * 0.5); // Move to 50% distance, minimum 3.0
             
-            // Maintain a minimum distance for orbit controller to preserve pan functionality
-            // This creates the "look around" feel instead of "orbit around a point"
-            const minDistance = 0; // Minimum focal distance for smooth orbit behavior and pan
-            tmpCamera.distance = minDistance;
+            // Position camera at the target distance, looking at the picked point
+            const newPosition = tmpv.copy(direction).mulScalar(-targetDistance).add(position);
+            tmpCamera.position.copy(newPosition);
             
-            // Keep the current viewing angles for natural transition
-            // This makes it feel like you're standing at the target looking in the same direction
+            // Make camera look at the picked point (this centers the target)
+            tmpCamera.look(newPosition, position);
+            
+            // Set distance for orbit controller
+            tmpCamera.distance = 3.0;
 
             controllers.orbit.goto(tmpCamera);
+            
+            // Fly mode version (commented out for now, as requested)
+            // if (currentMode === 'fly') {
+            //     const targetPose = new Pose();
+            //     targetPose.position.copy(tmpCamera.position);
+            //     targetPose.angles.copy(tmpCamera.angles);
+            //     targetPose.distance = tmpCamera.distance;
+            //     controllers.fly.goto(targetPose);
+            // }
         });
 
         events.on('annotation.activate', (annotation: Annotation) => {
@@ -222,19 +263,8 @@ class CameraManager {
             controllers.orbit.goto(tmpCamera);
         });
 
-        // Handle two-finger tap to switch to orbit
-        events.on('twoFingerTap', () => {
-            if (state.cameraMode !== 'orbit') {
-                state.cameraMode = 'orbit';
-            }
-        });
-
-        // Handle two-finger pan to switch to orbit
-        events.on('switchToOrbit', (_reason: string) => {
-            if (state.cameraMode !== 'orbit') {
-                state.cameraMode = 'orbit';
-            }
-        });
+        // Two-finger gestures no longer auto-switch modes
+        // Users can manually switch between orbit and fly modes as needed
     }
 }
 

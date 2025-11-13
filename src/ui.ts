@@ -357,27 +357,40 @@ const initUI = (global: Global) => {
 
     // Show joystick on touch devices and desktop (for debugging)
     // Always show joystick for better UX
-    //dom.joystickBase.classList.remove('hidden');
+    // Joystick visibility and functionality control
+    const joystickEnabled = false; // Set to false to completely disable joystick
     
-    console.log('UI: Joystick element ready', dom.joystickBase);
-    
-    // Notify that joystick element is ready for attachment
-    events.fire('joystickElementReady', dom.joystickBase);
-    
-    // Optional: hide on desktop if not needed
-    // Uncomment the following code to hide joystick on desktop
-    
-    if (state.inputMode === 'touch') {
+    if (joystickEnabled) {
+        // Option 1: Always hide joystick UI (uncomment to use)
+        // dom.joystickBase.classList.add('hidden');
+        
+        // Option 2: Show only on touch devices (uncomment to use)
+        // if (state.inputMode === 'touch') {
+        //     dom.joystickBase.classList.remove('hidden');
+        // }
+        
+        // Option 3: Always show joystick (default - uncomment to use)
         dom.joystickBase.classList.remove('hidden');
+        
+        console.log('UI: Joystick element ready', dom.joystickBase);
+        
+        // Notify that joystick element is ready for attachment
+        events.fire('joystickElementReady', dom.joystickBase);
+        
+        // Dynamic visibility based on input mode
+        events.on('inputMode:changed', (mode) => {
+            if (mode === 'touch') {
+                dom.joystickBase.classList.remove('hidden');
+            } else {
+                // Uncomment to hide on desktop
+                // dom.joystickBase.classList.add('hidden');
+            }
+        });
+    } else {
+        // Completely disable joystick (hide UI and disable functionality)
+        dom.joystickBase.classList.add('hidden');
+        events.fire('joystickDisabled');
     }
-
-    events.on('inputMode:changed', (mode) => {
-        if (mode === 'touch') {
-            dom.joystickBase.classList.remove('hidden');
-        } else {
-            dom.joystickBase.classList.add('hidden');
-        }
-    });
     
 
     // Hide all UI (poster, loading bar, controls)

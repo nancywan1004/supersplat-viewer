@@ -13,14 +13,20 @@ class MobileFlyInput {
     private joystickPosition = { x: 0, y: 0 }; // Will be set based on screen size
     
     // Touch tracking
-    private touches = new Map<number, { startX: number, startY: number, currentX: number, currentY: number }>();
+    private touches = new Map<number, { startX: number, startY: number, currentX: number, currentY: number, startTime: number }>();
     private joystickTouchId: number | null = null;
     private lookTouchId: number | null = null;
+    private lookTouchStartTime: number = 0;
+    private totalTouchCount: number = 0;
     
     // Output values
     public moveInput = new Vec2(0, 0);
     public lookInput = new Vec2(0, 0);
     public isJoystickActive = false;
+    
+    // Enable/disable flags
+    private joystickEnabled = false; // Joystick movement control
+    private lookEnabled = true; // Single finger look around (always enabled)
     
     // Canvas reference
     private canvas: HTMLCanvasElement;
@@ -59,6 +65,9 @@ class MobileFlyInput {
     public attachJoystickElement(element: HTMLElement) {
         console.log('MobileFlyInput: Attaching joystick element', element);
         this.joystickElement = element;
+        
+        // Enable joystick when element is attached
+        this.joystickEnabled = true;
         
         // Make sure element can receive pointer events
         element.style.touchAction = 'none';
@@ -115,32 +124,45 @@ class MobileFlyInput {
     }
     
     private onTouchStart(event: TouchEvent) {
+        // Update total touch count
+        this.totalTouchCount = event.touches.length;
+        
         for (let i = 0; i < event.changedTouches.length; i++) {
             const touch = event.changedTouches[i];
             const rect = this.canvas.getBoundingClientRect();
             const x = touch.clientX - rect.left;
             const y = touch.clientY - rect.top;
             
-            // Check if touch is in joystick area
-            if (this.joystickTouchId === null && this.isInJoystickArea(x, y)) {
+            // Check if touch is in joystick area (only if joystick is enabled)
+            if (this.joystickEnabled && this.joystickTouchId === null && this.isInJoystickArea(x, y)) {
                 this.joystickTouchId = touch.identifier;
                 this.isJoystickActive = true;
                 this.touches.set(touch.identifier, {
                     startX: x,
                     startY: y,
                     currentX: x,
-                    currentY: y
+                    currentY: y,
+                    startTime: Date.now()
                 });
-            } else if (this.lookTouchId === null) {
-                // Any other touch is for looking around
+            } else if (this.lookEnabled && this.lookTouchId === null && this.totalTouchCount === 1) {
+                // Only register look touch if this is a single finger touch
+                // This prevents conflict with two-finger gestures
                 this.lookTouchId = touch.identifier;
+                this.lookTouchStartTime = Date.now();
                 this.touches.set(touch.identifier, {
                     startX: x,
                     startY: y,
                     currentX: x,
-                    currentY: y
+                    currentY: y,
+                    startTime: Date.now()
                 });
             }
+        }
+        
+        // If a second finger is added, clear the look touch to avoid conflicts
+        if (this.totalTouchCount >= 2 && this.lookTouchId !== null) {
+            this.lookTouchId = null;
+            this.lookInput.set(0, 0);
         }
     }
     
@@ -162,6 +184,9 @@ class MobileFlyInput {
     }
     
     private onTouchEnd(event: TouchEvent) {
+        // Update total touch count
+        this.totalTouchCount = event.touches.length;
+        
         for (let i = 0; i < event.changedTouches.length; i++) {
             const touch = event.changedTouches[i];
             
@@ -181,8 +206,8 @@ class MobileFlyInput {
     }
     
     private updateInputs() {
-        // Update joystick input
-        if (this.joystickTouchId !== null) {
+        // Update joystick input (only if enabled)
+        if (this.joystickEnabled && this.joystickTouchId !== null) {
             const touchData = this.touches.get(this.joystickTouchId);
             if (touchData) {
                 // Calculate offset from joystick center (stored in startX/startY)
@@ -206,19 +231,31 @@ class MobileFlyInput {
         }
         
         // Update look input (delta-based)
-        if (this.lookTouchId !== null) {
+        // Only process look input if enabled and there's a single touch (not two-finger gesture)
+        if (this.lookEnabled && this.lookTouchId !== null && this.totalTouchCount <= 1) {
             const touchData = this.touches.get(this.lookTouchId);
             if (touchData) {
-                const dx = touchData.currentX - touchData.startX;
-                const dy = touchData.currentY - touchData.startY;
-                
-                this.lookInput.x = dx;
-                this.lookInput.y = dy;
-                
-                // Reset start position for continuous movement
-                touchData.startX = touchData.currentX;
-                touchData.startY = touchData.currentY;
+                // Ignore look input for the first 120ms to prevent interference with double-tap
+                // This gives enough time for double-tap detection (max 400ms between taps)
+                const touchDuration = Date.now() - this.lookTouchStartTime;
+                if (touchDuration > 120) {
+                    const dx = touchData.currentX - touchData.startX;
+                    const dy = touchData.currentY - touchData.startY;
+                    
+                    this.lookInput.x = dx;
+                    this.lookInput.y = dy;
+                    
+                    // Reset start position for continuous movement
+                    touchData.startX = touchData.currentX;
+                    touchData.startY = touchData.currentY;
+                } else {
+                    // During the delay period, keep look input at zero
+                    this.lookInput.set(0, 0);
+                }
             }
+        } else if (this.totalTouchCount >= 2) {
+            // Clear look input during two-finger gestures
+            this.lookInput.set(0, 0);
         }
     }
     
@@ -256,7 +293,8 @@ class MobileFlyInput {
             startX: this.joystickPosition.x,
             startY: this.joystickPosition.y,
             currentX: x,
-            currentY: y
+            currentY: y,
+            startTime: Date.now()
         });
         
         // Capture pointer to receive events even outside element
@@ -313,7 +351,8 @@ class MobileFlyInput {
                 startX: x,
                 startY: y,
                 currentX: x,
-                currentY: y
+                currentY: y,
+                startTime: Date.now()
             });
         }
     }
@@ -348,6 +387,34 @@ class MobileFlyInput {
         this.lookTouchId = null;
         this.touches.clear();
         this.mouseDown = false;
+        this.totalTouchCount = 0;
+    }
+    
+    public setJoystickEnabled(enabled: boolean) {
+        this.joystickEnabled = enabled;
+        if (!enabled) {
+            // Reset joystick input when disabled
+            this.moveInput.set(0, 0);
+            this.isJoystickActive = false;
+            this.joystickTouchId = null;
+        }
+    }
+    
+    public setLookEnabled(enabled: boolean) {
+        this.lookEnabled = enabled;
+        if (!enabled) {
+            // Reset look input when disabled
+            this.lookInput.set(0, 0);
+            this.lookTouchId = null;
+        }
+    }
+    
+    public isJoystickEnabled(): boolean {
+        return this.joystickEnabled;
+    }
+    
+    public isLookEnabled(): boolean {
+        return this.lookEnabled;
     }
 }
 
