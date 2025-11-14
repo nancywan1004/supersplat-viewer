@@ -113,6 +113,25 @@ class InputController {
 
     wheelSpeed: number = 0.06;
 
+    // Minimum effective distance for pan calculations to prevent slow panning when zoomed in
+    private _minPanDistance: number = 1;
+
+    /**
+     * Set move speed based on scene size.
+     * Larger scenes need faster movement speed for comfortable navigation.
+     * 
+     * @param sceneSize - The size of the scene (typically bounding box diagonal length)
+     */
+    setMoveSpeedFromSceneSize(sceneSize: number) {
+        // Scale move speed proportionally to scene size
+        // Base speed of 10 for a scene size of ~10 units
+        this.moveSpeed = Math.max(1, sceneSize * 0.5);
+        
+        // Set minimum pan distance to ensure smooth panning even when zoomed in
+        // Use 10% of scene size as minimum, with a floor of 1
+        this._minPanDistance = Math.max(1, sceneSize * 0.1);
+    }
+
     constructor(global: Global) {
         const { app, camera, events, state } = global;
         const canvas = app.graphicsDevice.canvas as HTMLCanvasElement;
@@ -355,11 +374,14 @@ class InputController {
 
         const { deltas } = this.frame;
 
+        // Use max of actual distance and minimum pan distance to prevent slow panning when zoomed in
+        const effectivePanDistance = Math.max(distance, this._minPanDistance);
+
         // desktop move
         const v = tmpV1.set(0, 0, 0);
         const keyMove = this._state.axis.clone().normalize();
         v.add(keyMove.mulScalar(fly * this.moveSpeed * (this._state.shift ? 4 : this._state.ctrl ? 0.25 : 1) * dt));
-        const panMove = screenToWorld(camera, mouse[0], mouse[1], distance);
+        const panMove = screenToWorld(camera, mouse[0], mouse[1], effectivePanDistance);
         v.add(panMove.mulScalar(pan));
         const wheelMove = new Vec3(0, 0, -wheel[0]);
         v.add(wheelMove.mulScalar(this.wheelSpeed * dt));
@@ -376,7 +398,7 @@ class InputController {
         v.set(0, 0, 0);
         
         // Two-finger pan: works in both orbit and fly modes
-        const twoFingerPanMove = screenToWorld(camera, touch[0], touch[1], distance);
+        const twoFingerPanMove = screenToWorld(camera, touch[0], touch[1], effectivePanDistance);
         v.add(twoFingerPanMove.mulScalar(pan));
         
         // Fly mode: use custom mobile fly input for separated joystick and look
