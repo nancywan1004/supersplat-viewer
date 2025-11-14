@@ -40,6 +40,7 @@
     "@playcanvas/eslint-config": "2.1.0",
     "@playcanvas/web-components": "0.2.11",
     "@rollup/plugin-node-resolve": "16.0.3",
+    "@rollup/plugin-terser": "^0.4.4",
     "@rollup/plugin-typescript": "12.3.0",
     "@typescript-eslint/eslint-plugin": "8.46.4",
     "@typescript-eslint/parser": "8.46.4",
