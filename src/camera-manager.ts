@@ -263,8 +263,21 @@ class CameraManager {
             controllers.orbit.goto(tmpCamera);
         });
 
-        // Two-finger gestures no longer auto-switch modes
-        // Users can manually switch between orbit and fly modes as needed
+        events.on('annotation.activate', (annotation: Annotation) => {
+            // switch to orbit camera on pick
+            state.cameraMode = 'orbit';
+
+            const { initial } = annotation.camera;
+
+            // construct camera
+            tmpCamera.fov = initial.fov;
+            tmpCamera.look(
+                new Vec3(initial.position),
+                new Vec3(initial.target)
+            );
+
+            controllers.orbit.goto(tmpCamera);
+        });
     }
 }
 
