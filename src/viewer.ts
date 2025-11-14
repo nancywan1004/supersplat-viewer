@@ -274,7 +274,7 @@ class Viewer {
             const sceneSize = sceneBound.halfExtents.length();
             this.inputController.setMoveSpeedFromSceneSize(sceneSize);
 
-            this.revealController = new RevealController(global, sceneBound, gsplat);
+            this.revealController = new RevealController(global, sceneBound, results[0]);
 
             this.cameraManager = new CameraManager(global, sceneBound);
             applyCamera(this.cameraManager.camera);

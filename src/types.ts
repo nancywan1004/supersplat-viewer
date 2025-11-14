@@ -12,6 +12,7 @@ type Config = {
     skyboxUrl?: string;
     contentUrl?: string;
     contents?: Promise<Response>;
+    colorizeLod?: boolean;
 
     noui: boolean;
     noanim: boolean;

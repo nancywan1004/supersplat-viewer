@@ -13,19 +13,29 @@ import type { Config, Global } from './types';
 import { initPoster, initUI } from './ui';
 import { Viewer } from './viewer';
 import { initXr } from './xr';
+import { LodLoader } from './loaders/lod-loader';
 
-const loadGsplat = async (app: AppBase, url: string, contents: Promise<Response>, forceUnified: boolean, progressCallback: (progress: number) => void) => {
+const loadGsplat = async (app: AppBase, url: string, contents: Promise<Response>, forceUnified: boolean, progressCallback: (progress: number) => void, lodLoader?: LodLoader) => {
     const c = contents as unknown as ArrayBuffer;
     const filename = new URL(url, location.href).pathname.split('/').pop();
     const data = filename.toLowerCase() === 'meta.json' ? await (await contents).json() : undefined;
+    const shouldEnableLod = lodLoader?.shouldEnableLod(url) ?? false;
     const asset = new Asset(filename, 'gsplat', { url, filename, contents: c }, data);
 
     return new Promise<Entity>((resolve, reject) => {
         asset.on('load', () => {
             const entity = new Entity('gsplat');
             entity.setLocalEulerAngles(0, 0, 180);
-            entity.addComponent('gsplat', { unified: forceUnified || filename.toLowerCase().endsWith('lod-meta.json'), asset });
+            entity.addComponent('gsplat', { unified: forceUnified || shouldEnableLod, asset });
             app.root.addChild(entity);
+
+            if (shouldEnableLod && lodLoader) {
+                const gsplatComponent = entity.gsplat;
+                if (gsplatComponent) {
+                    lodLoader.applyLodPreset(gsplatComponent);
+                }
+            }
+
             resolve(entity);
         });
 
@@ -102,6 +112,11 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         camera
     };
 
+    const lodLoader = new LodLoader(global);
+    if (lodLoader.shouldEnableLod(config.contentUrl)) {
+        lodLoader.initializeLodSettings();
+    }
+
     // Initialize the load-time poster
     if (config.poster) {
         initPoster(events);
@@ -121,7 +136,8 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         config.unified,
         (progress: number) => {
             state.progress = progress;
-        }
+        },
+        lodLoader
     );
 
     // Load skybox
