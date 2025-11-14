@@ -14,8 +14,8 @@ class FlyController implements CameraController {
     constructor() {
         this.controller = new FlyControllerPC();
         this.controller.pitchRange = new Vec2(-90, 90);
-        this.controller.rotateDamping = 0.97;
-        this.controller.moveDamping = 0.97;
+        this.controller.rotateDamping = 0.9; // Lower damping for more responsive rotation
+        this.controller.moveDamping = 0.9; // Lower damping for more responsive movement
     }
 
     onEnter(camera: Camera): void {
@@ -33,7 +33,7 @@ class FlyController implements CameraController {
         camera.distance = pose.distance;
     }
 
-    onExit(camera: Camera): void {
+    onExit(_camera: Camera): void {
 
     }
 

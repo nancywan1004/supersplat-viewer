@@ -268,6 +268,10 @@ class Viewer {
             this.annotations = new Annotations(global, this.cameraFrame != null);
 
             this.inputController = new InputController(global);
+            
+            // Set move speed based on scene size
+            const sceneSize = sceneBound.halfExtents.length();
+            this.inputController.setMoveSpeedFromSceneSize(sceneSize);
 
             this.revealController = new RevealController(global, sceneBound, gsplat);
 

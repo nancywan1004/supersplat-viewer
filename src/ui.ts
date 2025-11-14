@@ -337,8 +337,11 @@ const initUI = (global: Global) => {
 
     // update UI based on touch joystick updates
     events.on('touchJoystickUpdate', (base, stick) => {
-        if (base === null) {
-            dom.joystickBase.classList.add('hidden');
+        if (base === null || stick === null) {
+            // Reset joystick to center when not in use
+            dom.joystick.style.left = '48px';
+            dom.joystick.style.top = '48px';
+            dom.joystickBase.classList.remove('active');
         } else {
             v.set(stick[0], stick[1], 0).mulScalar(1 / 48);
             if (v.length() > 1) {
@@ -346,13 +349,49 @@ const initUI = (global: Global) => {
             }
             v.mulScalar(48);
 
-            dom.joystickBase.classList.remove('hidden');
-            dom.joystickBase.style.left = `${base[0]}px`;
-            dom.joystickBase.style.top = `${base[1]}px`;
+            dom.joystickBase.classList.add('active');
             dom.joystick.style.left = `${48 + v.x}px`;
             dom.joystick.style.top = `${48 + v.y}px`;
         }
     });
+
+    // Show joystick on touch devices and desktop (for debugging)
+    // Always show joystick for better UX
+    // Joystick visibility and functionality control
+    const joystickEnabled = false; // Set to false to completely disable joystick
+    
+    if (joystickEnabled) {
+        // Option 1: Always hide joystick UI (uncomment to use)
+        // dom.joystickBase.classList.add('hidden');
+        
+        // Option 2: Show only on touch devices (uncomment to use)
+        // if (state.inputMode === 'touch') {
+        //     dom.joystickBase.classList.remove('hidden');
+        // }
+        
+        // Option 3: Always show joystick (default - uncomment to use)
+        dom.joystickBase.classList.remove('hidden');
+        
+        console.log('UI: Joystick element ready', dom.joystickBase);
+        
+        // Notify that joystick element is ready for attachment
+        events.fire('joystickElementReady', dom.joystickBase);
+        
+        // Dynamic visibility based on input mode
+        events.on('inputMode:changed', (mode) => {
+            if (mode === 'touch') {
+                dom.joystickBase.classList.remove('hidden');
+            } else {
+                // Uncomment to hide on desktop
+                // dom.joystickBase.classList.add('hidden');
+            }
+        });
+    } else {
+        // Completely disable joystick (hide UI and disable functionality)
+        dom.joystickBase.classList.add('hidden');
+        events.fire('joystickDisabled');
+    }
+    
 
     // Hide all UI (poster, loading bar, controls)
     if (config.noui) {

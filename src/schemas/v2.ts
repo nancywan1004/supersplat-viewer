@@ -84,7 +84,7 @@ type ExperienceSettings = {
 
     hasStartPose?: boolean,
 
-    revealEffect: RevealEffect,
+    revealEffect?: RevealEffect,
     lodSettings?: LodSettings
 };
 
