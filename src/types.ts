@@ -16,6 +16,7 @@ type Config = {
 
     noui: boolean;
     noanim: boolean;
+    noautorotate: boolean;
     ministats: boolean;
     unified: boolean;                           // force unified rendering mode
     aa: boolean;                                // render with antialiasing

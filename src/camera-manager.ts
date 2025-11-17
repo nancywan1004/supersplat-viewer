@@ -40,7 +40,7 @@ class CameraManager {
     camera = new Camera();
 
     constructor(global: Global, bbox: BoundingBox) {
-        const { events, settings, state } = global;
+        const { events, settings, state, config } = global;
 
         const camera0 = settings.cameras[0].initial;
         const frameCamera = createFrameCamera(bbox, camera0.fov);
@@ -53,7 +53,7 @@ class CameraManager {
             if (animTracks?.length > 0 && settings.startMode === 'animTrack') {
                 // use the first animTrack
                 return animTracks[0];
-            } else if (isObjectExperience) {
+            } else if (isObjectExperience && !config.noautorotate) {
                 // create basic rotation animation if no anim track is specified
                 initial.calcFocusPoint(tmpv);
                 return createRotateTrack(initial.position, tmpv, initial.fov);
