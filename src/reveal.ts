@@ -36,7 +36,6 @@ export class RevealController {
 
         this.config = {
             type: settings.revealEffect.type ?? 'radial',
-            duration: settings.revealEffect.duration ?? 3.0,
             radius: settings.revealEffect.radius ?? 10,
             autoStart: settings.revealEffect.autoStart ?? true
         };
@@ -84,7 +83,7 @@ export class RevealController {
                 // 配置script属性 - 类似原始实现
                 script.speed = 5;
                 script.acceleration = 0;
-                script.delay = 0.5; // 减少延迟以便更快看到效果
+                script.delay = 0.5;
                 script.dotTint.set(0, 1, 1); // Cyan
                 script.waveTint.set(1, 0.5, 0); // Orange
                 script.oscillationIntensity = 0.2;
@@ -154,23 +153,24 @@ export class RevealController {
      */
     private createSmoothScript() {
         if (!this.gsplatEntity || !this.gsplatEntity.script) {
-            console.warn('Cannot create radial script - entity or script component not ready');
+            console.warn('Cannot create smooth script - entity or script component not ready');
             return null;
         }
 
-        console.log('Creating radial reveal script');
+        console.log('Creating smooth reveal script');
 
         try {
             const script = this.gsplatEntity.script.create(GsplatRevealSmooth) as any;
             if (script) {
-                // 配置script属性 - 类似原始实现
+                // 配置script属性
+                script.maxRadius = this.config.radius;
                 
                 // 初始状态设为禁用，等待手动启动
                 script.enabled = true;
                 
                 console.log('Smooth script created with config:', {
                     center: script.center,
-                    endRadius: script.maxRadius
+                    maxRadius: script.maxRadius
                 });
             }
             return script;
@@ -300,9 +300,6 @@ export class RevealController {
             if (newConfig.radius !== undefined) {
                 this.currentScript.setRadius?.(newConfig.radius) || 
                 (this.currentScript.radius = newConfig.radius);
-            }
-            if (newConfig.duration !== undefined) {
-                this.currentScript.duration = newConfig.duration;
             }
         } catch (error) {
             console.warn('Error updating script config:', error);

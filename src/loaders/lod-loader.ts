@@ -56,7 +56,7 @@ export class LodLoader {
             lodUpdateAngle: 90,
             lodBehindPenalty: 5,
             radialSorting: true,
-            colorizeLod: !!global.config.colorizeLod
+            colorizeLod: global.config.colorizeLod
         };
     }
 

@@ -26,7 +26,7 @@
                 skyboxUrl,
                 contentUrl,
                 contents: fetch(contentUrl),
-                colorizeLod,
+                colorizeLod: url.searchParams.has('colorizeLod'),
                 noui: url.searchParams.has('noui'),
                 noanim: url.searchParams.has('noanim'),
                 ministats: url.searchParams.has('ministats'),
