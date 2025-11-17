@@ -362,8 +362,10 @@ class Viewer {
                 this.cameraFrame = null;
             }
 
-            camera.camera.toneMapping = tonemapTable[settings.tonemapping];
-            camera.camera.clearColor = new Color(background.color);
+            if (!app.xr.active) {
+                camera.camera.toneMapping = tonemapTable[settings.tonemapping];
+                camera.camera.clearColor = new Color(background.color);
+            }
         }
     }
 }
