@@ -406,12 +406,7 @@ class GsplatRevealRain extends GsplatShaderEffect {
     }
 
     updateEffect(effectTime: number, dt: number) {
-        // Check if effect is complete and disable if so
-        if (this.isEffectComplete()) {
-            this.enabled = false;
-            return;
-        }
-
+        // Update all uniforms first
         this.setUniform('uTime', effectTime);
 
         this._centerArray[0] = this.center.x;
@@ -439,6 +434,14 @@ class GsplatRevealRain extends GsplatShaderEffect {
 
         this.setUniform('uHitDuration', this.hitDuration);
         this.setUniform('uEndRadius', this.endRadius);
+
+        // Check if effect is complete after updating uniforms
+        // This ensures the last frame is rendered with correct values
+        if (this.isEffectComplete()) {
+            console.log('Rain effect completed, disabling');
+            this.enabled = false;
+            return;
+        }
     }
 
     /**

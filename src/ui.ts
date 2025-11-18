@@ -153,13 +153,27 @@ const initUI = (global: Global) => {
         const hasReveal = state.hasRevealEffect;
         if (dom.revealPanel) {
             dom.revealPanel.classList[hasReveal ? 'remove' : 'add']('hidden');
+            
+            // Sync dropdown with current reveal effect type from settings
+            if (hasReveal && dom.revealType && global.settings?.revealEffect?.type) {
+                const currentType = global.settings.revealEffect.type;
+                const selectElement = dom.revealType as HTMLSelectElement;
+                if (selectElement.value !== currentType) {
+                    selectElement.value = currentType;
+                }
+            }
         }
     };
 
     events.on('hasRevealEffect:changed', updateRevealControls);
-    updateRevealControls();
-
-    events.on('hasRevealEffect:changed', updateRevealControls);
+    
+    // Listen for reveal config changes to update UI
+    events.on('revealConfigChanged', (newConfig) => {
+        if (dom.revealType && newConfig.type) {
+            (dom.revealType as HTMLSelectElement).value = newConfig.type;
+        }
+    });
+    
     updateRevealControls();
 
     // Info panel

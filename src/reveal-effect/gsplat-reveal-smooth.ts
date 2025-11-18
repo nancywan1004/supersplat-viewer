@@ -195,13 +195,6 @@ class GsplatRevealSmooth extends GsplatShaderEffect {
             );
         }
 
-        // 检查效果是否完成
-        if (this.isEffectComplete()) {
-            console.log('Smooth transition effect completed, disabling');
-            this.enabled = false;
-            return;
-        }
-
         // 更新 uniforms
         this.setUniform('uTime', effectTime);
 
@@ -217,6 +210,13 @@ class GsplatRevealSmooth extends GsplatShaderEffect {
         this.setUniform('uFadeWidth', fadeWidth);
         
         this.setUniform('uTransitionEffect', this.transitionEffect);
+
+        // 检查效果是否完成
+        if (this.isEffectComplete()) {
+            console.log('Smooth transition effect completed, disabling');
+            this.enabled = false;
+            return;
+        }
     }
 
     /**

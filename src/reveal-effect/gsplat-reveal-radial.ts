@@ -347,22 +347,6 @@ class GsplatRevealRadial extends GsplatShaderEffect {
     }
 
     updateEffect(effectTime: number, dt: number) {
-        // Add debug logging
-        if (Math.floor(effectTime * 10) % 10 === 0) { // Log every 0.1 seconds
-            console.log('GsplatRevealRadial updateEffect called:', {
-                effectTime,
-                materialsApplied: this.materialsApplied.size,
-                enabled: this.enabled
-            });
-        }
-
-        // Check if effect is complete and disable if so
-        if (this.isEffectComplete()) {
-            console.log('Radial effect completed, disabling');
-            this.enabled = false;
-            return;
-        }
-
         // Update uniforms from attributes
         this.setUniform('uTime', effectTime);
 
@@ -387,6 +371,13 @@ class GsplatRevealRadial extends GsplatShaderEffect {
 
         this.setUniform('uOscillationIntensity', this.oscillationIntensity);
         this.setUniform('uEndRadius', this.endRadius);
+
+        // Check if effect is complete and disable if so
+        if (this.isEffectComplete()) {
+            console.log('Radial effect completed, disabling');
+            this.enabled = false;
+            return;
+        }
     }
 
     /**

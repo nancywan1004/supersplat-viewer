@@ -275,6 +275,11 @@ export class RevealController {
         
         Object.assign(this.config, newConfig);
         
+        // Also update the settings object so UI can read it
+        if (this.global.settings.revealEffect) {
+            Object.assign(this.global.settings.revealEffect, newConfig);
+        }
+        
         console.log('Updated reveal config:', this.config);
 
         // 如果类型改变，重新创建效果
