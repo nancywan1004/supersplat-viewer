@@ -101,12 +101,12 @@ class CameraManager {
         state.animationDuration = controllers.anim ? controllers.anim.animState.cursor.duration : 0;
 
         // initialize camera mode and initial camera position
-        state.cameraMode = state.hasAnimation ? 'anim' : (isObjectExperience ? 'orbit' : 'fly');
+        state.cameraMode = state.hasAnimation ? 'anim' : 'orbit';
         this.camera.copy(resetCamera);
 
         const target = new Camera(this.camera);             // the active controller updates this
         const from = new Camera(this.camera);               // stores the previous camera state during transition
-        let fromMode: CameraMode = isObjectExperience ? 'orbit' : 'fly';
+        let fromMode: CameraMode = 'orbit';
 
         // enter the initial controller
         getController(state.cameraMode).onEnter(this.camera);
