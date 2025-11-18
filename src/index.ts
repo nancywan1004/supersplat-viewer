@@ -130,6 +130,8 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         initPoster(events);
     }
 
+    camera.addComponent('camera');
+
     // Initialize XR support
     initXr(global);
 
