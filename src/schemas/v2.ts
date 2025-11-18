@@ -1,4 +1,4 @@
-import type { LodSettings, LodPreset, LodPlatform, RevealEffect } from "./v2-custom";
+import type { LodSettings, LodPreset, LodPlatform, RevealEffect, TransformFrame } from "./v2-custom";
 
 type AnimTrack = {
     name: string,
@@ -88,4 +88,4 @@ type ExperienceSettings = {
     lodSettings?: LodSettings
 };
 
-export type { AnimTrack, Camera, Annotation, PostEffectSettings, RevealEffect, LodSettings, LodPreset, LodPlatform, ExperienceSettings };
+export type { AnimTrack, Camera, Annotation, PostEffectSettings, RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, ExperienceSettings };

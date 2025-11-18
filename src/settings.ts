@@ -1,5 +1,6 @@
 import { ExperienceSettings as V1, AnimTrack as AnimTrackV1 } from './schemas/v1';
-import { ExperienceSettings as V2, AnimTrack as AnimTrackV2 } from './schemas/v2';
+import { ExperienceSettings as V2, AnimTrack as AnimTrackV2, TransformFrame } from './schemas/v2';
+import { Vec3 } from 'playcanvas';
 
 const migrateV1 = (settings: V1): V1 => {
     settings.animTracks?.forEach((track: AnimTrackV1) => {
@@ -96,25 +97,121 @@ const migrateV2 = (v1: V1): V2 => {
     };
 };
 
+// Convert 3x3 rotation matrix to target point
+const rotationMatrixToTarget = (position: [number, number, number], rotation: [[number, number, number], [number, number, number], [number, number, number]]): [number, number, number] => {
+    // The rotation matrix uses row vectors (each row represents an axis in world space)
+    // Row 0 = camera right vector
+    // Row 1 = camera up vector  
+    // Row 2 = camera forward vector (viewing direction)
+    
+    // Extract forward direction from the third row of rotation matrix
+    const forward = new Vec3(rotation[2][0], rotation[2][1], rotation[2][2]);
+    
+    // Calculate target point at a reasonable distance
+    const targetDistance = 3;
+    const pos = new Vec3(position[0], position[1], position[2]);
+    const target = pos.clone().add(forward.mulScalar(targetDistance));
+    
+    return [target.x, target.y, target.z];
+};
+
+// Calculate FOV from focal length and image dimensions
+const focalLengthToFov = (fx: number, width: number): number => {
+    // FOV = 2 * atan(width / (2 * fx)) * (180 / PI)
+    return 2 * Math.atan(width / (2 * fx)) * (180 / Math.PI);
+};
+
+// Migrate transform format to V2
+const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
+    if (!transforms || transforms.length === 0) {
+        throw new Error('Transform array is empty');
+    }
+    
+    // Use first frame for initial camera pose
+    const firstFrame = transforms[0];
+    const position = firstFrame.position;
+    const target = rotationMatrixToTarget(firstFrame.position, firstFrame.rotation);
+    const fov = focalLengthToFov(firstFrame.fx, firstFrame.width);
+    
+    return {
+        version: 2,
+        tonemapping: 'none',
+        highPrecisionRendering: false,
+        background: {
+            color: [0, 0, 0]
+        },
+        postEffectSettings: {
+            sharpness: {
+                enabled: false,
+                amount: 0
+            },
+            bloom: {
+                enabled: false,
+                intensity: 1,
+                blurLevel: 2
+            },
+            grading: {
+                enabled: false,
+                brightness: 0,
+                contrast: 1,
+                saturation: 1,
+                tint: [1, 1, 1]
+            },
+            vignette: {
+                enabled: false,
+                intensity: 0.5,
+                inner: 0.3,
+                outer: 0.75,
+                curvature: 1
+            },
+            fringing: {
+                enabled: false,
+                intensity: 0.5
+            }
+        },
+        animTracks: [],
+        cameras: [{
+            initial: {
+                position: position,
+                target: target,
+                fov: fov
+            }
+        }],
+        annotations: [],
+        startMode: 'default',
+        hasStartPose: true,
+        revealEffect: {
+            type: 'smooth',
+            autoStart: true
+        }
+    };
+};
+
 // import a json object to conform to the latest settings schema. settings is assumed to be one of the well-formed schemas
 const importSettings = (settings: any): V2 => {
     let result: V2;
 
-    const version = settings.version;
-    if (version === undefined) {
-        // v1 -> v2
-        result = migrateV2(migrateV1(settings as V1));
-    } else if (version === 2) {
-        // already v2
-        result = settings as V2;
+    // Check if it's a transform array format
+    if (Array.isArray(settings) && settings.length > 0 && settings[0].rotation && settings[0].position) {
+        // Transform format -> v2
+        result = migrateTransformToV2(settings as TransformFrame[]);
     } else {
-        throw new Error(`Unsupported experience settings version: ${version}`);
+        const version = settings.version;
+        if (version === undefined) {
+            // v1 -> v2
+            result = migrateV2(migrateV1(settings as V1));
+        } else if (version === 2) {
+            // already v2
+            result = settings as V2;
+        } else {
+            throw new Error(`Unsupported experience settings version: ${version}`);
+        }
     }
 
     return result;
 };
 
 // export the latest/current schema types
-export type { AnimTrack, Camera, Annotation, PostEffectSettings, RevealEffect, ExperienceSettings } from './schemas/v2';
+export type { AnimTrack, Camera, Annotation, PostEffectSettings, RevealEffect, TransformFrame, ExperienceSettings } from './schemas/v2';
 
 export { importSettings };

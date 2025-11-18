@@ -25,4 +25,15 @@ type LodSettings = {
     [key: string]: any;
 }
 
-export type { RevealEffect, LodSettings, LodPreset, LodPlatform };
+type TransformFrame = {
+    id: number,
+    img_name: string,
+    width: number,
+    height: number,
+    position: [number, number, number],
+    rotation: [[number, number, number], [number, number, number], [number, number, number]],
+    fy: number,
+    fx: number
+}
+
+export type { RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame };
