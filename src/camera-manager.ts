@@ -1,6 +1,9 @@
 import {
     type BoundingBox,
+    Color,
+    Entity,
     Pose,
+    StandardMaterial,
     Vec3
 } from 'playcanvas';
 
@@ -39,8 +42,26 @@ class CameraManager {
     // holds the camera state
     camera = new Camera();
 
+    // visual marker for picked point
+    private pickMarker: Entity | null = null;
+
     constructor(global: Global, bbox: BoundingBox) {
-        const { events, settings, state, config } = global;
+        const { events, settings, state, config, app } = global;
+
+        // // Create a visual marker for picked points
+        // const markerMaterial = new StandardMaterial();
+        // markerMaterial.diffuse = new Color(1, 0, 0); // Red
+        // markerMaterial.emissive = new Color(0.5, 0, 0); // Glowing red
+        // markerMaterial.update();
+
+        // this.pickMarker = new Entity('pickMarker');
+        // this.pickMarker.addComponent('render', {
+        //     type: 'sphere',
+        //     material: markerMaterial
+        // });
+        // this.pickMarker.setLocalScale(0.3, 0.3, 0.3);
+        // this.pickMarker.enabled = false;
+        // app.root.addChild(this.pickMarker);
 
         const camera0 = settings.cameras[0].initial;
         const frameCamera = createFrameCamera(bbox, camera0.fov);
@@ -212,8 +233,23 @@ class CameraManager {
 
         // handle user picking in the scene
         events.on('pick', (position: Vec3) => {
-            // Always switch to orbit mode on double-tap
-            state.cameraMode = 'orbit';
+            // Show visual marker at picked position
+            // if (this.pickMarker) {
+            //     this.pickMarker.setPosition(position);
+            //     this.pickMarker.enabled = true;
+
+            //     // Hide marker after 3 seconds
+            //     setTimeout(() => {
+            //         if (this.pickMarker) {
+            //             this.pickMarker.enabled = false;
+            //         }
+            //     }, 3000);
+            // }
+
+            // Switch to orbit mode on double-tap (only if not already in orbit mode)
+            if (state.cameraMode !== 'orbit') {
+                state.cameraMode = 'orbit';
+            }
 
             // construct camera - look at the picked target from current position
             tmpCamera.copy(this.camera);
@@ -230,10 +266,8 @@ class CameraManager {
             tmpCamera.position.copy(newPosition);
             
             // Make camera look at the picked point (this centers the target)
+            // The look() method automatically sets the correct distance
             tmpCamera.look(newPosition, position);
-            
-            // Set distance for orbit controller
-            tmpCamera.distance = 3.0;
 
             controllers.orbit.goto(tmpCamera);
             
@@ -248,24 +282,10 @@ class CameraManager {
         });
 
         events.on('annotation.activate', (annotation: Annotation) => {
-            // switch to orbit camera on pick
-            state.cameraMode = 'orbit';
-
-            const { initial } = annotation.camera;
-
-            // construct camera
-            tmpCamera.fov = initial.fov;
-            tmpCamera.look(
-                new Vec3(initial.position),
-                new Vec3(initial.target)
-            );
-
-            controllers.orbit.goto(tmpCamera);
-        });
-
-        events.on('annotation.activate', (annotation: Annotation) => {
-            // switch to orbit camera on pick
-            state.cameraMode = 'orbit';
+            // switch to orbit camera on pick (only if not already in orbit mode)
+            if (state.cameraMode !== 'orbit') {
+                state.cameraMode = 'orbit';
+            }
 
             const { initial } = annotation.camera;
 
