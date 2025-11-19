@@ -43,19 +43,19 @@ const screenToWorld = (camera: CameraComponent, dx: number, dy: number, dz: numb
     const halfSize = tmpV2.set(0, 0, 0);
     if (projection === PROJECTION_PERSPECTIVE) {
         const halfSlice = dz * Math.tan(0.5 * fov * math.DEG_TO_RAD);
-        if (horizontalFov) {
-            halfSize.set(
-                halfSlice,
-                halfSlice / aspectRatio,
-                0
-            );
-        } else {
+        // if (horizontalFov) {
+        //     halfSize.set(
+        //         halfSlice,
+        //         halfSlice / aspectRatio,
+        //         0
+        //     );
+        // } else {
             halfSize.set(
                 halfSlice * aspectRatio,
                 halfSlice,
                 0
             );
-        }
+        // }
     } else {
         halfSize.set(
             orthoHeight * aspectRatio,

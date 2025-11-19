@@ -99,13 +99,9 @@ const migrateV2 = (v1: V1): V2 => {
 
 // Convert 3x3 rotation matrix to target point
 const rotationMatrixToTarget = (position: [number, number, number], rotation: [[number, number, number], [number, number, number], [number, number, number]]): [number, number, number] => {
-    // The rotation matrix uses row vectors (each row represents an axis in world space)
-    // Row 0 = camera right vector
-    // Row 1 = camera up vector  
-    // Row 2 = camera forward vector (viewing direction)
-    
-    // Extract forward direction from the third row of rotation matrix
-    const forward = new Vec3(rotation[2][0], rotation[2][1], rotation[2][2]);
+    // Extract viewing direction from the third row (camera's Z-axis in world space)
+    // Flip X and Y components to match coordinate system
+    const forward = new Vec3(-rotation[2][0], -rotation[2][1], rotation[2][2]);
     
     // Calculate target point at a reasonable distance
     const targetDistance = 3;
@@ -121,7 +117,7 @@ const focalLengthToFov = (fx: number, width: number): number => {
     return 2 * Math.atan(width / (2 * fx)) * (180 / Math.PI);
 };
 
-// Migrate transform format to V2
+// Migrate transform format to V2 with animTracks
 const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
     if (!transforms || transforms.length === 0) {
         throw new Error('Transform array is empty');
@@ -129,9 +125,45 @@ const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
     
     // Use first frame for initial camera pose
     const firstFrame = transforms[0];
-    const position = firstFrame.position;
-    const target = rotationMatrixToTarget(firstFrame.position, firstFrame.rotation);
-    const fov = focalLengthToFov(firstFrame.fx, firstFrame.width);
+    const originalTarget = rotationMatrixToTarget(firstFrame.position, firstFrame.rotation);
+    
+    // Flip X and Y axes to match coordinate system
+    const initialPosition: [number, number, number] = [-firstFrame.position[0], -firstFrame.position[1], firstFrame.position[2]];
+    const initialTarget: [number, number, number] = [-originalTarget[0], -originalTarget[1], originalTarget[2]];
+    const initialFov = focalLengthToFov(firstFrame.fx, firstFrame.width);
+    
+    // Build keyframes from all transforms
+    const frameRate = 30;
+    const times: number[] = [];
+    const positions: number[] = [];
+    const targets: number[] = [];
+    const fovs: number[] = [];
+    
+    transforms.forEach((frame, index) => {
+        times.push(index);
+        
+        // Position - flip X and Y axes to match coordinate system
+        positions.push(-frame.position[0], -frame.position[1], frame.position[2]);
+        
+        // Target (calculated from rotation matrix) - also flip X and Y axes
+        const target = rotationMatrixToTarget(frame.position, frame.rotation);
+        targets.push(-target[0], -target[1], target[2]);
+        
+        // FOV (calculated from focal length)
+        const fov = focalLengthToFov(frame.fx, frame.width);
+        fovs.push(fov);
+        
+        if (index === 0) {
+            console.log(`=== Frame ${index} ===`);
+            console.log('Original Position:', frame.position);
+            console.log('Flipped Position:', [-frame.position[0], -frame.position[1], frame.position[2]]);
+            console.log('Original Target:', target);
+            console.log('Flipped Target:', [-target[0], -target[1], target[2]]);
+        }
+    });
+    
+    // Calculate duration based on number of frames and frame rate
+    const duration = (transforms.length - 1) / frameRate;
     
     return {
         version: 2,
@@ -169,16 +201,31 @@ const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
                 intensity: 0.5
             }
         },
-        animTracks: [],
+        animTracks: [{
+            name: 'Camera Path',
+            duration: duration,
+            frameRate: frameRate,
+            loopMode: 'none',
+            interpolation: 'spline',
+            smoothness: 0,
+            keyframes: {
+                times: times,
+                values: {
+                    position: positions,
+                    target: targets,
+                    fov: fovs
+                }
+            }
+        }],
         cameras: [{
             initial: {
-                position: position,
-                target: target,
-                fov: fov
+                position: initialPosition,
+                target: initialTarget,
+                fov: initialFov
             }
         }],
         annotations: [],
-        startMode: 'default',
+        startMode: 'animTrack',
         hasStartPose: true,
         revealEffect: {
             type: 'smooth',

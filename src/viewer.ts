@@ -167,12 +167,12 @@ class Viewer {
         app.xr.on('end', () => this.configureCamera(settings));
 
         // handle horizontal fov on canvas resize
-        const updateHorizontalFov = () => {
-            camera.camera.horizontalFov = graphicsDevice.width > graphicsDevice.height;
-            app.renderNextFrame = true;
-        };
-        graphicsDevice.on('resizecanvas', updateHorizontalFov);
-        updateHorizontalFov();
+        // const updateHorizontalFov = () => {
+        //     camera.camera.horizontalFov = graphicsDevice.width > graphicsDevice.height;
+        //     app.renderNextFrame = true;
+        // };
+        // graphicsDevice.on('resizecanvas', updateHorizontalFov);
+        // updateHorizontalFov();
 
         // handle HQ mode changes
         const updateHqMode = () => {
