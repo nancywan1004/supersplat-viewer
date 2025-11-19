@@ -12,7 +12,7 @@ import { AnimController } from './cameras/anim-controller';
 import { Camera, type CameraFrame, type CameraController } from './cameras/camera';
 import { FlyController } from './cameras/fly-controller';
 import { OrbitController } from './cameras/orbit-controller';
-import { easeOut } from './core/math';
+import { easeOut, smootherStep } from './core/math';
 import { Annotation } from './settings';
 import { CameraMode, Global } from './types';
 
@@ -130,7 +130,8 @@ class CameraManager {
 
             if (transitionTimer < 1) {
                 // lerp away from previous camera during transition
-                this.camera.lerp(from, target, easeOut(transitionTimer));
+                // Use smootherStep for ultra-smooth transitions
+                this.camera.lerp(from, target, smootherStep(transitionTimer));
             } else {
                 this.camera.copy(target);
             }

@@ -18,6 +18,42 @@ const damp = (damping: number, dt: number) => 1 - Math.pow(damping, dt * 1000);
 const easeOut = (x: number) => (1 - (2 ** (-10 * x))) / (1 - (2 ** -10));
 
 /**
+ * Smooth ease-in-out function (cubic).
+ * Provides smoother acceleration and deceleration.
+ *
+ * @param x - Input value in the range [0, 1].
+ * @returns - Output value in the range [0, 1].
+ */
+const easeInOutCubic = (x: number) => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+
+/**
+ * Smooth ease-in-out function (quintic).
+ * Provides even smoother transitions than cubic.
+ *
+ * @param x - Input value in the range [0, 1].
+ * @returns - Output value in the range [0, 1].
+ */
+const easeInOutQuint = (x: number) => x < 0.5 ? 16 * x * x * x * x * x : 1 - Math.pow(-2 * x + 2, 5) / 2;
+
+/**
+ * Smooth step function.
+ * Classic smoothstep interpolation.
+ *
+ * @param x - Input value in the range [0, 1].
+ * @returns - Output value in the range [0, 1].
+ */
+const smoothStep = (x: number) => x * x * (3 - 2 * x);
+
+/**
+ * Smoother step function.
+ * Ken Perlin's improved smoothstep.
+ *
+ * @param x - Input value in the range [0, 1].
+ * @returns - Output value in the range [0, 1].
+ */
+const smootherStep = (x: number) => x * x * x * (x * (x * 6 - 15) + 10);
+
+/**
  * Modulus function that handles negative values correctly.
  *
  * @param n - The number to be modulated.
@@ -38,4 +74,4 @@ const vecToAngles = (result: Vec3, vec: Vec3) => {
     return result;
 };
 
-export { damp, easeOut, mod, nearlyEquals, vecToAngles };
+export { damp, easeOut, easeInOutCubic, easeInOutQuint, smoothStep, smootherStep, mod, nearlyEquals, vecToAngles };

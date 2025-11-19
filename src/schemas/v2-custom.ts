@@ -33,7 +33,8 @@ type TransformFrame = {
     position: [number, number, number],
     rotation: [[number, number, number], [number, number, number], [number, number, number]],
     fy: number,
-    fx: number
+    fx: number,
+    fps: number
 }
 
 export type { RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame };

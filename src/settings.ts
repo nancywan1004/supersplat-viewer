@@ -133,7 +133,7 @@ const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
     const initialFov = focalLengthToFov(firstFrame.fx, firstFrame.width);
     
     // Build keyframes from all transforms
-    const frameRate = 30;
+    const frameRate = firstFrame.fps;
     const times: number[] = [];
     const positions: number[] = [];
     const targets: number[] = [];
@@ -207,7 +207,7 @@ const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
             frameRate: frameRate,
             loopMode: 'none',
             interpolation: 'spline',
-            smoothness: 0,
+            smoothness: 1,  // 增加平滑度：0 = 线性，1 = 最平滑
             keyframes: {
                 times: times,
                 values: {
