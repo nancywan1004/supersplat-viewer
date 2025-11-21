@@ -205,7 +205,7 @@ const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
             name: 'Camera Path',
             duration: duration,
             frameRate: frameRate,
-            loopMode: 'none',
+            loopMode: 'repeat',
             interpolation: 'spline',
             smoothness: 1,  // 增加平滑度：0 = 线性，1 = 最平滑
             keyframes: {
