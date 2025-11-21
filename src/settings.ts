@@ -130,7 +130,8 @@ const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
     // Flip X and Y axes to match coordinate system
     const initialPosition: [number, number, number] = [-firstFrame.position[0], -firstFrame.position[1], firstFrame.position[2]];
     const initialTarget: [number, number, number] = [-originalTarget[0], -originalTarget[1], originalTarget[2]];
-    const initialFov = focalLengthToFov(firstFrame.fx, firstFrame.width);
+    // const initialFov = focalLengthToFov(firstFrame.fx, firstFrame.width);
+    const initialFov = 50 // todo: temp set to 50
     
     // Build keyframes from all transforms
     const frameRate = firstFrame.fps;
@@ -150,8 +151,8 @@ const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
         targets.push(-target[0], -target[1], target[2]);
         
         // FOV (calculated from focal length)
-        const fov = focalLengthToFov(frame.fx, frame.width);
-        fovs.push(fov);
+        // const fov = focalLengthToFov(frame.fx, frame.width);
+        fovs.push(50); // todo: temp set to 50
         
         if (index === 0) {
             console.log(`=== Frame ${index} ===`);
