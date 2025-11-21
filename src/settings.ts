@@ -133,35 +133,14 @@ const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
     const initialFov = focalLengthToFov(firstFrame.fx, firstFrame.width);
     
     // Build keyframes from all transforms
-    // Check if frames have frame_duration field
-    const hasFrameDuration = firstFrame.frame_duration !== undefined;
-    const frameRate = 30; // Use fixed frame rate for time calculations
-    
+    const frameRate = firstFrame.fps;
     const times: number[] = [];
     const positions: number[] = [];
     const targets: number[] = [];
     const fovs: number[] = [];
     
-    let cumulativeTime = 0;
-    
     transforms.forEach((frame, index) => {
-        // Calculate time for this keyframe
-        if (hasFrameDuration) {
-            // For frame_duration: accumulate time in seconds, then convert to frame units
-            const timeInFrames = cumulativeTime * frameRate;
-            times.push(timeInFrames);
-            
-            // Debug: log first few frames and frames with different durations
-            if (index < 10 || (index > 0 && Math.abs(frame.frame_duration - transforms[index-1].frame_duration) > 0.01)) {
-                console.log(`Frame ${index}: time=${cumulativeTime.toFixed(3)}s (${timeInFrames.toFixed(2)} frames), duration=${frame.frame_duration}s`);
-            }
-            
-            // Add current frame's duration for next iteration
-            cumulativeTime += frame.frame_duration;
-        } else {
-            // Use frame index for fixed frame rate
-            times.push(index);
-        }
+        times.push(index);
         
         // Position - flip X and Y axes to match coordinate system
         positions.push(-frame.position[0], -frame.position[1], frame.position[2]);
@@ -175,23 +154,16 @@ const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
         fovs.push(fov);
         
         if (index === 0) {
-            console.log(`=== Transform Migration ===`);
-            console.log('Has frame_duration:', hasFrameDuration);
-            console.log('Frame rate:', frameRate);
+            console.log(`=== Frame ${index} ===`);
+            console.log('Original Position:', frame.position);
+            console.log('Flipped Position:', [-frame.position[0], -frame.position[1], frame.position[2]]);
+            console.log('Original Target:', target);
+            console.log('Flipped Target:', [-target[0], -target[1], target[2]]);
         }
     });
     
-    // Calculate total duration
-    let duration: number;
-    if (hasFrameDuration) {
-        // Sum all frame durations
-        duration = transforms.reduce((sum, frame) => sum + (frame.frame_duration || 0), 0);
-        console.log(`Total duration: ${duration.toFixed(3)}s (${(duration * frameRate).toFixed(2)} frames)`);
-        console.log(`Last keyframe time: ${times[times.length - 1].toFixed(2)} frames`);
-    } else {
-        // Use frame count and frame rate
-        duration = (transforms.length - 1) / frameRate;
-    }
+    // Calculate duration based on number of frames and frame rate
+    const duration = (transforms.length - 1) / frameRate;
     
     return {
         version: 2,
@@ -233,9 +205,9 @@ const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
             name: 'Camera Path',
             duration: duration,
             frameRate: frameRate,
-            loopMode: 'repeat',
+            loopMode: 'none',
             interpolation: 'spline',
-            smoothness: 0.3,  // 降低平滑度以更好地体现速度变化：0 = 线性，1 = 最平滑
+            smoothness: 1,  // 增加平滑度：0 = 线性，1 = 最平滑
             keyframes: {
                 times: times,
                 values: {
