@@ -44,6 +44,10 @@ class Camera {
         this.distance = avec.length();
 
         vecToAngles(this.angles, avec.mulScalar(1.0 / this.distance));
+        
+        // Preserve roll by interpolating it separately
+        // vecToAngles only calculates pitch and yaw, setting roll to 0
+        this.angles.z = math.lerp(a.angles.z, b.angles.z, t);
 
         this.fov = math.lerp(a.fov, b.fov, t);
     }

@@ -1,44 +1,105 @@
 import {
-    FlyController as FlyControllerPC,
     Pose,
-    Vec2
+    Vec2,
+    Vec3,
+    Quat,
+    math
 } from 'playcanvas';
 
 import type { CameraFrame, Camera, CameraController } from './camera';
 
-const p = new Pose();
+const angles = new Vec3();
+const rotation = new Quat();
+const forward = new Vec3();
+const right = new Vec3();
+const up = new Vec3();
+const offset = new Vec3();
+
+// Damping helper function
+const damp = (damping: number, dt: number) => {
+    return 1 - Math.pow(damping, dt * 60);
+};
 
 class FlyController implements CameraController {
-    controller: FlyControllerPC;
+    private _targetPose: Pose;
+    private _pose: Pose;
+    rotateDamping: number = 0.1; // Lower damping for more responsive rotation (was 0.9)
+    moveDamping: number = 0.9;
+    pitchRange: Vec2 = new Vec2(-90, 90);
 
     constructor() {
-        this.controller = new FlyControllerPC();
-        this.controller.pitchRange = new Vec2(-90, 90);
-        this.controller.rotateDamping = 0.9; // Lower damping for more responsive rotation
-        this.controller.moveDamping = 0.9; // Lower damping for more responsive movement
+        this._targetPose = new Pose();
+        this._pose = new Pose();
     }
 
     onEnter(camera: Camera): void {
-        p.position.copy(camera.position);
-        p.angles.copy(camera.angles);
-        p.distance = camera.distance;
-        this.controller.attach(p, false);
+        this._targetPose.set(camera.position, camera.angles, camera.distance);
+        this._pose.copy(this._targetPose);
     }
 
     update(deltaTime: number, inputFrame: CameraFrame, camera: Camera) {
-        const pose = this.controller.update(inputFrame, deltaTime);
-
-        camera.position.copy(pose.position);
-        camera.angles.copy(pose.angles);
-        camera.distance = pose.distance;
+        const { move, rotate } = inputFrame.read();
+        
+        // Apply rotation with roll support
+        // rotate[0] = mouse/touch X (yaw)
+        // rotate[1] = mouse/touch Y (pitch)
+        // rotate[2] = Q/E keys (roll)
+        angles.set(-rotate[1], -rotate[0], rotate[2]);
+        this._targetPose.rotate(angles);
+        
+        // Clamp pitch
+        this._targetPose.angles.x = math.clamp(
+            this._targetPose.angles.x,
+            this.pitchRange.x,
+            this.pitchRange.y
+        );
+        
+        // Apply movement in local space
+        rotation.setFromEulerAngles(this._pose.angles);
+        rotation.transformVector(Vec3.FORWARD, forward);
+        rotation.transformVector(Vec3.RIGHT, right);
+        rotation.transformVector(Vec3.UP, up);
+        
+        offset.set(0, 0, 0);
+        offset.add(forward.mulScalar(move[2]));
+        offset.add(right.mulScalar(move[0]));
+        offset.add(up.mulScalar(move[1]));
+        
+        this._targetPose.move(offset);
+        
+        // Apply damping using Pose.lerp
+        this._pose.lerp(
+            this._pose,
+            this._targetPose,
+            damp(this.moveDamping, deltaTime),
+            damp(this.rotateDamping, deltaTime),
+            1
+        );
+        
+        // For roll, use target directly (no damping) for instant response
+        // This prevents any delay or "bounce back" feeling
+        this._pose.angles.z = this._targetPose.angles.z;
+        
+        // Update camera
+        camera.position.copy(this._pose.position);
+        camera.angles.copy(this._pose.angles);
+        camera.distance = this._pose.distance;
+        
+        // Debug: Show roll angle in console title
+        if (typeof document !== 'undefined' && Math.abs(camera.angles.z) > 0.1) {
+            document.title = `Roll: ${camera.angles.z.toFixed(1)}°`;
+        } else if (typeof document !== 'undefined') {
+            document.title = 'SuperSplat Viewer';
+        }
     }
 
     onExit(_camera: Camera): void {
-
+        // No cleanup needed
     }
 
     goto(pose: Pose) {
-        this.controller.attach(pose, true);
+        this._targetPose.copy(pose);
+        this._pose.copy(pose);
     }
 }
 

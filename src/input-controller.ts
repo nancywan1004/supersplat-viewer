@@ -79,7 +79,10 @@ class InputController {
         touches: 0,
         lastTouchCount: 0,
         twoFingerTapTimer: 0,
-        currentTouchCount: 0
+        currentTouchCount: 0,
+        // Persistent key states for roll control
+        keyQPressed: false,
+        keyEPressed: false
     };
 
     private _desktopInput: KeyboardMouseSource = new KeyboardMouseSource();
@@ -332,17 +335,18 @@ class InputController {
         const { keyCode } = KeyboardMouseSource;
 
         const { key, button, mouse, wheel } = this._desktopInput.read();
+
+        const { events, state } = this.global;
+        const { camera } = this.global.camera;
+        
         const { touch, pinch, count } = this._orbitInput.read();
         const { leftInput, rightInput } = this._flyInput.read();
         const { leftStick, rightStick } = this._gamepadInput.read();
 
-        const { events, state } = this.global;
-        const { camera } = this.global.camera;
-
         // update state
         this._state.axis.add(tmpV1.set(
             (key[keyCode.D] - key[keyCode.A]) + (key[keyCode.RIGHT] - key[keyCode.LEFT]),
-            (key[keyCode.E] - key[keyCode.Q]),
+            0, // Y axis movement removed (was Q/E keys)
             (key[keyCode.W] - key[keyCode.S]) + (key[keyCode.UP] - key[keyCode.DOWN])
         ));
         
@@ -361,7 +365,10 @@ class InputController {
         this._state.shift += key[keyCode.SHIFT];
         this._state.ctrl += key[keyCode.CTRL];
 
-        if (state.cameraMode !== 'fly' && this._state.axis.length() > 0) {
+        // Switch to fly mode when using WASD or Q/E keys
+        const hasMovementInput = this._state.axis.length() > 0;
+        const hasRollInput = key[keyCode.Q] !== 0 || key[keyCode.E] !== 0;
+        if (state.cameraMode !== 'fly' && (hasMovementInput || hasRollInput)) {
             state.cameraMode = 'fly';
         }
 
@@ -392,6 +399,22 @@ class InputController {
         v.set(0, 0, 0);
         const mouseRotate = new Vec3(mouse[0], mouse[1], 0);
         v.add(mouseRotate.mulScalar((1 - pan) * this.orbitSpeed * orbitFactor * dt));
+        // Update persistent key states for Q/E
+        // key[] contains deltas: 1 = pressed this frame, -1 = released this frame, 0 = no change
+        if (key[keyCode.Q] === 1) this._state.keyQPressed = true;
+        if (key[keyCode.Q] === -1) this._state.keyQPressed = false;
+        if (key[keyCode.E] === 1) this._state.keyEPressed = true;
+        if (key[keyCode.E] === -1) this._state.keyEPressed = false;
+        
+        // Add roll control with Q/E keys (only in fly mode)
+        // Use persistent state, not deltas
+        const keyQState = this._state.keyQPressed ? 1 : 0;
+        const keyEState = this._state.keyEPressed ? 1 : 0;
+        const keyDiff = keyEState - keyQState;
+        const rollSpeedMultiplier = 3.0; // Increase roll speed (adjust as needed)
+        const rollInput = keyDiff * fly * this.orbitSpeed * orbitFactor * dt * rollSpeedMultiplier;
+        
+        v.z += rollInput;
         deltas.rotate.append([v.x, v.y, v.z]);
 
         // mobile move
@@ -438,7 +461,10 @@ class InputController {
             const flyRotate = new Vec3(rightInput[0], rightInput[1], 0);
             v.add(flyRotate.mulScalar(fly * this.orbitSpeed * orbitFactor * dt));
         }
-        deltas.rotate.append([v.x, v.y, v.z]);
+        // Only append if there's actual mobile input (don't override desktop roll with 0)
+        if (v.x !== 0 || v.y !== 0) {
+            deltas.rotate.append([v.x, v.y, 0]); // Mobile doesn't have roll control
+        }
 
         // gamepad move
         v.set(0, 0, 0);
@@ -450,7 +476,10 @@ class InputController {
         v.set(0, 0, 0);
         const stickRotate = new Vec3(rightStick[0], rightStick[1], 0);
         v.add(stickRotate.mulScalar(this.orbitSpeed * orbitFactor * dt));
-        deltas.rotate.append([v.x, v.y, v.z]);
+        // Only append if there's actual gamepad input (don't override desktop roll with 0)
+        if (v.x !== 0 || v.y !== 0) {
+            deltas.rotate.append([v.x, v.y, 0]); // Gamepad doesn't have roll control
+        }
 
         // update touch joystick UI - always show when using joystick
         // Auto-switch to fly mode when joystick is used
