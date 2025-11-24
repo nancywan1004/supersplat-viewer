@@ -111,11 +111,19 @@ const rotationMatrixToTarget = (position: [number, number, number], rotation: [[
     return [target.x, target.y, target.z];
 };
 
-// Calculate FOV from focal length and image dimensions
-const focalLengthToFov = (fx: number, width: number): number => {
-    // FOV = 2 * atan(width / (2 * fx)) * (180 / PI)
-    return 2 * Math.atan(width / (2 * fx)) * (180 / Math.PI);
-};
+/**
+ * 计算相机水平和垂直 FOV
+ * @param fx 水平焦距（像素）
+ * @param fy 垂直焦距（像素）
+ * @param width 图像宽度（像素）
+ * @param height 图像高度（像素）
+ * @returns [水平FOV, 垂直FOV]，单位：度
+ */
+function computeFOV(fx: number, fy: number, width: number, height: number): [number, number] {
+    const fovX = 2 * Math.atan(width / (2 * fx)) * (180 / Math.PI);
+    const fovY = 2 * Math.atan(height / (2 * fy)) * (180 / Math.PI);
+    return [fovX, fovY];
+}
 
 // Migrate transform format to V2 with animTracks
 const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
@@ -130,8 +138,8 @@ const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
     // Flip X and Y axes to match coordinate system
     const initialPosition: [number, number, number] = [-firstFrame.position[0], -firstFrame.position[1], firstFrame.position[2]];
     const initialTarget: [number, number, number] = [-originalTarget[0], -originalTarget[1], originalTarget[2]];
-    // const initialFov = focalLengthToFov(firstFrame.fx, firstFrame.width);
-    const initialFov = 50 // todo: temp set to 50
+    const initialFovs = computeFOV(firstFrame.fx, firstFrame.fy, firstFrame.width, firstFrame.height);
+    const initialFov = initialFovs[1] // vertical fov
     
     // Build keyframes from all transforms
     const frameRate = firstFrame.fps;
@@ -151,8 +159,9 @@ const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
         targets.push(-target[0], -target[1], target[2]);
         
         // FOV (calculated from focal length)
-        // const fov = focalLengthToFov(frame.fx, frame.width);
-        fovs.push(50); // todo: temp set to 50
+        const fov_xy = computeFOV(frame.fx, frame.fy, frame.width, frame.height);
+        const fov_y = fov_xy[1] // vertical fov
+        fovs.push(fov_y);
         
         if (index === 0) {
             console.log(`=== Frame ${index} ===`);
