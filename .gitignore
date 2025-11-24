@@ -3,3 +3,7 @@ dist
 public
 .DS_Store
 .npmrc
+
+/** 保留打包dist文件夹 */
+!build-package/
+!build-package/dist/

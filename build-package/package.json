@@ -1,0 +1,55 @@
+{
+  "name": "@playcanvas/supersplat-viewer",
+  "version": "1.8.3",
+  "author": "PlayCanvas <support@playcanvas.com>",
+  "homepage": "https://github.com/playcanvas/supersplat-viewer#readme",
+  "description": "Viewer for https://superspl.at",
+  "keywords": [
+    "playcanvas",
+    "ply",
+    "gaussian",
+    "splat",
+    "viewer"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "./dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/playcanvas/supersplat-viewer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/playcanvas/supersplat-viewer/issues"
+  },
+  "files": [
+    "dist",
+    "public",
+    "LICENSE",
+    "package.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rollup -c",
+    "build-pkg": "BUILD_PACKAGE=true rollup -c --environment INPUT:src/module/viewer-exports.ts",
+    "develop": "concurrently --kill-others \"npm run watch\" \"npm run serve\"",
+    "lint": "eslint src rollup.config.mjs eslint.config.mjs",
+    "lint:fix": "eslint src rollup.config.mjs eslint.config.mjs --fix",
+    "publint": "publint",
+    "serve": "serve public -C",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "type:check": "tsc --noEmit",
+    "watch": "rollup -c -w"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "private": false
+}
