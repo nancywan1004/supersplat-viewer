@@ -51,6 +51,7 @@
     "playcanvas": "2.13.2",
     "postcss": "8.5.6",
     "publint": "0.3.15",
+    "path": "^0.12.7",
     "rollup": "4.53.2",
     "rollup-plugin-copy": "3.5.0",
     "rollup-plugin-scss": "4.0.1",
@@ -61,6 +62,7 @@
   },
   "scripts": {
     "build": "rollup -c",
+    "build-pkg": "BUILD_PACKAGE=true rollup -c --environment INPUT:src/module/viewer-exports.ts",
     "develop": "concurrently --kill-others \"npm run watch\" \"npm run serve\"",
     "lint": "eslint src rollup.config.mjs eslint.config.mjs",
     "lint:fix": "eslint src rollup.config.mjs eslint.config.mjs --fix",
