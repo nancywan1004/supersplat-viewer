@@ -1,8 +1,10 @@
 import {
     BoundingBox,
     CameraFrame,
+    type CameraComponent,
     Color,
     type Entity,
+    type Layer,
     RenderTarget,
     Mat4,
     MiniStats,
@@ -18,7 +20,8 @@ import {
     TONEMAP_ACES2,
     TONEMAP_NEUTRAL,
     Vec3,
-    GSplatComponent
+    GSplatComponent,
+    platform
 } from 'playcanvas';
 
 import { Annotations } from './annotations';
@@ -135,6 +138,8 @@ class Viewer {
 
     annotations: Annotations;
 
+    forceRenderNextFrame = false;
+
     constructor(global: Global, gsplatLoad: Promise<Entity>, skyboxLoad: Promise<void>) {
         this.global = global;
 
@@ -222,6 +227,10 @@ class Viewer {
                 app.renderNextFrame = false;
             }
 
+            if (this.forceRenderNextFrame) {
+                app.renderNextFrame = true;
+            }
+
             if (app.renderNextFrame) {
                 prevWorld.copy(world);
                 prevProj.copy(proj);
@@ -278,7 +287,9 @@ class Viewer {
                 sceneBound.setFromTransformedAabb(gsplatBbox, results[0].getWorldTransform());
             }
 
-            this.annotations = new Annotations(global, this.cameraFrame != null);
+            if (!config.noui) {
+                this.annotations = new Annotations(global, this.cameraFrame != null);
+            }
 
             this.inputController = new InputController(global);
             
@@ -315,11 +326,44 @@ class Viewer {
                     }
                 });
             } else {
-                // FIXME: unified doesn't have a sorter, need to add a "ready" event for this case
-                // till then screenshots will likely not work correctly.
-                state.readyToRender = true;
-                events.fire('firstFrame');
-                window.firstFrame?.();
+                // in unified mode, for now we hard-code LOD range on mobile vs desktop
+                const range = platform.mobile ? [2, 5] : [0, 2];
+                const { gsplat } = app.scene;
+                gsplat.lodRangeMin = range[0];
+                gsplat.lodRangeMax = range[1];
+
+                // FIXME: remove ignore when gsplat system is documented
+                // @ts-ignore
+                const eventHandler = app.systems.gsplat;
+
+                // force render empty frames otherwise unified rendering doesn't update
+                this.forceRenderNextFrame = true;
+
+                const readyHandler = (camera: CameraComponent, layer: Layer, ready: boolean, loading: boolean) => {
+                    if (ready && !loading) {
+                        eventHandler.off('frame:ready', readyHandler);
+
+                        this.forceRenderNextFrame = false;
+                        state.readyToRender = true;
+
+                        // wait for the first valid frame to complete rendering
+                        app.once('frameend', () => {
+                            events.fire('firstFrame');
+
+                            // emit first frame event on window
+                            window.firstFrame?.();
+                        });
+                    }
+                };
+
+                eventHandler.on('frame:ready', readyHandler);
+
+                // render when ready is set
+                eventHandler.on('frame:ready', (camera: CameraComponent, layer: Layer, ready: boolean, loading: boolean) => {
+                    if (ready) {
+                        app.renderNextFrame = true;
+                    }
+                });
             }
         });
     }
