@@ -148,6 +148,17 @@ const buildDist = {
       declarationMap: false,
     }),
     json(),
+    copy({
+      targets: [
+        {
+          src: 'src/index.html',
+          dest: 'dist',
+          transform: (contents) =>
+            contents.toString().replace('<base href="">', `<base href="${process.env.BASE_HREF ?? ''}">`)
+        },
+        { src: 'public/index.css', dest: 'dist' }
+      ]
+    }),
     copyDtsPlugin(),
     packagePlugin(),
   ],
