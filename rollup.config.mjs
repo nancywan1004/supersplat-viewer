@@ -1,3 +1,4 @@
+import json from '@rollup/plugin-json';
 import resolve from '@rollup/plugin-node-resolve';
 import typescript from '@rollup/plugin-typescript';
 import autoprefixer from 'autoprefixer';
@@ -71,24 +72,26 @@ const buildCss = {
 
 // --- Public 构建 ---
 const buildPublic = {
-  input: 'src/index.ts',
-  output: { dir: 'public', format: 'esm', sourcemap: false },
-  plugins: [
-    resolve(),
-    typescript(),
-    copy({
-      targets: [
-        {
-          src: 'src/index.html',
-          dest: 'public',
-          transform: (contents) =>
-            contents
-              .toString()
-              .replace('<base href="">', `<base href="${process.env.BASE_HREF ?? ''}">`),
-        },
-      ],
-    }),
-  ],
+    input: 'src/index.ts',
+    output: {
+        dir: 'public',
+        format: 'esm',
+        sourcemap: true
+    },
+    plugins: [
+        resolve(),
+        typescript(),
+        json(),
+        copy({
+            targets: [{
+                src: 'src/index.html',
+                dest: 'public',
+                transform: (contents) => {
+                    return contents.toString().replace('<base href="">', `<base href="${process.env.BASE_HREF ?? ''}">`);
+                }
+            }]
+        })
+    ]
 };
 
 const input = process.env.INPUT || 'src/module/index.ts';
@@ -144,6 +147,7 @@ const buildDist = {
       declaration: false,
       declarationMap: false,
     }),
+    json(),
     copyDtsPlugin(),
     packagePlugin(),
   ],

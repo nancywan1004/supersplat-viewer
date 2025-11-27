@@ -4,7 +4,9 @@ import {
     Entity,
     EventHandler,
     type Texture,
-    type AppBase
+    type AppBase,
+    revision as engineRevision,
+    version as engineVersion
 } from 'playcanvas';
 
 import { observe } from './core/observe';
@@ -14,6 +16,7 @@ import { initPoster, initUI } from './ui';
 import { Viewer } from './viewer';
 import { initXr } from './xr';
 import { LodLoader } from './loaders/lod-loader';
+import { version as appVersion } from '../package.json';
 
 const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progress: number) => void, lodLoader?: LodLoader) => {
     const { contents, contentUrl, unified, aa } = config;
@@ -103,7 +106,7 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         hasAnimation: false,
         animationDuration: 0,
         animationTime: 0,
-        animationPaused: !!config.noanim,
+        animationPaused: true,
         hasAR: false,
         hasVR: false,
         isFullscreen: false,
@@ -171,5 +174,7 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
     // Create the viewer
     return new Viewer(global, gsplatLoad, skyboxLoad);
 };
+
+console.log(`SuperSplat Viewer v${appVersion} | Engine v${engineVersion} (${engineRevision})`);
 
 export { main };

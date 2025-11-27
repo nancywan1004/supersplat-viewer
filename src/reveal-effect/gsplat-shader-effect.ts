@@ -1,4 +1,4 @@
-import { Script, Entity, Material, Camera, Layer, Vec3 } from 'playcanvas';
+import { Script, Entity, Material, Camera, Layer, Vec3, CameraComponent } from 'playcanvas';
 
 /**
  * Base class for gsplat shader effects.
@@ -260,7 +260,7 @@ class GsplatShaderEffect extends Script {
                 if (camera.layers.indexOf(layerId) >= 0) {
                     const layer = composition.getLayerById(layerId);
                     if (layer) {
-                        const material = gsplatSystem.getGSplatMaterial(camera, layer);
+                        const material = gsplatSystem.getGSplatMaterial(camera as Camera, layer);
                         if (material && !this.materialsApplied.has(material)) {
                             this.applyShaderToMaterial(material);
                             this.materialsApplied.add(material);
