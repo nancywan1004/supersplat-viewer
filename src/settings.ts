@@ -2,8 +2,61 @@ import { ExperienceSettings as V1, AnimTrack as AnimTrackV1 } from './schemas/v1
 import { ExperienceSettings as V2, AnimTrack as AnimTrackV2, TransformFrame } from './schemas/v2';
 import { Vec3 } from 'playcanvas';
 
+type LegacyKeyframes = AnimTrackV1['keyframes'];
+
+type KeyFrameItem = {
+    times?: number; // 兼容typo
+    time?: number;
+    position?: number[];
+    target?: number[];
+};
+
+const normalizeKeyframes = (keyframes: LegacyKeyframes | KeyFrameItem[]): LegacyKeyframes => {
+    if (!Array.isArray(keyframes)) {
+        return keyframes;
+    }
+
+    const times: number[] = [];
+    const positions: number[] = [];
+    const targets: number[] = [];
+
+    keyframes.forEach((frame) => {
+        if (!frame) {
+            return;
+        }
+
+        const timeValue = typeof frame.times === 'number'
+            ? frame.times
+            : typeof (frame as any).time === 'number'
+                ? (frame as any).time
+                : times.length > 0
+                    ? times[times.length - 1]
+                    : 0;
+
+        times.push(timeValue);
+
+        if (Array.isArray(frame.position) && frame.position.length === 3) {
+            positions.push(frame.position[0], frame.position[1], frame.position[2]);
+        }
+
+        if (Array.isArray(frame.target) && frame.target.length === 3) {
+            targets.push(frame.target[0], frame.target[1], frame.target[2]);
+        }
+    });
+
+    return {
+        times,
+        values: {
+            position: positions,
+            target: targets
+        }
+    };
+};
+
 const migrateV1 = (settings: V1): V1 => {
     settings.animTracks?.forEach((track: AnimTrackV1) => {
+        track.keyframes = normalizeKeyframes(track.keyframes as any);
+
         // some early settings did not have frameRate set on anim tracks
         if (!track.frameRate) {
             const defaultFrameRate = 30;
@@ -25,6 +78,8 @@ const migrateV1 = (settings: V1): V1 => {
 };
 
 const migrateAnimTrackV2 = (animTrackV1: AnimTrackV1, fov: number): AnimTrackV2 => {
+    const keyframes = normalizeKeyframes(animTrackV1.keyframes as any);
+
     return {
         name: animTrackV1.name,
         duration: animTrackV1.duration,
@@ -33,11 +88,11 @@ const migrateAnimTrackV2 = (animTrackV1: AnimTrackV1, fov: number): AnimTrackV2 
         interpolation: animTrackV1.interpolation,
         smoothness: animTrackV1.smoothness,
         keyframes: {
-            times: animTrackV1.keyframes.times,
+            times: keyframes.times,
             values: {
-                position: animTrackV1.keyframes.values.position,
-                target: animTrackV1.keyframes.values.target,
-                fov: new Array(animTrackV1.keyframes.times.length).fill(fov)
+                position: keyframes.values.position,
+                target: keyframes.values.target,
+                fov: new Array(keyframes.times.length).fill(fov)
             }
         }
     };
