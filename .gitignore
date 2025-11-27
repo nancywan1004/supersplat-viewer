@@ -1,9 +1,14 @@
 node_modules
 dist
-public
+public/*
 .DS_Store
 .npmrc
 
 /** 保留打包dist文件夹 */
 !build-package/
 !build-package/dist/
+
+/** 保留skyboxes */
+!public/assets/
+!public/assets/skyboxes/
+!public/assets/skyboxes/**

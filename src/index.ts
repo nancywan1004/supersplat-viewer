@@ -17,6 +17,7 @@ import { Viewer } from './viewer';
 import { initXr } from './xr';
 import { LodLoader } from './loaders/lod-loader';
 import { version as appVersion } from '../package.json';
+import { initPostMessageBridge } from './message-bridge';
 
 const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progress: number) => void, lodLoader?: LodLoader) => {
     const { contents, contentUrl, unified, aa } = config;
@@ -94,6 +95,29 @@ const loadSkybox = (app: AppBase, url: string) => {
     });
 };
 
+const skyboxTextureCache = new Map<string, Texture>();
+
+const applySkyboxTexture = async (app: AppBase, url: string) => {
+    const trimmedUrl = url?.trim();
+    if (!trimmedUrl) {
+        console.warn('[SuperSplat] SKYBOX_SWITCH 缺少有效的 URL');
+        return;
+    }
+
+    const cachedTexture = skyboxTextureCache.get(trimmedUrl);
+    if (cachedTexture) {
+        app.scene.envAtlas = cachedTexture;
+        app.renderNextFrame = true;
+        return;
+    }
+
+    const asset = await loadSkybox(app, trimmedUrl);
+    const texture = asset.resource as Texture;
+    skyboxTextureCache.set(trimmedUrl, texture);
+    app.scene.envAtlas = texture;
+    app.renderNextFrame = true;
+};
+
 const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) => {
     const events = new EventHandler();
 
@@ -152,10 +176,31 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
     );
 
     // Load skybox
-    const skyboxLoad = config.skyboxUrl &&
-        loadSkybox(app, config.skyboxUrl).then((asset) => {
-            app.scene.envAtlas = asset.resource as Texture;
+    const skyboxLoad = config.skyboxUrl && applySkyboxTexture(app, config.skyboxUrl);
+
+    if (skyboxLoad) {
+        skyboxLoad.then(() => {
+            events.fire('skyboxSelectionSynced', config.skyboxUrl ?? '');
+        }).catch((err) => {
+            console.warn('[SuperSplat] 初始化天空盒失败：', err);
         });
+    }
+
+    events.on('skyboxSwitch', async (url?: string | null) => {
+        if (!url) {
+            app.scene.envAtlas = null;
+            app.renderNextFrame = true;
+            events.fire('skyboxSelectionSynced', '');
+            return;
+        }
+
+        try {
+            await applySkyboxTexture(app, url);
+            events.fire('skyboxSelectionSynced', url);
+        } catch (err) {
+            console.warn('[SuperSplat] 切换天空盒失败：', err);
+        }
+    });
 
     // Load and play sound
     if (global.settings.soundUrl) {
@@ -172,6 +217,8 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
     }
 
     // Create the viewer
+    initPostMessageBridge(global);
+
     return new Viewer(global, gsplatLoad, skyboxLoad);
 };
 

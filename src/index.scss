@@ -269,6 +269,12 @@ button {
         gap: 4px;
         width: 100%;
 
+        > label {
+            min-width: 80px;
+            padding: 10px 0;
+            color: $clr-text-dark;
+        }
+
         > button {
             flex-grow: 1;
             padding: 10px 20px;
