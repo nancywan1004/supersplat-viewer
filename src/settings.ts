@@ -142,7 +142,7 @@ const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
     const initialFov = initialFovs[1] // vertical fov
     
     // Build keyframes from all transforms
-    const frameRate = firstFrame.fps;
+    const frameRate = 30;
     const times: number[] = [];
     const positions: number[] = [];
     const targets: number[] = [];
@@ -160,7 +160,7 @@ const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
         
         // FOV (calculated from focal length)
         const fov_xy = computeFOV(frame.fx, frame.fy, frame.width, frame.height);
-        const fov_y = fov_xy[1] // vertical fov
+        const fov_y = fov_xy[1]
         fovs.push(fov_y);
         
         if (index === 0) {
