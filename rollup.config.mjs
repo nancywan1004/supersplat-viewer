@@ -11,6 +11,7 @@ import terser from '@rollup/plugin-terser';
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import dts from 'rollup-plugin-dts';
 
 // 判断是否需要生成完整 package
 const isPackageBuild = process.env.BUILD_PACKAGE === 'true';
@@ -94,34 +95,16 @@ const buildPublic = {
     ]
 };
 
-const input = process.env.INPUT || 'src/module/index.ts';
-const baseName = path.basename(input, path.extname(input));
-const dtsSource = `src/module/${baseName}.d.ts`;
+const input = process.env.INPUT || 'src/index.ts';
 
-// --- 自定义插件：复制并重命名 .d.ts 文件，并清理其他 .d.ts ---
-const copyDtsPlugin = () => ({
-  name: 'copy-dts',
-  writeBundle() {
-    if (fs.existsSync(dtsSource)) {
-      const destPath = 'dist/index.d.ts';
-      fs.mkdirSync('dist', { recursive: true });
-      fs.copyFileSync(dtsSource, destPath);
-      console.log(`✅ 已复制 ${dtsSource} -> ${destPath}`);
-      
-      // 清理 dist 目录下除了 index.d.ts 之外的所有 .d.ts 文件
-      const distFiles = fs.readdirSync('dist');
-      distFiles.forEach(file => {
-        if (file.endsWith('.d.ts') && file !== 'index.d.ts') {
-          const filePath = path.join('dist', file);
-          fs.unlinkSync(filePath);
-          console.log(`🗑️  已删除多余文件: ${filePath}`);
-        }
-      });
-    } else {
-      console.warn(`⚠️  未找到源文件: ${dtsSource}`);
-    }
+const buildTypes = {
+  input,
+  output: {
+    file: "dist/index.d.ts",
+    format: "esm",
   },
-});
+  plugins: [dts()]
+};
 
 // --- Dist 构建（模块发布用 - 完整导出版本） ---
 const buildDist = {
@@ -156,13 +139,13 @@ const buildDist = {
           transform: (contents) =>
             contents.toString().replace('<base href="">', `<base href="${process.env.BASE_HREF ?? ''}">`)
         },
+        { src: 'settings.json', dest: 'dist'},
         { src: 'public/index.css', dest: 'dist' }
       ]
     }),
-    copyDtsPlugin(),
     packagePlugin(),
   ],
 };
 
 // --- 导出 ---
-export default [buildCss, buildPublic, buildDist];
+export default [buildCss, buildPublic, buildDist, buildTypes];
