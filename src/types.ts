@@ -15,6 +15,7 @@ type Config = {
     colorizeLod?: boolean;
 
     noui: boolean;
+    noBottomUI: boolean;                        // hide bottom UI controls, but keep poster and loading bar
     noanim: boolean;
     noautorotate: boolean;
     ministats: boolean;

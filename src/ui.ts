@@ -326,12 +326,22 @@ const initUI = (global: Global) => {
 
     // fade ui controls after 5 seconds of inactivity
     events.on('controlsHidden:changed', (value) => {
+        // If noBottomUI is enabled, always keep controlsWrap hidden
+        if (config.noBottomUI) {
+            dom.controlsWrap.classList.add('hidden');
+            dom.controlsWrap.classList.remove('faded-in', 'faded-out');
+            return;
+        }
         dom.controlsWrap.className = value ? 'faded-out' : 'faded-in';
     });
 
     // show the ui and start a timer to hide it again
     let uiTimeout: ReturnType<typeof setTimeout> | null = null;
     const showUI = () => {
+        // If noBottomUI is enabled, don't show UI
+        if (config.noBottomUI) {
+            return;
+        }
         if (uiTimeout) {
             clearTimeout(uiTimeout);
         }
@@ -341,7 +351,10 @@ const initUI = (global: Global) => {
             state.controlsHidden = true;
         }, 4000);
     };
-    showUI();
+    // Only show UI initially if noBottomUI is not enabled
+    if (!config.noBottomUI) {
+        showUI();
+    }
 
     events.on('inputEvent', showUI);
 
@@ -511,6 +524,15 @@ const initUI = (global: Global) => {
     // Hide all UI (poster, loading bar, controls)
     if (config.noui) {
         dom.ui.classList.add('hidden');
+    }
+
+    // Hide only bottom UI controls (keep poster and loading bar)
+    // This must be done after all event listeners are set up to ensure it stays hidden
+    if (config.noBottomUI) {
+        dom.controlsWrap.classList.add('hidden');
+        dom.controlsWrap.classList.remove('faded-in', 'faded-out');
+        // Also set controlsHidden to true to prevent any fade animations
+        state.controlsHidden = true;
     }
 
     // tooltips
