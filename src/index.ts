@@ -135,7 +135,8 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         hasVR: false,
         isFullscreen: false,
         controlsHidden: false,
-        hasRevealEffect: false
+        hasRevealEffect: false,
+        showCameraPath: false
     });
 
     const global: Global = {

@@ -21,6 +21,7 @@ type Config = {
     ministats: boolean;
     unified: boolean;                           // force unified rendering mode
     aa: boolean;                                // render with antialiasing
+    showCameraPathVisualizer?: boolean;         // show camera path visualization
 };
 
 // observable state that can change at runtime
@@ -39,6 +40,7 @@ type State = {
     isFullscreen: boolean;
     controlsHidden: boolean;
     hasRevealEffect: boolean;
+    showCameraPath: boolean;                    // show camera path visualization
 };
 
 type Global = {

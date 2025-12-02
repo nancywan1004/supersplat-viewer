@@ -38,6 +38,7 @@ const initUI = (global: Global) => {
         'settings', 'settingsPanel',
         'orbitCamera', 'flyCamera',
         'hqCheck', 'hqOption', 'lqCheck', 'lqOption',
+        'cameraPathCheck', 'cameraPathOption',
         'revealPanel', 'revealType', 'revealRestart',
         'skyboxRow', 'skyboxSelect',
         'reset', 'frame',
@@ -534,6 +535,18 @@ const initUI = (global: Global) => {
         // Also set controlsHidden to true to prevent any fade animations
         state.controlsHidden = true;
     }
+    // Camera path visualization toggle
+    dom.cameraPathOption.addEventListener('click', () => {
+        state.showCameraPath = !state.showCameraPath;
+    });
+
+    events.on('showCameraPath:changed', (value) => {
+        if (value) {
+            dom.cameraPathCheck.classList.remove('hidden');
+        } else {
+            dom.cameraPathCheck.classList.add('hidden');
+        }
+    });
 
     // tooltips
     const tooltip = new Tooltip(dom.tooltip);

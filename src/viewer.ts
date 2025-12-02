@@ -32,6 +32,7 @@ import { InputController } from './input-controller';
 import type { ExperienceSettings, PostEffectSettings } from './settings';
 import type { Global } from './types';
 import { RevealController } from './reveal';
+import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
 
 // override global pick to pack depth instead of meshInstance id
 const pickDepthGlsl = /* glsl */ `
@@ -139,6 +140,7 @@ class Viewer {
     annotations: Annotations;
 
     forceRenderNextFrame = false;
+    pathVisualizer: CameraPathVisualizer | null = null;
 
     constructor(global: Global, gsplatLoad: Promise<Entity>, skyboxLoad: Promise<void>) {
         this.global = global;
@@ -314,6 +316,21 @@ class Viewer {
             this.cameraManager = new CameraManager(global, sceneBound);
             applyCamera(this.cameraManager.camera);
 
+            // Initialize camera path visualizer if there are animation tracks
+            if (settings.animTracks && settings.animTracks.length > 0) {
+                this.pathVisualizer = new CameraPathVisualizer(app);
+                this.pathVisualizer.visualize(settings.animTracks[0]);
+                this.pathVisualizer.setVisible(state.showCameraPath);
+
+                // Listen for state changes
+                events.on('showCameraPath:changed', (visible: boolean) => {
+                    if (this.pathVisualizer) {
+                        this.pathVisualizer.setVisible(visible);
+                        app.renderNextFrame = true;
+                    }
+                });
+            }
+
             const { instance } = gsplat;
             if (instance) {
                 // kick off gsplat sorting immediately now that camera is in position
@@ -444,6 +461,44 @@ class Viewer {
                 camera.camera.toneMapping = tonemapTable[settings.tonemapping];
                 camera.camera.clearColor = new Color(background.color);
             }
+        }
+    }
+
+    // Camera path visualizer methods
+    updateCameraPathVisualizer(options: VisualizerOptions) {
+        if (!this.pathVisualizer) {
+            this.pathVisualizer = new CameraPathVisualizer(this.global.app, options);
+        }
+
+        const { settings } = this.global;
+        if (settings.animTracks && settings.animTracks.length > 0) {
+            this.pathVisualizer.visualize(settings.animTracks[0]);
+        }
+    }
+
+    setCameraPathVisible(type: 'path' | 'keyframes' | 'directions' | 'all', visible: boolean) {
+        if (!this.pathVisualizer) return;
+
+        switch (type) {
+            case 'path':
+                this.pathVisualizer.setPathVisible(visible);
+                break;
+            case 'keyframes':
+                this.pathVisualizer.setKeyframesVisible(visible);
+                break;
+            case 'directions':
+                this.pathVisualizer.setDirectionsVisible(visible);
+                break;
+            case 'all':
+                this.pathVisualizer.setVisible(visible);
+                break;
+        }
+    }
+
+    destroyCameraPathVisualizer() {
+        if (this.pathVisualizer) {
+            this.pathVisualizer.destroy();
+            this.pathVisualizer = null;
         }
     }
 }
