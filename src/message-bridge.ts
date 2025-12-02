@@ -14,6 +14,10 @@ type PostMessagePayload =
         type: 'SKYBOX_SWITCH';
         message?: string;
         value: string;
+    }
+    | {
+        type: 'ANIMATION_PLAY_PAUSE';
+        message?: string;
     };
 
 const initPostMessageBridge = (global: Global) => {
@@ -42,6 +46,9 @@ const initPostMessageBridge = (global: Global) => {
             } else {
                 console.warn('[SuperSplat] SKYBOX_SWITCH 需要字符串 URL');
             }
+            break;
+        case 'ANIMATION_PLAY_PAUSE':
+            events.fire('inputEvent', 'playPause');
             break;
         default:
             // 交给其他监听者处理
