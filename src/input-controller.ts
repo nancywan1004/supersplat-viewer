@@ -326,6 +326,15 @@ class InputController {
                     case 'r':
                         events.fire('inputEvent', 'reset', event);
                         break;
+                    case 'c':
+                        // Toggle between orbit and fly camera modes
+                        if (state.cameraMode === 'orbit') {
+                            state.cameraMode = 'fly';
+                        } else if (state.cameraMode === 'fly') {
+                            state.cameraMode = 'orbit';
+                        }
+                        // Note: anim mode is not toggled, only orbit <-> fly
+                        break;
                     case ' ':
                         events.fire('inputEvent', 'playPause', event);
                         break;
