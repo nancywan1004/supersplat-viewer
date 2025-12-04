@@ -331,8 +331,11 @@ const initUI = (global: Global) => {
         if (config.noBottomUI) {
             dom.controlsWrap.classList.add('hidden');
             dom.controlsWrap.classList.remove('faded-in', 'faded-out');
+            // 确保使用display:none来完全隐藏，防止任何显示
+            dom.controlsWrap.style.display = 'none';
             return;
         }
+        dom.controlsWrap.style.display = '';
         dom.controlsWrap.className = value ? 'faded-out' : 'faded-in';
     });
 
@@ -532,6 +535,8 @@ const initUI = (global: Global) => {
     if (config.noBottomUI) {
         dom.controlsWrap.classList.add('hidden');
         dom.controlsWrap.classList.remove('faded-in', 'faded-out');
+        // 确保使用display:none来完全隐藏，防止任何显示
+        dom.controlsWrap.style.display = 'none';
         // Also set controlsHidden to true to prevent any fade animations
         state.controlsHidden = true;
     }
