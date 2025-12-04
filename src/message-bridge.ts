@@ -57,6 +57,17 @@ const initPostMessageBridge = (global: Global) => {
     };
 
     window.addEventListener('message', handleMessage);
+
+    // 监听相机模式变化，通知iframe调用侧
+    events.on('cameraMode:changed', (value, prev) => {
+        // 只通知orbit和fly模式的变化，不通知anim模式
+        if (value === 'orbit' || value === 'fly') {
+            window.parent.postMessage({
+                type: 'CAMERA_MODE_CHANGED',
+                value: value
+            }, '*');
+        }
+    });
 };
 
 export { initPostMessageBridge };
