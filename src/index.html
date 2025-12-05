@@ -44,7 +44,7 @@
                 ministats: url.searchParams.has('ministats'),
                 unified: url.searchParams.has('unified'),
                 aa: url.searchParams.has('aa'),
-                noBottomUI: url.searchParams.has('noBottomUI')
+                noBottomUI: true  // url.searchParams.has('noBottomUI')
             };
 
             window.sse = {
@@ -196,7 +196,7 @@
                     <div id="cameraPathCheck" class="checkMark hidden">✓</div>
                     <div id="cameraPathOption">Show Camera Path</div>
                 </div>
-                <!-- <div id="revealPanel" class="hidden">
+                <div id="revealPanel" class="hidden">
                     <div class="divider"></div>
                     <div class="settingsRow">
                         <select id="revealType">
@@ -209,7 +209,7 @@
                         <button id="revealRestart">Start Reveal</button>
                     </div>
                     <div class="divider"></div>
-                </div> -->
+                </div>
                 <div class="settingsRow">
                     <label for="skyboxSelect" style="margin-right: 8px;">Skybox:</label>
                     <select id="skyboxSelect">

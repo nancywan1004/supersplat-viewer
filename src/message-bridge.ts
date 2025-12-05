@@ -64,6 +64,7 @@ const initPostMessageBridge = (global: Global) => {
         if (value === 'orbit' || value === 'fly') {
             window.parent.postMessage({
                 type: 'CAMERA_MODE_CHANGED',
+                message: 'camera mode changed',
                 value: value
             }, '*');
         }

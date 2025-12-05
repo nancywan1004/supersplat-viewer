@@ -293,8 +293,9 @@ const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
         startMode: 'animTrack',
         hasStartPose: true,
         revealEffect: {
-            type: 'smooth',
-            autoStart: true
+            type: 'radial',
+            autoStart: true,
+            radius: 25
         }
     };
 };

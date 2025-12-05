@@ -1,4 +1,5 @@
 import type { Entity, BoundingBox } from 'playcanvas';
+import { Vec3 } from 'playcanvas';
 import { GsplatRevealRadial } from './reveal-effect/gsplat-reveal-radial';
 import { GsplatRevealRain } from './reveal-effect/gsplat-reveal-rain';
 import { Global } from './types';
@@ -15,6 +16,7 @@ export class RevealController {
     private gsplatEntity: Entity | null = null;
     private config: RevealConfig;
     private currentScript: any = null;
+    private revealCenter: number[] = [0, 0, 0];
 
     global: Global;
 
@@ -59,8 +61,7 @@ export class RevealController {
 
         // 使用相机的 look target 作为默认 reveal center，如果没有则使用 bbox.center
         const cameraTarget = settings.cameras?.[0]?.initial?.target;
-        const revealCenter = cameraTarget ? cameraTarget : bbox.center.toArray();
-        this.setRevealCenter(revealCenter);
+        this.revealCenter = cameraTarget ? cameraTarget : bbox.center.toArray();
         
         // 创建初始效果
         this.createEffect(this.config.type);
@@ -88,6 +89,11 @@ export class RevealController {
                 script.waveTint.set(1, 0.5, 0); // Orange
                 script.oscillationIntensity = 0.2;
                 script.endRadius = this.config.radius;
+                
+                // 设置 reveal center
+                if (script.center && this.revealCenter) {
+                    script.center.set(-this.revealCenter[0], -this.revealCenter[1], this.revealCenter[2]);
+                }
                 
                 // 初始状态设为禁用，等待手动启动
                 script.enabled = true;
@@ -132,6 +138,11 @@ export class RevealController {
                 script.hitDuration = 0.5;
                 script.endRadius = this.config.radius;
                 
+                // 设置 reveal center
+                if (script.center && this.revealCenter) {
+                    script.center.set(-this.revealCenter[0], -this.revealCenter[1], this.revealCenter[2]);
+                }
+                
                 // 初始状态设为禁用，等待手动启动
                 script.enabled = true;
                 
@@ -164,6 +175,11 @@ export class RevealController {
             if (script) {
                 // 配置script属性
                 script.maxRadius = this.config.radius;
+                
+                // 设置 reveal center
+                if (script.center && this.revealCenter) {
+                    script.center.set(-this.revealCenter[0], -this.revealCenter[1], this.revealCenter[2]);
+                }
                 
                 // 初始状态设为禁用，等待手动启动
                 script.enabled = true;
@@ -351,15 +367,21 @@ export class RevealController {
             console.warn('Cannot set reveal center - no config');
             return;
         }
+        
+        // 保存到实例变量
+        this.revealCenter = center;
         console.log('Reveal center set to:', center);
         
         // 更新当前script的中心点
         if (this.currentScript) {
             try {
                 if (this.currentScript.setCenter) {
-                    this.currentScript.setCenter(center);
+                    // setCenter 需要 Vec3 对象
+                    const centerVec3 = new Vec3(center[0], center[1], center[2]);
+                    this.currentScript.setCenter(centerVec3);
                 } else if (this.currentScript.center) {
-                    this.currentScript.center.copy(center);
+                    // 直接设置 center 属性
+                    this.currentScript.center.set(center[0], center[1], center[2]);
                 }
             } catch (error) {
                 console.warn('Error setting reveal center:', error);
