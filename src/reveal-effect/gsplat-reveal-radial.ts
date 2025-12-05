@@ -38,20 +38,20 @@ void modifyCenter(inout vec3 center) {
     
     // Only apply oscillation if lift wave hasn't fully passed
     bool wavesActive = g_liftTime <= 0.0 || g_dist > g_liftWavePos - 1.5;
-    if (wavesActive) {
-        // Apply oscillation with per-splat phase offset
-        float phase = hash(center) * 6.28318;
-        center.y += sin(uTime * 3.0 + phase) * uOscillationIntensity * 0.25;
-    }
+    // if (wavesActive) {
+    //     // Apply oscillation with per-splat phase offset
+    //     float phase = hash(center) * 6.28318;
+    //     center.y += sin(uTime * 3.0 + phase) * uOscillationIntensity * 0.25;
+    // }
     
     // Apply lift effect near the wave edge
     float distToLiftWave = abs(g_dist - g_liftWavePos);
-    if (distToLiftWave < 1.0 && g_liftTime > 0.0) {
-        // Create a smooth lift curve (peaks at wave edge)
-        // Lift is 0.9x the oscillation intensity (30% of original 3x)
-        float liftAmount = (1.0 - distToLiftWave) * sin(distToLiftWave * 3.14159);
-        center.y += liftAmount * uOscillationIntensity * 0.9;
-    }
+    // if (distToLiftWave < 1.0 && g_liftTime > 0.0) {
+    //     // Create a smooth lift curve (peaks at wave edge)
+    //     // Lift is 0.9x the oscillation intensity (30% of original 3x)
+    //     float liftAmount = (1.0 - distToLiftWave) * sin(distToLiftWave * 3.14159);
+    //     center.y += liftAmount * uOscillationIntensity * 0.9;
+    // }
 }
 
 void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
@@ -112,17 +112,17 @@ void modifyColor(vec3 center, inout vec4 color) {
     if (g_dist > uEndRadius) return;
     
     // Lift wave tint takes priority (active during lift)
-    if (g_liftTime > 0.0 && g_dist >= g_liftWavePos - 1.5 && g_dist <= g_liftWavePos + 0.5) {
-        float distToLift = abs(g_dist - g_liftWavePos);
-        float liftIntensity = smoothstep(1.5, 0.0, distToLift);
-        color.rgb += uWaveTint * liftIntensity;
-    }
+    // if (g_liftTime > 0.0 && g_dist >= g_liftWavePos - 1.5 && g_dist <= g_liftWavePos + 0.5) {
+    //     float distToLift = abs(g_dist - g_liftWavePos);
+    //     float liftIntensity = smoothstep(1.5, 0.0, distToLift);
+    //     color.rgb += uWaveTint * liftIntensity;
+    // }
     // Dot wave tint (active in dot phase, but not where lift wave is active)
-    else if (g_dist <= g_dotWavePos && (g_liftTime <= 0.0 || g_dist > g_liftWavePos + 0.5)) {
-        float distToDot = abs(g_dist - g_dotWavePos);
-        float dotIntensity = smoothstep(1.0, 0.0, distToDot);
-        color.rgb += uDotTint * dotIntensity;
-    }
+    // else if (g_dist <= g_dotWavePos && (g_liftTime <= 0.0 || g_dist > g_liftWavePos + 0.5)) {
+    //     float distToDot = abs(g_dist - g_dotWavePos);
+    //     float dotIntensity = smoothstep(1.0, 0.0, distToDot);
+    //     color.rgb += uDotTint * dotIntensity;
+    // }
 }
 `;
 
@@ -165,20 +165,20 @@ fn modifyCenter(center: ptr<function, vec3f>) {
     
     // Only apply oscillation if lift wave hasn't fully passed
     let wavesActive = g_liftTime <= 0.0 || g_dist > g_liftWavePos - 1.5;
-    if (wavesActive) {
-        // Apply oscillation with per-splat phase offset
-        let phase = hash(*center) * 6.28318;
-        (*center).y += sin(uniform.uTime * 3.0 + phase) * uniform.uOscillationIntensity * 0.25;
-    }
+    // if (wavesActive) {
+    //     // Apply oscillation with per-splat phase offset
+    //     let phase = hash(*center) * 6.28318;
+    //     (*center).y += sin(uniform.uTime * 3.0 + phase) * uniform.uOscillationIntensity * 0.25;
+    // }
     
     // Apply lift effect near the wave edge
     let distToLiftWave = abs(g_dist - g_liftWavePos);
-    if (distToLiftWave < 1.0 && g_liftTime > 0.0) {
-        // Create a smooth lift curve (peaks at wave edge)
-        // Lift is 0.9x the oscillation intensity (30% of original 3x)
-        let liftAmount = (1.0 - distToLiftWave) * sin(distToLiftWave * 3.14159);
-        (*center).y += liftAmount * uniform.uOscillationIntensity * 0.9;
-    }
+    // if (distToLiftWave < 1.0 && g_liftTime > 0.0) {
+    //     // Create a smooth lift curve (peaks at wave edge)
+    //     // Lift is 0.9x the oscillation intensity (30% of original 3x)
+    //     let liftAmount = (1.0 - distToLiftWave) * sin(distToLiftWave * 3.14159);
+    //     (*center).y += liftAmount * uniform.uOscillationIntensity * 0.9;
+    // }
 }
 
 fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<function, vec3f>, covB: ptr<function, vec3f>) {
@@ -243,17 +243,17 @@ fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
     }
     
     // Lift wave tint takes priority (active during lift)
-    if (g_liftTime > 0.0 && g_dist >= g_liftWavePos - 1.5 && g_dist <= g_liftWavePos + 0.5) {
-        let distToLift = abs(g_dist - g_liftWavePos);
-        let liftIntensity = smoothstep(1.5, 0.0, distToLift);
-        (*color) = vec4f((*color).rgb + uniform.uWaveTint * liftIntensity, (*color).a);
-    }
+    // if (g_liftTime > 0.0 && g_dist >= g_liftWavePos - 1.5 && g_dist <= g_liftWavePos + 0.5) {
+    //     let distToLift = abs(g_dist - g_liftWavePos);
+    //     let liftIntensity = smoothstep(1.5, 0.0, distToLift);
+    //     (*color) = vec4f((*color).rgb + uniform.uWaveTint * liftIntensity, (*color).a);
+    // }
     // Dot wave tint (active in dot phase, but not where lift wave is active)
-    else if (g_dist <= g_dotWavePos && (g_liftTime <= 0.0 || g_dist > g_liftWavePos + 0.5)) {
-        let distToDot = abs(g_dist - g_dotWavePos);
-        let dotIntensity = smoothstep(1.0, 0.0, distToDot);
-        (*color) = vec4f((*color).rgb + uniform.uDotTint * dotIntensity, (*color).a);
-    }
+    // else if (g_dist <= g_dotWavePos && (g_liftTime <= 0.0 || g_dist > g_liftWavePos + 0.5)) {
+    //     let distToDot = abs(g_dist - g_dotWavePos);
+    //     let dotIntensity = smoothstep(1.0, 0.0, distToDot);
+    //     (*color) = vec4f((*color).rgb + uniform.uDotTint * dotIntensity, (*color).a);
+    // }
 }
 `;
 
