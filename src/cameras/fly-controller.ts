@@ -76,21 +76,11 @@ class FlyController implements CameraController {
             1
         );
         
-        // For roll, use target directly (no damping) for instant response
-        // This prevents any delay or "bounce back" feeling
-        this._pose.angles.z = this._targetPose.angles.z;
-        
         // Update camera
         camera.position.copy(this._pose.position);
         camera.angles.copy(this._pose.angles);
         camera.distance = this._pose.distance;
-        
-        // Debug: Show roll angle in console title
-        if (typeof document !== 'undefined' && Math.abs(camera.angles.z) > 0.1) {
-            document.title = `Roll: ${camera.angles.z.toFixed(1)}°`;
-        } else if (typeof document !== 'undefined') {
-            document.title = 'SuperSplat Viewer';
-        }
+
     }
 
     onExit(_camera: Camera): void {

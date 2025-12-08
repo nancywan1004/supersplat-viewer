@@ -3,7 +3,7 @@ import {
     CameraFrame,
     type CameraComponent,
     Color,
-    type Entity,
+    Entity,
     type Layer,
     RenderTarget,
     Mat4,
@@ -245,11 +245,27 @@ class Viewer {
             }
         });
 
+        // Create roll container entity if it doesn't exist
+        // This allows roll to be applied independently of pitch/yaw
+        let rollContainer = camera.parent;
+        if (!rollContainer || rollContainer === app.root) {
+            rollContainer = new Entity('rollContainer');
+            app.root.addChild(rollContainer);
+            rollContainer.addChild(camera);
+        }
+
         const applyCamera = (camera: Camera) => {
             const cameraEntity = global.camera;
 
-            cameraEntity.setPosition(camera.position);
-            cameraEntity.setEulerAngles(camera.angles);
+            // Apply position and pitch/yaw to the roll container
+            // This keeps pitch/yaw separate from roll
+            rollContainer.setPosition(camera.position);
+            rollContainer.setEulerAngles(camera.angles.x, camera.angles.y, 0);
+            
+            // Apply roll to the camera entity (child of rollContainer)
+            // Roll rotates around the local Z-axis (forward direction)
+            cameraEntity.setLocalEulerAngles(0, 0, camera.angles.z);
+            
             cameraEntity.camera.fov = camera.fov;
 
             // fit clipping planes to bounding box
