@@ -12,6 +12,7 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import dts from 'rollup-plugin-dts';
+import crypto from 'crypto';
 
 // 判断是否需要生成完整 package
 const isPackageBuild = process.env.BUILD_PACKAGE === 'true';
@@ -50,7 +51,7 @@ const packagePlugin = () => ({
   },
 });
 
-// --- CSS 构建 ---
+// --- CSS 构建（public 目录，不使用 hash） ---
 const buildCss = {
     input: 'src/index.scss',
     output: {
@@ -71,7 +72,7 @@ const buildCss = {
     ]
 };
 
-// --- Public 构建 ---
+// --- Public 构建（本地开发预览，不使用 hash） ---
 const buildPublic = {
     input: 'src/index.ts',
     output: {
@@ -106,21 +107,89 @@ const buildTypes = {
   plugins: [dts()]
 };
 
+// 插件：为 dist 生成带 hash 的文件并清理旧文件
+const distHashPlugin = () => {
+  let distJsFileName = '';
+  let distCssFileName = '';
+  
+  return {
+    name: 'dist-hash',
+    generateBundle(options, bundle) {
+      // 获取生成的 JS 文件名（带 hash）
+      const jsFile = Object.keys(bundle).find(name => name.endsWith('.js') && !name.endsWith('.map') && name.includes('.'));
+      if (jsFile) {
+        distJsFileName = jsFile;
+      }
+    },
+    writeBundle() {
+      // 删除不带 hash 的 JS 文件
+      const filesToRemove = [
+        'dist/index.js',
+        'dist/index.js.map',
+        'dist/index.min.js'
+      ];
+      
+      filesToRemove.forEach(file => {
+        if (fs.existsSync(file)) {
+          fs.unlinkSync(file);
+          console.log(`🗑️  已删除: ${file}`);
+        }
+      });
+
+      // 处理 CSS：从 public 复制并生成 hash
+      const publicCssPath = 'public/index.css';
+      if (fs.existsSync(publicCssPath)) {
+        const cssContent = fs.readFileSync(publicCssPath, 'utf-8');
+        const hash = crypto.createHash('md5').update(cssContent).digest('hex').slice(0, 8);
+        distCssFileName = `index.${hash}.css`;
+        const distCssPath = `dist/${distCssFileName}`;
+        
+        // 复制 CSS 到 dist 并重命名
+        fs.writeFileSync(distCssPath, cssContent);
+        console.log(`✅ 已生成 dist CSS: ${distCssFileName}`);
+        
+        // 删除旧的 index.css
+        if (fs.existsSync('dist/index.css')) {
+          fs.unlinkSync('dist/index.css');
+          console.log(`🗑️  已删除: dist/index.css`);
+        }
+      }
+
+      // 更新 dist/index.html
+      const htmlPath = 'dist/index.html';
+      
+      if (fs.existsSync(htmlPath)) {
+        let html = fs.readFileSync(htmlPath, 'utf-8');
+        
+        // 更新 JS 引用
+        if (distJsFileName) {
+          html = html.replace(/from ['"]\.\/index\.js['"]/g, `from './${distJsFileName}'`);
+          console.log(`✅ 已更新 dist/index.html JS 引用: ${distJsFileName}`);
+        }
+        
+        // 更新 CSS 引用
+        if (distCssFileName) {
+          html = html.replace(/href=['"]\.\/index\.css['"]/g, `href='./${distCssFileName}'`);
+          console.log(`✅ 已更新 dist/index.html CSS 引用: ${distCssFileName}`);
+        }
+        
+        fs.writeFileSync(htmlPath, html);
+      }
+    }
+  };
+};
+
 // --- Dist 构建（模块发布用 - 完整导出版本） ---
 const buildDist = {
   input: input,
   external: ['playcanvas'],
   output: [
+    // 只生成带 hash 的版本
     {
-      file: 'dist/index.js',
+      dir: 'dist',
       format: 'esm',
       sourcemap: true,
-    },
-    {
-      file: 'dist/index.min.js',
-      format: 'esm',
-      sourcemap: false,
-      plugins: [terser()],
+      entryFileNames: 'index.[hash].js',
     }
   ],
   plugins: [
@@ -139,10 +208,10 @@ const buildDist = {
           transform: (contents) =>
             contents.toString().replace('<base href="">', `<base href="${process.env.BASE_HREF ?? ''}">`)
         },
-        { src: 'settings.json', dest: 'dist'},
-        { src: 'public/index.css', dest: 'dist' }
+        { src: 'settings.json', dest: 'dist'}
       ]
     }),
+    distHashPlugin(),
     packagePlugin(),
   ],
 };
