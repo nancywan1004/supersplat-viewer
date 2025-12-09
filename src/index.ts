@@ -88,63 +88,46 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
         const asset = await loadGsplatAsset(app, assetSource);
         progressCallback(90);
         
-        // 创建实体 - .splat 格式的 asset 已经加载完成并触发了 load 事件
-        // 但我们需要确保实体创建在 load 事件之后
-        return new Promise<Entity>((resolve, reject) => {
-            // 如果 asset 已经加载完成，直接创建实体
-            if (asset.loaded) {
-                const entity = new Entity('gsplat');
-                entity.setLocalEulerAngles(0, 0, 180);
-                entity.addComponent('gsplat', {
-                    unified: unified || shouldEnableLod,
-                    asset
-                });
-                // don't support AA in unified mode yet
-                if (aa && !entity.gsplat.unified) {
-                    entity.gsplat.material.setDefine('GSPLAT_AA', true);
-                }
-                app.root.addChild(entity);
-
-                if (shouldEnableLod && lodLoader) {
-                    const gsplatComponent = entity.gsplat;
-                    if (gsplatComponent) {
-                        lodLoader.applyLodPreset(gsplatComponent);
-                    }
-                }
-
-                progressCallback(100);
-                resolve(entity);
-            } else {
-                // 如果还未加载完成，等待 load 事件
-                asset.once('load', () => {
-                    const entity = new Entity('gsplat');
-                    entity.setLocalEulerAngles(0, 0, 180);
-                    entity.addComponent('gsplat', {
-                        unified: unified || shouldEnableLod,
-                        asset
-                    });
-                    // don't support AA in unified mode yet
-                    if (aa && !entity.gsplat.unified) {
-                        entity.gsplat.material.setDefine('GSPLAT_AA', true);
-                    }
-                    app.root.addChild(entity);
-
-                    if (shouldEnableLod && lodLoader) {
-                        const gsplatComponent = entity.gsplat;
-                        if (gsplatComponent) {
-                            lodLoader.applyLodPreset(gsplatComponent);
-                        }
-                    }
-
-                    progressCallback(100);
-                    resolve(entity);
-                });
-
-                asset.on('error', (err) => {
-                    console.log(err);
-                    reject(err);
-                });
+        // 创建实体的辅助函数
+        const createEntity = () => {
+            const entity = new Entity('gsplat');
+            entity.setLocalEulerAngles(0, 0, 180);
+            entity.addComponent('gsplat', {
+                unified: unified || shouldEnableLod,
+                asset
+            });
+            // don't support AA in unified mode yet
+            if (aa && !entity.gsplat.unified) {
+                entity.gsplat.material.setDefine('GSPLAT_AA', true);
             }
+            app.root.addChild(entity);
+
+            if (shouldEnableLod && lodLoader) {
+                const gsplatComponent = entity.gsplat;
+                if (gsplatComponent) {
+                    lodLoader.applyLodPreset(gsplatComponent);
+                }
+            }
+
+            progressCallback(100);
+            return entity;
+        };
+        
+        // 如果 asset 已经加载完成，直接创建实体
+        if (asset.loaded) {
+            return createEntity();
+        }
+        
+        // 否则等待 load 事件
+        return new Promise<Entity>((resolve, reject) => {
+            asset.once('load', () => {
+                resolve(createEntity());
+            });
+
+            asset.on('error', (err) => {
+                console.log(err);
+                reject(err);
+            });
         });
     } else {
         // 对于其他格式，使用原始代码的方式
