@@ -182,7 +182,12 @@ class Viewer {
 
         // handle HQ mode changes
         const updateHqMode = () => {
-            graphicsDevice.maxPixelRatio = state.hqMode ? window.devicePixelRatio : 1;
+            // keep resolution under 4k on desktop and HD on mobile
+            const maxRatio = (platform.mobile ? 1920 : 3024) / Math.max(screen.width, screen.height);
+
+            // half pixel resolution with hq mode disabled
+            graphicsDevice.maxPixelRatio = (state.hqMode ? 1.0 : 0.5) * Math.min(maxRatio, window.devicePixelRatio);
+
             app.renderNextFrame = true;
         };
         events.on('hqMode:changed', updateHqMode);
@@ -373,13 +378,36 @@ class Viewer {
 
                 const { gsplat } = app.scene;
 
-                // lod ranges
-                const low = [2, 5];
-                const high = [0, 2];
+                // quality ranges
+                const ranges = {
+                    mobile: {
+                        low: {
+                            range: [2, 8],
+                            splatBudget: 1
+                        },
+                        high: {
+                            range: [1, 8],
+                            splatBudget: 2
+                        }
+                    },
+                    desktop: {
+                        low: {
+                            range: [1, 8],
+                            splatBudget: 3
+                        },
+                        high: {
+                            range: [0, 8],
+                            splatBudget: 6
+                        }
+                    }
+                };
 
-                // in unified mode, for now we hard-code LOD range on mobile vs desktop
-                gsplat.lodRangeMin = low[0];
-                gsplat.lodRangeMax = low[1];
+                const quality = platform.mobile ? ranges.mobile : ranges.desktop;
+
+                // start in low quality mode so we can get user interacting asap
+                gsplat.lodRangeMin = quality.low.range[0];
+                gsplat.lodRangeMax = quality.low.range[1];
+                results[0].gsplat.splatBudget = quality.low.splatBudget * 1000000;
 
                 // these two allow LOD behind camera to drop, saves lots of splats
                 gsplat.lodUpdateAngle = 90;
@@ -390,23 +418,30 @@ class Viewer {
 
                 const eventHandler = app.systems.gsplat;
 
-                // force render empty frames otherwise unified rendering doesn't update
+                // we must force continuous rendering with streaming & lod system
                 this.forceRenderNextFrame = true;
 
                 let current = 0;
                 let watermark = 1;
                 const readyHandler = (camera: CameraComponent, layer: Layer, ready: boolean, loading: number) => {
-                    if (ready && !loading) {
+                    if (ready && loading === 0) {
                         // scene is done loading
-
                         eventHandler.off('frame:ready', readyHandler);
 
-                        this.forceRenderNextFrame = false;
                         state.readyToRender = true;
 
-                        const range = platform.mobile ? low : high;
-                        gsplat.lodRangeMin = range[0];
-                        gsplat.lodRangeMax = range[1];
+                        // handle quality mode changes
+                        const updateLod = () => {
+                            const settings = state.hqMode ? quality.high : quality.low;
+                            gsplat.lodRangeMin = settings.range[0];
+                            gsplat.lodRangeMax = settings.range[1];
+                            results[0].gsplat.splatBudget = settings.splatBudget * 1000000;
+                        };
+                        events.on('hqMode:changed', updateLod);
+                        updateLod();
+
+                        // debug colorize lods
+                        gsplat.colorizeLod = config.colorize;
 
                         // wait for the first valid frame to complete rendering
                         app.once('frameend', () => {
@@ -417,10 +452,6 @@ class Viewer {
                         });
                     }
 
-                    if (ready) {
-                        app.renderNextFrame = true;
-                    }
-
                     // update loading status
                     if (loading !== current) {
                         watermark = Math.max(watermark, loading);
@@ -428,7 +459,6 @@ class Viewer {
                         state.progress = Math.trunc(current / watermark * 100);
                     }
                 };
-
                 eventHandler.on('frame:ready', readyHandler);
             }
         });
