@@ -69,6 +69,14 @@ const initPostMessageBridge = (global: Global) => {
             }, '*');
         }
     });
+
+    // 监听viewer初始化完成事件，通知iframe调用侧
+    events.on('firstFrame', () => {
+        window.parent.postMessage({
+            type: 'VIEWER_READY',
+            message: 'viewer initialized and ready'
+        }, '*');
+    });
 };
 
 export { initPostMessageBridge };
