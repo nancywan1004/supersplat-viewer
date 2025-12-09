@@ -465,23 +465,41 @@ class InputController {
 
         // mobile rotate
         v.set(0, 0, 0);
-        orbitRotate.set(touch[0], touch[1], 0);
-        v.add(orbitRotate.mulScalar(orbit * (1 - pan) * this.orbitSpeed * dt));
+        
+        // Check if two-finger gesture is in rotate mode
+        const isTwoFingerRotate = this._mobileFlyInput && this._mobileFlyInput.getTwoFingerGestureMode() === 'rotate';
+        
+        // Auto-switch to fly mode when rotate gesture is detected
+        if (isTwoFingerRotate && state.cameraMode === 'orbit') {
+            state.cameraMode = 'fly';
+            console.log('🔄 Auto-switched to Fly mode (rotate gesture detected)');
+        }
+        
+        // Only apply orbit rotate and pan if NOT in two-finger rotate mode
+        if (!isTwoFingerRotate) {
+            orbitRotate.set(touch[0], touch[1], 0);
+            v.add(orbitRotate.mulScalar(orbit * (1 - pan) * this.orbitSpeed * dt));
+        }
         
         // Fly mode: use custom mobile fly input for look around
         // Also works on desktop for debugging
         if (this._mobileFlyInput) {
-            const { lookInput } = this._mobileFlyInput;
+            const { lookInput, rollInput } = this._mobileFlyInput;
             flyRotate.set(lookInput.x, lookInput.y, 0);
             v.add(flyRotate.mulScalar(fly * this.orbitSpeed * orbitFactor * dt * 0.8)); // Increased for more responsive control
+            
+            // Add two-finger rotation roll control (works in fly mode)
+            // Convert angle delta to roll speed
+            const rollSensitivity = 2.5; // Adjust sensitivity as needed
+            v.z += rollInput * fly * rollSensitivity;
         } else {
             // Fallback to DualGestureSource only if MobileFlyInput is not available
             flyRotate.set(rightInput[0], rightInput[1], 0);
             v.add(flyRotate.mulScalar(fly * this.orbitSpeed * orbitFactor * dt));
         }
         // Only append if there's actual mobile input (don't override desktop roll with 0)
-        if (v.x !== 0 || v.y !== 0) {
-            deltas.rotate.append([v.x, v.y, 0]); // Mobile doesn't have roll control
+        if (v.x !== 0 || v.y !== 0 || v.z !== 0) {
+            deltas.rotate.append([v.x, v.y, v.z]); // Now includes roll control from two-finger rotation
         }
 
         // gamepad move
