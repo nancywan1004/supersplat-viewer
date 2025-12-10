@@ -137,7 +137,7 @@ class InputController {
         // Scale move speed proportionally to scene size
         // Base speed of 10 for a scene size of ~10 units
         // Reduced coefficient from 0.5 to 0.2 for slower, more controlled fly movement
-        this.moveSpeed = Math.max(1, sceneSize * 0.2);
+        this.moveSpeed = Math.max(1, sceneSize * 0.1);
         
         // Set minimum pan distance to ensure smooth panning even when zoomed in
         // Use 10% of scene size as minimum, with a floor of 1
