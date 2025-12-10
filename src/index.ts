@@ -248,9 +248,15 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         showCameraPath: false
     });
 
+    // 如果设置了 noreveal 参数，清除 reveal effect 配置
+    const processedSettings = importSettings(settingsJson);
+    if (config.noreveal) {
+        processedSettings.revealEffect = undefined;
+    }
+
     const global: Global = {
         app,
-        settings: importSettings(settingsJson),
+        settings: processedSettings,
         config,
         state,
         events,

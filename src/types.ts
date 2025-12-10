@@ -22,6 +22,7 @@ type Config = {
     colorize: boolean;                          // render with LOD colorization
     unified: boolean;                           // force unified rendering mode
     aa: boolean;                                // render with antialiasing
+    noreveal: boolean;                          // disable reveal effect transition animation
     showCameraPathVisualizer?: boolean;         // show camera path visualization
 };
 
