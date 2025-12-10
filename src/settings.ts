@@ -204,7 +204,7 @@ const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
     const initialFov = initialFovs[1] // vertical fov
     
     // Build keyframes from all transforms
-    const frameRate = 30;
+    const frameRate = 15;
     const times: number[] = [];
     const positions: number[] = [];
     const targets: number[] = [];
