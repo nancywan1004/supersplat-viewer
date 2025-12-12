@@ -490,7 +490,7 @@ class InputController {
             
             // Add two-finger rotation roll control (works in fly mode)
             // Convert angle delta to roll speed
-            const rollSensitivity = 2.5; // Adjust sensitivity as needed
+            const rollSensitivity = 3; // Adjust sensitivity as needed
             v.z += rollInput * fly * rollSensitivity;
         } else {
             // Fallback to DualGestureSource only if MobileFlyInput is not available
