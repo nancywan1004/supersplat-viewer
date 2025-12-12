@@ -16,6 +16,10 @@ type PostMessagePayload =
         value: string;
     }
     | {
+        type: 'ANIMATION_RESET';
+        message?: string;
+    }
+    | {
         type: 'ANIMATION_PLAY_PAUSE';
         message?: string;
     };
@@ -46,6 +50,9 @@ const initPostMessageBridge = (global: Global) => {
             } else {
                 console.warn('[SuperSplat] SKYBOX_SWITCH 需要字符串 URL');
             }
+            break;
+        case 'ANIMATION_RESET':
+            events.fire('inputEvent', 'resetAnim');
             break;
         case 'ANIMATION_PLAY_PAUSE':
             events.fire('inputEvent', 'playPause');

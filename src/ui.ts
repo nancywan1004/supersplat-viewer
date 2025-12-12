@@ -460,7 +460,7 @@ const initUI = (global: Global) => {
     });
 
     dom.reset.addEventListener('click', (event) => {
-        events.fire('inputEvent', 'reset', event);
+        events.fire('inputEvent', 'resetAnim', event);
     });
 
     dom.frame.addEventListener('click', (event) => {
