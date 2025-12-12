@@ -36,11 +36,13 @@ const normalizeKeyframes = (keyframes: LegacyKeyframes | KeyFrameItem[]): Legacy
         times.push(timeValue);
 
         if (Array.isArray(frame.position) && frame.position.length === 3) {
-            positions.push(frame.position[0], frame.position[1], frame.position[2]);
+            // Flip X and Y axes to match coordinate system
+            positions.push(-frame.position[0], -frame.position[1], frame.position[2]);
         }
 
         if (Array.isArray(frame.target) && frame.target.length === 3) {
-            targets.push(frame.target[0], frame.target[1], frame.target[2]);
+            // Flip X and Y axes to match coordinate system
+            targets.push(-frame.target[0], -frame.target[1], frame.target[2]);
         }
     });
 
