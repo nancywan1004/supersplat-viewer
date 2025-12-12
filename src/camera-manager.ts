@@ -177,6 +177,19 @@ class CameraManager {
                         }
                     }
                     break;
+                case 'resetAnim':
+                    if (state.hasAnimation && controllers.anim) {
+                        state.cameraMode = 'anim';
+                        state.animationPaused = false;
+                        // 重置动画光标到初始位置（时间0）
+                        controllers.anim.animState.cursor.value = 0;
+                        controllers.anim.animState.cursor.timer = 0;
+                        // 更新动画状态以应用初始相机位置
+                        controllers.anim.animState.update(0);
+                        // 确保相机使用动画的初始位置
+                        controllers.anim.onEnter(this.camera);
+                    }
+                    break;
                 case 'cancel':
                 case 'interrupt':
                     if (state.cameraMode === 'anim') {
