@@ -10,6 +10,8 @@ import {
     version as engineVersion
 } from 'playcanvas';
 
+import { applySkyboxSphere, removeSkyboxSphere, applySkyboxTexture } from './loaders/skybox-loader';
+
 import { observe } from './core/observe';
 import { importSettings } from './settings';
 import type { Config, Global } from './types';
@@ -179,54 +181,6 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
     }
 };
 
-const loadSkybox = (app: AppBase, url: string) => {
-    return new Promise<Asset>((resolve, reject) => {
-        const asset = new Asset('skybox', 'texture', {
-            url
-        }, {
-            type: 'rgbp',
-            mipmaps: false,
-            addressu: 'repeat',
-            addressv: 'clamp'
-        });
-
-        asset.on('load', () => {
-            resolve(asset);
-        });
-
-        asset.on('error', (err) => {
-            console.log(err);
-            reject(err);
-        });
-
-        app.assets.add(asset);
-        app.assets.load(asset);
-    });
-};
-
-const skyboxTextureCache = new Map<string, Texture>();
-
-const applySkyboxTexture = async (app: AppBase, url: string) => {
-    const trimmedUrl = url?.trim();
-    if (!trimmedUrl) {
-        console.warn('[SuperSplat] SKYBOX_SWITCH 缺少有效的 URL');
-        return;
-    }
-
-    const cachedTexture = skyboxTextureCache.get(trimmedUrl);
-    if (cachedTexture) {
-        app.scene.envAtlas = cachedTexture;
-        app.renderNextFrame = true;
-        return;
-    }
-
-    const asset = await loadSkybox(app, trimmedUrl);
-    const texture = asset.resource as Texture;
-    skyboxTextureCache.set(trimmedUrl, texture);
-    app.scene.envAtlas = texture;
-    app.renderNextFrame = true;
-};
-
 const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) => {
     const events = new EventHandler();
 
@@ -292,7 +246,8 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
     );
 
     // Load skybox
-    const skyboxLoad = config.skyboxUrl && applySkyboxTexture(app, config.skyboxUrl);
+    //const skyboxLoad = config.skyboxUrl && applySkyboxTexture(app, config.skyboxUrl);
+    const skyboxLoad = config.skyboxUrl ? applySkyboxSphere(app, config.skyboxUrl).then(() => {}) : Promise.resolve();
 
     if (skyboxLoad) {
         skyboxLoad.then(() => {
@@ -304,6 +259,8 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
 
     events.on('skyboxSwitch', async (url?: string | null) => {
         if (!url) {
+            // 移除所有天空盒实体
+            removeSkyboxSphere(app);
             app.scene.envAtlas = null;
             app.renderNextFrame = true;
             events.fire('skyboxSelectionSynced', '');
@@ -311,7 +268,12 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         }
 
         try {
-            await applySkyboxTexture(app, url);
+            // 切换天空盒时，先移除旧的 sphere 实体（如果有不同 URL 的）
+            // 注意：applySkyboxSphere 内部会处理相同 URL 的复用，所以这里可以不移除
+            // 但如果需要确保只有一个天空盒，可以在这里移除所有旧的
+            removeSkyboxSphere(app); // 可选：确保只有一个天空盒
+            //await applySkyboxTexture(app, url);
+            await applySkyboxSphere(app, url);
             events.fire('skyboxSelectionSynced', url);
         } catch (err) {
             console.warn('[SuperSplat] 切换天空盒失败：', err);

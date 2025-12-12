@@ -33,6 +33,7 @@ import type { ExperienceSettings, PostEffectSettings } from './settings';
 import type { Global } from './types';
 import { RevealController } from './reveal';
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
+import { getSkyboxRadius } from './loaders/skybox-loader';
 
 // override global pick to pack depth instead of meshInstance id
 const pickDepthGlsl = /* glsl */ `
@@ -280,7 +281,19 @@ class Viewer {
             vec.sub2(sceneBound.center, camera.position);
             const dist = vec.dot(cameraEntity.forward);
 
-            const far = Math.max(dist + boundRadius, 1e-2);
+            // 计算基础 far clip（基于 bounding box）
+            let far = Math.max(dist + boundRadius, 1e-2);
+            
+            // 获取天空盒的实际半径，如果存在天空盒，确保 farClip 足够大以包含它
+            const skyboxRadius = getSkyboxRadius(app, config.skyboxUrl);
+            if (skyboxRadius > 0) {
+                // 使用固定的天空盒半径，计算相机到天空盒边缘的最大距离
+                // 假设天空盒中心在原点 (0, 0, 0)，计算相机到原点的距离 + 半径
+                const distToOrigin = camera.position.length();
+                const requiredFar = distToOrigin + skyboxRadius;
+                far = Math.max(far, requiredFar);
+            }
+            
             const near = Math.max(dist - boundRadius, far / (1024 * 16));
 
             cameraEntity.camera.farClip = far;
