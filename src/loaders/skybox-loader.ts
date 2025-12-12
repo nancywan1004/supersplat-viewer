@@ -6,7 +6,7 @@ const skyboxEntityCache = new Map<string, Entity>();
 export interface SkyboxOptions {
     /** 中心点位置，默认为 (0, 0, 0) */
     center?: Vec3 | [number, number, number];
-    /** 半径，默认为 5000 */
+    /** 半径，默认为 1000 */
     radius?: number;
     /** 旋转角度（欧拉角，单位：度），默认为 (0, 0, 0) */
     rotation?: Vec3 | [number, number, number];
@@ -30,7 +30,7 @@ const applySkyboxSphere = async (
     const center = options.center instanceof Vec3 
         ? options.center 
         : new Vec3(...(options.center || [0, 0, 0]));
-    const radius = options.radius ?? 5000; // 默认半径 5000
+    const radius = options.radius ?? 1000; // 默认半径 1000
     
     const rotation = options.rotation instanceof Vec3
         ? options.rotation
