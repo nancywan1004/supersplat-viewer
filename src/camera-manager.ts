@@ -15,7 +15,6 @@ import { OrbitController } from './cameras/orbit-controller';
 import { easeOut, smootherStep } from './core/math';
 import { Annotation } from './settings';
 import { CameraMode, Global } from './types';
-import { getSkyboxRadius } from './loaders/skybox-loader';
 
 const tmpCamera = new Camera();
 const tmpv = new Vec3();
@@ -43,8 +42,26 @@ class CameraManager {
     // holds the camera state
     camera = new Camera();
 
+    // visual marker for picked point
+    private pickMarker: Entity | null = null;
+
     constructor(global: Global, bbox: BoundingBox) {
         const { events, settings, state, config, app } = global;
+
+        // // Create a visual marker for picked points
+        // const markerMaterial = new StandardMaterial();
+        // markerMaterial.diffuse = new Color(1, 0, 0); // Red
+        // markerMaterial.emissive = new Color(0.5, 0, 0); // Glowing red
+        // markerMaterial.update();
+
+        // this.pickMarker = new Entity('pickMarker');
+        // this.pickMarker.addComponent('render', {
+        //     type: 'sphere',
+        //     material: markerMaterial
+        // });
+        // this.pickMarker.setLocalScale(0.3, 0.3, 0.3);
+        // this.pickMarker.enabled = false;
+        // app.root.addChild(this.pickMarker);
 
         const camera0 = settings.cameras[0].initial;
         const frameCamera = createFrameCamera(bbox, camera0.fov);
@@ -69,77 +86,11 @@ class CameraManager {
         const isObjectExperience = !bbox.containsPoint(resetCamera.position);
         const animTrack = getAnimTrack(settings.hasStartPose ? resetCamera : frameCamera, isObjectExperience);
 
-        // 计算相机移动范围限制
-        // 天空盒半径的0.25倍（可调整比例）
-        const skyboxRadiusRatio = 0.25; // 可调整的比例
-        
-        // 尝试获取天空盒半径
-        // 首先尝试使用 config.skyboxUrl（如果存在）
-        const skyboxUrl = config.skyboxUrl?.trim();
-        let skyboxRadius = 0;
-        
-        if (skyboxUrl) {
-            // 如果有 URL，先尝试用 URL 查找
-            skyboxRadius = getSkyboxRadius(app, skyboxUrl);
-        }
-        
-        // 如果没找到，尝试不传 URL 来查找任何已存在的天空盒
-        if (skyboxRadius === 0) {
-            skyboxRadius = getSkyboxRadius(app);
-        }
-        
-        const skyboxLimit = skyboxRadius > 0 ? skyboxRadius * skyboxRadiusRatio : Infinity;
-        console.log('CameraManager: skyboxRadius =', skyboxRadius, 'skyboxUrl =', skyboxUrl, 'skyboxLimit =', skyboxLimit);
-        
-        // 场景包围盒的0.5倍
-        const sceneBboxRadius = bbox.halfExtents.length();
-        const sceneBboxLimit = sceneBboxRadius * 0.5;
-        console.log('CameraManager: sceneBboxLimit =', sceneBboxLimit);
-        
-        // 取两者中的较小值作为最大移动半径
-        const maxMoveRadius = Math.min(skyboxLimit, sceneBboxLimit);
-        const moveLimitCenter = bbox.center; // 限制中心点使用场景包围盒中心
-
         const controllers = {
             orbit: new OrbitController(),
             fly: new FlyController(),
             anim: animTrack ? new AnimController(animTrack) : null
         };
-
-        // 设置移动范围限制
-        if (maxMoveRadius < Infinity) {
-            controllers.orbit.setMoveLimit(moveLimitCenter, maxMoveRadius);
-            controllers.fly.setMoveLimit(moveLimitCenter, maxMoveRadius);
-        }
-
-        // 如果天空盒还没加载，监听天空盒加载完成事件来更新限制
-        if (skyboxRadius === 0) {
-            events.once('skyboxSelectionSynced', (syncedUrl?: string) => {
-                // 天空盒加载完成，重新获取半径并更新限制
-                // 优先使用 syncedUrl（如果提供），否则使用原来的 skyboxUrl，最后尝试查找任何天空盒
-                let newSkyboxRadius = 0;
-                if (syncedUrl) {
-                    newSkyboxRadius = getSkyboxRadius(app, syncedUrl.trim());
-                }
-                if (newSkyboxRadius === 0 && skyboxUrl) {
-                    newSkyboxRadius = getSkyboxRadius(app, skyboxUrl);
-                }
-                if (newSkyboxRadius === 0) {
-                    newSkyboxRadius = getSkyboxRadius(app);
-                }
-                
-                if (newSkyboxRadius > 0) {
-                    const newSkyboxLimit = newSkyboxRadius * skyboxRadiusRatio;
-                    const newMaxMoveRadius = Math.min(newSkyboxLimit, sceneBboxLimit);
-                    
-                    if (newMaxMoveRadius < Infinity) {
-                        controllers.orbit.setMoveLimit(moveLimitCenter, newMaxMoveRadius);
-                        controllers.fly.setMoveLimit(moveLimitCenter, newMaxMoveRadius);
-                        console.log('CameraManager: Updated limits after skybox loaded, newSkyboxRadius =', newSkyboxRadius, 'newMaxMoveRadius =', newMaxMoveRadius);
-                    }
-                }
-            });
-        }
 
         const getController = (cameraMode: 'orbit' | 'anim' | 'fly'): CameraController => {
             return controllers[cameraMode];
