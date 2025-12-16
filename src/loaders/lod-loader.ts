@@ -55,8 +55,7 @@ export class LodLoader {
             focusPoint: global.settings.lodSettings?.focusPoint ?? [0, 0, -1],
             lodUpdateAngle: 90,
             lodBehindPenalty: 5,
-            radialSorting: true,
-            colorizeLod: global.config.colorizeLod
+            radialSorting: true
         };
     }
 
@@ -85,15 +84,13 @@ export class LodLoader {
         gsplatScene.radialSorting = this.config.radialSorting;
         gsplatScene.lodUpdateDistance = this.config.lodUpdateDistance;
         gsplatScene.lodUnderfillLimit = this.config.lodUnderfillLimit;
-        gsplatScene.colorizeLod = this.config.colorizeLod;
 
         console.log('LOD settings initialized:', {
             lodUpdateAngle: gsplatScene.lodUpdateAngle,
             lodBehindPenalty: gsplatScene.lodBehindPenalty,
             radialSorting: gsplatScene.radialSorting,
             lodUpdateDistance: gsplatScene.lodUpdateDistance,
-            lodUnderfillLimit: gsplatScene.lodUnderfillLimit,
-            colorizeLod: gsplatScene.colorizeLod
+            lodUnderfillLimit: gsplatScene.lodUnderfillLimit
         });
     }
 
@@ -116,8 +113,10 @@ export class LodLoader {
         const isHighPerformance = this.detectHighPerformance();
         
         if (isMobileDevice) {
+            console.log('Mobile device detected: ' + isHighPerformance ? 'high performance' : 'low performance');
             return isHighPerformance ? 'mobile-max' : 'mobile';
         } else {
+            console.log('Desktop device detected: ' + isHighPerformance ? 'high performance' : 'low performance');
             return isHighPerformance ? 'desktop-max' : 'desktop';
         }
     }

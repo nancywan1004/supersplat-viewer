@@ -2,6 +2,7 @@ import { EventHandler, Vec3 } from 'playcanvas';
 
 import { Tooltip } from './tooltip';
 import { Global } from './types';
+import { isLodMetaFile } from './loaders/lod-loader';
 
 const v = new Vec3();
 
@@ -50,15 +51,30 @@ const initUI = (global: Global) => {
         return acc;
     }, {});
 
+    // Check if LOD mode is enabled
+    const isLodMode = config.contentUrl ? isLodMetaFile(config.contentUrl) : false;
+    
+    // In LOD mode, optionally hide the progress bar to avoid confusion with dynamic loading
+    // Set this to true to hide progress bar in LOD mode, false to show it with non-regressing progress
+    const hideProgressBarInLodMode = false;
+
     // Handle loading progress updates
-    events.on('progress:changed', (progress) => {
-        dom.loadingText.textContent = `${progress}%`;
-        if (progress < 100) {
-            dom.loadingBar.style.backgroundImage = `linear-gradient(90deg, #F60 0%, #F60 ${progress}%, white ${progress}%, white 100%)`;
-        } else {
-            dom.loadingBar.style.backgroundImage = 'linear-gradient(90deg, #F60 0%, #F60 100%)';
+    if (isLodMode && hideProgressBarInLodMode) {
+        // Hide progress bar in LOD mode
+        const loadingWrap = document.getElementById('loadingWrap');
+        if (loadingWrap) {
+            loadingWrap.classList.add('hidden');
         }
-    });
+    } else {
+        events.on('progress:changed', (progress) => {
+            dom.loadingText.textContent = `${progress}%`;
+            if (progress < 100) {
+                dom.loadingBar.style.backgroundImage = `linear-gradient(90deg, #F60 0%, #F60 ${progress}%, white ${progress}%, white 100%)`;
+            } else {
+                dom.loadingBar.style.backgroundImage = 'linear-gradient(90deg, #F60 0%, #F60 100%)';
+            }
+        });
+    }
 
     // Hide loading bar once first frame is rendered
     events.on('firstFrame', () => {

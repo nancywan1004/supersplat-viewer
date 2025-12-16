@@ -34,6 +34,7 @@ import type { Global } from './types';
 import { RevealController } from './reveal';
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
 import { getSkyboxRadius } from './loaders/skybox-loader';
+import { isLodMetaFile } from './loaders/lod-loader';
 
 // override global pick to pack depth instead of meshInstance id
 const pickDepthGlsl = /* glsl */ `
@@ -434,8 +435,13 @@ class Viewer {
                 // we must force continuous rendering with streaming & lod system
                 this.forceRenderNextFrame = true;
 
+                // Check if LOD mode is enabled
+                const isLodMode = config.contentUrl ? isLodMetaFile(config.contentUrl) : false;
+
                 let current = 0;
                 let watermark = 1;
+                // For LOD mode, track the maximum progress to prevent regression
+                let maxProgress = 0;
                 const readyHandler = (camera: CameraComponent, layer: Layer, ready: boolean, loading: number) => {
                     if (ready && loading === 0) {
                         // scene is done loading
@@ -469,7 +475,15 @@ class Viewer {
                     if (loading !== current) {
                         watermark = Math.max(watermark, loading);
                         current = watermark - loading;
-                        state.progress = Math.trunc(current / watermark * 100);
+                        let progress = Math.trunc(current / watermark * 100);
+                        
+                        // In LOD mode, ensure progress never decreases
+                        if (isLodMode) {
+                            maxProgress = Math.max(maxProgress, progress);
+                            progress = maxProgress;
+                        }
+                        
+                        state.progress = progress;
                     }
                 };
                 eventHandler.on('frame:ready', readyHandler);

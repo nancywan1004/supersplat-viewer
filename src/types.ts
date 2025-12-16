@@ -12,7 +12,6 @@ type Config = {
     skyboxUrl?: string;
     contentUrl?: string;
     contents?: Promise<Response>;
-    colorizeLod?: boolean;
 
     noui: boolean;
     noBottomUI: boolean;                        // hide bottom UI controls, but keep poster and loading bar
