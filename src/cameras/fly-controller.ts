@@ -24,7 +24,7 @@ class FlyController implements CameraController {
     private _targetPose: Pose;
     private _pose: Pose;
     rotateDamping: number = 0.1; // Lower damping for more responsive rotation (was 0.9)
-    moveDamping: number = 0.9;
+    moveDamping: number = 0.5;
     pitchRange: Vec2 = new Vec2(-90, 90);
 
     constructor() {
