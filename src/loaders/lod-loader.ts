@@ -8,19 +8,23 @@ import { LodPreset, LodSettings, LodPlatform } from '../schemas/v2';
 export const LOD_PRESETS: Record<string, LodPreset> = {
     'desktop-max': {
         range: [0, 5],
-        lodDistances: [10, 20, 40, 80, 120, 150, 200]
+        lodDistances: [10, 20, 40, 80, 120, 150, 200],
+        splatBudget: 6
     },
     'desktop': {
         range: [1, 5],
-        lodDistances: [5, 10, 25, 50, 65, 90, 150]
+        lodDistances: [5, 10, 25, 50, 65, 90, 150],
+        splatBudget: 3
     },
     'mobile-max': {
-        range: [2, 5],
-        lodDistances: [5, 7, 12, 25, 75, 120, 200]
+        range: [1, 5],
+        lodDistances: [5, 7, 12, 25, 75, 120, 200],
+        splatBudget: 2
     },
     'mobile': {
-        range: [3, 5],
-        lodDistances: [2, 4, 6, 10, 75, 120, 200]
+        range: [2, 5],
+        lodDistances: [2, 4, 6, 10, 75, 120, 200],
+        splatBudget: 1
     }
 };
 
@@ -160,24 +164,31 @@ export class LodLoader {
 
         const gsplatScene = (this.app.scene as any).gsplat;
         if (gsplatScene) {
+            // Store preset values in scene for later use in viewer.ts
             gsplatScene.lodRangeMin = preset.range[0];
             gsplatScene.lodRangeMax = preset.range[1];
-            console.log('Set LOD range:', preset.range);
+            if (preset.splatBudget !== undefined) {
+                gsplatScene.splatBudget = preset.splatBudget;
+            }
+            console.log('LOD preset stored in scene:', {
+                preset: platform,
+                range: preset.range,
+                splatBudget: preset.splatBudget
+            });
         }
 
-        // Apply LOD distances to the component
+        // Apply only lodDistances to the component (preset-specific, doesn't need viewer.ts handling)
+        // Component-level range, splatBudget will be set in viewer.ts from scene preset values
         const gsplat = gsplatComponent as any;
         console.log('GSplat component:', gsplat);
         
-        if (gsplat && preset.lodDistances) {
-            gsplat.lodDistances = preset.lodDistances;
-            console.log('LOD preset applied:', {
-                preset: this.config.preset,
-                range: preset.range,
-                lodDistances: preset.lodDistances
-            });
+        if (gsplat) {
+            if (preset.lodDistances) {
+                gsplat.lodDistances = preset.lodDistances;
+            }
+            console.log('LOD distances applied:', preset.lodDistances);
         } else {
-            console.warn('Could not apply LOD distances to component');
+            console.warn('Could not apply LOD preset to component');
         }
     }
 }

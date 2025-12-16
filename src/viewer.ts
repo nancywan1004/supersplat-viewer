@@ -392,7 +392,11 @@ class Viewer {
 
                 const { gsplat } = app.scene;
 
-                // quality ranges
+                // Check if custom LOD (lodLoader) is enabled
+                // If not, use default LOD settings (ranges below)
+                const isCustomLod = config.contentUrl ? isLodMetaFile(config.contentUrl) : false;
+
+                // Default quality ranges (used when lodLoader is not enabled)
                 const ranges = {
                     mobile: {
                         low: {
@@ -418,10 +422,30 @@ class Viewer {
 
                 const quality = platform.mobile ? ranges.mobile : ranges.desktop;
 
-                // start in low quality mode so we can get user interacting asap
-                gsplat.lodRangeMin = quality.low.range[0];
-                gsplat.lodRangeMax = quality.low.range[1];
-                results[0].gsplat.splatBudget = quality.low.splatBudget * 1000000;
+                // If using custom LOD (lodLoader), apply component-level parameters from preset stored in scene
+                // Otherwise, use default LOD settings
+                if (isCustomLod) {
+                    const gsplatScene = (app.scene as any).gsplat;
+                    if (gsplatScene && gsplatScene.lodRangeMax !== undefined) {
+                        // Apply splatBudget from preset
+                        if (gsplatScene.splatBudget !== undefined) {
+                            results[0].gsplat.splatBudget = gsplatScene.splatBudget * 1000000;
+                        }
+                        // Force initial load to include lod0, temporarily set range to [0, max]
+                        // The preset range will be restored after initial load completes via updateLod()
+                        gsplat.lodRangeMin = 0;
+                        gsplat.lodRangeMax = gsplatScene.lodRangeMax;
+                    } else {
+                        // Fallback: start with lod0 to ensure initial high quality
+                        gsplat.lodRangeMin = 0;
+                        gsplat.lodRangeMax = 5;
+                    }
+                } else {
+                    // Use default LOD settings, start in low quality mode so we can get user interacting asap
+                    gsplat.lodRangeMin = quality.low.range[0];
+                    gsplat.lodRangeMax = quality.low.range[1];
+                    results[0].gsplat.splatBudget = quality.low.splatBudget * 1000000;
+                }
 
                 // these two allow LOD behind camera to drop, saves lots of splats
                 gsplat.lodUpdateAngle = 90;
@@ -435,12 +459,9 @@ class Viewer {
                 // we must force continuous rendering with streaming & lod system
                 this.forceRenderNextFrame = true;
 
-                // Check if LOD mode is enabled
-                const isLodMode = config.contentUrl ? isLodMetaFile(config.contentUrl) : false;
-
                 let current = 0;
                 let watermark = 1;
-                // For LOD mode, track the maximum progress to prevent regression
+                // For custom LOD mode, track the maximum progress to prevent regression
                 let maxProgress = 0;
                 const readyHandler = (camera: CameraComponent, layer: Layer, ready: boolean, loading: number) => {
                     if (ready && loading === 0) {
@@ -451,10 +472,24 @@ class Viewer {
 
                         // handle quality mode changes
                         const updateLod = () => {
-                            const settings = state.hqMode ? quality.high : quality.low;
-                            gsplat.lodRangeMin = settings.range[0];
-                            gsplat.lodRangeMax = settings.range[1];
-                            results[0].gsplat.splatBudget = settings.splatBudget * 1000000;
+                            if (isCustomLod) {
+                                // If using custom LOD (lodLoader), use the preset range and splatBudget from scene settings
+                                const gsplatScene = (app.scene as any).gsplat;
+                                if (gsplatScene && gsplatScene.lodRangeMin !== undefined) {
+                                    gsplat.lodRangeMin = gsplatScene.lodRangeMin;
+                                    gsplat.lodRangeMax = gsplatScene.lodRangeMax;
+                                    // Ensure splatBudget is set from preset
+                                    if (gsplatScene.splatBudget !== undefined) {
+                                        results[0].gsplat.splatBudget = gsplatScene.splatBudget * 1000000;
+                                    }
+                                }
+                            } else {
+                                // For default LOD mode, use the quality ranges
+                                const settings = state.hqMode ? quality.high : quality.low;
+                                gsplat.lodRangeMin = settings.range[0];
+                                gsplat.lodRangeMax = settings.range[1];
+                                results[0].gsplat.splatBudget = settings.splatBudget * 1000000;
+                            }
                         };
                         events.on('hqMode:changed', updateLod);
                         updateLod();
@@ -477,8 +512,8 @@ class Viewer {
                         current = watermark - loading;
                         let progress = Math.trunc(current / watermark * 100);
                         
-                        // In LOD mode, ensure progress never decreases
-                        if (isLodMode) {
+                        // In custom LOD mode, ensure progress never decreases
+                        if (isCustomLod) {
                             maxProgress = Math.max(maxProgress, progress);
                             progress = maxProgress;
                         }

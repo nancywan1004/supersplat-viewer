@@ -8,7 +8,8 @@ type LodPlatform = 'desktop-max' | 'desktop' | 'mobile-max' | 'mobile'
 
 type LodPreset = {
     range: [number, number],
-    lodDistances: number[]
+    lodDistances: number[],
+    splatBudget?: number
 }
 
 type LodSettings = {
