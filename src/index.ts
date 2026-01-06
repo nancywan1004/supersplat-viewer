@@ -7,10 +7,11 @@ import {
     type AppBase,
     GSplatResource,
     revision as engineRevision,
-    version as engineVersion
+    version as engineVersion,
+    Vec3
 } from 'playcanvas';
 
-import { applySkyboxSphere, removeSkyboxSphere, applySkyboxTexture } from './loaders/skybox-loader';
+import { applySkyboxSphere, removeSkyboxSphere, applySkyboxTexture, type SkyboxOptions } from './loaders/skybox-loader';
 
 import { observe } from './core/observe';
 import { importSettings } from './settings';
@@ -245,9 +246,15 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         lodLoader
     );
 
+    const skyboxOptions: SkyboxOptions = {
+        center: new Vec3(0, 0, 0),
+        radius: 5000,
+        rotation: new Vec3(0, 0, 0)
+    };
+
     // Load skybox
-    //const skyboxLoad = config.skyboxUrl && applySkyboxTexture(app, config.skyboxUrl);
-    const skyboxLoad = config.skyboxUrl ? applySkyboxSphere(app, config.skyboxUrl).then(() => {}) : Promise.resolve();
+    const skyboxLoad = config.skyboxUrl && applySkyboxTexture(app, config.skyboxUrl);
+    //const skyboxLoad = config.skyboxUrl ? applySkyboxSphere(app, config.skyboxUrl, skyboxOptions).then(() => {}) : Promise.resolve();
 
     if (skyboxLoad) {
         skyboxLoad.then(() => {
@@ -272,8 +279,8 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
             // 注意：applySkyboxSphere 内部会处理相同 URL 的复用，所以这里可以不移除
             // 但如果需要确保只有一个天空盒，可以在这里移除所有旧的
             removeSkyboxSphere(app); // 可选：确保只有一个天空盒
-            //await applySkyboxTexture(app, url);
-            await applySkyboxSphere(app, url);
+            await applySkyboxTexture(app, url);
+            //await applySkyboxSphere(app, url, skyboxOptions);
             events.fire('skyboxSelectionSynced', url);
         } catch (err) {
             console.warn('[SuperSplat] 切换天空盒失败：', err);
