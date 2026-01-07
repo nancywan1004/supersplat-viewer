@@ -1,8 +1,13 @@
 import {
     BoundingBox,
+    BLEND_NORMAL,
     Color,
     Entity,
+    Layer,
+    Mesh,
+    MeshInstance,
     Pose,
+    PRIMITIVE_LINES,
     StandardMaterial,
     Vec2,
     Vec3
@@ -136,9 +141,13 @@ class CameraManager {
     private constraint: SphereConstraint | null = null;
     private targetConstraint: BoxConstraint | null = null;
     private constraintVisualizer: Entity | null = null;
+    private animBoundsVisualizer: Entity | null = null;
+    private debugBoundsLayerId: number | null = null;
+    private cameraEntity: Entity;
 
     constructor(global: Global, bbox: BoundingBox) {
-        const { events, settings, state, config, app } = global;
+        const { events, settings, state, config, app, camera: cameraEntity } = global;
+        this.cameraEntity = cameraEntity;
 
         // // Create a visual marker for picked points
         // const markerMaterial = new StandardMaterial();
@@ -191,6 +200,18 @@ class CameraManager {
         const usingAnimBbox = !!animCoreBbox;
         // TODO: 暂时不使用fusedBbox，而是直接使用animCoreBbox，后续根据情况来优化
         const fusedBbox = animCoreBbox ? animCoreBbox : bbox;
+
+        // 可视化：动画路径计算出来的 bbox（AABB）
+        // 默认绑定到现有 UI 的 “Show Camera Path” 开关（state.showCameraPath）
+        if (animCoreBbox) {
+            this.animBoundsVisualizer = this.createBoundingBoxVisualizer(app, animCoreBbox, new Color(1, 0, 1, 1));
+            this.animBoundsVisualizer.enabled = !!state.showCameraPath;
+            events.on('showCameraPath:changed', (visible: boolean) => {
+                if (this.animBoundsVisualizer) {
+                    this.animBoundsVisualizer.enabled = visible;
+                }
+            });
+        }
 
         // 约束策略：
         // - Orbit：限制 target/focus point 在收缩后的 bbox 内（避免贴球面滑动、pan 越界）
@@ -480,6 +501,95 @@ class CameraManager {
 
         // 默认可见
         sphereEntity.enabled = true;
+    }
+
+    private ensureDebugBoundsLayer(app: any): number {
+        if (this.debugBoundsLayerId !== null) {
+            return this.debugBoundsLayerId;
+        }
+
+        const layers = app.scene.layers;
+        let layer = layers.getLayerByName('DebugBounds');
+        if (!layer) {
+            layer = new Layer({ name: 'DebugBounds' });
+            // 放到最后渲染，确保不被 gsplat/场景覆盖
+            layers.push(layer);
+        }
+
+        this.debugBoundsLayerId = layer.id;
+
+        // 确保主相机渲染该 layer
+        const cam = this.cameraEntity?.camera;
+        if (cam && cam.layers.indexOf(layer.id) < 0) {
+            cam.layers = [...cam.layers, layer.id];
+        }
+
+        return layer.id;
+    }
+
+    /**
+     * 创建 BoundingBox 可视化（线框盒子）
+     * - 用于调试动画路径计算出的 AABB 边界
+     */
+    private createBoundingBoxVisualizer(app: any, bbox: BoundingBox, color: Color): Entity {
+        const lineEntity = new Entity('animBoundsAABB');
+
+        // 8 corners
+        const min = bbox.getMin();
+        const max = bbox.getMax();
+        const p: number[] = [
+            // 0..7 positions
+            min.x, min.y, min.z, // 0
+            max.x, min.y, min.z, // 1
+            max.x, min.y, max.z, // 2
+            min.x, min.y, max.z, // 3
+            min.x, max.y, min.z, // 4
+            max.x, max.y, min.z, // 5
+            max.x, max.y, max.z, // 6
+            min.x, max.y, max.z  // 7
+        ];
+
+        // 12 edges as line segments (pairs of indices)
+        const indices: number[] = [
+            0, 1, 1, 2, 2, 3, 3, 0, // bottom
+            4, 5, 5, 6, 6, 7, 7, 4, // top
+            0, 4, 1, 5, 2, 6, 3, 7  // verticals
+        ];
+
+        const mesh = new Mesh(app.graphicsDevice);
+        mesh.setPositions(p);
+        mesh.setIndices(indices);
+        // 关键：以线段方式渲染（否则会被当成三角形索引绘制）
+        mesh.update(PRIMITIVE_LINES);
+
+        const material = new StandardMaterial();
+        material.diffuse = color;
+        material.emissive = color;
+        material.emissiveIntensity = 0.75;
+        material.opacity = 0.95;
+        material.blendType = BLEND_NORMAL;
+        // 调试线框：总是可见，但不会像填充面一样“染背景”
+        material.depthWrite = false;
+        material.depthTest = false;
+        material.update();
+
+        const layerId = this.ensureDebugBoundsLayer(app);
+
+        lineEntity.addComponent('render', {
+            type: 'asset',
+            layers: [layerId],
+            meshInstances: [new MeshInstance(mesh, material)]
+        });
+
+        // 避免影响光照/阴影
+        const renderComponent = lineEntity.render;
+        if (renderComponent) {
+            renderComponent.castShadows = false;
+            renderComponent.receiveShadows = false;
+        }
+
+        app.root.addChild(lineEntity);
+        return lineEntity;
     }
 
     /**
