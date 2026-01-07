@@ -10,6 +10,12 @@ import type { SphereConstraint } from '../camera-constraints/sphere-constraint';
 
 const p = new Pose();
 const tmpVec = new Vec3();
+const tmpTarget = new Vec3();
+
+// Damping helper function (same shape as fly-controller.ts)
+const damp = (damping: number, dt: number) => {
+    return 1 - Math.pow(damping, dt * 60);
+};
 
 class OrbitController implements CameraController {
     controller: OrbitControllerPC;
@@ -41,9 +47,23 @@ class OrbitController implements CameraController {
     update(deltaTime: number, inputFrame: CameraFrame, camera: Camera) {
         const pose = this.controller.update(inputFrame, deltaTime);
 
-        // 应用约束：限制相机位置在sphere内
+        // 应用约束：使用“软边界 + 阻尼回弹”
+        // - 超出软边界：以 damping 形式回弹到软边界
+        // - 任何情况下：硬边界兜底，确保不会跑出 radius
         if (this.constraint) {
-            this.constraint.clampPoint(pose.position, camera.position);
+            const clampedSoft = this.constraint.clampToSoft(pose.position, tmpTarget);
+            if (clampedSoft) {
+                const a = damp(this.constraint.reboundDamping, deltaTime);
+                camera.position.lerp(camera.position, tmpTarget, a);
+            } else {
+                camera.position.copy(pose.position);
+            }
+
+            // 硬边界兜底
+            this.constraint.clampToHard(camera.position, camera.position);
+
+            // 回写给底层 controller，避免“相机显示位置”和“控制器内部状态”分离
+            pose.position.copy(camera.position);
         } else {
             camera.position.copy(pose.position);
         }
@@ -57,14 +77,11 @@ class OrbitController implements CameraController {
     }
 
     goto(camera: Camera) {
-        // goto时，如果目标位置超出约束，则移动到约束边界
-        // 这样可以确保相机始终在有效范围内
+        // goto 时也应用“软边界回弹”，避免直接贴到硬边界导致后续交互卡死/抖动
         if (this.constraint) {
-            if (!this.constraint.containsPoint(camera.position)) {
-                // 如果目标位置超出约束，移动到sphere表面
-                this.constraint.clampPoint(camera.position, tmpVec);
-                camera.position.copy(tmpVec);
-            }
+            // goto 这里直接 snap 到软边界内（不做 damping），避免初始状态就贴边
+            this.constraint.clampToSoft(camera.position, tmpVec);
+            camera.position.copy(tmpVec);
         }
         
         p.position.copy(camera.position);

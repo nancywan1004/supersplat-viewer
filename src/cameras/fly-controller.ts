@@ -16,6 +16,7 @@ const right = new Vec3();
 const up = new Vec3();
 const offset = new Vec3();
 const tmpPos = new Vec3();
+const tmpClamp = new Vec3();
 
 // Damping helper function
 const damp = (damping: number, dt: number) => {
@@ -46,9 +47,9 @@ class FlyController implements CameraController {
         this._targetPose.set(camera.position, camera.angles, camera.distance);
         this._pose.copy(this._targetPose);
         
-        // 如果初始位置超出约束，移动到约束边界
-        if (this.constraint && !this.constraint.containsPoint(camera.position)) {
-            this.constraint.clampPoint(this._targetPose.position, this._targetPose.position);
+        // 进入 fly 模式时也应用“软边界回弹”，避免直接贴硬边界导致移动受限
+        if (this.constraint) {
+            this.constraint.clampToSoft(this._targetPose.position, this._targetPose.position);
             this._pose.position.copy(this._targetPose.position);
         }
     }
@@ -84,9 +85,10 @@ class FlyController implements CameraController {
         // 预测下一个位置
         tmpPos.copy(this._targetPose.position).add(offset);
         
-        // 应用约束：限制在sphere内
+        // 应用约束（目标层面）：硬边界兜底，避免目标跑出范围
+        // 真正的“软边界回弹 damping”在后面输出阶段叠加（这样更像弹簧效果）
         if (this.constraint) {
-            this.constraint.clampPoint(tmpPos, this._targetPose.position);
+            this.constraint.clampToHard(tmpPos, this._targetPose.position);
         } else {
             this._targetPose.position.copy(tmpPos);
         }
@@ -100,9 +102,22 @@ class FlyController implements CameraController {
             1
         );
         
-        // 确保最终位置也在约束内
+        // 输出阶段：叠加软边界阻尼回弹（spring/damping 感）
         if (this.constraint) {
-            this.constraint.clampPoint(this._pose.position, camera.position);
+            // 先把相机输出设置为 _pose
+            camera.position.copy(this._pose.position);
+
+            // 如果落在软边界外，则以 damping 形式回弹到软边界
+            const clampedSoft = this.constraint.clampToSoft(camera.position, tmpClamp);
+            if (clampedSoft) {
+                const a = damp(this.constraint.reboundDamping, deltaTime);
+                camera.position.lerp(camera.position, tmpClamp, a);
+                // 同步回写，避免下一帧又从外侧继续积分
+                this._pose.position.copy(camera.position);
+            }
+
+            // 硬边界兜底
+            this.constraint.clampToHard(camera.position, camera.position);
         } else {
             camera.position.copy(this._pose.position);
         }
@@ -116,14 +131,10 @@ class FlyController implements CameraController {
     }
 
     goto(pose: Pose) {
-        // goto时，如果目标位置超出约束，则移动到约束边界
+        // goto 时应用“软边界回弹”
         if (this.constraint) {
-            if (!this.constraint.containsPoint(pose.position)) {
-                this.constraint.clampPoint(pose.position, tmpPos);
-                this._targetPose.set(tmpPos, pose.angles, pose.distance);
-            } else {
-                this._targetPose.copy(pose);
-            }
+            this.constraint.clampToSoft(pose.position, tmpPos);
+            this._targetPose.set(tmpPos, pose.angles, pose.distance);
         } else {
             this._targetPose.copy(pose);
         }
