@@ -2,24 +2,22 @@ import {
     OrbitController as OrbitControllerPC,
     Pose,
     Vec2,
-    Vec3
+    Vec3,
+    Quat
 } from 'playcanvas';
 
 import type { Camera, CameraFrame, CameraController } from './camera';
-import type { SphereConstraint } from '../camera-constraints/sphere-constraint';
+import type { BoxConstraint } from '../camera-constraints/box-constraint';
 
 const p = new Pose();
 const tmpVec = new Vec3();
 const tmpTarget = new Vec3();
-
-// Damping helper function (same shape as fly-controller.ts)
-const damp = (damping: number, dt: number) => {
-    return 1 - Math.pow(damping, dt * 60);
-};
+const tmpForward = new Vec3();
+const tmpQuat = new Quat();
 
 class OrbitController implements CameraController {
     controller: OrbitControllerPC;
-    private constraint: SphereConstraint | null = null;
+    private targetConstraint: BoxConstraint | null = null;
 
     constructor() {
         this.controller = new OrbitControllerPC();
@@ -31,10 +29,10 @@ class OrbitController implements CameraController {
     }
 
     /**
-     * 设置约束
+     * 设置 target 约束（用于 pan 平移）
      */
-    setConstraint(constraint: SphereConstraint | null): void {
-        this.constraint = constraint;
+    setTargetConstraint(constraint: BoxConstraint | null): void {
+        this.targetConstraint = constraint;
     }
 
     onEnter(camera: Camera): void {
@@ -47,26 +45,24 @@ class OrbitController implements CameraController {
     update(deltaTime: number, inputFrame: CameraFrame, camera: Camera) {
         const pose = this.controller.update(inputFrame, deltaTime);
 
-        // 应用约束：使用“软边界 + 阻尼回弹”
-        // - 超出软边界：以 damping 形式回弹到软边界
-        // - 任何情况下：硬边界兜底，确保不会跑出 radius
-        if (this.constraint) {
-            const clampedSoft = this.constraint.clampToSoft(pose.position, tmpTarget);
-            if (clampedSoft) {
-                const a = damp(this.constraint.reboundDamping, deltaTime);
-                camera.position.lerp(camera.position, tmpTarget, a);
-            } else {
-                camera.position.copy(pose.position);
+        // 约束策略：
+        // - **target/focus point** 限制在收缩后的 BoundingBox 内（符合“场景核心区域”）
+        // - zoom 只通过 distance 控制（不再用球形位置约束，避免贴球面滑动）
+        if (this.targetConstraint) {
+            // 计算 desired target（本帧输入）
+            tmpQuat.setFromEulerAngles(pose.angles);
+            tmpQuat.transformVector(Vec3.FORWARD, tmpForward);
+            tmpTarget.copy(tmpForward).mulScalar(pose.distance).add(pose.position);
+
+            // clamp target 到 box 内
+            const clamped = this.targetConstraint.clampPoint(tmpTarget, tmpTarget);
+            if (clamped) {
+                // 反解 position = target - forward * distance
+                pose.position.copy(tmpTarget).sub(tmpForward.mulScalar(pose.distance));
             }
-
-            // 硬边界兜底
-            this.constraint.clampToHard(camera.position, camera.position);
-
-            // 回写给底层 controller，避免“相机显示位置”和“控制器内部状态”分离
-            pose.position.copy(camera.position);
-        } else {
-            camera.position.copy(pose.position);
         }
+
+        camera.position.copy(pose.position);
 
         camera.angles.copy(pose.angles);
         camera.distance = pose.distance;
@@ -77,13 +73,17 @@ class OrbitController implements CameraController {
     }
 
     goto(camera: Camera) {
-        // goto 时也应用“软边界回弹”，避免直接贴到硬边界导致后续交互卡死/抖动
-        if (this.constraint) {
-            // goto 这里直接 snap 到软边界内（不做 damping），避免初始状态就贴边
-            this.constraint.clampToSoft(camera.position, tmpVec);
-            camera.position.copy(tmpVec);
+        // goto 时让 target 落入 box 内（避免初始就处在边界外导致 pan 手感异常）
+        if (this.targetConstraint) {
+            tmpQuat.setFromEulerAngles(camera.angles);
+            tmpQuat.transformVector(Vec3.FORWARD, tmpForward);
+            tmpTarget.copy(tmpForward).mulScalar(camera.distance).add(camera.position);
+            const clamped = this.targetConstraint.clampPoint(tmpTarget, tmpTarget);
+            if (clamped) {
+                camera.position.copy(tmpTarget).sub(tmpForward.mulScalar(camera.distance));
+            }
         }
-        
+
         p.position.copy(camera.position);
         p.angles.copy(camera.angles);
         p.distance = camera.distance;

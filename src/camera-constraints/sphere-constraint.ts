@@ -2,6 +2,8 @@ import { Vec3, BoundingBox } from 'playcanvas';
 import { BoundingSphere } from '../core/bounding-sphere';
 
 const tmpDir = new Vec3();
+const tmpA = new Vec3();
+const tmpB = new Vec3();
 
 /**
  * 简单的Sphere约束
@@ -36,7 +38,11 @@ export class SphereConstraint {
      */
     static fromBoundingBox(bbox: BoundingBox, shrinkFactor: number = 0.7): SphereConstraint {
         const center = bbox.center.clone();
-        const radius = bbox.halfExtents.length() * shrinkFactor;
+        // 注意：不能用 halfExtents.length()（对角线的一半）来做半径，
+        // 否则 sphere 会比场景大很多，导致 pan/zoom 看起来“无限移动”但仍在 sphere 内。
+        // 这里用最大轴向 halfExtent 来近似“场景半径”，shrinkFactor=0.7 才符合直觉。
+        const he = bbox.halfExtents;
+        const radius = Math.max(he.x, he.y, he.z) * shrinkFactor;
         // 默认给一个很小的“软边界”缓冲带：半径的 1%
         const reboundMargin = Math.max(0.05, radius * 0.01);
         return new SphereConstraint(center, radius, reboundMargin, 0.95);
@@ -92,6 +98,97 @@ export class SphereConstraint {
      */
     clampToSoft(point: Vec3, result: Vec3): boolean {
         return this.clampToRadius(point, this.effectiveRadius(), result);
+    }
+
+    /**
+     * 软边界约束（沿移动方向截断）+ 接近边界渐进阻尼：
+     * - **关键点**：当目标点在边界外时，不做“投影到球面”（会引入切向滑动），而是沿 current->desired 的方向
+     *   计算线段与 sphere 的交点，将移动截断到边界交点。
+     * - 若当前已经在阻尼带内且移动会让半径变大，则对位移做渐进衰减，避免“贴边卡死/抖动”。
+     *
+     * @returns 是否对 desired 做了限制/修改
+     */
+    constrainToSoftDamped(currentPos: Vec3, desiredPos: Vec3, dt: number, result: Vec3): boolean {
+        const center = this.sphere.center;
+        const r = this.effectiveRadius();
+
+        const p0 = tmpA.sub2(currentPos, center);
+        const p1 = tmpB.sub2(desiredPos, center);
+        const d0 = p0.length();
+        const d1 = p1.length();
+
+        // 若 desired 已在软边界内：根据是否处在阻尼带内 & 是否“向外走”做渐进阻尼
+        if (d1 <= r) {
+            // 只对“向外”的移动施加阻尼
+            if (d1 > d0) {
+                const zone = Math.max(1e-4, this.reboundMargin);
+                const distToBoundary = r - d0; // >=0 表示在边界内
+                if (distToBoundary < zone) {
+                    // factor: 远离边界=1，贴边=0
+                    const factor = Math.max(0, Math.min(1, distToBoundary / zone));
+                    // 额外用 dt 让阻尼更稳定（避免高帧率时太硬）
+                    const a = 1 - Math.pow(this.reboundDamping, dt * 60);
+                    const t = factor * (1 - a) + a * factor; // 等价于 factor，但保留 dt 参与感
+                    result.lerp(currentPos, desiredPos, t);
+                    return true;
+                }
+            }
+            result.copy(desiredPos);
+            return false;
+        }
+
+        // desired 在软边界外：沿 current->desired 方向求交点，截断到交点（避免切向滑动）
+        const dir = tmpDir.sub2(desiredPos, currentPos);
+        const a = dir.lengthSq();
+        if (a < 1e-12) {
+            // 没有位移
+            result.copy(currentPos);
+            return true;
+        }
+
+        // 将线段参数化：p(t) = p0 + t*(p1-p0), t in [0,1]
+        const dp = tmpDir.sub2(p1, p0);
+        const A = dp.dot(dp);
+        const B = 2 * p0.dot(dp);
+        const C = p0.dot(p0) - r * r;
+        const disc = B * B - 4 * A * C;
+        if (disc < 0 || A < 1e-12) {
+            // 理论上不该发生：兜底直接 clamp 到软边界（可能引入少量切向，但比 NaN 强）
+            this.clampToSoft(desiredPos, result);
+            return true;
+        }
+
+        const sqrtDisc = Math.sqrt(disc);
+        const t1 = (-B - sqrtDisc) / (2 * A);
+        const t2 = (-B + sqrtDisc) / (2 * A);
+
+        // 从 inside->outside：通常取较大的正根
+        let tHit = Math.max(t1, t2);
+        if (!(tHit >= 0 && tHit <= 1)) {
+            // 兜底取落在 [0,1] 的根
+            const cand1 = t1 >= 0 && t1 <= 1 ? t1 : -1;
+            const cand2 = t2 >= 0 && t2 <= 1 ? t2 : -1;
+            tHit = Math.max(cand1, cand2);
+            if (tHit < 0) {
+                // 如果两根都不在段内：保持当前位置
+                result.copy(currentPos);
+                return true;
+            }
+        }
+
+        // 交点（在软边界上）
+        result.lerp(currentPos, desiredPos, tHit);
+
+        // 若属于“向外”移动且当前已进入阻尼带，则再做一次渐进衰减（让撞边更软）
+        if (d0 > r - Math.max(1e-4, this.reboundMargin)) {
+            const zone = Math.max(1e-4, this.reboundMargin);
+            const distToBoundary = Math.max(0, r - d0);
+            const factor = Math.max(0, Math.min(1, distToBoundary / zone));
+            // 贴边时 factor≈0，会把 result 拉回 currentPos（不再产生切向漂移）
+            result.lerp(currentPos, result, factor);
+        }
+
+        return true;
     }
 
     /**

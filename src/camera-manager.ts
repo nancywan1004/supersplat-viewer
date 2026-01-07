@@ -4,6 +4,7 @@ import {
     Entity,
     Pose,
     StandardMaterial,
+    Vec2,
     Vec3
 } from 'playcanvas';
 
@@ -16,6 +17,7 @@ import { easeOut, smootherStep } from './core/math';
 import { Annotation } from './settings';
 import { CameraMode, Global } from './types';
 import { SphereConstraint } from './camera-constraints/sphere-constraint';
+import { BoxConstraint } from './camera-constraints/box-constraint';
 
 const tmpCamera = new Camera();
 const tmpv = new Vec3();
@@ -48,6 +50,7 @@ class CameraManager {
 
     // 相机约束
     private constraint: SphereConstraint | null = null;
+    private targetConstraint: BoxConstraint | null = null;
     private constraintVisualizer: Entity | null = null;
 
     constructor(global: Global, bbox: BoundingBox) {
@@ -97,13 +100,21 @@ class CameraManager {
             anim: animTrack ? new AnimController(animTrack) : null
         };
 
-        // 初始化约束：从BoundingBox创建sphere约束
-        // 使用0.85的收缩系数，确保约束sphere足够大，不会导致场景被裁剪
+        // 约束策略：
+        // - Orbit：限制 target/focus point 在收缩后的 bbox 内（避免贴球面滑动、pan 越界）
+        // - Fly：保持原球形硬边界兜底（防止飞行穿出场景太远）
+        this.targetConstraint = BoxConstraint.fromBoundingBox(bbox, 0.7);
+        controllers.orbit.setTargetConstraint(this.targetConstraint);
+        controllers.fly.setTargetConstraint(this.targetConstraint);
+
         this.constraint = SphereConstraint.fromBoundingBox(bbox, 0.7);
-        
-        // 将约束应用到orbit和fly控制器（使用相同的约束确保一致性）
-        controllers.orbit.setConstraint(this.constraint);
+        // fly 仍保留一个球形硬边界兜底（仅在没有 box 约束时才会用到），不影响两种模式的主约束一致性
         controllers.fly.setConstraint(this.constraint);
+
+        // 给 orbit 设置一个合理的最大缩放距离（避免无限 zoom-out 让场景跑出视野）
+        const sceneSize = bbox.halfExtents.length();
+        const maxZoom = (sceneSize / Math.tan(camera0.fov / 180 * Math.PI * 0.5)) * 0.5;
+        controllers.orbit.controller.zoomRange = new Vec2(0.5, maxZoom);
 
         // 创建约束可视化
         //this.createConstraintVisualizer(app, this.constraint);
