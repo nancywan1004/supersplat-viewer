@@ -22,7 +22,7 @@ class OrbitController implements CameraController {
     constructor() {
         this.controller = new OrbitControllerPC();
         this.controller.zoomRange = new Vec2(0.5, Infinity); // Minimum zoom distance to preserve pan functionality
-        this.controller.pitchRange = new Vec2(-90, 90);
+        this.controller.pitchRange = new Vec2(0, 90);
         this.controller.rotateDamping = 0.97;
         this.controller.moveDamping = 0.97;
         this.controller.zoomDamping = 0.97;

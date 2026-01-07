@@ -21,6 +21,9 @@ const tmpClamp = new Vec3();
 const tmpQuat = new Quat();
 const tmpForward = new Vec3();
 const tmpFocus = new Vec3();
+const tmpCurrentFocus = new Vec3();
+const tmpPrevPos = new Vec3();
+const tmpPrevAngles = new Vec3();
 
 // Damping helper function
 const damp = (damping: number, dt: number) => {
@@ -59,13 +62,50 @@ class FlyController implements CameraController {
      * 将 focus/target 点限制在 bbox 内，并反解位置（保持 distance 不变）
      * @returns 是否发生了修正
      */
-    private applyTargetConstraint(position: Vec3, anglesIn: Vec3, distance: number, result: Vec3): boolean {
+    private constrainTargetSegment(
+        currentPosition: Vec3,
+        currentAngles: Vec3,
+        desiredPosition: Vec3,
+        desiredAngles: Vec3,
+        distance: number,
+        result: Vec3
+    ): boolean {
+        if (!this.targetConstraint) {
+            result.copy(desiredPosition);
+            return false;
+        }
+
+        // current focus（上一帧输出）
+        tmpQuat.setFromEulerAngles(currentAngles);
+        tmpQuat.transformVector(Vec3.FORWARD, tmpForward);
+        tmpCurrentFocus.copy(tmpForward).mulScalar(distance).add(currentPosition);
+
+        // desired focus（本帧期望）
+        tmpQuat.setFromEulerAngles(desiredAngles);
+        tmpQuat.transformVector(Vec3.FORWARD, tmpForward);
+        tmpFocus.copy(tmpForward).mulScalar(distance).add(desiredPosition);
+
+        // 沿 current->desired 方向截断到 AABB（避免贴边产生切向滑动）
+        const constrained = this.targetConstraint.constrainSegment(tmpCurrentFocus, tmpFocus, tmpFocus);
+        if (!constrained) {
+            result.copy(desiredPosition);
+            return false;
+        }
+
+        // position = focus - forward * distance
+        result.copy(tmpFocus).sub(tmpForward.mulScalar(distance));
+        return true;
+    }
+
+    /**
+     * 初始化/跳转时把 focus 直接 snap 到 box 内（不做 segment/damping）
+     */
+    private snapTargetIntoBox(position: Vec3, anglesIn: Vec3, distance: number, result: Vec3): boolean {
         if (!this.targetConstraint) {
             result.copy(position);
             return false;
         }
 
-        // desired focus（本帧期望）
         tmpQuat.setFromEulerAngles(anglesIn);
         tmpQuat.transformVector(Vec3.FORWARD, tmpForward);
         tmpFocus.copy(tmpForward).mulScalar(distance).add(position);
@@ -76,7 +116,6 @@ class FlyController implements CameraController {
             return false;
         }
 
-        // position = focus - forward * distance
         result.copy(tmpFocus).sub(tmpForward.mulScalar(distance));
         return true;
     }
@@ -88,7 +127,12 @@ class FlyController implements CameraController {
         // 进入 fly 模式时也应用“软边界回弹”，避免直接贴硬边界导致移动受限
         // 这里优先保证与 Orbit 一致：focus/target 在 bbox 内
         if (this.targetConstraint) {
-            const changed = this.applyTargetConstraint(this._targetPose.position, this._targetPose.angles, this._targetPose.distance, tmpClamp);
+            const changed = this.snapTargetIntoBox(
+                this._targetPose.position,
+                this._targetPose.angles,
+                this._targetPose.distance,
+                tmpClamp
+            );
             if (changed) {
                 this._targetPose.position.copy(tmpClamp);
                 this._pose.position.copy(tmpClamp);
@@ -133,7 +177,10 @@ class FlyController implements CameraController {
         
         // 应用约束（目标层面）：硬边界兜底，避免目标跑出范围
         // 真正的“软边界回弹 damping”在后面输出阶段叠加（这样更像弹簧效果）
-        if (this.constraint) {
+        if (this.targetConstraint) {
+            // 与 Orbit 对齐：有 box 约束时不再应用 sphere（否则会出现范围很小/回弹/跳变）
+            this._targetPose.position.copy(tmpPos);
+        } else if (this.constraint) {
             this.constraint.clampToHard(tmpPos, this._targetPose.position);
         } else {
             this._targetPose.position.copy(tmpPos);
@@ -149,14 +196,25 @@ class FlyController implements CameraController {
         );
         
         // 输出阶段：与 Orbit 一致，限制 focus/target 在 bbox 内
+        // 关键：segment 截断需要上一帧输出作为 current
+        tmpPrevPos.copy(camera.position);
+        tmpPrevAngles.copy(camera.angles);
+
         camera.position.copy(this._pose.position);
-        const changed = this.applyTargetConstraint(camera.position, this._pose.angles, this._pose.distance, tmpClamp);
+        const changed = this.targetConstraint ? this.constrainTargetSegment(
+            tmpPrevPos,
+            tmpPrevAngles,
+            camera.position,
+            this._pose.angles,
+            this._pose.distance,
+            tmpClamp
+        ) : false;
         if (changed) {
             camera.position.copy(tmpClamp);
             // 同步回写，避免内部状态继续“顶着边界”累计导致卡死
             this._pose.position.copy(tmpClamp);
             this._targetPose.position.copy(tmpClamp);
-        } else if (this.constraint) {
+        } else if (!this.targetConstraint && this.constraint) {
             // 没有 box 约束时，用球形硬边界兜底（防止飞到特别远）
             this.constraint.clampToHard(camera.position, camera.position);
             this._pose.position.copy(camera.position);
@@ -173,7 +231,7 @@ class FlyController implements CameraController {
     goto(pose: Pose) {
         // goto 时应用“软边界回弹”
         if (this.targetConstraint) {
-            const changed = this.applyTargetConstraint(pose.position, pose.angles, pose.distance, tmpPos);
+            const changed = this.snapTargetIntoBox(pose.position, pose.angles, pose.distance, tmpPos);
             this._targetPose.set(changed ? tmpPos : pose.position, pose.angles, pose.distance);
         } else if (this.constraint) {
             this.constraint.clampToSoft(pose.position, tmpPos);

@@ -5,10 +5,17 @@ import { BoundingBox, Vec3 } from 'playcanvas';
  */
 export class BoxConstraint {
     bbox: BoundingBox;
+    /**
+     * 数值容差/内缩距离：用于避免点恰好落在边界或因浮点误差被判定为“在盒外”，导致卡死
+     */
+    epsilon: number;
 
     constructor(bbox: BoundingBox) {
         // clone 避免外部修改
         this.bbox = new BoundingBox(bbox.center.clone(), bbox.halfExtents.clone());
+        // 根据场景尺度给一个自适应 epsilon；同时设置下限，保证小场景也有效
+        const size = this.bbox.halfExtents.length() * 2;
+        this.epsilon = Math.max(1e-4, size * 1e-6);
     }
 
     /**
@@ -22,7 +29,15 @@ export class BoxConstraint {
     }
 
     containsPoint(point: Vec3): boolean {
-        return this.bbox.containsPoint(point);
+        // 使用带容差的 contains，避免贴边时抖动/误判
+        const min = this.bbox.getMin();
+        const max = this.bbox.getMax();
+        const e = this.epsilon;
+        return (
+            point.x >= min.x - e && point.x <= max.x + e &&
+            point.y >= min.y - e && point.y <= max.y + e &&
+            point.z >= min.z - e && point.z <= max.z + e
+        );
     }
 
     /**
@@ -33,9 +48,18 @@ export class BoxConstraint {
         const min = this.bbox.getMin();
         const max = this.bbox.getMax();
 
-        const x = Math.min(max.x, Math.max(min.x, point.x));
-        const y = Math.min(max.y, Math.max(min.y, point.y));
-        const z = Math.min(max.z, Math.max(min.z, point.z));
+        // 夹紧到“内缩后的盒子”：[min+e, max-e]，避免结果精确贴边导致下一帧误判在外
+        const e = this.epsilon;
+        const minX = (max.x - min.x > 2 * e) ? (min.x + e) : min.x;
+        const maxX = (max.x - min.x > 2 * e) ? (max.x - e) : max.x;
+        const minY = (max.y - min.y > 2 * e) ? (min.y + e) : min.y;
+        const maxY = (max.y - min.y > 2 * e) ? (max.y - e) : max.y;
+        const minZ = (max.z - min.z > 2 * e) ? (min.z + e) : min.z;
+        const maxZ = (max.z - min.z > 2 * e) ? (max.z - e) : max.z;
+
+        const x = Math.min(maxX, Math.max(minX, point.x));
+        const y = Math.min(maxY, Math.max(minY, point.y));
+        const z = Math.min(maxZ, Math.max(minZ, point.z));
 
         const changed = (x !== point.x) || (y !== point.y) || (z !== point.z);
         result.set(x, y, z);
@@ -51,8 +75,8 @@ export class BoxConstraint {
      * @returns 是否发生了限制/修改
      */
     constrainSegment(current: Vec3, desired: Vec3, result: Vec3): boolean {
-        const currentIn = this.bbox.containsPoint(current);
-        const desiredIn = this.bbox.containsPoint(desired);
+        const currentIn = this.containsPoint(current);
+        const desiredIn = this.containsPoint(desired);
 
         if (desiredIn) {
             result.copy(desired);
@@ -67,6 +91,7 @@ export class BoxConstraint {
 
         const min = this.bbox.getMin();
         const max = this.bbox.getMax();
+        const e = this.epsilon;
 
         // slab method：求 current + t*(desired-current) 与 AABB 的交点，t ∈ [0,1]
         const dx = desired.x - current.x;
@@ -79,7 +104,7 @@ export class BoxConstraint {
         const updateAxis = (p: number, d: number, minA: number, maxA: number) => {
             if (Math.abs(d) < 1e-12) {
                 // 平行该轴：必须在区间内，否则无解（理论上 currentIn 保证）
-                return p >= minA && p <= maxA;
+                return p >= minA - e && p <= maxA + e;
             }
             const inv = 1 / d;
             let t1 = (minA - p) * inv;
@@ -111,6 +136,8 @@ export class BoxConstraint {
             current.y + dy * tHit,
             current.z + dz * tHit
         );
+        // 将交点内缩，避免精确贴边导致下一帧 “currentIn=false” 进而卡死
+        this.clampPoint(result, result);
         return true;
     }
 }

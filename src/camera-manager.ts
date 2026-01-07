@@ -103,17 +103,17 @@ class CameraManager {
         // 约束策略：
         // - Orbit：限制 target/focus point 在收缩后的 bbox 内（避免贴球面滑动、pan 越界）
         // - Fly：保持原球形硬边界兜底（防止飞行穿出场景太远）
-        this.targetConstraint = BoxConstraint.fromBoundingBox(bbox, 0.7);
+        this.targetConstraint = BoxConstraint.fromBoundingBox(bbox, 0.5);
         controllers.orbit.setTargetConstraint(this.targetConstraint);
         controllers.fly.setTargetConstraint(this.targetConstraint);
 
-        this.constraint = SphereConstraint.fromBoundingBox(bbox, 0.7);
+        this.constraint = SphereConstraint.fromBoundingBox(bbox, 0.5);
         // fly 仍保留一个球形硬边界兜底（仅在没有 box 约束时才会用到），不影响两种模式的主约束一致性
         controllers.fly.setConstraint(this.constraint);
 
         // 给 orbit 设置一个合理的最大缩放距离（避免无限 zoom-out 让场景跑出视野）
         const sceneSize = bbox.halfExtents.length();
-        const maxZoom = (sceneSize / Math.tan(camera0.fov / 180 * Math.PI * 0.5)) * 0.5;
+        const maxZoom = (sceneSize / Math.tan(camera0.fov / 180 * Math.PI * 0.5)) * 0.25;
         controllers.orbit.controller.zoomRange = new Vec2(0.5, maxZoom);
 
         // 创建约束可视化
