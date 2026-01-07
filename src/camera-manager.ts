@@ -15,6 +15,7 @@ import { OrbitController } from './cameras/orbit-controller';
 import { easeOut, smootherStep } from './core/math';
 import { Annotation } from './settings';
 import { CameraMode, Global } from './types';
+import { SphereConstraint } from './camera-constraints/sphere-constraint';
 
 const tmpCamera = new Camera();
 const tmpv = new Vec3();
@@ -44,6 +45,10 @@ class CameraManager {
 
     // visual marker for picked point
     private pickMarker: Entity | null = null;
+
+    // 相机约束
+    private constraint: SphereConstraint | null = null;
+    private constraintVisualizer: Entity | null = null;
 
     constructor(global: Global, bbox: BoundingBox) {
         const { events, settings, state, config, app } = global;
@@ -91,6 +96,17 @@ class CameraManager {
             fly: new FlyController(),
             anim: animTrack ? new AnimController(animTrack) : null
         };
+
+        // 初始化约束：从BoundingBox创建sphere约束
+        // 使用0.85的收缩系数，确保约束sphere足够大，不会导致场景被裁剪
+        this.constraint = SphereConstraint.fromBoundingBox(bbox, 0.7);
+        
+        // 将约束应用到orbit和fly控制器（使用相同的约束确保一致性）
+        controllers.orbit.setConstraint(this.constraint);
+        controllers.fly.setConstraint(this.constraint);
+
+        // 创建约束可视化
+        //this.createConstraintVisualizer(app, this.constraint);
 
         const getController = (cameraMode: 'orbit' | 'anim' | 'fly'): CameraController => {
             return controllers[cameraMode];
@@ -313,6 +329,54 @@ class CameraManager {
 
             controllers.orbit.goto(tmpCamera);
         });
+    }
+
+    /**
+     * 创建约束可视化（显示bounding sphere）
+     */
+    private createConstraintVisualizer(app: any, constraint: SphereConstraint): void {
+        if (!constraint) return;
+
+        const sphereEntity = new Entity('constraintSphere');
+        
+        // 创建材质（半透明绿色）
+        const material = new StandardMaterial();
+        material.diffuse = new Color(0, 1, 0); // 绿色
+        material.emissive = new Color(0, 0.3, 0);
+        material.update();
+
+        // 创建sphere渲染组件
+        sphereEntity.addComponent('render', {
+            type: 'sphere',
+            material: material
+        });
+
+        // 设置位置和大小
+        sphereEntity.setPosition(constraint.sphere.center);
+        const scale = constraint.sphere.radius * 2;
+        sphereEntity.setLocalScale(scale, scale, scale);
+
+        // 设置为半透明（通过render组件的castShadows和receiveShadows控制）
+        const renderComponent = sphereEntity.render;
+        if (renderComponent) {
+            renderComponent.castShadows = false;
+            renderComponent.receiveShadows = false;
+        }
+
+        app.root.addChild(sphereEntity);
+        this.constraintVisualizer = sphereEntity;
+
+        // 默认可见
+        sphereEntity.enabled = true;
+    }
+
+    /**
+     * 设置约束可视化可见性
+     */
+    setConstraintVisualizerVisible(visible: boolean): void {
+        if (this.constraintVisualizer) {
+            this.constraintVisualizer.enabled = visible;
+        }
     }
 }
 
