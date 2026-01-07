@@ -85,7 +85,15 @@ type ExperienceSettings = {
     hasStartPose?: boolean,
 
     revealEffect?: RevealEffect,
-    lodSettings?: LodSettings
+    lodSettings?: LodSettings,
+
+    /**
+     * 可选：相机边界策略（不影响旧 settings.json）
+     * - animScale: 动画核心区域整体放大系数（>1 更宽松）
+     */
+    cameraBounds?: {
+        animScale?: number;
+    }
 };
 
 export type { AnimTrack, Camera, Annotation, PostEffectSettings, RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, ExperienceSettings };

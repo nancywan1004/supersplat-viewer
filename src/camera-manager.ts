@@ -1,5 +1,5 @@
 import {
-    type BoundingBox,
+    BoundingBox,
     Color,
     Entity,
     Pose,
@@ -15,12 +15,96 @@ import { FlyController } from './cameras/fly-controller';
 import { OrbitController } from './cameras/orbit-controller';
 import { easeOut, smootherStep } from './core/math';
 import { Annotation } from './settings';
+import type { AnimTrack } from './settings';
 import { CameraMode, Global } from './types';
 import { SphereConstraint } from './camera-constraints/sphere-constraint';
 import { BoxConstraint } from './camera-constraints/box-constraint';
 
 const tmpCamera = new Camera();
 const tmpv = new Vec3();
+
+const unionBoundingBoxes = (a: BoundingBox, b: BoundingBox): BoundingBox => {
+    const amin = a.getMin();
+    const amax = a.getMax();
+    const bmin = b.getMin();
+    const bmax = b.getMax();
+
+    const min = new Vec3(
+        Math.min(amin.x, bmin.x),
+        Math.min(amin.y, bmin.y),
+        Math.min(amin.z, bmin.z)
+    );
+    const max = new Vec3(
+        Math.max(amax.x, bmax.x),
+        Math.max(amax.y, bmax.y),
+        Math.max(amax.z, bmax.z)
+    );
+
+    const center = min.clone().add(max).mulScalar(0.5);
+    const half = max.clone().sub(min).mulScalar(0.5);
+    return new BoundingBox(center, half);
+};
+
+/**
+ * 优先根据 settingsJson(animTracks) 计算一个“核心区域” BoundingBox：
+ * - 用所有 animTracks 的 position + target 点集做 AABB
+ * - 给 AABB 加一点 padding（避免太贴边导致操作手感变差）
+ * - 若没有有效路径点，返回 null，由调用方回退到场景 bbox
+ */
+const computeAnimTracksBoundingBox = (animTracks: AnimTrack[] | undefined | null): BoundingBox | null => {
+    if (!animTracks || animTracks.length === 0) {
+        return null;
+    }
+
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+
+    const expandWithArray = (arr: number[] | undefined) => {
+        if (!arr || arr.length < 3) return;
+        for (let i = 0; i + 2 < arr.length; i += 3) {
+            const x = arr[i];
+            const y = arr[i + 1];
+            const z = arr[i + 2];
+            if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (z < minZ) minZ = z;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+            if (z > maxZ) maxZ = z;
+        }
+    };
+
+    for (const track of animTracks) {
+        const values = track?.keyframes?.values;
+        expandWithArray(values?.position);
+        expandWithArray(values?.target);
+    }
+
+    if (!Number.isFinite(minX) || !Number.isFinite(maxX)) {
+        return null;
+    }
+
+    const center = new Vec3(
+        (minX + maxX) * 0.5,
+        (minY + maxY) * 0.5,
+        (minZ + maxZ) * 0.5
+    );
+    const half = new Vec3(
+        (maxX - minX) * 0.5,
+        (maxY - minY) * 0.5,
+        (maxZ - minZ) * 0.5
+    );
+
+    // padding：对小盒子给固定最小值，对大盒子按尺寸比例放大
+    const maxAxisSize = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
+    const pad = Math.max(0.5, maxAxisSize * 0.05);
+    half.x += pad;
+    half.y += pad;
+    half.z += pad;
+
+    return new BoundingBox(center, half);
+};
 
 const createCamera = (position: Vec3, target: Vec3, fov: number) => {
     const result = new Camera();
@@ -100,19 +184,36 @@ class CameraManager {
             anim: animTrack ? new AnimController(animTrack) : null
         };
 
+        // 约束边界（融合策略）：
+        // - 若有动画路径：用 anim AABB 与 scene AABB 做 union（避免 anim→orbit / orbit→fly 切换时发生 clamp 跳变）
+        // - 若无动画路径：直接使用 scene bbox
+        const animCoreBbox = computeAnimTracksBoundingBox(settings.animTracks);
+        const usingAnimBbox = !!animCoreBbox;
+        // TODO: 暂时不使用fusedBbox，而是直接使用animCoreBbox，后续根据情况来优化
+        const fusedBbox = animCoreBbox ? animCoreBbox : bbox;
+
         // 约束策略：
         // - Orbit：限制 target/focus point 在收缩后的 bbox 内（避免贴球面滑动、pan 越界）
         // - Fly：保持原球形硬边界兜底（防止飞行穿出场景太远）
-        this.targetConstraint = BoxConstraint.fromBoundingBox(bbox, 0.5);
+        // 注意：animScale 允许 >1（放大），用于给“融合后 bbox”留出余量，减少贴边与切换抖动。
+        const cameraBoundsCfg = (settings as any).cameraBounds as undefined | {
+            animScale?: number;
+        };
+        const animScale = Math.max(0.01, cameraBoundsCfg?.animScale ?? 1.15);
+
+        // 无动画时维持更“核心”的收缩范围；有动画时以融合 bbox 为主，缩放更保守，优先避免跳变
+        const targetScaleFactor = usingAnimBbox ? animScale : 0.5;
+
+        this.targetConstraint = BoxConstraint.fromBoundingBox(fusedBbox, targetScaleFactor);
         controllers.orbit.setTargetConstraint(this.targetConstraint);
         controllers.fly.setTargetConstraint(this.targetConstraint);
 
-        this.constraint = SphereConstraint.fromBoundingBox(bbox, 0.5);
+        this.constraint = SphereConstraint.fromBoundingBox(fusedBbox, targetScaleFactor);
         // fly 仍保留一个球形硬边界兜底（仅在没有 box 约束时才会用到），不影响两种模式的主约束一致性
         controllers.fly.setConstraint(this.constraint);
 
         // 给 orbit 设置一个合理的最大缩放距离（避免无限 zoom-out 让场景跑出视野）
-        const sceneSize = bbox.halfExtents.length();
+        const sceneSize = fusedBbox.halfExtents.length();
         const maxZoom = (sceneSize / Math.tan(camera0.fov / 180 * Math.PI * 0.5)) * 0.25;
         controllers.orbit.controller.zoomRange = new Vec2(0.5, maxZoom);
 

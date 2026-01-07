@@ -20,11 +20,11 @@ export class BoxConstraint {
 
     /**
      * 从原始 bbox 创建一个“收缩”的有效 bbox，用于限制 target 活动范围
-     * shrinkFactor: 0~1，越小范围越小（例如 0.7 表示各轴 halfExtents 乘 0.7）
+     * scaleFactor: 建议 >0；<1 表示收缩，>1 表示放大（例如 1.2 表示各轴 halfExtents 乘 1.2）
      */
-    static fromBoundingBox(bbox: BoundingBox, shrinkFactor: number = 0.7): BoxConstraint {
+    static fromBoundingBox(bbox: BoundingBox, scaleFactor: number = 0.7): BoxConstraint {
         const center = bbox.center.clone();
-        const half = bbox.halfExtents.clone().mulScalar(shrinkFactor);
+        const half = bbox.halfExtents.clone().mulScalar(scaleFactor);
         return new BoxConstraint(new BoundingBox(center, half));
     }
 
