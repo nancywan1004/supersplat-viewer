@@ -107,9 +107,7 @@ class InputController {
 
     frame = new InputFrame({
         move: [0, 0, 0],
-        rotate: [0, 0, 0],
-        // fly 模式下用于 dolly：调整 distance（与 orbit zoomRange 语义一致）
-        zoom: [0]
+        rotate: [0, 0, 0]
     });
 
     joystick: {
@@ -406,26 +404,12 @@ class InputController {
 
         // desktop move
         const v = tmpV1.set(0, 0, 0);
-        const keyMoveRaw = this._state.axis.clone();
-        const keyLen = keyMoveRaw.length();
-        const keyMove = keyLen > 1e-12 ? keyMoveRaw.mulScalar(1 / keyLen) : keyMoveRaw;
-        const flySpeed = fly * this.moveSpeed * (this._state.shift ? 4 : this._state.ctrl ? 0.25 : 1) * dt;
-        // fly 下：W/S（axis.z）改为调 distance（zoom），不再沿 forward 平移
-        v.add(tmpV2.set(keyMove.x, 0, 0).mulScalar(flySpeed));
-        if (fly) {
-            const denom = Math.max(1, distance);
-            const zoomFactorFromWS = -(keyMove.z * flySpeed) / denom; // W(+) => zoom in(distance 变小)
-            deltas.zoom.append([zoomFactorFromWS]);
-        }
+        const keyMove = this._state.axis.clone().normalize();
+        v.add(keyMove.mulScalar(fly * this.moveSpeed * (this._state.shift ? 4 : this._state.ctrl ? 0.25 : 1) * dt));
         const panMove = screenToWorld(camera, mouse[0], mouse[1], effectivePanDistance);
         v.add(panMove.mulScalar(pan));
-        // wheel：orbit 走 move[2]；fly 走 zoom（调整 distance）
-        const wheelZoom = wheel[0] * this.wheelSpeed * dt;
-        if (orbit) {
-            v.z += wheelZoom;
-        } else if (fly) {
-            deltas.zoom.append([wheelZoom]);
-        }
+        const wheelMove = new Vec3(0, 0, -wheel[0]);
+        v.add(wheelMove.mulScalar(this.wheelSpeed * dt));
         // FIXME: need to flip z axis for orbit camera
         deltas.move.append([v.x, v.y, orbit ? -v.z : v.z]);
 
@@ -472,13 +456,9 @@ class InputController {
         
         // Two-finger pinch zoom: works in both orbit and fly modes
         // In orbit mode: zoom in/out around target
-        // In fly mode: dolly by adjusting distance（与 W/S & wheel 一致）
-        const pinchZoom = pinch[0] * double * this.pinchSpeed * dt;
-        if (orbit) {
-            v.z += pinchZoom;
-        } else if (fly) {
-            deltas.zoom.append([pinchZoom]);
-        }
+        // In fly mode: move forward/backward
+        pinchMove.set(0, 0, pinch[0]);
+        v.add(pinchMove.mulScalar(double * this.pinchSpeed * dt));
         
         // Need to flip z axis for orbit camera (same as desktop move)
         deltas.move.append([v.x, v.y, orbit ? v.z : -v.z]);

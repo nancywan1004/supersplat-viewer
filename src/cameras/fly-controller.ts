@@ -19,11 +19,6 @@ const offset = new Vec3();
 const tmpPos = new Vec3();
 const tmpClamp = new Vec3();
 const tmpPrevPos = new Vec3();
-const tmpForward = new Vec3();
-const tmpFocus = new Vec3();
-const tmpCurForward = new Vec3();
-const tmpCurFocus = new Vec3();
-const tmpClamped = new Vec3();
 
 // Damping helper function
 const damp = (damping: number, dt: number) => {
@@ -36,10 +31,6 @@ class FlyController implements CameraController {
     rotateDamping: number = 0.1; // Lower damping for more responsive rotation (was 0.9)
     moveDamping: number = 0.5;
     pitchRange: Vec2 = new Vec2(-90, 90);
-    /**
-     * 与 orbit zoomRange 语义一致：限制 distance 的范围（用于 fly 模式的 dolly 缩放）
-     */
-    zoomRange: Vec2 = new Vec2(0.5, Infinity);
     private constraint: SphereConstraint | null = null;
     private targetConstraint: BoxConstraint | null = null;
 
@@ -88,7 +79,7 @@ class FlyController implements CameraController {
     }
 
     update(deltaTime: number, inputFrame: CameraFrame, camera: Camera) {
-        const { move, rotate, zoom } = inputFrame.read();
+        const { move, rotate } = inputFrame.read();
         
         // Apply rotation with roll support
         // rotate[0] = mouse/touch X (yaw)
@@ -109,32 +100,8 @@ class FlyController implements CameraController {
         rotation.transformVector(Vec3.FORWARD, forward);
         rotation.transformVector(Vec3.RIGHT, right);
         rotation.transformVector(Vec3.UP, up);
-
-        // fly 模式下的“缩放”（dolly）：调整 distance 的同时**必须更新 position**
-        // 否则 distance 只是元数据，画面不会有任何变化（你现在看到的“滚轮/W/S没反应”就是这个原因）。
-        //
-        // 这里用一个“虚拟 focus”保持不变：
-        // focus = position + forward * distance
-        // distance 改变后，position = focus - forward * newDistance
-        if (zoom && zoom[0] !== 0) {
-            // forward 使用 targetPose 的姿态（本帧期望姿态），让缩放方向与视线一致
-            rotation.setFromEulerAngles(this._targetPose.angles);
-            rotation.transformVector(Vec3.FORWARD, tmpForward);
-
-            // focus 基于当前 targetPose 的 position/distance（缩放前）
-            tmpFocus.copy(tmpForward).mulScalar(this._targetPose.distance).add(this._targetPose.position);
-
-            const desired = this._targetPose.distance * (1 + zoom[0]);
-            const newDistance = math.clamp(desired, this.zoomRange.x, this.zoomRange.y);
-            this._targetPose.distance = newDistance;
-
-            // 反解 position（产生真实的 dolly 位移）
-            this._targetPose.position.copy(tmpFocus).sub(tmpForward.mulScalar(newDistance));
-        }
         
         offset.set(0, 0, 0);
-        // move[2] 在 fly 中仅用于“真正的前后平移/飞行”（例如摇杆/自定义移动），
-        // 键盘 W/S、滚轮、pinch 已在 InputController 中改为 zoom(distance)。
         offset.add(forward.mulScalar(move[2]));
         offset.add(right.mulScalar(move[0]));
         offset.add(up.mulScalar(move[1]));
@@ -142,52 +109,28 @@ class FlyController implements CameraController {
         // 预测下一个位置
         tmpPos.copy(this._targetPose.position).add(offset);
         
-        // 应用约束（与 Orbit 行为一致）：
-        // - Orbit 约束的是 target/focus point（position + forward * distance）
-        // - Fly 若直接约束 position，贴边时容易出现“某个分量轻微越界 => move 被截断/卡死”的手感
-        // 因此 Fly 也改为约束 focus point，再反解 position（撞墙停止但不切线滑动）
+        // 应用约束（位置层面）：硬边界兜底，避免相机穿出范围
         if (this.targetConstraint) {
-            // 使用 target angles（本帧期望姿态）计算 forward
-            rotation.setFromEulerAngles(this._targetPose.angles);
-            rotation.transformVector(Vec3.FORWARD, tmpForward);
+            const currentIn = this.targetConstraint.containsPoint(this._pose.position);
+            if (currentIn) {
+                // inside -> (maybe) outside：沿 current->desired 截断到 AABB（比直接 clamp 更不“滑”）
+                this.targetConstraint.constrainSegment(this._pose.position, tmpPos, tmpPos);
+                this._targetPose.position.copy(tmpPos);
+            } else {
+                // 若当前已经在 box 外：不进行 snap（避免跳变）
+                // 仅阻止继续远离 box；允许用户飞回 box 内
+                this.targetConstraint.clampPoint(this._pose.position, tmpClamp);
+                const curDist = this._pose.position.distance(tmpClamp);
+                this.targetConstraint.clampPoint(tmpPos, tmpClamp);
+                const nextDist = tmpPos.distance(tmpClamp);
 
-            // desired focus = desiredPos + forward * distance
-            tmpFocus.copy(tmpForward).mulScalar(this._targetPose.distance).add(tmpPos);
-
-            // current focus = currentPos + forward(currentAngles) * currentDistance
-            rotation.setFromEulerAngles(this._pose.angles);
-            rotation.transformVector(Vec3.FORWARD, tmpCurForward);
-            tmpCurFocus.copy(tmpCurForward).mulScalar(this._pose.distance).add(this._pose.position);
-
-            const currentFocusIn = this.targetConstraint.containsPoint(tmpCurFocus);
-            const hasMoveInput = (move[0] !== 0) || (move[1] !== 0) || (move[2] !== 0) || (zoom && zoom[0] !== 0);
-            const isZoomOnly = (zoom && zoom[0] !== 0) && (move[0] === 0) && (move[1] === 0) && (move[2] === 0);
-
-            if (currentFocusIn || hasMoveInput) {
-                // 额外：即使当前 focus 在 box 外，也只在用户确实有移动输入时才开始 clamp，避免“无输入也突然 snap”
-                //
-                // 关键修复（你说的 zoom out 会沿切线漂移）：
-                // - clampPoint 会把 focus 拉到盒面上，导致 position 反解时出现“切线方向漂移”
-                // - 对于仅 zoom（沿 forward 前后移动）这种输入，更符合直觉的是“撞墙停止”：沿 currentFocus->desiredFocus 线段截断
-                if (isZoomOnly && currentFocusIn) {
-                    tmpClamped.copy(tmpCurFocus);
-                    const constrained = this.targetConstraint.constrainSegment(tmpCurFocus, tmpFocus, tmpClamped);
-                    if (constrained) {
-                        tmpPos.copy(tmpClamped).sub(tmpForward.mulScalar(this._targetPose.distance));
-                    }
-                    this._targetPose.position.copy(tmpPos);
+                if (nextDist > curDist + 1e-5) {
+                    // 继续远离：吃掉这次位移
+                    this._targetPose.position.copy(this._pose.position);
                 } else {
-                    // 默认：约束 focus；若 focus 被 clamp，则反解 position
-                    tmpClamped.copy(tmpFocus);
-                    const clamped = this.targetConstraint.clampPoint(tmpClamped, tmpClamped);
-                    if (clamped) {
-                        tmpPos.copy(tmpClamped).sub(tmpForward.mulScalar(this._targetPose.distance));
-                    }
+                    // 朝向 box 或保持：允许移动（即使仍在 box 外）
                     this._targetPose.position.copy(tmpPos);
                 }
-            } else {
-                // 无移动输入且当前 focus 在 box 外：保持当前位置（不 snap）
-                this._targetPose.position.copy(this._pose.position);
             }
         } else if (this.constraint) {
             this.constraint.clampToHard(tmpPos, this._targetPose.position);
@@ -205,24 +148,20 @@ class FlyController implements CameraController {
         );
         
         // 输出阶段：
-        // - Fly 与 Orbit 一致：约束 focus 点，而不是相机 position
-        // - 不能在这里再对 position 做 clamp，否则会与 focus 约束互相打架，导致贴边平移“卡死”
+        // - 若在 box 内：保持 box 内（保险）
+        // - 若在 box 外：不做 snap（避免跳变），由“继续远离限制 + 允许飞回”机制逐步回到 box 内
         tmpPrevPos.copy(camera.position);
 
         camera.position.copy(this._pose.position);
         if (this.targetConstraint) {
-            // 用当前 pose 计算 focus，并 clamp
-            rotation.setFromEulerAngles(this._pose.angles);
-            rotation.transformVector(Vec3.FORWARD, tmpForward);
-            tmpFocus.copy(tmpForward).mulScalar(this._pose.distance).add(camera.position);
-
-            const clamped = this.targetConstraint.clampPoint(tmpFocus, tmpFocus);
-            if (clamped) {
-                // 反解 position = focus - forward * distance
-                camera.position.copy(tmpFocus).sub(tmpForward.mulScalar(this._pose.distance));
-                // 同步回写，避免内部状态继续“顶着边界”累计导致卡死
-                this._pose.position.copy(camera.position);
-                this._targetPose.position.copy(camera.position);
+            if (this.targetConstraint.containsPoint(camera.position)) {
+                const clamped = this.clampPositionIntoBox(camera.position, tmpClamp);
+                if (clamped) {
+                    camera.position.copy(tmpClamp);
+                    // 同步回写，避免内部状态继续“顶着边界”累计导致卡死
+                    this._pose.position.copy(tmpClamp);
+                    this._targetPose.position.copy(tmpClamp);
+                }
             }
         } else if (this.constraint) {
             // 没有 box 约束时，用球形硬边界兜底（防止飞到特别远）
