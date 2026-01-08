@@ -59,6 +59,14 @@ class OrbitController implements CameraController {
             if (clamped) {
                 // 反解 position = target - forward * distance
                 pose.position.copy(tmpTarget).sub(tmpForward.mulScalar(pose.distance));
+
+                // 关键：同步 OrbitController 的内部状态（root/child pose）
+                // 否则内部仍“认为”target 在盒外，后续 zoom/pan 组合会出现卡住，需要再次平移才恢复。
+                // attach(...) 会用当前 pose 重新计算 focus，并重置内部 root/child pose。
+                p.position.copy(pose.position);
+                p.angles.copy(pose.angles);
+                p.distance = pose.distance;
+                this.controller.attach(p, false);
             }
         }
 

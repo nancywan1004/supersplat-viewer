@@ -220,7 +220,7 @@ class CameraManager {
         const cameraBoundsCfg = (settings as any).cameraBounds as undefined | {
             animScale?: number;
         };
-        const animScale = Math.max(0.01, cameraBoundsCfg?.animScale ?? 1.15);
+        const animScale = Math.max(0.01, cameraBoundsCfg?.animScale ?? 1.5);
 
         // 无动画时维持更“核心”的收缩范围；有动画时以融合 bbox 为主，缩放更保守，优先避免跳变
         const targetScaleFactor = usingAnimBbox ? animScale : 0.5;
@@ -234,8 +234,12 @@ class CameraManager {
         controllers.fly.setConstraint(this.constraint);
 
         // 给 orbit 设置一个合理的最大缩放距离（避免无限 zoom-out 让场景跑出视野）
+        // 之前的系数偏小，会导致 orbit 很早到达 maxZoom；切到 fly（通过位置平移）看起来还能继续“退远”。
+        // 这里改为基于“可 frame 场景的距离”的倍数，默认更宽松，手感与 fly 更一致。
         const sceneSize = fusedBbox.halfExtents.length();
-        const maxZoom = (sceneSize / Math.tan(camera0.fov / 180 * Math.PI * 0.5)) * 0.25;
+        const frameDistance = sceneSize / Math.sin(camera0.fov / 180 * Math.PI * 0.5);
+        const maxZoomMultiplier = 0.5;
+        const maxZoom = frameDistance * maxZoomMultiplier;
         controllers.orbit.controller.zoomRange = new Vec2(0.5, maxZoom);
 
         // 创建约束可视化
