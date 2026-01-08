@@ -241,6 +241,8 @@ class CameraManager {
         const maxZoomMultiplier = 0.5;
         const maxZoom = frameDistance * maxZoomMultiplier;
         controllers.orbit.controller.zoomRange = new Vec2(0.5, maxZoom);
+        // fly 模式下 W/S 与滚轮/捏合缩放将调整 distance（dolly），因此使用与 orbit 一致的 zoomRange
+        controllers.fly.zoomRange = new Vec2(0.5, maxZoom);
 
         // 创建约束可视化
         //this.createConstraintVisualizer(app, this.constraint);

@@ -6,6 +6,7 @@ import { vecToAngles } from '../core/math';
 type CameraFrame = InputFrame<{
     move: [number, number, number];
     rotate: [number, number, number];
+    zoom: [number];
 }>;
 
 const rotation = new Quat();
