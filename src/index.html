@@ -43,7 +43,7 @@
                 unified: url.searchParams.has('unified'),
                 aa: url.searchParams.has('aa'),
                 noreveal: url.searchParams.has('noreveal'),
-                noBottomUI: true  // url.searchParams.has('noBottomUI')
+                noBottomUI: false  // url.searchParams.has('noBottomUI')
             };
 
             window.sse = {
@@ -194,6 +194,10 @@
                 <div class="settingsRow">
                     <div id="cameraPathCheck" class="checkMark hidden">✓</div>
                     <div id="cameraPathOption">Show Camera Path</div>
+                </div>
+                <div class="settingsRow">
+                    <div id="cameraBoundsCheck" class="checkMark hidden">✓</div>
+                    <div id="cameraBoundsOption">Show Camera BoundingBox</div>
                 </div>
                 <div id="revealPanel" class="hidden">
                     <div class="divider"></div>

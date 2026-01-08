@@ -40,6 +40,7 @@ const initUI = (global: Global) => {
         'orbitCamera', 'flyCamera',
         'hqCheck', 'hqOption', 'lqCheck', 'lqOption',
         'cameraPathCheck', 'cameraPathOption',
+        'cameraBoundsCheck', 'cameraBoundsOption',
         'revealPanel', 'revealType', 'revealRestart',
         'skyboxRow', 'skyboxSelect',
         'reset', 'frame',
@@ -566,6 +567,19 @@ const initUI = (global: Global) => {
             dom.cameraPathCheck.classList.remove('hidden');
         } else {
             dom.cameraPathCheck.classList.add('hidden');
+        }
+    });
+
+    // Camera bounding box visualization toggle (independent from camera path)
+    dom.cameraBoundsOption.addEventListener('click', () => {
+        state.showCameraBoundingBox = !state.showCameraBoundingBox;
+    });
+
+    events.on('showCameraBoundingBox:changed', (value) => {
+        if (value) {
+            dom.cameraBoundsCheck.classList.remove('hidden');
+        } else {
+            dom.cameraBoundsCheck.classList.add('hidden');
         }
     });
 

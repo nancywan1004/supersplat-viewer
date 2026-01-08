@@ -42,6 +42,7 @@ type State = {
     controlsHidden: boolean;
     hasRevealEffect: boolean;
     showCameraPath: boolean;                    // show camera path visualization
+    showCameraBoundingBox: boolean;            // show camera bounding box (animCoreBbox preferred, fallback to scene bbox)
 };
 
 type Global = {

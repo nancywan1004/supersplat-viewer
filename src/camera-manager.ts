@@ -141,7 +141,7 @@ class CameraManager {
     private constraint: SphereConstraint | null = null;
     private targetConstraint: BoxConstraint | null = null;
     private constraintVisualizer: Entity | null = null;
-    private animBoundsVisualizer: Entity | null = null;
+    private cameraBoundsVisualizer: Entity | null = null;
     private debugBoundsLayerId: number | null = null;
     private cameraEntity: Entity;
 
@@ -201,17 +201,18 @@ class CameraManager {
         // TODO: 暂时不使用fusedBbox，而是直接使用animCoreBbox，后续根据情况来优化
         const fusedBbox = animCoreBbox ? animCoreBbox : bbox;
 
-        // 可视化：动画路径计算出来的 bbox（AABB）
-        // 默认绑定到现有 UI 的 “Show Camera Path” 开关（state.showCameraPath）
-        if (animCoreBbox) {
-            this.animBoundsVisualizer = this.createBoundingBoxVisualizer(app, animCoreBbox, new Color(1, 0, 1, 1));
-            this.animBoundsVisualizer.enabled = !!state.showCameraPath;
-            events.on('showCameraPath:changed', (visible: boolean) => {
-                if (this.animBoundsVisualizer) {
-                    this.animBoundsVisualizer.enabled = visible;
-                }
-            });
-        }
+        // 可视化：相机 BoundingBox（AABB）
+        // - 优先显示 animCoreBbox（紫色）
+        // - 若无 animCoreBbox，则显示场景 bbox
+        // - 独立于 “Show Camera Path”，通过 Settings -> Show Camera BoundingBox 控制
+        const bboxForCameraBounds = animCoreBbox ?? bbox;
+        this.cameraBoundsVisualizer = this.createBoundingBoxVisualizer(app, bboxForCameraBounds, new Color(1, 0, 1, 1));
+        this.cameraBoundsVisualizer.enabled = !!(state as any).showCameraBoundingBox;
+        events.on('showCameraBoundingBox:changed', (visible: boolean) => {
+            if (this.cameraBoundsVisualizer) {
+                this.cameraBoundsVisualizer.enabled = visible;
+            }
+        });
 
         // 约束策略：
         // - Orbit：限制 target/focus point 在收缩后的 bbox 内（避免贴球面滑动、pan 越界）
@@ -241,9 +242,6 @@ class CameraManager {
         const maxZoomMultiplier = 0.5;
         const maxZoom = frameDistance * maxZoomMultiplier;
         controllers.orbit.controller.zoomRange = new Vec2(0.5, maxZoom);
-
-        // 创建约束可视化
-        //this.createConstraintVisualizer(app, this.constraint);
 
         const getController = (cameraMode: 'orbit' | 'anim' | 'fly'): CameraController => {
             return controllers[cameraMode];
@@ -466,45 +464,6 @@ class CameraManager {
 
             controllers.orbit.goto(tmpCamera);
         });
-    }
-
-    /**
-     * 创建约束可视化（显示bounding sphere）
-     */
-    private createConstraintVisualizer(app: any, constraint: SphereConstraint): void {
-        if (!constraint) return;
-
-        const sphereEntity = new Entity('constraintSphere');
-        
-        // 创建材质（半透明绿色）
-        const material = new StandardMaterial();
-        material.diffuse = new Color(0, 1, 0); // 绿色
-        material.emissive = new Color(0, 0.3, 0);
-        material.update();
-
-        // 创建sphere渲染组件
-        sphereEntity.addComponent('render', {
-            type: 'sphere',
-            material: material
-        });
-
-        // 设置位置和大小
-        sphereEntity.setPosition(constraint.sphere.center);
-        const scale = constraint.sphere.radius * 2;
-        sphereEntity.setLocalScale(scale, scale, scale);
-
-        // 设置为半透明（通过render组件的castShadows和receiveShadows控制）
-        const renderComponent = sphereEntity.render;
-        if (renderComponent) {
-            renderComponent.castShadows = false;
-            renderComponent.receiveShadows = false;
-        }
-
-        app.root.addChild(sphereEntity);
-        this.constraintVisualizer = sphereEntity;
-
-        // 默认可见
-        sphereEntity.enabled = true;
     }
 
     private ensureDebugBoundsLayer(app: any): number {

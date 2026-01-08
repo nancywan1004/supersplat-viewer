@@ -200,7 +200,8 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         isFullscreen: false,
         controlsHidden: false,
         hasRevealEffect: false,
-        showCameraPath: false
+        showCameraPath: false,
+        showCameraBoundingBox: false
     });
 
     // 如果设置了 noreveal 参数，清除 reveal effect 配置
