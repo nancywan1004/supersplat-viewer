@@ -14,6 +14,10 @@ const tmpVec = new Vec3();
 const tmpTarget = new Vec3();
 const tmpForward = new Vec3();
 const tmpQuat = new Quat();
+const tmpPrevPos = new Vec3();
+const tmpClampPos = new Vec3();
+const tmpRemain = new Vec3();
+const tmpNormal2 = new Vec3();
 
 class OrbitController implements CameraController {
     controller: OrbitControllerPC;
@@ -29,7 +33,7 @@ class OrbitController implements CameraController {
     }
 
     /**
-     * 设置 target 约束（用于 pan 平移）
+     * 设置约束（与 Fly 保持一致：约束 camera.position 活动范围）
      */
     setTargetConstraint(constraint: BoxConstraint | null): void {
         this.targetConstraint = constraint;
@@ -43,26 +47,75 @@ class OrbitController implements CameraController {
     }
 
     update(deltaTime: number, inputFrame: CameraFrame, camera: Camera) {
+        // 记录上一帧位置，用于“撞墙后滑动”与 segment 约束
+        tmpPrevPos.copy(camera.position);
+
         const pose = this.controller.update(inputFrame, deltaTime);
 
         // 约束策略：
-        // - **target/focus point** 限制在收缩后的 BoundingBox 内（符合“场景核心区域”）
-        // - zoom 只通过 distance 控制（不再用球形位置约束，避免贴球面滑动）
+        // - 为了与 Fly 边界一致：限制 **camera.position** 在 BoundingBox 内（含“撞墙后沿边界滑动”）
+        // - zoom 仍由 distance 控制（OrbitControllerPC 的语义）
         if (this.targetConstraint) {
-            // 计算 desired target（本帧输入）
-            tmpQuat.setFromEulerAngles(pose.angles);
-            tmpQuat.transformVector(Vec3.FORWARD, tmpForward);
-            tmpTarget.copy(tmpForward).mulScalar(pose.distance).add(pose.position);
+            const desiredPos = pose.position;
+            const currentPos = tmpPrevPos;
 
-            // clamp target 到 box 内
-            const clamped = this.targetConstraint.clampPoint(tmpTarget, tmpTarget);
-            if (clamped) {
-                // 反解 position = target - forward * distance
-                pose.position.copy(tmpTarget).sub(tmpForward.mulScalar(pose.distance));
+            const currentIn = this.targetConstraint.containsPoint(currentPos);
+            const desiredIn = this.targetConstraint.containsPoint(desiredPos);
 
-                // 关键：同步 OrbitController 的内部状态（root/child pose）
-                // 否则内部仍“认为”target 在盒外，后续 zoom/pan 组合会出现卡住，需要再次平移才恢复。
-                // attach(...) 会用当前 pose 重新计算 focus，并重置内部 root/child pose。
+            let changed = false;
+
+            if (desiredIn) {
+                // no-op
+            } else if (currentIn) {
+                // inside -> outside：先撞墙到盒边，再把剩余位移投影到盒面切向（允许沿边界滑动，避免卡死）
+                this.targetConstraint.constrainSegment(currentPos, desiredPos, tmpClampPos);
+                tmpRemain.sub2(desiredPos, tmpClampPos);
+
+                const min = this.targetConstraint.bbox.getMin();
+                const max = this.targetConstraint.bbox.getMax();
+                const e = this.targetConstraint.epsilon;
+                const tol = e * 2 + 1e-6;
+
+                const minX = (max.x - min.x > 2 * e) ? (min.x + e) : min.x;
+                const maxX = (max.x - min.x > 2 * e) ? (max.x - e) : max.x;
+                const minY = (max.y - min.y > 2 * e) ? (min.y + e) : min.y;
+                const maxY = (max.y - min.y > 2 * e) ? (max.y - e) : max.y;
+                const minZ = (max.z - min.z > 2 * e) ? (min.z + e) : min.z;
+                const maxZ = (max.z - min.z > 2 * e) ? (max.z - e) : max.z;
+
+                tmpNormal2.set(0, 0, 0);
+                if (Math.abs(tmpClampPos.x - minX) <= tol) tmpNormal2.x = -1;
+                else if (Math.abs(tmpClampPos.x - maxX) <= tol) tmpNormal2.x = 1;
+                if (Math.abs(tmpClampPos.y - minY) <= tol) tmpNormal2.y = -1;
+                else if (Math.abs(tmpClampPos.y - maxY) <= tol) tmpNormal2.y = 1;
+                if (Math.abs(tmpClampPos.z - minZ) <= tol) tmpNormal2.z = -1;
+                else if (Math.abs(tmpClampPos.z - maxZ) <= tol) tmpNormal2.z = 1;
+
+                if (tmpNormal2.x !== 0 && tmpRemain.x * tmpNormal2.x > 0) tmpRemain.x = 0;
+                if (tmpNormal2.y !== 0 && tmpRemain.y * tmpNormal2.y > 0) tmpRemain.y = 0;
+                if (tmpNormal2.z !== 0 && tmpRemain.z * tmpNormal2.z > 0) tmpRemain.z = 0;
+
+                desiredPos.copy(tmpClampPos).add(tmpRemain);
+                changed = this.targetConstraint.clampPoint(desiredPos, desiredPos) || changed;
+            } else {
+                // 当前在盒外：不 snap，只阻止继续远离；允许用户移动回盒内
+                this.targetConstraint.clampPoint(currentPos, tmpClampPos);
+                const curDist = currentPos.distance(tmpClampPos);
+                this.targetConstraint.clampPoint(desiredPos, tmpClampPos);
+                const nextDist = desiredPos.distance(tmpClampPos);
+                if (nextDist > curDist + 1e-5) {
+                    desiredPos.copy(currentPos);
+                    changed = true;
+                }
+            }
+
+            // damping 之后 controller 的 pose 仍可能短暂落在盒外，这里强制拉回并同步内部状态，避免切换到 fly 时出现回弹
+            if (!desiredIn) {
+                changed = this.targetConstraint.clampPoint(desiredPos, desiredPos) || changed;
+            }
+
+            if (changed) {
+                // 同步 OrbitControllerPC 内部状态，避免后续输入“顶着边界”累计导致怪异手感
                 p.position.copy(pose.position);
                 p.angles.copy(pose.angles);
                 p.distance = pose.distance;

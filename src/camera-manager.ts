@@ -215,7 +215,7 @@ class CameraManager {
         });
 
         // 约束策略：
-        // - Orbit：限制 target/focus point 在收缩后的 bbox 内（避免贴球面滑动、pan 越界）
+        // - Orbit：限制 **camera.position** 在收缩后的 bbox 内（与 Fly 保持一致；避免两种模式边界不对齐）
         // - Fly：保持原球形硬边界兜底（防止飞行穿出场景太远）
         // 注意：animScale 允许 >1（放大），用于给“融合后 bbox”留出余量，减少贴边与切换抖动。
         const cameraBoundsCfg = (settings as any).cameraBounds as undefined | {
@@ -242,6 +242,8 @@ class CameraManager {
         const maxZoomMultiplier = 0.5;
         const maxZoom = frameDistance * maxZoomMultiplier;
         controllers.orbit.controller.zoomRange = new Vec2(0.5, maxZoom);
+        // Fly 的 focusDistance 也 clamp 到同一 zoomRange，保证两种模式 target clamp 时的“相机位置外壳范围”一致
+        controllers.fly.setFocusDistanceRange(controllers.orbit.controller.zoomRange);
 
         const getController = (cameraMode: 'orbit' | 'anim' | 'fly'): CameraController => {
             return controllers[cameraMode];
