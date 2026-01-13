@@ -5,6 +5,7 @@ import { GsplatRevealRain } from './reveal-effect/gsplat-reveal-rain';
 import { Global } from './types';
 import { RevealEffect as RevealConfig } from './settings';
 import { GsplatRevealSmooth } from './reveal-effect/gsplat-reveal-smooth';
+import { GsplatRevealPiecesRecover } from './reveal-effect/gsplat-reveal-pieces-recover';
 // import { GsplatRevealRadial } from 'playcanvas/scripts/esm/gsplat/reveal-radial.mjs';
 // import { GsplatRevealRain } from 'playcanvas/scripts/esm/gsplat/reveal-rain.mjs';
 
@@ -198,9 +199,53 @@ export class RevealController {
     }
 
     /**
+     * 创建pieces-recover reveal script
+     */
+    private createPiecesRecoverScript() {
+        if (!this.gsplatEntity || !this.gsplatEntity.script) {
+            console.warn('Cannot create pieces-recover script - entity or script component not ready');
+            return null;
+        }
+
+        console.log('Creating pieces-recover reveal script');
+
+        try {
+            const script = this.gsplatEntity.script.create(GsplatRevealPiecesRecover) as any;
+            if (script) {
+                // 配置script属性
+                script.scatterDistance = 2.0;
+                script.scatterDuration = 1.0;
+                script.holdDuration = 0;
+                script.recoverDuration = 3.5;
+                script.noiseIntensity = 0.3;
+                script.scatterDirection.set(1, 1, 1); // 向上散开
+                script.endRadius = this.config.radius;
+                
+                // 设置 reveal center
+                if (script.center && this.revealCenter) {
+                    script.center.set(-this.revealCenter[0], -this.revealCenter[1], this.revealCenter[2]);
+                }
+                
+                // 初始状态设为启用
+                script.enabled = true;
+                
+                console.log('Pieces-recover script created with config:', {
+                    center: script.center,
+                    endRadius: script.endRadius,
+                    scatterDistance: script.scatterDistance
+                });
+            }
+            return script;
+        } catch (error) {
+            console.error('Failed to create pieces-recover script:', error);
+            return null;
+        }
+    }
+
+    /**
      * 创建指定类型的reveal效果 - 类似原始实现中的createEffect函数
      */
-    private createEffect(effectName: 'radial' | 'rain' | 'smooth') {
+    private createEffect(effectName: 'radial' | 'rain' | 'smooth' | 'pieces-recover') {
         if (!this.gsplatEntity || !this.config) {
             console.log('Cannot create effect - entity not ready or config not set');
             return;
@@ -234,6 +279,9 @@ export class RevealController {
                 break;
             case 'smooth':
                 script = this.createSmoothScript();
+                break;
+            case 'pieces-recover':
+                script = this.createPiecesRecoverScript();
                 break;
             default:
                 console.warn('Unknown effect type:', effectName);
@@ -278,6 +326,7 @@ export class RevealController {
             this.gsplatEntity.script.destroy('gsplatRevealRadial');
             this.gsplatEntity.script.destroy('gsplatRevealRain');
             this.gsplatEntity.script.destroy('gsplatRevealSmooth');
+            this.gsplatEntity.script.destroy('gsplatRevealPiecesRecover');
             // 未来可以添加更多类型
         } catch (error) {
             console.warn('Error destroying reveal scripts:', error);
