@@ -31,12 +31,6 @@ void modifyCenter(inout vec3 center) {
 void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
     initShared(modifiedCenter);
     
-    // 早期退出优化：超出半径的点直接隐藏
-    if (g_dist > uEndRadius) {
-        gsplatMakeRound(covA, covB, 0.0);
-        return;
-    }
-    
     // AABB crop 效果：检查 splat 是否在 AABB 内
     bool insideAABB = all(greaterThanEqual(modifiedCenter, uAabbMin)) && all(lessThanEqual(modifiedCenter, uAabbMax));
     
@@ -93,12 +87,6 @@ void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA,
 
 void modifyColor(vec3 center, inout vec4 color) {
     initShared(center);
-    
-    // 早期退出优化
-    if (g_dist > uEndRadius) {
-        color.a = 0.0;
-        return;
-    }
     
     // AABB crop 效果：检查 splat 是否在 AABB 内
     bool insideAABB = all(greaterThanEqual(center, uAabbMin)) && all(lessThanEqual(center, uAabbMax));
@@ -164,12 +152,6 @@ fn modifyCenter(center: ptr<function, vec3f>) {
 fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<function, vec3f>, covB: ptr<function, vec3f>) {
     initShared(modifiedCenter);
     
-    // 早期退出优化：超出半径的点直接隐藏
-    if (g_dist > uniform.uEndRadius) {
-        gsplatMakeRound(covA, covB, 0.0);
-        return;
-    }
-    
     // AABB crop 效果：检查 splat 是否在 AABB 内
     let insideAABB = all(modifiedCenter >= uniform.uAabbMin) && all(modifiedCenter <= uniform.uAabbMax);
     
@@ -225,12 +207,6 @@ fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<func
 
 fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
     initShared(center);
-    
-    // 早期退出优化
-    if (g_dist > uniform.uEndRadius) {
-        (*color).a = 0.0;
-        return;
-    }
     
     // AABB crop 效果：检查 splat 是否在 AABB 内
     let insideAABB = all(center >= uniform.uAabbMin) && all(center <= uniform.uAabbMax);
