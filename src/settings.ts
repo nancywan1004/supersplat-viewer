@@ -36,8 +36,9 @@ const normalizeKeyframes = (keyframes: LegacyKeyframes | KeyFrameItem[]): Legacy
         times.push(timeValue);
 
         // Only apply xy axis conversion for non-LegacyKeyFrame format
-        // LegacyKeyFrame has 'times' or 'values' property, which means it's already processed
-        const isLegacyKeyFrame = (frame as any).times !== undefined || (frame as any).values !== undefined;
+        // LegacyKeyFrame has 'times' as array or 'values' property, which means it's already processed
+        // KeyFrameItem has 'times' as a single number (or 'time'), so check the type
+        const isLegacyKeyFrame = Array.isArray((frame as any).times) || (frame as any).values !== undefined;
 
         if (!isLegacyKeyFrame) {
             if (Array.isArray(frame.position) && frame.position.length === 3) {
