@@ -52,16 +52,26 @@ void initShared(vec3 center) {
     g_tRecover = g_tScatter + uScatterDuration;
     g_phase = 0.0;
     
-    // Determine current phase (only 3 phases now: before, scatter, recover)
-    if (uTime < g_tScatter) {
-        g_phase = 0.0; // Before scatter
-    } else if (uTime < g_tRecover) {
-        g_phase = 1.0; // Scattering
+    // Determine current phase
+    // NOTE: Scatter phase (phase 1.0) is commented out - only recovery phase is active
+    if (uTime < g_tRecover) {
+        g_phase = 0.0; // Before recovery (particles start in scattered state)
     } else if (uTime < g_tRecover + uRecoverDuration) {
-        g_phase = 2.0; // Recovering (was phase 3)
+        g_phase = 2.0; // Recovering (directly start from scattered state)
     } else {
-        g_phase = 3.0; // Complete (was phase 4)
+        g_phase = 3.0; // Complete
     }
+    
+    // OLD PHASE LOGIC (commented out - scatter phase disabled):
+    // if (uTime < g_tScatter) {
+    //     g_phase = 0.0; // Before scatter
+    // } else if (uTime < g_tRecover) {
+    //     g_phase = 1.0; // Scattering
+    // } else if (uTime < g_tRecover + uRecoverDuration) {
+    //     g_phase = 2.0; // Recovering (was phase 3)
+    // } else {
+    //     g_phase = 3.0; // Complete (was phase 4)
+    // }
 }
 
 void modifyCenter(inout vec3 center) {
@@ -165,89 +175,92 @@ void modifyCenter(inout vec3 center) {
     float scatterFactor = streamScatterBase * perParticleVariationDist; // Range: ~0.49 to ~1.75
     scatterFactor = max(0.4, scatterFactor); // Ensure minimum movement
     
-    if (g_phase == 1.0) {
-        // Scattering phase: smooth stream-based dust expansion like natural smoke trails
-        float t = (uTime - g_tScatter) / uScatterDuration; // 0 to 1
-        
-        // Smooth easing for natural acceleration
-        float easedT = t * t * (3.0 - 2.0 * t); // Smoothstep: slow start, slow end
-        
-        // Smooth speed variation using trilinear interpolation
-        float noiseScale1 = 1.2;  // Match the scale from above
-        float noiseScale2 = 3.5;
-        vec3 noisePos1 = (originalCenter - uCenter) * noiseScale1;
-        vec3 noisePos2 = (originalCenter - uCenter) * noiseScale2;
-        vec3 i1 = floor(noisePos1);
-        vec3 f1 = fract(noisePos1);
-        f1 = f1 * f1 * (3.0 - 2.0 * f1); // Smoothstep
-        
-        // Trilinear interpolation for smooth speed variation
-        float s000 = hash(i1);
-        float s100 = hash(i1 + vec3(1.0, 0.0, 0.0));
-        float s010 = hash(i1 + vec3(0.0, 1.0, 0.0));
-        float s110 = hash(i1 + vec3(1.0, 1.0, 0.0));
-        float s001 = hash(i1 + vec3(0.0, 0.0, 1.0));
-        float s101 = hash(i1 + vec3(1.0, 0.0, 1.0));
-        float s011 = hash(i1 + vec3(0.0, 1.0, 1.0));
-        float s111 = hash(i1 + vec3(1.0, 1.0, 1.0));
-        
-        float speedHash1 = mix(
-            mix(mix(s000, s100, f1.x), mix(s010, s110, f1.x), f1.y),
-            mix(mix(s001, s101, f1.x), mix(s011, s111, f1.x), f1.y),
-            f1.z
-        );
-        
-        vec3 frac2 = fract(noisePos2);
-        float smooth2 = smoothstep(0.0, 1.0, frac2.x) * smoothstep(0.0, 1.0, frac2.y) * smoothstep(0.0, 1.0, frac2.z);
-        float speedHash2 = hash(floor(noisePos2));
-        
-        // Smooth speed variation - creates elongated trails
-        float speedVariation = 0.85 + speedHash1 * 0.3 + speedHash2 * smooth2 * 0.15; // 0.85 to 1.3 (smooth)
-        float perParticleSpeed = 0.88 + randomSeed * 0.24; // Per-particle: 0.88 to 1.12 (natural spread)
-        easedT *= speedVariation * perParticleSpeed;
-        easedT = clamp(easedT, 0.0, 1.4);
-        
-        float scatterAmount = easedT * uScatterDistance * scatterFactor;
-        
-        // Smooth turbulence using trilinear interpolation
-        vec3 turbI1 = floor(noisePos1 + vec3(50.0, 0.0, 0.0));
-        vec3 turbF1 = fract(noisePos1 + vec3(50.0, 0.0, 0.0));
-        turbF1 = turbF1 * turbF1 * (3.0 - 2.0 * turbF1);
-        
-        vec3 t000 = randomDir(turbI1);
-        vec3 t100 = randomDir(turbI1 + vec3(1.0, 0.0, 0.0));
-        vec3 t010 = randomDir(turbI1 + vec3(0.0, 1.0, 0.0));
-        vec3 t110 = randomDir(turbI1 + vec3(1.0, 1.0, 0.0));
-        vec3 t001 = randomDir(turbI1 + vec3(0.0, 0.0, 1.0));
-        vec3 t101 = randomDir(turbI1 + vec3(1.0, 0.0, 1.0));
-        vec3 t011 = randomDir(turbI1 + vec3(0.0, 1.0, 1.0));
-        vec3 t111 = randomDir(turbI1 + vec3(1.0, 1.0, 1.0));
-        
-        vec3 turbDir1 = normalize(mix(
-            mix(mix(t000, t100, turbF1.x), mix(t010, t110, turbF1.x), turbF1.y),
-            mix(mix(t001, t101, turbF1.x), mix(t011, t111, turbF1.x), turbF1.y),
-            turbF1.z
-        ));
-        
-        vec3 turbDir2 = randomDir(floor(noisePos2 + vec3(100.0, 0.0, 0.0)));
-        vec3 streamTurbulence = normalize(turbDir1 * 0.7 + turbDir2 * 0.3 * smooth2) * uNoiseIntensity * easedT * 0.1; // Moderate: 10%
-        
-        // Natural jitter for organic smoke feel
-        vec3 jitter = randomDir(originalCenter + vec3(100.0, 0.0, 0.0)) * uNoiseIntensity * easedT * 0.06; // Moderate: 6%
-        
-        // Time-based curl for dynamic smoke-like motion
-        float curlHash = speedHash1; // Use smooth interpolated hash
-        float curlStrength = sin(uTime * 0.4 + curlHash * 6.28) * 0.1 * easedT; // Moderate: 10%
-        vec3 curlDir = cross(scatterDir, normalize(turbDir1));
-        vec3 curl = normalize(curlDir) * curlStrength;
-        
-        center = originalCenter + scatterDir * scatterAmount + streamTurbulence + jitter + curl;
-    } else if (g_phase == 2.0) {
-        // Recovering phase: CLEAN and DIRECT return to original position
-        float t = (uTime - g_tRecover) / uRecoverDuration; // 0 to 1
+    // SCATTER PHASE COMMENTED OUT - particles start in scattered state
+    // if (g_phase == 1.0) {
+    //     // Scattering phase: smooth stream-based dust expansion like natural smoke trails
+    //     float t = (uTime - g_tScatter) / uScatterDuration; // 0 to 1
+    //     
+    //     // Smooth easing for natural acceleration
+    //     float easedT = t * t * (3.0 - 2.0 * t); // Smoothstep: slow start, slow end
+    //     
+    //     // Smooth speed variation using trilinear interpolation
+    //     float noiseScale1 = 1.2;  // Match the scale from above
+    //     float noiseScale2 = 3.5;
+    //     vec3 noisePos1 = (originalCenter - uCenter) * noiseScale1;
+    //     vec3 noisePos2 = (originalCenter - uCenter) * noiseScale2;
+    //     vec3 i1 = floor(noisePos1);
+    //     vec3 f1 = fract(noisePos1);
+    //     f1 = f1 * f1 * (3.0 - 2.0 * f1); // Smoothstep
+    //     
+    //     // Trilinear interpolation for smooth speed variation
+    //     float s000 = hash(i1);
+    //     float s100 = hash(i1 + vec3(1.0, 0.0, 0.0));
+    //     float s010 = hash(i1 + vec3(0.0, 1.0, 0.0));
+    //     float s110 = hash(i1 + vec3(1.0, 1.0, 0.0));
+    //     float s001 = hash(i1 + vec3(0.0, 0.0, 1.0));
+    //     float s101 = hash(i1 + vec3(1.0, 0.0, 1.0));
+    //     float s011 = hash(i1 + vec3(0.0, 1.0, 1.0));
+    //     float s111 = hash(i1 + vec3(1.0, 1.0, 1.0));
+    //     
+    //     float speedHash1 = mix(
+    //         mix(mix(s000, s100, f1.x), mix(s010, s110, f1.x), f1.y),
+    //         mix(mix(s001, s101, f1.x), mix(s011, s111, f1.x), f1.y),
+    //         f1.z
+    //     );
+    //     
+    //     vec3 frac2 = fract(noisePos2);
+    //     float smooth2 = smoothstep(0.0, 1.0, frac2.x) * smoothstep(0.0, 1.0, frac2.y) * smoothstep(0.0, 1.0, frac2.z);
+    //     float speedHash2 = hash(floor(noisePos2));
+    //     
+    //     // Smooth speed variation - creates elongated trails
+    //     float speedVariation = 0.85 + speedHash1 * 0.3 + speedHash2 * smooth2 * 0.15; // 0.85 to 1.3 (smooth)
+    //     float perParticleSpeed = 0.88 + randomSeed * 0.24; // Per-particle: 0.88 to 1.12 (natural spread)
+    //     easedT *= speedVariation * perParticleSpeed;
+    //     easedT = clamp(easedT, 0.0, 1.4);
+    //     
+    //     float scatterAmount = easedT * uScatterDistance * scatterFactor;
+    //     
+    //     // Smooth turbulence using trilinear interpolation
+    //     vec3 turbI1 = floor(noisePos1 + vec3(50.0, 0.0, 0.0));
+    //     vec3 turbF1 = fract(noisePos1 + vec3(50.0, 0.0, 0.0));
+    //     turbF1 = turbF1 * turbF1 * (3.0 - 2.0 * turbF1);
+    //     
+    //     vec3 t000 = randomDir(turbI1);
+    //     vec3 t100 = randomDir(turbI1 + vec3(1.0, 0.0, 0.0));
+    //     vec3 t010 = randomDir(turbI1 + vec3(0.0, 1.0, 0.0));
+    //     vec3 t110 = randomDir(turbI1 + vec3(1.0, 1.0, 0.0));
+    //     vec3 t001 = randomDir(turbI1 + vec3(0.0, 0.0, 1.0));
+    //     vec3 t101 = randomDir(turbI1 + vec3(1.0, 0.0, 1.0));
+    //     vec3 t011 = randomDir(turbI1 + vec3(0.0, 1.0, 1.0));
+    //     vec3 t111 = randomDir(turbI1 + vec3(1.0, 1.0, 1.0));
+    //     
+    //     vec3 turbDir1 = normalize(mix(
+    //         mix(mix(t000, t100, turbF1.x), mix(t010, t110, turbF1.x), turbF1.y),
+    //         mix(mix(t001, t101, turbF1.x), mix(t011, t111, turbF1.x), turbF1.y),
+    //         turbF1.z
+    //     ));
+    //     
+    //     vec3 turbDir2 = randomDir(floor(noisePos2 + vec3(100.0, 0.0, 0.0)));
+    //     vec3 streamTurbulence = normalize(turbDir1 * 0.7 + turbDir2 * 0.3 * smooth2) * uNoiseIntensity * easedT * 0.1; // Moderate: 10%
+    //     
+    //     // Natural jitter for organic smoke feel
+    //     vec3 jitter = randomDir(originalCenter + vec3(100.0, 0.0, 0.0)) * uNoiseIntensity * easedT * 0.06; // Moderate: 6%
+    //     
+    //     // Time-based curl for dynamic smoke-like motion
+    //     float curlHash = speedHash1; // Use smooth interpolated hash
+    //     float curlStrength = sin(uTime * 0.4 + curlHash * 6.28) * 0.1 * easedT; // Moderate: 10%
+    //     vec3 curlDir = cross(scatterDir, normalize(turbDir1));
+    //     vec3 curl = normalize(curlDir) * curlStrength;
+    //     
+    //     center = originalCenter + scatterDir * scatterAmount + streamTurbulence + jitter + curl;
+    // } else 
+    if (g_phase == 0.0 || g_phase == 2.0) {
+        // Phase 0.0: Show fully scattered state (before recovery starts)
+        // Phase 2.0: Recovering phase: CLEAN and DIRECT return to original position
+        float t = (g_phase == 0.0) ? 0.0 : (uTime - g_tRecover) / uRecoverDuration; // 0 to 1
         
         // Use smooth ease-out curve for natural deceleration
-        float easedT = 1.0 - pow(1.0 - t, 3.0);
+        float easedT = (g_phase == 0.0) ? 0.0 : (1.0 - pow(1.0 - t, 3.0)); // 0.0 for phase 0 (fully scattered), eased for phase 2
         
         // Reconstruct scatter phase end position (must match scatter phase calculation)
         float scatterAmount = uScatterDistance * scatterFactor;
@@ -357,33 +370,25 @@ void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA,
     // Now initialize shared variables using modifiedCenter for phase calculation
     initShared(modifiedCenter);
     
-    // Before scatter: only hide particles within range
-    // Distant particles remain visible and will participate in the effect
-    if (g_phase < 1.0) {
-        if (isWithinRange) {
-        gsplatMakeRound(covA, covB, 0.0);
-        return;
-    }
-        // Distant particles: remain visible before scatter starts
-        return; // Keep original shape
-    }
-    
     // All particles participate in the effect (both within and outside range)
-    
-    // During all phases, show the splats (much smaller during scatter for "explosion" effect)
     float originalSize = gsplatExtractSize(covA, covB);
     
-    if (g_phase == 1.0) {
-        // Scattering: make particles VERY small (10-25% of original) for dust/powder effect
-        // Use per-splat variation for more chaotic effect
-        float randomSeed = hash(originalCenter);
-        float sizeFactor = 0.10 + randomSeed * 0.15; // 0.10 to 0.25 (10% to 25% of original)
-        float size = originalSize * sizeFactor;
-        // Make them round for dust particle appearance
-        gsplatMakeRound(covA, covB, size);
-    } else if (g_phase == 2.0) {
-        // Recovering: gradually restore original size and shape
-        float t = (uTime - g_tRecover) / uRecoverDuration;
+    // SCATTER PHASE COMMENTED OUT - particles start in scattered state
+    // if (g_phase == 1.0) {
+    //     // Scattering: make particles VERY small (10-25% of original) for dust/powder effect
+    //     // Use per-splat variation for more chaotic effect
+    //     float randomSeed = hash(originalCenter);
+    //     float sizeFactor = 0.10 + randomSeed * 0.15; // 0.10 to 0.25 (10% to 25% of original)
+    //     float size = originalSize * sizeFactor;
+    //     // Make them round for dust particle appearance
+    //     gsplatMakeRound(covA, covB, size);
+    // } else 
+    if (g_phase == 0.0 || g_phase == 2.0) {
+        // Phase 0.0: Show fully scattered state (small particles, before recovery starts)
+        // Phase 2.0: Recovering: gradually restore original size and shape
+        // Phase 0.0: Show fully scattered state (small particles, before recovery starts)
+        // Phase 2.0: Recovering: gradually restore original size and shape
+        float t = (g_phase == 0.0) ? 0.0 : (uTime - g_tRecover) / uRecoverDuration;
         float randomSeed = hash(originalCenter);
         float minSizeFactor = 0.10 + randomSeed * 0.15; // Same as scatter phase
         float size = mix(originalSize * minSizeFactor, originalSize, t);
@@ -404,21 +409,24 @@ void modifyColor(vec3 center, inout vec4 color) {
     initShared(center);
     
     // Adjust alpha (transparency) for powder-like effect
-    if (g_phase == 1.0) {
-        // Scattering phase: gradually increase transparency (become more powdery)
-        float t = (uTime - g_tScatter) / uScatterDuration;
-        // Reduce alpha to 40-60% for powder effect, with variation per splat
+    // SCATTER PHASE COMMENTED OUT - particles start in scattered state
+    // if (g_phase == 1.0) {
+    //     // Scattering phase: gradually increase transparency (become more powdery)
+    //     float t = (uTime - g_tScatter) / uScatterDuration;
+    //     // Reduce alpha to 40-60% for powder effect, with variation per splat
+    //     float randomSeed = hash(center);
+    //     float minAlpha = 0.4 + randomSeed * 0.2; // 0.4 to 0.6
+    //     color.a *= mix(1.0, minAlpha, t * t); // Ease-in to transparency
+    // } else 
+    if (g_phase == 0.0 || g_phase == 2.0) {
+        // Phase 0.0: Show fully scattered state (low opacity, before recovery starts)
+        // Phase 2.0: Recovering phase: gradually restore original opacity
+        float t = (g_phase == 0.0) ? 0.0 : (uTime - g_tRecover) / uRecoverDuration;
         float randomSeed = hash(center);
         float minAlpha = 0.4 + randomSeed * 0.2; // 0.4 to 0.6
-        color.a *= mix(1.0, minAlpha, t * t); // Ease-in to transparency
-    } else if (g_phase == 2.0) {
-        // Recovering phase: gradually restore original opacity
-        float t = (uTime - g_tRecover) / uRecoverDuration;
-        float randomSeed = hash(center);
-        float minAlpha = 0.4 + randomSeed * 0.2; // 0.4 to 0.6
-        color.a *= mix(minAlpha, 1.0, t); // Fade back to full opacity
+        color.a *= mix(minAlpha, 1.0, t); // Phase 0: minAlpha, Phase 2: fade back to full opacity
     }
-    // Phase 0 and 3: original opacity (no modification)
+    // Phase 3: original opacity (no modification)
 }
 `;
 
@@ -473,16 +481,26 @@ fn initShared(center: vec3f) {
     g_tRecover = g_tScatter + uniform.uScatterDuration;
     g_phase = 0.0;
     
-    // Determine current phase (only 3 phases now: before, scatter, recover)
-    if (uniform.uTime < g_tScatter) {
-        g_phase = 0.0; // Before scatter
-    } else if (uniform.uTime < g_tRecover) {
-        g_phase = 1.0; // Scattering
+    // Determine current phase
+    // NOTE: Scatter phase (phase 1.0) is commented out - only recovery phase is active
+    if (uniform.uTime < g_tRecover) {
+        g_phase = 0.0; // Before recovery (particles start in scattered state)
     } else if (uniform.uTime < g_tRecover + uniform.uRecoverDuration) {
-        g_phase = 2.0; // Recovering (was phase 3)
+        g_phase = 2.0; // Recovering (directly start from scattered state)
     } else {
-        g_phase = 3.0; // Complete (was phase 4)
+        g_phase = 3.0; // Complete
     }
+    
+    // OLD PHASE LOGIC (commented out - scatter phase disabled):
+    // if (uniform.uTime < g_tScatter) {
+    //     g_phase = 0.0; // Before scatter
+    // } else if (uniform.uTime < g_tRecover) {
+    //     g_phase = 1.0; // Scattering
+    // } else if (uniform.uTime < g_tRecover + uniform.uRecoverDuration) {
+    //     g_phase = 2.0; // Recovering (was phase 3)
+    // } else {
+    //     g_phase = 3.0; // Complete (was phase 4)
+    // }
 }
 
 fn modifyCenter(center: ptr<function, vec3f>) {
@@ -586,89 +604,18 @@ fn modifyCenter(center: ptr<function, vec3f>) {
     var scatterFactor = streamScatterBase * perParticleVariationDist; // Range: ~0.49 to ~1.75
     scatterFactor = max(0.4, scatterFactor); // Ensure minimum movement
     
-    if (g_phase == 1.0) {
-        // Scattering phase: smooth stream-based dust expansion like natural smoke trails
-        let t = (uniform.uTime - g_tScatter) / uniform.uScatterDuration; // 0 to 1
-        
-        // Smooth easing for natural acceleration
-        var easedT = t * t * (3.0 - 2.0 * t); // Smoothstep: slow start, slow end
-        
-        // Smooth speed variation using trilinear interpolation
-        let noiseScale1 = 1.2;  // Match the scale from above
-        let noiseScale2 = 3.5;
-        let noisePos1 = (originalCenter - uniform.uCenter) * noiseScale1;
-        let noisePos2 = (originalCenter - uniform.uCenter) * noiseScale2;
-        let i1 = floor(noisePos1);
-        var f1 = fract(noisePos1);
-        f1 = f1 * f1 * (3.0 - 2.0 * f1); // Smoothstep
-        
-        // Trilinear interpolation for smooth speed variation
-        let s000 = hash(i1);
-        let s100 = hash(i1 + vec3f(1.0, 0.0, 0.0));
-        let s010 = hash(i1 + vec3f(0.0, 1.0, 0.0));
-        let s110 = hash(i1 + vec3f(1.0, 1.0, 0.0));
-        let s001 = hash(i1 + vec3f(0.0, 0.0, 1.0));
-        let s101 = hash(i1 + vec3f(1.0, 0.0, 1.0));
-        let s011 = hash(i1 + vec3f(0.0, 1.0, 1.0));
-        let s111 = hash(i1 + vec3f(1.0, 1.0, 1.0));
-        
-        let speedHash1 = mix(
-            mix(mix(s000, s100, f1.x), mix(s010, s110, f1.x), f1.y),
-            mix(mix(s001, s101, f1.x), mix(s011, s111, f1.x), f1.y),
-            f1.z
-        );
-        
-        let frac2 = fract(noisePos2);
-        let smooth2 = smoothstep(0.0, 1.0, frac2.x) * smoothstep(0.0, 1.0, frac2.y) * smoothstep(0.0, 1.0, frac2.z);
-        let speedHash2 = hash(floor(noisePos2));
-        
-        // Smooth speed variation - creates elongated trails
-        let speedVariation = 0.85 + speedHash1 * 0.3 + speedHash2 * smooth2 * 0.15; // 0.85 to 1.3 (smooth)
-        let perParticleSpeed = 0.88 + randomSeed * 0.24; // Per-particle: 0.88 to 1.12 (natural spread)
-        easedT *= speedVariation * perParticleSpeed;
-        easedT = clamp(easedT, 0.0, 1.4);
-        
-        let scatterAmount = easedT * uniform.uScatterDistance * scatterFactor;
-        
-        // Smooth turbulence using trilinear interpolation
-        let turbI1 = floor(noisePos1 + vec3f(50.0, 0.0, 0.0));
-        var turbF1 = fract(noisePos1 + vec3f(50.0, 0.0, 0.0));
-        turbF1 = turbF1 * turbF1 * (3.0 - 2.0 * turbF1);
-        
-        let t000 = randomDir(turbI1);
-        let t100 = randomDir(turbI1 + vec3f(1.0, 0.0, 0.0));
-        let t010 = randomDir(turbI1 + vec3f(0.0, 1.0, 0.0));
-        let t110 = randomDir(turbI1 + vec3f(1.0, 1.0, 0.0));
-        let t001 = randomDir(turbI1 + vec3f(0.0, 0.0, 1.0));
-        let t101 = randomDir(turbI1 + vec3f(1.0, 0.0, 1.0));
-        let t011 = randomDir(turbI1 + vec3f(0.0, 1.0, 1.0));
-        let t111 = randomDir(turbI1 + vec3f(1.0, 1.0, 1.0));
-        
-        let turbDir1 = normalize(mix(
-            mix(mix(t000, t100, turbF1.x), mix(t010, t110, turbF1.x), turbF1.y),
-            mix(mix(t001, t101, turbF1.x), mix(t011, t111, turbF1.x), turbF1.y),
-            turbF1.z
-        ));
-        
-        let turbDir2 = randomDir(floor(noisePos2 + vec3f(100.0, 0.0, 0.0)));
-        let streamTurbulence = normalize(turbDir1 * 0.7 + turbDir2 * 0.3 * smooth2) * uniform.uNoiseIntensity * easedT * 0.1; // Moderate: 10%
-        
-        // Natural jitter for organic smoke feel
-        let jitter = randomDir(originalCenter + vec3f(100.0, 0.0, 0.0)) * uniform.uNoiseIntensity * easedT * 0.06; // Moderate: 6%
-        
-        // Time-based curl for dynamic smoke-like motion
-        let curlHash = speedHash1; // Use smooth interpolated hash
-        let curlStrength = sin(uniform.uTime * 0.4 + curlHash * 6.28) * 0.1 * easedT; // Moderate: 10%
-        let curlDir = cross(scatterDir, normalize(turbDir1));
-        let curl = normalize(curlDir) * curlStrength;
-        
-        *center = originalCenter + scatterDir * scatterAmount + streamTurbulence + jitter + curl;
-    } else if (g_phase == 2.0) {
-        // Recovering phase: CLEAN and DIRECT return to original position
-        let t = (uniform.uTime - g_tRecover) / uniform.uRecoverDuration; // 0 to 1
+    // SCATTER PHASE COMMENTED OUT - particles start in scattered state
+    // if (g_phase == 1.0) {
+    //     // Scattering phase: smooth stream-based dust expansion like natural smoke trails
+    //     ... (entire scatter phase code commented out)
+    // } else 
+    if (g_phase == 0.0 || g_phase == 2.0) {
+        // Phase 0.0: Show fully scattered state (before recovery starts)
+        // Phase 2.0: Recovering phase: CLEAN and DIRECT return to original position
+        let t = (g_phase == 0.0) ? 0.0 : (uniform.uTime - g_tRecover) / uniform.uRecoverDuration; // 0 to 1
         
         // Use smooth ease-out curve for natural deceleration
-        let easedT = 1.0 - pow(1.0 - t, 3.0);
+        let easedT = (g_phase == 0.0) ? 0.0 : (1.0 - pow(1.0 - t, 3.0)); // 0.0 for phase 0 (fully scattered), eased for phase 2
         
         // Reconstruct scatter phase end position (must match scatter phase calculation)
         let scatterAmount = uniform.uScatterDistance * scatterFactor;
@@ -790,21 +737,22 @@ fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<func
     }
     
     // All particles participate in the effect (both within and outside range)
-    
-    // During all phases, show the splats (much smaller during scatter for "explosion" effect)
     let originalSize = gsplatExtractSize(*covA, *covB);
     
-    if (g_phase == 1.0) {
-        // Scattering: make particles VERY small (10-25% of original) for dust/powder effect
-        // Use per-splat variation for more chaotic effect
-        let randomSeed = hash(originalCenter);
-        let sizeFactor = 0.10 + randomSeed * 0.15; // 0.10 to 0.25 (10% to 25% of original)
-        let size = originalSize * sizeFactor;
-        // Make them round for dust particle appearance
-        gsplatMakeRound(covA, covB, size);
-    } else if (g_phase == 2.0) {
-        // Recovering: gradually restore original size and shape
-        let t = (uniform.uTime - g_tRecover) / uniform.uRecoverDuration;
+    // SCATTER PHASE COMMENTED OUT - particles start in scattered state
+    // if (g_phase == 1.0) {
+    //     // Scattering: make particles VERY small (10-25% of original) for dust/powder effect
+    //     // Use per-splat variation for more chaotic effect
+    //     let randomSeed = hash(originalCenter);
+    //     let sizeFactor = 0.10 + randomSeed * 0.15; // 0.10 to 0.25 (10% to 25% of original)
+    //     let size = originalSize * sizeFactor;
+    //     // Make them round for dust particle appearance
+    //     gsplatMakeRound(covA, covB, size);
+    // } else 
+    if (g_phase == 0.0 || g_phase == 2.0) {
+        // Phase 0.0: Show fully scattered state (small particles, before recovery starts)
+        // Phase 2.0: Recovering: gradually restore original size and shape
+        let t = (g_phase == 0.0) ? 0.0 : (uniform.uTime - g_tRecover) / uniform.uRecoverDuration;
         let randomSeed = hash(originalCenter);
         let minSizeFactor = 0.10 + randomSeed * 0.15; // Same as scatter phase
         let size = mix(originalSize * minSizeFactor, originalSize, t);
@@ -825,21 +773,24 @@ fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
     initShared(center);
     
     // Adjust alpha (transparency) for powder-like effect
-    if (g_phase == 1.0) {
-        // Scattering phase: gradually increase transparency (become more powdery)
-        let t = (uniform.uTime - g_tScatter) / uniform.uScatterDuration;
-        // Reduce alpha to 40-60% for powder effect, with variation per splat
+    // SCATTER PHASE COMMENTED OUT - particles start in scattered state
+    // if (g_phase == 1.0) {
+    //     // Scattering phase: gradually increase transparency (become more powdery)
+    //     let t = (uniform.uTime - g_tScatter) / uniform.uScatterDuration;
+    //     // Reduce alpha to 40-60% for powder effect, with variation per splat
+    //     let randomSeed = hash(center);
+    //     let minAlpha = 0.4 + randomSeed * 0.2; // 0.4 to 0.6
+    //     (*color).a *= mix(1.0, minAlpha, t * t); // Ease-in to transparency
+    // } else 
+    if (g_phase == 0.0 || g_phase == 2.0) {
+        // Phase 0.0: Show fully scattered state (low opacity, before recovery starts)
+        // Phase 2.0: Recovering phase: gradually restore original opacity
+        let t = (g_phase == 0.0) ? 0.0 : (uniform.uTime - g_tRecover) / uniform.uRecoverDuration;
         let randomSeed = hash(center);
         let minAlpha = 0.4 + randomSeed * 0.2; // 0.4 to 0.6
-        (*color).a *= mix(1.0, minAlpha, t * t); // Ease-in to transparency
-    } else if (g_phase == 2.0) {
-        // Recovering phase: gradually restore original opacity
-        let t = (uniform.uTime - g_tRecover) / uniform.uRecoverDuration;
-        let randomSeed = hash(center);
-        let minAlpha = 0.4 + randomSeed * 0.2; // 0.4 to 0.6
-        (*color).a *= mix(minAlpha, 1.0, t); // Fade back to full opacity
+        (*color).a *= mix(minAlpha, 1.0, t); // Phase 0: minAlpha, Phase 2: fade back to full opacity
     }
-    // Phase 0 and 3: original opacity (no modification)
+    // Phase 3: original opacity (no modification)
 }
 `;
 
