@@ -6,6 +6,7 @@ import { Global } from './types';
 import { RevealEffect as RevealConfig } from './settings';
 import { GsplatRevealSmooth } from './reveal-effect/gsplat-reveal-smooth';
 import { GsplatRevealPiecesRecover } from './reveal-effect/gsplat-reveal-pieces-recover';
+import { GsplatRevealGrow } from './reveal-effect/gsplat-reveal-grow';
 // import { GsplatRevealRadial } from 'playcanvas/scripts/esm/gsplat/reveal-radial.mjs';
 // import { GsplatRevealRain } from 'playcanvas/scripts/esm/gsplat/reveal-rain.mjs';
 
@@ -18,6 +19,7 @@ export class RevealController {
     private config: RevealConfig;
     private currentScript: any = null;
     private revealCenter: number[] = [0, 0, 0];
+    private bbox: BoundingBox | null = null;
 
     global: Global;
 
@@ -25,6 +27,7 @@ export class RevealController {
         this.global = global;
         const { settings, events, state } = global;
         this.gsplatEntity = gsplatEntity;
+        this.bbox = bbox;
         
         // Check if revealEffect is empty or has no type
         const hasRevealEffect = settings.revealEffect && 
@@ -243,9 +246,78 @@ export class RevealController {
     }
 
     /**
+     * 创建grow reveal script
+     */
+    private createGrowScript() {
+        if (!this.gsplatEntity || !this.gsplatEntity.script) {
+            console.warn('Cannot create grow script - entity or script component not ready');
+            return null;
+        }
+
+        console.log('Creating grow reveal script');
+
+        try {
+            const script = this.gsplatEntity.script.create(GsplatRevealGrow) as any;
+            if (script) {
+                // 配置script属性
+                // 使用 bbox 来计算 bottomY 和 topY
+                if (this.bbox) {
+                    script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y;
+                    script.topY = this.bbox.center.y + this.bbox.halfExtents.y;
+                    
+                    // 设置 AABB 用于 crop 效果
+                    script.aabbMin.set(
+                        this.bbox.center.x - this.bbox.halfExtents.x,
+                        this.bbox.center.y - this.bbox.halfExtents.y,
+                        this.bbox.center.z - this.bbox.halfExtents.z
+                    );
+                    script.aabbMax.set(
+                        this.bbox.center.x + this.bbox.halfExtents.x,
+                        this.bbox.center.y + this.bbox.halfExtents.y,
+                        this.bbox.center.z + this.bbox.halfExtents.z
+                    );
+                } else {
+                    // 如果没有 bbox，使用默认值
+                    script.bottomY = -5.0;
+                    script.topY = 5.0;
+                    script.aabbMin.set(-10, -10, -10);
+                    script.aabbMax.set(10, 10, 10);
+                }
+                
+                script.growthSpeed = 2.0;
+                script.fadeWidthRatio = 0.1;
+                script.endRadius = this.config.radius;
+                script.edgeScaleFactor = 0.5;
+                
+                // 设置 reveal center
+                if (script.center && this.revealCenter) {
+                    script.center.set(-this.revealCenter[0], -this.revealCenter[1], this.revealCenter[2]);
+                }
+                
+                // 初始状态设为启用
+                script.enabled = true;
+                
+                console.log('Grow script created with config:', {
+                    center: script.center,
+                    bottomY: script.bottomY,
+                    topY: script.topY,
+                    growthSpeed: script.growthSpeed,
+                    endRadius: script.endRadius,
+                    aabbMin: script.aabbMin,
+                    aabbMax: script.aabbMax
+                });
+            }
+            return script;
+        } catch (error) {
+            console.error('Failed to create grow script:', error);
+            return null;
+        }
+    }
+
+    /**
      * 创建指定类型的reveal效果 - 类似原始实现中的createEffect函数
      */
-    private createEffect(effectName: 'radial' | 'rain' | 'smooth' | 'pieces-recover') {
+    private createEffect(effectName: 'radial' | 'rain' | 'smooth' | 'pieces-recover' | 'grow') {
         if (!this.gsplatEntity || !this.config) {
             console.log('Cannot create effect - entity not ready or config not set');
             return;
@@ -282,6 +354,9 @@ export class RevealController {
                 break;
             case 'pieces-recover':
                 script = this.createPiecesRecoverScript();
+                break;
+            case 'grow':
+                script = this.createGrowScript();
                 break;
             default:
                 console.warn('Unknown effect type:', effectName);
@@ -327,6 +402,7 @@ export class RevealController {
             this.gsplatEntity.script.destroy('gsplatRevealRain');
             this.gsplatEntity.script.destroy('gsplatRevealSmooth');
             this.gsplatEntity.script.destroy('gsplatRevealPiecesRecover');
+            this.gsplatEntity.script.destroy('gsplatRevealGrow');
             // 未来可以添加更多类型
         } catch (error) {
             console.warn('Error destroying reveal scripts:', error);

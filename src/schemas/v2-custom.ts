@@ -1,5 +1,5 @@
 type RevealEffect = {
-    type?: 'radial' | 'rain' | 'smooth' | 'pieces-recover',
+    type?: 'radial' | 'rain' | 'smooth' | 'pieces-recover' | 'grow',
     radius?: number, // 10
     autoStart?: boolean
 }

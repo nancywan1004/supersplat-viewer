@@ -259,7 +259,7 @@ const initUI = (global: Global) => {
     // Reveal mode
     dom.revealType?.addEventListener('change', (event) => {
         const target = event.target as HTMLSelectElement;
-        const revealType = target.value as 'radial' | 'rain' | 'smooth' | 'pieces-recover';
+        const revealType = target.value as 'radial' | 'rain' | 'smooth' | 'pieces-recover' | 'grow';
         events.fire('revealConfigChanged', { type: revealType });
     });
 
