@@ -46,13 +46,13 @@ void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA,
         return;
     }
     
-    // 从底部向上生长：计算当前生长高度
-    // currentGrowY 表示当前生长到的 Y 坐标位置（从 bottomY 开始）
-    float currentGrowY = uBottomY + uCurrentHeight;
+    // 【临时测试：从顶部向下生长】
+    // currentGrowY 表示当前生长到的 Y 坐标位置（从 topY 开始向下）
+    float currentGrowY = uTopY - uCurrentHeight;
     
-    // 从底部向上生长：只显示 Y 坐标小于等于当前生长高度的点
-    // 如果 splat 的 Y 坐标高于当前生长高度，隐藏它
-    if (g_splatY > currentGrowY) {
+    // 从顶部向下生长：只显示 Y 坐标大于等于当前生长高度的点
+    // 如果 splat 的 Y 坐标低于当前生长高度，隐藏它
+    if (g_splatY < currentGrowY) {
         gsplatMakeRound(covA, covB, 0.0);
         return;
     }
@@ -79,16 +79,16 @@ void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA,
     }
     #endif
     
-    // 计算渐变区域的起始位置（当前生长高度的下方）
-    float fadeStart = currentGrowY - uFadeWidth;
+    // 计算渐变区域的起始位置（当前生长高度的上方，因为是从上向下生长）
+    float fadeStart = currentGrowY + uFadeWidth;
     
-    // 如果 splat 在渐变区域内（fadeStart 到 currentGrowY 之间），保持原始形状
+    // 如果 splat 在渐变区域内（currentGrowY 到 fadeStart 之间），保持原始形状
     // 透明度渐变在 modifyColor 中处理
-    if (g_splatY > fadeStart && g_splatY <= currentGrowY) {
+    if (g_splatY >= currentGrowY && g_splatY < fadeStart) {
         // 在渐变区域内，保持原始形状，只在 modifyColor 中调整透明度
     }
     
-    // 如果 splat 在完全显示区域（g_splatY <= fadeStart），保持原始大小和形状
+    // 如果 splat 在完全显示区域（g_splatY >= fadeStart），保持原始大小和形状
 }
 
 void modifyColor(vec3 center, inout vec4 color) {
@@ -107,29 +107,30 @@ void modifyColor(vec3 center, inout vec4 color) {
         return;
     }
     
-    // 从底部向上生长：计算当前生长高度
-    float currentGrowY = uBottomY + uCurrentHeight;
+    // 【临时测试：从顶部向下生长】
+    // 计算当前生长高度（从 topY 开始向下）
+    float currentGrowY = uTopY - uCurrentHeight;
     
-    // 如果 splat 的 Y 坐标高于当前生长高度，完全隐藏
-    if (g_splatY > currentGrowY) {
+    // 如果 splat 的 Y 坐标低于当前生长高度，完全隐藏
+    if (g_splatY < currentGrowY) {
         color.a = 0.0;
         return;
     }
     
-    // 计算渐变区域
-    float fadeStart = currentGrowY - uFadeWidth;
+    // 计算渐变区域（当前生长高度的上方）
+    float fadeStart = currentGrowY + uFadeWidth;
     
     // 如果 splat 在渐变区域内，应用平滑透明度渐变
-    if (g_splatY > fadeStart && g_splatY <= currentGrowY) {
-        float fadeProgress = (g_splatY - fadeStart) / uFadeWidth;
-        // 使用 smoothstep 创建平滑过渡：从底部（fadeStart）到顶部（currentGrowY）
-        // fadeProgress 从 0（底部）到 1（顶部）
-        // 我们希望底部完全不透明，顶部逐渐透明
+    if (g_splatY >= currentGrowY && g_splatY < fadeStart) {
+        float fadeProgress = (fadeStart - g_splatY) / uFadeWidth;
+        // 使用 smoothstep 创建平滑过渡：从顶部（fadeStart）到底部（currentGrowY）
+        // fadeProgress 从 0（顶部）到 1（底部）
+        // 我们希望顶部完全不透明，底部逐渐透明
         float fadeFactor = 1.0 - smoothstep(0.0, 1.0, fadeProgress);
         color.a *= fadeFactor;
     }
     
-    // 如果 splat 在完全显示区域（g_splatY <= fadeStart），保持原始透明度
+    // 如果 splat 在完全显示区域（g_splatY >= fadeStart），保持原始透明度
 }
 `;
 
@@ -178,11 +179,13 @@ fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<func
         return;
     }
     
-    // 从底部向上生长：计算当前生长高度
-    let currentGrowY = uniform.uBottomY + uniform.uCurrentHeight;
+    // 【临时测试：从顶部向下生长】
+    // currentGrowY 表示当前生长到的 Y 坐标位置（从 topY 开始向下）
+    let currentGrowY = uniform.uTopY - uniform.uCurrentHeight;
     
-    // 如果 splat 的 Y 坐标高于当前生长高度，隐藏它
-    if (g_splatY > currentGrowY) {
+    // 从顶部向下生长：只显示 Y 坐标大于等于当前生长高度的点
+    // 如果 splat 的 Y 坐标低于当前生长高度，隐藏它
+    if (g_splatY < currentGrowY) {
         gsplatMakeRound(covA, covB, 0.0);
         return;
     }
@@ -209,15 +212,15 @@ fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<func
     }
     #endif
     
-    // 计算渐变区域
-    let fadeStart = currentGrowY - uniform.uFadeWidth;
+    // 计算渐变区域的起始位置（当前生长高度的上方，因为是从上向下生长）
+    let fadeStart = currentGrowY + uniform.uFadeWidth;
     
-    // 如果 splat 在渐变区域内，根据距离调整大小
-    if (g_splatY > fadeStart && g_splatY <= currentGrowY) {
+    // 如果 splat 在渐变区域内（currentGrowY 到 fadeStart 之间），保持原始形状
+    if (g_splatY >= currentGrowY && g_splatY < fadeStart) {
         // 在渐变区域内，保持原始形状，只在 modifyColor 中调整透明度
     }
     
-    // 其他情况保持原始大小和形状
+    // 如果 splat 在完全显示区域（g_splatY >= fadeStart），保持原始大小和形状
 }
 
 fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
@@ -236,29 +239,30 @@ fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
         return;
     }
     
-    // 计算当前生长高度
-    let currentGrowY = uniform.uBottomY + uniform.uCurrentHeight;
+    // 【临时测试：从顶部向下生长】
+    // 计算当前生长高度（从 topY 开始向下）
+    let currentGrowY = uniform.uTopY - uniform.uCurrentHeight;
     
-    // 如果 splat 的 Y 坐标高于当前生长高度，完全隐藏
-    if (g_splatY > currentGrowY) {
+    // 如果 splat 的 Y 坐标低于当前生长高度，完全隐藏
+    if (g_splatY < currentGrowY) {
         (*color).a = 0.0;
         return;
     }
     
-    // 计算渐变区域
-    let fadeStart = currentGrowY - uniform.uFadeWidth;
+    // 计算渐变区域（当前生长高度的上方）
+    let fadeStart = currentGrowY + uniform.uFadeWidth;
     
     // 如果 splat 在渐变区域内，应用平滑透明度渐变
-    if (g_splatY > fadeStart && g_splatY <= currentGrowY) {
-        let fadeProgress = (g_splatY - fadeStart) / uniform.uFadeWidth;
-        // 使用 smoothstep 创建平滑过渡：从底部（fadeStart）到顶部（currentGrowY）
-        // fadeProgress 从 0（底部）到 1（顶部）
-        // 我们希望底部完全不透明，顶部逐渐透明
+    if (g_splatY >= currentGrowY && g_splatY < fadeStart) {
+        let fadeProgress = (fadeStart - g_splatY) / uniform.uFadeWidth;
+        // 使用 smoothstep 创建平滑过渡：从顶部（fadeStart）到底部（currentGrowY）
+        // fadeProgress 从 0（顶部）到 1（底部）
+        // 我们希望顶部完全不透明，底部逐渐透明
         let fadeFactor = 1.0 - smoothstep(0.0, 1.0, fadeProgress);
         (*color).a *= fadeFactor;
     }
     
-    // 如果 splat 在完全显示区域（g_splatY <= fadeStart），保持原始透明度
+    // 如果 splat 在完全显示区域（g_splatY >= fadeStart），保持原始透明度
 }
 `;
 
@@ -384,25 +388,25 @@ class GsplatRevealGrow extends GsplatShaderEffect {
         }
 
         // Calculate currentGrowY for debugging
-        // currentGrowY 从 actualBottomY 开始，增长到 actualTopY
-        const currentGrowY = actualBottomY + this.currentHeight;
+        // 【临时测试：从顶部向下】currentGrowY 从 actualTopY 开始，减少到 actualBottomY
+        const currentGrowY = actualTopY - this.currentHeight;
         
         // 每 0.5 秒打印一次调试信息（避免打印太频繁）
-        if (!this._lastDebugTime || effectTime - this._lastDebugTime >= 0.5) {
-            console.log('🌱 Grow Effect Debug:', {
-                effectTime: effectTime.toFixed(2) + 's',
-                '原始值': { bottomY: this.bottomY.toFixed(2), topY: this.topY.toFixed(2) },
-                '修正后': { bottomY: actualBottomY.toFixed(2), topY: actualTopY.toFixed(2) },
-                wasSwapped: wasSwapped ? '⚠️ 已交换' : '✓ 正常',
-                currentHeight: this.currentHeight.toFixed(2),
-                currentGrowY: currentGrowY.toFixed(2),
-                totalHeight: totalHeight.toFixed(2),
-                growthSpeed: this.growthSpeed,
-                progress: totalHeight > 0 ? ((this.currentHeight / totalHeight) * 100).toFixed(1) + '%' : '0%',
-                '显示范围': `Y <= ${currentGrowY.toFixed(2)} (从 ${actualBottomY.toFixed(2)} 到 ${actualTopY.toFixed(2)})`
-            });
-            this._lastDebugTime = effectTime;
-        }
+        // if (!this._lastDebugTime || effectTime - this._lastDebugTime >= 0.5) {
+        //     console.log('🌱 Grow Effect Debug:', {
+        //         effectTime: effectTime.toFixed(2) + 's',
+        //         '原始值': { bottomY: this.bottomY.toFixed(2), topY: this.topY.toFixed(2) },
+        //         '修正后': { bottomY: actualBottomY.toFixed(2), topY: actualTopY.toFixed(2) },
+        //         wasSwapped: wasSwapped ? '⚠️ 已交换' : '✓ 正常',
+        //         currentHeight: this.currentHeight.toFixed(2),
+        //         currentGrowY: currentGrowY.toFixed(2),
+        //         totalHeight: totalHeight.toFixed(2),
+        //         growthSpeed: this.growthSpeed,
+        //         progress: totalHeight > 0 ? ((this.currentHeight / totalHeight) * 100).toFixed(1) + '%' : '0%',
+        //         '显示范围': `Y >= ${currentGrowY.toFixed(2)} (从 ${actualTopY.toFixed(2)} 向下到 ${actualBottomY.toFixed(2)})`
+        //     });
+        //     this._lastDebugTime = effectTime;
+        // }
         
         // 使用修正后的值更新 uniforms
         this.setUniform('uBottomY', actualBottomY);
