@@ -32,6 +32,7 @@ import { InputController } from './input-controller';
 import type { ExperienceSettings, PostEffectSettings } from './settings';
 import type { Global } from './types';
 import { RevealController } from './reveal';
+import { VfxController } from './vfx';
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
 import { getSkyboxRadius } from './loaders/skybox-loader';
 import { isLodMetaFile } from './loaders/lod-loader';
@@ -136,6 +137,8 @@ class Viewer {
     inputController: InputController;
 
     revealController: RevealController;
+
+    vfxController: VfxController;
 
     cameraManager: CameraManager;
 
@@ -346,9 +349,11 @@ class Viewer {
             const sceneSize = sceneBound.halfExtents.length();
             this.inputController.setMoveSpeedFromSceneSize(sceneSize);
 
-            this.revealController = new RevealController(global, sceneBound, results[0]);
-
+            // 先创建 cameraManager，因为 revealController 和 vfxController 需要它来获取 targetConstraint
             this.cameraManager = new CameraManager(global, sceneBound);
+            
+            this.revealController = new RevealController(global, sceneBound, results[0], this.cameraManager);
+            this.vfxController = new VfxController(global, sceneBound, results[0], this.cameraManager);
             applyCamera(this.cameraManager.camera);
 
             // Initialize camera path visualizer if there are animation tracks

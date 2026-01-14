@@ -140,6 +140,13 @@ class CameraManager {
     // 相机约束
     private constraint: SphereConstraint | null = null;
     private targetConstraint: BoxConstraint | null = null;
+
+    /**
+     * 获取 target constraint（用于 reveal 效果等）
+     */
+    getTargetConstraint(): BoxConstraint | null {
+        return this.targetConstraint;
+    }
     private constraintVisualizer: Entity | null = null;
     private cameraBoundsVisualizer: Entity | null = null;
     private debugBoundsLayerId: number | null = null;

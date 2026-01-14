@@ -201,7 +201,9 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         controlsHidden: false,
         hasRevealEffect: false,
         showCameraPath: false,
-        showCameraBoundingBox: false
+        showCameraBoundingBox: false,
+        vfxActive: false,
+        vfxType: 'none' as 'none' | 'grow' | 'pieces-recover' | 'perlin-wave'
     });
 
     // 如果设置了 noreveal 参数，清除 reveal effect 配置

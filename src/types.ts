@@ -43,6 +43,8 @@ type State = {
     hasRevealEffect: boolean;
     showCameraPath: boolean;                    // show camera path visualization
     showCameraBoundingBox: boolean;            // show camera bounding box (animCoreBbox preferred, fallback to scene bbox)
+    vfxActive: boolean;                        // VFX effect active state
+    vfxType: 'none' | 'grow' | 'pieces-recover' | 'perlin-wave';  // current VFX effect type
 };
 
 type Global = {
