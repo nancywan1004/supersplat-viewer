@@ -190,13 +190,13 @@ export class VfxController {
             const script = this.gsplatEntity.script.create(GsplatRevealPiecesRecover) as any;
             if (script) {
                 // 配置script属性
-                script.scatterDistance = 2.0;
-                script.scatterDuration = 7.0; // Slow scatter (total 10-15s)
+                script.scatterDistance = 4.0;
+                script.scatterDuration = 7.5; // Slow scatter (total 10-15s)
                 script.holdDuration = 0;
-                script.recoverDuration = 7.0; // Slow recovery (total 10-15s)
+                script.recoverDuration = 7.5; // Slow recovery (total 10-15s)
                 script.noiseIntensity = 0.3;
                 script.scatterDirection.set(1, 1, 1);
-                script.maxScatterRadius = 2.0; // Small radius for spray effect
+                script.maxScatterRadius = 4.0; // Small radius for spray effect
                 script.waveSpeed = 5.0; // Wave propagation speed
                 
                 // 设置 vfx center (使用相机当前target点)
@@ -519,11 +519,24 @@ export class VfxController {
         
         console.log('Restarting VFX effect:', this.config.type);
         
+        // 重置相机动画轨道（animTrack），让相机动画也重新播放
+        const { events } = this.global;
+        //events.fire('inputEvent', 'resetAnim');
+        console.log('Reset animTrack animation');
+        
+        // 保存当前的启用状态
+        const wasEnabled = this.config.enabled;
+        
+        // 先禁用当前效果（如果存在），确保清理状态
+        if (this.currentScript) {
+            this.currentScript.enabled = false;
+        }
+        
         // 重新创建效果
         this.createEffect(this.config.type);
         
-        // 如果配置为启用，则启用它
-        if (this.config.enabled) {
+        // 如果之前是启用状态，则重新启用它（这会触发 enable 事件，基类会重置 effectTime）
+        if (wasEnabled) {
             setTimeout(() => {
                 if (this.currentScript) {
                     // 在启用前再次更新 center（确保使用最新的相机 target）
@@ -547,6 +560,11 @@ export class VfxController {
                             z: this.currentScript.center.z
                         });
                     }
+                    
+                    // 确保 effectTime 重置为 0（在启用前重置，确保动画从头开始）
+                    this.currentScript.effectTime = 0;
+                    
+                    // 启用效果（这会触发 enable 事件，基类也会重置 effectTime）
                     this.currentScript.enabled = true;
                     
                     // 在启用后立即更新一次 uniform（确保 materials 已准备好）
@@ -563,10 +581,8 @@ export class VfxController {
                             }
                         }, 50);
                     }
-                    // 确保 effectTime 重置（虽然基类会在 enable 时重置，但这里明确一下）
-                    if (this.currentScript.effectTime !== undefined) {
-                        this.currentScript.effectTime = 0;
-                    }
+                    
+                    console.log('VFX effect restarted, effectTime reset to:', this.currentScript.effectTime);
                 }
             }, 100);
         }

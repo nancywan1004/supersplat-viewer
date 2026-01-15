@@ -196,7 +196,7 @@ void modifyCenter(inout vec3 center) {
     float streamDist2 = hash(floor(noisePos2));
     // Smooth distance variation - creates elongated trails
     float streamScatterBase = 0.65 + streamDist1 * 0.5 + streamDist2 * smooth2 * 0.25; // 0.65 to 1.4 (smooth)
-    float perParticleVariationDist = 0.75 + randomSeed * 0.5; // Per-particle: 0.75 to 1.25 (natural spread)
+    float perParticleVariationDist = 0.75 + randomSeed * 0.75; // Per-particle: 0.75 to 1.25 (natural spread)
     float scatterFactor = streamScatterBase * perParticleVariationDist; // Range: ~0.49 to ~1.75
     scatterFactor = max(0.4, scatterFactor); // Ensure minimum movement
     
