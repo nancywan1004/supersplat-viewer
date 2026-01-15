@@ -5,12 +5,13 @@ import { GsplatRevealGrow } from './vfx/gsplat-grow';
 import { GsplatRevealPiecesRecover } from './vfx/gsplat-pieces-recover';
 import { GsplatRevealPerlinWave } from './vfx/gsplat-perlin-wave';
 import { GsplatDisintegrate } from './vfx/gsplat-disintegrate';
+import { GsplatIntegrate } from './vfx/gsplat-integrate';
 import type { CameraManager } from './camera-manager';
 
 /**
  * VFX effect type
  */
-export type VfxEffectType = 'grow' | 'pieces-recover' | 'perlin-wave' | 'disintegrate' | 'none';
+export type VfxEffectType = 'grow' | 'pieces-recover' | 'perlin-wave' | 'disintegrate' | 'integrate' | 'none';
 
 /**
  * VFX configuration
@@ -31,6 +32,7 @@ export interface VfxConfig {
  * - pieces-recover: 碎片恢复效果
  * - perlin-wave: Perlin 波浪效果
  * - disintegrate: 分解效果
+ * - integrate: 整合效果（从点云整合为高斯）
  * 
  * 架构设计考虑：
  * - 支持未来视频导出功能（记录时间、状态等）
@@ -335,6 +337,73 @@ export class VfxController {
     }
 
     /**
+     * 创建 integrate 效果脚本
+     */
+    private createIntegrateScript() {
+        if (!this.gsplatEntity || !this.gsplatEntity.script) {
+            console.warn('Cannot create integrate script - entity or script component not ready');
+            return null;
+        }
+
+        console.log('Creating integrate VFX script');
+
+        try {
+            const script = this.gsplatEntity.script.create(GsplatIntegrate) as any;
+            if (script) {
+                // 配置script属性
+                script.intensity = 0.5;
+                script.speed = 0.8;
+                script.waveSpeed = 1.0;
+                script.waveFrequency = 3.0;
+                
+                // 设置 AABB（如果 bbox 存在）
+                if (this.bbox) {
+                    script.aabbMin = new Vec3(
+                        this.bbox.center.x - this.bbox.halfExtents.x * 0.5,
+                        this.bbox.center.y - this.bbox.halfExtents.y,
+                        this.bbox.center.z - this.bbox.halfExtents.z * 0.5
+                    );
+                    script.aabbMax = new Vec3(
+                        this.bbox.center.x + this.bbox.halfExtents.x * 0.5,
+                        this.bbox.center.y + this.bbox.halfExtents.y,
+                        this.bbox.center.z + this.bbox.halfExtents.z * 0.5
+                    );
+                } else {
+                    // 默认 AABB
+                    script.aabbMin = new Vec3(-0.5, -0.5, -0.5);
+                    script.aabbMax = new Vec3(0.5, 0.5, 0.5);
+                }
+                
+                // 设置 topY 和 bottomY（基于 bbox 或默认值）
+                if (this.bbox) {
+                    script.topY = this.bbox.center.y + this.bbox.halfExtents.y * 0.25;
+                    script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y;
+                } else {
+                    script.topY = 10.0;
+                    script.bottomY = -10.0;
+                }
+                
+                // 初始状态根据配置决定
+                script.enabled = this.config.enabled ?? false;
+                
+                console.log('Integrate script created with config:', {
+                    intensity: script.intensity,
+                    speed: script.speed,
+                    aabbMin: script.aabbMin,
+                    aabbMax: script.aabbMax,
+                    topY: script.topY,
+                    bottomY: script.bottomY,
+                    enabled: script.enabled
+                });
+            }
+            return script;
+        } catch (error) {
+            console.error('Failed to create integrate script:', error);
+            return null;
+        }
+    }
+
+    /**
      * 创建指定类型的 VFX 效果
      */
     private createEffect(effectType: VfxEffectType) {
@@ -369,6 +438,9 @@ export class VfxController {
             case 'disintegrate':
                 script = this.createDisintegrateScript();
                 break;
+            case 'integrate':
+                script = this.createIntegrateScript();
+                break;
             case 'none':
                 // 不创建任何效果
                 script = null;
@@ -398,6 +470,7 @@ export class VfxController {
             this.gsplatEntity.script.destroy('gsplatRevealPiecesRecover');
             this.gsplatEntity.script.destroy('gsplatRevealPerlinWave');
             this.gsplatEntity.script.destroy('gsplatDisintegrate');
+            this.gsplatEntity.script.destroy('gsplatIntegrate');
         } catch (error) {
             console.warn('Error destroying VFX scripts:', error);
         }

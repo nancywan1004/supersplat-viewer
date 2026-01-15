@@ -9,7 +9,6 @@ uniform float uTopY;
 uniform float uCurrentHeight;
 uniform float uFadeWidth;
 uniform float uGrowthSpeed;
-uniform float uEndRadius;
 uniform vec3 uAabbMin;
 uniform vec3 uAabbMax;
 uniform float uEdgeScaleFactor;
@@ -130,7 +129,6 @@ uniform uTopY: f32;
 uniform uCurrentHeight: f32;
 uniform uFadeWidth: f32;
 uniform uGrowthSpeed: f32;
-uniform uEndRadius: f32;
 uniform uAabbMin: vec3f;
 uniform uAabbMax: vec3f;
 uniform uEdgeScaleFactor: f32;
@@ -307,13 +305,6 @@ class GsplatRevealGrow extends GsplatShaderEffect {
     growthSpeed = 5.0;
 
     /**
-     * Distance at which to disable effect for performance
-     * @attribute
-     * @range [0, 500]
-     */
-    endRadius = 50.0;
-
-    /**
      * Minimum corner of AABB in world space
      * @attribute
      */
@@ -404,7 +395,6 @@ class GsplatRevealGrow extends GsplatShaderEffect {
         this.setUniform('uFadeWidth', fadeWidth);
         
         this.setUniform('uGrowthSpeed', this.growthSpeed);
-        this.setUniform('uEndRadius', this.endRadius);
 
         // Set AABB uniforms
         this._aabbMinArray[0] = this.aabbMin.x;
