@@ -67,9 +67,6 @@ void initShared(vec3 center) {
 void modifyCenter(inout vec3 center) {
     initShared(center);
     
-    // Early exit for distant splats
-    if (g_dist > uEndRadius) return;
-    
     // Apply Perlin noise offset for wave motion
     vec3 noiseOffset = uWaveAmplitude * noise2(center * uWaveFrequency + uTime * uWaveSpeed);
     center += noiseOffset;
@@ -77,12 +74,6 @@ void modifyCenter(inout vec3 center) {
 
 void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
     initShared(modifiedCenter);
-    
-    // Early exit for distant splats - hide them
-    if (g_dist > uEndRadius) {
-        gsplatMakeRound(covA, covB, 0.0);
-        return;
-    }
     
     // Apply scale blend
     if (uScaleBlend < 0.1) {
@@ -99,12 +90,6 @@ void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA,
 void modifyColor(vec3 center, inout vec4 color) {
     initShared(center);
     
-    // Early exit for distant splats
-    if (g_dist > uEndRadius) {
-        color.a = 0.0;
-        return;
-    }
-    
     // Apply 3D sine wave color effect
     vec4 e = sin3D(center, uTime);
     color = mix(color, color * e, uIntensity);
@@ -119,7 +104,6 @@ uniform uWaveAmplitude: f32;
 uniform uWaveFrequency: f32;
 uniform uWaveSpeed: f32;
 uniform uScaleBlend: f32;
-uniform uEndRadius: f32;
 
 // Helper functions
 fn rot(a: f32) -> mat2x2f {
@@ -184,11 +168,6 @@ fn initShared(center: vec3f) {
 fn modifyCenter(center: ptr<function, vec3f>) {
     initShared(*center);
     
-    // Early exit for distant splats
-    if (g_dist > uniform.uEndRadius) {
-        return;
-    }
-    
     // Apply Perlin noise offset for wave motion
     let noiseOffset = uniform.uWaveAmplitude * noise2(*center * uniform.uWaveFrequency + uniform.uTime * uniform.uWaveSpeed);
     *center = *center + noiseOffset;
@@ -196,12 +175,6 @@ fn modifyCenter(center: ptr<function, vec3f>) {
 
 fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<function, vec3f>, covB: ptr<function, vec3f>) {
     initShared(modifiedCenter);
-    
-    // Early exit for distant splats - hide them
-    if (g_dist > uniform.uEndRadius) {
-        gsplatMakeRound(covA, covB, 0.0);
-        return;
-    }
     
     // Apply scale blend
     if (uniform.uScaleBlend < 0.1) {
@@ -217,12 +190,6 @@ fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<func
 
 fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
     initShared(center);
-    
-    // Early exit for distant splats
-    if (g_dist > uniform.uEndRadius) {
-        (*color).a = 0.0;
-        return;
-    }
     
     // Apply 3D sine wave color effect
     let e = sin3D(center, uniform.uTime);
@@ -290,14 +257,7 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
      * @attribute
      * @range [0, 1]
      */
-    scaleBlend = 1.0;
-
-    /**
-     * Distance at which to disable effect for performance
-     * @attribute
-     * @range [0, 500]
-     */
-    endRadius = 50.0;
+    scaleBlend = 0;
 
     getShaderGLSL() {
         return shaderGLSL;
@@ -321,7 +281,6 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
         this.setUniform('uWaveFrequency', this.waveFrequency);
         this.setUniform('uWaveSpeed', this.waveSpeed);
         this.setUniform('uScaleBlend', this.scaleBlend);
-        this.setUniform('uEndRadius', this.endRadius);
     }
 }
 

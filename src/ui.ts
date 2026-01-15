@@ -306,7 +306,7 @@ const initUI = (global: Global) => {
     // VFX mode
     dom.vfxType?.addEventListener('change', (event) => {
         const target = event.target as HTMLSelectElement;
-        const vfxType = target.value as 'none' | 'grow' | 'pieces-recover' | 'perlin-wave';
+        const vfxType = target.value as 'none' | 'grow' | 'pieces-recover' | 'perlin-wave' | 'disintegrate';
         events.fire('vfxSwitch', vfxType);
     });
 

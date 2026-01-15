@@ -4,12 +4,13 @@ import { Global } from './types';
 import { GsplatRevealGrow } from './vfx/gsplat-grow';
 import { GsplatRevealPiecesRecover } from './vfx/gsplat-pieces-recover';
 import { GsplatRevealPerlinWave } from './vfx/gsplat-perlin-wave';
+import { GsplatDisintegrate } from './vfx/gsplat-disintegrate';
 import type { CameraManager } from './camera-manager';
 
 /**
  * VFX effect type
  */
-export type VfxEffectType = 'grow' | 'pieces-recover' | 'perlin-wave' | 'none';
+export type VfxEffectType = 'grow' | 'pieces-recover' | 'perlin-wave' | 'disintegrate' | 'none';
 
 /**
  * VFX configuration
@@ -29,6 +30,7 @@ export interface VfxConfig {
  * - grow: 垂直生长效果
  * - pieces-recover: 碎片恢复效果
  * - perlin-wave: Perlin 波浪效果
+ * - disintegrate: 分解效果
  * 
  * 架构设计考虑：
  * - 支持未来视频导出功能（记录时间、状态等）
@@ -171,7 +173,6 @@ export class VfxController {
                 
                 script.growthSpeed = 2.0;
                 script.fadeWidthRatio = 0.1;
-                script.endRadius = 50.0;
                 script.edgeScaleFactor = 0.5;
                 
                 // 设置 vfx center
@@ -187,7 +188,6 @@ export class VfxController {
                     bottomY: script.bottomY,
                     topY: script.topY,
                     growthSpeed: script.growthSpeed,
-                    endRadius: script.endRadius,
                     enabled: script.enabled
                 });
             }
@@ -214,14 +214,15 @@ export class VfxController {
             if (script) {
                 // 配置script属性
                 script.scatterDistance = 2.0;
-                script.scatterDuration = 1.0;
+                script.scatterDuration = 7.0; // Slow scatter (total 10-15s)
                 script.holdDuration = 0;
-                script.recoverDuration = 3.5;
+                script.recoverDuration = 7.0; // Slow recovery (total 10-15s)
                 script.noiseIntensity = 0.3;
                 script.scatterDirection.set(1, 1, 1);
-                script.endRadius = 50.0;
+                script.maxScatterRadius = 2.0; // Small radius for spray effect
+                script.waveSpeed = 5.0; // Wave propagation speed
                 
-                // 设置 vfx center
+                // 设置 vfx center (使用相机初始target点)
                 if (script.center && this.vfxCenter) {
                     script.center.set(-this.vfxCenter[0], -this.vfxCenter[1], this.vfxCenter[2]);
                 }
@@ -231,7 +232,6 @@ export class VfxController {
                 
                 console.log('Pieces-recover script created with config:', {
                     center: script.center,
-                    endRadius: script.endRadius,
                     scatterDistance: script.scatterDistance,
                     enabled: script.enabled
                 });
@@ -263,7 +263,6 @@ export class VfxController {
                 script.waveFrequency = 1.0;
                 script.waveSpeed = 1.0;
                 script.scaleBlend = 1.0;
-                script.endRadius = 50.0;
                 
                 // 设置 vfx center
                 if (script.center && this.vfxCenter) {
@@ -280,13 +279,44 @@ export class VfxController {
                     waveFrequency: script.waveFrequency,
                     waveSpeed: script.waveSpeed,
                     scaleBlend: script.scaleBlend,
-                    endRadius: script.endRadius,
                     enabled: script.enabled
                 });
             }
             return script;
         } catch (error) {
             console.error('Failed to create perlin-wave script:', error);
+            return null;
+        }
+    }
+
+    /**
+     * 创建 disintegrate 效果脚本
+     */
+    private createDisintegrateScript() {
+        if (!this.gsplatEntity || !this.gsplatEntity.script) {
+            console.warn('Cannot create disintegrate script - entity or script component not ready');
+            return null;
+        }
+
+        console.log('Creating disintegrate VFX script');
+
+        try {
+            const script = this.gsplatEntity.script.create(GsplatDisintegrate) as any;
+            if (script) {
+                // 配置script属性
+                script.intensity = 0.5;
+                
+                // 初始状态根据配置决定
+                script.enabled = this.config.enabled ?? false;
+                
+                console.log('Disintegrate script created with config:', {
+                    intensity: script.intensity,
+                    enabled: script.enabled
+                });
+            }
+            return script;
+        } catch (error) {
+            console.error('Failed to create disintegrate script:', error);
             return null;
         }
     }
@@ -323,6 +353,9 @@ export class VfxController {
             case 'perlin-wave':
                 script = this.createPerlinWaveScript();
                 break;
+            case 'disintegrate':
+                script = this.createDisintegrateScript();
+                break;
             case 'none':
                 // 不创建任何效果
                 script = null;
@@ -351,6 +384,7 @@ export class VfxController {
             this.gsplatEntity.script.destroy('gsplatRevealGrow');
             this.gsplatEntity.script.destroy('gsplatRevealPiecesRecover');
             this.gsplatEntity.script.destroy('gsplatRevealPerlinWave');
+            this.gsplatEntity.script.destroy('gsplatDisintegrate');
         } catch (error) {
             console.warn('Error destroying VFX scripts:', error);
         }
