@@ -222,8 +222,21 @@ export class VfxController {
                 script.maxScatterRadius = 2.0; // Small radius for spray effect
                 script.waveSpeed = 5.0; // Wave propagation speed
                 
-                // 设置 vfx center (使用相机初始target点)
-                if (script.center && this.vfxCenter) {
+                // 设置 vfx center (使用相机当前target点)
+                // 每次重启时都根据最新的相机target来设置
+                // CRITICAL: 需要坐标转换 - gsplat 坐标系需要翻转 X 和 Y 轴
+                if (script.center && this.cameraManager) {
+                    const camera = this.cameraManager.camera;
+                    const targetPoint = new Vec3();
+                    camera.calcFocusPoint(targetPoint);
+                    // 坐标转换：翻转 X 和 Y 轴，保持 Z 轴不变（与 reveal.ts 中的处理一致）
+                    script.center.set(-targetPoint.x, -targetPoint.y, targetPoint.z);
+                    console.log('Pieces-recover center set to current camera target (with coordinate transform):', {
+                        originalTarget: targetPoint,
+                        transformedCenter: script.center
+                    });
+                } else if (script.center && this.vfxCenter) {
+                    // 如果没有相机管理器，使用备用方案（已经包含坐标转换）
                     script.center.set(-this.vfxCenter[0], -this.vfxCenter[1], this.vfxCenter[2]);
                 }
                 
@@ -465,7 +478,47 @@ export class VfxController {
         if (this.config.enabled) {
             setTimeout(() => {
                 if (this.currentScript) {
+                    // 在启用前再次更新 center（确保使用最新的相机 target）
+                    if (this.config.type === 'pieces-recover' && this.cameraManager) {
+                        const camera = this.cameraManager.camera;
+                        const targetPoint = new Vec3();
+                        camera.calcFocusPoint(targetPoint);
+                        // CRITICAL: 坐标转换 - gsplat 坐标系需要翻转 X 和 Y 轴（与 reveal.ts 中的处理一致）
+                        this.currentScript.center.set(-targetPoint.x, -targetPoint.y, targetPoint.z);
+                        
+                        // 标记 center 已更新，以便在 updateEffect 中强制更新 uniform
+                        if (this.currentScript._centerUpdatedOnEnable !== undefined) {
+                            this.currentScript._centerUpdatedOnEnable = true;
+                        }
+                        
+                        console.log('Pieces-recover center updated to current camera target before enabling (with coordinate transform):', {
+                            originalTarget: targetPoint,
+                            transformedCenter: this.currentScript.center,
+                            x: this.currentScript.center.x,
+                            y: this.currentScript.center.y,
+                            z: this.currentScript.center.z
+                        });
+                    }
                     this.currentScript.enabled = true;
+                    
+                    // 在启用后立即更新一次 uniform（确保 materials 已准备好）
+                    if (this.config.type === 'pieces-recover' && this.currentScript) {
+                        setTimeout(() => {
+                            if (this.currentScript && this.currentScript.materialsApplied && this.currentScript.materialsApplied.size > 0) {
+                                const centerArray = [
+                                    this.currentScript.center.x,
+                                    this.currentScript.center.y,
+                                    this.currentScript.center.z
+                                ];
+                                this.currentScript.setUniform('uCenter', centerArray);
+                                console.log('Pieces-recover center uniform updated after enabling:', centerArray);
+                            }
+                        }, 50);
+                    }
+                    // 确保 effectTime 重置（虽然基类会在 enable 时重置，但这里明确一下）
+                    if (this.currentScript.effectTime !== undefined) {
+                        this.currentScript.effectTime = 0;
+                    }
                 }
             }, 100);
         }

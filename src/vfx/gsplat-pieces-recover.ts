@@ -474,36 +474,8 @@ void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA,
 }
 
 void modifyColor(vec3 center, inout vec4 color) {
-    // Initialize shared variables for phase calculation
-    initShared(center);
-    
-    // Phase 0.0: Before scatter - show scattered effect (same as scatter phase)
-    if (g_phase == 0.0) {
-        // Reduce alpha to 40-60% for powder effect, with variation per splat
-        float randomSeed = hash(center);
-        float minAlpha = 0.4 + randomSeed * 0.2; // 0.4 to 0.6
-        color.a *= minAlpha; // Already at scattered transparency
-        return;
-    }
-    
-    // All particles participate in scatter/recover phases
-    if (g_phase == 1.0) {
-        // Scattering phase: gradually increase transparency (become more powdery)
-        float t = (uTime - g_tScatter) / uScatterDuration;
-        t = clamp(t, 0.0, 1.0); // Ensure t is in valid range to prevent flickering
-        // Reduce alpha to 40-60% for powder effect, with variation per splat
-        float randomSeed = hash(center);
-        float minAlpha = 0.4 + randomSeed * 0.2; // 0.4 to 0.6
-        color.a *= mix(1.0, minAlpha, t * t); // Ease-in to transparency
-    } else if (g_phase == 2.0) {
-        // Phase 2.0: Recovering phase: gradually restore original opacity
-        float t = (uTime - g_tRecover) / uRecoverDuration;
-        t = clamp(t, 0.0, 1.0); // Ensure t is in valid range to prevent flickering
-        float randomSeed = hash(center);
-        float minAlpha = 0.4 + randomSeed * 0.2; // 0.4 to 0.6
-        color.a *= mix(minAlpha, 1.0, t); // Fade back to full opacity
-    }
-    // Phase 3: original opacity (no modification)
+    // Temporarily disabled: all alpha/transparency modifications removed
+    // No color modifications are applied
 }
 `;
 
@@ -977,34 +949,8 @@ fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<func
 }
 
 fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
-    // Initialize shared variables for phase calculation
-    initShared(center);
-    
-    // Phase 0.0: Before scatter - show scattered effect (same as scatter phase)
-    if (g_phase == 0.0) {
-        // Reduce alpha to 40-60% for powder effect, with variation per splat
-        let randomSeed = hash(center);
-        let minAlpha = 0.4 + randomSeed * 0.2; // 0.4 to 0.6
-        (*color).a *= minAlpha; // Already at scattered transparency
-        return;
-    }
-    
-    // All particles participate in scatter/recover phases
-    if (g_phase == 1.0) {
-        // Scattering phase: gradually increase transparency (become more powdery)
-        let t = clamp((uniform.uTime - g_tScatter) / uniform.uScatterDuration, 0.0, 1.0);
-        // Reduce alpha to 40-60% for powder effect, with variation per splat
-        let randomSeed = hash(center);
-        let minAlpha = 0.4 + randomSeed * 0.2; // 0.4 to 0.6
-        (*color).a *= mix(1.0, minAlpha, t * t); // Ease-in to transparency
-    } else if (g_phase == 2.0) {
-        // Phase 2.0: Recovering phase: gradually restore original opacity
-        let t = clamp((uniform.uTime - g_tRecover) / uniform.uRecoverDuration, 0.0, 1.0);
-        let randomSeed = hash(center);
-        let minAlpha = 0.4 + randomSeed * 0.2; // 0.4 to 0.6
-        (*color).a *= mix(minAlpha, 1.0, t); // Fade back to full opacity
-    }
-    // Phase 3: original opacity (no modification)
+    // Temporarily disabled: all alpha/transparency modifications removed
+    // No color modifications are applied
 }
 `;
 
@@ -1029,6 +975,9 @@ class GsplatRevealPiecesRecover extends GsplatShaderEffect {
     // Reusable arrays for uniform updates
     _centerArray = [0, 0, 0];
     _scatterDirectionArray = [0, 1, 0];
+    
+    // Track if center was updated on enable (to force uniform update)
+    private _centerUpdatedOnEnable = false;
 
     /**
      * Focus point (center) for the effect - spray starts from here
@@ -1118,6 +1067,7 @@ class GsplatRevealPiecesRecover extends GsplatShaderEffect {
         // Update all uniforms
         this.setUniform('uTime', effectTime);
 
+        // Update center uniform (ensures latest center is used)
         this._centerArray[0] = this.center.x;
         this._centerArray[1] = this.center.y;
         this._centerArray[2] = this.center.z;
