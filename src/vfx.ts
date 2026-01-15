@@ -125,18 +125,18 @@ export class VfxController {
                 // 设置 AABB（与 integrate 效果对齐）
                 if (this.bbox) {
                     script.aabbMin.set(
-                        this.bbox.center.x - this.bbox.halfExtents.x * 0.5,
+                        this.bbox.center.x - this.bbox.halfExtents.x,
                         this.bbox.center.y - this.bbox.halfExtents.y,
-                        this.bbox.center.z - this.bbox.halfExtents.z * 0.5
+                        this.bbox.center.z - this.bbox.halfExtents.z
                     );
                     script.aabbMax.set(
-                        this.bbox.center.x + this.bbox.halfExtents.x * 0.5,
+                        this.bbox.center.x + this.bbox.halfExtents.x,
                         this.bbox.center.y + this.bbox.halfExtents.y,
-                        this.bbox.center.z + this.bbox.halfExtents.z * 0.5
+                        this.bbox.center.z + this.bbox.halfExtents.z
                     );
                     
                     // 设置 topY 和 bottomY（与 integrate 效果对齐）
-                    script.topY = this.bbox.center.y + this.bbox.halfExtents.y * 0.25;
+                    script.topY = this.bbox.center.y + this.bbox.halfExtents.y * 0.35;
                     script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y;
                 } else {
                     // 默认 AABB
@@ -334,14 +334,14 @@ export class VfxController {
                 // 设置 AABB（如果 bbox 存在）
                 if (this.bbox) {
                     script.aabbMin = new Vec3(
-                        this.bbox.center.x - this.bbox.halfExtents.x * 0.5,
+                        this.bbox.center.x - this.bbox.halfExtents.x,
                         this.bbox.center.y - this.bbox.halfExtents.y,
-                        this.bbox.center.z - this.bbox.halfExtents.z * 0.5
+                        this.bbox.center.z - this.bbox.halfExtents.z
                     );
                     script.aabbMax = new Vec3(
-                        this.bbox.center.x + this.bbox.halfExtents.x * 0.5,
+                        this.bbox.center.x + this.bbox.halfExtents.x,
                         this.bbox.center.y + this.bbox.halfExtents.y,
-                        this.bbox.center.z + this.bbox.halfExtents.z * 0.5
+                        this.bbox.center.z + this.bbox.halfExtents.z
                     );
                 } else {
                     // 默认 AABB
@@ -351,7 +351,7 @@ export class VfxController {
                 
                 // 设置 topY 和 bottomY（基于 bbox 或默认值）
                 if (this.bbox) {
-                    script.topY = this.bbox.center.y + this.bbox.halfExtents.y * 0.25;
+                    script.topY = this.bbox.center.y + this.bbox.halfExtents.y * 0.35;
                     script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y;
                 } else {
                     script.topY = 10.0;
