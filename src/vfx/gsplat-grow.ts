@@ -31,12 +31,10 @@ void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA,
     initShared(modifiedCenter);
     
     // AABB crop 效果：检查 splat 是否在 AABB 内
+    // 如果不在 AABB 内，不应用效果，保持原始状态（正常显示）
     bool insideAABB = all(greaterThanEqual(modifiedCenter, uAabbMin)) && all(lessThanEqual(modifiedCenter, uAabbMax));
-    
-    // 如果不在 AABB 内，隐藏
     if (!insideAABB) {
-        gsplatMakeRound(covA, covB, 0.0);
-        return;
+        return; // 不在 AABB 内，不参与效果，保持原始状态
     }
     
     // 【临时测试：从顶部向下生长】
@@ -88,10 +86,10 @@ void modifyColor(vec3 center, inout vec4 color) {
     initShared(center);
     
     // AABB crop 效果：检查 splat 是否在 AABB 内
+    // 如果不在 AABB 内，不应用效果，保持原始颜色（正常显示）
     bool insideAABB = all(greaterThanEqual(center, uAabbMin)) && all(lessThanEqual(center, uAabbMax));
     if (!insideAABB) {
-        color.a = 0.0;
-        return;
+        return; // 不在 AABB 内，不参与效果，保持原始颜色
     }
     
     // 【临时测试：从顶部向下生长】
@@ -151,12 +149,10 @@ fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<func
     initShared(modifiedCenter);
     
     // AABB crop 效果：检查 splat 是否在 AABB 内
+    // 如果不在 AABB 内，不应用效果，保持原始状态（正常显示）
     let insideAABB = all(modifiedCenter >= uniform.uAabbMin) && all(modifiedCenter <= uniform.uAabbMax);
-    
-    // 如果不在 AABB 内，隐藏
     if (!insideAABB) {
-        gsplatMakeRound(covA, covB, 0.0);
-        return;
+        return; // 不在 AABB 内，不参与效果，保持原始状态
     }
     
     // 【临时测试：从顶部向下生长】
@@ -207,10 +203,10 @@ fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
     initShared(center);
     
     // AABB crop 效果：检查 splat 是否在 AABB 内
+    // 如果不在 AABB 内，不应用效果，保持原始颜色（正常显示）
     let insideAABB = all(center >= uniform.uAabbMin) && all(center <= uniform.uAabbMax);
     if (!insideAABB) {
-        (*color).a = 0.0;
-        return;
+        return; // 不在 AABB 内，不参与效果，保持原始颜色
     }
     
     // 【临时测试：从顶部向下生长】

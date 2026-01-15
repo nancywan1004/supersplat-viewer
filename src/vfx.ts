@@ -122,55 +122,30 @@ export class VfxController {
             const script = this.gsplatEntity.script.create(GsplatRevealGrow) as any;
             if (script) {
                 // 配置script属性
-                // 优先使用相机移动限制 boxConstraint 的最高点作为 topY（起始位置），否则使用 bbox
+                // 设置 AABB（与 integrate 效果对齐）
                 if (this.bbox) {
-                    const targetConstraint = this.cameraManager?.getTargetConstraint();
-                    
-                    if (targetConstraint) {
-                        const constraintBbox = targetConstraint.bbox;
-                        script.topY = constraintBbox.center.y + constraintBbox.halfExtents.y;
-                        console.log('Using targetConstraint bounding box maximum Y as topY:', {
-                            topY: script.topY,
-                            'bbox topY': this.bbox.center.y + this.bbox.halfExtents.y,
-                            'constraint center': constraintBbox.center.y,
-                            'constraint halfExtents': constraintBbox.halfExtents.y
-                        });
-                    } else {
-                        script.topY = this.bbox.center.y + this.bbox.halfExtents.y;
-                        console.log('Using bbox maximum Y as topY:', script.topY);
-                    }
-                    
-                    script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y;
-                    
-                    // 设置 AABB 用于 crop 效果
                     script.aabbMin.set(
-                        this.bbox.center.x - this.bbox.halfExtents.x,
+                        this.bbox.center.x - this.bbox.halfExtents.x * 0.5,
                         this.bbox.center.y - this.bbox.halfExtents.y,
-                        this.bbox.center.z - this.bbox.halfExtents.z
+                        this.bbox.center.z - this.bbox.halfExtents.z * 0.5
                     );
                     script.aabbMax.set(
-                        this.bbox.center.x + this.bbox.halfExtents.x,
+                        this.bbox.center.x + this.bbox.halfExtents.x * 0.5,
                         this.bbox.center.y + this.bbox.halfExtents.y,
-                        this.bbox.center.z + this.bbox.halfExtents.z
+                        this.bbox.center.z + this.bbox.halfExtents.z * 0.5
                     );
+                    
+                    // 设置 topY 和 bottomY（与 integrate 效果对齐）
+                    script.topY = this.bbox.center.y + this.bbox.halfExtents.y * 0.25;
+                    script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y;
                 } else {
-                    const targetConstraint = this.cameraManager?.getTargetConstraint();
+                    // 默认 AABB
+                    script.aabbMin.set(-0.5, -0.5, -0.5);
+                    script.aabbMax.set(0.5, 0.5, 0.5);
                     
-                    if (targetConstraint) {
-                        const constraintBbox = targetConstraint.bbox;
-                        script.topY = constraintBbox.center.y + constraintBbox.halfExtents.y;
-                        script.bottomY = script.topY - 10.0;
-                        console.log('Using targetConstraint bounding box maximum Y as topY (no bbox):', {
-                            topY: script.topY,
-                            bottomY: script.bottomY
-                        });
-                    } else {
-                        script.bottomY = -5.0;
-                        script.topY = 5.0;
-                    }
-                    
-                    script.aabbMin.set(-10, -10, -10);
-                    script.aabbMax.set(10, 10, 10);
+                    // 默认 topY 和 bottomY
+                    script.topY = 10.0;
+                    script.bottomY = -10.0;
                 }
                 
                 script.growthSpeed = 2.0;
