@@ -19,6 +19,7 @@ import type { Config, Global } from './types';
 import { initPoster, initUI } from './ui';
 import { Viewer } from './viewer';
 import { initXr } from './xr';
+import { initLight } from './light';
 import { LodLoader } from './loaders/lod-loader';
 import { loadSplat } from './loaders/splat-loader';
 import type { AssetSource } from './loaders/asset-source';
@@ -232,6 +233,9 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
     }
 
     camera.addComponent('camera');
+
+    // Initialize lighting
+    initLight(global);
 
     // Initialize XR support
     initXr(global);

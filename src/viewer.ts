@@ -36,6 +36,7 @@ import { VfxController } from './vfx';
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
 import { getSkyboxRadius } from './loaders/skybox-loader';
 import { isLodMetaFile } from './loaders/lod-loader';
+import { NightMode } from './vfx/lighting/night-mode';
 
 // override global pick to pack depth instead of meshInstance id
 const pickDepthGlsl = /* glsl */ `
@@ -354,6 +355,27 @@ class Viewer {
             
             this.revealController = new RevealController(global, sceneBound, results[0], this.cameraManager);
             this.vfxController = new VfxController(global, sceneBound, results[0], this.cameraManager);
+            
+            // Initialize night mode script on root entity
+            if (!app.root.script) {
+                app.root.addComponent('script');
+            }
+            const nightModeScript = app.root.script.create(NightMode) as any;
+            // Find entities by name or tag
+            const lightEntity = app.root.findByName('light') as Entity | null || (app.root.findByTag('light') as Entity[])?.[0] || null;
+            const cameraEntity = global.camera;
+            nightModeScript.light = lightEntity;
+            nightModeScript.camera = cameraEntity || null;
+            nightModeScript.splat = results[0];
+            // Keep enabled = true so update() continues to run
+            // We control night mode through nightMode property, not enabled
+            nightModeScript.enabled = true;
+            console.log('NightMode script initialized:', {
+                light: lightEntity ? 'found' : 'not found',
+                camera: cameraEntity ? 'found' : 'not found',
+                splat: results[0] ? 'found' : 'not found'
+            });
+            
             applyCamera(this.cameraManager.camera);
 
             // Initialize camera path visualizer if there are animation tracks

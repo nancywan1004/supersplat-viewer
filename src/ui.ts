@@ -44,6 +44,8 @@ const initUI = (global: Global) => {
         'revealPanel', 'revealType', 'revealRestart',
         'vfxPanel', 'vfxType', 'vfxToggle', 'vfxRestart',
         'skyboxRow', 'skyboxSelect',
+        'nightModeCheck', 'nightModeOption',
+        'nightFadeSlider', 'nightFadeValue',
         'reset', 'frame',
         'loadingText', 'loadingBar',
         'joystickBase', 'joystick',
@@ -242,6 +244,81 @@ const initUI = (global: Global) => {
         });
 
         populateSkyboxes();
+    }
+
+    // Night Mode Toggle and Intensity Slider
+    const nightModeCheck = dom.nightModeCheck;
+    const nightModeOption = dom.nightModeOption;
+    const nightFadeSlider = dom.nightFadeSlider as HTMLInputElement;
+    const nightFadeValue = dom.nightFadeValue;
+    
+    let nightModeEnabled = false;
+    
+    if (nightModeCheck && nightModeOption) {
+        // Toggle night mode on/off
+        const toggleNightMode = () => {
+            nightModeEnabled = !nightModeEnabled;
+            nightModeCheck.classList[nightModeEnabled ? 'remove' : 'add']('hidden');
+            // Enable/disable slider based on night mode state
+            if (nightFadeSlider) {
+                nightFadeSlider.disabled = !nightModeEnabled;
+            }
+            // Fire toggle event
+            events.fire('toggle:night-mode');
+            global.app.fire('toggle:night-mode');
+        };
+        
+        nightModeOption.addEventListener('click', toggleNightMode);
+        nightModeCheck.addEventListener('click', toggleNightMode);
+    }
+    
+    if (nightFadeSlider && nightFadeValue) {
+        // Update slider value display (show 0-1 value)
+        const updateSliderDisplay = (value: number) => {
+            nightFadeSlider.value = value.toString();
+            nightFadeValue.textContent = value.toFixed(2);
+        };
+
+        // Handle slider input
+        nightFadeSlider.addEventListener('input', (event) => {
+            const value = parseFloat((event.target as HTMLInputElement).value);
+            updateSliderDisplay(value);
+            // Fire on both event systems to ensure night-mode script receives it
+            events.fire('nightFade:set', value);
+            global.app.fire('nightFade:set', value);
+        });
+
+        // Sync slider with nightFade changes from night-mode script
+        events.on('nightFade:changed', (value: number) => {
+            updateSliderDisplay(value);
+        });
+        
+        // Also listen to app events (in case night-mode fires on app)
+        global.app.on('nightFade:changed', (value: number) => {
+            updateSliderDisplay(value);
+        });
+        
+        // Listen for night mode state changes to update toggle and slider
+        global.app.on('nightMode:changed', (enabled: boolean) => {
+            nightModeEnabled = enabled;
+            if (nightModeCheck) {
+                nightModeCheck.classList[enabled ? 'remove' : 'add']('hidden');
+            }
+            if (nightFadeSlider) {
+                nightFadeSlider.disabled = !enabled;
+                // When enabling, slider will be updated by nightFade:changed event
+                // When disabling, keep slider at current value but disabled
+            }
+        });
+
+        // Initialize slider to 0
+        updateSliderDisplay(0);
+        
+        // Request initial nightFade value from night-mode script
+        // This will be sent when night-mode script initializes
+        setTimeout(() => {
+            global.app.fire('nightFade:request');
+        }, 100);
     }
 
     // AR/VR
