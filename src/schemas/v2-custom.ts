@@ -1,5 +1,5 @@
 type RevealEffect = {
-    type?: 'radial' | 'rain' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'none',
+    type?: 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'none',
     radius?: number, // 10
     autoStart?: boolean
 }

@@ -1,0 +1,290 @@
+// Adapted from spark: https://github.com/sparkjsdev/spark 
+
+import { Script, Vec3, Color } from 'playcanvas';
+import { GsplatShaderEffect } from './gsplat-shader-effect';
+
+const shaderGLSL = /* glsl */`
+uniform float uTime;
+uniform float uIntensity;
+uniform vec3 uCenter;
+uniform vec3 uHitTint;
+uniform float uHitDuration;
+uniform float uBottomY;
+uniform float uRainHeight;
+
+vec3 hash2(vec3 p) {
+    p = fract(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return fract(vec3(p.x * p.y * p.z, p.x + p.y * p.z, p.x * p.y + p.z));
+}
+
+// Shared globals for consistent calculations
+float g_rainProgress;
+float g_originalY;
+float g_rainY;
+float g_hasReached;
+float g_redFadeFactor;
+
+void initShared(vec3 originalCenter) {
+    vec3 h = hash2(originalCenter);
+    float dist2D = length(originalCenter.xz - uCenter.xz);
+    float rawProgress = uTime*uTime*0.1 - dist2D*2.0 + 1.0;
+    g_rainProgress = pow(smoothstep(0., 5., rawProgress), 0.5 + h.x);
+    g_originalY = originalCenter.y;
+    g_rainY = min(uBottomY + g_rainProgress*uRainHeight, g_originalY);
+    
+    // Check if splat has reached its original position
+    // Only mark as reached if:
+    // 1. Animation wave has reached this splat (rawProgress > 0, meaning smoothstep will give non-zero result)
+    // 2. Progress is significant enough that the splat has moved from below
+    // 3. The splat is at or very close to its original position
+    float progressWhenReached = max(0.001, (g_originalY - uBottomY) / uRainHeight);
+    float hasStartedAnimating = step(0.0, rawProgress); // 1.0 if wave has started
+    float hasMovedEnough = step(progressWhenReached * 0.8, g_rainProgress); // Must have moved at least 80% to reach point
+    float isAtOriginalY = step(g_originalY - 0.01, g_rainY); // 1.0 if at original position
+    g_hasReached = hasStartedAnimating * hasMovedEnough * isAtOriginalY;
+    
+    // Calculate fade factor for red tint effect
+    // Red tint appears when splat reaches original position and fades out as progress continues
+    if (g_hasReached > 0.5) {
+        // Calculate progress range for red effect
+        float progressAfterReach = max(0.0, g_rainProgress - progressWhenReached);
+        float maxProgressForFade = 0.3; // Progress range for fade-out (can be adjusted via uniform if needed)
+        
+        // Calculate fade: starts at 1.0 when just reached, fades to 0.0 after maxProgressForFade
+        // Use smoothstep for smooth transition
+        g_redFadeFactor = 1.0 - smoothstep(0.0, maxProgressForFade, progressAfterReach);
+        
+        // Ensure that when progress reaches 1.0 or beyond, red completely disappears
+        // This prevents red from persisting for splats that have fully completed animation
+        if (g_rainProgress >= 1.0 - 0.001) {
+            g_redFadeFactor = 0.0;
+        }
+    } else {
+        g_redFadeFactor = 0.0; // No red if not reached
+    }
+}
+
+void modifyCenter(inout vec3 center) {
+    vec3 originalCenter = center;
+    initShared(originalCenter);
+    
+    float newY = min(uBottomY + g_rainProgress*uRainHeight, g_originalY);
+    center.y = newY;
+    center.x = originalCenter.x + (newY - g_originalY)*0.2;
+    vec2 xz = mix(originalCenter.xz*0.3, originalCenter.xz, g_rainProgress);
+    center.xz = xz;
+}
+
+void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
+    // Scale can be adjusted based on rain effect
+    // Original implementation doesn't modify scale explicitly, but we can add it if needed
+    initShared(originalCenter);
+}
+
+void modifyColor(vec3 center, inout vec4 color) {
+    // Use shared variables calculated in modifyCenter for consistency
+    // These were computed from originalCenter in modifyCenter
+    float alpha = smoothstep(uBottomY, g_originalY, g_rainY);
+    
+    // Apply intensity to alpha
+    color.a *= mix(1.0, alpha, uIntensity);
+    
+    // Apply red tint when reaching original position (hit effect)
+    // Use the fade factor calculated in initShared
+    if (g_redFadeFactor > 0.001) {
+        // Apply red tint with fade factor
+        // This ensures red completely disappears after fade-out period
+        color.rgb += uHitTint * g_redFadeFactor;
+    }
+}
+`;
+
+const shaderWGSL = /* wgsl */`
+uniform uTime: f32;
+uniform uIntensity: f32;
+uniform uCenter: vec3f;
+uniform uHitTint: vec3f;
+uniform uHitDuration: f32;
+uniform uBottomY: f32;
+uniform uRainHeight: f32;
+
+fn hash2(p: vec3f) -> vec3f {
+    var p_fract = fract(p * 0.3183099 + 0.1);
+    p_fract *= 17.0;
+    return fract(vec3f(
+        p_fract.x * p_fract.y * p_fract.z,
+        p_fract.x + p_fract.y * p_fract.z,
+        p_fract.x * p_fract.y + p_fract.z
+    ));
+}
+
+// Shared globals for consistent calculations
+var<private> g_rainProgress: f32;
+var<private> g_originalY: f32;
+var<private> g_rainY: f32;
+var<private> g_hasReached: f32;
+var<private> g_redFadeFactor: f32;
+
+fn initShared(originalCenter: vec3f) {
+    let h = hash2(originalCenter);
+    let dist2D = length(originalCenter.xz - uniform.uCenter.xz);
+    let rawProgress = uniform.uTime*uniform.uTime*0.1 - dist2D*2.0 + 1.0;
+    g_rainProgress = pow(smoothstep(0.0, 5.0, rawProgress), 0.5 + h.x);
+    g_originalY = originalCenter.y;
+    g_rainY = min(uniform.uBottomY + g_rainProgress*uniform.uRainHeight, g_originalY);
+    
+    // Check if splat has reached its original position
+    // Only mark as reached if:
+    // 1. Animation wave has reached this splat (rawProgress > 0, meaning smoothstep will give non-zero result)
+    // 2. Progress is significant enough that the splat has moved from below
+    // 3. The splat is at or very close to its original position
+    let progressWhenReached = max(0.001, (g_originalY - uniform.uBottomY) / uniform.uRainHeight);
+    let hasStartedAnimating = select(0.0, 1.0, rawProgress > 0.0); // 1.0 if wave has started
+    let hasMovedEnough = select(0.0, 1.0, g_rainProgress >= progressWhenReached * 0.8); // Must have moved at least 80% to reach point
+    let isAtOriginalY = select(0.0, 1.0, g_rainY >= g_originalY - 0.01); // 1.0 if at original position
+    g_hasReached = hasStartedAnimating * hasMovedEnough * isAtOriginalY;
+    
+    // Calculate fade factor for red tint effect
+    // Red tint appears when splat reaches original position and fades out as progress continues
+    if (g_hasReached > 0.5) {
+        // Calculate progress range for red effect
+        let progressAfterReach = max(0.0, g_rainProgress - progressWhenReached);
+        let maxProgressForFade = 0.3; // Progress range for fade-out (can be adjusted via uniform if needed)
+        
+        // Calculate fade: starts at 1.0 when just reached, fades to 0.0 after maxProgressForFade
+        // Use smoothstep for smooth transition
+        g_redFadeFactor = 1.0 - smoothstep(0.0, maxProgressForFade, progressAfterReach);
+        
+        // Ensure that when progress reaches 1.0 or beyond, red completely disappears
+        // This prevents red from persisting for splats that have fully completed animation
+        if (g_rainProgress >= 1.0 - 0.001) {
+            g_redFadeFactor = 0.0;
+        }
+    } else {
+        g_redFadeFactor = 0.0; // No red if not reached
+    }
+}
+
+fn modifyCenter(center: ptr<function, vec3f>) {
+    let originalCenter = *center;
+    initShared(originalCenter);
+    
+    let newY = min(uniform.uBottomY + g_rainProgress*uniform.uRainHeight, g_originalY);
+    (*center).y = newY;
+    (*center).x = originalCenter.x + (newY - g_originalY)*0.2;
+    var xz = mix(originalCenter.xz*0.3, originalCenter.xz, g_rainProgress);
+    (*center).x = xz.x;
+    (*center).z = xz.y;
+}
+
+fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<function, vec3f>, covB: ptr<function, vec3f>) {
+    // Scale can be adjusted based on rain effect
+    // Original implementation doesn't modify scale explicitly, but we can add it if needed
+    initShared(originalCenter);
+}
+
+fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
+    // Use shared variables calculated in modifyCenter for consistency
+    // These were computed from originalCenter in modifyCenter
+    let alpha = smoothstep(uniform.uBottomY, g_originalY, g_rainY);
+    
+    // Apply intensity to alpha
+    (*color).a *= mix(1.0, alpha, uniform.uIntensity);
+    
+    // Apply red tint when reaching original position (hit effect)
+    // Use the fade factor calculated in initShared
+    if (g_redFadeFactor > 0.001) {
+        // Apply red tint with fade factor
+        // This ensures red completely disappears after fade-out period
+        (*color).rgb = (*color).rgb + uniform.uHitTint * g_redFadeFactor;
+    }
+}
+`;
+
+/**
+ * Rain V2 effect for gaussian splats.
+ * Creates a rain-like animation where splats appear from below and move upward,
+ * with rotation and scaling effects based on time and distance from center.
+ * This is a simplified version compared to GsplatRevealRain.
+ * 
+ * @example
+ * // Add the script to a gsplat entity
+ * entity.addComponent('script');
+ * const rainScript = entity.script.create(GsplatRainV2);
+ * rainScript.intensity = 1.0;
+ */
+class GsplatRainV2 extends GsplatShaderEffect {
+    static scriptName = 'gsplatRainV2';
+
+    // Reusable arrays for uniform updates
+    _centerArray = [0, 0, 0];
+    _hitTintArray = [0, 0, 0];
+
+    /**
+     * Effect intensity (0.0 to 1.0)
+     * @attribute
+     * @range [0, 1]
+     */
+    intensity: number = 1.0;
+
+    /**
+     * Center point for the rain effect
+     * @attribute
+     */
+    center: Vec3 = new Vec3(0, 0, 0);
+
+    /**
+     * Additive color when splat reaches its original position (hit flash)
+     * @attribute
+     */
+    hitTint: Color = new Color(2, 0, 0);
+
+    /**
+     * Duration of hit tint flash in seconds (longer duration creates wider boundary expansion effect)
+     * @attribute
+     * @range [0, 5]
+     */
+    hitDuration: number = 2.0;
+
+    /**
+     * Bottom Y position where splats start appearing (below scene)
+     * @attribute
+     */
+    bottomY: number = -10.0;
+
+    /**
+     * Height range for rain effect (distance from bottomY to original position)
+     * @attribute
+     */
+    rainHeight: number = 15.0;
+
+    getShaderGLSL() {
+        return shaderGLSL;
+    }
+
+    getShaderWGSL() {
+        return shaderWGSL;
+    }
+
+    updateEffect(effectTime: number, dt: number) {
+        // Update uniforms
+        this.setUniform('uTime', effectTime);
+        this.setUniform('uIntensity', this.intensity);
+        
+        this._centerArray[0] = this.center.x;
+        this._centerArray[1] = this.center.y;
+        this._centerArray[2] = this.center.z;
+        this.setUniform('uCenter', this._centerArray);
+        
+        this._hitTintArray[0] = this.hitTint.r;
+        this._hitTintArray[1] = this.hitTint.g;
+        this._hitTintArray[2] = this.hitTint.b;
+        this.setUniform('uHitTint', this._hitTintArray);
+        this.setUniform('uHitDuration', this.hitDuration);
+        this.setUniform('uBottomY', this.bottomY);
+        this.setUniform('uRainHeight', this.rainHeight);
+    }
+}
+
+export { GsplatRainV2 };

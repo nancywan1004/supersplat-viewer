@@ -8,6 +8,7 @@ import { GsplatRevealSmooth } from './vfx/reveal/gsplat-reveal-smooth';
 import { GsplatRevealPiecesRecover } from './vfx/gsplat-pieces-recover';
 import { GsplatRevealPerlinWave } from './vfx/gsplat-perlin-wave';
 import { GsplatIntegrate } from './vfx/gsplat-integrate';
+import { GsplatRainV2 } from './vfx/gsplat-rain';
 import type { CameraManager } from './camera-manager';
 // import { GsplatRevealRadial } from 'playcanvas/scripts/esm/gsplat/reveal-radial.mjs';
 // import { GsplatRevealRain } from 'playcanvas/scripts/esm/gsplat/reveal-rain.mjs';
@@ -19,7 +20,7 @@ import type { CameraManager } from './camera-manager';
 /**
  * Reveal effect type (including VFX effects)
  */
-export type RevealEffectType = 'radial' | 'rain' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'none';
+export type RevealEffectType = 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'none';
 
 export class RevealController {
     private gsplatEntity: Entity | null = null;
@@ -168,6 +169,67 @@ export class RevealController {
             return script;
         } catch (error) {
             console.error('Failed to create rain script:', error);
+            return null;
+        }
+    }
+
+    /**
+     * 创建rain_v2 reveal script - 简化版本的rain效果
+     */
+    private createRainV2Script() {
+        if (!this.gsplatEntity || !this.gsplatEntity.script) {
+            console.warn('Cannot create rain_v2 script - entity or script component not ready');
+            return null;
+        }
+
+        console.log('Creating rain_v2 reveal script');
+        
+        try {
+            const script = this.gsplatEntity.script.create(GsplatRainV2) as any;
+            if (script) {
+                // 配置script属性
+                script.intensity = 1.0;
+                
+                // 根据场景包围盒设置底部Y和高度
+                if (this.bbox) {
+                    const minY = this.bbox.getMin().y;
+                    const maxY = this.bbox.getMax().y;
+                    // 底部位置：场景底部减去场景高度的10%作为缓冲区
+                    script.bottomY = minY - (maxY - minY) * 0.1;
+                    // 高度范围：从底部到顶部，再加上一些额外的范围
+                    script.rainHeight = maxY - script.bottomY;
+                    
+                    console.log('Rain V2 configured with bbox:', {
+                        bboxMinY: minY,
+                        bboxMaxY: maxY,
+                        bottomY: script.bottomY,
+                        rainHeight: script.rainHeight
+                    });
+                } else {
+                    // 如果没有包围盒，使用默认值
+                    script.bottomY = -10.0;
+                    script.rainHeight = 15.0;
+                    console.warn('No bbox available, using default bottomY and rainHeight');
+                }
+                
+                // 设置 reveal center
+                this.updateScriptCenter(script);
+                
+                // 初始状态和 effectTime
+                script.enabled = this.config.autoStart;
+                script.effectTime = 0;
+                
+                console.log('Rain V2 script created with config:', {
+                    center: script.center,
+                    intensity: script.intensity,
+                    bottomY: script.bottomY,
+                    rainHeight: script.rainHeight,
+                    enabled: script.enabled
+                });
+            }
+            return script;
+        } catch (error) {
+            console.error('Failed to create rain_v2 script:', error);
             return null;
         }
     }
@@ -402,6 +464,9 @@ export class RevealController {
             case 'rain':
                 script = this.createRainScript();
                 break;
+            case 'rain_v2':
+                script = this.createRainV2Script();
+                break;
             case 'smooth':
                 script = this.createSmoothScript();
                 break;
@@ -454,6 +519,7 @@ export class RevealController {
             // 销毁所有类型的reveal scripts
             this.gsplatEntity.script.destroy('gsplatRevealRadial');
             this.gsplatEntity.script.destroy('gsplatRevealRain');
+            this.gsplatEntity.script.destroy('gsplatRainV2');
             this.gsplatEntity.script.destroy('gsplatRevealSmooth');
             this.gsplatEntity.script.destroy('gsplatRevealPiecesRecover');
             this.gsplatEntity.script.destroy('gsplatRevealPerlinWave');
