@@ -202,32 +202,23 @@
                 <div id="revealPanel" class="hidden">
                     <div class="divider"></div>
                     <div class="settingsRow">
+                        <label for="revealType" style="margin-right: 8px;">Effect:</label>
                         <select id="revealType">
-                            <option value="radial">Radial</option>
-                            <option value="rain">Rain</option>
-                            <option value="smooth">Smooth</option>
-                        </select>
-                    </div>
-                    <div class="settingsRow">
-                        <button id="revealRestart">Start Reveal</button>
-                    </div>
-                    <div class="divider"></div>
-                </div>
-                <div id="vfxPanel">
-                    <div class="settingsRow">
-                        <label for="vfxType" style="margin-right: 8px;">VFX Effect:</label>
-                        <select id="vfxType">
                             <option value="none">None</option>
-                            <option value="grow">Grow</option>
-                            <option value="pieces-recover">Pieces Recover</option>
-                            <option value="perlin-wave">Perlin Wave</option>
-                            <option value="disintegrate">Disintegrate</option>
-                            <option value="integrate">Integrate</option>
+                            <optgroup label="Reveal Effects">
+                                <option value="radial">Radial</option>
+                                <option value="rain">Rain</option>
+                                <option value="smooth">Smooth</option>
+                            </optgroup>
+                            <optgroup label="VFX Effects">
+                                <option value="pieces-recover">Pieces Recover</option>
+                                <option value="perlin-wave">Perlin Wave</option>
+                                <option value="integrate">Integrate</option>
+                            </optgroup>
                         </select>
                     </div>
                     <div class="settingsRow">
-                        <button id="vfxToggle">Enable VFX</button>
-                        <button id="vfxRestart">Restart VFX</button>
+                        <button id="revealRestart">Restart Effect</button>
                     </div>
                     <div class="divider"></div>
                 </div>
@@ -239,6 +230,18 @@
                         <option value="/assets/skyboxes/多云.png">多云</option>
                         <option value="/assets/skyboxes/阴天.png">阴天</option>
                     </select>
+                </div>
+                <div class="divider"></div>
+                <div class="settingsRow">
+                    <div id="nightModeCheck" class="checkMark">✓</div>
+                    <div id="nightModeOption">Night Mode</div>
+                </div>
+                <div class="settingsRow">
+                    <label for="nightFadeSlider" style="margin-right: 8px;">Intensity:</label>
+                    <div style="display: flex; align-items: center; flex: 1; gap: 8px;">
+                        <input type="range" id="nightFadeSlider" min="0" max="1" step="0.01" value="0" style="flex: 1;" disabled>
+                        <span id="nightFadeValue" style="min-width: 40px; text-align: right;">0.00</span>
+                    </div>
                 </div>
                 <div class="settingsRow">
                     <button id="frame">Frame</button>

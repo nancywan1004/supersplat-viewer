@@ -1,10 +1,13 @@
-import type { Entity } from 'playcanvas';
-import { Vec3, BoundingBox } from 'playcanvas';
+import type { Entity, BoundingBox } from 'playcanvas';
+import { Vec3 } from 'playcanvas';
 import { GsplatRevealRadial } from './vfx/reveal/gsplat-reveal-radial';
 import { GsplatRevealRain } from './vfx/reveal/gsplat-reveal-rain';
 import { Global } from './types';
 import { RevealEffect as RevealConfig, AnimTrack } from './settings';
 import { GsplatRevealSmooth } from './vfx/reveal/gsplat-reveal-smooth';
+import { GsplatRevealPiecesRecover } from './vfx/gsplat-pieces-recover';
+import { GsplatRevealPerlinWave } from './vfx/gsplat-perlin-wave';
+import { GsplatIntegrate } from './vfx/gsplat-integrate';
 import type { CameraManager } from './camera-manager';
 // import { GsplatRevealRadial } from 'playcanvas/scripts/esm/gsplat/reveal-radial.mjs';
 // import { GsplatRevealRain } from 'playcanvas/scripts/esm/gsplat/reveal-rain.mjs';
@@ -13,6 +16,11 @@ import type { CameraManager } from './camera-manager';
  * Script-based Reveal Controller - 基于原始reveal.example.mjs的实现
  * 使用createRadialScript等方法来创建和管理reveal scripts
  */
+/**
+ * Reveal effect type (including VFX effects)
+ */
+export type RevealEffectType = 'radial' | 'rain' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'none';
+
 export class RevealController {
     private gsplatEntity: Entity | null = null;
     private config: RevealConfig;
@@ -35,30 +43,27 @@ export class RevealController {
                                 Object.keys(settings.revealEffect).length > 0 && 
                                 settings.revealEffect.type;
         
-        if (!hasRevealEffect) {
-            console.log('No reveal effect specified, skipping reveal initialization.');
-            state.hasRevealEffect = false;
-            return;
-        }
-
+        // Always initialize (VFX effects don't require revealEffect in settings)
         this.config = {
-            type: settings.revealEffect.type ?? 'radial',
-            radius: settings.revealEffect.radius ?? 10,
-            autoStart: settings.revealEffect.autoStart ?? true
+            type: (settings.revealEffect?.type as RevealEffectType) ?? 'none',
+            radius: settings.revealEffect?.radius ?? 10,
+            autoStart: settings.revealEffect?.autoStart ?? true
         };
 
         console.log('RevealController initialized with config:', this.config);
         
         // Set state to indicate reveal effect is available
-        state.hasRevealEffect = true;
+        state.hasRevealEffect = !!hasRevealEffect || true; // Always available for VFX effects
+        state.vfxType = this.config.type;
+        state.vfxActive = false;
 
-        // 监听配置变化
+        // 统一监听配置变化（包括类型切换和启用状态）
         events.on('revealConfigChanged', (newConfig: Partial<RevealConfig>) => {
             console.log('Reveal config changed:', newConfig);
             this.updateConfig(newConfig);
         });
 
-        // 监听重启请求
+        // 统一监听重启请求（所有效果类型）
         events.on('revealRestart', () => {
             console.log('Reveal restart requested via event');
             this.restart();
@@ -71,8 +76,10 @@ export class RevealController {
         // 触发事件以更新 UI（确保 UI 显示当前类型）
         events.fire('revealType:changed', this.config.type);
         
-        // 创建初始效果
-        this.createEffect(this.config.type);
+        // 创建初始效果（如果类型不是 none）
+        if (this.config.type !== 'none') {
+            this.createEffect(this.config.type);
+        }
     }
 
     /**
@@ -99,12 +106,11 @@ export class RevealController {
                 script.endRadius = this.config.radius;
                 
                 // 设置 reveal center
-                if (script.center && this.revealCenter) {
-                    script.center.set(-this.revealCenter[0], -this.revealCenter[1], this.revealCenter[2]);
-                }
+                this.updateScriptCenter(script);
                 
-                // 初始状态设为禁用，等待手动启动
-                script.enabled = true;
+                // 初始状态和 effectTime
+                script.enabled = this.config.autoStart;
+                script.effectTime = 0;
                 
                 console.log('Radial script created with config:', {
                     center: script.center,
@@ -147,12 +153,11 @@ export class RevealController {
                 script.endRadius = this.config.radius;
                 
                 // 设置 reveal center
-                if (script.center && this.revealCenter) {
-                    script.center.set(-this.revealCenter[0], -this.revealCenter[1], this.revealCenter[2]);
-                }
+                this.updateScriptCenter(script);
                 
-                // 初始状态设为禁用，等待手动启动
-                script.enabled = true;
+                // 初始状态和 effectTime
+                script.enabled = this.config.autoStart;
+                script.effectTime = 0;
                 
                 console.log('Rain script created with config:', {
                     center: script.center,
@@ -185,12 +190,11 @@ export class RevealController {
                 script.maxRadius = this.config.radius;
                 
                 // 设置 reveal center
-                if (script.center && this.revealCenter) {
-                    script.center.set(-this.revealCenter[0], -this.revealCenter[1], this.revealCenter[2]);
-                }
+                this.updateScriptCenter(script);
                 
-                // 初始状态设为禁用，等待手动启动
-                script.enabled = true;
+                // 初始状态和 effectTime
+                script.enabled = this.config.autoStart;
+                script.effectTime = 0;
                 
                 console.log('Smooth script created with config:', {
                     center: script.center,
@@ -207,9 +211,166 @@ export class RevealController {
 
 
     /**
+     * 创建 pieces-recover 效果脚本
+     */
+    private createPiecesRecoverScript() {
+        if (!this.gsplatEntity || !this.gsplatEntity.script) {
+            console.warn('Cannot create pieces-recover script - entity or script component not ready');
+            return null;
+        }
+
+        console.log('Creating pieces-recover reveal script');
+
+        try {
+            const script = this.gsplatEntity.script.create(GsplatRevealPiecesRecover) as any;
+            if (script) {
+                // 配置script属性
+                script.scatterDistance = 4.0;
+                script.scatterDuration = 7.5;
+                script.holdDuration = 0;
+                script.recoverDuration = 7.5;
+                script.noiseIntensity = 0.3;
+                script.scatterDirection.set(1, 1, 1);
+                script.maxScatterRadius = 4.0;
+                script.waveSpeed = 5.0;
+                
+                // 设置 reveal center
+                this.updateScriptCenter(script);
+                
+                // 初始状态和 effectTime
+                script.enabled = this.config.autoStart;
+                script.effectTime = 0;
+                
+                console.log('Pieces-recover script created with config:', {
+                    center: script.center,
+                    scatterDistance: script.scatterDistance,
+                    enabled: script.enabled
+                });
+            }
+            return script;
+        } catch (error) {
+            console.error('Failed to create pieces-recover script:', error);
+            return null;
+        }
+    }
+
+    /**
+     * 创建 perlin-wave 效果脚本
+     */
+    private createPerlinWaveScript() {
+        if (!this.gsplatEntity || !this.gsplatEntity.script) {
+            console.warn('Cannot create perlin-wave script - entity or script component not ready');
+            return null;
+        }
+
+        console.log('Creating perlin-wave reveal script');
+
+        try {
+            const script = this.gsplatEntity.script.create(GsplatRevealPerlinWave) as any;
+            if (script) {
+                // 配置script属性
+                script.intensity = 0.5;
+                script.waveAmplitude = 0.1;
+                script.waveFrequency = 1.0;
+                script.waveSpeed = 1.0;
+                script.scaleBlend = 1.0;
+                
+                // 设置 reveal center
+                this.updateScriptCenter(script);
+                
+                // 初始状态和 effectTime
+                script.enabled = this.config.autoStart;
+                script.effectTime = 0;
+                
+                console.log('Perlin-wave script created with config:', {
+                    center: script.center,
+                    intensity: script.intensity,
+                    waveAmplitude: script.waveAmplitude,
+                    waveFrequency: script.waveFrequency,
+                    waveSpeed: script.waveSpeed,
+                    scaleBlend: script.scaleBlend,
+                    enabled: script.enabled
+                });
+            }
+            return script;
+        } catch (error) {
+            console.error('Failed to create perlin-wave script:', error);
+            return null;
+        }
+    }
+
+    /**
+     * 创建 integrate 效果脚本
+     */
+    private createIntegrateScript() {
+        if (!this.gsplatEntity || !this.gsplatEntity.script) {
+            console.warn('Cannot create integrate script - entity or script component not ready');
+            return null;
+        }
+
+        console.log('Creating integrate reveal script');
+
+        try {
+            const script = this.gsplatEntity.script.create(GsplatIntegrate) as any;
+            if (script) {
+                // 配置script属性
+                script.intensity = 0.5;
+                script.speed = 0.8;
+                script.waveSpeed = 1.0;
+                script.waveFrequency = 3.0;
+                
+                // 设置 AABB（如果 bbox 存在）
+                if (this.bbox) {
+                    script.aabbMin = new Vec3(
+                        this.bbox.center.x - this.bbox.halfExtents.x,
+                        this.bbox.center.y - this.bbox.halfExtents.y,
+                        this.bbox.center.z - this.bbox.halfExtents.z
+                    );
+                    script.aabbMax = new Vec3(
+                        this.bbox.center.x + this.bbox.halfExtents.x,
+                        this.bbox.center.y + this.bbox.halfExtents.y,
+                        this.bbox.center.z + this.bbox.halfExtents.z
+                    );
+                } else {
+                    // 默认 AABB
+                    script.aabbMin = new Vec3(-0.5, -0.5, -0.5);
+                    script.aabbMax = new Vec3(0.5, 0.5, 0.5);
+                }
+                
+                // 设置 topY 和 bottomY（基于 bbox 或默认值）
+                if (this.bbox) {
+                    script.topY = this.bbox.center.y + this.bbox.halfExtents.y * 0.35;
+                    script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y;
+                } else {
+                    script.topY = 10.0;
+                    script.bottomY = -10.0;
+                }
+                
+                // 初始状态和 effectTime
+                script.enabled = this.config.autoStart;
+                script.effectTime = 0;
+                
+                console.log('Integrate script created with config:', {
+                    intensity: script.intensity,
+                    speed: script.speed,
+                    aabbMin: script.aabbMin,
+                    aabbMax: script.aabbMax,
+                    topY: script.topY,
+                    bottomY: script.bottomY,
+                    enabled: script.enabled
+                });
+            }
+            return script;
+        } catch (error) {
+            console.error('Failed to create integrate script:', error);
+            return null;
+        }
+    }
+
+    /**
      * 创建指定类型的reveal效果 - 类似原始实现中的createEffect函数
      */
-    private createEffect(effectName: 'radial' | 'rain' | 'smooth') {
+    private createEffect(effectName: RevealEffectType) {
         if (!this.gsplatEntity || !this.config) {
             console.log('Cannot create effect - entity not ready or config not set');
             return;
@@ -244,35 +405,39 @@ export class RevealController {
             case 'smooth':
                 script = this.createSmoothScript();
                 break;
+            case 'pieces-recover':
+                script = this.createPiecesRecoverScript();
+                break;
+            case 'perlin-wave':
+                script = this.createPerlinWaveScript();
+                break;
+            case 'integrate':
+                script = this.createIntegrateScript();
+                break;
+            case 'none':
+                // 不创建任何效果
+                script = null;
+                break;
             default:
                 console.warn('Unknown effect type:', effectName);
                 script = this.createRadialScript();
         }
 
         this.currentScript = script;
+        this.config.type = effectName;
 
-        // 如果script创建成功
+        // 如果script创建成功，设置初始状态
         if (script) {
-            if (this.config.autoStart) {
-                console.log('Auto-starting reveal effect by enabling script');
-                setTimeout(() => {
-                    if (script) {
-                        script.enabled = true;
-                        console.log('Script enabled, effect should start. Script details:', {
-                            enabled: script.enabled,
-                            initialized: script.initialized,
-                            materialsApplied: script.materialsApplied?.size || 0
-                        });
-                    }
-                }, 1000); // 增加延迟确保gsplat完全加载
-            } else {
-                console.log('Reveal effect created but not auto-started. Click "Start Reveal" button to begin.');
-                script.enabled = false;
-            }
+            // 重置 effectTime
+            script.effectTime = 0;
+            
+            // 根据 autoStart 配置设置启用状态
+            script.enabled = this.config.autoStart;
         }
         
-        // 触发事件以更新 UI（确保 UI 显示当前类型）
+        // 触发事件以更新 UI（统一使用 revealType:changed）
         this.global.events.fire('revealType:changed', effectName);
+        this.global.state.vfxType = effectName as any;
     }
 
     /**
@@ -290,6 +455,9 @@ export class RevealController {
             this.gsplatEntity.script.destroy('gsplatRevealRadial');
             this.gsplatEntity.script.destroy('gsplatRevealRain');
             this.gsplatEntity.script.destroy('gsplatRevealSmooth');
+            this.gsplatEntity.script.destroy('gsplatRevealPiecesRecover');
+            this.gsplatEntity.script.destroy('gsplatRevealPerlinWave');
+            this.gsplatEntity.script.destroy('gsplatIntegrate');
             // 未来可以添加更多类型
         } catch (error) {
             console.warn('Error destroying reveal scripts:', error);
@@ -313,7 +481,7 @@ export class RevealController {
         // 如果类型改变，重新创建效果并重置动画
         if (newConfig.type && newConfig.type !== oldType) {
             this.createEffect(newConfig.type);
-            // 触发事件以更新 UI
+            // 触发事件以更新 UI（统一使用 revealType:changed）
             this.global.events.fire('revealType:changed', newConfig.type);
             // 重置播放动画
             this.global.events.fire('inputEvent', 'resetAnim');
@@ -321,7 +489,7 @@ export class RevealController {
 
         // 更新现有script的配置
         else if (this.currentScript) {
-            this.updateCurrentScriptConfig(newConfig);
+            this.updateCurrentScriptConfig(newConfig as Partial<RevealConfig>);
         }
     }
 
@@ -344,21 +512,20 @@ export class RevealController {
     }
 
     restart() {
-        if (!this.config) {
-            console.log('No reveal config, cannot start reveal');
+        if (!this.config || this.config.type === 'none') {
+            console.log('No reveal effect active, cannot restart');
             return;
         }
         
-        console.log('Manual start/restart reveal requested - recreating effect');
-        // 临时设置 autoStart 为 true 以启动效果
-        const originalAutoStart = this.config.autoStart;
-        this.config.autoStart = true;
+        console.log('Restarting reveal effect:', this.config.type);
         
-        // 重新创建效果
+        // 先禁用当前效果（如果存在），确保清理状态
+        if (this.currentScript) {
+            this.currentScript.enabled = false;
+        }
+        
+        // 重新创建效果（会自动根据 autoStart 配置启用，并重置 effectTime）
         this.createEffect(this.config.type);
-        
-        // 恢复原始设置
-        this.config.autoStart = originalAutoStart;
     }
 
     // 公共方法
@@ -407,6 +574,28 @@ export class RevealController {
 
     getCurrentScript() {
         return this.currentScript;
+    }
+
+    /**
+     * 更新脚本的 center（统一处理坐标转换）
+     * 优先使用当前相机 target，如果没有则使用 revealCenter
+     */
+    private updateScriptCenter(script: any) {
+        if (!script || !script.center) {
+            return;
+        }
+
+        // 优先使用相机当前 target 点（如果可用）
+        if (this.cameraManager) {
+            const camera = this.cameraManager.camera;
+            const targetPoint = new Vec3();
+            camera.calcFocusPoint(targetPoint);
+            // CRITICAL: 坐标转换 - gsplat 坐标系需要翻转 X 和 Y 轴
+            script.center.set(-targetPoint.x, -targetPoint.y, targetPoint.z);
+        } else if (this.revealCenter) {
+            // 使用默认 reveal center
+            script.center.set(-this.revealCenter[0], -this.revealCenter[1], this.revealCenter[2]);
+        }
     }
 
     destroy() {

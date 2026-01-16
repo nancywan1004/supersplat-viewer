@@ -42,7 +42,6 @@ const initUI = (global: Global) => {
         'cameraPathCheck', 'cameraPathOption',
         'cameraBoundsCheck', 'cameraBoundsOption',
         'revealPanel', 'revealType', 'revealRestart',
-        'vfxPanel', 'vfxType', 'vfxToggle', 'vfxRestart',
         'skyboxRow', 'skyboxSelect',
         'nightModeCheck', 'nightModeOption',
         'nightFadeSlider', 'nightFadeValue',
@@ -334,10 +333,11 @@ const initUI = (global: Global) => {
     arChanged();
     vrChanged();
 
-    // Reveal mode
+    // Reveal mode (now includes VFX effects)
     dom.revealType?.addEventListener('change', (event) => {
         const target = event.target as HTMLSelectElement;
-        const revealType = target.value as 'radial' | 'rain' | 'smooth';
+        const revealType = target.value as 'radial' | 'rain' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'none';
+        
         events.fire('revealConfigChanged', { type: revealType });
     });
 
@@ -345,15 +345,15 @@ const initUI = (global: Global) => {
         events.fire('revealRestart');
     });
 
-    // Show/hide reveal controls based on hasRevealEffect state
+    // Show/hide reveal controls (always show now since it includes VFX)
     const updateRevealControls = () => {
-        const hasReveal = state.hasRevealEffect;
+        // Reveal panel always visible (includes VFX effects)
         if (dom.revealPanel) {
-            dom.revealPanel.classList[hasReveal ? 'remove' : 'add']('hidden');
+            dom.revealPanel.classList.remove('hidden');
             
-            // Sync dropdown with current reveal effect type from settings
-            if (hasReveal && dom.revealType && global.settings?.revealEffect?.type) {
-                const currentType = global.settings.revealEffect.type;
+            // Sync dropdown with current effect type
+            if (dom.revealType) {
+                const currentType = (state as any).vfxType || global.settings?.revealEffect?.type || 'none';
                 const selectElement = dom.revealType as HTMLSelectElement;
                 if (selectElement.value !== currentType) {
                     selectElement.value = currentType;
@@ -364,82 +364,23 @@ const initUI = (global: Global) => {
 
     events.on('hasRevealEffect:changed', updateRevealControls);
     
-    // Listen for reveal type changes to update UI
+    // 统一监听 reveal 类型变化和配置变化
     events.on('revealType:changed', (type: string) => {
         if (dom.revealType) {
             (dom.revealType as HTMLSelectElement).value = type;
         }
+        updateRevealControls();
     });
     
-    // Listen for reveal config changes to update UI
-    events.on('revealConfigChanged', (newConfig) => {
+    // 监听配置变化（包括类型和启用状态）
+    events.on('revealConfigChanged', (newConfig: any) => {
         if (dom.revealType && newConfig.type) {
             (dom.revealType as HTMLSelectElement).value = newConfig.type;
         }
+        updateRevealControls();
     });
     
     updateRevealControls();
-
-    // VFX mode
-    dom.vfxType?.addEventListener('change', (event) => {
-        const target = event.target as HTMLSelectElement;
-        const vfxType = target.value as 'none' | 'grow' | 'pieces-recover' | 'perlin-wave' | 'disintegrate' | 'integrate';
-        events.fire('vfxSwitch', vfxType);
-    });
-
-    dom.vfxToggle?.addEventListener('click', () => {
-        const currentType = (dom.vfxType as HTMLSelectElement)?.value;
-        if (currentType && currentType !== 'none') {
-            const isActive = (state as any).vfxActive || false;
-            events.fire('vfxToggle', !isActive);
-        }
-    });
-
-    dom.vfxRestart?.addEventListener('click', () => {
-        events.fire('vfxRestart');
-    });
-
-    // Show/hide VFX controls
-    const updateVfxControls = () => {
-        // VFX 面板始终显示（不依赖配置）
-        if (dom.vfxPanel) {
-            dom.vfxPanel.classList.remove('hidden');
-            
-            // Sync dropdown with current VFX effect type
-            if (dom.vfxType) {
-                const currentType = (state as any).vfxType || 'none';
-                const selectElement = dom.vfxType as HTMLSelectElement;
-                if (selectElement.value !== currentType) {
-                    selectElement.value = currentType;
-                }
-            }
-            
-            // Update toggle button text
-            if (dom.vfxToggle) {
-                const isActive = (state as any).vfxActive || false;
-                const button = dom.vfxToggle as HTMLButtonElement;
-                button.textContent = isActive ? 'Disable VFX' : 'Enable VFX';
-            }
-        }
-    };
-
-    // Listen for VFX state changes
-    events.on('vfxType:changed', (type: string) => {
-        if (dom.vfxType) {
-            (dom.vfxType as HTMLSelectElement).value = type;
-        }
-        updateVfxControls();
-    });
-
-    events.on('vfxActive:changed', (active: boolean) => {
-        if (dom.vfxToggle) {
-            const button = dom.vfxToggle as HTMLButtonElement;
-            button.textContent = active ? 'Disable VFX' : 'Enable VFX';
-        }
-        (state as any).vfxActive = active;
-    });
-
-    updateVfxControls();
 
     // Info panel
     const updateInfoTab = (tab: 'desktop' | 'touch') => {

@@ -18,24 +18,11 @@ vec3 hash(vec3 p) {
 }
 
 void modifyCenter(inout vec3 center) {
-    // 计算溶解因子（与溶解效果同步）
+    // Apply disintegrate effect: random offset + rotation based on time
+    vec3 p = center + (hash(center) * 2.0 - 1.0) * uIntensity;
     float tt = smoothstep(-1.0, 0.5, -sin(uTime + -center.y * 0.5));
-    
-    // 计算沿y轴传导的波形弹动效果（只向外扩，不向内收缩）
-    float wavePhase = uTime * 2.0 + center.y * 3.0;
-    float wave = abs(sin(wavePhase)); // 使用绝对值确保只向外扩
-    float bounce = wave * (1.0 - tt); // 弹动强度随溶解减弱
-    
-    // 计算xz平面的径向方向（向外扩展）
-    vec2 xz = center.xz;
-    float radius = length(xz);
-    vec2 direction = radius > 0.001 ? normalize(xz) : vec2(1.0, 0.0);
-    
-    // 向外扩展，带弹动效果
-    float expandAmount = uIntensity * bounce * 0.5;
-    xz += direction * expandAmount;
-    
-    center.xz = xz;
+    p.xz *= rot(tt * 0.5 + center.y * 0.5 * tt);
+    center = mix(p, center, tt);
 }
 
 void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
@@ -74,25 +61,15 @@ fn hash(p: vec3f) -> vec3f {
 }
 
 fn modifyCenter(center: ptr<function, vec3f>) {
-    // 计算溶解因子（与溶解效果同步）
+    // Apply disintegrate effect: random offset + rotation based on time
+    var p = *center + (hash(*center) * 2.0 - 1.0) * uniform.uIntensity;
     let tt = smoothstep(-1.0, 0.5, -sin(uniform.uTime + -(*center).y * 0.5));
-    
-    // 计算沿y轴传导的波形弹动效果（只向外扩，不向内收缩）
-    let wavePhase = uniform.uTime * 2.0 + (*center).y * 3.0;
-    let wave = abs(sin(wavePhase)); // 使用绝对值确保只向外扩
-    let bounce = wave * (1.0 - tt); // 弹动强度随溶解减弱
-    
-    // 计算xz平面的径向方向（向外扩展）
-    var xz = vec2f((*center).x, (*center).z);
-    let radius = length(xz);
-    let direction = select(vec2f(1.0, 0.0), normalize(xz), radius > 0.001);
-    
-    // 向外扩展，带弹动效果
-    let expandAmount = uniform.uIntensity * bounce * 0.5;
-    xz = xz + direction * expandAmount;
-    
-    (*center).x = xz.x;
-    (*center).z = xz.y;
+    let rotMat = rot(tt * 0.5 + (*center).y * 0.5 * tt);
+    let xz = vec2f((*p).x, (*p).z);
+    let rotatedXz = rotMat * xz;
+    p.x = rotatedXz.x;
+    p.z = rotatedXz.y;
+    *center = mix(p, *center, tt);
 }
 
 fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<function, vec3f>, covB: ptr<function, vec3f>) {
@@ -120,6 +97,7 @@ fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
  * entity.addComponent('script');
  * const disintegrateScript = entity.script.create(GsplatDisintegrate);
  * disintegrateScript.intensity = 0.5;
+ * disintegrateScript.duration = 13.0;
  */
 class GsplatDisintegrate extends GsplatShaderEffect {
     static scriptName = 'gsplatDisintegrate';
@@ -131,6 +109,14 @@ class GsplatDisintegrate extends GsplatShaderEffect {
      */
     intensity = 0.5;
 
+    /**
+     * Duration of one complete disintegrate cycle in seconds
+     * After this duration, the effect will automatically disable
+     * @attribute
+     * @range [0.1, 60]
+     */
+    duration = 13.0;
+
     getShaderGLSL() {
         return shaderGLSL;
     }
@@ -140,9 +126,28 @@ class GsplatDisintegrate extends GsplatShaderEffect {
     }
 
     updateEffect(effectTime: number, dt: number) {
+        // Scale time so that a full cycle (2π) completes in duration seconds
+        // The shader uses sin(uTime + ...) which needs approximately 2π for one complete cycle
+        const timeScale = (Math.PI * 2.0) / this.duration;
+        const scaledTime = effectTime * timeScale;
+        
         // Update uniforms
-        this.setUniform('uTime', effectTime);
+        this.setUniform('uTime', scaledTime);
         this.setUniform('uIntensity', this.intensity);
+
+        // Check if effect is complete
+        // if (this.isEffectComplete()) {
+        //     this.enabled = false;
+        //     return;
+        // }
+    }
+
+    /**
+     * Check if the disintegrate effect has completed one full cycle
+     * @returns {boolean} True if effect is complete
+     */
+    isEffectComplete() {
+        return this.effectTime >= this.duration;
     }
 }
 
