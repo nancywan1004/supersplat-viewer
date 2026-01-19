@@ -259,6 +259,20 @@ class GsplatRainV2 extends GsplatShaderEffect {
      */
     rainHeight: number = 15.0;
 
+    /**
+     * Time scale factor for adjusting effect duration (default 1.0)
+     * Used to fit the effect duration to a specific totalDuration
+     * @attribute
+     */
+    timeScale: number = 1.0;
+
+    /**
+     * Maximum 2D distance from center to the farthest splat
+     * Used to calculate actual completion time based on shader logic
+     * @attribute
+     */
+    maxDist2D: number = 10.0;
+
     getShaderGLSL() {
         return shaderGLSL;
     }
@@ -268,8 +282,11 @@ class GsplatRainV2 extends GsplatShaderEffect {
     }
 
     updateEffect(effectTime: number, dt: number) {
+        // Apply timeScale to adjust effect duration
+        const scaledTime = effectTime * this.timeScale;
+        
         // Update uniforms
-        this.setUniform('uTime', effectTime);
+        this.setUniform('uTime', scaledTime);
         this.setUniform('uIntensity', this.intensity);
         
         this._centerArray[0] = this.center.x;
@@ -284,6 +301,51 @@ class GsplatRainV2 extends GsplatShaderEffect {
         this.setUniform('uHitDuration', this.hitDuration);
         this.setUniform('uBottomY', this.bottomY);
         this.setUniform('uRainHeight', this.rainHeight);
+        
+        // Check if effect is complete
+        if (this.isEffectComplete()) {
+            console.log('Rain V2 effect completed, disabling');
+            this.enabled = false;
+            return;
+        }
+    }
+
+    /**
+     * Calculate when the effect is complete.
+     * Effect completes when all splats have reached their original positions.
+     * Based on shader logic: rawProgress = uTime*uTime*0.1 - dist2D*2.0 + 1.0
+     * When rawProgress >= 5, smoothstep(0., 5., rawProgress) = 1.0, so effect is complete.
+     * Solving: uTime*uTime*0.1 - dist2D*2.0 + 1.0 >= 5
+     * => uTime*uTime*0.1 >= 4 + dist2D*2.0
+     * => uTime >= sqrt((4 + dist2D*2.0) / 0.1)
+     * 
+     * Note: uTime in shader is scaledTime = effectTime * timeScale
+     * So we need: effectTime * timeScale >= sqrt((4 + maxDist2D*2.0) / 0.1)
+     * => effectTime >= sqrt((4 + maxDist2D*2.0) / 0.1) / timeScale
+     * 
+     * @returns {boolean} True if effect is complete
+     */
+    isEffectComplete() {
+        // 根据 shader 逻辑计算：rawProgress = uTime*uTime*0.1 - dist2D*2.0 + 1.0
+        // 当 rawProgress >= 5 时完成
+        // uTime 在 shader 中是 scaledTime = effectTime * timeScale
+        const rawProgressThreshold = 5.0;
+        const constant = 1.0;
+        const timeCoeff = 0.1;
+        const distCoeff = 2.0;
+        
+        // 计算最远点完成所需的时间（在 shader 中的 scaledTime）
+        // rawProgress = scaledTime^2 * timeCoeff - maxDist2D * distCoeff + constant >= rawProgressThreshold
+        // scaledTime^2 * timeCoeff >= rawProgressThreshold - constant + maxDist2D * distCoeff
+        // scaledTime >= sqrt((rawProgressThreshold - constant + maxDist2D * distCoeff) / timeCoeff)
+        const requiredScaledTime = Math.sqrt(
+            (rawProgressThreshold - constant + this.maxDist2D * distCoeff) / timeCoeff
+        );
+        
+        // 转换为实际的 effectTime（考虑 timeScale）
+        const requiredEffectTime = requiredScaledTime / Math.max(this.timeScale, 0.001);
+        
+        return this.effectTime >= requiredEffectTime;
     }
 }
 

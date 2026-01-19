@@ -320,6 +320,11 @@ class Viewer {
                 // apply to the camera entity
                 applyCamera(this.cameraManager.camera);
             }
+            
+            // update reveal effect timing
+            if (this.revealController) {
+                this.revealController.updateTiming(deltaTime);
+            }
         });
 
         // unpause the animation on first frame

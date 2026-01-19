@@ -41,7 +41,7 @@ const initUI = (global: Global) => {
         'hqCheck', 'hqOption', 'lqCheck', 'lqOption',
         'cameraPathCheck', 'cameraPathOption',
         'cameraBoundsCheck', 'cameraBoundsOption',
-        'revealPanel', 'revealType', 'revealRestart',
+        'revealPanel', 'revealType', 'revealRestart', 'totalDurationRow', 'totalDuration',
         'skyboxRow', 'skyboxSelect',
         'nightModeCheck', 'nightModeOption',
         'nightFadeSlider', 'nightFadeValue',
@@ -334,11 +334,23 @@ const initUI = (global: Global) => {
     vrChanged();
 
     // Reveal mode (now includes VFX effects)
+    // 需要 totalDuration 的特效列表
+    const timedVfxEffects = ['rain_v2', 'pieces-recover', 'integrate'];
+    
     dom.revealType?.addEventListener('change', (event) => {
         const target = event.target as HTMLSelectElement;
-        const revealType = target.value as 'radial' | 'rain' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'none';
+        const revealType = target.value as 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'none';
         
         events.fire('revealConfigChanged', { type: revealType });
+    });
+
+    // Total duration control
+    dom.totalDuration?.addEventListener('change', (event) => {
+        const target = event.target as HTMLInputElement;
+        const totalDuration = parseFloat(target.value);
+        if (!isNaN(totalDuration) && totalDuration > 0) {
+            events.fire('revealConfigChanged', { totalDuration });
+        }
     });
 
     dom.revealRestart?.addEventListener('click', () => {
@@ -357,6 +369,21 @@ const initUI = (global: Global) => {
                 const selectElement = dom.revealType as HTMLSelectElement;
                 if (selectElement.value !== currentType) {
                     selectElement.value = currentType;
+                }
+                
+                // Show/hide totalDuration control based on selected effect
+                const showTotalDuration = timedVfxEffects.includes(currentType);
+                if (dom.totalDurationRow) {
+                    if (showTotalDuration) {
+                        dom.totalDurationRow.classList.remove('hidden');
+                        // Sync totalDuration value
+                        const currentTotalDuration = global.settings?.revealEffect?.totalDuration ?? 20.0;
+                        if (dom.totalDuration) {
+                            (dom.totalDuration as HTMLInputElement).value = currentTotalDuration.toString();
+                        }
+                    } else {
+                        dom.totalDurationRow.classList.add('hidden');
+                    }
                 }
             }
         }

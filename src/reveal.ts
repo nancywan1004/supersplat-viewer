@@ -29,6 +29,12 @@ export class RevealController {
     private revealCenter: number[] = [0, 0, 0];
     private bbox: BoundingBox | null = null;
     private cameraManager: CameraManager | null = null;
+    
+    // 计时相关
+    private effectStartTime: number | null = null;
+    private effectEndTime: number | null = null;
+    private isTiming: boolean = false;
+    private timedEffects = ['rain_v2', 'pieces-recover', 'integrate'];
 
     global: Global;
 
@@ -48,7 +54,8 @@ export class RevealController {
         this.config = {
             type: (settings.revealEffect?.type as RevealEffectType) ?? 'none',
             radius: settings.revealEffect?.radius ?? 10,
-            autoStart: settings.revealEffect?.autoStart ?? true
+            autoStart: settings.revealEffect?.autoStart ?? true,
+            totalDuration: settings.revealEffect?.totalDuration ?? 20.0 // 默认 15 秒
         };
 
         console.log('RevealController initialized with config:', this.config);
@@ -191,6 +198,7 @@ export class RevealController {
                 script.intensity = 1.0;
                 
                 // 根据场景包围盒设置底部Y和高度
+                let maxDist2D = 10.0; // 默认最大距离
                 if (this.bbox) {
                     const minY = this.bbox.getMin().y;
                     const maxY = this.bbox.getMax().y;
@@ -199,18 +207,58 @@ export class RevealController {
                     // 高度范围：从底部到顶部，再加上一些额外的范围
                     script.rainHeight = maxY - script.bottomY;
                     
+                    // 计算最大 2D 距离（从 center 到 bbox 最远角的 xz 平面距离）
+                    // 设置 reveal center 后，计算 bbox 在 xz 平面的最大距离
+                    this.updateScriptCenter(script);
+                    const centerX = script.center.x;
+                    const centerZ = script.center.z;
+                    const bboxMin = this.bbox.getMin();
+                    const bboxMax = this.bbox.getMax();
+                    
+                    // 计算 bbox 四个角到 center 的 xz 平面距离，取最大值
+                    const corners = [
+                        [bboxMin.x, bboxMin.z],
+                        [bboxMax.x, bboxMin.z],
+                        [bboxMin.x, bboxMax.z],
+                        [bboxMax.x, bboxMax.z]
+                    ];
+                    maxDist2D = Math.max(...corners.map(([x, z]) => {
+                        const dx = x - centerX;
+                        const dz = z - centerZ;
+                        return Math.sqrt(dx * dx + dz * dz);
+                    }));
+                    
+                    script.maxDist2D = maxDist2D;
+                    
                     console.log('Rain V2 configured with bbox:', {
                         bboxMinY: minY,
                         bboxMaxY: maxY,
                         bottomY: script.bottomY,
-                        rainHeight: script.rainHeight
+                        rainHeight: script.rainHeight,
+                        maxDist2D: maxDist2D
                     });
                 } else {
                     // 如果没有包围盒，使用默认值
                     script.bottomY = -10.0;
                     script.rainHeight = 15.0;
+                    script.maxDist2D = maxDist2D;
                     console.warn('No bbox available, using default bottomY and rainHeight');
                 }
+                
+                // 根据 totalDuration 调整时间参数
+                const totalDuration = this.config.totalDuration ?? 15.0;
+                // 根据 shader 逻辑计算实际完成时间
+                // rawProgress = uTime^2 * 0.1 - dist2D*2.0 + 1.0 >= 5
+                // uTime >= sqrt((4 + maxDist2D*2.0) / 0.1)
+                const rawProgressThreshold = 5.0;
+                const constant = 1.0;
+                const timeCoeff = 0.1;
+                const distCoeff = 2.0;
+                const requiredScaledTime = Math.sqrt(
+                    (rawProgressThreshold - constant + maxDist2D * distCoeff) / timeCoeff
+                );
+                // 通过 timeScale 来适配 totalDuration
+                script.timeScale = requiredScaledTime / totalDuration;
                 
                 // 设置 reveal center
                 this.updateScriptCenter(script);
@@ -224,6 +272,8 @@ export class RevealController {
                     intensity: script.intensity,
                     bottomY: script.bottomY,
                     rainHeight: script.rainHeight,
+                    totalDuration,
+                    timeScale: script.timeScale,
                     enabled: script.enabled
                 });
             }
@@ -286,15 +336,31 @@ export class RevealController {
         try {
             const script = this.gsplatEntity.script.create(GsplatRevealPiecesRecover) as any;
             if (script) {
-                // 配置script属性
+                // 默认配置
+                const defaultScatterDuration = 7.5;
+                const defaultRecoverDuration = 7.5;
+                const defaultWaveSpeed = 5.0;
+                const defaultEndRadius = 25.0;
+                
+                // 根据 totalDuration 自动调整时间参数
+                const totalDuration = this.config.totalDuration ?? 20.0;
+                // 计算默认总时长：maxScatterStartTime + scatterDuration + recoverDuration
+                const maxScatterStartTime = defaultEndRadius / defaultWaveSpeed;
+                const defaultTotalDuration = maxScatterStartTime + defaultScatterDuration + defaultRecoverDuration;
+                
+                // 计算缩放比例
+                const scale = totalDuration / defaultTotalDuration;
+                
+                // 按比例调整参数
                 script.scatterDistance = 4.0;
-                script.scatterDuration = 7.5;
+                script.scatterDuration = defaultScatterDuration * scale;
                 script.holdDuration = 0;
-                script.recoverDuration = 7.5;
+                script.recoverDuration = defaultRecoverDuration * scale;
                 script.noiseIntensity = 0.3;
                 script.scatterDirection.set(1, 1, 1);
                 script.maxScatterRadius = 4.0;
-                script.waveSpeed = 5.0;
+                script.waveSpeed = defaultWaveSpeed * scale;
+                script.endRadius = defaultEndRadius;
                 
                 // 设置 reveal center
                 this.updateScriptCenter(script);
@@ -306,6 +372,11 @@ export class RevealController {
                 console.log('Pieces-recover script created with config:', {
                     center: script.center,
                     scatterDistance: script.scatterDistance,
+                    scatterDuration: script.scatterDuration,
+                    recoverDuration: script.recoverDuration,
+                    waveSpeed: script.waveSpeed,
+                    totalDuration,
+                    scale,
                     enabled: script.enabled
                 });
             }
@@ -375,10 +446,12 @@ export class RevealController {
         try {
             const script = this.gsplatEntity.script.create(GsplatIntegrate) as any;
             if (script) {
+                // 默认配置
+                const defaultSpeed = 0.8;
+                const defaultWaveSpeed = 1.0;
+                
                 // 配置script属性
                 script.intensity = 0.5;
-                script.speed = 0.8;
-                script.waveSpeed = 1.0;
                 script.waveFrequency = 3.0;
                 
                 // 设置 AABB（如果 bbox 存在）
@@ -400,13 +473,34 @@ export class RevealController {
                 }
                 
                 // 设置 topY 和 bottomY（基于 bbox 或默认值）
+                let topY: number;
+                let bottomY: number;
                 if (this.bbox) {
-                    script.topY = this.bbox.center.y + this.bbox.halfExtents.y * 0.35;
-                    script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y;
+                    topY = this.bbox.center.y + this.bbox.halfExtents.y * 0.35;
+                    bottomY = this.bbox.center.y - this.bbox.halfExtents.y;
                 } else {
-                    script.topY = 10.0;
-                    script.bottomY = -10.0;
+                    topY = 10.0;
+                    bottomY = -10.0;
                 }
+                script.topY = topY;
+                script.bottomY = bottomY;
+                
+                // 根据 totalDuration 自动调整时间参数
+                const totalDuration = this.config.totalDuration ?? 20.0;
+                // 计算默认总时长：根据 shader 逻辑
+                // wavePhase = timeScaled - yOffset * 0.5 >= 1.0 时完成
+                // 对于最底部的点：timeScaled >= 1.0 + heightRange * 0.5
+                // timeScaled = uTime * uSpeed，所以：uTime >= (1.0 + heightRange * 0.5) / uSpeed
+                const heightRange = Math.abs(topY - bottomY);
+                const requiredTimeScaled = 1.0 + heightRange * 0.5;
+                const defaultTotalDuration = requiredTimeScaled / Math.max(defaultSpeed, 0.001);
+                
+                // 计算缩放比例
+                const scale = totalDuration / defaultTotalDuration;
+                
+                // 按比例调整 speed 和 waveSpeed
+                script.speed = defaultSpeed * scale;
+                script.waveSpeed = defaultWaveSpeed * scale;
                 
                 // 初始状态和 effectTime
                 script.enabled = this.config.autoStart;
@@ -415,10 +509,13 @@ export class RevealController {
                 console.log('Integrate script created with config:', {
                     intensity: script.intensity,
                     speed: script.speed,
+                    waveSpeed: script.waveSpeed,
                     aabbMin: script.aabbMin,
                     aabbMax: script.aabbMax,
                     topY: script.topY,
                     bottomY: script.bottomY,
+                    totalDuration,
+                    scale,
                     enabled: script.enabled
                 });
             }
@@ -498,11 +595,114 @@ export class RevealController {
             
             // 根据 autoStart 配置设置启用状态
             script.enabled = this.config.autoStart;
+            
+            // 如果是需要计时的特效，设置计时监听
+            if (this.timedEffects.includes(effectName)) {
+                this.setupTiming(script);
+            }
         }
         
         // 触发事件以更新 UI（统一使用 revealType:changed）
         this.global.events.fire('revealType:changed', effectName);
         this.global.state.vfxType = effectName as any;
+    }
+
+    /**
+     * 设置计时功能
+     */
+    private setupTiming(script: any) {
+        // 重置计时状态
+        this.effectStartTime = null;
+        this.effectEndTime = null;
+        this.isTiming = false;
+        
+        // 监听 enable 事件，开始计时
+        script.on('enable', () => {
+            if (!this.isTiming) {
+                this.effectStartTime = performance.now() / 1000; // 转换为秒
+                this.isTiming = true;
+                this.effectEndTime = null;
+                console.log(`[Timing] ${this.config.type} effect started at ${this.effectStartTime.toFixed(3)}s`);
+            }
+        });
+        
+        // 监听 disable 事件，停止计时
+        script.on('disable', () => {
+            if (this.isTiming && this.effectStartTime !== null) {
+                this.effectEndTime = performance.now() / 1000;
+                const actualDuration = this.effectEndTime - this.effectStartTime;
+                const expectedDuration = this.config.totalDuration ?? 15.0;
+                const difference = actualDuration - expectedDuration;
+                
+                console.log(`[Timing] ${this.config.type} effect completed:`);
+                console.log(`  - Start time: ${this.effectStartTime.toFixed(3)}s`);
+                console.log(`  - End time: ${this.effectEndTime.toFixed(3)}s`);
+                console.log(`  - Actual duration: ${actualDuration.toFixed(3)}s`);
+                console.log(`  - Expected duration: ${expectedDuration.toFixed(3)}s`);
+                console.log(`  - Difference: ${difference > 0 ? '+' : ''}${difference.toFixed(3)}s (${((difference / expectedDuration) * 100).toFixed(2)}%)`);
+                
+                // 触发事件，让外部可以监听
+                this.global.events.fire('effectTimingComplete', {
+                    type: this.config.type,
+                    startTime: this.effectStartTime,
+                    endTime: this.effectEndTime,
+                    actualDuration,
+                    expectedDuration,
+                    difference
+                });
+                
+                this.isTiming = false;
+            }
+        });
+        
+        // 如果脚本已经启用，立即开始计时
+        if (script.enabled) {
+            this.effectStartTime = performance.now() / 1000;
+            this.isTiming = true;
+            console.log(`[Timing] ${this.config.type} effect started (already enabled) at ${this.effectStartTime.toFixed(3)}s`);
+        }
+    }
+
+    /**
+     * 更新计时（每帧调用，检查特效是否完成）
+     */
+    updateTiming(dt: number) {
+        if (!this.isTiming || !this.currentScript || this.effectStartTime === null) {
+            return;
+        }
+        
+        // 检查特效是否完成
+        if (this.timedEffects.includes(this.config.type) && 
+            this.currentScript.isEffectComplete && 
+            this.currentScript.isEffectComplete()) {
+            
+            // 特效完成，停止计时
+            if (this.effectEndTime === null) {
+                this.effectEndTime = performance.now() / 1000;
+                const actualDuration = this.effectEndTime - this.effectStartTime;
+                const expectedDuration = this.config.totalDuration ?? 15.0;
+                const difference = actualDuration - expectedDuration;
+                
+                console.log(`[Timing] ${this.config.type} effect completed (detected via isEffectComplete):`);
+                console.log(`  - Start time: ${this.effectStartTime.toFixed(3)}s`);
+                console.log(`  - End time: ${this.effectEndTime.toFixed(3)}s`);
+                console.log(`  - Actual duration: ${actualDuration.toFixed(3)}s`);
+                console.log(`  - Expected duration: ${expectedDuration.toFixed(3)}s`);
+                console.log(`  - Difference: ${difference > 0 ? '+' : ''}${difference.toFixed(3)}s (${((difference / expectedDuration) * 100).toFixed(2)}%)`);
+                
+                // 触发事件
+                this.global.events.fire('effectTimingComplete', {
+                    type: this.config.type,
+                    startTime: this.effectStartTime,
+                    endTime: this.effectEndTime,
+                    actualDuration,
+                    expectedDuration,
+                    difference
+                });
+                
+                this.isTiming = false;
+            }
+        }
     }
 
     /**
@@ -534,6 +734,7 @@ export class RevealController {
 
     updateConfig(newConfig: Partial<RevealConfig>) {
         const oldType = this.config.type;
+        const oldTotalDuration = this.config.totalDuration;
         
         Object.assign(this.config, newConfig);
         
@@ -552,7 +753,13 @@ export class RevealController {
             // 重置播放动画
             this.global.events.fire('inputEvent', 'resetAnim');
         }
-
+        // 如果 totalDuration 改变且当前特效是需要 totalDuration 的特效，重新创建效果
+        else if (newConfig.totalDuration !== undefined && 
+                 newConfig.totalDuration !== oldTotalDuration &&
+                 ['rain_v2', 'pieces-recover', 'integrate'].includes(this.config.type)) {
+            this.createEffect(this.config.type);
+            console.log('Recreated effect due to totalDuration change');
+        }
         // 更新现有script的配置
         else if (this.currentScript) {
             this.updateCurrentScriptConfig(newConfig as Partial<RevealConfig>);
