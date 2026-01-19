@@ -217,18 +217,27 @@ class CameraManager {
         // 约束策略：
         // - Orbit：限制 **camera.position** 在收缩后的 bbox 内（与 Fly 保持一致；避免两种模式边界不对齐）
         // - Fly：保持原球形硬边界兜底（防止飞行穿出场景太远）
-        // 注意：animScale 允许 >1（放大），用于给“融合后 bbox”留出余量，减少贴边与切换抖动。
+        // 注意：animScale 允许 >1（放大），用于给"融合后 bbox"留出余量，减少贴边与切换抖动。
         const cameraBoundsCfg = (settings as any).cameraBounds as undefined | {
             animScale?: number;
+            enabled?: boolean;
         };
         const animScale = Math.max(0.01, cameraBoundsCfg?.animScale ?? 1.5);
+        const boundsEnabled = cameraBoundsCfg?.enabled !== false; // 默认启用
 
-        // 无动画时维持更“核心”的收缩范围；有动画时以融合 bbox 为主，缩放更保守，优先避免跳变
+        // 无动画时维持更"核心"的收缩范围；有动画时以融合 bbox 为主，缩放更保守，优先避免跳变
         const targetScaleFactor = usingAnimBbox ? animScale : 0.5;
 
-        this.targetConstraint = BoxConstraint.fromBoundingBox(fusedBbox, targetScaleFactor);
-        controllers.orbit.setTargetConstraint(this.targetConstraint);
-        controllers.fly.setTargetConstraint(this.targetConstraint);
+        if (boundsEnabled) {
+            this.targetConstraint = BoxConstraint.fromBoundingBox(fusedBbox, targetScaleFactor);
+            controllers.orbit.setTargetConstraint(this.targetConstraint);
+            controllers.fly.setTargetConstraint(this.targetConstraint);
+        } else {
+            // 禁用约束
+            this.targetConstraint = null;
+            controllers.orbit.setTargetConstraint(null);
+            controllers.fly.setTargetConstraint(null);
+        }
 
         this.constraint = SphereConstraint.fromBoundingBox(fusedBbox, targetScaleFactor);
         // fly 仍保留一个球形硬边界兜底（仅在没有 box 约束时才会用到），不影响两种模式的主约束一致性

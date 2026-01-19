@@ -18,6 +18,8 @@ const tmpPrevPos = new Vec3();
 const tmpClampPos = new Vec3();
 const tmpRemain = new Vec3();
 const tmpNormal2 = new Vec3();
+const tmpNewPos = new Vec3();
+const tmpDirection = new Vec3();
 
 class OrbitController implements CameraController {
     controller: OrbitControllerPC;
@@ -47,15 +49,33 @@ class OrbitController implements CameraController {
     }
 
     update(deltaTime: number, inputFrame: CameraFrame, camera: Camera) {
-        // 记录上一帧位置，用于“撞墙后滑动”与 segment 约束
+        // 记录上一帧位置，用于"撞墙后滑动"与 segment 约束
         tmpPrevPos.copy(camera.position);
 
         const pose = this.controller.update(inputFrame, deltaTime);
 
         // 约束策略：
-        // - 为了与 Fly 边界一致：限制 **camera.position** 在 BoundingBox 内（含“撞墙后沿边界滑动”）
+        // - 为了与 Fly 边界一致：限制 **camera.position** 在 BoundingBox 内（含"撞墙后沿边界滑动"）
         // - zoom 仍由 distance 控制（OrbitControllerPC 的语义）
+        // - 但是：纯旋转（仅鼠标左键，没有 move 输入）不应该 clamp position，因为 position 没有改变
         if (this.targetConstraint) {
+            // 检查是否有 move 输入（pan 操作）
+            const { move } = inputFrame.read();
+            const hasMoveInput = Math.abs(move[0]) > 1e-6 || Math.abs(move[1]) > 1e-6 || Math.abs(move[2]) > 1e-6;
+            
+            // 如果没有 move 输入（纯旋转），检查 position 是否真的改变了
+            // 如果 position 没有变化，就不需要 clamp
+            if (!hasMoveInput) {
+                const positionChanged = tmpPrevPos.distance(pose.position) > 1e-6;
+                // 纯旋转时 position 不应该改变，如果没改变就不 clamp
+                if (!positionChanged) {
+                    camera.position.copy(pose.position);
+                    camera.angles.copy(pose.angles);
+                    camera.distance = pose.distance;
+                    return;
+                }
+            }
+
             const desiredPos = pose.position;
             const currentPos = tmpPrevPos;
 
@@ -134,15 +154,64 @@ class OrbitController implements CameraController {
     }
 
     goto(camera: Camera) {
-        // goto 时让 target 落入 box 内（避免初始就处在边界外导致 pan 手感异常）
+        // goto 时只约束 position（orbit 模式只限制 position，不限制 target）
         if (this.targetConstraint) {
+            const originalPosition = camera.position.clone();
+            const originalAngles = camera.angles.clone();
+            
+            // 计算当前 target（focus point）
             tmpQuat.setFromEulerAngles(camera.angles);
             tmpQuat.transformVector(Vec3.FORWARD, tmpForward);
             tmpTarget.copy(tmpForward).mulScalar(camera.distance).add(camera.position);
-            const clamped = this.targetConstraint.clampPoint(tmpTarget, tmpTarget);
-            if (clamped) {
-                camera.position.copy(tmpTarget).sub(tmpForward.mulScalar(camera.distance));
+            
+            // 保存原始 target（用户选择的点）
+            const desiredTarget = tmpTarget.clone();
+            
+            console.log('[goto] 初始状态:');
+            console.log('  position:', originalPosition);
+            console.log('  desired target:', desiredTarget);
+            console.log('  angles:', originalAngles);
+            console.log('  distance:', camera.distance);
+            console.log('  position in box?', this.targetConstraint.containsPoint(originalPosition));
+            console.log('  target in box?', this.targetConstraint.containsPoint(desiredTarget));
+            
+            // 检查 position 是否在 box 内
+            if (!this.targetConstraint.containsPoint(camera.position)) {
+                console.log('[goto] position 在 box 外，需要调整');
+                
+                // position 在 box 外，将 position clamp 到 box 内
+                this.targetConstraint.clampPoint(camera.position, tmpNewPos);
+                
+                // 计算从 clamped position 指向 desired target 的方向
+                // 这是正确的方向，确保 target 在屏幕中心
+                tmpDirection.sub2(desiredTarget, tmpNewPos).normalize();
+                
+                // 计算新的距离（从 clamped position 到 desired target）
+                const newDistance = desiredTarget.distance(tmpNewPos);
+                
+                // 更新 position、distance 和角度
+                camera.position.copy(tmpNewPos);
+                camera.distance = newDistance;
+                
+                // 重新计算角度，确保相机看向 desired target（这样 target 在屏幕中心）
+                camera.look(tmpNewPos, desiredTarget);
+                
+                console.log('[goto] position 调整后:');
+                console.log('  new position:', tmpNewPos);
+                console.log('  desired target:', desiredTarget);
+                console.log('  new distance:', newDistance);
+                console.log('  new angles:', camera.angles);
+            } else {
+                // position 在 box 内，确保相机正确看向 target
+                camera.look(camera.position, desiredTarget);
             }
+            
+            console.log('[goto] 最终状态:');
+            console.log('  position:', camera.position);
+            console.log('  target:', desiredTarget);
+            console.log('  angles:', camera.angles);
+            console.log('  distance:', camera.distance);
+            console.log('  position in box?', this.targetConstraint.containsPoint(camera.position));
         }
 
         p.position.copy(camera.position);
