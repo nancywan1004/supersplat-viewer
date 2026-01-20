@@ -446,12 +446,10 @@ export class RevealController {
         try {
             const script = this.gsplatEntity.script.create(GsplatIntegrate) as any;
             if (script) {
-                // 默认配置
-                const defaultSpeed = 0.8;
-                const defaultWaveSpeed = 1.0;
-                
                 // 配置script属性
                 script.intensity = 0.5;
+                script.speed = 0.8;
+                script.waveSpeed = 1.0;
                 script.waveFrequency = 3.0;
                 
                 // 设置 AABB（如果 bbox 存在）
@@ -473,34 +471,34 @@ export class RevealController {
                 }
                 
                 // 设置 topY 和 bottomY（基于 bbox 或默认值）
-                let topY: number;
-                let bottomY: number;
                 if (this.bbox) {
-                    topY = this.bbox.center.y + this.bbox.halfExtents.y * 0.35;
-                    bottomY = this.bbox.center.y - this.bbox.halfExtents.y;
+                    script.topY = this.bbox.center.y + this.bbox.halfExtents.y * 0.35;
+                    script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y;
                 } else {
-                    topY = 10.0;
-                    bottomY = -10.0;
+                    script.topY = 10.0;
+                    script.bottomY = -10.0;
                 }
-                script.topY = topY;
-                script.bottomY = bottomY;
+
+                const heightRange = Math.abs(script.topY - script.bottomY);
+                console.log('topY: ', script.topY, 'bottomY: ', script.bottomY);
+                console.log('heightRange: ', heightRange);
                 
-                // 根据 totalDuration 自动调整时间参数
+                // 根据 totalDuration 计算 verticalSpread
+                // 完成时间公式: completionTime = (heightRange * verticalSpread + 1.0) / speed
+                // 我们需要: totalDuration = completionTime
+                // 因此: verticalSpread = (totalDuration * speed - 1.0) / heightRange
                 const totalDuration = this.config.totalDuration ?? 20.0;
-                // 计算默认总时长：根据 shader 逻辑
-                // wavePhase = timeScaled - yOffset * 0.5 >= 1.0 时完成
-                // 对于最底部的点：timeScaled >= 1.0 + heightRange * 0.5
-                // timeScaled = uTime * uSpeed，所以：uTime >= (1.0 + heightRange * 0.5) / uSpeed
-                const heightRange = Math.abs(topY - bottomY);
-                const requiredTimeScaled = 1.0 + heightRange * 0.5;
-                const defaultTotalDuration = requiredTimeScaled / Math.max(defaultSpeed, 0.001);
+                if (heightRange > 0.001 && totalDuration * script.speed > 1.0) {
+                    script.verticalSpread = (totalDuration * script.speed - 1.0) / heightRange;
+                    // 确保 verticalSpread 是合理的正值
+                    script.verticalSpread = Math.max(0.01, script.verticalSpread);
+                } else {
+                    // 使用默认值
+                    script.verticalSpread = 0.5;
+                    console.warn('Cannot calculate verticalSpread from totalDuration, using default:', script.verticalSpread);
+                }
                 
-                // 计算缩放比例
-                const scale = totalDuration / defaultTotalDuration;
-                
-                // 按比例调整 speed 和 waveSpeed
-                script.speed = defaultSpeed * scale;
-                script.waveSpeed = defaultWaveSpeed * scale;
+                console.log('totalDuration: ', totalDuration, 'verticalSpread: ', script.verticalSpread);
                 
                 // 初始状态和 effectTime
                 script.enabled = this.config.autoStart;
@@ -509,13 +507,11 @@ export class RevealController {
                 console.log('Integrate script created with config:', {
                     intensity: script.intensity,
                     speed: script.speed,
-                    waveSpeed: script.waveSpeed,
+                    verticalSpread: script.verticalSpread,
                     aabbMin: script.aabbMin,
                     aabbMax: script.aabbMax,
                     topY: script.topY,
                     bottomY: script.bottomY,
-                    totalDuration,
-                    scale,
                     enabled: script.enabled
                 });
             }

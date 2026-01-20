@@ -167,14 +167,6 @@ class OrbitController implements CameraController {
             // 保存原始 target（用户选择的点）
             const desiredTarget = tmpTarget.clone();
             
-            console.log('[goto] 初始状态:');
-            console.log('  position:', originalPosition);
-            console.log('  desired target:', desiredTarget);
-            console.log('  angles:', originalAngles);
-            console.log('  distance:', camera.distance);
-            console.log('  position in box?', this.targetConstraint.containsPoint(originalPosition));
-            console.log('  target in box?', this.targetConstraint.containsPoint(desiredTarget));
-            
             // 检查 position 是否在 box 内
             if (!this.targetConstraint.containsPoint(camera.position)) {
                 console.log('[goto] position 在 box 外，需要调整');

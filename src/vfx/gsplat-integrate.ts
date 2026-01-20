@@ -8,6 +8,7 @@ uniform float uSpeed;
 uniform float uWaveSpeed;
 uniform float uWaveFrequency;
 uniform float uTopY;
+uniform float uVerticalSpread;
 uniform vec3 uAabbMin;
 uniform vec3 uAabbMax;
 
@@ -37,7 +38,7 @@ void modifyCenter(inout vec3 center) {
     float yOffset = uTopY - center.y;
     // 计算传播相位：时间推进 - y坐标偏移（从顶部开始）
     // 顶部（yOffset=0，即center.y接近uTopY）的wavePhase先达到阈值，所以顶部先整合
-    float wavePhase = timeScaled - yOffset * 0.5;
+    float wavePhase = timeScaled - yOffset * uVerticalSpread;
     // 使用smoothstep确保：开始时所有点tt=0（点云），传播到后tt逐渐变为1（高斯）
     // 增大过渡范围，使每层的整合更明显
     float tt = smoothstep(0.0, 1.0, wavePhase);
@@ -92,7 +93,7 @@ void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA,
     float yOffset = uTopY - originalCenter.y;
     // 计算传播相位：时间推进 - y坐标偏移（从顶部开始）
     // 顶部（yOffset=0，即center.y接近uTopY）的wavePhase先达到阈值，所以顶部先整合
-    float wavePhase = timeScaled - yOffset * 0.5;
+    float wavePhase = timeScaled - yOffset * uVerticalSpread;
     // 使用smoothstep确保：开始时所有点tt=0（点云），传播到后tt逐渐变为1（高斯）
     float tt = smoothstep(0.0, 1.0, wavePhase);
     tt = clamp(tt, 0.0, 1.0); // 确保在[0,1]范围内
@@ -149,6 +150,7 @@ uniform uSpeed: f32;
 uniform uWaveSpeed: f32;
 uniform uWaveFrequency: f32;
 uniform uTopY: f32;
+uniform uVerticalSpread: f32;
 uniform uAabbMin: vec3f;
 uniform uAabbMax: vec3f;
 
@@ -181,7 +183,7 @@ fn modifyCenter(center: ptr<function, vec3f>) {
     let yOffset = uniform.uTopY - (*center).y;
     // 计算传播相位：时间推进 - y坐标偏移（从顶部开始）
     // 顶部（yOffset=0，即center.y接近uTopY）的wavePhase先达到阈值，所以顶部先整合
-    let wavePhase = timeScaled - yOffset * 0.5;
+        let wavePhase = timeScaled - yOffset * uniform.uVerticalSpread;
     // 使用smoothstep确保：开始时所有点tt=0（点云），传播到后tt逐渐变为1（高斯）
     // 增大过渡范围，使每层的整合更明显
     var tt = smoothstep(0.0, 1.0, wavePhase);
@@ -237,7 +239,7 @@ fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<func
     let yOffset = uniform.uTopY - originalCenter.y;
     // 计算传播相位：时间推进 - y坐标偏移（从顶部开始）
     // 顶部（yOffset=0，即center.y接近uTopY）的wavePhase先达到阈值，所以顶部先整合
-    let wavePhase = timeScaled - yOffset * 0.5;
+        let wavePhase = timeScaled - yOffset * uniform.uVerticalSpread;
     // 使用smoothstep确保：开始时所有点tt=0（点云），传播到后tt逐渐变为1（高斯）
     var tt = smoothstep(0.0, 1.0, wavePhase);
     tt = clamp(tt, 0.0, 1.0); // 确保在[0,1]范围内
@@ -348,6 +350,15 @@ class GsplatIntegrate extends GsplatShaderEffect {
     topY = 10.0;
 
     /**
+     * Vertical spread coefficient for wave propagation
+     * Controls how y-coordinate offset affects wave phase: wavePhase = timeScaled - yOffset * verticalSpread
+     * Larger values = slower vertical propagation
+     * This is typically calculated automatically based on totalDuration
+     * @attribute
+     */
+    verticalSpread = 0.5;
+
+    /**
      * Minimum corner of AABB in world space
      * @attribute
      */
@@ -375,6 +386,7 @@ class GsplatIntegrate extends GsplatShaderEffect {
         this.setUniform('uWaveSpeed', this.waveSpeed);
         this.setUniform('uWaveFrequency', this.waveFrequency);
         this.setUniform('uTopY', this.topY);
+        this.setUniform('uVerticalSpread', this.verticalSpread);
 
         // Set AABB uniforms
         this._aabbMinArray[0] = this.aabbMin.x;
@@ -390,6 +402,7 @@ class GsplatIntegrate extends GsplatShaderEffect {
         // Check if effect is complete after updating uniforms
         // Temporarily disabled to debug - uncomment when effect is working
         if (this.isEffectComplete()) {
+            console.log('[Integrate] effect time: ', this.effectTime);
             this.enabled = false;
             return;
         }
@@ -401,30 +414,28 @@ class GsplatIntegrate extends GsplatShaderEffect {
      * @returns {boolean} True if effect is complete
      */
     isEffectComplete() {
-        // The integration effect uses a sine wave that propagates from bottom to top
-        // The wave phase in shader is: timeScaled + center.y * 0.5
-        // where timeScaled = uTime * uSpeed
+        // The integration effect propagates from top to bottom
+        // The wave phase in shader is: wavePhase = timeScaled - yOffset * verticalSpread
+        // where timeScaled = uTime * uSpeed, yOffset = uTopY - center.y
         // 
-        // For a point at bottomY, integration starts when: timeScaled + bottomY * 0.5 = -π/2
-        // For a point at topY, integration starts when: timeScaled + topY * 0.5 = -π/2
+        // tt = smoothstep(0.0, 1.0, wavePhase)
+        // Integration completes when wavePhase >= 1.0, i.e., tt = 1.0
         // 
-        // The time difference is: (topY - bottomY) * 0.5 / speed
+        // For top point (y = topY):
+        //   yOffset = 0, wavePhase = timeScaled
+        //   Completes when: timeScaled >= 1.0, i.e., uTime >= 1.0 / speed
         // 
-        // After the wave reaches topY, we need additional time for the smoothstep to complete
-        // The smoothstep range is [-1.0, 0.5], and -sin() ranges from [-1, 1]
-        // We need the wave to complete a full cycle to ensure all points are integrated
+        // For bottom point (y = bottomY):
+        //   yOffset = heightRange, wavePhase = timeScaled - heightRange * verticalSpread
+        //   Completes when: wavePhase >= 1.0, i.e., timeScaled >= heightRange * verticalSpread + 1.0
+        //   Therefore: uTime >= (heightRange * verticalSpread + 1.0) / speed
         
         const heightRange = Math.abs(this.topY - this.bottomY);
         
-        // Time for wave to propagate from bottom to top
-        // The phase difference is heightRange * 0.5, divided by speed
-        const propagationTime = (heightRange * 0.5) / Math.max(this.speed, 0.001);
-        
-        // Additional time for smoothstep to complete (need full sine cycle)
-        // One full sine cycle is 2π, but we need to account for the phase shift
-        // Add enough time for the wave to complete integration at the top
-        const cycleTime = (Math.PI * 2.0) / Math.max(this.speed, 0.001);
-        const completionTime = propagationTime + cycleTime;
+        // The bottom point is the last to complete, so the effect completes when
+        // the bottom point reaches wavePhase = 1.0
+        // Completion time = (heightRange * verticalSpread + 1.0) / speed
+        const completionTime = (heightRange * this.verticalSpread + 1.0) / Math.max(this.speed, 0.001);
         
         return this.effectTime >= completionTime;
     }
