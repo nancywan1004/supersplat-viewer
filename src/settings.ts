@@ -178,15 +178,14 @@ const migrateV2 = (v1: V1): V2 => {
 };
 
 // Convert 3x3 rotation matrix to target point
-const rotationMatrixToTarget = (position: [number, number, number], rotation: [[number, number, number], [number, number, number], [number, number, number]]): [number, number, number] => {
+const rotationMatrixToTarget = (position: [number, number, number], rotation: [[number, number, number], [number, number, number], [number, number, number]], distance: number = 3): [number, number, number] => {
     // Extract viewing direction from the third row (camera's Z-axis in world space)
     // Flip X and Y components to match coordinate system
     const forward = new Vec3(-rotation[2][0], -rotation[2][1], rotation[2][2]);
     
     // Calculate target point at a reasonable distance
-    const targetDistance = 3;
     const pos = new Vec3(position[0], position[1], position[2]);
-    const target = pos.clone().add(forward.mulScalar(targetDistance));
+    const target = pos.clone().add(forward.mulScalar(distance));
     
     return [target.x, target.y, target.z];
 };
@@ -206,14 +205,14 @@ function computeFOV(fx: number, fy: number, width: number, height: number): [num
 }
 
 // Migrate transform format to V2 with animTracks
-const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
+const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: number = 3): V2 => {
     if (!transforms || transforms.length === 0) {
         throw new Error('Transform array is empty');
     }
     
     // Use first frame for initial camera pose
     const firstFrame = transforms[0];
-    const originalTarget = rotationMatrixToTarget(firstFrame.position, firstFrame.rotation);
+    const originalTarget = rotationMatrixToTarget(firstFrame.position, firstFrame.rotation, targetDistance);
     
     // Flip X and Y axes to match coordinate system
     const initialPosition: [number, number, number] = [-firstFrame.position[0], -firstFrame.position[1], firstFrame.position[2]];
@@ -235,7 +234,7 @@ const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
         positions.push(-frame.position[0], -frame.position[1], frame.position[2]);
         
         // Target (calculated from rotation matrix) - also flip X and Y axes
-        const target = rotationMatrixToTarget(frame.position, frame.rotation);
+        const target = rotationMatrixToTarget(frame.position, frame.rotation, targetDistance);
         targets.push(-target[0], -target[1], target[2]);
         
         // FOV (calculated from focal length)
@@ -329,10 +328,14 @@ const migrateTransformToV2 = (transforms: TransformFrame[]): V2 => {
 const importSettings = (settings: any): V2 => {
     let result: V2;
 
-    // Check if it's a transform array format
+    // Check if it's a transform array format or object format with frames
     if (Array.isArray(settings) && settings.length > 0 && settings[0].rotation && settings[0].position) {
-        // Transform format -> v2
+        // Transform array format -> v2 (backward compatible, uses default distance = 3)
         result = migrateTransformToV2(settings as TransformFrame[]);
+    } else if (settings && typeof settings === 'object' && Array.isArray(settings.frames) && settings.frames.length > 0 && settings.frames[0].rotation && settings.frames[0].position) {
+        // Transform object format with frames array -> v2 (supports optional targetDistance)
+        const targetDistance = typeof settings.targetDistance === 'number' ? settings.targetDistance : 3;
+        result = migrateTransformToV2(settings.frames as TransformFrame[], targetDistance);
     } else {
         const version = settings.version;
         if (version === undefined) {
