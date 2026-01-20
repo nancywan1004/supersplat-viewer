@@ -57,8 +57,8 @@ const initUI = (global: Global) => {
     // Check if LOD mode is enabled
     const isLodMode = config.contentUrl ? isLodMetaFile(config.contentUrl) : false;
     
-    // In LOD mode, optionally hide the progress bar to avoid confusion with dynamic loading
-    // Set this to true to hide progress bar in LOD mode, false to show it with non-regressing progress
+    // In LOD mode, show progress bar but mark as 100% when animation starts
+    // Progress is calculated based on threshold, reaching 100% when animation begins
     const hideProgressBarInLodMode = false;
 
     // Handle loading progress updates
@@ -75,6 +75,13 @@ const initUI = (global: Global) => {
                 dom.loadingBar.style.backgroundImage = `linear-gradient(90deg, #F60 0%, #F60 ${progress}%, white ${progress}%, white 100%)`;
             } else {
                 dom.loadingBar.style.backgroundImage = 'linear-gradient(90deg, #F60 0%, #F60 100%)';
+                // In LOD mode, hide loading UI when progress reaches 100%
+                if (isLodMode) {
+                    const loadingWrap = document.getElementById('loadingWrap');
+                    if (loadingWrap) {
+                        loadingWrap.classList.add('hidden');
+                    }
+                }
             }
         });
     }
@@ -82,6 +89,16 @@ const initUI = (global: Global) => {
     // Hide loading bar once first frame is rendered
     events.on('firstFrame', () => {
         document.getElementById('loadingWrap').classList.add('hidden');
+    });
+
+    // Hide loading bar when animation starts in LOD mode (progress reaches 100%)
+    events.on('animationStarted', () => {
+        if (isLodMode) {
+            const loadingWrap = document.getElementById('loadingWrap');
+            if (loadingWrap) {
+                loadingWrap.classList.add('hidden');
+            }
+        }
     });
 
     // Fullscreen support
