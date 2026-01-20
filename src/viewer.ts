@@ -464,18 +464,24 @@ class Viewer {
                 let watermark = 1;
                 // For custom LOD mode, track the maximum progress to prevent regression
                 let maxProgress = 0;
+                let animationStarted = false; // Track if animation has started
                 const readyHandler = (camera: CameraComponent, layer: Layer, ready: boolean, loading: number) => {
                     // In LOD mode, start animation when loading drops below threshold
                     // This allows animation to start earlier without waiting for all chunks
                     // Set this threshold to control when animation starts (0 = wait for all chunks)
                     const ANIMATION_START_LOADING_THRESHOLD = 3; // Adjust this value as needed
 
-                    if (isCustomLod && ready && !state.readyToRender) {
+                    if (isCustomLod && ready && !state.readyToRender && !animationStarted) {
                         if (loading <= ANIMATION_START_LOADING_THRESHOLD) {
                             // Start animation when loading is below threshold
                             if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim) {
+                                animationStarted = true;
                                 console.log(`LOD mode: loading (${loading}) <= threshold (${ANIMATION_START_LOADING_THRESHOLD}), starting animation`);
                                 state.animationPaused = false;
+                                // Set progress to 100% when animation starts
+                                state.progress = 100;
+                                // Fire event to notify UI that animation has started
+                                events.fire('animationStarted');
                             }
                         }
                     }
@@ -532,15 +538,21 @@ class Viewer {
                     if (loading !== current) {
                         watermark = Math.max(watermark, loading);
                         current = watermark - loading;
-                        let progress = Math.trunc(current / watermark * 100);
                         
-                        // In custom LOD mode, ensure progress never decreases
-                        if (isCustomLod) {
-                            maxProgress = Math.max(maxProgress, progress);
-                            progress = maxProgress;
+                        // In custom LOD mode, if animation has started, show 100% progress
+                        if (isCustomLod && animationStarted) {
+                            state.progress = 100;
+                        } else {
+                            let progress = Math.trunc(current / watermark * 100);
+                            
+                            // In custom LOD mode, ensure progress never decreases
+                            if (isCustomLod) {
+                                maxProgress = Math.max(maxProgress, progress);
+                                progress = maxProgress;
+                            }
+                            
+                            state.progress = progress;
                         }
-                        
-                        state.progress = progress;
                     }
                 };
                 eventHandler.on('frame:ready', readyHandler);
