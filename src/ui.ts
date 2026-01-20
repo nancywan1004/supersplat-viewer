@@ -55,9 +55,9 @@ const initUI = (global: Global) => {
     // Check if LOD mode is enabled
     const isLodMode = config.contentUrl ? isLodMetaFile(config.contentUrl) : false;
     
-    // In LOD mode, optionally hide the progress bar to avoid confusion with dynamic loading
-    // Set this to true to hide progress bar in LOD mode, false to show it with non-regressing progress
-    const hideProgressBarInLodMode = false;
+    // In LOD mode, hide the progress bar to avoid confusion with dynamic loading
+    // LOD mode has continuous streaming, so showing progress can be misleading
+    const hideProgressBarInLodMode = true;
 
     // Handle loading progress updates
     if (isLodMode && hideProgressBarInLodMode) {

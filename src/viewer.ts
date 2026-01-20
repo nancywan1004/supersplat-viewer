@@ -465,11 +465,32 @@ class Viewer {
                 // For custom LOD mode, track the maximum progress to prevent regression
                 let maxProgress = 0;
                 const readyHandler = (camera: CameraComponent, layer: Layer, ready: boolean, loading: number) => {
+                    // In LOD mode, start animation when loading drops below threshold
+                    // This allows animation to start earlier without waiting for all chunks
+                    // Set this threshold to control when animation starts (0 = wait for all chunks)
+                    const ANIMATION_START_LOADING_THRESHOLD = 3; // Adjust this value as needed
+
+                    if (isCustomLod && ready && !state.readyToRender) {
+                        if (loading <= ANIMATION_START_LOADING_THRESHOLD) {
+                            // Start animation when loading is below threshold
+                            if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim) {
+                                console.log(`LOD mode: loading (${loading}) <= threshold (${ANIMATION_START_LOADING_THRESHOLD}), starting animation`);
+                                state.animationPaused = false;
+                            }
+                        }
+                    }
+
                     if (ready && loading === 0) {
                         // scene is done loading
                         eventHandler.off('frame:ready', readyHandler);
 
                         state.readyToRender = true;
+
+                        // In LOD mode, ensure animation is started (in case it wasn't started earlier)
+                        if (isCustomLod && settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim) {
+                            console.log('LOD mode: all chunks loaded, ensuring animation is playing');
+                            state.animationPaused = false;
+                        }
 
                         // handle quality mode changes
                         const updateLod = () => {
