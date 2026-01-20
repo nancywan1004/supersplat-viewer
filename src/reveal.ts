@@ -246,7 +246,7 @@ export class RevealController {
                 }
                 
                 // 根据 totalDuration 调整时间参数
-                const totalDuration = this.config.totalDuration ?? 15.0;
+                const totalDuration = this.config.totalDuration ?? 20.0;
                 // 根据 shader 逻辑计算实际完成时间
                 // rawProgress = uTime^2 * 0.1 - dist2D*2.0 + 1.0 >= 5
                 // uTime >= sqrt((4 + maxDist2D*2.0) / 0.1)
@@ -627,7 +627,7 @@ export class RevealController {
             if (this.isTiming && this.effectStartTime !== null) {
                 this.effectEndTime = performance.now() / 1000;
                 const actualDuration = this.effectEndTime - this.effectStartTime;
-                const expectedDuration = this.config.totalDuration ?? 15.0;
+                const expectedDuration = this.config.totalDuration ?? 20.0;
                 const difference = actualDuration - expectedDuration;
                 
                 console.log(`[Timing] ${this.config.type} effect completed:`);
@@ -676,7 +676,7 @@ export class RevealController {
             if (this.effectEndTime === null) {
                 this.effectEndTime = performance.now() / 1000;
                 const actualDuration = this.effectEndTime - this.effectStartTime;
-                const expectedDuration = this.config.totalDuration ?? 15.0;
+                const expectedDuration = this.config.totalDuration ?? 20.0;
                 const difference = actualDuration - expectedDuration;
                 
                 console.log(`[Timing] ${this.config.type} effect completed (detected via isEffectComplete):`);

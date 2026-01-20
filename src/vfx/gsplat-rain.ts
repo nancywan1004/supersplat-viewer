@@ -77,9 +77,64 @@ void modifyCenter(inout vec3 center) {
 }
 
 void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
-    // Scale can be adjusted based on rain effect
-    // Original implementation doesn't modify scale explicitly, but we can add it if needed
     initShared(originalCenter);
+    
+    // 如果已经完全到达并恢复，保持原始形状
+    if (g_hasReached > 0.5 && g_rainProgress >= 1.0) {
+        // 已经完全恢复，保持原始大小和形状
+        return;
+    }
+    
+    // 在下落过程中，缩小为小点云（模拟雨点）
+    // 计算缩放因子：在下落过程中保持小尺寸，到达时恢复
+    float progressWhenReached = max(0.001, (g_originalY - uBottomY) / uRainHeight);
+    
+    // 小点云的相对大小（可以调整）
+    float smallDotSize = 0.05;
+    float scaleFactor;
+    
+    if (g_hasReached > 0.5) {
+        // 已经到达原始位置：平滑过渡到原始大小和形状
+        // 使用 redFadeFactor 的逆作为过渡因子（到达时开始恢复）
+        float restoreProgress = 1.0 - g_redFadeFactor;
+        scaleFactor = mix(smallDotSize, 1.0, restoreProgress);
+        
+        // 如果已经完全恢复，直接返回原始形状
+        if (restoreProgress >= 1.0) {
+            return;
+        }
+    } else if (g_rainProgress < progressWhenReached * 0.9) {
+        // 下落阶段：保持小点云
+        scaleFactor = smallDotSize;
+    } else {
+        // 接近到达时：平滑过渡到原始大小
+        float transitionStart = progressWhenReached * 0.9;
+        float transitionEnd = progressWhenReached;
+        float t = smoothstep(transitionStart, transitionEnd, g_rainProgress);
+        scaleFactor = mix(smallDotSize, 1.0, t);
+    }
+    
+    // 提取原始大小并应用缩放
+    float originalSize = gsplatExtractSize(covA, covB);
+    float newSize = originalSize * scaleFactor;
+    
+    // 在下落阶段和过渡阶段，创建圆形小点云
+    // 到达后逐渐恢复原始形状
+    if (g_hasReached > 0.5) {
+        // 到达后：混合圆形和原始形状
+        float restoreProgress = 1.0 - g_redFadeFactor;
+        vec3 originalCovA = covA;
+        vec3 originalCovB = covB;
+        gsplatMakeRound(covA, covB, newSize);
+        vec3 roundCovA = covA;
+        vec3 roundCovB = covB;
+        // 从圆形逐渐过渡到原始形状
+        covA = mix(roundCovA, originalCovA, restoreProgress);
+        covB = mix(roundCovB, originalCovB, restoreProgress);
+    } else {
+        // 下落阶段：创建圆形小点云
+        gsplatMakeRound(covA, covB, newSize);
+    }
 }
 
 void modifyColor(vec3 center, inout vec4 color) {
@@ -179,9 +234,64 @@ fn modifyCenter(center: ptr<function, vec3f>) {
 }
 
 fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<function, vec3f>, covB: ptr<function, vec3f>) {
-    // Scale can be adjusted based on rain effect
-    // Original implementation doesn't modify scale explicitly, but we can add it if needed
     initShared(originalCenter);
+    
+    // 如果已经完全到达并恢复，保持原始形状
+    if (g_hasReached > 0.5 && g_rainProgress >= 1.0) {
+        // 已经完全恢复，保持原始大小和形状
+        return;
+    }
+    
+    // 在下落过程中，缩小为小点云（模拟雨点）
+    // 计算缩放因子：在下落过程中保持小尺寸，到达时恢复
+    let progressWhenReached = max(0.001, (g_originalY - uniform.uBottomY) / uniform.uRainHeight);
+    
+    // 小点云的相对大小（可以调整）
+    let smallDotSize: f32 = 0.05;
+    var scaleFactor: f32;
+    
+    if (g_hasReached > 0.5) {
+        // 已经到达原始位置：平滑过渡到原始大小和形状
+        // 使用 redFadeFactor 的逆作为过渡因子（到达时开始恢复）
+        let restoreProgress = 1.0 - g_redFadeFactor;
+        scaleFactor = mix(smallDotSize, 1.0, restoreProgress);
+        
+        // 如果已经完全恢复，直接返回原始形状
+        if (restoreProgress >= 1.0) {
+            return;
+        }
+    } else if (g_rainProgress < progressWhenReached * 0.9) {
+        // 下落阶段：保持小点云
+        scaleFactor = smallDotSize;
+    } else {
+        // 接近到达时：平滑过渡到原始大小
+        let transitionStart = progressWhenReached * 0.9;
+        let transitionEnd = progressWhenReached;
+        let t = smoothstep(transitionStart, transitionEnd, g_rainProgress);
+        scaleFactor = mix(smallDotSize, 1.0, t);
+    }
+    
+    // 提取原始大小并应用缩放
+    let originalSize = gsplatExtractSize(*covA, *covB);
+    let newSize = originalSize * scaleFactor;
+    
+    // 在下落阶段和过渡阶段，创建圆形小点云
+    // 到达后逐渐恢复原始形状
+    if (g_hasReached > 0.5) {
+        // 到达后：混合圆形和原始形状
+        let restoreProgress = 1.0 - g_redFadeFactor;
+        let originalCovA = *covA;
+        let originalCovB = *covB;
+        gsplatMakeRound(covA, covB, newSize);
+        let roundCovA = *covA;
+        let roundCovB = *covB;
+        // 从圆形逐渐过渡到原始形状
+        *covA = mix(roundCovA, originalCovA, restoreProgress);
+        *covB = mix(roundCovB, originalCovB, restoreProgress);
+    } else {
+        // 下落阶段：创建圆形小点云
+        gsplatMakeRound(covA, covB, newSize);
+    }
 }
 
 fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
