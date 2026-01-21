@@ -81,10 +81,10 @@ void modifyCenter(inout vec3 center) {
 void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
     // AABB crop 效果：检查 splat 是否在 AABB 内
     // 如果不在 AABB 内，不应用效果，保持原始状态（正常显示）
-    bool insideAABB = all(greaterThanEqual(modifiedCenter, uAabbMin)) && all(lessThanEqual(modifiedCenter, uAabbMax));
-    if (!insideAABB) {
-        return; // 不在 AABB 内，不参与效果，保持原始状态
-    }
+    // bool insideAABB = all(greaterThanEqual(modifiedCenter, uAabbMin)) && all(lessThanEqual(modifiedCenter, uAabbMax));
+    // if (!insideAABB) {
+    //     return; // 不在 AABB 内，不参与效果，保持原始状态
+    // }
     
     // Calculate integrate factor (same calculation as in modifyCenter, from top to bottom)
     // 使用传播波：从顶部开始，向下传播（由于坐标系y轴取反，顶部y值大）

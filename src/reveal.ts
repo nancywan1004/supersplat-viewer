@@ -472,7 +472,7 @@ export class RevealController {
                 
                 // 设置 topY 和 bottomY（基于 bbox 或默认值）
                 if (this.bbox) {
-                    script.topY = this.bbox.center.y + this.bbox.halfExtents.y * 0.35;
+                    script.topY = this.bbox.center.y - this.bbox.halfExtents.y * 0.68;
                     script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y;
                 } else {
                     script.topY = 10.0;
