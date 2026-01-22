@@ -9,6 +9,7 @@ import { GsplatRevealPiecesRecover } from './vfx/gsplat-pieces-recover';
 import { GsplatRevealPerlinWave } from './vfx/gsplat-perlin-wave';
 import { GsplatIntegrate } from './vfx/gsplat-integrate';
 import { GsplatRainV2 } from './vfx/gsplat-rain';
+import { GsplatRevealGrowthWave } from './vfx/gsplat-growth-wave';
 import type { CameraManager } from './camera-manager';
 // import { GsplatRevealRadial } from 'playcanvas/scripts/esm/gsplat/reveal-radial.mjs';
 // import { GsplatRevealRain } from 'playcanvas/scripts/esm/gsplat/reveal-rain.mjs';
@@ -20,7 +21,7 @@ import type { CameraManager } from './camera-manager';
 /**
  * Reveal effect type (including VFX effects)
  */
-export type RevealEffectType = 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'none';
+export type RevealEffectType = 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'none';
 
 export class RevealController {
     private gsplatEntity: Entity | null = null;
@@ -34,7 +35,7 @@ export class RevealController {
     private effectStartTime: number | null = null;
     private effectEndTime: number | null = null;
     private isTiming: boolean = false;
-    private timedEffects = ['rain_v2', 'pieces-recover', 'integrate'];
+    private timedEffects = ['rain_v2', 'pieces-recover', 'integrate', 'growth-wave'];
 
     global: Global;
 
@@ -433,6 +434,71 @@ export class RevealController {
     }
 
     /**
+     * 创建 growth-wave 效果脚本
+     */
+    private createGrowthWaveScript() {
+        if (!this.gsplatEntity || !this.gsplatEntity.script) {
+            console.warn('Cannot create growth-wave script - entity or script component not ready');
+            return null;
+        }
+
+        console.log('Creating growth-wave reveal script');
+
+        try {
+            const script = this.gsplatEntity.script.create(GsplatRevealGrowthWave) as any;
+            if (script) {
+                // 默认配置
+                const defaultGrowthSpeed = 5.0;
+                const defaultGrowthDuration = 7.0;
+                const defaultRecoverDuration = 7.0;
+                
+                // 根据 totalDuration 自动调整时间参数
+                const totalDuration = this.config.totalDuration ?? 20.0;
+                // 计算默认总时长：maxGrowthStartTime + growthDuration + recoverDuration
+                const defaultEndRadius = 50.0;
+                const maxGrowthStartTime = defaultEndRadius / defaultGrowthSpeed;
+                const defaultTotalDuration = maxGrowthStartTime + defaultGrowthDuration + defaultRecoverDuration;
+                
+                // 计算缩放比例
+                const scale = totalDuration / defaultTotalDuration;
+                
+                // 按比例调整参数
+                script.growthSpeed = defaultGrowthSpeed * scale;
+                script.growthDuration = defaultGrowthDuration * scale;
+                script.recoverDuration = defaultRecoverDuration * scale;
+                script.noiseIntensity = 2.8;
+                script.scatterDistance = 4.0;
+                script.minSize = 0.15;
+                script.endRadius = defaultEndRadius;
+                
+                // 设置 reveal center
+                this.updateScriptCenter(script);
+                
+                // 初始状态和 effectTime
+                script.enabled = this.config.autoStart;
+                script.effectTime = 0;
+                
+                console.log('Growth-wave script created with config:', {
+                    center: script.center,
+                    growthSpeed: script.growthSpeed,
+                    growthDuration: script.growthDuration,
+                    recoverDuration: script.recoverDuration,
+                    noiseIntensity: script.noiseIntensity,
+                    scatterDistance: script.scatterDistance,
+                    minSize: script.minSize,
+                    totalDuration,
+                    scale,
+                    enabled: script.enabled
+                });
+            }
+            return script;
+        } catch (error) {
+            console.error('Failed to create growth-wave script:', error);
+            return null;
+        }
+    }
+
+    /**
      * 创建 integrate 效果脚本
      */
     private createIntegrateScript() {
@@ -571,6 +637,9 @@ export class RevealController {
                 break;
             case 'integrate':
                 script = this.createIntegrateScript();
+                break;
+            case 'growth-wave':
+                script = this.createGrowthWaveScript();
                 break;
             case 'none':
                 // 不创建任何效果
@@ -720,6 +789,7 @@ export class RevealController {
             this.gsplatEntity.script.destroy('gsplatRevealPiecesRecover');
             this.gsplatEntity.script.destroy('gsplatRevealPerlinWave');
             this.gsplatEntity.script.destroy('gsplatIntegrate');
+            this.gsplatEntity.script.destroy('gsplatRevealGrowthWave');
             // 未来可以添加更多类型
         } catch (error) {
             console.warn('Error destroying reveal scripts:', error);
@@ -752,7 +822,7 @@ export class RevealController {
         // 如果 totalDuration 改变且当前特效是需要 totalDuration 的特效，重新创建效果
         else if (newConfig.totalDuration !== undefined && 
                  newConfig.totalDuration !== oldTotalDuration &&
-                 ['rain_v2', 'pieces-recover', 'integrate'].includes(this.config.type)) {
+                 ['rain_v2', 'pieces-recover', 'integrate', 'growth-wave'].includes(this.config.type)) {
             this.createEffect(this.config.type);
             console.log('Recreated effect due to totalDuration change');
         }

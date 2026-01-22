@@ -1,8 +1,8 @@
 type RevealEffect = {
-    type?: 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'none',
+    type?: 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'none',
     radius?: number, // 10
     autoStart?: boolean,
-    totalDuration?: number // 总时长（秒），用于 rain_v2, pieces-recover, integrate 三个特效，默认 15 秒
+    totalDuration?: number // 总时长（秒），用于 rain_v2, pieces-recover, integrate, growth-wave 四个特效，默认 15 秒
 }
 
 type LodPlatform = 'desktop-max' | 'desktop' | 'mobile-max' | 'mobile'

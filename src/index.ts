@@ -204,7 +204,7 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         showCameraPath: false,
         showCameraBoundingBox: false,
         vfxActive: false,
-        vfxType: 'none' as 'none' | 'grow' | 'pieces-recover' | 'perlin-wave' | 'disintegrate' | 'integrate'
+        vfxType: 'none' as 'none' | 'grow' | 'pieces-recover' | 'perlin-wave' | 'disintegrate' | 'integrate' | 'growth-wave'
     });
 
     // 如果设置了 noreveal 参数，清除 reveal effect 配置

@@ -352,11 +352,11 @@ const initUI = (global: Global) => {
 
     // Reveal mode (now includes VFX effects)
     // 需要 totalDuration 的特效列表
-    const timedVfxEffects = ['rain_v2', 'pieces-recover', 'integrate'];
+    const timedVfxEffects = ['rain_v2', 'pieces-recover', 'integrate', 'growth-wave'];
     
     dom.revealType?.addEventListener('change', (event) => {
         const target = event.target as HTMLSelectElement;
-        const revealType = target.value as 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'none';
+        const revealType = target.value as 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'none';
         
         events.fire('revealConfigChanged', { type: revealType });
     });
