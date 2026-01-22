@@ -89,15 +89,16 @@ const initUI = (global: Global) => {
         document.getElementById('loadingWrap').classList.add('hidden');
     });
 
-    // Hide loading bar when animation starts in LOD mode (progress reaches 100%)
-    events.on('animationStarted', () => {
-        if (isLodMode) {
-            const loadingWrap = document.getElementById('loadingWrap');
-            if (loadingWrap) {
-                loadingWrap.classList.add('hidden');
-            }
+    // Hide loading bar when progress reaches threshold (50%) or animation starts
+    const hideLoadingUI = () => {
+        const loadingWrap = document.getElementById('loadingWrap');
+        if (loadingWrap) {
+            loadingWrap.classList.add('hidden');
         }
-    });
+    };
+    
+    events.on('progressThresholdReached', hideLoadingUI);
+    events.on('animationStarted', hideLoadingUI);
 
     // Fullscreen support
     const hasFullscreenAPI = docRoot.requestFullscreen && document.exitFullscreen;

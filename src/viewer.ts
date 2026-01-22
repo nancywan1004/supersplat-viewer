@@ -462,26 +462,9 @@ class Viewer {
                 // For custom LOD mode, track the maximum progress to prevent regression
                 let maxProgress = 0;
                 let animationStarted = false; // Track if animation has started
+                let progressUIHidden = false; // Track if progress UI has been hidden
+                const PROGRESS_THRESHOLD = 50; // Hide progress UI when progress reaches this threshold
                 const readyHandler = (camera: CameraComponent, layer: Layer, ready: boolean, loading: number) => {
-                    // In LOD mode, start animation when loading drops below threshold
-                    // This allows animation to start earlier without waiting for all chunks
-                    // Set this threshold to control when animation starts (0 = wait for all chunks)
-                    const ANIMATION_START_LOADING_THRESHOLD = 3; // Adjust this value as needed
-
-                    if (isCustomLod && ready && !state.readyToRender && !animationStarted) {
-                        if (loading <= ANIMATION_START_LOADING_THRESHOLD) {
-                            // Start animation when loading is below threshold
-                            if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim) {
-                                animationStarted = true;
-                                console.log(`LOD mode: loading (${loading}) <= threshold (${ANIMATION_START_LOADING_THRESHOLD}), starting animation`);
-                                state.animationPaused = false;
-                                // Set progress to 100% when animation starts
-                                state.progress = 100;
-                                // Fire event to notify UI that animation has started
-                                events.fire('animationStarted');
-                            }
-                        }
-                    }
 
                     if (ready && loading === 0) {
                         // scene is done loading
@@ -536,19 +519,35 @@ class Viewer {
                         watermark = Math.max(watermark, loading);
                         current = watermark - loading;
                         
+                        let progress: number;
                         // In custom LOD mode, if animation has started, show 100% progress
                         if (isCustomLod && animationStarted) {
-                            state.progress = 100;
+                            progress = 100;
                         } else {
-                            let progress = Math.trunc(current / watermark * 100);
+                            progress = Math.trunc(current / watermark * 100);
                             
                             // In custom LOD mode, ensure progress never decreases
                             if (isCustomLod) {
                                 maxProgress = Math.max(maxProgress, progress);
                                 progress = maxProgress;
                             }
+                        }
+                        
+                        state.progress = progress;
+                        
+                        // When progress reaches threshold, hide progress UI and start animation if available
+                        if (!progressUIHidden && progress >= PROGRESS_THRESHOLD) {
+                            progressUIHidden = true;
+                            // Fire event to hide progress UI
+                            events.fire('progressThresholdReached', progress);
                             
-                            state.progress = progress;
+                            // Start animation if available
+                            if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !animationStarted) {
+                                animationStarted = true;
+                                console.log(`Progress reached ${PROGRESS_THRESHOLD}%, starting animation`);
+                                state.animationPaused = false;
+                                events.fire('animationStarted');
+                            }
                         }
                     }
                 };
