@@ -244,15 +244,23 @@ class CameraManager {
         controllers.fly.setConstraint(this.constraint);
 
         // 给 orbit 设置一个合理的最大缩放距离（避免无限 zoom-out 让场景跑出视野）
-        // 之前的系数偏小，会导致 orbit 很早到达 maxZoom；切到 fly（通过位置平移）看起来还能继续“退远”。
-        // 这里改为基于“可 frame 场景的距离”的倍数，默认更宽松，手感与 fly 更一致。
+        // 之前的系数偏小，会导致 orbit 很早到达 maxZoom；切到 fly（通过位置平移）看起来还能继续"退远"。
+        // 这里改为基于"可 frame 场景的距离"的倍数，默认更宽松，手感与 fly 更一致。
         const sceneSize = fusedBbox.halfExtents.length();
         const frameDistance = sceneSize / Math.sin(camera0.fov / 180 * Math.PI * 0.5);
         const maxZoomMultiplier = 0.5;
         const maxZoom = frameDistance * maxZoomMultiplier;
         controllers.orbit.controller.zoomRange = new Vec2(0.5, maxZoom);
-        // Fly 的 focusDistance 也 clamp 到同一 zoomRange，保证两种模式 target clamp 时的“相机位置外壳范围”一致
+        // Fly 的 focusDistance 也 clamp 到同一 zoomRange，保证两种模式 target clamp 时的"相机位置外壳范围"一致
         controllers.fly.setFocusDistanceRange(controllers.orbit.controller.zoomRange);
+
+        // 应用俯仰角限制配置
+        const pitchRange = settings.cameras[0].pitchRange;
+        if (pitchRange && Array.isArray(pitchRange) && pitchRange.length === 2) {
+            const pitchVec2 = new Vec2(pitchRange[0], pitchRange[1]);
+            controllers.orbit.controller.pitchRange = pitchVec2;
+            controllers.fly.pitchRange = pitchVec2;
+        }
 
         const getController = (cameraMode: 'orbit' | 'anim' | 'fly'): CameraController => {
             return controllers[cameraMode];

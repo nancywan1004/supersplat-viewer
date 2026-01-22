@@ -25,6 +25,13 @@ type CameraPose = {
 
 type Camera = {
     initial: CameraPose,
+    /**
+     * 可选：相机俯仰角限制（单位：度）
+     * - 默认值：[-90, 90]
+     * - 第一个值为最小俯仰角（向下看的角度限制）
+     * - 第二个值为最大俯仰角（向上看的角度限制）
+     */
+    pitchRange?: [number, number];
 };
 
 type Annotation = {
