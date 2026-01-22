@@ -55,6 +55,7 @@
     "rollup": "4.55.1",
     "rollup-plugin-copy": "3.5.0",
     "rollup-plugin-dts": "^6.3.0",
+    "rollup-plugin-obfuscator": "^1.1.0",
     "rollup-plugin-scss": "4.0.1",
     "rollup-plugin-string": "3.0.0",
     "sass": "1.97.2",
@@ -63,6 +64,10 @@
   },
   "scripts": {
     "build": "rollup -c",
+    "build:prod": "NODE_ENV=production rollup -c",
+    "build:prod:obfuscate": "NODE_ENV=production OBFUSCATE=true rollup -c",
+    "build:prod:with-types": "NODE_ENV=production GENERATE_TYPES=true rollup -c",
+    "build:dev": "NODE_ENV=development rollup -c",
     "develop": "concurrently --kill-others \"npm run watch\" \"npm run serve\"",
     "lint": "eslint src rollup.config.mjs eslint.config.mjs",
     "lint:fix": "eslint src rollup.config.mjs eslint.config.mjs --fix",

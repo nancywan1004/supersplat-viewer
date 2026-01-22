@@ -17,6 +17,126 @@ import crypto from 'crypto';
 // 判断是否需要生成完整 package
 const isPackageBuild = process.env.BUILD_PACKAGE === 'true';
 
+// 判断是否生成 sourcemap（默认生产环境不生成，可通过 SOURCEMAP=true 启用）
+const shouldGenerateSourcemap = process.env.SOURCEMAP === 'true' || process.env.NODE_ENV !== 'production';
+
+// 判断是否启用强混淆（通过环境变量 OBFUSCATE=true 启用）
+const shouldObfuscate = process.env.OBFUSCATE === 'true';
+
+// 创建 obfuscator 插件配置（安全模式，避免破坏代码功能）
+// 注意：需要先安装 rollup-plugin-obfuscator
+// 运行: npm install --save-dev rollup-plugin-obfuscator
+const getObfuscatorConfig = () => ({
+  // 基础混淆选项（安全模式）
+  compact: true, // 压缩代码
+  controlFlowFlattening: false, // 禁用控制流扁平化（可能影响性能）
+  deadCodeInjection: false, // 禁用死代码注入（可能影响性能）
+  debugProtection: false, // 禁用调试保护（可能影响开发）
+  disableConsoleOutput: false, // 不禁用 console（已通过 terser 处理）
+  
+  // 字符串混淆（相对安全）
+  stringArray: true, // 启用字符串数组
+  stringArrayCallsTransform: false, // 禁用字符串数组调用转换（更安全）
+  stringArrayEncoding: [], // 不使用编码（避免兼容性问题）
+  stringArrayIndexShift: true, // 字符串数组索引偏移
+  stringArrayRotate: true, // 字符串数组旋转
+  stringArrayShuffle: true, // 字符串数组洗牌
+  stringArrayWrappersCount: 1, // 字符串数组包装器数量
+  stringArrayThreshold: 0.75, // 字符串数组阈值
+  
+  // 标识符混淆（相对安全）
+  identifierNamesGenerator: 'hexadecimal', // 标识符名称生成器
+  renameGlobals: false, // 不重命名全局变量（避免破坏外部接口）
+  renameProperties: false, // 不重命名属性（避免破坏对象属性访问）
+  
+  // 其他选项
+  selfDefending: false, // 禁用自我保护（可能影响性能）
+  simplify: true, // 简化代码
+  splitStrings: false, // 不分割字符串（避免兼容性问题）
+  transformObjectKeys: false, // 不转换对象键（避免破坏对象结构）
+  unicodeEscapeSequence: false, // 不使用 Unicode 转义（避免兼容性问题）
+  
+  // 目标环境
+  target: 'browser', // 目标环境：浏览器
+});
+
+// 创建 obfuscator 插件（延迟加载，避免未安装时报错）
+const createObfuscatorPlugin = () => {
+  if (!shouldObfuscate) return null;
+  
+  // 返回一个包装插件，在运行时加载真正的 obfuscator
+  let obfuscatorInstance = null;
+  
+  return {
+    name: 'obfuscator-wrapper',
+    async buildStart() {
+      if (!obfuscatorInstance) {
+        try {
+          const obfuscatorModule = await import('rollup-plugin-obfuscator');
+          const Obfuscator = obfuscatorModule.default || obfuscatorModule;
+          obfuscatorInstance = Obfuscator(getObfuscatorConfig());
+          
+          // 调用真正的 obfuscator 的 buildStart
+          if (obfuscatorInstance && obfuscatorInstance.buildStart) {
+            await obfuscatorInstance.buildStart.apply(this, arguments);
+          }
+        } catch (e) {
+          console.warn('⚠️  rollup-plugin-obfuscator 未安装，强混淆功能将不可用。');
+          console.warn('   运行: npm install --save-dev rollup-plugin-obfuscator');
+          obfuscatorInstance = { transform: () => null }; // 空插件，避免后续错误
+        }
+      }
+    },
+    async transform(code, id) {
+      if (obfuscatorInstance && obfuscatorInstance.transform) {
+        return await obfuscatorInstance.transform.call(this, code, id);
+      }
+      return null;
+    },
+    async generateBundle(options, bundle) {
+      if (obfuscatorInstance && obfuscatorInstance.generateBundle) {
+        return await obfuscatorInstance.generateBundle.call(this, options, bundle);
+      }
+    }
+  };
+};
+
+const obfuscatorPlugin = createObfuscatorPlugin();
+
+// --- 清理 dist 文件夹插件 ---
+const cleanDistPlugin = () => ({
+  name: 'clean-dist',
+  buildStart() {
+    const distDir = 'dist';
+    if (fs.existsSync(distDir)) {
+      // 读取 dist 目录下的所有文件
+      const files = fs.readdirSync(distDir);
+      
+      // 删除所有文件
+      files.forEach(file => {
+        const filePath = path.join(distDir, file);
+        const stat = fs.statSync(filePath);
+        
+        if (stat.isDirectory()) {
+          // 如果是目录，递归删除
+          fs.rmSync(filePath, { recursive: true, force: true });
+          console.log(`🗑️  已删除目录: ${filePath}`);
+        } else {
+          // 如果是文件，直接删除
+          fs.unlinkSync(filePath);
+          console.log(`🗑️  已删除文件: ${filePath}`);
+        }
+      });
+      
+      console.log(`✅ 已清空 dist 文件夹`);
+    } else {
+      // 如果 dist 目录不存在，创建它
+      fs.mkdirSync(distDir, { recursive: true });
+      console.log(`✅ 已创建 dist 文件夹`);
+    }
+  }
+});
+
 // --- 可选的 Package 构建逻辑（改成 Rollup 插件形式） ---
 const packagePlugin = () => ({
   name: 'build-package',
@@ -122,19 +242,26 @@ const distHashPlugin = () => {
       }
     },
     writeBundle() {
-      // 删除不带 hash 的 JS 文件
-      const filesToRemove = [
-        'dist/index.js',
-        'dist/index.js.map',
-        'dist/index.min.js'
-      ];
-      
-      filesToRemove.forEach(file => {
-        if (fs.existsSync(file)) {
-          fs.unlinkSync(file);
-          console.log(`🗑️  已删除: ${file}`);
+      // 如果不需要 sourcemap，删除所有 sourcemap 文件
+      if (!shouldGenerateSourcemap) {
+        const distFiles = fs.readdirSync('dist');
+        distFiles.forEach(file => {
+          if (file.endsWith('.map')) {
+            const mapPath = path.join('dist', file);
+            fs.unlinkSync(mapPath);
+            console.log(`🗑️  已删除 sourcemap: ${file}`);
+          }
+        });
+      }
+
+      // 生产环境删除类型定义文件（保护代码结构）
+      if (process.env.NODE_ENV === 'production' && process.env.KEEP_TYPES !== 'true') {
+        const dtsPath = 'dist/index.d.ts';
+        if (fs.existsSync(dtsPath)) {
+          fs.unlinkSync(dtsPath);
+          console.log(`🗑️  已删除类型定义文件: index.d.ts (生产环境)`);
         }
-      });
+      }
 
       // 处理 CSS：从 public 复制并生成 hash
       const publicCssPath = 'public/index.css';
@@ -188,11 +315,12 @@ const buildDist = {
     {
       dir: 'dist',
       format: 'esm',
-      sourcemap: true,
+      sourcemap: shouldGenerateSourcemap, // 通过环境变量 SOURCEMAP 或 NODE_ENV 控制
       entryFileNames: 'index.[hash].js',
     }
   ],
   plugins: [
+    cleanDistPlugin(), // 在构建开始时清空 dist 文件夹
     resolve(),
     string({ include: ['**/*.html', '**/*.css', '**/*.js'] }),
     typescript({
@@ -211,10 +339,37 @@ const buildDist = {
         { src: 'settings.json', dest: 'dist'}
       ]
     }),
+    terser({
+      compress: {
+        drop_console: true, // 删除 console
+        drop_debugger: true,
+        pure_funcs: [], // 可以添加 ['console.log'] 来移除特定函数调用
+        passes: 2, // 多次压缩以获得更好的效果
+      },
+      mangle: {
+        properties: false, // 不混淆属性名，避免破坏代码功能
+        toplevel: false, // 不混淆顶级作用域
+        reserved: [], // 保留的变量名列表
+      },
+      format: {
+        comments: false, // 移除注释
+      },
+      ecma: 2020, // 目标 ECMAScript 版本
+    }),
+    // 强混淆插件（需要先安装: npm install --save-dev rollup-plugin-obfuscator）
+    // 通过环境变量 OBFUSCATE=true 启用
+    obfuscatorPlugin,
     distHashPlugin(),
     packagePlugin(),
   ],
 };
 
 // --- 导出 ---
-export default [buildCss, buildPublic, buildDist, buildTypes];
+// 根据环境变量决定是否生成类型定义文件
+const buildConfigs = [buildCss, buildPublic, buildDist];
+// 只有在非生产环境或明确要求时才生成类型定义
+if (process.env.NODE_ENV !== 'production' || process.env.GENERATE_TYPES === 'true') {
+  buildConfigs.push(buildTypes);
+}
+
+export default buildConfigs;
