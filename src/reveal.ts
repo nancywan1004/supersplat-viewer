@@ -37,6 +37,9 @@ export class RevealController {
     private effectEndTime: number | null = null;
     private isTiming: boolean = false;
     private timedEffects = ['rain_v2', 'pieces-recover', 'integrate', 'growth-wave', 'sketch'];
+    
+    // 时间轴控制相关
+    private isEffectPaused: boolean = false;
 
     global: Global;
 
@@ -77,6 +80,19 @@ export class RevealController {
         events.on('revealRestart', () => {
             console.log('Reveal restart requested via event');
             this.restart();
+        });
+
+        // 监听时间轴控制事件
+        events.on('effectTimeline:set', (time: number) => {
+            this.setEffectTime(time);
+        });
+
+        events.on('effectPlayPause:toggle', () => {
+            this.togglePlayPause();
+        });
+
+        events.on('effectPlayPause:set', (paused: boolean) => {
+            this.setPlayPause(paused);
         });
 
         // 使用相机的 look target 作为默认 reveal center，如果没有则使用 bbox.center
@@ -729,6 +745,8 @@ export class RevealController {
         if (script) {
             // 重置 effectTime
             script.effectTime = 0;
+            script.isPaused = false;
+            this.isEffectPaused = false;
             
             // 根据 autoStart 配置设置启用状态
             script.enabled = this.config.autoStart;
@@ -737,6 +755,10 @@ export class RevealController {
             if (this.timedEffects.includes(effectName)) {
                 this.setupTiming(script);
             }
+            
+            // 触发事件更新 UI
+            this.global.events.fire('effectTime:changed', 0);
+            this.global.events.fire('effectPlayPause:changed', false);
         }
         
         // 触发事件以更新 UI（统一使用 revealType:changed）
@@ -804,6 +826,12 @@ export class RevealController {
      * 更新计时（每帧调用，检查特效是否完成）
      */
     updateTiming(dt: number) {
+        // 如果是 timed effect 且脚本存在且未暂停，定期触发时间更新事件（用于 UI 更新）
+        if (this.currentScript && this.timedEffects.includes(this.config.type) && !this.isEffectPaused) {
+            const currentTime = this.currentScript.effectTime;
+            this.global.events.fire('effectTime:changed', currentTime);
+        }
+        
         if (!this.isTiming || !this.currentScript || this.effectStartTime === null) {
             return;
         }
@@ -936,8 +964,83 @@ export class RevealController {
             this.currentScript.enabled = false;
         }
         
+        // 重置暂停状态
+        this.isEffectPaused = false;
+        
         // 重新创建效果（会自动根据 autoStart 配置启用，并重置 effectTime）
         this.createEffect(this.config.type);
+    }
+
+    /**
+     * 设置特效时间（用于时间轴拖动）
+     */
+    setEffectTime(time: number) {
+        if (!this.currentScript || !this.timedEffects.includes(this.config.type)) {
+            return;
+        }
+        
+        const totalDuration = this.config.totalDuration ?? 20.0;
+        const clampedTime = Math.max(0, Math.min(time, totalDuration));
+        
+        // 如果脚本被禁用了（特效完成），需要重新启用它以便回放
+        if (!this.currentScript.enabled) {
+            this.currentScript.enabled = true;
+            // 重置计时状态，以便可以重新开始
+            this.effectStartTime = null;
+            this.effectEndTime = null;
+            this.isTiming = false;
+        }
+        
+        this.currentScript.setEffectTime(clampedTime);
+        
+        // 触发事件更新 UI
+        this.global.events.fire('effectTime:changed', clampedTime);
+    }
+
+    /**
+     * 切换播放/暂停状态
+     */
+    togglePlayPause() {
+        this.setPlayPause(!this.isEffectPaused);
+    }
+
+    /**
+     * 设置播放/暂停状态
+     */
+    setPlayPause(paused: boolean) {
+        if (!this.currentScript || !this.timedEffects.includes(this.config.type)) {
+            return;
+        }
+        
+        this.isEffectPaused = paused;
+        this.currentScript.isPaused = paused;
+        
+        // 触发事件更新 UI
+        this.global.events.fire('effectPlayPause:changed', paused);
+    }
+
+    /**
+     * 获取当前特效时间
+     */
+    getEffectTime(): number {
+        if (!this.currentScript) {
+            return 0;
+        }
+        return this.currentScript.effectTime;
+    }
+
+    /**
+     * 获取特效总时长
+     */
+    getTotalDuration(): number {
+        return this.config.totalDuration ?? 20.0;
+    }
+
+    /**
+     * 检查当前特效是否为 timed effect
+     */
+    isTimedEffect(): boolean {
+        return this.timedEffects.includes(this.config.type);
     }
 
     // 公共方法

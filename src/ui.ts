@@ -42,6 +42,7 @@ const initUI = (global: Global) => {
         'cameraPathCheck', 'cameraPathOption',
         'cameraBoundsCheck', 'cameraBoundsOption',
         'revealPanel', 'revealType', 'revealRestart', 'totalDurationRow', 'totalDuration',
+        'effectTimelineRow', 'effectTimeline', 'effectPlayPause', 'effectTimeDisplay',
         'skyboxRow', 'skyboxSelect',
         'nightModeCheck', 'nightModeOption',
         'nightFadeSlider', 'nightFadeValue',
@@ -354,11 +355,11 @@ const initUI = (global: Global) => {
 
     // Reveal mode (now includes VFX effects)
     // 需要 totalDuration 的特效列表
-    const timedVfxEffects = ['rain_v2', 'pieces-recover', 'integrate', 'growth-wave'];
+    const timedVfxEffects = ['rain_v2', 'pieces-recover', 'integrate', 'growth-wave', 'sketch'];
     
     dom.revealType?.addEventListener('change', (event) => {
         const target = event.target as HTMLSelectElement;
-        const revealType = target.value as 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'none';
+        const revealType = target.value as 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch' | 'none';
         
         events.fire('revealConfigChanged', { type: revealType });
     });
@@ -369,11 +370,105 @@ const initUI = (global: Global) => {
         const totalDuration = parseFloat(target.value);
         if (!isNaN(totalDuration) && totalDuration > 0) {
             events.fire('revealConfigChanged', { totalDuration });
+            // 更新时间轴 slider 的最大值
+            if (dom.effectTimeline) {
+                (dom.effectTimeline as HTMLInputElement).max = totalDuration.toString();
+            }
         }
     });
 
     dom.revealRestart?.addEventListener('click', () => {
         events.fire('revealRestart');
+    });
+
+    // 时间轴控制
+    const effectTimeline = dom.effectTimeline as HTMLInputElement;
+    const effectPlayPause = dom.effectPlayPause as HTMLButtonElement;
+    const effectTimeDisplay = dom.effectTimeDisplay;
+    let isDraggingTimeline = false;
+    let wasPausedBeforeDrag = false;
+
+    // 更新播放/暂停按钮显示
+    const updatePlayPauseButton = (paused: boolean) => {
+        if (effectPlayPause) {
+            effectPlayPause.textContent = paused ? '▶' : '⏸';
+        }
+    };
+
+    // 更新时间轴 slider 和时间显示
+    const updateTimeline = (time: number, totalDuration: number) => {
+        if (effectTimeline && !isDraggingTimeline) {
+            // slider 使用整数步进，所以将时间（秒）乘以 10 转换为整数（0.1 秒精度）
+            effectTimeline.value = (time * 10).toString();
+            effectTimeline.max = (totalDuration * 10).toString();
+        }
+        if (effectTimeDisplay) {
+            effectTimeDisplay.textContent = `${time.toFixed(1)}s`;
+        }
+    };
+
+    // 播放/暂停按钮点击
+    effectPlayPause?.addEventListener('click', () => {
+        events.fire('effectPlayPause:toggle');
+    });
+
+    // 时间轴拖动开始
+    effectTimeline?.addEventListener('pointerdown', () => {
+        isDraggingTimeline = true;
+        // 获取当前暂停状态（从 RevealController 获取，或使用事件）
+        // 先暂停播放，保存之前的状态
+        const currentPaused = (global.state as any).effectPaused ?? false;
+        wasPausedBeforeDrag = currentPaused;
+        // 暂停播放以便拖动
+        events.fire('effectPlayPause:set', true);
+    });
+
+    // 时间轴拖动
+    effectTimeline?.addEventListener('input', (event) => {
+        const sliderValue = parseFloat((event.target as HTMLInputElement).value);
+        const timeValue = sliderValue / 10; // 除以 10 因为 slider 使用 0.1 秒精度
+        // 更新显示
+        if (effectTimeDisplay) {
+            effectTimeDisplay.textContent = `${timeValue.toFixed(1)}s`;
+        }
+        // 发送时间设置事件（这会触发特效时间更新）
+        events.fire('effectTimeline:set', timeValue);
+        // 同时触发时间变化事件，确保 UI 同步
+        events.fire('effectTime:changed', timeValue);
+    });
+
+    // 时间轴拖动结束
+    effectTimeline?.addEventListener('pointerup', () => {
+        isDraggingTimeline = false;
+        // 恢复之前的播放/暂停状态
+        events.fire('effectPlayPause:set', wasPausedBeforeDrag);
+    });
+
+    // 监听时间变化事件
+    events.on('effectTime:changed', (time: number) => {
+        const totalDuration = global.settings?.revealEffect?.totalDuration ?? 20.0;
+        updateTimeline(time, totalDuration);
+    });
+
+    // 监听播放/暂停状态变化
+    events.on('effectPlayPause:changed', (paused: boolean) => {
+        updatePlayPauseButton(paused);
+    });
+
+    // 监听 totalDuration 变化，更新 slider 范围
+    events.on('revealConfigChanged', (newConfig: any) => {
+        if (newConfig.totalDuration !== undefined) {
+            const totalDuration = newConfig.totalDuration;
+            if (effectTimeline) {
+                effectTimeline.max = (totalDuration * 10).toString();
+                // 如果当前时间超过新的总时长，限制到最大值
+                const currentValue = parseFloat(effectTimeline.value) / 10;
+                if (currentValue > totalDuration) {
+                    effectTimeline.value = (totalDuration * 10).toString();
+                    events.fire('effectTimeline:set', totalDuration);
+                }
+            }
+        }
     });
 
     // Show/hide reveal controls (always show now since it includes VFX)
@@ -402,6 +497,26 @@ const initUI = (global: Global) => {
                         }
                     } else {
                         dom.totalDurationRow.classList.add('hidden');
+                    }
+                }
+                
+                // Show/hide timeline control based on selected effect
+                const showTimeline = timedVfxEffects.includes(currentType);
+                if (dom.effectTimelineRow) {
+                    if (showTimeline) {
+                        dom.effectTimelineRow.classList.remove('hidden');
+                        // Sync timeline max value and reset to 0
+                        const currentTotalDuration = global.settings?.revealEffect?.totalDuration ?? 20.0;
+                        if (dom.effectTimeline) {
+                            const timelineEl = dom.effectTimeline as HTMLInputElement;
+                            timelineEl.max = (currentTotalDuration * 10).toString();
+                            timelineEl.value = '0';
+                        }
+                        if (dom.effectTimeDisplay) {
+                            dom.effectTimeDisplay.textContent = '0.0s';
+                        }
+                    } else {
+                        dom.effectTimelineRow.classList.add('hidden');
                     }
                 }
             }

@@ -63,6 +63,12 @@ class GsplatShaderEffect extends Script {
     effectTime: number = 0;
 
     /**
+     * Whether the effect time is paused (not updating automatically)
+     * @type {boolean}
+     */
+    isPaused: boolean = false;
+
+    /**
      * Set of materials with applied shader
      * @type {Set<import('playcanvas').Material>}
      */
@@ -317,10 +323,12 @@ class GsplatShaderEffect extends Script {
 
         if (this.materialsApplied.size === 0) return;
 
-        // Update time
-        this.effectTime += dt;
+        // Update time only if not paused
+        if (!this.isPaused) {
+            this.effectTime += dt;
+        }
 
-        // Let subclass update the effect
+        // Let subclass update the effect (always call, even when paused, to allow manual time updates)
         this.updateEffect(this.effectTime, dt);
         
         // Request render on next frame when effect is active
@@ -412,6 +420,19 @@ class GsplatShaderEffect extends Script {
             if (this.hasOwnProperty('endRadius')) {
                 this.setUniform('uEndRadius', radius);
             }
+        }
+    }
+
+    /**
+     * Set the effect time manually (useful for scrubbing/playback control)
+     * @param {number} time - The new effect time in seconds
+     */
+    setEffectTime(time: number) {
+        this.effectTime = Math.max(0, time);
+        // Force update even if paused
+        if (this.materialsApplied.size > 0) {
+            this.updateEffect(this.effectTime, 0);
+            this.app.renderNextFrame = true;
         }
     }
 
