@@ -1,5 +1,5 @@
 type RevealEffect = {
-    type?: 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'none',
+    type?: 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch' | 'none',
     radius?: number, // 10
     autoStart?: boolean,
     totalDuration?: number // 总时长（秒），用于 rain_v2, pieces-recover, integrate, growth-wave 四个特效，默认 15 秒

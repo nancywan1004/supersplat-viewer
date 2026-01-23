@@ -10,6 +10,7 @@ import { GsplatRevealPerlinWave } from './vfx/gsplat-perlin-wave';
 import { GsplatIntegrate } from './vfx/gsplat-integrate';
 import { GsplatRainV2 } from './vfx/gsplat-rain';
 import { GsplatRevealGrowthWave } from './vfx/gsplat-growth-wave';
+import { GsplatSketch } from './vfx/gsplat-sketch';
 import type { CameraManager } from './camera-manager';
 // import { GsplatRevealRadial } from 'playcanvas/scripts/esm/gsplat/reveal-radial.mjs';
 // import { GsplatRevealRain } from 'playcanvas/scripts/esm/gsplat/reveal-rain.mjs';
@@ -21,7 +22,7 @@ import type { CameraManager } from './camera-manager';
 /**
  * Reveal effect type (including VFX effects)
  */
-export type RevealEffectType = 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'none';
+export type RevealEffectType = 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch' | 'none';
 
 export class RevealController {
     private gsplatEntity: Entity | null = null;
@@ -35,7 +36,7 @@ export class RevealController {
     private effectStartTime: number | null = null;
     private effectEndTime: number | null = null;
     private isTiming: boolean = false;
-    private timedEffects = ['rain_v2', 'pieces-recover', 'integrate', 'growth-wave'];
+    private timedEffects = ['rain_v2', 'pieces-recover', 'integrate', 'growth-wave', 'sketch'];
 
     global: Global;
 
@@ -499,6 +500,71 @@ export class RevealController {
     }
 
     /**
+     * 创建 sketch 效果脚本
+     */
+    private createSketchScript() {
+        if (!this.gsplatEntity || !this.gsplatEntity.script) {
+            console.warn('Cannot create sketch script - entity or script component not ready');
+            return null;
+        }
+
+        console.log('Creating sketch reveal script');
+
+        try {
+            const script = this.gsplatEntity.script.create(GsplatSketch) as any;
+            if (script) {
+                // 默认配置
+                const defaultWaveSpeed = 10.0;
+                const defaultSketchDuration = 5.0;
+                const defaultColorizeDuration = 5.0;
+                
+                // 根据 totalDuration 自动调整时间参数
+                const totalDuration = this.config.totalDuration ?? 20.0;
+                // 计算默认总时长：maxSketchStart + sketchDuration + colorizeDuration
+                const defaultEndRadius = 200.0;
+                const maxSketchStart = defaultEndRadius / defaultWaveSpeed;
+                const defaultTotalDuration = maxSketchStart + defaultSketchDuration + defaultColorizeDuration;
+                
+                // 计算缩放比例
+                const scale = totalDuration / defaultTotalDuration;
+                
+                // 按比例调整参数
+                script.waveSpeed = defaultWaveSpeed * scale;
+                script.sketchDuration = defaultSketchDuration * scale;
+                script.colorizeDuration = defaultColorizeDuration * scale;
+                script.fadeWidthRatio = 0.1;
+                script.endRadius = defaultEndRadius;
+                script.sketchIntensity = 1.0;
+                script.sketchLineDensity = 2.0;
+                script.sketchEdgeThreshold = 3.0;
+                script.colorTransitionStart = 0.3;
+                
+                // 设置 reveal center
+                this.updateScriptCenter(script);
+                
+                // 初始状态和 effectTime
+                script.enabled = this.config.autoStart;
+                script.effectTime = 0;
+                
+                console.log('Sketch script created with config:', {
+                    center: script.center,
+                    waveSpeed: script.waveSpeed,
+                    sketchDuration: script.sketchDuration,
+                    colorizeDuration: script.colorizeDuration,
+                    endRadius: script.endRadius,
+                    totalDuration,
+                    scale,
+                    enabled: script.enabled
+                });
+            }
+            return script;
+        } catch (error) {
+            console.error('Failed to create sketch script:', error);
+            return null;
+        }
+    }
+
+    /**
      * 创建 integrate 效果脚本
      */
     private createIntegrateScript() {
@@ -640,6 +706,9 @@ export class RevealController {
                 break;
             case 'growth-wave':
                 script = this.createGrowthWaveScript();
+                break;
+            case 'sketch':
+                script = this.createSketchScript();
                 break;
             case 'none':
                 // 不创建任何效果
@@ -790,6 +859,7 @@ export class RevealController {
             this.gsplatEntity.script.destroy('gsplatRevealPerlinWave');
             this.gsplatEntity.script.destroy('gsplatIntegrate');
             this.gsplatEntity.script.destroy('gsplatRevealGrowthWave');
+            this.gsplatEntity.script.destroy('gsplatSketch');
             // 未来可以添加更多类型
         } catch (error) {
             console.warn('Error destroying reveal scripts:', error);
