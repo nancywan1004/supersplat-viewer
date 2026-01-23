@@ -224,19 +224,30 @@ class CameraManager {
         // 约束策略：
         // - Orbit：限制 **camera.position** 在收缩后的 bbox 内（与 Fly 保持一致；避免两种模式边界不对齐）
         // - Fly：保持原球形硬边界兜底（防止飞行穿出场景太远）
-        // 注意：animScale 允许 >1（放大），用于给"融合后 bbox"留出余量，减少贴边与切换抖动。
-        const cameraBoundsCfg = (settings as any).cameraBounds as undefined | {
-            animScale?: number;
-            enabled?: boolean;
-        };
-        const animScale = Math.max(0.01, cameraBoundsCfg?.animScale ?? 1.5);
+        const cameraBoundsCfg = settings.cameraBounds;
         const boundsEnabled = cameraBoundsCfg?.enabled !== false; // 默认启用
 
-        // 无动画时维持更"核心"的收缩范围；有动画时以融合 bbox 为主，缩放更保守，优先避免跳变
-        const targetScaleFactor = usingAnimBbox ? animScale : 0.5;
+        // 无动画时维持更"核心"的收缩范围；有动画时使用 animScaleX/animScaleY
+        const targetScaleFactor = 0.5; // 非动画路径的固定缩放系数
 
         if (boundsEnabled) {
-            this.targetConstraint = BoxConstraint.fromBoundingBox(fusedBbox, targetScaleFactor);
+            // 只有在有动画路径时，才使用 animScaleX/animScaleY 来分别设置各轴缩放
+            // 对于非动画路径，维持原来的 targetScaleFactor 逻辑
+            if (usingAnimBbox) {
+                // 使用 animScaleX 和 animScaleY，支持数组格式分别设置左右和上下
+                // 如果没有设置则使用默认值 1.5
+                const defaultAnimScale = 1.5;
+                const animScaleX = cameraBoundsCfg?.animScaleX ?? defaultAnimScale;
+                const animScaleY = cameraBoundsCfg?.animScaleY ?? defaultAnimScale;
+                this.targetConstraint = BoxConstraint.fromBoundingBoxWithAsymmetricScales(
+                    fusedBbox,
+                    defaultAnimScale, // Z 轴使用默认值
+                    animScaleX,
+                    animScaleY
+                );
+            } else {
+                this.targetConstraint = BoxConstraint.fromBoundingBox(fusedBbox, targetScaleFactor);
+            }
             controllers.orbit.setTargetConstraint(this.targetConstraint);
             controllers.fly.setTargetConstraint(this.targetConstraint);
         } else {
@@ -251,15 +262,23 @@ class CameraManager {
         controllers.fly.setConstraint(this.constraint);
 
         // 给 orbit 设置一个合理的最大缩放距离（避免无限 zoom-out 让场景跑出视野）
-        // 之前的系数偏小，会导致 orbit 很早到达 maxZoom；切到 fly（通过位置平移）看起来还能继续“退远”。
-        // 这里改为基于“可 frame 场景的距离”的倍数，默认更宽松，手感与 fly 更一致。
+        // 之前的系数偏小，会导致 orbit 很早到达 maxZoom；切到 fly（通过位置平移）看起来还能继续"退远"。
+        // 这里改为基于"可 frame 场景的距离"的倍数，默认更宽松，手感与 fly 更一致。
         const sceneSize = fusedBbox.halfExtents.length();
         const frameDistance = sceneSize / Math.sin(camera0.fov / 180 * Math.PI * 0.5);
         const maxZoomMultiplier = 0.5;
         const maxZoom = frameDistance * maxZoomMultiplier;
         controllers.orbit.controller.zoomRange = new Vec2(0.5, maxZoom);
-        // Fly 的 focusDistance 也 clamp 到同一 zoomRange，保证两种模式 target clamp 时的“相机位置外壳范围”一致
+        // Fly 的 focusDistance 也 clamp 到同一 zoomRange，保证两种模式 target clamp 时的"相机位置外壳范围"一致
         controllers.fly.setFocusDistanceRange(controllers.orbit.controller.zoomRange);
+
+        // 应用俯仰角限制配置
+        const pitchRange = settings.cameras[0].pitchRange;
+        if (pitchRange && Array.isArray(pitchRange) && pitchRange.length === 2) {
+            const pitchVec2 = new Vec2(pitchRange[0], pitchRange[1]);
+            controllers.orbit.controller.pitchRange = pitchVec2;
+            controllers.fly.pitchRange = pitchVec2;
+        }
 
         const getController = (cameraMode: 'orbit' | 'anim' | 'fly'): CameraController => {
             return controllers[cameraMode];
@@ -270,7 +289,18 @@ class CameraManager {
         state.animationDuration = controllers.anim ? controllers.anim.animState.cursor.duration : 0;
 
         // initialize camera mode and initial camera position
-        state.cameraMode = state.hasAnimation ? 'anim' : 'orbit';
+        // 优先使用配置中的 initialCameraMode，如果没有配置则按原有逻辑
+        if (state.hasAnimation) {
+            state.cameraMode = 'anim';
+        } else {
+            // 读取配置中的初始相机模式，默认为 'orbit'
+            const initialMode = settings.initialCameraMode;
+            if (initialMode === 'fly' || initialMode === 'orbit') {
+                state.cameraMode = initialMode;
+            } else {
+                state.cameraMode = 'orbit'; // 默认值
+            }
+        }
         this.camera.copy(resetCamera);
 
         const target = new Camera(this.camera);             // the active controller updates this

@@ -39,12 +39,11 @@ import { NightMode } from './vfx/lighting/night-mode';
 
 // override global pick to pack depth instead of meshInstance id
 const pickDepthGlsl = /* glsl */ `
-vec4 packFloat(float depth) {
-    uvec4 u = (uvec4(floatBitsToUint(depth)) >> uvec4(0u, 8u, 16u, 24u)) & 0xffu;
-    return vec4(u) / 255.0;
-}
+uniform vec4 camera_params;     // 1/far, far, near, isOrtho
 vec4 getPickOutput() {
-    return packFloat(gl_FragCoord.z);
+    float linearDepth = 1.0 / gl_FragCoord.w;
+    float normalizedDepth = (linearDepth - camera_params.z) / (camera_params.y - camera_params.z);
+    return vec4(gaussianColor.a * normalizedDepth, 0.0, 0.0, gaussianColor.a);
 }
 `;
 
@@ -55,13 +54,11 @@ vec3 prepareOutputFromGamma(vec3 gammaColor) {
 `;
 
 const pickDepthWgsl = /* wgsl */ `
-    fn packFloat(depth: f32) -> vec4f {
-        let u: vec4<u32> = (vec4<u32>(bitcast<u32>(depth)) >> vec4<u32>(0u, 8u, 16u, 24u)) & vec4<u32>(0xffu);
-        return vec4f(u) / 255.0;
-    }
-
+    uniform camera_params: vec4f;       // 1/far, far, near, isOrtho
     fn getPickOutput() -> vec4f {
-        return packFloat(pcPosition.z);
+        let linearDepth = 1.0 / pcPosition.w;
+        let normalizedDepth = (linearDepth - uniform.camera_params.z) / (uniform.camera_params.y - uniform.camera_params.z);
+        return vec4f(gaussianColor.a * normalizedDepth, 0.0, 0.0, gaussianColor.a);
     }
 `;
 
@@ -394,6 +391,64 @@ class Viewer {
                 });
             }
 
+            // Handle get camera info request
+            events.on('getCameraInfo', () => {
+                if (this.cameraManager) {
+                    const camera = this.cameraManager.camera;
+                    const target = new Vec3();
+                    camera.calcFocusPoint(target);
+                    
+                    const cameraInfo = {
+                        position: {
+                            x: camera.position.x,
+                            y: camera.position.y,
+                            z: camera.position.z
+                        },
+                        target: {
+                            x: target.x,
+                            y: target.y,
+                            z: target.z
+                        },
+                        fov: camera.fov
+                    };
+                    
+                    // 格式化输出
+                    const formattedInfo = `相机位置 (Position):
+x: ${cameraInfo.position.x.toFixed(6)}
+y: ${cameraInfo.position.y.toFixed(6)}
+z: ${cameraInfo.position.z.toFixed(6)}
+
+相机目标 (Target):
+x: ${cameraInfo.target.x.toFixed(6)}
+y: ${cameraInfo.target.y.toFixed(6)}
+z: ${cameraInfo.target.z.toFixed(6)}
+
+视野角度 (FOV): ${cameraInfo.fov.toFixed(2)}°`;
+
+                    // 输出到控制台
+                    console.log('=== 相机信息 ===');
+                    console.log(formattedInfo);
+                    console.log('=== JSON格式 ===');
+                    console.log(JSON.stringify(cameraInfo, null, 2));
+                    
+                    // 复制到剪贴板
+                    const jsonString = JSON.stringify(cameraInfo, null, 2);
+                    navigator.clipboard.writeText(jsonString).then(() => {
+                        console.log('相机信息已复制到剪贴板');
+                        // 可以显示一个提示消息
+                        const message = document.createElement('div');
+                        message.textContent = '相机信息已复制到剪贴板！';
+                        message.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0, 0, 0, 0.8); color: white; padding: 20px 30px; border-radius: 8px; z-index: 10000; font-size: 16px;';
+                        document.body.appendChild(message);
+                        setTimeout(() => {
+                            document.body.removeChild(message);
+                        }, 2000);
+                    }).catch((err) => {
+                        console.error('复制到剪贴板失败:', err);
+                    });
+                }
+            });
+
             const { instance } = gsplat;
             if (instance) {
                 // kick off gsplat sorting immediately now that camera is in position
@@ -493,26 +548,9 @@ class Viewer {
                 // For custom LOD mode, track the maximum progress to prevent regression
                 let maxProgress = 0;
                 let animationStarted = false; // Track if animation has started
+                let progressUIHidden = false; // Track if progress UI has been hidden
+                const PROGRESS_THRESHOLD = 50; // Hide progress UI when progress reaches this threshold
                 const readyHandler = (camera: CameraComponent, layer: Layer, ready: boolean, loading: number) => {
-                    // In LOD mode, start animation when loading drops below threshold
-                    // This allows animation to start earlier without waiting for all chunks
-                    // Set this threshold to control when animation starts (0 = wait for all chunks)
-                    const ANIMATION_START_LOADING_THRESHOLD = 3; // Adjust this value as needed
-
-                    if (isCustomLod && ready && !state.readyToRender && !animationStarted) {
-                        if (loading <= ANIMATION_START_LOADING_THRESHOLD) {
-                            // Start animation when loading is below threshold
-                            if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim) {
-                                animationStarted = true;
-                                console.log(`LOD mode: loading (${loading}) <= threshold (${ANIMATION_START_LOADING_THRESHOLD}), starting animation`);
-                                state.animationPaused = false;
-                                // Set progress to 100% when animation starts
-                                state.progress = 100;
-                                // Fire event to notify UI that animation has started
-                                events.fire('animationStarted');
-                            }
-                        }
-                    }
 
                     if (ready && loading === 0) {
                         // scene is done loading
@@ -567,19 +605,35 @@ class Viewer {
                         watermark = Math.max(watermark, loading);
                         current = watermark - loading;
                         
+                        let progress: number;
                         // In custom LOD mode, if animation has started, show 100% progress
                         if (isCustomLod && animationStarted) {
-                            state.progress = 100;
+                            progress = 100;
                         } else {
-                            let progress = Math.trunc(current / watermark * 100);
+                            progress = Math.trunc(current / watermark * 100);
                             
                             // In custom LOD mode, ensure progress never decreases
                             if (isCustomLod) {
                                 maxProgress = Math.max(maxProgress, progress);
                                 progress = maxProgress;
                             }
+                        }
+                        
+                        state.progress = progress;
+                        
+                        // When progress reaches threshold, hide progress UI and start animation if available
+                        if (!progressUIHidden && progress >= PROGRESS_THRESHOLD) {
+                            progressUIHidden = true;
+                            // Fire event to hide progress UI
+                            events.fire('progressThresholdReached', progress);
                             
-                            state.progress = progress;
+                            // Start animation if available
+                            if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !animationStarted) {
+                                animationStarted = true;
+                                console.log(`Progress reached ${PROGRESS_THRESHOLD}%, starting animation`);
+                                state.animationPaused = false;
+                                events.fire('animationStarted');
+                            }
                         }
                     }
                 };

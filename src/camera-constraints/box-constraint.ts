@@ -19,13 +19,85 @@ export class BoxConstraint {
     }
 
     /**
-     * 从原始 bbox 创建一个“收缩”的有效 bbox，用于限制 target 活动范围
+     * 从原始 bbox 创建一个"收缩"的有效 bbox，用于限制 target 活动范围
      * scaleFactor: 建议 >0；<1 表示收缩，>1 表示放大（例如 1.2 表示各轴 halfExtents 乘 1.2）
      */
     static fromBoundingBox(bbox: BoundingBox, scaleFactor: number = 0.7): BoxConstraint {
         const center = bbox.center.clone();
         const half = bbox.halfExtents.clone().mulScalar(scaleFactor);
         return new BoxConstraint(new BoundingBox(center, half));
+    }
+
+    /**
+     * 从原始 bbox 创建一个"收缩"的有效 bbox，支持分别设置左右和上下的缩放系数
+     * scaleX: X 轴方向的缩放系数，可以是单个数值（左右相同）或数组 [left, right]
+     * scaleY: Y 轴方向的缩放系数，可以是单个数值（上下相同）或数组 [top, bottom]
+     * scaleFactor: 默认缩放系数，当某个轴未指定时使用
+     */
+    static fromBoundingBoxWithAsymmetricScales(
+        bbox: BoundingBox,
+        scaleFactor: number = 0.7,
+        scaleX?: number | [number, number],
+        scaleY?: number | [number, number]
+    ): BoxConstraint {
+        const min = bbox.getMin();
+        const max = bbox.getMax();
+        const center = bbox.center.clone();
+        const halfExtents = bbox.halfExtents.clone();
+
+        // 处理 X 轴缩放（左右）
+        let newMinX: number, newMaxX: number;
+        if (scaleX === undefined) {
+            // 使用默认缩放
+            const scale = scaleFactor;
+            const halfX = halfExtents.x * scale;
+            newMinX = center.x - halfX;
+            newMaxX = center.x + halfX;
+        } else if (typeof scaleX === 'number') {
+            // 单个数值，左右相同
+            const halfX = halfExtents.x * scaleX;
+            newMinX = center.x - halfX;
+            newMaxX = center.x + halfX;
+        } else {
+            // 数组 [left, right]
+            const [leftScale, rightScale] = scaleX;
+            newMinX = center.x - halfExtents.x * leftScale;
+            newMaxX = center.x + halfExtents.x * rightScale;
+        }
+
+        // 处理 Y 轴缩放（上下）
+        // 注意：Y 轴向上为正，所以 max.y 是上面，min.y 是下面
+        let newMinY: number, newMaxY: number;
+        if (scaleY === undefined) {
+            // 使用默认缩放
+            const scale = scaleFactor;
+            const halfY = halfExtents.y * scale;
+            newMinY = center.y - halfY;
+            newMaxY = center.y + halfY;
+        } else if (typeof scaleY === 'number') {
+            // 单个数值，上下相同
+            const halfY = halfExtents.y * scaleY;
+            newMinY = center.y - halfY;
+            newMaxY = center.y + halfY;
+        } else {
+            // 数组 [top, bottom]，第一个值是上面（max.y），第二个值是下面（min.y）
+            const [topScale, bottomScale] = scaleY;
+            newMaxY = center.y + halfExtents.y * topScale;  // 上面
+            newMinY = center.y - halfExtents.y * bottomScale; // 下面
+        }
+
+        // Z 轴使用默认缩放
+        const halfZ = halfExtents.z * scaleFactor;
+        const newMinZ = center.z - halfZ;
+        const newMaxZ = center.z + halfZ;
+
+        // 构建新的 bounding box
+        const newMin = new Vec3(newMinX, newMinY, newMinZ);
+        const newMax = new Vec3(newMaxX, newMaxY, newMaxZ);
+        const newCenter = newMin.clone().add(newMax).mulScalar(0.5);
+        const newHalf = newMax.clone().sub(newMin).mulScalar(0.5);
+
+        return new BoxConstraint(new BoundingBox(newCenter, newHalf));
     }
 
     containsPoint(point: Vec3): boolean {
