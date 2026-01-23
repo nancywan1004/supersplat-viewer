@@ -363,6 +363,64 @@ class Viewer {
                 });
             }
 
+            // Handle get camera info request
+            events.on('getCameraInfo', () => {
+                if (this.cameraManager) {
+                    const camera = this.cameraManager.camera;
+                    const target = new Vec3();
+                    camera.calcFocusPoint(target);
+                    
+                    const cameraInfo = {
+                        position: {
+                            x: camera.position.x,
+                            y: camera.position.y,
+                            z: camera.position.z
+                        },
+                        target: {
+                            x: target.x,
+                            y: target.y,
+                            z: target.z
+                        },
+                        fov: camera.fov
+                    };
+                    
+                    // 格式化输出
+                    const formattedInfo = `相机位置 (Position):
+x: ${cameraInfo.position.x.toFixed(6)}
+y: ${cameraInfo.position.y.toFixed(6)}
+z: ${cameraInfo.position.z.toFixed(6)}
+
+相机目标 (Target):
+x: ${cameraInfo.target.x.toFixed(6)}
+y: ${cameraInfo.target.y.toFixed(6)}
+z: ${cameraInfo.target.z.toFixed(6)}
+
+视野角度 (FOV): ${cameraInfo.fov.toFixed(2)}°`;
+
+                    // 输出到控制台
+                    console.log('=== 相机信息 ===');
+                    console.log(formattedInfo);
+                    console.log('=== JSON格式 ===');
+                    console.log(JSON.stringify(cameraInfo, null, 2));
+                    
+                    // 复制到剪贴板
+                    const jsonString = JSON.stringify(cameraInfo, null, 2);
+                    navigator.clipboard.writeText(jsonString).then(() => {
+                        console.log('相机信息已复制到剪贴板');
+                        // 可以显示一个提示消息
+                        const message = document.createElement('div');
+                        message.textContent = '相机信息已复制到剪贴板！';
+                        message.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0, 0, 0, 0.8); color: white; padding: 20px 30px; border-radius: 8px; z-index: 10000; font-size: 16px;';
+                        document.body.appendChild(message);
+                        setTimeout(() => {
+                            document.body.removeChild(message);
+                        }, 2000);
+                    }).catch((err) => {
+                        console.error('复制到剪贴板失败:', err);
+                    });
+                }
+            });
+
             const { instance } = gsplat;
             if (instance) {
                 // kick off gsplat sorting immediately now that camera is in position

@@ -44,6 +44,7 @@ const initUI = (global: Global) => {
         'revealPanel', 'revealType', 'revealRestart',
         'skyboxRow', 'skyboxSelect',
         'reset', 'frame',
+        'getCameraInfo',
         'loadingText', 'loadingBar',
         'joystickBase', 'joystick',
         'tooltip'
@@ -500,6 +501,10 @@ const initUI = (global: Global) => {
 
     dom.frame.addEventListener('click', (event) => {
         events.fire('inputEvent', 'frame', event);
+    });
+
+    dom.getCameraInfo.addEventListener('click', () => {
+        events.fire('getCameraInfo');
     });
 
     // update UI based on touch joystick updates
