@@ -522,18 +522,21 @@ export class RevealController {
                 const totalDuration = this.config.totalDuration ?? 20.0;
                 // 计算默认总时长：maxSketchStart + sketchDuration + colorizeDuration
                 const defaultEndRadius = 200.0;
-                const maxSketchStart = defaultEndRadius / defaultWaveSpeed;
-                const defaultTotalDuration = maxSketchStart + defaultSketchDuration + defaultColorizeDuration;
+                const defaultMaxSketchStart = defaultEndRadius / defaultWaveSpeed;
+                const defaultTotalDuration = defaultMaxSketchStart + defaultSketchDuration + defaultColorizeDuration;
                 
-                // 计算缩放比例
+                // 计算缩放比例（用于 sketchDuration 和 colorizeDuration）
                 const scale = totalDuration / defaultTotalDuration;
                 
-                // 按比例调整参数
-                script.waveSpeed = defaultWaveSpeed * scale;
+                // 计算调整后的 waveSpeed，使得总时长正好是 totalDuration
+                // 总时长 = endRadius / waveSpeed + sketchDuration + colorizeDuration
+                // 因此：waveSpeed = endRadius / (totalDuration - sketchDuration - colorizeDuration)
                 script.sketchDuration = defaultSketchDuration * scale;
                 script.colorizeDuration = defaultColorizeDuration * scale;
-                script.fadeWidthRatio = 0.1;
+                const remainingTime = totalDuration - script.sketchDuration - script.colorizeDuration;
+                script.waveSpeed = defaultEndRadius / Math.max(remainingTime, 0.1); // 确保不为0或负数
                 script.endRadius = defaultEndRadius;
+                script.fadeWidthRatio = 0.1;
                 script.sketchIntensity = 1.0;
                 script.sketchLineDensity = 2.0;
                 script.sketchEdgeThreshold = 3.0;
