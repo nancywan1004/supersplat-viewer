@@ -77,9 +77,9 @@ export class RevealController {
         });
 
         // 统一监听重启请求（所有效果类型）
-        events.on('revealRestart', () => {
-            console.log('Reveal restart requested via event');
-            this.restart();
+        events.on('revealRestart', (restartAnimTrack?: boolean) => {
+            console.log('Reveal restart requested via event', restartAnimTrack ? '(with animTrack)' : '(without animTrack)');
+            this.restart(restartAnimTrack ?? false);
         });
 
         // 监听时间轴控制事件
@@ -471,10 +471,19 @@ export class RevealController {
                 
                 // 根据 totalDuration 自动调整时间参数
                 const totalDuration = this.config.totalDuration ?? 20.0;
-                // 计算默认总时长：maxGrowthStartTime + growthDuration + recoverDuration
-                const defaultEndRadius = 50.0;
-                const maxGrowthStartTime = defaultEndRadius / defaultGrowthSpeed;
-                const defaultTotalDuration = maxGrowthStartTime + defaultGrowthDuration + defaultRecoverDuration;
+                
+                // 计算默认总时长：基于 shader 逻辑
+                // Shader 中：topParticleGrowthEnd = (growthDuration + maxYOffset * verticalSpread) / growthSpeed
+                // 其中 maxYOffset = abs(bottomY - topY), verticalSpread = growthSpeed / abs(topY - bottomY)
+                // 所以：topParticleGrowthEnd = (growthDuration + abs(bottomY - topY) * (growthSpeed / abs(topY - bottomY))) / growthSpeed
+                //      = (growthDuration + growthSpeed) / growthSpeed
+                //      = growthDuration / growthSpeed + 1.0
+                // 总时长 = topParticleGrowthEnd + recoverDuration
+                // 对于默认值：topParticleGrowthEnd = 7.0 / 5.0 + 1.0 = 2.4
+                // 总时长 = 2.4 + 7.0 = 9.4
+                // 但为了保持向后兼容，我们仍然使用原来的公式作为近似值
+                const defaultTopParticleGrowthEnd = defaultGrowthDuration / defaultGrowthSpeed + 1.0;
+                const defaultTotalDuration = defaultTopParticleGrowthEnd + defaultRecoverDuration;
                 
                 // 计算缩放比例
                 const scale = totalDuration / defaultTotalDuration;
@@ -486,7 +495,20 @@ export class RevealController {
                 script.noiseIntensity = 2.8;
                 script.scatterDistance = 4.0;
                 script.minSize = 0.15;
-                script.endRadius = defaultEndRadius;
+                script.endRadius = 25.0; // 保持默认值，用于性能优化（距离剔除）
+                
+                // 设置 topY 和 bottomY（基于 bbox 或默认值）
+                // 注意：growth-wave 是从 bottom 到 top 传播，shader 期望 bottomY > topY
+                // 所以将 integrate 的 topY 和 bottomY 对调
+                if (this.bbox) {
+                    // 基于 bbox 计算：与 integrate 效果使用相同的计算方式，但赋值顺序相反
+                    script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y * 0.68; // 底部（更接近 center，数值更大）
+                    script.topY = this.bbox.center.y - this.bbox.halfExtents.y;            // 顶部（更远离 center，数值更小）
+                } else {
+                    // 默认值：bottomY > topY（与 shader 期望一致）
+                    script.bottomY = 10.0;
+                    script.topY = -10.0;
+                }
                 
                 // 设置 reveal center
                 this.updateScriptCenter(script);
@@ -494,6 +516,13 @@ export class RevealController {
                 // 初始状态和 effectTime
                 script.enabled = this.config.autoStart;
                 script.effectTime = 0;
+                
+                // 计算实际的总时长（用于验证）
+                const heightRange = Math.abs(script.topY - script.bottomY);
+                const verticalSpread = script.growthSpeed / Math.max(heightRange, 0.001);
+                const maxYOffset = heightRange;
+                const topParticleGrowthEnd = (script.growthDuration + maxYOffset * verticalSpread) / script.growthSpeed;
+                const actualTotalDuration = topParticleGrowthEnd + script.recoverDuration;
                 
                 console.log('Growth-wave script created with config:', {
                     center: script.center,
@@ -503,7 +532,13 @@ export class RevealController {
                     noiseIntensity: script.noiseIntensity,
                     scatterDistance: script.scatterDistance,
                     minSize: script.minSize,
-                    totalDuration,
+                    topY: script.topY,
+                    bottomY: script.bottomY,
+                    heightRange,
+                    verticalSpread,
+                    topParticleGrowthEnd,
+                    requestedTotalDuration: totalDuration,
+                    actualTotalDuration,
                     scale,
                     enabled: script.enabled
                 });
@@ -951,13 +986,13 @@ export class RevealController {
         }
     }
 
-    restart() {
+    restart(restartAnimTrack: boolean = false) {
         if (!this.config || this.config.type === 'none') {
             console.log('No reveal effect active, cannot restart');
             return;
         }
         
-        console.log('Restarting reveal effect:', this.config.type);
+        console.log('Restarting reveal effect:', this.config.type, restartAnimTrack ? '(with animTrack)' : '(without animTrack)');
         
         // 先禁用当前效果（如果存在），确保清理状态
         if (this.currentScript) {
@@ -969,6 +1004,11 @@ export class RevealController {
         
         // 重新创建效果（会自动根据 autoStart 配置启用，并重置 effectTime）
         this.createEffect(this.config.type);
+        
+        // 如果启用了重启 animTrack，触发重置动画事件
+        if (restartAnimTrack) {
+            this.global.events.fire('inputEvent', 'resetAnim');
+        }
     }
 
     /**

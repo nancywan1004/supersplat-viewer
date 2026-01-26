@@ -40,6 +40,58 @@ vec3 randomDir(vec3 p) {
     );
 }
 
+// Smooth interpolation function (smoothstep)
+float smoothInterp(float t) {
+    return t * t * (3.0 - 2.0 * t);
+}
+
+// Gradient noise (Perlin-like) for smooth, continuous noise field
+vec3 gradientNoise(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f); // smoothstep
+    
+    // Sample 8 corners
+    vec3 d000 = randomDir(i);
+    vec3 d100 = randomDir(i + vec3(1.0, 0.0, 0.0));
+    vec3 d010 = randomDir(i + vec3(0.0, 1.0, 0.0));
+    vec3 d110 = randomDir(i + vec3(1.0, 1.0, 0.0));
+    vec3 d001 = randomDir(i + vec3(0.0, 0.0, 1.0));
+    vec3 d101 = randomDir(i + vec3(1.0, 0.0, 1.0));
+    vec3 d011 = randomDir(i + vec3(0.0, 1.0, 1.0));
+    vec3 d111 = randomDir(i + vec3(1.0, 1.0, 1.0));
+    
+    // Trilinear interpolation
+    vec3 result = mix(
+        mix(mix(d000, d100, f.x), mix(d010, d110, f.x), f.y),
+        mix(mix(d001, d101, f.x), mix(d011, d111, f.x), f.y),
+        f.z
+    );
+    
+    return normalize(result);
+}
+
+// Fractal Brownian Motion (fBM) - multi-frequency noise
+vec3 fbmNoise(vec3 p, float time) {
+    // Combine multiple frequencies for smooth, flowing noise
+    float scale1 = 0.8;
+    float scale2 = 2.5;
+    float scale3 = 6.0;
+    
+    // Add time-based flow
+    vec3 p1 = p * scale1 + vec3(0.0, 0.0, time * 0.3);
+    vec3 p2 = p * scale2 + vec3(0.0, 0.0, time * 0.5);
+    vec3 p3 = p * scale3 + vec3(0.0, 0.0, time * 0.8);
+    
+    vec3 n1 = gradientNoise(p1);
+    vec3 n2 = gradientNoise(p2);
+    vec3 n3 = gradientNoise(p3);
+    
+    // Combine with decreasing weights (lower frequencies have more influence)
+    vec3 result = n1 * 0.5 + n2 * 0.3 + n3 * 0.2;
+    return normalize(result);
+}
+
 // Shared globals
 float g_dist;
 float g_yOffset;
@@ -77,9 +129,20 @@ void initShared(vec3 center) {
     
     // Recover phase: wait for ALL particles to finish growing before starting recovery
     // Recovery also propagates from bottom to top
-    // Top particle has largest yOffset = uBottomY - uTopY (since uBottomY > uTopY due to Y-axis inversion)
-    float globalGrowthEnd = abs(uBottomY - uTopY) * verticalSpread + uGrowthDuration;
-    g_tRecoverStart = globalGrowthEnd;
+    // Top particle has largest yOffset = abs(uBottomY - uTopY) (since uBottomY > uTopY due to Y-axis inversion)
+    // For the top particle: g_wavePhase = timeScaled - maxYOffset * verticalSpread
+    // When g_wavePhase >= uGrowthDuration, the top particle finishes growing
+    // So: timeScaled - maxYOffset * verticalSpread >= uGrowthDuration
+    //     uTime * uGrowthSpeed >= uGrowthDuration + maxYOffset * verticalSpread
+    //     uTime >= (uGrowthDuration + maxYOffset * verticalSpread) / uGrowthSpeed
+    // Since maxYOffset = abs(uBottomY - uTopY) and verticalSpread = uGrowthSpeed / abs(uTopY - uBottomY)
+    //     uTime >= (uGrowthDuration + abs(uBottomY - uTopY) * (uGrowthSpeed / abs(uTopY - uBottomY))) / uGrowthSpeed
+    //     uTime >= (uGrowthDuration + uGrowthSpeed) / uGrowthSpeed
+    //     uTime >= uGrowthDuration / uGrowthSpeed + 1.0
+    // But we want to start recovery as soon as the last particle finishes, so:
+    float maxYOffset = abs(uBottomY - uTopY);
+    float topParticleGrowthEnd = (uGrowthDuration + maxYOffset * verticalSpread) / uGrowthSpeed;
+    g_tRecoverStart = topParticleGrowthEnd;
     
     // Recovery wave phase: similar to growth, but for recovery
     float recoverTimeScaled = max(0.0, uTime - g_tRecoverStart) * uGrowthSpeed;
@@ -93,11 +156,13 @@ void initShared(vec3 center) {
     
     // Determine current phase
     if (g_wavePhase < 0.0) {
-        g_phase = 0.0; // Before wave reaches (hidden)
-    } else if (g_wavePhase < uGrowthDuration) {
-        g_phase = 1.0; // Growth phase (wave scanning, showing edge particles)
+        g_phase = 0.0; // Hidden
+    } else if (uTime < g_tRecoverStart) {
+        // Phase 1: from wave arrival until global recover starts
+        // This includes the "fully grown but waiting" period
+        g_phase = 1.0;
     } else if (uTime < g_tRecoverEnd && g_recoverProgress < 1.0) {
-        g_phase = 2.0; // Recover phase (wave scanning, recovering particles)
+        g_phase = 2.0; // Recovering
     } else {
         g_phase = 3.0; // Complete
     }
@@ -215,99 +280,175 @@ void modifyCenter(inout vec3 center) {
     scatterFactor = max(0.4, scatterFactor);
     
     if (g_phase == 1.0) {
-        // Growth phase: wave scanning from bottom to top, showing edge particles
-        // Only show edge particles (far from center)
-        float distFromCenter = length(originalCenter - uCenter);
-        float edgeThreshold = uEndRadius * 0.3; // Only show particles in outer 30% of radius
+        // Growth phase: 聚拢生长粒子特效
+        // 核心原则：聚拢是主趋势，噪声扰动路径，最终严格到达目标位置
         
-        // Hide particles that are too close to center
-        if (distFromCenter < edgeThreshold) {
-            center = originalCenter + vec3(0.0, 1000.0, 0.0);
+        // 当这个粒子的生长阶段真正完成时（g_growthProgress >= 1.0），
+        // 直接设置为原始位置并返回，不再执行任何噪声计算
+        // 这样可以确保 Phase 1 结束后粒子稳定停留在原始位置，不会乱飘
+        if (g_growthProgress >= 1.0) {
+            center = originalCenter;
             return;
         }
         
-        // Use growthProgress (0 to 1) for smooth wave scanning effect
-        // g_growthProgress is calculated based on wave phase, so it creates a scanning effect
-        float easedProgress = g_growthProgress * g_growthProgress * (3.0 - 2.0 * g_growthProgress); // Smoothstep
+        // 计算径向距离和方向
+        vec3 toSplat = originalCenter - uCenter;
+        float distFromCenter = length(toSplat);
+        vec3 radialOut = distFromCenter > 0.001 ? normalize(toSplat) : vec3(1.0, 0.0, 0.0);
         
-        // 从外部向内聚拢效果（类似pieces-recover的打散，但方向相反）
-        // 使用scatterDir定义打散方向，然后反向实现聚拢
-        // scatterDir已经在上面计算好了，包含了多频率噪声和平滑的流式方向
+        // 聚拢进度：使用慢启动缓动曲线
+        float easedProgress = pow(g_growthProgress, 0.4);
         
-        // 计算打散距离：粒子从外部的一个较大范围开始
-        float scatterAmount = uScatterDistance * scatterFactor;
-        float maxScatterDistance = scatterAmount * 1.5; // 增加外部起始范围
+        // 计算聚拢距离
+        float baseScatterDistance = uScatterDistance * 15.0;
+        float distanceBasedMultiplier = 1.0 + distFromCenter * 0.2;
+        float maxScatterDistance = baseScatterDistance * distanceBasedMultiplier;
         
-        // 从打散位置开始（使用scatterDir的反向，即从外部向内的方向）
-        vec3 scatterStartDir = -scatterDir; // 反向scatterDir，实现聚拢
-        vec3 startPos = originalCenter + scatterStartDir * maxScatterDistance;
+        // 主收敛路径：从外部到目标位置的径向路径
+        vec3 startPos = originalCenter + radialOut * maxScatterDistance;
+        vec3 targetPos = originalCenter; // 最终必须严格到达这里
         
-        // 内收进度：随着easedProgress增加，粒子从外部向内移动
-        // 使用平滑的曲线，让内收过程更明显
-        float inwardProgress = easedProgress;
-        float inwardEase = inwardProgress * inwardProgress; // 二次方，让内收更平滑明显
-        float currentScatterDistance = maxScatterDistance * (1.0 - inwardEase);
+        // 主收敛路径上的当前位置（无扰动）
+        float currentScatterDistance = maxScatterDistance * (1.0 - easedProgress);
+        vec3 mainConvergePos = originalCenter + radialOut * currentScatterDistance;
         
-        // 轻微的螺旋旋转效果（降低强度，更柔和）
-        vec3 radialIn = distFromCenter > 0.001 ? -normalize(toSplat) : vec3(0.0, 0.0, -1.0);
+        // 噪声场扰动：使用fBM噪声来扰动路径
+        // 增强烟雾扰动效果：增大扰动强度和轮廓
+        // 噪声强度随聚拢过程逐渐减弱（初期烟雾感强，末期稳定）
+        float noiseIntensity = (1.0 - easedProgress) * (1.0 - easedProgress); // 二次衰减，初期强，末期弱
+        noiseIntensity *= 10.0; // 增加50%的基础强度
+        
+        // 计算噪声采样位置（空间+时间）
+        // 使用更大的空间尺度，产生更大的烟雾轮廓
+        vec3 noisePos = (originalCenter - uCenter) * 0.3; // 降低空间频率，增大轮廓
+        float noiseTime = uTime * 0.6; // 增加时间流动速度，增强飘动感
+        
+        // 获取噪声方向（低频、连续、随时间流动）
+        // 使用多层噪声增强烟雾的复杂性和飘动感
+        vec3 noiseDir = fbmNoise(noisePos, noiseTime);
+        
+        // 添加额外的低频噪声层，增强大范围飘动
+        vec3 noisePos2 = (originalCenter - uCenter) * 0.15 + vec3(0.0, 0.0, noiseTime * 0.2);
+        vec3 noiseDir2 = fbmNoise(noisePos2, noiseTime * 0.5);
+        noiseDir = normalize(noiseDir * 0.7 + noiseDir2 * 0.3); // 混合两层噪声
+        
+        // 构建切向和法向空间（用于侧向扰动）
         vec3 upAxis = vec3(0.0, 1.0, 0.0);
-        vec3 tangential = normalize(cross(upAxis, radialIn));
+        vec3 tangential = normalize(cross(upAxis, radialOut));
         if (length(tangential) < 0.001) {
-            tangential = vec3(1.0, 0.0, 0.0);
+            tangential = vec3(0.0, 0.0, 1.0);
         }
+        vec3 normal = cross(radialOut, tangential);
         
-        // 柔和的螺旋旋转（降低强度）
-        float twistSpeed = 1.0; // 降低旋转速度
-        float twistAngle = uTime * twistSpeed + distFromCenter * 0.2 + randomSeed * 6.28318;
-        float twistStrength = 0.25; // 大幅降低螺旋强度，使效果更柔和
+        // 将噪声方向投影到切向和法向空间（侧向扰动，不影响径向收敛）
+        float tangentialNoise = dot(noiseDir, tangential);
+        float normalNoise = dot(noiseDir, normal);
         
-        // 计算螺旋偏移（基于当前内收距离）
-        float spiralRadius = currentScatterDistance * 0.3; // 降低螺旋半径
-        vec3 spiralOffset = tangential * twistStrength * sin(twistAngle) * spiralRadius;
-        vec3 spiralOffset2 = cross(radialIn, tangential) * twistStrength * 0.2 * cos(twistAngle) * spiralRadius;
+        // 计算扰动偏移（作用在路径上，不是最终结果）
+        // 增大扰动距离：增强烟雾扰动的轮廓
+        float perturbationDistance = currentScatterDistance * noiseIntensity * 10.0; // 从0.8增加到1.5
+        vec3 perturbation = tangential * tangentialNoise * perturbationDistance + 
+                           normal * normalNoise * perturbationDistance;
         
-        // 添加轻微的湍流，使运动更自然
-        vec3 noisePos1 = (originalCenter - uCenter) * noiseScale1;
-        vec3 i1 = floor(noisePos1);
-        vec3 f1 = fract(noisePos1);
-        f1 = f1 * f1 * (3.0 - 2.0 * f1);
+        // 添加更强的径向相位扰动（距离延迟），增强飘动感
+        float phaseNoise = dot(noiseDir, radialOut) * 1.5; // 从0.3增加到0.5
+        float phaseOffset = phaseNoise * noiseIntensity * currentScatterDistance * 1.2; // 从0.2增加到0.4
+        vec3 phasePerturbation = radialOut * phaseOffset;
         
-        vec3 t000 = randomDir(i1);
-        vec3 t100 = randomDir(i1 + vec3(1.0, 0.0, 0.0));
-        vec3 t010 = randomDir(i1 + vec3(0.0, 1.0, 0.0));
-        vec3 t110 = randomDir(i1 + vec3(1.0, 1.0, 0.0));
-        vec3 t001 = randomDir(i1 + vec3(0.0, 0.0, 1.0));
-        vec3 t101 = randomDir(i1 + vec3(1.0, 0.0, 1.0));
-        vec3 t011 = randomDir(i1 + vec3(0.0, 1.0, 1.0));
-        vec3 t111 = randomDir(i1 + vec3(1.0, 1.0, 1.0));
+        // 添加额外的垂直扰动，增强烟雾的上升飘动感
+        float verticalNoise = dot(noiseDir, upAxis);
+        vec3 verticalPerturbation = upAxis * verticalNoise * noiseIntensity * currentScatterDistance * 0.3;
+        perturbation += verticalPerturbation;
         
-        vec3 turbDir = normalize(mix(
-            mix(mix(t000, t100, f1.x), mix(t010, t110, f1.x), f1.y),
-            mix(mix(t001, t101, f1.x), mix(t011, t111, f1.x), f1.y),
-            f1.z
-        ));
+        // 最终位置 = 主收敛路径 + 噪声偏移（随时间衰减）
+        vec3 finalPos = mainConvergePos + perturbation + phasePerturbation;
         
-        float turbulenceAmount = uNoiseIntensity * 0.1 * easedProgress * (1.0 - easedProgress);
-        vec3 turbulence = turbDir * turbulenceAmount;
-        
-        // 最终位置：从外部打散位置向内聚拢，伴随柔和的螺旋旋转
-        vec3 targetPos = originalCenter + scatterStartDir * currentScatterDistance + spiralOffset + spiralOffset2 + turbulence;
-        
-        // 平滑插值：从起始外部位置到目标位置
-        center = mix(startPos, targetPos, easedProgress);
-
-        // At end of phase1, lock to original position to keep the correct point cloud
-        if (easedProgress >= 0.999) {
-            center = originalCenter;
-        }
+        // 确保最终位置在聚拢完成时严格到达目标位置
+        // 当easedProgress接近1时，噪声强度接近0，位置接近targetPos
+        center = mix(startPos, finalPos, easedProgress);
         
     } else if (g_phase == 2.0) {
-        // Recover phase: wave scanning from bottom to top, recovering all particles
-        // Use recoverProgress (0 to 1) for smooth wave scanning effect
-        float easedRecover = g_recoverProgress * g_recoverProgress * (3.0 - 2.0 * g_recoverProgress); // Smoothstep
+        // Recover phase: 碎片还原效果 - 粒子沿着原始轨迹复原
+        // 从 Phase 1 结束时的位置（原始位置）稍微偏移，然后沿着轨迹还原
+        // 使用基于波传播的恢复进度（g_recoverProgress），实现从下到上的波传播效果
+        // g_recoverProgress 已经根据粒子的高度位置计算了恢复进度（底部先恢复，顶部后恢复）
+        // 如果恢复进度为 0，说明波还没到达这个粒子，应该保持隐藏状态
+        if (g_recoverProgress <= 0.0) {
+            // 波还没到达，保持 Phase 1 结束时的状态（原始位置）
+            center = originalCenter;
+            return;
+        }
         
-        // Recovery: force back to original (no scatter reconstruction)
-        center = originalCenter;
+        // 使用缓出曲线，让还原过程更自然
+        float easedRecover = 1.0 - pow(1.0 - g_recoverProgress, 4.0);
+        easedRecover = clamp(easedRecover, 0.0, 1.0);
+        
+        // 计算径向距离和方向（与 Phase 1 相同）
+        vec3 toSplat = originalCenter - uCenter;
+        float distFromCenter = length(toSplat);
+        vec3 radialOut = distFromCenter > 0.001 ? normalize(toSplat) : vec3(1.0, 0.0, 0.0);
+        
+        // 在 Phase 1 结束时，粒子已经在原始位置
+        // Phase 2 开始时，让粒子稍微向外偏移（模拟碎片状态）
+        float startOffsetDistance = uScatterDistance * 2.0; // 较小的偏移距离
+        vec3 startRecoverPos = originalCenter + radialOut * startOffsetDistance;
+        
+        // 使用与 Phase 1 相同的噪声场来创建还原轨迹
+        // 噪声强度随还原进度逐渐减弱（初期有扰动，末期稳定）
+        float noiseIntensity = (1.0 - easedRecover) * (1.0 - easedRecover); // 二次衰减
+        noiseIntensity *= 3.0; // 适中的扰动强度
+        
+        // 计算噪声采样位置（空间+时间）
+        vec3 noisePos = (originalCenter - uCenter) * 0.3;
+        float noiseTime = uTime * 0.6;
+        
+        // 获取噪声方向（与 Phase 1 相同的 fBM 噪声）
+        vec3 noiseDir = fbmNoise(noisePos, noiseTime);
+        
+        // 添加额外的低频噪声层
+        vec3 noisePos2 = (originalCenter - uCenter) * 0.15 + vec3(0.0, 0.0, noiseTime * 0.2);
+        vec3 noiseDir2 = fbmNoise(noisePos2, noiseTime * 0.5);
+        noiseDir = normalize(noiseDir * 0.7 + noiseDir2 * 0.3);
+        
+        // 构建切向和法向空间（用于侧向扰动）
+        vec3 upAxis = vec3(0.0, 1.0, 0.0);
+        vec3 tangential = normalize(cross(upAxis, radialOut));
+        if (length(tangential) < 0.001) {
+            tangential = vec3(0.0, 0.0, 1.0);
+        }
+        vec3 normal = cross(radialOut, tangential);
+        
+        // 将噪声方向投影到切向和法向空间
+        float tangentialNoise = dot(noiseDir, tangential);
+        float normalNoise = dot(noiseDir, normal);
+        
+        // 计算扰动偏移（随还原进度逐渐减弱）
+        float perturbationDistance = startOffsetDistance * noiseIntensity * 2.0;
+        vec3 perturbation = tangential * tangentialNoise * perturbationDistance + 
+                           normal * normalNoise * perturbationDistance;
+        
+        // 添加径向相位扰动
+        float phaseNoise = dot(noiseDir, radialOut) * 0.8;
+        float phaseOffset = phaseNoise * noiseIntensity * startOffsetDistance * 0.6;
+        vec3 phasePerturbation = radialOut * phaseOffset;
+        
+        // 添加垂直扰动
+        float verticalNoise = dot(noiseDir, upAxis);
+        vec3 verticalPerturbation = upAxis * verticalNoise * noiseIntensity * startOffsetDistance * 0.2;
+        perturbation += verticalPerturbation;
+        
+        // 主还原路径：从偏移位置回到原始位置
+        vec3 mainRecoverPos = mix(startRecoverPos, originalCenter, easedRecover);
+        
+        // 最终位置 = 主还原路径 + 噪声偏移（随时间衰减）
+        vec3 finalPos = mainRecoverPos + perturbation + phasePerturbation;
+        
+        // 确保最终位置在还原完成时严格到达原始位置
+        if (easedRecover >= 0.999) {
+            center = originalCenter;
+        } else {
+            center = finalPos;
+        }
     }
 }
 
@@ -322,34 +463,77 @@ void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA,
         return;
     }
     
-    // Phase 1: Growth phase - small particles (point cloud) with smoke spray
+    // Phase 1: Growth phase - small particles (point cloud) with convergence effect
     if (g_phase == 1.0) {
-        float randomSeed = hash(originalCenter);
-        float sizeFactor = uMinSize + randomSeed * (0.25 - uMinSize); // Use uMinSize to 0.25 range
-        float size = originalSize * sizeFactor;
-
-        // Edge filter using approximate screen area & anisotropy (no projected ellipse available here)
+        // 所有在growth阶段的粒子都参与聚拢效果
+        // 使用g_growthProgress控制显示：只有波传播到的粒子才显示
+        if (g_growthProgress <= 0.0) {
+            gsplatMakeRound(covA, covB, originalSize * 0.001);
+            return;
+        }
+        
+        // 放宽边缘粒子过滤条件：让更多边缘粒子参与
+        // 在波前内：显示小且圆的粒子或各向异性边缘粒子（纯点云）
         float lenA = length(covA);
         float lenB = length(covB);
         float small = 1e-4;
         float aniso = max(lenA, lenB) / max(min(lenA, lenB), small);
-        float screenArea = size * size;
-        bool edgeCandidate = (screenArea < uEdgeAreaMin) || (aniso > uEdgeAnisoMin && screenArea < uEdgeAreaMax);
-        if (!edgeCandidate) {
-            gsplatMakeRound(covA, covB, originalSize * 0.001); // hide non-edges
+        
+        // 放宽条件：增加边缘粒子的识别范围
+        float originalScreenArea = originalSize * originalSize;
+        // 小且圆的粒子：放宽面积阈值
+        bool isSmallRound = (originalScreenArea < uEdgeAreaMax * 1.5) && (aniso < 3.0);
+        // 各向异性边缘粒子：放宽各向异性和面积阈值
+        bool isSmallAniso = (aniso > uEdgeAnisoMin * 0.6 && aniso < 4.0) && (originalScreenArea < uEdgeAreaMax * 1.2);
+        // 添加中等大小的边缘粒子
+        bool isMediumEdge = (originalScreenArea < uEdgeAreaMax * 2.0) && (aniso > 2.0 && aniso < 5.0);
+        
+        if (!isSmallRound && !isSmallAniso && !isMediumEdge) {
+            gsplatMakeRound(covA, covB, originalSize * 0.001);
             return;
         }
 
-        gsplatMakeRound(covA, covB, size);
+        // 强制所有粒子为非常小的纯点云，但保持可见性以支持辉光效果
+        float maxPointSize = originalSize * uMinSize;
+        float pointSize = min(maxPointSize, originalSize * 0.08); // 稍微增大到8%，确保可见性
+        
+        gsplatMakeRound(covA, covB, pointSize);
         return;
     }
     
     // Phase 2: Recover phase - gradually restore original size and shape
     // ALL particles recover, not just edge particles
+    // 使用基于波传播的恢复进度（g_recoverProgress），实现从下到上的波传播效果
     if (g_phase == 2.0) {
-        float t = (uTime - g_tRecoverStart) / uRecoverDuration;
-        t = clamp(t, 0.0, 1.0);
-        float easedT = 1.0 - pow(1.0 - t, 4.0);
+        // 判断这个粒子在 Phase 1 中是否是可见的点云粒子
+        // 使用与 Phase 1 相同的判断逻辑
+        float lenA = length(covA);
+        float lenB = length(covB);
+        float small = 1e-4;
+        float aniso = max(lenA, lenB) / max(min(lenA, lenB), small);
+        float originalScreenArea = originalSize * originalSize;
+        bool isSmallRound = (originalScreenArea < uEdgeAreaMax * 1.5) && (aniso < 3.0);
+        bool isSmallAniso = (aniso > uEdgeAnisoMin * 0.6 && aniso < 4.0) && (originalScreenArea < uEdgeAreaMax * 1.2);
+        bool isMediumEdge = (originalScreenArea < uEdgeAreaMax * 2.0) && (aniso > 2.0 && aniso < 5.0);
+        bool wasPointCloudParticle = isSmallRound || isSmallAniso || isMediumEdge;
+        
+        // 如果恢复进度为 0，说明波还没到达这个粒子
+        // 如果是 Phase 1 的点云粒子，保持点云状态；否则隐藏
+        if (g_recoverProgress <= 0.0) {
+            if (wasPointCloudParticle) {
+                // 保持 Phase 1 的点云状态
+                float maxPointSize = originalSize * uMinSize;
+                float pointSize = min(maxPointSize, originalSize * 0.08);
+                gsplatMakeRound(covA, covB, pointSize);
+            } else {
+                // 非点云粒子保持隐藏
+                gsplatMakeRound(covA, covB, originalSize * 0.001);
+            }
+            return;
+        }
+        
+        // 使用基于波传播的恢复进度，而不是全局时间
+        float easedT = 1.0 - pow(1.0 - g_recoverProgress, 4.0);
         easedT = clamp(easedT, 0.0, 1.0);
         
         // Check if this particle was an edge particle during growth phase
@@ -358,17 +542,22 @@ void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA,
         bool wasEdgeParticle = distFromCenter >= edgeThreshold;
         
         float randomSeed = hash(originalCenter);
-        float minSizeFactor;
+        float startSize;
         
-        if (wasEdgeParticle) {
+        if (wasPointCloudParticle) {
+            // Phase 1 的点云粒子：从点云大小开始恢复
+            float maxPointSize = originalSize * uMinSize;
+            float pointSize = min(maxPointSize, originalSize * 0.08);
+            startSize = pointSize;
+        } else if (wasEdgeParticle) {
             // Edge particles: recover from small point cloud size
-            minSizeFactor = uMinSize + randomSeed * (0.1 - uMinSize);
+            startSize = originalSize * (uMinSize + randomSeed * (0.1 - uMinSize));
         } else {
             // Non-edge particles: start from hidden (very small) and grow to original
-            minSizeFactor = 0.001;
+            startSize = originalSize * 0.001;
         }
         
-        float size = mix(originalSize * minSizeFactor, originalSize, easedT);
+        float size = mix(startSize, originalSize, easedT);
         
         // Lerp from round to original shape
         vec3 origCovA = covA;
@@ -383,7 +572,51 @@ void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA,
 }
 
 void modifyColor(vec3 center, inout vec4 color) {
-    // No color modifications
+    initShared(center);
+    
+    // Phase 1 和 Phase 2: 添加蓝色辉光效果，营造能量场/体积感
+    // 蓝色辉光持续到Phase 2复原粒子的原始形态前
+    if ((g_phase == 1.0 && g_growthProgress > 0.0) || (g_phase == 2.0 && g_recoverProgress < 1.0)) {
+        // 计算蓝色辉光强度
+        float glowIntensity = 1.0;
+        float progressGlow = 1.0;
+        
+        if (g_phase == 1.0) {
+            // Phase 1: 在整个Phase 1期间保持稳定
+            // 只在最后10%的进度时稍微减弱，确保过渡平滑
+            if (g_growthProgress > 0.9) {
+                progressGlow = 1.0 - (g_growthProgress - 0.9) * 2.0; // 最后10%时逐渐减弱
+            }
+            progressGlow = max(progressGlow, 0.8); // 保持至少80%的强度
+        } else if (g_phase == 2.0) {
+            // Phase 2: 根据复原进度逐渐减弱，直到完全恢复时消失
+            // 复原进度从0到1，辉光从强到弱
+            progressGlow = 1.0 - g_recoverProgress; // 复原进度越高，辉光越弱
+            progressGlow = max(progressGlow, 0.0); // 确保不小于0
+        }
+        
+        // 根据距离中心的距离调整：边缘粒子辉光更强
+        vec3 toSplat = center - uCenter;
+        float distFromCenter = length(toSplat);
+        float normalizedDist = distFromCenter / max(uEndRadius, 1.0);
+        float distanceGlow = 1.0 + (1.0 - normalizedDist) * 0.3; // 边缘粒子增加30%强度
+        
+        // 组合辉光强度
+        glowIntensity = progressGlow * distanceGlow;
+        glowIntensity = clamp(glowIntensity, 0.0, 1.3); // Phase 2时允许降到0
+        
+        // 蓝色辉光颜色：能量场感的蓝色（偏青蓝色）
+        vec3 blueGlow = vec3(0.3, 0.6, 1.0); // 明亮的青蓝色
+        
+        // 添加蓝色辉光到原始颜色（加法混合，营造发光效果）
+        color.rgb += blueGlow * glowIntensity * 0.4; // 40%的混合强度
+        
+        // 稍微增加亮度以增强体积感
+        color.rgb *= (1.0 + glowIntensity * 0.2);
+        
+        // 确保颜色值在合理范围内
+        color.rgb = clamp(color.rgb, 0.0, 2.0);
+    }
 }
 `;
 
@@ -426,6 +659,58 @@ fn randomDir(p: vec3f) -> vec3f {
     );
 }
 
+// Smooth interpolation function (smoothstep)
+fn smoothInterp(t: f32) -> f32 {
+    return t * t * (3.0 - 2.0 * t);
+}
+
+// Gradient noise (Perlin-like) for smooth, continuous noise field
+fn gradientNoise(p: vec3f) -> vec3f {
+    let i = floor(p);
+    var f = fract(p);
+    f = f * f * (3.0 - 2.0 * f); // smoothstep
+    
+    // Sample 8 corners
+    let d000 = randomDir(i);
+    let d100 = randomDir(i + vec3f(1.0, 0.0, 0.0));
+    let d010 = randomDir(i + vec3f(0.0, 1.0, 0.0));
+    let d110 = randomDir(i + vec3f(1.0, 1.0, 0.0));
+    let d001 = randomDir(i + vec3f(0.0, 0.0, 1.0));
+    let d101 = randomDir(i + vec3f(1.0, 0.0, 1.0));
+    let d011 = randomDir(i + vec3f(0.0, 1.0, 1.0));
+    let d111 = randomDir(i + vec3f(1.0, 1.0, 1.0));
+    
+    // Trilinear interpolation
+    let result = normalize(mix(
+        mix(mix(d000, d100, f.x), mix(d010, d110, f.x), f.y),
+        mix(mix(d001, d101, f.x), mix(d011, d111, f.x), f.y),
+        f.z
+    ));
+    
+    return result;
+}
+
+// Fractal Brownian Motion (fBM) - multi-frequency noise
+fn fbmNoise(p: vec3f, time: f32) -> vec3f {
+    // Combine multiple frequencies for smooth, flowing noise
+    let scale1 = 0.8;
+    let scale2 = 2.5;
+    let scale3 = 6.0;
+    
+    // Add time-based flow
+    let p1 = p * scale1 + vec3f(0.0, 0.0, time * 0.3);
+    let p2 = p * scale2 + vec3f(0.0, 0.0, time * 0.5);
+    let p3 = p * scale3 + vec3f(0.0, 0.0, time * 0.8);
+    
+    let n1 = gradientNoise(p1);
+    let n2 = gradientNoise(p2);
+    let n3 = gradientNoise(p3);
+    
+    // Combine with decreasing weights (lower frequencies have more influence)
+    let result = n1 * 0.5 + n2 * 0.3 + n3 * 0.2;
+    return normalize(result);
+}
+
 // Shared globals
 var<private> g_dist: f32;
 var<private> g_yOffset: f32;
@@ -463,9 +748,20 @@ fn initShared(center: vec3f) {
     
     // Recover phase: wait for ALL particles to finish growing before starting recovery
     // Recovery also propagates from bottom to top
-    // Top particle has largest yOffset = uBottomY - uTopY (since uBottomY > uTopY due to Y-axis inversion)
-    let globalGrowthEnd = abs(uniform.uBottomY - uniform.uTopY) * verticalSpread + uniform.uGrowthDuration;
-    g_tRecoverStart = globalGrowthEnd;
+    // Top particle has largest yOffset = abs(uBottomY - uTopY) (since uBottomY > uTopY due to Y-axis inversion)
+    // For the top particle: g_wavePhase = timeScaled - maxYOffset * verticalSpread
+    // When g_wavePhase >= uGrowthDuration, the top particle finishes growing
+    // So: timeScaled - maxYOffset * verticalSpread >= uGrowthDuration
+    //     uTime * uGrowthSpeed >= uGrowthDuration + maxYOffset * verticalSpread
+    //     uTime >= (uGrowthDuration + maxYOffset * verticalSpread) / uGrowthSpeed
+    // Since maxYOffset = abs(uBottomY - uTopY) and verticalSpread = uGrowthSpeed / abs(uTopY - uBottomY)
+    //     uTime >= (uGrowthDuration + abs(uBottomY - uTopY) * (uGrowthSpeed / abs(uTopY - uBottomY))) / uGrowthSpeed
+    //     uTime >= (uGrowthDuration + uGrowthSpeed) / uGrowthSpeed
+    //     uTime >= uGrowthDuration / uGrowthSpeed + 1.0
+    // But we want to start recovery as soon as the last particle finishes, so:
+    let maxYOffset = abs(uniform.uBottomY - uniform.uTopY);
+    let topParticleGrowthEnd = (uniform.uGrowthDuration + maxYOffset * verticalSpread) / uniform.uGrowthSpeed;
+    g_tRecoverStart = topParticleGrowthEnd;
     
     // Recovery wave phase: similar to growth, but for recovery
     let recoverTimeScaled = max(0.0, uniform.uTime - g_tRecoverStart) * uniform.uGrowthSpeed;
@@ -479,11 +775,13 @@ fn initShared(center: vec3f) {
     
     // Determine current phase
     if (g_wavePhase < 0.0) {
-        g_phase = 0.0; // Before wave reaches (hidden)
-    } else if (g_wavePhase < uniform.uGrowthDuration) {
-        g_phase = 1.0; // Growth phase (wave scanning, showing edge particles)
-    } else if (uniform.uTime < g_tRecoverEnd && g_recoverProgress < 1.0) {
-        g_phase = 2.0; // Recover phase (wave scanning, recovering particles)
+        g_phase = 0.0; // Hidden
+    } else if (uTime < g_tRecoverStart) {
+        // Phase 1: from wave arrival until global recover starts
+        // This includes the "fully grown but waiting" period
+        g_phase = 1.0;
+    } else if (uTime < g_tRecoverEnd && g_recoverProgress < 1.0) {
+        g_phase = 2.0; // Recovering
     } else {
         g_phase = 3.0; // Complete
     }
@@ -586,93 +884,174 @@ fn modifyCenter(center: ptr<function, vec3f>) {
     scatterFactor = max(0.4, scatterFactor);
     
     if (g_phase == 1.0) {
-        // Growth phase: wave scanning from bottom to top, showing edge particles
-        // Only show edge particles (far from center)
-        let distFromCenter = length(originalCenter - uniform.uCenter);
-        let edgeThreshold = uniform.uEndRadius * 0.3;
+        // Growth phase: 聚拢生长粒子特效
+        // 核心原则：聚拢是主趋势，噪声扰动路径，最终严格到达目标位置
         
-        // Hide particles that are too close to center
-        if (distFromCenter < edgeThreshold) {
-            *center = originalCenter + vec3f(0.0, 1000.0, 0.0);
+        // 当这个粒子的生长阶段真正完成时（g_growthProgress >= 1.0），
+        // 直接设置为原始位置并返回，不再执行任何噪声计算
+        // 这样可以确保 Phase 1 结束后粒子稳定停留在原始位置，不会乱飘
+        if (g_growthProgress >= 1.0) {
+            *center = originalCenter;
             return;
         }
         
-        // Use growthProgress (0 to 1) for smooth wave scanning effect
-        let easedProgress = g_growthProgress * g_growthProgress * (3.0 - 2.0 * g_growthProgress); // Smoothstep
+        // 计算径向距离和方向
+        let toSplat = originalCenter - uniform.uCenter;
+        let distFromCenter = length(toSplat);
+        let radialOut = select(vec3f(1.0, 0.0, 0.0), normalize(toSplat), distFromCenter > 0.001);
         
-        // 从外部向内聚拢效果（类似pieces-recover的打散，但方向相反）
-        // 使用scatterDir定义打散方向，然后反向实现聚拢
-        // scatterDir已经在上面计算好了，包含了多频率噪声和平滑的流式方向
+        // 聚拢进度：使用慢启动缓动曲线
+        let easedProgress = pow(g_growthProgress, 0.4);
         
-        // 计算打散距离：粒子从外部的一个较大范围开始
-        let scatterAmount = uniform.uScatterDistance * scatterFactor;
-        let maxScatterDistance = scatterAmount * 1.5; // 增加外部起始范围
+        // 计算聚拢距离
+        let baseScatterDistance = uniform.uScatterDistance * 15.0;
+        let distanceBasedMultiplier = 1.0 + distFromCenter * 0.2;
+        let maxScatterDistance = baseScatterDistance * distanceBasedMultiplier;
         
-        // 从打散位置开始（使用scatterDir的反向，即从外部向内的方向）
-        let scatterStartDir = -scatterDir; // 反向scatterDir，实现聚拢
-        let startPos = originalCenter + scatterStartDir * maxScatterDistance;
+        // 主收敛路径：从外部到目标位置的径向路径
+        let startPos = originalCenter + radialOut * maxScatterDistance;
+        let targetPos = originalCenter; // 最终必须严格到达这里
         
-        // 内收进度：随着easedProgress增加，粒子从外部向内移动
-        // 使用平滑的曲线，让内收过程更明显
-        let inwardProgress = easedProgress;
-        let inwardEase = inwardProgress * inwardProgress; // 二次方，让内收更平滑明显
-        let currentScatterDistance = maxScatterDistance * (1.0 - inwardEase);
+        // 主收敛路径上的当前位置（无扰动）
+        let currentScatterDistance = maxScatterDistance * (1.0 - easedProgress);
+        var mainConvergePos = originalCenter + radialOut * currentScatterDistance;
         
-        // 轻微的螺旋旋转效果（降低强度，更柔和）
-        let radialIn = select(vec3f(0.0, 0.0, -1.0), -normalize(toSplat), distFromCenter > 0.001);
+        // 噪声场扰动：使用fBM噪声来扰动路径
+        // 增强烟雾扰动效果：增大扰动强度和轮廓
+        // 噪声强度随聚拢过程逐渐减弱（初期烟雾感强，末期稳定）
+        var noiseIntensity = (1.0 - easedProgress) * (1.0 - easedProgress); // 二次衰减，初期强，末期弱
+        noiseIntensity = noiseIntensity * 1.5; // 增加50%的基础强度
+        
+        // 计算噪声采样位置（空间+时间）
+        // 使用更大的空间尺度，产生更大的烟雾轮廓
+        let noisePos = (originalCenter - uniform.uCenter) * 0.3; // 降低空间频率，增大轮廓
+        let noiseTime = uniform.uTime * 0.6; // 增加时间流动速度，增强飘动感
+        
+        // 获取噪声方向（低频、连续、随时间流动）
+        // 使用多层噪声增强烟雾的复杂性和飘动感
+        var noiseDir = fbmNoise(noisePos, noiseTime);
+        
+        // 添加额外的低频噪声层，增强大范围飘动
+        let noisePos2 = (originalCenter - uniform.uCenter) * 0.15 + vec3f(0.0, 0.0, noiseTime * 0.2);
+        let noiseDir2 = fbmNoise(noisePos2, noiseTime * 0.5);
+        noiseDir = normalize(noiseDir * 0.7 + noiseDir2 * 0.3); // 混合两层噪声
+        
+        // 构建切向和法向空间（用于侧向扰动）
         let upAxis = vec3f(0.0, 1.0, 0.0);
-        var tangential = normalize(cross(upAxis, radialIn));
+        var tangential = normalize(cross(upAxis, radialOut));
         if (length(tangential) < 0.001) {
-            tangential = vec3f(1.0, 0.0, 0.0);
+            tangential = vec3f(0.0, 0.0, 1.0);
         }
+        let normal = cross(radialOut, tangential);
         
-        // 柔和的螺旋旋转（降低强度）
-        let twistSpeed = 1.0; // 降低旋转速度
-        let twistAngle = uniform.uTime * twistSpeed + distFromCenter * 0.2 + randomSeed * 6.28318;
-        let twistStrength = 0.25; // 大幅降低螺旋强度，使效果更柔和
+        // 将噪声方向投影到切向和法向空间（侧向扰动，不影响径向收敛）
+        let tangentialNoise = dot(noiseDir, tangential);
+        let normalNoise = dot(noiseDir, normal);
         
-        // 计算螺旋偏移（基于当前内收距离）
-        let spiralRadius = currentScatterDistance * 0.3; // 降低螺旋半径
-        let spiralOffset = tangential * twistStrength * sin(twistAngle) * spiralRadius;
-        let spiralOffset2 = cross(radialIn, tangential) * twistStrength * 0.2 * cos(twistAngle) * spiralRadius;
+        // 计算扰动偏移（作用在路径上，不是最终结果）
+        // 增大扰动距离：增强烟雾扰动的轮廓
+        let perturbationDistance = currentScatterDistance * noiseIntensity * 1.5; // 从0.8增加到1.5
+        var perturbation = tangential * tangentialNoise * perturbationDistance;
+        perturbation = perturbation + normal * normalNoise * perturbationDistance;
         
-        // 添加轻微的湍流，使运动更自然
-        let noisePos1 = (originalCenter - uniform.uCenter) * noiseScale1;
-        let i1 = floor(noisePos1);
-        var f1 = fract(noisePos1);
-        f1 = f1 * f1 * (3.0 - 2.0 * f1);
+        // 添加更强的径向相位扰动（距离延迟），增强飘动感
+        let phaseNoise = dot(noiseDir, radialOut) * 0.5; // 从0.3增加到0.5
+        let phaseOffset = phaseNoise * noiseIntensity * currentScatterDistance * 0.4; // 从0.2增加到0.4
+        let phasePerturbation = radialOut * phaseOffset;
         
-        let t000 = randomDir(i1);
-        let t100 = randomDir(i1 + vec3f(1.0, 0.0, 0.0));
-        let t010 = randomDir(i1 + vec3f(0.0, 1.0, 0.0));
-        let t110 = randomDir(i1 + vec3f(1.0, 1.0, 0.0));
-        let t001 = randomDir(i1 + vec3f(0.0, 0.0, 1.0));
-        let t101 = randomDir(i1 + vec3f(1.0, 0.0, 1.0));
-        let t011 = randomDir(i1 + vec3f(0.0, 1.0, 1.0));
-        let t111 = randomDir(i1 + vec3f(1.0, 1.0, 1.0));
+        // 添加额外的垂直扰动，增强烟雾的上升飘动感
+        let verticalNoise = dot(noiseDir, upAxis);
+        let verticalPerturbation = upAxis * verticalNoise * noiseIntensity * currentScatterDistance * 0.3;
+        perturbation = perturbation + verticalPerturbation;
         
-        let turbDir = normalize(mix(
-            mix(mix(t000, t100, f1.x), mix(t010, t110, f1.x), f1.y),
-            mix(mix(t001, t101, f1.x), mix(t011, t111, f1.x), f1.y),
-            f1.z
-        ));
+        // 最终位置 = 主收敛路径 + 噪声偏移（随时间衰减）
+        var finalPos = mainConvergePos + perturbation + phasePerturbation;
         
-        let turbulenceAmount = uniform.uNoiseIntensity * 0.1 * easedProgress * (1.0 - easedProgress);
-        let turbulence = turbDir * turbulenceAmount;
-        
-        // 最终位置：从外部打散位置向内聚拢，伴随柔和的螺旋旋转
-        let targetPos = originalCenter + scatterStartDir * currentScatterDistance + spiralOffset + spiralOffset2 + turbulence;
-        
-        // 平滑插值：从起始外部位置到目标位置
-        *center = mix(startPos, targetPos, easedProgress);
+        // 确保最终位置在聚拢完成时严格到达目标位置
+        // 当easedProgress接近1时，噪声强度接近0，位置接近targetPos
+        *center = mix(startPos, finalPos, easedProgress);
         
     } else if (g_phase == 2.0) {
-        // Recover phase: wave scanning from bottom to top, recovering all particles
-        // Use recoverProgress (0 to 1) for smooth wave scanning effect
-        let easedRecover = g_recoverProgress * g_recoverProgress * (3.0 - 2.0 * g_recoverProgress); // Smoothstep
+        // Recover phase: 碎片还原效果 - 粒子沿着原始轨迹复原
+        // 从 Phase 1 结束时的位置（原始位置）稍微偏移，然后沿着轨迹还原
+        // 使用基于波传播的恢复进度（g_recoverProgress），实现从下到上的波传播效果
+        // g_recoverProgress 已经根据粒子的高度位置计算了恢复进度（底部先恢复，顶部后恢复）
+        // 如果恢复进度为 0，说明波还没到达这个粒子，应该保持隐藏状态
+        if (g_recoverProgress <= 0.0) {
+            // 波还没到达，保持 Phase 1 结束时的状态（原始位置）
+            *center = originalCenter;
+            return;
+        }
         
-        // Recovery: force back to original (no scatter reconstruction)
-        *center = originalCenter;
+        // 使用缓出曲线，让还原过程更自然
+        var easedRecover = clamp(1.0 - pow(1.0 - g_recoverProgress, 4.0), 0.0, 1.0);
+        
+        // 计算径向距离和方向（与 Phase 1 相同）
+        let toSplat = originalCenter - uniform.uCenter;
+        let distFromCenter = length(toSplat);
+        let radialOut = select(vec3f(1.0, 0.0, 0.0), normalize(toSplat), distFromCenter > 0.001);
+        
+        // 在 Phase 1 结束时，粒子已经在原始位置
+        // Phase 2 开始时，让粒子稍微向外偏移（模拟碎片状态）
+        let startOffsetDistance = uniform.uScatterDistance * 2.0; // 较小的偏移距离
+        let startRecoverPos = originalCenter + radialOut * startOffsetDistance;
+        
+        // 使用与 Phase 1 相同的噪声场来创建还原轨迹
+        // 噪声强度随还原进度逐渐减弱（初期有扰动，末期稳定）
+        var noiseIntensity = (1.0 - easedRecover) * (1.0 - easedRecover); // 二次衰减
+        noiseIntensity = noiseIntensity * 3.0; // 适中的扰动强度
+        
+        // 计算噪声采样位置（空间+时间）
+        let noisePos = (originalCenter - uniform.uCenter) * 0.3;
+        let noiseTime = uniform.uTime * 0.6;
+        
+        // 获取噪声方向（与 Phase 1 相同的 fBM 噪声）
+        var noiseDir = fbmNoise(noisePos, noiseTime);
+        
+        // 添加额外的低频噪声层
+        let noisePos2 = (originalCenter - uniform.uCenter) * 0.15 + vec3f(0.0, 0.0, noiseTime * 0.2);
+        let noiseDir2 = fbmNoise(noisePos2, noiseTime * 0.5);
+        noiseDir = normalize(noiseDir * 0.7 + noiseDir2 * 0.3);
+        
+        // 构建切向和法向空间（用于侧向扰动）
+        let upAxis = vec3f(0.0, 1.0, 0.0);
+        var tangential = normalize(cross(upAxis, radialOut));
+        if (length(tangential) < 0.001) {
+            tangential = vec3f(0.0, 0.0, 1.0);
+        }
+        let normal = cross(radialOut, tangential);
+        
+        // 将噪声方向投影到切向和法向空间
+        let tangentialNoise = dot(noiseDir, tangential);
+        let normalNoise = dot(noiseDir, normal);
+        
+        // 计算扰动偏移（随还原进度逐渐减弱）
+        let perturbationDistance = startOffsetDistance * noiseIntensity * 2.0;
+        var perturbation = tangential * tangentialNoise * perturbationDistance;
+        perturbation = perturbation + normal * normalNoise * perturbationDistance;
+        
+        // 添加径向相位扰动
+        let phaseNoise = dot(noiseDir, radialOut) * 0.8;
+        let phaseOffset = phaseNoise * noiseIntensity * startOffsetDistance * 0.6;
+        let phasePerturbation = radialOut * phaseOffset;
+        
+        // 添加垂直扰动
+        let verticalNoise = dot(noiseDir, upAxis);
+        let verticalPerturbation = upAxis * verticalNoise * noiseIntensity * startOffsetDistance * 0.2;
+        perturbation = perturbation + verticalPerturbation;
+        
+        // 主还原路径：从偏移位置回到原始位置
+        let mainRecoverPos = mix(startRecoverPos, originalCenter, easedRecover);
+        
+        // 最终位置 = 主还原路径 + 噪声偏移（随时间衰减）
+        var finalPos = mainRecoverPos + perturbation + phasePerturbation;
+        
+        // 确保最终位置在还原完成时严格到达原始位置
+        if (easedRecover >= 0.999) {
+            *center = originalCenter;
+        } else {
+            *center = finalPos;
+        }
     }
 }
 
@@ -687,43 +1066,76 @@ fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<func
         return;
     }
     
-    // Phase 1: Growth phase - small particles (only edge particles)
+    // Phase 1: Growth phase - small particles (point cloud) with convergence effect
     if (g_phase == 1.0) {
-        // Check if particle is at edge (far from center)
-        let distFromCenter = length(originalCenter - uniform.uCenter);
-        let edgeThreshold = uniform.uEndRadius * 0.3; // Only show particles in outer 30% of radius
-        
-        // Hide particles that are too close to center
-        if (distFromCenter < edgeThreshold) {
+        // 所有在growth阶段的粒子都参与聚拢效果
+        // 使用g_growthProgress控制显示：只有波传播到的粒子才显示
+        if (g_growthProgress <= 0.0) {
             gsplatMakeRound(covA, covB, originalSize * 0.001);
             return;
         }
         
-        let randomSeed = hash(originalCenter);
-        // Make particles much smaller for point cloud effect (5-10% of original)
-        let sizeFactor = uniform.uMinSize + randomSeed * (0.1 - uniform.uMinSize);
-        let size = originalSize * sizeFactor;
-
-        // Edge filter using approximate screen area & anisotropy (no projected ellipse available here)
+        // 放宽边缘粒子过滤条件：让更多边缘粒子参与
+        // 在波前内：显示小且圆的粒子或各向异性边缘粒子（纯点云）
         let lenA = length(*covA);
         let lenB = length(*covB);
         let small = 1e-4;
         let aniso = max(lenA, lenB) / max(min(lenA, lenB), small);
-        let screenArea = size * size;
-        let edgeCandidate = (screenArea < uniform.uEdgeAreaMin) || (aniso > uniform.uEdgeAnisoMin && screenArea < uniform.uEdgeAreaMax);
-        if (!edgeCandidate) {
-            gsplatMakeRound(covA, covB, originalSize * 0.001); // hide non-edges
+        
+        // 放宽条件：增加边缘粒子的识别范围
+        let originalScreenArea = originalSize * originalSize;
+        // 小且圆的粒子：放宽面积阈值
+        let isSmallRound = (originalScreenArea < uniform.uEdgeAreaMax * 1.5) && (aniso < 3.0);
+        // 各向异性边缘粒子：放宽各向异性和面积阈值
+        let isSmallAniso = (aniso > uniform.uEdgeAnisoMin * 0.6 && aniso < 4.0) && (originalScreenArea < uniform.uEdgeAreaMax * 1.2);
+        // 添加中等大小的边缘粒子
+        let isMediumEdge = (originalScreenArea < uniform.uEdgeAreaMax * 2.0) && (aniso > 2.0 && aniso < 5.0);
+        
+        if (!isSmallRound && !isSmallAniso && !isMediumEdge) {
+            gsplatMakeRound(covA, covB, originalSize * 0.001);
             return;
         }
 
-        gsplatMakeRound(covA, covB, size);
+        // 强制所有粒子为非常小的纯点云，但保持可见性以支持辉光效果
+        let maxPointSize = originalSize * uniform.uMinSize;
+        let pointSize = min(maxPointSize, originalSize * 0.08); // 稍微增大到8%，确保可见性
+        
+        gsplatMakeRound(covA, covB, pointSize);
         return;
     }
     
     // Phase 2: Recover phase - ALL particles recover, not just edge particles
+    // 使用基于波传播的恢复进度（g_recoverProgress），实现从下到上的波传播效果
     if (g_phase == 2.0) {
-        let t = clamp((uniform.uTime - g_tRecoverStart) / uniform.uRecoverDuration, 0.0, 1.0);
-        let easedT = clamp(1.0 - pow(1.0 - t, 4.0), 0.0, 1.0);
+        // 判断这个粒子在 Phase 1 中是否是可见的点云粒子
+        // 使用与 Phase 1 相同的判断逻辑
+        let lenA = length(*covA);
+        let lenB = length(*covB);
+        let small = 1e-4;
+        let aniso = max(lenA, lenB) / max(min(lenA, lenB), small);
+        let originalScreenArea = originalSize * originalSize;
+        let isSmallRound = (originalScreenArea < uniform.uEdgeAreaMax * 1.5) && (aniso < 3.0);
+        let isSmallAniso = (aniso > uniform.uEdgeAnisoMin * 0.6 && aniso < 4.0) && (originalScreenArea < uniform.uEdgeAreaMax * 1.2);
+        let isMediumEdge = (originalScreenArea < uniform.uEdgeAreaMax * 2.0) && (aniso > 2.0 && aniso < 5.0);
+        let wasPointCloudParticle = isSmallRound || isSmallAniso || isMediumEdge;
+        
+        // 如果恢复进度为 0，说明波还没到达这个粒子
+        // 如果是 Phase 1 的点云粒子，保持点云状态；否则隐藏
+        if (g_recoverProgress <= 0.0) {
+            if (wasPointCloudParticle) {
+                // 保持 Phase 1 的点云状态
+                let maxPointSize = originalSize * uniform.uMinSize;
+                let pointSize = min(maxPointSize, originalSize * 0.08);
+                gsplatMakeRound(covA, covB, pointSize);
+            } else {
+                // 非点云粒子保持隐藏
+                gsplatMakeRound(covA, covB, originalSize * 0.001);
+            }
+            return;
+        }
+        
+        // 使用基于波传播的恢复进度，而不是全局时间
+        let easedT = clamp(1.0 - pow(1.0 - g_recoverProgress, 4.0), 0.0, 1.0);
         
         // Check if this particle was an edge particle during growth phase
         let distFromCenter = length(originalCenter - uniform.uCenter);
@@ -731,17 +1143,22 @@ fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<func
         let wasEdgeParticle = distFromCenter >= edgeThreshold;
         
         let randomSeed = hash(originalCenter);
-        var minSizeFactor: f32;
+        var startSize: f32;
         
-        if (wasEdgeParticle) {
+        if (wasPointCloudParticle) {
+            // Phase 1 的点云粒子：从点云大小开始恢复
+            let maxPointSize = originalSize * uniform.uMinSize;
+            let pointSize = min(maxPointSize, originalSize * 0.08);
+            startSize = pointSize;
+        } else if (wasEdgeParticle) {
             // Edge particles: recover from small point cloud size
-            minSizeFactor = uniform.uMinSize + randomSeed * (0.1 - uniform.uMinSize);
+            startSize = originalSize * (uniform.uMinSize + randomSeed * (0.1 - uniform.uMinSize));
         } else {
             // Non-edge particles: start from hidden (very small) and grow to original
-            minSizeFactor = 0.001;
+            startSize = originalSize * 0.001;
         }
         
-        let size = mix(originalSize * minSizeFactor, originalSize, easedT);
+        let size = mix(startSize, originalSize, easedT);
         
         let origCovA = *covA;
         let origCovB = *covB;
@@ -755,7 +1172,52 @@ fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<func
 }
 
 fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
-    // No color modifications
+    initShared(center);
+    
+    // Phase 1 和 Phase 2: 添加蓝色辉光效果，营造能量场/体积感
+    // 蓝色辉光持续到Phase 2复原粒子的原始形态前
+    if ((g_phase == 1.0 && g_growthProgress > 0.0) || (g_phase == 2.0 && g_recoverProgress < 1.0)) {
+        // 计算蓝色辉光强度
+        var glowIntensity: f32 = 1.0;
+        var progressGlow: f32 = 1.0;
+        
+        if (g_phase == 1.0) {
+            // Phase 1: 在整个Phase 1期间保持稳定
+            // 只在最后10%的进度时稍微减弱，确保过渡平滑
+            if (g_growthProgress > 0.9) {
+                progressGlow = 1.0 - (g_growthProgress - 0.9) * 2.0; // 最后10%时逐渐减弱
+            }
+            progressGlow = max(progressGlow, 0.8); // 保持至少80%的强度
+        } else if (g_phase == 2.0) {
+            // Phase 2: 根据复原进度逐渐减弱，直到完全恢复时消失
+            // 复原进度从0到1，辉光从强到弱
+            progressGlow = 1.0 - g_recoverProgress; // 复原进度越高，辉光越弱
+            progressGlow = max(progressGlow, 0.0); // 确保不小于0
+        }
+        
+        // 根据距离中心的距离调整：边缘粒子辉光更强
+        let toSplat = center - uniform.uCenter;
+        let distFromCenter = length(toSplat);
+        let normalizedDist = distFromCenter / max(uniform.uEndRadius, 1.0);
+        let distanceGlow = 1.0 + (1.0 - normalizedDist) * 0.3; // 边缘粒子增加30%强度
+        
+        // 组合辉光强度
+        glowIntensity = progressGlow * distanceGlow;
+        glowIntensity = clamp(glowIntensity, 0.0, 1.3); // Phase 2时允许降到0
+        
+        // 蓝色辉光颜色：更亮的能量场感蓝色（偏青蓝色）
+        let blueGlow = vec3f(0.4, 0.7, 1.2); // 更亮的青蓝色，增强能量感
+        
+        // 添加蓝色辉光到原始颜色（加法混合，营造发光效果）
+        // 大幅增加混合强度，使辉光更明显
+        (*color).rgb = (*color).rgb + blueGlow * glowIntensity * 0.9; // 90%的混合强度
+        
+        // 增加亮度提升以增强体积感和能量场效果
+        (*color).rgb = (*color).rgb * (1.0 + glowIntensity * 0.4); // 40%的亮度提升
+        
+        // 确保颜色值在合理范围内
+        (*color).rgb = clamp((*color).rgb, vec3f(0.0), vec3f(3.0)); // 允许更高的亮度值
+    }
 }
 `;
 
@@ -876,11 +1338,17 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
     }
 
     updateEffect(effectTime: number, dt: number) {
-        // Calculate global recover start time: when the topmost particle finishes growing
-        // Topmost particle has smallest Y (most negative yOffset = endRadius)
-        // Growth start time for topmost = endRadius / growthSpeed
-        // Growth end time for topmost = (endRadius / growthSpeed) + growthDuration
-        const globalRecoverStart = (this.endRadius / this.growthSpeed) + this.growthDuration;
+        // Calculate global recover start time based on topY and bottomY limits
+        // This matches the shader calculation exactly:
+        // Shader: topParticleGrowthEnd = (growthDuration + maxYOffset * verticalSpread) / growthSpeed
+        // where maxYOffset = abs(bottomY - topY), verticalSpread = growthSpeed / abs(topY - bottomY)
+        // So: topParticleGrowthEnd = (growthDuration + heightRange * (growthSpeed / heightRange)) / growthSpeed
+        //    = (growthDuration + growthSpeed) / growthSpeed
+        //    = growthDuration / growthSpeed + 1.0
+        const heightRange = Math.abs(this.topY - this.bottomY);
+        const verticalSpread = this.growthSpeed / Math.max(heightRange, 0.001);
+        const maxYOffset = heightRange;
+        const globalRecoverStart = (this.growthDuration + maxYOffset * verticalSpread) / this.growthSpeed;
 
         // Update all uniforms
         this.setUniform('uTime', effectTime);
@@ -916,12 +1384,18 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
     /**
      * Calculate when the effect is complete.
      * Effect completes when all particles have finished recovering.
+     * Uses topY and bottomY limits to calculate completion time (matching shader logic).
      * @returns {boolean} True if effect is complete
      */
     isEffectComplete(globalRecoverStart?: number) {
-        // All particles finish growing at globalRecoverStart
-        // Then they all recover together
-        const recoverStart = globalRecoverStart ?? (this.endRadius / this.growthSpeed) + this.growthDuration;
+        // Calculate recover start time based on topY/bottomY limits (matching shader calculation)
+        // Shader: globalGrowthEnd = abs(bottomY - topY) * verticalSpread + growthDuration
+        // where verticalSpread = growthSpeed / abs(topY - bottomY)
+        // So: globalGrowthEnd = growthSpeed + growthDuration
+        const heightRange = Math.abs(this.topY - this.bottomY);
+        const verticalSpread = this.growthSpeed / Math.max(heightRange, 0.001);
+        const waveCompletesAtTopY = heightRange * verticalSpread + this.growthDuration;
+        const recoverStart = globalRecoverStart ?? waveCompletesAtTopY;
         const maxCompletionTime = recoverStart + this.recoverDuration;
 
         return this.effectTime >= maxCompletionTime;

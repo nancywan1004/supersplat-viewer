@@ -43,6 +43,7 @@ const initUI = (global: Global) => {
         'cameraBoundsCheck', 'cameraBoundsOption',
         'revealPanel', 'revealType', 'revealRestart', 'totalDurationRow', 'totalDuration',
         'effectTimelineRow', 'effectTimeline', 'effectPlayPause', 'effectTimeDisplay',
+        'restartAnimTrackCheck', 'restartAnimTrackOption',
         'skyboxRow', 'skyboxSelect',
         'nightModeCheck', 'nightModeOption',
         'nightFadeSlider', 'nightFadeValue',
@@ -377,8 +378,23 @@ const initUI = (global: Global) => {
         }
     });
 
+    // Restart AnimTrack toggle
+    let restartAnimTrackEnabled = false;
+    const restartAnimTrackCheck = dom.restartAnimTrackCheck;
+    const restartAnimTrackOption = dom.restartAnimTrackOption;
+    
+    if (restartAnimTrackCheck && restartAnimTrackOption) {
+        const toggleRestartAnimTrack = () => {
+            restartAnimTrackEnabled = !restartAnimTrackEnabled;
+            restartAnimTrackCheck.classList[restartAnimTrackEnabled ? 'remove' : 'add']('hidden');
+        };
+        
+        restartAnimTrackOption.addEventListener('click', toggleRestartAnimTrack);
+        restartAnimTrackCheck.addEventListener('click', toggleRestartAnimTrack);
+    }
+
     dom.revealRestart?.addEventListener('click', () => {
-        events.fire('revealRestart');
+        events.fire('revealRestart', restartAnimTrackEnabled);
     });
 
     // 时间轴控制
