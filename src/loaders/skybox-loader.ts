@@ -1,4 +1,4 @@
-import { Texture, Entity, Vec3, AppBase, StandardMaterial, CULLFACE_NONE, Asset, BoundingBox, Color } from "playcanvas";
+import { Texture, Entity, Vec3, AppBase, StandardMaterial, CULLFACE_NONE, Asset, BoundingBox, Color, type TextureHandler } from "playcanvas";
 
 const skyboxTextureCache = new Map<string, Texture>();
 const skyboxEntityCache = new Map<string, Entity>();
@@ -143,7 +143,89 @@ const applySkyboxTexture = async (app: AppBase, url: string) => {
     app.renderNextFrame = true;
 };
 
-const loadSkybox = (app: AppBase, url: string) => {
+/**
+ * 检测是否是本地开发环境
+ */
+const isLocalDevelopment = (): boolean => {
+    if (typeof window === 'undefined') {
+        return false;
+    }
+    const hostname = window.location.hostname;
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0';
+};
+
+/**
+ * 获取代理服务器地址
+ * - 本地开发环境：使用 localhost:3001 或通过 URL 参数配置
+ * - 生产环境：使用当前域名的相对路径（同域名代理）
+ */
+const getProxyServerUrl = (): string => {
+    if (typeof window === 'undefined') {
+        return 'http://localhost:3001';
+    }
+    
+    // 允许通过 URL 参数配置代理服务器地址
+    const params = new URLSearchParams(window.location.search);
+    const proxyServer = params.get('proxyServer');
+    if (proxyServer) {
+        return proxyServer;
+    }
+    
+    // 本地开发环境使用 localhost:3001
+    if (isLocalDevelopment()) {
+        return 'http://localhost:3001';
+    }
+    
+    // 生产环境使用当前域名的相对路径（同域名代理）
+    // 这样会自动使用 https://3dgs-viewer.bdnrc.org.cn/proxy/cdn/
+    return '';
+};
+
+/**
+ * 将 CDN URL 转换为代理 URL（如果需要）
+ * - 本地开发环境：使用 localhost:3001 代理服务器
+ * - 生产环境：使用当前域名的 /proxy/cdn/ 路径（同域名代理）
+ */
+const getProxiedUrl = (url: string): string => {
+    // 如果 URL 来自 unicity-cdn.bdnrc.org.cn，使用代理
+    if (url.includes('unicity-cdn.bdnrc.org.cn')) {
+        try {
+            const urlObj = new URL(url);
+            const proxyServerUrl = getProxyServerUrl();
+            
+            // 构建代理 URL
+            if (proxyServerUrl) {
+                // 本地开发环境：使用完整的代理服务器地址
+                return `${proxyServerUrl}/proxy/cdn${urlObj.pathname}${urlObj.search}`;
+            } else {
+                // 生产环境：使用相对路径（同域名代理）
+                return `/proxy/cdn${urlObj.pathname}${urlObj.search}`;
+            }
+        } catch (e) {
+            console.warn('[SuperSplat] URL 解析失败，使用原始 URL:', e);
+            return url;
+        }
+    }
+    return url;
+};
+
+const loadSkybox = async (app: AppBase, url: string): Promise<Asset> => {
+    // 将 URL 转换为代理 URL（如果需要）
+    const proxiedUrl = getProxiedUrl(url);
+    
+    // 确保设置 crossOrigin 以支持跨域图片加载
+    const textureHandler = app.loader.getHandler('texture') as TextureHandler;
+    if (textureHandler && textureHandler.imgParser) {
+        textureHandler.imgParser.crossOrigin = 'anonymous';
+    }
+
+    return await loadSkyboxDirect(app, proxiedUrl);
+};
+
+/**
+ * 直接加载天空盒（不使用代理）
+ */
+const loadSkyboxDirect = (app: AppBase, url: string): Promise<Asset> => {
     return new Promise<Asset>((resolve, reject) => {
         const asset = new Asset('skybox', 'texture', {
             url
@@ -159,7 +241,7 @@ const loadSkybox = (app: AppBase, url: string) => {
         });
 
         asset.on('error', (err) => {
-            console.log(err);
+            console.error('[SuperSplat] 天空盒加载失败:', err);
             reject(err);
         });
 
