@@ -679,12 +679,18 @@ export class RevealController {
                 }
                 
                 // 设置 topY 和 bottomY（基于 bbox 或默认值）
+                // 与 growth-wave 保持一致的约定：
+                //   - bottomY 为视觉上的底部，对应更大的 Y 值
+                //   - topY 为视觉上的顶部，对应更小的 Y 值
                 if (this.bbox) {
-                    script.topY = this.bbox.center.y - this.bbox.halfExtents.y * 0.68;
-                    script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y;
+                    // bbox 底部：center.y - halfExtents.y（数值更小）
+                    // 为了让 bottomY 更「靠下」（数值更大），取靠近中心的一层作为 bottomY
+                    script.topY = this.bbox.center.y - this.bbox.halfExtents.y;          // 顶部（更小的 Y）
+                    script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y * 0.68; // 底部（更大的 Y）
                 } else {
-                    script.topY = 10.0;
-                    script.bottomY = -10.0;
+                    // 默认：bottomY > topY
+                    script.topY = -10.0;
+                    script.bottomY = 10.0;
                 }
 
                 const heightRange = Math.abs(script.topY - script.bottomY);

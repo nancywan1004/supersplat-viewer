@@ -8,6 +8,7 @@ uniform float uSpeed;
 uniform float uWaveSpeed;
 uniform float uWaveFrequency;
 uniform float uTopY;
+uniform float uBottomY;
 uniform float uVerticalSpread;
 uniform vec3 uAabbMin;
 uniform vec3 uAabbMax;
@@ -31,13 +32,17 @@ void modifyCenter(inout vec3 center) {
         return; // 不在 AABB 内，不应用效果
     }
     
-    // 计算整合因子（与整合效果同步，从顶部向下传导，速度由uSpeed控制）
-    // 使用传播波：从顶部开始，向下传播（由于坐标系y轴取反，顶部y值大）
+    // 计算整合因子（与整合效果同步，从底部向上传导，速度由uSpeed控制）
+    // 使用传播波：从底部开始，向上传播
     float timeScaled = uTime * uSpeed;
-    // 计算相对于顶部的高度偏移（顶部y值大，所以用topY - center.y）
-    float yOffset = uTopY - center.y;
-    // 计算传播相位：时间推进 - y坐标偏移（从顶部开始）
-    // 顶部（yOffset=0，即center.y接近uTopY）的wavePhase先达到阈值，所以顶部先整合
+    // 计算相对于底部的高度偏移
+    // 统一约定：topY 是「顶部」，其数值更小；bottomY 是「底部」，其数值更大
+    // 因此这里使用 bottomY - center.y，使得：
+    //   - 底部附近（center.y ≈ bottomY）yOffset ≈ 0（最先整合）
+    //   - 顶部附近（center.y < bottomY）yOffset 为正，数值更大（最后整合）
+    float yOffset = uBottomY - center.y;
+    // 计算传播相位：时间推进 - y坐标偏移（从底部开始）
+    // 底部（yOffset=0，即center.y接近uBottomY）的wavePhase先达到阈值，所以底部先整合
     float wavePhase = timeScaled - yOffset * uVerticalSpread;
     // 使用smoothstep确保：开始时所有点tt=0（点云），传播到后tt逐渐变为1（高斯）
     // 增大过渡范围，使每层的整合更明显
@@ -86,13 +91,13 @@ void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA,
     //     return; // 不在 AABB 内，不参与效果，保持原始状态
     // }
     
-    // Calculate integrate factor (same calculation as in modifyCenter, from top to bottom)
-    // 使用传播波：从顶部开始，向下传播（由于坐标系y轴取反，顶部y值大）
+    // Calculate integrate factor (same calculation as in modifyCenter, from bottom to top)
+    // 使用传播波：从底部开始，向上传播
     float timeScaled = uTime * uSpeed;
-    // 计算相对于顶部的高度偏移（顶部y值大，所以用topY - center.y）
-    float yOffset = uTopY - originalCenter.y;
-    // 计算传播相位：时间推进 - y坐标偏移（从顶部开始）
-    // 顶部（yOffset=0，即center.y接近uTopY）的wavePhase先达到阈值，所以顶部先整合
+    // 计算相对于底部的高度偏移（bottomY 为视觉上的底部，数值更大）
+    float yOffset = uBottomY - originalCenter.y;
+    // 计算传播相位：时间推进 - y坐标偏移（从底部开始）
+    // 底部（yOffset=0，即center.y接近uBottomY）的wavePhase先达到阈值，所以底部先整合
     float wavePhase = timeScaled - yOffset * uVerticalSpread;
     // 使用smoothstep确保：开始时所有点tt=0（点云），传播到后tt逐渐变为1（高斯）
     float tt = smoothstep(0.0, 1.0, wavePhase);
@@ -150,6 +155,7 @@ uniform uSpeed: f32;
 uniform uWaveSpeed: f32;
 uniform uWaveFrequency: f32;
 uniform uTopY: f32;
+uniform uBottomY: f32;
 uniform uVerticalSpread: f32;
 uniform uAabbMin: vec3f;
 uniform uAabbMax: vec3f;
@@ -176,14 +182,18 @@ fn modifyCenter(center: ptr<function, vec3f>) {
         return; // 不在 AABB 内，不应用效果
     }
     
-    // 计算整合因子（与整合效果同步，从顶部向下传导，速度由uSpeed控制）
-    // 使用传播波：从顶部开始，向下传播（由于坐标系y轴取反，顶部y值大）
+    // 计算整合因子（与整合效果同步，从底部向上传导，速度由uSpeed控制）
+    // 使用传播波：从底部开始，向上传播
     let timeScaled = uniform.uTime * uniform.uSpeed;
-    // 计算相对于顶部的高度偏移（顶部y值大，所以用topY - center.y）
-    let yOffset = uniform.uTopY - (*center).y;
-    // 计算传播相位：时间推进 - y坐标偏移（从顶部开始）
-    // 顶部（yOffset=0，即center.y接近uTopY）的wavePhase先达到阈值，所以顶部先整合
-        let wavePhase = timeScaled - yOffset * uniform.uVerticalSpread;
+    // 计算相对于底部的高度偏移
+    // 统一约定：topY 是「顶部」，其数值更小；bottomY 是「底部」，其数值更大
+    // 因此这里使用 bottomY - center.y，使得：
+    //   - 底部附近（center.y ≈ bottomY）yOffset ≈ 0（最先整合）
+    //   - 顶部附近（center.y < bottomY）yOffset 为正，数值更大（最后整合）
+    let yOffset = uniform.uBottomY - (*center).y;
+    // 计算传播相位：时间推进 - y坐标偏移（从底部开始）
+    // 底部（yOffset=0，即center.y接近uBottomY）的wavePhase先达到阈值，所以底部先整合
+    let wavePhase = timeScaled - yOffset * uniform.uVerticalSpread;
     // 使用smoothstep确保：开始时所有点tt=0（点云），传播到后tt逐渐变为1（高斯）
     // 增大过渡范围，使每层的整合更明显
     var tt = smoothstep(0.0, 1.0, wavePhase);
@@ -232,14 +242,14 @@ fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<func
         return; // 不在 AABB 内，不参与效果，保持原始状态
     }
     
-    // Calculate integrate factor (same calculation as in modifyCenter, from top to bottom)
-    // 使用传播波：从顶部开始，向下传播（由于坐标系y轴取反，顶部y值大）
+    // Calculate integrate factor (same calculation as in modifyCenter, from bottom to top)
+    // 使用传播波：从底部开始，向上传播
     let timeScaled = uniform.uTime * uniform.uSpeed;
-    // 计算相对于顶部的高度偏移（顶部y值大，所以用topY - center.y）
-    let yOffset = uniform.uTopY - originalCenter.y;
-    // 计算传播相位：时间推进 - y坐标偏移（从顶部开始）
-    // 顶部（yOffset=0，即center.y接近uTopY）的wavePhase先达到阈值，所以顶部先整合
-        let wavePhase = timeScaled - yOffset * uniform.uVerticalSpread;
+    // 计算相对于底部的高度偏移（bottomY 为视觉上的底部，数值更大）
+    let yOffset = uniform.uBottomY - originalCenter.y;
+    // 计算传播相位：时间推进 - y坐标偏移（从底部开始）
+    // 底部（yOffset=0，即center.y接近uBottomY）的wavePhase先达到阈值，所以底部先整合
+    let wavePhase = timeScaled - yOffset * uniform.uVerticalSpread;
     // 使用smoothstep确保：开始时所有点tt=0（点云），传播到后tt逐渐变为1（高斯）
     var tt = smoothstep(0.0, 1.0, wavePhase);
     tt = clamp(tt, 0.0, 1.0); // 确保在[0,1]范围内
@@ -338,16 +348,18 @@ class GsplatIntegrate extends GsplatShaderEffect {
     waveFrequency = 3.0;
 
     /**
-     * Bottom Y coordinate where integration starts
+     * Bottom Y coordinate where integration starts.
+     * 约定：bottomY 是视觉上的底部，对应更大的 Y 值；topY 是视觉上的顶部，对应更小的 Y 值。
      * @attribute
      */
-    bottomY = -10.0;
+    bottomY = 10.0;
 
     /**
-     * Top Y coordinate where integration ends
+     * Top Y coordinate where integration ends.
+     * 约定：topY 是视觉上的顶部，对应更小的 Y 值。
      * @attribute
      */
-    topY = 10.0;
+    topY = -10.0;
 
     /**
      * Vertical spread coefficient for wave propagation
@@ -386,6 +398,7 @@ class GsplatIntegrate extends GsplatShaderEffect {
         this.setUniform('uWaveSpeed', this.waveSpeed);
         this.setUniform('uWaveFrequency', this.waveFrequency);
         this.setUniform('uTopY', this.topY);
+        this.setUniform('uBottomY', this.bottomY);
         this.setUniform('uVerticalSpread', this.verticalSpread);
 
         // Set AABB uniforms
