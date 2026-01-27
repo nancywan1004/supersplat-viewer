@@ -17,6 +17,7 @@ uniform float uTopY;
 uniform float uEdgeAreaMin;
 uniform float uEdgeAreaMax;
 uniform float uEdgeAnisoMin;
+uniform float uVerticalSpread;
 
 // Hash function for per-splat randomization
 float hash(vec3 p) {
@@ -119,8 +120,8 @@ void initShared(vec3 center) {
     float timeScaled = uTime * uGrowthSpeed;
     // For bottom-up: bottom has yOffset=0, top has large yOffset
     // Wave phase = time - yOffset * spread, so bottom (yOffset=0) starts first
-    float verticalSpread = uGrowthSpeed / abs(uTopY - uBottomY); // Speed per unit height (use abs for safety)
-    g_wavePhase = timeScaled - g_yOffset * verticalSpread;
+    // Use uVerticalSpread uniform instead of calculating it, so it can be controlled by totalDuration
+    g_wavePhase = timeScaled - g_yOffset * uVerticalSpread;
     
     // Growth progress: 0 = not reached, 1 = fully grown
     // Use smoothstep for smooth transition
@@ -130,23 +131,19 @@ void initShared(vec3 center) {
     // Recover phase: wait for ALL particles to finish growing before starting recovery
     // Recovery also propagates from bottom to top
     // Top particle has largest yOffset = abs(uBottomY - uTopY) (since uBottomY > uTopY due to Y-axis inversion)
-    // For the top particle: g_wavePhase = timeScaled - maxYOffset * verticalSpread
+    // For the top particle: g_wavePhase = timeScaled - maxYOffset * uVerticalSpread
     // When g_wavePhase >= uGrowthDuration, the top particle finishes growing
-    // So: timeScaled - maxYOffset * verticalSpread >= uGrowthDuration
-    //     uTime * uGrowthSpeed >= uGrowthDuration + maxYOffset * verticalSpread
-    //     uTime >= (uGrowthDuration + maxYOffset * verticalSpread) / uGrowthSpeed
-    // Since maxYOffset = abs(uBottomY - uTopY) and verticalSpread = uGrowthSpeed / abs(uTopY - uBottomY)
-    //     uTime >= (uGrowthDuration + abs(uBottomY - uTopY) * (uGrowthSpeed / abs(uTopY - uBottomY))) / uGrowthSpeed
-    //     uTime >= (uGrowthDuration + uGrowthSpeed) / uGrowthSpeed
-    //     uTime >= uGrowthDuration / uGrowthSpeed + 1.0
+    // So: timeScaled - maxYOffset * uVerticalSpread >= uGrowthDuration
+    //     uTime * uGrowthSpeed >= uGrowthDuration + maxYOffset * uVerticalSpread
+    //     uTime >= (uGrowthDuration + maxYOffset * uVerticalSpread) / uGrowthSpeed
     // But we want to start recovery as soon as the last particle finishes, so:
     float maxYOffset = abs(uBottomY - uTopY);
-    float topParticleGrowthEnd = (uGrowthDuration + maxYOffset * verticalSpread) / uGrowthSpeed;
+    float topParticleGrowthEnd = (uGrowthDuration + maxYOffset * uVerticalSpread) / uGrowthSpeed;
     g_tRecoverStart = topParticleGrowthEnd;
     
     // Recovery wave phase: similar to growth, but for recovery
     float recoverTimeScaled = max(0.0, uTime - g_tRecoverStart) * uGrowthSpeed;
-    float recoverWavePhase = recoverTimeScaled - g_yOffset * verticalSpread;
+    float recoverWavePhase = recoverTimeScaled - g_yOffset * uVerticalSpread;
     g_recoverProgress = smoothstep(0.0, uRecoverDuration, recoverWavePhase);
     g_recoverProgress = clamp(g_recoverProgress, 0.0, 1.0);
     
@@ -636,6 +633,7 @@ uniform uTopY: f32;
 uniform uEdgeAreaMin: f32;
 uniform uEdgeAreaMax: f32;
 uniform uEdgeAnisoMin: f32;
+uniform uVerticalSpread: f32;
 
 // Hash function for per-splat randomization
 fn hash(p: vec3f) -> f32 {
@@ -738,8 +736,8 @@ fn initShared(center: vec3f) {
     let timeScaled = uniform.uTime * uniform.uGrowthSpeed;
     // For bottom-up: bottom has yOffset=0, top has large yOffset
     // Wave phase = time - yOffset * spread, so bottom (yOffset=0) starts first
-    let verticalSpread = uniform.uGrowthSpeed / abs(uniform.uTopY - uniform.uBottomY); // Speed per unit height (use abs for safety)
-    g_wavePhase = timeScaled - g_yOffset * verticalSpread;
+    // Use uVerticalSpread uniform instead of calculating it, so it can be controlled by totalDuration
+    g_wavePhase = timeScaled - g_yOffset * uniform.uVerticalSpread;
     
     // Growth progress: 0 = not reached, 1 = fully grown
     // Use smoothstep for smooth transition
@@ -749,23 +747,19 @@ fn initShared(center: vec3f) {
     // Recover phase: wait for ALL particles to finish growing before starting recovery
     // Recovery also propagates from bottom to top
     // Top particle has largest yOffset = abs(uBottomY - uTopY) (since uBottomY > uTopY due to Y-axis inversion)
-    // For the top particle: g_wavePhase = timeScaled - maxYOffset * verticalSpread
+    // For the top particle: g_wavePhase = timeScaled - maxYOffset * uVerticalSpread
     // When g_wavePhase >= uGrowthDuration, the top particle finishes growing
-    // So: timeScaled - maxYOffset * verticalSpread >= uGrowthDuration
-    //     uTime * uGrowthSpeed >= uGrowthDuration + maxYOffset * verticalSpread
-    //     uTime >= (uGrowthDuration + maxYOffset * verticalSpread) / uGrowthSpeed
-    // Since maxYOffset = abs(uBottomY - uTopY) and verticalSpread = uGrowthSpeed / abs(uTopY - uBottomY)
-    //     uTime >= (uGrowthDuration + abs(uBottomY - uTopY) * (uGrowthSpeed / abs(uTopY - uBottomY))) / uGrowthSpeed
-    //     uTime >= (uGrowthDuration + uGrowthSpeed) / uGrowthSpeed
-    //     uTime >= uGrowthDuration / uGrowthSpeed + 1.0
+    // So: timeScaled - maxYOffset * uVerticalSpread >= uGrowthDuration
+    //     uTime * uGrowthSpeed >= uGrowthDuration + maxYOffset * uVerticalSpread
+    //     uTime >= (uGrowthDuration + maxYOffset * uVerticalSpread) / uGrowthSpeed
     // But we want to start recovery as soon as the last particle finishes, so:
     let maxYOffset = abs(uniform.uBottomY - uniform.uTopY);
-    let topParticleGrowthEnd = (uniform.uGrowthDuration + maxYOffset * verticalSpread) / uniform.uGrowthSpeed;
+    let topParticleGrowthEnd = (uniform.uGrowthDuration + maxYOffset * uniform.uVerticalSpread) / uniform.uGrowthSpeed;
     g_tRecoverStart = topParticleGrowthEnd;
     
     // Recovery wave phase: similar to growth, but for recovery
     let recoverTimeScaled = max(0.0, uniform.uTime - g_tRecoverStart) * uniform.uGrowthSpeed;
-    let recoverWavePhase = recoverTimeScaled - g_yOffset * verticalSpread;
+    let recoverWavePhase = recoverTimeScaled - g_yOffset * uniform.uVerticalSpread;
     g_recoverProgress = smoothstep(0.0, uniform.uRecoverDuration, recoverWavePhase);
     g_recoverProgress = clamp(g_recoverProgress, 0.0, 1.0);
     
@@ -1329,6 +1323,14 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
      */
     edgeAnisoMin = 5.0;
 
+    /**
+     * Vertical spread speed (units per unit height) - controls wave propagation speed
+     * If not set, will be calculated from growthSpeed and height range
+     * @attribute
+     * @range [0.01, 100]
+     */
+    verticalSpread?: number;
+
     getShaderGLSL() {
         return shaderGLSL;
     }
@@ -1338,15 +1340,13 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
     }
 
     updateEffect(effectTime: number, dt: number) {
+        // Calculate verticalSpread: use provided value or calculate from growthSpeed and height range
+        const heightRange = Math.abs(this.topY - this.bottomY);
+        const verticalSpread = this.verticalSpread ?? (this.growthSpeed / Math.max(heightRange, 0.001));
+        
         // Calculate global recover start time based on topY and bottomY limits
         // This matches the shader calculation exactly:
         // Shader: topParticleGrowthEnd = (growthDuration + maxYOffset * verticalSpread) / growthSpeed
-        // where maxYOffset = abs(bottomY - topY), verticalSpread = growthSpeed / abs(topY - bottomY)
-        // So: topParticleGrowthEnd = (growthDuration + heightRange * (growthSpeed / heightRange)) / growthSpeed
-        //    = (growthDuration + growthSpeed) / growthSpeed
-        //    = growthDuration / growthSpeed + 1.0
-        const heightRange = Math.abs(this.topY - this.bottomY);
-        const verticalSpread = this.growthSpeed / Math.max(heightRange, 0.001);
         const maxYOffset = heightRange;
         const globalRecoverStart = (this.growthDuration + maxYOffset * verticalSpread) / this.growthSpeed;
 
@@ -1372,6 +1372,7 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
         this.setUniform('uEdgeAreaMin', this.edgeAreaMin);
         this.setUniform('uEdgeAreaMax', this.edgeAreaMax);
         this.setUniform('uEdgeAnisoMin', this.edgeAnisoMin);
+        this.setUniform('uVerticalSpread', verticalSpread);
 
         // Check if effect is complete
         if (this.isEffectComplete(globalRecoverStart)) {
@@ -1389,12 +1390,11 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
      */
     isEffectComplete(globalRecoverStart?: number) {
         // Calculate recover start time based on topY/bottomY limits (matching shader calculation)
-        // Shader: globalGrowthEnd = abs(bottomY - topY) * verticalSpread + growthDuration
-        // where verticalSpread = growthSpeed / abs(topY - bottomY)
-        // So: globalGrowthEnd = growthSpeed + growthDuration
+        // Shader: topParticleGrowthEnd = (growthDuration + maxYOffset * verticalSpread) / growthSpeed
         const heightRange = Math.abs(this.topY - this.bottomY);
-        const verticalSpread = this.growthSpeed / Math.max(heightRange, 0.001);
-        const waveCompletesAtTopY = heightRange * verticalSpread + this.growthDuration;
+        const verticalSpread = this.verticalSpread ?? (this.growthSpeed / Math.max(heightRange, 0.001));
+        const maxYOffset = heightRange;
+        const waveCompletesAtTopY = (this.growthDuration + maxYOffset * verticalSpread) / this.growthSpeed;
         const recoverStart = globalRecoverStart ?? waveCompletesAtTopY;
         const maxCompletionTime = recoverStart + this.recoverDuration;
 

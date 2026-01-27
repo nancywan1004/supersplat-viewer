@@ -513,15 +513,37 @@ export class RevealController {
                 // 设置 reveal center
                 this.updateScriptCenter(script);
                 
+                // 根据 totalDuration 计算 verticalSpread
+                // 公式推导：
+                // totalDuration = topParticleGrowthEnd + recoverDuration
+                // topParticleGrowthEnd = (growthDuration + maxYOffset * verticalSpread) / growthSpeed
+                // 所以：totalDuration = (growthDuration + maxYOffset * verticalSpread) / growthSpeed + recoverDuration
+                // (totalDuration - recoverDuration) * growthSpeed = growthDuration + maxYOffset * verticalSpread
+                // verticalSpread = ((totalDuration - recoverDuration) * growthSpeed - growthDuration) / maxYOffset
+                const heightRange = Math.abs(script.topY - script.bottomY);
+                if (heightRange > 0.001) {
+                    const maxYOffset = heightRange;
+                    const growthPhaseTime = totalDuration - script.recoverDuration;
+                    if (growthPhaseTime > 0 && script.growthSpeed > 0) {
+                        script.verticalSpread = (growthPhaseTime * script.growthSpeed - script.growthDuration) / maxYOffset;
+                        // 确保 verticalSpread 是合理的正值
+                        script.verticalSpread = Math.max(0.01, script.verticalSpread);
+                    } else {
+                        // 使用默认计算
+                        script.verticalSpread = script.growthSpeed / heightRange;
+                    }
+                } else {
+                    // 使用默认计算
+                    script.verticalSpread = script.growthSpeed / Math.max(heightRange, 0.001);
+                }
+                
                 // 初始状态和 effectTime
                 script.enabled = this.config.autoStart;
                 script.effectTime = 0;
                 
                 // 计算实际的总时长（用于验证）
-                const heightRange = Math.abs(script.topY - script.bottomY);
-                const verticalSpread = script.growthSpeed / Math.max(heightRange, 0.001);
                 const maxYOffset = heightRange;
-                const topParticleGrowthEnd = (script.growthDuration + maxYOffset * verticalSpread) / script.growthSpeed;
+                const topParticleGrowthEnd = (script.growthDuration + maxYOffset * script.verticalSpread) / script.growthSpeed;
                 const actualTotalDuration = topParticleGrowthEnd + script.recoverDuration;
                 
                 console.log('Growth-wave script created with config:', {
@@ -535,7 +557,7 @@ export class RevealController {
                     topY: script.topY,
                     bottomY: script.bottomY,
                     heightRange,
-                    verticalSpread,
+                    verticalSpread: script.verticalSpread,
                     topParticleGrowthEnd,
                     requestedTotalDuration: totalDuration,
                     actualTotalDuration,
