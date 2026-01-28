@@ -473,7 +473,8 @@ class CameraManager {
             // Calculate a good viewing distance (move much closer to target)
             const currentDistance = position.distance(this.camera.position);
             // Use a smaller multiplier (0.2) and lower minimum (1.0) to get closer
-            const targetDistance = Math.max(1.0, currentDistance * 0.2);
+            const targetDistance = Math.max(4.0, currentDistance * 0.2);
+            console.log('targetDistance: '+targetDistance)
             
             // Position camera at the target distance, looking at the picked point
             const newPosition = tmpv.copy(direction).mulScalar(-targetDistance).add(position);
