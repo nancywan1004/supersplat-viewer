@@ -1,4 +1,4 @@
-import { EventHandler, Vec3 } from 'playcanvas';
+import { EventHandler, Vec3, RenderTarget, Texture, PIXELFORMAT_RGBA8 } from 'playcanvas';
 
 import { Tooltip } from './tooltip';
 import { Global } from './types';
@@ -43,6 +43,7 @@ const initUI = (global: Global) => {
         'cameraBoundsCheck', 'cameraBoundsOption',
         'revealPanel', 'revealType', 'revealRestart', 'totalDurationRow', 'totalDuration',
         'effectTimelineRow', 'effectTimeline', 'effectPlayPause', 'effectTimeDisplay',
+        'vfxVideoExportRow', 'vfxVideoExportButton', 'testCaptureFrameButton', 'videoResolution', 'customResolutionRow', 'customWidth', 'customHeight',
         'restartAnimTrackCheck', 'restartAnimTrackOption',
         'skyboxRow', 'skyboxSelect',
         'nightModeCheck', 'nightModeOption',
@@ -484,6 +485,362 @@ const initUI = (global: Global) => {
                     events.fire('effectTimeline:set', totalDuration);
                 }
             }
+        }
+    });
+
+    // VFX 视频导出按钮（基于当前 VFX 时间轴）
+    const vfxVideoExportRow = dom.vfxVideoExportRow;
+    const vfxVideoExportButton = dom.vfxVideoExportButton as HTMLButtonElement;
+    const videoResolution = dom.videoResolution as HTMLSelectElement;
+    const customResolutionRow = dom.customResolutionRow;
+    const customWidth = dom.customWidth as HTMLInputElement;
+    const customHeight = dom.customHeight as HTMLInputElement;
+
+    // 分辨率预设
+    const resolutionPresets: Record<string, { width: number; height: number }> = {
+        '720p': { width: 1280, height: 720 },
+        '1080p': { width: 1920, height: 1080 },
+        '1440p': { width: 2560, height: 1440 },
+        '2160p': { width: 3840, height: 2160 }
+    };
+
+    // 根据分辨率选择显示/隐藏自定义分辨率输入
+    const updateCustomResolutionVisibility = () => {
+        if (videoResolution && customResolutionRow) {
+            const isCustom = videoResolution.value === 'custom';
+            customResolutionRow.classList[isCustom ? 'remove' : 'add']('hidden');
+        }
+    };
+
+    videoResolution?.addEventListener('change', updateCustomResolutionVisibility);
+    updateCustomResolutionVisibility();
+
+    // 获取配置的分辨率
+    const getVideoResolution = (): { width: number; height: number } => {
+        const selected = videoResolution?.value || '1080p';
+        
+        if (selected === 'custom') {
+            const width = parseInt(customWidth?.value || '1920', 10);
+            const height = parseInt(customHeight?.value || '1080', 10);
+            return { width, height };
+        }
+        
+        return resolutionPresets[selected] || resolutionPresets['1080p'];
+    };
+
+    // 根据当前是否为需要时间轴的 VFX 效果来显示/隐藏导出按钮
+    const updateVfxVideoExportVisibility = () => {
+        const currentType = (state as any).vfxType || global.settings?.revealEffect?.type || 'none';
+        const showForType = timedVfxEffects.includes(currentType);
+        if (vfxVideoExportRow) {
+            vfxVideoExportRow.classList[showForType ? 'remove' : 'add']('hidden');
+        }
+    };
+
+    // 初始及配置变化时更新可见性
+    events.on('revealType:changed', updateVfxVideoExportVisibility);
+    events.on('revealConfigChanged', updateVfxVideoExportVisibility);
+    updateVfxVideoExportVisibility();
+
+    // 点击导出 VFX 视频
+    vfxVideoExportButton?.addEventListener('click', async () => {
+        try {
+            // 获取配置的分辨率
+            const resolution = getVideoResolution();
+            // H264 编码器要求宽度和高度都是偶数
+            const width = resolution.width % 2 === 0 ? resolution.width : resolution.width - 1;
+            const height = resolution.height % 2 === 0 ? resolution.height : resolution.height - 1;
+            
+            if (width !== resolution.width || height !== resolution.height) {
+                console.log(`Video dimensions adjusted from ${resolution.width}x${resolution.height} to ${width}x${height} for H264 compatibility`);
+            }
+
+            // 使用 revealEffect 的 totalDuration 作为导出时长
+            // 注意：导出将基于 VFX 时间轴，从 0 到 totalDuration
+            const totalDuration = global.settings?.revealEffect?.totalDuration ?? 20.0;
+            const frameRate = 30;          // 输出视频帧率
+            
+            // 注意：startFrame 和 endFrame 现在不再使用，因为导出基于 VFX 时间轴
+            // 但为了保持 VideoSettings 接口兼容性，仍然提供这些值
+            const videoSettings = {
+                startFrame: 0,
+                endFrame: 0, // 不再使用，导出时长由 VFX 时间轴决定
+                frameRate,
+                width,
+                height,
+                bitrate: 8_000_000,
+                transparentBg: false,
+                showDebug: false,
+                format: 'mov' as const,
+                codec: 'h264' as const
+            };
+
+            let fileStream: FileSystemWritableFileStream | undefined;
+
+            // 如果浏览器支持 File System Access API，则弹出保存对话框
+            if ('showSaveFilePicker' in window) {
+                const opts = {
+                    types: [
+                        {
+                            description: 'Video File',
+                            accept: {
+                                'video/quicktime': ['.mov']
+                            }
+                        }
+                    ],
+                    suggestedName: 'vfx-timeline.mov'
+                };
+                const handle = await (window as any).showSaveFilePicker(opts);
+                fileStream = await handle.createWritable();
+            }
+
+            // 触发视频渲染与编码
+            events.fire('render.video', videoSettings, fileStream as any);
+        } catch (err) {
+            console.error('Failed to start VFX video export:', err);
+        }
+    });
+
+    // 测试捕获单帧按钮
+    const testCaptureFrameButton = dom.testCaptureFrameButton as HTMLButtonElement;
+    testCaptureFrameButton?.addEventListener('click', async () => {
+        try {
+            const gd = global.app.graphicsDevice;
+            const canvas = gd.canvas as HTMLCanvasElement;
+            
+            // 检查 canvas 是否存在和有效
+            if (!canvas) {
+                throw new Error('Canvas not found');
+            }
+            
+            console.log('Canvas info:', {
+                width: canvas.width,
+                height: canvas.height,
+                clientWidth: canvas.clientWidth,
+                clientHeight: canvas.clientHeight,
+                offsetWidth: canvas.offsetWidth,
+                offsetHeight: canvas.offsetHeight,
+                style: {
+                    display: canvas.style.display,
+                    visibility: canvas.style.visibility,
+                    opacity: canvas.style.opacity
+                }
+            });
+            
+            // 获取配置的分辨率
+            const resolution = getVideoResolution();
+            const width = resolution.width % 2 === 0 ? resolution.width : resolution.width - 1;
+            const height = resolution.height % 2 === 0 ? resolution.height : resolution.height - 1;
+            
+            console.log(`Testing frame capture at ${width}x${height}`);
+            console.log(`Source canvas size: ${canvas.width}x${canvas.height}`);
+            
+            // 如果 canvas 尺寸为 0，使用实际显示尺寸
+            const sourceWidth = canvas.width || canvas.clientWidth || gd.width;
+            const sourceHeight = canvas.height || canvas.clientHeight || gd.height;
+            
+            console.log(`Using source size: ${sourceWidth}x${sourceHeight}`);
+            
+            if (sourceWidth === 0 || sourceHeight === 0) {
+                throw new Error(`Invalid canvas size: ${sourceWidth}x${sourceHeight}`);
+            }
+            
+            // 等待多帧渲染完成，确保内容已渲染
+            for (let i = 0; i < 3; i++) {
+                await new Promise<void>((resolve) => {
+                    global.app.once('frameend', () => {
+                        resolve();
+                    });
+                    global.app.renderNextFrame = true;
+                });
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+            
+            // 先尝试从 RenderTarget 捕获（优先方法）
+            let capturedData: Uint8Array | null = null;
+            let captureMethod = 'unknown';
+            
+            try {
+                // 创建临时 RenderTarget 用于捕获
+                const device = global.app.graphicsDevice;
+                const tempColorBuffer = new Texture(device, {
+                    format: PIXELFORMAT_RGBA8,
+                    width: width,
+                    height: height,
+                    mipmaps: false
+                });
+                const tempRenderTarget = new RenderTarget({
+                    colorBuffer: tempColorBuffer,
+                    depth: false
+                });
+                
+                // 保存原始渲染目标
+                const originalRenderTarget = device.getRenderTarget();
+                const originalCameraRenderTarget = (global.camera.camera as any).renderTarget;
+                
+                try {
+                    // 设置渲染目标
+                    device.setRenderTarget(tempRenderTarget);
+                    if (originalCameraRenderTarget !== undefined) {
+                        (global.camera.camera as any).renderTarget = tempRenderTarget;
+                    }
+                    
+                    // 触发渲染
+                    global.app.renderNextFrame = true;
+                    await new Promise<void>((resolve) => {
+                        global.app.once('frameend', () => {
+                            resolve();
+                        });
+                    });
+                    
+                    // 读取数据
+                    const data = await tempColorBuffer.read(0, 0, width, height, { renderTarget: tempRenderTarget });
+                    
+                    if (data instanceof Uint8Array) {
+                        capturedData = data;
+                        captureMethod = 'RenderTarget (direct render, Uint8Array)';
+                    } else if (data instanceof Float32Array) {
+                        capturedData = new Uint8Array(data.length);
+                        for (let i = 0; i < data.length; i++) {
+                            capturedData[i] = Math.max(0, Math.min(255, Math.floor(data[i] * 255)));
+                        }
+                        captureMethod = 'RenderTarget (direct render, Float32Array converted)';
+                    }
+                    
+                    // 恢复原始渲染目标
+                    device.setRenderTarget(originalRenderTarget);
+                    if (originalCameraRenderTarget !== undefined) {
+                        (global.camera.camera as any).renderTarget = originalCameraRenderTarget;
+                    }
+                    
+                    // 清理临时资源
+                    tempRenderTarget.destroy();
+                    tempColorBuffer.destroy();
+                } catch (renderError) {
+                    // 确保恢复
+                    device.setRenderTarget(originalRenderTarget);
+                    if (originalCameraRenderTarget !== undefined) {
+                        (global.camera.camera as any).renderTarget = originalCameraRenderTarget;
+                    }
+                    tempRenderTarget.destroy();
+                    tempColorBuffer.destroy();
+                    throw renderError;
+                }
+            } catch (rtError) {
+                console.warn('RenderTarget capture failed, trying canvas method:', rtError);
+            }
+            
+            // 如果 RenderTarget 方法失败，使用 canvas 方法
+            if (!capturedData) {
+                // 创建离屏 canvas 用于捕获
+                const offscreenCanvas = document.createElement('canvas');
+                offscreenCanvas.width = width;
+                offscreenCanvas.height = height;
+                const ctx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
+                
+                if (!ctx) {
+                    throw new Error('Failed to get 2d context');
+                }
+                
+                // 先尝试直接绘制 canvas
+                try {
+                    ctx.drawImage(canvas, 0, 0, sourceWidth, sourceHeight, 0, 0, width, height);
+                    captureMethod = 'Canvas (drawImage)';
+                } catch (drawError) {
+                    console.warn('Direct drawImage failed, trying toDataURL method:', drawError);
+                    // 如果直接绘制失败，尝试使用 toDataURL
+                    try {
+                        const dataUrl = canvas.toDataURL('image/png');
+                        const img = new Image();
+                        await new Promise((resolve, reject) => {
+                            img.onload = resolve;
+                            img.onerror = reject;
+                            img.src = dataUrl;
+                        });
+                        ctx.drawImage(img, 0, 0, width, height);
+                        captureMethod = 'Canvas (toDataURL)';
+                    } catch (dataUrlError) {
+                        console.error('toDataURL method also failed:', dataUrlError);
+                        throw new Error(`Failed to capture canvas: ${drawError}, ${dataUrlError}`);
+                    }
+                }
+                
+                // 从 canvas 读取像素数据
+                const imageData = ctx.getImageData(0, 0, width, height);
+                capturedData = new Uint8Array(imageData.data);
+            }
+            
+            // 检查是否有内容（不是全黑）
+            let hasContent = false;
+            let maxR = 0, maxG = 0, maxB = 0;
+            let sampleCount = 0;
+            for (let i = 0; i < capturedData.length; i += 4) {
+                const r = capturedData[i];
+                const g = capturedData[i + 1];
+                const b = capturedData[i + 2];
+                maxR = Math.max(maxR, r);
+                maxG = Math.max(maxG, g);
+                maxB = Math.max(maxB, b);
+                if (r > 10 || g > 10 || b > 10) {
+                    hasContent = true;
+                }
+                sampleCount++;
+                if (sampleCount > 10000) break; // 只检查前10000个像素
+            }
+            
+            console.log(`Frame capture test: ${hasContent ? 'SUCCESS - Content detected' : 'FAILED - Black screen detected'}`);
+            console.log(`Capture method: ${captureMethod}`);
+            console.log(`Max RGB values: R=${maxR}, G=${maxG}, B=${maxB}`);
+            
+            // 创建 canvas 用于显示
+            const offscreenCanvas = document.createElement('canvas');
+            offscreenCanvas.width = width;
+            offscreenCanvas.height = height;
+            const ctx = offscreenCanvas.getContext('2d');
+            if (ctx) {
+                // 垂直翻转数据（因为 Canvas 和视频帧的坐标系不同）
+                const flippedData = new Uint8ClampedArray(capturedData.length);
+                for (let y = 0; y < height; y++) {
+                    const srcY = height - 1 - y;
+                    const srcOffset = srcY * width * 4;
+                    const dstOffset = y * width * 4;
+                    flippedData.set(capturedData.subarray(srcOffset, srcOffset + width * 4), dstOffset);
+                }
+                
+                const imageData = ctx.createImageData(width, height);
+                imageData.data.set(flippedData);
+                ctx.putImageData(imageData, 0, 0);
+            }
+            
+            // 将捕获的图像显示在新窗口中
+            const dataUrl = offscreenCanvas.toDataURL('image/png');
+            const newWindow = window.open();
+            if (newWindow) {
+                newWindow.document.write(`
+                    <html>
+                        <head><title>Captured Frame Test</title></head>
+                        <body style="margin: 0; padding: 20px; background: #333; color: white;">
+                            <h2>捕获的帧测试 (${width}×${height})</h2>
+                            <p>状态: <strong style="color: ${hasContent ? 'green' : 'red'}">${hasContent ? '成功 - 检测到内容' : '失败 - 黑屏'}</strong></p>
+                            <p>最大 RGB 值: R=${maxR}, G=${maxG}, B=${maxB}</p>
+                            <img src="${dataUrl}" style="max-width: 100%; border: 2px solid ${hasContent ? 'green' : 'red'};" />
+                            <p style="margin-top: 20px; font-size: 12px; color: #999;">
+                                捕获方法: ${captureMethod}<br>
+                                源 canvas 尺寸: ${canvas.width}×${canvas.height}<br>
+                                源显示尺寸: ${sourceWidth}×${sourceHeight}<br>
+                                捕获尺寸: ${width}×${height}<br>
+                                GraphicsDevice: ${gd.width}×${gd.height}
+                            </p>
+                        </body>
+                    </html>
+                `);
+            } else {
+                // 如果弹窗被阻止，使用 alert 显示结果
+                alert(`捕获测试完成！\n状态: ${hasContent ? '成功 - 检测到内容' : '失败 - 黑屏'}\n尺寸: ${width}×${height}\n最大RGB: R=${maxR}, G=${maxG}, B=${maxB}`);
+            }
+        } catch (err) {
+            console.error('Failed to test frame capture:', err);
+            alert(`捕获测试失败: ${err}`);
         }
     });
 

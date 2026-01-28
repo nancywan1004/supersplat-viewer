@@ -25,6 +25,7 @@ import { loadSplat } from './loaders/splat-loader';
 import type { AssetSource } from './loaders/asset-source';
 import { version as appVersion } from '../package.json';
 import { initPostMessageBridge } from './message-bridge';
+import { initVideoExport } from './video-export';
 
 /**
  * 加载 gsplat Asset（参照提供的 load 函数模式）
@@ -242,6 +243,10 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
     // Initialize user interface
     initUI(global);
 
+    // Initialize video export (VFX / timeline capture)
+    // This listens to 'render.video' events and performs offscreen rendering + encoding
+    initVideoExport(global);
+
     // Load model
     const gsplatLoad = loadGsplat(
         app,
@@ -310,7 +315,12 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
     // Create the viewer
     initPostMessageBridge(global);
 
-    return new Viewer(global, gsplatLoad, skyboxLoad);
+    const viewer = new Viewer(global, gsplatLoad, skyboxLoad);
+    
+    // 将 viewer 存储到 app 上，方便其他模块访问（如 video-export）
+    (app as any).viewer = viewer;
+    
+    return viewer;
 };
 
 console.log(`SuperSplat Viewer v${appVersion} | Engine v${engineVersion} (${engineRevision})`);
