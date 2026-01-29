@@ -1,0 +1,27 @@
+// VFX 视频导出组件样式（由 index.scss 在 #settingsPanel 内 @import，变量来自主文件）
+
+.vfxExportInner {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+}
+
+.vfxExportRow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    > label {
+        min-width: 60px;
+        color: $clr-text-dark;
+    }
+
+    > .settingsSelect {
+        flex: 1;
+    }
+
+    > .settingsInput {
+        flex: 1;
+    }
+}

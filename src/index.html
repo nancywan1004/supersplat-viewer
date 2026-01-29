@@ -217,8 +217,8 @@
                 <div id="revealPanel" class="hidden">
                     <div class="divider"></div>
                     <div class="settingsRow">
-                        <label for="revealType" style="margin-right: 8px;">Effect:</label>
-                        <select id="revealType">
+                        <label for="revealType">Effect:</label>
+                        <select id="revealType" class="settingsSelect">
                             <option value="none">None</option>
                             <optgroup label="Reveal Effects">
                                 <option value="radial">Radial</option>
@@ -238,21 +238,21 @@
                         </select>
                     </div>
                     <div id="totalDurationRow" class="settingsRow hidden">
-                        <label for="totalDuration" style="margin-right: 8px;">Total Duration (s):</label>
-                        <input type="number" id="totalDuration" min="1" max="60" step="0.5" value="15" style="width: 80px;">
+                        <label for="totalDuration">Total Duration (s):</label>
+                        <input type="number" id="totalDuration" class="settingsInput" min="1" max="60" step="0.5" value="15">
                     </div>
                     <div id="effectTimelineRow" class="settingsRow hidden">
-                        <div style="display: flex; align-items: center; gap: 8px; width: 100%;">
-                            <button id="effectPlayPause" style="min-width: 40px; padding: 4px 8px;">⏸</button>
-                            <input type="range" id="effectTimeline" min="0" max="200" step="1" value="0" style="flex: 1;">
-                            <span id="effectTimeDisplay" style="min-width: 50px; text-align: right; font-size: 12px;">0.0s</span>
+                        <div class="effectTimelineInner">
+                            <button id="effectPlayPause" class="settingsButton" type="button" aria-label="Play/Pause">⏸</button>
+                            <input type="range" id="effectTimeline" min="0" max="200" step="1" value="0" class="effectTimelineRange">
+                            <span id="effectTimeDisplay" class="effectTimeDisplay">0.0s</span>
                         </div>
                     </div>
                     <div class="settingsRow hidden" id="vfxVideoExportRow">
-                        <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <label for="videoResolution" style="min-width: 80px;">分辨率:</label>
-                                <select id="videoResolution" style="flex: 1;">
+                        <div class="vfxExportInner">
+                            <div class="vfxExportRow">
+                                <label for="videoResolution">分辨率:</label>
+                                <select id="videoResolution" class="settingsSelect">
                                     <option value="720p">720p (1280×720)</option>
                                     <option value="1080p" selected>1080p (1920×1080)</option>
                                     <option value="1440p">1440p (2560×1440)</option>
@@ -260,18 +260,18 @@
                                     <option value="custom">自定义</option>
                                 </select>
                             </div>
-                            <div id="customResolutionRow" class="hidden" style="display: flex; align-items: center; gap: 8px;">
-                                <label for="customWidth" style="min-width: 60px;">宽度:</label>
-                                <input type="number" id="customWidth" min="320" max="7680" step="2" value="1920" style="flex: 1;">
-                                <label for="customHeight" style="min-width: 60px;">高度:</label>
-                                <input type="number" id="customHeight" min="240" max="4320" step="2" value="1080" style="flex: 1;">
+                            <div id="customResolutionRow" class="hidden vfxExportRow">
+                                <label for="customWidth">宽度:</label>
+                                <input type="number" id="customWidth" class="settingsInput" min="320" max="7680" step="2" value="1920">
+                                <label for="customHeight">高度:</label>
+                                <input type="number" id="customHeight" class="settingsInput" min="240" max="4320" step="2" value="1080">
                             </div>
-                            <button id="vfxVideoExportButton" style="width: 100%;">导出 VFX 视频</button>
-                            <button id="testCaptureFrameButton" style="width: 100%; margin-top: 8px;">测试捕获单帧</button>
+                            <button id="vfxVideoExportButton" class="settingsButton" type="button">导出 VFX 视频</button>
+                            <button id="testCaptureFrameButton" class="settingsButton" type="button">测试捕获单帧</button>
                         </div>
                     </div>
                     <div class="settingsRow">
-                        <button id="revealRestart">Restart Effect</button>
+                        <button id="revealRestart" class="settingsButton" type="button">Restart Effect</button>
                     </div>
                     <div class="settingsRow">
                         <div id="restartAnimTrackCheck" class="checkMark">✓</div>

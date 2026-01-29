@@ -316,15 +316,67 @@ button {
 
             &.checkMark {
                 width: 16px;
+                flex-shrink: 0;
+                text-align: center;
 
                 &:not(.active) {
                     color: $clr-bkg;
+                }
+
+                &.active {
+                    color: $clr-accent;
                 }
             }
 
             &:hover {
                 color: $clr-text;
             }
+        }
+    }
+
+    /* 非直接子元素的按钮/下拉框也使用与 settingsRow 一致的样式 */
+    .settingsButton {
+        padding: 10px 20px;
+        border: 0;
+        cursor: pointer;
+        border-radius: 4px;
+
+        color: $clr-text;
+        background-color: $clr-bkg-darkest;
+
+        &:hover {
+            color: $clr-text-light;
+        }
+    }
+
+    .settingsSelect {
+        padding: 10px 20px;
+        border: 0;
+        cursor: pointer;
+        border-radius: 4px;
+
+        color: $clr-text;
+        background-color: $clr-bkg-darkest;
+
+        &:hover {
+            color: $clr-text-light;
+        }
+
+        &:focus {
+            outline: 1px solid $clr-accent;
+        }
+    }
+
+    .settingsInput {
+        padding: 8px 12px;
+        border: 0;
+        border-radius: 4px;
+
+        color: $clr-text;
+        background-color: $clr-bkg-darkest;
+
+        &:focus {
+            outline: 1px solid $clr-accent;
         }
     }
 
@@ -336,12 +388,8 @@ button {
         background-color: $clr-text-darkest;
     }
 
-    #revealPanel {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        width: 100%;
-    }
+    @import 'ui/reveal-ui';
+    @import 'ui/video-export-ui';
 }
 
 /* infoPanel */

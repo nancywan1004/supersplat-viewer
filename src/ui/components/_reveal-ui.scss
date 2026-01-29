@@ -1,0 +1,32 @@
+// Reveal / VFX 与效果时间轴组件样式（由 index.scss 在 #settingsPanel 内 @import，变量来自主文件）
+
+#revealPanel {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+}
+
+.effectTimelineInner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.effectTimelineRange {
+    flex: 1;
+    accent-color: $clr-accent;
+}
+
+.effectTimeDisplay {
+    min-width: 50px;
+    text-align: right;
+    font-size: 12px;
+    color: $clr-text-dark;
+}
+
+#totalDuration {
+    width: 80px;
+    min-width: 80px;
+}

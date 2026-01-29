@@ -16,7 +16,7 @@ import { applySkyboxSphere, removeSkyboxSphere, applySkyboxTexture, type SkyboxO
 import { observe } from './core/observe';
 import { importSettings } from './settings';
 import type { Config, Global } from './types';
-import { initPoster, initUI } from './ui';
+import { initPoster, initUI } from './ui/ui';
 import { Viewer } from './viewer';
 import { initXr } from './xr';
 import { initLight } from './light';
