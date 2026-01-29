@@ -134,6 +134,9 @@ class CameraManager {
     // holds the camera state
     camera = new Camera();
 
+    /** 动画控制器（用于导出时按时间轴 seek 相机） */
+    animController: AnimController | null = null;
+
     // visual marker for picked point
     private pickMarker: Entity | null = null;
 
@@ -199,6 +202,7 @@ class CameraManager {
             fly: new FlyController(),
             anim: animTrack ? new AnimController(animTrack) : null
         };
+        this.animController = controllers.anim;
 
         // 约束边界（融合策略）：
         // - 若有动画路径：用 anim AABB 与 scene AABB 做 union（避免 anim→orbit / orbit→fly 切换时发生 clamp 跳变）
@@ -513,6 +517,21 @@ class CameraManager {
 
             controllers.orbit.goto(tmpCamera);
         });
+    }
+
+    /**
+     * 将 animTrack 定位到指定时间并更新相机姿态（用于导出时与 VFX 时间轴同步录制相机动画）
+     */
+    seekAnimToTime(time: number): void {
+        const anim = this.animController;
+        if (!anim) return;
+        const { cursor, position, target } = anim.animState;
+        const duration = cursor.duration;
+        const t = Math.max(0, Math.min(time, duration));
+        (cursor as { cursor: number }).cursor = t;
+        cursor.timer = 0;
+        anim.animState.update(0);
+        this.camera.look(position, target);
     }
 
     private ensureDebugBoundsLayer(app: any): number {

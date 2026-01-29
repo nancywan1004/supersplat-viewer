@@ -82,9 +82,14 @@ export class RevealController {
             this.restart(restartAnimTrack ?? false);
         });
 
-        // 监听时间轴控制事件
+        // 监听时间轴控制事件（交互用：会驱动 UI slider）
         events.on('effectTimeline:set', (time: number) => {
             this.setEffectTime(time);
+        });
+
+        // 监听导出专用时间轴事件（离线导出用：不会驱动 UI slider）
+        events.on('effectTimeline:setForExport', (time: number) => {
+            this.setEffectTimeForExport(time);
         });
 
         events.on('effectPlayPause:toggle', () => {
@@ -1061,8 +1066,41 @@ export class RevealController {
         
         this.currentScript.setEffectTime(clampedTime);
         
-        // 触发事件更新 UI
+        // 触发事件更新 UI（交互用）
         this.global.events.fire('effectTime:changed', clampedTime);
+    }
+
+    /**
+     * 设置特效时间（用于离线导出）
+     * 与 setEffectTime 的差异：
+     * - 不触发 effectTime:changed，避免驱动 UI slider / 播放控制
+     */
+    setEffectTimeForExport(time: number) {
+        if (!this.currentScript || typeof this.currentScript.setEffectTime !== 'function') {
+            return;
+        }
+        const totalDuration = this.config.totalDuration ?? 20.0;
+        const clampedTime = Math.max(0, Math.min(time, totalDuration));
+        
+        if (!this.currentScript.enabled) {
+            this.currentScript.enabled = true;
+            this.effectStartTime = null;
+            this.effectEndTime = null;
+            this.isTiming = false;
+        }
+        
+        // 导出时暂停脚本，防止 update 方法中的 effectTime += dt 覆盖我们设置的值
+        // 注意：setEffectTime 会立即调用 updateEffect，所以即使 paused，uniforms 也会更新
+        // 保存之前的暂停状态，以便后续恢复（虽然导出时应该保持暂停）
+        if (!this.currentScript.isPaused) {
+            this.currentScript.isPaused = true;
+            // 同时更新 isEffectPaused 状态，保持一致性
+            this.isEffectPaused = true;
+        }
+        
+        this.currentScript.setEffectTime(clampedTime);
+        
+        // 不再 fire effectTime:changed，保持 UI 不动
     }
 
     /**

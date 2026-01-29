@@ -25,7 +25,7 @@ import { loadSplat } from './loaders/splat-loader';
 import type { AssetSource } from './loaders/asset-source';
 import { version as appVersion } from '../package.json';
 import { initPostMessageBridge } from './message-bridge';
-import { initVideoExport } from './video-export';
+import { initVideoExport } from './render/video-export';
 
 /**
  * 加载 gsplat Asset（参照提供的 load 函数模式）
@@ -204,7 +204,10 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         showCameraPath: false,
         showCameraBoundingBox: false,
         vfxActive: false,
-        vfxType: 'none' as 'none' | 'grow' | 'pieces-recover' | 'perlin-wave' | 'disintegrate' | 'integrate' | 'growth-wave'
+        vfxType: 'none' as 'none' | 'grow' | 'pieces-recover' | 'perlin-wave' | 'disintegrate' | 'integrate' | 'growth-wave',
+
+        // 导出 VFX 视频时的锁，防止实时更新干扰离线渲染
+        isExportingVfxVideo: false
     });
 
     // 如果设置了 noreveal 参数，清除 reveal effect 配置

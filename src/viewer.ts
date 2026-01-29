@@ -142,6 +142,9 @@ class Viewer {
     forceRenderNextFrame = false;
     pathVisualizer: CameraPathVisualizer | null = null;
 
+    /** 将 cameraManager 的相机姿态应用到实体（导出时 seek anim 后调用） */
+    applyCameraFromManager: () => void = () => {};
+
     constructor(global: Global, gsplatLoad: Promise<Entity>, skyboxLoad: Promise<void>) {
         this.global = global;
 
@@ -225,6 +228,13 @@ class Viewer {
 
         // track the camera state and trigger a render when it changes
         app.on('framerender', () => {
+            // 导出 VFX 视频时：不推进相机/UI 逻辑，但允许 renderNextFrame 保持为 true（由导出循环设置），
+            // 以便主相机管线照常跑一帧并输出到导出 RT，实现 SuperSplat 式「关掉最终 blit 到 canvas」的离屏导出
+            const stateAny = state as any;
+            if (stateAny.isExportingVfxVideo) {
+                return;
+            }
+
             const world = camera.getWorldTransform();
             const proj = camera.camera.projectionMatrix;
 
@@ -300,8 +310,19 @@ class Viewer {
             cameraEntity.camera.nearClip = near;
         };
 
+        /** 将 cameraManager 的相机姿态应用到实体（导出时 seek anim 后调用） */
+        this.applyCameraFromManager = () => {
+            if (this.cameraManager) applyCamera(this.cameraManager.camera);
+        };
+
         // handle application update
         app.on('update', (deltaTime) => {
+            // 导出 VFX 视频时锁住实时更新（相机 / VFX 不再推进）
+            const stateAny = this.global.state as any;
+            if (stateAny.isExportingVfxVideo) {
+                return;
+            }
+
             // in xr mode we leave the camera alone
             if (app.xr.active) {
                 return;

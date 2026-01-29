@@ -1,6 +1,14 @@
 import { BufferTarget, EncodedPacket, EncodedVideoPacketSource, MkvOutputFormat, MovOutputFormat, Mp4OutputFormat, Output, StreamTarget, WebMOutputFormat } from 'mediabunny';
-import { Global } from './types';
-import { EventHandler, Vec3, RenderTarget, Texture, PIXELFORMAT_RGBA8, Color, RenderPass } from 'playcanvas';
+import { Global } from '../types';
+import {
+    EventHandler,
+    Vec3,
+    Entity,
+    RenderTarget,
+    Texture,
+    PIXELFORMAT_RGBA8,
+    Color
+} from 'playcanvas';
 
 type VideoSettings = {
     startFrame: number;
@@ -13,6 +21,8 @@ type VideoSettings = {
     showDebug: boolean;
     format: 'mp4' | 'webm' | 'mov' | 'mkv';
     codec: 'h264' | 'h265' | 'vp9' | 'av1';
+    /** 勾选「Restart AnimTrack」时导出：VFX 时间轴与相机 animTrack 同步录制 */
+    syncAnimTrack?: boolean;
 };
 
 /**
@@ -133,289 +143,170 @@ class VideoExportConfig {
 }
 
 /**
- * 渲染管理器
- * 负责离屏渲染模式的设置和恢复
- * 简化版本，专注于架构而非具体API实现
+ * SuperSplat 式离屏导出：接管主相机管线，只把「最终输出」从 canvas 改到我们的 RT，
+ * 其它 pass（splat、compose 等）照常跑，主 canvas 不再更新（画面定格），导出从 RT 读帧。
  */
-class RenderManager {
-    private originalSettings: Map<string, any> = new Map();
+export class RenderManager {
+    private global: Global;
+    private exportRT: RenderTarget | null = null;
+    private savedComposeTarget: RenderTarget | null | undefined = undefined;
+    private savedAfterTarget: RenderTarget | null | undefined = undefined;
+    private savedCameraRenderTarget: RenderTarget | null | undefined = undefined;
+    private renderPassCamera: any = null; // 引擎 RenderPassCameraFrame
+    private usedCameraFramePath = false;
 
-    constructor(private global: Global) {}
+    constructor(global: Global) {
+        this.global = global;
+    }
 
-    /**
-     * 启动离屏渲染模式
-     * 禁用自动渲染，确保完全离线渲染，不在屏幕上显示
-     */
     startOffscreenMode(settings: VideoSettings): void {
-        const { app } = this.global;
-        const { width, height, showDebug, transparentBg } = settings;
+        this.endOffscreenMode();
 
-        console.log('Starting offscreen mode (completely offline rendering):', { width, height, showDebug, transparentBg });
-        
-        // 保存原始设置用于恢复
-        this.originalSettings.set('autoRender', app.autoRender);
-        
-        // 禁用自动渲染，确保完全离线渲染
-        // 这样渲染过程不会显示在屏幕上，只渲染到 RenderTarget
-        app.autoRender = false;
-        
-        console.log('Offscreen mode enabled: autoRender = false');
+        const { app, camera } = this.global;
+        const device = app.graphicsDevice;
+        const width = settings.width;
+        const height = settings.height;
+
+        const colorBuffer = new Texture(device, {
+            name: 'exportColor',
+            width,
+            height,
+            format: PIXELFORMAT_RGBA8,
+            mipmaps: false
+        });
+        this.exportRT = new RenderTarget({
+            colorBuffer,
+            depth: true,
+            autoResolve: true
+        });
+
+        const viewer = (app as any).viewer;
+        const engineCameraFrame = viewer?.cameraFrame;
+        this.renderPassCamera = engineCameraFrame?.renderPassCamera ?? null;
+
+        if (this.renderPassCamera?.composePass != null && this.renderPassCamera?.afterPass != null) {
+            this.usedCameraFramePath = true;
+            this.savedComposeTarget = this.renderPassCamera.composePass.renderTarget;
+            this.savedAfterTarget = this.renderPassCamera.afterPass.renderTarget;
+            this.renderPassCamera.composePass.renderTarget = this.exportRT;
+            this.renderPassCamera.afterPass.renderTarget = this.exportRT;
+        } else {
+            this.usedCameraFramePath = false;
+            const camComp = (camera as Entity & { camera?: { renderTarget?: RenderTarget | null } }).camera;
+            this.savedCameraRenderTarget = camComp?.renderTarget ?? undefined;
+            if (camComp) camComp.renderTarget = this.exportRT;
+        }
+    }
+
+    endOffscreenMode(): void {
+        if (this.usedCameraFramePath && this.renderPassCamera) {
+            this.renderPassCamera.composePass.renderTarget = this.savedComposeTarget ?? null;
+            this.renderPassCamera.afterPass.renderTarget = this.savedAfterTarget ?? null;
+        } else if (!this.usedCameraFramePath && this.global.camera) {
+            const camComp = (this.global.camera as Entity & { camera?: { renderTarget?: RenderTarget | null } }).camera;
+            if (camComp) camComp.renderTarget = this.savedCameraRenderTarget ?? null;
+        }
+        this.renderPassCamera = null;
+        this.savedComposeTarget = this.savedAfterTarget = this.savedCameraRenderTarget = undefined;
+        this.usedCameraFramePath = false;
+
+        if (this.exportRT) {
+            this.exportRT.destroy();
+            this.exportRT = null;
+        }
     }
 
     /**
-     * 结束离屏渲染模式，恢复原始设置
+     * 触发主相机管线跑一帧（输出已重定向到 exportRT），等 frameend 后返回该 RT。
      */
-    endOffscreenMode(): void {
-        const { app } = this.global;
+    async renderExportFrame(): Promise<RenderTarget | null> {
+        if (!this.exportRT) return null;
 
-        console.log('Ending offscreen mode');
-        
-        // 恢复原始设置
-        app.autoRender = this.originalSettings.get('autoRender') ?? true;
+        const { app } = this.global;
         app.renderNextFrame = true;
-        
-        this.originalSettings.clear();
+
+        return new Promise<RenderTarget | null>((resolve) => {
+            app.once('frameend', () => resolve(this.exportRT));
+        });
     }
 }
 
 /**
+ * 与「测试捕获单帧」完全一致的一帧流程：设置 VFX 时间 → 等待 → 离屏渲染。
+ * 单帧测试和批量导出都复用此函数，保证行为一致。
+ * @param runScriptUpdate 导出时传 true，在设置 effectTime 后手动触发脚本 update，避免 isExportingVfxVideo 下引擎不跑脚本导致黑屏
+ */
+export async function prepareAndRenderOneFrame(
+    global: Global,
+    renderManager: RenderManager,
+    effectTime: number,
+    options?: { waitMs?: number; runScriptUpdate?: boolean }
+): Promise<RenderTarget | null> {
+    global.events.fire('effectTimeline:setForExport', effectTime);
+    if (options?.runScriptUpdate) {
+        const gsplatEntity = global.app.root.findByName('gsplat') as Entity | null;
+        if (gsplatEntity?.script) {
+            const scripts = (gsplatEntity.script as any).scripts as Array<{ update?: (dt: number) => void }> | undefined;
+            if (Array.isArray(scripts)) {
+                for (const s of scripts) if (s?.update) s.update(0);
+            }
+        }
+    }
+    await new Promise(r => setTimeout(r, options?.waitMs ?? 0));
+    return await renderManager.renderExportFrame();
+}
+
+/**
  * 帧处理器
- * 负责帧的准备、渲染和捕获
- * 使用 RenderTarget 从 PlayCanvas 渲染管道捕获帧
+ * 负责从离屏 RenderTarget 读像素、翻转、编码。
+ * 「准备+渲染」统一用 prepareAndRenderOneFrame，与单帧测试一致。
  */
 class FrameProcessor {
     private lastCameraPosition = new Vec3(0, 0, 0);
     private lastCameraForward = new Vec3(1, 0, 0);
     private frameBuffer: Uint8Array;
     private lineBuffer: Uint8Array;
-    private workTarget: RenderTarget | null = null;
-    private workColorBuffer: Texture | null = null;
-
     constructor(private global: Global, width: number, height: number) {
         this.frameBuffer = new Uint8Array(width * height * 4);
         this.lineBuffer = new Uint8Array(width * 4);
-        this.initWorkTarget(width, height);
-    }
-
-    /**
-     * 初始化工作渲染目标
-     */
-    private initWorkTarget(width: number, height: number): void {
-        const { app } = this.global;
-        const device = app.graphicsDevice;
-
-        // 创建用于捕获的工作渲染目标
-        this.workColorBuffer = new Texture(device, {
-            format: PIXELFORMAT_RGBA8,
-            width: width,
-            height: height,
-            mipmaps: false
-        });
-
-        this.workTarget = new RenderTarget({
-            colorBuffer: this.workColorBuffer,
-            depth: false
-        });
-    }
-
-    /**
-     * 调整工作渲染目标尺寸
-     */
-    private resizeWorkTarget(width: number, height: number): void {
-        if (this.workTarget && this.workColorBuffer) {
-            this.workTarget.resize(width, height);
-        } else {
-            this.initWorkTarget(width, height);
-        }
     }
 
     /**
      * 清理资源
      */
     destroy(): void {
-        if (this.workTarget) {
-            this.workTarget.destroy();
-            this.workTarget = null;
-        }
-        if (this.workColorBuffer) {
-            this.workColorBuffer.destroy();
-            this.workColorBuffer = null;
-        }
+        // 当前实现中 FrameProcessor 不持有独立的 RenderTarget 资源，
+        // 仅依赖 RenderManager 提供的导出 RenderTarget，因此这里无需清理。
     }
 
-    /**
-     * 准备渲染帧
-     * @param effectTime VFX 时间轴的时间（秒）
-     */
-    async prepareFrame(effectTime: number): Promise<void> {
-        const { events } = this.global;
-
-        console.log(`Preparing frame at VFX time: ${effectTime.toFixed(2)}s`);
-        
-        // 设置 VFX 时间轴时间（使用 effectTimeline:set 事件）
-        events.fire('effectTimeline:set', effectTime);
-        // 同时触发 effectTime:changed 事件，确保 UI 和特效同步
-        events.fire('effectTime:changed', effectTime);
-        
-        // 等待排序完成
-        await this.waitForSorting();
-    }
-
-    /**
-     * 等待所有可见的splat排序完成和 VFX 特效更新
-     */
-    private async waitForSorting(): Promise<void> {
-        const { app } = this.global;
-        // 等待渲染完成，确保 VFX 特效有时间更新
-        return new Promise<void>((resolve) => {
-            // 等待一帧渲染完成
-            app.once('frameend', () => {
-                // 再等待一小段时间，确保 VFX 特效完全更新
-                setTimeout(resolve, 50);
-            });
-            app.renderNextFrame = true;
-        });
-    }
-
-    /**
-     * 等待渲染完成
-     */
-    private async waitForRenderComplete(): Promise<void> {
-        const { app } = this.global;
-        return new Promise<void>((resolve) => {
-            // 监听 frameend 事件，确保渲染完成
-            app.once('frameend', () => {
-                // 再等待一小段时间，确保所有后处理完成
-                setTimeout(resolve, 50);
-            });
-            // 触发渲染
-            app.renderNextFrame = true;
-        });
-    }
 
     /**
      * 从 RenderTarget 捕获帧（完全离线渲染）
      * 直接渲染场景到我们的 RenderTarget，不显示在屏幕上
      */
-    private async captureFromRenderTarget(width: number, height: number): Promise<boolean> {
-        const { app, camera } = this.global;
-        const device = app.graphicsDevice;
-        
-        // 调整工作渲染目标尺寸
-        this.resizeWorkTarget(width, height);
-        
-        if (!this.workTarget || !this.workColorBuffer) {
-            console.error('Work target not initialized');
+    private async captureFromRenderTarget(sourceTarget: RenderTarget, width: number, height: number): Promise<boolean> {
+        if (!sourceTarget.colorBuffer) {
+            console.error('Export RenderTarget has no colorBuffer');
             return false;
         }
-        
         try {
-            // 完全离线渲染：直接渲染到 RenderTarget，不显示在屏幕上
-            // 保存原始 renderTarget
-            const originalRenderTarget = device.getRenderTarget();
-            const originalCameraRenderTarget = (camera.camera as any).renderTarget;
-            
-            try {
-                // 设置设备渲染目标为我们的 workTarget（离屏渲染）
-                device.setRenderTarget(this.workTarget);
-                
-                // 设置相机渲染目标（如果支持）
-                if (originalCameraRenderTarget !== undefined) {
-                    (camera.camera as any).renderTarget = this.workTarget;
-                }
-                
-                // 由于 autoRender = false，需要手动触发渲染
-                // 这会渲染到我们的 RenderTarget，不会显示在屏幕上
-                app.renderNextFrame = true;
-                
-                // 等待渲染完成（完全离线，不显示在屏幕上）
-                await new Promise<void>((resolve) => {
-                    app.once('frameend', () => {
-                        resolve();
-                    });
-                });
-                
-                // 从渲染目标读取像素数据（完全离线，不影响屏幕显示）
-                const data = await this.workColorBuffer.read(0, 0, width, height, { renderTarget: this.workTarget });
-                
-                // 恢复原始渲染目标
-                device.setRenderTarget(originalRenderTarget);
-                if (originalCameraRenderTarget !== undefined) {
-                    (camera.camera as any).renderTarget = originalCameraRenderTarget;
-                }
-                
-                // 检查数据格式并转换
-                if (data instanceof Uint8Array) {
-                    // 已经是 RGBA8 格式，直接使用
-                    this.flipBufferVerticallyFromSource(data, width, height);
-                    console.log('Successfully captured from RenderTarget (direct render)');
-                    return true;
-                } else if (data instanceof Float32Array) {
-                    // 如果是 Float32Array（例如 RGBA16F 或 RGBA32F），需要转换
-                    console.log('Converting Float32Array to Uint8Array');
-                    const uint8Data = new Uint8Array(data.length);
-                    for (let i = 0; i < data.length; i++) {
-                        // 假设数据范围是 0-1，转换为 0-255
-                        uint8Data[i] = Math.max(0, Math.min(255, Math.floor(data[i] * 255)));
-                    }
-                    this.flipBufferVerticallyFromSource(uint8Data, width, height);
-                    console.log('Successfully captured from RenderTarget (Float32Array converted)');
-                    return true;
-                } else {
-                    console.warn(`Unsupported color buffer format: ${data.constructor.name}`);
-                    return false;
-                }
-            } catch (renderError) {
-                // 确保恢复原始渲染目标
-                device.setRenderTarget(originalRenderTarget);
-                if (originalCameraRenderTarget !== undefined) {
-                    (camera.camera as any).renderTarget = originalCameraRenderTarget;
-                }
-                throw renderError;
+            const data = await sourceTarget.colorBuffer.read(0, 0, width, height, { renderTarget: sourceTarget });
+            if (data instanceof Uint8Array) {
+                this.flipBufferVerticallyFromSource(data, width, height);
+                return true;
             }
+            if (data instanceof Float32Array) {
+                const uint8Data = new Uint8Array(data.length);
+                for (let i = 0; i < data.length; i++) {
+                    uint8Data[i] = Math.max(0, Math.min(255, Math.floor(data[i] * 255)));
+                }
+                this.flipBufferVerticallyFromSource(uint8Data, width, height);
+                return true;
+            }
+            console.warn(`Unsupported color buffer format: ${data.constructor.name}`);
+            return false;
         } catch (error) {
-            console.warn('Failed to capture from RenderTarget (direct render):', error);
-            
-            // 方法2: 尝试从现有的渲染目标读取（如果存在）
-            try {
-                const viewer = (app as any).viewer;
-                let mainTarget: RenderTarget | null = null;
-                
-                if (viewer?.cameraFrame) {
-                    const cameraFrame = viewer.cameraFrame as any;
-                    mainTarget = cameraFrame.mainTarget || 
-                                cameraFrame.rendering?.mainTarget || 
-                                cameraFrame.renderTarget ||
-                                null;
-                }
-                
-                if (!mainTarget) {
-                    const cameraComponent = camera.camera as any;
-                    mainTarget = cameraComponent.renderTarget || 
-                                cameraComponent.mainTarget ||
-                                null;
-                }
-                
-                if (mainTarget && mainTarget.colorBuffer) {
-                    console.log('Found existing mainTarget, reading from it');
-                    const data = await mainTarget.colorBuffer.read(0, 0, width, height, { renderTarget: mainTarget });
-                    
-                    if (data instanceof Uint8Array) {
-                        this.flipBufferVerticallyFromSource(data, width, height);
-                        return true;
-                    } else if (data instanceof Float32Array) {
-                        const uint8Data = new Uint8Array(data.length);
-                        for (let i = 0; i < data.length; i++) {
-                            uint8Data[i] = Math.max(0, Math.min(255, Math.floor(data[i] * 255)));
-                        }
-                        this.flipBufferVerticallyFromSource(uint8Data, width, height);
-                        return true;
-                    }
-                }
-            } catch (readError) {
-                console.warn('Failed to read from existing RenderTarget:', readError);
-            }
-            
+            console.error('Failed to read pixels from RenderTarget:', error);
             return false;
         }
     }
@@ -423,7 +314,14 @@ class FrameProcessor {
     /**
      * 捕获当前视频帧
      */
-    async captureFrame(frameTime: number, frameRate: number, encoder: VideoEncoder | null, width: number, height: number): Promise<boolean> {
+    async captureFrame(
+        frameTime: number,
+        frameRate: number,
+        encoder: VideoEncoder | null,
+        width: number,
+        height: number,
+        exportTarget: RenderTarget | null
+    ): Promise<boolean> {
         // 检查编码器是否有效
         if (!encoder || (encoder as any)._errorOccurred) {
             console.warn('Encoder is closed or has error, skipping frame');
@@ -436,19 +334,18 @@ class FrameProcessor {
             return false;
         }
         
-        console.log(`Capturing frame at time: ${frameTime}`);
-        
         // H264 要求偶数尺寸，确保使用偶数尺寸
         const evenWidth = width % 2 === 0 ? width : width - 1;
         const evenHeight = height % 2 === 0 ? height : height - 1;
         
-        // 等待渲染完成（多次等待确保渲染完成）
-        for (let i = 0; i < 2; i++) {
-            await this.waitForRenderComplete();
+        // 从导出相机的 RenderTarget 捕获（与单帧测试同一套离屏管线）
+        let captured = false;
+        if (exportTarget) {
+            // RenderPassForward.render() 是同步的，但 GPU 可能需要时间完成渲染
+            // 使用 requestAnimationFrame 确保 GPU 完成渲染后再读取像素
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            captured = await this.captureFromRenderTarget(exportTarget, evenWidth, evenHeight);
         }
-        
-        // 尝试从 RenderTarget 捕获（优先方法）
-        let captured = await this.captureFromRenderTarget(evenWidth, evenHeight);
         
         // 如果 RenderTarget 方法失败，回退到 canvas 方法
         if (!captured) {
@@ -515,8 +412,6 @@ class FrameProcessor {
                         hasContent = true;
                     }
                 }
-                console.log(`Frame capture (canvas fallback): ${hasContent ? 'Content detected' : 'WARNING: Black screen detected'} (max RGB: ${maxR}, ${maxG}, ${maxB})`);
-                
                 // 复制到 frameBuffer（需要垂直翻转，因为 canvas 坐标系与视频帧不同）
                 this.flipBufferVerticallyFromSource(imageData.data, evenWidth, evenHeight);
                 captured = true;
@@ -626,6 +521,12 @@ export const initVideoExport = (global: Global): void => {
     const renderManager = new RenderManager(global);
     const { events } = global;
 
+    // 跟踪当前 UI 所在的 VFX 时间（用于导出结束后恢复）
+    let lastUiEffectTime = 0;
+    events.on('effectTime:changed', (time: number) => {
+        lastUiEffectTime = time;
+    });
+
     /**
      * 本地化文本（占位符实现）
      */
@@ -681,19 +582,8 @@ export const initVideoExport = (global: Global): void => {
         }
     };
 
-    /**
-     * 等待渲染完成
-     */
-    const waitForRender = async (): Promise<void> => {
-        return new Promise<void>((resolve) => {
-            // 等待 frameend 事件，确保渲染完成
-            global.app.once('frameend', () => {
-                // 再等待一小段时间，确保所有后处理完成
-                setTimeout(resolve, 50);
-            });
-            global.app.renderNextFrame = true;
-        });
-    };
+    // SuperSplat 风格中有一个 postRender() 来等待一次离屏渲染完成，
+    // 这里我们直接复用 FrameProcessor.waitForRenderComplete()，不再单独暴露 waitForRender。
 
     /**
      * 更新进度
@@ -706,61 +596,44 @@ export const initVideoExport = (global: Global): void => {
     };
 
     /**
-     * 渲染所有帧（基于 VFX 时间轴）
+     * 将 animTrack 定位到 effectTime 并应用到主相机（勾选 Restart AnimTrack 时与 VFX 时间轴同步录制相机）
      */
-    const renderAllFrames = async (frameProcessor: FrameProcessor, encoder: VideoEncoder | null, settings: VideoSettings): Promise<void> => {
-        if (!encoder) {
-            throw new Error('Encoder is not available');
-        }
-        
-        const { frameRate, width, height } = settings;
-        const { app, settings: appSettings } = global;
+    const seekAnimToTimeAndApply = (g: Global, effectTime: number): void => {
+        const viewer = (g.app as any).viewer as { cameraManager?: { seekAnimToTime: (t: number) => void; camera: unknown }; applyCameraFromManager?: () => void } | undefined;
+        if (!viewer?.cameraManager?.seekAnimToTime || !viewer.applyCameraFromManager) return;
+        viewer.cameraManager.seekAnimToTime(effectTime);
+        viewer.applyCameraFromManager();
+    };
 
-        // H264 要求偶数尺寸
+    /**
+     * 渲染所有帧：与单帧截获完全相同的流程，循环执行。
+     * 每帧（若 syncAnimTrack）：先 seek anim 并应用相机 → prepareAndRenderOneFrame → requestAnimationFrame → captureFrame
+     */
+    const renderAllFrames = async (frameProcessor: FrameProcessor, encoder: VideoEncoder | null, settings: VideoSettings, renderManager: RenderManager): Promise<void> => {
+        if (!encoder) throw new Error('Encoder is not available');
+        const { frameRate, width, height, syncAnimTrack } = settings;
+        const { settings: appSettings } = global;
         const evenWidth = width % 2 === 0 ? width : width - 1;
         const evenHeight = height % 2 === 0 ? height : height - 1;
-
-        // 获取 VFX 时间轴的总时长（从 revealEffect 配置中获取）
         const totalDuration = appSettings?.revealEffect?.totalDuration ?? 20.0;
-        
-        // 计算需要导出的帧数（基于 VFX 时间轴的总时长）
         const totalFrames = Math.ceil(totalDuration * frameRate);
-        const frameInterval = 1.0 / frameRate; // 每帧之间的时间间隔（秒）
+        const frameInterval = 1.0 / frameRate;
 
-        console.log(`Rendering ${totalFrames} frames for VFX timeline (duration: ${totalDuration}s, frameRate: ${frameRate}fps) at ${evenWidth}x${evenHeight}`);
-
-        // 从 0 开始，到 totalDuration 结束，按帧率间隔遍历每一帧
         for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
-            // 检查编码器状态
-            if (encoder.state === 'closed' || (encoder as any)._errorOccurred) {
-                console.error('Encoder closed or error occurred, stopping frame rendering');
-                break;
-            }
-            
-            // 计算当前帧对应的 VFX 时间轴时间（秒）
+            if (encoder.state === 'closed' || (encoder as any)._errorOccurred) break;
             const effectTime = Math.min(frameIndex * frameInterval, totalDuration);
-            
-            // 准备帧（设置 VFX 时间轴到对应时间，不播放动画）
-            // 这是离线渲染：直接设置时间点，不播放动画
-            await frameProcessor.prepareFrame(effectTime);
 
-            // 等待 VFX 特效更新（离线渲染，不显示在屏幕上）
-            // 由于 autoRender = false，渲染会直接到 RenderTarget，不会显示
-            app.renderNextFrame = true;
-            await waitForRender();
-            
-            // 再等待一次，确保 VFX 特效完全更新
-            app.renderNextFrame = true;
-            await waitForRender();
+            // 同步更新动画相机的时间
+            if (syncAnimTrack) seekAnimToTimeAndApply(global, effectTime);
 
-            // 捕获帧（完全离线渲染，使用 effectTime 作为时间戳）
-            const success = await frameProcessor.captureFrame(effectTime, frameRate, encoder, evenWidth, evenHeight);
-            
-            if (!success) {
-                console.warn(`Failed to capture frame at VFX time ${effectTime.toFixed(2)}s, continuing...`);
-            }
-
-            // 更新进度（基于 VFX 时间轴）
+            // 与单帧截获相同：设置时间 → 等待 → 离屏渲染（导出时补一次脚本 update）
+            const exportTarget = await prepareAndRenderOneFrame(global, renderManager, effectTime, {
+                waitMs: 100,
+                runScriptUpdate: true
+            });
+            await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+            const success = await frameProcessor.captureFrame(effectTime, frameRate, encoder, evenWidth, evenHeight, exportTarget ?? null);
+            if (!success) console.warn(`Failed to capture frame at VFX time ${effectTime.toFixed(2)}s`);
             updateProgress(effectTime, totalDuration);
         }
     };
@@ -809,7 +682,7 @@ export const initVideoExport = (global: Global): void => {
         console.log('Starting video export (offline rendering mode)');
         console.log('This will render frames offline without displaying on screen');
         
-        // 启动离屏渲染模式（禁用自动渲染，完全离线）
+        // 启动离屏渲染模式（创建导出专用相机和 RenderTarget）
         renderManager.startOffscreenMode(videoSettings);
         
         try {
@@ -848,8 +721,8 @@ export const initVideoExport = (global: Global): void => {
             const frameProcessor = new FrameProcessor(global, evenWidth, evenHeight);
 
             try {
-                // 渲染所有帧（完全离线渲染，不显示在屏幕上）
-                await renderAllFrames(frameProcessor, encoder, videoSettings);
+                // 渲染所有帧（完全离线渲染，不影响主 viewer）
+                await renderAllFrames(frameProcessor, encoder, videoSettings, renderManager);
 
                 // 完成输出
                 if (encoder.state !== 'closed' && !(encoder as any)._errorOccurred) {
@@ -868,16 +741,17 @@ export const initVideoExport = (global: Global): void => {
             // 完成输出（这会确保所有数据都写入流）
             await output.finalize();
 
-            // 如果使用文件流，需要显式关闭以确保数据写入
-            // 注意：必须在 finalize() 之后关闭，因为 StreamTarget 可能在 finalize 时还在使用流
+            // 如果使用文件流：仅当流未被锁定时才主动 close，避免 "Cannot close a locked stream"
+            // StreamTarget 可能在 finalize 后仍持有 writer，此时流处于 locked 状态，不应再 close
             if (fileStream) {
-                try {
-                    // 等待一小段时间，确保 StreamTarget 完成所有写入操作
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    await fileStream.close();
-                    console.log('File stream closed successfully');
-                } catch (error) {
-                    console.warn('Error closing file stream (may already be closed):', error);
+                const streamLike = fileStream as unknown as { locked?: boolean; close?: () => Promise<void> };
+                if (streamLike.locked !== true) {
+                    try {
+                        await streamLike.close?.();
+                        console.log('File stream closed successfully');
+                    } catch (error) {
+                        console.warn('Error closing file stream (may already be closed):', error);
+                    }
                 }
             }
 
@@ -897,6 +771,13 @@ export const initVideoExport = (global: Global): void => {
     const exportVideo = async (videoSettings: VideoSettings, fileStream?: FileSystemWritableFileStream): Promise<boolean> => {
         events.fire('progressStart', localize('panel.render.render-video'));
 
+        const stateAny = global.state as any;
+        const prevExporting = stateAny.isExportingVfxVideo ?? false;
+        const prevEffectTime = lastUiEffectTime;
+
+        // 锁住 viewer 实时更新
+        stateAny.isExportingVfxVideo = true;
+
         try {
             return await performVideoExport(videoSettings, fileStream);
         } catch (error) {
@@ -904,6 +785,11 @@ export const initVideoExport = (global: Global): void => {
             return false;
         } finally {
             cleanup();
+
+            // 恢复锁和 UI 时间轴
+            stateAny.isExportingVfxVideo = prevExporting;
+            // 用交互事件恢复到导出前的时间，并驱动 UI slider
+            global.events.fire('effectTimeline:set', prevEffectTime);
         }
     };
 
