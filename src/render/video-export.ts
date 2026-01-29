@@ -10,6 +10,96 @@ import {
     Color
 } from 'playcanvas';
 
+/** VFX 导出性能分析：记录各阶段耗时并输出汇总（控制台会打印 [VFX Export Profile]） */
+const VFX_EXPORT_PROFILE = true; // 设为 false 可关闭 profiling 日志
+
+/** 每帧准备后的固定等待（ms）。设为 0 可显著加速（profile 显示 waitMs 约占 15s/150 帧）；若 VFX 不依赖该延迟建议保持 0。 */
+const EXPORT_FRAME_WAIT_MS = 0;
+
+/** 控制台过滤用：所有 VFX 导出/性能相关 log 均带此 tag，可在 DevTools 中按此关键字过滤 */
+const VFX_EXPORT_LOG_TAG = '[VFX Export]';
+
+type ProfileEntry = { name: string; ms: number };
+type FrameProfile = {
+    seekAnim: number;
+    setTimelineAndUpdate: number;
+    waitMs: number;
+    renderFrame: number;
+    raf: number;
+    readPixels: number;
+    flipBuffer: number;
+    encode: number;
+    total: number;
+};
+
+class ExportProfiler {
+    private phaseStart = 0;
+    private phaseName = '';
+    private frameTimes: FrameProfile[] = [];
+    private phaseTimes: ProfileEntry[] = [];
+
+    startPhase(name: string): void {
+        this.phaseName = name;
+        this.phaseStart = performance.now();
+    }
+
+    endPhase(): number {
+        const ms = performance.now() - this.phaseStart;
+        if (VFX_EXPORT_PROFILE && this.phaseName) {
+            this.phaseTimes.push({ name: this.phaseName, ms });
+        }
+        this.phaseName = '';
+        return ms;
+    }
+
+    recordFrame(entry: Partial<FrameProfile> & { total: number }): void {
+        if (VFX_EXPORT_PROFILE) {
+            this.frameTimes.push(entry as FrameProfile);
+        }
+    }
+
+    logSummary(totalFrames: number, totalDurationSec: number): void {
+        if (!VFX_EXPORT_PROFILE) return;
+        const totalMs = this.phaseTimes.reduce((s, p) => s + p.ms, 0);
+        const tag = VFX_EXPORT_LOG_TAG;
+        console.group(`${tag} Profile`);
+        console.log(tag, '阶段耗时:');
+        this.phaseTimes.forEach(p => {
+            const pct = totalMs > 0 ? ((p.ms / totalMs) * 100).toFixed(1) : '0';
+            console.log(tag, `  ${p.name}: ${p.ms.toFixed(0)} ms (${pct}%)`);
+        });
+        console.log(tag, `总耗时: ${(totalMs / 1000).toFixed(2)} s, 帧数: ${totalFrames}, 视频时长: ${totalDurationSec.toFixed(1)}s`);
+        if (this.frameTimes.length > 0) {
+            const avg: FrameProfile = {
+                seekAnim: 0, setTimelineAndUpdate: 0, waitMs: 0, renderFrame: 0, raf: 0,
+                readPixels: 0, flipBuffer: 0, encode: 0, total: 0
+            };
+            this.frameTimes.forEach(f => {
+                avg.seekAnim += f.seekAnim ?? 0;
+                avg.setTimelineAndUpdate += f.setTimelineAndUpdate ?? 0;
+                avg.waitMs += f.waitMs ?? 0;
+                avg.renderFrame += f.renderFrame ?? 0;
+                avg.raf += f.raf ?? 0;
+                avg.readPixels += f.readPixels ?? 0;
+                avg.flipBuffer += f.flipBuffer ?? 0;
+                avg.encode += f.encode ?? 0;
+                avg.total += f.total ?? 0;
+            });
+            const n = this.frameTimes.length;
+            Object.keys(avg).forEach(k => (avg as any)[k] /= n);
+            console.log(tag, '单帧平均耗时 (ms):');
+            console.log(tag, '  seekAnim:', (avg.seekAnim).toFixed(1), '| setTimeline+update:', (avg.setTimelineAndUpdate).toFixed(1), '| waitMs:', (avg.waitMs).toFixed(1));
+            console.log(tag, '  renderFrame:', (avg.renderFrame).toFixed(1), '| rAF:', (avg.raf).toFixed(1), '| readPixels:', (avg.readPixels).toFixed(1));
+            console.log(tag, '  flipBuffer:', (avg.flipBuffer).toFixed(1), '| encode:', (avg.encode).toFixed(1), '| total:', (avg.total).toFixed(1));
+            const readPct = avg.total > 0 ? ((avg.readPixels / avg.total) * 100).toFixed(0) : '0';
+            if (avg.readPixels > 200) {
+                console.log(tag, `  → readPixels 占主导 (${readPct}%)，降分辨率可明显加快导出`);
+            }
+        }
+        console.groupEnd();
+    }
+}
+
 type VideoSettings = {
     startFrame: number;
     endFrame: number;
@@ -23,6 +113,8 @@ type VideoSettings = {
     codec: 'h264' | 'h265' | 'vp9' | 'av1';
     /** 勾选「Restart AnimTrack」时导出：VFX 时间轴与相机 animTrack 同步录制 */
     syncAnimTrack?: boolean;
+    /** 使用 canvas.captureStream + MediaRecorder 快速导出（约实时，输出 WebM），无 readPixels 瓶颈 */
+    useFastExport?: boolean;
 };
 
 /**
@@ -94,7 +186,7 @@ class VideoExportConfig {
                     // 所以需要确保即使调整后也在 Level 4.0 限制内
                     // 1920×1088 = 2,088,960 < 2,097,152 (Level 4.0 限制)
                     this.codec = 'avc1.640028'; // High Profile, Level 4.0 (0x28=40)
-                    console.log(`Selected codec: ${this.codec} for resolution ${width}x${height} (codedArea: ${codedArea})`);
+                    console.log(VFX_EXPORT_LOG_TAG, `Selected codec: ${this.codec} for resolution ${width}x${height} (codedArea: ${codedArea})`);
                 } else if (codedArea <= 5222400) {
                     // Level 4.2: 最大约 3840×1360
                     this.codec = 'avc1.64002A'; // High Profile, Level 4.2 (0x2A=42)
@@ -232,16 +324,35 @@ export class RenderManager {
 }
 
 /**
+ * 渲染一帧到主 canvas（不经过离屏 RT）。
+ * 用于「快速导出」：设置 VFX 时间 → 脚本 update → 触发一帧渲染到屏幕，由 captureStream 录制。
+ */
+export async function prepareAndRenderOneFrameToCanvas(global: Global, effectTime: number): Promise<void> {
+    global.events.fire('effectTimeline:setForExport', effectTime);
+    const gsplatEntity = global.app.root.findByName('gsplat') as Entity | null;
+    if (gsplatEntity?.script) {
+        const scripts = (gsplatEntity.script as any).scripts as Array<{ update?: (dt: number) => void }> | undefined;
+        if (Array.isArray(scripts)) {
+            for (const s of scripts) if (s?.update) s.update(0);
+        }
+    }
+    global.app.renderNextFrame = true;
+    await new Promise<void>(resolve => global.app.once('frameend', () => resolve()));
+}
+
+/**
  * 与「测试捕获单帧」完全一致的一帧流程：设置 VFX 时间 → 等待 → 离屏渲染。
  * 单帧测试和批量导出都复用此函数，保证行为一致。
  * @param runScriptUpdate 导出时传 true，在设置 effectTime 后手动触发脚本 update，避免 isExportingVfxVideo 下引擎不跑脚本导致黑屏
+ * @param profile 可选，用于 profiling：写入 setTimelineAndUpdate / waitMs / renderFrame 耗时（ms）
  */
 export async function prepareAndRenderOneFrame(
     global: Global,
     renderManager: RenderManager,
     effectTime: number,
-    options?: { waitMs?: number; runScriptUpdate?: boolean }
+    options?: { waitMs?: number; runScriptUpdate?: boolean; profile?: { setTimelineAndUpdate: number; waitMs: number; renderFrame: number } }
 ): Promise<RenderTarget | null> {
+    const t0 = VFX_EXPORT_PROFILE ? performance.now() : 0;
     global.events.fire('effectTimeline:setForExport', effectTime);
     if (options?.runScriptUpdate) {
         const gsplatEntity = global.app.root.findByName('gsplat') as Entity | null;
@@ -252,8 +363,18 @@ export async function prepareAndRenderOneFrame(
             }
         }
     }
-    await new Promise(r => setTimeout(r, options?.waitMs ?? 0));
-    return await renderManager.renderExportFrame();
+    const t1 = VFX_EXPORT_PROFILE ? performance.now() : 0;
+    const waitMs = options?.waitMs ?? 0;
+    await new Promise(r => setTimeout(r, waitMs));
+    const t2 = VFX_EXPORT_PROFILE ? performance.now() : 0;
+    const rt = await renderManager.renderExportFrame();
+    const t3 = VFX_EXPORT_PROFILE ? performance.now() : 0;
+    if (options?.profile && VFX_EXPORT_PROFILE) {
+        options.profile.setTimelineAndUpdate = t1 - t0;
+        options.profile.waitMs = t2 - t1;
+        options.profile.renderFrame = t3 - t2;
+    }
+    return rt;
 }
 
 /**
@@ -283,16 +404,24 @@ class FrameProcessor {
     /**
      * 从 RenderTarget 捕获帧（完全离线渲染）
      * 直接渲染场景到我们的 RenderTarget，不显示在屏幕上
+     * @param profile 可选，用于 profiling：写入 flipBuffer 耗时（ms）
      */
-    private async captureFromRenderTarget(sourceTarget: RenderTarget, width: number, height: number): Promise<boolean> {
+    private async captureFromRenderTarget(
+        sourceTarget: RenderTarget,
+        width: number,
+        height: number,
+        profile?: Partial<Pick<FrameProfile, 'flipBuffer'>>
+    ): Promise<boolean> {
         if (!sourceTarget.colorBuffer) {
-            console.error('Export RenderTarget has no colorBuffer');
+            console.error(VFX_EXPORT_LOG_TAG, 'Export RenderTarget has no colorBuffer');
             return false;
         }
         try {
             const data = await sourceTarget.colorBuffer.read(0, 0, width, height, { renderTarget: sourceTarget });
+            const flipStart = VFX_EXPORT_PROFILE && profile ? performance.now() : 0;
             if (data instanceof Uint8Array) {
                 this.flipBufferVerticallyFromSource(data, width, height);
+                if (VFX_EXPORT_PROFILE && profile) (profile as { flipBuffer: number }).flipBuffer = performance.now() - flipStart;
                 return true;
             }
             if (data instanceof Float32Array) {
@@ -301,18 +430,20 @@ class FrameProcessor {
                     uint8Data[i] = Math.max(0, Math.min(255, Math.floor(data[i] * 255)));
                 }
                 this.flipBufferVerticallyFromSource(uint8Data, width, height);
+                if (VFX_EXPORT_PROFILE && profile) (profile as { flipBuffer: number }).flipBuffer = performance.now() - flipStart;
                 return true;
             }
-            console.warn(`Unsupported color buffer format: ${data.constructor.name}`);
+            console.warn(VFX_EXPORT_LOG_TAG, `Unsupported color buffer format: ${data.constructor.name}`);
             return false;
         } catch (error) {
-            console.error('Failed to read pixels from RenderTarget:', error);
+            console.error(VFX_EXPORT_LOG_TAG, 'Failed to read pixels from RenderTarget:', error);
             return false;
         }
     }
 
     /**
      * 捕获当前视频帧
+     * @param frameProfile 可选，用于 profiling：写入 raf / readPixels / flipBuffer / encode 耗时（ms）
      */
     async captureFrame(
         frameTime: number,
@@ -320,17 +451,18 @@ class FrameProcessor {
         encoder: VideoEncoder | null,
         width: number,
         height: number,
-        exportTarget: RenderTarget | null
+        exportTarget: RenderTarget | null,
+        frameProfile?: Partial<FrameProfile>
     ): Promise<boolean> {
         // 检查编码器是否有效
         if (!encoder || (encoder as any)._errorOccurred) {
-            console.warn('Encoder is closed or has error, skipping frame');
+            console.warn(VFX_EXPORT_LOG_TAG, 'Encoder is closed or has error, skipping frame');
             return false;
         }
         
         // 检查编码器状态
         if (encoder.state === 'closed') {
-            console.warn('Encoder is closed, skipping frame');
+            console.warn(VFX_EXPORT_LOG_TAG, 'Encoder is closed, skipping frame');
             return false;
         }
         
@@ -343,8 +475,16 @@ class FrameProcessor {
         if (exportTarget) {
             // RenderPassForward.render() 是同步的，但 GPU 可能需要时间完成渲染
             // 使用 requestAnimationFrame 确保 GPU 完成渲染后再读取像素
+            const rafStart = VFX_EXPORT_PROFILE && frameProfile ? performance.now() : 0;
             await new Promise(resolve => requestAnimationFrame(resolve));
-            captured = await this.captureFromRenderTarget(exportTarget, evenWidth, evenHeight);
+            if (VFX_EXPORT_PROFILE && frameProfile) {
+                frameProfile.raf = performance.now() - rafStart;
+            }
+            const readStart = VFX_EXPORT_PROFILE && frameProfile ? performance.now() : 0;
+            captured = await this.captureFromRenderTarget(exportTarget, evenWidth, evenHeight, frameProfile);
+            if (VFX_EXPORT_PROFILE && frameProfile) {
+                frameProfile.readPixels = performance.now() - readStart; // 含 GPU read + 垂直翻转（flip 单独记录在 flipBuffer）
+            }
         }
         
         // 如果 RenderTarget 方法失败，回退到 canvas 方法
@@ -354,7 +494,7 @@ class FrameProcessor {
             const canvas = device.canvas as HTMLCanvasElement;
             
             if (!canvas) {
-                console.error('Canvas not found');
+                console.error(VFX_EXPORT_LOG_TAG, 'Canvas not found');
                 return false;
             }
             
@@ -365,7 +505,7 @@ class FrameProcessor {
                 const sourceHeight = canvas.height || canvas.clientHeight || device.height;
                 
                 if (sourceWidth === 0 || sourceHeight === 0) {
-                    console.error(`Invalid canvas size: ${sourceWidth}x${sourceHeight}`);
+                    console.error(VFX_EXPORT_LOG_TAG, `Invalid canvas size: ${sourceWidth}x${sourceHeight}`);
                     return false;
                 }
                 
@@ -383,7 +523,7 @@ class FrameProcessor {
                 try {
                     ctx.drawImage(canvas, 0, 0, sourceWidth, sourceHeight, 0, 0, evenWidth, evenHeight);
                 } catch (drawError) {
-                    console.warn('Direct drawImage failed, trying toDataURL method:', drawError);
+                    console.warn(VFX_EXPORT_LOG_TAG, 'Direct drawImage failed, trying toDataURL method:', drawError);
                     // 如果直接绘制失败，尝试使用 toDataURL
                     const dataUrl = canvas.toDataURL('image/png');
                     const img = new Image();
@@ -416,7 +556,7 @@ class FrameProcessor {
                 this.flipBufferVerticallyFromSource(imageData.data, evenWidth, evenHeight);
                 captured = true;
             } catch (error) {
-                console.error('Canvas capture also failed:', error);
+                console.error(VFX_EXPORT_LOG_TAG, 'Canvas capture also failed:', error);
                 return false;
             }
         }
@@ -433,6 +573,7 @@ class FrameProcessor {
         const durationMicroseconds = Math.floor(1e6 / frameRate);
         
         let videoFrame: VideoFrame | null = null;
+        const encodeStart = VFX_EXPORT_PROFILE && frameProfile ? performance.now() : 0;
         try {
             videoFrame = new VideoFrame(this.frameBuffer, {
                 format: 'RGBA',
@@ -447,9 +588,12 @@ class FrameProcessor {
 
             // 尝试编码帧
             encoder.encode(videoFrame);
+            if (VFX_EXPORT_PROFILE && frameProfile) {
+                frameProfile.encode = performance.now() - encodeStart;
+            }
             return true;
         } catch (error) {
-            console.warn('Failed to create or encode video frame:', error);
+            console.warn(VFX_EXPORT_LOG_TAG, 'Failed to create or encode video frame:', error);
             return false;
         } finally {
             // 确保 VideoFrame 总是被关闭
@@ -544,7 +688,7 @@ export const initVideoExport = (global: Global): void => {
         const evenHeight = settings.height % 2 === 0 ? settings.height : settings.height - 1;
         
         if (evenWidth !== settings.width || evenHeight !== settings.height) {
-            console.warn(`Video dimensions adjusted from ${settings.width}x${settings.height} to ${evenWidth}x${evenHeight} for H264 compatibility`);
+            console.warn(VFX_EXPORT_LOG_TAG, `Video dimensions adjusted from ${settings.width}x${settings.height} to ${evenWidth}x${evenHeight} for H264 compatibility`);
         }
         
         const encoder = new VideoEncoder({
@@ -553,7 +697,7 @@ export const initVideoExport = (global: Global): void => {
                 await videoSource.add(encodedPacket, meta);
             },
             error: (error) => {
-                console.error('Video encoding error:', error);
+                console.error(VFX_EXPORT_LOG_TAG, 'Video encoding error:', error);
                 // 编码器错误时，标记为已关闭，防止继续编码
                 (encoder as any)._errorOccurred = true;
             }
@@ -562,7 +706,7 @@ export const initVideoExport = (global: Global): void => {
         try {
             // 配置编码器，添加 QuickTime Player 兼容性所需的参数
             // 注意：framerate 是必需的，确保时间戳正确
-            console.log(`Configuring encoder with codec: ${codec}, resolution: ${evenWidth}x${evenHeight}`);
+            console.log(VFX_EXPORT_LOG_TAG, `Configuring encoder with codec: ${codec}, resolution: ${evenWidth}x${evenHeight}`);
             encoder.configure({
                 codec,
                 width: evenWidth,
@@ -573,10 +717,10 @@ export const initVideoExport = (global: Global): void => {
                 // 如果浏览器支持，会自动使用合适的默认值
             });
             
-            console.log(`Encoder configured successfully with codec: ${codec}`);
+            console.log(VFX_EXPORT_LOG_TAG, `Encoder configured successfully with codec: ${codec}`);
             return encoder;
         } catch (error) {
-            console.error('Failed to configure video encoder:', error);
+            console.error(VFX_EXPORT_LOG_TAG, 'Failed to configure video encoder:', error);
             encoder.close();
             return null;
         }
@@ -608,8 +752,15 @@ export const initVideoExport = (global: Global): void => {
     /**
      * 渲染所有帧：与单帧截获完全相同的流程，循环执行。
      * 每帧（若 syncAnimTrack）：先 seek anim 并应用相机 → prepareAndRenderOneFrame → requestAnimationFrame → captureFrame
+     * @param profiler 可选，用于 VFX 导出性能分析
      */
-    const renderAllFrames = async (frameProcessor: FrameProcessor, encoder: VideoEncoder | null, settings: VideoSettings, renderManager: RenderManager): Promise<void> => {
+    const renderAllFrames = async (
+        frameProcessor: FrameProcessor,
+        encoder: VideoEncoder | null,
+        settings: VideoSettings,
+        renderManager: RenderManager,
+        profiler?: ExportProfiler
+    ): Promise<void> => {
         if (!encoder) throw new Error('Encoder is not available');
         const { frameRate, width, height, syncAnimTrack } = settings;
         const { settings: appSettings } = global;
@@ -623,17 +774,41 @@ export const initVideoExport = (global: Global): void => {
             if (encoder.state === 'closed' || (encoder as any)._errorOccurred) break;
             const effectTime = Math.min(frameIndex * frameInterval, totalDuration);
 
+            const frameProfile: FrameProfile = {
+                seekAnim: 0, setTimelineAndUpdate: 0, waitMs: 0, renderFrame: 0, raf: 0,
+                readPixels: 0, flipBuffer: 0, encode: 0, total: 0
+            };
+            const tFrameStart = VFX_EXPORT_PROFILE ? performance.now() : 0;
+
             // 同步更新动画相机的时间
-            if (syncAnimTrack) seekAnimToTimeAndApply(global, effectTime);
+            if (syncAnimTrack) {
+                const t0 = VFX_EXPORT_PROFILE ? performance.now() : 0;
+                seekAnimToTimeAndApply(global, effectTime);
+                if (VFX_EXPORT_PROFILE) frameProfile.seekAnim = performance.now() - t0;
+            }
 
             // 与单帧截获相同：设置时间 → 等待 → 离屏渲染（导出时补一次脚本 update）
+            const prepareProfile = VFX_EXPORT_PROFILE ? { setTimelineAndUpdate: 0, waitMs: 0, renderFrame: 0 } : undefined;
             const exportTarget = await prepareAndRenderOneFrame(global, renderManager, effectTime, {
-                waitMs: 100,
-                runScriptUpdate: true
+                waitMs: EXPORT_FRAME_WAIT_MS,
+                runScriptUpdate: true,
+                profile: prepareProfile
             });
+            if (VFX_EXPORT_PROFILE && prepareProfile) {
+                frameProfile.setTimelineAndUpdate = prepareProfile.setTimelineAndUpdate;
+                frameProfile.waitMs = prepareProfile.waitMs;
+                frameProfile.renderFrame = prepareProfile.renderFrame;
+            }
             await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
-            const success = await frameProcessor.captureFrame(effectTime, frameRate, encoder, evenWidth, evenHeight, exportTarget ?? null);
-            if (!success) console.warn(`Failed to capture frame at VFX time ${effectTime.toFixed(2)}s`);
+            const success = await frameProcessor.captureFrame(
+                effectTime, frameRate, encoder, evenWidth, evenHeight, exportTarget ?? null,
+                VFX_EXPORT_PROFILE ? frameProfile : undefined
+            );
+            if (VFX_EXPORT_PROFILE) {
+                frameProfile.total = performance.now() - tFrameStart;
+                profiler?.recordFrame(frameProfile);
+            }
+            if (!success) console.warn(VFX_EXPORT_LOG_TAG, `Failed to capture frame at VFX time ${effectTime.toFixed(2)}s`);
             updateProgress(effectTime, totalDuration);
         }
     };
@@ -647,7 +822,7 @@ export const initVideoExport = (global: Global): void => {
             
             // 这里应该有downloadFile函数，但不在当前作用域中
             // downloadFile((output.target as BufferTarget).buffer, filename);
-            console.log(`Video export complete: ${filename}`);
+            console.log(VFX_EXPORT_LOG_TAG, `Video export complete: ${filename}`);
         }
     };
 
@@ -656,7 +831,7 @@ export const initVideoExport = (global: Global): void => {
      */
     const handleExportError = async (error: any): Promise<void> => {
         // 简化错误处理，直接输出到控制台
-        console.error('Video export error:', error);
+        console.error(VFX_EXPORT_LOG_TAG, 'Video export error:', error);
         // 如果有错误处理的事件，可以这样触发:
         // global.events.fire('showPopup', {
         //     type: 'error',
@@ -674,21 +849,117 @@ export const initVideoExport = (global: Global): void => {
     };
 
     /**
+     * 快速导出：渲染到主 canvas，用 captureStream + MediaRecorder 录制，无 readPixels，约实时（类似 SuperSplat）。
+     * 输出 WebM（VP9 或 AVC1），导出期间画面会实时播放在屏幕上。
+     */
+    const performVideoExportFast = async (videoSettings: VideoSettings, fileStream: FileSystemWritableFileStream | undefined): Promise<boolean> => {
+        const { frameRate, width, height, bitrate, syncAnimTrack } = videoSettings;
+        const evenWidth = width % 2 === 0 ? width : width - 1;
+        const evenHeight = height % 2 === 0 ? height : height - 1;
+        const totalDuration = global.settings?.revealEffect?.totalDuration ?? 20.0;
+        const totalFrames = Math.ceil(totalDuration * frameRate);
+        const frameInterval = 1.0 / frameRate;
+        const frameTimeMs = 1000 / frameRate;
+
+        const app = global.app;
+        const device = app.graphicsDevice;
+        const canvas = device.canvas as HTMLCanvasElement;
+        if (!canvas || !canvas.captureStream) {
+            console.error(VFX_EXPORT_LOG_TAG, 'Fast export requires canvas.captureStream (not supported in this context)');
+            return false;
+        }
+
+        const prevWidth = canvas.width;
+        const prevHeight = canvas.height;
+        canvas.width = evenWidth;
+        canvas.height = evenHeight;
+        if (typeof (device as any).setResolution === 'function') {
+            (device as any).setResolution(evenWidth, evenHeight);
+        }
+        (device as any).fire?.('resizecanvas');
+
+        console.log(VFX_EXPORT_LOG_TAG, 'Fast export: rendering to canvas + captureStream (no readPixels), ~real-time');
+        const tStart = performance.now();
+
+        const stream = canvas.captureStream(frameRate);
+        const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+            ? 'video/webm;codecs=vp9'
+            : MediaRecorder.isTypeSupported('video/webm;codecs=avc1')
+                ? 'video/webm;codecs=avc1'
+                : 'video/webm';
+        const chunks: Blob[] = [];
+        const recorder = new MediaRecorder(stream, {
+            mimeType,
+            videoBitsPerSecond: bitrate,
+            audioBitsPerSecond: 0
+        });
+        recorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) chunks.push(e.data);
+        };
+
+        const blobPromise = new Promise<Blob>((resolve, reject) => {
+            recorder.onstop = () => {
+                resolve(new Blob(chunks, { type: mimeType }));
+            };
+            recorder.onerror = () => {
+                reject(new Error('MediaRecorder error'));
+            };
+        });
+
+        recorder.start(100);
+
+        for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+            const frameStart = performance.now();
+            const effectTime = Math.min(frameIndex * frameInterval, totalDuration);
+            if (syncAnimTrack) seekAnimToTimeAndApply(global, effectTime);
+            await prepareAndRenderOneFrameToCanvas(global, effectTime);
+            updateProgress(effectTime, totalDuration);
+            const elapsed = performance.now() - frameStart;
+            const wait = Math.max(0, frameTimeMs - elapsed);
+            if (wait > 0) await new Promise(r => setTimeout(r, wait));
+        }
+
+        recorder.stop();
+        const blob = await blobPromise;
+
+        canvas.width = prevWidth;
+        canvas.height = prevHeight;
+        if (typeof (device as any).setResolution === 'function') {
+            (device as any).setResolution(prevWidth, prevHeight);
+        }
+        (device as any).fire?.('resizecanvas');
+
+        const tTotal = ((performance.now() - tStart) / 1000).toFixed(1);
+        console.log(VFX_EXPORT_LOG_TAG, `Fast export done in ${tTotal} s for ${totalDuration.toFixed(1)}s video (${(blob.size / 1024).toFixed(0)} KB)`);
+
+        if (fileStream) {
+            await fileStream.write(blob);
+            const streamLike = fileStream as unknown as { locked?: boolean; close?: () => Promise<void> };
+            if (streamLike.locked !== true) await streamLike.close?.();
+        }
+        return true;
+    };
+
+    /**
      * 执行视频导出的核心逻辑（完全离线渲染）
      */
     const performVideoExport = async (videoSettings: VideoSettings, fileStream: FileSystemWritableFileStream | undefined): Promise<boolean> => {
         const { startFrame, endFrame, frameRate, width, height, bitrate } = videoSettings;
-        
-        console.log('Starting video export (offline rendering mode)');
-        console.log('This will render frames offline without displaying on screen');
+        const profiler = new ExportProfiler();
+        const totalDuration = global.settings?.revealEffect?.totalDuration ?? 20.0;
+        const totalFrames = Math.ceil(totalDuration * frameRate);
+
+        console.log(VFX_EXPORT_LOG_TAG, 'Starting video export (offline rendering mode)');
+        console.log(VFX_EXPORT_LOG_TAG, 'This will render frames offline without displaying on screen');
         
         // 启动离屏渲染模式（创建导出专用相机和 RenderTarget）
+        profiler.startPhase('init (offscreen + encoder)');
         renderManager.startOffscreenMode(videoSettings);
         
         try {
             // 配置编码器
             const encoderConfig = new VideoExportConfig(videoSettings);
-            console.log(`VideoExportConfig created: codec=${encoderConfig.codec}, codecType=${encoderConfig.codecType}, resolution=${width}x${height}`);
+            console.log(VFX_EXPORT_LOG_TAG, `VideoExportConfig created: codec=${encoderConfig.codec}, codecType=${encoderConfig.codecType}, resolution=${width}x${height}`);
             
             // 设置输出目标
             const target = fileStream ? new StreamTarget(fileStream) : new BufferTarget();
@@ -719,17 +990,22 @@ export const initVideoExport = (global: Global): void => {
             
             // 创建帧处理器（使用偶数尺寸）
             const frameProcessor = new FrameProcessor(global, evenWidth, evenHeight);
+            profiler.endPhase();
 
             try {
                 // 渲染所有帧（完全离线渲染，不影响主 viewer）
-                await renderAllFrames(frameProcessor, encoder, videoSettings, renderManager);
+                profiler.startPhase('renderAllFrames');
+                await renderAllFrames(frameProcessor, encoder, videoSettings, renderManager, profiler);
+                profiler.endPhase();
 
                 // 完成输出
                 if (encoder.state !== 'closed' && !(encoder as any)._errorOccurred) {
+                    profiler.startPhase('encoder.flush');
                     await encoder.flush();
+                    profiler.endPhase();
                 }
             } catch (error) {
-                console.error('Error during frame rendering:', error);
+                console.error(VFX_EXPORT_LOG_TAG, 'Error during frame rendering:', error);
                 throw error;
             } finally {
                 // 确保编码器被关闭
@@ -739,7 +1015,11 @@ export const initVideoExport = (global: Global): void => {
             }
             
             // 完成输出（这会确保所有数据都写入流）
+            profiler.startPhase('output.finalize');
             await output.finalize();
+            profiler.endPhase();
+
+            profiler.logSummary(totalFrames, totalDuration);
 
             // 如果使用文件流：仅当流未被锁定时才主动 close，避免 "Cannot close a locked stream"
             // StreamTarget 可能在 finalize 后仍持有 writer，此时流处于 locked 状态，不应再 close
@@ -748,9 +1028,9 @@ export const initVideoExport = (global: Global): void => {
                 if (streamLike.locked !== true) {
                     try {
                         await streamLike.close?.();
-                        console.log('File stream closed successfully');
+                        console.log(VFX_EXPORT_LOG_TAG, 'File stream closed successfully');
                     } catch (error) {
-                        console.warn('Error closing file stream (may already be closed):', error);
+                        console.warn(VFX_EXPORT_LOG_TAG, 'Error closing file stream (may already be closed):', error);
                     }
                 }
             }
@@ -769,7 +1049,7 @@ export const initVideoExport = (global: Global): void => {
      * 导出视频的主要方法
      */
     const exportVideo = async (videoSettings: VideoSettings, fileStream?: FileSystemWritableFileStream): Promise<boolean> => {
-        events.fire('progressStart', localize('panel.render.render-video'));
+        events.fire('progressStart', videoSettings.useFastExport ? '快速导出 (WebM)…' : localize('panel.render.render-video'));
 
         const stateAny = global.state as any;
         const prevExporting = stateAny.isExportingVfxVideo ?? false;
@@ -779,6 +1059,9 @@ export const initVideoExport = (global: Global): void => {
         stateAny.isExportingVfxVideo = true;
 
         try {
+            if (videoSettings.useFastExport) {
+                return await performVideoExportFast(videoSettings, fileStream);
+            }
             return await performVideoExport(videoSettings, fileStream);
         } catch (error) {
             await handleExportError(error);

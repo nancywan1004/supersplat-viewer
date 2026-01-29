@@ -41,7 +41,8 @@ const VFX_VIDEO_EXPORT_ROW_HTML = `
       <label for="customHeight">高度:</label>
       <input type="number" id="customHeight" class="settingsInput" min="240" max="4320" step="2" value="1080">
     </div>
-    <button id="vfxVideoExportButton" class="settingsButton" type="button">导出 VFX 视频</button>
+    <button id="vfxVideoExportButton" class="settingsButton" type="button">导出 VFX 视频 (MP4)</button>
+    <button id="vfxVideoExportFastButton" class="settingsButton" type="button">快速导出 (WebM，约实时)</button>
     <button id="testCaptureFrameButton" class="settingsButton" type="button">测试捕获单帧</button>
   </div>
 </div>
@@ -73,6 +74,7 @@ export function initVideoExportUI(global: Global): () => void {
     container.innerHTML = VFX_VIDEO_EXPORT_ROW_HTML;
     const vfxVideoExportRow = container.querySelector('#vfxVideoExportRow') as HTMLElement;
     const vfxVideoExportButton = container.querySelector('#vfxVideoExportButton') as HTMLButtonElement | null;
+    const vfxVideoExportFastButton = container.querySelector('#vfxVideoExportFastButton') as HTMLButtonElement | null;
     const testCaptureFrameButton = container.querySelector('#testCaptureFrameButton') as HTMLButtonElement | null;
     const videoResolution = container.querySelector('#videoResolution') as HTMLSelectElement | null;
     const customResolutionRow = container.querySelector('#customResolutionRow');
@@ -126,7 +128,7 @@ export function initVideoExportUI(global: Global): () => void {
         vfxVideoExportRow.classList[showForType ? 'remove' : 'add']('hidden');
     };
 
-    const onExportClick = async () => {
+    const startExport = async (useFastExport: boolean) => {
         try {
             const resolution = getVideoResolution();
             const width = resolution.width % 2 === 0 ? resolution.width : resolution.width - 1;
@@ -146,16 +148,16 @@ export function initVideoExportUI(global: Global): () => void {
                 bitrate: 8_000_000,
                 transparentBg: false,
                 showDebug: false,
-                format: 'mov' as const,
+                format: (useFastExport ? 'webm' : 'mp4') as 'mp4' | 'webm',
                 codec: 'h264' as const,
-                syncAnimTrack
+                syncAnimTrack,
+                useFastExport
             };
             let fileStream: FileSystemWritableFileStream | undefined;
             if ('showSaveFilePicker' in window) {
-                const opts = {
-                    types: [{ description: 'Video File', accept: { 'video/quicktime': ['.mov'] } }],
-                    suggestedName: 'vfx-timeline.mov'
-                };
+                const opts = useFastExport
+                    ? { types: [{ description: 'WebM Video', accept: { 'video/webm': ['.webm'] } }], suggestedName: 'vfx-timeline.webm' }
+                    : { types: [{ description: 'Video File', accept: { 'video/mp4': ['.mp4'] } }], suggestedName: 'vfx-timeline.mp4' };
                 const handle = await (window as any).showSaveFilePicker(opts);
                 fileStream = await handle.createWritable();
             }
@@ -164,6 +166,9 @@ export function initVideoExportUI(global: Global): () => void {
             console.error('Failed to start VFX video export:', err);
         }
     };
+
+    const onExportClick = () => startExport(false);
+    const onExportFastClick = () => startExport(true);
 
     const onTestCaptureClick = async () => {
         try {
@@ -175,7 +180,7 @@ export function initVideoExportUI(global: Global): () => void {
             const tempSettings = {
                 startFrame: 0, endFrame: 0, frameRate: 30, width, height,
                 bitrate: 8_000_000, transparentBg: false, showDebug: false,
-                format: 'mov' as const, codec: 'h264' as const
+                format: 'mp4' as const, codec: 'h264' as const
             };
             const renderManager = new RenderManager(global);
             renderManager.startOffscreenMode(tempSettings);
@@ -261,6 +266,7 @@ export function initVideoExportUI(global: Global): () => void {
 
     videoResolution?.addEventListener('change', updateCustomResolutionVisibility);
     vfxVideoExportButton?.addEventListener('click', onExportClick);
+    vfxVideoExportFastButton?.addEventListener('click', onExportFastClick);
     testCaptureFrameButton?.addEventListener('click', onTestCaptureClick);
 
     updateCustomResolutionVisibility();
@@ -274,6 +280,7 @@ export function initVideoExportUI(global: Global): () => void {
         events.off('revealConfigChanged', updateVfxVideoExportVisibility);
         videoResolution?.removeEventListener('change', updateCustomResolutionVisibility);
         vfxVideoExportButton?.removeEventListener('click', onExportClick);
+        vfxVideoExportFastButton?.removeEventListener('click', onExportFastClick);
         testCaptureFrameButton?.removeEventListener('click', onTestCaptureClick);
 
         container.replaceChildren();
