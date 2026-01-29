@@ -92,20 +92,7 @@
             </pc-scene>
         </pc-app>
 
-        <!-- VFX 视频导出的进度覆盖层 -->
-        <div id="vfxExportOverlay" class="hidden" style="position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); z-index: 1000;">
-            <div style="min-width: 320px; max-width: 480px; padding: 24px 32px; border-radius: 12px; background: rgba(20,20,20,0.95); box-shadow: 0 12px 32px rgba(0,0,0,0.4);">
-                <div style="font-size: 16px; font-weight: 600; color: #fff; margin-bottom: 12px; text-align: center;">
-                    正在离线导出 VFX 视频…
-                </div>
-                <div style="width: 100%; height: 6px; border-radius: 999px; background: rgba(255,255,255,0.12); overflow: hidden;">
-                    <div id="vfxExportProgressBar" style="height: 100%; width: 0%; border-radius: 999px; background: linear-gradient(90deg, #4facfe, #00f2fe); transition: width 0.15s ease-out;"></div>
-                </div>
-                <div id="vfxExportProgressText" style="margin-top: 10px; font-size: 12px; color: rgba(255,255,255,0.75); text-align: center;">
-                    准备中…
-                </div>
-            </div>
-        </div>
+        <!-- VFX 进度覆盖层与 Reveal/导出 UI 由 reveal-ui、video-export-ui 组件在 JS 中创建 -->
 
         <div id="ui">
             <div id="poster"></div>
@@ -214,71 +201,9 @@
                     <div id="cameraBoundsCheck" class="checkMark hidden">✓</div>
                     <div id="cameraBoundsOption">Show Camera BoundingBox</div>
                 </div>
-                <div id="revealPanel" class="hidden">
-                    <div class="divider"></div>
-                    <div class="settingsRow">
-                        <label for="revealType">Effect:</label>
-                        <select id="revealType" class="settingsSelect">
-                            <option value="none">None</option>
-                            <optgroup label="Reveal Effects">
-                                <option value="radial">Radial</option>
-                                <option value="rain">Rain</option>
-                                <option value="smooth">Smooth</option>
-                            </optgroup>
-                            <optgroup label="Timed VFX Effects">
-                                <option value="rain_v2">Rain_V2</option>
-                                <option value="pieces-recover">Pieces Recover</option>
-                                <option value="integrate">Integrate</option>
-                                <option value="growth-wave">Growth Wave</option>
-                                <option value="sketch">Sketch</option>
-                            </optgroup>
-                            <optgroup label="Continuous VFX Effects">
-                                <option value="perlin-wave">Perlin Wave</option>
-                            </optgroup>
-                        </select>
-                    </div>
-                    <div id="totalDurationRow" class="settingsRow hidden">
-                        <label for="totalDuration">Total Duration (s):</label>
-                        <input type="number" id="totalDuration" class="settingsInput" min="1" max="60" step="0.5" value="15">
-                    </div>
-                    <div id="effectTimelineRow" class="settingsRow hidden">
-                        <div class="effectTimelineInner">
-                            <button id="effectPlayPause" class="settingsButton" type="button" aria-label="Play/Pause">⏸</button>
-                            <input type="range" id="effectTimeline" min="0" max="200" step="1" value="0" class="effectTimelineRange">
-                            <span id="effectTimeDisplay" class="effectTimeDisplay">0.0s</span>
-                        </div>
-                    </div>
-                    <div class="settingsRow hidden" id="vfxVideoExportRow">
-                        <div class="vfxExportInner">
-                            <div class="vfxExportRow">
-                                <label for="videoResolution">分辨率:</label>
-                                <select id="videoResolution" class="settingsSelect">
-                                    <option value="720p">720p (1280×720)</option>
-                                    <option value="1080p" selected>1080p (1920×1080)</option>
-                                    <option value="1440p">1440p (2560×1440)</option>
-                                    <option value="2160p">4K (3840×2160)</option>
-                                    <option value="custom">自定义</option>
-                                </select>
-                            </div>
-                            <div id="customResolutionRow" class="hidden vfxExportRow">
-                                <label for="customWidth">宽度:</label>
-                                <input type="number" id="customWidth" class="settingsInput" min="320" max="7680" step="2" value="1920">
-                                <label for="customHeight">高度:</label>
-                                <input type="number" id="customHeight" class="settingsInput" min="240" max="4320" step="2" value="1080">
-                            </div>
-                            <button id="vfxVideoExportButton" class="settingsButton" type="button">导出 VFX 视频</button>
-                            <button id="testCaptureFrameButton" class="settingsButton" type="button">测试捕获单帧</button>
-                        </div>
-                    </div>
-                    <div class="settingsRow">
-                        <button id="revealRestart" class="settingsButton" type="button">Restart Effect</button>
-                    </div>
-                    <div class="settingsRow">
-                        <div id="restartAnimTrackCheck" class="checkMark">✓</div>
-                        <div id="restartAnimTrackOption">Restart AnimTrack</div>
-                    </div>
-                    <div class="divider"></div>
-                </div>
+                <div class="divider"></div>
+                <div id="revealPanelContainer"></div>
+                <div class="divider"></div>
                 <div class="settingsRow">
                     <label for="skyboxSelect" style="margin-right: 8px;">Skybox:</label>
                     <select id="skyboxSelect">

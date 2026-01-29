@@ -388,8 +388,8 @@ button {
         background-color: $clr-text-darkest;
     }
 
-    @import 'ui/reveal-ui';
-    @import 'ui/video-export-ui';
+    @import 'ui/components/reveal-ui';
+    @import 'ui/components/video-export-ui';
 }
 
 /* infoPanel */

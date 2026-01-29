@@ -5,32 +5,82 @@ export const TIMED_VFX_EFFECTS = ['rain_v2', 'pieces-recover', 'integrate', 'gro
 
 export type RevealType = 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch' | 'none';
 
+/** Reveal 面板的 HTML 模板（挂载到 #revealPanelContainer，内含 #vfxVideoExportContainer 供 video-export-ui 挂载） */
+const REVEAL_PANEL_HTML = `
+<div id="revealPanel" class="hidden">
+  <div class="settingsRow">
+    <label for="revealType">Effect:</label>
+    <select id="revealType" class="settingsSelect">
+      <option value="none">None</option>
+      <optgroup label="Reveal Effects">
+        <option value="radial">Radial</option>
+        <option value="rain">Rain</option>
+        <option value="smooth">Smooth</option>
+      </optgroup>
+      <optgroup label="Timed VFX Effects">
+        <option value="rain_v2">Rain_V2</option>
+        <option value="pieces-recover">Pieces Recover</option>
+        <option value="integrate">Integrate</option>
+        <option value="growth-wave">Growth Wave</option>
+        <option value="sketch">Sketch</option>
+      </optgroup>
+      <optgroup label="Continuous VFX Effects">
+        <option value="perlin-wave">Perlin Wave</option>
+      </optgroup>
+    </select>
+  </div>
+  <div id="totalDurationRow" class="settingsRow hidden">
+    <label for="totalDuration">Total Duration (s):</label>
+    <input type="number" id="totalDuration" class="settingsInput" min="1" max="60" step="0.5" value="15">
+  </div>
+  <div id="effectTimelineRow" class="settingsRow hidden">
+    <div class="effectTimelineInner">
+      <button id="effectPlayPause" class="settingsButton" type="button" aria-label="Play/Pause">⏸</button>
+      <input type="range" id="effectTimeline" min="0" max="200" step="1" value="0" class="effectTimelineRange">
+      <span id="effectTimeDisplay" class="effectTimeDisplay">0.0s</span>
+    </div>
+  </div>
+  <div id="vfxVideoExportContainer"></div>
+  <div class="settingsRow">
+    <button id="revealRestart" class="settingsButton" type="button">Restart Effect</button>
+  </div>
+  <div class="settingsRow">
+    <div id="restartAnimTrackCheck" class="checkMark">✓</div>
+    <div id="restartAnimTrackOption">Restart AnimTrack</div>
+  </div>
+</div>
+`.trim();
+
 /**
  * 初始化 Reveal / VFX 与效果时间轴相关 UI。
- * 包括：特效类型选择、总时长、重播时是否同步动画轨道、重播按钮、效果时间轴（播放/暂停、拖动）。
- * @returns 清理函数，调用后解除所有事件订阅与 DOM 监听，便于组件卸载或重建。
+ * 组件自行创建 DOM 并挂载到 #revealPanelContainer；若无容器则跳过。
+ * @returns 清理函数，调用后解除事件并移除创建的 DOM。
  */
 export function initRevealUI(global: Global): () => void {
     const { events, state } = global;
 
-    const revealPanel = document.getElementById('revealPanel');
-    const revealType = document.getElementById('revealType') as HTMLSelectElement | null;
-    const revealRestart = document.getElementById('revealRestart');
-    const totalDurationRow = document.getElementById('totalDurationRow');
-    const totalDuration = document.getElementById('totalDuration') as HTMLInputElement | null;
-    const effectTimelineRow = document.getElementById('effectTimelineRow');
-    const effectTimeline = document.getElementById('effectTimeline') as HTMLInputElement | null;
-    const effectPlayPause = document.getElementById('effectPlayPause') as HTMLButtonElement | null;
-    const effectTimeDisplay = document.getElementById('effectTimeDisplay');
-    const restartAnimTrackCheck = document.getElementById('restartAnimTrackCheck');
-    const restartAnimTrackOption = document.getElementById('restartAnimTrackOption');
+    const container = document.getElementById('revealPanelContainer');
+    if (!container) return () => {};
+
+    container.innerHTML = REVEAL_PANEL_HTML;
+    const revealPanel = container.querySelector('#revealPanel') as HTMLElement;
+    const revealType = container.querySelector('#revealType') as HTMLSelectElement | null;
+    const revealRestart = container.querySelector('#revealRestart');
+    const totalDurationRow = container.querySelector('#totalDurationRow') as HTMLElement | null;
+    const totalDuration = container.querySelector('#totalDuration') as HTMLInputElement | null;
+    const effectTimelineRow = container.querySelector('#effectTimelineRow') as HTMLElement | null;
+    const effectTimeline = container.querySelector('#effectTimeline') as HTMLInputElement | null;
+    const effectPlayPause = container.querySelector('#effectPlayPause') as HTMLButtonElement | null;
+    const effectTimeDisplay = container.querySelector('#effectTimeDisplay');
+    const restartAnimTrackCheck = container.querySelector('#restartAnimTrackCheck');
+    const restartAnimTrackOption = container.querySelector('#restartAnimTrackOption');
 
     let restartAnimTrackEnabled = false;
 
     const toggleRestartAnimTrack = () => {
         restartAnimTrackEnabled = !restartAnimTrackEnabled;
         restartAnimTrackCheck?.classList[restartAnimTrackEnabled ? 'add' : 'remove']('active');
-        state.syncAnimTrackOnExport = restartAnimTrackEnabled;
+        // 不写入 state：state 可能是 Proxy，不允许随意 set 新属性；导出时以 DOM (#restartAnimTrackCheck.active) 为准
     };
 
     const onRevealTypeChange = (event: Event) => {
@@ -122,9 +172,7 @@ export function initRevealUI(global: Global): () => void {
     };
 
     const updateRevealControls = () => {
-        if (revealPanel) {
-            revealPanel.classList.remove('hidden');
-        }
+        revealPanel.classList.remove('hidden');
         if (revealType) {
             const currentType = (state as any).vfxType || global.settings?.revealEffect?.type || 'none';
             if (revealType.value !== currentType) {
@@ -177,7 +225,6 @@ export function initRevealUI(global: Global): () => void {
         updateRevealControls();
     };
 
-    // DOM 监听
     if (restartAnimTrackCheck && restartAnimTrackOption) {
         restartAnimTrackOption.addEventListener('click', toggleRestartAnimTrack);
         restartAnimTrackCheck.addEventListener('click', toggleRestartAnimTrack);
@@ -190,7 +237,6 @@ export function initRevealUI(global: Global): () => void {
     effectTimeline?.addEventListener('input', onEffectTimelineInput);
     effectTimeline?.addEventListener('pointerup', onEffectTimelinePointerUp);
 
-    // 事件订阅
     events.on('effectTime:changed', onEffectTimeChanged);
     events.on('effectPlayPause:changed', onEffectPlayPauseChanged);
     events.on('revealConfigChanged', onRevealConfigChangedForTimeline);
@@ -198,7 +244,7 @@ export function initRevealUI(global: Global): () => void {
     events.on('revealType:changed', onRevealTypeChanged);
     events.on('revealConfigChanged', onRevealConfigChangedForControls);
 
-    updateRevealControls(); // 初始同步 UI
+    updateRevealControls();
 
     return function cleanupRevealUI() {
         if (restartAnimTrackCheck && restartAnimTrackOption) {
@@ -219,5 +265,7 @@ export function initRevealUI(global: Global): () => void {
         events.off('hasRevealEffect:changed', onHasRevealEffectChanged);
         events.off('revealType:changed', onRevealTypeChanged);
         events.off('revealConfigChanged', onRevealConfigChangedForControls);
+
+        container.replaceChildren();
     };
 }

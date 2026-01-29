@@ -8,27 +8,79 @@ const RESOLUTION_PRESETS: Record<string, { width: number; height: number }> = {
     '2160p': { width: 3840, height: 2160 }
 };
 
+/** 导出进度覆盖层 HTML 模板（挂到 body） */
+const VFX_EXPORT_OVERLAY_HTML = `
+<div id="vfxExportOverlay" class="hidden" style="position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); z-index: 1000;">
+  <div style="min-width: 320px; max-width: 480px; padding: 24px 32px; border-radius: 12px; background: rgba(20,20,20,0.95); box-shadow: 0 12px 32px rgba(0,0,0,0.4);">
+    <div style="font-size: 16px; font-weight: 600; color: #fff; margin-bottom: 12px; text-align: center;">正在离线导出 VFX 视频…</div>
+    <div style="width: 100%; height: 6px; border-radius: 999px; background: rgba(255,255,255,0.12); overflow: hidden;">
+      <div id="vfxExportProgressBar" style="height: 100%; width: 0%; border-radius: 999px; background: linear-gradient(90deg, #4facfe, #00f2fe); transition: width 0.15s ease-out;"></div>
+    </div>
+    <div id="vfxExportProgressText" style="margin-top: 10px; font-size: 12px; color: rgba(255,255,255,0.75); text-align: center;">准备中…</div>
+  </div>
+</div>
+`.trim();
+
+/** VFX 导出行 HTML 模板（挂到 #vfxVideoExportContainer） */
+const VFX_VIDEO_EXPORT_ROW_HTML = `
+<div id="vfxVideoExportRow" class="settingsRow hidden">
+  <div class="vfxExportInner">
+    <div class="vfxExportRow">
+      <label for="videoResolution">分辨率:</label>
+      <select id="videoResolution" class="settingsSelect">
+        <option value="720p">720p (1280×720)</option>
+        <option value="1080p" selected>1080p (1920×1080)</option>
+        <option value="1440p">1440p (2560×1440)</option>
+        <option value="2160p">4K (3840×2160)</option>
+        <option value="custom">自定义</option>
+      </select>
+    </div>
+    <div id="customResolutionRow" class="hidden vfxExportRow">
+      <label for="customWidth">宽度:</label>
+      <input type="number" id="customWidth" class="settingsInput" min="320" max="7680" step="2" value="1920">
+      <label for="customHeight">高度:</label>
+      <input type="number" id="customHeight" class="settingsInput" min="240" max="4320" step="2" value="1080">
+    </div>
+    <button id="vfxVideoExportButton" class="settingsButton" type="button">导出 VFX 视频</button>
+    <button id="testCaptureFrameButton" class="settingsButton" type="button">测试捕获单帧</button>
+  </div>
+</div>
+`.trim();
+
 /**
  * 初始化 VFX 视频导出相关 UI。
- * 包括：导出进度覆盖层、分辨率选择、自定义分辨率、导出按钮、测试单帧按钮。
- * @returns 清理函数，调用后解除所有事件订阅与 DOM 监听，便于组件卸载或重建。
+ * 组件自行创建 DOM：进度覆盖层挂到 body，导出行挂到 #vfxVideoExportContainer（由 reveal-ui 创建）。
+ * @returns 清理函数，调用后解除事件并移除创建的 DOM。
  */
 export function initVideoExportUI(global: Global): () => void {
     const { events, state } = global;
 
-    const vfxExportOverlay = document.getElementById('vfxExportOverlay') as HTMLElement | null;
-    const vfxExportProgressBar = document.getElementById('vfxExportProgressBar') as HTMLElement | null;
-    const vfxExportProgressText = document.getElementById('vfxExportProgressText') as HTMLElement | null;
-    const vfxVideoExportRow = document.getElementById('vfxVideoExportRow');
-    const vfxVideoExportButton = document.getElementById('vfxVideoExportButton') as HTMLButtonElement | null;
-    const testCaptureFrameButton = document.getElementById('testCaptureFrameButton') as HTMLButtonElement | null;
-    const videoResolution = document.getElementById('videoResolution') as HTMLSelectElement | null;
-    const customResolutionRow = document.getElementById('customResolutionRow');
-    const customWidth = document.getElementById('customWidth') as HTMLInputElement | null;
-    const customHeight = document.getElementById('customHeight') as HTMLInputElement | null;
+    const overlayWrap = document.createElement('div');
+    overlayWrap.innerHTML = VFX_EXPORT_OVERLAY_HTML;
+    const overlayRoot = overlayWrap.firstElementChild as HTMLElement;
+    document.body.appendChild(overlayRoot);
+
+    const vfxExportOverlay = overlayRoot;
+    const vfxExportProgressBar = overlayRoot.querySelector('#vfxExportProgressBar') as HTMLElement | null;
+    const vfxExportProgressText = overlayRoot.querySelector('#vfxExportProgressText') as HTMLElement | null;
+
+    const container = document.getElementById('vfxVideoExportContainer');
+    if (!container) {
+        overlayRoot.remove();
+        return () => {};
+    }
+
+    container.innerHTML = VFX_VIDEO_EXPORT_ROW_HTML;
+    const vfxVideoExportRow = container.querySelector('#vfxVideoExportRow') as HTMLElement;
+    const vfxVideoExportButton = container.querySelector('#vfxVideoExportButton') as HTMLButtonElement | null;
+    const testCaptureFrameButton = container.querySelector('#testCaptureFrameButton') as HTMLButtonElement | null;
+    const videoResolution = container.querySelector('#videoResolution') as HTMLSelectElement | null;
+    const customResolutionRow = container.querySelector('#customResolutionRow');
+    const customWidth = container.querySelector('#customWidth') as HTMLInputElement | null;
+    const customHeight = container.querySelector('#customHeight') as HTMLInputElement | null;
 
     const onProgressStart = (message: string) => {
-        if (vfxExportOverlay) vfxExportOverlay.classList.remove('hidden');
+        vfxExportOverlay.classList.remove('hidden');
         if (vfxExportProgressBar) vfxExportProgressBar.style.width = '0%';
         if (vfxExportProgressText) {
             vfxExportProgressText.textContent =
@@ -37,7 +89,6 @@ export function initVideoExportUI(global: Global): () => void {
     };
 
     const onProgressUpdate = (payload: { text: string; progress: number }) => {
-        if (!vfxExportOverlay) return;
         if (vfxExportProgressBar) {
             const clamped = Math.max(0, Math.min(100, payload.progress));
             vfxExportProgressBar.style.width = `${clamped}%`;
@@ -49,7 +100,7 @@ export function initVideoExportUI(global: Global): () => void {
     };
 
     const onProgressEnd = () => {
-        if (vfxExportOverlay) vfxExportOverlay.classList.add('hidden');
+        vfxExportOverlay.classList.add('hidden');
     };
 
     const updateCustomResolutionVisibility = () => {
@@ -72,9 +123,7 @@ export function initVideoExportUI(global: Global): () => void {
     const updateVfxVideoExportVisibility = () => {
         const currentType = (state as any).vfxType || global.settings?.revealEffect?.type || 'none';
         const showForType = TIMED_VFX_EFFECTS.includes(currentType);
-        if (vfxVideoExportRow) {
-            vfxVideoExportRow.classList[showForType ? 'remove' : 'add']('hidden');
-        }
+        vfxVideoExportRow.classList[showForType ? 'remove' : 'add']('hidden');
     };
 
     const onExportClick = async () => {
@@ -86,9 +135,8 @@ export function initVideoExportUI(global: Global): () => void {
                 console.log(`Video dimensions adjusted from ${resolution.width}x${resolution.height} to ${width}x${height} for H264 compatibility`);
             }
             const frameRate = 30;
-            // 以 DOM 勾选状态为准，避免与 reveal-ui 的 state 不同步导致导出时未带上相机 anim
             const restartCheckEl = document.getElementById('restartAnimTrackCheck');
-            const syncAnimTrack = restartCheckEl?.classList.contains('active') ?? !!state.syncAnimTrackOnExport;
+            const syncAnimTrack = restartCheckEl?.classList.contains('active') ?? false;
             const videoSettings = {
                 startFrame: 0,
                 endFrame: 0,
@@ -227,5 +275,8 @@ export function initVideoExportUI(global: Global): () => void {
         videoResolution?.removeEventListener('change', updateCustomResolutionVisibility);
         vfxVideoExportButton?.removeEventListener('click', onExportClick);
         testCaptureFrameButton?.removeEventListener('click', onTestCaptureClick);
+
+        container.replaceChildren();
+        overlayRoot.remove();
     };
 }
