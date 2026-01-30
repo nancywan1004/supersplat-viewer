@@ -621,9 +621,19 @@ export class RevealController {
                 script.endRadius = defaultEndRadius;
                 script.fadeWidthRatio = 0.1;
                 script.sketchIntensity = 1.0;
-                script.sketchLineDensity = 2.0;
-                script.sketchEdgeThreshold = 3.0;
-                script.colorTransitionStart = 0.3;
+                script.sketchContrast = 1.2;
+                script.draftFeel = 0.65;
+                script.shadeLevels = 5.0;
+                script.hatchDensity = 8.0;
+                script.hatchStrength = 0.65;
+                script.paperTintAmount = 0.4;
+                script.paperTint = [0.97, 0.95, 0.90];
+                script.colorizeSpread = 0.08;
+                script.colorizeDensity = 0.25;
+                script.colorizeAlphaGrain = 0.5;
+                script.grainFreq = 25.0;
+                script.grainAmp = 0.06;
+                script.colorizeSharpness = 0.6;
                 
                 // 设置 reveal center
                 this.updateScriptCenter(script);
