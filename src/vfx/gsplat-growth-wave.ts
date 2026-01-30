@@ -10,6 +10,7 @@ uniform float uRecoverDuration;
 uniform float uNoiseIntensity;
 uniform float uScatterDistance;
 uniform float uMinSize;
+uniform float uPointSize;   // 点云阶段固定点大小（参考 splat-overlay-shader 的 splatSize）
 uniform float uEndRadius;
 uniform float uGlobalRecoverStart;
 uniform float uBottomY;
@@ -460,103 +461,25 @@ void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA,
         return;
     }
     
-    // Phase 1: Growth phase - small particles (point cloud) with convergence effect
+    // Phase 1: Growth phase - 点云模式（参考 splat-overlay-shader：固定点大小 uPointSize，不依赖 originalSize）
+    // 注：overlay 用 gl_PointSize + 1 顶点/splat；本管线为四边形，用 gsplatMakeRound 得到 uniform 圆点
     if (g_phase == 1.0) {
-        // 所有在growth阶段的粒子都参与聚拢效果
-        // 使用g_growthProgress控制显示：只有波传播到的粒子才显示
         if (g_growthProgress <= 0.0) {
             gsplatMakeRound(covA, covB, originalSize * 0.001);
             return;
         }
-        
-        // 放宽边缘粒子过滤条件：让更多边缘粒子参与
-        // 在波前内：显示小且圆的粒子或各向异性边缘粒子（纯点云）
-        float lenA = length(covA);
-        float lenB = length(covB);
-        float small = 1e-4;
-        float aniso = max(lenA, lenB) / max(min(lenA, lenB), small);
-        
-        // 放宽条件：增加边缘粒子的识别范围
-        float originalScreenArea = originalSize * originalSize;
-        // 小且圆的粒子：放宽面积阈值
-        bool isSmallRound = (originalScreenArea < uEdgeAreaMax * 1.5) && (aniso < 3.0);
-        // 各向异性边缘粒子：放宽各向异性和面积阈值
-        bool isSmallAniso = (aniso > uEdgeAnisoMin * 0.6 && aniso < 4.0) && (originalScreenArea < uEdgeAreaMax * 1.2);
-        // 添加中等大小的边缘粒子
-        bool isMediumEdge = (originalScreenArea < uEdgeAreaMax * 2.0) && (aniso > 2.0 && aniso < 5.0);
-        
-        if (!isSmallRound && !isSmallAniso && !isMediumEdge) {
-            gsplatMakeRound(covA, covB, originalSize * 0.001);
-            return;
-        }
-
-        // 强制所有粒子为非常小的纯点云，但保持可见性以支持辉光效果
-        float maxPointSize = originalSize * uMinSize;
-        float pointSize = min(maxPointSize, originalSize * 0.08); // 稍微增大到8%，确保可见性
-        
-        gsplatMakeRound(covA, covB, pointSize);
+        gsplatMakeRound(covA, covB, uPointSize);
         return;
     }
     
-    // Phase 2: Recover phase - gradually restore original size and shape
-    // ALL particles recover, not just edge particles
-    // 使用基于波传播的恢复进度（g_recoverProgress），实现从下到上的波传播效果
+    // Phase 2: Recover phase - 从固定点大小 uPointSize 恢复至原始
     if (g_phase == 2.0) {
-        // 判断这个粒子在 Phase 1 中是否是可见的点云粒子
-        // 使用与 Phase 1 相同的判断逻辑
-        float lenA = length(covA);
-        float lenB = length(covB);
-        float small = 1e-4;
-        float aniso = max(lenA, lenB) / max(min(lenA, lenB), small);
-        float originalScreenArea = originalSize * originalSize;
-        bool isSmallRound = (originalScreenArea < uEdgeAreaMax * 1.5) && (aniso < 3.0);
-        bool isSmallAniso = (aniso > uEdgeAnisoMin * 0.6 && aniso < 4.0) && (originalScreenArea < uEdgeAreaMax * 1.2);
-        bool isMediumEdge = (originalScreenArea < uEdgeAreaMax * 2.0) && (aniso > 2.0 && aniso < 5.0);
-        bool wasPointCloudParticle = isSmallRound || isSmallAniso || isMediumEdge;
-        
-        // 如果恢复进度为 0，说明波还没到达这个粒子
-        // 如果是 Phase 1 的点云粒子，保持点云状态；否则隐藏
         if (g_recoverProgress <= 0.0) {
-            if (wasPointCloudParticle) {
-                // 保持 Phase 1 的点云状态
-                float maxPointSize = originalSize * uMinSize;
-                float pointSize = min(maxPointSize, originalSize * 0.08);
-                gsplatMakeRound(covA, covB, pointSize);
-            } else {
-                // 非点云粒子保持隐藏
-                gsplatMakeRound(covA, covB, originalSize * 0.001);
-            }
+            gsplatMakeRound(covA, covB, uPointSize);
             return;
         }
-        
-        // 使用基于波传播的恢复进度，而不是全局时间
-        float easedT = 1.0 - pow(1.0 - g_recoverProgress, 4.0);
-        easedT = clamp(easedT, 0.0, 1.0);
-        
-        // Check if this particle was an edge particle during growth phase
-        float distFromCenter = length(originalCenter - uCenter);
-        float edgeThreshold = uEndRadius * 0.3;
-        bool wasEdgeParticle = distFromCenter >= edgeThreshold;
-        
-        float randomSeed = hash(originalCenter);
-        float startSize;
-        
-        if (wasPointCloudParticle) {
-            // Phase 1 的点云粒子：从点云大小开始恢复
-            float maxPointSize = originalSize * uMinSize;
-            float pointSize = min(maxPointSize, originalSize * 0.08);
-            startSize = pointSize;
-        } else if (wasEdgeParticle) {
-            // Edge particles: recover from small point cloud size
-            startSize = originalSize * (uMinSize + randomSeed * (0.1 - uMinSize));
-        } else {
-            // Non-edge particles: start from hidden (very small) and grow to original
-            startSize = originalSize * 0.001;
-        }
-        
-        float size = mix(startSize, originalSize, easedT);
-        
-        // Lerp from round to original shape
+        float easedT = clamp(1.0 - pow(1.0 - g_recoverProgress, 4.0), 0.0, 1.0);
+        float size = mix(uPointSize, originalSize, easedT);
         vec3 origCovA = covA;
         vec3 origCovB = covB;
         gsplatMakeRound(covA, covB, size);
@@ -626,6 +549,7 @@ uniform uRecoverDuration: f32;
 uniform uNoiseIntensity: f32;
 uniform uScatterDistance: f32;
 uniform uMinSize: f32;
+uniform uPointSize: f32;   // 点云阶段固定点大小（参考 splat-overlay-shader 的 splatSize）
 uniform uEndRadius: f32;
 uniform uGlobalRecoverStart: f32;
 uniform uBottomY: f32;
@@ -1060,100 +984,24 @@ fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<func
         return;
     }
     
-    // Phase 1: Growth phase - small particles (point cloud) with convergence effect
+    // Phase 1: 点云模式 - 固定点大小 uPointSize（参考 splat-overlay-shader）
     if (g_phase == 1.0) {
-        // 所有在growth阶段的粒子都参与聚拢效果
-        // 使用g_growthProgress控制显示：只有波传播到的粒子才显示
         if (g_growthProgress <= 0.0) {
             gsplatMakeRound(covA, covB, originalSize * 0.001);
             return;
         }
-        
-        // 放宽边缘粒子过滤条件：让更多边缘粒子参与
-        // 在波前内：显示小且圆的粒子或各向异性边缘粒子（纯点云）
-        let lenA = length(*covA);
-        let lenB = length(*covB);
-        let small = 1e-4;
-        let aniso = max(lenA, lenB) / max(min(lenA, lenB), small);
-        
-        // 放宽条件：增加边缘粒子的识别范围
-        let originalScreenArea = originalSize * originalSize;
-        // 小且圆的粒子：放宽面积阈值
-        let isSmallRound = (originalScreenArea < uniform.uEdgeAreaMax * 1.5) && (aniso < 3.0);
-        // 各向异性边缘粒子：放宽各向异性和面积阈值
-        let isSmallAniso = (aniso > uniform.uEdgeAnisoMin * 0.6 && aniso < 4.0) && (originalScreenArea < uniform.uEdgeAreaMax * 1.2);
-        // 添加中等大小的边缘粒子
-        let isMediumEdge = (originalScreenArea < uniform.uEdgeAreaMax * 2.0) && (aniso > 2.0 && aniso < 5.0);
-        
-        if (!isSmallRound && !isSmallAniso && !isMediumEdge) {
-            gsplatMakeRound(covA, covB, originalSize * 0.001);
-            return;
-        }
-
-        // 强制所有粒子为非常小的纯点云，但保持可见性以支持辉光效果
-        let maxPointSize = originalSize * uniform.uMinSize;
-        let pointSize = min(maxPointSize, originalSize * 0.08); // 稍微增大到8%，确保可见性
-        
-        gsplatMakeRound(covA, covB, pointSize);
+        gsplatMakeRound(covA, covB, uniform.uPointSize);
         return;
     }
     
-    // Phase 2: Recover phase - ALL particles recover, not just edge particles
-    // 使用基于波传播的恢复进度（g_recoverProgress），实现从下到上的波传播效果
+    // Phase 2: 从 uPointSize 恢复至原始
     if (g_phase == 2.0) {
-        // 判断这个粒子在 Phase 1 中是否是可见的点云粒子
-        // 使用与 Phase 1 相同的判断逻辑
-        let lenA = length(*covA);
-        let lenB = length(*covB);
-        let small = 1e-4;
-        let aniso = max(lenA, lenB) / max(min(lenA, lenB), small);
-        let originalScreenArea = originalSize * originalSize;
-        let isSmallRound = (originalScreenArea < uniform.uEdgeAreaMax * 1.5) && (aniso < 3.0);
-        let isSmallAniso = (aniso > uniform.uEdgeAnisoMin * 0.6 && aniso < 4.0) && (originalScreenArea < uniform.uEdgeAreaMax * 1.2);
-        let isMediumEdge = (originalScreenArea < uniform.uEdgeAreaMax * 2.0) && (aniso > 2.0 && aniso < 5.0);
-        let wasPointCloudParticle = isSmallRound || isSmallAniso || isMediumEdge;
-        
-        // 如果恢复进度为 0，说明波还没到达这个粒子
-        // 如果是 Phase 1 的点云粒子，保持点云状态；否则隐藏
         if (g_recoverProgress <= 0.0) {
-            if (wasPointCloudParticle) {
-                // 保持 Phase 1 的点云状态
-                let maxPointSize = originalSize * uniform.uMinSize;
-                let pointSize = min(maxPointSize, originalSize * 0.08);
-                gsplatMakeRound(covA, covB, pointSize);
-            } else {
-                // 非点云粒子保持隐藏
-                gsplatMakeRound(covA, covB, originalSize * 0.001);
-            }
+            gsplatMakeRound(covA, covB, uniform.uPointSize);
             return;
         }
-        
-        // 使用基于波传播的恢复进度，而不是全局时间
         let easedT = clamp(1.0 - pow(1.0 - g_recoverProgress, 4.0), 0.0, 1.0);
-        
-        // Check if this particle was an edge particle during growth phase
-        let distFromCenter = length(originalCenter - uniform.uCenter);
-        let edgeThreshold = uniform.uEndRadius * 0.3;
-        let wasEdgeParticle = distFromCenter >= edgeThreshold;
-        
-        let randomSeed = hash(originalCenter);
-        var startSize: f32;
-        
-        if (wasPointCloudParticle) {
-            // Phase 1 的点云粒子：从点云大小开始恢复
-            let maxPointSize = originalSize * uniform.uMinSize;
-            let pointSize = min(maxPointSize, originalSize * 0.08);
-            startSize = pointSize;
-        } else if (wasEdgeParticle) {
-            // Edge particles: recover from small point cloud size
-            startSize = originalSize * (uniform.uMinSize + randomSeed * (0.1 - uniform.uMinSize));
-        } else {
-            // Non-edge particles: start from hidden (very small) and grow to original
-            startSize = originalSize * 0.001;
-        }
-        
-        let size = mix(startSize, originalSize, easedT);
-        
+        let size = mix(uniform.uPointSize, originalSize, easedT);
         let origCovA = *covA;
         let origCovB = *covB;
         gsplatMakeRound(covA, covB, size);
@@ -1284,6 +1132,13 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
     minSize = 0.05;
 
     /**
+     * 点云阶段固定点大小（参考 splat-overlay-shader 的 splatSize，与协方差尺度一致）
+     * @attribute
+     * @range [0.001, 0.5]
+     */
+    pointSize = 0.005;
+
+    /**
      * Maximum Y distance from center to process (for performance)
      * @attribute
      * @range [0, 500]
@@ -1303,6 +1158,7 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
     topY = 10.0;
 
     /**
+     * @deprecated 聚拢阶段已改为点云模式，所有粒子均参与，此参数保留仅为兼容
      * Edge filter: minimum screen area (px^2) to keep; smaller treated as edges
      * @attribute
      * @range [0, 20]
@@ -1310,6 +1166,7 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
     edgeAreaMin = 1.5;
 
     /**
+     * @deprecated 聚拢阶段已改为点云模式，此参数保留仅为兼容
      * Edge filter: maximum screen area (px^2) for anisotropic edges
      * @attribute
      * @range [0, 50]
@@ -1317,6 +1174,7 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
     edgeAreaMax = 6.0;
 
     /**
+     * @deprecated 聚拢阶段已改为点云模式，此参数保留仅为兼容
      * Edge filter: anisotropy threshold (r_major / r_minor approx)
      * @attribute
      * @range [1, 20]
@@ -1365,6 +1223,7 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
         this.setUniform('uNoiseIntensity', this.noiseIntensity);
         this.setUniform('uScatterDistance', this.scatterDistance);
         this.setUniform('uMinSize', this.minSize);
+        this.setUniform('uPointSize', this.pointSize);
         this.setUniform('uEndRadius', this.endRadius);
         this.setUniform('uGlobalRecoverStart', globalRecoverStart);
         this.setUniform('uBottomY', this.bottomY);
