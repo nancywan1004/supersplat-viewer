@@ -10,12 +10,17 @@ uniform float uColorizeDuration;
 uniform float uFadeWidthRatio;
 uniform float uSketchIntensity;
 uniform float uSketchContrast;
+uniform float uDraftFeel;
 uniform float uShadeLevels;
 uniform float uHatchDensity;
 uniform float uHatchStrength;
-uniform float uSketchFeel;
 uniform float uGrainFreq;
 uniform float uGrainAmp;
+uniform float uPaperTintAmount;
+uniform vec3 uPaperTint;
+uniform float uColorizeSpread;
+uniform float uColorizeDensity;
+uniform float uColorizeAlphaGrain;
 uniform float uColorizeSharpness;
 uniform float uEndRadius;
 
@@ -31,7 +36,8 @@ mat2 rot2D(float angle) {
     return mat2(c, -s, s, c);
 }
 
-// Value noise (smoother than raw hash)
+// Value noise: 晶格顶点 hash + 平滑插值(smoothstep)，输出 [0,1]
+// 比纯 hash 更柔和，适合做颗粒/纤维
 float valueNoise(vec3 p) {
     vec3 i = floor(p);
     vec3 f = fract(p);
@@ -42,6 +48,16 @@ float valueNoise(vec3 p) {
         mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x),
             mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
     return n;
+}
+
+// FBM：多层 valueNoise 叠加，产生更丰富自然的纹路（纸张纤维/炭笔粗糙感）
+float fbmValueNoise(vec3 p) {
+    float v = 0.0, a = 0.5, f = 1.0;
+    v += a * valueNoise(p * f); f *= 2.0; a *= 0.5;
+    v += a * valueNoise(p * f); f *= 2.0; a *= 0.5;
+    v += a * valueNoise(p * f); f *= 2.0; a *= 0.5;
+    v += a * valueNoise(p * f);
+    return v;
 }
 
 // Shared globals
@@ -80,14 +96,22 @@ void initShared(vec3 center) {
         g_sketchProgress = clamp(g_sketchProgress, 0.0, 1.0);
     }
     
-    // 计算上色进度
-    if (uTime < g_tColorizeStart) {
-        g_colorizeProgress = 0.0;
-    } else if (uTime >= g_tColorizeEnd) {
+    // 计算上色进度：光圈式空间传播（与素描一致，从中心向外）
+    // 上色波前半径随时间扩张
+    float colorizeRadius = 0.0;
+    if (uTime > g_tColorizeStart) {
+        float colorizeT = min(uTime - g_tColorizeStart, uColorizeDuration);
+        colorizeRadius = (colorizeT / uColorizeDuration) * uEndRadius;
+    }
+    float colorizeBand = uEndRadius * uFadeWidthRatio * 3.0;
+    float colorizeOuter = colorizeRadius + colorizeBand * 0.5;
+    float colorizeInner = max(0.0, colorizeRadius - colorizeBand * 0.5);
+    if (g_dist <= colorizeInner) {
         g_colorizeProgress = 1.0;
+    } else if (g_dist >= colorizeOuter) {
+        g_colorizeProgress = 0.0;
     } else {
-        g_colorizeProgress = (uTime - g_tColorizeStart) / uColorizeDuration;
-        g_colorizeProgress = clamp(g_colorizeProgress, 0.0, 1.0);
+        g_colorizeProgress = 1.0 - smoothstep(colorizeInner, colorizeOuter, g_dist);
     }
     
     // 确定当前阶段
@@ -122,8 +146,12 @@ void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA,
         return;
     }
     
-    // 素描和上色阶段：保持原始形状
-    // 形状修改在 modifyColor 中通过颜色处理
+    // 上色阶段：过渡区内高斯拉长，模拟笔触涂抹扩散
+    if (g_phase == 2.0 && uColorizeSpread > 0.0) {
+        float peak = smoothstep(0.2, 0.5, g_colorizeProgress) * smoothstep(0.8, 0.5, g_colorizeProgress);
+        float spread = 1.0 + uColorizeSpread * peak;
+        gsplatApplyUniformScale(covA, covB, spread);
+    }
 }
 
 void modifyColor(vec3 center, inout vec4 color) {
@@ -178,50 +206,78 @@ void modifyColor(vec3 center, inout vec4 color) {
     // === 素描 NPR：明暗正确 + 排线 + 颗粒 ===
     // 1. 基础亮度（暗部=深色，亮部=浅色）
     float luminance = dot(originalColor.rgb, vec3(0.299, 0.587, 0.114));
-    float brightness = pow(luminance, uSketchContrast);
+    float effectiveContrast = mix(uSketchContrast, 1.0, uDraftFeel * 0.5);
+    float brightness = pow(luminance, effectiveContrast);
     float darkness = 1.0 - brightness;
     
-    // 2. 排线（hatching）：多向交叉 + 速写感（仅用 sin/cos，无 hash）
+    // 2. 排线（hatching）：草稿感 = 更松的线条、更大抖动、更块面
     vec2 worldPos = center.xz;
     vec2 radialDir = normalize((center - uCenter).xz);
     vec2 lineDir = vec2(-radialDir.y, radialDir.x);
-    // 速写感：区域角度微变、线条轻微起伏（纯 deterministic）
-    float angleOff = 0.15 * uSketchFeel * sin(center.x * 0.25) * cos(center.z * 0.25);
+    float draft = 1.0 + 0.7 * uDraftFeel;
+    float angleOff = 0.2 * draft * sin(center.x * 0.37 + center.z * 0.21) * cos(center.z * 0.31 + center.y * 0.1);
     vec2 lineDirR = rot2D(angleOff) * lineDir;
-    float wobble = 0.2 * uSketchFeel * sin(center.x * 0.35) * cos(center.z * 0.35);
-    float lineCoord = (dot(worldPos, lineDirR) + wobble) * uHatchDensity;
-    float linePattern = smoothstep(0.78, 0.98, abs(sin(lineCoord * 3.14159)));
-    vec2 lineDir2 = rot2D(0.78 + angleOff * 0.5) * lineDir;
-    float wobble2 = 0.18 * uSketchFeel * sin(center.x * 0.4 + 1.0) * cos(center.z * 0.3);
-    float lineCoord2 = (dot(worldPos, lineDir2) + wobble2) * uHatchDensity * 0.75;
-    float linePattern2 = smoothstep(0.78, 0.98, abs(sin(lineCoord2 * 3.14159)));
-    vec2 lineDir3 = rot2D(1.57 + angleOff * 0.3) * lineDir;
-    float wobble3 = 0.15 * uSketchFeel * sin(center.x * 0.3) * cos(center.z * 0.45 + 0.5);
-    float lineCoord3 = (dot(worldPos, lineDir3) + wobble3) * uHatchDensity * 0.6;
-    float linePattern3 = smoothstep(0.82, 0.98, abs(sin(lineCoord3 * 3.14159)));
-    brightness -= (linePattern + linePattern2 * 0.55 + linePattern3 * 0.35) * darkness * uHatchStrength;
+    float wobble = 0.25 * draft * sin(center.x * 0.41 + center.z * 0.29) * cos(center.z * 0.33 + 1.0);
+    float phaseJitter = (valueNoise(center * 0.7 + 1.0) - 0.5) * (1.2 + 0.8 * uDraftFeel);
+    float lineCoord = (dot(worldPos, lineDirR) + wobble + phaseJitter) * uHatchDensity;
+    float linePattern = smoothstep(0.68, 0.96, abs(sin(lineCoord * 3.14159)));
+    vec2 lineDir2 = rot2D(0.73 + angleOff * 0.5) * lineDir;
+    float wobble2 = 0.22 * draft * sin(center.x * 0.43 + center.z * 0.19) * cos(center.z * 0.27 + 0.5);
+    float phaseJitter2 = (valueNoise(center * 0.6 + 3.0) - 0.5) * (1.0 + 0.6 * uDraftFeel);
+    float lineCoord2 = (dot(worldPos, lineDir2) + wobble2 + phaseJitter2) * uHatchDensity * 0.82;
+    float linePattern2 = smoothstep(0.68, 0.96, abs(sin(lineCoord2 * 3.14159)));
+    vec2 lineDir3 = rot2D(1.43 + angleOff * 0.3) * lineDir;
+    float wobble3 = 0.2 * draft * sin(center.x * 0.39 + center.z * 0.23) * cos(center.z * 0.35 + 1.3);
+    float phaseJitter3 = (valueNoise(center * 0.65 + 5.0) - 0.5) * (0.9 + 0.5 * uDraftFeel);
+    float lineCoord3 = (dot(worldPos, lineDir3) + wobble3 + phaseJitter3) * uHatchDensity * 0.63;
+    float linePattern3 = smoothstep(0.7, 0.96, abs(sin(lineCoord3 * 3.14159)));
+    float hatchInDark = uHatchStrength * (1.0 - smoothstep(0.42, 0.72, darkness));
+    brightness -= (linePattern + linePattern2 * 0.55 + linePattern3 * 0.35) * darkness * hatchInDark;
     
-    // 3. 量化层次
+    // 3. 量化层次：草稿感=更块面，写实感=更平滑
     float levels = max(2.0, uShadeLevels);
-    brightness = (floor(brightness * levels) + 0.5) / levels;
+    float preQuant = brightness;
+    float quantized = (floor(brightness * levels) + 0.5) / levels;
+    float quantBlend = mix(0.06, 0.18, 1.0 - uDraftFeel);
+    brightness = mix(quantized, preQuant, quantBlend);
     
-    // 4. 铅笔颗粒
+    // 4. 肌理层（暗处减弱，避免黑洞感）
     float grain = (valueNoise(center * uGrainFreq) - 0.5) * uGrainAmp;
-    brightness += grain;
+    float paperFiber = (fbmValueNoise(center * uGrainFreq * 0.4 + 2.0) - 0.5) * uGrainAmp * 0.8;
+    float roughGrit = (valueNoise(center * uGrainFreq * 2.5 + 5.0) - 0.5) * uGrainAmp * 0.5;
+    float darkMask = 1.0 - 0.55 * smoothstep(0.5, 0.92, darkness);
+    brightness += (grain + paperFiber + roughGrit) * 1.5 * darkMask;
     
-    float sketchValue = clamp(brightness, 0.0, 1.0);
+    brightness = mix(brightness, 0.5, uDraftFeel * mix(0.06, 0.12, 1.0 - uDraftFeel));
     
-    // 应用素描效果：素描 = 黑白，彩色 = 原始颜色
-    vec3 sketchColor = vec3(sketchValue); // 黑白素描
+    float sketchValue = clamp(brightness, 0.03, 1.0);
+    
+    // 纸张色调：灰度乘暖色，不改变明暗次序，仅整体偏暖
+    vec3 pureGray = vec3(sketchValue);
+    vec3 tinted = pureGray * uPaperTint;
+    vec3 sketchColor = mix(pureGray, tinted, uPaperTintAmount);
     vec3 colorizedColor = originalColor.rgb; // 原始彩色
     
-    // 根据进度混合素描和彩色（简化，避免随机扰动造成杂乱）
+    // 混合素描和彩色
     float mixFactor = sketchProgress * uSketchIntensity;
+    
+    // 上色阶段笔触增强：密度叠加（过渡区中心颜色更实，边缘渐浅）
+    if (g_phase == 2.0 && uColorizeDensity > 0.0) {
+        float densityPeak = smoothstep(0.2, 0.5, g_colorizeProgress) * smoothstep(0.8, 0.5, g_colorizeProgress);
+        mixFactor *= (1.0 - uColorizeDensity * densityPeak);
+    }
+    
     vec3 finalColor = mix(colorizedColor, sketchColor, mixFactor);
     
-    // 应用最终颜色和透明度
+    // 上色阶段：Alpha 颗粒抖动（纸张/彩铅质感）
+    float alphaGrain = 1.0;
+    if (g_phase == 2.0 && uColorizeAlphaGrain > 0.0) {
+        alphaGrain = 0.9 + 0.1 * valueNoise(center * uGrainFreq * 2.0);
+        alphaGrain = mix(1.0, alphaGrain, uColorizeAlphaGrain);
+    }
+    
     color.rgb = finalColor;
-    color.a *= alphaMultiplier;
+    color.a *= alphaMultiplier * alphaGrain;
 }
 `;
 
@@ -234,12 +290,17 @@ uniform uColorizeDuration: f32;
 uniform uFadeWidthRatio: f32;
 uniform uSketchIntensity: f32;
 uniform uSketchContrast: f32;
+uniform uDraftFeel: f32;
 uniform uShadeLevels: f32;
 uniform uHatchDensity: f32;
 uniform uHatchStrength: f32;
-uniform uSketchFeel: f32;
 uniform uGrainFreq: f32;
 uniform uGrainAmp: f32;
+uniform uPaperTintAmount: f32;
+uniform uPaperTint: vec3f;
+uniform uColorizeSpread: f32;
+uniform uColorizeDensity: f32;
+uniform uColorizeAlphaGrain: f32;
 uniform uColorizeSharpness: f32;
 uniform uEndRadius: f32;
 
@@ -263,6 +324,17 @@ fn valueNoise(p: vec3f) -> f32 {
         mix(mix(hash(i + vec3f(0.0, 0.0, 1.0)), hash(i + vec3f(1.0, 0.0, 1.0)), f.x),
             mix(hash(i + vec3f(0.0, 1.0, 1.0)), hash(i + vec3f(1.0, 1.0, 1.0)), f.x), f.y), f.z);
     return n;
+}
+
+fn fbmValueNoise(p: vec3f) -> f32 {
+    var v: f32 = 0.0;
+    var a: f32 = 0.5;
+    var f: f32 = 1.0;
+    v += a * valueNoise(p * f); f *= 2.0; a *= 0.5;
+    v += a * valueNoise(p * f); f *= 2.0; a *= 0.5;
+    v += a * valueNoise(p * f); f *= 2.0; a *= 0.5;
+    v += a * valueNoise(p * f);
+    return v;
 }
 
 // Shared globals
@@ -301,14 +373,21 @@ fn initShared(center: vec3f) {
         g_sketchProgress = clamp(g_sketchProgress, 0.0, 1.0);
     }
     
-    // 计算上色进度
-    if (uniform.uTime < g_tColorizeStart) {
-        g_colorizeProgress = 0.0;
-    } else if (uniform.uTime >= g_tColorizeEnd) {
+    // 计算上色进度：光圈式空间传播（与素描一致，从中心向外）
+    var colorizeRadius: f32 = 0.0;
+    if (uniform.uTime > g_tColorizeStart) {
+        let colorizeT = min(uniform.uTime - g_tColorizeStart, uniform.uColorizeDuration);
+        colorizeRadius = (colorizeT / uniform.uColorizeDuration) * uniform.uEndRadius;
+    }
+    let colorizeBand = uniform.uEndRadius * uniform.uFadeWidthRatio * 3.0;
+    let colorizeOuter = colorizeRadius + colorizeBand * 0.5;
+    let colorizeInner = max(0.0, colorizeRadius - colorizeBand * 0.5);
+    if (g_dist <= colorizeInner) {
         g_colorizeProgress = 1.0;
+    } else if (g_dist >= colorizeOuter) {
+        g_colorizeProgress = 0.0;
     } else {
-        g_colorizeProgress = (uniform.uTime - g_tColorizeStart) / uniform.uColorizeDuration;
-        g_colorizeProgress = clamp(g_colorizeProgress, 0.0, 1.0);
+        g_colorizeProgress = 1.0 - smoothstep(colorizeInner, colorizeOuter, g_dist);
     }
     
     // 确定当前阶段
@@ -343,8 +422,12 @@ fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<func
         return;
     }
     
-    // 素描和上色阶段：保持原始形状
-    // 形状修改在 modifyColor 中通过颜色处理
+    // 上色阶段：过渡区内高斯拉长，模拟笔触涂抹扩散
+    if (g_phase == 2.0 && uniform.uColorizeSpread > 0.0) {
+        let peak = smoothstep(0.2, 0.5, g_colorizeProgress) * smoothstep(0.8, 0.5, g_colorizeProgress);
+        let spread = 1.0 + uniform.uColorizeSpread * peak;
+        gsplatApplyUniformScale(covA, covB, spread);
+    }
 }
 
 fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
@@ -397,45 +480,71 @@ fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
     
     // === 素描 NPR：明暗正确 + 排线 + 颗粒 ===
     let luminance = dot(originalColor.rgb, vec3f(0.299, 0.587, 0.114));
-    var brightness = pow(luminance, uniform.uSketchContrast);
+    var effectiveContrast = mix(uniform.uSketchContrast, 1.0, uniform.uDraftFeel * 0.5);
+    var brightness = pow(luminance, effectiveContrast);
     let darkness = 1.0 - brightness;
     
     let worldPos = vec2f(center.x, center.z);
     let radialDir = normalize(vec2f((center - uniform.uCenter).x, (center - uniform.uCenter).z));
     let lineDir = vec2f(-radialDir.y, radialDir.x);
-    let angleOff = 0.15 * uniform.uSketchFeel * sin(center.x * 0.25) * cos(center.z * 0.25);
+    let draft = 1.0 + 0.7 * uniform.uDraftFeel;
+    let angleOff = 0.2 * draft * sin(center.x * 0.37 + center.z * 0.21) * cos(center.z * 0.31 + center.y * 0.1);
     let lineDirR = rot2D(angleOff) * lineDir;
-    let wobble = 0.2 * uniform.uSketchFeel * sin(center.x * 0.35) * cos(center.z * 0.35);
-    let lineCoord = (dot(worldPos, lineDirR) + wobble) * uniform.uHatchDensity;
-    let linePattern = smoothstep(0.78, 0.98, abs(sin(lineCoord * 3.14159)));
-    let lineDir2 = rot2D(0.78 + angleOff * 0.5) * lineDir;
-    let wobble2 = 0.18 * uniform.uSketchFeel * sin(center.x * 0.4 + 1.0) * cos(center.z * 0.3);
-    let lineCoord2 = (dot(worldPos, lineDir2) + wobble2) * uniform.uHatchDensity * 0.75;
-    let linePattern2 = smoothstep(0.78, 0.98, abs(sin(lineCoord2 * 3.14159)));
-    let lineDir3 = rot2D(1.57 + angleOff * 0.3) * lineDir;
-    let wobble3 = 0.15 * uniform.uSketchFeel * sin(center.x * 0.3) * cos(center.z * 0.45 + 0.5);
-    let lineCoord3 = (dot(worldPos, lineDir3) + wobble3) * uniform.uHatchDensity * 0.6;
-    let linePattern3 = smoothstep(0.82, 0.98, abs(sin(lineCoord3 * 3.14159)));
-    brightness -= (linePattern + linePattern2 * 0.55 + linePattern3 * 0.35) * darkness * uniform.uHatchStrength;
+    let wobble = 0.25 * draft * sin(center.x * 0.41 + center.z * 0.29) * cos(center.z * 0.33 + 1.0);
+    let phaseJitter = (valueNoise(center * 0.7 + 1.0) - 0.5) * (1.2 + 0.8 * uniform.uDraftFeel);
+    let lineCoord = (dot(worldPos, lineDirR) + wobble + phaseJitter) * uniform.uHatchDensity;
+    let linePattern = smoothstep(0.68, 0.96, abs(sin(lineCoord * 3.14159)));
+    let lineDir2 = rot2D(0.73 + angleOff * 0.5) * lineDir;
+    let wobble2 = 0.22 * draft * sin(center.x * 0.43 + center.z * 0.19) * cos(center.z * 0.27 + 0.5);
+    let phaseJitter2 = (valueNoise(center * 0.6 + 3.0) - 0.5) * (1.0 + 0.6 * uniform.uDraftFeel);
+    let lineCoord2 = (dot(worldPos, lineDir2) + wobble2 + phaseJitter2) * uniform.uHatchDensity * 0.82;
+    let linePattern2 = smoothstep(0.68, 0.96, abs(sin(lineCoord2 * 3.14159)));
+    let lineDir3 = rot2D(1.43 + angleOff * 0.3) * lineDir;
+    let wobble3 = 0.2 * draft * sin(center.x * 0.39 + center.z * 0.23) * cos(center.z * 0.35 + 1.3);
+    let phaseJitter3 = (valueNoise(center * 0.65 + 5.0) - 0.5) * (0.9 + 0.5 * uniform.uDraftFeel);
+    let lineCoord3 = (dot(worldPos, lineDir3) + wobble3 + phaseJitter3) * uniform.uHatchDensity * 0.63;
+    let linePattern3 = smoothstep(0.7, 0.96, abs(sin(lineCoord3 * 3.14159)));
+    let hatchInDark = uniform.uHatchStrength * (1.0 - smoothstep(0.42, 0.72, darkness));
+    brightness -= (linePattern + linePattern2 * 0.55 + linePattern3 * 0.35) * darkness * hatchInDark;
     
     let levels = max(2.0, uniform.uShadeLevels);
-    brightness = (floor(brightness * levels) + 0.5) / levels;
+    let preQuant = brightness;
+    let quantized = (floor(brightness * levels) + 0.5) / levels;
+    let quantBlend = mix(0.06, 0.18, 1.0 - uniform.uDraftFeel);
+    brightness = mix(quantized, preQuant, quantBlend);
     
     let grain = (valueNoise(center * uniform.uGrainFreq) - 0.5) * uniform.uGrainAmp;
-    brightness += grain;
+    let paperFiber = (fbmValueNoise(center * uniform.uGrainFreq * 0.4 + 2.0) - 0.5) * uniform.uGrainAmp * 0.8;
+    let roughGrit = (valueNoise(center * uniform.uGrainFreq * 2.5 + 5.0) - 0.5) * uniform.uGrainAmp * 0.5;
+    let darkMask = 1.0 - 0.55 * smoothstep(0.5, 0.92, darkness);
+    brightness += (grain + paperFiber + roughGrit) * 1.5 * darkMask;
     
-    var sketchValue = clamp(brightness, 0.0, 1.0);
+    brightness = mix(brightness, 0.5, uniform.uDraftFeel * mix(0.06, 0.12, 1.0 - uniform.uDraftFeel));
     
-    // 应用素描效果：素描 = 黑白，彩色 = 原始颜色
-    let sketchColor = vec3f(sketchValue); // 黑白素描
-    let colorizedColor = originalColor.rgb; // 原始彩色
+    var sketchValue = clamp(brightness, 0.03, 1.0);
+    
+    let pureGray = vec3f(sketchValue);
+    let tinted = pureGray * uniform.uPaperTint;
+    let sketchColor = mix(pureGray, tinted, uniform.uPaperTintAmount);
+    let colorizedColor = originalColor.rgb;
     
     var mixFactor = sketchProgress * uniform.uSketchIntensity;
+    
+    if (g_phase == 2.0 && uniform.uColorizeDensity > 0.0) {
+        let densityPeak = smoothstep(0.2, 0.5, g_colorizeProgress) * smoothstep(0.8, 0.5, g_colorizeProgress);
+        mixFactor *= (1.0 - uniform.uColorizeDensity * densityPeak);
+    }
+    
     let finalColor = mix(colorizedColor, sketchColor, mixFactor);
     
-    // 应用最终颜色和透明度
+    var alphaGrain: f32 = 1.0;
+    if (g_phase == 2.0 && uniform.uColorizeAlphaGrain > 0.0) {
+        alphaGrain = 0.9 + 0.1 * valueNoise(center * uniform.uGrainFreq * 2.0);
+        alphaGrain = mix(1.0, alphaGrain, uniform.uColorizeAlphaGrain);
+    }
+    
     (*color).rgb = finalColor;
-    (*color).a *= alphaMultiplier;
+    (*color).a *= alphaMultiplier * alphaGrain;
 }
 `;
 
@@ -514,6 +623,13 @@ class GsplatSketch extends GsplatShaderEffect {
     sketchContrast = 1.2;
 
     /**
+     * 草稿感（0-1）：线条松度、抖动、块面感、柔和度，统一控制
+     * @attribute
+     * @range [0, 1]
+     */
+    draftFeel = 1.0;
+
+    /**
      * 明暗量化层数（块面感，2-8）
      * @attribute
      * @range [2, 8]
@@ -535,11 +651,17 @@ class GsplatSketch extends GsplatShaderEffect {
     hatchStrength = 1.0;
 
     /**
-     * 速写感（0-1）：线条角度微变、轻微起伏，纯 deterministic 无黑洞
+     * 纸张色调强度（0-1）：整体偏暖，不改变明暗
      * @attribute
      * @range [0, 1]
      */
-    sketchFeel = 1.0;
+    paperTintAmount = 0.8;
+
+    /**
+     * 纸张色调 [r,g,b]，如 [0.97, 0.95, 0.90] 米色
+     * @attribute
+     */
+    paperTint = [0.97, 0.95, 0.90];
 
     /**
      * 铅笔颗粒噪声频率
@@ -553,7 +675,7 @@ class GsplatSketch extends GsplatShaderEffect {
      * @attribute
      * @range [0, 0.15]
      */
-    grainAmp = 0.04;
+    grainAmp = 0.06;
 
     /**
      * 上色过渡边缘锐度（0-1）
@@ -561,6 +683,27 @@ class GsplatSketch extends GsplatShaderEffect {
      * @range [0, 1]
      */
     colorizeSharpness = 0.6;
+
+    /**
+     * 上色高斯扩散（0-0.2）：过渡区高斯拉长，模拟笔触涂抹
+     * @attribute
+     * @range [0, 0.2]
+     */
+    colorizeSpread = 0.2;
+
+    /**
+     * 上色密度（0-0.5）：过渡区中心颜色更实，边缘渐浅
+     * @attribute
+     * @range [0, 0.5]
+     */
+    colorizeDensity = 0.5;
+
+    /**
+     * 上色 Alpha 颗粒（0-1）：纸张/彩铅质感
+     * @attribute
+     * @range [0, 1]
+     */
+    colorizeAlphaGrain = 1.0;
 
     getShaderGLSL() {
         return shaderGLSL;
@@ -588,10 +731,15 @@ class GsplatSketch extends GsplatShaderEffect {
         // 素描效果相关 uniforms
         this.setUniform('uSketchIntensity', this.sketchIntensity);
         this.setUniform('uSketchContrast', this.sketchContrast);
+        this.setUniform('uDraftFeel', this.draftFeel);
         this.setUniform('uShadeLevels', this.shadeLevels);
         this.setUniform('uHatchDensity', this.hatchDensity);
         this.setUniform('uHatchStrength', this.hatchStrength);
-        this.setUniform('uSketchFeel', this.sketchFeel);
+        this.setUniform('uPaperTintAmount', this.paperTintAmount);
+        this.setUniform('uPaperTint', this.paperTint);
+        this.setUniform('uColorizeSpread', this.colorizeSpread);
+        this.setUniform('uColorizeDensity', this.colorizeDensity);
+        this.setUniform('uColorizeAlphaGrain', this.colorizeAlphaGrain);
         this.setUniform('uGrainFreq', this.grainFreq);
         this.setUniform('uGrainAmp', this.grainAmp);
         this.setUniform('uColorizeSharpness', this.colorizeSharpness);
