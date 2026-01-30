@@ -11,7 +11,7 @@ import {
 } from 'playcanvas';
 
 /** VFX 导出性能分析：记录各阶段耗时并输出汇总（控制台会打印 [VFX Export Profile]） */
-const VFX_EXPORT_PROFILE = true; // 设为 false 可关闭 profiling 日志
+const VFX_EXPORT_PROFILE = false; // 设为 false 可关闭 profiling 日志
 
 /** 每帧准备后的固定等待（ms）。设为 0 可显著加速（profile 显示 waitMs 约占 15s/150 帧）；若 VFX 不依赖该延迟建议保持 0。 */
 const EXPORT_FRAME_WAIT_MS = 0;
@@ -237,14 +237,17 @@ class VideoExportConfig {
 /**
  * SuperSplat 式离屏导出：接管主相机管线，只把「最终输出」从 canvas 改到我们的 RT，
  * 其它 pass（splat、compose 等）照常跑，主 canvas 不再更新（画面定格），导出从 RT 读帧。
+ * 优化：双 RT 交替 + 异步 readback（immediate:false）+ 预分配 buffer + 流水线并行。
+ * 注：智能跳过 splat 排序（相机未动时）由 PlayCanvas gsplat-manager 的 cameraMovedEnough() 处理。
  */
 export class RenderManager {
     private global: Global;
-    private exportRT: RenderTarget | null = null;
+    private exportRTs: [RenderTarget | null, RenderTarget | null] = [null, null];
+    private renderTargetIndex = 0;
     private savedComposeTarget: RenderTarget | null | undefined = undefined;
     private savedAfterTarget: RenderTarget | null | undefined = undefined;
     private savedCameraRenderTarget: RenderTarget | null | undefined = undefined;
-    private renderPassCamera: any = null; // 引擎 RenderPassCameraFrame
+    private renderPassCamera: any = null;
     private usedCameraFramePath = false;
 
     constructor(global: Global) {
@@ -259,34 +262,38 @@ export class RenderManager {
         const width = settings.width;
         const height = settings.height;
 
-        const colorBuffer = new Texture(device, {
-            name: 'exportColor',
-            width,
-            height,
-            format: PIXELFORMAT_RGBA8,
-            mipmaps: false
-        });
-        this.exportRT = new RenderTarget({
-            colorBuffer,
-            depth: true,
-            autoResolve: true
-        });
+        for (let i = 0; i < 2; i++) {
+            const colorBuffer = new Texture(device, {
+                name: `exportColor${i}`,
+                width,
+                height,
+                format: PIXELFORMAT_RGBA8,
+                mipmaps: false
+            });
+            this.exportRTs[i] = new RenderTarget({
+                colorBuffer,
+                depth: true,
+                autoResolve: true
+            });
+        }
+        this.renderTargetIndex = 0;
 
         const viewer = (app as any).viewer;
         const engineCameraFrame = viewer?.cameraFrame;
         this.renderPassCamera = engineCameraFrame?.renderPassCamera ?? null;
+        const currentRT = this.exportRTs[0];
 
         if (this.renderPassCamera?.composePass != null && this.renderPassCamera?.afterPass != null) {
             this.usedCameraFramePath = true;
             this.savedComposeTarget = this.renderPassCamera.composePass.renderTarget;
             this.savedAfterTarget = this.renderPassCamera.afterPass.renderTarget;
-            this.renderPassCamera.composePass.renderTarget = this.exportRT;
-            this.renderPassCamera.afterPass.renderTarget = this.exportRT;
+            this.renderPassCamera.composePass.renderTarget = currentRT;
+            this.renderPassCamera.afterPass.renderTarget = currentRT;
         } else {
             this.usedCameraFramePath = false;
             const camComp = (camera as Entity & { camera?: { renderTarget?: RenderTarget | null } }).camera;
             this.savedCameraRenderTarget = camComp?.renderTarget ?? undefined;
-            if (camComp) camComp.renderTarget = this.exportRT;
+            if (camComp) camComp.renderTarget = currentRT;
         }
     }
 
@@ -302,23 +309,37 @@ export class RenderManager {
         this.savedComposeTarget = this.savedAfterTarget = this.savedCameraRenderTarget = undefined;
         this.usedCameraFramePath = false;
 
-        if (this.exportRT) {
-            this.exportRT.destroy();
-            this.exportRT = null;
+        for (let i = 0; i < 2; i++) {
+            if (this.exportRTs[i]) {
+                this.exportRTs[i]!.destroy();
+                this.exportRTs[i] = null;
+            }
         }
     }
 
     /**
-     * 触发主相机管线跑一帧（输出已重定向到 exportRT），等 frameend 后返回该 RT。
+     * 触发主相机管线跑一帧；每帧交替写入两个 RT，返回本帧写入的 RT（便于流水线：上一帧在另一 RT 可异步读）。
      */
     async renderExportFrame(): Promise<RenderTarget | null> {
-        if (!this.exportRT) return null;
+        const rt = this.exportRTs[this.renderTargetIndex];
+        if (!rt) return null;
 
         const { app } = this.global;
+        if (this.renderPassCamera?.composePass != null && this.renderPassCamera?.afterPass != null) {
+            this.renderPassCamera.composePass.renderTarget = rt;
+            this.renderPassCamera.afterPass.renderTarget = rt;
+        } else if (this.global.camera) {
+            const camComp = (this.global.camera as Entity & { camera?: { renderTarget?: RenderTarget | null } }).camera;
+            if (camComp) camComp.renderTarget = rt;
+        }
+
         app.renderNextFrame = true;
 
         return new Promise<RenderTarget | null>((resolve) => {
-            app.once('frameend', () => resolve(this.exportRT));
+            app.once('frameend', () => {
+                this.renderTargetIndex = 1 - this.renderTargetIndex;
+                resolve(rt);
+            });
         });
     }
 }
@@ -385,11 +406,16 @@ export async function prepareAndRenderOneFrame(
 class FrameProcessor {
     private lastCameraPosition = new Vec3(0, 0, 0);
     private lastCameraForward = new Vec3(1, 0, 0);
+    /** 预分配：最终翻转后的帧数据，也作为 read() 的 data 目标以避免每帧分配 */
     private frameBuffer: Uint8Array;
     private lineBuffer: Uint8Array;
+    /** 预分配：Float32 纹理读回时转 Uint8 的临时缓冲，减少 GC */
+    private floatToUint8Buffer: Uint8Array;
     constructor(private global: Global, width: number, height: number) {
-        this.frameBuffer = new Uint8Array(width * height * 4);
+        const size = width * height * 4;
+        this.frameBuffer = new Uint8Array(size);
         this.lineBuffer = new Uint8Array(width * 4);
+        this.floatToUint8Buffer = new Uint8Array(size);
     }
 
     /**
@@ -402,8 +428,7 @@ class FrameProcessor {
 
 
     /**
-     * 从 RenderTarget 捕获帧（完全离线渲染）
-     * 直接渲染场景到我们的 RenderTarget，不显示在屏幕上
+     * 从 RenderTarget 捕获帧：异步 GPU readback（immediate: false）+ 预分配 buffer，不阻塞 GPU。
      * @param profile 可选，用于 profiling：写入 flipBuffer 耗时（ms）
      */
     private async captureFromRenderTarget(
@@ -417,19 +442,29 @@ class FrameProcessor {
             return false;
         }
         try {
-            const data = await sourceTarget.colorBuffer.read(0, 0, width, height, { renderTarget: sourceTarget });
+            const tex = sourceTarget.colorBuffer;
+            const opts: { renderTarget: RenderTarget; immediate?: boolean; data?: Uint8Array } = {
+                renderTarget: sourceTarget,
+                immediate: false,
+                data: this.frameBuffer
+            };
             const flipStart = VFX_EXPORT_PROFILE && profile ? performance.now() : 0;
+            const data = await tex.read(0, 0, width, height, opts);
             if (data instanceof Uint8Array) {
-                this.flipBufferVerticallyFromSource(data, width, height);
+                if (data === this.frameBuffer) {
+                    this.flipBufferVertically(width, height);
+                } else {
+                    this.flipBufferVerticallyFromSource(data, width, height);
+                }
                 if (VFX_EXPORT_PROFILE && profile) (profile as { flipBuffer: number }).flipBuffer = performance.now() - flipStart;
                 return true;
             }
             if (data instanceof Float32Array) {
-                const uint8Data = new Uint8Array(data.length);
+                const buf = this.floatToUint8Buffer;
                 for (let i = 0; i < data.length; i++) {
-                    uint8Data[i] = Math.max(0, Math.min(255, Math.floor(data[i] * 255)));
+                    buf[i] = Math.max(0, Math.min(255, Math.floor(data[i] * 255)));
                 }
-                this.flipBufferVerticallyFromSource(uint8Data, width, height);
+                this.flipBufferVerticallyFromSource(buf, width, height);
                 if (VFX_EXPORT_PROFILE && profile) (profile as { flipBuffer: number }).flipBuffer = performance.now() - flipStart;
                 return true;
             }
@@ -438,6 +473,93 @@ class FrameProcessor {
         } catch (error) {
             console.error(VFX_EXPORT_LOG_TAG, 'Failed to read pixels from RenderTarget:', error);
             return false;
+        }
+    }
+
+    /**
+     * 异步 readback：不阻塞，返回 Promise；resolve 后 frameBuffer 已就绪可编码。
+     * 用于流水线并行：在等待上一帧 readback 时下一帧可已开始渲染。
+     */
+    startAsyncRead(
+        sourceTarget: RenderTarget | null,
+        width: number,
+        height: number,
+        profile?: Partial<Pick<FrameProfile, 'readPixels' | 'flipBuffer'>>
+    ): Promise<boolean> {
+        if (!sourceTarget?.colorBuffer) return Promise.resolve(false);
+        const readStart = VFX_EXPORT_PROFILE && profile ? performance.now() : 0;
+        const opts: { renderTarget: RenderTarget; immediate?: boolean; data?: Uint8Array } = {
+            renderTarget: sourceTarget,
+            immediate: false,
+            data: this.frameBuffer
+        };
+        return sourceTarget.colorBuffer
+            .read(0, 0, width, height, opts)
+            .then((data) => {
+                if (VFX_EXPORT_PROFILE && profile) profile.readPixels = performance.now() - readStart;
+                const flipStart = VFX_EXPORT_PROFILE && profile ? performance.now() : 0;
+                if (data instanceof Uint8Array) {
+                    if (data === this.frameBuffer) {
+                        this.flipBufferVertically(width, height);
+                    } else {
+                        this.flipBufferVerticallyFromSource(data, width, height);
+                    }
+                    if (VFX_EXPORT_PROFILE && profile) (profile as { flipBuffer: number }).flipBuffer = performance.now() - flipStart;
+                    return true;
+                }
+                if (data instanceof Float32Array) {
+                    const buf = this.floatToUint8Buffer;
+                    for (let i = 0; i < data.length; i++) {
+                        buf[i] = Math.max(0, Math.min(255, Math.floor(data[i] * 255)));
+                    }
+                    this.flipBufferVerticallyFromSource(buf, width, height);
+                    if (VFX_EXPORT_PROFILE && profile) (profile as { flipBuffer: number }).flipBuffer = performance.now() - flipStart;
+                    return true;
+                }
+                return false;
+            })
+            .catch((err) => {
+                console.error(VFX_EXPORT_LOG_TAG, 'Async read failed:', err);
+                return false;
+            });
+    }
+
+    /**
+     * 仅编码当前 frameBuffer 中的一帧（用于流水线：readback 已完成后再编码）。
+     */
+    encodeCurrentFrame(
+        frameTime: number,
+        frameRate: number,
+        encoder: VideoEncoder | null,
+        width: number,
+        height: number,
+        frameProfile?: Partial<FrameProfile>
+    ): boolean {
+        if (!encoder || (encoder as any)._errorOccurred || encoder.state === 'closed') return false;
+        const evenWidth = width % 2 === 0 ? width : width - 1;
+        const evenHeight = height % 2 === 0 ? height : height - 1;
+        const timestampMicroseconds = Math.floor(frameTime * 1e6);
+        const durationMicroseconds = Math.floor(1e6 / frameRate);
+        const encodeStart = VFX_EXPORT_PROFILE && frameProfile ? performance.now() : 0;
+        let videoFrame: VideoFrame | null = null;
+        try {
+            videoFrame = new VideoFrame(this.frameBuffer, {
+                format: 'RGBA',
+                codedWidth: evenWidth,
+                codedHeight: evenHeight,
+                timestamp: timestampMicroseconds,
+                duration: durationMicroseconds,
+                displayWidth: evenWidth,
+                displayHeight: evenHeight
+            });
+            encoder.encode(videoFrame);
+            if (VFX_EXPORT_PROFILE && frameProfile) frameProfile.encode = performance.now() - encodeStart;
+            return true;
+        } catch (e) {
+            if (videoFrame) videoFrame.close();
+            return false;
+        } finally {
+            if (videoFrame) videoFrame.close();
         }
     }
 
@@ -770,6 +892,10 @@ export const initVideoExport = (global: Global): void => {
         const totalFrames = Math.ceil(totalDuration * frameRate);
         const frameInterval = 1.0 / frameRate;
 
+        let prevReadPromise: Promise<boolean> | null = null;
+        let prevFrameTime = 0;
+        let prevFrameProfile: FrameProfile | undefined;
+
         for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
             if (encoder.state === 'closed' || (encoder as any)._errorOccurred) break;
             const effectTime = Math.min(frameIndex * frameInterval, totalDuration);
@@ -780,14 +906,12 @@ export const initVideoExport = (global: Global): void => {
             };
             const tFrameStart = VFX_EXPORT_PROFILE ? performance.now() : 0;
 
-            // 同步更新动画相机的时间
             if (syncAnimTrack) {
                 const t0 = VFX_EXPORT_PROFILE ? performance.now() : 0;
                 seekAnimToTimeAndApply(global, effectTime);
                 if (VFX_EXPORT_PROFILE) frameProfile.seekAnim = performance.now() - t0;
             }
 
-            // 与单帧截获相同：设置时间 → 等待 → 离屏渲染（导出时补一次脚本 update）
             const prepareProfile = VFX_EXPORT_PROFILE ? { setTimelineAndUpdate: 0, waitMs: 0, renderFrame: 0 } : undefined;
             const exportTarget = await prepareAndRenderOneFrame(global, renderManager, effectTime, {
                 waitMs: EXPORT_FRAME_WAIT_MS,
@@ -800,16 +924,56 @@ export const initVideoExport = (global: Global): void => {
                 frameProfile.renderFrame = prepareProfile.renderFrame;
             }
             await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
-            const success = await frameProcessor.captureFrame(
-                effectTime, frameRate, encoder, evenWidth, evenHeight, exportTarget ?? null,
+            if (VFX_EXPORT_PROFILE) frameProfile.raf = 0;
+
+            // 流水线：先发起本帧异步 readback（不 await），再处理上一帧的 readback + 编码
+            const readPromise = frameProcessor.startAsyncRead(
+                exportTarget ?? null,
+                evenWidth,
+                evenHeight,
                 VFX_EXPORT_PROFILE ? frameProfile : undefined
             );
+
+            if (prevReadPromise) {
+                const prevOk = await prevReadPromise;
+                if (prevOk) {
+                    frameProcessor.encodeCurrentFrame(
+                        prevFrameTime,
+                        frameRate,
+                        encoder,
+                        evenWidth,
+                        evenHeight,
+                        VFX_EXPORT_PROFILE ? prevFrameProfile : undefined
+                    );
+                } else {
+                    console.warn(VFX_EXPORT_LOG_TAG, `Failed to capture frame at VFX time ${prevFrameTime.toFixed(2)}s`);
+                }
+            }
+
+            prevReadPromise = readPromise;
+            prevFrameTime = effectTime;
+            prevFrameProfile = frameProfile;
             if (VFX_EXPORT_PROFILE) {
                 frameProfile.total = performance.now() - tFrameStart;
                 profiler?.recordFrame(frameProfile);
             }
-            if (!success) console.warn(VFX_EXPORT_LOG_TAG, `Failed to capture frame at VFX time ${effectTime.toFixed(2)}s`);
             updateProgress(effectTime, totalDuration);
+        }
+
+        if (prevReadPromise) {
+            const lastOk = await prevReadPromise;
+            if (lastOk) {
+                frameProcessor.encodeCurrentFrame(
+                    prevFrameTime,
+                    frameRate,
+                    encoder,
+                    evenWidth,
+                    evenHeight,
+                    VFX_EXPORT_PROFILE ? prevFrameProfile : undefined
+                );
+            } else {
+                console.warn(VFX_EXPORT_LOG_TAG, `Failed to capture last frame at VFX time ${prevFrameTime.toFixed(2)}s`);
+            }
         }
     };
 
@@ -887,6 +1051,7 @@ export const initVideoExport = (global: Global): void => {
             : MediaRecorder.isTypeSupported('video/webm;codecs=avc1')
                 ? 'video/webm;codecs=avc1'
                 : 'video/webm';
+        console.log(VFX_EXPORT_LOG_TAG, `Fast export: using mimeType=${mimeType}`);
         const chunks: Blob[] = [];
         const recorder = new MediaRecorder(stream, {
             mimeType,
@@ -1054,6 +1219,7 @@ export const initVideoExport = (global: Global): void => {
         const stateAny = global.state as any;
         const prevExporting = stateAny.isExportingVfxVideo ?? false;
         const prevEffectTime = lastUiEffectTime;
+        const prevEffectPaused = stateAny.effectPaused ?? false;
 
         // 锁住 viewer 实时更新
         stateAny.isExportingVfxVideo = true;
@@ -1073,6 +1239,8 @@ export const initVideoExport = (global: Global): void => {
             stateAny.isExportingVfxVideo = prevExporting;
             // 用交互事件恢复到导出前的时间，并驱动 UI slider
             global.events.fire('effectTimeline:set', prevEffectTime);
+            // 恢复导出前的播放/暂停状态（导出期间 setEffectTimeForExport 会强制暂停，需恢复）
+            global.events.fire('effectPlayPause:set', prevEffectPaused);
         }
     };
 

@@ -207,7 +207,9 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         vfxType: 'none' as 'none' | 'grow' | 'pieces-recover' | 'perlin-wave' | 'disintegrate' | 'integrate' | 'growth-wave',
 
         // 导出 VFX 视频时的锁，防止实时更新干扰离线渲染
-        isExportingVfxVideo: false
+        isExportingVfxVideo: false,
+        // 导出前 VFX 播放/暂停状态，导出结束后用于恢复（reveal 会在 setPlayPause 时同步）
+        effectPaused: false
     });
 
     // 如果设置了 noreveal 参数，清除 reveal effect 配置

@@ -38,8 +38,13 @@ export class RevealController {
     private isTiming: boolean = false;
     private timedEffects = ['rain_v2', 'pieces-recover', 'integrate', 'growth-wave', 'sketch'];
     
-    // 时间轴控制相关
-    private isEffectPaused: boolean = false;
+    // 时间轴控制相关（唯一来源：state.effectPaused）
+    private get effectPaused(): boolean {
+        return (this.global.state as any).effectPaused ?? false;
+    }
+    private set effectPaused(v: boolean) {
+        (this.global.state as any).effectPaused = v;
+    }
 
     global: Global;
 
@@ -814,8 +819,8 @@ export class RevealController {
             // 重置 effectTime
             script.effectTime = 0;
             script.isPaused = false;
-            this.isEffectPaused = false;
-            
+            this.effectPaused = false;
+
             // 根据 autoStart 配置设置启用状态
             script.enabled = this.config.autoStart;
             
@@ -895,7 +900,7 @@ export class RevealController {
      */
     updateTiming(dt: number) {
         // 如果是 timed effect 且脚本存在且未暂停，定期触发时间更新事件（用于 UI 更新）
-        if (this.currentScript && this.timedEffects.includes(this.config.type) && !this.isEffectPaused) {
+        if (this.currentScript && this.timedEffects.includes(this.config.type) && !this.effectPaused) {
             const currentTime = this.currentScript.effectTime;
             this.global.events.fire('effectTime:changed', currentTime);
         }
@@ -1033,8 +1038,8 @@ export class RevealController {
         }
         
         // 重置暂停状态
-        this.isEffectPaused = false;
-        
+        this.effectPaused = false;
+
         // 重新创建效果（会自动根据 autoStart 配置启用，并重置 effectTime）
         this.createEffect(this.config.type);
         
@@ -1091,11 +1096,9 @@ export class RevealController {
         
         // 导出时暂停脚本，防止 update 方法中的 effectTime += dt 覆盖我们设置的值
         // 注意：setEffectTime 会立即调用 updateEffect，所以即使 paused，uniforms 也会更新
-        // 保存之前的暂停状态，以便后续恢复（虽然导出时应该保持暂停）
         if (!this.currentScript.isPaused) {
             this.currentScript.isPaused = true;
-            // 同时更新 isEffectPaused 状态，保持一致性
-            this.isEffectPaused = true;
+            this.effectPaused = true;
         }
         
         this.currentScript.setEffectTime(clampedTime);
@@ -1107,20 +1110,19 @@ export class RevealController {
      * 切换播放/暂停状态
      */
     togglePlayPause() {
-        this.setPlayPause(!this.isEffectPaused);
+        this.setPlayPause(!this.effectPaused);
     }
 
     /**
-     * 设置播放/暂停状态
+     * 设置播放/暂停状态（唯一来源：state.effectPaused）
      */
     setPlayPause(paused: boolean) {
         if (!this.currentScript || !this.timedEffects.includes(this.config.type)) {
             return;
         }
-        
-        this.isEffectPaused = paused;
+        this.effectPaused = paused;
         this.currentScript.isPaused = paused;
-        
+
         // 触发事件更新 UI
         this.global.events.fire('effectPlayPause:changed', paused);
     }
