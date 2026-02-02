@@ -494,48 +494,55 @@ void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA,
 void modifyColor(vec3 center, inout vec4 color) {
     initShared(center);
     
-    // Phase 1 和 Phase 2: 添加蓝色辉光效果，营造能量场/体积感
-    // 蓝色辉光持续到Phase 2复原粒子的原始形态前
     if ((g_phase == 1.0 && g_growthProgress > 0.0) || (g_phase == 2.0 && g_recoverProgress < 1.0)) {
-        // 计算蓝色辉光强度
         float glowIntensity = 1.0;
         float progressGlow = 1.0;
         
         if (g_phase == 1.0) {
-            // Phase 1: 在整个Phase 1期间保持稳定
-            // 只在最后10%的进度时稍微减弱，确保过渡平滑
             if (g_growthProgress > 0.9) {
-                progressGlow = 1.0 - (g_growthProgress - 0.9) * 2.0; // 最后10%时逐渐减弱
+                progressGlow = 1.0 - (g_growthProgress - 0.9) * 2.0;
             }
-            progressGlow = max(progressGlow, 0.8); // 保持至少80%的强度
+            progressGlow = max(progressGlow, 0.8);
         } else if (g_phase == 2.0) {
-            // Phase 2: 根据复原进度逐渐减弱，直到完全恢复时消失
-            // 复原进度从0到1，辉光从强到弱
-            progressGlow = 1.0 - g_recoverProgress; // 复原进度越高，辉光越弱
-            progressGlow = max(progressGlow, 0.0); // 确保不小于0
+            progressGlow = 1.0 - g_recoverProgress;
+            progressGlow = max(progressGlow, 0.0);
         }
         
-        // 根据距离中心的距离调整：边缘粒子辉光更强
         vec3 toSplat = center - uCenter;
         float distFromCenter = length(toSplat);
         float normalizedDist = distFromCenter / max(uEndRadius, 1.0);
-        float distanceGlow = 1.0 + (1.0 - normalizedDist) * 0.3; // 边缘粒子增加30%强度
+        float distanceGlow = 1.0 + (1.0 - normalizedDist) * 0.35;
         
-        // 组合辉光强度
         glowIntensity = progressGlow * distanceGlow;
-        glowIntensity = clamp(glowIntensity, 0.0, 1.3); // Phase 2时允许降到0
+        glowIntensity = clamp(glowIntensity, 0.0, 1.35);
         
-        // 蓝色辉光颜色：能量场感的蓝色（偏青蓝色）
-        vec3 blueGlow = vec3(0.3, 0.6, 1.0); // 明亮的青蓝色
+        vec3 blueGlow = vec3(0.35, 0.65, 1.0);
+        color.rgb += blueGlow * glowIntensity * 0.45;
         
-        // 添加蓝色辉光到原始颜色（加法混合，营造发光效果）
-        color.rgb += blueGlow * glowIntensity * 0.4; // 40%的混合强度
+        // Phase 1 聚拢：光圈在整个 Phase 1 期间从下扫到上，更亮、带发光感
+        if (g_phase == 1.0 && g_growthProgress > 0.0 && g_growthProgress < 1.0) {
+            float phase1Progress = clamp(uTime / g_tRecoverStart, 0.0, 1.0);
+            float ringY = mix(uBottomY, uTopY, phase1Progress);
+            float sceneHeight = abs(uBottomY - uTopY);
+            float ringWidth = max(4.0, sceneHeight * 0.18);
+            float distToRing = abs(center.y - ringY);
+            float ringBand = 1.0 - smoothstep(0.0, ringWidth, distToRing);
+            float ringCore = 1.0 - smoothstep(0.0, ringWidth * 0.4, distToRing);
+            // 外围柔光：光圈两侧软衰减，增强发光感
+            float ringSoft = 1.0 - smoothstep(ringWidth, ringWidth * 2.2, distToRing);
+            vec3 ringColor = vec3(0.95, 1.0, 1.0);
+            color.rgb += ringColor * ringBand * distanceGlow * 3.2;
+            color.rgb += ringColor * ringCore * 2.0;
+            color.rgb += ringColor * ringSoft * 0.9;
+            color.rgb *= (1.0 + ringBand * 1.4);
+            
+            float scannedGlow = smoothstep(ringY - ringWidth, ringY, center.y);
+            color.rgb += blueGlow * scannedGlow * 0.55;
+            color.rgb *= (1.0 + scannedGlow * 0.4);
+        }
         
-        // 稍微增加亮度以增强体积感
         color.rgb *= (1.0 + glowIntensity * 0.2);
-        
-        // 确保颜色值在合理范围内
-        color.rgb = clamp(color.rgb, 0.0, 2.0);
+        color.rgb = clamp(color.rgb, 0.0, 4.5);
     }
 }
 `;
@@ -1016,49 +1023,54 @@ fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<func
 fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
     initShared(center);
     
-    // Phase 1 和 Phase 2: 添加蓝色辉光效果，营造能量场/体积感
-    // 蓝色辉光持续到Phase 2复原粒子的原始形态前
     if ((g_phase == 1.0 && g_growthProgress > 0.0) || (g_phase == 2.0 && g_recoverProgress < 1.0)) {
-        // 计算蓝色辉光强度
         var glowIntensity: f32 = 1.0;
         var progressGlow: f32 = 1.0;
         
         if (g_phase == 1.0) {
-            // Phase 1: 在整个Phase 1期间保持稳定
-            // 只在最后10%的进度时稍微减弱，确保过渡平滑
             if (g_growthProgress > 0.9) {
-                progressGlow = 1.0 - (g_growthProgress - 0.9) * 2.0; // 最后10%时逐渐减弱
+                progressGlow = 1.0 - (g_growthProgress - 0.9) * 2.0;
             }
-            progressGlow = max(progressGlow, 0.8); // 保持至少80%的强度
+            progressGlow = max(progressGlow, 0.8);
         } else if (g_phase == 2.0) {
-            // Phase 2: 根据复原进度逐渐减弱，直到完全恢复时消失
-            // 复原进度从0到1，辉光从强到弱
-            progressGlow = 1.0 - g_recoverProgress; // 复原进度越高，辉光越弱
-            progressGlow = max(progressGlow, 0.0); // 确保不小于0
+            progressGlow = 1.0 - g_recoverProgress;
+            progressGlow = max(progressGlow, 0.0);
         }
         
-        // 根据距离中心的距离调整：边缘粒子辉光更强
         let toSplat = center - uniform.uCenter;
         let distFromCenter = length(toSplat);
         let normalizedDist = distFromCenter / max(uniform.uEndRadius, 1.0);
-        let distanceGlow = 1.0 + (1.0 - normalizedDist) * 0.3; // 边缘粒子增加30%强度
+        let distanceGlow = 1.0 + (1.0 - normalizedDist) * 0.35;
         
-        // 组合辉光强度
         glowIntensity = progressGlow * distanceGlow;
-        glowIntensity = clamp(glowIntensity, 0.0, 1.3); // Phase 2时允许降到0
+        glowIntensity = clamp(glowIntensity, 0.0, 1.35);
         
-        // 蓝色辉光颜色：更亮的能量场感蓝色（偏青蓝色）
-        let blueGlow = vec3f(0.4, 0.7, 1.2); // 更亮的青蓝色，增强能量感
+        let blueGlow = vec3f(0.35, 0.65, 1.0);
+        (*color).rgb = (*color).rgb + blueGlow * glowIntensity * 0.45;
         
-        // 添加蓝色辉光到原始颜色（加法混合，营造发光效果）
-        // 大幅增加混合强度，使辉光更明显
-        (*color).rgb = (*color).rgb + blueGlow * glowIntensity * 0.9; // 90%的混合强度
+        // Phase 1 聚拢：光圈更亮、带发光感
+        if (g_phase == 1.0 && g_growthProgress > 0.0 && g_growthProgress < 1.0) {
+            let phase1Progress = clamp(uniform.uTime / g_tRecoverStart, 0.0, 1.0);
+            let ringY = mix(uniform.uBottomY, uniform.uTopY, phase1Progress);
+            let sceneHeight = abs(uniform.uBottomY - uniform.uTopY);
+            let ringWidth = max(4.0, sceneHeight * 0.18);
+            let distToRing = abs(center.y - ringY);
+            let ringBand = 1.0 - smoothstep(0.0, ringWidth, distToRing);
+            let ringCore = 1.0 - smoothstep(0.0, ringWidth * 0.4, distToRing);
+            let ringSoft = 1.0 - smoothstep(ringWidth, ringWidth * 2.2, distToRing);
+            let ringColor = vec3f(0.95, 1.0, 1.0);
+            (*color).rgb = (*color).rgb + ringColor * ringBand * distanceGlow * 3.2;
+            (*color).rgb = (*color).rgb + ringColor * ringCore * 2.0;
+            (*color).rgb = (*color).rgb + ringColor * ringSoft * 0.9;
+            (*color).rgb = (*color).rgb * (1.0 + ringBand * 1.4);
+            
+            let scannedGlow = smoothstep(ringY - ringWidth, ringY, center.y);
+            (*color).rgb = (*color).rgb + blueGlow * scannedGlow * 0.55;
+            (*color).rgb = (*color).rgb * (1.0 + scannedGlow * 0.4);
+        }
         
-        // 增加亮度提升以增强体积感和能量场效果
-        (*color).rgb = (*color).rgb * (1.0 + glowIntensity * 0.4); // 40%的亮度提升
-        
-        // 确保颜色值在合理范围内
-        (*color).rgb = clamp((*color).rgb, vec3f(0.0), vec3f(3.0)); // 允许更高的亮度值
+        (*color).rgb = (*color).rgb * (1.0 + glowIntensity * 0.2);
+        (*color).rgb = clamp((*color).rgb, vec3f(0.0), vec3f(4.5));
     }
 }
 `;
