@@ -511,13 +511,14 @@ void modifyColor(vec3 center, inout vec4 color) {
         vec3 toSplat = center - uCenter;
         float distFromCenter = length(toSplat);
         float normalizedDist = distFromCenter / max(uEndRadius, 1.0);
-        float distanceGlow = 1.0 + (1.0 - normalizedDist) * 0.35;
+        // 光晕更大：离中心较远的区域也保留较多辉光（软衰减范围加大）
+        float distanceGlow = 1.0 + (1.0 - smoothstep(0.0, 0.85, normalizedDist)) * 0.7;
         
         glowIntensity = progressGlow * distanceGlow;
-        glowIntensity = clamp(glowIntensity, 0.0, 1.35);
+        glowIntensity = clamp(glowIntensity, 0.0, 1.6);
         
-        vec3 blueGlow = vec3(0.35, 0.65, 1.0);
-        color.rgb += blueGlow * glowIntensity * 0.45;
+        vec3 blueGlow = vec3(0.18, 0.45, 1.0);
+        color.rgb += blueGlow * glowIntensity * 0.58;
         
         // Phase 1 聚拢：光圈在整个 Phase 1 期间从下扫到上，更亮、带发光感
         if (g_phase == 1.0 && g_growthProgress > 0.0 && g_growthProgress < 1.0) {
@@ -537,11 +538,11 @@ void modifyColor(vec3 center, inout vec4 color) {
             color.rgb *= (1.0 + ringBand * 1.4);
             
             float scannedGlow = smoothstep(ringY - ringWidth, ringY, center.y);
-            color.rgb += blueGlow * scannedGlow * 0.55;
-            color.rgb *= (1.0 + scannedGlow * 0.4);
+            color.rgb += blueGlow * scannedGlow * 0.6;
+            color.rgb *= (1.0 + scannedGlow * 0.45);
         }
         
-        color.rgb *= (1.0 + glowIntensity * 0.2);
+        color.rgb *= (1.0 + glowIntensity * 0.28);
         color.rgb = clamp(color.rgb, 0.0, 4.5);
     }
 }
@@ -1040,13 +1041,13 @@ fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
         let toSplat = center - uniform.uCenter;
         let distFromCenter = length(toSplat);
         let normalizedDist = distFromCenter / max(uniform.uEndRadius, 1.0);
-        let distanceGlow = 1.0 + (1.0 - normalizedDist) * 0.35;
+        let distanceGlow = 1.0 + (1.0 - smoothstep(0.0, 0.85, normalizedDist)) * 0.7;
         
         glowIntensity = progressGlow * distanceGlow;
-        glowIntensity = clamp(glowIntensity, 0.0, 1.35);
+        glowIntensity = clamp(glowIntensity, 0.0, 1.6);
         
-        let blueGlow = vec3f(0.35, 0.65, 1.0);
-        (*color).rgb = (*color).rgb + blueGlow * glowIntensity * 0.45;
+        let blueGlow = vec3f(0.18, 0.45, 1.0);
+        (*color).rgb = (*color).rgb + blueGlow * glowIntensity * 0.58;
         
         // Phase 1 聚拢：光圈更亮、带发光感
         if (g_phase == 1.0 && g_growthProgress > 0.0 && g_growthProgress < 1.0) {
@@ -1065,11 +1066,11 @@ fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
             (*color).rgb = (*color).rgb * (1.0 + ringBand * 1.4);
             
             let scannedGlow = smoothstep(ringY - ringWidth, ringY, center.y);
-            (*color).rgb = (*color).rgb + blueGlow * scannedGlow * 0.55;
-            (*color).rgb = (*color).rgb * (1.0 + scannedGlow * 0.4);
+            (*color).rgb = (*color).rgb + blueGlow * scannedGlow * 0.6;
+            (*color).rgb = (*color).rgb * (1.0 + scannedGlow * 0.45);
         }
         
-        (*color).rgb = (*color).rgb * (1.0 + glowIntensity * 0.2);
+        (*color).rgb = (*color).rgb * (1.0 + glowIntensity * 0.28);
         (*color).rgb = clamp((*color).rgb, vec3f(0.0), vec3f(4.5));
     }
 }
@@ -1144,11 +1145,19 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
     minSize = 0.05;
 
     /**
-     * 点云阶段固定点大小（参考 splat-overlay-shader 的 splatSize，与协方差尺度一致）
+     * 点云阶段固定点大小（与协方差尺度一致，为模型/视空间绝对数值）。
+     * 同一数值在不同场景下观感不同：场景范围大（bottomY~topY 跨度大）或相机远时，点会显得更小、更稀疏；
+     * 场景范围小或相机近时，点会显得更大、更密。大场景可适当增大 pointSize（如 0.01~0.02）以保持密度感。
      * @attribute
      * @range [0.001, 0.5]
      */
     pointSize = 0.005;
+
+    /**
+     * 是否按场景高度自动缩放 pointSize，使不同尺度场景的点密度更一致（参考高度 20 单位）
+     * @attribute
+     */
+    pointSizeScaleByScene = true;
 
     /**
      * Maximum Y distance from center to process (for performance)
@@ -1235,7 +1244,12 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
         this.setUniform('uNoiseIntensity', this.noiseIntensity);
         this.setUniform('uScatterDistance', this.scatterDistance);
         this.setUniform('uMinSize', this.minSize);
-        this.setUniform('uPointSize', this.pointSize);
+        const refHeight = 20;
+        const effectivePointSize = this.pointSizeScaleByScene
+            ? this.pointSize * Math.max(0.5, Math.min(2, heightRange / refHeight))
+            : this.pointSize;
+        //console.log('effectivePointSize', effectivePointSize);
+        this.setUniform('uPointSize', effectivePointSize);
         this.setUniform('uEndRadius', this.endRadius);
         this.setUniform('uGlobalRecoverStart', globalRecoverStart);
         this.setUniform('uBottomY', this.bottomY);
