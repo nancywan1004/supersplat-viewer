@@ -610,6 +610,14 @@ class GsplatSketch extends GsplatShaderEffect {
      */
     _cameraPosCaptured = false;
 
+    initialize() {
+        super.initialize();
+        // 每次启用效果时重置相机捕获，restart 或时间轴回拉后上色阶段会使用当前相机位姿
+        this.on('enable', () => {
+            this._cameraPosCaptured = false;
+        });
+    }
+
     /**
      * 波传播速度（单位/秒）
      * @attribute
@@ -824,6 +832,17 @@ class GsplatSketch extends GsplatShaderEffect {
         const maxSketchEnd = maxSketchStart + this.sketchDuration;
         const maxColorizeEnd = maxSketchEnd + this.colorizeDuration;
         return maxColorizeEnd;
+    }
+
+    /**
+     * 设置特效时间（重写以在“回到上色开始前”时重置相机捕获，restart/时间轴回拉时使用当前相机位姿）
+     */
+    setEffectTime(time: number) {
+        super.setEffectTime(time);
+        // 时间回到上色开始之前时，下次进入上色阶段需重新捕获当前相机位姿
+        if (time < this.sketchDuration) {
+            this._cameraPosCaptured = false;
+        }
     }
 
     /**

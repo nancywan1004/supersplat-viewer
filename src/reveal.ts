@@ -598,7 +598,7 @@ export class RevealController {
             if (script) {
                 // 默认配置
                 const defaultWaveSpeed = 10.0;
-                const defaultSketchDuration = 5.0;
+                const defaultSketchDuration = 1.5;  // 素描到上色间隔，缩短以加快上色
                 const defaultColorizeDuration = 5.0;
                 
                 // 根据 totalDuration 自动调整时间参数
@@ -634,6 +634,12 @@ export class RevealController {
                 script.grainFreq = 25.0;
                 script.grainAmp = 0.06;
                 script.colorizeSharpness = 0.6;
+                
+                // 启用基于相机距离的上色（从相机视角由近至远上色）
+                script.useCameraDistance = true;
+                
+                // 设置相机实体引用（用于获取上色时的相机位置）
+                script.camera = this.global.camera;
                 
                 // 设置 reveal center
                 this.updateScriptCenter(script);
