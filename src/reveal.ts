@@ -367,7 +367,7 @@ export class RevealController {
                 // 默认配置
                 const defaultScatterDuration = 7.5;
                 const defaultRecoverDuration = 7.5;
-                const defaultWaveSpeed = 5.0;
+                const defaultWaveSpeed = 6.0;
                 const defaultEndRadius = 25.0;
                 
                 // 根据 totalDuration 自动调整时间参数

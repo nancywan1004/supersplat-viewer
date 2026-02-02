@@ -14,6 +14,8 @@ uniform vec3 uScatterDirection;
 uniform float uEndRadius;
 uniform float uMaxScatterRadius;
 uniform float uWaveSpeed;
+uniform float uWaveSpeedDistScale;   // 随距离增大波速的系数，>0 时远处点更早进入散射，缩短整体 Phase 0
+uniform float uPointSize;   // 散射阶段点云模式固定点大小（与 gsplat-growth-wave 聚拢生长一致）
 
 // Hash function for per-splat randomization
 float hash(vec3 p) {
@@ -39,7 +41,7 @@ vec3 randomDir(vec3 p) {
 }
 
 // Shared globals
-float g_dist;
+float g_dist;   // 当前 splat 到效果中心 uCenter 的 3D 欧氏距离（单位与场景一致）
 float g_tScatter;
 float g_tRecover;
 float g_phase;
@@ -48,10 +50,9 @@ void initShared(vec3 center) {
     g_dist = length(center - uCenter);
     
     // Wave propagation: points start scattering based on distance from center
-    // Points closer to center start earlier, points farther start later
-    // This creates the effect of spray spreading outward from target center
-    // All points participate in the scatter/recover effect (no range limit)
-    g_tScatter = g_dist / uWaveSpeed;
+    // effectiveWaveSpeed 可随 g_dist 增大（uWaveSpeedDistScale > 0），远处点更早进入散射，缩短整体 Phase 0
+    float effectiveWaveSpeed = uWaveSpeed * max(1.0, 1.0 + uWaveSpeedDistScale * g_dist);
+    g_tScatter = g_dist / effectiveWaveSpeed;
     
     // NO HOLDING PHASE - direct transition from scatter to recover
     g_tRecover = g_tScatter + uScatterDuration;
@@ -434,41 +435,30 @@ void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA,
     
     float originalSize = gsplatExtractSize(covA, covB);
     
-    // Phase 0.0: Before scatter - show scattered effect (same as scatter phase)
+    // Phase 0.0: Before scatter - 点云 outline 模式（与散射阶段一致）
     if (g_phase == 0.0) {
-        // Make particles VERY small (10-25% of original) for dust/powder effect
-        // Use per-splat variation for more chaotic effect
-        float randomSeed = hash(originalCenter);
-        float sizeFactor = 0.10 + randomSeed * 0.15; // 0.10 to 0.25 (10% to 25% of original)
-        float size = originalSize * sizeFactor;
-        // Make them round for dust particle appearance
-        gsplatMakeRound(covA, covB, size);
+        gsplatMakeRound(covA, covB, uPointSize);
         return;
     }
     
-    // All particles participate in scatter/recover phases
+    // Scattering phase: 点云 outline 模式（与 gsplat-growth-wave 聚拢生长一致）
     if (g_phase == 1.0) {
-        // Scattering: make particles VERY small (10-25% of original) for dust/powder effect
-        // Use per-splat variation for more chaotic effect
-        float randomSeed = hash(originalCenter);
-        float sizeFactor = 0.10 + randomSeed * 0.15; // 0.10 to 0.25 (10% to 25% of original)
-        float size = originalSize * sizeFactor;
-        // Make them round for dust particle appearance
-        gsplatMakeRound(covA, covB, size);
-    } else if (g_phase == 2.0) {
-        // Phase 2.0: Recovering: gradually restore original size and shape
+        gsplatMakeRound(covA, covB, uPointSize);
+        return;
+    }
+    
+    // Phase 2.0: Recovering: 从点云 uPointSize 过渡回原始协方差
+    if (g_phase == 2.0) {
         float t = (uTime - g_tRecover) / uRecoverDuration;
-        t = clamp(t, 0.0, 1.0); // Ensure t is in valid range to prevent flickering
-        float randomSeed = hash(originalCenter);
-        float minSizeFactor = 0.10 + randomSeed * 0.15; // Same as scatter phase
-        float size = mix(originalSize * minSizeFactor, originalSize, t);
-        
-        // Lerp from round to original shape
+        t = clamp(t, 0.0, 1.0);
+        float easedT = clamp(1.0 - pow(1.0 - t, 4.0), 0.0, 1.0);
+        float size = mix(uPointSize, originalSize, easedT);
         vec3 origCovA = covA;
         vec3 origCovB = covB;
         gsplatMakeRound(covA, covB, size);
-        covA = mix(covA, origCovA, t);
-        covB = mix(covB, origCovB, t);
+        covA = mix(covA, origCovA, easedT);
+        covB = mix(covB, origCovB, easedT);
+        return;
     }
     // Phase 3: original shape (no modification)
 }
@@ -492,6 +482,8 @@ uniform uScatterDirection: vec3f;
 uniform uEndRadius: f32;
 uniform uMaxScatterRadius: f32;
 uniform uWaveSpeed: f32;
+uniform uWaveSpeedDistScale: f32;   // 随距离增大波速的系数，>0 时远处点更早进入散射，缩短整体 Phase 0
+uniform uPointSize: f32;   // 散射阶段点云模式固定点大小（与 gsplat-growth-wave 聚拢生长一致）
 
 // Hash function for per-splat randomization
 fn hash(p: vec3f) -> f32 {
@@ -517,7 +509,7 @@ fn randomDir(p: vec3f) -> vec3f {
 }
 
 // Shared globals
-var<private> g_dist: f32;
+var<private> g_dist: f32;   // 当前 splat 到效果中心 uCenter 的 3D 欧氏距离（单位与场景一致）
 var<private> g_tScatter: f32;
 var<private> g_tRecover: f32;
 var<private> g_phase: f32;
@@ -525,11 +517,9 @@ var<private> g_phase: f32;
 fn initShared(center: vec3f) {
     g_dist = length(center - uniform.uCenter);
     
-    // Wave propagation: points start scattering based on distance from center
-    // Points closer to center start earlier, points farther start later
-    // This creates the effect of spray spreading outward from target center
-    // All points participate in the scatter/recover effect (no range limit)
-    g_tScatter = g_dist / uniform.uWaveSpeed;
+    // Wave propagation: effectiveWaveSpeed 可随 g_dist 增大，远处点更早进入散射，缩短整体 Phase 0
+    let effectiveWaveSpeed = uniform.uWaveSpeed * max(1.0, 1.0 + uniform.uWaveSpeedDistScale * g_dist);
+    g_tScatter = g_dist / effectiveWaveSpeed;
     
     // NO HOLDING PHASE - direct transition from scatter to recover
     g_tRecover = g_tScatter + uniform.uScatterDuration;
@@ -910,40 +900,29 @@ fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<func
     
     let originalSize = gsplatExtractSize(*covA, *covB);
     
-    // Phase 0.0: Before scatter - show scattered effect (same as scatter phase)
+    // Phase 0.0: Before scatter - 点云 outline 模式（与散射阶段一致）
     if (g_phase == 0.0) {
-        // Make particles VERY small (10-25% of original) for dust/powder effect
-        // Use per-splat variation for more chaotic effect
-        let randomSeed = hash(originalCenter);
-        let sizeFactor = 0.10 + randomSeed * 0.15; // 0.10 to 0.25 (10% to 25% of original)
-        let size = originalSize * sizeFactor;
-        // Make them round for dust particle appearance
-        gsplatMakeRound(covA, covB, size);
+        gsplatMakeRound(covA, covB, uniform.uPointSize);
         return;
     }
     
-    // All particles participate in scatter/recover phases
+    // Scattering phase: 点云 outline 模式（与 gsplat-growth-wave 聚拢生长一致）
     if (g_phase == 1.0) {
-        // Scattering: make particles VERY small (10-25% of original) for dust/powder effect
-        // Use per-splat variation for more chaotic effect
-        let randomSeed = hash(originalCenter);
-        let sizeFactor = 0.10 + randomSeed * 0.15; // 0.10 to 0.25 (10% to 25% of original)
-        let size = originalSize * sizeFactor;
-        // Make them round for dust particle appearance
-        gsplatMakeRound(covA, covB, size);
-    } else if (g_phase == 2.0) {
-        // Phase 2.0: Recovering: gradually restore original size and shape
+        gsplatMakeRound(covA, covB, uniform.uPointSize);
+        return;
+    }
+    
+    // Phase 2.0: Recovering: 从点云 uPointSize 过渡回原始协方差
+    if (g_phase == 2.0) {
         let t = clamp((uniform.uTime - g_tRecover) / uniform.uRecoverDuration, 0.0, 1.0);
-        let randomSeed = hash(originalCenter);
-        let minSizeFactor = 0.10 + randomSeed * 0.15; // Same as scatter phase
-        let size = mix(originalSize * minSizeFactor, originalSize, t);
-        
-        // Lerp from round to original shape
+        let easedT = clamp(1.0 - pow(1.0 - t, 4.0), 0.0, 1.0);
+        let size = mix(uniform.uPointSize, originalSize, easedT);
         let origCovA = *covA;
         let origCovB = *covB;
         gsplatMakeRound(covA, covB, size);
-        *covA = mix(*covA, origCovA, t);
-        *covB = mix(*covB, origCovB, t);
+        *covA = mix(*covA, origCovA, easedT);
+        *covB = mix(*covB, origCovB, easedT);
+        return;
     }
     // Phase 3: original shape (no modification)
 }
@@ -1053,7 +1032,29 @@ class GsplatRevealPiecesRecover extends GsplatShaderEffect {
      * @attribute
      * @range [0.1, 100]
      */
-    waveSpeed = 5.0;
+    waveSpeed = 6.0;
+
+    /**
+     * 波速随距离的缩放系数（相对 g_dist）。>0 时远处点有效波速更大、更早进入散射，整体 Phase 0 缩短；0 为固定波速。
+     * 例如 0.02 表示每单位距离波速增加 2%，大场景可设 0.01~0.05 以缩短开场等待。
+     * @attribute
+     * @range [0, 0.2]
+     */
+    waveSpeedDistScale = 0.02;
+
+    /**
+     * 散射阶段点云 outline 模式固定点大小（与 gsplat-growth-wave 聚拢生长一致，为模型/视空间绝对数值）。
+     * 默认略大以保证一开始点云视觉上较密集（无筛选，所有点均参与显示）。
+     * @attribute
+     * @range [0.001, 0.5]
+     */
+    pointSize = 0.01;
+
+    /**
+     * 是否按场景尺度（endRadius）自动缩放 pointSize，使不同尺度场景的点密度更一致。默认开启以提升初始点云密度感。
+     * @attribute
+     */
+    pointSizeScaleByScene = true;
 
     getShaderGLSL() {
         return shaderGLSL;
@@ -1089,6 +1090,12 @@ class GsplatRevealPiecesRecover extends GsplatShaderEffect {
         this.setUniform('uEndRadius', this.endRadius);
         this.setUniform('uMaxScatterRadius', this.maxScatterRadius);
         this.setUniform('uWaveSpeed', this.waveSpeed);
+        this.setUniform('uWaveSpeedDistScale', this.waveSpeedDistScale);
+        const refRadius = 25;
+        const effectivePointSize = this.pointSizeScaleByScene
+            ? this.pointSize * Math.max(0.5, Math.min(2, this.endRadius / refRadius))
+            : this.pointSize;
+        this.setUniform('uPointSize', effectivePointSize);
 
         // Check if effect is complete
         if (this.isEffectComplete()) {
@@ -1106,9 +1113,9 @@ class GsplatRevealPiecesRecover extends GsplatShaderEffect {
     isEffectComplete() {
         // Points start at different times due to wave propagation from center
         // The farthest point will start last, so we need to account for that
-        // Use endRadius as reference distance for calculating completion time
-        // (even though we don't limit range, we use it as a reasonable maximum distance reference)
-        const maxScatterStartTime = this.endRadius / this.waveSpeed;
+        // Use endRadius as reference; when waveSpeedDistScale > 0, 远处有效波速更大，最晚开始时间缩短
+        const effectiveSpeedAtEnd = this.waveSpeed * Math.max(1, 1 + this.waveSpeedDistScale * this.endRadius);
+        const maxScatterStartTime = this.endRadius / effectiveSpeedAtEnd;
         const maxCompletionTime = maxScatterStartTime + this.scatterDuration + this.recoverDuration;
 
         return this.effectTime >= maxCompletionTime;
