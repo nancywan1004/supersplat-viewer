@@ -45,7 +45,7 @@ const initUI = (global: Global) => {
         'skyboxRow', 'skyboxSelect',
         'reset', 'frame',
         'getCameraInfo',
-        'loadingText', 'loadingBar',
+        'loadingText', 'loadingBar', 'loadingIcon',
         'joystickBase', 'joystick',
         'tooltip'
     ].reduce((acc: Record<string, HTMLElement>, id) => {
@@ -71,6 +71,7 @@ const initUI = (global: Global) => {
         const progressGradient = 'linear-gradient(90deg, #FFFFFF 0%, #73CCFF 41.83%, #2061FD 100%)';
         events.on('progress:changed', (progress) => {
             dom.loadingText.textContent = `${progress}%`;
+            dom.loadingIcon.style.left = `${progress}%`;
             if (progress < 100) {
                 dom.loadingBar.style.background = 'rgba(255,255,255,0.25)'; // 未填充轨道
                 dom.loadingBar.style.backgroundImage = progressGradient;

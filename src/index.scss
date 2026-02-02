@@ -95,20 +95,6 @@ button {
     padding: 16px 8px;
     border: 16px;
 
-    > #loadingIcon {
-        margin-bottom: 12px;
-        color: $clr-text-light;
-        width: 72px;
-        flex-shrink: 0;
-
-        svg {
-            display: block;
-            width: 100%;
-            height: auto;
-            filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.5));
-        }
-    }
-
     > #loadingRow {
         display: flex;
         align-items: center;
@@ -116,12 +102,35 @@ button {
         width: 100%;
     }
 
-    > #loadingRow > #loadingBar {
+    > #loadingRow > #loadingBarWrap {
+        position: relative;
         flex: 1;
         min-width: 0;
+        overflow: visible;
+    }
+
+    > #loadingRow > #loadingBarWrap > #loadingBar {
         height: 10px;
         border-radius: 4px;
-        overflow: hidden;
+        overflow: visible;
+    }
+
+    > #loadingRow > #loadingBarWrap > #loadingIcon {
+        position: absolute;
+        bottom: 100%;
+        left: 0;
+        margin-bottom: 10px;
+        width: 60px;
+        pointer-events: none;
+        color: $clr-text-light;
+        transform: translateX(-36%);
+
+        svg {
+            display: block;
+            width: 100%;
+            height: auto;
+            filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.5));
+        }
     }
 
     > #loadingRow > #loadingText {
@@ -136,7 +145,7 @@ button {
     #loadingWrap {
         width: 65vw;
 
-        > #loadingIcon {
+        > #loadingRow > #loadingBarWrap > #loadingIcon {
             width: 12vw;
         }
     }
