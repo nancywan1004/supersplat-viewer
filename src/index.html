@@ -99,8 +99,29 @@
 
             <!-- Loading Indicator -->
             <div id="loadingWrap">
-                <div id="loadingText"></div>
-                <div id="loadingBar"></div>
+                <div id="loadingRow">
+                    <div id="loadingBarWrap">
+                        <div id="loadingBar"></div>
+                        <div id="loadingIcon" aria-hidden="true">
+                            <svg width="72" height="48" viewBox="0 0 72 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M19.6966 47.0555C19.6957 36.6466 10.8438 28.8138 0 28.8138V24.7749C10.8413 24.7719 19.6961 16.9405 19.6966 6.53312V5.58984H22.5351V6.53312C22.5356 16.9423 31.3735 24.7746 42.2173 24.7749H43.2V28.8138H42.2173C31.3738 28.8141 22.536 36.6467 22.5351 47.0555L22.5351 47.9988H19.6966V47.0555Z" fill="url(#paint0_linear_5750_999)"/>
+                                <path d="M60.8483 20.7328C60.8478 15.5284 56.4219 11.612 51 11.612V9.59251C56.4207 9.59103 60.8481 5.67531 60.8483 0.471637V0H62.2676V0.471637C62.2678 5.6762 66.0868 9.59236 71.5087 9.59251H72V11.612H71.5087C66.0869 11.6121 62.268 15.5284 62.2676 20.7328L62.2675 21.2045H60.8483V20.7328Z" fill="url(#paint1_linear_5750_999)"/>
+                                <defs>
+                                <linearGradient id="paint0_linear_5750_999" x1="0" y1="26.7943" x2="43.2" y2="26.7943" gradientUnits="userSpaceOnUse">
+                                <stop stop-color="white"/>
+                                <stop offset="0.418269" stop-color="#73CCFF"/>
+                                <stop offset="1" stop-color="#2061FD"/>
+                                </linearGradient>
+                                <linearGradient id="paint1_linear_5750_999" x1="51" y1="10.6022" x2="72.6" y2="10.6022" gradientUnits="userSpaceOnUse">
+                                <stop stop-color="white"/>
+                                <stop offset="1" stop-color="#73CCFF"/>
+                                </linearGradient>
+                                </defs>
+                            </svg>
+                        </div>
+                    </div>
+                    <div id="loadingText"></div>
+                </div>
             </div>
 
             <div id="controlsWrap" class="faded-in">
