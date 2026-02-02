@@ -319,7 +319,7 @@ const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: numb
         revealEffect: {
             type: 'radial',
             autoStart: true,
-            radius: 25
+            radius: 50
         }
     };
 };

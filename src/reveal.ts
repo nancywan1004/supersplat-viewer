@@ -474,38 +474,27 @@ export class RevealController {
         try {
             const script = this.gsplatEntity.script.create(GsplatRevealGrowthWave) as any;
             if (script) {
-                // 默认配置
+                // 默认配置：Phase 1 生长固定约 7s，Phase 2 光圈复原固定 1.5s，互不干扰
                 const defaultGrowthSpeed = 5.0;
                 const defaultGrowthDuration = 7.0;
                 const defaultRecoverDuration = 7.0;
+                const defaultGrowthPhaseTime = 7.0; // Phase 1 目标时长，不随 totalDuration 拉长
                 
-                // 根据 totalDuration 自动调整时间参数
-                const totalDuration = this.config.totalDuration ?? 20.0;
-                
-                // 计算默认总时长：基于 shader 逻辑
-                // Shader 中：topParticleGrowthEnd = (growthDuration + maxYOffset * verticalSpread) / growthSpeed
-                // 其中 maxYOffset = abs(bottomY - topY), verticalSpread = growthSpeed / abs(topY - bottomY)
-                // 所以：topParticleGrowthEnd = (growthDuration + abs(bottomY - topY) * (growthSpeed / abs(topY - bottomY))) / growthSpeed
-                //      = (growthDuration + growthSpeed) / growthSpeed
-                //      = growthDuration / growthSpeed + 1.0
-                // 总时长 = topParticleGrowthEnd + recoverDuration
-                // 对于默认值：topParticleGrowthEnd = 7.0 / 5.0 + 1.0 = 2.4
-                // 总时长 = 2.4 + 7.0 = 9.4
-                // 但为了保持向后兼容，我们仍然使用原来的公式作为近似值
+                // 基于 Phase 1 目标时长计算 scale，避免缩短 Phase 2 时把 Phase 1 拉长
+                // topParticleGrowthEnd ≈ growthDuration/growthSpeed + 1（默认 verticalSpread 下）
                 const defaultTopParticleGrowthEnd = defaultGrowthDuration / defaultGrowthSpeed + 1.0;
-                const defaultTotalDuration = defaultTopParticleGrowthEnd + defaultRecoverDuration;
+                const scale = defaultGrowthPhaseTime / defaultTopParticleGrowthEnd;
                 
-                // 计算缩放比例
-                const scale = totalDuration / defaultTotalDuration;
-                
-                // 按比例调整参数
                 script.growthSpeed = defaultGrowthSpeed * scale;
                 script.growthDuration = defaultGrowthDuration * scale;
-                script.recoverDuration = defaultRecoverDuration * scale;
+                script.recoverDuration = defaultRecoverDuration; // 固定 1.5s，不参与 scale
                 script.noiseIntensity = 2.8;
                 script.scatterDistance = 4.0;
                 script.minSize = 0.15;
-                script.endRadius = 25.0; // 保持默认值，用于性能优化（距离剔除）
+                // Phase 2 光圈半径：优先用 config.radius；若有 bbox 则至少为 bbox 外接球半径，保证光圈覆盖全场景
+                const defaultEndRadius = 50;
+                let endRadius = this.config.radius ?? defaultEndRadius;
+                script.endRadius = endRadius;
                 
                 // 设置 topY 和 bottomY（基于 bbox 或默认值）
                 // 注意：growth-wave 是从 bottom 到 top 传播，shader 期望 bottomY > topY
@@ -522,28 +511,21 @@ export class RevealController {
                 
                 // 设置 reveal center
                 this.updateScriptCenter(script);
+                // Phase 2 开始时用当前帧相机 target 再更新一次 center
+                script.onPhase2Start = () => this.updateScriptCenter(script);
                 
-                // 根据 totalDuration 计算 verticalSpread
-                // 公式推导：
-                // totalDuration = topParticleGrowthEnd + recoverDuration
-                // topParticleGrowthEnd = (growthDuration + maxYOffset * verticalSpread) / growthSpeed
-                // 所以：totalDuration = (growthDuration + maxYOffset * verticalSpread) / growthSpeed + recoverDuration
-                // (totalDuration - recoverDuration) * growthSpeed = growthDuration + maxYOffset * verticalSpread
-                // verticalSpread = ((totalDuration - recoverDuration) * growthSpeed - growthDuration) / maxYOffset
+                // 根据 Phase 1 目标时长计算 verticalSpread，使 topParticleGrowthEnd = defaultGrowthPhaseTime
+                // verticalSpread = (defaultGrowthPhaseTime * growthSpeed - growthDuration) / maxYOffset
                 const heightRange = Math.abs(script.topY - script.bottomY);
                 if (heightRange > 0.001) {
                     const maxYOffset = heightRange;
-                    const growthPhaseTime = totalDuration - script.recoverDuration;
-                    if (growthPhaseTime > 0 && script.growthSpeed > 0) {
-                        script.verticalSpread = (growthPhaseTime * script.growthSpeed - script.growthDuration) / maxYOffset;
-                        // 确保 verticalSpread 是合理的正值
+                    if (script.growthSpeed > 0) {
+                        script.verticalSpread = (defaultGrowthPhaseTime * script.growthSpeed - script.growthDuration) / maxYOffset;
                         script.verticalSpread = Math.max(0.01, script.verticalSpread);
                     } else {
-                        // 使用默认计算
                         script.verticalSpread = script.growthSpeed / heightRange;
                     }
                 } else {
-                    // 使用默认计算
                     script.verticalSpread = script.growthSpeed / Math.max(heightRange, 0.001);
                 }
                 
@@ -551,7 +533,6 @@ export class RevealController {
                 script.enabled = this.config.autoStart;
                 script.effectTime = 0;
                 
-                // 计算实际的总时长（用于验证）
                 const maxYOffset = heightRange;
                 const topParticleGrowthEnd = (script.growthDuration + maxYOffset * script.verticalSpread) / script.growthSpeed;
                 const actualTotalDuration = topParticleGrowthEnd + script.recoverDuration;
@@ -561,6 +542,7 @@ export class RevealController {
                     growthSpeed: script.growthSpeed,
                     growthDuration: script.growthDuration,
                     recoverDuration: script.recoverDuration,
+                    endRadius: script.endRadius,
                     noiseIntensity: script.noiseIntensity,
                     scatterDistance: script.scatterDistance,
                     minSize: script.minSize,
@@ -569,9 +551,8 @@ export class RevealController {
                     heightRange,
                     verticalSpread: script.verticalSpread,
                     topParticleGrowthEnd,
-                    requestedTotalDuration: totalDuration,
                     actualTotalDuration,
-                    scale,
+                    phase1Target: defaultGrowthPhaseTime,
                     enabled: script.enabled
                 });
             }

@@ -142,27 +142,29 @@ void initShared(vec3 center) {
     float topParticleGrowthEnd = (uGrowthDuration + maxYOffset * uVerticalSpread) / uGrowthSpeed;
     g_tRecoverStart = topParticleGrowthEnd;
     
-    // Recovery wave phase: similar to growth, but for recovery
-    float recoverTimeScaled = max(0.0, uTime - g_tRecoverStart) * uGrowthSpeed;
-    float recoverWavePhase = recoverTimeScaled - g_yOffset * uVerticalSpread;
-    g_recoverProgress = smoothstep(0.0, uRecoverDuration, recoverWavePhase);
-    g_recoverProgress = clamp(g_recoverProgress, 0.0, 1.0);
-    
     g_tRecoverEnd = g_tRecoverStart + uRecoverDuration;
     
     g_phase = 0.0;
     
-    // Determine current phase
+    // Determine current phase (Phase 2 仅按时间判定)
     if (g_wavePhase < 0.0) {
         g_phase = 0.0; // Hidden
     } else if (uTime < g_tRecoverStart) {
-        // Phase 1: from wave arrival until global recover starts
-        // This includes the "fully grown but waiting" period
-        g_phase = 1.0;
-    } else if (uTime < g_tRecoverEnd && g_recoverProgress < 1.0) {
-        g_phase = 2.0; // Recovering
+        g_phase = 1.0; // Phase 1: 聚拢生长
+    } else if (uTime < g_tRecoverEnd) {
+        g_phase = 2.0; // Phase 2: 从中心向外光圈过渡复原
     } else {
         g_phase = 3.0; // Complete
+    }
+    
+    // Phase 2: 从视点 target 中心向外光圈过渡复原，g_recoverProgress = 光圈内已复原
+    if (g_phase == 2.0) {
+        float recoverRadius = ((uTime - g_tRecoverStart) / uRecoverDuration) * uEndRadius;
+        float recoverBand = uEndRadius * 0.05;
+        g_recoverProgress = 1.0 - smoothstep(recoverRadius - recoverBand, recoverRadius + recoverBand, g_dist);
+        g_recoverProgress = clamp(g_recoverProgress, 0.0, 1.0);
+    } else {
+        g_recoverProgress = 0.0;
     }
 }
 
@@ -366,87 +368,8 @@ void modifyCenter(inout vec3 center) {
         center = mix(startPos, finalPos, easedProgress);
         
     } else if (g_phase == 2.0) {
-        // Recover phase: 碎片还原效果 - 粒子沿着原始轨迹复原
-        // 从 Phase 1 结束时的位置（原始位置）稍微偏移，然后沿着轨迹还原
-        // 使用基于波传播的恢复进度（g_recoverProgress），实现从下到上的波传播效果
-        // g_recoverProgress 已经根据粒子的高度位置计算了恢复进度（底部先恢复，顶部后恢复）
-        // 如果恢复进度为 0，说明波还没到达这个粒子，应该保持隐藏状态
-        if (g_recoverProgress <= 0.0) {
-            // 波还没到达，保持 Phase 1 结束时的状态（原始位置）
-            center = originalCenter;
-            return;
-        }
-        
-        // 使用缓出曲线，让还原过程更自然
-        float easedRecover = 1.0 - pow(1.0 - g_recoverProgress, 4.0);
-        easedRecover = clamp(easedRecover, 0.0, 1.0);
-        
-        // 计算径向距离和方向（与 Phase 1 相同）
-        vec3 toSplat = originalCenter - uCenter;
-        float distFromCenter = length(toSplat);
-        vec3 radialOut = distFromCenter > 0.001 ? normalize(toSplat) : vec3(1.0, 0.0, 0.0);
-        
-        // 在 Phase 1 结束时，粒子已经在原始位置
-        // Phase 2 开始时，让粒子稍微向外偏移（模拟碎片状态）
-        float startOffsetDistance = uScatterDistance * 2.0; // 较小的偏移距离
-        vec3 startRecoverPos = originalCenter + radialOut * startOffsetDistance;
-        
-        // 使用与 Phase 1 相同的噪声场来创建还原轨迹
-        // 噪声强度随还原进度逐渐减弱（初期有扰动，末期稳定）
-        float noiseIntensity = (1.0 - easedRecover) * (1.0 - easedRecover); // 二次衰减
-        noiseIntensity *= 3.0; // 适中的扰动强度
-        
-        // 计算噪声采样位置（空间+时间）
-        vec3 noisePos = (originalCenter - uCenter) * 0.3;
-        float noiseTime = uTime * 0.6;
-        
-        // 获取噪声方向（与 Phase 1 相同的 fBM 噪声）
-        vec3 noiseDir = fbmNoise(noisePos, noiseTime);
-        
-        // 添加额外的低频噪声层
-        vec3 noisePos2 = (originalCenter - uCenter) * 0.15 + vec3(0.0, 0.0, noiseTime * 0.2);
-        vec3 noiseDir2 = fbmNoise(noisePos2, noiseTime * 0.5);
-        noiseDir = normalize(noiseDir * 0.7 + noiseDir2 * 0.3);
-        
-        // 构建切向和法向空间（用于侧向扰动）
-        vec3 upAxis = vec3(0.0, 1.0, 0.0);
-        vec3 tangential = normalize(cross(upAxis, radialOut));
-        if (length(tangential) < 0.001) {
-            tangential = vec3(0.0, 0.0, 1.0);
-        }
-        vec3 normal = cross(radialOut, tangential);
-        
-        // 将噪声方向投影到切向和法向空间
-        float tangentialNoise = dot(noiseDir, tangential);
-        float normalNoise = dot(noiseDir, normal);
-        
-        // 计算扰动偏移（随还原进度逐渐减弱）
-        float perturbationDistance = startOffsetDistance * noiseIntensity * 2.0;
-        vec3 perturbation = tangential * tangentialNoise * perturbationDistance + 
-                           normal * normalNoise * perturbationDistance;
-        
-        // 添加径向相位扰动
-        float phaseNoise = dot(noiseDir, radialOut) * 0.8;
-        float phaseOffset = phaseNoise * noiseIntensity * startOffsetDistance * 0.6;
-        vec3 phasePerturbation = radialOut * phaseOffset;
-        
-        // 添加垂直扰动
-        float verticalNoise = dot(noiseDir, upAxis);
-        vec3 verticalPerturbation = upAxis * verticalNoise * noiseIntensity * startOffsetDistance * 0.2;
-        perturbation += verticalPerturbation;
-        
-        // 主还原路径：从偏移位置回到原始位置
-        vec3 mainRecoverPos = mix(startRecoverPos, originalCenter, easedRecover);
-        
-        // 最终位置 = 主还原路径 + 噪声偏移（随时间衰减）
-        vec3 finalPos = mainRecoverPos + perturbation + phasePerturbation;
-        
-        // 确保最终位置在还原完成时严格到达原始位置
-        if (easedRecover >= 0.999) {
-            center = originalCenter;
-        } else {
-            center = finalPos;
-        }
+        // Phase 2: 从视点 target 中心向外光圈过渡复原，无位置动画，保持原始位置
+        center = originalCenter;
     }
 }
 
@@ -472,7 +395,7 @@ void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA,
         return;
     }
     
-    // Phase 2: Recover phase - 从固定点大小 uPointSize 恢复至原始
+    // Phase 2: 从中心向外光圈过渡复原，由 uPointSize 过渡至原始协方差
     if (g_phase == 2.0) {
         if (g_recoverProgress <= 0.0) {
             gsplatMakeRound(covA, covB, uPointSize);
@@ -689,27 +612,29 @@ fn initShared(center: vec3f) {
     let topParticleGrowthEnd = (uniform.uGrowthDuration + maxYOffset * uniform.uVerticalSpread) / uniform.uGrowthSpeed;
     g_tRecoverStart = topParticleGrowthEnd;
     
-    // Recovery wave phase: similar to growth, but for recovery
-    let recoverTimeScaled = max(0.0, uniform.uTime - g_tRecoverStart) * uniform.uGrowthSpeed;
-    let recoverWavePhase = recoverTimeScaled - g_yOffset * uniform.uVerticalSpread;
-    g_recoverProgress = smoothstep(0.0, uniform.uRecoverDuration, recoverWavePhase);
-    g_recoverProgress = clamp(g_recoverProgress, 0.0, 1.0);
-    
     g_tRecoverEnd = g_tRecoverStart + uniform.uRecoverDuration;
     
     g_phase = 0.0;
     
-    // Determine current phase
+    // Determine current phase (Phase 2 仅按时间判定)
     if (g_wavePhase < 0.0) {
         g_phase = 0.0; // Hidden
-    } else if (uTime < g_tRecoverStart) {
-        // Phase 1: from wave arrival until global recover starts
-        // This includes the "fully grown but waiting" period
-        g_phase = 1.0;
-    } else if (uTime < g_tRecoverEnd && g_recoverProgress < 1.0) {
-        g_phase = 2.0; // Recovering
+    } else if (uniform.uTime < g_tRecoverStart) {
+        g_phase = 1.0; // Phase 1: 聚拢生长
+    } else if (uniform.uTime < g_tRecoverEnd) {
+        g_phase = 2.0; // Phase 2: 从中心向外光圈过渡复原
     } else {
         g_phase = 3.0; // Complete
+    }
+    
+    // Phase 2: 从视点 target 中心向外光圈过渡复原
+    if (g_phase == 2.0) {
+        let recoverRadius = ((uniform.uTime - g_tRecoverStart) / uniform.uRecoverDuration) * uniform.uEndRadius;
+        let recoverBand = uniform.uEndRadius * 0.05;
+        g_recoverProgress = 1.0 - smoothstep(recoverRadius - recoverBand, recoverRadius + recoverBand, g_dist);
+        g_recoverProgress = clamp(g_recoverProgress, 0.0, 1.0);
+    } else {
+        g_recoverProgress = 0.0;
     }
 }
 
@@ -898,86 +823,8 @@ fn modifyCenter(center: ptr<function, vec3f>) {
         *center = mix(startPos, finalPos, easedProgress);
         
     } else if (g_phase == 2.0) {
-        // Recover phase: 碎片还原效果 - 粒子沿着原始轨迹复原
-        // 从 Phase 1 结束时的位置（原始位置）稍微偏移，然后沿着轨迹还原
-        // 使用基于波传播的恢复进度（g_recoverProgress），实现从下到上的波传播效果
-        // g_recoverProgress 已经根据粒子的高度位置计算了恢复进度（底部先恢复，顶部后恢复）
-        // 如果恢复进度为 0，说明波还没到达这个粒子，应该保持隐藏状态
-        if (g_recoverProgress <= 0.0) {
-            // 波还没到达，保持 Phase 1 结束时的状态（原始位置）
-            *center = originalCenter;
-            return;
-        }
-        
-        // 使用缓出曲线，让还原过程更自然
-        var easedRecover = clamp(1.0 - pow(1.0 - g_recoverProgress, 4.0), 0.0, 1.0);
-        
-        // 计算径向距离和方向（与 Phase 1 相同）
-        let toSplat = originalCenter - uniform.uCenter;
-        let distFromCenter = length(toSplat);
-        let radialOut = select(vec3f(1.0, 0.0, 0.0), normalize(toSplat), distFromCenter > 0.001);
-        
-        // 在 Phase 1 结束时，粒子已经在原始位置
-        // Phase 2 开始时，让粒子稍微向外偏移（模拟碎片状态）
-        let startOffsetDistance = uniform.uScatterDistance * 2.0; // 较小的偏移距离
-        let startRecoverPos = originalCenter + radialOut * startOffsetDistance;
-        
-        // 使用与 Phase 1 相同的噪声场来创建还原轨迹
-        // 噪声强度随还原进度逐渐减弱（初期有扰动，末期稳定）
-        var noiseIntensity = (1.0 - easedRecover) * (1.0 - easedRecover); // 二次衰减
-        noiseIntensity = noiseIntensity * 3.0; // 适中的扰动强度
-        
-        // 计算噪声采样位置（空间+时间）
-        let noisePos = (originalCenter - uniform.uCenter) * 0.3;
-        let noiseTime = uniform.uTime * 0.6;
-        
-        // 获取噪声方向（与 Phase 1 相同的 fBM 噪声）
-        var noiseDir = fbmNoise(noisePos, noiseTime);
-        
-        // 添加额外的低频噪声层
-        let noisePos2 = (originalCenter - uniform.uCenter) * 0.15 + vec3f(0.0, 0.0, noiseTime * 0.2);
-        let noiseDir2 = fbmNoise(noisePos2, noiseTime * 0.5);
-        noiseDir = normalize(noiseDir * 0.7 + noiseDir2 * 0.3);
-        
-        // 构建切向和法向空间（用于侧向扰动）
-        let upAxis = vec3f(0.0, 1.0, 0.0);
-        var tangential = normalize(cross(upAxis, radialOut));
-        if (length(tangential) < 0.001) {
-            tangential = vec3f(0.0, 0.0, 1.0);
-        }
-        let normal = cross(radialOut, tangential);
-        
-        // 将噪声方向投影到切向和法向空间
-        let tangentialNoise = dot(noiseDir, tangential);
-        let normalNoise = dot(noiseDir, normal);
-        
-        // 计算扰动偏移（随还原进度逐渐减弱）
-        let perturbationDistance = startOffsetDistance * noiseIntensity * 2.0;
-        var perturbation = tangential * tangentialNoise * perturbationDistance;
-        perturbation = perturbation + normal * normalNoise * perturbationDistance;
-        
-        // 添加径向相位扰动
-        let phaseNoise = dot(noiseDir, radialOut) * 0.8;
-        let phaseOffset = phaseNoise * noiseIntensity * startOffsetDistance * 0.6;
-        let phasePerturbation = radialOut * phaseOffset;
-        
-        // 添加垂直扰动
-        let verticalNoise = dot(noiseDir, upAxis);
-        let verticalPerturbation = upAxis * verticalNoise * noiseIntensity * startOffsetDistance * 0.2;
-        perturbation = perturbation + verticalPerturbation;
-        
-        // 主还原路径：从偏移位置回到原始位置
-        let mainRecoverPos = mix(startRecoverPos, originalCenter, easedRecover);
-        
-        // 最终位置 = 主还原路径 + 噪声偏移（随时间衰减）
-        var finalPos = mainRecoverPos + perturbation + phasePerturbation;
-        
-        // 确保最终位置在还原完成时严格到达原始位置
-        if (easedRecover >= 0.999) {
-            *center = originalCenter;
-        } else {
-            *center = finalPos;
-        }
+        // Phase 2: 从视点 target 中心向外光圈过渡复原，无位置动画，保持原始位置
+        *center = originalCenter;
     }
 }
 
@@ -1002,7 +849,7 @@ fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<func
         return;
     }
     
-    // Phase 2: 从 uPointSize 恢复至原始
+    // Phase 2: 从中心向外光圈过渡复原，由 uPointSize 过渡至原始
     if (g_phase == 2.0) {
         if (g_recoverProgress <= 0.0) {
             gsplatMakeRound(covA, covB, uniform.uPointSize);
@@ -1088,13 +935,17 @@ fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
  * growthScript.center.set(0, 0, 0);
  * growthScript.growthSpeed = 5.0;
  * growthScript.growthDuration = 7.0;
- * growthScript.recoverDuration = 7.0;
+ * growthScript.recoverDuration = 3.0;
  */
 class GsplatRevealGrowthWave extends GsplatShaderEffect {
     static scriptName = 'gsplatRevealGrowthWave';
 
     // Reusable arrays for uniform updates
     _centerArray = [0, 0, 0];
+
+    /** 进入 Phase 2 时调用一次，可由 reveal 挂接为「用当前相机 target 更新 center」 */
+    onPhase2Start?: () => void;
+    private _phase2CenterUpdated = false;
 
     /**
      * Focus point (center) for the effect - growth starts from bottom relative to this
@@ -1117,11 +968,13 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
     growthDuration = 7.0;
 
     /**
-     * Duration of recover phase in seconds (particles return to original positions)
+     * Phase 2 光圈复原时长（秒）。光圈从中心向外扩散到 endRadius 所用的时间。
+     * 光圈扫描速度（世界单位/秒）= endRadius / recoverDuration。
+     * 想加快光圈扩散：减小 recoverDuration；想放慢：增大 recoverDuration。
      * @attribute
      * @range [0.5, 20]
      */
-    recoverDuration = 7.0;
+    recoverDuration = 5.0;
 
     /**
      * Intensity of noise/perturbation during growth and recovery
@@ -1160,7 +1013,10 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
     pointSizeScaleByScene = true;
 
     /**
-     * Maximum Y distance from center to process (for performance)
+     * Phase 2 光圈最大半径：光圈从中心向外扩散到此距离后停止。
+     * 若场景很大（粒子离中心很远）而 endRadius 较小，则只有距离中心 ≤ endRadius 的区域会被光圈“复原”，
+     * 更远的粒子 g_recoverProgress 始终为 0，会一直保持点云状态，看起来“只扫描了一小部分”。
+     * 解决办法：调高 endRadius，使其大于场景中需要被光圈覆盖的最大距离（如 bbox 半径或视距）。
      * @attribute
      * @range [0, 500]
      */
@@ -1228,6 +1084,14 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
         // Shader: topParticleGrowthEnd = (growthDuration + maxYOffset * verticalSpread) / growthSpeed
         const maxYOffset = heightRange;
         const globalRecoverStart = (this.growthDuration + maxYOffset * verticalSpread) / this.growthSpeed;
+
+        // 进入 Phase 2 时更新一次 center（例如由 reveal 挂接为当前相机 target）
+        if (effectTime < globalRecoverStart) {
+            this._phase2CenterUpdated = false;
+        } else if (!this._phase2CenterUpdated) {
+            this._phase2CenterUpdated = true;
+            this.onPhase2Start?.();
+        }
 
         // Update all uniforms
         this.setUniform('uTime', effectTime);
