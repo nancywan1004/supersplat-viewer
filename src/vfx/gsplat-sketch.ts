@@ -111,7 +111,8 @@ void initShared(vec3 center) {
         float colorizeT = min(uTime - g_tColorizeStart, uColorizeDuration);
         colorizeRadius = (colorizeT / uColorizeDuration) * uEndRadius;
     }
-    float colorizeBand = uEndRadius * uFadeWidthRatio * 3.0;
+    // 上色过渡带加宽，使素描→彩色过渡更明显
+    float colorizeBand = uEndRadius * uFadeWidthRatio * 6.0;
     float colorizeOuter = colorizeRadius + colorizeBand * 0.5;
     float colorizeInner = max(0.0, colorizeRadius - colorizeBand * 0.5);
     if (colorizeDist <= colorizeInner) {
@@ -198,12 +199,14 @@ void modifyColor(vec3 center, inout vec4 color) {
         // 素描阶段：完全素描
         sketchProgress = 1.0;
     } else if (g_phase == 2.0) {
-        // 上色阶段：与素描一致的时空顺序
-        float transitionBand = mix(1.0, 0.25, uColorizeSharpness);
+        // 上色阶段：与素描一致的时空顺序，加宽过渡带使过渡更明显
+        float transitionBand = mix(1.0, 0.2, uColorizeSharpness);
         float tMin = 0.5 - transitionBand * 0.5;
         float tMax = 0.5 + transitionBand * 0.5;
         float t = smoothstep(tMin, tMax, g_colorizeProgress);
         sketchProgress = 1.0 - t;
+        // 轻微缓动，让半素描半彩色的过渡区更可见
+        sketchProgress = pow(sketchProgress, 0.9);
     } else {
         // 完成阶段：完全彩色
         sketchProgress = 0.0;
@@ -396,7 +399,8 @@ fn initShared(center: vec3f) {
         let colorizeT = min(uniform.uTime - g_tColorizeStart, uniform.uColorizeDuration);
         colorizeRadius = (colorizeT / uniform.uColorizeDuration) * uniform.uEndRadius;
     }
-    let colorizeBand = uniform.uEndRadius * uniform.uFadeWidthRatio * 3.0;
+    // 上色过渡带加宽，使素描→彩色过渡更明显
+    let colorizeBand = uniform.uEndRadius * uniform.uFadeWidthRatio * 6.0;
     let colorizeOuter = colorizeRadius + colorizeBand * 0.5;
     let colorizeInner = max(0.0, colorizeRadius - colorizeBand * 0.5);
     if (colorizeDist <= colorizeInner) {
@@ -482,12 +486,14 @@ fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
         // 素描阶段：完全素描
         sketchProgress = 1.0;
     } else if (g_phase == 2.0) {
-        // 上色阶段：与素描一致的时空顺序
-        let transitionBand = mix(1.0, 0.25, uniform.uColorizeSharpness);
+        // 上色阶段：与素描一致的时空顺序，加宽过渡带使过渡更明显
+        let transitionBand = mix(1.0, 0.2, uniform.uColorizeSharpness);
         let tMin = 0.5 - transitionBand * 0.5;
         let tMax = 0.5 + transitionBand * 0.5;
         let t = smoothstep(tMin, tMax, g_colorizeProgress);
         sketchProgress = 1.0 - t;
+        // 轻微缓动，让半素描半彩色的过渡区更可见
+        sketchProgress = pow(sketchProgress, 0.9);
     } else {
         // 完成阶段：完全彩色
         sketchProgress = 0.0;
@@ -724,11 +730,11 @@ class GsplatSketch extends GsplatShaderEffect {
     grainAmp = 0.06;
 
     /**
-     * 上色过渡边缘锐度（0-1）
+     * 上色过渡边缘锐度（0-1），越小过渡带越宽、过渡越明显
      * @attribute
      * @range [0, 1]
      */
-    colorizeSharpness = 0.6;
+    colorizeSharpness = 0.35;
 
     /**
      * 上色高斯扩散（0-0.2）：过渡区高斯拉长，模拟笔触涂抹
@@ -760,18 +766,13 @@ class GsplatSketch extends GsplatShaderEffect {
     }
 
     updateEffect(effectTime: number, dt: number) {
-        // 在上色开始时记录相机位置（只记录一次）
+        // 效果开始的首帧立即记录相机位置，保证 Restart / 导出 VFX 时从当前视角中心开始上色
         if (this.useCameraDistance && !this._cameraPosCaptured) {
-            // 检查是否有点已经进入上色阶段
-            const minColorizeStartTime = this.sketchDuration; // 中心点的上色开始时间
-            if (effectTime >= minColorizeStartTime) {
-                // 获取相机位置：优先使用基类的 camera 属性，否则通过名字查找
-                const cameraEntity = this.camera || this.app?.root?.findByName('Camera');
-                if (cameraEntity) {
-                    this.cameraPos.copy(cameraEntity.getPosition());
-                    this._cameraPosCaptured = true;
-                    console.log('Captured camera position for colorize:', this.cameraPos);
-                }
+            const cameraEntity = this.camera || this.app?.root?.findByName('Camera');
+            if (cameraEntity) {
+                this.cameraPos.copy(cameraEntity.getPosition());
+                this._cameraPosCaptured = true;
+                console.log('Captured camera position for colorize:', this.cameraPos);
             }
         }
 

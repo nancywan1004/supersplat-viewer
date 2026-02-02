@@ -600,7 +600,7 @@ export class RevealController {
                 const remainingTime = totalDuration - script.sketchDuration - script.colorizeDuration;
                 script.waveSpeed = defaultEndRadius / Math.max(remainingTime, 0.1); // 确保不为0或负数
                 script.endRadius = defaultEndRadius;
-                script.fadeWidthRatio = 0.1;
+                script.fadeWidthRatio = 0.18;
                 script.sketchIntensity = 1.0;
                 script.sketchContrast = 1.2;
                 script.draftFeel = 0.65;
@@ -614,7 +614,7 @@ export class RevealController {
                 script.colorizeAlphaGrain = 0.5;
                 script.grainFreq = 25.0;
                 script.grainAmp = 0.06;
-                script.colorizeSharpness = 0.6;
+                script.colorizeSharpness = 0.3;
                 
                 // 启用基于相机距离的上色（从相机视角由近至远上色）
                 script.useCameraDistance = true;
