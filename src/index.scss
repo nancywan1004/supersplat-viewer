@@ -90,22 +90,61 @@ button {
 
     display: flex;
     flex-direction: column;
+    align-items: center;
 
-    padding: 16px;
+    padding: 16px 8px;
+    border: 16px;
 
-    > #loadingText {
-        font-size: 18px;
+    > #loadingIcon {
+        margin-bottom: 12px;
         color: $clr-text-light;
-        text-align: center;
-        text-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+        width: 72px;
+        flex-shrink: 0;
+
+        svg {
+            display: block;
+            width: 100%;
+            height: auto;
+            filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.5));
+        }
     }
 
-    > #loadingBar {
+    > #loadingRow {
+        display: flex;
+        align-items: center;
+        gap: 12px;
         width: 100%;
+    }
+
+    > #loadingRow > #loadingBar {
+        flex: 1;
+        min-width: 0;
         height: 10px;
-        margin-top: 8px;
         border-radius: 4px;
         overflow: hidden;
+    }
+
+    > #loadingRow > #loadingText {
+        flex-shrink: 0;
+        font-size: 18px;
+        color: $clr-text-light;
+        text-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+    }
+}
+
+@media (max-width: 599px) {
+    #loadingWrap {
+        width: 65vw;
+
+        > #loadingIcon {
+            width: 12vw;
+        }
+    }
+}
+
+@keyframes loadingSpin {
+    to {
+        transform: rotate(360deg);
     }
 }
 

@@ -68,12 +68,19 @@ const initUI = (global: Global) => {
             loadingWrap.classList.add('hidden');
         }
     } else {
+        const progressGradient = 'linear-gradient(90deg, #FFFFFF 0%, #73CCFF 41.83%, #2061FD 100%)';
         events.on('progress:changed', (progress) => {
             dom.loadingText.textContent = `${progress}%`;
             if (progress < 100) {
-                dom.loadingBar.style.backgroundImage = `linear-gradient(90deg, #F60 0%, #F60 ${progress}%, white ${progress}%, white 100%)`;
+                dom.loadingBar.style.background = 'rgba(255,255,255,0.25)'; // 未填充轨道
+                dom.loadingBar.style.backgroundImage = progressGradient;
+                dom.loadingBar.style.backgroundSize = `${progress}% 100%`;
+                dom.loadingBar.style.backgroundRepeat = 'no-repeat';
             } else {
-                dom.loadingBar.style.backgroundImage = 'linear-gradient(90deg, #F60 0%, #F60 100%)';
+                dom.loadingBar.style.background = 'transparent';
+                dom.loadingBar.style.backgroundImage = progressGradient;
+                dom.loadingBar.style.backgroundSize = '100% 100%';
+                dom.loadingBar.style.backgroundRepeat = 'no-repeat';
                 // In LOD mode, hide loading UI when progress reaches 100%
                 if (isLodMode) {
                     const loadingWrap = document.getElementById('loadingWrap');
