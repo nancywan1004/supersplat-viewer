@@ -86,7 +86,7 @@ button {
     bottom: 120px;
     left: 50%;
     transform: translate(-50%, 0);
-    width: 380px;
+    width: auto;
 
     display: flex;
     flex-direction: column;
@@ -110,7 +110,8 @@ button {
     }
 
     > #loadingRow > #loadingBarWrap > #loadingBar {
-        height: 10px;
+        width: min(800px, 41.667vw);
+        height: clamp(4px, 0.31vw, 8px);
         border-radius: 4px;
         overflow: visible;
     }
@@ -120,7 +121,8 @@ button {
         bottom: 100%;
         left: 0;
         margin-bottom: 10px;
-        width: 60px;
+        height: clamp(24px, 1.667vw, 48px);
+        aspect-ratio: 3 / 2;
         pointer-events: none;
         color: $clr-text-light;
         transform: translateX(-36%);
@@ -128,14 +130,14 @@ button {
         svg {
             display: block;
             width: 100%;
-            height: auto;
-            filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.5));
+            height: 100%;
         }
     }
 
     > #loadingRow > #loadingText {
         flex-shrink: 0;
-        font-size: 18px;
+        min-width: clamp(40px, 2.71vw, 70px);
+        font-size: clamp(14px, 0.94vw, 20px);
         color: $clr-text-light;
         text-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
     }
@@ -147,6 +149,7 @@ button {
 
         > #loadingRow > #loadingBarWrap > #loadingIcon {
             width: 12vw;
+            height: auto;
         }
     }
 }
