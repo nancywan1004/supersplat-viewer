@@ -102,6 +102,8 @@ float g_growthProgress;
 float g_tRecoverStart;
 float g_tRecoverEnd;
 float g_recoverProgress;
+float g_recoverRadius;       // Phase 2 复原带中心半径
+float g_recoverWaveFront;    // Phase 2 复原波前半径（外缘，复原波刚扫到此处），金环对齐此处与几何同步
 float g_phase;
 
 void initShared(vec3 center) {
@@ -161,10 +163,14 @@ void initShared(vec3 center) {
     if (g_phase == 2.0) {
         float recoverRadius = ((uTime - g_tRecoverStart) / uRecoverDuration) * uEndRadius;
         float recoverBand = uEndRadius * 0.05;
+        g_recoverRadius = recoverRadius;
+        g_recoverWaveFront = recoverRadius + recoverBand;   // 波前在外缘，金环对齐波前才不滞后
         g_recoverProgress = 1.0 - smoothstep(recoverRadius - recoverBand, recoverRadius + recoverBand, g_dist);
         g_recoverProgress = clamp(g_recoverProgress, 0.0, 1.0);
     } else {
         g_recoverProgress = 0.0;
+        g_recoverRadius = 0.0;
+        g_recoverWaveFront = 0.0;
     }
 }
 
@@ -441,31 +447,58 @@ void modifyColor(vec3 center, inout vec4 color) {
         glowIntensity = clamp(glowIntensity, 0.0, 1.6);
         
         vec3 blueGlow = vec3(0.18, 0.45, 1.0);
-        color.rgb += blueGlow * glowIntensity * 0.58;
+        // 仅 Phase 1 加蓝辉光；Phase 2 不加，避免未复原区整片发蓝导致光圈显得很宽
+        if (g_phase == 1.0) {
+            color.rgb += blueGlow * glowIntensity * 0.58;
+        }
         
-        // Phase 1 聚拢：光圈在整个 Phase 1 期间从下扫到上，更亮、带发光感
+        // Phase 1 聚拢：光圈从下扫到上。主带偏白 (0.95,1,1)，扫描辉光偏蓝 blueGlow，整体白蓝色。收窄宽度 + 收紧柔光 = 更明显光环
         if (g_phase == 1.0 && g_growthProgress > 0.0 && g_growthProgress < 1.0) {
             float phase1Progress = clamp(uTime / g_tRecoverStart, 0.0, 1.0);
             float ringY = mix(uBottomY, uTopY, phase1Progress);
             float sceneHeight = abs(uBottomY - uTopY);
-            float ringWidth = max(4.0, sceneHeight * 0.18);
+            float ringWidth = max(2.0, sceneHeight * 0.06);   // 收窄：0.18 -> 0.06，光环更细
             float distToRing = abs(center.y - ringY);
             float ringBand = 1.0 - smoothstep(0.0, ringWidth, distToRing);
-            float ringCore = 1.0 - smoothstep(0.0, ringWidth * 0.4, distToRing);
-            // 外围柔光：光圈两侧软衰减，增强发光感
-            float ringSoft = 1.0 - smoothstep(ringWidth, ringWidth * 2.2, distToRing);
-            vec3 ringColor = vec3(0.95, 1.0, 1.0);
+            float ringCore = 1.0 - smoothstep(0.0, ringWidth * 0.35, distToRing);  // 亮芯更细
+            float ringSoft = 1.0 - smoothstep(ringWidth, ringWidth * 1.25, distToRing);  // 柔光范围收紧：2.2 -> 1.25
+            vec3 ringColor = vec3(0.95, 1.0, 1.0);  // 光圈主色：偏白
             color.rgb += ringColor * ringBand * distanceGlow * 3.2;
             color.rgb += ringColor * ringCore * 2.0;
             color.rgb += ringColor * ringSoft * 0.9;
             color.rgb *= (1.0 + ringBand * 1.4);
-            
             float scannedGlow = smoothstep(ringY - ringWidth, ringY, center.y);
-            color.rgb += blueGlow * scannedGlow * 0.6;
+            color.rgb += blueGlow * scannedGlow * 0.6;  // 蓝辉光
             color.rgb *= (1.0 + scannedGlow * 0.45);
         }
         
-        color.rgb *= (1.0 + glowIntensity * 0.28);
+        // Phase 2 光圈复原：金环对齐复原波前（外缘），与高斯复原同步，不滞后
+        if (g_phase == 2.0 && g_recoverProgress < 1.0 && g_recoverWaveFront > 0.0) {
+            float haloWidth = uEndRadius * 0.016;   // 极窄环
+            float distToHalo = abs(g_dist - g_recoverWaveFront);   // 用波前（外缘）半径
+            float haloBand = 1.0 - smoothstep(0.0, haloWidth, distToHalo);
+            float haloCore = 1.0 - smoothstep(0.0, haloWidth * 0.5, distToHalo);
+            // 不再用 haloSoft，避免环变宽；只保留最外缘窄带
+            float haloEdge = smoothstep(haloWidth * 0.6, haloWidth, distToHalo) * (1.0 - smoothstep(haloWidth, haloWidth * 1.08, distToHalo));
+            vec3 haloColor = vec3(1.0, 0.82, 0.52);   // 金粉色
+            // 金粉闪烁：对比拉大（暗时接近灭、亮时明显闪），三频叠加 + 加快速度
+            float h1 = hash(center);
+            float h2 = hash(center + vec3(10.0, 20.0, 30.0));
+            float h3 = hash(center + vec3(50.0, 100.0, 150.0));
+            float t1 = uTime * 14.0 + h1 * 6.28318;
+            float t2 = uTime * 22.0 + h2 * 6.28318;
+            float t3 = uTime * 31.0 + h3 * 6.28318;
+            float sparkle = 0.15 + 0.55 * sin(t1) + 0.45 * sin(t2) + 0.35 * sin(t3);   // 约 0.15~1.5 再拉大
+            sparkle = clamp(sparkle, 0.05, 2.2);   // 暗时几乎灭，亮时明显闪
+            color.rgb += haloColor * haloBand * distanceGlow * 4.0 * sparkle;
+            color.rgb += haloColor * haloCore * 3.0 * sparkle;
+            color.rgb += haloColor * haloEdge * distanceGlow * 8.0 * sparkle;
+            color.rgb *= (1.0 + haloBand * 0.4);
+        }
+        
+        // Phase 2 未复原区不再整体提亮，只保留环上的金粉，光圈不会显得宽
+        float glowMul = (g_phase == 2.0) ? 0.08 : 0.28;
+        color.rgb *= (1.0 + glowIntensity * glowMul);
         color.rgb = clamp(color.rgb, 0.0, 4.5);
     }
 }
@@ -572,6 +605,8 @@ var<private> g_growthProgress: f32;
 var<private> g_tRecoverStart: f32;
 var<private> g_tRecoverEnd: f32;
 var<private> g_recoverProgress: f32;
+var<private> g_recoverRadius: f32;       // Phase 2 复原带中心半径
+var<private> g_recoverWaveFront: f32;    // Phase 2 复原波前半径（外缘），金环对齐此处与几何同步
 var<private> g_phase: f32;
 
 fn initShared(center: vec3f) {
@@ -631,10 +666,14 @@ fn initShared(center: vec3f) {
     if (g_phase == 2.0) {
         let recoverRadius = ((uniform.uTime - g_tRecoverStart) / uniform.uRecoverDuration) * uniform.uEndRadius;
         let recoverBand = uniform.uEndRadius * 0.05;
+        g_recoverRadius = recoverRadius;
+        g_recoverWaveFront = recoverRadius + recoverBand;   // 波前在外缘，金环对齐波前才不滞后
         g_recoverProgress = 1.0 - smoothstep(recoverRadius - recoverBand, recoverRadius + recoverBand, g_dist);
         g_recoverProgress = clamp(g_recoverProgress, 0.0, 1.0);
     } else {
         g_recoverProgress = 0.0;
+        g_recoverRadius = 0.0;
+        g_recoverWaveFront = 0.0;
     }
 }
 
@@ -894,30 +933,55 @@ fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
         glowIntensity = clamp(glowIntensity, 0.0, 1.6);
         
         let blueGlow = vec3f(0.18, 0.45, 1.0);
-        (*color).rgb = (*color).rgb + blueGlow * glowIntensity * 0.58;
+        // 仅 Phase 1 加蓝辉光；Phase 2 不加，避免未复原区整片发蓝导致光圈显得很宽
+        if (g_phase == 1.0) {
+            (*color).rgb = (*color).rgb + blueGlow * glowIntensity * 0.58;
+        }
         
-        // Phase 1 聚拢：光圈更亮、带发光感
+        // Phase 1 聚拢：光圈收窄 + 柔光收紧，更明显光环；主带偏白，蓝辉光
         if (g_phase == 1.0 && g_growthProgress > 0.0 && g_growthProgress < 1.0) {
             let phase1Progress = clamp(uniform.uTime / g_tRecoverStart, 0.0, 1.0);
             let ringY = mix(uniform.uBottomY, uniform.uTopY, phase1Progress);
             let sceneHeight = abs(uniform.uBottomY - uniform.uTopY);
-            let ringWidth = max(4.0, sceneHeight * 0.18);
+            let ringWidth = max(2.0, sceneHeight * 0.06);
             let distToRing = abs(center.y - ringY);
             let ringBand = 1.0 - smoothstep(0.0, ringWidth, distToRing);
-            let ringCore = 1.0 - smoothstep(0.0, ringWidth * 0.4, distToRing);
-            let ringSoft = 1.0 - smoothstep(ringWidth, ringWidth * 2.2, distToRing);
+            let ringCore = 1.0 - smoothstep(0.0, ringWidth * 0.35, distToRing);
+            let ringSoft = 1.0 - smoothstep(ringWidth, ringWidth * 1.25, distToRing);
             let ringColor = vec3f(0.95, 1.0, 1.0);
             (*color).rgb = (*color).rgb + ringColor * ringBand * distanceGlow * 3.2;
             (*color).rgb = (*color).rgb + ringColor * ringCore * 2.0;
             (*color).rgb = (*color).rgb + ringColor * ringSoft * 0.9;
             (*color).rgb = (*color).rgb * (1.0 + ringBand * 1.4);
-            
             let scannedGlow = smoothstep(ringY - ringWidth, ringY, center.y);
             (*color).rgb = (*color).rgb + blueGlow * scannedGlow * 0.6;
             (*color).rgb = (*color).rgb * (1.0 + scannedGlow * 0.45);
         }
         
-        (*color).rgb = (*color).rgb * (1.0 + glowIntensity * 0.28);
+        // Phase 2 光圈复原：金环对齐复原波前（外缘），与高斯复原同步，不滞后
+        if (g_phase == 2.0 && g_recoverProgress < 1.0 && g_recoverWaveFront > 0.0) {
+            let haloWidth = uniform.uEndRadius * 0.016;   // 极窄环
+            let distToHalo = abs(g_dist - g_recoverWaveFront);   // 用波前（外缘）半径
+            let haloBand = 1.0 - smoothstep(0.0, haloWidth, distToHalo);
+            let haloCore = 1.0 - smoothstep(0.0, haloWidth * 0.5, distToHalo);
+            let haloEdge = smoothstep(haloWidth * 0.6, haloWidth, distToHalo) * (1.0 - smoothstep(haloWidth, haloWidth * 1.08, distToHalo));
+            let haloColor = vec3f(1.0, 0.82, 0.52);   // 金粉色
+            let h1 = hash(center);
+            let h2 = hash(center + vec3f(10.0, 20.0, 30.0));
+            let h3 = hash(center + vec3f(50.0, 100.0, 150.0));
+            let t1 = uniform.uTime * 14.0 + h1 * 6.28318;
+            let t2 = uniform.uTime * 22.0 + h2 * 6.28318;
+            let t3 = uniform.uTime * 31.0 + h3 * 6.28318;
+            let sparkle = 0.15 + 0.55 * sin(t1) + 0.45 * sin(t2) + 0.35 * sin(t3);
+            let sparkleClamped = clamp(sparkle, 0.05, 2.2);   // 暗时几乎灭，亮时明显闪
+            (*color).rgb = (*color).rgb + haloColor * haloBand * distanceGlow * 4.0 * sparkleClamped;
+            (*color).rgb = (*color).rgb + haloColor * haloCore * 3.0 * sparkleClamped;
+            (*color).rgb = (*color).rgb + haloColor * haloEdge * distanceGlow * 8.0 * sparkleClamped;
+            (*color).rgb = (*color).rgb * (1.0 + haloBand * 0.4);
+        }
+        
+        let glowMul = select(0.28, 0.08, g_phase == 2.0);   // Phase 2 未复原区少提亮，光圈不显宽
+        (*color).rgb = (*color).rgb * (1.0 + glowIntensity * glowMul);
         (*color).rgb = clamp((*color).rgb, vec3f(0.0), vec3f(4.5));
     }
 }
