@@ -227,6 +227,9 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         camera
     };
 
+    // 供 NightMode 等脚本读取点光源等（collectPointLights 需要 global）
+    (app as any).__global = global;
+
     const lodLoader = new LodLoader(global);
     if (lodLoader.shouldEnableLod(config.contentUrl)) {
         lodLoader.initializeLodSettings();

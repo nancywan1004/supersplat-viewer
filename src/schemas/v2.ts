@@ -1,4 +1,4 @@
-import type { LodSettings, LodPreset, LodPlatform, RevealEffect, TransformFrame } from "./v2-custom";
+import type { LodSettings, LodPreset, LodPlatform, RevealEffect, TransformFrame, PointLightConfig, LightingSettings } from "./v2-custom";
 
 type AnimTrack = {
     name: string,
@@ -95,6 +95,12 @@ type ExperienceSettings = {
     lodSettings?: LodSettings,
 
     /**
+     * 可选：光照配置（点光源列表，上限 10 个）
+     * 用于夜间模式等效果，每项包含 position / color / intensity
+     */
+    lighting?: LightingSettings,
+
+    /**
      * 可选：相机边界策略（不影响旧 settings.json）
      * - enabled: 是否启用相机移动限制（默认 true）
      * - animScaleX: X 轴方向的缩放系数（可选，仅在有动画路径时生效）
@@ -118,4 +124,4 @@ type ExperienceSettings = {
     initialCameraMode?: 'orbit' | 'fly';
 };
 
-export type { AnimTrack, Camera, Annotation, PostEffectSettings, RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, ExperienceSettings };
+export type { AnimTrack, Camera, Annotation, PostEffectSettings, RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, ExperienceSettings, PointLightConfig, LightingSettings };

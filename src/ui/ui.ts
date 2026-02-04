@@ -5,6 +5,7 @@ import { Global } from '../types';
 import { isLodMetaFile } from '../loaders/lod-loader';
 import { initRevealUI } from './components/reveal-ui';
 import { initVideoExportUI } from './components/video-export-ui';
+import { initLightingUI } from './components/lighting-ui';
 
 const v = new Vec3();
 
@@ -44,8 +45,8 @@ const initUI = (global: Global) => {
         'cameraPathCheck', 'cameraPathOption',
         'cameraBoundsCheck', 'cameraBoundsOption',
         'skyboxRow', 'skyboxSelect',
-        'nightModeCheck', 'nightModeOption',
-        'nightFadeSlider', 'nightFadeValue',
+        'vfxSubmenuHeader', 'vfxSubpanel', 'vfxSubmenuArrow',
+        'lightingSubmenuHeader', 'lightingSubpanel', 'lightingSubmenuArrow',
         'reset', 'frame',
         'getCameraInfo',
         'loadingText', 'loadingBar', 'loadingIcon',
@@ -273,83 +274,6 @@ const initUI = (global: Global) => {
         populateSkyboxes();
     }
 
-    // Night Mode Toggle and Intensity Slider
-    const nightModeCheck = dom.nightModeCheck;
-    const nightModeOption = dom.nightModeOption;
-    const nightFadeSlider = dom.nightFadeSlider as HTMLInputElement;
-    const nightFadeValue = dom.nightFadeValue;
-    
-    let nightModeEnabled = false;
-    
-    if (nightModeCheck && nightModeOption) {
-        // Toggle night mode on/off
-        const toggleNightMode = () => {
-            nightModeEnabled = !nightModeEnabled;
-            nightModeCheck.classList[nightModeEnabled ? 'remove' : 'add']('hidden');
-            nightModeCheck.classList[nightModeEnabled ? 'add' : 'remove']('active');
-            // Enable/disable slider based on night mode state
-            if (nightFadeSlider) {
-                nightFadeSlider.disabled = !nightModeEnabled;
-            }
-            // Fire toggle event
-            events.fire('toggle:night-mode');
-            global.app.fire('toggle:night-mode');
-        };
-        
-        nightModeOption.addEventListener('click', toggleNightMode);
-        nightModeCheck.addEventListener('click', toggleNightMode);
-    }
-    
-    if (nightFadeSlider && nightFadeValue) {
-        // Update slider value display (show 0-1 value)
-        const updateSliderDisplay = (value: number) => {
-            nightFadeSlider.value = value.toString();
-            nightFadeValue.textContent = value.toFixed(2);
-        };
-
-        // Handle slider input
-        nightFadeSlider.addEventListener('input', (event) => {
-            const value = parseFloat((event.target as HTMLInputElement).value);
-            updateSliderDisplay(value);
-            // Fire on both event systems to ensure night-mode script receives it
-            events.fire('nightFade:set', value);
-            global.app.fire('nightFade:set', value);
-        });
-
-        // Sync slider with nightFade changes from night-mode script
-        events.on('nightFade:changed', (value: number) => {
-            updateSliderDisplay(value);
-        });
-        
-        // Also listen to app events (in case night-mode fires on app)
-        global.app.on('nightFade:changed', (value: number) => {
-            updateSliderDisplay(value);
-        });
-        
-        // Listen for night mode state changes to update toggle and slider
-        global.app.on('nightMode:changed', (enabled: boolean) => {
-            nightModeEnabled = enabled;
-            if (nightModeCheck) {
-                nightModeCheck.classList[enabled ? 'remove' : 'add']('hidden');
-                nightModeCheck.classList[enabled ? 'add' : 'remove']('active');
-            }
-            if (nightFadeSlider) {
-                nightFadeSlider.disabled = !enabled;
-                // When enabling, slider will be updated by nightFade:changed event
-                // When disabling, keep slider at current value but disabled
-            }
-        });
-
-        // Initialize slider to 0
-        updateSliderDisplay(0);
-        
-        // Request initial nightFade value from night-mode script
-        // This will be sent when night-mode script initializes
-        setTimeout(() => {
-            global.app.fire('nightFade:request');
-        }, 100);
-    }
-
     // AR/VR
     const arChanged = () => dom.arMode.classList[state.hasAR ? 'remove' : 'add']('hidden');
     const vrChanged = () => dom.vrMode.classList[state.hasVR ? 'remove' : 'add']('hidden');
@@ -363,11 +287,31 @@ const initUI = (global: Global) => {
     arChanged();
     vrChanged();
 
-    // Reveal / VFX 与视频导出 UI 由独立组件管理（带生命周期，需卸载时调用返回的 cleanup）
+    // Reveal / VFX、Lighting 由独立组件管理（带生命周期，需卸载时调用返回的 cleanup）
     const cleanupRevealUI = initRevealUI(global);
     const cleanupVideoExportUI = initVideoExportUI(global);
+    const cleanupLightingUI = initLightingUI(global);
     // 若将来有“关闭设置面板并销毁子组件”等场景，可在此处或适当时机调用：
-    // cleanupRevealUI(); cleanupVideoExportUI();
+    // cleanupRevealUI(); cleanupVideoExportUI(); cleanupLightingUI();
+
+    // VFX / Lighting 二级菜单折叠
+    const toggleSubpanel = (headerId: string, panelId: string, arrowId: string) => {
+        const header = document.getElementById(headerId);
+        const panel = document.getElementById(panelId);
+        const arrow = document.getElementById(arrowId);
+        if (!header || !panel || !arrow) return;
+        const isHidden = panel.classList.contains('hidden');
+        panel.classList.toggle('hidden', !isHidden);
+        header.classList.toggle('expanded', isHidden);
+    };
+    if (dom.vfxSubmenuHeader && dom.vfxSubpanel) {
+        dom.vfxSubmenuHeader.addEventListener('click', () => toggleSubpanel('vfxSubmenuHeader', 'vfxSubpanel', 'vfxSubmenuArrow'));
+        dom.vfxSubmenuHeader.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSubpanel('vfxSubmenuHeader', 'vfxSubpanel', 'vfxSubmenuArrow'); } });
+    }
+    if (dom.lightingSubmenuHeader && dom.lightingSubpanel) {
+        dom.lightingSubmenuHeader.addEventListener('click', () => toggleSubpanel('lightingSubmenuHeader', 'lightingSubpanel', 'lightingSubmenuArrow'));
+        dom.lightingSubmenuHeader.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSubpanel('lightingSubmenuHeader', 'lightingSubpanel', 'lightingSubmenuArrow'); } });
+    }
 
     // Info panel
     const updateInfoTab = (tab: 'desktop' | 'touch') => {

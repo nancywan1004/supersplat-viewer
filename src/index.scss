@@ -439,6 +439,37 @@ button {
         background-color: $clr-text-darkest;
     }
 
+    .submenuHeader {
+        cursor: pointer;
+        user-select: none;
+        padding: 8px 4px;
+        &:hover {
+            color: $clr-text-light;
+        }
+        .submenuArrow {
+            display: inline-block;
+            margin-right: 6px;
+            transition: transform 0.2s ease;
+        }
+        &.expanded .submenuArrow {
+            transform: rotate(90deg);
+        }
+    }
+
+    .subpanel {
+        padding-left: 12px;
+        border-left: 2px solid $clr-bkg-light;
+        margin-left: 8px;
+        margin-bottom: 4px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        &.hidden {
+            display: none !important;
+        }
+    }
+
+    @import 'ui/components/lighting-ui';
     @import 'ui/components/reveal-ui';
     @import 'ui/components/video-export-ui';
 }

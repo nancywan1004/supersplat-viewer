@@ -1,5 +1,6 @@
 import { Script, Color, Entity, Vec3 } from 'playcanvas';
 import { GsplatShaderEffect } from '../gsplat-shader-effect';
+import { collectPointLights } from '../../light';
 
 const shaderGLSL = /* glsl */`
 uniform vec3 uSpherePositions[10];
@@ -433,35 +434,24 @@ class NightMode extends GsplatShaderEffect {
             }
         }
 
-        // Get sphere positions and colors
-        const spheres = this.app.root.findByTag('sphere');
+        // 从场景中的 Light 实体（type='point'）收集点光源，上限 10 个
+        const global = (this.app as any).__global;
+        const pointLights = global ? collectPointLights(global) : [];
         const positions: number[] = [];
         const colors: number[] = [];
-
+        const scale = this.lightingIntensity;
         for (let i = 0; i < 10; ++i) {
-            const sphere = spheres[i];
-            if (!sphere) {
+            const pl = pointLights[i];
+            if (!pl) {
                 positions.push(0, 0, 0);
                 colors.push(0, 0, 0);
             } else {
-                const pos = sphere.getPosition();
-                const renderComponent = (sphere as any).render;
-                const meshInstance = renderComponent?.meshInstances?.[0];
-                if (meshInstance) {
-                    const material = meshInstance.material;
-                    const diffuse = material.diffuse;
-                    positions.push(pos.x, pos.y, pos.z);
-                    colors.push(diffuse.r * this.lightingIntensity, diffuse.g * this.lightingIntensity, diffuse.b * this.lightingIntensity);
-                    
-                    // Update sphere material
-                    material.emissive.set(diffuse.r, diffuse.g, diffuse.b);
-                    material.emissiveIntensity = this.nightFade * this.emissiveIntensity;
-                    material.gloss = 0.7 * (1 - this.nightFade) + 0.3 * this.nightFade;
-                    material.update();
-                } else {
-                    positions.push(0, 0, 0);
-                    colors.push(0, 0, 0);
-                }
+                positions.push(pl.position.x, pl.position.y, pl.position.z);
+                colors.push(
+                    pl.color.r * pl.intensity * scale,
+                    pl.color.g * pl.intensity * scale,
+                    pl.color.b * pl.intensity * scale
+                );
             }
         }
 

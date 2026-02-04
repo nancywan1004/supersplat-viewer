@@ -38,4 +38,20 @@ type TransformFrame = {
     fx: number
 }
 
-export type { RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame };
+/**
+ * Lighting 配置（自定义扩展字段）
+ * - 用于 settings.json 中配置点光源等
+ */
+type PointLightConfig = {
+    position: [number, number, number],
+    color: [number, number, number],
+    intensity: number,
+    /** 是否启用该光源，默认 true；设为 false 可临时关闭 */
+    enabled?: boolean
+};
+
+type LightingSettings = {
+    lights: PointLightConfig[]
+};
+
+export type { RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, LightingSettings };

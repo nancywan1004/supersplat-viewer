@@ -1,0 +1,148 @@
+// Lighting 面板组件样式（由 index.scss 在 #settingsPanel 内 @import，变量来自主文件）
+
+.lightingPanel {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+}
+
+.lightingLabel {
+    margin-right: 8px;
+    min-width: 64px;
+}
+
+.lightingSliderWrap {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    gap: 8px;
+}
+
+.lightingSlider {
+    flex: 1;
+    accent-color: $clr-accent;
+}
+
+.lightingSliderValue {
+    min-width: 40px;
+    text-align: right;
+    font-size: 12px;
+    color: $clr-text-dark;
+}
+
+.lightingOption {
+    padding: 8px;
+    cursor: pointer;
+    color: $clr-text-dark;
+    &:hover {
+        color: $clr-text;
+    }
+}
+
+.lightingSectionLabel {
+    font-size: 12px;
+    color: $clr-text-dark;
+    margin-top: 8px;
+    margin-bottom: 2px;
+}
+
+.pointLightsList {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.pointLightRow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    padding: 6px 8px;
+    background: $clr-bkg-darkest;
+    border-radius: 4px;
+    margin-bottom: 4px;
+    font-size: 12px;
+
+    .pointLightVisual {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-right: 4px;
+    }
+
+    .pointLightSwatch {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+    }
+
+    .pointLightNum {
+        color: $clr-text-dark;
+        font-size: 11px;
+        white-space: nowrap;
+    }
+
+    .pointLightLabel {
+        min-width: 28px;
+        color: $clr-text-dark;
+    }
+
+    input[type="number"] {
+        width: 48px;
+        padding: 4px 6px;
+        border: 0;
+        border-radius: 2px;
+        color: $clr-text;
+        background: $clr-bkg-dark;
+    }
+
+    input[type="color"] {
+        width: 28px;
+        height: 22px;
+        padding: 0;
+        border: 0;
+        border-radius: 2px;
+        cursor: pointer;
+    }
+
+    .pointLightIntensity {
+        width: 56px;
+    }
+
+    .pointLightEnableWrap {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .pointLightEnable {
+        margin: 0;
+    }
+
+    .pointLightEnableLabel {
+        font-size: 11px;
+        color: $clr-text-dark;
+    }
+
+    &.pointLightRow--disabled {
+        opacity: 0.55;
+    }
+
+    .pointLightRemove {
+        padding: 4px 8px;
+        margin-left: auto;
+        font-size: 11px;
+        cursor: pointer;
+        color: $clr-text-dark;
+        background: transparent;
+        border: 0;
+        &:hover {
+            color: $clr-accent;
+        }
+    }
+}
