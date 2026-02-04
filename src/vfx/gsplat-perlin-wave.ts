@@ -51,9 +51,9 @@ mat2 rot(float a) {
             return mix(y0, y1, f.z);
           }
 
-// 3D sine wave effect for color
-vec4 sin3D(vec3 p, float t) {
-    float m = exp(-2.0 * length(sin(p * 2.0 + t * 3.0))) * 5.0;
+// 3D sine wave effect for color (spatialScale、timeScale 与位移一致，波长/波速都能同时影响位移和颜色)
+vec4 sin3D(vec3 p, float t, float spatialScale, float timeScale) {
+    float m = exp(-2.0 * length(sin(p * 2.0 * spatialScale + t * timeScale))) * 5.0;
     return vec4(m) + 0.3;
 }
 
@@ -75,23 +75,23 @@ void modifyCenter(inout vec3 center) {
 void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
     initShared(modifiedCenter);
     
-    // Apply scale blend
-    if (uScaleBlend < 0.1) {
-        // Hide splats if scale blend is too low
-        gsplatMakeRound(covA, covB, 0.001);
-    } else {
-        // Scale splats based on blend factor
-        float originalSize = gsplatExtractSize(covA, covB);
-        float newSize = originalSize * uScaleBlend;
-        gsplatMakeRound(covA, covB, newSize);
-    }
+    // // Apply scale blend
+    // if (uScaleBlend < 0.1) {
+    //     // Hide splats if scale blend is too low
+    //     gsplatMakeRound(covA, covB, 0.001);
+    // } else {
+    //     // Scale splats based on blend factor
+    //     float originalSize = gsplatExtractSize(covA, covB);
+    //     float newSize = originalSize * uScaleBlend;
+    //     gsplatMakeRound(covA, covB, newSize);
+    // }
 }
 
 void modifyColor(vec3 center, inout vec4 color) {
     initShared(center);
     
-    // Apply 3D sine wave color effect
-    vec4 e = sin3D(center, uTime);
+    // Apply 3D sine wave color effect（波长、波速与位移一致）
+    vec4 e = sin3D(center, uTime, uWaveFrequency, uWaveSpeed * 3.0);
     color = mix(color, color * e, uIntensity);
 }
 `;
@@ -152,9 +152,9 @@ fn noise2(p: vec3f) -> vec3f {
     return mix(y0, y1, f.z);
 }
 
-// 3D sine wave effect for color
-fn sin3D(p: vec3f, t: f32) -> vec4f {
-    let m = exp(-2.0 * length(sin(p * 2.0 + t * 3.0))) * 5.0;
+// 3D sine wave effect for color (spatialScale、timeScale 与位移一致，波长/波速都能同时影响位移和颜色)
+fn sin3D(p: vec3f, t: f32, spatialScale: f32, timeScale: f32) -> vec4f {
+    let m = exp(-2.0 * length(sin(p * 2.0 * spatialScale + t * timeScale))) * 5.0;
     return vec4f(m, m, m, 1.0) + vec4f(0.3, 0.3, 0.3, 0.0);
 }
 
@@ -176,23 +176,23 @@ fn modifyCenter(center: ptr<function, vec3f>) {
 fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<function, vec3f>, covB: ptr<function, vec3f>) {
     initShared(modifiedCenter);
     
-    // Apply scale blend
-    if (uniform.uScaleBlend < 0.1) {
-        // Hide splats if scale blend is too low
-        gsplatMakeRound(covA, covB, 0.001);
-    } else {
-        // Scale splats based on blend factor
-        let originalSize = gsplatExtractSize(*covA, *covB);
-        let newSize = originalSize * uniform.uScaleBlend;
-        gsplatMakeRound(covA, covB, newSize);
-    }
+    // // Apply scale blend
+    // if (uniform.uScaleBlend < 0.1) {
+    //     // Hide splats if scale blend is too low
+    //     gsplatMakeRound(covA, covB, 0.001);
+    // } else {
+    //     // Scale splats based on blend factor
+    //     let originalSize = gsplatExtractSize(*covA, *covB);
+    //     let newSize = originalSize * uniform.uScaleBlend;
+    //     gsplatMakeRound(covA, covB, newSize);
+    // }
 }
 
 fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
     initShared(center);
     
-    // Apply 3D sine wave color effect
-    let e = sin3D(center, uniform.uTime);
+    // Apply 3D sine wave color effect（波长、波速与位移一致）
+    let e = sin3D(center, uniform.uTime, uniform.uWaveFrequency, uniform.uWaveSpeed * 3.0);
     *color = mix(*color, *color * e, uniform.uIntensity);
 }
 `;
@@ -208,7 +208,7 @@ fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
  * perlinWaveScript.center.set(0, 0, 0);
  * perlinWaveScript.intensity = 0.5;
  * perlinWaveScript.waveAmplitude = 0.1;
- * perlinWaveScript.waveFrequency = 1.0;
+ * perlinWaveScript.wavelength = 2.0;  // 波长（世界单位），优先于 waveFrequency；0 则用 waveFrequency
  * perlinWaveScript.waveSpeed = 1.0;
  * perlinWaveScript.scaleBlend = 1.0;
  */
@@ -239,11 +239,18 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
     waveAmplitude = 0.1;
 
     /**
-     * Frequency of the Perlin wave
+     * Frequency of the Perlin wave (used only when wavelength <= 0)
      * @attribute
      * @range [0, 10]
      */
     waveFrequency = 1.0;
+
+    /**
+     * 波长（世界单位）。当 > 0 时优先使用：uWaveFrequency = 1.0 / wavelength，调大波长 = 波更疏、周期更长
+     * @attribute
+     * @range [0, 100]
+     */
+    wavelength = 0;
 
     /**
      * Speed of the wave animation
@@ -278,7 +285,9 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
 
         this.setUniform('uIntensity', this.intensity);
         this.setUniform('uWaveAmplitude', this.waveAmplitude);
-        this.setUniform('uWaveFrequency', this.waveFrequency);
+        const w = Number(this.wavelength) || 0;
+        const effectiveFrequency = w > 0 ? 1.0 / w : this.waveFrequency;
+        this.setUniform('uWaveFrequency', effectiveFrequency);
         this.setUniform('uWaveSpeed', this.waveSpeed);
         this.setUniform('uScaleBlend', this.scaleBlend);
     }

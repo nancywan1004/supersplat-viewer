@@ -429,12 +429,12 @@ export class RevealController {
         try {
             const script = this.gsplatEntity.script.create(GsplatRevealPerlinWave) as any;
             if (script) {
-                // 配置script属性
-                script.intensity = 0.5;
-                script.waveAmplitude = 0.1;
-                script.waveFrequency = 1.0;
-                script.waveSpeed = 1.0;
-                script.scaleBlend = 1.0;
+                // 配置script属性（波长 world 单位：越大波越疏；拱起用 waveAmplitude）
+                script.intensity = 0.8;
+                script.waveAmplitude = 0.2;
+                script.wavelength = 2.5;      // 波长（世界单位），2=较疏，0 则用 waveFrequency
+                script.waveSpeed = 0.5;
+                script.scaleBlend = 0.75;
                 
                 // 设置 reveal center
                 this.updateScriptCenter(script);
@@ -447,6 +447,7 @@ export class RevealController {
                     center: script.center,
                     intensity: script.intensity,
                     waveAmplitude: script.waveAmplitude,
+                    wavelength: script.wavelength,
                     waveFrequency: script.waveFrequency,
                     waveSpeed: script.waveSpeed,
                     scaleBlend: script.scaleBlend,
