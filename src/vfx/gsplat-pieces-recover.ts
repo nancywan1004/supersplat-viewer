@@ -16,6 +16,10 @@ uniform float uMaxScatterRadius;
 uniform float uWaveSpeed;
 uniform float uWaveSpeedDistScale;   // 随距离增大波速的系数，>0 时远处点更早进入散射，缩短整体 Phase 0
 uniform float uPointSize;   // 散射阶段点云模式固定点大小（与 gsplat-growth-wave 聚拢生长一致）
+uniform float uScatterIntensity;   // 统一控制点云扩散程度的系数（0~1），值越大扩散越明显
+uniform float uTangentTwist;   // 统一控制切线扭曲程度的系数（0~1），值越大扭曲越明显
+uniform float uRadialExpand;   // 统一控制径向外扩程度的系数（0~1），值越大沿法线方向外扩越明显
+uniform float uSmokeDrift;     // 烟雾感：切平面内随时间轻柔漂移的强度（0~1）
 
 // Hash function for per-splat randomization
 float hash(vec3 p) {
@@ -108,77 +112,23 @@ void modifyCenter(inout vec3 center) {
     float randomSeed2 = hash(originalCenter + vec3(10.0, 20.0, 30.0));
     float randomSeed3 = hash(originalCenter + vec3(50.0, 100.0, 150.0));
     
-    // Determine if this particle sprays outward or inward (50/50 split)
-    float directionSeed = hash(originalCenter + vec3(999.0, 888.0, 777.0));
-    float directionSign = (directionSeed > 0.5) ? 1.0 : -1.0; // 1.0 = outward, -1.0 = inward
-    
-    // Create SMOOTH stream-based direction using multi-frequency noise for natural smoke trails
-    // Use smooth noise instead of hard cell boundaries to avoid blocky patterns
+    // Contour-following: radial from effect center（用于切平面）
     vec3 toSplat = originalCenter - uCenter;
     float distFromCenter = length(toSplat);
     vec3 radialDir = distFromCenter > 0.001 ? normalize(toSplat) : vec3(0.0, 1.0, 0.0);
-    
-    // Apply direction sign to create bidirectional spray effect (inward and outward)
-    radialDir *= directionSign;
-    
-    // Multi-frequency noise for smooth, elongated smoke trails
-    // Use LARGER scales for LONGER, more elongated streams (not blocky)
-    float noiseScale1 = 1.2;  // Large-scale stream patterns (larger = longer streams)
-    float noiseScale2 = 3.5;  // Medium-scale variations
-    float noiseScale3 = 12.0;  // Fine-scale details
-    
+    vec3 tangent1 = cross(radialDir, vec3(0.0, 1.0, 0.0));
+    if (length(tangent1) < 0.01) tangent1 = cross(radialDir, vec3(1.0, 0.0, 0.0));
+    tangent1 = normalize(tangent1);
+    vec3 tangent2 = normalize(cross(radialDir, tangent1));
+    float noiseScale1 = 1.2;
+    float noiseScale2 = 3.5;
+    float noiseScale3 = 12.0;
     vec3 noisePos1 = (originalCenter - uCenter) * noiseScale1;
     vec3 noisePos2 = (originalCenter - uCenter) * noiseScale2;
     vec3 noisePos3 = (originalCenter - uCenter) * noiseScale3;
-    
-    // Use trilinear interpolation for smooth, continuous stream directions
-    // This creates elongated trails instead of blocky patterns
     vec3 i1 = floor(noisePos1);
     vec3 f1 = fract(noisePos1);
-    f1 = f1 * f1 * (3.0 - 2.0 * f1); // Smoothstep for smoother interpolation
-    
-    // Sample 8 corners for trilinear interpolation
-    vec3 d000 = randomDir(i1);
-    vec3 d100 = randomDir(i1 + vec3(1.0, 0.0, 0.0));
-    vec3 d010 = randomDir(i1 + vec3(0.0, 1.0, 0.0));
-    vec3 d110 = randomDir(i1 + vec3(1.0, 1.0, 0.0));
-    vec3 d001 = randomDir(i1 + vec3(0.0, 0.0, 1.0));
-    vec3 d101 = randomDir(i1 + vec3(1.0, 0.0, 1.0));
-    vec3 d011 = randomDir(i1 + vec3(0.0, 1.0, 1.0));
-    vec3 d111 = randomDir(i1 + vec3(1.0, 1.0, 1.0));
-    
-    // Trilinear interpolation for smooth stream direction
-    vec3 streamDir1 = mix(
-        mix(mix(d000, d100, f1.x), mix(d010, d110, f1.x), f1.y),
-        mix(mix(d001, d101, f1.x), mix(d011, d111, f1.x), f1.y),
-        f1.z
-    );
-    
-    // Medium and fine scale variations (simpler interpolation)
-    vec3 streamDir2 = randomDir(floor(noisePos2));
-    vec3 streamDir3 = randomDir(floor(noisePos3));
-    vec3 frac2 = fract(noisePos2);
-    vec3 frac3 = fract(noisePos3);
-    float smooth2 = smoothstep(0.0, 1.0, frac2.x) * smoothstep(0.0, 1.0, frac2.y) * smoothstep(0.0, 1.0, frac2.z);
-    float smooth3 = smoothstep(0.0, 1.0, frac3.x) * smoothstep(0.0, 1.0, frac3.y) * smoothstep(0.0, 1.0, frac3.z);
-    
-    // Blend directions - balanced for elongated smoke trails
-    vec3 streamDir = normalize(
-        radialDir * 0.4 +                    // Moderate radial: 20%
-        streamDir1 * 1.2 +                   // Main stream: 60% (smooth, elongated)
-        streamDir2 * 0.3 * smooth2 +          // Medium variation: 15% (smooth)
-        streamDir3 * 0.15 * smooth3            // Fine detail: 7.5% (smooth)
-    );
-    
-    // Moderate per-particle variation - creates natural spread in elongated streams
-    vec3 perParticleDir = randomDir(originalCenter);
-    vec3 perParticleVariation = perParticleDir * (0.12 + randomSeed * 0.18); // 12-30% variation (natural spread)
-    
-    // Final scatter direction: smooth elongated stream + natural per-particle spread
-    vec3 scatterDir = normalize(streamDir + perParticleVariation);
-    
-    // Smooth distance variation using trilinear interpolation
-    // Use hash interpolation for smooth distance variation
+    f1 = f1 * f1 * (3.0 - 2.0 * f1);
     float h000 = hash(i1);
     float h100 = hash(i1 + vec3(1.0, 0.0, 0.0));
     float h010 = hash(i1 + vec3(0.0, 1.0, 0.0));
@@ -187,106 +137,60 @@ void modifyCenter(inout vec3 center) {
     float h101 = hash(i1 + vec3(1.0, 0.0, 1.0));
     float h011 = hash(i1 + vec3(0.0, 1.0, 1.0));
     float h111 = hash(i1 + vec3(1.0, 1.0, 1.0));
+    float angleHash = mix(
+        mix(mix(h000, h100, f1.x), mix(h010, h110, f1.x), f1.y),
+        mix(mix(h001, h101, f1.x), mix(h011, h111, f1.x), f1.y),
+        f1.z
+    );
+    vec3 frac2 = fract(noisePos2);
+    vec3 frac3 = fract(noisePos3);
+    float smooth2 = smoothstep(0.0, 1.0, frac2.x) * smoothstep(0.0, 1.0, frac2.y) * smoothstep(0.0, 1.0, frac2.z);
+    float smooth3 = smoothstep(0.0, 1.0, frac3.x) * smoothstep(0.0, 1.0, frac3.y) * smoothstep(0.0, 1.0, frac3.z);
+    // 折中：以位置角度为主保留轮廓，只加小幅每点抖动(±0.35 rad)打破“齐刷刷”，不整点随机避免乱飞
+    float angle = (angleHash * 6.28318 + (randomSeed - 0.5) * 0.7 + hash(floor(noisePos2)) * smooth2 * 1.2 + hash(floor(noisePos3)) * smooth3 * 0.6) * uTangentTwist;
+    vec3 tangentDir = cos(angle) * tangent1 + sin(angle) * tangent2;
+    vec3 perParticleDir = randomDir(originalCenter);
+    // 大幅减少随机扰动（从0.06~0.14降至0.02~0.04），让点云更贴合原轮廓
+    vec3 perParticleVariation = (tangent1 * (perParticleDir.x * 0.3) + tangent2 * (perParticleDir.y * 0.3)) * (0.02 + randomSeed * 0.02);
+    // 使用 uRadialExpand 控制径向外扩：基础值 0.3（增大10倍以获得明显效果），由 uRadialExpand 缩放（0~1）
+    vec3 scatterDir = normalize(tangentDir + radialDir * (0.3 * uRadialExpand) + perParticleVariation);
     
     float streamDist1 = mix(
         mix(mix(h000, h100, f1.x), mix(h010, h110, f1.x), f1.y),
         mix(mix(h001, h101, f1.x), mix(h011, h111, f1.x), f1.y),
         f1.z
     );
-    
     float streamDist2 = hash(floor(noisePos2));
-    // Smooth distance variation - creates elongated trails
-    float streamScatterBase = 0.65 + streamDist1 * 0.5 + streamDist2 * smooth2 * 0.25; // 0.65 to 1.4 (smooth)
-    float perParticleVariationDist = 0.75 + randomSeed * 0.75; // Per-particle: 0.75 to 1.25 (natural spread)
-    float scatterFactor = streamScatterBase * perParticleVariationDist; // Range: ~0.49 to ~1.75
-    scatterFactor = max(0.4, scatterFactor); // Ensure minimum movement
+    // 使用 uScatterIntensity 统一控制扩散程度：基础值 + 噪声变化
+    float streamScatterBase = 0.08 + streamDist1 * 0.12 + streamDist2 * smooth2 * 0.05;
+    float perParticleVariationDist = 0.8 + randomSeed * 0.4;
+    // scatterFactor 由 uScatterIntensity 缩放：0.06~0.25 的范围乘以 uScatterIntensity
+    float scatterFactor = clamp(streamScatterBase * perParticleVariationDist * uScatterIntensity, 0.06 * uScatterIntensity, 0.25 * uScatterIntensity);
     
     
     if (g_phase == 1.0) {
-        // Scattering phase: smooth stream-based dust expansion like natural smoke trails
-        float t = (uTime - g_tScatter) / uScatterDuration; // 0 to 1
-        t = clamp(t, 0.0, 1.0); // Ensure t is in valid range to prevent flickering
+        // 散射阶段：进度 0~1，不再乘 speed variation，确保位移严格受 uMaxScatterRadius 限制
+        float t = (uTime - g_tScatter) / uScatterDuration;
+        t = clamp(t, 0.0, 1.0);
+        float easedT = t * t * (3.0 - 2.0 * t); // smoothstep，严格 [0,1]
+        easedT = clamp(easedT, 0.0, 1.0);
         
-        // Slower, more graceful easing - ease-in-out cubic for smooth start and end
-        float easedT = t < 0.5 
-            ? 4.0 * t * t * t  // Ease-in cubic (slow start)
-            : 1.0 - pow(-2.0 * t + 2.0, 3.0) / 2.0; // Ease-out cubic (slow end)
-        easedT = clamp(easedT, 0.0, 1.0); // Ensure easedT is in valid range
+        // 位移量：easedT * scatterFactor 恒 <= 1，故 scatterAmount <= uMaxScatterRadius
+        float scatterAmount = easedT * uMaxScatterRadius * scatterFactor;
+        scatterAmount = min(scatterAmount, uMaxScatterRadius);
         
-        // Smooth speed variation using trilinear interpolation
-        float noiseScale1 = 1.2;  // Match the scale from above
-        float noiseScale2 = 3.5;
-        vec3 noisePos1 = (originalCenter - uCenter) * noiseScale1;
-        vec3 noisePos2 = (originalCenter - uCenter) * noiseScale2;
-        vec3 i1 = floor(noisePos1);
-        vec3 f1 = fract(noisePos1);
-        f1 = f1 * f1 * (3.0 - 2.0 * f1); // Smoothstep
-        
-        // Trilinear interpolation for smooth speed variation
-        float s000 = hash(i1);
-        float s100 = hash(i1 + vec3(1.0, 0.0, 0.0));
-        float s010 = hash(i1 + vec3(0.0, 1.0, 0.0));
-        float s110 = hash(i1 + vec3(1.0, 1.0, 0.0));
-        float s001 = hash(i1 + vec3(0.0, 0.0, 1.0));
-        float s101 = hash(i1 + vec3(1.0, 0.0, 1.0));
-        float s011 = hash(i1 + vec3(0.0, 1.0, 1.0));
-        float s111 = hash(i1 + vec3(1.0, 1.0, 1.0));
-        
-        float speedHash1 = mix(
-            mix(mix(s000, s100, f1.x), mix(s010, s110, f1.x), f1.y),
-            mix(mix(s001, s101, f1.x), mix(s011, s111, f1.x), f1.y),
-            f1.z
-        );
-        
-        vec3 frac2 = fract(noisePos2);
-        float smooth2 = smoothstep(0.0, 1.0, frac2.x) * smoothstep(0.0, 1.0, frac2.y) * smoothstep(0.0, 1.0, frac2.z);
-        float speedHash2 = hash(floor(noisePos2));
-        
-        // Slower, more uniform speed variation - creates gentle elongated trails
-        float speedVariation = 0.95 + speedHash1 * 0.08 + speedHash2 * smooth2 * 0.04; // 0.95 to 1.07 (more uniform, reduced variation)
-        float perParticleSpeed = 0.96 + randomSeed * 0.08; // Per-particle: 0.96 to 1.04 (more uniform, reduced variation)
-        easedT *= speedVariation * perParticleSpeed;
-        easedT = clamp(easedT, 0.0, 1.0); // CRITICAL: Keep within [0,1] to prevent flickering
-        
-        float scatterAmount = easedT * uScatterDistance * scatterFactor;
-        
-        // No limit on scatter distance - allow long, thin water mist/dust streams
-        // Particles can scatter far from their original position for elongated effect
-        
-        // Smooth turbulence using trilinear interpolation
-        vec3 turbI1 = floor(noisePos1 + vec3(50.0, 0.0, 0.0));
-        vec3 turbF1 = fract(noisePos1 + vec3(50.0, 0.0, 0.0));
-        turbF1 = turbF1 * turbF1 * (3.0 - 2.0 * turbF1);
-        
-        vec3 t000 = randomDir(turbI1);
-        vec3 t100 = randomDir(turbI1 + vec3(1.0, 0.0, 0.0));
-        vec3 t010 = randomDir(turbI1 + vec3(0.0, 1.0, 0.0));
-        vec3 t110 = randomDir(turbI1 + vec3(1.0, 1.0, 0.0));
-        vec3 t001 = randomDir(turbI1 + vec3(0.0, 0.0, 1.0));
-        vec3 t101 = randomDir(turbI1 + vec3(1.0, 0.0, 1.0));
-        vec3 t011 = randomDir(turbI1 + vec3(0.0, 1.0, 1.0));
-        vec3 t111 = randomDir(turbI1 + vec3(1.0, 1.0, 1.0));
-        
-        vec3 turbDir1 = normalize(mix(
-            mix(mix(t000, t100, turbF1.x), mix(t010, t110, turbF1.x), turbF1.y),
-            mix(mix(t001, t101, turbF1.x), mix(t011, t111, turbF1.x), turbF1.y),
-            turbF1.z
-        ));
-        
-        vec3 turbDir2 = randomDir(floor(noisePos2 + vec3(100.0, 0.0, 0.0)));
-        vec3 streamTurbulence = normalize(turbDir1 * 0.7 + turbDir2 * 0.3 * smooth2) * uNoiseIntensity * easedT * 0.1; // Moderate: 10%
-        
-        // Natural jitter for organic smoke feel
-        vec3 jitter = randomDir(originalCenter + vec3(100.0, 0.0, 0.0)) * uNoiseIntensity * easedT * 0.06; // Moderate: 6%
-        
-        // Time-based curl for dynamic smoke-like motion - use scatter time for consistency
-        float curlHash = speedHash1; // Use smooth interpolated hash
-        float scatterTime = g_tScatter + easedT * uScatterDuration; // Current time in scatter phase
-        float curlStrength = sin(scatterTime * 0.4 + curlHash * 6.28) * 0.1 * easedT; // Moderate: 10%
-        vec3 curlDir = cross(scatterDir, normalize(turbDir1));
-        vec3 curl = normalize(curlDir) * curlStrength;
-        
-        center = originalCenter + scatterDir * scatterAmount + streamTurbulence + jitter + curl;
+        vec3 totalOffset = scatterDir * scatterAmount;
+        // 硬性限制：总位移长度绝不超出 uMaxScatterRadius（防止 normalize 或精度问题）
+        float totalLen = length(totalOffset);
+        float maxLen = max(uMaxScatterRadius, 0.0001); // 避免除零
+        if (totalLen > maxLen) {
+            totalOffset = totalOffset * (maxLen / totalLen);
+        }
+        // 烟雾感：切平面内低频漂移，每点相位不同
+        float smokeT1 = uTime * 0.45 + randomSeed * 6.28318;
+        float smokeT2 = uTime * 0.6 + randomSeed2 * 6.28318;
+        vec3 smokeDrift = (tangent1 * sin(smokeT1) + tangent2 * cos(smokeT2)) * 0.04 * uSmokeDrift;
+        center = originalCenter + totalOffset + smokeDrift;
     } else if (g_phase == 2.0) {
         // Phase 2.0: Recovering phase: CLEAN and DIRECT return to original position
         float t = (uTime - g_tRecover) / uRecoverDuration; // 0 to 1
@@ -303,126 +207,71 @@ void modifyCenter(inout vec3 center) {
         float scatterEndTime = min(uTime, g_tRecover);
         float scatterEndT = (scatterEndTime - g_tScatter) / uScatterDuration;
         scatterEndT = clamp(scatterEndT, 0.0, 1.0);
-        
-        // Calculate base easedT at scatter end using the exact same formula as scatter phase
-        float baseEasedT = scatterEndT < 0.5 
-            ? 4.0 * scatterEndT * scatterEndT * scatterEndT  // Ease-in cubic (slow start)
-            : 1.0 - pow(-2.0 * scatterEndT + 2.0, 3.0) / 2.0; // Ease-out cubic (slow end)
+        // 与 scatter 一致：smoothstep 缓动
+        float baseEasedT = scatterEndT * scatterEndT * (3.0 - 2.0 * scatterEndT);
         baseEasedT = clamp(baseEasedT, 0.0, 1.0);
         
-        // Reconstruct smooth stream-based scatter direction (same as scatter phase)
-        float noiseScale1 = 1.2;  // Match scatter phase
-        float noiseScale2 = 3.5;
-        float noiseScale3 = 12.0;
-        vec3 noisePos1 = (originalCenter - uCenter) * noiseScale1;
-        vec3 noisePos2 = (originalCenter - uCenter) * noiseScale2;
-        vec3 noisePos3 = (originalCenter - uCenter) * noiseScale3;
-        
-        // Reconstruct trilinear interpolation
-        vec3 i1 = floor(noisePos1);
-        vec3 f1 = fract(noisePos1);
-        f1 = f1 * f1 * (3.0 - 2.0 * f1);
-        
-        vec3 d000 = randomDir(i1);
-        vec3 d100 = randomDir(i1 + vec3(1.0, 0.0, 0.0));
-        vec3 d010 = randomDir(i1 + vec3(0.0, 1.0, 0.0));
-        vec3 d110 = randomDir(i1 + vec3(1.0, 1.0, 0.0));
-        vec3 d001 = randomDir(i1 + vec3(0.0, 0.0, 1.0));
-        vec3 d101 = randomDir(i1 + vec3(1.0, 0.0, 1.0));
-        vec3 d011 = randomDir(i1 + vec3(0.0, 1.0, 1.0));
-        vec3 d111 = randomDir(i1 + vec3(1.0, 1.0, 1.0));
-        
-        vec3 streamDir1 = mix(
-            mix(mix(d000, d100, f1.x), mix(d010, d110, f1.x), f1.y),
-            mix(mix(d001, d101, f1.x), mix(d011, d111, f1.x), f1.y),
-            f1.z
+        // Reconstruct contour-based scatter direction（与 scatter 阶段一致：切线为主 + 径向 + 微扰）
+        vec3 toSplatRec = originalCenter - uCenter;
+        float distFromCenterRec = length(toSplatRec);
+        vec3 radialDirRec = distFromCenterRec > 0.001 ? normalize(toSplatRec) : vec3(0.0, 1.0, 0.0);
+        vec3 tangent1Rec = cross(radialDirRec, vec3(0.0, 1.0, 0.0));
+        if (length(tangent1Rec) < 0.01) tangent1Rec = cross(radialDirRec, vec3(1.0, 0.0, 0.0));
+        tangent1Rec = normalize(tangent1Rec);
+        vec3 tangent2Rec = normalize(cross(radialDirRec, tangent1Rec));
+        float noiseScale1R = 1.2;
+        float noiseScale2R = 3.5;
+        float noiseScale3R = 12.0;
+        vec3 noisePos1R = (originalCenter - uCenter) * noiseScale1R;
+        vec3 noisePos2R = (originalCenter - uCenter) * noiseScale2R;
+        vec3 noisePos3R = (originalCenter - uCenter) * noiseScale3R;
+        vec3 i1R = floor(noisePos1R);
+        vec3 f1R = fract(noisePos1R);
+        f1R = f1R * f1R * (3.0 - 2.0 * f1R);
+        float h000R = hash(i1R);
+        float h100R = hash(i1R + vec3(1.0, 0.0, 0.0));
+        float h010R = hash(i1R + vec3(0.0, 1.0, 0.0));
+        float h110R = hash(i1R + vec3(1.0, 1.0, 0.0));
+        float h001R = hash(i1R + vec3(0.0, 0.0, 1.0));
+        float h101R = hash(i1R + vec3(1.0, 0.0, 1.0));
+        float h011R = hash(i1R + vec3(0.0, 1.0, 1.0));
+        float h111R = hash(i1R + vec3(1.0, 1.0, 1.0));
+        float angleHashRec = mix(
+            mix(mix(h000R, h100R, f1R.x), mix(h010R, h110R, f1R.x), f1R.y),
+            mix(mix(h001R, h101R, f1R.x), mix(h011R, h111R, f1R.x), f1R.y),
+            f1R.z
         );
+        vec3 frac2R = fract(noisePos2R);
+        vec3 frac3R = fract(noisePos3R);
+        float smooth2R = smoothstep(0.0, 1.0, frac2R.x) * smoothstep(0.0, 1.0, frac2R.y) * smoothstep(0.0, 1.0, frac2R.z);
+        float smooth3R = smoothstep(0.0, 1.0, frac3R.x) * smoothstep(0.0, 1.0, frac3R.y) * smoothstep(0.0, 1.0, frac3R.z);
+        // 与散射阶段一致：位置为主 + 小幅每点抖动
+        float angleRec = (angleHashRec * 6.28318 + (randomSeed - 0.5) * 0.7 + hash(floor(noisePos2R)) * smooth2R * 1.2 + hash(floor(noisePos3R)) * smooth3R * 0.6) * uTangentTwist;
+        vec3 tangentDirRec = cos(angleRec) * tangent1Rec + sin(angleRec) * tangent2Rec;
+        vec3 perParticleDirRec = randomDir(originalCenter);
+        // 与散射阶段保持一致：大幅减少随机扰动
+        vec3 perParticleVariationRec = (tangent1Rec * (perParticleDirRec.x * 0.3) + tangent2Rec * (perParticleDirRec.y * 0.3)) * (0.02 + randomSeed * 0.02);
+        // 与散射阶段保持一致：使用 uRadialExpand 控制径向外扩（基础值 0.3）
+        vec3 scatterDir = normalize(tangentDirRec + radialDirRec * (0.3 * uRadialExpand) + perParticleVariationRec);
         
-        vec3 streamDir2 = randomDir(floor(noisePos2));
-        vec3 streamDir3 = randomDir(floor(noisePos3));
-        vec3 frac2 = fract(noisePos2);
-        vec3 frac3 = fract(noisePos3);
-        float smooth2 = smoothstep(0.0, 1.0, frac2.x) * smoothstep(0.0, 1.0, frac2.y) * smoothstep(0.0, 1.0, frac2.z);
-        float smooth3 = smoothstep(0.0, 1.0, frac3.x) * smoothstep(0.0, 1.0, frac3.y) * smoothstep(0.0, 1.0, frac3.z);
+        float finalEasedT = baseEasedT;
         
-        vec3 toSplat = originalCenter - uCenter;
-        float distFromCenter = length(toSplat);
-        vec3 radialDir = distFromCenter > 0.001 ? normalize(toSplat) : vec3(0.0, 1.0, 0.0);
-        // Apply direction sign for bidirectional spray
-        float directionSeed = hash(originalCenter + vec3(999.0, 888.0, 777.0));
-        float directionSign = (directionSeed > 0.5) ? 1.0 : -1.0;
-        radialDir *= directionSign;
-        vec3 streamDir = normalize(radialDir * 0.4 + streamDir1 * 1.2 + streamDir2 * 0.3 * smooth2 + streamDir3 * 0.15 * smooth3);
-        vec3 perParticleDir = randomDir(originalCenter);
-        vec3 perParticleVariation = perParticleDir * (0.12 + randomSeed * 0.18);
-        vec3 scatterDir = normalize(streamDir + perParticleVariation);
+        // 与 scatter 一致：由 uMaxScatterRadius 限制
+        float scatterAmount = finalEasedT * uMaxScatterRadius * scatterFactor;
+        scatterAmount = min(scatterAmount, uMaxScatterRadius);
         
-        // Reconstruct scatter phase perturbations (at full strength, easedT = 1.0 equivalent)
-        vec3 turbI1 = floor(noisePos1 + vec3(50.0, 0.0, 0.0));
-        vec3 turbF1 = fract(noisePos1 + vec3(50.0, 0.0, 0.0));
-        turbF1 = turbF1 * turbF1 * (3.0 - 2.0 * turbF1);
+        vec3 totalOffsetRec = scatterDir * scatterAmount;
+        float totalLenRec = length(totalOffsetRec);
+        float maxLenRec = max(uMaxScatterRadius, 0.0001);
+        if (totalLenRec > maxLenRec) {
+            totalOffsetRec = totalOffsetRec * (maxLenRec / totalLenRec);
+        }
+        // 与散射阶段一致的烟雾漂移（用 scatterEndTime 保证衔接）
+        float smokeT1R = scatterEndTime * 0.45 + randomSeed * 6.28318;
+        float smokeT2R = scatterEndTime * 0.6 + randomSeed2 * 6.28318;
+        vec3 smokeDriftRec = (tangent1Rec * sin(smokeT1R) + tangent2Rec * cos(smokeT2R)) * 0.04 * uSmokeDrift;
+        vec3 scatterPos = originalCenter + totalOffsetRec + smokeDriftRec;
         
-        vec3 t000 = randomDir(turbI1);
-        vec3 t100 = randomDir(turbI1 + vec3(1.0, 0.0, 0.0));
-        vec3 t010 = randomDir(turbI1 + vec3(0.0, 1.0, 0.0));
-        vec3 t110 = randomDir(turbI1 + vec3(1.0, 1.0, 0.0));
-        vec3 t001 = randomDir(turbI1 + vec3(0.0, 0.0, 1.0));
-        vec3 t101 = randomDir(turbI1 + vec3(1.0, 0.0, 1.0));
-        vec3 t011 = randomDir(turbI1 + vec3(0.0, 1.0, 1.0));
-        vec3 t111 = randomDir(turbI1 + vec3(1.0, 1.0, 1.0));
-        
-        vec3 turbDir1 = normalize(mix(
-            mix(mix(t000, t100, turbF1.x), mix(t010, t110, turbF1.x), turbF1.y),
-            mix(mix(t001, t101, turbF1.x), mix(t011, t111, turbF1.x), turbF1.y),
-            turbF1.z
-        ));
-        
-        vec3 turbDir2 = randomDir(floor(noisePos2 + vec3(100.0, 0.0, 0.0)));
-        
-        // Reconstruct speed variation to get exact easedT at scatter end
-        // Use the SAME noise positions and interpolation as scatter phase
-        // CRITICAL: Must use the same i1 and f1 from above (already calculated for scatterDir)
-        float s000 = hash(i1);
-        float s100 = hash(i1 + vec3(1.0, 0.0, 0.0));
-        float s010 = hash(i1 + vec3(0.0, 1.0, 0.0));
-        float s110 = hash(i1 + vec3(1.0, 1.0, 0.0));
-        float s001 = hash(i1 + vec3(0.0, 0.0, 1.0));
-        float s101 = hash(i1 + vec3(1.0, 0.0, 1.0));
-        float s011 = hash(i1 + vec3(0.0, 1.0, 1.0));
-        float s111 = hash(i1 + vec3(1.0, 1.0, 1.0));
-        
-        float speedHash1 = mix(
-            mix(mix(s000, s100, f1.x), mix(s010, s110, f1.x), f1.y),
-            mix(mix(s001, s101, f1.x), mix(s011, s111, f1.x), f1.y),
-            f1.z
-        );
-        
-        float speedHash2 = hash(floor(noisePos2));
-        float speedVariation = 0.95 + speedHash1 * 0.08 + speedHash2 * smooth2 * 0.04;
-        float perParticleSpeed = 0.96 + randomSeed * 0.08;
-        float finalEasedT = clamp(baseEasedT * speedVariation * perParticleSpeed, 0.0, 1.0);
-        
-        // Reconstruct scatter amount with correct finalEasedT
-        float scatterAmount = finalEasedT * uScatterDistance * scatterFactor;
-        
-        // Reconstruct turbulence and jitter with correct finalEasedT
-        vec3 streamTurbulence = normalize(turbDir1 * 0.7 + turbDir2 * 0.3 * smooth2) * uNoiseIntensity * finalEasedT * 0.1;
-        vec3 jitter = randomDir(originalCenter + vec3(100.0, 0.0, 0.0)) * uNoiseIntensity * finalEasedT * 0.06;
-        
-        // Reconstruct curl (at scatter phase end time with correct easedT)
-        // CRITICAL: Use the same scatterEndTime we calculated above (min(uTime, g_tRecover))
-        // This matches scatter phase: scatterTime = g_tScatter + easedT * uScatterDuration
-        // But we use scatterEndTime directly to ensure perfect continuity
-        float curlHash = speedHash1;
-        // Use scatterEndTime (already calculated above) instead of recalculating
-        float curlStrength = sin(scatterEndTime * 0.4 + curlHash * 6.28) * 0.1 * finalEasedT;
-        vec3 curlDir = cross(scatterDir, normalize(turbDir1));
-        vec3 curl = normalize(curlDir) * curlStrength;
-        
-        // Calculate exact scattered position
-        vec3 scatterPos = originalCenter + scatterDir * scatterAmount + streamTurbulence + jitter + curl;
-        
-        // Direct interpolation from scattered position to original
         center = mix(scatterPos, originalCenter, easedT);
     }
     // Phase 0: before scatter - no modification
@@ -464,8 +313,28 @@ void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA,
 }
 
 void modifyColor(vec3 center, inout vec4 color) {
-    // Temporarily disabled: all alpha/transparency modifications removed
-    // No color modifications are applied
+    initShared(center);
+    if (g_phase != 1.0) return;
+    // 白金色辉光，一闪一闪，强度较弱（参照 growth-wave 金环 sparkle，减弱）
+    vec3 toSplat = center - uCenter;
+    float distFromCenter = length(toSplat);
+    float normalizedDist = distFromCenter / max(uEndRadius, 1.0);
+    float distanceFade = 1.0 - smoothstep(0.0, 0.9, normalizedDist);
+    float h1 = hash(center);
+    float h2 = hash(center + vec3(10.0, 20.0, 30.0));
+    float h3 = hash(center + vec3(50.0, 100.0, 150.0));
+    float t1 = uTime * 8.0 + h1 * 6.28318;
+    float t2 = uTime * 13.0 + h2 * 6.28318;
+    float t3 = uTime * 18.0 + h3 * 6.28318;
+    float sparkle = 0.5 + 0.25 * sin(t1) + 0.2 * sin(t2) + 0.15 * sin(t3);
+    sparkle = clamp(sparkle, 0.4, 1.0);
+    vec3 goldWhite = vec3(0.98, 0.95, 0.88);
+    color.rgb += goldWhite * sparkle * distanceFade * 0.18;
+    color.rgb *= (1.0 + sparkle * distanceFade * 0.08);
+    // 一点点蓝色辉光（散射阶段）
+    vec3 blueGlow = vec3(0.5, 0.7, 1.0);
+    color.rgb += blueGlow * distanceFade * 0.25;
+    color.rgb = clamp(color.rgb, 0.0, 2.0);
 }
 `;
 
@@ -484,6 +353,10 @@ uniform uMaxScatterRadius: f32;
 uniform uWaveSpeed: f32;
 uniform uWaveSpeedDistScale: f32;   // 随距离增大波速的系数，>0 时远处点更早进入散射，缩短整体 Phase 0
 uniform uPointSize: f32;   // 散射阶段点云模式固定点大小（与 gsplat-growth-wave 聚拢生长一致）
+uniform uScatterIntensity: f32;   // 统一控制点云扩散程度的系数（0~1），值越大扩散越明显
+uniform uTangentTwist: f32;   // 统一控制切线扭曲程度的系数（0~1），值越大扭曲越明显
+uniform uRadialExpand: f32;   // 统一控制径向外扩程度的系数（0~1），值越大沿法线方向外扩越明显
+uniform uSmokeDrift: f32;     // 烟雾感：切平面内随时间轻柔漂移的强度（0~1）
 
 // Hash function for per-splat randomization
 fn hash(p: vec3f) -> f32 {
@@ -575,77 +448,23 @@ fn modifyCenter(center: ptr<function, vec3f>) {
     let randomSeed2 = hash(originalCenter + vec3f(10.0, 20.0, 30.0));
     let randomSeed3 = hash(originalCenter + vec3f(50.0, 100.0, 150.0));
     
-    // Create SMOOTH stream-based direction using multi-frequency noise for natural smoke trails
-    // Use smooth noise instead of hard cell boundaries to avoid blocky patterns
+    // Contour-following: radial from effect center（用于切平面），贴合原轮廓
     let toSplat = originalCenter - uniform.uCenter;
     let distFromCenter = length(toSplat);
     var radialDir = select(vec3f(0.0, 1.0, 0.0), normalize(toSplat), distFromCenter > 0.001);
-    
-    // Determine if this particle sprays outward or inward (50/50 split)
-    let directionSeed = hash(originalCenter + vec3f(999.0, 888.0, 777.0));
-    let directionSign = select(-1.0, 1.0, directionSeed > 0.5); // 1.0 = outward, -1.0 = inward
-    
-    // Apply direction sign to create bidirectional spray effect (inward and outward)
-    radialDir = radialDir * directionSign;
-    
-    // Multi-frequency noise for smooth, elongated smoke trails
-    // Use LARGER scales for LONGER, more elongated streams (not blocky)
-    let noiseScale1 = 1.2;  // Large-scale stream patterns (larger = longer streams)
-    let noiseScale2 = 3.5;  // Medium-scale variations
-    let noiseScale3 = 12.0;  // Fine-scale details
-    
+    var tangent1 = cross(radialDir, vec3f(0.0, 1.0, 0.0));
+    if (length(tangent1) < 0.01) { tangent1 = cross(radialDir, vec3f(1.0, 0.0, 0.0)); }
+    tangent1 = normalize(tangent1);
+    let tangent2 = normalize(cross(radialDir, tangent1));
+    let noiseScale1 = 1.2;
+    let noiseScale2 = 3.5;
+    let noiseScale3 = 12.0;
     let noisePos1 = (originalCenter - uniform.uCenter) * noiseScale1;
     let noisePos2 = (originalCenter - uniform.uCenter) * noiseScale2;
     let noisePos3 = (originalCenter - uniform.uCenter) * noiseScale3;
-    
-    // Use trilinear interpolation for smooth, continuous stream directions
-    // This creates elongated trails instead of blocky patterns
     let i1 = floor(noisePos1);
     var f1 = fract(noisePos1);
-    f1 = f1 * f1 * (3.0 - 2.0 * f1); // Smoothstep for smoother interpolation
-    
-    // Sample 8 corners for trilinear interpolation
-    let d000 = randomDir(i1);
-    let d100 = randomDir(i1 + vec3f(1.0, 0.0, 0.0));
-    let d010 = randomDir(i1 + vec3f(0.0, 1.0, 0.0));
-    let d110 = randomDir(i1 + vec3f(1.0, 1.0, 0.0));
-    let d001 = randomDir(i1 + vec3f(0.0, 0.0, 1.0));
-    let d101 = randomDir(i1 + vec3f(1.0, 0.0, 1.0));
-    let d011 = randomDir(i1 + vec3f(0.0, 1.0, 1.0));
-    let d111 = randomDir(i1 + vec3f(1.0, 1.0, 1.0));
-    
-    // Trilinear interpolation for smooth stream direction
-    let streamDir1 = normalize(mix(
-        mix(mix(d000, d100, f1.x), mix(d010, d110, f1.x), f1.y),
-        mix(mix(d001, d101, f1.x), mix(d011, d111, f1.x), f1.y),
-        f1.z
-    ));
-    
-    // Medium and fine scale variations (simpler interpolation)
-    let streamDir2 = randomDir(floor(noisePos2));
-    let streamDir3 = randomDir(floor(noisePos3));
-    let frac2 = fract(noisePos2);
-    let frac3 = fract(noisePos3);
-    let smooth2 = smoothstep(0.0, 1.0, frac2.x) * smoothstep(0.0, 1.0, frac2.y) * smoothstep(0.0, 1.0, frac2.z);
-    let smooth3 = smoothstep(0.0, 1.0, frac3.x) * smoothstep(0.0, 1.0, frac3.y) * smoothstep(0.0, 1.0, frac3.z);
-    
-    // Blend directions - balanced for elongated smoke trails
-    let streamDir = normalize(
-        radialDir * 0.4 +                    // Moderate radial: 20%
-        streamDir1 * 1.2 +                   // Main stream: 60% (smooth, elongated)
-        streamDir2 * 0.3 * smooth2 +          // Medium variation: 15% (smooth)
-        streamDir3 * 0.15 * smooth3            // Fine detail: 7.5% (smooth)
-    );
-    
-    // Moderate per-particle variation - creates natural spread in elongated streams
-    let perParticleDir = randomDir(originalCenter);
-    let perParticleVariation = perParticleDir * (0.12 + randomSeed * 0.18); // 12-30% variation (natural spread)
-    
-    // Final scatter direction: smooth elongated stream + natural per-particle spread
-    let scatterDir = normalize(streamDir + perParticleVariation);
-    
-    // Smooth distance variation using trilinear interpolation
-    // Use hash interpolation for smooth distance variation
+    f1 = f1 * f1 * (3.0 - 2.0 * f1);
     let h000 = hash(i1);
     let h100 = hash(i1 + vec3f(1.0, 0.0, 0.0));
     let h010 = hash(i1 + vec3f(0.0, 1.0, 0.0));
@@ -654,106 +473,57 @@ fn modifyCenter(center: ptr<function, vec3f>) {
     let h101 = hash(i1 + vec3f(1.0, 0.0, 1.0));
     let h011 = hash(i1 + vec3f(0.0, 1.0, 1.0));
     let h111 = hash(i1 + vec3f(1.0, 1.0, 1.0));
+    let angleHash = mix(
+        mix(mix(h000, h100, f1.x), mix(h010, h110, f1.x), f1.y),
+        mix(mix(h001, h101, f1.x), mix(h011, h111, f1.x), f1.y),
+        f1.z
+    );
+    let frac2 = fract(noisePos2);
+    let frac3 = fract(noisePos3);
+    let smooth2 = smoothstep(0.0, 1.0, frac2.x) * smoothstep(0.0, 1.0, frac2.y) * smoothstep(0.0, 1.0, frac2.z);
+    let smooth3 = smoothstep(0.0, 1.0, frac3.x) * smoothstep(0.0, 1.0, frac3.y) * smoothstep(0.0, 1.0, frac3.z);
+    // 折中：位置角度为主保留轮廓，小幅每点抖动(±0.35 rad)打破齐刷刷
+    let angle = (angleHash * 6.28318 + (randomSeed - 0.5) * 0.7 + hash(floor(noisePos2)) * smooth2 * 1.2 + hash(floor(noisePos3)) * smooth3 * 0.6) * uniform.uTangentTwist;
+    let tangentDir = cos(angle) * tangent1 + sin(angle) * tangent2;
+    let perParticleDir = randomDir(originalCenter);
+    // 大幅减少随机扰动（从0.06~0.14降至0.02~0.04），让点云更贴合原轮廓
+    let perParticleVariation = (tangent1 * (perParticleDir.x * 0.3) + tangent2 * (perParticleDir.y * 0.3)) * (0.02 + randomSeed * 0.02);
+    // 使用 uRadialExpand 控制径向外扩：基础值 0.3（增大10倍以获得明显效果），由 uRadialExpand 缩放（0~1）
+    var scatterDir = normalize(tangentDir + radialDir * (0.3 * uniform.uRadialExpand) + perParticleVariation);
     
     let streamDist1 = mix(
         mix(mix(h000, h100, f1.x), mix(h010, h110, f1.x), f1.y),
         mix(mix(h001, h101, f1.x), mix(h011, h111, f1.x), f1.y),
         f1.z
     );
-    
     let streamDist2 = hash(floor(noisePos2));
-    // Smooth distance variation - creates elongated trails
-    let streamScatterBase = 0.65 + streamDist1 * 0.5 + streamDist2 * smooth2 * 0.25; // 0.65 to 1.4 (smooth)
-    let perParticleVariationDist = 0.75 + randomSeed * 0.5; // Per-particle: 0.75 to 1.25 (natural spread)
-    var scatterFactor = streamScatterBase * perParticleVariationDist; // Range: ~0.49 to ~1.75
-    scatterFactor = max(0.4, scatterFactor); // Ensure minimum movement
+    // 使用 uScatterIntensity 统一控制扩散程度：基础值 + 噪声变化
+    let streamScatterBase = 0.08 + streamDist1 * 0.12 + streamDist2 * smooth2 * 0.05;
+    let perParticleVariationDist = 0.8 + randomSeed * 0.4;
+    // scatterFactor 由 uScatterIntensity 缩放：0.06~0.25 的范围乘以 uScatterIntensity
+    var scatterFactor = clamp(streamScatterBase * perParticleVariationDist * uniform.uScatterIntensity, 0.06 * uniform.uScatterIntensity, 0.25 * uniform.uScatterIntensity);
     
     if (g_phase == 1.0) {
-        // Scattering phase: smooth stream-based dust expansion like natural smoke trails
-        let t = clamp((uniform.uTime - g_tScatter) / uniform.uScatterDuration, 0.0, 1.0); // 0 to 1
+        // 散射阶段：进度 0~1，不再乘 speed variation，确保位移严格受 uMaxScatterRadius 限制（与 GLSL 一致）
+        let t = clamp((uniform.uTime - g_tScatter) / uniform.uScatterDuration, 0.0, 1.0);
+        var easedT = t * t * (3.0 - 2.0 * t); // smoothstep，严格 [0,1]
+        easedT = clamp(easedT, 0.0, 1.0);
         
-        // Slower, more graceful easing - ease-in-out cubic for smooth start and end
-        var easedT = select(
-            1.0 - pow(-2.0 * t + 2.0, 3.0) / 2.0,  // Ease-out cubic (slow end)
-            4.0 * t * t * t,                        // Ease-in cubic (slow start)
-            t < 0.5
-        );
-        easedT = clamp(easedT, 0.0, 1.0); // Ensure easedT is in valid range
+        // 位移量：easedT * scatterFactor 恒 <= 1，故 scatterAmount <= uMaxScatterRadius
+        var scatterAmount = easedT * uniform.uMaxScatterRadius * scatterFactor;
+        scatterAmount = min(scatterAmount, uniform.uMaxScatterRadius);
         
-        // Smooth speed variation using trilinear interpolation
-        let noiseScale1 = 1.2;  // Match the scale from above
-        let noiseScale2 = 3.5;
-        let noisePos1 = (originalCenter - uniform.uCenter) * noiseScale1;
-        let noisePos2 = (originalCenter - uniform.uCenter) * noiseScale2;
-        let i1 = floor(noisePos1);
-        var f1 = fract(noisePos1);
-        f1 = f1 * f1 * (3.0 - 2.0 * f1); // Smoothstep
-        
-        // Trilinear interpolation for smooth speed variation
-        let s000 = hash(i1);
-        let s100 = hash(i1 + vec3f(1.0, 0.0, 0.0));
-        let s010 = hash(i1 + vec3f(0.0, 1.0, 0.0));
-        let s110 = hash(i1 + vec3f(1.0, 1.0, 0.0));
-        let s001 = hash(i1 + vec3f(0.0, 0.0, 1.0));
-        let s101 = hash(i1 + vec3f(1.0, 0.0, 1.0));
-        let s011 = hash(i1 + vec3f(0.0, 1.0, 1.0));
-        let s111 = hash(i1 + vec3f(1.0, 1.0, 1.0));
-        
-        let speedHash1 = mix(
-            mix(mix(s000, s100, f1.x), mix(s010, s110, f1.x), f1.y),
-            mix(mix(s001, s101, f1.x), mix(s011, s111, f1.x), f1.y),
-            f1.z
-        );
-        
-        let frac2 = fract(noisePos2);
-        let smooth2 = smoothstep(0.0, 1.0, frac2.x) * smoothstep(0.0, 1.0, frac2.y) * smoothstep(0.0, 1.0, frac2.z);
-        let speedHash2 = hash(floor(noisePos2));
-        
-        // Slower, more uniform speed variation - creates gentle elongated trails
-        let speedVariation = 0.95 + speedHash1 * 0.08 + speedHash2 * smooth2 * 0.04; // 0.95 to 1.07 (more uniform, reduced variation)
-        let perParticleSpeed = 0.96 + randomSeed * 0.08; // Per-particle: 0.96 to 1.04 (more uniform, reduced variation)
-        easedT *= speedVariation * perParticleSpeed;
-        easedT = clamp(easedT, 0.0, 1.0); // CRITICAL: Keep within [0,1] to prevent flickering
-        
-        let scatterAmount = easedT * uniform.uScatterDistance * scatterFactor;
-        
-        // No limit on scatter distance - allow long, thin water mist/dust streams
-        // Particles can scatter far from their original position for elongated effect
-        
-        // Smooth turbulence using trilinear interpolation
-        let turbI1 = floor(noisePos1 + vec3f(50.0, 0.0, 0.0));
-        var turbF1 = fract(noisePos1 + vec3f(50.0, 0.0, 0.0));
-        turbF1 = turbF1 * turbF1 * (3.0 - 2.0 * turbF1);
-        
-        let t000 = randomDir(turbI1);
-        let t100 = randomDir(turbI1 + vec3f(1.0, 0.0, 0.0));
-        let t010 = randomDir(turbI1 + vec3f(0.0, 1.0, 0.0));
-        let t110 = randomDir(turbI1 + vec3f(1.0, 1.0, 0.0));
-        let t001 = randomDir(turbI1 + vec3f(0.0, 0.0, 1.0));
-        let t101 = randomDir(turbI1 + vec3f(1.0, 0.0, 1.0));
-        let t011 = randomDir(turbI1 + vec3f(0.0, 1.0, 1.0));
-        let t111 = randomDir(turbI1 + vec3f(1.0, 1.0, 1.0));
-        
-        let turbDir1 = normalize(mix(
-            mix(mix(t000, t100, turbF1.x), mix(t010, t110, turbF1.x), turbF1.y),
-            mix(mix(t001, t101, turbF1.x), mix(t011, t111, turbF1.x), turbF1.y),
-            turbF1.z
-        ));
-        
-        let turbDir2 = randomDir(floor(noisePos2 + vec3f(100.0, 0.0, 0.0)));
-        let streamTurbulence = normalize(turbDir1 * 0.7 + turbDir2 * 0.3 * smooth2) * uniform.uNoiseIntensity * easedT * 0.1; // Moderate: 10%
-        
-        // Natural jitter for organic smoke feel
-        let jitter = randomDir(originalCenter + vec3f(100.0, 0.0, 0.0)) * uniform.uNoiseIntensity * easedT * 0.06; // Moderate: 6%
-        
-        // Time-based curl for dynamic smoke-like motion - use scatter time for consistency
-        let curlHash = speedHash1; // Use smooth interpolated hash
-        let scatterTime = g_tScatter + easedT * uniform.uScatterDuration; // Current time in scatter phase
-        let curlStrength = sin(scatterTime * 0.4 + curlHash * 6.28) * 0.1 * easedT; // Moderate: 10%
-        let curlDir = cross(scatterDir, normalize(turbDir1));
-        let curl = normalize(curlDir) * curlStrength;
-        
-        *center = originalCenter + scatterDir * scatterAmount + streamTurbulence + jitter + curl;
+        var totalOffset = scatterDir * scatterAmount;
+        let totalLen = length(totalOffset);
+        let maxLen = max(uniform.uMaxScatterRadius, 0.0001);
+        if (totalLen > maxLen) {
+            totalOffset = totalOffset * (maxLen / totalLen);
+        }
+        // 烟雾感：切平面内低频漂移
+        let smokeT1 = uniform.uTime * 0.45 + randomSeed * 6.28318;
+        let smokeT2 = uniform.uTime * 0.6 + randomSeed2 * 6.28318;
+        let smokeDrift = (tangent1 * sin(smokeT1) + tangent2 * cos(smokeT2)) * 0.04 * uniform.uSmokeDrift;
+        *center = originalCenter + totalOffset + smokeDrift;
     } else if (g_phase == 2.0) {
         // Phase 2.0: Recovering phase: CLEAN and DIRECT return to original position
         let t = clamp((uniform.uTime - g_tRecover) / uniform.uRecoverDuration, 0.0, 1.0); // 0 to 1
@@ -770,124 +540,71 @@ fn modifyCenter(center: ptr<function, vec3f>) {
         scatterEndT = clamp(scatterEndT, 0.0, 1.0);
         
         // Calculate base easedT at scatter end using the exact same formula as scatter phase
-        let baseEasedT = select(
-            1.0 - pow(-2.0 * scatterEndT + 2.0, 3.0) / 2.0,  // Ease-out cubic (slow end)
-            4.0 * scatterEndT * scatterEndT * scatterEndT,    // Ease-in cubic (slow start)
-            scatterEndT < 0.5
-        );
+        let baseEasedT = scatterEndT * scatterEndT * (3.0 - 2.0 * scatterEndT); // smoothstep，与 scatter 一致
         baseEasedT = clamp(baseEasedT, 0.0, 1.0);
         
-        // Reconstruct smooth stream-based scatter direction (same as scatter phase)
-        let noiseScale1 = 1.2;  // Match scatter phase
-        let noiseScale2 = 3.5;
-        let noiseScale3 = 12.0;
-        let noisePos1 = (originalCenter - uniform.uCenter) * noiseScale1;
-        let noisePos2 = (originalCenter - uniform.uCenter) * noiseScale2;
-        let noisePos3 = (originalCenter - uniform.uCenter) * noiseScale3;
-        
-        // Reconstruct trilinear interpolation
-        let i1 = floor(noisePos1);
-        var f1 = fract(noisePos1);
-        f1 = f1 * f1 * (3.0 - 2.0 * f1);
-        
-        let d000 = randomDir(i1);
-        let d100 = randomDir(i1 + vec3f(1.0, 0.0, 0.0));
-        let d010 = randomDir(i1 + vec3f(0.0, 1.0, 0.0));
-        let d110 = randomDir(i1 + vec3f(1.0, 1.0, 0.0));
-        let d001 = randomDir(i1 + vec3f(0.0, 0.0, 1.0));
-        let d101 = randomDir(i1 + vec3f(1.0, 0.0, 1.0));
-        let d011 = randomDir(i1 + vec3f(0.0, 1.0, 1.0));
-        let d111 = randomDir(i1 + vec3f(1.0, 1.0, 1.0));
-        
-        let streamDir1 = normalize(mix(
-            mix(mix(d000, d100, f1.x), mix(d010, d110, f1.x), f1.y),
-            mix(mix(d001, d101, f1.x), mix(d011, d111, f1.x), f1.y),
-            f1.z
-        ));
-        
-        let streamDir2 = randomDir(floor(noisePos2));
-        let streamDir3 = randomDir(floor(noisePos3));
-        let frac2 = fract(noisePos2);
-        let frac3 = fract(noisePos3);
-        let smooth2 = smoothstep(0.0, 1.0, frac2.x) * smoothstep(0.0, 1.0, frac2.y) * smoothstep(0.0, 1.0, frac2.z);
-        let smooth3 = smoothstep(0.0, 1.0, frac3.x) * smoothstep(0.0, 1.0, frac3.y) * smoothstep(0.0, 1.0, frac3.z);
-        
-        let toSplat = originalCenter - uniform.uCenter;
-        let distFromCenter = length(toSplat);
-        var radialDir = select(vec3f(0.0, 1.0, 0.0), normalize(toSplat), distFromCenter > 0.001);
-        // Apply direction sign for bidirectional spray
-        let directionSeed = hash(originalCenter + vec3f(999.0, 888.0, 777.0));
-        let directionSign = select(-1.0, 1.0, directionSeed > 0.5);
-        radialDir = radialDir * directionSign;
-        let streamDir = normalize(radialDir * 0.4 + streamDir1 * 1.2 + streamDir2 * 0.3 * smooth2 + streamDir3 * 0.15 * smooth3);
-        let perParticleDir = randomDir(originalCenter);
-        let perParticleVariation = perParticleDir * (0.12 + randomSeed * 0.18);
-        let scatterDir = normalize(streamDir + perParticleVariation);
-        
-        // Reconstruct scatter phase perturbations (at full strength, easedT = 1.0 equivalent)
-        let turbI1 = floor(noisePos1 + vec3f(50.0, 0.0, 0.0));
-        var turbF1 = fract(noisePos1 + vec3f(50.0, 0.0, 0.0));
-        turbF1 = turbF1 * turbF1 * (3.0 - 2.0 * turbF1);
-        
-        let t000 = randomDir(turbI1);
-        let t100 = randomDir(turbI1 + vec3f(1.0, 0.0, 0.0));
-        let t010 = randomDir(turbI1 + vec3f(0.0, 1.0, 0.0));
-        let t110 = randomDir(turbI1 + vec3f(1.0, 1.0, 0.0));
-        let t001 = randomDir(turbI1 + vec3f(0.0, 0.0, 1.0));
-        let t101 = randomDir(turbI1 + vec3f(1.0, 0.0, 1.0));
-        let t011 = randomDir(turbI1 + vec3f(0.0, 1.0, 1.0));
-        let t111 = randomDir(turbI1 + vec3f(1.0, 1.0, 1.0));
-        
-        let turbDir1 = normalize(mix(
-            mix(mix(t000, t100, turbF1.x), mix(t010, t110, turbF1.x), turbF1.y),
-            mix(mix(t001, t101, turbF1.x), mix(t011, t111, turbF1.x), turbF1.y),
-            turbF1.z
-        ));
-        
-        let turbDir2 = randomDir(floor(noisePos2 + vec3f(100.0, 0.0, 0.0)));
-        
-        // Reconstruct speed variation to get exact easedT at scatter end
-        let s000 = hash(i1);
-        let s100 = hash(i1 + vec3f(1.0, 0.0, 0.0));
-        let s010 = hash(i1 + vec3f(0.0, 1.0, 0.0));
-        let s110 = hash(i1 + vec3f(1.0, 1.0, 0.0));
-        let s001 = hash(i1 + vec3f(0.0, 0.0, 1.0));
-        let s101 = hash(i1 + vec3f(1.0, 0.0, 1.0));
-        let s011 = hash(i1 + vec3f(0.0, 1.0, 1.0));
-        let s111 = hash(i1 + vec3f(1.0, 1.0, 1.0));
-        
-        let speedHash1 = mix(
-            mix(mix(s000, s100, f1.x), mix(s010, s110, f1.x), f1.y),
-            mix(mix(s001, s101, f1.x), mix(s011, s111, f1.x), f1.y),
-            f1.z
+        // Reconstruct contour-based scatter direction（与 scatter 阶段一致：切线为主 + 径向 + 微扰）
+        let toSplatRec = originalCenter - uniform.uCenter;
+        let distFromCenterRec = length(toSplatRec);
+        var radialDirRec = select(vec3f(0.0, 1.0, 0.0), normalize(toSplatRec), distFromCenterRec > 0.001);
+        var tangent1Rec = cross(radialDirRec, vec3f(0.0, 1.0, 0.0));
+        if (length(tangent1Rec) < 0.01) { tangent1Rec = cross(radialDirRec, vec3f(1.0, 0.0, 0.0)); }
+        tangent1Rec = normalize(tangent1Rec);
+        let tangent2Rec = normalize(cross(radialDirRec, tangent1Rec));
+        let noiseScale1R = 1.2;
+        let noiseScale2R = 3.5;
+        let noiseScale3R = 12.0;
+        let noisePos1R = (originalCenter - uniform.uCenter) * noiseScale1R;
+        let noisePos2R = (originalCenter - uniform.uCenter) * noiseScale2R;
+        let noisePos3R = (originalCenter - uniform.uCenter) * noiseScale3R;
+        let i1R = floor(noisePos1R);
+        var f1R = fract(noisePos1R);
+        f1R = f1R * f1R * (3.0 - 2.0 * f1R);
+        let h000R = hash(i1R);
+        let h100R = hash(i1R + vec3f(1.0, 0.0, 0.0));
+        let h010R = hash(i1R + vec3f(0.0, 1.0, 0.0));
+        let h110R = hash(i1R + vec3f(1.0, 1.0, 0.0));
+        let h001R = hash(i1R + vec3f(0.0, 0.0, 1.0));
+        let h101R = hash(i1R + vec3f(1.0, 0.0, 1.0));
+        let h011R = hash(i1R + vec3f(0.0, 1.0, 1.0));
+        let h111R = hash(i1R + vec3f(1.0, 1.0, 1.0));
+        let angleHashRec = mix(
+            mix(mix(h000R, h100R, f1R.x), mix(h010R, h110R, f1R.x), f1R.y),
+            mix(mix(h001R, h101R, f1R.x), mix(h011R, h111R, f1R.x), f1R.y),
+            f1R.z
         );
+        let frac2R = fract(noisePos2R);
+        let frac3R = fract(noisePos3R);
+        let smooth2R = smoothstep(0.0, 1.0, frac2R.x) * smoothstep(0.0, 1.0, frac2R.y) * smoothstep(0.0, 1.0, frac2R.z);
+        let smooth3R = smoothstep(0.0, 1.0, frac3R.x) * smoothstep(0.0, 1.0, frac3R.y) * smoothstep(0.0, 1.0, frac3R.z);
+        // 与散射阶段一致：位置为主 + 小幅每点抖动
+        let angleRec = (angleHashRec * 6.28318 + (randomSeed - 0.5) * 0.7 + hash(floor(noisePos2R)) * smooth2R * 1.2 + hash(floor(noisePos3R)) * smooth3R * 0.6) * uniform.uTangentTwist;
+        let tangentDirRec = cos(angleRec) * tangent1Rec + sin(angleRec) * tangent2Rec;
+        let perParticleDirRec = randomDir(originalCenter);
+        // 与散射阶段保持一致：大幅减少随机扰动
+        let perParticleVariationRec = (tangent1Rec * (perParticleDirRec.x * 0.3) + tangent2Rec * (perParticleDirRec.y * 0.3)) * (0.02 + randomSeed * 0.02);
+        // 与散射阶段保持一致：使用 uRadialExpand 控制径向外扩（基础值 0.3）
+        var scatterDir = normalize(tangentDirRec + radialDirRec * (0.3 * uniform.uRadialExpand) + perParticleVariationRec);
         
-        let speedHash2 = hash(floor(noisePos2));
-        let speedVariation = 0.95 + speedHash1 * 0.08 + speedHash2 * smooth2 * 0.04;
-        let perParticleSpeed = 0.96 + randomSeed * 0.08;
-        let finalEasedT = clamp(baseEasedT * speedVariation * perParticleSpeed, 0.0, 1.0);
+        // 与 scatter 一致：直接用 baseEasedT
+        let finalEasedT = baseEasedT;
         
-        // Reconstruct scatter amount with correct finalEasedT
-        let scatterAmount = finalEasedT * uniform.uScatterDistance * scatterFactor;
+        // 与 scatter 一致：由 uMaxScatterRadius 限制
+        var scatterAmount = finalEasedT * uniform.uMaxScatterRadius * scatterFactor;
+        scatterAmount = min(scatterAmount, uniform.uMaxScatterRadius);
         
-        // Reconstruct turbulence and jitter with correct finalEasedT
-        let streamTurbulence = normalize(turbDir1 * 0.7 + turbDir2 * 0.3 * smooth2) * uniform.uNoiseIntensity * finalEasedT * 0.1;
-        let jitter = randomDir(originalCenter + vec3f(100.0, 0.0, 0.0)) * uniform.uNoiseIntensity * finalEasedT * 0.06;
+        var totalOffsetRec = scatterDir * scatterAmount;
+        let totalLenRec = length(totalOffsetRec);
+        let maxLenRec = max(uniform.uMaxScatterRadius, 0.0001);
+        if (totalLenRec > maxLenRec) {
+            totalOffsetRec = totalOffsetRec * (maxLenRec / totalLenRec);
+        }
+        // 与散射阶段一致的烟雾漂移（用 scatterEndTime 保证衔接）
+        let smokeT1R = scatterEndTime * 0.45 + randomSeed * 6.28318;
+        let smokeT2R = scatterEndTime * 0.6 + randomSeed2 * 6.28318;
+        let smokeDriftRec = (tangent1Rec * sin(smokeT1R) + tangent2Rec * cos(smokeT2R)) * 0.04 * uniform.uSmokeDrift;
+        let scatterPos = originalCenter + totalOffsetRec + smokeDriftRec;
         
-        // Reconstruct curl (at scatter phase end time with correct easedT)
-        // CRITICAL: Use the same scatterEndTime we calculated above (min(uTime, g_tRecover))
-        // This matches scatter phase: scatterTime = g_tScatter + easedT * uScatterDuration
-        // But we use scatterEndTime directly to ensure perfect continuity
-        let curlHash = speedHash1;
-        // Use scatterEndTime (already calculated above) instead of recalculating
-        let curlStrength = sin(scatterEndTime * 0.4 + curlHash * 6.28) * 0.1 * finalEasedT;
-        let curlDir = cross(scatterDir, normalize(turbDir1));
-        let curl = normalize(curlDir) * curlStrength;
-        
-        // Calculate exact scattered position
-        let scatterPos = originalCenter + scatterDir * scatterAmount + streamTurbulence + jitter + curl;
-        
-        // Direct interpolation from scattered position to original
         *center = mix(scatterPos, originalCenter, easedT);
     }
     // Phase 0: before scatter - no modification
@@ -928,8 +645,27 @@ fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<func
 }
 
 fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
-    // Temporarily disabled: all alpha/transparency modifications removed
-    // No color modifications are applied
+    initShared(center);
+    if (g_phase != 1.0) { return; }
+    let toSplat = center - uniform.uCenter;
+    let distFromCenter = length(toSplat);
+    let normalizedDist = distFromCenter / max(uniform.uEndRadius, 1.0);
+    let distanceFade = 1.0 - smoothstep(0.0, 0.9, normalizedDist);
+    let h1 = hash(center);
+    let h2 = hash(center + vec3f(10.0, 20.0, 30.0));
+    let h3 = hash(center + vec3f(50.0, 100.0, 150.0));
+    let t1 = uniform.uTime * 8.0 + h1 * 6.28318;
+    let t2 = uniform.uTime * 13.0 + h2 * 6.28318;
+    let t3 = uniform.uTime * 18.0 + h3 * 6.28318;
+    var sparkle = 0.5 + 0.25 * sin(t1) + 0.2 * sin(t2) + 0.15 * sin(t3);
+    sparkle = clamp(sparkle, 0.4, 1.0);
+    let goldWhite = vec3f(0.98, 0.95, 0.88);
+    (*color).rgb = (*color).rgb + goldWhite * sparkle * distanceFade * 0.28;
+    (*color).rgb = (*color).rgb * (1.0 + sparkle * distanceFade * 0.18);
+    // 一点点蓝色辉光（散射阶段）
+    let blueGlow = vec3f(0.5, 0.7, 1.0);
+    (*color).rgb = (*color).rgb + blueGlow * distanceFade * 0.25;
+    (*color).rgb = clamp((*color).rgb, vec3f(0.0), vec3f(3.0));
 }
 `;
 
@@ -971,18 +707,18 @@ class GsplatRevealPiecesRecover extends GsplatShaderEffect {
     scatterDirection = new Vec3(0, 1, 0);
 
     /**
-     * Maximum distance splats scatter from their original positions
+     * Base scatter distance (effective displacement is clamped by maxScatterRadius for contour diffusion)
      * @attribute
      * @range [0, 50]
      */
-    scatterDistance = 10.0; // Increased for longer, thin water mist/dust streams
+    scatterDistance = 6.0;
 
     /**
-     * Duration of scatter phase in seconds
+     * 散射阶段时长（秒）。设大一点 = 在几何表面慢慢扩散，无抻拉感
      * @attribute
-     * @range [0.1, 10]
+     * @range [0.1, 20]
      */
-    scatterDuration = 7.0; // Slow scatter for dust/liquid stream effect (total 10-15s)
+    scatterDuration = 6.0;
 
     /**
      * Duration of hold phase in seconds (splats stay at scattered position)
@@ -992,11 +728,11 @@ class GsplatRevealPiecesRecover extends GsplatShaderEffect {
     holdDuration = 0.0; // No hold phase - direct transition
 
     /**
-     * Duration of recover phase in seconds (splats return to original)
+     * 复原阶段时长（秒）
      * @attribute
-     * @range [0.5, 10]
+     * @range [0.5, 20]
      */
-    recoverDuration = 7.0; // Slow recovery for gradual convergence (total 10-15s)
+    recoverDuration = 10.0;
 
     /**
      * Intensity of random noise/perturbation
@@ -1020,11 +756,11 @@ class GsplatRevealPiecesRecover extends GsplatShaderEffect {
     endRadius = 25;
 
     /**
-     * Maximum radius particles can scatter to (small radius for dust/liquid stream effect)
+     * 散射范围阈值：每个点沿轮廓（切线为主 + 少量径向）轻微扩散的最大位移（单位与场景一致）。贴合原轮廓外扩后复原
      * @attribute
      * @range [0, 50]
      */
-    maxScatterRadius = 2.0;
+    maxScatterRadius = 5.0;
 
     /**
      * Speed of wave propagation from center (units per second)
@@ -1055,6 +791,37 @@ class GsplatRevealPiecesRecover extends GsplatShaderEffect {
      * @attribute
      */
     pointSizeScaleByScene = true;
+
+    /**
+     * 统一控制点云扩散程度的系数（0~1）。值越大扩散越明显，值越小点云越贴合原轮廓。
+     * 建议范围：0.3（非常轻微）~ 1.0（明显扩散）
+     * @attribute
+     * @range [0, 1]
+     */
+    scatterIntensity = 1.8;
+
+    /**
+     * 统一控制切线扭曲程度的系数（0~1）。值越大扭曲越明显，值越小点云移动越直线。
+     * 建议范围：0.5（温和扭曲）~ 1.0（明显扭曲）
+     * @attribute
+     * @range [0, 1]
+     */
+    tangentTwist = 0.2;
+
+    /**
+     * 统一控制径向外扩程度的系数（0~1）。值越大沿法线方向外扩越明显，0表示无径向外扩。
+     * 建议范围：0.3（轻微外扩）~ 1.0（明显外扩）
+     * @attribute
+     * @range [0, 1]
+     */
+    radialExpand = 0;
+
+    /**
+     * 烟雾感强度（0~1）：散射时切平面内随时间轻柔漂移，0 为关闭。
+     * @attribute
+     * @range [0, 1]
+     */
+    smokeDrift = 0.5;
 
     getShaderGLSL() {
         return shaderGLSL;
@@ -1091,6 +858,10 @@ class GsplatRevealPiecesRecover extends GsplatShaderEffect {
         this.setUniform('uMaxScatterRadius', this.maxScatterRadius);
         this.setUniform('uWaveSpeed', this.waveSpeed);
         this.setUniform('uWaveSpeedDistScale', this.waveSpeedDistScale);
+        this.setUniform('uScatterIntensity', this.scatterIntensity);
+        this.setUniform('uTangentTwist', this.tangentTwist);
+        this.setUniform('uRadialExpand', this.radialExpand);
+        this.setUniform('uSmokeDrift', this.smokeDrift);
         const refRadius = 25;
         const effectivePointSize = this.pointSizeScaleByScene
             ? this.pointSize * Math.max(0.5, Math.min(2, this.endRadius / refRadius))
