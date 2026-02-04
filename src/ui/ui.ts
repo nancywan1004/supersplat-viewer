@@ -127,7 +127,9 @@ const initUI = (global: Global) => {
 
     const exitFullscreen = () => {
         if (hasFullscreenAPI) {
-            document.exitFullscreen();
+            if (document.fullscreenElement) {
+                document.exitFullscreen().catch(() => {});
+            }
         } else {
             window.parent.postMessage('exitFullscreen', '*');
             state.isFullscreen = false;
