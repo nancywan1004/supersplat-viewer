@@ -12,6 +12,8 @@ import {
     Texture,
     type TextureHandler,
     PIXELFORMAT_R8,
+    ADDRESS_CLAMP_TO_EDGE,
+    FILTER_LINEAR,
     PIXELFORMAT_RGBA16F,
     PIXELFORMAT_RGBA32F,
     TONEMAP_NONE,
@@ -163,6 +165,10 @@ class Viewer {
     bloomBrushPainter: BloomBrushPainter | null = null;
     /** 1x1 白纹理，未开 brush 时 compose 用此作 bloomMaskTexture（全屏 bloom） */
     bloomBrushWhiteTexture: Texture | null = null;
+    /** 固化后的 bloom mask（Set bloom 后，退出 brush 模式时仍保留选中区域） */
+    bloomCommittedMaskTexture: Texture | null = null;
+    /** 是否已通过 Set bloom 固化过 mask */
+    hasCommittedBloomMask: boolean = false;
 
     /** Night Mode 脚本（用于 Night Mode + Bloom Brush 合成） */
     nightModeScript: InstanceType<typeof NightMode> | null = null;
@@ -252,7 +258,9 @@ fn applyBloom(color: vec3f, uv: vec2f) -> vec3f {
             if (bloom.bloomBrush && this.bloomBrushPainter) this.bloomBrushPainter.flushUpload();
             const maskTex = bloom.bloomBrush && this.bloomBrushPainter
                 ? this.bloomBrushPainter.getTexture()
-                : this.bloomBrushWhiteTexture;
+                : (this.hasCommittedBloomMask && this.bloomCommittedMaskTexture)
+                    ? this.bloomCommittedMaskTexture
+                    : this.bloomBrushWhiteTexture;
             try {
                 if (maskTex) graphicsDevice.scope.resolve('bloomMaskTexture').setValue(maskTex);
                 const th = Math.max(0, Math.min(5, Number(bloom.threshold ?? 0.2)));
@@ -284,6 +292,13 @@ fn applyBloom(color: vec3f, uv: vec2f) -> vec3f {
         events.on('bloomBrush:clear', () => {
             this.bloomBrushPainter?.clear();
             app.renderNextFrame = true;
+        });
+        events.on('bloomBrush:set', () => {
+            if (this.bloomBrushPainter && this.bloomCommittedMaskTexture) {
+                this.bloomBrushPainter.copyMaskTo(this.bloomCommittedMaskTexture);
+                this.hasCommittedBloomMask = true;
+                app.renderNextFrame = true;
+            }
         });
 
         // handle canvas resize - update aspect ratio and trigger render
@@ -521,6 +536,26 @@ fn applyBloom(color: vec3f, uv: vec2f) -> vec3f {
                     appCanvas
                 });
                 this.bloomBrushFilter.maskTexture = this.bloomBrushPainter.getTexture();
+                const MASK_SIZE = 512;
+                this.bloomCommittedMaskTexture = new Texture(app.graphicsDevice, {
+                    name: 'bloomCommittedMask',
+                    width: MASK_SIZE,
+                    height: MASK_SIZE,
+                    format: PIXELFORMAT_R8,
+                    addressU: ADDRESS_CLAMP_TO_EDGE,
+                    addressV: ADDRESS_CLAMP_TO_EDGE,
+                    minFilter: FILTER_LINEAR,
+                    magFilter: FILTER_LINEAR,
+                    mipmaps: false
+                });
+                const blackCanvas = document.createElement('canvas');
+                blackCanvas.width = MASK_SIZE;
+                blackCanvas.height = MASK_SIZE;
+                const blackCtx = blackCanvas.getContext('2d')!;
+                blackCtx.fillStyle = '#000000';
+                blackCtx.fillRect(0, 0, MASK_SIZE, MASK_SIZE);
+                this.bloomCommittedMaskTexture.setSource(blackCanvas);
+                this.bloomCommittedMaskTexture.upload();
             } else {
                 console.warn('[Viewer] BloomBrushPainter not created: no appCanvas (graphicsDevice.canvas or querySelector("canvas"))');
             }
@@ -800,7 +835,9 @@ z: ${cameraInfo.target.z.toFixed(6)}
             const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomBrush?: boolean; threshold?: number } | undefined;
             const maskTex = (bloom?.bloomBrush && this.bloomBrushPainter)
                 ? this.bloomBrushPainter.getTexture()
-                : this.bloomBrushWhiteTexture;
+                : (this.hasCommittedBloomMask && this.bloomCommittedMaskTexture)
+                    ? this.bloomCommittedMaskTexture
+                    : this.bloomBrushWhiteTexture;
             try {
                 if (maskTex) graphicsDevice.scope.resolve('bloomMaskTexture').setValue(maskTex);
                 const th = Math.max(0, Math.min(5, Number(bloom?.threshold ?? 0.2)));

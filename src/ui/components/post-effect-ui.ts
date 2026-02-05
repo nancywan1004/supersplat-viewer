@@ -42,6 +42,7 @@ const POST_EFFECT_PANEL_HTML = `
       <input type="range" id="bloomBrushSizeSlider" min="1" max="200" step="1" value="30" class="postEffectSlider">
       <span id="bloomBrushSizeValue" class="postEffectSliderValue">30</span>
     </div>
+    <button type="button" id="bloomBrushSetBtn" class="postEffectOption">Set bloom</button>
     <button type="button" id="bloomBrushClearBtn" class="postEffectOption">Clear mask</button>
   </div>
 </div>
@@ -107,6 +108,7 @@ export function initPostEffectUI(global: Global): () => void {
     const bloomBrushOptionsRow = container.querySelector('#bloomBrushOptionsRow') as HTMLElement | null;
     const bloomBrushSizeSlider = container.querySelector('#bloomBrushSizeSlider') as HTMLInputElement | null;
     const bloomBrushSizeValue = container.querySelector('#bloomBrushSizeValue') as HTMLElement | null;
+    const bloomBrushSetBtn = container.querySelector('#bloomBrushSetBtn') as HTMLButtonElement | null;
     const bloomBrushClearBtn = container.querySelector('#bloomBrushClearBtn') as HTMLButtonElement | null;
 
     const syncFromSettings = () => {
@@ -197,6 +199,13 @@ export function initPostEffectUI(global: Global): () => void {
             const b = ensureBloom(settings);
             (b as any).bloomBrushSize = Math.max(1, Math.min(200, parseInt(bloomBrushSizeSlider!.value, 10) || 30));
             bloomBrushSizeValue!.textContent = String((b as any).bloomBrushSize);
+            firePostEffectChanged();
+        });
+    }
+
+    if (bloomBrushSetBtn) {
+        bloomBrushSetBtn.addEventListener('click', () => {
+            events.fire('bloomBrush:set');
             firePostEffectChanged();
         });
     }

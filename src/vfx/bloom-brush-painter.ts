@@ -91,6 +91,17 @@ export class BloomBrushPainter {
         this.texture.upload();
     }
 
+    /** 将当前 mask 复制到目标纹理（用于 Set bloom 固化选中区域） */
+    copyMaskTo(targetTexture: Texture): void {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = this.maskWidth;
+        tempCanvas.height = this.maskHeight;
+        const ctx = tempCanvas.getContext('2d')!;
+        ctx.drawImage(this.canvas, 0, 0);
+        targetTexture.setSource(tempCanvas);
+        targetTexture.upload();
+    }
+
     /** 判断指针是否在 appCanvas 的边界内（用于 document 上的全局监听） */
     private isInsideCanvas(clientX: number, clientY: number): boolean {
         const rect = this.appCanvas.getBoundingClientRect();
