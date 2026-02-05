@@ -51,6 +51,13 @@ type PostEffectSettings = {
         enabled: boolean,
         intensity: number,
         blurLevel: number,
+        /** 亮度阈值，仅高于此值的像素参与 bloom 柔光，0-1 */
+        threshold: number,
+        /** 仅显示参与 bloom 的高斯点（调试用） */
+        bloomDebug: boolean,
+        /** 2D 笔刷局部 bloom：仅在笔刷区域叠加光晕，与 bloomDebug 互斥 */
+        bloomBrush: boolean,
+        bloomBrushSize: number,
     },
     grading: {
         enabled: boolean,

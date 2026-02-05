@@ -9,7 +9,9 @@ import {
     Mat4,
     MiniStats,
     ShaderChunks,
+    Texture,
     type TextureHandler,
+    PIXELFORMAT_R8,
     PIXELFORMAT_RGBA16F,
     PIXELFORMAT_RGBA32F,
     TONEMAP_NONE,
@@ -35,6 +37,9 @@ import { RevealController } from './reveal';
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
 import { getSkyboxRadius } from './loaders/skybox-loader';
 import { isLodMetaFile } from './loaders/lod-loader';
+import { BloomDebugFilter } from './vfx/bloom-debug-filter';
+import { BloomBrushFilter } from './vfx/bloom-brush-filter';
+import { BloomBrushPainter } from './vfx/bloom-brush-painter';
 import { NightMode } from './vfx/lighting/night-mode';
 
 // override global pick to pack depth instead of meshInstance id
@@ -72,6 +77,11 @@ const tonemapTable: Record<string, number> = {
     neutral: TONEMAP_NEUTRAL
 };
 
+/**
+ * Bloom 的 threshold（亮度阈值）与 bright-pass 说明：
+ * - Bright-pass：常见 bloom 管线会先做一步「亮部提取」——只保留亮度高于某阈值的像素，得到一张仅高光区域有值的图，再对该图做模糊并叠回原图。这样只有「超过阈值的部分」会发光。
+ * - 当前 PlayCanvas CameraFrame 的 bloom 没有 bright-pass 阶段：它直接把半分辨率场景图做 downsample/upsample 模糊，没有「先按阈值过滤再模糊」的步骤，因此引擎未暴露 threshold 参数。settings 里的 threshold 仅作配置保留，后续若自建 bloom 管线或扩展引擎时可接入。
+ */
 const applyPostEffectSettings = (cameraFrame: CameraFrame, settings: PostEffectSettings) => {
     if (settings.sharpness.enabled) {
         cameraFrame.rendering.sharpness = settings.sharpness.amount;
@@ -80,11 +90,14 @@ const applyPostEffectSettings = (cameraFrame: CameraFrame, settings: PostEffectS
     }
 
     const { bloom } = cameraFrame;
+    const bloomDebug = (settings.bloom as { bloomDebug?: boolean }).bloomDebug ?? false;
     if (settings.bloom.enabled) {
-        bloom.intensity = settings.bloom.intensity;
+        bloom.intensity = Math.max(0, Math.min(0.2, Number(settings.bloom.intensity)));
         bloom.blurLevel = settings.bloom.blurLevel;
+        cameraFrame.debug = bloomDebug ? 'bloom' : null;
     } else {
         bloom.intensity = 0;
+        cameraFrame.debug = null;
     }
 
     const { grading } = cameraFrame;
@@ -117,8 +130,9 @@ const applyPostEffectSettings = (cameraFrame: CameraFrame, settings: PostEffectS
 };
 
 const anyPostEffectEnabled = (settings: PostEffectSettings): boolean => {
+    const bloomOn = settings.bloom.enabled && (Number(settings.bloom.intensity) > 0);
     return (settings.sharpness.enabled && settings.sharpness.amount > 0) ||
-        (settings.bloom.enabled && settings.bloom.intensity > 0) ||
+        bloomOn ||
         (settings.grading.enabled) ||
         (settings.vignette.enabled && settings.vignette.intensity > 0) ||
         (settings.fringing.enabled && settings.fringing.intensity > 0);
@@ -142,6 +156,16 @@ class Viewer {
     forceRenderNextFrame = false;
     pathVisualizer: CameraPathVisualizer | null = null;
 
+    /** Bloom Debug：按亮度阈值过滤 gsplat，仅亮部参与绘制；threshold 由此处从 settings 同步 */
+    bloomDebugFilter: InstanceType<typeof BloomDebugFilter> | null = null;
+    /** Bloom Brush：2D 屏幕空间局部 bloom，笔刷 mask 在 compose 阶段乘 bloom */
+    bloomBrushFilter: InstanceType<typeof BloomBrushFilter> | null = null;
+    bloomBrushPainter: BloomBrushPainter | null = null;
+    /** 1x1 白纹理，未开 brush 时 compose 用此作 bloomMaskTexture（全屏 bloom） */
+    bloomBrushWhiteTexture: Texture | null = null;
+
+    private _cameraFrameUpdateWrapped = false;
+
     /** 将 cameraManager 的相机姿态应用到实体（导出时 seek anim 后调用） */
     applyCameraFromManager: () => void = () => {};
 
@@ -163,6 +187,76 @@ class Viewer {
         wgsl.set('skyboxPS', wgsl.get('skyboxPS').replace('mapRoughnessUv(uv, uniform.mipLevel)', 'uv'));
         wgsl.set('pickPS', pickDepthWgsl);
 
+        // 2D 局部 bloom：compose 时用 mask 乘 bloom，仅 mask=1 区域叠加光晕（Bloom Brush）
+        // 亮度 threshold：仅当 luminance(color) >= bloomThreshold 时参与 bloom（复用 bloom 面板的 Threshold 滑杆）
+        const composeBloomPSGlsl = `
+#ifdef BLOOM
+uniform sampler2D bloomTexture;
+uniform float bloomIntensity;
+uniform sampler2D bloomMaskTexture;
+uniform float bloomThreshold;
+vec3 dBloom;
+vec3 applyBloom(vec3 color, vec2 uv) {
+    dBloom = texture2DLod(bloomTexture, uv, 0.0).rgb;
+    float mask = texture2DLod(bloomMaskTexture, uv, 0.0).r;
+    float lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
+    float brightPass = step(bloomThreshold, lum);
+    return color + dBloom * bloomIntensity * mask * brightPass;
+}
+#endif
+`;
+        const composeBloomPSWgsl = `
+#ifdef BLOOM
+var bloomTexture: texture_2d<f32>;
+var bloomTextureSampler: sampler;
+var bloomMaskTexture: texture_2d<f32>;
+var bloomMaskTextureSampler: sampler;
+uniform bloomIntensity: f32;
+uniform bloomThreshold: f32;
+var<private> dBloom: vec3f;
+fn applyBloom(color: vec3f, uv: vec2f) -> vec3f {
+    dBloom = textureSampleLevel(bloomTexture, bloomTextureSampler, uv, 0.0).rgb;
+    let mask = textureSampleLevel(bloomMaskTexture, bloomMaskTextureSampler, uv, 0.0).r;
+    let lum = dot(color, vec3f(0.2126, 0.7152, 0.0722));
+    let brightPass = select(0.0, 1.0, lum >= uniform.bloomThreshold);
+    return color + dBloom * uniform.bloomIntensity * mask * brightPass;
+}
+#endif
+`;
+        glsl.set('composeBloomPS', composeBloomPSGlsl);
+        wgsl.set('composeBloomPS', composeBloomPSWgsl);
+
+        // 1x1 白纹理：未开 Bloom Brush 时 bloomMaskTexture 用此（全屏 bloom）
+        const whiteCanvas = document.createElement('canvas');
+        whiteCanvas.width = 1;
+        whiteCanvas.height = 1;
+        const whiteCtx = whiteCanvas.getContext('2d')!;
+        whiteCtx.fillStyle = '#ffffff';
+        whiteCtx.fillRect(0, 0, 1, 1);
+        this.bloomBrushWhiteTexture = new Texture(graphicsDevice, {
+            name: 'bloomBrushWhite',
+            width: 1,
+            height: 1,
+            format: PIXELFORMAT_R8,
+            mipmaps: false
+        });
+        this.bloomBrushWhiteTexture.setSource(whiteCanvas);
+        this.bloomBrushWhiteTexture.upload();
+
+        app.on('frameUpdate', () => {
+            if (!this.cameraFrame || !global.settings.postEffectSettings?.bloom?.enabled) return;
+            const bloom = global.settings.postEffectSettings.bloom as { bloomBrush?: boolean; threshold?: number };
+            if (bloom.bloomBrush && this.bloomBrushPainter) this.bloomBrushPainter.flushUpload();
+            const maskTex = bloom.bloomBrush && this.bloomBrushPainter
+                ? this.bloomBrushPainter.getTexture()
+                : this.bloomBrushWhiteTexture;
+            try {
+                if (maskTex) graphicsDevice.scope.resolve('bloomMaskTexture').setValue(maskTex);
+                const th = Math.max(0, Math.min(5, Number(bloom.threshold ?? 0.2)));
+                graphicsDevice.scope.resolve('bloomThreshold').setValue(th);
+            } catch (_) {}
+        });
+
         // disable auto render, we'll render only when camera changes
         app.autoRender = false;
 
@@ -175,6 +269,15 @@ class Viewer {
         // reconfigure camera when entering/exiting XR
         app.xr.on('start', () => this.configureCamera(settings));
         app.xr.on('end', () => this.configureCamera(settings));
+
+        events.on('postEffect:changed', () => {
+            this.configureCamera(global.settings);
+            app.renderNextFrame = true;
+        });
+        events.on('bloomBrush:clear', () => {
+            this.bloomBrushPainter?.clear();
+            app.renderNextFrame = true;
+        });
 
         // handle canvas resize - update aspect ratio and trigger render
         const handleResize = () => {
@@ -394,7 +497,27 @@ class Viewer {
                 camera: cameraEntity ? 'found' : 'not found',
                 splat: results[0] ? 'found' : 'not found'
             });
-            
+
+            // Bloom Debug / Bloom Brush：与 NightMode 同机制，threshold 在 configureCamera 中同步；Brush 与 Debug 互斥
+            const gsplatEntity = results[0];
+            if (!gsplatEntity.script) gsplatEntity.addComponent('script');
+            this.bloomDebugFilter = gsplatEntity.script.create(BloomDebugFilter) as unknown as InstanceType<typeof BloomDebugFilter>;
+            this.bloomDebugFilter.enabled = false;
+            this.bloomBrushFilter = gsplatEntity.script.create(BloomBrushFilter) as unknown as InstanceType<typeof BloomBrushFilter>;
+            this.bloomBrushFilter.enabled = false;
+            this.bloomBrushFilter.cameraEntity = global.camera;
+            const appCanvas = app.graphicsDevice?.canvas as HTMLCanvasElement | undefined ?? document.querySelector('canvas');
+            if (appCanvas) {
+                this.bloomBrushPainter = new BloomBrushPainter({
+                    device: app.graphicsDevice,
+                    appCanvas
+                });
+                this.bloomBrushFilter.maskTexture = this.bloomBrushPainter.getTexture();
+                console.log('[Viewer] BloomBrushPainter created, appCanvas:', appCanvas === app.graphicsDevice?.canvas ? 'graphicsDevice.canvas' : 'querySelector');
+            } else {
+                console.warn('[Viewer] BloomBrushPainter not created: no appCanvas (graphicsDevice.canvas or querySelector("canvas"))');
+            }
+
             applyCamera(this.cameraManager.camera);
 
             // Initialize camera path visualizer if there are animation tracks
@@ -663,26 +786,83 @@ z: ${cameraInfo.target.z.toFixed(6)}
         });
     }
 
+    /** 在 cameraFrame.update 前设置 bloomMaskTexture 到 scope，并保证仅包装一次 update */
+    private injectBloomMaskTextureBeforeUpdate(cameraFrame: CameraFrame) {
+        const graphicsDevice = this.global.app.graphicsDevice;
+        const setBloomMask = () => {
+            const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomBrush?: boolean; threshold?: number } | undefined;
+            const maskTex = (bloom?.bloomBrush && this.bloomBrushPainter)
+                ? this.bloomBrushPainter.getTexture()
+                : this.bloomBrushWhiteTexture;
+            try {
+                if (maskTex) graphicsDevice.scope.resolve('bloomMaskTexture').setValue(maskTex);
+                const th = Math.max(0, Math.min(5, Number(bloom?.threshold ?? 0.2)));
+                graphicsDevice.scope.resolve('bloomThreshold').setValue(th);
+            } catch (_) {}
+        };
+        if (!this._cameraFrameUpdateWrapped) {
+            this._cameraFrameUpdateWrapped = true;
+            const orig = cameraFrame.update.bind(cameraFrame);
+            cameraFrame.update = () => {
+                setBloomMask();
+                orig();
+            };
+        } else {
+            setBloomMask();
+        }
+    }
+
     // configure camera based on application mode and post process settings
     configureCamera(settings: ExperienceSettings) {
         const { global } = this;
         const { app, camera } = global;
-        const { postEffectSettings } = settings;
+        const postEffectSettings = settings.postEffectSettings;
         const { background } = settings;
 
-        const enableCameraFrame = !app.xr.active && (anyPostEffectEnabled(postEffectSettings) || settings.highPrecisionRendering);
+        // 无 postEffectSettings 或未启用任一后处理时跳过，避免报错
+        const enableCameraFrame = !app.xr.active &&
+            !!postEffectSettings &&
+            (anyPostEffectEnabled(postEffectSettings) || settings.highPrecisionRendering);
 
         if (enableCameraFrame) {
-            // create instance
             if (!this.cameraFrame) {
                 this.cameraFrame = new CameraFrame(app, camera.camera);
             }
 
             const { cameraFrame } = this;
-            cameraFrame.enabled = true;
             cameraFrame.rendering.toneMapping = tonemapTable[settings.tonemapping];
-            cameraFrame.rendering.renderFormats = settings.highPrecisionRendering ? [PIXELFORMAT_RGBA16F, PIXELFORMAT_RGBA32F] : [];
+            // 启用 bloom 时必须先设 HDR 格式再 enable，否则引擎会回退到 RGBA8 并关闭 bloom（_bloomEnabled=false）
+            const bloomWanted = postEffectSettings.bloom.enabled && (Number(postEffectSettings.bloom.intensity) > 0);
+            cameraFrame.rendering.renderFormats = (settings.highPrecisionRendering || bloomWanted)
+                ? [PIXELFORMAT_RGBA16F, PIXELFORMAT_RGBA32F]
+                : [];
+            cameraFrame.enabled = true;
             applyPostEffectSettings(cameraFrame, postEffectSettings);
+
+            // threshold 仅用于 Bloom Debug 视图；Bloom Brush 与 Bloom Debug 互斥
+            const bloom = postEffectSettings.bloom as { bloomDebug?: boolean; bloomBrush?: boolean; bloomBrushSize?: number; threshold?: number };
+            const bloomDebug = !!bloom.bloomDebug;
+            const bloomBrush = !!bloom.bloomBrush;
+            const th = Math.max(0, Math.min(5, Number(bloom.threshold ?? 0.2)));
+            cameraFrame.debug = bloomDebug ? 'bloom' : null;
+            if (this.bloomDebugFilter) {
+                this.bloomDebugFilter.threshold = th;
+                this.bloomDebugFilter.enabled = bloomDebug && !bloomBrush;
+                this.bloomDebugFilter.camera = null;
+            }
+            if (this.bloomBrushFilter) {
+                this.bloomBrushFilter.enabled = bloomBrush;
+                this.bloomBrushFilter.maskTexture = this.bloomBrushPainter?.getTexture() ?? null;
+            }
+            if (this.bloomBrushPainter) {
+                this.bloomBrushPainter.setEnabled(bloomBrush);
+                this.bloomBrushPainter.setBrushSize(Math.max(1, Math.min(200, Number(bloom.bloomBrushSize ?? 30))));
+                if (bloomBrush) console.log('[Viewer] Bloom Brush mode ON: filter.enabled=true, painter.setEnabled(true), mask cleared');
+            }
+
+            // 在 cameraFrame.update() 前注入 bloomMaskTexture，确保与引擎 bloom 合成使用同一 scope
+            this.injectBloomMaskTextureBeforeUpdate(cameraFrame);
+
             cameraFrame.update();
 
             // force gsplat shader to write gamma-space colors
@@ -695,10 +875,14 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
             camera.camera.clearColor = new Color(background.color);
         } else {
-            // no post effects needed, destroy camera frame if it exists
             if (this.cameraFrame) {
                 this.cameraFrame.destroy();
                 this.cameraFrame = null;
+                this._cameraFrameUpdateWrapped = false;
+            }
+            if (this.bloomDebugFilter) {
+                this.bloomDebugFilter.enabled = false;
+                this.bloomDebugFilter.camera = null;
             }
 
             if (!app.xr.active) {

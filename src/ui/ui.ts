@@ -47,6 +47,7 @@ const initUI = (global: Global) => {
         'skyboxRow', 'skyboxSelect',
         'vfxSubmenuHeader', 'vfxSubpanel', 'vfxSubmenuArrow',
         'lightingSubmenuHeader', 'lightingSubpanel', 'lightingSubmenuArrow',
+        'postEffectSubmenuHeader', 'postEffectSubpanel', 'postEffectSubmenuArrow',
         'reset', 'frame',
         'getCameraInfo',
         'loadingText', 'loadingBar', 'loadingIcon',
@@ -314,6 +315,144 @@ const initUI = (global: Global) => {
         dom.lightingSubmenuHeader.addEventListener('click', () => toggleSubpanel('lightingSubmenuHeader', 'lightingSubpanel', 'lightingSubmenuArrow'));
         dom.lightingSubmenuHeader.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSubpanel('lightingSubmenuHeader', 'lightingSubpanel', 'lightingSubmenuArrow'); } });
     }
+    if (dom.postEffectSubmenuHeader && dom.postEffectSubpanel) {
+        dom.postEffectSubmenuHeader.addEventListener('click', () => toggleSubpanel('postEffectSubmenuHeader', 'postEffectSubpanel', 'postEffectSubmenuArrow'));
+        dom.postEffectSubmenuHeader.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSubpanel('postEffectSubmenuHeader', 'postEffectSubpanel', 'postEffectSubmenuArrow'); } });
+    }
+
+    // PostEffect (Bloom) 工具栏：同步 settings 并响应修改
+    const { settings } = global;
+    const ensureBloom = () => {
+        if (!settings.postEffectSettings) (settings as any).postEffectSettings = {};
+        const b = settings.postEffectSettings.bloom;
+        if (!b) (settings.postEffectSettings as any).bloom = { enabled: false, intensity: 0.1, blurLevel: 2, threshold: 0.2, bloomDebug: false, bloomBrush: false, bloomBrushSize: 30 };
+        else {
+            if ((b as any).threshold === undefined) (b as any).threshold = 0.2;
+            if ((b as any).bloomDebug === undefined) (b as any).bloomDebug = false;
+            if ((b as any).bloomBrush === undefined) (b as any).bloomBrush = false;
+            if ((b as any).bloomBrushSize === undefined) (b as any).bloomBrushSize = 30;
+        }
+        return settings.postEffectSettings.bloom;
+    };
+    const bloomEnableCheck = document.getElementById('bloomEnableCheck');
+    const bloomEnableOption = document.getElementById('bloomEnableOption');
+    const bloomIntensitySlider = document.getElementById('bloomIntensitySlider') as HTMLInputElement | null;
+    const bloomIntensityValue = document.getElementById('bloomIntensityValue');
+    const bloomBlurLevelSlider = document.getElementById('bloomBlurLevelSlider') as HTMLInputElement | null;
+    const bloomBlurLevelValue = document.getElementById('bloomBlurLevelValue');
+    const bloomThresholdSlider = document.getElementById('bloomThresholdSlider') as HTMLInputElement | null;
+    const bloomThresholdValue = document.getElementById('bloomThresholdValue');
+    const bloomDebugCheck = document.getElementById('bloomDebugCheck');
+    const bloomDebugOption = document.getElementById('bloomDebugOption');
+
+    const syncBloomUIFromSettings = () => {
+        const b = ensureBloom();
+        if (bloomEnableCheck) bloomEnableCheck.classList.toggle('active', b.enabled);
+        const intensity = Math.min(0.2, Math.max(0, Number(b.intensity)));
+        if (bloomIntensitySlider) bloomIntensitySlider.value = String(intensity);
+        if (bloomIntensityValue) bloomIntensityValue.textContent = intensity.toFixed(2);
+        if (bloomBlurLevelSlider) bloomBlurLevelSlider.value = String(b.blurLevel);
+        if (bloomBlurLevelValue) bloomBlurLevelValue.textContent = String(b.blurLevel);
+        const th = Math.max(0, Math.min(5, Number((b as any).threshold ?? 0.2)));
+        if (bloomThresholdSlider) bloomThresholdSlider.value = String(th);
+        if (bloomThresholdValue) bloomThresholdValue.textContent = th.toFixed(2);
+        const debug = (b as any).bloomDebug ?? false;
+        if (bloomDebugCheck) bloomDebugCheck.classList.toggle('active', debug);
+        const brush = (b as any).bloomBrush ?? false;
+        const bloomBrushCheck = document.getElementById('bloomBrushCheck');
+        const bloomBrushOption = document.getElementById('bloomBrushOption');
+        const bloomBrushOptionsRow = document.getElementById('bloomBrushOptionsRow');
+        const bloomBrushSizeSlider = document.getElementById('bloomBrushSizeSlider') as HTMLInputElement | null;
+        const bloomBrushSizeValue = document.getElementById('bloomBrushSizeValue');
+        if (bloomBrushCheck) bloomBrushCheck.classList.toggle('active', brush);
+        if (bloomBrushOptionsRow) bloomBrushOptionsRow.classList.toggle('hidden', !brush);
+        const brushSize = Math.max(1, Math.min(200, Number((b as any).bloomBrushSize ?? 30)));
+        if (bloomBrushSizeSlider) bloomBrushSizeSlider.value = String(brushSize);
+        if (bloomBrushSizeValue) bloomBrushSizeValue.textContent = String(brushSize);
+    };
+
+    const firePostEffectChanged = () => {
+        events.fire('postEffect:changed');
+    };
+
+    if (bloomEnableOption && bloomEnableCheck) {
+        const toggleBloom = () => {
+            const b = ensureBloom();
+            b.enabled = !b.enabled;
+            syncBloomUIFromSettings();
+            firePostEffectChanged();
+        };
+        bloomEnableOption.addEventListener('click', toggleBloom);
+        bloomEnableCheck.addEventListener('click', toggleBloom);
+    }
+    if (bloomIntensitySlider && bloomIntensityValue) {
+        bloomIntensitySlider.addEventListener('input', () => {
+            const b = ensureBloom();
+            b.intensity = Math.min(0.2, Math.max(0, parseFloat(bloomIntensitySlider.value) || 0));
+            bloomIntensityValue.textContent = b.intensity.toFixed(2);
+            firePostEffectChanged();
+        });
+    }
+    if (bloomBlurLevelSlider && bloomBlurLevelValue) {
+        bloomBlurLevelSlider.addEventListener('input', () => {
+            const b = ensureBloom();
+            b.blurLevel = Math.max(1, Math.min(16, parseInt(bloomBlurLevelSlider!.value, 10)));
+            bloomBlurLevelValue!.textContent = String(b.blurLevel);
+            firePostEffectChanged();
+        });
+    }
+    if (bloomThresholdSlider && bloomThresholdValue) {
+        bloomThresholdSlider.addEventListener('input', () => {
+            const b = ensureBloom();
+            (b as any).threshold = Math.max(0, Math.min(5, parseFloat(bloomThresholdSlider!.value) || 0));
+            bloomThresholdValue!.textContent = (b as any).threshold.toFixed(2);
+            firePostEffectChanged();
+        });
+    }
+    if (bloomDebugOption && bloomDebugCheck) {
+        const toggleBloomDebug = () => {
+            const b = ensureBloom();
+            (b as any).bloomDebug = !(b as any).bloomDebug;
+            if ((b as any).bloomDebug) (b as any).bloomBrush = false;
+            syncBloomUIFromSettings();
+            firePostEffectChanged();
+        };
+        bloomDebugOption.addEventListener('click', toggleBloomDebug);
+        bloomDebugCheck.addEventListener('click', toggleBloomDebug);
+    }
+    const bloomBrushCheck = document.getElementById('bloomBrushCheck');
+    const bloomBrushOption = document.getElementById('bloomBrushOption');
+    const bloomBrushSizeSlider = document.getElementById('bloomBrushSizeSlider') as HTMLInputElement | null;
+    const bloomBrushSizeValue = document.getElementById('bloomBrushSizeValue');
+    const bloomBrushClearBtn = document.getElementById('bloomBrushClearBtn');
+    if (bloomBrushOption && bloomBrushCheck) {
+        const toggleBloomBrush = () => {
+            const b = ensureBloom();
+            (b as any).bloomBrush = !(b as any).bloomBrush;
+            if ((b as any).bloomBrush) (b as any).bloomDebug = false;
+            syncBloomUIFromSettings();
+            firePostEffectChanged();
+        };
+        bloomBrushOption.addEventListener('click', toggleBloomBrush);
+        bloomBrushCheck.addEventListener('click', toggleBloomBrush);
+    }
+    if (bloomBrushSizeSlider && bloomBrushSizeValue) {
+        bloomBrushSizeSlider.addEventListener('input', () => {
+            const b = ensureBloom();
+            (b as any).bloomBrushSize = Math.max(1, Math.min(200, parseInt(bloomBrushSizeSlider!.value, 10) || 30));
+            bloomBrushSizeValue!.textContent = String((b as any).bloomBrushSize);
+            firePostEffectChanged();
+        });
+    }
+    if (bloomBrushClearBtn) {
+        bloomBrushClearBtn.addEventListener('click', () => {
+            events.fire('bloomBrush:clear');
+            firePostEffectChanged();
+        });
+    }
+
+    events.on('firstFrame', syncBloomUIFromSettings);
+    syncBloomUIFromSettings();
 
     // Info panel
     const updateInfoTab = (tab: 'desktop' | 'touch') => {

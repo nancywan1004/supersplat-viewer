@@ -247,6 +247,54 @@
                     </div>
                     <div id="lightingPanelContainer"></div>
                 </div>
+                <div class="settingsRow submenuHeader" id="postEffectSubmenuHeader" role="button" tabindex="0">
+                    <span class="submenuArrow" id="postEffectSubmenuArrow">▶</span>
+                    <span>postEffect</span>
+                </div>
+                <div id="postEffectSubpanel" class="subpanel hidden">
+                    <div class="postEffectSectionLabel">Bloom</div>
+                    <div class="settingsRow">
+                        <div id="bloomEnableCheck" class="checkMark">✓</div>
+                        <div id="bloomEnableOption" class="postEffectOption">Enable</div>
+                    </div>
+                    <div class="settingsRow">
+                        <label for="bloomIntensitySlider" class="postEffectLabel">Intensity:</label>
+                        <div class="postEffectSliderWrap">
+                            <input type="range" id="bloomIntensitySlider" min="0" max="0.2" step="0.01" value="0.1" class="postEffectSlider">
+                            <span id="bloomIntensityValue" class="postEffectSliderValue">0.10</span>
+                        </div>
+                    </div>
+                    <div class="settingsRow">
+                        <label for="bloomBlurLevelSlider" class="postEffectLabel">BlurLevel:</label>
+                        <div class="postEffectSliderWrap">
+                            <input type="range" id="bloomBlurLevelSlider" min="1" max="16" step="1" value="2" class="postEffectSlider">
+                            <span id="bloomBlurLevelValue" class="postEffectSliderValue">2</span>
+                        </div>
+                    </div>
+                    <div class="settingsRow">
+                            <label for="bloomThresholdSlider" class="postEffectLabel">Threshold (HDR):</label>
+                            <div class="postEffectSliderWrap">
+                            <input type="range" id="bloomThresholdSlider" min="0" max="5" step="0.1" value="0.2" class="postEffectSlider">
+                            <span id="bloomThresholdValue" class="postEffectSliderValue">0.20</span>
+                        </div>
+                    </div>
+                    <div class="settingsRow">
+                        <div id="bloomDebugCheck" class="checkMark">✓</div>
+                        <div id="bloomDebugOption" class="postEffectOption">Bloom Debug</div>
+                    </div>
+                    <div class="settingsRow">
+                        <div id="bloomBrushCheck" class="checkMark">✓</div>
+                        <div id="bloomBrushOption" class="postEffectOption">Bloom Brush (局部)</div>
+                    </div>
+                    <div id="bloomBrushOptionsRow" class="settingsRow hidden">
+                        <label for="bloomBrushSizeSlider" class="postEffectLabel">Brush Size:</label>
+                        <div class="postEffectSliderWrap">
+                            <input type="range" id="bloomBrushSizeSlider" min="1" max="200" step="1" value="30" class="postEffectSlider">
+                            <span id="bloomBrushSizeValue" class="postEffectSliderValue">30</span>
+                        </div>
+                        <button type="button" id="bloomBrushClearBtn" class="postEffectOption">Clear mask</button>
+                    </div>
+                </div>
                 <div class="divider"></div>
                 <div class="settingsRow">
                     <button id="frame">Frame</button>

@@ -469,6 +469,54 @@ button {
         }
     }
 
+    /* postEffect 子面板（Bloom 等） */
+    .postEffectSectionLabel {
+        color: $clr-text-dark;
+        font-size: 12px;
+        margin-bottom: 2px;
+    }
+    .postEffectLabel {
+        min-width: 72px;
+        color: $clr-text-dark;
+        font-size: 12px;
+    }
+    .postEffectSliderWrap {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 1;
+        min-width: 0;
+    }
+    .postEffectSlider {
+        flex: 1;
+        min-width: 60px;
+    }
+    .postEffectSliderValue {
+        min-width: 32px;
+        font-size: 12px;
+        color: $clr-text-dark;
+    }
+    .postEffectOption {
+        padding: 4px 0;
+        cursor: pointer;
+        color: $clr-text-dark;
+        &:hover {
+            color: $clr-text;
+        }
+    }
+    .postEffectButton {
+        padding: 4px 10px;
+        font-size: 12px;
+        cursor: pointer;
+        color: $clr-text-dark;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 4px;
+        &:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+    }
+
     @import 'ui/components/lighting-ui';
     @import 'ui/components/reveal-ui';
     @import 'ui/components/video-export-ui';
