@@ -521,7 +521,6 @@ fn applyBloom(color: vec3f, uv: vec2f) -> vec3f {
                     appCanvas
                 });
                 this.bloomBrushFilter.maskTexture = this.bloomBrushPainter.getTexture();
-                console.log('[Viewer] BloomBrushPainter created, appCanvas:', appCanvas === app.graphicsDevice?.canvas ? 'graphicsDevice.canvas' : 'querySelector');
             } else {
                 console.warn('[Viewer] BloomBrushPainter not created: no appCanvas (graphicsDevice.canvas or querySelector("canvas"))');
             }
@@ -869,7 +868,6 @@ z: ${cameraInfo.target.z.toFixed(6)}
             if (this.bloomBrushPainter) {
                 this.bloomBrushPainter.setEnabled(bloomBrush);
                 this.bloomBrushPainter.setBrushSize(Math.max(1, Math.min(200, Number(bloom.bloomBrushSize ?? 30))));
-                if (bloomBrush) console.log('[Viewer] Bloom Brush mode ON: filter.enabled=true, painter.setEnabled(true), mask cleared');
             }
             if (this.nightModeScript) {
                 const mask = bloomBrushWithNight ? this.bloomBrushPainter?.getTexture() ?? null : null;

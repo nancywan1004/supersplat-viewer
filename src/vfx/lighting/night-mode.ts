@@ -306,7 +306,6 @@ class NightMode extends GsplatShaderEffect {
 
         // Listen for toggle event
         this.app.on('toggle:night-mode', () => {
-            console.log('NightMode: toggle event received, current state - nightMode:', this.nightMode, 'nightFade:', this.nightFade);
             // Disable manual control when toggling (allow automatic transition)
             this.manualFadeControl = false;
             this.nightMode = !this.nightMode;
