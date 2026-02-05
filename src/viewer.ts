@@ -164,6 +164,9 @@ class Viewer {
     /** 1x1 白纹理，未开 brush 时 compose 用此作 bloomMaskTexture（全屏 bloom） */
     bloomBrushWhiteTexture: Texture | null = null;
 
+    /** Night Mode 脚本（用于 Night Mode + Bloom Brush 合成） */
+    nightModeScript: InstanceType<typeof NightMode> | null = null;
+
     private _cameraFrameUpdateWrapped = false;
 
     /** 将 cameraManager 的相机姿态应用到实体（导出时 seek anim 后调用） */
@@ -271,6 +274,10 @@ fn applyBloom(color: vec3f, uv: vec2f) -> vec3f {
         app.xr.on('end', () => this.configureCamera(settings));
 
         events.on('postEffect:changed', () => {
+            this.configureCamera(global.settings);
+            app.renderNextFrame = true;
+        });
+        app.on('nightMode:changed', () => {
             this.configureCamera(global.settings);
             app.renderNextFrame = true;
         });
@@ -482,7 +489,8 @@ fn applyBloom(color: vec3f, uv: vec2f) -> vec3f {
             if (!app.root.script) {
                 app.root.addComponent('script');
             }
-            const nightModeScript = app.root.script.create(NightMode) as any;
+            const nightModeScript = app.root.script.create(NightMode) as unknown as InstanceType<typeof NightMode>;
+            this.nightModeScript = nightModeScript;
             // Find entities by name or tag
             const lightEntity = app.root.findByName('light') as Entity | null || (app.root.findByTag('light') as Entity[])?.[0] || null;
             const cameraEntity = global.camera;
@@ -850,14 +858,22 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 this.bloomDebugFilter.enabled = bloomDebug && !bloomBrush;
                 this.bloomDebugFilter.camera = null;
             }
+            // Night Mode + Bloom Brush 合成：同时开启时 BloomBrushFilter 不应用（避免覆盖 NightMode 的 gsplat chunk），
+            // 由 NightMode 使用带 bloom brush 条件的 shader；仅 Bloom Brush 时正常启用 BloomBrushFilter
+            const nightModeOn = this.nightModeScript?.isNightModeEnabled ?? false;
+            const bloomBrushWithNight = bloomBrush && nightModeOn;
             if (this.bloomBrushFilter) {
-                this.bloomBrushFilter.enabled = bloomBrush;
+                this.bloomBrushFilter.enabled = bloomBrush && !nightModeOn;
                 this.bloomBrushFilter.maskTexture = this.bloomBrushPainter?.getTexture() ?? null;
             }
             if (this.bloomBrushPainter) {
                 this.bloomBrushPainter.setEnabled(bloomBrush);
                 this.bloomBrushPainter.setBrushSize(Math.max(1, Math.min(200, Number(bloom.bloomBrushSize ?? 30))));
                 if (bloomBrush) console.log('[Viewer] Bloom Brush mode ON: filter.enabled=true, painter.setEnabled(true), mask cleared');
+            }
+            if (this.nightModeScript) {
+                const mask = bloomBrushWithNight ? this.bloomBrushPainter?.getTexture() ?? null : null;
+                this.nightModeScript.setBloomBrushParams(bloomBrushWithNight, mask, th, undefined);
             }
 
             // 在 cameraFrame.update() 前注入 bloomMaskTexture，确保与引擎 bloom 合成使用同一 scope
@@ -883,6 +899,9 @@ z: ${cameraInfo.target.z.toFixed(6)}
             if (this.bloomDebugFilter) {
                 this.bloomDebugFilter.enabled = false;
                 this.bloomDebugFilter.camera = null;
+            }
+            if (this.nightModeScript) {
+                this.nightModeScript.setBloomBrushParams(false, null, 0.2, undefined);
             }
 
             if (!app.xr.active) {

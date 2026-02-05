@@ -1,6 +1,7 @@
-import { Script, Color, Entity, Vec3 } from 'playcanvas';
+import { Script, Color, Entity, Vec3, Mat4 } from 'playcanvas';
 import { GsplatShaderEffect } from '../gsplat-shader-effect';
 import { collectPointLights } from '../../light';
+import type { Texture } from 'playcanvas';
 
 const shaderGLSL = /* glsl */`
 uniform vec3 uSpherePositions[10];
@@ -9,21 +10,13 @@ uniform float uNightFade;
 uniform vec3 uNightAmbient;
 uniform mat4 uModelMatrix;
 
-// linear/gamma conversion
-vec3 l2g(vec3 c) { 
-    return pow(c, vec3(1.0 / 2.2)); 
-}
-
-vec3 g2l(vec3 c) { 
-    return pow(c, vec3(2.2)); 
-}
+vec3 l2g(vec3 c) { return pow(c, vec3(1.0 / 2.2)); }
+vec3 g2l(vec3 c) { return pow(c, vec3(2.2)); }
 
 void modifyCenter(inout vec3 center) {
-    // Night mode doesn't modify center position
 }
 
 void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
-    // Night mode doesn't modify covariance
 }
 
 void modifyColor(vec3 center, inout vec4 color) {
@@ -32,7 +25,6 @@ void modifyColor(vec3 center, inout vec4 color) {
     }
 
     // Calculate world position from model center
-    // Use the model matrix uniform to transform to world space
     vec4 worldPos = uModelMatrix * vec4(center, 1.0);
     worldPos /= worldPos.w;
 
@@ -41,7 +33,7 @@ void modifyColor(vec3 center, inout vec4 color) {
     for (int i = 0; i < 10; ++i) {
         vec3 pos = uSpherePositions[i];
         vec3 clr = uSphereColors[i];
-        if (length(pos) > 0.001) { // Only process valid spheres
+        if (length(pos) > 0.001) {
             float dist = length(pos - worldPos.xyz);
             if (dist > 0.001) {
                 sum += g2l(clr) * 1.1 / (dist * dist);
@@ -49,7 +41,68 @@ void modifyColor(vec3 center, inout vec4 color) {
         }
     }
 
-    // Blend in linear space
+    vec3 linearColor = g2l(color.rgb);
+    vec3 nightColor = g2l(uNightAmbient) + sum;
+    color.rgb = l2g(linearColor * mix(vec3(1.0), nightColor, uNightFade));
+}
+`;
+
+// Night Mode + Bloom Brush 合成：涂抹区域内亮部不应用 night mode（参与 bloom），暗部应用 night mode
+const shaderGLSLBloomBrush = /* glsl */`
+uniform vec3 uSpherePositions[10];
+uniform vec3 uSphereColors[10];
+uniform float uNightFade;
+uniform vec3 uNightAmbient;
+uniform mat4 uModelMatrix;
+uniform mat4 uModelViewProj;
+uniform sampler2D uBloomMask;
+uniform float uBloomThreshold;
+uniform float uBloomBrushActive;
+
+vec3 l2g(vec3 c) { return pow(c, vec3(1.0 / 2.2)); }
+vec3 g2l(vec3 c) { return pow(c, vec3(2.2)); }
+
+void modifyCenter(inout vec3 center) {
+}
+
+void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
+}
+
+void modifyColor(vec3 center, inout vec4 color) {
+    if (uNightFade == 0.0) {
+        return;
+    }
+
+    // Bloom Brush 模式：涂抹区域内亮部跳过 night mode（参与 bloom），暗部应用 night mode
+    // NDC：y=-1 底部，y=1 顶部；mask 纹理 v=0 底部 v=1 顶部（与 BloomBrushPainter 绘制一致），无需 Y 翻转
+    if (uBloomBrushActive > 0.5) {
+        vec4 clipPos = uModelViewProj * vec4(center, 1.0);
+        vec3 ndc = clipPos.xyz / clipPos.w;
+        vec2 uv = ndc.xy * 0.5 + 0.5;
+        if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
+            float maskVal = texture2D(uBloomMask, uv).r;
+            float lum = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+            if (maskVal > 0.5 && lum >= uBloomThreshold) {
+                return;
+            }
+        }
+    }
+
+    vec4 worldPos = uModelMatrix * vec4(center, 1.0);
+    worldPos /= worldPos.w;
+
+    vec3 sum = vec3(0.0);
+    for (int i = 0; i < 10; ++i) {
+        vec3 pos = uSpherePositions[i];
+        vec3 clr = uSphereColors[i];
+        if (length(pos) > 0.001) {
+            float dist = length(pos - worldPos.xyz);
+            if (dist > 0.001) {
+                sum += g2l(clr) * 1.1 / (dist * dist);
+            }
+        }
+    }
+
     vec3 linearColor = g2l(color.rgb);
     vec3 nightColor = g2l(uNightAmbient) + sum;
     color.rgb = l2g(linearColor * mix(vec3(1.0), nightColor, uNightFade));
@@ -110,6 +163,67 @@ fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
 }
 `;
 
+// Night Mode + Bloom Brush 合成：涂抹区域内亮部不应用 night mode（参与 bloom），暗部应用 night mode
+const shaderWGSLBloomBrush = /* wgsl */`
+uniform uSpherePositions: array<vec3f, 10>;
+uniform uSphereColors: array<vec3f, 10>;
+uniform uNightFade: f32;
+uniform uNightAmbient: vec3f;
+uniform uModelMatrix: mat4x4f;
+uniform uModelViewProj: mat4x4f;
+var uBloomMask: texture_2d<f32>;
+var uBloomMaskSampler: sampler;
+uniform uBloomThreshold: f32;
+uniform uBloomBrushActive: f32;
+
+fn l2g(c: vec3f) -> vec3f { return pow(c, vec3f(1.0 / 2.2)); }
+fn g2l(c: vec3f) -> vec3f { return pow(c, vec3f(2.2)); }
+
+fn modifyCenter(center: ptr<function, vec3f>) {
+}
+
+fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<function, vec3f>, covB: ptr<function, vec3f>) {
+}
+
+fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
+    if (uniform.uNightFade == 0.0) {
+        return;
+    }
+
+    if (uniform.uBloomBrushActive > 0.5) {
+        let clipPos = uniform.uModelViewProj * vec4f(center, 1.0);
+        let ndc = clipPos.xyz / clipPos.w;
+        let uv = ndc.xy * 0.5 + 0.5;
+        if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
+            let maskVal = textureSample(uBloomMask, uBloomMaskSampler, uv).r;
+            let lum = dot((*color).rgb, vec3f(0.2126, 0.7152, 0.0722));
+            if (maskVal > 0.5 && lum >= uniform.uBloomThreshold) {
+                return;
+            }
+        }
+    }
+
+    let worldPos = uniform.uModelMatrix * vec4f(center, 1.0);
+    let worldPos3 = worldPos.xyz / worldPos.w;
+
+    var sum = vec3f(0.0);
+    for (var i = 0u; i < 10u; i++) {
+        let pos = uniform.uSpherePositions[i];
+        let clr = uniform.uSphereColors[i];
+        if (length(pos) > 0.001) {
+            let dist = length(pos - worldPos3);
+            if (dist > 0.001) {
+                sum = sum + g2l(clr) * 1.1 / (dist * dist);
+            }
+        }
+    }
+
+    let linearColor = g2l((*color).rgb);
+    let nightColor = g2l(uniform.uNightAmbient) + sum;
+    (*color).rgb = l2g(linearColor * mix(vec3f(1.0), nightColor, uniform.uNightFade));
+}
+`;
+
 /**
  * Night mode effect for gaussian splats.
  * Creates a night mode lighting effect with ambient lighting and sphere-based lighting.
@@ -145,6 +259,12 @@ class NightMode extends GsplatShaderEffect {
      * @type {Entity | null}
      */
     splat: Entity | null = null;
+
+    /** Bloom Brush 合成：开启时涂抹区域内亮部不应用 night mode（参与 bloom），暗部应用 night mode */
+    bloomBrushActive: boolean = false;
+    bloomBrushMask: Texture | null = null;
+    bloomBrushThreshold: number = 0.2;
+    private _bloomBrushModelViewProj: Mat4 = new Mat4();
 
     /**
      * Night ambient color
@@ -340,11 +460,26 @@ class NightMode extends GsplatShaderEffect {
     }
 
     getShaderGLSL() {
-        return shaderGLSL;
+        return this.bloomBrushActive ? shaderGLSLBloomBrush : shaderGLSL;
     }
 
     getShaderWGSL() {
-        return shaderWGSL;
+        return this.bloomBrushActive ? shaderWGSLBloomBrush : shaderWGSL;
+    }
+
+    /** 设置 Bloom Brush 合成参数；当 active 变更时会重新应用 shader */
+    setBloomBrushParams(active: boolean, mask: Texture | null, threshold: number, modelViewProj?: Float32Array) {
+        const prevActive = this.bloomBrushActive;
+        this.bloomBrushActive = active;
+        this.bloomBrushMask = mask;
+        this.bloomBrushThreshold = Math.max(0, Math.min(5, threshold));
+        if (modelViewProj) {
+            this._bloomBrushModelViewProj.data.set(modelViewProj);
+        }
+        if (prevActive !== active && this.materialsApplied.size > 0) {
+            this.removeShaders();
+            this.applyShaders();
+        }
     }
 
     update(dt: number) {
@@ -487,6 +622,18 @@ class NightMode extends GsplatShaderEffect {
                 this.nightAmbient.b
             ]);
             this.setUniform('uModelMatrix', modelMatrix);
+            if (this.bloomBrushActive && this.bloomBrushMask && this.camera?.camera && this.splat) {
+                const cam = this.camera.camera;
+                this._bloomBrushModelViewProj.copy(cam.viewMatrix);
+                this._bloomBrushModelViewProj.mul2(this._bloomBrushModelViewProj, this.splat.getWorldTransform());
+                this._bloomBrushModelViewProj.mul2(cam.projectionMatrix, this._bloomBrushModelViewProj);
+                this.materialsApplied.forEach((material) => {
+                    material.setParameter('uBloomMask', this.bloomBrushMask!);
+                });
+                this.setUniform('uBloomBrushActive', 1);
+                this.setUniform('uBloomThreshold', this.bloomBrushThreshold);
+                this.setUniform('uModelViewProj', this._bloomBrushModelViewProj.data);
+            }
         }
 
         // Update light intensity (always update, even if shaders are removed)
@@ -527,6 +674,11 @@ class NightMode extends GsplatShaderEffect {
     setNightMode(enabled: boolean) {
         this.nightMode = enabled;
         this.enabled = enabled;
+    }
+
+    /** 是否开启夜间模式（供 Viewer 判断是否需与 Bloom Brush 合成） */
+    get isNightModeEnabled(): boolean {
+        return this.nightMode;
     }
 }
 
