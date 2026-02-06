@@ -11,9 +11,6 @@ import {
     ShaderChunks,
     Texture,
     type TextureHandler,
-    PIXELFORMAT_R8,
-    ADDRESS_CLAMP_TO_EDGE,
-    FILTER_LINEAR,
     PIXELFORMAT_RGBA16F,
     PIXELFORMAT_RGBA32F,
     TONEMAP_NONE,
@@ -39,9 +36,7 @@ import { RevealController } from './reveal';
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
 import { getSkyboxRadius } from './loaders/skybox-loader';
 import { isLodMetaFile } from './loaders/lod-loader';
-import { BloomDebugFilter } from './vfx/bloom-debug-filter';
-import { BloomBrushFilter } from './vfx/bloom-brush-filter';
-import { BloomBrushPainter } from './vfx/bloom-brush-painter';
+import { BloomController } from './vfx/bloom';
 import { NightMode } from './vfx/lighting/night-mode';
 
 // override global pick to pack depth instead of meshInstance id
@@ -79,27 +74,12 @@ const tonemapTable: Record<string, number> = {
     neutral: TONEMAP_NEUTRAL
 };
 
-/**
- * Bloom 的 threshold（亮度阈值）与 bright-pass 说明：
- * - Bright-pass：常见 bloom 管线会先做一步「亮部提取」——只保留亮度高于某阈值的像素，得到一张仅高光区域有值的图，再对该图做模糊并叠回原图。这样只有「超过阈值的部分」会发光。
- * - 当前 PlayCanvas CameraFrame 的 bloom 没有 bright-pass 阶段：它直接把半分辨率场景图做 downsample/upsample 模糊，没有「先按阈值过滤再模糊」的步骤，因此引擎未暴露 threshold 参数。settings 里的 threshold 仅作配置保留，后续若自建 bloom 管线或扩展引擎时可接入。
- */
+/** 仅处理非 Bloom 的后处理（Bloom 由 BloomController 统一配置） */
 const applyPostEffectSettings = (cameraFrame: CameraFrame, settings: PostEffectSettings) => {
     if (settings.sharpness.enabled) {
         cameraFrame.rendering.sharpness = settings.sharpness.amount;
     } else {
         cameraFrame.rendering.sharpness = 0;
-    }
-
-    const { bloom } = cameraFrame;
-    const bloomDebug = (settings.bloom as { bloomDebug?: boolean }).bloomDebug ?? false;
-    if (settings.bloom.enabled) {
-        bloom.intensity = Math.max(0, Math.min(0.2, Number(settings.bloom.intensity)));
-        bloom.blurLevel = settings.bloom.blurLevel;
-        cameraFrame.debug = bloomDebug ? 'bloom' : null;
-    } else {
-        bloom.intensity = 0;
-        cameraFrame.debug = null;
     }
 
     const { grading } = cameraFrame;
@@ -158,22 +138,11 @@ class Viewer {
     forceRenderNextFrame = false;
     pathVisualizer: CameraPathVisualizer | null = null;
 
-    /** Bloom Debug：按亮度阈值过滤 gsplat，仅亮部参与绘制；threshold 由此处从 settings 同步 */
-    bloomDebugFilter: InstanceType<typeof BloomDebugFilter> | null = null;
-    /** Bloom Brush：2D 屏幕空间局部 bloom，笔刷 mask 在 compose 阶段乘 bloom */
-    bloomBrushFilter: InstanceType<typeof BloomBrushFilter> | null = null;
-    bloomBrushPainter: BloomBrushPainter | null = null;
-    /** 1x1 白纹理，未开 brush 时 compose 用此作 bloomMaskTexture（全屏 bloom） */
-    bloomBrushWhiteTexture: Texture | null = null;
-    /** 固化后的 bloom mask（Set bloom 后，退出 brush 模式时仍保留选中区域） */
-    bloomCommittedMaskTexture: Texture | null = null;
-    /** 是否已通过 Set bloom 固化过 mask */
-    hasCommittedBloomMask: boolean = false;
+    /** Bloom 统一由 BloomController 管理，不往 gsplat 挂脚本，避免覆盖 reveal */
+    bloomController: BloomController | null = null;
 
     /** Night Mode 脚本（用于 Night Mode + Bloom Brush 合成） */
     nightModeScript: InstanceType<typeof NightMode> | null = null;
-
-    private _cameraFrameUpdateWrapped = false;
 
     /** 将 cameraManager 的相机姿态应用到实体（导出时 seek anim 后调用） */
     applyCameraFromManager: () => void = () => {};
@@ -196,76 +165,10 @@ class Viewer {
         wgsl.set('skyboxPS', wgsl.get('skyboxPS').replace('mapRoughnessUv(uv, uniform.mipLevel)', 'uv'));
         wgsl.set('pickPS', pickDepthWgsl);
 
-        // 2D 局部 bloom：compose 时用 mask 乘 bloom，仅 mask=1 区域叠加光晕（Bloom Brush）
-        // 亮度 threshold：仅当 luminance(color) >= bloomThreshold 时参与 bloom（复用 bloom 面板的 Threshold 滑杆）
-        const composeBloomPSGlsl = `
-#ifdef BLOOM
-uniform sampler2D bloomTexture;
-uniform float bloomIntensity;
-uniform sampler2D bloomMaskTexture;
-uniform float bloomThreshold;
-vec3 dBloom;
-vec3 applyBloom(vec3 color, vec2 uv) {
-    dBloom = texture2DLod(bloomTexture, uv, 0.0).rgb;
-    float mask = texture2DLod(bloomMaskTexture, uv, 0.0).r;
-    float lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
-    float brightPass = step(bloomThreshold, lum);
-    return color + dBloom * bloomIntensity * mask * brightPass;
-}
-#endif
-`;
-        const composeBloomPSWgsl = `
-#ifdef BLOOM
-var bloomTexture: texture_2d<f32>;
-var bloomTextureSampler: sampler;
-var bloomMaskTexture: texture_2d<f32>;
-var bloomMaskTextureSampler: sampler;
-uniform bloomIntensity: f32;
-uniform bloomThreshold: f32;
-var<private> dBloom: vec3f;
-fn applyBloom(color: vec3f, uv: vec2f) -> vec3f {
-    dBloom = textureSampleLevel(bloomTexture, bloomTextureSampler, uv, 0.0).rgb;
-    let mask = textureSampleLevel(bloomMaskTexture, bloomMaskTextureSampler, uv, 0.0).r;
-    let lum = dot(color, vec3f(0.2126, 0.7152, 0.0722));
-    let brightPass = select(0.0, 1.0, lum >= uniform.bloomThreshold);
-    return color + dBloom * uniform.bloomIntensity * mask * brightPass;
-}
-#endif
-`;
-        glsl.set('composeBloomPS', composeBloomPSGlsl);
-        wgsl.set('composeBloomPS', composeBloomPSWgsl);
-
-        // 1x1 白纹理：未开 Bloom Brush 时 bloomMaskTexture 用此（全屏 bloom）
-        const whiteCanvas = document.createElement('canvas');
-        whiteCanvas.width = 1;
-        whiteCanvas.height = 1;
-        const whiteCtx = whiteCanvas.getContext('2d')!;
-        whiteCtx.fillStyle = '#ffffff';
-        whiteCtx.fillRect(0, 0, 1, 1);
-        this.bloomBrushWhiteTexture = new Texture(graphicsDevice, {
-            name: 'bloomBrushWhite',
-            width: 1,
-            height: 1,
-            format: PIXELFORMAT_R8,
-            mipmaps: false
-        });
-        this.bloomBrushWhiteTexture.setSource(whiteCanvas);
-        this.bloomBrushWhiteTexture.upload();
-
-        app.on('frameUpdate', () => {
-            if (!this.cameraFrame || !global.settings.postEffectSettings?.bloom?.enabled) return;
-            const bloom = global.settings.postEffectSettings.bloom as { bloomBrush?: boolean; threshold?: number };
-            if (bloom.bloomBrush && this.bloomBrushPainter) this.bloomBrushPainter.flushUpload();
-            const maskTex = bloom.bloomBrush && this.bloomBrushPainter
-                ? this.bloomBrushPainter.getTexture()
-                : (this.hasCommittedBloomMask && this.bloomCommittedMaskTexture)
-                    ? this.bloomCommittedMaskTexture
-                    : this.bloomBrushWhiteTexture;
-            try {
-                if (maskTex) graphicsDevice.scope.resolve('bloomMaskTexture').setValue(maskTex);
-                const th = Math.max(0, Math.min(5, Number(bloom.threshold ?? 0.2)));
-                graphicsDevice.scope.resolve('bloomThreshold').setValue(th);
-            } catch (_) {}
+        this.bloomController = new BloomController(global, {
+            getCameraFrame: () => this.cameraFrame,
+            getAppCanvas: () => (app.graphicsDevice?.canvas as HTMLCanvasElement) ?? document.querySelector('canvas'),
+            getNightModeScript: () => this.nightModeScript
         });
 
         // disable auto render, we'll render only when camera changes
@@ -288,17 +191,6 @@ fn applyBloom(color: vec3f, uv: vec2f) -> vec3f {
         app.on('nightMode:changed', () => {
             this.configureCamera(global.settings);
             app.renderNextFrame = true;
-        });
-        events.on('bloomBrush:clear', () => {
-            this.bloomBrushPainter?.clear();
-            app.renderNextFrame = true;
-        });
-        events.on('bloomBrush:set', () => {
-            if (this.bloomBrushPainter && this.bloomCommittedMaskTexture) {
-                this.bloomBrushPainter.copyMaskTo(this.bloomCommittedMaskTexture);
-                this.hasCommittedBloomMask = true;
-                app.renderNextFrame = true;
-            }
         });
 
         // handle canvas resize - update aspect ratio and trigger render
@@ -520,45 +412,6 @@ fn applyBloom(color: vec3f, uv: vec2f) -> vec3f {
                 camera: cameraEntity ? 'found' : 'not found',
                 splat: results[0] ? 'found' : 'not found'
             });
-
-            // Bloom Debug / Bloom Brush：与 NightMode 同机制，threshold 在 configureCamera 中同步；Brush 与 Debug 互斥
-            const gsplatEntity = results[0];
-            if (!gsplatEntity.script) gsplatEntity.addComponent('script');
-            this.bloomDebugFilter = gsplatEntity.script.create(BloomDebugFilter) as unknown as InstanceType<typeof BloomDebugFilter>;
-            this.bloomDebugFilter.enabled = false;
-            this.bloomBrushFilter = gsplatEntity.script.create(BloomBrushFilter) as unknown as InstanceType<typeof BloomBrushFilter>;
-            this.bloomBrushFilter.enabled = false;
-            this.bloomBrushFilter.cameraEntity = global.camera;
-            const appCanvas = app.graphicsDevice?.canvas as HTMLCanvasElement | undefined ?? document.querySelector('canvas');
-            if (appCanvas) {
-                this.bloomBrushPainter = new BloomBrushPainter({
-                    device: app.graphicsDevice,
-                    appCanvas
-                });
-                this.bloomBrushFilter.maskTexture = this.bloomBrushPainter.getTexture();
-                const MASK_SIZE = 512;
-                this.bloomCommittedMaskTexture = new Texture(app.graphicsDevice, {
-                    name: 'bloomCommittedMask',
-                    width: MASK_SIZE,
-                    height: MASK_SIZE,
-                    format: PIXELFORMAT_R8,
-                    addressU: ADDRESS_CLAMP_TO_EDGE,
-                    addressV: ADDRESS_CLAMP_TO_EDGE,
-                    minFilter: FILTER_LINEAR,
-                    magFilter: FILTER_LINEAR,
-                    mipmaps: false
-                });
-                const blackCanvas = document.createElement('canvas');
-                blackCanvas.width = MASK_SIZE;
-                blackCanvas.height = MASK_SIZE;
-                const blackCtx = blackCanvas.getContext('2d')!;
-                blackCtx.fillStyle = '#000000';
-                blackCtx.fillRect(0, 0, MASK_SIZE, MASK_SIZE);
-                this.bloomCommittedMaskTexture.setSource(blackCanvas);
-                this.bloomCommittedMaskTexture.upload();
-            } else {
-                console.warn('[Viewer] BloomBrushPainter not created: no appCanvas (graphicsDevice.canvas or querySelector("canvas"))');
-            }
 
             applyCamera(this.cameraManager.camera);
 
@@ -828,34 +681,6 @@ z: ${cameraInfo.target.z.toFixed(6)}
         });
     }
 
-    /** 在 cameraFrame.update 前设置 bloomMaskTexture 到 scope，并保证仅包装一次 update */
-    private injectBloomMaskTextureBeforeUpdate(cameraFrame: CameraFrame) {
-        const graphicsDevice = this.global.app.graphicsDevice;
-        const setBloomMask = () => {
-            const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomBrush?: boolean; threshold?: number } | undefined;
-            const maskTex = (bloom?.bloomBrush && this.bloomBrushPainter)
-                ? this.bloomBrushPainter.getTexture()
-                : (this.hasCommittedBloomMask && this.bloomCommittedMaskTexture)
-                    ? this.bloomCommittedMaskTexture
-                    : this.bloomBrushWhiteTexture;
-            try {
-                if (maskTex) graphicsDevice.scope.resolve('bloomMaskTexture').setValue(maskTex);
-                const th = Math.max(0, Math.min(5, Number(bloom?.threshold ?? 0.2)));
-                graphicsDevice.scope.resolve('bloomThreshold').setValue(th);
-            } catch (_) {}
-        };
-        if (!this._cameraFrameUpdateWrapped) {
-            this._cameraFrameUpdateWrapped = true;
-            const orig = cameraFrame.update.bind(cameraFrame);
-            cameraFrame.update = () => {
-                setBloomMask();
-                orig();
-            };
-        } else {
-            setBloomMask();
-        }
-    }
-
     // configure camera based on application mode and post process settings
     configureCamera(settings: ExperienceSettings) {
         const { global } = this;
@@ -882,37 +707,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 : [];
             cameraFrame.enabled = true;
             applyPostEffectSettings(cameraFrame, postEffectSettings);
-
-            // threshold 仅用于 Bloom Debug 视图；Bloom Brush 与 Bloom Debug 互斥
-            const bloom = postEffectSettings.bloom as { bloomDebug?: boolean; bloomBrush?: boolean; bloomBrushSize?: number; threshold?: number };
-            const bloomDebug = !!bloom.bloomDebug;
-            const bloomBrush = !!bloom.bloomBrush;
-            const th = Math.max(0, Math.min(5, Number(bloom.threshold ?? 0.2)));
-            cameraFrame.debug = bloomDebug ? 'bloom' : null;
-            if (this.bloomDebugFilter) {
-                this.bloomDebugFilter.threshold = th;
-                this.bloomDebugFilter.enabled = bloomDebug && !bloomBrush;
-                this.bloomDebugFilter.camera = null;
-            }
-            // Night Mode + Bloom Brush 合成：同时开启时 BloomBrushFilter 不应用（避免覆盖 NightMode 的 gsplat chunk），
-            // 由 NightMode 使用带 bloom brush 条件的 shader；仅 Bloom Brush 时正常启用 BloomBrushFilter
-            const nightModeOn = this.nightModeScript?.isNightModeEnabled ?? false;
-            const bloomBrushWithNight = bloomBrush && nightModeOn;
-            if (this.bloomBrushFilter) {
-                this.bloomBrushFilter.enabled = bloomBrush && !nightModeOn;
-                this.bloomBrushFilter.maskTexture = this.bloomBrushPainter?.getTexture() ?? null;
-            }
-            if (this.bloomBrushPainter) {
-                this.bloomBrushPainter.setEnabled(bloomBrush);
-                this.bloomBrushPainter.setBrushSize(Math.max(1, Math.min(200, Number(bloom.bloomBrushSize ?? 30))));
-            }
-            if (this.nightModeScript) {
-                const mask = bloomBrushWithNight ? this.bloomBrushPainter?.getTexture() ?? null : null;
-                this.nightModeScript.setBloomBrushParams(bloomBrushWithNight, mask, th, undefined);
-            }
-
-            // 在 cameraFrame.update() 前注入 bloomMaskTexture，确保与引擎 bloom 合成使用同一 scope
-            this.injectBloomMaskTextureBeforeUpdate(cameraFrame);
+            this.bloomController?.applyToCameraFrame(cameraFrame, postEffectSettings);
 
             cameraFrame.update();
 
@@ -927,13 +722,9 @@ z: ${cameraInfo.target.z.toFixed(6)}
             camera.camera.clearColor = new Color(background.color);
         } else {
             if (this.cameraFrame) {
+                this.bloomController?.onCameraFrameDestroyed();
                 this.cameraFrame.destroy();
                 this.cameraFrame = null;
-                this._cameraFrameUpdateWrapped = false;
-            }
-            if (this.bloomDebugFilter) {
-                this.bloomDebugFilter.enabled = false;
-                this.bloomDebugFilter.camera = null;
             }
             if (this.nightModeScript) {
                 this.nightModeScript.setBloomBrushParams(false, null, 0.2, undefined);
