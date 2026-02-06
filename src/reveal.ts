@@ -242,6 +242,13 @@ export class RevealController {
 
         this.currentScript = script;
 
+        // 如果script创建成功，设置效果播放结束的回调（用于在 reveal 播完后再开始动画等）
+        if (script) {
+            (script as any).onRevealComplete = () => {
+                this.global.events.fire('revealComplete');
+            };
+        }
+
         // 如果script创建成功
         if (script) {
             if (this.config.autoStart) {

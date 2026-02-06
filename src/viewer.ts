@@ -325,9 +325,13 @@ class Viewer {
             }
         });
 
-        // unpause the animation on first frame
+        // unpause the animation on first frame（有 reveal 时保持暂停，等 reveal 播完再由 revealComplete 回调解除）
         events.on('firstFrame', () => {
-            state.animationPaused = !!config.noanim;
+            if (state.hasRevealEffect) {
+                state.animationPaused = true;
+            } else {
+                state.animationPaused = !!config.noanim;
+            }
         });
 
         // wait for the model to load
@@ -351,6 +355,17 @@ class Viewer {
             this.inputController.setMoveSpeedFromSceneSize(sceneSize);
 
             this.revealController = new RevealController(global, sceneBound, results[0]);
+
+            // 有 reveal 时：等 reveal 播完再开始动画（监听 revealComplete）
+            if (state.hasRevealEffect) {
+                events.once('revealComplete', () => {
+                    if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim) {
+                        state.animationStarted = true;
+                        state.animationPaused = false;
+                        events.fire('animationStarted');
+                    }
+                });
+            }
 
             this.cameraManager = new CameraManager(global, sceneBound);
             applyCamera(this.cameraManager.camera);
@@ -507,7 +522,6 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 let watermark = 1;
                 // For custom LOD mode, track the maximum progress to prevent regression
                 let maxProgress = 0;
-                let animationStarted = false; // Track if animation has started
                 let progressUIHidden = false; // Track if progress UI has been hidden
                 const PROGRESS_THRESHOLD = 50; // Hide progress UI when progress reaches this threshold
                 const readyHandler = (camera: CameraComponent, layer: Layer, ready: boolean, loading: number) => {
@@ -519,8 +533,10 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         state.readyToRender = true;
 
                         // In LOD mode, ensure animation is started (in case it wasn't started earlier)
-                        if (isCustomLod && settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim) {
+                        // 有 reveal 时不在此处启动动画，等 revealComplete 后再启动
+                        if (isCustomLod && settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !state.hasRevealEffect) {
                             console.log('LOD mode: all chunks loaded, ensuring animation is playing');
+                            state.animationStarted = true;
                             state.animationPaused = false;
                         }
 
@@ -562,7 +578,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         
                         let progress: number;
                         // In custom LOD mode, if animation has started, show 100% progress
-                        if (isCustomLod && animationStarted) {
+                        if (isCustomLod && state.animationStarted) {
                             progress = 100;
                         } else {
                             progress = Math.trunc(current / watermark * 100);
@@ -582,9 +598,9 @@ z: ${cameraInfo.target.z.toFixed(6)}
                             // Fire event to hide progress UI
                             events.fire('progressThresholdReached', progress);
                             
-                            // Start animation if available
-                            if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !animationStarted) {
-                                animationStarted = true;
+                            // Start animation if available（有 reveal 时由 revealComplete 回调启动，此处不启动）
+                            if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !state.animationStarted && !state.hasRevealEffect) {
+                                state.animationStarted = true;
                                 console.log(`Progress reached ${PROGRESS_THRESHOLD}%, starting animation`);
                                 state.animationPaused = false;
                                 events.fire('animationStarted');

@@ -371,6 +371,7 @@ class GsplatRevealRain extends GsplatShaderEffect {
         // This ensures the last frame is rendered with correct values
         if (this.isEffectComplete()) {
             console.log('Rain effect completed, disabling');
+            this.notifyRevealComplete();
             this.enabled = false;
             return;
         }

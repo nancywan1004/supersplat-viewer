@@ -195,6 +195,7 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         animationDuration: 0,
         animationTime: 0,
         animationPaused: true,
+        animationStarted: false,
         hasAR: false,
         hasVR: false,
         isFullscreen: false,

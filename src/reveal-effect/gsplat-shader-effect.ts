@@ -69,6 +69,17 @@ class GsplatShaderEffect extends Script {
     materialsApplied: Set<Material> = new Set();
 
     /**
+     * Optional callback when the reveal effect has finished playing.
+     * Set by RevealController to fire 'revealComplete' event.
+     */
+    onRevealComplete?: () => void;
+
+    /**
+     * Whether we have already fired the completion callback (only fire once).
+     */
+    private _revealCompleteFired: boolean = false;
+
+    /**
      * Material created handler
      * @type {any}
      * @private
@@ -93,8 +104,9 @@ class GsplatShaderEffect extends Script {
         // Listen to enable/disable events
         this.on('enable', () => {
             console.log('GsplatShaderEffect enabled for entity:', this.entity.name);
-            // Reset effect time when enabling
+            // Reset effect time and completion flag when enabling
             this.effectTime = 0;
+            this._revealCompleteFired = false;
 
             // Ensure we're initialized
             if (!this.initialized && this.entity.gsplat) {
@@ -424,6 +436,16 @@ class GsplatShaderEffect extends Script {
      */
     updateEffect(effectTime: number, dt: number) {
         // Optional to override
+    }
+
+    /**
+     * Called by subclasses when the reveal effect has completed.
+     * Invokes onRevealComplete callback once, then subclasses typically set enabled = false.
+     */
+    notifyRevealComplete() {
+        if (this._revealCompleteFired) return;
+        this._revealCompleteFired = true;
+        this.onRevealComplete?.();
     }
 }
 

@@ -314,6 +314,7 @@ class GsplatRevealRadial extends GsplatShaderEffect {
         // Check if effect is complete and disable if so
         if (this.isEffectComplete()) {
             console.log('Radial effect completed, disabling');
+            this.notifyRevealComplete();
             this.enabled = false;
             return;
         }
