@@ -156,7 +156,7 @@ class GsplatShaderEffect extends Script {
 
         // Remove custom shader chunk from all materials
         this.materialsApplied.forEach((material) => {
-            material.getShaderChunks(shaderLanguage).delete('gsplatCustomizeVS');
+            material.getShaderChunks(shaderLanguage).delete('gsplatModifyVS');
             material.update();
         });
 
@@ -284,7 +284,7 @@ class GsplatShaderEffect extends Script {
         console.log('Applying shader to material:', material.name, 'Language:', shaderLanguage);
         console.log('Custom shader length:', customShader.length);
 
-        material.getShaderChunks(shaderLanguage).set('gsplatCustomizeVS', customShader);
+        material.getShaderChunks(shaderLanguage).set('gsplatModifyVS', customShader);
         material.update();
         
         console.log('Shader applied and material updated');
