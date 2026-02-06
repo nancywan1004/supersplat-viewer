@@ -51,19 +51,19 @@ const screenToWorld = (camera: CameraComponent, dx: number, dy: number, dz: numb
     const halfSize = tmpV2.set(0, 0, 0);
     if (projection === PROJECTION_PERSPECTIVE) {
         const halfSlice = dz * Math.tan(0.5 * fov * math.DEG_TO_RAD);
-        // if (horizontalFov) {
-        //     halfSize.set(
-        //         halfSlice,
-        //         halfSlice / aspectRatio,
-        //         0
-        //     );
-        // } else {
+        if (horizontalFov) {
+            halfSize.set(
+                halfSlice,
+                halfSlice / aspectRatio,
+                0
+            );
+        } else {
             halfSize.set(
                 halfSlice * aspectRatio,
                 halfSlice,
                 0
             );
-        // }
+        }
     } else {
         halfSize.set(
             orthoHeight * aspectRatio,
@@ -76,6 +76,28 @@ const screenToWorld = (camera: CameraComponent, dx: number, dy: number, dz: numb
     out.mul(halfSize);
 
     return out;
+};
+
+// patch keydown and keyup to ignore events with meta key otherwise
+// keys can get stuck on macOS.
+const patchKeyboardMeta = (desktopInput: any) => {
+    const origOnKeyDown = desktopInput._onKeyDown;
+    desktopInput._onKeyDown = (event: KeyboardEvent) => {
+        if (event.key === 'Meta') {
+            desktopInput._keyNow.fill(0);
+        } else if (!event.metaKey) {
+            origOnKeyDown(event);
+        }
+    };
+
+    const origOnKeyUp = desktopInput._onKeyUp;
+    desktopInput._onKeyUp = (event: KeyboardEvent) => {
+        if (event.key === 'Meta') {
+            desktopInput._keyNow.fill(0);
+        } else if (!event.metaKey) {
+            origOnKeyUp(event);
+        }
+    };
 };
 
 class InputController {
@@ -110,10 +132,12 @@ class InputController {
         rotate: [0, 0, 0]
     });
 
-    joystick: {
-        base: [number, number] | null,
-        stick: [number, number] | null
-    } = { base: null, stick: null };
+    // Touch joystick input values (-1 to 1), from UI when joystick is enabled
+    private _touchJoystickX: number = 0; // negative = left, positive = right
+    private _touchJoystickY: number = 0; // negative = forward, positive = backward
+
+    // When false (e.g. UI disables joystick), use two-finger fly; when true, use joystick for fly move/look
+    private _joystickEnabled: boolean = false;
 
     // this gets overridden by the viewer based on scene size
     moveSpeed: number = 10;
@@ -148,62 +172,47 @@ class InputController {
         const { app, camera, events, state } = global;
         const canvas = app.graphicsDevice.canvas as HTMLCanvasElement;
 
+        patchKeyboardMeta(this._desktopInput);
+
         this._desktopInput.attach(canvas);
         this._orbitInput.attach(canvas);
         this._flyInput.attach(canvas);
-        
-        // Initialize custom mobile fly input
+
+        // Initialize custom mobile fly input (two-finger move/look as default; joystick disabled in UI)
         this._mobileFlyInput = new MobileFlyInput(canvas);
-        
-        // Try to find and attach joystick element immediately
+
+        // Joystick element: when UI enables joystick we can attach; when hidden we disable
         const joystickElement = document.getElementById('joystickBase');
         if (joystickElement) {
             if (joystickElement.classList.contains('hidden')) {
-                // Joystick is hidden, disable joystick but keep look enabled
-                console.log('InputController: Joystick is hidden, disabling joystick functionality');
                 this._mobileFlyInput.setJoystickEnabled(false);
             } else {
-                console.log('InputController: Found joystick element immediately', joystickElement);
                 this._mobileFlyInput.attachJoystickElement(joystickElement);
             }
-        } else {
-            console.log('InputController: Joystick element not found, waiting for event');
         }
-        
-        // Also listen for the event in case it comes later
         events.on('joystickElementReady', (element: HTMLElement) => {
-            console.log('InputController: Received joystickElementReady event', element);
+            this._joystickEnabled = true;
             if (this._mobileFlyInput) {
                 this._mobileFlyInput.attachJoystickElement(element);
-            } else {
-                console.error('InputController: _mobileFlyInput is null!');
             }
         });
-        
-        // Listen for joystick disabled event
         events.on('joystickDisabled', () => {
-            console.log('InputController: Joystick disabled');
+            this._joystickEnabled = false;
+            this._touchJoystickX = 0;
+            this._touchJoystickY = 0;
             if (this._mobileFlyInput) {
                 this._mobileFlyInput.setJoystickEnabled(false);
             }
         });
-        
-        // Reset mobile fly input when switching away from fly mode
+        // Incoming (main) joystick logic: UI fires this when user drags the joystick; only used when _joystickEnabled
+        events.on('joystickInput', (value: { x: number; y: number }) => {
+            this._touchJoystickX = value.x;
+            this._touchJoystickY = value.y;
+        });
         events.on('cameraModeChanged', (newMode, _prevMode) => {
             if (newMode !== 'fly' && this._mobileFlyInput) {
                 this._mobileFlyInput.reset();
             }
-        });
-
-        // convert events to joystick state - always show in bottom left
-        this._flyInput.on('joystick:position:left', ([bx, by, sx, sy]) => {
-            if (bx < 0 || by < 0 || sx < 0 || sy < 0) {
-                this.joystick.base = null;
-                this.joystick.stick = null;
-                return;
-            }
-            this.joystick.base = [bx, by];
-            this.joystick.stick = [sx - bx, sy - by];
         });
 
         // Track touch count changes for two-finger detection
@@ -358,8 +367,8 @@ class InputController {
         const { camera } = this.global.camera;
         
         const { touch, pinch, count } = this._orbitInput.read();
-        const { leftInput, rightInput } = this._flyInput.read();
         const { leftStick, rightStick } = this._gamepadInput.read();
+        const { leftInput, rightInput } = this._flyInput.read();
 
         // update state
         this._state.axis.add(tmpV1.set(
@@ -437,69 +446,67 @@ class InputController {
 
         // mobile move
         v.set(0, 0, 0);
-        
-        // Two-finger pan: works in both orbit and fly modes
-        const twoFingerPanMove = screenToWorld(camera, touch[0], touch[1], effectivePanDistance);
-        v.add(twoFingerPanMove.mulScalar(pan));
-        
-        // Fly mode: use custom mobile fly input for separated joystick and look
-        // Also works on desktop for debugging
-        if (this._mobileFlyInput) {
-            const { moveInput } = this._mobileFlyInput;
-            flyMove.set(moveInput.x, 0, -moveInput.y);
+
+        if (this._joystickEnabled) {
+            // Incoming (main) joystick logic: orbit pan + touch joystick for fly move
+            const orbitMove = screenToWorld(camera, touch[0], touch[1], effectivePanDistance);
+            v.add(orbitMove.mulScalar(orbit * pan));
+            flyMove.set(this._touchJoystickX, 0, -this._touchJoystickY);
             v.add(flyMove.mulScalar(fly * this.moveSpeed * dt));
         } else {
-            // Fallback to DualGestureSource only if MobileFlyInput is not available
-            flyMove.set(leftInput[0], 0, -leftInput[1]);
-            v.add(flyMove.mulScalar(fly * this.moveSpeed * dt));
+            // Two-finger pan + MobileFlyInput move (default when UI disables joystick)
+            const twoFingerPanMove = screenToWorld(camera, touch[0], touch[1], effectivePanDistance);
+            v.add(twoFingerPanMove.mulScalar(pan));
+            if (this._mobileFlyInput) {
+                const { moveInput } = this._mobileFlyInput;
+                flyMove.set(moveInput.x, 0, -moveInput.y);
+                v.add(flyMove.mulScalar(fly * this.moveSpeed * dt));
+            } else {
+                flyMove.set(leftInput[0], 0, -leftInput[1]);
+                v.add(flyMove.mulScalar(fly * this.moveSpeed * dt));
+            }
         }
-        
+
         // Two-finger pinch zoom: works in both orbit and fly modes
-        // In orbit mode: zoom in/out around target
-        // In fly mode: move forward/backward
         pinchMove.set(0, 0, pinch[0]);
         v.add(pinchMove.mulScalar(double * this.pinchSpeed * dt));
-        
+
         // Need to flip z axis for orbit camera (same as desktop move)
         deltas.move.append([v.x, v.y, orbit ? v.z : -v.z]);
 
         // mobile rotate
         v.set(0, 0, 0);
-        
-        // Check if two-finger gesture is in rotate mode
-        const isTwoFingerRotate = this._mobileFlyInput && this._mobileFlyInput.getTwoFingerGestureMode() === 'rotate';
-        
-        // Auto-switch to fly mode when rotate gesture is detected
-        if (isTwoFingerRotate && state.cameraMode === 'orbit') {
-            state.cameraMode = 'fly';
-            console.log('🔄 Auto-switched to Fly mode (rotate gesture detected)');
-        }
-        
-        // Only apply orbit rotate and pan if NOT in two-finger rotate mode
-        if (!isTwoFingerRotate) {
+
+        if (this._joystickEnabled) {
+            // Incoming (main) joystick logic: orbit rotate + single-finger look in fly (joystick has its own touches)
             orbitRotate.set(touch[0], touch[1], 0);
             v.add(orbitRotate.mulScalar(orbit * (1 - pan) * this.orbitSpeed * dt));
-        }
-        
-        // Fly mode: use custom mobile fly input for look around
-        // Also works on desktop for debugging
-        if (this._mobileFlyInput) {
-            const { lookInput, rollInput } = this._mobileFlyInput;
-            flyRotate.set(lookInput.x, lookInput.y, 0);
-            v.add(flyRotate.mulScalar(fly * this.orbitSpeed * orbitFactor * dt * 0.8)); // Increased for more responsive control
-            
-            // Add two-finger rotation roll control (works in fly mode)
-            // Convert angle delta to roll speed
-            const rollSensitivity = 3; // Adjust sensitivity as needed
-            v.z += rollInput * fly * rollSensitivity;
+            flyRotate.set(touch[0], touch[1], 0);
+            v.add(flyRotate.mulScalar(fly * (1 - double) * this.orbitSpeed * orbitFactor * 1.25 * dt));
+            deltas.rotate.append([v.x, v.y, v.z]);
         } else {
-            // Fallback to DualGestureSource only if MobileFlyInput is not available
-            flyRotate.set(rightInput[0], rightInput[1], 0);
-            v.add(flyRotate.mulScalar(fly * this.orbitSpeed * orbitFactor * dt));
-        }
-        // Only append if there's actual mobile input (don't override desktop roll with 0)
-        if (v.x !== 0 || v.y !== 0 || v.z !== 0) {
-            deltas.rotate.append([v.x, v.y, v.z]); // Now includes roll control from two-finger rotation
+            // Two-finger rotate + MobileFlyInput look/roll (default when UI disables joystick)
+            const isTwoFingerRotate = this._mobileFlyInput && this._mobileFlyInput.getTwoFingerGestureMode() === 'rotate';
+            if (isTwoFingerRotate && state.cameraMode === 'orbit') {
+                state.cameraMode = 'fly';
+            }
+            if (!isTwoFingerRotate) {
+                orbitRotate.set(touch[0], touch[1], 0);
+                v.add(orbitRotate.mulScalar(orbit * (1 - pan) * this.orbitSpeed * dt));
+            }
+            if (this._mobileFlyInput) {
+                const { lookInput, rollInput } = this._mobileFlyInput;
+                flyRotate.set(lookInput.x, lookInput.y, 0);
+                v.add(flyRotate.mulScalar(fly * this.orbitSpeed * orbitFactor * dt * 0.8));
+                const rollSensitivity = 3;
+                v.z += rollInput * fly * rollSensitivity;
+            } else {
+                flyRotate.set(rightInput[0], rightInput[1], 0);
+                v.add(flyRotate.mulScalar(fly * this.orbitSpeed * orbitFactor * dt));
+            }
+            if (v.x !== 0 || v.y !== 0 || v.z !== 0) {
+                deltas.rotate.append([v.x, v.y, v.z]);
+            }
         }
 
         // gamepad move
@@ -512,32 +519,8 @@ class InputController {
         v.set(0, 0, 0);
         stickRotate.set(rightStick[0], rightStick[1], 0);
         v.add(stickRotate.mulScalar(this.orbitSpeed * orbitFactor * dt));
-        // Only append if there's actual gamepad input (don't override desktop roll with 0)
         if (v.x !== 0 || v.y !== 0) {
-            deltas.rotate.append([v.x, v.y, 0]); // Gamepad doesn't have roll control
-        }
-
-        // update touch joystick UI - always show when using joystick
-        // Auto-switch to fly mode when joystick is used
-        // Works on both touch and desktop (for debugging)
-        if (this._mobileFlyInput) {
-            const { moveInput } = this._mobileFlyInput;
-            const isUsingJoystick = moveInput.x !== 0 || moveInput.y !== 0;
-            
-            if (isUsingJoystick && state.cameraMode !== 'fly') {
-                state.cameraMode = 'fly';
-            }
-            
-            // Update joystick visual position
-            const joystickPos = this._mobileFlyInput.getJoystickVisualPosition();
-            if (joystickPos) {
-                events.fire('touchJoystickUpdate', 
-                    [joystickPos.baseX, joystickPos.baseY], 
-                    [joystickPos.stickX, joystickPos.stickY]
-                );
-            } else {
-                events.fire('touchJoystickUpdate', null, null);
-            }
+            deltas.rotate.append([v.x, v.y, 0]);
         }
     }
 }

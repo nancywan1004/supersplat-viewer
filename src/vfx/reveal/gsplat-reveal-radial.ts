@@ -30,7 +30,7 @@ float hash(vec3 p) {
     return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
 }
 
-void modifyCenter(inout vec3 center) {
+void modifySplatCenter(inout vec3 center) {
     initShared(center);
     
     // Early exit optimization
@@ -38,76 +38,49 @@ void modifyCenter(inout vec3 center) {
     
     // Only apply oscillation if lift wave hasn't fully passed
     bool wavesActive = g_liftTime <= 0.0 || g_dist > g_liftWavePos - 1.5;
-    // if (wavesActive) {
-    //     // Apply oscillation with per-splat phase offset
-    //     float phase = hash(center) * 6.28318;
-    //     center.y += sin(uTime * 3.0 + phase) * uOscillationIntensity * 0.25;
-    // }
-    
-    // Apply lift effect near the wave edge
-    float distToLiftWave = abs(g_dist - g_liftWavePos);
-    // if (distToLiftWave < 1.0 && g_liftTime > 0.0) {
-    //     // Create a smooth lift curve (peaks at wave edge)
-    //     // Lift is 0.9x the oscillation intensity (30% of original 3x)
-    //     float liftAmount = (1.0 - distToLiftWave) * sin(distToLiftWave * 3.14159);
-    //     center.y += liftAmount * uOscillationIntensity * 0.9;
-    // }
+    // Apply lift effect near the wave edge - no-op in current version
 }
 
-void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
+void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
     // Early exit for distant splats - hide them
     if (g_dist > uEndRadius) {
-        gsplatMakeRound(covA, covB, 0.0);
+        gsplatMakeSpherical(scale, 0.0);
         return;
     }
     
-    // Determine scale and phase
-    float scale;
+    // Determine size factor and phase (0=hide, 0.1=dot, 1=full)
+    float scaleFactor;
     bool isLiftWave = g_liftTime > 0.0 && g_liftWavePos > g_dist;
     
     if (isLiftWave) {
-        // Lift wave: transition from dots to full size
-        scale = (g_liftWavePos >= g_dist + 2.0) ? 1.0 : mix(0.1, 1.0, (g_liftWavePos - g_dist) * 0.5);
+        scaleFactor = (g_liftWavePos >= g_dist + 2.0) ? 1.0 : mix(0.1, 1.0, (g_liftWavePos - g_dist) * 0.5);
     } else if (g_dist > g_dotWavePos + 1.0) {
-        // Before dot wave: invisible
-        gsplatMakeRound(covA, covB, 0.0);
+        gsplatMakeSpherical(scale, 0.0);
         return;
     } else if (g_dist > g_dotWavePos - 1.0) {
-        // Dot wave front: scale from 0 to 0.1 with 2x peak at center
         float distToWave = abs(g_dist - g_dotWavePos);
-        scale = (distToWave < 0.5) 
+        scaleFactor = (distToWave < 0.5) 
             ? mix(0.1, 0.2, 1.0 - distToWave * 2.0)
             : mix(0.0, 0.1, smoothstep(g_dotWavePos + 1.0, g_dotWavePos - 1.0, g_dist));
     } else {
-        // After dot wave, before lift: small dots
-        scale = 0.1;
+        scaleFactor = 0.1;
     }
     
-    // Apply scale to covariance
-    if (scale >= 1.0) {
-        // Fully revealed: original shape and size (no-op)
-        return;
-    } else if (isLiftWave) {
-        // Lift wave: lerp from round dots to original shape
-        float t = (scale - 0.1) * 1.111111; // normalize [0.1, 1.0] to [0, 1]
-        float dotSize = scale * 0.05;
-        float originalSize = gsplatExtractSize(covA, covB);
+    if (scaleFactor >= 1.0) {
+        return; // Fully revealed: no-op
+    }
+    float originalSize = gsplatGetSizeFromScale(scale);
+    if (isLiftWave) {
+        float t = (scaleFactor - 0.1) * 1.111111;
+        float dotSize = scaleFactor * 0.05;
         float finalSize = mix(dotSize, originalSize, t);
-        
-        // Lerp between round and scaled original
-        vec3 origCovA = covA * (scale * scale);
-        vec3 origCovB = covB * (scale * scale);
-        gsplatMakeRound(covA, covB, finalSize);
-        covA = mix(covA, origCovA, t);
-        covB = mix(covB, origCovB, t);
+        gsplatMakeSpherical(scale, finalSize);
     } else {
-        // Dot phase: round with absolute size, but don't make small splats larger
-        float originalSize = gsplatExtractSize(covA, covB);
-        gsplatMakeRound(covA, covB, min(scale * 0.05, originalSize));
+        gsplatMakeSpherical(scale, min(scaleFactor * 0.05, originalSize));
     }
 }
 
-void modifyColor(vec3 center, inout vec4 color) {
+void modifySplatColor(vec3 center, inout vec4 color) {
     // Use shared globals
     if (g_dist > uEndRadius) return;
     
@@ -155,88 +128,54 @@ fn hash(p: vec3f) -> f32 {
     return fract(sin(dot(p, vec3f(127.1, 311.7, 74.7))) * 43758.5453);
 }
 
-fn modifyCenter(center: ptr<function, vec3f>) {
+fn modifySplatCenter(center: ptr<function, vec3f>) {
     initShared(*center);
     
-    // Early exit optimization
     if (g_dist > uniform.uEndRadius) {
         return;
     }
-    
-    // Only apply oscillation if lift wave hasn't fully passed
-    let wavesActive = g_liftTime <= 0.0 || g_dist > g_liftWavePos - 1.5;
-    // if (wavesActive) {
-    //     // Apply oscillation with per-splat phase offset
-    //     let phase = hash(*center) * 6.28318;
-    //     (*center).y += sin(uniform.uTime * 3.0 + phase) * uniform.uOscillationIntensity * 0.25;
-    // }
-    
-    // Apply lift effect near the wave edge
-    let distToLiftWave = abs(g_dist - g_liftWavePos);
-    // if (distToLiftWave < 1.0 && g_liftTime > 0.0) {
-    //     // Create a smooth lift curve (peaks at wave edge)
-    //     // Lift is 0.9x the oscillation intensity (30% of original 3x)
-    //     let liftAmount = (1.0 - distToLiftWave) * sin(distToLiftWave * 3.14159);
-    //     (*center).y += liftAmount * uniform.uOscillationIntensity * 0.9;
-    // }
 }
 
-fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<function, vec3f>, covB: ptr<function, vec3f>) {
-    // Early exit for distant splats - hide them
+fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
     if (g_dist > uniform.uEndRadius) {
-        gsplatMakeRound(covA, covB, 0.0);
+        gsplatMakeSpherical(scale, 0.0);
         return;
     }
     
-    // Determine scale and phase
-    var scale: f32;
+    var scaleFactor: f32;
     let isLiftWave = g_liftTime > 0.0 && g_liftWavePos > g_dist;
     
     if (isLiftWave) {
-        // Lift wave: transition from dots to full size
-        scale = select(mix(0.1, 1.0, (g_liftWavePos - g_dist) * 0.5), 1.0, g_liftWavePos >= g_dist + 2.0);
+        scaleFactor = select(mix(0.1, 1.0, (g_liftWavePos - g_dist) * 0.5), 1.0, g_liftWavePos >= g_dist + 2.0);
     } else if (g_dist > g_dotWavePos + 1.0) {
-        // Before dot wave: invisible
-        gsplatMakeRound(covA, covB, 0.0);
+        gsplatMakeSpherical(scale, 0.0);
         return;
     } else if (g_dist > g_dotWavePos - 1.0) {
-        // Dot wave front: scale from 0 to 0.1 with 2x peak at center
         let distToWave = abs(g_dist - g_dotWavePos);
-        scale = select(
+        scaleFactor = select(
             mix(0.0, 0.1, smoothstep(g_dotWavePos + 1.0, g_dotWavePos - 1.0, g_dist)),
             mix(0.1, 0.2, 1.0 - distToWave * 2.0),
             distToWave < 0.5
         );
     } else {
-        // After dot wave, before lift: small dots
-        scale = 0.1;
+        scaleFactor = 0.1;
     }
     
-    // Apply scale to covariance
-    if (scale >= 1.0) {
-        // Fully revealed: original shape and size (no-op)
+    if (scaleFactor >= 1.0) {
         return;
-    } else if (isLiftWave) {
-        // Lift wave: lerp from round dots to original shape
-        let t = (scale - 0.1) * 1.111111; // normalize [0.1, 1.0] to [0, 1]
-        let dotSize = scale * 0.05;
-        let originalSize = gsplatExtractSize(*covA, *covB);
+    }
+    let originalSize = gsplatGetSizeFromScale(*scale);
+    if (isLiftWave) {
+        let t = (scaleFactor - 0.1) * 1.111111;
+        let dotSize = scaleFactor * 0.05;
         let finalSize = mix(dotSize, originalSize, t);
-        
-        // Lerp between round and scaled original
-        let origCovA = *covA * (scale * scale);
-        let origCovB = *covB * (scale * scale);
-        gsplatMakeRound(covA, covB, finalSize);
-        *covA = mix(*covA, origCovA, t);
-        *covB = mix(*covB, origCovB, t);
+        gsplatMakeSpherical(scale, finalSize);
     } else {
-        // Dot phase: round with absolute size, but don't make small splats larger
-        let originalSize = gsplatExtractSize(*covA, *covB);
-        gsplatMakeRound(covA, covB, min(scale * 0.05, originalSize));
+        gsplatMakeSpherical(scale, min(scaleFactor * 0.05, originalSize));
     }
 }
 
-fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
+fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     // Use shared globals
     if (g_dist > uniform.uEndRadius) {
         return;
@@ -375,6 +314,7 @@ class GsplatRevealRadial extends GsplatShaderEffect {
         // Check if effect is complete and disable if so
         if (this.isEffectComplete()) {
             console.log('Radial effect completed, disabling');
+            this.notifyRevealComplete();
             this.enabled = false;
             return;
         }

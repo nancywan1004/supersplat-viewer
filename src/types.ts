@@ -36,6 +36,7 @@ type State = {
     animationDuration: number;
     animationTime: number;
     animationPaused: boolean;
+    animationStarted: boolean;                  // true once animation has been started (e.g. after reveal or at progress threshold)
     hasAR: boolean;
     hasVR: boolean;
     isFullscreen: boolean;

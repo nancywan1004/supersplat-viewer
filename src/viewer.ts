@@ -176,6 +176,13 @@ class Viewer {
         app.xr.on('start', () => this.configureCamera(settings));
         app.xr.on('end', () => this.configureCamera(settings));
 
+        const updateHorizontalFov = () => {
+            camera.camera.horizontalFov = graphicsDevice.width > graphicsDevice.height;
+            app.renderNextFrame = true;
+        };
+        graphicsDevice.on('resizecanvas', updateHorizontalFov);
+        updateHorizontalFov();
+
         // handle canvas resize - update aspect ratio and trigger render
         const handleResize = () => {
             camera.camera.aspectRatio = graphicsDevice.width / graphicsDevice.height;
@@ -345,9 +352,13 @@ class Viewer {
             }
         });
 
-        // unpause the animation on first frame
+        // unpause the animation on first frame（有 reveal 时保持暂停，等 reveal 播完再由 revealComplete 回调解除）
         events.on('firstFrame', () => {
-            state.animationPaused = !!config.noanim;
+            if (state.hasRevealEffect) {
+                state.animationPaused = true;
+            } else {
+                state.animationPaused = !!config.noanim;
+            }
         });
 
         // wait for the model to load
@@ -374,6 +385,17 @@ class Viewer {
             this.cameraManager = new CameraManager(global, sceneBound);
             
             this.revealController = new RevealController(global, sceneBound, results[0], this.cameraManager);
+
+            // 有 reveal 时：等 reveal 播完再开始动画（监听 revealComplete）
+            if (state.hasRevealEffect) {
+                events.once('revealComplete', () => {
+                    if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim) {
+                        state.animationStarted = true;
+                        state.animationPaused = false;
+                        events.fire('animationStarted');
+                    }
+                });
+            }
             
             // Initialize night mode script on root entity
             if (!app.root.script) {
@@ -504,52 +526,33 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 // Default quality ranges (used when lodLoader is not enabled)
                 const ranges = {
                     mobile: {
-                        low: {
-                            range: [2, 8],
-                            splatBudget: 1
-                        },
-                        high: {
-                            range: [1, 8],
-                            splatBudget: 2
-                        }
+                        low: 1,
+                        high: 2
                     },
                     desktop: {
-                        low: {
-                            range: [1, 8],
-                            splatBudget: 3
-                        },
-                        high: {
-                            range: [0, 8],
-                            splatBudget: 6
-                        }
+                        low: 3,
+                        high: 6
                     }
                 };
 
                 const quality = platform.mobile ? ranges.mobile : ranges.desktop;
 
                 // If using custom LOD (lodLoader), apply component-level parameters from preset stored in scene
-                // Otherwise, use default LOD settings
                 if (isCustomLod) {
                     const gsplatScene = (app.scene as any).gsplat;
                     if (gsplatScene && gsplatScene.lodRangeMax !== undefined) {
-                        // Apply splatBudget from preset
                         if (gsplatScene.splatBudget !== undefined) {
                             results[0].gsplat.splatBudget = gsplatScene.splatBudget * 1000000;
                         }
-                        // Force initial load to include lod0, temporarily set range to [0, max]
-                        // The preset range will be restored after initial load completes via updateLod()
                         gsplat.lodRangeMin = 0;
                         gsplat.lodRangeMax = gsplatScene.lodRangeMax;
                     } else {
-                        // Fallback: start with lod0 to ensure initial high quality
                         gsplat.lodRangeMin = 0;
                         gsplat.lodRangeMax = 5;
                     }
                 } else {
-                    // Use default LOD settings, start in low quality mode so we can get user interacting asap
-                    gsplat.lodRangeMin = quality.low.range[0];
-                    gsplat.lodRangeMax = quality.low.range[1];
-                    results[0].gsplat.splatBudget = quality.low.splatBudget * 1000000;
+                    // Default LOD: start in low quality so we can get user interacting asap
+                    results[0].gsplat.splatBudget = quality.low * 1000000;
                 }
 
                 // these two allow LOD behind camera to drop, saves lots of splats
@@ -568,7 +571,6 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 let watermark = 1;
                 // For custom LOD mode, track the maximum progress to prevent regression
                 let maxProgress = 0;
-                let animationStarted = false; // Track if animation has started
                 let progressUIHidden = false; // Track if progress UI has been hidden
                 const PROGRESS_THRESHOLD = 50; // Hide progress UI when progress reaches this threshold
                 const readyHandler = (camera: CameraComponent, layer: Layer, ready: boolean, loading: number) => {
@@ -580,30 +582,27 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         state.readyToRender = true;
 
                         // In LOD mode, ensure animation is started (in case it wasn't started earlier)
-                        if (isCustomLod && settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim) {
+                        // 有 reveal 时不在此处启动动画，等 revealComplete 后再启动
+                        if (isCustomLod && settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !state.hasRevealEffect) {
                             console.log('LOD mode: all chunks loaded, ensuring animation is playing');
+                            state.animationStarted = true;
                             state.animationPaused = false;
                         }
 
                         // handle quality mode changes
                         const updateLod = () => {
                             if (isCustomLod) {
-                                // If using custom LOD (lodLoader), use the preset range and splatBudget from scene settings
                                 const gsplatScene = (app.scene as any).gsplat;
                                 if (gsplatScene && gsplatScene.lodRangeMin !== undefined) {
                                     gsplat.lodRangeMin = gsplatScene.lodRangeMin;
                                     gsplat.lodRangeMax = gsplatScene.lodRangeMax;
-                                    // Ensure splatBudget is set from preset
                                     if (gsplatScene.splatBudget !== undefined) {
                                         results[0].gsplat.splatBudget = gsplatScene.splatBudget * 1000000;
                                     }
                                 }
                             } else {
-                                // For default LOD mode, use the quality ranges
                                 const settings = state.hqMode ? quality.high : quality.low;
-                                gsplat.lodRangeMin = settings.range[0];
-                                gsplat.lodRangeMax = settings.range[1];
-                                results[0].gsplat.splatBudget = settings.splatBudget * 1000000;
+                                results[0].gsplat.splatBudget = settings * 1000000;
                             }
                         };
                         events.on('hqMode:changed', updateLod);
@@ -628,7 +627,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         
                         let progress: number;
                         // In custom LOD mode, if animation has started, show 100% progress
-                        if (isCustomLod && animationStarted) {
+                        if (isCustomLod && state.animationStarted) {
                             progress = 100;
                         } else {
                             progress = Math.trunc(current / watermark * 100);
@@ -648,9 +647,9 @@ z: ${cameraInfo.target.z.toFixed(6)}
                             // Fire event to hide progress UI
                             events.fire('progressThresholdReached', progress);
                             
-                            // Start animation if available
-                            if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !animationStarted) {
-                                animationStarted = true;
+                            // Start animation if available（有 reveal 时由 revealComplete 回调启动，此处不启动）
+                            if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !state.animationStarted && !state.hasRevealEffect) {
+                                state.animationStarted = true;
                                 console.log(`Progress reached ${PROGRESS_THRESHOLD}%, starting animation`);
                                 state.animationPaused = false;
                                 events.fire('animationStarted');
