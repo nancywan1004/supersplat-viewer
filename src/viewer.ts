@@ -455,52 +455,33 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 // Default quality ranges (used when lodLoader is not enabled)
                 const ranges = {
                     mobile: {
-                        low: {
-                            range: [2, 8],
-                            splatBudget: 1
-                        },
-                        high: {
-                            range: [1, 8],
-                            splatBudget: 2
-                        }
+                        low: 1,
+                        high: 2
                     },
                     desktop: {
-                        low: {
-                            range: [1, 8],
-                            splatBudget: 3
-                        },
-                        high: {
-                            range: [0, 8],
-                            splatBudget: 6
-                        }
+                        low: 3,
+                        high: 6
                     }
                 };
 
                 const quality = platform.mobile ? ranges.mobile : ranges.desktop;
 
                 // If using custom LOD (lodLoader), apply component-level parameters from preset stored in scene
-                // Otherwise, use default LOD settings
                 if (isCustomLod) {
                     const gsplatScene = (app.scene as any).gsplat;
                     if (gsplatScene && gsplatScene.lodRangeMax !== undefined) {
-                        // Apply splatBudget from preset
                         if (gsplatScene.splatBudget !== undefined) {
                             results[0].gsplat.splatBudget = gsplatScene.splatBudget * 1000000;
                         }
-                        // Force initial load to include lod0, temporarily set range to [0, max]
-                        // The preset range will be restored after initial load completes via updateLod()
                         gsplat.lodRangeMin = 0;
                         gsplat.lodRangeMax = gsplatScene.lodRangeMax;
                     } else {
-                        // Fallback: start with lod0 to ensure initial high quality
                         gsplat.lodRangeMin = 0;
                         gsplat.lodRangeMax = 5;
                     }
                 } else {
-                    // Use default LOD settings, start in low quality mode so we can get user interacting asap
-                    gsplat.lodRangeMin = quality.low.range[0];
-                    gsplat.lodRangeMax = quality.low.range[1];
-                    results[0].gsplat.splatBudget = quality.low.splatBudget * 1000000;
+                    // Default LOD: start in low quality so we can get user interacting asap
+                    results[0].gsplat.splatBudget = quality.low * 1000000;
                 }
 
                 // these two allow LOD behind camera to drop, saves lots of splats
@@ -539,22 +520,17 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         // handle quality mode changes
                         const updateLod = () => {
                             if (isCustomLod) {
-                                // If using custom LOD (lodLoader), use the preset range and splatBudget from scene settings
                                 const gsplatScene = (app.scene as any).gsplat;
                                 if (gsplatScene && gsplatScene.lodRangeMin !== undefined) {
                                     gsplat.lodRangeMin = gsplatScene.lodRangeMin;
                                     gsplat.lodRangeMax = gsplatScene.lodRangeMax;
-                                    // Ensure splatBudget is set from preset
                                     if (gsplatScene.splatBudget !== undefined) {
                                         results[0].gsplat.splatBudget = gsplatScene.splatBudget * 1000000;
                                     }
                                 }
                             } else {
-                                // For default LOD mode, use the quality ranges
                                 const settings = state.hqMode ? quality.high : quality.low;
-                                gsplat.lodRangeMin = settings.range[0];
-                                gsplat.lodRangeMax = settings.range[1];
-                                results[0].gsplat.splatBudget = settings.splatBudget * 1000000;
+                                results[0].gsplat.splatBudget = settings * 1000000;
                             }
                         };
                         events.on('hqMode:changed', updateLod);
