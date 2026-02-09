@@ -64,13 +64,13 @@ uniform float uBloomBrushActive;
 vec3 l2g(vec3 c) { return pow(c, vec3(1.0 / 2.2)); }
 vec3 g2l(vec3 c) { return pow(c, vec3(2.2)); }
 
-void modifyCenter(inout vec3 center) {
+void modifySplatCenter(inout vec3 center) {
 }
 
-void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
+void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
 }
 
-void modifyColor(vec3 center, inout vec4 color) {
+void modifySplatColor(vec3 center, inout vec4 color) {
     if (uNightFade == 0.0) {
         return;
     }
@@ -181,13 +181,13 @@ uniform uBloomBrushActive: f32;
 fn l2g(c: vec3f) -> vec3f { return pow(c, vec3f(1.0 / 2.2)); }
 fn g2l(c: vec3f) -> vec3f { return pow(c, vec3f(2.2)); }
 
-fn modifyCenter(center: ptr<function, vec3f>) {
+fn modifySplatCenter(center: ptr<function, vec3f>) {
 }
 
-fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<function, vec3f>, covB: ptr<function, vec3f>) {
+fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
 }
 
-fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
+fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     if (uniform.uNightFade == 0.0) {
         return;
     }
