@@ -42,82 +42,52 @@ void initShared(vec3 center) {
     g_tLand = g_tStart + uFlightTime;
 }
 
-void modifyCenter(inout vec3 center) {
+void modifySplatCenter(inout vec3 center) {
     vec3 originalCenter = center;
     initShared(center);
     
-    // Check if animation is complete (after landing transition)
     float timeSinceLanding = uTime - g_tLand;
-    if (timeSinceLanding >= 0.5) return; // Effect complete, no modifications
-    
-    // Early exit optimization during animation
+    if (timeSinceLanding >= 0.5) return;
     if (g_dist3D > uEndRadius) return;
-    
-    // If not started yet, do nothing (will be invisible)
     if (uTime < g_tStart) return;
     
-    // If falling: interpolate Y from elevated to original and apply rotation
     if (uTime < g_tLand) {
         float fallProgress = (uTime - g_tStart) / (g_tLand - g_tStart);
-        
-        // Vertical movement
         center.y += uDistance * (1.0 - fallProgress);
-        
-        // Rotation around Y axis through uCenter
-        float angle = fallProgress * uRotation * 6.283185; // uRotation * 2π
-        vec3 offset = originalCenter - uCenter;
+        float angle = fallProgress * uRotation * 6.283185;
         float cosAngle = cos(angle);
         float sinAngle = sin(angle);
-        offset.x = originalCenter.x - uCenter.x;
-        offset.z = originalCenter.z - uCenter.z;
-        center.x = uCenter.x + offset.x * cosAngle - offset.z * sinAngle;
-        center.z = uCenter.z + offset.x * sinAngle + offset.z * cosAngle;
+        float ox = originalCenter.x - uCenter.x;
+        float oz = originalCenter.z - uCenter.z;
+        center.x = uCenter.x + ox * cosAngle - oz * sinAngle;
+        center.z = uCenter.z + ox * sinAngle + oz * cosAngle;
     }
-    // If landed: stay at original position (no change needed)
 }
 
-void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
-    // Check if animation is complete (after landing transition)
+void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
     float timeSinceLanding = uTime - g_tLand;
-    if (timeSinceLanding >= 0.5) return; // Effect complete, no modifications
-    
-    // Early exit for distant splats during animation
+    if (timeSinceLanding >= 0.5) return;
     if (g_dist3D > uEndRadius) {
-        gsplatMakeRound(covA, covB, 0.0);
+        gsplatMakeSpherical(scale, 0.0);
         return;
     }
-    
-    // Before 2D wave reaches: invisible
     if (uTime < g_tStart) {
-        gsplatMakeRound(covA, covB, 0.0);
+        gsplatMakeSpherical(scale, 0.0);
         return;
     }
-    
-    // During fall and transition after landing
     if (timeSinceLanding < 0.5) {
-        // Still falling or transitioning
-        float originalSize = gsplatExtractSize(covA, covB);
-        
+        float originalSize = gsplatGetSizeFromScale(scale);
         if (timeSinceLanding < 0.0) {
-            // Falling: small round dots
-            gsplatMakeRound(covA, covB, min(uRainSize, originalSize));
+            gsplatMakeSpherical(scale, min(uRainSize, originalSize));
         } else {
-            // Landing transition: lerp from dots to original over 0.5s
-            float t = timeSinceLanding * 2.0; // normalize [0, 0.5] to [0, 1]
+            float t = timeSinceLanding * 2.0;
             float size = mix(uRainSize, originalSize, t);
-            
-            // Lerp between round and original shape
-            vec3 origCovA = covA;
-            vec3 origCovB = covB;
-            gsplatMakeRound(covA, covB, size);
-            covA = mix(covA, origCovA, t);
-            covB = mix(covB, origCovB, t);
+            gsplatMakeSpherical(scale, size);
         }
     }
-    // After transition: original shape/size (no-op)
 }
 
-void modifyColor(vec3 center, inout vec4 color) {
+void modifySplatColor(vec3 center, inout vec4 color) {
     // Check if animation is complete
     float timeSinceLanding = uTime - g_tLand;
     if (timeSinceLanding >= uHitDuration) return; // Effect complete, no modifications
@@ -181,36 +151,19 @@ fn initShared(center: vec3f) {
     g_tLand = g_tStart + uniform.uFlightTime;
 }
 
-fn modifyCenter(center: ptr<function, vec3f>) {
+fn modifySplatCenter(center: ptr<function, vec3f>) {
     let originalCenter = *center;
     initShared(*center);
     
-    // Check if animation is complete (after landing transition)
     let timeSinceLanding = uniform.uTime - g_tLand;
-    if (timeSinceLanding >= 0.5) {
-        return; // Effect complete, no modifications
-    }
+    if (timeSinceLanding >= 0.5) { return; }
+    if (g_dist3D > uniform.uEndRadius) { return; }
+    if (uniform.uTime < g_tStart) { return; }
     
-    // Early exit optimization during animation
-    if (g_dist3D > uniform.uEndRadius) {
-        return;
-    }
-    
-    // If not started yet, do nothing (will be invisible)
-    if (uniform.uTime < g_tStart) {
-        return;
-    }
-    
-    // If falling: interpolate Y from elevated to original and apply rotation
     if (uniform.uTime < g_tLand) {
         let fallProgress = (uniform.uTime - g_tStart) / (g_tLand - g_tStart);
-        
-        // Vertical movement
         (*center).y += uniform.uDistance * (1.0 - fallProgress);
-        
-        // Rotation around Y axis through uCenter
-        let angle = fallProgress * uniform.uRotation * 6.283185; // uRotation * 2π
-        let offset = originalCenter - uniform.uCenter;
+        let angle = fallProgress * uniform.uRotation * 6.283185;
         let cosAngle = cos(angle);
         let sinAngle = sin(angle);
         let offsetX = originalCenter.x - uniform.uCenter.x;
@@ -218,53 +171,32 @@ fn modifyCenter(center: ptr<function, vec3f>) {
         (*center).x = uniform.uCenter.x + offsetX * cosAngle - offsetZ * sinAngle;
         (*center).z = uniform.uCenter.z + offsetX * sinAngle + offsetZ * cosAngle;
     }
-    // If landed: stay at original position (no change needed)
 }
 
-fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<function, vec3f>, covB: ptr<function, vec3f>) {
-    // Check if animation is complete (after landing transition)
+fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
     let timeSinceLanding = uniform.uTime - g_tLand;
-    if (timeSinceLanding >= 0.5) {
-        return; // Effect complete, no modifications
-    }
-    
-    // Early exit for distant splats during animation
+    if (timeSinceLanding >= 0.5) { return; }
     if (g_dist3D > uniform.uEndRadius) {
-        gsplatMakeRound(covA, covB, 0.0);
+        gsplatMakeSpherical(scale, 0.0);
         return;
     }
-    
-    // Before 2D wave reaches: invisible
     if (uniform.uTime < g_tStart) {
-        gsplatMakeRound(covA, covB, 0.0);
+        gsplatMakeSpherical(scale, 0.0);
         return;
     }
-    
-    // During fall and transition after landing
     if (timeSinceLanding < 0.5) {
-        // Still falling or transitioning
-        let originalSize = gsplatExtractSize(*covA, *covB);
-        
+        let originalSize = gsplatGetSizeFromScale(*scale);
         if (timeSinceLanding < 0.0) {
-            // Falling: small round dots
-            gsplatMakeRound(covA, covB, min(uniform.uRainSize, originalSize));
+            gsplatMakeSpherical(scale, min(uniform.uRainSize, originalSize));
         } else {
-            // Landing transition: lerp from dots to original over 0.5s
-            let t = timeSinceLanding * 2.0; // normalize [0, 0.5] to [0, 1]
+            let t = timeSinceLanding * 2.0;
             let size = mix(uniform.uRainSize, originalSize, t);
-            
-            // Lerp between round and original shape
-            let origCovA = *covA;
-            let origCovB = *covB;
-            gsplatMakeRound(covA, covB, size);
-            *covA = mix(*covA, origCovA, t);
-            *covB = mix(*covB, origCovB, t);
+            gsplatMakeSpherical(scale, size);
         }
     }
-    // After transition: original shape/size (no-op)
 }
 
-fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
+fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     // Check if animation is complete
     let timeSinceLanding = uniform.uTime - g_tLand;
     if (timeSinceLanding >= uniform.uHitDuration) {
@@ -439,6 +371,7 @@ class GsplatRevealRain extends GsplatShaderEffect {
         // This ensures the last frame is rendered with correct values
         if (this.isEffectComplete()) {
             console.log('Rain effect completed, disabling');
+            this.notifyRevealComplete();
             this.enabled = false;
             return;
         }

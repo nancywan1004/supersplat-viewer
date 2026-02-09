@@ -115,6 +115,8 @@ type VideoSettings = {
     syncAnimTrack?: boolean;
     /** 使用 canvas.captureStream + MediaRecorder 快速导出（约实时，输出 WebM），无 readPixels 瓶颈 */
     useFastExport?: boolean;
+    /** 为 true 时导出每帧把 VFX 时间轴设到末尾（全显），不驱动 VFX；相机动画仍由 syncAnimTrack 控制 */
+    fixVfxAtEnd?: boolean;
 };
 
 /**
@@ -884,7 +886,7 @@ export const initVideoExport = (global: Global): void => {
         profiler?: ExportProfiler
     ): Promise<void> => {
         if (!encoder) throw new Error('Encoder is not available');
-        const { frameRate, width, height, syncAnimTrack } = settings;
+        const { frameRate, width, height, syncAnimTrack, fixVfxAtEnd } = settings;
         const { settings: appSettings } = global;
         const evenWidth = width % 2 === 0 ? width : width - 1;
         const evenHeight = height % 2 === 0 ? height : height - 1;
@@ -898,7 +900,8 @@ export const initVideoExport = (global: Global): void => {
 
         for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
             if (encoder.state === 'closed' || (encoder as any)._errorOccurred) break;
-            const effectTime = Math.min(frameIndex * frameInterval, totalDuration);
+            const frameTime = Math.min(frameIndex * frameInterval, totalDuration);
+            const effectTime = fixVfxAtEnd ? totalDuration : frameTime;
 
             const frameProfile: FrameProfile = {
                 seekAnim: 0, setTimelineAndUpdate: 0, waitMs: 0, renderFrame: 0, raf: 0,
@@ -908,7 +911,7 @@ export const initVideoExport = (global: Global): void => {
 
             if (syncAnimTrack) {
                 const t0 = VFX_EXPORT_PROFILE ? performance.now() : 0;
-                seekAnimToTimeAndApply(global, effectTime);
+                seekAnimToTimeAndApply(global, frameTime);
                 if (VFX_EXPORT_PROFILE) frameProfile.seekAnim = performance.now() - t0;
             }
 
@@ -951,13 +954,13 @@ export const initVideoExport = (global: Global): void => {
             }
 
             prevReadPromise = readPromise;
-            prevFrameTime = effectTime;
+            prevFrameTime = frameTime;
             prevFrameProfile = frameProfile;
             if (VFX_EXPORT_PROFILE) {
                 frameProfile.total = performance.now() - tFrameStart;
                 profiler?.recordFrame(frameProfile);
             }
-            updateProgress(effectTime, totalDuration);
+            updateProgress(frameTime, totalDuration);
         }
 
         if (prevReadPromise) {
@@ -1017,7 +1020,7 @@ export const initVideoExport = (global: Global): void => {
      * 输出 WebM（VP9 或 AVC1），导出期间画面会实时播放在屏幕上。
      */
     const performVideoExportFast = async (videoSettings: VideoSettings, fileStream: FileSystemWritableFileStream | undefined): Promise<boolean> => {
-        const { frameRate, width, height, bitrate, syncAnimTrack } = videoSettings;
+        const { frameRate, width, height, bitrate, syncAnimTrack, fixVfxAtEnd } = videoSettings;
         const evenWidth = width % 2 === 0 ? width : width - 1;
         const evenHeight = height % 2 === 0 ? height : height - 1;
         const totalDuration = global.settings?.revealEffect?.totalDuration ?? 20.0;
@@ -1075,10 +1078,11 @@ export const initVideoExport = (global: Global): void => {
 
         for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
             const frameStart = performance.now();
-            const effectTime = Math.min(frameIndex * frameInterval, totalDuration);
-            if (syncAnimTrack) seekAnimToTimeAndApply(global, effectTime);
+            const frameTime = Math.min(frameIndex * frameInterval, totalDuration);
+            const effectTime = fixVfxAtEnd ? totalDuration : frameTime;
+            if (syncAnimTrack) seekAnimToTimeAndApply(global, frameTime);
             await prepareAndRenderOneFrameToCanvas(global, effectTime);
-            updateProgress(effectTime, totalDuration);
+            updateProgress(frameTime, totalDuration);
             const elapsed = performance.now() - frameStart;
             const wait = Math.max(0, frameTimeMs - elapsed);
             if (wait > 0) await new Promise(r => setTimeout(r, wait));

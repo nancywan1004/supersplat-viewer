@@ -565,20 +565,21 @@ button {
 }
 
 #joystickBase {
-    position: fixed;
-    width: 96px;
-    height: 96px;
-    left: max(24px, env(safe-area-inset-left));
-    bottom: max(80px, calc(env(safe-area-inset-bottom) + 80px));
-    transform: translate(0, 0);
-    border-radius: 50%;
+    position: absolute;
+    width: 64px;
+    height: 120px;
+    transform: translate(-50%, -50%);
+    border-radius: 32px;
     touch-action: none;
     pointer-events: auto;
     opacity: 0.5;
     transition: opacity 0.3s ease, transform 0.2s ease;
 
-    background: radial-gradient(circle at center, #0000 50%, #000f 100%);
-    background-color: #0002;
+    background: linear-gradient(180deg, #0004 0%, #0000 30%, #0000 70%, #0004 100%);
+    background-color: #0003;
+    border: 2px solid #fff3;
+
+    transition: width 0.2s ease, height 0.2s ease, border-radius 0.2s ease;
 
     &:not(.hidden) {
         display: block;
@@ -591,20 +592,30 @@ button {
 
     > #joystick {
         position: absolute;
+        left: 8px;  // (64 - 48) / 2 = 8px to center horizontally
         width: 48px;
         height: 48px;
-        left: 48px;
-        top: 48px;
-        transform: translate(-50%, -50%);
         border-radius: 50%;
         touch-action: none;
         transition: background-color 0.2s ease;
 
-        background-color: #fff6;
+        background-color: #fff8;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+
+        transition: left 0.1s ease;
     }
 
-    &.active > #joystick {
-        background-color: #fffa;
+    // 2D mode: square joystick with full directional movement
+    &.mode-2d {
+        width: 120px;
+        height: 120px;
+        border-radius: 60px;
+        background: radial-gradient(circle, #0000 40%, #0004 100%);
+        background-color: #0003;
+
+        > #joystick {
+            left: 36px;  // (120 - 48) / 2 = 36px to center horizontally
+        }
     }
 }
 

@@ -16,29 +16,22 @@ float hash(vec3 p) {
     return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
 }
 
-void modifyCenter(inout vec3 center) {
+void modifySplatCenter(inout vec3 center) {
     // 平滑过渡效果不修改中心点位置
 }
 
-void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
-    // 计算到过渡中心的距离
+void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
     float distanceToCenter = length(originalCenter - uCenter);
-    
-    // 计算渐变区域
     float fadeStart = uCurrentLightRadius - uFadeWidth;
     
     if (distanceToCenter >= uCurrentLightRadius) {
-        // 完全隐藏：超出半径的点
-        gsplatMakeRound(covA, covB, 0.0);
-        return;
-    } else if (distanceToCenter < fadeStart) {
-        // 完全显示区域：保持原始形状
+        gsplatMakeSpherical(scale, 0.0);
         return;
     }
-    // 过渡区域：保持原始形状，透明度在 modifyColor 中处理
+    // 完全显示或过渡区域：保持原始形状，透明度在 modifySplatColor 中处理
 }
 
-void modifyColor(vec3 center, inout vec4 color) {
+void modifySplatColor(vec3 center, inout vec4 color) {
     // 计算到过渡中心的距离
     float distanceToCenter = length(center - uCenter);
     
@@ -72,29 +65,21 @@ fn hash(p: vec3f) -> f32 {
     return fract(sin(dot(p, vec3f(127.1, 311.7, 74.7))) * 43758.5453);
 }
 
-fn modifyCenter(center: ptr<function, vec3f>) {
+fn modifySplatCenter(center: ptr<function, vec3f>) {
     // 平滑过渡效果不修改中心点位置
 }
 
-fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<function, vec3f>, covB: ptr<function, vec3f>) {
-    // 计算到过渡中心的距离
+fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
     let distanceToCenter = length(originalCenter - uniform.uCenter);
-    
-    // 计算渐变区域
     let fadeStart = uniform.uCurrentLightRadius - uniform.uFadeWidth;
     
     if (distanceToCenter >= uniform.uCurrentLightRadius) {
-        // 完全隐藏：超出半径的点
-        gsplatMakeRound(covA, covB, 0.0);
-        return;
-    } else if (distanceToCenter < fadeStart) {
-        // 完全显示区域：保持原始形状
+        gsplatMakeSpherical(scale, 0.0);
         return;
     }
-    // 过渡区域：保持原始形状，透明度在 modifyColor 中处理
 }
 
-fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
+fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     // 计算到过渡中心的距离
     let distanceToCenter = length(center - uniform.uCenter);
     
@@ -214,6 +199,7 @@ class GsplatRevealSmooth extends GsplatShaderEffect {
         // 检查效果是否完成
         if (this.isEffectComplete()) {
             console.log('Smooth transition effect completed, disabling');
+            this.notifyRevealComplete();
             this.enabled = false;
             return;
         }

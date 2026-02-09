@@ -41,6 +41,11 @@ const VFX_VIDEO_EXPORT_ROW_HTML = `
       <label for="customHeight">高度:</label>
       <input type="number" id="customHeight" class="settingsInput" min="240" max="4320" step="2" value="1080">
     </div>
+    <div class="vfxExportRow">
+      <label class="settingsCheckLabel">
+        <input type="checkbox" id="fixVfxAtEndCheck" class="settingsCheck"> 导出时 VFX 固定到末尾（不驱动 VFX 时间轴）
+      </label>
+    </div>
     <button id="vfxVideoExportButton" class="settingsButton" type="button">导出 VFX 视频 (MP4)</button>
     <button id="vfxVideoExportFastButton" class="settingsButton" type="button">快速导出 (WebM，约实时)</button>
     <button id="testCaptureFrameButton" class="settingsButton" type="button">测试捕获单帧</button>
@@ -139,6 +144,8 @@ export function initVideoExportUI(global: Global): () => void {
             const frameRate = 30;
             const restartCheckEl = document.getElementById('restartAnimTrackCheck');
             const syncAnimTrack = restartCheckEl?.classList.contains('active') ?? false;
+            const fixVfxAtEndCheck = document.getElementById('fixVfxAtEndCheck') as HTMLInputElement | null;
+            const fixVfxAtEnd = fixVfxAtEndCheck?.checked ?? false;
             const videoSettings = {
                 startFrame: 0,
                 endFrame: 0,
@@ -151,7 +158,8 @@ export function initVideoExportUI(global: Global): () => void {
                 format: (useFastExport ? 'webm' : 'mp4') as 'mp4' | 'webm',
                 codec: 'h264' as const,
                 syncAnimTrack,
-                useFastExport
+                useFastExport,
+                fixVfxAtEnd
             };
             let fileStream: FileSystemWritableFileStream | undefined;
             if ('showSaveFilePicker' in window) {

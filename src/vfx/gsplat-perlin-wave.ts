@@ -64,7 +64,7 @@ void initShared(vec3 center) {
     g_dist = length(center - uCenter);
 }
 
-void modifyCenter(inout vec3 center) {
+void modifySplatCenter(inout vec3 center) {
     initShared(center);
     
     // Apply Perlin noise offset for wave motion
@@ -72,22 +72,12 @@ void modifyCenter(inout vec3 center) {
     center += noiseOffset;
 }
 
-void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
+void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
     initShared(modifiedCenter);
-    
-    // // Apply scale blend
-    // if (uScaleBlend < 0.1) {
-    //     // Hide splats if scale blend is too low
-    //     gsplatMakeRound(covA, covB, 0.001);
-    // } else {
-    //     // Scale splats based on blend factor
-    //     float originalSize = gsplatExtractSize(covA, covB);
-    //     float newSize = originalSize * uScaleBlend;
-    //     gsplatMakeRound(covA, covB, newSize);
-    // }
+    // No scale modification for perlin wave
 }
 
-void modifyColor(vec3 center, inout vec4 color) {
+void modifySplatColor(vec3 center, inout vec4 color) {
     initShared(center);
     
     // Apply 3D sine wave color effect（波长、波速与位移一致）
@@ -165,30 +155,18 @@ fn initShared(center: vec3f) {
     g_dist = length(center - uniform.uCenter);
 }
 
-fn modifyCenter(center: ptr<function, vec3f>) {
+fn modifySplatCenter(center: ptr<function, vec3f>) {
     initShared(*center);
     
-    // Apply Perlin noise offset for wave motion
     let noiseOffset = uniform.uWaveAmplitude * noise2(*center * uniform.uWaveFrequency + uniform.uTime * uniform.uWaveSpeed);
     *center = *center + noiseOffset;
 }
 
-fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<function, vec3f>, covB: ptr<function, vec3f>) {
+fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
     initShared(modifiedCenter);
-    
-    // // Apply scale blend
-    // if (uniform.uScaleBlend < 0.1) {
-    //     // Hide splats if scale blend is too low
-    //     gsplatMakeRound(covA, covB, 0.001);
-    // } else {
-    //     // Scale splats based on blend factor
-    //     let originalSize = gsplatExtractSize(*covA, *covB);
-    //     let newSize = originalSize * uniform.uScaleBlend;
-    //     gsplatMakeRound(covA, covB, newSize);
-    // }
 }
 
-fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
+fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     initShared(center);
     
     // Apply 3D sine wave color effect（波长、波速与位移一致）

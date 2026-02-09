@@ -1,4 +1,4 @@
-import { EventHandler, Vec3, RenderTarget, Texture, PIXELFORMAT_RGBA8 } from 'playcanvas';
+import { EventHandler } from 'playcanvas';
 
 import { Tooltip } from '../tooltip';
 import { Global } from '../types';
@@ -8,7 +8,136 @@ import { initVideoExportUI } from './components/video-export-ui';
 import { initLightingUI } from './components/lighting-ui';
 import { initPostEffectUI } from './components/post-effect-ui';
 
-const v = new Vec3();
+// Initialize the touch joystick for fly mode camera control
+const initJoystick = (
+    dom: Record<string, HTMLElement>,
+    events: EventHandler,
+    state: { cameraMode: string; inputMode: string }
+) => {
+    // Joystick dimensions (matches SCSS: base height=120, stick size=48)
+    const joystickHeight = 120;
+    const stickSize = 48;
+    const stickCenterY = (joystickHeight - stickSize) / 2; // 36px - top position when centered
+    const stickCenterX = (joystickHeight - stickSize) / 2; // 36px - left position when centered (for 2D mode)
+    const maxStickTravel = stickCenterY; // can travel 36px up or down from center
+
+    // Fixed joystick position (bottom-left corner with safe area)
+    const joystickFixedX = 70;
+    const joystickFixedY = () => window.innerHeight - 140;
+
+    // Joystick touch state
+    let joystickPointerId: number | null = null;
+    let joystickValueX = 0; // -1 to 1, negative = left, positive = right
+    let joystickValueY = 0; // -1 to 1, negative = forward, positive = backward
+
+    // Joystick mode: '1d' for vertical only, '2d' for full directional
+    let joystickMode: '1d' | '2d' = '2d';
+
+    // Double-tap detection for mode toggle
+    let lastTapTime = 0;
+
+    // Update joystick visibility based on camera mode and input mode
+    const updateJoystickVisibility = () => {
+        if (state.cameraMode === 'fly' && state.inputMode === 'touch') {
+            dom.joystickBase.classList.remove('hidden');
+            dom.joystickBase.classList.toggle('mode-2d', joystickMode === '2d');
+            dom.joystickBase.style.left = `${joystickFixedX}px`;
+            dom.joystickBase.style.top = `${joystickFixedY()}px`;
+            // Center the stick
+            dom.joystick.style.top = `${stickCenterY}px`;
+            if (joystickMode === '2d') {
+                dom.joystick.style.left = `${stickCenterX}px`;
+            } else {
+                dom.joystick.style.left = '8px'; // Reset to 1D centered position
+            }
+        } else {
+            dom.joystickBase.classList.add('hidden');
+        }
+    };
+
+    events.on('cameraMode:changed', updateJoystickVisibility);
+    events.on('inputMode:changed', updateJoystickVisibility);
+    window.addEventListener('resize', updateJoystickVisibility);
+
+    // Handle joystick touch input directly on the joystick element
+    const updateJoystickStick = (clientX: number, clientY: number) => {
+        const baseY = joystickFixedY();
+        // Calculate Y offset from joystick center (positive = down/backward)
+        const offsetY = clientY - baseY;
+        // Clamp to max travel and normalize to -1 to 1
+        const clampedOffsetY = Math.max(-maxStickTravel, Math.min(maxStickTravel, offsetY));
+        joystickValueY = clampedOffsetY / maxStickTravel;
+
+        // Update stick visual Y position
+        dom.joystick.style.top = `${stickCenterY + clampedOffsetY}px`;
+
+        // Handle X axis in 2D mode
+        if (joystickMode === '2d') {
+            const baseX = joystickFixedX;
+            const offsetX = clientX - baseX;
+            const clampedOffsetX = Math.max(-maxStickTravel, Math.min(maxStickTravel, offsetX));
+            joystickValueX = clampedOffsetX / maxStickTravel;
+
+            // Update stick visual X position
+            dom.joystick.style.left = `${stickCenterX + clampedOffsetX}px`;
+        } else {
+            joystickValueX = 0;
+        }
+
+        // Fire input event for the input controller
+        events.fire('joystickInput', { x: joystickValueX, y: joystickValueY });
+    };
+
+    dom.joystickBase.addEventListener('pointerdown', (event: PointerEvent) => {
+        // Double-tap detection for mode toggle
+        const now = Date.now();
+        if (now - lastTapTime < 300) {
+            joystickMode = joystickMode === '1d' ? '2d' : '1d';
+            updateJoystickVisibility();
+            lastTapTime = 0;
+        } else {
+            lastTapTime = now;
+        }
+
+        if (joystickPointerId !== null) return; // Already tracking a touch
+
+        joystickPointerId = event.pointerId;
+        dom.joystickBase.setPointerCapture(event.pointerId);
+
+        updateJoystickStick(event.clientX, event.clientY);
+        event.preventDefault();
+        event.stopPropagation();
+    });
+
+    dom.joystickBase.addEventListener('pointermove', (event: PointerEvent) => {
+        if (event.pointerId !== joystickPointerId) return;
+
+        updateJoystickStick(event.clientX, event.clientY);
+        event.preventDefault();
+    });
+
+    const endJoystickTouch = (event: PointerEvent) => {
+        if (event.pointerId !== joystickPointerId) return;
+
+        joystickPointerId = null;
+        joystickValueX = 0;
+        joystickValueY = 0;
+
+        // Reset stick to center
+        dom.joystick.style.top = `${stickCenterY}px`;
+        if (joystickMode === '2d') {
+            dom.joystick.style.left = `${stickCenterX}px`;
+        }
+
+        // Fire input event with zero values
+        events.fire('joystickInput', { x: 0, y: 0 });
+
+        dom.joystickBase.releasePointerCapture(event.pointerId);
+    };
+
+    dom.joystickBase.addEventListener('pointerup', endJoystickTouch);
+    dom.joystickBase.addEventListener('pointercancel', endJoystickTouch);
+};
 
 // update the poster image to start blurry and then resolve to sharp during loading
 const initPoster = (events: EventHandler) => {
@@ -515,59 +644,14 @@ const initUI = (global: Global) => {
         events.fire('getCameraInfo');
     });
 
-    // update UI based on touch joystick updates
-    events.on('touchJoystickUpdate', (base, stick) => {
-        if (base === null || stick === null) {
-            // Reset joystick to center when not in use
-            dom.joystick.style.left = '48px';
-            dom.joystick.style.top = '48px';
-            dom.joystickBase.classList.remove('active');
-        } else {
-            v.set(stick[0], stick[1], 0).mulScalar(1 / 48);
-            if (v.length() > 1) {
-                v.normalize();
-            }
-            v.mulScalar(48);
+    // Joystick: when true, initJoystick registers visibility (fly+touch => show); when false, never show.
+    const joystickEnabled = false; // false = 双指 fly 默认，不显示摇杆
 
-            dom.joystickBase.classList.add('active');
-            dom.joystick.style.left = `${48 + v.x}px`;
-            dom.joystick.style.top = `${48 + v.y}px`;
-        }
-    });
-
-    // Show joystick on touch devices and desktop (for debugging)
-    // Always show joystick for better UX
-    // Joystick visibility and functionality control
-    const joystickEnabled = false; // Set to false to completely disable joystick
-    
     if (joystickEnabled) {
-        // Option 1: Always hide joystick UI (uncomment to use)
-        // dom.joystickBase.classList.add('hidden');
-        
-        // Option 2: Show only on touch devices (uncomment to use)
-        // if (state.inputMode === 'touch') {
-        //     dom.joystickBase.classList.remove('hidden');
-        // }
-        
-        // Option 3: Always show joystick (default - uncomment to use)
-        dom.joystickBase.classList.remove('hidden');
-        
-        console.log('UI: Joystick element ready', dom.joystickBase);
-        
-        // Notify that joystick element is ready for attachment
+        initJoystick(dom, events, state);
         events.fire('joystickElementReady', dom.joystickBase);
-        
-        // Dynamic visibility based on input mode
-        events.on('inputMode:changed', (mode) => {
-            if (mode === 'touch') {
-                dom.joystickBase.classList.remove('hidden');
-            } else {
-                // Uncomment to hide on desktop
-                // dom.joystickBase.classList.add('hidden');
-            }
-        });
     } else {
-        // Completely disable joystick (hide UI and disable functionality)
+        // 不调用 initJoystick，避免其 updateJoystickVisibility 在 fly+touch 时去掉 hidden
         dom.joystickBase.classList.add('hidden');
         events.fire('joystickDisabled');
     }

@@ -75,6 +75,17 @@ class GsplatShaderEffect extends Script {
     materialsApplied: Set<Material> = new Set();
 
     /**
+     * Optional callback when the reveal effect has finished playing.
+     * Set by RevealController to fire 'revealComplete' event.
+     */
+    onRevealComplete?: () => void;
+
+    /**
+     * Whether we have already fired the completion callback (only fire once).
+     */
+    private _revealCompleteFired: boolean = false;
+
+    /**
      * Material created handler
      * @type {any}
      * @private
@@ -99,8 +110,9 @@ class GsplatShaderEffect extends Script {
         // Listen to enable/disable events
         this.on('enable', () => {
             console.log('GsplatShaderEffect enabled for entity:', this.entity.name);
-            // Reset effect time when enabling
+            // Reset effect time and completion flag when enabling
             this.effectTime = 0;
+            this._revealCompleteFired = false;
 
             // Ensure we're initialized
             if (!this.initialized && this.entity.gsplat) {
@@ -162,7 +174,7 @@ class GsplatShaderEffect extends Script {
 
         // Remove custom shader chunk from all materials
         this.materialsApplied.forEach((material) => {
-            material.getShaderChunks(shaderLanguage).delete('gsplatCustomizeVS');
+            material.getShaderChunks(shaderLanguage).delete('gsplatModifyVS');
             material.update();
         });
 
@@ -290,7 +302,7 @@ class GsplatShaderEffect extends Script {
         console.log('Applying shader to material:', material.name, 'Language:', shaderLanguage);
         console.log('Custom shader length:', customShader.length);
 
-        material.getShaderChunks(shaderLanguage).set('gsplatCustomizeVS', customShader);
+        material.getShaderChunks(shaderLanguage).set('gsplatModifyVS', customShader);
         material.update();
         
         console.log('Shader applied and material updated');
@@ -445,6 +457,16 @@ class GsplatShaderEffect extends Script {
      */
     updateEffect(effectTime: number, dt: number) {
         // Optional to override
+    }
+
+    /**
+     * Called by subclasses when the reveal effect has completed.
+     * Invokes onRevealComplete callback once, then subclasses typically set enabled = false.
+     */
+    notifyRevealComplete() {
+        if (this._revealCompleteFired) return;
+        this._revealCompleteFired = true;
+        this.onRevealComplete?.();
     }
 }
 
