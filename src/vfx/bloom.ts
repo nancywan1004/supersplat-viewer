@@ -161,6 +161,7 @@ export class BloomController {
                 this.bloomBrushPainter.copyMaskTo(this.bloomCommittedMaskTexture);
                 this.hasCommittedBloomMask = true;
                 (this.global.app as any).renderNextFrame = true;
+                console.log('bloomBrush:set');
             }
         });
         this._unregisterEvents.push(() => events.off('bloomBrush:set'));
@@ -195,14 +196,20 @@ export class BloomController {
 
         const nightModeScript = this.options.getNightModeScript();
         const nightModeOn = (nightModeScript as any)?.isNightModeEnabled ?? false;
-        const bloomBrushWithNight = bloomBrush && nightModeOn;
+        // Night mode + Bloom：需要跳过 night 的区域 = 有 bloom mask 的区域
+        // mask 来源与 compose 阶段一致：bloom brush 开启用 painter；否则用已固化的 committed mask
+        const effectiveMask = (bloomBrush && this.bloomBrushPainter)
+            ? this.bloomBrushPainter.getTexture()
+            : (this.hasCommittedBloomMask && this.bloomCommittedMaskTexture)
+                ? this.bloomCommittedMaskTexture
+                : null;
+        const bloomMaskActiveForNight = nightModeOn && effectiveMask !== null;
         if (this.bloomBrushPainter) {
             this.bloomBrushPainter.setEnabled(bloomBrush);
             this.bloomBrushPainter.setBrushSize(Math.max(1, Math.min(200, Number(bloomSettings.bloomBrushSize ?? 30))));
         }
         if (nightModeScript) {
-            const mask = bloomBrushWithNight ? this.bloomBrushPainter?.getTexture() ?? null : null;
-            nightModeScript.setBloomBrushParams(bloomBrushWithNight, mask, th, undefined);
+            nightModeScript.setBloomBrushParams(bloomMaskActiveForNight, effectiveMask, th, undefined);
         }
 
         this.injectBloomMaskBeforeUpdate(cameraFrame);
