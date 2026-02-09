@@ -176,13 +176,6 @@ class Viewer {
         app.xr.on('start', () => this.configureCamera(settings));
         app.xr.on('end', () => this.configureCamera(settings));
 
-        const updateHorizontalFov = () => {
-            camera.camera.horizontalFov = graphicsDevice.width > graphicsDevice.height;
-            app.renderNextFrame = true;
-        };
-        graphicsDevice.on('resizecanvas', updateHorizontalFov);
-        updateHorizontalFov();
-
         // handle canvas resize - update aspect ratio and trigger render
         const handleResize = () => {
             camera.camera.aspectRatio = graphicsDevice.width / graphicsDevice.height;
