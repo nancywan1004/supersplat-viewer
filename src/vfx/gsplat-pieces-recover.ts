@@ -74,7 +74,7 @@ void initShared(vec3 center) {
     }
 }
 
-void modifyCenter(inout vec3 center) {
+void modifySplatCenter(inout vec3 center) {
     vec3 originalCenter = center;
     
     initShared(center);
@@ -278,41 +278,31 @@ void modifyCenter(inout vec3 center) {
     // Phase 3: complete - no modification (already at original)
 }
 
-void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
-    // Now initialize shared variables using originalCenter for consistent phase calculation
+void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
     initShared(originalCenter);
     
-    float originalSize = gsplatExtractSize(covA, covB);
+    vec3 originalScale = scale;
     
-    // Phase 0.0: Before scatter - 点云 outline 模式（与散射阶段一致）
     if (g_phase == 0.0) {
-        gsplatMakeRound(covA, covB, uPointSize);
+        gsplatMakeSpherical(scale, uPointSize);
         return;
     }
-    
-    // Scattering phase: 点云 outline 模式（与 gsplat-growth-wave 聚拢生长一致）
     if (g_phase == 1.0) {
-        gsplatMakeRound(covA, covB, uPointSize);
+        gsplatMakeSpherical(scale, uPointSize);
         return;
     }
-    
-    // Phase 2.0: Recovering: 从点云 uPointSize 过渡回原始协方差
     if (g_phase == 2.0) {
         float t = (uTime - g_tRecover) / uRecoverDuration;
         t = clamp(t, 0.0, 1.0);
         float easedT = clamp(1.0 - pow(1.0 - t, 4.0), 0.0, 1.0);
-        float size = mix(uPointSize, originalSize, easedT);
-        vec3 origCovA = covA;
-        vec3 origCovB = covB;
-        gsplatMakeRound(covA, covB, size);
-        covA = mix(covA, origCovA, easedT);
-        covB = mix(covB, origCovB, easedT);
+        // 直接对 scale 向量插值：从点大小过渡回原始各向异性，避免整段用球形导致的模糊感
+        vec3 pointScale = vec3(uPointSize);
+        scale = mix(pointScale, originalScale, easedT);
         return;
     }
-    // Phase 3: original shape (no modification)
 }
 
-void modifyColor(vec3 center, inout vec4 color) {
+void modifySplatColor(vec3 center, inout vec4 color) {
     initShared(center);
     if (g_phase != 1.0) return;
     // 白金色辉光，一闪一闪，强度较弱（参照 growth-wave 金环 sparkle，减弱）
@@ -410,7 +400,7 @@ fn initShared(center: vec3f) {
     }
 }
 
-fn modifyCenter(center: ptr<function, vec3f>) {
+fn modifySplatCenter(center: ptr<function, vec3f>) {
     let originalCenter = *center;
     
     initShared(*center);
@@ -611,40 +601,29 @@ fn modifyCenter(center: ptr<function, vec3f>) {
     // Phase 3: complete - no modification (already at original)
 }
 
-fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<function, vec3f>, covB: ptr<function, vec3f>) {
-    // Now initialize shared variables using originalCenter for consistent phase calculation
+fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
     initShared(originalCenter);
     
-    let originalSize = gsplatExtractSize(*covA, *covB);
+    let originalScale = *scale;
     
-    // Phase 0.0: Before scatter - 点云 outline 模式（与散射阶段一致）
     if (g_phase == 0.0) {
-        gsplatMakeRound(covA, covB, uniform.uPointSize);
+        gsplatMakeSpherical(scale, uniform.uPointSize);
         return;
     }
-    
-    // Scattering phase: 点云 outline 模式（与 gsplat-growth-wave 聚拢生长一致）
     if (g_phase == 1.0) {
-        gsplatMakeRound(covA, covB, uniform.uPointSize);
+        gsplatMakeSpherical(scale, uniform.uPointSize);
         return;
     }
-    
-    // Phase 2.0: Recovering: 从点云 uPointSize 过渡回原始协方差
     if (g_phase == 2.0) {
         let t = clamp((uniform.uTime - g_tRecover) / uniform.uRecoverDuration, 0.0, 1.0);
         let easedT = clamp(1.0 - pow(1.0 - t, 4.0), 0.0, 1.0);
-        let size = mix(uniform.uPointSize, originalSize, easedT);
-        let origCovA = *covA;
-        let origCovB = *covB;
-        gsplatMakeRound(covA, covB, size);
-        *covA = mix(*covA, origCovA, easedT);
-        *covB = mix(*covB, origCovB, easedT);
+        let pointScale = vec3f(uniform.uPointSize);
+        *scale = mix(pointScale, originalScale, easedT);
         return;
     }
-    // Phase 3: original shape (no modification)
 }
 
-fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
+fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     initShared(center);
     if (g_phase != 1.0) { return; }
     let toSplat = center - uniform.uCenter;

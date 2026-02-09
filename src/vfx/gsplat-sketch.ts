@@ -137,33 +137,29 @@ void initShared(vec3 center) {
     }
 }
 
-void modifyCenter(inout vec3 center) {
+void modifySplatCenter(inout vec3 center) {
     // 素描效果不修改中心点位置
 }
 
-void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
+void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
     initShared(originalCenter);
     
-    // 超出范围或未开始：隐藏
     if (g_phase == 0.0) {
-        gsplatMakeRound(covA, covB, 0.0);
+        gsplatMakeSpherical(scale, 0.0);
         return;
     }
-    
-    // 完成阶段：保持原始形状
     if (g_phase >= 3.0) {
         return;
     }
-    
-    // 上色阶段：过渡区内高斯拉长，模拟笔触涂抹扩散
+    // 上色阶段：过渡区内均匀放大，模拟笔触涂抹扩散
     if (g_phase == 2.0 && uColorizeSpread > 0.0) {
         float peak = smoothstep(0.2, 0.5, g_colorizeProgress) * smoothstep(0.8, 0.5, g_colorizeProgress);
         float spread = 1.0 + uColorizeSpread * peak;
-        gsplatApplyUniformScale(covA, covB, spread);
+        scale *= spread;
     }
 }
 
-void modifyColor(vec3 center, inout vec4 color) {
+void modifySplatColor(vec3 center, inout vec4 color) {
     initShared(center);
     
     // 超出范围或未开始：隐藏
@@ -425,33 +421,28 @@ fn initShared(center: vec3f) {
     }
 }
 
-fn modifyCenter(center: ptr<function, vec3f>) {
+fn modifySplatCenter(center: ptr<function, vec3f>) {
     // 素描效果不修改中心点位置
 }
 
-fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<function, vec3f>, covB: ptr<function, vec3f>) {
+fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
     initShared(originalCenter);
     
-    // 超出范围或未开始：隐藏
     if (g_phase == 0.0) {
-        gsplatMakeRound(covA, covB, 0.0);
+        gsplatMakeSpherical(scale, 0.0);
         return;
     }
-    
-    // 完成阶段：保持原始形状
     if (g_phase >= 3.0) {
         return;
     }
-    
-    // 上色阶段：过渡区内高斯拉长，模拟笔触涂抹扩散
     if (g_phase == 2.0 && uniform.uColorizeSpread > 0.0) {
         let peak = smoothstep(0.2, 0.5, g_colorizeProgress) * smoothstep(0.8, 0.5, g_colorizeProgress);
         let spread = 1.0 + uniform.uColorizeSpread * peak;
-        gsplatApplyUniformScale(covA, covB, spread);
+        *scale = *scale * spread;
     }
 }
 
-fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
+fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     initShared(center);
     
     // 超出范围或未开始：隐藏

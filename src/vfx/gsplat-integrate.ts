@@ -25,7 +25,7 @@ vec3 hash(vec3 p) {
     return fract(sin(p * 123.456) * 123.456);
 }
 
-void modifyCenter(inout vec3 center) {
+void modifySplatCenter(inout vec3 center) {
     // AABB crop 效果：检查 splat 是否在 AABB 内
     bool insideAABB = all(greaterThanEqual(center, uAabbMin)) && all(lessThanEqual(center, uAabbMax));
     if (!insideAABB) {
@@ -83,61 +83,30 @@ void modifyCenter(inout vec3 center) {
     center.xz = xz;
 }
 
-void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
-    // AABB crop 效果：检查 splat 是否在 AABB 内
-    // 如果不在 AABB 内，不应用效果，保持原始状态（正常显示）
-    // bool insideAABB = all(greaterThanEqual(modifiedCenter, uAabbMin)) && all(lessThanEqual(modifiedCenter, uAabbMax));
-    // if (!insideAABB) {
-    //     return; // 不在 AABB 内，不参与效果，保持原始状态
-    // }
-    
-    // Calculate integrate factor (same calculation as in modifyCenter, from bottom to top)
-    // 使用传播波：从底部开始，向上传播
+void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
     float timeScaled = uTime * uSpeed;
-    // 计算相对于底部的高度偏移（bottomY 为视觉上的底部，数值更大）
     float yOffset = uBottomY - originalCenter.y;
-    // 计算传播相位：时间推进 - y坐标偏移（从底部开始）
-    // 底部（yOffset=0，即center.y接近uBottomY）的wavePhase先达到阈值，所以底部先整合
     float wavePhase = timeScaled - yOffset * uVerticalSpread;
-    // 使用smoothstep确保：开始时所有点tt=0（点云），传播到后tt逐渐变为1（高斯）
     float tt = smoothstep(0.0, 1.0, wavePhase);
-    tt = clamp(tt, 0.0, 1.0); // 确保在[0,1]范围内
+    tt = clamp(tt, 0.0, 1.0);
     
-    // 当tt=0时，隐藏点云（size = 0）
     if (tt <= 0.0) {
-        gsplatMakeRound(covA, covB, 0.0);
+        gsplatMakeSpherical(scale, 0.0);
+        return;
+    }
+    if (tt >= 1.0) {
         return;
     }
     
-    // 当tt=1时，完全整合完成，保持原始协方差形状，不做任何修改
-    if (tt >= 1.0) {
-        return; // 整合完成，保持原始形状
-    }
-    
-    // 保存原始协方差
-    vec3 originalCovA = covA;
-    vec3 originalCovB = covB;
-    
-    // 根据tt从隐藏（size=0）逐渐过渡到原始形态
-    // 使用平滑的过渡，使显现过程更自然
-    float fadeIn = smoothstep(0.0, 0.3, tt); // 前30%用于淡入
-    
-    // 计算大小：从0逐渐增加到原始大小
-    float originalSize = gsplatExtractSize(originalCovA, originalCovB);
+    float fadeIn = smoothstep(0.0, 0.3, tt);
+    float originalSize = gsplatGetSizeFromScale(scale);
     float newSize = originalSize * fadeIn;
-    
-    // 创建临时协方差用于混合
-    gsplatMakeRound(covA, covB, newSize);
-    vec3 tempCovA = covA;
-    vec3 tempCovB = covB;
-    
-    // 根据tt混合临时协方差和原始协方差，从隐藏逐渐过渡到原始形态
-    float shapeBlend = smoothstep(0.0, 1.0, tt); // 形状混合因子
-    covA = mix(tempCovA, originalCovA, shapeBlend);
-    covB = mix(tempCovB, originalCovB, shapeBlend);
+    float shapeBlend = smoothstep(0.0, 1.0, tt);
+    float finalSize = mix(newSize, originalSize, shapeBlend);
+    gsplatMakeSpherical(scale, finalSize);
 }
 
-void modifyColor(vec3 center, inout vec4 color) {
+void modifySplatColor(vec3 center, inout vec4 color) {
     // AABB crop 效果：检查 splat 是否在 AABB 内
     // 如果不在 AABB 内，不应用效果，保持原始颜色（正常显示）
     bool insideAABB = all(greaterThanEqual(center, uAabbMin)) && all(lessThanEqual(center, uAabbMax));
@@ -175,7 +144,7 @@ fn hash(p: vec3f) -> vec3f {
     return fract(sin(p * 123.456) * 123.456);
 }
 
-fn modifyCenter(center: ptr<function, vec3f>) {
+fn modifySplatCenter(center: ptr<function, vec3f>) {
     // AABB crop 效果：检查 splat 是否在 AABB 内
     let insideAABB = all((*center) >= uniform.uAabbMin) && all((*center) <= uniform.uAabbMax);
     if (!insideAABB) {
@@ -234,61 +203,35 @@ fn modifyCenter(center: ptr<function, vec3f>) {
     (*center).z = xz.y;
 }
 
-fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<function, vec3f>, covB: ptr<function, vec3f>) {
-    // AABB crop 效果：检查 splat 是否在 AABB 内
-    // 如果不在 AABB 内，不应用效果，保持原始状态（正常显示）
+fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
     let insideAABB = all(modifiedCenter >= uniform.uAabbMin) && all(modifiedCenter <= uniform.uAabbMax);
     if (!insideAABB) {
-        return; // 不在 AABB 内，不参与效果，保持原始状态
-    }
-    
-    // Calculate integrate factor (same calculation as in modifyCenter, from bottom to top)
-    // 使用传播波：从底部开始，向上传播
-    let timeScaled = uniform.uTime * uniform.uSpeed;
-    // 计算相对于底部的高度偏移（bottomY 为视觉上的底部，数值更大）
-    let yOffset = uniform.uBottomY - originalCenter.y;
-    // 计算传播相位：时间推进 - y坐标偏移（从底部开始）
-    // 底部（yOffset=0，即center.y接近uBottomY）的wavePhase先达到阈值，所以底部先整合
-    let wavePhase = timeScaled - yOffset * uniform.uVerticalSpread;
-    // 使用smoothstep确保：开始时所有点tt=0（点云），传播到后tt逐渐变为1（高斯）
-    var tt = smoothstep(0.0, 1.0, wavePhase);
-    tt = clamp(tt, 0.0, 1.0); // 确保在[0,1]范围内
-    
-    // 当tt=0时，隐藏点云（size = 0）
-    if (tt <= 0.0) {
-        gsplatMakeRound(covA, covB, 0.0);
         return;
     }
     
-    // 当tt=1时，完全整合完成，保持原始协方差形状，不做任何修改
+    let timeScaled = uniform.uTime * uniform.uSpeed;
+    let yOffset = uniform.uBottomY - originalCenter.y;
+    let wavePhase = timeScaled - yOffset * uniform.uVerticalSpread;
+    var tt = smoothstep(0.0, 1.0, wavePhase);
+    tt = clamp(tt, 0.0, 1.0);
+    
+    if (tt <= 0.0) {
+        gsplatMakeSpherical(scale, 0.0);
+        return;
+    }
     if (tt >= 1.0) {
-        return; // 整合完成，保持原始形状
+        return;
     }
     
-    // 保存原始协方差
-    let originalCovA = *covA;
-    let originalCovB = *covB;
-    
-    // 根据tt从隐藏（size=0）逐渐过渡到原始形态
-    // 使用平滑的过渡，使显现过程更自然
-    let fadeIn = smoothstep(0.0, 0.3, tt); // 前30%用于淡入
-    
-    // 计算大小：从0逐渐增加到原始大小
-    let originalSize = gsplatExtractSize(originalCovA, originalCovB);
+    let fadeIn = smoothstep(0.0, 0.3, tt);
+    let originalSize = gsplatGetSizeFromScale(*scale);
     let newSize = originalSize * fadeIn;
-    
-    // 创建临时协方差用于混合
-    gsplatMakeRound(covA, covB, newSize);
-    let tempCovA = *covA;
-    let tempCovB = *covB;
-    
-    // 根据tt混合临时协方差和原始协方差，从隐藏逐渐过渡到原始形态
-    let shapeBlend = smoothstep(0.0, 1.0, tt); // 形状混合因子
-    *covA = mix(tempCovA, originalCovA, shapeBlend);
-    *covB = mix(tempCovB, originalCovB, shapeBlend);
+    let shapeBlend = smoothstep(0.0, 1.0, tt);
+    let finalSize = mix(newSize, originalSize, shapeBlend);
+    gsplatMakeSpherical(scale, finalSize);
 }
 
-fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
+fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     // AABB crop 效果：检查 splat 是否在 AABB 内
     // 如果不在 AABB 内，不应用效果，保持原始颜色（正常显示）
     let insideAABB = all(center >= uniform.uAabbMin) && all(center <= uniform.uAabbMax);

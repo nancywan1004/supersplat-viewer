@@ -174,7 +174,7 @@ void initShared(vec3 center) {
     }
 }
 
-void modifyCenter(inout vec3 center) {
+void modifySplatCenter(inout vec3 center) {
     vec3 originalCenter = center;
     
     initShared(center);
@@ -379,48 +379,38 @@ void modifyCenter(inout vec3 center) {
     }
 }
 
-void modifyCovariance(vec3 originalCenter, vec3 modifiedCenter, inout vec3 covA, inout vec3 covB) {
+void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
     initShared(originalCenter);
     
-    float originalSize = gsplatExtractSize(covA, covB);
+    vec3 originalScale = scale;
+    float originalSize = gsplatGetSizeFromScale(scale);
     
-    // Phase 0: Hidden - make very small
     if (g_phase == 0.0) {
-        gsplatMakeRound(covA, covB, originalSize * 0.001);
+        gsplatMakeSpherical(scale, originalSize * 0.001);
         return;
     }
-    
-    // Phase 1: Growth phase - 点云模式（参考 splat-overlay-shader：固定点大小 uPointSize，不依赖 originalSize）
-    // 注：overlay 用 gl_PointSize + 1 顶点/splat；本管线为四边形，用 gsplatMakeRound 得到 uniform 圆点
     if (g_phase == 1.0) {
         if (g_growthProgress <= 0.0) {
-            gsplatMakeRound(covA, covB, originalSize * 0.001);
+            gsplatMakeSpherical(scale, originalSize * 0.001);
             return;
         }
-        gsplatMakeRound(covA, covB, uPointSize);
+        gsplatMakeSpherical(scale, uPointSize);
         return;
     }
-    
-    // Phase 2: 从中心向外光圈过渡复原，由 uPointSize 过渡至原始协方差
     if (g_phase == 2.0) {
         if (g_recoverProgress <= 0.0) {
-            gsplatMakeRound(covA, covB, uPointSize);
+            gsplatMakeSpherical(scale, uPointSize);
             return;
         }
         float easedT = clamp(1.0 - pow(1.0 - g_recoverProgress, 4.0), 0.0, 1.0);
-        float size = mix(uPointSize, originalSize, easedT);
-        vec3 origCovA = covA;
-        vec3 origCovB = covB;
-        gsplatMakeRound(covA, covB, size);
-        covA = mix(covA, origCovA, easedT);
-        covB = mix(covB, origCovB, easedT);
+        // 直接对 scale 向量插值：从点大小过渡回原始各向异性，避免整段用球形导致的模糊感
+        vec3 pointScale = vec3(uPointSize);
+        scale = mix(pointScale, originalScale, easedT);
         return;
     }
-    
-    // Phase 3: Original shape (no modification)
 }
 
-void modifyColor(vec3 center, inout vec4 color) {
+void modifySplatColor(vec3 center, inout vec4 color) {
     initShared(center);
     
     if ((g_phase == 1.0 && g_growthProgress > 0.0) || (g_phase == 2.0 && g_recoverProgress < 1.0)) {
@@ -677,7 +667,7 @@ fn initShared(center: vec3f) {
     }
 }
 
-fn modifyCenter(center: ptr<function, vec3f>) {
+fn modifySplatCenter(center: ptr<function, vec3f>) {
     let originalCenter = *center;
     
     initShared(*center);
@@ -867,47 +857,37 @@ fn modifyCenter(center: ptr<function, vec3f>) {
     }
 }
 
-fn modifyCovariance(originalCenter: vec3f, modifiedCenter: vec3f, covA: ptr<function, vec3f>, covB: ptr<function, vec3f>) {
+fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
     initShared(originalCenter);
     
-    let originalSize = gsplatExtractSize(*covA, *covB);
+    let originalScale = *scale;
+    let originalSize = gsplatGetSizeFromScale(*scale);
     
-    // Phase 0: Hidden
     if (g_phase == 0.0) {
-        gsplatMakeRound(covA, covB, originalSize * 0.001);
+        gsplatMakeSpherical(scale, originalSize * 0.001);
         return;
     }
-    
-    // Phase 1: 点云模式 - 固定点大小 uPointSize（参考 splat-overlay-shader）
     if (g_phase == 1.0) {
         if (g_growthProgress <= 0.0) {
-            gsplatMakeRound(covA, covB, originalSize * 0.001);
+            gsplatMakeSpherical(scale, originalSize * 0.001);
             return;
         }
-        gsplatMakeRound(covA, covB, uniform.uPointSize);
+        gsplatMakeSpherical(scale, uniform.uPointSize);
         return;
     }
-    
-    // Phase 2: 从中心向外光圈过渡复原，由 uPointSize 过渡至原始
     if (g_phase == 2.0) {
         if (g_recoverProgress <= 0.0) {
-            gsplatMakeRound(covA, covB, uniform.uPointSize);
+            gsplatMakeSpherical(scale, uniform.uPointSize);
             return;
         }
         let easedT = clamp(1.0 - pow(1.0 - g_recoverProgress, 4.0), 0.0, 1.0);
-        let size = mix(uniform.uPointSize, originalSize, easedT);
-        let origCovA = *covA;
-        let origCovB = *covB;
-        gsplatMakeRound(covA, covB, size);
-        *covA = mix(*covA, origCovA, easedT);
-        *covB = mix(*covB, origCovB, easedT);
+        let pointScale = vec3f(uniform.uPointSize);
+        *scale = mix(pointScale, originalScale, easedT);
         return;
     }
-    
-    // Phase 3: Original shape
 }
 
-fn modifyColor(center: vec3f, color: ptr<function, vec4f>) {
+fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     initShared(center);
     
     if ((g_phase == 1.0 && g_growthProgress > 0.0) || (g_phase == 2.0 && g_recoverProgress < 1.0)) {
