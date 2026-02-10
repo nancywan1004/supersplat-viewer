@@ -76,6 +76,18 @@ type PostEffectSettings = {
     fringing: {
         enabled: boolean,
         intensity: number
+    },
+    /** 地面阴影（与 SHADOW_SYSTEM_复用说明 一致：ShadowCatcher + ShadowApply postrender 叠阴影） */
+    shadow: {
+        enabled: boolean,
+        /** 阴影强度 0~1，越小阴影越淡 */
+        darken: number,
+        /** 调试：true 时全屏显示 RT 内容（R 通道灰度） */
+        debugRt?: boolean,
+        /** 调试：true 时显示接影平面几何（半透明绿色），用于确认平面位置与范围 */
+        debugVisual?: boolean,
+        /** 调试：true 时在相机前方放置红色小球（castShadows），用于验证投影 */
+        debugSphere?: boolean,
     }
 };
 

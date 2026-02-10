@@ -1,0 +1,406 @@
+import {
+    Script,
+    Entity,
+    Color,
+    Layer,
+    RenderTarget,
+    Texture,
+    PIXELFORMAT_RGBA8,
+    BLEND_NORMAL,
+    BLEND_NONE,
+    BlendState,
+    DepthState,
+    StandardMaterial,
+    drawQuadWithShader,
+    createShaderFromCode,
+    SEMANTIC_POSITION
+} from 'playcanvas';
+import type { Global } from '../../types';
+
+/**
+ * 与 Physics_Relighting_Demo 的 shadow-apply.mjs 完全一致的 shader：
+ * shadowTex R 通道：1=受光，0=阴影。
+ * blend = (1.0 - R) * intensity，Alpha Blend 黑色叠到屏幕。
+ * 不做 threshold 截断——Demo 也没有。
+ */
+const shadowApplyVs = /* glsl */ `
+    attribute vec2 vertex_position;
+    void main(void) {
+        gl_Position = vec4(vertex_position, 0.0, 1.0);
+    }
+`;
+
+const shadowApplyFs = /* glsl */ `
+    uniform sampler2D shadowTex;
+    uniform float intensity;
+    uniform float debugRt;
+    void main(void) {
+        float r = texelFetch(shadowTex, ivec2(gl_FragCoord.xy), 0).r;
+        if (debugRt > 0.5) {
+            gl_FragColor = vec4(r, r, r, 1.0);
+        } else {
+            float blend = 1.0 - r;
+            gl_FragColor = vec4(0.0, 0.0, 0.0, blend * intensity);
+        }
+    }
+`;
+
+/**
+ * ShadowApplyRt — 复刻 Physics_Relighting_Demo 的阴影系统。
+ *
+ * Demo 核心架构：
+ * 1. ShadowCamera 是主相机的子实体（自动继承位置/旋转），只渲染接影层到 RT
+ * 2. RT clearColor = 白色 [1,1,1,1]（R=1=不叠阴影），格式 RGBA8
+ * 3. 接影面 castShadows=false, receiveShadows=true, material.shadowCatcher=true
+ * 4. postrender 全屏 quad 画到 null（屏幕/backbuffer），NOT 画到 mainCam.renderTarget
+ * 5. shader: blend = (1-R) * intensity，无 threshold
+ */
+class ShadowApplyRt extends Script {
+    static scriptName = 'shadowApplyRt';
+
+    global: Global | null = null;
+
+    private _inited = false;
+    private _shadowMaskCamera: Entity | null = null;
+    private _shadowGeomEntity: Entity | null = null;
+    private _shadowLayer: Layer | null = null;
+    /** 用于 "Show shadow plane" 时把接影平面画在最上层 */
+    private _debugLayer: Layer | null = null;
+
+    initialize() {
+        const app = this.app as any;
+        const global = app.__shadowApplyGlobal ?? this.global;
+        const device = app.graphicsDevice;
+        if (!global || !device) return;
+
+        const anyApp = app as any;
+        if (anyApp.__shadowMaskRtInited) {
+            return;
+        }
+        anyApp.__shadowMaskRtInited = true;
+
+        // ─── 层 ───
+        const layers = app.scene.layers;
+        let shadowLayer = layers.getLayerByName('ShadowMask') as Layer | null;
+        if (!shadowLayer) {
+            shadowLayer = new Layer({ name: 'ShadowMask' });
+            layers.insert(shadowLayer, layers.layerList.length);
+        }
+        this._shadowLayer = shadowLayer;
+
+        let debugLayer = layers.getLayerByName('ShadowDebug') as Layer | null;
+        if (!debugLayer) {
+            debugLayer = new Layer({ name: 'ShadowDebug' });
+            layers.insert(debugLayer, layers.layerList.length);
+        }
+        this._debugLayer = debugLayer;
+
+        // 方向光必须在 ShadowMask 层（与 Demo 一致：light layers 包含接影层）
+        const lightEntity = app.root.findByName('light') as Entity | null;
+        if (lightEntity?.light) {
+            const lightLayers = lightEntity.light.layers as number[];
+            if (!lightLayers.includes(shadowLayer.id)) {
+                lightEntity.light.layers = [...lightLayers, shadowLayer.id];
+            }
+        }
+
+        const shadowSettings = global.settings.postEffectSettings.shadow as {
+            debugVisual?: boolean; debugSphere?: boolean; enabled?: boolean;
+        } | undefined;
+        const debugVisual = shadowSettings?.debugVisual === true;
+
+        // ─── 接影几何 → 放到 ShadowMask 层 ───
+        const shadowCatcherRoot = app.root.findByName('shadowCatcher') as Entity | null;
+        const geomEntity = shadowCatcherRoot?.findByName('ShadowCatcherGeometry') as Entity | null;
+        if (geomEntity && shadowLayer && debugLayer) {
+            this._shadowGeomEntity = geomEntity;
+            const layerIds = debugVisual ? [shadowLayer.id, debugLayer.id] : [shadowLayer.id];
+            const setLayersOnHierarchy = (e: Entity) => {
+                if (e.render) {
+                    e.render.layers = layerIds;
+                    e.render.receiveShadows = true;
+                    e.render.castShadows = false;   // 接影不投射阴影
+                }
+                e.children.forEach((c) => setLayersOnHierarchy(c as Entity));
+            };
+            setLayersOnHierarchy(geomEntity);
+        }
+        app.scene.layers.markDirty();
+
+        const mainCamEntity = global.camera;
+        const mainCamComp = mainCamEntity?.camera;
+        if (!mainCamEntity || !mainCamComp) {
+            return;
+        }
+
+        console.log('[Shadow] ShadowApplyRt init', {
+            shadowLayerId: shadowLayer?.id,
+            debugLayerId: debugLayer?.id,
+            debugVisual,
+            shadowEnabled: shadowSettings?.enabled,
+            foundGeomEntity: !!geomEntity,
+            mainCameraLayers: mainCamComp.layers,
+            lightCastShadows: lightEntity?.light?.castShadows ?? 'N/A',
+            lightLayers: lightEntity?.light?.layers
+        });
+
+        // ─── 阴影相机：作为主相机的子节点（与 Demo 完全一致） ───
+        const shadowMaskCamera = new Entity('shadowMaskCamera');
+        // clearColor = 白色 [1,1,1,1]，与 Demo 一致（R=1 = 不叠阴影）
+        shadowMaskCamera.addComponent('camera', {
+            clearColor: new Color(1, 1, 1, 1),
+            projection: mainCamComp.projection,
+            fov: mainCamComp.fov,
+            nearClip: mainCamComp.nearClip,
+            farClip: mainCamComp.farClip
+        });
+        const smCamComp = shadowMaskCamera.camera!;
+        smCamComp.layers = [shadowLayer.id];
+        // 确保阴影相机在主相机之前渲染（低 priority = 先渲染）
+        smCamComp.priority = -1;
+
+        // 与 Demo 一致：RT 格式 RGBA8
+        const shadowTex = new Texture(device, {
+            name: 'shadowMaskTex',
+            width: device.width,
+            height: device.height,
+            format: PIXELFORMAT_RGBA8,
+            mipmaps: false
+        });
+        const shadowRt = new RenderTarget({
+            colorBuffer: shadowTex,
+            depth: true
+        });
+        smCamComp.renderTarget = shadowRt;
+
+        // 放在 app.root 下（避免 CameraFrame 干扰子相机的 renderTarget）
+        // 位置/旋转在 update() 中与主相机同步
+        shadowMaskCamera.setPosition(mainCamEntity.getPosition());
+        shadowMaskCamera.setRotation(mainCamEntity.getRotation());
+        app.root.addChild(shadowMaskCamera);
+
+        this._shadowMaskCamera = shadowMaskCamera;
+        console.log('[Shadow] shadowMaskCamera created under app.root', {
+            cameraLayers: smCamComp.layers,
+            renderTarget: !!smCamComp.renderTarget
+        });
+
+        // ─── Shader ───
+        const shader = createShaderFromCode(
+            device,
+            shadowApplyVs,
+            shadowApplyFs,
+            'shadowApply',
+            { vertex_position: SEMANTIC_POSITION }
+        );
+
+        // ─── postrender：与 Demo 完全一致 ───
+        let _postrenderCount = 0;
+        app.on('postrender', () => {
+            _postrenderCount++;
+            const shadowSettingsNow = (global.settings.postEffectSettings.shadow || {}) as {
+                enabled?: boolean;
+                darken?: number;
+                debugRt?: boolean;
+                debugVisual?: boolean;
+            };
+            if (!shadowSettingsNow.enabled) {
+                if (_postrenderCount <= 3) {
+                    console.log('[Shadow] postrender skipped (shadow.enabled is false).');
+                }
+                return;
+            }
+            // debugVisual 时不叠阴影（此时材质已切换为 debugMaterial，RT 无意义）
+            if (shadowSettingsNow.debugVisual) {
+                return;
+            }
+
+            if (shadowRt.width !== device.width || shadowRt.height !== device.height) {
+                shadowRt.resize(device.width, device.height);
+            }
+
+            // intensity：Demo 默认 0.4，我们用 darken 控制（darken=0.45 → intensity=0.55）
+            const darken = Math.max(0, Math.min(1, Number(shadowSettingsNow.darken ?? 0.45)));
+            const intensity = 1 - darken;
+            const debugRt = shadowSettingsNow.debugRt === true ? 1 : 0;
+
+            device.scope.resolve('shadowTex')?.setValue(shadowTex);
+            device.scope.resolve('intensity')?.setValue(intensity);
+            device.scope.resolve('debugRt')?.setValue(debugRt);
+
+            if (debugRt > 0.5) {
+                device.setBlendState(BlendState.NOBLEND);
+            } else {
+                device.setBlendState(BlendState.ALPHABLEND);
+            }
+            device.setDepthState(DepthState.NODEPTH);
+            drawQuadWithShader(device, null, shader);
+
+            if (_postrenderCount <= 3 || _postrenderCount % 300 === 0) {
+                console.log('[Shadow] postrender applied', {
+                    frame: _postrenderCount,
+                    darken,
+                    intensity,
+                    debugRt,
+                    rtSize: `${shadowRt.width}x${shadowRt.height}`,
+                    deviceSize: `${device.width}x${device.height}`
+                });
+            }
+        });
+
+        this._inited = true;
+    }
+
+    private _debugLogTicks = 0;
+    private _lastDebugVisual = false;
+    /** debugVisual 时使用的半透明绿色材质 */
+    private _debugMaterial: StandardMaterial | null = null;
+    /** 缓存每个 meshInstance 的原始 ShadowMat 引用 */
+    private _originalMaterials: WeakMap<object, object> = new WeakMap();
+
+    private _getDebugMaterial(): StandardMaterial {
+        if (!this._debugMaterial) {
+            const mat = new StandardMaterial();
+            mat.diffuse.set(0.1, 0.8, 0.3);
+            mat.emissive.set(0, 0.3, 0.1);
+            mat.specular.set(0, 0, 0);
+            mat.opacity = 0.35;
+            mat.blendType = BLEND_NORMAL;
+            mat.depthWrite = false;
+            mat.depthTest = true;
+            mat.useLighting = false;
+            mat.useSkybox = false;
+            mat.useFog = false;
+            // 注意：不设 shadowCatcher，这样主相机渲染时正常显示半透明绿色
+            mat.update();
+            this._debugMaterial = mat;
+        }
+        return this._debugMaterial;
+    }
+
+    update() {
+        if (!this._inited || !this.global?.camera) return;
+        const shadowLayer = this._shadowLayer;
+        const shadowSettings = this.global.settings.postEffectSettings?.shadow as {
+            debugVisual?: boolean; debugSphere?: boolean; enabled?: boolean;
+        } | undefined;
+
+        const debugVisual = shadowSettings?.debugVisual === true;
+
+        // ─── 接影几何层 + 材质管理 ───
+        if (shadowLayer && this._shadowGeomEntity && this._debugLayer) {
+            const debugChanged = debugVisual !== this._lastDebugVisual;
+            this._lastDebugVisual = debugVisual;
+
+            // 层配置：debugVisual 时同时在 ShadowMask（阴影相机用）和 ShadowDebug（主相机用）上
+            // 非 debugVisual 时只在 ShadowMask 上
+            const layerIds = debugVisual
+                ? [shadowLayer.id, this._debugLayer.id]
+                : [shadowLayer.id];
+
+            const debugMat = debugVisual ? this._getDebugMaterial() : null;
+
+            const visit = (e: Entity) => {
+                if (e.render) {
+                    e.render.layers = layerIds;
+                    e.render.receiveShadows = true;
+                    e.render.castShadows = false;
+
+                    // 材质切换：
+                    // debugVisual ON → 使用 debugMaterial（半透明绿色，无 shadowCatcher）
+                    //   这样主相机渲染 ShadowDebug 层时看到绿色接影几何
+                    //   代价：阴影相机也渲染 debugMaterial 而非 ShadowMat → shadow RT 不含阴影信息
+                    //   可接受：debugVisual 是调试用途，不需要正确的阴影
+                    // debugVisual OFF → 恢复 ShadowMat（shadowCatcher=true）
+                    if (debugChanged) {
+                        e.render.meshInstances?.forEach((mi: any) => {
+                            if (debugVisual && debugMat) {
+                                // 保存原始 ShadowMat
+                                if (!this._originalMaterials.has(mi)) {
+                                    this._originalMaterials.set(mi, mi.material);
+                                }
+                                mi.material = debugMat;
+                            } else {
+                                // 恢复原始 ShadowMat
+                                const orig = this._originalMaterials.get(mi);
+                                if (orig) {
+                                    mi.material = orig;
+                                }
+                            }
+                        });
+                    }
+                }
+                e.children.forEach((c) => visit(c as Entity));
+            };
+            visit(this._shadowGeomEntity);
+        }
+
+        // ─── 红球管理（不放在 ShadowMask 层，与 Demo 一致） ───
+        const sphereEntity = this.app.root.findByName('shadowTestSphere') as Entity | null;
+        if (sphereEntity) {
+            const wantEnabled = shadowSettings?.debugSphere !== false;
+            if (sphereEntity.enabled !== wantEnabled) {
+                sphereEntity.enabled = wantEnabled;
+            }
+            if (shadowLayer && sphereEntity.render) {
+                const worldLayer = this.app.scene.layers.getLayerByName('World') ?? this.app.scene.layers.layerList[0];
+                const defaultLayerId = worldLayer?.id ?? this.app.scene.layers.layerList[0]?.id ?? 0;
+                const layers = (sphereEntity.render.layers as number[]) ?? [defaultLayerId];
+                if (layers.includes(shadowLayer.id)) {
+                    sphereEntity.render.layers = layers.filter((id: number) => id !== shadowLayer.id);
+                    if (sphereEntity.render.layers.length === 0) {
+                        sphereEntity.render.layers = [defaultLayerId];
+                    }
+                }
+            }
+        }
+
+        // ─── debugVisual 时主相机渲染 ShadowDebug 层 ───
+        if (this._debugLayer) {
+            const mainCamComp = this.global.camera?.camera;
+            if (mainCamComp) {
+                const hasDebug = mainCamComp.layers.indexOf(this._debugLayer.id) >= 0;
+                if (debugVisual && !hasDebug) {
+                    mainCamComp.layers = [...mainCamComp.layers, this._debugLayer.id];
+                } else if (!debugVisual && hasDebug) {
+                    mainCamComp.layers = mainCamComp.layers.filter((id: number) => id !== this._debugLayer!.id);
+                }
+            }
+        }
+
+        // ─── 同步阴影相机 ───
+        if (this._shadowMaskCamera && this.global.camera) {
+            const mainCamEntity = this.global.camera;
+            this._shadowMaskCamera.setPosition(mainCamEntity.getPosition());
+            this._shadowMaskCamera.setRotation(mainCamEntity.getRotation());
+            if (this._shadowMaskCamera.camera && mainCamEntity.camera) {
+                const smCam = this._shadowMaskCamera.camera;
+                const mainCam = mainCamEntity.camera;
+                if (smCam.fov !== mainCam.fov) smCam.fov = mainCam.fov;
+                if (smCam.nearClip !== mainCam.nearClip) smCam.nearClip = mainCam.nearClip;
+                if (smCam.farClip !== mainCam.farClip) smCam.farClip = mainCam.farClip;
+            }
+        }
+
+        this._debugLogTicks++;
+        if (this._debugLogTicks <= 3 || this._debugLogTicks % 300 === 0) {
+            const smCam = this._shadowMaskCamera?.camera;
+            console.log('[Shadow] update', {
+                tick: this._debugLogTicks,
+                debugVisual,
+                debugSphere: shadowSettings?.debugSphere,
+                shadowEnabled: shadowSettings?.enabled,
+                geomLayers: this._shadowGeomEntity?.render?.layers,
+                geomMeshCount: this._shadowGeomEntity?.render?.meshInstances?.length ?? 0,
+                smCamEnabled: this._shadowMaskCamera?.enabled,
+                smCamPriority: smCam?.priority,
+                smCamRT: !!smCam?.renderTarget,
+                smCamLayers: smCam?.layers,
+                sphereEnabled: sphereEntity?.enabled,
+                sphereLayers: sphereEntity?.render?.layers
+            });
+        }
+    }
+}
+
+export { ShadowApplyRt };

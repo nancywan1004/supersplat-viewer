@@ -23,6 +23,8 @@ type Config = {
     aa: boolean;                                // render with antialiasing
     noreveal: boolean;                          // disable reveal effect transition animation
     showCameraPathVisualizer?: boolean;         // show camera path visualization
+    /** 接影几何 GLB 的 URL（如 /assets/mesh/gabriel.glb），由 urlParam splatMesh 传入；无则用平面 */
+    splatMeshUrl?: string;
 };
 
 // observable state that can change at runtime

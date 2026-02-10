@@ -29,6 +29,7 @@
             const skyboxUrl = url.searchParams.get('skybox');
             const settingsUrl = url.searchParams.has('settings') ? url.searchParams.get('settings') : './settings.json';
             const contentUrl = url.searchParams.has('content') ? url.searchParams.get('content') : './scene.compressed.ply';
+            const splatMeshUrl = url.searchParams.get('splatMesh') || undefined;
 
             const sseConfig = {
                 poster: posterUrl && createImage(posterUrl),
@@ -43,7 +44,8 @@
                 unified: url.searchParams.has('unified'),
                 aa: url.searchParams.has('aa'),
                 noreveal: url.searchParams.has('noreveal'),
-                noBottomUI: false  // url.searchParams.has('noBottomUI')
+                noBottomUI: false,  // url.searchParams.has('noBottomUI')
+                splatMeshUrl
             };
 
             window.sse = {
@@ -84,7 +86,7 @@
                 </pc-entity>
                 <!-- Light (for XR controllers) -->
                 <pc-entity name="light" rotation="35 45 0">
-                    <pc-light color="white" intensity="1.5"></pc-light>
+                    <pc-light color="white" intensity="1.5" cast-shadows="true"></pc-light>
                 </pc-entity>
                 <!-- Splat -->
                 <pc-entity name="splat" rotation="0 0 180">

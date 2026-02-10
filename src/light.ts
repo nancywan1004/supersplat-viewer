@@ -1,4 +1,4 @@
-import { Color, Entity, Vec3, StandardMaterial } from 'playcanvas';
+import { Color, Entity, Vec3, StandardMaterial, TEXTUREPROJECTION_CUBE } from 'playcanvas';
 import type { Global } from './types';
 
 const MAX_POINT_LIGHTS = 10;
@@ -104,7 +104,7 @@ const createPointLightsFromSettings = (global: Global): void => {
                 type: 'point',
                 color: new Color(r, g, b),
                 intensity,
-                castShadows: false
+                castShadows: true
             });
             entity.tags.add('pointLight');
             // 场景内可视化：在光源位置显示一个与光同色的小球
@@ -180,7 +180,7 @@ const initLight = (global: Global): Entity => {
             type: 'directional',
             color: new Color(1, 1, 1),
             intensity: 1.5,
-            castShadows: false,
+            castShadows: true,
             shadowBias: 0.05,
             normalOffsetBias: 0.05
         });
@@ -191,11 +191,16 @@ const initLight = (global: Global): Entity => {
                 type: 'directional',
                 color: new Color(1, 1, 1),
                 intensity: 1.5,
-                castShadows: false,
+                castShadows: true,
                 shadowBias: 0.05,
                 normalOffsetBias: 0.05
             });
         }
+    }
+
+    // 方向光阴影可见范围（从相机算起）。默认过小会导致地面/物体上看不到投影，故设大一些
+    if (lightEntity.light) {
+        lightEntity.light.shadowDistance = 40;
     }
 
     lightEntity.tags.add('light');

@@ -2,13 +2,14 @@ import {
     BoundingBox,
     CameraFrame,
     type CameraComponent,
+    type Layer,
     Color,
     Entity,
-    type Layer,
     RenderTarget,
     Mat4,
     MiniStats,
     ShaderChunks,
+    StandardMaterial,
     Texture,
     type TextureHandler,
     PIXELFORMAT_RGBA16F,
@@ -37,7 +38,10 @@ import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visu
 import { getSkyboxRadius } from './loaders/skybox-loader';
 import { isLodMetaFile } from './loaders/lod-loader';
 import { BloomController } from './vfx/bloom';
+import { loadSplatMesh } from './loaders/splat-mesh-loader';
 import { NightMode } from './vfx/lighting/night-mode';
+import { initShadowCatcher } from './vfx/shadow/shadow-catcher';
+import { ShadowApplyRt } from './vfx/shadow/shadow-apply';
 
 // override global pick to pack depth instead of meshInstance id
 const pickDepthGlsl = /* glsl */ `
@@ -113,11 +117,13 @@ const applyPostEffectSettings = (cameraFrame: CameraFrame, settings: PostEffectS
 
 const anyPostEffectEnabled = (settings: PostEffectSettings): boolean => {
     const bloomOn = settings.bloom.enabled && (Number(settings.bloom.intensity) > 0);
+    const shadowOn = (settings as any).shadow?.enabled === true;
     return (settings.sharpness.enabled && settings.sharpness.amount > 0) ||
         bloomOn ||
         (settings.grading.enabled) ||
         (settings.vignette.enabled && settings.vignette.intensity > 0) ||
-        (settings.fringing.enabled && settings.fringing.intensity > 0);
+        (settings.fringing.enabled && settings.fringing.intensity > 0) ||
+        shadowOn;
 };
 
 const vec = new Vec3();
@@ -371,15 +377,87 @@ class Viewer {
             }
         });
 
+        // 接影几何：从 URL 参数 ?splatMesh= 读取 GLB 路径
+        console.log('[Shadow] config.splatMeshUrl =', config.splatMeshUrl);
+        const splatMeshLoad = config.splatMeshUrl
+            ? loadSplatMesh(app, config.splatMeshUrl).then((entity) => {
+                console.log('[Shadow] splatMesh loaded successfully:', entity?.name, 'render:', !!entity?.render, 'children:', entity?.children?.length);
+                return entity;
+            }).catch((err: unknown): null => {
+                console.warn('[Shadow] splatMesh load failed, falling back to plane', config.splatMeshUrl, err);
+                return null;
+            })
+            : (() => {
+                console.log('[Shadow] No splatMeshUrl in URL params, will create default plane. Add ?splatMesh=/assets/mesh/blue.glb to URL to use GLB mesh.');
+                return Promise.resolve(null as Entity | null);
+            })();
+
         // wait for the model to load
-        Promise.all([gsplatLoad, skyboxLoad]).then((results) => {
-            const gsplat = results[0].gsplat as GSplatComponent;
+        console.log('[Shadow] Waiting for Promise.all to resolve...');
+        Promise.all([gsplatLoad, skyboxLoad ?? Promise.resolve(), splatMeshLoad]).then((results) => {
+            console.log('[Shadow] Promise.all resolved, results count:', results.length);
+            try {
+            const gsplatEntity = results[0] as Entity;
+            const gsplat = gsplatEntity.gsplat as GSplatComponent;
+            const meshEntity = results[2] as Entity | null | undefined;
+            console.log('[Shadow] gsplatEntity:', gsplatEntity?.name, 'gsplat:', !!gsplat, 'meshEntity:', meshEntity?.name ?? 'null');
 
             // get scene bounding box
-            const gsplatBbox = gsplat.customAabb;
+            const gsplatBbox = gsplat?.customAabb;
             if (gsplatBbox) {
-                sceneBound.setFromTransformedAabb(gsplatBbox, results[0].getWorldTransform());
+                sceneBound.setFromTransformedAabb(gsplatBbox, gsplatEntity.getWorldTransform());
             }
+
+            // 阴影管线：有 GLB 则用 mesh 接影，否则用平面（与 Physics_Relighting_Demo 一致）
+            const shadowOpts = settings.postEffectSettings.shadow as { debugVisual?: boolean; debugSphere?: boolean } | undefined;
+            console.log('[Shadow] initShadowCatcher called with:', {
+                hasMeshEntity: !!meshEntity,
+                meshEntityName: meshEntity?.name,
+                meshEntityChildren: meshEntity?.children?.length,
+                sceneBoundCenter: sceneBound.center.toString(),
+                sceneBoundHalf: sceneBound.halfExtents.toString()
+            });
+            initShadowCatcher(app, sceneBound, {
+                debugVisual: shadowOpts?.debugVisual ?? false,
+                parentEntity: gsplatEntity,
+                meshEntity: meshEntity ?? undefined
+            });
+            // 必须在 create 之前注入 global：initialize() 在 create() 时同步执行，此时 script.global 尚未被赋值
+            (app as any).__shadowApplyGlobal = global;
+            if (!app.root.script) {
+                app.root.addComponent('script');
+            }
+            const applyScript = app.root.script.create(ShadowApplyRt) as unknown as ShadowApplyRt;
+            applyScript.global = global;
+            delete (app as any).__shadowApplyGlobal;
+
+            // 红色小球用于验证阴影投影（castShadows）；显示/隐藏由 settings.shadow.debugSphere 控制，ShadowApplyRt 每帧同步
+            const camEntity = global.camera;
+            const camPos = camEntity.getPosition();
+            const forward = camEntity.forward;
+            const dist = Math.min(5, sceneBound.halfExtents.length() * 0.15);
+            const sphereEntity = new Entity('shadowTestSphere');
+            sphereEntity.setPosition(
+                camPos.x - 5,
+                camPos.y + forward.y * dist,
+                camPos.z
+            );
+            const sphereMat = new StandardMaterial();
+            sphereMat.diffuse.set(0.85, 0.3, 0.25);
+            sphereMat.specular.set(0.3, 0.3, 0.3);
+            sphereMat.update();
+            sphereEntity.addComponent('render', {
+                type: 'sphere',
+                castShadows: true,
+                receiveShadows: true,
+                material: sphereMat
+            });
+            const half = sceneBound.halfExtents;
+            const radius = Math.min(1, half.x * 0.1);
+            sphereEntity.setLocalScale(radius * 2, radius * 2, radius * 2);
+            app.root.addChild(sphereEntity);
+            sphereEntity.enabled = shadowOpts?.debugSphere !== false;
+            console.log('[Shadow] shadowTestSphere created', { pos: sphereEntity.getPosition(), enabled: sphereEntity.enabled, debugSphere: shadowOpts?.debugSphere });
 
             if (!config.noui) {
                 this.annotations = new Annotations(global, this.cameraFrame != null);
@@ -394,7 +472,7 @@ class Viewer {
             // 先创建 cameraManager，因为 revealController 需要它来获取 targetConstraint
             this.cameraManager = new CameraManager(global, sceneBound);
             
-            this.revealController = new RevealController(global, sceneBound, results[0], this.cameraManager);
+            this.revealController = new RevealController(global, sceneBound, gsplatEntity, this.cameraManager);
 
             // 有 reveal 时：等 reveal 播完再开始动画（监听 revealComplete）
             if (state.hasRevealEffect) {
@@ -418,14 +496,14 @@ class Viewer {
             const cameraEntity = global.camera;
             nightModeScript.light = lightEntity;
             nightModeScript.camera = cameraEntity || null;
-            nightModeScript.splat = results[0];
+            nightModeScript.splat = gsplatEntity;
             // Keep enabled = true so update() continues to run
             // We control night mode through nightMode property, not enabled
             nightModeScript.enabled = true;
             console.log('NightMode script initialized:', {
                 light: lightEntity ? 'found' : 'not found',
                 camera: cameraEntity ? 'found' : 'not found',
-                splat: results[0] ? 'found' : 'not found'
+                splat: gsplatEntity ? 'found' : 'not found'
             });
 
             applyCamera(this.cameraManager.camera);
@@ -670,6 +748,11 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 };
                 eventHandler.on('frame:ready', readyHandler);
             }
+            } catch (e) {
+                console.error('[Shadow] Error inside Promise.all .then() callback:', e);
+            }
+        }).catch((err) => {
+            console.error('[Shadow] Promise.all REJECTED:', err);
         });
     }
 
