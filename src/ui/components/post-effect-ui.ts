@@ -62,8 +62,15 @@ const POST_EFFECT_PANEL_HTML = `
     <div id="shadowDebugVisualOption" class="postEffectOption">Show shadow plane (调试接影平面)</div>
   </div>
   <div class="settingsRow">
-    <div id="shadowDebugSphereCheck" class="checkMark">✓</div>
-    <div id="shadowDebugSphereOption" class="postEffectOption">Show test sphere (调试红球)</div>
+    <label for="shadowSphereRadiusSlider" class="postEffectLabel">Sphere Radius:</label>
+    <div class="postEffectSliderWrap">
+      <input type="range" id="shadowSphereRadiusSlider" min="0.1" max="5" step="0.1" value="0.5" class="postEffectSlider">
+      <span id="shadowSphereRadiusValue" class="postEffectSliderValue">0.50</span>
+    </div>
+  </div>
+  <div class="settingsRow">
+    <button type="button" id="shadowSpawnSphereBtn" class="postEffectOption" style="flex:1;text-align:center;cursor:pointer;padding:4px 8px;">Spawn Test Sphere (在相机前方生成)</button>
+    <button type="button" id="shadowClearSpheresBtn" class="postEffectOption" style="flex:1;text-align:center;cursor:pointer;padding:4px 8px;">Clear All Spheres</button>
   </div>
 </div>
 `.trim();
@@ -104,7 +111,7 @@ type ShadowSettings = {
     enabled: boolean;
     darken: number;
     debugVisual?: boolean;
-    debugSphere?: boolean;
+    sphereRadius?: number;
 };
 
 const ensureShadow = (settings: Global['settings']): ShadowSettings => {
@@ -115,12 +122,12 @@ const ensureShadow = (settings: Global['settings']): ShadowSettings => {
             enabled: true,
             darken: 0.45,
             debugVisual: false,
-            debugSphere: true
+            sphereRadius: 0.5
         };
     } else {
         if (typeof (s as any).darken !== 'number') (s as any).darken = 0.45;
         if ((s as any).debugVisual === undefined) (s as any).debugVisual = false;
-        if ((s as any).debugSphere === undefined) (s as any).debugSphere = true;
+        if (typeof (s as any).sphereRadius !== 'number') (s as any).sphereRadius = 0.5;
     }
     return (settings.postEffectSettings as any).shadow as ShadowSettings;
 };
@@ -161,8 +168,10 @@ export function initPostEffectUI(global: Global): () => void {
     const shadowDarkenValue = container.querySelector('#shadowDarkenValue') as HTMLElement | null;
     const shadowDebugVisualCheck = container.querySelector('#shadowDebugVisualCheck') as HTMLElement | null;
     const shadowDebugVisualOption = container.querySelector('#shadowDebugVisualOption') as HTMLElement | null;
-    const shadowDebugSphereCheck = container.querySelector('#shadowDebugSphereCheck') as HTMLElement | null;
-    const shadowDebugSphereOption = container.querySelector('#shadowDebugSphereOption') as HTMLElement | null;
+    const shadowSphereRadiusSlider = container.querySelector('#shadowSphereRadiusSlider') as HTMLInputElement | null;
+    const shadowSphereRadiusValue = container.querySelector('#shadowSphereRadiusValue') as HTMLElement | null;
+    const shadowSpawnSphereBtn = container.querySelector('#shadowSpawnSphereBtn') as HTMLButtonElement | null;
+    const shadowClearSpheresBtn = container.querySelector('#shadowClearSpheresBtn') as HTMLButtonElement | null;
 
     const syncFromSettings = () => {
         const b = ensureBloom(settings);
@@ -187,7 +196,9 @@ export function initPostEffectUI(global: Global): () => void {
         if (shadowDarkenSlider) shadowDarkenSlider.value = String(darken);
         if (shadowDarkenValue) shadowDarkenValue.textContent = darken.toFixed(2);
         if (shadowDebugVisualCheck) shadowDebugVisualCheck.classList.toggle('active', sh.debugVisual !== false);
-        if (shadowDebugSphereCheck) shadowDebugSphereCheck.classList.toggle('active', sh.debugSphere !== false);
+        const sphereRadius = Math.max(0.1, Math.min(5, Number(sh.sphereRadius ?? 0.5)));
+        if (shadowSphereRadiusSlider) shadowSphereRadiusSlider.value = String(sphereRadius);
+        if (shadowSphereRadiusValue) shadowSphereRadiusValue.textContent = sphereRadius.toFixed(2);
     };
 
     const firePostEffectChanged = () => events.fire('postEffect:changed');
@@ -308,15 +319,40 @@ export function initPostEffectUI(global: Global): () => void {
         shadowDebugVisualCheck.addEventListener('click', toggleDebugVisual);
     }
 
-    if (shadowDebugSphereOption && shadowDebugSphereCheck) {
-        const toggleDebugSphere = () => {
+    if (shadowSphereRadiusSlider && shadowSphereRadiusValue) {
+        shadowSphereRadiusSlider.addEventListener('input', () => {
             const sh = ensureShadow(settings);
-            (sh as any).debugSphere = (sh as any).debugSphere === false;
-            syncFromSettings();
+            sh.sphereRadius = Math.max(0.1, Math.min(5, parseFloat(shadowSphereRadiusSlider.value) || 0.5));
+            shadowSphereRadiusValue.textContent = sh.sphereRadius.toFixed(2);
+        });
+    }
+
+    if (shadowSpawnSphereBtn) {
+        shadowSpawnSphereBtn.addEventListener('click', () => {
+            const sh = ensureShadow(settings);
+            const radius = sh.sphereRadius ?? 0.5;
+            // 获取当前相机位置和前方方向，在相机前方一定距离处生成球体
+            const cam = global.camera;
+            if (cam) {
+                const pos = cam.getPosition();
+                const fwd = cam.forward;
+                const spawnDist = radius * 6;   // 在相机前方生成
+                events.fire('shadow:spawnSphere', {
+                    x: pos.x + fwd.x * spawnDist,
+                    y: pos.y + fwd.y * spawnDist,
+                    z: pos.z + fwd.z * spawnDist,
+                    radius
+                });
+            }
             firePostEffectChanged();
-        };
-        shadowDebugSphereOption.addEventListener('click', toggleDebugSphere);
-        shadowDebugSphereCheck.addEventListener('click', toggleDebugSphere);
+        });
+    }
+
+    if (shadowClearSpheresBtn) {
+        shadowClearSpheresBtn.addEventListener('click', () => {
+            events.fire('shadow:clearSpheres');
+            firePostEffectChanged();
+        });
     }
 
     events.on('firstFrame', syncFromSettings);

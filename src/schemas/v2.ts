@@ -86,8 +86,6 @@ type PostEffectSettings = {
         debugRt?: boolean,
         /** 调试：true 时显示接影平面几何（半透明绿色），用于确认平面位置与范围 */
         debugVisual?: boolean,
-        /** 调试：true 时在相机前方放置红色小球（castShadows），用于验证投影 */
-        debugSphere?: boolean,
     }
 };
 

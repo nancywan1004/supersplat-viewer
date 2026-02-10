@@ -409,7 +409,7 @@ class Viewer {
             }
 
             // 阴影管线：有 GLB 则用 mesh 接影，否则用平面（与 Physics_Relighting_Demo 一致）
-            const shadowOpts = settings.postEffectSettings.shadow as { debugVisual?: boolean; debugSphere?: boolean } | undefined;
+            const shadowOpts = settings.postEffectSettings.shadow as { debugVisual?: boolean } | undefined;
             console.log('[Shadow] initShadowCatcher called with:', {
                 hasMeshEntity: !!meshEntity,
                 meshEntityName: meshEntity?.name,
@@ -430,34 +430,6 @@ class Viewer {
             const applyScript = app.root.script.create(ShadowApplyRt) as unknown as ShadowApplyRt;
             applyScript.global = global;
             delete (app as any).__shadowApplyGlobal;
-
-            // 红色小球用于验证阴影投影（castShadows）；显示/隐藏由 settings.shadow.debugSphere 控制，ShadowApplyRt 每帧同步
-            const camEntity = global.camera;
-            const camPos = camEntity.getPosition();
-            const forward = camEntity.forward;
-            const dist = Math.min(5, sceneBound.halfExtents.length() * 0.15);
-            const sphereEntity = new Entity('shadowTestSphere');
-            sphereEntity.setPosition(
-                camPos.x - 5,
-                camPos.y + forward.y * dist,
-                camPos.z
-            );
-            const sphereMat = new StandardMaterial();
-            sphereMat.diffuse.set(0.85, 0.3, 0.25);
-            sphereMat.specular.set(0.3, 0.3, 0.3);
-            sphereMat.update();
-            sphereEntity.addComponent('render', {
-                type: 'sphere',
-                castShadows: true,
-                receiveShadows: true,
-                material: sphereMat
-            });
-            const half = sceneBound.halfExtents;
-            const radius = Math.min(1, half.x * 0.1);
-            sphereEntity.setLocalScale(radius * 2, radius * 2, radius * 2);
-            app.root.addChild(sphereEntity);
-            sphereEntity.enabled = shadowOpts?.debugSphere !== false;
-            console.log('[Shadow] shadowTestSphere created', { pos: sphereEntity.getPosition(), enabled: sphereEntity.enabled, debugSphere: shadowOpts?.debugSphere });
 
             if (!config.noui) {
                 this.annotations = new Annotations(global, this.cameraFrame != null);

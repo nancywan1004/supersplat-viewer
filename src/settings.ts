@@ -162,8 +162,7 @@ const migrateV2 = (v1: V1): V2 => {
             shadow: {
                 enabled: true,
                 darken: 0.45,
-                debugVisual: false,
-                debugSphere: true
+                debugVisual: false
             }
         },
         animTracks: v1.animTracks.map((animTrackV1: AnimTrackV1) => {
@@ -306,8 +305,7 @@ const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: numb
             shadow: {
                 enabled: true,
                 darken: 0.45,
-                debugVisual: false,
-                debugSphere: true
+                debugVisual: false
             }
         },
         animTracks: [{

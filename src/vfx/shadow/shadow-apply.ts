@@ -66,6 +66,50 @@ class ShadowApplyRt extends Script {
     private _shadowLayer: Layer | null = null;
     /** 用于 "Show shadow plane" 时把接影平面画在最上层 */
     private _debugLayer: Layer | null = null;
+    /** 动态生成的 testSphere 列表 */
+    private _testSpheres: Entity[] = [];
+    private _sphereCounter = 0;
+
+    /**
+     * 在指定世界坐标生成一个 testSphere（castShadows=true）。
+     * 由 UI 按钮通过事件触发。
+     */
+    spawnTestSphere(position: { x: number; y: number; z: number }, radius = 0.5) {
+        const app = this.app;
+        this._sphereCounter++;
+        const name = `testSphere_${this._sphereCounter}`;
+        const entity = new Entity(name);
+        entity.setPosition(position.x, position.y, position.z);
+
+        const mat = new StandardMaterial();
+        mat.diffuse.set(0.85, 0.3, 0.25);
+        mat.specular.set(0.3, 0.3, 0.3);
+        mat.update();
+
+        entity.addComponent('render', {
+            type: 'sphere',
+            castShadows: true,
+            receiveShadows: true,
+            material: mat
+        });
+        entity.setLocalScale(radius * 2, radius * 2, radius * 2);
+        app.root.addChild(entity);
+        this._testSpheres.push(entity);
+        (app as any).renderNextFrame = true;
+
+        console.log(`[Shadow] spawnTestSphere: ${name} at (${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)}), radius=${radius}`);
+        return entity;
+    }
+
+    /** 清除所有动态生成的 testSphere */
+    clearTestSpheres() {
+        this._testSpheres.forEach((e) => {
+            e.destroy();
+        });
+        this._testSpheres = [];
+        (this.app as any).renderNextFrame = true;
+        console.log('[Shadow] clearTestSpheres: all test spheres removed');
+    }
 
     initialize() {
         const app = this.app as any;
@@ -105,7 +149,7 @@ class ShadowApplyRt extends Script {
         }
 
         const shadowSettings = global.settings.postEffectSettings.shadow as {
-            debugVisual?: boolean; debugSphere?: boolean; enabled?: boolean;
+            debugVisual?: boolean; enabled?: boolean;
         } | undefined;
         const debugVisual = shadowSettings?.debugVisual === true;
 
@@ -248,6 +292,15 @@ class ShadowApplyRt extends Script {
             }
         });
 
+        // ─── 监听 UI 事件：生成/清除 testSphere ───
+        const events = global.events;
+        events.on('shadow:spawnSphere', (data: { x: number; y: number; z: number; radius?: number }) => {
+            this.spawnTestSphere(data, data.radius);
+        });
+        events.on('shadow:clearSpheres', () => {
+            this.clearTestSpheres();
+        });
+
         this._inited = true;
     }
 
@@ -282,7 +335,7 @@ class ShadowApplyRt extends Script {
         if (!this._inited || !this.global?.camera) return;
         const shadowLayer = this._shadowLayer;
         const shadowSettings = this.global.settings.postEffectSettings?.shadow as {
-            debugVisual?: boolean; debugSphere?: boolean; enabled?: boolean;
+            debugVisual?: boolean; enabled?: boolean;
         } | undefined;
 
         const debugVisual = shadowSettings?.debugVisual === true;
@@ -335,24 +388,21 @@ class ShadowApplyRt extends Script {
             visit(this._shadowGeomEntity);
         }
 
-        // ─── 红球管理（不放在 ShadowMask 层，与 Demo 一致） ───
-        const sphereEntity = this.app.root.findByName('shadowTestSphere') as Entity | null;
-        if (sphereEntity) {
-            const wantEnabled = shadowSettings?.debugSphere !== false;
-            if (sphereEntity.enabled !== wantEnabled) {
-                sphereEntity.enabled = wantEnabled;
-            }
-            if (shadowLayer && sphereEntity.render) {
-                const worldLayer = this.app.scene.layers.getLayerByName('World') ?? this.app.scene.layers.layerList[0];
-                const defaultLayerId = worldLayer?.id ?? this.app.scene.layers.layerList[0]?.id ?? 0;
-                const layers = (sphereEntity.render.layers as number[]) ?? [defaultLayerId];
-                if (layers.includes(shadowLayer.id)) {
-                    sphereEntity.render.layers = layers.filter((id: number) => id !== shadowLayer.id);
-                    if (sphereEntity.render.layers.length === 0) {
-                        sphereEntity.render.layers = [defaultLayerId];
+        // ─── testSphere 层管理：确保不在 ShadowMask 层 ───
+        if (shadowLayer) {
+            this._testSpheres.forEach((sphere) => {
+                if (sphere.render) {
+                    const worldLayer = this.app.scene.layers.getLayerByName('World') ?? this.app.scene.layers.layerList[0];
+                    const defaultLayerId = worldLayer?.id ?? this.app.scene.layers.layerList[0]?.id ?? 0;
+                    const layers = (sphere.render.layers as number[]) ?? [defaultLayerId];
+                    if (layers.includes(shadowLayer.id)) {
+                        sphere.render.layers = layers.filter((id: number) => id !== shadowLayer.id);
+                        if (sphere.render.layers.length === 0) {
+                            sphere.render.layers = [defaultLayerId];
+                        }
                     }
                 }
-            }
+            });
         }
 
         // ─── debugVisual 时主相机渲染 ShadowDebug 层 ───
@@ -388,7 +438,6 @@ class ShadowApplyRt extends Script {
             console.log('[Shadow] update', {
                 tick: this._debugLogTicks,
                 debugVisual,
-                debugSphere: shadowSettings?.debugSphere,
                 shadowEnabled: shadowSettings?.enabled,
                 geomLayers: this._shadowGeomEntity?.render?.layers,
                 geomMeshCount: this._shadowGeomEntity?.render?.meshInstances?.length ?? 0,
@@ -396,8 +445,7 @@ class ShadowApplyRt extends Script {
                 smCamPriority: smCam?.priority,
                 smCamRT: !!smCam?.renderTarget,
                 smCamLayers: smCam?.layers,
-                sphereEnabled: sphereEntity?.enabled,
-                sphereLayers: sphereEntity?.render?.layers
+                testSphereCount: this._testSpheres.length
             });
         }
     }
