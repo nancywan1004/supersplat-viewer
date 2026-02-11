@@ -66,8 +66,14 @@ class BloomBrushFilter extends GsplatShaderEffect {
         if (this.materialsApplied.size === 0) return;
         const cam = this.cameraEntity?.camera;
         if (cam) {
-            this._modelViewProj.mul2(cam.viewMatrix, this.entity.getWorldTransform());
-            this._modelViewProj.mul2(cam.projectionMatrix, this._modelViewProj);
+            // unified 模式下 center 已是 world space → MVP 只需 projection * view（不含 model）
+            const isUnified = (this.entity as any).gsplat?.unified ?? false;
+            if (isUnified) {
+                this._modelViewProj.mul2(cam.projectionMatrix, cam.viewMatrix);
+            } else {
+                this._modelViewProj.mul2(cam.viewMatrix, this.entity.getWorldTransform());
+                this._modelViewProj.mul2(cam.projectionMatrix, this._modelViewProj);
+            }
             this.setUniform('uModelViewProj', this._modelViewProj.data);
         }
         if (this.maskTexture) {

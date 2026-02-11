@@ -31,6 +31,8 @@ export class RevealController {
     private revealCenter: number[] = [0, 0, 0];
     private bbox: BoundingBox | null = null;
     private cameraManager: CameraManager | null = null;
+    /** unified 渲染模式标记（shader 接收 world-space 坐标） */
+    private isUnified: boolean = false;
     
     // 计时相关
     private effectStartTime: number | null = null;
@@ -54,6 +56,7 @@ export class RevealController {
         this.gsplatEntity = gsplatEntity;
         this.bbox = bbox;
         this.cameraManager = cameraManager || null;
+        this.isUnified = gsplatEntity.gsplat?.unified ?? false;
         
         // Check if revealEffect is empty or has no type
         const hasRevealEffect = settings.revealEffect && 
@@ -106,8 +109,19 @@ export class RevealController {
         });
 
         // 使用相机的 look target 作为默认 reveal center，如果没有则使用 bbox.center
+        // revealCenter 统一存储 world-space 坐标。
+        // bbox 已按 unified 模式选好坐标空间（viewer.ts 中处理），所以：
+        //   - unified=true  → bbox 是 world space，center 可直接用
+        //   - unified=false → bbox 是 model space，center 需要转为 world space（取反 X/Y）
         const cameraTarget = settings.cameras?.[0]?.initial?.target;
-        this.revealCenter = cameraTarget ? cameraTarget : bbox.center.toArray();
+        if (cameraTarget) {
+            this.revealCenter = cameraTarget;
+        } else {
+            const bc = bbox.center;
+            this.revealCenter = this.isUnified
+                ? bc.toArray()                      // bbox already world space
+                : [-bc.x, -bc.y, bc.z];            // model → world
+        }
         
         // 触发事件以更新 UI（确保 UI 显示当前类型）
         events.fire('revealType:changed', this.config.type);
@@ -706,16 +720,11 @@ export class RevealController {
                 console.log('heightRange: ', heightRange);
                 
                 // 根据 totalDuration 计算 verticalSpread
-                // 完成时间公式: completionTime = (heightRange * verticalSpread + 1.0) / speed
-                // 我们需要: totalDuration = completionTime
-                // 因此: verticalSpread = (totalDuration * speed - 1.0) / heightRange
                 const totalDuration = this.config.totalDuration ?? 20.0;
                 if (heightRange > 0.001 && totalDuration * script.speed > 1.0) {
                     script.verticalSpread = (totalDuration * script.speed - 1.0) / heightRange;
-                    // 确保 verticalSpread 是合理的正值
                     script.verticalSpread = Math.max(0.01, script.verticalSpread);
                 } else {
-                    // 使用默认值
                     script.verticalSpread = 0.5;
                     console.warn('Cannot calculate verticalSpread from totalDuration, using default:', script.verticalSpread);
                 }
@@ -1176,26 +1185,32 @@ export class RevealController {
         }
     }
 
+    /**
+     * 设置 reveal center（输入为 world-space 坐标）。
+     * 内部根据 unified 模式决定是否需要坐标转换再传给 shader。
+     */
     setRevealCenter(center: number[]) {
         if (!this.config) {
             console.warn('Cannot set reveal center - no config');
             return;
         }
         
-        // 保存到实例变量
+        // 保存 world-space 坐标到实例变量
         this.revealCenter = center;
-        console.log('Reveal center set to:', center);
+        console.log('Reveal center set to (world):', center);
         
-        // 更新当前script的中心点
+        // 更新当前 script 的中心点
         if (this.currentScript) {
             try {
+                // unified: shader 在 world space → 直接使用
+                // non-unified: shader 在 model space → 翻转 X/Y
+                const sx = this.isUnified ? center[0] : -center[0];
+                const sy = this.isUnified ? center[1] : -center[1];
+                const sz = center[2];
                 if (this.currentScript.setCenter) {
-                    // setCenter 需要 Vec3 对象
-                    const centerVec3 = new Vec3(center[0], center[1], center[2]);
-                    this.currentScript.setCenter(centerVec3);
+                    this.currentScript.setCenter(new Vec3(sx, sy, sz));
                 } else if (this.currentScript.center) {
-                    // 直接设置 center 属性
-                    this.currentScript.center.set(center[0], center[1], center[2]);
+                    this.currentScript.center.set(sx, sy, sz);
                 }
             } catch (error) {
                 console.warn('Error setting reveal center:', error);
@@ -1208,24 +1223,39 @@ export class RevealController {
     }
 
     /**
-     * 更新脚本的 center（统一处理坐标转换）
-     * 优先使用当前相机 target，如果没有则使用 revealCenter
+     * 更新脚本的 center（统一处理坐标转换：world space → shader space）
+     *
+     * Reveal shader 中 modifySplatCenter(inout vec3 center) 接收的坐标空间取决于 unified 模式：
+     *   - unified=true:  center 是 world space（engine 已在 CopyToWorkbuffer 中做了 matrix_model * modelCenter）
+     *   - unified=false: center 是 model space（engine 直接传入 getCenter()）
+     *
+     * 相机 target / revealCenter 均为 world space。
+     * gsplat Entity 有 setLocalEulerAngles(0, 0, 180) → model X = -world X, model Y = -world Y。
+     * 因此：
+     *   - unified=true:  直接使用 world-space 值（不转换）
+     *   - unified=false: 取反 X/Y（world → model）
      */
     private updateScriptCenter(script: any) {
         if (!script || !script.center) {
             return;
         }
 
-        // 优先使用相机当前 target 点（如果可用）
         if (this.cameraManager) {
             const camera = this.cameraManager.camera;
             const targetPoint = new Vec3();
             camera.calcFocusPoint(targetPoint);
-            // CRITICAL: 坐标转换 - gsplat 坐标系需要翻转 X 和 Y 轴
-            script.center.set(-targetPoint.x, -targetPoint.y, targetPoint.z);
+            if (this.isUnified) {
+                script.center.set(targetPoint.x, targetPoint.y, targetPoint.z);
+            } else {
+                // world → model: 翻转 X 和 Y
+                script.center.set(-targetPoint.x, -targetPoint.y, targetPoint.z);
+            }
         } else if (this.revealCenter) {
-            // 使用默认 reveal center
-            script.center.set(-this.revealCenter[0], -this.revealCenter[1], this.revealCenter[2]);
+            if (this.isUnified) {
+                script.center.set(this.revealCenter[0], this.revealCenter[1], this.revealCenter[2]);
+            } else {
+                script.center.set(-this.revealCenter[0], -this.revealCenter[1], this.revealCenter[2]);
+            }
         }
     }
 

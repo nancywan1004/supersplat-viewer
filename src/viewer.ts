@@ -448,7 +448,21 @@ class Viewer {
             // 先创建 cameraManager，因为 revealController 需要它来获取 targetConstraint
             this.cameraManager = new CameraManager(global, sceneBound);
             
-            this.revealController = new RevealController(global, sceneBound, gsplatEntity, this.cameraManager);
+            // ── 关键：根据 unified 模式选择正确的坐标空间 ──
+            // PlayCanvas gsplat 的 modifySplatCenter 在两种模式下接收不同坐标空间：
+            //   unified=true  → CopyToWorkbuffer 中先做 matrix_model * modelCenter → world space
+            //   unified=false → 顶点着色器直接传入 getCenter() → model space
+            // 传给 RevealController 的 AABB 必须与 shader 坐标空间一致。
+            const isUnified = gsplatEntity.gsplat?.unified ?? false;
+            const revealBbox = new BoundingBox();
+            if (isUnified) {
+                revealBbox.copy(sceneBound);           // world space
+            } else if (gsplatBbox) {
+                revealBbox.copy(gsplatBbox);            // model space
+            } else {
+                revealBbox.copy(sceneBound);            // fallback
+            }
+            this.revealController = new RevealController(global, revealBbox, gsplatEntity, this.cameraManager);
 
             // 有 reveal 时：等 reveal 播完再开始动画（监听 revealComplete）
             if (state.hasRevealEffect) {

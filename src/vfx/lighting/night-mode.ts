@@ -596,9 +596,21 @@ class NightMode extends GsplatShaderEffect {
             }
         }
 
-        // Get model matrix from splat entity
+        // ── 关键：根据 unified 模式选择 uModelMatrix ──
+        // modifySplatColor(vec3 center, …) 中用 uModelMatrix * center 来算世界位置。
+        //   - unified=false: engine 传 model-space center → 需要 model→world 变换
+        //   - unified=true:  engine 传 world-space center → 不需要变换（用单位矩阵）
+        const isUnified = this.splat?.gsplat?.unified ?? false;
         let modelMatrix: number[] = [];
-        if (this.splat) {
+        if (isUnified) {
+            // unified: center 已是 world space，不再变换
+            modelMatrix = [
+                1, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 0, 1, 0,
+                0, 0, 0, 1
+            ];
+        } else if (this.splat) {
             const worldTransform = this.splat.getWorldTransform();
             // Convert Mat4 to array (column-major order for GLSL)
             modelMatrix = [
@@ -630,9 +642,15 @@ class NightMode extends GsplatShaderEffect {
             this.setUniform('uModelMatrix', modelMatrix);
             if (this.bloomBrushActive && this.bloomBrushMask && this.camera?.camera && this.splat) {
                 const cam = this.camera.camera;
-                this._bloomBrushModelViewProj.copy(cam.viewMatrix);
-                this._bloomBrushModelViewProj.mul2(this._bloomBrushModelViewProj, this.splat.getWorldTransform());
-                this._bloomBrushModelViewProj.mul2(cam.projectionMatrix, this._bloomBrushModelViewProj);
+                if (isUnified) {
+                    // unified: center 已是 world space → 只需 view * projection（不含 model）
+                    this._bloomBrushModelViewProj.mul2(cam.projectionMatrix, cam.viewMatrix);
+                } else {
+                    // non-unified: center 是 model space → 需要 projection * view * model
+                    this._bloomBrushModelViewProj.copy(cam.viewMatrix);
+                    this._bloomBrushModelViewProj.mul2(this._bloomBrushModelViewProj, this.splat.getWorldTransform());
+                    this._bloomBrushModelViewProj.mul2(cam.projectionMatrix, this._bloomBrushModelViewProj);
+                }
                 this.materialsApplied.forEach((material) => {
                     material.setParameter('uBloomMask', this.bloomBrushMask!);
                 });
