@@ -96,8 +96,12 @@ const POST_EFFECT_PANEL_HTML = `
     </div>
   </div>
   <div class="settingsRow">
-    <button type="button" id="shadowSpawnSphereBtn" class="postEffectOption" style="flex:1;text-align:center;cursor:pointer;padding:4px 8px;">Spawn Test Sphere (在相机前方生成)</button>
-    <button type="button" id="shadowClearSpheresBtn" class="postEffectOption" style="flex:1;text-align:center;cursor:pointer;padding:4px 8px;">Clear All Spheres</button>
+    <button type="button" id="shadowSpawnSphereBtn" class="postEffectOption" style="flex:1;text-align:center;cursor:pointer;padding:4px 8px;">Spawn Test Sphere</button>
+    <button type="button" id="shadowClearSpheresBtn" class="postEffectOption" style="flex:1;text-align:center;cursor:pointer;padding:4px 8px;">Clear Spheres</button>
+  </div>
+  <div class="settingsRow">
+    <button type="button" id="shadowSpawnSplatBtn" class="postEffectOption" style="flex:1;text-align:center;cursor:pointer;padding:4px 8px;">Spawn Test Splat (biker)</button>
+    <button type="button" id="shadowClearSplatsBtn" class="postEffectOption" style="flex:1;text-align:center;cursor:pointer;padding:4px 8px;">Clear Splats</button>
   </div>
 </div>
 `.trim();
@@ -210,6 +214,8 @@ export function initPostEffectUI(global: Global): () => void {
     const shadowSphereRadiusValue = container.querySelector('#shadowSphereRadiusValue') as HTMLElement | null;
     const shadowSpawnSphereBtn = container.querySelector('#shadowSpawnSphereBtn') as HTMLButtonElement | null;
     const shadowClearSpheresBtn = container.querySelector('#shadowClearSpheresBtn') as HTMLButtonElement | null;
+    const shadowSpawnSplatBtn = container.querySelector('#shadowSpawnSplatBtn') as HTMLButtonElement | null;
+    const shadowClearSplatsBtn = container.querySelector('#shadowClearSplatsBtn') as HTMLButtonElement | null;
 
     const syncFromSettings = () => {
         const b = ensureBloom(settings);
@@ -460,6 +466,31 @@ export function initPostEffectUI(global: Global): () => void {
     if (shadowClearSpheresBtn) {
         shadowClearSpheresBtn.addEventListener('click', () => {
             events.fire('shadow:clearSpheres');
+            firePostEffectChanged();
+        });
+    }
+
+    if (shadowSpawnSplatBtn) {
+        shadowSpawnSplatBtn.addEventListener('click', () => {
+            const cam = global.camera;
+            if (cam) {
+                const pos = cam.getPosition();
+                const fwd = cam.forward;
+                const spawnDist = 3;
+                events.fire('shadow:spawnSplat', {
+                    url: '/assets/gsplat/biker.sog',
+                    x: pos.x + fwd.x * spawnDist,
+                    y: pos.y + fwd.y * spawnDist,
+                    z: pos.z + fwd.z * spawnDist
+                });
+            }
+            firePostEffectChanged();
+        });
+    }
+
+    if (shadowClearSplatsBtn) {
+        shadowClearSplatsBtn.addEventListener('click', () => {
+            events.fire('shadow:clearSplats');
             firePostEffectChanged();
         });
     }

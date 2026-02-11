@@ -1,6 +1,7 @@
 import {
     Script,
     Entity,
+    Asset,
     Color,
     Layer,
     RenderTarget,
@@ -89,7 +90,7 @@ class ShadowApplyRt extends Script {
         entity.addComponent('render', {
             type: 'sphere',
             castShadows: true,
-            receiveShadows: true,
+            receiveShadows: false,
             material: mat
         });
         entity.setLocalScale(radius * 2, radius * 2, radius * 2);
@@ -109,6 +110,76 @@ class ShadowApplyRt extends Script {
         this._testSpheres = [];
         (this.app as any).renderNextFrame = true;
         console.log('[Shadow] clearTestSpheres: all test spheres removed');
+    }
+
+    /** 动态生成的 testSplat 列表 */
+    private _testSplats: Entity[] = [];
+    private _splatCounter = 0;
+
+    /**
+     * 在指定世界坐标加载一个 gsplat（.sog/.ply/.splat 等）并添加到场景中。
+     * 复制主高斯的 layers 和 unified 模式，确保与已有高斯正确混合渲染。
+     */
+    spawnTestSplat(url: string, position: { x: number; y: number; z: number }) {
+        const app = this.app;
+        this._splatCounter++;
+        const name = `testSplat_${this._splatCounter}`;
+
+        // 使用绝对 URL
+        const absUrl = new URL(url, location.href).href;
+
+        // 找到主高斯实体，获取其 layers 和 unified 配置
+        const mainGsplat = app.root.findByName('gsplat') as Entity | null;
+        const mainGsplatComp = mainGsplat?.gsplat;
+        const mainLayers = mainGsplatComp?.layers ? [...mainGsplatComp.layers] : undefined;
+        console.log('mainLayers', mainLayers);
+        const mainUnified = mainGsplatComp?.unified ?? true;
+
+        console.log(`[Shadow] spawnTestSplat: loading ${url}, mainLayers=${JSON.stringify(mainLayers)}, unified=${mainUnified}`);
+
+        const asset = new Asset(name, 'gsplat', { url: absUrl, filename: url });
+        app.assets.add(asset);
+
+        asset.on('load', () => {
+            const entity = new Entity(name);
+            entity.setPosition(position.x, position.y, position.z);
+            // 与主高斯一致：Z 轴翻转 180°
+            entity.setLocalEulerAngles(0, 0, 180);
+
+            // gsplat 组件参数：与主高斯一致
+            const gsplatOpts: Record<string, any> = {
+                unified: true,
+                asset: asset,
+                castShadows: true
+            };
+            // 如果主高斯有显式 layers，则复制
+            if (mainLayers) {
+                gsplatOpts.layers = mainLayers;
+            }
+            entity.addComponent('gsplat', gsplatOpts);
+
+            app.root.addChild(entity);
+            this._testSplats.push(entity);
+            (app as any).renderNextFrame = true;
+
+            console.log(`[Shadow] spawnTestSplat: ${name} loaded, layers=${JSON.stringify(entity.gsplat?.layers)}, unified=${entity.gsplat?.unified}, position=(${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)})`);
+        });
+
+        asset.on('error', (err: string) => {
+            console.error(`[Shadow] spawnTestSplat: failed to load ${url}`, err);
+        });
+
+        app.assets.load(asset);
+    }
+
+    /** 清除所有动态生成的 testSplat */
+    clearTestSplats() {
+        this._testSplats.forEach((e) => {
+            e.destroy();
+        });
+        this._testSplats = [];
+        (this.app as any).renderNextFrame = true;
+        console.log('[Shadow] clearTestSplats: all test splats removed');
     }
 
     initialize() {
@@ -292,13 +363,19 @@ class ShadowApplyRt extends Script {
             }
         });
 
-        // ─── 监听 UI 事件：生成/清除 testSphere ───
+        // ─── 监听 UI 事件：生成/清除 testSphere / testSplat ───
         const events = global.events;
         events.on('shadow:spawnSphere', (data: { x: number; y: number; z: number; radius?: number }) => {
             this.spawnTestSphere(data, data.radius);
         });
         events.on('shadow:clearSpheres', () => {
             this.clearTestSpheres();
+        });
+        events.on('shadow:spawnSplat', (data: { url: string; x: number; y: number; z: number }) => {
+            this.spawnTestSplat(data.url, data);
+        });
+        events.on('shadow:clearSplats', () => {
+            this.clearTestSplats();
         });
 
         this._inited = true;

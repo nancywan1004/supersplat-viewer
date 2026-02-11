@@ -86,6 +86,8 @@ type PostEffectSettings = {
         debugRt?: boolean,
         /** 调试：true 时显示接影平面几何（半透明绿色），用于确认平面位置与范围 */
         debugVisual?: boolean,
+        /** 是否投射阴影，默认false */
+        castShadows?: boolean
     }
 };
 

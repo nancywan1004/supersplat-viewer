@@ -162,7 +162,8 @@ const migrateV2 = (v1: V1): V2 => {
             shadow: {
                 enabled: true,
                 darken: 0.45,
-                debugVisual: false
+                debugVisual: false,
+                castShadows: false
             }
         },
         animTracks: v1.animTracks.map((animTrackV1: AnimTrackV1) => {
@@ -181,7 +182,7 @@ const migrateV2 = (v1: V1): V2 => {
         revealEffect: {
             type: 'radial',
             autoStart: true,
-            radius: 25
+            radius: 50
         }
     };
 };
@@ -303,9 +304,10 @@ const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: numb
                 intensity: 0.5
             },
             shadow: {
-                enabled: true,
+                enabled: false,
                 darken: 0.45,
-                debugVisual: false
+                debugVisual: false,
+                castShadows: false
             }
         },
         animTracks: [{
@@ -332,11 +334,11 @@ const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: numb
             }
         }],
         annotations: [],
-        startMode: 'default',
+        startMode: 'animTrack',
         hasStartPose: true,
         revealEffect: {
             type: 'radial',
-            autoStart: false,
+            autoStart: true,
             radius: 50
         }
     };

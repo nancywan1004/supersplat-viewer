@@ -145,7 +145,7 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
                 const entity = new Entity('gsplat');
                 entity.setLocalEulerAngles(0, 0, 180);
                 entity.addComponent('gsplat', {
-                    unified: unified || shouldEnableLod,
+                    unified: true,
                     asset
                 });
                 // don't support AA in unified mode yet
