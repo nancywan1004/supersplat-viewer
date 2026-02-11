@@ -1,3 +1,4 @@
+import type { Entity } from 'playcanvas';
 import type { Global } from '../../types';
 
 const POST_EFFECT_PANEL_HTML = `
@@ -51,10 +52,36 @@ const POST_EFFECT_PANEL_HTML = `
     <div id="shadowEnableOption" class="postEffectOption">Enable</div>
   </div>
   <div class="settingsRow">
+    <div id="shadowCastCheck" class="checkMark">✓</div>
+    <div id="shadowCastOption" class="postEffectOption">Mesh Cast Shadows (接影几何投射阴影/自阴影)</div>
+  </div>
+  <div class="settingsRow">
     <label for="shadowDarkenSlider" class="postEffectLabel">Darken (阴影亮度 0~1):</label>
     <div class="postEffectSliderWrap">
       <input type="range" id="shadowDarkenSlider" min="0" max="1" step="0.05" value="0.45" class="postEffectSlider">
       <span id="shadowDarkenValue" class="postEffectSliderValue">0.45</span>
+    </div>
+  </div>
+  <div class="postEffectSectionLabel" style="margin-top:8px;">Light Direction (光源方向)</div>
+  <div class="settingsRow">
+    <label for="lightPitchSlider" class="postEffectLabel">Pitch (俯仰 -90~90):</label>
+    <div class="postEffectSliderWrap">
+      <input type="range" id="lightPitchSlider" min="-90" max="90" step="1" value="35" class="postEffectSlider">
+      <span id="lightPitchValue" class="postEffectSliderValue">35</span>
+    </div>
+  </div>
+  <div class="settingsRow">
+    <label for="lightYawSlider" class="postEffectLabel">Yaw (偏航 0~360):</label>
+    <div class="postEffectSliderWrap">
+      <input type="range" id="lightYawSlider" min="0" max="360" step="1" value="45" class="postEffectSlider">
+      <span id="lightYawValue" class="postEffectSliderValue">45</span>
+    </div>
+  </div>
+  <div class="settingsRow">
+    <label for="shadowBiasSlider" class="postEffectLabel">Shadow Bias:</label>
+    <div class="postEffectSliderWrap">
+      <input type="range" id="shadowBiasSlider" min="0" max="0.5" step="0.005" value="0.05" class="postEffectSlider">
+      <span id="shadowBiasValue" class="postEffectSliderValue">0.05</span>
     </div>
   </div>
   <div class="settingsRow">
@@ -110,6 +137,7 @@ const ensureBloom = (settings: Global['settings']): BloomSettings => {
 type ShadowSettings = {
     enabled: boolean;
     darken: number;
+    castShadows?: boolean;
     debugVisual?: boolean;
     sphereRadius?: number;
 };
@@ -121,11 +149,13 @@ const ensureShadow = (settings: Global['settings']): ShadowSettings => {
         (settings.postEffectSettings as any).shadow = {
             enabled: true,
             darken: 0.45,
+            castShadows: true,
             debugVisual: false,
             sphereRadius: 0.5
         };
     } else {
         if (typeof (s as any).darken !== 'number') (s as any).darken = 0.45;
+        if ((s as any).castShadows === undefined) (s as any).castShadows = true;
         if ((s as any).debugVisual === undefined) (s as any).debugVisual = false;
         if (typeof (s as any).sphereRadius !== 'number') (s as any).sphereRadius = 0.5;
     }
@@ -164,10 +194,18 @@ export function initPostEffectUI(global: Global): () => void {
     const bloomBrushClearBtn = container.querySelector('#bloomBrushClearBtn') as HTMLButtonElement | null;
     const shadowEnableCheck = container.querySelector('#shadowEnableCheck') as HTMLElement | null;
     const shadowEnableOption = container.querySelector('#shadowEnableOption') as HTMLElement | null;
+    const shadowCastCheck = container.querySelector('#shadowCastCheck') as HTMLElement | null;
+    const shadowCastOption = container.querySelector('#shadowCastOption') as HTMLElement | null;
     const shadowDarkenSlider = container.querySelector('#shadowDarkenSlider') as HTMLInputElement | null;
     const shadowDarkenValue = container.querySelector('#shadowDarkenValue') as HTMLElement | null;
     const shadowDebugVisualCheck = container.querySelector('#shadowDebugVisualCheck') as HTMLElement | null;
     const shadowDebugVisualOption = container.querySelector('#shadowDebugVisualOption') as HTMLElement | null;
+    const lightPitchSlider = container.querySelector('#lightPitchSlider') as HTMLInputElement | null;
+    const lightPitchValue = container.querySelector('#lightPitchValue') as HTMLElement | null;
+    const lightYawSlider = container.querySelector('#lightYawSlider') as HTMLInputElement | null;
+    const lightYawValue = container.querySelector('#lightYawValue') as HTMLElement | null;
+    const shadowBiasSlider = container.querySelector('#shadowBiasSlider') as HTMLInputElement | null;
+    const shadowBiasValue = container.querySelector('#shadowBiasValue') as HTMLElement | null;
     const shadowSphereRadiusSlider = container.querySelector('#shadowSphereRadiusSlider') as HTMLInputElement | null;
     const shadowSphereRadiusValue = container.querySelector('#shadowSphereRadiusValue') as HTMLElement | null;
     const shadowSpawnSphereBtn = container.querySelector('#shadowSpawnSphereBtn') as HTMLButtonElement | null;
@@ -192,6 +230,7 @@ export function initPostEffectUI(global: Global): () => void {
         if (bloomBrushSizeValue) bloomBrushSizeValue.textContent = String(brushSize);
         const sh = ensureShadow(settings);
         if (shadowEnableCheck) shadowEnableCheck.classList.toggle('active', sh.enabled);
+        if (shadowCastCheck) shadowCastCheck.classList.toggle('active', sh.castShadows !== false);
         const darken = Math.max(0, Math.min(1, Number(sh.darken ?? 0.45)));
         if (shadowDarkenSlider) shadowDarkenSlider.value = String(darken);
         if (shadowDarkenValue) shadowDarkenValue.textContent = darken.toFixed(2);
@@ -199,6 +238,21 @@ export function initPostEffectUI(global: Global): () => void {
         const sphereRadius = Math.max(0.1, Math.min(5, Number(sh.sphereRadius ?? 0.5)));
         if (shadowSphereRadiusSlider) shadowSphereRadiusSlider.value = String(sphereRadius);
         if (shadowSphereRadiusValue) shadowSphereRadiusValue.textContent = sphereRadius.toFixed(2);
+
+        // 同步光源方向
+        const lightEntity = global.app.root.findByName('light') as Entity | null;
+        if (lightEntity) {
+            const euler = lightEntity.getEulerAngles();
+            if (lightPitchSlider) lightPitchSlider.value = String(Math.round(euler.x));
+            if (lightPitchValue) lightPitchValue.textContent = String(Math.round(euler.x));
+            if (lightYawSlider) lightYawSlider.value = String(Math.round(euler.y));
+            if (lightYawValue) lightYawValue.textContent = String(Math.round(euler.y));
+            if (lightEntity.light) {
+                const bias = lightEntity.light.shadowBias ?? 0.05;
+                if (shadowBiasSlider) shadowBiasSlider.value = String(bias);
+                if (shadowBiasValue) shadowBiasValue.textContent = bias.toFixed(3);
+            }
+        }
     };
 
     const firePostEffectChanged = () => events.fire('postEffect:changed');
@@ -299,11 +353,66 @@ export function initPostEffectUI(global: Global): () => void {
         shadowEnableCheck.addEventListener('click', toggleShadow);
     }
 
+    if (shadowCastOption && shadowCastCheck) {
+        const toggleCast = () => {
+            const sh = ensureShadow(settings);
+            sh.castShadows = !sh.castShadows;
+            syncFromSettings();
+            firePostEffectChanged();
+        };
+        shadowCastOption.addEventListener('click', toggleCast);
+        shadowCastCheck.addEventListener('click', toggleCast);
+    }
+
     if (shadowDarkenSlider && shadowDarkenValue) {
         shadowDarkenSlider.addEventListener('input', () => {
             const sh = ensureShadow(settings);
             sh.darken = Math.max(0, Math.min(1, parseFloat(shadowDarkenSlider!.value) || 0.45));
             shadowDarkenValue!.textContent = sh.darken.toFixed(2);
+            firePostEffectChanged();
+        });
+    }
+
+    // ─── 光源方向控制 ───
+    if (lightPitchSlider && lightPitchValue) {
+        lightPitchSlider.addEventListener('input', () => {
+            const pitch = parseFloat(lightPitchSlider.value) || 0;
+            lightPitchValue.textContent = String(Math.round(pitch));
+            const lightEntity = global.app.root.findByName('light') as Entity | null;
+            if (lightEntity) {
+                const euler = lightEntity.getEulerAngles();
+                lightEntity.setEulerAngles(pitch, euler.y, euler.z);
+                (global.app as any).renderNextFrame = true;
+            }
+            firePostEffectChanged();
+        });
+    }
+
+    if (lightYawSlider && lightYawValue) {
+        lightYawSlider.addEventListener('input', () => {
+            const yaw = parseFloat(lightYawSlider.value) || 0;
+            lightYawValue.textContent = String(Math.round(yaw));
+            const lightEntity = global.app.root.findByName('light') as Entity | null;
+            if (lightEntity) {
+                const euler = lightEntity.getEulerAngles();
+                lightEntity.setEulerAngles(euler.x, yaw, euler.z);
+                (global.app as any).renderNextFrame = true;
+            }
+            firePostEffectChanged();
+        });
+    }
+
+    // ─── Shadow Bias 控制（防止自阴影伪影） ───
+    if (shadowBiasSlider && shadowBiasValue) {
+        shadowBiasSlider.addEventListener('input', () => {
+            const bias = Math.max(0, Math.min(0.5, parseFloat(shadowBiasSlider.value) || 0.05));
+            shadowBiasValue.textContent = bias.toFixed(3);
+            const lightEntity = global.app.root.findByName('light') as Entity | null;
+            if (lightEntity?.light) {
+                lightEntity.light.shadowBias = bias;
+                lightEntity.light.normalOffsetBias = bias;
+                (global.app as any).renderNextFrame = true;
+            }
             firePostEffectChanged();
         });
     }

@@ -33,11 +33,11 @@ function createShadowCatcherMaterial(): StandardMaterial {
 
 /**
  * 递归替换实体及其子孙所有 render 的材质为 ShadowMat。
- * 同时设 castShadows=false, receiveShadows=true。
+ * castShadows=true 使 mesh 同时作为阴影投射体（自阴影），receiveShadows=true 接收阴影。
  */
 function applyShadowMaterialToHierarchy(entity: Entity, material: StandardMaterial) {
     if (entity.render) {
-        entity.render.castShadows = false;
+        entity.render.castShadows = true;
         entity.render.receiveShadows = true;
         entity.render.meshInstances?.forEach((mi) => {
             mi.material = material;

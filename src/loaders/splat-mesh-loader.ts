@@ -18,7 +18,7 @@ export function loadSplatMesh(app: AppBase, url: string): Promise<Entity> {
                 return;
             }
             const entity = asset.resource.instantiateRenderEntity({
-                castShadows: false,    // 与 Demo 一致：接影面不投射阴影，只接收
+                castShadows: true,     // 同时作为阴影投射体（支持自阴影/光影变化）
                 receiveShadows: true
             });
             console.log('splatMesh loaded', entity);

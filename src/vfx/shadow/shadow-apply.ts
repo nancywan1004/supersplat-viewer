@@ -163,7 +163,7 @@ class ShadowApplyRt extends Script {
                 if (e.render) {
                     e.render.layers = layerIds;
                     e.render.receiveShadows = true;
-                    e.render.castShadows = false;   // 接影不投射阴影
+                    e.render.castShadows = true;    // 同时投射阴影（自阴影）
                 }
                 e.children.forEach((c) => setLayersOnHierarchy(c as Entity));
             };
@@ -335,10 +335,11 @@ class ShadowApplyRt extends Script {
         if (!this._inited || !this.global?.camera) return;
         const shadowLayer = this._shadowLayer;
         const shadowSettings = this.global.settings.postEffectSettings?.shadow as {
-            debugVisual?: boolean; enabled?: boolean;
+            debugVisual?: boolean; enabled?: boolean; castShadows?: boolean;
         } | undefined;
 
         const debugVisual = shadowSettings?.debugVisual === true;
+        const meshCastShadows = shadowSettings?.castShadows !== false;
 
         // ─── 接影几何层 + 材质管理 ───
         if (shadowLayer && this._shadowGeomEntity && this._debugLayer) {
@@ -357,7 +358,7 @@ class ShadowApplyRt extends Script {
                 if (e.render) {
                     e.render.layers = layerIds;
                     e.render.receiveShadows = true;
-                    e.render.castShadows = false;
+                    e.render.castShadows = meshCastShadows;
 
                     // 材质切换：
                     // debugVisual ON → 使用 debugMaterial（半透明绿色，无 shadowCatcher）
@@ -433,21 +434,21 @@ class ShadowApplyRt extends Script {
         }
 
         this._debugLogTicks++;
-        if (this._debugLogTicks <= 3 || this._debugLogTicks % 300 === 0) {
-            const smCam = this._shadowMaskCamera?.camera;
-            console.log('[Shadow] update', {
-                tick: this._debugLogTicks,
-                debugVisual,
-                shadowEnabled: shadowSettings?.enabled,
-                geomLayers: this._shadowGeomEntity?.render?.layers,
-                geomMeshCount: this._shadowGeomEntity?.render?.meshInstances?.length ?? 0,
-                smCamEnabled: this._shadowMaskCamera?.enabled,
-                smCamPriority: smCam?.priority,
-                smCamRT: !!smCam?.renderTarget,
-                smCamLayers: smCam?.layers,
-                testSphereCount: this._testSpheres.length
-            });
-        }
+        // if (this._debugLogTicks <= 3 || this._debugLogTicks % 300 === 0) {
+        //     const smCam = this._shadowMaskCamera?.camera;
+        //     console.log('[Shadow] update', {
+        //         tick: this._debugLogTicks,
+        //         debugVisual,
+        //         shadowEnabled: shadowSettings?.enabled,
+        //         geomLayers: this._shadowGeomEntity?.render?.layers,
+        //         geomMeshCount: this._shadowGeomEntity?.render?.meshInstances?.length ?? 0,
+        //         smCamEnabled: this._shadowMaskCamera?.enabled,
+        //         smCamPriority: smCam?.priority,
+        //         smCamRT: !!smCam?.renderTarget,
+        //         smCamLayers: smCam?.layers,
+        //         testSphereCount: this._testSpheres.length
+        //     });
+        // }
     }
 }
 

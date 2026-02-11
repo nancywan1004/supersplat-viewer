@@ -198,9 +198,12 @@ const initLight = (global: Global): Entity => {
         }
     }
 
-    // 方向光阴影可见范围（从相机算起）。默认过小会导致地面/物体上看不到投影，故设大一些
+    // 方向光阴影可见范围（从相机算起）
+    // 默认 40 对大场景太小，后续 updateShadowDistance() 会根据场景包围盒动态更新
     if (lightEntity.light) {
-        lightEntity.light.shadowDistance = 40;
+        lightEntity.light.shadowDistance = 200;
+        // 提高 shadow map 分辨率以覆盖大场景时保持精度
+        lightEntity.light.shadowResolution = 2048;
     }
 
     lightEntity.tags.add('light');
@@ -210,4 +213,18 @@ const initLight = (global: Global): Entity => {
     return lightEntity;
 };
 
-export { initLight, collectPointLights, updatePointLightsFromSettings, setPointLightsVisualVisible };
+/**
+ * 根据场景包围盒大小动态设置方向光的 shadowDistance。
+ * 应在场景加载后、获得 sceneBound 时调用。
+ */
+const updateShadowDistance = (global: Global, sceneSize: number): void => {
+    const lightEntity = global.app.root.findByName('light') as Entity | null;
+    if (lightEntity?.light) {
+        // shadowDistance 设为场景对角线长度的 1.5 倍，确保覆盖整个场景
+        const dist = Math.max(200, sceneSize * 1.5);
+        lightEntity.light.shadowDistance = dist;
+        console.log(`[Light] shadowDistance updated to ${dist.toFixed(1)} (sceneSize=${sceneSize.toFixed(1)})`);
+    }
+};
+
+export { initLight, collectPointLights, updatePointLightsFromSettings, setPointLightsVisualVisible, updateShadowDistance };

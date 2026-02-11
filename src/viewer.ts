@@ -42,6 +42,7 @@ import { loadSplatMesh } from './loaders/splat-mesh-loader';
 import { NightMode } from './vfx/lighting/night-mode';
 import { initShadowCatcher } from './vfx/shadow/shadow-catcher';
 import { ShadowApplyRt } from './vfx/shadow/shadow-apply';
+import { updateShadowDistance } from './light';
 
 // override global pick to pack depth instead of meshInstance id
 const pickDepthGlsl = /* glsl */ `
@@ -400,7 +401,7 @@ class Viewer {
             const gsplatEntity = results[0] as Entity;
             const gsplat = gsplatEntity.gsplat as GSplatComponent;
             const meshEntity = results[2] as Entity | null | undefined;
-            console.log('[Shadow] gsplatEntity:', gsplatEntity?.name, 'gsplat:', !!gsplat, 'meshEntity:', meshEntity?.name ?? 'null');
+            // console.log('[Shadow] gsplatEntity:', gsplatEntity?.name, 'gsplat:', !!gsplat, 'meshEntity:', meshEntity?.name ?? 'null');
 
             // get scene bounding box
             const gsplatBbox = gsplat?.customAabb;
@@ -408,15 +409,19 @@ class Viewer {
                 sceneBound.setFromTransformedAabb(gsplatBbox, gsplatEntity.getWorldTransform());
             }
 
+            // 根据场景大小动态更新方向光的 shadowDistance
+            const sceneSize = sceneBound.halfExtents.length();
+            updateShadowDistance(global, sceneSize);
+
             // 阴影管线：有 GLB 则用 mesh 接影，否则用平面（与 Physics_Relighting_Demo 一致）
             const shadowOpts = settings.postEffectSettings.shadow as { debugVisual?: boolean } | undefined;
-            console.log('[Shadow] initShadowCatcher called with:', {
-                hasMeshEntity: !!meshEntity,
-                meshEntityName: meshEntity?.name,
-                meshEntityChildren: meshEntity?.children?.length,
-                sceneBoundCenter: sceneBound.center.toString(),
-                sceneBoundHalf: sceneBound.halfExtents.toString()
-            });
+            // console.log('[Shadow] initShadowCatcher called with:', {
+            //     hasMeshEntity: !!meshEntity,
+            //     meshEntityName: meshEntity?.name,
+            //     meshEntityChildren: meshEntity?.children?.length,
+            //     sceneBoundCenter: sceneBound.center.toString(),
+            //     sceneBoundHalf: sceneBound.halfExtents.toString()
+            // });
             initShadowCatcher(app, sceneBound, {
                 debugVisual: shadowOpts?.debugVisual ?? false,
                 parentEntity: gsplatEntity,
@@ -437,8 +442,7 @@ class Viewer {
 
             this.inputController = new InputController(global);
             
-            // Set move speed based on scene size
-            const sceneSize = sceneBound.halfExtents.length();
+            // Set move speed based on scene size (reuse sceneSize from above)
             this.inputController.setMoveSpeedFromSceneSize(sceneSize);
 
             // 先创建 cameraManager，因为 revealController 需要它来获取 targetConstraint
