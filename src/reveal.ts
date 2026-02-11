@@ -767,6 +767,9 @@ export class RevealController {
             console.log('Added script component to gsplat entity');
         }
 
+        // Reveal 即将接管 gsplatModifyVS，通知 NightMode 退出（互斥关系）
+        this.global.app.fire('nightMode:exit');
+
         // 销毁现有的reveal scripts - 类似原始实现
         this.destroyAllRevealScripts();
 

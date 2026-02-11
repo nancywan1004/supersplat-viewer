@@ -367,13 +367,26 @@ class NightMode extends GsplatShaderEffect {
         this.on('disable', () => {
         });
 
-        // Setup unified event listener if needed
-        this.setupUnifiedEventListener();
+        // 注意：不调用 setupUnifiedEventListener()。
+        // NightMode 不应在材质创建时自动应用 shader，否则会覆盖 reveal 效果的 gsplatModifyVS。
+        // NightMode 仅在 nightMode 被切换为 true 时才通过 updateEffect() 中的重试机制应用 shader。
+
+        // 监听 reveal 等互斥效果接管 gsplatModifyVS 的信号，立即退出 nightMode
+        this.app.on('nightMode:exit', () => {
+            if (!this.nightMode) return;
+            this.nightMode = false;
+            this.nightFade = 0;
+            this.manualFadeControl = false;
+            this.materialsApplied.clear(); // 不删除 shader chunk，由接管方负责
+            this.app.fire('nightMode:changed', false);
+            this.app.fire('nightFade:changed', 0);
+        });
 
         // Try to initialize if splat is already available
         if (this.splat?.gsplat) {
             this.initialized = true;
-            if (this.enabled) {
+            // 只在 nightMode 已开启时才应用 shader，避免覆盖 reveal
+            if (this.enabled && this.nightMode) {
                 this.applyShaders();
             }
         }
@@ -435,7 +448,10 @@ class NightMode extends GsplatShaderEffect {
 
         let targetCameras;
         if (this.camera && this.camera.camera) {
-            targetCameras = [this.camera.camera];
+            // this.camera = Entity, this.camera.camera = CameraComponent
+            // this.camera.camera.camera = Camera 实例（内部渲染对象）
+            // getGSplatMaterial() 需要 Camera 实例作为 key，传 CameraComponent 会查找失败
+            targetCameras = [this.camera.camera.camera];
         } else {
             targetCameras = composition.cameras.map(cameraComponent => cameraComponent.camera);
         }
@@ -538,24 +554,13 @@ class NightMode extends GsplatShaderEffect {
         // If manually controlled, keep the current value (already set by slider event)
         // But still update uniforms and other effects
         
-        // If we just reached 0 and shaders are still applied, remove them
-        // This ensures shaders are removed only after fade completes
+        // 当 nightMode 关闭且 fade 回 0 时，只清空 materialsApplied 追踪集，
+        // 不删除 gsplatModifyVS shader chunk。原因：
+        // 1. NightMode shader 自带 `if (uNightFade == 0.0) return;`，nightFade=0 时完全透明
+        // 2. 删除 gsplatModifyVS 会连带破坏其他使用同一 chunk 的效果（如 reveal）
+        // 3. 清空 materialsApplied 以便下次切换 nightMode 时重新 applyShaders()
         if (!this.nightMode && this.nightFade < 1e-6 && this.materialsApplied.size > 0) {
-            // Store materials before clearing
-            const materialsToUpdate = Array.from(this.materialsApplied);
-            const device = this.app.graphicsDevice;
-            const shaderLanguage = device?.isWebGPU ? 'wgsl' : 'glsl';
-            
-            // Remove shader chunks
-            materialsToUpdate.forEach((material) => {
-                material.getShaderChunks(shaderLanguage).delete('gsplatModifyVS');
-                material.update();
-            });
-            
-            // Clear the set
             this.materialsApplied.clear();
-            
-            // Force render to ensure changes are visible
             this.app.renderNextFrame = true;
         }
         
