@@ -1,5 +1,4 @@
 import type { Global } from '../../types';
-import { TIMED_VFX_EFFECTS } from './reveal-ui';
 
 const RESOLUTION_PRESETS: Record<string, { width: number; height: number }> = {
     '720p': { width: 1280, height: 720 },
@@ -21,7 +20,7 @@ const VFX_EXPORT_OVERLAY_HTML = `
 </div>
 `.trim();
 
-/** VFX 导出行 HTML 模板（挂到 #vfxVideoExportContainer） */
+/** VFX 导出行 HTML 模板（挂到 #renderPanelContainer） */
 const VFX_VIDEO_EXPORT_ROW_HTML = `
 <div id="vfxVideoExportRow" class="settingsRow hidden">
   <div class="vfxExportInner">
@@ -55,11 +54,11 @@ const VFX_VIDEO_EXPORT_ROW_HTML = `
 
 /**
  * 初始化 VFX 视频导出相关 UI。
- * 组件自行创建 DOM：进度覆盖层挂到 body，导出行挂到 #vfxVideoExportContainer（由 reveal-ui 创建）。
+ * 组件自行创建 DOM：进度覆盖层挂到 body，导出行挂到 #renderPanelContainer（由 index.html 中 Render 一级菜单提供）。
  * @returns 清理函数，调用后解除事件并移除创建的 DOM。
  */
 export function initVideoExportUI(global: Global): () => void {
-    const { events, state } = global;
+    const { events } = global;
 
     const overlayWrap = document.createElement('div');
     overlayWrap.innerHTML = VFX_EXPORT_OVERLAY_HTML;
@@ -70,7 +69,7 @@ export function initVideoExportUI(global: Global): () => void {
     const vfxExportProgressBar = overlayRoot.querySelector('#vfxExportProgressBar') as HTMLElement | null;
     const vfxExportProgressText = overlayRoot.querySelector('#vfxExportProgressText') as HTMLElement | null;
 
-    const container = document.getElementById('vfxVideoExportContainer');
+    const container = document.getElementById('renderPanelContainer');
     if (!container) {
         overlayRoot.remove();
         return () => {};
@@ -128,9 +127,8 @@ export function initVideoExportUI(global: Global): () => void {
     };
 
     const updateVfxVideoExportVisibility = () => {
-        const currentType = (state as any).vfxType || global.settings?.revealEffect?.type || 'none';
-        const showForType = TIMED_VFX_EFFECTS.includes(currentType);
-        vfxVideoExportRow.classList[showForType ? 'remove' : 'add']('hidden');
+        // 始终展示导出区域，避免 Render 面板在某些 VFX 类型下看起来是空的
+        vfxVideoExportRow.classList.remove('hidden');
     };
 
     const startExport = async (useFastExport: boolean) => {

@@ -178,6 +178,7 @@ const initUI = (global: Global) => {
         'vfxSubmenuHeader', 'vfxSubpanel', 'vfxSubmenuArrow',
         'lightingSubmenuHeader', 'lightingSubpanel', 'lightingSubmenuArrow',
         'postEffectSubmenuHeader', 'postEffectSubpanel', 'postEffectSubmenuArrow',
+        'renderSubmenuHeader', 'renderSubpanel', 'renderSubmenuArrow',
         'reset', 'frame',
         'getCameraInfo',
         'loadingText', 'loadingBar', 'loadingIcon',
@@ -428,7 +429,7 @@ const initUI = (global: Global) => {
     // 若将来有“关闭设置面板并销毁子组件”等场景，可在此处或适当时机调用：
     // cleanupRevealUI(); cleanupVideoExportUI(); cleanupLightingUI(); cleanupPostEffectUI();
 
-    // VFX / Lighting 二级菜单折叠
+    // VFX / Lighting / postEffect / Render 二级菜单折叠
     const toggleSubpanel = (headerId: string, panelId: string, arrowId: string) => {
         const header = document.getElementById(headerId);
         const panel = document.getElementById(panelId);
@@ -449,6 +450,10 @@ const initUI = (global: Global) => {
     if (dom.postEffectSubmenuHeader && dom.postEffectSubpanel) {
         dom.postEffectSubmenuHeader.addEventListener('click', () => toggleSubpanel('postEffectSubmenuHeader', 'postEffectSubpanel', 'postEffectSubmenuArrow'));
         dom.postEffectSubmenuHeader.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSubpanel('postEffectSubmenuHeader', 'postEffectSubpanel', 'postEffectSubmenuArrow'); } });
+    }
+    if (dom.renderSubmenuHeader && dom.renderSubpanel) {
+        dom.renderSubmenuHeader.addEventListener('click', () => toggleSubpanel('renderSubmenuHeader', 'renderSubpanel', 'renderSubmenuArrow'));
+        dom.renderSubmenuHeader.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSubpanel('renderSubmenuHeader', 'renderSubpanel', 'renderSubmenuArrow'); } });
     }
 
     // Info panel

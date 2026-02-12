@@ -1,9 +1,37 @@
 import type { Global } from '../../types';
 
-/** 需要 totalDuration / 时间轴 的 VFX 特效类型列表 */
-export const TIMED_VFX_EFFECTS = ['rain_v2', 'pieces-recover', 'integrate', 'growth-wave', 'sketch'] as const;
+/** 需要 totalDuration / 时间轴 的 VFX 特效类型列表（同时被 reveal-ui / video-export-ui 使用） */
+export const TIMED_VFX_EFFECTS = [
+    'rain_v2',
+    'pieces-recover',
+    'integrate',
+    'growth-wave',
+    'sketch'
+] as const;
 
-export type RevealType = 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch' | 'none';
+export type RevealType =
+    | 'radial'
+    | 'rain'
+    | 'rain_v2'
+    | 'smooth'
+    | 'pieces-recover'
+    | 'perlin-wave'
+    | 'integrate'
+    | 'growth-wave'
+    | 'sketch'
+    | 'none';
+
+/** 当前 VFX 类型（优先 state，其次 settings） */
+export const getCurrentVfxType = (global: Global): string => {
+    const stateType = (global.state as any)?.vfxType;
+    const settingsType = global.settings?.revealEffect?.type;
+    return (stateType || settingsType || 'none') as string;
+};
+
+/** 是否属于“有总时长/时间轴”的 VFX 类型 */
+export const isTimedVfxType = (type: string): boolean => {
+    return (TIMED_VFX_EFFECTS as readonly string[]).includes(type);
+};
 
 /** Reveal 面板的 HTML 模板（挂载到 #revealPanelContainer，内含 #vfxVideoExportContainer 供 video-export-ui 挂载） */
 const REVEAL_PANEL_HTML = `
@@ -40,7 +68,6 @@ const REVEAL_PANEL_HTML = `
       <span id="effectTimeDisplay" class="effectTimeDisplay">0.0s</span>
     </div>
   </div>
-  <div id="vfxVideoExportContainer"></div>
   <div class="settingsRow">
     <button id="revealRestart" class="settingsButton" type="button">Restart Effect</button>
   </div>
@@ -174,11 +201,11 @@ export function initRevealUI(global: Global): () => void {
     const updateRevealControls = () => {
         revealPanel.classList.remove('hidden');
         if (revealType) {
-            const currentType = (state as any).vfxType || global.settings?.revealEffect?.type || 'none';
+            const currentType = getCurrentVfxType(global);
             if (revealType.value !== currentType) {
                 revealType.value = currentType;
             }
-            const showTotalDuration = TIMED_VFX_EFFECTS.includes(currentType as any);
+            const showTotalDuration = isTimedVfxType(currentType);
             if (totalDurationRow) {
                 if (showTotalDuration) {
                     totalDurationRow.classList.remove('hidden');
@@ -190,7 +217,7 @@ export function initRevealUI(global: Global): () => void {
                     totalDurationRow.classList.add('hidden');
                 }
             }
-            const showTimeline = TIMED_VFX_EFFECTS.includes(currentType as any);
+            const showTimeline = isTimedVfxType(currentType);
             if (effectTimelineRow) {
                 if (showTimeline) {
                     effectTimelineRow.classList.remove('hidden');
