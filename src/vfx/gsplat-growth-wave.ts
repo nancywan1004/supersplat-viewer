@@ -114,7 +114,7 @@ void initShared(vec3 center) {
     // So for bottom-to-top growth, we calculate offset from bottomY
     // Bottom particles (center.y close to bottomY, larger Y value) have small yOffset, start first
     // Use uBottomY - center.y (inverse of integrate effect) to make bottom start first
-    g_yOffset = uBottomY - center.y;
+    g_yOffset = center.y - uBottomY;
     
     // Growth phase: wave propagation from bottom to top
     // Similar to integrate effect, but from bottom to top
@@ -607,7 +607,7 @@ fn initShared(center: vec3f) {
     // So for bottom-to-top growth, we calculate offset from bottomY
     // Bottom particles (center.y close to bottomY, larger Y value) have small yOffset, start first
     // Use uBottomY - center.y (inverse of integrate effect) to make bottom start first
-    g_yOffset = uniform.uBottomY - center.y;
+    g_yOffset = center.y - uniform.uBottomY;
     
     // Growth phase: wave propagation from bottom to top
     // Similar to integrate effect, but from bottom to top

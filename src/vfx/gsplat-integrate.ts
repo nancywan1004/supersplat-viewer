@@ -40,7 +40,7 @@ void modifySplatCenter(inout vec3 center) {
     // 因此这里使用 bottomY - center.y，使得：
     //   - 底部附近（center.y ≈ bottomY）yOffset ≈ 0（最先整合）
     //   - 顶部附近（center.y < bottomY）yOffset 为正，数值更大（最后整合）
-    float yOffset = uBottomY - center.y;
+    float yOffset = center.y - uBottomY;
     // 计算传播相位：时间推进 - y坐标偏移（从底部开始）
     // 底部（yOffset=0，即center.y接近uBottomY）的wavePhase先达到阈值，所以底部先整合
     float wavePhase = timeScaled - yOffset * uVerticalSpread;
@@ -85,7 +85,7 @@ void modifySplatCenter(inout vec3 center) {
 
 void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
     float timeScaled = uTime * uSpeed;
-    float yOffset = uBottomY - originalCenter.y;
+    float yOffset = originalCenter.y - uBottomY;
     float wavePhase = timeScaled - yOffset * uVerticalSpread;
     float tt = smoothstep(0.0, 1.0, wavePhase);
     tt = clamp(tt, 0.0, 1.0);
@@ -159,7 +159,7 @@ fn modifySplatCenter(center: ptr<function, vec3f>) {
     // 因此这里使用 bottomY - center.y，使得：
     //   - 底部附近（center.y ≈ bottomY）yOffset ≈ 0（最先整合）
     //   - 顶部附近（center.y < bottomY）yOffset 为正，数值更大（最后整合）
-    let yOffset = uniform.uBottomY - (*center).y;
+    let yOffset = (*center).y - uniform.uBottomY;
     // 计算传播相位：时间推进 - y坐标偏移（从底部开始）
     // 底部（yOffset=0，即center.y接近uBottomY）的wavePhase先达到阈值，所以底部先整合
     let wavePhase = timeScaled - yOffset * uniform.uVerticalSpread;
@@ -210,7 +210,7 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
     }
     
     let timeScaled = uniform.uTime * uniform.uSpeed;
-    let yOffset = uniform.uBottomY - originalCenter.y;
+    let yOffset = originalCenter.y -uniform.uBottomY;
     let wavePhase = timeScaled - yOffset * uniform.uVerticalSpread;
     var tt = smoothstep(0.0, 1.0, wavePhase);
     tt = clamp(tt, 0.0, 1.0);

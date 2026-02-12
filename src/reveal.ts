@@ -516,12 +516,11 @@ export class RevealController {
                 // 所以将 integrate 的 topY 和 bottomY 对调
                 if (this.bbox) {
                     // 基于 bbox 计算：与 integrate 效果使用相同的计算方式，但赋值顺序相反
-                    script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y * 0.68; // 底部（更接近 center，数值更大）
-                    script.topY = this.bbox.center.y - this.bbox.halfExtents.y;            // 顶部（更远离 center，数值更小）
+                    script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y;
+                    script.topY = this.bbox.center.y - this.bbox.halfExtents.y * 0.68;
                 } else {
-                    // 默认值：bottomY > topY（与 shader 期望一致）
-                    script.bottomY = 10.0;
-                    script.topY = -10.0;
+                    script.bottomY = -10.0;
+                    script.topY = 10.0;
                 }
                 
                 // 设置 reveal center
@@ -707,12 +706,11 @@ export class RevealController {
                 if (this.bbox) {
                     // bbox 底部：center.y - halfExtents.y（数值更小）
                     // 为了让 bottomY 更「靠下」（数值更大），取靠近中心的一层作为 bottomY
-                    script.topY = this.bbox.center.y - this.bbox.halfExtents.y;          // 顶部（更小的 Y）
-                    script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y * 0.68; // 底部（更大的 Y）
+                    script.topY = this.bbox.center.y - this.bbox.halfExtents.y * 0.68;
+                    script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y;
                 } else {
-                    // 默认：bottomY > topY
-                    script.topY = -10.0;
-                    script.bottomY = 10.0;
+                    script.topY = 10.0;
+                    script.bottomY = -10.0;
                 }
 
                 const heightRange = Math.abs(script.topY - script.bottomY);
