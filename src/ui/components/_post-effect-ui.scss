@@ -11,6 +11,25 @@
     color: $clr-text-dark;
     font-size: 12px;
     margin-bottom: 2px;
+    &.collapsible {
+        cursor: pointer;
+        user-select: none;
+        &:hover {
+            color: $clr-text;
+        }
+        &.collapsed::after {
+            content: ' ▶';
+        }
+        &:not(.collapsed)::after {
+            content: ' ▼';
+        }
+    }
+}
+
+.postEffectSectionContent {
+    &.collapsed {
+        display: none !important;
+    }
 }
 
 .postEffectLabel {

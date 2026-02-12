@@ -88,7 +88,8 @@ export class BloomController {
     private _unregisterEvents: (() => void)[] = [];
     private picker: Picker | null = null;
     private worldSpaceData: WorldSpaceBloomData = new WorldSpaceBloomData();
-    private mode: BloomMode = BloomMode.ScreenSpace;
+    /** Always World Space (Screen Space removed per product decision) */
+    private mode: BloomMode = BloomMode.WorldSpace;
     private isDrawing: boolean = false;
     private boundPointerDown: ((e: PointerEvent) => void) | null = null;
     private boundPointerMove: ((e: PointerEvent) => void) | null = null;
@@ -188,22 +189,10 @@ export class BloomController {
             const cameraFrame = options.getCameraFrame();
             if (!cameraFrame || !global.settings.postEffectSettings?.bloom?.enabled) return;
             const bloom = global.settings.postEffectSettings.bloom as { bloomBrush?: boolean; threshold?: number };
-            if (bloom.bloomBrush && this.bloomBrushPainter && this.mode === BloomMode.ScreenSpace) {
-                this.bloomBrushPainter.flushUpload();
-            }
             this.updateShaderUniforms();
-            // Screen space: set mask here. World space: mask is set in onFrameRender (after camera update).
-            if (this.mode !== BloomMode.WorldSpace) {
-                const maskTex = this.getEffectiveMaskTexture(!!bloom.bloomBrush);
-                try {
-                    if (maskTex) graphicsDevice.scope.resolve('bloomMaskTexture').setValue(maskTex);
-                    const th = Math.max(0, Math.min(5, Number(bloom.threshold ?? 0.2)));
-                    graphicsDevice.scope.resolve('bloomThreshold').setValue(th);
-                } catch (_) {}
-            }
+            // World space mask is set in onFrameRender (after camera update)
         };
         const onFrameRender = () => {
-            if (this.mode !== BloomMode.WorldSpace) return;
             const bloom = global.settings.postEffectSettings?.bloom as { enabled?: boolean; bloomBrush?: boolean; threshold?: number } | undefined;
             if (!bloom?.enabled) return;
             // After update(dt), camera is current; project 3D points to screen and set mask for this frame.
@@ -224,78 +213,34 @@ export class BloomController {
 
         const { events } = global;
         events.on('bloomBrush:clear', () => {
-            // Clear mask: remove only current uncommitted strokes
-            if (this.mode === BloomMode.WorldSpace) {
-                this.worldSpaceData.clear();
-                if (this.isDrawing) this.worldSpaceMaskDirtyFromDrawing = false;
-                // Redraw mask from remaining committed points next frame
-            } else {
-                this.bloomBrushPainter?.clear();
-            }
+            this.worldSpaceData.clear();
+            if (this.isDrawing) this.worldSpaceMaskDirtyFromDrawing = false;
             (this.global.app as any).renderNextFrame = true;
         });
         this._unregisterEvents.push(() => events.off('bloomBrush:clear'));
 
         events.on('bloomBrush:reset', () => {
-            // Reset mask: remove all (current + committed)
-            if (this.mode === BloomMode.WorldSpace) {
-                this.worldSpaceData.reset();
-                if (this.worldSpaceMaskCtx && this.worldSpaceMaskCanvas && this.worldSpaceMaskTexture) {
-                    this.worldSpaceMaskCtx.fillStyle = '#000000';
-                    this.worldSpaceMaskCtx.fillRect(0, 0, MASK_SIZE, MASK_SIZE);
-                    this.worldSpaceMaskTexture.setSource(this.worldSpaceMaskCanvas);
-                    this.worldSpaceMaskTexture.upload();
-                }
-                this.worldSpaceMaskDirtyFromDrawing = false;
-                this.saveWorldSpaceConfig();
-            } else {
-                this.bloomBrushPainter?.clear();
-                if (this.bloomCommittedMaskTexture && this.worldSpaceMaskCtx && this.worldSpaceMaskCanvas) {
-                    this.worldSpaceMaskCtx.fillStyle = '#000000';
-                    this.worldSpaceMaskCtx.fillRect(0, 0, MASK_SIZE, MASK_SIZE);
-                    this.bloomCommittedMaskTexture.setSource(this.worldSpaceMaskCanvas);
-                    this.bloomCommittedMaskTexture.upload();
-                }
-                this.hasCommittedBloomMask = false;
+            this.worldSpaceData.reset();
+            if (this.worldSpaceMaskCtx && this.worldSpaceMaskCanvas && this.worldSpaceMaskTexture) {
+                this.worldSpaceMaskCtx.fillStyle = '#000000';
+                this.worldSpaceMaskCtx.fillRect(0, 0, MASK_SIZE, MASK_SIZE);
+                this.worldSpaceMaskTexture.setSource(this.worldSpaceMaskCanvas);
+                this.worldSpaceMaskTexture.upload();
             }
+            this.worldSpaceMaskDirtyFromDrawing = false;
+            this.saveWorldSpaceConfig();
             (this.global.app as any).renderNextFrame = true;
         });
         this._unregisterEvents.push(() => events.off('bloomBrush:reset'));
 
         events.on('bloomBrush:set', () => {
-            if (this.mode === BloomMode.WorldSpace) {
-                // World space mode: commit world space data
-                this.worldSpaceData.commit();
-                
-                // Serialize and save to settings
-                this.saveWorldSpaceConfig();
-                
-                console.log('bloomBrush:set (world space)');
-            } else {
-                // Screen space mode: copy mask to committed texture
-                if (this.bloomBrushPainter && this.bloomCommittedMaskTexture) {
-                    this.bloomBrushPainter.copyMaskTo(this.bloomCommittedMaskTexture);
-                    this.hasCommittedBloomMask = true;
-                    console.log('bloomBrush:set (screen space)');
-                }
-            }
+            this.worldSpaceData.commit();
+            this.saveWorldSpaceConfig();
             (this.global.app as any).renderNextFrame = true;
         });
         this._unregisterEvents.push(() => events.off('bloomBrush:set'));
 
-        // Listen for mode change events from UI
-        events.on('bloomBrush:modeChange', (newMode: string) => {
-            if (newMode === 'world') {
-                this.setMode(BloomMode.WorldSpace);
-            } else {
-                this.setMode(BloomMode.ScreenSpace);
-            }
-            // Save mode to settings
-            this.saveWorldSpaceConfig();
-        });
-        this._unregisterEvents.push(() => events.off('bloomBrush:modeChange'));
-
-        // Setup pointer event handlers for world space mode
+        // Setup pointer event handlers for world space bloom
         this.boundPointerDown = this.handlePointerDown.bind(this);
         this.boundPointerMove = this.handlePointerMove.bind(this);
         this.boundPointerUp = this.handlePointerUp.bind(this);
@@ -304,13 +249,10 @@ export class BloomController {
         this.loadWorldSpaceConfig();
 
         // If loaded mode is world space, register pointer event listeners
-        // Use document + capture phase to intercept events before camera orbit controller
-        if (this.mode === BloomMode.WorldSpace) {
-            const captureOpts: AddEventListenerOptions = { capture: true };
-            if (this.boundPointerDown) document.addEventListener('pointerdown', this.boundPointerDown, captureOpts);
-            if (this.boundPointerMove) document.addEventListener('pointermove', this.boundPointerMove, captureOpts);
-            if (this.boundPointerUp) document.addEventListener('pointerup', this.boundPointerUp, captureOpts);
-        }
+        const captureOpts: AddEventListenerOptions = { capture: true };
+        if (this.boundPointerDown) document.addEventListener('pointerdown', this.boundPointerDown, captureOpts);
+        if (this.boundPointerMove) document.addEventListener('pointermove', this.boundPointerMove, captureOpts);
+        if (this.boundPointerUp) document.addEventListener('pointerup', this.boundPointerUp, captureOpts);
     }
 
     /**
@@ -348,8 +290,7 @@ export class BloomController {
         const hasEffectiveMask = effectiveMask !== null && effectiveMask !== this.bloomBrushWhiteTexture;
         const bloomMaskActiveForNight = nightModeOn && hasEffectiveMask;
         if (this.bloomBrushPainter) {
-            // In world space mode, screen space painter should be disabled
-            this.bloomBrushPainter.setEnabled(bloomBrush && this.mode === BloomMode.ScreenSpace);
+            this.bloomBrushPainter.setEnabled(false); // Screen space removed, always World Space
             this.bloomBrushPainter.setBrushSize(Math.max(1, Math.min(200, Number(bloomSettings.bloomBrushSize ?? 30))));
         }
         if (nightModeScript) {
@@ -508,9 +449,7 @@ export class BloomController {
      * @private
      */
     private handlePointerDown(e: PointerEvent): void {
-        // Only intercept when bloom brush is ON and mode is WorldSpace
         if (!this.isBloomBrushEnabled()) return;
-        if (this.mode !== BloomMode.WorldSpace) return;
 
         // Skip if clicking on interactive UI elements
         if (this.isInteractiveTarget(e.target)) return;
@@ -537,8 +476,14 @@ export class BloomController {
                 const brushSize = bloom?.bloomBrushSize ?? 30;
                 const cameraPos = this.global.camera.getPosition();
                 const distance = worldPos.distance(cameraPos);
-                const worldRadius = (brushSize / canvas.clientWidth) * distance * 0.5;
-                this.worldSpaceData.addPoint(worldPos, worldRadius, 1.0);
+                const sceneCam = (this.global.camera as { camera?: { camera?: { fov?: number } } }).camera?.camera;
+                const fovDeg = sceneCam?.fov ?? 60;
+                const fovRad = (fovDeg * Math.PI) / 180;
+                const canvasHeight = canvas.clientHeight || canvas.height;
+                if (canvasHeight > 0 && distance > 0.001) {
+                    const worldRadius = (brushSize * 2 * distance * Math.tan(fovRad / 2)) / canvasHeight;
+                    this.worldSpaceData.addPoint(worldPos, worldRadius, 1.0);
+                }
             }
         });
     }
@@ -575,8 +520,14 @@ export class BloomController {
                 const brushSize = bloom?.bloomBrushSize ?? 30;
                 const cameraPos = this.global.camera.getPosition();
                 const distance = worldPos.distance(cameraPos);
-                const worldRadius = (brushSize / canvas.clientWidth) * distance * 0.5;
-                this.worldSpaceData.addPoint(worldPos, worldRadius, 1.0);
+                const sceneCam = (this.global.camera as { camera?: { camera?: { fov?: number } } }).camera?.camera;
+                const fovDeg = sceneCam?.fov ?? 60;
+                const fovRad = (fovDeg * Math.PI) / 180;
+                const canvasHeight = canvas.clientHeight || canvas.height;
+                if (canvasHeight > 0 && distance > 0.001) {
+                    const worldRadius = (brushSize * 2 * distance * Math.tan(fovRad / 2)) / canvasHeight;
+                    this.worldSpaceData.addPoint(worldPos, worldRadius, 1.0);
+                }
             }
         });
     }
@@ -599,44 +550,8 @@ export class BloomController {
         (this.global.app as any).renderNextFrame = true;
     }
 
-    /**
-     * Set bloom mode (screen space or world space)
-     * @param newMode The mode to switch to
-     */
-    setMode(newMode: BloomMode): void {
-        if (this.mode === newMode) return;
-
-        const captureOpts: AddEventListenerOptions = { capture: true };
-
-        // Unregister old mode event listeners
-        if (this.mode === BloomMode.WorldSpace) {
-            // Remove world space event listeners from document (capture phase)
-            if (this.boundPointerDown) document.removeEventListener('pointerdown', this.boundPointerDown, captureOpts);
-            if (this.boundPointerMove) document.removeEventListener('pointermove', this.boundPointerMove, captureOpts);
-            if (this.boundPointerUp) document.removeEventListener('pointerup', this.boundPointerUp, captureOpts);
-            this.isDrawing = false;
-        } else if (this.mode === BloomMode.ScreenSpace) {
-            // Screen space mode uses BloomBrushPainter which manages its own events
-            // No cleanup needed here
-        }
-
-        // Switch mode
-        this.mode = newMode;
-
-        // Register new mode event listeners
-        if (newMode === BloomMode.WorldSpace) {
-            // Register world space event listeners on document with capture phase
-            // This ensures we intercept events before the camera orbit controller
-            if (this.boundPointerDown) document.addEventListener('pointerdown', this.boundPointerDown, captureOpts);
-            if (this.boundPointerMove) document.addEventListener('pointermove', this.boundPointerMove, captureOpts);
-            if (this.boundPointerUp) document.addEventListener('pointerup', this.boundPointerUp, captureOpts);
-        } else if (newMode === BloomMode.ScreenSpace) {
-            // Screen space mode uses BloomBrushPainter which manages its own events
-            // No setup needed here
-        }
-
-        console.log(`Bloom mode switched to: ${newMode}`);
-    }
+    /** No-op: Screen Space removed, always World Space. Kept for API compat. */
+    setMode(_newMode: BloomMode): void {}
 
     /**
      * Get current bloom mode
@@ -653,14 +568,8 @@ export class BloomController {
     private saveWorldSpaceConfig(): void {
         const bloom = this.global.settings?.postEffectSettings?.bloom;
         if (!bloom) return;
-
-        // Save current mode
-        (bloom as any).bloomMode = this.mode;
-
-        // Save world space points data
-        if (this.mode === BloomMode.WorldSpace) {
-            (bloom as any).worldSpacePoints = this.worldSpaceData.toJSON();
-        }
+        (bloom as any).bloomMode = 'world';
+        (bloom as any).worldSpacePoints = this.worldSpaceData.toJSON();
     }
 
     /**
@@ -668,26 +577,9 @@ export class BloomController {
      * @private
      */
     private loadWorldSpaceConfig(): void {
-        const bloom = this.global.settings?.postEffectSettings?.bloom as {
-            bloomMode?: 'screen' | 'world';
-            worldSpacePoints?: any;
-        } | undefined;
-
-        if (!bloom) return;
-
-        // Load bloom mode (default to 'screen' for backward compatibility)
-        const savedMode = bloom.bloomMode ?? 'screen';
-        if (savedMode === 'world') {
-            this.mode = BloomMode.WorldSpace;
-
-            // Load world space points data
-            if (bloom.worldSpacePoints) {
-                this.worldSpaceData.fromJSON(bloom.worldSpacePoints);
-                console.log('Loaded world space bloom data from settings');
-            }
-        } else {
-            this.mode = BloomMode.ScreenSpace;
-        }
+        const bloom = this.global.settings?.postEffectSettings?.bloom as { worldSpacePoints?: any } | undefined;
+        if (!bloom?.worldSpacePoints) return;
+        this.worldSpaceData.fromJSON(bloom.worldSpacePoints);
     }
 
     /**
@@ -773,7 +665,6 @@ export class BloomController {
             const distance = point.position.distance(cameraPos);
             if (distance < 0.001) continue;
 
-            // fov-based projection: pixels per world unit at this distance
             const fovRad = ((sceneCam as { fov?: number }).fov ?? 60) * (Math.PI / 180);
             const pixelsPerUnit = (canvasHeight / 2) / (distance * Math.tan(fovRad / 2));
             const screenRadius = Math.max(2, point.radius * pixelsPerUnit);
@@ -794,31 +685,21 @@ export class BloomController {
     }
 
     /**
-     * Get the effective mask texture for the current mode.
-     * World space mode: dynamically projected mask from 3D bloom points.
-     * Screen space mode: painter texture or committed mask.
+     * Get the effective mask texture for compose stage.
+     * - If there are world space points (committed or current): use projected mask so Set bloom regions stay visible even after exiting brush.
+     * - Else if Bloom Brush OFF: white = full-screen (global) bloom.
+     * - Else: world space mask (black until drawn).
      * @private
      */
     private getEffectiveMaskTexture(bloomBrushOn: boolean): Texture | null {
-        if (this.mode === BloomMode.WorldSpace) {
-            // World space mode: use dynamically projected mask
-            // renderWorldSpaceMask() always produces a valid mask (black when no points)
-            if (this.hasWorldSpaceMask && this.worldSpaceMaskTexture) {
-                return this.worldSpaceMaskTexture;
-            }
-            // Fallback before first render: use the mask texture itself (it starts uninitialized)
-            // or return null to avoid accidental full bloom
+        const hasWorldPoints = this.worldSpaceData.getAllPoints().length > 0;
+        if (hasWorldPoints && this.hasWorldSpaceMask && this.worldSpaceMaskTexture) {
             return this.worldSpaceMaskTexture;
         }
-
-        // Screen space mode: original logic
-        if (bloomBrushOn && this.bloomBrushPainter) {
-            return this.bloomBrushPainter.getTexture();
+        if (!bloomBrushOn) {
+            return this.bloomBrushWhiteTexture;
         }
-        if (this.hasCommittedBloomMask && this.bloomCommittedMaskTexture) {
-            return this.bloomCommittedMaskTexture;
-        }
-        return this.bloomBrushWhiteTexture;
+        return this.worldSpaceMaskTexture;
     }
 
     /**
@@ -828,7 +709,6 @@ export class BloomController {
      * @private
      */
     private checkCameraMovement(): void {
-        if (this.mode !== BloomMode.WorldSpace) return;
 
         // Only trigger re-render if there are world space bloom points
         const allPoints = this.worldSpaceData.getAllPoints();
@@ -871,16 +751,7 @@ export class BloomController {
         // Check for camera movement and trigger re-render if needed
         this.checkCameraMovement();
 
-        if (this.mode === BloomMode.ScreenSpace) {
-            // Screen space mode: set mode to 0
-            if (this.bloomBrushFilter) {
-                this.bloomBrushFilter.bloomMode = 0;
-                this.bloomBrushFilter.bloomPointCount = 0;
-            }
-            return;
-        }
-
-        // World space mode: set mode to 1 and upload bloom points
+        // World space: set mode to 1 and upload bloom points
         if (!this.bloomBrushFilter) {
             // Try to find or create BloomBrushFilter
             const gsplatEntity = this.global.app.root.findByName('gsplat') as any;
@@ -926,13 +797,10 @@ export class BloomController {
     }
 
     destroy(): void {
-        // Clean up world space event listeners if active (document + capture phase)
-        if (this.mode === BloomMode.WorldSpace) {
-            const captureOpts: AddEventListenerOptions = { capture: true };
-            if (this.boundPointerDown) document.removeEventListener('pointerdown', this.boundPointerDown, captureOpts);
-            if (this.boundPointerMove) document.removeEventListener('pointermove', this.boundPointerMove, captureOpts);
-            if (this.boundPointerUp) document.removeEventListener('pointerup', this.boundPointerUp, captureOpts);
-        }
+        const captureOpts: AddEventListenerOptions = { capture: true };
+        if (this.boundPointerDown) document.removeEventListener('pointerdown', this.boundPointerDown, captureOpts);
+        if (this.boundPointerMove) document.removeEventListener('pointermove', this.boundPointerMove, captureOpts);
+        if (this.boundPointerUp) document.removeEventListener('pointerup', this.boundPointerUp, captureOpts);
         
         this._unregisterFrameUpdate?.();
         this._unregisterFrameUpdate = null;

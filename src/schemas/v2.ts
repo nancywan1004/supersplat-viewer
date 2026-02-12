@@ -58,9 +58,7 @@ type PostEffectSettings = {
         /** 2D 笔刷局部 bloom：仅在笔刷区域叠加光晕，与 bloomDebug 互斥 */
         bloomBrush: boolean,
         bloomBrushSize: number,
-        /** Bloom 模式：'screen' = 屏幕空间（默认），'world' = 世界空间 */
-        bloomMode?: 'screen' | 'world',
-        /** 世界空间 bloom 数据（序列化后的 WorldSpaceBloomData），仅当 bloomMode='world' 时有效 */
+        /** 世界空间 bloom 数据（序列化后的 WorldSpaceBloomData） */
         worldSpacePoints?: {
             points: Array<{ position: [number, number, number], radius: number, intensity: number }>,
             committed: Array<{ position: [number, number, number], radius: number, intensity: number }>
