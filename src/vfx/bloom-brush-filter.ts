@@ -3,10 +3,15 @@ import { GsplatShaderEffect } from './gsplat-shader-effect';
 import type { Texture } from 'playcanvas';
 import type { Entity } from 'playcanvas';
 
+const MAX_POINTS = 256;
+
 const shaderGLSL = /* glsl */ `
 uniform mat4 uModelViewProj;
 uniform sampler2D uBloomMask;
 uniform float uBloomThreshold;
+uniform int uBloomMode;
+uniform vec4 uBloomPoints[` + MAX_POINTS + `];
+uniform int uBloomPointCount;
 
 void modifySplatCenter(inout vec3 center) {
 }
@@ -16,7 +21,31 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
 
 // Bloom Brush：主场景不做任何裁剪，保持正常高斯渲染（不置黑）。
 // 笔刷 mask 仅用于后处理阶段限制 bloom 叠加（见 viewer 中 bloom 与 mask 的合成）。
+// 世界空间模式下基于世界坐标距离判断，不考虑可见性/遮挡，
+// 因此被遮挡的 bloom 点仍然影响该位置的 splat（Requirement 7.3）。
 void modifySplatColor(vec3 center, inout vec4 color) {
+    if (uBloomMode == 1) {
+        // World space mode: check if splat center is within any bloom point's influence
+        float bloomMask = 0.0;
+        for (int i = 0; i < uBloomPointCount; i++) {
+            vec3 bloomPos = uBloomPoints[i].xyz;
+            float bloomRadius = uBloomPoints[i].w;
+            float dist = distance(center, bloomPos);
+            if (dist < bloomRadius) {
+                // Smooth transition using smoothstep
+                float t = 1.0 - smoothstep(bloomRadius * 0.5, bloomRadius, dist);
+                bloomMask = max(bloomMask, t);
+                // Early exit: if bloomMask is already at max (1.0), no need to check more points
+                if (bloomMask >= 1.0) break;
+            }
+        }
+        // Boost brightness of splats within bloom regions so they feed into
+        // the bloom pass. The projected 2D mask in compose stage limits where
+        // bloom glow actually appears on screen.
+        if (bloomMask > 0.0) {
+            color.rgb *= 1.0 + bloomMask * 0.5;
+        }
+    }
 }
 `;
 
@@ -25,6 +54,9 @@ uniform uModelViewProj: mat4x4f;
 var uBloomMask: texture_2d<f32>;
 var uBloomMaskSampler: sampler;
 uniform uBloomThreshold: f32;
+uniform uBloomMode: i32;
+uniform uBloomPoints: array<vec4f, ` + MAX_POINTS + `>;
+uniform uBloomPointCount: i32;
 
 fn modifySplatCenter(center: ptr<function, vec3f>) {
 }
@@ -32,7 +64,33 @@ fn modifySplatCenter(center: ptr<function, vec3f>) {
 fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
 }
 
+// 世界空间模式下基于世界坐标距离判断，不考虑可见性/遮挡，
+// 因此被遮挡的 bloom 点仍然影响该位置的 splat（Requirement 7.3）。
 fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
+    if (uniform.uBloomMode == 1) {
+        // World space mode: check if splat center is within any bloom point's influence
+        var bloomMask: f32 = 0.0;
+        for (var i: i32 = 0; i < uniform.uBloomPointCount; i = i + 1) {
+            let bloomPos = uniform.uBloomPoints[i].xyz;
+            let bloomRadius = uniform.uBloomPoints[i].w;
+            let dist = distance(center, bloomPos);
+            if (dist < bloomRadius) {
+                // Smooth transition using smoothstep
+                let t = 1.0 - smoothstep(bloomRadius * 0.5, bloomRadius, dist);
+                bloomMask = max(bloomMask, t);
+                // Early exit: if bloomMask is already at max (1.0), no need to check more points
+                if (bloomMask >= 1.0) { break; }
+            }
+        }
+        // Boost brightness of splats within bloom regions so they feed into
+        // the bloom pass. The projected 2D mask in compose stage limits where
+        // bloom glow actually appears on screen.
+        if (bloomMask > 0.0) {
+            (*color).r *= 1.0 + bloomMask * 0.5;
+            (*color).g *= 1.0 + bloomMask * 0.5;
+            (*color).b *= 1.0 + bloomMask * 0.5;
+        }
+    }
 }
 `;
 
@@ -51,6 +109,15 @@ class BloomBrushFilter extends GsplatShaderEffect {
 
     /** 相机实体（用于每帧计算 modelViewProj） */
     cameraEntity: Entity | null = null;
+
+    /** Bloom mode: 0 = screen space, 1 = world space */
+    bloomMode: number = 0;
+
+    /** World space bloom points (vec4: xyz=position, w=radius) */
+    bloomPoints: Float32Array = new Float32Array(MAX_POINTS * 4);
+
+    /** Number of active bloom points */
+    bloomPointCount: number = 0;
 
     private _modelViewProj: Mat4 = new Mat4();
 
@@ -83,7 +150,12 @@ class BloomBrushFilter extends GsplatShaderEffect {
             this.app.renderNextFrame = true;
         }
         this.setUniform('uBloomThreshold', this.threshold);
+        
+        // Set world space bloom uniforms
+        this.setUniform('uBloomMode', this.bloomMode);
+        this.setUniform('uBloomPoints', this.bloomPoints);
+        this.setUniform('uBloomPointCount', this.bloomPointCount);
     }
 }
 
-export { BloomBrushFilter };
+export { BloomBrushFilter, MAX_POINTS };

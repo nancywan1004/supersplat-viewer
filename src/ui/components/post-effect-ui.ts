@@ -37,14 +37,27 @@ const POST_EFFECT_PANEL_HTML = `
     <div id="bloomBrushCheck" class="checkMark">✓</div>
     <div id="bloomBrushOption" class="postEffectOption">Bloom Brush (局部)</div>
   </div>
-  <div id="bloomBrushOptionsRow" class="settingsRow hidden">
-    <label for="bloomBrushSizeSlider" class="postEffectLabel">Brush Size:</label>
-    <div class="postEffectSliderWrap">
-      <input type="range" id="bloomBrushSizeSlider" min="1" max="200" step="1" value="30" class="postEffectSlider">
-      <span id="bloomBrushSizeValue" class="postEffectSliderValue">30</span>
+  <div id="bloomBrushOptionsRow" class="settingsRow hidden" style="flex-wrap:wrap;gap:4px;">
+    <div style="display:flex;align-items:center;width:100%;gap:6px;">
+      <label for="bloomModeSelect" class="postEffectLabel" style="min-width:auto;">Mode:</label>
+      <select id="bloomModeSelect" style="padding:2px 4px;border-radius:3px;border:1px solid #555;background:#2a2a2a;color:#ccc;font-size:12px;cursor:pointer;">
+        <option value="screen">Screen (屏幕空间)</option>
+        <option value="world">World (世界空间)</option>
+      </select>
+      <span id="bloomModeIndicator" style="font-size:11px;color:#888;margin-left:4px;">● Screen</span>
     </div>
-    <button type="button" id="bloomBrushSetBtn" class="postEffectOption">Set bloom</button>
-    <button type="button" id="bloomBrushClearBtn" class="postEffectOption">Clear mask</button>
+    <div style="display:flex;align-items:center;width:100%;gap:6px;">
+      <label for="bloomBrushSizeSlider" class="postEffectLabel">Brush Size:</label>
+      <div class="postEffectSliderWrap">
+        <input type="range" id="bloomBrushSizeSlider" min="1" max="200" step="1" value="30" class="postEffectSlider">
+        <span id="bloomBrushSizeValue" class="postEffectSliderValue">30</span>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;width:100%;gap:6px;">
+      <button type="button" id="bloomBrushSetBtn" class="postEffectOption">Set bloom</button>
+      <button type="button" id="bloomBrushClearBtn" class="postEffectOption">Clear mask</button>
+      <button type="button" id="bloomBrushResetBtn" class="postEffectOption">Reset mask</button>
+    </div>
   </div>
   <div class="postEffectSectionLabel">Shadow</div>
   <div class="settingsRow">
@@ -114,6 +127,7 @@ type BloomSettings = {
     bloomDebug: boolean;
     bloomBrush: boolean;
     bloomBrushSize: number;
+    bloomMode?: 'screen' | 'world';
 };
 
 const ensureBloom = (settings: Global['settings']): BloomSettings => {
@@ -134,6 +148,7 @@ const ensureBloom = (settings: Global['settings']): BloomSettings => {
         if ((b as any).bloomDebug === undefined) (b as any).bloomDebug = false;
         if ((b as any).bloomBrush === undefined) (b as any).bloomBrush = false;
         if ((b as any).bloomBrushSize === undefined) (b as any).bloomBrushSize = 30;
+        if ((b as any).bloomMode === undefined) (b as any).bloomMode = 'screen';
     }
     return settings.postEffectSettings.bloom as BloomSettings;
 };
@@ -196,6 +211,9 @@ export function initPostEffectUI(global: Global): () => void {
     const bloomBrushSizeValue = container.querySelector('#bloomBrushSizeValue') as HTMLElement | null;
     const bloomBrushSetBtn = container.querySelector('#bloomBrushSetBtn') as HTMLButtonElement | null;
     const bloomBrushClearBtn = container.querySelector('#bloomBrushClearBtn') as HTMLButtonElement | null;
+    const bloomBrushResetBtn = container.querySelector('#bloomBrushResetBtn') as HTMLButtonElement | null;
+    const bloomModeSelect = container.querySelector('#bloomModeSelect') as HTMLSelectElement | null;
+    const bloomModeIndicator = container.querySelector('#bloomModeIndicator') as HTMLElement | null;
     const shadowEnableCheck = container.querySelector('#shadowEnableCheck') as HTMLElement | null;
     const shadowEnableOption = container.querySelector('#shadowEnableOption') as HTMLElement | null;
     const shadowCastCheck = container.querySelector('#shadowCastCheck') as HTMLElement | null;
@@ -234,6 +252,13 @@ export function initPostEffectUI(global: Global): () => void {
         const brushSize = Math.max(1, Math.min(200, Number(b.bloomBrushSize ?? 30)));
         if (bloomBrushSizeSlider) bloomBrushSizeSlider.value = String(brushSize);
         if (bloomBrushSizeValue) bloomBrushSizeValue.textContent = String(brushSize);
+        const currentMode = b.bloomMode ?? 'screen';
+        if (bloomModeSelect) bloomModeSelect.value = currentMode;
+        if (bloomModeIndicator) {
+            const isWorld = currentMode === 'world';
+            bloomModeIndicator.textContent = isWorld ? '● World' : '● Screen';
+            bloomModeIndicator.style.color = isWorld ? '#4fc3f7' : '#888';
+        }
         const sh = ensureShadow(settings);
         if (shadowEnableCheck) shadowEnableCheck.classList.toggle('active', sh.enabled);
         if (shadowCastCheck) shadowCastCheck.classList.toggle('active', sh.castShadows !== false);
@@ -334,6 +359,18 @@ export function initPostEffectUI(global: Global): () => void {
         });
     }
 
+    if (bloomModeSelect) {
+        bloomModeSelect.addEventListener('change', () => {
+            const b = ensureBloom(settings);
+            const newMode = bloomModeSelect.value as 'screen' | 'world';
+            (b as any).bloomMode = newMode;
+            // Fire event for BloomController to handle mode switch
+            events.fire('bloomBrush:modeChange', newMode);
+            syncFromSettings();
+            firePostEffectChanged();
+        });
+    }
+
     if (bloomBrushSetBtn) {
         bloomBrushSetBtn.addEventListener('click', () => {
             events.fire('bloomBrush:set');
@@ -344,6 +381,12 @@ export function initPostEffectUI(global: Global): () => void {
     if (bloomBrushClearBtn) {
         bloomBrushClearBtn.addEventListener('click', () => {
             events.fire('bloomBrush:clear');
+            firePostEffectChanged();
+        });
+    }
+    if (bloomBrushResetBtn) {
+        bloomBrushResetBtn.addEventListener('click', () => {
+            events.fire('bloomBrush:reset');
             firePostEffectChanged();
         });
     }
