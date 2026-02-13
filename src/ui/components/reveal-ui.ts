@@ -58,8 +58,8 @@ const REVEAL_PANEL_HTML = `
     </select>
   </div>
   <div id="totalDurationRow" class="settingsRow hidden">
-    <label for="totalDuration">Total Duration (s):</label>
-    <input type="number" id="totalDuration" class="settingsInput" min="1" max="60" step="0.5" value="15">
+    <label for="totalDuration">Timed VFX 时长 (s):</label>
+    <input type="number" id="totalDuration" class="settingsInput" min="1" max="60" step="0.5" value="15" title="仅控制 Timed VFX 效果的快慢/时长，与导出视频长度无关">
   </div>
   <div id="effectTimelineRow" class="settingsRow hidden">
     <div class="effectTimelineInner">

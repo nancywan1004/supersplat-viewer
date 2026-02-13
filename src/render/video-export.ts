@@ -115,7 +115,11 @@ type VideoSettings = {
     syncAnimTrack?: boolean;
     /** 使用 canvas.captureStream + MediaRecorder 快速导出（约实时，输出 WebM），无 readPixels 瓶颈 */
     useFastExport?: boolean;
-    /** 为 true 时导出每帧把 VFX 时间轴设到末尾（全显），不驱动 VFX；相机动画仍由 syncAnimTrack 控制 */
+    /** 导出视频总时长（秒），基于动画时间轴(animTrack)长度，与 VFX 面板的「Timed VFX 时长」无关 */
+    totalDuration?: number;
+    /** 为 true 时导出过程中驱动 VFX 特效（含 Timed/非 Timed）；为 false 时 VFX 固定为末尾状态，仅导出 animTrack */
+    includeVfx?: boolean;
+    /** @deprecated 使用 includeVfx：为 true 时等价于 includeVfx=false */
     fixVfxAtEnd?: boolean;
 };
 
@@ -886,11 +890,11 @@ export const initVideoExport = (global: Global): void => {
         profiler?: ExportProfiler
     ): Promise<void> => {
         if (!encoder) throw new Error('Encoder is not available');
-        const { frameRate, width, height, syncAnimTrack, fixVfxAtEnd } = settings;
-        const { settings: appSettings } = global;
+        const { frameRate, width, height, syncAnimTrack } = settings;
         const evenWidth = width % 2 === 0 ? width : width - 1;
         const evenHeight = height % 2 === 0 ? height : height - 1;
-        const totalDuration = appSettings?.revealEffect?.totalDuration ?? 20.0;
+        const totalDuration = settings.totalDuration ?? global.settings?.revealEffect?.totalDuration ?? 20.0;
+        const includeVfx = settings.includeVfx !== false && !settings.fixVfxAtEnd;
         const totalFrames = Math.ceil(totalDuration * frameRate);
         const frameInterval = 1.0 / frameRate;
 
@@ -901,7 +905,7 @@ export const initVideoExport = (global: Global): void => {
         for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
             if (encoder.state === 'closed' || (encoder as any)._errorOccurred) break;
             const frameTime = Math.min(frameIndex * frameInterval, totalDuration);
-            const effectTime = fixVfxAtEnd ? totalDuration : frameTime;
+            const effectTime = includeVfx ? frameTime : totalDuration;
 
             const frameProfile: FrameProfile = {
                 seekAnim: 0, setTimelineAndUpdate: 0, waitMs: 0, renderFrame: 0, raf: 0,
@@ -1020,10 +1024,11 @@ export const initVideoExport = (global: Global): void => {
      * 输出 WebM（VP9 或 AVC1），导出期间画面会实时播放在屏幕上。
      */
     const performVideoExportFast = async (videoSettings: VideoSettings, fileStream: FileSystemWritableFileStream | undefined): Promise<boolean> => {
-        const { frameRate, width, height, bitrate, syncAnimTrack, fixVfxAtEnd } = videoSettings;
+        const { frameRate, width, height, bitrate, syncAnimTrack } = videoSettings;
         const evenWidth = width % 2 === 0 ? width : width - 1;
         const evenHeight = height % 2 === 0 ? height : height - 1;
-        const totalDuration = global.settings?.revealEffect?.totalDuration ?? 20.0;
+        const totalDuration = videoSettings.totalDuration ?? global.settings?.revealEffect?.totalDuration ?? 20.0;
+        const includeVfx = videoSettings.includeVfx !== false && !videoSettings.fixVfxAtEnd;
         const totalFrames = Math.ceil(totalDuration * frameRate);
         const frameInterval = 1.0 / frameRate;
         const frameTimeMs = 1000 / frameRate;
@@ -1079,7 +1084,7 @@ export const initVideoExport = (global: Global): void => {
         for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
             const frameStart = performance.now();
             const frameTime = Math.min(frameIndex * frameInterval, totalDuration);
-            const effectTime = fixVfxAtEnd ? totalDuration : frameTime;
+            const effectTime = includeVfx ? frameTime : totalDuration;
             if (syncAnimTrack) seekAnimToTimeAndApply(global, frameTime);
             await prepareAndRenderOneFrameToCanvas(global, effectTime);
             updateProgress(frameTime, totalDuration);
@@ -1115,7 +1120,7 @@ export const initVideoExport = (global: Global): void => {
     const performVideoExport = async (videoSettings: VideoSettings, fileStream: FileSystemWritableFileStream | undefined): Promise<boolean> => {
         const { startFrame, endFrame, frameRate, width, height, bitrate } = videoSettings;
         const profiler = new ExportProfiler();
-        const totalDuration = global.settings?.revealEffect?.totalDuration ?? 20.0;
+        const totalDuration = videoSettings.totalDuration ?? global.settings?.revealEffect?.totalDuration ?? 20.0;
         const totalFrames = Math.ceil(totalDuration * frameRate);
 
         console.log(VFX_EXPORT_LOG_TAG, 'Starting video export (offline rendering mode)');
@@ -1224,6 +1229,13 @@ export const initVideoExport = (global: Global): void => {
         const prevExporting = stateAny.isExportingVfxVideo ?? false;
         const prevEffectTime = lastUiEffectTime;
         const prevEffectPaused = stateAny.effectPaused ?? false;
+        const prevAnimationPaused = stateAny.animationPaused ?? false;
+        const includeVfx = videoSettings.includeVfx !== false && !videoSettings.fixVfxAtEnd;
+
+        // 导出时包含 VFX：在开始前重启特效，从 0 开始录制（Timed 与非 Timed 均适用）
+        if (includeVfx) {
+            events.fire('revealRestart', false);
+        }
 
         // 锁住 viewer 实时更新
         stateAny.isExportingVfxVideo = true;
@@ -1239,12 +1251,16 @@ export const initVideoExport = (global: Global): void => {
         } finally {
             cleanup();
 
-            // 恢复锁和 UI 时间轴
+            // 恢复锁
             stateAny.isExportingVfxVideo = prevExporting;
-            // 用交互事件恢复到导出前的时间，并驱动 UI slider
-            global.events.fire('effectTimeline:set', prevEffectTime);
-            // 恢复导出前的播放/暂停状态（导出期间 setEffectTimeForExport 会强制暂停，需恢复）
-            global.events.fire('effectPlayPause:set', prevEffectPaused);
+
+            // 延后到下一帧再恢复；用 restoreAfterExport 区分 Timed/非 Timed，避免非 Timed 黑屏；恢复动画播放状态
+            requestAnimationFrame(() => {
+                seekAnimToTimeAndApply(global, prevEffectTime);
+                global.events.fire('effectTimeline:restoreAfterExport', prevEffectTime);
+                global.events.fire('effectPlayPause:set', prevEffectPaused);
+                stateAny.animationPaused = prevAnimationPaused;
+            });
         }
     };
 

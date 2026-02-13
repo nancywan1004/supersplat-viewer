@@ -20,10 +20,17 @@ const VFX_EXPORT_OVERLAY_HTML = `
 </div>
 `.trim();
 
+/** 导出配置：导出时长（秒），与 VFX 面板的「Timed VFX 时长」无关，仅决定视频长度 */
+const DEFAULT_EXPORT_DURATION = 20;
+
 /** VFX 导出行 HTML 模板（挂到 #renderPanelContainer） */
 const VFX_VIDEO_EXPORT_ROW_HTML = `
-<div id="vfxVideoExportRow" class="settingsRow hidden">
+<div id="vfxVideoExportRow" class="settingsRow">
   <div class="vfxExportInner">
+    <div class="vfxExportRow">
+      <label for="exportDurationInput">导出时长 (s):</label>
+      <input type="number" id="exportDurationInput" class="settingsInput" min="0.5" max="600" step="0.5" value="${DEFAULT_EXPORT_DURATION}" title="基于动画时间轴(animTrack)的导出长度，与 VFX 特效时长无关">
+    </div>
     <div class="vfxExportRow">
       <label for="videoResolution">分辨率:</label>
       <select id="videoResolution" class="settingsSelect">
@@ -42,10 +49,10 @@ const VFX_VIDEO_EXPORT_ROW_HTML = `
     </div>
     <div class="vfxExportRow">
       <label class="settingsCheckLabel">
-        <input type="checkbox" id="fixVfxAtEndCheck" class="settingsCheck"> 导出时 VFX 固定到末尾（不驱动 VFX 时间轴）
+        <input type="checkbox" id="includeVfxCheck" class="settingsCheck" checked> 导出时包含 VFX 特效（不勾选则仅导出 animTrack，VFX 固定为末尾状态）
       </label>
     </div>
-    <button id="vfxVideoExportButton" class="settingsButton" type="button">导出 VFX 视频 (MP4)</button>
+    <button id="vfxVideoExportButton" class="settingsButton" type="button">导出视频 (MP4)</button>
     <button id="vfxVideoExportFastButton" class="settingsButton" type="button">快速导出 (WebM，约实时)</button>
     <button id="testCaptureFrameButton" class="settingsButton" type="button">测试捕获单帧</button>
   </div>
@@ -126,11 +133,6 @@ export function initVideoExportUI(global: Global): () => void {
         return RESOLUTION_PRESETS[selected] || RESOLUTION_PRESETS['1080p'];
     };
 
-    const updateVfxVideoExportVisibility = () => {
-        // 始终展示导出区域，避免 Render 面板在某些 VFX 类型下看起来是空的
-        vfxVideoExportRow.classList.remove('hidden');
-    };
-
     const startExport = async (useFastExport: boolean) => {
         try {
             const resolution = getVideoResolution();
@@ -142,8 +144,10 @@ export function initVideoExportUI(global: Global): () => void {
             const frameRate = 30;
             const restartCheckEl = document.getElementById('restartAnimTrackCheck');
             const syncAnimTrack = restartCheckEl?.classList.contains('active') ?? false;
-            const fixVfxAtEndCheck = document.getElementById('fixVfxAtEndCheck') as HTMLInputElement | null;
-            const fixVfxAtEnd = fixVfxAtEndCheck?.checked ?? false;
+            const exportDurationEl = document.getElementById('exportDurationInput') as HTMLInputElement | null;
+            const totalDuration = Math.max(0.5, Math.min(600, parseFloat(exportDurationEl?.value || '') || DEFAULT_EXPORT_DURATION));
+            const includeVfxEl = document.getElementById('includeVfxCheck') as HTMLInputElement | null;
+            const includeVfx = includeVfxEl?.checked !== false;
             const videoSettings = {
                 startFrame: 0,
                 endFrame: 0,
@@ -157,7 +161,8 @@ export function initVideoExportUI(global: Global): () => void {
                 codec: 'h264' as const,
                 syncAnimTrack,
                 useFastExport,
-                fixVfxAtEnd
+                totalDuration,
+                includeVfx
             };
             let fileStream: FileSystemWritableFileStream | undefined;
             if ('showSaveFilePicker' in window) {
@@ -267,8 +272,6 @@ export function initVideoExportUI(global: Global): () => void {
     events.on('progressStart', onProgressStart);
     events.on('progressUpdate', onProgressUpdate);
     events.on('progressEnd', onProgressEnd);
-    events.on('revealType:changed', updateVfxVideoExportVisibility);
-    events.on('revealConfigChanged', updateVfxVideoExportVisibility);
 
     videoResolution?.addEventListener('change', updateCustomResolutionVisibility);
     vfxVideoExportButton?.addEventListener('click', onExportClick);
@@ -276,14 +279,11 @@ export function initVideoExportUI(global: Global): () => void {
     testCaptureFrameButton?.addEventListener('click', onTestCaptureClick);
 
     updateCustomResolutionVisibility();
-    updateVfxVideoExportVisibility();
 
     return function cleanupVideoExportUI() {
         events.off('progressStart', onProgressStart);
         events.off('progressUpdate', onProgressUpdate);
         events.off('progressEnd', onProgressEnd);
-        events.off('revealType:changed', updateVfxVideoExportVisibility);
-        events.off('revealConfigChanged', updateVfxVideoExportVisibility);
         videoResolution?.removeEventListener('change', updateCustomResolutionVisibility);
         vfxVideoExportButton?.removeEventListener('click', onExportClick);
         vfxVideoExportFastButton?.removeEventListener('click', onExportFastClick);

@@ -95,6 +95,13 @@ export class RevealController {
             this.setEffectTime(time);
         });
 
+        // 导出结束后恢复：仅 Timed 恢复特效时间；非 Timed 不碰特效时间（保持导出最后一帧状态，避免设回 t=0 导致黑屏）
+        events.on('effectTimeline:restoreAfterExport', (time: number) => {
+            if (this.timedEffects.includes(this.config.type)) {
+                this.setEffectTime(time);
+            }
+        });
+
         // 监听导出专用时间轴事件（离线导出用：不会驱动 UI slider）
         events.on('effectTimeline:setForExport', (time: number) => {
             this.setEffectTimeForExport(time);
@@ -1065,28 +1072,23 @@ export class RevealController {
     }
 
     /**
-     * 设置特效时间（用于时间轴拖动）
+     * 设置特效时间（用于时间轴拖动；仅 Timed 类型，避免非 Timed 被误触导致黑屏）
      */
     setEffectTime(time: number) {
         if (!this.currentScript || !this.timedEffects.includes(this.config.type)) {
             return;
         }
-        
         const totalDuration = this.config.totalDuration ?? 20.0;
         const clampedTime = Math.max(0, Math.min(time, totalDuration));
-        
-        // 如果脚本被禁用了（特效完成），需要重新启用它以便回放
+
         if (!this.currentScript.enabled) {
             this.currentScript.enabled = true;
-            // 重置计时状态，以便可以重新开始
             this.effectStartTime = null;
             this.effectEndTime = null;
             this.isTiming = false;
         }
-        
+
         this.currentScript.setEffectTime(clampedTime);
-        
-        // 触发事件更新 UI（交互用）
         this.global.events.fire('effectTime:changed', clampedTime);
     }
 
@@ -1130,16 +1132,15 @@ export class RevealController {
 
     /**
      * 设置播放/暂停状态（唯一来源：state.effectPaused）
+     * 对所有有 currentScript 的类型都同步 isPaused，否则导出后非 Timed 会一直暂停、VFX 不继续播。
      */
     setPlayPause(paused: boolean) {
-        if (!this.currentScript || !this.timedEffects.includes(this.config.type)) {
-            return;
-        }
+        if (!this.currentScript) return;
         this.effectPaused = paused;
         this.currentScript.isPaused = paused;
-
-        // 触发事件更新 UI
-        this.global.events.fire('effectPlayPause:changed', paused);
+        if (this.timedEffects.includes(this.config.type)) {
+            this.global.events.fire('effectPlayPause:changed', paused);
+        }
     }
 
     /**
