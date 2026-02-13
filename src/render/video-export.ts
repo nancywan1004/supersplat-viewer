@@ -894,7 +894,9 @@ export const initVideoExport = (global: Global): void => {
         const evenWidth = width % 2 === 0 ? width : width - 1;
         const evenHeight = height % 2 === 0 ? height : height - 1;
         const totalDuration = settings.totalDuration ?? global.settings?.revealEffect?.totalDuration ?? 20.0;
-        const includeVfx = settings.includeVfx !== false && !settings.fixVfxAtEnd;
+        const includeVfx = settings.includeVfx !== false;
+        // 不包含 VFX 时固定为「VFX 自身总时长」的最后一帧，这样整段视频都能看到完整效果状态（Timed/非 Timed 一致）
+        const vfxTotalDuration = global.settings?.revealEffect?.totalDuration ?? 20.0;
         const totalFrames = Math.ceil(totalDuration * frameRate);
         const frameInterval = 1.0 / frameRate;
 
@@ -905,7 +907,7 @@ export const initVideoExport = (global: Global): void => {
         for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
             if (encoder.state === 'closed' || (encoder as any)._errorOccurred) break;
             const frameTime = Math.min(frameIndex * frameInterval, totalDuration);
-            const effectTime = includeVfx ? frameTime : totalDuration;
+            const effectTime = includeVfx ? frameTime : vfxTotalDuration;
 
             const frameProfile: FrameProfile = {
                 seekAnim: 0, setTimelineAndUpdate: 0, waitMs: 0, renderFrame: 0, raf: 0,
@@ -913,7 +915,8 @@ export const initVideoExport = (global: Global): void => {
             };
             const tFrameStart = VFX_EXPORT_PROFILE ? performance.now() : 0;
 
-            if (syncAnimTrack) {
+            // 不包含 VFX 时也必须每帧驱动 anim，否则导出的视频里相机不动；包含 VFX 时按 syncAnimTrack 决定是否同步
+            if (syncAnimTrack || !includeVfx) {
                 const t0 = VFX_EXPORT_PROFILE ? performance.now() : 0;
                 seekAnimToTimeAndApply(global, frameTime);
                 if (VFX_EXPORT_PROFILE) frameProfile.seekAnim = performance.now() - t0;
@@ -1029,6 +1032,8 @@ export const initVideoExport = (global: Global): void => {
         const evenHeight = height % 2 === 0 ? height : height - 1;
         const totalDuration = videoSettings.totalDuration ?? global.settings?.revealEffect?.totalDuration ?? 20.0;
         const includeVfx = videoSettings.includeVfx !== false && !videoSettings.fixVfxAtEnd;
+        // 不包含 VFX 时固定为「VFX 自身总时长」的最后一帧，整段视频显示完整效果状态
+        const vfxTotalDuration = global.settings?.revealEffect?.totalDuration ?? 20.0;
         const totalFrames = Math.ceil(totalDuration * frameRate);
         const frameInterval = 1.0 / frameRate;
         const frameTimeMs = 1000 / frameRate;
@@ -1084,8 +1089,9 @@ export const initVideoExport = (global: Global): void => {
         for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
             const frameStart = performance.now();
             const frameTime = Math.min(frameIndex * frameInterval, totalDuration);
-            const effectTime = includeVfx ? frameTime : totalDuration;
-            if (syncAnimTrack) seekAnimToTimeAndApply(global, frameTime);
+            const effectTime = includeVfx ? frameTime : vfxTotalDuration;
+            // 不包含 VFX 时也必须每帧驱动 anim，否则导出的视频里相机不动
+            if (syncAnimTrack || !includeVfx) seekAnimToTimeAndApply(global, frameTime);
             await prepareAndRenderOneFrameToCanvas(global, effectTime);
             updateProgress(frameTime, totalDuration);
             const elapsed = performance.now() - frameStart;
@@ -1230,7 +1236,7 @@ export const initVideoExport = (global: Global): void => {
         const prevEffectTime = lastUiEffectTime;
         const prevEffectPaused = stateAny.effectPaused ?? false;
         const prevAnimationPaused = stateAny.animationPaused ?? false;
-        const includeVfx = videoSettings.includeVfx !== false && !videoSettings.fixVfxAtEnd;
+        const includeVfx = videoSettings.includeVfx !== false;
 
         // 导出时包含 VFX：在开始前重启特效，从 0 开始录制（Timed 与非 Timed 均适用）
         if (includeVfx) {
