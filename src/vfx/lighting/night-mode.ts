@@ -1,11 +1,15 @@
 import { Script, Color, Entity, Vec3, Mat4 } from 'playcanvas';
 import { GsplatShaderEffect } from '../gsplat-shader-effect';
-import { collectPointLights } from '../../light';
+import { collectPointLights, collectSpotLights } from '../../light';
 import type { Texture } from 'playcanvas';
 
 const shaderGLSL = /* glsl */`
 uniform vec3 uSpherePositions[10];
 uniform vec3 uSphereColors[10];
+uniform vec3 uSpotPositions[10];
+uniform vec3 uSpotDirections[10];
+uniform vec3 uSpotColors[10];
+uniform vec4 uSpotParams[10];  // x=innerConeRad, y=outerConeRad, z=range, w=enabled
 uniform float uNightFade;
 uniform vec3 uNightAmbient;
 uniform mat4 uModelMatrix;
@@ -26,21 +30,39 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         return;
     }
 
-    // Calculate world position from model center
     vec4 worldPos = uModelMatrix * vec4(center, 1.0);
     worldPos /= worldPos.w;
+    vec3 wpos = worldPos.xyz;
 
-    // Calculate lighting from spheres
     vec3 sum = vec3(0.0);
     for (int i = 0; i < 10; ++i) {
         vec3 pos = uSpherePositions[i];
         vec3 clr = uSphereColors[i];
         if (length(pos) > 0.001) {
-            float dist = length(pos - worldPos.xyz);
+            float dist = length(pos - wpos);
             if (dist > 0.001) {
                 sum += g2l(clr) * 1.1 / (dist * dist);
             }
         }
+    }
+    for (int i = 0; i < 10; ++i) {
+        if (uSpotParams[i].w < 0.5) continue;
+        vec3 spotPos = uSpotPositions[i];
+        vec3 spotDir = uSpotDirections[i];
+        vec3 spotClr = uSpotColors[i];
+        float range = uSpotParams[i].z;
+        float innerCos = cos(uSpotParams[i].x);
+        float outerCos = cos(uSpotParams[i].y);
+        float cosOuter = min(innerCos, outerCos);
+        float cosInner = max(innerCos, outerCos);
+        vec3 toPoint = wpos - spotPos;
+        float dist = length(toPoint);
+        if (dist >= range || dist < 0.001) continue;
+        vec3 L = toPoint / dist;
+        float cosTheta = dot(L, spotDir);
+        if (cosTheta <= cosOuter) continue;
+        float spotAtt = (cosTheta >= cosInner) ? 1.0 : smoothstep(cosOuter, cosInner, cosTheta);
+        sum += g2l(spotClr) * spotAtt * 1.1 / (dist * dist);
     }
 
     vec3 linearColor = g2l(color.rgb);
@@ -53,6 +75,10 @@ void modifySplatColor(vec3 center, inout vec4 color) {
 const shaderGLSLBloomBrush = /* glsl */`
 uniform vec3 uSpherePositions[10];
 uniform vec3 uSphereColors[10];
+uniform vec3 uSpotPositions[10];
+uniform vec3 uSpotDirections[10];
+uniform vec3 uSpotColors[10];
+uniform vec4 uSpotParams[10];
 uniform float uNightFade;
 uniform vec3 uNightAmbient;
 uniform mat4 uModelMatrix;
@@ -75,8 +101,6 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         return;
     }
 
-    // Bloom Brush 模式：涂抹区域内亮部跳过 night mode（参与 bloom），暗部应用 night mode
-    // NDC：y=-1 底部，y=1 顶部；mask 纹理 v=0 底部 v=1 顶部（与 BloomBrushPainter 绘制一致），无需 Y 翻转
     if (uBloomBrushActive > 0.5) {
         vec4 clipPos = uModelViewProj * vec4(center, 1.0);
         vec3 ndc = clipPos.xyz / clipPos.w;
@@ -92,17 +116,37 @@ void modifySplatColor(vec3 center, inout vec4 color) {
 
     vec4 worldPos = uModelMatrix * vec4(center, 1.0);
     worldPos /= worldPos.w;
+    vec3 wpos = worldPos.xyz;
 
     vec3 sum = vec3(0.0);
     for (int i = 0; i < 10; ++i) {
         vec3 pos = uSpherePositions[i];
         vec3 clr = uSphereColors[i];
         if (length(pos) > 0.001) {
-            float dist = length(pos - worldPos.xyz);
+            float dist = length(pos - wpos);
             if (dist > 0.001) {
                 sum += g2l(clr) * 1.1 / (dist * dist);
             }
         }
+    }
+    for (int i = 0; i < 10; ++i) {
+        if (uSpotParams[i].w < 0.5) continue;
+        vec3 spotPos = uSpotPositions[i];
+        vec3 spotDir = uSpotDirections[i];
+        vec3 spotClr = uSpotColors[i];
+        float range = uSpotParams[i].z;
+        float innerCos = cos(uSpotParams[i].x);
+        float outerCos = cos(uSpotParams[i].y);
+        float cosOuter = min(innerCos, outerCos);
+        float cosInner = max(innerCos, outerCos);
+        vec3 toPoint = wpos - spotPos;
+        float dist = length(toPoint);
+        if (dist >= range || dist < 0.001) continue;
+        vec3 L = toPoint / dist;
+        float cosTheta = dot(L, spotDir);
+        if (cosTheta <= cosOuter) continue;
+        float spotAtt = (cosTheta >= cosInner) ? 1.0 : smoothstep(cosOuter, cosInner, cosTheta);
+        sum += g2l(spotClr) * spotAtt * 1.1 / (dist * dist);
     }
 
     vec3 linearColor = g2l(color.rgb);
@@ -114,25 +158,21 @@ void modifySplatColor(vec3 center, inout vec4 color) {
 const shaderWGSL = /* wgsl */`
 uniform uSpherePositions: array<vec3f, 10>;
 uniform uSphereColors: array<vec3f, 10>;
+uniform uSpotPositions: array<vec3f, 10>;
+uniform uSpotDirections: array<vec3f, 10>;
+uniform uSpotColors: array<vec3f, 10>;
+uniform uSpotParams: array<vec4f, 10>;
 uniform uNightFade: f32;
 uniform uNightAmbient: vec3f;
 uniform uModelMatrix: mat4x4f;
 
-// linear/gamma conversion
-fn l2g(c: vec3f) -> vec3f {
-    return pow(c, vec3f(1.0 / 2.2));
-}
-
-fn g2l(c: vec3f) -> vec3f {
-    return pow(c, vec3f(2.2));
-}
+fn l2g(c: vec3f) -> vec3f { return pow(c, vec3f(1.0 / 2.2)); }
+fn g2l(c: vec3f) -> vec3f { return pow(c, vec3f(2.2)); }
 
 fn modifySplatCenter(center: ptr<function, vec3f>) {
-    // Night mode doesn't modify center position
 }
 
 fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
-    // Night mode doesn't modify rotation/scale
 }
 
 fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
@@ -140,25 +180,43 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         return;
     }
 
-    // Calculate world position from model center
-    // Use the model matrix uniform to transform to world space
     let worldPos = uniform.uModelMatrix * vec4f(center, 1.0);
-    let worldPos3 = worldPos.xyz / worldPos.w;
+    let wpos = worldPos.xyz / worldPos.w;
 
-    // Calculate lighting from spheres
     var sum = vec3f(0.0);
     for (var i = 0u; i < 10u; i++) {
         let pos = uniform.uSpherePositions[i];
         let clr = uniform.uSphereColors[i];
-        if (length(pos) > 0.001) { // Only process valid spheres
-            let dist = length(pos - worldPos3);
+        if (length(pos) > 0.001) {
+            let dist = length(pos - wpos);
             if (dist > 0.001) {
                 sum = sum + g2l(clr) * 1.1 / (dist * dist);
             }
         }
     }
+    for (var i = 0u; i < 10u; i++) {
+        if (uniform.uSpotParams[i].w < 0.5) { continue; }
+        let spotPos = uniform.uSpotPositions[i];
+        let spotDir = uniform.uSpotDirections[i];
+        let spotClr = uniform.uSpotColors[i];
+        let range = uniform.uSpotParams[i].z;
+        let innerCos = cos(uniform.uSpotParams[i].x);
+        let outerCos = cos(uniform.uSpotParams[i].y);
+        let cosOuter = min(innerCos, outerCos);
+        let cosInner = max(innerCos, outerCos);
+        let toPoint = wpos - spotPos;
+        let dist = length(toPoint);
+        if (dist >= range || dist < 0.001) { continue; }
+        let L = toPoint / dist;
+        let cosTheta = dot(L, spotDir);
+        if (cosTheta <= cosOuter) { continue; }
+        var spotAtt = 1.0;
+        if (cosTheta < cosInner) {
+            spotAtt = smoothstep(cosOuter, cosInner, cosTheta);
+        }
+        sum = sum + g2l(spotClr) * spotAtt * 1.1 / (dist * dist);
+    }
 
-    // Blend in linear space
     let linearColor = g2l((*color).rgb);
     let nightColor = g2l(uniform.uNightAmbient) + sum;
     (*color).rgb = l2g(linearColor * mix(vec3f(1.0), nightColor, uniform.uNightFade));
@@ -169,6 +227,10 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
 const shaderWGSLBloomBrush = /* wgsl */`
 uniform uSpherePositions: array<vec3f, 10>;
 uniform uSphereColors: array<vec3f, 10>;
+uniform uSpotPositions: array<vec3f, 10>;
+uniform uSpotDirections: array<vec3f, 10>;
+uniform uSpotColors: array<vec3f, 10>;
+uniform uSpotParams: array<vec4f, 10>;
 uniform uNightFade: f32;
 uniform uNightAmbient: vec3f;
 uniform uModelMatrix: mat4x4f;
@@ -206,18 +268,40 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     }
 
     let worldPos = uniform.uModelMatrix * vec4f(center, 1.0);
-    let worldPos3 = worldPos.xyz / worldPos.w;
+    let wpos = worldPos.xyz / worldPos.w;
 
     var sum = vec3f(0.0);
     for (var i = 0u; i < 10u; i++) {
         let pos = uniform.uSpherePositions[i];
         let clr = uniform.uSphereColors[i];
         if (length(pos) > 0.001) {
-            let dist = length(pos - worldPos3);
+            let dist = length(pos - wpos);
             if (dist > 0.001) {
                 sum = sum + g2l(clr) * 1.1 / (dist * dist);
             }
         }
+    }
+    for (var i = 0u; i < 10u; i++) {
+        if (uniform.uSpotParams[i].w < 0.5) { continue; }
+        let spotPos = uniform.uSpotPositions[i];
+        let spotDir = uniform.uSpotDirections[i];
+        let spotClr = uniform.uSpotColors[i];
+        let range = uniform.uSpotParams[i].z;
+        let innerCos = cos(uniform.uSpotParams[i].x);
+        let outerCos = cos(uniform.uSpotParams[i].y);
+        let cosOuter = min(innerCos, outerCos);
+        let cosInner = max(innerCos, outerCos);
+        let toPoint = wpos - spotPos;
+        let dist = length(toPoint);
+        if (dist >= range || dist < 0.001) { continue; }
+        let L = toPoint / dist;
+        let cosTheta = dot(L, spotDir);
+        if (cosTheta <= cosOuter) { continue; }
+        var spotAtt = 1.0;
+        if (cosTheta < cosInner) {
+            spotAtt = smoothstep(cosOuter, cosInner, cosTheta);
+        }
+        sum = sum + g2l(spotClr) * spotAtt * 1.1 / (dist * dist);
     }
 
     let linearColor = g2l((*color).rgb);
@@ -563,21 +647,18 @@ class NightMode extends GsplatShaderEffect {
             this.materialsApplied.clear();
             this.app.renderNextFrame = true;
         }
-        
-        // If we're transitioning to night mode and shaders aren't applied, apply them
-        // Apply as soon as nightMode is true, not waiting for fade to start
+
         if (this.nightMode && this.materialsApplied.size === 0 && this.splat?.gsplat) {
             this.applyShaders();
-            // When enabling night mode, if manual control is not active, initialize slider with current fade
             if (!this.manualFadeControl) {
-                // Fire event to sync slider with current nightFade value
                 this.app.fire('nightFade:changed', this.nightFade);
             }
         }
 
-        // 从场景中的 Light 实体（type='point'）收集点光源，上限 10 个
+        // 从场景中的 Light 实体收集点光源与聚光灯，上限各 10 个（供高斯 night mode 打光）
         const global = (this.app as any).__global;
         const pointLights = global ? collectPointLights(global) : [];
+        const spotLights = global ? collectSpotLights(global) : [];
         const positions: number[] = [];
         const colors: number[] = [];
         const scale = this.lightingIntensity;
@@ -593,6 +674,29 @@ class NightMode extends GsplatShaderEffect {
                     pl.color.g * pl.intensity * scale,
                     pl.color.b * pl.intensity * scale
                 );
+            }
+        }
+
+        const spotPositions: number[] = [];
+        const spotDirections: number[] = [];
+        const spotColors: number[] = [];
+        const spotParams: number[] = [];
+        for (let i = 0; i < 10; ++i) {
+            const sl = spotLights[i];
+            if (!sl) {
+                spotPositions.push(0, 0, 0);
+                spotDirections.push(0, 0, -1);
+                spotColors.push(0, 0, 0);
+                spotParams.push(0, 0, 0, 0);
+            } else {
+                spotPositions.push(sl.position.x, sl.position.y, sl.position.z);
+                spotDirections.push(sl.direction.x, sl.direction.y, sl.direction.z);
+                spotColors.push(
+                    sl.color.r * sl.intensity * scale,
+                    sl.color.g * sl.intensity * scale,
+                    sl.color.b * sl.intensity * scale
+                );
+                spotParams.push(sl.innerConeAngle, sl.outerConeAngle, sl.range, 1);
             }
         }
 
@@ -633,6 +737,10 @@ class NightMode extends GsplatShaderEffect {
         if (this.materialsApplied.size > 0) {
             this.setUniform('uSpherePositions[0]', positions);
             this.setUniform('uSphereColors[0]', colors);
+            this.setUniform('uSpotPositions[0]', spotPositions);
+            this.setUniform('uSpotDirections[0]', spotDirections);
+            this.setUniform('uSpotColors[0]', spotColors);
+            this.setUniform('uSpotParams[0]', spotParams);
             this.setUniform('uNightFade', this.nightFade);
             this.setUniform('uNightAmbient', [
                 this.nightAmbient.r,
@@ -698,6 +806,45 @@ class NightMode extends GsplatShaderEffect {
     setNightMode(enabled: boolean) {
         this.nightMode = enabled;
         this.enabled = enabled;
+    }
+
+    /**
+     * Set night fade (0–1). Enables manual control so fade is not auto-animated.
+     */
+    setNightFade(value: number) {
+        const clamped = Math.max(0, Math.min(1, value));
+        this.manualFadeControl = true;
+        this.nightFade = clamped;
+        if (this.materialsApplied.size > 0) {
+            this.updateEffect(this.effectTime, 0);
+        }
+        this.app.fire('nightFade:changed', this.nightFade);
+    }
+
+    /**
+     * Apply night mode state from settings (e.g. after load). Fires events so UI syncs.
+     */
+    applyFromSettings(config: { enabled: boolean; fade?: number }) {
+        console.log('applyFromSettings', config);
+        if (!config || typeof config.enabled !== 'boolean') return;
+        this.nightMode = config.enabled;
+        this.enabled = config.enabled;
+        if (this.nightMode) {
+            this.manualFadeControl = true;
+            const fade = typeof config.fade === 'number' ? Math.max(0, Math.min(1, config.fade)) : 0.95;
+            this.nightFade = fade;
+            if (this.splat?.gsplat && this.materialsApplied.size === 0) {
+                this.applyShaders();
+            }
+            if (this.materialsApplied.size > 0) {
+                this.updateEffect(this.effectTime, 0);
+            }
+        } else {
+            this.nightFade = 0;
+            this.manualFadeControl = false;
+        }
+        this.app.fire('nightMode:changed', this.nightMode);
+        this.app.fire('nightFade:changed', this.nightFade);
     }
 
     /** 是否开启夜间模式（供 Viewer 判断是否需与 Bloom Brush 合成） */

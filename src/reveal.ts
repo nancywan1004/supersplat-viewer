@@ -61,7 +61,7 @@ export class RevealController {
         // Check if revealEffect is empty or has no type
         const hasRevealEffect = settings.revealEffect && 
                                 Object.keys(settings.revealEffect).length > 0 && 
-                                settings.revealEffect.type;
+                                settings.revealEffect.type !== 'none';
         
         // Always initialize (VFX effects don't require revealEffect in settings)
         this.config = {
@@ -74,7 +74,7 @@ export class RevealController {
         console.log('RevealController initialized with config:', this.config);
         
         // Set state to indicate reveal effect is available
-        state.hasRevealEffect = !!hasRevealEffect || true; // Always available for VFX effects
+        state.hasRevealEffect = !!hasRevealEffect;
         state.vfxType = this.config.type;
         state.vfxActive = false;
 

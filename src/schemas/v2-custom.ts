@@ -40,18 +40,52 @@ type TransformFrame = {
 
 /**
  * Lighting 配置（自定义扩展字段）
- * - 用于 settings.json 中配置点光源等
+ * - 用于 settings.json 中配置点光源、平行光等
  */
 type PointLightConfig = {
     position: [number, number, number],
     color: [number, number, number],
     intensity: number,
-    /** 是否启用该光源，默认 true；设为 false 可临时关闭 */
+    /** 是否启用该光源，默认 true */
+    enabled?: boolean
+};
+
+/** 平行光配置（主方向光/太阳，无位置概念，仅方向；用于阴影等） */
+type DirectionalLightConfig = {
+    type: 'directional',
+    /** 仅用于锥体可视化与阴影相机参考，默认 [0, 8, 8] */
+    position?: [number, number, number],
+    color: [number, number, number],
+    intensity: number,
+    pitch?: number,
+    yaw?: number,
+    castShadows?: boolean,
+    shadowBias?: number,
+    enabled?: boolean
+};
+
+/** 聚光灯配置：有位置 + 方向，局部锥形照明 */
+type SpotLightConfig = {
+    type: 'spot',
+    position: [number, number, number],
+    color: [number, number, number],
+    intensity: number,
+    /** 俯仰角（度），默认 -45 */
+    pitch?: number,
+    /** 偏航角（度），默认 0 */
+    yaw?: number,
+    /** 内锥角（度），默认 25 */
+    innerConeAngle?: number,
+    /** 外锥角（度），默认 45 */
+    outerConeAngle?: number,
+    /** 照射范围（世界单位），默认 10 */
+    range?: number,
     enabled?: boolean
 };
 
 type LightingSettings = {
-    lights: PointLightConfig[]
+    /** 点光源 + 平行光（最多一个） + 聚光灯 */
+    lights: (PointLightConfig | DirectionalLightConfig | SpotLightConfig)[]
 };
 
-export type { RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, LightingSettings };
+export type { RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings };

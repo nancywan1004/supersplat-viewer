@@ -45,7 +45,8 @@
                 aa: url.searchParams.has('aa'),
                 noreveal: url.searchParams.has('noreveal'),
                 noBottomUI: false,  // url.searchParams.has('noBottomUI')
-                splatMeshUrl
+                splatMeshUrl,
+                allowEditMode: !url.searchParams.has('noEditMode')
             };
 
             window.sse = {
@@ -97,6 +98,46 @@
         <!-- VFX 进度覆盖层与 Reveal/导出 UI 由 reveal-ui、video-export-ui 组件在 JS 中创建 -->
 
         <div id="ui">
+            <!-- 右上角：进入/退出编辑模式 -->
+            <div id="editModeStrip" class="edit-mode-strip">
+                <button type="button" id="editModeBtn" class="edit-mode-btn">编辑</button>
+            </div>
+            <!-- 编辑模式右侧栏（仅 edit 模式显示） -->
+            <div id="rightToolBar" class="right-tool-bar hidden">
+                <div id="rightToolBarInner" class="right-tool-bar-inner">
+                    <div class="right-tool-bar-header">
+                        <button type="button" id="saveSettingsBtn" class="save-settings-btn">保存配置</button>
+                    </div>
+                    <div class="settingsRow submenuHeader" id="vfxSubmenuHeader" role="button" tabindex="0">
+                        <span class="submenuArrow" id="vfxSubmenuArrow">▶</span>
+                        <span>VFX</span>
+                    </div>
+                    <div id="vfxSubpanel" class="subpanel hidden">
+                        <div id="revealPanelContainer"></div>
+                    </div>
+                    <div class="settingsRow submenuHeader" id="lightingSubmenuHeader" role="button" tabindex="0">
+                        <span class="submenuArrow" id="lightingSubmenuArrow">▶</span>
+                        <span>Lighting</span>
+                    </div>
+                    <div id="lightingSubpanel" class="subpanel hidden">
+                        <div id="lightingPanelContainer"></div>
+                    </div>
+                    <div class="settingsRow submenuHeader" id="postEffectSubmenuHeader" role="button" tabindex="0">
+                        <span class="submenuArrow" id="postEffectSubmenuArrow">▶</span>
+                        <span>postEffect</span>
+                    </div>
+                    <div id="postEffectSubpanel" class="subpanel hidden">
+                        <div id="postEffectPanelContainer"></div>
+                    </div>
+                    <div class="settingsRow submenuHeader" id="renderSubmenuHeader" role="button" tabindex="0">
+                        <span class="submenuArrow" id="renderSubmenuArrow">▶</span>
+                        <span>Render</span>
+                    </div>
+                    <div id="renderSubpanel" class="subpanel hidden">
+                        <div id="renderPanelContainer"></div>
+                    </div>
+                </div>
+            </div>
             <div id="poster"></div>
 
             <!-- Loading Indicator -->
@@ -206,7 +247,7 @@
                 </div>
             </div>
 
-            <!-- Settings Panel -->
+            <!-- Settings Panel（保留项：HQ/LQ、相机路径/边界、天空盒、Frame、Reset、获取相机信息） -->
             <div id="settingsPanel" class="hidden">
                 <div class="settingsRow">
                     <div id="hqCheck" class="checkMark">✓</div>
@@ -225,43 +266,15 @@
                     <div id="cameraBoundsOption">Show Camera BoundingBox</div>
                 </div>
                 <div class="divider"></div>
-                <div class="settingsRow submenuHeader" id="vfxSubmenuHeader" role="button" tabindex="0">
-                    <span class="submenuArrow" id="vfxSubmenuArrow">▶</span>
-                    <span>VFX</span>
-                </div>
-                <div id="vfxSubpanel" class="subpanel hidden">
-                    <div id="revealPanelContainer"></div>
-                </div>
-                <div class="settingsRow submenuHeader" id="lightingSubmenuHeader" role="button" tabindex="0">
-                    <span class="submenuArrow" id="lightingSubmenuArrow">▶</span>
-                    <span>Lighting</span>
-                </div>
-                <div id="lightingSubpanel" class="subpanel hidden">
-                    <div id="skyboxRow" class="settingsRow">
-                        <label for="skyboxSelect" style="margin-right: 8px;">Skybox:</label>
-                        <select id="skyboxSelect">
-                            <option value="">None</option>
-                            <option value="/assets/skyboxes/晴天.png">晴天</option>
-                            <option value="/assets/skyboxes/多云.png">多云</option>
-                            <option value="/assets/skyboxes/阴天.png">阴天</option>
-                            <option value="/assets/skyboxes/霞光.png">霞光</option>
-                        </select>
-                    </div>
-                    <div id="lightingPanelContainer"></div>
-                </div>
-                <div class="settingsRow submenuHeader" id="postEffectSubmenuHeader" role="button" tabindex="0">
-                    <span class="submenuArrow" id="postEffectSubmenuArrow">▶</span>
-                    <span>postEffect</span>
-                </div>
-                <div id="postEffectSubpanel" class="subpanel hidden">
-                    <div id="postEffectPanelContainer"></div>
-                </div>
-                <div class="settingsRow submenuHeader" id="renderSubmenuHeader" role="button" tabindex="0">
-                    <span class="submenuArrow" id="renderSubmenuArrow">▶</span>
-                    <span>Render</span>
-                </div>
-                <div id="renderSubpanel" class="subpanel hidden">
-                    <div id="renderPanelContainer"></div>
+                <div id="skyboxRow" class="settingsRow">
+                    <label for="skyboxSelect" style="margin-right: 8px;">Skybox:</label>
+                    <select id="skyboxSelect">
+                        <option value="">None</option>
+                        <option value="/assets/skyboxes/晴天.png">晴天</option>
+                        <option value="/assets/skyboxes/多云.png">多云</option>
+                        <option value="/assets/skyboxes/阴天.png">阴天</option>
+                        <option value="/assets/skyboxes/霞光.png">霞光</option>
+                    </select>
                 </div>
                 <div class="divider"></div>
                 <div class="settingsRow">

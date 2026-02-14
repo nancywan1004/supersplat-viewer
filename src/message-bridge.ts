@@ -22,10 +22,13 @@ type PostMessagePayload =
     | {
         type: 'ANIMATION_PLAY_PAUSE';
         message?: string;
-    };
+    }
+    | { type: 'EDIT_MODE_ENTER'; message?: string }
+    | { type: 'EDIT_MODE_EXIT'; message?: string }
+    | { type: 'EDIT_MODE_SET'; message?: string; value: boolean };
 
 const initPostMessageBridge = (global: Global) => {
-    const { state, events, app } = global;
+    const { state, events, config } = global;
 
     const handleMessage = async (event: MessageEvent) => {
         const payload = event.data as PostMessagePayload;
@@ -57,6 +60,18 @@ const initPostMessageBridge = (global: Global) => {
         case 'ANIMATION_PLAY_PAUSE':
             events.fire('inputEvent', 'playPause');
             break;
+        case 'EDIT_MODE_ENTER':
+            if (config.allowEditMode !== false) {
+                state.editMode = true;
+            }
+            break;
+        case 'EDIT_MODE_EXIT':
+            state.editMode = false;
+            break;
+        case 'EDIT_MODE_SET':
+            if (payload.value === true && config.allowEditMode === false) break;
+            state.editMode = !!payload.value;
+            break;
         default:
             // 交给其他监听者处理
             break;
@@ -82,6 +97,15 @@ const initPostMessageBridge = (global: Global) => {
         window.parent.postMessage({
             type: 'VIEWER_READY',
             message: 'viewer initialized and ready'
+        }, '*');
+    });
+
+    // 监听编辑模式变化，通知父页
+    events.on('editMode:changed', (value: boolean) => {
+        window.parent.postMessage({
+            type: 'EDIT_MODE_CHANGED',
+            message: 'edit mode changed',
+            value
         }, '*');
     });
 };

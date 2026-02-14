@@ -25,6 +25,8 @@ type Config = {
     showCameraPathVisualizer?: boolean;         // show camera path visualization
     /** 接影几何 GLB 的 URL（如 /assets/mesh/gabriel.glb），由 urlParam splatMesh 传入；无则用平面 */
     splatMeshUrl?: string;
+    /** 是否允许进入编辑模式（默认 true）；设为 false 时不显示编辑按钮且不响应进入编辑的 postMessage */
+    allowEditMode?: boolean;
 };
 
 // observable state that can change at runtime
@@ -49,6 +51,7 @@ type State = {
     vfxActive: boolean;                        // VFX effect active state
     vfxType: 'none' | 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch';  // current effect type (includes reveal and VFX)
     syncAnimTrackOnExport?: boolean;           // 导出 VFX 视频时是否同步重播动画轨道（由 reveal-ui 设置，video-export-ui 读取）
+    editMode: boolean;                         // true = 编辑模式（显示 rightToolBar），false = 观看模式
 };
 
 type Global = {

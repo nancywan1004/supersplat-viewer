@@ -3,6 +3,7 @@ import { EventHandler } from 'playcanvas';
 import { Tooltip } from '../tooltip';
 import { Global } from '../types';
 import { isLodMetaFile } from '../loaders/lod-loader';
+import { serializeExperienceSettings } from '../settings-serialize';
 import { initRevealUI } from './components/reveal-ui';
 import { initVideoExportUI } from './components/video-export-ui';
 import { initLightingUI } from './components/lighting-ui';
@@ -163,6 +164,7 @@ const initUI = (global: Global) => {
     const dom = [
         'ui',
         'controlsWrap',
+        'editModeStrip', 'editModeBtn', 'rightToolBar', 'saveSettingsBtn',
         'arMode', 'vrMode',
         'enterFullscreen', 'exitFullscreen',
         'info', 'infoPanel', 'desktopTab', 'touchTab', 'desktopInfoPanel', 'touchInfoPanel',
@@ -420,6 +422,42 @@ const initUI = (global: Global) => {
 
     arChanged();
     vrChanged();
+
+    // 编辑模式：右上角按钮与右侧栏
+    const updateEditModeUI = () => {
+        const inEdit = state.editMode;
+        if (dom.rightToolBar) {
+            dom.rightToolBar.classList.toggle('hidden', !inEdit);
+        }
+        if (dom.editModeBtn) {
+            dom.editModeBtn.textContent = inEdit ? '退出编辑' : '编辑';
+        }
+    };
+    if (config.allowEditMode === false) {
+        if (dom.editModeStrip) {
+            dom.editModeStrip.classList.add('hidden');
+        }
+    } else if (dom.editModeBtn) {
+        dom.editModeBtn.addEventListener('click', () => {
+            state.editMode = !state.editMode;
+        });
+        events.on('editMode:changed', updateEditModeUI);
+        updateEditModeUI();
+    }
+
+    // 保存配置按钮：序列化后触发浏览器下载到本地，并 postMessage 回传父页
+    if (dom.saveSettingsBtn) {
+        dom.saveSettingsBtn.addEventListener('click', () => {
+            const payload = serializeExperienceSettings(global);
+            const jsonString = JSON.stringify(payload, null, 2);
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([jsonString], { type: 'application/json' }));
+            a.download = 'settings.json';
+            a.click();
+            URL.revokeObjectURL(a.href);
+            window.parent.postMessage({ type: 'SETTINGS_UPDATED', message: 'settings updated', payload: jsonString }, '*');
+        });
+    }
 
     // Reveal / VFX、Lighting 由独立组件管理（带生命周期，需卸载时调用返回的 cleanup）
     const cleanupRevealUI = initRevealUI(global);

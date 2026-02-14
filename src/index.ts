@@ -207,6 +207,7 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         showCameraBoundingBox: false,
         vfxActive: false,
         vfxType: 'none' as 'none' | 'grow' | 'pieces-recover' | 'perlin-wave' | 'disintegrate' | 'integrate' | 'growth-wave',
+        editMode: false,
 
         // 导出 VFX 视频时的锁，防止实时更新干扰离线渲染
         isExportingVfxVideo: false,

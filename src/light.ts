@@ -1,15 +1,39 @@
 import { Color, Entity, Vec3, StandardMaterial, TEXTUREPROJECTION_CUBE } from 'playcanvas';
 import type { Global } from './types';
+import type { DirectionalLightConfig, SpotLightConfig } from './schemas/v2';
 
 const MAX_POINT_LIGHTS = 10;
+const MAX_SPOT_LIGHTS = 10;
+
+const isDirectionalLightConfig = (cfg: any): cfg is DirectionalLightConfig =>
+    cfg && cfg.type === 'directional';
+
+const isSpotLightConfig = (cfg: any): cfg is SpotLightConfig =>
+    cfg && cfg.type === 'spot';
 
 /** 点光源在场景中的可视化球体默认半径（世界单位） */
 const LIGHT_VISUAL_RADIUS = 0.25;
+
+/** 平行光实体默认位置（用于主方向光） */
+const DIRECTIONAL_DEFAULT_POSITION: [number, number, number] = [0, 8, 8];
+
+/** 聚光灯锥体可视化缩放（放大以便在大场景中易见） */
+const SPOT_VISUAL_SCALE = 1.2;
 
 export type PointLightInfo = {
     position: Vec3;
     color: Color;
     intensity: number;
+};
+
+export type SpotLightInfo = {
+    position: Vec3;
+    direction: Vec3;  // 归一化，照射方向（实体 forward = -Z）
+    color: Color;
+    intensity: number;
+    innerConeAngle: number;  // 弧度
+    outerConeAngle: number;  // 弧度
+    range: number;
 };
 
 /**
@@ -32,6 +56,42 @@ const collectPointLights = (global: Global): PointLightInfo[] => {
         e.children.forEach(visit);
     };
     app.root.children.forEach(visit);
+    return result;
+};
+
+/**
+ * 从场景中收集聚光灯信息（spotLights 容器下 type === 'spot' 的实体），上限 10 个。
+ * 供 night-mode 等 shader 对高斯施加聚光照明。
+ */
+const collectSpotLights = (global: Global): SpotLightInfo[] => {
+    const { app } = global;
+    const result: SpotLightInfo[] = [];
+    const container = app.root.findByName('spotLights') as Entity | null;
+    if (!container) return result;
+    const zAxis = new Vec3();
+    for (let i = 0; i < container.children.length && result.length < MAX_SPOT_LIGHTS; i++) {
+        const e = container.children[i] as Entity;
+        if (!e.name.startsWith('spotLight_') || e.name === 'spotLight_visual') continue;
+        if (!e.light || (e.light as any).type !== 'spot' || !e.light.enabled) continue;
+        const position = e.getPosition().clone();
+        e.getWorldTransform().getZ(zAxis);
+        const direction = new Vec3(-zAxis.x, -zAxis.y, -zAxis.z).normalize();
+        let innerRad = ((e.light as any).innerConeAngle ?? 25) * (Math.PI / 180);
+        let outerRad = ((e.light as any).outerConeAngle ?? 45) * (Math.PI / 180);
+        if (innerRad > outerRad) {
+            [innerRad, outerRad] = [outerRad, innerRad];
+        }
+        const range = (e.light as any).range ?? 10;
+        result.push({
+            position,
+            direction,
+            color: new Color(e.light.color.r, e.light.color.g, e.light.color.b),
+            intensity: e.light.intensity ?? 1,
+            innerConeAngle: innerRad,
+            outerConeAngle: outerRad,
+            range
+        });
+    }
     return result;
 };
 
@@ -77,12 +137,208 @@ const updateLightVisual = (lightEntity: Entity, r: number, g: number, b: number)
 };
 
 /**
- * 根据 settings.lighting 创建点光源实体（Light 组件 type='point'），最多 10 个
+ * 为聚光灯实体添加锥体可视化。锥尖指向照射方向（实体 -Z = forward），
+ * 与「Show lights in scene」联动。锥体几何与 inner/outer 角无关，仅表示方向。
+ */
+const addSpotLightVisual = (app: Global['app'], spotEntity: Entity, r: number, g: number, b: number): void => {
+    let visual = spotEntity.findByName('spotLight_visual') as Entity | null;
+    if (visual) return;
+    const mat = new StandardMaterial();
+    mat.diffuse.set(r, g, b);
+    mat.emissive.set(r, g, b);
+    mat.emissiveIntensity = 0.15;
+    mat.update();
+    visual = new Entity('spotLight_visual');
+    visual.addComponent('render', { type: 'cone', material: mat });
+    const rc = visual.render;
+    if (rc) {
+        rc.castShadows = false;
+        rc.receiveShadows = false;
+        rc.enabled = !!(app as any).__pointLightsVisualVisible;
+    }
+    visual.setLocalPosition(0, 0, -SPOT_VISUAL_SCALE);
+    visual.setLocalEulerAngles(-90, 0, 0);
+    visual.setLocalScale(SPOT_VISUAL_SCALE, SPOT_VISUAL_SCALE, SPOT_VISUAL_SCALE * 2);
+    spotEntity.addChild(visual);
+    (spotEntity as any).__spotVisualMaterial = mat;
+    (spotEntity as any).__spotVisualEntity = visual;
+};
+
+const updateSpotLightVisual = (spotEntity: Entity, r: number, g: number, b: number): void => {
+    const mat = (spotEntity as any).__spotVisualMaterial as StandardMaterial | undefined;
+    if (mat) {
+        mat.diffuse.set(r, g, b);
+        mat.emissive.set(r, g, b);
+        mat.update();
+    }
+};
+
+/**
+ * 从 settings.lighting.lights 应用平行光到主方向光实体（name='light'）。
+ * 若有 type==='directional' 的项则用其配置；否则用默认值。
+ */
+const applyDirectionalLightFromSettings = (global: Global): void => {
+    const { app, settings } = global;
+    const configs = settings.lighting?.lights;
+    let cfg = configs && Array.isArray(configs) ? configs.find(isDirectionalLightConfig) : undefined;
+    const shadow = (settings as any).postEffectSettings?.shadow;
+    if (!cfg && shadow && (typeof shadow.lightPitch === 'number' || typeof shadow.lightYaw === 'number')) {
+        cfg = {
+            type: 'directional',
+            position: DIRECTIONAL_DEFAULT_POSITION,
+            color: [1, 1, 1],
+            intensity: 1.5,
+            pitch: typeof shadow.lightPitch === 'number' ? shadow.lightPitch : 35,
+            yaw: typeof shadow.lightYaw === 'number' ? shadow.lightYaw : 45,
+            shadowBias: typeof shadow.shadowBias === 'number' ? shadow.shadowBias : 0.05,
+            castShadows: true,
+            enabled: true
+        };
+    }
+
+    let lightEntity = app.root.findByName('light') as Entity | null;
+    if (!lightEntity) {
+        lightEntity = new Entity('light');
+        lightEntity.addComponent('light', {
+            type: 'directional',
+            color: new Color(1, 1, 1),
+            intensity: 1.5,
+            castShadows: true,
+            shadowBias: 0.05,
+            normalOffsetBias: 0.05
+        });
+        lightEntity.tags.add('light');
+        app.root.addChild(lightEntity);
+    }
+    if (!lightEntity.light) {
+        lightEntity.addComponent('light', {
+            type: 'directional',
+            color: new Color(1, 1, 1),
+            intensity: 1.5,
+            castShadows: true,
+            shadowBias: 0.05,
+            normalOffsetBias: 0.05
+        });
+    }
+
+    const pitch = cfg?.pitch ?? 35;
+    const yaw = cfg?.yaw ?? 45;
+    const pos = cfg?.position ?? DIRECTIONAL_DEFAULT_POSITION;
+    const [r, g, b] = cfg?.color ?? [1, 1, 1];
+    const intensity = typeof cfg?.intensity === 'number' ? cfg.intensity : 1.5;
+    const castShadows = cfg?.castShadows !== false;
+    const shadowBias = typeof cfg?.shadowBias === 'number' ? cfg.shadowBias : 0.05;
+    const enabled = cfg?.enabled !== false;
+
+    lightEntity.setPosition(pos[0], pos[1], pos[2]);
+    lightEntity.setEulerAngles(pitch, yaw, 0);
+    if (lightEntity.light) {
+        lightEntity.light.enabled = enabled;
+        lightEntity.light.color.set(r, g, b);
+        lightEntity.light.intensity = intensity;
+        lightEntity.light.castShadows = castShadows;
+        lightEntity.light.shadowBias = shadowBias;
+        lightEntity.light.shadowDistance = lightEntity.light.shadowDistance ?? 200;
+        lightEntity.light.shadowResolution = lightEntity.light.shadowResolution ?? 2048;
+    }
+};
+
+/** 主场景层 ID（World 或默认），聚光灯需照亮此层才能照到 mesh / test sphere */
+const getWorldLayerId = (app: Global['app']): number => {
+    const layer = app.scene.layers.getLayerByName('World') ?? app.scene.layers.layerList[0];
+    return layer?.id ?? 0;
+};
+
+/** 聚光灯照亮的层：World（mesh/球体）+ ShadowMask（参与阴影通道） */
+const getSpotLightLayers = (app: Global['app']): number[] => {
+    const worldId = getWorldLayerId(app);
+    const shadowLayer = app.scene.layers.getLayerByName('ShadowMask');
+    if (shadowLayer) return [worldId, shadowLayer.id];
+    return [worldId];
+};
+
+/**
+ * 根据 settings.lighting 创建聚光灯实体（type==='spot'），最多 MAX_SPOT_LIGHTS 个
+ */
+const createSpotLightsFromSettings = (global: Global): void => {
+    const { app, settings } = global;
+    const configs = settings.lighting?.lights;
+    if (!configs || !Array.isArray(configs)) return;
+
+    const spotConfigs = configs.filter((c: any) => isSpotLightConfig(c)).slice(0, MAX_SPOT_LIGHTS);
+    if (spotConfigs.length === 0) return;
+
+    const spotLayers = getSpotLightLayers(app);
+    let container = app.root.findByName('spotLights') as Entity | null;
+    if (!container) {
+        container = new Entity('spotLights');
+        app.root.addChild(container);
+    }
+
+    spotConfigs.forEach((cfg: SpotLightConfig, i: number) => {
+        const [x, y, z] = cfg.position ?? [0, 2, 0];
+        const [r, g, b] = cfg.color ?? [1, 1, 1];
+        const intensity = typeof cfg.intensity === 'number' ? cfg.intensity : 1;
+        const pitch = cfg.pitch ?? -45;
+        const yaw = cfg.yaw ?? 0;
+        const innerCone = cfg.innerConeAngle ?? 25;
+        const outerCone = cfg.outerConeAngle ?? 45;
+        const range = typeof cfg.range === 'number' ? cfg.range : 10;
+        const enabled = cfg.enabled !== false;
+
+        const shadowDist = Math.max(range, 50);
+        const shadowRes = 2048;
+        let entity = container!.findByName(`spotLight_${i}`) as Entity | undefined;
+        if (!entity) {
+            entity = new Entity(`spotLight_${i}`);
+            entity.addComponent('light', {
+                type: 'spot',
+                color: new Color(r, g, b),
+                intensity,
+                innerConeAngle: innerCone,
+                outerConeAngle: outerCone,
+                range,
+                castShadows: true,
+                shadowDistance: shadowDist,
+                shadowResolution: shadowRes
+            });
+            if (entity.light) entity.light.layers = spotLayers;
+            entity.tags.add('spotLight');
+            addSpotLightVisual(app, entity, r, g, b);
+            container!.addChild(entity);
+        }
+        entity.setPosition(x, y, z);
+        entity.setEulerAngles(pitch, yaw, 0);
+        if (entity.light) {
+            entity.light.enabled = enabled;
+            entity.light.color.set(r, g, b);
+            entity.light.intensity = intensity;
+            (entity.light as any).innerConeAngle = innerCone;
+            (entity.light as any).outerConeAngle = outerCone;
+            (entity.light as any).range = range;
+            entity.light.shadowDistance = shadowDist;
+            entity.light.shadowResolution = shadowRes;
+            entity.light.layers = spotLayers;
+        }
+        updateSpotLightVisual(entity, r, g, b);
+    });
+
+    const existing = container!.children.filter(c => c.name.startsWith('spotLight_'));
+    existing.forEach((child, i) => {
+        if (i >= spotConfigs.length) container!.removeChild(child);
+    });
+};
+
+/**
+ * 根据 settings.lighting 创建点光源实体（仅处理无 type 或 type 非 directional/spot 的项），最多 10 个
  */
 const createPointLightsFromSettings = (global: Global): void => {
     const { app, settings } = global;
     const configs = settings.lighting?.lights;
-    if (!configs || !Array.isArray(configs) || configs.length === 0) return;
+    if (!configs || !Array.isArray(configs)) return;
+
+    const pointConfigs = configs.filter((c: any) => !isDirectionalLightConfig(c) && !isSpotLightConfig(c)).slice(0, MAX_POINT_LIGHTS);
+    if (pointConfigs.length === 0) return;
 
     let container = app.root.findByName('pointLights') as Entity | null;
     if (!container) {
@@ -90,8 +346,7 @@ const createPointLightsFromSettings = (global: Global): void => {
         app.root.addChild(container);
     }
 
-    const toCreate = configs.slice(0, MAX_POINT_LIGHTS);
-    toCreate.forEach((cfg, i) => {
+    pointConfigs.forEach((cfg: any, i: number) => {
         const [x, y, z] = cfg.position ?? [0, 0, 0];
         const [r, g, b] = cfg.color ?? [1, 1, 1];
         const intensity = typeof cfg.intensity === 'number' ? cfg.intensity : 1;
@@ -107,7 +362,6 @@ const createPointLightsFromSettings = (global: Global): void => {
                 castShadows: true
             });
             entity.tags.add('pointLight');
-            // 场景内可视化：在光源位置显示一个与光同色的小球
             addLightVisual(app, entity, r, g, b);
             container!.addChild(entity);
         }
@@ -120,96 +374,82 @@ const createPointLightsFromSettings = (global: Global): void => {
         updateLightVisual(entity, r, g, b);
     });
 
-    // 移除多余的子实体（若配置数量减少）
     const existing = container!.children.filter(c => c.name.startsWith('pointLight_'));
     existing.forEach((child, i) => {
-        if (i >= toCreate.length) container!.removeChild(child);
+        if (i >= pointConfigs.length) container!.removeChild(child);
     });
 };
 
 /**
- * 设置场景中点光源可视化小球（彩色球体）的显示/隐藏。
- * 仅切换可视化 mesh，不改变点光源光照。工具栏通过此接口与「可视化光源」开关联动。
+ * 设置场景中点光源、平行光、聚光灯可视化的显示/隐藏。与「Show lights in scene」联动。
  */
 const setPointLightsVisualVisible = (global: Global, visible: boolean): void => {
     const { app } = global;
     (app as any).__pointLightsVisualVisible = visible;
-    const container = app.root.findByName('pointLights') as Entity | null;
-    if (!container) return;
-    container.children.forEach((node) => {
-        const entity = node as Entity;
-        if (!entity.name.startsWith('pointLight_') || entity.name === 'pointLight_visual') return;
-        const visual = (entity as any).__lightVisualEntity as Entity | undefined;
-        if (visual?.render) visual.render.enabled = visible;
-    });
+    const pointContainer = app.root.findByName('pointLights') as Entity | null;
+    if (pointContainer) {
+        pointContainer.children.forEach((node) => {
+            const entity = node as Entity;
+            if (!entity.name.startsWith('pointLight_') || entity.name === 'pointLight_visual') return;
+            const visual = (entity as any).__lightVisualEntity as Entity | undefined;
+            if (visual?.render) visual.render.enabled = visible;
+        });
+    }
+    const spotContainer = app.root.findByName('spotLights') as Entity | null;
+    if (spotContainer) {
+        spotContainer.children.forEach((node) => {
+            const entity = node as Entity;
+            if (!entity.name.startsWith('spotLight_') || entity.name === 'spotLight_visual') return;
+            const visual = (entity as any).__spotVisualEntity as Entity | undefined;
+            if (visual?.render) visual.render.enabled = visible;
+        });
+    }
 };
 
 /**
- * 根据当前 settings.lighting 重新创建/更新点光源实体（供运行时 UI 修改配置后调用）
+ * 根据当前 settings.lighting 重新应用平行光并创建/更新点光源实体（供运行时 UI 修改配置后调用）
  */
 const updatePointLightsFromSettings = (global: Global): void => {
     const { app } = global;
+    applyDirectionalLightFromSettings(global);
     const configs = global.settings.lighting?.lights;
-    if (!configs || !Array.isArray(configs) || configs.length === 0) {
-        const container = app.root.findByName('pointLights') as Entity | null;
-        if (container) {
-            app.root.removeChild(container);
-        }
+    if (!configs || !Array.isArray(configs)) {
+        const c1 = app.root.findByName('pointLights') as Entity | null;
+        const c2 = app.root.findByName('spotLights') as Entity | null;
+        if (c1) app.root.removeChild(c1);
+        if (c2) app.root.removeChild(c2);
         return;
     }
-    createPointLightsFromSettings(global);
+    const hasPoint = configs.some((c: any) => !isDirectionalLightConfig(c) && !isSpotLightConfig(c));
+    const hasSpot = configs.some((c: any) => isSpotLightConfig(c));
+    if (!hasPoint) {
+        const c = app.root.findByName('pointLights') as Entity | null;
+        if (c) app.root.removeChild(c);
+    } else {
+        createPointLightsFromSettings(global);
+    }
+    if (!hasSpot) {
+        const c = app.root.findByName('spotLights') as Entity | null;
+        if (c) app.root.removeChild(c);
+    } else {
+        createSpotLightsFromSettings(global);
+    }
 };
 
 /**
  * 初始化场景光照
- * - 创建主方向光（directional）
- * - 根据 settings.lighting 创建点光源实体（point），最多 10 个
- *
- * @param global - 全局对象，包含 app、settings 等
- * @returns 主方向光实体
+ * - 主方向光（平行光）由 settings.lighting.lights 中 type==='directional' 的项驱动，若无则用默认
+ * - 点光源由 settings.lighting.lights 中非 directional 的项创建，最多 10 个
  */
 const initLight = (global: Global): Entity => {
-    const { app } = global;
-
-    let lightEntity = app.root.findByName('light') as Entity | null;
-
-    if (!lightEntity) {
-        lightEntity = new Entity('light');
-        lightEntity.setEulerAngles(35, 45, 0);
-        lightEntity.addComponent('light', {
-            type: 'directional',
-            color: new Color(1, 1, 1),
-            intensity: 1.5,
-            castShadows: true,
-            shadowBias: 0.05,
-            normalOffsetBias: 0.05
-        });
-        app.root.addChild(lightEntity);
-    } else {
-        if (!lightEntity.light) {
-            lightEntity.addComponent('light', {
-                type: 'directional',
-                color: new Color(1, 1, 1),
-                intensity: 1.5,
-                castShadows: true,
-                shadowBias: 0.05,
-                normalOffsetBias: 0.05
-            });
-        }
+    applyDirectionalLightFromSettings(global);
+    const lightEntity = global.app.root.findByName('light') as Entity;
+    if (lightEntity?.light) {
+        lightEntity.light.shadowDistance = lightEntity.light.shadowDistance ?? 200;
+        lightEntity.light.shadowResolution = lightEntity.light.shadowResolution ?? 2048;
     }
-
-    // 方向光阴影可见范围（从相机算起）
-    // 默认 40 对大场景太小，后续 updateShadowDistance() 会根据场景包围盒动态更新
-    if (lightEntity.light) {
-        lightEntity.light.shadowDistance = 200;
-        // 提高 shadow map 分辨率以覆盖大场景时保持精度
-        lightEntity.light.shadowResolution = 2048;
-    }
-
-    lightEntity.tags.add('light');
-
     createPointLightsFromSettings(global);
-
+    createSpotLightsFromSettings(global);
     return lightEntity;
 };
 
@@ -227,4 +467,4 @@ const updateShadowDistance = (global: Global, sceneSize: number): void => {
     }
 };
 
-export { initLight, collectPointLights, updatePointLightsFromSettings, setPointLightsVisualVisible, updateShadowDistance };
+export { initLight, collectPointLights, collectSpotLights, updatePointLightsFromSettings, setPointLightsVisualVisible, updateShadowDistance };

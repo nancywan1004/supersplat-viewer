@@ -1,4 +1,4 @@
-import type { LodSettings, LodPreset, LodPlatform, RevealEffect, TransformFrame, PointLightConfig, LightingSettings } from "./v2-custom";
+import type { LodSettings, LodPreset, LodPlatform, RevealEffect, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings } from "./v2-custom";
 
 type AnimTrack = {
     name: string,
@@ -92,7 +92,15 @@ type PostEffectSettings = {
         /** 调试：true 时显示接影平面几何（半透明绿色），用于确认平面位置与范围 */
         debugVisual?: boolean,
         /** 是否投射阴影，默认false */
-        castShadows?: boolean
+        castShadows?: boolean,
+        /** 光源方向俯仰角（度），用于序列化还原 */
+        lightPitch?: number,
+        /** 光源方向偏航角（度），用于序列化还原 */
+        lightYaw?: number,
+        /** 阴影 bias，用于序列化还原 */
+        shadowBias?: number,
+        /** 调试球体半径，用于序列化还原 */
+        sphereRadius?: number
     }
 };
 
@@ -125,6 +133,16 @@ type ExperienceSettings = {
     lighting?: LightingSettings,
 
     /**
+     * 可选：夜间模式配置（保存/加载时序列化）
+     * - enabled: 是否开启夜间模式
+     * - fade: 夜间强度 0~1，不写则默认 0.95
+     */
+    nightMode?: {
+        enabled: boolean;
+        fade?: number;
+    };
+
+    /**
      * 可选：相机边界策略（不影响旧 settings.json）
      * - enabled: 是否启用相机移动限制（默认 true）
      * - animScaleX: X 轴方向的缩放系数（可选，仅在有动画路径时生效）
@@ -148,4 +166,4 @@ type ExperienceSettings = {
     initialCameraMode?: 'orbit' | 'fly';
 };
 
-export type { AnimTrack, Camera, Annotation, PostEffectSettings, RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, ExperienceSettings, PointLightConfig, LightingSettings };
+export type { AnimTrack, Camera, Annotation, PostEffectSettings, RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, ExperienceSettings, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings };

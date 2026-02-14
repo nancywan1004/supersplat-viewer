@@ -85,6 +85,8 @@ class ShadowApplyRt extends Script {
         const mat = new StandardMaterial();
         mat.diffuse.set(0.85, 0.3, 0.25);
         mat.specular.set(0.3, 0.3, 0.3);
+        mat.emissive.set(0.12, 0.04, 0.03);
+        mat.emissiveIntensity = 1;
         mat.update();
 
         entity.addComponent('render', {
@@ -93,6 +95,8 @@ class ShadowApplyRt extends Script {
             receiveShadows: false,
             material: mat
         });
+        const worldLayer = app.scene.layers.getLayerByName('World') ?? app.scene.layers.layerList[0];
+        if (entity.render && worldLayer) entity.render.layers = [worldLayer.id];
         entity.setLocalScale(radius * 2, radius * 2, radius * 2);
         app.root.addChild(entity);
         this._testSpheres.push(entity);
@@ -210,7 +214,8 @@ class ShadowApplyRt extends Script {
         }
         this._debugLayer = debugLayer;
 
-        // 方向光必须在 ShadowMask 层（与 Demo 一致：light layers 包含接影层）
+        // 参与阴影通道的光源必须把 ShadowMask 层加入 light.layers，阴影相机渲染该层时才会被用来打光并产生阴影。
+        // 方向光：此处追加 ShadowMask；聚光灯：在 light.ts 的 getSpotLightLayers() 里已包含 World + ShadowMask。
         const lightEntity = app.root.findByName('light') as Entity | null;
         if (lightEntity?.light) {
             const lightLayers = lightEntity.light.layers as number[];
@@ -334,8 +339,8 @@ class ShadowApplyRt extends Script {
                 shadowRt.resize(device.width, device.height);
             }
 
-            // intensity：Demo 默认 0.4，我们用 darken 控制（darken=0.45 → intensity=0.55）
-            const darken = Math.max(0, Math.min(1, Number(shadowSettingsNow.darken ?? 0.45)));
+            // intensity = 1 - darken：darken=0 最暗，darken=1 不压暗
+            const darken = Math.max(0, Math.min(1, Number(shadowSettingsNow.darken ?? 0)));
             const intensity = 1 - darken;
             const debugRt = shadowSettingsNow.debugRt === true ? 1 : 0;
 

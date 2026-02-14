@@ -464,13 +464,20 @@ class Viewer {
             }
             this.revealController = new RevealController(global, revealBbox, gsplatEntity, this.cameraManager);
 
-            // 有 reveal 时：等 reveal 播完再开始动画（监听 revealComplete）
+            // 有 reveal 时：等 reveal 播完再开始动画（监听 revealComplete），并恢复配置中的夜间模式
             if (state.hasRevealEffect) {
                 events.once('revealComplete', () => {
                     if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim) {
                         state.animationStarted = true;
                         state.animationPaused = false;
                         events.fire('animationStarted');
+                    }
+                    const nightCfgAfterReveal = (settings as { nightMode?: { enabled: boolean; fade?: number } }).nightMode;
+                    if (nightCfgAfterReveal?.enabled && this.nightModeScript) {
+                        const fade = typeof nightCfgAfterReveal.fade === 'number' && Number.isFinite(nightCfgAfterReveal.fade)
+                            ? Math.max(0, Math.min(1, nightCfgAfterReveal.fade))
+                            : 0.95;
+                        this.nightModeScript.applyFromSettings({ enabled: true, fade });
                     }
                 });
             }
@@ -490,6 +497,21 @@ class Viewer {
             // Keep enabled = true so update() continues to run
             // We control night mode through nightMode property, not enabled
             nightModeScript.enabled = true;
+            const nightCfg = (settings as { nightMode?: { enabled: boolean; fade?: number } }).nightMode;
+            // 立即捕获 enabled/fade 的值：nightCfg 与 settings.nightMode 是同一引用，firstFrame 触发前 lighting-ui 等会把它改成 0，回调里再读就错了
+            const nightEnabled = !!nightCfg?.enabled;
+            const nightFade = typeof nightCfg?.fade === 'number' && Number.isFinite(nightCfg.fade)
+                ? Math.max(0, Math.min(1, nightCfg.fade))
+                : 0.95;
+            if (nightEnabled) {
+                if (!state.hasRevealEffect) {
+                    events.once('firstFrame', () => {
+                        if (this.nightModeScript) {
+                            this.nightModeScript.applyFromSettings({ enabled: true, fade: nightFade });
+                        }
+                    });
+                }
+            }
             console.log('NightMode script initialized:', {
                 light: lightEntity ? 'found' : 'not found',
                 camera: cameraEntity ? 'found' : 'not found',
