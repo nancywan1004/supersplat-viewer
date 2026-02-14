@@ -243,19 +243,6 @@ const applyDirectionalLightFromSettings = (global: Global): void => {
     }
 };
 
-/** 主场景层 ID（World 或默认），聚光灯需照亮此层才能照到 mesh / test sphere */
-const getWorldLayerId = (app: Global['app']): number => {
-    const layer = app.scene.layers.getLayerByName('World') ?? app.scene.layers.layerList[0];
-    return layer?.id ?? 0;
-};
-
-/** 聚光灯照亮的层：World（mesh/球体）+ ShadowMask（参与阴影通道） */
-const getSpotLightLayers = (app: Global['app']): number[] => {
-    const worldId = getWorldLayerId(app);
-    const shadowLayer = app.scene.layers.getLayerByName('ShadowMask');
-    if (shadowLayer) return [worldId, shadowLayer.id];
-    return [worldId];
-};
 
 /**
  * 根据 settings.lighting 创建聚光灯实体（type==='spot'），最多 MAX_SPOT_LIGHTS 个
@@ -268,7 +255,6 @@ const createSpotLightsFromSettings = (global: Global): void => {
     const spotConfigs = configs.filter((c: any) => isSpotLightConfig(c)).slice(0, MAX_SPOT_LIGHTS);
     if (spotConfigs.length === 0) return;
 
-    const spotLayers = getSpotLightLayers(app);
     let container = app.root.findByName('spotLights') as Entity | null;
     if (!container) {
         container = new Entity('spotLights');
@@ -286,8 +272,6 @@ const createSpotLightsFromSettings = (global: Global): void => {
         const range = typeof cfg.range === 'number' ? cfg.range : 10;
         const enabled = cfg.enabled !== false;
 
-        const shadowDist = Math.max(range, 50);
-        const shadowRes = 2048;
         let entity = container!.findByName(`spotLight_${i}`) as Entity | undefined;
         if (!entity) {
             entity = new Entity(`spotLight_${i}`);
@@ -298,11 +282,8 @@ const createSpotLightsFromSettings = (global: Global): void => {
                 innerConeAngle: innerCone,
                 outerConeAngle: outerCone,
                 range,
-                castShadows: true,
-                shadowDistance: shadowDist,
-                shadowResolution: shadowRes
+                castShadows: false
             });
-            if (entity.light) entity.light.layers = spotLayers;
             entity.tags.add('spotLight');
             addSpotLightVisual(app, entity, r, g, b);
             container!.addChild(entity);
@@ -313,12 +294,10 @@ const createSpotLightsFromSettings = (global: Global): void => {
             entity.light.enabled = enabled;
             entity.light.color.set(r, g, b);
             entity.light.intensity = intensity;
+            entity.light.castShadows = false;
             (entity.light as any).innerConeAngle = innerCone;
             (entity.light as any).outerConeAngle = outerCone;
             (entity.light as any).range = range;
-            entity.light.shadowDistance = shadowDist;
-            entity.light.shadowResolution = shadowRes;
-            entity.light.layers = spotLayers;
         }
         updateSpotLightVisual(entity, r, g, b);
     });
@@ -359,7 +338,7 @@ const createPointLightsFromSettings = (global: Global): void => {
                 type: 'point',
                 color: new Color(r, g, b),
                 intensity,
-                castShadows: true
+                castShadows: false
             });
             entity.tags.add('pointLight');
             addLightVisual(app, entity, r, g, b);
@@ -370,6 +349,7 @@ const createPointLightsFromSettings = (global: Global): void => {
             entity.light.enabled = enabled;
             entity.light.color.set(r, g, b);
             entity.light.intensity = intensity;
+            entity.light.castShadows = false;
         }
         updateLightVisual(entity, r, g, b);
     });

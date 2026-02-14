@@ -23,6 +23,12 @@ import type { Global } from '../../types';
  * shadowTex R 通道：1=受光，0=阴影。
  * blend = (1.0 - R) * intensity，Alpha Blend 黑色叠到屏幕。
  * 不做 threshold 截断——Demo 也没有。
+ *
+ * 说明：本管线用「单次阴影相机 + 单张 shadowTex」叠到屏幕。平行光因每相机单独排队
+ * 方向光阴影（cameraDirShadowLights），所以能正常 cast shadows。点光/聚光的阴影由
+ * buildNonClusteredRenderPasses 统一排队，且已设 layers（World+ShadowMask）和
+ * shadowUpdateMode=REALTIME；若仍看不到点/聚光阴影，多为引擎在自定义 RT 相机下
+ * 仅合入方向光阴影所致，可视为当前管线限制。
  */
 const shadowApplyVs = /* glsl */ `
     attribute vec2 vertex_position;

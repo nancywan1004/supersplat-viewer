@@ -63,7 +63,25 @@ export function initLightingUI(global: Global): () => void {
     const ensureLighting = (): { lights: (PointLightConfig | DirectionalLightConfig | SpotLightConfig)[] } => {
         if (!(global.settings as any).lighting) (global.settings as any).lighting = { lights: [] };
         if (!Array.isArray((global.settings as any).lighting.lights)) (global.settings as any).lighting.lights = [];
-        return (global.settings as any).lighting;
+        const lighting = (global.settings as any).lighting;
+        if (!lighting.lights.some((l: any) => (l as any).type === 'directional')) {
+            lighting.lights.unshift({
+                type: 'directional',
+                position: [0, 8, 8],
+                color: [1, 1, 1],
+                intensity: 1.5,
+                pitch: 35,
+                yaw: 45,
+                castShadows: true,
+                enabled: true
+            } as DirectionalLightConfig);
+        }
+        const dirIdx = lighting.lights.findIndex((l: any) => (l as any).type === 'directional');
+        if (dirIdx > 0) {
+            const [dir] = lighting.lights.splice(dirIdx, 1);
+            lighting.lights.unshift(dir);
+        }
+        return lighting;
     };
     const ensureNightModeSettings = (): { enabled: boolean; fade?: number } => {
         if (!(global.settings as any).nightMode) {
@@ -152,7 +170,7 @@ export function initLightingUI(global: Global): () => void {
         updateLightsVisualCheck();
     }
 
-    // Lights list (point + directional)
+    // Lights list: 平行光主光源（首条，不可删）+ 点光/聚光
     const renderPointLightsList = () => {
         if (!pointLightsList) return;
         const lighting = ensureLighting();
@@ -162,9 +180,6 @@ export function initLightingUI(global: Global): () => void {
         lights.forEach((light, index) => {
             const isDir = isDirectional(light);
             const isSpotLight = isSpot(light);
-            // 暂时不展示、不编辑平行光配置
-            if (isDir) return;
-
             const [r, g, b] = light.color ?? [1, 1, 1];
             const intensity = typeof light.intensity === 'number' ? light.intensity : 1;
             const enabled = light.enabled !== false;
@@ -172,9 +187,25 @@ export function initLightingUI(global: Global): () => void {
 
             const row = document.createElement('div');
             row.className = 'pointLightRow' + (enabled ? '' : ' pointLightRow--disabled')
-                + (isSpotLight ? ' pointLightRow--spot' : '');
+                + (isSpotLight ? ' pointLightRow--spot' : '')
+                + (isDir ? ' pointLightRow--directional' : '');
 
-            if (isSpotLight) {
+            if (isDir) {
+                const d = light as DirectionalLightConfig;
+                const pitch = d.pitch ?? 35;
+                const yaw = d.yaw ?? 45;
+                const castShadows = d.castShadows !== false;
+                row.innerHTML = `
+                    <div class="pointLightVisual" title="主光源（不可删除）">
+                        <span class="pointLightSwatch" style="background:${hex}; box-shadow:0 0 6px ${hex};"></span>
+                        <span class="pointLightNum">Directional</span>
+                    </div>
+                    <label class="pointLightEnableWrap"><input type="checkbox" class="pointLightEnable" data-index="${index}" data-field="enabled" ${enabled ? 'checked' : ''}><span class="pointLightEnableLabel">On</span></label>
+                    <span class="pointLightLabel">Pitch</span><input type="number" step="1" min="-90" max="90" data-index="${index}" data-field="dirPitch" value="${pitch}">
+                    <span class="pointLightLabel">Yaw</span><input type="number" step="1" min="0" max="360" data-index="${index}" data-field="dirYaw" value="${yaw}">
+                    <label class="pointLightEnableWrap"><input type="checkbox" class="pointLightCastShadows" data-index="${index}" data-field="dirCastShadows" ${castShadows ? 'checked' : ''}><span class="pointLightEnableLabel">Cast Shadows</span></label>
+                `;
+            } else if (isSpotLight) {
                 spotOrdinal += 1;
                 const s = light as SpotLightConfig;
                 const [sx, sy, sz] = s.position ?? [0, 2, 0];
@@ -202,7 +233,8 @@ export function initLightingUI(global: Global): () => void {
                     <button type="button" class="pointLightRemove" data-index="${index}" aria-label="Remove">✕</button>
                 `;
             } else {
-                const [x, y, z] = (light as PointLightConfig).position ?? [0, 0, 0];
+                const p = light as PointLightConfig;
+                const [x, y, z] = p.position ?? [0, 0, 0];
                 row.innerHTML = `
                     <div class="pointLightVisual" title="Point ${index + 1}">
                         <span class="pointLightSwatch" style="background:${hex}; box-shadow:0 0 6px ${hex};"></span>
@@ -227,7 +259,14 @@ export function initLightingUI(global: Global): () => void {
                 const lighting = ensureLighting();
                 const light = lighting.lights[idx];
                 if (!light) return;
-                if (isSpot(light)) {
+                if (isDirectional(light)) {
+                    const d = light as DirectionalLightConfig;
+                    if (field === 'enabled') d.enabled = (input as HTMLInputElement).checked;
+                    else if (field === 'dirPitch') d.pitch = parseFloat((input as HTMLInputElement).value) ?? 35;
+                    else if (field === 'dirYaw') d.yaw = parseFloat((input as HTMLInputElement).value) ?? 45;
+                    else if (field === 'dirCastShadows') d.castShadows = (input as HTMLInputElement).checked;
+                    (input as HTMLElement).closest('.pointLightRow')?.classList.toggle('pointLightRow--disabled', !d.enabled);
+                } else if (isSpot(light)) {
                     const s = light as SpotLightConfig;
                     if (!s.position) s.position = [0, 2, 0];
                     if (field === 'enabled') s.enabled = (input as HTMLInputElement).checked;
@@ -273,6 +312,8 @@ export function initLightingUI(global: Global): () => void {
             btn.addEventListener('click', () => {
                 const idx = parseInt((btn as HTMLElement).dataset.index!, 10);
                 const lighting = ensureLighting();
+                const light = lighting.lights[idx];
+                if (isDirectional(light)) return;
                 lighting.lights.splice(idx, 1);
                 renderPointLightsList();
                 updatePointLightsFromSettings(global);
