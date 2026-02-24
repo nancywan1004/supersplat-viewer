@@ -28,7 +28,7 @@ export type PointLightInfo = {
 
 export type SpotLightInfo = {
     position: Vec3;
-    direction: Vec3;  // 归一化，照射方向（实体 forward = -Z）
+    direction: Vec3;  // 归一化，照射方向（与引擎一致：实体 -Y 轴）
     color: Color;
     intensity: number;
     innerConeAngle: number;  // 弧度
@@ -63,19 +63,23 @@ const collectPointLights = (global: Global): PointLightInfo[] => {
  * 从场景中收集聚光灯信息（spotLights 容器下 type === 'spot' 的实体），上限 10 个。
  * 供 night-mode 等 shader 对高斯施加聚光照明。
  */
+/**
+ * 聚光方向须与引擎一致：PlayCanvas 聚光沿实体 -Y 轴照射（forward-renderer 用 getY().mulScalar(-1)），
+ * 此处也用 -Y，这样高斯与 mesh 的锥体方向一致。
+ */
 const collectSpotLights = (global: Global): SpotLightInfo[] => {
     const { app } = global;
     const result: SpotLightInfo[] = [];
     const container = app.root.findByName('spotLights') as Entity | null;
     if (!container) return result;
-    const zAxis = new Vec3();
+    const yAxis = new Vec3();
     for (let i = 0; i < container.children.length && result.length < MAX_SPOT_LIGHTS; i++) {
         const e = container.children[i] as Entity;
         if (!e.name.startsWith('spotLight_') || e.name === 'spotLight_visual') continue;
         if (!e.light || (e.light as any).type !== 'spot' || !e.light.enabled) continue;
         const position = e.getPosition().clone();
-        e.getWorldTransform().getZ(zAxis);
-        const direction = new Vec3(-zAxis.x, -zAxis.y, -zAxis.z).normalize();
+        e.getWorldTransform().getY(yAxis);
+        const direction = new Vec3(-yAxis.x, -yAxis.y, -yAxis.z).normalize();
         let innerRad = ((e.light as any).innerConeAngle ?? 25) * (Math.PI / 180);
         let outerRad = ((e.light as any).outerConeAngle ?? 45) * (Math.PI / 180);
         if (innerRad > outerRad) {
@@ -137,7 +141,7 @@ const updateLightVisual = (lightEntity: Entity, r: number, g: number, b: number)
 };
 
 /**
- * 为聚光灯实体添加锥体可视化。锥尖指向照射方向（实体 -Z = forward），
+ * 为聚光灯实体添加锥体可视化。锥尖指向照射方向（实体 -Y，与引擎与 collectSpotLights 一致），
  * 与「Show lights in scene」联动。锥体几何与 inner/outer 角无关，仅表示方向。
  */
 const addSpotLightVisual = (app: Global['app'], spotEntity: Entity, r: number, g: number, b: number): void => {
@@ -156,9 +160,10 @@ const addSpotLightVisual = (app: Global['app'], spotEntity: Entity, r: number, g
         rc.receiveShadows = false;
         rc.enabled = !!(app as any).__pointLightsVisualVisible;
     }
-    visual.setLocalPosition(0, 0, -SPOT_VISUAL_SCALE);
-    visual.setLocalEulerAngles(-90, 0, 0);
-    visual.setLocalScale(SPOT_VISUAL_SCALE, SPOT_VISUAL_SCALE, SPOT_VISUAL_SCALE * 2);
+    // 锥体默认 +Y 为锥尖；放在 (0, -S, 0) 使锥尖在光源、底面朝 -Y，与聚光方向一致
+    visual.setLocalPosition(0, -SPOT_VISUAL_SCALE, 0);
+    visual.setLocalEulerAngles(0, 0, 0);
+    visual.setLocalScale(SPOT_VISUAL_SCALE, SPOT_VISUAL_SCALE * 2, SPOT_VISUAL_SCALE);
     spotEntity.addChild(visual);
     (spotEntity as any).__spotVisualMaterial = mat;
     (spotEntity as any).__spotVisualEntity = visual;
