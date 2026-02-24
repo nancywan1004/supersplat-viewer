@@ -191,7 +191,6 @@ const applyDirectionalLightFromSettings = (global: Global): void => {
             pitch: typeof shadow.lightPitch === 'number' ? shadow.lightPitch : 35,
             yaw: typeof shadow.lightYaw === 'number' ? shadow.lightYaw : 45,
             shadowBias: typeof shadow.shadowBias === 'number' ? shadow.shadowBias : 0.05,
-            castShadows: true,
             enabled: true
         };
     }
@@ -226,9 +225,10 @@ const applyDirectionalLightFromSettings = (global: Global): void => {
     const pos = cfg?.position ?? DIRECTIONAL_DEFAULT_POSITION;
     const [r, g, b] = cfg?.color ?? [1, 1, 1];
     const intensity = typeof cfg?.intensity === 'number' ? cfg.intensity : 1.5;
-    const castShadows = cfg?.castShadows !== false;
     const shadowBias = typeof cfg?.shadowBias === 'number' ? cfg.shadowBias : 0.05;
     const enabled = cfg?.enabled !== false;
+    // 平行光是否投射阴影由 postEffectSettings.shadow.enabled 统一控制
+    const castShadows = (settings as any).postEffectSettings?.shadow?.enabled === true;
 
     lightEntity.setPosition(pos[0], pos[1], pos[2]);
     lightEntity.setEulerAngles(pitch, yaw, 0);
@@ -350,6 +350,8 @@ const createPointLightsFromSettings = (global: Global): void => {
             entity.light.color.set(r, g, b);
             entity.light.intensity = intensity;
             entity.light.castShadows = false;
+            entity.light.shadowDistance = entity.light.shadowDistance ?? 200;
+            entity.light.shadowResolution = entity.light.shadowResolution ?? 2048;
         }
         updateLightVisual(entity, r, g, b);
     });

@@ -194,7 +194,6 @@ export function initLightingUI(global: Global): () => void {
                 const d = light as DirectionalLightConfig;
                 const pitch = d.pitch ?? 35;
                 const yaw = d.yaw ?? 45;
-                const castShadows = d.castShadows !== false;
                 row.innerHTML = `
                     <div class="pointLightVisual" title="主光源（不可删除）">
                         <span class="pointLightSwatch" style="background:${hex}; box-shadow:0 0 6px ${hex};"></span>
@@ -203,7 +202,6 @@ export function initLightingUI(global: Global): () => void {
                     <label class="pointLightEnableWrap"><input type="checkbox" class="pointLightEnable" data-index="${index}" data-field="enabled" ${enabled ? 'checked' : ''}><span class="pointLightEnableLabel">On</span></label>
                     <span class="pointLightLabel">Pitch</span><input type="number" step="1" min="-90" max="90" data-index="${index}" data-field="dirPitch" value="${pitch}">
                     <span class="pointLightLabel">Yaw</span><input type="number" step="1" min="0" max="360" data-index="${index}" data-field="dirYaw" value="${yaw}">
-                    <label class="pointLightEnableWrap"><input type="checkbox" class="pointLightCastShadows" data-index="${index}" data-field="dirCastShadows" ${castShadows ? 'checked' : ''}><span class="pointLightEnableLabel">Cast Shadows</span></label>
                 `;
             } else if (isSpotLight) {
                 spotOrdinal += 1;
@@ -264,7 +262,6 @@ export function initLightingUI(global: Global): () => void {
                     if (field === 'enabled') d.enabled = (input as HTMLInputElement).checked;
                     else if (field === 'dirPitch') d.pitch = parseFloat((input as HTMLInputElement).value) ?? 35;
                     else if (field === 'dirYaw') d.yaw = parseFloat((input as HTMLInputElement).value) ?? 45;
-                    else if (field === 'dirCastShadows') d.castShadows = (input as HTMLInputElement).checked;
                     (input as HTMLElement).closest('.pointLightRow')?.classList.toggle('pointLightRow--disabled', !d.enabled);
                 } else if (isSpot(light)) {
                     const s = light as SpotLightConfig;

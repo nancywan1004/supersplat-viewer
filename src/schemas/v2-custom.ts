@@ -50,7 +50,7 @@ type PointLightConfig = {
     enabled?: boolean
 };
 
-/** 平行光配置（主方向光/太阳，无位置概念，仅方向；用于阴影等） */
+/** 平行光配置（主方向光/太阳，无位置概念，仅方向；用于阴影等）。阴影开关由 postEffectSettings.shadow.enabled 统一控制。 */
 type DirectionalLightConfig = {
     type: 'directional',
     /** 仅用于锥体可视化与阴影相机参考，默认 [0, 8, 8] */
@@ -59,7 +59,6 @@ type DirectionalLightConfig = {
     intensity: number,
     pitch?: number,
     yaw?: number,
-    castShadows?: boolean,
     shadowBias?: number,
     enabled?: boolean
 };

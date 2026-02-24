@@ -24,11 +24,11 @@ import type { Global } from '../../types';
  * blend = (1.0 - R) * intensity，Alpha Blend 黑色叠到屏幕。
  * 不做 threshold 截断——Demo 也没有。
  *
- * 说明：本管线用「单次阴影相机 + 单张 shadowTex」叠到屏幕。平行光因每相机单独排队
- * 方向光阴影（cameraDirShadowLights），所以能正常 cast shadows。点光/聚光的阴影由
- * buildNonClusteredRenderPasses 统一排队，且已设 layers（World+ShadowMask）和
- * shadowUpdateMode=REALTIME；若仍看不到点/聚光阴影，多为引擎在自定义 RT 相机下
- * 仅合入方向光阴影所致，可视为当前管线限制。
+ * 【重要】投影不是我们算的：
+ * - 我们不做任何阴影投影计算。shadowTex 的内容 100% 由 PlayCanvas 引擎在「阴影相机
+ *   渲染接影面」时写入：接影面使用 LIT_SHADOW_CATCHER 材质，引擎采样光源的 shadow map 写出 R=0/1。
+ * - 当该相机带 renderTarget（我们的 shadowMaskCamera）时，引擎在此 pass 里只合入
+ *   平行光（directional）的 shadow map；平行光是否投射阴影由 postEffectSettings.shadow.enabled 统一控制。
  */
 const shadowApplyVs = /* glsl */ `
     attribute vec2 vertex_position;
@@ -221,7 +221,7 @@ class ShadowApplyRt extends Script {
         this._debugLayer = debugLayer;
 
         // 参与阴影通道的光源必须把 ShadowMask 层加入 light.layers，阴影相机渲染该层时才会被用来打光并产生阴影。
-        // 方向光：此处追加 ShadowMask；聚光灯：在 light.ts 的 getSpotLightLayers() 里已包含 World + ShadowMask。
+        // 平行光（name='light'）
         const lightEntity = app.root.findByName('light') as Entity | null;
         if (lightEntity?.light) {
             const lightLayers = lightEntity.light.layers as number[];
@@ -229,7 +229,6 @@ class ShadowApplyRt extends Script {
                 lightEntity.light.layers = [...lightLayers, shadowLayer.id];
             }
         }
-
         const shadowSettings = global.settings.postEffectSettings.shadow as {
             debugVisual?: boolean; enabled?: boolean;
         } | undefined;
@@ -350,6 +349,7 @@ class ShadowApplyRt extends Script {
             const intensity = 1 - darken;
             const debugRt = shadowSettingsNow.debugRt === true ? 1 : 0;
 
+            // shadowTex 由引擎写入（仅平行光参与），此处只做 (1-R)*intensity 叠黑，无自算投影
             device.scope.resolve('shadowTex')?.setValue(shadowTex);
             device.scope.resolve('intensity')?.setValue(intensity);
             device.scope.resolve('debugRt')?.setValue(debugRt);

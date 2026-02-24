@@ -1,4 +1,5 @@
 import type { Global } from '../../types';
+import { updatePointLightsFromSettings } from '../../light';
 
 const POST_EFFECT_PANEL_HTML = `
 <div class="postEffectPanel">
@@ -338,6 +339,7 @@ export function initPostEffectUI(global: Global): () => void {
             const sh = ensureShadow(settings);
             sh.enabled = !sh.enabled;
             syncFromSettings();
+            updatePointLightsFromSettings(global);
             firePostEffectChanged();
         };
         shadowEnableOption.addEventListener('click', toggleShadow);
