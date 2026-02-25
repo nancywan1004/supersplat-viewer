@@ -3,6 +3,14 @@ import { GsplatShaderEffect } from '../gsplat-shader-effect';
 import { collectPointLights, collectSpotLights } from '../../light';
 import type { Texture } from 'playcanvas';
 
+/**
+ * 调亮/调暗原理（Shader 内 modifySplatColor）：
+ * - 线性空间：result = linearColor * mult，再 gamma 写回。
+ * - 调暗 (f < 0)：mult = mix(1, nightColor, -f)。nightColor = 环境光 + 点光 + 聚光贡献，乘数 < 1；主光不参与此计算。
+ * - 调亮 (f > 0)：mult = baseBright * (1 + dirContrib)。baseBright = mix(1, uBrightFactor, f) 整体提亮；
+ *   dirContrib = NdotL * uLightColor 为平行光方向性（视线方向近似 splat 朝向，面向光更亮）。
+ * TS 侧：主光强度 = settings 基准 × (1 + nightFade)；天空球强度与 fade 同向；Bloom 仅调暗时增强。
+ */
 const shaderGLSL = /* glsl */`
 uniform vec3 uSpherePositions[10];
 uniform vec3 uSphereColors[10];
@@ -74,12 +82,14 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     vec3 nightColor = g2l(uNightAmbient) + sum;
     vec3 mult;
     if (f > 0.0) {
+        // 调亮：整体乘数 baseBright (1 -> uBrightFactor) + 平行光方向性
         vec3 baseBright = mix(vec3(1.0), vec3(uBrightFactor), f);
         vec3 viewDir = normalize(uCameraPos - wpos);
         float NdotL = max(0.0, dot(viewDir, uLightDir));
         vec3 dirContrib = NdotL * uLightColor;
         mult = baseBright * (vec3(1.0) + dirContrib);
     } else {
+        // 调暗：乘数向 nightColor（环境光+点光+聚光）插值，主光不参与此计算
         mult = mix(vec3(1.0), nightColor, -f);
     }
     color.rgb = l2g(linearColor * mult);
@@ -172,13 +182,15 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     vec3 linearColor = g2l(color.rgb);
     vec3 nightColor = g2l(uNightAmbient) + sum;
     vec3 mult;
-    if (f > 0.0) {
+    if (f >= 0.0) {
+        // 调亮：baseBright (1 -> uBrightFactor) × (1 + 平行光方向性 dirContrib)
         vec3 baseBright = mix(vec3(1.0), vec3(uBrightFactor), f);
         vec3 viewDir = normalize(uCameraPos - wpos);
         float NdotL = max(0.0, dot(viewDir, uLightDir));
         vec3 dirContrib = NdotL * uLightColor;
         mult = baseBright * (vec3(1.0) + dirContrib);
     } else {
+        // 调暗：乘数向 nightColor（环境光+点光+聚光）插值
         mult = mix(vec3(1.0), nightColor, -f);
     }
     color.rgb = l2g(linearColor * mult);
@@ -255,13 +267,15 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     let linearColor = g2l((*color).rgb);
     let nightColor = g2l(uniform.uNightAmbient) + sum;
     var mult: vec3f;
-    if (f > 0.0) {
+    if (f >= 0.0) {
+        // 调亮：baseBright × (1 + 平行光方向性)
         let baseBright = mix(vec3f(1.0), vec3f(uniform.uBrightFactor), f);
         let viewDir = normalize(uniform.uCameraPos - wpos);
         let NdotL = max(0.0, dot(viewDir, uniform.uLightDir));
         let dirContrib = NdotL * uniform.uLightColor;
         mult = baseBright * (vec3f(1.0) + dirContrib);
     } else {
+        // 调暗：乘数向 nightColor 插值
         mult = mix(vec3f(1.0), nightColor, -f);
     }
     (*color).rgb = l2g(linearColor * mult);
@@ -358,12 +372,14 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     let nightColor = g2l(uniform.uNightAmbient) + sum;
     var mult: vec3f;
     if (f > 0.0) {
+        // 调亮：baseBright × (1 + 平行光方向性)
         let baseBright = mix(vec3f(1.0), vec3f(uniform.uBrightFactor), f);
         let viewDir = normalize(uniform.uCameraPos - wpos);
         let NdotL = max(0.0, dot(viewDir, uniform.uLightDir));
         let dirContrib = NdotL * uniform.uLightColor;
         mult = baseBright * (vec3f(1.0) + dirContrib);
     } else {
+        // 调暗：乘数向 nightColor 插值
         mult = mix(vec3f(1.0), nightColor, -f);
     }
     (*color).rgb = l2g(linearColor * mult);
@@ -796,7 +812,9 @@ class NightMode extends GsplatShaderEffect {
             }
         }
 
-        // Update directional light intensity: 以 settings 中的平行光强度为基准，再乘以 (1 + nightFade)，这样用户调节的亮度不会被覆盖
+        // ── 调亮/调暗联动（TS 侧）──
+        // 主光：基准强度来自 settings，再乘 (1 + nightFade)，与 shader 内调亮方向一致且不覆盖用户设的 I。
+        // 调亮时主光变强，调暗时变弱；Bloom 仅调暗时增加发光感；天空球与 fade 同向（调亮更亮、调暗更暗）。
         if (this.light?.light) {
             const global = (this.app as any).__global;
             const dirCfg = global?.settings?.lighting?.lights?.find((l: any) => l.type === 'directional');

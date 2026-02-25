@@ -92,27 +92,28 @@ export function initLightingUI(global: Global): () => void {
 
     // Scene brightness (Dark ← 0 → Bright), slider always active
     if (nightFadeSlider && nightFadeValue) {
-        const updateSliderDisplay = (value: number) => {
+        // 仅更新滑块/数值显示，不写回 settings（用户拖滑块时才写回）
+        const setSliderDisplay = (value: number) => {
             nightFadeSlider.value = value.toString();
             nightFadeValue.textContent = value.toFixed(2);
-            ensureNightModeSettings();
-            (global.settings as any).nightMode.fade = value;
         };
         nightFadeSlider.addEventListener('input', (e) => {
             const value = parseFloat((e.target as HTMLInputElement).value);
-            updateSliderDisplay(value);
-            events.fire('nightFade:set', value);
+            setSliderDisplay(value);
+            ensureNightModeSettings();
+            (global.settings as any).nightMode.fade = value;
+            //events.fire('nightFade:set', value);
             global.app.fire('nightFade:set', value);
         });
-        events.on('nightFade:changed', updateSliderDisplay);
-        global.app.on('nightFade:changed', updateSliderDisplay);
+        //events.on('nightFade:changed', setSliderDisplay);
+        global.app.on('nightFade:changed', setSliderDisplay);
         ensureNightModeSettings();
         const nmInit = (global.settings as any).nightMode;
         const initialFade = typeof nmInit.fade === 'number' && Number.isFinite(nmInit.fade)
             ? Math.max(-1, Math.min(1, nmInit.fade))
             : 0;
-        updateSliderDisplay(initialFade);
-        setTimeout(() => global.app.fire('nightFade:request'), 100);
+        setSliderDisplay(initialFade);
+        // 初始值已从 settings 读取；firstFrame 时 viewer 会 applyFromSettings 并触发 nightFade:changed，无需再 request
     }
 
     // Show lights in scene
