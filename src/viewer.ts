@@ -195,7 +195,7 @@ class Viewer {
             this.configureCamera(global.settings);
             app.renderNextFrame = true;
         });
-        app.on('nightMode:changed', () => {
+        app.on('nightFade:changed', () => {
             this.configureCamera(global.settings);
             app.renderNextFrame = true;
         });
@@ -472,12 +472,12 @@ class Viewer {
                         state.animationPaused = false;
                         events.fire('animationStarted');
                     }
-                    const nightCfgAfterReveal = (settings as { nightMode?: { enabled: boolean; fade?: number } }).nightMode;
-                    if (nightCfgAfterReveal?.enabled && this.nightModeScript) {
+                    const nightCfgAfterReveal = (settings as { nightMode?: { enabled?: boolean; fade?: number } }).nightMode;
+                    if (nightCfgAfterReveal && this.nightModeScript) {
                         const fade = typeof nightCfgAfterReveal.fade === 'number' && Number.isFinite(nightCfgAfterReveal.fade)
-                            ? Math.max(0, Math.min(1, nightCfgAfterReveal.fade))
-                            : 0.95;
-                        this.nightModeScript.applyFromSettings({ enabled: true, fade });
+                            ? Math.max(-1, Math.min(1, nightCfgAfterReveal.fade))
+                            : (nightCfgAfterReveal.enabled ? -0.95 : 0);
+                        this.nightModeScript.applyFromSettings({ enabled: nightCfgAfterReveal.enabled, fade });
                     }
                 });
             }
@@ -494,23 +494,17 @@ class Viewer {
             nightModeScript.light = lightEntity;
             nightModeScript.camera = cameraEntity || null;
             nightModeScript.splat = gsplatEntity;
-            // Keep enabled = true so update() continues to run
-            // We control night mode through nightMode property, not enabled
             nightModeScript.enabled = true;
-            const nightCfg = (settings as { nightMode?: { enabled: boolean; fade?: number } }).nightMode;
-            // 立即捕获 enabled/fade 的值：nightCfg 与 settings.nightMode 是同一引用，firstFrame 触发前 lighting-ui 等会把它改成 0，回调里再读就错了
-            const nightEnabled = !!nightCfg?.enabled;
+            const nightCfg = (settings as { nightMode?: { enabled?: boolean; fade?: number } }).nightMode;
             const nightFade = typeof nightCfg?.fade === 'number' && Number.isFinite(nightCfg.fade)
-                ? Math.max(0, Math.min(1, nightCfg.fade))
-                : 0.95;
-            if (nightEnabled) {
-                if (!state.hasRevealEffect) {
-                    events.once('firstFrame', () => {
-                        if (this.nightModeScript) {
-                            this.nightModeScript.applyFromSettings({ enabled: true, fade: nightFade });
-                        }
-                    });
-                }
+                ? Math.max(-1, Math.min(1, nightCfg.fade))
+                : (nightCfg?.enabled ? -0.95 : 0);
+            if (!state.hasRevealEffect) {
+                events.once('firstFrame', () => {
+                    if (this.nightModeScript) {
+                        this.nightModeScript.applyFromSettings({ fade: nightFade, enabled: nightCfg?.enabled });
+                    }
+                });
             }
             console.log('NightMode script initialized:', {
                 light: lightEntity ? 'found' : 'not found',

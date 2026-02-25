@@ -133,13 +133,13 @@ type ExperienceSettings = {
     lighting?: LightingSettings,
 
     /**
-     * 可选：夜间模式配置（保存/加载时序列化）
-     * - enabled: 是否开启夜间模式
-     * - fade: 夜间强度 0~1，不写则默认 0.95
+     * 可选：场景亮度配置（保存/加载时序列化）
+     * - fade: 全局亮度 -1~1，负值变暗、正值变亮、0 不变（仅用滑块控制，无开关）
+     * - enabled: 已废弃，仅用于兼容旧配置；新配置只保存 fade
      */
     nightMode?: {
-        enabled: boolean;
         fade?: number;
+        enabled?: boolean;
     };
 
     /**

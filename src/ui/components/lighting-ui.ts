@@ -5,13 +5,9 @@ import type { PointLightConfig, DirectionalLightConfig, SpotLightConfig } from '
 const LIGHTING_PANEL_HTML = `
 <div class="lightingPanel">
   <div class="settingsRow">
-    <div id="nightModeCheck" class="checkMark">✓</div>
-    <div id="nightModeOption" class="lightingOption">Night Mode</div>
-  </div>
-  <div class="settingsRow">
-    <label for="nightFadeSlider" class="lightingLabel">Intensity:</label>
+    <label for="nightFadeSlider" class="lightingLabel">Dark ← 0 → Bright:</label>
     <div class="lightingSliderWrap">
-      <input type="range" id="nightFadeSlider" min="0" max="1" step="0.01" value="0" class="lightingSlider" disabled>
+      <input type="range" id="nightFadeSlider" min="-1" max="1" step="0.01" value="0" class="lightingSlider">
       <span id="nightFadeValue" class="lightingSliderValue">0.00</span>
     </div>
   </div>
@@ -48,16 +44,12 @@ export function initLightingUI(global: Global): () => void {
 
     container.innerHTML = LIGHTING_PANEL_HTML;
 
-    const nightModeCheck = container.querySelector('#nightModeCheck') as HTMLElement | null;
-    const nightModeOption = container.querySelector('#nightModeOption') as HTMLElement | null;
     const nightFadeSlider = container.querySelector('#nightFadeSlider') as HTMLInputElement | null;
     const nightFadeValue = container.querySelector('#nightFadeValue') as HTMLElement | null;
     const showLightsInSceneCheck = container.querySelector('#showLightsInSceneCheck') as HTMLElement | null;
     const showLightsInSceneOption = container.querySelector('#showLightsInSceneOption') as HTMLElement | null;
     const pointLightsList = container.querySelector('#pointLightsList') as HTMLElement | null;
     const addPointLight = container.querySelector('#addPointLight') as HTMLButtonElement | null;
-
-    let nightModeEnabled = false;
     let lightsVisualVisible = !!(global.app as any).__pointLightsVisualVisible;
 
     const ensureLighting = (): { lights: (PointLightConfig | DirectionalLightConfig | SpotLightConfig)[] } => {
@@ -83,9 +75,9 @@ export function initLightingUI(global: Global): () => void {
         }
         return lighting;
     };
-    const ensureNightModeSettings = (): { enabled: boolean; fade?: number } => {
+    const ensureNightModeSettings = (): { fade?: number } => {
         if (!(global.settings as any).nightMode) {
-            (global.settings as any).nightMode = { enabled: false, fade: 0 };
+            (global.settings as any).nightMode = { fade: 0 };
         }
         return (global.settings as any).nightMode;
     };
@@ -98,28 +90,13 @@ export function initLightingUI(global: Global): () => void {
         return [((n >> 16) & 0xff) / 255, ((n >> 8) & 0xff) / 255, (n & 0xff) / 255];
     };
 
-    // Night Mode
-    if (nightModeCheck && nightModeOption) {
-        const toggleNightMode = () => {
-            nightModeEnabled = !nightModeEnabled;
-            nightModeCheck.classList[nightModeEnabled ? 'remove' : 'add']('hidden');
-            nightModeCheck.classList[nightModeEnabled ? 'add' : 'remove']('active');
-            if (nightFadeSlider) nightFadeSlider.disabled = !nightModeEnabled;
-            events.fire('toggle:night-mode');
-            global.app.fire('toggle:night-mode');
-        };
-        nightModeOption.addEventListener('click', toggleNightMode);
-        nightModeCheck.addEventListener('click', toggleNightMode);
-    }
-
+    // Scene brightness (Dark ← 0 → Bright), slider always active
     if (nightFadeSlider && nightFadeValue) {
         const updateSliderDisplay = (value: number) => {
             nightFadeSlider.value = value.toString();
             nightFadeValue.textContent = value.toFixed(2);
             ensureNightModeSettings();
-            const nm = (global.settings as any).nightMode;
-            nm.fade = value;
-            nm.enabled = nightModeEnabled;
+            (global.settings as any).nightMode.fade = value;
         };
         nightFadeSlider.addEventListener('input', (e) => {
             const value = parseFloat((e.target as HTMLInputElement).value);
@@ -129,26 +106,12 @@ export function initLightingUI(global: Global): () => void {
         });
         events.on('nightFade:changed', updateSliderDisplay);
         global.app.on('nightFade:changed', updateSliderDisplay);
-        global.app.on('nightMode:changed', (enabled: boolean) => {
-            nightModeEnabled = enabled;
-            ensureNightModeSettings();
-            (global.settings as any).nightMode.enabled = enabled;
-            if (nightModeCheck) {
-                nightModeCheck.classList[enabled ? 'remove' : 'add']('hidden');
-                nightModeCheck.classList[enabled ? 'add' : 'remove']('active');
-            }
-            if (nightFadeSlider) nightFadeSlider.disabled = !enabled;
-        });
-        // 从 global.settings 同步初始值，避免用 0/false 覆盖已加载的配置（如 settings-save.json 中的 nightMode）
         ensureNightModeSettings();
         const nmInit = (global.settings as any).nightMode;
-        nightModeEnabled = !!nmInit.enabled;
-        if (nightModeCheck) {
-            nightModeCheck.classList[nightModeEnabled ? 'remove' : 'add']('hidden');
-            nightModeCheck.classList[nightModeEnabled ? 'add' : 'remove']('active');
-        }
-        if (nightFadeSlider) nightFadeSlider.disabled = !nightModeEnabled;
-        updateSliderDisplay(typeof nmInit.fade === 'number' ? nmInit.fade : 0);
+        const initialFade = typeof nmInit.fade === 'number' && Number.isFinite(nmInit.fade)
+            ? Math.max(-1, Math.min(1, nmInit.fade))
+            : 0;
+        updateSliderDisplay(initialFade);
         setTimeout(() => global.app.fire('nightFade:request'), 100);
     }
 

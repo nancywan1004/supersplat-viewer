@@ -11,6 +11,7 @@ uniform vec3 uSpotDirections[10];
 uniform vec3 uSpotColors[10];
 uniform vec4 uSpotParams[10];  // x=innerConeRad, y=outerConeRad, z=range, w=enabled
 uniform float uNightFade;
+uniform float uBrightFactor;
 uniform vec3 uNightAmbient;
 uniform mat4 uModelMatrix;
 
@@ -26,7 +27,8 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
 }
 
 void modifySplatColor(vec3 center, inout vec4 color) {
-    if (uNightFade == 0.0) {
+    float f = uNightFade;
+    if (abs(f) < 1e-6) {
         return;
     }
 
@@ -67,7 +69,13 @@ void modifySplatColor(vec3 center, inout vec4 color) {
 
     vec3 linearColor = g2l(color.rgb);
     vec3 nightColor = g2l(uNightAmbient) + sum;
-    color.rgb = l2g(linearColor * mix(vec3(1.0), nightColor, uNightFade));
+    vec3 mult;
+    if (f > 0.0) {
+        mult = mix(vec3(1.0), vec3(uBrightFactor), f);
+    } else {
+        mult = mix(vec3(1.0), nightColor, -f);
+    }
+    color.rgb = l2g(linearColor * mult);
 }
 `;
 
@@ -80,6 +88,7 @@ uniform vec3 uSpotDirections[10];
 uniform vec3 uSpotColors[10];
 uniform vec4 uSpotParams[10];
 uniform float uNightFade;
+uniform float uBrightFactor;
 uniform vec3 uNightAmbient;
 uniform mat4 uModelMatrix;
 uniform mat4 uModelViewProj;
@@ -97,7 +106,8 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
 }
 
 void modifySplatColor(vec3 center, inout vec4 color) {
-    if (uNightFade == 0.0) {
+    float f = uNightFade;
+    if (abs(f) < 1e-6) {
         return;
     }
 
@@ -151,7 +161,13 @@ void modifySplatColor(vec3 center, inout vec4 color) {
 
     vec3 linearColor = g2l(color.rgb);
     vec3 nightColor = g2l(uNightAmbient) + sum;
-    color.rgb = l2g(linearColor * mix(vec3(1.0), nightColor, uNightFade));
+    vec3 mult;
+    if (f > 0.0) {
+        mult = mix(vec3(1.0), vec3(uBrightFactor), f);
+    } else {
+        mult = mix(vec3(1.0), nightColor, -f);
+    }
+    color.rgb = l2g(linearColor * mult);
 }
 `;
 
@@ -163,6 +179,7 @@ uniform uSpotDirections: array<vec3f, 10>;
 uniform uSpotColors: array<vec3f, 10>;
 uniform uSpotParams: array<vec4f, 10>;
 uniform uNightFade: f32;
+uniform uBrightFactor: f32;
 uniform uNightAmbient: vec3f;
 uniform uModelMatrix: mat4x4f;
 
@@ -176,7 +193,8 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
 }
 
 fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
-    if (uniform.uNightFade == 0.0) {
+    let f = uniform.uNightFade;
+    if (abs(f) < 1e-6) {
         return;
     }
 
@@ -219,7 +237,13 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
 
     let linearColor = g2l((*color).rgb);
     let nightColor = g2l(uniform.uNightAmbient) + sum;
-    (*color).rgb = l2g(linearColor * mix(vec3f(1.0), nightColor, uniform.uNightFade));
+    var mult: vec3f;
+    if (f > 0.0) {
+        mult = mix(vec3f(1.0), vec3f(uniform.uBrightFactor), f);
+    } else {
+        mult = mix(vec3f(1.0), nightColor, -f);
+    }
+    (*color).rgb = l2g(linearColor * mult);
 }
 `;
 
@@ -232,6 +256,7 @@ uniform uSpotDirections: array<vec3f, 10>;
 uniform uSpotColors: array<vec3f, 10>;
 uniform uSpotParams: array<vec4f, 10>;
 uniform uNightFade: f32;
+uniform uBrightFactor: f32;
 uniform uNightAmbient: vec3f;
 uniform uModelMatrix: mat4x4f;
 uniform uModelViewProj: mat4x4f;
@@ -250,7 +275,8 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
 }
 
 fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
-    if (uniform.uNightFade == 0.0) {
+    let f = uniform.uNightFade;
+    if (abs(f) < 1e-6) {
         return;
     }
 
@@ -306,7 +332,13 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
 
     let linearColor = g2l((*color).rgb);
     let nightColor = g2l(uniform.uNightAmbient) + sum;
-    (*color).rgb = l2g(linearColor * mix(vec3f(1.0), nightColor, uniform.uNightFade));
+    var mult: vec3f;
+    if (f > 0.0) {
+        mult = mix(vec3f(1.0), vec3f(uniform.uBrightFactor), f);
+    } else {
+        mult = mix(vec3f(1.0), nightColor, -f);
+    }
+    (*color).rgb = l2g(linearColor * mult);
 }
 `;
 
@@ -377,70 +409,41 @@ class NightMode extends GsplatShaderEffect {
      */
     emissiveBloom: number = 0.05;
 
-    private nightMode: boolean = false;
+    /**
+     * Brighten multiplier when fade > 0 (max brighten factor)
+     * @attribute
+     */
+    brightFactor: number = 1.4;
+
     private nightFade: number = 0;
-    private manualFadeControl: boolean = false; // Flag to indicate manual control via slider
+    private manualFadeControl: boolean = true; // Slider-only control, no auto animation
 
     initialize() {
         // Override initialization to work with external gsplat entity
         this.initialized = false;
         this.effectTime = 0;
         this.materialsApplied.clear();
-        
-        this.nightMode = false;
         this.nightFade = 0;
 
-        // Listen for toggle event
-        this.app.on('toggle:night-mode', () => {
-            // Disable manual control when toggling (allow automatic transition)
-            this.manualFadeControl = false;
-            this.nightMode = !this.nightMode;
-            // Keep script enabled so update() continues to be called
-            // We control shader application through nightMode, not enabled
-            // Only trigger enable/disable events for shader management
-            if (this.nightMode && !this.enabled) {
-                this.enabled = true;
-            }
-            // Fire event to update UI toggle state
-            this.app.fire('nightMode:changed', this.nightMode);
-            // When enabling night mode, sync slider with current nightFade value
-            if (this.nightMode) {
-                this.app.fire('nightFade:changed', this.nightFade);
-            }
-        });
-
-        // Listen for nightFade set event from UI slider
+        // Listen for nightFade set event from UI slider (always allowed, no toggle)
         this.app.on('nightFade:set', (value: number) => {
-            // Only allow slider control when night mode is enabled
-            if (!this.nightMode) {
-                console.warn('NightMode: Cannot set nightFade when night mode is disabled');
-                return;
-            }
-            // Clamp value to [0, 1]
-            const clampedValue = Math.max(0, Math.min(1, value));
-            // Enable manual control mode
+            const clampedValue = Math.max(-1, Math.min(1, value));
             this.manualFadeControl = true;
-            // Directly set nightFade
             this.nightFade = clampedValue;
-            // Ensure shaders are applied when slider is used
-            if (this.materialsApplied.size === 0 && this.splat?.gsplat) {
+            if (Math.abs(this.nightFade) > 1e-6 && this.materialsApplied.size === 0 && this.splat?.gsplat) {
                 this.applyShaders();
             }
-            // Force update uniforms immediately
             if (this.materialsApplied.size > 0) {
                 this.updateEffect(this.effectTime, 0);
             }
-            // Fire event to update UI
             this.app.fire('nightFade:changed', this.nightFade);
         });
 
-        // Listen to enable/disable events
         this.on('enable', () => {
             this.effectTime = 0;
             if (this.splat?.gsplat) {
                 this.initialized = true;
-                // Apply shaders immediately when enabling and nightMode is true
-                if (this.nightMode && this.materialsApplied.size === 0) {
+                if (Math.abs(this.nightFade) > 1e-6 && this.materialsApplied.size === 0) {
                     this.applyShaders();
                 }
             } else {
@@ -451,34 +454,23 @@ class NightMode extends GsplatShaderEffect {
         this.on('disable', () => {
         });
 
-        // 注意：不调用 setupUnifiedEventListener()。
-        // NightMode 不应在材质创建时自动应用 shader，否则会覆盖 reveal 效果的 gsplatModifyVS。
-        // NightMode 仅在 nightMode 被切换为 true 时才通过 updateEffect() 中的重试机制应用 shader。
-
-        // 监听 reveal 等互斥效果接管 gsplatModifyVS 的信号，立即退出 nightMode
+        // 监听 reveal 等互斥效果接管 gsplatModifyVS 的信号：重置亮度为 0 并清空 shader 应用
         this.app.on('nightMode:exit', () => {
-            if (!this.nightMode) return;
-            this.nightMode = false;
             this.nightFade = 0;
-            this.manualFadeControl = false;
-            this.materialsApplied.clear(); // 不删除 shader chunk，由接管方负责
-            this.app.fire('nightMode:changed', false);
+            this.manualFadeControl = true;
+            this.materialsApplied.clear();
             this.app.fire('nightFade:changed', 0);
         });
 
-        // Try to initialize if splat is already available
         if (this.splat?.gsplat) {
             this.initialized = true;
-            // 只在 nightMode 已开启时才应用 shader，避免覆盖 reveal
-            if (this.enabled && this.nightMode) {
+            if (this.enabled && Math.abs(this.nightFade) > 1e-6 && this.materialsApplied.size === 0) {
                 this.applyShaders();
             }
         }
-        
-        // Listen for nightFade request from UI (to sync initial slider value)
+
         this.app.on('nightFade:request', () => {
             this.app.fire('nightFade:changed', this.nightFade);
-            this.app.fire('nightMode:changed', this.nightMode);
         });
     }
 
@@ -613,46 +605,21 @@ class NightMode extends GsplatShaderEffect {
         // Request render if enabled and materials are applied, or if we're transitioning
         if (this.enabled && this.materialsApplied.size > 0) {
             this.app.renderNextFrame = true;
-        } else if (this.nightFade > 0 || this.nightFade < 1) {
+        } else if (Math.abs(this.nightFade) > 1e-6) {
             // Also request render during fade transitions even if shaders are not applied
             this.app.renderNextFrame = true;
         }
     }
 
     updateEffect(effectTime: number, dt: number) {
-        // Only update night fade with smooth interpolation if not manually controlled
-        if (!this.manualFadeControl) {
-            const target = this.nightMode ? 0.95 : 0;
-            const previousFade = this.nightFade;
-            const wasAtTarget = Math.abs(this.nightFade - target) < 1e-6;
-            
-            if (wasAtTarget) {
-                this.nightFade = target;
-            } else {
-                const damping = 0.98;
-                const dampFactor = 1 - Math.pow(damping, dt * 1000);
-                const newFade = this.nightFade * (1 - dampFactor) + target * dampFactor;
-                this.nightFade = newFade;
-            }
-        }
-        // If manually controlled, keep the current value (already set by slider event)
-        // But still update uniforms and other effects
-        
-        // 当 nightMode 关闭且 fade 回 0 时，只清空 materialsApplied 追踪集，
-        // 不删除 gsplatModifyVS shader chunk。原因：
-        // 1. NightMode shader 自带 `if (uNightFade == 0.0) return;`，nightFade=0 时完全透明
-        // 2. 删除 gsplatModifyVS 会连带破坏其他使用同一 chunk 的效果（如 reveal）
-        // 3. 清空 materialsApplied 以便下次切换 nightMode 时重新 applyShaders()
-        if (!this.nightMode && this.nightFade < 1e-6 && this.materialsApplied.size > 0) {
+        // Apply/clear shaders purely by |nightFade| (slider-only, no toggle)
+        if (Math.abs(this.nightFade) < 1e-6 && this.materialsApplied.size > 0) {
             this.materialsApplied.clear();
             this.app.renderNextFrame = true;
         }
 
-        if (this.nightMode && this.materialsApplied.size === 0 && this.splat?.gsplat) {
+        if (Math.abs(this.nightFade) > 1e-6 && this.materialsApplied.size === 0 && this.splat?.gsplat) {
             this.applyShaders();
-            if (!this.manualFadeControl) {
-                this.app.fire('nightFade:changed', this.nightFade);
-            }
         }
 
         // 从场景中的 Light 实体收集点光源与聚光灯，上限各 10 个（供高斯 night mode 打光）
@@ -742,6 +709,7 @@ class NightMode extends GsplatShaderEffect {
             this.setUniform('uSpotColors[0]', spotColors);
             this.setUniform('uSpotParams[0]', spotParams);
             this.setUniform('uNightFade', this.nightFade);
+            this.setUniform('uBrightFactor', this.brightFactor);
             this.setUniform('uNightAmbient', [
                 this.nightAmbient.r,
                 this.nightAmbient.g,
@@ -770,18 +738,18 @@ class NightMode extends GsplatShaderEffect {
 
         // Update light intensity (always update, even if shaders are removed)
         if (this.light?.light) {
-            const targetIntensity = 1 - this.nightFade;
+            const targetIntensity = Math.max(0.1, Math.min(2, 1 + this.nightFade));
             this.light.light.intensity = targetIntensity;
         }
 
-        // Update camera bloom
+        // Update camera bloom (emissive bloom only when darkening, fade < 0)
         const cameraScript = this.camera?.script as any;
         if (cameraScript?.cameraEffects?.bloom) {
-            cameraScript.cameraEffects.bloom.intensity = this.nightFade * this.emissiveBloom;
+            cameraScript.cameraEffects.bloom.intensity = Math.max(0, -this.nightFade) * this.emissiveBloom;
         }
 
-        // Update skybox intensity (always update, even if shaders are removed)
-        const targetSkyboxIntensity = 1.0 * (1 - this.nightFade) + 0.2 * this.nightFade;
+        // Update skybox intensity: same direction as scene (fade > 0 brighten → brighter sky, fade < 0 darken → dimmer sky)
+        const targetSkyboxIntensity = Math.max(0.2, Math.min(1.5, 1.0 + 0.8 * this.nightFade));
         this.app.scene.skyboxIntensity = targetSkyboxIntensity;
 
         // Fire events
@@ -793,26 +761,10 @@ class NightMode extends GsplatShaderEffect {
     }
 
     /**
-     * Toggle night mode on/off
-     */
-    toggle() {
-        this.nightMode = !this.nightMode;
-        this.enabled = this.nightMode;
-    }
-
-    /**
-     * Set night mode state
-     */
-    setNightMode(enabled: boolean) {
-        this.nightMode = enabled;
-        this.enabled = enabled;
-    }
-
-    /**
-     * Set night fade (0–1). Enables manual control so fade is not auto-animated.
+     * Set night fade (-1–1). Controls scene brightness directly (no toggle).
      */
     setNightFade(value: number) {
-        const clamped = Math.max(0, Math.min(1, value));
+        const clamped = Math.max(-1, Math.min(1, value));
         this.manualFadeControl = true;
         this.nightFade = clamped;
         if (this.materialsApplied.size > 0) {
@@ -822,34 +774,35 @@ class NightMode extends GsplatShaderEffect {
     }
 
     /**
-     * Apply night mode state from settings (e.g. after load). Fires events so UI syncs.
+     * Apply brightness from settings (e.g. after load). Accepts { fade?: number } or legacy { enabled: boolean; fade?: number }.
      */
-    applyFromSettings(config: { enabled: boolean; fade?: number }) {
-        console.log('applyFromSettings', config);
-        if (!config || typeof config.enabled !== 'boolean') return;
-        this.nightMode = config.enabled;
-        this.enabled = config.enabled;
-        if (this.nightMode) {
-            this.manualFadeControl = true;
-            const fade = typeof config.fade === 'number' ? Math.max(0, Math.min(1, config.fade)) : 0.95;
-            this.nightFade = fade;
-            if (this.splat?.gsplat && this.materialsApplied.size === 0) {
-                this.applyShaders();
-            }
-            if (this.materialsApplied.size > 0) {
-                this.updateEffect(this.effectTime, 0);
-            }
-        } else {
+    applyFromSettings(config: { enabled?: boolean; fade?: number }) {
+        if (!config) return;
+        this.manualFadeControl = true;
+        // Legacy: enabled === false means "no effect"
+        if (config.enabled === false) {
             this.nightFade = 0;
-            this.manualFadeControl = false;
+        } else {
+            let fade: number;
+            if (typeof config.fade === 'number' && Number.isFinite(config.fade)) {
+                fade = Math.max(-1, Math.min(1, config.fade));
+            } else {
+                fade = !!config.enabled ? -0.95 : 0;
+            }
+            this.nightFade = fade;
         }
-        this.app.fire('nightMode:changed', this.nightMode);
+        if (Math.abs(this.nightFade) > 1e-6 && this.splat?.gsplat && this.materialsApplied.size === 0) {
+            this.applyShaders();
+        }
+        if (this.materialsApplied.size > 0) {
+            this.updateEffect(this.effectTime, 0);
+        }
         this.app.fire('nightFade:changed', this.nightFade);
     }
 
-    /** 是否开启夜间模式（供 Viewer 判断是否需与 Bloom Brush 合成） */
+    /** Whether brightness effect is active (|fade| > 0), e.g. for Bloom Brush coupling */
     get isNightModeEnabled(): boolean {
-        return this.nightMode;
+        return Math.abs(this.nightFade) > 1e-6;
     }
 }
 
