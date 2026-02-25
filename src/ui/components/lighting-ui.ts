@@ -163,6 +163,7 @@ export function initLightingUI(global: Global): () => void {
                         <span class="pointLightNum">Directional</span>
                     </div>
                     <label class="pointLightEnableWrap"><input type="checkbox" class="pointLightEnable" data-index="${index}" data-field="enabled" ${enabled ? 'checked' : ''}><span class="pointLightEnableLabel">On</span></label>
+                    <span class="pointLightLabel">I</span><input type="number" step="0.1" min="0" data-index="${index}" data-field="dirIntensity" value="${intensity}" title="亮度">
                     <span class="pointLightLabel">Pitch</span><input type="number" step="1" min="-90" max="90" data-index="${index}" data-field="dirPitch" value="${pitch}">
                     <span class="pointLightLabel">Yaw</span><input type="number" step="1" min="0" max="360" data-index="${index}" data-field="dirYaw" value="${yaw}">
                 `;
@@ -223,6 +224,7 @@ export function initLightingUI(global: Global): () => void {
                 if (isDirectional(light)) {
                     const d = light as DirectionalLightConfig;
                     if (field === 'enabled') d.enabled = (input as HTMLInputElement).checked;
+                    else if (field === 'dirIntensity') d.intensity = parseFloat((input as HTMLInputElement).value) || 1;
                     else if (field === 'dirPitch') d.pitch = parseFloat((input as HTMLInputElement).value) ?? 35;
                     else if (field === 'dirYaw') d.yaw = parseFloat((input as HTMLInputElement).value) ?? 45;
                     (input as HTMLElement).closest('.pointLightRow')?.classList.toggle('pointLightRow--disabled', !d.enabled);

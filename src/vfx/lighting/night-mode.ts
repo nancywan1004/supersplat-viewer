@@ -14,6 +14,9 @@ uniform float uNightFade;
 uniform float uBrightFactor;
 uniform vec3 uNightAmbient;
 uniform mat4 uModelMatrix;
+uniform vec3 uCameraPos;
+uniform vec3 uLightDir; // direction of directional light
+uniform vec3 uLightColor; // color of directional light
 
 vec3 l2g(vec3 c) { return pow(c, vec3(1.0 / 2.2)); }
 vec3 g2l(vec3 c) { return pow(c, vec3(2.2)); }
@@ -71,7 +74,11 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     vec3 nightColor = g2l(uNightAmbient) + sum;
     vec3 mult;
     if (f > 0.0) {
-        mult = mix(vec3(1.0), vec3(uBrightFactor), f);
+        vec3 baseBright = mix(vec3(1.0), vec3(uBrightFactor), f);
+        vec3 viewDir = normalize(uCameraPos - wpos);
+        float NdotL = max(0.0, dot(viewDir, uLightDir));
+        vec3 dirContrib = NdotL * uLightColor;
+        mult = baseBright * (vec3(1.0) + dirContrib);
     } else {
         mult = mix(vec3(1.0), nightColor, -f);
     }
@@ -91,6 +98,9 @@ uniform float uNightFade;
 uniform float uBrightFactor;
 uniform vec3 uNightAmbient;
 uniform mat4 uModelMatrix;
+uniform vec3 uCameraPos;
+uniform vec3 uLightDir;
+uniform vec3 uLightColor;
 uniform mat4 uModelViewProj;
 uniform sampler2D uBloomMask;
 uniform float uBloomThreshold;
@@ -163,7 +173,11 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     vec3 nightColor = g2l(uNightAmbient) + sum;
     vec3 mult;
     if (f > 0.0) {
-        mult = mix(vec3(1.0), vec3(uBrightFactor), f);
+        vec3 baseBright = mix(vec3(1.0), vec3(uBrightFactor), f);
+        vec3 viewDir = normalize(uCameraPos - wpos);
+        float NdotL = max(0.0, dot(viewDir, uLightDir));
+        vec3 dirContrib = NdotL * uLightColor;
+        mult = baseBright * (vec3(1.0) + dirContrib);
     } else {
         mult = mix(vec3(1.0), nightColor, -f);
     }
@@ -182,6 +196,9 @@ uniform uNightFade: f32;
 uniform uBrightFactor: f32;
 uniform uNightAmbient: vec3f;
 uniform uModelMatrix: mat4x4f;
+uniform uCameraPos: vec3f;
+uniform uLightDir: vec3f;
+uniform uLightColor: vec3f;
 
 fn l2g(c: vec3f) -> vec3f { return pow(c, vec3f(1.0 / 2.2)); }
 fn g2l(c: vec3f) -> vec3f { return pow(c, vec3f(2.2)); }
@@ -239,7 +256,11 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     let nightColor = g2l(uniform.uNightAmbient) + sum;
     var mult: vec3f;
     if (f > 0.0) {
-        mult = mix(vec3f(1.0), vec3f(uniform.uBrightFactor), f);
+        let baseBright = mix(vec3f(1.0), vec3f(uniform.uBrightFactor), f);
+        let viewDir = normalize(uniform.uCameraPos - wpos);
+        let NdotL = max(0.0, dot(viewDir, uniform.uLightDir));
+        let dirContrib = NdotL * uniform.uLightColor;
+        mult = baseBright * (vec3f(1.0) + dirContrib);
     } else {
         mult = mix(vec3f(1.0), nightColor, -f);
     }
@@ -259,6 +280,9 @@ uniform uNightFade: f32;
 uniform uBrightFactor: f32;
 uniform uNightAmbient: vec3f;
 uniform uModelMatrix: mat4x4f;
+uniform uCameraPos: vec3f;
+uniform uLightDir: vec3f;
+uniform uLightColor: vec3f;
 uniform uModelViewProj: mat4x4f;
 var uBloomMask: texture_2d<f32>;
 var uBloomMaskSampler: sampler;
@@ -334,7 +358,11 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     let nightColor = g2l(uniform.uNightAmbient) + sum;
     var mult: vec3f;
     if (f > 0.0) {
-        mult = mix(vec3f(1.0), vec3f(uniform.uBrightFactor), f);
+        let baseBright = mix(vec3f(1.0), vec3f(uniform.uBrightFactor), f);
+        let viewDir = normalize(uniform.uCameraPos - wpos);
+        let NdotL = max(0.0, dot(viewDir, uniform.uLightDir));
+        let dirContrib = NdotL * uniform.uLightColor;
+        mult = baseBright * (vec3f(1.0) + dirContrib);
     } else {
         mult = mix(vec3f(1.0), nightColor, -f);
     }
@@ -414,6 +442,12 @@ class NightMode extends GsplatShaderEffect {
      * @attribute
      */
     brightFactor: number = 1.4;
+
+    /**
+     * Directional light contribution scale when brightening (fade > 0). 0 = no dir light in shader.
+     * @attribute
+     */
+    dirLightScale: number = 0.4;
 
     private nightFade: number = 0;
     private manualFadeControl: boolean = true; // Slider-only control, no auto animation
@@ -716,6 +750,32 @@ class NightMode extends GsplatShaderEffect {
                 this.nightAmbient.b
             ]);
             this.setUniform('uModelMatrix', modelMatrix);
+            // 调亮时 (fade > 0) 传入平行光与相机位置，供 shader 计算平行光参与的高斯光照
+            const camPos = this.camera?.getPosition();
+            if (camPos) {
+                this.setUniform('uCameraPos', [camPos.x, camPos.y, camPos.z]);
+            } else {
+                this.setUniform('uCameraPos', [0, 0, 0]);
+            }
+            if (this.nightFade > 1e-6 && this.light?.light && (this.light.light as any).type === 'directional' && this.dirLightScale > 0) {
+                const wt = this.light.getWorldTransform();
+                const data = wt.data;
+                const yx = data[1], yy = data[5], yz = data[9];
+                const len = Math.sqrt(yx * yx + yy * yy + yz * yz) || 1;
+                this.setUniform('uLightDir', [yx / len, yy / len, yz / len]);
+                const c = this.light.light.color;
+                const intensity = this.light.light.intensity ?? 1;
+                const lin = (x: number) => Math.pow(x, 2.2);
+                const scale = this.dirLightScale * intensity;
+                this.setUniform('uLightColor', [
+                    lin(c.r) * scale,
+                    lin(c.g) * scale,
+                    lin(c.b) * scale
+                ]);
+            } else {
+                this.setUniform('uLightDir', [0, 1, 0]);
+                this.setUniform('uLightColor', [0, 0, 0]);
+            }
             if (this.bloomBrushActive && this.bloomBrushMask && this.camera?.camera && this.splat) {
                 const cam = this.camera.camera;
                 if (isUnified) {
@@ -736,9 +796,12 @@ class NightMode extends GsplatShaderEffect {
             }
         }
 
-        // Update light intensity (always update, even if shaders are removed)
+        // Update directional light intensity: 以 settings 中的平行光强度为基准，再乘以 (1 + nightFade)，这样用户调节的亮度不会被覆盖
         if (this.light?.light) {
-            const targetIntensity = Math.max(0.1, Math.min(2, 1 + this.nightFade));
+            const global = (this.app as any).__global;
+            const dirCfg = global?.settings?.lighting?.lights?.find((l: any) => l.type === 'directional');
+            const baseIntensity = typeof dirCfg?.intensity === 'number' ? dirCfg.intensity : 1.5;
+            const targetIntensity = Math.max(0.1, Math.min(4, baseIntensity * (1 + this.nightFade)));
             this.light.light.intensity = targetIntensity;
         }
 
