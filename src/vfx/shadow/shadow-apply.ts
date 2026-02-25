@@ -142,10 +142,10 @@ class ShadowApplyRt extends Script {
         const mainGsplat = app.root.findByName('gsplat') as Entity | null;
         const mainGsplatComp = mainGsplat?.gsplat;
         const mainLayers = mainGsplatComp?.layers ? [...mainGsplatComp.layers] : undefined;
-        console.log('mainLayers', mainLayers);
+        // console.log('mainLayers', mainLayers);
         const mainUnified = mainGsplatComp?.unified ?? true;
 
-        console.log(`[Shadow] spawnTestSplat: loading ${url}, mainLayers=${JSON.stringify(mainLayers)}, unified=${mainUnified}`);
+        // console.log(`[Shadow] spawnTestSplat: loading ${url}, mainLayers=${JSON.stringify(mainLayers)}, unified=${mainUnified}`);
 
         const asset = new Asset(name, 'gsplat', { url: absUrl, filename: url });
         app.assets.add(asset);
@@ -362,16 +362,16 @@ class ShadowApplyRt extends Script {
             device.setDepthState(DepthState.NODEPTH);
             drawQuadWithShader(device, null, shader);
 
-            if (_postrenderCount <= 3 || _postrenderCount % 300 === 0) {
-                console.log('[Shadow] postrender applied', {
-                    frame: _postrenderCount,
-                    darken,
-                    intensity,
-                    debugRt,
-                    rtSize: `${shadowRt.width}x${shadowRt.height}`,
-                    deviceSize: `${device.width}x${device.height}`
-                });
-            }
+            // if (_postrenderCount <= 3 || _postrenderCount % 300 === 0) {
+            //     console.log('[Shadow] postrender applied', {
+            //         frame: _postrenderCount,
+            //         darken,
+            //         intensity,
+            //         debugRt,
+            //         rtSize: `${shadowRt.width}x${shadowRt.height}`,
+            //         deviceSize: `${device.width}x${device.height}`
+            //     });
+            // }
         });
 
         // ─── 监听 UI 事件：生成/清除 testSphere / testSplat ───
