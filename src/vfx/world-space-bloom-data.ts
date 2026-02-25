@@ -16,6 +16,8 @@ export interface BloomPoint {
 export class WorldSpaceBloomData {
     private points: BloomPoint[] = [];
     private committed: BloomPoint[] = [];  // "Set bloom" committed points
+    /** 已提交区域对应的局部亮度 -1～1，与 committed 一起持久化；Set 时写入并用于 bake 到顶点 */
+    private committedBrightness: number = 0;
 
     /**
      * Add a new bloom point
@@ -46,6 +48,15 @@ export class WorldSpaceBloomData {
     reset(): void {
         this.points = [];
         this.committed = [];
+        this.committedBrightness = 0;
+    }
+
+    getCommittedBrightness(): number {
+        return this.committedBrightness;
+    }
+
+    setCommittedBrightness(b: number): void {
+        this.committedBrightness = Math.max(-1, Math.min(1, b));
     }
 
     /**
@@ -62,6 +73,13 @@ export class WorldSpaceBloomData {
      */
     getAllPoints(): BloomPoint[] {
         return [...this.committed, ...this.points];
+    }
+
+    /**
+     * Get committed points only (for persisted brightness regions).
+     */
+    getCommittedPoints(): BloomPoint[] {
+        return [...this.committed];
     }
 
     /**
@@ -99,7 +117,8 @@ export class WorldSpaceBloomData {
                 position: [p.position.x, p.position.y, p.position.z],
                 radius: p.radius,
                 intensity: p.intensity
-            }))
+            })),
+            committedBrightness: this.committedBrightness
         };
     }
 
@@ -134,6 +153,9 @@ export class WorldSpaceBloomData {
                         });
                     }
                 }
+            }
+            if (typeof data.committedBrightness === 'number') {
+                this.committedBrightness = Math.max(-1, Math.min(1, data.committedBrightness));
             }
         } catch (error) {
             console.warn('WorldSpaceBloomData.fromJSON: Failed to parse data, using defaults', error);

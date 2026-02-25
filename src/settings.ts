@@ -139,7 +139,8 @@ const migrateV2 = (v1: V1): V2 => {
                 threshold: 0.2,
                 bloomDebug: false,
                 bloomBrush: false,
-                bloomBrushSize: 30
+                bloomBrushSize: 30,
+                bloomBrushBrightness: 0
             },
             grading: {
                 enabled: false,
@@ -283,7 +284,8 @@ const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: numb
                 threshold: 0.2,
                 bloomDebug: false,
                 bloomBrush: false,
-                bloomBrushSize: 30
+                bloomBrushSize: 30,
+                bloomBrushBrightness: 0
             },
             grading: {
                 enabled: false,

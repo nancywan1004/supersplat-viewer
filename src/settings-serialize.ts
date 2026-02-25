@@ -17,7 +17,8 @@ const defaultPostEffectSettings = () => ({
         threshold: 0.2,
         bloomDebug: false,
         bloomBrush: false,
-        bloomBrushSize: 30
+        bloomBrushSize: 30,
+        bloomBrushBrightness: 0
     },
     grading: {
         enabled: false,

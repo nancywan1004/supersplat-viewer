@@ -46,6 +46,13 @@ const POST_EFFECT_PANEL_HTML = `
     <button type="button" id="bloomBrushClearBtn" class="postEffectOption" style="padding:2px 6px;font-size:11px;">Clear</button>
     <button type="button" id="bloomBrushResetBtn" class="postEffectOption" style="padding:2px 6px;font-size:11px;">Reset</button>
   </div>
+  <div id="bloomBrushBrightnessRow" class="settingsRow hidden">
+    <label for="bloomBrushBrightnessSlider" class="postEffectLabel">Dark ← 0 → Bright:</label>
+    <div class="postEffectSliderWrap">
+      <input type="range" id="bloomBrushBrightnessSlider" min="-1" max="1" step="0.05" value="0" class="postEffectSlider">
+      <span id="bloomBrushBrightnessValue" class="postEffectSliderValue">0.00</span>
+    </div>
+  </div>
   </div>
   <div class="postEffectSectionLabel collapsible collapsed" id="shadowSectionLabel" title="Click to expand/collapse">Shadow</div>
   <div id="shadowSectionContent" class="postEffectSectionContent collapsed">
@@ -95,6 +102,10 @@ type BloomSettings = {
     bloomDebug: boolean;
     bloomBrush: boolean;
     bloomBrushSize: number;
+    /** 选中区域局部亮度 -1～1，0 不变，<0 调暗，>0 调亮；Set 时写入 bloomBrushCommittedBrightness */
+    bloomBrushBrightness: number;
+    /** 已提交区域亮度，与 worldSpacePoints.committed 在 shader 中每帧应用 */
+    bloomBrushCommittedBrightness?: number;
 };
 
 const ensureBloom = (settings: Global['settings']): BloomSettings => {
@@ -108,13 +119,16 @@ const ensureBloom = (settings: Global['settings']): BloomSettings => {
             threshold: 0.2,
             bloomDebug: false,
             bloomBrush: false,
-            bloomBrushSize: 30
+            bloomBrushSize: 30,
+            bloomBrushBrightness: 0
         };
     } else {
         if ((b as any).threshold === undefined) (b as any).threshold = 0.2;
         if ((b as any).bloomDebug === undefined) (b as any).bloomDebug = false;
         if ((b as any).bloomBrush === undefined) (b as any).bloomBrush = false;
         if ((b as any).bloomBrushSize === undefined) (b as any).bloomBrushSize = 30;
+        if (typeof (b as any).bloomBrushBrightness !== 'number') (b as any).bloomBrushBrightness = 0;
+        if (typeof (b as any).bloomBrushCommittedBrightness !== 'number') (b as any).bloomBrushCommittedBrightness = 0;
     }
     return settings.postEffectSettings.bloom as BloomSettings;
 };
@@ -178,6 +192,9 @@ export function initPostEffectUI(global: Global): () => void {
     const bloomBrushSetBtn = container.querySelector('#bloomBrushSetBtn') as HTMLButtonElement | null;
     const bloomBrushClearBtn = container.querySelector('#bloomBrushClearBtn') as HTMLButtonElement | null;
     const bloomBrushResetBtn = container.querySelector('#bloomBrushResetBtn') as HTMLButtonElement | null;
+    const bloomBrushBrightnessRow = container.querySelector('#bloomBrushBrightnessRow') as HTMLElement | null;
+    const bloomBrushBrightnessSlider = container.querySelector('#bloomBrushBrightnessSlider') as HTMLInputElement | null;
+    const bloomBrushBrightnessValue = container.querySelector('#bloomBrushBrightnessValue') as HTMLElement | null;
     const bloomSectionLabel = container.querySelector('#bloomSectionLabel') as HTMLElement | null;
     const bloomSectionContent = container.querySelector('#bloomSectionContent') as HTMLElement | null;
     const shadowSectionLabel = container.querySelector('#shadowSectionLabel') as HTMLElement | null;
@@ -211,9 +228,13 @@ export function initPostEffectUI(global: Global): () => void {
         if (bloomDebugCheck) bloomDebugCheck.classList.toggle('active', b.bloomDebug ?? false);
         if (bloomBrushCheck) bloomBrushCheck.classList.toggle('active', b.bloomBrush ?? false);
         if (bloomBrushOptionsRow) bloomBrushOptionsRow.classList.toggle('hidden', !(b.bloomBrush ?? false));
+        if (bloomBrushBrightnessRow) bloomBrushBrightnessRow.classList.toggle('hidden', !(b.bloomBrush ?? false));
         const brushSize = Math.max(1, Math.min(200, Number(b.bloomBrushSize ?? 30)));
         if (bloomBrushSizeSlider) bloomBrushSizeSlider.value = String(brushSize);
         if (bloomBrushSizeValue) bloomBrushSizeValue.textContent = String(brushSize);
+        const brightness = Math.max(-1, Math.min(1, Number((b as any).bloomBrushBrightness ?? 0)));
+        if (bloomBrushBrightnessSlider) bloomBrushBrightnessSlider.value = String(brightness);
+        if (bloomBrushBrightnessValue) bloomBrushBrightnessValue.textContent = brightness.toFixed(2);
         const sh = ensureShadow(settings);
         if (shadowEnableCheck) shadowEnableCheck.classList.toggle('active', sh.enabled);
         if (shadowCastCheck) shadowCastCheck.classList.toggle('active', sh.castShadows !== false);
@@ -283,6 +304,7 @@ export function initPostEffectUI(global: Global): () => void {
     if (bloomBrushOption && bloomBrushCheck) {
         const toggleBloomBrush = () => {
             const b = ensureBloom(settings);
+            const wasOn = !!(b as any).bloomBrush;
             (b as any).bloomBrush = !(b as any).bloomBrush;
             if ((b as any).bloomBrush) (b as any).bloomDebug = false;
             syncFromSettings();
@@ -297,6 +319,15 @@ export function initPostEffectUI(global: Global): () => void {
             const b = ensureBloom(settings);
             (b as any).bloomBrushSize = Math.max(1, Math.min(200, parseInt(bloomBrushSizeSlider!.value, 10) || 30));
             bloomBrushSizeValue!.textContent = String((b as any).bloomBrushSize);
+            firePostEffectChanged();
+        });
+    }
+    if (bloomBrushBrightnessSlider && bloomBrushBrightnessValue) {
+        bloomBrushBrightnessSlider.addEventListener('input', () => {
+            const b = ensureBloom(settings);
+            const val = parseFloat(bloomBrushBrightnessSlider!.value);
+            (b as any).bloomBrushBrightness = Math.max(-1, Math.min(1, val));
+            bloomBrushBrightnessValue!.textContent = (Math.max(-1, Math.min(1, val))).toFixed(2);
             firePostEffectChanged();
         });
     }

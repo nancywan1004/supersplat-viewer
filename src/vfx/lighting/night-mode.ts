@@ -25,6 +25,10 @@ uniform mat4 uModelMatrix;
 uniform vec3 uCameraPos;
 uniform vec3 uLightDir; // direction of directional light
 uniform vec3 uLightColor; // color of directional light
+uniform sampler2D uCommittedBrightnessVolume; // 64×4096 2D 图集，体素 (ix,iy,iz) -> (ix+0.5)/64, (iy+iz*64+0.5)/4096
+uniform vec3 uCommittedAabbMin;
+uniform vec3 uCommittedAabbMax;
+uniform float uCommittedBrightness;
 
 vec3 l2g(vec3 c) { return pow(c, vec3(1.0 / 2.2)); }
 vec3 g2l(vec3 c) { return pow(c, vec3(2.2)); }
@@ -38,14 +42,26 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
 }
 
 void modifySplatColor(vec3 center, inout vec4 color) {
+    vec4 worldPos = uModelMatrix * vec4(center, 1.0);
+    worldPos /= worldPos.w;
+    vec3 wpos = worldPos.xyz;
+
+    // 已提交区域：3D 体积纹理一次采样，无点数上限
+    if (abs(uCommittedBrightness) > 1e-6) {
+        vec3 size = max(uCommittedAabbMax - uCommittedAabbMin, vec3(1e-6));
+        vec3 n = clamp((wpos - uCommittedAabbMin) / size, 0.0, 1.0);
+        float ix = floor(n.x * 64.0); float iy = floor(n.y * 64.0); float iz = floor(n.z * 64.0);
+        ix = min(ix, 63.0); iy = min(iy, 63.0); iz = min(iz, 63.0);
+        float u = (ix + 0.5) / 64.0;
+        float v = (iy + iz * 64.0 + 0.5) / 4096.0;
+        float committedMask = texture2D(uCommittedBrightnessVolume, vec2(u, v)).r;
+        color.rgb *= 1.0 + uCommittedBrightness * committedMask;
+    }
+
     float f = uNightFade;
     if (abs(f) < 1e-6) {
         return;
     }
-
-    vec4 worldPos = uModelMatrix * vec4(center, 1.0);
-    worldPos /= worldPos.w;
-    vec3 wpos = worldPos.xyz;
 
     vec3 sum = vec3(0.0);
     for (int i = 0; i < 10; ++i) {
@@ -115,6 +131,11 @@ uniform mat4 uModelViewProj;
 uniform sampler2D uBloomMask;
 uniform float uBloomThreshold;
 uniform float uBloomBrushActive;
+uniform float uBloomBrushLocalBrightness;
+uniform sampler2D uCommittedBrightnessVolume;
+uniform vec3 uCommittedAabbMin;
+uniform vec3 uCommittedAabbMax;
+uniform float uCommittedBrightness;
 
 vec3 l2g(vec3 c) { return pow(c, vec3(1.0 / 2.2)); }
 vec3 g2l(vec3 c) { return pow(c, vec3(2.2)); }
@@ -126,11 +147,24 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
 }
 
 void modifySplatColor(vec3 center, inout vec4 color) {
-    float f = uNightFade;
-    if (abs(f) < 1e-6) {
-        return;
+    vec4 worldPos = uModelMatrix * vec4(center, 1.0);
+    worldPos /= worldPos.w;
+    vec3 wpos = worldPos.xyz;
+
+    // 已提交区域：3D 体积纹理一次采样
+    float committedMask = 0.0;
+    if (abs(uCommittedBrightness) > 1e-6) {
+        vec3 size = max(uCommittedAabbMax - uCommittedAabbMin, vec3(1e-6));
+        vec3 n = clamp((wpos - uCommittedAabbMin) / size, 0.0, 1.0);
+        float ix = floor(n.x * 64.0); float iy = floor(n.y * 64.0); float iz = floor(n.z * 64.0);
+        ix = min(ix, 63.0); iy = min(iy, 63.0); iz = min(iz, 63.0);
+        float u = (ix + 0.5) / 64.0;
+        float v = (iy + iz * 64.0 + 0.5) / 4096.0;
+        committedMask = texture2D(uCommittedBrightnessVolume, vec2(u, v)).r;
+        color.rgb *= 1.0 + uCommittedBrightness * committedMask;
     }
 
+    // 笔刷区域：仅对「明确未提交」区域应用实时预览亮度；committedMask>=0.2 视为已提交，避免体积边缘重复乘算
     if (uBloomBrushActive > 0.5) {
         vec4 clipPos = uModelViewProj * vec4(center, 1.0);
         vec3 ndc = clipPos.xyz / clipPos.w;
@@ -139,14 +173,17 @@ void modifySplatColor(vec3 center, inout vec4 color) {
             float maskVal = texture2D(uBloomMask, uv).r;
             float lum = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
             if (maskVal > 0.5 && lum >= uBloomThreshold) {
-                return;
+                if (committedMask < 0.2) {
+                    color.rgb *= 1.0 + uBloomBrushLocalBrightness;
+                }
             }
         }
     }
 
-    vec4 worldPos = uModelMatrix * vec4(center, 1.0);
-    worldPos /= worldPos.w;
-    vec3 wpos = worldPos.xyz;
+    float f = uNightFade;
+    if (abs(f) < 1e-6) {
+        return;
+    }
 
     vec3 sum = vec3(0.0);
     for (int i = 0; i < 10; ++i) {
@@ -211,6 +248,11 @@ uniform uModelMatrix: mat4x4f;
 uniform uCameraPos: vec3f;
 uniform uLightDir: vec3f;
 uniform uLightColor: vec3f;
+var uCommittedBrightnessVolume: texture_2d<f32>;
+var uCommittedBrightnessVolumeSampler: sampler;
+uniform uCommittedAabbMin: vec3f;
+uniform uCommittedAabbMax: vec3f;
+uniform uCommittedBrightness: f32;
 
 fn l2g(c: vec3f) -> vec3f { return pow(c, vec3f(1.0 / 2.2)); }
 fn g2l(c: vec3f) -> vec3f { return pow(c, vec3f(2.2)); }
@@ -222,13 +264,25 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
 }
 
 fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
+    let worldPos = uniform.uModelMatrix * vec4f(center, 1.0);
+    let wpos = worldPos.xyz / worldPos.w;
+
+    if (abs(uniform.uCommittedBrightness) > 1e-6) {
+        let size = max(uniform.uCommittedAabbMax - uniform.uCommittedAabbMin, vec3f(1e-6));
+        let n = clamp((wpos - uniform.uCommittedAabbMin) / size, vec3f(0.0), vec3f(1.0));
+        let ix = min(floor(n.x * 64.0), 63.0);
+        let iy = min(floor(n.y * 64.0), 63.0);
+        let iz = min(floor(n.z * 64.0), 63.0);
+        let u = (ix + 0.5) / 64.0;
+        let v = (iy + iz * 64.0 + 0.5) / 4096.0;
+        let committedMask = textureSample(uCommittedBrightnessVolume, uCommittedBrightnessVolumeSampler, vec2f(u, v)).r;
+        (*color).rgb *= 1.0 + uniform.uCommittedBrightness * committedMask;
+    }
+
     let f = uniform.uNightFade;
     if (abs(f) < 1e-6) {
         return;
     }
-
-    let worldPos = uniform.uModelMatrix * vec4f(center, 1.0);
-    let wpos = worldPos.xyz / worldPos.w;
 
     var sum = vec3f(0.0);
     for (var i = 0u; i < 10u; i++) {
@@ -302,6 +356,12 @@ var uBloomMask: texture_2d<f32>;
 var uBloomMaskSampler: sampler;
 uniform uBloomThreshold: f32;
 uniform uBloomBrushActive: f32;
+uniform uBloomBrushLocalBrightness: f32;
+var uCommittedBrightnessVolume: texture_2d<f32>;
+var uCommittedBrightnessVolumeSampler: sampler;
+uniform uCommittedAabbMin: vec3f;
+uniform uCommittedAabbMax: vec3f;
+uniform uCommittedBrightness: f32;
 
 fn l2g(c: vec3f) -> vec3f { return pow(c, vec3f(1.0 / 2.2)); }
 fn g2l(c: vec3f) -> vec3f { return pow(c, vec3f(2.2)); }
@@ -313,11 +373,23 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
 }
 
 fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
-    let f = uniform.uNightFade;
-    if (abs(f) < 1e-6) {
-        return;
+    let worldPos = uniform.uModelMatrix * vec4f(center, 1.0);
+    let wpos = worldPos.xyz / worldPos.w;
+
+    var committedMask = 0.0;
+    if (abs(uniform.uCommittedBrightness) > 1e-6) {
+        let size = max(uniform.uCommittedAabbMax - uniform.uCommittedAabbMin, vec3f(1e-6));
+        let n = clamp((wpos - uniform.uCommittedAabbMin) / size, vec3f(0.0), vec3f(1.0));
+        let ix = min(floor(n.x * 64.0), 63.0);
+        let iy = min(floor(n.y * 64.0), 63.0);
+        let iz = min(floor(n.z * 64.0), 63.0);
+        let u = (ix + 0.5) / 64.0;
+        let v = (iy + iz * 64.0 + 0.5) / 4096.0;
+        committedMask = textureSample(uCommittedBrightnessVolume, uCommittedBrightnessVolumeSampler, vec2f(u, v)).r;
+        (*color).rgb *= 1.0 + uniform.uCommittedBrightness * committedMask;
     }
 
+    // 笔刷区域：仅对「明确未提交」区域应用实时预览亮度；committedMask>=0.2 视为已提交，避免体积边缘重复乘算
     if (uniform.uBloomBrushActive > 0.5) {
         let clipPos = uniform.uModelViewProj * vec4f(center, 1.0);
         let ndc = clipPos.xyz / clipPos.w;
@@ -326,13 +398,17 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
             let maskVal = textureSample(uBloomMask, uBloomMaskSampler, uv).r;
             let lum = dot((*color).rgb, vec3f(0.2126, 0.7152, 0.0722));
             if (maskVal > 0.5 && lum >= uniform.uBloomThreshold) {
-                return;
+                if (committedMask < 0.2) {
+                    (*color).rgb *= 1.0 + uniform.uBloomBrushLocalBrightness;
+                }
             }
         }
     }
 
-    let worldPos = uniform.uModelMatrix * vec4f(center, 1.0);
-    let wpos = worldPos.xyz / worldPos.w;
+    let f = uniform.uNightFade;
+    if (abs(f) < 1e-6) {
+        return;
+    }
 
     var sum = vec3f(0.0);
     for (var i = 0u; i < 10u; i++) {
@@ -426,7 +502,15 @@ class NightMode extends GsplatShaderEffect {
     bloomBrushActive: boolean = false;
     bloomBrushMask: Texture | null = null;
     bloomBrushThreshold: number = 0.2;
+    /** 笔刷区域局部亮度 -1～1，0 不变；由 setBloomBrushParams 传入 */
+    bloomBrushLocalBrightness: number = 0;
     private _bloomBrushModelViewProj: Mat4 = new Mat4();
+
+    /** 已提交亮度：3D 体积烘焙纹理 + AABB + 乘数，由 BloomController 通过 setCommittedBrightnessVolume 传入 */
+    private committedVolumeTexture: Texture | null = null;
+    private committedVolumeAabbMin: Vec3 = new Vec3(0, 0, 0);
+    private committedVolumeAabbMax: Vec3 = new Vec3(1, 1, 1);
+    private committedBrightness: number = 0;
 
     /**
      * Night ambient color
@@ -611,11 +695,12 @@ class NightMode extends GsplatShaderEffect {
     }
 
     /** 设置 Bloom Brush 合成参数；当 active 变更时会重新应用 shader */
-    setBloomBrushParams(active: boolean, mask: Texture | null, threshold: number, modelViewProj?: Float32Array) {
+    setBloomBrushParams(active: boolean, mask: Texture | null, threshold: number, modelViewProj?: Float32Array, localBrightness?: number) {
         const prevActive = this.bloomBrushActive;
         this.bloomBrushActive = active;
         this.bloomBrushMask = mask;
         this.bloomBrushThreshold = Math.max(0, Math.min(5, threshold));
+        this.bloomBrushLocalBrightness = typeof localBrightness === 'number' ? Math.max(-1, Math.min(1, localBrightness)) : 0;
         if (modelViewProj) {
             this._bloomBrushModelViewProj.data.set(modelViewProj);
         }
@@ -623,6 +708,31 @@ class NightMode extends GsplatShaderEffect {
             this.removeShaders();
             this.applyShaders();
         }
+    }
+
+    /** 已废弃：请使用 setCommittedBrightnessVolume。保留仅为兼容。 */
+    setCommittedBrightnessRegions(_points: Array<{ position: Vec3; radius: number }>, _brightness: number) {
+        // no-op，由 BloomController 统一走 setCommittedBrightnessVolume
+    }
+
+    /** 设置已提交亮度体积纹理与 AABB（由 BloomController 在 Set/加载/apply 时调用） */
+    setCommittedBrightnessVolume(volumeTexture: Texture | null, aabbMin: Vec3, aabbMax: Vec3, brightness: number) {
+        this.committedVolumeTexture = volumeTexture;
+        this.committedVolumeAabbMin.copy(aabbMin);
+        this.committedVolumeAabbMax.copy(aabbMax);
+        this.committedBrightness = Math.max(-1, Math.min(1, brightness));
+        if (this.materialsApplied.size > 0) {
+            this.setCommittedUniforms();
+        }
+    }
+
+    private setCommittedUniforms(): void {
+        if (this.committedVolumeTexture) {
+            this.setUniform('uCommittedBrightnessVolume', this.committedVolumeTexture);
+        }
+        this.setUniform('uCommittedAabbMin', [this.committedVolumeAabbMin.x, this.committedVolumeAabbMin.y, this.committedVolumeAabbMin.z]);
+        this.setUniform('uCommittedAabbMax', [this.committedVolumeAabbMax.x, this.committedVolumeAabbMax.y, this.committedVolumeAabbMax.z]);
+        this.setUniform('uCommittedBrightness', this.committedBrightness);
     }
 
     update(dt: number) {
@@ -662,13 +772,13 @@ class NightMode extends GsplatShaderEffect {
     }
 
     updateEffect(effectTime: number, dt: number) {
-        // Apply/clear shaders purely by |nightFade| (slider-only, no toggle)
-        if (Math.abs(this.nightFade) < 1e-6 && this.materialsApplied.size > 0) {
+        const needShader = Math.abs(this.nightFade) > 1e-6 || (this.committedVolumeTexture != null && Math.abs(this.committedBrightness) > 1e-6) || this.bloomBrushActive;
+        if (!needShader && this.materialsApplied.size > 0) {
             this.materialsApplied.clear();
             this.app.renderNextFrame = true;
         }
 
-        if (Math.abs(this.nightFade) > 1e-6 && this.materialsApplied.size === 0 && this.splat?.gsplat) {
+        if (needShader && this.materialsApplied.size === 0 && this.splat?.gsplat) {
             this.applyShaders();
         }
 
@@ -808,8 +918,10 @@ class NightMode extends GsplatShaderEffect {
                 });
                 this.setUniform('uBloomBrushActive', 1);
                 this.setUniform('uBloomThreshold', this.bloomBrushThreshold);
+                this.setUniform('uBloomBrushLocalBrightness', this.bloomBrushLocalBrightness);
                 this.setUniform('uModelViewProj', this._bloomBrushModelViewProj.data);
             }
+            this.setCommittedUniforms();
         }
 
         // ── 调亮/调暗联动（TS 侧）──

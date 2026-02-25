@@ -12,6 +12,7 @@ uniform float uBloomThreshold;
 uniform int uBloomMode;
 uniform vec4 uBloomPoints[` + MAX_POINTS + `];
 uniform int uBloomPointCount;
+uniform float uBloomBrushLocalBrightness;
 
 void modifySplatCenter(inout vec3 center) {
 }
@@ -42,8 +43,10 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         // Boost brightness of splats within bloom regions so they feed into
         // the bloom pass. The projected 2D mask in compose stage limits where
         // bloom glow actually appears on screen.
+        // uBloomBrushLocalBrightness: -1~1, 0=no change, <0 darken, >0 brighten (persisted on Set).
         if (bloomMask > 0.0) {
             color.rgb *= 1.0 + bloomMask * 0.5;
+            color.rgb *= 1.0 + uBloomBrushLocalBrightness * bloomMask;
         }
     }
 }
@@ -57,6 +60,7 @@ uniform uBloomThreshold: f32;
 uniform uBloomMode: i32;
 uniform uBloomPoints: array<vec4f, ` + MAX_POINTS + `>;
 uniform uBloomPointCount: i32;
+uniform uBloomBrushLocalBrightness: f32;
 
 fn modifySplatCenter(center: ptr<function, vec3f>) {
 }
@@ -85,10 +89,15 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         // Boost brightness of splats within bloom regions so they feed into
         // the bloom pass. The projected 2D mask in compose stage limits where
         // bloom glow actually appears on screen.
+        // uBloomBrushLocalBrightness: -1~1, 0=no change, <0 darken, >0 brighten (persisted on Set).
         if (bloomMask > 0.0) {
             (*color).r *= 1.0 + bloomMask * 0.5;
             (*color).g *= 1.0 + bloomMask * 0.5;
             (*color).b *= 1.0 + bloomMask * 0.5;
+            let localBright = 1.0 + uniform.uBloomBrushLocalBrightness * bloomMask;
+            (*color).r *= localBright;
+            (*color).g *= localBright;
+            (*color).b *= localBright;
         }
     }
 }
@@ -118,6 +127,9 @@ class BloomBrushFilter extends GsplatShaderEffect {
 
     /** Number of active bloom points */
     bloomPointCount: number = 0;
+
+    /** Local brightness for selected region: -1~1, 0=no change (set from settings.bloom.bloomBrushBrightness) */
+    bloomBrushLocalBrightness: number = 0;
 
     private _modelViewProj: Mat4 = new Mat4();
 
@@ -155,6 +167,7 @@ class BloomBrushFilter extends GsplatShaderEffect {
         this.setUniform('uBloomMode', this.bloomMode);
         this.setUniform('uBloomPoints', this.bloomPoints);
         this.setUniform('uBloomPointCount', this.bloomPointCount);
+        this.setUniform('uBloomBrushLocalBrightness', Math.max(-1, Math.min(1, this.bloomBrushLocalBrightness)));
     }
 }
 

@@ -13,6 +13,7 @@ import { BloomBrushPainter } from './bloom-brush-painter';
 import { Picker } from '../picker';
 import { WorldSpaceBloomData } from './world-space-bloom-data';
 import { BloomBrushFilter, MAX_POINTS } from './bloom-brush-filter';
+import { buildCommittedBrightnessVolume } from './committed-brightness-volume';
 
 const MASK_SIZE = 512;
 
@@ -65,8 +66,12 @@ export interface BloomControllerOptions {
     getCameraFrame: () => CameraFrame | null;
     /** 用于 BloomBrushPainter 与坐标映射 */
     getAppCanvas: () => HTMLCanvasElement | null;
-    /** 用于 Night Mode + Bloom Brush 合成时传入 mask */
-    getNightModeScript: () => { setBloomBrushParams(active: boolean, mask: Texture | null, threshold: number, modelViewProj?: Float32Array): void } | null;
+    /** 用于 Night Mode + Bloom Brush 合成时传入 mask 与已提交区域亮度 */
+    getNightModeScript: () => {
+        setBloomBrushParams(active: boolean, mask: Texture | null, threshold: number, modelViewProj?: Float32Array, localBrightness?: number): void;
+        setCommittedBrightnessRegions(points: Array<{ position: Vec3; radius: number }>, brightness: number): void;
+        setCommittedBrightnessVolume(volumeTexture: Texture | null, aabbMin: Vec3, aabbMax: Vec3, brightness: number): void;
+    } | null;
 }
 
 /**
@@ -110,6 +115,10 @@ export class BloomController {
     private hasWorldSpaceMask = false;
     /** Whether the world space mask was manually painted during active drawing */
     private worldSpaceMaskDirtyFromDrawing = false;
+    /** 3D 亮度场烘焙成的 2D 图集纹理，无 64 点上限 */
+    private committedVolumeTexture: Texture | null = null;
+    private committedVolumeAabbMin: Vec3 = new Vec3(0, 0, 0);
+    private committedVolumeAabbMax: Vec3 = new Vec3(1, 1, 1);
 
     constructor(global: Global, options: BloomControllerOptions) {
         this.global = global;
@@ -235,7 +244,14 @@ export class BloomController {
 
         events.on('bloomBrush:set', () => {
             this.worldSpaceData.commit();
+            const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomBrushBrightness?: number } | undefined;
+            const brightness = bloom && typeof bloom.bloomBrushBrightness === 'number'
+                ? Math.max(-1, Math.min(1, bloom.bloomBrushBrightness))
+                : 0;
+            this.worldSpaceData.setCommittedBrightness(brightness);
+            if (bloom) (bloom as any).bloomBrushCommittedBrightness = brightness;
             this.saveWorldSpaceConfig();
+            this.syncCommittedToNightMode();
             (this.global.app as any).renderNextFrame = true;
         });
         this._unregisterEvents.push(() => events.off('bloomBrush:set'));
@@ -268,10 +284,15 @@ export class BloomController {
             bloomBrush?: boolean;
             bloomBrushSize?: number;
             threshold?: number;
+            bloomBrushBrightness?: number;
+            bloomBrushCommittedBrightness?: number;
         };
         const bloomDebug = !!bloomSettings.bloomDebug;
         const bloomBrush = !!bloomSettings.bloomBrush;
         const th = Math.max(0, Math.min(5, Number(bloomSettings.threshold ?? 0.2)));
+        const bloomBrushBrightness = typeof bloomSettings.bloomBrushBrightness === 'number'
+            ? Math.max(-1, Math.min(1, bloomSettings.bloomBrushBrightness))
+            : 0;
 
         if (bloomSettings.enabled) {
             bloom.intensity = Math.max(0, Math.min(0.2, Number(bloomSettings.intensity)));
@@ -283,18 +304,25 @@ export class BloomController {
         }
 
         const nightModeScript = this.options.getNightModeScript();
-        const nightModeOn = (nightModeScript as any)?.isNightModeEnabled ?? false;
-        // Night mode + Bloom：需要跳过 night 的区域 = 有 bloom mask 的区域
-        // mask 来源与 compose 阶段一致：世界空间用投影 mask；屏幕空间用 painter/committed mask
+        // 只要开启 Bloom Brush 就传 active=true，让 NightMode 用带笔刷分支的 shader，笔刷区域内应用局部亮度
         const effectiveMask = this.getEffectiveMaskTexture(bloomBrush);
-        const hasEffectiveMask = effectiveMask !== null && effectiveMask !== this.bloomBrushWhiteTexture;
-        const bloomMaskActiveForNight = nightModeOn && hasEffectiveMask;
         if (this.bloomBrushPainter) {
             this.bloomBrushPainter.setEnabled(false); // Screen space removed, always World Space
             this.bloomBrushPainter.setBrushSize(Math.max(1, Math.min(200, Number(bloomSettings.bloomBrushSize ?? 30))));
         }
         if (nightModeScript) {
-            nightModeScript.setBloomBrushParams(bloomMaskActiveForNight, effectiveMask, th, undefined);
+            nightModeScript.setBloomBrushParams(bloomBrush, effectiveMask, th, undefined, bloomBrushBrightness);
+            // 仅在没有已构建纹理时重建（首帧）；其余每帧只传缓存，避免每帧重建 64³ 体积导致卡顿
+            if (!this.committedVolumeTexture) {
+                this.syncCommittedToNightMode();
+            } else {
+                nightModeScript.setCommittedBrightnessVolume(
+                    this.committedVolumeTexture,
+                    this.committedVolumeAabbMin,
+                    this.committedVolumeAabbMax,
+                    this.worldSpaceData.getCommittedBrightness()
+                );
+            }
         }
 
         this.injectBloomMaskBeforeUpdate(cameraFrame);
@@ -577,9 +605,34 @@ export class BloomController {
      * @private
      */
     private loadWorldSpaceConfig(): void {
-        const bloom = this.global.settings?.postEffectSettings?.bloom as { worldSpacePoints?: any } | undefined;
+        const bloom = this.global.settings?.postEffectSettings?.bloom as { worldSpacePoints?: any; bloomBrushCommittedBrightness?: number } | undefined;
         if (!bloom?.worldSpacePoints) return;
         this.worldSpaceData.fromJSON(bloom.worldSpacePoints);
+        // 兼容：committedBrightness 可能在 worldSpacePoints 内（toJSON），也可能在 bloom 顶层（bloomBrushCommittedBrightness）
+        if (bloom && typeof (bloom as any).bloomBrushCommittedBrightness === 'number') {
+            this.worldSpaceData.setCommittedBrightness((bloom as any).bloomBrushCommittedBrightness);
+        }
+        if (bloom && typeof this.worldSpaceData.getCommittedBrightness() === 'number') {
+            (bloom as any).bloomBrushCommittedBrightness = this.worldSpaceData.getCommittedBrightness();
+        }
+        this.syncCommittedToNightMode();
+    }
+
+    /** 仅在 Set / 加载配置 / applyToCameraFrame 时同步 committed 到 NightMode；使用 3D 体积纹理，无点数上限 */
+    private syncCommittedToNightMode(): void {
+        const nightModeScript = this.options.getNightModeScript();
+        if (!nightModeScript) return;
+        const committed = this.worldSpaceData.getCommittedPoints();
+        const brightness = this.worldSpaceData.getCommittedBrightness();
+        const { texture, aabbMin, aabbMax } = buildCommittedBrightnessVolume(
+            this.global.app.graphicsDevice,
+            committed.map(p => ({ position: p.position, radius: p.radius })),
+            this.committedVolumeTexture
+        );
+        this.committedVolumeTexture = texture;
+        this.committedVolumeAabbMin.copy(aabbMin);
+        this.committedVolumeAabbMax.copy(aabbMax);
+        nightModeScript.setCommittedBrightnessVolume(texture, aabbMin, aabbMax, brightness);
     }
 
     /**
@@ -794,6 +847,12 @@ export class BloomController {
 
         // Set point count
         this.bloomBrushFilter.bloomPointCount = pointCount;
+
+        const bloomSettings = this.global.settings?.postEffectSettings?.bloom as { bloomBrushBrightness?: number } | undefined;
+        const brightness = typeof bloomSettings?.bloomBrushBrightness === 'number'
+            ? Math.max(-1, Math.min(1, bloomSettings.bloomBrushBrightness))
+            : 0;
+        this.bloomBrushFilter.bloomBrushLocalBrightness = brightness;
     }
 
     destroy(): void {

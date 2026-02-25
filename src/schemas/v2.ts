@@ -58,10 +58,15 @@ type PostEffectSettings = {
         /** 2D 笔刷局部 bloom：仅在笔刷区域叠加光晕，与 bloomDebug 互斥 */
         bloomBrush: boolean,
         bloomBrushSize: number,
-        /** 世界空间 bloom 数据（序列化后的 WorldSpaceBloomData） */
+        /** 选中区域局部亮度 -1～1（当前滑块）；Set 时写入 bloomBrushCommittedBrightness */
+        bloomBrushBrightness?: number,
+        /** 已提交区域的局部亮度 -1～1，与 worldSpacePoints.committed 一起每帧在 shader 中应用 */
+        bloomBrushCommittedBrightness?: number,
+        /** 世界空间 bloom 数据（序列化后的 WorldSpaceBloomData）；committedBrightness 与 committed 一起由 Set 固化 */
         worldSpacePoints?: {
             points: Array<{ position: [number, number, number], radius: number, intensity: number }>,
-            committed: Array<{ position: [number, number, number], radius: number, intensity: number }>
+            committed: Array<{ position: [number, number, number], radius: number, intensity: number }>,
+            committedBrightness?: number
         },
     },
     grading: {
