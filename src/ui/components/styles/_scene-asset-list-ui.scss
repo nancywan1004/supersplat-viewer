@@ -1,0 +1,88 @@
+// 场景资产列表面板组件样式（需在 #rightToolBar .right-tool-bar-inner 内生效，变量由 index 提供）
+
+#rightToolBar .right-tool-bar-inner {
+    .scene-asset-list-section {
+        margin-top: 8px;
+    }
+    .scene-asset-list-header {
+        font-size: 14px;
+        color: $clr-text;
+        padding: 6px 4px;
+        margin-bottom: 4px;
+        border-bottom: 1px solid $clr-bkg-light;
+    }
+    .scene-asset-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .scene-asset-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 10px;
+        background: $clr-bkg-darkest;
+        border-radius: 6px;
+        gap: 8px;
+        cursor: pointer;
+        &.selected {
+            outline: 2px solid $clr-accent;
+            outline-offset: -2px;
+        }
+        .scene-asset-name {
+            flex: 1;
+            min-width: 0;
+            font-size: 13px;
+            color: $clr-text;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .scene-asset-visibility {
+            flex-shrink: 0;
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            border: none;
+            background: transparent;
+            color: $clr-text-dark;
+            cursor: pointer;
+            border-radius: 4px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            &:hover {
+                color: $clr-text;
+                background: rgba(255, 255, 255, 0.08);
+            }
+            &:focus-visible {
+                outline: 2px solid $clr-accent;
+                outline-offset: 2px;
+            }
+            &.hidden {
+                display: none !important;
+            }
+        }
+        .scene-asset-delete {
+            flex-shrink: 0;
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            border: none;
+            background: transparent;
+            color: $clr-text-dark;
+            cursor: pointer;
+            border-radius: 4px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            &:hover {
+                color: #e57373;
+                background: rgba(255, 255, 255, 0.08);
+            }
+        }
+    }
+}

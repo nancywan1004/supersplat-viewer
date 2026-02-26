@@ -87,4 +87,21 @@ type LightingSettings = {
     lights: (PointLightConfig | DirectionalLightConfig | SpotLightConfig)[]
 };
 
-export type { RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings };
+type SceneAsset = {
+    id: string,
+    type: 'image' | 'mesh' | 'gaussian',
+    name: string,
+    visible: boolean,
+    source: {
+        assetId?: string,
+        filename?: string,
+        url?: string
+    },
+    transform: {
+        position: [number, number, number],
+        rotation: [number, number, number],
+        scale: [number, number, number]
+    }
+}
+
+export type { RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset };

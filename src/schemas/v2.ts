@@ -1,4 +1,4 @@
-import type { LodSettings, LodPreset, LodPlatform, RevealEffect, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings } from "./v2-custom";
+import type { LodSettings, LodPreset, LodPlatform, RevealEffect, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset } from "./v2-custom";
 
 type AnimTrack = {
     name: string,
@@ -169,6 +169,12 @@ type ExperienceSettings = {
      * - 如果有动画，默认为 'anim'
      */
     initialCameraMode?: 'orbit' | 'fly';
+
+    /**
+     * 可选：场景中放置的资产列表（编辑模式添加的 mesh / gaussian / image）
+     * - 每一项记录类型、来源 url 以及在世界空间中的变换
+     */
+    sceneAssets?: SceneAsset[];
 };
 
 export type { AnimTrack, Camera, Annotation, PostEffectSettings, RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, ExperienceSettings, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings };

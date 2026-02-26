@@ -43,6 +43,8 @@ import { NightMode } from './vfx/lighting/night-mode';
 import { initShadowCatcher } from './vfx/shadow/shadow-catcher';
 import { ShadowApplyRt } from './vfx/shadow/shadow-apply';
 import { updateShadowDistance } from './light';
+import { initAssetPlacementHandler, restoreSceneAssetsFromSettings } from './asset-placement-handler';
+import { initGizmoHandler } from './gizmo-handler';
 
 // override global pick to pack depth instead of meshInstance id
 const pickDepthGlsl = /* glsl */ `
@@ -153,6 +155,12 @@ class Viewer {
 
     /** 将 cameraManager 的相机姿态应用到实体（导出时 seek anim 后调用） */
     applyCameraFromManager: () => void = () => {};
+
+    /** 资产放置 handler 清理函数 */
+    cleanupAssetPlacementHandler: (() => void) | null = null;
+
+    /** Gizmo handler 清理函数 */
+    cleanupGizmoHandler: (() => void) | null = null;
 
     constructor(global: Global, gsplatLoad: Promise<Entity>, skyboxLoad: Promise<void>) {
         this.global = global;
@@ -586,6 +594,22 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     });
                 }
             });
+
+            // 先根据 settings.sceneAssets 还原场景中的资产实体
+            restoreSceneAssetsFromSettings(global).catch((err) => {
+                console.warn('[SceneAssets] restore from settings failed:', err);
+            });
+
+            // 编辑模式：初始化资产放置与 Gizmo
+            const canvasEl = app.graphicsDevice?.canvas as HTMLCanvasElement | undefined;
+            if (canvasEl && config.allowEditMode !== false) {
+                this.cleanupAssetPlacementHandler = initAssetPlacementHandler(
+                    global,
+                    canvasEl,
+                    sceneBound.center.y
+                );
+                this.cleanupGizmoHandler = initGizmoHandler(global);
+            }
 
             const { instance } = gsplat;
             if (instance) {

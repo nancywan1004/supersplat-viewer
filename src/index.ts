@@ -24,48 +24,12 @@ import { initLight } from './light';
 import { LodLoader } from './loaders/lod-loader';
 import { loadSplat } from './loaders/splat-loader';
 import type { AssetSource } from './loaders/asset-source';
+import { loadGsplatAsset } from './loaders/gsplat-asset-loader';
 import { version as appVersion } from '../package.json';
 import { initPostMessageBridge } from './message-bridge';
 import { initVideoExport } from './render/video-export';
 
-/**
- * 加载 gsplat Asset（参照提供的 load 函数模式）
- * 用于处理 .splat 格式和其他格式的 gsplat 文件
- */
-const loadGsplatAsset = async (app: AppBase, assetSource: AssetSource): Promise<Asset> => {
-    const filename = (assetSource.filename || assetSource.url || '').toLowerCase();
-    let asset: Asset;
-
-    if (filename.endsWith('.splat')) {
-        // 对于 .splat 格式，加载并转换为 GSplatData
-        const gsplatData = await loadSplat(assetSource);
-        
-        // 创建 Asset 并设置 resource
-        asset = new Asset(assetSource.filename || assetSource.url, 'gsplat', {
-            url: assetSource.contents ? `local-asset-${Date.now()}` : assetSource.url ?? assetSource.filename,
-            filename: assetSource.filename
-        });
-        
-        app.assets.add(asset);
-        // 使用 GSplatResource 包装 GSplatData
-        asset.resource = new GSplatResource(app.graphicsDevice, gsplatData);
-        // 标记为已加载，并触发 load 事件
-        asset.loaded = true;
-        asset.fire('load', asset);
-    } else {
-        // 对于其他格式，使用 PlayCanvas 的标准加载方式
-        const c = assetSource.contents ? await assetSource.contents.arrayBuffer() : undefined;
-        asset = new Asset(assetSource.filename || assetSource.url, 'gsplat', {
-            url: assetSource.url ?? assetSource.filename,
-            filename: assetSource.filename,
-            contents: c
-        });
-        app.assets.add(asset);
-        app.assets.load(asset);
-    }
-
-    return asset;
-};
+export { loadGsplatAsset };
 
 const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progress: number) => void, lodLoader?: LodLoader) => {
     const { contents, contentUrl, unified, aa } = config;
@@ -208,6 +172,12 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         vfxActive: false,
         vfxType: 'none' as 'none' | 'grow' | 'pieces-recover' | 'perlin-wave' | 'disintegrate' | 'integrate' | 'growth-wave',
         editMode: false,
+        editLeftModule: 'environment',
+        assetTransformMode: 'move',
+        uploadedAssets: [],
+        scenePlacedEntities: [],
+        selectedSceneEntity: null,
+        cameraControlsEnabled: true,
 
         // 导出 VFX 视频时的锁，防止实时更新干扰离线渲染
         isExportingVfxVideo: false,

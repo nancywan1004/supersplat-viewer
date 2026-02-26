@@ -1,0 +1,104 @@
+// 编辑模式左侧工具箱样式（变量由 index.scss 提供）
+
+/* 编辑模式左侧工具箱：固定左侧、与右侧栏风格统一 */
+.edit-left-sidebar {
+    position: fixed;
+    top: var(--edit-top-bar-height, 48px);
+    left: 0;
+    width: 200px;
+    max-width: 50vw;
+    height: auto;
+    padding-top: max(0, env(safe-area-inset-top));
+    padding-left: max(0, env(safe-area-inset-left));
+    margin-top: 5%;
+    z-index: 99;
+    background: $clr-bkg-dark;
+    box-shadow: 4px 0 12px rgba(0, 0, 0, 0.4);
+    display: flex;
+    flex-direction: column;
+    &.hidden {
+        display: none !important;
+    }
+}
+
+/* 编辑工具箱：左侧工具栏隶属于其下，整体可折叠 */
+.edit-left-toolbar-nav {
+    flex: 1;
+    height: auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.edit-left-toolbar-nav-header {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: $clr-text-dark;
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.15s ease, background 0.15s ease;
+    &::before {
+        content: '▶';
+        font-size: 10px;
+        transition: transform 0.2s ease;
+    }
+    &.expanded::before {
+        content: '▼';
+    }
+    &:hover {
+        color: $clr-text;
+        background: $clr-bkg-light;
+    }
+    &:focus-visible {
+        outline: 2px solid $clr-accent;
+        outline-offset: 2px;
+    }
+}
+.edit-left-toolbar-nav-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    transition: opacity 0.2s ease, max-height 0.25s ease;
+    &.collapsed {
+        max-height: 0;
+        overflow: hidden;
+        opacity: 0;
+    }
+}
+
+.edit-left-toolbar-list {
+    list-style: none;
+    margin: 0;
+    padding: 12px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.edit-left-toolbar-item {
+    padding: 10px 12px;
+    font-size: 14px;
+    color: $clr-text;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+    transition: background 0.15s ease, color 0.15s ease;
+    &:hover {
+        background: $clr-bkg-light;
+        color: $clr-text-light;
+    }
+    &.active {
+        background: rgba($clr-accent, 0.25);
+        color: $clr-text-light;
+    }
+    &:focus-visible {
+        outline: 2px solid $clr-accent;
+        outline-offset: 2px;
+    }
+}

@@ -316,6 +316,26 @@ class InputController {
             }
         });
 
+        // 当外部（如 Gizmo）请求清空相机输入增量时，刷新各输入源，避免重新开启控制后出现「一次性吃掉拖拽期间的累积输入」
+        events.on('cameraControls:flushInputs', () => {
+            // 读一遍输入，把内部缓存清零
+            this._desktopInput.read();
+            this._orbitInput.read();
+            this._flyInput.read();
+            this._gamepadInput.read();
+
+            // 清空内部状态与输出帧
+            this._state.axis.set(0, 0, 0);
+            this._state.mouse = [0, 0, 0];
+            this._state.touches = 0;
+            this._state.currentTouchCount = 0;
+
+            this.frame = new InputFrame({
+                move: [0, 0, 0],
+                rotate: [0, 0, 0]
+            });
+        });
+
         // update input mode based on pointer event
         ['pointerdown', 'pointermove'].forEach((eventName) => {
             window.addEventListener(eventName, (event: PointerEvent) => {
@@ -359,6 +379,15 @@ class InputController {
      * @param distance - the distance to the camera target
      */
     update(dt: number, distance: number) {
+        // 当全局关闭相机控制（例如正在拖拽 Gizmo）时，清空输入增量并直接返回
+        if (this.global.state.cameraControlsEnabled === false) {
+            this.frame = new InputFrame({
+                move: [0, 0, 0],
+                rotate: [0, 0, 0]
+            });
+            return;
+        }
+
         const { keyCode } = KeyboardMouseSource;
 
         const { key, button, mouse, wheel } = this._desktopInput.read();

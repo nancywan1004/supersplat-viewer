@@ -1,10 +1,47 @@
-import type { Entity, EventHandler, AppBase } from 'playcanvas';
+import type { Entity, EventHandler, AppBase, Asset } from 'playcanvas';
 
 import type { ExperienceSettings } from './settings';
+
+/** 资产库项类型 */
+export type AssetLibraryType = 'image' | 'mesh' | 'gaussian';
+
+/** 资产库单项（上传后的资产） */
+export interface AssetLibraryItem {
+    id: string;
+    type: AssetLibraryType;
+    name: string;
+    filename?: string;
+    url?: string;
+    file?: File;
+    asset?: Asset;
+    thumbnailUrl?: string;
+}
+
+/** 场景中已放置的可编辑实体项 */
+export interface ScenePlacedItem {
+    id: string;
+    name: string;
+    entity: Entity;
+    visible: boolean;
+    /** 对应资产库类型（用于 serialize） */
+    assetType?: AssetLibraryType;
+    /** 对应上传资产库中的条目 id（用于 serialize） */
+    assetId?: string;
+    /** 资产源文件名（可选，便于调试 / 保存） */
+    filename?: string;
+    /** 资产源 url（用于 serialize 到 settings.sceneAssets.source.url） */
+    url?: string;
+}
 
 type CameraMode = 'orbit' | 'anim' | 'fly';
 
 type InputMode = 'desktop' | 'touch';
+
+/** 编辑模式左侧工具箱当前选中的模块 */
+type EditLeftModule = 'gs' | 'asset' | 'annotation' | 'environment' | 'camera' | 'effects';
+
+/** 资产变换模式（移动/旋转/缩放） */
+type AssetTransformMode = 'move' | 'rotate' | 'scale';
 
 // configuration options are immutable at runtime
 type Config = {
@@ -52,6 +89,16 @@ type State = {
     vfxType: 'none' | 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch';  // current effect type (includes reveal and VFX)
     syncAnimTrackOnExport?: boolean;           // 导出 VFX 视频时是否同步重播动画轨道（由 reveal-ui 设置，video-export-ui 读取）
     editMode: boolean;                         // true = 编辑模式（显示 rightToolBar），false = 观看模式
+    editLeftModule?: EditLeftModule;           // 左侧工具箱当前模块，默认 'environment'
+    assetTransformMode?: AssetTransformMode;   // 资产变换模式，默认 'move'
+    /** 已上传的资产库列表 */
+    uploadedAssets?: AssetLibraryItem[];
+    /** 场景中已放置的可编辑实体列表 */
+    scenePlacedEntities?: ScenePlacedItem[];
+    /** 当前选中的场景实体（用于 Gizmo / 复制删除） */
+    selectedSceneEntity?: Entity | null;
+    /** 相机输入是否启用（用于与 Gizmo 交互互斥） */
+    cameraControlsEnabled?: boolean;
 };
 
 type Global = {
@@ -63,4 +110,4 @@ type Global = {
     camera: Entity;
 };
 
-export { CameraMode, InputMode, Config, State, Global };
+export { CameraMode, InputMode, EditLeftModule, AssetTransformMode, Config, State, Global };

@@ -1,5 +1,6 @@
 import type { Global } from './types';
 import type { ExperienceSettings } from './schemas/v2';
+import type { ScenePlacedItem } from './types';
 
 const defaultPostEffectShadow = () => ({
     enabled: true,
@@ -70,6 +71,31 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
     if (!Array.isArray(out.cameras)) out.cameras = [];
     if (!Array.isArray(out.annotations)) out.annotations = [];
     if (out.startMode == null) out.startMode = 'default';
+
+    // 将当前场景中的可编辑资产列表序列化到 settings.sceneAssets
+    const sceneItems = (global.state.scenePlacedEntities ?? []) as ScenePlacedItem[];
+    out.sceneAssets = sceneItems.map((entry) => {
+        const pos = entry.entity.getPosition();
+        const rot = entry.entity.getEulerAngles();
+        const scale = entry.entity.getLocalScale();
+
+        return {
+            id: entry.id,
+            type: entry.assetType ?? 'gaussian',
+            name: entry.name,
+            visible: entry.visible,
+            source: {
+                assetId: entry.assetId,
+                filename: entry.filename,
+                url: entry.url
+            },
+            transform: {
+                position: [pos.x, pos.y, pos.z] as [number, number, number],
+                rotation: [rot.x, rot.y, rot.z] as [number, number, number],
+                scale: [scale.x, scale.y, scale.z] as [number, number, number]
+            }
+        };
+    });
 
     return out as ExperienceSettings;
 }

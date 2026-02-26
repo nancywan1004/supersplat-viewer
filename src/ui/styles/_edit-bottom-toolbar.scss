@@ -1,0 +1,65 @@
+// 编辑模式底部资产栏样式（变量由 index.scss 提供）
+
+/* 编辑模式底部资产栏：固定底部、横条、按钮选中态 .active */
+.edit-bottom-toolbar {
+    position: fixed;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+  
+    /* 去掉 left:0; right:0;，只保留一个水平锚点 */
+    width: fit-content;
+  
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  
+    padding: 8px 16px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+    &.hidden {
+        display: none !important;
+    }
+}
+.edit-bottom-toolbar-inner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.edit-bottom-toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.edit-bottom-toolbar-divider {
+    width: 1px;
+    height: 28px;
+    background: $clr-bkg-light;
+    margin: 0 4px;
+    flex-shrink: 0;
+}
+.edit-bottom-toolbar-btn {
+    padding: 8px 14px;
+    font-size: 14px;
+    color: $clr-text;
+    background: $clr-bkg-light;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+    &:hover {
+        background: darken($clr-bkg-light, 5%);
+        color: $clr-text-light;
+    }
+    &.active {
+        background: rgba($clr-accent, 0.5);
+        color: $clr-text-light;
+    }
+    &:focus-visible {
+        outline: 2px solid $clr-accent;
+        outline-offset: 2px;
+    }
+    &.edit-bottom-toolbar-btn-danger:hover {
+        background: rgba(200, 60, 60, 0.8);
+        color: #fff;
+    }
+}

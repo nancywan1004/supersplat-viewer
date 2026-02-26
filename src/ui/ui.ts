@@ -8,6 +8,9 @@ import { initRevealUI } from './components/reveal-ui';
 import { initVideoExportUI } from './components/video-export-ui';
 import { initLightingUI } from './components/lighting-ui';
 import { initPostEffectUI } from './components/post-effect-ui';
+import { initEditLeftToolbarUI } from './edit-left-toolbar';
+import { initEditRightToolbarUI } from './edit-right-toolbar';
+import { initEditBottomToolbarUI } from './edit-bottom-toolbar';
 
 // Initialize the touch joystick for fly mode camera control
 const initJoystick = (
@@ -164,7 +167,7 @@ const initUI = (global: Global) => {
     const dom = [
         'ui',
         'controlsWrap',
-        'editModeStrip', 'editModeBtn', 'rightToolBar', 'saveSettingsBtn',
+        'editModeStrip', 'editModeBtn', 'exitEditBtn', 'saveSettingsBtn', 'rightToolBar',
         'arMode', 'vrMode',
         'enterFullscreen', 'exitFullscreen',
         'info', 'infoPanel', 'desktopTab', 'touchTab', 'desktopInfoPanel', 'touchInfoPanel',
@@ -423,43 +426,69 @@ const initUI = (global: Global) => {
     arChanged();
     vrChanged();
 
-    // 编辑模式：右上角按钮与右侧栏
+    // 编辑模式：左上侧栏、右侧多面板栏、底部资产栏、右上角按钮
+    const cleanupEditLeftToolbarUI = initEditLeftToolbarUI(global);
+    const cleanupEditRightToolbarUI = initEditRightToolbarUI(global);
+    const cleanupEditBottomToolbarUI = initEditBottomToolbarUI(global);
     const updateEditModeUI = () => {
         const inEdit = state.editMode;
+        const leftMount = document.getElementById('editLeftSidebarMount');
+        if (leftMount) {
+            leftMount.classList.toggle('hidden', !inEdit);
+        }
         if (dom.rightToolBar) {
             dom.rightToolBar.classList.toggle('hidden', !inEdit);
         }
+        const bottomMount = document.getElementById('editBottomToolbarMount');
+        if (bottomMount) {
+            bottomMount.classList.toggle('hidden', !inEdit);
+        }
+        // 顶栏：编辑时显示「退出」+「保存」，非编辑时显示「编辑」
+        if (dom.editModeStrip) {
+            dom.editModeStrip.classList.toggle('edit-mode-active', inEdit);
+        }
         if (dom.editModeBtn) {
-            dom.editModeBtn.textContent = inEdit ? '退出编辑' : '编辑';
+            dom.editModeBtn.classList.toggle('hidden', inEdit);
+        }
+        if (dom.exitEditBtn) {
+            dom.exitEditBtn.classList.toggle('hidden', !inEdit);
+        }
+        if (dom.saveSettingsBtn) {
+            dom.saveSettingsBtn.classList.toggle('hidden', !inEdit);
         }
     };
     if (config.allowEditMode === false) {
         if (dom.editModeStrip) {
             dom.editModeStrip.classList.add('hidden');
         }
-    } else if (dom.editModeBtn) {
-        dom.editModeBtn.addEventListener('click', () => {
-            state.editMode = !state.editMode;
-        });
+    } else {
+        if (dom.editModeBtn) {
+            dom.editModeBtn.addEventListener('click', () => {
+                state.editMode = true;
+            });
+        }
+        if (dom.exitEditBtn) {
+            dom.exitEditBtn.addEventListener('click', () => {
+                state.editMode = false;
+            });
+        }
+        if (dom.saveSettingsBtn) {
+            dom.saveSettingsBtn.addEventListener('click', () => {
+                const payload = serializeExperienceSettings(global);
+                const jsonString = JSON.stringify(payload, null, 2);
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(new Blob([jsonString], { type: 'application/json' }));
+                a.download = 'settings.json';
+                a.click();
+                URL.revokeObjectURL(a.href);
+                window.parent.postMessage({ type: 'SETTINGS_UPDATED', message: 'settings updated', payload: jsonString }, '*');
+            });
+        }
         events.on('editMode:changed', updateEditModeUI);
         updateEditModeUI();
     }
 
-    // 保存配置按钮：序列化后触发浏览器下载到本地，并 postMessage 回传父页
-    if (dom.saveSettingsBtn) {
-        dom.saveSettingsBtn.addEventListener('click', () => {
-            const payload = serializeExperienceSettings(global);
-            const jsonString = JSON.stringify(payload, null, 2);
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(new Blob([jsonString], { type: 'application/json' }));
-            a.download = 'settings.json';
-            a.click();
-            URL.revokeObjectURL(a.href);
-            window.parent.postMessage({ type: 'SETTINGS_UPDATED', message: 'settings updated', payload: jsonString }, '*');
-        });
-    }
-
-    // Reveal / VFX、Lighting 由独立组件管理（带生命周期，需卸载时调用返回的 cleanup）
+    // Reveal / VFX、Lighting、PostEffect 由独立组件管理；挂载容器由 edit-right-toolbar 提供
     const cleanupRevealUI = initRevealUI(global);
     const cleanupVideoExportUI = initVideoExportUI(global);
     const cleanupLightingUI = initLightingUI(global);
@@ -467,32 +496,7 @@ const initUI = (global: Global) => {
     // 若将来有“关闭设置面板并销毁子组件”等场景，可在此处或适当时机调用：
     // cleanupRevealUI(); cleanupVideoExportUI(); cleanupLightingUI(); cleanupPostEffectUI();
 
-    // VFX / Lighting / postEffect / Render 二级菜单折叠
-    const toggleSubpanel = (headerId: string, panelId: string, arrowId: string) => {
-        const header = document.getElementById(headerId);
-        const panel = document.getElementById(panelId);
-        const arrow = document.getElementById(arrowId);
-        if (!header || !panel || !arrow) return;
-        const isHidden = panel.classList.contains('hidden');
-        panel.classList.toggle('hidden', !isHidden);
-        header.classList.toggle('expanded', isHidden);
-    };
-    if (dom.vfxSubmenuHeader && dom.vfxSubpanel) {
-        dom.vfxSubmenuHeader.addEventListener('click', () => toggleSubpanel('vfxSubmenuHeader', 'vfxSubpanel', 'vfxSubmenuArrow'));
-        dom.vfxSubmenuHeader.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSubpanel('vfxSubmenuHeader', 'vfxSubpanel', 'vfxSubmenuArrow'); } });
-    }
-    if (dom.lightingSubmenuHeader && dom.lightingSubpanel) {
-        dom.lightingSubmenuHeader.addEventListener('click', () => toggleSubpanel('lightingSubmenuHeader', 'lightingSubpanel', 'lightingSubmenuArrow'));
-        dom.lightingSubmenuHeader.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSubpanel('lightingSubmenuHeader', 'lightingSubpanel', 'lightingSubmenuArrow'); } });
-    }
-    if (dom.postEffectSubmenuHeader && dom.postEffectSubpanel) {
-        dom.postEffectSubmenuHeader.addEventListener('click', () => toggleSubpanel('postEffectSubmenuHeader', 'postEffectSubpanel', 'postEffectSubmenuArrow'));
-        dom.postEffectSubmenuHeader.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSubpanel('postEffectSubmenuHeader', 'postEffectSubpanel', 'postEffectSubmenuArrow'); } });
-    }
-    if (dom.renderSubmenuHeader && dom.renderSubpanel) {
-        dom.renderSubmenuHeader.addEventListener('click', () => toggleSubpanel('renderSubmenuHeader', 'renderSubpanel', 'renderSubmenuArrow'));
-        dom.renderSubmenuHeader.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSubpanel('renderSubmenuHeader', 'renderSubpanel', 'renderSubmenuArrow'); } });
-    }
+    // VFX / Lighting / postEffect / Render 二级菜单折叠由 edit-right-toolbar 组件内处理
 
     // Info panel
     const updateInfoTab = (tab: 'desktop' | 'touch') => {

@@ -1,0 +1,103 @@
+// 资产放置设置组件样式（需在 #rightToolBar .right-tool-bar-inner 内生效，变量由 index 提供）
+
+#rightToolBar .right-tool-bar-inner {
+    .asset-panel-section[data-asset-placement-root] {
+        width: 100%;
+        margin-bottom: 4px;
+    }
+    .asset-placement-header {
+        margin-bottom: 0;
+    }
+    #assetPlacementSubpanel {
+        padding-top: 6px;
+    }
+    .asset-type-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 10px;
+        .settingsSelect {
+            flex: 1;
+            min-width: 0;
+        }
+        .settingsButton {
+            flex-shrink: 0;
+        }
+    }
+    .asset-preview-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+    }
+    .asset-preview-slot {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+        position: relative;
+        &.selected .asset-preview-placeholder {
+            border-color: $clr-accent;
+            box-shadow: 0 0 0 2px $clr-accent;
+        }
+        .asset-preview-delete {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            width: 22px;
+            height: 22px;
+            padding: 0;
+            border: none;
+            border-radius: 4px;
+            background: rgba(0, 0, 0, 0.6);
+            color: $clr-text;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1;
+            &:hover {
+                background: rgba(200, 60, 60, 0.9);
+                color: #fff;
+            }
+        }
+        .asset-preview-placeholder {
+            width: 100%;
+            aspect-ratio: 1;
+            max-height: 72px;
+            background: $clr-bkg-darkest;
+            border-radius: 6px;
+            border: 1px dashed $clr-text-darkest;
+            position: relative;
+            &::before,
+            &::after {
+                content: '';
+                position: absolute;
+                left: 50%;
+                top: 50%;
+                width: 2px;
+                height: 120%;
+                background: $clr-text-darkest;
+                transform-origin: center center;
+            }
+            &::before {
+                transform: translate(-50%, -50%) rotate(-45deg);
+            }
+            &::after {
+                transform: translate(-50%, -50%) rotate(45deg);
+            }
+        }
+        .asset-preview-name {
+            font-size: 12px;
+            color: $clr-text-dark;
+            text-align: center;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 100%;
+        }
+        &:hover .asset-preview-placeholder {
+            border-color: $clr-text-dark;
+        }
+    }
+}

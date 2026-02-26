@@ -98,46 +98,19 @@
         <!-- VFX 进度覆盖层与 Reveal/导出 UI 由 reveal-ui、video-export-ui 组件在 JS 中创建 -->
 
         <div id="ui">
-            <!-- 右上角：进入/退出编辑模式 -->
+            <!-- 顶部栏：左侧留白供上级页面注入项目名称；非编辑时仅右侧「编辑」；编辑时「退出」+「保存」 -->
             <div id="editModeStrip" class="edit-mode-strip">
+                <button type="button" id="exitEditBtn" class="edit-mode-btn edit-mode-exit hidden">退出</button>
+                <div id="editModeProjectNameSlot" class="edit-mode-strip-project-slot"></div>
                 <button type="button" id="editModeBtn" class="edit-mode-btn">编辑</button>
+                <button type="button" id="saveSettingsBtn" class="edit-mode-btn edit-mode-save hidden">保存</button>
             </div>
-            <!-- 编辑模式右侧栏（仅 edit 模式显示） -->
+            <!-- 编辑模式三个挂载点（仅 edit 模式显示），内容由对应组件注入 -->
+            <div id="editLeftSidebarMount" class="edit-left-sidebar hidden"></div>
             <div id="rightToolBar" class="right-tool-bar hidden">
-                <div id="rightToolBarInner" class="right-tool-bar-inner">
-                    <div class="right-tool-bar-header">
-                        <button type="button" id="saveSettingsBtn" class="save-settings-btn">保存配置</button>
-                    </div>
-                    <div class="settingsRow submenuHeader" id="vfxSubmenuHeader" role="button" tabindex="0">
-                        <span class="submenuArrow" id="vfxSubmenuArrow">▶</span>
-                        <span>VFX</span>
-                    </div>
-                    <div id="vfxSubpanel" class="subpanel hidden">
-                        <div id="revealPanelContainer"></div>
-                    </div>
-                    <div class="settingsRow submenuHeader" id="lightingSubmenuHeader" role="button" tabindex="0">
-                        <span class="submenuArrow" id="lightingSubmenuArrow">▶</span>
-                        <span>Lighting</span>
-                    </div>
-                    <div id="lightingSubpanel" class="subpanel hidden">
-                        <div id="lightingPanelContainer"></div>
-                    </div>
-                    <div class="settingsRow submenuHeader" id="postEffectSubmenuHeader" role="button" tabindex="0">
-                        <span class="submenuArrow" id="postEffectSubmenuArrow">▶</span>
-                        <span>postEffect</span>
-                    </div>
-                    <div id="postEffectSubpanel" class="subpanel hidden">
-                        <div id="postEffectPanelContainer"></div>
-                    </div>
-                    <div class="settingsRow submenuHeader" id="renderSubmenuHeader" role="button" tabindex="0">
-                        <span class="submenuArrow" id="renderSubmenuArrow">▶</span>
-                        <span>Render</span>
-                    </div>
-                    <div id="renderSubpanel" class="subpanel hidden">
-                        <div id="renderPanelContainer"></div>
-                    </div>
-                </div>
+                <div id="rightToolBarInner" class="right-tool-bar-inner"></div>
             </div>
+            <div id="editBottomToolbarMount" class="edit-bottom-toolbar hidden"></div>
             <div id="poster"></div>
 
             <!-- Loading Indicator -->
