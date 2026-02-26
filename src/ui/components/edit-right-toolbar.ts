@@ -1,7 +1,7 @@
 import type { Global } from '../../types';
 import type { EditLeftModule } from '../../types';
-import { getAssetPlacementSettingsHTML, bindAssetPlacementSettings } from './asset-placement-settings';
-import { getSceneAssetListHTML, bindSceneAssetList } from './scene-asset-list';
+import { getAssetPlacementSettingsHTML, bindAssetPlacementSettings } from './asset-placement-settings-ui';
+import { getSceneAssetListHTML, bindSceneAssetList } from './scene-asset-list-ui';
 
 const RIGHT_PANEL_IDS: EditLeftModule[] = ['gs', 'asset', 'annotation', 'environment', 'camera', 'effects'];
 
@@ -145,8 +145,8 @@ export function initEditRightToolbarUI(global: Global): () => void {
     if (assetPanel) {
         const placementRoot = assetPanel.querySelector<HTMLElement>('[data-asset-placement-root]');
         const listRoot = assetPanel.querySelector<HTMLElement>('[data-scene-asset-list-root]');
-        unbindSubpanels.push(bindAssetPlacementSettings(placementRoot));
-        unbindSubpanels.push(bindSceneAssetList(listRoot));
+        unbindSubpanels.push(bindAssetPlacementSettings(placementRoot, global));
+        unbindSubpanels.push(bindSceneAssetList(listRoot, global));
     }
 
     return () => {
