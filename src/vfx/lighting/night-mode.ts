@@ -9,7 +9,7 @@ import type { Texture } from 'playcanvas';
  * - 调暗 (f < 0)：mult = mix(1, nightColor, -f)。nightColor = 环境光 + 点光 + 聚光贡献，乘数 < 1；主光不参与此计算。
  * - 调亮 (f > 0)：mult = baseBright * (1 + dirContrib)。baseBright = mix(1, uBrightFactor, f) 整体提亮；
  *   dirContrib = NdotL * uLightColor 为平行光方向性（视线方向近似 splat 朝向，面向光更亮）。
- * TS 侧：主光强度 = settings 基准 × (1 + nightFade)；天空球强度与 fade 同向；Bloom 仅调暗时增强。
+ * TS 侧：主光强度 = settings 基准 × (1 + nightFade)；天空球强度与 fade 同向；Bloom 由 settings 统一控制，调亮/调暗都使用同一强度。
  */
 const shaderGLSL = /* glsl */`
 uniform vec3 uSpherePositions[10];
@@ -550,6 +550,8 @@ class NightMode extends GsplatShaderEffect {
     dirLightScale: number = 0.4;
 
     private nightFade: number = 0;
+    /** 上次已 fire 的 nightFade，用于仅在 fade 变化时触发 nightFade:changed */
+    private _lastFiredNightFade: number | null = null;
     private manualFadeControl: boolean = true; // Slider-only control, no auto animation
 
     initialize() {
@@ -571,6 +573,7 @@ class NightMode extends GsplatShaderEffect {
                 this.updateEffect(this.effectTime, 0);
             }
             this.app.fire('nightFade:changed', this.nightFade);
+            this._lastFiredNightFade = this.nightFade;
         });
 
         this.on('enable', () => {
@@ -925,8 +928,9 @@ class NightMode extends GsplatShaderEffect {
         }
 
         // ── 调亮/调暗联动（TS 侧）──
-        // 主光：基准强度来自 settings，再乘 (1 + nightFade)，与 shader 内调亮方向一致且不覆盖用户设的 I。
-        // 调亮时主光变强，调暗时变弱；Bloom 仅调暗时增加发光感；天空球与 fade 同向（调亮更亮、调暗更暗）。
+        // 主光：基准强度来自 settings，再乘 (1 + nightFade)。调亮时主光变强，调暗时变弱。
+        // Bloom：统一由 settings 控制（configureCamera → applyToCameraFrame），调亮/调暗都使用同一套强度，不在此处改写。
+        // 天空球与 fade 同向（调亮更亮、调暗更暗）。
         if (this.light?.light) {
             const global = (this.app as any).__global;
             const dirCfg = global?.settings?.lighting?.lights?.find((l: any) => l.type === 'directional');
@@ -935,20 +939,17 @@ class NightMode extends GsplatShaderEffect {
             this.light.light.intensity = targetIntensity;
         }
 
-        // Update camera bloom (emissive bloom only when darkening, fade < 0)
-        const cameraScript = this.camera?.script as any;
-        if (cameraScript?.cameraEffects?.bloom) {
-            cameraScript.cameraEffects.bloom.intensity = Math.max(0, -this.nightFade) * this.emissiveBloom;
-        }
-
         // Update skybox intensity: same direction as scene (fade > 0 brighten → brighter sky, fade < 0 darken → dimmer sky)
         const targetSkyboxIntensity = Math.max(0.2, Math.min(1.5, 1.0 + 0.8 * this.nightFade));
         this.app.scene.skyboxIntensity = targetSkyboxIntensity;
 
-        // Fire events
-        this.app.fire('nightFade', this.nightFade);
-        this.app.fire('nightFade:changed', this.nightFade);
-        
+        // 仅在 fade 变化时 fire，避免每帧触发 configureCamera
+        if (this._lastFiredNightFade !== this.nightFade) {
+            this.app.fire('nightFade', this.nightFade);
+            this.app.fire('nightFade:changed', this.nightFade);
+            this._lastFiredNightFade = this.nightFade;
+        }
+
         // Always request render to ensure state changes are visible
         this.app.renderNextFrame = true;
     }
@@ -964,6 +965,7 @@ class NightMode extends GsplatShaderEffect {
             this.updateEffect(this.effectTime, 0);
         }
         this.app.fire('nightFade:changed', this.nightFade);
+        this._lastFiredNightFade = this.nightFade;
     }
 
     /**
@@ -991,6 +993,7 @@ class NightMode extends GsplatShaderEffect {
             this.updateEffect(this.effectTime, 0);
         }
         this.app.fire('nightFade:changed', this.nightFade);
+        this._lastFiredNightFade = this.nightFade;
     }
 
     /** Whether brightness effect is active (|fade| > 0), e.g. for Bloom Brush coupling */
