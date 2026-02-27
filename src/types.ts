@@ -95,8 +95,8 @@ type State = {
     uploadedAssets?: AssetLibraryItem[];
     /** 场景中已放置的可编辑实体列表 */
     scenePlacedEntities?: ScenePlacedItem[];
-    /** 当前选中的场景实体（用于 Gizmo / 复制删除） */
-    selectedSceneEntity?: Entity | null;
+    /** 当前选中的场景实体 id（用于列表高亮、Gizmo、复制删除；实体通过 getSelectedSceneEntity(state) 获取） */
+    selectedSceneEntityId?: string | null;
     /** 相机输入是否启用（用于与 Gizmo 交互互斥） */
     cameraControlsEnabled?: boolean;
 };

@@ -2,6 +2,7 @@ import type { AppBase } from 'playcanvas';
 import { Ray, Vec3, StandardMaterial } from 'playcanvas';
 import type { Global } from './types';
 import type { AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from './types';
+import { getSelectedSceneEntity } from './state-helpers';
 import { Entity } from 'playcanvas';
 import { Picker } from './picker';
 import { loadGsplatAsset } from './loaders/gsplat-asset-loader';
@@ -297,8 +298,9 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
         // 先尝试拾取已放置实体
         const picked = pickPlacedEntity(global);
         if (picked) {
-            state.selectedSceneEntity = picked.entity;
-            events.fire('sceneAsset:selected', picked.entity);
+            const entry = (state.scenePlacedEntities ?? []).find((e) => e.entity === picked.entity);
+            state.selectedSceneEntityId = entry?.id ?? null;
+            events.fire('sceneAsset:selected');
             return;
         }
 
@@ -306,7 +308,7 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
     };
 
     const onCopy = () => {
-        const current = state.selectedSceneEntity;
+        const current = getSelectedSceneEntity(state);
         if (!current) return;
         const list = state.scenePlacedEntities ?? [];
         const entry = list.find((e) => e.entity === current);
@@ -326,13 +328,13 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
             visible: true
         };
         state.scenePlacedEntities!.push(newEntry);
-        state.selectedSceneEntity = clone;
+        state.selectedSceneEntityId = newEntry.id;
         events.fire('sceneAssets:added', newEntry);
-        events.fire('sceneAsset:selected', clone);
+        events.fire('sceneAsset:selected');
     };
 
     const onDelete = () => {
-        const current = state.selectedSceneEntity;
+        const current = getSelectedSceneEntity(state);
         if (!current) return;
         const list = state.scenePlacedEntities ?? [];
         const idx = list.findIndex((e) => e.entity === current);
@@ -340,9 +342,9 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
         const entry = list[idx];
         entry.entity.destroy();
         list.splice(idx, 1);
-        state.selectedSceneEntity = null;
+        state.selectedSceneEntityId = null;
         events.fire('sceneAssets:removed', entry);
-        events.fire('sceneAsset:selected', null);
+        events.fire('sceneAsset:selected');
     };
 
     const onDropOnCanvas = async (payload: { item: AssetLibraryItem; clientX: number; clientY: number }) => {
@@ -373,8 +375,8 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
 
         const entry = await placeAsset(global, item, hit);
         if (!entry) return;
-        state.selectedSceneEntity = entry.entity;
-        events.fire('sceneAsset:selected', entry.entity);
+        state.selectedSceneEntityId = entry.id;
+        events.fire('sceneAsset:selected');
     };
 
     canvas.addEventListener('pointerdown', onPointerDown);

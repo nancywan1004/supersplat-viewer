@@ -7,6 +7,7 @@ import * as pc from 'playcanvas';
 import type { AppBase } from 'playcanvas';
 import type { Global } from './types';
 import type { AssetTransformMode } from './types';
+import { getSelectedSceneEntity } from './state-helpers';
 
 function getGizmoAPI(): {
     Gizmo: { createLayer: (app: AppBase) => any };
@@ -121,7 +122,7 @@ export function initGizmoHandler(global: Global): () => void {
     }
 
     const syncGizmoToSelection = () => {
-        const entity = state.selectedSceneEntity;
+        const entity = getSelectedSceneEntity(state);
         if (handler) {
             if (entity) {
                 handler.add(entity, true);
@@ -134,7 +135,7 @@ export function initGizmoHandler(global: Global): () => void {
     };
 
     const onModeChanged = (_mode: AssetTransformMode) => {
-        if (handler && state.selectedSceneEntity) {
+        if (handler && getSelectedSceneEntity(state)) {
             const type = MODE_TO_GIZMO_TYPE[state.assetTransformMode ?? 'move'];
             handler.switch(type);
         }

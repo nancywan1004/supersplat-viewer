@@ -11,9 +11,14 @@ const ASSET_TYPE_ACCEPT: Record<AssetLibraryType, string> = {
 const TRASH_SVG =
     '<svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
 
-function renderAssetPreviewGrid(gridEl: HTMLElement, global: Global): void {
+function renderAssetPreviewGrid(
+    gridEl: HTMLElement,
+    global: Global,
+    typeSelect: HTMLSelectElement | null
+): void {
     const { state, events, app } = global;
-    const list = state.uploadedAssets ?? [];
+    const currentType = (typeSelect?.value ?? 'mesh') as AssetLibraryType;
+    const list = (state.uploadedAssets ?? []).filter((item) => item.type === currentType);
     gridEl.innerHTML = '';
 
     list.forEach((item) => {
@@ -49,7 +54,7 @@ function renderAssetPreviewGrid(gridEl: HTMLElement, global: Global): void {
                 if (item.type === 'image' && item.url) URL.revokeObjectURL(item.url);
                 arr.splice(idx, 1);
                 events.fire('assetLibrary:removed', item);
-                renderAssetPreviewGrid(gridEl, global);
+                renderAssetPreviewGrid(gridEl, global, typeSelect);
             }
         });
         slot.appendChild(placeholder);
@@ -182,8 +187,8 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
     const gridEl = root.querySelector<HTMLElement>('#assetPreviewGrid');
     let onLibraryChange: (() => void) | null = null;
     if (gridEl) {
-        renderAssetPreviewGrid(gridEl, global);
-        onLibraryChange = () => renderAssetPreviewGrid(gridEl, global);
+        renderAssetPreviewGrid(gridEl, global, typeSelect);
+        onLibraryChange = () => renderAssetPreviewGrid(gridEl, global, typeSelect);
         events.on('assetLibrary:added', onLibraryChange);
         events.on('assetLibrary:removed', onLibraryChange);
 
@@ -217,7 +222,10 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         fileInput.accept = ASSET_TYPE_ACCEPT[type] ?? ASSET_TYPE_ACCEPT.mesh;
     };
     updateFileAccept();
-    typeSelect.addEventListener('change', updateFileAccept);
+    typeSelect.addEventListener('change', () => {
+        updateFileAccept();
+        if (gridEl) renderAssetPreviewGrid(gridEl, global, typeSelect);
+    });
 
     const handleFileSelect = async (e: Event) => {
         const input = e.target as HTMLInputElement;

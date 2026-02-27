@@ -22,12 +22,13 @@ export function getSceneAssetListHTML(): string {
 function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
     const { state, events } = global;
     const list = state.scenePlacedEntities ?? [];
-    const selectedEntity = state.selectedSceneEntity;
+    const selectedId = state.selectedSceneEntityId ?? null;
     listEl.innerHTML = '';
 
     list.forEach((entry: ScenePlacedItem) => {
+        const isSelected = selectedId !== null && entry.id === selectedId;
         const li = document.createElement('li');
-        li.className = 'scene-asset-item' + (entry.entity === selectedEntity ? ' selected' : '');
+        li.className = 'scene-asset-item' + (isSelected ? ' selected' : '');
         li.dataset.entityId = entry.id;
         const nameSpan = document.createElement('span');
         nameSpan.className = 'scene-asset-name';
@@ -76,9 +77,9 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
             const idx = arr.findIndex((s) => s.id === entry.id);
             if (idx >= 0) {
                 arr.splice(idx, 1);
-                if (state.selectedSceneEntity === entry.entity) {
-                    state.selectedSceneEntity = null;
-                    events.fire('sceneAsset:selected', null);
+                if (state.selectedSceneEntityId === entry.id) {
+                    state.selectedSceneEntityId = null;
+                    events.fire('sceneAsset:selected');
                 }
                 events.fire('sceneAssets:removed', entry);
                 renderSceneAssetList(listEl, global);
@@ -86,10 +87,9 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
         });
         li.addEventListener('click', (e) => {
             if ((e.target as HTMLElement).closest('.scene-asset-delete') || (e.target as HTMLElement).closest('.scene-asset-visibility')) return;
-            state.selectedSceneEntity = entry.entity;
-            events.fire('sceneAsset:selected', entry.entity);
-            listEl.querySelectorAll('.scene-asset-item').forEach((n) => n.classList.remove('selected'));
-            li.classList.add('selected');
+            state.selectedSceneEntityId = entry.id;
+            events.fire('sceneAsset:selected');
+            renderSceneAssetList(listEl, global);
         });
 
         li.appendChild(nameSpan);
