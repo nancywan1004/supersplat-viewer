@@ -528,15 +528,11 @@ const initUI = (global: Global) => {
         updateEditModeUI();
     }
 
-    // Reveal / VFX、Lighting、PostEffect 由独立组件管理；挂载容器由 edit-right-toolbar 提供
-    const cleanupRevealUI = initRevealUI(global);
-    const cleanupVideoExportUI = initVideoExportUI(global);
-    const cleanupLightingUI = initLightingUI(global);
-    const cleanupPostEffectUI = initPostEffectUI(global);
-    // 若将来有“关闭设置面板并销毁子组件”等场景，可在此处或适当时机调用：
-    // cleanupRevealUI(); cleanupVideoExportUI(); cleanupLightingUI(); cleanupPostEffectUI();
-
-    // VFX / Lighting / postEffect / Render 二级菜单折叠由 edit-right-toolbar 组件内处理
+    // Reveal / VFX、Lighting、PostEffect、VideoExport 由独立组件管理，挂载到 edit-right-toolbar 提供的容器（#revealPanelContainer、#lightingPanelContainer 等）
+    initRevealUI(global);
+    initVideoExportUI(global);
+    initLightingUI(global);
+    initPostEffectUI(global);
 
     // Info panel
     const updateInfoTab = (tab: 'desktop' | 'touch') => {

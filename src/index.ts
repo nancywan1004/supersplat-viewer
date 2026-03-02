@@ -172,7 +172,7 @@ const main = (app: AppBase, camera: Entity, settingsJson: any, config: Config) =
         vfxActive: false,
         vfxType: 'none' as 'none' | 'grow' | 'pieces-recover' | 'perlin-wave' | 'disintegrate' | 'integrate' | 'growth-wave',
         editMode: false,
-        editLeftModule: 'environment',
+        editLeftModule: 'asset',
         assetTransformMode: 'move',
         uploadedAssets: [],
         scenePlacedEntities: [],

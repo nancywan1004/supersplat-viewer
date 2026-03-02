@@ -84,7 +84,7 @@ export function initEditRightToolbarUI(global: Global): () => void {
 
     container.innerHTML = EDIT_RIGHT_TOOLBAR_HTML;
 
-    const current = (): EditLeftModule => state.editLeftModule ?? 'environment';
+    const current = (): EditLeftModule => state.editLeftModule ?? 'asset';
 
     const showPanel = (moduleId: EditLeftModule) => {
         RIGHT_PANEL_IDS.forEach((id) => {
