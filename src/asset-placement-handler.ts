@@ -141,7 +141,7 @@ async function instantiateGaussian(app: AppBase, item: AssetLibraryItem, positio
     const entity = new Entity(item.name || 'gsplat');
     // 与主场景 gsplat 的朝向一致
     entity.setLocalEulerAngles(0, 0, 180);
-    entity.addComponent('gsplat', { unified: true, asset });
+    entity.addComponent('gsplat', { unified: true, asset, castShadows: true });
     const material = entity.gsplat!.unified ? app.scene.gsplat.material : entity.gsplat!.material;
     // 尽量与主场景 gsplat 的配置保持一致，开启 AA 并设置 alphaClip
     material.setDefine('GSPLAT_AA', true);
