@@ -99,3 +99,29 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
 
     return out as ExperienceSettings;
 }
+
+/** 递归按 key 排序对象，用于生成可比较的字符串（避免 key 顺序导致误判） */
+function sortKeysForCompare(obj: unknown): unknown {
+    if (obj === null || typeof obj !== 'object') return obj;
+    if (Array.isArray(obj)) return obj.map(sortKeysForCompare);
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(obj).sort()) {
+        sorted[key] = sortKeysForCompare((obj as Record<string, unknown>)[key]);
+    }
+    return sorted;
+}
+
+/** 返回与序列化结果一致的可比较字符串，用于判断 settings 是否有改动 */
+export function getComparableSettingsString(global: Global): string {
+    const settings = serializeExperienceSettings(global);
+    return JSON.stringify(sortKeysForCompare(settings));
+}
+
+/**
+ * 将 global.settings 恢复为快照内容（原地替换属性），用于「不保存并退出」时回退。
+ */
+export function applySettingsSnapshot(global: Global, snapshot: ExperienceSettings): void {
+    const gs = global.settings as Record<string, unknown>;
+    for (const k of Object.keys(gs)) delete gs[k];
+    Object.assign(gs, snapshot);
+}

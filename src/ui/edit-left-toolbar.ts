@@ -75,7 +75,7 @@ export function initEditLeftToolbarUI(global: Global): () => void {
 
     const items = Array.from(container.querySelectorAll<HTMLElement>('.edit-left-toolbar-item'));
 
-    const current = (): EditLeftModule => state.editLeftModule ?? 'environment';
+    const current = (): EditLeftModule => state.editLeftModule ?? 'asset';
 
     const setActive = (id: EditLeftModule) => {
         state.editLeftModule = id;

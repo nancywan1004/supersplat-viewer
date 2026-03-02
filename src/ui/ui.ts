@@ -3,7 +3,10 @@ import { EventHandler } from 'playcanvas';
 import { Tooltip } from '../tooltip';
 import { Global } from '../types';
 import { isLodMetaFile } from '../loaders/lod-loader';
-import { serializeExperienceSettings } from '../settings-serialize';
+import type { ExperienceSettings } from '../schemas/v2';
+import { serializeExperienceSettings, getComparableSettingsString, applySettingsSnapshot } from '../settings-serialize';
+import { clearScenePlacedEntities, restoreSceneAssetsFromSettings } from '../asset-placement-handler';
+import { showExitEditConfirmModal } from './components/exit-edit-confirm-ui';
 import { initRevealUI } from './components/reveal-ui';
 import { initVideoExportUI } from './components/video-export-ui';
 import { initLightingUI } from './components/lighting-ui';
@@ -430,8 +433,18 @@ const initUI = (global: Global) => {
     const cleanupEditLeftToolbarUI = initEditLeftToolbarUI(global);
     const cleanupEditRightToolbarUI = initEditRightToolbarUI(global);
     const cleanupEditBottomToolbarUI = initEditBottomToolbarUI(global);
+    /** 进入编辑模式时的 settings 快照（字符串用于比较是否有改动） */
+    let editModeEnteredSettingsSnapshot: string | null = null;
+    /** 进入编辑模式时的 settings 完整数据，用于「不保存并退出」时回退场景 */
+    let editModeEnteredSettingsData: ExperienceSettings | null = null;
     const updateEditModeUI = () => {
         const inEdit = state.editMode;
+        if (inEdit) {
+            editModeEnteredSettingsSnapshot = getComparableSettingsString(global);
+            editModeEnteredSettingsData = JSON.parse(
+                JSON.stringify(serializeExperienceSettings(global))
+            ) as ExperienceSettings;
+        }
         const leftMount = document.getElementById('editLeftSidebarMount');
         if (leftMount) {
             leftMount.classList.toggle('hidden', !inEdit);
@@ -469,7 +482,34 @@ const initUI = (global: Global) => {
         }
         if (dom.exitEditBtn) {
             dom.exitEditBtn.addEventListener('click', () => {
-                state.editMode = false;
+                const current = getComparableSettingsString(global);
+                if (editModeEnteredSettingsSnapshot === null || current === editModeEnteredSettingsSnapshot) {
+                    state.editMode = false;
+                    return;
+                }
+                showExitEditConfirmModal({
+                    onSave: () => {
+                        const payload = serializeExperienceSettings(global);
+                        const jsonString = JSON.stringify(payload, null, 2);
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(new Blob([jsonString], { type: 'application/json' }));
+                        a.download = 'settings.json';
+                        a.click();
+                        URL.revokeObjectURL(a.href);
+                        window.parent.postMessage({ type: 'SETTINGS_UPDATED', message: 'settings updated', payload: jsonString }, '*');
+                        state.editMode = false;
+                    },
+                    onDiscard: async () => {
+                        if (!editModeEnteredSettingsData) {
+                            state.editMode = false;
+                            return;
+                        }
+                        applySettingsSnapshot(global, editModeEnteredSettingsData);
+                        clearScenePlacedEntities(global);
+                        await restoreSceneAssetsFromSettings(global);
+                        state.editMode = false;
+                    }
+                });
             });
         }
         if (dom.saveSettingsBtn) {

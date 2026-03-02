@@ -279,10 +279,26 @@ export async function restoreSceneAssetsFromSettings(global: Global): Promise<vo
         const entry = await placeAsset(global, item, pos);
         if (!entry) continue;
 
-        // 应用保存时记录的旋转与缩放
+        // 应用保存时记录的旋转、缩放与可见性
         entry.entity.setEulerAngles(rotArr[0] ?? 0, rotArr[1] ?? 0, rotArr[2] ?? 0);
         entry.entity.setLocalScale(scaleArr[0] ?? 1, scaleArr[1] ?? 1, scaleArr[2] ?? 1);
+        const visible = sa.visible !== false;
+        entry.visible = visible;
+        entry.entity.enabled = visible;
     }
+}
+
+/**
+ * 清空当前场景中已放置的资产：销毁实体并从 state.scenePlacedEntities 移除，并派发 sceneAssets:cleared。
+ */
+export function clearScenePlacedEntities(global: Global): void {
+    const list = global.state.scenePlacedEntities ?? [];
+    for (const entry of list) {
+        entry.entity.destroy();
+    }
+    global.state.scenePlacedEntities = [];
+    global.state.selectedSceneEntityId = null;
+    global.events.fire('sceneAssets:cleared');
 }
 
 export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElement, planeY: number = 0): () => void {

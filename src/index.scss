@@ -115,6 +115,8 @@ button {
     }
 }
 
+@import 'ui/components/styles/exit-edit-confirm-ui';
+
 /* 编辑模式工具栏（左/右/底） */
 @import 'ui/styles/edit-left-toolbar';
 @import 'ui/styles/edit-bottom-toolbar';

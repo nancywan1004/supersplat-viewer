@@ -1,0 +1,54 @@
+/* 退出编辑模式时的保存确认弹窗 */
+.exit-edit-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+.exit-edit-confirm-dialog {
+    background: $clr-bkg-dark;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+    padding: 24px;
+    max-width: 360px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+.exit-edit-confirm-dialog h3 {
+    margin: 0 0 16px;
+    font-size: 16px;
+    font-weight: 600;
+    color: $clr-text;
+}
+.exit-edit-confirm-dialog .exit-edit-confirm-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+.exit-edit-confirm-dialog .exit-edit-confirm-buttons button {
+    padding: 8px 14px;
+    font-size: 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+.exit-edit-confirm-dialog .exit-edit-confirm-save {
+    background: $clr-accent;
+    color: #fff;
+    border-color: $clr-accent;
+}
+.exit-edit-confirm-dialog .exit-edit-confirm-save:hover {
+    filter: brightness(1.1);
+}
+.exit-edit-confirm-dialog .exit-edit-confirm-discard {
+    background: $clr-bkg-light;
+    color: $clr-text;
+}
+.exit-edit-confirm-dialog .exit-edit-confirm-cancel {
+    background: transparent;
+    color: $clr-text-dark;
+}

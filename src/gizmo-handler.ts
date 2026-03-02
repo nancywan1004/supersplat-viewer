@@ -143,9 +143,30 @@ export function initGizmoHandler(global: Global): () => void {
 
     const onSelectionChanged = () => syncGizmoToSelection();
 
+    /** 退出编辑模式时隐藏 Gizmo；进入编辑模式时若无选中则默认选场景列表第一项并同步 Gizmo */
+    const onEditModeChanged = (inEdit: boolean) => {
+        if (!handler) return;
+        if (!inEdit) {
+            handler.clear();
+            return;
+        }
+        const entity = getSelectedSceneEntity(state);
+        const list = state.scenePlacedEntities ?? [];
+        if (!entity && list.length > 0) {
+            state.selectedSceneEntityId = list[0].id;
+            events.fire('sceneAsset:selected');
+        }
+        syncGizmoToSelection();
+    };
+
     events.on('assetTransformMode:changed', onModeChanged);
     events.on('sceneAsset:selected', onSelectionChanged);
-    syncGizmoToSelection();
+    events.on('editMode:changed', onEditModeChanged);
+    if (state.editMode) {
+        onEditModeChanged(true);
+    } else if (handler) {
+        handler.clear();
+    }
 
     // 每帧更新 Gizmo（官方 Gizmo 需要 update）
     const onUpdate = () => {
@@ -159,6 +180,7 @@ export function initGizmoHandler(global: Global): () => void {
     return () => {
         events.off('assetTransformMode:changed', onModeChanged);
         events.off('sceneAsset:selected', onSelectionChanged);
+        events.off('editMode:changed', onEditModeChanged);
         app.off('update', onUpdate);
         handler?.destroy();
     };

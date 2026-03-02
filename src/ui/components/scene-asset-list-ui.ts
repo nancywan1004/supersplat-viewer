@@ -119,11 +119,13 @@ export function bindSceneAssetList(root: HTMLElement | null, global: Global): ()
     const onSceneListChange = () => renderSceneAssetList(listEl, global);
     events.on('sceneAssets:added', onSceneListChange);
     events.on('sceneAssets:removed', onSceneListChange);
+    events.on('sceneAssets:cleared', onSceneListChange);
     events.on('sceneAsset:selected', onSceneListChange);
 
     return () => {
         events.off('sceneAssets:added', onSceneListChange);
         events.off('sceneAssets:removed', onSceneListChange);
+        events.off('sceneAssets:cleared', onSceneListChange);
         events.off('sceneAsset:selected', onSceneListChange);
     };
 }
