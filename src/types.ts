@@ -17,16 +17,21 @@ type Config = {
     noBottomUI: boolean;                        // hide bottom UI controls, but keep poster and loading bar
     noanim: boolean;
     noautorotate: boolean;
+    nofx: boolean;                              // disable post effects
+    hpr?: boolean;                              // override highPrecisionRendering (undefined = use settings)
     ministats: boolean;
     colorize: boolean;                          // render with LOD colorization
     unified: boolean;                           // force unified rendering mode
     aa: boolean;                                // render with antialiasing
     noreveal: boolean;                          // disable reveal effect transition animation
     showCameraPathVisualizer?: boolean;         // show camera path visualization
+    webgpu: boolean;                            // use WebGPU device
+    gpusort: boolean;                           // use GPU sorting for splats
 };
 
 // observable state that can change at runtime
 type State = {
+    loaded: boolean;                            // true once first frame is rendered
     readyToRender: boolean;                     // don't render till this is set
     hqMode: boolean;
     progress: number;                           // content loading progress 0-100

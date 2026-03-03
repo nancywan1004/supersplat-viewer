@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+
 import json from '@rollup/plugin-json';
 import resolve from '@rollup/plugin-node-resolve';
 import typescript from '@rollup/plugin-typescript';
@@ -172,6 +174,24 @@ const packagePlugin = () => ({
 });
 
 // --- CSS 构建（public 目录，不使用 hash） ---
+function htmlPlugin() {
+    return {
+        name: 'html',
+        buildStart() {
+            this.addWatchFile('src/index.html');
+        },
+        generateBundle() {
+            const contents = readFileSync('src/index.html', 'utf-8');
+            const transformed = contents.replace('<base href="">', `<base href="${process.env.BASE_HREF ?? ''}">`);
+            this.emitFile({
+                type: 'asset',
+                fileName: 'index.html',
+                source: transformed
+            });
+        }
+    };
+}
+
 const buildCss = {
     input: 'src/index.scss',
     output: {
@@ -188,7 +208,17 @@ const buildCss = {
                 .process(css, { from: undefined })
                 .then(result => result.css);
             }
-        })
+        }),
+        {
+            name: 'suppress-empty-chunks',
+            generateBundle(options, bundle) {
+                for (const [fileName, chunk] of Object.entries(bundle)) {
+                    if (chunk.type === 'chunk' && chunk.code.trim() === '') {
+                        delete bundle[fileName];
+                    }
+                }
+            }
+        }
     ]
 };
 
@@ -204,15 +234,7 @@ const buildPublic = {
         resolve(),
         typescript(),
         json(),
-        copy({
-            targets: [{
-                src: 'src/index.html',
-                dest: 'public',
-                transform: (contents) => {
-                    return contents.toString().replace('<base href="">', `<base href="${process.env.BASE_HREF ?? ''}">`);
-                }
-            }]
-        })
+        htmlPlugin()
     ]
 };
 

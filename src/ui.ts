@@ -1,5 +1,6 @@
 import { EventHandler } from 'playcanvas';
 
+import type { Annotation } from './settings';
 import { Tooltip } from './tooltip';
 import { Global } from './types';
 import { isLodMetaFile } from './loaders/lod-loader';
@@ -135,11 +136,77 @@ const initJoystick = (
     dom.joystickBase.addEventListener('pointercancel', endJoystickTouch);
 };
 
+// Initialize the annotation navigator for stepping between annotations
+const initAnnotationNav = (
+    dom: Record<string, HTMLElement>,
+    events: EventHandler,
+    state: { loaded: boolean; inputMode: string; controlsHidden: boolean },
+    annotations: Annotation[]
+) => {
+    // Only show navigator when there are at least 2 annotations
+    if (annotations.length < 2) return;
+
+    let currentIndex = 0;
+
+    const updateDisplay = () => {
+        dom.annotationNavTitle.textContent = annotations[currentIndex].title || '';
+    };
+
+    const updateMode = () => {
+        if (!state.loaded) return;
+        dom.annotationNav.classList.remove('desktop', 'touch', 'hidden');
+        dom.annotationNav.classList.add(state.inputMode);
+    };
+
+    const updateFade = () => {
+        if (!state.loaded) return;
+        dom.annotationNav.classList.toggle('faded-in', !state.controlsHidden);
+        dom.annotationNav.classList.toggle('faded-out', state.controlsHidden);
+    };
+
+    const goTo = (index: number) => {
+        currentIndex = index;
+        updateDisplay();
+        events.fire('annotation.navigate', annotations[currentIndex]);
+    };
+
+    // Prev / Next
+    dom.annotationPrev.addEventListener('click', (e) => {
+        e.stopPropagation();
+        goTo((currentIndex - 1 + annotations.length) % annotations.length);
+    });
+
+    dom.annotationNext.addEventListener('click', (e) => {
+        e.stopPropagation();
+        goTo((currentIndex + 1) % annotations.length);
+    });
+
+    // Sync when an annotation is activated externally (e.g. hotspot click)
+    events.on('annotation.activate', (annotation: Annotation) => {
+        const idx = annotations.indexOf(annotation);
+        if (idx !== -1) {
+            currentIndex = idx;
+            updateDisplay();
+        }
+    });
+
+    // React to state changes
+    events.on('loaded:changed', () => {
+        updateMode();
+        updateFade();
+    });
+    events.on('inputMode:changed', updateMode);
+    events.on('controlsHidden:changed', updateFade);
+
+    // Initial state
+    updateDisplay();
+};
+
 // update the poster image to start blurry and then resolve to sharp during loading
 const initPoster = (events: EventHandler) => {
     const poster = document.getElementById('poster');
 
-    events.on('firstFrame', () => {
+    events.on('loaded:changed', () => {
         poster.style.display = 'none';
         document.documentElement.style.setProperty('--canvas-opacity', '1');
     });
@@ -176,7 +243,9 @@ const initUI = (global: Global) => {
         'getCameraInfo',
         'loadingText', 'loadingBar', 'loadingIcon',
         'joystickBase', 'joystick',
-        'tooltip'
+        'tooltip',
+        'annotationNav', 'annotationPrev', 'annotationNext', 'annotationInfo', 'annotationNavTitle',
+        'supersplatBranding'
     ].reduce((acc: Record<string, HTMLElement>, id) => {
         acc[id] = document.getElementById(id);
         return acc;
@@ -188,6 +257,13 @@ const initUI = (global: Global) => {
     // In LOD mode, show progress bar but mark as 100% when animation starts
     // Progress is calculated based on threshold, reaching 100% when animation begins
     const hideProgressBarInLodMode = false;
+    // Forward wheel events from UI overlays to the canvas so the camera zooms
+    // instead of the page scrolling (e.g. annotation nav, tooltips, hotspots)
+    const canvas = global.app.graphicsDevice.canvas as HTMLCanvasElement;
+    dom.ui.addEventListener('wheel', (event: WheelEvent) => {
+        event.preventDefault();
+        canvas.dispatchEvent(new WheelEvent(event.type, event));
+    }, { passive: false });
 
     // Handle loading progress updates
     if (isLodMode && hideProgressBarInLodMode) {
@@ -222,8 +298,8 @@ const initUI = (global: Global) => {
         });
     }
 
-    // Hide loading bar once first frame is rendered
-    events.on('firstFrame', () => {
+    // Hide loading bar once loaded
+    events.on('loaded:changed', () => {
         document.getElementById('loadingWrap').classList.add('hidden');
     });
 
@@ -516,6 +592,8 @@ const initUI = (global: Global) => {
 
     // show the ui and start a timer to hide it again
     let uiTimeout: ReturnType<typeof setTimeout> | null = null;
+    let annotationVisible = false;
+
     const showUI = () => {
         // If noBottomUI is enabled, don't show UI
         if (config.noBottomUI) {
@@ -527,7 +605,9 @@ const initUI = (global: Global) => {
         state.controlsHidden = false;
         uiTimeout = setTimeout(() => {
             uiTimeout = null;
-            state.controlsHidden = true;
+            if (!annotationVisible) {
+                state.controlsHidden = true;
+            }
         }, 4000);
     };
     // Only show UI initially if noBottomUI is not enabled
@@ -535,7 +615,24 @@ const initUI = (global: Global) => {
         showUI();
     }
 
+    // Show controls once loaded
+    events.on('loaded:changed', () => {
+        dom.controlsWrap.classList.remove('hidden');
+        showUI();
+    });
+
     events.on('inputEvent', showUI);
+
+    // keep UI visible while an annotation tooltip is shown
+    events.on('annotation.activate', () => {
+        annotationVisible = true;
+        showUI();
+    });
+
+    events.on('annotation.deactivate', () => {
+        annotationVisible = false;
+        showUI();
+    });
 
     // Animation controls
     events.on('hasAnimation:changed', (value, prev) => {
@@ -659,6 +756,9 @@ const initUI = (global: Global) => {
     }
     
 
+    // Initialize annotation navigator
+    initAnnotationNav(dom, events, state, global.settings.annotations);
+
     // Hide all UI (poster, loading bar, controls)
     if (config.noui) {
         dom.ui.classList.add('hidden');
@@ -715,6 +815,25 @@ const initUI = (global: Global) => {
     tooltip.register(dom.vrMode, 'Enter VR', 'top');
     tooltip.register(dom.enterFullscreen, 'Fullscreen', 'top');
     tooltip.register(dom.exitFullscreen, 'Fullscreen', 'top');
+
+    const isThirdPartyEmbedded = () => {
+        try {
+            return window.location.hostname !== window.parent.location.hostname;
+        } catch (e) {
+            // cross-origin iframe — parent location is inaccessible
+            return true;
+        }
+    };
+
+    if (window.parent !== window && isThirdPartyEmbedded()) {
+        const viewUrl = new URL(window.location.href);
+        if (viewUrl.pathname === '/s') {
+            viewUrl.pathname = '/view';
+        }
+
+        (dom.supersplatBranding as HTMLAnchorElement).href = viewUrl.toString();
+        dom.supersplatBranding.classList.remove('hidden');
+    }
 };
 
 export { initPoster, initUI };
