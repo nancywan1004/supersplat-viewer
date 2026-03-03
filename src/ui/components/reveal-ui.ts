@@ -1,4 +1,5 @@
 import type { Global } from '../../types';
+import { pushEditHistory } from '../../edit-history';
 
 /** 需要 totalDuration / 时间轴 的 VFX 特效类型列表（同时被 reveal-ui / video-export-ui 使用） */
 export const TIMED_VFX_EFFECTS = [
@@ -110,10 +111,17 @@ export function initRevealUI(global: Global): () => void {
         // 不写入 state：state 可能是 Proxy，不允许随意 set 新属性；导出时以 DOM (#restartAnimTrackCheck.active) 为准
     };
 
+    const pushEditHistorySafe = () => {
+        if ((global.state as any).editMode) {
+            pushEditHistory(global, 'reveal');
+        }
+    };
+
     const onRevealTypeChange = (event: Event) => {
         const target = (event.target as HTMLSelectElement);
         const type = target.value as RevealType;
         events.fire('revealConfigChanged', { type });
+        pushEditHistorySafe();
     };
 
     const onTotalDurationChange = (event: Event) => {
@@ -124,6 +132,7 @@ export function initRevealUI(global: Global): () => void {
             if (effectTimeline) {
                 effectTimeline.max = (totalDurationVal * 10).toString();
             }
+            pushEditHistorySafe();
         }
     };
 

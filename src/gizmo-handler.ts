@@ -8,6 +8,7 @@ import type { AppBase } from 'playcanvas';
 import type { Global } from './types';
 import type { AssetTransformMode } from './types';
 import { getSelectedSceneEntity } from './state-helpers';
+import { pushEditHistory } from './edit-history';
 
 function getGizmoAPI(): {
     Gizmo: { createLayer: (app: AppBase) => any };
@@ -79,6 +80,9 @@ export function initGizmoHandler(global: Global): () => void {
                     // 结束拖拽后，先清空一次相机输入增量，再重新开启相机控制，避免「松手瞬间相机跳一下」
                     events.fire('cameraControls:flushInputs');
                     state.cameraControlsEnabled = true;
+                    if (state.editMode && state.selectedSceneEntityId && handler && handler._nodes.length > 0) {
+                        pushEditHistory(global, 'transform asset');
+                    }
                 });
             });
             let _type = 'translate';

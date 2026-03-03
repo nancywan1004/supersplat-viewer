@@ -113,6 +113,15 @@ button {
     &:hover {
         background: darken($clr-bkg-light, 5%);
     }
+    &[disabled],
+    &.edit-mode-btn-disabled {
+        opacity: 0.4;
+        cursor: default;
+        pointer-events: none;
+        &:hover {
+            background: $clr-bkg-light;
+        }
+    }
 }
 
 @import 'ui/components/styles/exit-edit-confirm-ui';

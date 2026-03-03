@@ -1,5 +1,6 @@
 import type { Global } from '../../types';
 import { updatePointLightsFromSettings } from '../../light';
+import { pushEditHistory } from '../../edit-history';
 
 const POST_EFFECT_PANEL_HTML = `
 <div class="postEffectPanel">
@@ -214,6 +215,12 @@ export function initPostEffectUI(global: Global): () => void {
     const shadowSpawnSplatBtn = container.querySelector('#shadowSpawnSplatBtn') as HTMLButtonElement | null;
     const shadowClearSplatsBtn = container.querySelector('#shadowClearSplatsBtn') as HTMLButtonElement | null;
 
+    const pushEditHistorySafe = () => {
+        if ((global.state as any).editMode) {
+            pushEditHistory(global, 'postEffect');
+        }
+    };
+
     const syncFromSettings = () => {
         const b = ensureBloom(settings);
         if (bloomEnableCheck) bloomEnableCheck.classList.toggle('active', b.enabled);
@@ -257,6 +264,7 @@ export function initPostEffectUI(global: Global): () => void {
             b.enabled = !b.enabled;
             syncFromSettings();
             firePostEffectChanged();
+            pushEditHistorySafe();
         };
         bloomEnableOption.addEventListener('click', toggleBloom);
         bloomEnableCheck.addEventListener('click', toggleBloom);
@@ -269,6 +277,9 @@ export function initPostEffectUI(global: Global): () => void {
             bloomIntensityValue.textContent = b.intensity.toFixed(2);
             firePostEffectChanged();
         });
+        bloomIntensitySlider.addEventListener('change', () => {
+            pushEditHistorySafe();
+        });
     }
 
     if (bloomBlurLevelSlider && bloomBlurLevelValue) {
@@ -277,6 +288,9 @@ export function initPostEffectUI(global: Global): () => void {
             b.blurLevel = Math.max(1, Math.min(16, parseInt(bloomBlurLevelSlider!.value, 10)));
             bloomBlurLevelValue!.textContent = String(b.blurLevel);
             firePostEffectChanged();
+        });
+        bloomBlurLevelSlider.addEventListener('change', () => {
+            pushEditHistorySafe();
         });
     }
 
@@ -287,6 +301,9 @@ export function initPostEffectUI(global: Global): () => void {
             bloomThresholdValue!.textContent = (b as any).threshold.toFixed(2);
             firePostEffectChanged();
         });
+        bloomThresholdSlider.addEventListener('change', () => {
+            pushEditHistorySafe();
+        });
     }
 
     if (bloomDebugOption && bloomDebugCheck) {
@@ -296,6 +313,7 @@ export function initPostEffectUI(global: Global): () => void {
             if ((b as any).bloomDebug) (b as any).bloomBrush = false;
             syncFromSettings();
             firePostEffectChanged();
+            pushEditHistorySafe();
         };
         bloomDebugOption.addEventListener('click', toggleBloomDebug);
         bloomDebugCheck.addEventListener('click', toggleBloomDebug);
@@ -321,6 +339,9 @@ export function initPostEffectUI(global: Global): () => void {
             bloomBrushSizeValue!.textContent = String((b as any).bloomBrushSize);
             firePostEffectChanged();
         });
+        bloomBrushSizeSlider.addEventListener('change', () => {
+            pushEditHistorySafe();
+        });
     }
     if (bloomBrushBrightnessSlider && bloomBrushBrightnessValue) {
         bloomBrushBrightnessSlider.addEventListener('input', () => {
@@ -329,6 +350,9 @@ export function initPostEffectUI(global: Global): () => void {
             (b as any).bloomBrushBrightness = Math.max(-1, Math.min(1, val));
             bloomBrushBrightnessValue!.textContent = (Math.max(-1, Math.min(1, val))).toFixed(2);
             firePostEffectChanged();
+        });
+        bloomBrushBrightnessSlider.addEventListener('change', () => {
+            pushEditHistorySafe();
         });
     }
 
@@ -372,6 +396,7 @@ export function initPostEffectUI(global: Global): () => void {
             syncFromSettings();
             updatePointLightsFromSettings(global);
             firePostEffectChanged();
+            pushEditHistorySafe();
         };
         shadowEnableOption.addEventListener('click', toggleShadow);
         shadowEnableCheck.addEventListener('click', toggleShadow);
@@ -383,6 +408,7 @@ export function initPostEffectUI(global: Global): () => void {
             sh.castShadows = !sh.castShadows;
             syncFromSettings();
             firePostEffectChanged();
+            pushEditHistorySafe();
         };
         shadowCastOption.addEventListener('click', toggleCast);
         shadowCastCheck.addEventListener('click', toggleCast);
@@ -395,6 +421,9 @@ export function initPostEffectUI(global: Global): () => void {
             shadowDarkenValue!.textContent = sh.darken.toFixed(2);
             firePostEffectChanged();
         });
+        shadowDarkenSlider.addEventListener('change', () => {
+            pushEditHistorySafe();
+        });
     }
 
     if (shadowDebugVisualOption && shadowDebugVisualCheck) {
@@ -403,6 +432,7 @@ export function initPostEffectUI(global: Global): () => void {
             (sh as any).debugVisual = (sh as any).debugVisual === false;
             syncFromSettings();
             firePostEffectChanged();
+            pushEditHistorySafe();
         };
         shadowDebugVisualOption.addEventListener('click', toggleDebugVisual);
         shadowDebugVisualCheck.addEventListener('click', toggleDebugVisual);
@@ -413,6 +443,10 @@ export function initPostEffectUI(global: Global): () => void {
             const sh = ensureShadow(settings);
             sh.sphereRadius = Math.max(0.1, Math.min(5, parseFloat(shadowSphereRadiusSlider.value) || 0.5));
             shadowSphereRadiusValue.textContent = sh.sphereRadius.toFixed(2);
+            firePostEffectChanged();
+        });
+        shadowSphereRadiusSlider.addEventListener('change', () => {
+            pushEditHistorySafe();
         });
     }
 

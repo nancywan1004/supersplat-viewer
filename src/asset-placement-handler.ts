@@ -6,6 +6,7 @@ import { getSelectedSceneEntity } from './state-helpers';
 import { Entity } from 'playcanvas';
 import { Picker } from './picker';
 import { loadGsplatAsset } from './loaders/gsplat-asset-loader';
+import { pushEditHistory } from './edit-history';
 
 const PLACED_ASSETS_NAME = 'placedAssets';
 const vec = new Vec3();
@@ -282,6 +283,10 @@ export async function restoreSceneAssetsFromSettings(global: Global): Promise<vo
         const entry = await placeAsset(global, item, pos);
         if (!entry) continue;
 
+        if (sa.id) {
+            entry.id = sa.id;
+        }
+
         // 应用保存时记录的旋转、缩放与可见性
         entry.entity.setEulerAngles(rotArr[0] ?? 0, rotArr[1] ?? 0, rotArr[2] ?? 0);
         entry.entity.setLocalScale(scaleArr[0] ?? 1, scaleArr[1] ?? 1, scaleArr[2] ?? 1);
@@ -350,6 +355,7 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
         state.selectedSceneEntityId = newEntry.id;
         events.fire('sceneAssets:added', newEntry);
         events.fire('sceneAsset:selected');
+        pushEditHistory(global, 'copy asset');
     };
 
     const onDelete = () => {
@@ -364,6 +370,7 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
         state.selectedSceneEntityId = null;
         events.fire('sceneAssets:removed', entry);
         events.fire('sceneAsset:selected');
+        pushEditHistory(global, 'delete asset');
     };
 
     const onDropOnCanvas = async (payload: { item: AssetLibraryItem; clientX: number; clientY: number }) => {
@@ -396,6 +403,7 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
         if (!entry) return;
         state.selectedSceneEntityId = entry.id;
         events.fire('sceneAsset:selected');
+        pushEditHistory(global, 'place asset');
     };
 
     canvas.addEventListener('pointerdown', onPointerDown);

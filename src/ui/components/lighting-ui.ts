@@ -1,6 +1,7 @@
 import type { Global } from '../../types';
 import { updatePointLightsFromSettings, setPointLightsVisualVisible } from '../../light';
 import type { PointLightConfig, DirectionalLightConfig, SpotLightConfig } from '../../schemas/v2';
+import { pushEditHistory } from '../../edit-history';
 
 const LIGHTING_PANEL_HTML = `
 <div class="lightingPanel">
@@ -90,6 +91,12 @@ export function initLightingUI(global: Global): () => void {
         return [((n >> 16) & 0xff) / 255, ((n >> 8) & 0xff) / 255, (n & 0xff) / 255];
     };
 
+    const pushEditHistorySafe = () => {
+        if ((global.state as any).editMode) {
+            pushEditHistory(global, 'lighting');
+        }
+    };
+
     // Scene brightness (Dark ← 0 → Bright), slider always active
     if (nightFadeSlider && nightFadeValue) {
         // 仅更新滑块/数值显示，不写回 settings（用户拖滑块时才写回）
@@ -104,6 +111,9 @@ export function initLightingUI(global: Global): () => void {
             (global.settings as any).nightMode.fade = value;
             //events.fire('nightFade:set', value);
             global.app.fire('nightFade:set', value);
+        });
+        nightFadeSlider.addEventListener('change', () => {
+            pushEditHistorySafe();
         });
         //events.on('nightFade:changed', setSliderDisplay);
         global.app.on('nightFade:changed', setSliderDisplay);
@@ -268,6 +278,7 @@ export function initLightingUI(global: Global): () => void {
                 }
                 updatePointLightsFromSettings(global);
                 events.fire('lighting:changed');
+                pushEditHistorySafe();
             });
         });
 
@@ -281,6 +292,7 @@ export function initLightingUI(global: Global): () => void {
                 renderPointLightsList();
                 updatePointLightsFromSettings(global);
                 events.fire('lighting:changed');
+                pushEditHistorySafe();
             });
         });
     };
@@ -296,6 +308,7 @@ export function initLightingUI(global: Global): () => void {
             renderPointLightsList();
             updatePointLightsFromSettings(global);
             events.fire('lighting:changed');
+            pushEditHistorySafe();
         });
     }
     if (addSpotLightBtn && pointLightsList) {
@@ -316,6 +329,7 @@ export function initLightingUI(global: Global): () => void {
             renderPointLightsList();
             updatePointLightsFromSettings(global);
             events.fire('lighting:changed');
+            pushEditHistorySafe();
         });
     }
     if (pointLightsList) renderPointLightsList();

@@ -6,6 +6,7 @@ import { isLodMetaFile } from '../loaders/lod-loader';
 import type { ExperienceSettings } from '../schemas/v2';
 import { serializeExperienceSettings, getComparableSettingsString, applySettingsSnapshot } from '../settings-serialize';
 import { clearScenePlacedEntities, restoreSceneAssetsFromSettings } from '../asset-placement-handler';
+import { initEditHistory, canUndo, canRedo, undo, redo } from '../edit-history';
 import { showExitEditConfirmModal } from './components/exit-edit-confirm-ui';
 import { initRevealUI } from './components/reveal-ui';
 import { initVideoExportUI } from './components/video-export-ui';
@@ -170,7 +171,7 @@ const initUI = (global: Global) => {
     const dom = [
         'ui',
         'controlsWrap',
-        'editModeStrip', 'editModeBtn', 'exitEditBtn', 'saveSettingsBtn', 'rightToolBar',
+        'editModeStrip', 'editModeBtn', 'exitEditBtn', 'saveSettingsBtn', 'undoEditBtn', 'redoEditBtn', 'rightToolBar',
         'arMode', 'vrMode',
         'enterFullscreen', 'exitFullscreen',
         'info', 'infoPanel', 'desktopTab', 'touchTab', 'desktopInfoPanel', 'touchInfoPanel',
@@ -440,9 +441,12 @@ const initUI = (global: Global) => {
     const updateEditModeUI = () => {
         const inEdit = state.editMode;
         if (inEdit) {
+            const initialSnapshot = serializeExperienceSettings(global);
+            initEditHistory(global, initialSnapshot);
+
             editModeEnteredSettingsSnapshot = getComparableSettingsString(global);
             editModeEnteredSettingsData = JSON.parse(
-                JSON.stringify(serializeExperienceSettings(global))
+                JSON.stringify(initialSnapshot)
             ) as ExperienceSettings;
         }
         const leftMount = document.getElementById('editLeftSidebarMount');
@@ -468,6 +472,12 @@ const initUI = (global: Global) => {
         }
         if (dom.saveSettingsBtn) {
             dom.saveSettingsBtn.classList.toggle('hidden', !inEdit);
+        }
+        if (dom.undoEditBtn) {
+            dom.undoEditBtn.classList.toggle('hidden', !inEdit);
+        }
+        if (dom.redoEditBtn) {
+            dom.redoEditBtn.classList.toggle('hidden', !inEdit);
         }
     };
     if (config.allowEditMode === false) {
@@ -530,6 +540,55 @@ const initUI = (global: Global) => {
                 editModeEnteredSettingsData = JSON.parse(JSON.stringify(payload)) as ExperienceSettings;
             });
         }
+
+        let editHistoryRestoring = false;
+        let editHistoryCanUndo = false;
+        let editHistoryCanRedo = false;
+
+        const applyUndoRedoState = () => {
+            const undoDisabled = !state.editMode || editHistoryRestoring || !editHistoryCanUndo;
+            const redoDisabled = !state.editMode || editHistoryRestoring || !editHistoryCanRedo;
+
+            if (dom.undoEditBtn) {
+                dom.undoEditBtn.toggleAttribute('disabled', undoDisabled);
+                dom.undoEditBtn.setAttribute('aria-disabled', undoDisabled ? 'true' : 'false');
+                dom.undoEditBtn.classList.toggle('edit-mode-btn-disabled', undoDisabled);
+            }
+            if (dom.redoEditBtn) {
+                dom.redoEditBtn.toggleAttribute('disabled', redoDisabled);
+                dom.redoEditBtn.setAttribute('aria-disabled', redoDisabled ? 'true' : 'false');
+                dom.redoEditBtn.classList.toggle('edit-mode-btn-disabled', redoDisabled);
+            }
+        };
+
+        if (dom.undoEditBtn) {
+            dom.undoEditBtn.addEventListener('click', async () => {
+                if (!state.editMode) return;
+                if (!canUndo()) return;
+                await undo(global);
+                // 撤销完成后，历史模块会通过 editHistory:stateChanged 更新状态
+            });
+        }
+        if (dom.redoEditBtn) {
+            dom.redoEditBtn.addEventListener('click', async () => {
+                if (!state.editMode) return;
+                if (!canRedo()) return;
+                await redo(global);
+                // 重做完成后，历史模块会通过 editHistory:stateChanged 更新状态
+            });
+        }
+
+        events.on('editHistory:restoring', (restoring: boolean) => {
+            editHistoryRestoring = restoring;
+            applyUndoRedoState();
+        });
+
+        events.on('editHistory:stateChanged', (payload: { canUndo: boolean; canRedo: boolean }) => {
+            editHistoryCanUndo = payload.canUndo;
+            editHistoryCanRedo = payload.canRedo;
+            applyUndoRedoState();
+        });
+
         events.on('editMode:changed', updateEditModeUI);
         updateEditModeUI();
     }
@@ -806,6 +865,50 @@ const initUI = (global: Global) => {
     tooltip.register(dom.vrMode, 'Enter VR', 'top');
     tooltip.register(dom.enterFullscreen, 'Fullscreen', 'top');
     tooltip.register(dom.exitFullscreen, 'Fullscreen', 'top');
+    tooltip.register(dom.saveSettingsBtn, 'Save Settings', 'top');
+    tooltip.register(dom.undoEditBtn, 'Undo (Ctrl/Cmd+Z)', 'top');
+    tooltip.register(dom.redoEditBtn, 'Redo (Ctrl/Cmd+Shift+Z)', 'top');
+
+    // 全局 Undo/Redo 快捷键，仅在编辑模式下生效
+    const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
+    const shouldIgnoreKeyEventTarget = (target: EventTarget | null) => {
+        if (!target || !(target as HTMLElement).tagName) return false;
+        const el = target as HTMLElement;
+        const tag = el.tagName;
+        if (el.isContentEditable) return true;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+        return false;
+    };
+
+    document.addEventListener(
+        'keydown',
+        async (event: KeyboardEvent) => {
+            if (!state.editMode) return;
+            if (shouldIgnoreKeyEventTarget(event.target)) return;
+
+            const primary = isMac ? event.metaKey : event.ctrlKey;
+            if (!primary) return;
+
+            const key = event.key.toLowerCase();
+            const isRedoCombo =
+                (!isMac && key === 'y') ||
+                (key === 'z' && event.shiftKey);
+            const isUndoCombo = key === 'z' && !event.shiftKey;
+
+            if (!isUndoCombo && !isRedoCombo) return;
+
+            if (isUndoCombo) {
+                if (!canUndo()) return;
+                event.preventDefault();
+                await undo(global);
+            } else if (isRedoCombo) {
+                if (!canRedo()) return;
+                event.preventDefault();
+                await redo(global);
+            }
+        },
+        { passive: true } // 不会阻止默认行为
+    );
 };
 
 export { initPoster, initUI };
