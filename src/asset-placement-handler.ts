@@ -1,5 +1,5 @@
 import type { AppBase } from 'playcanvas';
-import { Ray, Vec3, StandardMaterial } from 'playcanvas';
+import { Ray, Vec3, StandardMaterial, CULLFACE_NONE } from 'playcanvas';
 import type { Global } from './types';
 import type { AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from './types';
 import { getSelectedSceneEntity } from './state-helpers';
@@ -106,6 +106,7 @@ async function instantiateImage(app: AppBase, item: AssetLibraryItem, position: 
             }
             const mat = new StandardMaterial();
             mat.diffuseMap = texture;
+            mat.cull = CULLFACE_NONE;
             mat.update();
             const entity = new Entity(item.name || 'image');
             entity.addComponent('render', {
@@ -115,6 +116,8 @@ async function instantiateImage(app: AppBase, item: AssetLibraryItem, position: 
                 receiveShadows: true
             });
             entity.setPosition(position);
+            // 让图片立在场景中（绕 X 轴 -180°，避免平贴地面）
+            entity.setLocalEulerAngles(-90, 0, 180);
             const s = 2;
             entity.setLocalScale(s, s, 1);
             resolve(entity);

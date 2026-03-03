@@ -31,10 +31,12 @@ function renderAssetPreviewGrid(
             const img = document.createElement('img');
             img.src = item.thumbnailUrl;
             img.alt = '';
+            img.draggable = false;
             img.style.width = '100%';
             img.style.height = '100%';
             img.style.objectFit = 'cover';
             img.style.borderRadius = 'inherit';
+            img.style.pointerEvents = 'none';
             placeholder.appendChild(img);
         }
         const nameSpan = document.createElement('span');
@@ -72,6 +74,9 @@ function renderAssetPreviewGrid(
             if (dragging) return;
         });
 
+        // 禁止原生 HTML5 拖拽（尤其 img 会触发），否则 pointerup 收不到，drop 无法触发
+        slot.addEventListener('dragstart', (e) => e.preventDefault());
+
         // 从资产列表拖拽到画布：pointerdown 开始记录，pointermove 判定为拖拽，pointerup 上报 drop
         slot.addEventListener('pointerdown', (e: PointerEvent) => {
             if (e.button !== 0) return;
@@ -79,7 +84,7 @@ function renderAssetPreviewGrid(
             dragStartX = e.clientX;
             dragStartY = e.clientY;
             try {
-                (e.target as HTMLElement).setPointerCapture(e.pointerId);
+                slot.setPointerCapture(e.pointerId);
             } catch {
                 // ignore
             }
@@ -98,7 +103,7 @@ function renderAssetPreviewGrid(
 
         const endDrag = (e: PointerEvent) => {
             try {
-                (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+                slot.releasePointerCapture(e.pointerId);
             } catch {
                 // ignore
             }
@@ -200,7 +205,7 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
                         url: '/assets/gsplat/biker.sog',
                         filename: 'biker.sog'
                     } as any);
-                    const demoItem: AssetLibraryItem = {
+                    const gaussianDemoItem: AssetLibraryItem = {
                         id: nextAssetId(),
                         type: 'gaussian',
                         name: 'biker (demo)',
@@ -208,8 +213,8 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
                         url: '/assets/gsplat/biker.sog',
                         asset
                     };
-                    state.uploadedAssets!.push(demoItem);
-                    events.fire('assetLibrary:added', demoItem);
+                    state.uploadedAssets!.push(gaussianDemoItem);
+                    events.fire('assetLibrary:added', [gaussianDemoItem]);
                 } catch (err) {
                     console.warn('[AssetPlacement] 初始化示例资产失败:', err);
                 }
@@ -249,7 +254,7 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
                     thumbnailUrl: url
                 };
                 state.uploadedAssets!.push(item);
-                events.fire('assetLibrary:added', item);
+                events.fire('assetLibrary:added', [item]);
                 return;
             }
             if (type === 'mesh') {
@@ -274,7 +279,7 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
                             asset
                         };
                         state.uploadedAssets!.push(item);
-                        events.fire('assetLibrary:added', item);
+                        events.fire('assetLibrary:added', [item]);
                         resolve();
                     });
                 });
@@ -291,7 +296,7 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
                     asset
                 };
                 state.uploadedAssets!.push(item);
-                events.fire('assetLibrary:added', item);
+                events.fire('assetLibrary:added', [item]);
             }
         } catch (err) {
             console.warn('[AssetPlacement] 上传失败:', err);
