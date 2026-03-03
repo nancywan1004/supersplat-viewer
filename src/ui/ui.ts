@@ -522,6 +522,12 @@ const initUI = (global: Global) => {
                 a.click();
                 URL.revokeObjectURL(a.href);
                 window.parent.postMessage({ type: 'SETTINGS_UPDATED', message: 'settings updated', payload: jsonString }, '*');
+
+                // 编辑模式下手动点击「保存配置」后，将当前配置视为最新快照：
+                // - 下次比较是否有改动时，以本次保存后的配置为基准
+                // - 之后选择「不保存并退出」时，回退到最近一次保存的配置
+                editModeEnteredSettingsSnapshot = getComparableSettingsString(global);
+                editModeEnteredSettingsData = JSON.parse(JSON.stringify(payload)) as ExperienceSettings;
             });
         }
         events.on('editMode:changed', updateEditModeUI);
