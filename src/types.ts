@@ -54,6 +54,8 @@ type Config = {
     noBottomUI: boolean;                        // hide bottom UI controls, but keep poster and loading bar
     noanim: boolean;
     noautorotate: boolean;
+    nofx: boolean;                              // disable post effects
+    hpr?: boolean;                              // override highPrecisionRendering (undefined = use settings)
     ministats: boolean;
     colorize: boolean;                          // render with LOD colorization
     unified: boolean;                           // force unified rendering mode
@@ -64,10 +66,13 @@ type Config = {
     splatMeshUrl?: string;
     /** 是否允许进入编辑模式（默认 true）；设为 false 时不显示编辑按钮且不响应进入编辑的 postMessage */
     allowEditMode?: boolean;
+    webgpu: boolean;                            // use WebGPU device
+    gpusort: boolean;                           // use GPU sorting for splats
 };
 
 // observable state that can change at runtime
 type State = {
+    loaded: boolean;                            // true once first frame is rendered
     readyToRender: boolean;                     // don't render till this is set
     hqMode: boolean;
     progress: number;                           // content loading progress 0-100
