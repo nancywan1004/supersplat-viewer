@@ -2,6 +2,7 @@ import type { Global } from './types';
 import type { ExperienceSettings } from './schemas/v2';
 import { serializeExperienceSettings, applySettingsSnapshot } from './settings-serialize';
 import { clearScenePlacedEntities, restoreSceneAssetsFromSettings } from './asset-placement-handler';
+import type { AnnotationManager } from './annotation-toolbar/annotation-manager';
 
 export type EditSnapshot = ExperienceSettings;
 
@@ -12,6 +13,8 @@ let redoStack: EditSnapshot[] = [];
 let isRestoring = false;
 let undoSelectionStack: (string | null)[] = [];
 let redoSelectionStack: (string | null)[] = [];
+let undoAnnotationSelectionStack: (string | null)[] = [];
+let redoAnnotationSelectionStack: (string | null)[] = [];
 
 function cloneSnapshot(snapshot: EditSnapshot): EditSnapshot {
     return JSON.parse(JSON.stringify(snapshot)) as EditSnapshot;
@@ -29,11 +32,15 @@ export function initEditHistory(global: Global, initialSnapshot?: EditSnapshot):
     redoStack = [];
     undoSelectionStack = [];
     redoSelectionStack = [];
+    undoAnnotationSelectionStack = [];
+    redoAnnotationSelectionStack = [];
 
     const base = initialSnapshot ? cloneSnapshot(initialSnapshot) : serializeExperienceSettings(global);
     const baseSelection = global.state.selectedSceneEntityId ?? null;
+    const baseAnnotationSelection = global.state.selectedAnnotationId ?? null;
     undoStack.push(base);
     undoSelectionStack.push(baseSelection);
+    undoAnnotationSelectionStack.push(baseAnnotationSelection);
     emitHistoryState(global);
 }
 
@@ -45,6 +52,27 @@ export function canRedo(): boolean {
     return !isRestoring && redoStack.length > 0;
 }
 
+/**
+ * Restore annotations from settings
+ * 
+ * This function restores annotation entities from the global settings,
+ * similar to how scene assets are restored.
+ * 
+ * @param global - Global reference
+ */
+export function restoreAnnotationsFromSettings(global: Global): void {
+    // Get the annotation manager from the app
+    const annotationManager = (global as any).annotationManager as AnnotationManager | undefined;
+    
+    if (!annotationManager) {
+        // Annotation manager not initialized yet, skip restoration
+        return;
+    }
+    
+    // Load annotations from settings
+    annotationManager.loadFromSettings();
+}
+
 export async function restoreSnapshot(global: Global, snapshot: EditSnapshot): Promise<void> {
     if (isRestoring) return;
 
@@ -54,6 +82,9 @@ export async function restoreSnapshot(global: Global, snapshot: EditSnapshot): P
         applySettingsSnapshot(global, snapshot);
         clearScenePlacedEntities(global);
         await restoreSceneAssetsFromSettings(global);
+        
+        // Restore annotations from the snapshot
+        restoreAnnotationsFromSettings(global);
     } finally {
         isRestoring = false;
         global.events.fire('editHistory:restoring', false);
@@ -68,29 +99,50 @@ export function pushEditHistory(global: Global, _label?: string): void {
     undoStack.push(snapshot);
     redoStack = [];
     undoSelectionStack.push(global.state.selectedSceneEntityId ?? null);
+    undoAnnotationSelectionStack.push(global.state.selectedAnnotationId ?? null);
     redoSelectionStack = [];
+    redoAnnotationSelectionStack = [];
 
     if (undoStack.length > MAX_HISTORY) {
         undoStack.shift();
         undoSelectionStack.shift();
+        undoAnnotationSelectionStack.shift();
     }
 
     emitHistoryState(global);
 }
 
-function restoreSelectionForSnapshot(global: Global, selectionId: string | null): void {
+function restoreSelectionForSnapshot(global: Global, selectionId: string | null, annotationSelectionId: string | null): void {
     const { state, events } = global;
     const list = state.scenePlacedEntities ?? [];
 
+    // Restore scene entity selection
     if (selectionId && list.some((entry) => entry.id === selectionId)) {
         state.selectedSceneEntityId = selectionId;
         events.fire('sceneAsset:selected');
-        return;
-    }
-
-    if (state.selectedSceneEntityId) {
+    } else if (state.selectedSceneEntityId) {
         state.selectedSceneEntityId = null;
         events.fire('sceneAsset:selected');
+    }
+
+    // Restore annotation selection
+    const annotations = global.settings?.annotations ?? [];
+    if (annotationSelectionId && annotations.some((ann) => ann.id === annotationSelectionId)) {
+        state.selectedAnnotationId = annotationSelectionId;
+        
+        // Get the annotation manager and select the annotation
+        const annotationManager = (global as any).annotationManager as AnnotationManager | undefined;
+        if (annotationManager) {
+            annotationManager.selectAnnotation(annotationSelectionId);
+        }
+    } else if (state.selectedAnnotationId) {
+        state.selectedAnnotationId = null;
+        
+        // Deselect annotation
+        const annotationManager = (global as any).annotationManager as AnnotationManager | undefined;
+        if (annotationManager) {
+            annotationManager.deselectAnnotation();
+        }
     }
 }
 
@@ -99,14 +151,19 @@ export async function undo(global: Global): Promise<void> {
 
     const current = undoStack.pop();
     const currentSelection = undoSelectionStack.pop();
+    const currentAnnotationSelection = undoAnnotationSelectionStack.pop();
     if (!current) return;
 
     redoStack.push(current);
     redoSelectionStack.push(currentSelection ?? null);
+    redoAnnotationSelectionStack.push(currentAnnotationSelection ?? null);
+    
     const target = undoStack[undoStack.length - 1];
     const targetSelection = undoSelectionStack[undoStack.length - 1] ?? null;
+    const targetAnnotationSelection = undoAnnotationSelectionStack[undoStack.length - 1] ?? null;
+    
     await restoreSnapshot(global, target);
-    restoreSelectionForSnapshot(global, targetSelection);
+    restoreSelectionForSnapshot(global, targetSelection, targetAnnotationSelection);
 }
 
 export async function redo(global: Global): Promise<void> {
@@ -114,11 +171,14 @@ export async function redo(global: Global): Promise<void> {
 
     const snapshot = redoStack.pop();
     const selectionId = redoSelectionStack.pop();
+    const annotationSelectionId = redoAnnotationSelectionStack.pop();
     if (!snapshot) return;
 
     undoStack.push(snapshot);
     undoSelectionStack.push(selectionId ?? null);
+    undoAnnotationSelectionStack.push(annotationSelectionId ?? null);
+    
     await restoreSnapshot(global, snapshot);
-    restoreSelectionForSnapshot(global, selectionId ?? null);
+    restoreSelectionForSnapshot(global, selectionId ?? null, annotationSelectionId ?? null);
 }
 

@@ -15,7 +15,7 @@ const EDIT_RIGHT_TOOLBAR_HTML = `
     ${getSceneAssetListHTML()}
 </div>
 <div id="rightPanelAnnotation" class="edit-right-panel hidden" data-module="annotation">
-    <div class="edit-right-panel-placeholder">敬请期待</div>
+    <div id="annotationPanelContainer"></div>
 </div>
 <div id="rightPanelEnvironment" class="edit-right-panel hidden" data-module="environment">
     <div class="settingsRow submenuHeader" id="lightingSubmenuHeader" role="button" tabindex="0">

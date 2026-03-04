@@ -1,6 +1,7 @@
 import type { Global } from './types';
 import type { ExperienceSettings } from './schemas/v2';
 import type { ScenePlacedItem } from './types';
+import type { AnnotationManager } from './annotation-toolbar/annotation-manager';
 
 const defaultPostEffectShadow = () => ({
     enabled: true,
@@ -69,8 +70,16 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
     }
     if (!Array.isArray(out.animTracks)) out.animTracks = [];
     if (!Array.isArray(out.cameras)) out.cameras = [];
-    if (!Array.isArray(out.annotations)) out.annotations = [];
     if (out.startMode == null) out.startMode = 'default';
+
+    // 将 AnnotationManager 中的标注序列化到 settings.annotations
+    const annotationManager = (global as any).annotationManager as AnnotationManager | undefined;
+    if (annotationManager) {
+        const annotationsData = annotationManager.getAllAnnotations().map((a) => a.serialize());
+        out.annotations = annotationsData;
+    } else if (!Array.isArray(out.annotations)) {
+        out.annotations = [];
+    }
 
     // 将当前场景中的可编辑资产列表序列化到 settings.sceneAssets
     const sceneItems = (global.state.scenePlacedEntities ?? []) as ScenePlacedItem[];

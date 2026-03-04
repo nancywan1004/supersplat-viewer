@@ -115,6 +115,9 @@ class InputController {
         keyEPressed: false
     };
 
+    // Flag to track if annotation input fields have focus
+    private _annotationInputFocused: boolean = false;
+
     private _desktopInput: KeyboardMouseSource = new KeyboardMouseSource();
 
     private _orbitInput = new MultiTouchSource();
@@ -345,6 +348,11 @@ class InputController {
 
         // handle keyboard events
         window.addEventListener('keydown', (event: KeyboardEvent) => {
+            // Skip keyboard event handling if annotation input has focus
+            if (this._annotationInputFocused) {
+                return;
+            }
+            
             if (event.key === 'Escape') {
                 events.fire('inputEvent', 'cancel', event);
             } else if (!event.ctrlKey && !event.altKey && !event.metaKey) {
@@ -370,6 +378,82 @@ class InputController {
                 }
             }
         });
+
+        // Set up focus/blur listeners for annotation input fields
+        this.setupAnnotationInputListeners();
+    }
+
+    /**
+     * Set up focus and blur event listeners for annotation input fields.
+     * This prevents keyboard events from interfering with camera controls when editing annotations.
+     */
+    private setupAnnotationInputListeners(): void {
+        // Use event delegation on document to catch focus/blur events from annotation inputs
+        // This works even if the annotation toolbar is created after InputController initialization
+        document.addEventListener('focusin', (event: FocusEvent) => {
+            const target = event.target as HTMLElement;
+            
+            // Check if the focused element is an annotation input field
+            if (this.isAnnotationInput(target)) {
+                this._annotationInputFocused = true;
+            }
+        });
+
+        document.addEventListener('focusout', (event: FocusEvent) => {
+            const target = event.target as HTMLElement;
+            
+            // Check if the blurred element is an annotation input field
+            if (this.isAnnotationInput(target)) {
+                this._annotationInputFocused = false;
+            }
+        });
+    }
+
+    /**
+     * Check if an element is an annotation input field.
+     * This includes title input, text textarea, and other form inputs in the annotation toolbar.
+     * 
+     * @param element - The element to check
+     * @returns True if the element is an annotation input field
+     */
+    private isAnnotationInput(element: HTMLElement): boolean {
+        // Check if element is an input or textarea
+        if (element.tagName !== 'INPUT' && element.tagName !== 'TEXTAREA') {
+            return false;
+        }
+
+        // Check if element is within the annotation toolbar
+        const annotationToolbar = element.closest('#annotationToolbar');
+        if (annotationToolbar) {
+            return true;
+        }
+
+        // Also check for specific annotation input classes as a fallback
+        const annotationInputClasses = [
+            'annotation-form-input',
+            'annotation-form-textarea'
+        ];
+        
+        return annotationInputClasses.some(className => element.classList.contains(className));
+    }
+
+    /**
+     * Manually set the annotation input focus state.
+     * This can be used by external components if needed.
+     * 
+     * @param focused - Whether annotation inputs are focused
+     */
+    setAnnotationInputFocused(focused: boolean): void {
+        this._annotationInputFocused = focused;
+    }
+
+    /**
+     * Check if annotation input fields currently have focus.
+     * 
+     * @returns True if annotation inputs are focused
+     */
+    isAnnotationInputFocused(): boolean {
+        return this._annotationInputFocused;
     }
 
     /**
@@ -400,11 +484,14 @@ class InputController {
         const { leftInput, rightInput } = this._flyInput.read();
 
         // update state
-        this._state.axis.add(tmpV1.set(
-            (key[keyCode.D] - key[keyCode.A]) + (key[keyCode.RIGHT] - key[keyCode.LEFT]),
-            0, // Y axis movement removed (was Q/E keys)
-            (key[keyCode.W] - key[keyCode.S]) + (key[keyCode.UP] - key[keyCode.DOWN])
-        ));
+        // Skip keyboard input if annotation input fields have focus
+        if (!this._annotationInputFocused) {
+            this._state.axis.add(tmpV1.set(
+                (key[keyCode.D] - key[keyCode.A]) + (key[keyCode.RIGHT] - key[keyCode.LEFT]),
+                0, // Y axis movement removed (was Q/E keys)
+                (key[keyCode.W] - key[keyCode.S]) + (key[keyCode.UP] - key[keyCode.DOWN])
+            ));
+        }
         
         const currentTouchCount = count[0];
         this._state.touches += currentTouchCount;
@@ -455,12 +542,15 @@ class InputController {
         v.set(0, 0, 0);
         mouseRotate.set(mouse[0], mouse[1], 0);
         v.add(mouseRotate.mulScalar((1 - pan) * this.orbitSpeed * orbitFactor * dt));
-        // Update persistent key states for Q/E
-        // key[] contains deltas: 1 = pressed this frame, -1 = released this frame, 0 = no change
-        if (key[keyCode.Q] === 1) this._state.keyQPressed = true;
-        if (key[keyCode.Q] === -1) this._state.keyQPressed = false;
-        if (key[keyCode.E] === 1) this._state.keyEPressed = true;
-        if (key[keyCode.E] === -1) this._state.keyEPressed = false;
+        
+        // Update persistent key states for Q/E (only if annotation inputs don't have focus)
+        if (!this._annotationInputFocused) {
+            // key[] contains deltas: 1 = pressed this frame, -1 = released this frame, 0 = no change
+            if (key[keyCode.Q] === 1) this._state.keyQPressed = true;
+            if (key[keyCode.Q] === -1) this._state.keyQPressed = false;
+            if (key[keyCode.E] === 1) this._state.keyEPressed = true;
+            if (key[keyCode.E] === -1) this._state.keyEPressed = false;
+        }
         
         // Add roll control with Q/E keys (only in fly mode)
         // Use persistent state, not deltas

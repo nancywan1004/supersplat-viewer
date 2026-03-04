@@ -35,9 +35,13 @@ type Camera = {
 };
 
 type Annotation = {
+    id: string,
     position: [number, number, number],
     title: string,
     text: string,
+    imageUrl?: string,
+    showTitleWhenCollapsed: boolean,
+    collapsed: boolean,
     extras: any,
     camera: Camera;
 };

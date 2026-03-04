@@ -346,6 +346,29 @@ const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: numb
     };
 };
 
+/** 规范化单个标注数据，确保反序列化所需字段存在 */
+const normalizeAnnotation = (ann: any): any => {
+    if (!ann || typeof ann !== 'object') return null;
+    const id = typeof ann.id === 'string' ? ann.id : `annotation-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+    const pos = Array.isArray(ann.position) && ann.position.length >= 3
+        ? [Number(ann.position[0]), Number(ann.position[1]), Number(ann.position[2])] as [number, number, number]
+        : [0, 0, 0] as [number, number, number];
+    const camera = ann.camera && typeof ann.camera === 'object' && ann.camera.initial
+        ? ann.camera
+        : { initial: { position: [0, 0, 0], target: [0, 0, 0], fov: 60 } };
+    return {
+        id,
+        position: pos,
+        title: typeof ann.title === 'string' ? ann.title : '',
+        text: typeof ann.text === 'string' ? ann.text : '',
+        imageUrl: typeof ann.imageUrl === 'string' ? ann.imageUrl : undefined,
+        showTitleWhenCollapsed: Boolean(ann.showTitleWhenCollapsed),
+        collapsed: Boolean(ann.collapsed),
+        extras: ann.extras && typeof ann.extras === 'object' ? ann.extras : {},
+        camera
+    };
+};
+
 // import a json object to conform to the latest settings schema. settings is assumed to be one of the well-formed schemas
 const importSettings = (settings: any): V2 => {
     let result: V2;
@@ -364,8 +387,13 @@ const importSettings = (settings: any): V2 => {
             // v1 -> v2
             result = migrateV2(migrateV1(settings as V1));
         } else if (version === 2) {
-            // already v2
+            // already v2，保留并规范化 annotations
             result = settings as V2;
+            if (!Array.isArray(result.annotations)) {
+                result.annotations = [];
+            } else {
+                result.annotations = result.annotations.map((ann: any) => normalizeAnnotation(ann)).filter(Boolean);
+            }
         } else {
             throw new Error(`Unsupported experience settings version: ${version}`);
         }

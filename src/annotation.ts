@@ -71,6 +71,8 @@ export class Annotation extends Script {
 
     static textDom: HTMLDivElement | null = null;
 
+    static imageDom: HTMLImageElement | null = null;
+
     static layers: Layer[] = [];
 
     static mesh: Mesh | null = null;
@@ -237,6 +239,12 @@ export class Annotation extends Script {
         Annotation.textDom = document.createElement('div');
         Annotation.textDom.className = 'pc-annotation-text';
         Annotation.tooltipDom.appendChild(Annotation.textDom);
+
+        // 可选图片元素（AnnotationEntity 展开时显示）
+        Annotation.imageDom = document.createElement('img');
+        Annotation.imageDom.className = 'pc-annotation-image';
+        Annotation.imageDom.style.cssText = 'display:none;max-width:100%;max-height:100px;margin-top:4px;border-radius:4px;';
+        Annotation.tooltipDom.appendChild(Annotation.imageDom);
 
         Annotation.parentDom.appendChild(Annotation.tooltipDom);
     }
@@ -431,17 +439,23 @@ export class Annotation extends Script {
         this.hotspotDom.addEventListener('pointerenter', enter);
         this.hotspotDom.addEventListener('pointerleave', leave);
 
-        document.addEventListener('click', () => {
-            if (Annotation.activeAnnotation === this) {
-                this.hideTooltip();
-            }
-        });
+        if ((this as any).closeOnDocumentClick !== false) {
+            document.addEventListener('click', () => {
+                if (Annotation.activeAnnotation === this) {
+                    this.hideTooltip();
+                }
+            });
+        }
 
         Annotation.parentDom.appendChild(this.hotspotDom);
 
+        const prerenderHandler = () => this._update();
+
         // Clean up on entity destruction
         this.on('destroy', () => {
-            this.hotspotDom.remove();
+            this.app.off('prerender', prerenderHandler);
+            this.hotspotDom?.remove();
+            this.hotspotDom = null;
             if (Annotation.activeAnnotation === this) {
                 this.hideTooltip();
             }
@@ -449,13 +463,11 @@ export class Annotation extends Script {
             this.materials.forEach(mat => mat.destroy());
             this.materials = [];
 
-            this.texture.destroy();
+            this.texture?.destroy();
             this.texture = null;
         });
 
-        this.app.on('prerender', () => {
-            this._update();
-        });
+        this.app.on('prerender', prerenderHandler);
     }
 
     /**
@@ -465,7 +477,7 @@ export class Annotation extends Script {
      * @private
      */
     _update() {
-        if (!Annotation.camera) return;
+        if (!Annotation.camera || !this.materials?.length || !this.entity) return;
 
         const position = this.entity.getPosition();
         const screenPos = Annotation.camera.camera.worldToScreen(position);
@@ -510,6 +522,9 @@ export class Annotation extends Script {
         Annotation.tooltipDom.style.opacity = '1';
         Annotation.titleDom.textContent = this.title;
         Annotation.textDom.textContent = this.text;
+        if (Annotation.imageDom) {
+            Annotation.imageDom.style.display = 'none';
+        }
 
         // Immediately update incase the camera doesn't move
         this._update();

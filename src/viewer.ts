@@ -45,6 +45,7 @@ import { ShadowApplyRt } from './vfx/shadow/shadow-apply';
 import { updateShadowDistance } from './light';
 import { initAssetPlacementHandler, restoreSceneAssetsFromSettings } from './asset-placement-handler';
 import { initGizmoHandler } from './gizmo-handler';
+import { initAnnotationGizmoHandler } from './annotation-toolbar/annotation-gizmo-handler';
 
 const gammaChunkGlsl = `
 vec3 prepareOutputFromGamma(vec3 gammaColor) {
@@ -132,7 +133,7 @@ class Viewer {
 
     cameraManager: CameraManager;
 
-    annotations: Annotations;
+    annotations: Annotations | null = null;
 
     forceRenderNextFrame = false;
     pathVisualizer: CameraPathVisualizer | null = null;
@@ -151,6 +152,9 @@ class Viewer {
 
     /** Gizmo handler 清理函数 */
     cleanupGizmoHandler: (() => void) | null = null;
+
+    /** Annotation Gizmo handler 清理函数 */
+    cleanupAnnotationGizmoHandler: (() => void) | null = null;
 
     origChunks: {
         glsl: {
@@ -437,7 +441,7 @@ class Viewer {
             applyScript.global = global;
             delete (app as any).__shadowApplyGlobal;
 
-            if (!config.noui) {
+            if (!config.noui && !(global as any).annotationManager) {
                 this.annotations = new Annotations(global, this.cameraFrame != null);
             }
 
@@ -602,6 +606,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     sceneBound.center.y
                 );
                 this.cleanupGizmoHandler = initGizmoHandler(global);
+                this.cleanupAnnotationGizmoHandler = initAnnotationGizmoHandler(global);
             }
 
             const { instance } = gsplat;

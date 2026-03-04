@@ -12,6 +12,7 @@ import { initRevealUI } from './components/reveal-ui';
 import { initVideoExportUI } from './components/video-export-ui';
 import { initLightingUI } from './components/lighting-ui';
 import { initPostEffectUI } from './components/post-effect-ui';
+import { initAnnotationUI } from './components/annotation-ui';
 import { initEditLeftToolbarUI } from './edit-left-toolbar';
 import { initEditRightToolbarUI } from './edit-right-toolbar';
 import { initEditBottomToolbarUI } from './edit-bottom-toolbar';
@@ -669,11 +670,12 @@ const initUI = (global: Global) => {
         updateEditModeUI();
     }
 
-    // Reveal / VFX、Lighting、PostEffect、VideoExport 由独立组件管理，挂载到 edit-right-toolbar 提供的容器（#revealPanelContainer、#lightingPanelContainer 等）
+    // Reveal / VFX、Lighting、PostEffect、VideoExport、Annotation 由独立组件管理，挂载到 edit-right-toolbar 提供的容器
     initRevealUI(global);
     initVideoExportUI(global);
     initLightingUI(global);
     initPostEffectUI(global);
+    initAnnotationUI(global);
 
     // Info panel
     const updateInfoTab = (tab: 'desktop' | 'touch') => {

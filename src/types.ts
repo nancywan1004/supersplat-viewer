@@ -104,6 +104,12 @@ type State = {
     selectedSceneEntityId?: string | null;
     /** 相机输入是否启用（用于与 Gizmo 交互互斥） */
     cameraControlsEnabled?: boolean;
+    /** 是否处于标注编辑模式 */
+    annotationEditMode?: boolean;
+    /** 当前选中的标注 ID */
+    selectedAnnotationId?: string | null;
+    /** 是否处于标注放置模式 */
+    annotationPlacementActive?: boolean;
 };
 
 type Global = {
