@@ -187,7 +187,8 @@ const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
     light.setEulerAngles(35, 45, 0);
     light.addComponent('light', {
         color: new Color(1.0, 0.98, 0.957),
-        intensity: 1
+        intensity: 1,
+        castShadows: true
     });
     app.root.addChild(light);
 
