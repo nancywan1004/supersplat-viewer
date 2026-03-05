@@ -331,6 +331,8 @@ export class AnnotationEntity extends Annotation {
             }
         } else {
             if (this.collapsedTitleSpan) this.collapsedTitleSpan.style.display = 'none';
+            // 展开状态：自动显示 tooltip，否则只显示热点无内容
+            this.showTooltip(true);
         }
 
         if (this.app) this.app.renderNextFrame = true;

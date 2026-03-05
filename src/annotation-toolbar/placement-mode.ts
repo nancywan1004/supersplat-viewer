@@ -135,16 +135,11 @@ export class PlacementMode {
     /**
      * 取消放置
      * 
-     * 取消当前的标注放置流程
+     * 取消当前的标注放置流程。
+     * 注意：占位标注的销毁由 AnnotationManager.cancelAnnotation 负责，此处仅清除引用。
      */
     cancelPlacement(): void {
-        // 如果有占位标注，移除它
-        if (this.placeholderAnnotation) {
-            this.placeholderAnnotation.entity.destroy();
-            this.placeholderAnnotation = null;
-        }
-
-        // 取消激活
+        this.placeholderAnnotation = null;
         this.deactivate();
     }
 

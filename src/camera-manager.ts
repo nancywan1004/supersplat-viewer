@@ -513,7 +513,19 @@ class CameraManager {
                 state.cameraMode = 'orbit';
             }
 
-            const { initial } = annotation.camera;
+            // AnnotationEntity 的 camera 在 data 中；普通 Annotation 可能在 annotation.camera
+            const ann = annotation as { camera?: { initial?: any }; data?: { camera?: { initial?: any } } };
+            const camera = ann.camera ?? ann.data?.camera;
+            if (!camera?.initial) return;
+
+            const { initial } = camera;
+            // 占位标注的 camera.initial 为 [0,0,0]，跳过相机过渡避免 zoom 到原点
+            const pos = initial.position;
+            const tgt = initial.target;
+            if (Array.isArray(pos) && pos[0] === 0 && pos[1] === 0 && pos[2] === 0 &&
+                Array.isArray(tgt) && tgt[0] === 0 && tgt[1] === 0 && tgt[2] === 0) {
+                return;
+            }
 
             // construct camera
             tmpCamera.fov = initial.fov;
