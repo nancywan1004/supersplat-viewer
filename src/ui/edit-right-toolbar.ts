@@ -1,7 +1,6 @@
 import type { Global } from '../types';
 import type { EditLeftModule } from '../types';
 import { getAssetPlacementSettingsHTML, bindAssetPlacementSettings } from './components/asset-placement-settings-ui';
-import { getSceneAssetListHTML, bindSceneAssetList } from './components/scene-asset-list-ui';
 
 const RIGHT_PANEL_IDS: EditLeftModule[] = ['gs', 'asset', 'annotation', 'environment', 'camera', 'effects'];
 
@@ -12,10 +11,17 @@ const EDIT_RIGHT_TOOLBAR_HTML = `
 </div>
 <div id="rightPanelAsset" class="edit-right-panel hidden" data-module="asset">
     ${getAssetPlacementSettingsHTML()}
-    ${getSceneAssetListHTML()}
 </div>
 <div id="rightPanelAnnotation" class="edit-right-panel hidden" data-module="annotation">
-    <div id="annotationPanelContainer"></div>
+    <div class="annotation-panel-section" data-annotation-settings-root>
+        <div class="settingsRow submenuHeader annotation-settings-header expanded" id="annotationSettingsHeader" role="button" tabindex="0">
+            <span class="submenuArrow" id="annotationSettingsArrow">▶</span>
+            <span>场景标注设置</span>
+        </div>
+        <div id="annotationSettingsSubpanel" class="subpanel">
+            <div id="annotationPanelContainer"></div>
+        </div>
+    </div>
 </div>
 <div id="rightPanelEnvironment" class="edit-right-panel hidden" data-module="environment">
     <div class="settingsRow submenuHeader" id="lightingSubmenuHeader" role="button" tabindex="0">
@@ -137,16 +143,16 @@ export function initEditRightToolbarUI(global: Global): () => void {
         bindSubpanel('lightingSubmenuHeader', 'lightingSubpanel', 'lightingSubmenuArrow'),
         bindSubpanel('postEffectSubmenuHeader', 'postEffectSubpanel', 'postEffectSubmenuArrow'),
         bindSubpanel('vfxSubmenuHeader', 'vfxSubpanel', 'vfxSubmenuArrow'),
-        bindSubpanel('renderSubmenuHeader', 'renderSubpanel', 'renderSubmenuArrow')
+        bindSubpanel('renderSubmenuHeader', 'renderSubpanel', 'renderSubmenuArrow'),
+        bindSubpanel('annotationSettingsHeader', 'annotationSettingsSubpanel', 'annotationSettingsArrow'),
+        bindSubpanel('assetPlacementHeader', 'assetPlacementSubpanel', 'assetPlacementArrow')
     ];
 
-    // 资产放置模块：独立组件的 bind（折叠 + 场景列表可见性）
+    // 资产放置模块：HTML 与 bind 均由 asset-placement-settings-ui 内部管理（含场景资产列表）
     const assetPanel = document.getElementById('rightPanelAsset');
     if (assetPanel) {
         const placementRoot = assetPanel.querySelector<HTMLElement>('[data-asset-placement-root]');
-        const listRoot = assetPanel.querySelector<HTMLElement>('[data-scene-asset-list-root]');
         unbindSubpanels.push(bindAssetPlacementSettings(placementRoot, global));
-        unbindSubpanels.push(bindSceneAssetList(listRoot, global));
     }
 
     return () => {

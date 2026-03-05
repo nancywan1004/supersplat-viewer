@@ -3,11 +3,11 @@
 /* 编辑模式右侧栏：多面板切换时仅当前面板非 .hidden */
 .right-tool-bar {
     position: fixed;
-    top: var(--edit-top-bar-height, 48px);
+    top: calc(var(--edit-top-bar-height, 48px) + 5vh);
     right: 0;
     width: 320px;
     max-width: 90vw;
-    height: calc(100% - var(--edit-top-bar-height, 48px));
+    height: auto;
     padding-top: max(0, env(safe-area-inset-top));
     padding-right: max(0, env(safe-area-inset-right));
     z-index: 99;

@@ -1,20 +1,13 @@
-// 场景标注工具栏 UI 样式（右侧编辑面板，变量由 index 提供）
+// 场景标注工具栏 UI 样式（右侧编辑面板，由 #rightToolBar 控制整体宽高，变量由 index 提供）
 
-/* Annotation Toolbar Styles */
+/* Annotation Toolbar Styles - 与资产放置等模块对齐，流式布局于 right-tool-bar-inner 内 */
 
 .annotation-toolbar {
-    position: fixed;
-    top: var(--edit-top-bar-height);
-    right: 0;
-    width: 320px;
-    height: calc(100% - var(--edit-top-bar-height));
-    background-color: rgba($clr-bkg-dark, 0.95);
-    backdrop-filter: blur(8px);
-    z-index: 90;
-    pointer-events: auto;
-    box-shadow: -2px 0 8px rgba(0, 0, 0, 0.3);
     display: flex;
     flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    box-sizing: border-box;
 
     &.hidden {
         display: none;
@@ -22,30 +15,10 @@
 }
 
 .annotation-toolbar-scroll {
-    flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding: 16px;
     display: flex;
     flex-direction: column;
-    gap: 16px;
-
-    &::-webkit-scrollbar {
-        width: 8px;
-    }
-
-    &::-webkit-scrollbar-track {
-        background: rgba(0, 0, 0, 0.2);
-    }
-
-    &::-webkit-scrollbar-thumb {
-        background: rgba(255, 255, 255, 0.2);
-        border-radius: 4px;
-
-        &:hover {
-            background: rgba(255, 255, 255, 0.3);
-        }
-    }
+    gap: 12px;
+    width: 100%;
 }
 
 .annotation-placement-hint {

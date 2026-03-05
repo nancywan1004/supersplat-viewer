@@ -1,6 +1,7 @@
 import type { Global } from '../../types';
 import type { AssetLibraryItem, AssetLibraryType } from '../../types';
 import { loadGsplatAsset } from '../../loaders/gsplat-asset-loader';
+import { getSceneAssetListHTML, bindSceneAssetList } from './scene-asset-list-ui';
 
 const ASSET_TYPE_ACCEPT: Record<AssetLibraryType, string> = {
     image: '.jpg,.jpeg,.png,image/jpeg,image/png',
@@ -136,14 +137,15 @@ function renderAssetPreviewGrid(
 }
 
 /**
- * 资产放置设置组件：资产类型选择、上传按钮、资产预览网格。
- * 导出 HTML 模板与 bind 函数，由右侧栏挂载并绑定折叠等交互。
+ * 资产放置设置组件：资产类型选择、上传按钮、资产预览网格、场景资产列表。
+ * 场景资产列表嵌套在 subpanel 内，与资产放置设置一起折叠。
  */
-const ASSET_PLACEMENT_SETTINGS_HTML = `
+export function getAssetPlacementSettingsHTML(): string {
+    return `
 <div class="asset-panel-section" data-asset-placement-root>
     <div class="settingsRow submenuHeader asset-placement-header expanded" id="assetPlacementHeader" role="button" tabindex="0">
         <span class="submenuArrow" id="assetPlacementArrow">▶</span>
-        <span>资产放置设置</span>
+        <span>资产放置</span>
     </div>
     <div id="assetPlacementSubpanel" class="subpanel">
         <div class="asset-type-row">
@@ -157,12 +159,10 @@ const ASSET_PLACEMENT_SETTINGS_HTML = `
         <input type="file" id="assetFileInput" class="hidden" accept="" tabindex="-1" aria-hidden="true" />
         <div class="asset-preview-grid" id="assetPreviewGrid">
         </div>
+        ${getSceneAssetListHTML()}
     </div>
 </div>
 `.trim();
-
-export function getAssetPlacementSettingsHTML(): string {
-    return ASSET_PLACEMENT_SETTINGS_HTML;
 }
 
 function nextAssetId(): string {
@@ -170,22 +170,23 @@ function nextAssetId(): string {
 }
 
 /**
- * 绑定资产放置设置面板的折叠/展开、类型选择、上传等交互。
- * @param root 组件根元素（含 data-asset-placement-root 的容器）
+ * 绑定资产放置设置面板的类型选择、上传、网格渲染、场景资产列表等交互。
+ * 折叠/展开由 edit-right-toolbar 的 bindSubpanel 统一处理。
+ * @param root 组件根元素（含 data-asset-placement-root 的容器，内含 data-scene-asset-list-root）
  * @param global 全局对象（用于 app、state、events）
  * @returns 清理函数
  */
 export function bindAssetPlacementSettings(root: HTMLElement | null, global: Global): () => void {
     if (!root) return () => {};
 
+    const listRoot = root.querySelector<HTMLElement>('[data-scene-asset-list-root]');
+    const unbindList = bindSceneAssetList(listRoot, global);
+
     const { app, state, events } = global;
-    const header = root.querySelector<HTMLElement>('#assetPlacementHeader');
-    const panel = root.querySelector<HTMLElement>('#assetPlacementSubpanel');
-    const arrow = root.querySelector<HTMLElement>('#assetPlacementArrow');
     const typeSelect = root.querySelector<HTMLSelectElement>('#assetTypeSelect');
     const uploadBtn = root.querySelector<HTMLButtonElement>('#uploadAssetBtn');
     const fileInput = root.querySelector<HTMLInputElement>('#assetFileInput');
-    if (!header || !panel || !arrow || !typeSelect || !uploadBtn || !fileInput) return () => {};
+    if (!typeSelect || !uploadBtn || !fileInput) return () => {};
 
     if (!state.uploadedAssets) state.uploadedAssets = [];
 
@@ -227,10 +228,11 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         fileInput.accept = ASSET_TYPE_ACCEPT[type] ?? ASSET_TYPE_ACCEPT.mesh;
     };
     updateFileAccept();
-    typeSelect.addEventListener('change', () => {
+    const typeSelectHandler = () => {
         updateFileAccept();
         if (gridEl) renderAssetPreviewGrid(gridEl, global, typeSelect);
-    });
+    };
+    typeSelect.addEventListener('change', typeSelectHandler);
 
     const handleFileSelect = async (e: Event) => {
         const input = e.target as HTMLInputElement;
@@ -307,30 +309,13 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
     fileInput.addEventListener('change', handleFileSelect);
     uploadBtn.addEventListener('click', () => fileInput.click());
 
-    const toggle = () => {
-        const isHidden = panel.classList.contains('hidden');
-        panel.classList.toggle('hidden', !isHidden);
-        header.classList.toggle('expanded', isHidden);
-    };
-
-    const onKey = (e: KeyboardEvent) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            toggle();
-        }
-    };
-
-    header.addEventListener('click', toggle);
-    header.addEventListener('keydown', onKey);
-
     return () => {
+        unbindList();
         if (gridEl && onLibraryChange) {
             events.off('assetLibrary:added', onLibraryChange);
             events.off('assetLibrary:removed', onLibraryChange);
         }
-        typeSelect.removeEventListener('change', updateFileAccept);
+        typeSelect.removeEventListener('change', typeSelectHandler);
         fileInput.removeEventListener('change', handleFileSelect);
-        header.removeEventListener('click', toggle);
-        header.removeEventListener('keydown', onKey);
     };
 }
