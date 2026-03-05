@@ -135,6 +135,17 @@ export function initAnnotationUI(global: Global): () => void {
     events.on('annotationPlacement:started', onPlacementStarted);
     events.on('annotationPlacement:ended', onPlacementEnded);
 
+    /** 底部栏「编辑」按钮：显示右侧编辑表单 */
+    const onAnnotationEditShow = () => {
+        const selected = annotationManager.getSelectedAnnotation();
+        if (selected) {
+            const serialized = selected.serialize();
+            originalAnnotationDataForEdit = serialized;
+            annotationUI.showEditForm(serialized, true);
+        }
+    };
+    events.on('annotationEdit:show', onAnnotationEditShow);
+
     const onControlsHiddenChanged = (hidden: boolean) => {
         annotationManager.setAllAnnotationsVisible(!hidden);
     };
@@ -148,9 +159,16 @@ export function initAnnotationUI(global: Global): () => void {
     };
     events.on('editMode:changed', onEditModeChanged);
 
-    /** 切换到非标注模块时，自动取消正在进行的放置或编辑 */
+    /** 切换模块时：进入标注模块默认选中第一个；离开时取消放置/编辑 */
     const onEditLeftModuleChanged = (newModule: string) => {
-        if (newModule === 'annotation') return;
+        if (newModule === 'annotation') {
+            const all = annotationManager.getAllAnnotations();
+            if (all.length > 0 && !annotationManager.getSelectedAnnotation()) {
+                annotationManager.selectAnnotation(all[0].id);
+            }
+            updateList();
+            return;
+        }
         if (annotationManager.getPlaceholderAnnotation()) {
             annotationManager.cancelAnnotation();
             annotationUI.hideEditForm();
@@ -200,6 +218,7 @@ export function initAnnotationUI(global: Global): () => void {
         events.off('annotation:place', onAnnotationPlaceWithHint);
         events.off('annotationPlacement:started', onPlacementStarted);
         events.off('annotationPlacement:ended', onPlacementEnded);
+        events.off('annotationEdit:show', onAnnotationEditShow);
         events.off('controlsHidden:changed', onControlsHiddenChanged);
         events.off('editMode:changed', onEditModeChanged);
         events.off('editLeftModule:changed', onEditLeftModuleChanged);

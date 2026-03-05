@@ -69,6 +69,20 @@ const PANEL_ID_BY_MODULE: Record<EditLeftModule, string> = {
     effects: 'rightPanelEffects'
 };
 
+/** 各模块的 subpanel 对 (headerId, panelId)，切换模块时展开 */
+const SUBPANEL_PAIRS_BY_MODULE: Partial<Record<EditLeftModule, [string, string][]>> = {
+    environment: [
+        ['lightingSubmenuHeader', 'lightingSubpanel'],
+        ['postEffectSubmenuHeader', 'postEffectSubpanel']
+    ],
+    effects: [
+        ['vfxSubmenuHeader', 'vfxSubpanel'],
+        ['renderSubmenuHeader', 'renderSubpanel']
+    ],
+    asset: [['assetPlacementHeader', 'assetPlacementSubpanel']],
+    annotation: [['annotationSettingsHeader', 'annotationSettingsSubpanel']]
+};
+
 /**
  * 初始化右侧编辑工具栏 UI（保存按钮 + 多模块面板）。
  * 根据 state.editLeftModule 只显示对应面板；环境设置含 Lighting+PostEffect，场景特效含 VFX+Render。
@@ -92,6 +106,19 @@ export function initEditRightToolbarUI(global: Global): () => void {
 
     const current = (): EditLeftModule => state.editLeftModule ?? 'environment';
 
+    const expandSubpanelsForModule = (moduleId: EditLeftModule) => {
+        const pairs = SUBPANEL_PAIRS_BY_MODULE[moduleId];
+        if (!pairs) return;
+        pairs.forEach(([headerId, panelId]) => {
+            const header = document.getElementById(headerId);
+            const panel = document.getElementById(panelId);
+            if (header && panel) {
+                panel.classList.remove('hidden');
+                header.classList.add('expanded');
+            }
+        });
+    };
+
     const showPanel = (moduleId: EditLeftModule) => {
         RIGHT_PANEL_IDS.forEach((id) => {
             const panel = document.getElementById(PANEL_ID_BY_MODULE[id]);
@@ -99,6 +126,7 @@ export function initEditRightToolbarUI(global: Global): () => void {
                 panel.classList.toggle('hidden', id !== moduleId);
             }
         });
+        expandSubpanelsForModule(moduleId);
     };
 
     showPanel(current());

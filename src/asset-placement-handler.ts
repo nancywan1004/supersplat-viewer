@@ -406,16 +406,25 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
         pushEditHistory(global, 'place asset');
     };
 
+    const onEditLeftModuleChanged = (newModule: string) => {
+        if (newModule !== 'asset' && state.selectedSceneEntityId) {
+            state.selectedSceneEntityId = null;
+            events.fire('sceneAsset:selected');
+        }
+    };
+
     canvas.addEventListener('pointerdown', onPointerDown);
     events.on('assetEdit:copy', onCopy);
     events.on('assetEdit:delete', onDelete);
     events.on('assetPlacement:dropOnCanvas', onDropOnCanvas);
+    events.on('editLeftModule:changed', onEditLeftModuleChanged);
 
     return () => {
         canvas.removeEventListener('pointerdown', onPointerDown);
         events.off('assetEdit:copy', onCopy);
         events.off('assetEdit:delete', onDelete);
         events.off('assetPlacement:dropOnCanvas', onDropOnCanvas);
+        events.off('editLeftModule:changed', onEditLeftModuleChanged);
 
         // 释放 Picker 相关 GPU 资源
         if (placementPicker) {

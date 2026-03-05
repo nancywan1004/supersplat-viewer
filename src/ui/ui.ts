@@ -535,7 +535,8 @@ const initUI = (global: Global) => {
         }
         const bottomMount = document.getElementById('editBottomToolbarMount');
         if (bottomMount) {
-            bottomMount.classList.toggle('hidden', !inEdit);
+            const showBottomBar = inEdit && (state.editLeftModule === 'asset' || state.editLeftModule === 'annotation');
+            bottomMount.classList.toggle('hidden', !showBottomBar);
         }
         // 顶栏：编辑时显示「退出」+「保存」，非编辑时显示「编辑」
         if (dom.editModeStrip) {
@@ -669,6 +670,13 @@ const initUI = (global: Global) => {
         });
 
         events.on('editMode:changed', updateEditModeUI);
+        events.on('editLeftModule:changed', () => {
+            const bottomMount = document.getElementById('editBottomToolbarMount');
+            if (bottomMount && state.editMode) {
+                const showBottomBar = state.editLeftModule === 'asset' || state.editLeftModule === 'annotation';
+                bottomMount.classList.toggle('hidden', !showBottomBar);
+            }
+        });
         updateEditModeUI();
     }
 

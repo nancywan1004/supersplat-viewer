@@ -64,4 +64,6 @@ export interface AnnotationToolbarEvents {
     'annotation:moved': { id: string; position: Vec3 };
     /** 标注内容已更新 */
     'annotation:updated': { id: string };
+    /** 底部栏「编辑」按钮：请求显示标注编辑表单 */
+    'annotationEdit:show': void;
 }

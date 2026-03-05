@@ -1,0 +1,141 @@
+// 场景标注设置组件样式（需在 #rightToolBar .right-tool-bar-inner 内生效）
+
+#rightToolBar .right-tool-bar-inner {
+    .annotation-settings-section[data-annotation-settings-root] {
+        width: 100%;
+        margin-bottom: 4px;
+    }
+    .annotation-settings-header {
+        margin-bottom: 0;
+    }
+    #annotationSettingsSubpanel {
+        padding-top: 6px;
+    }
+    .annotation-new-btn {
+        width: 100%;
+        margin-bottom: 8px;
+        background: $clr-accent;
+        color: #fff;
+        &:hover {
+            filter: brightness(1.1);
+        }
+    }
+    .annotation-placement-hint {
+        font-size: 13px;
+        color: $clr-text-dark;
+        margin: 0 0 8px 0;
+    }
+    .annotation-form {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-bottom: 12px;
+        .settingsRow {
+            align-items: flex-start;
+            label {
+                min-width: 90px;
+                padding-top: 8px;
+            }
+        }
+        .annotation-label {
+            min-width: 90px;
+            padding: 8px 0;
+            color: $clr-text-dark;
+            font-size: 14px;
+        }
+        .annotation-body-input {
+            min-height: 60px;
+            resize: vertical;
+        }
+        .annotation-image-upload {
+            width: 80px;
+            height: 80px;
+            border: 1px dashed $clr-text-darkest;
+            border-radius: 6px;
+            background: $clr-bkg-darkest;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            position: relative;
+            .annotation-image-plus {
+                font-size: 24px;
+                color: $clr-text-dark;
+            }
+            .annotation-image-preview {
+                position: absolute;
+                inset: 4px;
+                width: calc(100% - 8px);
+                height: calc(100% - 8px);
+                object-fit: contain;
+                border-radius: 4px;
+            }
+            &:hover {
+                border-color: $clr-text-dark;
+                .annotation-image-plus {
+                    color: $clr-text;
+                }
+            }
+        }
+        .annotation-radio-group {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            padding: 8px 0;
+        }
+        .annotation-radio {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            color: $clr-text;
+        }
+        .annotation-form-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 4px;
+        }
+        .annotation-confirm-btn {
+            flex: 1;
+            background: $clr-accent;
+            color: #fff;
+            &:hover:not(:disabled) {
+                filter: brightness(1.1);
+            }
+            &:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+            }
+        }
+        .annotation-cancel-btn {
+            flex-shrink: 0;
+            background: $clr-bkg-darkest;
+            color: $clr-text;
+            &:hover {
+                color: $clr-text-light;
+            }
+        }
+    }
+    .annotation-selected-actions {
+        margin-bottom: 12px;
+        .annotation-selected-hint {
+            font-size: 13px;
+            color: $clr-text-dark;
+            margin: 0 0 8px 0;
+        }
+        .annotation-action-buttons {
+            display: flex;
+            gap: 8px;
+        }
+        .settingsButton {
+            flex: 1;
+        }
+    }
+    .annotation-help {
+        font-size: 12px;
+        color: $clr-text-darkest;
+        margin: 12px 0 0 0;
+        line-height: 1.4;
+    }
+}
