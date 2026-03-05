@@ -3,7 +3,7 @@
  * 负责右侧工具栏的显示、标注编辑表单和标注列表
  */
 
-import type { AnnotationFormData, AnnotationData } from './types';
+import type { AnnotationFormData, AnnotationData } from '../../annotation-toolbar/types';
 
 export class AnnotationToolbarUI {
     private container: HTMLElement | null = null;

@@ -7,7 +7,7 @@
 
 import { Annotation } from '../../annotation';
 import { AnnotationManager } from '../../annotation-toolbar/annotation-manager';
-import { AnnotationToolbarUI } from '../../annotation-toolbar/annotation-toolbar-ui';
+import { AnnotationToolbarUI } from './annotation-toolbar-ui';
 import type { Global } from '../../types';
 import type { AnnotationData } from '../../annotation-toolbar/types';
 
