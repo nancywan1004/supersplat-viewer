@@ -20,10 +20,14 @@ function cloneSnapshot(snapshot: EditSnapshot): EditSnapshot {
     return JSON.parse(JSON.stringify(snapshot)) as EditSnapshot;
 }
 
+function isTrackEditHistoryEnabled(global: Global): boolean {
+    return global.config.trackEditHistory === true;
+}
+
 function emitHistoryState(global: Global): void {
     global.events.fire('editHistory:stateChanged', {
-        canUndo: canUndo(),
-        canRedo: canRedo()
+        canUndo: canUndo(global),
+        canRedo: canRedo(global)
     });
 }
 
@@ -35,6 +39,8 @@ export function initEditHistory(global: Global, initialSnapshot?: EditSnapshot):
     undoAnnotationSelectionStack = [];
     redoAnnotationSelectionStack = [];
 
+    if (!isTrackEditHistoryEnabled(global)) return;
+
     const base = initialSnapshot ? cloneSnapshot(initialSnapshot) : serializeExperienceSettings(global);
     const baseSelection = global.state.selectedSceneEntityId ?? null;
     const baseAnnotationSelection = global.state.selectedAnnotationId ?? null;
@@ -44,11 +50,13 @@ export function initEditHistory(global: Global, initialSnapshot?: EditSnapshot):
     emitHistoryState(global);
 }
 
-export function canUndo(): boolean {
+export function canUndo(global?: Global): boolean {
+    if (global && !isTrackEditHistoryEnabled(global)) return false;
     return !isRestoring && undoStack.length > 1;
 }
 
-export function canRedo(): boolean {
+export function canRedo(global?: Global): boolean {
+    if (global && !isTrackEditHistoryEnabled(global)) return false;
     return !isRestoring && redoStack.length > 0;
 }
 
@@ -94,6 +102,7 @@ export async function restoreSnapshot(global: Global, snapshot: EditSnapshot): P
 
 export function pushEditHistory(global: Global, _label?: string): void {
     if (isRestoring) return;
+    if (!isTrackEditHistoryEnabled(global)) return;
 
     const snapshot = serializeExperienceSettings(global);
     undoStack.push(snapshot);
@@ -147,7 +156,8 @@ function restoreSelectionForSnapshot(global: Global, selectionId: string | null,
 }
 
 export async function undo(global: Global): Promise<void> {
-    if (!canUndo()) return;
+    if (!isTrackEditHistoryEnabled(global)) return;
+    if (!canUndo(global)) return;
 
     const current = undoStack.pop();
     const currentSelection = undoSelectionStack.pop();
@@ -167,7 +177,8 @@ export async function undo(global: Global): Promise<void> {
 }
 
 export async function redo(global: Global): Promise<void> {
-    if (!canRedo()) return;
+    if (!isTrackEditHistoryEnabled(global)) return;
+    if (!canRedo(global)) return;
 
     const snapshot = redoStack.pop();
     const selectionId = redoSelectionStack.pop();

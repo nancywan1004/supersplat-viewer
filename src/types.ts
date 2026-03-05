@@ -66,6 +66,8 @@ type Config = {
     splatMeshUrl?: string;
     /** 是否允许进入编辑模式（默认 true）；设为 false 时不显示编辑按钮且不响应进入编辑的 postMessage */
     allowEditMode?: boolean;
+    /** 是否启用编辑历史与撤销/重做（默认 false）；为 true 时才会记录历史并显示撤销/重做按钮及快捷键 */
+    trackEditHistory?: boolean;
     webgpu: boolean;                            // use WebGPU device
     gpusort: boolean;                           // use GPU sorting for splats
 };

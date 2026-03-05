@@ -508,9 +508,9 @@ const initUI = (global: Global) => {
     vrChanged();
 
     // 编辑模式：左上侧栏、右侧多面板栏、底部资产栏、右上角按钮
-    const cleanupEditLeftToolbarUI = initEditLeftToolbarUI(global);
-    const cleanupEditRightToolbarUI = initEditRightToolbarUI(global);
-    const cleanupEditBottomToolbarUI = initEditBottomToolbarUI(global);
+    initEditLeftToolbarUI(global);
+    initEditRightToolbarUI(global);
+    initEditBottomToolbarUI(global);
     /** 进入编辑模式时的 settings 快照（字符串用于比较是否有改动） */
     let editModeEnteredSettingsSnapshot: string | null = null;
     /** 进入编辑模式时的 settings 完整数据，用于「不保存并退出」时回退场景 */
@@ -550,11 +550,12 @@ const initUI = (global: Global) => {
         if (dom.saveSettingsBtn) {
             dom.saveSettingsBtn.classList.toggle('hidden', !inEdit);
         }
+        const showUndoRedo = inEdit && config.trackEditHistory === true;
         if (dom.undoEditBtn) {
-            dom.undoEditBtn.classList.toggle('hidden', !inEdit);
+            dom.undoEditBtn.classList.toggle('hidden', !showUndoRedo);
         }
         if (dom.redoEditBtn) {
-            dom.redoEditBtn.classList.toggle('hidden', !inEdit);
+            dom.redoEditBtn.classList.toggle('hidden', !showUndoRedo);
         }
     };
     if (config.allowEditMode === false) {
@@ -623,8 +624,9 @@ const initUI = (global: Global) => {
         let editHistoryCanRedo = false;
 
         const applyUndoRedoState = () => {
-            const undoDisabled = !state.editMode || editHistoryRestoring || !editHistoryCanUndo;
-            const redoDisabled = !state.editMode || editHistoryRestoring || !editHistoryCanRedo;
+            const undoRedoEnabled = config.trackEditHistory === true;
+            const undoDisabled = !undoRedoEnabled || !state.editMode || editHistoryRestoring || !editHistoryCanUndo;
+            const redoDisabled = !undoRedoEnabled || !state.editMode || editHistoryRestoring || !editHistoryCanRedo;
 
             if (dom.undoEditBtn) {
                 dom.undoEditBtn.toggleAttribute('disabled', undoDisabled);
@@ -641,7 +643,7 @@ const initUI = (global: Global) => {
         if (dom.undoEditBtn) {
             dom.undoEditBtn.addEventListener('click', async () => {
                 if (!state.editMode) return;
-                if (!canUndo()) return;
+                if (!canUndo(global)) return;
                 await undo(global);
                 // 撤销完成后，历史模块会通过 editHistory:stateChanged 更新状态
             });
@@ -649,7 +651,7 @@ const initUI = (global: Global) => {
         if (dom.redoEditBtn) {
             dom.redoEditBtn.addEventListener('click', async () => {
                 if (!state.editMode) return;
-                if (!canRedo()) return;
+                if (!canRedo(global)) return;
                 await redo(global);
                 // 重做完成后，历史模块会通过 editHistory:stateChanged 更新状态
             });
@@ -985,7 +987,7 @@ const initUI = (global: Global) => {
     document.addEventListener(
         'keydown',
         async (event: KeyboardEvent) => {
-            if (!state.editMode) return;
+            if (!state.editMode || config.trackEditHistory !== true) return;
             if (shouldIgnoreKeyEventTarget(event.target)) return;
 
             const primary = isMac ? event.metaKey : event.ctrlKey;
@@ -1000,11 +1002,11 @@ const initUI = (global: Global) => {
             if (!isUndoCombo && !isRedoCombo) return;
 
             if (isUndoCombo) {
-                if (!canUndo()) return;
+                if (!canUndo(global)) return;
                 event.preventDefault();
                 await undo(global);
             } else if (isRedoCombo) {
-                if (!canRedo()) return;
+                if (!canRedo(global)) return;
                 event.preventDefault();
                 await redo(global);
             }
