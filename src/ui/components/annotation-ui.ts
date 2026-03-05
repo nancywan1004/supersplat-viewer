@@ -148,6 +148,34 @@ export function initAnnotationUI(global: Global): () => void {
     };
     events.on('editMode:changed', onEditModeChanged);
 
+    /** 切换到非标注模块时，自动取消正在进行的放置或编辑 */
+    const onEditLeftModuleChanged = (newModule: string) => {
+        if (newModule === 'annotation') return;
+        if (annotationManager.getPlaceholderAnnotation()) {
+            annotationManager.cancelAnnotation();
+            annotationUI.hideEditForm();
+        } else {
+            const editingId = annotationUI.getEditingAnnotationId();
+            if (editingId && originalAnnotationDataForEdit) {
+                const annotation = annotationManager.getAllAnnotations().find((a) => a.id === editingId);
+                if (annotation) {
+                    annotation.updateContent({
+                        title: originalAnnotationDataForEdit.title,
+                        text: originalAnnotationDataForEdit.text,
+                        imageUrl: originalAnnotationDataForEdit.imageUrl,
+                        showTitleWhenCollapsed: originalAnnotationDataForEdit.showTitleWhenCollapsed
+                    });
+                    annotation.setCollapsed(originalAnnotationDataForEdit.collapsed);
+                }
+                annotationManager.deselectAnnotation();
+            }
+            originalAnnotationDataForEdit = null;
+            annotationUI.hideEditForm();
+        }
+        updateList();
+    };
+    events.on('editLeftModule:changed', onEditLeftModuleChanged);
+
     const onAnnotationNavigate = (ann: { id?: string }) => {
         const id = ann?.id;
         if (id) {
@@ -174,6 +202,7 @@ export function initAnnotationUI(global: Global): () => void {
         events.off('annotationPlacement:ended', onPlacementEnded);
         events.off('controlsHidden:changed', onControlsHiddenChanged);
         events.off('editMode:changed', onEditModeChanged);
+        events.off('editLeftModule:changed', onEditLeftModuleChanged);
         events.off('annotation.navigate', onAnnotationNavigate);
         annotationUI.destroy();
         annotationManager.destroy();
