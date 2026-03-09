@@ -234,17 +234,18 @@ export class AnnotationManager {
     /**
      * 选中标注
      * 
-     * 选中指定标注并显示 Transform Gizmo
-     * 
      * @param id - 标注 ID
+     * @param options - showGizmo: 是否同时显示 Transform Gizmo，默认 false（仅点击底部「移动」时显示 Gizmo）
      */
-    selectAnnotation(id: string): void {
+    selectAnnotation(id: string, options?: { showGizmo?: boolean }): void {
         const annotation = this.annotations.get(id);
 
         if (!annotation) {
             console.warn(`Annotation with id ${id} not found`);
             return;
         }
+
+        const showGizmo = options?.showGizmo ?? false;
 
         // 如果已经选中其他标注，先取消选择
         if (this.selectedAnnotationId && this.selectedAnnotationId !== id) {
@@ -254,8 +255,10 @@ export class AnnotationManager {
         // 更新选中状态
         this.selectedAnnotationId = id;
 
-        // 启用 Transform Gizmo
-        annotation.enableGizmo();
+        // 仅当显式请求时启用 Transform Gizmo（符合「先点击热点、再点击移动按钮」才显示 Gizmo）
+        if (showGizmo) {
+            annotation.enableGizmo();
+        }
 
         // 更新全局状态
         if (this.global.state) {
@@ -265,6 +268,17 @@ export class AnnotationManager {
         // 触发标注选中事件
         if (this.global.events) {
             this.global.events.fire('annotation:selected', { id });
+        }
+    }
+
+    /**
+     * 为当前选中的标注显示 Transform Gizmo（底部「移动」按钮点击时调用）
+     */
+    enableGizmoForSelected(): void {
+        if (!this.selectedAnnotationId) return;
+        const annotation = this.annotations.get(this.selectedAnnotationId);
+        if (annotation) {
+            annotation.enableGizmo();
         }
     }
 

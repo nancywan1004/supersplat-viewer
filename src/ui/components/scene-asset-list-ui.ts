@@ -125,11 +125,13 @@ export function bindSceneAssetList(root: HTMLElement | null, global: Global): ()
     events.on('sceneAssets:removed', onSceneListChange);
     events.on('sceneAssets:cleared', onSceneListChange);
     events.on('sceneAsset:selected', onSceneListChange);
+    events.on('editLeftModule:changed', onSceneListChange);
 
     return () => {
         events.off('sceneAssets:added', onSceneListChange);
         events.off('sceneAssets:removed', onSceneListChange);
         events.off('sceneAssets:cleared', onSceneListChange);
         events.off('sceneAsset:selected', onSceneListChange);
+        events.off('editLeftModule:changed', onSceneListChange);
     };
 }

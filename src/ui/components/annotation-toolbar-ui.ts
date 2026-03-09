@@ -417,8 +417,9 @@ export class AnnotationToolbarUI {
      * 更新标注列表
      * @param annotations - 标注数据列表
      * @param editingId - 当前正在编辑的标注 ID（其编辑按钮显示为「更新」）
+     * @param selectedId - 当前选中的标注 ID（仅此项高亮，与场景选中状态一致）
      */
-    updateAnnotationList(annotations: AnnotationData[], editingId?: string | null): void {
+    updateAnnotationList(annotations: AnnotationData[], editingId?: string | null, selectedId?: string | null): void {
         const listContainer = this.annotationList?.querySelector('.annotation-list-container');
         if (!listContainer) return;
 
@@ -433,10 +434,10 @@ export class AnnotationToolbarUI {
             return;
         }
 
-        // 渲染标注列表项
+        // 渲染标注列表项（高亮由 selectedId 驱动，与场景选中一致）
         annotations.forEach((annotation) => {
             const item = document.createElement('div');
-            item.className = 'annotation-list-item';
+            item.className = 'annotation-list-item' + (selectedId === annotation.id ? ' selected' : '');
             item.dataset.annotationId = annotation.id;
 
             const itemContent = document.createElement('div');
@@ -469,13 +470,9 @@ export class AnnotationToolbarUI {
             deleteBtn.title = '删除标注';
             item.appendChild(deleteBtn);
 
-            // 点击列表项选择标注（仅显示 Gizmo，不显示编辑表单）
+            // 点击列表项选择标注（选中状态由 updateAnnotationList 的 selectedId 驱动，选中后会触发 updateList 重绘）
             itemContent.addEventListener('click', () => {
                 this.annotationSelectCallback?.(annotation.id);
-                listContainer.querySelectorAll('.annotation-list-item').forEach((el) => {
-                    el.classList.remove('selected');
-                });
-                item.classList.add('selected');
             });
 
             // 点击编辑/更新按钮：编辑时显示表单+Gizmo，更新时保存

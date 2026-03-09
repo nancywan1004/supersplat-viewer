@@ -26,7 +26,7 @@ const ASSET_HTML = `
 const ANNOTATION_HTML = `
 <div class="edit-bottom-toolbar-inner">
     <div class="edit-bottom-toolbar-group" role="group" aria-label="标注变换">
-        <button type="button" class="edit-bottom-toolbar-btn active" data-mode="move" aria-pressed="true">移动</button>
+        <button type="button" class="edit-bottom-toolbar-btn" data-mode="move" aria-pressed="false">移动</button>
     </div>
     <div class="edit-bottom-toolbar-divider"></div>
     <div class="edit-bottom-toolbar-group" role="group" aria-label="标注操作">
@@ -65,7 +65,7 @@ export function initEditBottomToolbarUI(global: Global): () => void {
     }
 
     const currentModule = (): EditLeftModule => state.editLeftModule ?? 'asset';
-    const currentTransformMode = (): AssetTransformMode => state.assetTransformMode ?? 'move';
+    const currentTransformMode = (): AssetTransformMode | undefined => state.assetTransformMode;
 
     const renderAndBind = () => {
         const module = currentModule();
@@ -85,11 +85,17 @@ export function initEditBottomToolbarUI(global: Global): () => void {
         const copyBtn = container.querySelector<HTMLButtonElement>('#assetEditCopy');
         const deleteBtn = container.querySelector<HTMLButtonElement>('#assetEditDelete');
 
-        const setTransformActive = (mode: AssetTransformMode) => {
+        const setTransformActive = (mode: AssetTransformMode | undefined) => {
             state.assetTransformMode = mode;
-            events.fire('assetTransformMode:changed', mode);
+            events.fire('assetTransformMode:changed', mode as any);
+            syncAssetModeButtons();
+        };
+
+        const syncAssetModeButtons = () => {
+            const hasSelection = state.selectedSceneEntityId != null;
+            const mode = currentTransformMode();
             modeButtons.forEach((btn) => {
-                const isActive = btn.getAttribute('data-mode') === mode;
+                const isActive = hasSelection && mode !== undefined && btn.getAttribute('data-mode') === mode;
                 btn.classList.toggle('active', isActive);
                 btn.setAttribute('aria-pressed', String(isActive));
             });
@@ -97,16 +103,25 @@ export function initEditBottomToolbarUI(global: Global): () => void {
 
         modeButtons.forEach((btn) => {
             const mode = btn.getAttribute('data-mode') as AssetTransformMode;
-            const isActive = mode === currentTransformMode();
-            btn.classList.toggle('active', isActive);
-            btn.setAttribute('aria-pressed', String(isActive));
             btn.addEventListener('click', () => setTransformActive(mode));
         });
+        syncAssetModeButtons();
 
         copyBtn?.addEventListener('click', () => events.fire('assetEdit:copy'));
         deleteBtn?.addEventListener('click', () => events.fire('assetEdit:delete'));
+    };
 
-        setTransformActive(currentTransformMode());
+    let annotationMoveActive = false;
+
+    const syncAnnotationMoveButton = () => {
+        if (currentModule() !== 'annotation') return;
+        const moveBtn = container.querySelector<HTMLButtonElement>('.edit-bottom-toolbar-btn[data-mode="move"]');
+        if (!moveBtn) return;
+        const annotationManager = (global as any).annotationManager;
+        const hasSelection = annotationManager?.getSelectedAnnotation() != null;
+        const isActive = hasSelection && annotationMoveActive;
+        moveBtn.classList.toggle('active', isActive);
+        moveBtn.setAttribute('aria-pressed', String(isActive));
     };
 
     const bindAnnotationContent = () => {
@@ -115,8 +130,12 @@ export function initEditBottomToolbarUI(global: Global): () => void {
         const deleteBtn = container.querySelector<HTMLButtonElement>('#annotationDeleteBtn');
 
         moveBtn?.addEventListener('click', () => {
-            state.assetTransformMode = 'move';
-            events.fire('assetTransformMode:changed', 'move');
+            const annotationManager = (global as any).annotationManager;
+            if (annotationManager) {
+                annotationManager.enableGizmoForSelected();
+                annotationMoveActive = true;
+                syncAnnotationMoveButton();
+            }
         });
 
         editBtn?.addEventListener('click', () => {
@@ -132,17 +151,41 @@ export function initEditBottomToolbarUI(global: Global): () => void {
                 }
             }
         });
+
+        syncAnnotationMoveButton();
     };
 
-    const onEditLeftModuleChanged = () => {
+    const onEditLeftModuleChanged = (newModule?: string) => {
+        if (newModule !== 'annotation') {
+            annotationMoveActive = false;
+        }
         renderAndBind();
+    };
+
+    const onAnnotationDeselected = () => {
+        annotationMoveActive = false;
+        syncAnnotationMoveButton();
     };
 
     const onAssetTransformModeChanged = () => {
         if (currentModule() !== 'asset') return;
+        const modeButtons = container.querySelectorAll<HTMLButtonElement>('.edit-bottom-toolbar-btn[data-mode]');
+        const hasSelection = state.selectedSceneEntityId != null;
         const c = currentTransformMode();
-        container.querySelectorAll<HTMLButtonElement>('.edit-bottom-toolbar-btn[data-mode]').forEach((btn) => {
-            const isActive = btn.getAttribute('data-mode') === c;
+        modeButtons.forEach((btn) => {
+            const isActive = hasSelection && c !== undefined && btn.getAttribute('data-mode') === c;
+            btn.classList.toggle('active', isActive);
+            btn.setAttribute('aria-pressed', String(isActive));
+        });
+    };
+
+    const onSceneAssetSelected = () => {
+        if (currentModule() !== 'asset') return;
+        const modeButtons = container.querySelectorAll<HTMLButtonElement>('.edit-bottom-toolbar-btn[data-mode]');
+        const hasSelection = state.selectedSceneEntityId != null;
+        const c = currentTransformMode();
+        modeButtons.forEach((btn) => {
+            const isActive = hasSelection && c !== undefined && btn.getAttribute('data-mode') === c;
             btn.classList.toggle('active', isActive);
             btn.setAttribute('aria-pressed', String(isActive));
         });
@@ -150,12 +193,16 @@ export function initEditBottomToolbarUI(global: Global): () => void {
 
     events.on('editLeftModule:changed', onEditLeftModuleChanged);
     events.on('assetTransformMode:changed', onAssetTransformModeChanged);
+    events.on('sceneAsset:selected', onSceneAssetSelected);
+    events.on('annotation:deselected', onAnnotationDeselected);
 
     renderAndBind();
 
     return () => {
         events.off('editLeftModule:changed', onEditLeftModuleChanged);
         events.off('assetTransformMode:changed', onAssetTransformModeChanged);
+        events.off('sceneAsset:selected', onSceneAssetSelected);
+        events.off('annotation:deselected', onAnnotationDeselected);
         if (root && root.parentNode) {
             root.parentNode.removeChild(root);
         } else if (container) {

@@ -66,8 +66,8 @@ export function initAnnotationUI(global: Global): () => void {
         updateList();
     });
     annotationUI.onAnnotationSelect((id) => {
-        annotationManager.selectAnnotation(id);
-        // 仅选择不显示表单，编辑需点击「编辑」按钮
+        annotationManager.selectAnnotation(id, { showGizmo: false });
+        // 仅选择不显示表单、不显示 Gizmo；Gizmo 需点击底部「移动」后显示
     });
     annotationUI.onAnnotationEditOrUpdate((id, isUpdate) => {
         if (isUpdate) {
@@ -79,7 +79,7 @@ export function initAnnotationUI(global: Global): () => void {
         } else {
             const annotation = annotationManager.getAllAnnotations().find((a) => a.id === id);
             if (annotation) {
-                annotationManager.selectAnnotation(id);
+                annotationManager.selectAnnotation(id, { showGizmo: false });
                 const serialized = annotation.serialize();
                 originalAnnotationDataForEdit = serialized;
                 annotationUI.showEditForm(serialized, true);
@@ -99,7 +99,8 @@ export function initAnnotationUI(global: Global): () => void {
         const annotations: AnnotationData[] = annotationManager
             .getAllAnnotations()
             .map((a) => a.serialize());
-        annotationUI.updateAnnotationList(annotations, annotationUI.getEditingAnnotationId());
+        const selectedId = annotationManager.getSelectedAnnotation()?.id ?? null;
+        annotationUI.updateAnnotationList(annotations, annotationUI.getEditingAnnotationId(), selectedId);
     };
 
     const onAnnotationSelected = () => {
@@ -130,6 +131,10 @@ export function initAnnotationUI(global: Global): () => void {
     events.on('annotation:created', updateList);
     events.on('annotation:deleted', updateList);
     events.on('annotation:selected', onAnnotationSelected);
+    const onAnnotationSelectFromHotspot = (data: { id: string }) => {
+        annotationManager.selectAnnotation(data.id, { showGizmo: false });
+    };
+    events.on('annotation:selectFromHotspot', onAnnotationSelectFromHotspot);
     events.on('annotation:deselected', onAnnotationDeselected);
     events.on('annotation:place', onAnnotationPlaceWithHint);
     events.on('annotationPlacement:started', onPlacementStarted);
@@ -159,12 +164,12 @@ export function initAnnotationUI(global: Global): () => void {
     };
     events.on('editMode:changed', onEditModeChanged);
 
-    /** 切换模块时：进入标注模块默认选中第一个；离开时取消放置/编辑 */
+    /** 切换模块时：进入标注模块默认选中列表中第一项（不自动显示 Gizmo）；离开时取消选中与 Gizmo、取消放置/编辑 */
     const onEditLeftModuleChanged = (newModule: string) => {
         if (newModule === 'annotation') {
             const all = annotationManager.getAllAnnotations();
             if (all.length > 0 && !annotationManager.getSelectedAnnotation()) {
-                annotationManager.selectAnnotation(all[0].id);
+                annotationManager.selectAnnotation(all[0].id, { showGizmo: false });
             }
             updateList();
             return;
@@ -185,11 +190,12 @@ export function initAnnotationUI(global: Global): () => void {
                     });
                     annotation.setCollapsed(originalAnnotationDataForEdit.collapsed);
                 }
-                annotationManager.deselectAnnotation();
             }
             originalAnnotationDataForEdit = null;
             annotationUI.hideEditForm();
         }
+        // 离开标注模块时始终取消选中并清除标注 Gizmo，避免切换到资产模块后 Gizmo 未清除
+        annotationManager.deselectAnnotation();
         updateList();
     };
     events.on('editLeftModule:changed', onEditLeftModuleChanged);
@@ -214,6 +220,7 @@ export function initAnnotationUI(global: Global): () => void {
         events.off('annotation:created', updateList);
         events.off('annotation:deleted', updateList);
         events.off('annotation:selected', onAnnotationSelected);
+        events.off('annotation:selectFromHotspot', onAnnotationSelectFromHotspot);
         events.off('annotation:deselected', onAnnotationDeselected);
         events.off('annotation:place', onAnnotationPlaceWithHint);
         events.off('annotationPlacement:started', onPlacementStarted);

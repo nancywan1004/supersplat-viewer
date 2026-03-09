@@ -58,6 +58,8 @@ export interface AnnotationToolbarEvents {
     'annotation:deleted': { id: string };
     /** 标注已选中 */
     'annotation:selected': { id: string };
+    /** 从 3D 热点点击请求选中（仅选中不显示 Gizmo） */
+    'annotation:selectFromHotspot': { id: string };
     /** 标注已取消选中 */
     'annotation:deselected': void;
     /** 标注位置已更新 */

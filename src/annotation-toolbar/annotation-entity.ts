@@ -60,6 +60,17 @@ export class AnnotationEntity extends Annotation {
             this.collapsedTitleSpan = null;
         });
 
+        // 编辑模式 + 标注模块下，点击热点时仅选中该标注（不显示 Gizmo；Gizmo 需点击底部「移动」后显示）
+        const hotspotDom = (this as any).hotspotDom as HTMLDivElement | null;
+        if (hotspotDom && this.global?.state && this.global?.events) {
+            hotspotDom.addEventListener('click', () => {
+                const s = this.global!.state;
+                if (s?.editMode && s?.editLeftModule === 'annotation') {
+                    this.global!.events.fire('annotation:selectFromHotspot', { id: this.id });
+                }
+            });
+        }
+
         // 与 UI 的 controlsHidden 联动：tooltip 显示时阻止 4 秒无操作自动隐藏
         this.on('show', () => this.global?.events?.fire('annotation.activate', this));
         this.on('hide', () => this.global?.events?.fire('annotation.deactivate'));

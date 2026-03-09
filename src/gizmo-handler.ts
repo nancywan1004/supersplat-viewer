@@ -126,11 +126,16 @@ export function initGizmoHandler(global: Global): () => void {
     }
 
     const syncGizmoToSelection = () => {
-        const entity = getSelectedSceneEntity(state);
+        const inAssetModule = state.editLeftModule === 'asset';
+        const mode = state.assetTransformMode;
+        const showAssetGizmo =
+            inAssetModule &&
+            (mode === 'move' || mode === 'rotate' || mode === 'scale');
+        const entity = showAssetGizmo ? getSelectedSceneEntity(state) : null;
         if (handler) {
             if (entity) {
                 handler.add(entity, true);
-                const type = MODE_TO_GIZMO_TYPE[state.assetTransformMode ?? 'move'];
+                const type = MODE_TO_GIZMO_TYPE[mode!];
                 handler.switch(type);
             } else {
                 handler.clear();
@@ -138,33 +143,36 @@ export function initGizmoHandler(global: Global): () => void {
         }
     };
 
-    const onModeChanged = (_mode: AssetTransformMode) => {
-        if (handler && getSelectedSceneEntity(state)) {
-            const type = MODE_TO_GIZMO_TYPE[state.assetTransformMode ?? 'move'];
-            handler.switch(type);
-        }
+    const onModeChanged = (_mode: AssetTransformMode | undefined) => {
+        if (state.editLeftModule !== 'asset') return;
+        // 始终走完整同步：确保先 handler.add(entity) 再 switch(type)，避免初始默认选中后首次点「移动」时 _nodes 为空导致 Gizmo 不显示
+        syncGizmoToSelection();
     };
 
     const onSelectionChanged = () => syncGizmoToSelection();
 
-    /** 退出编辑模式时隐藏 Gizmo；进入编辑模式时若无选中则默认选场景列表第一项并同步 Gizmo */
+    const onEditLeftModuleChanged = () => syncGizmoToSelection();
+
+    /** 退出编辑模式时隐藏 Gizmo；进入编辑模式且当前为资产模块时若无选中则默认选首 entity（与切换进资产模块行为一致） */
     const onEditModeChanged = (inEdit: boolean) => {
         if (!handler) return;
         if (!inEdit) {
             handler.clear();
             return;
         }
-        const entity = getSelectedSceneEntity(state);
-        const list = state.scenePlacedEntities ?? [];
-        if (!entity && list.length > 0) {
-            state.selectedSceneEntityId = list[0].id;
-            events.fire('sceneAsset:selected');
+        if (state.editLeftModule === 'asset') {
+            const list = state.scenePlacedEntities ?? [];
+            if (list.length > 0 && !state.selectedSceneEntityId) {
+                state.selectedSceneEntityId = list[0].id;
+                events.fire('sceneAsset:selected');
+            }
         }
         syncGizmoToSelection();
     };
 
     events.on('assetTransformMode:changed', onModeChanged);
     events.on('sceneAsset:selected', onSelectionChanged);
+    events.on('editLeftModule:changed', onEditLeftModuleChanged);
     events.on('editMode:changed', onEditModeChanged);
     if (state.editMode) {
         onEditModeChanged(true);
@@ -184,6 +192,7 @@ export function initGizmoHandler(global: Global): () => void {
     return () => {
         events.off('assetTransformMode:changed', onModeChanged);
         events.off('sceneAsset:selected', onSelectionChanged);
+        events.off('editLeftModule:changed', onEditLeftModuleChanged);
         events.off('editMode:changed', onEditModeChanged);
         app.off('update', onUpdate);
         handler?.destroy();
