@@ -327,6 +327,10 @@ const initPostMessageBridge = (global: Global) => {
             if (p.value === 'move' || p.value === 'rotate' || p.value === 'scale') {
                 state.assetTransformMode = p.value;
                 events.fire('assetTransformMode:changed', p.value);
+            } else {
+                // 未传 value 或非合法值：清除模式，隐藏 Gizmo
+                state.assetTransformMode = undefined;
+                events.fire('assetTransformMode:changed', undefined as any);
             }
             break;
         case 'ANNOTATION_PLACEMENT_START':

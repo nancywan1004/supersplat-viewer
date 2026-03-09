@@ -64,73 +64,12 @@ function renderAssetPreviewGrid(
         slot.appendChild(nameSpan);
         slot.appendChild(deleteBtn);
 
-        // 点击资产格子（不拖拽）暂时不做「待放置」状态，仅用于未来扩展（如弹出属性面板）
-        let dragging = false;
-        let dragStartX = 0;
-        let dragStartY = 0;
-
+        // 点击资产格子：直接在相机前方放置（与 ASSET_PLACE 协议一致，不再拖拽到画布）
+        slot.addEventListener('dragstart', (e) => e.preventDefault());
         slot.addEventListener('click', (e) => {
             if ((e.target as HTMLElement).closest('.asset-preview-delete')) return;
-            // 若本次 pointer 序列发生过拖拽，则不当作点击选择
-            if (dragging) return;
+            events.fire('assetPlacement:place', { value: item });
         });
-
-        // 禁止原生 HTML5 拖拽（尤其 img 会触发），否则 pointerup 收不到，drop 无法触发
-        slot.addEventListener('dragstart', (e) => e.preventDefault());
-
-        // 从资产列表拖拽到画布：pointerdown 开始记录，pointermove 判定为拖拽，pointerup 上报 drop
-        slot.addEventListener('pointerdown', (e: PointerEvent) => {
-            if (e.button !== 0) return;
-            dragging = false;
-            dragStartX = e.clientX;
-            dragStartY = e.clientY;
-            try {
-                slot.setPointerCapture(e.pointerId);
-            } catch {
-                // ignore
-            }
-        });
-
-        slot.addEventListener('pointermove', (e: PointerEvent) => {
-            if (e.buttons === 0) return;
-            if (dragStartX === 0 && dragStartY === 0) return;
-            const dx = e.clientX - dragStartX;
-            const dy = e.clientY - dragStartY;
-            if (!dragging && Math.hypot(dx, dy) > 4) {
-                dragging = true;
-                events.fire('assetDrag:start', item);
-            }
-        });
-
-        const endDrag = (e: PointerEvent) => {
-            try {
-                slot.releasePointerCapture(e.pointerId);
-            } catch {
-                // ignore
-            }
-            if (dragging) {
-                const canvas = app.graphicsDevice?.canvas as HTMLCanvasElement | undefined;
-                if (canvas) {
-                    const target = document.elementFromPoint(e.clientX, e.clientY);
-                    if (target && (target === canvas || canvas.contains(target))) {
-                        events.fire('assetPlacement:dropOnCanvas', {
-                            item,
-                            clientX: e.clientX,
-                            clientY: e.clientY
-                        });
-                    }
-                }
-                events.fire('assetDrag:end', item);
-                e.preventDefault();
-                e.stopPropagation();
-            }
-            dragging = false;
-            dragStartX = 0;
-            dragStartY = 0;
-        };
-
-        slot.addEventListener('pointerup', endDrag);
-        slot.addEventListener('pointercancel', endDrag);
 
         gridEl.appendChild(slot);
     });

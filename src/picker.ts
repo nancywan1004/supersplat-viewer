@@ -20,23 +20,49 @@ import {
     PROJECTION_ORTHOGRAPHIC
 } from 'playcanvas';
 
-// override global pick to pack depth instead of meshInstance id
+// override global pick: encodePickOutput（gsplat/mesh 共用）+ getPickOutput 分支（mesh 用 meshInstanceId，gsplat 用深度）
 const pickDepthGlsl = /* glsl */ `
+vec4 encodePickOutput(uint id) {
+    const vec4 inv = vec4(1.0 / 255.0);
+    const uvec4 shifts = uvec4(16, 8, 0, 24);
+    uvec4 col = (uvec4(id) >> shifts) & uvec4(0xff);
+    return vec4(col) * inv;
+}
+#ifndef PICK_CUSTOM_ID
+uniform uint meshInstanceId;
+vec4 getPickOutput() {
+    return encodePickOutput(meshInstanceId);
+}
+#else
 uniform vec4 camera_params;     // 1/far, far, near, isOrtho
 vec4 getPickOutput() {
     float linearDepth = 1.0 / gl_FragCoord.w;
     float normalizedDepth = (linearDepth - camera_params.z) / (camera_params.y - camera_params.z);
     return vec4(gaussianColor.a * normalizedDepth, 0.0, 0.0, gaussianColor.a);
 }
+#endif
 `;
 
 const pickDepthWgsl = /* wgsl */ `
-    uniform camera_params: vec4f;       // 1/far, far, near, isOrtho
+    fn encodePickOutput(id: u32) -> vec4f {
+        let inv: vec4f = vec4f(1.0 / 255.0);
+        let shifts: vec4u = vec4u(16u, 8u, 0u, 24u);
+        let col: vec4u = (vec4u(id) >> shifts) & vec4u(0xffu);
+        return vec4f(col) * inv;
+    }
+    #ifndef PICK_CUSTOM_ID
+    uniform meshInstanceId: u32;
+    fn getPickOutput() -> vec4f {
+        return encodePickOutput(uniform.meshInstanceId);
+    }
+    #else
+    uniform camera_params: vec4f;
     fn getPickOutput() -> vec4f {
         let linearDepth = 1.0 / pcPosition.w;
         let normalizedDepth = (linearDepth - uniform.camera_params.z) / (uniform.camera_params.y - uniform.camera_params.z);
         return vec4f(gaussianColor.a * normalizedDepth, 0.0, 0.0, gaussianColor.a);
     }
+    #endif
 `;
 
 const vec = new Vec3();

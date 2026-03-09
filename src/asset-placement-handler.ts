@@ -1,19 +1,14 @@
 import type { AppBase } from 'playcanvas';
-import { Ray, Vec3, StandardMaterial, CULLFACE_NONE } from 'playcanvas';
+import * as pc from 'playcanvas';
+import { Vec3, StandardMaterial, CULLFACE_NONE } from 'playcanvas';
 import type { Global } from './types';
 import type { AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from './types';
 import { getSelectedSceneEntity } from './state-helpers';
 import { Entity } from 'playcanvas';
-import { Picker } from './picker';
 import { loadGsplatAsset } from './loaders/gsplat-asset-loader';
 import { pushEditHistory } from './edit-history';
 
 const PLACED_ASSETS_NAME = 'placedAssets';
-const vec = new Vec3();
-const ray = new Ray();
-
-// 资产放置使用的 gsplat 拾取器（重用同一个实例，避免反复创建 RenderPass）
-let placementPicker: Picker | null = null;
 
 function nextSceneEntityId(): string {
     return `scene-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -28,51 +23,6 @@ function getPlacedAssetsParent(app: AppBase): Entity {
     return parent;
 }
 
-/** 从相机和屏幕坐标构建世界空间射线 */
-function buildRay(
-    camera: Entity,
-    clientX: number,
-    clientY: number,
-    canvas: HTMLCanvasElement,
-    width: number,
-    height: number
-): void {
-    const rect = canvas.getBoundingClientRect();
-    const nx = (clientX - rect.left) / rect.width;
-    const ny = (clientY - rect.top) / rect.height;
-    const screenX = nx * width;
-    const screenY = (1 - ny) * height;
-    const camPos = camera.getPosition();
-    camera.camera.screenToWorld(screenX, screenY, 1, vec);
-    vec.sub(camPos).normalize();
-    ray.set(camPos, vec);
-}
-
-/** 射线与平面 y = planeY 的交点 */
-function raycastPlane(planeY: number): Vec3 | null {
-    const dirY = ray.direction.y;
-    if (Math.abs(dirY) < 1e-6) return null;
-    const t = (planeY - ray.origin.y) / dirY;
-    if (t < 0) return null;
-    return ray.origin.clone().add(ray.direction.clone().mulScalar(t));
-}
-
-/** 射线与球体相交，返回 t 值；无交返回 null。球心 worldPos，半径 radius */
-function raycastSphere(center: Vec3, radius: number): number | null {
-    const o = ray.origin;
-    const d = ray.direction;
-    const oc = new Vec3().sub2(o, center);
-    const a = d.dot(d);
-    const b = 2 * oc.dot(d);
-    const c = oc.dot(oc) - radius * radius;
-    const disc = b * b - 4 * a * c;
-    if (disc < 0) return null;
-    const t = (-b - Math.sqrt(disc)) / (2 * a);
-    return t >= 0 ? t : null;
-}
-
-const PICK_SPHERE_RADIUS = 3;
-
 /** 相机前方距离，用于 ASSET_PLACE 在相机前方放置 */
 const CAMERA_FRONT_DISTANCE = 5;
 
@@ -86,21 +36,6 @@ export function getPositionInFrontOfCamera(global: Global, distance: number = CA
     zAxis.mulScalar(-distance);
     pos.add(zAxis);
     return pos;
-}
-
-/** 从已放置实体中拾取射线击中的第一个（最近）实体 */
-function pickPlacedEntity(global: Global): ScenePlacedItem | null {
-    const list = global.state.scenePlacedEntities ?? [];
-    let best: { entry: ScenePlacedItem; t: number } | null = null;
-    for (const entry of list) {
-        if (!entry.entity.enabled) continue;
-        const pos = entry.entity.getPosition();
-        const t = raycastSphere(pos, PICK_SPHERE_RADIUS);
-        if (t !== null && (best === null || t < best.t)) {
-            best = { entry, t };
-        }
-    }
-    return best?.entry ?? null;
 }
 
 async function instantiateImage(app: AppBase, item: AssetLibraryItem, position: Vec3): Promise<Entity> {
@@ -330,21 +265,56 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
     const width = () => app.graphicsDevice.width;
     const height = () => app.graphicsDevice.height;
 
+    let sceneAssetPicker: any = null;
+
     const onPointerDown = (e: PointerEvent) => {
-        if (!state.editMode) return;
-        if (e.button !== 0) return;
-        buildRay(camera, e.clientX, e.clientY, canvas, width(), height());
+        if (!state.editMode || state.editLeftModule !== 'asset' || e.button !== 0) return;
 
-        // 先尝试拾取已放置实体
-        const picked = pickPlacedEntity(global);
-        if (picked) {
-            const entry = (state.scenePlacedEntities ?? []).find((e) => e.entity === picked.entity);
-            state.selectedSceneEntityId = entry?.id ?? null;
-            events.fire('sceneAsset:selected');
-            return;
+        e.stopPropagation();
+        e.preventDefault();
+
+        const rect = canvas.getBoundingClientRect();
+        const offsetX = e.clientX - rect.left;
+        const offsetY = e.clientY - rect.top;
+        if (offsetX < 0 || offsetY < 0 || offsetX > rect.width || offsetY > rect.height) return;
+
+        const list = state.scenePlacedEntities ?? [];
+        if (list.length === 0) return;
+
+        const pickerScale = 0.5;
+        const pickW = Math.max(1, Math.floor(width() * pickerScale));
+        const pickH = Math.max(1, Math.floor(height() * pickerScale));
+        const pickX = Math.floor((offsetX / rect.width) * pickW);
+        const pickY = Math.floor((offsetY / rect.height) * pickH);
+
+        if ((app.scene as any).gsplat) {
+            (app.scene as any).gsplat.enableIds = true;
         }
+        // depth=false：本仓库 picker.ts 覆盖了全局 pickPS 且只实现 getPickOutput()，未实现 getPickDepth()，
+        // Picker(depth=true) 会触发 DEPTH_PICK_PASS 导致 shader 报错；实体选中只需 id 缓冲。
+        if (!sceneAssetPicker) {
+            sceneAssetPicker = new (pc as any).Picker(app, pickW, pickH, false);
+        }
+        sceneAssetPicker.resize(pickW, pickH);
+        const worldLayer = app.scene.layers.getLayerByName('World');
+        sceneAssetPicker.prepare(camera.camera, app.scene, worldLayer ? [worldLayer] : undefined);
 
-        // 旧的「点击画布再选资产」模式已废弃，这里只处理实体拾取，真正的放置通过 assetPlacement:dropOnCanvas 完成
+        sceneAssetPicker.getSelectionAsync(pickX, pickY, 1, 1).then((selection: any[]) => {
+            if (selection.length === 0) return;
+            const picked = selection[0];
+            // Unified 模式下拾取 gsplat 返回 GSplatComponent（有 .entity）；拾取 mesh / plane 返回 MeshInstance（有 .node）
+            const entity = picked.entity ?? picked.node ?? null;
+            if (!entity) return;
+            // 对于 mesh，MeshInstance.node 可能是挂在 ScenePlacedItem.entity 下的子节点，这里同时兼容「自身」与「子层级命中」
+            const entry = list.find((item) => {
+                if (item.entity === entity) return true;
+                const anyEntity = entity as any;
+                return typeof anyEntity.isDescendantOf === 'function' && anyEntity.isDescendantOf(item.entity);
+            });
+            if (!entry) return;
+            state.selectedSceneEntityId = entry.id;
+            events.fire('sceneAsset:selected');
+        }).catch(() => {});
     };
 
     const onCopy = () => {
@@ -389,39 +359,6 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
         pushEditHistory(global, 'delete asset');
     };
 
-    const onDropOnCanvas = async (payload: { item: AssetLibraryItem; clientX: number; clientY: number }) => {
-        if (!state.editMode) return;
-        const { item, clientX, clientY } = payload;
-        const rect = canvas.getBoundingClientRect();
-        const offsetX = clientX - rect.left;
-        const offsetY = clientY - rect.top;
-        if (offsetX < 0 || offsetY < 0 || offsetX > rect.width || offsetY > rect.height) {
-            return;
-        }
-
-        // 归一化到 [0,1]，与 Picker.pick 的期望一致
-        const nx = offsetX / rect.width;
-        const ny = offsetY / rect.height;
-
-        // 优先用 gsplat Picker 精确拾取主 gsplat 表面位置；失败时再回退到地平面
-        if (!placementPicker) {
-            placementPicker = new Picker(app, camera);
-        }
-
-        let hit = await placementPicker.pick(nx, ny);
-        if (!hit) {
-            buildRay(camera, clientX, clientY, canvas, width(), height());
-            hit = raycastPlane(planeY);
-        }
-        if (!hit) return;
-
-        const entry = await placeAsset(global, item, hit);
-        if (!entry) return;
-        state.selectedSceneEntityId = entry.id;
-        events.fire('sceneAsset:selected');
-        pushEditHistory(global, 'place asset');
-    };
-
     const onEditLeftModuleChanged = (newModule: string) => {
         if (newModule === 'asset') {
             // 进入资产模块：默认选中场景中第一个 entity（若有）；不自动显示 Gizmo（需用户点击底部移动/旋转/缩放）
@@ -450,27 +387,24 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
         if (entry) {
             state.selectedSceneEntityId = entry.id;
             events.fire('sceneAsset:selected');
+            pushEditHistory(global, 'place asset');
         }
     };
 
     events.on('assetEdit:copy', onCopy);
     events.on('assetEdit:delete', onDelete);
-    events.on('assetPlacement:dropOnCanvas', onDropOnCanvas);
     events.on('assetPlacement:place', onPlaceFromProtocol);
     events.on('editLeftModule:changed', onEditLeftModuleChanged);
 
     return () => {
         canvas.removeEventListener('pointerdown', onPointerDown);
+        if (sceneAssetPicker) {
+            sceneAssetPicker.destroy();
+            sceneAssetPicker = null;
+        }
         events.off('assetEdit:copy', onCopy);
         events.off('assetEdit:delete', onDelete);
-        events.off('assetPlacement:dropOnCanvas', onDropOnCanvas);
         events.off('assetPlacement:place', onPlaceFromProtocol);
         events.off('editLeftModule:changed', onEditLeftModuleChanged);
-
-        // 释放 Picker 相关 GPU 资源
-        if (placementPicker) {
-            placementPicker.release();
-            placementPicker = null;
-        }
     };
 }
