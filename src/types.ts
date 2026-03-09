@@ -68,6 +68,8 @@ type Config = {
     allowEditMode?: boolean;
     /** 是否启用编辑历史与撤销/重做（默认 false）；为 true 时才会记录历史并显示撤销/重做按钮及快捷键 */
     trackEditHistory?: boolean;
+    /** 是否显示内部编辑 UI（默认 true）；为 false 时不挂载顶部菜单、左侧工具栏、右侧面板、底部编辑工具栏，由父级通过 postMessage 驱动 */
+    showEditUI?: boolean;
     webgpu: boolean;                            // use WebGPU device
     gpusort: boolean;                           // use GPU sorting for splats
 };

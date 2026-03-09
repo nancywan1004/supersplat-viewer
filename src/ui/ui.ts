@@ -507,10 +507,12 @@ const initUI = (global: Global) => {
     arChanged();
     vrChanged();
 
-    // 编辑模式：左上侧栏、右侧多面板栏、底部资产栏、右上角按钮
-    initEditLeftToolbarUI(global);
-    initEditRightToolbarUI(global);
-    initEditBottomToolbarUI(global);
+    // 编辑模式：左上侧栏、右侧多面板栏、底部资产栏、右上角按钮（showEditUI 为 false 时不挂载，仅保留逻辑）
+    if (config.showEditUI !== false) {
+        initEditLeftToolbarUI(global);
+        initEditRightToolbarUI(global);
+        initEditBottomToolbarUI(global);
+    }
     /** 进入编辑模式时的 settings 快照（字符串用于比较是否有改动） */
     let editModeEnteredSettingsSnapshot: string | null = null;
     /** 进入编辑模式时的 settings 完整数据，用于「不保存并退出」时回退场景 */
@@ -526,40 +528,42 @@ const initUI = (global: Global) => {
                 JSON.stringify(initialSnapshot)
             ) as ExperienceSettings;
         }
-        const leftMount = document.getElementById('editLeftSidebarMount');
-        if (leftMount) {
-            leftMount.classList.toggle('hidden', !inEdit);
-        }
-        if (dom.rightToolBar) {
-            dom.rightToolBar.classList.toggle('hidden', !inEdit);
-        }
-        const bottomMount = document.getElementById('editBottomToolbarMount');
-        if (bottomMount) {
-            const showBottomBar = inEdit && (state.editLeftModule === 'asset' || state.editLeftModule === 'annotation');
-            bottomMount.classList.toggle('hidden', !showBottomBar);
-        }
-        // 顶栏：编辑时显示「退出」+「保存」，非编辑时显示「编辑」
-        if (dom.editModeStrip) {
-            dom.editModeStrip.classList.toggle('edit-mode-active', inEdit);
-        }
-        if (dom.editModeBtn) {
-            dom.editModeBtn.classList.toggle('hidden', inEdit);
-        }
-        if (dom.exitEditBtn) {
-            dom.exitEditBtn.classList.toggle('hidden', !inEdit);
-        }
-        if (dom.saveSettingsBtn) {
-            dom.saveSettingsBtn.classList.toggle('hidden', !inEdit);
-        }
-        const showUndoRedo = inEdit && config.trackEditHistory === true;
-        if (dom.undoEditBtn) {
-            dom.undoEditBtn.classList.toggle('hidden', !showUndoRedo);
-        }
-        if (dom.redoEditBtn) {
-            dom.redoEditBtn.classList.toggle('hidden', !showUndoRedo);
+        if (config.showEditUI !== false) {
+            const leftMount = document.getElementById('editLeftSidebarMount');
+            if (leftMount) {
+                leftMount.classList.toggle('hidden', !inEdit);
+            }
+            if (dom.rightToolBar) {
+                dom.rightToolBar.classList.toggle('hidden', !inEdit);
+            }
+            const bottomMount = document.getElementById('editBottomToolbarMount');
+            if (bottomMount) {
+                const showBottomBar = inEdit && (state.editLeftModule === 'asset' || state.editLeftModule === 'annotation');
+                bottomMount.classList.toggle('hidden', !showBottomBar);
+            }
+            // 顶栏：编辑时显示「退出」+「保存」，非编辑时显示「编辑」
+            if (dom.editModeStrip) {
+                dom.editModeStrip.classList.toggle('edit-mode-active', inEdit);
+            }
+            if (dom.editModeBtn) {
+                dom.editModeBtn.classList.toggle('hidden', inEdit);
+            }
+            if (dom.exitEditBtn) {
+                dom.exitEditBtn.classList.toggle('hidden', !inEdit);
+            }
+            if (dom.saveSettingsBtn) {
+                dom.saveSettingsBtn.classList.toggle('hidden', !inEdit);
+            }
+            const showUndoRedo = inEdit && config.trackEditHistory === true;
+            if (dom.undoEditBtn) {
+                dom.undoEditBtn.classList.toggle('hidden', !showUndoRedo);
+            }
+            if (dom.redoEditBtn) {
+                dom.redoEditBtn.classList.toggle('hidden', !showUndoRedo);
+            }
         }
     };
-    if (config.allowEditMode === false) {
+    if (config.allowEditMode === false || config.showEditUI === false) {
         if (dom.editModeStrip) {
             dom.editModeStrip.classList.add('hidden');
         }
@@ -679,13 +683,20 @@ const initUI = (global: Global) => {
         });
         updateEditModeUI();
     }
+    // showEditUI 为 false 时也监听 editMode:changed，以便进入编辑模式时执行 initEditHistory 与快照逻辑（供 message-bridge 退出/保存用）
+    if (config.showEditUI === false) {
+        events.on('editMode:changed', updateEditModeUI);
+        updateEditModeUI();
+    }
 
-    // Reveal / VFX、Lighting、PostEffect、VideoExport、Annotation 由独立组件管理，挂载到 edit-right-toolbar 提供的容器
-    initRevealUI(global);
-    initVideoExportUI(global);
-    initLightingUI(global);
-    initPostEffectUI(global);
-    initAnnotationUI(global);
+    // Reveal / VFX、Lighting、PostEffect、VideoExport、Annotation 由独立组件管理，挂载到 edit-right-toolbar 提供的容器（showEditUI 为 false 时不挂载）
+    if (config.showEditUI !== false) {
+        initRevealUI(global);
+        initVideoExportUI(global);
+        initLightingUI(global);
+        initPostEffectUI(global);
+        initAnnotationUI(global);
+    }
 
     // Info panel
     const updateInfoTab = (tab: 'desktop' | 'touch') => {
