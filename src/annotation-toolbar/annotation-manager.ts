@@ -48,6 +48,9 @@ export class AnnotationManager {
     /** 当前正在创建的占位标注 */
     private currentPlaceholder: AnnotationEntity | null = null;
 
+    /** 由父级协议 ANNOTATION_PLACEMENT_START 传入的 id，在首次点击放置时使用 */
+    private pendingPlacementId: string | null = null;
+
     /**
      * 构造函数
      * 
@@ -74,13 +77,21 @@ export class AnnotationManager {
      * 启动标注创建流程，进入放置模式
      */
     createAnnotation(): void {
-        // 如果已经在放置模式，忽略
+        this.startPlacementWithId(this.generateAnnotationId());
+    }
+
+    /**
+     * 由父级协议 ANNOTATION_PLACEMENT_START 调用：使用指定 id 进入放置模式，场景点击时创建占位标注并上报 ANNOTATION_PLACEMENT_UPDATE。
+     */
+    startPlacementWithId(id: string): void {
         if (this.placementMode.isActive()) {
             return;
         }
-
-        // 激活放置模式
+        this.pendingPlacementId = id;
         this.placementMode.activate();
+        if (this.global.state) {
+            this.global.state.annotationPlacementActive = true;
+        }
 
         // 更新状态
         if (this.global.state) {
@@ -410,8 +421,8 @@ export class AnnotationManager {
      * @private
      */
     private onAnnotationPlace(position: Vec3): void {
-        // 生成唯一 ID
-        const id = this.generateAnnotationId();
+        const id = this.pendingPlacementId ?? this.generateAnnotationId();
+        this.pendingPlacementId = null;
 
         // 创建占位标注数据（占位文字确保 tooltip 窗口正常大小）
         const data: AnnotationData = {
@@ -442,6 +453,11 @@ export class AnnotationManager {
 
         // 放置后自动显示完整 tooltip 窗口（不切换收起状态）
         annotation.showTooltip(true);
+
+        // 供 message-bridge 上报 ANNOTATION_PLACEMENT_UPDATE
+        if (this.global.events) {
+            this.global.events.fire('annotationPlacement:update', { id: annotation.id, value: annotation.serialize() });
+        }
     }
 
     /**

@@ -73,6 +73,21 @@ function raycastSphere(center: Vec3, radius: number): number | null {
 
 const PICK_SPHERE_RADIUS = 3;
 
+/** 相机前方距离，用于 ASSET_PLACE 在相机前方放置 */
+const CAMERA_FRONT_DISTANCE = 5;
+
+/**
+ * 计算相机前方某距离处的世界坐标（用于协议 ASSET_PLACE「在相机前方 instantiate」）
+ */
+export function getPositionInFrontOfCamera(global: Global, distance: number = CAMERA_FRONT_DISTANCE): Vec3 {
+    const cam = global.camera;
+    const pos = cam.getPosition().clone();
+    const zAxis = cam.getWorldTransform().getZ().clone();
+    zAxis.mulScalar(-distance);
+    pos.add(zAxis);
+    return pos;
+}
+
 /** 从已放置实体中拾取射线击中的第一个（最近）实体 */
 function pickPlacedEntity(global: Global): ScenePlacedItem | null {
     const list = global.state.scenePlacedEntities ?? [];
@@ -128,10 +143,11 @@ async function instantiateImage(app: AppBase, item: AssetLibraryItem, position: 
 
 async function instantiateMesh(app: AppBase, item: AssetLibraryItem, position: Vec3): Promise<Entity> {
     const asset = item.asset;
-    if (!asset?.resource?.instantiateRenderEntity) {
+    const resource = asset?.resource as { instantiateRenderEntity?: (opts: object) => Entity } | undefined;
+    if (!resource?.instantiateRenderEntity) {
         throw new Error('mesh asset not ready');
     }
-    const entity = asset.resource.instantiateRenderEntity({
+    const entity = resource.instantiateRenderEntity({
         castShadows: true,
         receiveShadows: true
     });
@@ -414,9 +430,19 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
     };
 
     canvas.addEventListener('pointerdown', onPointerDown);
+    const onPlaceFromProtocol = async (payload: { value: AssetLibraryItem }) => {
+        const pos = getPositionInFrontOfCamera(global);
+        const entry = await placeAsset(global, payload.value, pos);
+        if (entry) {
+            state.selectedSceneEntityId = entry.id;
+            events.fire('sceneAsset:selected');
+        }
+    };
+
     events.on('assetEdit:copy', onCopy);
     events.on('assetEdit:delete', onDelete);
     events.on('assetPlacement:dropOnCanvas', onDropOnCanvas);
+    events.on('assetPlacement:place', onPlaceFromProtocol);
     events.on('editLeftModule:changed', onEditLeftModuleChanged);
 
     return () => {
@@ -424,6 +450,7 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
         events.off('assetEdit:copy', onCopy);
         events.off('assetEdit:delete', onDelete);
         events.off('assetPlacement:dropOnCanvas', onDropOnCanvas);
+        events.off('assetPlacement:place', onPlaceFromProtocol);
         events.off('editLeftModule:changed', onEditLeftModuleChanged);
 
         // 释放 Picker 相关 GPU 资源
