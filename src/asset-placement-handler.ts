@@ -105,7 +105,54 @@ async function instantiateGaussian(app: AppBase, item: AssetLibraryItem, positio
     return entity;
 }
 
-export async function placeAsset(global: Global, item: AssetLibraryItem, worldPos: Vec3): Promise<ScenePlacedItem | null> {
+export function computeEntityWorldCenter(entity: Entity): Vec3 | null {
+    const anyEntity = entity as any;
+    let worldCenter: Vec3 | null = null;
+
+    // 1) 普通 mesh / image：扫 entity 及子节点上的 render.meshInstances，合并 world-space AABB
+    const meshInstances: any[] = [];
+    const collectMeshInstances = (node: any) => {
+        const r = node.render;
+        if (r && r.meshInstances && r.meshInstances.length > 0) {
+            for (const mi of r.meshInstances) {
+                meshInstances.push(mi);
+            }
+        }
+        const children = node.children as any[] | undefined;
+        if (children && children.length) {
+            for (const child of children) collectMeshInstances(child);
+        }
+    };
+    collectMeshInstances(anyEntity);
+
+    if (meshInstances.length > 0) {
+        const min = new Vec3(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
+        const max = new Vec3(Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY);
+        for (const mi of meshInstances) {
+            const aabb = mi.aabb;
+            if (!aabb) continue;
+            const miMin = aabb.getMin ? aabb.getMin() : aabb.center.clone().sub(aabb.halfExtents);
+            const miMax = aabb.getMax ? aabb.getMax() : aabb.center.clone().add(aabb.halfExtents);
+            min.min(miMin);
+            max.max(miMax);
+        }
+        worldCenter = min.add(max).mulScalar(0.5);
+    }
+
+    // 2) 高斯：使用 gsplat 的 AABB
+    if (!worldCenter && anyEntity.gsplat) {
+        const gs = anyEntity.gsplat;
+        const aabb = gs.customAabb || gs.aabb;
+        if (aabb && aabb.center) {
+            const modelCenter = aabb.center.clone();
+            worldCenter = entity.getWorldTransform().transformPoint(modelCenter);
+        }
+    }
+
+    return worldCenter;
+}
+
+export async function placeAsset(global: Global, item: AssetLibraryItem, worldPos: Vec3, alignCenterToCameraHeight: boolean = false): Promise<ScenePlacedItem | null> {
     const { app, state, events } = global;
     if (!state.scenePlacedEntities) state.scenePlacedEntities = [];
 
@@ -135,6 +182,19 @@ export async function placeAsset(global: Global, item: AssetLibraryItem, worldPo
     }
 
     parent.addChild(entity);
+
+    if (alignCenterToCameraHeight) {
+        const center = computeEntityWorldCenter(entity);
+        if (center) {
+            const camY = global.camera.getPosition().y;
+            const dy = camY - center.y;
+            if (Math.abs(dy) > 1e-3) {
+                const pos = entity.getPosition();
+                pos.y += dy;
+                entity.setPosition(pos);
+            }
+        }
+    }
     const entry: ScenePlacedItem = {
         id: nextSceneEntityId(),
         name: item.name || entity.name || '资产',
@@ -231,7 +291,7 @@ export async function restoreSceneAssetsFromSettings(global: Global): Promise<vo
         }
 
         const pos = new Vec3(posArr[0] ?? 0, posArr[1] ?? 0, posArr[2] ?? 0);
-        const entry = await placeAsset(global, item, pos);
+        const entry = await placeAsset(global, item, pos, false);
         if (!entry) continue;
 
         if (sa.id) {
@@ -383,7 +443,7 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
     canvas.addEventListener('pointerdown', onPointerDown);
     const onPlaceFromProtocol = async (payload: { value: AssetLibraryItem }) => {
         const pos = getPositionInFrontOfCamera(global);
-        const entry = await placeAsset(global, payload.value, pos);
+        const entry = await placeAsset(global, payload.value, pos, true);
         if (entry) {
             state.selectedSceneEntityId = entry.id;
             events.fire('sceneAsset:selected');
