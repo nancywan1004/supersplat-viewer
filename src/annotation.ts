@@ -53,9 +53,14 @@ const vec = new Vec3();
 export class Annotation extends Script {
     static scriptName = 'annotation';
 
-    static hotspotSize = 25;
+    /** 热点圆直径（屏幕像素） */
+    static hotspotSize = 24;
 
-    static hotspotColor = new Color(0.8, 0.8, 0.8);
+    /** 使用本地 SVG 时图标的 URL，设为空字符串则用 3D 纹理 */
+    static hotspotSvgUrl = '/assets/icons/hotspot.svg';
+
+    /** 热点默认颜色（仅 3D 纹理模式有效） */
+    static hotspotColor = new Color(1, 1, 1);
 
     static hoverColor = new Color(1.0, 0.4, 0.0);
 
@@ -175,6 +180,32 @@ export class Annotation extends Script {
                 cursor: pointer;
                 transform: translate(-50%, -50%);
             }
+            .pc-annotation-hotspot--svg {
+                opacity: 1;
+                width: 24px;
+                height: 24px;
+            }
+            .pc-annotation-hotspot--svg .pc-annotation-hotspot__img {
+                width: 100%;
+                height: 100%;
+                display: block;
+                pointer-events: none;
+            }
+
+            /* 收起时标题：深灰圆角 pill */
+            .pc-annotation-collapsed-title {
+                background: #2d2d2d;
+                color: #fff;
+                padding: 5px 12px;
+                border-radius: 999px;
+                font-size: 12px;
+                font-weight: 400;
+                font-family: sans-serif;
+                white-space: nowrap;
+                box-sizing: border-box;
+                position: relative;
+                text-shadow: none;
+            }
         `;
 
         const style = document.createElement('style');
@@ -258,43 +289,41 @@ export class Annotation extends Script {
      * @returns {Texture} The hotspot texture
      * @private
      */
-    static _createHotspotTexture(app: AppBase, label: string, size = 64, borderWidth = 6) {
-        // Create canvas for hotspot texture
+    static _createHotspotTexture(app: AppBase, label: string, size = 64, borderWidth = 4) {
         const canvas = document.createElement('canvas');
         canvas.width = size;
         canvas.height = size;
         const ctx = canvas.getContext('2d');
 
-        // First clear with stroke color at zero alpha
         ctx.fillStyle = 'white';
         ctx.globalAlpha = 0;
         ctx.fillRect(0, 0, size, size);
         ctx.globalAlpha = 1.0;
 
-        // Draw dark circle with light border
         const centerX = size / 2;
         const centerY = size / 2;
-        const radius = (size / 2) - 4; // Leave space for border
+        const radius = (size / 2) - borderWidth;
 
-        // Draw main circle
+        // 蓝心：实心圆
         ctx.beginPath();
         ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-        ctx.fillStyle = 'black';
+        ctx.fillStyle = '#2196F3';
         ctx.fill();
 
-        // Draw border
+        // 白环：外描边
         ctx.beginPath();
         ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
         ctx.lineWidth = borderWidth;
         ctx.strokeStyle = 'white';
         ctx.stroke();
 
-        // Draw text
-        ctx.font = 'bold 32px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = 'white';
-        ctx.fillText(label, Math.floor(canvas.width / 2), Math.floor(canvas.height / 2) + 1);
+        if (label) {
+            ctx.font = 'bold 20px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = 'white';
+            ctx.fillText(label, centerX, centerY + 1);
+        }
 
         // get pixel data
         const imageData = ctx.getImageData(0, 0, size, size);
@@ -411,33 +440,29 @@ export class Annotation extends Script {
         this.entity.addChild(base);
         this.entity.addChild(overlay);
 
+        // 使用本地 SVG 时隐藏 3D 热点，改为在 DOM 中显示 SVG
+        if (Annotation.hotspotSvgUrl) {
+            base.enabled = false;
+            overlay.enabled = false;
+        }
+
         // Create hotspot dom
         this.hotspotDom = document.createElement('div');
         this.hotspotDom.className = 'pc-annotation-hotspot';
 
-        // Add click handlers
+        if (Annotation.hotspotSvgUrl) {
+            const img = document.createElement('img');
+            img.src = Annotation.hotspotSvgUrl;
+            img.alt = '';
+            img.className = 'pc-annotation-hotspot__img';
+            this.hotspotDom.appendChild(img);
+            this.hotspotDom.classList.add('pc-annotation-hotspot--svg');
+        }
+
         this.hotspotDom.addEventListener('click', (e) => {
             e.stopPropagation();
             this.showTooltip();
         });
-
-        const leave = () => {
-            if (Annotation.hoverAnnotation === this) {
-                Annotation.hoverAnnotation = null;
-                this.setHover(false);
-            }
-        };
-
-        const enter = () => {
-            if (Annotation.hoverAnnotation !== null) {
-                Annotation.hoverAnnotation.setHover(false);
-            }
-            Annotation.hoverAnnotation = this;
-            this.setHover(true);
-        };
-
-        this.hotspotDom.addEventListener('pointerenter', enter);
-        this.hotspotDom.addEventListener('pointerleave', leave);
 
         if ((this as any).closeOnDocumentClick !== false) {
             document.addEventListener('click', () => {
@@ -506,10 +531,12 @@ export class Annotation extends Script {
      * @private
      */
     setHover(hover: boolean) {
-        this.materials.forEach((material) => {
-            material.emissive.copy(hover ? Annotation.hoverColor : Annotation.hotspotColor);
-            material.update();
-        });
+        if (!Annotation.hotspotSvgUrl && this.materials.length > 0) {
+            this.materials.forEach((material) => {
+                material.emissive.copy(hover ? Annotation.hoverColor : Annotation.hotspotColor);
+                material.update();
+            });
+        }
         this.fire('hover', hover);
     }
 

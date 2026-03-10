@@ -46,10 +46,10 @@ export class AnnotationEntity extends Annotation {
         this.label = '';
         super.initialize();
 
-        // 收起时显示的标题：挂到 parentDom（hotspot 有 opacity:0 会隐藏子元素）
+        // 收起时显示的标题：pill 样式由 .pc-annotation-collapsed-title 控制
         this.collapsedTitleSpan = document.createElement('span');
         this.collapsedTitleSpan.className = 'pc-annotation-collapsed-title';
-        this.collapsedTitleSpan.style.cssText = 'position:absolute;white-space:nowrap;font-size:12px;color:white;text-shadow:0 1px 2px rgba(0,0,0,0.8);pointer-events:none;display:none;transform:translate(-50%,-100%);';
+        this.collapsedTitleSpan.style.cssText = 'position:absolute;pointer-events:none;display:none;transform:translate(-50%,-100%);';
         Annotation.parentDom.appendChild(this.collapsedTitleSpan);
 
         this.on('destroy', () => {
@@ -90,10 +90,10 @@ export class AnnotationEntity extends Annotation {
     _updatePositions(screenPos: Vec3): void {
         super._updatePositions(screenPos);
         if (!this.collapsedTitleSpan) return;
-        // tooltip 收起时，标题显示在热点上方（无论 showTitleWhenCollapsed 是否勾选）
-        const show = !this.isTooltipVisible() && !!this.title;
+        const show = !this.isTooltipVisible() && !!this.title && !!(this.data?.showTitleWhenCollapsed);
         if (show) {
             const offsetY = (Annotation.hotspotSize + 5) / 2 + 6;
+            this.collapsedTitleSpan.textContent = this.title;
             this.collapsedTitleSpan.style.left = `${screenPos.x}px`;
             this.collapsedTitleSpan.style.top = `${screenPos.y - offsetY}px`;
             this.collapsedTitleSpan.style.display = 'block';
@@ -105,9 +105,7 @@ export class AnnotationEntity extends Annotation {
     /** 重写：标注在相机背后时隐藏收起标题 */
     _hideElements(): void {
         super._hideElements();
-        if (this.collapsedTitleSpan) {
-            this.collapsedTitleSpan.style.display = 'none';
-        }
+        if (this.collapsedTitleSpan) this.collapsedTitleSpan.style.display = 'none';
     }
 
     /**
