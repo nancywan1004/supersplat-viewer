@@ -1,243 +1,53 @@
-import {
-    type AppBase,
-    type Entity,
-    type MeshInstance,
-    ADDRESS_CLAMP_TO_EDGE,
-    BLENDEQUATION_ADD,
-    BLENDMODE_ZERO,
-    BLENDMODE_ONE,
-    BLENDMODE_ONE_MINUS_SRC_ALPHA,
-    FILTER_NEAREST,
-    PIXELFORMAT_RGBA16F,
-    Color,
-    Ray,
-    RenderPassPicker,
-    RenderTarget,
-    ShaderChunks,
-    Texture,
-    Vec3,
-    BlendState,
-    PROJECTION_ORTHOGRAPHIC
-} from 'playcanvas';
+import { type AppBase, type Entity, Picker as PcPicker, Vec3 } from 'playcanvas';
 
-// override global pick: encodePickOutput（gsplat/mesh 共用）+ getPickOutput 分支（mesh 用 meshInstanceId，gsplat 用深度）
-const pickDepthGlsl = /* glsl */ `
-vec4 encodePickOutput(uint id) {
-    const vec4 inv = vec4(1.0 / 255.0);
-    const uvec4 shifts = uvec4(16, 8, 0, 24);
-    uvec4 col = (uvec4(id) >> shifts) & uvec4(0xff);
-    return vec4(col) * inv;
-}
-#ifndef PICK_CUSTOM_ID
-uniform uint meshInstanceId;
-vec4 getPickOutput() {
-    return encodePickOutput(meshInstanceId);
-}
-#else
-uniform vec4 camera_params;     // 1/far, far, near, isOrtho
-vec4 getPickOutput() {
-    float linearDepth = 1.0 / gl_FragCoord.w;
-    float normalizedDepth = (linearDepth - camera_params.z) / (camera_params.y - camera_params.z);
-    return vec4(gaussianColor.a * normalizedDepth, 0.0, 0.0, gaussianColor.a);
-}
-#endif
-`;
-
-const pickDepthWgsl = /* wgsl */ `
-    fn encodePickOutput(id: u32) -> vec4f {
-        let inv: vec4f = vec4f(1.0 / 255.0);
-        let shifts: vec4u = vec4u(16u, 8u, 0u, 24u);
-        let col: vec4u = (vec4u(id) >> shifts) & vec4u(0xffu);
-        return vec4f(col) * inv;
-    }
-    #ifndef PICK_CUSTOM_ID
-    uniform meshInstanceId: u32;
-    fn getPickOutput() -> vec4f {
-        return encodePickOutput(uniform.meshInstanceId);
-    }
-    #else
-    uniform camera_params: vec4f;
-    fn getPickOutput() -> vec4f {
-        let linearDepth = 1.0 / pcPosition.w;
-        let normalizedDepth = (linearDepth - uniform.camera_params.z) / (uniform.camera_params.y - uniform.camera_params.z);
-        return vec4f(gaussianColor.a * normalizedDepth, 0.0, 0.0, gaussianColor.a);
-    }
-    #endif
-`;
-
-const vec = new Vec3();
-const vecb = new Vec3();
-const ray = new Ray();
-const clearColor = new Color(0, 0, 0, 1);
-
-// Shared buffer for half-to-float conversion
-const float32 = new Float32Array(1);
-const uint32 = new Uint32Array(float32.buffer);
-
-// Convert 16-bit half-float to 32-bit float using bit manipulation
-const half2Float = (h: number): number => {
-    const sign = (h & 0x8000) << 16;           // Move sign to bit 31
-    const exponent = (h & 0x7C00) >> 10;       // Extract 5-bit exponent
-    const mantissa = h & 0x03FF;               // Extract 10-bit mantissa
-
-    if (exponent === 0) {
-        if (mantissa === 0) {
-            // Zero
-            uint32[0] = sign;
-        } else {
-            // Denormalized: convert to normalized float32
-            let e = -1;
-            let m = mantissa;
-            do {
-                e++;
-                m <<= 1;
-            } while ((m & 0x0400) === 0);
-            uint32[0] = sign | ((127 - 15 - e) << 23) | ((m & 0x03FF) << 13);
-        }
-    } else if (exponent === 31) {
-        // Infinity or NaN
-        uint32[0] = sign | 0x7F800000 | (mantissa << 13);
-    } else {
-        // Normalized: adjust exponent bias from 15 to 127
-        uint32[0] = sign | ((exponent + 127 - 15) << 23) | (mantissa << 13);
-    }
-
-    return float32[0];
-};
-
-// get the normalized world-space ray starting at the camera position
-// facing the supplied screen position
-// works for both perspective and orthographic cameras
-const getRay = (camera: Entity, screenX: number, screenY: number, ray: Ray) => {
-    const cameraPos = camera.getPosition();
-
-    // create the pick ray in world space
-    if (camera.camera.projection === PROJECTION_ORTHOGRAPHIC) {
-        camera.camera.screenToWorld(screenX, screenY, -1.0, vec);
-        camera.camera.screenToWorld(screenX, screenY, 1.0, vecb);
-        vecb.sub(vec).normalize();
-        ray.set(vec, vecb);
-    } else {
-        camera.camera.screenToWorld(screenX, screenY, 1.0, vec);
-        vec.sub(cameraPos).normalize();
-        ray.set(cameraPos, vec);
-    }
-};
-
+/**
+ * 标注放置 / 深度拾取专用 Picker。
+ * 使用 PlayCanvas 内置 Picker(depth=true)，走 DEPTH_PICK pass：colorBuffer 出 ID，depthBuffer 出深度，
+ * 通过 getWorldPointAsync 读深度并反投影到世界坐标。不覆盖全局 pickPS，与资产选中用的 pc.Picker(depth=false) 无冲突。
+ */
 class Picker {
-    pick: (x: number, y: number) => Promise<Vec3 | null>;
-
-    release: () => void;
+    private app: AppBase;
+    private camera: Entity;
+    private pcPicker: InstanceType<typeof PcPicker> | null = null;
 
     constructor(app: AppBase, camera: Entity) {
-        const { graphicsDevice } = app;
+        this.app = app;
+        this.camera = camera;
+    }
 
-        // register pick depth shader chunks
-        ShaderChunks.get(graphicsDevice, 'glsl').set('pickPS', pickDepthGlsl);
-        ShaderChunks.get(graphicsDevice, 'wgsl').set('pickPS', pickDepthWgsl);
+    /**
+     * 从归一化坐标 [0,1] 拾取世界坐标。
+     * @param x 归一化 X（0=左，1=右）
+     * @param y 归一化 Y（0=上，1=下）
+     */
+    async pick(x: number, y: number): Promise<Vec3 | null> {
+        const canvas = this.app.graphicsDevice?.canvas as HTMLCanvasElement | undefined;
+        if (!canvas) return null;
 
-        let colorBuffer: Texture;
-        let renderTarget: RenderTarget;
-        let renderPass: RenderPassPicker;
+        const width = canvas.clientWidth || this.app.graphicsDevice.width;
+        const height = canvas.clientHeight || this.app.graphicsDevice.height;
+        if (width <= 0 || height <= 0) return null;
 
-        const emptyMap = new Map<number, MeshInstance>();
+        if (!this.pcPicker) {
+            this.pcPicker = new PcPicker(this.app, width, height, true);
+        }
+        this.pcPicker.resize(width, height);
 
-        const init = (width: number, height: number) => {
-            colorBuffer = new Texture(graphicsDevice, {
-                format: PIXELFORMAT_RGBA16F,
-                width: width,
-                height: height,
-                mipmaps: false,
-                minFilter: FILTER_NEAREST,
-                magFilter: FILTER_NEAREST,
-                addressU: ADDRESS_CLAMP_TO_EDGE,
-                addressV: ADDRESS_CLAMP_TO_EDGE,
-                name: 'picker'
-            });
+        const worldLayer = this.app.scene.layers.getLayerByName('World');
+        this.pcPicker.prepare(this.camera.camera, this.app.scene, worldLayer ? [worldLayer] : undefined);
 
-            renderTarget = new RenderTarget({
-                colorBuffer,
-                depth: false  // not needed - gaussians are rendered back to front
-            });
+        const px = Math.max(0, Math.min(width - 1, Math.floor(x * width)));
+        const py = Math.max(0, Math.min(height - 1, Math.floor(y * height)));
 
-            renderPass = new RenderPassPicker(graphicsDevice, app.renderer);
-            // RGB: additive depth accumulation (ONE, ONE_MINUS_SRC_ALPHA)
-            // Alpha: multiplicative transmittance (ZERO, ONE_MINUS_SRC_ALPHA) -> T = T * (1 - alpha)
-            renderPass.blendState = new BlendState(
-                true,
-                BLENDEQUATION_ADD, BLENDMODE_ONE, BLENDMODE_ONE_MINUS_SRC_ALPHA,           // RGB blend
-                BLENDEQUATION_ADD, BLENDMODE_ZERO, BLENDMODE_ONE_MINUS_SRC_ALPHA           // Alpha blend (transmittance)
-            );
-        };
+        const worldPoint = await this.pcPicker.getWorldPointAsync(px, py);
+        return worldPoint;
+    }
 
-        this.pick = async (x: number, y: number) => {
-            const width = Math.floor(graphicsDevice.width);
-            const height = Math.floor(graphicsDevice.height);
-
-            // convert from [0,1] to pixel coordinates
-            const screenX = Math.floor(x * graphicsDevice.width);
-            const screenY = Math.floor(y * graphicsDevice.height);
-
-            // flip Y for texture read on WebGL (texture origin is bottom-left)
-            const texX = screenX;
-            const texY = graphicsDevice.isWebGL2 ? height - screenY - 1 : screenY;
-
-            // construct picker on demand
-            if (!renderPass) {
-                init(width, height);
-            } else {
-                renderTarget.resize(width, height);
-            }
-
-            // render scene
-            renderPass.init(renderTarget);
-            renderPass.setClearColor(clearColor);
-            renderPass.update(camera.camera, app.scene, [app.scene.layers.getLayerByName('World')], emptyMap, false);
-            renderPass.render();
-
-            // read pixel using texture coordinates
-            const pixels = await colorBuffer.read(texX, texY, 1, 1, { renderTarget, immediate: true });
-
-            // convert half-float values to floats
-            // R channel: accumulated depth * alpha
-            // A channel: transmittance (1 - alpha), values near 0 have better half-float precision
-            const r = half2Float(pixels[0]);
-            const transmittance = half2Float(pixels[3]);
-            const alpha = 1 - transmittance;
-
-            // check alpha first (transmittance close to 1 means nothing visible)
-            if (alpha < 1e-6) {
-                return null;
-            }
-
-            // get camera near/far for denormalization
-            const near = camera.camera.nearClip;
-            const far = camera.camera.farClip;
-
-            // divide by alpha to get normalized depth, then denormalize to linear depth
-            const normalizedDepth = r / alpha;
-            const depth = normalizedDepth * (far - near) + near;
-
-            // get the ray from camera through the screen point (using pixel coords)
-            getRay(camera,
-                Math.floor(x * graphicsDevice.canvas.offsetWidth),
-                Math.floor(y * graphicsDevice.canvas.offsetHeight),
-                ray
-            );
-
-            // convert linear depth (view-space z distance) to ray distance
-            const forward = camera.forward;
-            const t = depth / ray.direction.dot(forward);
-
-            // world position = ray origin + ray direction * t
-            return ray.origin.clone().add(ray.direction.clone().mulScalar(t));
-        };
-
-        this.release = () => {
-            renderPass?.destroy();
-            renderTarget?.destroy();
-            colorBuffer?.destroy();
-        };
+    release(): void {
+        if (this.pcPicker) {
+            this.pcPicker.destroy();
+            this.pcPicker = null;
+        }
     }
 }
 

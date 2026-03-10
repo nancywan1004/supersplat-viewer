@@ -350,8 +350,7 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
         if ((app.scene as any).gsplat) {
             (app.scene as any).gsplat.enableIds = true;
         }
-        // depth=false：本仓库 picker.ts 覆盖了全局 pickPS 且只实现 getPickOutput()，未实现 getPickDepth()，
-        // Picker(depth=true) 会触发 DEPTH_PICK_PASS 导致 shader 报错；实体选中只需 id 缓冲。
+        // depth=false：实体选中只需 ID 缓冲；深度拾取由标注 Picker 用 pc.Picker(..., true) + getWorldPointAsync 单独处理。
         if (!sceneAssetPicker) {
             sceneAssetPicker = new (pc as any).Picker(app, pickW, pickH, false);
         }
