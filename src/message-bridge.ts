@@ -36,6 +36,7 @@ type InboundPayload =
     | { type: 'EDIT_REDO' }
     | { type: 'SETTINGS_SAVE' }
     | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule }
+    | { type: 'ASSET_SHOW_HIDE_SET'; value?: boolean }
     | { type: 'ASSET_PLACE'; value?: AssetLibraryItem }
     | { type: 'ASSET_SELECT'; id?: string | null }
     | { type: 'ASSET_COPY'; id?: string }
@@ -45,6 +46,8 @@ type InboundPayload =
     | { type: 'ANNOTATION_PLACEMENT_CANCEL' }
     | { type: 'ANNOTATION_CONFIRM'; id?: string; value?: Partial<AnnotationData> }
     | { type: 'ANNOTATION_DELETE'; id?: string }
+    | { type: 'ANNOTATION_EDIT'; id?: string }
+    | { type: 'ANNOTATION_TRANSFORM_MODE'; value?: 'move' | null }
     | { type: 'LIGHT_GLOBAL_SET'; value?: number }
     | { type: 'LIGHT_ADD'; id?: string }
     | { type: 'LIGHT_SELECT'; id?: string | null }
@@ -66,11 +69,13 @@ type InboundPayload =
     | { type: 'SHADOW_SET'; value?: boolean }
     | { type: 'SHADOW_INTENSITY_UPDATE'; value?: number }
     | { type: 'VFX_TYPE_SET'; value?: string }
+    | { type: 'VFX_EXIT' }
     | { type: 'VFX_RESTART'; restartAnim?: boolean }
     | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean };
 
 const postToParent = (type: string, payload?: object) => {
     window.parent.postMessage(payload !== undefined ? { type, payload } : { type }, '*');
+    console.log('[MessageBridge] postToParent', type, payload);
 };
 
 function applyLightAndPostEffectFromProtocol(global: Global, type: string, p: InboundPayload): void {
@@ -302,7 +307,25 @@ const initPostMessageBridge = (global: Global) => {
         case 'ASSET_PLACE':
             if (p.value && typeof p.value === 'object') {
                 const pos = getPositionInFrontOfCamera(global);
-                events.fire('assetPlacement:place', { value: p.value as AssetLibraryItem });
+                let value: AssetLibraryItem | null = null;
+                const incoming = p.value as { id?: string } & Partial<AssetLibraryItem>;
+                if (incoming.id && Array.isArray(state.uploadedAssets)) {
+                    value = (state.uploadedAssets as AssetLibraryItem[]).find((it) => it.id === incoming.id) ?? null;
+                }
+                // 回退：若未在 uploadedAssets 中找到，则直接使用 payload（兼容外部宿主仅传 url/name 等字段的情况）
+                const finalValue = (value ?? (p.value as AssetLibraryItem));
+                events.fire('assetPlacement:place', { value: finalValue });
+            }
+            break;
+        case 'ASSET_SHOW_HIDE_SET':
+            if (typeof p.value === 'boolean' && Array.isArray(state.scenePlacedEntities)) {
+                const visible = p.value;
+                state.scenePlacedEntities.forEach((item: any) => {
+                    if (item && item.entity) {
+                        item.visible = visible;
+                        item.entity.enabled = visible;
+                    }
+                });
             }
             break;
         case 'ASSET_SELECT':
@@ -372,6 +395,31 @@ const initPostMessageBridge = (global: Global) => {
                 if (am?.deleteAnnotation) am.deleteAnnotation(p.id);
             }
             break;
+        case 'ANNOTATION_EDIT': {
+            const am = g.annotationManager;
+            if (!am) break;
+            const id = p.id as string | undefined;
+            if (!id) break;
+            if (am.selectAnnotation) {
+                am.selectAnnotation(id, { showGizmo: false });
+            }
+            // 触发内部 UI 显示编辑表单（annotation-ui 中监听 annotationEdit:show）
+            events.fire('annotationEdit:show');
+            break;
+        }
+        case 'ANNOTATION_TRANSFORM_MODE': {
+            const am = g.annotationManager;
+            if (!am) break;
+            const mode = p.value === 'move' ? 'move' : null;
+            if (mode === 'move') {
+                if (am.enableGizmoForSelected) {
+                    am.enableGizmoForSelected();
+                }
+            } else if (am.disableGizmoForSelected) {
+                am.disableGizmoForSelected();
+            }
+            break;
+        }
         case 'LIGHT_GLOBAL_SET':
         case 'BLOOM_SET':
         case 'BLOOM_INTENSITY_UPDATE':
@@ -420,6 +468,12 @@ const initPostMessageBridge = (global: Global) => {
             if (typeof p.value === 'string') {
                 events.fire('revealConfigChanged', { type: p.value });
             }
+            break;
+        case 'VFX_EXIT':
+            // 特效关闭：将类型切回 none，并标记为非激活
+            (state as any).vfxActive = false;
+            (state as any).vfxType = 'none';
+            events.fire('revealConfigChanged', { type: 'none' });
             break;
         case 'VFX_RESTART':
             events.fire('revealRestart', (p as any).restartAnim !== false);
@@ -482,10 +536,6 @@ const initPostMessageBridge = (global: Global) => {
     events.on('sceneAsset:selected', () => {
         const id = state.selectedSceneEntityId ?? null;
         postToParent('SCENE_ASSET_SELECTED', { id });
-    });
-
-    events.on('annotationPlacement:update', (data: { id: string; value: AnnotationData }) => {
-        postToParent('ANNOTATION_PLACEMENT_UPDATE', { id: data.id, value: data.value });
     });
 
     events.on('annotation:selected', (data: { id: string }) => {

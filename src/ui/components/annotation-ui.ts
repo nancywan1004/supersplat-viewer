@@ -10,6 +10,7 @@ import { AnnotationManager } from '../../annotation-toolbar/annotation-manager';
 import { AnnotationToolbarUI } from './annotation-toolbar-ui';
 import type { Global } from '../../types';
 import type { AnnotationData } from '../../annotation-toolbar/types';
+import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
 /**
  * 初始化场景标注面板 UI
@@ -18,6 +19,7 @@ import type { AnnotationData } from '../../annotation-toolbar/types';
  */
 export function initAnnotationUI(global: Global): () => void {
     const { config, events, state } = global;
+    const editUiTransport = getEditUiTransport(global);
 
     const container = document.getElementById('annotationPanelContainer');
     if (!container || config.allowEditMode === false) return () => {};
@@ -65,7 +67,11 @@ export function initAnnotationUI(global: Global): () => void {
             pendingCreateId = annotationManager.generateNewAnnotationId();
             hasPlacedForCreate = false;
             annotationManager.setPendingFormDataForPlacement(pendingCreateId, formData);
-            annotationManager.startPlacementWithId(pendingCreateId);
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'ANNOTATION_PLACEMENT_START', id: pendingCreateId });
+            } else {
+                annotationManager.startPlacementWithId(pendingCreateId);
+            }
             // 提示在场景中点击放置位置
             annotationUI.setPlacementHintVisible(true);
             return;
@@ -73,7 +79,11 @@ export function initAnnotationUI(global: Global): () => void {
 
         // 阶段 2：已完成放置（收到 ANNOTATION_PLACEMENT_UPDATE 等价事件），点击「确定并放置」-> ANNOTATION_CONFIRM
         if (hasPlacedForCreate) {
-            annotationManager.confirmAnnotation(formData);
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'ANNOTATION_CONFIRM', id: pendingCreateId, value: formData });
+            } else {
+                annotationManager.confirmAnnotation(formData);
+            }
             pendingCreateId = null;
             hasPlacedForCreate = false;
             annotationUI.setPlacementHintVisible(false);
@@ -83,7 +93,11 @@ export function initAnnotationUI(global: Global): () => void {
     });
     annotationUI.onCancelButtonClick(() => {
         if (annotationManager.getPlaceholderAnnotation()) {
-            annotationManager.cancelAnnotation();
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'ANNOTATION_PLACEMENT_CANCEL' });
+            } else {
+                annotationManager.cancelAnnotation();
+            }
             pendingCreateId = null;
             hasPlacedForCreate = false;
             annotationUI.setPlacementHintVisible(false);
@@ -114,7 +128,11 @@ export function initAnnotationUI(global: Global): () => void {
     annotationUI.onAnnotationEditOrUpdate((id, isUpdate) => {
         if (isUpdate) {
             const data = annotationUI.getFormData();
-            annotationManager.updateAnnotation(id, data);
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'ANNOTATION_CONFIRM', id, value: data });
+            } else {
+                annotationManager.updateAnnotation(id, data);
+            }
             annotationUI.hideEditForm();
             annotationManager.deselectAnnotation();
             originalAnnotationDataForEdit = null;
@@ -129,7 +147,13 @@ export function initAnnotationUI(global: Global): () => void {
         }
         updateList();
     });
-    annotationUI.onDeleteButtonClick((id) => annotationManager.deleteAnnotation(id));
+    annotationUI.onDeleteButtonClick((id) => {
+        if (editUiTransport === 'message-bridge') {
+            sendEditProtocolMessage({ type: 'ANNOTATION_DELETE', id });
+        } else {
+            annotationManager.deleteAnnotation(id);
+        }
+    });
     annotationUI.onInputChange((data) => {
         const placeholder = annotationManager.getPlaceholderAnnotation();
         if (placeholder) {
@@ -193,20 +217,13 @@ export function initAnnotationUI(global: Global): () => void {
         if (placeholder && placeholder.id === data.id) {
             return;
         }
-        annotationManager.selectAnnotation(data.id, { showGizmo: false });
+        annotationManager.selectAnnotation(data.id);
     };
     events.on('annotation:selectFromHotspot', onAnnotationSelectFromHotspot);
     events.on('annotation:deselected', onAnnotationDeselected);
     events.on('annotation:place', onAnnotationPlaceWithHint);
     events.on('annotationPlacement:started', onPlacementStarted);
     events.on('annotationPlacement:ended', onPlacementEnded);
-    // 放置完成（等价 ANNOTATION_PLACEMENT_UPDATE）：用于调试与状态确认
-    events.on('annotationPlacement:update', (data: { id: string }) => {
-        console.log('[Annotation][UI] annotationPlacement:update', data, {
-            pendingCreateId,
-            hasPlacedForCreate
-        });
-    });
 
     /** 底部栏「编辑」按钮：显示右侧编辑表单 */
     const onAnnotationEditShow = () => {
@@ -237,7 +254,7 @@ export function initAnnotationUI(global: Global): () => void {
         if (newModule === 'annotation') {
             const all = annotationManager.getAllAnnotations();
             if (all.length > 0 && !annotationManager.getSelectedAnnotation()) {
-                annotationManager.selectAnnotation(all[0].id, { showGizmo: false });
+                annotationManager.selectAnnotation(all[0].id);
             }
             updateList();
             return;

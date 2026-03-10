@@ -70,6 +70,13 @@ type Config = {
     trackEditHistory?: boolean;
     /** 是否显示内部编辑 UI（默认 true）；为 false 时不挂载顶部菜单、左侧工具栏、右侧面板、底部编辑工具栏，由父级通过 postMessage 驱动 */
     showEditUI?: boolean;
+    /**
+     * 内部编辑 UI 的驱动方式（默认 internal）。
+     * - internal：UI 直接走内部 state/events（现状）
+     * - message-bridge：UI 通过 window.postMessage 发送协议命令，由 src/message-bridge.ts 统一映射到内部逻辑
+     *   主要用于 E2E 抓包对齐 docs 中的 postMessage 事件表（即使 showEditUI === true 也能强制走协议）
+     */
+    editUiTransport?: 'internal' | 'message-bridge';
     webgpu: boolean;                            // use WebGPU device
     gpusort: boolean;                           // use GPU sorting for splats
 };

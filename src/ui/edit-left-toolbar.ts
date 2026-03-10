@@ -1,5 +1,6 @@
 import type { Global } from '../types';
 import type { EditLeftModule } from '../types';
+import { getEditUiTransport, sendEditProtocolMessage } from './edit-ui-transport';
 
 const MODULES: { id: EditLeftModule; label: string }[] = [
     { id: 'gs', label: 'GS模型编辑' },
@@ -35,6 +36,7 @@ ${MODULES.map(
  */
 export function initEditLeftToolbarUI(global: Global): () => void {
     const { state, events } = global;
+    const editUiTransport = getEditUiTransport(global);
 
     let container = document.getElementById('editLeftSidebarMount');
     let root: HTMLElement | null = null;
@@ -78,8 +80,12 @@ export function initEditLeftToolbarUI(global: Global): () => void {
     const current = (): EditLeftModule => state.editLeftModule ?? 'asset';
 
     const setActive = (id: EditLeftModule) => {
-        state.editLeftModule = id;
-        events.fire('editLeftModule:changed', id);
+        if (editUiTransport === 'message-bridge') {
+            sendEditProtocolMessage({ type: 'EDIT_MODULE_SET', value: id });
+        } else {
+            state.editLeftModule = id;
+            events.fire('editLeftModule:changed', id);
+        }
         items.forEach((el) => {
             const active = el.getAttribute('data-module') === id;
             el.classList.toggle('active', active);

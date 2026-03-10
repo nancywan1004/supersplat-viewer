@@ -55,7 +55,6 @@ export class PlacementMode {
             return;
         }
 
-        console.log('[Annotation][PlacementMode] activate');
         this.state = PlacementState.Following;
         this.setPlacementCursor(true);
         this.startFollowing();
@@ -110,32 +109,9 @@ export class PlacementMode {
 
         const canvas = this.global.app.graphicsDevice.canvas as HTMLCanvasElement;
         this.clickHandler = (event: MouseEvent) => {
-            console.log('[Annotation][PlacementMode] canvas click', {
-                clientX: event.clientX,
-                clientY: event.clientY
-            });
             this.onSceneClick(event);
         };
         canvas.addEventListener('click', this.clickHandler);
-    }
-
-    /**
-     * 放置标注
-     *
-     * 占位标注由 AnnotationManager 在 annotation:place 事件中创建，
-     * 此处仅切换状态并移除点击监听
-     */
-    placeAnnotation(_position: Vec3): void {
-        this.state = PlacementState.Placed;
-
-        if (this.clickHandler) {
-            const canvas = this.global.app.graphicsDevice.canvas as HTMLCanvasElement;
-            canvas.removeEventListener('click', this.clickHandler);
-            this.clickHandler = null;
-        }
-
-        this.setPlacementCursor(false);
-        this.enableInteractions();
     }
 
     /**
@@ -240,33 +216,20 @@ export class PlacementMode {
         const normalizedX = canvasX / canvas.clientWidth;
         const normalizedY = canvasY / canvas.clientHeight;
 
-        console.log('[Annotation][PlacementMode] onSceneClick normalized', {
-            canvasX,
-            canvasY,
-            normalizedX,
-            normalizedY
-        });
-
         // 使用 Picker 获取 3D 位置
         try {
             const position = await this.picker.pick(normalizedX, normalizedY);
             if (position) {
-                console.log('[Annotation][PlacementMode] picker hit position', position);
-                // 触发标注放置事件（由 AnnotationManager 监听并创建标注）
+                // 触发标注放置事件（由 AnnotationManager 监听并创建或更新占位标注）
                 if (this.global.events) {
                     this.global.events.fire('annotation:place', position);
                 }
-
-                // 调用 placeAnnotation（状态切换到 Placed）
-                this.placeAnnotation(position);
             } else {
-                console.log('[Annotation][PlacementMode] picker returned null (no hit), fallback to camera-front');
                 // 兜底策略：即便 Picker 没击中几何，也在相机前方放置一个标注，保证交互可用
                 const fallbackPos = getPositionInFrontOfCamera(this.global);
                 if (this.global.events) {
                     this.global.events.fire('annotation:place', fallbackPos);
                 }
-                this.placeAnnotation(fallbackPos);
             }
         } catch (error) {
             console.warn('[Annotation][PlacementMode] Failed to pick position for annotation placement:', error);

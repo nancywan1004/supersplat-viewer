@@ -17,6 +17,7 @@ import { initEditLeftToolbarUI } from './edit-left-toolbar';
 import { initEditRightToolbarUI } from './edit-right-toolbar';
 import { initEditBottomToolbarUI } from './edit-bottom-toolbar';
 import type { Annotation } from '../settings';
+import { getEditUiTransport, sendEditProtocolMessage } from './edit-ui-transport';
 
 // Initialize the touch joystick for fly mode camera control
 const initJoystick = (
@@ -233,6 +234,7 @@ const initPoster = (events: EventHandler) => {
 
 const initUI = (global: Global) => {
     const { config, events, state } = global;
+    const editUiTransport = getEditUiTransport(global);
 
     // Acquire Elements
     const docRoot = document.documentElement;
@@ -570,11 +572,76 @@ const initUI = (global: Global) => {
     } else {
         if (dom.editModeBtn) {
             dom.editModeBtn.addEventListener('click', () => {
+                if (editUiTransport === 'message-bridge') {
+                    sendEditProtocolMessage({ type: 'EDIT_MODE_SET', value: true });
+                    return;
+                }
                 state.editMode = true;
             });
         }
         if (dom.exitEditBtn) {
             dom.exitEditBtn.addEventListener('click', () => {
+                if (editUiTransport === 'message-bridge') {
+                    // 两段式退出：先请求 Viewer 判断是否需要保存，再由确认弹窗决定后续命令
+                    const waitFor = (t: string, timeoutMs = 1500) =>
+                        new Promise<any>((resolve, reject) => {
+                            const onMsg = (ev: MessageEvent) => {
+                                const data = ev.data as any;
+                                if (!data || data.type !== t) return;
+                                window.removeEventListener('message', onMsg);
+                                clearTimeout(to);
+                                resolve(data);
+                            };
+                            const to = window.setTimeout(() => {
+                                window.removeEventListener('message', onMsg);
+                                reject(new Error(`timeout waiting for ${t}`));
+                            }, timeoutMs);
+                            window.addEventListener('message', onMsg);
+                        });
+
+                    // 1) 请求退出：由 bridge 基于 baseline 判断 needsSave
+                    sendEditProtocolMessage({ type: 'EDIT_MODE_EXIT_REQUEST' });
+
+                    // 2) 等待 needsSave 再弹窗
+                    waitFor('EDIT_EXIT_NEEDS_SAVE')
+                        .then((msg) => {
+                            const needsSave = !!msg?.payload?.needsSave;
+                            if (!needsSave) {
+                                sendEditProtocolMessage({ type: 'EDIT_MODE_SET', value: false });
+                                return;
+                            }
+
+                            showExitEditConfirmModal({
+                                onSave: () => {
+                                    // 保存：由 bridge 生成 SETTINGS_UPDATED，再退出编辑模式
+                                    sendEditProtocolMessage({ type: 'SETTINGS_SAVE' });
+                                    waitFor('SETTINGS_UPDATED', 3000)
+                                        .then((m) => {
+                                            const jsonString = m?.payload?.payload;
+                                            if (typeof jsonString === 'string' && jsonString.length > 0) {
+                                                const a = document.createElement('a');
+                                                a.href = URL.createObjectURL(new Blob([jsonString], { type: 'application/json' }));
+                                                a.download = 'settings.json';
+                                                a.click();
+                                                URL.revokeObjectURL(a.href);
+                                            }
+                                        })
+                                        .finally(() => {
+                                            sendEditProtocolMessage({ type: 'EDIT_MODE_SET', value: false });
+                                        });
+                                },
+                                onDiscard: () => {
+                                    sendEditProtocolMessage({ type: 'EDIT_MODE_EXIT_DISCARD' });
+                                }
+                            });
+                        })
+                        .catch(() => {
+                            // 忽略：协议未返回时不做任何事，避免误退出
+                        });
+
+                    return;
+                }
+
                 const current = getComparableSettingsString(global);
                 if (editModeEnteredSettingsSnapshot === null || current === editModeEnteredSettingsSnapshot) {
                     state.editMode = false;
@@ -607,6 +674,38 @@ const initUI = (global: Global) => {
         }
         if (dom.saveSettingsBtn) {
             dom.saveSettingsBtn.addEventListener('click', () => {
+                if (editUiTransport === 'message-bridge') {
+                    const waitForUpdated = (timeoutMs = 3000) =>
+                        new Promise<any>((resolve, reject) => {
+                            const onMsg = (ev: MessageEvent) => {
+                                const data = ev.data as any;
+                                if (!data || data.type !== 'SETTINGS_UPDATED') return;
+                                window.removeEventListener('message', onMsg);
+                                clearTimeout(to);
+                                resolve(data);
+                            };
+                            const to = window.setTimeout(() => {
+                                window.removeEventListener('message', onMsg);
+                                reject(new Error('timeout waiting for SETTINGS_UPDATED'));
+                            }, timeoutMs);
+                            window.addEventListener('message', onMsg);
+                        });
+
+                    sendEditProtocolMessage({ type: 'SETTINGS_SAVE' });
+                    waitForUpdated()
+                        .then((m) => {
+                            const jsonString = m?.payload?.payload;
+                            if (typeof jsonString === 'string' && jsonString.length > 0) {
+                                const a = document.createElement('a');
+                                a.href = URL.createObjectURL(new Blob([jsonString], { type: 'application/json' }));
+                                a.download = 'settings.json';
+                                a.click();
+                                URL.revokeObjectURL(a.href);
+                            }
+                        })
+                        .catch(() => {});
+                    return;
+                }
                 const payload = serializeExperienceSettings(global);
                 const jsonString = JSON.stringify(payload, null, 2);
                 const a = document.createElement('a');
@@ -648,6 +747,10 @@ const initUI = (global: Global) => {
         if (dom.undoEditBtn) {
             dom.undoEditBtn.addEventListener('click', async () => {
                 if (!state.editMode) return;
+                if (editUiTransport === 'message-bridge') {
+                    sendEditProtocolMessage({ type: 'EDIT_UNDO' });
+                    return;
+                }
                 if (!canUndo(global)) return;
                 await undo(global);
                 // 撤销完成后，历史模块会通过 editHistory:stateChanged 更新状态
@@ -656,6 +759,10 @@ const initUI = (global: Global) => {
         if (dom.redoEditBtn) {
             dom.redoEditBtn.addEventListener('click', async () => {
                 if (!state.editMode) return;
+                if (editUiTransport === 'message-bridge') {
+                    sendEditProtocolMessage({ type: 'EDIT_REDO' });
+                    return;
+                }
                 if (!canRedo(global)) return;
                 await redo(global);
                 // 重做完成后，历史模块会通过 editHistory:stateChanged 更新状态

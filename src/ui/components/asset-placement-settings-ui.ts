@@ -2,6 +2,7 @@ import type { Global } from '../../types';
 import type { AssetLibraryItem, AssetLibraryType } from '../../types';
 import { loadGsplatAsset } from '../../loaders/gsplat-asset-loader';
 import { getSceneAssetListHTML, bindSceneAssetList } from './scene-asset-list-ui';
+import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
 const ASSET_TYPE_ACCEPT: Record<AssetLibraryType, string> = {
     image: '.jpg,.jpeg,.png,image/jpeg,image/png',
@@ -18,6 +19,7 @@ function renderAssetPreviewGrid(
     typeSelect: HTMLSelectElement | null
 ): void {
     const { state, events, app } = global;
+    const editUiTransport = getEditUiTransport(global);
     const currentType = (typeSelect?.value ?? 'mesh') as AssetLibraryType;
     const list = (state.uploadedAssets ?? []).filter((item) => item.type === currentType);
     gridEl.innerHTML = '';
@@ -68,7 +70,12 @@ function renderAssetPreviewGrid(
         slot.addEventListener('dragstart', (e) => e.preventDefault());
         slot.addEventListener('click', (e) => {
             if ((e.target as HTMLElement).closest('.asset-preview-delete')) return;
-            events.fire('assetPlacement:place', { value: item });
+            if (editUiTransport === 'message-bridge') {
+                // 通过协议只下发可结构化克隆的最小信息（id）；实际 Asset 对象由 message-bridge 在 state.uploadedAssets 中查找
+                sendEditProtocolMessage({ type: 'ASSET_PLACE', value: { id: item.id } });
+            } else {
+                events.fire('assetPlacement:place', { value: item });
+            }
         });
 
         gridEl.appendChild(slot);

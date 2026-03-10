@@ -54,6 +54,9 @@ export class AnnotationManager {
     /** 由 UI / 父级在放置前收集的表单数据（按 id 存储），用于占位标注创建后立即带上内容 */
     private pendingFormData: Map<string, AnnotationFormData> = new Map();
 
+    /** 最近一次上报位置的缓存（当前未对外上报，仅保留以备将来扩展） */
+    private lastPlacementReported: Map<string, Vec3> = new Map();
+
     /**
      * 构造函数
      * 
@@ -63,9 +66,10 @@ export class AnnotationManager {
         this.global = global;
         this.placementMode = new PlacementMode(global);
 
-        // 监听标注放置事件
+        // 监听标注放置 / 移动 / 更新事件
         if (this.global.events) {
             this.global.events.on('annotation:place', this.onAnnotationPlace, this);
+            this.global.events.on('annotation:moved', this.onAnnotationMoved, this);
             this.global.events.on('annotation:moveComplete', this.onAnnotationMoveComplete, this);
             this.global.events.on('annotation:updated', this.onAnnotationUpdated, this);
         }
@@ -241,7 +245,7 @@ export class AnnotationManager {
 
     /**
      * 选中标注
-     * 
+     *
      * @param id - 标注 ID
      * @param options - showGizmo: 是否同时显示 Transform Gizmo，默认 false（仅点击底部「移动」时显示 Gizmo）
      */
@@ -253,12 +257,12 @@ export class AnnotationManager {
             return;
         }
 
-        const showGizmo = options?.showGizmo ?? false;
-
         // 如果已经选中其他标注，先取消选择
         if (this.selectedAnnotationId && this.selectedAnnotationId !== id) {
             this.deselectAnnotation();
         }
+
+        const showGizmo = options?.showGizmo ?? false;
 
         // 更新选中状态
         this.selectedAnnotationId = id;
@@ -291,8 +295,19 @@ export class AnnotationManager {
     }
 
     /**
+     * 为当前选中的标注隐藏 Transform Gizmo（不改变选中状态）
+     */
+    disableGizmoForSelected(): void {
+        if (!this.selectedAnnotationId) return;
+        const annotation = this.annotations.get(this.selectedAnnotationId);
+        if (annotation) {
+            annotation.disableGizmo();
+        }
+    }
+
+    /**
      * 取消选中标注
-     * 
+     *
      * 取消当前选中的标注并隐藏 Transform Gizmo
      */
     deselectAnnotation(): void {
@@ -443,6 +458,14 @@ export class AnnotationManager {
      * @private
      */
     private onAnnotationPlace(position: Vec3): void {
+        // 若已存在占位标注，则仅更新其位置（支持在确认前多次点击更换位置）
+        if (this.currentPlaceholder) {
+            // 直接更新占位实体位置与 data，避免通过 setPosition 再次触发 annotation:moved 事件
+            this.currentPlaceholder.entity.setPosition(position);
+            this.currentPlaceholder.data.position = [position.x, position.y, position.z];
+            return;
+        }
+
         const id = this.pendingPlacementId ?? this.generateAnnotationId();
         this.pendingPlacementId = null;
 
@@ -480,11 +503,6 @@ export class AnnotationManager {
 
         // 放置后自动显示完整 tooltip 窗口（不切换收起状态）
         annotation.showTooltip(true);
-
-        // 供 message-bridge 上报 ANNOTATION_PLACEMENT_UPDATE
-        if (this.global.events) {
-            this.global.events.fire('annotationPlacement:update', { id: annotation.id, value: annotation.serialize() });
-        }
     }
 
     /**
@@ -495,6 +513,24 @@ export class AnnotationManager {
      * @private
      */
     private onAnnotationUpdated(): void {
+        this.syncToSettings();
+    }
+
+    /**
+     * 处理标注移动事件（已有标注位置变化时）
+     *
+     * - 占位标注：由 onAnnotationPlace 负责处理，不走此分支
+     * - 已有标注：位置变化时仅同步到 settings，供撤销/重做与保存使用
+     *
+     * @private
+     */
+    private onAnnotationMoved(data: { id: string; position: Vec3 }): void {
+        const { id } = data;
+
+        // 已有标注：同步到设置
+        const annotation = this.annotations.get(id);
+        if (!annotation) return;
+
         this.syncToSettings();
     }
 
@@ -535,6 +571,7 @@ export class AnnotationManager {
         // 移除事件监听器
         if (this.global.events) {
             this.global.events.off('annotation:place', this.onAnnotationPlace, this);
+            this.global.events.off('annotation:moved', this.onAnnotationMoved, this);
             this.global.events.off('annotation:moveComplete', this.onAnnotationMoveComplete, this);
             this.global.events.off('annotation:updated', this.onAnnotationUpdated, this);
         }

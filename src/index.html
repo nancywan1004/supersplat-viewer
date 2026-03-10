@@ -49,6 +49,7 @@
                 allowEditMode: !url.searchParams.has('noEditMode'),
                 showEditUI: url.searchParams.get('showEditUI') !== 'false',
                 trackEditHistory: url.searchParams.get('trackEditHistory') !== 'false',
+                editUiTransport: url.searchParams.get('editUiTransport') === 'message-bridge' ? 'message-bridge' : 'internal',
                 nofx: url.searchParams.has('nofx'),
                 hpr: url.searchParams.has('hpr') ? ['', '1', 'true', 'enable'].includes(url.searchParams.get('hpr')) : undefined,
                 webgpu: url.searchParams.has('webgpu'),

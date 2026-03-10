@@ -4,7 +4,6 @@
  * 扩展现有的 Annotation 类，添加编辑模式所需的功能：
  * - 内容更新（标题、正文、图片）
  * - 展开/收起状态控制
- * - Transform Gizmo 集成
  * - 数据序列化和反序列化
  */
 
@@ -59,11 +58,12 @@ export class AnnotationEntity extends Annotation {
 
         // 点击热点时切换锚定展开状态；在编辑模式 + 标注模块下额外触发选中
         const hotspotDom = (this as any).hotspotDom as HTMLDivElement | null;
-        if (hotspotDom && this.global?.state && this.global?.events) {
+        if (hotspotDom) {
             hotspotDom.addEventListener('click', () => {
-                const s = this.global!.state;
-                if (s?.editMode && s?.editLeftModule === 'annotation') {
-                    this.global!.events.fire('annotation:selectFromHotspot', { id: this.id });
+                const g = this.global;
+                const s = g?.state;
+                if (g && s?.editMode && s?.editLeftModule === 'annotation' && g.events) {
+                    g.events.fire('annotation:selectFromHotspot', { id: this.id });
                 }
                 // 点击切换锚定展开：锚定时不会因为鼠标离开而收起；再次点击取消锚定（编辑模式与非编辑模式一致）
                 this.toggleAnchored();
@@ -214,7 +214,7 @@ export class AnnotationEntity extends Annotation {
 
     /**
      * 设置标注位置
-     * 
+     *
      * @param position - 新的 3D 位置
      */
     setPosition(position: Vec3): void {
@@ -238,7 +238,7 @@ export class AnnotationEntity extends Annotation {
 
     /**
      * 启用 Transform Gizmo
-     * 
+     *
      * 激活 Transform Gizmo 并附加到此标注实体
      */
     enableGizmo(): void {
@@ -246,7 +246,6 @@ export class AnnotationEntity extends Annotation {
             return;
         }
 
-        // 触发 Gizmo 启用事件
         this.global.events.fire('gizmo:attach', {
             entity: this.entity,
             onMove: (position: Vec3) => {
@@ -257,7 +256,7 @@ export class AnnotationEntity extends Annotation {
 
     /**
      * 禁用 Transform Gizmo
-     * 
+     *
      * 隐藏并分离 Transform Gizmo
      */
     disableGizmo(): void {
@@ -265,7 +264,6 @@ export class AnnotationEntity extends Annotation {
             return;
         }
 
-        // 触发 Gizmo 禁用事件
         this.global.events.fire('gizmo:detach');
     }
 
