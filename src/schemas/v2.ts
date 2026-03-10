@@ -46,6 +46,43 @@ type Annotation = {
     camera: Camera;
 };
 
+/**
+ * 世界空间 Bloom 区域的序列化结构，
+ * 需与 WorldSpaceBloomData.toJSON() 保持兼容。
+ */
+type WorldSpaceBloomRegionJSON = {
+    points: Array<{
+        position: [number, number, number],
+        radius: number,
+        intensity: number,
+    }>,
+    committed: Array<{
+        position: [number, number, number],
+        radius: number,
+        intensity: number,
+    }>,
+    committedBrightness?: number,
+};
+
+/**
+ * 单个局部亮灯区域配置。
+ */
+type LocalLightRegion = {
+    /** 稳定 ID，用于内部引用与父级托管 */
+    id: string;
+    /** 列表显示名称，例如「亮灯区域01」 */
+    name: string;
+    /** 世界空间 Bloom 区域数据（与 WorldSpaceBloomData.toJSON 兼容） */
+    worldSpace: WorldSpaceBloomRegionJSON;
+    /**
+     * 区域局部亮度 -1～1：
+     * - 0 不变
+     * - <0 调暗
+     * - >0 调亮
+     */
+    localBrightness: number;
+};
+
 type PostEffectSettings = {
     sharpness: {
         enabled: boolean,
@@ -66,12 +103,19 @@ type PostEffectSettings = {
         bloomBrushBrightness?: number,
         /** 已提交区域的局部亮度 -1～1，与 worldSpacePoints.committed 一起每帧在 shader 中应用 */
         bloomBrushCommittedBrightness?: number,
-        /** 世界空间 bloom 数据（序列化后的 WorldSpaceBloomData）；committedBrightness 与 committed 一起由 Set 固化 */
-        worldSpacePoints?: {
-            points: Array<{ position: [number, number, number], radius: number, intensity: number }>,
-            committed: Array<{ position: [number, number, number], radius: number, intensity: number }>,
-            committedBrightness?: number
-        },
+        /** 世界空间 bloom 数据（序列化后的 WorldSpaceBloomData）；committedBrightness 与 committed 一起由 Set 固化（旧结构） */
+        worldSpacePoints?: WorldSpaceBloomRegionJSON,
+        /**
+         * 可选：局部亮灯区域列表。
+         * - 首版策略：一次只激活一个 LocalLightRegion；
+         * - 未来可扩展为多区域叠加。
+         */
+        localLightRegions?: LocalLightRegion[];
+        /**
+         * 当前激活的 LocalLightRegion ID。
+         * - null 或 undefined 表示没有激活区域。
+         */
+        activeLocalLightRegionId?: string | null;
     },
     grading: {
         enabled: boolean,
@@ -181,4 +225,21 @@ type ExperienceSettings = {
     sceneAssets?: SceneAsset[];
 };
 
-export type { AnimTrack, Camera, Annotation, PostEffectSettings, RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, ExperienceSettings, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings };
+export type {
+    AnimTrack,
+    Camera,
+    Annotation,
+    PostEffectSettings,
+    RevealEffect,
+    LodSettings,
+    LodPreset,
+    LodPlatform,
+    TransformFrame,
+    ExperienceSettings,
+    PointLightConfig,
+    DirectionalLightConfig,
+    SpotLightConfig,
+    LightingSettings,
+    WorldSpaceBloomRegionJSON,
+    LocalLightRegion,
+};

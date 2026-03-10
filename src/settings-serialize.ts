@@ -20,7 +20,10 @@ const defaultPostEffectSettings = () => ({
         bloomDebug: false,
         bloomBrush: false,
         bloomBrushSize: 30,
-        bloomBrushBrightness: 0
+        bloomBrushBrightness: 0,
+        // 新结构：局部亮灯区域，默认空
+        localLightRegions: [] as any[],
+        activeLocalLightRegionId: null as string | null
     },
     grading: {
         enabled: false,
@@ -66,6 +69,18 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
         const pes = out.postEffectSettings as Record<string, unknown>;
         if (!pes.shadow || typeof pes.shadow !== 'object') {
             pes.shadow = defaultPostEffectShadow();
+        }
+
+        // 补齐 bloom 的 LocalLightRegion 默认值，保证序列化结构稳定
+        const bloom = pes.bloom as any;
+        if (bloom && typeof bloom === 'object') {
+            if (!Array.isArray(bloom.localLightRegions)) {
+                bloom.localLightRegions = [];
+            }
+            if (bloom.activeLocalLightRegionId === undefined) {
+                bloom.activeLocalLightRegionId =
+                    bloom.localLightRegions.length > 0 ? bloom.localLightRegions[0].id : null;
+            }
         }
     }
     if (!Array.isArray(out.animTracks)) out.animTracks = [];

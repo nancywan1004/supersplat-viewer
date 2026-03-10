@@ -369,6 +369,76 @@ const normalizeAnnotation = (ann: any): any => {
     };
 };
 
+/**
+ * 规范化 bloom 的 LocalLightRegion 配置：
+ * - 为新字段 localLightRegions / activeLocalLightRegionId 补齐默认值；
+ * - 若检测到旧的 worldSpacePoints 结构且尚未迁移，则自动构造单个 LocalLightRegion。
+ */
+const ensureBloomLocalLightRegions = (settings: V2): void => {
+    const pes: any = settings.postEffectSettings;
+    if (!pes || typeof pes !== 'object') return;
+    const bloom: any = pes.bloom;
+    if (!bloom || typeof bloom !== 'object') return;
+
+    const hasLocalRegions = Array.isArray(bloom.localLightRegions);
+
+    // 从旧 worldSpacePoints 结构迁移到单个 LocalLightRegion
+    if (!hasLocalRegions) {
+        const ws = bloom.worldSpacePoints;
+        const hasWs =
+            ws &&
+            typeof ws === 'object' &&
+            (Array.isArray(ws.points) || Array.isArray(ws.committed));
+
+        // 优先使用顶层 bloomBrushCommittedBrightness，其次回退到 worldSpacePoints.committedBrightness
+        const topBrightness =
+            typeof bloom.bloomBrushCommittedBrightness === 'number'
+                ? bloom.bloomBrushCommittedBrightness
+                : undefined;
+        const wsBrightness =
+            ws && typeof ws.committedBrightness === 'number'
+                ? ws.committedBrightness
+                : undefined;
+        const effectiveBrightness =
+            typeof topBrightness === 'number'
+                ? topBrightness
+                : typeof wsBrightness === 'number'
+                    ? wsBrightness
+                    : 0;
+
+        if (hasWs) {
+            const regionId = 'region-1';
+            bloom.localLightRegions = [
+                {
+                    id: regionId,
+                    name: '亮灯区域01',
+                    worldSpace: {
+                        points: Array.isArray(ws.points) ? ws.points : [],
+                        committed: Array.isArray(ws.committed) ? ws.committed : [],
+                        committedBrightness: effectiveBrightness
+                    },
+                    localBrightness: effectiveBrightness
+                }
+            ];
+            if (bloom.activeLocalLightRegionId === undefined) {
+                bloom.activeLocalLightRegionId = regionId;
+            }
+        } else {
+            // 没有旧结构时，补齐为空列表和 null
+            bloom.localLightRegions = [];
+            if (bloom.activeLocalLightRegionId === undefined) {
+                bloom.activeLocalLightRegionId = null;
+            }
+        }
+    } else {
+        // 已存在 localLightRegions 时，仅补齐 activeLocalLightRegionId
+        if (bloom.activeLocalLightRegionId === undefined) {
+            bloom.activeLocalLightRegionId =
+                bloom.localLightRegions.length > 0 ? bloom.localLightRegions[0].id : null;
+        }
+    }
+};
+
 // import a json object to conform to the latest settings schema. settings is assumed to be one of the well-formed schemas
 const importSettings = (settings: any): V2 => {
     let result: V2;
@@ -398,6 +468,9 @@ const importSettings = (settings: any): V2 => {
             throw new Error(`Unsupported experience settings version: ${version}`);
         }
     }
+
+    // 补齐 / 迁移 Bloom 的 LocalLightRegion 配置
+    ensureBloomLocalLightRegions(result);
 
     return result;
 };

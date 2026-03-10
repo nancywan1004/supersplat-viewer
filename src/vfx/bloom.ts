@@ -119,6 +119,8 @@ export class BloomController {
     private committedVolumeTexture: Texture | null = null;
     private committedVolumeAabbMin: Vec3 = new Vec3(0, 0, 0);
     private committedVolumeAabbMax: Vec3 = new Vec3(1, 1, 1);
+    /** 当前是否处于橡皮擦模式，由 LIGHT_ERASER_START / LIGHT_BRUSH_START 驱动 */
+    private isErasing: boolean = false;
 
     constructor(global: Global, options: BloomControllerOptions) {
         this.global = global;
@@ -255,6 +257,95 @@ export class BloomController {
             (this.global.app as any).renderNextFrame = true;
         });
         this._unregisterEvents.push(() => events.off('bloomBrush:set'));
+
+        // 父级托管模式下的 LIGHT_BRUSH_* 协议适配：
+        // - LIGHT_BRUSH_START: 进入画笔模式（加亮/调暗）
+        // - LIGHT_ERASER_START: 进入橡皮擦模式
+        // - LIGHT_BRUSH_CLEAR: 清空当前绘制区域（不影响已提交体积）
+        // - LIGHT_BRUSH_FINISH: 结束一次笔刷操作，相当于 "Set"：提交当前点并重建体积
+        // - LIGHT_BRUSH_BLOOM_UPDATE: 更新局部亮度系数（bloomBrushBrightness）
+        events.on('messageBridge:lightBrush', (data: { type: string; payload?: any }) => {
+            const t = data?.type;
+            const payload = (data?.payload ?? {}) as { value?: number };
+            const bloomSettings = (this.global.settings as any).postEffectSettings?.bloom as any;
+
+            const ensureBloomSettings = () => {
+                if (!(this.global.settings as any).postEffectSettings) {
+                    (this.global.settings as any).postEffectSettings = {};
+                }
+                if (!(this.global.settings as any).postEffectSettings.bloom) {
+                    (this.global.settings as any).postEffectSettings.bloom = {
+                        enabled: false,
+                        intensity: 1,
+                        blurLevel: 2,
+                        threshold: 0.2,
+                        bloomDebug: false,
+                        bloomBrush: false,
+                        bloomBrushSize: 30,
+                        bloomBrushBrightness: 0
+                    };
+                }
+                return (this.global.settings as any).postEffectSettings.bloom as any;
+            };
+
+            switch (t) {
+            case 'LIGHT_BRUSH_START': {
+                const bloom = ensureBloomSettings();
+                bloom.bloomBrush = true;
+                this.isErasing = false;
+                this.worldSpaceData.setEraseMode(false);
+                (this.global.app as any).renderNextFrame = true;
+                break;
+            }
+            case 'LIGHT_ERASER_START': {
+                const bloom = ensureBloomSettings();
+                bloom.bloomBrush = true;
+                this.isErasing = true;
+                this.worldSpaceData.setEraseMode(true);
+                (this.global.app as any).renderNextFrame = true;
+                break;
+            }
+            case 'LIGHT_BRUSH_CLEAR': {
+                // 清除当前绘制区域：等价 bloomBrush:clear
+                this.worldSpaceData.clear();
+                this.worldSpaceMaskDirtyFromDrawing = false;
+                (this.global.app as any).renderNextFrame = true;
+                break;
+            }
+            case 'LIGHT_BRUSH_FINISH': {
+                // 完成一次笔刷操作：提交并重建体积，同时退出笔刷模式（不再依赖 toggle）
+                this.worldSpaceData.commit();
+                const bloom = ensureBloomSettings();
+                const brightness = typeof bloom.bloomBrushBrightness === 'number'
+                    ? Math.max(-1, Math.min(1, bloom.bloomBrushBrightness))
+                    : 0;
+                this.worldSpaceData.setCommittedBrightness(brightness);
+                bloom.bloomBrushCommittedBrightness = brightness;
+                bloom.bloomBrush = false;
+                this.isErasing = false;
+                this.worldSpaceData.setEraseMode(false);
+                this.saveWorldSpaceConfig();
+                this.syncCommittedToNightMode();
+                this.worldSpaceMaskDirtyFromDrawing = false;
+                (this.global.app as any).renderNextFrame = true;
+                break;
+            }
+            case 'LIGHT_BRUSH_BLOOM_UPDATE': {
+                // 更新局部亮度调制系数（-1～1），仅影响笔刷区域颜色；是否参与 Bloom 仍由全局 bloom 强度决定
+                const bloom = ensureBloomSettings();
+                if (typeof payload.value === 'number') {
+                    const v = Math.max(-1, Math.min(1, payload.value));
+                    bloom.bloomBrushBrightness = v;
+                    (this.global.events as any).fire('postEffect:changed');
+                    (this.global.app as any).renderNextFrame = true;
+                }
+                break;
+            }
+            default:
+                break;
+            }
+        });
+        this._unregisterEvents.push(() => events.off('messageBridge:lightBrush'));
 
         // Setup pointer event handlers for world space bloom
         this.boundPointerDown = this.handlePointerDown.bind(this);
@@ -435,8 +526,8 @@ export class BloomController {
         const scale = MASK_SIZE / rect.width;
         const radius = brushSize * scale;
 
-        // Draw white circle
-        ctx.fillStyle = '#ffffff';
+        // 根据当前模式绘制：画笔=白，橡皮擦=黑
+        ctx.fillStyle = this.isErasing ? '#000000' : '#ffffff';
         ctx.beginPath();
         ctx.arc(mx, my, radius, 0, Math.PI * 2);
         ctx.fill();
@@ -489,7 +580,7 @@ export class BloomController {
         e.preventDefault();
         e.stopPropagation();
 
-        // 1) Immediate visual feedback: paint directly on mask canvas
+        // 1) Immediate visual feedback: paint directly on mask canvas（根据是否为橡皮擦决定加亮或擦除）
         this.paintOnWorldSpaceMask(e.clientX, e.clientY);
 
         // 2) Async: get 3D world position for persistence
@@ -510,7 +601,11 @@ export class BloomController {
                 const canvasHeight = canvas.clientHeight || canvas.height;
                 if (canvasHeight > 0 && distance > 0.001) {
                     const worldRadius = (brushSize * 2 * distance * Math.tan(fovRad / 2)) / canvasHeight;
-                    this.worldSpaceData.addPoint(worldPos, worldRadius, 1.0);
+                    if (this.isErasing) {
+                        this.worldSpaceData.eraseAt(worldPos, worldRadius);
+                    } else {
+                        this.worldSpaceData.addPoint(worldPos, worldRadius, 1.0);
+                    }
                 }
             }
         });
@@ -533,7 +628,7 @@ export class BloomController {
         e.preventDefault();
         e.stopPropagation();
 
-        // Immediate visual feedback: paint directly on mask canvas
+        // Immediate visual feedback: paint directly on mask canvas（根据是否为橡皮擦决定加亮或擦除）
         this.paintOnWorldSpaceMask(e.clientX, e.clientY);
 
         // Async: get 3D world position for persistence
@@ -554,7 +649,11 @@ export class BloomController {
                 const canvasHeight = canvas.clientHeight || canvas.height;
                 if (canvasHeight > 0 && distance > 0.001) {
                     const worldRadius = (brushSize * 2 * distance * Math.tan(fovRad / 2)) / canvasHeight;
-                    this.worldSpaceData.addPoint(worldPos, worldRadius, 1.0);
+                    if (this.isErasing) {
+                        this.worldSpaceData.eraseAt(worldPos, worldRadius);
+                    } else {
+                        this.worldSpaceData.addPoint(worldPos, worldRadius, 1.0);
+                    }
                 }
             }
         });

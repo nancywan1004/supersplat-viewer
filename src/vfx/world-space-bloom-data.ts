@@ -18,6 +18,9 @@ export class WorldSpaceBloomData {
     private committed: BloomPoint[] = [];  // "Set bloom" committed points
     /** 已提交区域对应的局部亮度 -1～1，与 committed 一起持久化；Set 时写入并用于 bake 到顶点 */
     private committedBrightness: number = 0;
+    /** 当前是否处于「橡皮擦」模式，仅由上层控制；本类只提供擦除 API */
+    // eraseMode 不参与序列化，仅影响运行时行为
+    private eraseMode: boolean = false;
 
     /**
      * Add a new bloom point
@@ -49,6 +52,33 @@ export class WorldSpaceBloomData {
         this.points = [];
         this.committed = [];
         this.committedBrightness = 0;
+    }
+
+    /**
+     * 设置是否为橡皮擦模式。
+     * 橡皮擦模式本身不改变数据，仅用于上层决定是 add 还是 erase。
+     */
+    setEraseMode(on: boolean): void {
+        this.eraseMode = on;
+    }
+
+    /**
+     * 在给定世界坐标半径内执行局部擦除。
+     * - 默认会同时作用于「当前绘制点」与「已提交点」；
+     * - 这样可以通过橡皮擦对既有亮度区域做局部修剪。
+     */
+    eraseAt(position: Vec3, radius: number): void {
+        if (radius <= 0) return;
+        const r2 = radius * radius;
+        const shouldKeep = (p: BloomPoint) => {
+            const dx = p.position.x - position.x;
+            const dy = p.position.y - position.y;
+            const dz = p.position.z - position.z;
+            const dist2 = dx * dx + dy * dy + dz * dz;
+            return dist2 > r2;
+        };
+        this.points = this.points.filter(shouldKeep);
+        this.committed = this.committed.filter(shouldKeep);
     }
 
     getCommittedBrightness(): number {
