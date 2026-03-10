@@ -27,8 +27,8 @@ export class AnnotationEntity extends Annotation {
     /** 标注数据 */
     data: AnnotationData;
 
-    /** 是否处于收起状态 */
-    private _collapsed: boolean = false;
+    /** 是否处于锚定展开状态（点击热点切换），hover 不会修改该状态 */
+    private anchored: boolean = false;
 
     /** Global 引用 */
     private global: Global;
@@ -46,13 +46,10 @@ export class AnnotationEntity extends Annotation {
         this.label = '';
         super.initialize();
 
-        // 初始化收起状态
-        this._collapsed = this.data?.collapsed ?? false;
-
         // 收起时显示的标题：挂到 parentDom（hotspot 有 opacity:0 会隐藏子元素）
         this.collapsedTitleSpan = document.createElement('span');
         this.collapsedTitleSpan.className = 'pc-annotation-collapsed-title';
-        this.collapsedTitleSpan.style.cssText = 'position:absolute;white-space:nowrap;font-size:12px;color:white;text-shadow:0 1px 2px rgba(0,0,0,0.8);pointer-events:none;display:none;transform:translateY(-50%);';
+        this.collapsedTitleSpan.style.cssText = 'position:absolute;white-space:nowrap;font-size:12px;color:white;text-shadow:0 1px 2px rgba(0,0,0,0.8);pointer-events:none;display:none;transform:translate(-50%,-100%);';
         Annotation.parentDom.appendChild(this.collapsedTitleSpan);
 
         this.on('destroy', () => {
@@ -60,13 +57,24 @@ export class AnnotationEntity extends Annotation {
             this.collapsedTitleSpan = null;
         });
 
-        // 编辑模式 + 标注模块下，点击热点时仅选中该标注（不显示 Gizmo；Gizmo 需点击底部「移动」后显示）
+        // 点击热点时切换锚定展开状态；在编辑模式 + 标注模块下额外触发选中
         const hotspotDom = (this as any).hotspotDom as HTMLDivElement | null;
         if (hotspotDom && this.global?.state && this.global?.events) {
             hotspotDom.addEventListener('click', () => {
                 const s = this.global!.state;
                 if (s?.editMode && s?.editLeftModule === 'annotation') {
                     this.global!.events.fire('annotation:selectFromHotspot', { id: this.id });
+                }
+                // 点击切换锚定展开：锚定时不会因为鼠标离开而收起；再次点击取消锚定（编辑模式与非编辑模式一致）
+                this.toggleAnchored();
+            });
+            hotspotDom.addEventListener('pointerenter', () => {
+                // 悬停时短期展开（不修改 anchored）；移开时若未锚定则收起
+                this.showTooltip(true);
+            });
+            hotspotDom.addEventListener('pointerleave', () => {
+                if (!this.anchored) {
+                    this.hideTooltip();
                 }
             });
         }
@@ -82,11 +90,12 @@ export class AnnotationEntity extends Annotation {
     _updatePositions(screenPos: Vec3): void {
         super._updatePositions(screenPos);
         if (!this.collapsedTitleSpan) return;
-        const show = this._collapsed && this.data?.showTitleWhenCollapsed && !!this.title;
+        // tooltip 收起时，标题显示在热点上方（无论 showTitleWhenCollapsed 是否勾选）
+        const show = !this.isTooltipVisible() && !!this.title;
         if (show) {
-            const offset = (Annotation.hotspotSize + 5) / 2 + 6;
-            this.collapsedTitleSpan.style.left = `${screenPos.x + offset}px`;
-            this.collapsedTitleSpan.style.top = `${screenPos.y}px`;
+            const offsetY = (Annotation.hotspotSize + 5) / 2 + 6;
+            this.collapsedTitleSpan.style.left = `${screenPos.x}px`;
+            this.collapsedTitleSpan.style.top = `${screenPos.y - offsetY}px`;
             this.collapsedTitleSpan.style.display = 'block';
         } else {
             this.collapsedTitleSpan.style.display = 'none';
@@ -125,8 +134,13 @@ export class AnnotationEntity extends Annotation {
             this.data.showTitleWhenCollapsed = data.showTitleWhenCollapsed;
         }
 
-        // 更新显示
+        // 更新显示（包括收起标题）
         this._updateVisibility();
+
+        // 若当前 tooltip 正在显示，需要同步更新 tooltip DOM 的内容
+        if (this.isTooltipVisible()) {
+            this.showTooltip(false);
+        }
 
         // 触发更新事件
         if (this.global?.events) {
@@ -135,18 +149,33 @@ export class AnnotationEntity extends Annotation {
     }
 
     /**
-     * 重写：点击热点时切换展开/收起，而非直接显示 tooltip
+     * 兼容旧调用：设置「收起 / 展开」状态
      *
-     * @param skipToggle - 为 true 时仅显示 tooltip，不切换收起状态（用于占位标注放置后自动展示）
+     * 新语义：
+     * - collapsed === true  → 视为收起：取消锚定并收起 tooltip，仅按照 showTitleWhenCollapsed 显示收起标题
+     * - collapsed === false → 视为展开：锚定展开 tooltip，不因鼠标移开而收起
      */
-    showTooltip(skipToggle?: boolean): void {
-        if (!skipToggle) {
-            this.toggleCollapsed();
-            if (this._collapsed) {
-                return; // 已收起，_updateVisibility 会隐藏 tooltip
-            }
+    setCollapsed(collapsed: boolean): void {
+        this.data.collapsed = collapsed;
+        if (collapsed) {
+            this.anchored = false;
+            this.hideTooltip();
+        } else {
+            this.anchored = true;
+            this.showTooltip(false);
         }
-        // 展开状态：显示完整 tooltip（标题、正文、图片）
+        this._updateVisibility();
+        if (this.global?.events) {
+            this.global.events.fire('annotation:updated', { id: this.id });
+        }
+    }
+
+    /**
+     * 展开 tooltip（不负责锚定状态，仅根据当前 anchored / 调用方语义控制）
+     *
+     * @param _fromHover - 为 true 时表示由 hover 触发，仅短期展开
+     */
+    showTooltip(_fromHover?: boolean): void {
         Annotation.activeAnnotation = this;
         Annotation.tooltipDom!.style.visibility = 'visible';
         Annotation.tooltipDom!.style.opacity = '1';
@@ -164,50 +193,25 @@ export class AnnotationEntity extends Annotation {
         this.fire('show', this);
     }
 
-    /**
-     * 设置展开/收起状态
-     * 
-     * @param collapsed - true 为收起，false 为展开
-     */
-    setCollapsed(collapsed: boolean): void {
-        if (this._collapsed === collapsed) {
-            return;
-        }
-
-        this._collapsed = collapsed;
-        this.data.collapsed = collapsed;
-        this._updateVisibility();
-
-        // 触发更新事件
-        if (this.global?.events) {
-            this.global.events.fire('annotation:updated', { id: this.id });
+    /** 切换锚定展开状态（点击热点时调用） */
+    private toggleAnchored(): void {
+        this.anchored = !this.anchored;
+        if (this.anchored) {
+            this.showTooltip(false);
+        } else {
+            this.hideTooltip();
         }
     }
 
     /**
-     * 切换展开/收起状态
-     */
-    toggleCollapsed(): void {
-        this.setCollapsed(!this._collapsed);
-    }
-
-    /**
-     * 重写：隐藏时自动收起，避免弹窗消失但 title 不显示
+     * 重写：隐藏时仅控制 tooltip，不修改锚定状态
      */
     hideTooltip(): void {
-        if (!this._collapsed) {
-            this.setCollapsed(true);
-        }
         super.hideTooltip();
     }
-
-    /**
-     * 获取当前是否处于收起状态
-     * 
-     * @returns true 为收起，false 为展开
-     */
-    isCollapsed(): boolean {
-        return this._collapsed;
+    /** 当前 tooltip 是否可见（用于决定是否展示收起标题） */
+    private isTooltipVisible(): boolean {
+        return Annotation.activeAnnotation === this && Annotation.tooltipDom?.style.opacity === '1';
     }
 
     /**
@@ -282,7 +286,8 @@ export class AnnotationEntity extends Annotation {
             text: this.text,
             imageUrl: this.data.imageUrl,
             showTitleWhenCollapsed: this.data.showTitleWhenCollapsed,
-            collapsed: this._collapsed,
+            // collapsed 字段仅为兼容旧数据，始终视为默认收起
+            collapsed: false,
             extras: this.data.extras,
             camera: this.data.camera
         };
@@ -312,7 +317,7 @@ export class AnnotationEntity extends Annotation {
         annotationEntity.title = data.title;
         annotationEntity.text = data.text;
         annotationEntity.global = global;
-        annotationEntity._collapsed = data.collapsed ?? false;
+        annotationEntity.anchored = false;
 
         // 设置位置
         entity.setPosition(data.position[0], data.position[1], data.position[2]);
@@ -330,22 +335,10 @@ export class AnnotationEntity extends Annotation {
      * @private
      */
     private _updateVisibility(): void {
-        if (this._collapsed) {
-            if (Annotation.activeAnnotation === this) this.hideTooltip();
-            if (this.collapsedTitleSpan) {
-                if (this.data?.showTitleWhenCollapsed && this.title) {
-                    this.collapsedTitleSpan.textContent = this.title;
-                    // display 由 _updatePositions 在设置位置时一并设置
-                } else {
-                    this.collapsedTitleSpan.style.display = 'none';
-                }
-            }
-        } else {
-            if (this.collapsedTitleSpan) this.collapsedTitleSpan.style.display = 'none';
-            // 展开状态：自动显示 tooltip，否则只显示热点无内容
-            this.showTooltip(true);
+        // anchored / tooltip 可见性决定是否展示收起标题，逻辑在 _updatePositions 中处理
+        if (this.collapsedTitleSpan && !(this.data?.showTitleWhenCollapsed && this.title)) {
+            this.collapsedTitleSpan.style.display = 'none';
         }
-
         if (this.app) this.app.renderNextFrame = true;
     }
 }

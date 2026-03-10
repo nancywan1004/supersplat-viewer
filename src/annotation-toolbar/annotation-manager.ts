@@ -51,6 +51,9 @@ export class AnnotationManager {
     /** 由父级协议 ANNOTATION_PLACEMENT_START 传入的 id，在首次点击放置时使用 */
     private pendingPlacementId: string | null = null;
 
+    /** 由 UI / 父级在放置前收集的表单数据（按 id 存储），用于占位标注创建后立即带上内容 */
+    private pendingFormData: Map<string, AnnotationFormData> = new Map();
+
     /**
      * 构造函数
      * 
@@ -72,12 +75,10 @@ export class AnnotationManager {
     }
 
     /**
-     * 创建新标注
-     * 
-     * 启动标注创建流程，进入放置模式
+     * 供 UI 生成新的标注 id（与放置流程解耦，支持先填表单再放置）
      */
-    createAnnotation(): void {
-        this.startPlacementWithId(this.generateAnnotationId());
+    generateNewAnnotationId(): string {
+        return this.generateAnnotationId();
     }
 
     /**
@@ -97,6 +98,13 @@ export class AnnotationManager {
         if (this.global.state) {
             this.global.state.annotationPlacementActive = true;
         }
+    }
+
+    /**
+     * 在放置开始前预存表单数据，待首次点击放置时应用到占位标注上
+     */
+    setPendingFormDataForPlacement(id: string, data: AnnotationFormData): void {
+        this.pendingFormData.set(id, data);
     }
 
     /**
@@ -438,14 +446,19 @@ export class AnnotationManager {
         const id = this.pendingPlacementId ?? this.generateAnnotationId();
         this.pendingPlacementId = null;
 
-        // 创建占位标注数据（占位文字确保 tooltip 窗口正常大小）
+        const preset = this.pendingFormData.get(id);
+        this.pendingFormData.delete(id);
+
+        // 创建占位标注数据：位置由点击确定，内容优先使用预填表单数据
         const data: AnnotationData = {
             id,
             position: [position.x, position.y, position.z],
-            title: 'Untitled',
-            text: 'Description...',
-            showTitleWhenCollapsed: false,
-            collapsed: false,
+            title: preset?.title ?? 'Untitled',
+            text: preset?.text ?? 'Description...',
+            imageUrl: preset?.imageUrl,
+            showTitleWhenCollapsed: preset?.showTitleWhenCollapsed ?? false,
+            // collapsed 在新语义下仅用于兼容老数据，这里始终以默认收起为准
+            collapsed: true,
             extras: {},
             camera: {
                 initial: {

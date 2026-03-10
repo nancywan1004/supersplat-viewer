@@ -108,8 +108,9 @@ export function bindAnnotationSettings(root: HTMLElement | null, global: Global)
     header.addEventListener('keydown', onHeaderKey);
 
     const updateUI = () => {
-        const selected = state.selectedAnnotationIndex;
-        const hasSelection = selected !== null && selected !== undefined && (global.settings.annotations?.length ?? 0) > selected;
+        const selectedId = state.selectedAnnotationId;
+        const annotations = global.settings.annotations ?? [];
+        const hasSelection = !!selectedId && annotations.some((a) => a.id === selectedId);
 
         if (annotationPlacementActive) {
             placementHint.classList.remove('hidden');
@@ -137,7 +138,7 @@ export function bindAnnotationSettings(root: HTMLElement | null, global: Global)
         if (imageInput) imageInput.value = '';
         const yesRadio = root.querySelector<HTMLInputElement>('input[name="annotationShowTitle"][value="yes"]');
         if (yesRadio) yesRadio.checked = true;
-        state.selectedAnnotationIndex = null;
+        state.selectedAnnotationId = null;
         state.editLeftModule = 'annotation';
         // 进入标注放置模式时关闭相机控制，避免鼠标/键盘继续驱动相机
         state.cameraControlsEnabled = false;
@@ -181,11 +182,13 @@ export function bindAnnotationSettings(root: HTMLElement | null, global: Global)
         const showTitleWhenCollapsed = root.querySelector<HTMLInputElement>('input[name="annotationShowTitle"]:checked')?.value !== 'no';
 
         const ann: Annotation = {
+            id: `annotation-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
             position: pendingPlacementPosition,
             title,
             text: body,
-            image: pendingImageDataUrl ?? undefined,
+            imageUrl: pendingImageDataUrl ?? undefined,
             showTitleWhenCollapsed,
+            collapsed: true,
             extras: {},
             camera: getDefaultCamera()
         };
@@ -222,29 +225,38 @@ export function bindAnnotationSettings(root: HTMLElement | null, global: Global)
         updateUI();
     });
 
-    const onAnnotationSelected = (payload: { index: number }) => {
-        state.selectedAnnotationIndex = payload.index;
+    const onAnnotationSelected = (payload: { id: string }) => {
+        state.selectedAnnotationId = payload.id;
         updateUI();
     };
     events.on('annotation:selected', onAnnotationSelected);
 
     moveBtn.addEventListener('click', () => {
-        if (state.selectedAnnotationIndex == null) return;
-        events.fire('annotation:requestMove', { index: state.selectedAnnotationIndex });
+        const selectedId = state.selectedAnnotationId;
+        if (!selectedId) return;
+        events.fire('annotation:requestMove', { id: selectedId });
     });
 
     deleteBtn.addEventListener('click', () => {
-        if (state.selectedAnnotationIndex == null) return;
+        const selectedId = state.selectedAnnotationId;
+        if (!selectedId) return;
         if (!confirm('确定删除该标注？')) return;
 
-        const index = state.selectedAnnotationIndex;
+        const annotations = global.settings.annotations ?? [];
+        const index = annotations.findIndex((a) => a.id === selectedId);
+        if (index < 0) return;
+
         const viewer = (global.app as any).viewer;
         if (viewer?.annotations) {
             viewer.annotations.removeAnnotation(index);
         }
-        state.selectedAnnotationIndex = null;
+        // 从 settings 中移除对应标注
+        annotations.splice(index, 1);
+        global.settings.annotations = annotations;
+
+        state.selectedAnnotationId = null;
         pushEditHistory(global, 'delete annotation');
-        events.fire('annotation:selected', { index: -1 });
+        events.fire('annotation:selected', { id: '' });
         updateUI();
     });
 

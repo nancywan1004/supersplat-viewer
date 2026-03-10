@@ -12,6 +12,7 @@ import { PlacementState } from './types';
 import type { AnnotationEntity } from './annotation-entity';
 import type { Global } from '../types';
 import { Picker } from '../picker';
+import { getPositionInFrontOfCamera } from '../asset-placement-handler';
 
 /**
  * PlacementMode 类
@@ -54,6 +55,7 @@ export class PlacementMode {
             return;
         }
 
+        console.log('[Annotation][PlacementMode] activate');
         this.state = PlacementState.Following;
         this.setPlacementCursor(true);
         this.startFollowing();
@@ -108,6 +110,10 @@ export class PlacementMode {
 
         const canvas = this.global.app.graphicsDevice.canvas as HTMLCanvasElement;
         this.clickHandler = (event: MouseEvent) => {
+            console.log('[Annotation][PlacementMode] canvas click', {
+                clientX: event.clientX,
+                clientY: event.clientY
+            });
             this.onSceneClick(event);
         };
         canvas.addEventListener('click', this.clickHandler);
@@ -162,13 +168,13 @@ export class PlacementMode {
     }
 
     /**
-     * 设置放置模式下的光标样式（pointer 表示可交互/放置）
+     * 设置放置模式下的光标样式（使用 crosshair 表示十字拾取光标）
      * @private
      */
     private setPlacementCursor(active: boolean): void {
         const canvas = this.global.app.graphicsDevice.canvas as HTMLCanvasElement;
         if (canvas) {
-            canvas.style.cursor = active ? 'pointer' : '';
+            canvas.style.cursor = active ? 'crosshair' : '';
         }
     }
 
@@ -219,6 +225,7 @@ export class PlacementMode {
     private async onSceneClick(event: MouseEvent): Promise<void> {
         // 只在跟随状态下处理点击
         if (this.state !== PlacementState.Following) {
+            console.log('[Annotation][PlacementMode] onSceneClick ignored, state=', this.state);
             return;
         }
 
@@ -233,10 +240,18 @@ export class PlacementMode {
         const normalizedX = canvasX / canvas.clientWidth;
         const normalizedY = canvasY / canvas.clientHeight;
 
+        console.log('[Annotation][PlacementMode] onSceneClick normalized', {
+            canvasX,
+            canvasY,
+            normalizedX,
+            normalizedY
+        });
+
         // 使用 Picker 获取 3D 位置
         try {
             const position = await this.picker.pick(normalizedX, normalizedY);
             if (position) {
+                console.log('[Annotation][PlacementMode] picker hit position', position);
                 // 触发标注放置事件（由 AnnotationManager 监听并创建标注）
                 if (this.global.events) {
                     this.global.events.fire('annotation:place', position);
@@ -244,9 +259,17 @@ export class PlacementMode {
 
                 // 调用 placeAnnotation（状态切换到 Placed）
                 this.placeAnnotation(position);
+            } else {
+                console.log('[Annotation][PlacementMode] picker returned null (no hit), fallback to camera-front');
+                // 兜底策略：即便 Picker 没击中几何，也在相机前方放置一个标注，保证交互可用
+                const fallbackPos = getPositionInFrontOfCamera(this.global);
+                if (this.global.events) {
+                    this.global.events.fire('annotation:place', fallbackPos);
+                }
+                this.placeAnnotation(fallbackPos);
             }
         } catch (error) {
-            console.warn('Failed to pick position for annotation placement:', error);
+            console.warn('[Annotation][PlacementMode] Failed to pick position for annotation placement:', error);
         }
     }
 }

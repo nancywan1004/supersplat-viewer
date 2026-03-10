@@ -35,16 +35,58 @@ export function initAnnotationUI(global: Global): () => void {
     const annotationUI = new AnnotationToolbarUI(container);
 
     let originalAnnotationDataForEdit: AnnotationData | null = null;
+    let pendingCreateId: string | null = null;
+    let hasPlacedForCreate = false;
 
-    annotationUI.onCreateButtonClick(() => annotationManager.createAnnotation());
-    annotationUI.onConfirmButtonClick((data) => {
-        annotationManager.confirmAnnotation(data);
-        annotationUI.hideEditForm();
+    // 新建流程：先填表单，再点击「去放置」进入放置模式，场景点击后按钮变为「确定并放置」
+    annotationUI.onCreateButtonClick(() => {
+        // 新建前清理当前选中与编辑状态，避免修改到已有标注
+        annotationManager.deselectAnnotation();
         originalAnnotationDataForEdit = null;
+        pendingCreateId = null;
+        hasPlacedForCreate = false;
+        if (annotationManager.getPlaceholderAnnotation()) {
+            annotationManager.cancelAnnotation();
+        }
+        annotationUI.showEditForm(undefined, false);
+        annotationUI.setPlacementHintVisible(false);
+    });
+
+    // 「去放置 / 确定并放置」按钮点击
+    annotationUI.onPlaceButtonClick(() => {
+        const formData = annotationUI.getFormData();
+        if (!formData.title || !formData.text) {
+            // 理论上 UI 已禁用按钮，这里仅防御
+            return;
+        }
+
+        // 阶段 1：去放置 → 下发等价于 ANNOTATION_PLACEMENT_START，进入放置模式
+        if (!pendingCreateId) {
+            pendingCreateId = annotationManager.generateNewAnnotationId();
+            hasPlacedForCreate = false;
+            annotationManager.setPendingFormDataForPlacement(pendingCreateId, formData);
+            annotationManager.startPlacementWithId(pendingCreateId);
+            // 提示在场景中点击放置位置
+            annotationUI.setPlacementHintVisible(true);
+            return;
+        }
+
+        // 阶段 2：已完成放置（收到 ANNOTATION_PLACEMENT_UPDATE 等价事件），点击「确定并放置」-> ANNOTATION_CONFIRM
+        if (hasPlacedForCreate) {
+            annotationManager.confirmAnnotation(formData);
+            pendingCreateId = null;
+            hasPlacedForCreate = false;
+            annotationUI.setPlacementHintVisible(false);
+            annotationUI.hideEditForm();
+            updateList();
+        }
     });
     annotationUI.onCancelButtonClick(() => {
         if (annotationManager.getPlaceholderAnnotation()) {
             annotationManager.cancelAnnotation();
+            pendingCreateId = null;
+            hasPlacedForCreate = false;
+            annotationUI.setPlacementHintVisible(false);
         } else {
             const editingId = annotationUI.getEditingAnnotationId();
             if (editingId && originalAnnotationDataForEdit) {
@@ -89,9 +131,18 @@ export function initAnnotationUI(global: Global): () => void {
     });
     annotationUI.onDeleteButtonClick((id) => annotationManager.deleteAnnotation(id));
     annotationUI.onInputChange((data) => {
-        const target = annotationManager.getPlaceholderAnnotation() ?? annotationManager.getSelectedAnnotation();
-        if (target) {
-            target.updateContent(data);
+        const placeholder = annotationManager.getPlaceholderAnnotation();
+        if (placeholder) {
+            placeholder.updateContent(data);
+            return;
+        }
+        // 仅在编辑已有标注时实时更新场景中的标注内容；新建时不影响已有标注
+        const editingId = annotationUI.getEditingAnnotationId();
+        if (editingId) {
+            const annotation = annotationManager.getAllAnnotations().find((a) => a.id === editingId);
+            if (annotation) {
+                annotation.updateContent(data);
+            }
         }
     });
 
@@ -126,12 +177,22 @@ export function initAnnotationUI(global: Global): () => void {
     const onAnnotationPlaceWithHint = () => {
         onPlacementEnded();
         onAnnotationPlace();
+        // 放置完成：切换按钮为「确定并放置」
+        if (pendingCreateId) {
+            hasPlacedForCreate = true;
+            annotationUI.setPlaceButton('确定并放置', true);
+        }
     };
 
     events.on('annotation:created', updateList);
     events.on('annotation:deleted', updateList);
     events.on('annotation:selected', onAnnotationSelected);
     const onAnnotationSelectFromHotspot = (data: { id: string }) => {
+        const placeholder = annotationManager.getPlaceholderAnnotation();
+        // 放置流程中的占位标注不参与「选中」逻辑，避免找不到 id 的 warning
+        if (placeholder && placeholder.id === data.id) {
+            return;
+        }
         annotationManager.selectAnnotation(data.id, { showGizmo: false });
     };
     events.on('annotation:selectFromHotspot', onAnnotationSelectFromHotspot);
@@ -139,6 +200,13 @@ export function initAnnotationUI(global: Global): () => void {
     events.on('annotation:place', onAnnotationPlaceWithHint);
     events.on('annotationPlacement:started', onPlacementStarted);
     events.on('annotationPlacement:ended', onPlacementEnded);
+    // 放置完成（等价 ANNOTATION_PLACEMENT_UPDATE）：用于调试与状态确认
+    events.on('annotationPlacement:update', (data: { id: string }) => {
+        console.log('[Annotation][UI] annotationPlacement:update', data, {
+            pendingCreateId,
+            hasPlacedForCreate
+        });
+    });
 
     /** 底部栏「编辑」按钮：显示右侧编辑表单 */
     const onAnnotationEditShow = () => {
@@ -225,6 +293,7 @@ export function initAnnotationUI(global: Global): () => void {
         events.off('annotation:place', onAnnotationPlaceWithHint);
         events.off('annotationPlacement:started', onPlacementStarted);
         events.off('annotationPlacement:ended', onPlacementEnded);
+        events.off('annotationPlacement:update');
         events.off('annotationEdit:show', onAnnotationEditShow);
         events.off('controlsHidden:changed', onControlsHiddenChanged);
         events.off('editMode:changed', onEditModeChanged);

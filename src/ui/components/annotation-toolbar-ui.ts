@@ -11,6 +11,7 @@ export class AnnotationToolbarUI {
     private annotationList: HTMLElement | null = null;
     private createButton: HTMLButtonElement | null = null;
     private confirmButton: HTMLButtonElement | null = null;
+    private placeButton: HTMLButtonElement | null = null;
     private cancelButton: HTMLButtonElement | null = null;
     private titleInput: HTMLInputElement | null = null;
     private textInput: HTMLTextAreaElement | null = null;
@@ -24,6 +25,7 @@ export class AnnotationToolbarUI {
     // 回调函数
     private createButtonCallback: (() => void) | null = null;
     private confirmButtonCallback: ((data: AnnotationFormData) => void) | null = null;
+    private placeButtonCallback: (() => void) | null = null;
     private cancelButtonCallback: (() => void) | null = null;
     private deleteButtonCallback: ((id: string) => void) | null = null;
     private annotationSelectCallback: ((id: string) => void) | null = null;
@@ -192,8 +194,15 @@ export class AnnotationToolbarUI {
 
         this.confirmButton = document.createElement('button');
         this.confirmButton.className = 'annotation-form-btn annotation-confirm-btn';
-        this.confirmButton.textContent = '确定并放置';
+        this.confirmButton.textContent = '更新';
         buttonGroup.appendChild(this.confirmButton);
+
+        // 「去放置 / 确定并放置」按钮：仅在新建标注时可见
+        this.placeButton = document.createElement('button');
+        this.placeButton.className = 'annotation-form-btn annotation-place-btn';
+        this.placeButton.textContent = '去放置';
+        this.placeButton.disabled = true;
+        buttonGroup.appendChild(this.placeButton);
 
         form.appendChild(buttonGroup);
 
@@ -228,13 +237,18 @@ export class AnnotationToolbarUI {
             this.createButtonCallback?.();
         });
 
-        // 确认/更新按钮点击
+        // 确认/更新按钮点击（仅编辑已有标注时可见）
         this.confirmButton?.addEventListener('click', () => {
             if (this.isEditMode && this.editingAnnotationId) {
                 this.annotationEditCallback?.(this.editingAnnotationId, true);
             } else {
                 this.confirmButtonCallback?.(this.getFormData());
             }
+        });
+
+        // 去放置 / 确定并放置 按钮点击（仅新建标注时可见）
+        this.placeButton?.addEventListener('click', () => {
+            this.placeButtonCallback?.();
         });
 
         // 取消按钮点击
@@ -320,8 +334,15 @@ export class AnnotationToolbarUI {
      * 通知输入变化
      */
     private notifyInputChange(): void {
+        const data = this.getFormData();
+
+        // 新建模式下，根据是否填写标题和正文启用「去放置」按钮
+        if (!this.isEditMode && this.placeButton) {
+            const canPlace = !!data.title && !!data.text;
+            this.placeButton.disabled = !canPlace;
+        }
+
         if (this.inputChangeCallback) {
-            const data = this.getFormData();
             this.inputChangeCallback(data);
         }
     }
@@ -386,7 +407,30 @@ export class AnnotationToolbarUI {
             if (this.imageInput) this.imageInput.value = '';
         }
         this.updateCharCount();
-        this.confirmButton!.textContent = isEditMode ? '更新' : '确定并放置';
+
+        // 编辑已有标注：显示「更新」按钮，隐藏「去放置」按钮
+        if (isEditMode) {
+            if (this.confirmButton) {
+                this.confirmButton.style.display = '';
+                this.confirmButton.textContent = '更新';
+            }
+            if (this.placeButton) {
+                this.placeButton.style.display = 'none';
+            }
+        } else {
+            // 新建标注：隐藏确认按钮，只显示「去放置 / 确定并放置」按钮
+            if (this.confirmButton) {
+                this.confirmButton.style.display = 'none';
+            }
+            if (this.placeButton) {
+                this.placeButton.style.display = '';
+                this.placeButton.textContent = '去放置';
+                // 是否可点击由 notifyInputChange / getFormData 控制
+                const canPlace = !!this.titleInput?.value && !!this.textInput?.value;
+                this.placeButton.disabled = !canPlace;
+            }
+        }
+
         this.editForm?.classList.remove('hidden');
     }
 
@@ -504,6 +548,22 @@ export class AnnotationToolbarUI {
      */
     onConfirmButtonClick(callback: (data: AnnotationFormData) => void): void {
         this.confirmButtonCallback = callback;
+    }
+
+    /**
+     * 注册「去放置 / 确定并放置」按钮回调（仅新建标注场景）
+     */
+    onPlaceButtonClick(callback: () => void): void {
+        this.placeButtonCallback = callback;
+    }
+
+    /**
+     * 更新「去放置 / 确定并放置」按钮文案和可用状态
+     */
+    setPlaceButton(label: string, enabled: boolean): void {
+        if (!this.placeButton) return;
+        this.placeButton.textContent = label;
+        this.placeButton.disabled = !enabled;
     }
 
     /**
