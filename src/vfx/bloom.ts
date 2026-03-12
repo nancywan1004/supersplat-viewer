@@ -17,6 +17,9 @@ import { BloomBrushFilter, MAX_POINTS } from './bloom-brush-filter';
 import { buildCommittedBrightnessVolume, buildCommittedBrightnessVolumeFromRegions, type CommittedPointWithBrightness } from './committed-brightness-volume';
 
 const MASK_SIZE = 512;
+/** 与 committed-brightness-volume 一致，用于判断是否为有效 64³ volume 纹理 */
+const VOLUME_TEX_WIDTH = 64;
+const VOLUME_TEX_HEIGHT = 64 * 64;
 
 /**
  * Bloom mode enumeration
@@ -1122,9 +1125,99 @@ export class BloomController {
     }
 
     /**
+     * 判断当前是否有可用于「按 volume 光栅化 2D mask」的 64³ 体积纹理（与局部亮度同源）。
+     */
+    private hasValidCommittedVolumeForMask(): boolean {
+        const t = this.committedVolumeTexture;
+        if (!t) return false;
+        const w = (t as { width?: number }).width ?? 0;
+        const h = (t as { height?: number }).height ?? 0;
+        if (w !== VOLUME_TEX_WIDTH || h !== VOLUME_TEX_HEIGHT) return false;
+        const sx = this.committedVolumeAabbMax.x - this.committedVolumeAabbMin.x;
+        const sy = this.committedVolumeAabbMax.y - this.committedVolumeAabbMin.y;
+        const sz = this.committedVolumeAabbMax.z - this.committedVolumeAabbMin.z;
+        return sx > 1e-6 && sy > 1e-6 && sz > 1e-6;
+    }
+
+    /**
+     * 使用局部亮度已计算好的 3D Volume 光栅化到 2D mask，与 NightMode 采样完全同源，compose 阶段用此 mask 与局部亮度一致。
+     * 体素按 stride 采样投影到屏幕画圆（lighten），无 depth 需求、不改 compose 管线。
+     * @private
+     */
+    private renderWorldSpaceMaskFromVolume(): boolean {
+        const ctx = this.worldSpaceMaskCtx;
+        const canvas = this.worldSpaceMaskCanvas;
+        const tex = this.worldSpaceMaskTexture;
+        const camera = this.global.camera;
+        if (!ctx || !canvas || !tex || !camera?.camera || !this.hasValidCommittedVolumeForMask()) return false;
+
+        const sceneCam = (camera as { camera?: { camera?: { worldToScreen(w: Vec3, cw: number, ch: number, out?: Vec3): Vec3; fov?: number } } }).camera?.camera;
+        if (!sceneCam?.worldToScreen) return false;
+
+        const appCanvas = this.global.app.graphicsDevice.canvas;
+        const canvasWidth = appCanvas.clientWidth || appCanvas.width;
+        const canvasHeight = appCanvas.clientHeight || appCanvas.height;
+        if (canvasWidth <= 0 || canvasHeight <= 0) return false;
+
+        const aabbMin = this.committedVolumeAabbMin;
+        const aabbMax = this.committedVolumeAabbMax;
+        const sizeX = aabbMax.x - aabbMin.x;
+        const sizeY = aabbMax.y - aabbMin.y;
+        const sizeZ = aabbMax.z - aabbMin.z;
+
+        let pixels: Uint8Array | undefined;
+        try {
+            pixels = this.committedVolumeTexture!.lock() as Uint8Array;
+        } catch {
+            return false;
+        }
+        const screenPos = new Vec3();
+        const worldPos = new Vec3();
+        const stride = 2;
+        const maskRadius = 2.5;
+        const threshold = Math.round(0.002 * 255);
+
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, MASK_SIZE, MASK_SIZE);
+        ctx.globalCompositeOperation = 'lighten';
+
+        for (let iz = 0; iz < VOLUME_TEX_WIDTH; iz += stride) {
+            for (let iy = 0; iy < VOLUME_TEX_WIDTH; iy += stride) {
+                for (let ix = 0; ix < VOLUME_TEX_WIDTH; ix += stride) {
+                    const idx = ix + iy * VOLUME_TEX_WIDTH + iz * VOLUME_TEX_WIDTH * VOLUME_TEX_WIDTH;
+                    const val = pixels[idx];
+                    if (val <= threshold) continue;
+                    worldPos.x = aabbMin.x + (ix + 0.5) / VOLUME_TEX_WIDTH * sizeX;
+                    worldPos.y = aabbMin.y + (iy + 0.5) / VOLUME_TEX_WIDTH * sizeY;
+                    worldPos.z = aabbMin.z + (iz + 0.5) / VOLUME_TEX_WIDTH * sizeZ;
+                    sceneCam.worldToScreen(worldPos, canvasWidth, canvasHeight, screenPos);
+                    if (screenPos.z < 0) continue;
+                    const maskX = (screenPos.x / canvasWidth) * MASK_SIZE;
+                    const maskY = (1 - screenPos.y / canvasHeight) * MASK_SIZE;
+                    const g = Math.min(1, val / 255);
+                    const gray = Math.round(g * 255);
+                    const h = gray.toString(16).padStart(2, '0');
+                    ctx.fillStyle = '#' + h + h + h;
+                    ctx.beginPath();
+                    ctx.arc(maskX, maskY, maskRadius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        }
+
+        this.committedVolumeTexture!.unlock();
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = '#000000';
+        tex.setSource(canvas);
+        tex.upload();
+        this.hasWorldSpaceMask = true;
+        return true;
+    }
+
+    /**
      * Render world space bloom points projected to screen space into a 2D mask texture.
-     * This mask is used by the compose shader to limit bloom to world space regions.
-     * Called every frame when in world space mode with active bloom points.
+     * When a committed 3D volume exists, rasterizes that volume to the 2D mask (same source as local brightness) so compose matches exactly.
+     * Otherwise projects point list with 0.85-radius gradient as before.
      * @private
      */
     private renderWorldSpaceMask(): void {
@@ -1136,21 +1229,26 @@ export class BloomController {
             return;
         }
 
-        // 始终从 3D 点投影生成 2D mask，与 pointer up / 完成 后的结果一致，避免完成前后 mask 差异大（体积仍仅 pointer up 重建，无频闪）
-        const allPoints = this.getPointsForMask();
         const camera = this.global.camera;
         const camPos = camera?.getPosition();
         const camFwd = camera?.forward;
         const posStr = camPos ? `${camPos.x.toFixed(2)},${camPos.y.toFixed(2)},${camPos.z.toFixed(2)}` : '';
         const fwdStr = camFwd ? `${camFwd.x.toFixed(2)},${camFwd.y.toFixed(2)},${camFwd.z.toFixed(2)}` : '';
+
+        if (this.hasValidCommittedVolumeForMask()) {
+            const volStr = `${this.committedVolumeAabbMin.x.toFixed(3)},${this.committedVolumeAabbMax.x.toFixed(3)}`;
+            const signature = `vol:${volStr}:${posStr}:${fwdStr}`;
+            if (signature === this._lastMaskSignature) return;
+            this._lastMaskSignature = signature;
+            if (this.renderWorldSpaceMaskFromVolume()) return;
+        }
+
+        const allPoints = this.getPointsForMask();
         const pointSig = allPoints.length + (allPoints.length > 0 && allPoints[0]?.position
             ? `,${allPoints[0].position.x.toFixed(2)},${allPoints[0].position.y.toFixed(2)},${allPoints[0].position.z.toFixed(2)}`
             : '');
         const signature = `${allPoints.length}:${pointSig}:${posStr}:${fwdStr}`;
-
-        if (signature === this._lastMaskSignature) {
-            return;
-        }
+        if (signature === this._lastMaskSignature) return;
         this._lastMaskSignature = signature;
 
         ctx.fillStyle = '#000000';
@@ -1189,21 +1287,17 @@ export class BloomController {
             return;
         }
 
-        ctx.fillStyle = '#ffffff';
+        const innerFrac = 0.85;
+        ctx.globalCompositeOperation = 'lighten';
 
         for (const point of allPoints) {
             sceneCam.worldToScreen(point.position, canvasWidth, canvasHeight, screenPos);
 
-            // Skip if behind camera (z < 0)
             if (screenPos.z < 0) continue;
 
-            // screenPos.x/y are in pixel coordinates
-            // Convert to mask UV [0, MASK_SIZE] with Y flip
             const maskX = (screenPos.x / canvasWidth) * MASK_SIZE;
             const maskY = (1 - screenPos.y / canvasHeight) * MASK_SIZE;
 
-            // Estimate screen-space radius from world radius
-            // Use perspective projection: screenRadius = worldRadius * (focalLength / distance)
             const cameraPos = camera.getPosition();
             const distance = point.position.distance(cameraPos);
             if (distance < 0.001) continue;
@@ -1211,17 +1305,24 @@ export class BloomController {
             const fovRad = ((sceneCam as { fov?: number }).fov ?? 60) * (Math.PI / 180);
             const pixelsPerUnit = (canvasHeight / 2) / (distance * Math.tan(fovRad / 2));
             const screenRadius = Math.max(2, point.radius * pixelsPerUnit);
-
-            // Convert screen pixel radius to mask texture pixels
             const maskRadius = (screenRadius / canvasWidth) * MASK_SIZE;
 
-            // Draw filled circle
+            const gradient = ctx.createRadialGradient(
+                maskX, maskY, 0,
+                maskX, maskY, maskRadius
+            );
+            gradient.addColorStop(0, '#ffffff');
+            gradient.addColorStop(innerFrac, '#ffffff');
+            gradient.addColorStop(1, '#000000');
+            ctx.fillStyle = gradient;
             ctx.beginPath();
             ctx.arc(maskX, maskY, maskRadius, 0, Math.PI * 2);
             ctx.fill();
         }
 
-        // Upload to GPU
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = '#000000';
+
         tex.setSource(canvas);
         tex.upload();
         this.hasWorldSpaceMask = true;
