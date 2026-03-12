@@ -422,7 +422,9 @@ const ensureBloomLocalLightRegions = (settings: V2): void => {
                         committed: Array.isArray(ws.committed) ? ws.committed : [],
                         committedBrightness: effectiveBrightness
                     },
-                    localBrightness: effectiveBrightness
+                    localBrightness: effectiveBrightness,
+                    tintColor: [1, 1, 1],
+                    tintBlend: 0
                 }
             ];
             if (bloom.activeLocalLightRegionId === undefined) {
@@ -454,6 +456,12 @@ const ensureBloomLocalLightRegions = (settings: V2): void => {
                     r.localBrightness = typeof r.worldSpace.committedBrightness === 'number'
                         ? r.worldSpace.committedBrightness
                         : 0;
+                }
+                if (!Array.isArray(r.tintColor) || r.tintColor.length !== 3) {
+                    r.tintColor = [1, 1, 1];
+                }
+                if (typeof r.tintBlend !== 'number') {
+                    r.tintBlend = 0;
                 }
                 return r;
             });

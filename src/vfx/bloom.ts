@@ -72,6 +72,7 @@ export interface BloomControllerOptions {
         setBloomBrushParams(active: boolean, mask: Texture | null, threshold: number, modelViewProj?: Float32Array, localBrightness?: number): void;
         setCommittedBrightnessRegions(points: Array<{ position: Vec3; radius: number }>, brightness: number): void;
         setCommittedBrightnessVolume(volumeTexture: Texture | null, aabbMin: Vec3, aabbMax: Vec3, brightness: number, options?: { volumeEncodedBrightness?: boolean }): void;
+        setCommittedTint(tintColor: [number, number, number], tintBlend: number): void;
     } | null;
 }
 
@@ -464,6 +465,16 @@ export class BloomController {
             nightModeScript.setBloomBrushParams(bloomBrush, effectiveMask, th, undefined, bloomBrushBrightness);
             const regions = bloomSettings.localLightRegions ?? [];
             const activeId = bloomSettings.activeLocalLightRegionId ?? null;
+            const activeRegion = (activeId && !String(activeId).startsWith('draft-'))
+                ? regions.find((r: { id: string }) => r.id === activeId)
+                : null;
+            const tintColor: [number, number, number] = (activeRegion as any)?.tintColor != null
+                ? [(activeRegion as any).tintColor[0], (activeRegion as any).tintColor[1], (activeRegion as any).tintColor[2]]
+                : [1, 1, 1];
+            const tintBlend = typeof (activeRegion as any)?.tintBlend === 'number'
+                ? Math.max(0, Math.min(1, (activeRegion as any).tintBlend))
+                : 0;
+            nightModeScript.setCommittedTint(tintColor, tintBlend);
             // 多区域叠加：所有 localLightRegions 同时参与体积/亮度合成；若有当前正在编辑的（含草稿），也把 worldSpaceData 纳入体积
             if (regions.length > 0) {
                 const pointsWithBrightness: CommittedPointWithBrightness[] = [];

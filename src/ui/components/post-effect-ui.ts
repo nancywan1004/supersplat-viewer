@@ -104,6 +104,10 @@ type LocalLightRegion = {
     worldSpace: WorldSpaceBloomRegionJSON;
     /** 局部颜色亮度 -1～1 */
     localBrightness: number;
+    /** 颜色调制（sRGB [0,1]），与 nightFade 混合原理一致 */
+    tintColor?: [number, number, number];
+    /** 颜色混合系数 0～1 */
+    tintBlend?: number;
 };
 
 type BloomSettings = {
@@ -204,16 +208,33 @@ function renderBloomLocalLightRegionsList(
         body.style.paddingLeft = '12px';
         body.style.marginBottom = '4px';
         const brightness = Math.max(-1, Math.min(1, region.localBrightness ?? 0));
+        const tint = region.tintColor ?? [1, 1, 1];
+        const tintHex = '#' + [tint[0], tint[1], tint[2]].map(x => Math.round(Math.max(0, Math.min(1, x)) * 255).toString(16).padStart(2, '0')).join('');
+        const tintBlend = Math.max(0, Math.min(1, region.tintBlend ?? 0));
         body.innerHTML = `
           <div class="settingsRow">
-            <label class="postEffectLabel">局部颜色亮度:</label>
+            <label class="postEffectLabel">局部亮度:</label>
             <div class="postEffectSliderWrap">
               <input type="range" class="bloomRegionBrightnessSlider postEffectSlider" min="-1" max="1" step="0.05" value="${brightness}">
               <span class="bloomRegionBrightnessValue postEffectSliderValue">${brightness.toFixed(2)}</span>
             </div>
+          </div>
+          <div class="settingsRow">
+            <label class="postEffectLabel">颜色调制:</label>
+            <input type="color" class="bloomRegionTintColor postEffectOption" value="${tintHex}" title="参与混合的颜色">
+          </div>
+          <div class="settingsRow">
+            <label class="postEffectLabel">颜色混合:</label>
+            <div class="postEffectSliderWrap">
+              <input type="range" class="bloomRegionTintBlendSlider postEffectSlider" min="0" max="1" step="0.05" value="${tintBlend}">
+              <span class="bloomRegionTintBlendValue postEffectSliderValue">${tintBlend.toFixed(2)}</span>
+            </div>
           </div>`;
         const brightnessSlider = body.querySelector('.bloomRegionBrightnessSlider') as HTMLInputElement;
         const brightnessValueSpan = body.querySelector('.bloomRegionBrightnessValue') as HTMLElement;
+        const tintColorInput = body.querySelector('.bloomRegionTintColor') as HTMLInputElement;
+        const tintBlendSlider = body.querySelector('.bloomRegionTintBlendSlider') as HTMLInputElement;
+        const tintBlendValueSpan = body.querySelector('.bloomRegionTintBlendValue') as HTMLElement;
 
         header.addEventListener('click', (e) => {
             // 若点击的是删除按钮，由 deleteBtn 自己处理，不切换展开
@@ -231,6 +252,26 @@ function renderBloomLocalLightRegionsList(
                 firePostEffectChanged();
             });
             brightnessSlider.addEventListener('change', () => pushEditHistorySafe());
+        }
+        if (tintColorInput) {
+            tintColorInput.addEventListener('input', () => {
+                const hex = tintColorInput.value;
+                const r = parseInt(hex.slice(1, 3), 16) / 255;
+                const g = parseInt(hex.slice(3, 5), 16) / 255;
+                const b = parseInt(hex.slice(5, 7), 16) / 255;
+                region.tintColor = [r, g, b];
+                firePostEffectChanged();
+            });
+            tintColorInput.addEventListener('change', () => pushEditHistorySafe());
+        }
+        if (tintBlendSlider && tintBlendValueSpan) {
+            tintBlendSlider.addEventListener('input', () => {
+                const val = Math.max(0, Math.min(1, parseFloat(tintBlendSlider.value) || 0));
+                region.tintBlend = val;
+                tintBlendValueSpan.textContent = val.toFixed(2);
+                firePostEffectChanged();
+            });
+            tintBlendSlider.addEventListener('change', () => pushEditHistorySafe());
         }
 
         item.appendChild(header);
@@ -472,7 +513,9 @@ export function initPostEffectUI(global: Global): () => void {
                     id: `region-${Date.now()}`,
                     name: `亮灯区域${String(nextIndex).padStart(2, '0')}`,
                     worldSpace: payload.worldSpaceJSON,
-                    localBrightness: Math.max(-1, Math.min(1, payload.committedBrightness ?? 1))
+                    localBrightness: Math.max(-1, Math.min(1, payload.committedBrightness ?? 1)),
+                    tintColor: [1, 1, 1],
+                    tintBlend: 0
                 };
                 if (!b.localLightRegions) b.localLightRegions = [];
                 b.localLightRegions.push(newRegion);

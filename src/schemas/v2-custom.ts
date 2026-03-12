@@ -122,6 +122,15 @@ type LocalLightRegion = {
      * - >0 调亮
      */
     localBrightness: number;
+    /**
+     * 颜色调制：参与混合的颜色（sRGB [0,1]），与 nightFade 调暗时的颜色混合原理一致。
+     * 默认 [1,1,1] 表示无着色。
+     */
+    tintColor?: [number, number, number];
+    /**
+     * 颜色混合系数 0～1：0 不混合，1 完全使用 tintColor 参与混合。
+     */
+    tintBlend?: number;
 };
 
 type SceneAsset = {
