@@ -43,6 +43,10 @@ export function buildCommittedBrightnessVolume(
     const aabbMax = new Vec3(1, 1, 1);
 
     if (points.length === 0) {
+        if (existingTexture && (existingTexture.width !== 1 || existingTexture.height !== 1)) {
+            existingTexture.destroy();
+            existingTexture = null;
+        }
         if (!existingTexture) {
             const tex = new Texture(device, {
                 name: 'committedBrightnessVolume',
@@ -61,6 +65,10 @@ export function buildCommittedBrightnessVolume(
             tex.upload();
             return { texture: tex, aabbMin, aabbMax };
         }
+        const pixels = existingTexture.lock();
+        pixels[0] = 0;
+        existingTexture.unlock();
+        existingTexture.upload();
         return { texture: existingTexture, aabbMin, aabbMax };
     }
 
@@ -164,6 +172,14 @@ export function buildCommittedBrightnessVolumeFromRegions(
     });
 
     if (points.length === 0) {
+        if (existingTexture && (existingTexture.width !== 1 || existingTexture.height !== 1)) {
+            existingTexture.destroy();
+            existingTexture = null;
+        }
+        if (existingTintTexture) {
+            existingTintTexture.destroy();
+            existingTintTexture = null;
+        }
         if (!existingTexture) {
             const tex = new Texture(device, {
                 name: 'committedBrightnessVolume',
@@ -182,6 +198,10 @@ export function buildCommittedBrightnessVolumeFromRegions(
             tex.upload();
             return { texture: tex, tintTexture: null, aabbMin, aabbMax };
         }
+        const pixels = existingTexture.lock();
+        pixels[0] = 0;
+        existingTexture.unlock();
+        existingTexture.upload();
         return { texture: existingTexture, tintTexture: null, aabbMin, aabbMax };
     }
 
