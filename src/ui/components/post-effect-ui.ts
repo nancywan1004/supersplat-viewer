@@ -19,7 +19,7 @@ const POST_EFFECT_PANEL_HTML = `
   <div class="settingsRow">
     <label for="bloomBlurLevelSlider" class="postEffectLabel">BlurLevel:</label>
     <div class="postEffectSliderWrap">
-      <input type="range" id="bloomBlurLevelSlider" min="1" max="16" step="1" value="2" class="postEffectSlider">
+      <input type="range" id="bloomBlurLevelSlider" min="0" max="5" step="1" value="2" class="postEffectSlider">
       <span id="bloomBlurLevelValue" class="postEffectSliderValue">2</span>
     </div>
   </div>
@@ -448,10 +448,16 @@ export function initPostEffectUI(global: Global): () => void {
 
     if (bloomBlurLevelSlider && bloomBlurLevelValue) {
         bloomBlurLevelSlider.addEventListener('input', () => {
-            const b = ensureBloom(settings);
-            b.blurLevel = Math.max(1, Math.min(16, parseInt(bloomBlurLevelSlider!.value, 10)));
-            bloomBlurLevelValue!.textContent = String(b.blurLevel);
-            firePostEffectChanged();
+            const val = Math.max(0, Math.min(5, parseInt(bloomBlurLevelSlider!.value, 10)));
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'BLOOM_BLUR_SET', value: val });
+            } else {
+                const b = ensureBloom(settings);
+                b.blurLevel = val;
+                b.enabled = val > 0 && Number(b.intensity) > 0;
+                firePostEffectChanged();
+            }
+            bloomBlurLevelValue!.textContent = String(val);
         });
         bloomBlurLevelSlider.addEventListener('change', () => {
             pushEditHistorySafe();

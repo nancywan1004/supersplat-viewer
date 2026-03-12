@@ -26,6 +26,7 @@ import {
     applyLightDetail,
     applyBloomIntensityUpdate,
     applyBloomThresholdUpdate,
+    applyBloomBlurSet,
     applyBloomLocalLightRegionDelete,
     applyShadowSet,
     applyShadowIntensityUpdate,
@@ -80,6 +81,7 @@ type InboundPayload =
     | { type: 'LIGHT_BRUSH_BLOOM_UPDATE'; value?: number }
     | { type: 'BLOOM_INTENSITY_UPDATE'; value?: number }
     | { type: 'BLOOM_THRESHOLD_UPDATE'; value?: number }
+    | { type: 'BLOOM_BLUR_SET'; value?: number }
     | { type: 'SHADOW_SET'; value?: boolean }
     | { type: 'SHADOW_INTENSITY_UPDATE'; value?: number }
     | { type: 'VFX_TYPE_SET'; value?: string }
@@ -323,6 +325,11 @@ const initPostMessageBridge = (global: Global) => {
         case 'BLOOM_THRESHOLD_UPDATE': {
             const bloomThrVal = (p as { value?: number }).value;
             if (typeof bloomThrVal === 'number') applyBloomThresholdUpdate(global, bloomThrVal);
+            break;
+        }
+        case 'BLOOM_BLUR_SET': {
+            const bloomBlurVal = (p as { value?: number }).value;
+            if (typeof bloomBlurVal === 'number') applyBloomBlurSet(global, bloomBlurVal);
             break;
         }
         case 'SHADOW_SET': {
