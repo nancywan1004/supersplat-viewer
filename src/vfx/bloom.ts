@@ -76,6 +76,7 @@ export interface BloomControllerOptions {
         setCommittedBrightnessRegions(points: Array<{ position: Vec3; radius: number }>, brightness: number): void;
         setCommittedBrightnessVolume(volumeTexture: Texture | null, aabbMin: Vec3, aabbMax: Vec3, brightness: number, options?: { volumeEncodedBrightness?: boolean }): void;
         setCommittedTint(tintColor: [number, number, number], tintBlend: number): void;
+        setCommittedTintVolume(tintVolumeTexture: Texture | null): void;
     } | null;
 }
 
@@ -155,6 +156,8 @@ export class BloomController {
     private worldSpaceMaskDirtyFromDrawing = false;
     /** 3D 亮度场烘焙成的 2D 图集纹理，无 64 点上限 */
     private committedVolumeTexture: Texture | null = null;
+    /** 3D 颜色调制场（per-voxel tint），多区域时每区域只影响自己体素 */
+    private committedTintTexture: Texture | null = null;
     private committedVolumeAabbMin: Vec3 = new Vec3(0, 0, 0);
     private committedVolumeAabbMax: Vec3 = new Vec3(1, 1, 1);
     /** 当前是否处于橡皮擦模式，由 LIGHT_ERASER_START / LIGHT_BRUSH_START 驱动 */
@@ -477,6 +480,7 @@ export class BloomController {
             const tintBlend = typeof (activeRegion as any)?.tintBlend === 'number'
                 ? Math.max(0, Math.min(1, (activeRegion as any).tintBlend))
                 : 0;
+            // 多区域路径会传 per-voxel tint 纹理，此处 uniform 仅用于单区域/无 tint 纹理时的回退
             nightModeScript.setCommittedTint(tintColor, tintBlend);
             // 多区域叠加：所有 localLightRegions 同时参与体积/亮度合成；若有当前正在编辑的（含草稿），也把 worldSpaceData 纳入体积
             if (regions.length > 0) {
@@ -490,12 +494,19 @@ export class BloomController {
                         ? Math.max(-1, Math.min(1, r.localBrightness))
                         : 0;
                     const brightness = Math.max(-1, Math.min(1, colorBrightness));
+                    const tc = (r as any).tintColor;
+                    const tblend = typeof (r as any).tintBlend === 'number' ? Math.max(0, Math.min(1, (r as any).tintBlend)) : 0;
+                    const tintColor: [number, number, number] = Array.isArray(tc) && tc.length >= 3
+                        ? [tc[0], tc[1], tc[2]]
+                        : [1, 1, 1];
                     for (const p of committed) {
                         if (!p.position || !Array.isArray(p.position) || p.position.length < 3) continue;
                         pointsWithBrightness.push({
                             position: new Vec3(p.position[0], p.position[1], p.position[2]),
                             radius: p.radius ?? 1,
-                            brightness
+                            brightness,
+                            tintColor,
+                            tintBlend: tblend
                         });
                     }
                 }
@@ -516,15 +527,17 @@ export class BloomController {
                 }
                 if (pointsWithBrightness.length > 0) {
                     const multiHash = regions.map((r: any) =>
-                        `${r.id}:${(r.worldSpace?.committed ?? []).length}:${r.localBrightness ?? 0}`
+                        `${r.id}:${(r.worldSpace?.committed ?? []).length}:${r.localBrightness ?? 0}:${(r.tintColor ?? []).join(',')}:${r.tintBlend ?? 0}`
                     ).join('|') + (isDraftActive ? '|active=' + (activeId ?? '') + '|ws=' + this.worldSpaceData.getAllPoints().length : '');
                     if (this._lastMultiRegionHash !== multiHash) {
-                        const { texture, aabbMin, aabbMax } = buildCommittedBrightnessVolumeFromRegions(
+                        const { texture, tintTexture, aabbMin, aabbMax } = buildCommittedBrightnessVolumeFromRegions(
                             this.global.app.graphicsDevice,
                             pointsWithBrightness,
-                            this.committedVolumeTexture
+                            this.committedVolumeTexture,
+                            this.committedTintTexture
                         );
                         this.committedVolumeTexture = texture;
+                        this.committedTintTexture = tintTexture;
                         this.committedVolumeAabbMin.copy(aabbMin);
                         this.committedVolumeAabbMax.copy(aabbMax);
                         this._lastMultiRegionHash = multiHash;
@@ -538,16 +551,20 @@ export class BloomController {
                         1,
                         { volumeEncodedBrightness: true }
                     );
+                    nightModeScript.setCommittedTintVolume(this.committedTintTexture);
                 } else {
                     this._lastMultiRegionHash = '';
                     this._lastActiveRegionId = null;
                     this._lastActiveRegionCommittedLength = -1;
-                    const { texture, aabbMin, aabbMax } = buildCommittedBrightnessVolumeFromRegions(
+                    this.committedTintTexture = null;
+                    const { texture, tintTexture, aabbMin, aabbMax } = buildCommittedBrightnessVolumeFromRegions(
                         this.global.app.graphicsDevice,
                         [],
-                        this.committedVolumeTexture
+                        this.committedVolumeTexture,
+                        this.committedTintTexture
                     );
                     this.committedVolumeTexture = texture;
+                    this.committedTintTexture = tintTexture;
                     this.committedVolumeAabbMin.copy(aabbMin);
                     this.committedVolumeAabbMax.copy(aabbMax);
                     nightModeScript.setCommittedBrightnessVolume(
@@ -557,6 +574,7 @@ export class BloomController {
                         1,
                         { volumeEncodedBrightness: true }
                     );
+                    nightModeScript.setCommittedTintVolume(null);
                 }
             } else {
                 // 无 localLightRegions（或仅有草稿）：
@@ -567,12 +585,15 @@ export class BloomController {
                     this._lastMultiRegionHash = '';
                     this._lastActiveRegionId = null;
                     this._lastActiveRegionCommittedLength = -1;
-                    const { texture, aabbMin, aabbMax } = buildCommittedBrightnessVolumeFromRegions(
+                    this.committedTintTexture = null;
+                    const { texture, tintTexture, aabbMin, aabbMax } = buildCommittedBrightnessVolumeFromRegions(
                         this.global.app.graphicsDevice,
                         [],
-                        this.committedVolumeTexture
+                        this.committedVolumeTexture,
+                        this.committedTintTexture
                     );
                     this.committedVolumeTexture = texture;
+                    this.committedTintTexture = tintTexture;
                     this.committedVolumeAabbMin.copy(aabbMin);
                     this.committedVolumeAabbMax.copy(aabbMax);
                     nightModeScript.setCommittedBrightnessVolume(
@@ -582,6 +603,7 @@ export class BloomController {
                         0,
                         { volumeEncodedBrightness: true }
                     );
+                    nightModeScript.setCommittedTintVolume(null);
                 } else {
                     const activeId = bloomSettings.activeLocalLightRegionId ?? null;
                     const isDraftOnly = bloomBrush && activeId != null && String(activeId).startsWith('draft-');
@@ -599,12 +621,14 @@ export class BloomController {
                         const draftHash = `draft|ws=${wsPoints.length}|b=${draftBrightness}`;
                         if (this._lastMultiRegionHash !== draftHash) {
                             this._lastMultiRegionHash = draftHash;
-                            const { texture, aabbMin, aabbMax } = buildCommittedBrightnessVolumeFromRegions(
+                            const { texture, tintTexture, aabbMin, aabbMax } = buildCommittedBrightnessVolumeFromRegions(
                                 this.global.app.graphicsDevice,
                                 pointsWithBrightness,
-                                this.committedVolumeTexture
+                                this.committedVolumeTexture,
+                                this.committedTintTexture
                             );
                             this.committedVolumeTexture = texture;
+                            this.committedTintTexture = tintTexture;
                             this.committedVolumeAabbMin.copy(aabbMin);
                             this.committedVolumeAabbMax.copy(aabbMax);
                         }
@@ -617,6 +641,7 @@ export class BloomController {
                             1,
                             { volumeEncodedBrightness: true }
                         );
+                        nightModeScript.setCommittedTintVolume(this.committedTintTexture);
                     } else {
                         // 旧逻辑：无 localLightRegions 且非草稿，使用单区域 worldSpaceData / activeRegion
                         const activeRegion = activeId && !String(activeId).startsWith('draft-')

@@ -1,4 +1,4 @@
-import { Texture, Vec3, PIXELFORMAT_R8, ADDRESS_CLAMP_TO_EDGE, FILTER_LINEAR } from 'playcanvas';
+import { Texture, Vec3, PIXELFORMAT_R8, PIXELFORMAT_RGBA8, ADDRESS_CLAMP_TO_EDGE, FILTER_LINEAR } from 'playcanvas';
 import type { GraphicsDevice } from 'playcanvas';
 
 const VOLUME_SIZE = 64;
@@ -10,9 +10,13 @@ export interface CommittedPoint {
     radius: number;
 }
 
-/** 带所属区域局部亮度 -1～1 的已提交点，用于多区域叠加烘焙 */
+/** 带所属区域局部亮度与颜色调制的已提交点，用于多区域叠加烘焙 */
 export interface CommittedPointWithBrightness extends CommittedPoint {
     brightness: number;
+    /** 可选：所属区域颜色调制 sRGB [0,1]，用于 per-voxel 烘焙 */
+    tintColor?: [number, number, number];
+    /** 可选：所属区域颜色混合系数 0～1 */
+    tintBlend?: number;
 }
 
 /**
@@ -141,17 +145,23 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
 }
 
 /**
- * 多区域叠加：从带亮度的已提交点列表构建 3D 有效亮度场，烘焙到同一张 2D 图集。
- * 每个体素按各点贡献加权得到有效亮度 (-1～1)，编码为 0～255 写入 R8；
- * AABB 取所有区域的并集。单纹理、单次采样，无额外 GPU 开销。
+ * 多区域叠加：从带亮度的已提交点列表构建 3D 有效亮度场与 per-voxel 颜色调制场。
+ * 亮度烘焙到 R8 图集；若点带 tintColor/tintBlend 则再烘焙一张 RGBA 图集（RGB=颜色，A=混合系数），
+ * 每个体素按各点贡献加权平均，使每个亮灯区域只影响自己体素内的颜色。
  */
 export function buildCommittedBrightnessVolumeFromRegions(
     device: GraphicsDevice,
     points: CommittedPointWithBrightness[],
-    existingTexture: Texture | null
-): { texture: Texture; aabbMin: Vec3; aabbMax: Vec3 } {
+    existingTexture: Texture | null,
+    existingTintTexture?: Texture | null
+): { texture: Texture; tintTexture: Texture | null; aabbMin: Vec3; aabbMax: Vec3 } {
     const aabbMin = new Vec3(0, 0, 0);
     const aabbMax = new Vec3(1, 1, 1);
+    const hasAnyTint = points.some((p) => {
+        const tc = p.tintColor;
+        const tb = p.tintBlend;
+        return (Array.isArray(tc) && tc.length >= 3 && typeof tb === 'number' && tb > 1e-6);
+    });
 
     if (points.length === 0) {
         if (!existingTexture) {
@@ -170,9 +180,9 @@ export function buildCommittedBrightnessVolumeFromRegions(
             pixels[0] = 0;
             tex.unlock();
             tex.upload();
-            return { texture: tex, aabbMin, aabbMax };
+            return { texture: tex, tintTexture: null, aabbMin, aabbMax };
         }
-        return { texture: existingTexture, aabbMin, aabbMax };
+        return { texture: existingTexture, tintTexture: null, aabbMin, aabbMax };
     }
 
     const margin = VOLUME_MARGIN;
@@ -215,6 +225,27 @@ export function buildCommittedBrightnessVolumeFromRegions(
         });
     }
 
+    let tintTex: Texture | null = null;
+    let tintPixels: Uint8Array | null = null;
+    if (hasAnyTint) {
+        tintTex = existingTintTexture ?? null;
+        if (!tintTex || tintTex.width !== width || tintTex.height !== height) {
+            if (tintTex) tintTex.destroy();
+            tintTex = new Texture(device, {
+                name: 'committedTintVolume',
+                width,
+                height,
+                format: PIXELFORMAT_RGBA8,
+                addressU: ADDRESS_CLAMP_TO_EDGE,
+                addressV: ADDRESS_CLAMP_TO_EDGE,
+                minFilter: FILTER_LINEAR,
+                magFilter: FILTER_LINEAR,
+                mipmaps: false
+            });
+        }
+        tintPixels = tintTex.lock() as Uint8Array;
+    }
+
     const pixels = tex.lock();
     for (let iz = 0; iz < VOLUME_SIZE; iz++) {
         for (let iy = 0; iy < VOLUME_SIZE; iy++) {
@@ -224,6 +255,10 @@ export function buildCommittedBrightnessVolumeFromRegions(
                 const wz = aabbMin.z + (iz + 0.5) / VOLUME_SIZE * sizeZ;
                 let weightSum = 0;
                 let brightnessSum = 0;
+                let tintRSum = 0;
+                let tintGSum = 0;
+                let tintBSum = 0;
+                let tintBlendSum = 0;
                 for (const p of points) {
                     const dx = wx - p.position.x;
                     const dy = wy - p.position.y;
@@ -234,22 +269,53 @@ export function buildCommittedBrightnessVolumeFromRegions(
                     const b = Math.max(-1, Math.min(1, p.brightness));
                     weightSum += t;
                     brightnessSum += t * b;
+                    if (hasAnyTint && Array.isArray(p.tintColor) && p.tintColor.length >= 3 && typeof p.tintBlend === 'number') {
+                        const tr = Math.max(0, Math.min(1, p.tintColor[0]));
+                        const tg = Math.max(0, Math.min(1, p.tintColor[1]));
+                        const tb = Math.max(0, Math.min(1, p.tintColor[2]));
+                        const tblend = Math.max(0, Math.min(1, p.tintBlend));
+                        tintRSum += t * tr;
+                        tintGSum += t * tg;
+                        tintBSum += t * tb;
+                        tintBlendSum += t * tblend;
+                    }
                 }
                 const idx = ix + iy * width + iz * width * VOLUME_SIZE;
                 if (weightSum <= 1e-6) {
                     pixels[idx] = 0;
+                    if (tintPixels) {
+                        tintPixels[idx * 4] = 255;
+                        tintPixels[idx * 4 + 1] = 255;
+                        tintPixels[idx * 4 + 2] = 255;
+                        tintPixels[idx * 4 + 3] = 0;
+                    }
                 } else {
                     const effectiveBrightness = Math.max(-1, Math.min(1, brightnessSum / weightSum));
                     const encoded = Math.round((effectiveBrightness * 0.5 + 0.5) * 255);
                     pixels[idx] = Math.max(1, Math.min(255, encoded));
+                    if (tintPixels) {
+                        const tw = weightSum > 1e-6 ? 1 / weightSum : 0;
+                        const tr = Math.max(0, Math.min(255, Math.round((tintRSum * tw) * 255)));
+                        const tg = Math.max(0, Math.min(255, Math.round((tintGSum * tw) * 255)));
+                        const tb = Math.max(0, Math.min(255, Math.round((tintBSum * tw) * 255)));
+                        const tblend = Math.max(0, Math.min(255, Math.round((tintBlendSum * tw) * 255)));
+                        tintPixels[idx * 4] = tr;
+                        tintPixels[idx * 4 + 1] = tg;
+                        tintPixels[idx * 4 + 2] = tb;
+                        tintPixels[idx * 4 + 3] = tblend;
+                    }
                 }
             }
         }
     }
     tex.unlock();
     tex.upload();
+    if (tintTex && tintPixels) {
+        tintTex.unlock();
+        tintTex.upload();
+    }
 
-    return { texture: tex, aabbMin, aabbMax };
+    return { texture: tex, tintTexture: tintTex, aabbMin, aabbMax };
 }
 
 export { VOLUME_SIZE, VOLUME_SLICES };

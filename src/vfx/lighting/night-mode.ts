@@ -30,8 +30,10 @@ uniform vec3 uCommittedAabbMin;
 uniform vec3 uCommittedAabbMax;
 uniform float uCommittedBrightness;
 uniform float uCommittedVolumeEncodedBrightness; // 1 = volume stores effective brightness (0~1 = -1~1), 0 = mask * uniform
-uniform vec3 uLocalLightTintColor;   // sRGB，局部亮灯区域颜色调制，与 nightFade 混合原理一致
-uniform float uLocalLightTintBlend;  // 0~1 颜色混合系数
+uniform vec3 uLocalLightTintColor;   // sRGB，单区域/回退用
+uniform float uLocalLightTintBlend;
+uniform sampler2D uCommittedTintVolume;  // per-voxel 颜色调制 RGBA，多区域时每区域只影响自己体素
+uniform float uCommittedTintVolumeActive; // 1 = 使用纹理，0 = 使用 uniform
 
 vec3 l2g(vec3 c) { return pow(c, vec3(1.0 / 2.2)); }
 vec3 g2l(vec3 c) { return pow(c, vec3(2.2)); }
@@ -51,6 +53,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
 
     // 已提交区域：3D 体积纹理一次采样，无点数上限
     float inCommittedLit = 0.0;
+    vec2 committedUV = vec2(0.0);
     if (uCommittedVolumeEncodedBrightness > 0.5) {
         vec3 size = max(uCommittedAabbMax - uCommittedAabbMin, vec3(1e-6));
         vec3 n = clamp((wpos - uCommittedAabbMin) / size, 0.0, 1.0);
@@ -58,7 +61,8 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         ix = min(ix, 63.0); iy = min(iy, 63.0); iz = min(iz, 63.0);
         float u = (ix + 0.5) / 64.0;
         float v = (iy + iz * 64.0 + 0.5) / 4096.0;
-        float encoded = texture2D(uCommittedBrightnessVolume, vec2(u, v)).r;
+        committedUV = vec2(u, v);
+        float encoded = texture2D(uCommittedBrightnessVolume, committedUV).r;
         if (encoded > 0.002) {
             float effectiveBrightness = encoded * 2.0 - 1.0;
             color.rgb *= 1.0 + effectiveBrightness;
@@ -71,14 +75,24 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         ix = min(ix, 63.0); iy = min(iy, 63.0); iz = min(iz, 63.0);
         float u = (ix + 0.5) / 64.0;
         float v = (iy + iz * 64.0 + 0.5) / 4096.0;
-        float committedMask = texture2D(uCommittedBrightnessVolume, vec2(u, v)).r;
+        committedUV = vec2(u, v);
+        float committedMask = texture2D(uCommittedBrightnessVolume, committedUV).r;
         color.rgb *= 1.0 + uCommittedBrightness * committedMask;
         if (committedMask > 0.002) inCommittedLit = 1.0;
     }
-    if (inCommittedLit > 0.5 && uLocalLightTintBlend > 1e-6) {
-        vec3 linear = g2l(color.rgb);
-        linear *= mix(vec3(1.0), g2l(uLocalLightTintColor), uLocalLightTintBlend);
-        color.rgb = l2g(linear);
+    if (inCommittedLit > 0.5) {
+        vec3 tintCol = uLocalLightTintColor;
+        float blend = uLocalLightTintBlend;
+        if (uCommittedTintVolumeActive > 0.5) {
+            vec4 tintSample = texture2D(uCommittedTintVolume, committedUV);
+            tintCol = tintSample.rgb;
+            blend = tintSample.a;
+        }
+        if (blend > 1e-6) {
+            vec3 linear = g2l(color.rgb);
+            linear *= mix(vec3(1.0), g2l(tintCol), blend);
+            color.rgb = l2g(linear);
+        }
     }
 
     float f = uNightFade;
@@ -162,6 +176,8 @@ uniform float uCommittedBrightness;
 uniform float uCommittedVolumeEncodedBrightness;
 uniform vec3 uLocalLightTintColor;
 uniform float uLocalLightTintBlend;
+uniform sampler2D uCommittedTintVolume;
+uniform float uCommittedTintVolumeActive;
 
 vec3 l2g(vec3 c) { return pow(c, vec3(1.0 / 2.2)); }
 vec3 g2l(vec3 c) { return pow(c, vec3(2.2)); }
@@ -179,6 +195,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
 
     // 已提交区域：3D 体积纹理一次采样
     float committedMask = 0.0;
+    vec2 committedUV = vec2(0.0);
     if (uCommittedVolumeEncodedBrightness > 0.5) {
         vec3 size = max(uCommittedAabbMax - uCommittedAabbMin, vec3(1e-6));
         vec3 n = clamp((wpos - uCommittedAabbMin) / size, 0.0, 1.0);
@@ -186,7 +203,8 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         ix = min(ix, 63.0); iy = min(iy, 63.0); iz = min(iz, 63.0);
         float u = (ix + 0.5) / 64.0;
         float v = (iy + iz * 64.0 + 0.5) / 4096.0;
-        float encoded = texture2D(uCommittedBrightnessVolume, vec2(u, v)).r;
+        committedUV = vec2(u, v);
+        float encoded = texture2D(uCommittedBrightnessVolume, committedUV).r;
         if (encoded > 0.002) {
             float effectiveBrightness = encoded * 2.0 - 1.0;
             color.rgb *= 1.0 + effectiveBrightness;
@@ -199,13 +217,23 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         ix = min(ix, 63.0); iy = min(iy, 63.0); iz = min(iz, 63.0);
         float u = (ix + 0.5) / 64.0;
         float v = (iy + iz * 64.0 + 0.5) / 4096.0;
-        committedMask = texture2D(uCommittedBrightnessVolume, vec2(u, v)).r;
+        committedUV = vec2(u, v);
+        committedMask = texture2D(uCommittedBrightnessVolume, committedUV).r;
         color.rgb *= 1.0 + uCommittedBrightness * committedMask;
     }
-    if (committedMask > 0.5 && uLocalLightTintBlend > 1e-6) {
-        vec3 linear = g2l(color.rgb);
-        linear *= mix(vec3(1.0), g2l(uLocalLightTintColor), uLocalLightTintBlend);
-        color.rgb = l2g(linear);
+    if (committedMask > 0.5) {
+        vec3 tintCol = uLocalLightTintColor;
+        float blend = uLocalLightTintBlend;
+        if (uCommittedTintVolumeActive > 0.5) {
+            vec4 tintSample = texture2D(uCommittedTintVolume, committedUV);
+            tintCol = tintSample.rgb;
+            blend = tintSample.a;
+        }
+        if (blend > 1e-6) {
+            vec3 linear = g2l(color.rgb);
+            linear *= mix(vec3(1.0), g2l(tintCol), blend);
+            color.rgb = l2g(linear);
+        }
     }
 
     // 笔刷区域：仅对「明确未提交」区域应用实时预览亮度；committedMask>=0.2 视为已提交，避免体积边缘重复乘算
@@ -300,6 +328,9 @@ uniform uCommittedBrightness: f32;
 uniform uCommittedVolumeEncodedBrightness: f32;
 uniform uLocalLightTintColor: vec3f;
 uniform uLocalLightTintBlend: f32;
+var uCommittedTintVolume: texture_2d<f32>;
+var uCommittedTintVolumeSampler: sampler;
+uniform uCommittedTintVolumeActive: f32;
 
 fn l2g(c: vec3f) -> vec3f { return pow(c, vec3f(1.0 / 2.2)); }
 fn g2l(c: vec3f) -> vec3f { return pow(c, vec3f(2.2)); }
@@ -315,6 +346,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     let wpos = worldPos.xyz / worldPos.w;
 
     var inCommittedLit = 0.0;
+    var committedUV = vec2f(0.0, 0.0);
     if (uniform.uCommittedVolumeEncodedBrightness > 0.5) {
         let size = max(uniform.uCommittedAabbMax - uniform.uCommittedAabbMin, vec3f(1e-6));
         let n = clamp((wpos - uniform.uCommittedAabbMin) / size, vec3f(0.0), vec3f(1.0));
@@ -323,7 +355,8 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         let iz = min(floor(n.z * 64.0), 63.0);
         let u = (ix + 0.5) / 64.0;
         let v = (iy + iz * 64.0 + 0.5) / 4096.0;
-        let encoded = textureSample(uCommittedBrightnessVolume, uCommittedBrightnessVolumeSampler, vec2f(u, v)).r;
+        committedUV = vec2f(u, v);
+        let encoded = textureSample(uCommittedBrightnessVolume, uCommittedBrightnessVolumeSampler, committedUV).r;
         if (encoded > 0.002) {
             let effectiveBrightness = encoded * 2.0 - 1.0;
             (*color).rgb *= 1.0 + effectiveBrightness;
@@ -337,14 +370,24 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         let iz = min(floor(n.z * 64.0), 63.0);
         let u = (ix + 0.5) / 64.0;
         let v = (iy + iz * 64.0 + 0.5) / 4096.0;
-        let committedMask = textureSample(uCommittedBrightnessVolume, uCommittedBrightnessVolumeSampler, vec2f(u, v)).r;
+        committedUV = vec2f(u, v);
+        let committedMask = textureSample(uCommittedBrightnessVolume, uCommittedBrightnessVolumeSampler, committedUV).r;
         (*color).rgb *= 1.0 + uniform.uCommittedBrightness * committedMask;
         if (committedMask > 0.002) { inCommittedLit = 1.0; }
     }
-    if (inCommittedLit > 0.5 && uniform.uLocalLightTintBlend > 1e-6) {
-        var linear = g2l((*color).rgb);
-        linear *= mix(vec3f(1.0), g2l(uniform.uLocalLightTintColor), uniform.uLocalLightTintBlend);
-        (*color).rgb = l2g(linear);
+    if (inCommittedLit > 0.5) {
+        var tintCol = uniform.uLocalLightTintColor;
+        var blend = uniform.uLocalLightTintBlend;
+        if (uniform.uCommittedTintVolumeActive > 0.5) {
+            let tintSample = textureSample(uCommittedTintVolume, uCommittedTintVolumeSampler, committedUV);
+            tintCol = tintSample.rgb;
+            blend = tintSample.a;
+        }
+        if (blend > 1e-6) {
+            var linear = g2l((*color).rgb);
+            linear *= mix(vec3f(1.0), g2l(tintCol), blend);
+            (*color).rgb = l2g(linear);
+        }
     }
 
     let f = uniform.uNightFade;
@@ -433,6 +476,9 @@ uniform uCommittedBrightness: f32;
 uniform uCommittedVolumeEncodedBrightness: f32;
 uniform uLocalLightTintColor: vec3f;
 uniform uLocalLightTintBlend: f32;
+var uCommittedTintVolume: texture_2d<f32>;
+var uCommittedTintVolumeSampler: sampler;
+uniform uCommittedTintVolumeActive: f32;
 
 fn l2g(c: vec3f) -> vec3f { return pow(c, vec3f(1.0 / 2.2)); }
 fn g2l(c: vec3f) -> vec3f { return pow(c, vec3f(2.2)); }
@@ -448,6 +494,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     let wpos = worldPos.xyz / worldPos.w;
 
     var committedMask = 0.0;
+    var committedUV = vec2f(0.0, 0.0);
     if (uniform.uCommittedVolumeEncodedBrightness > 0.5) {
         let size = max(uniform.uCommittedAabbMax - uniform.uCommittedAabbMin, vec3f(1e-6));
         let n = clamp((wpos - uniform.uCommittedAabbMin) / size, vec3f(0.0), vec3f(1.0));
@@ -456,7 +503,8 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         let iz = min(floor(n.z * 64.0), 63.0);
         let u = (ix + 0.5) / 64.0;
         let v = (iy + iz * 64.0 + 0.5) / 4096.0;
-        let encoded = textureSample(uCommittedBrightnessVolume, uCommittedBrightnessVolumeSampler, vec2f(u, v)).r;
+        committedUV = vec2f(u, v);
+        let encoded = textureSample(uCommittedBrightnessVolume, uCommittedBrightnessVolumeSampler, committedUV).r;
         if (encoded > 0.002) {
             let effectiveBrightness = encoded * 2.0 - 1.0;
             (*color).rgb *= 1.0 + effectiveBrightness;
@@ -470,13 +518,23 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         let iz = min(floor(n.z * 64.0), 63.0);
         let u = (ix + 0.5) / 64.0;
         let v = (iy + iz * 64.0 + 0.5) / 4096.0;
-        committedMask = textureSample(uCommittedBrightnessVolume, uCommittedBrightnessVolumeSampler, vec2f(u, v)).r;
+        committedUV = vec2f(u, v);
+        committedMask = textureSample(uCommittedBrightnessVolume, uCommittedBrightnessVolumeSampler, committedUV).r;
         (*color).rgb *= 1.0 + uniform.uCommittedBrightness * committedMask;
     }
-    if (committedMask > 0.5 && uniform.uLocalLightTintBlend > 1e-6) {
-        var linear = g2l((*color).rgb);
-        linear *= mix(vec3f(1.0), g2l(uniform.uLocalLightTintColor), uniform.uLocalLightTintBlend);
-        (*color).rgb = l2g(linear);
+    if (committedMask > 0.5) {
+        var tintCol = uniform.uLocalLightTintColor;
+        var blend = uniform.uLocalLightTintBlend;
+        if (uniform.uCommittedTintVolumeActive > 0.5) {
+            let tintSample = textureSample(uCommittedTintVolume, uCommittedTintVolumeSampler, committedUV);
+            tintCol = tintSample.rgb;
+            blend = tintSample.a;
+        }
+        if (blend > 1e-6) {
+            var linear = g2l((*color).rgb);
+            linear *= mix(vec3f(1.0), g2l(tintCol), blend);
+            (*color).rgb = l2g(linear);
+        }
     }
 
     // 笔刷区域：仅对「明确未提交」区域应用实时预览亮度；committedMask>=0.2 视为已提交，避免体积边缘重复乘算
@@ -603,10 +661,12 @@ class NightMode extends GsplatShaderEffect {
     private committedBrightness: number = 0;
     /** 为 true 时体积纹理存储的是编码后的有效亮度 (0~1 = -1~1)，shader 直接解码应用；否则为 mask × uCommittedBrightness */
     private committedVolumeEncodedBrightness: boolean = false;
-    /** 局部亮灯区域颜色调制（sRGB [0,1]），与 nightFade 混合原理一致；由 BloomController 通过 setCommittedTint 传入 */
+    /** 局部亮灯区域颜色调制（sRGB [0,1]），单区域/回退用；由 BloomController 通过 setCommittedTint 传入 */
     private localLightTintColor: [number, number, number] = [1, 1, 1];
     /** 局部亮灯区域颜色混合系数 0～1 */
     private localLightTintBlend: number = 0;
+    /** per-voxel 颜色调制纹理（多区域时每区域只影响自己体素），null 时用 uniform */
+    private committedTintVolumeTexture: Texture | null = null;
 
     /**
      * Night ambient color
@@ -832,7 +892,7 @@ class NightMode extends GsplatShaderEffect {
         }
     }
 
-    /** 设置局部亮灯区域颜色调制（由 BloomController 在 applyToCameraFrame 时根据 active LocalLightRegion 传入）。 */
+    /** 设置局部亮灯区域颜色调制（单区域/回退，由 BloomController 传入）。 */
     setCommittedTint(tintColor: [number, number, number], tintBlend: number) {
         this.localLightTintColor = [
             Math.max(0, Math.min(1, tintColor[0] ?? 1)),
@@ -840,6 +900,14 @@ class NightMode extends GsplatShaderEffect {
             Math.max(0, Math.min(1, tintColor[2] ?? 1))
         ];
         this.localLightTintBlend = Math.max(0, Math.min(1, tintBlend));
+        if (this.materialsApplied.size > 0) {
+            this.setCommittedUniforms();
+        }
+    }
+
+    /** 设置 per-voxel 颜色调制纹理（多区域时每区域只影响自己体素）；null 时使用 uniform。 */
+    setCommittedTintVolume(tintVolumeTexture: Texture | null) {
+        this.committedTintVolumeTexture = tintVolumeTexture;
         if (this.materialsApplied.size > 0) {
             this.setCommittedUniforms();
         }
@@ -855,6 +923,12 @@ class NightMode extends GsplatShaderEffect {
         this.setUniform('uCommittedVolumeEncodedBrightness', this.committedVolumeEncodedBrightness ? 1 : 0);
         this.setUniform('uLocalLightTintColor', this.localLightTintColor);
         this.setUniform('uLocalLightTintBlend', this.localLightTintBlend);
+        if (this.committedTintVolumeTexture) {
+            this.setUniform('uCommittedTintVolume', this.committedTintVolumeTexture);
+            this.setUniform('uCommittedTintVolumeActive', 1);
+        } else {
+            this.setUniform('uCommittedTintVolumeActive', 0);
+        }
     }
 
     update(dt: number) {
