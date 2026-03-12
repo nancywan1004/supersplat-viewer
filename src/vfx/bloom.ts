@@ -283,14 +283,31 @@ export class BloomController {
 
         events.on('bloomBrush:reset', () => {
             this.worldSpaceData.reset();
-            if (this.worldSpaceMaskCtx && this.worldSpaceMaskCanvas && this.worldSpaceMaskTexture) {
-                this.worldSpaceMaskCtx.fillStyle = '#000000';
-                this.worldSpaceMaskCtx.fillRect(0, 0, MASK_SIZE, MASK_SIZE);
-                this.worldSpaceMaskTexture.setSource(this.worldSpaceMaskCanvas);
-                this.worldSpaceMaskTexture.upload();
-            }
             this.worldSpaceMaskDirtyFromDrawing = false;
-            this.saveWorldSpaceConfig();
+            this._lastMultiRegionHash = '';
+            this._lastActiveRegionId = null;
+            this._lastActiveRegionCommittedLength = -1;
+            this.committedTintTexture = null;
+            // 强制下一帧重建 2D mask，避免旧 signature 缓存导致 mask 不更新
+            this._lastMaskSignature = '';
+
+            const bloomSettings = (this.global.settings as any).postEffectSettings?.bloom as any;
+            const hasExistingRegions = Array.isArray(bloomSettings?.localLightRegions) &&
+                bloomSettings.localLightRegions.some((r: any) => r?.worldSpace?.committed?.length > 0);
+
+            if (hasExistingRegions) {
+                // 有已提交区域时不清 mask / volume：worldSpaceData 仅代表当前草稿工作区，
+                // 已有区域的 committed 数据在 localLightRegions 中，下一帧 applyToCameraFrame 会从中重建。
+            } else {
+                if (this.worldSpaceMaskCtx && this.worldSpaceMaskCanvas && this.worldSpaceMaskTexture) {
+                    this.worldSpaceMaskCtx.fillStyle = '#000000';
+                    this.worldSpaceMaskCtx.fillRect(0, 0, MASK_SIZE, MASK_SIZE);
+                    this.worldSpaceMaskTexture.setSource(this.worldSpaceMaskCanvas);
+                    this.worldSpaceMaskTexture.upload();
+                }
+                this.saveWorldSpaceConfig();
+                this.syncCommittedToNightMode();
+            }
             this.fireWorldSpaceChanged();
             (this.global.app as any).renderNextFrame = true;
         });
@@ -311,6 +328,25 @@ export class BloomController {
         });
         this._unregisterEvents.push(() => events.off('bloomBrush:set'));
 
+        // 当局部亮灯区域列表发生变化且被清空时，清理遗留的 worldSpaceData 与体积，避免已删除区域继续参与合成。
+        const onRegionListChanged = () => {
+            const bloomSettings = (this.global.settings as any).postEffectSettings?.bloom as any;
+            const regions = bloomSettings?.localLightRegions as any[] | undefined;
+            if (Array.isArray(regions) && regions.length === 0) {
+                // 清空工作区与缓存体积
+                this.worldSpaceData.reset();
+                this._lastMultiRegionHash = '';
+                this._lastActiveRegionId = null;
+                this._lastActiveRegionCommittedLength = -1;
+                this.committedTintTexture = null;
+                // 使用空 committedPoints 重建体积，使 NightMode 中不再有旧区域残留
+                this.syncCommittedToNightMode();
+                (this.global.app as any).renderNextFrame = true;
+            }
+        };
+        events.on('bloomLocalLightRegion:listChanged', onRegionListChanged);
+        this._unregisterEvents.push(() => events.off('bloomLocalLightRegion:listChanged', onRegionListChanged));
+
         events.on('bloomLocalLightRegion:requestExport', () => {
             const { worldSpaceJSON, committedBrightness } = this.exportRegion();
             (this.global.events as any).fire('bloomLocalLightRegion:exported', { worldSpaceJSON, committedBrightness });
@@ -326,7 +362,12 @@ export class BloomController {
         // 仅当存在当前 active LocalLightRegion（含草稿）时处理，否则不接管 pointer，与 UI 笔刷/擦除/完成行为一致。
         events.on('messageBridge:lightBrush', (data: { type: string; payload?: any }) => {
             const t = data?.type;
-            const payload = (data?.payload ?? {}) as { value?: number };
+            const payload = (data?.payload ?? {}) as {
+                id?: string;
+                value?: unknown;
+                tintColor?: number[];
+                tintBlend?: number;
+            };
             const bloomSettings = (this.global.settings as any).postEffectSettings?.bloom as any;
 
             if (!this.hasActiveLocalLightRegion()) {
@@ -373,6 +414,59 @@ export class BloomController {
                 // 清除当前绘制区域：等价 bloomBrush:clear
                 this.worldSpaceData.clear();
                 this.worldSpaceMaskDirtyFromDrawing = false;
+                (this.global.app as any).renderNextFrame = true;
+                break;
+            }
+            case 'LIGHT_BRUSH_COLOR_UPDATE': {
+                // 更新当前（或指定）区域的颜色调制：tintColor + tintBlend
+                const bloom = ensureBloomSettings();
+                const regions = (bloom as any).localLightRegions as any[] | undefined;
+                const activeId = (bloom as any).activeLocalLightRegionId as string | null | undefined;
+                const targetId = typeof payload.id === 'string' && payload.id.length > 0
+                    ? payload.id
+                    : (activeId ?? null);
+                if (!targetId) break;
+
+                // 兼容旧字段：payload.color / payload.tintBlend（若外部仍传）
+                const v = (payload.value as any) ?? {};
+                const tintColorArr =
+                    Array.isArray(v?.tintColor) ? v.tintColor :
+                        (Array.isArray((payload as any).color) ? (payload as any).color : (Array.isArray(payload.tintColor) ? payload.tintColor : null));
+                const tintBlendVal =
+                    typeof v?.tintBlend === 'number' ? v.tintBlend :
+                        (typeof (payload as any).tintBlend === 'number' ? (payload as any).tintBlend : null);
+
+                if (!Array.isArray(regions)) break;
+                const region = regions.find((r) => r && r.id === targetId);
+                if (!region) break;
+
+                if (Array.isArray(tintColorArr) && tintColorArr.length >= 3) {
+                    const r = Math.max(0, Math.min(1, Number(tintColorArr[0]) || 0));
+                    const g = Math.max(0, Math.min(1, Number(tintColorArr[1]) || 0));
+                    const b = Math.max(0, Math.min(1, Number(tintColorArr[2]) || 0));
+                    region.tintColor = [r, g, b];
+                }
+                if (typeof tintBlendVal === 'number') {
+                    region.tintBlend = Math.max(0, Math.min(1, tintBlendVal));
+                }
+
+                (this.global.events as any).fire('postEffect:changed');
+                (this.global.app as any).renderNextFrame = true;
+                break;
+            }
+            case 'LIGHT_BRUSH_BRIGHTNESS_UPDATE': {
+                // 更新指定区域的局部亮度（-1～1）：region.localBrightness
+                const bloom = ensureBloomSettings();
+                const regions = (bloom as any).localLightRegions as any[] | undefined;
+                if (!Array.isArray(regions)) break;
+                const regionId = typeof payload.id === 'string' ? payload.id : '';
+                if (!regionId) break;
+                const val = typeof payload.value === 'number' ? payload.value : Number(payload.value);
+                if (!Number.isFinite(val)) break;
+                const region = regions.find((r) => r && r.id === regionId);
+                if (!region) break;
+                region.localBrightness = Math.max(-1, Math.min(1, val));
+                (this.global.events as any).fire('postEffect:changed');
                 (this.global.app as any).renderNextFrame = true;
                 break;
             }
@@ -468,7 +562,11 @@ export class BloomController {
             this.bloomBrushPainter.setBrushSize(Math.max(1, Math.min(200, Number(bloomSettings.bloomBrushSize ?? 30))));
         }
         if (nightModeScript) {
-            nightModeScript.setBloomBrushParams(bloomBrush, effectiveMask, th, undefined, bloomBrushBrightness);
+            // BloomBrush shader 分支仅在「正在拖动画笔」时激活，提供实时 2D mask 预览。
+            // 松手后（!isDrawing）关闭该分支，渲染完全由 3D 体积决定——和已提交态走同一管线，
+            // 从根本上保证草稿态（非拖动时）与 SET 后的视觉效果一致。
+            const brushShaderActive = bloomBrush && this.isDrawing;
+            nightModeScript.setBloomBrushParams(brushShaderActive, effectiveMask, th, undefined, bloomBrushBrightness);
             const regions = bloomSettings.localLightRegions ?? [];
             const activeId = bloomSettings.activeLocalLightRegionId ?? null;
             const activeRegion = (activeId && !String(activeId).startsWith('draft-'))
@@ -528,7 +626,9 @@ export class BloomController {
                 if (pointsWithBrightness.length > 0) {
                     const multiHash = regions.map((r: any) =>
                         `${r.id}:${(r.worldSpace?.committed ?? []).length}:${r.localBrightness ?? 0}:${(r.tintColor ?? []).join(',')}:${r.tintBlend ?? 0}`
-                    ).join('|') + (isDraftActive ? '|active=' + (activeId ?? '') + '|ws=' + this.worldSpaceData.getAllPoints().length : '');
+                    ).join('|') + (isDraftActive
+                        ? ('|active=' + (activeId ?? '') + (this.isDrawing ? '' : '|ws=' + this.worldSpaceData.getAllPoints().length))
+                        : '');
                     if (this._lastMultiRegionHash !== multiHash) {
                         const { texture, tintTexture, aabbMin, aabbMax } = buildCommittedBrightnessVolumeFromRegions(
                             this.global.app.graphicsDevice,
@@ -612,7 +712,7 @@ export class BloomController {
                         const wsPoints = this.worldSpaceData.getAllPoints();
                         const draftBrightness = typeof bloomSettings.bloomBrushBrightness === 'number'
                             ? Math.max(-1, Math.min(1, bloomSettings.bloomBrushBrightness))
-                            : 1;
+                            : 0;
                         const pointsWithBrightness: CommittedPointWithBrightness[] = wsPoints.map(p => ({
                             position: p.position.clone(),
                             radius: p.radius,
@@ -1266,7 +1366,9 @@ export class BloomController {
         const posStr = camPos ? `${camPos.x.toFixed(2)},${camPos.y.toFixed(2)},${camPos.z.toFixed(2)}` : '';
         const fwdStr = camFwd ? `${camFwd.x.toFixed(2)},${camFwd.y.toFixed(2)},${camFwd.z.toFixed(2)}` : '';
 
-        if (this.hasValidCommittedVolumeForMask()) {
+        // 绘制中不走 volume-based 路径：volume 不含正在绘制的新点，
+        // 必须 fall through 到 point-based 投影才能实时预览新笔触。
+        if (!this.isDrawing && this.hasValidCommittedVolumeForMask()) {
             const volStr = `${this.committedVolumeAabbMin.x.toFixed(3)},${this.committedVolumeAabbMax.x.toFixed(3)}`;
             const signature = `vol:${volStr}:${posStr}:${fwdStr}`;
             if (signature === this._lastMaskSignature) return;
@@ -1275,10 +1377,13 @@ export class BloomController {
         }
 
         const allPoints = this.getPointsForMask();
-        const pointSig = allPoints.length + (allPoints.length > 0 && allPoints[0]?.position
-            ? `,${allPoints[0].position.x.toFixed(2)},${allPoints[0].position.y.toFixed(2)},${allPoints[0].position.z.toFixed(2)}`
+        const lastPt = allPoints.length > 0 ? allPoints[allPoints.length - 1] : null;
+        const pointSig = allPoints.length + (lastPt?.position
+            ? `,${lastPt.position.x.toFixed(2)},${lastPt.position.y.toFixed(2)},${lastPt.position.z.toFixed(2)}`
             : '');
-        const signature = `${allPoints.length}:${pointSig}:${posStr}:${fwdStr}`;
+        // 绘制中加入 isDrawing 标记使每次新增点都能重建 mask
+        const drawTag = this.isDrawing ? `:draw:${allPoints.length}` : '';
+        const signature = `${allPoints.length}:${pointSig}:${posStr}:${fwdStr}${drawTag}`;
         if (signature === this._lastMaskSignature) return;
         this._lastMaskSignature = signature;
 

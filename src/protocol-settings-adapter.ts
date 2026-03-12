@@ -177,22 +177,17 @@ export function applyLightDetail(
 
 // --- BLOOM 映射 ---
 
-/** BLOOM_SET */
-export function applyBloomSet(global: Global, enabled: boolean): void {
-    const settings = global.settings as ExperienceSettings;
-    const b = ensureBloom(settings);
-    (b as Record<string, unknown>).enabled = enabled;
-    global.events.fire('postEffect:changed');
-}
-
-/** BLOOM_INTENSITY_UPDATE（协议值 0–16 与内部 0–0.2 均可支持：若 > 1 则视为 0–16 并归一化到 0–0.2） */
+/** BLOOM_INTENSITY_UPDATE（协议值 0–16 与内部 0–0.2 均可支持：若 > 1 则视为 0–16 并归一化到 0–0.2）。
+ * 同时写 bloom.enabled：传 0 关辉光，非零开辉光并设强度，可完全取代 BLOOM_SET。 */
 export function applyBloomIntensityUpdate(global: Global, value: number): void {
     const settings = global.settings as ExperienceSettings;
     const b = ensureBloom(settings);
     const clamped = value > 1
         ? Math.max(0, Math.min(16, value)) / 80
         : Math.max(0, Math.min(1, value));
-    (b as Record<string, unknown>).intensity = Math.min(0.2, Math.max(0, clamped));
+    const intensity = Math.min(0.2, Math.max(0, clamped));
+    (b as Record<string, unknown>).intensity = intensity;
+    (b as Record<string, unknown>).enabled = intensity > 0;
     global.events.fire('postEffect:changed');
 }
 

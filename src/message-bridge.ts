@@ -24,7 +24,6 @@ import {
     applyLightAdd,
     applyLightSelect,
     applyLightDetail,
-    applyBloomSet,
     applyBloomIntensityUpdate,
     applyBloomThresholdUpdate,
     applyBloomLocalLightRegionDelete,
@@ -74,11 +73,11 @@ type InboundPayload =
     | { type: 'LIGHT_BRUSH_START' }
     | { type: 'LIGHT_ERASER_START' }
     | { type: 'LIGHT_BRUSH_CLEAR' }
-    | { type: 'LIGHT_BRUSH_COLOR_UPDATE'; color?: number[] }
+    | { type: 'LIGHT_BRUSH_COLOR_UPDATE'; id?: string; value?: { tintColor?: number[]; tintBlend?: number } }
+    | { type: 'LIGHT_BRUSH_BRIGHTNESS_UPDATE'; id?: string; value?: number }
     | { type: 'LIGHT_BRUSH_FINISH' }
     | { type: 'LIGHT_BRUSH_DELETE'; id?: string }
     | { type: 'LIGHT_BRUSH_BLOOM_UPDATE'; value?: number }
-    | { type: 'BLOOM_SET'; value?: boolean }
     | { type: 'BLOOM_INTENSITY_UPDATE'; value?: number }
     | { type: 'BLOOM_THRESHOLD_UPDATE'; value?: number }
     | { type: 'SHADOW_SET'; value?: boolean }
@@ -315,12 +314,8 @@ const initPostMessageBridge = (global: Global) => {
             if (typeof lightGlobalVal === 'number') applyLightGlobalSet(global, lightGlobalVal);
             break;
         }
-        case 'BLOOM_SET': {
-            const bloomVal = (p as { value?: boolean }).value;
-            if (typeof bloomVal === 'boolean') applyBloomSet(global, bloomVal);
-            break;
-        }
-        case 'BLOOM_INTENSITY_UPDATE': {
+        case 'BLOOM_INTENSITY_UPDATE':
+        {
             const bloomIntVal = (p as { value?: number }).value;
             if (typeof bloomIntVal === 'number') applyBloomIntensityUpdate(global, bloomIntVal);
             break;
@@ -361,6 +356,7 @@ const initPostMessageBridge = (global: Global) => {
         case 'LIGHT_ERASER_START':
         case 'LIGHT_BRUSH_CLEAR':
         case 'LIGHT_BRUSH_COLOR_UPDATE':
+        case 'LIGHT_BRUSH_BRIGHTNESS_UPDATE':
         case 'LIGHT_BRUSH_FINISH':
         case 'LIGHT_BRUSH_BLOOM_UPDATE':
             // 笔刷协议映射到内部事件，由 vfx/bloom-brush 等处理

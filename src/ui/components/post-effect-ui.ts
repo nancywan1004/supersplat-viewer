@@ -3,6 +3,7 @@ import type { ExperienceSettings } from '../../schemas/v2';
 import { updatePointLightsFromSettings } from '../../light';
 import { pushEditHistory } from '../../edit-history';
 import { ensureBloom as ensureBloomFromAdapter, ensureShadow as ensureShadowFromAdapter } from '../../protocol-settings-adapter';
+import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
 const POST_EFFECT_PANEL_HTML = `
 <div class="postEffectPanel">
@@ -150,6 +151,7 @@ function renderBloomLocalLightRegionsList(
     firePostEffectChanged: () => void,
     pushEditHistorySafe: () => void,
     onSelectRegion: (regionId: string | null) => void,
+    editUiTransport: 'internal' | 'message-bridge',
     refreshList?: () => void
 ): void {
     if (!container) return;
@@ -190,6 +192,12 @@ function renderBloomLocalLightRegionsList(
 
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (editUiTransport === 'message-bridge') {
+                // 走协议：由 message-bridge 统一删除并触发 listChanged 刷新
+                sendEditProtocolMessage({ type: 'LIGHT_BRUSH_DELETE', id: region.id });
+                return;
+            }
+
             const list = b.localLightRegions ?? [];
             (b as any).localLightRegions = list.filter((r: LocalLightRegion) => r.id !== region.id);
             if ((b as any).activeLocalLightRegionId === region.id) {
@@ -249,6 +257,9 @@ function renderBloomLocalLightRegionsList(
                 const val = Math.max(-1, Math.min(1, parseFloat(brightnessSlider.value) || 0));
                 region.localBrightness = val;
                 brightnessValueSpan.textContent = val.toFixed(2);
+                if (editUiTransport === 'message-bridge') {
+                    sendEditProtocolMessage({ type: 'LIGHT_BRUSH_BRIGHTNESS_UPDATE', id: region.id, value: val });
+                }
                 firePostEffectChanged();
             });
             brightnessSlider.addEventListener('change', () => pushEditHistorySafe());
@@ -260,6 +271,13 @@ function renderBloomLocalLightRegionsList(
                 const g = parseInt(hex.slice(3, 5), 16) / 255;
                 const b = parseInt(hex.slice(5, 7), 16) / 255;
                 region.tintColor = [r, g, b];
+                if (editUiTransport === 'message-bridge') {
+                    sendEditProtocolMessage({
+                        type: 'LIGHT_BRUSH_COLOR_UPDATE',
+                        id: region.id,
+                        value: { tintColor: [r, g, b], tintBlend: Math.max(0, Math.min(1, region.tintBlend ?? 0)) }
+                    });
+                }
                 firePostEffectChanged();
             });
             tintColorInput.addEventListener('change', () => pushEditHistorySafe());
@@ -269,6 +287,14 @@ function renderBloomLocalLightRegionsList(
                 const val = Math.max(0, Math.min(1, parseFloat(tintBlendSlider.value) || 0));
                 region.tintBlend = val;
                 tintBlendValueSpan.textContent = val.toFixed(2);
+                if (editUiTransport === 'message-bridge') {
+                    const tc = region.tintColor ?? [1, 1, 1];
+                    sendEditProtocolMessage({
+                        type: 'LIGHT_BRUSH_COLOR_UPDATE',
+                        id: region.id,
+                        value: { tintColor: [tc[0], tc[1], tc[2]], tintBlend: val }
+                    });
+                }
                 firePostEffectChanged();
             });
             tintBlendSlider.addEventListener('change', () => pushEditHistorySafe());
@@ -381,8 +407,8 @@ export function initPostEffectUI(global: Global): () => void {
             events.fire('bloomLocalLightRegion:listChanged');
         };
         const refreshRegionList = () =>
-            renderBloomLocalLightRegionsList(bloomLocalLightRegionsList, ensureBloom(settings), firePostEffectChanged, pushEditHistorySafe, onSelectRegion, refreshRegionList);
-        renderBloomLocalLightRegionsList(bloomLocalLightRegionsList, b, firePostEffectChanged, pushEditHistorySafe, onSelectRegion, refreshRegionList);
+            renderBloomLocalLightRegionsList(bloomLocalLightRegionsList, ensureBloom(settings), firePostEffectChanged, pushEditHistorySafe, onSelectRegion, editUiTransport, refreshRegionList);
+        renderBloomLocalLightRegionsList(bloomLocalLightRegionsList, b, firePostEffectChanged, pushEditHistorySafe, onSelectRegion, editUiTransport, refreshRegionList);
         if (bloomDrawModeBar) bloomDrawModeBar.style.display = currentDraftId ? 'block' : 'none';
         const sh = ensureShadow(settings);
         if (shadowEnableCheck) shadowEnableCheck.classList.toggle('active', sh.enabled);
@@ -399,14 +425,21 @@ export function initPostEffectUI(global: Global): () => void {
     };
 
     const firePostEffectChanged = () => events.fire('postEffect:changed');
+    const editUiTransport = getEditUiTransport(global);
 
     if (bloomIntensitySlider && bloomIntensityValue) {
         bloomIntensitySlider.addEventListener('input', () => {
-            const b = ensureBloom(settings);
-            b.intensity = Math.min(0.2, Math.max(0, parseFloat(bloomIntensitySlider.value) || 0));
-            b.enabled = b.intensity > 0;
-            bloomIntensityValue.textContent = b.intensity.toFixed(2);
-            firePostEffectChanged();
+            const raw = parseFloat(bloomIntensitySlider.value) || 0;
+            const value = Math.min(0.2, Math.max(0, raw));
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'BLOOM_INTENSITY_UPDATE', value });
+            } else {
+                const b = ensureBloom(settings);
+                b.intensity = value;
+                b.enabled = value > 0;
+                firePostEffectChanged();
+            }
+            bloomIntensityValue.textContent = value.toFixed(2);
         });
         bloomIntensitySlider.addEventListener('change', () => {
             pushEditHistorySafe();
@@ -427,10 +460,15 @@ export function initPostEffectUI(global: Global): () => void {
 
     if (bloomThresholdSlider && bloomThresholdValue) {
         bloomThresholdSlider.addEventListener('input', () => {
-            const b = ensureBloom(settings);
-            (b as any).threshold = Math.max(0, Math.min(5, parseFloat(bloomThresholdSlider!.value) || 0));
-            bloomThresholdValue!.textContent = (b as any).threshold.toFixed(2);
-            firePostEffectChanged();
+            const value = Math.max(0, Math.min(5, parseFloat(bloomThresholdSlider!.value) || 0));
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'BLOOM_THRESHOLD_UPDATE', value });
+            } else {
+                const b = ensureBloom(settings);
+                (b as any).threshold = value;
+                firePostEffectChanged();
+            }
+            bloomThresholdValue!.textContent = value.toFixed(2);
         });
         bloomThresholdSlider.addEventListener('change', () => {
             pushEditHistorySafe();
@@ -461,7 +499,11 @@ export function initPostEffectUI(global: Global): () => void {
             b.bloomBrushBrightness = 1;
             b.bloomBrushCommittedBrightness = 1;
             events.fire('bloomBrush:reset');
-            (events as any).fire('messageBridge:lightBrush', { type: 'LIGHT_BRUSH_START' });
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'LIGHT_BRUSH_START' });
+            } else {
+                (events as any).fire('messageBridge:lightBrush', { type: 'LIGHT_BRUSH_START' });
+            }
             setDrawModeVisible(true);
             setDrawModeButtonsState(false);
             setDrawToolActive('brush');
@@ -495,7 +537,7 @@ export function initPostEffectUI(global: Global): () => void {
             firePostEffectChanged();
         };
         const refreshRegionList2 = () =>
-            renderBloomLocalLightRegionsList(bloomLocalLightRegionsList, ensureBloom(settings), firePostEffectChanged, pushEditHistorySafe, onSelectRegion2, refreshRegionList2);
+            renderBloomLocalLightRegionsList(bloomLocalLightRegionsList, ensureBloom(settings), firePostEffectChanged, pushEditHistorySafe, onSelectRegion2, editUiTransport, refreshRegionList2);
         refreshRegionList2();
     };
     events.on('bloomLocalLightRegion:listChanged', regionListChangedHandler);
@@ -544,7 +586,11 @@ export function initPostEffectUI(global: Global): () => void {
     if (bloomDrawModeBrushBtn) {
         bloomDrawModeBrushBtn.addEventListener('click', () => {
             setDrawToolActive('brush');
-            (events as any).fire('messageBridge:lightBrush', { type: 'LIGHT_BRUSH_START' });
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'LIGHT_BRUSH_START' });
+            } else {
+                (events as any).fire('messageBridge:lightBrush', { type: 'LIGHT_BRUSH_START' });
+            }
             firePostEffectChanged();
         });
     }
@@ -552,7 +598,11 @@ export function initPostEffectUI(global: Global): () => void {
     if (bloomDrawModeEraserBtn) {
         bloomDrawModeEraserBtn.addEventListener('click', () => {
             setDrawToolActive('eraser');
-            (events as any).fire('messageBridge:lightBrush', { type: 'LIGHT_ERASER_START' });
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'LIGHT_ERASER_START' });
+            } else {
+                (events as any).fire('messageBridge:lightBrush', { type: 'LIGHT_ERASER_START' });
+            }
             firePostEffectChanged();
         });
     }
