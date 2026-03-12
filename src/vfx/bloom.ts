@@ -1199,7 +1199,8 @@ export class BloomController {
         const screenPos = new Vec3();
         const worldPos = new Vec3();
         const stride = 2;
-        const maskRadius = 2.5;
+        // 半径足够大、且用径向渐变，使体素圆重叠后融合成连续光晕，避免出现网格状小圆点
+        const maskRadius = 12;
         const threshold = Math.round(0.002 * 255);
 
         ctx.fillStyle = '#000000';
@@ -1222,7 +1223,12 @@ export class BloomController {
                     const g = Math.min(1, val / 255);
                     const gray = Math.round(g * 255);
                     const h = gray.toString(16).padStart(2, '0');
-                    ctx.fillStyle = '#' + h + h + h;
+                    const color = '#' + h + h + h;
+                    const gradient = ctx.createRadialGradient(maskX, maskY, 0, maskX, maskY, maskRadius);
+                    gradient.addColorStop(0, color);
+                    gradient.addColorStop(0.4, color);
+                    gradient.addColorStop(1, '#000000');
+                    ctx.fillStyle = gradient;
                     ctx.beginPath();
                     ctx.arc(maskX, maskY, maskRadius, 0, Math.PI * 2);
                     ctx.fill();
