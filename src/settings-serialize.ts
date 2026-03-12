@@ -81,6 +81,32 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
                 bloom.activeLocalLightRegionId =
                     bloom.localLightRegions.length > 0 ? bloom.localLightRegions[0].id : null;
             }
+
+            // 持久化约束：localLightRegions[*].worldSpace 只保存 committed + committedBrightness，
+            // 不保留 points 草稿，避免保存过程中把未完成的笔刷轨迹写死到配置里。
+            if (Array.isArray(bloom.localLightRegions)) {
+                bloom.localLightRegions = bloom.localLightRegions.map((r: any) => {
+                    if (!r || typeof r !== 'object') return r;
+                    const ws = r.worldSpace;
+                    if (ws && typeof ws === 'object') {
+                        // 始终清空 points，仅保留 committed（已提交区域）与 committedBrightness
+                        if (!Array.isArray(ws.committed)) {
+                            ws.committed = [];
+                        }
+                        ws.points = [];
+
+                        // 将有效亮度写回 committedBrightness，保证重新加载时 WorldSpaceBloomData 有一致的快照：
+                        // 目前仅根据局部颜色亮度 localBrightness 计算，不再使用每区域 Bloom 强度 slider
+                        const colorBrightness =
+                            typeof r.localBrightness === 'number'
+                                ? Math.max(-1, Math.min(1, r.localBrightness))
+                                : 0;
+                        const effectiveBrightness = colorBrightness;
+                        ws.committedBrightness = effectiveBrightness;
+                    }
+                    return r;
+                });
+            }
         }
     }
     if (!Array.isArray(out.animTracks)) out.animTracks = [];

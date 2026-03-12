@@ -87,6 +87,43 @@ type LightingSettings = {
     lights: (PointLightConfig | DirectionalLightConfig | SpotLightConfig)[]
 };
 
+/**
+ * 世界空间 Bloom 区域的序列化结构，
+ * 需与 WorldSpaceBloomData.toJSON() 保持兼容。
+ */
+type WorldSpaceBloomRegionJSON = {
+    points: Array<{
+        position: [number, number, number],
+        radius: number,
+        intensity: number,
+    }>,
+    committed: Array<{
+        position: [number, number, number],
+        radius: number,
+        intensity: number,
+    }>,
+    committedBrightness?: number,
+};
+
+/**
+ * 单个局部亮灯区域配置。
+ */
+type LocalLightRegion = {
+    /** 稳定 ID，用于内部引用与父级托管 */
+    id: string;
+    /** 列表显示名称，例如「亮灯区域01」 */
+    name: string;
+    /** 世界空间 Bloom 区域数据（与 WorldSpaceBloomData.toJSON 兼容） */
+    worldSpace: WorldSpaceBloomRegionJSON;
+    /**
+     * 区域局部亮度 -1～1：
+     * - 0 不变
+     * - <0 调暗
+     * - >0 调亮
+     */
+    localBrightness: number;
+};
+
 type SceneAsset = {
     id: string,
     type: 'image' | 'mesh' | 'gaussian',
@@ -104,4 +141,4 @@ type SceneAsset = {
     }
 }
 
-export type { RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset };
+export type { RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset, LocalLightRegion, WorldSpaceBloomRegionJSON };

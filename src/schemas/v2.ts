@@ -1,4 +1,4 @@
-import type { LodSettings, LodPreset, LodPlatform, RevealEffect, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset } from "./v2-custom";
+import type { LodSettings, LodPreset, LodPlatform, RevealEffect, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset, LocalLightRegion, WorldSpaceBloomRegionJSON } from "./v2-custom";
 
 type AnimTrack = {
     name: string,
@@ -46,43 +46,6 @@ type Annotation = {
     camera: Camera;
 };
 
-/**
- * 世界空间 Bloom 区域的序列化结构，
- * 需与 WorldSpaceBloomData.toJSON() 保持兼容。
- */
-type WorldSpaceBloomRegionJSON = {
-    points: Array<{
-        position: [number, number, number],
-        radius: number,
-        intensity: number,
-    }>,
-    committed: Array<{
-        position: [number, number, number],
-        radius: number,
-        intensity: number,
-    }>,
-    committedBrightness?: number,
-};
-
-/**
- * 单个局部亮灯区域配置。
- */
-type LocalLightRegion = {
-    /** 稳定 ID，用于内部引用与父级托管 */
-    id: string;
-    /** 列表显示名称，例如「亮灯区域01」 */
-    name: string;
-    /** 世界空间 Bloom 区域数据（与 WorldSpaceBloomData.toJSON 兼容） */
-    worldSpace: WorldSpaceBloomRegionJSON;
-    /**
-     * 区域局部亮度 -1～1：
-     * - 0 不变
-     * - <0 调暗
-     * - >0 调亮
-     */
-    localBrightness: number;
-};
-
 type PostEffectSettings = {
     sharpness: {
         enabled: boolean,
@@ -101,9 +64,18 @@ type PostEffectSettings = {
         bloomBrushSize: number,
         /** 选中区域局部亮度 -1～1（当前滑块）；Set 时写入 bloomBrushCommittedBrightness */
         bloomBrushBrightness?: number,
-        /** 已提交区域的局部亮度 -1～1，与 worldSpacePoints.committed 一起每帧在 shader 中应用 */
+        /**
+         * 已提交区域的局部亮度 -1～1（旧字段，已废弃）：
+         * - 仅用于与旧版 bloomBrush/worldSpacePoints 配置兼容；
+         * - 新的多区域模型下，请使用 LocalLightRegion.localBrightness。
+         */
         bloomBrushCommittedBrightness?: number,
-        /** 世界空间 bloom 数据（序列化后的 WorldSpaceBloomData）；committedBrightness 与 committed 一起由 Set 固化（旧结构） */
+        /**
+         * DEPRECATED: 单区域时代的世界空间 bloom 数据快照。
+         * - 仅作为「旧配置输入源」被读取，用于在 importSettings 时迁移到单个 LocalLightRegion；
+         * - 在存在 localLightRegions/activeLocalLightRegionId 的多区域模型下，运行时与保存流程不再写入该字段；
+         * - 新代码不应再依赖或扩展 worldSpacePoints，后续可以在确认上游完全迁移后移除。
+         */
         worldSpacePoints?: WorldSpaceBloomRegionJSON,
         /**
          * 可选：局部亮灯区域列表。

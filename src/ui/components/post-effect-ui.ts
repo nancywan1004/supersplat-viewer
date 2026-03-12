@@ -1,15 +1,13 @@
 import type { Global } from '../../types';
+import type { ExperienceSettings } from '../../schemas/v2';
 import { updatePointLightsFromSettings } from '../../light';
 import { pushEditHistory } from '../../edit-history';
+import { ensureBloom as ensureBloomFromAdapter, ensureShadow as ensureShadowFromAdapter } from '../../protocol-settings-adapter';
 
 const POST_EFFECT_PANEL_HTML = `
 <div class="postEffectPanel">
-  <div class="postEffectSectionLabel collapsible collapsed" id="bloomSectionLabel" title="Click to expand/collapse">Bloom</div>
-  <div id="bloomSectionContent" class="postEffectSectionContent collapsed">
-  <div class="settingsRow">
-    <div id="bloomEnableCheck" class="checkMark">✓</div>
-    <div id="bloomEnableOption" class="postEffectOption">Enable</div>
-  </div>
+  <div class="postEffectSectionLabel collapsible" id="bloomSectionLabel" title="Click to expand/collapse">Bloom</div>
+  <div id="bloomSectionContent" class="postEffectSectionContent">
   <div class="settingsRow">
     <label for="bloomIntensitySlider" class="postEffectLabel">Intensity:</label>
     <div class="postEffectSliderWrap">
@@ -35,25 +33,22 @@ const POST_EFFECT_PANEL_HTML = `
     <div id="bloomDebugCheck" class="checkMark">✓</div>
     <div id="bloomDebugOption" class="postEffectOption">Bloom Debug</div>
   </div>
-  <div class="settingsRow">
-    <div id="bloomBrushCheck" class="checkMark">✓</div>
-    <div id="bloomBrushOption" class="postEffectOption">Bloom Brush (局部)</div>
+  <div class="settingsRow" style="align-items:center;gap:6px;">
+    <span class="postEffectLabel" style="flex:1;">新建亮灯区域</span>
+    <button type="button" id="bloomNewRegionBtn" class="postEffectOption" style="padding:2px 8px;font-size:14px;line-height:1;" title="新建亮灯区域">+</button>
   </div>
-  <div id="bloomBrushOptionsRow" class="settingsRow hidden" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px;">
-    <label for="bloomBrushSizeSlider" class="postEffectLabel" style="min-width:auto;">Brush:</label>
-    <input type="range" id="bloomBrushSizeSlider" min="1" max="200" step="1" value="30" class="postEffectSlider" style="width:60px;">
-    <span id="bloomBrushSizeValue" class="postEffectSliderValue" style="min-width:24px;">30</span>
-    <button type="button" id="bloomBrushSetBtn" class="postEffectOption" style="padding:2px 6px;font-size:11px;">Set</button>
-    <button type="button" id="bloomBrushClearBtn" class="postEffectOption" style="padding:2px 6px;font-size:11px;">Clear</button>
-    <button type="button" id="bloomBrushResetBtn" class="postEffectOption" style="padding:2px 6px;font-size:11px;">Reset</button>
-  </div>
-  <div id="bloomBrushBrightnessRow" class="settingsRow hidden">
-    <label for="bloomBrushBrightnessSlider" class="postEffectLabel">Dark ← 0 → Bright:</label>
-    <div class="postEffectSliderWrap">
-      <input type="range" id="bloomBrushBrightnessSlider" min="-1" max="1" step="0.05" value="0" class="postEffectSlider">
-      <span id="bloomBrushBrightnessValue" class="postEffectSliderValue">0.00</span>
+  <div id="bloomDrawModeBar" class="bloomDrawModeBar" style="display:none;margin-top:6px;padding:6px;background:var(--panel-bg, #2a2a2a);border-radius:4px;">
+    <div class="settingsRow" style="align-items:center;gap:8px;margin-bottom:6px;">
+      <span class="postEffectLabel" style="flex:1;">绘制亮灯区域</span>
+      <button type="button" id="bloomDrawModeCompleteBtn" class="postEffectOption" style="padding:4px 10px;">完成</button>
+      <button type="button" id="bloomDrawModeAbandonBtn" class="postEffectOption" style="padding:4px 10px;">放弃</button>
+    </div>
+    <div class="settingsRow" style="align-items:center;gap:6px;flex-wrap:wrap;">
+      <button type="button" id="bloomDrawModeBrushBtn" class="postEffectOption" style="padding:4px 10px;" title="笔刷">笔刷</button>
+      <button type="button" id="bloomDrawModeEraserBtn" class="postEffectOption" style="padding:4px 10px;" title="擦除">擦除</button>
     </div>
   </div>
+  <div id="bloomLocalLightRegionsList" class="bloomRegionsList" style="margin-top:4px;"></div>
   </div>
   <div class="postEffectSectionLabel collapsible collapsed" id="shadowSectionLabel" title="Click to expand/collapse">Shadow</div>
   <div id="shadowSectionContent" class="postEffectSectionContent collapsed">
@@ -95,6 +90,22 @@ const POST_EFFECT_PANEL_HTML = `
 </div>
 `.trim();
 
+/** 世界空间 Bloom 区域 JSON，与 WorldSpaceBloomData.toJSON 兼容 */
+type WorldSpaceBloomRegionJSON = {
+    points: Array<{ position: [number, number, number]; radius: number; intensity: number }>;
+    committed: Array<{ position: [number, number, number]; radius: number; intensity: number }>;
+    committedBrightness?: number;
+};
+
+/** 局部亮灯区域（与 schemas/v2 LocalLightRegion 一致） */
+type LocalLightRegion = {
+    id: string;
+    name: string;
+    worldSpace: WorldSpaceBloomRegionJSON;
+    /** 局部颜色亮度 -1～1 */
+    localBrightness: number;
+};
+
 type BloomSettings = {
     enabled: boolean;
     intensity: number;
@@ -103,35 +114,14 @@ type BloomSettings = {
     bloomDebug: boolean;
     bloomBrush: boolean;
     bloomBrushSize: number;
-    /** 选中区域局部亮度 -1～1，0 不变，<0 调暗，>0 调亮；Set 时写入 bloomBrushCommittedBrightness */
     bloomBrushBrightness: number;
-    /** 已提交区域亮度，与 worldSpacePoints.committed 在 shader 中每帧应用 */
     bloomBrushCommittedBrightness?: number;
+    localLightRegions?: LocalLightRegion[];
+    activeLocalLightRegionId?: string | null;
 };
 
 const ensureBloom = (settings: Global['settings']): BloomSettings => {
-    if (!settings.postEffectSettings) (settings as any).postEffectSettings = {};
-    const b = settings.postEffectSettings.bloom;
-    if (!b) {
-        (settings.postEffectSettings as any).bloom = {
-            enabled: false,
-            intensity: 0.1,
-            blurLevel: 2,
-            threshold: 0.2,
-            bloomDebug: false,
-            bloomBrush: false,
-            bloomBrushSize: 30,
-            bloomBrushBrightness: 0
-        };
-    } else {
-        if ((b as any).threshold === undefined) (b as any).threshold = 0.2;
-        if ((b as any).bloomDebug === undefined) (b as any).bloomDebug = false;
-        if ((b as any).bloomBrush === undefined) (b as any).bloomBrush = false;
-        if ((b as any).bloomBrushSize === undefined) (b as any).bloomBrushSize = 30;
-        if (typeof (b as any).bloomBrushBrightness !== 'number') (b as any).bloomBrushBrightness = 0;
-        if (typeof (b as any).bloomBrushCommittedBrightness !== 'number') (b as any).bloomBrushCommittedBrightness = 0;
-    }
-    return settings.postEffectSettings.bloom as BloomSettings;
+    return ensureBloomFromAdapter(settings as ExperienceSettings) as BloomSettings;
 };
 
 type ShadowSettings = {
@@ -143,24 +133,111 @@ type ShadowSettings = {
 };
 
 const ensureShadow = (settings: Global['settings']): ShadowSettings => {
-    if (!settings.postEffectSettings) (settings as any).postEffectSettings = {};
-    const s = (settings.postEffectSettings as any).shadow;
-    if (!s) {
-        (settings.postEffectSettings as any).shadow = {
-            enabled: true,
-            darken: 0,
-            castShadows: true,
-            debugVisual: false,
-            sphereRadius: 0.5
-        };
-    } else {
-        if (typeof (s as any).darken !== 'number') (s as any).darken = 0;
-        if ((s as any).castShadows === undefined) (s as any).castShadows = true;
-        if ((s as any).debugVisual === undefined) (s as any).debugVisual = false;
-        if (typeof (s as any).sphereRadius !== 'number') (s as any).sphereRadius = 0.5;
-    }
-    return (settings.postEffectSettings as any).shadow as ShadowSettings;
+    return ensureShadowFromAdapter(settings as ExperienceSettings) as ShadowSettings;
 };
+
+/**
+ * 渲染「局部亮灯区域」列表：每个区域可展开/折叠，展开时显示局部亮度滑块。
+ * 点击标题切换展开并设为当前激活区域。
+ */
+function renderBloomLocalLightRegionsList(
+    container: HTMLElement | null,
+    b: BloomSettings,
+    firePostEffectChanged: () => void,
+    pushEditHistorySafe: () => void,
+    onSelectRegion: (regionId: string | null) => void,
+    refreshList?: () => void
+): void {
+    if (!container) return;
+    const regions = b.localLightRegions ?? [];
+    const activeId = b.activeLocalLightRegionId ?? null;
+
+    container.innerHTML = '';
+    for (const region of regions) {
+        const item = document.createElement('div');
+        item.className = 'bloomRegionItem';
+        item.dataset.regionId = region.id;
+        const expanded = region.id === activeId;
+
+        const header = document.createElement('div');
+        header.className = 'bloomRegionItemHeader settingsRow';
+        header.style.cursor = 'pointer';
+        header.style.alignItems = 'center';
+        header.style.gap = '4px';
+        const arrow = document.createElement('span');
+        arrow.className = 'bloomRegionItemArrow';
+        arrow.textContent = expanded ? '▼' : '▶';
+        arrow.style.fontSize = '10px';
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'bloomRegionItemName postEffectOption';
+        nameSpan.textContent = region.name;
+        nameSpan.style.flex = '1';
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'postEffectOption bloomRegionDeleteBtn';
+        deleteBtn.textContent = '×';
+        deleteBtn.title = '删除该亮灯区域';
+        deleteBtn.style.padding = '2px 6px';
+        deleteBtn.style.fontSize = '14px';
+        deleteBtn.style.cursor = 'pointer';
+        header.appendChild(arrow);
+        header.appendChild(nameSpan);
+        header.appendChild(deleteBtn);
+
+        deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const list = b.localLightRegions ?? [];
+            (b as any).localLightRegions = list.filter((r: LocalLightRegion) => r.id !== region.id);
+            if ((b as any).activeLocalLightRegionId === region.id) {
+                (b as any).activeLocalLightRegionId = (b as any).localLightRegions.length > 0
+                    ? (b as any).localLightRegions[0].id
+                    : null;
+            }
+            pushEditHistorySafe();
+            firePostEffectChanged();
+            if (refreshList) refreshList();
+        });
+
+        const body = document.createElement('div');
+        body.className = 'bloomRegionItemBody';
+        body.style.display = expanded ? 'block' : 'none';
+        body.style.paddingLeft = '12px';
+        body.style.marginBottom = '4px';
+        const brightness = Math.max(-1, Math.min(1, region.localBrightness ?? 0));
+        body.innerHTML = `
+          <div class="settingsRow">
+            <label class="postEffectLabel">局部颜色亮度:</label>
+            <div class="postEffectSliderWrap">
+              <input type="range" class="bloomRegionBrightnessSlider postEffectSlider" min="-1" max="1" step="0.05" value="${brightness}">
+              <span class="bloomRegionBrightnessValue postEffectSliderValue">${brightness.toFixed(2)}</span>
+            </div>
+          </div>`;
+        const brightnessSlider = body.querySelector('.bloomRegionBrightnessSlider') as HTMLInputElement;
+        const brightnessValueSpan = body.querySelector('.bloomRegionBrightnessValue') as HTMLElement;
+
+        header.addEventListener('click', (e) => {
+            // 若点击的是删除按钮，由 deleteBtn 自己处理，不切换展开
+            if ((e.target as Node)?.parentElement === deleteBtn || (e.target as HTMLElement) === deleteBtn) return;
+            const nextActiveId = expanded ? null : region.id;
+            onSelectRegion(nextActiveId);
+            if (refreshList) refreshList();
+        });
+
+        if (brightnessSlider && brightnessValueSpan) {
+            brightnessSlider.addEventListener('input', () => {
+                const val = Math.max(-1, Math.min(1, parseFloat(brightnessSlider.value) || 0));
+                region.localBrightness = val;
+                brightnessValueSpan.textContent = val.toFixed(2);
+                firePostEffectChanged();
+            });
+            brightnessSlider.addEventListener('change', () => pushEditHistorySafe());
+        }
+
+        item.appendChild(header);
+        item.appendChild(body);
+        container.appendChild(item);
+    }
+}
 
 /**
  * 初始化 Post Effect 面板 UI（Bloom、Shadow：Enable / Darken）。
@@ -175,8 +252,6 @@ export function initPostEffectUI(global: Global): () => void {
 
     container.innerHTML = POST_EFFECT_PANEL_HTML;
 
-    const bloomEnableCheck = container.querySelector('#bloomEnableCheck') as HTMLElement | null;
-    const bloomEnableOption = container.querySelector('#bloomEnableOption') as HTMLElement | null;
     const bloomIntensitySlider = container.querySelector('#bloomIntensitySlider') as HTMLInputElement | null;
     const bloomIntensityValue = container.querySelector('#bloomIntensityValue') as HTMLElement | null;
     const bloomBlurLevelSlider = container.querySelector('#bloomBlurLevelSlider') as HTMLInputElement | null;
@@ -185,17 +260,13 @@ export function initPostEffectUI(global: Global): () => void {
     const bloomThresholdValue = container.querySelector('#bloomThresholdValue') as HTMLElement | null;
     const bloomDebugCheck = container.querySelector('#bloomDebugCheck') as HTMLElement | null;
     const bloomDebugOption = container.querySelector('#bloomDebugOption') as HTMLElement | null;
-    const bloomBrushCheck = container.querySelector('#bloomBrushCheck') as HTMLElement | null;
-    const bloomBrushOption = container.querySelector('#bloomBrushOption') as HTMLElement | null;
-    const bloomBrushOptionsRow = container.querySelector('#bloomBrushOptionsRow') as HTMLElement | null;
-    const bloomBrushSizeSlider = container.querySelector('#bloomBrushSizeSlider') as HTMLInputElement | null;
-    const bloomBrushSizeValue = container.querySelector('#bloomBrushSizeValue') as HTMLElement | null;
-    const bloomBrushSetBtn = container.querySelector('#bloomBrushSetBtn') as HTMLButtonElement | null;
-    const bloomBrushClearBtn = container.querySelector('#bloomBrushClearBtn') as HTMLButtonElement | null;
-    const bloomBrushResetBtn = container.querySelector('#bloomBrushResetBtn') as HTMLButtonElement | null;
-    const bloomBrushBrightnessRow = container.querySelector('#bloomBrushBrightnessRow') as HTMLElement | null;
-    const bloomBrushBrightnessSlider = container.querySelector('#bloomBrushBrightnessSlider') as HTMLInputElement | null;
-    const bloomBrushBrightnessValue = container.querySelector('#bloomBrushBrightnessValue') as HTMLElement | null;
+    const bloomNewRegionBtn = container.querySelector('#bloomNewRegionBtn') as HTMLButtonElement | null;
+    const bloomDrawModeBar = container.querySelector('#bloomDrawModeBar') as HTMLElement | null;
+    const bloomDrawModeCompleteBtn = container.querySelector('#bloomDrawModeCompleteBtn') as HTMLButtonElement | null;
+    const bloomDrawModeAbandonBtn = container.querySelector('#bloomDrawModeAbandonBtn') as HTMLButtonElement | null;
+    const bloomDrawModeBrushBtn = container.querySelector('#bloomDrawModeBrushBtn') as HTMLButtonElement | null;
+    const bloomDrawModeEraserBtn = container.querySelector('#bloomDrawModeEraserBtn') as HTMLButtonElement | null;
+    const bloomLocalLightRegionsList = container.querySelector('#bloomLocalLightRegionsList') as HTMLElement | null;
     const bloomSectionLabel = container.querySelector('#bloomSectionLabel') as HTMLElement | null;
     const bloomSectionContent = container.querySelector('#bloomSectionContent') as HTMLElement | null;
     const shadowSectionLabel = container.querySelector('#shadowSectionLabel') as HTMLElement | null;
@@ -221,9 +292,37 @@ export function initPostEffectUI(global: Global): () => void {
         }
     };
 
+    /** 当前正在新建的草稿 ID，非空表示处于绘制模式 */
+    let currentDraftId: string | null = null;
+
+    const setDrawModeVisible = (visible: boolean) => {
+        if (bloomDrawModeBar) bloomDrawModeBar.style.display = visible ? 'block' : 'none';
+    };
+
+    const setDrawModeButtonsState = (hasPoints: boolean) => {
+        if (bloomDrawModeEraserBtn) bloomDrawModeEraserBtn.disabled = !hasPoints;
+    };
+
+    type DrawTool = 'brush' | 'eraser';
+    const setDrawToolActive = (tool: DrawTool) => {
+        if (bloomDrawModeBrushBtn) bloomDrawModeBrushBtn.classList.toggle('active', tool === 'brush');
+        if (bloomDrawModeEraserBtn) bloomDrawModeEraserBtn.classList.toggle('active', tool === 'eraser');
+    };
+
+    const exitDrawMode = () => {
+        const b = ensureBloom(settings);
+        b.bloomBrush = false;
+        b.activeLocalLightRegionId = currentDraftId === (b.activeLocalLightRegionId ?? null) ? null : b.activeLocalLightRegionId;
+        currentDraftId = null;
+        setDrawModeVisible(false);
+        setDrawModeButtonsState(false);
+        firePostEffectChanged();
+        events.fire('bloomLocalLightRegion:listChanged');
+    };
+
     const syncFromSettings = () => {
         const b = ensureBloom(settings);
-        if (bloomEnableCheck) bloomEnableCheck.classList.toggle('active', b.enabled);
+        b.enabled = Number(b.intensity) > 0;
         const intensity = Math.min(0.2, Math.max(0, Number(b.intensity)));
         if (bloomIntensitySlider) bloomIntensitySlider.value = String(intensity);
         if (bloomIntensityValue) bloomIntensityValue.textContent = intensity.toFixed(2);
@@ -233,15 +332,17 @@ export function initPostEffectUI(global: Global): () => void {
         if (bloomThresholdSlider) bloomThresholdSlider.value = String(th);
         if (bloomThresholdValue) bloomThresholdValue.textContent = th.toFixed(2);
         if (bloomDebugCheck) bloomDebugCheck.classList.toggle('active', b.bloomDebug ?? false);
-        if (bloomBrushCheck) bloomBrushCheck.classList.toggle('active', b.bloomBrush ?? false);
-        if (bloomBrushOptionsRow) bloomBrushOptionsRow.classList.toggle('hidden', !(b.bloomBrush ?? false));
-        if (bloomBrushBrightnessRow) bloomBrushBrightnessRow.classList.toggle('hidden', !(b.bloomBrush ?? false));
-        const brushSize = Math.max(1, Math.min(200, Number(b.bloomBrushSize ?? 30)));
-        if (bloomBrushSizeSlider) bloomBrushSizeSlider.value = String(brushSize);
-        if (bloomBrushSizeValue) bloomBrushSizeValue.textContent = String(brushSize);
-        const brightness = Math.max(-1, Math.min(1, Number((b as any).bloomBrushBrightness ?? 0)));
-        if (bloomBrushBrightnessSlider) bloomBrushBrightnessSlider.value = String(brightness);
-        if (bloomBrushBrightnessValue) bloomBrushBrightnessValue.textContent = brightness.toFixed(2);
+        const onSelectRegion = (regionId: string | null) => {
+            if (currentDraftId) return;
+            const bl = ensureBloom(settings);
+            bl.activeLocalLightRegionId = regionId;
+            firePostEffectChanged();
+            events.fire('bloomLocalLightRegion:listChanged');
+        };
+        const refreshRegionList = () =>
+            renderBloomLocalLightRegionsList(bloomLocalLightRegionsList, ensureBloom(settings), firePostEffectChanged, pushEditHistorySafe, onSelectRegion, refreshRegionList);
+        renderBloomLocalLightRegionsList(bloomLocalLightRegionsList, b, firePostEffectChanged, pushEditHistorySafe, onSelectRegion, refreshRegionList);
+        if (bloomDrawModeBar) bloomDrawModeBar.style.display = currentDraftId ? 'block' : 'none';
         const sh = ensureShadow(settings);
         if (shadowEnableCheck) shadowEnableCheck.classList.toggle('active', sh.enabled);
         if (shadowCastCheck) shadowCastCheck.classList.toggle('active', sh.castShadows !== false);
@@ -258,22 +359,11 @@ export function initPostEffectUI(global: Global): () => void {
 
     const firePostEffectChanged = () => events.fire('postEffect:changed');
 
-    if (bloomEnableOption && bloomEnableCheck) {
-        const toggleBloom = () => {
-            const b = ensureBloom(settings);
-            b.enabled = !b.enabled;
-            syncFromSettings();
-            firePostEffectChanged();
-            pushEditHistorySafe();
-        };
-        bloomEnableOption.addEventListener('click', toggleBloom);
-        bloomEnableCheck.addEventListener('click', toggleBloom);
-    }
-
     if (bloomIntensitySlider && bloomIntensityValue) {
         bloomIntensitySlider.addEventListener('input', () => {
             const b = ensureBloom(settings);
             b.intensity = Math.min(0.2, Math.max(0, parseFloat(bloomIntensitySlider.value) || 0));
+            b.enabled = b.intensity > 0;
             bloomIntensityValue.textContent = b.intensity.toFixed(2);
             firePostEffectChanged();
         });
@@ -319,40 +409,108 @@ export function initPostEffectUI(global: Global): () => void {
         bloomDebugCheck.addEventListener('click', toggleBloomDebug);
     }
 
-    if (bloomBrushOption && bloomBrushCheck) {
-        const toggleBloomBrush = () => {
+    if (bloomNewRegionBtn) {
+        bloomNewRegionBtn.addEventListener('click', () => {
             const b = ensureBloom(settings);
-            const wasOn = !!(b as any).bloomBrush;
-            (b as any).bloomBrush = !(b as any).bloomBrush;
-            if ((b as any).bloomBrush) (b as any).bloomDebug = false;
-            syncFromSettings();
+            if (currentDraftId) return;
+            const draftId = `draft-${Date.now()}`;
+            currentDraftId = draftId;
+            b.activeLocalLightRegionId = draftId;
+            b.bloomBrush = true;
+            b.bloomBrushBrightness = 1;
+            b.bloomBrushCommittedBrightness = 1;
+            events.fire('bloomBrush:reset');
+            (events as any).fire('messageBridge:lightBrush', { type: 'LIGHT_BRUSH_START' });
+            setDrawModeVisible(true);
+            setDrawModeButtonsState(false);
+            setDrawToolActive('brush');
+            (events as any).fire('bloomLocalLightRegion:draftEnter');
             firePostEffectChanged();
-        };
-        bloomBrushOption.addEventListener('click', toggleBloomBrush);
-        bloomBrushCheck.addEventListener('click', toggleBloomBrush);
+        });
     }
 
-    if (bloomBrushSizeSlider && bloomBrushSizeValue) {
-        bloomBrushSizeSlider.addEventListener('input', () => {
-            const b = ensureBloom(settings);
-            (b as any).bloomBrushSize = Math.max(1, Math.min(200, parseInt(bloomBrushSizeSlider!.value, 10) || 30));
-            bloomBrushSizeValue!.textContent = String((b as any).bloomBrushSize);
+    const worldSpaceChangedHandler = (data: { hasPoints?: boolean }) => {
+        if (currentDraftId) setDrawModeButtonsState(!!(data as any).hasPoints);
+    };
+    events.on('bloomLocalLightRegion:worldSpaceChanged', worldSpaceChangedHandler);
+
+    let handleExported: ((data: { worldSpaceJSON: WorldSpaceBloomRegionJSON; committedBrightness: number }) => void) | null = null;
+    const exportedHandler = (data: { worldSpaceJSON?: WorldSpaceBloomRegionJSON; committedBrightness?: number }) => {
+        if (handleExported && currentDraftId) {
+            const d = data as { worldSpaceJSON: WorldSpaceBloomRegionJSON; committedBrightness: number };
+            handleExported(d);
+        }
+    };
+    events.on('bloomLocalLightRegion:exported', exportedHandler);
+
+    // 仅在区域列表结构变化（增删区域、外部协议操作）时重建列表 DOM，
+    // 不监听 postEffect:changed（slider input 也会 fire 该事件，
+    // 若在 handler 里 innerHTML='' 重建列表则 slider 被销毁、拖动失效）。
+    const regionListChangedHandler = () => {
+        const onSelectRegion2 = (regionId: string | null) => {
+            if (currentDraftId) return;
+            const bl = ensureBloom(settings);
+            bl.activeLocalLightRegionId = regionId;
             firePostEffectChanged();
-        });
-        bloomBrushSizeSlider.addEventListener('change', () => {
-            pushEditHistorySafe();
+        };
+        const refreshRegionList2 = () =>
+            renderBloomLocalLightRegionsList(bloomLocalLightRegionsList, ensureBloom(settings), firePostEffectChanged, pushEditHistorySafe, onSelectRegion2, refreshRegionList2);
+        refreshRegionList2();
+    };
+    events.on('bloomLocalLightRegion:listChanged', regionListChangedHandler);
+
+    if (bloomDrawModeCompleteBtn) {
+        bloomDrawModeCompleteBtn.addEventListener('click', () => {
+            if (!currentDraftId) return;
+            const b = ensureBloom(settings);
+            events.fire('bloomBrush:set');
+            handleExported = (payload: { worldSpaceJSON: WorldSpaceBloomRegionJSON; committedBrightness: number }) => {
+                handleExported = null;
+                const regions = b.localLightRegions ?? [];
+                const nextIndex = regions.length + 1;
+                const newRegion: LocalLightRegion = {
+                    id: `region-${Date.now()}`,
+                    name: `亮灯区域${String(nextIndex).padStart(2, '0')}`,
+                    worldSpace: payload.worldSpaceJSON,
+                    localBrightness: Math.max(-1, Math.min(1, payload.committedBrightness ?? 1))
+                };
+                if (!b.localLightRegions) b.localLightRegions = [];
+                b.localLightRegions.push(newRegion);
+                b.activeLocalLightRegionId = newRegion.id;
+                currentDraftId = null;
+                (events as any).fire('bloomLocalLightRegion:draftExit');
+                b.bloomBrush = false;
+                setDrawModeVisible(false);
+                setDrawModeButtonsState(false);
+                pushEditHistorySafe();
+                firePostEffectChanged();
+                events.fire('bloomLocalLightRegion:listChanged');
+            };
+            (events as any).fire('bloomLocalLightRegion:requestExport');
         });
     }
-    if (bloomBrushBrightnessSlider && bloomBrushBrightnessValue) {
-        bloomBrushBrightnessSlider.addEventListener('input', () => {
-            const b = ensureBloom(settings);
-            const val = parseFloat(bloomBrushBrightnessSlider!.value);
-            (b as any).bloomBrushBrightness = Math.max(-1, Math.min(1, val));
-            bloomBrushBrightnessValue!.textContent = (Math.max(-1, Math.min(1, val))).toFixed(2);
+
+    if (bloomDrawModeAbandonBtn) {
+        bloomDrawModeAbandonBtn.addEventListener('click', () => {
+            if (!currentDraftId) return;
+            events.fire('bloomBrush:reset');
+            exitDrawMode();
+        });
+    }
+
+    if (bloomDrawModeBrushBtn) {
+        bloomDrawModeBrushBtn.addEventListener('click', () => {
+            setDrawToolActive('brush');
+            (events as any).fire('messageBridge:lightBrush', { type: 'LIGHT_BRUSH_START' });
             firePostEffectChanged();
         });
-        bloomBrushBrightnessSlider.addEventListener('change', () => {
-            pushEditHistorySafe();
+    }
+
+    if (bloomDrawModeEraserBtn) {
+        bloomDrawModeEraserBtn.addEventListener('click', () => {
+            setDrawToolActive('eraser');
+            (events as any).fire('messageBridge:lightBrush', { type: 'LIGHT_ERASER_START' });
+            firePostEffectChanged();
         });
     }
 
@@ -366,26 +524,6 @@ export function initPostEffectUI(global: Global): () => void {
         shadowSectionLabel.addEventListener('click', () => {
             shadowSectionContent.classList.toggle('collapsed');
             shadowSectionLabel.classList.toggle('collapsed', shadowSectionContent.classList.contains('collapsed'));
-        });
-    }
-
-    if (bloomBrushSetBtn) {
-        bloomBrushSetBtn.addEventListener('click', () => {
-            events.fire('bloomBrush:set');
-            firePostEffectChanged();
-        });
-    }
-
-    if (bloomBrushClearBtn) {
-        bloomBrushClearBtn.addEventListener('click', () => {
-            events.fire('bloomBrush:clear');
-            firePostEffectChanged();
-        });
-    }
-    if (bloomBrushResetBtn) {
-        bloomBrushResetBtn.addEventListener('click', () => {
-            events.fire('bloomBrush:reset');
-            firePostEffectChanged();
         });
     }
 
@@ -507,6 +645,9 @@ export function initPostEffectUI(global: Global): () => void {
     syncFromSettings();
 
     return () => {
+        events.off('bloomLocalLightRegion:worldSpaceChanged', worldSpaceChangedHandler);
+        events.off('bloomLocalLightRegion:exported', exportedHandler);
+        events.off('bloomLocalLightRegion:listChanged', regionListChangedHandler);
         container.innerHTML = '';
     };
 }

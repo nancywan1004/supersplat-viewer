@@ -29,6 +29,7 @@ uniform sampler2D uCommittedBrightnessVolume; // 64×4096 2D 图集，体素 (ix
 uniform vec3 uCommittedAabbMin;
 uniform vec3 uCommittedAabbMax;
 uniform float uCommittedBrightness;
+uniform float uCommittedVolumeEncodedBrightness; // 1 = volume stores effective brightness (0~1 = -1~1), 0 = mask * uniform
 
 vec3 l2g(vec3 c) { return pow(c, vec3(1.0 / 2.2)); }
 vec3 g2l(vec3 c) { return pow(c, vec3(2.2)); }
@@ -47,7 +48,19 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     vec3 wpos = worldPos.xyz;
 
     // 已提交区域：3D 体积纹理一次采样，无点数上限
-    if (abs(uCommittedBrightness) > 1e-6) {
+    if (uCommittedVolumeEncodedBrightness > 0.5) {
+        vec3 size = max(uCommittedAabbMax - uCommittedAabbMin, vec3(1e-6));
+        vec3 n = clamp((wpos - uCommittedAabbMin) / size, 0.0, 1.0);
+        float ix = floor(n.x * 64.0); float iy = floor(n.y * 64.0); float iz = floor(n.z * 64.0);
+        ix = min(ix, 63.0); iy = min(iy, 63.0); iz = min(iz, 63.0);
+        float u = (ix + 0.5) / 64.0;
+        float v = (iy + iz * 64.0 + 0.5) / 4096.0;
+        float encoded = texture2D(uCommittedBrightnessVolume, vec2(u, v)).r;
+        if (encoded > 0.002) {
+            float effectiveBrightness = encoded * 2.0 - 1.0;
+            color.rgb *= 1.0 + effectiveBrightness;
+        }
+    } else if (abs(uCommittedBrightness) > 1e-6) {
         vec3 size = max(uCommittedAabbMax - uCommittedAabbMin, vec3(1e-6));
         vec3 n = clamp((wpos - uCommittedAabbMin) / size, 0.0, 1.0);
         float ix = floor(n.x * 64.0); float iy = floor(n.y * 64.0); float iz = floor(n.z * 64.0);
@@ -136,6 +149,7 @@ uniform sampler2D uCommittedBrightnessVolume;
 uniform vec3 uCommittedAabbMin;
 uniform vec3 uCommittedAabbMax;
 uniform float uCommittedBrightness;
+uniform float uCommittedVolumeEncodedBrightness;
 
 vec3 l2g(vec3 c) { return pow(c, vec3(1.0 / 2.2)); }
 vec3 g2l(vec3 c) { return pow(c, vec3(2.2)); }
@@ -153,7 +167,20 @@ void modifySplatColor(vec3 center, inout vec4 color) {
 
     // 已提交区域：3D 体积纹理一次采样
     float committedMask = 0.0;
-    if (abs(uCommittedBrightness) > 1e-6) {
+    if (uCommittedVolumeEncodedBrightness > 0.5) {
+        vec3 size = max(uCommittedAabbMax - uCommittedAabbMin, vec3(1e-6));
+        vec3 n = clamp((wpos - uCommittedAabbMin) / size, 0.0, 1.0);
+        float ix = floor(n.x * 64.0); float iy = floor(n.y * 64.0); float iz = floor(n.z * 64.0);
+        ix = min(ix, 63.0); iy = min(iy, 63.0); iz = min(iz, 63.0);
+        float u = (ix + 0.5) / 64.0;
+        float v = (iy + iz * 64.0 + 0.5) / 4096.0;
+        float encoded = texture2D(uCommittedBrightnessVolume, vec2(u, v)).r;
+        if (encoded > 0.002) {
+            float effectiveBrightness = encoded * 2.0 - 1.0;
+            color.rgb *= 1.0 + effectiveBrightness;
+            committedMask = 1.0;
+        }
+    } else if (abs(uCommittedBrightness) > 1e-6) {
         vec3 size = max(uCommittedAabbMax - uCommittedAabbMin, vec3(1e-6));
         vec3 n = clamp((wpos - uCommittedAabbMin) / size, 0.0, 1.0);
         float ix = floor(n.x * 64.0); float iy = floor(n.y * 64.0); float iz = floor(n.z * 64.0);
@@ -253,6 +280,7 @@ var uCommittedBrightnessVolumeSampler: sampler;
 uniform uCommittedAabbMin: vec3f;
 uniform uCommittedAabbMax: vec3f;
 uniform uCommittedBrightness: f32;
+uniform uCommittedVolumeEncodedBrightness: f32;
 
 fn l2g(c: vec3f) -> vec3f { return pow(c, vec3f(1.0 / 2.2)); }
 fn g2l(c: vec3f) -> vec3f { return pow(c, vec3f(2.2)); }
@@ -267,7 +295,20 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     let worldPos = uniform.uModelMatrix * vec4f(center, 1.0);
     let wpos = worldPos.xyz / worldPos.w;
 
-    if (abs(uniform.uCommittedBrightness) > 1e-6) {
+    if (uniform.uCommittedVolumeEncodedBrightness > 0.5) {
+        let size = max(uniform.uCommittedAabbMax - uniform.uCommittedAabbMin, vec3f(1e-6));
+        let n = clamp((wpos - uniform.uCommittedAabbMin) / size, vec3f(0.0), vec3f(1.0));
+        let ix = min(floor(n.x * 64.0), 63.0);
+        let iy = min(floor(n.y * 64.0), 63.0);
+        let iz = min(floor(n.z * 64.0), 63.0);
+        let u = (ix + 0.5) / 64.0;
+        let v = (iy + iz * 64.0 + 0.5) / 4096.0;
+        let encoded = textureSample(uCommittedBrightnessVolume, uCommittedBrightnessVolumeSampler, vec2f(u, v)).r;
+        if (encoded > 0.002) {
+            let effectiveBrightness = encoded * 2.0 - 1.0;
+            (*color).rgb *= 1.0 + effectiveBrightness;
+        }
+    } else if (abs(uniform.uCommittedBrightness) > 1e-6) {
         let size = max(uniform.uCommittedAabbMax - uniform.uCommittedAabbMin, vec3f(1e-6));
         let n = clamp((wpos - uniform.uCommittedAabbMin) / size, vec3f(0.0), vec3f(1.0));
         let ix = min(floor(n.x * 64.0), 63.0);
@@ -362,6 +403,7 @@ var uCommittedBrightnessVolumeSampler: sampler;
 uniform uCommittedAabbMin: vec3f;
 uniform uCommittedAabbMax: vec3f;
 uniform uCommittedBrightness: f32;
+uniform uCommittedVolumeEncodedBrightness: f32;
 
 fn l2g(c: vec3f) -> vec3f { return pow(c, vec3f(1.0 / 2.2)); }
 fn g2l(c: vec3f) -> vec3f { return pow(c, vec3f(2.2)); }
@@ -377,7 +419,21 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     let wpos = worldPos.xyz / worldPos.w;
 
     var committedMask = 0.0;
-    if (abs(uniform.uCommittedBrightness) > 1e-6) {
+    if (uniform.uCommittedVolumeEncodedBrightness > 0.5) {
+        let size = max(uniform.uCommittedAabbMax - uniform.uCommittedAabbMin, vec3f(1e-6));
+        let n = clamp((wpos - uniform.uCommittedAabbMin) / size, vec3f(0.0), vec3f(1.0));
+        let ix = min(floor(n.x * 64.0), 63.0);
+        let iy = min(floor(n.y * 64.0), 63.0);
+        let iz = min(floor(n.z * 64.0), 63.0);
+        let u = (ix + 0.5) / 64.0;
+        let v = (iy + iz * 64.0 + 0.5) / 4096.0;
+        let encoded = textureSample(uCommittedBrightnessVolume, uCommittedBrightnessVolumeSampler, vec2f(u, v)).r;
+        if (encoded > 0.002) {
+            let effectiveBrightness = encoded * 2.0 - 1.0;
+            (*color).rgb *= 1.0 + effectiveBrightness;
+            committedMask = 1.0;
+        }
+    } else if (abs(uniform.uCommittedBrightness) > 1e-6) {
         let size = max(uniform.uCommittedAabbMax - uniform.uCommittedAabbMin, vec3f(1e-6));
         let n = clamp((wpos - uniform.uCommittedAabbMin) / size, vec3f(0.0), vec3f(1.0));
         let ix = min(floor(n.x * 64.0), 63.0);
@@ -511,6 +567,8 @@ class NightMode extends GsplatShaderEffect {
     private committedVolumeAabbMin: Vec3 = new Vec3(0, 0, 0);
     private committedVolumeAabbMax: Vec3 = new Vec3(1, 1, 1);
     private committedBrightness: number = 0;
+    /** 为 true 时体积纹理存储的是编码后的有效亮度 (0~1 = -1~1)，shader 直接解码应用；否则为 mask × uCommittedBrightness */
+    private committedVolumeEncodedBrightness: boolean = false;
 
     /**
      * Night ambient color
@@ -718,12 +776,19 @@ class NightMode extends GsplatShaderEffect {
         // no-op，由 BloomController 统一走 setCommittedBrightnessVolume
     }
 
-    /** 设置已提交亮度体积纹理与 AABB（由 BloomController 在 Set/加载/apply 时调用） */
-    setCommittedBrightnessVolume(volumeTexture: Texture | null, aabbMin: Vec3, aabbMax: Vec3, brightness: number) {
+    /** 设置已提交亮度体积纹理与 AABB（由 BloomController 在 Set/加载/apply 时调用）。options.volumeEncodedBrightness 为 true 表示多区域叠加烘焙，体积存的是有效亮度。 */
+    setCommittedBrightnessVolume(
+        volumeTexture: Texture | null,
+        aabbMin: Vec3,
+        aabbMax: Vec3,
+        brightness: number,
+        options?: { volumeEncodedBrightness?: boolean }
+    ) {
         this.committedVolumeTexture = volumeTexture;
         this.committedVolumeAabbMin.copy(aabbMin);
         this.committedVolumeAabbMax.copy(aabbMax);
         this.committedBrightness = Math.max(-1, Math.min(1, brightness));
+        this.committedVolumeEncodedBrightness = !!options?.volumeEncodedBrightness;
         if (this.materialsApplied.size > 0) {
             this.setCommittedUniforms();
         }
@@ -736,6 +801,7 @@ class NightMode extends GsplatShaderEffect {
         this.setUniform('uCommittedAabbMin', [this.committedVolumeAabbMin.x, this.committedVolumeAabbMin.y, this.committedVolumeAabbMin.z]);
         this.setUniform('uCommittedAabbMax', [this.committedVolumeAabbMax.x, this.committedVolumeAabbMax.y, this.committedVolumeAabbMax.z]);
         this.setUniform('uCommittedBrightness', this.committedBrightness);
+        this.setUniform('uCommittedVolumeEncodedBrightness', this.committedVolumeEncodedBrightness ? 1 : 0);
     }
 
     update(dt: number) {
@@ -775,7 +841,9 @@ class NightMode extends GsplatShaderEffect {
     }
 
     updateEffect(effectTime: number, dt: number) {
-        const needShader = Math.abs(this.nightFade) > 1e-6 || (this.committedVolumeTexture != null && Math.abs(this.committedBrightness) > 1e-6) || this.bloomBrushActive;
+        const needShader = Math.abs(this.nightFade) > 1e-6
+            || (this.committedVolumeTexture != null && (this.committedVolumeEncodedBrightness || Math.abs(this.committedBrightness) > 1e-6))
+            || this.bloomBrushActive;
         if (!needShader && this.materialsApplied.size > 0) {
             this.materialsApplied.clear();
             this.app.renderNextFrame = true;

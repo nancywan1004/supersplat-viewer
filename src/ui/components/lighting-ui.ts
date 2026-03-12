@@ -1,7 +1,9 @@
 import type { Global } from '../../types';
+import type { ExperienceSettings } from '../../schemas/v2';
 import { updatePointLightsFromSettings, setPointLightsVisualVisible } from '../../light';
 import type { PointLightConfig, DirectionalLightConfig, SpotLightConfig } from '../../schemas/v2';
 import { pushEditHistory } from '../../edit-history';
+import { ensureNightMode, ensureLighting } from '../../protocol-settings-adapter';
 
 const LIGHTING_PANEL_HTML = `
 <div class="lightingPanel">
@@ -53,10 +55,8 @@ export function initLightingUI(global: Global): () => void {
     const addPointLight = container.querySelector('#addPointLight') as HTMLButtonElement | null;
     let lightsVisualVisible = !!(global.app as any).__pointLightsVisualVisible;
 
-    const ensureLighting = (): { lights: (PointLightConfig | DirectionalLightConfig | SpotLightConfig)[] } => {
-        if (!(global.settings as any).lighting) (global.settings as any).lighting = { lights: [] };
-        if (!Array.isArray((global.settings as any).lighting.lights)) (global.settings as any).lighting.lights = [];
-        const lighting = (global.settings as any).lighting;
+    const ensureLightingLocal = (): { lights: (PointLightConfig | DirectionalLightConfig | SpotLightConfig)[] } => {
+        const lighting = ensureLighting(global.settings as ExperienceSettings);
         if (!lighting.lights.some((l: any) => (l as any).type === 'directional')) {
             lighting.lights.unshift({
                 type: 'directional',
@@ -74,13 +74,10 @@ export function initLightingUI(global: Global): () => void {
             const [dir] = lighting.lights.splice(dirIdx, 1);
             lighting.lights.unshift(dir);
         }
-        return lighting;
+        return lighting as { lights: (PointLightConfig | DirectionalLightConfig | SpotLightConfig)[] };
     };
     const ensureNightModeSettings = (): { fade?: number } => {
-        if (!(global.settings as any).nightMode) {
-            (global.settings as any).nightMode = { fade: 0 };
-        }
-        return (global.settings as any).nightMode;
+        return ensureNightMode(global.settings as ExperienceSettings);
     };
     const rgbToHex = (r: number, g: number, b: number) => {
         const to = (x: number) => Math.max(0, Math.min(255, Math.round(x * 255))).toString(16).padStart(2, '0');
@@ -147,7 +144,7 @@ export function initLightingUI(global: Global): () => void {
     // Lights list: 平行光主光源（首条，不可删）+ 点光/聚光
     const renderPointLightsList = () => {
         if (!pointLightsList) return;
-        const lighting = ensureLighting();
+        const lighting = ensureLightingLocal();
         const lights = lighting.lights;
         pointLightsList.innerHTML = '';
         let spotOrdinal = 0;
@@ -229,7 +226,7 @@ export function initLightingUI(global: Global): () => void {
             input.addEventListener('change', () => {
                 const idx = parseInt((input as HTMLElement).dataset.index!, 10);
                 const field = (input as HTMLElement).dataset.field!;
-                const lighting = ensureLighting();
+                const lighting = ensureLightingLocal();
                 const light = lighting.lights[idx];
                 if (!light) return;
                 if (isDirectional(light)) {
@@ -285,7 +282,7 @@ export function initLightingUI(global: Global): () => void {
         pointLightsList.querySelectorAll('.pointLightRemove').forEach((btn) => {
             btn.addEventListener('click', () => {
                 const idx = parseInt((btn as HTMLElement).dataset.index!, 10);
-                const lighting = ensureLighting();
+                const lighting = ensureLightingLocal();
                 const light = lighting.lights[idx];
                 if (isDirectional(light)) return;
                 lighting.lights.splice(idx, 1);
@@ -301,7 +298,7 @@ export function initLightingUI(global: Global): () => void {
     const addSpotLightBtn = container.querySelector('#addSpotLight') as HTMLButtonElement | null;
     if (addPointLightBtn && pointLightsList) {
         addPointLightBtn.addEventListener('click', () => {
-            const lighting = ensureLighting();
+            const lighting = ensureLightingLocal();
             const pointCount = lighting.lights.filter((l: any) => !isDirectional(l) && !isSpot(l)).length;
             if (pointCount >= MAX_POINT_LIGHTS) return;
             lighting.lights.push({ position: [0, 1, 0], color: [1, 1, 1], intensity: 1, enabled: true });
@@ -313,7 +310,7 @@ export function initLightingUI(global: Global): () => void {
     }
     if (addSpotLightBtn && pointLightsList) {
         addSpotLightBtn.addEventListener('click', () => {
-            const lighting = ensureLighting();
+            const lighting = ensureLightingLocal();
             lighting.lights.push({
                 type: 'spot',
                 position: [0, 2, 0],

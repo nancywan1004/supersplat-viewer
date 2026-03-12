@@ -19,6 +19,20 @@ import {
 } from './asset-placement-handler';
 import { restoreAnnotationsFromSettings } from './edit-history';
 import type { ExperienceSettings } from './schemas/v2';
+import {
+    applyLightGlobalSet,
+    applyLightAdd,
+    applyLightSelect,
+    applyLightDetail,
+    applyBloomSet,
+    applyBloomIntensityUpdate,
+    applyBloomThresholdUpdate,
+    applyBloomLocalLightRegionDelete,
+    applyShadowSet,
+    applyShadowIntensityUpdate,
+    applyVfxTypeSet,
+    applyVfxExit
+} from './protocol-settings-adapter';
 
 /** 父级 → Viewer 的 postMessage payload 类型（按文档事件表） */
 type InboundPayload =
@@ -62,6 +76,7 @@ type InboundPayload =
     | { type: 'LIGHT_BRUSH_CLEAR' }
     | { type: 'LIGHT_BRUSH_COLOR_UPDATE'; color?: number[] }
     | { type: 'LIGHT_BRUSH_FINISH' }
+    | { type: 'LIGHT_BRUSH_DELETE'; id?: string }
     | { type: 'LIGHT_BRUSH_BLOOM_UPDATE'; value?: number }
     | { type: 'BLOOM_SET'; value?: boolean }
     | { type: 'BLOOM_INTENSITY_UPDATE'; value?: number }
@@ -77,131 +92,6 @@ const postToParent = (type: string, payload?: object) => {
     window.parent.postMessage(payload !== undefined ? { type, payload } : { type }, '*');
     console.log('[MessageBridge] postToParent', type, payload);
 };
-
-function applyLightAndPostEffectFromProtocol(global: Global, type: string, p: InboundPayload): void {
-    const settings = global.settings as Record<string, unknown>;
-    const app = global.app as { fire: (name: string, value?: unknown) => void };
-
-    switch (type) {
-    case 'LIGHT_GLOBAL_SET': {
-        const value = (p as { value?: number }).value;
-        if (typeof value !== 'number') break;
-        const v = Math.max(-1, Math.min(1, value));
-        if (!settings.nightMode || typeof settings.nightMode !== 'object') {
-            settings.nightMode = { fade: 0 };
-        }
-        (settings.nightMode as Record<string, unknown>).fade = v;
-        app.fire('nightFade:set', v);
-        break;
-    }
-    case 'BLOOM_SET': {
-        const val = (p as { value?: boolean }).value;
-        if (typeof val !== 'boolean') break;
-        if (!settings.postEffectSettings || typeof settings.postEffectSettings !== 'object') {
-            settings.postEffectSettings = {};
-        }
-        const pe = settings.postEffectSettings as Record<string, unknown>;
-        if (!pe.bloom || typeof pe.bloom !== 'object') {
-            pe.bloom = { enabled: false, intensity: 0.1, blurLevel: 2, threshold: 0.2 };
-        }
-        (pe.bloom as Record<string, unknown>).enabled = val;
-        global.events.fire('postEffect:changed');
-        break;
-    }
-    case 'BLOOM_INTENSITY_UPDATE': {
-        const val = (p as { value?: number }).value;
-        if (typeof val !== 'number') break;
-        const pe = settings.postEffectSettings as Record<string, unknown> | undefined;
-        if (!pe?.bloom || typeof pe.bloom !== 'object') {
-            if (!pe) (settings.postEffectSettings as Record<string, unknown>) = {};
-            (settings.postEffectSettings as any).bloom = {
-                enabled: false, intensity: 0.1, blurLevel: 2, threshold: 0.2
-            };
-        }
-        (settings.postEffectSettings as any).bloom.intensity = Math.max(0, Math.min(16, val));
-        global.events.fire('postEffect:changed');
-        break;
-    }
-    case 'BLOOM_THRESHOLD_UPDATE': {
-        const val = (p as { value?: number }).value;
-        if (typeof val !== 'number') break;
-        const pe = settings.postEffectSettings as Record<string, unknown> | undefined;
-        if (!pe?.bloom || typeof pe.bloom !== 'object') {
-            if (!pe) (settings.postEffectSettings as Record<string, unknown>) = {};
-            (settings.postEffectSettings as any).bloom = {
-                enabled: false, intensity: 0.1, blurLevel: 2, threshold: 0.2
-            };
-        }
-        (settings.postEffectSettings as any).bloom.threshold = val;
-        global.events.fire('postEffect:changed');
-        break;
-    }
-    case 'SHADOW_SET': {
-        const val = (p as { value?: boolean }).value;
-        if (typeof val !== 'boolean') break;
-        if (!settings.postEffectSettings || typeof settings.postEffectSettings !== 'object') {
-            settings.postEffectSettings = {};
-        }
-        const pes = settings.postEffectSettings as Record<string, unknown>;
-        if (!pes.shadow || typeof pes.shadow !== 'object') {
-            pes.shadow = { enabled: true, darken: 0 };
-        }
-        (pes.shadow as Record<string, unknown>).enabled = val;
-        global.events.fire('postEffect:changed');
-        break;
-    }
-    case 'SHADOW_INTENSITY_UPDATE': {
-        const val = (p as { value?: number }).value;
-        if (typeof val !== 'number') break;
-        const pes = settings.postEffectSettings as Record<string, unknown> | undefined;
-        if (!pes?.shadow || typeof pes.shadow !== 'object') {
-            if (!pes) (settings.postEffectSettings as Record<string, unknown>) = {};
-            (settings.postEffectSettings as any).shadow = {
-                enabled: true, darken: 0
-            };
-        }
-        (settings.postEffectSettings as any).shadow.darken = Math.max(0, Math.min(1, val));
-        global.events.fire('postEffect:changed');
-        break;
-    }
-    default:
-        break;
-    }
-}
-
-function applyLightDetailFromProtocol(global: Global, type: string, p: InboundPayload): void {
-    const settings = global.settings as any;
-    if (!settings.lighting?.lights || !Array.isArray(settings.lighting.lights)) return;
-    const id = (p as { id?: string }).id;
-    if (id == null) return;
-    const light = settings.lighting.lights.find((l: any) => l.id === id);
-    if (!light) return;
-    switch (type) {
-    case 'LIGHT_INTENSITY_UPDATE':
-        if (typeof (p as any).value === 'number') light.intensity = (p as any).value;
-        break;
-    case 'LIGHT_COLOR_UPDATE':
-        if (Array.isArray((p as any).value) && (p as any).value.length >= 3) {
-            light.color = [(p as any).value[0], (p as any).value[1], (p as any).value[2]];
-        }
-        break;
-    case 'LIGHT_IS_THREE_SIXTY_UPDATE':
-        if (typeof (p as any).value === 'boolean') light.isThreeSixty = (p as any).value;
-        break;
-    case 'LIGHT_INNER_ANGLE_SET':
-        if (typeof (p as any).value === 'number') light.innerAngle = Math.max(0, Math.min(180, (p as any).value));
-        break;
-    case 'LIGHT_OUTER_ANGLE_SET':
-        if (typeof (p as any).value === 'number') light.outerAngle = Math.max(0, Math.min(180, (p as any).value));
-        break;
-    case 'LIGHT_RANGE_SET':
-        if (typeof (p as any).value === 'number') light.range = Math.max(0, Math.min(20, (p as any).value));
-        break;
-    default:
-        break;
-    }
-    global.events.fire('postEffect:changed');
-}
 
 const initPostMessageBridge = (global: Global) => {
     const { state, events, config } = global;
@@ -420,32 +310,41 @@ const initPostMessageBridge = (global: Global) => {
             }
             break;
         }
-        case 'LIGHT_GLOBAL_SET':
-        case 'BLOOM_SET':
-        case 'BLOOM_INTENSITY_UPDATE':
-        case 'BLOOM_THRESHOLD_UPDATE':
-        case 'SHADOW_SET':
-        case 'SHADOW_INTENSITY_UPDATE':
-            applyLightAndPostEffectFromProtocol(global, type, payload);
+        case 'LIGHT_GLOBAL_SET': {
+            const lightGlobalVal = (p as { value?: number }).value;
+            if (typeof lightGlobalVal === 'number') applyLightGlobalSet(global, lightGlobalVal);
             break;
+        }
+        case 'BLOOM_SET': {
+            const bloomVal = (p as { value?: boolean }).value;
+            if (typeof bloomVal === 'boolean') applyBloomSet(global, bloomVal);
+            break;
+        }
+        case 'BLOOM_INTENSITY_UPDATE': {
+            const bloomIntVal = (p as { value?: number }).value;
+            if (typeof bloomIntVal === 'number') applyBloomIntensityUpdate(global, bloomIntVal);
+            break;
+        }
+        case 'BLOOM_THRESHOLD_UPDATE': {
+            const bloomThrVal = (p as { value?: number }).value;
+            if (typeof bloomThrVal === 'number') applyBloomThresholdUpdate(global, bloomThrVal);
+            break;
+        }
+        case 'SHADOW_SET': {
+            const shadowVal = (p as { value?: boolean }).value;
+            if (typeof shadowVal === 'boolean') applyShadowSet(global, shadowVal);
+            break;
+        }
+        case 'SHADOW_INTENSITY_UPDATE': {
+            const shadowIntVal = (p as { value?: number }).value;
+            if (typeof shadowIntVal === 'number') applyShadowIntensityUpdate(global, shadowIntVal);
+            break;
+        }
         case 'LIGHT_ADD':
-            if (typeof p.id === 'string') {
-                if (!(global.settings as any).lighting) (global.settings as any).lighting = { lights: [] };
-                const lights = (global.settings as any).lighting.lights;
-                lights.push({
-                    id: p.id,
-                    type: 'point',
-                    position: [0, 2, 0],
-                    color: [1, 1, 1],
-                    intensity: 1,
-                    range: 10,
-                    enabled: true
-                });
-                global.events.fire('postEffect:changed');
-            }
+            if (typeof p.id === 'string') applyLightAdd(global, p.id);
             break;
         case 'LIGHT_SELECT':
-            // 仅更新内部选中光源 id，可由 lighting UI 或后续扩展使用
+            applyLightSelect(global, (p.id !== undefined ? p.id : null) as string | null);
             break;
         case 'LIGHT_INTENSITY_UPDATE':
         case 'LIGHT_COLOR_UPDATE':
@@ -453,7 +352,10 @@ const initPostMessageBridge = (global: Global) => {
         case 'LIGHT_INNER_ANGLE_SET':
         case 'LIGHT_OUTER_ANGLE_SET':
         case 'LIGHT_RANGE_SET':
-            applyLightDetailFromProtocol(global, type, payload);
+            applyLightDetail(global, type, payload as { id?: string; value?: number | number[] | boolean });
+            break;
+        case 'LIGHT_BRUSH_DELETE':
+            applyBloomLocalLightRegionDelete(global, (p as { id?: string }).id ?? '');
             break;
         case 'LIGHT_BRUSH_START':
         case 'LIGHT_ERASER_START':
@@ -465,15 +367,10 @@ const initPostMessageBridge = (global: Global) => {
             events.fire('messageBridge:lightBrush', { type, payload: p });
             break;
         case 'VFX_TYPE_SET':
-            if (typeof p.value === 'string') {
-                events.fire('revealConfigChanged', { type: p.value });
-            }
+            if (typeof p.value === 'string') applyVfxTypeSet(global, p.value);
             break;
         case 'VFX_EXIT':
-            // 特效关闭：将类型切回 none，并标记为非激活
-            (state as any).vfxActive = false;
-            (state as any).vfxType = 'none';
-            events.fire('revealConfigChanged', { type: 'none' });
+            applyVfxExit(global);
             break;
         case 'VFX_RESTART':
             events.fire('revealRestart', (p as any).restartAnim !== false);

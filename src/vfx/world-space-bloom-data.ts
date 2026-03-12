@@ -11,6 +11,30 @@ export interface BloomPoint {
 
 /**
  * Manages world-space bloom marker points.
+ *
+ * ── 角色定位（配合 LocalLightRegion 多区域架构）──
+ *
+ * - 本类只代表「单个局部亮灯区域」的工作区（当前正在编辑的 LocalLightRegion 或其 draft-* 草稿）：
+ *   - points：当前未提交的笔刷轨迹；
+ *   - committed：当前区域已提交的点集；
+ *   - committedBrightness：当前区域的局部亮度 -1～1。
+ *
+ * - 多区域场景下：
+ *   - 所有 LocalLightRegion 的持久化 worldSpace/brightness 均由 settings.postEffectSettings.bloom.localLightRegions 持有；
+ *   - BloomController 在需要时将「某一个区域」加载到 WorldSpaceBloomData（loadRegion），
+ *     或把当前 WorldSpaceBloomData 导出回单个 LocalLightRegion（exportRegion）；
+ *   - WorldSpaceBloomData 不保存「所有区域的汇总」，也不直接关心 activeLocalLightRegionId，
+ *     只专注于当前区域的数据读写与擦除操作。
+ *
+ * - 擦除语义：
+ *   - eraseAt() 同时作用于当前区域的绘制点 points 与已提交点 committed，表示「只对当前区域做局部修剪」；
+ *   - 哪个区域被擦除、何时写回 settings 由上层 BloomController/UI 决定，
+ *     保证「擦除只影响当前区域」这一交互原则。
+ *
+ * - 向后兼容：
+ *   - 旧版仅单区域/无 LocalLightRegion 时，调用方仍可把整个 worldSpacePoints 直接塞进本类，
+ *     并通过 getAllPoints()/getCommittedPoints() 驱动体积与 mask 逻辑，不影响现有对外 API。
+ *
  * Stores bloom points in 3D world coordinates and provides spatial queries.
  */
 export class WorldSpaceBloomData {

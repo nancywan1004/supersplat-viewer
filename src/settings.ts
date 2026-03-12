@@ -373,6 +373,11 @@ const normalizeAnnotation = (ann: any): any => {
  * 规范化 bloom 的 LocalLightRegion 配置：
  * - 为新字段 localLightRegions / activeLocalLightRegionId 补齐默认值；
  * - 若检测到旧的 worldSpacePoints 结构且尚未迁移，则自动构造单个 LocalLightRegion。
+ *
+ * 注意：bloom.worldSpacePoints / bloom.bloomBrushCommittedBrightness 已视为 **deprecated**：
+ * - 仅在这里作为「旧配置输入」被消费一次，用于生成首个 LocalLightRegion；
+ * - 多区域模型下的运行时与保存流程都不再写回这两个字段；
+ * - 新增能力/字段时，应统一挂在 localLightRegions[*] 或其子结构上。
  */
 const ensureBloomLocalLightRegions = (settings: V2): void => {
     const pes: any = settings.postEffectSettings;
@@ -431,7 +436,28 @@ const ensureBloomLocalLightRegions = (settings: V2): void => {
             }
         }
     } else {
-        // 已存在 localLightRegions 时，仅补齐 activeLocalLightRegionId
+        // 已存在 localLightRegions 时，仅补齐 activeLocalLightRegionId 与缺失字段
+        if (Array.isArray(bloom.localLightRegions)) {
+            bloom.localLightRegions = bloom.localLightRegions.map((r: any, index: number) => {
+                if (!r || typeof r !== 'object') return r;
+                // 兼容老配置：若缺失 id/name/worldSpace/localBrightness 则按最小集补齐
+                if (typeof r.id !== 'string') {
+                    r.id = `region-${index + 1}`;
+                }
+                if (typeof r.name !== 'string') {
+                    r.name = `亮灯区域${String(index + 1).padStart(2, '0')}`;
+                }
+                if (!r.worldSpace || typeof r.worldSpace !== 'object') {
+                    r.worldSpace = { points: [], committed: [], committedBrightness: 0 };
+                }
+                if (typeof r.localBrightness !== 'number') {
+                    r.localBrightness = typeof r.worldSpace.committedBrightness === 'number'
+                        ? r.worldSpace.committedBrightness
+                        : 0;
+                }
+                return r;
+            });
+        }
         if (bloom.activeLocalLightRegionId === undefined) {
             bloom.activeLocalLightRegionId =
                 bloom.localLightRegions.length > 0 ? bloom.localLightRegions[0].id : null;
