@@ -551,6 +551,9 @@ export function initPostEffectUI(global: Global): () => void {
     if (bloomDrawModeCompleteBtn) {
         bloomDrawModeCompleteBtn.addEventListener('click', () => {
             if (!currentDraftId) return;
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'LIGHT_BRUSH_FINISH' });
+            }
             const b = ensureBloom(settings);
             events.fire('bloomBrush:set');
             handleExported = (payload: { worldSpaceJSON: WorldSpaceBloomRegionJSON; committedBrightness: number }) => {
@@ -584,6 +587,9 @@ export function initPostEffectUI(global: Global): () => void {
     if (bloomDrawModeAbandonBtn) {
         bloomDrawModeAbandonBtn.addEventListener('click', () => {
             if (!currentDraftId) return;
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'LIGHT_BRUSH_CLEAR' });
+            }
             events.fire('bloomBrush:reset');
             exitDrawMode();
         });
