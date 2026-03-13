@@ -19,6 +19,7 @@ const DEFAULT_BLOOM = {
     blurLevel: 2,
     threshold: 0.2,
     bloomDebug: false,
+    bloomScope: 'local' as const,
     bloomBrush: false,
     bloomBrushSize: 30,
     bloomBrushBrightness: 0
@@ -72,6 +73,7 @@ export function ensureBloom(settings: ExperienceSettings): NonNullable<Experienc
     const b = pe.bloom as Record<string, unknown>;
     if (b.threshold === undefined) b.threshold = 0.2;
     if (b.bloomDebug === undefined) b.bloomDebug = false;
+    if (b.bloomScope !== 'global' && b.bloomScope !== 'local') b.bloomScope = 'local';
     if (b.bloomBrush === undefined) b.bloomBrush = false;
     if (b.bloomBrushSize === undefined) b.bloomBrushSize = 30;
     if (typeof b.bloomBrushBrightness !== 'number') b.bloomBrushBrightness = 0;

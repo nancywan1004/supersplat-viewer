@@ -59,6 +59,8 @@ type PostEffectSettings = {
         threshold: number,
         /** 仅显示参与 bloom 的高斯点（调试用） */
         bloomDebug: boolean,
+        /** Bloom 管线范围：'global' 全屏辉光，'local' 仅局部亮灯区域参与 compose mask */
+        bloomScope?: 'global' | 'local';
         /** 2D 笔刷局部 bloom：仅在笔刷区域叠加光晕，与 bloomDebug 互斥 */
         bloomBrush: boolean,
         bloomBrushSize: number,

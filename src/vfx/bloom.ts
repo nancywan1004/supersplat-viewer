@@ -1467,19 +1467,21 @@ export class BloomController {
 
     /**
      * Get the effective mask texture for compose stage.
-     * - If there are world space points (committed or current): use projected mask so Set bloom regions stay visible even after exiting brush.
-     * - Else if Bloom Brush OFF: white = full-screen (global) bloom.
-     * - Else: world space mask (black until drawn).
+     * - bloomScope === 'global'：始终使用全屏白纹理，走全局 Bloom 管线。
+     * - bloomScope === 'local'：有世界空间点则用投影 mask；无任何亮灯区域时用世界空间 mask（空=全黑），场景无 bloom。
      * @private
      */
     private getEffectiveMaskTexture(bloomBrushOn: boolean): Texture | null {
+        const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomScope?: 'global' | 'local' } | undefined;
+        const scope = bloom?.bloomScope === 'global' ? 'global' : 'local';
+        if (scope === 'global') {
+            return this.bloomBrushWhiteTexture;
+        }
         const hasWorldPoints = this.getPointsForMask().length > 0;
         if (hasWorldPoints && this.hasWorldSpaceMask && this.worldSpaceMaskTexture) {
             return this.worldSpaceMaskTexture;
         }
-        if (!bloomBrushOn) {
-            return this.bloomBrushWhiteTexture;
-        }
+        // 局部模式且无亮灯区域：使用世界空间 mask（空时为黑），使整个场景无 bloom
         return this.worldSpaceMaskTexture;
     }
 

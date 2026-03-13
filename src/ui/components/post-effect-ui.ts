@@ -34,6 +34,10 @@ const POST_EFFECT_PANEL_HTML = `
     <div id="bloomDebugCheck" class="checkMark">✓</div>
     <div id="bloomDebugOption" class="postEffectOption">Bloom Debug</div>
   </div>
+  <div class="settingsRow">
+    <div id="bloomScopeCheck" class="checkMark">✓</div>
+    <div id="bloomScopeOption" class="postEffectOption" title="勾选=仅局部亮灯区域管线，不勾选=全局 Bloom">仅局部亮灯区域</div>
+  </div>
   <div class="settingsRow" style="align-items:center;gap:6px;">
     <span class="postEffectLabel" style="flex:1;">新建亮灯区域</span>
     <button type="button" id="bloomNewRegionBtn" class="postEffectOption" style="padding:2px 8px;font-size:14px;line-height:1;" title="新建亮灯区域">+</button>
@@ -327,6 +331,8 @@ export function initPostEffectUI(global: Global): () => void {
     const bloomThresholdValue = container.querySelector('#bloomThresholdValue') as HTMLElement | null;
     const bloomDebugCheck = container.querySelector('#bloomDebugCheck') as HTMLElement | null;
     const bloomDebugOption = container.querySelector('#bloomDebugOption') as HTMLElement | null;
+    const bloomScopeCheck = container.querySelector('#bloomScopeCheck') as HTMLElement | null;
+    const bloomScopeOption = container.querySelector('#bloomScopeOption') as HTMLElement | null;
     const bloomNewRegionBtn = container.querySelector('#bloomNewRegionBtn') as HTMLButtonElement | null;
     const bloomDrawModeBar = container.querySelector('#bloomDrawModeBar') as HTMLElement | null;
     const bloomDrawModeCompleteBtn = container.querySelector('#bloomDrawModeCompleteBtn') as HTMLButtonElement | null;
@@ -399,6 +405,8 @@ export function initPostEffectUI(global: Global): () => void {
         if (bloomThresholdSlider) bloomThresholdSlider.value = String(th);
         if (bloomThresholdValue) bloomThresholdValue.textContent = th.toFixed(2);
         if (bloomDebugCheck) bloomDebugCheck.classList.toggle('active', b.bloomDebug ?? false);
+        const scope = (b as { bloomScope?: 'global' | 'local' }).bloomScope;
+        if (bloomScopeCheck) bloomScopeCheck.classList.toggle('active', scope !== 'global');
         const onSelectRegion = (regionId: string | null) => {
             if (currentDraftId) return;
             const bl = ensureBloom(settings);
@@ -492,6 +500,18 @@ export function initPostEffectUI(global: Global): () => void {
         };
         bloomDebugOption.addEventListener('click', toggleBloomDebug);
         bloomDebugCheck.addEventListener('click', toggleBloomDebug);
+    }
+
+    if (bloomScopeOption && bloomScopeCheck) {
+        const toggleBloomScope = () => {
+            const b = ensureBloom(settings) as { bloomScope?: 'global' | 'local' };
+            b.bloomScope = b.bloomScope === 'local' ? 'global' : 'local';
+            syncFromSettings();
+            firePostEffectChanged();
+            pushEditHistorySafe();
+        };
+        bloomScopeOption.addEventListener('click', toggleBloomScope);
+        bloomScopeCheck.addEventListener('click', toggleBloomScope);
     }
 
     if (bloomNewRegionBtn) {
