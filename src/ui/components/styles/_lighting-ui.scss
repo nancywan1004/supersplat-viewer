@@ -145,4 +145,20 @@
             color: $clr-accent;
         }
     }
+
+    &.pointLightRow--selected {
+        position: relative;
+        box-shadow: 0 0 0 1px rgba($clr-accent, 0.9);
+        border-radius: 6px;
+
+        .pointLightSwatch {
+            box-shadow: 0 0 8px rgba($clr-accent, 0.85);
+            border-color: rgba($clr-accent, 0.9);
+        }
+
+        .pointLightNum {
+            color: $clr-text;
+            font-weight: 600;
+        }
+    }
 }

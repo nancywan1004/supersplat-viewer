@@ -6,9 +6,10 @@
 import * as pc from 'playcanvas';
 import type { AppBase } from 'playcanvas';
 import type { Global } from './types';
-import type { AssetTransformMode } from './types';
+import type { AssetTransformMode, LightTransformMode } from './types';
 import { getSelectedSceneEntity } from './state-helpers';
 import { pushEditHistory } from './edit-history';
+import { updatePointLightsFromSettings } from './light';
 
 function getGizmoAPI(): {
     Gizmo: { createLayer: (app: AppBase) => any };
@@ -80,8 +81,40 @@ export function initGizmoHandler(global: Global): () => void {
                     // 结束拖拽后，先清空一次相机输入增量，再重新开启相机控制，避免「松手瞬间相机跳一下」
                     events.fire('cameraControls:flushInputs');
                     state.cameraControlsEnabled = true;
-                    if (state.editMode && state.selectedSceneEntityId && handler && handler._nodes.length > 0) {
+
+                    // 资产模式：记录资产变换历史
+                    if (state.editMode && state.selectedSceneEntityId && handler && handler._nodes.length > 0 && state.editLeftModule === 'asset') {
                         pushEditHistory(global, 'transform asset');
+                    }
+
+                    // 光源模式：将 Gizmo 上的变换回写到 settings.lighting，并刷新光源实体
+                    if (state.editMode && state.editLeftModule === 'environment' && handler && handler._nodes.length > 0) {
+                        let changed = false;
+                        handler._nodes.forEach((node: any) => {
+                            const cfg = (node as any).__lightConfig as any | undefined;
+                            if (!cfg) return;
+                            const pos = node.getPosition?.();
+                            if (pos) {
+                                cfg.position = [pos.x, pos.y, pos.z];
+                            }
+                            if ((cfg as any).type === 'spot') {
+                                const euler = node.getEulerAngles?.();
+                                if (euler) {
+                                    const pitch = Math.max(-90, Math.min(90, euler.x ?? 0));
+                                    let yaw = euler.y ?? 0;
+                                    // 归一化到 0-360
+                                    yaw = ((yaw % 360) + 360) % 360;
+                                    (cfg as any).pitch = pitch;
+                                    (cfg as any).yaw = yaw;
+                                }
+                            }
+                            changed = true;
+                        });
+                        if (changed) {
+                            updatePointLightsFromSettings(global);
+                            events.fire('lighting:changed');
+                            pushEditHistory(global, 'transform light');
+                        }
                     }
                 });
             });
@@ -125,21 +158,64 @@ export function initGizmoHandler(global: Global): () => void {
         }
     }
 
+    const findSelectedLightEntity = (): any | null => {
+        const id = state.selectedLightId;
+        if (!id) return null;
+        const pointContainer = app.root.findByName('pointLights') as any;
+        if (pointContainer) {
+            for (let i = 0; i < pointContainer.children.length; i++) {
+                const e = pointContainer.children[i];
+                const cfg = (e as any).__lightConfig as any | undefined;
+                if (cfg && cfg.id === id) return e;
+            }
+        }
+        const spotContainer = app.root.findByName('spotLights') as any;
+        if (spotContainer) {
+            for (let i = 0; i < spotContainer.children.length; i++) {
+                const e = spotContainer.children[i];
+                const cfg = (e as any).__lightConfig as any | undefined;
+                if (cfg && cfg.id === id) return e;
+            }
+        }
+        return null;
+    };
+
     const syncGizmoToSelection = () => {
+        if (!handler) return;
+
+        let targetNode: any | null = null;
+        let gizmoType: string | null = null;
+
+        // 资产模式
         const inAssetModule = state.editLeftModule === 'asset';
-        const mode = state.assetTransformMode;
+        const assetMode = state.assetTransformMode;
         const showAssetGizmo =
             inAssetModule &&
-            (mode === 'move' || mode === 'rotate' || mode === 'scale');
-        const entity = showAssetGizmo ? getSelectedSceneEntity(state) : null;
-        if (handler) {
+            (assetMode === 'move' || assetMode === 'rotate' || assetMode === 'scale');
+        if (showAssetGizmo) {
+            const entity = getSelectedSceneEntity(state);
             if (entity) {
-                handler.add(entity, true);
-                const type = MODE_TO_GIZMO_TYPE[mode!];
-                handler.switch(type);
-            } else {
-                handler.clear();
+                targetNode = entity;
+                gizmoType = MODE_TO_GIZMO_TYPE[assetMode!];
             }
+        }
+
+        // 光源模式（环境模块）
+        const inEnvModule = state.editLeftModule === 'environment';
+        const lightMode = state.lightTransformMode as LightTransformMode | undefined;
+        if (!targetNode && inEnvModule && (lightMode === 'move' || lightMode === 'rotate') && state.selectedLightId) {
+            const lightEntity = findSelectedLightEntity();
+            if (lightEntity) {
+                targetNode = lightEntity;
+                gizmoType = lightMode === 'move' ? 'translate' : 'rotate';
+            }
+        }
+
+        if (targetNode && gizmoType) {
+            handler.add(targetNode, true);
+            handler.switch(gizmoType);
+        } else {
+            handler.clear();
         }
     };
 
@@ -152,6 +228,16 @@ export function initGizmoHandler(global: Global): () => void {
     const onSelectionChanged = () => syncGizmoToSelection();
 
     const onEditLeftModuleChanged = () => syncGizmoToSelection();
+
+    const onLightModeChanged = (_mode: LightTransformMode | undefined | null) => {
+        if (state.editLeftModule !== 'environment') return;
+        syncGizmoToSelection();
+    };
+
+    const onSceneLightSelected = () => {
+        if (state.editLeftModule !== 'environment') return;
+        syncGizmoToSelection();
+    };
 
     /** 退出编辑模式时隐藏 Gizmo；进入编辑模式且当前为资产模块时若无选中则默认选首 entity（与切换进资产模块行为一致） */
     const onEditModeChanged = (inEdit: boolean) => {
@@ -174,6 +260,8 @@ export function initGizmoHandler(global: Global): () => void {
     events.on('sceneAsset:selected', onSelectionChanged);
     events.on('editLeftModule:changed', onEditLeftModuleChanged);
     events.on('editMode:changed', onEditModeChanged);
+    events.on('lightTransformMode:changed', onLightModeChanged as any);
+    events.on('sceneLight:selected', onSceneLightSelected as any);
     if (state.editMode) {
         onEditModeChanged(true);
     } else if (handler) {
@@ -194,6 +282,8 @@ export function initGizmoHandler(global: Global): () => void {
         events.off('sceneAsset:selected', onSelectionChanged);
         events.off('editLeftModule:changed', onEditLeftModuleChanged);
         events.off('editMode:changed', onEditModeChanged);
+        events.off('lightTransformMode:changed', onLightModeChanged as any);
+        events.off('sceneLight:selected', onSceneLightSelected as any);
         app.off('update', onUpdate);
         handler?.destroy();
     };

@@ -1,6 +1,6 @@
 import type { Global } from '../../types';
 import type { ExperienceSettings } from '../../schemas/v2';
-import { updatePointLightsFromSettings, setPointLightsVisualVisible } from '../../light';
+import { updatePointLightsFromSettings, setLightsVisualVisible } from '../../light';
 import type { PointLightConfig, DirectionalLightConfig, SpotLightConfig } from '../../schemas/v2';
 import { pushEditHistory } from '../../edit-history';
 import { ensureNightMode, ensureLighting } from '../../protocol-settings-adapter';
@@ -53,7 +53,12 @@ export function initLightingUI(global: Global): () => void {
     const showLightsInSceneOption = container.querySelector('#showLightsInSceneOption') as HTMLElement | null;
     const pointLightsList = container.querySelector('#pointLightsList') as HTMLElement | null;
     const addPointLight = container.querySelector('#addPointLight') as HTMLButtonElement | null;
-    let lightsVisualVisible = !!(global.app as any).__pointLightsVisualVisible;
+    // 环境模块内部「Show lights in scene」开关的逻辑状态；默认打开
+    let lightsVisualVisible = (global.app as any).__lightsVisualToggle;
+    if (lightsVisualVisible == null) {
+        lightsVisualVisible = true;
+        (global.app as any).__lightsVisualToggle = true;
+    }
 
     const ensureLightingLocal = (): { lights: (PointLightConfig | DirectionalLightConfig | SpotLightConfig)[] } => {
         const lighting = ensureLighting(global.settings as ExperienceSettings);
@@ -133,12 +138,21 @@ export function initLightingUI(global: Global): () => void {
     if (showLightsInSceneCheck && showLightsInSceneOption) {
         const toggleLightsVisual = () => {
             lightsVisualVisible = !lightsVisualVisible;
-            setPointLightsVisualVisible(global, lightsVisualVisible);
+            setLightsVisualVisible(global, lightsVisualVisible);
             updateLightsVisualCheck();
         };
         showLightsInSceneCheck.addEventListener('click', toggleLightsVisual);
         showLightsInSceneOption.addEventListener('click', toggleLightsVisual);
+        // 初始化一次显隐状态（依赖当前 editMode / editLeftModule）
+        setLightsVisualVisible(global, lightsVisualVisible);
         updateLightsVisualCheck();
+        // 当编辑模式或左侧模块变化时，重新应用显隐规则
+        global.events.on('editMode:changed', () => {
+            setLightsVisualVisible(global, lightsVisualVisible);
+        });
+        global.events.on('editLeftModule:changed', () => {
+            setLightsVisualVisible(global, lightsVisualVisible);
+        });
     }
 
     // Lights list: 平行光主光源（首条，不可删）+ 点光/聚光
@@ -160,6 +174,12 @@ export function initLightingUI(global: Global): () => void {
             row.className = 'pointLightRow' + (enabled ? '' : ' pointLightRow--disabled')
                 + (isSpotLight ? ' pointLightRow--spot' : '')
                 + (isDir ? ' pointLightRow--directional' : '');
+            // 记录配置索引与内部 id（若存在），用于选中与场景联动
+            (row.dataset as any).index = String(index);
+            const lightId = (light as any).id as string | undefined;
+            if (lightId) {
+                (row.dataset as any).lightId = lightId;
+            }
 
             if (isDir) {
                 const d = light as DirectionalLightConfig;
@@ -290,6 +310,52 @@ export function initLightingUI(global: Global): () => void {
                 updatePointLightsFromSettings(global);
                 events.fire('lighting:changed');
                 pushEditHistorySafe();
+                // 若删除的是当前选中的光源，清空选中
+                const currentId = (global.state as any).selectedLightId ?? null;
+                if (currentId) {
+                    const removedId = (light as any).id as string | undefined;
+                    if (removedId && removedId === currentId) {
+                        (global.state as any).selectedLightId = null;
+                        global.events.fire('sceneLight:selected', { id: null });
+                    }
+                }
+            });
+        });
+
+        // 若当前还没有选中的光源，默认选中第一盏非 directional 光源，便于直接使用底部 Gizmo 按钮
+        let currentSelectedId = (global.state as any).selectedLightId as string | null | undefined;
+        if (!currentSelectedId) {
+            const firstNonDirectional = lights.find((l) => !isDirectional(l));
+            const firstId = firstNonDirectional ? (firstNonDirectional as any).id as string | undefined : undefined;
+            if (firstId) {
+                currentSelectedId = firstId;
+                (global.state as any).selectedLightId = firstId;
+                global.events.fire('sceneLight:selected', { id: firstId });
+            }
+        }
+
+        // 同步行选中样式（基于 currentSelectedId）
+        pointLightsList.querySelectorAll<HTMLElement>('.pointLightRow').forEach((row) => {
+            const rowId = row.dataset.lightId;
+            const selected = currentSelectedId && rowId && rowId === currentSelectedId;
+            row.classList.toggle('pointLightRow--selected', !!selected);
+        });
+
+        // 行点击：选中光源（列表 → 场景）
+        pointLightsList.querySelectorAll<HTMLElement>('.pointLightRow').forEach((row) => {
+            row.addEventListener('click', (ev) => {
+                // 避免点击输入控件/删除按钮触发选中
+                const target = ev.target as HTMLElement;
+                if (target.closest('input') || target.closest('button')) return;
+                const idx = parseInt((row.dataset.index as string) ?? '-1', 10);
+                if (!Number.isFinite(idx) || idx < 0) return;
+                const lighting = ensureLightingLocal();
+                const light = lighting.lights[idx];
+                if (!light || isDirectional(light)) return;
+
+                const id = (light as any).id as string | undefined;
+                (global.state as any).selectedLightId = id ?? null;
+                global.events.fire('sceneLight:selected', { id: id ?? null });
             });
         });
     };
@@ -329,7 +395,24 @@ export function initLightingUI(global: Global): () => void {
             pushEditHistorySafe();
         });
     }
-    if (pointLightsList) renderPointLightsList();
+    if (pointLightsList) {
+        renderPointLightsList();
+        // 当场景光源选中变化时，同步列表高亮
+        events.on('sceneLight:selected', ({ id }: { id: string | null }) => {
+            if (!pointLightsList) return;
+            const currentSelectedId = id;
+            pointLightsList.querySelectorAll<HTMLElement>('.pointLightRow').forEach((row) => {
+                const rowId = row.dataset.lightId;
+                const selected = currentSelectedId && rowId && rowId === currentSelectedId;
+                row.classList.toggle('pointLightRow--selected', !!selected);
+            });
+        });
+        // 外部（如 message-bridge）直接改 state.selectedLightId 时也能初始化一次样式
+        const initialId = (global.state as any).selectedLightId as string | null | undefined;
+        if (initialId) {
+            events.fire('sceneLight:selected', { id: initialId });
+        }
+    }
 
     return () => {
         container.innerHTML = '';

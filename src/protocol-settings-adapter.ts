@@ -55,6 +55,12 @@ export function ensureLighting(settings: ExperienceSettings): { lights: LightWit
     }
     const lighting = (settings as Record<string, unknown>).lighting as { lights: LightWithId[] };
     if (!Array.isArray(lighting.lights)) lighting.lights = [];
+    // 确保每盏光源（尤其是 internal UI 新建的点光/聚光）都有一个 id，便于场景/列表/Gizmo 之间通过 id 关联
+    lighting.lights.forEach((light, index) => {
+        if (!light.id) {
+            (light as LightWithId).id = `light-${index}`;
+        }
+    });
     return lighting;
 }
 
@@ -131,9 +137,10 @@ export function applyLightAdd(global: Global, id: string): void {
     global.events.fire('postEffect:changed');
 }
 
-/** LIGHT_SELECT：仅更新内部选中光源 id（可选，供 UI 使用） */
+/** LIGHT_SELECT：仅更新内部选中光源 id（可选，供 UI 使用），并派发 sceneLight:selected 事件 */
 export function applyLightSelect(global: Global, id: string | null): void {
     (global.state as Record<string, unknown>).selectedLightId = id;
+    global.events.fire('sceneLight:selected', { id });
 }
 
 /** LIGHT_INTENSITY_UPDATE / LIGHT_COLOR_UPDATE / LIGHT_IS_THREE_SIXTY_UPDATE / LIGHT_INNER_ANGLE_SET / LIGHT_OUTER_ANGLE_SET / LIGHT_RANGE_SET */

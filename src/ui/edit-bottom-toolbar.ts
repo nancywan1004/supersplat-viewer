@@ -1,5 +1,5 @@
 import type { Global } from '../types';
-import type { AssetTransformMode, EditLeftModule } from '../types';
+import type { AssetTransformMode, EditLeftModule, LightTransformMode } from '../types';
 import { getEditUiTransport, sendEditProtocolMessage } from './edit-ui-transport';
 
 const TRANSFORM_MODES: { id: AssetTransformMode; label: string }[] = [
@@ -37,8 +37,24 @@ const ANNOTATION_HTML = `
 </div>
 `.trim();
 
+const ENV_LIGHTING_HTML = `
+<div class="edit-bottom-toolbar-inner">
+    <div class="edit-bottom-toolbar-group" role="group" aria-label="光源变换">
+        <button type="button" class="edit-bottom-toolbar-btn" data-light-mode="move" aria-pressed="false">移动</button>
+        <button type="button" class="edit-bottom-toolbar-btn" data-light-mode="rotate" aria-pressed="false">旋转</button>
+    </div>
+    <div class="edit-bottom-toolbar-divider"></div>
+    <div class="edit-bottom-toolbar-group" role="group" aria-label="光源操作">
+        <button type="button" class="edit-bottom-toolbar-btn" id="lightEditFocus" data-action="focus">编辑</button>
+        <button type="button" class="edit-bottom-toolbar-btn edit-bottom-toolbar-btn-danger" id="lightEditDelete" data-action="delete">删除</button>
+    </div>
+</div>
+`.trim();
+
 function getToolbarHTML(module: EditLeftModule): string {
-    return module === 'annotation' ? ANNOTATION_HTML : ASSET_HTML;
+    if (module === 'annotation') return ANNOTATION_HTML;
+    if (module === 'environment') return ENV_LIGHTING_HTML;
+    return ASSET_HTML;
 }
 
 /**
@@ -77,6 +93,8 @@ export function initEditBottomToolbarUI(global: Global): () => void {
             bindAssetContent();
         } else if (module === 'annotation') {
             bindAnnotationContent();
+        } else if (module === 'environment') {
+            bindEnvironmentLightingContent();
         }
     };
 
@@ -198,6 +216,61 @@ export function initEditBottomToolbarUI(global: Global): () => void {
         });
 
         syncAnnotationMoveButton();
+    };
+
+    const bindEnvironmentLightingContent = () => {
+        const modeButtons = Array.from(
+            container.querySelectorAll<HTMLButtonElement>('.edit-bottom-toolbar-btn[data-light-mode]')
+        );
+        const focusBtn = container.querySelector<HTMLButtonElement>('#lightEditFocus');
+        const deleteBtn = container.querySelector<HTMLButtonElement>('#lightEditDelete');
+
+        const syncLightModeButtons = () => {
+            const hasSelection = (state as any).selectedLightId != null;
+            const mode = (state as any).lightTransformMode as LightTransformMode | undefined | null;
+            modeButtons.forEach((btn) => {
+                const btnMode = btn.getAttribute('data-light-mode') as LightTransformMode;
+                const isActive = hasSelection && mode != null && btnMode === mode;
+                btn.classList.toggle('active', isActive);
+                btn.setAttribute('aria-pressed', String(isActive));
+                btn.toggleAttribute('disabled', !hasSelection);
+            });
+            focusBtn?.toggleAttribute('disabled', !hasSelection);
+            deleteBtn?.toggleAttribute('disabled', !hasSelection);
+        };
+
+        const setLightTransformModeInternal = (mode: LightTransformMode | null) => {
+            (state as any).lightTransformMode = mode;
+            events.fire('lightTransformMode:changed', mode);
+            syncLightModeButtons();
+        };
+
+        modeButtons.forEach((btn) => {
+            const mode = btn.getAttribute('data-light-mode') as LightTransformMode;
+            btn.addEventListener('click', () => {
+                const current = (state as any).lightTransformMode as LightTransformMode | null | undefined;
+                const nextMode: LightTransformMode | null = current === mode ? null : mode;
+
+                if (editUiTransport === 'message-bridge') {
+                    // 暂不透出协议，internal 模式下直接本地状态切换
+                    setLightTransformModeInternal(nextMode);
+                } else {
+                    setLightTransformModeInternal(nextMode);
+                }
+            });
+        });
+
+        focusBtn?.addEventListener('click', () => {
+            if (!(state as any).selectedLightId) return;
+            events.fire('lighting:focusLightRow', { id: (state as any).selectedLightId });
+        });
+
+        deleteBtn?.addEventListener('click', () => {
+            if (!(state as any).selectedLightId) return;
+            events.fire('lighting:deleteLight', { id: (state as any).selectedLightId });
+        });
+
+        syncLightModeButtons();
     };
 
     const onEditLeftModuleChanged = (newModule?: string) => {

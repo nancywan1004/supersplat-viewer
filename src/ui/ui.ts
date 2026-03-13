@@ -18,6 +18,7 @@ import { initEditRightToolbarUI } from './edit-right-toolbar';
 import { initEditBottomToolbarUI } from './edit-bottom-toolbar';
 import type { Annotation } from '../settings';
 import { getEditUiTransport, sendEditProtocolMessage } from './edit-ui-transport';
+import { setLightsVisualVisible } from '../light';
 
 // Initialize the touch joystick for fly mode camera control
 const initJoystick = (
@@ -540,7 +541,10 @@ const initUI = (global: Global) => {
             }
             const bottomMount = document.getElementById('editBottomToolbarMount');
             if (bottomMount) {
-                const showBottomBar = inEdit && (state.editLeftModule === 'asset' || state.editLeftModule === 'annotation');
+                const showBottomBar = inEdit
+                    && (state.editLeftModule === 'asset'
+                        || state.editLeftModule === 'annotation'
+                        || state.editLeftModule === 'environment');
                 bottomMount.classList.toggle('hidden', !showBottomBar);
             }
             // 顶栏：编辑时显示「退出」+「保存」，非编辑时显示「编辑」
@@ -784,8 +788,18 @@ const initUI = (global: Global) => {
         events.on('editLeftModule:changed', () => {
             const bottomMount = document.getElementById('editBottomToolbarMount');
             if (bottomMount && state.editMode) {
-                const showBottomBar = state.editLeftModule === 'asset' || state.editLeftModule === 'annotation';
+                const showBottomBar = state.editLeftModule === 'asset'
+                    || state.editLeftModule === 'annotation'
+                    || state.editLeftModule === 'environment';
                 bottomMount.classList.toggle('hidden', !showBottomBar);
+            }
+            // 进入/离开环境模块时，根据当前开关状态刷新光源可视化
+            if (state.editMode) {
+                const toggle = (global.app as any).__lightsVisualToggle;
+                const visibleInEnv = toggle == null ? true : !!toggle;
+                setLightsVisualVisible(global, visibleInEnv);
+            } else {
+                setLightsVisualVisible(global, false);
             }
         });
         updateEditModeUI();

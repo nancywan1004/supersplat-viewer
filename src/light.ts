@@ -102,9 +102,10 @@ const collectSpotLights = (global: Global): SpotLightInfo[] => {
 /**
  * 为点光源实体添加场景内可视化小球（子实体，与光同色）
  * 使用 diffuse 为主、低 emissive，避免小球本身照亮场景导致“整屏变亮”。
- * @param app - 应用实例（创建时实体可能尚未挂到场景，需显式传入）
+ * @param global - Global，用于读取 app 与 state（后续可在此挂接 pointer 事件）
  */
-const addLightVisual = (app: Global['app'], lightEntity: Entity, r: number, g: number, b: number): void => {
+const addLightVisual = (global: Global, lightEntity: Entity, r: number, g: number, b: number): void => {
+    const app = global.app;
     const mat = new StandardMaterial();
     mat.diffuse.set(r, g, b);
     mat.emissive.set(r, g, b);
@@ -144,7 +145,8 @@ const updateLightVisual = (lightEntity: Entity, r: number, g: number, b: number)
  * 为聚光灯实体添加锥体可视化。锥尖指向照射方向（实体 -Y，与引擎与 collectSpotLights 一致），
  * 与「Show lights in scene」联动。锥体几何与 inner/outer 角无关，仅表示方向。
  */
-const addSpotLightVisual = (app: Global['app'], spotEntity: Entity, r: number, g: number, b: number): void => {
+const addSpotLightVisual = (global: Global, spotEntity: Entity, r: number, g: number, b: number): void => {
+    const app = global.app;
     let visual = spotEntity.findByName('spotLight_visual') as Entity | null;
     if (visual) return;
     const mat = new StandardMaterial();
@@ -290,9 +292,11 @@ const createSpotLightsFromSettings = (global: Global): void => {
                 castShadows: false
             });
             entity.tags.add('spotLight');
-            addSpotLightVisual(app, entity, r, g, b);
+            (entity as any).__lightConfig = cfg;
+            addSpotLightVisual(global, entity, r, g, b);
             container!.addChild(entity);
         }
+        (entity as any).__lightConfig = cfg;
         entity.setPosition(x, y, z);
         entity.setEulerAngles(pitch, yaw, 0);
         if (entity.light) {
@@ -346,9 +350,11 @@ const createPointLightsFromSettings = (global: Global): void => {
                 castShadows: false
             });
             entity.tags.add('pointLight');
-            addLightVisual(app, entity, r, g, b);
+            (entity as any).__lightConfig = cfg;
+            addLightVisual(global, entity, r, g, b);
             container!.addChild(entity);
         }
+        (entity as any).__lightConfig = cfg;
         entity.setPosition(x, y, z);
         if (entity.light) {
             entity.light.enabled = enabled;
@@ -368,7 +374,8 @@ const createPointLightsFromSettings = (global: Global): void => {
 };
 
 /**
- * 设置场景中点光源、平行光、聚光灯可视化的显示/隐藏。与「Show lights in scene」联动。
+ * 低层级：直接控制点光源、聚光灯可视化实体的显示/隐藏。
+ * 不关心编辑模式/左侧模块，仅根据 visible 决定是否启用可视化渲染。
  */
 const setPointLightsVisualVisible = (global: Global, visible: boolean): void => {
     const { app } = global;
@@ -391,6 +398,18 @@ const setPointLightsVisualVisible = (global: Global, visible: boolean): void => 
             if (visual?.render) visual.render.enabled = visible;
         });
     }
+};
+
+/**
+ * 高层级入口：根据「编辑模式 + 左侧环境模块 + Show lights 开关」综合控制光源可视化显隐。
+ * - visibleInEnvironment 表示环境模块内部的「Show lights in scene」开关状态；
+ * - 实际是否显示还需满足：state.editMode === true 且 state.editLeftModule === 'environment'。
+ */
+const setLightsVisualVisible = (global: Global, visibleInEnvironment: boolean): void => {
+    const { app, state } = global;
+    (app as any).__lightsVisualToggle = visibleInEnvironment;
+    const inEnvironmentEdit = !!(state.editMode && state.editLeftModule === 'environment');
+    setPointLightsVisualVisible(global, visibleInEnvironment && inEnvironmentEdit);
 };
 
 /**
@@ -454,4 +473,12 @@ const updateShadowDistance = (global: Global, sceneSize: number): void => {
     }
 };
 
-export { initLight, collectPointLights, collectSpotLights, updatePointLightsFromSettings, setPointLightsVisualVisible, updateShadowDistance };
+export {
+    initLight,
+    collectPointLights,
+    collectSpotLights,
+    updatePointLightsFromSettings,
+    setPointLightsVisualVisible,
+    setLightsVisualVisible,
+    updateShadowDistance
+};

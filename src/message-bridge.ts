@@ -438,6 +438,10 @@ const initPostMessageBridge = (global: Global) => {
         postToParent('SCENE_ASSET_SELECTED', { id });
     });
 
+    events.on('sceneLight:selected', (data: { id: string | null }) => {
+        postToParent('SCENE_LIGHT_SELECTED', { id: data.id ?? null });
+    });
+
     events.on('annotation:selected', (data: { id: string }) => {
         postToParent('SCENE_ANNOTATION_SELECTED', { id: data.id });
     });

@@ -43,6 +43,9 @@ type EditLeftModule = 'gs' | 'asset' | 'annotation' | 'environment' | 'camera' |
 /** 资产变换模式（移动/旋转/缩放） */
 type AssetTransformMode = 'move' | 'rotate' | 'scale';
 
+/** 光源变换模式（移动/旋转） */
+type LightTransformMode = 'move' | 'rotate' | null;
+
 // configuration options are immutable at runtime
 type Config = {
     poster?: HTMLImageElement;
@@ -121,6 +124,10 @@ type State = {
     selectedAnnotationId?: string | null;
     /** 是否处于标注放置模式 */
     annotationPlacementActive?: boolean;
+    /** 当前选中的光源 ID（用于环境模块光照编辑、Gizmo 挂载与列表/场景联动） */
+    selectedLightId?: string | null;
+    /** 光源变换模式（与环境模块底部工具栏联动） */
+    lightTransformMode?: LightTransformMode | null;
 };
 
 type Global = {
@@ -132,4 +139,4 @@ type Global = {
     camera: Entity;
 };
 
-export { CameraMode, InputMode, EditLeftModule, AssetTransformMode, Config, State, Global };
+export { CameraMode, InputMode, EditLeftModule, AssetTransformMode, LightTransformMode, Config, State, Global };
