@@ -11,7 +11,7 @@ import {
 import type { CameraComponent } from 'playcanvas';
 
 import { MobileFlyInput } from './cameras/mobile-fly-input';
-import { Picker } from './picker';
+import { pickWorldFromClientXY } from './picker';
 import type { Global } from './types';
 
 /* Vec initialisation to avoid recurrent memory allocation */
@@ -302,20 +302,32 @@ class InputController {
             }
         });
 
-        // Calculate pick location on double click
-        let picker: Picker | null = null;
+        // Calculate pick location on double click / single click
         events.on('inputEvent', async (eventName, event) => {
             switch (eventName) {
                 case 'dblclick': {
-                    if (!picker) {
-                        picker = new Picker(app, camera);
-                    }
-                    const result = await picker.pick(event.offsetX / canvas.clientWidth, event.offsetY / canvas.clientHeight);
+                    const result = await pickWorldFromClientXY(this.global, event.clientX, event.clientY);
                     if (result) {
                         events.fire('pick', result);
                     }
                     break;
                 }
+            }
+        });
+
+        // 单击拾取：用于场景中单击世界坐标（不改变相机）
+        canvas.addEventListener('pointerup', async (event: PointerEvent) => {
+            if (!event.isPrimary || event.button !== 0) return;
+            // 仅在画布区域内的左键点击才进行拾取
+            const rect = canvas.getBoundingClientRect();
+            if (event.clientX < rect.left || event.clientX > rect.right
+                || event.clientY < rect.top || event.clientY > rect.bottom) {
+                return;
+            }
+            const result = await pickWorldFromClientXY(this.global, event.clientX, event.clientY);
+            if (result) {
+                // 语义化：场景中一次 pointerup 对应的世界坐标点击
+                events.fire('scenePointerWorldClick', result);
             }
         });
 

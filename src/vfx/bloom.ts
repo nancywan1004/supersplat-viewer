@@ -11,7 +11,7 @@ import type { PostEffectSettings } from '../settings';
 import type { LocalLightRegion, WorldSpaceBloomRegionJSON } from '../schemas/v2';
 import type { Global } from '../types';
 import { BloomBrushPainter } from './bloom-brush-painter';
-import { Picker } from '../picker';
+import { pickWorldFromClientXY } from '../picker';
 import { WorldSpaceBloomData } from './world-space-bloom-data';
 import { BloomBrushFilter, MAX_POINTS } from './bloom-brush-filter';
 import { buildCommittedBrightnessVolume, buildCommittedBrightnessVolumeFromRegions, type CommittedPointWithBrightness } from './committed-brightness-volume';
@@ -130,7 +130,6 @@ export class BloomController {
     private _cameraFrameUpdateWrapped = false;
     private _unregisterFrameUpdate: (() => void) | null = null;
     private _unregisterEvents: (() => void)[] = [];
-    private picker: Picker | null = null;
     private worldSpaceData: WorldSpaceBloomData = new WorldSpaceBloomData();
     /** Always World Space (Screen Space removed per product decision) */
     private mode: BloomMode = BloomMode.WorldSpace;
@@ -833,50 +832,6 @@ export class BloomController {
     }
 
     /**
-     * Initialize picker for world-space coordinate conversion
-     * @private
-     */
-    private initPicker(): void {
-        if (!this.picker) {
-            this.picker = new Picker(this.global.app, this.global.camera);
-        }
-    }
-
-    /**
-     * Convert screen coordinates to world coordinates using ray casting.
-     * Uses the same coordinate system as the depth buffer: normalize by getBoundingClientRect()
-     * so that [0,1] maps to Picker's (clientWidth x clientHeight) buffer, ensuring world positions
-     * stay correct after camera move (no perspective/scale mismatch).
-     * @param screenX Screen X in same units as rect (e.clientX - rect.left)
-     * @param screenY Screen Y in same units as rect (e.clientY - rect.top)
-     * @returns World position Vec3 or null if invalid depth
-     * @private
-     */
-    private async screenToWorld(screenX: number, screenY: number): Promise<Vec3 | null> {
-        if (!this.picker) {
-            this.initPicker();
-        }
-
-        const canvas = this.global.app.graphicsDevice.canvas as HTMLCanvasElement;
-        const rect = canvas.getBoundingClientRect();
-        const rw = rect.width;
-        const rh = rect.height;
-        if (rw <= 0 || rh <= 0) return null;
-
-        // Normalize to [0,1] in display space so Picker maps to buffer (clientWidth x clientHeight) correctly
-        const normalizedX = screenX / rw;
-        const normalizedY = screenY / rh;
-
-        try {
-            const worldPos = await this.picker!.pick(normalizedX, normalizedY);
-            return worldPos;
-        } catch (error) {
-            console.warn('Picker failed:', error);
-            return null;
-        }
-    }
-
-    /**
      * Check if event target is an interactive UI element
      * @private
      */
@@ -987,12 +942,8 @@ export class BloomController {
 
         // 不再手画 2D 白圈：手画中心/半径是屏幕坐标，与 pointer up 后从 3D 投影的 mask 几何不一致，导致完成前后差异大。
         // 改为每帧只用 3D 点投影画 2D mask（体积仍仅 pointer up 重建），完成前后一致。
-        const canvas = this.global.app.graphicsDevice.canvas;
-        const rect = canvas.getBoundingClientRect();
-        const screenX = e.clientX - rect.left;
-        const screenY = e.clientY - rect.top;
-
-        this.screenToWorld(screenX, screenY).then(worldPos => {
+        const canvas = this.global.app.graphicsDevice.canvas as HTMLCanvasElement;
+        pickWorldFromClientXY(this.global, e.clientX, e.clientY).then(worldPos => {
             if (worldPos) {
                 const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomBrushSize?: number } | undefined;
                 const brushSize = bloom?.bloomBrushSize ?? 30;
@@ -1034,12 +985,8 @@ export class BloomController {
         e.preventDefault();
         e.stopPropagation();
 
-        const canvas = this.global.app.graphicsDevice.canvas;
-        const rect = canvas.getBoundingClientRect();
-        const screenX = e.clientX - rect.left;
-        const screenY = e.clientY - rect.top;
-
-        this.screenToWorld(screenX, screenY).then(worldPos => {
+        const canvas = this.global.app.graphicsDevice.canvas as HTMLCanvasElement;
+        pickWorldFromClientXY(this.global, e.clientX, e.clientY).then(worldPos => {
             if (worldPos) {
                 const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomBrushSize?: number } | undefined;
                 const brushSize = bloom?.bloomBrushSize ?? 30;
@@ -1604,9 +1551,5 @@ export class BloomController {
         }
         this.worldSpaceMaskCanvas = null;
         this.worldSpaceMaskCtx = null;
-        if (this.picker) {
-            this.picker.release();
-            this.picker = null;
-        }
     }
 }

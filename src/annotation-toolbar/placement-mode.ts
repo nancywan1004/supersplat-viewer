@@ -11,7 +11,7 @@ import { Vec3 } from 'playcanvas';
 import { PlacementState } from './types';
 import type { AnnotationEntity } from './annotation-entity';
 import type { Global } from '../types';
-import { Picker } from '../picker';
+import { pickWorldFromClientXY } from '../picker';
 import { getPositionInFrontOfCamera } from '../asset-placement-handler';
 
 /**
@@ -29,9 +29,6 @@ export class PlacementMode {
     /** Global 引用 */
     private global: Global;
 
-    /** 场景拾取器 */
-    private picker: Picker;
-
     /** 场景点击事件处理器 */
     private clickHandler: ((event: MouseEvent) => void) | null = null;
 
@@ -42,7 +39,6 @@ export class PlacementMode {
      */
     constructor(global: Global) {
         this.global = global;
-        this.picker = new Picker(global.app, global.camera);
     }
 
     /**
@@ -205,20 +201,8 @@ export class PlacementMode {
             return;
         }
 
-        const canvas = this.global.app.graphicsDevice.canvas as HTMLCanvasElement;
-        const rect = canvas.getBoundingClientRect();
-        
-        // 转换为画布坐标
-        const canvasX = event.clientX - rect.left;
-        const canvasY = event.clientY - rect.top;
-
-        // 归一化坐标 (0-1)
-        const normalizedX = canvasX / canvas.clientWidth;
-        const normalizedY = canvasY / canvas.clientHeight;
-
-        // 使用 Picker 获取 3D 位置
         try {
-            const position = await this.picker.pick(normalizedX, normalizedY);
+            const position = await pickWorldFromClientXY(this.global, event.clientX, event.clientY);
             if (position) {
                 // 触发标注放置事件（由 AnnotationManager 监听并创建或更新占位标注）
                 if (this.global.events) {

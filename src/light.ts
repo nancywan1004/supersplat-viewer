@@ -413,6 +413,49 @@ const setLightsVisualVisible = (global: Global, visibleInEnvironment: boolean): 
 };
 
 /**
+ * 根据拾取到的世界坐标，在点光/聚光灯实体中找到最近的一盏光源并选中它。
+ * 仅在编辑模式 + 环境模块下才生效。
+ */
+const selectNearestLightAtPosition = (global: Global, position: Vec3): void => {
+    const { app, state, events } = global;
+    if (!state.editMode || state.editLeftModule !== 'environment') return;
+
+    let bestEntity: Entity | null = null;
+    let bestConfig: any | null = null;
+    let bestDist = Infinity;
+
+    const testContainer = (name: string) => {
+        const container = app.root.findByName(name) as Entity | null;
+        if (!container) return;
+        container.children.forEach((node) => {
+            const e = node as Entity;
+            if (!e.light || !e.light.enabled) return;
+            const cfg = (e as any).__lightConfig as any | undefined;
+            if (!cfg || !cfg.id) return;
+            const pos = e.getPosition();
+            const d = pos.distance(position);
+            if (d < bestDist) {
+                bestDist = d;
+                bestEntity = e;
+                bestConfig = cfg;
+            }
+        });
+    };
+
+    testContainer('pointLights');
+    testContainer('spotLights');
+
+    if (!bestEntity || !bestConfig) return;
+
+    // 距离阈值：避免点击在场景空白位置时误选光源，这里取 2.5 米作为经验值
+    const MAX_SELECT_DISTANCE = 2.5;
+    if (bestDist > MAX_SELECT_DISTANCE) return;
+
+    (state as any).selectedLightId = bestConfig.id;
+    events.fire('sceneLight:selected', { id: bestConfig.id });
+};
+
+/**
  * 根据当前 settings.lighting 重新应用平行光并创建/更新点光源实体（供运行时 UI 修改配置后调用）
  */
 const updatePointLightsFromSettings = (global: Global): void => {
@@ -480,5 +523,6 @@ export {
     updatePointLightsFromSettings,
     setPointLightsVisualVisible,
     setLightsVisualVisible,
+    selectNearestLightAtPosition,
     updateShadowDistance
 };

@@ -1,4 +1,5 @@
 import { type AppBase, type Entity, Picker as PcPicker, Vec3 } from 'playcanvas';
+import type { Global } from './types';
 
 /**
  * 标注放置 / 深度拾取专用 Picker。
@@ -50,5 +51,26 @@ class Picker {
         }
     }
 }
+/**
+ * 根据浏览器事件的 clientX/clientY，将屏幕坐标转换为世界坐标。
+ * - 统一使用 canvas.getBoundingClientRect() 做归一化，保证与 depth buffer / Picker 一致；
+ * - 所有需要「点击 → 世界坐标」的模块应优先通过此方法获取坐标，再根据各自业务解释（选光源、放注释、画 bloom 等）。
+ */
+async function pickWorldFromClientXY(global: Global, clientX: number, clientY: number): Promise<Vec3 | null> {
+    const canvas = global.app.graphicsDevice.canvas as HTMLCanvasElement;
+    const rect = canvas.getBoundingClientRect();
+    const rw = rect.width;
+    const rh = rect.height;
+    if (rw <= 0 || rh <= 0) return null;
 
-export { Picker };
+    const nx = (clientX - rect.left) / rw;
+    const ny = (clientY - rect.top) / rh;
+
+    const pickerHolder = global as unknown as { __picker?: Picker };
+    if (!pickerHolder.__picker) {
+        pickerHolder.__picker = new Picker(global.app, global.camera);
+    }
+    return pickerHolder.__picker.pick(nx, ny);
+}
+
+export { Picker, pickWorldFromClientXY };

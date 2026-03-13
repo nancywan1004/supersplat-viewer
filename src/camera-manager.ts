@@ -24,6 +24,7 @@ import type { AnimTrack } from './settings';
 import { CameraMode, Global } from './types';
 import { SphereConstraint } from './camera-constraints/sphere-constraint';
 import { BoxConstraint } from './camera-constraints/box-constraint';
+import { selectNearestLightAtPosition } from './light';
 
 const tmpCamera = new Camera();
 const tmpv = new Vec3();
@@ -454,7 +455,7 @@ class CameraManager {
             controllers.anim.animState.cursor.value = time;
         });
 
-        // handle user picking in the scene
+        // handle user picking in the scene（双击/双指点）
         events.on('pick', (position: Vec3) => {
             // Show visual marker at picked position
             // if (this.pickMarker) {
@@ -505,6 +506,11 @@ class CameraManager {
             //     controllers.fly.goto(targetPose);
             // }
             startTransition();
+        });
+
+        // 单击拾取：用于光源等场景对象选中（不改变相机）
+        events.on('scenePointerWorldClick', (position: Vec3) => {
+            selectNearestLightAtPosition(global, position);
         });
 
         events.on('annotation.activate', (annotation: Annotation) => {
