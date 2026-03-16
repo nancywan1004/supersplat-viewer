@@ -28,6 +28,9 @@ import {
     applyBloomThresholdUpdate,
     applyBloomBlurSet,
     applyBloomLocalLightRegionDelete,
+    applyBloomLocalLightRegionIntensityUpdate,
+    applyBloomLocalLightRegionInnerAngleSet,
+    applyBloomLocalLightRegionOuterAngleSet,
     applyShadowSet,
     applyShadowIntensityUpdate,
     applyVfxTypeSet,
@@ -67,7 +70,6 @@ type InboundPayload =
     | { type: 'LIGHT_SELECT'; id?: string | null }
     | { type: 'LIGHT_INTENSITY_UPDATE'; id?: string; value?: number }
     | { type: 'LIGHT_COLOR_UPDATE'; id?: string; value?: number[] }
-    | { type: 'LIGHT_IS_THREE_SIXTY_UPDATE'; id?: string; value?: boolean }
     | { type: 'LIGHT_INNER_ANGLE_SET'; id?: string; value?: number }
     | { type: 'LIGHT_OUTER_ANGLE_SET'; id?: string; value?: number }
     | { type: 'LIGHT_RANGE_SET'; id?: string; value?: number }
@@ -352,7 +354,6 @@ const initPostMessageBridge = (global: Global) => {
             break;
         case 'LIGHT_INTENSITY_UPDATE':
         case 'LIGHT_COLOR_UPDATE':
-        case 'LIGHT_IS_THREE_SIXTY_UPDATE':
         case 'LIGHT_INNER_ANGLE_SET':
         case 'LIGHT_OUTER_ANGLE_SET':
         case 'LIGHT_RANGE_SET':
@@ -361,13 +362,34 @@ const initPostMessageBridge = (global: Global) => {
         case 'LIGHT_BRUSH_DELETE':
             applyBloomLocalLightRegionDelete(global, (p as { id?: string }).id ?? '');
             break;
+        case 'LIGHT_BRUSH_INTENSITY_UPDATE': {
+            const id = (p as { id?: string }).id ?? '';
+            const v = (p as { value?: number }).value;
+            if (typeof v === 'number') {
+                applyBloomLocalLightRegionIntensityUpdate(global, id, v);
+            }
+            break;
+        }
+        case 'LIGHT_BRUSH_INNER_ANGLE_SET': {
+            const id = (p as { id?: string }).id ?? '';
+            const v = (p as { value?: number }).value;
+            if (typeof v === 'number') {
+                applyBloomLocalLightRegionInnerAngleSet(global, id, v);
+            }
+            break;
+        }
+        case 'LIGHT_BRUSH_OUTER_ANGLE_SET': {
+            const id = (p as { id?: string }).id ?? '';
+            const v = (p as { value?: number }).value;
+            if (typeof v === 'number') {
+                applyBloomLocalLightRegionOuterAngleSet(global, id, v);
+            }
+            break;
+        }
         case 'LIGHT_BRUSH_START':
         case 'LIGHT_ERASER_START':
         case 'LIGHT_BRUSH_CLEAR':
         case 'LIGHT_BRUSH_COLOR_UPDATE':
-        case 'LIGHT_BRUSH_INTENSITY_UPDATE':
-        case 'LIGHT_BRUSH_INNER_ANGLE_SET':
-        case 'LIGHT_BRUSH_OUTER_ANGLE_SET':
         case 'LIGHT_BRUSH_FINISH':
         case 'LIGHT_BRUSH_BLOOM_UPDATE':
             // 笔刷协议映射到内部事件，由 vfx/bloom-brush 等处理

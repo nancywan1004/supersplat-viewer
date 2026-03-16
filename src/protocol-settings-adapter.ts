@@ -144,7 +144,7 @@ export function applyLightSelect(global: Global, id: string | null): void {
     global.events.fire('sceneLight:selected', { id });
 }
 
-/** LIGHT_INTENSITY_UPDATE / LIGHT_COLOR_UPDATE / LIGHT_IS_THREE_SIXTY_UPDATE / LIGHT_INNER_ANGLE_SET / LIGHT_OUTER_ANGLE_SET / LIGHT_RANGE_SET */
+/** LIGHT_INTENSITY_UPDATE / LIGHT_COLOR_UPDATE / LIGHT_INNER_ANGLE_SET / LIGHT_OUTER_ANGLE_SET / LIGHT_RANGE_SET */
 export function applyLightDetail(
     global: Global,
     type: string,
@@ -166,9 +166,6 @@ export function applyLightDetail(
         if (Array.isArray(payload.value) && payload.value.length >= 3) {
             light.color = [payload.value[0], payload.value[1], payload.value[2]];
         }
-        break;
-    case 'LIGHT_IS_THREE_SIXTY_UPDATE':
-        if (typeof payload.value === 'boolean') (light as Record<string, unknown>).isThreeSixty = payload.value;
         break;
     case 'LIGHT_INNER_ANGLE_SET':
         if (typeof payload.value === 'number') (light as Record<string, unknown>).innerAngle = Math.max(0, Math.min(180, payload.value));

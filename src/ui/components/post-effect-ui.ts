@@ -261,6 +261,34 @@ function renderBloomLocalLightRegionsList(
         const tint = region.tintColor ?? [1, 1, 1];
         const tintHex = '#' + [tint[0], tint[1], tint[2]].map(x => Math.round(Math.max(0, Math.min(1, x)) * 255).toString(16).padStart(2, '0')).join('');
         const tintBlend = Math.max(0, Math.min(1, region.tintBlend ?? 0));
+
+        // 若该区域已绑定光源，则查一次当前光源配置（用于显示强度/角度/Range）
+        let linkedLightType: 'point' | 'spot' | null = null;
+        let linkedLightIntensity = 1;
+        let linkedInner = 25;
+        let linkedOuter = 45;
+        let linkedRange = 10;
+        const linkedIdForUI = (region as any).linkedLightId as string | null | undefined;
+        if (linkedIdForUI) {
+            try {
+                const lighting = ensureLightingForLighting((global as any).settings as ExperienceSettings);
+                const light = (lighting as any).lights?.find?.((l: any) => l && l.id === linkedIdForUI) as any | undefined;
+                if (light) {
+                    linkedLightIntensity = typeof light.intensity === 'number' ? light.intensity : 1;
+                    if (light.type === 'spot') {
+                        linkedLightType = 'spot';
+                        linkedInner = typeof light.innerConeAngle === 'number' ? light.innerConeAngle : 25;
+                        linkedOuter = typeof light.outerConeAngle === 'number' ? light.outerConeAngle : 45;
+                        linkedRange = typeof light.range === 'number' ? light.range : 10;
+                    } else {
+                        linkedLightType = 'point';
+                    }
+                }
+            } catch {
+                // 若查光源失败，不影响区域自身 UI
+            }
+        }
+
         body.innerHTML = `
           <div class="settingsRow">
             <label class="postEffectLabel">局部亮度:</label>
@@ -279,12 +307,61 @@ function renderBloomLocalLightRegionsList(
               <input type="range" class="bloomRegionTintBlendSlider postEffectSlider" min="0" max="1" step="0.05" value="${tintBlend}">
               <span class="bloomRegionTintBlendValue postEffectSliderValue">${tintBlend.toFixed(2)}</span>
             </div>
-          </div>`;
+          </div>
+          ${
+              linkedLightType
+                  ? `
+          <div class="settingsRow">
+            <label class="postEffectLabel">光照强度:</label>
+            <div class="postEffectSliderWrap">
+              <input type="range" class="bloomRegionLinkedLightIntensitySlider postEffectSlider" min="0" max="10" step="0.1" value="${linkedLightIntensity}">
+              <span class="bloomRegionLinkedLightIntensityValue postEffectSliderValue">${linkedLightIntensity.toFixed(1)}</span>
+            </div>
+          </div>
+          ${
+              linkedLightType === 'spot'
+                  ? `
+          <div class="settingsRow">
+            <label class="postEffectLabel">Inner角:</label>
+            <div class="postEffectSliderWrap">
+              <input type="range" class="bloomRegionLinkedLightInnerSlider postEffectSlider" min="0" max="180" step="1" value="${linkedInner}">
+              <span class="bloomRegionLinkedLightInnerValue postEffectSliderValue">${linkedInner.toFixed(0)}</span>
+            </div>
+          </div>
+          <div class="settingsRow">
+            <label class="postEffectLabel">Outer角:</label>
+            <div class="postEffectSliderWrap">
+              <input type="range" class="bloomRegionLinkedLightOuterSlider postEffectSlider" min="0" max="180" step="1" value="${linkedOuter}">
+              <span class="bloomRegionLinkedLightOuterValue postEffectSliderValue">${linkedOuter.toFixed(0)}</span>
+            </div>
+          </div>
+          <div class="settingsRow">
+            <label class="postEffectLabel">Range:</label>
+            <div class="postEffectSliderWrap">
+              <input type="range" class="bloomRegionLinkedLightRangeSlider postEffectSlider" min="0" max="20" step="0.1" value="${linkedRange}">
+              <span class="bloomRegionLinkedLightRangeValue postEffectSliderValue">${linkedRange.toFixed(1)}</span>
+            </div>
+          </div>
+          `
+                  : ''
+          }
+          `
+                  : ''
+          }
+        `;
         const brightnessSlider = body.querySelector('.bloomRegionBrightnessSlider') as HTMLInputElement;
         const brightnessValueSpan = body.querySelector('.bloomRegionBrightnessValue') as HTMLElement;
         const tintColorInput = body.querySelector('.bloomRegionTintColor') as HTMLInputElement;
         const tintBlendSlider = body.querySelector('.bloomRegionTintBlendSlider') as HTMLInputElement;
         const tintBlendValueSpan = body.querySelector('.bloomRegionTintBlendValue') as HTMLElement;
+        const linkedIntensitySlider = body.querySelector('.bloomRegionLinkedLightIntensitySlider') as HTMLInputElement | null;
+        const linkedIntensityValueSpan = body.querySelector('.bloomRegionLinkedLightIntensityValue') as HTMLElement | null;
+        const linkedInnerSlider = body.querySelector('.bloomRegionLinkedLightInnerSlider') as HTMLInputElement | null;
+        const linkedInnerValueSpan = body.querySelector('.bloomRegionLinkedLightInnerValue') as HTMLElement | null;
+        const linkedOuterSlider = body.querySelector('.bloomRegionLinkedLightOuterSlider') as HTMLInputElement | null;
+        const linkedOuterValueSpan = body.querySelector('.bloomRegionLinkedLightOuterValue') as HTMLElement | null;
+        const linkedRangeSlider = body.querySelector('.bloomRegionLinkedLightRangeSlider') as HTMLInputElement | null;
+        const linkedRangeValueSpan = body.querySelector('.bloomRegionLinkedLightRangeValue') as HTMLElement | null;
 
         header.addEventListener('click', (e) => {
             // 若点击的是删除按钮，由 deleteBtn 自己处理，不切换展开
@@ -361,6 +438,91 @@ function renderBloomLocalLightRegionsList(
             });
             tintBlendSlider.addEventListener('change', () => pushEditHistorySafe());
         }
+
+        // 绑定光源的调节（强度 / 角度 / Range）
+        const linkedIdRuntime = linkedIdForUI;
+        if (linkedIdRuntime && linkedIntensitySlider && linkedIntensityValueSpan) {
+            linkedIntensitySlider.addEventListener('input', () => {
+                const raw = parseFloat(linkedIntensitySlider.value);
+                const v = Math.max(0, Math.min(10, Number.isFinite(raw) ? raw : 0));
+                linkedIntensityValueSpan.textContent = v.toFixed(1);
+                if (editUiTransport === 'message-bridge') {
+                    sendEditProtocolMessage({
+                        type: 'LIGHT_BRUSH_INTENSITY_UPDATE',
+                        id: region.id,
+                        value: v
+                    });
+                } else {
+                    try {
+                        const settingsAny = global.settings as ExperienceSettings;
+                        const lighting = ensureLightingForLighting(settingsAny);
+                        const lightsAny = (lighting as any).lights as any[];
+                        const light = lightsAny.find((l) => l && (l as any).id === linkedIdRuntime);
+                        if (light) {
+                            (light as any).intensity = v;
+                            updatePointLightsFromSettings(global);
+                            global.events.fire('lighting:changed');
+                        }
+                    } catch {
+                        // 忽略联动失败，不影响 UI
+                    }
+                }
+            });
+            linkedIntensitySlider.addEventListener('change', () => pushEditHistorySafe());
+        }
+
+        const attachSpotSlider = (
+            slider: HTMLInputElement | null,
+            valueSpan: HTMLElement | null,
+            min: number,
+            max: number,
+            step: number,
+            type: 'inner' | 'outer' | 'range'
+        ) => {
+            if (!slider || !valueSpan || !linkedIdRuntime) return;
+            const clamp = (val: number) => Math.max(min, Math.min(max, val));
+            slider.addEventListener('input', () => {
+                const raw = parseFloat(slider.value);
+                const v = clamp(Number.isFinite(raw) ? raw : min);
+                valueSpan.textContent = type === 'range' ? v.toFixed(1) : v.toFixed(0);
+                if (editUiTransport === 'message-bridge') {
+                    const msgType =
+                        type === 'inner'
+                            ? 'LIGHT_BRUSH_INNER_ANGLE_SET'
+                            : type === 'outer'
+                                ? 'LIGHT_BRUSH_OUTER_ANGLE_SET'
+                                : 'LIGHT_RANGE_SET';
+                    sendEditProtocolMessage({
+                        type: msgType as any,
+                        id: region.id,
+                        value: v
+                    });
+                } else {
+                    try {
+                        const settingsAny = global.settings as ExperienceSettings;
+                        const lighting = ensureLightingForLighting(settingsAny);
+                        const lightsAny = (lighting as any).lights as any[];
+                        const light = lightsAny.find(
+                            (l) => l && (l as any).id === linkedIdRuntime && (l as any).type === 'spot'
+                        );
+                        if (light) {
+                            if (type === 'inner') (light as any).innerConeAngle = v;
+                            else if (type === 'outer') (light as any).outerConeAngle = v;
+                            else (light as any).range = v;
+                            updatePointLightsFromSettings(global);
+                            global.events.fire('lighting:changed');
+                        }
+                    } catch {
+                        // 忽略联动失败，不影响 UI
+                    }
+                }
+            });
+            slider.addEventListener('change', () => pushEditHistorySafe());
+        };
+
+        attachSpotSlider(linkedInnerSlider, linkedInnerValueSpan, 0, 180, 1, 'inner');
+        attachSpotSlider(linkedOuterSlider, linkedOuterValueSpan, 0, 180, 1, 'outer');
+        attachSpotSlider(linkedRangeSlider, linkedRangeValueSpan, 0, 20, 0.1, 'range');
 
         item.appendChild(header);
         item.appendChild(body);
