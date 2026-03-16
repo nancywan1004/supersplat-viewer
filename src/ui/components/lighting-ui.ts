@@ -51,6 +51,12 @@ export function initLightingUI(global: Global): () => void {
 
     container.innerHTML = LIGHTING_PANEL_HTML;
 
+    // 当鼠标在 Lighting UI 上滚动时，阻止事件向下传给画布，避免触发相机缩放
+    container.addEventListener('wheel', (e) => {
+        e.stopPropagation();
+        // 允许在列表内部滚动，但不让事件冒到 canvas 去驱动相机
+    }, { passive: true });
+
     const nightFadeSlider = container.querySelector('#nightFadeSlider') as HTMLInputElement | null;
     const nightFadeValue = container.querySelector('#nightFadeValue') as HTMLElement | null;
     const showLightsInSceneCheck = container.querySelector('#showLightsInSceneCheck') as HTMLElement | null;

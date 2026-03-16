@@ -5,9 +5,9 @@
     position: fixed;
     top: calc(var(--edit-top-bar-height, 48px) + 5vh);
     right: 0;
+    bottom: 0; // 让右侧栏高度由 top/bottom 约束，内部才能滚动
     width: 320px;
     max-width: 90vw;
-    height: auto;
     padding-top: max(0, env(safe-area-inset-top));
     padding-right: max(0, env(safe-area-inset-right));
     z-index: 99;

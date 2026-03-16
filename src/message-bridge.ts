@@ -71,6 +71,9 @@ type InboundPayload =
     | { type: 'LIGHT_INNER_ANGLE_SET'; id?: string; value?: number }
     | { type: 'LIGHT_OUTER_ANGLE_SET'; id?: string; value?: number }
     | { type: 'LIGHT_RANGE_SET'; id?: string; value?: number }
+    | { type: 'LIGHT_BRUSH_INTENSITY_UPDATE'; id?: string; value?: number }
+    | { type: 'LIGHT_BRUSH_INNER_ANGLE_SET'; id?: string; value?: number }
+    | { type: 'LIGHT_BRUSH_OUTER_ANGLE_SET'; id?: string; value?: number }
     | { type: 'LIGHT_BRUSH_START' }
     | { type: 'LIGHT_ERASER_START' }
     | { type: 'LIGHT_BRUSH_CLEAR' }
@@ -362,6 +365,9 @@ const initPostMessageBridge = (global: Global) => {
         case 'LIGHT_ERASER_START':
         case 'LIGHT_BRUSH_CLEAR':
         case 'LIGHT_BRUSH_COLOR_UPDATE':
+        case 'LIGHT_BRUSH_INTENSITY_UPDATE':
+        case 'LIGHT_BRUSH_INNER_ANGLE_SET':
+        case 'LIGHT_BRUSH_OUTER_ANGLE_SET':
         case 'LIGHT_BRUSH_FINISH':
         case 'LIGHT_BRUSH_BLOOM_UPDATE':
             // 笔刷协议映射到内部事件，由 vfx/bloom-brush 等处理

@@ -51,6 +51,8 @@
     display: flex;
     flex-direction: column;
     gap: 0;
+    max-height: 260px;
+    overflow-y: auto;
 }
 
 .pointLightRow {

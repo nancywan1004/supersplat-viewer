@@ -87,3 +87,12 @@
         border-radius: 4px;
     }
 }
+
+// 局部亮灯区域列表：限制高度并允许滚动，避免区域过多时溢出
+.bloomRegionsList {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 260px;
+    overflow-y: auto;
+}

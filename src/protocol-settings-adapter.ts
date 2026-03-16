@@ -209,6 +209,60 @@ export function applyBloomThresholdUpdate(global: Global, value: number): void {
     global.events.fire('postEffect:changed');
 }
 
+/** LIGHT_BRUSH_INTENSITY_UPDATE：根据亮灯区域 id，更新其绑定光源的 intensity（0-10） */
+export function applyBloomLocalLightRegionIntensityUpdate(global: Global, regionId: string, value: number): void {
+    if (!regionId) return;
+    const settings = global.settings as ExperienceSettings;
+    const b = ensureBloom(settings);
+    const regions = (b as any).localLightRegions as any[] | undefined;
+    if (!Array.isArray(regions)) return;
+    const region = regions.find((r) => r && r.id === regionId);
+    if (!region || !region.linkedLightId) return;
+    const lighting = ensureLighting(settings);
+    const light = (lighting.lights as any[]).find((l) => l && (l as any).id === region.linkedLightId);
+    if (!light) return;
+    const clamped = Math.max(0, Math.min(10, value));
+    (light as any).intensity = clamped;
+    updatePointLightsFromSettings(global);
+    global.events.fire('lighting:changed');
+}
+
+/** LIGHT_BRUSH_INNER_ANGLE_SET：根据亮灯区域 id，更新其绑定聚光灯的 innerConeAngle（0-180） */
+export function applyBloomLocalLightRegionInnerAngleSet(global: Global, regionId: string, value: number): void {
+    if (!regionId) return;
+    const settings = global.settings as ExperienceSettings;
+    const b = ensureBloom(settings);
+    const regions = (b as any).localLightRegions as any[] | undefined;
+    if (!Array.isArray(regions)) return;
+    const region = regions.find((r) => r && r.id === regionId);
+    if (!region || !region.linkedLightId) return;
+    const lighting = ensureLighting(settings);
+    const light = (lighting.lights as any[]).find((l) => l && (l as any).id === region.linkedLightId && (l as any).type === 'spot');
+    if (!light) return;
+    const clamped = Math.max(0, Math.min(180, value));
+    (light as any).innerConeAngle = clamped;
+    updatePointLightsFromSettings(global);
+    global.events.fire('lighting:changed');
+}
+
+/** LIGHT_BRUSH_OUTER_ANGLE_SET：根据亮灯区域 id，更新其绑定聚光灯的 outerConeAngle（0-180） */
+export function applyBloomLocalLightRegionOuterAngleSet(global: Global, regionId: string, value: number): void {
+    if (!regionId) return;
+    const settings = global.settings as ExperienceSettings;
+    const b = ensureBloom(settings);
+    const regions = (b as any).localLightRegions as any[] | undefined;
+    if (!Array.isArray(regions)) return;
+    const region = regions.find((r) => r && r.id === regionId);
+    if (!region || !region.linkedLightId) return;
+    const lighting = ensureLighting(settings);
+    const light = (lighting.lights as any[]).find((l) => l && (l as any).id === region.linkedLightId && (l as any).type === 'spot');
+    if (!light) return;
+    const clamped = Math.max(0, Math.min(180, value));
+    (light as any).outerConeAngle = clamped;
+    updatePointLightsFromSettings(global);
+    global.events.fire('lighting:changed');
+}
+
 /** BLOOM_BLUR_SET（0-10；0 关辉光，1-10 设模糊级别并开辉光） */
 export function applyBloomBlurSet(global: Global, value: number): void {
     const settings = global.settings as ExperienceSettings;

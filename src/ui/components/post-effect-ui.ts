@@ -381,6 +381,11 @@ export function initPostEffectUI(global: Global): () => void {
 
     container.innerHTML = POST_EFFECT_PANEL_HTML;
 
+    // 当鼠标在 PostEffect UI 上滚动时，阻止事件向下传给画布，避免触发相机缩放
+    container.addEventListener('wheel', (e) => {
+        e.stopPropagation();
+    }, { passive: true });
+
     const bloomIntensitySlider = container.querySelector('#bloomIntensitySlider') as HTMLInputElement | null;
     const bloomIntensityValue = container.querySelector('#bloomIntensityValue') as HTMLElement | null;
     const bloomBlurLevelSlider = container.querySelector('#bloomBlurLevelSlider') as HTMLInputElement | null;
