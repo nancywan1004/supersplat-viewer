@@ -15,6 +15,7 @@ import { pickWorldFromClientXY } from '../picker';
 import { WorldSpaceBloomData } from './world-space-bloom-data';
 import { BloomBrushFilter, MAX_POINTS } from './bloom-brush-filter';
 import { buildCommittedBrightnessVolume, buildCommittedBrightnessVolumeFromRegions, type CommittedPointWithBrightness } from './committed-brightness-volume';
+import { updatePointLightsFromSettings } from '../light';
 
 const MASK_SIZE = 512;
 /** 与 committed-brightness-volume 一致，用于判断是否为有效 64³ volume 纹理 */
@@ -447,6 +448,29 @@ export class BloomController {
                 }
                 if (typeof tintBlendVal === 'number') {
                     region.tintBlend = Math.max(0, Math.min(1, tintBlendVal));
+                }
+                // 若该区域绑定了光源，则同步更新对应 light 颜色（message-bridge 模式）
+                const linkedId = (region as any).linkedLightId as string | null | undefined;
+                if (linkedId && Array.isArray(region.tintColor) && region.tintColor.length >= 3) {
+                    try {
+                        const settingsAny = this.global.settings as any;
+                        const lighting = settingsAny.lighting;
+                        if (lighting && Array.isArray(lighting.lights)) {
+                            const lightsAny = lighting.lights as any[];
+                            const light = lightsAny.find((l) => l && (l as any).id === linkedId);
+                            if (light) {
+                                const [lr, lg, lb] = region.tintColor as [number, number, number];
+                                (light as any).color = [
+                                    Math.max(0, Math.min(1, lr)),
+                                    Math.max(0, Math.min(1, lg)),
+                                    Math.max(0, Math.min(1, lb))
+                                ];
+                                updatePointLightsFromSettings(this.global);
+                            }
+                        }
+                    } catch {
+                        // 忽略联动失败，保证 Bloom 协议本身正常
+                    }
                 }
 
                 (this.global.events as any).fire('postEffect:changed');
@@ -1125,6 +1149,24 @@ export class BloomController {
         const worldSpaceJSON = this.worldSpaceData.toJSON() as WorldSpaceBloomRegionJSON;
         const committedBrightness = this.worldSpaceData.getCommittedBrightness();
         return { worldSpaceJSON, committedBrightness };
+    }
+
+    /**
+     * 计算当前 worldSpaceData 对应区域的世界空间中心（简单几何中心）：
+     * - 若存在 committed 点集，则以 committed 为准；
+     * - 否则退化为使用当前所有点（points）；
+     * - 无点时返回 null。
+     * 用于在 LocalLightRegion 绘制完成后为 Lighting 模块提供一个推荐的光源放置位置。
+     */
+    getCurrentRegionCenter(): Vec3 | null {
+        const all = this.worldSpaceData.getAllPoints();
+        if (!all.length) return null;
+        const center = new Vec3(0, 0, 0);
+        for (const p of all) {
+            center.add(p.position);
+        }
+        center.mulScalar(1 / all.length);
+        return center;
     }
 
     /** 仅在 Set / 加载配置 / applyToCameraFrame 时同步 committed 到 NightMode；使用 3D 体积纹理，无点数上限 */

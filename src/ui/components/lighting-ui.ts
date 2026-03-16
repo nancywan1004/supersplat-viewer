@@ -29,10 +29,14 @@ const LIGHTING_PANEL_HTML = `
 
 const MAX_POINT_LIGHTS = 10;
 
-const isDirectional = (l: PointLightConfig | DirectionalLightConfig | SpotLightConfig): l is DirectionalLightConfig =>
-    (l as any).type === 'directional';
-const isSpot = (l: PointLightConfig | DirectionalLightConfig | SpotLightConfig): l is SpotLightConfig =>
-    (l as any).type === 'spot';
+const isDirectional = (
+    l: PointLightConfig | DirectionalLightConfig | SpotLightConfig | undefined | null
+): l is DirectionalLightConfig =>
+    !!l && (l as any).type === 'directional';
+const isSpot = (
+    l: PointLightConfig | DirectionalLightConfig | SpotLightConfig | undefined | null
+): l is SpotLightConfig =>
+    !!l && (l as any).type === 'spot';
 
 /**
  * 初始化 Lighting 面板 UI（夜间模式、强度滑块、场景光源可视化、点光源列表）。
@@ -80,6 +84,23 @@ export function initLightingUI(global: Global): () => void {
             lighting.lights.unshift(dir);
         }
         return lighting as { lights: (PointLightConfig | DirectionalLightConfig | SpotLightConfig)[] };
+    };
+
+    // 为新建光源生成一个不会与现有 light.id 冲突的 id（light-<n> 形式）
+    const generateNextLightId = (): string => {
+        const lighting = ensureLightingLocal();
+        const existingIds = (lighting.lights as any[])
+            .map((l) => (l && typeof l === 'object' ? (l as any).id as string | undefined : undefined))
+            .filter((id) => typeof id === 'string') as string[];
+        let maxIndex = -1;
+        for (const id of existingIds) {
+            const m = /^light-(\d+)$/.exec(id);
+            if (m) {
+                const n = parseInt(m[1], 10);
+                if (Number.isFinite(n) && n > maxIndex) maxIndex = n;
+            }
+        }
+        return `light-${maxIndex + 1}`;
     };
     const ensureNightModeSettings = (): { fade?: number } => {
         return ensureNightMode(global.settings as ExperienceSettings);
@@ -365,9 +386,29 @@ export function initLightingUI(global: Global): () => void {
     if (addPointLightBtn && pointLightsList) {
         addPointLightBtn.addEventListener('click', () => {
             const lighting = ensureLightingLocal();
+            const bloom = (global.settings as ExperienceSettings).postEffectSettings?.bloom as {
+                draftLightRegionCenter?: [number, number, number] | null;
+                activeLocalLightRegionId?: string | null;
+                localLightRegions?: Array<{ id: string; linkedLightId?: string | null }>;
+            } | undefined;
+            const center = bloom?.draftLightRegionCenter ?? null;
             const pointCount = lighting.lights.filter((l: any) => !isDirectional(l) && !isSpot(l)).length;
             if (pointCount >= MAX_POINT_LIGHTS) return;
-            lighting.lights.push({ position: [0, 1, 0], color: [1, 1, 1], intensity: 1, enabled: true });
+            const basePos: [number, number, number] = center ? [center[0], center[1], center[2]] : [0, 1, 0];
+            const nextId = generateNextLightId();
+            const cfgPoint: any = { position: basePos, color: [1, 1, 1], intensity: 1, enabled: true };
+            cfgPoint.id = nextId;
+            lighting.lights.push(cfgPoint);
+            // 若当前有激活的亮灯区域，则把该区域的 linkedLightId 绑定到新建光源
+            if (bloom && bloom.activeLocalLightRegionId && Array.isArray(bloom.localLightRegions)) {
+                const region = bloom.localLightRegions.find((r) => r && r.id === bloom.activeLocalLightRegionId);
+                if (region) {
+                    (region as any).linkedLightId = nextId;
+                }
+            }
+            if (bloom) {
+                (bloom as any).draftLightRegionCenter = null;
+            }
             renderPointLightsList();
             updatePointLightsFromSettings(global);
             events.fire('lighting:changed');
@@ -377,9 +418,18 @@ export function initLightingUI(global: Global): () => void {
     if (addSpotLightBtn && pointLightsList) {
         addSpotLightBtn.addEventListener('click', () => {
             const lighting = ensureLightingLocal();
-            lighting.lights.push({
+            const bloom = (global.settings as ExperienceSettings).postEffectSettings?.bloom as {
+                draftLightRegionCenter?: [number, number, number] | null;
+                activeLocalLightRegionId?: string | null;
+                localLightRegions?: Array<{ id: string; linkedLightId?: string | null }>;
+            } | undefined;
+            const center = bloom?.draftLightRegionCenter ?? null;
+            const basePos: [number, number, number] = center ? [center[0], center[1], center[2]] : [0, 2, 0];
+            const nextId = generateNextLightId();
+            const cfgSpot: any = {
+                id: nextId,
                 type: 'spot',
-                position: [0, 2, 0],
+                position: basePos,
                 color: [1, 1, 1],
                 intensity: 1,
                 pitch: -45,
@@ -388,7 +438,17 @@ export function initLightingUI(global: Global): () => void {
                 outerConeAngle: 45,
                 range: 10,
                 enabled: true
-            });
+            };
+            lighting.lights.push(cfgSpot);
+            if (bloom && bloom.activeLocalLightRegionId && Array.isArray(bloom.localLightRegions)) {
+                const region = bloom.localLightRegions.find((r) => r && r.id === bloom.activeLocalLightRegionId);
+                if (region) {
+                    (region as any).linkedLightId = nextId;
+                }
+            }
+            if (bloom) {
+                (bloom as any).draftLightRegionCenter = null;
+            }
             renderPointLightsList();
             updatePointLightsFromSettings(global);
             events.fire('lighting:changed');
@@ -412,6 +472,12 @@ export function initLightingUI(global: Global): () => void {
         if (initialId) {
             events.fire('sceneLight:selected', { id: initialId });
         }
+
+        // 监听 lighting:changed（包括由亮灯区域联动触发的删灯），实时重建列表
+        events.on('lighting:changed', () => {
+            if (!document.body.contains(pointLightsList)) return;
+            renderPointLightsList();
+        });
     }
 
     return () => {

@@ -2,7 +2,7 @@ import type { Global } from '../../types';
 import type { ExperienceSettings } from '../../schemas/v2';
 import { updatePointLightsFromSettings } from '../../light';
 import { pushEditHistory } from '../../edit-history';
-import { ensureBloom as ensureBloomFromAdapter, ensureShadow as ensureShadowFromAdapter } from '../../protocol-settings-adapter';
+import { ensureBloom as ensureBloomFromAdapter, ensureShadow as ensureShadowFromAdapter, ensureLighting as ensureLightingForLighting } from '../../protocol-settings-adapter';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
 const POST_EFFECT_PANEL_HTML = `
@@ -113,6 +113,8 @@ type LocalLightRegion = {
     tintColor?: [number, number, number];
     /** 颜色混合系数 0～1 */
     tintBlend?: number;
+    /** （可选）与该局部亮灯区域绑定的光源 ID，用于删除/颜色联动 */
+    linkedLightId?: string | null;
 };
 
 type BloomSettings = {
@@ -127,6 +129,7 @@ type BloomSettings = {
     bloomBrushCommittedBrightness?: number;
     localLightRegions?: LocalLightRegion[];
     activeLocalLightRegionId?: string | null;
+    draftLightRegionCenter?: [number, number, number] | null;
 };
 
 const ensureBloom = (settings: Global['settings']): BloomSettings => {
@@ -150,6 +153,7 @@ const ensureShadow = (settings: Global['settings']): ShadowSettings => {
  * 点击标题切换展开并设为当前激活区域。
  */
 function renderBloomLocalLightRegionsList(
+    global: Global,
     container: HTMLElement | null,
     b: BloomSettings,
     firePostEffectChanged: () => void,
@@ -203,14 +207,48 @@ function renderBloomLocalLightRegionsList(
             }
 
             const list = b.localLightRegions ?? [];
-            (b as any).localLightRegions = list.filter((r: LocalLightRegion) => r.id !== region.id);
+            let linkedLightId: string | null = null;
+            const remaining = list.filter((r) => {
+                if (r && r.id === region.id) {
+                    linkedLightId = (r as any).linkedLightId ?? null;
+                    return false;
+                }
+                return !!r;
+            });
+            (b as any).localLightRegions = remaining;
             if ((b as any).activeLocalLightRegionId === region.id) {
                 (b as any).activeLocalLightRegionId = (b as any).localLightRegions.length > 0
                     ? (b as any).localLightRegions[0].id
                     : null;
             }
+            // internal 模式下：若该区域绑定了光源，则同步删除对应 light
+            if (linkedLightId) {
+                try {
+                    const settingsAny = global.settings as ExperienceSettings;
+                    const lighting = ensureLightingForLighting(settingsAny);
+                    if (Array.isArray((lighting as any).lights)) {
+                        const lightsAny = (lighting as any).lights as any[];
+                        const idx = lightsAny.findIndex((l) => l && (l as any).id === linkedLightId);
+                        if (idx >= 0) {
+                            lightsAny.splice(idx, 1);
+                            updatePointLightsFromSettings(global);
+                            global.events.fire('lighting:changed');
+                            // 若当前选中的光源就是被联动删除的那一盏，则清空选中状态
+                            const currentId = (global.state as any).selectedLightId ?? null;
+                            if (currentId && currentId === linkedLightId) {
+                                (global.state as any).selectedLightId = null;
+                                global.events.fire('sceneLight:selected', { id: null });
+                            }
+                        }
+                    }
+                } catch {
+                    // 若联动失败，不影响区域本身的删除
+                }
+            }
             pushEditHistorySafe();
             firePostEffectChanged();
+            // 通知 BloomController 与其他监听方：局部亮灯区域列表发生变化
+            global.events.fire('bloomLocalLightRegion:listChanged');
             if (refreshList) refreshList();
         });
 
@@ -281,6 +319,29 @@ function renderBloomLocalLightRegionsList(
                         id: region.id,
                         value: { tintColor: [r, g, b], tintBlend: Math.max(0, Math.min(1, region.tintBlend ?? 0)) }
                     });
+                } else {
+                    // internal 模式下：若该区域绑定了光源，则同步更新对应 light 颜色
+                    const linkedId = (region as any).linkedLightId as string | null | undefined;
+                    if (linkedId) {
+                        try {
+                            const settingsAny = global.settings as ExperienceSettings;
+                            const lighting = ensureLightingForLighting(settingsAny);
+                            if (Array.isArray((lighting as any).lights)) {
+                                const lightsAny = (lighting as any).lights as any[];
+                                const light = lightsAny.find((l) => l && (l as any).id === linkedId);
+                                if (light) {
+                                    (light as any).color = [
+                                        Math.max(0, Math.min(1, r)),
+                                        Math.max(0, Math.min(1, g)),
+                                        Math.max(0, Math.min(1, b))
+                                    ];
+                                    updatePointLightsFromSettings(global);
+                                }
+                            }
+                        } catch {
+                            // 若联动失败，不影响 Bloom 自身颜色调制
+                        }
+                    }
                 }
                 firePostEffectChanged();
             });
@@ -415,8 +476,8 @@ export function initPostEffectUI(global: Global): () => void {
             events.fire('bloomLocalLightRegion:listChanged');
         };
         const refreshRegionList = () =>
-            renderBloomLocalLightRegionsList(bloomLocalLightRegionsList, ensureBloom(settings), firePostEffectChanged, pushEditHistorySafe, onSelectRegion, editUiTransport, refreshRegionList);
-        renderBloomLocalLightRegionsList(bloomLocalLightRegionsList, b, firePostEffectChanged, pushEditHistorySafe, onSelectRegion, editUiTransport, refreshRegionList);
+            renderBloomLocalLightRegionsList(global, bloomLocalLightRegionsList, ensureBloom(settings), firePostEffectChanged, pushEditHistorySafe, onSelectRegion, editUiTransport, refreshRegionList);
+        renderBloomLocalLightRegionsList(global, bloomLocalLightRegionsList, b, firePostEffectChanged, pushEditHistorySafe, onSelectRegion, editUiTransport, refreshRegionList);
         if (bloomDrawModeBar) bloomDrawModeBar.style.display = currentDraftId ? 'block' : 'none';
         const sh = ensureShadow(settings);
         if (shadowEnableCheck) shadowEnableCheck.classList.toggle('active', sh.enabled);
@@ -563,7 +624,7 @@ export function initPostEffectUI(global: Global): () => void {
             firePostEffectChanged();
         };
         const refreshRegionList2 = () =>
-            renderBloomLocalLightRegionsList(bloomLocalLightRegionsList, ensureBloom(settings), firePostEffectChanged, pushEditHistorySafe, onSelectRegion2, editUiTransport, refreshRegionList2);
+            renderBloomLocalLightRegionsList(global, bloomLocalLightRegionsList, ensureBloom(settings), firePostEffectChanged, pushEditHistorySafe, onSelectRegion2, editUiTransport, refreshRegionList2);
         refreshRegionList2();
     };
     events.on('bloomLocalLightRegion:listChanged', regionListChangedHandler);
@@ -588,6 +649,20 @@ export function initPostEffectUI(global: Global): () => void {
                     tintColor: [1, 1, 1],
                     tintBlend: 0
                 };
+                // 计算当前草稿区域在世界空间中的几何中心，供后续 Lighting 模块放置光源时复用
+                try {
+                    const appAny = global.app as any;
+                    const bloomController = appAny?.viewer?.bloomController as { getCurrentRegionCenter?: () => import('playcanvas').Vec3 | null } | null;
+                    const center = bloomController?.getCurrentRegionCenter ? bloomController.getCurrentRegionCenter() : null;
+                    if (center) {
+                        b.draftLightRegionCenter = [center.x, center.y, center.z];
+                    } else {
+                        b.draftLightRegionCenter = null;
+                    }
+                } catch {
+                    // 若无法访问 bloomController，则忽略该功能，不影响原有行为
+                    (b as any).draftLightRegionCenter = null;
+                }
                 if (!b.localLightRegions) b.localLightRegions = [];
                 b.localLightRegions.push(newRegion);
                 b.activeLocalLightRegionId = newRegion.id;

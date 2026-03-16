@@ -131,6 +131,13 @@ type LocalLightRegion = {
      * 颜色混合系数 0～1：0 不混合，1 完全使用 tintColor 参与混合。
      */
     tintBlend?: number;
+    /**
+     * （可选）与该局部亮灯区域绑定的光源 ID：
+     * - 当通过该区域的 draftLightRegionCenter 创建点光源 / 聚光灯时，写入对应 light.id；
+     * - 删除该区域时，可用于同步删除对应光源；
+     * - 调整区域 tintColor 时，可用于同步更新对应光源的颜色。
+     */
+    linkedLightId?: string | null;
 };
 
 type SceneAsset = {

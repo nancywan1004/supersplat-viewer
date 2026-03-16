@@ -465,6 +465,9 @@ const ensureBloomLocalLightRegions = (settings: V2): void => {
                 if (typeof r.tintBlend !== 'number') {
                     r.tintBlend = 0;
                 }
+                if (r.linkedLightId === undefined) {
+                    r.linkedLightId = null;
+                }
                 return r;
             });
         }

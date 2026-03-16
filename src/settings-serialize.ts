@@ -23,7 +23,9 @@ const defaultPostEffectSettings = () => ({
         bloomBrushBrightness: 0,
         // 新结构：局部亮灯区域，默认空
         localLightRegions: [] as any[],
-        activeLocalLightRegionId: null as string | null
+        activeLocalLightRegionId: null as string | null,
+        // 最近一次完成绘制的局部亮灯区域中心（用于引导后续新建光源的位置）
+        draftLightRegionCenter: null as [number, number, number] | null
     },
     grading: {
         enabled: false,

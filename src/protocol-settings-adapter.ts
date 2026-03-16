@@ -7,6 +7,7 @@
 import type { Global } from './types';
 import type { ExperienceSettings } from './schemas/v2';
 import type { PointLightConfig, DirectionalLightConfig, SpotLightConfig } from './schemas/v2';
+import { updatePointLightsFromSettings } from './light';
 
 /** 协议中光源项带 id（用于 LIGHT_SELECT / LIGHT_INTENSITY_UPDATE 等） */
 type LightWithId = (PointLightConfig | DirectionalLightConfig | SpotLightConfig) & { id?: string };
@@ -224,13 +225,44 @@ export function applyBloomLocalLightRegionDelete(global: Global, regionId: strin
     const settings = global.settings as ExperienceSettings;
     const b = ensureBloom(settings);
     if (!Array.isArray(b.localLightRegions)) return;
-    const before = b.localLightRegions.length;
-    (b as any).localLightRegions = b.localLightRegions.filter((r: { id: string }) => r.id !== regionId);
-    if ((b as any).localLightRegions.length === before) return;
+    const list = b.localLightRegions as any[];
+    let linkedLightId: string | null = null;
+    const remaining = list.filter((r) => {
+        if (r && r.id === regionId) {
+            linkedLightId = (r as any).linkedLightId ?? null;
+            return false;
+        }
+        return !!r;
+    });
+    if (remaining.length === list.length) return;
+    (b as any).localLightRegions = remaining;
     if ((b as any).activeLocalLightRegionId === regionId) {
         (b as any).activeLocalLightRegionId = (b as any).localLightRegions.length > 0
             ? (b as any).localLightRegions[0].id
             : null;
+    }
+    // 若该区域绑定了光源，则通过 lighting 配置同步删除对应 light
+    if (linkedLightId) {
+        try {
+            const lighting = ensureLighting(settings);
+            if (Array.isArray((lighting as any).lights)) {
+                const lightsAny = (lighting as any).lights as any[];
+                const idx = lightsAny.findIndex((l) => l && (l as any).id === linkedLightId);
+                if (idx >= 0) {
+                    lightsAny.splice(idx, 1);
+                    updatePointLightsFromSettings(global);
+                    global.events.fire('lighting:changed');
+                    // 若当前选中的光源就是被联动删除的那一盏，则清空选中状态
+                    const currentId = (global.state as any).selectedLightId ?? null;
+                    if (currentId && currentId === linkedLightId) {
+                        (global.state as any).selectedLightId = null;
+                        global.events.fire('sceneLight:selected', { id: null });
+                    }
+                }
+            }
+        } catch {
+            // 若联动失败，不影响区域本身的删除与协议行为
+        }
     }
     global.events.fire('postEffect:changed');
     global.events.fire('bloomLocalLightRegion:listChanged');

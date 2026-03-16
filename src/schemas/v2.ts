@@ -90,6 +90,13 @@ type PostEffectSettings = {
          * - null 或 undefined 表示没有激活区域。
          */
         activeLocalLightRegionId?: string | null;
+        /**
+         * 最近一次完成绘制的 LocalLightRegion 的世界空间中心位置：
+         * - 由 Bloom 绘制完成（点击「完成」）时，根据该区域的 worldSpace 点集计算得到；
+         * - 用于后续在 Lighting 面板中新建点光源/聚光灯时，优先将光源放置在该中心位置；
+         * - 使用一次后应被重置为 null，避免长期干扰后续创建。
+         */
+        draftLightRegionCenter?: [number, number, number] | null;
     },
     grading: {
         enabled: boolean,
