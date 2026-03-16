@@ -19,7 +19,7 @@ const POST_EFFECT_PANEL_HTML = `
   <div class="settingsRow">
     <label for="bloomBlurLevelSlider" class="postEffectLabel">BlurLevel:</label>
     <div class="postEffectSliderWrap">
-      <input type="range" id="bloomBlurLevelSlider" min="0" max="5" step="1" value="2" class="postEffectSlider">
+      <input type="range" id="bloomBlurLevelSlider" min="0" max="10" step="1" value="2" class="postEffectSlider">
       <span id="bloomBlurLevelValue" class="postEffectSliderValue">2</span>
     </div>
   </div>
@@ -514,7 +514,7 @@ export function initPostEffectUI(global: Global): () => void {
 
     if (bloomBlurLevelSlider && bloomBlurLevelValue) {
         bloomBlurLevelSlider.addEventListener('input', () => {
-            const val = Math.max(0, Math.min(5, parseInt(bloomBlurLevelSlider!.value, 10)));
+            const val = Math.max(0, Math.min(10, parseInt(bloomBlurLevelSlider!.value, 10)));
             if (editUiTransport === 'message-bridge') {
                 sendEditProtocolMessage({ type: 'BLOOM_BLUR_SET', value: val });
             } else {

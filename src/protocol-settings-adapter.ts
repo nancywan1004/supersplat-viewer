@@ -209,11 +209,11 @@ export function applyBloomThresholdUpdate(global: Global, value: number): void {
     global.events.fire('postEffect:changed');
 }
 
-/** BLOOM_BLUR_SET（0-5；0 关辉光，1-5 设模糊级别并开辉光） */
+/** BLOOM_BLUR_SET（0-10；0 关辉光，1-10 设模糊级别并开辉光） */
 export function applyBloomBlurSet(global: Global, value: number): void {
     const settings = global.settings as ExperienceSettings;
     const b = ensureBloom(settings);
-    const clamped = Math.max(0, Math.min(5, Math.round(value)));
+    const clamped = Math.max(0, Math.min(10, Math.round(value)));
     (b as Record<string, unknown>).blurLevel = clamped;
     (b as Record<string, unknown>).enabled = clamped > 0 && Number(b.intensity) > 0;
     global.events.fire('postEffect:changed');
