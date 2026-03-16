@@ -75,7 +75,6 @@ type InboundPayload =
     | { type: 'LIGHT_ERASER_START' }
     | { type: 'LIGHT_BRUSH_CLEAR' }
     | { type: 'LIGHT_BRUSH_COLOR_UPDATE'; id?: string; value?: { tintColor?: number[]; tintBlend?: number } }
-    | { type: 'LIGHT_BRUSH_BRIGHTNESS_UPDATE'; id?: string; value?: number }
     | { type: 'LIGHT_BRUSH_FINISH' }
     | { type: 'LIGHT_BRUSH_DELETE'; id?: string }
     | { type: 'LIGHT_BRUSH_BLOOM_UPDATE'; value?: number }
@@ -363,7 +362,6 @@ const initPostMessageBridge = (global: Global) => {
         case 'LIGHT_ERASER_START':
         case 'LIGHT_BRUSH_CLEAR':
         case 'LIGHT_BRUSH_COLOR_UPDATE':
-        case 'LIGHT_BRUSH_BRIGHTNESS_UPDATE':
         case 'LIGHT_BRUSH_FINISH':
         case 'LIGHT_BRUSH_BLOOM_UPDATE':
             // 笔刷协议映射到内部事件，由 vfx/bloom-brush 等处理

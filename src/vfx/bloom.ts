@@ -477,22 +477,6 @@ export class BloomController {
                 (this.global.app as any).renderNextFrame = true;
                 break;
             }
-            case 'LIGHT_BRUSH_BRIGHTNESS_UPDATE': {
-                // 更新指定区域的局部亮度（-1～1）：region.localBrightness
-                const bloom = ensureBloomSettings();
-                const regions = (bloom as any).localLightRegions as any[] | undefined;
-                if (!Array.isArray(regions)) break;
-                const regionId = typeof payload.id === 'string' ? payload.id : '';
-                if (!regionId) break;
-                const val = typeof payload.value === 'number' ? payload.value : Number(payload.value);
-                if (!Number.isFinite(val)) break;
-                const region = regions.find((r) => r && r.id === regionId);
-                if (!region) break;
-                region.localBrightness = Math.max(-1, Math.min(1, val));
-                (this.global.events as any).fire('postEffect:changed');
-                (this.global.app as any).renderNextFrame = true;
-                break;
-            }
             case 'LIGHT_BRUSH_FINISH': {
                 // 完成一次笔刷操作：提交并重建体积，同时退出笔刷模式（不再依赖 toggle）
                 this.worldSpaceData.commit();
