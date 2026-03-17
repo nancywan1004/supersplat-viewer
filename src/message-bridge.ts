@@ -149,6 +149,9 @@ const initPostMessageBridge = (global: Global) => {
         case 'EDIT_MODE_ENTER':
             if (config.allowEditMode !== false) {
                 state.editMode = true;
+                // 父级触发进入编辑模式时，同样重置左侧模块为默认 asset
+                state.editLeftModule = 'asset';
+                events.fire('editLeftModule:changed', 'asset');
                 setBaseline();
             }
             break;
@@ -160,6 +163,9 @@ const initPostMessageBridge = (global: Global) => {
             if (value && config.allowEditMode === false) break;
             state.editMode = !!p.value;
             if (value) {
+                // 通过 EDIT_MODE_SET 进入编辑模式时，也重置左侧模块为默认 asset
+                state.editLeftModule = 'asset';
+                events.fire('editLeftModule:changed', 'asset');
                 setBaseline();
                 if (config.trackEditHistory) {
                     const { canUndo, canRedo } = await import('./edit-history');

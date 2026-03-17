@@ -536,6 +536,10 @@ const initUI = (global: Global) => {
     const updateEditModeUI = () => {
         const inEdit = state.editMode;
         if (inEdit) {
+            // 每次进入编辑模式时重置左侧模块到默认值（asset），而不是沿用上次退出前的模块
+            state.editLeftModule = 'asset';
+            events.fire('editLeftModule:changed', 'asset');
+
             const initialSnapshot = serializeExperienceSettings(global);
             initEditHistory(global, initialSnapshot);
 
