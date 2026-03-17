@@ -38,6 +38,7 @@ import {
     applyBloomLocalLightRegionIntensityUpdate,
     applyBloomLocalLightRegionInnerAngleSet,
     applyBloomLocalLightRegionOuterAngleSet,
+    applyBloomLocalLightRegionRangeSet,
     applyShadowSet,
     applyShadowIntensityUpdate,
     applyShadowDirectionSet,
@@ -86,6 +87,7 @@ type InboundPayload =
     | { type: 'LIGHT_BRUSH_INTENSITY_UPDATE'; id?: string; value?: number }
     | { type: 'LIGHT_BRUSH_INNER_ANGLE_SET'; id?: string; value?: number }
     | { type: 'LIGHT_BRUSH_OUTER_ANGLE_SET'; id?: string; value?: number }
+    | { type: 'LIGHT_BRUSH_RANGE_SET'; id?: string; value?: number }
     | { type: 'LIGHT_BRUSH_START' }
     | { type: 'LIGHT_ERASER_START' }
     | { type: 'LIGHT_BRUSH_CLEAR' }
@@ -429,6 +431,14 @@ const initPostMessageBridge = (global: Global) => {
             const v = (p as { value?: number }).value;
             if (typeof v === 'number') {
                 applyBloomLocalLightRegionOuterAngleSet(global, id, v);
+            }
+            break;
+        }
+        case 'LIGHT_BRUSH_RANGE_SET': {
+            const id = (p as { id?: string }).id ?? '';
+            const v = (p as { value?: number }).value;
+            if (typeof v === 'number') {
+                applyBloomLocalLightRegionRangeSet(global, id, v);
             }
             break;
         }

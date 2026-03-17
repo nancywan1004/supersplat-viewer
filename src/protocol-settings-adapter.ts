@@ -320,6 +320,24 @@ export function applyBloomLocalLightRegionOuterAngleSet(global: Global, regionId
     global.events.fire('lighting:changed');
 }
 
+/** LIGHT_BRUSH_RANGE_SET：根据亮灯区域 id，更新其绑定聚光灯的 range（0-20） */
+export function applyBloomLocalLightRegionRangeSet(global: Global, regionId: string, value: number): void {
+    if (!regionId) return;
+    const settings = global.settings as ExperienceSettings;
+    const b = ensureBloom(settings);
+    const regions = (b as any).localLightRegions as any[] | undefined;
+    if (!Array.isArray(regions)) return;
+    const region = regions.find((r) => r && r.id === regionId);
+    if (!region || !region.linkedLightId) return;
+    const lighting = ensureLighting(settings);
+    const light = (lighting.lights as any[]).find((l) => l && (l as any).id === region.linkedLightId && (l as any).type === 'spot');
+    if (!light) return;
+    const clamped = Math.max(0, Math.min(20, value));
+    (light as any).range = clamped;
+    updatePointLightsFromSettings(global);
+    global.events.fire('lighting:changed');
+}
+
 /** BLOOM_BLUR_SET（0-10；0 关辉光，1-10 设模糊级别并开辉光） */
 export function applyBloomBlurSet(global: Global, value: number): void {
     const settings = global.settings as ExperienceSettings;

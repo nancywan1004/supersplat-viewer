@@ -502,8 +502,8 @@ function renderBloomLocalLightRegionsList(
                         type === 'inner'
                             ? 'LIGHT_BRUSH_INNER_ANGLE_SET'
                             : type === 'outer'
-                                ? 'LIGHT_BRUSH_OUTER_ANGLE_SET'
-                                : 'LIGHT_RANGE_SET';
+                            ? 'LIGHT_BRUSH_OUTER_ANGLE_SET'
+                            : 'LIGHT_BRUSH_RANGE_SET';
                     sendEditProtocolMessage({
                         type: msgType as any,
                         id: region.id,
