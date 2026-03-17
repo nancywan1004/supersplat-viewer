@@ -143,7 +143,8 @@ const updateLightVisual = (lightEntity: Entity, r: number, g: number, b: number)
 
 /**
  * 为聚光灯实体添加锥体可视化。锥尖指向照射方向（实体 -Y，与引擎与 collectSpotLights 一致），
- * 与「Show lights in scene」联动。锥体几何与 inner/outer 角无关，仅表示方向。
+ * 与「Show lights in scene」联动。几何本身不携带业务含义，具体形状由 createSpotLightsFromSettings 按
+ * range / outerConeAngle 进行缩放。
  */
 const addSpotLightVisual = (global: Global, spotEntity: Entity, r: number, g: number, b: number): void => {
     const app = global.app;
@@ -162,10 +163,10 @@ const addSpotLightVisual = (global: Global, spotEntity: Entity, r: number, g: nu
         rc.receiveShadows = false;
         rc.enabled = !!(app as any).__pointLightsVisualVisible;
     }
-    // 锥体默认 +Y 为锥尖；放在 (0, -S, 0) 使锥尖在光源、底面朝 -Y，与聚光方向一致
-    visual.setLocalPosition(0, -SPOT_VISUAL_SCALE, 0);
+    // 初始局部变换留给 createSpotLightsFromSettings 计算
+    visual.setLocalPosition(0, 0, 0);
     visual.setLocalEulerAngles(0, 0, 0);
-    visual.setLocalScale(SPOT_VISUAL_SCALE, SPOT_VISUAL_SCALE * 2, SPOT_VISUAL_SCALE);
+    visual.setLocalScale(1, 1, 1);
     spotEntity.addChild(visual);
     (spotEntity as any).__spotVisualMaterial = mat;
     (spotEntity as any).__spotVisualEntity = visual;
@@ -178,6 +179,21 @@ const updateSpotLightVisual = (spotEntity: Entity, r: number, g: number, b: numb
         mat.emissive.set(r, g, b);
         mat.update();
     }
+};
+
+/**
+ * 根据聚光灯的 range / outerConeAngle 更新可视化锥体的形状（仅用于编辑时的 gizmo）
+ */
+const updateSpotGizmoShape = (spotEntity: Entity, range: number, outerConeAngleDeg: number): void => {
+    const visual = (spotEntity as any).__spotVisualEntity as Entity | undefined;
+    if (!visual) return;
+    const r = Math.max(0.1, Number.isFinite(range) ? range : 1);
+    const outerDeg = Math.max(0, Math.min(180, Number.isFinite(outerConeAngleDeg) ? outerConeAngleDeg : 45));
+    const outerRad = outerDeg * Math.PI / 180;
+    const outerRadius = r * Math.tan(outerRad * 0.5);
+    // 近似处理：让锥尖靠近光源位置，底面在 -Y 方向
+    visual.setLocalPosition(0, -r * 0.5, 0);
+    visual.setLocalScale(Math.max(outerRadius * 2, 0.01), r, Math.max(outerRadius * 2, 0.01));
 };
 
 /**
@@ -309,6 +325,7 @@ const createSpotLightsFromSettings = (global: Global): void => {
             (entity.light as any).range = range;
         }
         updateSpotLightVisual(entity, r, g, b);
+        updateSpotGizmoShape(entity, range, outerCone);
     });
 
     const existing = container!.children.filter(c => c.name.startsWith('spotLight_'));
