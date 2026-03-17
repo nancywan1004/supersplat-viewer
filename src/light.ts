@@ -1,4 +1,15 @@
-import { Color, Entity, Vec3, StandardMaterial, TEXTUREPROJECTION_CUBE } from 'playcanvas';
+import {
+    Color,
+    Entity,
+    Layer,
+    Mesh,
+    MeshInstance,
+    PRIMITIVE_LINES,
+    StandardMaterial,
+    TEXTUREPROJECTION_CUBE,
+    Vec3
+} from 'playcanvas';
+import type { GraphicsDevice } from 'playcanvas';
 import type { Global } from './types';
 import type { DirectionalLightConfig, SpotLightConfig } from './schemas/v2';
 
@@ -11,14 +22,173 @@ const isDirectionalLightConfig = (cfg: any): cfg is DirectionalLightConfig =>
 const isSpotLightConfig = (cfg: any): cfg is SpotLightConfig =>
     cfg && cfg.type === 'spot';
 
-/** 点光源在场景中的可视化球体默认半径（世界单位） */
-const LIGHT_VISUAL_RADIUS = 0.25;
-
 /** 平行光实体默认位置（用于主方向光） */
 const DIRECTIONAL_DEFAULT_POSITION: [number, number, number] = [0, 8, 8];
 
-/** 聚光灯锥体可视化缩放（放大以便在大场景中易见） */
-const SPOT_VISUAL_SCALE = 1.2;
+// ─── 线框 Mesh 工厂 & 材质 ───────────────────────────────────────────
+
+const ensureLightVisualLayer = (app: any): number => {
+    if (app.__lightVisualLayerId != null) return app.__lightVisualLayerId as number;
+
+    const layers = app.scene.layers;
+    let layer = layers.getLayerByName('LightVisual');
+    if (!layer) {
+        layer = new Layer({ name: 'LightVisual' });
+        // 放到最后渲染，避免与 gsplat/透明队列排序互相影响
+        layers.push(layer);
+    }
+    app.__lightVisualLayerId = layer.id;
+
+    // 确保主相机渲染该 layer
+    const camEntity = app.root.findComponent('camera')?.entity as Entity | undefined;
+    const cam = camEntity?.camera;
+    if (cam && cam.layers.indexOf(layer.id) < 0) {
+        cam.layers = [...cam.layers, layer.id];
+    }
+
+    return layer.id;
+};
+
+/**
+ * 创建球体线框 Mesh：3 个正交单位圆环（XY / XZ / YZ 平面），半径 = 1。
+ * 使用时通过 entity.setLocalScale(range, range, range) 映射到实际 range。
+ */
+const createSphereWireframeMesh = (device: GraphicsDevice, segments = 64): Mesh => {
+    const totalVerts = 3 * segments;
+    const totalIndices = 3 * 2 * segments;
+    const positions = new Float32Array(totalVerts * 3);
+    const indices = new Uint16Array(totalIndices);
+
+    let vi = 0; // vertex write cursor
+    let ii = 0; // index write cursor
+    const step = (2 * Math.PI) / segments;
+
+    const writeCircle = (ax1: 0 | 1 | 2, ax2: 0 | 1 | 2, ax3: 0 | 1 | 2) => {
+        const base = vi / 3;
+        for (let s = 0; s < segments; s++) {
+            const angle = s * step;
+            const p = [0, 0, 0];
+            p[ax1] = Math.cos(angle);
+            p[ax2] = Math.sin(angle);
+            p[ax3] = 0;
+            positions[vi++] = p[0];
+            positions[vi++] = p[1];
+            positions[vi++] = p[2];
+            indices[ii++] = base + s;
+            indices[ii++] = base + ((s + 1) % segments);
+        }
+    };
+
+    writeCircle(0, 1, 2); // XY plane
+    writeCircle(0, 2, 1); // XZ plane
+    writeCircle(1, 2, 0); // YZ plane
+
+    const mesh = new Mesh(device);
+    mesh.setPositions(Array.from(positions));
+    mesh.setIndices(Array.from(indices));
+    mesh.update(PRIMITIVE_LINES);
+    return mesh;
+};
+
+/**
+ * 创建锥体线框 Mesh：锥尖 (0,0,0)，底面圆心 (0,-1,0)，底面半径 = 1。
+ * 使用时通过 setLocalScale(outerRadius, range, outerRadius) 映射到实际尺寸。
+ */
+const createConeWireframeMesh = (device: GraphicsDevice, segments = 64, edges = 4): Mesh => {
+    const baseVerts = segments;
+    const tipVert = 1;
+    const totalVerts = baseVerts + tipVert;
+    const baseLineIndices = segments * 2;
+    const edgeLineIndices = edges * 2;
+    const totalIndices = baseLineIndices + edgeLineIndices;
+
+    const positions = new Float32Array(totalVerts * 3);
+    const indices = new Uint16Array(totalIndices);
+
+    let vi = 0;
+    let ii = 0;
+    const step = (2 * Math.PI) / segments;
+
+    // 底面圆顶点 (y = -1)
+    for (let s = 0; s < segments; s++) {
+        const angle = s * step;
+        positions[vi++] = Math.cos(angle); // x
+        positions[vi++] = -1;              // y
+        positions[vi++] = Math.sin(angle); // z
+    }
+
+    // 锥尖顶点
+    const tipIndex = segments;
+    positions[vi++] = 0;
+    positions[vi++] = 0;
+    positions[vi++] = 0;
+
+    // 底面圆线段
+    for (let s = 0; s < segments; s++) {
+        indices[ii++] = s;
+        indices[ii++] = (s + 1) % segments;
+    }
+
+    // 边缘线：从锥尖到底面均匀分布的点
+    const edgeStep = Math.floor(segments / edges);
+    for (let e = 0; e < edges; e++) {
+        indices[ii++] = tipIndex;
+        indices[ii++] = e * edgeStep;
+    }
+
+    const mesh = new Mesh(device);
+    mesh.setPositions(Array.from(positions));
+    mesh.setIndices(Array.from(indices));
+    mesh.update(PRIMITIVE_LINES);
+    return mesh;
+};
+
+/**
+ * 创建单位圆环 Mesh：位于 y = -1 平面，半径 = 1，用于在锥体底面上表示 innerAngle。
+ */
+const createCircleWireframeMesh = (device: GraphicsDevice, segments = 64): Mesh => {
+    const positions = new Float32Array(segments * 3);
+    const indices = new Uint16Array(segments * 2);
+
+    let vi = 0;
+    let ii = 0;
+    const step = (2 * Math.PI) / segments;
+
+    for (let s = 0; s < segments; s++) {
+        const angle = s * step;
+        positions[vi++] = Math.cos(angle); // x
+        positions[vi++] = -1;             // y
+        positions[vi++] = Math.sin(angle); // z
+
+        indices[ii++] = s;
+        indices[ii++] = (s + 1) % segments;
+    }
+
+    const mesh = new Mesh(device);
+    mesh.setPositions(Array.from(positions));
+    mesh.setIndices(Array.from(indices));
+    mesh.update(PRIMITIVE_LINES);
+    return mesh;
+};
+
+/**
+ * 创建白色线框材质，用于光源可视化 gizmo。
+ * emissive 纯白保证颜色恒定；depthWrite=false 避免遮挡场景；depthTest=true 保持正确遮挡关系。
+ */
+const createWireframeMaterial = (): StandardMaterial => {
+    const mat = new StandardMaterial();
+    mat.diffuse.set(0, 0, 0);
+    mat.emissive.set(1, 1, 1);
+    mat.emissiveIntensity = 1;
+    mat.depthWrite = false;
+    // 与 gsplat（半透明/自定义 pass）混合时，depthTest 可能导致线框“时隐时现”
+    mat.depthTest = false;
+    mat.useLighting = false;
+    mat.update();
+    return mat;
+};
+
+// ─────────────────────────────────────────────────────────────────────
 
 export type PointLightInfo = {
     position: Vec3;
@@ -100,24 +270,27 @@ const collectSpotLights = (global: Global): SpotLightInfo[] => {
 };
 
 /**
- * 为点光源实体添加场景内可视化小球（子实体，与光同色）
- * 使用 diffuse 为主、低 emissive，避免小球本身照亮场景导致“整屏变亮”。
+ * 为点光源实体添加场景内可视化线框球（子实体）。
+ * 使用 PRIMITIVE_LINES 绘制 3 个正交圆环，后续通过 range 缩放体现影响范围。
  * @param global - Global，用于读取 app 与 state（后续可在此挂接 pointer 事件）
  */
 const addLightVisual = (global: Global, lightEntity: Entity, r: number, g: number, b: number): void => {
     const app = global.app;
-    const mat = new StandardMaterial();
-    mat.diffuse.set(r, g, b);
-    mat.emissive.set(r, g, b);
-    mat.emissiveIntensity = 0.12;
-    mat.update();
+    const device = app.graphicsDevice;
+    const layerId = ensureLightVisualLayer(app);
+
+    const mesh = createSphereWireframeMesh(device);
+    const material = createWireframeMaterial();
     const visual = new Entity('pointLight_visual');
+
     visual.addComponent('render', {
-        type: 'sphere',
-        material: mat
+        type: 'asset',
+        layers: [layerId],
+        meshInstances: [new MeshInstance(mesh, material)]
     });
-    const scale = LIGHT_VISUAL_RADIUS * 2;
-    visual.setLocalScale(scale, scale, scale);
+
+    // 初始为单位半径，具体范围由 updatePointLightRangeVisual 控制
+    visual.setLocalScale(1, 1, 1);
     const rc = visual.render;
     if (rc) {
         rc.castShadows = false;
@@ -125,20 +298,18 @@ const addLightVisual = (global: Global, lightEntity: Entity, r: number, g: numbe
         rc.enabled = !!(app as any).__pointLightsVisualVisible;
     }
     lightEntity.addChild(visual);
-    (lightEntity as any).__lightVisualMaterial = mat;
     (lightEntity as any).__lightVisualEntity = visual;
+    (lightEntity as any).__lightRangeWireframe = visual;
 };
 
 /**
- * 更新点光源实体的可视化小球颜色
+ * 根据点光源的 range 更新线框球的缩放，单位球半径为 1。
  */
-const updateLightVisual = (lightEntity: Entity, r: number, g: number, b: number): void => {
-    const mat = (lightEntity as any).__lightVisualMaterial as StandardMaterial | undefined;
-    if (mat) {
-        mat.diffuse.set(r, g, b);
-        mat.emissive.set(r, g, b);
-        mat.update();
-    }
+const updatePointLightRangeVisual = (lightEntity: Entity, range: number): void => {
+    const visual = (lightEntity as any).__lightRangeWireframe as Entity | undefined;
+    if (!visual) return;
+    const r = Math.max(0.01, Number.isFinite(range) ? range : 1);
+    visual.setLocalScale(r, r, r);
 };
 
 /**
@@ -148,15 +319,19 @@ const updateLightVisual = (lightEntity: Entity, r: number, g: number, b: number)
  */
 const addSpotLightVisual = (global: Global, spotEntity: Entity, r: number, g: number, b: number): void => {
     const app = global.app;
+    const device = app.graphicsDevice;
+    const layerId = ensureLightVisualLayer(app);
     let visual = spotEntity.findByName('spotLight_visual') as Entity | null;
     if (visual) return;
-    const mat = new StandardMaterial();
-    mat.diffuse.set(r, g, b);
-    mat.emissive.set(r, g, b);
-    mat.emissiveIntensity = 0.15;
-    mat.update();
+    const mesh = createConeWireframeMesh(device);
+    const innerMesh = createCircleWireframeMesh(device);
+    const material = createWireframeMaterial();
     visual = new Entity('spotLight_visual');
-    visual.addComponent('render', { type: 'cone', material: mat });
+    visual.addComponent('render', {
+        type: 'asset',
+        layers: [layerId],
+        meshInstances: [new MeshInstance(mesh, material)]
+    });
     const rc = visual.render;
     if (rc) {
         rc.castShadows = false;
@@ -168,17 +343,26 @@ const addSpotLightVisual = (global: Global, spotEntity: Entity, r: number, g: nu
     visual.setLocalEulerAngles(0, 0, 0);
     visual.setLocalScale(1, 1, 1);
     spotEntity.addChild(visual);
-    (spotEntity as any).__spotVisualMaterial = mat;
     (spotEntity as any).__spotVisualEntity = visual;
-};
 
-const updateSpotLightVisual = (spotEntity: Entity, r: number, g: number, b: number): void => {
-    const mat = (spotEntity as any).__spotVisualMaterial as StandardMaterial | undefined;
-    if (mat) {
-        mat.diffuse.set(r, g, b);
-        mat.emissive.set(r, g, b);
-        mat.update();
+    // 内圈：用于可视化 innerConeAngle，对应锥体底面上的内圆
+    const innerRing = new Entity('spotLight_innerRing');
+    innerRing.addComponent('render', {
+        type: 'asset',
+        layers: [layerId],
+        meshInstances: [new MeshInstance(innerMesh, material)]
+    });
+    const innerRc = innerRing.render;
+    if (innerRc) {
+        innerRc.castShadows = false;
+        innerRc.receiveShadows = false;
+        innerRc.enabled = !!(app as any).__pointLightsVisualVisible;
     }
+    innerRing.setLocalPosition(0, 0, 0);
+    innerRing.setLocalEulerAngles(0, 0, 0);
+    innerRing.setLocalScale(1, 1, 1);
+    spotEntity.addChild(innerRing);
+    (spotEntity as any).__spotInnerRingEntity = innerRing;
 };
 
 /**
@@ -186,14 +370,26 @@ const updateSpotLightVisual = (spotEntity: Entity, r: number, g: number, b: numb
  */
 const updateSpotGizmoShape = (spotEntity: Entity, range: number, outerConeAngleDeg: number): void => {
     const visual = (spotEntity as any).__spotVisualEntity as Entity | undefined;
+    const innerRing = (spotEntity as any).__spotInnerRingEntity as Entity | undefined;
     if (!visual) return;
     const r = Math.max(0.1, Number.isFinite(range) ? range : 1);
     const outerDeg = Math.max(0, Math.min(180, Number.isFinite(outerConeAngleDeg) ? outerConeAngleDeg : 45));
     const outerRad = outerDeg * Math.PI / 180;
     const outerRadius = r * Math.tan(outerRad * 0.5);
-    // 近似处理：让锥尖靠近光源位置，底面在 -Y 方向
-    visual.setLocalPosition(0, -r * 0.5, 0);
-    visual.setLocalScale(Math.max(outerRadius * 2, 0.01), r, Math.max(outerRadius * 2, 0.01));
+    // 单位锥体：锥尖(0,0,0) → 底面y=-1，底面半径=1
+    visual.setLocalPosition(0, 0, 0);
+    visual.setLocalScale(Math.max(outerRadius, 0.01), r, Math.max(outerRadius, 0.01));
+
+    // 内圈半径来源：light.innerConeAngle，若无则退化为 outerAngle
+    if (innerRing) {
+        const lightAny = spotEntity.light as any | undefined;
+        let innerDeg = typeof lightAny?.innerConeAngle === 'number' ? lightAny.innerConeAngle : outerDeg;
+        innerDeg = Math.max(0, Math.min(innerDeg, outerDeg));
+        const innerRad = innerDeg * Math.PI / 180;
+        const innerRadius = r * Math.tan(innerRad * 0.5);
+        innerRing.setLocalPosition(0, 0, 0);
+        innerRing.setLocalScale(Math.max(innerRadius, 0.01), r, Math.max(innerRadius, 0.01));
+    }
 };
 
 /**
@@ -324,7 +520,6 @@ const createSpotLightsFromSettings = (global: Global): void => {
             (entity.light as any).outerConeAngle = outerCone;
             (entity.light as any).range = range;
         }
-        updateSpotLightVisual(entity, r, g, b);
         updateSpotGizmoShape(entity, range, outerCone);
     });
 
@@ -356,6 +551,7 @@ const createPointLightsFromSettings = (global: Global): void => {
         const [r, g, b] = cfg.color ?? [1, 1, 1];
         const intensity = typeof cfg.intensity === 'number' ? cfg.intensity : 1;
         const enabled = cfg.enabled !== false;
+        const range = typeof cfg.range === 'number' ? cfg.range : 1;
 
         let entity = container!.findByName(`pointLight_${i}`) as Entity | undefined;
         if (!entity) {
@@ -364,7 +560,8 @@ const createPointLightsFromSettings = (global: Global): void => {
                 type: 'point',
                 color: new Color(r, g, b),
                 intensity,
-                castShadows: false
+                castShadows: false,
+                range
             });
             entity.tags.add('pointLight');
             (entity as any).__lightConfig = cfg;
@@ -378,10 +575,11 @@ const createPointLightsFromSettings = (global: Global): void => {
             entity.light.color.set(r, g, b);
             entity.light.intensity = intensity;
             entity.light.castShadows = false;
+            (entity.light as any).range = range;
             entity.light.shadowDistance = entity.light.shadowDistance ?? 200;
             entity.light.shadowResolution = entity.light.shadowResolution ?? 2048;
         }
-        updateLightVisual(entity, r, g, b);
+        updatePointLightRangeVisual(entity, range);
     });
 
     const existing = container!.children.filter(c => c.name.startsWith('pointLight_'));
@@ -412,7 +610,9 @@ const setPointLightsVisualVisible = (global: Global, visible: boolean): void => 
             const entity = node as Entity;
             if (!entity.name.startsWith('spotLight_') || entity.name === 'spotLight_visual') return;
             const visual = (entity as any).__spotVisualEntity as Entity | undefined;
+            const innerRing = (entity as any).__spotInnerRingEntity as Entity | undefined;
             if (visual?.render) visual.render.enabled = visible;
+            if (innerRing?.render) innerRing.render.enabled = visible;
         });
     }
 };
