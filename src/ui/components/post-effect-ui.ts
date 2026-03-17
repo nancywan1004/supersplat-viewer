@@ -730,10 +730,16 @@ export function initPostEffectUI(global: Global): () => void {
     if (bloomScopeOption && bloomScopeCheck) {
         const toggleBloomScope = () => {
             const b = ensureBloom(settings) as { bloomScope?: 'global' | 'local' };
-            b.bloomScope = b.bloomScope === 'local' ? 'global' : 'local';
-            syncFromSettings();
-            firePostEffectChanged();
-            pushEditHistorySafe();
+            const nextIsLocal = !(b.bloomScope === 'local');
+            if (editUiTransport === 'message-bridge') {
+                // 父级托管模式：由父级通过 BLOOM_IS_LOCAL_SET 驱动 Viewer
+                (global as any).postMessage?.({ type: 'BLOOM_IS_LOCAL_SET', value: nextIsLocal });
+            } else {
+                b.bloomScope = nextIsLocal ? 'local' : 'global';
+                syncFromSettings();
+                firePostEffectChanged();
+                pushEditHistorySafe();
+            }
         };
         bloomScopeOption.addEventListener('click', toggleBloomScope);
         bloomScopeCheck.addEventListener('click', toggleBloomScope);

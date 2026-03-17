@@ -254,6 +254,14 @@ export function applyBloomThresholdUpdate(global: Global, value: number): void {
     global.events.fire('postEffect:changed');
 }
 
+/** BLOOM_IS_LOCAL_SET：true=仅局部亮灯区域（bloomScope='local'），false=全局 Bloom（bloomScope='global'） */
+export function applyBloomIsLocalSet(global: Global, value: boolean): void {
+    const settings = global.settings as ExperienceSettings;
+    const b = ensureBloom(settings) as Record<string, unknown>;
+    b.bloomScope = value ? 'local' : 'global';
+    global.events.fire('postEffect:changed');
+}
+
 /** LIGHT_BRUSH_INTENSITY_UPDATE：根据亮灯区域 id，更新其绑定光源的 intensity（0-10） */
 export function applyBloomLocalLightRegionIntensityUpdate(global: Global, regionId: string, value: number): void {
     if (!regionId) return;
