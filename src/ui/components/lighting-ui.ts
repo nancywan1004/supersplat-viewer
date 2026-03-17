@@ -1,6 +1,7 @@
 import type { Global } from '../../types';
 import type { ExperienceSettings } from '../../schemas/v2';
 import { updatePointLightsFromSettings, setLightsVisualVisible } from '../../light';
+import { getPositionInFrontOfCamera } from '../../asset-placement-handler';
 import type { PointLightConfig, DirectionalLightConfig, SpotLightConfig } from '../../schemas/v2';
 import { pushEditHistory } from '../../edit-history';
 import { ensureNightMode, ensureLighting } from '../../protocol-settings-adapter';
@@ -400,7 +401,11 @@ export function initLightingUI(global: Global): () => void {
             const center = bloom?.draftLightRegionCenter ?? null;
             const pointCount = lighting.lights.filter((l: any) => !isDirectional(l) && !isSpot(l)).length;
             if (pointCount >= MAX_POINT_LIGHTS) return;
-            const basePos: [number, number, number] = center ? [center[0], center[1], center[2]] : [0, 1, 0];
+            const basePos: [number, number, number] = (() => {
+                if (center) return [center[0], center[1], center[2]];
+                const camPos = getPositionInFrontOfCamera(global);
+                return [camPos.x, camPos.y, camPos.z];
+            })();
             const nextId = generateNextLightId();
             const cfgPoint: any = { position: basePos, color: [1, 1, 1], intensity: 1, enabled: true };
             cfgPoint.id = nextId;
@@ -415,6 +420,9 @@ export function initLightingUI(global: Global): () => void {
             if (bloom) {
                 (bloom as any).draftLightRegionCenter = null;
             }
+            // 默认选中新建光源
+            (global.state as any).selectedLightId = nextId;
+            events.fire('sceneLight:selected', { id: nextId });
             renderPointLightsList();
             updatePointLightsFromSettings(global);
             events.fire('lighting:changed');
@@ -430,7 +438,11 @@ export function initLightingUI(global: Global): () => void {
                 localLightRegions?: Array<{ id: string; linkedLightId?: string | null }>;
             } | undefined;
             const center = bloom?.draftLightRegionCenter ?? null;
-            const basePos: [number, number, number] = center ? [center[0], center[1], center[2]] : [0, 2, 0];
+            const basePos: [number, number, number] = (() => {
+                if (center) return [center[0], center[1], center[2]];
+                const camPos = getPositionInFrontOfCamera(global);
+                return [camPos.x, camPos.y, camPos.z];
+            })();
             const nextId = generateNextLightId();
             const cfgSpot: any = {
                 id: nextId,
@@ -455,6 +467,9 @@ export function initLightingUI(global: Global): () => void {
             if (bloom) {
                 (bloom as any).draftLightRegionCenter = null;
             }
+            // 默认选中新建光源
+            (global.state as any).selectedLightId = nextId;
+            events.fire('sceneLight:selected', { id: nextId });
             renderPointLightsList();
             updatePointLightsFromSettings(global);
             events.fire('lighting:changed');
@@ -483,6 +498,26 @@ export function initLightingUI(global: Global): () => void {
         events.on('lighting:changed', () => {
             if (!document.body.contains(pointLightsList)) return;
             renderPointLightsList();
+        });
+
+        // 底部工具栏触发的删除光源
+        events.on('lighting:deleteLight', ({ id }: { id: string | null }) => {
+            const lighting = ensureLightingLocal();
+            const lightsAny = (lighting.lights as any[]) ?? [];
+            const targetId = id ?? ((global.state as any).selectedLightId as string | null | undefined);
+            if (!targetId) return;
+            const idx = lightsAny.findIndex((l) => l && (l as any).id === targetId);
+            if (idx < 0) return;
+            const light = lightsAny[idx];
+            // 不允许删除主方向光
+            if (isDirectional(light)) return;
+            lightsAny.splice(idx, 1);
+            (global.state as any).selectedLightId = null;
+            events.fire('sceneLight:selected', { id: null });
+            renderPointLightsList();
+            updatePointLightsFromSettings(global);
+            events.fire('lighting:changed');
+            pushEditHistorySafe();
         });
     }
 

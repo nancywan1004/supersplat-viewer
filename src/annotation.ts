@@ -78,6 +78,10 @@ export class Annotation extends Script {
 
     static imageDom: HTMLImageElement | null = null;
 
+    static imagePreviewOverlay: HTMLDivElement | null = null;
+
+    static imagePreviewImg: HTMLImageElement | null = null;
+
     static layers: Layer[] = [];
 
     static mesh: Mesh | null = null;
@@ -134,7 +138,7 @@ export class Annotation extends Script {
                 border-radius: 4px;
                 font-size: 14px;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-                pointer-events: none;
+                pointer-events: auto;
                 max-width: 200px;
                 word-wrap: break-word;
                 overflow-x: visible;
@@ -206,6 +210,23 @@ export class Annotation extends Script {
                 position: relative;
                 text-shadow: none;
             }
+
+            /* 图片预览遮罩层 */
+            .pc-annotation-image-preview-overlay {
+                position: fixed;
+                inset: 0;
+                background: rgba(0,0,0,0.75);
+                display: none;
+                align-items: center;
+                justify-content: center;
+                z-index: 9999;
+            }
+            .pc-annotation-image-preview-overlay img {
+                max-width: 80vw;
+                max-height: 80vh;
+                border-radius: 8px;
+                box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+            }
         `;
 
         const style = document.createElement('style');
@@ -274,10 +295,42 @@ export class Annotation extends Script {
         // 可选图片元素（AnnotationEntity 展开时显示）
         Annotation.imageDom = document.createElement('img');
         Annotation.imageDom.className = 'pc-annotation-image';
-        Annotation.imageDom.style.cssText = 'display:none;max-width:100%;max-height:100px;margin-top:4px;border-radius:4px;';
+        Annotation.imageDom.style.cssText = 'display:none;max-width:100%;max-height:100px;margin-top:4px;border-radius:4px;cursor:pointer;';
         Annotation.tooltipDom.appendChild(Annotation.imageDom);
 
+        // 图片大图预览遮罩
+        Annotation.imagePreviewOverlay = document.createElement('div');
+        Annotation.imagePreviewOverlay.className = 'pc-annotation-image-preview-overlay';
+        Annotation.imagePreviewOverlay.style.display = 'none';
+        Annotation.imagePreviewImg = document.createElement('img');
+        Annotation.imagePreviewOverlay.appendChild(Annotation.imagePreviewImg);
+        Annotation.imagePreviewOverlay.addEventListener('click', () => {
+            if (Annotation.imagePreviewOverlay) {
+                Annotation.imagePreviewOverlay.style.display = 'none';
+            }
+        });
+
+        if (Annotation.imageDom) {
+            Annotation.imageDom.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                const src = Annotation.imageDom!.src;
+                if (!src) return;
+                if (Annotation.imagePreviewImg) {
+                    Annotation.imagePreviewImg.src = src;
+                }
+                if (Annotation.imagePreviewOverlay) {
+                    Annotation.imagePreviewOverlay.style.display = 'flex';
+                }
+            });
+            // 若图片加载失败（404/跨域等），视为无图：隐藏并清空 src，避免 Tooltip 中出现破图占位
+            Annotation.imageDom.addEventListener('error', () => {
+                Annotation.imageDom!.removeAttribute('src');
+                Annotation.imageDom!.style.display = 'none';
+            });
+        }
+
         Annotation.parentDom.appendChild(Annotation.tooltipDom);
+        Annotation.parentDom.appendChild(Annotation.imagePreviewOverlay);
     }
 
     /**

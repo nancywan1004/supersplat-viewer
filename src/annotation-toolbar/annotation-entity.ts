@@ -184,6 +184,8 @@ export class AnnotationEntity extends Annotation {
                 Annotation.imageDom.src = this.data.imageUrl;
                 Annotation.imageDom.style.display = 'block';
             } else {
+                // 无图片时彻底移除占位：清空 src 并隐藏
+                Annotation.imageDom.removeAttribute('src');
                 Annotation.imageDom.style.display = 'none';
             }
         }

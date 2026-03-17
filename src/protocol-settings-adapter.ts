@@ -8,6 +8,7 @@ import type { Global } from './types';
 import type { ExperienceSettings } from './schemas/v2';
 import type { PointLightConfig, DirectionalLightConfig, SpotLightConfig } from './schemas/v2';
 import { updatePointLightsFromSettings } from './light';
+import { getPositionInFrontOfCamera } from './asset-placement-handler';
 
 /** 协议中光源项带 id（用于 LIGHT_SELECT / LIGHT_INTENSITY_UPDATE 等） */
 type LightWithId = (PointLightConfig | DirectionalLightConfig | SpotLightConfig) & { id?: string };
@@ -132,18 +133,21 @@ export function applyLightGlobalSet(global: Global, value: number): void {
     (global.app as { fire: (name: string, value?: unknown) => void }).fire('nightFade:set', v);
 }
 
-/** LIGHT_ADD：在 lighting.lights 中追加一盏点光（带 id） */
+/** LIGHT_ADD：在 lighting.lights 中追加一盏点光（带 id），默认在相机前方生成 */
 export function applyLightAdd(global: Global, id: string): void {
     const settings = global.settings as ExperienceSettings;
     const lighting = ensureLighting(settings);
+    const camPos = getPositionInFrontOfCamera(global);
     lighting.lights.push({
         id,
-        position: [0, 2, 0],
+        position: [camPos.x, camPos.y, camPos.z],
         color: [1, 1, 1],
         intensity: 1,
         range: 10,
         enabled: true
     } as LightWithId);
+    updatePointLightsFromSettings(global);
+    global.events.fire('lighting:changed');
     global.events.fire('postEffect:changed');
 }
 
