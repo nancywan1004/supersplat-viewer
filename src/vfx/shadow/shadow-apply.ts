@@ -344,9 +344,9 @@ class ShadowApplyRt extends Script {
                 shadowRt.resize(device.width, device.height);
             }
 
-            // intensity = 1 - darken：darken=0 最暗，darken=1 不压暗
+            // intensity = darken：darken=0 不压暗，darken=1 最深
             const darken = Math.max(0, Math.min(1, Number(shadowSettingsNow.darken ?? 0)));
-            const intensity = 1 - darken;
+            const intensity = darken;
             const debugRt = shadowSettingsNow.debugRt === true ? 1 : 0;
 
             // shadowTex 由引擎写入（仅平行光参与），此处只做 (1-R)*intensity 叠黑，无自算投影

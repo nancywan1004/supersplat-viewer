@@ -40,6 +40,7 @@ import {
     applyBloomLocalLightRegionOuterAngleSet,
     applyShadowSet,
     applyShadowIntensityUpdate,
+    applyShadowDirectionSet,
     applyVfxTypeSet,
     applyVfxExit
 } from './protocol-settings-adapter';
@@ -98,6 +99,7 @@ type InboundPayload =
     | { type: 'BLOOM_IS_LOCAL_SET'; value?: boolean }
     | { type: 'SHADOW_SET'; value?: boolean }
     | { type: 'SHADOW_INTENSITY_UPDATE'; value?: number }
+    | { type: 'SHADOW_DIRECTION_SET'; value?: number }
     | { type: 'VFX_TYPE_SET'; value?: string }
     | { type: 'VFX_EXIT' }
     | { type: 'VFX_RESTART'; restartAnim?: boolean }
@@ -383,6 +385,11 @@ const initPostMessageBridge = (global: Global) => {
         case 'SHADOW_INTENSITY_UPDATE': {
             const shadowIntVal = (p as { value?: number }).value;
             if (typeof shadowIntVal === 'number') applyShadowIntensityUpdate(global, shadowIntVal);
+            break;
+        }
+        case 'SHADOW_DIRECTION_SET': {
+            const shadowDirVal = (p as { value?: number }).value;
+            if (typeof shadowDirVal === 'number') applyShadowDirectionSet(global, shadowDirVal);
             break;
         }
         case 'LIGHT_ADD':

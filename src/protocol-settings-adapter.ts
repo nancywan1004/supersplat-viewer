@@ -393,6 +393,31 @@ export function applyShadowIntensityUpdate(global: Global, value: number): void 
     global.events.fire('postEffect:changed');
 }
 
+/** SHADOW_DIRECTION_SET：调节场景主方向光的航向角（yaw，度）
+ * - 优先写入 settings.lighting.lights 中的 directional 配置（如存在）
+ * - 同步写入 postEffectSettings.shadow.lightYaw 以兼容旧配置
+ * - 调整后通过 updatePointLightsFromSettings 立即应用到场景中的平行光实体
+ */
+export function applyShadowDirectionSet(global: Global, value: number): void {
+    const settings = global.settings as ExperienceSettings;
+    const yaw = Math.max(0, Math.min(360, Number.isFinite(value) ? value : 0));
+
+    const lightingAny = (settings as any).lighting;
+    if (lightingAny && Array.isArray(lightingAny.lights)) {
+        const lights = lightingAny.lights as Array<Record<string, unknown>>;
+        const dir = lights.find((l: any) => l && (l as any).type === 'directional');
+        if (dir) {
+            dir.yaw = yaw;
+        }
+    }
+
+    const shadow = ensureShadow(settings) as Record<string, unknown>;
+    shadow.lightYaw = yaw;
+
+    updatePointLightsFromSettings(global);
+    global.events.fire('lighting:changed');
+}
+
 // --- VFX 映射 ---
 
 /** VFX_TYPE_SET：写 settings.revealEffect.type、state.vfxType，并触发 revealConfigChanged */

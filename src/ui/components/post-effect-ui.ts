@@ -2,7 +2,12 @@ import type { Global } from '../../types';
 import type { ExperienceSettings } from '../../schemas/v2';
 import { updatePointLightsFromSettings } from '../../light';
 import { pushEditHistory } from '../../edit-history';
-import { ensureBloom as ensureBloomFromAdapter, ensureShadow as ensureShadowFromAdapter, ensureLighting as ensureLightingForLighting } from '../../protocol-settings-adapter';
+import {
+    ensureBloom as ensureBloomFromAdapter,
+    ensureShadow as ensureShadowFromAdapter,
+    ensureLighting as ensureLightingForLighting,
+    applyShadowDirectionSet
+} from '../../protocol-settings-adapter';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
 const POST_EFFECT_PANEL_HTML = `
@@ -66,10 +71,17 @@ const POST_EFFECT_PANEL_HTML = `
     <div id="shadowCastOption" class="postEffectOption">Mesh Cast Shadows (接影几何投射阴影/自阴影)</div>
   </div>
   <div class="settingsRow">
-    <label for="shadowDarkenSlider" class="postEffectLabel">Darken (0=最暗 1=不压暗):</label>
+    <label for="shadowDarkenSlider" class="postEffectLabel">Darken (0=不压暗 1=最深):</label>
     <div class="postEffectSliderWrap">
       <input type="range" id="shadowDarkenSlider" min="0" max="1" step="0.05" value="0" class="postEffectSlider">
       <span id="shadowDarkenValue" class="postEffectSliderValue">0.00</span>
+    </div>
+  </div>
+  <div class="settingsRow">
+    <label for="shadowYawSlider" class="postEffectLabel">Light Yaw (°):</label>
+    <div class="postEffectSliderWrap">
+      <input type="range" id="shadowYawSlider" min="0" max="360" step="1" value="45" class="postEffectSlider">
+      <span id="shadowYawValue" class="postEffectSliderValue">45</span>
     </div>
   </div>
   <div class="settingsRow">
@@ -575,6 +587,8 @@ export function initPostEffectUI(global: Global): () => void {
     const shadowCastOption = container.querySelector('#shadowCastOption') as HTMLElement | null;
     const shadowDarkenSlider = container.querySelector('#shadowDarkenSlider') as HTMLInputElement | null;
     const shadowDarkenValue = container.querySelector('#shadowDarkenValue') as HTMLElement | null;
+    const shadowYawSlider = container.querySelector('#shadowYawSlider') as HTMLInputElement | null;
+    const shadowYawValue = container.querySelector('#shadowYawValue') as HTMLElement | null;
     const shadowDebugVisualCheck = container.querySelector('#shadowDebugVisualCheck') as HTMLElement | null;
     const shadowDebugVisualOption = container.querySelector('#shadowDebugVisualOption') as HTMLElement | null;
     const shadowSphereRadiusSlider = container.querySelector('#shadowSphereRadiusSlider') as HTMLInputElement | null;
@@ -653,6 +667,10 @@ export function initPostEffectUI(global: Global): () => void {
         const sphereRadius = Math.max(0.1, Math.min(5, Number(sh.sphereRadius ?? 0.5)));
         if (shadowSphereRadiusSlider) shadowSphereRadiusSlider.value = String(sphereRadius);
         if (shadowSphereRadiusValue) shadowSphereRadiusValue.textContent = sphereRadius.toFixed(2);
+
+        const yaw = Math.max(0, Math.min(360, Number((sh as any).lightYaw ?? 45)));
+        if (shadowYawSlider) shadowYawSlider.value = String(yaw);
+        if (shadowYawValue) shadowYawValue.textContent = yaw.toFixed(0);
 
         // 平行光方向/强度/Bias 已移至 Lighting 面板配置
     };
@@ -899,6 +917,13 @@ export function initPostEffectUI(global: Global): () => void {
 
     if (shadowEnableOption && shadowEnableCheck) {
         const toggleShadow = () => {
+            const editUiTransport = getEditUiTransport(global);
+            if (editUiTransport === 'message-bridge') {
+                const sh = ensureShadow(settings);
+                const nextEnabled = !sh.enabled;
+                sendEditProtocolMessage({ type: 'SHADOW_SET', value: nextEnabled });
+                return;
+            }
             const sh = ensureShadow(settings);
             sh.enabled = !sh.enabled;
             syncFromSettings();
@@ -924,12 +949,36 @@ export function initPostEffectUI(global: Global): () => void {
 
     if (shadowDarkenSlider && shadowDarkenValue) {
         shadowDarkenSlider.addEventListener('input', () => {
-            const sh = ensureShadow(settings);
-            sh.darken = Math.max(0, Math.min(1, parseFloat(shadowDarkenSlider!.value) || 0));
-            shadowDarkenValue!.textContent = sh.darken.toFixed(2);
-            firePostEffectChanged();
+            const raw = parseFloat(shadowDarkenSlider!.value) || 0;
+            const v = Math.max(0, Math.min(1, raw));
+            const editUiTransport = getEditUiTransport(global);
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'SHADOW_INTENSITY_UPDATE', value: v });
+            } else {
+                const sh = ensureShadow(settings);
+                sh.darken = v;
+                firePostEffectChanged();
+            }
+            shadowDarkenValue!.textContent = v.toFixed(2);
         });
         shadowDarkenSlider.addEventListener('change', () => {
+            pushEditHistorySafe();
+        });
+    }
+
+    if (shadowYawSlider && shadowYawValue) {
+        shadowYawSlider.addEventListener('input', () => {
+            const raw = parseFloat(shadowYawSlider.value) || 0;
+            const v = Math.max(0, Math.min(360, raw));
+            const editUiTransport = getEditUiTransport(global);
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'SHADOW_DIRECTION_SET', value: v });
+            } else {
+                applyShadowDirectionSet(global, v);
+            }
+            shadowYawValue.textContent = v.toFixed(0);
+        });
+        shadowYawSlider.addEventListener('change', () => {
             pushEditHistorySafe();
         });
     }
