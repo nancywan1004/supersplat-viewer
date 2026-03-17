@@ -24,6 +24,8 @@ import {
     applyLightAdd,
     applyLightSelect,
     applyLightDetail,
+    applyLightToggleAll,
+    applyLightToggle,
     applyBloomIntensityUpdate,
     applyBloomThresholdUpdate,
     applyBloomBlurSet,
@@ -67,6 +69,8 @@ type InboundPayload =
     | { type: 'ANNOTATION_TRANSFORM_MODE'; value?: 'move' | null }
     | { type: 'LIGHT_GLOBAL_SET'; value?: number }
     | { type: 'LIGHT_ADD'; id?: string }
+    | { type: 'LIGHT_TOGGLE_ALL'; value?: boolean }
+    | { type: 'LIGHT_TOGGLE'; id?: string; value?: boolean }
     | { type: 'LIGHT_SELECT'; id?: string | null }
     | { type: 'LIGHT_INTENSITY_UPDATE'; id?: string; value?: number }
     | { type: 'LIGHT_COLOR_UPDATE'; id?: string; value?: number[] }
@@ -318,6 +322,21 @@ const initPostMessageBridge = (global: Global) => {
         case 'LIGHT_GLOBAL_SET': {
             const lightGlobalVal = (p as { value?: number }).value;
             if (typeof lightGlobalVal === 'number') applyLightGlobalSet(global, lightGlobalVal);
+            break;
+        }
+        case 'LIGHT_TOGGLE_ALL': {
+            const v = (p as { value?: boolean }).value;
+            if (typeof v === 'boolean') {
+                applyLightToggleAll(global, v);
+            }
+            break;
+        }
+        case 'LIGHT_TOGGLE': {
+            const id = (p as { id?: string }).id;
+            const v = (p as { value?: boolean }).value;
+            if (typeof id === 'string' && typeof v === 'boolean') {
+                applyLightToggle(global, id, v);
+            }
             break;
         }
         case 'BLOOM_INTENSITY_UPDATE':

@@ -65,6 +65,14 @@ export function ensureLighting(settings: ExperienceSettings): { lights: LightWit
     return lighting;
 }
 
+/** 判断是否为「用户添加的可控光源」：排除场景内默认平行光，仅保留点光/聚光灯 */
+function isUserControllableLight(light: LightWithId): boolean {
+    const anyLight = light as any;
+    const type = anyLight.type as string | undefined;
+    // 约定：directional 为场景主方向光，始终不参与 LIGHT_TOGGLE / LIGHT_TOGGLE_ALL
+    return type === 'point' || type === 'spot' || type === undefined;
+}
+
 export function ensurePostEffectSettings(settings: ExperienceSettings): NonNullable<ExperienceSettings['postEffectSettings']> {
     if (!settings.postEffectSettings || typeof settings.postEffectSettings !== 'object') {
         (settings as Record<string, unknown>).postEffectSettings = {};
@@ -86,6 +94,7 @@ export function ensureBloom(settings: ExperienceSettings): NonNullable<Experienc
     if (typeof b.bloomBrushBrightness !== 'number') b.bloomBrushBrightness = 0;
     if (typeof b.bloomBrushCommittedBrightness !== 'number') b.bloomBrushCommittedBrightness = 0;
     if (!Array.isArray(b.localLightRegions)) b.localLightRegions = [];
+    if (typeof (b as any).localLightsEnabled !== 'boolean') (b as any).localLightsEnabled = true;
     if (b.activeLocalLightRegionId === undefined) b.activeLocalLightRegionId = null;
     return pe.bloom!;
 }
@@ -179,6 +188,45 @@ export function applyLightDetail(
     default:
         return;
     }
+    global.events.fire('postEffect:changed');
+}
+
+/** LIGHT_TOGGLE_ALL：仅对用户添加的点光源/聚光灯生效，排除场景默认平行光 */
+export function applyLightToggleAll(global: Global, enabled: boolean): void {
+    const settings = global.settings as ExperienceSettings;
+    const lighting = ensureLighting(settings);
+    let changed = false;
+    for (const l of lighting.lights) {
+        if (!isUserControllableLight(l)) continue;
+        const anyLight = l as any;
+        if (anyLight.enabled !== enabled) {
+            anyLight.enabled = enabled;
+            changed = true;
+        }
+    }
+    if (!changed) return;
+    updatePointLightsFromSettings(global);
+    global.events.fire('lighting:changed');
+    // 全局「所有光照开关」同时作为局部亮灯区域的主开关：
+    // 关闭时，bloom.localLightsEnabled=false，所有 LocalLightRegion 在 Bloom 中整体失效。
+    const bloom = ensureBloom(settings) as any;
+    bloom.localLightsEnabled = enabled;
+    // Bloom 配置/体积依赖灯光显隐，需要重新配置 postEffect 管线并强制渲染一帧
+    global.events.fire('postEffect:changed');
+}
+
+/** LIGHT_TOGGLE：按 id 开关某一盏用户光源；若为平行光则忽略 */
+export function applyLightToggle(global: Global, id: string, enabled: boolean): void {
+    if (!id) return;
+    const settings = global.settings as ExperienceSettings;
+    const lighting = ensureLighting(settings);
+    const light = lighting.lights.find((l) => (l as LightWithId).id === id) as LightWithId | undefined;
+    if (!light || !isUserControllableLight(light)) return;
+    const anyLight = light as any;
+    if (anyLight.enabled === enabled) return;
+    anyLight.enabled = enabled;
+    updatePointLightsFromSettings(global);
+    global.events.fire('lighting:changed');
     global.events.fire('postEffect:changed');
 }
 

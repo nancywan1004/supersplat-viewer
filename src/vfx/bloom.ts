@@ -8,7 +8,7 @@ import {
     Vec3
 } from 'playcanvas';
 import type { PostEffectSettings } from '../settings';
-import type { LocalLightRegion, WorldSpaceBloomRegionJSON } from '../schemas/v2';
+import type { LocalLightRegion, WorldSpaceBloomRegionJSON, ExperienceSettings } from '../schemas/v2';
 import type { Global } from '../types';
 import { BloomBrushPainter } from './bloom-brush-painter';
 import { pickWorldFromClientXY } from '../picker';
@@ -588,11 +588,42 @@ export class BloomController {
                 : 0;
             // 多区域路径会传 per-voxel tint 纹理，此处 uniform 仅用于单区域/无 tint 纹理时的回退
             nightModeScript.setCommittedTint(tintColor, tintBlend);
-            // 多区域叠加：所有 localLightRegions 同时参与体积/亮度合成；若有当前正在编辑的（含草稿），也把 worldSpaceData 纳入体积
+            // 多区域叠加：所有 localLightRegions 同时参与体积/亮度合成；
+            // 若有当前正在编辑的（含草稿），也把 worldSpaceData 纳入体积。
+            // 若某区域绑定的光源当前处于关闭状态（lighting.lights[*].enabled === false），
+            // 则视为该区域整体不可见：其局部亮度与 Bloom mask 均不参与体积/亮度合成。
+            const localLightsEnabled = (bloomSettings as any).localLightsEnabled !== false;
+            if (!localLightsEnabled) {
+                // 全局局部亮灯开关关闭：强制清空所有局部亮度体积与 tint，视为没有任何 LocalLightRegion。
+                this._lastMultiRegionHash = '';
+                this._lastActiveRegionId = null;
+                this._lastActiveRegionCommittedLength = -1;
+                this.committedTintTexture = null;
+                const { texture, tintTexture, aabbMin, aabbMax } = buildCommittedBrightnessVolumeFromRegions(
+                    this.global.app.graphicsDevice,
+                    [],
+                    this.committedVolumeTexture,
+                    this.committedTintTexture
+                );
+                this.committedVolumeTexture = texture;
+                this.committedTintTexture = tintTexture;
+                this.committedVolumeAabbMin.copy(aabbMin);
+                this.committedVolumeAabbMax.copy(aabbMax);
+                nightModeScript.setCommittedBrightnessVolume(
+                    texture,
+                    aabbMin,
+                    aabbMax,
+                    1,
+                    { volumeEncodedBrightness: true }
+                );
+                nightModeScript.setCommittedTintVolume(null);
+                return;
+            }
             if (regions.length > 0) {
                 const pointsWithBrightness: CommittedPointWithBrightness[] = [];
                 const isDraftActive = activeId != null && String(activeId).startsWith('draft-');
                 for (const r of regions) {
+                    if (!this.isLocalLightRegionVisible(r)) continue;
                     if (isDraftActive && r.id === activeId) continue;
                     const committed = r.worldSpace?.committed;
                     if (!committed?.length) continue;
@@ -632,11 +663,12 @@ export class BloomController {
                     }
                 }
                 if (pointsWithBrightness.length > 0) {
+                    const visibilitySig = regions.map((r: any) => `${r.id}:${this.isLocalLightRegionVisible(r) ? 1 : 0}`).join('|');
                     const multiHash = regions.map((r: any) =>
                         `${r.id}:${(r.worldSpace?.committed ?? []).length}:${r.localBrightness ?? 0}:${(r.tintColor ?? []).join(',')}:${r.tintBlend ?? 0}`
                     ).join('|') + (isDraftActive
                         ? ('|active=' + (activeId ?? '') + (this.isDrawing ? '' : '|ws=' + this.worldSpaceData.getAllPoints().length))
-                        : '');
+                        : '') + `|vis=${visibilitySig}`;
                     if (this._lastMultiRegionHash !== multiHash) {
                         const { texture, tintTexture, aabbMin, aabbMax } = buildCommittedBrightnessVolumeFromRegions(
                             this.global.app.graphicsDevice,
@@ -1171,6 +1203,20 @@ export class BloomController {
     }
 
     /**
+     * 判断局部亮灯区域是否可见：若区域绑定了光源，则仅当该光源 enabled !== false 时可见；
+     * 无绑定或找不到灯则视为可见。供 applyToCameraFrame 与 getPointsForMask 复用。
+     */
+    private isLocalLightRegionVisible(region: any): boolean {
+        const lighting = (this.global.settings as ExperienceSettings).lighting as { lights?: Array<{ id?: string; enabled?: boolean }> } | undefined;
+        const lights = Array.isArray(lighting?.lights) ? lighting.lights : undefined;
+        const linkedId = region?.linkedLightId;
+        if (!linkedId || !lights || lights.length === 0) return true;
+        const light = lights.find((l) => l && l.id === linkedId);
+        if (!light) return true;
+        return light.enabled !== false;
+    }
+
+    /**
      * 获取用于 2D mask 投影的点列表：
      * - 绘制中：使用当前正在编辑区域的 worldSpaceData（points + committed）；
      * - 非绘制且存在 localLightRegions：所有区域的 committed 叠加，当前 active 区域（含草稿）由 worldSpaceData 代表，避免重复；
@@ -1179,11 +1225,20 @@ export class BloomController {
      */
     private getPointsForMask(): Array<{ position: Vec3; radius: number }> {
         const bloom = this.global.settings?.postEffectSettings?.bloom as {
-            localLightRegions?: Array<{ id: string; worldSpace?: { committed?: Array<{ position: [number, number, number]; radius?: number }> } }>;
+            localLightRegions?: Array<{ id: string; linkedLightId?: string | null; worldSpace?: { committed?: Array<{ position: [number, number, number]; radius?: number }> } }>;
             activeLocalLightRegionId?: string | null;
+            localLightsEnabled?: boolean;
         } | undefined;
         const regions = bloom?.localLightRegions ?? [];
         const activeId = bloom?.activeLocalLightRegionId ?? null;
+
+        // 全局局部亮灯关闭时：不向 2D Bloom mask 提供任何点，mask 被清黑，compose 阶段无局部辉光
+        if ((bloom as any)?.localLightsEnabled === false) return [];
+
+        // 所有绑定光源均处于关闭状态时，也不应再有任何局部 Bloom mask
+        if (regions.length > 0 && !regions.some((r) => this.isLocalLightRegionVisible(r))) {
+            return [];
+        }
 
         // 笔刷绘制中（非擦除）：只返回当前 worldSpaceData 的点做实时预览
         // 擦除模式需要 fall through 到多区域路径，否则其他区域的 2D mask 会消失
@@ -1193,10 +1248,12 @@ export class BloomController {
 
         const out: Array<{ position: Vec3; radius: number }> = [];
 
-        // 多区域：仅当 active 为草稿时用 worldSpaceData 代表该草稿；否则全部用 localLightRegions，避免展开已有区域时误用空 worldSpaceData 导致区域消失
+        // 多区域：仅当 active 为草稿时用 worldSpaceData 代表该草稿；否则全部用 localLightRegions（且仅包含绑定灯处于开启状态的区域），
+        // 避免展开已有区域时误用空 worldSpaceData 导致区域消失
         if (regions.length > 0) {
             const isDraftActive = activeId != null && String(activeId).startsWith('draft-');
             for (const r of regions) {
+                if (!this.isLocalLightRegionVisible(r)) continue;
                 if (isDraftActive && r.id === activeId) continue;
                 const committed = r.worldSpace?.committed;
                 if (!committed?.length) continue;

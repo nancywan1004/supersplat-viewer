@@ -19,6 +19,7 @@ import { initEditBottomToolbarUI } from './edit-bottom-toolbar';
 import type { Annotation } from '../settings';
 import { getEditUiTransport, sendEditProtocolMessage } from './edit-ui-transport';
 import { setLightsVisualVisible } from '../light';
+import { applyLightToggleAll, applyLightToggle } from '../protocol-settings-adapter';
 
 // Initialize the touch joystick for fly mode camera control
 const initJoystick = (
@@ -265,7 +266,10 @@ const initUI = (global: Global) => {
         'joystickBase', 'joystick',
         'tooltip',
         'annotationNav', 'annotationPrev', 'annotationNext', 'annotationInfo', 'annotationNavTitle',
-        'supersplatBranding'
+        'supersplatBranding',
+        // View 模式调试按钮（右上角编辑按钮旁）
+        'viewDebugToggleAssets', 'viewDebugLightsAllOn', 'viewDebugLightsAllOff',
+        'viewDebugRegionSelect', 'viewDebugToggleRegionLight'
     ].reduce((acc: Record<string, HTMLElement>, id) => {
         acc[id] = document.getElementById(id);
         return acc;
@@ -804,6 +808,100 @@ const initUI = (global: Global) => {
         });
         updateEditModeUI();
     }
+
+    // --- View 模式调试按钮：顶栏右上角，在非编辑模式下用于直接测试 Viewer 模式协议 ---
+    if (dom.viewDebugToggleAssets) {
+        dom.viewDebugToggleAssets.addEventListener('click', () => {
+            // 简单按当前第一资产的 enabled 状态反转所有资产显隐；无资产则直接切换显示/隐藏状态
+            const items = (global.state as any).scenePlacedEntities as any[] | undefined;
+            let nextVisible = true;
+            if (Array.isArray(items) && items.length > 0) {
+                const first = items.find((it) => it && it.entity);
+                if (first && typeof first.visible === 'boolean') {
+                    nextVisible = !first.visible;
+                }
+            }
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'ASSET_SHOW_HIDE_SET', value: nextVisible });
+            } else if (Array.isArray(items)) {
+                items.forEach((item: any) => {
+                    if (item && item.entity) {
+                        item.visible = nextVisible;
+                        item.entity.enabled = nextVisible;
+                    }
+                });
+            }
+        });
+    }
+
+    if (dom.viewDebugLightsAllOn) {
+        dom.viewDebugLightsAllOn.addEventListener('click', () => {
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'LIGHT_TOGGLE_ALL', value: true });
+            } else {
+                applyLightToggleAll(global, true);
+            }
+        });
+    }
+
+    if (dom.viewDebugLightsAllOff) {
+        dom.viewDebugLightsAllOff.addEventListener('click', () => {
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'LIGHT_TOGGLE_ALL', value: false });
+            } else {
+                applyLightToggleAll(global, false);
+            }
+        });
+    }
+
+    // 单个局部亮灯区域：下拉选区域，点击「Toggle 区域灯」切换该区域绑定光源的开关
+    const viewDebugRegionSelect = dom.viewDebugRegionSelect as HTMLSelectElement | undefined;
+    const viewDebugToggleRegionLight = dom.viewDebugToggleRegionLight;
+    const refreshViewDebugRegionSelect = () => {
+        if (!viewDebugRegionSelect) return;
+        const bloom = (global.settings as any)?.postEffectSettings?.bloom;
+        const regions = (bloom?.localLightRegions as Array<{ id: string; name?: string; linkedLightId?: string }>) ?? [];
+        viewDebugRegionSelect.innerHTML = '';
+        const none = document.createElement('option');
+        none.value = '';
+        none.textContent = '（无）';
+        viewDebugRegionSelect.appendChild(none);
+        regions.forEach((r, i) => {
+            const opt = document.createElement('option');
+            opt.value = r.linkedLightId ?? '';
+            opt.textContent = r.name || `区域${i + 1}`;
+            viewDebugRegionSelect.appendChild(opt);
+        });
+        if (viewDebugToggleRegionLight) {
+            viewDebugToggleRegionLight.toggleAttribute('disabled', regions.length === 0 || !viewDebugRegionSelect.value);
+        }
+    };
+    if (viewDebugRegionSelect) {
+        viewDebugRegionSelect.addEventListener('change', () => {
+            if (viewDebugToggleRegionLight) {
+                viewDebugToggleRegionLight.toggleAttribute('disabled', !viewDebugRegionSelect.value);
+            }
+        });
+        events.on('loaded:changed', refreshViewDebugRegionSelect);
+        events.on('postEffect:changed', refreshViewDebugRegionSelect);
+        refreshViewDebugRegionSelect();
+    }
+    if (viewDebugToggleRegionLight) {
+        viewDebugToggleRegionLight.addEventListener('click', () => {
+            const linkedLightId = viewDebugRegionSelect?.value;
+            if (!linkedLightId) return;
+            const lighting = (global.settings as any)?.lighting;
+            const lights = lighting?.lights as Array<{ id?: string; enabled?: boolean }> | undefined;
+            const light = Array.isArray(lights) ? lights.find((l) => l && l.id === linkedLightId) : undefined;
+            const nextEnabled = light ? !(light.enabled !== false) : true;
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'LIGHT_TOGGLE', id: linkedLightId, value: nextEnabled });
+            } else {
+                applyLightToggle(global, linkedLightId, nextEnabled);
+            }
+        });
+    }
+
     // showEditUI 为 false 时也监听 editMode:changed，以便进入编辑模式时执行 initEditHistory 与快照逻辑（供 message-bridge 退出/保存用）
     if (config.showEditUI === false) {
         events.on('editMode:changed', updateEditModeUI);
