@@ -17,7 +17,11 @@ import {
     clearScenePlacedEntities,
     restoreSceneAssetsFromSettings
 } from './asset-placement-handler';
-import { restoreAnnotationsFromSettings } from './edit-history';
+import {
+    restoreAnnotationsFromSettings,
+    restoreLightingFromSettings,
+    restorePostEffectsFromSettings
+} from './edit-history';
 import type { ExperienceSettings } from './schemas/v2';
 import {
     applyLightGlobalSet,
@@ -175,6 +179,9 @@ const initPostMessageBridge = (global: Global) => {
                 clearScenePlacedEntities(global);
                 await restoreSceneAssetsFromSettings(global);
                 restoreAnnotationsFromSettings(global);
+                // 统一通过 helper 按当前 settings 重置 Lighting / NightMode / PostEffect
+                restoreLightingFromSettings(global);
+                restorePostEffectsFromSettings(global);
             }
             state.editMode = false;
             break;

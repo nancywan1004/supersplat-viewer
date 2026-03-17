@@ -3,6 +3,7 @@ import type { ExperienceSettings } from './schemas/v2';
 import { serializeExperienceSettings, applySettingsSnapshot } from './settings-serialize';
 import { clearScenePlacedEntities, restoreSceneAssetsFromSettings } from './asset-placement-handler';
 import type { AnnotationManager } from './annotation-toolbar/annotation-manager';
+import { updatePointLightsFromSettings } from './light';
 
 export type EditSnapshot = ExperienceSettings;
 
@@ -81,6 +82,43 @@ export function restoreAnnotationsFromSettings(global: Global): void {
     annotationManager.loadFromSettings();
 }
 
+/**
+ * 根据当前 settings 恢复灯光 / 场景整体亮度的运行时状态：
+ * - 点光 / 聚光灯：从 settings.lighting 重新推入运行时；
+ * - NightMode：按 nightMode.fade 重置整体亮度与天空盒；
+ * - 触发 lighting:changed，驱动相关监听方重新应用配置。
+ */
+export function restoreLightingFromSettings(global: Global): void {
+    const settings = global.settings as ExperienceSettings;
+
+    try {
+        updatePointLightsFromSettings(global);
+    } catch {
+        // ignore
+    }
+
+    try {
+        const nm = settings.nightMode as { fade?: number } | undefined;
+        const rawFade = nm && typeof nm.fade === 'number' && Number.isFinite(nm.fade) ? nm.fade : 0;
+        const fade = Math.max(-1, Math.min(1, rawFade));
+        (global.app as any).fire?.('nightFade:set', fade);
+    } catch {
+        // ignore
+    }
+
+    global.events.fire('lighting:changed');
+}
+
+/**
+ * 通知后处理管线（Bloom / Shadow / Grading 等）根据当前 settings 重新配置：
+ * - postEffect:changed：BloomController / Shadow 等按 settings 重建体积 / 阴影；
+ * - bloomLocalLightRegion:listChanged：局部亮灯区域列表与体积按 settings 重新同步。
+ */
+export function restorePostEffectsFromSettings(global: Global): void {
+    global.events.fire('postEffect:changed');
+    global.events.fire('bloomLocalLightRegion:listChanged');
+}
+
 export async function restoreSnapshot(global: Global, snapshot: EditSnapshot): Promise<void> {
     if (isRestoring) return;
 
@@ -90,9 +128,11 @@ export async function restoreSnapshot(global: Global, snapshot: EditSnapshot): P
         applySettingsSnapshot(global, snapshot);
         clearScenePlacedEntities(global);
         await restoreSceneAssetsFromSettings(global);
-        
         // Restore annotations from the snapshot
         restoreAnnotationsFromSettings(global);
+        // Restore lighting / night mode / post effects from the snapshot
+        restoreLightingFromSettings(global);
+        restorePostEffectsFromSettings(global);
     } finally {
         isRestoring = false;
         global.events.fire('editHistory:restoring', false);

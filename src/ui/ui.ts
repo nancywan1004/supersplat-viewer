@@ -6,7 +6,16 @@ import { isLodMetaFile } from '../loaders/lod-loader';
 import type { ExperienceSettings } from '../schemas/v2';
 import { serializeExperienceSettings, getComparableSettingsString, applySettingsSnapshot } from '../settings-serialize';
 import { clearScenePlacedEntities, restoreSceneAssetsFromSettings } from '../asset-placement-handler';
-import { initEditHistory, canUndo, canRedo, undo, redo } from '../edit-history';
+import {
+    initEditHistory,
+    canUndo,
+    canRedo,
+    undo,
+    redo,
+    restoreAnnotationsFromSettings,
+    restoreLightingFromSettings,
+    restorePostEffectsFromSettings
+} from '../edit-history';
 import { showExitEditConfirmModal } from './components/exit-edit-confirm-ui';
 import { initRevealUI } from './components/reveal-ui';
 import { initVideoExportUI } from './components/video-export-ui';
@@ -675,6 +684,11 @@ const initUI = (global: Global) => {
                         applySettingsSnapshot(global, editModeEnteredSettingsData);
                         clearScenePlacedEntities(global);
                         await restoreSceneAssetsFromSettings(global);
+                        // 恢复标注实体与 UI（保持与 message-bridge 下 EDIT_MODE_EXIT_DISCARD 一致）
+                        restoreAnnotationsFromSettings(global);
+                        // 统一通过 helper 按当前 settings 重置 Lighting / NightMode / PostEffect
+                        restoreLightingFromSettings(global);
+                        restorePostEffectsFromSettings(global);
                         state.editMode = false;
                     }
                 });
