@@ -230,7 +230,8 @@ class CameraManager {
         // - Orbit：限制 **camera.position** 在收缩后的 bbox 内（与 Fly 保持一致；避免两种模式边界不对齐）
         // - Fly：保持原球形硬边界兜底（防止飞行穿出场景太远）
         const cameraBoundsCfg = settings.cameraBounds;
-        const boundsEnabled = cameraBoundsCfg?.enabled !== false; // 默认启用
+        // 若 config.disableCameraBounds === true，则强制关闭相机边界约束
+        const boundsEnabled = !config.disableCameraBounds && cameraBoundsCfg?.enabled !== false; // 默认启用
 
         // 无动画时维持更"核心"的收缩范围；有动画时使用 animScaleX/animScaleY
         const targetScaleFactor = 0.5; // 非动画路径的固定缩放系数

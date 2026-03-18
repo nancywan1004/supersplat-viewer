@@ -922,6 +922,8 @@ export function initPostEffectUI(global: Global): () => void {
                 const sh = ensureShadow(settings);
                 const nextEnabled = !sh.enabled;
                 sendEditProtocolMessage({ type: 'SHADOW_SET', value: nextEnabled });
+                // 立即本地更新样式，避免父级尚未回写 settings 时勾选状态不变的错觉
+                shadowEnableCheck.classList.toggle('active', nextEnabled);
                 return;
             }
             const sh = ensureShadow(settings);

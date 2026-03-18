@@ -80,6 +80,12 @@ type Config = {
      *   主要用于 E2E 抓包对齐 docs 中的 postMessage 事件表（即使 showEditUI === true 也能强制走协议）
      */
     editUiTransport?: 'internal' | 'message-bridge';
+    /**
+     * 是否禁用相机边界约束（默认 false）。
+     * - false 或未设置：遵循 settings.cameraBounds.enabled（默认启用）
+     * - true：强制关闭 CameraManager 的 box 约束（orbit/fly 都不再被场景 bbox 限制）
+     */
+    disableCameraBounds?: boolean;
     webgpu: boolean;                            // use WebGPU device
     gpusort: boolean;                           // use GPU sorting for splats
 };
