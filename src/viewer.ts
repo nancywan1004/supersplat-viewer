@@ -46,6 +46,7 @@ import { updateShadowDistance } from './light';
 import { initAssetPlacementHandler, restoreSceneAssetsFromSettings } from './asset-placement-handler';
 import { initGizmoHandler } from './gizmo-handler';
 import { initAnnotationGizmoHandler } from './annotation-toolbar/annotation-gizmo-handler';
+import { initAnnotationSystem } from './annotation-toolbar/init-annotation-system';
 
 const gammaChunkGlsl = `
 vec3 prepareOutputFromGamma(vec3 gammaColor) {
@@ -441,8 +442,14 @@ class Viewer {
             applyScript.global = global;
             delete (app as any).__shadowApplyGlobal;
 
-            if (!config.noui && !(global as any).annotationManager) {
-                this.annotations = new Annotations(global, this.cameraFrame != null);
+            if (!config.noui) {
+                // showEditUI=false 时也使用可交互标注系统（AnnotationManager + AnnotationEntity），避免走只读 Annotations
+                // showEditUI=true 时 annotation-ui 会先创建 annotationManager，这里 initAnnotationSystem 会自动跳过
+                initAnnotationSystem(global);
+                // 兼容兜底：若没有 annotationManager（理论上不会），才创建只读 Annotations
+                if (!(global as any).annotationManager) {
+                    this.annotations = new Annotations(global, this.cameraFrame != null);
+                }
             }
 
             this.inputController = new InputController(global);
