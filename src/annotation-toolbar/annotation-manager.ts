@@ -249,6 +249,14 @@ export class AnnotationManager {
         pushEditHistory(this.global, 'annotation:deleted');
     }
 
+    private clearSelectionVisuals(id: string): void {
+        const annotation = this.annotations.get(id);
+        if (annotation) {
+            annotation.disableGizmo();
+            annotation.hideTooltip();
+        }
+    }
+
     /**
      * 选中标注
      *
@@ -263,9 +271,10 @@ export class AnnotationManager {
             return;
         }
 
-        // 如果已经选中其他标注，先取消选择
-        if (this.selectedAnnotationId && this.selectedAnnotationId !== id) {
-            this.deselectAnnotation();
+        // 如果已经选中其他标注：不要 fire annotation:deselected（否则底部“移动”会被重置），仅切换选中对象并迁移 Gizmo/状态
+        const prevId = this.selectedAnnotationId;
+        if (prevId && prevId !== id) {
+            this.clearSelectionVisuals(prevId);
         }
 
         const showGizmo = options?.showGizmo ?? false;
@@ -273,8 +282,9 @@ export class AnnotationManager {
         // 更新选中状态
         this.selectedAnnotationId = id;
 
-        // 仅当显式请求时启用 Transform Gizmo（符合「先点击热点、再点击移动按钮」才显示 Gizmo）
-        if (showGizmo) {
+        // 若标注移动模式已开启，则切换选中时保持 Gizmo 继续显示在新标注上
+        const mode = (this.global.state as any)?.annotationTransformMode ?? null;
+        if (showGizmo || mode === 'move') {
             annotation.enableGizmo();
         }
 
@@ -320,13 +330,7 @@ export class AnnotationManager {
         if (!this.selectedAnnotationId) {
             return;
         }
-
-        const annotation = this.annotations.get(this.selectedAnnotationId);
-
-        if (annotation) {
-            annotation.disableGizmo();
-            annotation.hideTooltip();
-        }
+        this.clearSelectionVisuals(this.selectedAnnotationId);
 
         // 清空选中状态
         this.selectedAnnotationId = null;

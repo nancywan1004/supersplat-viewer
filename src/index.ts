@@ -292,6 +292,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         // 标注相关状态
         annotationEditMode: false,
         selectedAnnotationId: null,
+        annotationTransformMode: null,
         annotationPlacementActive: false,
 
         // 光源编辑相关状态（环境模块）

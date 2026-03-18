@@ -1,5 +1,5 @@
 import type { Global } from '../types';
-import type { AssetTransformMode, EditLeftModule, LightTransformMode } from '../types';
+import type { AssetTransformMode, EditLeftModule, LightTransformMode, AnnotationTransformMode } from '../types';
 import { getEditUiTransport, sendEditProtocolMessage } from './edit-ui-transport';
 
 const TRANSFORM_MODES: { id: AssetTransformMode; label: string }[] = [
@@ -146,15 +146,13 @@ export function initEditBottomToolbarUI(global: Global): () => void {
         deleteBtn?.addEventListener('click', () => events.fire('assetEdit:delete'));
     };
 
-    let annotationMoveActive = false;
-
     const syncAnnotationMoveButton = () => {
         if (currentModule() !== 'annotation') return;
         const moveBtn = container.querySelector<HTMLButtonElement>('.edit-bottom-toolbar-btn[data-mode="move"]');
         if (!moveBtn) return;
         const annotationManager = (global as any).annotationManager;
         const hasSelection = annotationManager?.getSelectedAnnotation() != null;
-        const isActive = hasSelection && annotationMoveActive;
+        const isActive = hasSelection && ((state as any).annotationTransformMode === 'move');
         moveBtn.classList.toggle('active', isActive);
         moveBtn.setAttribute('aria-pressed', String(isActive));
     };
@@ -171,17 +169,18 @@ export function initEditBottomToolbarUI(global: Global): () => void {
             const selected = annotationManager.getSelectedAnnotation?.();
             if (!selected) return;
 
-            const nextActive = !annotationMoveActive;
-            annotationMoveActive = nextActive;
+            const current = ((state as any).annotationTransformMode as AnnotationTransformMode | null | undefined) ?? null;
+            const nextMode: AnnotationTransformMode | null = current === 'move' ? null : 'move';
+            (state as any).annotationTransformMode = nextMode;
 
             if (editUiTransport === 'message-bridge') {
-                if (nextActive) {
+                if (nextMode === 'move') {
                     sendEditProtocolMessage({ type: 'ANNOTATION_TRANSFORM_MODE', value: 'move' });
                 } else {
                     sendEditProtocolMessage({ type: 'ANNOTATION_TRANSFORM_MODE', value: null });
                 }
             } else {
-                if (nextActive) {
+                if (nextMode === 'move') {
                     annotationManager.enableGizmoForSelected?.();
                 } else if (annotationManager.disableGizmoForSelected) {
                     annotationManager.disableGizmoForSelected();
@@ -275,13 +274,13 @@ export function initEditBottomToolbarUI(global: Global): () => void {
 
     const onEditLeftModuleChanged = (newModule?: string) => {
         if (newModule !== 'annotation') {
-            annotationMoveActive = false;
+            (state as any).annotationTransformMode = null;
         }
         renderAndBind();
     };
 
     const onAnnotationDeselected = () => {
-        annotationMoveActive = false;
+        (state as any).annotationTransformMode = null;
         syncAnnotationMoveButton();
     };
 

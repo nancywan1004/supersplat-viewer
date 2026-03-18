@@ -330,6 +330,7 @@ const initPostMessageBridge = (global: Global) => {
             const am = g.annotationManager;
             if (!am) break;
             const mode = p.value === 'move' ? 'move' : null;
+            (state as any).annotationTransformMode = mode;
             if (mode === 'move') {
                 if (am.enableGizmoForSelected) {
                     am.enableGizmoForSelected();

@@ -45,6 +45,7 @@ type AssetTransformMode = 'move' | 'rotate' | 'scale';
 
 /** 光源变换模式（移动/旋转） */
 type LightTransformMode = 'move' | 'rotate' | null;
+type AnnotationTransformMode = 'move' | null;
 
 // configuration options are immutable at runtime
 type Config = {
@@ -128,6 +129,8 @@ type State = {
     annotationEditMode?: boolean;
     /** 当前选中的标注 ID */
     selectedAnnotationId?: string | null;
+    /** 标注变换模式（与标注模块底部「移动」按钮联动） */
+    annotationTransformMode?: AnnotationTransformMode | null;
     /** 是否处于标注放置模式 */
     annotationPlacementActive?: boolean;
     /** 当前选中的光源 ID（用于环境模块光照编辑、Gizmo 挂载与列表/场景联动） */
@@ -145,4 +148,4 @@ type Global = {
     camera: Entity;
 };
 
-export { CameraMode, InputMode, EditLeftModule, AssetTransformMode, LightTransformMode, Config, State, Global };
+export { CameraMode, InputMode, EditLeftModule, AssetTransformMode, LightTransformMode, AnnotationTransformMode, Config, State, Global };
