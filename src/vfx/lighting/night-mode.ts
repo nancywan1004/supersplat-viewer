@@ -709,6 +709,8 @@ class NightMode extends GsplatShaderEffect {
     /** 上次已 fire 的 nightFade，用于仅在 fade 变化时触发事件 */
     private _lastFiredNightFade: number | null = null;
     private manualFadeControl: boolean = true; // Slider-only control, no auto animation
+    /** Reveal/VFX 互斥接管期间：禁止 NightMode 往 gsplatModifyVS 写入，避免与 VFX shader 冲突 */
+    private suspendedByVfx: boolean = false;
 
     private fireNightFadeChanged(source: 'set' | 'exit' | 'request' | 'applyFromSettings' | 'forceReapply') {
         // 唯一事件：带来源信息（确定性区分 exit vs set）
@@ -727,11 +729,14 @@ class NightMode extends GsplatShaderEffect {
             const clampedValue = Math.max(-1, Math.min(1, value));
             this.manualFadeControl = true;
             this.nightFade = clampedValue;
-            if (Math.abs(this.nightFade) > 1e-6 && this.materialsApplied.size === 0 && this.splat?.gsplat) {
-                this.applyShaders();
-            }
-            if (this.materialsApplied.size > 0) {
-                this.updateEffect(this.effectTime, 0);
+            // VFX 期间仅记录与广播，不往材质写 shader（避免覆盖 VFX）
+            if (!this.suspendedByVfx) {
+                if (Math.abs(this.nightFade) > 1e-6 && this.materialsApplied.size === 0 && this.splat?.gsplat) {
+                    this.applyShaders();
+                }
+                if (this.materialsApplied.size > 0) {
+                    this.updateEffect(this.effectTime, 0);
+                }
             }
             this.fireNightFadeChanged('set');
         });
@@ -753,9 +758,18 @@ class NightMode extends GsplatShaderEffect {
 
         // 监听 reveal 等互斥效果接管 gsplatModifyVS 的信号：重置亮度为 0 并清空 shader 应用
         this.app.on('nightMode:exit', () => {
+            // 进入互斥阶段：完全挂起 NightMode 对 gsplatModifyVS 的写入
+            this.suspendedByVfx = true;
             this.nightFade = 0;
             this.manualFadeControl = true;
             this.materialsApplied.clear();
+            // 同时清掉局部亮灯/笔刷的 shader 需求，避免 updateEffect 重新 apply
+            this.bloomBrushActive = false;
+            this.bloomBrushMask = null;
+            this.committedVolumeTexture = null;
+            this.committedBrightness = 0;
+            this.committedVolumeEncodedBrightness = false;
+            this.committedTintVolumeTexture = null;
             this.fireNightFadeChanged('exit');
         });
 
@@ -778,6 +792,8 @@ class NightMode extends GsplatShaderEffect {
             this.manualFadeControl = true;
             this.nightFade = clampedValue;
             this.materialsApplied.clear();
+            // forceReapply 代表“互斥结束，允许恢复 NightMode”
+            this.suspendedByVfx = false;
             if (Math.abs(this.nightFade) > 1e-6 && this.splat?.gsplat) {
                 this.applyShaders();
             }
@@ -989,6 +1005,14 @@ class NightMode extends GsplatShaderEffect {
     }
 
     updateEffect(effectTime: number, dt: number) {
+        // Reveal/VFX 互斥期：确保 NightMode 不会重新 apply shader 覆盖 VFX
+        if (this.suspendedByVfx) {
+            if (this.materialsApplied.size > 0) {
+                this.materialsApplied.clear();
+                this.app.renderNextFrame = true;
+            }
+            return;
+        }
         const needShader = Math.abs(this.nightFade) > 1e-6
             || (this.committedVolumeTexture != null && (this.committedVolumeEncodedBrightness || Math.abs(this.committedBrightness) > 1e-6))
             || this.bloomBrushActive;
