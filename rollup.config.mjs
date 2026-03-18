@@ -344,7 +344,8 @@ const buildDist = {
   plugins: [
     cleanDistPlugin(), // 在构建开始时清空 dist 文件夹
     resolve(),
-    string({ include: ['**/*.html', '**/*.css', '**/*.js'] }),
+    // NOTE: 仅将源码中的静态文本资源作为字符串引入，避免误处理 node_modules 的 JS（会破坏第三方库的命名导出）
+    string({ include: ['src/**/*.html', 'src/**/*.css'], exclude: ['**/node_modules/**'] }),
     typescript({
       declaration: false,
       declarationMap: false,
