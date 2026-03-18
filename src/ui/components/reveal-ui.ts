@@ -1,6 +1,7 @@
 import type { Global } from '../../types';
 import { pushEditHistory } from '../../edit-history';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../../schemas/v2-custom';
+import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
 /** 需要 totalDuration / 时间轴 的 VFX 特效类型列表（同时被 reveal-ui / video-export-ui 使用） */
 export const TIMED_VFX_EFFECTS = [
@@ -74,6 +75,7 @@ const REVEAL_PANEL_HTML = (() => {
   </div>
   <div class="settingsRow">
     <button id="revealRestart" class="settingsButton" type="button">Restart Effect</button>
+    <button id="revealStop" class="settingsButton" type="button" title="强制停止当前特效播放（不改变已选特效类型配置）">Stop</button>
   </div>
   <div class="settingsRow">
     <div id="restartAnimTrackCheck" class="checkMark">✓</div>
@@ -90,6 +92,7 @@ const REVEAL_PANEL_HTML = (() => {
  */
 export function initRevealUI(global: Global): () => void {
     const { events, state } = global;
+    const editUiTransport = getEditUiTransport(global);
 
     const container = document.getElementById('revealPanelContainer');
     if (!container) return () => {};
@@ -98,6 +101,7 @@ export function initRevealUI(global: Global): () => void {
     const revealPanel = container.querySelector('#revealPanel') as HTMLElement;
     const revealType = container.querySelector('#revealType') as HTMLSelectElement | null;
     const revealRestart = container.querySelector('#revealRestart');
+    const revealStop = container.querySelector('#revealStop') as HTMLButtonElement | null;
     const totalDurationRow = container.querySelector('#totalDurationRow') as HTMLElement | null;
     const totalDuration = container.querySelector('#totalDuration') as HTMLInputElement | null;
     const effectTimelineRow = container.querySelector('#effectTimelineRow') as HTMLElement | null;
@@ -124,7 +128,11 @@ export function initRevealUI(global: Global): () => void {
     const onRevealTypeChange = (event: Event) => {
         const target = (event.target as HTMLSelectElement);
         const type = target.value as RevealType;
-        events.fire('revealConfigChanged', { type });
+        if (editUiTransport === 'message-bridge') {
+            sendEditProtocolMessage({ type: 'VFX_TYPE_SET', value: type });
+        } else {
+            events.fire('revealConfigChanged', { type });
+        }
         pushEditHistorySafe();
     };
 
@@ -141,7 +149,21 @@ export function initRevealUI(global: Global): () => void {
     };
 
     const onRevealRestartClick = () => {
-        events.fire('revealRestart', restartAnimTrackEnabled);
+        if (editUiTransport === 'message-bridge') {
+            sendEditProtocolMessage({ type: 'VFX_RESTART', restartAnim: restartAnimTrackEnabled });
+        } else {
+            events.fire('revealRestart', restartAnimTrackEnabled);
+        }
+    };
+
+    const onRevealStopClick = () => {
+        // 强制停播但保留配置：不改 type，只停当前播放并恢复 nightFade
+        if (editUiTransport === 'message-bridge') {
+            sendEditProtocolMessage({ type: 'VFX_EXIT' });
+        } else {
+            events.fire('vfxExit');
+        }
+        pushEditHistorySafe();
     };
 
     let isDraggingTimeline = false;
@@ -218,6 +240,11 @@ export function initRevealUI(global: Global): () => void {
             if (revealType.value !== currentType) {
                 revealType.value = currentType;
             }
+            // Stop 按钮：只有当前确实在播放（vfxActive=true）且类型非 none 时才可用
+            if (revealStop) {
+                const active = (global.state as any)?.vfxActive === true;
+                revealStop.disabled = !active || currentType === 'none';
+            }
             const showTotalDuration = isTimedVfxType(currentType);
             if (totalDurationRow) {
                 if (showTotalDuration) {
@@ -272,6 +299,7 @@ export function initRevealUI(global: Global): () => void {
     revealType?.addEventListener('change', onRevealTypeChange);
     totalDuration?.addEventListener('change', onTotalDurationChange);
     revealRestart?.addEventListener('click', onRevealRestartClick);
+    revealStop?.addEventListener('click', onRevealStopClick);
     effectPlayPause?.addEventListener('click', onEffectPlayPauseClick);
     effectTimeline?.addEventListener('pointerdown', onEffectTimelinePointerDown);
     effectTimeline?.addEventListener('input', onEffectTimelineInput);
@@ -294,6 +322,7 @@ export function initRevealUI(global: Global): () => void {
         revealType?.removeEventListener('change', onRevealTypeChange);
         totalDuration?.removeEventListener('change', onTotalDurationChange);
         revealRestart?.removeEventListener('click', onRevealRestartClick);
+        revealStop?.removeEventListener('click', onRevealStopClick);
         effectPlayPause?.removeEventListener('click', onEffectPlayPauseClick);
         effectTimeline?.removeEventListener('pointerdown', onEffectTimelinePointerDown);
         effectTimeline?.removeEventListener('input', onEffectTimelineInput);

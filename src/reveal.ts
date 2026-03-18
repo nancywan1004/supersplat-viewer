@@ -107,6 +107,11 @@ export class RevealController {
             this.updateConfig(newConfig);
         });
 
+        // 父级协议：VFX_EXIT（强制停播但保留配置）
+        events.on('vfxExit', () => {
+            this.forceStopVfx('VFX_EXIT');
+        });
+
         // 统一监听重启请求（所有效果类型）
         events.on('revealRestart', (restartAnimTrack?: boolean) => {
             console.log('Reveal restart requested via event', restartAnimTrack ? '(with animTrack)' : '(without animTrack)');
@@ -808,6 +813,8 @@ export class RevealController {
         // 仅在目标类型非 none 时才接管；none 代表「退出特效」，应恢复/保留 NightMode 当前状态。
         if (effectName !== 'none') {
             this.inVfx = true;
+            // 进入播放/启用阶段（语义：当前有特效在运行，供 SaaS/父级状态读取）
+            (this.global.state as any).vfxActive = true;
             // 首次进入 VFX 时记录当前 nightFade（以运行时 currentNightFade 为准，作为「播放前亮度」快照）
             if (this.originalNightFade === null) {
                 this.originalNightFade = this.currentNightFade;
@@ -886,6 +893,11 @@ export class RevealController {
             this.global.events.fire('effectTime:changed', 0);
             this.global.events.fire('effectPlayPause:changed', false);
         }
+        else {
+            // type='none' 或创建失败：视为当前无特效在运行
+            (this.global.state as any).vfxActive = false;
+            this.inVfx = false;
+        }
         
         // 触发事件以更新 UI（统一使用 revealType:changed）
         this.global.events.fire('revealType:changed', effectName);
@@ -903,6 +915,7 @@ export class RevealController {
         const fade = this.originalNightFade;
         this.originalNightFade = null;
         this.inVfx = false;
+        (this.global.state as any).vfxActive = false;
 
         const settingsAny = this.global.settings as any;
         if (!settingsAny.nightMode) {
@@ -915,6 +928,25 @@ export class RevealController {
         // 但 NightMode 的 materialsApplied 不知情，nightFade:set 只会 updateEffect 不会重新 apply shader。
         // 必须用 nightMode:forceReapply 先清 materialsApplied 再重新 apply，才能真正恢复 NightMode shader。
         this.global.app.fire('nightMode:forceReapply', fade);
+    }
+
+    /** 强制停止当前特效播放，但不改 this.config.type（保留配置以便后续重播/保存） */
+    private forceStopVfx(reason: string) {
+        // 停掉脚本（会触发 removeShaders），并恢复 NightMode
+        this.destroyAllRevealScripts();
+        this.currentScript = null;
+        this.isTiming = false;
+        this.effectStartTime = null;
+        this.effectEndTime = null;
+        this.effectPaused = false;
+
+        // 若之前进入过 VFX，则恢复进入前的 nightFade（或 VFX 中用户 set 的值）
+        this.restoreNightModeIfNeeded(reason);
+
+        // 标记：当前不在播放中
+        this.inVfx = false;
+        (this.global.state as any).vfxActive = false;
+        // 注意：不改 config.type / settings.revealEffect.type / state.vfxType
     }
 
     /**

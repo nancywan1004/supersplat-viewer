@@ -452,13 +452,9 @@ export function applyVfxTypeSet(global: Global, value: string): void {
     global.events.fire('revealConfigChanged', { type: value });
 }
 
-/** VFX_EXIT：关闭当前特效，state.vfxActive=false、vfxType='none'，并触发 revealConfigChanged({ type: 'none' }) */
+/** VFX_EXIT：强制停止当前特效播放，但保留配置（不改 settings.revealEffect.type）。 */
 export function applyVfxExit(global: Global): void {
-    const settings = global.settings as ExperienceSettings;
-    ensureRevealEffect(settings);
-    const rev = settings.revealEffect!;
-    (rev as Record<string, unknown>).type = 'none';
     (global.state as Record<string, unknown>).vfxActive = false;
-    (global.state as Record<string, unknown>).vfxType = 'none';
-    global.events.fire('revealConfigChanged', { type: 'none' });
+    // 交由 RevealController 执行停播与恢复 NightMode；不触碰 revealEffect.type（保证后续保存仍保留已选特效）
+    global.events.fire('vfxExit');
 }
