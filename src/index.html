@@ -44,10 +44,10 @@
                 unified: url.searchParams.has('unified'),
                 aa: url.searchParams.has('aa'),
                 noreveal: url.searchParams.has('noreveal'),
-                noBottomUI: false,  // url.searchParams.has('noBottomUI')
+                noBottomUI: true,  // url.searchParams.has('noBottomUI')
                 splatMeshUrl,
                 allowEditMode: !url.searchParams.has('noEditMode'),
-                showEditUI: url.searchParams.get('showEditUI') !== 'false',
+                showEditUI: false,
                 trackEditHistory: url.searchParams.get('trackEditHistory') !== 'false',
                 editUiTransport: url.searchParams.get('editUiTransport') === 'message-bridge' ? 'message-bridge' : 'internal',
                 nofx: url.searchParams.has('nofx'),
@@ -60,6 +60,11 @@
                 config: sseConfig,
                 settings: fetch(settingsUrl).then(response => response.json())
             };
+
+            // showEditUI=false 时：在首屏渲染前给 <html> 加类，避免顶栏按钮闪现
+            if (sseConfig.showEditUI === false) {
+                document.documentElement.classList.add('hide-edit-ui');
+            }
 
             // 如果noBottomUI开启，立即隐藏controlsWrap，避免初始化时显示
             if (sseConfig.noBottomUI) {
