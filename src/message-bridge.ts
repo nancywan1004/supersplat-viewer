@@ -62,7 +62,7 @@ type InboundPayload =
     | { type: 'EDIT_UNDO' }
     | { type: 'EDIT_REDO' }
     | { type: 'SETTINGS_SAVE' }
-    | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule }
+    | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule | null }
     | { type: 'ASSET_SHOW_HIDE_SET'; value?: boolean }
     | { type: 'ASSET_PLACE'; value?: AssetLibraryItem }
     | { type: 'ASSET_SELECT'; id?: string | null }
@@ -154,9 +154,9 @@ const initPostMessageBridge = (global: Global) => {
         case 'EDIT_MODE_ENTER':
             if (config.allowEditMode !== false) {
                 state.editMode = true;
-                // 父级触发进入编辑模式时，同样重置左侧模块为默认 asset
-                state.editLeftModule = 'asset';
-                events.fire('editLeftModule:changed', 'asset');
+                // 父级触发进入编辑模式时：默认不选中任何模块（null）
+                state.editLeftModule = null;
+                events.fire('editLeftModule:changed', null);
                 setBaseline();
             }
             break;
@@ -168,9 +168,9 @@ const initPostMessageBridge = (global: Global) => {
             if (value && config.allowEditMode === false) break;
             state.editMode = !!p.value;
             if (value) {
-                // 通过 EDIT_MODE_SET 进入编辑模式时，也重置左侧模块为默认 asset
-                state.editLeftModule = 'asset';
-                events.fire('editLeftModule:changed', 'asset');
+                // 通过 EDIT_MODE_SET 进入编辑模式时：默认不选中任何模块（null）
+                state.editLeftModule = null;
+                events.fire('editLeftModule:changed', null);
                 setBaseline();
                 if (config.trackEditHistory) {
                     const { canUndo, canRedo } = await import('./edit-history');
@@ -215,7 +215,12 @@ const initPostMessageBridge = (global: Global) => {
             break;
         }
         case 'EDIT_MODULE_SET':
-            if (p.value != null && typeof p.value === 'string') {
+            if (p.value == null) {
+                state.editLeftModule = null;
+                events.fire('editLeftModule:changed', null);
+                break;
+            }
+            if (typeof p.value === 'string') {
                 const valid: EditLeftModule[] = ['gs', 'asset', 'annotation', 'environment', 'camera', 'effects'];
                 if (valid.includes(p.value as EditLeftModule)) {
                     state.editLeftModule = p.value as EditLeftModule;

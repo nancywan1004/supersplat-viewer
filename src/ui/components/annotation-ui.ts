@@ -250,7 +250,7 @@ export function initAnnotationUI(global: Global): () => void {
     events.on('editMode:changed', onEditModeChanged);
 
     /** 切换模块时：进入标注模块默认选中列表中第一项（不自动显示 Gizmo）；离开时取消选中与 Gizmo、取消放置/编辑 */
-    const onEditLeftModuleChanged = (newModule: string) => {
+    const onEditLeftModuleChanged = (newModule: string | null) => {
         if (newModule === 'annotation') {
             const all = annotationManager.getAllAnnotations();
             if (all.length > 0 && !annotationManager.getSelectedAnnotation()) {
@@ -283,7 +283,7 @@ export function initAnnotationUI(global: Global): () => void {
         annotationManager.deselectAnnotation();
         updateList();
     };
-    events.on('editLeftModule:changed', onEditLeftModuleChanged);
+    events.on('editLeftModule:changed', onEditLeftModuleChanged as any);
 
     const onAnnotationNavigate = (ann: { id?: string }) => {
         const id = ann?.id;
@@ -314,7 +314,7 @@ export function initAnnotationUI(global: Global): () => void {
         events.off('annotationEdit:show', onAnnotationEditShow);
         events.off('controlsHidden:changed', onControlsHiddenChanged);
         events.off('editMode:changed', onEditModeChanged);
-        events.off('editLeftModule:changed', onEditLeftModuleChanged);
+        events.off('editLeftModule:changed', onEditLeftModuleChanged as any);
         events.off('annotation.navigate', onAnnotationNavigate);
         annotationUI.destroy();
         annotationManager.destroy();

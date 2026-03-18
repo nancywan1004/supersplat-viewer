@@ -77,20 +77,29 @@ export function initEditLeftToolbarUI(global: Global): () => void {
 
     const items = Array.from(container.querySelectorAll<HTMLElement>('.edit-left-toolbar-item'));
 
-    const current = (): EditLeftModule => state.editLeftModule ?? 'asset';
+    const current = (): EditLeftModule | null => (state.editLeftModule ?? null);
 
-    const setActive = (id: EditLeftModule) => {
+    const syncActiveClasses = (id: EditLeftModule | null) => {
+        items.forEach((el) => {
+            const active = id != null && el.getAttribute('data-module') === id;
+            el.classList.toggle('active', active);
+            el.setAttribute('aria-selected', String(active));
+        });
+    };
+
+    const setActive = (id: EditLeftModule | null) => {
         if (editUiTransport === 'message-bridge') {
-            sendEditProtocolMessage({ type: 'EDIT_MODULE_SET', value: id });
+            if (id == null) {
+                // 不带 value：表示清空模块选择
+                sendEditProtocolMessage({ type: 'EDIT_MODULE_SET' });
+            } else {
+                sendEditProtocolMessage({ type: 'EDIT_MODULE_SET', value: id });
+            }
         } else {
             state.editLeftModule = id;
             events.fire('editLeftModule:changed', id);
         }
-        items.forEach((el) => {
-            const active = el.getAttribute('data-module') === id;
-            el.classList.toggle('active', active);
-            el.setAttribute('aria-selected', String(active));
-        });
+        syncActiveClasses(id);
     };
 
     items.forEach((el) => {
@@ -99,11 +108,15 @@ export function initEditLeftToolbarUI(global: Global): () => void {
         el.classList.toggle('active', isActive);
         el.setAttribute('aria-selected', String(isActive));
 
-        const handleClick = () => setActive(id);
+        const handleClick = () => {
+            const c = current();
+            setActive(c === id ? null : id);
+        };
         const handleKey = (e: KeyboardEvent) => {
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                setActive(id);
+                const c = current();
+                setActive(c === id ? null : id);
             }
         };
 
@@ -112,16 +125,11 @@ export function initEditLeftToolbarUI(global: Global): () => void {
     });
 
     const onEditLeftModuleChanged = () => {
-        const c = current();
-        items.forEach((el) => {
-            const active = el.getAttribute('data-module') === c;
-            el.classList.toggle('active', active);
-            el.setAttribute('aria-selected', String(active));
-        });
+        syncActiveClasses(current());
     };
     events.on('editLeftModule:changed', onEditLeftModuleChanged);
 
-    setActive(current());
+    syncActiveClasses(current());
 
     return () => {
         events.off('editLeftModule:changed', onEditLeftModuleChanged);

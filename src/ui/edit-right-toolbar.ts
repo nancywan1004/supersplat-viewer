@@ -104,7 +104,7 @@ export function initEditRightToolbarUI(global: Global): () => void {
 
     container.innerHTML = EDIT_RIGHT_TOOLBAR_HTML;
 
-    const current = (): EditLeftModule => state.editLeftModule ?? 'environment';
+    const current = (): EditLeftModule | null => (state.editLeftModule ?? null);
 
     const expandSubpanelsForModule = (moduleId: EditLeftModule) => {
         const pairs = SUBPANEL_PAIRS_BY_MODULE[moduleId];
@@ -119,19 +119,24 @@ export function initEditRightToolbarUI(global: Global): () => void {
         });
     };
 
-    const showPanel = (moduleId: EditLeftModule) => {
+    const showPanel = (moduleId: EditLeftModule | null) => {
         RIGHT_PANEL_IDS.forEach((id) => {
             const panel = document.getElementById(PANEL_ID_BY_MODULE[id]);
-            if (panel) {
-                panel.classList.toggle('hidden', id !== moduleId);
+            if (!panel) return;
+            if (moduleId == null) {
+                panel.classList.add('hidden');
+                return;
             }
+            panel.classList.toggle('hidden', id !== moduleId);
         });
-        expandSubpanelsForModule(moduleId);
+        if (moduleId != null) {
+            expandSubpanelsForModule(moduleId);
+        }
     };
 
     showPanel(current());
 
-    const onEditLeftModuleChanged = (_id: EditLeftModule) => {
+    const onEditLeftModuleChanged = (_id: EditLeftModule | null) => {
         showPanel(current());
     };
     events.on('editLeftModule:changed', onEditLeftModuleChanged);

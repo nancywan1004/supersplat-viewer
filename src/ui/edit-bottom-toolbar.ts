@@ -82,11 +82,15 @@ export function initEditBottomToolbarUI(global: Global): () => void {
         container.classList.add('edit-bottom-toolbar');
     }
 
-    const currentModule = (): EditLeftModule => state.editLeftModule ?? 'asset';
+    const currentModule = (): EditLeftModule | null => (state.editLeftModule ?? null);
     const currentTransformMode = (): AssetTransformMode | undefined => state.assetTransformMode;
 
     const renderAndBind = () => {
         const module = currentModule();
+        if (module == null) {
+            container.innerHTML = '';
+            return;
+        }
         container.innerHTML = getToolbarHTML(module);
 
         if (module === 'asset') {
@@ -272,7 +276,7 @@ export function initEditBottomToolbarUI(global: Global): () => void {
         syncLightModeButtons();
     };
 
-    const onEditLeftModuleChanged = (newModule?: string) => {
+    const onEditLeftModuleChanged = (newModule?: string | null) => {
         if (newModule !== 'annotation') {
             (state as any).annotationTransformMode = null;
         }

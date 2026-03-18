@@ -536,9 +536,9 @@ const initUI = (global: Global) => {
     const updateEditModeUI = () => {
         const inEdit = state.editMode;
         if (inEdit) {
-            // 每次进入编辑模式时重置左侧模块到默认值（asset），而不是沿用上次退出前的模块
-            state.editLeftModule = 'asset';
-            events.fire('editLeftModule:changed', 'asset');
+            // 每次进入编辑模式时默认不选中任何模块（null）
+            state.editLeftModule = null;
+            events.fire('editLeftModule:changed', null);
 
             const initialSnapshot = serializeExperienceSettings(global);
             initEditHistory(global, initialSnapshot);
@@ -554,7 +554,9 @@ const initUI = (global: Global) => {
                 leftMount.classList.toggle('hidden', !inEdit);
             }
             if (dom.rightToolBar) {
-                dom.rightToolBar.classList.toggle('hidden', !inEdit);
+                // editLeftModule === null 时：不显示任何模块面板
+                const showRight = inEdit && state.editLeftModule != null;
+                dom.rightToolBar.classList.toggle('hidden', !showRight);
             }
             const bottomMount = document.getElementById('editBottomToolbarMount');
             if (bottomMount) {
@@ -814,6 +816,11 @@ const initUI = (global: Global) => {
                     || state.editLeftModule === 'annotation'
                     || state.editLeftModule === 'environment';
                 bottomMount.classList.toggle('hidden', !showBottomBar);
+            }
+            // 右侧面板：null 表示未选模块 => 隐藏右侧栏
+            if (dom.rightToolBar) {
+                const showRight = state.editMode && state.editLeftModule != null;
+                dom.rightToolBar.classList.toggle('hidden', !showRight);
             }
             // 进入/离开环境模块时，根据当前开关状态刷新光源可视化
             if (state.editMode) {

@@ -262,7 +262,7 @@ export function bindAnnotationSettings(root: HTMLElement | null, global: Global)
 
     const onAnnotationsChanged = () => updateUI();
     events.on('annotations:changed', onAnnotationsChanged);
-    const onEditLeftModuleChanged = (moduleId: string) => {
+    const onEditLeftModuleChanged = (moduleId: string | null) => {
         if (annotationPlacementActive && moduleId !== 'annotation') {
             annotationPlacementActive = false;
             pendingPlacementPosition = null;

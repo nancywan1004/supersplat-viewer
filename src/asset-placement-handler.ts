@@ -418,7 +418,7 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
         pushEditHistory(global, 'delete asset');
     };
 
-    const onEditLeftModuleChanged = (newModule: string) => {
+    const onEditLeftModuleChanged = (newModule: string | null) => {
         if (newModule === 'asset') {
             // 进入资产模块：默认选中场景中第一个 entity（若有）；不自动显示 Gizmo（需用户点击底部移动/旋转/缩放）
             const list = state.scenePlacedEntities ?? [];
@@ -453,7 +453,7 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
     events.on('assetEdit:copy', onCopy);
     events.on('assetEdit:delete', onDelete);
     events.on('assetPlacement:place', onPlaceFromProtocol);
-    events.on('editLeftModule:changed', onEditLeftModuleChanged);
+        events.on('editLeftModule:changed', onEditLeftModuleChanged as any);
 
     return () => {
         canvas.removeEventListener('pointerdown', onPointerDown);
@@ -464,6 +464,6 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
         events.off('assetEdit:copy', onCopy);
         events.off('assetEdit:delete', onDelete);
         events.off('assetPlacement:place', onPlaceFromProtocol);
-        events.off('editLeftModule:changed', onEditLeftModuleChanged);
+        events.off('editLeftModule:changed', onEditLeftModuleChanged as any);
     };
 }

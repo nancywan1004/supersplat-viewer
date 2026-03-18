@@ -115,7 +115,8 @@ type State = {
     vfxType: 'none' | 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch';  // current effect type (includes reveal and VFX)
     syncAnimTrackOnExport?: boolean;           // 导出 VFX 视频时是否同步重播动画轨道（由 reveal-ui 设置，video-export-ui 读取）
     editMode: boolean;                         // true = 编辑模式（显示 rightToolBar），false = 观看模式
-    editLeftModule?: EditLeftModule;           // 左侧工具箱当前模块，默认 'environment'
+    /** 左侧工具箱当前模块；null 表示不选中任何模块 */
+    editLeftModule?: EditLeftModule | null;
     assetTransformMode?: AssetTransformMode;   // 资产变换模式，默认 'move'
     /** 已上传的资产库列表 */
     uploadedAssets?: AssetLibraryItem[];
