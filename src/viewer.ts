@@ -442,15 +442,19 @@ class Viewer {
             applyScript.global = global;
             delete (app as any).__shadowApplyGlobal;
 
-            if (!config.noui) {
+            // 标注系统初始化时机：
+            // - 若有 reveal / VFX（开场播放），则等 revealComplete 后再初始化，避免动画期间热点/tooltip 干扰观感
+            // - 否则加载完成后立即初始化
+            const initAnnotations = () => {
+                if (config.noui) return;
                 // showEditUI=false 时也使用可交互标注系统（AnnotationManager + AnnotationEntity），避免走只读 Annotations
                 // showEditUI=true 时 annotation-ui 会先创建 annotationManager，这里 initAnnotationSystem 会自动跳过
                 initAnnotationSystem(global);
-                // 兼容兜底：若没有 annotationManager（理论上不会），才创建只读 Annotations
+                // 兜底：若没有 annotationManager，才创建只读 Annotations
                 if (!(global as any).annotationManager) {
                     this.annotations = new Annotations(global, this.cameraFrame != null);
                 }
-            }
+            };
 
             this.inputController = new InputController(global);
             
@@ -492,6 +496,11 @@ class Viewer {
                         this.nightModeScript.applyFromSettings({ enabled: nightCfgAfterReveal.enabled, fade });
                     }
                 });
+                // reveal 播完再初始化标注
+                events.once('revealComplete', initAnnotations);
+            } else {
+                // 无 reveal：立即初始化标注
+                initAnnotations();
             }
             
             // Initialize night mode script on root entity
