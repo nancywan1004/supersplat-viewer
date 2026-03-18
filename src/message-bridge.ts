@@ -23,6 +23,7 @@ import {
     restorePostEffectsFromSettings
 } from './edit-history';
 import type { ExperienceSettings } from './schemas/v2';
+import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import {
     applyLightGlobalSet,
     applyLightAdd,
@@ -465,7 +466,7 @@ const initPostMessageBridge = (global: Global) => {
             const resolution = { width: 1920, height: 1080 };
             const width = resolution.width % 2 === 0 ? resolution.width : resolution.width - 1;
             const height = resolution.height % 2 === 0 ? resolution.height : resolution.height - 1;
-            const totalDuration = global.settings?.revealEffect?.totalDuration ?? 20;
+            const totalDuration = global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
             const videoSettings = {
                 startFrame: 0,
                 endFrame: 0,

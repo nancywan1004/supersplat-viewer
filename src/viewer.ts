@@ -213,7 +213,7 @@ class Viewer {
             this.configureCamera(global.settings);
             app.renderNextFrame = true;
         });
-        app.on('nightFade:changed', () => {
+        app.on('nightFade:changedDetailed', () => {
             this.configureCamera(global.settings);
             app.renderNextFrame = true;
         });

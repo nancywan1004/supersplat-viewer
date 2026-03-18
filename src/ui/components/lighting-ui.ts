@@ -145,15 +145,18 @@ export function initLightingUI(global: Global): () => void {
         nightFadeSlider.addEventListener('change', () => {
             pushEditHistorySafe();
         });
-        //events.on('nightFade:changed', setSliderDisplay);
-        global.app.on('nightFade:changed', setSliderDisplay);
+        global.app.on('nightFade:changedDetailed', (payload: { value: number }) => {
+            if (payload && typeof payload.value === 'number' && Number.isFinite(payload.value)) {
+                setSliderDisplay(payload.value);
+            }
+        });
         ensureNightModeSettings();
         const nmInit = (global.settings as any).nightMode;
         const initialFade = typeof nmInit.fade === 'number' && Number.isFinite(nmInit.fade)
             ? Math.max(-1, Math.min(1, nmInit.fade))
             : 0;
         setSliderDisplay(initialFade);
-        // 初始值已从 settings 读取；firstFrame 时 viewer 会 applyFromSettings 并触发 nightFade:changed，无需再 request
+        // 初始值已从 settings 读取；firstFrame 时 viewer 会 applyFromSettings 并触发 nightFade:changedDetailed，无需再 request
     }
 
     // Show lights in scene

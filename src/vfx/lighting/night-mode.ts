@@ -706,9 +706,14 @@ class NightMode extends GsplatShaderEffect {
     dirLightScale: number = 0.4;
 
     private nightFade: number = 0;
-    /** 上次已 fire 的 nightFade，用于仅在 fade 变化时触发 nightFade:changed */
+    /** 上次已 fire 的 nightFade，用于仅在 fade 变化时触发事件 */
     private _lastFiredNightFade: number | null = null;
     private manualFadeControl: boolean = true; // Slider-only control, no auto animation
+
+    private fireNightFadeChanged(source: 'set' | 'exit' | 'request' | 'applyFromSettings' | 'forceReapply') {
+        // 唯一事件：带来源信息（确定性区分 exit vs set）
+        this.app.fire('nightFade:changedDetailed', { value: this.nightFade, source });
+    }
 
     initialize() {
         // Override initialization to work with external gsplat entity
@@ -728,8 +733,7 @@ class NightMode extends GsplatShaderEffect {
             if (this.materialsApplied.size > 0) {
                 this.updateEffect(this.effectTime, 0);
             }
-            this.app.fire('nightFade:changed', this.nightFade);
-            this._lastFiredNightFade = this.nightFade;
+            this.fireNightFadeChanged('set');
         });
 
         this.on('enable', () => {
@@ -752,7 +756,7 @@ class NightMode extends GsplatShaderEffect {
             this.nightFade = 0;
             this.manualFadeControl = true;
             this.materialsApplied.clear();
-            this.app.fire('nightFade:changed', 0);
+            this.fireNightFadeChanged('exit');
         });
 
         if (this.splat?.gsplat) {
@@ -763,7 +767,24 @@ class NightMode extends GsplatShaderEffect {
         }
 
         this.app.on('nightFade:request', () => {
-            this.app.fire('nightFade:changed', this.nightFade);
+            this.fireNightFadeChanged('request');
+        });
+
+        // VFX 播放结束后，其 GsplatShaderEffect.disable 会从材质上删掉 gsplatModifyVS，
+        // 但 NightMode 的 materialsApplied 并不知情，导致后续 nightFade:set 只更新 uniform 而不重新 apply shader。
+        // nightMode:forceReapply 先清空 materialsApplied，再设 fade 并重新 apply，保证材质上有正确的 shader。
+        this.app.on('nightMode:forceReapply', (value: number) => {
+            const clampedValue = Math.max(-1, Math.min(1, value));
+            this.manualFadeControl = true;
+            this.nightFade = clampedValue;
+            this.materialsApplied.clear();
+            if (Math.abs(this.nightFade) > 1e-6 && this.splat?.gsplat) {
+                this.applyShaders();
+            }
+            if (this.materialsApplied.size > 0) {
+                this.updateEffect(this.effectTime, 0);
+            }
+            this.fireNightFadeChanged('forceReapply');
         });
     }
 
@@ -1139,10 +1160,10 @@ class NightMode extends GsplatShaderEffect {
         this.app.scene.skyboxIntensity = targetSkyboxIntensity;
 
         // 仅在 fade 变化时 fire，避免每帧触发 configureCamera
+        // 这里不再发旧的 nightFade:changed(number)，统一走 detailed 事件
         if (this._lastFiredNightFade !== this.nightFade) {
             this.app.fire('nightFade', this.nightFade);
-            this.app.fire('nightFade:changed', this.nightFade);
-            this._lastFiredNightFade = this.nightFade;
+            this.fireNightFadeChanged('request');
         }
 
         // Always request render to ensure state changes are visible
@@ -1159,8 +1180,8 @@ class NightMode extends GsplatShaderEffect {
         if (this.materialsApplied.size > 0) {
             this.updateEffect(this.effectTime, 0);
         }
-        this.app.fire('nightFade:changed', this.nightFade);
-        this._lastFiredNightFade = this.nightFade;
+        // setNightFade 是内部 API：明确标注为 set
+        this.fireNightFadeChanged('set');
     }
 
     /**
@@ -1187,8 +1208,7 @@ class NightMode extends GsplatShaderEffect {
         if (this.materialsApplied.size > 0) {
             this.updateEffect(this.effectTime, 0);
         }
-        this.app.fire('nightFade:changed', this.nightFade);
-        this._lastFiredNightFade = this.nightFade;
+        this.fireNightFadeChanged('applyFromSettings');
     }
 
     /** Whether brightness effect is active (|fade| > 0), e.g. for Bloom Brush coupling */

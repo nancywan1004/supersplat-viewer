@@ -1,5 +1,6 @@
 import { BufferTarget, EncodedPacket, EncodedVideoPacketSource, MkvOutputFormat, MovOutputFormat, Mp4OutputFormat, Output, StreamTarget, WebMOutputFormat } from 'mediabunny';
 import { Global } from '../types';
+import { DEFAULT_VFX_TOTAL_DURATION } from '../schemas/v2-custom';
 import {
     EventHandler,
     Vec3,
@@ -893,10 +894,10 @@ export const initVideoExport = (global: Global): void => {
         const { frameRate, width, height, syncAnimTrack } = settings;
         const evenWidth = width % 2 === 0 ? width : width - 1;
         const evenHeight = height % 2 === 0 ? height : height - 1;
-        const totalDuration = settings.totalDuration ?? global.settings?.revealEffect?.totalDuration ?? 20.0;
+        const totalDuration = settings.totalDuration ?? global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
         const includeVfx = settings.includeVfx !== false;
         // 不包含 VFX 时固定为「VFX 自身总时长」的最后一帧，这样整段视频都能看到完整效果状态（Timed/非 Timed 一致）
-        const vfxTotalDuration = global.settings?.revealEffect?.totalDuration ?? 20.0;
+        const vfxTotalDuration = global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
         const totalFrames = Math.ceil(totalDuration * frameRate);
         const frameInterval = 1.0 / frameRate;
 
@@ -1030,10 +1031,10 @@ export const initVideoExport = (global: Global): void => {
         const { frameRate, width, height, bitrate, syncAnimTrack } = videoSettings;
         const evenWidth = width % 2 === 0 ? width : width - 1;
         const evenHeight = height % 2 === 0 ? height : height - 1;
-        const totalDuration = videoSettings.totalDuration ?? global.settings?.revealEffect?.totalDuration ?? 20.0;
+        const totalDuration = videoSettings.totalDuration ?? global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
         const includeVfx = videoSettings.includeVfx !== false && !videoSettings.fixVfxAtEnd;
         // 不包含 VFX 时固定为「VFX 自身总时长」的最后一帧，整段视频显示完整效果状态
-        const vfxTotalDuration = global.settings?.revealEffect?.totalDuration ?? 20.0;
+        const vfxTotalDuration = global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
         const totalFrames = Math.ceil(totalDuration * frameRate);
         const frameInterval = 1.0 / frameRate;
         const frameTimeMs = 1000 / frameRate;
@@ -1126,7 +1127,7 @@ export const initVideoExport = (global: Global): void => {
     const performVideoExport = async (videoSettings: VideoSettings, fileStream: FileSystemWritableFileStream | undefined): Promise<boolean> => {
         const { startFrame, endFrame, frameRate, width, height, bitrate } = videoSettings;
         const profiler = new ExportProfiler();
-        const totalDuration = videoSettings.totalDuration ?? global.settings?.revealEffect?.totalDuration ?? 20.0;
+        const totalDuration = videoSettings.totalDuration ?? global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
         const totalFrames = Math.ceil(totalDuration * frameRate);
 
         console.log(VFX_EXPORT_LOG_TAG, 'Starting video export (offline rendering mode)');

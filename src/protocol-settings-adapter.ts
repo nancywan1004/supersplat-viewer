@@ -7,6 +7,7 @@
 import type { Global } from './types';
 import type { ExperienceSettings } from './schemas/v2';
 import type { PointLightConfig, DirectionalLightConfig, SpotLightConfig } from './schemas/v2';
+import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import { updatePointLightsFromSettings } from './light';
 import { getPositionInFrontOfCamera } from './asset-placement-handler';
 
@@ -39,7 +40,7 @@ const DEFAULT_REVEAL_EFFECT = {
     type: 'none' as const,
     radius: 10,
     autoStart: true,
-    totalDuration: 20
+    totalDuration: DEFAULT_VFX_TOTAL_DURATION
 };
 
 // --- ensure 系列：保证 settings 上存在对应结构 ---

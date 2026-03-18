@@ -1,4 +1,5 @@
 import type { Global } from '../../types';
+import { DEFAULT_VFX_TOTAL_DURATION } from '../../schemas/v2-custom';
 
 const RESOLUTION_PRESETS: Record<string, { width: number; height: number }> = {
     '720p': { width: 1280, height: 720 },
@@ -195,7 +196,7 @@ export function initVideoExportUI(global: Global): () => void {
             };
             const renderManager = new RenderManager(global);
             renderManager.startOffscreenMode(tempSettings);
-            const totalDuration = global.settings?.revealEffect?.totalDuration ?? 20.0;
+            const totalDuration = global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
             let currentEffectTime = (global.state as any).effectTime || 0;
             if (currentEffectTime === 0) currentEffectTime = totalDuration * 0.5;
             try {

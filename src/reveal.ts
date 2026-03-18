@@ -4,6 +4,7 @@ import { GsplatRevealRadial } from './vfx/reveal/gsplat-reveal-radial';
 import { GsplatRevealRain } from './vfx/reveal/gsplat-reveal-rain';
 import { Global } from './types';
 import { RevealEffect as RevealConfig, AnimTrack } from './settings';
+import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import { GsplatRevealSmooth } from './vfx/reveal/gsplat-reveal-smooth';
 import { GsplatRevealPiecesRecover } from './vfx/gsplat-pieces-recover';
 import { GsplatRevealPerlinWave } from './vfx/gsplat-perlin-wave';
@@ -49,14 +50,36 @@ export class RevealController {
     }
 
     global: Global;
+    /** 进入 VFX 前的 nightFade 快照；仅在从非 none 切入特效时记录，用于结束/切回 none 时恢复全局亮度。
+     *  若用户在 VFX 播放中手动调了 nightFade，此值会同步更新为最新值，保证 VFX 结束时恢复到用户期望的亮度。 */
+    private originalNightFade: number | null = null;
+    /** 当前运行时的 nightFade（由 NightMode 通过 nightFade:changedDetailed 事件持续更新），用于拍快照 */
+    private currentNightFade: number = 0;
+    /** VFX 正在播放中 */
+    private inVfx: boolean = false;
 
     constructor(global: Global, bbox: BoundingBox, gsplatEntity: Entity, cameraManager?: CameraManager | null) {
         this.global = global;
-        const { settings, events, state } = global;
+        const { settings, events, state, app } = global;
         this.gsplatEntity = gsplatEntity;
         this.bbox = bbox;
         this.cameraManager = cameraManager || null;
         this.isUnified = gsplatEntity.gsplat?.unified ?? false;
+        
+        // 确定性区分来源：优先监听带 source 的详细事件；避免用“0 值猜测/冷却期”等不确定方案
+        app.on('nightFade:changedDetailed', (payload: { value: number; source: string }) => {
+            const value = payload?.value;
+            const source = payload?.source;
+            if (typeof value === 'number' && isFinite(value)) {
+                this.currentNightFade = Math.max(-1, Math.min(1, value));
+                // VFX 播放中：只有显式 nightFade:set（UI / 外部指令）才更新恢复目标；exit/request/forceReapply 等都不算用户调节
+                if (this.inVfx && this.originalNightFade !== null && source === 'set') {
+                    this.originalNightFade = this.currentNightFade;
+                }
+            }
+        });
+
+        // 不再监听旧的 nightFade:changed(number)，只接受带 source 的 detailed 事件，避免 0 值误判
         
         // Check if revealEffect is empty or has no type
         const hasRevealEffect = settings.revealEffect && 
@@ -68,7 +91,7 @@ export class RevealController {
             type: (settings.revealEffect?.type as RevealEffectType) ?? 'none',
             radius: settings.revealEffect?.radius ?? 10,
             autoStart: settings.revealEffect?.autoStart ?? true,
-            totalDuration: settings.revealEffect?.totalDuration ?? 20.0 // 默认 15 秒
+            totalDuration: settings.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION
         };
 
         console.log('RevealController initialized with config:', this.config);
@@ -295,7 +318,7 @@ export class RevealController {
                 }
                 
                 // 根据 totalDuration 调整时间参数
-                const totalDuration = this.config.totalDuration ?? 20.0;
+                const totalDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
                 // 根据 shader 逻辑计算实际完成时间
                 // rawProgress = uTime^2 * 0.1 - dist2D*2.0 + 1.0 >= 5
                 // uTime >= sqrt((4 + maxDist2D*2.0) / 0.1)
@@ -392,7 +415,7 @@ export class RevealController {
                 const defaultEndRadius = 25.0;
                 
                 // 根据 totalDuration 自动调整时间参数
-                const totalDuration = this.config.totalDuration ?? 20.0;
+                const totalDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
                 // 计算默认总时长：maxScatterStartTime + scatterDuration + recoverDuration
                 const maxScatterStartTime = defaultEndRadius / defaultWaveSpeed;
                 const defaultTotalDuration = maxScatterStartTime + defaultScatterDuration + defaultRecoverDuration;
@@ -604,7 +627,7 @@ export class RevealController {
                 const defaultColorizeDuration = 5.0;
                 
                 // 根据 totalDuration 自动调整时间参数
-                const totalDuration = this.config.totalDuration ?? 20.0;
+                const totalDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
                 // 计算默认总时长：maxSketchStart + sketchDuration + colorizeDuration
                 const defaultEndRadius = 200.0;
                 const defaultMaxSketchStart = defaultEndRadius / defaultWaveSpeed;
@@ -725,7 +748,7 @@ export class RevealController {
                 console.log('heightRange: ', heightRange);
                 
                 // 根据 totalDuration 计算 verticalSpread
-                const totalDuration = this.config.totalDuration ?? 20.0;
+                const totalDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
                 if (heightRange > 0.001 && totalDuration * script.speed > 1.0) {
                     script.verticalSpread = (totalDuration * script.speed - 1.0) / heightRange;
                     script.verticalSpread = Math.max(0.01, script.verticalSpread);
@@ -782,7 +805,15 @@ export class RevealController {
         }
 
         // Reveal 即将接管 gsplatModifyVS，通知 NightMode 退出（互斥关系）
-        this.global.app.fire('nightMode:exit');
+        // 仅在目标类型非 none 时才接管；none 代表「退出特效」，应恢复/保留 NightMode 当前状态。
+        if (effectName !== 'none') {
+            this.inVfx = true;
+            // 首次进入 VFX 时记录当前 nightFade（以运行时 currentNightFade 为准，作为「播放前亮度」快照）
+            if (this.originalNightFade === null) {
+                this.originalNightFade = this.currentNightFade;
+            }
+            this.global.app.fire('nightMode:exit');
+        }
 
         // 销毁现有的reveal scripts - 类似原始实现
         this.destroyAllRevealScripts();
@@ -862,6 +893,31 @@ export class RevealController {
     }
 
     /**
+     * 在特效结束或类型切回 none 时恢复进入特效前记录的 nightFade。
+     * 同步写回 settings.nightMode.fade，并通过事件驱动 NightMode Shader 更新。
+     */
+    private restoreNightModeIfNeeded(reason: string) {
+        if (this.originalNightFade === null) {
+            return;
+        }
+        const fade = this.originalNightFade;
+        this.originalNightFade = null;
+        this.inVfx = false;
+
+        const settingsAny = this.global.settings as any;
+        if (!settingsAny.nightMode) {
+            settingsAny.nightMode = {};
+        }
+        settingsAny.nightMode.fade = fade;
+
+        console.log('[RevealController] Restoring nightFade to', fade, 'due to', reason);
+        // VFX disable 时 GsplatShaderEffect.removeShaders() 把材质上的 gsplatModifyVS 删了，
+        // 但 NightMode 的 materialsApplied 不知情，nightFade:set 只会 updateEffect 不会重新 apply shader。
+        // 必须用 nightMode:forceReapply 先清 materialsApplied 再重新 apply，才能真正恢复 NightMode shader。
+        this.global.app.fire('nightMode:forceReapply', fade);
+    }
+
+    /**
      * 设置计时功能
      */
     private setupTiming(script: any) {
@@ -885,7 +941,7 @@ export class RevealController {
             if (this.isTiming && this.effectStartTime !== null) {
                 this.effectEndTime = performance.now() / 1000;
                 const actualDuration = this.effectEndTime - this.effectStartTime;
-                const expectedDuration = this.config.totalDuration ?? 20.0;
+                const expectedDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
                 const difference = actualDuration - expectedDuration;
                 
                 console.log(`[Timing] ${this.config.type} effect completed:`);
@@ -921,6 +977,12 @@ export class RevealController {
      * 更新计时（每帧调用，检查特效是否完成）
      */
     updateTiming(dt: number) {
+        // ── 通用检测：VFX 脚本自然播放完并 disable 了（removeShaders 已删掉材质上的 gsplatModifyVS），恢复 NightMode ──
+        // 无论 timed 或 non-timed 特效，只要脚本 disabled 且仍在 inVfx 状态，就需要恢复
+        if (this.currentScript && !this.currentScript.enabled && this.inVfx && this.originalNightFade !== null) {
+            this.restoreNightModeIfNeeded('effectScriptDisabled');
+        }
+
         // 如果是 timed effect 且脚本存在且未暂停，定期触发时间更新事件（用于 UI 更新）
         if (this.currentScript && this.timedEffects.includes(this.config.type) && !this.effectPaused) {
             const currentTime = this.currentScript.effectTime;
@@ -940,7 +1002,7 @@ export class RevealController {
             if (this.effectEndTime === null) {
                 this.effectEndTime = performance.now() / 1000;
                 const actualDuration = this.effectEndTime - this.effectStartTime;
-                const expectedDuration = this.config.totalDuration ?? 20.0;
+                const expectedDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
                 const difference = actualDuration - expectedDuration;
                 
                 console.log(`[Timing] ${this.config.type} effect completed (detected via isEffectComplete):`);
@@ -959,7 +1021,10 @@ export class RevealController {
                     expectedDuration,
                     difference
                 });
-                
+
+                // Timed VFX 播放完成后，将全局亮度恢复到进入特效前的 nightFade，避免长留在「特效接管后的亮度」状态
+                this.restoreNightModeIfNeeded('timedEffectComplete');
+
                 this.isTiming = false;
             }
         }
@@ -1010,6 +1075,10 @@ export class RevealController {
         // 如果类型改变，重新创建效果并重置动画
         if (newConfig.type && newConfig.type !== oldType) {
             this.createEffect(newConfig.type);
+            // 当切回 none 时，视为退出特效，恢复进入特效前的 nightFade
+            if (newConfig.type === 'none') {
+                this.restoreNightModeIfNeeded('typeChangedToNone');
+            }
             // 触发事件以更新 UI（统一使用 revealType:changed）
             this.global.events.fire('revealType:changed', newConfig.type);
             // 重置播放动画
@@ -1078,7 +1147,7 @@ export class RevealController {
         if (!this.currentScript || !this.timedEffects.includes(this.config.type)) {
             return;
         }
-        const totalDuration = this.config.totalDuration ?? 20.0;
+        const totalDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
         const clampedTime = Math.max(0, Math.min(time, totalDuration));
 
         if (!this.currentScript.enabled) {
@@ -1101,7 +1170,7 @@ export class RevealController {
         if (!this.currentScript || typeof this.currentScript.setEffectTime !== 'function') {
             return;
         }
-        const totalDuration = this.config.totalDuration ?? 20.0;
+        const totalDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
         const clampedTime = Math.max(0, Math.min(time, totalDuration));
         
         if (!this.currentScript.enabled) {
@@ -1157,7 +1226,7 @@ export class RevealController {
      * 获取特效总时长
      */
     getTotalDuration(): number {
-        return this.config.totalDuration ?? 20.0;
+        return this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
     }
 
     /**

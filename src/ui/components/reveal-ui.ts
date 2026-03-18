@@ -1,5 +1,6 @@
 import type { Global } from '../../types';
 import { pushEditHistory } from '../../edit-history';
+import { DEFAULT_VFX_TOTAL_DURATION } from '../../schemas/v2-custom';
 
 /** 需要 totalDuration / 时间轴 的 VFX 特效类型列表（同时被 reveal-ui / video-export-ui 使用） */
 export const TIMED_VFX_EFFECTS = [
@@ -35,7 +36,9 @@ export const isTimedVfxType = (type: string): boolean => {
 };
 
 /** Reveal 面板的 HTML 模板（挂载到 #revealPanelContainer，内含 #vfxVideoExportContainer 供 video-export-ui 挂载） */
-const REVEAL_PANEL_HTML = `
+const REVEAL_PANEL_HTML = (() => {
+    const defaultDuration = DEFAULT_VFX_TOTAL_DURATION;
+    return `
 <div id="revealPanel" class="hidden">
   <div class="settingsRow">
     <label for="revealType">Effect:</label>
@@ -60,7 +63,7 @@ const REVEAL_PANEL_HTML = `
   </div>
   <div id="totalDurationRow" class="settingsRow hidden">
     <label for="totalDuration">Timed VFX 时长 (s):</label>
-    <input type="number" id="totalDuration" class="settingsInput" min="1" max="60" step="0.5" value="15" title="仅控制 Timed VFX 效果的快慢/时长，与导出视频长度无关">
+    <input type="number" id="totalDuration" class="settingsInput" min="1" max="60" step="0.5" value="${defaultDuration}" title="仅控制 Timed VFX 效果的快慢/时长，与导出视频长度无关">
   </div>
   <div id="effectTimelineRow" class="settingsRow hidden">
     <div class="effectTimelineInner">
@@ -78,6 +81,7 @@ const REVEAL_PANEL_HTML = `
   </div>
 </div>
 `.trim();
+})();
 
 /**
  * 初始化 Reveal / VFX 与效果时间轴相关 UI。
@@ -185,7 +189,7 @@ export function initRevealUI(global: Global): () => void {
     };
 
     const onEffectTimeChanged = (time: number) => {
-        const totalDurationVal = global.settings?.revealEffect?.totalDuration ?? 20.0;
+        const totalDurationVal = global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
         updateTimeline(time, totalDurationVal);
     };
 
@@ -218,7 +222,7 @@ export function initRevealUI(global: Global): () => void {
             if (totalDurationRow) {
                 if (showTotalDuration) {
                     totalDurationRow.classList.remove('hidden');
-                    const currentTotalDuration = global.settings?.revealEffect?.totalDuration ?? 20.0;
+                    const currentTotalDuration = global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
                     if (totalDuration) {
                         totalDuration.value = currentTotalDuration.toString();
                     }
@@ -230,7 +234,7 @@ export function initRevealUI(global: Global): () => void {
             if (effectTimelineRow) {
                 if (showTimeline) {
                     effectTimelineRow.classList.remove('hidden');
-                    const currentTotalDuration = global.settings?.revealEffect?.totalDuration ?? 20.0;
+                    const currentTotalDuration = global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
                     if (effectTimeline) {
                         effectTimeline.max = (currentTotalDuration * 10).toString();
                         effectTimeline.value = '0';
