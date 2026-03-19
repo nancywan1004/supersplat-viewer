@@ -119,6 +119,7 @@ type SelectionSource = 'host' | 'scene' | 'unknown';
 const initPostMessageBridge = (global: Global) => {
     const { state, events, config } = global;
     const g = global as any;
+    let cameraModeChangeSource: SelectionSource = 'unknown';
 
     // 退出编辑模式时用于比较与回退的基线（与 ui 内逻辑一致，供 postMessage 协议使用）
     let editModeBaselineData: ExperienceSettings | null = null;
@@ -139,6 +140,8 @@ const initPostMessageBridge = (global: Global) => {
         switch (type) {
         case 'CAMERA_MODE_SWITCH':
             if (p.value === 'orbit' || p.value === 'fly') {
+                if (state.cameraMode === p.value) break;
+                cameraModeChangeSource = 'host';
                 state.cameraMode = p.value;
             }
             break;
@@ -518,7 +521,12 @@ const initPostMessageBridge = (global: Global) => {
     // ---------- Viewer → 父级 上报 ----------
     events.on('cameraMode:changed', (value: string, _prev: string) => {
         if (value === 'orbit' || value === 'fly') {
-            postToParent('CAMERA_MODE_CHANGED', { value });
+            const source = cameraModeChangeSource;
+            cameraModeChangeSource = 'scene';
+            if (source === 'host') {
+                return;
+            }
+            postToParent('CAMERA_MODE_CHANGED', { value, source: 'scene' });
         }
     });
 
@@ -528,10 +536,6 @@ const initPostMessageBridge = (global: Global) => {
         if (config.trackEditHistory) {
             postToParent('EDIT_HISTORY_STATE', { canUndo: canUndo(global), canRedo: canRedo(global) });
         }
-    });
-
-    events.on('editMode:changed', (value: boolean) => {
-        postToParent('EDIT_MODE_CHANGED', { value });
     });
 
     events.on('editHistory:stateChanged', (data: { canUndo: boolean; canRedo: boolean }) => {
