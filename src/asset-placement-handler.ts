@@ -6,9 +6,12 @@ import type { AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from './type
 import { getSelectedSceneEntity } from './state-helpers';
 import { Entity } from 'playcanvas';
 import { loadGsplatAsset } from './loaders/gsplat-asset-loader';
-import { pushEditHistory } from './edit-history';
 
 const PLACED_ASSETS_NAME = 'placedAssets';
+
+export type AssetPlacementHandlerDeps = {
+    pushEditHistory?: (global: Global, label?: string) => void;
+};
 
 function nextSceneEntityId(): string {
     return `scene-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -320,7 +323,12 @@ export function clearScenePlacedEntities(global: Global): void {
     global.events.fire('sceneAssets:cleared');
 }
 
-export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElement, planeY: number = 0): () => void {
+export function initAssetPlacementHandler(
+    global: Global,
+    canvas: HTMLCanvasElement,
+    planeY: number = 0,
+    deps: AssetPlacementHandlerDeps = {}
+): () => void {
     const { app, state, events, camera } = global;
     const width = () => app.graphicsDevice.width;
     const height = () => app.graphicsDevice.height;
@@ -400,7 +408,7 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
         state.selectedSceneEntityId = newEntry.id;
         events.fire('sceneAssets:added', newEntry);
         events.fire('sceneAsset:selected');
-        pushEditHistory(global, 'copy asset');
+        deps.pushEditHistory?.(global, 'copy asset');
     };
 
     const onDelete = () => {
@@ -415,7 +423,7 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
         state.selectedSceneEntityId = null;
         events.fire('sceneAssets:removed', entry);
         events.fire('sceneAsset:selected');
-        pushEditHistory(global, 'delete asset');
+        deps.pushEditHistory?.(global, 'delete asset');
     };
 
     const onEditLeftModuleChanged = (newModule: string | null) => {
@@ -446,7 +454,7 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
         if (entry) {
             state.selectedSceneEntityId = entry.id;
             events.fire('sceneAsset:selected');
-            pushEditHistory(global, 'place asset');
+            deps.pushEditHistory?.(global, 'place asset');
         }
     };
 

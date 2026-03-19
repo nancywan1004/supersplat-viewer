@@ -44,6 +44,7 @@ import { initShadowCatcher } from './vfx/shadow/shadow-catcher';
 import { ShadowApplyRt } from './vfx/shadow/shadow-apply';
 import { updateShadowDistance } from './light';
 import { initAssetPlacementHandler, restoreSceneAssetsFromSettings } from './asset-placement-handler';
+import { pushEditHistory } from './edit-history';
 import { initGizmoHandler } from './gizmo-handler';
 import { initAnnotationGizmoHandler } from './annotation-toolbar/annotation-gizmo-handler';
 import { initAnnotationSystem } from './annotation-toolbar/init-annotation-system';
@@ -619,7 +620,8 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 this.cleanupAssetPlacementHandler = initAssetPlacementHandler(
                     global,
                     canvasEl,
-                    sceneBound.center.y
+                    sceneBound.center.y,
+                    { pushEditHistory }
                 );
                 this.cleanupGizmoHandler = initGizmoHandler(global);
                 this.cleanupAnnotationGizmoHandler = initAnnotationGizmoHandler(global);
