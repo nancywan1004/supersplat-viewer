@@ -384,7 +384,7 @@ export function initAssetPlacementHandler(
         }).catch(() => {});
     };
 
-    const onCopy = () => {
+    const onCopy = (payload?: { copyId?: string }) => {
         const current = getSelectedSceneEntity(state);
         if (!current) return;
         const list = state.scenePlacedEntities ?? [];
@@ -398,8 +398,11 @@ export function initAssetPlacementHandler(
             current.getPosition().z + 1
         );
         parent.addChild(clone);
+        const copiedId = (typeof payload?.copyId === 'string' && payload.copyId.trim().length > 0)
+            ? payload.copyId
+            : nextSceneEntityId();
         const newEntry: ScenePlacedItem = {
-            id: nextSceneEntityId(),
+            id: copiedId,
             name: entry.name + ' (副本)',
             entity: clone,
             visible: true

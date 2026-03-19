@@ -66,7 +66,7 @@ type InboundPayload =
     | { type: 'ASSET_SHOW_HIDE_SET'; value?: boolean }
     | { type: 'ASSET_PLACE'; value?: AssetLibraryItem }
     | { type: 'ASSET_SELECT'; id?: string | null }
-    | { type: 'ASSET_COPY'; id?: string }
+    | { type: 'ASSET_COPY'; id?: string; copyId?: string }
     | { type: 'ASSET_DELETE'; id?: string }
     | { type: 'ASSET_TRANSFORM_MODE'; value?: 'move' | 'rotate' | 'scale' }
     | { type: 'ANNOTATION_PLACEMENT_START'; id?: string }
@@ -266,7 +266,9 @@ const initPostMessageBridge = (global: Global) => {
             if (typeof p.id === 'string') {
                 state.selectedSceneEntityId = p.id;
                 events.fire('sceneAsset:selected', { source: 'host' as SelectionSource });
-                events.fire('assetEdit:copy');
+                events.fire('assetEdit:copy', {
+                    copyId: typeof p.copyId === 'string' ? p.copyId : undefined
+                });
             }
             break;
         case 'ASSET_DELETE':
