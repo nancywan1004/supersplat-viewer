@@ -111,13 +111,17 @@ export function initRevealUI(global: Global): () => void {
     const restartAnimTrackCheck = container.querySelector('#restartAnimTrackCheck');
     const restartAnimTrackOption = container.querySelector('#restartAnimTrackOption');
 
-    let restartAnimTrackEnabled = false;
+    // 默认开启：导出时通常需要重启相机 animTrack（与 message-bridge 的默认 syncAnimTrack=true 对齐）
+    let restartAnimTrackEnabled = true;
 
     const toggleRestartAnimTrack = () => {
         restartAnimTrackEnabled = !restartAnimTrackEnabled;
         restartAnimTrackCheck?.classList[restartAnimTrackEnabled ? 'add' : 'remove']('active');
         // 不写入 state：state 可能是 Proxy，不允许随意 set 新属性；导出时以 DOM (#restartAnimTrackCheck.active) 为准
     };
+
+    // 初始化时同步到 UI（确保“默认开启”）
+    restartAnimTrackCheck?.classList.add('active');
 
     const pushEditHistorySafe = () => {
         if ((global.state as any).editMode) {

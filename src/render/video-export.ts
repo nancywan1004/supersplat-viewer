@@ -794,6 +794,10 @@ export const initVideoExport = (global: Global): void => {
     const renderManager = new RenderManager(global);
     const { events } = global;
 
+    // 当前导出任务的可取消句柄（主要用于快速导出）
+    let activeAbort: AbortController | null = null;
+    let activeFastRecorder: MediaRecorder | null = null;
+
     // 跟踪当前 UI 所在的 VFX 时间（用于导出结束后恢复）
     let lastUiEffectTime = 0;
     events.on('effectTime:changed', (time: number) => {
@@ -1027,7 +1031,11 @@ export const initVideoExport = (global: Global): void => {
      * 快速导出：渲染到主 canvas，用 captureStream + MediaRecorder 录制，无 readPixels，约实时（类似 SuperSplat）。
      * 输出 WebM（VP9 或 AVC1），导出期间画面会实时播放在屏幕上。
      */
-    const performVideoExportFast = async (videoSettings: VideoSettings, fileStream: FileSystemWritableFileStream | undefined): Promise<boolean> => {
+    const performVideoExportFast = async (
+        videoSettings: VideoSettings,
+        fileStream: FileSystemWritableFileStream | undefined,
+        signal?: AbortSignal
+    ): Promise<boolean> => {
         const { frameRate, width, height, bitrate, syncAnimTrack } = videoSettings;
         const evenWidth = width % 2 === 0 ? width : width - 1;
         const evenHeight = height % 2 === 0 ? height : height - 1;
@@ -1072,6 +1080,7 @@ export const initVideoExport = (global: Global): void => {
             videoBitsPerSecond: bitrate,
             audioBitsPerSecond: 0
         });
+        activeFastRecorder = recorder;
         recorder.ondataavailable = (e) => {
             if (e.data && e.data.size > 0) chunks.push(e.data);
         };
@@ -1088,6 +1097,7 @@ export const initVideoExport = (global: Global): void => {
         recorder.start(100);
 
         for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+            if (signal?.aborted) break;
             const frameStart = performance.now();
             const frameTime = Math.min(frameIndex * frameInterval, totalDuration);
             const effectTime = includeVfx ? frameTime : vfxTotalDuration;
@@ -1100,7 +1110,10 @@ export const initVideoExport = (global: Global): void => {
             if (wait > 0) await new Promise(r => setTimeout(r, wait));
         }
 
-        recorder.stop();
+        // 结束录制：无论正常结束还是 aborted，都需要 stop 才能拿到 blob
+        if (recorder.state === 'recording') {
+            recorder.stop();
+        }
         const blob = await blobPromise;
 
         canvas.width = prevWidth;
@@ -1117,7 +1130,21 @@ export const initVideoExport = (global: Global): void => {
             await fileStream.write(blob);
             const streamLike = fileStream as unknown as { locked?: boolean; close?: () => Promise<void> };
             if (streamLike.locked !== true) await streamLike.close?.();
+        } else {
+            // 无 FileSystemAccess：直接触发浏览器下载
+            try {
+                const filename = 'video.webm';
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.click();
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                // ignore
+            }
         }
+        activeFastRecorder = null;
         return true;
     };
 
@@ -1246,10 +1273,13 @@ export const initVideoExport = (global: Global): void => {
 
         // 锁住 viewer 实时更新
         stateAny.isExportingVfxVideo = true;
+        // 每次导出都创建新的 abort controller（供 VIDEO_EXPORT_END / stop 调用）
+        activeAbort?.abort();
+        activeAbort = new AbortController();
 
         try {
             if (videoSettings.useFastExport) {
-                return await performVideoExportFast(videoSettings, fileStream);
+                return await performVideoExportFast(videoSettings, fileStream, activeAbort.signal);
             }
             return await performVideoExport(videoSettings, fileStream);
         } catch (error) {
@@ -1268,9 +1298,24 @@ export const initVideoExport = (global: Global): void => {
                 global.events.fire('effectPlayPause:set', prevEffectPaused);
                 stateAny.animationPaused = prevAnimationPaused;
             });
+            // 清理导出句柄
+            activeAbort = null;
+            activeFastRecorder = null;
         }
     };
 
     // 监听视频导出事件
     events.on('render.video', exportVideo);
+
+    // 允许外部（协议）停止导出：主要用于快速导出 MediaRecorder
+    events.on('render.video.stop', () => {
+        try {
+            activeAbort?.abort();
+            if (activeFastRecorder && activeFastRecorder.state === 'recording') {
+                activeFastRecorder.stop();
+            }
+        } catch (e) {
+            // ignore
+        }
+    });
 };

@@ -106,7 +106,8 @@ type InboundPayload =
     | { type: 'VFX_TYPE_SET'; value?: string }
     | { type: 'VFX_EXIT' }
     | { type: 'VFX_RESTART'; restartAnim?: boolean }
-    | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean };
+    | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean }
+    | { type: 'VIDEO_EXPORT_CANCEL' };
 
 const postToParent = (type: string, payload?: object) => {
     window.parent.postMessage(payload !== undefined ? { type, payload } : { type }, '*');
@@ -472,7 +473,12 @@ const initPostMessageBridge = (global: Global) => {
             const resolution = { width: 1920, height: 1080 };
             const width = resolution.width % 2 === 0 ? resolution.width : resolution.width - 1;
             const height = resolution.height % 2 === 0 ? resolution.height : resolution.height - 1;
-            const totalDuration = global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+            // 默认导出时长：优先用相机 animTrack 总时长（state.animationDuration），无 animTrack 时回退到 VFX 默认时长
+            const animDuration = (global.state as any).animationDuration as number | undefined;
+            const totalDuration =
+                (typeof animDuration === 'number' && Number.isFinite(animDuration) && animDuration > 0)
+                    ? animDuration
+                    : (global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION);
             const videoSettings = {
                 startFrame: 0,
                 endFrame: 0,
@@ -482,12 +488,22 @@ const initPostMessageBridge = (global: Global) => {
                 bitrate: 8_000_000,
                 transparentBg: false,
                 showDebug: false,
-                format: 'mp4' as const,
+                // 协议默认走“快速导出”（WebM captureStream + MediaRecorder）
+                format: 'webm' as const,
                 codec: 'h264' as const,
+                // 导出默认重启 animTrack
+                syncAnimTrack: true,
                 totalDuration,
-                includeVfx
+                includeVfx,
+                useFastExport: true
             };
             events.fire('render.video', videoSettings, undefined);
+            break;
+        }
+        case 'VIDEO_EXPORT_CANCEL': {
+            // 停止当前导出（优先用于快速导出 MediaRecorder）
+            // 注意：真正的“导出完成”仍由 Viewer 在 progressEnd 时 postToParent('VIDEO_EXPORT_END') 上报父级
+            events.fire('render.video.stop');
             break;
         }
         default:

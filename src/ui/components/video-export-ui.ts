@@ -1,5 +1,6 @@
 import type { Global } from '../../types';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../../schemas/v2-custom';
+import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
 const RESOLUTION_PRESETS: Record<string, { width: number; height: number }> = {
     '720p': { width: 1280, height: 720 },
@@ -67,6 +68,7 @@ const VFX_VIDEO_EXPORT_ROW_HTML = `
  */
 export function initVideoExportUI(global: Global): () => void {
     const { events } = global;
+    const editUiTransport = getEditUiTransport(global);
 
     const overlayWrap = document.createElement('div');
     overlayWrap.innerHTML = VFX_EXPORT_OVERLAY_HTML;
@@ -136,6 +138,16 @@ export function initVideoExportUI(global: Global): () => void {
 
     const startExport = async (useFastExport: boolean) => {
         try {
+            // message-bridge：UI 只负责发协议，由 Viewer 内部按协议默认值执行导出（当前以快速导出为主）
+            // 注意：file picker 无法通过 postMessage 传递 FileSystemWritableFileStream，因此协议路径下不在 iframe 内弹出保存对话框
+            if (editUiTransport === 'message-bridge') {
+                const includeVfxEl = document.getElementById('includeVfxCheck') as HTMLInputElement | null;
+                const includeVfx = includeVfxEl?.checked !== false;
+                // 当前协议仅区分是否包含 VFX；其余分辨率/时长默认由 Viewer（message-bridge）侧决定
+                sendEditProtocolMessage({ type: 'VIDEO_EXPORT_START', includeVfx });
+                return;
+            }
+
             const resolution = getVideoResolution();
             const width = resolution.width % 2 === 0 ? resolution.width : resolution.width - 1;
             const height = resolution.height % 2 === 0 ? resolution.height : resolution.height - 1;
@@ -144,7 +156,8 @@ export function initVideoExportUI(global: Global): () => void {
             }
             const frameRate = 30;
             const restartCheckEl = document.getElementById('restartAnimTrackCheck');
-            const syncAnimTrack = restartCheckEl?.classList.contains('active') ?? false;
+            // 导出默认重启 animTrack：若找不到开关则默认为 true；若存在则以其 active 状态为准
+            const syncAnimTrack = restartCheckEl ? restartCheckEl.classList.contains('active') : true;
             const exportDurationEl = document.getElementById('exportDurationInput') as HTMLInputElement | null;
             const totalDuration = Math.max(0.5, Math.min(600, parseFloat(exportDurationEl?.value || '') || DEFAULT_EXPORT_DURATION));
             const includeVfxEl = document.getElementById('includeVfxCheck') as HTMLInputElement | null;
