@@ -669,7 +669,7 @@ const selectNearestLightAtPosition = (global: Global, position: Vec3): void => {
     if (bestDist > MAX_SELECT_DISTANCE) return;
 
     (state as any).selectedLightId = bestConfig.id;
-    events.fire('sceneLight:selected', { id: bestConfig.id });
+    events.fire('sceneLight:selected', { id: bestConfig.id, source: 'scene' });
 };
 
 /**

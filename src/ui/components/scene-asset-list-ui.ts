@@ -82,7 +82,7 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
                 arr.splice(idx, 1);
                 if (state.selectedSceneEntityId === entry.id) {
                     state.selectedSceneEntityId = null;
-                    events.fire('sceneAsset:selected');
+                    events.fire('sceneAsset:selected', { source: 'host' });
                 }
                 events.fire('sceneAssets:removed', entry);
                 renderSceneAssetList(listEl, global);
@@ -92,7 +92,7 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
         li.addEventListener('click', (e) => {
             if ((e.target as HTMLElement).closest('.scene-asset-delete') || (e.target as HTMLElement).closest('.scene-asset-visibility')) return;
             state.selectedSceneEntityId = entry.id;
-            events.fire('sceneAsset:selected');
+            events.fire('sceneAsset:selected', { source: 'host' });
             renderSceneAssetList(listEl, global);
         });
 

@@ -114,6 +114,8 @@ const postToParent = (type: string, payload?: object) => {
     console.log('[MessageBridge] postToParent', type, payload);
 };
 
+type SelectionSource = 'host' | 'scene' | 'unknown';
+
 const initPostMessageBridge = (global: Global) => {
     const { state, events, config } = global;
     const g = global as any;
@@ -255,19 +257,19 @@ const initPostMessageBridge = (global: Global) => {
             break;
         case 'ASSET_SELECT':
             state.selectedSceneEntityId = (p.id !== undefined ? p.id : null) as string | null;
-            events.fire('sceneAsset:selected');
+            events.fire('sceneAsset:selected', { source: 'host' as SelectionSource });
             break;
         case 'ASSET_COPY':
             if (typeof p.id === 'string') {
                 state.selectedSceneEntityId = p.id;
-                events.fire('sceneAsset:selected');
+                events.fire('sceneAsset:selected', { source: 'host' as SelectionSource });
                 events.fire('assetEdit:copy');
             }
             break;
         case 'ASSET_DELETE':
             if (typeof p.id === 'string') {
                 state.selectedSceneEntityId = p.id;
-                events.fire('sceneAsset:selected');
+                events.fire('sceneAsset:selected', { source: 'host' as SelectionSource });
                 events.fire('assetEdit:delete');
             }
             break;
@@ -326,7 +328,7 @@ const initPostMessageBridge = (global: Global) => {
             const id = p.id as string | undefined;
             if (!id) break;
             if (am.selectAnnotation) {
-                am.selectAnnotation(id, { showGizmo: false });
+                am.selectAnnotation(id, { showGizmo: false, source: 'host' as SelectionSource });
             }
             // 触发内部 UI 显示编辑表单（annotation-ui 中监听 annotationEdit:show）
             events.fire('annotationEdit:show');
@@ -406,7 +408,7 @@ const initPostMessageBridge = (global: Global) => {
             if (typeof p.id === 'string') applyLightAdd(global, p.id);
             break;
         case 'LIGHT_SELECT':
-            applyLightSelect(global, (p.id !== undefined ? p.id : null) as string | null);
+            applyLightSelect(global, (p.id !== undefined ? p.id : null) as string | null, 'host');
             break;
         case 'LIGHT_INTENSITY_UPDATE':
         case 'LIGHT_COLOR_UPDATE':
@@ -538,17 +540,25 @@ const initPostMessageBridge = (global: Global) => {
         }
     });
 
-    events.on('sceneAsset:selected', () => {
+    events.on('sceneAsset:selected', (data?: { source?: SelectionSource }) => {
+        const source = data?.source ?? 'unknown';
+        if (source !== 'scene') return;
         const id = state.selectedSceneEntityId ?? null;
         postToParent('SCENE_ASSET_SELECTED', { id });
     });
 
-    events.on('sceneLight:selected', (data: { id: string | null }) => {
-        postToParent('SCENE_LIGHT_SELECTED', { id: data.id ?? null });
+    events.on('sceneLight:selected', (data: { id: string | null; source?: SelectionSource }) => {
+        const source = data?.source ?? 'unknown';
+        if (source !== 'scene') return;
+        const id = data.id ?? null;
+        postToParent('SCENE_LIGHT_SELECTED', { id });
     });
 
-    events.on('annotation:selected', (data: { id: string }) => {
-        postToParent('SCENE_ANNOTATION_SELECTED', { id: data.id });
+    events.on('annotation:selected', (data: { id: string; source?: SelectionSource }) => {
+        const source = data?.source ?? 'unknown';
+        if (source !== 'scene') return;
+        const id = data.id;
+        postToParent('SCENE_ANNOTATION_SELECTED', { id });
     });
 
     events.on('progressEnd', () => {

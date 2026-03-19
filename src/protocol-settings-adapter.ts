@@ -153,9 +153,9 @@ export function applyLightAdd(global: Global, id: string): void {
 }
 
 /** LIGHT_SELECT：仅更新内部选中光源 id（可选，供 UI 使用），并派发 sceneLight:selected 事件 */
-export function applyLightSelect(global: Global, id: string | null): void {
+export function applyLightSelect(global: Global, id: string | null, source: 'host' | 'scene' | 'unknown' = 'unknown'): void {
     (global.state as Record<string, unknown>).selectedLightId = id;
-    global.events.fire('sceneLight:selected', { id });
+    global.events.fire('sceneLight:selected', { id, source });
 }
 
 /** LIGHT_INTENSITY_UPDATE / LIGHT_COLOR_UPDATE / LIGHT_INNER_ANGLE_SET / LIGHT_OUTER_ANGLE_SET / LIGHT_RANGE_SET */

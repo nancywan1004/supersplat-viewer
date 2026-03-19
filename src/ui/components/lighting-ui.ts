@@ -347,7 +347,7 @@ export function initLightingUI(global: Global): () => void {
                     const removedId = (light as any).id as string | undefined;
                     if (removedId && removedId === currentId) {
                         (global.state as any).selectedLightId = null;
-                        global.events.fire('sceneLight:selected', { id: null });
+                        global.events.fire('sceneLight:selected', { id: null, source: 'host' });
                     }
                 }
             });
@@ -361,7 +361,7 @@ export function initLightingUI(global: Global): () => void {
             if (firstId) {
                 currentSelectedId = firstId;
                 (global.state as any).selectedLightId = firstId;
-                global.events.fire('sceneLight:selected', { id: firstId });
+                global.events.fire('sceneLight:selected', { id: firstId, source: 'host' });
             }
         }
 
@@ -386,7 +386,7 @@ export function initLightingUI(global: Global): () => void {
 
                 const id = (light as any).id as string | undefined;
                 (global.state as any).selectedLightId = id ?? null;
-                global.events.fire('sceneLight:selected', { id: id ?? null });
+                global.events.fire('sceneLight:selected', { id: id ?? null, source: 'host' });
             });
         });
     };
@@ -425,7 +425,7 @@ export function initLightingUI(global: Global): () => void {
             }
             // 默认选中新建光源
             (global.state as any).selectedLightId = nextId;
-            events.fire('sceneLight:selected', { id: nextId });
+            events.fire('sceneLight:selected', { id: nextId, source: 'host' });
             renderPointLightsList();
             updatePointLightsFromSettings(global);
             events.fire('lighting:changed');
@@ -472,7 +472,7 @@ export function initLightingUI(global: Global): () => void {
             }
             // 默认选中新建光源
             (global.state as any).selectedLightId = nextId;
-            events.fire('sceneLight:selected', { id: nextId });
+            events.fire('sceneLight:selected', { id: nextId, source: 'host' });
             renderPointLightsList();
             updatePointLightsFromSettings(global);
             events.fire('lighting:changed');
@@ -494,7 +494,7 @@ export function initLightingUI(global: Global): () => void {
         // 外部（如 message-bridge）直接改 state.selectedLightId 时也能初始化一次样式
         const initialId = (global.state as any).selectedLightId as string | null | undefined;
         if (initialId) {
-            events.fire('sceneLight:selected', { id: initialId });
+            events.fire('sceneLight:selected', { id: initialId, source: 'host' });
         }
 
         // 监听 lighting:changed（包括由亮灯区域联动触发的删灯），实时重建列表
@@ -516,7 +516,7 @@ export function initLightingUI(global: Global): () => void {
             if (isDirectional(light)) return;
             lightsAny.splice(idx, 1);
             (global.state as any).selectedLightId = null;
-            events.fire('sceneLight:selected', { id: null });
+            events.fire('sceneLight:selected', { id: null, source: 'host' });
             renderPointLightsList();
             updatePointLightsFromSettings(global);
             events.fire('lighting:changed');

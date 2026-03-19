@@ -372,7 +372,7 @@ export function initAssetPlacementHandler(global: Global, canvas: HTMLCanvasElem
             });
             if (!entry) return;
             state.selectedSceneEntityId = entry.id;
-            events.fire('sceneAsset:selected');
+            events.fire('sceneAsset:selected', { source: 'scene' });
         }).catch(() => {});
     };
 

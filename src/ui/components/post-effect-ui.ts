@@ -249,7 +249,7 @@ function renderBloomLocalLightRegionsList(
                             const currentId = (global.state as any).selectedLightId ?? null;
                             if (currentId && currentId === linkedLightId) {
                                 (global.state as any).selectedLightId = null;
-                                global.events.fire('sceneLight:selected', { id: null });
+                                global.events.fire('sceneLight:selected', { id: null, source: 'host' });
                             }
                         }
                     }

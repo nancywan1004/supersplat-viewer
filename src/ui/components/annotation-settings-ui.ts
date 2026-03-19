@@ -256,7 +256,7 @@ export function bindAnnotationSettings(root: HTMLElement | null, global: Global)
 
         state.selectedAnnotationId = null;
         pushEditHistory(global, 'delete annotation');
-        events.fire('annotation:selected', { id: '' });
+        events.fire('annotation:selected', { id: '', source: 'host' });
         updateUI();
     });
 

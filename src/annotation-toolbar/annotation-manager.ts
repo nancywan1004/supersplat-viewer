@@ -263,7 +263,7 @@ export class AnnotationManager {
      * @param id - 标注 ID
      * @param options - showGizmo: 是否同时显示 Transform Gizmo，默认 false（仅点击底部「移动」时显示 Gizmo）
      */
-    selectAnnotation(id: string, options?: { showGizmo?: boolean }): void {
+    selectAnnotation(id: string, options?: { showGizmo?: boolean; source?: 'host' | 'scene' | 'unknown' }): void {
         const annotation = this.annotations.get(id);
 
         if (!annotation) {
@@ -295,7 +295,7 @@ export class AnnotationManager {
 
         // 触发标注选中事件
         if (this.global.events) {
-            this.global.events.fire('annotation:selected', { id });
+            this.global.events.fire('annotation:selected', { id, source: options?.source ?? 'unknown' });
         }
     }
 

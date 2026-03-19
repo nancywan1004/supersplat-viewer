@@ -122,7 +122,7 @@ export function initAnnotationUI(global: Global): () => void {
         updateList();
     });
     annotationUI.onAnnotationSelect((id) => {
-        annotationManager.selectAnnotation(id, { showGizmo: false });
+        annotationManager.selectAnnotation(id, { showGizmo: false, source: 'host' });
         // 仅选择不显示表单、不显示 Gizmo；Gizmo 需点击底部「移动」后显示
     });
     annotationUI.onAnnotationEditOrUpdate((id, isUpdate) => {
@@ -139,7 +139,7 @@ export function initAnnotationUI(global: Global): () => void {
         } else {
             const annotation = annotationManager.getAllAnnotations().find((a) => a.id === id);
             if (annotation) {
-                annotationManager.selectAnnotation(id, { showGizmo: false });
+                annotationManager.selectAnnotation(id, { showGizmo: false, source: 'host' });
                 const serialized = annotation.serialize();
                 originalAnnotationDataForEdit = serialized;
                 annotationUI.showEditForm(serialized, true);
@@ -217,7 +217,7 @@ export function initAnnotationUI(global: Global): () => void {
         if (placeholder && placeholder.id === data.id) {
             return;
         }
-        annotationManager.selectAnnotation(data.id);
+        annotationManager.selectAnnotation(data.id, { source: 'scene' });
     };
     events.on('annotation:selectFromHotspot', onAnnotationSelectFromHotspot);
     events.on('annotation:deselected', onAnnotationDeselected);
@@ -254,7 +254,7 @@ export function initAnnotationUI(global: Global): () => void {
         if (newModule === 'annotation') {
             const all = annotationManager.getAllAnnotations();
             if (all.length > 0 && !annotationManager.getSelectedAnnotation()) {
-                annotationManager.selectAnnotation(all[0].id);
+                annotationManager.selectAnnotation(all[0].id, { source: 'host' });
             }
             updateList();
             return;
