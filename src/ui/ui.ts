@@ -847,7 +847,7 @@ const initUI = (global: Global) => {
                 }
             }
             if (editUiTransport === 'message-bridge') {
-                sendEditProtocolMessage({ type: 'ASSET_SHOW_HIDE_SET', value: nextVisible });
+                sendEditProtocolMessage({ type: 'ASSETS_SHOW_HIDE_SET', value: nextVisible });
             } else if (Array.isArray(items)) {
                 items.forEach((item: any) => {
                     if (item && item.entity) {

@@ -63,7 +63,8 @@ type InboundPayload =
     | { type: 'EDIT_REDO' }
     | { type: 'SETTINGS_SAVE' }
     | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule | null }
-    | { type: 'ASSET_SHOW_HIDE_SET'; value?: boolean }
+    | { type: 'ASSET_SHOW_HIDE_SET'; id?: string; value?: boolean }
+    | { type: 'ASSETS_SHOW_HIDE_SET'; value?: boolean }
     | { type: 'ASSET_PLACE'; value?: AssetLibraryItem }
     | { type: 'ASSET_SELECT'; id?: string | null }
     | { type: 'ASSET_COPY'; id?: string; copyId?: string }
@@ -248,6 +249,19 @@ const initPostMessageBridge = (global: Global) => {
             }
             break;
         case 'ASSET_SHOW_HIDE_SET':
+            if (
+                Array.isArray(state.scenePlacedEntities) &&
+                typeof p.id === 'string' &&
+                typeof p.value === 'boolean'
+            ) {
+                const entry = (state.scenePlacedEntities as any[]).find((it) => it?.id === p.id);
+                if (entry?.entity) {
+                    entry.visible = p.value;
+                    entry.entity.enabled = p.value;
+                }
+            }
+            break;
+        case 'ASSETS_SHOW_HIDE_SET':
             if (typeof p.value === 'boolean' && Array.isArray(state.scenePlacedEntities)) {
                 const visible = p.value;
                 state.scenePlacedEntities.forEach((item: any) => {

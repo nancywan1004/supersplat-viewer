@@ -1,6 +1,7 @@
 import type { Global } from '../../types';
 import type { ScenePlacedItem } from '../../types';
 import { pushEditHistory } from '../../edit-history';
+import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
 const EYE_SVG =
     '<svg class="icon-eye" viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>';
@@ -22,6 +23,7 @@ export function getSceneAssetListHTML(): string {
 
 function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
     const { state, events } = global;
+    const editUiTransport = getEditUiTransport(global);
     const list = state.scenePlacedEntities ?? [];
     const selectedId = state.selectedSceneEntityId ?? null;
     listEl.innerHTML = '';
@@ -53,26 +55,24 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
         deleteBtn.title = '移除';
         deleteBtn.setAttribute('aria-label', '移除');
 
-        eyeBtn.addEventListener('click', (e) => {
+        const toggleVisibility = (e: Event) => {
             e.stopPropagation();
-            entry.visible = !entry.visible;
-            entry.entity.enabled = entry.visible;
+            const nextVisible = !entry.visible;
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'ASSET_SHOW_HIDE_SET', id: entry.id, value: nextVisible });
+                return;
+            }
+            entry.visible = nextVisible;
+            entry.entity.enabled = nextVisible;
             eyeBtn.classList.toggle('hidden', !entry.visible);
             eyeOffBtn.classList.toggle('hidden', entry.visible);
             eyeBtn.title = entry.visible ? '隐藏' : '显示';
             eyeOffBtn.title = entry.visible ? '显示' : '隐藏';
             pushEditHistory(global, 'toggle asset visibility');
-        });
-        eyeOffBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            entry.visible = !entry.visible;
-            entry.entity.enabled = entry.visible;
-            eyeBtn.classList.toggle('hidden', !entry.visible);
-            eyeOffBtn.classList.toggle('hidden', entry.visible);
-            eyeBtn.title = entry.visible ? '隐藏' : '显示';
-            eyeOffBtn.title = entry.visible ? '显示' : '隐藏';
-            pushEditHistory(global, 'toggle asset visibility');
-        });
+        };
+
+        eyeBtn.addEventListener('click', toggleVisibility);
+        eyeOffBtn.addEventListener('click', toggleVisibility);
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             entry.entity.destroy();
