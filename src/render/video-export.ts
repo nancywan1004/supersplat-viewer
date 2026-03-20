@@ -892,7 +892,8 @@ export const initVideoExport = (global: Global): void => {
         encoder: VideoEncoder | null,
         settings: VideoSettings,
         renderManager: RenderManager,
-        profiler?: ExportProfiler
+        profiler?: ExportProfiler,
+        signal?: AbortSignal
     ): Promise<void> => {
         if (!encoder) throw new Error('Encoder is not available');
         const { frameRate, width, height, syncAnimTrack } = settings;
@@ -910,6 +911,7 @@ export const initVideoExport = (global: Global): void => {
         let prevFrameProfile: FrameProfile | undefined;
 
         for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+            if (signal?.aborted) break;
             if (encoder.state === 'closed' || (encoder as any)._errorOccurred) break;
             const frameTime = Math.min(frameIndex * frameInterval, totalDuration);
             const effectTime = includeVfx ? frameTime : vfxTotalDuration;
@@ -1123,6 +1125,19 @@ export const initVideoExport = (global: Global): void => {
         }
         (device as any).fire?.('resizecanvas');
 
+        if (signal?.aborted) {
+            // 取消导出时不写入/不下载，但仍需尽量释放 fileStream 句柄，避免 locked 状态残留
+            if (fileStream) {
+                try {
+                    await fileStream.close?.();
+                } catch {
+                    // ignore
+                }
+            }
+            activeFastRecorder = null;
+            return false;
+        }
+
         const tTotal = ((performance.now() - tStart) / 1000).toFixed(1);
         console.log(VFX_EXPORT_LOG_TAG, `Fast export done in ${tTotal} s for ${totalDuration.toFixed(1)}s video (${(blob.size / 1024).toFixed(0)} KB)`);
 
@@ -1151,11 +1166,16 @@ export const initVideoExport = (global: Global): void => {
     /**
      * 执行视频导出的核心逻辑（完全离线渲染）
      */
-    const performVideoExport = async (videoSettings: VideoSettings, fileStream: FileSystemWritableFileStream | undefined): Promise<boolean> => {
+    const performVideoExport = async (
+        videoSettings: VideoSettings,
+        fileStream: FileSystemWritableFileStream | undefined,
+        signal?: AbortSignal
+    ): Promise<boolean> => {
         const { startFrame, endFrame, frameRate, width, height, bitrate } = videoSettings;
         const profiler = new ExportProfiler();
         const totalDuration = videoSettings.totalDuration ?? global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
         const totalFrames = Math.ceil(totalDuration * frameRate);
+        let didAbort = false;
 
         console.log(VFX_EXPORT_LOG_TAG, 'Starting video export (offline rendering mode)');
         console.log(VFX_EXPORT_LOG_TAG, 'This will render frames offline without displaying on screen');
@@ -1203,11 +1223,13 @@ export const initVideoExport = (global: Global): void => {
             try {
                 // 渲染所有帧（完全离线渲染，不影响主 viewer）
                 profiler.startPhase('renderAllFrames');
-                await renderAllFrames(frameProcessor, encoder, videoSettings, renderManager, profiler);
+                await renderAllFrames(frameProcessor, encoder, videoSettings, renderManager, profiler, signal);
                 profiler.endPhase();
 
+                didAbort = signal?.aborted === true;
+
                 // 完成输出
-                if (encoder.state !== 'closed' && !(encoder as any)._errorOccurred) {
+                if (!didAbort && encoder.state !== 'closed' && !(encoder as any)._errorOccurred) {
                     profiler.startPhase('encoder.flush');
                     await encoder.flush();
                     profiler.endPhase();
@@ -1220,6 +1242,19 @@ export const initVideoExport = (global: Global): void => {
                 if (encoder.state !== 'closed') {
                     encoder.close();
                 }
+            }
+
+            // 取消导出：明确丢弃“部分结果”，不 finalize 输出、不写文件/下载
+            if (signal?.aborted) {
+                console.log(VFX_EXPORT_LOG_TAG, 'Video export aborted: discard partial output');
+                if (fileStream) {
+                    try {
+                        await fileStream.close?.();
+                    } catch {
+                        // ignore
+                    }
+                }
+                return false;
             }
             
             // 完成输出（这会确保所有数据都写入流）
@@ -1281,7 +1316,7 @@ export const initVideoExport = (global: Global): void => {
             if (videoSettings.useFastExport) {
                 return await performVideoExportFast(videoSettings, fileStream, activeAbort.signal);
             }
-            return await performVideoExport(videoSettings, fileStream);
+            return await performVideoExport(videoSettings, fileStream, activeAbort.signal);
         } catch (error) {
             await handleExportError(error);
             return false;
@@ -1310,6 +1345,8 @@ export const initVideoExport = (global: Global): void => {
     // 允许外部（协议）停止导出：主要用于快速导出 MediaRecorder
     events.on('render.video.stop', () => {
         try {
+            // 通知 message-bridge：本次导出被外部取消（由 VIDEO_EXPORT_CANCEL 触发）
+            events.fire('videoExport:cancelled');
             activeAbort?.abort();
             if (activeFastRecorder && activeFastRecorder.state === 'recording') {
                 activeFastRecorder.stop();

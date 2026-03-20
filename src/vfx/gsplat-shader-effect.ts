@@ -109,7 +109,7 @@ class GsplatShaderEffect extends Script {
 
         // Listen to enable/disable events
         this.on('enable', () => {
-            console.log('GsplatShaderEffect enabled for entity:', this.entity.name);
+            //console.log('GsplatShaderEffect enabled for entity:', this.entity.name);
             // Reset effect time and completion flag when enabling
             this.effectTime = 0;
             this._revealCompleteFired = false;
@@ -117,15 +117,13 @@ class GsplatShaderEffect extends Script {
             // Ensure we're initialized
             if (!this.initialized && this.entity.gsplat) {
                 this.initialized = true;
-                console.log('GsplatShaderEffect initialized');
+                //console.log('GsplatShaderEffect initialized');
             }
 
             // Apply shaders if initialized, otherwise flag for application
             if (this.initialized) {
-                console.log('Applying shaders immediately');
                 this.applyShaders();
             } else {
-                console.log('Flagging shaders for later application');
                 this.shadersNeedApplication = true;
             }
         });
@@ -153,17 +151,17 @@ class GsplatShaderEffect extends Script {
     }
 
     applyShaders() {
-        console.log('GsplatShaderEffect applyShaders() called. GSplat unified:', this.entity.gsplat?.unified);
+        // console.log('GsplatShaderEffect applyShaders() called. GSplat unified:', this.entity.gsplat?.unified);
         if (this.entity.gsplat?.unified) {
             // Unified mode: Apply to specified camera (or all cameras if not specified)
-            console.log('Applying to unified materials');
+            // console.log('Applying to unified materials');
             this.applyToUnifiedMaterials();
         } else {
             // Non-unified mode: Apply to component's material
-            console.log('Applying to component material');
+            // console.log('Applying to component material');
             this.applyToComponentMaterial();
         }
-        console.log('Materials applied count:', this.materialsApplied.size);
+        // console.log('Materials applied count:', this.materialsApplied.size);
     }
 
     removeShaders() {
@@ -217,24 +215,24 @@ class GsplatShaderEffect extends Script {
     }
 
     applyToComponentMaterial() {
-        console.log('applyToComponentMaterial called');
+        // console.log('applyToComponentMaterial called');
         const applyShader = () => {
             const material = this.entity.gsplat?.material;
-            console.log('Attempting to apply shader to material:', material);
+            // console.log('Attempting to apply shader to material:', material);
             if (!material) {
                 console.error(`${this.constructor.name}: gsplat material not available.`);
                 return;
             }
             this.applyShaderToMaterial(material);
             this.materialsApplied.add(material);
-            console.log('Material added to applied set. Total materials:', this.materialsApplied.size);
+            // console.log('Material added to applied set. Total materials:', this.materialsApplied.size);
         };
 
         if (this.entity.gsplat?.material) {
-            console.log('GSplat material available immediately');
+            // console.log('GSplat material available immediately');
             applyShader();
         } else {
-            console.log('GSplat material not available, waiting for load event');
+            // console.log('GSplat material not available, waiting for load event');
             // Listen for when the gsplat component is ready
             this.entity.gsplat?.once('load', applyShader);
         }
@@ -299,13 +297,13 @@ class GsplatShaderEffect extends Script {
         const shaderLanguage = device?.isWebGPU ? 'wgsl' : 'glsl';
         const customShader = shaderLanguage === 'wgsl' ? this.getShaderWGSL() : this.getShaderGLSL();
 
-        console.log('Applying shader to material:', material.name, 'Language:', shaderLanguage);
-        console.log('Custom shader length:', customShader.length);
+        // console.log('Applying shader to material:', material.name, 'Language:', shaderLanguage);
+        // console.log('Custom shader length:', customShader.length);
 
         material.getShaderChunks(shaderLanguage).set('gsplatModifyVS', customShader);
         material.update();
         
-        console.log('Shader applied and material updated');
+        // console.log('Shader applied and material updated');
     }
 
     update(dt: number) {

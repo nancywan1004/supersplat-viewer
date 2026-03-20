@@ -121,6 +121,8 @@ const initPostMessageBridge = (global: Global) => {
     const { state, events, config } = global;
     const g = global as any;
     let cameraModeChangeSource: SelectionSource = 'unknown';
+    // 用闭包变量记录本次导出是否被外部取消，避免向 global.state（可能是 Proxy）新增属性
+    let videoExportCancelled = false;
 
     // 退出编辑模式时用于比较与回退的基线（与 ui 内逻辑一致，供 postMessage 协议使用）
     let editModeBaselineData: ExperienceSettings | null = null;
@@ -518,12 +520,27 @@ const initPostMessageBridge = (global: Global) => {
                 includeVfx,
                 useFastExport: true
             };
-            events.fire('render.video', videoSettings, undefined);
+            // 统一约束：开始导出前先让用户选择保存地址
+            if (!('showSaveFilePicker' in window)) {
+                postToParent('VIDEO_EXPORT_CANCELLED');
+                break;
+            }
+            try {
+                const handle = await (window as any).showSaveFilePicker({
+                    types: [{ description: 'WebM Video', accept: { 'video/webm': ['.webm'] } }],
+                    suggestedName: 'vfx-timeline.webm'
+                });
+                const fileStream = await handle.createWritable();
+                events.fire('render.video', videoSettings, fileStream as any);
+            } catch {                console.log('[MessageBridge] file picker cancelled by user');
+                postToParent('VIDEO_EXPORT_CANCELLED');
+            }
             break;
         }
         case 'VIDEO_EXPORT_CANCEL': {
             // 停止当前导出（优先用于快速导出 MediaRecorder）
             // 注意：真正的“导出完成”仍由 Viewer 在 progressEnd 时 postToParent('VIDEO_EXPORT_END') 上报父级
+            videoExportCancelled = true;
             events.fire('render.video.stop');
             break;
         }
@@ -581,8 +598,20 @@ const initPostMessageBridge = (global: Global) => {
         postToParent('SCENE_ANNOTATION_SELECTED', { id });
     });
 
+    // 导出取消通知：避免依赖往 global.state 写入临时属性（state 可能是 Proxy）
+    events.on('videoExport:cancelled', () => {
+        videoExportCancelled = true;
+    });
+
     events.on('progressEnd', () => {
-        postToParent('VIDEO_EXPORT_END');
+        postToParent(videoExportCancelled ? 'VIDEO_EXPORT_CANCELLED' : 'VIDEO_EXPORT_END');
+        videoExportCancelled = false;
+    });
+
+    events.on('progressStart', () => {
+        // 开始导出：默认认为走“结束”，除非后续收到取消
+        videoExportCancelled = false;
+        postToParent('VIDEO_EXPORT_STARTED');
     });
 };
 
