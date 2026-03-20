@@ -598,6 +598,22 @@ const initPostMessageBridge = (global: Global) => {
         postToParent('SCENE_ANNOTATION_SELECTED', { id });
     });
 
+    // 统一上报“进入标注编辑”并附带初始化数据（不区分选中来源）
+    events.on('annotationEdit:show', () => {
+        const selected = g.annotationManager?.getSelectedAnnotation?.();
+        const serialized = selected?.serialize?.();
+        if (!serialized?.id) return;
+        postToParent('SCENE_ANNOTATION_EDIT_START', {
+            id: serialized.id,
+            value: {
+                title: serialized.title ?? '',
+                text: serialized.text ?? '',
+                imageUrl: serialized.imageUrl,
+                showTitleWhenCollapsed: serialized.showTitleWhenCollapsed ?? false
+            }
+        });
+    });
+
     // 导出取消通知：避免依赖往 global.state 写入临时属性（state 可能是 Proxy）
     events.on('videoExport:cancelled', () => {
         videoExportCancelled = true;
