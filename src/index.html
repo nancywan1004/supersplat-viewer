@@ -25,17 +25,29 @@
 
             const url = new URL(location.href);
 
-            const posterUrl = url.searchParams.get('poster');
-            const skyboxUrl = url.searchParams.get('skybox');
+            const isLocalDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            const proxyPort = url.searchParams.get('proxyPort') || '3001';
+            const proxyBase = `http://localhost:${proxyPort}/api/proxy?url=`;
+
+            const toProxy = (resourceUrl) => {
+                if (!resourceUrl || !isLocalDev) return resourceUrl;
+                if (!/^https?:\/\//i.test(resourceUrl)) return resourceUrl;
+                return `${proxyBase}${encodeURIComponent(resourceUrl)}`;
+            };
+
+            const posterUrl = toProxy(url.searchParams.get('poster'));
+            const skyboxUrl = toProxy(url.searchParams.get('skybox'));
             const settingsUrl = url.searchParams.has('settings') ? url.searchParams.get('settings') : './settings.json';
             const contentUrl = url.searchParams.has('content') ? url.searchParams.get('content') : './scene.compressed.ply';
+            const settingsFetchUrl = toProxy(settingsUrl);
+            const contentFetchUrl = toProxy(contentUrl);
             const splatMeshUrl = url.searchParams.get('splatMesh') || undefined;
 
             const sseConfig = {
                 poster: posterUrl && createImage(posterUrl),
                 skyboxUrl,
                 contentUrl,
-                contents: fetch(contentUrl),
+                contents: fetch(contentFetchUrl),
                 noui: url.searchParams.has('noui'),
                 noanim: url.searchParams.has('noanim'),
                 noautorotate: url.searchParams.has('noautorotate'),
@@ -58,7 +70,7 @@
 
             window.sse = {
                 config: sseConfig,
-                settings: fetch(settingsUrl).then(response => response.json())
+                settings: fetch(settingsFetchUrl).then(response => response.json())
             };
 
             // showEditUI=false 时：在首屏渲染前给 <html> 加类，避免顶栏按钮闪现
