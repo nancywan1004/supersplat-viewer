@@ -1030,8 +1030,9 @@ export const initVideoExport = (global: Global): void => {
     };
 
     /**
-     * 快速导出：渲染到主 canvas，用 captureStream + MediaRecorder 录制，无 readPixels，约实时（类似 SuperSplat）。
-     * 输出 WebM（VP9 或 AVC1），导出期间画面会实时播放在屏幕上。
+     * 快速导出：渲染到主 canvas，约实时。
+     * - format=mp4: 实时渲染 + WebCodecs 编码 + MP4 封装（不走离屏导出）
+     * - format=webm: captureStream + MediaRecorder（保留后备）
      */
     const performVideoExportFast = async (
         videoSettings: VideoSettings,
@@ -1069,54 +1070,173 @@ export const initVideoExport = (global: Global): void => {
         console.log(VFX_EXPORT_LOG_TAG, 'Fast export: rendering to canvas + captureStream (no readPixels), ~real-time');
         const tStart = performance.now();
 
-        const stream = canvas.captureStream(frameRate);
-        const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-            ? 'video/webm;codecs=vp9'
-            : MediaRecorder.isTypeSupported('video/webm;codecs=avc1')
-                ? 'video/webm;codecs=avc1'
-                : 'video/webm';
-        console.log(VFX_EXPORT_LOG_TAG, `Fast export: using mimeType=${mimeType}`);
-        const chunks: Blob[] = [];
-        const recorder = new MediaRecorder(stream, {
-            mimeType,
-            videoBitsPerSecond: bitrate,
-            audioBitsPerSecond: 0
-        });
-        activeFastRecorder = recorder;
-        recorder.ondataavailable = (e) => {
-            if (e.data && e.data.size > 0) chunks.push(e.data);
-        };
+        const useRealtimeWebCodecsMp4 = videoSettings.format === 'mp4';
 
-        const blobPromise = new Promise<Blob>((resolve, reject) => {
-            recorder.onstop = () => {
-                resolve(new Blob(chunks, { type: mimeType }));
+        if (useRealtimeWebCodecsMp4) {
+            // 实时渲染到主 canvas，但编码用 WebCodecs + MP4 封装
+            const encoderConfig = new VideoExportConfig(videoSettings);
+            const target = fileStream ? new StreamTarget(fileStream) : new BufferTarget();
+            const output = new Output({
+                format: encoderConfig.outputFormat,
+                target
+            });
+            const videoSource = new EncodedVideoPacketSource(encoderConfig.codecType);
+            output.addVideoTrack(videoSource, {
+                rotation: 0,
+                frameRate
+            });
+            await output.start();
+
+            const encoder = createVideoEncoder(videoSource, encoderConfig.codec, videoSettings);
+            if (!encoder) {
+                throw new Error('Failed to create realtime WebCodecs encoder for fast MP4 export');
+            }
+
+            try {
+                const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
+                for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+                    if (signal?.aborted) break;
+                    if (encoder.state === 'closed' || (encoder as any)._errorOccurred) break;
+                    const frameStart = performance.now();
+                    const frameTime = Math.min(frameIndex * frameInterval, totalDuration);
+                    const effectTime = includeVfx ? frameTime : vfxTotalDuration;
+                    if (syncAnimTrack || !includeVfx) seekAnimToTimeAndApply(global, frameTime);
+                    await prepareAndRenderOneFrameToCanvas(global, effectTime);
+
+                    const timestampUs = Math.round(frameTime * 1_000_000);
+                    const vf = new (globalThis as any).VideoFrame(canvas, {
+                        timestamp: timestampUs,
+                        duration: frameDurationUs
+                    });
+                    const keyFrameEvery = Math.max(1, Math.round(frameRate * 2));
+                    encoder.encode(vf, { keyFrame: frameIndex === 0 || frameIndex % keyFrameEvery === 0 });
+                    vf.close();
+
+                    // 轻量回压：防止编码队列长期堆积导致内存上涨
+                    while (encoder.encodeQueueSize > 8) {
+                        if (signal?.aborted) break;
+                        await new Promise(r => setTimeout(r, 2));
+                    }
+
+                    updateProgress(frameTime, totalDuration);
+                    const elapsed = performance.now() - frameStart;
+                    const wait = Math.max(0, frameTimeMs - elapsed);
+                    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+                }
+
+                if (signal?.aborted) {
+                    if (encoder.state !== 'closed') encoder.close();
+                    if (fileStream) {
+                        try {
+                            await fileStream.close?.();
+                        } catch {
+                            // ignore
+                        }
+                    }
+                    return false;
+                }
+
+                await encoder.flush();
+                if (encoder.state !== 'closed') encoder.close();
+                await output.finalize();
+
+                if (fileStream) {
+                    const streamLike = fileStream as unknown as { locked?: boolean; close?: () => Promise<void> };
+                    if (streamLike.locked !== true) await streamLike.close?.();
+                } else {
+                    await handleDownload(output, target, fileStream, encoderConfig.fileExtension);
+                }
+            } finally {
+                if (encoder.state !== 'closed') {
+                    encoder.close();
+                }
+            }
+        } else {
+            const stream = canvas.captureStream(frameRate);
+            const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+                ? 'video/webm;codecs=vp9'
+                : MediaRecorder.isTypeSupported('video/webm;codecs=avc1')
+                    ? 'video/webm;codecs=avc1'
+                    : 'video/webm';
+            console.log(VFX_EXPORT_LOG_TAG, `Fast export: using mimeType=${mimeType}`);
+            const chunks: Blob[] = [];
+            const recorder = new MediaRecorder(stream, {
+                mimeType,
+                videoBitsPerSecond: bitrate,
+                audioBitsPerSecond: 0
+            });
+            activeFastRecorder = recorder;
+            recorder.ondataavailable = (e) => {
+                if (e.data && e.data.size > 0) chunks.push(e.data);
             };
-            recorder.onerror = () => {
-                reject(new Error('MediaRecorder error'));
-            };
-        });
 
-        recorder.start(100);
+            const blobPromise = new Promise<Blob>((resolve, reject) => {
+                recorder.onstop = () => {
+                    resolve(new Blob(chunks, { type: mimeType }));
+                };
+                recorder.onerror = () => {
+                    reject(new Error('MediaRecorder error'));
+                };
+            });
 
-        for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
-            if (signal?.aborted) break;
-            const frameStart = performance.now();
-            const frameTime = Math.min(frameIndex * frameInterval, totalDuration);
-            const effectTime = includeVfx ? frameTime : vfxTotalDuration;
-            // 不包含 VFX 时也必须每帧驱动 anim，否则导出的视频里相机不动
-            if (syncAnimTrack || !includeVfx) seekAnimToTimeAndApply(global, frameTime);
-            await prepareAndRenderOneFrameToCanvas(global, effectTime);
-            updateProgress(frameTime, totalDuration);
-            const elapsed = performance.now() - frameStart;
-            const wait = Math.max(0, frameTimeMs - elapsed);
-            if (wait > 0) await new Promise(r => setTimeout(r, wait));
+            recorder.start(100);
+
+            for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+                if (signal?.aborted) break;
+                const frameStart = performance.now();
+                const frameTime = Math.min(frameIndex * frameInterval, totalDuration);
+                const effectTime = includeVfx ? frameTime : vfxTotalDuration;
+                // 不包含 VFX 时也必须每帧驱动 anim，否则导出的视频里相机不动
+                if (syncAnimTrack || !includeVfx) seekAnimToTimeAndApply(global, frameTime);
+                await prepareAndRenderOneFrameToCanvas(global, effectTime);
+                updateProgress(frameTime, totalDuration);
+                const elapsed = performance.now() - frameStart;
+                const wait = Math.max(0, frameTimeMs - elapsed);
+                if (wait > 0) await new Promise(r => setTimeout(r, wait));
+            }
+
+            // 结束录制：无论正常结束还是 aborted，都需要 stop 才能拿到 blob
+            if (recorder.state === 'recording') {
+                recorder.stop();
+            }
+            const blob = await blobPromise;
+
+            if (signal?.aborted) {
+                // 取消导出时不写入/不下载，但仍需尽量释放 fileStream 句柄，避免 locked 状态残留
+                if (fileStream) {
+                    try {
+                        await fileStream.close?.();
+                    } catch {
+                        // ignore
+                    }
+                }
+                activeFastRecorder = null;
+                return false;
+            }
+
+            const tTotal = ((performance.now() - tStart) / 1000).toFixed(1);
+            console.log(VFX_EXPORT_LOG_TAG, `Fast export done in ${tTotal} s for ${totalDuration.toFixed(1)}s video (${(blob.size / 1024).toFixed(0)} KB)`);
+
+            if (fileStream) {
+                await fileStream.write(blob);
+                const streamLike = fileStream as unknown as { locked?: boolean; close?: () => Promise<void> };
+                if (streamLike.locked !== true) await streamLike.close?.();
+            } else {
+                // 无 FileSystemAccess：直接触发浏览器下载
+                try {
+                    const filename = 'video.webm';
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                } catch (e) {
+                    // ignore
+                }
+            }
+            activeFastRecorder = null;
         }
-
-        // 结束录制：无论正常结束还是 aborted，都需要 stop 才能拿到 blob
-        if (recorder.state === 'recording') {
-            recorder.stop();
-        }
-        const blob = await blobPromise;
 
         canvas.width = prevWidth;
         canvas.height = prevHeight;
@@ -1125,41 +1245,8 @@ export const initVideoExport = (global: Global): void => {
         }
         (device as any).fire?.('resizecanvas');
 
-        if (signal?.aborted) {
-            // 取消导出时不写入/不下载，但仍需尽量释放 fileStream 句柄，避免 locked 状态残留
-            if (fileStream) {
-                try {
-                    await fileStream.close?.();
-                } catch {
-                    // ignore
-                }
-            }
-            activeFastRecorder = null;
-            return false;
-        }
-
         const tTotal = ((performance.now() - tStart) / 1000).toFixed(1);
-        console.log(VFX_EXPORT_LOG_TAG, `Fast export done in ${tTotal} s for ${totalDuration.toFixed(1)}s video (${(blob.size / 1024).toFixed(0)} KB)`);
-
-        if (fileStream) {
-            await fileStream.write(blob);
-            const streamLike = fileStream as unknown as { locked?: boolean; close?: () => Promise<void> };
-            if (streamLike.locked !== true) await streamLike.close?.();
-        } else {
-            // 无 FileSystemAccess：直接触发浏览器下载
-            try {
-                const filename = 'video.webm';
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                a.click();
-                URL.revokeObjectURL(url);
-            } catch (e) {
-                // ignore
-            }
-        }
-        activeFastRecorder = null;
+        console.log(VFX_EXPORT_LOG_TAG, `Fast export done in ${tTotal} s for ${totalDuration.toFixed(1)}s video`);
         return true;
     };
 
@@ -1292,7 +1379,8 @@ export const initVideoExport = (global: Global): void => {
      * 导出视频的主要方法
      */
     const exportVideo = async (videoSettings: VideoSettings, fileStream?: FileSystemWritableFileStream): Promise<boolean> => {
-        events.fire('progressStart', videoSettings.useFastExport ? '快速导出 (WebM)…' : localize('panel.render.render-video'));
+        const fastLabel = videoSettings.format === 'mp4' ? '极速导出 (MP4，实时转码)…' : '极速导出 (WebM)…';
+        events.fire('progressStart', videoSettings.useFastExport ? fastLabel : localize('panel.render.render-video'));
 
         const stateAny = global.state as any;
         const prevExporting = stateAny.isExportingVfxVideo ?? false;

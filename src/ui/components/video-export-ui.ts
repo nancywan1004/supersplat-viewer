@@ -54,8 +54,8 @@ const VFX_VIDEO_EXPORT_ROW_HTML = `
         <input type="checkbox" id="includeVfxCheck" class="settingsCheck" checked> 导出时包含 VFX 特效（不勾选则仅导出 animTrack，VFX 固定为末尾状态）
       </label>
     </div>
-    <button id="vfxVideoExportButton" class="settingsButton" type="button">导出视频 (MP4)</button>
-    <button id="vfxVideoExportFastButton" class="settingsButton" type="button">快速导出 (WebM，约实时)</button>
+    <button id="vfxVideoExportButton" class="settingsButton" type="button">高兼容导出 (MP4，较慢)</button>
+    <button id="vfxVideoExportFastButton" class="settingsButton" type="button">极速导出 (MP4，实时转码)</button>
     <button id="testCaptureFrameButton" class="settingsButton" type="button">测试捕获单帧</button>
   </div>
 </div>
@@ -171,21 +171,24 @@ export function initVideoExportUI(global: Global): () => void {
                 bitrate: 8_000_000,
                 transparentBg: false,
                 showDebug: false,
-                format: (useFastExport ? 'webm' : 'mp4') as 'mp4' | 'webm',
+                format: 'mp4' as 'mp4' | 'webm',
                 codec: 'h264' as const,
                 syncAnimTrack,
                 useFastExport,
                 totalDuration,
                 includeVfx
             };
-            let fileStream: FileSystemWritableFileStream | undefined;
-            if ('showSaveFilePicker' in window) {
-                const opts = useFastExport
-                    ? { types: [{ description: 'WebM Video', accept: { 'video/webm': ['.webm'] } }], suggestedName: 'vfx-timeline.webm' }
-                    : { types: [{ description: 'Video File', accept: { 'video/mp4': ['.mp4'] } }], suggestedName: 'vfx-timeline.mp4' };
-                const handle = await (window as any).showSaveFilePicker(opts);
-                fileStream = await handle.createWritable();
+            // 与 message-bridge 统一：必须先选择保存地址，再启动导出。
+            if (!('showSaveFilePicker' in window)) {
+                console.error('Current environment does not support showSaveFilePicker. Export aborted.');
+                return;
             }
+            let fileStream: FileSystemWritableFileStream | undefined;
+            const opts = useFastExport
+                ? { types: [{ description: 'WebM Video', accept: { 'video/webm': ['.webm'] } }], suggestedName: 'vfx-timeline.webm' }
+                : { types: [{ description: 'Video File', accept: { 'video/mp4': ['.mp4'] } }], suggestedName: 'vfx-timeline.mp4' };
+            const handle = await (window as any).showSaveFilePicker(opts);
+            fileStream = await handle.createWritable();
             events.fire('render.video', videoSettings, fileStream as any);
         } catch (err) {
             console.error('Failed to start VFX video export:', err);

@@ -511,8 +511,8 @@ const initPostMessageBridge = (global: Global) => {
                 bitrate: 8_000_000,
                 transparentBg: false,
                 showDebug: false,
-                // 协议默认走“快速导出”（WebM captureStream + MediaRecorder）
-                format: 'webm' as const,
+                // 协议默认走“极速导出 MP4”（实时渲染 + WebCodecs 编码）
+                format: 'mp4' as const,
                 codec: 'h264' as const,
                 // 导出默认重启 animTrack
                 syncAnimTrack: true,
@@ -520,19 +520,20 @@ const initPostMessageBridge = (global: Global) => {
                 includeVfx,
                 useFastExport: true
             };
-            // 统一约束：开始导出前先让用户选择保存地址
+            // 优先先选地址；若环境不支持 picker，则降级为浏览器下载，不直接取消导出
             if (!('showSaveFilePicker' in window)) {
                 postToParent('VIDEO_EXPORT_CANCELLED');
                 break;
             }
             try {
                 const handle = await (window as any).showSaveFilePicker({
-                    types: [{ description: 'WebM Video', accept: { 'video/webm': ['.webm'] } }],
-                    suggestedName: 'vfx-timeline.webm'
+                    types: [{ description: 'MP4 Video', accept: { 'video/mp4': ['.mp4'] } }],
+                    suggestedName: 'vfx-timeline.mp4'
                 });
                 const fileStream = await handle.createWritable();
                 events.fire('render.video', videoSettings, fileStream as any);
-            } catch {                console.log('[MessageBridge] file picker cancelled by user');
+            } catch {                
+                console.log('[MessageBridge] file picker cancelled by user');
                 postToParent('VIDEO_EXPORT_CANCELLED');
             }
             break;
@@ -620,7 +621,11 @@ const initPostMessageBridge = (global: Global) => {
     });
 
     events.on('progressEnd', () => {
-        postToParent(videoExportCancelled ? 'VIDEO_EXPORT_CANCELLED' : 'VIDEO_EXPORT_END');
+        if (videoExportCancelled) {
+            postToParent('VIDEO_EXPORT_CANCELLED');
+        } else {
+            postToParent('VIDEO_EXPORT_END');
+        }
         videoExportCancelled = false;
     });
 
