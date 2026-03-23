@@ -18,6 +18,8 @@ import { buildCommittedBrightnessVolume, buildCommittedBrightnessVolumeFromRegio
 import { updatePointLightsFromSettings } from '../light';
 
 const MASK_SIZE = 512;
+/** 屏幕笔刷半径映射到世界半径时的缩放系数：<1 可减少“2D 预览偏大、3D 结果偏肥” */
+const BRUSH_WORLD_RADIUS_SCALE = 0.65;
 /** 与 committed-brightness-volume 一致，用于判断是否为有效 64³ volume 纹理 */
 const VOLUME_TEX_WIDTH = 64;
 const VOLUME_TEX_HEIGHT = 64 * 64;
@@ -393,7 +395,7 @@ export class BloomController {
                         threshold: 0.2,
                         bloomDebug: false,
                         bloomBrush: false,
-                        bloomBrushSize: 30,
+                        bloomBrushSize: 10,
                         bloomBrushBrightness: 0
                     };
                 }
@@ -404,16 +406,24 @@ export class BloomController {
             case 'LIGHT_BRUSH_START': {
                 const bloom = ensureBloomSettings();
                 bloom.bloomBrush = true;
+                // 切工具时强制结束 drawing 状态，避免误走“绘制中仅2D预览”分支
+                this.isDrawing = false;
+                this.worldSpaceMaskDirtyFromDrawing = false;
                 this.isErasing = false;
                 this.worldSpaceData.setEraseMode(false);
+                (this.global.events as any).fire('postEffect:changed');
                 (this.global.app as any).renderNextFrame = true;
                 break;
             }
             case 'LIGHT_ERASER_START': {
                 const bloom = ensureBloomSettings();
                 bloom.bloomBrush = true;
+                // 切工具时强制结束 drawing 状态，避免误走“绘制中仅2D预览”分支
+                this.isDrawing = false;
+                this.worldSpaceMaskDirtyFromDrawing = false;
                 this.isErasing = true;
                 this.worldSpaceData.setEraseMode(true);
+                (this.global.events as any).fire('postEffect:changed');
                 (this.global.app as any).renderNextFrame = true;
                 break;
             }
@@ -581,7 +591,7 @@ export class BloomController {
         const effectiveMask = this.getEffectiveMaskTexture(bloomBrush);
         if (this.bloomBrushPainter) {
             this.bloomBrushPainter.setEnabled(false); // Screen space removed, always World Space
-            this.bloomBrushPainter.setBrushSize(Math.max(1, Math.min(200, Number(bloomSettings.bloomBrushSize ?? 30))));
+            this.bloomBrushPainter.setBrushSize(Math.max(0.1, Math.min(200, Number(bloomSettings.bloomBrushSize ?? 10))));
         }
         if (nightModeScript) {
             // BloomBrush shader 分支仅在「正在拖动画笔」时激活，提供实时 2D mask 预览。
@@ -922,7 +932,7 @@ export class BloomController {
 
         // Get brush size from settings and scale to mask pixels
         const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomBrushSize?: number } | undefined;
-        const brushSize = bloom?.bloomBrushSize ?? 30;
+        const brushSize = Math.max(0.1, Number(bloom?.bloomBrushSize ?? 10));
         const scale = MASK_SIZE / rect.width;
         const radius = brushSize * scale;
 
@@ -996,7 +1006,7 @@ export class BloomController {
         pickWorldFromClientXY(this.global, e.clientX, e.clientY).then(worldPos => {
             if (worldPos) {
                 const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomBrushSize?: number } | undefined;
-                const brushSize = bloom?.bloomBrushSize ?? 30;
+                const brushSize = Math.max(0.1, Number(bloom?.bloomBrushSize ?? 10));
                 const cameraPos = this.global.camera.getPosition();
                 const distance = worldPos.distance(cameraPos);
                 const sceneCam = (this.global.camera as { camera?: { camera?: { fov?: number } } }).camera?.camera;
@@ -1004,7 +1014,7 @@ export class BloomController {
                 const fovRad = (fovDeg * Math.PI) / 180;
                 const canvasHeight = canvas.clientHeight || canvas.height;
                 if (canvasHeight > 0 && distance > 0.001) {
-                    const worldRadius = (brushSize * 2 * distance * Math.tan(fovRad / 2)) / canvasHeight;
+                    const worldRadius = ((brushSize * 2 * distance * Math.tan(fovRad / 2)) / canvasHeight) * BRUSH_WORLD_RADIUS_SCALE;
                     if (this.isErasing) {
                         this.worldSpaceData.eraseAt(worldPos, worldRadius);
                     } else {
@@ -1012,6 +1022,14 @@ export class BloomController {
                     }
                     this.fireWorldSpaceChanged();
                     (this.global.app as any).renderNextFrame = true;
+                    // 点按场景时，pickWorld 是异步返回；若 pointerup 已先发生（isDrawing=false），
+                    // 本次新增/擦除点会错过 pointerup 触发的那次 3D 重建，导致只看到 2D 点。
+                    // 这里在“点数据晚到”时补触发一次 postEffect:changed，确保首击即可看到 3D Volume。
+                    if (!this.isDrawing) {
+                        this._lastMultiRegionHash = '';
+                        this._lastMaskSignature = '';
+                        (this.global.events as any).fire('postEffect:changed');
+                    }
                     // 不在每点回调里触发 postEffect:changed，避免每加一个点就重建 volume 导致频闪；仅在 pointer up 时触发一次 3D 重算
                 }
             }
@@ -1039,7 +1057,7 @@ export class BloomController {
         pickWorldFromClientXY(this.global, e.clientX, e.clientY).then(worldPos => {
             if (worldPos) {
                 const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomBrushSize?: number } | undefined;
-                const brushSize = bloom?.bloomBrushSize ?? 30;
+                const brushSize = Math.max(0.1, Number(bloom?.bloomBrushSize ?? 10));
                 const cameraPos = this.global.camera.getPosition();
                 const distance = worldPos.distance(cameraPos);
                 const sceneCam = (this.global.camera as { camera?: { camera?: { fov?: number } } }).camera?.camera;
@@ -1047,7 +1065,7 @@ export class BloomController {
                 const fovRad = (fovDeg * Math.PI) / 180;
                 const canvasHeight = canvas.clientHeight || canvas.height;
                 if (canvasHeight > 0 && distance > 0.001) {
-                    const worldRadius = (brushSize * 2 * distance * Math.tan(fovRad / 2)) / canvasHeight;
+                    const worldRadius = ((brushSize * 2 * distance * Math.tan(fovRad / 2)) / canvasHeight) * BRUSH_WORLD_RADIUS_SCALE;
                     if (this.isErasing) {
                         this.worldSpaceData.eraseAt(worldPos, worldRadius);
                     } else {
@@ -1055,6 +1073,12 @@ export class BloomController {
                     }
                     this.fireWorldSpaceChanged();
                     (this.global.app as any).renderNextFrame = true;
+                    // 同 handlePointerDown：若该点在 pointerup 之后才落入数据，补触发一次重建。
+                    if (!this.isDrawing) {
+                        this._lastMultiRegionHash = '';
+                        this._lastMaskSignature = '';
+                        (this.global.events as any).fire('postEffect:changed');
+                    }
                 }
             }
         });
