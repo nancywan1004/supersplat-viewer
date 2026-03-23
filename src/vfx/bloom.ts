@@ -315,14 +315,21 @@ export class BloomController {
 
         events.on('bloomBrush:set', () => {
             this.worldSpaceData.commit();
-            const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomBrushBrightness?: number } | undefined;
+            const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomBrushBrightness?: number; localLightRegions?: any[] } | undefined;
             const brightness = bloom && typeof bloom.bloomBrushBrightness === 'number'
                 ? Math.max(-1, Math.min(1, bloom.bloomBrushBrightness))
                 : 0;
             this.worldSpaceData.setCommittedBrightness(brightness);
             if (bloom) (bloom as any).bloomBrushCommittedBrightness = brightness;
             this.saveWorldSpaceConfig();
-            this.syncCommittedToNightMode();
+            const hasExistingRegions = Array.isArray(bloom?.localLightRegions) &&
+                bloom!.localLightRegions!.some((r: any) => r?.worldSpace?.committed?.length > 0);
+            if (hasExistingRegions) {
+                this._lastMultiRegionHash = '';
+                this._lastMaskSignature = '';
+            } else {
+                this.syncCommittedToNightMode();
+            }
             this.fireWorldSpaceChanged();
             (this.global.app as any).renderNextFrame = true;
         });
@@ -490,7 +497,14 @@ export class BloomController {
                 this.isErasing = false;
                 this.worldSpaceData.setEraseMode(false);
                 this.saveWorldSpaceConfig();
-                this.syncCommittedToNightMode();
+                const hasExistingRegionsFinish = Array.isArray(bloom.localLightRegions) &&
+                    bloom.localLightRegions.some((r: any) => r?.worldSpace?.committed?.length > 0);
+                if (hasExistingRegionsFinish) {
+                    this._lastMultiRegionHash = '';
+                    this._lastMaskSignature = '';
+                } else {
+                    this.syncCommittedToNightMode();
+                }
                 this.worldSpaceMaskDirtyFromDrawing = false;
                 (this.global.app as any).renderNextFrame = true;
                 break;
@@ -717,10 +731,6 @@ export class BloomController {
                     nightModeScript.setCommittedTintVolume(null);
                 }
             } else {
-                // 无 localLightRegions（或仅有草稿）：
-                // - 若之前走过多区域体积，先清空；
-                // - 若当前为「首个亮灯区域」草稿（bloomBrush + draft id），用 worldSpaceData 草稿点实时建体积与 mask；
-                // - 否则沿用单区域/旧逻辑（active 或 worldSpaceData）。
                 if (this._lastMultiRegionHash) {
                     this._lastMultiRegionHash = '';
                     this._lastActiveRegionId = null;
@@ -758,7 +768,7 @@ export class BloomController {
                             radius: p.radius,
                             brightness: draftBrightness
                         }));
-                        const draftHash = `draft|ws=${wsPoints.length}|b=${draftBrightness}`;
+                        const draftHash = `draft|ws=${this.isDrawing ? 0 : wsPoints.length}|b=${draftBrightness}`;
                         if (this._lastMultiRegionHash !== draftHash) {
                             this._lastMultiRegionHash = draftHash;
                             const { texture, tintTexture, aabbMin, aabbMax } = buildCommittedBrightnessVolumeFromRegions(
@@ -1400,8 +1410,10 @@ export class BloomController {
         // 绘制中不走 volume-based 路径：volume 不含正在绘制的新点，
         // 必须 fall through 到 point-based 投影才能实时预览新笔触。
         if (!this.isDrawing && this.hasValidCommittedVolumeForMask()) {
-            const volStr = `${this.committedVolumeAabbMin.x.toFixed(3)},${this.committedVolumeAabbMax.x.toFixed(3)}`;
-            const signature = `vol:${volStr}:${posStr}:${fwdStr}`;
+            const mn = this.committedVolumeAabbMin;
+            const mx = this.committedVolumeAabbMax;
+            const volStr = `${mn.x.toFixed(3)},${mn.y.toFixed(3)},${mn.z.toFixed(3)},${mx.x.toFixed(3)},${mx.y.toFixed(3)},${mx.z.toFixed(3)}`;
+            const signature = `vol:${volStr}:${this._lastMultiRegionHash}:${posStr}:${fwdStr}`;
             if (signature === this._lastMaskSignature) return;
             this._lastMaskSignature = signature;
             if (this.renderWorldSpaceMaskFromVolume()) return;

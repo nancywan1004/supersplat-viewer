@@ -1186,6 +1186,7 @@ class NightMode extends GsplatShaderEffect {
         // 仅在 fade 变化时 fire，避免每帧触发 configureCamera
         // 这里不再发旧的 nightFade:changed(number)，统一走 detailed 事件
         if (this._lastFiredNightFade !== this.nightFade) {
+            this._lastFiredNightFade = this.nightFade;
             this.app.fire('nightFade', this.nightFade);
             this.fireNightFadeChanged('request');
         }
