@@ -111,9 +111,9 @@ type InboundPayload =
     | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean }
     | { type: 'VIDEO_EXPORT_CANCEL' };
 
-const postToParent = (type: string, payload?: object) => {
-    window.parent.postMessage(payload !== undefined ? { type, payload } : { type }, '*');
-    console.log('[MessageBridge] postToParent', type, payload);
+const postToParent = (type: string, data?: Record<string, unknown>) => {
+    window.parent.postMessage(data ? { type, ...data } : { type }, '*');
+    console.log('[MessageBridge] postToParent', type, data);
 };
 
 type SelectionSource = 'host' | 'scene' | 'unknown';
