@@ -359,7 +359,9 @@ const buildDist = {
           transform: (contents) =>
             contents.toString().replace('<base href="">', `<base href="${process.env.BASE_HREF ?? ''}">`)
         },
-        { src: 'settings.json', dest: 'dist'}
+        { src: 'settings.json', dest: 'dist' },
+        // 标注热点 SVG 等图标资源，供 dist 产物直接访问 assets/icons/*
+        { src: 'public/assets/icons/**/*', dest: 'dist/assets/icons' }
       ]
     }),
     terser({
