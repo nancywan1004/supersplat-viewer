@@ -89,6 +89,10 @@ type Config = {
     disableCameraBounds?: boolean;
     webgpu: boolean;                            // use WebGPU device
     gpusort: boolean;                           // use GPU sorting for splats
+    /** 父级透传的项目 ID（用于保存上传） */
+    projectId?: string | number;
+    /** 父级透传的 token（用于保存上传鉴权） */
+    token?: string;
 };
 
 // observable state that can change at runtime

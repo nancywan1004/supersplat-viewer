@@ -638,17 +638,35 @@ const initUI = (global: Global) => {
                                 onSave: () => {
                                     // 保存：由 bridge 生成 SETTINGS_UPDATED，再退出编辑模式
                                     sendEditProtocolMessage({ type: 'SETTINGS_SAVE' });
-                                    waitFor('SETTINGS_UPDATED', 3000)
-                                        .then((m) => {
-                                            const jsonString = m?.payload?.payload;
-                                            if (typeof jsonString === 'string' && jsonString.length > 0) {
-                                                const a = document.createElement('a');
-                                                a.href = URL.createObjectURL(new Blob([jsonString], { type: 'application/json' }));
-                                                a.download = 'settings.json';
-                                                a.click();
-                                                URL.revokeObjectURL(a.href);
+                                    new Promise<any>((resolve, reject) => {
+                                        const onMsg = (ev: MessageEvent) => {
+                                            const data = ev.data as any;
+                                            if (!data) return;
+                                            if (data.type !== 'SETTINGS_UPDATED' && data.type !== 'SETTINGS_SAVE_FAILED') return;
+                                            window.removeEventListener('message', onMsg);
+                                            clearTimeout(to);
+                                            if (data.type === 'SETTINGS_SAVE_FAILED') {
+                                                reject(new Error(data?.payload?.message || 'SETTINGS_SAVE_FAILED'));
+                                                return;
                                             }
-                                        })
+                                            resolve(data);
+                                        };
+                                        const to = window.setTimeout(() => {
+                                            window.removeEventListener('message', onMsg);
+                                            reject(new Error('timeout waiting for SETTINGS_UPDATED / SETTINGS_SAVE_FAILED'));
+                                        }, 3000);
+                                        window.addEventListener('message', onMsg);
+                                    })
+                                        // .then((m) => {
+                                        //     const jsonString = m?.payload?.payload;
+                                        //     if (typeof jsonString === 'string' && jsonString.length > 0) {
+                                        //         const a = document.createElement('a');
+                                        //         a.href = URL.createObjectURL(new Blob([jsonString], { type: 'application/json' }));
+                                        //         a.download = 'settings.json';
+                                        //         a.click();
+                                        //         URL.revokeObjectURL(a.href);
+                                        //     }
+                                        // })
                                         .finally(() => {
                                             sendEditProtocolMessage({ type: 'EDIT_MODE_SET', value: false });
                                         });
@@ -703,34 +721,39 @@ const initUI = (global: Global) => {
         if (dom.saveSettingsBtn) {
             dom.saveSettingsBtn.addEventListener('click', () => {
                 if (editUiTransport === 'message-bridge') {
-                    const waitForUpdated = (timeoutMs = 3000) =>
+                    const waitForSaveResult = (timeoutMs = 3000) =>
                         new Promise<any>((resolve, reject) => {
                             const onMsg = (ev: MessageEvent) => {
                                 const data = ev.data as any;
-                                if (!data || data.type !== 'SETTINGS_UPDATED') return;
+                                if (!data) return;
+                                if (data.type !== 'SETTINGS_UPDATED' && data.type !== 'SETTINGS_SAVE_FAILED') return;
                                 window.removeEventListener('message', onMsg);
                                 clearTimeout(to);
+                                if (data.type === 'SETTINGS_SAVE_FAILED') {
+                                    reject(new Error(data?.payload?.message || 'SETTINGS_SAVE_FAILED'));
+                                    return;
+                                }
                                 resolve(data);
                             };
                             const to = window.setTimeout(() => {
                                 window.removeEventListener('message', onMsg);
-                                reject(new Error('timeout waiting for SETTINGS_UPDATED'));
+                                reject(new Error('timeout waiting for SETTINGS_UPDATED / SETTINGS_SAVE_FAILED'));
                             }, timeoutMs);
                             window.addEventListener('message', onMsg);
                         });
 
                     sendEditProtocolMessage({ type: 'SETTINGS_SAVE' });
-                    waitForUpdated()
-                        .then((m) => {
-                            const jsonString = m?.payload?.payload;
-                            if (typeof jsonString === 'string' && jsonString.length > 0) {
-                                const a = document.createElement('a');
-                                a.href = URL.createObjectURL(new Blob([jsonString], { type: 'application/json' }));
-                                a.download = 'settings.json';
-                                a.click();
-                                URL.revokeObjectURL(a.href);
-                            }
-                        })
+                    waitForSaveResult()
+                        // .then((m) => {
+                        //     const jsonString = m?.payload?.payload;
+                        //     if (typeof jsonString === 'string' && jsonString.length > 0) {
+                        //         const a = document.createElement('a');
+                        //         a.href = URL.createObjectURL(new Blob([jsonString], { type: 'application/json' }));
+                        //         a.download = 'settings.json';
+                        //         a.click();
+                        //         URL.revokeObjectURL(a.href);
+                        //     }
+                        // })
                         .catch(() => {});
                     return;
                 }
@@ -939,7 +962,21 @@ const initUI = (global: Global) => {
         initVideoExportUI(global);
         initLightingUI(global);
         initPostEffectUI(global);
-        initAnnotationUI(global);
+        // 标注面板/系统与 reveal 播放时机对齐：
+        // - 有 reveal：等 revealComplete 后再初始化，避免开场动画期间提前出现热点/tooltip
+        // - 无 reveal：首帧后初始化（确保与 viewer 初始化阶段顺序一致）
+        let annotationUiInitialized = false;
+        const initAnnotationUiIfNeeded = () => {
+            if (annotationUiInitialized) return;
+            annotationUiInitialized = true;
+            initAnnotationUI(global);
+        };
+        events.once('revealComplete', initAnnotationUiIfNeeded);
+        events.once('firstFrame', () => {
+            if (!state.hasRevealEffect) {
+                initAnnotationUiIfNeeded();
+            }
+        });
     }
 
     // Info panel

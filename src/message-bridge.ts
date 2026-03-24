@@ -46,6 +46,7 @@ import {
     applyVfxTypeSet,
     applyVfxExit
 } from './protocol-settings-adapter';
+import { uploadProjectData } from './universe/service';
 
 /** 父级 → Viewer 的 postMessage payload 类型（按文档事件表） */
 type InboundPayload =
@@ -219,6 +220,14 @@ const initPostMessageBridge = (global: Global) => {
         case 'SETTINGS_SAVE': {
             const serialized = serializeExperienceSettings(global);
             const jsonString = JSON.stringify(serialized, null, 2);
+            const projectId = global.config.projectId;
+            const token = global.config.token;
+            const uploaded = await uploadProjectData(projectId ?? '', token ?? '', jsonString);
+            if (!uploaded) {
+                console.error('[MessageBridge] SETTINGS_SAVE 上传失败，已取消 SETTINGS_UPDATED 回传');
+                postToParent('SETTINGS_SAVE_FAILED', { message: 'settings upload failed' });
+                break;
+            }
             postToParent('SETTINGS_UPDATED', { payload: jsonString });
             setBaseline();
             break;
