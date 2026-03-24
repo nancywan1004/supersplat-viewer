@@ -155,6 +155,14 @@ export function initAnnotationUI(global: Global): () => void {
         }
     });
     annotationUI.onInputChange((data) => {
+        if (editUiTransport === 'message-bridge') {
+            // 父级托管/协议模式：输入时通过协议实时下发，驱动场景内标注预览更新
+            const targetId = pendingCreateId ?? annotationUI.getEditingAnnotationId();
+            if (targetId) {
+                sendEditProtocolMessage({ type: 'ANNOTATION_UPDATE', id: targetId, value: data });
+            }
+            return;
+        }
         const placeholder = annotationManager.getPlaceholderAnnotation();
         if (placeholder) {
             placeholder.updateContent(data);

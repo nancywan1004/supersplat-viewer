@@ -74,6 +74,7 @@ type InboundPayload =
     | { type: 'ANNOTATION_PLACEMENT_START'; id?: string }
     | { type: 'ANNOTATION_PLACEMENT_CANCEL' }
     | { type: 'ANNOTATION_CONFIRM'; id?: string; value?: Partial<AnnotationData> }
+    | { type: 'ANNOTATION_UPDATE'; id?: string; value?: Partial<AnnotationData> }
     | { type: 'ANNOTATION_DELETE'; id?: string }
     | { type: 'ANNOTATION_EDIT'; id?: string }
     | { type: 'ANNOTATION_TRANSFORM_MODE'; value?: 'move' | null }
@@ -342,6 +343,33 @@ const initPostMessageBridge = (global: Global) => {
             if (placeholder && placeholder.id === id) {
                 am.confirmAnnotation(formData);
             } else {
+                am.updateAnnotation(id, formData);
+            }
+            break;
+        }
+        case 'ANNOTATION_UPDATE': {
+            // 父级编辑表单实时下发：仅更新场景中的标注内容，不触发“确认放置/固化”语义
+            const am = g.annotationManager;
+            if (!am) break;
+            const id = p.id as string | undefined;
+            const value = p.value as Partial<AnnotationData> | undefined;
+            if (!id || !value) break;
+
+            const formData = {
+                title: value.title ?? '',
+                text: value.text ?? '',
+                imageUrl: value.imageUrl,
+                showTitleWhenCollapsed: value.showTitleWhenCollapsed ?? false
+            };
+
+            const placeholder = am.getPlaceholderAnnotation?.();
+            if (placeholder && placeholder.id === id) {
+                // 放置阶段的占位标注，直接更新占位内容用于实时预览
+                if (placeholder.updateContent) {
+                    placeholder.updateContent(formData);
+                }
+            } else if (am.updateAnnotation) {
+                // 已有标注，走更新但不退出编辑态
                 am.updateAnnotation(id, formData);
             }
             break;
