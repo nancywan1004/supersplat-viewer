@@ -132,9 +132,9 @@ export class Annotation extends Script {
             .pc-annotation {
                 display: block;
                 position: absolute;
-                background-color: rgba(0, 0, 0, 0.8);
+                background-color: rgba(0, 0, 0, 0.5);
                 color: white;
-                padding: 8px;
+                padding: 10px 14px;
                 border-radius: 4px;
                 font-size: 14px;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
@@ -144,6 +144,7 @@ export class Annotation extends Script {
                 overflow-x: visible;
                 white-space: normal;
                 width: fit-content;
+                text-align: center;
                 opacity: 0;
                 transition: opacity 0.2s ease-in-out;
                 visibility: hidden;
@@ -151,7 +152,14 @@ export class Annotation extends Script {
 
             .pc-annotation-title {
                 font-weight: bold;
-                margin-bottom: 4px;
+                margin: 0 0 6px 0;
+                text-align: center;
+            }
+
+            .pc-annotation-text {
+                margin: 0;
+                text-align: center;
+                line-height: 1.4;
             }
 
             /* Tooltip arrow */
@@ -167,12 +175,12 @@ export class Annotation extends Script {
 
             .pc-annotation.arrow-right::before {
                 left: -8px;
-                border-right: 8px solid rgba(0, 0, 0, 0.8);
+                border-right: 8px solid rgba(0, 0, 0, 0.58);
             }
 
             .pc-annotation.arrow-left::before {
                 right: -8px;
-                border-left: 8px solid rgba(0, 0, 0, 0.8);
+                border-left: 8px solid rgba(0, 0, 0, 0.58);
             }
 
             .pc-annotation-hotspot {
@@ -198,10 +206,10 @@ export class Annotation extends Script {
 
             /* 收起时标题：深灰圆角 pill */
             .pc-annotation-collapsed-title {
-                background: #2d2d2d;
+                background: rgba(45, 45, 45, 0.5);
                 color: #fff;
                 padding: 5px 12px;
-                border-radius: 999px;
+                border-radius: 8px;
                 font-size: 12px;
                 font-weight: 400;
                 font-family: sans-serif;
