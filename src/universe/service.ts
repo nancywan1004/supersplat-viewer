@@ -196,7 +196,7 @@ export const updateProjectData = async (projectId: number | string, inputFiles: 
 
     try {
         const uploadResults = await Promise.all(
-            files.map((file) => uploadFileToAliyun(file, 2))
+            files.map((file) => uploadFileToAliyun(file, 2, projectId))
         );
 
         const payloadFiles: UploadFile[] = files.map((file, index) => ({
@@ -386,17 +386,19 @@ const buildUploadedFileUrl = (objectKey: string) => {
 /**
  * settings 文件上传时，强制对象名尾部为 settings.json，避免时间戳命名影响识别。
  */
-const resolveUploadObjectKey = (objectKey: string, fileName: string) => {
+const resolveUploadObjectKey = (objectKey: string, fileName: string, projectId?: number | string) => {
     if (fileName.toLowerCase() !== SETTINGFILENAME) return objectKey;
+    const normalizedProjectId = String(projectId ?? '').trim();
     const key = objectKey.replace(/^\/+/, '');
     const slashIndex = key.lastIndexOf('/');
-    if (slashIndex < 0) return SETTINGFILENAME;
-    return `${key.slice(0, slashIndex + 1)}${SETTINGFILENAME}`;
+    const baseDir = slashIndex >= 0 ? key.slice(0, slashIndex + 1) : '';
+    if (!normalizedProjectId) return `${baseDir}${SETTINGFILENAME}`;
+    return `${baseDir}${normalizedProjectId}/${SETTINGFILENAME}`;
 };
 
-const uploadSingleToOss = async (file: File, sts: Single_STSTOKEN_Response['data']) => {
+const uploadSingleToOss = async (file: File, sts: Single_STSTOKEN_Response['data'], projectId?: number | string) => {
     const client = createOssClient(sts);
-    const targetObjectKey = resolveUploadObjectKey(sts.objectKey, file.name);
+    const targetObjectKey = resolveUploadObjectKey(sts.objectKey, file.name, projectId);
     const result = await client.put(targetObjectKey, file, {
         mime: file.type || 'application/octet-stream'
     });
@@ -412,7 +414,7 @@ const uploadSingleToOss = async (file: File, sts: Single_STSTOKEN_Response['data
  * @param file 需要上传的文件
  * @param type 文件类型（1-物体，2-场景）
  */
-export const uploadFileToAliyun = async (file: File, type = 2): Promise<OssUploadResult> => {
+export const uploadFileToAliyun = async (file: File, type = 2, projectId?: number | string): Promise<OssUploadResult> => {
     if (!file) {
         throw new Error('文件不能为空');
     }
@@ -427,7 +429,7 @@ export const uploadFileToAliyun = async (file: File, type = 2): Promise<OssUploa
             fileName: file.name
         });
 
-        const uploadedObjectKey = await uploadSingleToOss(file, sts);
+        const uploadedObjectKey = await uploadSingleToOss(file, sts, projectId);
         return {
             fileName: file.name,
             fileSize: file.size,
@@ -445,7 +447,7 @@ export const uploadFileToAliyun = async (file: File, type = 2): Promise<OssUploa
     });
 
     const client = createOssClient(multipartSts);
-    const targetObjectKey = resolveUploadObjectKey(multipartSts.objectKey, file.name);
+    const targetObjectKey = resolveUploadObjectKey(multipartSts.objectKey, file.name, projectId);
     await client.multipartUpload(targetObjectKey, file, {
         partSize: multipartSts.chunkSize || CHUNKSIZE
     });
