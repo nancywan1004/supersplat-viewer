@@ -335,7 +335,8 @@ const initPostMessageBridge = (global: Global) => {
                 ? {
                     title: value.title ?? '',
                     text: value.text ?? '',
-                    imageUrl: value.imageUrl,
+                    // 协议语义：imageUrl: '' 表示显式清空；null 也按清空处理
+                    imageUrl: value.imageUrl === null ? '' : value.imageUrl,
                     showTitleWhenCollapsed: value.showTitleWhenCollapsed ?? false
                 }
                 : { title: '', text: '', showTitleWhenCollapsed: false };
@@ -358,7 +359,8 @@ const initPostMessageBridge = (global: Global) => {
             const formData = {
                 title: value.title ?? '',
                 text: value.text ?? '',
-                imageUrl: value.imageUrl,
+                // 协议语义：imageUrl: '' 表示显式清空；null 也按清空处理
+                imageUrl: value.imageUrl === null ? '' : value.imageUrl,
                 showTitleWhenCollapsed: value.showTitleWhenCollapsed ?? false
             };
 

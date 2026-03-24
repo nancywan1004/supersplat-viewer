@@ -17,14 +17,14 @@ const TEST_ENV_CONFIG: EnvConfig = {
 
 // 生产环境域名
 const PROD_ENV_CONFIG: EnvConfig = {
-    apiHost: 'https://unicity3-api.bdnrc.org.cn',   //待确认
+    apiHost: 'https://unicity3-api.bdnrc.org.cn',
     uploadedFileHost: 'https://unicity-model-cdn.bdnrc.org.cn',
     // viewerHost: 'https://universe.bdnrc.org.cn/gs?projectId='
 };
 
 const resolveDeployEnv = (): DeployEnv => {
     const host = window.location.hostname.toLowerCase();
-    return (host.includes('localhost') || host.includes('127.0.0.1') || host.includes('dev')) ? 'test' : 'prod';
+    return (host.includes('localhost') || host.includes('127.0.0.1') || host.includes('dev') || host.includes('3dgs-viewer-test')) ? 'test' : 'prod';
 };
 
 const CURRENT_ENV = resolveDeployEnv();
