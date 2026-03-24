@@ -168,7 +168,7 @@ export function initVideoExportUI(global: Global): () => void {
                 frameRate,
                 width,
                 height,
-                bitrate: 8_000_000,
+                bitrate: useFastExport ? 5_000_000 : 8_000_000,
                 transparentBg: false,
                 showDebug: false,
                 format: 'mp4' as 'mp4' | 'webm',

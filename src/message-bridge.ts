@@ -508,7 +508,7 @@ const initPostMessageBridge = (global: Global) => {
                 frameRate: 30,
                 width,
                 height,
-                bitrate: 8_000_000,
+                bitrate: 5_000_000,
                 transparentBg: false,
                 showDebug: false,
                 // 协议默认走“极速导出 MP4”（实时渲染 + WebCodecs 编码）

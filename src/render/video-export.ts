@@ -1,6 +1,7 @@
 import { BufferTarget, EncodedPacket, EncodedVideoPacketSource, MkvOutputFormat, MovOutputFormat, Mp4OutputFormat, Output, StreamTarget, WebMOutputFormat } from 'mediabunny';
 import { Global } from '../types';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../schemas/v2-custom';
+import { VIDEO_EXPORT_WORKER_SOURCE } from './video-export-worker';
 import {
     EventHandler,
     Vec3,
@@ -1073,7 +1074,7 @@ export const initVideoExport = (global: Global): void => {
         const useRealtimeWebCodecsMp4 = videoSettings.format === 'mp4';
 
         if (useRealtimeWebCodecsMp4) {
-            // 实时渲染到主 canvas，但编码用 WebCodecs + MP4 封装
+            // 实时渲染到主 canvas；编码放到 Worker，主线程仅渲染与 MP4 封装
             const encoderConfig = new VideoExportConfig(videoSettings);
             const target = fileStream ? new StreamTarget(fileStream) : new BufferTarget();
             const output = new Output({
@@ -1087,45 +1088,110 @@ export const initVideoExport = (global: Global): void => {
             });
             await output.start();
 
-            const encoder = createVideoEncoder(videoSource, encoderConfig.codec, videoSettings);
-            if (!encoder) {
-                throw new Error('Failed to create realtime WebCodecs encoder for fast MP4 export');
-            }
+            const worker = new Worker(URL.createObjectURL(new Blob([VIDEO_EXPORT_WORKER_SOURCE], { type: 'text/javascript' })));
+            let workerReady = false;
+            let workerDone = false;
+            let workerErrored: string | null = null;
+            let inFlightFrames = 0;
+            const MAX_IN_FLIGHT = 3;
+            let addChain = Promise.resolve();
+            let encodedChunkCount = 0;
+            const tFastStart = performance.now();
+            let tRenderEnd = 0;
+            let tBacklogEnd = 0;
+            let tWorkerDone = 0;
+            let tAddChainDone = 0;
+            let tFinalizeDone = 0;
+
+            const waitFor = (pred: () => boolean) => new Promise<void>((resolve, reject) => {
+                const tick = () => {
+                    if (workerErrored) {
+                        reject(new Error(workerErrored));
+                        return;
+                    }
+                    if (pred()) {
+                        resolve();
+                        return;
+                    }
+                    setTimeout(tick, 2);
+                };
+                tick();
+            });
+
+            worker.onmessage = (ev) => {
+                const msg = ev.data as any;
+                if (msg?.type === 'ready') workerReady = true;
+                if (msg?.type === 'frameDone') inFlightFrames = Math.max(0, inFlightFrames - 1);
+                if (msg?.type === 'chunk') {
+                    encodedChunkCount++;
+                    const chunk = new EncodedVideoChunk({
+                        type: msg.chunkType,
+                        timestamp: msg.timestamp,
+                        duration: msg.duration,
+                        data: new Uint8Array(msg.data)
+                    });
+                    addChain = addChain.then(async () => {
+                        const packet = EncodedPacket.fromEncodedChunk(chunk);
+                        await videoSource.add(packet, msg.meta);
+                    });
+                }
+                if (msg?.type === 'done') workerDone = true;
+                if (msg?.type === 'error') workerErrored = msg.message ?? 'worker error';
+            };
+
+            worker.postMessage({
+                type: 'init',
+                config: {
+                    codec: encoderConfig.codec,
+                    width: evenWidth,
+                    height: evenHeight,
+                    bitrate: videoSettings.bitrate,
+                    framerate: frameRate
+                }
+            });
+            await waitFor(() => workerReady);
 
             try {
                 const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
+                const keyFrameEvery = Math.max(1, Math.round(frameRate * 2));
                 for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
                     if (signal?.aborted) break;
-                    if (encoder.state === 'closed' || (encoder as any)._errorOccurred) break;
+                    if (workerErrored) throw new Error(workerErrored);
+                    while (inFlightFrames >= MAX_IN_FLIGHT) {
+                        if (signal?.aborted) break;
+                        if (workerErrored) throw new Error(workerErrored);
+                        await new Promise(r => setTimeout(r, 2));
+                    }
                     const frameStart = performance.now();
                     const frameTime = Math.min(frameIndex * frameInterval, totalDuration);
                     const effectTime = includeVfx ? frameTime : vfxTotalDuration;
                     if (syncAnimTrack || !includeVfx) seekAnimToTimeAndApply(global, frameTime);
                     await prepareAndRenderOneFrameToCanvas(global, effectTime);
-
+                    const bitmap = await createImageBitmap(canvas);
                     const timestampUs = Math.round(frameTime * 1_000_000);
-                    const vf = new (globalThis as any).VideoFrame(canvas, {
+                    inFlightFrames++;
+                    worker.postMessage({
+                        type: 'frame',
+                        bitmap,
                         timestamp: timestampUs,
-                        duration: frameDurationUs
-                    });
-                    const keyFrameEvery = Math.max(1, Math.round(frameRate * 2));
-                    encoder.encode(vf, { keyFrame: frameIndex === 0 || frameIndex % keyFrameEvery === 0 });
-                    vf.close();
-
-                    // 轻量回压：防止编码队列长期堆积导致内存上涨
-                    while (encoder.encodeQueueSize > 8) {
-                        if (signal?.aborted) break;
-                        await new Promise(r => setTimeout(r, 2));
+                        duration: frameDurationUs,
+                        keyFrame: frameIndex === 0 || frameIndex % keyFrameEvery === 0
+                    }, [bitmap]);
+                    if ((frameIndex + 1) % 120 === 0) {
+                        console.log(
+                            VFX_EXPORT_LOG_TAG,
+                            `fast-mp4 progress: rendered=${frameIndex + 1}/${totalFrames}, inFlight=${inFlightFrames}, chunks=${encodedChunkCount}`
+                        );
                     }
-
                     updateProgress(frameTime, totalDuration);
                     const elapsed = performance.now() - frameStart;
                     const wait = Math.max(0, frameTimeMs - elapsed);
                     if (wait > 0) await new Promise(r => setTimeout(r, wait));
                 }
+                tRenderEnd = performance.now();
 
                 if (signal?.aborted) {
-                    if (encoder.state !== 'closed') encoder.close();
+                    worker.postMessage({ type: 'abort' });
                     if (fileStream) {
                         try {
                             await fileStream.close?.();
@@ -1136,9 +1202,25 @@ export const initVideoExport = (global: Global): void => {
                     return false;
                 }
 
-                await encoder.flush();
-                if (encoder.state !== 'closed') encoder.close();
+                await waitFor(() => inFlightFrames === 0);
+                tBacklogEnd = performance.now();
+                worker.postMessage({ type: 'finalize' });
+                await waitFor(() => workerDone);
+                tWorkerDone = performance.now();
+                await addChain;
+                tAddChainDone = performance.now();
                 await output.finalize();
+                tFinalizeDone = performance.now();
+                console.log(
+                    VFX_EXPORT_LOG_TAG,
+                    `fast-mp4 timing: render=${((tRenderEnd - tFastStart) / 1000).toFixed(2)}s, ` +
+                    `drainBacklog=${((tBacklogEnd - tRenderEnd) / 1000).toFixed(2)}s, ` +
+                    `workerFlush=${((tWorkerDone - tBacklogEnd) / 1000).toFixed(2)}s, ` +
+                    `sourceAddDrain=${((tAddChainDone - tWorkerDone) / 1000).toFixed(2)}s, ` +
+                    `finalize=${((tFinalizeDone - tAddChainDone) / 1000).toFixed(2)}s, ` +
+                    `total=${((tFinalizeDone - tFastStart) / 1000).toFixed(2)}s, ` +
+                    `chunks=${encodedChunkCount}`
+                );
 
                 if (fileStream) {
                     const streamLike = fileStream as unknown as { locked?: boolean; close?: () => Promise<void> };
@@ -1147,9 +1229,7 @@ export const initVideoExport = (global: Global): void => {
                     await handleDownload(output, target, fileStream, encoderConfig.fileExtension);
                 }
             } finally {
-                if (encoder.state !== 'closed') {
-                    encoder.close();
-                }
+                try { worker.terminate(); } catch {}
             }
         } else {
             const stream = canvas.captureStream(frameRate);
