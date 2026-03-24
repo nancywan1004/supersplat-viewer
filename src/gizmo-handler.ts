@@ -47,6 +47,7 @@ const MODE_TO_GIZMO_TYPE: Record<AssetTransformMode, string> = {
 export function initGizmoHandler(global: Global): () => void {
     const { app, state, events, camera } = global;
     const api = getGizmoAPI();
+    let gizmoPointerLocked = false;
 
     let handler: {
         _gizmos: Record<string, any>;
@@ -69,26 +70,29 @@ export function initGizmoHandler(global: Global): () => void {
                 scale: new api.ScaleGizmo(cameraComp, layer)
             };
 
-            // 绑定 pointer 事件：当 Gizmo 被拖拽时临时关闭相机控制，避免两边同时处理同一批输入事件
+            // 使用 transform 生命周期锁定相机输入，避免 pointer 命中抖动导致“拖一点就断”
             Object.values(_gizmos).forEach((gizmo: any) => {
-                gizmo.on('pointer:down', (_x: number, _y: number, meshInstance: any) => {
-                    if (meshInstance) {
-                        // 命中 Gizmo 句柄，关闭相机输入
-                        state.cameraControlsEnabled = false;
-                    }
+                gizmo.on('transform:start', () => {
+                    gizmoPointerLocked = true;
+                    events.fire('cameraControls:flushInputs');
+                    state.cameraControlsEnabled = false;
                 });
-                gizmo.on('pointer:up', () => {
-                    // 结束拖拽后，先清空一次相机输入增量，再重新开启相机控制，避免「松手瞬间相机跳一下」
+                gizmo.on('transform:end', () => {
+                    if (!gizmoPointerLocked) return;
+                    gizmoPointerLocked = false;
                     events.fire('cameraControls:flushInputs');
                     state.cameraControlsEnabled = true;
+                });
+                gizmo.on('pointer:up', () => {
+                    if (!state.editMode || !handler || handler._nodes.length === 0) return;
 
                     // 资产模式：记录资产变换历史
-                    if (state.editMode && state.selectedSceneEntityId && handler && handler._nodes.length > 0 && state.editLeftModule === 'asset') {
+                    if (state.selectedSceneEntityId && state.editLeftModule === 'asset') {
                         pushEditHistory(global, 'transform asset');
                     }
 
                     // 光源模式：将 Gizmo 上的变换回写到 settings.lighting，并刷新光源实体
-                    if (state.editMode && state.editLeftModule === 'environment' && handler && handler._nodes.length > 0) {
+                    if (state.editLeftModule === 'environment') {
                         let changed = false;
                         handler._nodes.forEach((node: any) => {
                             const cfg = (node as any).__lightConfig as any | undefined;
@@ -118,6 +122,16 @@ export function initGizmoHandler(global: Global): () => void {
                     }
                 });
             });
+
+            // 兜底：异常情况下若没有收到 transform:end，松开左键时回收锁
+            const onWindowPointerUp = (ev: PointerEvent) => {
+                if (ev.button !== 0 || !gizmoPointerLocked) return;
+                gizmoPointerLocked = false;
+                events.fire('cameraControls:flushInputs');
+                state.cameraControlsEnabled = true;
+            };
+            window.addEventListener('pointerup', onWindowPointerUp, true);
+            window.addEventListener('pointercancel', onWindowPointerUp as any, true);
             let _type = 'translate';
             const _nodes: any[] = [];
             handler = {
@@ -147,6 +161,9 @@ export function initGizmoHandler(global: Global): () => void {
                     g.coordSpace = coordSpace;
                 },
                 destroy() {
+                    gizmoPointerLocked = false;
+                    window.removeEventListener('pointerup', onWindowPointerUp, true);
+                    window.removeEventListener('pointercancel', onWindowPointerUp as any, true);
                     for (const k of Object.keys(_gizmos)) {
                         _gizmos[k].destroy();
                     }

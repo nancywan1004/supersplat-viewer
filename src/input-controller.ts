@@ -475,8 +475,19 @@ class InputController {
      * @param distance - the distance to the camera target
      */
     update(dt: number, distance: number) {
-        // 当全局关闭相机控制（例如正在拖拽 Gizmo）时，清空输入增量并直接返回
+        // 当全局关闭相机控制（例如正在拖拽 Gizmo）时，仍持续消费输入源缓存，
+        // 防止恢复后一次性吃掉拖拽期间累积的 mouse delta。
         if (this.global.state.cameraControlsEnabled === false) {
+            this._desktopInput.read();
+            this._orbitInput.read();
+            this._flyInput.read();
+            this._gamepadInput.read();
+
+            this._state.axis.set(0, 0, 0);
+            this._state.mouse = [0, 0, 0];
+            this._state.touches = 0;
+            this._state.currentTouchCount = 0;
+
             this.frame = new InputFrame({
                 move: [0, 0, 0],
                 rotate: [0, 0, 0]
