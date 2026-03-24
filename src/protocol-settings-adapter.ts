@@ -134,19 +134,34 @@ export function applyLightGlobalSet(global: Global, value: number): void {
     (global.app as { fire: (name: string, value?: unknown) => void }).fire('nightFade:set', v);
 }
 
-/** LIGHT_ADD：在 lighting.lights 中追加一盏点光（带 id），默认在相机前方生成 */
-export function applyLightAdd(global: Global, id: string): void {
+/** LIGHT_ADD：isThreeSixty=true 创建点光；false 创建聚光灯（带 id），默认在相机前方生成 */
+export function applyLightAdd(global: Global, id: string, isThreeSixty = true): void {
     const settings = global.settings as ExperienceSettings;
     const lighting = ensureLighting(settings);
     const camPos = getPositionInFrontOfCamera(global);
-    lighting.lights.push({
-        id,
-        position: [camPos.x, camPos.y, camPos.z],
-        color: [1, 1, 1],
-        intensity: 1,
-        range: 10,
-        enabled: true
-    } as LightWithId);
+    if (isThreeSixty) {
+        lighting.lights.push({
+            id,
+            type: 'point',
+            position: [camPos.x, camPos.y, camPos.z],
+            color: [1, 1, 1],
+            intensity: 1,
+            range: 10,
+            enabled: true
+        } as LightWithId);
+    } else {
+        lighting.lights.push({
+            id,
+            type: 'spot',
+            position: [camPos.x, camPos.y, camPos.z],
+            color: [1, 1, 1],
+            intensity: 1,
+            range: 10,
+            innerConeAngle: 25,
+            outerConeAngle: 45,
+            enabled: true
+        } as LightWithId);
+    }
     updatePointLightsFromSettings(global);
     global.events.fire('lighting:changed');
     global.events.fire('postEffect:changed');

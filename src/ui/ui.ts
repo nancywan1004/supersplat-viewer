@@ -628,7 +628,7 @@ const initUI = (global: Global) => {
                     // 2) 等待 needsSave 再弹窗
                     waitFor('EDIT_EXIT_NEEDS_SAVE')
                         .then((msg) => {
-                            const needsSave = !!msg?.payload?.needsSave;
+                            const needsSave = !!msg?.payload?.value;
                             if (!needsSave) {
                                 sendEditProtocolMessage({ type: 'EDIT_MODE_SET', value: false });
                                 return;

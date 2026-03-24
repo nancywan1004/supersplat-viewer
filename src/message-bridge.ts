@@ -78,7 +78,7 @@ type InboundPayload =
     | { type: 'ANNOTATION_EDIT'; id?: string }
     | { type: 'ANNOTATION_TRANSFORM_MODE'; value?: 'move' | null }
     | { type: 'LIGHT_GLOBAL_SET'; value?: number }
-    | { type: 'LIGHT_ADD'; id?: string }
+    | { type: 'LIGHT_ADD'; id?: string; isThreeSixty?: boolean }
     | { type: 'LIGHT_TOGGLE_ALL'; value?: boolean }
     | { type: 'LIGHT_TOGGLE'; id?: string; value?: boolean }
     | { type: 'LIGHT_SELECT'; id?: string | null }
@@ -191,7 +191,7 @@ const initPostMessageBridge = (global: Global) => {
         }
         case 'EDIT_MODE_EXIT_REQUEST': {
             const needsSave = editModeBaselineString != null && getComparableSettingsString(global) !== editModeBaselineString;
-            postToParent('EDIT_EXIT_NEEDS_SAVE', { needsSave });
+            postToParent('EDIT_EXIT_NEEDS_SAVE', { value: needsSave });
             break;
         }
         case 'EDIT_MODE_EXIT_DISCARD': {
@@ -225,10 +225,10 @@ const initPostMessageBridge = (global: Global) => {
             const uploaded = await uploadProjectData(projectId ?? '', token ?? '', jsonString);
             if (!uploaded) {
                 console.error('[MessageBridge] SETTINGS_SAVE 上传失败，已取消 SETTINGS_UPDATED 回传');
-                postToParent('SETTINGS_SAVE_FAILED', { message: 'settings upload failed' });
+                postToParent('SETTINGS_SAVE_FAILED');
                 break;
             }
-            postToParent('SETTINGS_UPDATED', { payload: jsonString });
+            postToParent('SETTINGS_UPDATED');
             setBaseline();
             break;
         }
@@ -435,7 +435,9 @@ const initPostMessageBridge = (global: Global) => {
             break;
         }
         case 'LIGHT_ADD':
-            if (typeof p.id === 'string') applyLightAdd(global, p.id);
+            if (typeof p.id === 'string') {
+                applyLightAdd(global, p.id, (p as { isThreeSixty?: boolean }).isThreeSixty);
+            }
             break;
         case 'LIGHT_SELECT':
             applyLightSelect(global, (p.id !== undefined ? p.id : null) as string | null, 'host');
