@@ -146,8 +146,26 @@ export function initEditBottomToolbarUI(global: Global): () => void {
         });
         syncAssetModeButtons();
 
-        copyBtn?.addEventListener('click', () => events.fire('assetEdit:copy'));
-        deleteBtn?.addEventListener('click', () => events.fire('assetEdit:delete'));
+        copyBtn?.addEventListener('click', () => {
+            if (editUiTransport === 'message-bridge') {
+                const id = state.selectedSceneEntityId;
+                if (typeof id === 'string') {
+                    sendEditProtocolMessage({ type: 'ASSET_COPY', id });
+                }
+                return;
+            }
+            events.fire('assetEdit:copy');
+        });
+        deleteBtn?.addEventListener('click', () => {
+            if (editUiTransport === 'message-bridge') {
+                const id = state.selectedSceneEntityId;
+                if (typeof id === 'string') {
+                    sendEditProtocolMessage({ type: 'ASSET_DELETE', id });
+                }
+                return;
+            }
+            events.fire('assetEdit:delete');
+        });
     };
 
     const syncAnnotationMoveButton = () => {

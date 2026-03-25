@@ -75,6 +75,10 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
         eyeOffBtn.addEventListener('click', toggleVisibility);
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'ASSET_DELETE', id: entry.id });
+                return;
+            }
             entry.entity.destroy();
             const arr = state.scenePlacedEntities!;
             const idx = arr.findIndex((s) => s.id === entry.id);
@@ -91,6 +95,10 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
         });
         li.addEventListener('click', (e) => {
             if ((e.target as HTMLElement).closest('.scene-asset-delete') || (e.target as HTMLElement).closest('.scene-asset-visibility')) return;
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'ASSET_SELECT', id: entry.id });
+                return;
+            }
             state.selectedSceneEntityId = entry.id;
             events.fire('sceneAsset:selected', { source: 'host' });
             renderSceneAssetList(listEl, global);
