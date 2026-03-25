@@ -1,6 +1,6 @@
 import type { AppBase } from 'playcanvas';
 import * as pc from 'playcanvas';
-import { Vec3, StandardMaterial, CULLFACE_NONE } from 'playcanvas';
+import { Vec3, Quat, StandardMaterial, CULLFACE_NONE } from 'playcanvas';
 import type { Global } from './types';
 import type { AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from './types';
 import { getSelectedSceneEntity } from './state-helpers';
@@ -41,6 +41,43 @@ export function getPositionInFrontOfCamera(global: Global, distance: number = CA
     return pos;
 }
 
+/**
+ * 仅根据相机在 XZ 平面上的方位设置「航向角」（本地欧拉 yaw / Y），不改变 pitch(X)、roll(Z)。
+ */
+function computeYawDegToFaceCameraHorizontal(entityPos: Vec3, camPos: Vec3): number {
+    const dx = camPos.x - entityPos.x;
+    const dz = camPos.z - entityPos.z;
+    return Math.atan2(dx, dz) * pc.math.RAD_TO_DEG;
+}
+
+/**
+ * 放置后只调整 yaw，使水平面上指向相机；保留原有 pitch/roll。
+ * 图片：维持原立屏姿态 pitch=-90、roll=180，仅改 Y。
+ * 高斯：unified 需 Z=180，但与航向若写进同一组 intrinsic XYZ 欧拉会耦合成「左右镜像」体感；
+ * 改用四元数先 Rz(180) 再绕世界 Y 转航向（mul2(yaw, fix)）。
+ */
+function applyPlacedEntityYawToFaceCamera(entity: Entity, global: Global, assetType: AssetLibraryType) {
+    const camPos = global.camera.getPosition();
+    const pos = entity.getPosition();
+    const yawDeg = computeYawDegToFaceCameraHorizontal(pos, camPos);
+
+    if (assetType === 'image') {
+        entity.setLocalEulerAngles(-90, yawDeg, 180);
+        return;
+    }
+
+    if (assetType === 'gaussian') {
+        const qFix = new Quat().setFromEulerAngles(0, 0, 180);
+        const qYaw = new Quat().setFromAxisAngle(Vec3.UP, yawDeg);
+        const q = new Quat().mul2(qYaw, qFix);
+        entity.setRotation(q);
+        return;
+    }
+
+    const e = entity.getLocalEulerAngles();
+    entity.setLocalEulerAngles(e.x, yawDeg, e.z);
+}
+
 async function instantiateImage(app: AppBase, item: AssetLibraryItem, position: Vec3): Promise<Entity> {
     return new Promise((resolve, reject) => {
         const url = item.url || item.thumbnailUrl;
@@ -70,8 +107,6 @@ async function instantiateImage(app: AppBase, item: AssetLibraryItem, position: 
                 receiveShadows: true
             });
             entity.setPosition(position);
-            // 让图片立在场景中（绕 X 轴 -180°，避免平贴地面）
-            entity.setLocalEulerAngles(-90, 0, 180);
             const s = 2;
             entity.setLocalScale(s, s, 1);
             resolve(entity);
@@ -97,8 +132,6 @@ async function instantiateGaussian(app: AppBase, item: AssetLibraryItem, positio
     const asset = item.asset;
     if (!asset) throw new Error('gaussian asset not ready');
     const entity = new Entity(item.name || 'gsplat');
-    // 与主场景 gsplat 的朝向一致
-    entity.setLocalEulerAngles(0, 0, 180);
     entity.addComponent('gsplat', { unified: true, asset, castShadows: true });
     const material = entity.gsplat!.unified ? app.scene.gsplat.material : entity.gsplat!.material;
     // 尽量与主场景 gsplat 的配置保持一致，开启 AA 并设置 alphaClip
@@ -185,6 +218,8 @@ export async function placeAsset(global: Global, item: AssetLibraryItem, worldPo
     }
 
     parent.addChild(entity);
+
+    applyPlacedEntityYawToFaceCamera(entity, global, item.type);
 
     if (alignCenterToCameraHeight) {
         const center = computeEntityWorldCenter(entity);
