@@ -219,15 +219,8 @@ export function initAnnotationUI(global: Global): () => void {
     events.on('annotation:created', updateList);
     events.on('annotation:deleted', updateList);
     events.on('annotation:selected', onAnnotationSelected);
-    const onAnnotationSelectFromHotspot = (data: { id: string }) => {
-        const placeholder = annotationManager.getPlaceholderAnnotation();
-        // 放置流程中的占位标注不参与「选中」逻辑，避免找不到 id 的 warning
-        if (placeholder && placeholder.id === data.id) {
-            return;
-        }
-        annotationManager.selectAnnotation(data.id, { source: 'scene' });
-    };
-    events.on('annotation:selectFromHotspot', onAnnotationSelectFromHotspot);
+    // annotation:selectFromHotspot 的兜底监听已下沉到 AnnotationManager，
+    // 这里不再在 UI 层注册，避免 UI 未挂载时无法触发选中回传。
     events.on('annotation:deselected', onAnnotationDeselected);
     events.on('annotation:place', onAnnotationPlaceWithHint);
     events.on('annotationPlacement:started', onPlacementStarted);
@@ -313,7 +306,6 @@ export function initAnnotationUI(global: Global): () => void {
         events.off('annotation:created', updateList);
         events.off('annotation:deleted', updateList);
         events.off('annotation:selected', onAnnotationSelected);
-        events.off('annotation:selectFromHotspot', onAnnotationSelectFromHotspot);
         events.off('annotation:deselected', onAnnotationDeselected);
         events.off('annotation:place', onAnnotationPlaceWithHint);
         events.off('annotationPlacement:started', onPlacementStarted);

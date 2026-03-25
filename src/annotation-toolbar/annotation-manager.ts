@@ -72,10 +72,22 @@ export class AnnotationManager {
             this.global.events.on('annotation:moved', this.onAnnotationMoved, this);
             this.global.events.on('annotation:moveComplete', this.onAnnotationMoveComplete, this);
             this.global.events.on('annotation:updated', this.onAnnotationUpdated, this);
+            // 热点点击事件需要由 manager 兜底接管，
+            // 避免 annotation-ui 未初始化时导致 message-bridge 收不到 SCENE_ANNOTATION_SELECTED。
+            this.global.events.on('annotation:selectFromHotspot', this.onAnnotationSelectFromHotspot, this);
         }
 
         // 从设置中加载现有标注
         this.loadFromSettings();
+    }
+
+    private onAnnotationSelectFromHotspot(data: { id: string }): void {
+        const placeholder = this.getPlaceholderAnnotation();
+        // 放置流程中的占位标注不参与「选中」逻辑
+        if (placeholder && placeholder.id === data.id) return;
+        // 同一 id 重复点击可能导致事件重复 fire，这里仅在“确实换选项”时触发回传。
+        if (this.selectedAnnotationId === data.id) return;
+        this.selectAnnotation(data.id, { source: 'scene' });
     }
 
     /**
