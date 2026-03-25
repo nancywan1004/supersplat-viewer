@@ -62,7 +62,7 @@
                 splatMeshUrl,
                 allowEditMode: !url.searchParams.has('noEditMode'),
                 showEditUI: false,
-                trackEditHistory: url.searchParams.get('trackEditHistory') !== 'false',
+                trackEditHistory: false, //url.searchParams.get('trackEditHistory') !== 'false',
                 editUiTransport: url.searchParams.get('editUiTransport') === 'message-bridge' ? 'message-bridge' : 'internal',
                 nofx: url.searchParams.has('nofx'),
                 hpr: url.searchParams.has('hpr') ? ['', '1', 'true', 'enable'].includes(url.searchParams.get('hpr')) : undefined,

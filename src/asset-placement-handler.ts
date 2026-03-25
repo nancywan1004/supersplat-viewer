@@ -249,6 +249,51 @@ export async function placeAsset(global: Global, item: AssetLibraryItem, worldPo
 }
 
 /**
+ * 协议放置时，父级常只传 url/name/type，不会携带已加载的 PlayCanvas asset 实例。
+ * 这里补齐 mesh/gaussian 的 asset，保证 ASSET_PLACE 只传 URL 也可直接放置。
+ */
+async function hydrateProtocolPlaceItem(global: Global, item: AssetLibraryItem): Promise<AssetLibraryItem | null> {
+    if (item.type === 'image') return item;
+
+    if (item.asset) return item;
+
+    const url = item.url || item.filename;
+    if (!url) {
+        console.warn('[AssetPlacement] protocol place missing url for', item.type);
+        return null;
+    }
+
+    const app = global.app;
+    try {
+        if (item.type === 'gaussian') {
+            const asset = await loadGsplatAsset(app, {
+                url,
+                filename: item.filename ?? url
+            } as any);
+            return { ...item, asset, filename: item.filename ?? url, url };
+        }
+
+        if (item.type === 'mesh') {
+            const asset = await new Promise<any>((resolve, reject) => {
+                (app.assets as any).loadFromUrl(url, 'container', (err: Error | null, loadedAsset: any) => {
+                    if (err || !loadedAsset) {
+                        reject(err ?? new Error('container asset missing'));
+                        return;
+                    }
+                    resolve(loadedAsset);
+                });
+            });
+            return { ...item, asset, filename: item.filename ?? url, url };
+        }
+    } catch (err) {
+        console.warn('[AssetPlacement] protocol asset hydrate failed:', item.type, url, err);
+        return null;
+    }
+
+    return item;
+}
+
+/**
  * 从 settings.sceneAssets 还原场景中的资产实体，并写入 state.scenePlacedEntities。
  * 支持 image / mesh / gaussian，使用 source.url / source.filename 重新加载资产。
  */
@@ -488,7 +533,9 @@ export function initAssetPlacementHandler(
     canvas.addEventListener('pointerdown', onPointerDown);
     const onPlaceFromProtocol = async (payload: { value: AssetLibraryItem }) => {
         const pos = getPositionInFrontOfCamera(global);
-        const entry = await placeAsset(global, payload.value, pos, true);
+        const hydrated = await hydrateProtocolPlaceItem(global, payload.value);
+        if (!hydrated) return;
+        const entry = await placeAsset(global, hydrated, pos, true);
         if (entry) {
             state.selectedSceneEntityId = entry.id;
             events.fire('sceneAsset:selected');
