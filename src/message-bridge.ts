@@ -257,7 +257,9 @@ const initPostMessageBridge = (global: Global) => {
                 }
                 // 回退：若未在 uploadedAssets 中找到，则直接使用 payload（兼容外部宿主仅传 url/name 等字段的情况）
                 const finalValue = (value ?? (p.value as AssetLibraryItem));
-                events.fire('assetPlacement:place', { value: finalValue });
+                // 协议语义：ASSET_PLACE.value.id 用作场景实体 id；资产库匹配命中时通过 finalValue 提供素材数据。
+                const sceneEntityId = typeof incoming.id === 'string' && incoming.id.trim().length > 0 ? incoming.id : undefined;
+                events.fire('assetPlacement:place', { value: finalValue, sceneEntityId });
             }
             break;
         case 'ASSET_SHOW_HIDE_SET':
@@ -289,11 +291,15 @@ const initPostMessageBridge = (global: Global) => {
             events.fire('sceneAsset:selected', { source: 'host' as SelectionSource });
             break;
         case 'ASSET_COPY':
-            if (typeof p.id === 'string') {
+            if (
+                typeof p.id === 'string' &&
+                typeof p.copyId === 'string' &&
+                p.copyId.trim().length > 0
+            ) {
                 state.selectedSceneEntityId = p.id;
                 events.fire('sceneAsset:selected', { source: 'host' as SelectionSource });
                 events.fire('assetEdit:copy', {
-                    copyId: typeof p.copyId === 'string' ? p.copyId : undefined
+                    copyId: p.copyId
                 });
             }
             break;

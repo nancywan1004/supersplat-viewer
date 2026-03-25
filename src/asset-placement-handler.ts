@@ -13,7 +13,8 @@ export type AssetPlacementHandlerDeps = {
     pushEditHistory?: (global: Global, label?: string) => void;
 };
 
-function nextSceneEntityId(): string {
+/** 新场景放置实体 id（ASSET_COPY 的 copyId 等与内部复制共用） */
+export function nextSceneEntityId(): string {
     return `scene-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
@@ -531,12 +532,15 @@ export function initAssetPlacementHandler(
     };
 
     canvas.addEventListener('pointerdown', onPointerDown);
-    const onPlaceFromProtocol = async (payload: { value: AssetLibraryItem }) => {
+    const onPlaceFromProtocol = async (payload: { value: AssetLibraryItem; sceneEntityId?: string }) => {
         const pos = getPositionInFrontOfCamera(global);
         const hydrated = await hydrateProtocolPlaceItem(global, payload.value);
         if (!hydrated) return;
         const entry = await placeAsset(global, hydrated, pos, true);
         if (entry) {
+            if (typeof payload.sceneEntityId === 'string' && payload.sceneEntityId.trim().length > 0) {
+                entry.id = payload.sceneEntityId;
+            }
             state.selectedSceneEntityId = entry.id;
             events.fire('sceneAsset:selected');
             deps.pushEditHistory?.(global, 'place asset');

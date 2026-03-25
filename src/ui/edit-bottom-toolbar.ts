@@ -148,10 +148,7 @@ export function initEditBottomToolbarUI(global: Global): () => void {
 
         copyBtn?.addEventListener('click', () => {
             if (editUiTransport === 'message-bridge') {
-                const id = state.selectedSceneEntityId;
-                if (typeof id === 'string') {
-                    sendEditProtocolMessage({ type: 'ASSET_COPY', id });
-                }
+                console.warn('[EditBottomToolbar] message-bridge 模式下 copyId 需由父级生成并通过 ASSET_COPY 下发');
                 return;
             }
             events.fire('assetEdit:copy');
