@@ -15,6 +15,8 @@ import type { DirectionalLightConfig, SpotLightConfig } from './schemas/v2';
 
 const MAX_POINT_LIGHTS = 10;
 const MAX_SPOT_LIGHTS = 10;
+// 仅影响“线框/锥体可视化”的大小，不影响真实光照参数（range 等）
+const LIGHT_VISUAL_SCALE = 0.25;
 
 const isDirectionalLightConfig = (cfg: any): cfg is DirectionalLightConfig =>
     cfg && cfg.type === 'directional';
@@ -309,7 +311,8 @@ const updatePointLightRangeVisual = (lightEntity: Entity, range: number): void =
     const visual = (lightEntity as any).__lightRangeWireframe as Entity | undefined;
     if (!visual) return;
     const r = Math.max(0.01, Number.isFinite(range) ? range : 1);
-    visual.setLocalScale(r, r, r);
+    const s = r * LIGHT_VISUAL_SCALE;
+    visual.setLocalScale(s, s, s);
 };
 
 /**
@@ -378,7 +381,11 @@ const updateSpotGizmoShape = (spotEntity: Entity, range: number, outerConeAngleD
     const outerRadius = r * Math.tan(outerRad * 0.5);
     // 单位锥体：锥尖(0,0,0) → 底面y=-1，底面半径=1
     visual.setLocalPosition(0, 0, 0);
-    visual.setLocalScale(Math.max(outerRadius, 0.01), r, Math.max(outerRadius, 0.01));
+    visual.setLocalScale(
+        Math.max(outerRadius * LIGHT_VISUAL_SCALE, 0.01),
+        r * LIGHT_VISUAL_SCALE,
+        Math.max(outerRadius * LIGHT_VISUAL_SCALE, 0.01)
+    );
 
     // 内圈半径来源：light.innerConeAngle，若无则退化为 outerAngle
     if (innerRing) {
@@ -388,7 +395,11 @@ const updateSpotGizmoShape = (spotEntity: Entity, range: number, outerConeAngleD
         const innerRad = innerDeg * Math.PI / 180;
         const innerRadius = r * Math.tan(innerRad * 0.5);
         innerRing.setLocalPosition(0, 0, 0);
-        innerRing.setLocalScale(Math.max(innerRadius, 0.01), r, Math.max(innerRadius, 0.01));
+        innerRing.setLocalScale(
+            Math.max(innerRadius * LIGHT_VISUAL_SCALE, 0.01),
+            r * LIGHT_VISUAL_SCALE,
+            Math.max(innerRadius * LIGHT_VISUAL_SCALE, 0.01)
+        );
     }
 };
 

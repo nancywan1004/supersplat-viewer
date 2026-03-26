@@ -355,14 +355,17 @@ export class RenderManager {
 /**
  * 渲染一帧到主 canvas（不经过离屏 RT）。
  * 用于「快速导出」：设置 VFX 时间 → 脚本 update → 触发一帧渲染到屏幕，由 captureStream 录制。
+ * @param skipVfx 为 true 时跳过 VFX 时间轴设置和脚本 update，避免 reveal shader 被意外激活
  */
-export async function prepareAndRenderOneFrameToCanvas(global: Global, effectTime: number): Promise<void> {
-    global.events.fire('effectTimeline:setForExport', effectTime);
-    const gsplatEntity = global.app.root.findByName('gsplat') as Entity | null;
-    if (gsplatEntity?.script) {
-        const scripts = (gsplatEntity.script as any).scripts as Array<{ update?: (dt: number) => void }> | undefined;
-        if (Array.isArray(scripts)) {
-            for (const s of scripts) if (s?.update) s.update(0);
+export async function prepareAndRenderOneFrameToCanvas(global: Global, effectTime: number, skipVfx = false): Promise<void> {
+    if (!skipVfx) {
+        global.events.fire('effectTimeline:setForExport', effectTime);
+        const gsplatEntity = global.app.root.findByName('gsplat') as Entity | null;
+        if (gsplatEntity?.script) {
+            const scripts = (gsplatEntity.script as any).scripts as Array<{ update?: (dt: number) => void }> | undefined;
+            if (Array.isArray(scripts)) {
+                for (const s of scripts) if (s?.update) s.update(0);
+            }
         }
     }
     global.app.renderNextFrame = true;
@@ -1096,6 +1099,7 @@ export const initVideoExport = (global: Global): void => {
             const MAX_IN_FLIGHT = 3;
             let addChain = Promise.resolve();
             let encodedChunkCount = 0;
+            let lastEncodeQueueSize = 0;
             const tFastStart = performance.now();
             let tRenderEnd = 0;
             let tBacklogEnd = 0;
@@ -1121,7 +1125,10 @@ export const initVideoExport = (global: Global): void => {
             worker.onmessage = (ev) => {
                 const msg = ev.data as any;
                 if (msg?.type === 'ready') workerReady = true;
-                if (msg?.type === 'frameDone') inFlightFrames = Math.max(0, inFlightFrames - 1);
+                if (msg?.type === 'frameDone') {
+                    inFlightFrames = Math.max(0, inFlightFrames - 1);
+                    lastEncodeQueueSize = msg.encodeQueueSize || 0;
+                }
                 if (msg?.type === 'chunk') {
                     encodedChunkCount++;
                     const chunk = new EncodedVideoChunk({
@@ -1146,7 +1153,8 @@ export const initVideoExport = (global: Global): void => {
                     width: evenWidth,
                     height: evenHeight,
                     bitrate: videoSettings.bitrate,
-                    framerate: frameRate
+                    framerate: frameRate,
+                    latencyMode: 'realtime'
                 }
             });
             await waitFor(() => workerReady);
@@ -1154,21 +1162,30 @@ export const initVideoExport = (global: Global): void => {
             try {
                 const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
                 const keyFrameEvery = Math.max(1, Math.round(frameRate * 2));
+                // 背压：最多允许编码器落后 5 帧。
+                // 配合 8ms 等待间隔，在减少 flush 尾巴的同时降低 sleep 开销。
+                const MAX_ENCODE_DEBT = 5;
+                let framesSent = 0;
+                let paceHits = 0;
                 for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
                     if (signal?.aborted) break;
                     if (workerErrored) throw new Error(workerErrored);
-                    while (inFlightFrames >= MAX_IN_FLIGHT) {
+                    // 等编码器追上：已发送帧数 - 已产出 chunk 数 <= MAX_ENCODE_DEBT
+                    let didPaceWait = false;
+                    while (framesSent - encodedChunkCount >= MAX_ENCODE_DEBT) {
+                        didPaceWait = true;
                         if (signal?.aborted) break;
                         if (workerErrored) throw new Error(workerErrored);
-                        await new Promise(r => setTimeout(r, 2));
+                        await new Promise(r => setTimeout(r, 8));
                     }
-                    const frameStart = performance.now();
+                    if (didPaceWait) paceHits++;
                     const frameTime = Math.min(frameIndex * frameInterval, totalDuration);
                     const effectTime = includeVfx ? frameTime : vfxTotalDuration;
                     if (syncAnimTrack || !includeVfx) seekAnimToTimeAndApply(global, frameTime);
-                    await prepareAndRenderOneFrameToCanvas(global, effectTime);
+                    await prepareAndRenderOneFrameToCanvas(global, effectTime, !includeVfx);
                     const bitmap = await createImageBitmap(canvas);
                     const timestampUs = Math.round(frameTime * 1_000_000);
+                    framesSent++;
                     inFlightFrames++;
                     worker.postMessage({
                         type: 'frame',
@@ -1180,15 +1197,15 @@ export const initVideoExport = (global: Global): void => {
                     if ((frameIndex + 1) % 120 === 0) {
                         console.log(
                             VFX_EXPORT_LOG_TAG,
-                            `fast-mp4 progress: rendered=${frameIndex + 1}/${totalFrames}, inFlight=${inFlightFrames}, chunks=${encodedChunkCount}`
+                            `fast-mp4 progress: rendered=${frameIndex + 1}/${totalFrames}, ` +
+                            `chunks=${encodedChunkCount}, debt=${framesSent - encodedChunkCount}, ` +
+                            `eqs=${lastEncodeQueueSize}, paceHits=${paceHits}`
                         );
                     }
                     updateProgress(frameTime, totalDuration);
-                    const elapsed = performance.now() - frameStart;
-                    const wait = Math.max(0, frameTimeMs - elapsed);
-                    if (wait > 0) await new Promise(r => setTimeout(r, wait));
                 }
                 tRenderEnd = performance.now();
+                console.log(VFX_EXPORT_LOG_TAG, `render done, paceHits=${paceHits}, debt=${framesSent - encodedChunkCount}, eqs=${lastEncodeQueueSize}`);
 
                 if (signal?.aborted) {
                     worker.postMessage({ type: 'abort' });
@@ -1204,8 +1221,40 @@ export const initVideoExport = (global: Global): void => {
 
                 await waitFor(() => inFlightFrames === 0);
                 tBacklogEnd = performance.now();
+
+                // 渲染已完成，在 flush 阶段尽量释放 GPU 给硬件编码器。
+                // 前台时 Chrome 合成器+WebGL backbuffer 持续占 GPU，导致 encoder.flush() 极慢
+                // （实测前台 ~140s vs 切后台 ~24s）。
+                // 策略：缩 canvas 到 1x1（释放 backbuffer 显存）+ 隐藏 + 停渲染循环。
+                const canvasEl = canvas as HTMLElement;
+                const prevVisibility = canvasEl.style.visibility;
+                const prevPointerEvents = canvasEl.style.pointerEvents;
+                const flushPrevWidth = canvas.width;
+                const flushPrevHeight = canvas.height;
+                canvas.width = 1;
+                canvas.height = 1;
+                canvasEl.style.visibility = 'hidden';
+                canvasEl.style.pointerEvents = 'none';
+                const prevAutoRender = (app as any).autoRender;
+                const prevRenderNextFrame = (app as any).renderNextFrame;
+                (app as any).autoRender = false;
+                (app as any).renderNextFrame = false;
+
                 worker.postMessage({ type: 'finalize' });
                 await waitFor(() => workerDone);
+
+                // 恢复：先拉回导出分辨率（flush 期间为 1×1 释放 GPU），再恢复显示与渲染开关
+                canvas.width = flushPrevWidth;
+                canvas.height = flushPrevHeight;
+                if (typeof (device as any).setResolution === 'function') {
+                    (device as any).setResolution(flushPrevWidth, flushPrevHeight);
+                }
+                (device as any).fire?.('resizecanvas');
+                canvasEl.style.visibility = prevVisibility;
+                canvasEl.style.pointerEvents = prevPointerEvents;
+                (app as any).autoRender = prevAutoRender;
+                (app as any).renderNextFrame = prevRenderNextFrame;
+
                 tWorkerDone = performance.now();
                 await addChain;
                 tAddChainDone = performance.now();
@@ -1268,7 +1317,7 @@ export const initVideoExport = (global: Global): void => {
                 const effectTime = includeVfx ? frameTime : vfxTotalDuration;
                 // 不包含 VFX 时也必须每帧驱动 anim，否则导出的视频里相机不动
                 if (syncAnimTrack || !includeVfx) seekAnimToTimeAndApply(global, frameTime);
-                await prepareAndRenderOneFrameToCanvas(global, effectTime);
+                await prepareAndRenderOneFrameToCanvas(global, effectTime, !includeVfx);
                 updateProgress(frameTime, totalDuration);
                 const elapsed = performance.now() - frameStart;
                 const wait = Math.max(0, frameTimeMs - elapsed);

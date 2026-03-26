@@ -24,6 +24,7 @@ import {
 } from './edit-history';
 import type { ExperienceSettings } from './schemas/v2';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
+import { setLightsVisualVisible } from './light';
 import {
     applyLightGlobalSet,
     applyLightAdd,
@@ -126,6 +127,13 @@ const initPostMessageBridge = (global: Global) => {
     // 用闭包变量记录本次导出是否被外部取消，避免向 global.state（可能是 Proxy）新增属性
     let videoExportCancelled = false;
 
+    // showEditUI=false 时：无 Lighting 面板驱动“Show lights in scene”开关。
+    // 这里默认认为 visibleInEnvironment=true；仅在模块/编辑态切换时刷新一次，避免无谓调用。
+    const syncLightVisualsForNoEditUi = () => {
+        if (config.showEditUI !== false) return;
+        setLightsVisualVisible(global, true);
+    };
+
     // 退出编辑模式时用于比较与回退的基线（与 ui 内逻辑一致，供 postMessage 协议使用）
     let editModeBaselineData: ExperienceSettings | null = null;
     let editModeBaselineString: string | null = null;
@@ -173,6 +181,8 @@ const initPostMessageBridge = (global: Global) => {
             break;
         case 'EDIT_MODE_EXIT':
             state.editMode = false;
+            // 退出编辑模式时需要确保光源线框被隐藏（避免残留）
+            syncLightVisualsForNoEditUi();
             break;
         case 'EDIT_MODE_SET': {
             const value = p.value === true;
@@ -187,6 +197,10 @@ const initPostMessageBridge = (global: Global) => {
                     const { canUndo, canRedo } = await import('./edit-history');
                     postToParent('EDIT_HISTORY_STATE', { canUndo: canUndo(global), canRedo: canRedo(global) });
                 }
+            }
+            // 仅在当前处于 environment（或退出编辑模式）时需要刷新线框显隐
+            if (!state.editMode || state.editLeftModule === 'environment') {
+                syncLightVisualsForNoEditUi();
             }
             break;
         }
@@ -237,6 +251,7 @@ const initPostMessageBridge = (global: Global) => {
             if (p.value == null) {
                 state.editLeftModule = null;
                 events.fire('editLeftModule:changed', null);
+                syncLightVisualsForNoEditUi();
                 break;
             }
             if (typeof p.value === 'string') {
@@ -244,6 +259,7 @@ const initPostMessageBridge = (global: Global) => {
                 if (valid.includes(p.value as EditLeftModule)) {
                     state.editLeftModule = p.value as EditLeftModule;
                     events.fire('editLeftModule:changed', p.value);
+                    syncLightVisualsForNoEditUi();
                 }
             }
             break;

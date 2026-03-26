@@ -377,7 +377,35 @@ export class BloomController {
                 tintColor?: number[];
                 tintBlend?: number;
             };
-            const bloomSettings = (this.global.settings as any).postEffectSettings?.bloom as any;
+
+            let createdDraftForToolStart = false;
+            // 简化规则：进入 brush 且当前 active 不是 draft-* 时新建草稿区域。
+            // 这样“新增区域”路径稳定；同一草稿内 brush/eraser 切换不会重复创建。
+            const settingsAnyForStart = this.global.settings as any;
+            const bloomForStart = settingsAnyForStart?.postEffectSettings?.bloom as { activeLocalLightRegionId?: string | null } | undefined;
+            const activeIdForStart = bloomForStart?.activeLocalLightRegionId;
+            // 仅 LIGHT_BRUSH_START 才隐式建草稿；LIGHT_ERASER_START 只切工具，不改区域上下文。
+            const shouldCreateDraftForStart = t === 'LIGHT_BRUSH_START' && !(
+                typeof activeIdForStart === 'string' &&
+                activeIdForStart.startsWith('draft-')
+            );
+            if (shouldCreateDraftForStart) {
+                const settingsAny = this.global.settings as any;
+                if (!settingsAny.postEffectSettings) {
+                    settingsAny.postEffectSettings = {};
+                }
+                if (!settingsAny.postEffectSettings.bloom) {
+                    settingsAny.postEffectSettings.bloom = {};
+                }
+                const bloom = settingsAny.postEffectSettings.bloom as any;
+                const draftId = `draft-${Date.now()}`;
+                bloom.activeLocalLightRegionId = draftId;
+                if (!Array.isArray(bloom.localLightRegions)) {
+                    bloom.localLightRegions = [];
+                }
+                createdDraftForToolStart = true;
+                (this.global.events as any).fire('bloomLocalLightRegion:listChanged');
+            }
 
             if (!this.hasActiveLocalLightRegion()) {
                 return;
@@ -406,11 +434,19 @@ export class BloomController {
             case 'LIGHT_BRUSH_START': {
                 const bloom = ensureBloomSettings();
                 bloom.bloomBrush = true;
+                if (typeof bloom.bloomBrushBrightness !== 'number') bloom.bloomBrushBrightness = 1;
+                if (typeof bloom.bloomBrushCommittedBrightness !== 'number') bloom.bloomBrushCommittedBrightness = 1;
+                if (bloom.enabled === false) bloom.enabled = true;
                 // 切工具时强制结束 drawing 状态，避免误走“绘制中仅2D预览”分支
                 this.isDrawing = false;
                 this.worldSpaceMaskDirtyFromDrawing = false;
                 this.isErasing = false;
                 this.worldSpaceData.setEraseMode(false);
+                // 仅在“无 active 区域 -> 自动创建草稿区域”时重置工作区；
+                // 若只是 brush/eraser 工具切换，不应清空当前已绘制内容。
+                if (createdDraftForToolStart) {
+                    (this.global.events as any).fire('bloomBrush:reset');
+                }
                 (this.global.events as any).fire('postEffect:changed');
                 (this.global.app as any).renderNextFrame = true;
                 break;
@@ -428,9 +464,19 @@ export class BloomController {
                 break;
             }
             case 'LIGHT_BRUSH_CLEAR': {
-                // 清除当前绘制区域：等价 bloomBrush:clear
-                this.worldSpaceData.clear();
+                const bloom = ensureBloomSettings();
+                (this.global.events as any).fire('bloomBrush:reset');
+                bloom.bloomBrush = false;
+                this.isDrawing = false;
+                this.isErasing = false;
+                this.worldSpaceData.setEraseMode(false);
                 this.worldSpaceMaskDirtyFromDrawing = false;
+                const activeId = bloom.activeLocalLightRegionId as string | null | undefined;
+                if (typeof activeId === 'string' && activeId.startsWith('draft-')) {
+                    bloom.activeLocalLightRegionId = null;
+                }
+                (this.global.events as any).fire('bloomLocalLightRegion:listChanged');
+                (this.global.events as any).fire('postEffect:changed');
                 (this.global.app as any).renderNextFrame = true;
                 break;
             }
@@ -516,6 +562,42 @@ export class BloomController {
                     this.syncCommittedToNightMode();
                 }
                 this.worldSpaceMaskDirtyFromDrawing = false;
+                // 父级托管（showEditUI=false）下没有 post-effect-ui 的“完成”逻辑，
+                // 在这里补齐：将 draft-* 草稿区域落成正式区域，保持与本地 UI 一致。
+                if (this.global.config.showEditUI === false) {
+                    const activeId = bloom.activeLocalLightRegionId as string | null | undefined;
+                    const isDraftActive = typeof activeId === 'string' && activeId.startsWith('draft-');
+                    if (isDraftActive) {
+                        const { worldSpaceJSON, committedBrightness } = this.exportRegion();
+                        const committed = worldSpaceJSON?.committed ?? [];
+                        if (committed.length > 0) {
+                            if (!Array.isArray(bloom.localLightRegions)) bloom.localLightRegions = [];
+                            const nextIndex = bloom.localLightRegions.length + 1;
+                            const incomingRegionId = typeof payload.id === 'string' && payload.id.trim().length > 0
+                                ? payload.id
+                                : `region-${Date.now()}`;
+                            const newRegion = {
+                                id: incomingRegionId,
+                                name: `亮灯区域${String(nextIndex).padStart(2, '0')}`,
+                                worldSpace: worldSpaceJSON,
+                                localBrightness: Math.max(-1, Math.min(1, committedBrightness ?? brightness)),
+                                tintColor: [1, 1, 1] as [number, number, number],
+                                tintBlend: 0
+                            };
+                            const existingIndex = bloom.localLightRegions.findIndex((r: any) => r && r.id === incomingRegionId);
+                            if (existingIndex >= 0) {
+                                bloom.localLightRegions[existingIndex] = newRegion as any;
+                            } else {
+                                bloom.localLightRegions.push(newRegion as any);
+                            }
+                            bloom.activeLocalLightRegionId = newRegion.id;
+                            (this.global.events as any).fire('bloomLocalLightRegion:listChanged');
+                        } else {
+                            // 空草稿直接清空 active，等价于“无绘制内容完成”
+                            bloom.activeLocalLightRegionId = null;
+                        }
+                    }
+                }
                 (this.global.app as any).renderNextFrame = true;
                 break;
             }
@@ -594,12 +676,14 @@ export class BloomController {
             this.bloomBrushPainter.setBrushSize(Math.max(0.1, Math.min(200, Number(bloomSettings.bloomBrushSize ?? 10))));
         }
         if (nightModeScript) {
+            const regions = bloomSettings.localLightRegions ?? [];
+            const hasCommittedRegions = regions.some((r: any) => (r?.worldSpace?.committed?.length ?? 0) > 0);
             // BloomBrush shader 分支仅在「正在拖动画笔」时激活，提供实时 2D mask 预览。
             // 松手后（!isDrawing）关闭该分支，渲染完全由 3D 体积决定——和已提交态走同一管线，
             // 从根本上保证草稿态（非拖动时）与 SET 后的视觉效果一致。
-            const brushShaderActive = bloomBrush && this.isDrawing;
+            // 有已提交区域或擦除模式时，禁用 2D 预览，避免覆盖/干扰已有 3D volume 观感。
+            const brushShaderActive = bloomBrush && this.isDrawing && !this.isErasing && !hasCommittedRegions;
             nightModeScript.setBloomBrushParams(brushShaderActive, effectiveMask, th, undefined, bloomBrushBrightness);
-            const regions = bloomSettings.localLightRegions ?? [];
             const activeId = bloomSettings.activeLocalLightRegionId ?? null;
             const activeRegion = (activeId && !String(activeId).startsWith('draft-'))
                 ? regions.find((r: { id: string }) => r.id === activeId)
