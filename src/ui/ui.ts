@@ -275,7 +275,7 @@ const initUI = (global: Global) => {
         'joystickBase', 'joystick',
         'tooltip',
         'annotationNav', 'annotationPrev', 'annotationNext', 'annotationInfo', 'annotationNavTitle',
-        'supersplatBranding',
+        // 'supersplatBranding',
         // View 模式调试按钮（右上角编辑按钮旁）
         'viewDebugToggleAssets', 'viewDebugLightsAllOn', 'viewDebugLightsAllOff',
         'viewDebugRegionSelect', 'viewDebugToggleRegionLight'
@@ -1330,8 +1330,8 @@ const initUI = (global: Global) => {
             viewUrl.pathname = '/view';
         }
 
-        (dom.supersplatBranding as HTMLAnchorElement).href = viewUrl.toString();
-        dom.supersplatBranding.classList.remove('hidden');
+        // (dom.supersplatBranding as HTMLAnchorElement).href = viewUrl.toString();
+        // dom.supersplatBranding.classList.remove('hidden');
     }
 };
 
