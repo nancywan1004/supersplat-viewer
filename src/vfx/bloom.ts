@@ -567,6 +567,8 @@ export class BloomController {
                 if (isDraftActive) {
                     const { worldSpaceJSON, committedBrightness } = this.exportRegion();
                     const committed = worldSpaceJSON?.committed ?? [];
+                    const center = this.getCurrentRegionCenter();
+                    bloom.draftLightRegionCenter = center ? [center.x, center.y, center.z] : null;
                     if (committed.length > 0) {
                         if (!Array.isArray(bloom.localLightRegions)) bloom.localLightRegions = [];
                         const nextIndex = bloom.localLightRegions.length + 1;
@@ -592,6 +594,7 @@ export class BloomController {
                     } else {
                         // 空草稿直接清空 active，等价于“无绘制内容完成”
                         bloom.activeLocalLightRegionId = null;
+                        bloom.draftLightRegionCenter = null;
                     }
                 }
                 (this.global.app as any).renderNextFrame = true;

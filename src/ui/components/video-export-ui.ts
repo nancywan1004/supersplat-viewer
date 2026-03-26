@@ -100,7 +100,7 @@ export function initVideoExportUI(global: Global): () => void {
         if (vfxExportProgressBar) vfxExportProgressBar.style.width = '0%';
         if (vfxExportProgressText) {
             vfxExportProgressText.textContent =
-                typeof message === 'string' && message.length > 0 ? message : '正在离线导出 VFX 视频…';
+                typeof message === 'string' && message.length > 0 ? message : '正在导出视频…';
         }
     };
 
