@@ -808,13 +808,6 @@ export const initVideoExport = (global: Global): void => {
         lastUiEffectTime = time;
     });
 
-    /**
-     * 本地化文本（占位符实现）
-     */
-    const localize = (key: string, params?: any): string => {
-        // 这里应该实现真正的本地化逻辑
-        return key;
-    };
 
     /**
      * 创建视频编码器
@@ -871,7 +864,7 @@ export const initVideoExport = (global: Global): void => {
      */
     const updateProgress = (frameTime: number, duration: number): void => {
         global.events.fire('progressUpdate', {
-            text: localize('panel.render.rendering', { ellipsis: true }),
+            text: '正在渲染，请勿退出页面',
             progress: 100 * frameTime / duration
         });
     };
@@ -1017,12 +1010,6 @@ export const initVideoExport = (global: Global): void => {
     const handleExportError = async (error: any): Promise<void> => {
         // 简化错误处理，直接输出到控制台
         console.error(VFX_EXPORT_LOG_TAG, 'Video export error:', error);
-        // 如果有错误处理的事件，可以这样触发:
-        // global.events.fire('showPopup', {
-        //     type: 'error',
-        //     header: localize('render.failed'),
-        //     message: `'${error.message ?? error}'`
-        // });
     };
 
     /**
@@ -1516,7 +1503,7 @@ export const initVideoExport = (global: Global): void => {
      */
     const exportVideo = async (videoSettings: VideoSettings, fileStream?: FileSystemWritableFileStream): Promise<boolean> => {
         const fastLabel = videoSettings.format === 'mp4' ? '极速导出 (MP4，实时转码)…' : '极速导出 (WebM)…';
-        events.fire('progressStart', videoSettings.useFastExport ? fastLabel : localize('panel.render.render-video'));
+        events.fire('progressStart', videoSettings.useFastExport ? fastLabel : '导出视频...');
 
         const stateAny = global.state as any;
         const prevExporting = stateAny.isExportingVfxVideo ?? false;
