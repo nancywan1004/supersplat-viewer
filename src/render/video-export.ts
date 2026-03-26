@@ -1153,8 +1153,7 @@ export const initVideoExport = (global: Global): void => {
                     width: evenWidth,
                     height: evenHeight,
                     bitrate: videoSettings.bitrate,
-                    framerate: frameRate,
-                    latencyMode: 'realtime'
+                    framerate: frameRate
                 }
             });
             await waitFor(() => workerReady);
@@ -1162,9 +1161,7 @@ export const initVideoExport = (global: Global): void => {
             try {
                 const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
                 const keyFrameEvery = Math.max(1, Math.round(frameRate * 2));
-                // 背压：最多允许编码器落后 5 帧。
-                // 配合 8ms 等待间隔，在减少 flush 尾巴的同时降低 sleep 开销。
-                const MAX_ENCODE_DEBT = 5;
+                const MAX_ENCODE_DEBT = 10;
                 let framesSent = 0;
                 let paceHits = 0;
                 for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
@@ -1222,36 +1219,46 @@ export const initVideoExport = (global: Global): void => {
                 await waitFor(() => inFlightFrames === 0);
                 tBacklogEnd = performance.now();
 
-                // 渲染已完成，在 flush 阶段尽量释放 GPU 给硬件编码器。
-                // 前台时 Chrome 合成器+WebGL backbuffer 持续占 GPU，导致 encoder.flush() 极慢
-                // （实测前台 ~140s vs 切后台 ~24s）。
-                // 策略：缩 canvas 到 1x1（释放 backbuffer 显存）+ 隐藏 + 停渲染循环。
+                // 渲染结束，停止 PlayCanvas 渲染循环 + 隐藏 canvas（降低合成器 GPU 占用）
+                // 用 visibility:hidden 而非 display:none，避免 canvas 尺寸归零触发 GL_INVALID_FRAMEBUFFER_OPERATION
                 const canvasEl = canvas as HTMLElement;
                 const prevVisibility = canvasEl.style.visibility;
-                const prevPointerEvents = canvasEl.style.pointerEvents;
                 const flushPrevWidth = canvas.width;
                 const flushPrevHeight = canvas.height;
-                canvas.width = 1;
-                canvas.height = 1;
-                canvasEl.style.visibility = 'hidden';
-                canvasEl.style.pointerEvents = 'none';
                 const prevAutoRender = (app as any).autoRender;
                 const prevRenderNextFrame = (app as any).renderNextFrame;
                 (app as any).autoRender = false;
                 (app as any).renderNextFrame = false;
+                canvasEl.style.visibility = 'hidden';
+
+                // 等待编码器追上（drain 阶段），期间显示编码进度
+                const drainStart = performance.now();
+                let lastDrainLog = 0;
+                while (framesSent - encodedChunkCount > 0) {
+                    if (signal?.aborted) break;
+                    if (workerErrored) throw new Error(workerErrored);
+                    await new Promise(r => setTimeout(r, 50));
+                    const now = performance.now();
+                    if (now - lastDrainLog > 2000) {
+                        console.log(VFX_EXPORT_LOG_TAG,
+                            `encoding drain: ${encodedChunkCount}/${framesSent} ` +
+                            `(${((now - drainStart) / 1000).toFixed(1)}s)`);
+                        lastDrainLog = now;
+                    }
+                }
+                const tDrainEnd = performance.now();
 
                 worker.postMessage({ type: 'finalize' });
                 await waitFor(() => workerDone);
 
-                // 恢复：先拉回导出分辨率（flush 期间为 1×1 释放 GPU），再恢复显示与渲染开关
+                // 恢复 canvas 和渲染
+                canvasEl.style.visibility = prevVisibility;
                 canvas.width = flushPrevWidth;
                 canvas.height = flushPrevHeight;
                 if (typeof (device as any).setResolution === 'function') {
                     (device as any).setResolution(flushPrevWidth, flushPrevHeight);
                 }
                 (device as any).fire?.('resizecanvas');
-                canvasEl.style.visibility = prevVisibility;
-                canvasEl.style.pointerEvents = prevPointerEvents;
                 (app as any).autoRender = prevAutoRender;
                 (app as any).renderNextFrame = prevRenderNextFrame;
 
@@ -1263,8 +1270,8 @@ export const initVideoExport = (global: Global): void => {
                 console.log(
                     VFX_EXPORT_LOG_TAG,
                     `fast-mp4 timing: render=${((tRenderEnd - tFastStart) / 1000).toFixed(2)}s, ` +
-                    `drainBacklog=${((tBacklogEnd - tRenderEnd) / 1000).toFixed(2)}s, ` +
-                    `workerFlush=${((tWorkerDone - tBacklogEnd) / 1000).toFixed(2)}s, ` +
+                    `encodeDrain=${((tDrainEnd - tBacklogEnd) / 1000).toFixed(2)}s, ` +
+                    `workerFlush=${((tWorkerDone - tDrainEnd) / 1000).toFixed(2)}s, ` +
                     `sourceAddDrain=${((tAddChainDone - tWorkerDone) / 1000).toFixed(2)}s, ` +
                     `finalize=${((tFinalizeDone - tAddChainDone) / 1000).toFixed(2)}s, ` +
                     `total=${((tFinalizeDone - tFastStart) / 1000).toFixed(2)}s, ` +

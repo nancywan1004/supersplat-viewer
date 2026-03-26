@@ -1203,7 +1203,10 @@ export class RevealController {
             return;
         }
         const totalDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
-        const clampedTime = Math.max(0, Math.min(time, totalDuration));
+        // 导出时 perlin-wave 需要覆盖整段视频时长，不受 revealEffect.totalDuration 限制
+        const exportTime = this.config.type === 'perlin-wave'
+            ? Math.max(0, time)
+            : Math.max(0, Math.min(time, totalDuration));
         
         if (!this.currentScript.enabled) {
             this.currentScript.enabled = true;
@@ -1219,7 +1222,7 @@ export class RevealController {
             this.effectPaused = true;
         }
         
-        this.currentScript.setEffectTime(clampedTime);
+        this.currentScript.setEffectTime(exportTime);
         
         // 不再 fire effectTime:changed，保持 UI 不动
     }
