@@ -621,17 +621,6 @@ export function initPostEffectUI(global: Global): () => void {
         if (bloomDrawModeEraserBtn) bloomDrawModeEraserBtn.classList.toggle('active', tool === 'eraser');
     };
 
-    const exitDrawMode = () => {
-        const b = ensureBloom(settings);
-        b.bloomBrush = false;
-        b.activeLocalLightRegionId = currentDraftId === (b.activeLocalLightRegionId ?? null) ? null : b.activeLocalLightRegionId;
-        currentDraftId = null;
-        setDrawModeVisible(false);
-        setDrawModeButtonsState(false);
-        firePostEffectChanged();
-        events.fire('bloomLocalLightRegion:listChanged');
-    };
-
     const syncFromSettings = () => {
         const b = ensureBloom(settings);
         b.enabled = Number(b.intensity) > 0;
@@ -646,16 +635,9 @@ export function initPostEffectUI(global: Global): () => void {
         if (bloomDebugCheck) bloomDebugCheck.classList.toggle('active', b.bloomDebug ?? false);
         const scope = (b as { bloomScope?: 'global' | 'local' }).bloomScope;
         if (bloomScopeCheck) bloomScopeCheck.classList.toggle('active', scope !== 'global');
-        const onSelectRegion = (regionId: string | null) => {
-            if (currentDraftId) return;
-            const bl = ensureBloom(settings);
-            bl.activeLocalLightRegionId = regionId;
-            firePostEffectChanged();
-            events.fire('bloomLocalLightRegion:listChanged');
-        };
-        const refreshRegionList = () =>
-            renderBloomLocalLightRegionsList(global, bloomLocalLightRegionsList, ensureBloom(settings), firePostEffectChanged, pushEditHistorySafe, onSelectRegion, editUiTransport, refreshRegionList);
-        renderBloomLocalLightRegionsList(global, bloomLocalLightRegionsList, b, firePostEffectChanged, pushEditHistorySafe, onSelectRegion, editUiTransport, refreshRegionList);
+        refreshRegionList();
+        const activeId = b.activeLocalLightRegionId ?? null;
+        currentDraftId = (typeof activeId === 'string' && activeId.startsWith('draft-')) ? activeId : null;
         if (bloomDrawModeBar) bloomDrawModeBar.style.display = currentDraftId ? 'block' : 'none';
         const sh = ensureShadow(settings);
         if (shadowEnableCheck) shadowEnableCheck.classList.toggle('active', sh.enabled);
@@ -677,6 +659,30 @@ export function initPostEffectUI(global: Global): () => void {
 
     const firePostEffectChanged = () => events.fire('postEffect:changed');
     const editUiTransport = getEditUiTransport(global);
+    const onSelectRegion = (regionId: string | null) => {
+        if (currentDraftId) return;
+        const bl = ensureBloom(settings);
+        bl.activeLocalLightRegionId = regionId;
+        firePostEffectChanged();
+    };
+    const refreshRegionList = () =>
+        renderBloomLocalLightRegionsList(
+            global,
+            bloomLocalLightRegionsList,
+            ensureBloom(settings),
+            firePostEffectChanged,
+            pushEditHistorySafe,
+            onSelectRegion,
+            editUiTransport,
+            refreshRegionList
+        );
+    const dispatchLightBrushMessage = (type: string, payload?: Record<string, unknown>) => {
+        if (editUiTransport === 'message-bridge') {
+            sendEditProtocolMessage(payload ? { type, ...payload } as any : { type } as any);
+        } else {
+            (events as any).fire('messageBridge:lightBrush', { type, payload: payload ?? {} });
+        }
+    };
 
     if (bloomIntensitySlider && bloomIntensityValue) {
         bloomIntensitySlider.addEventListener('input', () => {
@@ -765,24 +771,11 @@ export function initPostEffectUI(global: Global): () => void {
 
     if (bloomNewRegionBtn) {
         bloomNewRegionBtn.addEventListener('click', () => {
-            const b = ensureBloom(settings);
             if (currentDraftId) return;
-            const draftId = `draft-${Date.now()}`;
-            currentDraftId = draftId;
-            b.activeLocalLightRegionId = draftId;
-            b.bloomBrush = true;
-            b.bloomBrushBrightness = 1;
-            b.bloomBrushCommittedBrightness = 1;
-            events.fire('bloomBrush:reset');
-            if (editUiTransport === 'message-bridge') {
-                sendEditProtocolMessage({ type: 'LIGHT_BRUSH_START' });
-            } else {
-                (events as any).fire('messageBridge:lightBrush', { type: 'LIGHT_BRUSH_START' });
-            }
+            dispatchLightBrushMessage('LIGHT_BRUSH_START');
             setDrawModeVisible(true);
             setDrawModeButtonsState(false);
             setDrawToolActive('brush');
-            (events as any).fire('bloomLocalLightRegion:draftEnter');
             firePostEffectChanged();
         });
     }
@@ -792,100 +785,41 @@ export function initPostEffectUI(global: Global): () => void {
     };
     events.on('bloomLocalLightRegion:worldSpaceChanged', worldSpaceChangedHandler);
 
-    let handleExported: ((data: { worldSpaceJSON: WorldSpaceBloomRegionJSON; committedBrightness: number }) => void) | null = null;
-    const exportedHandler = (data: { worldSpaceJSON?: WorldSpaceBloomRegionJSON; committedBrightness?: number }) => {
-        if (handleExported && currentDraftId) {
-            const d = data as { worldSpaceJSON: WorldSpaceBloomRegionJSON; committedBrightness: number };
-            handleExported(d);
-        }
-    };
-    events.on('bloomLocalLightRegion:exported', exportedHandler);
-
     // 仅在区域列表结构变化（增删区域、外部协议操作）时重建列表 DOM，
     // 不监听 postEffect:changed（slider input 也会 fire 该事件，
     // 若在 handler 里 innerHTML='' 重建列表则 slider 被销毁、拖动失效）。
     const regionListChangedHandler = () => {
-        const onSelectRegion2 = (regionId: string | null) => {
-            if (currentDraftId) return;
-            const bl = ensureBloom(settings);
-            bl.activeLocalLightRegionId = regionId;
-            firePostEffectChanged();
-        };
-        const refreshRegionList2 = () =>
-            renderBloomLocalLightRegionsList(global, bloomLocalLightRegionsList, ensureBloom(settings), firePostEffectChanged, pushEditHistorySafe, onSelectRegion2, editUiTransport, refreshRegionList2);
-        refreshRegionList2();
+        refreshRegionList();
+        const bloom = ensureBloom(settings);
+        const activeId2 = bloom.activeLocalLightRegionId ?? null;
+        currentDraftId = (typeof activeId2 === 'string' && activeId2.startsWith('draft-')) ? activeId2 : null;
+        setDrawModeVisible(!!currentDraftId);
+        if (!currentDraftId) setDrawModeButtonsState(false);
     };
     events.on('bloomLocalLightRegion:listChanged', regionListChangedHandler);
 
     if (bloomDrawModeCompleteBtn) {
         bloomDrawModeCompleteBtn.addEventListener('click', () => {
             if (!currentDraftId) return;
-            if (editUiTransport === 'message-bridge') {
-                sendEditProtocolMessage({ type: 'LIGHT_BRUSH_FINISH' });
-            }
-            const b = ensureBloom(settings);
-            events.fire('bloomBrush:set');
-            handleExported = (payload: { worldSpaceJSON: WorldSpaceBloomRegionJSON; committedBrightness: number }) => {
-                handleExported = null;
-                const regions = b.localLightRegions ?? [];
-                const nextIndex = regions.length + 1;
-                const newRegion: LocalLightRegion = {
-                    id: `region-${Date.now()}`,
-                    name: `亮灯区域${String(nextIndex).padStart(2, '0')}`,
-                    worldSpace: payload.worldSpaceJSON,
-                    localBrightness: Math.max(-1, Math.min(1, payload.committedBrightness ?? 1)),
-                    tintColor: [1, 1, 1],
-                    tintBlend: 0
-                };
-                // 计算当前草稿区域在世界空间中的几何中心，供后续 Lighting 模块放置光源时复用
-                try {
-                    const appAny = global.app as any;
-                    const bloomController = appAny?.viewer?.bloomController as { getCurrentRegionCenter?: () => import('playcanvas').Vec3 | null } | null;
-                    const center = bloomController?.getCurrentRegionCenter ? bloomController.getCurrentRegionCenter() : null;
-                    if (center) {
-                        b.draftLightRegionCenter = [center.x, center.y, center.z];
-                    } else {
-                        b.draftLightRegionCenter = null;
-                    }
-                } catch {
-                    // 若无法访问 bloomController，则忽略该功能，不影响原有行为
-                    (b as any).draftLightRegionCenter = null;
-                }
-                if (!b.localLightRegions) b.localLightRegions = [];
-                b.localLightRegions.push(newRegion);
-                b.activeLocalLightRegionId = newRegion.id;
-                currentDraftId = null;
-                (events as any).fire('bloomLocalLightRegion:draftExit');
-                b.bloomBrush = false;
-                setDrawModeVisible(false);
-                setDrawModeButtonsState(false);
-                pushEditHistorySafe();
-                firePostEffectChanged();
-                events.fire('bloomLocalLightRegion:listChanged');
-            };
-            (events as any).fire('bloomLocalLightRegion:requestExport');
+            dispatchLightBrushMessage('LIGHT_BRUSH_FINISH');
+            pushEditHistorySafe();
+            firePostEffectChanged();
         });
     }
 
     if (bloomDrawModeAbandonBtn) {
         bloomDrawModeAbandonBtn.addEventListener('click', () => {
             if (!currentDraftId) return;
-            if (editUiTransport === 'message-bridge') {
-                sendEditProtocolMessage({ type: 'LIGHT_BRUSH_CLEAR' });
-            }
-            events.fire('bloomBrush:reset');
-            exitDrawMode();
+            dispatchLightBrushMessage('LIGHT_BRUSH_CLEAR');
+            pushEditHistorySafe();
+            firePostEffectChanged();
         });
     }
 
     if (bloomDrawModeBrushBtn) {
         bloomDrawModeBrushBtn.addEventListener('click', () => {
             setDrawToolActive('brush');
-            if (editUiTransport === 'message-bridge') {
-                sendEditProtocolMessage({ type: 'LIGHT_BRUSH_START' });
-            } else {
-                (events as any).fire('messageBridge:lightBrush', { type: 'LIGHT_BRUSH_START' });
-            }
+            dispatchLightBrushMessage('LIGHT_BRUSH_START');
             firePostEffectChanged();
         });
     }
@@ -893,11 +827,7 @@ export function initPostEffectUI(global: Global): () => void {
     if (bloomDrawModeEraserBtn) {
         bloomDrawModeEraserBtn.addEventListener('click', () => {
             setDrawToolActive('eraser');
-            if (editUiTransport === 'message-bridge') {
-                sendEditProtocolMessage({ type: 'LIGHT_ERASER_START' });
-            } else {
-                (events as any).fire('messageBridge:lightBrush', { type: 'LIGHT_ERASER_START' });
-            }
+            dispatchLightBrushMessage('LIGHT_ERASER_START');
             firePostEffectChanged();
         });
     }
@@ -1067,7 +997,6 @@ export function initPostEffectUI(global: Global): () => void {
 
     return () => {
         events.off('bloomLocalLightRegion:worldSpaceChanged', worldSpaceChangedHandler);
-        events.off('bloomLocalLightRegion:exported', exportedHandler);
         events.off('bloomLocalLightRegion:listChanged', regionListChangedHandler);
         container.innerHTML = '';
     };

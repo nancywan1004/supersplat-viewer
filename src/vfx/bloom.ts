@@ -562,40 +562,36 @@ export class BloomController {
                     this.syncCommittedToNightMode();
                 }
                 this.worldSpaceMaskDirtyFromDrawing = false;
-                // 父级托管（showEditUI=false）下没有 post-effect-ui 的“完成”逻辑，
-                // 在这里补齐：将 draft-* 草稿区域落成正式区域，保持与本地 UI 一致。
-                if (this.global.config.showEditUI === false) {
-                    const activeId = bloom.activeLocalLightRegionId as string | null | undefined;
-                    const isDraftActive = typeof activeId === 'string' && activeId.startsWith('draft-');
-                    if (isDraftActive) {
-                        const { worldSpaceJSON, committedBrightness } = this.exportRegion();
-                        const committed = worldSpaceJSON?.committed ?? [];
-                        if (committed.length > 0) {
-                            if (!Array.isArray(bloom.localLightRegions)) bloom.localLightRegions = [];
-                            const nextIndex = bloom.localLightRegions.length + 1;
-                            const incomingRegionId = typeof payload.id === 'string' && payload.id.trim().length > 0
-                                ? payload.id
-                                : `region-${Date.now()}`;
-                            const newRegion = {
-                                id: incomingRegionId,
-                                name: `亮灯区域${String(nextIndex).padStart(2, '0')}`,
-                                worldSpace: worldSpaceJSON,
-                                localBrightness: Math.max(-1, Math.min(1, committedBrightness ?? brightness)),
-                                tintColor: [1, 1, 1] as [number, number, number],
-                                tintBlend: 0
-                            };
-                            const existingIndex = bloom.localLightRegions.findIndex((r: any) => r && r.id === incomingRegionId);
-                            if (existingIndex >= 0) {
-                                bloom.localLightRegions[existingIndex] = newRegion as any;
-                            } else {
-                                bloom.localLightRegions.push(newRegion as any);
-                            }
-                            bloom.activeLocalLightRegionId = newRegion.id;
-                            (this.global.events as any).fire('bloomLocalLightRegion:listChanged');
+                const activeId = bloom.activeLocalLightRegionId as string | null | undefined;
+                const isDraftActive = typeof activeId === 'string' && activeId.startsWith('draft-');
+                if (isDraftActive) {
+                    const { worldSpaceJSON, committedBrightness } = this.exportRegion();
+                    const committed = worldSpaceJSON?.committed ?? [];
+                    if (committed.length > 0) {
+                        if (!Array.isArray(bloom.localLightRegions)) bloom.localLightRegions = [];
+                        const nextIndex = bloom.localLightRegions.length + 1;
+                        const incomingRegionId = typeof payload.id === 'string' && payload.id.trim().length > 0
+                            ? payload.id
+                            : `region-${Date.now()}`;
+                        const newRegion = {
+                            id: incomingRegionId,
+                            name: `亮灯区域${String(nextIndex).padStart(2, '0')}`,
+                            worldSpace: worldSpaceJSON,
+                            localBrightness: Math.max(-1, Math.min(1, committedBrightness ?? brightness)),
+                            tintColor: [1, 1, 1] as [number, number, number],
+                            tintBlend: 0
+                        };
+                        const existingIndex = bloom.localLightRegions.findIndex((r: any) => r && r.id === incomingRegionId);
+                        if (existingIndex >= 0) {
+                            bloom.localLightRegions[existingIndex] = newRegion as any;
                         } else {
-                            // 空草稿直接清空 active，等价于“无绘制内容完成”
-                            bloom.activeLocalLightRegionId = null;
+                            bloom.localLightRegions.push(newRegion as any);
                         }
+                        bloom.activeLocalLightRegionId = newRegion.id;
+                        (this.global.events as any).fire('bloomLocalLightRegion:listChanged');
+                    } else {
+                        // 空草稿直接清空 active，等价于“无绘制内容完成”
+                        bloom.activeLocalLightRegionId = null;
                     }
                 }
                 (this.global.app as any).renderNextFrame = true;
