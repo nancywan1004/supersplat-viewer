@@ -1075,8 +1075,10 @@ export class BloomController {
         const camera = this.global.camera;
         const camPos = camera?.getPosition();
         const camFwd = camera?.forward;
-        const posStr = camPos ? `${camPos.x.toFixed(2)},${camPos.y.toFixed(2)},${camPos.z.toFixed(2)}` : '';
-        const fwdStr = camFwd ? `${camFwd.x.toFixed(2)},${camFwd.y.toFixed(2)},${camFwd.z.toFixed(2)}` : '';
+        // 签名过于敏感会在相机微抖时频繁重建，形成闪动；过粗又会出现“跟屏滑动”。
+        // 使用 3 位小数作为折中：保持空间锚定，同时降低抖动重建频率。
+        const posStr = camPos ? `${camPos.x.toFixed(3)},${camPos.y.toFixed(3)},${camPos.z.toFixed(3)}` : '';
+        const fwdStr = camFwd ? `${camFwd.x.toFixed(3)},${camFwd.y.toFixed(3)},${camFwd.z.toFixed(3)}` : '';
 
         // 绘制中不走 volume-based 路径：volume 不含正在绘制的新点，
         // 必须 fall through 到 point-based 投影才能实时预览新笔触。
@@ -1223,7 +1225,8 @@ export class BloomController {
             return;
         }
 
-        const EPSILON = 1e-4;
+        // 过滤控制器微小抖动，减少无意义的重绘请求。
+        const EPSILON = 5e-4;
         const posDiff = currentPos.distance(this.lastCameraPosition);
         const fwdDiffX = Math.abs(currentFwd.x - this.lastCameraForward.x);
         const fwdDiffY = Math.abs(currentFwd.y - this.lastCameraForward.y);
