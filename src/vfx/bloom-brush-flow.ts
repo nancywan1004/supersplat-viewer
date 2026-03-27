@@ -359,11 +359,28 @@ export class BloomBrushFlowController {
         (this.ctx.global.app as any).renderNextFrame = true;
     }
 
-    private handleBrushBloomUpdate(payload: { value?: unknown }): void {
+    private handleBrushBloomUpdate(payload: { id?: string; value?: unknown }): void {
         const bloom = this.ensureBloomSettings();
         if (typeof payload.value === 'number') {
             const v = Math.max(-1, Math.min(1, payload.value));
-            bloom.bloomBrushBrightness = v;
+            const targetId = typeof payload.id === 'string' && payload.id.length > 0 ? payload.id : null;
+            if (targetId && Array.isArray((bloom as any).localLightRegions)) {
+                const regions = (bloom as any).localLightRegions as any[];
+                const target = regions.find((r) => r && r.id === targetId);
+                if (target) {
+                    target.localBrightness = v;
+                    const activeId = (bloom as any).activeLocalLightRegionId as string | null | undefined;
+                    if (activeId === targetId && !String(activeId).startsWith('draft-')) {
+                        // 当前区域正在编辑时，同步工作区亮度，避免体积与工作区状态短暂不一致。
+                        this.ctx.worldSpaceData.setCommittedBrightness(v);
+                    }
+                } else {
+                    bloom.bloomBrushBrightness = v;
+                }
+            } else {
+                // 无指定区域 id 时，沿用原语义：更新当前绘制会话亮度（草稿态）。
+                bloom.bloomBrushBrightness = v;
+            }
             (this.ctx.global.events as any).fire('postEffect:changed');
             (this.ctx.global.app as any).renderNextFrame = true;
         }

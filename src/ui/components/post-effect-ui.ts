@@ -387,7 +387,11 @@ function renderBloomLocalLightRegionsList(
                 const val = Math.max(-1, Math.min(1, parseFloat(brightnessSlider.value) || 0));
                 region.localBrightness = val;
                 brightnessValueSpan.textContent = val.toFixed(2);
+                if (editUiTransport === 'message-bridge') {
+                    sendEditProtocolMessage({ type: 'LIGHT_BRUSH_BLOOM_UPDATE', id: region.id, value: val });
+                }
                 firePostEffectChanged();
+                (global.app as any).renderNextFrame = true;
             });
             brightnessSlider.addEventListener('change', () => pushEditHistorySafe());
         }
