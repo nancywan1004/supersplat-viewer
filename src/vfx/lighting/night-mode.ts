@@ -133,17 +133,17 @@ void modifySplatColor(vec3 center, inout vec4 color) {
 
     vec3 linearColor = g2l(color.rgb);
     vec3 nightColor = g2l(uNightAmbient) + sum;
+    vec3 viewDir = normalize(uCameraPos - wpos);
+    float NdotL = max(0.0, dot(viewDir, uLightDir));
+    vec3 dirContrib = NdotL * uLightColor;
     vec3 mult;
     if (f > 0.0) {
-        // 调亮：整体乘数 baseBright (1 -> uBrightFactor) + 平行光方向性
+        // 调亮：所有光源（环境光+点光+聚光+平行光）统一参与
         vec3 baseBright = mix(vec3(1.0), vec3(uBrightFactor), f);
-        vec3 viewDir = normalize(uCameraPos - wpos);
-        float NdotL = max(0.0, dot(viewDir, uLightDir));
-        vec3 dirContrib = NdotL * uLightColor;
-        mult = baseBright * (vec3(1.0) + dirContrib);
+        mult = baseBright * (vec3(1.0) + sum + dirContrib);
     } else {
-        // 调暗：乘数向 nightColor（环境光+点光+聚光）插值，主光不参与此计算
-        mult = mix(vec3(1.0), nightColor, -f);
+        // 调暗：同样让平行光参与，不再与调亮分支做“光源参与”差异化
+        mult = mix(vec3(1.0), nightColor + dirContrib, -f);
     }
     color.rgb = l2g(linearColor * mult);
 }
@@ -290,17 +290,17 @@ void modifySplatColor(vec3 center, inout vec4 color) {
 
     vec3 linearColor = g2l(color.rgb);
     vec3 nightColor = g2l(uNightAmbient) + sum;
+    vec3 viewDir = normalize(uCameraPos - wpos);
+    float NdotL = max(0.0, dot(viewDir, uLightDir));
+    vec3 dirContrib = NdotL * uLightColor;
     vec3 mult;
     if (f >= 0.0) {
-        // 调亮：baseBright (1 -> uBrightFactor) × (1 + 平行光方向性 dirContrib)
+        // 调亮：所有光源（环境光+点光+聚光+平行光）统一参与
         vec3 baseBright = mix(vec3(1.0), vec3(uBrightFactor), f);
-        vec3 viewDir = normalize(uCameraPos - wpos);
-        float NdotL = max(0.0, dot(viewDir, uLightDir));
-        vec3 dirContrib = NdotL * uLightColor;
-        mult = baseBright * (vec3(1.0) + dirContrib);
+        mult = baseBright * (vec3(1.0) + sum + dirContrib);
     } else {
-        // 调暗：乘数向 nightColor（环境光+点光+聚光）插值
-        mult = mix(vec3(1.0), nightColor, -f);
+        // 调暗：同样让平行光参与，不再与调亮分支做“光源参与”差异化
+        mult = mix(vec3(1.0), nightColor + dirContrib, -f);
     }
     color.rgb = l2g(linearColor * mult);
 }
@@ -431,17 +431,17 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
 
     let linearColor = g2l((*color).rgb);
     let nightColor = g2l(uniform.uNightAmbient) + sum;
+    let viewDir = normalize(uniform.uCameraPos - wpos);
+    let NdotL = max(0.0, dot(viewDir, uniform.uLightDir));
+    let dirContrib = NdotL * uniform.uLightColor;
     var mult: vec3f;
     if (f >= 0.0) {
-        // 调亮：baseBright × (1 + 平行光方向性)
+        // 调亮：所有光源（环境光+点光+聚光+平行光）统一参与
         let baseBright = mix(vec3f(1.0), vec3f(uniform.uBrightFactor), f);
-        let viewDir = normalize(uniform.uCameraPos - wpos);
-        let NdotL = max(0.0, dot(viewDir, uniform.uLightDir));
-        let dirContrib = NdotL * uniform.uLightColor;
-        mult = baseBright * (vec3f(1.0) + dirContrib);
+        mult = baseBright * (vec3f(1.0) + sum + dirContrib);
     } else {
-        // 调暗：乘数向 nightColor 插值
-        mult = mix(vec3f(1.0), nightColor, -f);
+        // 调暗：同样让平行光参与，不再与调亮分支做“光源参与”差异化
+        mult = mix(vec3f(1.0), nightColor + dirContrib, -f);
     }
     (*color).rgb = l2g(linearColor * mult);
 }
@@ -594,17 +594,17 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
 
     let linearColor = g2l((*color).rgb);
     let nightColor = g2l(uniform.uNightAmbient) + sum;
+    let viewDir = normalize(uniform.uCameraPos - wpos);
+    let NdotL = max(0.0, dot(viewDir, uniform.uLightDir));
+    let dirContrib = NdotL * uniform.uLightColor;
     var mult: vec3f;
     if (f > 0.0) {
-        // 调亮：baseBright × (1 + 平行光方向性)
+        // 调亮：所有光源（环境光+点光+聚光+平行光）统一参与
         let baseBright = mix(vec3f(1.0), vec3f(uniform.uBrightFactor), f);
-        let viewDir = normalize(uniform.uCameraPos - wpos);
-        let NdotL = max(0.0, dot(viewDir, uniform.uLightDir));
-        let dirContrib = NdotL * uniform.uLightColor;
-        mult = baseBright * (vec3f(1.0) + dirContrib);
+        mult = baseBright * (vec3f(1.0) + sum + dirContrib);
     } else {
-        // 调暗：乘数向 nightColor 插值
-        mult = mix(vec3f(1.0), nightColor, -f);
+        // 调暗：同样让平行光参与，不再与调亮分支做“光源参与”差异化
+        mult = mix(vec3f(1.0), nightColor + dirContrib, -f);
     }
     (*color).rgb = l2g(linearColor * mult);
 }
@@ -1119,14 +1119,14 @@ class NightMode extends GsplatShaderEffect {
                 this.nightAmbient.b
             ]);
             this.setUniform('uModelMatrix', modelMatrix);
-            // 调亮时 (fade > 0) 传入平行光与相机位置，供 shader 计算平行光参与的高斯光照
+            // 无论 fade 正负，统一传入平行光与相机位置，保证所有光源都参与计算
             const camPos = this.camera?.getPosition();
             if (camPos) {
                 this.setUniform('uCameraPos', [camPos.x, camPos.y, camPos.z]);
             } else {
                 this.setUniform('uCameraPos', [0, 0, 0]);
             }
-            if (this.nightFade > 1e-6 && this.light?.light && (this.light.light as any).type === 'directional' && this.dirLightScale > 0) {
+            if (this.light?.light && (this.light.light as any).type === 'directional' && this.dirLightScale > 0) {
                 const wt = this.light.getWorldTransform();
                 const data = wt.data;
                 const yx = data[1], yy = data[5], yz = data[9];
