@@ -64,21 +64,8 @@ type PostEffectSettings = {
         /** 2D 笔刷局部 bloom：仅在笔刷区域叠加光晕，与 bloomDebug 互斥 */
         bloomBrush: boolean,
         bloomBrushSize: number,
-        /** 选中区域局部亮度 -1～1（当前滑块）；Set 时写入 bloomBrushCommittedBrightness */
+        /** 当前绘制会话局部亮度 -1～1（草稿/编辑态滑块） */
         bloomBrushBrightness?: number,
-        /**
-         * 已提交区域的局部亮度 -1～1（旧字段，已废弃）：
-         * - 仅用于与旧版 bloomBrush/worldSpacePoints 配置兼容；
-         * - 新的多区域模型下，请使用 LocalLightRegion.localBrightness。
-         */
-        bloomBrushCommittedBrightness?: number,
-        /**
-         * DEPRECATED: 单区域时代的世界空间 bloom 数据快照。
-         * - 仅作为「旧配置输入源」被读取，用于在 importSettings 时迁移到单个 LocalLightRegion；
-         * - 在存在 localLightRegions/activeLocalLightRegionId 的多区域模型下，运行时与保存流程不再写入该字段；
-         * - 新代码不应再依赖或扩展 worldSpacePoints，后续可以在确认上游完全迁移后移除。
-         */
-        worldSpacePoints?: WorldSpaceBloomRegionJSON,
         /**
          * 可选：局部亮灯区域列表。
          * - 首版策略：一次只激活一个 LocalLightRegion；

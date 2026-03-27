@@ -24,8 +24,8 @@ export interface CommittedPointWithBrightness extends CommittedPoint {
  * shader 一次采样得到 mask，无 64 点上限，且每 splat O(1)。
  *
  * 多区域约束对本模块的含义：
- * - 单区域入口 buildCommittedBrightnessVolume()：假定 points 来源于「某一个 LocalLightRegion 的 committed 集合」
- *   或旧版 worldSpacePoints，整体亮度由统一的 brightness 乘数控制；
+ * - 单区域入口 buildCommittedBrightnessVolume()：假定 points 来源于「某一个 LocalLightRegion 的 committed 集合」，
+ *   整体亮度由统一的 brightness 乘数控制；
  * - 多区域入口 buildCommittedBrightnessVolumeFromRegions()：假定 points 已由调用方按 LocalLightRegion 展开并带上各自的
  *   brightness（-1～1），此处只负责在烘焙阶段把它们叠加为单张体积纹理：
  *   - AABB 取所有区域的并集；

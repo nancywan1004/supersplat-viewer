@@ -374,12 +374,7 @@ const normalizeAnnotation = (ann: any): any => {
 /**
  * 规范化 bloom 的 LocalLightRegion 配置：
  * - 为新字段 localLightRegions / activeLocalLightRegionId 补齐默认值；
- * - 若检测到旧的 worldSpacePoints 结构且尚未迁移，则自动构造单个 LocalLightRegion。
- *
- * 注意：bloom.worldSpacePoints / bloom.bloomBrushCommittedBrightness 已视为 **deprecated**：
- * - 仅在这里作为「旧配置输入」被消费一次，用于生成首个 LocalLightRegion；
- * - 多区域模型下的运行时与保存流程都不再写回这两个字段；
- * - 新增能力/字段时，应统一挂在 localLightRegions[*] 或其子结构上。
+ * - 不再读取 legacy 的 worldSpacePoints；旧配置需先完成外部迁移。
  */
 const ensureBloomLocalLightRegions = (settings: V2): void => {
     const pes: any = settings.postEffectSettings;
@@ -389,55 +384,10 @@ const ensureBloomLocalLightRegions = (settings: V2): void => {
 
     const hasLocalRegions = Array.isArray(bloom.localLightRegions);
 
-    // 从旧 worldSpacePoints 结构迁移到单个 LocalLightRegion
     if (!hasLocalRegions) {
-        const ws = bloom.worldSpacePoints;
-        const hasWs =
-            ws &&
-            typeof ws === 'object' &&
-            (Array.isArray(ws.points) || Array.isArray(ws.committed));
-
-        // 优先使用顶层 bloomBrushCommittedBrightness，其次回退到 worldSpacePoints.committedBrightness
-        const topBrightness =
-            typeof bloom.bloomBrushCommittedBrightness === 'number'
-                ? bloom.bloomBrushCommittedBrightness
-                : undefined;
-        const wsBrightness =
-            ws && typeof ws.committedBrightness === 'number'
-                ? ws.committedBrightness
-                : undefined;
-        const effectiveBrightness =
-            typeof topBrightness === 'number'
-                ? topBrightness
-                : typeof wsBrightness === 'number'
-                    ? wsBrightness
-                    : 0;
-
-        if (hasWs) {
-            const regionId = 'region-1';
-            bloom.localLightRegions = [
-                {
-                    id: regionId,
-                    name: '亮灯区域01',
-                    worldSpace: {
-                        points: Array.isArray(ws.points) ? ws.points : [],
-                        committed: Array.isArray(ws.committed) ? ws.committed : [],
-                        committedBrightness: effectiveBrightness
-                    },
-                    localBrightness: effectiveBrightness,
-                    tintColor: [1, 1, 1],
-                    tintBlend: 0
-                }
-            ];
-            if (bloom.activeLocalLightRegionId === undefined) {
-                bloom.activeLocalLightRegionId = regionId;
-            }
-        } else {
-            // 没有旧结构时，补齐为空列表和 null
-            bloom.localLightRegions = [];
-            if (bloom.activeLocalLightRegionId === undefined) {
-                bloom.activeLocalLightRegionId = null;
-            }
+        bloom.localLightRegions = [];
+        if (bloom.activeLocalLightRegionId === undefined) {
+            bloom.activeLocalLightRegionId = null;
         }
     } else {
         // 已存在 localLightRegions 时，仅补齐 activeLocalLightRegionId 与缺失字段

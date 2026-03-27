@@ -11,15 +11,12 @@ import type { PostEffectSettings } from '../settings';
 import type { LocalLightRegion, WorldSpaceBloomRegionJSON, ExperienceSettings } from '../schemas/v2';
 import type { Global } from '../types';
 import { BloomBrushPainter } from './bloom-brush-painter';
-import { pickWorldFromClientXY } from '../picker';
 import { WorldSpaceBloomData } from './world-space-bloom-data';
 import { BloomBrushFilter, MAX_POINTS } from './bloom-brush-filter';
 import { buildCommittedBrightnessVolume, buildCommittedBrightnessVolumeFromRegions, type CommittedPointWithBrightness } from './committed-brightness-volume';
-import { updatePointLightsFromSettings } from '../light';
+import { BloomBrushFlowController } from './bloom-brush-flow';
 
 const MASK_SIZE = 512;
-/** 屏幕笔刷半径映射到世界半径时的缩放系数：<1 可减少“2D 预览偏大、3D 结果偏肥” */
-const BRUSH_WORLD_RADIUS_SCALE = 0.65;
 /** 与 committed-brightness-volume 一致，用于判断是否为有效 64³ volume 纹理 */
 const VOLUME_TEX_WIDTH = 64;
 const VOLUME_TEX_HEIGHT = 64 * 64;
@@ -136,10 +133,23 @@ export class BloomController {
     private worldSpaceData: WorldSpaceBloomData = new WorldSpaceBloomData();
     /** Always World Space (Screen Space removed per product decision) */
     private mode: BloomMode = BloomMode.WorldSpace;
+    // ===== Brush Flow 状态总览（入口 -> 状态 -> 副作用）=====
+    // 入口 A（协议）：messageBridge:lightBrush
+    //   - LIGHT_BRUSH_START / LIGHT_ERASER_START：切工具态（isErasing + eraseMode）
+    //   - LIGHT_BRUSH_CLEAR：清空当前草稿工作区
+    //   - LIGHT_BRUSH_FINISH：提交 committed + 同步 localLightRegions + 触发重建
+    // 入口 B（交互）：pointerdown/move/up（仅 bloomBrush=true 且有 active region）
+    //   - pointerdown/move：写入或擦除 worldSpaceData 点集
+    //   - pointerup：统一触发一次 3D 重建（postEffect:changed）
+    // 关键状态：
+    //   - isDrawing：是否处于一次 pointer 绘制会话中
+    //   - isErasing：当前工具是否为橡皮擦（影响 addPoint / eraseAt）
+    //   - _lastMultiRegionHash / _lastMaskSignature：体积与 2D mask 缓存签名，置空即强制下一帧重算
     private isDrawing: boolean = false;
     private boundPointerDown: ((e: PointerEvent) => void) | null = null;
     private boundPointerMove: ((e: PointerEvent) => void) | null = null;
     private boundPointerUp: ((e: PointerEvent) => void) | null = null;
+    private brushFlow: BloomBrushFlowController | null = null;
     private bloomBrushFilter: BloomBrushFilter | null = null;
     /** Last known camera position for detecting camera movement */
     private lastCameraPosition: Vec3 = new Vec3();
@@ -154,8 +164,6 @@ export class BloomController {
     private worldSpaceMaskTexture: Texture | null = null;
     /** Whether the world space mask has valid content */
     private hasWorldSpaceMask = false;
-    /** Whether the world space mask was manually painted during active drawing */
-    private worldSpaceMaskDirtyFromDrawing = false;
     /** 3D 亮度场烘焙成的 2D 图集纹理，无 64 点上限 */
     private committedVolumeTexture: Texture | null = null;
     /** 3D 颜色调制场（per-voxel tint），多区域时每区域只影响自己体素 */
@@ -277,7 +285,6 @@ export class BloomController {
         const { events } = global;
         events.on('bloomBrush:clear', () => {
             this.worldSpaceData.clear();
-            if (this.isDrawing) this.worldSpaceMaskDirtyFromDrawing = false;
             this.fireWorldSpaceChanged();
             (this.global.app as any).renderNextFrame = true;
         });
@@ -285,7 +292,6 @@ export class BloomController {
 
         events.on('bloomBrush:reset', () => {
             this.worldSpaceData.reset();
-            this.worldSpaceMaskDirtyFromDrawing = false;
             this._lastMultiRegionHash = '';
             this._lastActiveRegionId = null;
             this._lastActiveRegionCommittedLength = -1;
@@ -315,28 +321,6 @@ export class BloomController {
         });
         this._unregisterEvents.push(() => events.off('bloomBrush:reset'));
 
-        events.on('bloomBrush:set', () => {
-            this.worldSpaceData.commit();
-            const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomBrushBrightness?: number; localLightRegions?: any[] } | undefined;
-            const brightness = bloom && typeof bloom.bloomBrushBrightness === 'number'
-                ? Math.max(-1, Math.min(1, bloom.bloomBrushBrightness))
-                : 0;
-            this.worldSpaceData.setCommittedBrightness(brightness);
-            if (bloom) (bloom as any).bloomBrushCommittedBrightness = brightness;
-            this.saveWorldSpaceConfig();
-            const hasExistingRegions = Array.isArray(bloom?.localLightRegions) &&
-                bloom!.localLightRegions!.some((r: any) => r?.worldSpace?.committed?.length > 0);
-            if (hasExistingRegions) {
-                this._lastMultiRegionHash = '';
-                this._lastMaskSignature = '';
-            } else {
-                this.syncCommittedToNightMode();
-            }
-            this.fireWorldSpaceChanged();
-            (this.global.app as any).renderNextFrame = true;
-        });
-        this._unregisterEvents.push(() => events.off('bloomBrush:set'));
-
         // 当局部亮灯区域列表发生变化且被清空时，清理遗留的 worldSpaceData 与体积，避免已删除区域继续参与合成。
         const onRegionListChanged = () => {
             const bloomSettings = (this.global.settings as any).postEffectSettings?.bloom as any;
@@ -362,265 +346,31 @@ export class BloomController {
         });
         this._unregisterEvents.push(() => events.off('bloomLocalLightRegion:requestExport'));
 
-        // 父级托管模式下的 LIGHT_BRUSH_* 协议适配：
-        // - LIGHT_BRUSH_START: 进入画笔模式（加亮/调暗）
-        // - LIGHT_ERASER_START: 进入橡皮擦模式
-        // - LIGHT_BRUSH_CLEAR: 清空当前绘制区域（不影响已提交体积）
-        // - LIGHT_BRUSH_FINISH: 结束一次笔刷操作，相当于 "Set"：提交当前点并重建体积
-        // - LIGHT_BRUSH_BLOOM_UPDATE: 更新局部亮度系数（bloomBrushBrightness）
-        // 仅当存在当前 active LocalLightRegion（含草稿）时处理，否则不接管 pointer，与 UI 笔刷/擦除/完成行为一致。
-        events.on('messageBridge:lightBrush', (data: { type: string; payload?: any }) => {
-            const t = data?.type;
-            const payload = (data?.payload ?? {}) as {
-                id?: string;
-                value?: unknown;
-                tintColor?: number[];
-                tintBlend?: number;
-            };
-
-            let createdDraftForToolStart = false;
-            // 简化规则：进入 brush 且当前 active 不是 draft-* 时新建草稿区域。
-            // 这样“新增区域”路径稳定；同一草稿内 brush/eraser 切换不会重复创建。
-            const settingsAnyForStart = this.global.settings as any;
-            const bloomForStart = settingsAnyForStart?.postEffectSettings?.bloom as { activeLocalLightRegionId?: string | null } | undefined;
-            const activeIdForStart = bloomForStart?.activeLocalLightRegionId;
-            // 仅 LIGHT_BRUSH_START 才隐式建草稿；LIGHT_ERASER_START 只切工具，不改区域上下文。
-            const shouldCreateDraftForStart = t === 'LIGHT_BRUSH_START' && !(
-                typeof activeIdForStart === 'string' &&
-                activeIdForStart.startsWith('draft-')
-            );
-            if (shouldCreateDraftForStart) {
-                const settingsAny = this.global.settings as any;
-                if (!settingsAny.postEffectSettings) {
-                    settingsAny.postEffectSettings = {};
-                }
-                if (!settingsAny.postEffectSettings.bloom) {
-                    settingsAny.postEffectSettings.bloom = {};
-                }
-                const bloom = settingsAny.postEffectSettings.bloom as any;
-                const draftId = `draft-${Date.now()}`;
-                bloom.activeLocalLightRegionId = draftId;
-                if (!Array.isArray(bloom.localLightRegions)) {
-                    bloom.localLightRegions = [];
-                }
-                createdDraftForToolStart = true;
-                (this.global.events as any).fire('bloomLocalLightRegion:listChanged');
-            }
-
-            if (!this.hasActiveLocalLightRegion()) {
-                return;
-            }
-
-            const ensureBloomSettings = () => {
-                if (!(this.global.settings as any).postEffectSettings) {
-                    (this.global.settings as any).postEffectSettings = {};
-                }
-                if (!(this.global.settings as any).postEffectSettings.bloom) {
-                    (this.global.settings as any).postEffectSettings.bloom = {
-                        enabled: false,
-                        intensity: 1,
-                        blurLevel: 2,
-                        threshold: 0.2,
-                        bloomDebug: false,
-                        bloomBrush: false,
-                        bloomBrushSize: 10,
-                        bloomBrushBrightness: 0
-                    };
-                }
-                return (this.global.settings as any).postEffectSettings.bloom as any;
-            };
-
-            switch (t) {
-            case 'LIGHT_BRUSH_START': {
-                const bloom = ensureBloomSettings();
-                bloom.bloomBrush = true;
-                if (typeof bloom.bloomBrushBrightness !== 'number') bloom.bloomBrushBrightness = 1;
-                if (typeof bloom.bloomBrushCommittedBrightness !== 'number') bloom.bloomBrushCommittedBrightness = 1;
-                if (bloom.enabled === false) bloom.enabled = true;
-                // 切工具时强制结束 drawing 状态，避免误走“绘制中仅2D预览”分支
-                this.isDrawing = false;
-                this.worldSpaceMaskDirtyFromDrawing = false;
-                this.isErasing = false;
-                this.worldSpaceData.setEraseMode(false);
-                // 仅在“无 active 区域 -> 自动创建草稿区域”时重置工作区；
-                // 若只是 brush/eraser 工具切换，不应清空当前已绘制内容。
-                if (createdDraftForToolStart) {
-                    (this.global.events as any).fire('bloomBrush:reset');
-                }
-                (this.global.events as any).fire('postEffect:changed');
-                (this.global.app as any).renderNextFrame = true;
-                break;
-            }
-            case 'LIGHT_ERASER_START': {
-                const bloom = ensureBloomSettings();
-                bloom.bloomBrush = true;
-                // 切工具时强制结束 drawing 状态，避免误走“绘制中仅2D预览”分支
-                this.isDrawing = false;
-                this.worldSpaceMaskDirtyFromDrawing = false;
-                this.isErasing = true;
-                this.worldSpaceData.setEraseMode(true);
-                (this.global.events as any).fire('postEffect:changed');
-                (this.global.app as any).renderNextFrame = true;
-                break;
-            }
-            case 'LIGHT_BRUSH_CLEAR': {
-                const bloom = ensureBloomSettings();
-                (this.global.events as any).fire('bloomBrush:reset');
-                bloom.bloomBrush = false;
-                this.isDrawing = false;
-                this.isErasing = false;
-                this.worldSpaceData.setEraseMode(false);
-                this.worldSpaceMaskDirtyFromDrawing = false;
-                const activeId = bloom.activeLocalLightRegionId as string | null | undefined;
-                if (typeof activeId === 'string' && activeId.startsWith('draft-')) {
-                    bloom.activeLocalLightRegionId = null;
-                }
-                (this.global.events as any).fire('bloomLocalLightRegion:listChanged');
-                (this.global.events as any).fire('postEffect:changed');
-                (this.global.app as any).renderNextFrame = true;
-                break;
-            }
-            case 'LIGHT_BRUSH_COLOR_UPDATE': {
-                // 更新当前（或指定）区域的颜色调制：tintColor + tintBlend
-                const bloom = ensureBloomSettings();
-                const regions = (bloom as any).localLightRegions as any[] | undefined;
-                const activeId = (bloom as any).activeLocalLightRegionId as string | null | undefined;
-                const targetId = typeof payload.id === 'string' && payload.id.length > 0
-                    ? payload.id
-                    : (activeId ?? null);
-                if (!targetId) break;
-
-                // 兼容旧字段：payload.color / payload.tintBlend（若外部仍传）
-                const v = (payload.value as any) ?? {};
-                const tintColorArr =
-                    Array.isArray(v?.tintColor) ? v.tintColor :
-                        (Array.isArray((payload as any).color) ? (payload as any).color : (Array.isArray(payload.tintColor) ? payload.tintColor : null));
-                const tintBlendVal =
-                    typeof v?.tintBlend === 'number' ? v.tintBlend :
-                        (typeof (payload as any).tintBlend === 'number' ? (payload as any).tintBlend : null);
-
-                if (!Array.isArray(regions)) break;
-                const region = regions.find((r) => r && r.id === targetId);
-                if (!region) break;
-
-                if (Array.isArray(tintColorArr) && tintColorArr.length >= 3) {
-                    const r = Math.max(0, Math.min(1, Number(tintColorArr[0]) || 0));
-                    const g = Math.max(0, Math.min(1, Number(tintColorArr[1]) || 0));
-                    const b = Math.max(0, Math.min(1, Number(tintColorArr[2]) || 0));
-                    region.tintColor = [r, g, b];
-                }
-                if (typeof tintBlendVal === 'number') {
-                    region.tintBlend = Math.max(0, Math.min(1, tintBlendVal));
-                }
-                // 若该区域绑定了光源，则同步更新对应 light 颜色（message-bridge 模式）
-                const linkedId = (region as any).linkedLightId as string | null | undefined;
-                if (linkedId && Array.isArray(region.tintColor) && region.tintColor.length >= 3) {
-                    try {
-                        const settingsAny = this.global.settings as any;
-                        const lighting = settingsAny.lighting;
-                        if (lighting && Array.isArray(lighting.lights)) {
-                            const lightsAny = lighting.lights as any[];
-                            const light = lightsAny.find((l) => l && (l as any).id === linkedId);
-                            if (light) {
-                                const [lr, lg, lb] = region.tintColor as [number, number, number];
-                                (light as any).color = [
-                                    Math.max(0, Math.min(1, lr)),
-                                    Math.max(0, Math.min(1, lg)),
-                                    Math.max(0, Math.min(1, lb))
-                                ];
-                                updatePointLightsFromSettings(this.global);
-                            }
-                        }
-                    } catch {
-                        // 忽略联动失败，保证 Bloom 协议本身正常
-                    }
-                }
-
-                (this.global.events as any).fire('postEffect:changed');
-                (this.global.app as any).renderNextFrame = true;
-                break;
-            }
-            case 'LIGHT_BRUSH_FINISH': {
-                // 完成一次笔刷操作：提交并重建体积，同时退出笔刷模式（不再依赖 toggle）
-                this.worldSpaceData.commit();
-                const bloom = ensureBloomSettings();
-                const brightness = typeof bloom.bloomBrushBrightness === 'number'
-                    ? Math.max(-1, Math.min(1, bloom.bloomBrushBrightness))
-                    : 0;
-                this.worldSpaceData.setCommittedBrightness(brightness);
-                bloom.bloomBrushCommittedBrightness = brightness;
-                bloom.bloomBrush = false;
-                this.isErasing = false;
-                this.worldSpaceData.setEraseMode(false);
-                this.saveWorldSpaceConfig();
-                const hasExistingRegionsFinish = Array.isArray(bloom.localLightRegions) &&
-                    bloom.localLightRegions.some((r: any) => r?.worldSpace?.committed?.length > 0);
-                if (hasExistingRegionsFinish) {
-                    this._lastMultiRegionHash = '';
-                    this._lastMaskSignature = '';
-                } else {
-                    this.syncCommittedToNightMode();
-                }
-                this.worldSpaceMaskDirtyFromDrawing = false;
-                const activeId = bloom.activeLocalLightRegionId as string | null | undefined;
-                const isDraftActive = typeof activeId === 'string' && activeId.startsWith('draft-');
-                if (isDraftActive) {
-                    const { worldSpaceJSON, committedBrightness } = this.exportRegion();
-                    const committed = worldSpaceJSON?.committed ?? [];
-                    const center = this.getCurrentRegionCenter();
-                    bloom.draftLightRegionCenter = center ? [center.x, center.y, center.z] : null;
-                    if (committed.length > 0) {
-                        if (!Array.isArray(bloom.localLightRegions)) bloom.localLightRegions = [];
-                        const nextIndex = bloom.localLightRegions.length + 1;
-                        const incomingRegionId = typeof payload.id === 'string' && payload.id.trim().length > 0
-                            ? payload.id
-                            : `region-${Date.now()}`;
-                        const newRegion = {
-                            id: incomingRegionId,
-                            name: `亮灯区域${String(nextIndex).padStart(2, '0')}`,
-                            worldSpace: worldSpaceJSON,
-                            localBrightness: Math.max(-1, Math.min(1, committedBrightness ?? brightness)),
-                            tintColor: [1, 1, 1] as [number, number, number],
-                            tintBlend: 0
-                        };
-                        const existingIndex = bloom.localLightRegions.findIndex((r: any) => r && r.id === incomingRegionId);
-                        if (existingIndex >= 0) {
-                            bloom.localLightRegions[existingIndex] = newRegion as any;
-                        } else {
-                            bloom.localLightRegions.push(newRegion as any);
-                        }
-                        bloom.activeLocalLightRegionId = newRegion.id;
-                        (this.global.events as any).fire('bloomLocalLightRegion:listChanged');
-                    } else {
-                        // 空草稿直接清空 active，等价于“无绘制内容完成”
-                        bloom.activeLocalLightRegionId = null;
-                        bloom.draftLightRegionCenter = null;
-                    }
-                }
-                (this.global.app as any).renderNextFrame = true;
-                break;
-            }
-            case 'LIGHT_BRUSH_BLOOM_UPDATE': {
-                // 更新局部亮度调制系数（-1～1），仅影响笔刷区域颜色；是否参与 Bloom 仍由全局 bloom 强度决定
-                const bloom = ensureBloomSettings();
-                if (typeof payload.value === 'number') {
-                    const v = Math.max(-1, Math.min(1, payload.value));
-                    bloom.bloomBrushBrightness = v;
-                    (this.global.events as any).fire('postEffect:changed');
-                    (this.global.app as any).renderNextFrame = true;
-                }
-                break;
-            }
-            default:
-                break;
-            }
+        this.brushFlow = new BloomBrushFlowController({
+            global: this.global,
+            worldSpaceData: this.worldSpaceData,
+            getIsDrawing: () => this.isDrawing,
+            setIsDrawing: (v) => { this.isDrawing = v; },
+            getIsErasing: () => this.isErasing,
+            setIsErasing: (v) => { this.isErasing = v; },
+            hasActiveLocalLightRegion: () => this.hasActiveLocalLightRegion(),
+            fireWorldSpaceChanged: () => this.fireWorldSpaceChanged(),
+            invalidateBrushCaches: () => this.invalidateBrushCaches(),
+            saveWorldSpaceConfig: () => this.saveWorldSpaceConfig(),
+            syncCommittedToNightMode: () => this.syncCommittedToNightMode(),
+            exportRegion: () => this.exportRegion(),
+            getCurrentRegionCenter: () => this.getCurrentRegionCenter()
         });
-        this._unregisterEvents.push(() => events.off('messageBridge:lightBrush'));
+        events.on('messageBridge:lightBrush', this.brushFlow.handleMessageBridgeLightBrush);
+        this._unregisterEvents.push(() => {
+            if (this.brushFlow) events.off('messageBridge:lightBrush', this.brushFlow.handleMessageBridgeLightBrush);
+        });
 
-        // Setup pointer event handlers for world space bloom
-        this.boundPointerDown = this.handlePointerDown.bind(this);
-        this.boundPointerMove = this.handlePointerMove.bind(this);
-        this.boundPointerUp = this.handlePointerUp.bind(this);
+        // ===== Brush Flow 入口 B：pointer 交互入口（会话态）=====
+        // 仅负责“写点/擦点 + 通知渲染”；真正的体积重建集中在 pointerup 或 FINISH。
+        this.boundPointerDown = this.brushFlow.handlePointerDown;
+        this.boundPointerMove = this.brushFlow.handlePointerMove;
+        this.boundPointerUp = this.brushFlow.handlePointerUp;
 
         // Load saved world space config from settings (backward compatible: defaults to 'screen')
         this.loadWorldSpaceConfig();
@@ -630,6 +380,11 @@ export class BloomController {
         if (this.boundPointerDown) document.addEventListener('pointerdown', this.boundPointerDown, captureOpts);
         if (this.boundPointerMove) document.addEventListener('pointermove', this.boundPointerMove, captureOpts);
         if (this.boundPointerUp) document.addEventListener('pointerup', this.boundPointerUp, captureOpts);
+    }
+
+    private invalidateBrushCaches(): void {
+        this._lastMultiRegionHash = '';
+        this._lastMaskSignature = '';
     }
 
     /**
@@ -646,7 +401,6 @@ export class BloomController {
             bloomBrushSize?: number;
             threshold?: number;
             bloomBrushBrightness?: number;
-            bloomBrushCommittedBrightness?: number;
             localLightRegions?: Array<{ id: string; name: string; worldSpace: { points?: Array<{ position: [number, number, number]; radius: number }>; committed: Array<{ position: [number, number, number]; radius: number }> }; localBrightness: number }>;
             activeLocalLightRegionId?: string | null;
         };
@@ -975,20 +729,6 @@ export class BloomController {
     }
 
     /**
-     * Check if event target is an interactive UI element
-     * @private
-     */
-    private isInteractiveTarget(target: EventTarget | null): boolean {
-        if (!target || !(target instanceof Node)) return false;
-        const el = target as HTMLElement;
-        const tag = el.tagName?.toLowerCase();
-        if (tag === 'input' || tag === 'button' || tag === 'select' || tag === 'textarea' || tag === 'a') return true;
-        if (el.closest?.('input, button, select, textarea, a[href], [role="slider"], [contenteditable="true"]')) return true;
-        if (el.closest?.('.postEffectSliderWrap, .postEffectOption')) return true;
-        return false;
-    }
-
-    /**
      * Paint directly on the world space mask canvas using screen coordinates.
      * Uses the same buffer-space mapping as renderWorldSpaceMask (worldToScreen with clientWidth/clientHeight)
      * so that brush strokes and 3D-projected regions align and stay fixed in world space after camera move.
@@ -1029,19 +769,8 @@ export class BloomController {
         tex.setSource(this.worldSpaceMaskCanvas!);
         tex.upload();
         this.hasWorldSpaceMask = true;
-        this.worldSpaceMaskDirtyFromDrawing = true;
 
         (this.global.app as any).renderNextFrame = true;
-    }
-
-    /**
-     * Check if pointer coordinates are inside the app canvas bounds
-     * @private
-     */
-    private isInsideCanvas(clientX: number, clientY: number): boolean {
-        const canvas = this.global.app.graphicsDevice.canvas;
-        const rect = canvas.getBoundingClientRect();
-        return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
     }
 
     /**
@@ -1053,139 +782,6 @@ export class BloomController {
         const bloom = this.global.settings?.postEffectSettings?.bloom as { activeLocalLightRegionId?: string | null } | undefined;
         const id = bloom?.activeLocalLightRegionId;
         return id != null && String(id).length > 0;
-    }
-
-    /**
-     * Check if bloom brush is currently enabled in settings and there is an active LocalLightRegion.
-     * World space pointer handlers only intercept events when this returns true.
-     * When bloomBrush is OFF or no active region, events pass through to camera orbit controller.
-     * @private
-     */
-    private isBloomBrushEnabled(): boolean {
-        const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomBrush?: boolean } | undefined;
-        return !!bloom?.bloomBrush && this.hasActiveLocalLightRegion();
-    }
-
-    /**
-     * Handle pointer down event
-     * Routes to appropriate handler based on current mode
-     * @private
-     */
-    private handlePointerDown(e: PointerEvent): void {
-        if (!this.isBloomBrushEnabled()) return;
-
-        // Skip if clicking on interactive UI elements
-        if (this.isInteractiveTarget(e.target)) return;
-        if (e.button !== 0) return; // Only handle left click
-        if (!this.isInsideCanvas(e.clientX, e.clientY)) return;
-
-        this.isDrawing = true;
-        e.preventDefault();
-        e.stopPropagation();
-
-        // 不再手画 2D 白圈：手画中心/半径是屏幕坐标，与 pointer up 后从 3D 投影的 mask 几何不一致，导致完成前后差异大。
-        // 改为每帧只用 3D 点投影画 2D mask（体积仍仅 pointer up 重建），完成前后一致。
-        const canvas = this.global.app.graphicsDevice.canvas as HTMLCanvasElement;
-        pickWorldFromClientXY(this.global, e.clientX, e.clientY).then(worldPos => {
-            if (worldPos) {
-                const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomBrushSize?: number } | undefined;
-                const brushSize = Math.max(0.1, Number(bloom?.bloomBrushSize ?? 10));
-                const cameraPos = this.global.camera.getPosition();
-                const distance = worldPos.distance(cameraPos);
-                const sceneCam = (this.global.camera as { camera?: { camera?: { fov?: number } } }).camera?.camera;
-                const fovDeg = sceneCam?.fov ?? 60;
-                const fovRad = (fovDeg * Math.PI) / 180;
-                const canvasHeight = canvas.clientHeight || canvas.height;
-                if (canvasHeight > 0 && distance > 0.001) {
-                    const worldRadius = ((brushSize * 2 * distance * Math.tan(fovRad / 2)) / canvasHeight) * BRUSH_WORLD_RADIUS_SCALE;
-                    if (this.isErasing) {
-                        this.worldSpaceData.eraseAt(worldPos, worldRadius);
-                    } else {
-                        this.worldSpaceData.addPoint(worldPos, worldRadius, 1.0);
-                    }
-                    this.fireWorldSpaceChanged();
-                    (this.global.app as any).renderNextFrame = true;
-                    // 点按场景时，pickWorld 是异步返回；若 pointerup 已先发生（isDrawing=false），
-                    // 本次新增/擦除点会错过 pointerup 触发的那次 3D 重建，导致只看到 2D 点。
-                    // 这里在“点数据晚到”时补触发一次 postEffect:changed，确保首击即可看到 3D Volume。
-                    if (!this.isDrawing) {
-                        this._lastMultiRegionHash = '';
-                        this._lastMaskSignature = '';
-                        (this.global.events as any).fire('postEffect:changed');
-                    }
-                    // 不在每点回调里触发 postEffect:changed，避免每加一个点就重建 volume 导致频闪；仅在 pointer up 时触发一次 3D 重算
-                }
-            }
-        });
-    }
-
-    /**
-     * Handle pointer move event
-     * Only processes movement when actively drawing (isDrawing=true, set by handlePointerDown)
-     * @private
-     */
-    private handlePointerMove(e: PointerEvent): void {
-        if (!this.isDrawing) return;
-
-        // Skip if moving over interactive UI elements
-        if (this.isInteractiveTarget(e.target)) {
-            this.isDrawing = false;
-            return;
-        }
-
-        e.preventDefault();
-        e.stopPropagation();
-
-        const canvas = this.global.app.graphicsDevice.canvas as HTMLCanvasElement;
-        pickWorldFromClientXY(this.global, e.clientX, e.clientY).then(worldPos => {
-            if (worldPos) {
-                const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomBrushSize?: number } | undefined;
-                const brushSize = Math.max(0.1, Number(bloom?.bloomBrushSize ?? 10));
-                const cameraPos = this.global.camera.getPosition();
-                const distance = worldPos.distance(cameraPos);
-                const sceneCam = (this.global.camera as { camera?: { camera?: { fov?: number } } }).camera?.camera;
-                const fovDeg = sceneCam?.fov ?? 60;
-                const fovRad = (fovDeg * Math.PI) / 180;
-                const canvasHeight = canvas.clientHeight || canvas.height;
-                if (canvasHeight > 0 && distance > 0.001) {
-                    const worldRadius = ((brushSize * 2 * distance * Math.tan(fovRad / 2)) / canvasHeight) * BRUSH_WORLD_RADIUS_SCALE;
-                    if (this.isErasing) {
-                        this.worldSpaceData.eraseAt(worldPos, worldRadius);
-                    } else {
-                        this.worldSpaceData.addPoint(worldPos, worldRadius, 1.0);
-                    }
-                    this.fireWorldSpaceChanged();
-                    (this.global.app as any).renderNextFrame = true;
-                    // 同 handlePointerDown：若该点在 pointerup 之后才落入数据，补触发一次重建。
-                    if (!this.isDrawing) {
-                        this._lastMultiRegionHash = '';
-                        this._lastMaskSignature = '';
-                        (this.global.events as any).fire('postEffect:changed');
-                    }
-                }
-            }
-        });
-    }
-
-    /**
-     * Handle pointer up event
-     * Only processes when actively drawing (isDrawing=true)
-     * @private
-     */
-    private handlePointerUp(e: PointerEvent): void {
-        if (e.button !== 0) return;
-        if (!this.isDrawing) return;
-
-        this.isDrawing = false;
-        e.preventDefault();
-        e.stopPropagation();
-        this.worldSpaceMaskDirtyFromDrawing = false;
-        this._lastMultiRegionHash = '';
-        this._lastMaskSignature = '';
-        this.fireWorldSpaceChanged();
-        (this.global.app as any).renderNextFrame = true;
-        // 仅在 pointer up 时触发一次 3D 投影/体积重算，松手即可看到 3D mask，无需点「完成」
-        this.global.events.fire('postEffect:changed');
     }
 
     /** No-op: Screen Space removed, always World Space. Kept for API compat. */
@@ -1204,21 +800,9 @@ export class BloomController {
      * @private
      */
     private saveWorldSpaceConfig(): void {
-        const bloom = this.global.settings?.postEffectSettings?.bloom as {
-            worldSpacePoints?: unknown;
-            localLightRegions?: unknown[];
-            activeLocalLightRegionId?: string | null;
-        } | undefined;
+        const bloom = this.global.settings?.postEffectSettings?.bloom as Record<string, unknown> | undefined;
         if (!bloom) return;
-        // DEPRECATED: worldSpacePoints 仅作为旧配置输入源（参考 settings.ts 中 ensureBloomLocalLightRegions）。
-        // 多区域模型下（存在 localLightRegions 或 activeLocalLightRegionId 时），
-        // worldSpaceData 仅作为当前区域/草稿的工作区，不再写回旧版 worldSpacePoints，
-        // 以避免多个区域共享同一份 worldSpaceData 持久化结果。
-        if ((bloom.localLightRegions && bloom.localLightRegions.length > 0) || bloom.activeLocalLightRegionId != null) {
-            return;
-        }
-        (bloom as any).bloomMode = 'world';
-        (bloom as any).worldSpacePoints = this.worldSpaceData.toJSON();
+        bloom.bloomMode = 'world';
     }
 
     /** 通知 UI 当前 worldSpace 是否有任意点（用于绘制模式下 擦除/放弃 按钮可用性） */
@@ -1232,28 +816,8 @@ export class BloomController {
      * @private
      */
     private loadWorldSpaceConfig(): void {
-        const bloom = this.global.settings?.postEffectSettings?.bloom as {
-            worldSpacePoints?: any;
-            bloomBrushCommittedBrightness?: number;
-            localLightRegions?: unknown[];
-        } | undefined;
-        if (!bloom?.worldSpacePoints) return;
-        // DEPRECATED: worldSpacePoints 仅在 importSettings 阶段用于迁移到 localLightRegions。
-        // 若已经存在 LocalLightRegion，则视为已迁移到多区域模型：
-        // 此时 worldSpaceData 由 loadRegion/exportRegion 与当前 active 区域驱动，
-        // 不再从旧的 worldSpacePoints 中加载，避免与多区域持久化状态产生混淆。
-        if (bloom.localLightRegions && bloom.localLightRegions.length > 0) {
-            return;
-        }
-        this.worldSpaceData.fromJSON(bloom.worldSpacePoints);
-        // 兼容：committedBrightness 可能在 worldSpacePoints 内（toJSON），也可能在 bloom 顶层（bloomBrushCommittedBrightness）
-        if (bloom && typeof (bloom as any).bloomBrushCommittedBrightness === 'number') {
-            this.worldSpaceData.setCommittedBrightness((bloom as any).bloomBrushCommittedBrightness);
-        }
-        if (bloom && typeof this.worldSpaceData.getCommittedBrightness() === 'number') {
-            (bloom as any).bloomBrushCommittedBrightness = this.worldSpaceData.getCommittedBrightness();
-        }
-        this.syncCommittedToNightMode();
+        // worldSpacePoints 兼容输入已移除：
+        // 运行时只从 localLightRegions / activeLocalLightRegionId 驱动当前工作区。
     }
 
     /**

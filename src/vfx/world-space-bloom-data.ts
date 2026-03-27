@@ -31,9 +31,8 @@ export interface BloomPoint {
  *   - 哪个区域被擦除、何时写回 settings 由上层 BloomController/UI 决定，
  *     保证「擦除只影响当前区域」这一交互原则。
  *
- * - 向后兼容：
- *   - 旧版仅单区域/无 LocalLightRegion 时，调用方仍可把整个 worldSpacePoints 直接塞进本类，
- *     并通过 getAllPoints()/getCommittedPoints() 驱动体积与 mask 逻辑，不影响现有对外 API。
+ * - 配置语义：
+ *   - legacy 的 bloom.worldSpacePoints 已下线；本类只处理当前区域的 worldSpace 数据对象。
  *
  * Stores bloom points in 3D world coordinates and provides spatial queries.
  */

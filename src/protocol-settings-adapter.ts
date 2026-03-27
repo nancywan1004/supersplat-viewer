@@ -94,7 +94,6 @@ export function ensureBloom(settings: ExperienceSettings): NonNullable<Experienc
     if (b.bloomBrush === undefined) b.bloomBrush = false;
     if (b.bloomBrushSize === undefined) b.bloomBrushSize = 30;
     if (typeof b.bloomBrushBrightness !== 'number') b.bloomBrushBrightness = 0;
-    if (typeof b.bloomBrushCommittedBrightness !== 'number') b.bloomBrushCommittedBrightness = 0;
     if (!Array.isArray(b.localLightRegions)) b.localLightRegions = [];
     if (typeof (b as any).localLightsEnabled !== 'boolean') (b as any).localLightsEnabled = true;
     if (b.activeLocalLightRegionId === undefined) b.activeLocalLightRegionId = null;
@@ -134,16 +133,25 @@ export function applyLightGlobalSet(global: Global, value: number): void {
     (global.app as { fire: (name: string, value?: unknown) => void }).fire('nightFade:set', v);
 }
 
-/** LIGHT_ADD：isThreeSixty=true 创建点光；false 创建聚光灯（带 id），默认在相机前方生成 */
+/** LIGHT_ADD：isThreeSixty=true 创建点光；false 创建聚光灯（带 id），优先在草稿区域中心生成 */
 export function applyLightAdd(global: Global, id: string, isThreeSixty = true): void {
     const settings = global.settings as ExperienceSettings;
     const lighting = ensureLighting(settings);
+    const bloom = ensureBloom(settings) as {
+        draftLightRegionCenter?: [number, number, number] | null;
+        activeLocalLightRegionId?: string | null;
+        localLightRegions?: Array<{ id: string; linkedLightId?: string | null }>;
+    };
+    const center = bloom.draftLightRegionCenter ?? null;
     const camPos = getPositionInFrontOfCamera(global);
+    const position: [number, number, number] = center
+        ? [center[0], center[1], center[2]]
+        : [camPos.x, camPos.y, camPos.z];
     if (isThreeSixty) {
         lighting.lights.push({
             id,
             type: 'point',
-            position: [camPos.x, camPos.y, camPos.z],
+            position,
             color: [1, 1, 1],
             intensity: 1,
             range: 10,
@@ -153,7 +161,7 @@ export function applyLightAdd(global: Global, id: string, isThreeSixty = true): 
         lighting.lights.push({
             id,
             type: 'spot',
-            position: [camPos.x, camPos.y, camPos.z],
+            position,
             color: [1, 1, 1],
             intensity: 1,
             range: 10,
@@ -162,6 +170,13 @@ export function applyLightAdd(global: Global, id: string, isThreeSixty = true): 
             enabled: true
         } as LightWithId);
     }
+    if (bloom.activeLocalLightRegionId && Array.isArray(bloom.localLightRegions)) {
+        const region = bloom.localLightRegions.find((r) => r && r.id === bloom.activeLocalLightRegionId);
+        if (region) {
+            (region as any).linkedLightId = id;
+        }
+    }
+    bloom.draftLightRegionCenter = null;
     updatePointLightsFromSettings(global);
     global.events.fire('lighting:changed');
     global.events.fire('postEffect:changed');

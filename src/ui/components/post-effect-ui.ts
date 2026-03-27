@@ -138,7 +138,6 @@ type BloomSettings = {
     bloomBrush: boolean;
     bloomBrushSize: number;
     bloomBrushBrightness: number;
-    bloomBrushCommittedBrightness?: number;
     localLightRegions?: LocalLightRegion[];
     activeLocalLightRegionId?: string | null;
     draftLightRegionCenter?: [number, number, number] | null;
