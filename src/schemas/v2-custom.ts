@@ -2,10 +2,10 @@
 export const DEFAULT_VFX_TOTAL_DURATION = 12;
 
 type RevealEffect = {
-    type?: 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch' | 'none',
+    type?: 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch' | 'none',
     radius?: number, // 10
     autoStart?: boolean,
-    totalDuration?: number // 总时长（秒），用于 rain_v2, pieces-recover, integrate, growth-wave, sketch，默认见 DEFAULT_VFX_TOTAL_DURATION
+    totalDuration?: number // 总时长（秒），用于 rain-v2, pieces-recover, integrate, growth-wave, sketch，默认见 DEFAULT_VFX_TOTAL_DURATION
 }
 
 type LodPlatform = 'desktop-max' | 'desktop' | 'mobile-max' | 'mobile'

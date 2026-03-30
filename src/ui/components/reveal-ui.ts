@@ -5,7 +5,7 @@ import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transpor
 
 /** 需要 totalDuration / 时间轴 的 VFX 特效类型列表（同时被 reveal-ui / video-export-ui 使用） */
 export const TIMED_VFX_EFFECTS = [
-    'rain_v2',
+    'rain-v2',
     'pieces-recover',
     'integrate',
     'growth-wave',
@@ -15,7 +15,7 @@ export const TIMED_VFX_EFFECTS = [
 export type RevealType =
     | 'radial'
     | 'rain'
-    | 'rain_v2'
+    | 'rain-v2'
     | 'smooth'
     | 'pieces-recover'
     | 'perlin-wave'
@@ -51,7 +51,7 @@ const REVEAL_PANEL_HTML = (() => {
         <option value="smooth">Smooth</option>
       </optgroup>
       <optgroup label="Timed VFX Effects">
-        <option value="rain_v2">Rain_V2</option>
+        <option value="rain-v2">Rain v2</option>
         <option value="pieces-recover">Pieces Recover</option>
         <option value="integrate">Integrate</option>
         <option value="growth-wave">Growth Wave</option>

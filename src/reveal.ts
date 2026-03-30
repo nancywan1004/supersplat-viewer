@@ -23,7 +23,7 @@ import type { CameraManager } from './camera-manager';
 /**
  * Reveal effect type (including VFX effects)
  */
-export type RevealEffectType = 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch' | 'none';
+export type RevealEffectType = 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch' | 'none';
 
 export class RevealController {
     private gsplatEntity: Entity | null = null;
@@ -39,7 +39,7 @@ export class RevealController {
     private effectStartTime: number | null = null;
     private effectEndTime: number | null = null;
     private isTiming: boolean = false;
-    private timedEffects = ['rain_v2', 'pieces-recover', 'integrate', 'growth-wave', 'sketch'];
+    private timedEffects = ['rain-v2', 'pieces-recover', 'integrate', 'growth-wave', 'sketch'];
     
     // 时间轴控制相关（唯一来源：state.effectPaused）
     private get effectPaused(): boolean {
@@ -258,15 +258,15 @@ export class RevealController {
     }
 
     /**
-     * 创建rain_v2 reveal script - 简化版本的rain效果
+     * 创建 rain-v2 reveal script - 简化版本的 rain 效果
      */
     private createRainV2Script() {
         if (!this.gsplatEntity || !this.gsplatEntity.script) {
-            console.warn('Cannot create rain_v2 script - entity or script component not ready');
+            console.warn('Cannot create rain-v2 script - entity or script component not ready');
             return null;
         }
 
-        console.log('Creating rain_v2 reveal script');
+        console.log('Creating rain-v2 reveal script');
         
         try {
             const script = this.gsplatEntity.script.create(GsplatRainV2) as any;
@@ -356,7 +356,7 @@ export class RevealController {
             }
             return script;
         } catch (error) {
-            console.error('Failed to create rain_v2 script:', error);
+            console.error('Failed to create rain-v2 script:', error);
             return null;
         }
     }
@@ -834,7 +834,7 @@ export class RevealController {
             case 'rain':
                 script = this.createRainScript();
                 break;
-            case 'rain_v2':
+            case 'rain-v2':
                 script = this.createRainV2Script();
                 break;
             case 'smooth':
@@ -1094,14 +1094,14 @@ export class RevealController {
     updateConfig(newConfig: Partial<RevealConfig>) {
         const oldType = this.config.type;
         const oldTotalDuration = this.config.totalDuration;
-        
+
         Object.assign(this.config, newConfig);
-        
+
         // Also update the settings object so UI can read it
         if (this.global.settings.revealEffect) {
             Object.assign(this.global.settings.revealEffect, newConfig);
         }
-        
+
         console.log('Updated reveal config:', this.config);
 
         // 如果类型改变，重新创建效果并重置动画
@@ -1119,7 +1119,7 @@ export class RevealController {
         // 如果 totalDuration 改变且当前特效是需要 totalDuration 的特效，重新创建效果
         else if (newConfig.totalDuration !== undefined && 
                  newConfig.totalDuration !== oldTotalDuration &&
-                 ['rain_v2', 'pieces-recover', 'integrate', 'growth-wave'].includes(this.config.type)) {
+                 ['rain-v2', 'pieces-recover', 'integrate', 'growth-wave'].includes(this.config.type)) {
             this.createEffect(this.config.type);
             console.log('Recreated effect due to totalDuration change');
         }

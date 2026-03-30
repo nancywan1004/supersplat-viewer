@@ -116,7 +116,7 @@ type State = {
     showCameraPath: boolean;                    // show camera path visualization
     showCameraBoundingBox: boolean;            // show camera bounding box (animCoreBbox preferred, fallback to scene bbox)
     vfxActive: boolean;                        // VFX effect active state
-    vfxType: 'none' | 'radial' | 'rain' | 'rain_v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch';  // current effect type (includes reveal and VFX)
+    vfxType: 'none' | 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch';  // current effect type (includes reveal and VFX)
     syncAnimTrackOnExport?: boolean;           // 导出 VFX 视频时是否同步重播动画轨道（由 reveal-ui 设置，video-export-ui 读取）
     editMode: boolean;                         // true = 编辑模式（显示 rightToolBar），false = 观看模式
     /** 左侧工具箱当前模块；null 表示不选中任何模块 */
