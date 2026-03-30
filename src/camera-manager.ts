@@ -264,8 +264,8 @@ class CameraManager {
         }
 
         this.constraint = SphereConstraint.fromBoundingBox(fusedBbox, targetScaleFactor);
-        // fly 仍保留一个球形硬边界兜底（仅在没有 box 约束时才会用到），不影响两种模式的主约束一致性
-        controllers.fly.setConstraint(this.constraint);
+        // disableCameraBounds=true 时要求“彻底不限制相机”，因此同时关闭 fly 的球形兜底约束
+        controllers.fly.setConstraint(boundsEnabled ? this.constraint : null);
 
         // 给 orbit 设置一个合理的最大缩放距离（避免无限 zoom-out 让场景跑出视野）
         // 之前的系数偏小，会导致 orbit 很早到达 maxZoom；切到 fly（通过位置平移）看起来还能继续"退远"。
