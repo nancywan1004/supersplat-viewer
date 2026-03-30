@@ -552,7 +552,7 @@ export class RevealController {
                 if (this.bbox) {
                     // 基于 bbox 计算：与 integrate 效果使用相同的计算方式，但赋值顺序相反
                     script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y;
-                    script.topY = this.bbox.center.y - this.bbox.halfExtents.y * 0.68;
+                    script.topY = this.bbox.center.y + this.bbox.halfExtents.y;
                 } else {
                     script.bottomY = -10.0;
                     script.topY = 10.0;
@@ -741,7 +741,7 @@ export class RevealController {
                 if (this.bbox) {
                     // bbox 底部：center.y - halfExtents.y（数值更小）
                     // 为了让 bottomY 更「靠下」（数值更大），取靠近中心的一层作为 bottomY
-                    script.topY = this.bbox.center.y - this.bbox.halfExtents.y * 0.68;
+                    script.topY = this.bbox.center.y + this.bbox.halfExtents.y;
                     script.bottomY = this.bbox.center.y - this.bbox.halfExtents.y;
                 } else {
                     script.topY = 10.0;

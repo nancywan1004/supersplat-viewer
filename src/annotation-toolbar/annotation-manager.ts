@@ -85,8 +85,8 @@ export class AnnotationManager {
         const placeholder = this.getPlaceholderAnnotation();
         // 放置流程中的占位标注不参与「选中」逻辑
         if (placeholder && placeholder.id === data.id) return;
-        // 同一 id 重复点击可能导致事件重复 fire，这里仅在“确实换选项”时触发回传。
-        if (this.selectedAnnotationId === data.id) return;
+        // 允许“重复点击已选中的标注”也触发一次 selected 回传，
+        // 这样父级（通过 message-bridge）能收到 SCENE_ANNOTATION_SELECTED。
         this.selectAnnotation(data.id, { source: 'scene' });
     }
 

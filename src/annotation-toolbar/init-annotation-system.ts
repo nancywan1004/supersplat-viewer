@@ -25,7 +25,31 @@ export function initAnnotationSystem(global: Global): () => void {
     const manager = new AnnotationManager(global);
     g.annotationManager = manager;
 
-    // 暂时不提供 teardown：标注与事件生命周期跟随 viewer/app
-    return () => {};
+    // 兜底：Annotation 系统自身不依赖 annotation-ui 的挂载时序。
+    // 避免父级通过 EDIT_MODULE_SET 从 annotation 切到其他模式时：
+    // - selectedAnnotationId 未清理
+    // - annotation 的 transform gizmo 残留
+    const onEditModeChanged = (inEdit: boolean) => {
+        if (!inEdit) {
+            // 即使 selection state 已经丢失，也强制解绑 gizmo
+            global.events.fire('gizmo:detach');
+            manager.deselectAnnotation();
+        }
+    };
+
+    const onEditLeftModuleChanged = (newModule: string | null) => {
+        if (newModule !== 'annotation') {
+            global.events.fire('gizmo:detach');
+            manager.deselectAnnotation();
+        }
+    };
+
+    global.events.on('editMode:changed', onEditModeChanged as any);
+    global.events.on('editLeftModule:changed', onEditLeftModuleChanged as any);
+
+    return () => {
+        global.events.off('editMode:changed', onEditModeChanged as any);
+        global.events.off('editLeftModule:changed', onEditLeftModuleChanged as any);
+    };
 }
 
