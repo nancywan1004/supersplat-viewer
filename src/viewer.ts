@@ -457,6 +457,12 @@ class Viewer {
                 }
             };
 
+            const initSceneAssets = () => {
+                restoreSceneAssetsFromSettings(global).catch((err) => {
+                    console.warn('[SceneAssets] restore from settings failed:', err);
+                });
+            };
+
             this.inputController = new InputController(global);
             
             // Set move speed based on scene size (reuse sceneSize from above)
@@ -481,33 +487,6 @@ class Viewer {
             }
             this.revealController = new RevealController(global, revealBbox, gsplatEntity, this.cameraManager);
 
-            // Reveal 播放期间：非 gaussian 资产先不出现在画面里，直到 revealComplete 再恢复
-            // 目的：对齐“标注 UI 延迟初始化”的开场观感，但资产是在实体层（entity.enabled）做门控。
-            // 初始加载：只要检测到有 revealEffect，就在 revealComplete 前隐藏非 gaussian 资产。
-            // 若无 revealEffect，则直接显示。
-            const revealAssetGateActive = !!state.hasRevealEffect;
-            if (revealAssetGateActive) {
-                const onSceneAssetsAdded = (entry: any) => {
-                    if (!entry?.entity) return;
-                    const isGaussian = entry.assetType === 'gaussian';
-                    if (!isGaussian) {
-                        entry.entity.enabled = false;
-                    }
-                };
-                events.on('sceneAssets:added', onSceneAssetsAdded);
-                events.once('revealComplete', () => {
-                    events.off('sceneAssets:added', onSceneAssetsAdded);
-                    const list = state.scenePlacedEntities ?? [];
-                    list.forEach((entry: any) => {
-                        if (!entry?.entity) return;
-                        const isGaussian = entry.assetType === 'gaussian';
-                        if (!isGaussian) {
-                            entry.entity.enabled = !!entry.visible;
-                        }
-                    });
-                });
-            }
-
             // 有 reveal 时：等 reveal 播完再开始动画（监听 revealComplete），并恢复配置中的夜间模式
             if (state.hasRevealEffect) {
                 events.once('revealComplete', () => {
@@ -526,9 +505,11 @@ class Viewer {
                 });
                 // reveal 播完再初始化标注
                 events.once('revealComplete', initAnnotations);
+                events.once('revealComplete', initSceneAssets);
             } else {
                 // 无 reveal：立即初始化标注
                 initAnnotations();
+                initSceneAssets();
             }
             
             // Initialize night mode script on root entity
@@ -634,11 +615,6 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         console.error('复制到剪贴板失败:', err);
                     });
                 }
-            });
-
-            // 先根据 settings.sceneAssets 还原场景中的资产实体
-            restoreSceneAssetsFromSettings(global).catch((err) => {
-                console.warn('[SceneAssets] restore from settings failed:', err);
             });
 
             // 编辑模式：初始化资产放置与 Gizmo
