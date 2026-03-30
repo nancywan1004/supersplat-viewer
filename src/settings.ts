@@ -1,5 +1,6 @@
 import { ExperienceSettings as V1, AnimTrack as AnimTrackV1 } from './schemas/v1';
 import { ExperienceSettings as V2, AnimTrack as AnimTrackV2, TransformFrame } from './schemas/v2';
+import { ensureBloom } from './protocol-settings-adapter';
 import { Vec3 } from 'playcanvas';
 
 type LegacyKeyframes = AnimTrackV1['keyframes'];
@@ -134,14 +135,14 @@ const migrateV2 = (v1: V1): V2 => {
             },
             bloom: {
                 enabled: false,
-                intensity: 1,
-                blurLevel: 2,
+                intensity: 0.1,
+                blurLevel: 4,
                 threshold: 0.2,
                 bloomDebug: false,
                 bloomScope: 'local',
                 bloomBrush: false,
                 bloomBrushSize: 30,
-                bloomBrushBrightness: 0
+                bloomBrushBrightness: 1
             },
             grading: {
                 enabled: false,
@@ -280,14 +281,14 @@ const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: numb
             },
             bloom: {
                 enabled: false,
-                intensity: 1,
-                blurLevel: 2,
+                intensity: 0.1,
+                blurLevel: 4,
                 threshold: 0.2,
                 bloomDebug: false,
                 bloomScope: 'local',
                 bloomBrush: false,
                 bloomBrushSize: 30,
-                bloomBrushBrightness: 0
+                bloomBrushBrightness: 1
             },
             grading: {
                 enabled: false,
@@ -407,7 +408,7 @@ const ensureBloomLocalLightRegions = (settings: V2): void => {
                 if (typeof r.localBrightness !== 'number') {
                     r.localBrightness = typeof r.worldSpace.committedBrightness === 'number'
                         ? r.worldSpace.committedBrightness
-                        : 0;
+                        : 1;
                 }
                 if (!Array.isArray(r.tintColor) || r.tintColor.length !== 3) {
                     r.tintColor = [1, 1, 1];
@@ -460,6 +461,8 @@ const importSettings = (settings: any): V2 => {
 
     // 补齐 / 迁移 Bloom 的 LocalLightRegion 配置
     ensureBloomLocalLightRegions(result);
+    // 归一化 bloom 缺省与旧存盘（intensity:1 等），并保证与运行时 ensureBloom 一致
+    ensureBloom(result);
 
     return result;
 };

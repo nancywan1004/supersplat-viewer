@@ -175,13 +175,13 @@ export class BloomBrushFlowController {
         if (!(this.ctx.global.settings as any).postEffectSettings.bloom) {
             (this.ctx.global.settings as any).postEffectSettings.bloom = {
                 enabled: false,
-                intensity: 1,
-                blurLevel: 2,
+                intensity: 0.1,
+                blurLevel: 4,
                 threshold: 0.2,
                 bloomDebug: false,
                 bloomBrush: false,
-                bloomBrushSize: 10,
-                bloomBrushBrightness: 0
+                bloomBrushSize: 30,
+                bloomBrushBrightness: 1
             };
         }
         return (this.ctx.global.settings as any).postEffectSettings.bloom as any;
@@ -310,7 +310,7 @@ export class BloomBrushFlowController {
         const bloom = this.ensureBloomSettings();
         const brightness = typeof bloom.bloomBrushBrightness === 'number'
             ? Math.max(-1, Math.min(1, bloom.bloomBrushBrightness))
-            : 0;
+            : 1;
         this.ctx.worldSpaceData.setCommittedBrightness(brightness);
         bloom.bloomBrush = false;
         this.switchBrushToolState(false);

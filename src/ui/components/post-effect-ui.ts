@@ -24,8 +24,8 @@ const POST_EFFECT_PANEL_HTML = `
   <div class="settingsRow">
     <label for="bloomBlurLevelSlider" class="postEffectLabel">BlurLevel:</label>
     <div class="postEffectSliderWrap">
-      <input type="range" id="bloomBlurLevelSlider" min="0" max="10" step="1" value="2" class="postEffectSlider">
-      <span id="bloomBlurLevelValue" class="postEffectSliderValue">2</span>
+      <input type="range" id="bloomBlurLevelSlider" min="0" max="10" step="1" value="4" class="postEffectSlider">
+      <span id="bloomBlurLevelValue" class="postEffectSliderValue">4</span>
     </div>
   </div>
   <div class="settingsRow">
@@ -268,7 +268,7 @@ function renderBloomLocalLightRegionsList(
         body.style.display = expanded ? 'block' : 'none';
         body.style.paddingLeft = '12px';
         body.style.marginBottom = '4px';
-        const brightness = Math.max(-1, Math.min(1, region.localBrightness ?? 0));
+        const brightness = Math.max(-1, Math.min(1, region.localBrightness ?? 1));
         const tint = region.tintColor ?? [1, 1, 1];
         const tintHex = '#' + [tint[0], tint[1], tint[2]].map(x => Math.round(Math.max(0, Math.min(1, x)) * 255).toString(16).padStart(2, '0')).join('');
         const tintBlend = Math.max(0, Math.min(1, region.tintBlend ?? 0));

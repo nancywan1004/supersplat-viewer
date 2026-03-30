@@ -19,13 +19,13 @@ type LightWithId = (PointLightConfig | DirectionalLightConfig | SpotLightConfig)
 const DEFAULT_BLOOM = {
     enabled: false,
     intensity: 0.1,
-    blurLevel: 2,
+    blurLevel: 4,
     threshold: 0.2,
     bloomDebug: false,
     bloomScope: 'local' as const,
     bloomBrush: false,
     bloomBrushSize: 30,
-    bloomBrushBrightness: 0
+    bloomBrushBrightness: 1
 } as const;
 
 const DEFAULT_SHADOW = {
@@ -93,10 +93,22 @@ export function ensureBloom(settings: ExperienceSettings): NonNullable<Experienc
     if (b.bloomScope !== 'global' && b.bloomScope !== 'local') b.bloomScope = 'local';
     if (b.bloomBrush === undefined) b.bloomBrush = false;
     if (b.bloomBrushSize === undefined) b.bloomBrushSize = 30;
-    if (typeof b.bloomBrushBrightness !== 'number') b.bloomBrushBrightness = 0;
+    if (typeof b.bloomBrushBrightness !== 'number') b.bloomBrushBrightness = 1;
+    if (typeof b.blurLevel !== 'number') b.blurLevel = 4;
+    if (typeof b.intensity !== 'number') b.intensity = 0.1;
     if (!Array.isArray(b.localLightRegions)) b.localLightRegions = [];
     if (typeof (b as any).localLightsEnabled !== 'boolean') (b as any).localLightsEnabled = true;
     if (b.activeLocalLightRegionId === undefined) b.activeLocalLightRegionId = null;
+    // 旧 migrate / 存盘曾写 intensity:1（运行时钳到 0.2）；产品默认强度 0.1、blur 4、笔刷亮度 1
+    if (Number(b.intensity) === 1) {
+        b.intensity = 0.1;
+        if (Number(b.blurLevel) === 2) {
+            b.blurLevel = 4;
+        }
+        if (Number(b.bloomBrushBrightness) === 0) {
+            b.bloomBrushBrightness = 1;
+        }
+    }
     return pe.bloom!;
 }
 

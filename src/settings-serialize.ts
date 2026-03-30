@@ -14,13 +14,13 @@ const defaultPostEffectSettings = () => ({
     sharpness: { enabled: false, amount: 0 },
     bloom: {
         enabled: false,
-        intensity: 1,
-        blurLevel: 2,
+        intensity: 0.1,
+        blurLevel: 4,
         threshold: 0.2,
         bloomDebug: false,
         bloomBrush: false,
         bloomBrushSize: 30,
-        bloomBrushBrightness: 0,
+        bloomBrushBrightness: 1,
         // 新结构：局部亮灯区域，默认空
         localLightRegions: [] as any[],
         activeLocalLightRegionId: null as string | null,

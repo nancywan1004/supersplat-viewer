@@ -411,7 +411,7 @@ export class BloomController {
             ? Math.max(-1, Math.min(1, bloomSettings.bloomBrushBrightness))
             : 0;
 
-        const blurLevel = bloomSettings.blurLevel ?? 2;
+        const blurLevel = bloomSettings.blurLevel ?? 4;
         if (bloomSettings.enabled && blurLevel > 0) {
             bloom.intensity = Math.max(0, Math.min(0.2, Number(bloomSettings.intensity)));
             bloom.blurLevel = Math.max(1, Math.min(5, blurLevel));
@@ -828,7 +828,7 @@ export class BloomController {
         this.worldSpaceData.fromJSON(region.worldSpace);
         const colorBrightness = typeof region.localBrightness === 'number'
             ? Math.max(-1, Math.min(1, region.localBrightness))
-            : 0;
+            : 1;
         const effectiveBrightness = Math.max(-1, Math.min(1, colorBrightness));
         this.worldSpaceData.setCommittedBrightness(effectiveBrightness);
         this._activeLocalLightRegionId = region.id;
