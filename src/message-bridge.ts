@@ -559,12 +559,12 @@ const initPostMessageBridge = (global: Global) => {
             const resolution = { width: 1920, height: 1080 };
             const width = resolution.width % 2 === 0 ? resolution.width : resolution.width - 1;
             const height = resolution.height % 2 === 0 ? resolution.height : resolution.height - 1;
-            // 默认导出时长：优先用相机 animTrack 总时长（state.animationDuration），无 animTrack 时回退到 VFX 默认时长
+            // 默认导出时长：VFX 总时长为下限；animTrack 更长则用 animTrack，更短则仍导出满 VFX totalDuration
+            const vfxDuration = global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
             const animDuration = (global.state as any).animationDuration as number | undefined;
-            const totalDuration =
-                (typeof animDuration === 'number' && Number.isFinite(animDuration) && animDuration > 0)
-                    ? animDuration
-                    : (global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION);
+            const hasAnim =
+                typeof animDuration === 'number' && Number.isFinite(animDuration) && animDuration > 0;
+            const totalDuration = hasAnim ? Math.max(animDuration, vfxDuration) : vfxDuration;
             const videoSettings = {
                 startFrame: 0,
                 endFrame: 0,
