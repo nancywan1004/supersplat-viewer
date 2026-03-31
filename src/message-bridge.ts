@@ -237,10 +237,10 @@ const initPostMessageBridge = (global: Global) => {
             const jsonString = JSON.stringify(serialized, null, 2);
             const projectId = global.config.projectId;
             const token = global.config.token;
-            const uploaded = await uploadProjectData(projectId ?? '', token ?? '', jsonString);
-            if (!uploaded) {
-                console.error('[MessageBridge] SETTINGS_SAVE 上传失败，已取消 SETTINGS_UPDATED 回传');
-                postToParent('SETTINGS_SAVE_FAILED');
+            const uploadResult = await uploadProjectData(projectId ?? '', token ?? '', jsonString);
+            if (uploadResult.ok === false) {
+                console.error('[MessageBridge] SETTINGS_SAVE 上传失败，已取消 SETTINGS_UPDATED 回传', uploadResult.message);
+                postToParent('SETTINGS_SAVE_FAILED', { message: uploadResult.message });
                 break;
             }
             postToParent('SETTINGS_UPDATED');

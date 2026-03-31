@@ -647,7 +647,11 @@ const initUI = (global: Global) => {
                                             window.removeEventListener('message', onMsg);
                                             clearTimeout(to);
                                             if (data.type === 'SETTINGS_SAVE_FAILED') {
-                                                reject(new Error(data?.payload?.message || 'SETTINGS_SAVE_FAILED'));
+                                                const failMsg =
+                                                    (typeof data.message === 'string' && data.message) ||
+                                                    data?.payload?.message ||
+                                                    'SETTINGS_SAVE_FAILED';
+                                                reject(new Error(failMsg));
                                                 return;
                                             }
                                             resolve(data);
@@ -731,7 +735,11 @@ const initUI = (global: Global) => {
                                 window.removeEventListener('message', onMsg);
                                 clearTimeout(to);
                                 if (data.type === 'SETTINGS_SAVE_FAILED') {
-                                    reject(new Error(data?.payload?.message || 'SETTINGS_SAVE_FAILED'));
+                                    const failMsg =
+                                        (typeof data.message === 'string' && data.message) ||
+                                        data?.payload?.message ||
+                                        'SETTINGS_SAVE_FAILED';
+                                    reject(new Error(failMsg));
                                     return;
                                 }
                                 resolve(data);

@@ -177,21 +177,25 @@ type Multipart_STSTOKEN_Response={
 //#endregion
 
 //#region 更新项目文件
+/** settings / 模型文件上传与版本登记结果 */
+export type ProjectDataUploadResult =
+    | { ok: true }
+    | { ok: false; message: string };
+
 /**
  * 更新模型文件新版本
  * 流程：上传阿里云 -> 组装 files 请求体 -> 调用接口
  * @param projectId 项目ID
  * @param inputFiles 支持单文件或最多两个文件
- * @returns 是否更新成功（code === 1）
  */
-export const updateProjectData = async (projectId: number | string, inputFiles: File | File[]): Promise<boolean> => {
+export const updateProjectData = async (projectId: number | string, inputFiles: File | File[]): Promise<ProjectDataUploadResult> => {
     const files = Array.isArray(inputFiles) ? inputFiles : [inputFiles];
 
     if (files.length === 0) {
-        throw new Error('至少需要传入一个文件');
+        return { ok: false, message: '至少需要传入一个文件' };
     }
     if (files.length > 2) {
-        throw new Error('最多支持两个文件');
+        return { ok: false, message: '最多支持两个文件' };
     }
 
     try {
@@ -217,10 +221,18 @@ export const updateProjectData = async (projectId: number | string, inputFiles: 
         };
 
         const response = await postProjectData(requestBody);
-        return response.code === 1;
+        if (response.code === 1) {
+            return { ok: true };
+        }
+        const apiMsg = typeof response.message === 'string' && response.message.trim() ? response.message.trim() : '';
+        return {
+            ok: false,
+            message: apiMsg || `保存失败（接口 code=${response.code}）`
+        };
     } catch (error) {
         console.error('更新模型版本失败:', error);
-        return false;
+        const message = error instanceof Error ? error.message : String(error);
+        return { ok: false, message };
     }
 };
 
@@ -232,14 +244,16 @@ export const uploadProjectData = async (
     projectId: number | string,
     token: string,
     settingsJson: string | object
-): Promise<boolean> => {
+): Promise<ProjectDataUploadResult> => {
     if (projectId == null || projectId === '') {
-        console.error('uploadProjectData 缺少 projectId');
-        return false;
+        const message = '缺少 projectId';
+        console.error('uploadProjectData', message);
+        return { ok: false, message };
     }
     if (!token) {
-        console.error('uploadProjectData 缺少 token');
-        return false;
+        const message = '缺少 token';
+        console.error('uploadProjectData', message);
+        return { ok: false, message };
     }
 
     setUniverseAuthContext({ token });
