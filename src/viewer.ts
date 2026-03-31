@@ -470,6 +470,39 @@ class Viewer {
 
             // 先创建 cameraManager，因为 revealController 需要它来获取 targetConstraint
             this.cameraManager = new CameraManager(global, sceneBound);
+
+            // NightMode 必须在 RevealController 之前创建：Reveal 构造函数里会立即 createEffect 并 fire('nightMode:exit')。
+            // 若 NightMode 尚未注册监听，首次开场的 exit 会丢失，NightMode 仍占用 gsplatModifyVS，与 sketch 等 VFX 互斥失败；
+            // 用户在 UI 里切换特效时会再次 fire exit，因此只有「第一次」不播。
+            if (!app.root.script) {
+                app.root.addComponent('script');
+            }
+            const nightModeScriptEarly = app.root.script.create(NightMode) as unknown as InstanceType<typeof NightMode>;
+            this.nightModeScript = nightModeScriptEarly;
+            {
+                const lightEntity = app.root.findByName('light') as Entity | null || (app.root.findByTag('light') as Entity[])?.[0] || null;
+                const cameraEntity = global.camera;
+                nightModeScriptEarly.light = lightEntity;
+                nightModeScriptEarly.camera = cameraEntity || null;
+                nightModeScriptEarly.splat = gsplatEntity;
+                nightModeScriptEarly.enabled = true;
+                const nightCfg = (settings as { nightMode?: { enabled?: boolean; fade?: number } }).nightMode;
+                const nightFade = typeof nightCfg?.fade === 'number' && Number.isFinite(nightCfg.fade)
+                    ? Math.max(-1, Math.min(1, nightCfg.fade))
+                    : (nightCfg?.enabled ? -0.95 : 0);
+                if (!state.hasRevealEffect) {
+                    events.once('firstFrame', () => {
+                        if (this.nightModeScript) {
+                            this.nightModeScript.applyFromSettings({ fade: nightFade, enabled: nightCfg?.enabled });
+                        }
+                    });
+                }
+                console.log('NightMode script initialized:', {
+                    light: lightEntity ? 'found' : 'not found',
+                    camera: cameraEntity ? 'found' : 'not found',
+                    splat: gsplatEntity ? 'found' : 'not found'
+                });
+            }
             
             // ── 关键：根据 unified 模式选择正确的坐标空间 ──
             // PlayCanvas gsplat 的 modifySplatCenter 在两种模式下接收不同坐标空间：
@@ -511,36 +544,6 @@ class Viewer {
                 initAnnotations();
                 initSceneAssets();
             }
-            
-            // Initialize night mode script on root entity
-            if (!app.root.script) {
-                app.root.addComponent('script');
-            }
-            const nightModeScript = app.root.script.create(NightMode) as unknown as InstanceType<typeof NightMode>;
-            this.nightModeScript = nightModeScript;
-            // Find entities by name or tag
-            const lightEntity = app.root.findByName('light') as Entity | null || (app.root.findByTag('light') as Entity[])?.[0] || null;
-            const cameraEntity = global.camera;
-            nightModeScript.light = lightEntity;
-            nightModeScript.camera = cameraEntity || null;
-            nightModeScript.splat = gsplatEntity;
-            nightModeScript.enabled = true;
-            const nightCfg = (settings as { nightMode?: { enabled?: boolean; fade?: number } }).nightMode;
-            const nightFade = typeof nightCfg?.fade === 'number' && Number.isFinite(nightCfg.fade)
-                ? Math.max(-1, Math.min(1, nightCfg.fade))
-                : (nightCfg?.enabled ? -0.95 : 0);
-            if (!state.hasRevealEffect) {
-                events.once('firstFrame', () => {
-                    if (this.nightModeScript) {
-                        this.nightModeScript.applyFromSettings({ fade: nightFade, enabled: nightCfg?.enabled });
-                    }
-                });
-            }
-            console.log('NightMode script initialized:', {
-                light: lightEntity ? 'found' : 'not found',
-                camera: cameraEntity ? 'found' : 'not found',
-                splat: gsplatEntity ? 'found' : 'not found'
-            });
 
             applyCamera(this.cameraManager.camera);
 

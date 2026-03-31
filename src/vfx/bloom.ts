@@ -10,6 +10,7 @@ import {
 import type { PostEffectSettings } from '../settings';
 import type { LocalLightRegion, WorldSpaceBloomRegionJSON, ExperienceSettings } from '../schemas/v2';
 import type { Global } from '../types';
+import { ensureBloomEditorSession } from '../protocol-settings-adapter';
 import { BloomBrushPainter } from './bloom-brush-painter';
 import { WorldSpaceBloomData } from './world-space-bloom-data';
 import { BloomBrushFilter, MAX_POINTS } from './bloom-brush-filter';
@@ -259,16 +260,17 @@ export class BloomController {
         const onFrameUpdate = () => {
             const cameraFrame = options.getCameraFrame();
             if (!cameraFrame || !global.settings.postEffectSettings?.bloom?.enabled) return;
-            const bloom = global.settings.postEffectSettings.bloom as { bloomBrush?: boolean; threshold?: number };
+            const bloom = global.settings.postEffectSettings.bloom as { threshold?: number };
             this.updateShaderUniforms();
             // World space mask is set in onFrameRender (after camera update)
         };
         const onFrameRender = () => {
-            const bloom = global.settings.postEffectSettings?.bloom as { enabled?: boolean; bloomBrush?: boolean; threshold?: number } | undefined;
+            const bloom = global.settings.postEffectSettings?.bloom as { enabled?: boolean; threshold?: number } | undefined;
             if (!bloom?.enabled) return;
             // After update(dt), camera is current; project 3D points to screen and set mask for this frame.
             this.renderWorldSpaceMask();
-            const maskTex = this.getEffectiveMaskTexture(!!bloom.bloomBrush);
+            const brushOn = !!ensureBloomEditorSession(global.settings as ExperienceSettings).bloomBrush;
+            const maskTex = this.getEffectiveMaskTexture(brushOn);
             try {
                 if (maskTex) graphicsDevice.scope.resolve('bloomMaskTexture').setValue(maskTex);
                 const th = Math.max(0, Math.min(5, Number(bloom.threshold ?? 0.2)));
@@ -397,15 +399,14 @@ export class BloomController {
             intensity?: number;
             blurLevel?: number;
             bloomDebug?: boolean;
-            bloomBrush?: boolean;
             bloomBrushSize?: number;
             threshold?: number;
             bloomBrushBrightness?: number;
             localLightRegions?: Array<{ id: string; name: string; worldSpace: { points?: Array<{ position: [number, number, number]; radius: number }>; committed: Array<{ position: [number, number, number]; radius: number }> }; localBrightness: number }>;
-            activeLocalLightRegionId?: string | null;
         };
+        const editor = ensureBloomEditorSession(this.global.settings as ExperienceSettings);
         const bloomDebug = !!bloomSettings.bloomDebug;
-        const bloomBrush = !!bloomSettings.bloomBrush;
+        const bloomBrush = !!editor.bloomBrush;
         const th = Math.max(0, Math.min(5, Number(bloomSettings.threshold ?? 0.2)));
         const bloomBrushBrightness = typeof bloomSettings.bloomBrushBrightness === 'number'
             ? Math.max(-1, Math.min(1, bloomSettings.bloomBrushBrightness))
@@ -437,7 +438,7 @@ export class BloomController {
             // 有已提交区域或擦除模式时，禁用 2D 预览，避免覆盖/干扰已有 3D volume 观感。
             const brushShaderActive = bloomBrush && this.isDrawing && !this.isErasing && !hasCommittedRegions;
             nightModeScript.setBloomBrushParams(brushShaderActive, effectiveMask, th, undefined, bloomBrushBrightness);
-            const activeId = bloomSettings.activeLocalLightRegionId ?? null;
+            const activeId = editor.activeLocalLightRegionId ?? null;
             const activeRegion = (activeId && !String(activeId).startsWith('draft-'))
                 ? regions.find((r: { id: string }) => r.id === activeId)
                 : null;
@@ -602,7 +603,7 @@ export class BloomController {
                     );
                     nightModeScript.setCommittedTintVolume(null);
                 } else {
-                    const activeId = bloomSettings.activeLocalLightRegionId ?? null;
+                    const activeId = editor.activeLocalLightRegionId ?? null;
                     const isDraftOnly = bloomBrush && activeId != null && String(activeId).startsWith('draft-');
                     if (isDraftOnly) {
                         // 首个亮灯区域草稿：仅 worldSpaceData 有笔刷点，按草稿点建体积并设亮度，实现实时 mask/体积预览
@@ -700,8 +701,9 @@ export class BloomController {
 
     private setBloomMaskInScope(): void {
         const graphicsDevice = this.global.app.graphicsDevice;
-        const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomBrush?: boolean; threshold?: number } | undefined;
-        const maskTex = this.getEffectiveMaskTexture(!!bloom?.bloomBrush);
+        const bloom = this.global.settings?.postEffectSettings?.bloom as { threshold?: number } | undefined;
+        const brushOn = !!ensureBloomEditorSession(this.global.settings as ExperienceSettings).bloomBrush;
+        const maskTex = this.getEffectiveMaskTexture(brushOn);
         try {
             if (maskTex) graphicsDevice.scope.resolve('bloomMaskTexture').setValue(maskTex);
             const th = Math.max(0, Math.min(5, Number(bloom?.threshold ?? 0.2)));
@@ -779,8 +781,7 @@ export class BloomController {
      * @private
      */
     private hasActiveLocalLightRegion(): boolean {
-        const bloom = this.global.settings?.postEffectSettings?.bloom as { activeLocalLightRegionId?: string | null } | undefined;
-        const id = bloom?.activeLocalLightRegionId;
+        const id = ensureBloomEditorSession(this.global.settings as ExperienceSettings).activeLocalLightRegionId;
         return id != null && String(id).length > 0;
     }
 
@@ -907,11 +908,10 @@ export class BloomController {
     private getPointsForMask(): Array<{ position: Vec3; radius: number }> {
         const bloom = this.global.settings?.postEffectSettings?.bloom as {
             localLightRegions?: Array<{ id: string; linkedLightId?: string | null; worldSpace?: { committed?: Array<{ position: [number, number, number]; radius?: number }> } }>;
-            activeLocalLightRegionId?: string | null;
             localLightsEnabled?: boolean;
         } | undefined;
         const regions = bloom?.localLightRegions ?? [];
-        const activeId = bloom?.activeLocalLightRegionId ?? null;
+        const activeId = ensureBloomEditorSession(this.global.settings as ExperienceSettings).activeLocalLightRegionId ?? null;
 
         // 全局局部亮灯关闭时：不向 2D Bloom mask 提供任何点，mask 被清黑，compose 阶段无局部辉光
         if ((bloom as any)?.localLightsEnabled === false) return [];

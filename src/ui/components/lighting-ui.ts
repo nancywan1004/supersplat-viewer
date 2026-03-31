@@ -4,7 +4,7 @@ import { updatePointLightsFromSettings, setLightsVisualVisible } from '../../lig
 import { getPositionInFrontOfCamera } from '../../asset-placement-handler';
 import type { PointLightConfig, DirectionalLightConfig, SpotLightConfig } from '../../schemas/v2';
 import { pushEditHistory } from '../../edit-history';
-import { ensureNightMode, ensureLighting } from '../../protocol-settings-adapter';
+import { ensureNightMode, ensureLighting, ensureBloom, ensureBloomEditorSession } from '../../protocol-settings-adapter';
 
 const LIGHTING_PANEL_HTML = `
 <div class="lightingPanel">
@@ -396,12 +396,10 @@ export function initLightingUI(global: Global): () => void {
     if (addPointLightBtn && pointLightsList) {
         addPointLightBtn.addEventListener('click', () => {
             const lighting = ensureLightingLocal();
-            const bloom = (global.settings as ExperienceSettings).postEffectSettings?.bloom as {
-                draftLightRegionCenter?: [number, number, number] | null;
-                activeLocalLightRegionId?: string | null;
-                localLightRegions?: Array<{ id: string; linkedLightId?: string | null }>;
-            } | undefined;
-            const center = bloom?.draftLightRegionCenter ?? null;
+            const settingsAny = global.settings as ExperienceSettings;
+            const bloom = ensureBloom(settingsAny);
+            const ses = ensureBloomEditorSession(settingsAny);
+            const center = ses.draftLightRegionCenter ?? null;
             const pointCount = lighting.lights.filter((l: any) => !isDirectional(l) && !isSpot(l)).length;
             if (pointCount >= MAX_POINT_LIGHTS) return;
             const basePos: [number, number, number] = (() => {
@@ -414,15 +412,13 @@ export function initLightingUI(global: Global): () => void {
             cfgPoint.id = nextId;
             lighting.lights.push(cfgPoint);
             // 若当前有激活的亮灯区域，则把该区域的 linkedLightId 绑定到新建光源
-            if (bloom && bloom.activeLocalLightRegionId && Array.isArray(bloom.localLightRegions)) {
-                const region = bloom.localLightRegions.find((r) => r && r.id === bloom.activeLocalLightRegionId);
+            if (ses.activeLocalLightRegionId && Array.isArray(bloom.localLightRegions)) {
+                const region = bloom.localLightRegions.find((r) => r && r.id === ses.activeLocalLightRegionId);
                 if (region) {
                     (region as any).linkedLightId = nextId;
                 }
             }
-            if (bloom) {
-                (bloom as any).draftLightRegionCenter = null;
-            }
+            ses.draftLightRegionCenter = null;
             // 默认选中新建光源
             (global.state as any).selectedLightId = nextId;
             events.fire('sceneLight:selected', { id: nextId, source: 'host' });
@@ -435,12 +431,10 @@ export function initLightingUI(global: Global): () => void {
     if (addSpotLightBtn && pointLightsList) {
         addSpotLightBtn.addEventListener('click', () => {
             const lighting = ensureLightingLocal();
-            const bloom = (global.settings as ExperienceSettings).postEffectSettings?.bloom as {
-                draftLightRegionCenter?: [number, number, number] | null;
-                activeLocalLightRegionId?: string | null;
-                localLightRegions?: Array<{ id: string; linkedLightId?: string | null }>;
-            } | undefined;
-            const center = bloom?.draftLightRegionCenter ?? null;
+            const settingsAny = global.settings as ExperienceSettings;
+            const bloom = ensureBloom(settingsAny);
+            const ses = ensureBloomEditorSession(settingsAny);
+            const center = ses.draftLightRegionCenter ?? null;
             const basePos: [number, number, number] = (() => {
                 if (center) return [center[0], center[1], center[2]];
                 const camPos = getPositionInFrontOfCamera(global);
@@ -461,15 +455,13 @@ export function initLightingUI(global: Global): () => void {
                 enabled: true
             };
             lighting.lights.push(cfgSpot);
-            if (bloom && bloom.activeLocalLightRegionId && Array.isArray(bloom.localLightRegions)) {
-                const region = bloom.localLightRegions.find((r) => r && r.id === bloom.activeLocalLightRegionId);
+            if (ses.activeLocalLightRegionId && Array.isArray(bloom.localLightRegions)) {
+                const region = bloom.localLightRegions.find((r) => r && r.id === ses.activeLocalLightRegionId);
                 if (region) {
                     (region as any).linkedLightId = nextId;
                 }
             }
-            if (bloom) {
-                (bloom as any).draftLightRegionCenter = null;
-            }
+            ses.draftLightRegionCenter = null;
             // 默认选中新建光源
             (global.state as any).selectedLightId = nextId;
             events.fire('sceneLight:selected', { id: nextId, source: 'host' });

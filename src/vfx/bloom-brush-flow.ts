@@ -1,7 +1,9 @@
 import type { Vec3 } from 'playcanvas';
 import type { Global } from '../types';
+import type { ExperienceSettings } from '../schemas/v2';
 import { pickWorldFromClientXY } from '../picker';
 import { updatePointLightsFromSettings } from '../light';
+import { ensureBloom, ensureBloomEditorSession } from '../protocol-settings-adapter';
 import type { WorldSpaceBloomData } from './world-space-bloom-data';
 
 /** 屏幕笔刷半径映射到世界半径时的缩放系数：<1 可减少“2D 预览偏大、3D 结果偏肥” */
@@ -168,30 +170,22 @@ export class BloomBrushFlowController {
         this.ctx.global.events.fire('postEffect:changed');
     };
 
-    private ensureBloomSettings(): any {
-        if (!(this.ctx.global.settings as any).postEffectSettings) {
-            (this.ctx.global.settings as any).postEffectSettings = {};
-        }
-        if (!(this.ctx.global.settings as any).postEffectSettings.bloom) {
-            (this.ctx.global.settings as any).postEffectSettings.bloom = {
-                enabled: false,
-                intensity: 0.1,
-                blurLevel: 4,
-                threshold: 0.2,
-                bloomDebug: false,
-                bloomBrush: false,
-                bloomBrushSize: 30,
-                bloomBrushBrightness: 1
-            };
-        }
-        return (this.ctx.global.settings as any).postEffectSettings.bloom as any;
+    private exp(): ExperienceSettings {
+        return this.ctx.global.settings as ExperienceSettings;
+    }
+
+    private ensureBloomSettings(): ReturnType<typeof ensureBloom> {
+        return ensureBloom(this.exp());
+    }
+
+    private ensureBloomSes(): ReturnType<typeof ensureBloomEditorSession> {
+        return ensureBloomEditorSession(this.exp());
     }
 
     private ensureDraftForBrushStart(type: string | undefined): boolean {
         if (type !== 'LIGHT_BRUSH_START') return false;
-        const settingsAnyForStart = this.ctx.global.settings as any;
-        const bloomForStart = settingsAnyForStart?.postEffectSettings?.bloom as { activeLocalLightRegionId?: string | null } | undefined;
-        const activeIdForStart = bloomForStart?.activeLocalLightRegionId;
+        const ses = this.ensureBloomSes();
+        const activeIdForStart = ses.activeLocalLightRegionId;
         const shouldCreateDraftForStart = !(
             typeof activeIdForStart === 'string' &&
             activeIdForStart.startsWith('draft-')
@@ -199,7 +193,7 @@ export class BloomBrushFlowController {
         if (!shouldCreateDraftForStart) return false;
         const bloom = this.ensureBloomSettings();
         const draftId = `draft-${Date.now()}`;
-        bloom.activeLocalLightRegionId = draftId;
+        ses.activeLocalLightRegionId = draftId;
         if (!Array.isArray(bloom.localLightRegions)) {
             bloom.localLightRegions = [];
         }
@@ -215,7 +209,8 @@ export class BloomBrushFlowController {
 
     private handleBrushStart(createdDraftForToolStart: boolean): void {
         const bloom = this.ensureBloomSettings();
-        bloom.bloomBrush = true;
+        const ses = this.ensureBloomSes();
+        ses.bloomBrush = true;
         if (typeof bloom.bloomBrushBrightness !== 'number') bloom.bloomBrushBrightness = 1;
         if (bloom.enabled === false) bloom.enabled = true;
         this.switchBrushToolState(false);
@@ -228,7 +223,7 @@ export class BloomBrushFlowController {
 
     private handleEraserStart(): void {
         const bloom = this.ensureBloomSettings();
-        bloom.bloomBrush = true;
+        this.ensureBloomSes().bloomBrush = true;
         this.switchBrushToolState(true);
         (this.ctx.global.events as any).fire('postEffect:changed');
         (this.ctx.global.app as any).renderNextFrame = true;
@@ -236,12 +231,13 @@ export class BloomBrushFlowController {
 
     private handleBrushClear(): void {
         const bloom = this.ensureBloomSettings();
+        const ses = this.ensureBloomSes();
         (this.ctx.global.events as any).fire('bloomBrush:reset');
-        bloom.bloomBrush = false;
+        ses.bloomBrush = false;
         this.switchBrushToolState(false);
-        const activeId = bloom.activeLocalLightRegionId as string | null | undefined;
+        const activeId = ses.activeLocalLightRegionId as string | null | undefined;
         if (typeof activeId === 'string' && activeId.startsWith('draft-')) {
-            bloom.activeLocalLightRegionId = null;
+            ses.activeLocalLightRegionId = null;
         }
         (this.ctx.global.events as any).fire('bloomLocalLightRegion:listChanged');
         (this.ctx.global.events as any).fire('postEffect:changed');
@@ -251,7 +247,7 @@ export class BloomBrushFlowController {
     private handleBrushColorUpdate(payload: { id?: string; value?: unknown; tintColor?: number[]; tintBlend?: number }): void {
         const bloom = this.ensureBloomSettings();
         const regions = (bloom as any).localLightRegions as any[] | undefined;
-        const activeId = (bloom as any).activeLocalLightRegionId as string | null | undefined;
+        const activeId = this.ensureBloomSes().activeLocalLightRegionId as string | null | undefined;
         const targetId = typeof payload.id === 'string' && payload.id.length > 0
             ? payload.id
             : (activeId ?? null);
@@ -308,11 +304,12 @@ export class BloomBrushFlowController {
     private handleBrushFinish(payload: { id?: string }): void {
         this.ctx.worldSpaceData.commit();
         const bloom = this.ensureBloomSettings();
+        const ses = this.ensureBloomSes();
         const brightness = typeof bloom.bloomBrushBrightness === 'number'
             ? Math.max(-1, Math.min(1, bloom.bloomBrushBrightness))
             : 1;
         this.ctx.worldSpaceData.setCommittedBrightness(brightness);
-        bloom.bloomBrush = false;
+        ses.bloomBrush = false;
         this.switchBrushToolState(false);
         this.ctx.saveWorldSpaceConfig();
         const hasExistingRegionsFinish = Array.isArray(bloom.localLightRegions) &&
@@ -322,13 +319,13 @@ export class BloomBrushFlowController {
         } else {
             this.ctx.syncCommittedToNightMode();
         }
-        const activeId = bloom.activeLocalLightRegionId as string | null | undefined;
+        const activeId = ses.activeLocalLightRegionId as string | null | undefined;
         const isDraftActive = typeof activeId === 'string' && activeId.startsWith('draft-');
         if (isDraftActive) {
             const { worldSpaceJSON, committedBrightness } = this.ctx.exportRegion();
             const committed = worldSpaceJSON?.committed ?? [];
             const center = this.ctx.getCurrentRegionCenter();
-            bloom.draftLightRegionCenter = center ? [center.x, center.y, center.z] : null;
+            ses.draftLightRegionCenter = center ? [center.x, center.y, center.z] : null;
             if (committed.length > 0) {
                 if (!Array.isArray(bloom.localLightRegions)) bloom.localLightRegions = [];
                 const nextIndex = bloom.localLightRegions.length + 1;
@@ -349,11 +346,11 @@ export class BloomBrushFlowController {
                 } else {
                     bloom.localLightRegions.push(newRegion as any);
                 }
-                bloom.activeLocalLightRegionId = newRegion.id;
+                ses.activeLocalLightRegionId = newRegion.id;
                 (this.ctx.global.events as any).fire('bloomLocalLightRegion:listChanged');
             } else {
-                bloom.activeLocalLightRegionId = null;
-                bloom.draftLightRegionCenter = null;
+                ses.activeLocalLightRegionId = null;
+                ses.draftLightRegionCenter = null;
             }
         }
         (this.ctx.global.app as any).renderNextFrame = true;
@@ -361,6 +358,7 @@ export class BloomBrushFlowController {
 
     private handleBrushBloomUpdate(payload: { id?: string; value?: unknown }): void {
         const bloom = this.ensureBloomSettings();
+        const ses = this.ensureBloomSes();
         if (typeof payload.value === 'number') {
             const v = Math.max(-1, Math.min(1, payload.value));
             const targetId = typeof payload.id === 'string' && payload.id.length > 0 ? payload.id : null;
@@ -369,7 +367,7 @@ export class BloomBrushFlowController {
                 const target = regions.find((r) => r && r.id === targetId);
                 if (target) {
                     target.localBrightness = v;
-                    const activeId = (bloom as any).activeLocalLightRegionId as string | null | undefined;
+                    const activeId = ses.activeLocalLightRegionId as string | null | undefined;
                     if (activeId === targetId && !String(activeId).startsWith('draft-')) {
                         // 当前区域正在编辑时，同步工作区亮度，避免体积与工作区状态短暂不一致。
                         this.ctx.worldSpaceData.setCommittedBrightness(v);
@@ -391,8 +389,7 @@ export class BloomBrushFlowController {
     }
 
     private isBloomBrushEnabled(): boolean {
-        const bloom = this.ctx.global.settings?.postEffectSettings?.bloom as { bloomBrush?: boolean } | undefined;
-        return !!bloom?.bloomBrush && this.hasActiveLocalLightRegion();
+        return !!this.ensureBloomSes().bloomBrush && this.hasActiveLocalLightRegion();
     }
 
     private isInsideCanvas(clientX: number, clientY: number): boolean {

@@ -355,6 +355,7 @@ class GsplatRainV2 extends GsplatShaderEffect {
         // Check if effect is complete
         if (this.isEffectComplete()) {
             console.log('Rain V2 effect completed, disabling');
+            this.notifyRevealComplete();
             this.enabled = false;
             return;
         }

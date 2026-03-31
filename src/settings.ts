@@ -1,6 +1,6 @@
 import { ExperienceSettings as V1, AnimTrack as AnimTrackV1 } from './schemas/v1';
 import { ExperienceSettings as V2, AnimTrack as AnimTrackV2, TransformFrame } from './schemas/v2';
-import { ensureBloom } from './protocol-settings-adapter';
+import { ensureBloom, ensureBloomEditorSession } from './protocol-settings-adapter';
 import { Vec3 } from 'playcanvas';
 
 type LegacyKeyframes = AnimTrackV1['keyframes'];
@@ -140,7 +140,6 @@ const migrateV2 = (v1: V1): V2 => {
                 threshold: 0.2,
                 bloomDebug: false,
                 bloomScope: 'local',
-                bloomBrush: false,
                 bloomBrushSize: 30,
                 bloomBrushBrightness: 1
             },
@@ -286,7 +285,6 @@ const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: numb
                 threshold: 0.2,
                 bloomDebug: false,
                 bloomScope: 'local',
-                bloomBrush: false,
                 bloomBrushSize: 30,
                 bloomBrushBrightness: 1
             },
@@ -372,9 +370,27 @@ const normalizeAnnotation = (ann: any): any => {
     };
 };
 
+/** 旧存盘把会话字段写在 bloom 上：导入时迁入 bloomEditorSession */
+const hoistBloomSessionFieldsIntoBloomEditorSession = (pes: any): void => {
+    if (!pes || typeof pes !== 'object') return;
+    const b = pes.bloom;
+    if (!b || typeof b !== 'object') return;
+    const move = (key: string) => {
+        if (!(key in b)) return;
+        if (!pes.bloomEditorSession || typeof pes.bloomEditorSession !== 'object') {
+            pes.bloomEditorSession = {};
+        }
+        (pes.bloomEditorSession as any)[key] = (b as any)[key];
+        delete (b as any)[key];
+    };
+    move('bloomBrush');
+    move('activeLocalLightRegionId');
+    move('draftLightRegionCenter');
+};
+
 /**
  * 规范化 bloom 的 LocalLightRegion 配置：
- * - 为新字段 localLightRegions / activeLocalLightRegionId 补齐默认值；
+ * - 为新字段 localLightRegions 补齐默认值；
  * - 不再读取 legacy 的 worldSpacePoints；旧配置需先完成外部迁移。
  */
 const ensureBloomLocalLightRegions = (settings: V2): void => {
@@ -387,11 +403,7 @@ const ensureBloomLocalLightRegions = (settings: V2): void => {
 
     if (!hasLocalRegions) {
         bloom.localLightRegions = [];
-        if (bloom.activeLocalLightRegionId === undefined) {
-            bloom.activeLocalLightRegionId = null;
-        }
     } else {
-        // 已存在 localLightRegions 时，仅补齐 activeLocalLightRegionId 与缺失字段
         if (Array.isArray(bloom.localLightRegions)) {
             bloom.localLightRegions = bloom.localLightRegions.map((r: any, index: number) => {
                 if (!r || typeof r !== 'object') return r;
@@ -422,11 +434,32 @@ const ensureBloomLocalLightRegions = (settings: V2): void => {
                 return r;
             });
         }
-        if (bloom.activeLocalLightRegionId === undefined) {
-            bloom.activeLocalLightRegionId =
+    }
+
+    // 配置文件不应含 draft-* 区域：导入时剔除
+    if (Array.isArray(bloom.localLightRegions)) {
+        bloom.localLightRegions = bloom.localLightRegions.filter(
+            (r: any) => r && typeof r.id === 'string' && !String(r.id).startsWith('draft-')
+        );
+    }
+
+    const ses = ensureBloomEditorSession(settings as any);
+    if (ses.activeLocalLightRegionId == null) {
+        ses.activeLocalLightRegionId =
+            bloom.localLightRegions.length > 0 ? bloom.localLightRegions[0].id : null;
+    }
+
+    const active = ses.activeLocalLightRegionId;
+    if (typeof active === 'string') {
+        if (active.startsWith('draft-')
+            || !bloom.localLightRegions.some((r: any) => r && r.id === active)) {
+            ses.activeLocalLightRegionId =
                 bloom.localLightRegions.length > 0 ? bloom.localLightRegions[0].id : null;
         }
     }
+
+    ses.bloomBrush = false;
+    ses.draftLightRegionCenter = null;
 };
 
 // import a json object to conform to the latest settings schema. settings is assumed to be one of the well-formed schemas
@@ -459,10 +492,13 @@ const importSettings = (settings: any): V2 => {
         }
     }
 
-    // 补齐 / 迁移 Bloom 的 LocalLightRegion 配置
-    ensureBloomLocalLightRegions(result);
-    // 归一化 bloom 缺省与旧存盘（intensity:1 等），并保证与运行时 ensureBloom 一致
+    if (result.postEffectSettings && typeof result.postEffectSettings === 'object') {
+        hoistBloomSessionFieldsIntoBloomEditorSession(result.postEffectSettings);
+    }
+
+    // 先保证 bloom 对象存在，再规范化区域与会话
     ensureBloom(result);
+    ensureBloomLocalLightRegions(result);
 
     return result;
 };

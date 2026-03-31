@@ -1170,6 +1170,7 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
         // Check if effect is complete
         if (this.isEffectComplete(globalRecoverStart)) {
             console.log('Growth wave effect completed, disabling');
+            this.notifyRevealComplete();
             this.enabled = false;
             return;
         }

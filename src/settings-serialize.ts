@@ -18,14 +18,9 @@ const defaultPostEffectSettings = () => ({
         blurLevel: 4,
         threshold: 0.2,
         bloomDebug: false,
-        bloomBrush: false,
         bloomBrushSize: 30,
         bloomBrushBrightness: 1,
-        // 新结构：局部亮灯区域，默认空
-        localLightRegions: [] as any[],
-        activeLocalLightRegionId: null as string | null,
-        // 最近一次完成绘制的局部亮灯区域中心（用于引导后续新建光源的位置）
-        draftLightRegionCenter: null as [number, number, number] | null
+        localLightRegions: [] as any[]
     },
     grading: {
         enabled: false,
@@ -44,6 +39,24 @@ const defaultPostEffectSettings = () => ({
     fringing: { enabled: false, intensity: 0.5 },
     shadow: defaultPostEffectShadow()
 });
+
+/** 存盘/出站 payload：省略 bloomEditorSession；兼容旧扁平字段；过滤 draft-* 区域 */
+function stripBloomSessionFieldsForPersistence(root: Record<string, unknown>): void {
+    const pes = root.postEffectSettings as Record<string, unknown> | undefined;
+    if (!pes || typeof pes !== 'object') return;
+    delete pes.bloomEditorSession;
+    const bloom = pes.bloom as Record<string, unknown> | undefined;
+    if (!bloom || typeof bloom !== 'object') return;
+    delete bloom.bloomBrush;
+    delete bloom.draftLightRegionCenter;
+    delete bloom.activeLocalLightRegionId;
+    if (Array.isArray(bloom.localLightRegions)) {
+        bloom.localLightRegions = (bloom.localLightRegions as any[]).filter(
+            (r) => r && typeof r === 'object' && typeof (r as { id?: string }).id === 'string'
+                && !(r as { id: string }).id.startsWith('draft-')
+        );
+    }
+}
 
 /**
  * 将当前 global.settings 序列化为符合 v2 的 ExperienceSettings，
@@ -79,10 +92,9 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
             if (!Array.isArray(bloom.localLightRegions)) {
                 bloom.localLightRegions = [];
             }
-            if (bloom.activeLocalLightRegionId === undefined) {
-                bloom.activeLocalLightRegionId =
-                    bloom.localLightRegions.length > 0 ? bloom.localLightRegions[0].id : null;
-            }
+            bloom.localLightRegions = bloom.localLightRegions.filter(
+                (r: any) => r && typeof r.id === 'string' && !String(r.id).startsWith('draft-')
+            );
 
             // 持久化约束：localLightRegions[*].worldSpace 只保存 committed + committedBrightness，
             // 不保留 points 草稿，避免保存过程中把未完成的笔刷轨迹写死到配置里。
@@ -148,6 +160,8 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
             }
         };
     });
+
+    stripBloomSessionFieldsForPersistence(out);
 
     return out as ExperienceSettings;
 }

@@ -46,11 +46,22 @@ type Annotation = {
     camera: Camera;
 };
 
+/**
+ * Bloom 笔刷编辑会话（仅内存）。
+ * 与 `postEffectSettings.bloom` 分离：`bloom` 只承载可持久化配置；本段在 serialize 时整段省略。
+ */
+type BloomEditorSession = {
+    bloomBrush: boolean;
+    activeLocalLightRegionId: string | null;
+    draftLightRegionCenter: [number, number, number] | null;
+};
+
 type PostEffectSettings = {
     sharpness: {
         enabled: boolean,
         amount: number,
     },
+    /** 可持久化的 Bloom 配置（不含笔刷会话态） */
     bloom: {
         enabled: boolean,
         intensity: number,
@@ -61,10 +72,8 @@ type PostEffectSettings = {
         bloomDebug: boolean,
         /** Bloom 管线范围：'global' 全屏辉光，'local' 仅局部亮灯区域参与 compose mask */
         bloomScope?: 'global' | 'local';
-        /** 2D 笔刷局部 bloom：仅在笔刷区域叠加光晕，与 bloomDebug 互斥 */
-        bloomBrush: boolean,
         bloomBrushSize: number,
-        /** 当前绘制会话局部亮度 -1～1（草稿/编辑态滑块） */
+        /** 当前绘制会话局部亮度 -1～1（草稿/编辑态滑块，可持久化作为默认笔刷亮度） */
         bloomBrushBrightness?: number,
         /**
          * 可选：局部亮灯区域列表。
@@ -72,19 +81,9 @@ type PostEffectSettings = {
          * - 未来可扩展为多区域叠加。
          */
         localLightRegions?: LocalLightRegion[];
-        /**
-         * 当前激活的 LocalLightRegion ID。
-         * - null 或 undefined 表示没有激活区域。
-         */
-        activeLocalLightRegionId?: string | null;
-        /**
-         * 最近一次完成绘制的 LocalLightRegion 的世界空间中心位置：
-         * - 由 Bloom 绘制完成（点击「完成」）时，根据该区域的 worldSpace 点集计算得到；
-         * - 用于后续在 Lighting 面板中新建点光源/聚光灯时，优先将光源放置在该中心位置；
-         * - 使用一次后应被重置为 null，避免长期干扰后续创建。
-         */
-        draftLightRegionCenter?: [number, number, number] | null;
     },
+    /** 笔刷开关、当前选中区域、新建光源引导点等（仅内存，不入库） */
+    bloomEditorSession?: BloomEditorSession,
     grading: {
         enabled: boolean,
         brightness: number,
@@ -195,6 +194,7 @@ type ExperienceSettings = {
 
 export type {
     AnimTrack,
+    BloomEditorSession,
     Camera,
     Annotation,
     PostEffectSettings,

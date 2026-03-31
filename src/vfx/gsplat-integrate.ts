@@ -359,6 +359,7 @@ class GsplatIntegrate extends GsplatShaderEffect {
         // Temporarily disabled to debug - uncomment when effect is working
         if (this.isEffectComplete()) {
             console.log('[Integrate] effect time: ', this.effectTime);
+            this.notifyRevealComplete();
             this.enabled = false;
             return;
         }

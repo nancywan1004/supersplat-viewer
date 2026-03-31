@@ -259,16 +259,16 @@ class GsplatShaderEffect extends Script {
         if (!componentLayers) return;
 
         // Determine which cameras to target
-        let targetCameras;
-        if (this.camera && this.camera.camera) {
-            // Specific camera specified via attribute
-            targetCameras = [this.camera.camera];
+        let targetCameras: Camera[];
+        if (this.camera?.camera) {
+            // Entity → CameraComponent → .camera 才是 getGSplatMaterial 所需的 Camera 实例（误传 Component 会查不到材质）
+            const inner = this.camera.camera.camera;
+            targetCameras = inner ? [inner] : composition.cameras.map((c) => c.camera);
         } else {
-            // All cameras in the composition
-            targetCameras = composition.cameras.map(cameraComponent => cameraComponent.camera);
+            targetCameras = composition.cameras.map((cameraComponent) => cameraComponent.camera);
         }
 
-        // Iterate through target cameras (already Camera objects, not CameraComponents)
+        // Iterate through target cameras（Camera 实例）
         targetCameras.forEach((camera) => {
             // For each layer this component is on
             componentLayers.forEach((layerId) => {

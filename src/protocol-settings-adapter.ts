@@ -5,7 +5,7 @@
  */
 
 import type { Global } from './types';
-import type { ExperienceSettings } from './schemas/v2';
+import type { BloomEditorSession, ExperienceSettings } from './schemas/v2';
 import type { PointLightConfig, DirectionalLightConfig, SpotLightConfig } from './schemas/v2';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import { updatePointLightsFromSettings } from './light';
@@ -23,10 +23,15 @@ const DEFAULT_BLOOM = {
     threshold: 0.2,
     bloomDebug: false,
     bloomScope: 'local' as const,
-    bloomBrush: false,
     bloomBrushSize: 30,
     bloomBrushBrightness: 1
 } as const;
+
+const DEFAULT_BLOOM_EDITOR_SESSION: BloomEditorSession = {
+    bloomBrush: false,
+    activeLocalLightRegionId: null,
+    draftLightRegionCenter: null
+};
 
 const DEFAULT_SHADOW = {
     enabled: true,
@@ -82,6 +87,18 @@ export function ensurePostEffectSettings(settings: ExperienceSettings): NonNulla
     return settings.postEffectSettings!;
 }
 
+export function ensureBloomEditorSession(settings: ExperienceSettings): BloomEditorSession {
+    const pe = ensurePostEffectSettings(settings);
+    if (!pe.bloomEditorSession || typeof pe.bloomEditorSession !== 'object') {
+        (pe as Record<string, unknown>).bloomEditorSession = { ...DEFAULT_BLOOM_EDITOR_SESSION };
+    }
+    const s = pe.bloomEditorSession as Record<string, unknown>;
+    if (typeof s.bloomBrush !== 'boolean') s.bloomBrush = false;
+    if (s.activeLocalLightRegionId === undefined) s.activeLocalLightRegionId = null;
+    if (s.draftLightRegionCenter === undefined) s.draftLightRegionCenter = null;
+    return pe.bloomEditorSession as BloomEditorSession;
+}
+
 export function ensureBloom(settings: ExperienceSettings): NonNullable<ExperienceSettings['postEffectSettings']>['bloom'] {
     const pe = ensurePostEffectSettings(settings);
     if (!pe.bloom || typeof pe.bloom !== 'object') {
@@ -91,14 +108,12 @@ export function ensureBloom(settings: ExperienceSettings): NonNullable<Experienc
     if (b.threshold === undefined) b.threshold = 0.2;
     if (b.bloomDebug === undefined) b.bloomDebug = false;
     if (b.bloomScope !== 'global' && b.bloomScope !== 'local') b.bloomScope = 'local';
-    if (b.bloomBrush === undefined) b.bloomBrush = false;
     if (b.bloomBrushSize === undefined) b.bloomBrushSize = 30;
     if (typeof b.bloomBrushBrightness !== 'number') b.bloomBrushBrightness = 1;
     if (typeof b.blurLevel !== 'number') b.blurLevel = 4;
     if (typeof b.intensity !== 'number') b.intensity = 0.1;
     if (!Array.isArray(b.localLightRegions)) b.localLightRegions = [];
     if (typeof (b as any).localLightsEnabled !== 'boolean') (b as any).localLightsEnabled = true;
-    if (b.activeLocalLightRegionId === undefined) b.activeLocalLightRegionId = null;
     // 旧 migrate / 存盘曾写 intensity:1（运行时钳到 0.2）；产品默认强度 0.1、blur 4、笔刷亮度 1
     if (Number(b.intensity) === 1) {
         b.intensity = 0.1;
@@ -149,12 +164,9 @@ export function applyLightGlobalSet(global: Global, value: number): void {
 export function applyLightAdd(global: Global, id: string, isThreeSixty = true): void {
     const settings = global.settings as ExperienceSettings;
     const lighting = ensureLighting(settings);
-    const bloom = ensureBloom(settings) as {
-        draftLightRegionCenter?: [number, number, number] | null;
-        activeLocalLightRegionId?: string | null;
-        localLightRegions?: Array<{ id: string; linkedLightId?: string | null }>;
-    };
-    const center = bloom.draftLightRegionCenter ?? null;
+    const bloom = ensureBloom(settings);
+    const bloomSes = ensureBloomEditorSession(settings);
+    const center = bloomSes.draftLightRegionCenter ?? null;
     const camPos = getPositionInFrontOfCamera(global);
     const position: [number, number, number] = center
         ? [center[0], center[1], center[2]]
@@ -182,13 +194,13 @@ export function applyLightAdd(global: Global, id: string, isThreeSixty = true): 
             enabled: true
         } as LightWithId);
     }
-    if (bloom.activeLocalLightRegionId && Array.isArray(bloom.localLightRegions)) {
-        const region = bloom.localLightRegions.find((r) => r && r.id === bloom.activeLocalLightRegionId);
+    if (bloomSes.activeLocalLightRegionId && Array.isArray(bloom.localLightRegions)) {
+        const region = bloom.localLightRegions.find((r) => r && r.id === bloomSes.activeLocalLightRegionId);
         if (region) {
             (region as any).linkedLightId = id;
         }
     }
-    bloom.draftLightRegionCenter = null;
+    bloomSes.draftLightRegionCenter = null;
     updatePointLightsFromSettings(global);
     global.events.fire('lighting:changed');
     global.events.fire('postEffect:changed');
@@ -408,8 +420,9 @@ export function applyBloomLocalLightRegionDelete(global: Global, regionId: strin
     });
     if (remaining.length === list.length) return;
     (b as any).localLightRegions = remaining;
-    if ((b as any).activeLocalLightRegionId === regionId) {
-        (b as any).activeLocalLightRegionId = (b as any).localLightRegions.length > 0
+    const ses = ensureBloomEditorSession(settings);
+    if (ses.activeLocalLightRegionId === regionId) {
+        ses.activeLocalLightRegionId = (b as any).localLightRegions.length > 0
             ? (b as any).localLightRegions[0].id
             : null;
     }

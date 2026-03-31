@@ -4,6 +4,7 @@ import { updatePointLightsFromSettings } from '../../light';
 import { pushEditHistory } from '../../edit-history';
 import {
     ensureBloom as ensureBloomFromAdapter,
+    ensureBloomEditorSession,
     ensureShadow as ensureShadowFromAdapter,
     ensureLighting as ensureLightingForLighting,
     applyShadowDirectionSet
@@ -135,12 +136,9 @@ type BloomSettings = {
     blurLevel: number;
     threshold: number;
     bloomDebug: boolean;
-    bloomBrush: boolean;
     bloomBrushSize: number;
     bloomBrushBrightness: number;
     localLightRegions?: LocalLightRegion[];
-    activeLocalLightRegionId?: string | null;
-    draftLightRegionCenter?: [number, number, number] | null;
 };
 
 const ensureBloom = (settings: Global['settings']): BloomSettings => {
@@ -174,8 +172,9 @@ function renderBloomLocalLightRegionsList(
     refreshList?: () => void
 ): void {
     if (!container) return;
+    const ses = ensureBloomEditorSession(global.settings as ExperienceSettings);
     const regions = b.localLightRegions ?? [];
-    const activeId = b.activeLocalLightRegionId ?? null;
+    const activeId = ses.activeLocalLightRegionId ?? null;
 
     container.innerHTML = '';
     for (const region of regions) {
@@ -227,8 +226,8 @@ function renderBloomLocalLightRegionsList(
                 return !!r;
             });
             (b as any).localLightRegions = remaining;
-            if ((b as any).activeLocalLightRegionId === region.id) {
-                (b as any).activeLocalLightRegionId = (b as any).localLightRegions.length > 0
+            if (ses.activeLocalLightRegionId === region.id) {
+                ses.activeLocalLightRegionId = (b as any).localLightRegions.length > 0
                     ? (b as any).localLightRegions[0].id
                     : null;
             }
@@ -639,7 +638,7 @@ export function initPostEffectUI(global: Global): () => void {
         const scope = (b as { bloomScope?: 'global' | 'local' }).bloomScope;
         if (bloomScopeCheck) bloomScopeCheck.classList.toggle('active', scope !== 'global');
         refreshRegionList();
-        const activeId = b.activeLocalLightRegionId ?? null;
+        const activeId = ensureBloomEditorSession(settings as ExperienceSettings).activeLocalLightRegionId ?? null;
         currentDraftId = (typeof activeId === 'string' && activeId.startsWith('draft-')) ? activeId : null;
         if (bloomDrawModeBar) bloomDrawModeBar.style.display = currentDraftId ? 'block' : 'none';
         const sh = ensureShadow(settings);
@@ -664,8 +663,7 @@ export function initPostEffectUI(global: Global): () => void {
     const editUiTransport = getEditUiTransport(global);
     const onSelectRegion = (regionId: string | null) => {
         if (currentDraftId) return;
-        const bl = ensureBloom(settings);
-        bl.activeLocalLightRegionId = regionId;
+        ensureBloomEditorSession(settings as ExperienceSettings).activeLocalLightRegionId = regionId;
         firePostEffectChanged();
     };
     const refreshRegionList = () =>
@@ -745,7 +743,7 @@ export function initPostEffectUI(global: Global): () => void {
         const toggleBloomDebug = () => {
             const b = ensureBloom(settings);
             (b as any).bloomDebug = !(b as any).bloomDebug;
-            if ((b as any).bloomDebug) (b as any).bloomBrush = false;
+            if ((b as any).bloomDebug) ensureBloomEditorSession(settings as ExperienceSettings).bloomBrush = false;
             syncFromSettings();
             firePostEffectChanged();
             pushEditHistorySafe();
@@ -793,8 +791,7 @@ export function initPostEffectUI(global: Global): () => void {
     // 若在 handler 里 innerHTML='' 重建列表则 slider 被销毁、拖动失效）。
     const regionListChangedHandler = () => {
         refreshRegionList();
-        const bloom = ensureBloom(settings);
-        const activeId2 = bloom.activeLocalLightRegionId ?? null;
+        const activeId2 = ensureBloomEditorSession(settings as ExperienceSettings).activeLocalLightRegionId ?? null;
         currentDraftId = (typeof activeId2 === 'string' && activeId2.startsWith('draft-')) ? activeId2 : null;
         setDrawModeVisible(!!currentDraftId);
         if (!currentDraftId) setDrawModeButtonsState(false);

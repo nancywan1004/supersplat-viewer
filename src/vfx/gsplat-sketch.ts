@@ -806,6 +806,7 @@ class GsplatSketch extends GsplatShaderEffect {
         // 检查效果是否完成
         if (this.isEffectComplete()) {
             console.log('Sketch effect completed, disabling');
+            this.notifyRevealComplete();
             this.enabled = false;
             return;
         }
