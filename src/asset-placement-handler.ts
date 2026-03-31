@@ -486,7 +486,11 @@ export function initAssetPlacementHandler(
             id: copiedId,
             name: entry.name + ' (副本)',
             entity: clone,
-            visible: true
+            visible: true,
+            assetType: entry.assetType,
+            assetId: entry.assetId,
+            filename: entry.filename,
+            url: entry.url
         };
         state.scenePlacedEntities!.push(newEntry);
         state.selectedSceneEntityId = newEntry.id;
