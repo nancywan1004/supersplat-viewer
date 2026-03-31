@@ -183,9 +183,41 @@ export class BloomController {
     /** 2D mask 缓存：仅当点集或相机变化时重绘，避免每帧清空导致闪动 */
     private _lastMaskSignature: string = '';
 
+    /**
+     * 与「开场 reveal」共用节奏：为 false 时关闭相机 compose bloom 与局部亮灯（体积+mask），避免与 VFX 叠加。
+     * 无 reveal 或 revealComplete 后为 true；revealRestart 且仍有 reveal 时再次为 false。
+     */
+    private _bloomStackUnlocked = true;
+
     constructor(global: Global, options: BloomControllerOptions) {
         this.global = global;
         this.options = options;
+
+        this._bloomStackUnlocked = !global.state.hasRevealEffect;
+        const onHasRevealChanged = (v: boolean) => {
+            if (v) {
+                this._bloomStackUnlocked = false;
+            } else {
+                this._bloomStackUnlocked = true;
+            }
+        };
+        const onRevealComplete = () => {
+            this._bloomStackUnlocked = true;
+        };
+        const onRevealRestart = () => {
+            if (global.state.hasRevealEffect) {
+                this._bloomStackUnlocked = false;
+            }
+        };
+        global.events.on('hasRevealEffect:changed', onHasRevealChanged);
+        global.events.on('revealComplete', onRevealComplete);
+        global.events.on('revealRestart', onRevealRestart);
+        this._unregisterEvents.push(() => {
+            global.events.off('hasRevealEffect:changed', onHasRevealChanged);
+            global.events.off('revealComplete', onRevealComplete);
+            global.events.off('revealRestart', onRevealRestart);
+        });
+
         const { app } = global;
         const graphicsDevice = app.graphicsDevice;
         if (!graphicsDevice) return;
@@ -421,6 +453,11 @@ export class BloomController {
             bloom.intensity = 0;
             cameraFrame.debug = null;
         }
+        // 与局部亮灯共用 reveal 节奏：开场 VFX 未结束时 compose bloom 也关闭
+        if (!this._bloomStackUnlocked) {
+            bloom.intensity = 0;
+            cameraFrame.debug = null;
+        }
 
         const nightModeScript = this.options.getNightModeScript();
         // 只要开启 Bloom Brush 就传 active=true，让 NightMode 用带笔刷分支的 shader，笔刷区域内应用局部亮度
@@ -438,6 +475,14 @@ export class BloomController {
             // 有已提交区域或擦除模式时，禁用 2D 预览，避免覆盖/干扰已有 3D volume 观感。
             const brushShaderActive = bloomBrush && this.isDrawing && !this.isErasing && !hasCommittedRegions;
             nightModeScript.setBloomBrushParams(brushShaderActive, effectiveMask, th, undefined, bloomBrushBrightness);
+
+            // 开场 reveal 未结束时：与上方 compose bloom 一致，不提交局部亮灯体积与 tint
+            if (!this._bloomStackUnlocked) {
+                this.clearLocalLightVolumeForNightMode(nightModeScript);
+                this.injectBloomMaskBeforeUpdate(cameraFrame);
+                return;
+            }
+
             const activeId = editor.activeLocalLightRegionId ?? null;
             const activeRegion = (activeId && !String(activeId).startsWith('draft-'))
                 ? regions.find((r: { id: string }) => r.id === activeId)
@@ -867,10 +912,41 @@ export class BloomController {
         return center;
     }
 
+    /** 清空 NightMode 侧局部亮灯体积（与 localLightsEnabled 关闭时一致） */
+    private clearLocalLightVolumeForNightMode(nightModeScript: NonNullable<ReturnType<BloomControllerOptions['getNightModeScript']>>): void {
+        this._lastMultiRegionHash = '';
+        this._lastActiveRegionId = null;
+        this._lastActiveRegionCommittedLength = -1;
+        this.committedTintTexture = null;
+        const { texture, tintTexture, aabbMin, aabbMax } = buildCommittedBrightnessVolumeFromRegions(
+            this.global.app.graphicsDevice,
+            [],
+            this.committedVolumeTexture,
+            this.committedTintTexture
+        );
+        this.committedVolumeTexture = texture;
+        this.committedTintTexture = tintTexture;
+        this.committedVolumeAabbMin.copy(aabbMin);
+        this.committedVolumeAabbMax.copy(aabbMax);
+        nightModeScript.setCommittedTint([1, 1, 1], 0);
+        nightModeScript.setCommittedBrightnessVolume(
+            texture,
+            aabbMin,
+            aabbMax,
+            1,
+            { volumeEncodedBrightness: true }
+        );
+        nightModeScript.setCommittedTintVolume(null);
+    }
+
     /** 仅在 Set / 加载配置 / applyToCameraFrame 时同步 committed 到 NightMode；使用 3D 体积纹理，无点数上限 */
     private syncCommittedToNightMode(): void {
         const nightModeScript = this.options.getNightModeScript();
         if (!nightModeScript) return;
+        if (!this._bloomStackUnlocked) {
+            this.clearLocalLightVolumeForNightMode(nightModeScript);
+            return;
+        }
         const committed = this.worldSpaceData.getCommittedPoints();
         const brightness = this.worldSpaceData.getCommittedBrightness();
         const { texture, aabbMin, aabbMax } = buildCommittedBrightnessVolume(
@@ -906,6 +982,9 @@ export class BloomController {
      * @private
      */
     private getPointsForMask(): Array<{ position: Vec3; radius: number }> {
+        if (!this._bloomStackUnlocked) {
+            return [];
+        }
         const bloom = this.global.settings?.postEffectSettings?.bloom as {
             localLightRegions?: Array<{ id: string; linkedLightId?: string | null; worldSpace?: { committed?: Array<{ position: [number, number, number]; radius?: number }> } }>;
             localLightsEnabled?: boolean;
@@ -1069,6 +1148,16 @@ export class BloomController {
         const tex = this.worldSpaceMaskTexture;
         if (!ctx || !canvas || !tex) {
             this.hasWorldSpaceMask = false;
+            return;
+        }
+
+        if (!this._bloomStackUnlocked) {
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, MASK_SIZE, MASK_SIZE);
+            tex.setSource(canvas);
+            tex.upload();
+            this._lastMaskSignature = '';
+            this.hasWorldSpaceMask = true;
             return;
         }
 
