@@ -350,10 +350,6 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     // Initialize user interface
     initUI(global);
 
-    // Initialize video export (VFX / timeline capture)
-    // This listens to 'render.video' events and performs offscreen rendering + encoding
-    initVideoExport(global);
-
     // Load model
     const gsplatLoad = loadGsplat(
         app,
@@ -423,10 +419,15 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     initPostMessageBridge(global);
 
     const viewer = new Viewer(global, gsplatLoad, skyboxLoad);
-    
-    // 将 viewer 存储到 app 上，方便其他模块访问（如 video-export）
+
+    // 将 viewer 存储到 app 上，方便其他模块访问（如 seekAnimToTimeAndApply）
     (app as any).viewer = viewer;
-    
+
+    // 视频导出需在 Viewer / RevealController 就绪后初始化，通过依赖注入传入 reveal 时间源
+    initVideoExport(global, {
+        getRevealExportTimingSource: () => viewer.revealController
+    });
+
     return viewer;
 };
 

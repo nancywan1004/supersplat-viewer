@@ -366,35 +366,21 @@ class GsplatIntegrate extends GsplatShaderEffect {
     }
 
     /**
+     * 与 `isEffectComplete` 使用同一公式：底部点 wavePhase 达到 1 的时刻（秒）。
+     * 供导出 / `getPostRevealContentThresholdSec` 与真实播完对齐（不依赖存盘 `totalDuration` 是否匹配自动算的 verticalSpread）。
+     */
+    getCompletionTime(): number {
+        const heightRange = Math.abs(this.topY - this.bottomY);
+        return (heightRange * this.verticalSpread + 1.0) / Math.max(this.speed, 0.001);
+    }
+
+    /**
      * Calculate when the effect is complete.
      * Effect completes when the integration wave has propagated from bottom to top.
      * @returns {boolean} True if effect is complete
      */
     isEffectComplete() {
-        // The integration effect propagates from top to bottom
-        // The wave phase in shader is: wavePhase = timeScaled - yOffset * verticalSpread
-        // where timeScaled = uTime * uSpeed, yOffset = uTopY - center.y
-        // 
-        // tt = smoothstep(0.0, 1.0, wavePhase)
-        // Integration completes when wavePhase >= 1.0, i.e., tt = 1.0
-        // 
-        // For top point (y = topY):
-        //   yOffset = 0, wavePhase = timeScaled
-        //   Completes when: timeScaled >= 1.0, i.e., uTime >= 1.0 / speed
-        // 
-        // For bottom point (y = bottomY):
-        //   yOffset = heightRange, wavePhase = timeScaled - heightRange * verticalSpread
-        //   Completes when: wavePhase >= 1.0, i.e., timeScaled >= heightRange * verticalSpread + 1.0
-        //   Therefore: uTime >= (heightRange * verticalSpread + 1.0) / speed
-        
-        const heightRange = Math.abs(this.topY - this.bottomY);
-        
-        // The bottom point is the last to complete, so the effect completes when
-        // the bottom point reaches wavePhase = 1.0
-        // Completion time = (heightRange * verticalSpread + 1.0) / speed
-        const completionTime = (heightRange * this.verticalSpread + 1.0) / Math.max(this.speed, 0.001);
-        
-        return this.effectTime >= completionTime;
+        return this.effectTime >= this.getCompletionTime();
     }
 }
 

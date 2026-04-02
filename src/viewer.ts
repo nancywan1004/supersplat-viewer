@@ -519,7 +519,7 @@ class Viewer {
                 revealBbox.copy(sceneBound);            // fallback
             }
             this.revealController = new RevealController(global, revealBbox, gsplatEntity, this.cameraManager);
-
+            // 供 VFX 导出与 deferred-editing-visual-sync 使用，避免从 app.viewer 反射取 RevealController
             // 有 reveal 时：等 reveal 播完再开始动画（监听 revealComplete），并恢复配置中的夜间模式
             if (state.hasRevealEffect) {
                 events.once('revealComplete', () => {

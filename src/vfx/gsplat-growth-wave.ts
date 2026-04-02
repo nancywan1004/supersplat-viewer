@@ -1177,22 +1177,26 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
     }
 
     /**
+     * 与 `isEffectComplete` / shader 中 `globalRecoverStart + recoverDuration` 一致。
+     * `globalRecoverStart` 若传入须与当帧 `updateEffect` 内计算值相同；省略时按当前属性重算。
+     */
+    getCompletionTime(globalRecoverStart?: number): number {
+        const heightRange = Math.abs(this.topY - this.bottomY);
+        const verticalSpread = this.verticalSpread ?? (this.growthSpeed / Math.max(heightRange, 0.001));
+        const maxYOffset = heightRange;
+        const waveCompletesAtTopY = (this.growthDuration + maxYOffset * verticalSpread) / Math.max(this.growthSpeed, 0.001);
+        const recoverStart = globalRecoverStart ?? waveCompletesAtTopY;
+        return recoverStart + this.recoverDuration;
+    }
+
+    /**
      * Calculate when the effect is complete.
      * Effect completes when all particles have finished recovering.
      * Uses topY and bottomY limits to calculate completion time (matching shader logic).
      * @returns {boolean} True if effect is complete
      */
     isEffectComplete(globalRecoverStart?: number) {
-        // Calculate recover start time based on topY/bottomY limits (matching shader calculation)
-        // Shader: topParticleGrowthEnd = (growthDuration + maxYOffset * verticalSpread) / growthSpeed
-        const heightRange = Math.abs(this.topY - this.bottomY);
-        const verticalSpread = this.verticalSpread ?? (this.growthSpeed / Math.max(heightRange, 0.001));
-        const maxYOffset = heightRange;
-        const waveCompletesAtTopY = (this.growthDuration + maxYOffset * verticalSpread) / this.growthSpeed;
-        const recoverStart = globalRecoverStart ?? waveCompletesAtTopY;
-        const maxCompletionTime = recoverStart + this.recoverDuration;
-
-        return this.effectTime >= maxCompletionTime;
+        return this.effectTime >= this.getCompletionTime(globalRecoverStart);
     }
 }
 

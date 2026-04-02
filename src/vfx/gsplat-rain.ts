@@ -362,41 +362,25 @@ class GsplatRainV2 extends GsplatShaderEffect {
     }
 
     /**
-     * Calculate when the effect is complete.
-     * Effect completes when all splats have reached their original positions.
-     * Based on shader logic: rawProgress = uTime*uTime*0.1 - dist2D*2.0 + 1.0
-     * When rawProgress >= 5, smoothstep(0., 5., rawProgress) = 1.0, so effect is complete.
-     * Solving: uTime*uTime*0.1 - dist2D*2.0 + 1.0 >= 5
-     * => uTime*uTime*0.1 >= 4 + dist2D*2.0
-     * => uTime >= sqrt((4 + dist2D*2.0) / 0.1)
-     * 
-     * Note: uTime in shader is scaledTime = effectTime * timeScale
-     * So we need: effectTime * timeScale >= sqrt((4 + maxDist2D*2.0) / 0.1)
-     * => effectTime >= sqrt((4 + maxDist2D*2.0) / 0.1) / timeScale
-     * 
-     * @returns {boolean} True if effect is complete
+     * 完成条件见 `getCompletionTime`（与 shader 中 rawProgress≥5 的最远点一致）。
      */
     isEffectComplete() {
-        // 根据 shader 逻辑计算：rawProgress = uTime*uTime*0.1 - dist2D*2.0 + 1.0
-        // 当 rawProgress >= 5 时完成
-        // uTime 在 shader 中是 scaledTime = effectTime * timeScale
+        return this.effectTime >= this.getCompletionTime();
+    }
+
+    /**
+     * 最远 splat 的 rawProgress 达阈值所需 effectTime（uTime=scaledTime=effectTime*timeScale）。
+     * 与 `getPostRevealContentThresholdSec` / 导出门控对齐。
+     */
+    getCompletionTime(): number {
         const rawProgressThreshold = 5.0;
         const constant = 1.0;
         const timeCoeff = 0.1;
         const distCoeff = 2.0;
-        
-        // 计算最远点完成所需的时间（在 shader 中的 scaledTime）
-        // rawProgress = scaledTime^2 * timeCoeff - maxDist2D * distCoeff + constant >= rawProgressThreshold
-        // scaledTime^2 * timeCoeff >= rawProgressThreshold - constant + maxDist2D * distCoeff
-        // scaledTime >= sqrt((rawProgressThreshold - constant + maxDist2D * distCoeff) / timeCoeff)
         const requiredScaledTime = Math.sqrt(
             (rawProgressThreshold - constant + this.maxDist2D * distCoeff) / timeCoeff
         );
-        
-        // 转换为实际的 effectTime（考虑 timeScale）
-        const requiredEffectTime = requiredScaledTime / Math.max(this.timeScale, 0.001);
-        
-        return this.effectTime >= requiredEffectTime;
+        return requiredScaledTime / Math.max(this.timeScale, 0.001);
     }
 }
 

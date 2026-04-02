@@ -398,6 +398,19 @@ class GsplatRevealRain extends GsplatShaderEffect {
 
         return this.effectTime >= maxCompletionTime;
     }
+
+    /** 与 isEffectComplete 对齐，供导出时间轴与「revealComplete 后再显示编辑内容」门控使用 */
+    getCompletionTime(): number {
+        let maxTStart: number;
+        if (this.acceleration === 0) {
+            maxTStart = this.endRadius / this.speed;
+        } else {
+            const discriminant = this.speed * this.speed + 2.0 * this.acceleration * this.endRadius;
+            maxTStart = (-this.speed + Math.sqrt(Math.max(discriminant, 0.0))) / this.acceleration;
+        }
+        const maxTLand = maxTStart + this.flightTime;
+        return maxTLand + Math.max(0.5, this.hitDuration);
+    }
 }
 
 export { GsplatRevealRain };

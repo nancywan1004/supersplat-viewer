@@ -1271,6 +1271,34 @@ export class RevealController {
         return this.timedEffects.includes(this.config.type);
     }
 
+    /**
+     * 导出时间轴上与「首访 revealComplete」对齐的时刻（秒）：此前应隐藏编辑添加的资产/标注/附加光源；
+     * 局部亮灯（Bloom 体积）由 revealRestart 锁定 _bloomStackUnlocked，在越过该时刻后通过 synthetic revealComplete 解锁。
+     * 与 viewer.ts 中 hasRevealEffect 时 defer initAnnotations/initSceneAssets 至 revealComplete 的语义一致。
+     *
+     * 优先级：
+     * 1. `currentScript.getCompletionTime()`（若存在且为有效非负数）——integrate / growth-wave / rain-v2 / sketch 等与 `isEffectComplete` 一致；
+     * 2. Timed（见 timedEffects）与 perlin-wave：回退 `config.totalDuration`；
+     * 3. 其余：回退 `config.totalDuration`。
+     */
+    getPostRevealContentThresholdSec(): number {
+        const { state } = this.global;
+        if (!state.hasRevealEffect || this.config.type === 'none') {
+            return 0;
+        }
+        const script = this.currentScript;
+        if (script && typeof script.getCompletionTime === 'function') {
+            const t = Number(script.getCompletionTime());
+            if (Number.isFinite(t) && t >= 0) {
+                return t;
+            }
+        }
+        if (this.timedEffects.includes(this.config.type) || this.config.type === 'perlin-wave') {
+            return this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+        }
+        return this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+    }
+
     // 公共方法
     isRevealActive(): boolean {
         return this.currentScript?.enabled || false;

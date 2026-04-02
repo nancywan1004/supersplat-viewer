@@ -1,6 +1,18 @@
 import { BufferTarget, EncodedPacket, EncodedVideoPacketSource, MkvOutputFormat, MovOutputFormat, Mp4OutputFormat, Output, StreamTarget, WebMOutputFormat } from 'mediabunny';
 import { Global } from '../types';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../schemas/v2-custom';
+// 含 VFX 导出时：按时间轴门控「编辑叠加层」并与 synthetic revealComplete 对齐 Bloom（见 deferred-editing-visual-sync 文件头说明）
+import {
+    createVfxExportPostRevealSync,
+    type RevealExportTimingSource,
+    type VfxExportPostRevealSync
+} from './deferred-editing-visual-sync';
+
+/** `initVideoExport` 依赖注入：由组合根（如 index）在 Viewer 就绪后提供 */
+export type VideoExportInitOptions = {
+    /** 返回 `RevealController`（或实现同接口的对象）；用于 Timed 导出门控阈值与 `isTimedEffect` */
+    getRevealExportTimingSource?: () => RevealExportTimingSource | null;
+};
 import { VIDEO_EXPORT_WORKER_SOURCE } from './video-export-worker';
 import {
     EventHandler,
@@ -791,12 +803,16 @@ class FrameProcessor {
 /**
  * 初始化视频导出功能
  * 监听 'render.video' 事件并执行视频导出
- * 
+ *
  * @param global - 全局对象，包含 app、events 等
+ * @param options - 依赖注入；应在 Viewer 创建之后调用并传入 `getRevealExportTimingSource`
  */
-export const initVideoExport = (global: Global): void => {
+export const initVideoExport = (global: Global, options?: VideoExportInitOptions): void => {
     const renderManager = new RenderManager(global);
     const { events } = global;
+
+    const getRevealExportTimingSource: () => RevealExportTimingSource | null =
+        options?.getRevealExportTimingSource ?? (() => null);
 
     // 当前导出任务的可取消句柄（主要用于快速导出）
     let activeAbort: AbortController | null = null;
@@ -883,6 +899,7 @@ export const initVideoExport = (global: Global): void => {
      * 渲染所有帧：与单帧截获完全相同的流程，循环执行。
      * 每帧（若 syncAnimTrack）：先 seek anim 并应用相机 → prepareAndRenderOneFrame → requestAnimationFrame → captureFrame
      * @param profiler 可选，用于 VFX 导出性能分析
+     * @param revealGate 可选；存在时每帧先 `syncExportFrame`，使导出画面与首访「VFX 后再见编辑内容」一致
      */
     const renderAllFrames = async (
         frameProcessor: FrameProcessor,
@@ -890,7 +907,8 @@ export const initVideoExport = (global: Global): void => {
         settings: VideoSettings,
         renderManager: RenderManager,
         profiler?: ExportProfiler,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        revealGate?: VfxExportPostRevealSync
     ): Promise<void> => {
         if (!encoder) throw new Error('Encoder is not available');
         const { frameRate, width, height, syncAnimTrack } = settings;
@@ -918,6 +936,9 @@ export const initVideoExport = (global: Global): void => {
                 readPixels: 0, flipBuffer: 0, encode: 0, total: 0
             };
             const tFrameStart = VFX_EXPORT_PROFILE ? performance.now() : 0;
+
+            // 必须在 setEffectTime / 渲染前：先按本帧时间切换 placedAssets/标注/光源等显隐，必要时 fire revealComplete
+            revealGate?.syncExportFrame(global, frameTime, { includeVfx });
 
             // 不包含 VFX 时也必须每帧驱动 anim，否则导出的视频里相机不动；包含 VFX 时按 syncAnimTrack 决定是否同步
             if (syncAnimTrack || !includeVfx) {
@@ -994,14 +1015,35 @@ export const initVideoExport = (global: Global): void => {
     /**
      * 处理下载
      */
-    const handleDownload = async (output: Output, target: any, fileStream: FileSystemWritableFileStream | undefined, fileExtension: string): Promise<void> => {
-        if (!fileStream) {
-            const filename = `supersplat-video.${fileExtension}`;
-            
-            // 这里应该有downloadFile函数，但不在当前作用域中
-            // downloadFile((output.target as BufferTarget).buffer, filename);
-            console.log(VFX_EXPORT_LOG_TAG, `Video export complete: ${filename}`);
+    const handleDownload = async (
+        _output: Output,
+        target: BufferTarget,
+        fileStream: FileSystemWritableFileStream | undefined,
+        fileExtension: string
+    ): Promise<void> => {
+        if (fileStream) return;
+        const filename = `supersplat-video.${fileExtension}`;
+        const buf = target.buffer;
+        if (!buf || buf.byteLength === 0) {
+            console.warn(VFX_EXPORT_LOG_TAG, `No output buffer to download (${filename})`);
+            return;
         }
+        const mime =
+            fileExtension === 'mp4' ? 'video/mp4' :
+            fileExtension === 'webm' ? 'video/webm' :
+            'application/octet-stream';
+        try {
+            const blob = new Blob([buf], { type: mime });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            console.error(VFX_EXPORT_LOG_TAG, 'Browser download failed:', e);
+        }
+        console.log(VFX_EXPORT_LOG_TAG, `Video export complete: ${filename}`);
     };
 
     /**
@@ -1024,11 +1066,13 @@ export const initVideoExport = (global: Global): void => {
      * 快速导出：渲染到主 canvas，约实时。
      * - format=mp4: 实时渲染 + WebCodecs 编码 + MP4 封装（不走离屏导出）
      * - format=webm: captureStream + MediaRecorder（保留后备）
+     * @param revealGate 与离线导出相同：逐帧门控编辑叠加层 + synthetic revealComplete
      */
     const performVideoExportFast = async (
         videoSettings: VideoSettings,
         fileStream: FileSystemWritableFileStream | undefined,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        revealGate?: VfxExportPostRevealSync
     ): Promise<boolean> => {
         const { frameRate, width, height, bitrate, syncAnimTrack } = videoSettings;
         const evenWidth = width % 2 === 0 ? width : width - 1;
@@ -1165,6 +1209,8 @@ export const initVideoExport = (global: Global): void => {
                     if (didPaceWait) paceHits++;
                     const frameTime = Math.min(frameIndex * frameInterval, totalDuration);
                     const effectTime = includeVfx ? frameTime : vfxTotalDuration;
+                    // 与离线路径一致：先门控编辑层再 seek 相机与写 VFX 时间
+                    revealGate?.syncExportFrame(global, frameTime, { includeVfx });
                     if (syncAnimTrack || !includeVfx) seekAnimToTimeAndApply(global, frameTime);
                     await prepareAndRenderOneFrameToCanvas(global, effectTime, !includeVfx);
                     const bitmap = await createImageBitmap(canvas);
@@ -1269,7 +1315,7 @@ export const initVideoExport = (global: Global): void => {
                     const streamLike = fileStream as unknown as { locked?: boolean; close?: () => Promise<void> };
                     if (streamLike.locked !== true) await streamLike.close?.();
                 } else {
-                    await handleDownload(output, target, fileStream, encoderConfig.fileExtension);
+                    await handleDownload(output, target as BufferTarget, fileStream, encoderConfig.fileExtension);
                 }
             } finally {
                 try { worker.terminate(); } catch {}
@@ -1309,6 +1355,8 @@ export const initVideoExport = (global: Global): void => {
                 const frameStart = performance.now();
                 const frameTime = Math.min(frameIndex * frameInterval, totalDuration);
                 const effectTime = includeVfx ? frameTime : vfxTotalDuration;
+                // 与 renderAllFrames 顺序一致：门控 → 相机 → VFX 时间 → 画到主 canvas
+                revealGate?.syncExportFrame(global, frameTime, { includeVfx });
                 // 不包含 VFX 时也必须每帧驱动 anim，否则导出的视频里相机不动
                 if (syncAnimTrack || !includeVfx) seekAnimToTimeAndApply(global, frameTime);
                 await prepareAndRenderOneFrameToCanvas(global, effectTime, !includeVfx);
@@ -1375,11 +1423,13 @@ export const initVideoExport = (global: Global): void => {
 
     /**
      * 执行视频导出的核心逻辑（完全离线渲染）
+     * @param revealGate 传入后由 `renderAllFrames` 内逐帧 `syncExportFrame`
      */
     const performVideoExport = async (
         videoSettings: VideoSettings,
         fileStream: FileSystemWritableFileStream | undefined,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        revealGate?: VfxExportPostRevealSync
     ): Promise<boolean> => {
         const { startFrame, endFrame, frameRate, width, height, bitrate } = videoSettings;
         const profiler = new ExportProfiler();
@@ -1433,7 +1483,7 @@ export const initVideoExport = (global: Global): void => {
             try {
                 // 渲染所有帧（完全离线渲染，不影响主 viewer）
                 profiler.startPhase('renderAllFrames');
-                await renderAllFrames(frameProcessor, encoder, videoSettings, renderManager, profiler, signal);
+                await renderAllFrames(frameProcessor, encoder, videoSettings, renderManager, profiler, signal, revealGate);
                 profiler.endPhase();
 
                 didAbort = signal?.aborted === true;
@@ -1489,7 +1539,7 @@ export const initVideoExport = (global: Global): void => {
             }
 
             // 处理下载（如果没有文件流）
-            await handleDownload(output, target, fileStream, encoderConfig.fileExtension);
+            await handleDownload(output, target as BufferTarget, fileStream, encoderConfig.fileExtension);
 
             return true;
         } finally {
@@ -1499,7 +1549,8 @@ export const initVideoExport = (global: Global): void => {
     };
 
     /**
-     * 导出视频的主要方法
+     * 导出视频的主要方法。
+     * `revealGate`：单次导出生命周期内复用；`finally` 里必须 `finalizeAfterExport` 以恢复叠加层并兜底 revealComplete。
      */
     const exportVideo = async (videoSettings: VideoSettings, fileStream?: FileSystemWritableFileStream): Promise<boolean> => {
         const fastLabel = videoSettings.format === 'mp4' ? '极速导出 (MP4，实时转码)…' : '极速导出 (WebM)…';
@@ -1511,6 +1562,9 @@ export const initVideoExport = (global: Global): void => {
         const prevEffectPaused = stateAny.effectPaused ?? false;
         const prevAnimationPaused = stateAny.animationPaused ?? false;
         const includeVfx = videoSettings.includeVfx !== false;
+        const hadRevealEffect = global.state.hasRevealEffect;
+        // 新建门控实例；Reveal 时间源由 initVideoExport 注入的 getRevealExportTimingSource 提供
+        const revealGate = createVfxExportPostRevealSync(getRevealExportTimingSource());
 
         // 导出时包含 VFX：在开始前重启特效，从 0 开始录制（Timed 与非 Timed 均适用）
         if (includeVfx) {
@@ -1525,13 +1579,15 @@ export const initVideoExport = (global: Global): void => {
 
         try {
             if (videoSettings.useFastExport) {
-                return await performVideoExportFast(videoSettings, fileStream, activeAbort.signal);
+                return await performVideoExportFast(videoSettings, fileStream, activeAbort.signal, revealGate);
             }
-            return await performVideoExport(videoSettings, fileStream, activeAbort.signal);
+            return await performVideoExport(videoSettings, fileStream, activeAbort.signal, revealGate);
         } catch (error) {
             await handleExportError(error);
             return false;
         } finally {
+            // 恢复编辑层显示；若导出过短未触发帧内 revealComplete，此处补发，避免 Bloom 等仍认为在 reveal 中
+            revealGate.finalizeAfterExport(global, { includeVfx, hadRevealEffect });
             cleanup();
 
             // 恢复锁

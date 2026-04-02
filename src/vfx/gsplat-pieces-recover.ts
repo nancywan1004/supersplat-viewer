@@ -856,20 +856,20 @@ class GsplatRevealPiecesRecover extends GsplatShaderEffect {
         }
     }
 
+    /** 与 `isEffectComplete` 一致，供 `getPostRevealContentThresholdSec` / 导出门控 */
+    getCompletionTime(): number {
+        const effectiveSpeedAtEnd = this.waveSpeed * Math.max(1, 1 + this.waveSpeedDistScale * this.endRadius);
+        const maxScatterStartTime = this.endRadius / effectiveSpeedAtEnd;
+        return maxScatterStartTime + this.scatterDuration + this.recoverDuration;
+    }
+
     /**
      * Calculate when the effect is complete.
      * Effect completes when all splats have finished recovering.
      * @returns {boolean} True if effect is complete
      */
     isEffectComplete() {
-        // Points start at different times due to wave propagation from center
-        // The farthest point will start last, so we need to account for that
-        // Use endRadius as reference; when waveSpeedDistScale > 0, 远处有效波速更大，最晚开始时间缩短
-        const effectiveSpeedAtEnd = this.waveSpeed * Math.max(1, 1 + this.waveSpeedDistScale * this.endRadius);
-        const maxScatterStartTime = this.endRadius / effectiveSpeedAtEnd;
-        const maxCompletionTime = maxScatterStartTime + this.scatterDuration + this.recoverDuration;
-
-        return this.effectTime >= maxCompletionTime;
+        return this.effectTime >= this.getCompletionTime();
     }
 }
 
