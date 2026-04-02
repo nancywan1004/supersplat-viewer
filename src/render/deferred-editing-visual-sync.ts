@@ -112,7 +112,7 @@ export class VfxExportPostRevealSync {
         reveal: RevealExportTimingSource | null = null,
         layers: readonly DeferredEditingLayerSpec[] = DEFAULT_DEFERRED_EDITING_LAYERS
     ) {
-        this.reveal = reveal;
+        this.reveal = reveal ?? null;
         this.layers = layers;
     }
 
@@ -174,10 +174,10 @@ export class VfxExportPostRevealSync {
  * @param reveal 一般由组合根通过 `initVideoExport` 注入的 `getRevealExportTimingSource()` 返回（如 `RevealController`）；为 null 时 Timed 门控不启用，阈值回退 settings。
  */
 export function createVfxExportPostRevealSync(
-    reveal: RevealExportTimingSource | null = null,
+    reveal: RevealExportTimingSource | null | undefined = null,
     layers?: readonly DeferredEditingLayerSpec[]
 ): VfxExportPostRevealSync {
-    return new VfxExportPostRevealSync(reveal, layers ?? DEFAULT_DEFERRED_EDITING_LAYERS);
+    return new VfxExportPostRevealSync(reveal ?? null, layers ?? DEFAULT_DEFERRED_EDITING_LAYERS);
 }
 
 /** 在默认层之后追加自定义层（例如新编辑模块的实体根节点），再传入 `createVfxExportPostRevealSync(...)`。 */

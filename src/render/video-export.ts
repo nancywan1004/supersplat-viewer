@@ -1562,17 +1562,23 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
         const prevEffectPaused = stateAny.effectPaused ?? false;
         const prevAnimationPaused = stateAny.animationPaused ?? false;
         const includeVfx = videoSettings.includeVfx !== false;
+        // 与 performVideoExportFast 一致：fixVfxAtEnd 时不在时间轴上 scrub VFX，导出门控也不应按帧隐藏叠加层
+        const includeVfxTimeline =
+            includeVfx && !(videoSettings.useFastExport && videoSettings.fixVfxAtEnd);
         const hadRevealEffect = global.state.hasRevealEffect;
         // 新建门控实例；Reveal 时间源由 initVideoExport 注入的 getRevealExportTimingSource 提供
         const revealGate = createVfxExportPostRevealSync(getRevealExportTimingSource());
+
+        // 先锁 viewer，避免 revealRestart 与首帧编码之间仍按正常帧渲染出一帧「带标注/资产」的画面
+        stateAny.isExportingVfxVideo = true;
 
         // 导出时包含 VFX：在开始前重启特效，从 0 开始录制（Timed 与非 Timed 均适用）
         if (includeVfx) {
             events.fire('revealRestart', false);
         }
 
-        // 锁住 viewer 实时更新
-        stateAny.isExportingVfxVideo = true;
+        // Timed + 含时间轴 VFX：在首帧编码前按 t=0 应用门控（隐藏 placedAssets/标注等）
+        revealGate.syncExportFrame(global, 0, { includeVfx: includeVfxTimeline });
         // 每次导出都创建新的 abort controller（供 VIDEO_EXPORT_END / stop 调用）
         activeAbort?.abort();
         activeAbort = new AbortController();

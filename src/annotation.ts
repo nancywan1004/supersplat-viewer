@@ -564,6 +564,11 @@ export class Annotation extends Script {
      */
     _update() {
         if (!Annotation.camera || !this.materials?.length || !this.entity) return;
+        // entity.enabled=false 时引擎不跑 script update，但本类仍挂在 app.prerender 上，必须自行隐藏 DOM/热点
+        if (!this.entity.enabled) {
+            this._hideElements();
+            return;
+        }
 
         const position = this.entity.getPosition();
         const screenPos = Annotation.camera.camera.worldToScreen(position);
@@ -641,7 +646,9 @@ export class Annotation extends Script {
      * @private
      */
     _hideElements() {
-        this.hotspotDom.style.display = 'none';
+        if (this.hotspotDom) {
+            this.hotspotDom.style.display = 'none';
+        }
         if (Annotation.activeAnnotation === this) {
             Annotation.tooltipDom.style.visibility = 'hidden';
             Annotation.tooltipDom.style.opacity = '0';
