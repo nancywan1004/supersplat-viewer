@@ -1042,19 +1042,11 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
     minSize = 0.05;
 
     /**
-     * 点云阶段固定点大小（与协方差尺度一致，为模型/视空间绝对数值）。
-     * 同一数值在不同场景下观感不同：场景范围大（bottomY~topY 跨度大）或相机远时，点会显得更小、更稀疏；
-     * 场景范围小或相机近时，点会显得更大、更密。大场景可适当增大 pointSize（如 0.01~0.02）以保持密度感。
+     * 点云阶段固定大小（世界单位，与协方差尺度一致）：全场景统一，不按 bbox 缩放。
      * @attribute
      * @range [0.001, 0.5]
      */
     pointSize = 0.005;
-
-    /**
-     * 是否按场景高度自动缩放 pointSize，使不同尺度场景的点密度更一致（参考高度 20 单位）
-     * @attribute
-     */
-    pointSizeScaleByScene = true;
 
     /**
      * Phase 2 光圈最大半径：光圈从中心向外扩散到此距离后停止。
@@ -1152,12 +1144,7 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
         this.setUniform('uNoiseIntensity', this.noiseIntensity);
         this.setUniform('uScatterDistance', this.scatterDistance);
         this.setUniform('uMinSize', this.minSize);
-        const refHeight = 20;
-        const effectivePointSize = this.pointSizeScaleByScene
-            ? this.pointSize * Math.max(0.5, Math.min(2, heightRange / refHeight))
-            : this.pointSize;
-        //console.log('effectivePointSize', effectivePointSize);
-        this.setUniform('uPointSize', effectivePointSize);
+        this.setUniform('uPointSize', this.pointSize);
         this.setUniform('uEndRadius', this.endRadius);
         this.setUniform('uGlobalRecoverStart', globalRecoverStart);
         this.setUniform('uBottomY', this.bottomY);
