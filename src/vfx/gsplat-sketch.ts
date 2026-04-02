@@ -4,7 +4,6 @@ import { GsplatShaderEffect } from './gsplat-shader-effect';
 const shaderGLSL = /* glsl */`
 uniform float uTime;
 uniform vec3 uCenter;
-uniform vec3 uCameraPos;
 uniform float uUseCameraDistance;
 uniform float uWaveSpeed;
 uniform float uSketchDuration;
@@ -74,7 +73,13 @@ float g_phase;
 float g_currentRadius;
 
 void initShared(vec3 center) {
-    g_dist = length(center - uCenter);
+    // 与 rain-v2 对齐：useCameraDistance 时用 xz 到焦点 uCenter 的距离（相机 calcFocusPoint），
+    // 避免用相机 eye 的欧氏距离形成「绕相机球面」波前（近处不一定在画面中心）。
+    if (uUseCameraDistance > 0.5) {
+        g_dist = length(center.xz - uCenter.xz);
+    } else {
+        g_dist = length(center - uCenter);
+    }
     
     // 素描阶段：从中心向外传播
     // 距离中心越远的点，素描效果开始得越晚
@@ -98,12 +103,8 @@ void initShared(vec3 center) {
         g_sketchProgress = clamp(g_sketchProgress, 0.0, 1.0);
     }
     
-    // 计算上色进度：可选择基于相机距离或中心距离
+    // 上色波前：与 g_dist 一致（useCameraDistance 时同 rain-v2 的 xz 距焦点传播）
     float colorizeDist = g_dist;
-    if (uUseCameraDistance > 0.5) {
-        // 使用到相机的距离（基于相机视角由近至远上色）
-        colorizeDist = length(center - uCameraPos);
-    }
     
     // 上色波前半径随时间扩张
     float colorizeRadius = 0.0;
@@ -291,7 +292,6 @@ void modifySplatColor(vec3 center, inout vec4 color) {
 const shaderWGSL = /* wgsl */`
 uniform uTime: f32;
 uniform uCenter: vec3f;
-uniform uCameraPos: vec3f;
 uniform uUseCameraDistance: f32;
 uniform uWaveSpeed: f32;
 uniform uSketchDuration: f32;
@@ -358,7 +358,13 @@ var<private> g_phase: f32;
 var<private> g_currentRadius: f32;
 
 fn initShared(center: vec3f) {
-    g_dist = length(center - uniform.uCenter);
+    if (uniform.uUseCameraDistance > 0.5) {
+        let dx = center.x - uniform.uCenter.x;
+        let dz = center.z - uniform.uCenter.z;
+        g_dist = sqrt(dx * dx + dz * dz);
+    } else {
+        g_dist = length(center - uniform.uCenter);
+    }
     
     // 素描阶段：从中心向外传播
     // 距离中心越远的点，素描效果开始得越晚
@@ -382,12 +388,7 @@ fn initShared(center: vec3f) {
         g_sketchProgress = clamp(g_sketchProgress, 0.0, 1.0);
     }
     
-    // 计算上色进度：可选择基于相机距离或中心距离
-    var colorizeDist: f32 = g_dist;
-    if (uniform.uUseCameraDistance > 0.5) {
-        // 使用到相机的距离（基于相机视角由近至远上色）
-        colorizeDist = length(center - uniform.uCameraPos);
-    }
+    let colorizeDist: f32 = g_dist;
     
     // 上色波前半径随时间扩张
     var colorizeRadius: f32 = 0.0;
@@ -579,7 +580,6 @@ class GsplatSketch extends GsplatShaderEffect {
 
     // 可重用数组用于 uniform 更新
     _centerArray = [0, 0, 0];
-    _cameraPosArray = [0, 0, 0];
 
     /**
      * 效果的中心点
@@ -588,32 +588,11 @@ class GsplatSketch extends GsplatShaderEffect {
     center = new Vec3(0, 0, 0);
 
     /**
-     * 上色时使用相机距离（而不是中心距离）
-     * 启用后，上色会从相机视角由近至远扩散
+     * 与 rain-v2 对齐的传播方式：启用后素描与上色均按 **xz 平面到 uCenter 的距离** 推进（uCenter 由 Reveal 用相机焦点设置），
+     * 而非三维球面绕场景中心；也不会再用相机 eye 的欧氏距离（易产生「绕镜头球面」、与视线中心不一致）。
      * @attribute
      */
     useCameraDistance = false;
-
-    /**
-     * 相机位置（在上色开始时记录）
-     * 仅当 useCameraDistance = true 时使用
-     * @attribute
-     */
-    cameraPos = new Vec3(0, 0, 0);
-
-    /**
-     * 是否已记录相机位置
-     * @private
-     */
-    _cameraPosCaptured = false;
-
-    initialize() {
-        super.initialize();
-        // 每次启用效果时重置相机捕获，restart 或时间轴回拉后上色阶段会使用当前相机位姿
-        this.on('enable', () => {
-            this._cameraPosCaptured = false;
-        });
-    }
 
     /**
      * 波传播速度（单位/秒）
@@ -757,16 +736,6 @@ class GsplatSketch extends GsplatShaderEffect {
     }
 
     updateEffect(effectTime: number, dt: number) {
-        // 效果开始的首帧立即记录相机位置，保证 Restart / 导出 VFX 时从当前视角中心开始上色
-        if (this.useCameraDistance && !this._cameraPosCaptured) {
-            const cameraEntity = this.camera || this.app?.root?.findByName('Camera');
-            if (cameraEntity) {
-                this.cameraPos.copy(cameraEntity.getPosition());
-                this._cameraPosCaptured = true;
-                console.log('Captured camera position for colorize:', this.cameraPos);
-            }
-        }
-
         // 更新 uniforms
         this.setUniform('uTime', effectTime);
 
@@ -775,10 +744,6 @@ class GsplatSketch extends GsplatShaderEffect {
         this._centerArray[2] = this.center.z;
         this.setUniform('uCenter', this._centerArray);
 
-        this._cameraPosArray[0] = this.cameraPos.x;
-        this._cameraPosArray[1] = this.cameraPos.y;
-        this._cameraPosArray[2] = this.cameraPos.z;
-        this.setUniform('uCameraPos', this._cameraPosArray);
         this.setUniform('uUseCameraDistance', this.useCameraDistance ? 1.0 : 0.0);
 
         this.setUniform('uWaveSpeed', this.waveSpeed);
@@ -825,17 +790,6 @@ class GsplatSketch extends GsplatShaderEffect {
         const maxSketchEnd = maxSketchStart + this.sketchDuration;
         const maxColorizeEnd = maxSketchEnd + this.colorizeDuration;
         return maxColorizeEnd;
-    }
-
-    /**
-     * 设置特效时间（重写以在“回到上色开始前”时重置相机捕获，restart/时间轴回拉时使用当前相机位姿）
-     */
-    setEffectTime(time: number) {
-        super.setEffectTime(time);
-        // 时间回到上色开始之前时，下次进入上色阶段需重新捕获当前相机位姿
-        if (time < this.sketchDuration) {
-            this._cameraPosCaptured = false;
-        }
     }
 
     /**

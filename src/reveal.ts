@@ -665,10 +665,10 @@ export class RevealController {
                 script.grainAmp = 0.06;
                 script.colorizeSharpness = 0.3;
                 
-                // 启用基于相机距离的上色（从相机视角由近至远上色）
+                // 与 rain-v2 一致：素描+上色按 xz 到相机焦点（updateScriptCenter）由内向外，不用相机 eye 球面距
                 script.useCameraDistance = true;
                 
-                // 设置相机实体引用（用于获取上色时的相机位置）
+                // 材质/统一管线目标相机（非上色距离；上色距离已随 uCenter 与 xz 度量对齐 rain-v2）
                 script.camera = this.global.camera;
                 
                 // 设置 reveal center
