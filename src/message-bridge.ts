@@ -555,6 +555,9 @@ const initPostMessageBridge = (global: Global) => {
             events.fire('revealRestart', (p as any).restartAnim !== false);
             break;
         case 'VIDEO_EXPORT_START': {
+            console.log('[MessageBridge] VIDEO_EXPORT_START → start export pipeline', {
+                includeVfx: (p as any).includeVfx !== false
+            });
             const includeVfx = (p as any).includeVfx !== false;
             const resolution = { width: 1920, height: 1080 };
             const width = resolution.width % 2 === 0 ? resolution.width : resolution.width - 1;
@@ -583,9 +586,10 @@ const initPostMessageBridge = (global: Global) => {
                 includeVfx,
                 useFastExport: true
             };
-            // 优先先选地址；若环境不支持 picker，则降级为浏览器下载，不直接取消导出
+            // 有 File System Access API 时先选保存路径；否则走无 fileStream 导出，由 video-export 在 finalize 后触发浏览器下载
             if (!('showSaveFilePicker' in window)) {
-                postToParent('VIDEO_EXPORT_CANCELLED');
+                console.warn('[MessageBridge] showSaveFilePicker unavailable, export will use in-memory encode + download');
+                events.fire('render.video', videoSettings);
                 break;
             }
             try {
@@ -595,9 +599,11 @@ const initPostMessageBridge = (global: Global) => {
                 });
                 const fileStream = await handle.createWritable();
                 events.fire('render.video', videoSettings, fileStream as any);
-            } catch {                
-                console.log('[MessageBridge] file picker cancelled by user');
-                postToParent('VIDEO_EXPORT_CANCELLED');
+            } catch {
+                console.log('file picker failed, auto export');
+                events.fire('render.video', videoSettings);
+                // console.log('[MessageBridge] file picker cancelled or denied');
+                // postToParent('VIDEO_EXPORT_CANCELLED');
             }
             break;
         }
