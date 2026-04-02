@@ -25,9 +25,74 @@ import { CameraMode, Global } from './types';
 import { SphereConstraint } from './camera-constraints/sphere-constraint';
 import { BoxConstraint } from './camera-constraints/box-constraint';
 import { selectNearestLightAtPosition } from './light';
+import { getSelectedSceneEntity } from './state-helpers';
 
 const tmpCamera = new Camera();
 const tmpv = new Vec3();
+/** F 键 / inputEvent「frame」分支里，用于承接「选中项世界坐标」的临时 Vec3（避免每帧分配）。 */
+const tmpFocus = new Vec3();
+
+/**
+ * 编辑模式下解析「应对准」的世界坐标，供 F 键聚焦选中对象。
+ * 仅当 `editLeftModule` 与选中态一致时生效，避免跨模块误用旧选中：
+ * - asset：选中场景实体的世界位置
+ * - annotation：`settings.annotations` 中当前选中项的 `position`
+ * - environment：当前选中点光/聚光的 `position`（directional 不参与）
+ * @returns 已写入 `out` 则为 true，否则 false（调用方回退为框整场景 frameCamera）
+ */
+function fillEditFocus(global: Global, out: Vec3): boolean {
+    const { state, settings } = global;
+    if (!state.editMode) return false;
+    const mod = state.editLeftModule;
+    if (mod === 'asset' && state.selectedSceneEntityId) {
+        const ent = getSelectedSceneEntity(state);
+        if (ent) {
+            out.copy(ent.getPosition());
+            return true;
+        }
+        return false;
+    }
+    if (mod === 'annotation' && state.selectedAnnotationId) {
+        const list = settings.annotations;
+        if (Array.isArray(list)) {
+            const ann = list.find((a) => a && a.id === state.selectedAnnotationId);
+            const p = ann?.position;
+            if (
+                Array.isArray(p) &&
+                p.length >= 3 &&
+                Number.isFinite(p[0]) &&
+                Number.isFinite(p[1]) &&
+                Number.isFinite(p[2])
+            ) {
+                out.set(p[0], p[1], p[2]);
+                return true;
+            }
+        }
+        return false;
+    }
+    if (mod === 'environment' && state.selectedLightId) {
+        const lights = settings.lighting?.lights;
+        if (Array.isArray(lights)) {
+            const L = lights.find((l: any) => l && l.id === state.selectedLightId) as
+                | { type?: string; position?: number[] }
+                | undefined;
+            if (!L || L.type === 'directional') return false;
+            const p = L.position;
+            if (
+                Array.isArray(p) &&
+                p.length >= 3 &&
+                Number.isFinite(p[0]) &&
+                Number.isFinite(p[1]) &&
+                Number.isFinite(p[2])
+            ) {
+                out.set(p[0], p[1], p[2]);
+                return true;
+            }
+        }
+        return false;
+    }
+    return false;
+}
 
 const unionBoundingBoxes = (a: BoundingBox, b: BoundingBox): BoundingBox => {
     const amin = a.getMin();
@@ -367,10 +432,36 @@ class CameraManager {
             }
         };
 
+        /**
+         * 将 Orbit 相机对准某一世界坐标点（目标落在画面中心附近）。
+         * 与双击场景拾取 `pick` 共用：沿当前视线方向收束距离，`targetDistance = max(1, 距离*0.2)`。
+         */
+        const orbitFocus = (position: Vec3) => {
+            if (state.cameraMode !== 'orbit') {
+                state.cameraMode = 'orbit';
+            }
+            tmpCamera.copy(this.camera);
+            // 从相机指向目标的方向，在目标附近取新机位，再 lookAt 目标
+            tmpv.copy(position).sub(this.camera.position).normalize();
+            const currentDistance = position.distance(this.camera.position);
+            const targetDistance = Math.max(1.0, currentDistance * 0.2);
+            tmpv.mulScalar(-targetDistance).add(position);
+            tmpCamera.position.copy(tmpv);
+            tmpCamera.look(tmpv, position);
+            controllers.orbit.goto(tmpCamera);
+            startTransition();
+        };
+
         // handle input events
         events.on('inputEvent', (eventName, event) => {
             switch (eventName) {
                 case 'frame':
+                    // F 键 / UI「Frame」：优先聚焦当前编辑模块下的选中项，否则整场景 framing
+                    if (fillEditFocus(global, tmpFocus)) {
+                        (event as KeyboardEvent | undefined)?.preventDefault?.();
+                        orbitFocus(tmpFocus);
+                        break;
+                    }
                     state.cameraMode = 'orbit';
                     controllers.orbit.goto(frameCamera);
                     startTransition();
@@ -471,33 +562,9 @@ class CameraManager {
             //     }, 3000);
             // }
 
-            // Switch to orbit mode on double-tap (only if not already in orbit mode)
-            if (state.cameraMode !== 'orbit') {
-                state.cameraMode = 'orbit';
-            }
+            // 双击拾取点：与 F 键选中聚焦同一条 orbit 对准逻辑
+            orbitFocus(position);
 
-            // construct camera - look at the picked target from current position
-            tmpCamera.copy(this.camera);
-            
-            // Calculate direction from camera to picked point
-            const direction = tmpv.copy(position).sub(this.camera.position).normalize();
-            
-            // Calculate a good viewing distance (move much closer to target)
-            const currentDistance = position.distance(this.camera.position);
-            // Use a smaller multiplier (0.2) and lower minimum (1.0) to get closer
-            const targetDistance = Math.max(4.0, currentDistance * 0.2);
-            console.log('targetDistance: '+targetDistance)
-            
-            // Position camera at the target distance, looking at the picked point
-            const newPosition = tmpv.copy(direction).mulScalar(-targetDistance).add(position);
-            tmpCamera.position.copy(newPosition);
-            
-            // Make camera look at the picked point (this centers the target)
-            // The look() method automatically sets the correct distance
-            tmpCamera.look(newPosition, position);
-
-            controllers.orbit.goto(tmpCamera);
-            
             // Fly mode version (commented out for now, as requested)
             // if (currentMode === 'fly') {
             //     const targetPose = new Pose();
@@ -506,7 +573,6 @@ class CameraManager {
             //     targetPose.distance = tmpCamera.distance;
             //     controllers.fly.goto(targetPose);
             // }
-            startTransition();
         });
 
         // 单击拾取：用于光源等场景对象选中（不改变相机）

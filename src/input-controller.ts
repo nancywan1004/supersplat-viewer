@@ -370,7 +370,9 @@ class InputController {
             } else if (!event.ctrlKey && !event.altKey && !event.metaKey) {
                 switch (event.key) {
                     case 'f':
+                        // 编辑模式下有选中项时由 camera-manager 对准选中对象，否则框整场景；避免浏览器默认「查找」抢键
                         events.fire('inputEvent', 'frame', event);
+                        event.preventDefault();
                         break;
                     case 'r':
                         events.fire('inputEvent', 'reset', event);
