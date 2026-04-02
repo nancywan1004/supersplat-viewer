@@ -212,6 +212,33 @@ export function applyLightSelect(global: Global, id: string | null, source: 'hos
     global.events.fire('sceneLight:selected', { id, source });
 }
 
+/**
+ * LIGHT_TRANSFORM_MODE：切换环境模块下光源 Gizmo。
+ * 协议约定：点光源仅 `move` | null；聚光灯 `move` | `rotate` | null。
+ * 对点光下发 `rotate` 时按协议忽略并关闭 Gizmo。
+ */
+export function applyLightTransformMode(
+    global: Global,
+    value: 'move' | 'rotate' | null | undefined
+): void {
+    const { state, settings, events } = global;
+    if (value !== 'move' && value !== 'rotate') {
+        state.lightTransformMode = null;
+        events.fire('lightTransformMode:changed', null);
+        return;
+    }
+    const id = state.selectedLightId;
+    const lighting = ensureLighting(settings);
+    const cfg = id ? lighting.lights.find((l) => (l as LightWithId).id === id) : undefined;
+    if (value === 'rotate' && (cfg as { type?: string } | undefined)?.type !== 'spot') {
+        state.lightTransformMode = null;
+        events.fire('lightTransformMode:changed', null);
+        return;
+    }
+    state.lightTransformMode = value;
+    events.fire('lightTransformMode:changed', value);
+}
+
 /** LIGHT_INTENSITY_UPDATE / LIGHT_COLOR_UPDATE / LIGHT_INNER_ANGLE_SET / LIGHT_OUTER_ANGLE_SET / LIGHT_RANGE_SET */
 export function applyLightDetail(
     global: Global,

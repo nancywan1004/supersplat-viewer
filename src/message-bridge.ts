@@ -29,6 +29,7 @@ import {
     applyLightGlobalSet,
     applyLightAdd,
     applyLightSelect,
+    applyLightTransformMode,
     applyLightDetail,
     applyLightToggleAll,
     applyLightToggle,
@@ -84,6 +85,7 @@ type InboundPayload =
     | { type: 'LIGHT_TOGGLE_ALL'; value?: boolean }
     | { type: 'LIGHT_TOGGLE'; id?: string; value?: boolean }
     | { type: 'LIGHT_SELECT'; id?: string | null }
+    | { type: 'LIGHT_TRANSFORM_MODE'; value?: 'move' | 'rotate' | null }
     | { type: 'LIGHT_INTENSITY_UPDATE'; id?: string; value?: number }
     | { type: 'LIGHT_COLOR_UPDATE'; id?: string; value?: number[] }
     | { type: 'LIGHT_INNER_ANGLE_SET'; id?: string; value?: number }
@@ -494,6 +496,11 @@ const initPostMessageBridge = (global: Global) => {
         case 'LIGHT_SELECT':
             applyLightSelect(global, (p.id !== undefined ? p.id : null) as string | null, 'host');
             break;
+        case 'LIGHT_TRANSFORM_MODE': {
+            const v = (p as { value?: 'move' | 'rotate' | null }).value;
+            applyLightTransformMode(global, v);
+            break;
+        }
         case 'LIGHT_INTENSITY_UPDATE':
         case 'LIGHT_COLOR_UPDATE':
         case 'LIGHT_INNER_ANGLE_SET':

@@ -270,8 +270,11 @@ export function initEditBottomToolbarUI(global: Global): () => void {
                 const nextMode: LightTransformMode | null = current === mode ? null : mode;
 
                 if (editUiTransport === 'message-bridge') {
-                    // 暂不透出协议，internal 模式下直接本地状态切换
-                    setLightTransformModeInternal(nextMode);
+                    if (nextMode != null) {
+                        sendEditProtocolMessage({ type: 'LIGHT_TRANSFORM_MODE', value: nextMode });
+                    } else {
+                        sendEditProtocolMessage({ type: 'LIGHT_TRANSFORM_MODE', value: null });
+                    }
                 } else {
                     setLightTransformModeInternal(nextMode);
                 }
@@ -327,10 +330,33 @@ export function initEditBottomToolbarUI(global: Global): () => void {
         });
     };
 
+    const syncEnvironmentLightToolbar = () => {
+        if (currentModule() !== 'environment') return;
+        const modeButtons = Array.from(
+            container.querySelectorAll<HTMLButtonElement>('.edit-bottom-toolbar-btn[data-light-mode]')
+        );
+        if (modeButtons.length === 0) return;
+        const focusBtn = container.querySelector<HTMLButtonElement>('#lightEditFocus');
+        const deleteBtn = container.querySelector<HTMLButtonElement>('#lightEditDelete');
+        const hasSelection = (state as any).selectedLightId != null;
+        const mode = (state as any).lightTransformMode as LightTransformMode | undefined | null;
+        modeButtons.forEach((btn) => {
+            const btnMode = btn.getAttribute('data-light-mode') as LightTransformMode;
+            const isActive = hasSelection && mode != null && btnMode === mode;
+            btn.classList.toggle('active', isActive);
+            btn.setAttribute('aria-pressed', String(isActive));
+            btn.toggleAttribute('disabled', !hasSelection);
+        });
+        focusBtn?.toggleAttribute('disabled', !hasSelection);
+        deleteBtn?.toggleAttribute('disabled', !hasSelection);
+    };
+
     events.on('editLeftModule:changed', onEditLeftModuleChanged);
     events.on('assetTransformMode:changed', onAssetTransformModeChanged);
     events.on('sceneAsset:selected', onSceneAssetSelected);
     events.on('annotation:deselected', onAnnotationDeselected);
+    events.on('lightTransformMode:changed', syncEnvironmentLightToolbar as any);
+    events.on('sceneLight:selected', syncEnvironmentLightToolbar as any);
 
     renderAndBind();
 
@@ -339,6 +365,8 @@ export function initEditBottomToolbarUI(global: Global): () => void {
         events.off('assetTransformMode:changed', onAssetTransformModeChanged);
         events.off('sceneAsset:selected', onSceneAssetSelected);
         events.off('annotation:deselected', onAnnotationDeselected);
+        events.off('lightTransformMode:changed', syncEnvironmentLightToolbar as any);
+        events.off('sceneLight:selected', syncEnvironmentLightToolbar as any);
         if (root && root.parentNode) {
             root.parentNode.removeChild(root);
         } else if (container) {
