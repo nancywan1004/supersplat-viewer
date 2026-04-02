@@ -175,6 +175,11 @@ class InputController {
         const { app, camera, events, state } = global;
         const canvas = app.graphicsDevice.canvas as HTMLCanvasElement;
 
+        // 让 canvas 可聚焦：父级 UI 点击后 iframe 可能丢失键盘事件；回到场景时显式 focus，恢复 WASD/快捷键。
+        if (typeof canvas.tabIndex !== 'number' || canvas.tabIndex < 0) {
+            canvas.tabIndex = 0;
+        }
+
         patchKeyboardMeta(this._desktopInput);
 
         this._desktopInput.attach(canvas);
@@ -264,6 +269,20 @@ class InputController {
         // Single finger double tap will switch to orbit mode and pick target
         const lastTap = { time: 0, x: 0, y: 0, pointerType: '' };
         canvas.addEventListener('pointerdown', (event) => {
+            // 任何一次点击回场景，都尝试把键盘焦点拉回 iframe 内（使 window.keydown 生效）
+            try {
+                if (event.isPrimary && typeof canvas.focus === 'function') {
+                    (canvas.focus as any)({ preventScroll: true });
+                }
+            } catch {
+                // ignore: 某些浏览器不支持 focus({preventScroll})
+                try {
+                    if (event.isPrimary) canvas.focus();
+                } catch {
+                    // ignore
+                }
+            }
+
             // Only process single touch/mouse events for double tap
             if (event.isPrimary) {
                 const now = Date.now();
