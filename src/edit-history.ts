@@ -101,7 +101,8 @@ export function restoreLightingFromSettings(global: Global): void {
         const nm = settings.nightMode as { fade?: number } | undefined;
         const rawFade = nm && typeof nm.fade === 'number' && Number.isFinite(nm.fade) ? nm.fade : 0;
         const fade = Math.max(-1, Math.min(1, rawFade));
-        (global.app as any).fire?.('nightFade:set', fade);
+        // 与 VFX 结束恢复一致：forceReapply 会清 materialsApplied 并跑 updateEffect，避免仅 nightFade:set 时材质状态与主光/天空盒不同步
+        (global.app as any).fire?.('nightMode:forceReapply', fade);
     } catch {
         // ignore
     }

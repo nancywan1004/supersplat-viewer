@@ -786,20 +786,21 @@ class NightMode extends GsplatShaderEffect {
 
         // VFX 播放结束后，其 GsplatShaderEffect.disable 会从材质上删掉 gsplatModifyVS，
         // 但 NightMode 的 materialsApplied 并不知情，导致后续 nightFade:set 只更新 uniform 而不重新 apply shader。
-        // nightMode:forceReapply 先清空 materialsApplied，再设 fade 并重新 apply，保证材质上有正确的 shader。
+        // nightMode:forceReapply 先移除已应用的 shader、清空 materialsApplied，再设 fade 并重新 apply，保证材质上有正确的 shader。
         this.app.on('nightMode:forceReapply', (value: number) => {
             const clampedValue = Math.max(-1, Math.min(1, value));
             this.manualFadeControl = true;
             this.nightFade = clampedValue;
-            this.materialsApplied.clear();
+            // 关键：先真正从 materials 上移除 shader（与 disable 时一致），否则残留 gsplatModifyVS 会持续影响渲染
+            this.removeShaders();
             // forceReapply 代表“互斥结束，允许恢复 NightMode”
             this.suspendedByVfx = false;
+            // |fade|>0 时重新 apply shader；|fade|≈0 时保持移除状态（主光/天空盒仍会被 updateEffect 复位）
             if (Math.abs(this.nightFade) > 1e-6 && this.splat?.gsplat) {
                 this.applyShaders();
             }
-            if (this.materialsApplied.size > 0) {
-                this.updateEffect(this.effectTime, 0);
-            }
+            // 必须始终执行：把主光/天空盒强度按新的 nightFade 收回/调整，否则 discard 后场景仍像未复位
+            this.updateEffect(this.effectTime, 0);
             this.fireNightFadeChanged('forceReapply');
         });
     }

@@ -28,6 +28,7 @@ import { setLightsVisualVisible } from './light';
 import {
     applyLightGlobalSet,
     applyLightAdd,
+    applyLightDelete,
     applyLightSelect,
     applyLightTransformMode,
     applyLightDetail,
@@ -82,6 +83,7 @@ type InboundPayload =
     | { type: 'ANNOTATION_TRANSFORM_MODE'; value?: 'move' | null }
     | { type: 'LIGHT_GLOBAL_SET'; value?: number }
     | { type: 'LIGHT_ADD'; id?: string; isThreeSixty?: boolean }
+    | { type: 'LIGHT_DELETE'; id?: string }
     | { type: 'LIGHT_TOGGLE_ALL'; value?: boolean }
     | { type: 'LIGHT_TOGGLE'; id?: string; value?: boolean }
     | { type: 'LIGHT_SELECT'; id?: string | null }
@@ -491,6 +493,11 @@ const initPostMessageBridge = (global: Global) => {
         case 'LIGHT_ADD':
             if (typeof p.id === 'string') {
                 applyLightAdd(global, p.id, (p as { isThreeSixty?: boolean }).isThreeSixty);
+            }
+            break;
+        case 'LIGHT_DELETE':
+            if (typeof p.id === 'string') {
+                applyLightDelete(global, p.id);
             }
             break;
         case 'LIGHT_SELECT':

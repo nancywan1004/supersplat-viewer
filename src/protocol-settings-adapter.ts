@@ -253,27 +253,67 @@ export function applyLightDetail(
     const light = lighting.lights.find((l: LightWithId) => (l as LightWithId).id === id) as LightWithId | undefined;
     if (!light) return;
 
+    let changed = false;
     switch (type) {
     case 'LIGHT_INTENSITY_UPDATE':
-        if (typeof payload.value === 'number') light.intensity = payload.value;
+        if (typeof payload.value === 'number') {
+            light.intensity = payload.value;
+            changed = true;
+        }
         break;
     case 'LIGHT_COLOR_UPDATE':
         if (Array.isArray(payload.value) && payload.value.length >= 3) {
             light.color = [payload.value[0], payload.value[1], payload.value[2]];
+            changed = true;
         }
         break;
     case 'LIGHT_INNER_ANGLE_SET':
-        if (typeof payload.value === 'number') (light as Record<string, unknown>).innerAngle = Math.max(0, Math.min(180, payload.value));
+        if (typeof payload.value === 'number') {
+            const v = Math.max(0, Math.min(180, payload.value));
+            (light as Record<string, unknown>).innerConeAngle = v;
+            changed = true;
+        }
         break;
     case 'LIGHT_OUTER_ANGLE_SET':
-        if (typeof payload.value === 'number') (light as Record<string, unknown>).outerAngle = Math.max(0, Math.min(180, payload.value));
+        if (typeof payload.value === 'number') {
+            const v = Math.max(0, Math.min(180, payload.value));
+            (light as Record<string, unknown>).outerConeAngle = v;
+            changed = true;
+        }
         break;
     case 'LIGHT_RANGE_SET':
-        if (typeof payload.value === 'number') (light as Record<string, unknown>).range = Math.max(0, Math.min(20, payload.value));
+        if (typeof payload.value === 'number') {
+            (light as Record<string, unknown>).range = Math.max(0, Math.min(20, payload.value));
+            changed = true;
+        }
         break;
     default:
         return;
     }
+    if (!changed) return;
+    // 与 lighting-ui 一致：必须同步重建/更新场景内 Light 组件，仅改 settings 不会反映到画面上
+    updatePointLightsFromSettings(global);
+    global.events.fire('lighting:changed');
+    global.events.fire('postEffect:changed');
+}
+
+/** LIGHT_DELETE：从 settings 移除光源并重建场景灯实体（不可删 directional） */
+export function applyLightDelete(global: Global, id: string): void {
+    if (!id) return;
+    const settings = global.settings as ExperienceSettings;
+    const lighting = ensureLighting(settings);
+    const lightsAny = lighting.lights as any[];
+    const idx = lightsAny.findIndex((l) => l && l.id === id);
+    if (idx < 0) return;
+    const target = lightsAny[idx];
+    if (target?.type === 'directional') return;
+    lightsAny.splice(idx, 1);
+    if (global.state.selectedLightId === id) {
+        global.state.selectedLightId = null;
+        global.events.fire('sceneLight:selected', { id: null, source: 'host' });
+    }
+    updatePointLightsFromSettings(global);
+    global.events.fire('lighting:changed');
     global.events.fire('postEffect:changed');
 }
 
