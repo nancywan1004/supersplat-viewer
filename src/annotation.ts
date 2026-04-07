@@ -149,6 +149,10 @@ export class Annotation extends Script {
                 transition: opacity 0.2s ease-in-out;
                 visibility: hidden;
             }
+            .pc-annotation--selected {
+                border: 1px solid rgba(0, 191, 255, 0.41);
+                box-shadow: 0 0 0 3px rgba(0, 191, 255, 0.41);
+            }
 
             .pc-annotation-title {
                 font-weight: bold;
@@ -203,6 +207,9 @@ export class Annotation extends Script {
                 display: block;
                 pointer-events: none;
             }
+            .pc-annotation-hotspot--selected {
+                filter: drop-shadow(0 0 8px rgba(0, 191, 255, 0.41));
+            }
 
             /* 收起时标题：深灰圆角 pill */
             .pc-annotation-collapsed-title {
@@ -217,6 +224,9 @@ export class Annotation extends Script {
                 box-sizing: border-box;
                 position: relative;
                 text-shadow: none;
+            }
+            .pc-annotation-collapsed-title--selected {
+                box-shadow: 0 0 0 3px rgba(0, 191, 255, 0.41);
             }
 
             /* 图片预览遮罩层 */

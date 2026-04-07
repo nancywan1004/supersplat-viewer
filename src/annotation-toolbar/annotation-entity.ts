@@ -19,6 +19,8 @@ import type { Global } from '../types';
  */
 export class AnnotationEntity extends Annotation {
     static scriptName = 'annotationEntity';
+    private static readonly HOTSPOT_DEFAULT_SVG = '/assets/icons/hotspot.svg';
+    private static readonly HOTSPOT_HIGHLIGHT_SVG = '/assets/icons/hotspot-highlight.svg';
 
     /** 唯一标识符 */
     id: string;
@@ -34,6 +36,7 @@ export class AnnotationEntity extends Annotation {
 
     /** 收起时显示的标题 DOM（当 showTitleWhenCollapsed 为 true 时） */
     private collapsedTitleSpan: HTMLSpanElement | null = null;
+    private selectedVisual = false;
 
     /**
      * 初始化标注实体
@@ -177,6 +180,7 @@ export class AnnotationEntity extends Annotation {
         Annotation.activeAnnotation = this;
         Annotation.tooltipDom!.style.visibility = 'visible';
         Annotation.tooltipDom!.style.opacity = '1';
+        Annotation.tooltipDom!.classList.toggle('pc-annotation--selected', this.selectedVisual);
         Annotation.titleDom!.textContent = this.title;
         Annotation.textDom!.textContent = this.text;
         if (Annotation.imageDom) {
@@ -207,7 +211,34 @@ export class AnnotationEntity extends Annotation {
      * 重写：隐藏时仅控制 tooltip，不修改锚定状态
      */
     hideTooltip(): void {
+        if (Annotation.tooltipDom) {
+            Annotation.tooltipDom.classList.remove('pc-annotation--selected');
+        }
         super.hideTooltip();
+    }
+
+    setSelectedVisual(selected: boolean): void {
+        this.selectedVisual = selected;
+        try {
+            const hotspotDom = (this as any).hotspotDom as HTMLDivElement | null;
+            if (hotspotDom) {
+                hotspotDom.classList.toggle('pc-annotation-hotspot--selected', selected);
+                const img = hotspotDom.querySelector('.pc-annotation-hotspot__img') as HTMLImageElement | null;
+                if (img) {
+                    img.src = selected
+                        ? AnnotationEntity.HOTSPOT_HIGHLIGHT_SVG
+                        : (Annotation.hotspotSvgUrl || AnnotationEntity.HOTSPOT_DEFAULT_SVG);
+                }
+            }
+            if (this.collapsedTitleSpan) {
+                this.collapsedTitleSpan.classList.toggle('pc-annotation-collapsed-title--selected', selected);
+            }
+            if (Annotation.tooltipDom && Annotation.activeAnnotation === this) {
+                Annotation.tooltipDom.classList.toggle('pc-annotation--selected', selected);
+            }
+        } catch {
+            // 保底：高亮异常不影响标注本体显示
+        }
     }
     /** 当前 tooltip 是否可见（用于决定是否展示收起标题） */
     private isTooltipVisible(): boolean {

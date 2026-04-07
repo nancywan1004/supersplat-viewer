@@ -264,6 +264,7 @@ export class AnnotationManager {
     private clearSelectionVisuals(id: string): void {
         const annotation = this.annotations.get(id);
         if (annotation) {
+            annotation.setSelectedVisual?.(false);
             annotation.disableGizmo();
             annotation.hideTooltip();
         }
@@ -299,6 +300,7 @@ export class AnnotationManager {
         if (showGizmo || mode === 'move') {
             annotation.enableGizmo();
         }
+        annotation.setSelectedVisual?.(true);
 
         // 更新全局状态
         if (this.global.state) {
