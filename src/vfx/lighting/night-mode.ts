@@ -102,7 +102,8 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         if (length(pos) > 0.001) {
             float dist = length(pos - wpos);
             if (dist > 0.001) {
-                sum += g2l(clr) * 1.1 / (dist * dist);
+                float safeDist = max(dist, 0.25);
+                sum += g2l(clr) * 1.1 / (safeDist * safeDist);
             }
         }
     }
@@ -119,12 +120,14 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         vec3 toPoint = wpos - spotPos;
         float dist = length(toPoint);
         if (dist >= range || dist < 0.001) continue;
+        float safeDist = max(dist, 0.25);
         vec3 L = toPoint / dist;
         float cosTheta = dot(L, spotDir);
         if (cosTheta <= cosOuter) continue;
         float spotAtt = (cosTheta >= cosInner) ? 1.0 : smoothstep(cosOuter, cosInner, cosTheta);
-        sum += g2l(spotClr) * spotAtt * 1.1 / (dist * dist);
+        sum += g2l(spotClr) * spotAtt * 1.1 / (safeDist * safeDist);
     }
+    sum = clamp(sum, vec3(0.0), vec3(4.0));
 
     vec3 linearColor = g2l(color.rgb);
     float f = uNightFade;
@@ -260,7 +263,8 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         if (length(pos) > 0.001) {
             float dist = length(pos - wpos);
             if (dist > 0.001) {
-                sum += g2l(clr) * 1.1 / (dist * dist);
+                float safeDist = max(dist, 0.25);
+                sum += g2l(clr) * 1.1 / (safeDist * safeDist);
             }
         }
     }
@@ -277,12 +281,14 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         vec3 toPoint = wpos - spotPos;
         float dist = length(toPoint);
         if (dist >= range || dist < 0.001) continue;
+        float safeDist = max(dist, 0.25);
         vec3 L = toPoint / dist;
         float cosTheta = dot(L, spotDir);
         if (cosTheta <= cosOuter) continue;
         float spotAtt = (cosTheta >= cosInner) ? 1.0 : smoothstep(cosOuter, cosInner, cosTheta);
-        sum += g2l(spotClr) * spotAtt * 1.1 / (dist * dist);
+        sum += g2l(spotClr) * spotAtt * 1.1 / (safeDist * safeDist);
     }
+    sum = clamp(sum, vec3(0.0), vec3(4.0));
 
     vec3 linearColor = g2l(color.rgb);
     float f = uNightFade;
@@ -399,7 +405,8 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         if (length(pos) > 0.001) {
             let dist = length(pos - wpos);
             if (dist > 0.001) {
-                sum = sum + g2l(clr) * 1.1 / (dist * dist);
+                let safeDist = max(dist, 0.25);
+                sum = sum + g2l(clr) * 1.1 / (safeDist * safeDist);
             }
         }
     }
@@ -416,6 +423,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         let toPoint = wpos - spotPos;
         let dist = length(toPoint);
         if (dist >= range || dist < 0.001) { continue; }
+        let safeDist = max(dist, 0.25);
         let L = toPoint / dist;
         let cosTheta = dot(L, spotDir);
         if (cosTheta <= cosOuter) { continue; }
@@ -423,8 +431,9 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         if (cosTheta < cosInner) {
             spotAtt = smoothstep(cosOuter, cosInner, cosTheta);
         }
-        sum = sum + g2l(spotClr) * spotAtt * 1.1 / (dist * dist);
+        sum = sum + g2l(spotClr) * spotAtt * 1.1 / (safeDist * safeDist);
     }
+    sum = clamp(sum, vec3f(0.0), vec3f(4.0));
 
     let linearColor = g2l((*color).rgb);
     let f = uniform.uNightFade;
@@ -563,7 +572,8 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         if (length(pos) > 0.001) {
             let dist = length(pos - wpos);
             if (dist > 0.001) {
-                sum = sum + g2l(clr) * 1.1 / (dist * dist);
+                let safeDist = max(dist, 0.25);
+                sum = sum + g2l(clr) * 1.1 / (safeDist * safeDist);
             }
         }
     }
@@ -580,6 +590,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         let toPoint = wpos - spotPos;
         let dist = length(toPoint);
         if (dist >= range || dist < 0.001) { continue; }
+        let safeDist = max(dist, 0.25);
         let L = toPoint / dist;
         let cosTheta = dot(L, spotDir);
         if (cosTheta <= cosOuter) { continue; }
@@ -587,8 +598,9 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         if (cosTheta < cosInner) {
             spotAtt = smoothstep(cosOuter, cosInner, cosTheta);
         }
-        sum = sum + g2l(spotClr) * spotAtt * 1.1 / (dist * dist);
+        sum = sum + g2l(spotClr) * spotAtt * 1.1 / (safeDist * safeDist);
     }
+    sum = clamp(sum, vec3f(0.0), vec3f(4.0));
 
     let linearColor = g2l((*color).rgb);
     let f = uniform.uNightFade;
@@ -766,7 +778,8 @@ class NightMode extends GsplatShaderEffect {
             this.suspendedByVfx = true;
             this.nightFade = 0;
             this.manualFadeControl = true;
-            this.materialsApplied.clear();
+            // 关键：必须真正从材质上移除 night shader，避免与 reveal/VFX 的 gsplatModifyVS 冲突
+            this.removeShaders();
             // 同时清掉局部亮灯/笔刷的 shader 需求，避免 updateEffect 重新 apply
             this.bloomBrushActive = false;
             this.bloomBrushMask = null;
