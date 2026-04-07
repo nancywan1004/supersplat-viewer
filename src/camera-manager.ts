@@ -32,27 +32,32 @@ const tmpv = new Vec3();
 /** F 键 / inputEvent「frame」分支里，用于承接「选中项世界坐标」的临时 Vec3（避免每帧分配）。 */
 const tmpFocus = new Vec3();
 
+type FocusTarget = 'asset' | 'annotation' | 'light';
+
 /**
- * 编辑模式下解析「应对准」的世界坐标，供 F 键聚焦选中对象。
- * 仅当 `editLeftModule` 与选中态一致时生效，避免跨模块误用旧选中：
+ * 编辑模式下解析「应对准」的世界坐标，供 frame/选中协议聚焦对象。
+ * 默认仅当 `editLeftModule` 与选中态一致时生效，避免跨模块误用旧选中；
+ * 当传入 `focusTarget` 时，按指定目标优先解析（用于 ASSET_SELECT / LIGHT_SELECT 直达聚焦）。
+ *
  * - asset：选中场景实体的世界位置
  * - annotation：`settings.annotations` 中当前选中项的 `position`
  * - environment：当前选中点光/聚光的 `position`（directional 不参与）
  * @returns 已写入 `out` 则为 true，否则 false（调用方回退为框整场景 frameCamera）
  */
-function fillEditFocus(global: Global, out: Vec3): boolean {
+function fillEditFocus(global: Global, out: Vec3, focusTarget?: FocusTarget): boolean {
     const { state, settings } = global;
     if (!state.editMode) return false;
-    const mod = state.editLeftModule;
-    if (mod === 'asset' && state.selectedSceneEntityId) {
+    const tryAsset = () => {
+        if (!state.selectedSceneEntityId) return false;
         const ent = getSelectedSceneEntity(state);
         if (ent) {
             out.copy(ent.getPosition());
             return true;
         }
         return false;
-    }
-    if (mod === 'annotation' && state.selectedAnnotationId) {
+    };
+    const tryAnnotation = () => {
+        if (!state.selectedAnnotationId) return false;
         const list = settings.annotations;
         if (Array.isArray(list)) {
             const ann = list.find((a) => a && a.id === state.selectedAnnotationId);
@@ -69,8 +74,9 @@ function fillEditFocus(global: Global, out: Vec3): boolean {
             }
         }
         return false;
-    }
-    if (mod === 'environment' && state.selectedLightId) {
+    };
+    const tryLight = () => {
+        if (!state.selectedLightId) return false;
         const lights = settings.lighting?.lights;
         if (Array.isArray(lights)) {
             const L = lights.find((l: any) => l && l.id === state.selectedLightId) as
@@ -90,7 +96,16 @@ function fillEditFocus(global: Global, out: Vec3): boolean {
             }
         }
         return false;
-    }
+    };
+
+    if (focusTarget === 'asset') return tryAsset();
+    if (focusTarget === 'annotation') return tryAnnotation();
+    if (focusTarget === 'light') return tryLight();
+
+    const mod = state.editLeftModule;
+    if (mod === 'asset') return tryAsset();
+    if (mod === 'annotation') return tryAnnotation();
+    if (mod === 'environment') return tryLight();
     return false;
 }
 
@@ -457,7 +472,7 @@ class CameraManager {
             switch (eventName) {
                 case 'frame':
                     // F 键 / UI「Frame」：优先聚焦当前编辑模块下的选中项，否则整场景 framing
-                    if (fillEditFocus(global, tmpFocus)) {
+                    if (fillEditFocus(global, tmpFocus, (event as { focusTarget?: FocusTarget } | undefined)?.focusTarget)) {
                         (event as KeyboardEvent | undefined)?.preventDefault?.();
                         orbitFocus(tmpFocus);
                         break;

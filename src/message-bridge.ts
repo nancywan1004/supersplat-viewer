@@ -309,6 +309,9 @@ const initPostMessageBridge = (global: Global) => {
         case 'ASSET_SELECT':
             state.selectedSceneEntityId = (p.id !== undefined ? p.id : null) as string | null;
             events.fire('sceneAsset:selected', { source: 'host' as SelectionSource });
+            if (state.editMode && typeof p.id === 'string' && p.id.trim().length > 0) {
+                events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
+            }
             break;
         case 'ASSET_COPY':
             if (
@@ -502,6 +505,9 @@ const initPostMessageBridge = (global: Global) => {
             break;
         case 'LIGHT_SELECT':
             applyLightSelect(global, (p.id !== undefined ? p.id : null) as string | null, 'host');
+            if (state.editMode && typeof p.id === 'string' && p.id.trim().length > 0) {
+                events.fire('inputEvent', 'frame', { focusTarget: 'light' as const });
+            }
             break;
         case 'LIGHT_TRANSFORM_MODE': {
             const v = (p as { value?: 'move' | 'rotate' | null }).value;

@@ -5,6 +5,7 @@ import { getPositionInFrontOfCamera } from '../../asset-placement-handler';
 import type { PointLightConfig, DirectionalLightConfig, SpotLightConfig } from '../../schemas/v2';
 import { pushEditHistory } from '../../edit-history';
 import { ensureNightMode, ensureLighting, ensureBloom, ensureBloomEditorSession } from '../../protocol-settings-adapter';
+import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
 const LIGHTING_PANEL_HTML = `
 <div class="lightingPanel">
@@ -46,6 +47,7 @@ const isSpot = (
  */
 export function initLightingUI(global: Global): () => void {
     const { events } = global;
+    const editUiTransport = getEditUiTransport(global);
 
     const container = document.getElementById('lightingPanelContainer');
     if (!container) return () => {};
@@ -124,6 +126,21 @@ export function initLightingUI(global: Global): () => void {
     const pushEditHistorySafe = () => {
         if ((global.state as any).editMode) {
             pushEditHistory(global, 'lighting');
+        }
+    };
+
+    const emitLightSelect = (id: string | null, focus = false) => {
+        if (editUiTransport === 'message-bridge') {
+            // 本地先同步一次，避免依赖 postMessage 往返导致列表瞬态不同步
+            (global.state as any).selectedLightId = id;
+            global.events.fire('sceneLight:selected', { id, source: 'host' });
+            sendEditProtocolMessage({ type: 'LIGHT_SELECT', id });
+            return;
+        }
+        (global.state as any).selectedLightId = id;
+        global.events.fire('sceneLight:selected', { id, source: 'host' });
+        if (focus) {
+            global.events.fire('inputEvent', 'frame', { focusTarget: 'light' as const });
         }
     };
 
@@ -346,8 +363,7 @@ export function initLightingUI(global: Global): () => void {
                 if (currentId) {
                     const removedId = (light as any).id as string | undefined;
                     if (removedId && removedId === currentId) {
-                        (global.state as any).selectedLightId = null;
-                        global.events.fire('sceneLight:selected', { id: null, source: 'host' });
+                        emitLightSelect(null, false);
                     }
                 }
             });
@@ -360,8 +376,7 @@ export function initLightingUI(global: Global): () => void {
             const firstId = firstNonDirectional ? (firstNonDirectional as any).id as string | undefined : undefined;
             if (firstId) {
                 currentSelectedId = firstId;
-                (global.state as any).selectedLightId = firstId;
-                global.events.fire('sceneLight:selected', { id: firstId, source: 'host' });
+                emitLightSelect(firstId, false);
             }
         }
 
@@ -385,8 +400,8 @@ export function initLightingUI(global: Global): () => void {
                 if (!light || isDirectional(light)) return;
 
                 const id = (light as any).id as string | undefined;
-                (global.state as any).selectedLightId = id ?? null;
-                global.events.fire('sceneLight:selected', { id: id ?? null, source: 'host' });
+                // 光源列表点击后立即聚焦到该光源（不依赖 F 键）
+                emitLightSelect(id ?? null, true);
             });
         });
     };
@@ -420,8 +435,7 @@ export function initLightingUI(global: Global): () => void {
             }
             ses.draftLightRegionCenter = null;
             // 默认选中新建光源
-            (global.state as any).selectedLightId = nextId;
-            events.fire('sceneLight:selected', { id: nextId, source: 'host' });
+            emitLightSelect(nextId, false);
             renderPointLightsList();
             updatePointLightsFromSettings(global);
             events.fire('lighting:changed');
@@ -463,8 +477,7 @@ export function initLightingUI(global: Global): () => void {
             }
             ses.draftLightRegionCenter = null;
             // 默认选中新建光源
-            (global.state as any).selectedLightId = nextId;
-            events.fire('sceneLight:selected', { id: nextId, source: 'host' });
+            emitLightSelect(nextId, false);
             renderPointLightsList();
             updatePointLightsFromSettings(global);
             events.fire('lighting:changed');
@@ -507,8 +520,7 @@ export function initLightingUI(global: Global): () => void {
             // 不允许删除主方向光
             if (isDirectional(light)) return;
             lightsAny.splice(idx, 1);
-            (global.state as any).selectedLightId = null;
-            events.fire('sceneLight:selected', { id: null, source: 'host' });
+            emitLightSelect(null, false);
             renderPointLightsList();
             updatePointLightsFromSettings(global);
             events.fire('lighting:changed');
