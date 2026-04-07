@@ -591,8 +591,12 @@ class CameraManager {
         });
 
         // 单击拾取：用于光源等场景对象选中（不改变相机）
-        events.on('scenePointerWorldClick', (position: Vec3) => {
-            selectNearestLightAtPosition(global, position);
+        events.on('scenePointerWorldClick', (payload: Vec3 | { position: Vec3; clientX?: number; clientY?: number }) => {
+            const position = (payload as { position?: Vec3 })?.position ?? (payload as Vec3);
+            if (!position) return;
+            const clientX = (payload as { clientX?: number })?.clientX;
+            const clientY = (payload as { clientY?: number })?.clientY;
+            selectNearestLightAtPosition(global, position, clientX, clientY);
         });
 
         events.on('annotation.activate', (annotation: Annotation) => {

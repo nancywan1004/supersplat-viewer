@@ -346,7 +346,11 @@ class InputController {
             const result = await pickWorldFromClientXY(this.global, event.clientX, event.clientY);
             if (result) {
                 // 语义化：场景中一次 pointerup 对应的世界坐标点击
-                events.fire('scenePointerWorldClick', result);
+                events.fire('scenePointerWorldClick', {
+                    position: result,
+                    clientX: event.clientX,
+                    clientY: event.clientY
+                });
             }
         });
 

@@ -641,16 +641,22 @@ const setLightsVisualVisible = (global: Global, visibleInEnvironment: boolean): 
 };
 
 /**
- * 根据拾取到的世界坐标，在点光/聚光灯实体中找到最近的一盏光源并选中它。
+ * 根据拾取到的世界坐标（优先）与屏幕点击坐标（兜底），在点光/聚光灯实体中选中最接近的一盏。
  * 仅在编辑模式 + 环境模块下才生效。
  */
-const selectNearestLightAtPosition = (global: Global, position: Vec3): void => {
+const selectNearestLightAtPosition = (
+    global: Global,
+    position: Vec3,
+    clientX?: number,
+    clientY?: number
+): void => {
     const { app, state, events } = global;
     if (!state.editMode || state.editLeftModule !== 'environment') return;
 
     let bestEntity: Entity | null = null;
     let bestConfig: any | null = null;
     let bestDist = Infinity;
+    const candidates: Array<{ entity: Entity; cfg: any; dist: number }> = [];
 
     const testContainer = (name: string) => {
         const container = app.root.findByName(name) as Entity | null;
@@ -662,6 +668,7 @@ const selectNearestLightAtPosition = (global: Global, position: Vec3): void => {
             if (!cfg || !cfg.id) return;
             const pos = e.getPosition();
             const d = pos.distance(position);
+            candidates.push({ entity: e, cfg, dist: d });
             if (d < bestDist) {
                 bestDist = d;
                 bestEntity = e;
@@ -675,12 +682,32 @@ const selectNearestLightAtPosition = (global: Global, position: Vec3): void => {
 
     if (!bestEntity || !bestConfig) return;
 
-    // 距离阈值：避免点击在场景空白位置时误选光源，这里取 2.5 米作为经验值
-    const MAX_SELECT_DISTANCE = 2.5;
-    if (bestDist > MAX_SELECT_DISTANCE) return;
+    // 世界距离阈值：原 2.5 在大场景里过严，适当放宽
+    const MAX_SELECT_DISTANCE = 5.0;
+    let pickedCfg = bestConfig;
+    if (bestDist > MAX_SELECT_DISTANCE) {
+        // 兜底：使用屏幕空间像素距离判定，避免“点到模型表面但离灯位世界距离偏大”导致难选中
+        const cam = global.camera?.camera;
+        if (!cam || !Number.isFinite(clientX) || !Number.isFinite(clientY) || candidates.length === 0) return;
+        let bestScreenCfg: any | null = null;
+        let bestPx = Infinity;
+        candidates.forEach(({ entity, cfg }) => {
+            const sp = cam.worldToScreen(entity.getPosition());
+            const dx = sp.x - (clientX as number);
+            const dy = sp.y - (clientY as number);
+            const px = Math.hypot(dx, dy);
+            if (px < bestPx) {
+                bestPx = px;
+                bestScreenCfg = cfg;
+            }
+        });
+        const MAX_SCREEN_DISTANCE_PX = 64;
+        if (!bestScreenCfg || bestPx > MAX_SCREEN_DISTANCE_PX) return;
+        pickedCfg = bestScreenCfg;
+    }
 
-    (state as any).selectedLightId = bestConfig.id;
-    events.fire('sceneLight:selected', { id: bestConfig.id, source: 'scene' });
+    (state as any).selectedLightId = pickedCfg.id;
+    events.fire('sceneLight:selected', { id: pickedCfg.id, source: 'scene' });
 };
 
 /**
