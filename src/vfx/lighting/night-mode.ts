@@ -95,11 +95,6 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         }
     }
 
-    float f = uNightFade;
-    if (abs(f) < 1e-6) {
-        return;
-    }
-
     vec3 sum = vec3(0.0);
     for (int i = 0; i < 10; ++i) {
         vec3 pos = uSpherePositions[i];
@@ -132,6 +127,12 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     }
 
     vec3 linearColor = g2l(color.rgb);
+    float f = uNightFade;
+    // 全局亮度为 0 时仍允许点光/聚光生效（不施加 night fade，只应用局部灯光）
+    if (abs(f) < 1e-6) {
+        color.rgb = l2g(linearColor * (vec3(1.0) + sum));
+        return;
+    }
     vec3 nightColor = g2l(uNightAmbient) + sum;
     vec3 viewDir = normalize(uCameraPos - wpos);
     float NdotL = max(0.0, dot(viewDir, uLightDir));
@@ -252,11 +253,6 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         }
     }
 
-    float f = uNightFade;
-    if (abs(f) < 1e-6) {
-        return;
-    }
-
     vec3 sum = vec3(0.0);
     for (int i = 0; i < 10; ++i) {
         vec3 pos = uSpherePositions[i];
@@ -289,6 +285,12 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     }
 
     vec3 linearColor = g2l(color.rgb);
+    float f = uNightFade;
+    // 全局亮度为 0 时仍允许点光/聚光生效（不施加 night fade，只应用局部灯光）
+    if (abs(f) < 1e-6) {
+        color.rgb = l2g(linearColor * (vec3(1.0) + sum));
+        return;
+    }
     vec3 nightColor = g2l(uNightAmbient) + sum;
     vec3 viewDir = normalize(uCameraPos - wpos);
     float NdotL = max(0.0, dot(viewDir, uLightDir));
@@ -390,11 +392,6 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         }
     }
 
-    let f = uniform.uNightFade;
-    if (abs(f) < 1e-6) {
-        return;
-    }
-
     var sum = vec3f(0.0);
     for (var i = 0u; i < 10u; i++) {
         let pos = uniform.uSpherePositions[i];
@@ -430,6 +427,12 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     }
 
     let linearColor = g2l((*color).rgb);
+    let f = uniform.uNightFade;
+    // 全局亮度为 0 时仍允许点光/聚光生效（不施加 night fade，只应用局部灯光）
+    if (abs(f) < 1e-6) {
+        (*color).rgb = l2g(linearColor * (vec3f(1.0) + sum));
+        return;
+    }
     let nightColor = g2l(uniform.uNightAmbient) + sum;
     let viewDir = normalize(uniform.uCameraPos - wpos);
     let NdotL = max(0.0, dot(viewDir, uniform.uLightDir));
@@ -553,11 +556,6 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         }
     }
 
-    let f = uniform.uNightFade;
-    if (abs(f) < 1e-6) {
-        return;
-    }
-
     var sum = vec3f(0.0);
     for (var i = 0u; i < 10u; i++) {
         let pos = uniform.uSpherePositions[i];
@@ -593,6 +591,12 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     }
 
     let linearColor = g2l((*color).rgb);
+    let f = uniform.uNightFade;
+    // 全局亮度为 0 时仍允许点光/聚光生效（不施加 night fade，只应用局部灯光）
+    if (abs(f) < 1e-6) {
+        (*color).rgb = l2g(linearColor * (vec3f(1.0) + sum));
+        return;
+    }
     let nightColor = g2l(uniform.uNightAmbient) + sum;
     let viewDir = normalize(uniform.uCameraPos - wpos);
     let NdotL = max(0.0, dot(viewDir, uniform.uLightDir));
@@ -1009,16 +1013,24 @@ class NightMode extends GsplatShaderEffect {
         // Reveal/VFX 互斥期：确保 NightMode 不会重新 apply shader 覆盖 VFX
         if (this.suspendedByVfx) {
             if (this.materialsApplied.size > 0) {
-                this.materialsApplied.clear();
+                this.removeShaders();
                 this.app.renderNextFrame = true;
             }
             return;
         }
+        const global = (this.app as any).__global;
+        const pointLights = global ? collectPointLights(global) : [];
+        const spotLights = global ? collectSpotLights(global) : [];
+        // 只要场景中存在启用的点光/聚光灯，就保持夜景 shader 挂载，
+        // 避免 nightFade=0 时局部灯光完全失效。
+        const hasDynamicLocalLights = pointLights.length > 0 || spotLights.length > 0;
         const needShader = Math.abs(this.nightFade) > 1e-6
+            || hasDynamicLocalLights
             || (this.committedVolumeTexture != null && (this.committedVolumeEncodedBrightness || Math.abs(this.committedBrightness) > 1e-6))
             || this.bloomBrushActive;
         if (!needShader && this.materialsApplied.size > 0) {
-            this.materialsApplied.clear();
+            // 必须真正从材质上移除 gsplatModifyVS；仅 clear 集合会留下旧 shader/uniform 残留
+            this.removeShaders();
             this.app.renderNextFrame = true;
         }
 
@@ -1027,9 +1039,6 @@ class NightMode extends GsplatShaderEffect {
         }
 
         // 从场景中的 Light 实体收集点光源与聚光灯，上限各 10 个（供高斯 night mode 打光）
-        const global = (this.app as any).__global;
-        const pointLights = global ? collectPointLights(global) : [];
-        const spotLights = global ? collectSpotLights(global) : [];
         const positions: number[] = [];
         const colors: number[] = [];
         const scale = this.lightingIntensity;
