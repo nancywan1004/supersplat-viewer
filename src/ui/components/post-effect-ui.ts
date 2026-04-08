@@ -606,9 +606,6 @@ export function initPostEffectUI(global: Global): () => void {
         }
     };
 
-    /** 当前正在新建的草稿 ID，非空表示处于绘制模式 */
-    let currentDraftId: string | null = null;
-
     const setDrawModeVisible = (visible: boolean) => {
         if (bloomDrawModeBar) bloomDrawModeBar.style.display = visible ? 'block' : 'none';
     };
@@ -621,6 +618,22 @@ export function initPostEffectUI(global: Global): () => void {
     const setDrawToolActive = (tool: DrawTool) => {
         if (bloomDrawModeBrushBtn) bloomDrawModeBrushBtn.classList.toggle('active', tool === 'brush');
         if (bloomDrawModeEraserBtn) bloomDrawModeEraserBtn.classList.toggle('active', tool === 'eraser');
+    };
+    const getActiveLocalLightRegionId = (): string | null => {
+        const id = ensureBloomEditorSession(settings as ExperienceSettings).activeLocalLightRegionId;
+        return typeof id === 'string' && id.trim().length > 0 ? id : null;
+    };
+    const getActiveDraftId = (): string | null => {
+        const id = getActiveLocalLightRegionId();
+        return id && id.startsWith('draft-') ? id : null;
+    };
+    const hasActiveDraft = (): boolean => !!getActiveDraftId();
+    const syncDrawModeUiFromSession = (): void => {
+        const draftActive = hasActiveDraft();
+        setDrawModeVisible(draftActive);
+        if (!draftActive) {
+            setDrawModeButtonsState(false);
+        }
     };
 
     const syncFromSettings = () => {
@@ -638,9 +651,7 @@ export function initPostEffectUI(global: Global): () => void {
         const scope = (b as { bloomScope?: 'global' | 'local' }).bloomScope;
         if (bloomScopeCheck) bloomScopeCheck.classList.toggle('active', scope !== 'global');
         refreshRegionList();
-        const activeId = ensureBloomEditorSession(settings as ExperienceSettings).activeLocalLightRegionId ?? null;
-        currentDraftId = (typeof activeId === 'string' && activeId.startsWith('draft-')) ? activeId : null;
-        if (bloomDrawModeBar) bloomDrawModeBar.style.display = currentDraftId ? 'block' : 'none';
+        syncDrawModeUiFromSession();
         const sh = ensureShadow(settings);
         if (shadowEnableCheck) shadowEnableCheck.classList.toggle('active', sh.enabled);
         if (shadowCastCheck) shadowCastCheck.classList.toggle('active', sh.castShadows !== false);
@@ -662,7 +673,7 @@ export function initPostEffectUI(global: Global): () => void {
     const firePostEffectChanged = () => events.fire('postEffect:changed');
     const editUiTransport = getEditUiTransport(global);
     const onSelectRegion = (regionId: string | null) => {
-        if (currentDraftId) return;
+        if (hasActiveDraft()) return;
         ensureBloomEditorSession(settings as ExperienceSettings).activeLocalLightRegionId = regionId;
         firePostEffectChanged();
     };
@@ -772,9 +783,13 @@ export function initPostEffectUI(global: Global): () => void {
 
     if (bloomNewRegionBtn) {
         bloomNewRegionBtn.addEventListener('click', () => {
-            if (currentDraftId) return;
+            if (hasActiveDraft()) return;
+            // “新建亮灯区域”语义：始终开启一个新的 draft 绘制会话，
+            // 不复用当前已选中的正式区域，避免被当成“继续编辑”而无法触发放弃/完成。
+            const ses = ensureBloomEditorSession(settings as ExperienceSettings);
+            ses.activeLocalLightRegionId = null;
             dispatchLightBrushMessage('LIGHT_BRUSH_START');
-            setDrawModeVisible(true);
+            syncDrawModeUiFromSession();
             setDrawModeButtonsState(false);
             setDrawToolActive('brush');
             firePostEffectChanged();
@@ -782,7 +797,7 @@ export function initPostEffectUI(global: Global): () => void {
     }
 
     const worldSpaceChangedHandler = (data: { hasPoints?: boolean }) => {
-        if (currentDraftId) setDrawModeButtonsState(!!(data as any).hasPoints);
+        if (hasActiveDraft()) setDrawModeButtonsState(!!(data as any).hasPoints);
     };
     events.on('bloomLocalLightRegion:worldSpaceChanged', worldSpaceChangedHandler);
 
@@ -791,16 +806,14 @@ export function initPostEffectUI(global: Global): () => void {
     // 若在 handler 里 innerHTML='' 重建列表则 slider 被销毁、拖动失效）。
     const regionListChangedHandler = () => {
         refreshRegionList();
-        const activeId2 = ensureBloomEditorSession(settings as ExperienceSettings).activeLocalLightRegionId ?? null;
-        currentDraftId = (typeof activeId2 === 'string' && activeId2.startsWith('draft-')) ? activeId2 : null;
-        setDrawModeVisible(!!currentDraftId);
-        if (!currentDraftId) setDrawModeButtonsState(false);
+        syncDrawModeUiFromSession();
     };
     events.on('bloomLocalLightRegion:listChanged', regionListChangedHandler);
 
     if (bloomDrawModeCompleteBtn) {
         bloomDrawModeCompleteBtn.addEventListener('click', () => {
-            if (!currentDraftId) return;
+            const draftId = getActiveDraftId();
+            if (!draftId) return;
             dispatchLightBrushMessage('LIGHT_BRUSH_FINISH');
             pushEditHistorySafe();
             firePostEffectChanged();
@@ -809,7 +822,8 @@ export function initPostEffectUI(global: Global): () => void {
 
     if (bloomDrawModeAbandonBtn) {
         bloomDrawModeAbandonBtn.addEventListener('click', () => {
-            if (!currentDraftId) return;
+            const draftId = getActiveDraftId();
+            if (!draftId) return;
             dispatchLightBrushMessage('LIGHT_BRUSH_CLEAR');
             pushEditHistorySafe();
             firePostEffectChanged();

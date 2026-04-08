@@ -571,10 +571,13 @@ export class BloomController {
                 }
                 if (pointsWithBrightness.length > 0) {
                     const visibilitySig = regions.map((r: any) => `${r.id}:${this.isLocalLightRegionVisible(r) ? 1 : 0}`).join('|');
+                    const wsPointsLen = this.worldSpaceData.getAllPoints().length;
                     const multiHash = regions.map((r: any) =>
                         `${r.id}:${(r.worldSpace?.committed ?? []).length}:${r.localBrightness ?? 0}:${(r.tintColor ?? []).join(',')}:${r.tintBlend ?? 0}`
                     ).join('|') + (isDraftActive
-                        ? ('|active=' + (activeId ?? '') + (this.isDrawing ? '' : '|ws=' + this.worldSpaceData.getAllPoints().length))
+                        // 草稿绘制中也要把工作区点数纳入 hash，确保每次笔刷变更都触发 3D volume 重建。
+                        // 否则在“已有区域 + 新建第二个区域”场景里，绘制期间 hash 不变会导致体积预览停住或不显示。
+                        ? (`|active=${activeId ?? ''}|ws=${wsPointsLen}|drawing=${this.isDrawing ? 1 : 0}`)
                         : '') + `|vis=${visibilitySig}`;
                     if (this._lastMultiRegionHash !== multiHash) {
                         const { texture, tintTexture, aabbMin, aabbMax } = buildCommittedBrightnessVolumeFromRegions(

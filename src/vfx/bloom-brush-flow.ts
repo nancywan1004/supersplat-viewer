@@ -182,13 +182,23 @@ export class BloomBrushFlowController {
         return ensureBloomEditorSession(this.exp());
     }
 
+    private getActiveRegionId(): string | null {
+        const id = this.ensureBloomSes().activeLocalLightRegionId;
+        return typeof id === 'string' && id.trim().length > 0 ? id : null;
+    }
+
+    private isDraftId(id: string | null | undefined): id is string {
+        return typeof id === 'string' && id.startsWith('draft-');
+    }
+
     private ensureDraftForBrushStart(type: string | undefined): boolean {
         if (type !== 'LIGHT_BRUSH_START') return false;
         const ses = this.ensureBloomSes();
         const activeIdForStart = ses.activeLocalLightRegionId;
-        const shouldCreateDraftForStart = !(
-            typeof activeIdForStart === 'string' &&
-            activeIdForStart.startsWith('draft-')
+        // 当前版本仅支持“新增亮灯区域草稿”，不支持对已有 region 二次绘制编辑。
+        // 因此：只要当前 active 不是 draft-*，就强制创建新的 draft。
+        const shouldCreateDraftForStart = !this.isDraftId(
+            typeof activeIdForStart === 'string' ? activeIdForStart : null
         );
         if (!shouldCreateDraftForStart) return false;
         const bloom = this.ensureBloomSettings();
@@ -222,7 +232,7 @@ export class BloomBrushFlowController {
     }
 
     private handleEraserStart(): void {
-        const bloom = this.ensureBloomSettings();
+        this.ensureBloomSettings();
         this.ensureBloomSes().bloomBrush = true;
         this.switchBrushToolState(true);
         (this.ctx.global.events as any).fire('postEffect:changed');
@@ -230,7 +240,7 @@ export class BloomBrushFlowController {
     }
 
     private handleBrushClear(): void {
-        const bloom = this.ensureBloomSettings();
+        this.ensureBloomSettings();
         const ses = this.ensureBloomSes();
         (this.ctx.global.events as any).fire('bloomBrush:reset');
         ses.bloomBrush = false;
@@ -319,16 +329,19 @@ export class BloomBrushFlowController {
         } else {
             this.ctx.syncCommittedToNightMode();
         }
-        const activeId = ses.activeLocalLightRegionId as string | null | undefined;
-        const isDraftActive = typeof activeId === 'string' && activeId.startsWith('draft-');
+        const activeId = this.getActiveRegionId();
+        const isDraftActive = this.isDraftId(activeId);
+        const { worldSpaceJSON, committedBrightness } = this.ctx.exportRegion();
+        const committed = worldSpaceJSON?.committed ?? [];
         if (isDraftActive) {
-            const { worldSpaceJSON, committedBrightness } = this.ctx.exportRegion();
-            const committed = worldSpaceJSON?.committed ?? [];
             const center = this.ctx.getCurrentRegionCenter();
             ses.draftLightRegionCenter = center ? [center.x, center.y, center.z] : null;
             if (committed.length > 0) {
-                if (!Array.isArray(bloom.localLightRegions)) bloom.localLightRegions = [];
-                const nextIndex = bloom.localLightRegions.length + 1;
+                if (!Array.isArray((bloom as any).localLightRegions)) {
+                    (bloom as any).localLightRegions = [];
+                }
+                const regions = (bloom as any).localLightRegions as any[];
+                const nextIndex = regions.length + 1;
                 const incomingRegionId = typeof payload.id === 'string' && payload.id.trim().length > 0
                     ? payload.id
                     : `region-${Date.now()}`;
@@ -340,11 +353,11 @@ export class BloomBrushFlowController {
                     tintColor: [1, 1, 1] as [number, number, number],
                     tintBlend: 0
                 };
-                const existingIndex = bloom.localLightRegions.findIndex((r: any) => r && r.id === incomingRegionId);
+                const existingIndex = regions.findIndex((r: any) => r && r.id === incomingRegionId);
                 if (existingIndex >= 0) {
-                    bloom.localLightRegions[existingIndex] = newRegion as any;
+                    regions[existingIndex] = newRegion as any;
                 } else {
-                    bloom.localLightRegions.push(newRegion as any);
+                    regions.push(newRegion as any);
                 }
                 ses.activeLocalLightRegionId = newRegion.id;
                 (this.ctx.global.events as any).fire('bloomLocalLightRegion:listChanged');
