@@ -46,6 +46,38 @@ type AssetTransformMode = 'move' | 'rotate' | 'scale';
 /** 光源变换模式（移动/旋转） */
 type LightTransformMode = 'move' | 'rotate' | null;
 type AnnotationTransformMode = 'move' | null;
+/** 统一选中来源（用于防循环与回传语义） */
+type SelectionSource = 'host' | 'scene' | 'unknown';
+
+/** Facade 生命周期触发原因 */
+type ModuleLifecycleReason = 'editModuleChange' | 'editModeExit' | 'dispose';
+
+/** 编辑模块生命周期上下文（契约层，供 facade/orchestrator 使用） */
+interface ModuleContext {
+    global: Global;
+    state: State;
+    events: EventHandler;
+    activeModule: EditLeftModule | null;
+    editMode: boolean;
+}
+
+/** 统一模块命令（协议映射/UI事件收敛后的标准命令） */
+interface ModuleCommand<TPayload = unknown> {
+    type: string;
+    payload?: TPayload;
+    source?: SelectionSource;
+}
+
+/** 编辑模块 facade 统一契约（仅类型约束） */
+interface ModuleFacade {
+    readonly module: EditLeftModule;
+    onEnter(ctx: ModuleContext): void;
+    onExit(ctx: ModuleContext, reason?: ModuleLifecycleReason): void;
+    onEditModeExit(ctx: ModuleContext): void;
+    handleCommand<TPayload = unknown>(ctx: ModuleContext, command: ModuleCommand<TPayload>): void;
+    selectById(ctx: ModuleContext, id: string | null, source: SelectionSource, options?: Record<string, unknown>): void;
+    dispose?(ctx: ModuleContext): void;
+}
 
 // configuration options are immutable at runtime
 type Config = {
@@ -153,4 +185,19 @@ type Global = {
     camera: Entity;
 };
 
-export { CameraMode, InputMode, EditLeftModule, AssetTransformMode, LightTransformMode, AnnotationTransformMode, Config, State, Global };
+export {
+    CameraMode,
+    InputMode,
+    EditLeftModule,
+    AssetTransformMode,
+    LightTransformMode,
+    AnnotationTransformMode,
+    SelectionSource,
+    ModuleLifecycleReason,
+    ModuleContext,
+    ModuleCommand,
+    ModuleFacade,
+    Config,
+    State,
+    Global
+};
