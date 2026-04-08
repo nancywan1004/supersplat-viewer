@@ -33,6 +33,7 @@ import { nearlyEquals } from './core/math';
 import { InputController } from './input-controller';
 import type { ExperienceSettings, PostEffectSettings } from './settings';
 import type { Global } from './types';
+import { nightDeferredByReveal, revealBlocksAnim } from './reveal-policy';
 import { RevealController } from './reveal';
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
 import { getSkyboxRadius } from './loaders/skybox-loader';
@@ -375,10 +376,10 @@ class Viewer {
             }
         });
 
-        // unpause the animation on first frame（有 reveal 时保持暂停，等 reveal 播完再由 revealComplete 回调解除）
+        // unpause the animation on first frame（仅「会结束的 reveal」暂停路径动画，等 revealComplete）
         events.on('firstFrame', () => {
             state.loaded = true;
-            if (state.hasRevealEffect) {
+            if (revealBlocksAnim(state)) {
                 state.animationPaused = true;
             } else {
                 state.animationPaused = !!config.noanim;
@@ -490,7 +491,7 @@ class Viewer {
                 const nightFade = typeof nightCfg?.fade === 'number' && Number.isFinite(nightCfg.fade)
                     ? Math.max(-1, Math.min(1, nightCfg.fade))
                     : (nightCfg?.enabled ? -0.95 : 0);
-                if (!state.hasRevealEffect) {
+                if (!nightDeferredByReveal(state)) {
                     events.once('firstFrame', () => {
                         if (this.nightModeScript) {
                             this.nightModeScript.applyFromSettings({ fade: nightFade, enabled: nightCfg?.enabled });
@@ -520,9 +521,8 @@ class Viewer {
             }
             this.revealController = new RevealController(global, revealBbox, gsplatEntity, this.cameraManager);
             // 供 VFX 导出与 deferred-editing-visual-sync 使用，避免从 app.viewer 反射取 RevealController
-            // 有 reveal 时：等 reveal 播完再开始动画（监听 revealComplete），并恢复配置中的夜间模式
             if (state.hasRevealEffect) {
-                events.once('revealComplete', () => {
+                const afterReveal = () => {
                     if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim) {
                         state.animationStarted = true;
                         state.animationPaused = false;
@@ -535,12 +535,18 @@ class Viewer {
                             : (nightCfgAfterReveal.enabled ? -0.95 : 0);
                         this.nightModeScript.applyFromSettings({ enabled: nightCfgAfterReveal.enabled, fade });
                     }
-                });
-                // reveal 播完再初始化标注
-                events.once('revealComplete', initAnnotations);
-                events.once('revealComplete', initSceneAssets);
+                };
+                if (revealBlocksAnim(state)) {
+                    events.once('revealComplete', afterReveal);
+                    events.once('revealComplete', initAnnotations);
+                    events.once('revealComplete', initSceneAssets);
+                } else {
+                    // persistent 等：与 revealComplete 语义对齐的即时管线
+                    afterReveal();
+                    initAnnotations();
+                    initSceneAssets();
+                }
             } else {
-                // 无 reveal：立即初始化标注
                 initAnnotations();
                 initSceneAssets();
             }
@@ -724,7 +730,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
                         // In LOD mode, ensure animation is started (in case it wasn't started earlier)
                         // 有 reveal 时不在此处启动动画，等 revealComplete 后再启动
-                        if (isCustomLod && settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !state.hasRevealEffect) {
+                        if (isCustomLod && settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !revealBlocksAnim(state)) {
                             console.log('LOD mode: all chunks loaded, ensuring animation is playing');
                             state.animationStarted = true;
                             state.animationPaused = false;
@@ -791,7 +797,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                             events.fire('progressThresholdReached', progress);
                             
                             // Start animation if available（有 reveal 时由 revealComplete 回调启动，此处不启动）
-                            if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !state.animationStarted && !state.hasRevealEffect) {
+                            if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !state.animationStarted && !revealBlocksAnim(state)) {
                                 state.animationStarted = true;
                                 console.log(`Progress reached ${PROGRESS_THRESHOLD}%, starting animation`);
                                 state.animationPaused = false;

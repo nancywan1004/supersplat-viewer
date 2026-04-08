@@ -1026,8 +1026,8 @@ export class RevealController {
         }
         
         // 检查特效是否完成
-        if (this.timedEffects.includes(this.config.type) && 
-            this.currentScript.isEffectComplete && 
+        if (this.timedEffects.includes(this.config.type) &&
+            this.currentScript.isEffectComplete &&
             this.currentScript.isEffectComplete()) {
             
             // 特效完成，停止计时
@@ -1037,12 +1037,12 @@ export class RevealController {
                 const expectedDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
                 const difference = actualDuration - expectedDuration;
                 
-                console.log(`[Timing] ${this.config.type} effect completed (detected via isEffectComplete):`);
-                console.log(`  - Start time: ${this.effectStartTime.toFixed(3)}s`);
-                console.log(`  - End time: ${this.effectEndTime.toFixed(3)}s`);
-                console.log(`  - Actual duration: ${actualDuration.toFixed(3)}s`);
-                console.log(`  - Expected duration: ${expectedDuration.toFixed(3)}s`);
-                console.log(`  - Difference: ${difference > 0 ? '+' : ''}${difference.toFixed(3)}s (${((difference / expectedDuration) * 100).toFixed(2)}%)`);
+                // console.log(`[Timing] ${this.config.type} effect completed (detected via isEffectComplete):`);
+                // console.log(`  - Start time: ${this.effectStartTime.toFixed(3)}s`);
+                // console.log(`  - End time: ${this.effectEndTime.toFixed(3)}s`);
+                // console.log(`  - Actual duration: ${actualDuration.toFixed(3)}s`);
+                // console.log(`  - Expected duration: ${expectedDuration.toFixed(3)}s`);
+                // console.log(`  - Difference: ${difference > 0 ? '+' : ''}${difference.toFixed(3)}s (${((difference / expectedDuration) * 100).toFixed(2)}%)`);
                 
                 // 触发事件
                 this.global.events.fire('effectTimingComplete', {
