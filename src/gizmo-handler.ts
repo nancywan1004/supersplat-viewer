@@ -260,13 +260,7 @@ export function initGizmoHandler(global: Global): () => void {
             handler.clear();
             return;
         }
-        if (state.editLeftModule === 'asset') {
-            const list = state.scenePlacedEntities ?? [];
-            if (list.length > 0 && !state.selectedSceneEntityId) {
-                state.selectedSceneEntityId = list[0].id;
-                events.fire('sceneAsset:selected');
-            }
-        }
+        // 资产默认选中策略已由 AssetFacade.onEnter 统一管理，Gizmo 仅做显示同步。
         syncGizmoToSelection();
     };
 

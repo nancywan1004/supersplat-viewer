@@ -307,12 +307,21 @@ const initPostMessageBridge = (global: Global) => {
             }
             break;
         case 'ASSET_SELECT':
-            state.selectedSceneEntityId = (p.id !== undefined ? p.id : null) as string | null;
-            events.fire('sceneAsset:selected', { source: 'host' as SelectionSource });
+        {
+            const targetId = (p.id !== undefined ? p.id : null) as string | null;
+            const dispatched = g.__commandRegistry?.dispatch?.({
+                module: 'asset',
+                command: { type: 'ASSET_SELECT', payload: { id: targetId }, source: 'host' as SelectionSource }
+            });
+            if (!dispatched) {
+                state.selectedSceneEntityId = (p.id !== undefined ? p.id : null) as string | null;
+                events.fire('sceneAsset:selected', { source: 'host' as SelectionSource });
+            }
             if (state.editMode && typeof p.id === 'string' && p.id.trim().length > 0) {
                 events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
             }
             break;
+        }
         case 'ASSET_COPY':
             if (
                 typeof p.id === 'string' &&
@@ -416,8 +425,12 @@ const initPostMessageBridge = (global: Global) => {
             if (!am) break;
             const id = p.id as string | undefined;
             if (!id) break;
-            if (am.selectAnnotation) {
-                am.selectAnnotation(id, { showGizmo: false, source: 'host' as SelectionSource });
+            const dispatched = g.__commandRegistry?.dispatch?.({
+                module: 'annotation',
+                command: { type: 'ANNOTATION_EDIT', payload: { id }, source: 'host' as SelectionSource }
+            });
+            if (!dispatched) {
+                am.selectAnnotation?.(id, { showGizmo: false, source: 'host' as SelectionSource });
             }
             // 触发内部 UI 显示编辑表单（annotation-ui 中监听 annotationEdit:show）
             events.fire('annotationEdit:show');
@@ -504,11 +517,20 @@ const initPostMessageBridge = (global: Global) => {
             }
             break;
         case 'LIGHT_SELECT':
-            applyLightSelect(global, (p.id !== undefined ? p.id : null) as string | null, 'host');
+        {
+            const targetId = (p.id !== undefined ? p.id : null) as string | null;
+            const dispatched = g.__commandRegistry?.dispatch?.({
+                module: 'environment',
+                command: { type: 'LIGHT_SELECT', payload: { id: targetId }, source: 'host' as SelectionSource }
+            });
+            if (!dispatched) {
+                applyLightSelect(global, targetId, 'host');
+            }
             if (state.editMode && typeof p.id === 'string' && p.id.trim().length > 0) {
                 events.fire('inputEvent', 'frame', { focusTarget: 'light' as const });
             }
             break;
+        }
         case 'LIGHT_TRANSFORM_MODE': {
             const v = (p as { value?: 'move' | 'rotate' | null }).value;
             applyLightTransformMode(global, v);
@@ -566,13 +588,26 @@ const initPostMessageBridge = (global: Global) => {
             events.fire('messageBridge:lightBrush', { type, payload: p });
             break;
         case 'VFX_TYPE_SET':
-            if (typeof p.value === 'string') applyVfxTypeSet(global, p.value);
+            if (typeof p.value === 'string') {
+                applyVfxTypeSet(global, p.value);
+                g.__commandRegistry?.dispatch?.({
+                    module: 'effects',
+                    command: { type: 'VFX_TYPE_SET', payload: p.value, source: 'host' as SelectionSource }
+                });
+            }
             break;
         case 'VFX_EXIT':
             applyVfxExit(global);
+            g.__commandRegistry?.dispatch?.({
+                module: 'effects',
+                command: { type: 'VFX_EXIT', source: 'host' as SelectionSource }
+            });
             break;
         case 'VFX_RESTART':
-            events.fire('revealRestart', (p as any).restartAnim !== false);
+            g.__commandRegistry?.dispatch?.({
+                module: 'effects',
+                command: { type: 'VFX_RESTART', payload: { restartAnim: (p as any).restartAnim }, source: 'host' as SelectionSource }
+            });
             break;
         case 'VIDEO_EXPORT_START': {
             console.log('[MessageBridge] VIDEO_EXPORT_START → start export pipeline', {

@@ -49,6 +49,12 @@ import { pushEditHistory } from './edit-history';
 import { initGizmoHandler } from './gizmo-handler';
 import { initAnnotationGizmoHandler } from './annotation-toolbar/annotation-gizmo-handler';
 import { initAnnotationSystem } from './annotation-toolbar/init-annotation-system';
+import { initModuleOrchestrator, type ModuleOrchestrator } from './editor-modules/module-orchestrator';
+import { initAssetFacade } from './editor-modules/asset-facade';
+import { initAnnotationFacade } from './editor-modules/annotation-facade';
+import { initEnvironmentFacade } from './editor-modules/environment-facade';
+import { initEffectsFacade } from './editor-modules/effects-facade';
+import { initCommandRegistry } from './editor-modules/command-registry';
 
 const gammaChunkGlsl = `
 vec3 prepareOutputFromGamma(vec3 gammaColor) {
@@ -159,6 +165,9 @@ class Viewer {
     /** Annotation Gizmo handler 清理函数 */
     cleanupAnnotationGizmoHandler: (() => void) | null = null;
 
+    /** 编辑模块生命周期编排器（orchestrator-core） */
+    moduleOrchestrator: ModuleOrchestrator | null = null;
+
     origChunks: {
         glsl: {
             gsplatOutputVS: string
@@ -173,6 +182,15 @@ class Viewer {
 
         const { app, settings, config, events, state, camera } = global;
         const { graphicsDevice } = app;
+
+        // 仅初始化 orchestrator 核心骨架：后续 phase 再逐步注册各模块 facade
+        this.moduleOrchestrator = initModuleOrchestrator(global);
+        initCommandRegistry(global);
+        (global as any).__moduleOrchestrator = this.moduleOrchestrator;
+        initAssetFacade(global);
+        initAnnotationFacade(global);
+        initEnvironmentFacade(global);
+        initEffectsFacade(global);
 
         // enable anonymous CORS for image loading in safari
         (app.loader.getHandler('texture') as TextureHandler).imgParser.crossOrigin = 'anonymous';

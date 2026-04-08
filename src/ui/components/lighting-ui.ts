@@ -66,6 +66,7 @@ export function initLightingUI(global: Global): () => void {
     const showLightsInSceneOption = container.querySelector('#showLightsInSceneOption') as HTMLElement | null;
     const pointLightsList = container.querySelector('#pointLightsList') as HTMLElement | null;
     const addPointLight = container.querySelector('#addPointLight') as HTMLButtonElement | null;
+    let onEnvironmentLifecycle: (() => void) | null = null;
     // 环境模块内部「Show lights in scene」开关的逻辑状态；默认打开
     let lightsVisualVisible = (global.app as any).__lightsVisualToggle;
     if (lightsVisualVisible == null) {
@@ -184,6 +185,9 @@ export function initLightingUI(global: Global): () => void {
         }
     };
     if (showLightsInSceneCheck && showLightsInSceneOption) {
+        onEnvironmentLifecycle = () => {
+            setLightsVisualVisible(global, lightsVisualVisible);
+        };
         const toggleLightsVisual = () => {
             lightsVisualVisible = !lightsVisualVisible;
             setLightsVisualVisible(global, lightsVisualVisible);
@@ -194,13 +198,10 @@ export function initLightingUI(global: Global): () => void {
         // 初始化一次显隐状态（依赖当前 editMode / editLeftModule）
         setLightsVisualVisible(global, lightsVisualVisible);
         updateLightsVisualCheck();
-        // 当编辑模式或左侧模块变化时，重新应用显隐规则
-        global.events.on('editMode:changed', () => {
-            setLightsVisualVisible(global, lightsVisualVisible);
-        });
-        global.events.on('editLeftModule:changed', () => {
-            setLightsVisualVisible(global, lightsVisualVisible);
-        });
+        // 模块生命周期改由 environment facade 驱动，避免多处监听重复刷新
+        global.events.on('environmentFacade:enter', onEnvironmentLifecycle);
+        global.events.on('environmentFacade:exit', onEnvironmentLifecycle);
+        global.events.on('environmentFacade:editModeExit', onEnvironmentLifecycle);
     }
 
     // Lights list: 平行光主光源（首条，不可删）+ 点光/聚光
@@ -529,6 +530,11 @@ export function initLightingUI(global: Global): () => void {
     }
 
     return () => {
+        if (onEnvironmentLifecycle) {
+            global.events.off('environmentFacade:enter', onEnvironmentLifecycle);
+            global.events.off('environmentFacade:exit', onEnvironmentLifecycle);
+            global.events.off('environmentFacade:editModeExit', onEnvironmentLifecycle);
+        }
         container.innerHTML = '';
     };
 }

@@ -243,23 +243,11 @@ export function initAnnotationUI(global: Global): () => void {
     events.on('controlsHidden:changed', onControlsHiddenChanged);
     onControlsHiddenChanged(state.controlsHidden ?? false);
 
-    const onEditModeChanged = () => {
-        if (!state.editMode) {
-            annotationManager.deselectAnnotation();
-        }
+    /** 模块生命周期由 annotation facade 统一驱动，UI 仅处理表单/中间态收尾 */
+    const onAnnotationFacadeEnter = () => {
+        updateList();
     };
-    events.on('editMode:changed', onEditModeChanged);
-
-    /** 切换模块时：进入标注模块默认选中列表中第一项（不自动显示 Gizmo）；离开时取消选中与 Gizmo、取消放置/编辑 */
-    const onEditLeftModuleChanged = (newModule: string | null) => {
-        if (newModule === 'annotation') {
-            const all = annotationManager.getAllAnnotations();
-            if (all.length > 0 && !annotationManager.getSelectedAnnotation()) {
-                annotationManager.selectAnnotation(all[0].id, { source: 'host' });
-            }
-            updateList();
-            return;
-        }
+    const onAnnotationFacadeExit = () => {
         if (annotationManager.getPlaceholderAnnotation()) {
             annotationManager.cancelAnnotation();
             annotationUI.hideEditForm();
@@ -284,7 +272,9 @@ export function initAnnotationUI(global: Global): () => void {
         annotationManager.deselectAnnotation();
         updateList();
     };
-    events.on('editLeftModule:changed', onEditLeftModuleChanged as any);
+    events.on('annotationFacade:enter', onAnnotationFacadeEnter);
+    events.on('annotationFacade:exit', onAnnotationFacadeExit);
+    events.on('annotationFacade:editModeExit', onAnnotationFacadeExit);
 
     const onAnnotationNavigate = (ann: { id?: string }) => {
         const id = ann?.id;
@@ -313,8 +303,9 @@ export function initAnnotationUI(global: Global): () => void {
         events.off('annotationPlacement:update');
         events.off('annotationEdit:show', onAnnotationEditShow);
         events.off('controlsHidden:changed', onControlsHiddenChanged);
-        events.off('editMode:changed', onEditModeChanged);
-        events.off('editLeftModule:changed', onEditLeftModuleChanged as any);
+        events.off('annotationFacade:enter', onAnnotationFacadeEnter);
+        events.off('annotationFacade:exit', onAnnotationFacadeExit);
+        events.off('annotationFacade:editModeExit', onAnnotationFacadeExit);
         events.off('annotation.navigate', onAnnotationNavigate);
         annotationUI.destroy();
         annotationManager.destroy();

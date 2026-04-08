@@ -514,27 +514,6 @@ export function initAssetPlacementHandler(
         deps.pushEditHistory?.(global, 'delete asset');
     };
 
-    const onEditLeftModuleChanged = (newModule: string | null) => {
-        if (newModule === 'asset') {
-            // 进入资产模块：默认选中场景中第一个 entity（若有）；不自动显示 Gizmo（需用户点击底部移动/旋转/缩放）
-            const list = state.scenePlacedEntities ?? [];
-            if (list.length > 0 && !state.selectedSceneEntityId) {
-                state.selectedSceneEntityId = list[0].id;
-                events.fire('sceneAsset:selected');
-            }
-            state.assetTransformMode = undefined;
-            events.fire('assetTransformMode:changed', undefined as any);
-            return;
-        }
-        // 离开资产模块：清空选中并隐藏 Gizmo，重置变换模式
-        if (state.selectedSceneEntityId) {
-            state.selectedSceneEntityId = null;
-            events.fire('sceneAsset:selected');
-        }
-        state.assetTransformMode = undefined;
-        events.fire('assetTransformMode:changed', undefined as any);
-    };
-
     canvas.addEventListener('pointerdown', onPointerDown);
     const onPlaceFromProtocol = async (payload: { value: AssetLibraryItem; sceneEntityId?: string }) => {
         const pos = getPositionInFrontOfCamera(global);
@@ -554,7 +533,6 @@ export function initAssetPlacementHandler(
     events.on('assetEdit:copy', onCopy);
     events.on('assetEdit:delete', onDelete);
     events.on('assetPlacement:place', onPlaceFromProtocol);
-        events.on('editLeftModule:changed', onEditLeftModuleChanged as any);
 
     return () => {
         canvas.removeEventListener('pointerdown', onPointerDown);
@@ -565,6 +543,5 @@ export function initAssetPlacementHandler(
         events.off('assetEdit:copy', onCopy);
         events.off('assetEdit:delete', onDelete);
         events.off('assetPlacement:place', onPlaceFromProtocol);
-        events.off('editLeftModule:changed', onEditLeftModuleChanged as any);
     };
 }
