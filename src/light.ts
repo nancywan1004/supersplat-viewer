@@ -27,6 +27,15 @@ const isSpotLightConfig = (cfg: any): cfg is SpotLightConfig =>
 /** 平行光实体默认位置（用于主方向光） */
 const DIRECTIONAL_DEFAULT_POSITION: [number, number, number] = [0, 8, 8];
 
+/**
+ * 同步 Light 颜色到引擎内部（clustered / 标准 mesh 光照读 scene Light 的 _colorLinear）。
+ * 仅调用 LightComponent.color.set 不会触发 light.setColor，mesh 侧光色会停留在初值；gsplat/NightMode 若从 settings 另读颜色则会表现为「splat 有色、mesh 无色」。
+ */
+function applyLightColorRgb(lightComp: NonNullable<Entity['light']>, r: number, g: number, b: number): void {
+    lightComp.color.set(r, g, b);
+    lightComp.light.setColor(r, g, b);
+}
+
 // ─── 线框 Mesh 工厂 & 材质 ───────────────────────────────────────────
 
 const ensureLightVisualLayer = (app: any): number => {
@@ -464,7 +473,7 @@ const applyDirectionalLightFromSettings = (global: Global): void => {
     lightEntity.setEulerAngles(pitch, yaw, 0);
     if (lightEntity.light) {
         lightEntity.light.enabled = enabled;
-        lightEntity.light.color.set(r, g, b);
+        applyLightColorRgb(lightEntity.light, r, g, b);
         lightEntity.light.intensity = intensity;
         lightEntity.light.castShadows = castShadows;
         lightEntity.light.shadowBias = shadowBias;
@@ -524,7 +533,7 @@ const createSpotLightsFromSettings = (global: Global): void => {
         entity.setEulerAngles(pitch, yaw, 0);
         if (entity.light) {
             entity.light.enabled = enabled;
-            entity.light.color.set(r, g, b);
+            applyLightColorRgb(entity.light, r, g, b);
             entity.light.intensity = intensity;
             entity.light.castShadows = false;
             (entity.light as any).innerConeAngle = innerCone;
@@ -583,7 +592,7 @@ const createPointLightsFromSettings = (global: Global): void => {
         entity.setPosition(x, y, z);
         if (entity.light) {
             entity.light.enabled = enabled;
-            entity.light.color.set(r, g, b);
+            applyLightColorRgb(entity.light, r, g, b);
             entity.light.intensity = intensity;
             entity.light.castShadows = false;
             (entity.light as any).range = range;
