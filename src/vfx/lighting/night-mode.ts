@@ -4,12 +4,35 @@ import { collectPointLights, collectSpotLights } from '../../light';
 import type { Texture } from 'playcanvas';
 
 /**
+ * 单盏点/聚光：线性色单通道峰值上限。intensity 极大时按峰值等比缩小，保色相，避免 shader 里 sum 立刻顶满仍是一片死白 + ANGLE 数值风险。
+ * （与 modifySplatColor 内 sum / 输出 clamp 配套；要更「亮」可略调大该常数或改多盏灯分布。）
+ */
+const LOCAL_LIGHT_LINEAR_PEAK_CAP = 16;
+
+/** 与方向光 uLightColor 一致：sRGB→线性，再乘 intensity×scale；结果按 LOCAL_LIGHT_LINEAR_PEAK_CAP 封顶 */
+function localLightLinearRgb(r: number, g: number, b: number, intensity: number, scale: number): [number, number, number] {
+    const lin = (x: number) => Math.pow(Math.max(0, Math.min(1, x)), 2.2);
+    const m = Math.max(0, intensity) * scale;
+    let lr = lin(r) * m;
+    let lg = lin(g) * m;
+    let lb = lin(b) * m;
+    const peak = Math.max(lr, lg, lb, 1e-20);
+    if (peak > LOCAL_LIGHT_LINEAR_PEAK_CAP) {
+        const s = LOCAL_LIGHT_LINEAR_PEAK_CAP / peak;
+        lr *= s;
+        lg *= s;
+        lb *= s;
+    }
+    return [lr, lg, lb];
+}
+
+/**
  * 调亮/调暗原理（Shader 内 modifySplatColor）：
- * - 线性空间：result = linearColor * mult，再 gamma 写回。
- * - 调暗 (f < 0)：mult = mix(1, nightColor, -f)。nightColor = 环境光 + 点光 + 聚光贡献，乘数 < 1；主光不参与此计算。
- * - 调亮 (f > 0)：mult = baseBright * (1 + dirContrib)。baseBright = mix(1, uBrightFactor, f) 整体提亮；
- *   dirContrib = NdotL * uLightColor 为平行光方向性（视线方向近似 splat 朝向，面向光更亮）。
- * TS 侧：主光强度 = settings 基准 × (1 + nightFade)；天空球强度与 fade 同向；Bloom 由 settings 统一控制，调亮/调暗都使用同一强度。
+ * - 线性空间：result = linearColor * mult，再 gamma 写回；g2l/l2g 对底数 clamp，避免 pow(0) / 溢出在 ANGLE 上出 NaN 黑块。
+ * - 点光/聚光：TS 侧 sRGB→线性并乘强度，且按 LOCAL_LIGHT_LINEAR_PEAK_CAP 对单灯线性色封顶（极大 intensity 不再线性放大）；shader 内衰减 1.15/(1+d²)，并对 sum/输出 clamp。
+ * - 调暗 (f < 0)：mult = mix(1, nightColor, -f)。nightColor = 环境光 + 点光 + 聚光贡献；主光不参与此乘子。
+ * - 调亮 (f > 0)：mult = baseBright * (1 + sum + dirContrib)；dirContrib = NdotL * uLightColor（viewDir 零长时回退，避免 normalize(0)）。
+ * TS 侧：主光强度 = settings 基准 × (1 + nightFade)；天空球与 fade 同向；Bloom 由 settings 统一控制。
  */
 const shaderGLSL = /* glsl */`
 uniform vec3 uSpherePositions[10];
@@ -35,8 +58,8 @@ uniform float uLocalLightTintBlend;
 uniform sampler2D uCommittedTintVolume;  // per-voxel 颜色调制 RGBA，多区域时每区域只影响自己体素
 uniform float uCommittedTintVolumeActive; // 1 = 使用纹理，0 = 使用 uniform
 
-vec3 l2g(vec3 c) { return pow(c, vec3(1.0 / 2.2)); }
-vec3 g2l(vec3 c) { return pow(c, vec3(2.2)); }
+vec3 l2g(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(1.0 / 2.2)); }
+vec3 g2l(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(2.2)); }
 
 void modifySplatCenter(inout vec3 center) {
     // Night mode doesn't modify center position
@@ -95,6 +118,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         }
     }
 
+    // uSphereColors / uSpotColors：TS 已转线性；衰减用 1/(1+d²) 减轻近距 1/r² 过曝（ANGLE/部分 Win GPU 易炸）
     vec3 sum = vec3(0.0);
     for (int i = 0; i < 10; ++i) {
         vec3 pos = uSpherePositions[i];
@@ -102,8 +126,8 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         if (length(pos) > 0.001) {
             float dist = length(pos - wpos);
             if (dist > 0.001) {
-                float safeDist = max(dist, 0.25);
-                sum += g2l(clr) * 1.1 / (safeDist * safeDist);
+                float att = 1.15 / (1.0 + dist * dist);
+                sum += clr * att;
             }
         }
     }
@@ -120,24 +144,27 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         vec3 toPoint = wpos - spotPos;
         float dist = length(toPoint);
         if (dist >= range || dist < 0.001) continue;
-        float safeDist = max(dist, 0.25);
         vec3 L = toPoint / dist;
         float cosTheta = dot(L, spotDir);
         if (cosTheta <= cosOuter) continue;
         float spotAtt = (cosTheta >= cosInner) ? 1.0 : smoothstep(cosOuter, cosInner, cosTheta);
-        sum += g2l(spotClr) * spotAtt * 1.1 / (safeDist * safeDist);
+        float att = 1.15 / (1.0 + dist * dist);
+        sum += spotClr * spotAtt * att;
     }
-    sum = clamp(sum, vec3(0.0), vec3(4.0));
+    sum = clamp(sum, vec3(0.0), vec3(2.5));
 
     vec3 linearColor = g2l(color.rgb);
     float f = uNightFade;
     // 全局亮度为 0 时仍允许点光/聚光生效（不施加 night fade，只应用局部灯光）
-    if (abs(f) < 1e-6) {
-        color.rgb = l2g(linearColor * (vec3(1.0) + sum));
+    if (abs(f) < 5e-5) {
+        vec3 outLin = clamp(linearColor * (vec3(1.0) + sum), vec3(0.0), vec3(10.0));
+        color.rgb = l2g(outLin);
         return;
     }
     vec3 nightColor = g2l(uNightAmbient) + sum;
-    vec3 viewDir = normalize(uCameraPos - wpos);
+    vec3 vd = uCameraPos - wpos;
+    float vdl = length(vd);
+    vec3 viewDir = vdl > 1e-4 ? vd / vdl : vec3(0.0, 1.0, 0.0);
     float NdotL = max(0.0, dot(viewDir, uLightDir));
     vec3 dirContrib = NdotL * uLightColor;
     vec3 mult;
@@ -149,7 +176,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         // 调暗：同样让平行光参与，不再与调亮分支做“光源参与”差异化
         mult = mix(vec3(1.0), nightColor + dirContrib, -f);
     }
-    color.rgb = l2g(linearColor * mult);
+    color.rgb = l2g(clamp(linearColor * mult, vec3(0.0), vec3(10.0)));
 }
 `;
 
@@ -183,8 +210,8 @@ uniform float uLocalLightTintBlend;
 uniform sampler2D uCommittedTintVolume;
 uniform float uCommittedTintVolumeActive;
 
-vec3 l2g(vec3 c) { return pow(c, vec3(1.0 / 2.2)); }
-vec3 g2l(vec3 c) { return pow(c, vec3(2.2)); }
+vec3 l2g(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(1.0 / 2.2)); }
+vec3 g2l(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(2.2)); }
 
 void modifySplatCenter(inout vec3 center) {
 }
@@ -263,8 +290,8 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         if (length(pos) > 0.001) {
             float dist = length(pos - wpos);
             if (dist > 0.001) {
-                float safeDist = max(dist, 0.25);
-                sum += g2l(clr) * 1.1 / (safeDist * safeDist);
+                float att = 1.15 / (1.0 + dist * dist);
+                sum += clr * att;
             }
         }
     }
@@ -281,36 +308,36 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         vec3 toPoint = wpos - spotPos;
         float dist = length(toPoint);
         if (dist >= range || dist < 0.001) continue;
-        float safeDist = max(dist, 0.25);
         vec3 L = toPoint / dist;
         float cosTheta = dot(L, spotDir);
         if (cosTheta <= cosOuter) continue;
         float spotAtt = (cosTheta >= cosInner) ? 1.0 : smoothstep(cosOuter, cosInner, cosTheta);
-        sum += g2l(spotClr) * spotAtt * 1.1 / (safeDist * safeDist);
+        float att = 1.15 / (1.0 + dist * dist);
+        sum += spotClr * spotAtt * att;
     }
-    sum = clamp(sum, vec3(0.0), vec3(4.0));
+    sum = clamp(sum, vec3(0.0), vec3(2.5));
 
     vec3 linearColor = g2l(color.rgb);
     float f = uNightFade;
-    // 全局亮度为 0 时仍允许点光/聚光生效（不施加 night fade，只应用局部灯光）
-    if (abs(f) < 1e-6) {
-        color.rgb = l2g(linearColor * (vec3(1.0) + sum));
+    if (abs(f) < 5e-5) {
+        vec3 outLin = clamp(linearColor * (vec3(1.0) + sum), vec3(0.0), vec3(10.0));
+        color.rgb = l2g(outLin);
         return;
     }
     vec3 nightColor = g2l(uNightAmbient) + sum;
-    vec3 viewDir = normalize(uCameraPos - wpos);
+    vec3 vd = uCameraPos - wpos;
+    float vdl = length(vd);
+    vec3 viewDir = vdl > 1e-4 ? vd / vdl : vec3(0.0, 1.0, 0.0);
     float NdotL = max(0.0, dot(viewDir, uLightDir));
     vec3 dirContrib = NdotL * uLightColor;
     vec3 mult;
     if (f >= 0.0) {
-        // 调亮：所有光源（环境光+点光+聚光+平行光）统一参与
         vec3 baseBright = mix(vec3(1.0), vec3(uBrightFactor), f);
         mult = baseBright * (vec3(1.0) + sum + dirContrib);
     } else {
-        // 调暗：同样让平行光参与，不再与调亮分支做“光源参与”差异化
         mult = mix(vec3(1.0), nightColor + dirContrib, -f);
     }
-    color.rgb = l2g(linearColor * mult);
+    color.rgb = l2g(clamp(linearColor * mult, vec3(0.0), vec3(10.0)));
 }
 `;
 
@@ -340,8 +367,8 @@ var uCommittedTintVolume: texture_2d<f32>;
 var uCommittedTintVolumeSampler: sampler;
 uniform uCommittedTintVolumeActive: f32;
 
-fn l2g(c: vec3f) -> vec3f { return pow(c, vec3f(1.0 / 2.2)); }
-fn g2l(c: vec3f) -> vec3f { return pow(c, vec3f(2.2)); }
+fn l2g(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(1.0 / 2.2)); }
+fn g2l(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(2.2)); }
 
 fn modifySplatCenter(center: ptr<function, vec3f>) {
 }
@@ -405,8 +432,8 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         if (length(pos) > 0.001) {
             let dist = length(pos - wpos);
             if (dist > 0.001) {
-                let safeDist = max(dist, 0.25);
-                sum = sum + g2l(clr) * 1.1 / (safeDist * safeDist);
+                let att = 1.15 / (1.0 + dist * dist);
+                sum = sum + clr * att;
             }
         }
     }
@@ -423,7 +450,6 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         let toPoint = wpos - spotPos;
         let dist = length(toPoint);
         if (dist >= range || dist < 0.001) { continue; }
-        let safeDist = max(dist, 0.25);
         let L = toPoint / dist;
         let cosTheta = dot(L, spotDir);
         if (cosTheta <= cosOuter) { continue; }
@@ -431,31 +457,32 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         if (cosTheta < cosInner) {
             spotAtt = smoothstep(cosOuter, cosInner, cosTheta);
         }
-        sum = sum + g2l(spotClr) * spotAtt * 1.1 / (safeDist * safeDist);
+        let att = 1.15 / (1.0 + dist * dist);
+        sum = sum + spotClr * spotAtt * att;
     }
-    sum = clamp(sum, vec3f(0.0), vec3f(4.0));
+    sum = clamp(sum, vec3f(0.0), vec3f(2.5));
 
     let linearColor = g2l((*color).rgb);
     let f = uniform.uNightFade;
-    // 全局亮度为 0 时仍允许点光/聚光生效（不施加 night fade，只应用局部灯光）
-    if (abs(f) < 1e-6) {
-        (*color).rgb = l2g(linearColor * (vec3f(1.0) + sum));
+    if (abs(f) < 5e-5) {
+        let outLin = clamp(linearColor * (vec3f(1.0) + sum), vec3f(0.0), vec3f(10.0));
+        (*color).rgb = l2g(outLin);
         return;
     }
     let nightColor = g2l(uniform.uNightAmbient) + sum;
-    let viewDir = normalize(uniform.uCameraPos - wpos);
+    let vd = uniform.uCameraPos - wpos;
+    let vdl = length(vd);
+    let viewDir = select(vec3f(0.0, 1.0, 0.0), vd / vdl, vdl > 1e-4);
     let NdotL = max(0.0, dot(viewDir, uniform.uLightDir));
     let dirContrib = NdotL * uniform.uLightColor;
     var mult: vec3f;
     if (f >= 0.0) {
-        // 调亮：所有光源（环境光+点光+聚光+平行光）统一参与
         let baseBright = mix(vec3f(1.0), vec3f(uniform.uBrightFactor), f);
         mult = baseBright * (vec3f(1.0) + sum + dirContrib);
     } else {
-        // 调暗：同样让平行光参与，不再与调亮分支做“光源参与”差异化
         mult = mix(vec3f(1.0), nightColor + dirContrib, -f);
     }
-    (*color).rgb = l2g(linearColor * mult);
+    (*color).rgb = l2g(clamp(linearColor * mult, vec3f(0.0), vec3f(10.0)));
 }
 `;
 
@@ -492,8 +519,8 @@ var uCommittedTintVolume: texture_2d<f32>;
 var uCommittedTintVolumeSampler: sampler;
 uniform uCommittedTintVolumeActive: f32;
 
-fn l2g(c: vec3f) -> vec3f { return pow(c, vec3f(1.0 / 2.2)); }
-fn g2l(c: vec3f) -> vec3f { return pow(c, vec3f(2.2)); }
+fn l2g(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(1.0 / 2.2)); }
+fn g2l(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(2.2)); }
 
 fn modifySplatCenter(center: ptr<function, vec3f>) {
 }
@@ -572,8 +599,8 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         if (length(pos) > 0.001) {
             let dist = length(pos - wpos);
             if (dist > 0.001) {
-                let safeDist = max(dist, 0.25);
-                sum = sum + g2l(clr) * 1.1 / (safeDist * safeDist);
+                let att = 1.15 / (1.0 + dist * dist);
+                sum = sum + clr * att;
             }
         }
     }
@@ -590,7 +617,6 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         let toPoint = wpos - spotPos;
         let dist = length(toPoint);
         if (dist >= range || dist < 0.001) { continue; }
-        let safeDist = max(dist, 0.25);
         let L = toPoint / dist;
         let cosTheta = dot(L, spotDir);
         if (cosTheta <= cosOuter) { continue; }
@@ -598,31 +624,32 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         if (cosTheta < cosInner) {
             spotAtt = smoothstep(cosOuter, cosInner, cosTheta);
         }
-        sum = sum + g2l(spotClr) * spotAtt * 1.1 / (safeDist * safeDist);
+        let att = 1.15 / (1.0 + dist * dist);
+        sum = sum + spotClr * spotAtt * att;
     }
-    sum = clamp(sum, vec3f(0.0), vec3f(4.0));
+    sum = clamp(sum, vec3f(0.0), vec3f(2.5));
 
     let linearColor = g2l((*color).rgb);
     let f = uniform.uNightFade;
-    // 全局亮度为 0 时仍允许点光/聚光生效（不施加 night fade，只应用局部灯光）
-    if (abs(f) < 1e-6) {
-        (*color).rgb = l2g(linearColor * (vec3f(1.0) + sum));
+    if (abs(f) < 5e-5) {
+        let outLin = clamp(linearColor * (vec3f(1.0) + sum), vec3f(0.0), vec3f(10.0));
+        (*color).rgb = l2g(outLin);
         return;
     }
     let nightColor = g2l(uniform.uNightAmbient) + sum;
-    let viewDir = normalize(uniform.uCameraPos - wpos);
+    let vd = uniform.uCameraPos - wpos;
+    let vdl = length(vd);
+    let viewDir = select(vec3f(0.0, 1.0, 0.0), vd / vdl, vdl > 1e-4);
     let NdotL = max(0.0, dot(viewDir, uniform.uLightDir));
     let dirContrib = NdotL * uniform.uLightColor;
     var mult: vec3f;
     if (f > 0.0) {
-        // 调亮：所有光源（环境光+点光+聚光+平行光）统一参与
         let baseBright = mix(vec3f(1.0), vec3f(uniform.uBrightFactor), f);
         mult = baseBright * (vec3f(1.0) + sum + dirContrib);
     } else {
-        // 调暗：同样让平行光参与，不再与调亮分支做“光源参与”差异化
         mult = mix(vec3f(1.0), nightColor + dirContrib, -f);
     }
-    (*color).rgb = l2g(linearColor * mult);
+    (*color).rgb = l2g(clamp(linearColor * mult, vec3f(0.0), vec3f(10.0)));
 }
 `;
 
@@ -1062,11 +1089,8 @@ class NightMode extends GsplatShaderEffect {
                 colors.push(0, 0, 0);
             } else {
                 positions.push(pl.position.x, pl.position.y, pl.position.z);
-                colors.push(
-                    pl.color.r * pl.intensity * scale,
-                    pl.color.g * pl.intensity * scale,
-                    pl.color.b * pl.intensity * scale
-                );
+                const [lr, lg, lb] = localLightLinearRgb(pl.color.r, pl.color.g, pl.color.b, pl.intensity ?? 1, scale);
+                colors.push(lr, lg, lb);
             }
         }
 
@@ -1084,11 +1108,8 @@ class NightMode extends GsplatShaderEffect {
             } else {
                 spotPositions.push(sl.position.x, sl.position.y, sl.position.z);
                 spotDirections.push(sl.direction.x, sl.direction.y, sl.direction.z);
-                spotColors.push(
-                    sl.color.r * sl.intensity * scale,
-                    sl.color.g * sl.intensity * scale,
-                    sl.color.b * sl.intensity * scale
-                );
+                const [sr, sg, sb] = localLightLinearRgb(sl.color.r, sl.color.g, sl.color.b, sl.intensity ?? 1, scale);
+                spotColors.push(sr, sg, sb);
                 spotParams.push(sl.innerConeAngle, sl.outerConeAngle, sl.range, 1);
             }
         }
