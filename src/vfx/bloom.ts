@@ -627,7 +627,47 @@ export class BloomController {
                     nightModeScript.setCommittedTintVolume(null);
                 }
             } else {
-                if (this._lastMultiRegionHash) {
+                const activeId = editor.activeLocalLightRegionId ?? null;
+                const hasWorkingPoints = this.worldSpaceData.getAllPoints().length > 0;
+                // 兜底首个草稿判定：避免事件顺序导致 activeId/bloomBrush 一帧不同步而误清空体积
+                const isDraftOnly = (bloomBrush && activeId != null && String(activeId).startsWith('draft-'))
+                    || (regions.length === 0 && hasWorkingPoints);
+                if (isDraftOnly) {
+                    // 首个亮灯区域草稿：仅 worldSpaceData 有笔刷点，按草稿点建体积并设亮度，实现实时 mask/体积预览
+                    const wsPoints = this.worldSpaceData.getAllPoints();
+                    const draftBrightness = typeof bloomSettings.bloomBrushBrightness === 'number'
+                        ? Math.max(-1, Math.min(1, bloomSettings.bloomBrushBrightness))
+                        : 0;
+                    const pointsWithBrightness: CommittedPointWithBrightness[] = wsPoints.map(p => ({
+                        position: p.position.clone(),
+                        radius: p.radius,
+                        brightness: draftBrightness
+                    }));
+                    const draftHash = `draft|ws=${this.isDrawing ? 0 : wsPoints.length}|b=${draftBrightness}`;
+                    if (this._lastMultiRegionHash !== draftHash) {
+                        this._lastMultiRegionHash = draftHash;
+                        const { texture, tintTexture, aabbMin, aabbMax } = buildCommittedBrightnessVolumeFromRegions(
+                            this.global.app.graphicsDevice,
+                            pointsWithBrightness,
+                            this.committedVolumeTexture,
+                            this.committedTintTexture
+                        );
+                        this.committedVolumeTexture = texture;
+                        this.committedTintTexture = tintTexture;
+                        this.committedVolumeAabbMin.copy(aabbMin);
+                        this.committedVolumeAabbMax.copy(aabbMax);
+                    }
+                    this._lastActiveRegionId = null;
+                    this._lastActiveRegionCommittedLength = -1;
+                    nightModeScript.setCommittedBrightnessVolume(
+                        this.committedVolumeTexture!,
+                        this.committedVolumeAabbMin,
+                        this.committedVolumeAabbMax,
+                        1,
+                        { volumeEncodedBrightness: true }
+                    );
+                    nightModeScript.setCommittedTintVolume(this.committedTintTexture);
+                } else if (this._lastMultiRegionHash) {
                     this._lastMultiRegionHash = '';
                     this._lastActiveRegionId = null;
                     this._lastActiveRegionCommittedLength = -1;
@@ -651,49 +691,11 @@ export class BloomController {
                     );
                     nightModeScript.setCommittedTintVolume(null);
                 } else {
-                    const activeId = editor.activeLocalLightRegionId ?? null;
-                    const isDraftOnly = bloomBrush && activeId != null && String(activeId).startsWith('draft-');
-                    if (isDraftOnly) {
-                        // 首个亮灯区域草稿：仅 worldSpaceData 有笔刷点，按草稿点建体积并设亮度，实现实时 mask/体积预览
-                        const wsPoints = this.worldSpaceData.getAllPoints();
-                        const draftBrightness = typeof bloomSettings.bloomBrushBrightness === 'number'
-                            ? Math.max(-1, Math.min(1, bloomSettings.bloomBrushBrightness))
-                            : 0;
-                        const pointsWithBrightness: CommittedPointWithBrightness[] = wsPoints.map(p => ({
-                            position: p.position.clone(),
-                            radius: p.radius,
-                            brightness: draftBrightness
-                        }));
-                        const draftHash = `draft|ws=${this.isDrawing ? 0 : wsPoints.length}|b=${draftBrightness}`;
-                        if (this._lastMultiRegionHash !== draftHash) {
-                            this._lastMultiRegionHash = draftHash;
-                            const { texture, tintTexture, aabbMin, aabbMax } = buildCommittedBrightnessVolumeFromRegions(
-                                this.global.app.graphicsDevice,
-                                pointsWithBrightness,
-                                this.committedVolumeTexture,
-                                this.committedTintTexture
-                            );
-                            this.committedVolumeTexture = texture;
-                            this.committedTintTexture = tintTexture;
-                            this.committedVolumeAabbMin.copy(aabbMin);
-                            this.committedVolumeAabbMax.copy(aabbMax);
-                        }
-                        this._lastActiveRegionId = null;
-                        this._lastActiveRegionCommittedLength = -1;
-                        nightModeScript.setCommittedBrightnessVolume(
-                            this.committedVolumeTexture!,
-                            this.committedVolumeAabbMin,
-                            this.committedVolumeAabbMax,
-                            1,
-                            { volumeEncodedBrightness: true }
-                        );
-                        nightModeScript.setCommittedTintVolume(this.committedTintTexture);
-                    } else {
-                        // 旧逻辑：无 localLightRegions 且非草稿，使用单区域 worldSpaceData / activeRegion
-                        const activeRegion = activeId && !String(activeId).startsWith('draft-')
-                            ? (bloomSettings.localLightRegions ?? []).find((r: { id: string }) => r.id === activeId)
-                            : null;
-                        if (activeRegion?.worldSpace?.committed) {
+                    // 旧逻辑：无 localLightRegions 且非草稿，使用单区域 worldSpaceData / activeRegion
+                    const activeRegion = activeId && !String(activeId).startsWith('draft-')
+                        ? (bloomSettings.localLightRegions ?? []).find((r: { id: string }) => r.id === activeId)
+                        : null;
+                    if (activeRegion?.worldSpace?.committed) {
                         const committed = activeRegion.worldSpace.committed;
                         const colorBrightness = typeof (activeRegion as any).localBrightness === 'number'
                             ? Math.max(-1, Math.min(1, (activeRegion as any).localBrightness))
@@ -739,7 +741,6 @@ export class BloomController {
                             );
                         }
                     }
-                }
                 }
             }
         }
