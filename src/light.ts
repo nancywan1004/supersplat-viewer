@@ -545,7 +545,7 @@ const createSpotLightsFromSettings = (global: Global): void => {
 
     const existing = container!.children.filter(c => c.name.startsWith('spotLight_'));
     existing.forEach((child, i) => {
-        if (i >= spotConfigs.length) container!.removeChild(child);
+        if (i >= spotConfigs.length) (child as Entity).destroy();
     });
 };
 
@@ -604,7 +604,7 @@ const createPointLightsFromSettings = (global: Global): void => {
 
     const existing = container!.children.filter(c => c.name.startsWith('pointLight_'));
     existing.forEach((child, i) => {
-        if (i >= pointConfigs.length) container!.removeChild(child);
+        if (i >= pointConfigs.length) (child as Entity).destroy();
     });
 };
 
@@ -729,21 +729,21 @@ const updatePointLightsFromSettings = (global: Global): void => {
     if (!configs || !Array.isArray(configs)) {
         const c1 = app.root.findByName('pointLights') as Entity | null;
         const c2 = app.root.findByName('spotLights') as Entity | null;
-        if (c1) app.root.removeChild(c1);
-        if (c2) app.root.removeChild(c2);
+        if (c1) c1.destroy();
+        if (c2) c2.destroy();
         return;
     }
     const hasPoint = configs.some((c: any) => !isDirectionalLightConfig(c) && !isSpotLightConfig(c));
     const hasSpot = configs.some((c: any) => isSpotLightConfig(c));
     if (!hasPoint) {
         const c = app.root.findByName('pointLights') as Entity | null;
-        if (c) app.root.removeChild(c);
+        if (c) c.destroy();
     } else {
         createPointLightsFromSettings(global);
     }
     if (!hasSpot) {
         const c = app.root.findByName('spotLights') as Entity | null;
-        if (c) app.root.removeChild(c);
+        if (c) c.destroy();
     } else {
         createSpotLightsFromSettings(global);
     }
