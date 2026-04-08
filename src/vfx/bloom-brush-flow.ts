@@ -93,6 +93,7 @@ export class BloomBrushFlowController {
         const canvas = this.ctx.global.app.graphicsDevice.canvas as HTMLCanvasElement;
         pickWorldFromClientXY(this.ctx.global, e.clientX, e.clientY).then(worldPos => {
             if (!worldPos) return;
+            if (!Number.isFinite(worldPos.x) || !Number.isFinite(worldPos.y) || !Number.isFinite(worldPos.z)) return;
             const bloom = this.ctx.global.settings?.postEffectSettings?.bloom as { bloomBrushSize?: number } | undefined;
             const brushSize = Math.max(0.1, Number(bloom?.bloomBrushSize ?? 10));
             const cameraPos = this.ctx.global.camera.getPosition();
@@ -103,6 +104,7 @@ export class BloomBrushFlowController {
             const canvasHeight = canvas.clientHeight || canvas.height;
             if (canvasHeight <= 0 || distance <= 0.001) return;
             const worldRadius = ((brushSize * 2 * distance * Math.tan(fovRad / 2)) / canvasHeight) * BRUSH_WORLD_RADIUS_SCALE;
+            if (!Number.isFinite(worldRadius) || worldRadius <= 0) return;
             if (this.ctx.getIsErasing()) {
                 this.ctx.worldSpaceData.eraseAt(worldPos, worldRadius);
             } else {
@@ -132,6 +134,7 @@ export class BloomBrushFlowController {
         const canvas = this.ctx.global.app.graphicsDevice.canvas as HTMLCanvasElement;
         pickWorldFromClientXY(this.ctx.global, e.clientX, e.clientY).then(worldPos => {
             if (!worldPos) return;
+            if (!Number.isFinite(worldPos.x) || !Number.isFinite(worldPos.y) || !Number.isFinite(worldPos.z)) return;
             const bloom = this.ctx.global.settings?.postEffectSettings?.bloom as { bloomBrushSize?: number } | undefined;
             const brushSize = Math.max(0.1, Number(bloom?.bloomBrushSize ?? 10));
             const cameraPos = this.ctx.global.camera.getPosition();
@@ -142,6 +145,7 @@ export class BloomBrushFlowController {
             const canvasHeight = canvas.clientHeight || canvas.height;
             if (canvasHeight <= 0 || distance <= 0.001) return;
             const worldRadius = ((brushSize * 2 * distance * Math.tan(fovRad / 2)) / canvasHeight) * BRUSH_WORLD_RADIUS_SCALE;
+            if (!Number.isFinite(worldRadius) || worldRadius <= 0) return;
             if (this.ctx.getIsErasing()) {
                 this.ctx.worldSpaceData.eraseAt(worldPos, worldRadius);
             } else {

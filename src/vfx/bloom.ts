@@ -1238,18 +1238,23 @@ export class BloomController {
             sceneCam.worldToScreen(point.position, canvasWidth, canvasHeight, screenPos);
 
             if (screenPos.z < 0) continue;
+            if (!Number.isFinite(screenPos.x) || !Number.isFinite(screenPos.y) || !Number.isFinite(screenPos.z)) continue;
 
             const maskX = (screenPos.x / canvasWidth) * MASK_SIZE;
             const maskY = (1 - screenPos.y / canvasHeight) * MASK_SIZE;
 
             const cameraPos = camera.getPosition();
             const distance = point.position.distance(cameraPos);
-            if (distance < 0.001) continue;
+            if (!Number.isFinite(distance) || distance < 0.001) continue;
 
             const fovRad = ((sceneCam as { fov?: number }).fov ?? 60) * (Math.PI / 180);
-            const pixelsPerUnit = (canvasHeight / 2) / (distance * Math.tan(fovRad / 2));
-            const screenRadius = Math.max(2, point.radius * pixelsPerUnit);
+            const tanHalfFov = Math.tan(fovRad / 2);
+            if (!Number.isFinite(tanHalfFov) || Math.abs(tanHalfFov) < 1e-6) continue;
+            const pixelsPerUnit = (canvasHeight / 2) / (distance * tanHalfFov);
+            const pointRadius = Number.isFinite(point.radius) ? Math.max(0.01, point.radius) : 0.01;
+            const screenRadius = Math.max(2, pointRadius * pixelsPerUnit);
             const maskRadius = (screenRadius / canvasWidth) * MASK_SIZE;
+            if (!Number.isFinite(maskX) || !Number.isFinite(maskY) || !Number.isFinite(maskRadius) || maskRadius <= 0) continue;
 
             const gradient = ctx.createRadialGradient(
                 maskX, maskY, 0,
