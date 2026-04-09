@@ -1,6 +1,11 @@
 import { ExperienceSettings as V1, AnimTrack as AnimTrackV1 } from './schemas/v1';
 import { ExperienceSettings as V2, AnimTrack as AnimTrackV2, TransformFrame } from './schemas/v2';
-import { ensureBloom, ensureBloomEditorSession } from './protocol-settings-adapter';
+import {
+    ensureBloom,
+    normalizeHoistBloomSessionFields,
+    normalizeImportedAnnotation,
+    normalizeBloomLocalLightRegions
+} from './settings-serialize/settings-serialize-helper';
 import { Vec3 } from 'playcanvas';
 
 type LegacyKeyframes = AnimTrackV1['keyframes'];
@@ -347,120 +352,6 @@ const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: numb
     };
 };
 
-/** 规范化单个标注数据，确保反序列化所需字段存在 */
-const normalizeAnnotation = (ann: any): any => {
-    if (!ann || typeof ann !== 'object') return null;
-    const id = typeof ann.id === 'string' ? ann.id : `annotation-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-    const pos = Array.isArray(ann.position) && ann.position.length >= 3
-        ? [Number(ann.position[0]), Number(ann.position[1]), Number(ann.position[2])] as [number, number, number]
-        : [0, 0, 0] as [number, number, number];
-    const camera = ann.camera && typeof ann.camera === 'object' && ann.camera.initial
-        ? ann.camera
-        : { initial: { position: [0, 0, 0], target: [0, 0, 0], fov: 60 } };
-    return {
-        id,
-        position: pos,
-        title: typeof ann.title === 'string' ? ann.title : '',
-        text: typeof ann.text === 'string' ? ann.text : '',
-        imageUrl: typeof ann.imageUrl === 'string' ? ann.imageUrl : undefined,
-        showTitleWhenCollapsed: Boolean(ann.showTitleWhenCollapsed),
-        collapsed: Boolean(ann.collapsed),
-        extras: ann.extras && typeof ann.extras === 'object' ? ann.extras : {},
-        camera
-    };
-};
-
-/** 旧存盘把会话字段写在 bloom 上：导入时迁入 bloomEditorSession */
-const hoistBloomSessionFieldsIntoBloomEditorSession = (pes: any): void => {
-    if (!pes || typeof pes !== 'object') return;
-    const b = pes.bloom;
-    if (!b || typeof b !== 'object') return;
-    const move = (key: string) => {
-        if (!(key in b)) return;
-        if (!pes.bloomEditorSession || typeof pes.bloomEditorSession !== 'object') {
-            pes.bloomEditorSession = {};
-        }
-        (pes.bloomEditorSession as any)[key] = (b as any)[key];
-        delete (b as any)[key];
-    };
-    move('bloomBrush');
-    move('activeLocalLightRegionId');
-    move('draftLightRegionCenter');
-};
-
-/**
- * 规范化 bloom 的 LocalLightRegion 配置：
- * - 为新字段 localLightRegions 补齐默认值；
- * - 不再读取 legacy 的 worldSpacePoints；旧配置需先完成外部迁移。
- */
-const ensureBloomLocalLightRegions = (settings: V2): void => {
-    const pes: any = settings.postEffectSettings;
-    if (!pes || typeof pes !== 'object') return;
-    const bloom: any = pes.bloom;
-    if (!bloom || typeof bloom !== 'object') return;
-
-    const hasLocalRegions = Array.isArray(bloom.localLightRegions);
-
-    if (!hasLocalRegions) {
-        bloom.localLightRegions = [];
-    } else {
-        if (Array.isArray(bloom.localLightRegions)) {
-            bloom.localLightRegions = bloom.localLightRegions.map((r: any, index: number) => {
-                if (!r || typeof r !== 'object') return r;
-                // 兼容老配置：若缺失 id/name/worldSpace/localBrightness 则按最小集补齐
-                if (typeof r.id !== 'string') {
-                    r.id = `region-${index + 1}`;
-                }
-                if (typeof r.name !== 'string') {
-                    r.name = `亮灯区域${String(index + 1).padStart(2, '0')}`;
-                }
-                if (!r.worldSpace || typeof r.worldSpace !== 'object') {
-                    r.worldSpace = { points: [], committed: [], committedBrightness: 0 };
-                }
-                if (typeof r.localBrightness !== 'number') {
-                    r.localBrightness = typeof r.worldSpace.committedBrightness === 'number'
-                        ? r.worldSpace.committedBrightness
-                        : 1;
-                }
-                if (!Array.isArray(r.tintColor) || r.tintColor.length !== 3) {
-                    r.tintColor = [1, 1, 1];
-                }
-                if (typeof r.tintBlend !== 'number') {
-                    r.tintBlend = 0;
-                }
-                if (r.linkedLightId === undefined) {
-                    r.linkedLightId = null;
-                }
-                return r;
-            });
-        }
-    }
-
-    // 配置文件不应含 draft-* 区域：导入时剔除
-    if (Array.isArray(bloom.localLightRegions)) {
-        bloom.localLightRegions = bloom.localLightRegions.filter(
-            (r: any) => r && typeof r.id === 'string' && !String(r.id).startsWith('draft-')
-        );
-    }
-
-    const ses = ensureBloomEditorSession(settings as any);
-    if (ses.activeLocalLightRegionId == null) {
-        ses.activeLocalLightRegionId =
-            bloom.localLightRegions.length > 0 ? bloom.localLightRegions[0].id : null;
-    }
-
-    const active = ses.activeLocalLightRegionId;
-    if (typeof active === 'string') {
-        if (active.startsWith('draft-')
-            || !bloom.localLightRegions.some((r: any) => r && r.id === active)) {
-            ses.activeLocalLightRegionId =
-                bloom.localLightRegions.length > 0 ? bloom.localLightRegions[0].id : null;
-        }
-    }
-
-    ses.bloomBrush = false;
-    ses.draftLightRegionCenter = null;
-};
 
 // import a json object to conform to the latest settings schema. settings is assumed to be one of the well-formed schemas
 const importSettings = (settings: any): V2 => {
@@ -485,7 +376,7 @@ const importSettings = (settings: any): V2 => {
             if (!Array.isArray(result.annotations)) {
                 result.annotations = [];
             } else {
-                result.annotations = result.annotations.map((ann: any) => normalizeAnnotation(ann)).filter(Boolean);
+                result.annotations = result.annotations.map((ann: any) => normalizeImportedAnnotation(ann)).filter(Boolean);
             }
         } else {
             throw new Error(`Unsupported experience settings version: ${version}`);
@@ -493,12 +384,12 @@ const importSettings = (settings: any): V2 => {
     }
 
     if (result.postEffectSettings && typeof result.postEffectSettings === 'object') {
-        hoistBloomSessionFieldsIntoBloomEditorSession(result.postEffectSettings);
+        normalizeHoistBloomSessionFields(result.postEffectSettings as any);
     }
 
     // 先保证 bloom 对象存在，再规范化区域与会话
     ensureBloom(result);
-    ensureBloomLocalLightRegions(result);
+    normalizeBloomLocalLightRegions(result);
 
     return result;
 };

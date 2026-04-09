@@ -4,7 +4,7 @@ import { Tooltip } from '../tooltip';
 import { Global } from '../types';
 import { isLodMetaFile } from '../loaders/lod-loader';
 import type { ExperienceSettings } from '../schemas/v2';
-import { serializeExperienceSettings, getComparableSettingsString, applySettingsSnapshot } from '../settings-serialize';
+import { serializeExperienceSettings, getComparableSettingsString, applySettingsSnapshot } from '../settings-serialize/settings-serialize';
 import { clearScenePlacedEntities, restoreSceneAssetsFromSettings } from '../asset-placement-handler';
 import {
     initEditHistory,
@@ -28,7 +28,7 @@ import { initEditBottomToolbarUI } from './edit-bottom-toolbar';
 import type { Annotation } from '../settings';
 import { getEditUiTransport, sendEditProtocolMessage } from './edit-ui-transport';
 import { setLightsVisualVisible } from '../light';
-import { applyLightToggleAll, applyLightToggle } from '../protocol-settings-adapter';
+import { applyLightToggleAll, applyLightToggle } from '../editor-modules/protocol-adapters/environment-protocol-adapter';
 
 // Initialize the touch joystick for fly mode camera control
 const initJoystick = (

@@ -10,7 +10,7 @@ import {
 import type { PostEffectSettings } from '../settings';
 import type { LocalLightRegion, WorldSpaceBloomRegionJSON, ExperienceSettings } from '../schemas/v2';
 import type { Global } from '../types';
-import { ensureBloomEditorSession } from '../protocol-settings-adapter';
+import { ensureBloomEditorSession } from '../settings-serialize/settings-serialize-helper';
 import { BloomBrushPainter } from './bloom-brush-painter';
 import { WorldSpaceBloomData } from './world-space-bloom-data';
 import { BloomBrushFilter, MAX_POINTS } from './bloom-brush-filter';

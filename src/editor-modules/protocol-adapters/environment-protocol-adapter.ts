@@ -1,155 +1,26 @@
 /**
- * 协议 → ExperienceSettings / PostEffectSettings / LightingSettings 映射层
- * 将 LIGHT_* / BLOOM_* / SHADOW_* / VFX_* 等协议事件转换为对 settings/state 的写入与 events 派发，
- * 与 UI 逻辑解耦：message-bridge 与内部 UI 均可通过本模块复用同一套映射逻辑。
+ * 环境模块协议映射：LIGHT_* / BLOOM_* / SHADOW_* 及局部亮灯笔刷联动的 settings 写入与事件派发。
+ * 由 EnvironmentFacade 调用；其它模块如需相同语义可直接 import 本文件。
  */
 
-import type { Global } from './types';
-import type { BloomEditorSession, ExperienceSettings } from './schemas/v2';
-import type { PointLightConfig, DirectionalLightConfig, SpotLightConfig } from './schemas/v2';
-import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
-import { updatePointLightsFromSettings } from './light';
-import { getPositionInFrontOfCamera } from './asset-placement-handler';
+import { getPositionInFrontOfCamera } from '../../asset-placement-handler';
+import { updatePointLightsFromSettings } from '../../light';
+import type { ExperienceSettings } from '../../schemas/v2';
+import {
+    ensureBloom,
+    ensureBloomEditorSession,
+    ensureLighting,
+    ensureNightMode,
+    ensureShadow,
+    type LightWithId
+} from '../../settings-serialize/settings-serialize-helper';
+import type { Global } from '../../types';
 
-/** 协议中光源项带 id（用于 LIGHT_SELECT / LIGHT_INTENSITY_UPDATE 等） */
-type LightWithId = (PointLightConfig | DirectionalLightConfig | SpotLightConfig) & { id?: string };
-
-// --- 默认值（与 post-effect-ui / settings 一致） ---
-
-const DEFAULT_BLOOM = {
-    enabled: false,
-    intensity: 0.1,
-    blurLevel: 4,
-    threshold: 0.2,
-    bloomDebug: false,
-    bloomScope: 'local' as const,
-    bloomBrushSize: 30,
-    bloomBrushBrightness: 1
-} as const;
-
-const DEFAULT_BLOOM_EDITOR_SESSION: BloomEditorSession = {
-    bloomBrush: false,
-    activeLocalLightRegionId: null,
-    draftLightRegionCenter: null
-};
-
-const DEFAULT_SHADOW = {
-    enabled: true,
-    darken: 0,
-    castShadows: true,
-    debugVisual: false,
-    sphereRadius: 0.5
-} as const;
-
-const DEFAULT_REVEAL_EFFECT = {
-    type: 'none' as const,
-    radius: 10,
-    autoStart: true,
-    totalDuration: DEFAULT_VFX_TOTAL_DURATION
-};
-
-// --- ensure 系列：保证 settings 上存在对应结构 ---
-
-export function ensureNightMode(settings: ExperienceSettings): { fade?: number } {
-    if (!settings.nightMode || typeof settings.nightMode !== 'object') {
-        (settings as Record<string, unknown>).nightMode = { fade: 0 };
-    }
-    return settings.nightMode!;
-}
-
-export function ensureLighting(settings: ExperienceSettings): { lights: LightWithId[] } {
-    if (!(settings as Record<string, unknown>).lighting) {
-        (settings as Record<string, unknown>).lighting = { lights: [] };
-    }
-    const lighting = (settings as Record<string, unknown>).lighting as { lights: LightWithId[] };
-    if (!Array.isArray(lighting.lights)) lighting.lights = [];
-    // 确保每盏光源（尤其是 internal UI 新建的点光/聚光）都有一个 id，便于场景/列表/Gizmo 之间通过 id 关联
-    lighting.lights.forEach((light, index) => {
-        if (!light.id) {
-            (light as LightWithId).id = `light-${index}`;
-        }
-    });
-    return lighting;
-}
-
-/** 判断是否为「用户添加的可控光源」：排除场景内默认平行光，仅保留点光/聚光灯 */
 function isUserControllableLight(light: LightWithId): boolean {
     const anyLight = light as any;
     const type = anyLight.type as string | undefined;
-    // 约定：directional 为场景主方向光，始终不参与 LIGHT_TOGGLE / LIGHT_TOGGLE_ALL
     return type === 'point' || type === 'spot' || type === undefined;
 }
-
-export function ensurePostEffectSettings(settings: ExperienceSettings): NonNullable<ExperienceSettings['postEffectSettings']> {
-    if (!settings.postEffectSettings || typeof settings.postEffectSettings !== 'object') {
-        (settings as Record<string, unknown>).postEffectSettings = {};
-    }
-    return settings.postEffectSettings!;
-}
-
-export function ensureBloomEditorSession(settings: ExperienceSettings): BloomEditorSession {
-    const pe = ensurePostEffectSettings(settings);
-    if (!pe.bloomEditorSession || typeof pe.bloomEditorSession !== 'object') {
-        (pe as Record<string, unknown>).bloomEditorSession = { ...DEFAULT_BLOOM_EDITOR_SESSION };
-    }
-    const s = pe.bloomEditorSession as Record<string, unknown>;
-    if (typeof s.bloomBrush !== 'boolean') s.bloomBrush = false;
-    if (s.activeLocalLightRegionId === undefined) s.activeLocalLightRegionId = null;
-    if (s.draftLightRegionCenter === undefined) s.draftLightRegionCenter = null;
-    return pe.bloomEditorSession as BloomEditorSession;
-}
-
-export function ensureBloom(settings: ExperienceSettings): NonNullable<ExperienceSettings['postEffectSettings']>['bloom'] {
-    const pe = ensurePostEffectSettings(settings);
-    if (!pe.bloom || typeof pe.bloom !== 'object') {
-        (pe as Record<string, unknown>).bloom = { ...DEFAULT_BLOOM };
-    }
-    const b = pe.bloom as Record<string, unknown>;
-    if (b.threshold === undefined) b.threshold = 0.2;
-    if (b.bloomDebug === undefined) b.bloomDebug = false;
-    if (b.bloomScope !== 'global' && b.bloomScope !== 'local') b.bloomScope = 'local';
-    if (b.bloomBrushSize === undefined) b.bloomBrushSize = 30;
-    if (typeof b.bloomBrushBrightness !== 'number') b.bloomBrushBrightness = 1;
-    if (typeof b.blurLevel !== 'number') b.blurLevel = 4;
-    if (typeof b.intensity !== 'number') b.intensity = 0.1;
-    if (!Array.isArray(b.localLightRegions)) b.localLightRegions = [];
-    if (typeof (b as any).localLightsEnabled !== 'boolean') (b as any).localLightsEnabled = true;
-    // 旧 migrate / 存盘曾写 intensity:1（运行时钳到 0.2）；产品默认强度 0.1、blur 4、笔刷亮度 1
-    if (Number(b.intensity) === 1) {
-        b.intensity = 0.1;
-        if (Number(b.blurLevel) === 2) {
-            b.blurLevel = 4;
-        }
-        if (Number(b.bloomBrushBrightness) === 0) {
-            b.bloomBrushBrightness = 1;
-        }
-    }
-    return pe.bloom!;
-}
-
-export function ensureShadow(settings: ExperienceSettings): NonNullable<ExperienceSettings['postEffectSettings']>['shadow'] {
-    const pe = ensurePostEffectSettings(settings);
-    const s = (pe as Record<string, unknown>).shadow;
-    if (!s || typeof s !== 'object') {
-        (pe as Record<string, unknown>).shadow = { ...DEFAULT_SHADOW };
-    } else {
-        const sh = (pe as Record<string, unknown>).shadow as Record<string, unknown>;
-        if (typeof sh.darken !== 'number') sh.darken = 0;
-        if (sh.castShadows === undefined) sh.castShadows = true;
-        if (sh.debugVisual === undefined) sh.debugVisual = false;
-        if (typeof sh.sphereRadius !== 'number') sh.sphereRadius = 0.5;
-    }
-    return (pe as Record<string, unknown>).shadow as NonNullable<ExperienceSettings['postEffectSettings']>['shadow'];
-}
-
-export function ensureRevealEffect(settings: ExperienceSettings): NonNullable<ExperienceSettings['revealEffect']> {
-    if (!settings.revealEffect || typeof settings.revealEffect !== 'object') {
-        (settings as Record<string, unknown>).revealEffect = { ...DEFAULT_REVEAL_EFFECT };
-    }
-    return settings.revealEffect!;
-}
-
-// --- LIGHT 映射 ---
 
 /** LIGHT_GLOBAL_SET：写 nightMode.fade，并触发 nightFade:set */
 export function applyLightGlobalSet(global: Global, value: number): void {
@@ -291,7 +162,6 @@ export function applyLightDetail(
         return;
     }
     if (!changed) return;
-    // 与 lighting-ui 一致：必须同步重建/更新场景内 Light 组件，仅改 settings 不会反映到画面上
     updatePointLightsFromSettings(global);
     global.events.fire('lighting:changed');
     global.events.fire('postEffect:changed');
@@ -333,11 +203,8 @@ export function applyLightToggleAll(global: Global, enabled: boolean): void {
     if (!changed) return;
     updatePointLightsFromSettings(global);
     global.events.fire('lighting:changed');
-    // 全局「所有光照开关」同时作为局部亮灯区域的主开关：
-    // 关闭时，bloom.localLightsEnabled=false，所有 LocalLightRegion 在 Bloom 中整体失效。
     const bloom = ensureBloom(settings) as any;
     bloom.localLightsEnabled = enabled;
-    // Bloom 配置/体积依赖灯光显隐，需要重新配置 postEffect 管线并强制渲染一帧
     global.events.fire('postEffect:changed');
 }
 
@@ -356,10 +223,7 @@ export function applyLightToggle(global: Global, id: string, enabled: boolean): 
     global.events.fire('postEffect:changed');
 }
 
-// --- BLOOM 映射 ---
-
-/** BLOOM_INTENSITY_UPDATE（协议值 0–16 与内部 0–0.2 均可支持：若 > 1 则视为 0–16 并归一化到 0–0.2）。
- * 同时写 bloom.enabled：传 0 关辉光，非零开辉光并设强度，可完全取代 BLOOM_SET。 */
+/** BLOOM_INTENSITY_UPDATE（协议值 0–16 与内部 0–0.2 均可支持：若 > 1 则视为 0–16 并归一化到 0–0.2）。 */
 export function applyBloomIntensityUpdate(global: Global, value: number): void {
     const settings = global.settings as ExperienceSettings;
     const b = ensureBloom(settings);
@@ -493,7 +357,6 @@ export function applyBloomLocalLightRegionDelete(global: Global, regionId: strin
             ? (b as any).localLightRegions[0].id
             : null;
     }
-    // 若该区域绑定了光源，则通过 lighting 配置同步删除对应 light
     if (linkedLightId) {
         try {
             const lighting = ensureLighting(settings);
@@ -504,7 +367,6 @@ export function applyBloomLocalLightRegionDelete(global: Global, regionId: strin
                     lightsAny.splice(idx, 1);
                     updatePointLightsFromSettings(global);
                     global.events.fire('lighting:changed');
-                    // 若当前选中的光源就是被联动删除的那一盏，则清空选中状态
                     const currentId = (global.state as any).selectedLightId ?? null;
                     if (currentId && currentId === linkedLightId) {
                         (global.state as any).selectedLightId = null;
@@ -519,8 +381,6 @@ export function applyBloomLocalLightRegionDelete(global: Global, regionId: strin
     global.events.fire('postEffect:changed');
     global.events.fire('bloomLocalLightRegion:listChanged');
 }
-
-// --- SHADOW 映射 ---
 
 /** SHADOW_SET */
 export function applyShadowSet(global: Global, enabled: boolean): void {
@@ -538,11 +398,7 @@ export function applyShadowIntensityUpdate(global: Global, value: number): void 
     global.events.fire('postEffect:changed');
 }
 
-/** SHADOW_DIRECTION_SET：调节场景主方向光的航向角（yaw，度）
- * - 优先写入 settings.lighting.lights 中的 directional 配置（如存在）
- * - 同步写入 postEffectSettings.shadow.lightYaw 以兼容旧配置
- * - 调整后通过 updatePointLightsFromSettings 立即应用到场景中的平行光实体
- */
+/** SHADOW_DIRECTION_SET：调节场景主方向光的航向角（yaw，度） */
 export function applyShadowDirectionSet(global: Global, value: number): void {
     const settings = global.settings as ExperienceSettings;
     const yaw = Math.max(0, Math.min(360, Number.isFinite(value) ? value : 0));
@@ -561,22 +417,4 @@ export function applyShadowDirectionSet(global: Global, value: number): void {
 
     updatePointLightsFromSettings(global);
     global.events.fire('lighting:changed');
-}
-
-// --- VFX 映射 ---
-
-/** VFX_TYPE_SET：写 settings.revealEffect.type、state.vfxType，并触发 revealConfigChanged */
-export function applyVfxTypeSet(global: Global, value: string): void {
-    const settings = global.settings as ExperienceSettings;
-    const rev = ensureRevealEffect(settings);
-    (rev as Record<string, unknown>).type = value;
-    (global.state as Record<string, unknown>).vfxType = value;
-    global.events.fire('revealConfigChanged', { type: value });
-}
-
-/** VFX_EXIT：强制停止当前特效播放，但保留配置（不改 settings.revealEffect.type）。 */
-export function applyVfxExit(global: Global): void {
-    (global.state as Record<string, unknown>).vfxActive = false;
-    // 交由 RevealController 执行停播与恢复 NightMode；不触碰 revealEffect.type（保证后续保存仍保留已选特效）
-    global.events.fire('vfxExit');
 }

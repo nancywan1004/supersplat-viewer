@@ -3,7 +3,7 @@ import * as pc from 'playcanvas';
 import { Vec3, Quat, StandardMaterial, CULLFACE_NONE } from 'playcanvas';
 import type { Global } from './types';
 import type { AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from './types';
-import { getSelectedSceneEntity } from './state-helpers';
+import { getSelectedSceneEntity } from './state-selectors';
 import { Entity } from 'playcanvas';
 import { loadGsplatAsset } from './loaders/gsplat-asset-loader';
 

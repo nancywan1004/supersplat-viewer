@@ -1,3 +1,4 @@
+import { applyVfxExit, applyVfxTypeSet } from './protocol-adapters/effects-protocol-adapter';
 import type { Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 
 class EffectsFacade implements ModuleFacade {
@@ -17,8 +18,24 @@ class EffectsFacade implements ModuleFacade {
     }
 
     handleCommand(ctx: ModuleContext, command: ModuleCommand): void {
-        // phase-c 先收口生命周期，命令逻辑仍由既有 adapter/bridge 承担，避免重复派发
-        if (command.type && ctx.editMode !== undefined) return;
+        const { global, events } = ctx;
+        switch (command.type) {
+        case 'VFX_TYPE_SET':
+            if (typeof command.payload === 'string') {
+                applyVfxTypeSet(global, command.payload);
+            }
+            break;
+        case 'VFX_EXIT':
+            applyVfxExit(global);
+            break;
+        case 'VFX_RESTART': {
+            const restartAnim = (command.payload as { restartAnim?: boolean } | undefined)?.restartAnim !== false;
+            events.fire('revealRestart', restartAnim);
+            break;
+        }
+        default:
+            break;
+        }
     }
 
     // effects 模块无实体 id 选中语义，保留空实现满足统一接口

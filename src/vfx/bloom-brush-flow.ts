@@ -3,7 +3,7 @@ import type { Global } from '../types';
 import type { ExperienceSettings } from '../schemas/v2';
 import { pickWorldFromClientXY } from '../picker';
 import { updatePointLightsFromSettings } from '../light';
-import { ensureBloom, ensureBloomEditorSession } from '../protocol-settings-adapter';
+import { ensureBloom, ensureBloomEditorSession } from '../settings-serialize/settings-serialize-helper';
 import type { WorldSpaceBloomData } from './world-space-bloom-data';
 
 /** 屏幕笔刷半径映射到世界半径时的缩放系数：<1 可减少“2D 预览偏大、3D 结果偏肥” */

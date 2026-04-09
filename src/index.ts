@@ -415,10 +415,10 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         });
     }
 
-    // Create the viewer
-    initPostMessageBridge(global);
-
+    // Viewer 构造内会 initCommandRegistry 并注册各 facade；postMessage 监听须在此之后挂载，否则编辑类协议无法经 registry 单路径执行。
     const viewer = new Viewer(global, gsplatLoad, skyboxLoad);
+
+    initPostMessageBridge(global);
 
     // 将 viewer 存储到 app 上，方便其他模块访问（如 seekAnimToTimeAndApply）
     (app as any).viewer = viewer;

@@ -1,12 +1,12 @@
-import type { Global } from './types';
-import type { ExperienceSettings } from './schemas/v2';
-import type { ScenePlacedItem } from './types';
-import type { AnnotationManager } from './annotation-toolbar/annotation-manager';
+import type { Global, ScenePlacedItem } from '../types';
+import type { ExperienceSettings } from '../schemas/v2';
+import type { AnnotationManager } from '../annotation-toolbar/annotation-manager';
+import { DEFAULT_BLOOM, DEFAULT_SHADOW } from './settings-serialize-configs';
 
 const defaultPostEffectShadow = () => ({
-    enabled: true,
-    darken: 0,
-    debugVisual: false,
+    enabled: DEFAULT_SHADOW.enabled,
+    darken: DEFAULT_SHADOW.darken,
+    debugVisual: DEFAULT_SHADOW.debugVisual,
     castShadows: false
 });
 

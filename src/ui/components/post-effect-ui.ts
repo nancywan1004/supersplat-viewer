@@ -6,9 +6,9 @@ import {
     ensureBloom as ensureBloomFromAdapter,
     ensureBloomEditorSession,
     ensureShadow as ensureShadowFromAdapter,
-    ensureLighting as ensureLightingForLighting,
-    applyShadowDirectionSet
-} from '../../protocol-settings-adapter';
+    ensureLighting as ensureLightingForLighting
+} from '../../settings-serialize/settings-serialize-helper';
+import { applyShadowDirectionSet } from '../../editor-modules/protocol-adapters/environment-protocol-adapter';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
 const POST_EFFECT_PANEL_HTML = `

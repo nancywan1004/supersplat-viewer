@@ -1,6 +1,6 @@
 import type { Global } from './types';
 import type { ExperienceSettings } from './schemas/v2';
-import { serializeExperienceSettings, applySettingsSnapshot } from './settings-serialize';
+import { serializeExperienceSettings, applySettingsSnapshot } from './settings-serialize/settings-serialize';
 import { clearScenePlacedEntities, restoreSceneAssetsFromSettings } from './asset-placement-handler';
 import type { AnnotationManager } from './annotation-toolbar/annotation-manager';
 import { updatePointLightsFromSettings } from './light';

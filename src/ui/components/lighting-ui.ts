@@ -4,7 +4,7 @@ import { updatePointLightsFromSettings, setLightsVisualVisible } from '../../lig
 import { getPositionInFrontOfCamera } from '../../asset-placement-handler';
 import type { PointLightConfig, DirectionalLightConfig, SpotLightConfig } from '../../schemas/v2';
 import { pushEditHistory } from '../../edit-history';
-import { ensureNightMode, ensureLighting, ensureBloom, ensureBloomEditorSession } from '../../protocol-settings-adapter';
+import { ensureNightMode, ensureLighting, ensureBloom, ensureBloomEditorSession } from '../../settings-serialize/settings-serialize-helper';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
 const LIGHTING_PANEL_HTML = `

@@ -1,14 +1,49 @@
+import type { AnnotationData } from '../annotation-toolbar/types';
 import type { Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
+
+type AnnotationManagerApi = {
+    startPlacementWithId?: (id: string) => void;
+    cancelAnnotation?: () => void;
+    confirmAnnotation?: (form: Record<string, unknown>) => void;
+    updateAnnotation?: (id: string, form: Record<string, unknown>) => void;
+    deleteAnnotation?: (id: string) => void;
+    selectAnnotation?: (id: string, opts: { showGizmo: boolean; source: SelectionSource }) => void;
+    deselectAnnotation?: () => void;
+    getPlaceholderAnnotation?: () =>
+        | { id: string; updateContent?: (form: Record<string, unknown>) => void }
+        | null
+        | undefined;
+    enableGizmoForSelected?: () => void;
+    disableGizmoForSelected?: () => void;
+};
+
+function formDataFromPartial(value: Partial<AnnotationData> | undefined, allowEmpty: boolean) {
+    if (!value) {
+        return allowEmpty
+            ? { title: '', text: '', showTitleWhenCollapsed: false }
+            : null;
+    }
+    return {
+        title: value.title ?? '',
+        text: value.text ?? '',
+        imageUrl: value.imageUrl === null ? '' : value.imageUrl,
+        showTitleWhenCollapsed: value.showTitleWhenCollapsed ?? false
+    };
+}
 
 class AnnotationFacade implements ModuleFacade {
     readonly module = 'annotation' as const;
+
+    private manager(ctx: ModuleContext): AnnotationManagerApi | undefined {
+        return (ctx.global as { annotationManager?: AnnotationManagerApi }).annotationManager;
+    }
 
     onEnter(ctx: ModuleContext): void {
         ctx.events.fire('annotationFacade:enter');
     }
 
     onExit(ctx: ModuleContext): void {
-        const manager = (ctx.global as any).annotationManager;
+        const manager = this.manager(ctx);
         // 兜底清理：无论 UI 是否挂载都保证选中与 gizmo 收敛
         ctx.events.fire('gizmo:detach');
         manager?.deselectAnnotation?.();
@@ -21,14 +56,79 @@ class AnnotationFacade implements ModuleFacade {
     }
 
     handleCommand(ctx: ModuleContext, command: ModuleCommand): void {
-        if (command.type === 'ANNOTATION_EDIT') {
-            const id = (command.payload as any)?.id ?? null;
-            this.selectById(ctx, id, command.source ?? 'unknown');
+        const { state } = ctx;
+        const am = this.manager(ctx);
+        const src: SelectionSource = command.source ?? 'host';
+
+        switch (command.type) {
+        case 'ANNOTATION_PLACEMENT_START': {
+            const id = (command.payload as { id?: string } | undefined)?.id;
+            if (typeof id === 'string') am?.startPlacementWithId?.(id);
+            break;
+        }
+        case 'ANNOTATION_PLACEMENT_CANCEL':
+            am?.cancelAnnotation?.();
+            break;
+        case 'ANNOTATION_CONFIRM': {
+            const pl = command.payload as { id?: string; value?: Partial<AnnotationData> } | undefined;
+            const id = pl?.id;
+            if (!id || !am) break;
+            const formData = formDataFromPartial(pl?.value, true);
+            if (!formData) break;
+            const placeholder = am.getPlaceholderAnnotation?.();
+            if (placeholder && placeholder.id === id) {
+                am.confirmAnnotation?.(formData);
+            } else {
+                am.updateAnnotation?.(id, formData);
+            }
+            break;
+        }
+        case 'ANNOTATION_UPDATE': {
+            const pl = command.payload as { id?: string; value?: Partial<AnnotationData> } | undefined;
+            const id = pl?.id;
+            const value = pl?.value;
+            if (!id || !value || !am) break;
+            const formData = formDataFromPartial(value, false);
+            if (!formData) break;
+            const placeholder = am.getPlaceholderAnnotation?.();
+            if (placeholder && placeholder.id === id) {
+                placeholder.updateContent?.(formData);
+            } else {
+                am.updateAnnotation?.(id, formData);
+            }
+            break;
+        }
+        case 'ANNOTATION_DELETE': {
+            const id = (command.payload as { id?: string } | undefined)?.id;
+            if (typeof id === 'string') am?.deleteAnnotation?.(id);
+            break;
+        }
+        case 'ANNOTATION_EDIT': {
+            const id = (command.payload as { id?: string } | undefined)?.id ?? null;
+            if (!id) return;
+            this.selectById(ctx, id, src);
+            ctx.events.fire('annotationEdit:show');
+            break;
+        }
+        case 'ANNOTATION_TRANSFORM_MODE': {
+            if (!am) break;
+            const raw = (command.payload as { value?: 'move' | null } | undefined)?.value;
+            const mode = raw === 'move' ? 'move' : null;
+            state.annotationTransformMode = mode;
+            if (mode === 'move') {
+                am.enableGizmoForSelected?.();
+            } else {
+                am.disableGizmoForSelected?.();
+            }
+            break;
+        }
+        default:
+            break;
         }
     }
 
     selectById(ctx: ModuleContext, id: string | null, source: SelectionSource): void {
-        const manager = (ctx.global as any).annotationManager;
+        const manager = this.manager(ctx);
         if (!id) {
             manager?.deselectAnnotation?.();
             return;

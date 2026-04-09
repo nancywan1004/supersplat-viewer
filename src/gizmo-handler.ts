@@ -7,7 +7,7 @@ import * as pc from 'playcanvas';
 import type { AppBase } from 'playcanvas';
 import type { Global } from './types';
 import type { AssetTransformMode, LightTransformMode } from './types';
-import { getSelectedSceneEntity } from './state-helpers';
+import { getSelectedSceneEntity } from './state-selectors';
 import { pushEditHistory } from './edit-history';
 import { updatePointLightsFromSettings } from './light';
 

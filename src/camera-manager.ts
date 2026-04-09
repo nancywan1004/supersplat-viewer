@@ -25,7 +25,7 @@ import { CameraMode, Global } from './types';
 import { SphereConstraint } from './camera-constraints/sphere-constraint';
 import { BoxConstraint } from './camera-constraints/box-constraint';
 import { selectNearestLightAtPosition } from './light';
-import { getSelectedSceneEntity } from './state-helpers';
+import { getSelectedSceneEntity } from './state-selectors';
 
 const tmpCamera = new Camera();
 const tmpv = new Vec3();

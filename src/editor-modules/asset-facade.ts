@@ -1,4 +1,4 @@
-import type { Global, ModuleCommand, ModuleContext, ModuleFacade } from '../types';
+import type { AssetLibraryItem, Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 
 class AssetFacade implements ModuleFacade {
     readonly module = 'asset' as const;
@@ -33,15 +33,87 @@ class AssetFacade implements ModuleFacade {
     }
 
     handleCommand(ctx: ModuleContext, command: ModuleCommand): void {
-        if (command.type === 'ASSET_SELECT') {
-            const id = (command.payload as any)?.id ?? null;
-            this.selectById(ctx, id, command.source ?? 'unknown');
+        const { state, events } = ctx;
+        const src: SelectionSource = command.source ?? 'host';
+
+        switch (command.type) {
+        case 'ASSET_SELECT': {
+            const id = (command.payload as { id?: string | null } | undefined)?.id ?? null;
+            this.selectById(ctx, id, src);
+            break;
+        }
+        case 'ASSET_PLACE': {
+            const raw = (command.payload as { value?: unknown } | undefined)?.value;
+            if (!raw || typeof raw !== 'object') return;
+            const incoming = raw as { id?: string } & Partial<AssetLibraryItem>;
+            let value: AssetLibraryItem | null = null;
+            if (incoming.id && Array.isArray(state.uploadedAssets)) {
+                value = (state.uploadedAssets as AssetLibraryItem[]).find((it) => it.id === incoming.id) ?? null;
+            }
+            const finalValue = value ?? (raw as AssetLibraryItem);
+            const sceneEntityId =
+                typeof incoming.id === 'string' && incoming.id.trim().length > 0 ? incoming.id : undefined;
+            events.fire('assetPlacement:place', { value: finalValue, sceneEntityId });
+            break;
+        }
+        case 'ASSET_SHOW_HIDE_SET': {
+            const pl = command.payload as { id?: string; value?: boolean } | undefined;
+            if (!Array.isArray(state.scenePlacedEntities) || typeof pl?.id !== 'string' || typeof pl?.value !== 'boolean') {
+                return;
+            }
+            const entry = state.scenePlacedEntities.find((it) => it?.id === pl.id);
+            if (entry?.entity) {
+                entry.visible = pl.value;
+                entry.entity.enabled = pl.value;
+            }
+            break;
+        }
+        case 'ASSETS_SHOW_HIDE_SET': {
+            const visible = (command.payload as { value?: boolean } | undefined)?.value;
+            if (typeof visible !== 'boolean' || !Array.isArray(state.scenePlacedEntities)) return;
+            state.scenePlacedEntities.forEach((item) => {
+                if (item?.entity) {
+                    item.visible = visible;
+                    item.entity.enabled = visible;
+                }
+            });
+            break;
+        }
+        case 'ASSET_COPY': {
+            const pl = command.payload as { id?: string; copyId?: string } | undefined;
+            if (typeof pl?.id !== 'string' || typeof pl?.copyId !== 'string' || pl.copyId.trim().length === 0) return;
+            state.selectedSceneEntityId = pl.id;
+            events.fire('sceneAsset:selected', { source: src });
+            events.fire('assetEdit:copy', { copyId: pl.copyId });
+            break;
+        }
+        case 'ASSET_DELETE': {
+            const id = (command.payload as { id?: string } | undefined)?.id;
+            if (typeof id !== 'string') return;
+            state.selectedSceneEntityId = id;
+            events.fire('sceneAsset:selected', { source: src });
+            events.fire('assetEdit:delete');
+            break;
+        }
+        case 'ASSET_TRANSFORM_MODE': {
+            const value = (command.payload as { value?: 'move' | 'rotate' | 'scale' } | undefined)?.value;
+            if (value === 'move' || value === 'rotate' || value === 'scale') {
+                state.assetTransformMode = value;
+                events.fire('assetTransformMode:changed', value);
+            } else {
+                state.assetTransformMode = undefined;
+                events.fire('assetTransformMode:changed', undefined as any);
+            }
+            break;
+        }
+        default:
+            break;
         }
     }
 
-    selectById(ctx: ModuleContext, id: string | null, _source: 'host' | 'scene' | 'unknown'): void {
+    selectById(ctx: ModuleContext, id: string | null, source: 'host' | 'scene' | 'unknown'): void {
         ctx.state.selectedSceneEntityId = id;
-        ctx.events.fire('sceneAsset:selected');
+        ctx.events.fire('sceneAsset:selected', { source });
     }
 }
 
