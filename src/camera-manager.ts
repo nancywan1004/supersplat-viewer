@@ -31,6 +31,8 @@ const tmpCamera = new Camera();
 const tmpv = new Vec3();
 /** F 键 / inputEvent「frame」分支里，用于承接「选中项世界坐标」的临时 Vec3（避免每帧分配）。 */
 const tmpFocus = new Vec3();
+/** 资产/选中聚焦时使用固定距离，避免按目标大小比例缩放。 */
+const ORBIT_FOCUS_FIXED_DISTANCE = 0.5;
 
 type FocusTarget = 'asset' | 'annotation' | 'light';
 
@@ -449,7 +451,7 @@ class CameraManager {
 
         /**
          * 将 Orbit 相机对准某一世界坐标点（目标落在画面中心附近）。
-         * 与双击场景拾取 `pick` 共用：沿当前视线方向收束距离，`targetDistance = max(1, 距离*0.2)`。
+         * 与双击场景拾取 `pick` / 资产 frame 共用：使用固定目标距离（并受 zoomRange 约束）。
          */
         const orbitFocus = (position: Vec3) => {
             if (state.cameraMode !== 'orbit') {
@@ -458,8 +460,11 @@ class CameraManager {
             tmpCamera.copy(this.camera);
             // 从相机指向目标的方向，在目标附近取新机位，再 lookAt 目标
             tmpv.copy(position).sub(this.camera.position).normalize();
-            const currentDistance = position.distance(this.camera.position);
-            const targetDistance = Math.max(1.0, currentDistance * 0.2);
+            const zoomRange = controllers.orbit.controller.zoomRange;
+            const targetDistance = Math.max(
+                zoomRange.x,
+                Math.min(zoomRange.y, ORBIT_FOCUS_FIXED_DISTANCE)
+            );
             tmpv.mulScalar(-targetDistance).add(position);
             tmpCamera.position.copy(tmpv);
             tmpCamera.look(tmpv, position);

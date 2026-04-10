@@ -462,6 +462,8 @@ export function initAssetPlacementHandler(
             if (!entry) return;
             state.selectedSceneEntityId = entry.id;
             events.fire('sceneAsset:selected', { source: 'scene' });
+            // 场景点击命中资产后，复用资产选中的 frame 聚焦链路。
+            events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
         }).catch(() => {});
     };
 
