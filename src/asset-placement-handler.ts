@@ -125,30 +125,6 @@ async function instantiateMesh(app: AppBase, item: AssetLibraryItem, position: V
         castShadows: true,
         receiveShadows: true
     });
-    // Mesh 材质提亮基线：在仅使用 ambient light 时保证全方向可见度
-    entity.findComponents('render').forEach((renderComp: any) => {
-        const meshInstances = renderComp?.meshInstances as Array<{ material?: any }> | undefined;
-        if (!meshInstances) return;
-        meshInstances.forEach((mi) => {
-            const mat = mi.material as StandardMaterial | undefined;
-            if (!mat || typeof (mat as any).update !== 'function') return;
-            (mat as any).useLighting = true;
-            (mat as any).useSkybox = false;
-            (mat as any).ambientTint = false;
-            // 提升漫反射环境项
-            if (typeof (mat as any).ambient === 'object' && (mat as any).ambient?.set) {
-                (mat as any).ambient.set(1, 1, 1);
-            }
-            // 金属度过高在无主光时容易发黑，做软钳制保持层次
-            if (typeof (mat as any).metalness === 'number') {
-                (mat as any).metalness = Math.min((mat as any).metalness, 0.65);
-            }
-            // 轻量 emissive 兜底：保证暗面仍可读
-            mat.emissive = new Color(0.18, 0.18, 0.18);
-            (mat as any).emissiveIntensity = Math.max(0.75, (mat as any).emissiveIntensity ?? 0);
-            mat.update();
-        });
-    });
     entity.setPosition(position);
     return entity;
 }
@@ -484,10 +460,18 @@ export function initAssetPlacementHandler(
                 return typeof anyEntity.isDescendantOf === 'function' && anyEntity.isDescendantOf(item.entity);
             });
             if (!entry) return;
+            const prevSelectedId = state.selectedSceneEntityId;
             state.selectedSceneEntityId = entry.id;
             events.fire('sceneAsset:selected', { source: 'scene' });
-            // 场景点击命中资产后，复用资产选中的 frame 聚焦链路。
-            events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
+            // 仅当场景点击导致“选中对象变化”时，才触发聚焦。
+            if (prevSelectedId === entry.id) return;
+            const center = computeEntityWorldCenter(entry.entity);
+            if (center) {
+                events.fire('pick', center);
+            } else {
+                // 回退到选中聚焦链路（依赖 selectedSceneEntityId）。
+                events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
+            }
         }).catch(() => {});
     };
 
