@@ -62,21 +62,22 @@ class AssetFacade implements ModuleFacade {
                 return;
             }
             const entry = state.scenePlacedEntities.find((it) => it?.id === pl.id);
-            if (entry?.entity) {
-                entry.visible = pl.value;
-                entry.entity.enabled = pl.value;
-            }
+            if (!entry?.entity || entry.visible === pl.value) return;
+            entry.visible = pl.value;
+            entry.entity.enabled = pl.value;
             break;
         }
         case 'ASSETS_SHOW_HIDE_SET': {
             const visible = (command.payload as { value?: boolean } | undefined)?.value;
             if (typeof visible !== 'boolean' || !Array.isArray(state.scenePlacedEntities)) return;
-            state.scenePlacedEntities.forEach((item) => {
-                if (item?.entity) {
-                    item.visible = visible;
-                    item.entity.enabled = visible;
-                }
-            });
+            let anyChanged = false;
+            for (const item of state.scenePlacedEntities) {
+                if (!item?.entity || item.visible === visible) continue;
+                item.visible = visible;
+                item.entity.enabled = visible;
+                anyChanged = true;
+            }
+            if (!anyChanged) return;
             break;
         }
         case 'ASSET_COPY': {

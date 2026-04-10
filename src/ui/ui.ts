@@ -881,12 +881,19 @@ const initUI = (global: Global) => {
             if (editUiTransport === 'message-bridge') {
                 sendEditProtocolMessage({ type: 'ASSETS_SHOW_HIDE_SET', value: nextVisible });
             } else if (Array.isArray(items)) {
-                items.forEach((item: any) => {
-                    if (item && item.entity) {
+                const reg = (global as any).__commandRegistry;
+                if (typeof reg?.dispatch === 'function') {
+                    reg.dispatch({
+                        module: 'asset',
+                        command: { type: 'ASSETS_SHOW_HIDE_SET', payload: { value: nextVisible }, source: 'host' }
+                    });
+                } else {
+                    for (const item of items) {
+                        if (!item?.entity || item.visible === nextVisible) continue;
                         item.visible = nextVisible;
                         item.entity.enabled = nextVisible;
                     }
-                });
+                }
             }
         });
     }

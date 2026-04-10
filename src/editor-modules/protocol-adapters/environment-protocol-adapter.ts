@@ -201,11 +201,26 @@ export function applyLightToggleAll(global: Global, enabled: boolean): void {
             changed = true;
         }
     }
-    if (!changed) return;
-    updatePointLightsFromSettings(global);
-    global.events.fire('lighting:changed');
     const bloom = ensureBloom(settings) as any;
     bloom.localLightsEnabled = enabled;
+    const app = global.app as { fire: (name: string, value?: unknown) => void };
+    // Viewer 模式：全关时全局亮度仅运行时压到 0（不改 global.settings.nightMode.fade，配置真源仍在 settings）
+    // 全开时用 ensureNightMode(settings).fade 恢复，与 LIGHT_GLOBAL_SET 写入的 settings 一致，无需额外备份字段
+    if (!global.state.editMode) {
+        const nm = ensureNightMode(settings);
+        if (!enabled) {
+            app.fire('nightFade:set', 0);
+        } else {
+            const raw = typeof nm.fade === 'number' ? nm.fade : 0;
+            const v = Math.max(-1, Math.min(1, raw));
+            app.fire('nightFade:set', v);
+        }
+    }
+
+    if (changed) {
+        updatePointLightsFromSettings(global);
+        global.events.fire('lighting:changed');
+    }
     global.events.fire('postEffect:changed');
 }
 
@@ -216,6 +231,7 @@ export function applyLightToggle(global: Global, id: string, enabled: boolean): 
     const lighting = ensureLighting(settings);
     const light = lighting.lights.find((l) => (l as LightWithId).id === id) as LightWithId | undefined;
     if (!light || !isUserControllableLight(light)) return;
+
     const anyLight = light as any;
     if (anyLight.enabled === enabled) return;
     anyLight.enabled = enabled;
