@@ -114,6 +114,19 @@
         width: 56px;
     }
 
+    .pointLightRangeRow {
+        width: 100%;
+        flex-basis: 100%;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .pointLightRangeSliderWrap {
+        flex: 1;
+        min-width: 0;
+    }
+
     .pointLightEnableWrap {
         display: inline-flex;
         align-items: center;

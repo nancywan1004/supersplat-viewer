@@ -49,6 +49,8 @@ type PointLightConfig = {
     position: [number, number, number],
     color: [number, number, number],
     intensity: number,
+    /** 点光影响距离（世界单位），与引擎 Light.range 及编辑线框球半径一致，默认 10 */
+    range?: number,
     /** 是否启用该光源，默认 true */
     enabled?: boolean
 };

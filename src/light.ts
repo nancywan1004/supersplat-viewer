@@ -571,7 +571,7 @@ const createPointLightsFromSettings = (global: Global): void => {
         const [r, g, b] = cfg.color ?? [1, 1, 1];
         const intensity = typeof cfg.intensity === 'number' ? cfg.intensity : 1;
         const enabled = cfg.enabled !== false;
-        const range = typeof cfg.range === 'number' ? cfg.range : 1;
+        const range = typeof cfg.range === 'number' ? cfg.range : 10;
 
         let entity = container!.findByName(`pointLight_${i}`) as Entity | undefined;
         if (!entity) {

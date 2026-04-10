@@ -274,6 +274,7 @@ export function initLightingUI(global: Global): () => void {
             } else {
                 const p = light as PointLightConfig;
                 const [x, y, z] = p.position ?? [0, 0, 0];
+                const ptRange = typeof p.range === 'number' ? p.range : 10;
                 row.innerHTML = `
                     <div class="pointLightVisual" title="Point ${index + 1}">
                         <span class="pointLightSwatch" style="background:${hex}; box-shadow:0 0 6px ${hex};"></span>
@@ -285,10 +286,38 @@ export function initLightingUI(global: Global): () => void {
                     <span class="pointLightLabel">Z</span><input type="number" step="any" data-index="${index}" data-field="pz" value="${z}">
                     <input type="color" data-index="${index}" data-field="color" value="${hex}" title="Color">
                     <span class="pointLightLabel">I</span><input type="number" step="0.1" min="0" data-index="${index}" data-field="intensity" value="${intensity}">
+                    <div class="pointLightRangeRow">
+                        <span class="pointLightLabel" title="影响距离（世界单位）">Range</span>
+                        <div class="lightingSliderWrap pointLightRangeSliderWrap">
+                            <input type="range" class="lightingSlider" min="0" max="20" step="0.1" data-index="${index}" data-field="range" value="${ptRange}">
+                            <span class="lightingSliderValue pointLightRangeValue">${ptRange.toFixed(1)}</span>
+                        </div>
+                    </div>
                     <button type="button" class="pointLightRemove" data-index="${index}" aria-label="Remove">✕</button>
                 `;
             }
             pointLightsList.appendChild(row);
+        });
+
+        pointLightsList.querySelectorAll('input[type="range"][data-field="range"]').forEach((input) => {
+            input.addEventListener('input', () => {
+                const idx = parseInt((input as HTMLElement).dataset.index!, 10);
+                const field = (input as HTMLElement).dataset.field!;
+                const lighting = ensureLightingLocal();
+                const light = lighting.lights[idx];
+                if (!light || isDirectional(light) || isSpot(light) || field !== 'range') return;
+                const p = light as PointLightConfig;
+                let v = parseFloat((input as HTMLInputElement).value);
+                if (!Number.isFinite(v)) v = 10;
+                v = Math.max(0, Math.min(20, v));
+                (input as HTMLInputElement).value = String(v);
+                p.range = v;
+                const rowEl = (input as HTMLElement).closest('.pointLightRow');
+                const disp = rowEl?.querySelector('.pointLightRangeValue');
+                if (disp) disp.textContent = v.toFixed(1);
+                updatePointLightsFromSettings(global);
+                events.fire('lighting:changed');
+            });
         });
 
         pointLightsList.querySelectorAll('input').forEach((input) => {
@@ -337,7 +366,16 @@ export function initLightingUI(global: Global): () => void {
                         const swatch = rowEl?.querySelector('.pointLightSwatch') as HTMLElement;
                         if (swatch) { swatch.style.background = hex; swatch.style.boxShadow = `0 0 6px ${hex}`; }
                     } else if (field === 'intensity') p.intensity = parseFloat((input as HTMLInputElement).value) || 1;
-                    else if (field === 'enabled') {
+                    else if (field === 'range' && (input as HTMLInputElement).type === 'range') {
+                        let v = parseFloat((input as HTMLInputElement).value);
+                        if (!Number.isFinite(v)) v = 10;
+                        v = Math.max(0, Math.min(20, v));
+                        (input as HTMLInputElement).value = String(v);
+                        p.range = v;
+                        const rowEl = (input as HTMLElement).closest('.pointLightRow');
+                        const disp = rowEl?.querySelector('.pointLightRangeValue');
+                        if (disp) disp.textContent = v.toFixed(1);
+                    } else if (field === 'enabled') {
                         p.enabled = (input as HTMLInputElement).checked;
                         (input as HTMLElement).closest('.pointLightRow')?.classList.toggle('pointLightRow--disabled', !p.enabled);
                     }
@@ -424,7 +462,7 @@ export function initLightingUI(global: Global): () => void {
                 return [camPos.x, camPos.y, camPos.z];
             })();
             const nextId = generateNextLightId();
-            const cfgPoint: any = { position: basePos, color: [1, 1, 1], intensity: 1, enabled: true };
+            const cfgPoint: any = { position: basePos, color: [1, 1, 1], intensity: 1, range: 10, enabled: true };
             cfgPoint.id = nextId;
             lighting.lights.push(cfgPoint);
             // 若当前有激活的亮灯区域，则把该区域的 linkedLightId 绑定到新建光源

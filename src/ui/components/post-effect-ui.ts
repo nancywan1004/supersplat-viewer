@@ -292,6 +292,7 @@ function renderBloomLocalLightRegionsList(
                         linkedRange = typeof light.range === 'number' ? light.range : 10;
                     } else {
                         linkedLightType = 'point';
+                        linkedRange = typeof light.range === 'number' ? light.range : 10;
                     }
                 }
             } catch {
@@ -345,6 +346,12 @@ function renderBloomLocalLightRegionsList(
               <span class="bloomRegionLinkedLightOuterValue postEffectSliderValue">${linkedOuter.toFixed(0)}</span>
             </div>
           </div>
+          `
+                  : ''
+          }
+          ${
+              linkedLightType
+                  ? `
           <div class="settingsRow">
             <label class="postEffectLabel">Range:</label>
             <div class="postEffectSliderWrap">
@@ -500,32 +507,49 @@ function renderBloomLocalLightRegionsList(
                 const v = clamp(Number.isFinite(raw) ? raw : min);
                 valueSpan.textContent = type === 'range' ? v.toFixed(1) : v.toFixed(0);
                 if (editUiTransport === 'message-bridge') {
-                    const msgType =
-                        type === 'inner'
-                            ? 'LIGHT_BRUSH_INNER_ANGLE_SET'
-                            : type === 'outer'
-                            ? 'LIGHT_BRUSH_OUTER_ANGLE_SET'
-                            : 'LIGHT_BRUSH_RANGE_SET';
-                    sendEditProtocolMessage({
-                        type: msgType as any,
-                        id: region.id,
-                        value: v
-                    });
+                    if (type === 'range') {
+                        const settingsAny = global.settings as ExperienceSettings;
+                        const lighting = ensureLightingForLighting(settingsAny);
+                        const lightsAny = (lighting as any).lights as any[];
+                        const L = lightsAny.find((l) => l && (l as any).id === linkedIdRuntime);
+                        if ((L as any)?.type === 'spot') {
+                            sendEditProtocolMessage({
+                                type: 'LIGHT_BRUSH_RANGE_SET',
+                                id: region.id,
+                                value: v
+                            });
+                        } else if (linkedIdRuntime) {
+                            sendEditProtocolMessage({
+                                type: 'LIGHT_RANGE_SET',
+                                id: linkedIdRuntime,
+                                value: v
+                            });
+                        }
+                    } else {
+                        const msgType =
+                            type === 'inner' ? 'LIGHT_BRUSH_INNER_ANGLE_SET' : 'LIGHT_BRUSH_OUTER_ANGLE_SET';
+                        sendEditProtocolMessage({
+                            type: msgType as any,
+                            id: region.id,
+                            value: v
+                        });
+                    }
                 } else {
                     try {
                         const settingsAny = global.settings as ExperienceSettings;
                         const lighting = ensureLightingForLighting(settingsAny);
                         const lightsAny = (lighting as any).lights as any[];
-                        const light = lightsAny.find(
-                            (l) => l && (l as any).id === linkedIdRuntime && (l as any).type === 'spot'
-                        );
-                        if (light) {
+                        const light = lightsAny.find((l) => l && (l as any).id === linkedIdRuntime);
+                        if (!light || (light as any).type === 'directional') return;
+                        if (type === 'inner' || type === 'outer') {
+                            if ((light as any).type !== 'spot') return;
                             if (type === 'inner') (light as any).innerConeAngle = v;
-                            else if (type === 'outer') (light as any).outerConeAngle = v;
-                            else (light as any).range = v;
-                            updatePointLightsFromSettings(global);
-                            global.events.fire('lighting:changed');
+                            else (light as any).outerConeAngle = v;
+                        } else {
+                            (light as any).range = v;
                         }
+                        updatePointLightsFromSettings(global);
+                        global.events.fire('lighting:changed');
                     } catch {
                         // 忽略联动失败，不影响 UI
                     }

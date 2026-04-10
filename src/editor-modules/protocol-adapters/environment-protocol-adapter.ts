@@ -110,7 +110,7 @@ export function applyLightTransformMode(
     events.fire('lightTransformMode:changed', value);
 }
 
-/** LIGHT_INTENSITY_UPDATE / LIGHT_COLOR_UPDATE / LIGHT_INNER_ANGLE_SET / LIGHT_OUTER_ANGLE_SET / LIGHT_RANGE_SET */
+/** LIGHT_INTENSITY_UPDATE / LIGHT_COLOR_UPDATE / LIGHT_INNER_ANGLE_SET / LIGHT_OUTER_ANGLE_SET / LIGHT_RANGE_SET（点光与聚光，0–20；忽略 directional） */
 export function applyLightDetail(
     global: Global,
     type: string,
@@ -153,6 +153,7 @@ export function applyLightDetail(
         }
         break;
     case 'LIGHT_RANGE_SET':
+        if ((light as { type?: string }).type === 'directional') break;
         if (typeof payload.value === 'number') {
             (light as Record<string, unknown>).range = Math.max(0, Math.min(20, payload.value));
             changed = true;
