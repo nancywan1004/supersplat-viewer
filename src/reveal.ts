@@ -1117,13 +1117,21 @@ export class RevealController {
 
         // 如果类型改变，重新创建效果并重置动画
         if (newConfig.type && newConfig.type !== oldType) {
-            this.createEffect(newConfig.type);
+            const nextType = newConfig.type as RevealEffectType;
+            const hasReveal = nextType !== 'none';
+            this.global.state.hasRevealEffect = hasReveal;
+            this.global.state.vfxType = nextType as any;
+            this.global.events.fire('hasRevealEffect:changed', hasReveal);
             // 当切回 none 时，视为退出特效，恢复进入特效前的 nightFade
-            if (newConfig.type === 'none') {
+            if (nextType === 'none') {
+                this.createEffect(nextType);
                 this.restoreNightModeIfNeeded('typeChangedToNone');
+            } else {
+                // 切换类型统一走 revealRestart 节奏：Bloom 锁定、延迟层门控与导出/首访语义保持一致
+                this.global.events.fire('revealRestart', false);
             }
             // 触发事件以更新 UI（统一使用 revealType:changed）
-            this.global.events.fire('revealType:changed', newConfig.type);
+            this.global.events.fire('revealType:changed', nextType);
             // 重置播放动画
             this.global.events.fire('inputEvent', 'resetAnim');
         }

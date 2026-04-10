@@ -55,6 +55,7 @@ import { initAnnotationFacade } from './editor-modules/annotation-facade';
 import { initEnvironmentFacade } from './editor-modules/environment-facade';
 import { initEffectsFacade } from './editor-modules/effects-facade';
 import { initCommandRegistry } from './editor-modules/command-registry';
+import { DEFAULT_DEFERRED_EDITING_LAYERS } from './render/deferred-editing-visual-sync';
 
 const gammaChunkGlsl = `
 vec3 prepareOutputFromGamma(vec3 gammaColor) {
@@ -538,6 +539,37 @@ class Viewer {
                 revealBbox.copy(sceneBound);            // fallback
             }
             this.revealController = new RevealController(global, revealBbox, gsplatEntity, this.cameraManager);
+            let deferredEditingLayersLocked = false;
+            const applyDeferredEditingLayersVisibility = (visible: boolean) => {
+                for (const layer of DEFAULT_DEFERRED_EDITING_LAYERS) {
+                    try {
+                        layer.applyVisibility(global, visible);
+                    } catch (err) {
+                        console.warn(`[Viewer] deferred layer "${layer.id}" visibility failed`, err);
+                    }
+                }
+            };
+            const lockDeferredEditingLayersForReveal = () => {
+                if (deferredEditingLayersLocked) return;
+                deferredEditingLayersLocked = true;
+                applyDeferredEditingLayersVisibility(false);
+            };
+            const unlockDeferredEditingLayersAfterReveal = () => {
+                if (!deferredEditingLayersLocked) return;
+                deferredEditingLayersLocked = false;
+                applyDeferredEditingLayersVisibility(true);
+            };
+            events.on('revealRestart', () => {
+                if (revealBlocksAnim(state)) {
+                    lockDeferredEditingLayersForReveal();
+                }
+            });
+            events.on('revealComplete', unlockDeferredEditingLayersAfterReveal);
+            events.on('hasRevealEffect:changed', (hasReveal: boolean) => {
+                if (!hasReveal) {
+                    unlockDeferredEditingLayersAfterReveal();
+                }
+            });
             // 供 VFX 导出与 deferred-editing-visual-sync 使用，避免从 app.viewer 反射取 RevealController
             if (state.hasRevealEffect) {
                 const afterReveal = () => {
@@ -555,6 +587,7 @@ class Viewer {
                     }
                 };
                 if (revealBlocksAnim(state)) {
+                    lockDeferredEditingLayersForReveal();
                     events.once('revealComplete', afterReveal);
                     events.once('revealComplete', initAnnotations);
                     events.once('revealComplete', initSceneAssets);
