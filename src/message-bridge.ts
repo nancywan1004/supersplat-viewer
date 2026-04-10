@@ -441,9 +441,6 @@ const initPostMessageBridge = (global: Global) => {
         case 'LIGHT_SELECT':
         {
             dispatchEnvironment(global, 'LIGHT_SELECT', p);
-            if (state.editMode && typeof p.id === 'string' && p.id.trim().length > 0) {
-                events.fire('inputEvent', 'frame', { focusTarget: 'light' as const });
-            }
             break;
         }
         case 'LIGHT_TRANSFORM_MODE': {
