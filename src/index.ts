@@ -192,7 +192,8 @@ const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
     });
     app.root.addChild(light);
 
-    app.scene.ambientLight.set(0.51, 0.55, 0.65);
+    // 提高基础 ambient，保障 mesh 在无主光时仍具备可读性
+    app.scene.ambientLight.set(1.62, 1.66, 1.74);
 
     return { app, camera };
 };
