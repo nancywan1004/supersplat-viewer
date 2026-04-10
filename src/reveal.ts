@@ -25,6 +25,15 @@ import type { CameraManager } from './camera-manager';
  */
 export type RevealEffectType = 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch' | 'none';
 
+/** 与 viewer 中 NightMode 首帧 / afterReveal 解析一致；用于 VFX 进入时快照，避免早于 firstFrame 的 currentNightFade 仍为 0 */
+function getNightFadeFromSettings(settings: { nightMode?: { enabled?: boolean; fade?: number } }): number {
+    const nightCfg = settings.nightMode;
+    if (typeof nightCfg?.fade === 'number' && Number.isFinite(nightCfg.fade)) {
+        return Math.max(-1, Math.min(1, nightCfg.fade));
+    }
+    return nightCfg?.enabled ? -0.95 : 0;
+}
+
 export class RevealController {
     private gsplatEntity: Entity | null = null;
     private config: RevealConfig;
@@ -815,9 +824,11 @@ export class RevealController {
             this.inVfx = true;
             // 进入播放/启用阶段（语义：当前有特效在运行，供 SaaS/父级状态读取）
             (this.global.state as any).vfxActive = true;
-            // 首次进入 VFX 时记录当前 nightFade（以运行时 currentNightFade 为准，作为「播放前亮度」快照）
+            // 首次进入 VFX 时记录恢复用 nightFade：须以 settings 为准。
+            // RevealController 构造早于 firstFrame 上的 NightMode.applyFromSettings，currentNightFade 可能仍为 0，
+            // 若仅用 currentNightFade，restoreNightModeIfNeeded 会把 settings.nightMode.fade 错误写回 0（存盘即丢亮度）。
             if (this.originalNightFade === null) {
-                this.originalNightFade = this.currentNightFade;
+                this.originalNightFade = getNightFadeFromSettings(this.global.settings);
             }
             this.global.app.fire('nightMode:exit');
         }
