@@ -6,6 +6,7 @@ class ModuleOrchestrator {
     private readonly facades = new Map<string, ModuleFacade>();
 
     private readonly offHandlers: Array<() => void> = [];
+    private activeModule: string | null = null;
 
     constructor(global: Global) {
         this.global = global;
@@ -21,30 +22,36 @@ class ModuleOrchestrator {
 
     start() {
         const { events } = this.global;
+        this.activeModule = this.global.state.editLeftModule ?? null;
 
-        const onEditLeftModuleChanged = (nextModule: string | null, prevModule: string | null) => {
+        const onEditLeftModuleChanged = (nextModule: string | null) => {
             const ctx = this.buildContext();
             if (!ctx.editMode) return;
-            if ((nextModule ?? null) === (prevModule ?? null)) return;
+            const prevModule = this.activeModule;
+            const normalizedNext = nextModule ?? null;
+            if (normalizedNext === prevModule) return;
 
             if (prevModule && this.facades.has(prevModule)) {
                 this.facades.get(prevModule)?.onExit(ctx, 'editModuleChange');
             }
-            if (nextModule && this.facades.has(nextModule)) {
-                this.facades.get(nextModule)?.onEnter(ctx);
+            if (normalizedNext && this.facades.has(normalizedNext)) {
+                this.facades.get(normalizedNext)?.onEnter(ctx);
             }
+            this.activeModule = normalizedNext;
         };
 
         const onEditModeChanged = (editMode: boolean) => {
             const ctx = this.buildContext();
             if (!editMode) {
                 this.facades.forEach((facade) => facade.onEditModeExit(ctx));
+                this.activeModule = null;
                 return;
             }
             const active = ctx.activeModule;
             if (active && this.facades.has(active)) {
                 this.facades.get(active)?.onEnter(ctx);
             }
+            this.activeModule = active ?? null;
         };
 
         events.on('editLeftModule:changed', onEditLeftModuleChanged);
