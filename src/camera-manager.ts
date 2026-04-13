@@ -35,6 +35,8 @@ const tmpFocus = new Vec3();
 const ORBIT_FOCUS_FIXED_DISTANCE = 0.5;
 /** 资产 bbox 聚焦时，目标占据视野半角比例（越小留白越多）。 */
 const ASSET_FOCUS_HALF_FOV_FILL = 0.72;
+/** gaussian / gsplat 资产的取景距离补偿，拉近到更接近 mesh 的主观构图。 */
+const GAUSSIAN_ASSET_FOCUS_DISTANCE_SCALE = 0.6;
 /** 极小资产时的最小包围球半径，避免距离退化到 0。 */
 const MIN_FOCUS_RADIUS = 1e-3;
 
@@ -148,21 +150,51 @@ function computeEntityWorldBoundingBox(entity: Entity): BoundingBox | null {
         }
     }
 
-    const gsplat = (entity as Entity & { gsplat?: { customAabb?: BoundingBox; aabb?: BoundingBox } }).gsplat;
+    const gsplat = (entity as Entity & { gsplat?: { customAabb?: BoundingBox | null; aabb?: BoundingBox } }).gsplat;
     const gsAabb = gsplat?.customAabb ?? gsplat?.aabb;
     if (gsAabb) {
-        const worldCenter = entity.getWorldTransform().transformPoint(gsAabb.center.clone());
-        return new BoundingBox(worldCenter, gsAabb.halfExtents.clone());
+        const worldAabb = new BoundingBox();
+        worldAabb.setFromTransformedAabb(gsAabb, entity.getWorldTransform());
+        return worldAabb;
     }
     return null;
 }
 
-function computeDistanceForAssetFraming(bbox: BoundingBox, fovDeg: number, aspect: number): number {
-    const radius = Math.max(MIN_FOCUS_RADIUS, bbox.halfExtents.length());
-    const verticalHalf = Math.max(1e-4, (fovDeg * Math.PI / 180) * 0.5);
-    const horizontalHalf = Math.atan(Math.tan(verticalHalf) * Math.max(aspect, 1e-4));
-    const limitingHalfFov = Math.max(1e-4, Math.min(verticalHalf, horizontalHalf) * ASSET_FOCUS_HALF_FOV_FILL);
-    return radius / Math.sin(limitingHalfFov);
+function computeDistanceForAssetFraming(bbox: BoundingBox, fovDeg: number, aspect: number, viewDir: Vec3): number {
+    const verticalHalf = Math.max(1e-4, (fovDeg * Math.PI / 180) * 0.5) * ASSET_FOCUS_HALF_FOV_FILL;
+    const horizontalHalf = Math.max(1e-4, Math.atan(Math.tan(verticalHalf / ASSET_FOCUS_HALF_FOV_FILL) * Math.max(aspect, 1e-4))) * ASSET_FOCUS_HALF_FOV_FILL;
+
+    const forward = viewDir.clone();
+    if (forward.lengthSq() <= 1e-10) {
+        forward.set(0, 0, -1);
+    } else {
+        forward.normalize();
+    }
+
+    const refUp = Math.abs(forward.y) > 0.98 ? new Vec3(0, 0, 1) : new Vec3(0, 1, 0);
+    const right = new Vec3().cross(refUp, forward).normalize();
+    const up = new Vec3().cross(forward, right).normalize();
+
+    const center = bbox.center;
+    const half = bbox.halfExtents;
+    let maxHalfWidth = 0;
+    let maxHalfHeight = 0;
+    let maxHalfDepth = 0;
+
+    for (const sx of [-1, 1]) {
+        for (const sy of [-1, 1]) {
+            for (const sz of [-1, 1]) {
+                const rel = new Vec3(half.x * sx, half.y * sy, half.z * sz);
+                maxHalfWidth = Math.max(maxHalfWidth, Math.abs(rel.dot(right)));
+                maxHalfHeight = Math.max(maxHalfHeight, Math.abs(rel.dot(up)));
+                maxHalfDepth = Math.max(maxHalfDepth, Math.abs(rel.dot(forward)));
+            }
+        }
+    }
+
+    const distanceByWidth = maxHalfWidth / Math.tan(horizontalHalf);
+    const distanceByHeight = maxHalfHeight / Math.tan(verticalHalf);
+    return Math.max(MIN_FOCUS_RADIUS, Math.max(distanceByWidth, distanceByHeight) + maxHalfDepth);
 }
 
 const unionBoundingBoxes = (a: BoundingBox, b: BoundingBox): BoundingBox => {
@@ -536,8 +568,15 @@ class CameraManager {
             const bbox = computeEntityWorldBoundingBox(selected);
             if (!bbox) return false;
             const aspect = cameraEntity.camera?.aspectRatio ?? (app.graphicsDevice.width / Math.max(1, app.graphicsDevice.height));
-            const fitDistance = computeDistanceForAssetFraming(bbox, this.camera.fov, aspect);
-            orbitFocus(bbox.center, fitDistance);
+            const fitDistance = computeDistanceForAssetFraming(
+                bbox,
+                this.camera.fov,
+                aspect,
+                bbox.center.clone().sub(this.camera.position)
+            );
+            const isGaussianAsset = !!((selected as Entity & { gsplat?: unknown }).gsplat);
+            const focusDistance = fitDistance * (isGaussianAsset ? GAUSSIAN_ASSET_FOCUS_DISTANCE_SCALE : 1);
+            orbitFocus(bbox.center, focusDistance);
             return true;
         };
 
