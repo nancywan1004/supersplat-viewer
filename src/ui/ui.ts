@@ -4,7 +4,12 @@ import { Tooltip } from '../tooltip';
 import { Global } from '../types';
 import { isLodMetaFile } from '../loaders/lod-loader';
 import type { ExperienceSettings } from '../schemas/v2';
-import { serializeExperienceSettings, getComparableSettingsString, applySettingsSnapshot } from '../settings-serialize/settings-serialize';
+import {
+    serializeExperienceSettings,
+    getComparableSettingsString,
+    getComparableSettingsStringFromSnapshot,
+    applySettingsSnapshot
+} from '../settings-serialize/settings-serialize';
 import { clearScenePlacedEntities, restoreSceneAssetsFromSettings } from '../asset-placement-handler';
 import {
     initEditHistory,
@@ -533,20 +538,34 @@ const initUI = (global: Global) => {
     let editModeEnteredSettingsSnapshot: string | null = null;
     /** 进入编辑模式时的 settings 完整数据，用于「不保存并退出」时回退场景 */
     let editModeEnteredSettingsData: ExperienceSettings | null = null;
-    const updateEditModeUI = () => {
+    const updateEditModeUI = async () => {
         const inEdit = state.editMode;
         if (inEdit) {
-            // 每次进入编辑模式时默认不选中任何模块（null）
-            state.editLeftModule = null;
-            events.fire('editLeftModule:changed', null);
+            if (editUiTransport !== 'message-bridge') {
+                editModeEnteredSettingsSnapshot = null;
+                // View -> Edit：先恢复到原始配置（View 模式的临时修改不保留）
+                const originalSettings = (global as any).__originalSettings as ExperienceSettings | undefined;
+                if (originalSettings) {
+                    // 立即设置退出时用的基线（使用原始配置，确保用户快速退出也能正确恢复）
+                    editModeEnteredSettingsData = JSON.parse(JSON.stringify(originalSettings)) as ExperienceSettings;
 
-            const initialSnapshot = serializeExperienceSettings(global);
-            initEditHistory(global, initialSnapshot);
+                    applySettingsSnapshot(global, JSON.parse(JSON.stringify(originalSettings)) as ExperienceSettings);
+                    clearScenePlacedEntities(global);
+                    await restoreSceneAssetsFromSettings(global);
+                    restoreAnnotationsFromSettings(global);
+                    restoreLightingFromSettings(global);
+                    restorePostEffectsFromSettings(global);
+                }
 
-            editModeEnteredSettingsSnapshot = getComparableSettingsString(global);
-            editModeEnteredSettingsData = JSON.parse(
-                JSON.stringify(initialSnapshot)
-            ) as ExperienceSettings;
+                // 每次进入编辑模式时默认不选中任何模块（null）
+                state.editLeftModule = null;
+                events.fire('editLeftModule:changed', null);
+
+                const initialSnapshot = serializeExperienceSettings(global);
+                initEditHistory(global, initialSnapshot);
+                editModeEnteredSettingsData = JSON.parse(JSON.stringify(initialSnapshot)) as ExperienceSettings;
+                editModeEnteredSettingsSnapshot = getComparableSettingsStringFromSnapshot(initialSnapshot);
+            }
         }
         if (config.showEditUI !== false) {
             const leftMount = document.getElementById('editLeftSidebarMount');
@@ -603,7 +622,7 @@ const initUI = (global: Global) => {
             });
         }
         if (dom.exitEditBtn) {
-            dom.exitEditBtn.addEventListener('click', () => {
+            dom.exitEditBtn.addEventListener('click', async () => {
                 if (editUiTransport === 'message-bridge') {
                     // 两段式退出：先请求 Viewer 判断是否需要保存，再由确认弹窗决定后续命令
                     const waitFor = (t: string, timeoutMs = 1500) =>
@@ -689,7 +708,19 @@ const initUI = (global: Global) => {
                 }
 
                 const current = getComparableSettingsString(global);
-                if (editModeEnteredSettingsSnapshot === null || current === editModeEnteredSettingsSnapshot) {
+                if (editModeEnteredSettingsSnapshot === null) {
+                    if (editModeEnteredSettingsData) {
+                        applySettingsSnapshot(global, editModeEnteredSettingsData);
+                        clearScenePlacedEntities(global);
+                        await restoreSceneAssetsFromSettings(global);
+                        restoreAnnotationsFromSettings(global);
+                        restoreLightingFromSettings(global);
+                        restorePostEffectsFromSettings(global);
+                    }
+                    state.editMode = false;
+                    return;
+                }
+                if (current === editModeEnteredSettingsSnapshot) {
                     state.editMode = false;
                     return;
                 }

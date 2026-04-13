@@ -180,6 +180,12 @@ function sortKeysForCompare(obj: unknown): unknown {
 /** 返回与序列化结果一致的可比较字符串，用于判断 settings 是否有改动 */
 export function getComparableSettingsString(global: Global): string {
     const settings = serializeExperienceSettings(global);
+    return getComparableSettingsStringFromSnapshot(settings);
+}
+
+/** 对任意快照生成稳定可比较字符串，避免 key 顺序导致误判。 */
+export function getComparableSettingsStringFromSnapshot(snapshot: ExperienceSettings): string {
+    const settings = JSON.parse(JSON.stringify(snapshot)) as ExperienceSettings;
     return JSON.stringify(sortKeysForCompare(settings));
 }
 

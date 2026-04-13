@@ -22,6 +22,7 @@ import { App } from './app';
 import { observe } from './core/observe';
 import { importSettings } from './settings';
 import type { Config, Global } from './types';
+import type { ExperienceSettings } from './schemas/v2';
 import { initPoster, initUI } from './ui/ui';
 import { Viewer } from './viewer';
 import { initXr } from './xr';
@@ -312,6 +313,9 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         processedSettings.revealEffect = undefined;
     }
 
+    // 保留原始配置副本，供进入 Edit 模式时恢复使用（View 模式的临时修改不污染此副本）
+    const originalSettings = JSON.parse(JSON.stringify(processedSettings)) as ExperienceSettings;
+
     const global: Global = {
         app,
         settings: processedSettings,
@@ -320,6 +324,9 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         events,
         camera
     };
+
+    // 将原始配置挂载到 global 供后续恢复使用
+    (global as any).__originalSettings = originalSettings;
 
     // 供 NightMode 等脚本读取点光源等（collectPointLights 需要 global）
     (app as any).__global = global;

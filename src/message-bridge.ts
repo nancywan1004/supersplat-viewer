@@ -11,6 +11,7 @@ import { getPositionInFrontOfCamera } from './asset-placement-handler';
 import {
     serializeExperienceSettings,
     getComparableSettingsString,
+    getComparableSettingsStringFromSnapshot,
     applySettingsSnapshot
 } from './settings-serialize/settings-serialize';
 import {
@@ -18,6 +19,9 @@ import {
     restoreSceneAssetsFromSettings
 } from './asset-placement-handler';
 import {
+    initEditHistory,
+    canUndo,
+    canRedo,
     restoreAnnotationsFromSettings,
     restoreLightingFromSettings,
     restorePostEffectsFromSettings
@@ -35,8 +39,6 @@ type InboundPayload =
     | { type: 'SKYBOX_SWITCH'; value?: string }
     | { type: 'ANIMATION_RESET' }
     | { type: 'ANIMATION_PLAY_PAUSE' }
-    | { type: 'EDIT_MODE_ENTER' }
-    | { type: 'EDIT_MODE_EXIT' }
     | { type: 'EDIT_MODE_SET'; value?: boolean }
     | { type: 'EDIT_MODE_EXIT_REQUEST' }
     | { type: 'EDIT_MODE_EXIT_DISCARD' }
@@ -163,9 +165,10 @@ const initPostMessageBridge = (global: Global) => {
     let editModeBaselineData: ExperienceSettings | null = null;
     let editModeBaselineString: string | null = null;
 
-    const setBaseline = () => {
-        editModeBaselineData = JSON.parse(JSON.stringify(serializeExperienceSettings(global))) as ExperienceSettings;
-        editModeBaselineString = getComparableSettingsString(global);
+    const setBaseline = (snapshot?: ExperienceSettings) => {
+        const currentSnapshot = snapshot ?? serializeExperienceSettings(global);
+        editModeBaselineData = JSON.parse(JSON.stringify(currentSnapshot)) as ExperienceSettings;
+        editModeBaselineString = getComparableSettingsStringFromSnapshot(currentSnapshot);
     };
 
     const handleMessage = async (event: MessageEvent) => {
@@ -195,31 +198,34 @@ const initPostMessageBridge = (global: Global) => {
         case 'ANIMATION_PLAY_PAUSE':
             events.fire('inputEvent', 'playPause');
             break;
-        case 'EDIT_MODE_ENTER':
-            if (config.allowEditMode !== false) {
-                state.editMode = true;
-                // 父级触发进入编辑模式时：默认不选中任何模块（null）
-                state.editLeftModule = null;
-                events.fire('editLeftModule:changed', null);
-                setBaseline();
-            }
-            break;
-        case 'EDIT_MODE_EXIT':
-            state.editMode = false;
-            // 退出编辑模式时需要确保光源线框被隐藏（避免残留）
-            syncLightVisualsForNoEditUi(global);
-            break;
         case 'EDIT_MODE_SET': {
             const value = p.value === true;
             if (value && config.allowEditMode === false) break;
+            if (value) {
+                editModeBaselineString = null;
+                // View -> Edit：先恢复到原始配置（View 模式的临时修改不保留）
+                const originalSettings = (global as any).__originalSettings as ExperienceSettings | undefined;
+                if (originalSettings) {
+                    // 立即设置基线（使用原始配置，确保用户快速退出也能正确恢复）
+                    editModeBaselineData = JSON.parse(JSON.stringify(originalSettings)) as ExperienceSettings;
+
+                    applySettingsSnapshot(global, JSON.parse(JSON.stringify(originalSettings)) as ExperienceSettings);
+                    clearScenePlacedEntities(global);
+                    await restoreSceneAssetsFromSettings(global);
+                    restoreAnnotationsFromSettings(global);
+                    restoreLightingFromSettings(global);
+                    restorePostEffectsFromSettings(global);
+                }
+            }
             state.editMode = !!p.value;
             if (value) {
                 // 通过 EDIT_MODE_SET 进入编辑模式时：默认不选中任何模块（null）
                 state.editLeftModule = null;
                 events.fire('editLeftModule:changed', null);
-                setBaseline();
+                const initialSnapshot = serializeExperienceSettings(global);
+                setBaseline(initialSnapshot);
+                initEditHistory(global, initialSnapshot);
                 if (config.trackEditHistory) {
-                    const { canUndo, canRedo } = await import('./edit-history');
                     postToParent('EDIT_HISTORY_STATE', { canUndo: canUndo(global), canRedo: canRedo(global) });
                 }
             }
