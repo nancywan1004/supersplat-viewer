@@ -585,8 +585,12 @@ const initUI = (global: Global) => {
         if (inEdit) {
             if (editUiTransport !== 'message-bridge') {
                 editModeEnteredSettingsSnapshot = null;
+                // internal：进入编辑统一停播当前 VFX，退出编辑后再恢复（timed/persistent 一致）。
+                const hasVfxToResume = state.vfxType !== 'none';
+                if (hasVfxToResume) {
+                    events.fire('vfxExit');
+                }
                 // 进入编辑统一恢复原始配置（避免资产异步未完成时基线快照不一致）。
-                // 注意：不在此处触发 vfxExit，特效按当前运行状态保持。
                 const originalSettings = (global as any).__originalSettings as ExperienceSettings | undefined;
                 if (originalSettings) {
                     // 立即设置退出时用的基线（使用原始配置，确保用户快速退出也能正确恢复）

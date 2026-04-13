@@ -202,6 +202,11 @@ const initPostMessageBridge = (global: Global) => {
             if (value && config.allowEditMode === false) break;
             if (value) {
                 editModeBaselineString = null;
+                // 进入编辑统一停播当前 VFX（timed / persistent 一致），并在退出编辑后恢复。
+                const hasVfxToResume = state.vfxType !== 'none';
+                if (hasVfxToResume) {
+                    events.fire('vfxExit');
+                }
                 // View -> Edit：先恢复到原始配置（View 模式的临时修改不保留）
                 const originalSettings = (global as any).__originalSettings as ExperienceSettings | undefined;
                 if (originalSettings) {
