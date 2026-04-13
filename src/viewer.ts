@@ -44,7 +44,7 @@ import { NightMode } from './vfx/lighting/night-mode';
 import { initShadowCatcher } from './vfx/shadow/shadow-catcher';
 import { ShadowApplyRt } from './vfx/shadow/shadow-apply';
 import { updateShadowDistance } from './light';
-import { initAssetPlacementHandler, restoreSceneAssetsFromSettings } from './asset-placement-handler';
+import { initAssetPlacementHandler, requestSceneAssetsRestore } from './asset-placement-handler';
 import { pushEditHistory } from './edit-history';
 import { initGizmoHandler } from './gizmo-handler';
 import { initAnnotationGizmoHandler } from './annotation-toolbar/annotation-gizmo-handler';
@@ -477,8 +477,11 @@ class Viewer {
                 }
             };
 
-            const initSceneAssets = () => {
-                restoreSceneAssetsFromSettings(global).catch((err) => {
+            const initSceneAssets = (deferUntilRevealComplete: boolean = false) => {
+                requestSceneAssetsRestore(global, {
+                    reason: 'startup',
+                    deferUntilRevealComplete
+                }).catch((err) => {
                     console.warn('[SceneAssets] restore from settings failed:', err);
                 });
             };
@@ -590,16 +593,16 @@ class Viewer {
                     lockDeferredEditingLayersForReveal();
                     events.once('revealComplete', afterReveal);
                     events.once('revealComplete', initAnnotations);
-                    events.once('revealComplete', initSceneAssets);
+                    initSceneAssets(true);
                 } else {
                     // persistent 等：与 revealComplete 语义对齐的即时管线
                     afterReveal();
                     initAnnotations();
-                    initSceneAssets();
+                    initSceneAssets(false);
                 }
             } else {
                 initAnnotations();
-                initSceneAssets();
+                initSceneAssets(false);
             }
 
             applyCamera(this.cameraManager.camera);

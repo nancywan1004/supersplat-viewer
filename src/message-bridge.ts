@@ -15,8 +15,7 @@ import {
     applySettingsSnapshot
 } from './settings-serialize/settings-serialize';
 import {
-    clearScenePlacedEntities,
-    restoreSceneAssetsFromSettings
+    requestSceneAssetsRestore
 } from './asset-placement-handler';
 import {
     initEditHistory,
@@ -210,8 +209,7 @@ const initPostMessageBridge = (global: Global) => {
                     editModeBaselineData = JSON.parse(JSON.stringify(originalSettings)) as ExperienceSettings;
 
                     applySettingsSnapshot(global, JSON.parse(JSON.stringify(originalSettings)) as ExperienceSettings);
-                    clearScenePlacedEntities(global);
-                    await restoreSceneAssetsFromSettings(global);
+                    await requestSceneAssetsRestore(global, { reason: 'edit-enter' });
                     restoreAnnotationsFromSettings(global);
                     restoreLightingFromSettings(global);
                     restorePostEffectsFromSettings(global);
@@ -243,8 +241,7 @@ const initPostMessageBridge = (global: Global) => {
         case 'EDIT_MODE_EXIT_DISCARD': {
             if (editModeBaselineData) {
                 applySettingsSnapshot(global, editModeBaselineData);
-                clearScenePlacedEntities(global);
-                await restoreSceneAssetsFromSettings(global);
+                await requestSceneAssetsRestore(global, { reason: 'edit-discard' });
                 restoreAnnotationsFromSettings(global);
                 // 统一通过 helper 按当前 settings 重置 Lighting / NightMode / PostEffect
                 restoreLightingFromSettings(global);

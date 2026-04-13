@@ -10,7 +10,7 @@ import {
     getComparableSettingsStringFromSnapshot,
     applySettingsSnapshot
 } from '../settings-serialize/settings-serialize';
-import { clearScenePlacedEntities, restoreSceneAssetsFromSettings } from '../asset-placement-handler';
+import { requestSceneAssetsRestore } from '../asset-placement-handler';
 import {
     initEditHistory,
     canUndo,
@@ -550,8 +550,7 @@ const initUI = (global: Global) => {
                     editModeEnteredSettingsData = JSON.parse(JSON.stringify(originalSettings)) as ExperienceSettings;
 
                     applySettingsSnapshot(global, JSON.parse(JSON.stringify(originalSettings)) as ExperienceSettings);
-                    clearScenePlacedEntities(global);
-                    await restoreSceneAssetsFromSettings(global);
+                    await requestSceneAssetsRestore(global, { reason: 'edit-enter' });
                     restoreAnnotationsFromSettings(global);
                     restoreLightingFromSettings(global);
                     restorePostEffectsFromSettings(global);
@@ -711,8 +710,7 @@ const initUI = (global: Global) => {
                 if (editModeEnteredSettingsSnapshot === null) {
                     if (editModeEnteredSettingsData) {
                         applySettingsSnapshot(global, editModeEnteredSettingsData);
-                        clearScenePlacedEntities(global);
-                        await restoreSceneAssetsFromSettings(global);
+                        await requestSceneAssetsRestore(global, { reason: 'edit-discard' });
                         restoreAnnotationsFromSettings(global);
                         restoreLightingFromSettings(global);
                         restorePostEffectsFromSettings(global);
@@ -742,8 +740,7 @@ const initUI = (global: Global) => {
                             return;
                         }
                         applySettingsSnapshot(global, editModeEnteredSettingsData);
-                        clearScenePlacedEntities(global);
-                        await restoreSceneAssetsFromSettings(global);
+                        await requestSceneAssetsRestore(global, { reason: 'edit-discard' });
                         // 恢复标注实体与 UI（保持与 message-bridge 下 EDIT_MODE_EXIT_DISCARD 一致）
                         restoreAnnotationsFromSettings(global);
                         // 统一通过 helper 按当前 settings 重置 Lighting / NightMode / PostEffect

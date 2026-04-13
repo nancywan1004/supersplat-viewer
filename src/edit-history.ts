@@ -1,7 +1,7 @@
 import type { Global } from './types';
 import type { ExperienceSettings } from './schemas/v2';
 import { serializeExperienceSettings, applySettingsSnapshot } from './settings-serialize/settings-serialize';
-import { clearScenePlacedEntities, restoreSceneAssetsFromSettings } from './asset-placement-handler';
+import { requestSceneAssetsRestore } from './asset-placement-handler';
 import type { AnnotationManager } from './annotation-toolbar/annotation-manager';
 import { updatePointLightsFromSettings } from './light';
 
@@ -127,8 +127,7 @@ export async function restoreSnapshot(global: Global, snapshot: EditSnapshot): P
     global.events.fire('editHistory:restoring', true);
     try {
         applySettingsSnapshot(global, snapshot);
-        clearScenePlacedEntities(global);
-        await restoreSceneAssetsFromSettings(global);
+        await requestSceneAssetsRestore(global, { reason: 'history-restore' });
         // Restore annotations from the snapshot
         restoreAnnotationsFromSettings(global);
         // Restore lighting / night mode / post effects from the snapshot

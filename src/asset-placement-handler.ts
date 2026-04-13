@@ -13,6 +13,17 @@ export type AssetPlacementHandlerDeps = {
     pushEditHistory?: (global: Global, label?: string) => void;
 };
 
+type SceneAssetsRestoreOptions = {
+    reason?: 'startup' | 'edit-enter' | 'edit-discard' | 'history-restore';
+    deferUntilRevealComplete?: boolean;
+    clearBeforeRestore?: boolean;
+};
+
+type SceneAssetsRestoreController = {
+    version: number;
+    activePromise: Promise<void>;
+};
+
 /** 新场景放置实体 id（ASSET_COPY 的 copyId 等与内部复制共用） */
 export function nextSceneEntityId(): string {
     return `scene-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -29,6 +40,17 @@ function getPlacedAssetsParent(app: AppBase): Entity {
 
 /** 相机前方距离，用于 ASSET_PLACE 在相机前方放置 */
 const CAMERA_FRONT_DISTANCE = 5;
+
+function getSceneAssetsRestoreController(global: Global): SceneAssetsRestoreController {
+    const anyGlobal = global as Global & { __sceneAssetsRestoreController?: SceneAssetsRestoreController };
+    if (!anyGlobal.__sceneAssetsRestoreController) {
+        anyGlobal.__sceneAssetsRestoreController = {
+            version: 0,
+            activePromise: Promise.resolve()
+        };
+    }
+    return anyGlobal.__sceneAssetsRestoreController;
+}
 
 /**
  * 计算相机前方某距离处的世界坐标（用于协议 ASSET_PLACE「在相机前方 instantiate」）
@@ -389,6 +411,43 @@ export async function restoreSceneAssetsFromSettings(global: Global): Promise<vo
         entry.visible = visible;
         entry.entity.enabled = visible;
     }
+}
+
+/**
+ * 统一调度 sceneAssets → scenePlacedEntities 的恢复链路：
+ * - startup 可选择 defer 到 revealComplete；
+ * - 后续 edit/discard/history restore 会提升 version，使旧的 startup defer 自动失效；
+ * - 所有实际恢复都串行执行，避免与其他 restore 链并发交错。
+ */
+export async function requestSceneAssetsRestore(global: Global, options: SceneAssetsRestoreOptions = {}): Promise<void> {
+    const controller = getSceneAssetsRestoreController(global);
+    const version = controller.version + 1;
+    controller.version = version;
+
+    const invoke = async (): Promise<void> => {
+        const previousTask = controller.activePromise;
+        const task = (async (): Promise<void> => {
+            await previousTask.catch((): void => undefined);
+            if (controller.version !== version) return;
+            if (options.clearBeforeRestore !== false) {
+                clearScenePlacedEntities(global);
+            }
+            await restoreSceneAssetsFromSettings(global);
+        })();
+        controller.activePromise = task;
+        await task;
+    };
+
+    if (options.deferUntilRevealComplete) {
+        global.events.once('revealComplete', () => {
+            void invoke().catch((err) => {
+                console.warn('[SceneAssets] deferred restore failed:', options.reason ?? 'unknown', err);
+            });
+        });
+        return;
+    }
+
+    await invoke();
 }
 
 /**
