@@ -366,13 +366,13 @@ class CameraManager {
         // - Orbit：限制 **camera.position** 在收缩后的 bbox 内（与 Fly 保持一致；避免两种模式边界不对齐）
         // - Fly：保持原球形硬边界兜底（防止飞行穿出场景太远）
         const cameraBoundsCfg = settings.cameraBounds;
-        // 若 config.disableCameraBounds === true，则强制关闭相机边界约束
-        const boundsEnabled = !config.disableCameraBounds && cameraBoundsCfg?.enabled !== false; // 默认启用
+        // 基础开关：由配置与 settings 决定（不含编辑态临时覆盖）
+        const baseBoundsEnabled = !config.disableCameraBounds && cameraBoundsCfg?.enabled !== false; // 默认启用
 
         // 无动画时维持更"核心"的收缩范围；有动画时使用 animScaleX/animScaleY
         const targetScaleFactor = 0.5; // 非动画路径的固定缩放系数
 
-        if (boundsEnabled) {
+        if (baseBoundsEnabled) {
             // 只有在有动画路径时，才使用 animScaleX/animScaleY 来分别设置各轴缩放
             // 对于非动画路径，维持原来的 targetScaleFactor 逻辑
             if (usingAnimBbox) {
@@ -390,18 +390,21 @@ class CameraManager {
             } else {
                 this.targetConstraint = BoxConstraint.fromBoundingBox(fusedBbox, targetScaleFactor);
             }
-            controllers.orbit.setTargetConstraint(this.targetConstraint);
-            controllers.fly.setTargetConstraint(this.targetConstraint);
         } else {
             // 禁用约束
             this.targetConstraint = null;
-            controllers.orbit.setTargetConstraint(null);
-            controllers.fly.setTargetConstraint(null);
         }
 
         this.constraint = SphereConstraint.fromBoundingBox(fusedBbox, targetScaleFactor);
-        // disableCameraBounds=true 时要求“彻底不限制相机”，因此同时关闭 fly 的球形兜底约束
-        controllers.fly.setConstraint(boundsEnabled ? this.constraint : null);
+        // 编辑态覆盖：进入编辑模式时临时关约束，退出回到 View 时恢复基础开关
+        const applyCameraBoundsEnabled = (enabled: boolean) => {
+            const targetConstraint = enabled ? this.targetConstraint : null;
+            controllers.orbit.setTargetConstraint(targetConstraint);
+            controllers.fly.setTargetConstraint(targetConstraint);
+            // 与 target 约束同开关，保证“彻底不限制相机”
+            controllers.fly.setConstraint(enabled ? this.constraint : null);
+        };
+        applyCameraBoundsEnabled(baseBoundsEnabled && !state.editMode);
 
         // 给 orbit 设置一个合理的最大缩放距离（避免无限 zoom-out 让场景跑出视野）
         // 之前的系数偏小，会导致 orbit 很早到达 maxZoom；切到 fly（通过位置平移）看起来还能继续"退远"。
@@ -632,6 +635,10 @@ class CameraManager {
             
             // notify input controller about mode change
             events.fire('cameraModeChanged', value, prev);
+        });
+
+        events.on('editMode:changed', (inEdit: boolean) => {
+            applyCameraBoundsEnabled(baseBoundsEnabled && !inEdit);
         });
 
         // handle user scrubbing the animation timeline
