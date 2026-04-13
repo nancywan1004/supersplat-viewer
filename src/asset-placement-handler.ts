@@ -524,13 +524,8 @@ export function initAssetPlacementHandler(
             events.fire('sceneAsset:selected', { source: 'scene' });
             // 仅当场景点击导致“选中对象变化”时，才触发聚焦。
             if (prevSelectedId === entry.id) return;
-            const center = computeEntityWorldCenter(entry.entity);
-            if (center) {
-                events.fire('pick', center);
-            } else {
-                // 回退到选中聚焦链路（依赖 selectedSceneEntityId）。
-                events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
-            }
+            // 统一走资产 frame 链路（camera-manager 内会按选中资产 bbox 做 framing）。
+            events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
         }).catch(() => {});
     };
 
