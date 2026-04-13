@@ -289,10 +289,10 @@ function renderBloomLocalLightRegionsList(
                         linkedLightType = 'spot';
                         linkedInner = typeof light.innerConeAngle === 'number' ? light.innerConeAngle : 25;
                         linkedOuter = typeof light.outerConeAngle === 'number' ? light.outerConeAngle : 45;
-                        linkedRange = typeof light.range === 'number' ? light.range : 10;
+                        linkedRange = typeof light.range === 'number' ? light.range : 1;
                     } else {
                         linkedLightType = 'point';
-                        linkedRange = typeof light.range === 'number' ? light.range : 10;
+                        linkedRange = typeof light.range === 'number' ? light.range : 1;
                     }
                 }
             } catch {

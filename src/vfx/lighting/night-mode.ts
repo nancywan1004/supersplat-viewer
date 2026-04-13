@@ -37,6 +37,7 @@ function localLightLinearRgb(r: number, g: number, b: number, intensity: number,
 const shaderGLSL = /* glsl */`
 uniform vec3 uSpherePositions[10];
 uniform vec3 uSphereColors[10];
+uniform float uSphereRanges[10];
 uniform vec3 uSpotPositions[10];
 uniform vec3 uSpotDirections[10];
 uniform vec3 uSpotColors[10];
@@ -123,9 +124,10 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     for (int i = 0; i < 10; ++i) {
         vec3 pos = uSpherePositions[i];
         vec3 clr = uSphereColors[i];
+        float range = uSphereRanges[i];
         if (length(pos) > 0.001) {
             float dist = length(pos - wpos);
-            if (dist > 0.001) {
+            if (dist < range && dist > 0.001) {
                 float att = 1.15 / (1.0 + dist * dist);
                 sum += clr * att;
             }
@@ -184,6 +186,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
 const shaderGLSLBloomBrush = /* glsl */`
 uniform vec3 uSpherePositions[10];
 uniform vec3 uSphereColors[10];
+uniform float uSphereRanges[10];
 uniform vec3 uSpotPositions[10];
 uniform vec3 uSpotDirections[10];
 uniform vec3 uSpotColors[10];
@@ -287,9 +290,10 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     for (int i = 0; i < 10; ++i) {
         vec3 pos = uSpherePositions[i];
         vec3 clr = uSphereColors[i];
+        float range = uSphereRanges[i];
         if (length(pos) > 0.001) {
             float dist = length(pos - wpos);
-            if (dist > 0.001) {
+            if (dist < range && dist > 0.001) {
                 float att = 1.15 / (1.0 + dist * dist);
                 sum += clr * att;
             }
@@ -344,6 +348,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
 const shaderWGSL = /* wgsl */`
 uniform uSpherePositions: array<vec3f, 10>;
 uniform uSphereColors: array<vec3f, 10>;
+uniform uSphereRanges: array<f32, 10>;
 uniform uSpotPositions: array<vec3f, 10>;
 uniform uSpotDirections: array<vec3f, 10>;
 uniform uSpotColors: array<vec3f, 10>;
@@ -429,9 +434,10 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     for (var i = 0u; i < 10u; i++) {
         let pos = uniform.uSpherePositions[i];
         let clr = uniform.uSphereColors[i];
+        let range = uniform.uSphereRanges[i];
         if (length(pos) > 0.001) {
             let dist = length(pos - wpos);
-            if (dist > 0.001) {
+            if (dist < range && dist > 0.001) {
                 let att = 1.15 / (1.0 + dist * dist);
                 sum = sum + clr * att;
             }
@@ -490,6 +496,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
 const shaderWGSLBloomBrush = /* wgsl */`
 uniform uSpherePositions: array<vec3f, 10>;
 uniform uSphereColors: array<vec3f, 10>;
+uniform uSphereRanges: array<f32, 10>;
 uniform uSpotPositions: array<vec3f, 10>;
 uniform uSpotDirections: array<vec3f, 10>;
 uniform uSpotColors: array<vec3f, 10>;
@@ -596,9 +603,10 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     for (var i = 0u; i < 10u; i++) {
         let pos = uniform.uSpherePositions[i];
         let clr = uniform.uSphereColors[i];
+        let range = uniform.uSphereRanges[i];
         if (length(pos) > 0.001) {
             let dist = length(pos - wpos);
-            if (dist > 0.001) {
+            if (dist < range && dist > 0.001) {
                 let att = 1.15 / (1.0 + dist * dist);
                 sum = sum + clr * att;
             }
@@ -1081,16 +1089,19 @@ class NightMode extends GsplatShaderEffect {
         // 从场景中的 Light 实体收集点光源与聚光灯，上限各 10 个（供高斯 night mode 打光）
         const positions: number[] = [];
         const colors: number[] = [];
+        const ranges: number[] = [];
         const scale = this.lightingIntensity;
         for (let i = 0; i < 10; ++i) {
             const pl = pointLights[i];
             if (!pl) {
                 positions.push(0, 0, 0);
                 colors.push(0, 0, 0);
+                ranges.push(0);
             } else {
                 positions.push(pl.position.x, pl.position.y, pl.position.z);
                 const [lr, lg, lb] = localLightLinearRgb(pl.color.r, pl.color.g, pl.color.b, pl.intensity ?? 1, scale);
                 colors.push(lr, lg, lb);
+                ranges.push(Math.max(0, Number.isFinite(pl.range) ? pl.range : 1));
             }
         }
 
@@ -1151,6 +1162,7 @@ class NightMode extends GsplatShaderEffect {
         if (this.materialsApplied.size > 0) {
             this.setUniform('uSpherePositions[0]', positions);
             this.setUniform('uSphereColors[0]', colors);
+            this.setUniform('uSphereRanges[0]', ranges);
             this.setUniform('uSpotPositions[0]', spotPositions);
             this.setUniform('uSpotDirections[0]', spotDirections);
             this.setUniform('uSpotColors[0]', spotColors);

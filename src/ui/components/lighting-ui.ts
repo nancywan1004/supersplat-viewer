@@ -252,7 +252,7 @@ export function initLightingUI(global: Global): () => void {
                 const yaw = s.yaw ?? 0;
                 const innerCone = s.innerConeAngle ?? 25;
                 const outerCone = s.outerConeAngle ?? 45;
-                const range = typeof s.range === 'number' ? s.range : 10;
+                const range = typeof s.range === 'number' ? s.range : 1;
                 row.innerHTML = `
                     <div class="pointLightVisual" title="Spot ${spotOrdinal}">
                         <span class="pointLightSwatch" style="background:${hex}; box-shadow:0 0 6px ${hex};"></span>
@@ -274,7 +274,7 @@ export function initLightingUI(global: Global): () => void {
             } else {
                 const p = light as PointLightConfig;
                 const [x, y, z] = p.position ?? [0, 0, 0];
-                const ptRange = typeof p.range === 'number' ? p.range : 10;
+                const ptRange = typeof p.range === 'number' ? p.range : 1;
                 row.innerHTML = `
                     <div class="pointLightVisual" title="Point ${index + 1}">
                         <span class="pointLightSwatch" style="background:${hex}; box-shadow:0 0 6px ${hex};"></span>
@@ -308,7 +308,7 @@ export function initLightingUI(global: Global): () => void {
                 if (!light || isDirectional(light) || isSpot(light) || field !== 'range') return;
                 const p = light as PointLightConfig;
                 let v = parseFloat((input as HTMLInputElement).value);
-                if (!Number.isFinite(v)) v = 10;
+                if (!Number.isFinite(v)) v = 1;
                 v = Math.max(0, Math.min(20, v));
                 (input as HTMLInputElement).value = String(v);
                 p.range = v;
@@ -352,7 +352,7 @@ export function initLightingUI(global: Global): () => void {
                     else if (field === 'yaw') s.yaw = parseFloat((input as HTMLInputElement).value) ?? 0;
                     else if (field === 'innerConeAngle') s.innerConeAngle = parseFloat((input as HTMLInputElement).value) ?? 25;
                     else if (field === 'outerConeAngle') s.outerConeAngle = parseFloat((input as HTMLInputElement).value) ?? 45;
-                    else if (field === 'range') s.range = parseFloat((input as HTMLInputElement).value) ?? 10;
+                    else if (field === 'range') s.range = parseFloat((input as HTMLInputElement).value) ?? 1;
                     (input as HTMLElement).closest('.pointLightRow')?.classList.toggle('pointLightRow--disabled', !s.enabled);
                 } else {
                     const p = light as PointLightConfig;
@@ -368,7 +368,7 @@ export function initLightingUI(global: Global): () => void {
                     } else if (field === 'intensity') p.intensity = parseFloat((input as HTMLInputElement).value) || 1;
                     else if (field === 'range' && (input as HTMLInputElement).type === 'range') {
                         let v = parseFloat((input as HTMLInputElement).value);
-                        if (!Number.isFinite(v)) v = 10;
+                        if (!Number.isFinite(v)) v = 1;
                         v = Math.max(0, Math.min(20, v));
                         (input as HTMLInputElement).value = String(v);
                         p.range = v;
@@ -462,7 +462,7 @@ export function initLightingUI(global: Global): () => void {
                 return [camPos.x, camPos.y, camPos.z];
             })();
             const nextId = generateNextLightId();
-            const cfgPoint: any = { position: basePos, color: [1, 1, 1], intensity: 1, range: 10, enabled: true };
+            const cfgPoint: any = { position: basePos, color: [1, 1, 1], intensity: 1, range: 1, enabled: true };
             cfgPoint.id = nextId;
             lighting.lights.push(cfgPoint);
             // 若当前有激活的亮灯区域，则把该区域的 linkedLightId 绑定到新建光源
@@ -504,7 +504,7 @@ export function initLightingUI(global: Global): () => void {
                 yaw: 0,
                 innerConeAngle: 25,
                 outerConeAngle: 45,
-                range: 10,
+                range: 1,
                 enabled: true
             };
             lighting.lights.push(cfgSpot);

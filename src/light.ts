@@ -15,8 +15,8 @@ import type { DirectionalLightConfig, SpotLightConfig } from './schemas/v2';
 
 const MAX_POINT_LIGHTS = 10;
 const MAX_SPOT_LIGHTS = 10;
-// 仅影响“线框/锥体可视化”的大小，不影响真实光照参数（range 等）
-const LIGHT_VISUAL_SCALE = 0.25;
+// 光源可视化与真实 range 1:1 对齐（不再做额外视觉缩放）
+const LIGHT_VISUAL_SCALE = 1;
 
 const isDirectionalLightConfig = (cfg: any): cfg is DirectionalLightConfig =>
     cfg && cfg.type === 'directional';
@@ -205,6 +205,7 @@ export type PointLightInfo = {
     position: Vec3;
     color: Color;
     intensity: number;
+    range: number;
 };
 
 export type SpotLightInfo = {
@@ -231,7 +232,8 @@ const collectPointLights = (global: Global): PointLightInfo[] => {
             result.push({
                 position: new Vec3(pos.x, pos.y, pos.z),
                 color: new Color(e.light.color.r, e.light.color.g, e.light.color.b),
-                intensity: e.light.intensity ?? 1
+                intensity: e.light.intensity ?? 1,
+                range: (e.light as any).range ?? 1
             });
         }
         e.children.forEach(visit);
@@ -266,7 +268,7 @@ const collectSpotLights = (global: Global): SpotLightInfo[] => {
         if (innerRad > outerRad) {
             [innerRad, outerRad] = [outerRad, innerRad];
         }
-        const range = (e.light as any).range ?? 10;
+        const range = (e.light as any).range ?? 1;
         result.push({
             position,
             direction,
@@ -508,7 +510,7 @@ const createSpotLightsFromSettings = (global: Global): void => {
         const yaw = cfg.yaw ?? 0;
         const innerCone = cfg.innerConeAngle ?? 25;
         const outerCone = cfg.outerConeAngle ?? 45;
-        const range = typeof cfg.range === 'number' ? cfg.range : 10;
+        const range = typeof cfg.range === 'number' ? cfg.range : 1;
         const enabled = cfg.enabled !== false;
 
         let entity = container!.findByName(`spotLight_${i}`) as Entity | undefined;
@@ -571,7 +573,7 @@ const createPointLightsFromSettings = (global: Global): void => {
         const [r, g, b] = cfg.color ?? [1, 1, 1];
         const intensity = typeof cfg.intensity === 'number' ? cfg.intensity : 1;
         const enabled = cfg.enabled !== false;
-        const range = typeof cfg.range === 'number' ? cfg.range : 10;
+        const range = typeof cfg.range === 'number' ? cfg.range : 1;
 
         let entity = container!.findByName(`pointLight_${i}`) as Entity | undefined;
         if (!entity) {
@@ -662,10 +664,19 @@ const selectNearestLightAtPosition = (
     const { app, state, events } = global;
     if (!state.editMode || state.editLeftModule !== 'environment') return;
 
-    let bestEntity: Entity | null = null;
-    let bestConfig: any | null = null;
-    let bestDist = Infinity;
-    const candidates: Array<{ entity: Entity; cfg: any; dist: number }> = [];
+    type Candidate = {
+        entity: Entity;
+        cfg: any;
+        dist: number;
+        type: 'spot' | 'point';
+    };
+    const candidates: Candidate[] = [];
+
+    // 聚光灯只允许“锥头附近”命中，避免点击锥体中后段时误选到邻近点光。
+    const SPOT_HEAD_WORLD_DISTANCE = 1.4;
+    const POINT_WORLD_DISTANCE = 4.5;
+    const SPOT_HEAD_SCREEN_DISTANCE_PX = 28;
+    const POINT_SCREEN_DISTANCE_PX = 64;
 
     const testContainer = (name: string) => {
         const container = app.root.findByName(name) as Entity | null;
@@ -677,46 +688,57 @@ const selectNearestLightAtPosition = (
             if (!cfg || !cfg.id) return;
             const pos = e.getPosition();
             const d = pos.distance(position);
-            candidates.push({ entity: e, cfg, dist: d });
-            if (d < bestDist) {
-                bestDist = d;
-                bestEntity = e;
-                bestConfig = cfg;
-            }
+            const type: 'spot' | 'point' = cfg.type === 'spot' ? 'spot' : 'point';
+            candidates.push({ entity: e, cfg, dist: d, type });
         });
     };
 
     testContainer('pointLights');
     testContainer('spotLights');
 
-    if (!bestEntity || !bestConfig) return;
+    if (candidates.length === 0) return;
 
-    // 世界距离阈值：原 2.5 在大场景里过严，适当放宽
-    const MAX_SELECT_DISTANCE = 5.0;
-    let pickedCfg = bestConfig;
-    if (bestDist > MAX_SELECT_DISTANCE) {
-        // 兜底：使用屏幕空间像素距离判定，避免“点到模型表面但离灯位世界距离偏大”导致难选中
-        const cam = global.camera?.camera;
-        if (!cam || !Number.isFinite(clientX) || !Number.isFinite(clientY) || candidates.length === 0) return;
-        let bestScreenCfg: any | null = null;
-        let bestPx = Infinity;
-        candidates.forEach(({ entity, cfg }) => {
-            const sp = cam.worldToScreen(entity.getPosition());
-            const dx = sp.x - (clientX as number);
-            const dy = sp.y - (clientY as number);
-            const px = Math.hypot(dx, dy);
-            if (px < bestPx) {
-                bestPx = px;
-                bestScreenCfg = cfg;
-            }
-        });
-        const MAX_SCREEN_DISTANCE_PX = 64;
-        if (!bestScreenCfg || bestPx > MAX_SCREEN_DISTANCE_PX) return;
-        pickedCfg = bestScreenCfg;
+    const pickNearest = (list: Candidate[]): Candidate | null => {
+        if (list.length === 0) return null;
+        let best = list[0];
+        for (let i = 1; i < list.length; i++) {
+            if (list[i].dist < best.dist) best = list[i];
+        }
+        return best;
+    };
+
+    // 1) 先走世界坐标命中：spot 仅锥头近域；point 使用相对宽松阈值。
+    const spotNear = candidates.filter((c) => c.type === 'spot' && c.dist <= SPOT_HEAD_WORLD_DISTANCE);
+    const pointNear = candidates.filter((c) => c.type === 'point' && c.dist <= POINT_WORLD_DISTANCE);
+    const worldPicked = pickNearest(spotNear) ?? pickNearest(pointNear);
+    if (worldPicked) {
+        (state as any).selectedLightId = worldPicked.cfg.id;
+        events.fire('sceneLight:selected', { id: worldPicked.cfg.id, source: 'scene' });
+        return;
     }
 
-    (state as any).selectedLightId = pickedCfg.id;
-    events.fire('sceneLight:selected', { id: pickedCfg.id, source: 'scene' });
+    // 2) 屏幕空间兜底：spot 使用更小半径，仅允许锥头附近命中；按归一化分数选最优，降低点/聚冲突。
+    const cam = global.camera?.camera;
+    if (!cam || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
+    let bestScreenCandidate: Candidate | null = null;
+    let bestScore = Infinity;
+    candidates.forEach((candidate) => {
+        const threshold = candidate.type === 'spot' ? SPOT_HEAD_SCREEN_DISTANCE_PX : POINT_SCREEN_DISTANCE_PX;
+        const sp = cam.worldToScreen(candidate.entity.getPosition());
+        const dx = sp.x - (clientX as number);
+        const dy = sp.y - (clientY as number);
+        const px = Math.hypot(dx, dy);
+        if (px > threshold) return;
+        const score = px / threshold;
+        if (score < bestScore) {
+            bestScore = score;
+            bestScreenCandidate = candidate;
+        }
+    });
+    if (!bestScreenCandidate) return;
+
+    (state as any).selectedLightId = bestScreenCandidate.cfg.id;
+    events.fire('sceneLight:selected', { id: bestScreenCandidate.cfg.id, source: 'scene' });
 };
 
 /**

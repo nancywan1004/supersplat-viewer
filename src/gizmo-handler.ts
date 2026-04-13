@@ -40,6 +40,10 @@ const MODE_TO_GIZMO_TYPE: Record<AssetTransformMode, string> = {
     scale: 'scale'
 };
 
+type RotateGizmoShape = 'x' | 'y' | 'z' | 'xyz' | 'face';
+const ALL_ROTATE_GIZMO_SHAPES: RotateGizmoShape[] = ['x', 'y', 'z', 'xyz', 'face'];
+const SPOT_LIGHT_ROTATE_SHAPES: ReadonlySet<RotateGizmoShape> = new Set<RotateGizmoShape>(['x', 'y']);
+
 /**
  * 初始化 Gizmo：监听 assetTransformMode:changed 与 sceneAsset:selected，
  * 在编辑模式下对选中实体显示变换 Gizmo（若可用），否则提供简单拖拽平移。
@@ -101,9 +105,9 @@ export function initGizmoHandler(global: Global): () => void {
                             if ((cfg as any).type === 'spot') {
                                 const euler = node.getEulerAngles?.();
                                 if (euler) {
-                                    const pitch = Math.max(-90, Math.min(90, euler.x ?? 0));
+                                    const pitch = euler.x ?? 0;
                                     let yaw = euler.y ?? 0;
-                                    // 归一化到 0-360
+                                    // yaw 仅做等价归一化，不限制旋转自由度
                                     yaw = ((yaw % 360) + 360) % 360;
                                     (cfg as any).pitch = pitch;
                                     (cfg as any).yaw = yaw;
@@ -194,11 +198,39 @@ export function initGizmoHandler(global: Global): () => void {
         return null;
     };
 
+    const applyRotateGizmoShapePolicy = (enabledShapes: ReadonlySet<RotateGizmoShape>): void => {
+        if (!handler) return;
+        const rotateGizmo = (handler._gizmos as any)?.rotate;
+        if (!rotateGizmo || typeof rotateGizmo.enableShape !== 'function') return;
+
+        for (const shape of ALL_ROTATE_GIZMO_SHAPES) {
+            rotateGizmo.enableShape(shape, enabledShapes.has(shape));
+        }
+    };
+
+    const resolveRotateGizmoEnabledShapes = (context: {
+        gizmoType: string | null;
+        lightMode: LightTransformMode | undefined;
+        lightEntity: any | null;
+    }): ReadonlySet<RotateGizmoShape> => {
+        const { gizmoType, lightMode, lightEntity } = context;
+        if (gizmoType !== 'rotate') return new Set<RotateGizmoShape>(ALL_ROTATE_GIZMO_SHAPES);
+
+        const isSpotLightRotate = lightMode === 'rotate' && (lightEntity as any)?.__lightConfig?.type === 'spot';
+        if (isSpotLightRotate) {
+            // 聚光灯旋转仅保留 yaw(y) + pitch(x)，不开放 roll(z)/自由旋转。
+            return SPOT_LIGHT_ROTATE_SHAPES;
+        }
+
+        return new Set<RotateGizmoShape>(ALL_ROTATE_GIZMO_SHAPES);
+    };
+
     const syncGizmoToSelection = () => {
         if (!handler) return;
 
         let targetNode: any | null = null;
         let gizmoType: string | null = null;
+        let selectedLightEntity: any | null = null;
 
         // 资产模式
         const inAssetModule = state.editLeftModule === 'asset';
@@ -220,10 +252,17 @@ export function initGizmoHandler(global: Global): () => void {
         if (!targetNode && inEnvModule && (lightMode === 'move' || lightMode === 'rotate') && state.selectedLightId) {
             const lightEntity = findSelectedLightEntity();
             if (lightEntity) {
+                selectedLightEntity = lightEntity;
                 targetNode = lightEntity;
                 gizmoType = lightMode === 'move' ? 'translate' : 'rotate';
             }
         }
+
+        applyRotateGizmoShapePolicy(resolveRotateGizmoEnabledShapes({
+            gizmoType,
+            lightMode,
+            lightEntity: selectedLightEntity
+        }));
 
         if (targetNode && gizmoType) {
             handler.add(targetNode, true);

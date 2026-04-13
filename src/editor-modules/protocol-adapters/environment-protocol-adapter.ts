@@ -49,7 +49,7 @@ export function applyLightAdd(global: Global, id: string, isThreeSixty = true): 
             position,
             color: [1, 1, 1],
             intensity: 1,
-            range: 10,
+            range: 1,
             enabled: true
         } as LightWithId);
     } else {
@@ -59,7 +59,7 @@ export function applyLightAdd(global: Global, id: string, isThreeSixty = true): 
             position,
             color: [1, 1, 1],
             intensity: 1,
-            range: 10,
+            range: 1,
             innerConeAngle: 25,
             outerConeAngle: 45,
             enabled: true
