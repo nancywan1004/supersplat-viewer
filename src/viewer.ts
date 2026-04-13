@@ -565,6 +565,9 @@ class Viewer {
             events.on('revealRestart', () => {
                 if (revealBlocksAnim(state)) {
                     lockDeferredEditingLayersForReveal();
+                } else {
+                    // persistent VFX（如 perlin-wave）与非阻塞类型切换时不应继续沿用上一轮 reveal 的隐藏态
+                    unlockDeferredEditingLayersAfterReveal();
                 }
             });
             events.on('revealComplete', unlockDeferredEditingLayersAfterReveal);

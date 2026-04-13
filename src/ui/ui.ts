@@ -538,12 +538,55 @@ const initUI = (global: Global) => {
     let editModeEnteredSettingsSnapshot: string | null = null;
     /** 进入编辑模式时的 settings 完整数据，用于「不保存并退出」时回退场景 */
     let editModeEnteredSettingsData: ExperienceSettings | null = null;
+    const applyEditChromeVisibility = (inEdit: boolean) => {
+        if (config.showEditUI === false) return;
+        const leftMount = document.getElementById('editLeftSidebarMount');
+        if (leftMount) {
+            leftMount.classList.toggle('hidden', !inEdit);
+        }
+        if (dom.rightToolBar) {
+            // editLeftModule === null 时：不显示任何模块面板
+            const showRight = inEdit && state.editLeftModule != null;
+            dom.rightToolBar.classList.toggle('hidden', !showRight);
+        }
+        const bottomMount = document.getElementById('editBottomToolbarMount');
+        if (bottomMount) {
+            const showBottomBar = inEdit
+                && (state.editLeftModule === 'asset'
+                    || state.editLeftModule === 'annotation'
+                    || state.editLeftModule === 'environment');
+            bottomMount.classList.toggle('hidden', !showBottomBar);
+        }
+        // 顶栏：编辑时显示「退出」+「保存」，非编辑时显示「编辑」
+        if (dom.editModeStrip) {
+            dom.editModeStrip.classList.toggle('edit-mode-active', inEdit);
+        }
+        if (dom.editModeBtn) {
+            dom.editModeBtn.classList.toggle('hidden', inEdit);
+        }
+        if (dom.exitEditBtn) {
+            dom.exitEditBtn.classList.toggle('hidden', !inEdit);
+        }
+        if (dom.saveSettingsBtn) {
+            dom.saveSettingsBtn.classList.toggle('hidden', !inEdit);
+        }
+        const showUndoRedo = inEdit && config.trackEditHistory === true;
+        if (dom.undoEditBtn) {
+            dom.undoEditBtn.classList.toggle('hidden', !showUndoRedo);
+        }
+        if (dom.redoEditBtn) {
+            dom.redoEditBtn.classList.toggle('hidden', !showUndoRedo);
+        }
+    };
     const updateEditModeUI = async () => {
         const inEdit = state.editMode;
+        // 先切换工具栏显隐，再执行异步恢复，避免首次点击因 await restore 导致工具栏延迟出现
+        applyEditChromeVisibility(inEdit);
         if (inEdit) {
             if (editUiTransport !== 'message-bridge') {
                 editModeEnteredSettingsSnapshot = null;
-                // View -> Edit：先恢复到原始配置（View 模式的临时修改不保留）
+                // 进入编辑统一恢复原始配置（避免资产异步未完成时基线快照不一致）。
+                // 注意：不在此处触发 vfxExit，特效按当前运行状态保持。
                 const originalSettings = (global as any).__originalSettings as ExperienceSettings | undefined;
                 if (originalSettings) {
                     // 立即设置退出时用的基线（使用原始配置，确保用户快速退出也能正确恢复）
@@ -564,45 +607,8 @@ const initUI = (global: Global) => {
                 initEditHistory(global, initialSnapshot);
                 editModeEnteredSettingsData = JSON.parse(JSON.stringify(initialSnapshot)) as ExperienceSettings;
                 editModeEnteredSettingsSnapshot = getComparableSettingsStringFromSnapshot(initialSnapshot);
-            }
-        }
-        if (config.showEditUI !== false) {
-            const leftMount = document.getElementById('editLeftSidebarMount');
-            if (leftMount) {
-                leftMount.classList.toggle('hidden', !inEdit);
-            }
-            if (dom.rightToolBar) {
-                // editLeftModule === null 时：不显示任何模块面板
-                const showRight = inEdit && state.editLeftModule != null;
-                dom.rightToolBar.classList.toggle('hidden', !showRight);
-            }
-            const bottomMount = document.getElementById('editBottomToolbarMount');
-            if (bottomMount) {
-                const showBottomBar = inEdit
-                    && (state.editLeftModule === 'asset'
-                        || state.editLeftModule === 'annotation'
-                        || state.editLeftModule === 'environment');
-                bottomMount.classList.toggle('hidden', !showBottomBar);
-            }
-            // 顶栏：编辑时显示「退出」+「保存」，非编辑时显示「编辑」
-            if (dom.editModeStrip) {
-                dom.editModeStrip.classList.toggle('edit-mode-active', inEdit);
-            }
-            if (dom.editModeBtn) {
-                dom.editModeBtn.classList.toggle('hidden', inEdit);
-            }
-            if (dom.exitEditBtn) {
-                dom.exitEditBtn.classList.toggle('hidden', !inEdit);
-            }
-            if (dom.saveSettingsBtn) {
-                dom.saveSettingsBtn.classList.toggle('hidden', !inEdit);
-            }
-            const showUndoRedo = inEdit && config.trackEditHistory === true;
-            if (dom.undoEditBtn) {
-                dom.undoEditBtn.classList.toggle('hidden', !showUndoRedo);
-            }
-            if (dom.redoEditBtn) {
-                dom.redoEditBtn.classList.toggle('hidden', !showUndoRedo);
+                // 恢复流程中会重置 editLeftModule，完成后再同步一次显隐状态
+                applyEditChromeVisibility(state.editMode);
             }
         }
     };

@@ -957,6 +957,9 @@ export class RevealController {
         // 标记：当前不在播放中
         this.inVfx = false;
         (this.global.state as any).vfxActive = false;
+        // 强制停播视作「当前 reveal 生命周期已完成」：
+        // 统一解锁 deferred editing layers / bloom stack，避免 persistent 或中途停播后资产、标注继续隐藏。
+        this.global.events.fire('revealComplete');
         // 注意：不改 config.type / settings.revealEffect.type / state.vfxType
     }
 
