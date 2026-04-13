@@ -31,8 +31,12 @@ const tmpCamera = new Camera();
 const tmpv = new Vec3();
 /** F 键 / inputEvent「frame」分支里，用于承接「选中项世界坐标」的临时 Vec3（避免每帧分配）。 */
 const tmpFocus = new Vec3();
-/** 资产/选中聚焦时使用固定距离，避免按目标大小比例缩放。 */
+/** 非资产对象（如双击拾取点）聚焦时使用固定距离。 */
 const ORBIT_FOCUS_FIXED_DISTANCE = 0.5;
+/** 资产 bbox 聚焦时，目标占据视野半角比例（越小留白越多）。 */
+const ASSET_FOCUS_HALF_FOV_FILL = 0.72;
+/** 极小资产时的最小包围球半径，避免距离退化到 0。 */
+const MIN_FOCUS_RADIUS = 1e-3;
 
 type FocusTarget = 'asset' | 'annotation' | 'light';
 
@@ -109,6 +113,56 @@ function fillEditFocus(global: Global, out: Vec3, focusTarget?: FocusTarget): bo
     if (mod === 'annotation') return tryAnnotation();
     if (mod === 'environment') return tryLight();
     return false;
+}
+
+function computeEntityWorldBoundingBox(entity: Entity): BoundingBox | null {
+    const meshInstances: Array<{ aabb?: BoundingBox }> = [];
+    const collectMeshInstances = (node: Entity) => {
+        const renderComp = (node as Entity & { render?: { meshInstances?: Array<{ aabb?: BoundingBox }> } }).render;
+        const instances = renderComp?.meshInstances;
+        if (instances && instances.length > 0) {
+            for (const mi of instances) meshInstances.push(mi);
+        }
+        const children = node.children;
+        if (children && children.length > 0) {
+            for (const child of children) collectMeshInstances(child as Entity);
+        }
+    };
+    collectMeshInstances(entity);
+
+    if (meshInstances.length > 0) {
+        const min = new Vec3(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
+        const max = new Vec3(Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY);
+        let hasValidAabb = false;
+        for (const mi of meshInstances) {
+            const aabb = mi.aabb;
+            if (!aabb) continue;
+            hasValidAabb = true;
+            min.min(aabb.getMin());
+            max.max(aabb.getMax());
+        }
+        if (hasValidAabb) {
+            const center = min.clone().add(max).mulScalar(0.5);
+            const half = max.clone().sub(min).mulScalar(0.5);
+            return new BoundingBox(center, half);
+        }
+    }
+
+    const gsplat = (entity as Entity & { gsplat?: { customAabb?: BoundingBox; aabb?: BoundingBox } }).gsplat;
+    const gsAabb = gsplat?.customAabb ?? gsplat?.aabb;
+    if (gsAabb) {
+        const worldCenter = entity.getWorldTransform().transformPoint(gsAabb.center.clone());
+        return new BoundingBox(worldCenter, gsAabb.halfExtents.clone());
+    }
+    return null;
+}
+
+function computeDistanceForAssetFraming(bbox: BoundingBox, fovDeg: number, aspect: number): number {
+    const radius = Math.max(MIN_FOCUS_RADIUS, bbox.halfExtents.length());
+    const verticalHalf = Math.max(1e-4, (fovDeg * Math.PI / 180) * 0.5);
+    const horizontalHalf = Math.atan(Math.tan(verticalHalf) * Math.max(aspect, 1e-4));
+    const limitingHalfFov = Math.max(1e-4, Math.min(verticalHalf, horizontalHalf) * ASSET_FOCUS_HALF_FOV_FILL);
+    return radius / Math.sin(limitingHalfFov);
 }
 
 const unionBoundingBoxes = (a: BoundingBox, b: BoundingBox): BoundingBox => {
@@ -451,9 +505,10 @@ class CameraManager {
 
         /**
          * 将 Orbit 相机对准某一世界坐标点（目标落在画面中心附近）。
-         * 与双击场景拾取 `pick` / 资产 frame 共用：使用固定目标距离（并受 zoomRange 约束）。
+         * - 未指定 distance 时使用固定距离（用于 pick 等点目标）
+         * - 指定 distance 时可用于 bbox framing（例如资产 focus）
          */
-        const orbitFocus = (position: Vec3) => {
+        const orbitFocus = (position: Vec3, distance?: number) => {
             if (state.cameraMode !== 'orbit') {
                 state.cameraMode = 'orbit';
             }
@@ -463,7 +518,7 @@ class CameraManager {
             const zoomRange = controllers.orbit.controller.zoomRange;
             const targetDistance = Math.max(
                 zoomRange.x,
-                Math.min(zoomRange.y, ORBIT_FOCUS_FIXED_DISTANCE)
+                Math.min(zoomRange.y, distance ?? ORBIT_FOCUS_FIXED_DISTANCE)
             );
             tmpv.mulScalar(-targetDistance).add(position);
             tmpCamera.position.copy(tmpv);
@@ -472,11 +527,32 @@ class CameraManager {
             startTransition();
         };
 
+        const orbitFocusSelectedAssetWithFraming = () => {
+            const selected = state.selectedSceneEntityId ? getSelectedSceneEntity(state) : null;
+            if (!selected) return false;
+            const bbox = computeEntityWorldBoundingBox(selected);
+            if (!bbox) return false;
+            const aspect = cameraEntity.camera?.aspectRatio ?? (app.graphicsDevice.width / Math.max(1, app.graphicsDevice.height));
+            const fitDistance = computeDistanceForAssetFraming(bbox, this.camera.fov, aspect);
+            orbitFocus(bbox.center, fitDistance);
+            return true;
+        };
+
         // handle input events
         events.on('inputEvent', (eventName, event) => {
             switch (eventName) {
                 case 'frame':
                     // F 键 / UI「Frame」：优先聚焦当前编辑模块下的选中项，否则整场景 framing
+                    {
+                        const focusTarget = (event as { focusTarget?: FocusTarget } | undefined)?.focusTarget;
+                        const shouldUseAssetFraming =
+                            focusTarget === 'asset' ||
+                            (!focusTarget && state.editMode && state.editLeftModule === 'asset');
+                        if (shouldUseAssetFraming && orbitFocusSelectedAssetWithFraming()) {
+                            (event as KeyboardEvent | undefined)?.preventDefault?.();
+                            break;
+                        }
+                    }
                     if (fillEditFocus(global, tmpFocus, (event as { focusTarget?: FocusTarget } | undefined)?.focusTarget)) {
                         (event as KeyboardEvent | undefined)?.preventDefault?.();
                         orbitFocus(tmpFocus);
