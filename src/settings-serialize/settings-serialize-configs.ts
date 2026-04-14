@@ -10,10 +10,10 @@ export const DEFAULT_LIGHTING_ROOT: { lights: unknown[] } = { lights: [] };
 export const DEFAULT_BLOOM = {
     enabled: false,
     intensity: 0.1,
-    blurLevel: 4,
-    threshold: 0.2,
+    blurLevel: 0,
+    threshold: 0,
     bloomDebug: false,
-    bloomScope: 'local' as const,
+    bloomScope: 'global' as const,
     bloomBrushSize: 30,
     bloomBrushBrightness: 1
 } as const;

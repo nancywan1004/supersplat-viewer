@@ -25,8 +25,8 @@ const POST_EFFECT_PANEL_HTML = `
   <div class="settingsRow">
     <label for="bloomBlurLevelSlider" class="postEffectLabel">BlurLevel:</label>
     <div class="postEffectSliderWrap">
-      <input type="range" id="bloomBlurLevelSlider" min="0" max="10" step="1" value="4" class="postEffectSlider">
-      <span id="bloomBlurLevelValue" class="postEffectSliderValue">4</span>
+      <input type="range" id="bloomBlurLevelSlider" min="0" max="10" step="1" value="0" class="postEffectSlider">
+      <span id="bloomBlurLevelValue" class="postEffectSliderValue">0</span>
     </div>
   </div>
   <div class="settingsRow">
@@ -36,8 +36,8 @@ const POST_EFFECT_PANEL_HTML = `
       title="Bloom 提取阈值：越低越容易发光（范围更大），越高只保留更亮的高光区域"
     >Threshold (HDR):</label>
     <div class="postEffectSliderWrap">
-      <input type="range" id="bloomThresholdSlider" min="0" max="5" step="0.1" value="0.2" class="postEffectSlider">
-      <span id="bloomThresholdValue" class="postEffectSliderValue">0.20</span>
+      <input type="range" id="bloomThresholdSlider" min="0" max="5" step="0.1" value="0" class="postEffectSlider">
+      <span id="bloomThresholdValue" class="postEffectSliderValue">0.00</span>
     </div>
   </div>
   <div class="settingsRow">
@@ -672,7 +672,7 @@ export function initPostEffectUI(global: Global): () => void {
         if (bloomIntensityValue) bloomIntensityValue.textContent = intensity.toFixed(2);
         if (bloomBlurLevelSlider) bloomBlurLevelSlider.value = String(b.blurLevel);
         if (bloomBlurLevelValue) bloomBlurLevelValue.textContent = String(b.blurLevel);
-        const th = Math.max(0, Math.min(5, Number(b.threshold ?? 0.2)));
+        const th = Math.max(0, Math.min(5, Number(b.threshold ?? 0)));
         if (bloomThresholdSlider) bloomThresholdSlider.value = String(th);
         if (bloomThresholdValue) bloomThresholdValue.textContent = th.toFixed(2);
         if (bloomDebugCheck) bloomDebugCheck.classList.toggle('active', b.bloomDebug ?? false);

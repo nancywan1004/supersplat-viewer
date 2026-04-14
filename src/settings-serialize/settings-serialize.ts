@@ -15,9 +15,11 @@ const defaultPostEffectSettings = () => ({
     bloom: {
         enabled: false,
         intensity: 0.1,
-        blurLevel: 4,
-        threshold: 0.2,
+        blurLevel: 0,
+        threshold: 0,
         bloomDebug: false,
+        bloomScope: 'global' as const,
+        localLightsEnabled: false,
         bloomBrushSize: 30,
         bloomBrushBrightness: 1,
         localLightRegions: [] as any[]

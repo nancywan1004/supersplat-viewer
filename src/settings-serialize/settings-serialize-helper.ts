@@ -73,7 +73,7 @@ export function ensureBloom(settings: ExperienceSettings): NonNullable<Experienc
     if (typeof b.blurLevel !== 'number') b.blurLevel = DEFAULT_BLOOM.blurLevel;
     if (typeof b.intensity !== 'number') b.intensity = DEFAULT_BLOOM.intensity;
     if (!Array.isArray(b.localLightRegions)) b.localLightRegions = [];
-    if (typeof (b as any).localLightsEnabled !== 'boolean') (b as any).localLightsEnabled = true;
+    if (typeof (b as any).localLightsEnabled !== 'boolean') (b as any).localLightsEnabled = false;
     if (Number(b.intensity) === 1) {
         b.intensity = DEFAULT_BLOOM.intensity;
         if (Number(b.blurLevel) === 2) {

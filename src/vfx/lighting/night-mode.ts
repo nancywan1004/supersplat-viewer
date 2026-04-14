@@ -700,7 +700,7 @@ class NightMode extends GsplatShaderEffect {
     /** Bloom Brush 合成：开启时涂抹区域内亮部不应用 night mode（参与 bloom），暗部应用 night mode */
     bloomBrushActive: boolean = false;
     bloomBrushMask: Texture | null = null;
-    bloomBrushThreshold: number = 0.2;
+    bloomBrushThreshold: number = 0;
     /** 笔刷区域局部亮度 -1～1，0 不变；由 setBloomBrushParams 传入 */
     bloomBrushLocalBrightness: number = 0;
     private _bloomBrushModelViewProj: Mat4 = new Mat4();

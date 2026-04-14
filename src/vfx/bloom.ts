@@ -305,7 +305,7 @@ export class BloomController {
             const maskTex = this.getEffectiveMaskTexture(brushOn);
             try {
                 if (maskTex) graphicsDevice.scope.resolve('bloomMaskTexture').setValue(maskTex);
-                const th = Math.max(0, Math.min(5, Number(bloom.threshold ?? 0.2)));
+                const th = Math.max(0, Math.min(5, Number(bloom.threshold ?? 0)));
                 graphicsDevice.scope.resolve('bloomThreshold').setValue(th);
             } catch (_) {}
         };
@@ -443,12 +443,12 @@ export class BloomController {
         // 仅亮度高于该值的像素会被提取到 bloom 管线。
         // - 低阈值：更多中亮区域参与，画面更“糊光”；
         // - 高阈值：仅保留最亮高光，发光范围更克制。
-        const th = Math.max(0, Math.min(5, Number(bloomSettings.threshold ?? 0.2)));
+        const th = Math.max(0, Math.min(5, Number(bloomSettings.threshold ?? 0)));
         const bloomBrushBrightness = typeof bloomSettings.bloomBrushBrightness === 'number'
             ? Math.max(-1, Math.min(1, bloomSettings.bloomBrushBrightness))
             : 0;
 
-        const blurLevel = bloomSettings.blurLevel ?? 4;
+        const blurLevel = bloomSettings.blurLevel ?? 0;
         if (bloomSettings.enabled && blurLevel > 0) {
             bloom.intensity = Math.max(0, Math.min(0.2, Number(bloomSettings.intensity)));
             bloom.blurLevel = Math.max(1, Math.min(5, blurLevel));
@@ -759,7 +759,7 @@ export class BloomController {
         const maskTex = this.getEffectiveMaskTexture(brushOn);
         try {
             if (maskTex) graphicsDevice.scope.resolve('bloomMaskTexture').setValue(maskTex);
-            const th = Math.max(0, Math.min(5, Number(bloom?.threshold ?? 0.2)));
+            const th = Math.max(0, Math.min(5, Number(bloom?.threshold ?? 0)));
             graphicsDevice.scope.resolve('bloomThreshold').setValue(th);
         } catch (_) {}
     }
