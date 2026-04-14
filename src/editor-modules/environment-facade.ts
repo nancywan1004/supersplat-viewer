@@ -1,4 +1,5 @@
 import { setLightsVisualVisible } from '../light';
+import { ensureBloomEditorSession } from '../settings-serialize/settings-serialize-helper';
 import {
     applyBloomBlurSet,
     applyBloomIntensityUpdate,
@@ -39,6 +40,14 @@ class EnvironmentFacade implements ModuleFacade {
     }
 
     onExit(ctx: ModuleContext): void {
+        // 离开 environment（切到 null 或其他模块）时，若当前是 draft 区域则清理草稿与笔刷会话，
+        // 避免笔刷模式残留在非环境模块。
+        const bloomSes = ensureBloomEditorSession(ctx.global.settings as any);
+        const activeRegionId = bloomSes.activeLocalLightRegionId;
+        if (typeof activeRegionId === 'string' && activeRegionId.startsWith('draft-')) {
+            ctx.events.fire('messageBridge:lightBrush', { type: 'LIGHT_BRUSH_CLEAR', payload: {} });
+        }
+
         ctx.state.selectedLightId = null;
         ctx.state.lightTransformMode = null;
         ctx.events.fire('sceneLight:selected', { id: null, source: 'host' as SelectionSource });
