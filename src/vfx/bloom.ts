@@ -448,9 +448,10 @@ export class BloomController {
             ? Math.max(-1, Math.min(1, bloomSettings.bloomBrushBrightness))
             : 0;
 
-        const blurLevel = bloomSettings.blurLevel ?? 0;
+        const blurLevel = bloomSettings.blurLevel ?? 10;
         if (bloomSettings.enabled && blurLevel > 0) {
-            bloom.intensity = Math.max(0, Math.min(0.2, Number(bloomSettings.intensity)));
+            const intensity = Number(bloomSettings.intensity);
+            bloom.intensity = Number.isFinite(intensity) ? intensity : 0;
             bloom.blurLevel = Math.max(1, Math.min(5, blurLevel));
             cameraFrame.debug = bloomDebug ? 'bloom' : null;
         } else {

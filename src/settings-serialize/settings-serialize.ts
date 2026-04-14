@@ -14,8 +14,8 @@ const defaultPostEffectSettings = () => ({
     sharpness: { enabled: false, amount: 0 },
     bloom: {
         enabled: false,
-        intensity: 0.1,
-        blurLevel: 0,
+        intensity: 0,
+        blurLevel: 10,
         threshold: 0,
         bloomDebug: false,
         bloomScope: 'global' as const,

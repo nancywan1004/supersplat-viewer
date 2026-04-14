@@ -140,8 +140,8 @@ const migrateV2 = (v1: V1): V2 => {
             },
             bloom: {
                 enabled: false,
-                intensity: 0.1,
-                blurLevel: 0,
+                intensity: 0,
+                blurLevel: 10,
                 threshold: 0,
                 bloomDebug: false,
                 bloomScope: 'global',
@@ -285,8 +285,8 @@ const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: numb
             },
             bloom: {
                 enabled: false,
-                intensity: 0.1,
-                blurLevel: 0,
+                intensity: 0,
+                blurLevel: 10,
                 threshold: 0,
                 bloomDebug: false,
                 bloomScope: 'global',

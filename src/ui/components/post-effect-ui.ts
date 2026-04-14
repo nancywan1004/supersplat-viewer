@@ -18,15 +18,15 @@ const POST_EFFECT_PANEL_HTML = `
   <div class="settingsRow">
     <label for="bloomIntensitySlider" class="postEffectLabel">Intensity:</label>
     <div class="postEffectSliderWrap">
-      <input type="range" id="bloomIntensitySlider" min="0" max="0.2" step="0.01" value="0.1" class="postEffectSlider">
-      <span id="bloomIntensityValue" class="postEffectSliderValue">0.10</span>
+      <input type="range" id="bloomIntensitySlider" min="0" max="2" step="0.05" value="0" class="postEffectSlider">
+      <span id="bloomIntensityValue" class="postEffectSliderValue">0.00</span>
     </div>
   </div>
   <div class="settingsRow">
     <label for="bloomBlurLevelSlider" class="postEffectLabel">BlurLevel:</label>
     <div class="postEffectSliderWrap">
-      <input type="range" id="bloomBlurLevelSlider" min="0" max="10" step="1" value="0" class="postEffectSlider">
-      <span id="bloomBlurLevelValue" class="postEffectSliderValue">0</span>
+      <input type="range" id="bloomBlurLevelSlider" min="0" max="10" step="1" value="10" class="postEffectSlider">
+      <span id="bloomBlurLevelValue" class="postEffectSliderValue">10</span>
     </div>
   </div>
   <div class="settingsRow">
@@ -667,7 +667,8 @@ export function initPostEffectUI(global: Global): () => void {
     const syncFromSettings = () => {
         const b = ensureBloom(settings);
         b.enabled = Number(b.intensity) > 0;
-        const intensity = Math.min(0.2, Math.max(0, Number(b.intensity)));
+        const rawIntensity = Number(b.intensity);
+        const intensity = Number.isFinite(rawIntensity) ? rawIntensity : 0;
         if (bloomIntensitySlider) bloomIntensitySlider.value = String(intensity);
         if (bloomIntensityValue) bloomIntensityValue.textContent = intensity.toFixed(2);
         if (bloomBlurLevelSlider) bloomBlurLevelSlider.value = String(b.blurLevel);
@@ -727,7 +728,7 @@ export function initPostEffectUI(global: Global): () => void {
     if (bloomIntensitySlider && bloomIntensityValue) {
         bloomIntensitySlider.addEventListener('input', () => {
             const raw = parseFloat(bloomIntensitySlider.value) || 0;
-            const value = Math.min(0.2, Math.max(0, raw));
+            const value = raw;
             if (editUiTransport === 'message-bridge') {
                 sendEditProtocolMessage({ type: 'BLOOM_INTENSITY_UPDATE', value });
             } else {

@@ -240,14 +240,11 @@ export function applyLightToggle(global: Global, id: string, enabled: boolean): 
     global.events.fire('postEffect:changed');
 }
 
-/** BLOOM_INTENSITY_UPDATE（协议值 0–16 与内部 0–0.2 均可支持：若 > 1 则视为 0–16 并归一化到 0–0.2）。 */
+/** BLOOM_INTENSITY_UPDATE：直接更新 Bloom 真实 intensity（不做 clamp/映射）。 */
 export function applyBloomIntensityUpdate(global: Global, value: number): void {
     const settings = global.settings as ExperienceSettings;
     const b = ensureBloom(settings);
-    const clamped = value > 1
-        ? Math.max(0, Math.min(16, value)) / 80
-        : Math.max(0, Math.min(1, value));
-    const intensity = Math.min(0.2, Math.max(0, clamped));
+    const intensity = Number.isFinite(value) ? value : 0;
     (b as Record<string, unknown>).intensity = intensity;
     (b as Record<string, unknown>).enabled = intensity > 0;
     global.events.fire('postEffect:changed');

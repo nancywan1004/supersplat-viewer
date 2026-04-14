@@ -887,10 +887,17 @@ z: ${cameraInfo.target.z.toFixed(6)}
         const highPrecisionRendering = config.hpr ?? settings.highPrecisionRendering;
 
         // 无 postEffectSettings 或未启用任一后处理时跳过，避免报错
+        // Bloom 语义对齐：局部 Bloom 仅应改变 mask 区域，不应因 blur/enabled 开关导致整条渲染路径突变。
+        // 因此将 Bloom 管线是否预热与 Bloom 叠加是否生效解耦：
+        // - 管线预热（CameraFrame + HDR RT）：只要 Bloom 强度配置 > 0 即保持开启，避免 0/1 档位切换时全局观感跳变。
+        // - 实际叠加：仍由 BloomController 中 enabled/blur/mask 控制。
+        const bloomPipelineWanted = !!postEffectSettings
+            && Number(postEffectSettings.bloom?.intensity ?? 0) > 0;
+
         const enableCameraFrame = !app.xr.active &&
             !config.nofx &&
             !!postEffectSettings &&
-            (anyPostEffectEnabled(postEffectSettings) || highPrecisionRendering);
+            (anyPostEffectEnabled(postEffectSettings) || highPrecisionRendering || bloomPipelineWanted);
 
         if (enableCameraFrame) {
             if (!this.cameraFrame) {
@@ -900,8 +907,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
             const { cameraFrame } = this;
             cameraFrame.rendering.toneMapping = tonemapTable[settings.tonemapping];
             // 启用 bloom 时必须先设 HDR 格式再 enable，否则引擎会回退到 RGBA8 并关闭 bloom（_bloomEnabled=false）
-            const bloomWanted = postEffectSettings.bloom.enabled && (Number(postEffectSettings.bloom.intensity) > 0);
-            cameraFrame.rendering.renderFormats = (highPrecisionRendering || bloomWanted)
+            cameraFrame.rendering.renderFormats = (highPrecisionRendering || bloomPipelineWanted)
                 ? [PIXELFORMAT_RGBA16F, PIXELFORMAT_RGBA32F]
                 : [];
             cameraFrame.enabled = true;
