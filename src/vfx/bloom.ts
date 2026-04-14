@@ -439,6 +439,10 @@ export class BloomController {
         const editor = ensureBloomEditorSession(this.global.settings as ExperienceSettings);
         const bloomDebug = !!bloomSettings.bloomDebug;
         const bloomBrush = !!editor.bloomBrush;
+        // Bloom 阈值（HDR 提取阈值）：
+        // 仅亮度高于该值的像素会被提取到 bloom 管线。
+        // - 低阈值：更多中亮区域参与，画面更“糊光”；
+        // - 高阈值：仅保留最亮高光，发光范围更克制。
         const th = Math.max(0, Math.min(5, Number(bloomSettings.threshold ?? 0.2)));
         const bloomBrushBrightness = typeof bloomSettings.bloomBrushBrightness === 'number'
             ? Math.max(-1, Math.min(1, bloomSettings.bloomBrushBrightness))

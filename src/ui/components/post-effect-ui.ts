@@ -30,7 +30,11 @@ const POST_EFFECT_PANEL_HTML = `
     </div>
   </div>
   <div class="settingsRow">
-    <label for="bloomThresholdSlider" class="postEffectLabel">Threshold (HDR):</label>
+    <label
+      for="bloomThresholdSlider"
+      class="postEffectLabel"
+      title="Bloom 提取阈值：越低越容易发光（范围更大），越高只保留更亮的高光区域"
+    >Threshold (HDR):</label>
     <div class="postEffectSliderWrap">
       <input type="range" id="bloomThresholdSlider" min="0" max="5" step="0.1" value="0.2" class="postEffectSlider">
       <span id="bloomThresholdValue" class="postEffectSliderValue">0.20</span>
@@ -759,6 +763,8 @@ export function initPostEffectUI(global: Global): () => void {
 
     if (bloomThresholdSlider && bloomThresholdValue) {
         bloomThresholdSlider.addEventListener('input', () => {
+            // Bloom 提取阈值（HDR）：只有亮度高于该值的像素才会进入 bloom。
+            // 值越小 -> 发光范围更大；值越大 -> 仅最亮高光参与发光。
             const value = Math.max(0, Math.min(5, parseFloat(bloomThresholdSlider!.value) || 0));
             if (editUiTransport === 'message-bridge') {
                 sendEditProtocolMessage({ type: 'BLOOM_THRESHOLD_UPDATE', value });
@@ -792,8 +798,10 @@ export function initPostEffectUI(global: Global): () => void {
             const b = ensureBloom(settings) as { bloomScope?: 'global' | 'local' };
             const nextIsLocal = !(b.bloomScope === 'local');
             if (editUiTransport === 'message-bridge') {
-                // 父级托管模式：由父级通过 BLOOM_IS_LOCAL_SET 驱动 Viewer
-                (global as any).postMessage?.({ type: 'BLOOM_IS_LOCAL_SET', value: nextIsLocal });
+                // 统一走编辑协议单轨：window.postMessage -> message-bridge -> 环境 facade
+                sendEditProtocolMessage({ type: 'BLOOM_IS_LOCAL_SET', value: nextIsLocal });
+                // 立即更新勾选样式，避免等待父级回写时“点了没反应”的体感
+                bloomScopeCheck.classList.toggle('active', nextIsLocal);
             } else {
                 b.bloomScope = nextIsLocal ? 'local' : 'global';
                 syncFromSettings();
