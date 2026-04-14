@@ -593,6 +593,9 @@ class Viewer {
                     }
                 };
                 if (revealBlocksAnim(state)) {
+                    // 阻塞型 reveal 启动即冻结 animTrack，避免 firstFrame 之前被提前推进，
+                    // 导致开场视角与 animTrack t=0 不一致。
+                    state.animationPaused = true;
                     lockDeferredEditingLayersForReveal();
                     events.once('revealComplete', afterReveal);
                     events.once('revealComplete', initAnnotations);

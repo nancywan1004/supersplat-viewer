@@ -170,9 +170,18 @@ export class RevealController {
         // 触发事件以更新 UI（确保 UI 显示当前类型）
         events.fire('revealType:changed', this.config.type);
         
-        // 创建初始效果（如果类型不是 none）
+        // 创建初始效果（如果类型不是 none）：
+        // 启动阶段延后到 firstFrame 再创建，避免 gsplat 材质/渲染管线未就绪导致“首个 VFX 不播”。
         if (this.config.type !== 'none') {
-            this.createEffect(this.config.type);
+            const createInitial = () => {
+                if (this.currentScript) return;
+                this.createEffect(this.config.type);
+            };
+            if (state.loaded) {
+                createInitial();
+            } else {
+                events.once('firstFrame', createInitial);
+            }
         }
     }
 
