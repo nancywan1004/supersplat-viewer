@@ -1,6 +1,6 @@
 import type { AppBase } from 'playcanvas';
 import * as pc from 'playcanvas';
-import { Vec3, Quat, StandardMaterial, CULLFACE_NONE, Color } from 'playcanvas';
+import { Vec3, Quat, StandardMaterial, CULLFACE_NONE, Color, BLEND_NORMAL } from 'playcanvas';
 import type { Global } from './types';
 import type { AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from './types';
 import { getSelectedSceneEntity } from './state-selectors';
@@ -119,7 +119,12 @@ async function instantiateImage(app: AppBase, item: AssetLibraryItem, position: 
                 return;
             }
             const mat = new StandardMaterial();
+            // 图片资产按「带 alpha 的贴图卡片」渲染：使用透明混合 + opacityMap，避免透明区发黑。
             mat.diffuseMap = texture;
+            mat.opacityMap = texture;
+            mat.opacityMapChannel = 'a';
+            mat.blendType = BLEND_NORMAL;
+            mat.alphaTest = 0.01;
             mat.cull = CULLFACE_NONE;
             mat.update();
             const entity = new Entity(item.name || 'image');
