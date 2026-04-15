@@ -9,3 +9,15 @@ export function getSelectedSceneEntity(state: State): Entity | null {
     const entry = list.find((e) => e.id === id);
     return entry?.entity ?? null;
 }
+
+export function isAssetDebugVisualEnabled(state: State): boolean {
+    return !!(state.editMode && state.editLeftModule === 'asset' && state.previewMode !== true);
+}
+
+export function isAnnotationDebugVisualEnabled(state: State): boolean {
+    return !!(state.editMode && state.editLeftModule === 'annotation' && state.previewMode !== true);
+}
+
+export function isEnvironmentDebugVisualEnabled(state: State): boolean {
+    return !!(state.editMode && state.editLeftModule === 'environment' && state.previewMode !== true);
+}

@@ -7,7 +7,11 @@ import * as pc from 'playcanvas';
 import type { AppBase } from 'playcanvas';
 import type { Global } from './types';
 import type { AssetTransformMode, LightTransformMode } from './types';
-import { getSelectedSceneEntity } from './state-selectors';
+import {
+    getSelectedSceneEntity,
+    isAssetDebugVisualEnabled,
+    isEnvironmentDebugVisualEnabled
+} from './state-selectors';
 import { pushEditHistory } from './edit-history';
 import { updatePointLightsFromSettings } from './light';
 
@@ -364,6 +368,7 @@ export function initGizmoHandler(global: Global): () => void {
         const assetMode = state.assetTransformMode;
         const showAssetGizmo =
             inAssetModule &&
+            isAssetDebugVisualEnabled(state) &&
             (assetMode === 'move' || assetMode === 'rotate' || assetMode === 'scale');
         if (showAssetGizmo) {
             const entity = getSelectedSceneEntity(state);
@@ -376,7 +381,11 @@ export function initGizmoHandler(global: Global): () => void {
         // 光源模式（环境模块）
         const inEnvModule = state.editLeftModule === 'environment';
         const lightMode = state.lightTransformMode as LightTransformMode | undefined;
-        if (!targetNode && inEnvModule && (lightMode === 'move' || lightMode === 'rotate') && state.selectedLightId) {
+        if (!targetNode
+            && inEnvModule
+            && isEnvironmentDebugVisualEnabled(state)
+            && (lightMode === 'move' || lightMode === 'rotate')
+            && state.selectedLightId) {
             const lightEntity = findSelectedLightEntity();
             if (lightEntity) {
                 selectedLightEntity = lightEntity;
@@ -429,6 +438,7 @@ export function initGizmoHandler(global: Global): () => void {
         if (state.editLeftModule !== 'environment') return;
         syncGizmoToSelection();
     };
+    const onPreviewModeChanged = () => syncGizmoToSelection();
 
     /** 退出编辑模式时隐藏 Gizmo；进入编辑模式且当前为资产模块时若无选中则默认选首 entity（与切换进资产模块行为一致） */
     const onEditModeChanged = (inEdit: boolean) => {
@@ -447,6 +457,7 @@ export function initGizmoHandler(global: Global): () => void {
     events.on('editMode:changed', onEditModeChanged);
     events.on('lightTransformMode:changed', onLightModeChanged as any);
     events.on('sceneLight:selected', onSceneLightSelected as any);
+    events.on('previewMode:changed', onPreviewModeChanged as any);
     if (state.editMode) {
         onEditModeChanged(true);
     } else if (handler) {
@@ -469,6 +480,7 @@ export function initGizmoHandler(global: Global): () => void {
         events.off('editMode:changed', onEditModeChanged);
         events.off('lightTransformMode:changed', onLightModeChanged as any);
         events.off('sceneLight:selected', onSceneLightSelected as any);
+        events.off('previewMode:changed', onPreviewModeChanged as any);
         app.off('update', onUpdate);
         handler?.destroy();
     };

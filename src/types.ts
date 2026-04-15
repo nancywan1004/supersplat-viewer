@@ -76,6 +76,7 @@ interface ModuleFacade {
     onEnter(ctx: ModuleContext): void;
     onExit(ctx: ModuleContext, reason?: ModuleLifecycleReason): void;
     onEditModeExit(ctx: ModuleContext): void;
+    onPreviewModeChanged?(ctx: ModuleContext, previewMode: boolean): void;
     handleCommand<TPayload = unknown>(ctx: ModuleContext, command: ModuleCommand<TPayload>): void;
     selectById(ctx: ModuleContext, id: string | null, source: SelectionSource, options?: Record<string, unknown>): void;
     dispose?(ctx: ModuleContext): void;
@@ -153,6 +154,8 @@ type State = {
     vfxType: 'none' | 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch';  // current effect type (includes reveal and VFX)
     syncAnimTrackOnExport?: boolean;           // 导出 VFX 视频时是否同步重播动画轨道（由 reveal-ui 设置，video-export-ui 读取）
     editMode: boolean;                         // true = 编辑模式（显示 rightToolBar），false = 观看模式
+    /** 编辑预览模式：true 时隐藏编辑调试组件（操作轴、光源线框） */
+    previewMode?: boolean;
     /** 左侧工具箱当前模块；null 表示不选中任何模块 */
     editLeftModule?: EditLeftModule | null;
     assetTransformMode?: AssetTransformMode;   // 资产变换模式，默认 'move'

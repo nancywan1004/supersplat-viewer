@@ -11,6 +11,7 @@
 import * as pc from 'playcanvas';
 import type { AppBase, Vec3 } from 'playcanvas';
 import type { Global } from '../types';
+import { isAnnotationDebugVisualEnabled } from '../state-selectors';
 
 /**
  * 获取 PlayCanvas Gizmo API
@@ -140,6 +141,9 @@ export function initAnnotationGizmoHandler(global: Global): () => void {
             console.warn('[AnnotationGizmo] Gizmo API not available');
             return;
         }
+        if (!isAnnotationDebugVisualEnabled(state)) {
+            return;
+        }
 
         handler.attach(data.entity, data.onMove);
     };
@@ -153,13 +157,26 @@ export function initAnnotationGizmoHandler(global: Global): () => void {
         handler.detach();
     };
 
+    const onPreviewContextChanged = () => {
+        if (!handler) return;
+        if (!isAnnotationDebugVisualEnabled(state)) {
+            handler.detach();
+        }
+    };
+
     events.on('gizmo:attach', onGizmoAttach);
     events.on('gizmo:detach', onGizmoDetach);
+    events.on('previewMode:changed', onPreviewContextChanged);
+    events.on('editLeftModule:changed', onPreviewContextChanged);
+    events.on('editMode:changed', onPreviewContextChanged);
 
     // 返回清理函数
     return () => {
         events.off('gizmo:attach', onGizmoAttach);
         events.off('gizmo:detach', onGizmoDetach);
+        events.off('previewMode:changed', onPreviewContextChanged);
+        events.off('editLeftModule:changed', onPreviewContextChanged);
+        events.off('editMode:changed', onPreviewContextChanged);
         handler?.destroy();
     };
 }

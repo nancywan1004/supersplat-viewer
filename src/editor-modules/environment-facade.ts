@@ -23,19 +23,31 @@ import {
     applyShadowSet
 } from './protocol-adapters/environment-protocol-adapter';
 import type { Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
+import { isEnvironmentDebugVisualEnabled } from '../state-selectors';
 
 type Payload = Record<string, unknown>;
+
+const getEnvironmentVisualToggle = (global: Global): boolean => {
+    const v = (global.app as any).__lightsVisualToggle;
+    return typeof v === 'boolean' ? v : true;
+};
+
+function applyEnvironmentPreviewVisualPolicy(global: Global): void {
+    const { state } = global;
+    const gizmoVisible = isEnvironmentDebugVisualEnabled(state);
+    const lightWireframeVisible = getEnvironmentVisualToggle(global) && gizmoVisible;
+    setLightsVisualVisible(global, lightWireframeVisible);
+}
 
 class EnvironmentFacade implements ModuleFacade {
     readonly module = 'environment' as const;
 
-    private getVisualToggle(global: Global): boolean {
-        const v = (global.app as any).__lightsVisualToggle;
-        return typeof v === 'boolean' ? v : true;
+    private syncPreviewVisualPolicy(ctx: ModuleContext): void {
+        applyEnvironmentPreviewVisualPolicy(ctx.global);
     }
 
     onEnter(ctx: ModuleContext): void {
-        setLightsVisualVisible(ctx.global, this.getVisualToggle(ctx.global));
+        this.syncPreviewVisualPolicy(ctx);
         ctx.events.fire('environmentFacade:enter');
     }
 
@@ -52,13 +64,17 @@ class EnvironmentFacade implements ModuleFacade {
         ctx.state.lightTransformMode = null;
         ctx.events.fire('sceneLight:selected', { id: null, source: 'host' as SelectionSource });
         ctx.events.fire('lightTransformMode:changed', null);
-        setLightsVisualVisible(ctx.global, this.getVisualToggle(ctx.global));
+        this.syncPreviewVisualPolicy(ctx);
         ctx.events.fire('environmentFacade:exit');
     }
 
     onEditModeExit(ctx: ModuleContext): void {
         this.onExit(ctx);
         ctx.events.fire('environmentFacade:editModeExit');
+    }
+
+    onPreviewModeChanged(ctx: ModuleContext): void {
+        this.syncPreviewVisualPolicy(ctx);
     }
 
     handleCommand(ctx: ModuleContext, command: ModuleCommand): void {
@@ -198,13 +214,5 @@ const initEnvironmentFacade = (global: Global): ModuleFacade => {
     return facade;
 };
 
-/**
- * `showEditUI=false`（父级托管、无内置 Lighting 面板）时，在编辑态/左侧模块变化后强制显示光源线框，
- * 避免无人驱动 `__lightsVisualToggle` 时残留错误显隐。与 `onEnter/onExit` 内按 toggle 刷新互补。
- */
-function syncLightVisualsForNoEditUi(global: Global): void {
-    if (global.config.showEditUI !== false) return;
-    setLightsVisualVisible(global, true);
-}
-
-export { EnvironmentFacade, initEnvironmentFacade, syncLightVisualsForNoEditUi };
+export { EnvironmentFacade, initEnvironmentFacade };
+export { applyEnvironmentPreviewVisualPolicy };

@@ -808,8 +808,7 @@ const setPointLightsVisualVisible = (global: Global, visible: boolean): void => 
  * - 实际是否显示还需满足：state.editMode === true 且 state.editLeftModule === 'environment'。
  */
 const setLightsVisualVisible = (global: Global, visibleInEnvironment: boolean): void => {
-    const { app, state } = global;
-    (app as any).__lightsVisualToggle = visibleInEnvironment;
+    const { state } = global;
     const inEnvironmentEdit = !!(state.editMode && state.editLeftModule === 'environment');
     setPointLightsVisualVisible(global, visibleInEnvironment && inEnvironmentEdit);
 };

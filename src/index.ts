@@ -284,6 +284,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         vfxActive: false,
         vfxType: 'none' as 'none' | 'grow' | 'pieces-recover' | 'perlin-wave' | 'disintegrate' | 'integrate' | 'growth-wave',
         editMode: false,
+        previewMode: false,
         editLeftModule: null,
         assetTransformMode: undefined,
         uploadedAssets: [],

@@ -1,11 +1,12 @@
 import type { Global } from '../../types';
 import type { ExperienceSettings } from '../../schemas/v2';
-import { updatePointLightsFromSettings, setLightsVisualVisible } from '../../light';
+import { updatePointLightsFromSettings } from '../../light';
 import { getPositionInFrontOfCamera } from '../../asset-placement-handler';
 import type { PointLightConfig, DirectionalLightConfig, SpotLightConfig } from '../../schemas/v2';
 import { pushEditHistory } from '../../edit-history';
 import { ensureNightMode, ensureLighting, ensureBloom, ensureBloomEditorSession } from '../../settings-serialize/settings-serialize-helper';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
+import { applyEnvironmentPreviewVisualPolicy } from '../../editor-modules/environment-facade';
 
 const LIGHTING_PANEL_HTML = `
 <div class="lightingPanel">
@@ -186,17 +187,18 @@ export function initLightingUI(global: Global): () => void {
     };
     if (showLightsInSceneCheck && showLightsInSceneOption) {
         onEnvironmentLifecycle = () => {
-            setLightsVisualVisible(global, lightsVisualVisible);
+            applyEnvironmentPreviewVisualPolicy(global);
         };
         const toggleLightsVisual = () => {
             lightsVisualVisible = !lightsVisualVisible;
-            setLightsVisualVisible(global, lightsVisualVisible);
+            (global.app as any).__lightsVisualToggle = lightsVisualVisible;
+            applyEnvironmentPreviewVisualPolicy(global);
             updateLightsVisualCheck();
         };
         showLightsInSceneCheck.addEventListener('click', toggleLightsVisual);
         showLightsInSceneOption.addEventListener('click', toggleLightsVisual);
         // 初始化一次显隐状态（依赖当前 editMode / editLeftModule）
-        setLightsVisualVisible(global, lightsVisualVisible);
+        applyEnvironmentPreviewVisualPolicy(global);
         updateLightsVisualCheck();
         // 模块生命周期改由 environment facade 驱动，避免多处监听重复刷新
         global.events.on('environmentFacade:enter', onEnvironmentLifecycle);

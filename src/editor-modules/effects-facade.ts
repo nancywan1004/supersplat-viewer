@@ -17,6 +17,10 @@ class EffectsFacade implements ModuleFacade {
         ctx.events.fire('effectsFacade:editModeExit');
     }
 
+    onPreviewModeChanged(_ctx: ModuleContext, _previewMode: boolean): void {
+        // effects 模块当前无 preview 可视化策略，预留钩子以便后续扩展。
+    }
+
     handleCommand(ctx: ModuleContext, command: ModuleCommand): void {
         const { global, events } = ctx;
         switch (command.type) {

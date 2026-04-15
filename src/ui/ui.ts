@@ -32,7 +32,7 @@ import { initEditRightToolbarUI } from './edit-right-toolbar';
 import { initEditBottomToolbarUI } from './edit-bottom-toolbar';
 import type { Annotation } from '../settings';
 import { getEditUiTransport, sendEditProtocolMessage } from './edit-ui-transport';
-import { setLightsVisualVisible } from '../light';
+import { applyEnvironmentPreviewVisualPolicy } from '../editor-modules/environment-facade';
 import { applyLightToggleAll, applyLightToggle } from '../editor-modules/protocol-adapters/environment-protocol-adapter';
 
 // Initialize the touch joystick for fly mode camera control
@@ -288,6 +288,7 @@ const initUI = (global: Global) => {
         acc[id] = document.getElementById(id);
         return acc;
     }, {});
+    dom.previewModeBtn = document.getElementById('previewModeBtn');
 
     // Check if LOD mode is enabled
     const isLodMode = config.contentUrl ? isLodMetaFile(config.contentUrl) : false;
@@ -538,6 +539,11 @@ const initUI = (global: Global) => {
     let editModeEnteredSettingsSnapshot: string | null = null;
     /** 进入编辑模式时的 settings 完整数据，用于「不保存并退出」时回退场景 */
     let editModeEnteredSettingsData: ExperienceSettings | null = null;
+    const updatePreviewModeButton = () => {
+        if (!dom.previewModeBtn) return;
+        const inPreviewMode = state.previewMode === true;
+        dom.previewModeBtn.textContent = inPreviewMode ? '显示调试组件' : '隐藏调试组件';
+    };
     const applyEditChromeVisibility = (inEdit: boolean) => {
         if (config.showEditUI === false) return;
         const leftMount = document.getElementById('editLeftSidebarMount');
@@ -576,6 +582,9 @@ const initUI = (global: Global) => {
         }
         if (dom.redoEditBtn) {
             dom.redoEditBtn.classList.toggle('hidden', !showUndoRedo);
+        }
+        if (dom.previewModeBtn) {
+            dom.previewModeBtn.classList.toggle('hidden', !inEdit);
         }
     };
     const updateEditModeUI = async () => {
@@ -820,6 +829,17 @@ const initUI = (global: Global) => {
                 editModeEnteredSettingsData = JSON.parse(JSON.stringify(payload)) as ExperienceSettings;
             });
         }
+        if (dom.previewModeBtn) {
+            dom.previewModeBtn.addEventListener('click', () => {
+                const nextValue = state.previewMode !== true;
+                if (editUiTransport === 'message-bridge') {
+                    sendEditProtocolMessage({ type: 'PREVIEW_MODE_SET', value: nextValue });
+                    return;
+                }
+                state.previewMode = nextValue;
+            });
+            updatePreviewModeButton();
+        }
 
         let editHistoryRestoring = false;
         let editHistoryCanUndo = false;
@@ -879,6 +899,9 @@ const initUI = (global: Global) => {
         });
 
         events.on('editMode:changed', updateEditModeUI);
+        events.on('previewMode:changed', () => {
+            updatePreviewModeButton();
+        });
         events.on('editLeftModule:changed', () => {
             const bottomMount = document.getElementById('editBottomToolbarMount');
             if (bottomMount && state.editMode) {
@@ -892,14 +915,8 @@ const initUI = (global: Global) => {
                 const showRight = state.editMode && state.editLeftModule != null;
                 dom.rightToolBar.classList.toggle('hidden', !showRight);
             }
-            // 进入/离开环境模块时，根据当前开关状态刷新光源可视化
-            if (state.editMode) {
-                const toggle = (global.app as any).__lightsVisualToggle;
-                const visibleInEnv = toggle == null ? true : !!toggle;
-                setLightsVisualVisible(global, visibleInEnv);
-            } else {
-                setLightsVisualVisible(global, false);
-            }
+            // 进入/离开环境模块时交给 facade 策略统一刷新（含 preview 约束）。
+            applyEnvironmentPreviewVisualPolicy(global);
         });
         updateEditModeUI();
     }
@@ -1326,6 +1343,7 @@ const initUI = (global: Global) => {
     tooltip.register(dom.saveSettingsBtn, 'Save Settings', 'top');
     tooltip.register(dom.undoEditBtn, 'Undo (Ctrl/Cmd+Z)', 'top');
     tooltip.register(dom.redoEditBtn, 'Redo (Ctrl/Cmd+Shift+Z)', 'top');
+    tooltip.register(dom.previewModeBtn, 'Toggle Preview Mode', 'top');
 
     // 全局 Undo/Redo 快捷键，仅在编辑模式下生效
     const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);

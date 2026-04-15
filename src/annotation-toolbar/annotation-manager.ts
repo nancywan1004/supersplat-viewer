@@ -500,8 +500,8 @@ export class AnnotationManager {
         const data: AnnotationData = {
             id,
             position: [position.x, position.y, position.z],
-            title: preset?.title ?? 'Untitled',
-            text: preset?.text ?? 'Description...',
+            title: preset?.title ?? '请先确认放置位置',
+            text: preset?.text ?? '',
             imageUrl: preset?.imageUrl,
             showTitleWhenCollapsed: preset?.showTitleWhenCollapsed ?? false,
             // collapsed 在新语义下仅用于兼容老数据，这里始终以默认收起为准

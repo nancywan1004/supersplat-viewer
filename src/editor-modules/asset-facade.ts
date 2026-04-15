@@ -16,10 +16,9 @@ class AssetFacade implements ModuleFacade {
 
     onEnter(ctx: ModuleContext): void {
         const { state, events } = ctx;
-        const list = state.scenePlacedEntities ?? [];
-        // 保持现有行为：进入 asset 时若未选中则默认选中第一个
-        if (list.length > 0 && !state.selectedSceneEntityId) {
-            state.selectedSceneEntityId = list[0].id;
+        // 进入 asset 模块默认不选中任何资产（保持 null）
+        if (state.selectedSceneEntityId) {
+            state.selectedSceneEntityId = null;
             events.fire('sceneAsset:selected');
         }
         state.assetTransformMode = undefined;
@@ -42,6 +41,8 @@ class AssetFacade implements ModuleFacade {
         this.onExit(ctx);
         ctx.events.fire('assetFacade:editModeExit');
     }
+
+    onPreviewModeChanged(_ctx: ModuleContext): void {}
 
     handleCommand(ctx: ModuleContext, command: ModuleCommand): void {
         const { state, events } = ctx;

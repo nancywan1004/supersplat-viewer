@@ -55,6 +55,8 @@ class AnnotationFacade implements ModuleFacade {
         ctx.events.fire('annotationFacade:editModeExit');
     }
 
+    onPreviewModeChanged(_ctx: ModuleContext): void {}
+
     handleCommand(ctx: ModuleContext, command: ModuleCommand): void {
         const { state } = ctx;
         const am = this.manager(ctx);

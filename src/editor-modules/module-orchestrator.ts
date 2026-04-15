@@ -14,6 +14,7 @@ class ModuleOrchestrator {
 
     registerFacade(facade: ModuleFacade) {
         this.facades.set(facade.module, facade);
+        facade.onPreviewModeChanged?.(this.buildContext(), this.global.state.previewMode === true);
     }
 
     unregisterFacade(module: string) {
@@ -23,6 +24,7 @@ class ModuleOrchestrator {
     start() {
         const { events } = this.global;
         this.activeModule = this.global.state.editLeftModule ?? null;
+        this.syncPreviewPolicies(this.buildContext());
 
         const onEditLeftModuleChanged = (nextModule: string | null) => {
             const ctx = this.buildContext();
@@ -38,6 +40,7 @@ class ModuleOrchestrator {
                 this.facades.get(normalizedNext)?.onEnter(ctx);
             }
             this.activeModule = normalizedNext;
+            this.syncPreviewPolicies(this.buildContext());
         };
 
         const onEditModeChanged = (editMode: boolean) => {
@@ -45,6 +48,7 @@ class ModuleOrchestrator {
             if (!editMode) {
                 this.facades.forEach((facade) => facade.onEditModeExit(ctx));
                 this.activeModule = null;
+                this.syncPreviewPolicies(this.buildContext());
                 return;
             }
             const active = ctx.activeModule;
@@ -52,13 +56,21 @@ class ModuleOrchestrator {
                 this.facades.get(active)?.onEnter(ctx);
             }
             this.activeModule = active ?? null;
+            this.syncPreviewPolicies(this.buildContext());
+        };
+
+        const onPreviewModeChanged = (previewMode: boolean) => {
+            const ctx = this.buildContext();
+            this.facades.forEach((facade) => facade.onPreviewModeChanged?.(ctx, previewMode));
         };
 
         events.on('editLeftModule:changed', onEditLeftModuleChanged);
         events.on('editMode:changed', onEditModeChanged);
+        events.on('previewMode:changed', onPreviewModeChanged);
 
         this.offHandlers.push(() => events.off('editLeftModule:changed', onEditLeftModuleChanged));
         this.offHandlers.push(() => events.off('editMode:changed', onEditModeChanged));
+        this.offHandlers.push(() => events.off('previewMode:changed', onPreviewModeChanged));
     }
 
     dispose() {
@@ -77,6 +89,11 @@ class ModuleOrchestrator {
             activeModule: state.editLeftModule ?? null,
             editMode: !!state.editMode
         };
+    }
+
+    private syncPreviewPolicies(ctx: ModuleContext): void {
+        const previewMode = ctx.state.previewMode === true;
+        this.facades.forEach((facade) => facade.onPreviewModeChanged?.(ctx, previewMode));
     }
 }
 

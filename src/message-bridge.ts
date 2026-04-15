@@ -28,7 +28,6 @@ import {
 import type { ExperienceSettings } from './schemas/v2';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import type { CommandRegistry } from './editor-modules/command-registry';
-import { syncLightVisualsForNoEditUi } from './editor-modules/environment-facade';
 import { uploadProjectData } from './universe/service';
 
 /** 父级 → Viewer 的 postMessage payload 类型（按文档事件表） */
@@ -43,6 +42,7 @@ type InboundPayload =
     | { type: 'EDIT_MODE_EXIT_DISCARD' }
     | { type: 'EDIT_UNDO' }
     | { type: 'EDIT_REDO' }
+    | { type: 'PREVIEW_MODE_SET'; value?: boolean }
     | { type: 'SETTINGS_SAVE' }
     | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule | null }
     | { type: 'ASSET_SHOW_HIDE_SET'; id?: string; value?: boolean }
@@ -232,10 +232,6 @@ const initPostMessageBridge = (global: Global) => {
                     postToParent('EDIT_HISTORY_STATE', { canUndo: canUndo(global), canRedo: canRedo(global) });
                 }
             }
-            // 仅在当前处于 environment（或退出编辑模式）时需要刷新线框显隐
-            if (!state.editMode || state.editLeftModule === 'environment') {
-                syncLightVisualsForNoEditUi(global);
-            }
             break;
         }
         case 'EDIT_MODE_EXIT_REQUEST': {
@@ -265,6 +261,10 @@ const initPostMessageBridge = (global: Global) => {
             await redo(global);
             break;
         }
+        case 'PREVIEW_MODE_SET': {
+            state.previewMode = p.value === true;
+            break;
+        }
         case 'SETTINGS_SAVE': {
             const serialized = serializeExperienceSettings(global);
             const jsonString = JSON.stringify(serialized, null, 2);
@@ -284,7 +284,6 @@ const initPostMessageBridge = (global: Global) => {
             if (p.value == null) {
                 state.editLeftModule = null;
                 events.fire('editLeftModule:changed', null);
-                syncLightVisualsForNoEditUi(global);
                 break;
             }
             if (typeof p.value === 'string') {
@@ -292,7 +291,6 @@ const initPostMessageBridge = (global: Global) => {
                 if (valid.includes(p.value as EditLeftModule)) {
                     state.editLeftModule = p.value as EditLeftModule;
                     events.fire('editLeftModule:changed', p.value);
-                    syncLightVisualsForNoEditUi(global);
                 }
             }
             break;
