@@ -37,6 +37,7 @@ export class AnnotationEntity extends Annotation {
     /** 收起时显示的标题 DOM（当 showTitleWhenCollapsed 为 true 时） */
     private collapsedTitleSpan: HTMLSpanElement | null = null;
     private selectedVisual = false;
+    private tooltipInputSuppressed = false;
 
     /**
      * 初始化标注实体
@@ -55,6 +56,7 @@ export class AnnotationEntity extends Annotation {
         Annotation.parentDom.appendChild(this.collapsedTitleSpan);
 
         this.on('destroy', () => {
+            this.setTooltipInputSuppressed(false);
             this.collapsedTitleSpan?.remove();
             this.collapsedTitleSpan = null;
         });
@@ -180,6 +182,7 @@ export class AnnotationEntity extends Annotation {
         Annotation.activeAnnotation = this;
         Annotation.tooltipDom!.style.visibility = 'visible';
         Annotation.tooltipDom!.style.opacity = '1';
+        Annotation.tooltipDom!.style.pointerEvents = this.tooltipInputSuppressed ? 'none' : 'auto';
         Annotation.tooltipDom!.classList.toggle('pc-annotation--selected', this.selectedVisual);
         Annotation.titleDom!.textContent = this.title;
         Annotation.textDom!.textContent = this.text;
@@ -279,6 +282,7 @@ export class AnnotationEntity extends Annotation {
             return;
         }
 
+        this.setTooltipInputSuppressed(true);
         this.global.events.fire('gizmo:attach', {
             entity: this.entity,
             onMove: (position: Vec3) => {
@@ -297,7 +301,18 @@ export class AnnotationEntity extends Annotation {
             return;
         }
 
+        this.setTooltipInputSuppressed(false);
         this.global.events.fire('gizmo:detach');
+    }
+
+    private setTooltipInputSuppressed(suppressed: boolean): void {
+        if (this.tooltipInputSuppressed === suppressed) {
+            return;
+        }
+        this.tooltipInputSuppressed = suppressed;
+        if (Annotation.tooltipDom && Annotation.activeAnnotation === this) {
+            Annotation.tooltipDom.style.pointerEvents = suppressed ? 'none' : 'auto';
+        }
     }
 
     /**
