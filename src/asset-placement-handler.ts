@@ -598,6 +598,10 @@ export function initAssetPlacementHandler(
             }
             state.selectedSceneEntityId = entry.id;
             events.fire('sceneAsset:selected');
+            // 放置完成后下一帧统一走资产 framing，避免首次放置仍停留在旧焦点。
+            requestAnimationFrame(() => {
+                events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
+            });
             deps.pushEditHistory?.(global, 'place asset');
         }
     };
