@@ -319,7 +319,18 @@ const initPostMessageBridge = (global: Global) => {
         {
             const targetId = (p.id !== undefined ? p.id : null) as string | null;
             dispatchAsset(global, 'ASSET_SELECT', { id: targetId });
-            if (state.editMode && typeof p.id === 'string' && p.id.trim().length > 0) {
+            const resolvedId = state.selectedSceneEntityId;
+            const requested = typeof targetId === 'string' && targetId.trim().length > 0 ? targetId : null;
+            const resolvedEntry =
+                typeof resolvedId === 'string'
+                    ? state.scenePlacedEntities?.find((it) => it?.id === resolvedId) ?? null
+                    : null;
+            const matchedRequested =
+                !!resolvedEntry &&
+                !!requested &&
+                (resolvedEntry.id === requested || resolvedEntry.assetId === requested);
+            // 仅在“请求 id 成功命中场景实例”时触发 frame；未命中时不飞。
+            if (state.editMode && matchedRequested) {
                 events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
             }
             break;

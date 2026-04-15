@@ -39,7 +39,18 @@ class AssetFacade implements ModuleFacade {
         switch (command.type) {
         case 'ASSET_SELECT': {
             const id = (command.payload as { id?: string | null } | undefined)?.id ?? null;
-            this.selectById(ctx, id, src);
+            const list = state.scenePlacedEntities ?? [];
+            let resolvedId: string | null = id;
+            if (typeof id === 'string' && id.trim().length > 0) {
+                // 优先按场景实例 id 精确匹配；若未命中，兼容父级误传资产库 id 的情况，
+                // 回退匹配 assetId 并选择最近放置的一项，避免选中无效导致 frame 飞走。
+                const bySceneId = list.find((it) => it?.id === id);
+                if (!bySceneId) {
+                    const byAssetId = [...list].reverse().find((it) => it?.assetId === id);
+                    resolvedId = byAssetId?.id ?? null;
+                }
+            }
+            this.selectById(ctx, resolvedId, src);
             break;
         }
         case 'ASSET_PLACE': {
@@ -118,6 +129,14 @@ class AssetFacade implements ModuleFacade {
     }
 
     selectById(ctx: ModuleContext, id: string | null, source: 'host' | 'scene' | 'unknown'): void {
+        if (id === null) {
+            ctx.state.selectedSceneEntityId = null;
+            ctx.events.fire('sceneAsset:selected', { source });
+            return;
+        }
+        const list = ctx.state.scenePlacedEntities ?? [];
+        const exists = list.some((it) => it?.id === id);
+        if (!exists) return;
         ctx.state.selectedSceneEntityId = id;
         ctx.events.fire('sceneAsset:selected', { source });
     }

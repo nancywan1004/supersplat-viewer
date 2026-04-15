@@ -97,8 +97,6 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
             if ((e.target as HTMLElement).closest('.scene-asset-delete') || (e.target as HTMLElement).closest('.scene-asset-visibility')) return;
             if (editUiTransport === 'message-bridge') {
                 sendEditProtocolMessage({ type: 'ASSET_SELECT', id: entry.id });
-                // 与 message-bridge 入站 ASSET_SELECT 保持一致：列表点击后立即尝试资产 framing。
-                events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
                 return;
             }
             state.selectedSceneEntityId = entry.id;
