@@ -31,6 +31,8 @@ export interface ScenePlacedItem {
     filename?: string;
     /** 资产源 url（用于 serialize 到 settings.sceneAssets.source.url） */
     url?: string;
+    /** 对应源资产库条目的缩略图 URL（serialize 到 settings.sceneAssets.thumbnailUrl） */
+    thumbnailUrl?: string;
 }
 
 type CameraMode = 'orbit' | 'anim' | 'fly';

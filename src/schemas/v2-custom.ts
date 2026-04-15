@@ -150,6 +150,8 @@ type SceneAsset = {
     type: 'image' | 'mesh' | 'gaussian',
     name: string,
     visible: boolean,
+    /** 对应源资产库条目的缩略图 URL（可选，持久化到 settings.sceneAssets） */
+    thumbnailUrl?: string,
     source: {
         assetId?: string,
         filename?: string,

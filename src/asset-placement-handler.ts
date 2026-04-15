@@ -264,7 +264,8 @@ export async function placeAsset(global: Global, item: AssetLibraryItem, worldPo
         assetType: item.type,
         assetId: item.id,
         filename: item.filename,
-        url: item.url
+        url: item.url,
+        thumbnailUrl: item.thumbnailUrl
     };
     state.scenePlacedEntities.push(entry);
     events.fire('sceneAssets:added', entry);
@@ -351,6 +352,7 @@ export async function restoreSceneAssetsFromSettings(global: Global): Promise<vo
                     name: sa.name ?? src.filename ?? 'gaussian',
                     filename: src.filename ?? url,
                     url,
+                    thumbnailUrl: sa.thumbnailUrl,
                     asset
                 };
             } catch (err) {
@@ -376,6 +378,7 @@ export async function restoreSceneAssetsFromSettings(global: Global): Promise<vo
                     name: sa.name ?? src.filename ?? 'mesh',
                     filename: src.filename ?? url,
                     url,
+                    thumbnailUrl: sa.thumbnailUrl,
                     asset
                 };
             } catch (err) {
@@ -390,7 +393,8 @@ export async function restoreSceneAssetsFromSettings(global: Global): Promise<vo
                 type: 'image',
                 name: sa.name ?? src.filename ?? 'image',
                 filename: src.filename ?? url,
-                url
+                url,
+                thumbnailUrl: sa.thumbnailUrl
             };
         } else {
             continue;
@@ -402,6 +406,9 @@ export async function restoreSceneAssetsFromSettings(global: Global): Promise<vo
 
         if (sa.id) {
             entry.id = sa.id;
+        }
+        if (typeof sa.thumbnailUrl === 'string' && sa.thumbnailUrl.length > 0) {
+            entry.thumbnailUrl = sa.thumbnailUrl;
         }
 
         // 应用保存时记录的旋转、缩放与可见性
@@ -554,7 +561,8 @@ export function initAssetPlacementHandler(
             assetType: entry.assetType,
             assetId: entry.assetId,
             filename: entry.filename,
-            url: entry.url
+            url: entry.url,
+            thumbnailUrl: entry.thumbnailUrl
         };
         state.scenePlacedEntities!.push(newEntry);
         state.selectedSceneEntityId = newEntry.id;

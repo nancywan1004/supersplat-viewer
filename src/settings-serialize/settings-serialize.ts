@@ -150,6 +150,7 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
             type: entry.assetType ?? 'gaussian',
             name: entry.name,
             visible: entry.visible,
+            thumbnailUrl: entry.thumbnailUrl,
             source: {
                 assetId: entry.assetId,
                 filename: entry.filename,
