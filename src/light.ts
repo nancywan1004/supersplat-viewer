@@ -17,6 +17,16 @@ const MAX_POINT_LIGHTS = 10;
 const MAX_SPOT_LIGHTS = 10;
 // 光源可视化与真实 range 1:1 对齐（不再做额外视觉缩放）
 const LIGHT_VISUAL_SCALE = 1;
+// 实验性收紧真实聚光照明锥角，让主亮区更容易主观收敛到可视锥体内。
+// 仅影响实际 light / gsplat 打光，不改 settings 与 gizmo 展示。
+const EFFECTIVE_SPOT_CONE_ANGLE_SCALE = 0.5;
+
+/** 点光中心 / 聚光锥尖：小拾取球线框半径（世界单位） */
+const LIGHT_PICK_HANDLE_VISUAL_RADIUS = 0.24;
+/** 世界空间点击判定略大于视觉球，便于边缘命中 */
+const LIGHT_PICK_HANDLE_WORLD_HIT_RADIUS = 0.42;
+/** 屏幕空间兜底：投影点半径（像素），点光与聚光统一 */
+const LIGHT_PICK_HANDLE_SCREEN_PX = 36;
 
 const isDirectionalLightConfig = (cfg: any): cfg is DirectionalLightConfig =>
     cfg && cfg.type === 'directional';
@@ -34,6 +44,17 @@ const DIRECTIONAL_DEFAULT_POSITION: [number, number, number] = [0, 8, 8];
 function applyLightColorRgb(lightComp: NonNullable<Entity['light']>, r: number, g: number, b: number): void {
     lightComp.color.set(r, g, b);
     lightComp.light.setColor(r, g, b);
+}
+
+function getEffectiveSpotConeAngles(innerConeDeg: number, outerConeDeg: number) {
+    const safeOuterDeg = Math.max(0, Math.min(89.9, Number.isFinite(outerConeDeg) ? outerConeDeg : 45));
+    const safeInnerDeg = Math.max(0, Math.min(safeOuterDeg, Number.isFinite(innerConeDeg) ? innerConeDeg : 25));
+    const effectiveOuterDeg = Math.max(0.01, safeOuterDeg * EFFECTIVE_SPOT_CONE_ANGLE_SCALE);
+    const effectiveInnerDeg = Math.min(effectiveOuterDeg, safeInnerDeg * EFFECTIVE_SPOT_CONE_ANGLE_SCALE);
+    return {
+        effectiveInnerDeg,
+        effectiveOuterDeg
+    };
 }
 
 // ─── 线框 Mesh 工厂 & 材质 ───────────────────────────────────────────
@@ -183,6 +204,46 @@ const createCircleWireframeMesh = (device: GraphicsDevice, segments = 64): Mesh 
 };
 
 /**
+ * 创建单位圆盘调试网格：位于 y = -1 平面，半径 = 1。
+ * 用多圈圆环 + 辐射线强调“聚光灯底面截面”所在平面，便于和真实受光足迹对照。
+ */
+const createDiscWireMesh = (device: GraphicsDevice, segments = 64, rings = 4, spokes = 8): Mesh => {
+    const positions: number[] = [];
+    const indices: number[] = [];
+
+    const pushLine = (ax: number, az: number, bx: number, bz: number) => {
+        const base = positions.length / 3;
+        positions.push(ax, -1, az, bx, -1, bz);
+        indices.push(base, base + 1);
+    };
+
+    for (let ring = 1; ring <= rings; ring++) {
+        const radius = ring / rings;
+        for (let s = 0; s < segments; s++) {
+            const angle0 = (s / segments) * Math.PI * 2;
+            const angle1 = ((s + 1) / segments) * Math.PI * 2;
+            pushLine(
+                Math.cos(angle0) * radius,
+                Math.sin(angle0) * radius,
+                Math.cos(angle1) * radius,
+                Math.sin(angle1) * radius
+            );
+        }
+    }
+
+    for (let spoke = 0; spoke < spokes; spoke++) {
+        const angle = (spoke / spokes) * Math.PI * 2;
+        pushLine(0, 0, Math.cos(angle), Math.sin(angle));
+    }
+
+    const mesh = new Mesh(device);
+    mesh.setPositions(positions);
+    mesh.setIndices(indices);
+    mesh.update(PRIMITIVE_LINES);
+    return mesh;
+};
+
+/**
  * 创建白色线框材质，用于光源可视化 gizmo。
  * emissive 纯白保证颜色恒定；depthWrite=false 避免遮挡场景；depthTest=true 保持正确遮挡关系。
  */
@@ -194,6 +255,70 @@ const createWireframeMaterial = (): StandardMaterial => {
     mat.depthWrite = false;
     // 与 gsplat（半透明/自定义 pass）混合时，depthTest 可能导致线框“时隐时现”
     mat.depthTest = false;
+    mat.useLighting = false;
+    mat.update();
+    return mat;
+};
+
+/** 拾取小球线框材质，与 range 大线框区分 */
+const createPickHandleWireMaterial = (): StandardMaterial => {
+    const mat = new StandardMaterial();
+    mat.diffuse.set(0, 0, 0);
+    mat.emissive.set(0.35, 0.95, 1);
+    mat.emissiveIntensity = 1;
+    mat.depthWrite = false;
+    mat.depthTest = false;
+    mat.useLighting = false;
+    mat.update();
+    return mat;
+};
+
+const ensureLightPickHandleWireMesh = (app: any): Mesh => {
+    const cached = app.__lightPickHandleWireMesh as Mesh | undefined;
+    if (cached) return cached;
+    const mesh = createSphereWireframeMesh(app.graphicsDevice, 40);
+    app.__lightPickHandleWireMesh = mesh;
+    return mesh;
+};
+
+/**
+ * 在点光/聚光实体原点挂一个小球线框，表示「锥尖 / 灯心」拾取触发区（与 setPointLightsVisualVisible 联动显隐）。
+ */
+const ensureLightPickHandle = (global: Global, hostEntity: Entity): void => {
+    if ((hostEntity as any).__lightPickHandleEntity) return;
+    const app = global.app;
+    const layerId = ensureLightVisualLayer(app);
+    const mesh = ensureLightPickHandleWireMesh(app);
+    const material = createPickHandleWireMaterial();
+    const handle = new Entity('light_pick_handle');
+    handle.addComponent('render', {
+        type: 'asset',
+        layers: [layerId],
+        meshInstances: [new MeshInstance(mesh, material)]
+    });
+    const rc = handle.render;
+    if (rc) {
+        rc.castShadows = false;
+        rc.receiveShadows = false;
+        rc.enabled = !!(app as any).__pointLightsVisualVisible;
+    }
+    const r = Math.max(0.05, LIGHT_PICK_HANDLE_VISUAL_RADIUS);
+    handle.setLocalScale(r, r, r);
+    hostEntity.addChild(handle);
+    (hostEntity as any).__lightPickHandleEntity = handle;
+};
+
+/**
+ * 创建用于聚光灯底面验证的调试圆盘材质。
+ */
+const createDebugDiscMaterial = (): StandardMaterial => {
+    const mat = new StandardMaterial();
+    mat.diffuse.set(0, 0, 0);
+    mat.emissive.set(0.2, 1.0, 0.55);
+    mat.emissiveIntensity = 1;
+    mat.depthWrite = false;
+    mat.depthTest = false;
+    mat.opacity = 0.85;
     mat.useLighting = false;
     mat.update();
     return mat;
@@ -339,7 +464,9 @@ const addSpotLightVisual = (global: Global, spotEntity: Entity, r: number, g: nu
     if (visual) return;
     const mesh = createConeWireframeMesh(device);
     const innerMesh = createCircleWireframeMesh(device);
+    const discMesh = createDiscWireMesh(device);
     const material = createWireframeMaterial();
+    const discMaterial = createDebugDiscMaterial();
     visual = new Entity('spotLight_visual');
     visual.addComponent('render', {
         type: 'asset',
@@ -377,6 +504,24 @@ const addSpotLightVisual = (global: Global, spotEntity: Entity, r: number, g: nu
     innerRing.setLocalScale(1, 1, 1);
     spotEntity.addChild(innerRing);
     (spotEntity as any).__spotInnerRingEntity = innerRing;
+
+    // const debugDisc = new Entity('spotLight_debugDisc');
+    // debugDisc.addComponent('render', {
+    //     type: 'asset',
+    //     layers: [layerId],
+    //     meshInstances: [new MeshInstance(discMesh, discMaterial)]
+    // });
+    // const discRc = debugDisc.render;
+    // if (discRc) {
+    //     discRc.castShadows = false;
+    //     discRc.receiveShadows = false;
+    //     discRc.enabled = !!(app as any).__pointLightsVisualVisible;
+    // }
+    // debugDisc.setLocalPosition(0, 0, 0);
+    // debugDisc.setLocalEulerAngles(0, 0, 0);
+    // debugDisc.setLocalScale(1, 1, 1);
+    // spotEntity.addChild(debugDisc);
+    // (spotEntity as any).__spotDebugDiscEntity = debugDisc;
 };
 
 /**
@@ -385,6 +530,7 @@ const addSpotLightVisual = (global: Global, spotEntity: Entity, r: number, g: nu
 const updateSpotGizmoShape = (spotEntity: Entity, range: number, outerConeAngleDeg: number): void => {
     const visual = (spotEntity as any).__spotVisualEntity as Entity | undefined;
     const innerRing = (spotEntity as any).__spotInnerRingEntity as Entity | undefined;
+    const debugDisc = (spotEntity as any).__spotDebugDiscEntity as Entity | undefined;
     if (!visual) return;
     const r = Math.max(0.1, Number.isFinite(range) ? range : 1);
     const outerDeg = Math.max(0, Math.min(180, Number.isFinite(outerConeAngleDeg) ? outerConeAngleDeg : 45));
@@ -397,6 +543,14 @@ const updateSpotGizmoShape = (spotEntity: Entity, range: number, outerConeAngleD
         r * LIGHT_VISUAL_SCALE,
         Math.max(outerRadius * LIGHT_VISUAL_SCALE, 0.01)
     );
+    if (debugDisc) {
+        debugDisc.setLocalPosition(0, 0, 0);
+        debugDisc.setLocalScale(
+            Math.max(outerRadius * LIGHT_VISUAL_SCALE, 0.01),
+            r * LIGHT_VISUAL_SCALE,
+            Math.max(outerRadius * LIGHT_VISUAL_SCALE, 0.01)
+        );
+    }
 
     // 内圈半径来源：light.innerConeAngle，若无则退化为 outerAngle
     if (innerRing) {
@@ -512,6 +666,7 @@ const createSpotLightsFromSettings = (global: Global): void => {
         const outerCone = cfg.outerConeAngle ?? 45;
         const range = typeof cfg.range === 'number' ? cfg.range : 1;
         const enabled = cfg.enabled !== false;
+        const { effectiveInnerDeg, effectiveOuterDeg } = getEffectiveSpotConeAngles(innerCone, outerCone);
 
         let entity = container!.findByName(`spotLight_${i}`) as Entity | undefined;
         if (!entity) {
@@ -520,8 +675,8 @@ const createSpotLightsFromSettings = (global: Global): void => {
                 type: 'spot',
                 color: new Color(r, g, b),
                 intensity,
-                innerConeAngle: innerCone,
-                outerConeAngle: outerCone,
+                innerConeAngle: effectiveInnerDeg,
+                outerConeAngle: effectiveOuterDeg,
                 range,
                 castShadows: false
             });
@@ -538,11 +693,12 @@ const createSpotLightsFromSettings = (global: Global): void => {
             applyLightColorRgb(entity.light, r, g, b);
             entity.light.intensity = intensity;
             entity.light.castShadows = false;
-            (entity.light as any).innerConeAngle = innerCone;
-            (entity.light as any).outerConeAngle = outerCone;
+            (entity.light as any).innerConeAngle = effectiveInnerDeg;
+            (entity.light as any).outerConeAngle = effectiveOuterDeg;
             (entity.light as any).range = range;
         }
         updateSpotGizmoShape(entity, range, outerCone);
+        ensureLightPickHandle(global, entity);
     });
 
     const existing = container!.children.filter(c => c.name.startsWith('spotLight_'));
@@ -602,6 +758,7 @@ const createPointLightsFromSettings = (global: Global): void => {
             entity.light.shadowResolution = entity.light.shadowResolution ?? 2048;
         }
         updatePointLightRangeVisual(entity, range);
+        ensureLightPickHandle(global, entity);
     });
 
     const existing = container!.children.filter(c => c.name.startsWith('pointLight_'));
@@ -624,6 +781,8 @@ const setPointLightsVisualVisible = (global: Global, visible: boolean): void => 
             if (!entity.name.startsWith('pointLight_') || entity.name === 'pointLight_visual') return;
             const visual = (entity as any).__lightVisualEntity as Entity | undefined;
             if (visual?.render) visual.render.enabled = visible;
+            const pick = (entity as any).__lightPickHandleEntity as Entity | undefined;
+            if (pick?.render) pick.render.enabled = visible;
         });
     }
     const spotContainer = app.root.findByName('spotLights') as Entity | null;
@@ -633,8 +792,12 @@ const setPointLightsVisualVisible = (global: Global, visible: boolean): void => 
             if (!entity.name.startsWith('spotLight_') || entity.name === 'spotLight_visual') return;
             const visual = (entity as any).__spotVisualEntity as Entity | undefined;
             const innerRing = (entity as any).__spotInnerRingEntity as Entity | undefined;
+            const debugDisc = (entity as any).__spotDebugDiscEntity as Entity | undefined;
             if (visual?.render) visual.render.enabled = visible;
             if (innerRing?.render) innerRing.render.enabled = visible;
+            if (debugDisc?.render) debugDisc.render.enabled = visible;
+            const pick = (entity as any).__lightPickHandleEntity as Entity | undefined;
+            if (pick?.render) pick.render.enabled = visible;
         });
     }
 };
@@ -672,12 +835,6 @@ const selectNearestLightAtPosition = (
     };
     const candidates: Candidate[] = [];
 
-    // 聚光灯只允许“锥头附近”命中，避免点击锥体中后段时误选到邻近点光。
-    const SPOT_HEAD_WORLD_DISTANCE = 1.4;
-    const POINT_WORLD_DISTANCE = 4.5;
-    const SPOT_HEAD_SCREEN_DISTANCE_PX = 28;
-    const POINT_SCREEN_DISTANCE_PX = 64;
-
     const testContainer = (name: string) => {
         const container = app.root.findByName(name) as Entity | null;
         if (!container) return;
@@ -707,23 +864,22 @@ const selectNearestLightAtPosition = (
         return best;
     };
 
-    // 1) 先走世界坐标命中：spot 仅锥头近域；point 使用相对宽松阈值。
-    const spotNear = candidates.filter((c) => c.type === 'spot' && c.dist <= SPOT_HEAD_WORLD_DISTANCE);
-    const pointNear = candidates.filter((c) => c.type === 'point' && c.dist <= POINT_WORLD_DISTANCE);
-    const worldPicked = pickNearest(spotNear) ?? pickNearest(pointNear);
+    // 1) 世界坐标：点光中心 / 聚光锥尖统一为小球拾取半径（与 light_pick_handle 视觉一致）
+    const inPickSphere = candidates.filter((c) => c.dist <= LIGHT_PICK_HANDLE_WORLD_HIT_RADIUS);
+    const worldPicked = pickNearest(inPickSphere);
     if (worldPicked) {
         (state as any).selectedLightId = worldPicked.cfg.id;
         events.fire('sceneLight:selected', { id: worldPicked.cfg.id, source: 'scene' });
         return;
     }
 
-    // 2) 屏幕空间兜底：spot 使用更小半径，仅允许锥头附近命中；按归一化分数选最优，降低点/聚冲突。
+    // 2) 屏幕空间兜底：灯心/锥尖投影点附近，阈值与拾取球语义一致
     const cam = global.camera?.camera;
     if (!cam || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
     let bestScreenCandidate: Candidate | null = null;
     let bestScore = Infinity;
     candidates.forEach((candidate) => {
-        const threshold = candidate.type === 'spot' ? SPOT_HEAD_SCREEN_DISTANCE_PX : POINT_SCREEN_DISTANCE_PX;
+        const threshold = LIGHT_PICK_HANDLE_SCREEN_PX;
         const sp = cam.worldToScreen(candidate.entity.getPosition());
         const dx = sp.x - (clientX as number);
         const dy = sp.y - (clientY as number);

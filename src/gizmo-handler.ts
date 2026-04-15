@@ -42,7 +42,66 @@ const MODE_TO_GIZMO_TYPE: Record<AssetTransformMode, string> = {
 
 type RotateGizmoShape = 'x' | 'y' | 'z' | 'xyz' | 'face';
 const ALL_ROTATE_GIZMO_SHAPES: RotateGizmoShape[] = ['x', 'y', 'z', 'xyz', 'face'];
-const SPOT_LIGHT_ROTATE_SHAPES: ReadonlySet<RotateGizmoShape> = new Set<RotateGizmoShape>(['x', 'y']);
+const SPOT_LIGHT_ROTATE_SHAPES: ReadonlySet<RotateGizmoShape> = new Set<RotateGizmoShape>(['x', 'y', 'z']);
+const SPOT_ROTATE_EPSILON = 1e-5;
+
+type SpotRotateAxis = 'x' | 'y' | 'z';
+type SpotRotateState = {
+    node: any;
+    axis: SpotRotateAxis;
+    startPitch: number;
+    startYaw: number;
+    currentPitch: number;
+    currentYaw: number;
+    changed: boolean;
+};
+
+const normalizeYawDegrees = (yaw: number): number => ((yaw % 360) + 360) % 360;
+
+const getSpotDirectionFromNode = (node: any): pc.Vec3 | null => {
+    const wt = node?.getWorldTransform?.();
+    if (!wt?.getY) return null;
+    const yAxis = wt.getY(new pc.Vec3());
+    return new pc.Vec3(-yAxis.x, -yAxis.y, -yAxis.z).normalize();
+};
+
+const getSpotYawFromWorldXAxis = (node: any, fallbackYaw: number): number => {
+    const wt = node?.getWorldTransform?.();
+    if (!wt?.getX) return normalizeYawDegrees(fallbackYaw);
+    const xAxis = wt.getX(new pc.Vec3());
+    const planarLength = Math.hypot(xAxis.x, xAxis.z);
+    if (planarLength < SPOT_ROTATE_EPSILON) return normalizeYawDegrees(fallbackYaw);
+    return normalizeYawDegrees(Math.atan2(-xAxis.z, xAxis.x) * pc.math.RAD_TO_DEG);
+};
+
+const getSpotPitchFromDirectionAndYaw = (direction: pc.Vec3, yaw: number): number => {
+    const yawRad = normalizeYawDegrees(yaw) * pc.math.DEG_TO_RAD;
+    const pitchForward = new pc.Vec3(-Math.sin(yawRad), 0, -Math.cos(yawRad));
+    const signedSinPitch = direction.dot(pitchForward);
+    return Math.atan2(signedSinPitch, -direction.y) * pc.math.RAD_TO_DEG;
+};
+
+const projectSpotRotationForAxis = (
+    node: any,
+    axis: SpotRotateAxis,
+    startPitch: number,
+    startYaw: number
+): { pitch: number; yaw: number } | null => {
+    if (axis === 'y') {
+        return {
+            pitch: startPitch,
+            yaw: getSpotYawFromWorldXAxis(node, startYaw)
+        };
+    }
+
+    // x / z 都作为 pitch 的备用手柄；不恢复 z=roll 的旧语义。
+    const direction = getSpotDirectionFromNode(node);
+    if (!direction) return null;
+    return {
+        pitch: getSpotPitchFromDirectionAndYaw(direction, startYaw),
+        yaw: normalizeYawDegrees(startYaw)
+    };
+};
 
 /**
  * 初始化 Gizmo：监听 assetTransformMode:changed 与 sceneAsset:selected，
@@ -52,6 +111,7 @@ export function initGizmoHandler(global: Global): () => void {
     const { app, state, events, camera } = global;
     const api = getGizmoAPI();
     let gizmoPointerLocked = false;
+    let spotRotateState: SpotRotateState | null = null;
 
     let handler: {
         _gizmos: Record<string, any>;
@@ -73,6 +133,65 @@ export function initGizmoHandler(global: Global): () => void {
                 rotate: new api.RotateGizmo(cameraComp, layer),
                 scale: new api.ScaleGizmo(cameraComp, layer)
             };
+            const rotateGizmo = _gizmos.rotate;
+
+            rotateGizmo.on('transform:start', () => {
+                if (state.editMode !== true || state.editLeftModule !== 'environment' || state.lightTransformMode !== 'rotate') {
+                    spotRotateState = null;
+                    return;
+                }
+                const node = handler?._nodes?.[0];
+                const cfg = (node as any)?.__lightConfig as any | undefined;
+                const axis = rotateGizmo._selectedAxis as string | undefined;
+                if (!node || cfg?.type !== 'spot' || (axis !== 'x' && axis !== 'y' && axis !== 'z')) {
+                    spotRotateState = null;
+                    return;
+                }
+                const startPitch = typeof cfg.pitch === 'number' ? cfg.pitch : 0;
+                const startYaw = typeof cfg.yaw === 'number' ? cfg.yaw : 0;
+                spotRotateState = {
+                    node,
+                    axis,
+                    startPitch,
+                    startYaw,
+                    currentPitch: startPitch,
+                    currentYaw: startYaw,
+                    changed: false
+                };
+            });
+
+            rotateGizmo.on('transform:move', () => {
+                if (!spotRotateState) return;
+                const projected = projectSpotRotationForAxis(
+                    spotRotateState.node,
+                    spotRotateState.axis,
+                    spotRotateState.startPitch,
+                    spotRotateState.startYaw
+                );
+                if (!projected) return;
+                spotRotateState.currentPitch = projected.pitch;
+                spotRotateState.currentYaw = projected.yaw;
+                spotRotateState.changed =
+                    spotRotateState.changed
+                    || Math.abs(projected.pitch - spotRotateState.startPitch) > SPOT_ROTATE_EPSILON
+                    || Math.abs(projected.yaw - spotRotateState.startYaw) > SPOT_ROTATE_EPSILON;
+                spotRotateState.node.setEulerAngles(projected.pitch, projected.yaw, 0);
+                app.renderNextFrame = true;
+            });
+
+            rotateGizmo.on('transform:end', () => {
+                if (!spotRotateState) return;
+                const projected = projectSpotRotationForAxis(
+                    spotRotateState.node,
+                    spotRotateState.axis,
+                    spotRotateState.startPitch,
+                    spotRotateState.startYaw
+                );
+                if (!projected) return;
+                spotRotateState.currentPitch = projected.pitch;
+                spotRotateState.currentYaw = projected.yaw;
+                spotRotateState.node.setEulerAngles(projected.pitch, projected.yaw, 0);
+            });
 
             // 绑定 pointer 事件：当 Gizmo 被拖拽时临时关闭相机控制，避免两边同时处理同一批输入事件
             Object.values(_gizmos).forEach((gizmo: any) => {
@@ -103,15 +222,22 @@ export function initGizmoHandler(global: Global): () => void {
                                 cfg.position = [pos.x, pos.y, pos.z];
                             }
                             if ((cfg as any).type === 'spot') {
-                                const euler = node.getEulerAngles?.();
-                                if (euler) {
-                                    const pitch = euler.x ?? 0;
-                                    let yaw = euler.y ?? 0;
-                                    // yaw 仅做等价归一化，不限制旋转自由度
-                                    yaw = ((yaw % 360) + 360) % 360;
-                                    (cfg as any).pitch = pitch;
-                                    (cfg as any).yaw = yaw;
+                                if (spotRotateState && spotRotateState.node === node) {
+                                    (cfg as any).pitch = spotRotateState.currentPitch;
+                                    (cfg as any).yaw = normalizeYawDegrees(spotRotateState.currentYaw);
+                                    changed = changed || spotRotateState.changed;
+                                } else {
+                                    const euler = node.getEulerAngles?.();
+                                    if (euler) {
+                                        const pitch = euler.x ?? 0;
+                                        let yaw = euler.y ?? 0;
+                                        // yaw 仅做等价归一化，不限制旋转自由度
+                                        yaw = ((yaw % 360) + 360) % 360;
+                                        (cfg as any).pitch = pitch;
+                                        (cfg as any).yaw = yaw;
+                                    }
                                 }
+                                spotRotateState = null;
                             }
                             changed = true;
                         });
@@ -130,6 +256,7 @@ export function initGizmoHandler(global: Global): () => void {
                 gizmoPointerLocked = false;
                 events.fire('cameraControls:flushInputs');
                 state.cameraControlsEnabled = true;
+                spotRotateState = null;
             };
             window.addEventListener('pointerup', onWindowPointerUp, true);
             window.addEventListener('pointercancel', onWindowPointerUp as any, true);
@@ -264,10 +391,21 @@ export function initGizmoHandler(global: Global): () => void {
             lightEntity: selectedLightEntity
         }));
 
+        const isSpotRotateSelection =
+            gizmoType === 'rotate'
+            && (selectedLightEntity as any)?.__lightConfig?.type === 'spot';
+        if (!isSpotRotateSelection) {
+            spotRotateState = null;
+        }
+
         if (targetNode && gizmoType) {
             handler.add(targetNode, true);
             handler.switch(gizmoType);
+            if (isSpotRotateSelection) {
+                (handler._gizmos.rotate as any).coordSpace = 'world';
+            }
         } else {
+            spotRotateState = null;
             handler.clear();
         }
     };
