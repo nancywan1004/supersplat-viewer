@@ -568,6 +568,10 @@ export function initAssetPlacementHandler(
         state.selectedSceneEntityId = newEntry.id;
         events.fire('sceneAssets:added', newEntry);
         events.fire('sceneAsset:selected');
+        // 复制成功后聚焦到新副本，避免仍停留在原资产视角。
+        requestAnimationFrame(() => {
+            events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
+        });
         deps.pushEditHistory?.(global, 'copy asset');
     };
 

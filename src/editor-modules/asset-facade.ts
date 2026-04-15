@@ -3,6 +3,17 @@ import type { AssetLibraryItem, Global, ModuleCommand, ModuleContext, ModuleFaca
 class AssetFacade implements ModuleFacade {
     readonly module = 'asset' as const;
 
+    private resolveSceneEntityId(
+        ctx: ModuleContext,
+        id: string | null | undefined
+    ): string | null {
+        if (typeof id !== 'string' || id.trim().length === 0) return null;
+        const list = ctx.state.scenePlacedEntities ?? [];
+        const bySceneId = list.find((it) => it?.id === id);
+        if (bySceneId) return bySceneId.id;
+        return null;
+    }
+
     onEnter(ctx: ModuleContext): void {
         const { state, events } = ctx;
         const list = state.scenePlacedEntities ?? [];
@@ -39,17 +50,7 @@ class AssetFacade implements ModuleFacade {
         switch (command.type) {
         case 'ASSET_SELECT': {
             const id = (command.payload as { id?: string | null } | undefined)?.id ?? null;
-            const list = state.scenePlacedEntities ?? [];
-            let resolvedId: string | null = id;
-            if (typeof id === 'string' && id.trim().length > 0) {
-                // 优先按场景实例 id 精确匹配；若未命中，兼容父级误传资产库 id 的情况，
-                // 回退匹配 assetId 并选择最近放置的一项，避免选中无效导致 frame 飞走。
-                const bySceneId = list.find((it) => it?.id === id);
-                if (!bySceneId) {
-                    const byAssetId = [...list].reverse().find((it) => it?.assetId === id);
-                    resolvedId = byAssetId?.id ?? null;
-                }
-            }
+            const resolvedId = this.resolveSceneEntityId(ctx, id);
             this.selectById(ctx, resolvedId, src);
             break;
         }
@@ -99,7 +100,9 @@ class AssetFacade implements ModuleFacade {
         case 'ASSET_COPY': {
             const pl = command.payload as { id?: string; copyId?: string } | undefined;
             if (typeof pl?.id !== 'string' || typeof pl?.copyId !== 'string' || pl.copyId.trim().length === 0) return;
-            state.selectedSceneEntityId = pl.id;
+            const resolvedId = this.resolveSceneEntityId(ctx, pl.id);
+            if (!resolvedId) return;
+            state.selectedSceneEntityId = resolvedId;
             events.fire('sceneAsset:selected', { source: src });
             events.fire('assetEdit:copy', { copyId: pl.copyId });
             break;
@@ -107,7 +110,9 @@ class AssetFacade implements ModuleFacade {
         case 'ASSET_DELETE': {
             const id = (command.payload as { id?: string } | undefined)?.id;
             if (typeof id !== 'string') return;
-            state.selectedSceneEntityId = id;
+            const resolvedId = this.resolveSceneEntityId(ctx, id);
+            if (!resolvedId) return;
+            state.selectedSceneEntityId = resolvedId;
             events.fire('sceneAsset:selected', { source: src });
             events.fire('assetEdit:delete');
             break;

@@ -328,7 +328,7 @@ const initPostMessageBridge = (global: Global) => {
             const matchedRequested =
                 !!resolvedEntry &&
                 !!requested &&
-                (resolvedEntry.id === requested || resolvedEntry.assetId === requested);
+                resolvedEntry.id === requested;
             // 仅在“请求 id 成功命中场景实例”时触发 frame；未命中时不飞。
             if (state.editMode && matchedRequested) {
                 events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
