@@ -55,7 +55,8 @@ class AssetFacade implements ModuleFacade {
             break;
         }
         case 'ASSET_PLACE': {
-            const raw = (command.payload as { value?: unknown } | undefined)?.value;
+            const payload = command.payload as { value?: unknown; sceneEntityId?: string } | undefined;
+            const raw = payload?.value;
             if (!raw || typeof raw !== 'object') return;
             const incoming = raw as { id?: string; sceneEntityId?: string } & Partial<AssetLibraryItem>;
             let value: AssetLibraryItem | null = null;
@@ -67,9 +68,11 @@ class AssetFacade implements ModuleFacade {
             // - item.id：资产库条目 id（可重复用于多次放置）
             // - sceneEntityId：场景内实例 id（必须唯一，未显式提供时由放置链路生成）
             const sceneEntityId =
-                typeof incoming.sceneEntityId === 'string' && incoming.sceneEntityId.trim().length > 0
-                    ? incoming.sceneEntityId
-                    : undefined;
+                typeof payload?.sceneEntityId === 'string' && payload.sceneEntityId.trim().length > 0
+                    ? payload.sceneEntityId
+                    : (typeof incoming.sceneEntityId === 'string' && incoming.sceneEntityId.trim().length > 0
+                        ? incoming.sceneEntityId
+                        : undefined);
             events.fire('assetPlacement:place', { value: finalValue, sceneEntityId });
             break;
         }
