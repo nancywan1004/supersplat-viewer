@@ -489,6 +489,8 @@ export function initAssetPlacementHandler(
 
     const onPointerDown = (e: PointerEvent) => {
         if (!state.editMode || state.editLeftModule !== 'asset' || e.button !== 0) return;
+        // Gizmo 正在处理该指针会话时，屏蔽资产拾取，避免轴与实体重合时误选中实体。
+        if (state.cameraControlsEnabled === false) return;
 
         e.stopPropagation();
         e.preventDefault();

@@ -337,6 +337,7 @@ class InputController {
         // 单击拾取：用于场景中单击世界坐标（不改变相机）
         canvas.addEventListener('pointerup', async (event: PointerEvent) => {
             if (!event.isPrimary || event.button !== 0) return;
+            if (state.cameraControlsEnabled === false) return;
             // 仅在画布区域内的左键点击才进行拾取
             const rect = canvas.getBoundingClientRect();
             if (event.clientX < rect.left || event.clientX > rect.right
@@ -495,7 +496,7 @@ class InputController {
      * @param distance - the distance to the camera target
      */
     update(dt: number, distance: number) {
-        // 当全局关闭相机控制（例如正在拖拽 Gizmo）时，仍持续消费输入源缓存，
+        // 当相机控制关闭时，持续消费输入源缓存，
         // 防止恢复后一次性吃掉拖拽期间累积的 mouse delta。
         if (this.global.state.cameraControlsEnabled === false) {
             this._desktopInput.read();

@@ -65,13 +65,13 @@ export function initAnnotationGizmoHandler(global: Global): () => void {
             // 绑定 pointer 事件：拖拽时禁用相机控制
             translateGizmo.on('pointer:down', (_x: number, _y: number, meshInstance: any) => {
                 if (meshInstance) {
-                    // 命中 Gizmo 句柄，关闭相机输入
+                    // 关闭相机输入
                     state.cameraControlsEnabled = false;
                 }
             });
 
             translateGizmo.on('pointer:up', () => {
-                // 结束拖拽后，清空相机输入增量，再重新开启相机控制
+                // 清空相机输入增量，再重新开启相机控制
                 events.fire('cameraControls:flushInputs');
                 state.cameraControlsEnabled = true;
 
