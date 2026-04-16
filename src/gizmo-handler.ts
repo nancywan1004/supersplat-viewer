@@ -61,6 +61,7 @@ type SpotRotateState = {
 };
 
 const normalizeYawDegrees = (yaw: number): number => ((yaw % 360) + 360) % 360;
+const SCALE_EPSILON = 1e-6;
 
 const getSpotDirectionFromNode = (node: any): pc.Vec3 | null => {
     const wt = node?.getWorldTransform?.();
@@ -116,6 +117,9 @@ export function initGizmoHandler(global: Global): () => void {
     const api = getGizmoAPI();
     let gizmoPointerLocked = false;
     let spotRotateState: SpotRotateState | null = null;
+    let shiftPressed = false;
+    let shiftUniformScaleActive = false;
+    const shiftUniformScaleStart = new Map<any, pc.Vec3>();
 
     let handler: {
         _gizmos: Record<string, any>;
@@ -139,6 +143,7 @@ export function initGizmoHandler(global: Global): () => void {
                 scale: new api.ScaleGizmo(cameraComp, layer)
             };
             const rotateGizmo = _gizmos.rotate;
+            const scaleGizmo = _gizmos.scale;
             const onCanvasPointerDownCapture = (ev: PointerEvent) => {
                 if (!ev.isPrimary || ev.button !== 0 || !state.editMode) return;
                 if (!handler || handler._nodes.length === 0) return;
@@ -215,6 +220,57 @@ export function initGizmoHandler(global: Global): () => void {
                 spotRotateState.node.setEulerAngles(projected.pitch, projected.yaw, 0);
             });
 
+            const resolveUniformScaleFactor = (axis: string | undefined, start: pc.Vec3, current: pc.Vec3): number => {
+                const rx = Math.abs(start.x) > SCALE_EPSILON ? current.x / start.x : 1;
+                const ry = Math.abs(start.y) > SCALE_EPSILON ? current.y / start.y : 1;
+                const rz = Math.abs(start.z) > SCALE_EPSILON ? current.z / start.z : 1;
+                if (axis === 'x') return rx;
+                if (axis === 'y') return ry;
+                if (axis === 'z') return rz;
+                if (axis === 'xy') return (rx + ry) * 0.5;
+                if (axis === 'xz') return (rx + rz) * 0.5;
+                if (axis === 'yz') return (ry + rz) * 0.5;
+                return (rx + ry + rz) / 3;
+            };
+
+            scaleGizmo.on('transform:start', () => {
+                shiftUniformScaleActive =
+                    shiftPressed
+                    && state.editMode === true
+                    && state.editLeftModule === 'asset'
+                    && state.assetTransformMode === 'scale';
+                shiftUniformScaleStart.clear();
+                if (!shiftUniformScaleActive || !handler) return;
+                handler._nodes.forEach((node: any) => {
+                    const s = node.getLocalScale?.();
+                    if (!s) return;
+                    shiftUniformScaleStart.set(node, new pc.Vec3(s.x, s.y, s.z));
+                });
+            });
+
+            scaleGizmo.on('transform:move', () => {
+                if (!shiftUniformScaleActive || !handler) return;
+                const axis = (scaleGizmo as any)._selectedAxis as string | undefined;
+                handler._nodes.forEach((node: any) => {
+                    const start = shiftUniformScaleStart.get(node);
+                    if (!start) return;
+                    const current = node.getLocalScale?.();
+                    if (!current) return;
+                    const factor = resolveUniformScaleFactor(axis, start, current);
+                    node.setLocalScale(
+                        start.x * factor,
+                        start.y * factor,
+                        start.z * factor
+                    );
+                });
+                app.renderNextFrame = true;
+            });
+
+            scaleGizmo.on('transform:end', () => {
+                shiftUniformScaleActive = false;
+                shiftUniformScaleStart.clear();
+            });
+
             // 绑定 pointer 事件：当 Gizmo 被拖拽时临时关闭相机控制，避免两边同时处理同一批输入事件
             Object.values(_gizmos).forEach((gizmo: any) => {
                 gizmo.on('pointer:down', (_x: number, _y: number, meshInstance: any) => {
@@ -277,10 +333,20 @@ export function initGizmoHandler(global: Global): () => void {
             const onWindowPointerUp = (ev: PointerEvent) => {
                 if (ev.button !== 0 || !gizmoPointerLocked) return;
                 gizmoPointerLocked = false;
+                shiftUniformScaleActive = false;
+                shiftUniformScaleStart.clear();
                 events.fire('cameraControls:flushInputs');
                 state.cameraControlsEnabled = true;
                 spotRotateState = null;
             };
+            const onWindowKeyDown = (ev: KeyboardEvent) => {
+                if (ev.key === 'Shift') shiftPressed = true;
+            };
+            const onWindowKeyUp = (ev: KeyboardEvent) => {
+                if (ev.key === 'Shift') shiftPressed = false;
+            };
+            window.addEventListener('keydown', onWindowKeyDown, true);
+            window.addEventListener('keyup', onWindowKeyUp, true);
             window.addEventListener('pointerup', onWindowPointerUp, true);
             window.addEventListener('pointercancel', onWindowPointerUp as any, true);
             let _type = 'translate';
@@ -305,14 +371,21 @@ export function initGizmoHandler(global: Global): () => void {
                 },
                 switch(type: string) {
                     (handler!.gizmo as any).detach();
-                    const coordSpace = (handler!.gizmo as any).coordSpace;
                     _type = type ?? 'translate';
                     const g = _gizmos[_type] ?? _gizmos.translate;
                     g.attach(_nodes);
-                    g.coordSpace = coordSpace;
+                    // 不再继承上一个 gizmo 的坐标空间，避免 scale(local) 污染 move/rotate。
+                    // 统一策略：
+                    // - scale: local（符合建模直觉）
+                    // - translate/rotate: world（避免轴向在模式切换后“颠倒/翻转”）
+                    g.coordSpace = _type === 'scale' ? 'local' : 'world';
                 },
                 destroy() {
                     gizmoPointerLocked = false;
+                    shiftUniformScaleActive = false;
+                    shiftUniformScaleStart.clear();
+                    window.removeEventListener('keydown', onWindowKeyDown, true);
+                    window.removeEventListener('keyup', onWindowKeyUp, true);
                     canvas.removeEventListener('pointerdown', onCanvasPointerDownCapture, true);
                     window.removeEventListener('pointerup', onWindowPointerUp, true);
                     window.removeEventListener('pointercancel', onWindowPointerUp as any, true);
