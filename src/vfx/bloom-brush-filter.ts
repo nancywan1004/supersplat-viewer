@@ -14,6 +14,26 @@ uniform vec4 uBloomPoints[` + MAX_POINTS + `];
 uniform int uBloomPointCount;
 uniform float uBloomBrushLocalBrightness;
 
+vec3 l2g(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(1.0 / 2.2)); }
+vec3 g2l(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(2.2)); }
+vec3 applyCommittedBrightness(vec3 srgbColor, float brightness) {
+    float b = clamp(brightness, -1.0, 1.0);
+    vec3 linearColor = g2l(srgbColor);
+    float lumLin = dot(linearColor, vec3(0.2126, 0.7152, 0.0722));
+    float darkW = 1.0 - smoothstep(0.02, 0.38, lumLin);
+    float pos = max(b, 0.0);
+    float neg = max(-b, 0.0);
+    float posAggr = min(1.0, pos * (1.0 + 0.85 * darkW));
+    float wPos = posAggr * mix(0.55, 1.2, darkW);
+    float wNeg = neg * mix(0.90, 0.55, darkW);
+    vec3 mixed = linearColor * (1.0 + wPos);
+    mixed *= (1.0 - neg * wNeg);
+    float addAmt = posAggr * darkW * (0.2 + 0.45 * exp(-lumLin * 40.0));
+    addAmt = min(addAmt, 0.6 * posAggr);
+    vec3 outLin = clamp(mixed + vec3(addAmt), vec3(0.0), vec3(10.0));
+    return l2g(outLin);
+}
+
 void modifySplatCenter(inout vec3 center) {
 }
 
@@ -45,8 +65,8 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         // bloom glow actually appears on screen.
         // uBloomBrushLocalBrightness: -1~1, 0=no change, <0 darken, >0 brighten (persisted on Set).
         if (bloomMask > 0.0) {
-            color.rgb *= 1.0 + bloomMask * 0.5;
-            color.rgb *= 1.0 + uBloomBrushLocalBrightness * bloomMask;
+            float baseScale = (1.0 + bloomMask * 0.5) * (1.0 + uBloomBrushLocalBrightness * bloomMask);
+            color.rgb = applyCommittedBrightness(color.rgb, baseScale - 1.0);
         }
     }
 }
@@ -61,6 +81,26 @@ uniform uBloomMode: i32;
 uniform uBloomPoints: array<vec4f, ` + MAX_POINTS + `>;
 uniform uBloomPointCount: i32;
 uniform uBloomBrushLocalBrightness: f32;
+
+fn l2g(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(1.0 / 2.2)); }
+fn g2l(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(2.2)); }
+fn applyCommittedBrightness(srgbColor: vec3f, brightness: f32) -> vec3f {
+    let b = clamp(brightness, -1.0, 1.0);
+    let linearColor = g2l(srgbColor);
+    let lumLin = dot(linearColor, vec3f(0.2126, 0.7152, 0.0722));
+    let darkW = 1.0 - smoothstep(0.02, 0.38, lumLin);
+    let pos = max(b, 0.0);
+    let neg = max(-b, 0.0);
+    let posAggr = min(1.0, pos * (1.0 + 0.85 * darkW));
+    let wPos = posAggr * mix(0.55, 1.2, darkW);
+    let wNeg = neg * mix(0.90, 0.55, darkW);
+    var mixed = linearColor * (1.0 + wPos);
+    mixed *= (1.0 - neg * wNeg);
+    var addAmt = posAggr * darkW * (0.2 + 0.45 * exp(-lumLin * 40.0));
+    addAmt = min(addAmt, 0.6 * posAggr);
+    let outLin = clamp(mixed + vec3f(addAmt), vec3f(0.0), vec3f(10.0));
+    return l2g(outLin);
+}
 
 fn modifySplatCenter(center: ptr<function, vec3f>) {
 }
@@ -91,13 +131,8 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         // bloom glow actually appears on screen.
         // uBloomBrushLocalBrightness: -1~1, 0=no change, <0 darken, >0 brighten (persisted on Set).
         if (bloomMask > 0.0) {
-            (*color).r *= 1.0 + bloomMask * 0.5;
-            (*color).g *= 1.0 + bloomMask * 0.5;
-            (*color).b *= 1.0 + bloomMask * 0.5;
-            let localBright = 1.0 + uniform.uBloomBrushLocalBrightness * bloomMask;
-            (*color).r *= localBright;
-            (*color).g *= localBright;
-            (*color).b *= localBright;
+            let baseScale = (1.0 + bloomMask * 0.5) * (1.0 + uniform.uBloomBrushLocalBrightness * bloomMask);
+            (*color).rgb = applyCommittedBrightness((*color).rgb, baseScale - 1.0);
         }
     }
 }
