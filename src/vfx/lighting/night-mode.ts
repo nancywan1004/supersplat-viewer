@@ -61,6 +61,23 @@ uniform float uCommittedTintVolumeActive; // 1 = 使用纹理，0 = 使用 unifo
 
 vec3 l2g(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(1.0 / 2.2)); }
 vec3 g2l(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(2.2)); }
+vec3 applyCommittedBrightness(vec3 srgbColor, float brightness) {
+    float b = clamp(brightness, -1.0, 1.0);
+    vec3 linearColor = g2l(srgbColor);
+    float lumLin = dot(linearColor, vec3(0.2126, 0.7152, 0.0722));
+    float darkW = 1.0 - smoothstep(0.02, 0.38, lumLin);
+    float pos = max(b, 0.0);
+    float neg = max(-b, 0.0);
+    float posAggr = min(1.0, pos * (1.0 + 0.85 * darkW));
+    float wPos = posAggr * mix(0.55, 1.2, darkW);
+    float wNeg = neg * mix(0.90, 0.55, darkW);
+    vec3 mixed = linearColor * (1.0 + wPos);
+    mixed *= (1.0 - neg * wNeg);
+    float addAmt = posAggr * darkW * (0.2 + 0.45 * exp(-lumLin * 40.0));
+    addAmt = min(addAmt, 0.6 * posAggr);
+    vec3 outLin = clamp(mixed + vec3(addAmt), vec3(0.0), vec3(10.0));
+    return l2g(outLin);
+}
 
 void modifySplatCenter(inout vec3 center) {
     // Night mode doesn't modify center position
@@ -89,7 +106,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         float encoded = texture2D(uCommittedBrightnessVolume, committedUV).r;
         if (encoded > 0.002) {
             float effectiveBrightness = encoded * 2.0 - 1.0;
-            color.rgb *= 1.0 + effectiveBrightness;
+            color.rgb = applyCommittedBrightness(color.rgb, effectiveBrightness);
             inCommittedLit = 1.0;
         }
     } else if (abs(uCommittedBrightness) > 1e-6) {
@@ -101,7 +118,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         float v = (iy + iz * 64.0 + 0.5) / 4096.0;
         committedUV = vec2(u, v);
         float committedMask = texture2D(uCommittedBrightnessVolume, committedUV).r;
-        color.rgb *= 1.0 + uCommittedBrightness * committedMask;
+        color.rgb = applyCommittedBrightness(color.rgb, uCommittedBrightness * committedMask);
         if (committedMask > 0.002) inCommittedLit = 1.0;
     }
     if (inCommittedLit > 0.5) {
@@ -215,6 +232,23 @@ uniform float uCommittedTintVolumeActive;
 
 vec3 l2g(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(1.0 / 2.2)); }
 vec3 g2l(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(2.2)); }
+vec3 applyCommittedBrightness(vec3 srgbColor, float brightness) {
+    float b = clamp(brightness, -1.0, 1.0);
+    vec3 linearColor = g2l(srgbColor);
+    float lumLin = dot(linearColor, vec3(0.2126, 0.7152, 0.0722));
+    float darkW = 1.0 - smoothstep(0.02, 0.38, lumLin);
+    float pos = max(b, 0.0);
+    float neg = max(-b, 0.0);
+    float posAggr = min(1.0, pos * (1.0 + 0.85 * darkW));
+    float wPos = posAggr * mix(0.55, 1.2, darkW);
+    float wNeg = neg * mix(0.90, 0.55, darkW);
+    vec3 mixed = linearColor * (1.0 + wPos);
+    mixed *= (1.0 - neg * wNeg);
+    float addAmt = posAggr * darkW * (0.2 + 0.45 * exp(-lumLin * 40.0));
+    addAmt = min(addAmt, 0.6 * posAggr);
+    vec3 outLin = clamp(mixed + vec3(addAmt), vec3(0.0), vec3(10.0));
+    return l2g(outLin);
+}
 
 void modifySplatCenter(inout vec3 center) {
 }
@@ -241,7 +275,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         float encoded = texture2D(uCommittedBrightnessVolume, committedUV).r;
         if (encoded > 0.002) {
             float effectiveBrightness = encoded * 2.0 - 1.0;
-            color.rgb *= 1.0 + effectiveBrightness;
+            color.rgb = applyCommittedBrightness(color.rgb, effectiveBrightness);
             committedMask = 1.0;
         }
     } else if (abs(uCommittedBrightness) > 1e-6) {
@@ -253,7 +287,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         float v = (iy + iz * 64.0 + 0.5) / 4096.0;
         committedUV = vec2(u, v);
         committedMask = texture2D(uCommittedBrightnessVolume, committedUV).r;
-        color.rgb *= 1.0 + uCommittedBrightness * committedMask;
+        color.rgb = applyCommittedBrightness(color.rgb, uCommittedBrightness * committedMask);
     }
     if (committedMask > 0.5) {
         vec3 tintCol = uLocalLightTintColor;
@@ -280,7 +314,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
             float lum = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
             if (maskVal > 0.5 && lum >= uBloomThreshold) {
                 if (committedMask < 0.2) {
-                    color.rgb *= 1.0 + uBloomBrushLocalBrightness;
+                    color.rgb = applyCommittedBrightness(color.rgb, uBloomBrushLocalBrightness);
                 }
             }
         }
@@ -374,6 +408,23 @@ uniform uCommittedTintVolumeActive: f32;
 
 fn l2g(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(1.0 / 2.2)); }
 fn g2l(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(2.2)); }
+fn applyCommittedBrightness(srgbColor: vec3f, brightness: f32) -> vec3f {
+    let b = clamp(brightness, -1.0, 1.0);
+    let linearColor = g2l(srgbColor);
+    let lumLin = dot(linearColor, vec3f(0.2126, 0.7152, 0.0722));
+    let darkW = 1.0 - smoothstep(0.02, 0.38, lumLin);
+    let pos = max(b, 0.0);
+    let neg = max(-b, 0.0);
+    let posAggr = min(1.0, pos * (1.0 + 0.85 * darkW));
+    let wPos = posAggr * mix(0.55, 1.2, darkW);
+    let wNeg = neg * mix(0.90, 0.55, darkW);
+    var mixed = linearColor * (1.0 + wPos);
+    mixed *= (1.0 - neg * wNeg);
+    var addAmt = posAggr * darkW * (0.2 + 0.45 * exp(-lumLin * 40.0));
+    addAmt = min(addAmt, 0.6 * posAggr);
+    let outLin = clamp(mixed + vec3f(addAmt), vec3f(0.0), vec3f(10.0));
+    return l2g(outLin);
+}
 
 fn modifySplatCenter(center: ptr<function, vec3f>) {
 }
@@ -399,7 +450,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         let encoded = textureSample(uCommittedBrightnessVolume, uCommittedBrightnessVolumeSampler, committedUV).r;
         if (encoded > 0.002) {
             let effectiveBrightness = encoded * 2.0 - 1.0;
-            (*color).rgb *= 1.0 + effectiveBrightness;
+            (*color).rgb = applyCommittedBrightness((*color).rgb, effectiveBrightness);
             inCommittedLit = 1.0;
         }
     } else if (abs(uniform.uCommittedBrightness) > 1e-6) {
@@ -412,7 +463,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         let v = (iy + iz * 64.0 + 0.5) / 4096.0;
         committedUV = vec2f(u, v);
         let committedMask = textureSample(uCommittedBrightnessVolume, uCommittedBrightnessVolumeSampler, committedUV).r;
-        (*color).rgb *= 1.0 + uniform.uCommittedBrightness * committedMask;
+        (*color).rgb = applyCommittedBrightness((*color).rgb, uniform.uCommittedBrightness * committedMask);
         if (committedMask > 0.002) { inCommittedLit = 1.0; }
     }
     if (inCommittedLit > 0.5) {
@@ -528,6 +579,23 @@ uniform uCommittedTintVolumeActive: f32;
 
 fn l2g(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(1.0 / 2.2)); }
 fn g2l(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(2.2)); }
+fn applyCommittedBrightness(srgbColor: vec3f, brightness: f32) -> vec3f {
+    let b = clamp(brightness, -1.0, 1.0);
+    let linearColor = g2l(srgbColor);
+    let lumLin = dot(linearColor, vec3f(0.2126, 0.7152, 0.0722));
+    let darkW = 1.0 - smoothstep(0.02, 0.38, lumLin);
+    let pos = max(b, 0.0);
+    let neg = max(-b, 0.0);
+    let posAggr = min(1.0, pos * (1.0 + 0.85 * darkW));
+    let wPos = posAggr * mix(0.55, 1.2, darkW);
+    let wNeg = neg * mix(0.90, 0.55, darkW);
+    var mixed = linearColor * (1.0 + wPos);
+    mixed *= (1.0 - neg * wNeg);
+    var addAmt = posAggr * darkW * (0.2 + 0.45 * exp(-lumLin * 40.0));
+    addAmt = min(addAmt, 0.6 * posAggr);
+    let outLin = clamp(mixed + vec3f(addAmt), vec3f(0.0), vec3f(10.0));
+    return l2g(outLin);
+}
 
 fn modifySplatCenter(center: ptr<function, vec3f>) {
 }
@@ -553,7 +621,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         let encoded = textureSample(uCommittedBrightnessVolume, uCommittedBrightnessVolumeSampler, committedUV).r;
         if (encoded > 0.002) {
             let effectiveBrightness = encoded * 2.0 - 1.0;
-            (*color).rgb *= 1.0 + effectiveBrightness;
+            (*color).rgb = applyCommittedBrightness((*color).rgb, effectiveBrightness);
             committedMask = 1.0;
         }
     } else if (abs(uniform.uCommittedBrightness) > 1e-6) {
@@ -566,7 +634,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         let v = (iy + iz * 64.0 + 0.5) / 4096.0;
         committedUV = vec2f(u, v);
         committedMask = textureSample(uCommittedBrightnessVolume, uCommittedBrightnessVolumeSampler, committedUV).r;
-        (*color).rgb *= 1.0 + uniform.uCommittedBrightness * committedMask;
+        (*color).rgb = applyCommittedBrightness((*color).rgb, uniform.uCommittedBrightness * committedMask);
     }
     if (committedMask > 0.5) {
         var tintCol = uniform.uLocalLightTintColor;
@@ -593,7 +661,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
             let lum = dot((*color).rgb, vec3f(0.2126, 0.7152, 0.0722));
             if (maskVal > 0.5 && lum >= uniform.uBloomThreshold) {
                 if (committedMask < 0.2) {
-                    (*color).rgb *= 1.0 + uniform.uBloomBrushLocalBrightness;
+                    (*color).rgb = applyCommittedBrightness((*color).rgb, uniform.uBloomBrushLocalBrightness);
                 }
             }
         }
