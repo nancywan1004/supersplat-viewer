@@ -467,11 +467,15 @@ export function initLightingUI(global: Global): () => void {
             const cfgPoint: any = { position: basePos, color: [1, 1, 1], intensity: 1, range: 1, enabled: true };
             cfgPoint.id = nextId;
             lighting.lights.push(cfgPoint);
-            // 若当前有激活的亮灯区域，则把该区域的 linkedLightId 绑定到新建光源
+            // 仅当当前激活区域尚未绑灯时才自动绑定，避免完成落盘已自动绑灯后再加灯被错误覆盖
             if (ses.activeLocalLightRegionId && Array.isArray(bloom.localLightRegions)) {
                 const region = bloom.localLightRegions.find((r) => r && r.id === ses.activeLocalLightRegionId);
                 if (region) {
-                    (region as any).linkedLightId = nextId;
+                    const cur = (region as any).linkedLightId as string | null | undefined;
+                    const unbound = cur == null || (typeof cur === 'string' && cur.trim().length === 0);
+                    if (unbound) {
+                        (region as any).linkedLightId = nextId;
+                    }
                 }
             }
             ses.draftLightRegionCenter = null;
@@ -513,7 +517,11 @@ export function initLightingUI(global: Global): () => void {
             if (ses.activeLocalLightRegionId && Array.isArray(bloom.localLightRegions)) {
                 const region = bloom.localLightRegions.find((r) => r && r.id === ses.activeLocalLightRegionId);
                 if (region) {
-                    (region as any).linkedLightId = nextId;
+                    const cur = (region as any).linkedLightId as string | null | undefined;
+                    const unbound = cur == null || (typeof cur === 'string' && cur.trim().length === 0);
+                    if (unbound) {
+                        (region as any).linkedLightId = nextId;
+                    }
                 }
             }
             ses.draftLightRegionCenter = null;

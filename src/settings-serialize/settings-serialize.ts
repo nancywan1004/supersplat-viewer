@@ -19,7 +19,6 @@ const defaultPostEffectSettings = () => ({
         threshold: 0,
         bloomDebug: false,
         bloomScope: 'global' as const,
-        localLightsEnabled: false,
         bloomBrushSize: 30,
         bloomBrushBrightness: 1,
         localLightRegions: [] as any[]
@@ -52,6 +51,7 @@ function stripBloomSessionFieldsForPersistence(root: Record<string, unknown>): v
     delete bloom.bloomBrush;
     delete bloom.draftLightRegionCenter;
     delete bloom.activeLocalLightRegionId;
+    delete bloom.localLightsEnabled;
     if (Array.isArray(bloom.localLightRegions)) {
         bloom.localLightRegions = (bloom.localLightRegions as any[]).filter(
             (r) => r && typeof r === 'object' && typeof (r as { id?: string }).id === 'string'

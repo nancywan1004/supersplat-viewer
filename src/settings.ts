@@ -4,7 +4,8 @@ import {
     ensureBloom,
     normalizeHoistBloomSessionFields,
     normalizeImportedAnnotation,
-    normalizeBloomLocalLightRegions
+    normalizeBloomLocalLightRegions,
+    normalizeBloomAfterImport
 } from './settings-serialize/settings-serialize-helper';
 import { Vec3 } from 'playcanvas';
 
@@ -389,6 +390,7 @@ const importSettings = (settings: any): V2 => {
 
     // 先保证 bloom 对象存在，再规范化区域与会话
     ensureBloom(result);
+    normalizeBloomAfterImport(result);
     normalizeBloomLocalLightRegions(result);
 
     return result;

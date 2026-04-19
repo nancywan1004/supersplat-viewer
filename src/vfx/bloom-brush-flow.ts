@@ -4,10 +4,31 @@ import type { ExperienceSettings } from '../schemas/v2';
 import { pickWorldFromClientXY } from '../picker';
 import { updatePointLightsFromSettings } from '../light';
 import { ensureBloom, ensureBloomEditorSession } from '../settings-serialize/settings-serialize-helper';
+import { allocateNextUserLightId, applyLightAdd } from '../editor-modules/protocol-adapters/environment-protocol-adapter';
 import type { WorldSpaceBloomData } from './world-space-bloom-data';
+import { parseKind } from './brush-view';
 
 /** 屏幕笔刷半径映射到世界半径时的缩放系数：<1 可减少“2D 预览偏大、3D 结果偏肥” */
 const BRUSH_WORLD_RADIUS_SCALE = 0.65;
+
+/** committed 点集质心，用于新建区域时落默认点光位置 */
+function committedCentroid(committed: Array<{ position?: [number, number, number] }>): [number, number, number] | null {
+    if (!Array.isArray(committed) || committed.length === 0) return null;
+    let sx = 0;
+    let sy = 0;
+    let sz = 0;
+    let n = 0;
+    for (const c of committed) {
+        const p = c?.position;
+        if (!p || p.length < 3) continue;
+        sx += p[0];
+        sy += p[1];
+        sz += p[2];
+        n++;
+    }
+    if (n === 0) return null;
+    return [sx / n, sy / n, sz / n];
+}
 
 type LightBrushMessage = {
     type?: string;
@@ -16,6 +37,10 @@ type LightBrushMessage = {
         value?: unknown;
         tintColor?: number[];
         tintBlend?: number;
+        /**
+         * 是否跳过 FINISH 内自动 `LIGHT_ADD`。**未传视为 `true`**（父级分步建灯）；显式 `false` 时与子应用内「完成」一致自动绑灯。
+         */
+        skipAutoLinkedLight?: boolean;
     };
 };
 
@@ -49,6 +74,7 @@ export class BloomBrushFlowController {
             value?: unknown;
             tintColor?: number[];
             tintBlend?: number;
+            skipAutoLinkedLight?: boolean;
         };
 
         const createdDraftForToolStart = this.ensureDraftForBrushStart(t);
@@ -86,6 +112,9 @@ export class BloomBrushFlowController {
         if (e.button !== 0) return;
         if (!this.isInsideCanvas(e.clientX, e.clientY)) return;
 
+        if (this.ensureDraftWhenRegionsEmpty()) {
+            this.ctx.global.events.fire('postEffect:changed');
+        }
         this.ctx.setIsDrawing(true);
         e.preventDefault();
         e.stopPropagation();
@@ -115,13 +144,16 @@ export class BloomBrushFlowController {
 
             if (!this.ctx.getIsDrawing()) {
                 this.ctx.invalidateBrushCaches();
-                (this.ctx.global.events as any).fire('postEffect:changed');
+                this.ctx.global.events.fire('postEffect:changed');
             }
         });
     };
 
     handlePointerMove = (e: PointerEvent): void => {
         if (!this.ctx.getIsDrawing()) return;
+        if (this.ensureDraftWhenRegionsEmpty()) {
+            this.ctx.global.events.fire('postEffect:changed');
+        }
 
         if (this.isInteractiveTarget(e.target)) {
             this.ctx.setIsDrawing(false);
@@ -156,7 +188,7 @@ export class BloomBrushFlowController {
 
             if (!this.ctx.getIsDrawing()) {
                 this.ctx.invalidateBrushCaches();
-                (this.ctx.global.events as any).fire('postEffect:changed');
+                this.ctx.global.events.fire('postEffect:changed');
             }
         });
     };
@@ -191,8 +223,23 @@ export class BloomBrushFlowController {
         return typeof id === 'string' && id.trim().length > 0 ? id : null;
     }
 
-    private isDraftId(id: string | null | undefined): id is string {
-        return typeof id === 'string' && id.startsWith('draft-');
+    /**
+     * 尚无已提交 `localLightRegions` 时，绘制真源只能是草稿：若 active 非 `draft-*`，在此处与 START 对齐并写入 `draft-*`，
+     * 避免渲染侧再用「有笔迹即当草稿」兜底。
+     * @returns 是否新写了 `draft-*`
+     */
+    private ensureDraftWhenRegionsEmpty(): boolean {
+        const bloom = this.ensureBloomSettings();
+        const regions = bloom.localLightRegions ?? [];
+        if (regions.length > 0) return false;
+        const ses = this.ensureBloomSes();
+        if (!ses.bloomBrush) return false;
+        const raw = ses.activeLocalLightRegionId;
+        if (parseKind(raw) === 'draft') return false;
+        const draftId = `draft-${Date.now()}`;
+        ses.activeLocalLightRegionId = draftId;
+        this.ctx.global.events.fire('bloomLocalLightRegion:listChanged');
+        return true;
     }
 
     private ensureDraftForBrushStart(type: string | undefined): boolean {
@@ -201,9 +248,7 @@ export class BloomBrushFlowController {
         const activeIdForStart = ses.activeLocalLightRegionId;
         // 当前版本仅支持“新增亮灯区域草稿”，不支持对已有 region 二次绘制编辑。
         // 因此：只要当前 active 不是 draft-*，就强制创建新的 draft。
-        const shouldCreateDraftForStart = !this.isDraftId(
-            typeof activeIdForStart === 'string' ? activeIdForStart : null
-        );
+        const shouldCreateDraftForStart = parseKind(activeIdForStart) !== 'draft';
         if (!shouldCreateDraftForStart) return false;
         const bloom = this.ensureBloomSettings();
         const draftId = `draft-${Date.now()}`;
@@ -211,7 +256,7 @@ export class BloomBrushFlowController {
         if (!Array.isArray(bloom.localLightRegions)) {
             bloom.localLightRegions = [];
         }
-        (this.ctx.global.events as any).fire('bloomLocalLightRegion:listChanged');
+        this.ctx.global.events.fire('bloomLocalLightRegion:listChanged');
         return true;
     }
 
@@ -229,9 +274,9 @@ export class BloomBrushFlowController {
         if (bloom.enabled === false) bloom.enabled = true;
         this.switchBrushToolState(false);
         if (createdDraftForToolStart) {
-            (this.ctx.global.events as any).fire('bloomBrush:reset');
+            this.ctx.global.events.fire('bloomBrush:reset');
         }
-        (this.ctx.global.events as any).fire('postEffect:changed');
+        this.ctx.global.events.fire('postEffect:changed');
         (this.ctx.global.app as any).renderNextFrame = true;
     }
 
@@ -239,22 +284,22 @@ export class BloomBrushFlowController {
         this.ensureBloomSettings();
         this.ensureBloomSes().bloomBrush = true;
         this.switchBrushToolState(true);
-        (this.ctx.global.events as any).fire('postEffect:changed');
+        this.ctx.global.events.fire('postEffect:changed');
         (this.ctx.global.app as any).renderNextFrame = true;
     }
 
     private handleBrushClear(): void {
         this.ensureBloomSettings();
         const ses = this.ensureBloomSes();
-        (this.ctx.global.events as any).fire('bloomBrush:reset');
+        this.ctx.global.events.fire('bloomBrush:reset');
         ses.bloomBrush = false;
         this.switchBrushToolState(false);
         const activeId = ses.activeLocalLightRegionId as string | null | undefined;
-        if (typeof activeId === 'string' && activeId.startsWith('draft-')) {
+        if (parseKind(activeId) === 'draft') {
             ses.activeLocalLightRegionId = null;
         }
-        (this.ctx.global.events as any).fire('bloomLocalLightRegion:listChanged');
-        (this.ctx.global.events as any).fire('postEffect:changed');
+        this.ctx.global.events.fire('bloomLocalLightRegion:listChanged');
+        this.ctx.global.events.fire('postEffect:changed');
         (this.ctx.global.app as any).renderNextFrame = true;
     }
 
@@ -311,11 +356,11 @@ export class BloomBrushFlowController {
             }
         }
 
-        (this.ctx.global.events as any).fire('postEffect:changed');
+        this.ctx.global.events.fire('postEffect:changed');
         (this.ctx.global.app as any).renderNextFrame = true;
     }
 
-    private handleBrushFinish(payload: { id?: string }): void {
+    private handleBrushFinish(payload: { id?: string; skipAutoLinkedLight?: boolean }): void {
         this.ctx.worldSpaceData.commit();
         const bloom = this.ensureBloomSettings();
         const ses = this.ensureBloomSes();
@@ -334,12 +379,11 @@ export class BloomBrushFlowController {
             this.ctx.syncCommittedToNightMode();
         }
         const activeId = this.getActiveRegionId();
-        const isDraftActive = this.isDraftId(activeId);
+        const isDraftActive = parseKind(activeId) === 'draft';
         const { worldSpaceJSON, committedBrightness } = this.ctx.exportRegion();
         const committed = worldSpaceJSON?.committed ?? [];
         if (isDraftActive) {
             const center = this.ctx.getCurrentRegionCenter();
-            ses.draftLightRegionCenter = center ? [center.x, center.y, center.z] : null;
             if (committed.length > 0) {
                 if (!Array.isArray((bloom as any).localLightRegions)) {
                     (bloom as any).localLightRegions = [];
@@ -347,24 +391,56 @@ export class BloomBrushFlowController {
                 const regions = (bloom as any).localLightRegions as any[];
                 const nextIndex = regions.length + 1;
                 const incomingRegionId = typeof payload.id === 'string' && payload.id.trim().length > 0
-                    ? payload.id
+                    ? payload.id.trim()
                     : `region-${Date.now()}`;
+                const existingIndex = regions.findIndex((r: any) => r && r.id === incomingRegionId);
+                const prevLinked =
+                    existingIndex >= 0 ? ((regions[existingIndex] as any)?.linkedLightId as string | null | undefined) : undefined;
+                const inheritedLinkedId =
+                    typeof prevLinked === 'string' && prevLinked.trim().length > 0 ? prevLinked.trim() : null;
                 const newRegion = {
                     id: incomingRegionId,
                     name: `亮灯区域${String(nextIndex).padStart(2, '0')}`,
                     worldSpace: worldSpaceJSON,
                     localBrightness: Math.max(-1, Math.min(1, committedBrightness ?? brightness)),
                     tintColor: [1, 1, 1] as [number, number, number],
-                    tintBlend: 0
+                    tintBlend: 0,
+                    linkedLightId: inheritedLinkedId
                 };
-                const existingIndex = regions.findIndex((r: any) => r && r.id === incomingRegionId);
                 if (existingIndex >= 0) {
                     regions[existingIndex] = newRegion as any;
                 } else {
                     regions.push(newRegion as any);
                 }
                 ses.activeLocalLightRegionId = newRegion.id;
-                (this.ctx.global.events as any).fire('bloomLocalLightRegion:listChanged');
+                // 与自动绑灯时 `applyLightAdd(..., pos)` 一致的位置优先级，供父级随后 `LIGHT_ADD(id)`（无 position 时读 `draftLightRegionCenter`）及本机自动绑灯共用
+                const cen = committedCentroid(committed as Array<{ position?: [number, number, number] }>);
+                const pos: [number, number, number] | null = cen
+                    ? cen
+                    : center
+                        ? [center.x, center.y, center.z]
+                        : ses.draftLightRegionCenter
+                            ? [
+                                ses.draftLightRegionCenter[0],
+                                ses.draftLightRegionCenter[1],
+                                ses.draftLightRegionCenter[2]
+                            ]
+                            : null;
+                if (pos) {
+                    ses.draftLightRegionCenter = [pos[0], pos[1], pos[2]];
+                } else {
+                    ses.draftLightRegionCenter = null;
+                }
+                // 未传 / true：FINISH 仅落区域，不自动建灯（与父级一致；本机 UI 在 internal 下于 FINISH 后再调 `applyLightAdd`）；仅显式 `skipAutoLinkedLight: false` 时单步自动点光并绑定
+                const skipAutoLinkedLight = payload.skipAutoLinkedLight !== false;
+                // 新正式区域若无绑灯：仅当 `skipAutoLinkedLight === false`（强制单步）时在此 `applyLightAdd`；否则依赖后续 `LIGHT_ADD` 或宿主 UI 第二步
+                if (!inheritedLinkedId && committed.length > 0 && pos && !skipAutoLinkedLight) {
+                    const lid = allocateNextUserLightId(this.ctx.global.settings as ExperienceSettings);
+                    applyLightAdd(this.ctx.global, lid, true, pos);
+                } else if (!inheritedLinkedId && committed.length > 0 && skipAutoLinkedLight) {
+                    this.ctx.global.events.fire('postEffect:changed');
+                }
+                this.ctx.global.events.fire('bloomLocalLightRegion:listChanged');
             } else {
                 ses.activeLocalLightRegionId = null;
                 ses.draftLightRegionCenter = null;
@@ -385,7 +461,7 @@ export class BloomBrushFlowController {
                 if (target) {
                     target.localBrightness = v;
                     const activeId = ses.activeLocalLightRegionId as string | null | undefined;
-                    if (activeId === targetId && !String(activeId).startsWith('draft-')) {
+                    if (activeId === targetId && parseKind(activeId) === 'saved') {
                         // 当前区域正在编辑时，同步工作区亮度，避免体积与工作区状态短暂不一致。
                         this.ctx.worldSpaceData.setCommittedBrightness(v);
                     }
@@ -396,7 +472,7 @@ export class BloomBrushFlowController {
                 // 无指定区域 id 时，沿用原语义：更新当前绘制会话亮度（草稿态）。
                 bloom.bloomBrushBrightness = v;
             }
-            (this.ctx.global.events as any).fire('postEffect:changed');
+            this.ctx.global.events.fire('postEffect:changed');
             (this.ctx.global.app as any).renderNextFrame = true;
         }
     }

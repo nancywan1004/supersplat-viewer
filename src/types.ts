@@ -181,6 +181,21 @@ type State = {
     lightTransformMode?: LightTransformMode | null;
 };
 
+/**
+ * 观看态/会话级「视图设置」：与 `global.settings`（`ExperienceSettings`）**并列**、**不入库**。
+ * 只放「Viewer 里需要单独持有一份、又不能写回 JSON」的字段；由 `Viewer` 注入，编辑态通常不存在。
+ */
+export type ViewSettings = {
+    bloom: {
+        /**
+         * 整场景用户灯总闸在观看态的**仅内存**镜像（`LIGHT_TOGGLE_ALL` → `applyLightToggleAll` 写入）；
+         * **不从 settingsJson 读、不存盘**；旧键 `postEffectSettings.bloom.localLightsEnabled` 在导入时剥离。
+         * Viewer 构造默认 `true`，关灯后为 `false`。
+         */
+        localLightsEnabled: boolean;
+    };
+};
+
 type Global = {
     app: AppBase;
     settings: ExperienceSettings;
@@ -188,6 +203,8 @@ type Global = {
     state: State;
     events: EventHandler;
     camera: Entity;
+    /** 见 {@link ViewSettings} */
+    viewSettings?: ViewSettings;
 };
 
 export {

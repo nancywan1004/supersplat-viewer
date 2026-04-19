@@ -9,13 +9,14 @@ import {
 } from 'playcanvas';
 import type { PostEffectSettings } from '../settings';
 import type { LocalLightRegion, WorldSpaceBloomRegionJSON, ExperienceSettings } from '../schemas/v2';
-import type { Global } from '../types';
 import { ensureBloomEditorSession } from '../settings-serialize/settings-serialize-helper';
 import { BloomBrushPainter } from './bloom-brush-painter';
 import { WorldSpaceBloomData } from './world-space-bloom-data';
 import { BloomBrushFilter, MAX_POINTS } from './bloom-brush-filter';
 import { buildCommittedBrightnessVolume, buildCommittedBrightnessVolumeFromRegions, type CommittedPointWithBrightness } from './committed-brightness-volume';
 import { BloomBrushFlowController } from './bloom-brush-flow';
+import { computeBrushView, type BrushView } from './brush-view';
+import type { Global } from '../types';
 
 const MASK_SIZE = 512;
 /** 与 committed-brightness-volume 一致，用于判断是否为有效 64³ volume 纹理 */
@@ -94,8 +95,8 @@ export interface BloomControllerOptions {
  * 2）worldSpaceData 的职责仅限当前区域：
  *    - loadRegion() 会把某个 LocalLightRegion 的 worldSpace 加载到 worldSpaceData；
  *    - exportRegion() 只导出当前 worldSpaceData，对应「完成」后写回 single LocalLightRegion；
- *    - multi-region 模式下，已提交体积与 2D mask 的来源是 settings.localLightRegions（必要时再叠加当前草稿），
- *      而不是 worldSpaceData 内部残留的历史点。
+ *    - multi-region 模式下，已提交体积与 2D mask 通常来自 settings.localLightRegions 的叠加；
+ *      当 Bloom 笔刷会话且 active 仍为 draft-*（未完成）时，体积与 mask 仅反映当前草稿 worldSpaceData，直至完成转正。
  *
  * 3）3D 体积在渲染阶段按区域叠加：
  *    - 当存在多个 localLightRegions 时，applyToCameraFrame() 会收集所有区域的 committed 点，
@@ -121,6 +122,22 @@ export interface BloomControllerOptions {
  * - Bloom Brush：仅使用 mask 纹理在 compose 阶段乘 bloom，不修改 gsplat shader。
  * - Bloom Debug（仅亮部参与绘制）：不在此处实现，避免与 reveal 争用同一材质 chunk。
  */
+
+/**
+ * 仍从 `bloom` settings 里读的「编辑 / 观看」相关快照；只影响 Viewer 的闸以后**只加字段**，规则集中在
+ * {@link BloomController.applyViewerLocalLightPolicy}（或并列的单一出口方法）。
+ */
+type BloomPlayMode = {
+    /**
+     * 是否处于编辑模式（`global.state.editMode`）。
+     * **当前策略**：为 true 时本策略**不**因 `localLightsUserDisabled` 清空局部亮灯视觉（编辑以 regions / scope 等为真源）。
+     * **若日后产品要**「编辑态也吃总闸」：只改 {@link BloomController.applyViewerLocalLightPolicy} 内对 `editing` 的分支即可，无需改调用方。
+     */
+    editing: boolean;
+    /** 整灯总闸为关（`LIGHT_TOGGLE_ALL` / Viewer 运行时）时，观看态可清空局部亮灯视觉 */
+    localLightsUserDisabled: boolean;
+};
+
 export class BloomController {
     private global: Global;
     private options: BloomControllerOptions;
@@ -182,9 +199,9 @@ export class BloomController {
     private _activeLocalLightRegionId: string | null = null;
     /** 2D mask 缓存：仅当点集或相机变化时重绘，避免每帧清空导致闪动 */
     private _lastMaskSignature: string = '';
-
     /**
-     * 与「开场 reveal」共用节奏：为 false 时关闭相机 compose bloom 与局部亮灯（体积+mask），避免与 VFX 叠加。
+     * 与「开场 reveal」共用节奏：为 false 时关闭相机 compose bloom 与局部亮灯（体积+mask），避免与 VFX 叠加；
+     * 与 bloomBrush 会话无关，reveal 未结束前不放行笔刷/局部亮灯预览。
      * 无 reveal 或 revealComplete 后为 true；revealRestart 且仍有 reveal 时再次为 false。
      */
     private _bloomStackUnlocked = true;
@@ -421,6 +438,60 @@ export class BloomController {
         this._lastMaskSignature = '';
     }
 
+    /** 与 applyToCameraFrame / getPointsForMask 共用，避免散落推导。 */
+    private getBrushView(): BrushView {
+        const editor = ensureBloomEditorSession(this.global.settings as ExperienceSettings);
+        const bloom = this.global.settings?.postEffectSettings?.bloom as { localLightRegions?: unknown[] } | undefined;
+        const nRegions = Array.isArray(bloom?.localLightRegions) ? bloom.localLightRegions.length : 0;
+        return computeBrushView({
+            brush: !!editor.bloomBrush,
+            activeId: editor.activeLocalLightRegionId ?? null,
+            nRegions,
+            drawing: this.isDrawing,
+            erasing: this.isErasing
+        });
+    }
+
+    /**
+     * @param viewBloomLocalLightsEnabled - 即 `global.viewSettings?.bloom?.localLightsEnabled`；
+     *   `undefined` 表示未注入 `viewSettings`（不按「整闸关」处理局部亮灯支路）。
+     */
+    private readBloomPlayMode(viewBloomLocalLightsEnabled: boolean | undefined | null): BloomPlayMode {
+        return {
+            editing: !!this.global.state.editMode,
+            localLightsUserDisabled: viewBloomLocalLightsEnabled === false,
+        };
+    }
+
+    /** 读观看态 `viewSettings` 中与历史同名的 `localLightsEnabled`；无 `viewSettings` 时 `undefined`。 */
+    private readViewBloomLocalLightsEnabled(): boolean | undefined {
+        return this.global.viewSettings?.bloom?.localLightsEnabled;
+    }
+
+    /**
+     * 根据 {@link BloomPlayMode} 与当前笔刷会话，判断是否应**清空**局部亮灯体积 / mask（观看 + 用户关总闸且无笔刷预览理由）。
+     *
+     * @returns `true` 表示调用方应按策略清空局部亮灯视觉；本方法**只读**、不写 settings。
+     */
+    private applyViewerLocalLightPolicy(play: BloomPlayMode, brushSession: boolean, worldPointCount: number): boolean {
+        if (play.editing) return false;
+        if (!play.localLightsUserDisabled) return false;
+        if (brushSession && worldPointCount > 0) return false;
+        return true;
+    }
+
+    /**
+     * ── applyToCameraFrame：编辑 / 观看 读数约定（与仓库 Bloom 计划「编辑参与 vs Viewer 不参与」表一致；改逻辑先改本节）──
+     *
+     * **编辑态**（`global.state.editMode`）：以 settings 为真源——`bloomScope`、`localLightRegions`、绑灯 `lighting.lights[*]`、
+     * `bloomEditorSession`（`activeLocalLightRegionId`、`bloomBrush`）、`nightMode` 等。
+     * 不因存盘字段整段关掉局部亮灯体积；`localLightsEnabled` 仅在 **观看态** 由 `readBloomPlayMode` + `applyViewerLocalLightPolicy` 参与决策（读 `global.viewSettings?.bloom?.localLightsEnabled`；无 `viewSettings` 时不视为整闸关）。
+     *
+     * **观看态**：整灯总闸关（`LIGHT_TOGGLE_ALL` / 运行时）且无笔刷工作区预览时，清空局部亮灯视觉。
+     *
+     * **二者都不当区域语义根因**：reveal（`_bloomStackUnlocked`）、指针 `isDrawing`/`isErasing`（经 `getBrushView`）、Viewer 专用 `nightFade:set` 等。
+     */
+
     /**
      * 对 CameraFrame 应用 bloom 参数（intensity、blurLevel、debug），并注入 update 前设置 mask。
      */
@@ -438,7 +509,6 @@ export class BloomController {
         };
         const editor = ensureBloomEditorSession(this.global.settings as ExperienceSettings);
         const bloomDebug = !!bloomSettings.bloomDebug;
-        const bloomBrush = !!editor.bloomBrush;
         // Bloom 阈值（HDR 提取阈值）：
         // 仅亮度高于该值的像素会被提取到 bloom 管线。
         // - 低阈值：更多中亮区域参与，画面更“糊光”；
@@ -447,6 +517,9 @@ export class BloomController {
         const bloomBrushBrightness = typeof bloomSettings.bloomBrushBrightness === 'number'
             ? Math.max(-1, Math.min(1, bloomSettings.bloomBrushBrightness))
             : 0;
+        const regions = bloomSettings.localLightRegions ?? [];
+        const activeId = editor.activeLocalLightRegionId ?? null;
+        const viewBloomLocalLightsEnabled = this.readViewBloomLocalLightsEnabled();
 
         const blurLevel = bloomSettings.blurLevel ?? 10;
         if (bloomSettings.enabled && blurLevel > 0) {
@@ -458,38 +531,44 @@ export class BloomController {
             bloom.intensity = 0;
             cameraFrame.debug = null;
         }
-        // 与局部亮灯共用 reveal 节奏：开场 VFX 未结束时 compose bloom 也关闭
+
+        // reveal 未完成：关闭 compose Bloom、清空局部亮灯体积与 2D mask，不做笔刷预览（不再因 bloomBrush 放行）。
         if (!this._bloomStackUnlocked) {
             bloom.intensity = 0;
             cameraFrame.debug = null;
+            this.clearWorldSpaceMaskToBlack();
+            const nightModeScriptReveal = this.options.getNightModeScript();
+            if (this.bloomBrushPainter) {
+                this.bloomBrushPainter.setEnabled(false);
+                this.bloomBrushPainter.setBrushSize(Math.max(0.1, Math.min(200, Number(bloomSettings.bloomBrushSize ?? 10))));
+            }
+            if (nightModeScriptReveal) {
+                const maskReveal = this.getEffectiveMaskTexture(false);
+                nightModeScriptReveal.setBloomBrushParams(false, maskReveal, th, undefined, bloomBrushBrightness);
+                this.clearLocalLightVolumeForNightMode(nightModeScriptReveal);
+            }
+            this.injectBloomMaskBeforeUpdate(cameraFrame);
+            return;
         }
+
+        const bv = this.getBrushView();
 
         const nightModeScript = this.options.getNightModeScript();
         // 只要开启 Bloom Brush 就传 active=true，让 NightMode 用带笔刷分支的 shader，笔刷区域内应用局部亮度
-        const effectiveMask = this.getEffectiveMaskTexture(bloomBrush);
+        const effectiveMask = this.getEffectiveMaskTexture(bv.brush);
         if (this.bloomBrushPainter) {
             this.bloomBrushPainter.setEnabled(false); // Screen space removed, always World Space
             this.bloomBrushPainter.setBrushSize(Math.max(0.1, Math.min(200, Number(bloomSettings.bloomBrushSize ?? 10))));
         }
         if (nightModeScript) {
-            const regions = bloomSettings.localLightRegions ?? [];
-            const hasCommittedRegions = regions.some((r: any) => (r?.worldSpace?.committed?.length ?? 0) > 0);
             // BloomBrush shader 分支仅在「正在拖动画笔」时激活，提供实时 2D mask 预览。
             // 松手后（!isDrawing）关闭该分支，渲染完全由 3D 体积决定——和已提交态走同一管线，
             // 从根本上保证草稿态（非拖动时）与 SET 后的视觉效果一致。
-            // 有已提交区域或擦除模式时，禁用 2D 预览，避免覆盖/干扰已有 3D volume 观感。
-            const brushShaderActive = bloomBrush && this.isDrawing && !this.isErasing && !hasCommittedRegions;
+            // 擦除模式下禁用 2D 预览，避免与擦除语义冲突；其余绘制态都保持实时可见。
+            const brushShaderActive = bv.brush && bv.tool === 'paint';
             nightModeScript.setBloomBrushParams(brushShaderActive, effectiveMask, th, undefined, bloomBrushBrightness);
 
-            // 开场 reveal 未结束时：与上方 compose bloom 一致，不提交局部亮灯体积与 tint
-            if (!this._bloomStackUnlocked) {
-                this.clearLocalLightVolumeForNightMode(nightModeScript);
-                this.injectBloomMaskBeforeUpdate(cameraFrame);
-                return;
-            }
-
-            const activeId = editor.activeLocalLightRegionId ?? null;
-            const activeRegion = (activeId && !String(activeId).startsWith('draft-'))
+            const activeRegion = (activeId && bv.kind === 'saved')
                 ? regions.find((r: { id: string }) => r.id === activeId)
                 : null;
             const tintColor: [number, number, number] = (activeRegion as any)?.tintColor != null
@@ -504,9 +583,9 @@ export class BloomController {
             // 若有当前正在编辑的（含草稿），也把 worldSpaceData 纳入体积。
             // 若某区域绑定的光源当前处于关闭状态（lighting.lights[*].enabled === false），
             // 则视为该区域整体不可见：其局部亮度与 Bloom mask 均不参与体积/亮度合成。
-            const localLightsEnabled = (bloomSettings as any).localLightsEnabled !== false;
-            if (!localLightsEnabled) {
-                // 全局局部亮灯开关关闭：强制清空所有局部亮度体积与 tint，视为没有任何 LocalLightRegion。
+            const wsPointCount = this.worldSpaceData.getAllPoints().length;
+            const play = this.readBloomPlayMode(viewBloomLocalLightsEnabled);
+            if (this.applyViewerLocalLightPolicy(play, bv.brush, wsPointCount)) {
                 this._lastMultiRegionHash = '';
                 this._lastActiveRegionId = null;
                 this._lastActiveRegionCommittedLength = -1;
@@ -533,34 +612,36 @@ export class BloomController {
             }
             if (regions.length > 0) {
                 const pointsWithBrightness: CommittedPointWithBrightness[] = [];
-                const isDraftActive = activeId != null && String(activeId).startsWith('draft-');
-                for (const r of regions) {
-                    if (!this.isLocalLightRegionVisible(r)) continue;
-                    if (isDraftActive && r.id === activeId) continue;
-                    const committed = r.worldSpace?.committed;
-                    if (!committed?.length) continue;
-                    const colorBrightness = typeof r.localBrightness === 'number'
-                        ? Math.max(-1, Math.min(1, r.localBrightness))
-                        : 0;
-                    const brightness = Math.max(-1, Math.min(1, colorBrightness));
-                    const tc = (r as any).tintColor;
-                    const tblend = typeof (r as any).tintBlend === 'number' ? Math.max(0, Math.min(1, (r as any).tintBlend)) : 0;
-                    const tintColor: [number, number, number] = Array.isArray(tc) && tc.length >= 3
-                        ? [tc[0], tc[1], tc[2]]
-                        : [1, 1, 1];
-                    for (const p of committed) {
-                        if (!p.position || !Array.isArray(p.position) || p.position.length < 3) continue;
-                        pointsWithBrightness.push({
-                            position: new Vec3(p.position[0], p.position[1], p.position[2]),
-                            radius: p.radius ?? 1,
-                            brightness,
-                            tintColor,
-                            tintBlend: tblend
-                        });
+                const isDraftActive = bv.kind === 'draft';
+                const wsPoints = this.worldSpaceData.getAllPoints();
+                if (!bv.draftOnly) {
+                    for (const r of regions) {
+                        if (!this.isLocalLightRegionVisible(r)) continue;
+                        if (isDraftActive && r.id === activeId) continue;
+                        const committed = r.worldSpace?.committed;
+                        if (!committed?.length) continue;
+                        const colorBrightness = typeof r.localBrightness === 'number'
+                            ? Math.max(-1, Math.min(1, r.localBrightness))
+                            : 0;
+                        const brightness = Math.max(-1, Math.min(1, colorBrightness));
+                        const tc = (r as any).tintColor;
+                        const tblend = typeof (r as any).tintBlend === 'number' ? Math.max(0, Math.min(1, (r as any).tintBlend)) : 0;
+                        const tintColor: [number, number, number] = Array.isArray(tc) && tc.length >= 3
+                            ? [tc[0], tc[1], tc[2]]
+                            : [1, 1, 1];
+                        for (const p of committed) {
+                            if (!p.position || !Array.isArray(p.position) || p.position.length < 3) continue;
+                            pointsWithBrightness.push({
+                                position: new Vec3(p.position[0], p.position[1], p.position[2]),
+                                radius: p.radius ?? 1,
+                                brightness,
+                                tintColor,
+                                tintBlend: tblend
+                            });
+                        }
                     }
                 }
                 if (isDraftActive) {
-                    const wsPoints = this.worldSpaceData.getAllPoints();
                     // 草稿区域使用当前 bloomBrushBrightness 作为局部亮度来源，
                     // 保证「擦除/重涂 + 调整 slider」始终与实时体积预览一致。
                     const draftBrightness = typeof bloomSettings.bloomBrushBrightness === 'number'
@@ -576,14 +657,14 @@ export class BloomController {
                 }
                 if (pointsWithBrightness.length > 0) {
                     const visibilitySig = regions.map((r: any) => `${r.id}:${this.isLocalLightRegionVisible(r) ? 1 : 0}`).join('|');
-                    const wsPointsLen = this.worldSpaceData.getAllPoints().length;
+                    const wsPointsLen = wsPoints.length;
                     const multiHash = regions.map((r: any) =>
                         `${r.id}:${(r.worldSpace?.committed ?? []).length}:${r.localBrightness ?? 0}:${(r.tintColor ?? []).join(',')}:${r.tintBlend ?? 0}`
                     ).join('|') + (isDraftActive
                         // 草稿绘制中也要把工作区点数纳入 hash，确保每次笔刷变更都触发 3D volume 重建。
                         // 否则在“已有区域 + 新建第二个区域”场景里，绘制期间 hash 不变会导致体积预览停住或不显示。
                         ? (`|active=${activeId ?? ''}|ws=${wsPointsLen}|drawing=${this.isDrawing ? 1 : 0}`)
-                        : '') + `|vis=${visibilitySig}`;
+                        : '') + `|vis=${visibilitySig}|soloDraftVol=${bv.draftOnly ? 1 : 0}`;
                     if (this._lastMultiRegionHash !== multiHash) {
                         const { texture, tintTexture, aabbMin, aabbMax } = buildCommittedBrightnessVolumeFromRegions(
                             this.global.app.graphicsDevice,
@@ -632,11 +713,8 @@ export class BloomController {
                     nightModeScript.setCommittedTintVolume(null);
                 }
             } else {
-                const activeId = editor.activeLocalLightRegionId ?? null;
-                const hasWorkingPoints = this.worldSpaceData.getAllPoints().length > 0;
-                // 兜底首个草稿判定：避免事件顺序导致 activeId/bloomBrush 一帧不同步而误清空体积
-                const isDraftOnly = (bloomBrush && activeId != null && String(activeId).startsWith('draft-'))
-                    || (regions.length === 0 && hasWorkingPoints);
+                // 无 regions：仅当会话已是 draft-*（见 bloom-brush-flow pointer 与 LIGHT_BRUSH_START 同步）走草稿体积
+                const isDraftOnly = bv.draftOnly;
                 if (isDraftOnly) {
                     // 首个亮灯区域草稿：仅 worldSpaceData 有笔刷点，按草稿点建体积并设亮度，实现实时 mask/体积预览
                     const wsPoints = this.worldSpaceData.getAllPoints();
@@ -648,7 +726,7 @@ export class BloomController {
                         radius: p.radius,
                         brightness: draftBrightness
                     }));
-                    const draftHash = `draft|ws=${this.isDrawing ? 0 : wsPoints.length}|b=${draftBrightness}`;
+                    const draftHash = `draft|ws=${wsPoints.length}|b=${draftBrightness}|drawing=${this.isDrawing ? 1 : 0}`;
                     if (this._lastMultiRegionHash !== draftHash) {
                         this._lastMultiRegionHash = draftHash;
                         const { texture, tintTexture, aabbMin, aabbMax } = buildCommittedBrightnessVolumeFromRegions(
@@ -697,7 +775,7 @@ export class BloomController {
                     nightModeScript.setCommittedTintVolume(null);
                 } else {
                     // 旧逻辑：无 localLightRegions 且非草稿，使用单区域 worldSpaceData / activeRegion
-                    const activeRegion = activeId && !String(activeId).startsWith('draft-')
+                    const activeRegion = activeId && bv.kind === 'saved'
                         ? (bloomSettings.localLightRegions ?? []).find((r: { id: string }) => r.id === activeId)
                         : null;
                     if (activeRegion?.worldSpace?.committed) {
@@ -921,7 +999,7 @@ export class BloomController {
         return center;
     }
 
-    /** 清空 NightMode 侧局部亮灯体积（与 localLightsEnabled 关闭时一致） */
+    /** 清空 NightMode 侧局部亮灯体积（与观看态整灯总闸关闭时的清空路径一致） */
     private clearLocalLightVolumeForNightMode(nightModeScript: NonNullable<ReturnType<BloomControllerOptions['getNightModeScript']>>): void {
         this._lastMultiRegionHash = '';
         this._lastActiveRegionId = null;
@@ -946,6 +1024,23 @@ export class BloomController {
             { volumeEncodedBrightness: true }
         );
         nightModeScript.setCommittedTintVolume(null);
+    }
+
+    /** reveal 或未就绪时把世界空间 mask 清成全黑，避免沿用上帧笔刷/局部亮灯纹理。 */
+    private clearWorldSpaceMaskToBlack(): void {
+        const ctx = this.worldSpaceMaskCtx;
+        const canvas = this.worldSpaceMaskCanvas;
+        const tex = this.worldSpaceMaskTexture;
+        if (!ctx || !canvas || !tex) {
+            this.hasWorldSpaceMask = false;
+            return;
+        }
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, MASK_SIZE, MASK_SIZE);
+        tex.setSource(canvas);
+        tex.upload();
+        this._lastMaskSignature = '';
+        this.hasWorldSpaceMask = true;
     }
 
     /** 仅在 Set / 加载配置 / applyToCameraFrame 时同步 committed 到 NightMode；使用 3D 体积纹理，无点数上限 */
@@ -985,9 +1080,10 @@ export class BloomController {
 
     /**
      * 获取用于 2D mask 投影的点列表：
-     * - 绘制中：使用当前正在编辑区域的 worldSpaceData（points + committed）；
-     * - 非绘制且存在 localLightRegions：所有区域的 committed 叠加，当前 active 区域（含草稿）由 worldSpaceData 代表，避免重复；
-     * - 否则：回退到单区域 worldSpaceData。
+     * - 绘制中（非擦除）：仅当前 worldSpaceData 笔迹；
+     * - 多区域且 `BrushView.draftOnly`：仅草稿工作区点，与其它已提交区域隔离，与体积独奏语义一致；
+     * - 否则：各区域 committed 叠加，草稿由 worldSpaceData 代表，避免与 draft region 的 committed 重复；
+     * - 无 localLightRegions：回退 worldSpaceData。
      * @private
      */
     private getPointsForMask(): Array<{ position: Vec3; radius: number }> {
@@ -996,23 +1092,26 @@ export class BloomController {
         }
         const bloom = this.global.settings?.postEffectSettings?.bloom as {
             localLightRegions?: Array<{ id: string; linkedLightId?: string | null; worldSpace?: { committed?: Array<{ position: [number, number, number]; radius?: number }> } }>;
-            localLightsEnabled?: boolean;
         } | undefined;
         const regions = bloom?.localLightRegions ?? [];
+        const wsPoints = this.worldSpaceData.getAllPoints();
+        const bv = this.getBrushView();
         const activeId = ensureBloomEditorSession(this.global.settings as ExperienceSettings).activeLocalLightRegionId ?? null;
 
-        // 全局局部亮灯关闭时：不向 2D Bloom mask 提供任何点，mask 被清黑，compose 阶段无局部辉光
-        if ((bloom as any)?.localLightsEnabled === false) return [];
+        const play = this.readBloomPlayMode(this.readViewBloomLocalLightsEnabled());
+        if (this.applyViewerLocalLightPolicy(play, bv.brush, wsPoints.length)) {
+            return [];
+        }
 
-        // 所有绑定光源均处于关闭状态时，也不应再有任何局部 Bloom mask
-        if (regions.length > 0 && !regions.some((r) => this.isLocalLightRegionVisible(r))) {
+        // 所有绑定光源均关闭：无笔刷会话则无任何 mask；有会话则交后续逻辑用 worldSpaceData / 草稿点
+        if (regions.length > 0 && !regions.some((r) => this.isLocalLightRegionVisible(r)) && !bv.brush) {
             return [];
         }
 
         // 笔刷绘制中（非擦除）：只返回当前 worldSpaceData 的点做实时预览
         // 擦除模式需要 fall through 到多区域路径，否则其他区域的 2D mask 会消失
-        if (this.isDrawing && !this.isErasing) {
-            return this.worldSpaceData.getAllPoints().map(p => ({ position: p.position, radius: p.radius }));
+        if (bv.tool === 'paint') {
+            return wsPoints.map(p => ({ position: p.position, radius: p.radius }));
         }
 
         const out: Array<{ position: Vec3; radius: number }> = [];
@@ -1020,7 +1119,11 @@ export class BloomController {
         // 多区域：仅当 active 为草稿时用 worldSpaceData 代表该草稿；否则全部用 localLightRegions（且仅包含绑定灯处于开启状态的区域），
         // 避免展开已有区域时误用空 worldSpaceData 导致区域消失
         if (regions.length > 0) {
-            const isDraftActive = activeId != null && String(activeId).startsWith('draft-');
+            const isDraftActive = bv.kind === 'draft';
+            // 与 BrushView.draftOnly：完成前 mask 也只反映当前草稿，不叠其它区域
+            if (bv.brush && isDraftActive) {
+                return wsPoints.map(p => ({ position: p.position.clone(), radius: p.radius }));
+            }
             for (const r of regions) {
                 if (!this.isLocalLightRegionVisible(r)) continue;
                 if (isDraftActive && r.id === activeId) continue;
@@ -1035,7 +1138,6 @@ export class BloomController {
                 }
             }
             if (isDraftActive) {
-                const wsPoints = this.worldSpaceData.getAllPoints();
                 for (const p of wsPoints) {
                     out.push({ position: p.position.clone(), radius: p.radius });
                 }
@@ -1161,12 +1263,7 @@ export class BloomController {
         }
 
         if (!this._bloomStackUnlocked) {
-            ctx.fillStyle = '#000000';
-            ctx.fillRect(0, 0, MASK_SIZE, MASK_SIZE);
-            tex.setSource(canvas);
-            tex.upload();
-            this._lastMaskSignature = '';
-            this.hasWorldSpaceMask = true;
+            this.clearWorldSpaceMaskToBlack();
             return;
         }
 

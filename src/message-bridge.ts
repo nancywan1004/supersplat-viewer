@@ -79,7 +79,7 @@ type InboundPayload =
     | { type: 'LIGHT_ERASER_START' }
     | { type: 'LIGHT_BRUSH_CLEAR' }
     | { type: 'LIGHT_BRUSH_COLOR_UPDATE'; id?: string; value?: { tintColor?: number[]; tintBlend?: number } }
-    | { type: 'LIGHT_BRUSH_FINISH' }
+    | { type: 'LIGHT_BRUSH_FINISH'; id?: string; skipAutoLinkedLight?: boolean }
     | { type: 'LIGHT_BRUSH_DELETE'; id?: string }
     | { type: 'LIGHT_BRUSH_BLOOM_UPDATE'; value?: number }
     | { type: 'BLOOM_INTENSITY_UPDATE'; value?: number }

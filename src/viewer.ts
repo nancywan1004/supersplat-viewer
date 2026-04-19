@@ -212,6 +212,10 @@ class Viewer {
         const wgsl = ShaderChunks.get(graphicsDevice, 'wgsl');
         wgsl.set('skyboxPS', wgsl.get('skyboxPS').replace('mapRoughnessUv(uv, uniform.mipLevel)', 'uv'));
 
+        global.viewSettings = {
+            // 仅内存：不从 settingsJson 读；默认 true；整灯闸由 LIGHT_TOGGLE_ALL 写回此处
+            bloom: { localLightsEnabled: true }
+        };
         this.bloomController = new BloomController(global, {
             getCameraFrame: () => this.cameraFrame,
             getAppCanvas: () => (app.graphicsDevice?.canvas as HTMLCanvasElement) ?? document.querySelector('canvas'),

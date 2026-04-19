@@ -96,3 +96,78 @@
     max-height: 260px;
     overflow-y: auto;
 }
+
+// 行头：与工具栏 .settingsRow 分离，避免子 button 被赋予 flex-grow:1 挤扁标题
+.bloomRegionItemHeader {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    width: 100%;
+
+    .bloomRegionItemArrow {
+        flex-shrink: 0;
+        font-size: 10px;
+        line-height: 1;
+        color: $clr-text-dark;
+    }
+
+    .bloomRegionItemName {
+        flex: 1 1 0;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 12px;
+    }
+
+    .bloomRegionDeleteBtn {
+        flex: 0 0 auto;
+        flex-shrink: 0;
+    }
+
+    .bloomRegionLinkedLightToggle {
+        display: inline-flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+        padding: 2px 4px;
+        margin-left: 2px;
+        border-radius: 4px;
+        cursor: pointer;
+
+        &:hover {
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .bloomRegionLinkedLightCheck {
+            box-sizing: border-box;
+            width: 18px;
+            height: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            font-size: 11px;
+            line-height: 1;
+            border: 1px solid rgba(255, 255, 255, 0.28);
+            border-radius: 3px;
+            color: rgba(255, 255, 255, 0.22);
+
+            &.active {
+                color: $clr-accent;
+                border-color: $clr-accent;
+            }
+        }
+
+        .bloomRegionLinkedLightLabel {
+            padding: 0;
+            font-size: 11px;
+            white-space: nowrap;
+        }
+    }
+}

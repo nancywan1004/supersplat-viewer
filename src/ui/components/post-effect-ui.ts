@@ -1,3 +1,9 @@
+import {
+    allocateNextUserLightId,
+    applyLightAdd,
+    applyLightToggle,
+    applyShadowDirectionSet
+} from '../../editor-modules/protocol-adapters/environment-protocol-adapter';
 import type { Global } from '../../types';
 import type { ExperienceSettings } from '../../schemas/v2';
 import { updatePointLightsFromSettings } from '../../light';
@@ -8,7 +14,6 @@ import {
     ensureShadow as ensureShadowFromAdapter,
     ensureLighting as ensureLightingForLighting
 } from '../../settings-serialize/settings-serialize-helper';
-import { applyShadowDirectionSet } from '../../editor-modules/protocol-adapters/environment-protocol-adapter';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
 const POST_EFFECT_PANEL_HTML = `
@@ -39,10 +44,6 @@ const POST_EFFECT_PANEL_HTML = `
       <input type="range" id="bloomThresholdSlider" min="0" max="5" step="0.1" value="0" class="postEffectSlider">
       <span id="bloomThresholdValue" class="postEffectSliderValue">0.00</span>
     </div>
-  </div>
-  <div class="settingsRow">
-    <div id="bloomDebugCheck" class="checkMark">✓</div>
-    <div id="bloomDebugOption" class="postEffectOption">Bloom Debug</div>
   </div>
   <div class="settingsRow">
     <div id="bloomScopeCheck" class="checkMark">✓</div>
@@ -139,7 +140,6 @@ type BloomSettings = {
     intensity: number;
     blurLevel: number;
     threshold: number;
-    bloomDebug: boolean;
     bloomBrushSize: number;
     bloomBrushBrightness: number;
     localLightRegions?: LocalLightRegion[];
@@ -162,7 +162,7 @@ const ensureShadow = (settings: Global['settings']): ShadowSettings => {
 };
 
 /**
- * 渲染「局部亮灯区域」列表：每个区域可展开/折叠，展开时显示局部亮度滑块。
+ * 渲染「局部亮灯区域」列表：每个区域可展开/折叠；有 `linkedLightId` 时行头显示「区域灯」开关（`LIGHT_TOGGLE` / `applyLightToggle`）。
  * 点击标题切换展开并设为当前激活区域。
  */
 function renderBloomLocalLightRegionsList(
@@ -188,18 +188,15 @@ function renderBloomLocalLightRegionsList(
         const expanded = region.id === activeId;
 
         const header = document.createElement('div');
-        header.className = 'bloomRegionItemHeader settingsRow';
+        // 勿用工具栏 .settingsRow：其 `> button { flex-grow: 1 }` 会把删除键拉满宽度，把区域名挤成竖排
+        header.className = 'bloomRegionItemHeader';
         header.style.cursor = 'pointer';
-        header.style.alignItems = 'center';
-        header.style.gap = '4px';
         const arrow = document.createElement('span');
         arrow.className = 'bloomRegionItemArrow';
         arrow.textContent = expanded ? '▼' : '▶';
-        arrow.style.fontSize = '10px';
         const nameSpan = document.createElement('span');
         nameSpan.className = 'bloomRegionItemName postEffectOption';
         nameSpan.textContent = region.name;
-        nameSpan.style.flex = '1';
         const deleteBtn = document.createElement('button');
         deleteBtn.type = 'button';
         deleteBtn.className = 'postEffectOption bloomRegionDeleteBtn';
@@ -208,8 +205,71 @@ function renderBloomLocalLightRegionsList(
         deleteBtn.style.padding = '2px 6px';
         deleteBtn.style.fontSize = '14px';
         deleteBtn.style.cursor = 'pointer';
+
+        let linkedLightType: 'point' | 'spot' | null = null;
+        let linkedLightIntensity = 1;
+        let linkedInner = 25;
+        let linkedOuter = 45;
+        let linkedRange = 10;
+        let linkedLightEnabled = false;
+        const linkedIdForUI = (region as any).linkedLightId as string | null | undefined;
+        if (linkedIdForUI) {
+            try {
+                const lighting = ensureLightingForLighting((global as any).settings as ExperienceSettings);
+                const light = (lighting as any).lights?.find?.((l: any) => l && l.id === linkedIdForUI) as any | undefined;
+                if (light) {
+                    linkedLightEnabled = light.enabled !== false;
+                    linkedLightIntensity = typeof light.intensity === 'number' ? light.intensity : 1;
+                    if (light.type === 'spot') {
+                        linkedLightType = 'spot';
+                        linkedInner = typeof light.innerConeAngle === 'number' ? light.innerConeAngle : 25;
+                        linkedOuter = typeof light.outerConeAngle === 'number' ? light.outerConeAngle : 45;
+                        linkedRange = typeof light.range === 'number' ? light.range : 1;
+                    } else {
+                        linkedLightType = 'point';
+                        linkedRange = typeof light.range === 'number' ? light.range : 1;
+                    }
+                }
+            } catch {
+                // 若查光源失败，不影响区域自身 UI
+            }
+        }
+
         header.appendChild(arrow);
         header.appendChild(nameSpan);
+        if (linkedIdForUI) {
+            const linkedWrap = document.createElement('div');
+            linkedWrap.className = 'bloomRegionLinkedLightToggle';
+            linkedWrap.title = '开关该区域绑定的点光/聚光（与 Lighting 列表一致，可存盘）';
+            const linkedCheck = document.createElement('div');
+            linkedCheck.className = 'bloomRegionLinkedLightCheck checkMark';
+            linkedCheck.textContent = '✓';
+            linkedCheck.classList.toggle('active', linkedLightEnabled);
+            const linkedLabel = document.createElement('div');
+            linkedLabel.className = 'postEffectOption bloomRegionLinkedLightLabel';
+            linkedLabel.textContent = '区域灯';
+            linkedWrap.appendChild(linkedCheck);
+            linkedWrap.appendChild(linkedLabel);
+            const toggleLinkedLight = (e: Event) => {
+                e.stopPropagation();
+                const settingsAny = global.settings as ExperienceSettings;
+                const lighting = ensureLightingForLighting(settingsAny);
+                const lightsAny = ((lighting as any).lights ?? []) as any[];
+                const light = lightsAny.find((l) => l && l.id === linkedIdForUI);
+                const nextEnabled = light ? !(light.enabled !== false) : true;
+                if (editUiTransport === 'message-bridge') {
+                    sendEditProtocolMessage({ type: 'LIGHT_TOGGLE', id: linkedIdForUI, value: nextEnabled });
+                } else {
+                    applyLightToggle(global, linkedIdForUI, nextEnabled);
+                }
+                pushEditHistorySafe();
+                firePostEffectChanged();
+                if (refreshList) refreshList();
+            };
+            linkedCheck.addEventListener('click', toggleLinkedLight);
+            linkedLabel.addEventListener('click', toggleLinkedLight);
+            header.appendChild(linkedWrap);
+        }
         header.appendChild(deleteBtn);
 
         deleteBtn.addEventListener('click', (e) => {
@@ -275,34 +335,6 @@ function renderBloomLocalLightRegionsList(
         const tint = region.tintColor ?? [1, 1, 1];
         const tintHex = '#' + [tint[0], tint[1], tint[2]].map(x => Math.round(Math.max(0, Math.min(1, x)) * 255).toString(16).padStart(2, '0')).join('');
         const tintBlend = Math.max(0, Math.min(1, region.tintBlend ?? 0));
-
-        // 若该区域已绑定光源，则查一次当前光源配置（用于显示强度/角度/Range）
-        let linkedLightType: 'point' | 'spot' | null = null;
-        let linkedLightIntensity = 1;
-        let linkedInner = 25;
-        let linkedOuter = 45;
-        let linkedRange = 10;
-        const linkedIdForUI = (region as any).linkedLightId as string | null | undefined;
-        if (linkedIdForUI) {
-            try {
-                const lighting = ensureLightingForLighting((global as any).settings as ExperienceSettings);
-                const light = (lighting as any).lights?.find?.((l: any) => l && l.id === linkedIdForUI) as any | undefined;
-                if (light) {
-                    linkedLightIntensity = typeof light.intensity === 'number' ? light.intensity : 1;
-                    if (light.type === 'spot') {
-                        linkedLightType = 'spot';
-                        linkedInner = typeof light.innerConeAngle === 'number' ? light.innerConeAngle : 25;
-                        linkedOuter = typeof light.outerConeAngle === 'number' ? light.outerConeAngle : 45;
-                        linkedRange = typeof light.range === 'number' ? light.range : 1;
-                    } else {
-                        linkedLightType = 'point';
-                        linkedRange = typeof light.range === 'number' ? light.range : 1;
-                    }
-                }
-            } catch {
-                // 若查光源失败，不影响区域自身 UI
-            }
-        }
 
         body.innerHTML = `
           <div class="settingsRow">
@@ -596,8 +628,6 @@ export function initPostEffectUI(global: Global): () => void {
     const bloomBlurLevelValue = container.querySelector('#bloomBlurLevelValue') as HTMLElement | null;
     const bloomThresholdSlider = container.querySelector('#bloomThresholdSlider') as HTMLInputElement | null;
     const bloomThresholdValue = container.querySelector('#bloomThresholdValue') as HTMLElement | null;
-    const bloomDebugCheck = container.querySelector('#bloomDebugCheck') as HTMLElement | null;
-    const bloomDebugOption = container.querySelector('#bloomDebugOption') as HTMLElement | null;
     const bloomScopeCheck = container.querySelector('#bloomScopeCheck') as HTMLElement | null;
     const bloomScopeOption = container.querySelector('#bloomScopeOption') as HTMLElement | null;
     const bloomNewRegionBtn = container.querySelector('#bloomNewRegionBtn') as HTMLButtonElement | null;
@@ -676,7 +706,6 @@ export function initPostEffectUI(global: Global): () => void {
         const th = Math.max(0, Math.min(5, Number(b.threshold ?? 0)));
         if (bloomThresholdSlider) bloomThresholdSlider.value = String(th);
         if (bloomThresholdValue) bloomThresholdValue.textContent = th.toFixed(2);
-        if (bloomDebugCheck) bloomDebugCheck.classList.toggle('active', b.bloomDebug ?? false);
         const scope = (b as { bloomScope?: 'global' | 'local' }).bloomScope;
         if (bloomScopeCheck) bloomScopeCheck.classList.toggle('active', scope !== 'global');
         refreshRegionList();
@@ -781,19 +810,6 @@ export function initPostEffectUI(global: Global): () => void {
         });
     }
 
-    if (bloomDebugOption && bloomDebugCheck) {
-        const toggleBloomDebug = () => {
-            const b = ensureBloom(settings);
-            (b as any).bloomDebug = !(b as any).bloomDebug;
-            if ((b as any).bloomDebug) ensureBloomEditorSession(settings as ExperienceSettings).bloomBrush = false;
-            syncFromSettings();
-            firePostEffectChanged();
-            pushEditHistorySafe();
-        };
-        bloomDebugOption.addEventListener('click', toggleBloomDebug);
-        bloomDebugCheck.addEventListener('click', toggleBloomDebug);
-    }
-
     if (bloomScopeOption && bloomScopeCheck) {
         const toggleBloomScope = () => {
             const b = ensureBloom(settings) as { bloomScope?: 'global' | 'local' };
@@ -843,11 +859,36 @@ export function initPostEffectUI(global: Global): () => void {
     };
     events.on('bloomLocalLightRegion:listChanged', regionListChangedHandler);
 
+    const lightingChangedForBloomRegions = () => {
+        refreshRegionList();
+    };
+    events.on('lighting:changed', lightingChangedForBloomRegions);
+
     if (bloomDrawModeCompleteBtn) {
         bloomDrawModeCompleteBtn.addEventListener('click', () => {
             const draftId = getActiveDraftId();
             if (!draftId) return;
+            // 与父级一致：FINISH 默认不落自动灯；internal 下再本地走第二步 LIGHT_ADD（等价于父级分步）
             dispatchLightBrushMessage('LIGHT_BRUSH_FINISH');
+            if (editUiTransport !== 'message-bridge') {
+                const b = ensureBloom(settings) as { localLightRegions?: Array<{ id: string; linkedLightId?: string | null; worldSpace?: { committed?: unknown[] } }> };
+                const ses = ensureBloomEditorSession(settings as ExperienceSettings);
+                const rid = ses.activeLocalLightRegionId;
+                const regions = b.localLightRegions;
+                const region =
+                    Array.isArray(regions) && typeof rid === 'string' && rid.length > 0
+                        ? regions.find((r) => r && r.id === rid)
+                        : undefined;
+                if (region) {
+                    const lid = (region as { linkedLightId?: string | null }).linkedLightId;
+                    const unbound = lid == null || (typeof lid === 'string' && lid.trim().length === 0);
+                    const committed = region.worldSpace?.committed;
+                    if (unbound && Array.isArray(committed) && committed.length > 0) {
+                        const nextId = allocateNextUserLightId(settings as ExperienceSettings);
+                        applyLightAdd(global, nextId, true);
+                    }
+                }
+            }
             pushEditHistorySafe();
             firePostEffectChanged();
         });
@@ -1045,6 +1086,7 @@ export function initPostEffectUI(global: Global): () => void {
     return () => {
         events.off('bloomLocalLightRegion:worldSpaceChanged', worldSpaceChangedHandler);
         events.off('bloomLocalLightRegion:listChanged', regionListChangedHandler);
+        events.off('lighting:changed', lightingChangedForBloomRegions);
         container.innerHTML = '';
     };
 }

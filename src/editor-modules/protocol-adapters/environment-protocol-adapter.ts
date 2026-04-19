@@ -16,6 +16,28 @@ import {
 } from '../../settings-serialize/settings-serialize-helper';
 import type { Global } from '../../types';
 
+/**
+ * 分配不与现有 `lighting.lights[*].id` 冲突的用户光 id（`light-<n>`，与 Lighting 面板一致）。
+ *
+ * @param {ExperienceSettings} settings -
+ * @returns {string}
+ */
+export function allocateNextUserLightId(settings: ExperienceSettings): string {
+    const lighting = ensureLighting(settings);
+    const existingIds = (lighting.lights as any[])
+        .map((l) => (l && typeof l === 'object' ? (l as any).id as string | undefined : undefined))
+        .filter((id): id is string => typeof id === 'string');
+    let maxIndex = -1;
+    for (const id of existingIds) {
+        const m = /^light-(\d+)$/.exec(id);
+        if (m) {
+            const n = parseInt(m[1], 10);
+            if (Number.isFinite(n) && n > maxIndex) maxIndex = n;
+        }
+    }
+    return `light-${maxIndex + 1}`;
+}
+
 function isUserControllableLight(light: LightWithId): boolean {
     const anyLight = light as any;
     const type = anyLight.type as string | undefined;
@@ -31,17 +53,39 @@ export function applyLightGlobalSet(global: Global, value: number): void {
     (global.app as { fire: (name: string, value?: unknown) => void }).fire('nightFade:set', v);
 }
 
-/** LIGHT_ADD：isThreeSixty=true 创建点光；false 创建聚光灯（带 id），优先在草稿区域中心生成 */
-export function applyLightAdd(global: Global, id: string, isThreeSixty = true): void {
+/**
+ * LIGHT_ADD：isThreeSixty=true 创建点光；false 创建聚光灯（带 id）。
+ * 位置优先 `positionOverride`，否则 `draftLightRegionCenter`，再否则相机前。
+ *
+ * 与 `LIGHT_BRUSH_FINISH` 分步：`skipAutoLinkedLight` **未传或 true** 时不自动建灯；FINISH 后 `activeLocalLightRegionId` 已指向新区域且
+ * `draftLightRegionCenter` 已写入与自动绑灯相同的位置优先级；父级再发本方法并传入 `id` 即可绑定，无需额外关联字段。
+ *
+ * @param {Global} global -
+ * @param {string} id - 新光源 id
+ * @param {boolean} [isThreeSixty=true] - true 点光 / false 聚光
+ * @param {[number, number, number] | null | undefined} [positionOverride] - 可选世界坐标（亮灯区域完成落盘时传入 committed 质心）
+ */
+export function applyLightAdd(
+    global: Global,
+    id: string,
+    isThreeSixty = true,
+    positionOverride?: [number, number, number] | null
+): void {
     const settings = global.settings as ExperienceSettings;
     const lighting = ensureLighting(settings);
     const bloom = ensureBloom(settings);
     const bloomSes = ensureBloomEditorSession(settings);
     const center = bloomSes.draftLightRegionCenter ?? null;
     const camPos = getPositionInFrontOfCamera(global);
-    const position: [number, number, number] = center
-        ? [center[0], center[1], center[2]]
-        : [camPos.x, camPos.y, camPos.z];
+    const position: [number, number, number] = Array.isArray(positionOverride) && positionOverride.length >= 3
+        ? [
+            Number(positionOverride[0]),
+            Number(positionOverride[1]),
+            Number(positionOverride[2])
+        ]
+        : center
+            ? [center[0], center[1], center[2]]
+            : [camPos.x, camPos.y, camPos.z];
     if (isThreeSixty) {
         lighting.lights.push({
             id,
@@ -68,7 +112,11 @@ export function applyLightAdd(global: Global, id: string, isThreeSixty = true): 
     if (bloomSes.activeLocalLightRegionId && Array.isArray(bloom.localLightRegions)) {
         const region = bloom.localLightRegions.find((r) => r && r.id === bloomSes.activeLocalLightRegionId);
         if (region) {
-            (region as any).linkedLightId = id;
+            const cur = (region as { linkedLightId?: string | null }).linkedLightId;
+            const unbound = cur == null || (typeof cur === 'string' && cur.trim().length === 0);
+            if (unbound) {
+                (region as any).linkedLightId = id;
+            }
         }
     }
     bloomSes.draftLightRegionCenter = null;
@@ -188,7 +236,50 @@ export function applyLightDelete(global: Global, id: string): void {
     global.events.fire('postEffect:changed');
 }
 
-/** LIGHT_TOGGLE_ALL：仅对用户添加的点光源/聚光灯生效，排除场景默认平行光 */
+/**
+ * 遍历 `bloom.localLightRegions` 的 `linkedLightId`，将对应 `lighting.lights[*].enabled` 置为 `false`。
+ * 用于整灯总闸关等路径，与「关区域 ⇒ 绑灯全关」单向语义对齐（不做反向自动开灯）。
+ *
+ * @param {Global} global - 全局上下文
+ * @returns {boolean} 是否有任意光源被改写
+ */
+export function disableLinkedLightsForAllLocalLightRegions(global: Global): boolean {
+    const settings = global.settings as ExperienceSettings;
+    const b = ensureBloom(settings);
+    const regions = b.localLightRegions;
+    if (!Array.isArray(regions) || regions.length === 0) return false;
+    const lighting = ensureLighting(settings);
+    const lights = lighting.lights;
+    let changed = false;
+    for (const r of regions) {
+        if (!r || typeof r !== 'object') continue;
+        const lid = (r as { linkedLightId?: string | null }).linkedLightId;
+        if (!lid || typeof lid !== 'string') continue;
+        const light = lights.find(l => l && (l as LightWithId).id === lid);
+        if (light && (light as { enabled?: boolean }).enabled !== false) {
+            (light as { enabled?: boolean }).enabled = false;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+/**
+ * 将整场景用户灯总闸同步到 `global.viewSettings.bloom.localLightsEnabled`（仅观看路径已注入 `viewSettings` 时）。
+ *
+ * @param {Global} global - 全局上下文
+ * @param {boolean} enabled - 与 `LIGHT_TOGGLE_ALL` / `applyLightToggleAll` 一致
+ */
+function syncViewSettingsBloomLocalLightsFromToggleAll(global: Global, enabled: boolean): void {
+    const bloom = global.viewSettings?.bloom;
+    if (!bloom) return;
+    bloom.localLightsEnabled = enabled;
+}
+
+/**
+ * LIGHT_TOGGLE_ALL：用户点光/聚光整闸 + 夜景 fade + `viewSettings.bloom.localLightsEnabled` + 绑灯全关。
+ * 灯光数组与 Bloom 总闸分层，避免把「局部亮灯合成」写回 settings。
+ */
 export function applyLightToggleAll(global: Global, enabled: boolean): void {
     const settings = global.settings as ExperienceSettings;
     const lighting = ensureLighting(settings);
@@ -201,8 +292,10 @@ export function applyLightToggleAll(global: Global, enabled: boolean): void {
             changed = true;
         }
     }
-    const bloom = ensureBloom(settings) as any;
-    bloom.localLightsEnabled = enabled;
+    syncViewSettingsBloomLocalLightsFromToggleAll(global, enabled);
+    if (!enabled && disableLinkedLightsForAllLocalLightRegions(global)) {
+        changed = true;
+    }
     const app = global.app as { fire: (name: string, value?: unknown) => void };
     // Viewer 模式：全关时全局亮度仅运行时压到 0（不改 global.settings.nightMode.fade，配置真源仍在 settings）
     // 全开时用 ensureNightMode(settings).fade 恢复，与 LIGHT_GLOBAL_SET 写入的 settings 一致，无需额外备份字段

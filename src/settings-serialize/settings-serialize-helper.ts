@@ -73,7 +73,6 @@ export function ensureBloom(settings: ExperienceSettings): NonNullable<Experienc
     if (typeof b.blurLevel !== 'number') b.blurLevel = DEFAULT_BLOOM.blurLevel;
     if (typeof b.intensity !== 'number') b.intensity = DEFAULT_BLOOM.intensity;
     if (!Array.isArray(b.localLightRegions)) b.localLightRegions = [];
-    if (typeof (b as any).localLightsEnabled !== 'boolean') (b as any).localLightsEnabled = false;
     if (Number(b.intensity) === 1) {
         b.intensity = DEFAULT_BLOOM.intensity;
         if (Number(b.blurLevel) === 2) {
@@ -84,6 +83,18 @@ export function ensureBloom(settings: ExperienceSettings): NonNullable<Experienc
         }
     }
     return pe.bloom!;
+}
+
+/**
+ * 导入归一：在 `ensureBloom` 之后调用，从 bloom 上剥离已废弃、不参与读数的持久化字段（与导出 strip 对齐）。
+ */
+export function normalizeBloomAfterImport(settings: ExperienceSettings): void {
+    const pe = settings.postEffectSettings;
+    if (!pe?.bloom || typeof pe.bloom !== 'object') return;
+    const b = pe.bloom as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(b, 'localLightsEnabled')) {
+        delete b.localLightsEnabled;
+    }
 }
 
 export function ensureShadow(settings: ExperienceSettings): NonNullable<ExperienceSettings['postEffectSettings']>['shadow'] {
