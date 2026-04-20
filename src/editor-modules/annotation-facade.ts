@@ -39,6 +39,7 @@ class AnnotationFacade implements ModuleFacade {
     }
 
     onEnter(ctx: ModuleContext): void {
+        ctx.state.annotationTransformMode = 'move';
         ctx.events.fire('annotationFacade:enter');
     }
 

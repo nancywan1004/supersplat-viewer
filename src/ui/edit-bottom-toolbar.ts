@@ -296,13 +296,13 @@ export function initEditBottomToolbarUI(global: Global): () => void {
 
     const onEditLeftModuleChanged = (newModule?: string | null) => {
         if (newModule !== 'annotation') {
-            (state as any).annotationTransformMode = null;
+            (state as any).annotationTransformMode = 'move';
         }
         renderAndBind();
     };
 
     const onAnnotationDeselected = () => {
-        (state as any).annotationTransformMode = null;
+        (state as any).annotationTransformMode = 'move';
         syncAnnotationMoveButton();
     };
 

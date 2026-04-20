@@ -286,7 +286,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         editMode: false,
         previewMode: false,
         editLeftModule: null,
-        assetTransformMode: undefined,
+        assetTransformMode: 'move',
         uploadedAssets: [],
         scenePlacedEntities: [],
         selectedSceneEntityId: null,
@@ -295,12 +295,12 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         // 标注相关状态
         annotationEditMode: false,
         selectedAnnotationId: null,
-        annotationTransformMode: null,
+        annotationTransformMode: 'move',
         annotationPlacementActive: false,
 
         // 光源编辑相关状态（环境模块）
         selectedLightId: null,
-        lightTransformMode: null,
+        lightTransformMode: 'move',
 
         // 导出 VFX 视频时的锁，防止实时更新干扰离线渲染
         isExportingVfxVideo: false,

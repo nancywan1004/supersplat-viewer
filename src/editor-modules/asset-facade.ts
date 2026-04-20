@@ -21,8 +21,8 @@ class AssetFacade implements ModuleFacade {
             state.selectedSceneEntityId = null;
             events.fire('sceneAsset:selected');
         }
-        state.assetTransformMode = undefined;
-        events.fire('assetTransformMode:changed', undefined as any);
+        state.assetTransformMode = 'move';
+        events.fire('assetTransformMode:changed', 'move');
         events.fire('assetFacade:enter');
     }
 
@@ -32,8 +32,8 @@ class AssetFacade implements ModuleFacade {
             state.selectedSceneEntityId = null;
             events.fire('sceneAsset:selected');
         }
-        state.assetTransformMode = undefined;
-        events.fire('assetTransformMode:changed', undefined as any);
+        state.assetTransformMode = 'move';
+        events.fire('assetTransformMode:changed', 'move');
         events.fire('assetFacade:exit');
     }
 

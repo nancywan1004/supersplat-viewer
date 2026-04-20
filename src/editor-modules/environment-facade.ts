@@ -47,6 +47,8 @@ class EnvironmentFacade implements ModuleFacade {
     }
 
     onEnter(ctx: ModuleContext): void {
+        ctx.state.lightTransformMode = 'move';
+        ctx.events.fire('lightTransformMode:changed', 'move');
         this.syncPreviewVisualPolicy(ctx);
         ctx.events.fire('environmentFacade:enter');
     }
@@ -61,9 +63,9 @@ class EnvironmentFacade implements ModuleFacade {
         }
 
         ctx.state.selectedLightId = null;
-        ctx.state.lightTransformMode = null;
+        ctx.state.lightTransformMode = 'move';
         ctx.events.fire('sceneLight:selected', { id: null, source: 'host' as SelectionSource });
-        ctx.events.fire('lightTransformMode:changed', null);
+        ctx.events.fire('lightTransformMode:changed', 'move');
         this.syncPreviewVisualPolicy(ctx);
         ctx.events.fire('environmentFacade:exit');
     }
