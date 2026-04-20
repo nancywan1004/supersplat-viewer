@@ -180,6 +180,9 @@ export class BloomController {
     private worldSpaceMaskCtx: CanvasRenderingContext2D | null = null;
     /** GPU texture for world space projected mask */
     private worldSpaceMaskTexture: Texture | null = null;
+    /** 世界空间 mask 的临时缓冲，用于低成本平滑 */
+    private worldSpaceMaskTempCanvas: HTMLCanvasElement | null = null;
+    private worldSpaceMaskTempCtx: CanvasRenderingContext2D | null = null;
     /** Whether the world space mask has valid content */
     private hasWorldSpaceMask = false;
     /** 3D 亮度场烘焙成的 2D 图集纹理，无 64 点上限 */
@@ -1191,6 +1194,29 @@ export class BloomController {
         const sizeX = aabbMax.x - aabbMin.x;
         const sizeY = aabbMax.y - aabbMin.y;
         const sizeZ = aabbMax.z - aabbMin.z;
+        const camPos = camera.getPosition();
+        const center = new Vec3(
+            (aabbMin.x + aabbMax.x) * 0.5,
+            (aabbMin.y + aabbMax.y) * 0.5,
+            (aabbMin.z + aabbMax.z) * 0.5
+        );
+        const centerDistance = Math.max(1e-3, center.distance(camPos));
+        const fovDeg = (sceneCam as { fov?: number }).fov ?? 60;
+        const tanHalfFov = Math.tan((fovDeg * Math.PI / 180) * 0.5);
+        const pixelsPerUnit = Math.abs(tanHalfFov) > 1e-6
+            ? (canvasHeight * 0.5) / (centerDistance * tanHalfFov)
+            : 0;
+        const voxelWorldSize = Math.max(sizeX, sizeY, sizeZ) / VOLUME_TEX_WIDTH;
+        const voxelScreenPx = Math.max(0, voxelWorldSize * pixelsPerUnit);
+        // 近景提升采样密度（stride=1），远景维持 stride=2，平衡质量与成本。
+        const stride = voxelScreenPx > 1.15 ? 1 : 2;
+        // 根据体素屏幕尺寸动态扩大投影圆，减少近景点阵感。
+        const maskScaleX = MASK_SIZE / canvasWidth;
+        const maskScaleY = MASK_SIZE / canvasHeight;
+        const voxelMaskPx = voxelScreenPx * Math.max(maskScaleX, maskScaleY);
+        const maskRadius = Math.max(8, Math.min(24, 8 + voxelMaskPx * 2.4));
+        // 轻量平滑强度：近景略强，远景较弱。
+        const blurPx = Math.max(0.5, Math.min(2.2, 0.5 + voxelMaskPx * 0.3));
 
         let pixels: Uint8Array | undefined;
         try {
@@ -1200,9 +1226,6 @@ export class BloomController {
         }
         const screenPos = new Vec3();
         const worldPos = new Vec3();
-        const stride = 2;
-        // 半径足够大、且用径向渐变，使体素圆重叠后融合成连续光晕，避免出现网格状小圆点
-        const maskRadius = 12;
         const threshold = Math.round(0.002 * 255);
 
         ctx.fillStyle = '#000000';
@@ -1241,10 +1264,38 @@ export class BloomController {
         this.committedVolumeTexture!.unlock();
         ctx.globalCompositeOperation = 'source-over';
         ctx.fillStyle = '#000000';
+        this.applyMaskSmoothing(blurPx);
         tex.setSource(canvas);
         tex.upload();
         this.hasWorldSpaceMask = true;
         return true;
+    }
+
+    /**
+     * 对世界空间 mask 做一次低成本平滑，弱化体素投影的点阵观感。
+     */
+    private applyMaskSmoothing(blurPx: number): void {
+        const ctx = this.worldSpaceMaskCtx;
+        const canvas = this.worldSpaceMaskCanvas;
+        if (!ctx || !canvas || !Number.isFinite(blurPx) || blurPx <= 0) return;
+
+        if (!this.worldSpaceMaskTempCanvas) {
+            this.worldSpaceMaskTempCanvas = document.createElement('canvas');
+            this.worldSpaceMaskTempCanvas.width = MASK_SIZE;
+            this.worldSpaceMaskTempCanvas.height = MASK_SIZE;
+            this.worldSpaceMaskTempCtx = this.worldSpaceMaskTempCanvas.getContext('2d');
+        }
+        const tmpCanvas = this.worldSpaceMaskTempCanvas;
+        const tmpCtx = this.worldSpaceMaskTempCtx;
+        if (!tmpCtx) return;
+
+        tmpCtx.clearRect(0, 0, MASK_SIZE, MASK_SIZE);
+        tmpCtx.drawImage(canvas, 0, 0);
+        ctx.clearRect(0, 0, MASK_SIZE, MASK_SIZE);
+        ctx.save();
+        ctx.filter = `blur(${blurPx.toFixed(2)}px)`;
+        ctx.drawImage(tmpCanvas, 0, 0);
+        ctx.restore();
     }
 
     /**
@@ -1520,5 +1571,7 @@ export class BloomController {
         }
         this.worldSpaceMaskCanvas = null;
         this.worldSpaceMaskCtx = null;
+        this.worldSpaceMaskTempCanvas = null;
+        this.worldSpaceMaskTempCtx = null;
     }
 }
