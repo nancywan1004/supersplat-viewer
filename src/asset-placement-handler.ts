@@ -119,8 +119,12 @@ async function instantiateImage(app: AppBase, item: AssetLibraryItem, position: 
                 return;
             }
             const mat = new StandardMaterial();
-            // 图片资产按「带 alpha 的贴图卡片」渲染：使用透明混合 + opacityMap，避免透明区发黑。
-            mat.diffuseMap = texture;
+            // 图片资产使用近似 unlit 卡片：不受场景光照/天空盒影响，保持亮度稳定。
+            mat.useLighting = false;
+            // 关闭 diffuse 贡献，避免其常量项盖过 emissive 调节效果。
+            mat.diffuse.set(0, 0, 0);
+            mat.emissiveMap = texture;
+            mat.emissive.set(1, 1, 1);
             mat.opacityMap = texture;
             mat.opacityMapChannel = 'a';
             mat.blendType = BLEND_NORMAL;
