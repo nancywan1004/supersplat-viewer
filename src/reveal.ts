@@ -24,6 +24,8 @@ import type { CameraManager } from './camera-manager';
  * Reveal effect type (including VFX effects)
  */
 export type RevealEffectType = 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch' | 'none';
+/** clipPadding: 建议扩展 far；nearMax: 建议 near 的上限。均为可选提示，不是强制值。 */
+export type RevealCameraClipHint = { clipPadding?: number; nearMax?: number };
 
 /** 与 viewer 中 NightMode 首帧 / afterReveal 解析一致；用于 VFX 进入时快照，避免早于 firstFrame 的 currentNightFade 仍为 0 */
 function getNightFadeFromSettings(settings: { nightMode?: { enabled?: boolean; fade?: number } }): number {
@@ -1382,6 +1384,31 @@ export class RevealController {
 
     getCurrentScript() {
         return this.currentScript;
+    }
+
+    /**
+     * 统一查询当前特效对相机裁剪面的提示（可选能力）。
+     * Viewer 不关心具体特效类型，只消费这一层抽象。
+     * 这样新增/调整特效时只改脚本侧，避免在 viewer 中不断堆 if-else 补丁。
+     */
+    getCameraClipHint(): RevealCameraClipHint | null {
+        const script = this.currentScript as {
+            enabled?: boolean;
+            getCameraClipHint?: () => unknown;
+        } | null | undefined;
+        if (!script?.enabled || typeof script.getCameraClipHint !== 'function') return null;
+        const raw = script.getCameraClipHint();
+        if (!raw || typeof raw !== 'object') return null;
+        const hint = raw as Record<string, unknown>;
+        const out: RevealCameraClipHint = {};
+        if (typeof hint.clipPadding === 'number' && Number.isFinite(hint.clipPadding)) {
+            out.clipPadding = Math.max(0, hint.clipPadding);
+        }
+        if (typeof hint.nearMax === 'number' && Number.isFinite(hint.nearMax)) {
+            out.nearMax = Math.max(0.001, hint.nearMax);
+        }
+        if (out.clipPadding === undefined && out.nearMax === undefined) return null;
+        return out;
     }
 
     /**

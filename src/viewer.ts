@@ -348,13 +348,25 @@ class Viewer {
 
             // fit clipping planes to bounding box
             const boundRadius = sceneBound.halfExtents.length();
+            let clipPadding = 0;
+            let nearMaxHint: number | null = null;
+            // 通过 RevealController 的通用能力获取裁剪提示，viewer 不直接判断具体特效类型。
+            const clipHint = this.revealController?.getCameraClipHint?.();
+            if (clipHint) {
+                if (typeof clipHint.clipPadding === 'number' && Number.isFinite(clipHint.clipPadding)) {
+                    clipPadding = Math.max(0, clipHint.clipPadding);
+                }
+                if (typeof clipHint.nearMax === 'number' && Number.isFinite(clipHint.nearMax)) {
+                    nearMaxHint = Math.max(0.001, clipHint.nearMax);
+                }
+            }
 
             // calculate the forward distance between the camera to the bound center
             vec.sub2(sceneBound.center, camera.position);
             const dist = vec.dot(cameraEntity.forward);
 
-            // 计算基础 far clip（基于 bounding box）
-            let far = Math.max(dist + boundRadius, 1e-2);
+            // far 基于包围体并叠加可选 padding（用于覆盖特效阶段的临时外推范围）。
+            let far = Math.max(dist + boundRadius + clipPadding, 1e-2);
             
             // 获取天空盒的实际半径，如果存在天空盒，确保 farClip 足够大以包含它
             const skyboxRadius = getSkyboxRadius(app, config.skyboxUrl);
@@ -366,7 +378,12 @@ class Viewer {
                 far = Math.max(far, requiredFar);
             }
             
-            const near = Math.max(dist - boundRadius, far / (1024 * 16));
+            const nearBase = dist - boundRadius;
+            const nearDefault = Math.max(nearBase, far / (1024 * 16));
+            // nearMaxHint 仅作为“上限”约束 near，避免 near 随 far 抬升导致前景被裁。
+            const near = nearMaxHint == null
+                ? nearDefault
+                : Math.max(0.01, Math.min(nearDefault, nearMaxHint));
 
             cameraEntity.camera.farClip = far;
             cameraEntity.camera.nearClip = near;
