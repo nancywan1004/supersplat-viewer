@@ -116,8 +116,20 @@ const applyPostEffectSettings = (cameraFrame: CameraFrame, settings: PostEffectS
     }
 };
 
+const needsBloomPipeline = (settings: PostEffectSettings): boolean => {
+    const bloom = settings?.bloom as any;
+    if (!bloom || bloom.enabled === false) return false;
+    // 不依赖 bloomScope：transform.json 初始为 global，但局部亮灯会话仍需实时预览管线。
+    const hasRegions = Array.isArray(bloom.localLightRegions) && bloom.localLightRegions.length > 0;
+    const brushActive = !!settings?.bloomEditorSession?.bloomBrush;
+    return hasRegions || brushActive;
+};
+
 const anyPostEffectEnabled = (settings: PostEffectSettings): boolean => {
-    const bloomOn = settings.bloom.enabled && (Number(settings.bloom.intensity) > 0);
+    const bloomOn = settings.bloom.enabled && (
+        Number(settings.bloom.intensity) > 0 ||
+        needsBloomPipeline(settings)
+    );
     const shadowOn = (settings as any).shadow?.enabled === true;
     return (settings.sharpness.enabled && settings.sharpness.amount > 0) ||
         bloomOn ||
@@ -212,10 +224,6 @@ class Viewer {
         const wgsl = ShaderChunks.get(graphicsDevice, 'wgsl');
         wgsl.set('skyboxPS', wgsl.get('skyboxPS').replace('mapRoughnessUv(uv, uniform.mipLevel)', 'uv'));
 
-        global.viewSettings = {
-            // 仅内存：不从 settingsJson 读；默认 true；整灯闸由 LIGHT_TOGGLE_ALL 写回此处
-            bloom: { localLightsEnabled: true }
-        };
         this.bloomController = new BloomController(global, {
             getCameraFrame: () => this.cameraFrame,
             getAppCanvas: () => (app.graphicsDevice?.canvas as HTMLCanvasElement) ?? document.querySelector('canvas'),
@@ -893,10 +901,14 @@ z: ${cameraInfo.target.z.toFixed(6)}
         // 无 postEffectSettings 或未启用任一后处理时跳过，避免报错
         // Bloom 语义对齐：局部 Bloom 仅应改变 mask 区域，不应因 blur/enabled 开关导致整条渲染路径突变。
         // 因此将 Bloom 管线是否预热与 Bloom 叠加是否生效解耦：
-        // - 管线预热（CameraFrame + HDR RT）：只要 Bloom 强度配置 > 0 即保持开启，避免 0/1 档位切换时全局观感跳变。
+        // - 管线预热（CameraFrame + HDR RT）：Bloom 强度 > 0 或 local 亮灯预览需求时保持开启，
+        //   避免 intensity=0 时实时笔刷预览被整条管线关掉。
         // - 实际叠加：仍由 BloomController 中 enabled/blur/mask 控制。
         const bloomPipelineWanted = !!postEffectSettings
-            && Number(postEffectSettings.bloom?.intensity ?? 0) > 0;
+            && (
+                Number(postEffectSettings.bloom?.intensity ?? 0) > 0 ||
+                needsBloomPipeline(postEffectSettings)
+            );
 
         const enableCameraFrame = !app.xr.active &&
             !config.nofx &&
