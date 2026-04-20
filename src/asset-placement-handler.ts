@@ -1,6 +1,6 @@
 import type { AppBase } from 'playcanvas';
 import * as pc from 'playcanvas';
-import { Vec3, Quat, StandardMaterial, CULLFACE_NONE, Color, BLEND_NORMAL } from 'playcanvas';
+import { Vec3, Quat, StandardMaterial, CULLFACE_NONE, Color, BLEND_NONE } from 'playcanvas';
 import type { Global } from './types';
 import type { AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from './types';
 import { getSelectedSceneEntity } from './state-selectors';
@@ -127,8 +127,10 @@ async function instantiateImage(app: AppBase, item: AssetLibraryItem, position: 
             mat.emissive.set(1, 1, 1);
             mat.opacityMap = texture;
             mat.opacityMapChannel = 'a';
-            mat.blendType = BLEND_NORMAL;
-            mat.alphaTest = 0.01;
+            // 图片与 gsplat 叠加时，透明混合路径（BLEND_NORMAL）会带来排序/遮挡错误；
+            // 改用 alpha-test cutout + 不透明通道，确保深度写入，前后关系稳定。
+            mat.blendType = BLEND_NONE;
+            mat.alphaTest = 0.5;
             mat.cull = CULLFACE_NONE;
             mat.update();
             const entity = new Entity(item.name || 'image');
