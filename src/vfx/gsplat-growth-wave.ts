@@ -1035,7 +1035,7 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
     scatterDistance = 4.0;
 
     /**
-     * Minimum size factor for point cloud particles (relative to original size)
+     * @deprecated 当前 growth-wave 点云阶段统一使用 pointSize，此参数保留仅兼容旧配置。
      * @attribute
      * @range [0.01, 1]
      */
@@ -1046,7 +1046,7 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
      * @attribute
      * @range [0.001, 0.5]
      */
-    pointSize = 0.005;
+    pointSize = 0.008;
 
     /**
      * Phase 2 光圈最大半径：光圈从中心向外扩散到此距离后停止。
@@ -1184,6 +1184,22 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
      */
     isEffectComplete(globalRecoverStart?: number) {
         return this.effectTime >= this.getCompletionTime(globalRecoverStart);
+    }
+
+    /**
+     * 给相机裁剪面的运行时提示（供 RevealController / Viewer 通用消费）。
+     * growth-wave 在 Phase1 会把粒子外推，需放宽 far 并限制 near 上限避免前景被裁。
+     */
+    getCameraClipHint(): { clipPadding?: number; nearMax?: number } | null {
+        if (!this.enabled) return null;
+        const scatter = Math.max(0, Number(this.scatterDistance ?? 0));
+        // scatter 越大，波前可能越“超出静态包围体”，故按 scatter 线性放大 far padding，并做上下限约束。
+        const clipPadding = Math.min(60, Math.max(12, scatter * 12));
+        return {
+            clipPadding,
+            // 用 near 上限抑制“far 被抬高后 near 也升高”导致的近景裁切。
+            nearMax: 0.05
+        };
     }
 }
 
