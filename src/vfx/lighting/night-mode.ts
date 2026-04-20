@@ -1,7 +1,6 @@
-import { Script, Color, Entity, Vec3, Mat4 } from 'playcanvas';
+import { Script, Color, Entity, Vec3, Mat4, Texture, PIXELFORMAT_RGBA8 } from 'playcanvas';
 import { GsplatShaderEffect } from '../gsplat-shader-effect';
 import { collectPointLights, collectSpotLights } from '../../light';
-import type { Texture } from 'playcanvas';
 
 /**
  * 单盏点/聚光：线性色单通道峰值上限。intensity 极大时按峰值等比缩小，保色相，避免 shader 里 sum 立刻顶满仍是一片死白 + ANGLE 数值风险。
@@ -788,6 +787,12 @@ class NightMode extends GsplatShaderEffect {
     private committedTintVolumeTexture: Texture | null = null;
 
     /**
+     * Bloom 重建会 destroy 旧 GPU 纹理，但材质上的 sampler 参数可能仍指向旧对象（impl 已空），下一帧 draw 即崩。
+     * 用 1×1 占位纹理保证 uCommittedTintVolume / uCommittedBrightnessVolume / uBloomMask 始终绑定有效 Texture。
+     */
+    private _samplerFallback: Texture | null = null;
+
+    /**
      * Night ambient color
      * @attribute
      * @type {Color}
@@ -1050,6 +1055,28 @@ class NightMode extends GsplatShaderEffect {
         }
     }
 
+    private ensureSamplerFallbackTexture(): Texture {
+        if (this._samplerFallback) {
+            return this._samplerFallback;
+        }
+        const t = new Texture(this.app.graphicsDevice, {
+            name: 'nightModeSamplerFallback',
+            width: 1,
+            height: 1,
+            format: PIXELFORMAT_RGBA8,
+            mipmaps: false
+        });
+        const px = t.lock() as Uint8Array;
+        px[0] = 255;
+        px[1] = 255;
+        px[2] = 255;
+        px[3] = 255;
+        t.unlock();
+        t.upload();
+        this._samplerFallback = t;
+        return t;
+    }
+
     /** 设置局部亮灯区域颜色调制（单区域/回退，由 BloomController 传入）。 */
     setCommittedTint(tintColor: [number, number, number], tintBlend: number) {
         this.localLightTintColor = [
@@ -1072,19 +1099,22 @@ class NightMode extends GsplatShaderEffect {
     }
 
     private setCommittedUniforms(): void {
-        if (this.committedVolumeTexture) {
-            this.setUniform('uCommittedBrightnessVolume', this.committedVolumeTexture);
-        }
+        const fb = this.ensureSamplerFallbackTexture();
+        const vol = this.committedVolumeTexture;
+        const tint = this.committedTintVolumeTexture;
+
+        this.setUniform('uCommittedBrightnessVolume', vol ?? fb);
         this.setUniform('uCommittedAabbMin', [this.committedVolumeAabbMin.x, this.committedVolumeAabbMin.y, this.committedVolumeAabbMin.z]);
         this.setUniform('uCommittedAabbMax', [this.committedVolumeAabbMax.x, this.committedVolumeAabbMax.y, this.committedVolumeAabbMax.z]);
         this.setUniform('uCommittedBrightness', this.committedBrightness);
         this.setUniform('uCommittedVolumeEncodedBrightness', this.committedVolumeEncodedBrightness ? 1 : 0);
         this.setUniform('uLocalLightTintColor', this.localLightTintColor);
         this.setUniform('uLocalLightTintBlend', this.localLightTintBlend);
-        if (this.committedTintVolumeTexture) {
-            this.setUniform('uCommittedTintVolume', this.committedTintVolumeTexture);
+        if (tint) {
+            this.setUniform('uCommittedTintVolume', tint);
             this.setUniform('uCommittedTintVolumeActive', 1);
         } else {
+            this.setUniform('uCommittedTintVolume', vol ?? fb);
             this.setUniform('uCommittedTintVolumeActive', 0);
         }
     }
@@ -1269,6 +1299,7 @@ class NightMode extends GsplatShaderEffect {
                 this.setUniform('uLightDir', [0, 1, 0]);
                 this.setUniform('uLightColor', [0, 0, 0]);
             }
+            const fb = this.ensureSamplerFallbackTexture();
             if (this.bloomBrushActive && this.bloomBrushMask && this.camera?.camera && this.splat) {
                 const cam = this.camera.camera;
                 if (isUnified) {
@@ -1280,13 +1311,19 @@ class NightMode extends GsplatShaderEffect {
                     this._bloomBrushModelViewProj.mul2(this._bloomBrushModelViewProj, this.splat.getWorldTransform());
                     this._bloomBrushModelViewProj.mul2(cam.projectionMatrix, this._bloomBrushModelViewProj);
                 }
+                const maskTex = this.bloomBrushMask;
                 this.materialsApplied.forEach((material) => {
-                    material.setParameter('uBloomMask', this.bloomBrushMask!);
+                    material.setParameter('uBloomMask', maskTex ?? fb);
                 });
                 this.setUniform('uBloomBrushActive', 1);
                 this.setUniform('uBloomThreshold', this.bloomBrushThreshold);
                 this.setUniform('uBloomBrushLocalBrightness', this.bloomBrushLocalBrightness);
                 this.setUniform('uModelViewProj', this._bloomBrushModelViewProj.data);
+            } else {
+                this.materialsApplied.forEach((material) => {
+                    material.setParameter('uBloomMask', fb);
+                });
+                this.setUniform('uBloomBrushActive', 0);
             }
             this.setCommittedUniforms();
         }
@@ -1363,6 +1400,14 @@ class NightMode extends GsplatShaderEffect {
     /** Whether brightness effect is active (|fade| > 0), e.g. for Bloom Brush coupling */
     get isNightModeEnabled(): boolean {
         return Math.abs(this.nightFade) > 1e-6;
+    }
+
+    destroy() {
+        if (this._samplerFallback) {
+            this._samplerFallback.destroy();
+            this._samplerFallback = null;
+        }
+        super.destroy();
     }
 }
 
