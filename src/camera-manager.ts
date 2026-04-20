@@ -31,8 +31,9 @@ const tmpCamera = new Camera();
 const tmpv = new Vec3();
 /** F 键 / inputEvent「frame」分支里，用于承接「选中项世界坐标」的临时 Vec3（避免每帧分配）。 */
 const tmpFocus = new Vec3();
-/** 非资产对象（如双击拾取点）聚焦时使用固定距离。 */
-const ORBIT_FOCUS_FIXED_DISTANCE = 0.5;
+/** 非资产对象（如双击拾取点）聚焦时，按当前距离比例收束。 */
+const ORBIT_FOCUS_DISTANCE_SCALE = 0.2;
+const ORBIT_FOCUS_MIN_DISTANCE = 1.0;
 /** 资产 bbox 聚焦时，目标占据视野半角比例（越小留白越多）。 */
 const ASSET_FOCUS_HALF_FOV_FILL = 0.72;
 /** gaussian / gsplat 资产的取景距离补偿，拉近到更接近 mesh 的主观构图。 */
@@ -540,7 +541,7 @@ class CameraManager {
 
         /**
          * 将 Orbit 相机对准某一世界坐标点（目标落在画面中心附近）。
-         * - 未指定 distance 时使用固定距离（用于 pick 等点目标）
+         * - 未指定 distance 时按当前相机与目标距离比例收束（用于 pick 等点目标）
          * - 指定 distance 时可用于 bbox framing（例如资产 focus）
          */
         const orbitFocus = (position: Vec3, distance?: number) => {
@@ -550,10 +551,12 @@ class CameraManager {
             tmpCamera.copy(this.camera);
             // 从相机指向目标的方向，在目标附近取新机位，再 lookAt 目标
             tmpv.copy(position).sub(this.camera.position).normalize();
+            const currentDistance = position.distance(this.camera.position);
             const zoomRange = controllers.orbit.controller.zoomRange;
+            const fallbackDistance = Math.max(ORBIT_FOCUS_MIN_DISTANCE, currentDistance * ORBIT_FOCUS_DISTANCE_SCALE);
             const targetDistance = Math.max(
                 zoomRange.x,
-                Math.min(zoomRange.y, distance ?? ORBIT_FOCUS_FIXED_DISTANCE)
+                Math.min(zoomRange.y, distance ?? fallbackDistance)
             );
             tmpv.mulScalar(-targetDistance).add(position);
             tmpCamera.position.copy(tmpv);
