@@ -156,6 +156,29 @@ async function instantiateMesh(app: AppBase, item: AssetLibraryItem, position: V
     return entity;
 }
 
+/**
+ * 对放置的 mesh 层级做一次材质侧统一配置（当前：StandardMaterial 关闭 scene 级 IBL，便于弱 env 下仍靠光+ambient 可读）。
+ */
+function configurePlacedMeshMaterials(root: Entity): void {
+    const visit = (node: Entity) => {
+        const render = node.render;
+        const instances = render?.meshInstances;
+        if (instances?.length) {
+            for (const mi of instances as any[]) {
+                const mat = mi?.material;
+                if (mat instanceof StandardMaterial) {
+                    mat.useSkybox = false;
+                    mat.update();
+                }
+            }
+        }
+        for (const child of node.children as Entity[]) {
+            visit(child);
+        }
+    };
+    visit(root);
+}
+
 async function instantiateGaussian(app: AppBase, item: AssetLibraryItem, position: Vec3): Promise<Entity> {
     const asset = item.asset;
     if (!asset) throw new Error('gaussian asset not ready');
@@ -246,6 +269,10 @@ export async function placeAsset(global: Global, item: AssetLibraryItem, worldPo
     }
 
     parent.addChild(entity);
+
+    if (item.type === 'mesh') {
+        configurePlacedMeshMaterials(entity);
+    }
 
     applyPlacedEntityYawToFaceCamera(entity, global, item.type);
 
@@ -557,6 +584,9 @@ export function initAssetPlacementHandler(
             current.getPosition().z + 1
         );
         parent.addChild(clone);
+        if (entry.assetType === 'mesh') {
+            configurePlacedMeshMaterials(clone);
+        }
         const copiedId = (typeof payload?.copyId === 'string' && payload.copyId.trim().length > 0)
             ? payload.copyId
             : nextSceneEntityId();
