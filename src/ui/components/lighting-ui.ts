@@ -40,6 +40,14 @@ const isSpot = (
 ): l is SpotLightConfig =>
     !!l && (l as any).type === 'spot';
 
+const normalizeSpotConeAngles = (inner: number, outer: number): { inner: number; outer: number } => {
+    const safeOuter = Math.max(0.01, Math.min(89.9, Number.isFinite(outer) ? outer : 45));
+    const rawInner = Number.isFinite(inner) ? inner : 25;
+    const maxInner = Math.max(0, safeOuter - 1);
+    const safeInner = Math.max(0, Math.min(maxInner, rawInner));
+    return { inner: safeInner, outer: safeOuter };
+};
+
 /**
  * 初始化 Lighting 面板 UI（夜间模式、强度滑块、场景光源可视化、点光源列表）。
  * 挂载到 #lightingPanelContainer；若无容器则跳过。
@@ -322,6 +330,35 @@ export function initLightingUI(global: Global): () => void {
         });
 
         pointLightsList.querySelectorAll('input').forEach((input) => {
+            const liveField = (input as HTMLElement).dataset.field;
+            if (liveField === 'innerConeAngle' || liveField === 'outerConeAngle') {
+                input.addEventListener('input', () => {
+                    const idx = parseInt((input as HTMLElement).dataset.index!, 10);
+                    const field = (input as HTMLElement).dataset.field!;
+                    const lighting = ensureLightingLocal();
+                    const light = lighting.lights[idx];
+                    if (!light || !isSpot(light)) return;
+                    const s = light as SpotLightConfig;
+                    if (field === 'innerConeAngle') {
+                        s.innerConeAngle = parseFloat((input as HTMLInputElement).value) ?? 25;
+                    } else {
+                        s.outerConeAngle = parseFloat((input as HTMLInputElement).value) ?? 45;
+                    }
+                    const normalized = normalizeSpotConeAngles(
+                        Number(s.innerConeAngle ?? 25),
+                        Number(s.outerConeAngle ?? 45)
+                    );
+                    s.innerConeAngle = normalized.inner;
+                    s.outerConeAngle = normalized.outer;
+                    const rowEl = (input as HTMLElement).closest('.pointLightRow');
+                    const innerInput = rowEl?.querySelector<HTMLInputElement>('input[data-field="innerConeAngle"]');
+                    const outerInput = rowEl?.querySelector<HTMLInputElement>('input[data-field="outerConeAngle"]');
+                    if (innerInput) innerInput.value = String(normalized.inner);
+                    if (outerInput) outerInput.value = String(normalized.outer);
+                    updatePointLightsFromSettings(global);
+                    events.fire('lighting:changed');
+                });
+            }
             input.addEventListener('change', () => {
                 const idx = parseInt((input as HTMLElement).dataset.index!, 10);
                 const field = (input as HTMLElement).dataset.field!;
@@ -354,6 +391,17 @@ export function initLightingUI(global: Global): () => void {
                     else if (field === 'innerConeAngle') s.innerConeAngle = parseFloat((input as HTMLInputElement).value) ?? 25;
                     else if (field === 'outerConeAngle') s.outerConeAngle = parseFloat((input as HTMLInputElement).value) ?? 45;
                     else if (field === 'range') s.range = parseFloat((input as HTMLInputElement).value) ?? 1;
+                    const normalized = normalizeSpotConeAngles(
+                        Number(s.innerConeAngle ?? 25),
+                        Number(s.outerConeAngle ?? 45)
+                    );
+                    s.innerConeAngle = normalized.inner;
+                    s.outerConeAngle = normalized.outer;
+                    const rowEl = (input as HTMLElement).closest('.pointLightRow');
+                    const innerInput = rowEl?.querySelector<HTMLInputElement>('input[data-field="innerConeAngle"]');
+                    const outerInput = rowEl?.querySelector<HTMLInputElement>('input[data-field="outerConeAngle"]');
+                    if (innerInput) innerInput.value = String(normalized.inner);
+                    if (outerInput) outerInput.value = String(normalized.outer);
                     (input as HTMLElement).closest('.pointLightRow')?.classList.toggle('pointLightRow--disabled', !s.enabled);
                 } else {
                     const p = light as PointLightConfig;

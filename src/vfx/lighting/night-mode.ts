@@ -6,7 +6,7 @@ import { collectPointLights, collectSpotLights } from '../../light';
  * 单盏点/聚光：线性色单通道峰值上限。intensity 极大时按峰值等比缩小，保色相，避免 shader 里 sum 立刻顶满仍是一片死白 + ANGLE 数值风险。
  * （与 modifySplatColor 内 sum / 输出 clamp 配套；要更「亮」可略调大该常数或改多盏灯分布。）
  */
-const LOCAL_LIGHT_LINEAR_PEAK_CAP = 16;
+const LOCAL_LIGHT_LINEAR_PEAK_CAP = 64;
 
 /** 与方向光 uLightColor 一致：sRGB→线性，再乘 intensity×scale；结果按 LOCAL_LIGHT_LINEAR_PEAK_CAP 封顶 */
 function localLightLinearRgb(r: number, g: number, b: number, intensity: number, scale: number): [number, number, number] {
@@ -169,13 +169,13 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         float att = 1.15 / (1.0 + dist * dist);
         sum += spotClr * spotAtt * att;
     }
-    sum = clamp(sum, vec3(0.0), vec3(2.5));
+    sum = clamp(sum, vec3(0.0), vec3(8.0));
 
     vec3 linearColor = g2l(color.rgb);
     float f = uNightFade;
     // 全局亮度为 0 时仍允许点光/聚光生效（不施加 night fade，只应用局部灯光）
     if (abs(f) < 5e-5) {
-        vec3 outLin = clamp(linearColor * (vec3(1.0) + sum), vec3(0.0), vec3(10.0));
+        vec3 outLin = clamp(linearColor * (vec3(1.0) + sum), vec3(0.0), vec3(24.0));
         color.rgb = l2g(outLin);
         return;
     }
@@ -194,7 +194,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         // 调暗：同样让平行光参与，不再与调亮分支做“光源参与”差异化
         mult = mix(vec3(1.0), nightColor + dirContrib, -f);
     }
-    color.rgb = l2g(clamp(linearColor * mult, vec3(0.0), vec3(10.0)));
+    color.rgb = l2g(clamp(linearColor * mult, vec3(0.0), vec3(24.0)));
 }
 `;
 
@@ -352,12 +352,12 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         float att = 1.15 / (1.0 + dist * dist);
         sum += spotClr * spotAtt * att;
     }
-    sum = clamp(sum, vec3(0.0), vec3(2.5));
+    sum = clamp(sum, vec3(0.0), vec3(8.0));
 
     vec3 linearColor = g2l(color.rgb);
     float f = uNightFade;
     if (abs(f) < 5e-5) {
-        vec3 outLin = clamp(linearColor * (vec3(1.0) + sum), vec3(0.0), vec3(10.0));
+        vec3 outLin = clamp(linearColor * (vec3(1.0) + sum), vec3(0.0), vec3(24.0));
         color.rgb = l2g(outLin);
         return;
     }
@@ -374,7 +374,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     } else {
         mult = mix(vec3(1.0), nightColor + dirContrib, -f);
     }
-    color.rgb = l2g(clamp(linearColor * mult, vec3(0.0), vec3(10.0)));
+    color.rgb = l2g(clamp(linearColor * mult, vec3(0.0), vec3(24.0)));
 }
 `;
 
@@ -516,12 +516,12 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         let att = 1.15 / (1.0 + dist * dist);
         sum = sum + spotClr * spotAtt * att;
     }
-    sum = clamp(sum, vec3f(0.0), vec3f(2.5));
+    sum = clamp(sum, vec3f(0.0), vec3f(8.0));
 
     let linearColor = g2l((*color).rgb);
     let f = uniform.uNightFade;
     if (abs(f) < 5e-5) {
-        let outLin = clamp(linearColor * (vec3f(1.0) + sum), vec3f(0.0), vec3f(10.0));
+        let outLin = clamp(linearColor * (vec3f(1.0) + sum), vec3f(0.0), vec3f(24.0));
         (*color).rgb = l2g(outLin);
         return;
     }
@@ -538,7 +538,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     } else {
         mult = mix(vec3f(1.0), nightColor + dirContrib, -f);
     }
-    (*color).rgb = l2g(clamp(linearColor * mult, vec3f(0.0), vec3f(10.0)));
+    (*color).rgb = l2g(clamp(linearColor * mult, vec3f(0.0), vec3f(24.0)));
 }
 `;
 
@@ -702,12 +702,12 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         let att = 1.15 / (1.0 + dist * dist);
         sum = sum + spotClr * spotAtt * att;
     }
-    sum = clamp(sum, vec3f(0.0), vec3f(2.5));
+    sum = clamp(sum, vec3f(0.0), vec3f(8.0));
 
     let linearColor = g2l((*color).rgb);
     let f = uniform.uNightFade;
     if (abs(f) < 5e-5) {
-        let outLin = clamp(linearColor * (vec3f(1.0) + sum), vec3f(0.0), vec3f(10.0));
+        let outLin = clamp(linearColor * (vec3f(1.0) + sum), vec3f(0.0), vec3f(24.0));
         (*color).rgb = l2g(outLin);
         return;
     }
@@ -724,7 +724,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     } else {
         mult = mix(vec3f(1.0), nightColor + dirContrib, -f);
     }
-    (*color).rgb = l2g(clamp(linearColor * mult, vec3f(0.0), vec3f(10.0)));
+    (*color).rgb = l2g(clamp(linearColor * mult, vec3f(0.0), vec3f(24.0)));
 }
 `;
 

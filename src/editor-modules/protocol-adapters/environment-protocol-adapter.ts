@@ -47,6 +47,14 @@ function isUserControllableLight(light: LightWithId): boolean {
 const finiteOr = (value: unknown, fallback: number): number =>
     (typeof value === 'number' && Number.isFinite(value)) ? value : fallback;
 
+const normalizeSpotConeAngles = (inner: number, outer: number): { inner: number; outer: number } => {
+    const safeOuter = Math.max(0.01, Math.min(89.9, Number.isFinite(outer) ? outer : 45));
+    const rawInner = Number.isFinite(inner) ? inner : 25;
+    const maxInner = Math.max(0, safeOuter - 1);
+    const safeInner = Math.max(0, Math.min(maxInner, rawInner));
+    return { inner: safeInner, outer: safeOuter };
+};
+
 /** LIGHT_GLOBAL_SET：写 nightMode.fade，并触发 nightFade:set */
 export function applyLightGlobalSet(global: Global, value: number): void {
     const settings = global.settings as ExperienceSettings;
@@ -204,15 +212,19 @@ export function applyLightDetail(
         break;
     case 'LIGHT_INNER_ANGLE_SET':
         if (typeof payload.value === 'number') {
-            const v = Math.max(0, Math.min(180, payload.value));
-            (light as Record<string, unknown>).innerConeAngle = v;
+            const currentOuter = Number((light as any).outerConeAngle ?? 45);
+            const normalized = normalizeSpotConeAngles(payload.value, currentOuter);
+            (light as Record<string, unknown>).innerConeAngle = normalized.inner;
+            (light as Record<string, unknown>).outerConeAngle = normalized.outer;
             changed = true;
         }
         break;
     case 'LIGHT_OUTER_ANGLE_SET':
         if (typeof payload.value === 'number') {
-            const v = Math.max(0, Math.min(180, payload.value));
-            (light as Record<string, unknown>).outerConeAngle = v;
+            const currentInner = Number((light as any).innerConeAngle ?? 25);
+            const normalized = normalizeSpotConeAngles(currentInner, payload.value);
+            (light as Record<string, unknown>).innerConeAngle = normalized.inner;
+            (light as Record<string, unknown>).outerConeAngle = normalized.outer;
             changed = true;
         }
         break;
@@ -375,7 +387,7 @@ export function applyBloomIsLocalSet(global: Global, value: boolean): void {
     global.events.fire('postEffect:changed');
 }
 
-/** LIGHT_BRUSH_INTENSITY_UPDATE：根据亮灯区域 id，更新其绑定光源的 intensity（0-10） */
+/** LIGHT_BRUSH_INTENSITY_UPDATE：根据亮灯区域 id，更新其绑定光源的 intensity（0-100） */
 export function applyBloomLocalLightRegionIntensityUpdate(global: Global, regionId: string, value: number): void {
     if (!regionId) return;
     const settings = global.settings as ExperienceSettings;
@@ -387,7 +399,7 @@ export function applyBloomLocalLightRegionIntensityUpdate(global: Global, region
     const lighting = ensureLighting(settings);
     const light = (lighting.lights as any[]).find((l) => l && (l as any).id === region.linkedLightId);
     if (!light) return;
-    const clamped = Math.max(0, Math.min(10, value));
+    const clamped = Math.max(0, Math.min(100, value));
     (light as any).intensity = clamped;
     updatePointLightsFromSettings(global);
     global.events.fire('lighting:changed');
@@ -405,8 +417,12 @@ export function applyBloomLocalLightRegionInnerAngleSet(global: Global, regionId
     const lighting = ensureLighting(settings);
     const light = (lighting.lights as any[]).find((l) => l && (l as any).id === region.linkedLightId && (l as any).type === 'spot');
     if (!light) return;
-    const clamped = Math.max(0, Math.min(180, value));
-    (light as any).innerConeAngle = clamped;
+    const normalized = normalizeSpotConeAngles(
+        value,
+        Number((light as any).outerConeAngle ?? 45)
+    );
+    (light as any).innerConeAngle = normalized.inner;
+    (light as any).outerConeAngle = normalized.outer;
     updatePointLightsFromSettings(global);
     global.events.fire('lighting:changed');
 }
@@ -423,8 +439,12 @@ export function applyBloomLocalLightRegionOuterAngleSet(global: Global, regionId
     const lighting = ensureLighting(settings);
     const light = (lighting.lights as any[]).find((l) => l && (l as any).id === region.linkedLightId && (l as any).type === 'spot');
     if (!light) return;
-    const clamped = Math.max(0, Math.min(180, value));
-    (light as any).outerConeAngle = clamped;
+    const normalized = normalizeSpotConeAngles(
+        Number((light as any).innerConeAngle ?? 25),
+        value
+    );
+    (light as any).innerConeAngle = normalized.inner;
+    (light as any).outerConeAngle = normalized.outer;
     updatePointLightsFromSettings(global);
     global.events.fire('lighting:changed');
 }

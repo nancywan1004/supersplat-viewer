@@ -17,9 +17,8 @@ const MAX_POINT_LIGHTS = 10;
 const MAX_SPOT_LIGHTS = 10;
 // 光源可视化与真实 range 1:1 对齐（不再做额外视觉缩放）
 const LIGHT_VISUAL_SCALE = 1;
-// 实验性收紧真实聚光照明锥角，让主亮区更容易主观收敛到可视锥体内。
-// 仅影响实际 light / gsplat 打光，不改 settings 与 gizmo 展示。
-const EFFECTIVE_SPOT_CONE_ANGLE_SCALE = 0.5;
+// 真实聚光照明锥角与配置参数保持 1:1 对齐，避免与可视化锥体语义分叉。
+const EFFECTIVE_SPOT_CONE_ANGLE_SCALE = 1;
 
 /** 点光中心 / 聚光锥尖：小拾取球线框半径（世界单位） */
 const LIGHT_PICK_HANDLE_VISUAL_RADIUS = 0.24;
@@ -36,6 +35,15 @@ const isSpotLightConfig = (cfg: any): cfg is SpotLightConfig =>
 
 const finiteOr = (value: unknown, fallback: number): number =>
     (typeof value === 'number' && Number.isFinite(value)) ? value : fallback;
+
+function normalizeSpotConeAnglesDeg(innerConeDeg: number, outerConeDeg: number) {
+    const safeOuter = Math.max(0.01, Math.min(89.9, Number.isFinite(outerConeDeg) ? outerConeDeg : 45));
+    const rawInner = Number.isFinite(innerConeDeg) ? innerConeDeg : 25;
+    // 保证 inner < outer，避免过渡带塌缩导致“outer 看不出效果”。
+    const maxInner = Math.max(0, safeOuter - 1);
+    const safeInner = Math.max(0, Math.min(maxInner, rawInner));
+    return { safeInner, safeOuter };
+}
 
 const normalizeVec3 = (value: unknown, fallback: [number, number, number]): [number, number, number] => {
     const arr = Array.isArray(value) ? value : fallback;
@@ -59,10 +67,12 @@ function applyLightColorRgb(lightComp: NonNullable<Entity['light']>, r: number, 
 }
 
 function getEffectiveSpotConeAngles(innerConeDeg: number, outerConeDeg: number) {
-    const safeOuterDeg = Math.max(0, Math.min(89.9, Number.isFinite(outerConeDeg) ? outerConeDeg : 45));
-    const safeInnerDeg = Math.max(0, Math.min(safeOuterDeg, Number.isFinite(innerConeDeg) ? innerConeDeg : 25));
+    const { safeInner: safeInnerDeg, safeOuter: safeOuterDeg } = normalizeSpotConeAnglesDeg(innerConeDeg, outerConeDeg);
     const effectiveOuterDeg = Math.max(0.01, safeOuterDeg * EFFECTIVE_SPOT_CONE_ANGLE_SCALE);
-    const effectiveInnerDeg = Math.min(effectiveOuterDeg, safeInnerDeg * EFFECTIVE_SPOT_CONE_ANGLE_SCALE);
+    const effectiveInnerDeg = Math.min(
+        Math.max(0, effectiveOuterDeg - 1),
+        safeInnerDeg * EFFECTIVE_SPOT_CONE_ANGLE_SCALE
+    );
     return {
         effectiveInnerDeg,
         effectiveOuterDeg
@@ -545,9 +555,14 @@ const updateSpotGizmoShape = (spotEntity: Entity, range: number, outerConeAngleD
     const debugDisc = (spotEntity as any).__spotDebugDiscEntity as Entity | undefined;
     if (!visual) return;
     const r = Math.max(0.1, Number.isFinite(range) ? range : 1);
-    const outerDeg = Math.max(0, Math.min(180, Number.isFinite(outerConeAngleDeg) ? outerConeAngleDeg : 45));
+    const cfg = (spotEntity as any).__lightConfig as SpotLightConfig | undefined;
+    const outerDegInput = Number.isFinite(outerConeAngleDeg) ? outerConeAngleDeg : 45;
+    // PlayCanvas spot 角度语义是“半角”（轴线到锥面），可视化半径应为 range * tan(angle)
+    const cfgInner = Number.isFinite(cfg?.innerConeAngle) ? Number(cfg?.innerConeAngle) : NaN;
+    const fallbackInner = Number.isFinite(cfgInner) ? cfgInner : outerDegInput;
+    const { safeInner: innerDeg, safeOuter: outerDeg } = normalizeSpotConeAnglesDeg(fallbackInner, outerDegInput);
     const outerRad = outerDeg * Math.PI / 180;
-    const outerRadius = r * Math.tan(outerRad * 0.5);
+    const outerRadius = r * Math.tan(outerRad);
     // 单位锥体：锥尖(0,0,0) → 底面y=-1，底面半径=1
     visual.setLocalPosition(0, 0, 0);
     visual.setLocalScale(
@@ -564,13 +579,10 @@ const updateSpotGizmoShape = (spotEntity: Entity, range: number, outerConeAngleD
         );
     }
 
-    // 内圈半径来源：light.innerConeAngle，若无则退化为 outerAngle
+    // 内圈与外圈统一按“配置角度语义”计算，避免与实际 light 的实验性角度缩放耦合
     if (innerRing) {
-        const lightAny = spotEntity.light as any | undefined;
-        let innerDeg = typeof lightAny?.innerConeAngle === 'number' ? lightAny.innerConeAngle : outerDeg;
-        innerDeg = Math.max(0, Math.min(innerDeg, outerDeg));
         const innerRad = innerDeg * Math.PI / 180;
-        const innerRadius = r * Math.tan(innerRad * 0.5);
+        const innerRadius = r * Math.tan(innerRad);
         innerRing.setLocalPosition(0, 0, 0);
         innerRing.setLocalScale(
             Math.max(innerRadius * LIGHT_VISUAL_SCALE, 0.01),
