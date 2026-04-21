@@ -722,6 +722,7 @@ class CameraManager {
 
         // 单击拾取：用于光源等场景对象选中（不改变相机）
         events.on('scenePointerWorldClick', (payload: Vec3 | { position: Vec3; clientX?: number; clientY?: number }) => {
+            if (state.lightPlacementActive) return;
             const position = (payload as { position?: Vec3 })?.position ?? (payload as Vec3);
             if (!position) return;
             const clientX = (payload as { clientX?: number })?.clientX;

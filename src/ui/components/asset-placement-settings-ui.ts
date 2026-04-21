@@ -66,16 +66,16 @@ function renderAssetPreviewGrid(
         slot.appendChild(nameSpan);
         slot.appendChild(deleteBtn);
 
-        // 点击资产格子：直接在相机前方放置（与 ASSET_PLACE 协议一致，不再拖拽到画布）
+        // 点击资产格子：进入一次性放置态，随后在画布点击一次完成放置
         slot.addEventListener('dragstart', (e) => e.preventDefault());
         slot.addEventListener('click', (e) => {
             if ((e.target as HTMLElement).closest('.asset-preview-delete')) return;
-            if (editUiTransport === 'message-bridge') {
-                // 通过协议只下发可结构化克隆的最小信息（id）；实际 Asset 对象由 message-bridge 在 state.uploadedAssets 中查找
-                sendEditProtocolMessage({ type: 'ASSET_PLACE', value: { id: item.id } });
-            } else {
-                events.fire('assetPlacement:place', { value: item });
+            if (editUiTransport !== 'message-bridge') {
+                events.fire('assetPlacement:start', { value: item });
+                return;
             }
+            // 通过协议只下发可结构化克隆的最小信息（id）；实际 Asset 对象由 message-bridge 在 state.uploadedAssets 中查找
+            sendEditProtocolMessage({ type: 'ASSET_PLACE', value: { id: item.id } });
         });
 
         gridEl.appendChild(slot);

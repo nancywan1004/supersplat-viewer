@@ -1,10 +1,9 @@
 import type { Global } from '../../types';
 import type { ExperienceSettings } from '../../schemas/v2';
 import { updatePointLightsFromSettings } from '../../light';
-import { getPositionInFrontOfCamera } from '../../asset-placement-handler';
 import type { PointLightConfig, DirectionalLightConfig, SpotLightConfig } from '../../schemas/v2';
 import { pushEditHistory } from '../../edit-history';
-import { ensureNightMode, ensureLighting, ensureBloom, ensureBloomEditorSession } from '../../settings-serialize/settings-serialize-helper';
+import { ensureNightMode, ensureLighting } from '../../settings-serialize/settings-serialize-helper';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 import { applyEnvironmentPreviewVisualPolicy } from '../../editor-modules/environment-facade';
 
@@ -452,85 +451,16 @@ export function initLightingUI(global: Global): () => void {
     if (addPointLightBtn && pointLightsList) {
         addPointLightBtn.addEventListener('click', () => {
             const lighting = ensureLightingLocal();
-            const settingsAny = global.settings as ExperienceSettings;
-            const bloom = ensureBloom(settingsAny);
-            const ses = ensureBloomEditorSession(settingsAny);
-            const center = ses.draftLightRegionCenter ?? null;
             const pointCount = lighting.lights.filter((l: any) => !isDirectional(l) && !isSpot(l)).length;
             if (pointCount >= MAX_POINT_LIGHTS) return;
-            const basePos: [number, number, number] = (() => {
-                if (center) return [center[0], center[1], center[2]];
-                const camPos = getPositionInFrontOfCamera(global);
-                return [camPos.x, camPos.y, camPos.z];
-            })();
             const nextId = generateNextLightId();
-            const cfgPoint: any = { position: basePos, color: [1, 1, 1], intensity: 1, range: 1, enabled: true };
-            cfgPoint.id = nextId;
-            lighting.lights.push(cfgPoint);
-            // 仅当当前激活区域尚未绑灯时才自动绑定，避免完成落盘已自动绑灯后再加灯被错误覆盖
-            if (ses.activeLocalLightRegionId && Array.isArray(bloom.localLightRegions)) {
-                const region = bloom.localLightRegions.find((r) => r && r.id === ses.activeLocalLightRegionId);
-                if (region) {
-                    const cur = (region as any).linkedLightId as string | null | undefined;
-                    const unbound = cur == null || (typeof cur === 'string' && cur.trim().length === 0);
-                    if (unbound) {
-                        (region as any).linkedLightId = nextId;
-                    }
-                }
-            }
-            ses.draftLightRegionCenter = null;
-            renderPointLightsList();
-            updatePointLightsFromSettings(global);
-            events.fire('lighting:changed');
-            // 先创建场景实体再选中，避免「selectedLightId 已切换但实体尚未存在」的瞬时状态。
-            emitLightSelect(nextId, false);
-            pushEditHistorySafe();
+            sendEditProtocolMessage({ type: 'LIGHT_ADD', id: nextId, isThreeSixty: true });
         });
     }
     if (addSpotLightBtn && pointLightsList) {
         addSpotLightBtn.addEventListener('click', () => {
-            const lighting = ensureLightingLocal();
-            const settingsAny = global.settings as ExperienceSettings;
-            const bloom = ensureBloom(settingsAny);
-            const ses = ensureBloomEditorSession(settingsAny);
-            const center = ses.draftLightRegionCenter ?? null;
-            const basePos: [number, number, number] = (() => {
-                if (center) return [center[0], center[1], center[2]];
-                const camPos = getPositionInFrontOfCamera(global);
-                return [camPos.x, camPos.y, camPos.z];
-            })();
             const nextId = generateNextLightId();
-            const cfgSpot: any = {
-                id: nextId,
-                type: 'spot',
-                position: basePos,
-                color: [1, 1, 1],
-                intensity: 1,
-                pitch: -45,
-                yaw: 0,
-                innerConeAngle: 25,
-                outerConeAngle: 45,
-                range: 1,
-                enabled: true
-            };
-            lighting.lights.push(cfgSpot);
-            if (ses.activeLocalLightRegionId && Array.isArray(bloom.localLightRegions)) {
-                const region = bloom.localLightRegions.find((r) => r && r.id === ses.activeLocalLightRegionId);
-                if (region) {
-                    const cur = (region as any).linkedLightId as string | null | undefined;
-                    const unbound = cur == null || (typeof cur === 'string' && cur.trim().length === 0);
-                    if (unbound) {
-                        (region as any).linkedLightId = nextId;
-                    }
-                }
-            }
-            ses.draftLightRegionCenter = null;
-            renderPointLightsList();
-            updatePointLightsFromSettings(global);
-            events.fire('lighting:changed');
-            // 先创建场景实体再选中，避免「selectedLightId 已切换但实体尚未存在」的瞬时状态。
-            emitLightSelect(nextId, false);
-            pushEditHistorySafe();
+            sendEditProtocolMessage({ type: 'LIGHT_ADD', id: nextId, isThreeSixty: false });
         });
     }
     if (pointLightsList) {

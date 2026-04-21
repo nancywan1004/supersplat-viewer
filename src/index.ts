@@ -301,6 +301,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         // 光源编辑相关状态（环境模块）
         selectedLightId: null,
         lightTransformMode: 'move',
+        lightPlacementActive: false,
 
         // 导出 VFX 视频时的锁，防止实时更新干扰离线渲染
         isExportingVfxVideo: false,

@@ -179,6 +179,8 @@ type State = {
     selectedLightId?: string | null;
     /** 光源变换模式（与环境模块底部工具栏联动） */
     lightTransformMode?: LightTransformMode | null;
+    /** 光源放置态：true 时场景下一次有效点击将用于新建光源落点 */
+    lightPlacementActive?: boolean;
 };
 
 /**

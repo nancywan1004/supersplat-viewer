@@ -7,7 +7,6 @@ import { Global } from './types';
 import type { AssetLibraryItem } from './types';
 import type { EditLeftModule } from './types';
 import type { AnnotationData } from './annotation-toolbar/types';
-import { getPositionInFrontOfCamera } from './asset-placement-handler';
 import {
     serializeExperienceSettings,
     getComparableSettingsString,
@@ -628,11 +627,27 @@ const initPostMessageBridge = (global: Global) => {
         postToParent('SCENE_ASSET_SELECTED', { id });
     });
 
+    events.on('sceneAsset:placed', (data?: { id?: string | null; source?: SelectionSource }) => {
+        const source = data?.source ?? 'unknown';
+        if (source !== 'scene') return;
+        const id = typeof data?.id === 'string' ? data.id : null;
+        if (!id) return;
+        postToParent('SCENE_ASSET_PLACED', { id });
+    });
+
     events.on('sceneLight:selected', (data: { id: string | null; source?: SelectionSource }) => {
         const source = data?.source ?? 'unknown';
         if (source !== 'scene') return;
         const id = data.id ?? null;
         postToParent('SCENE_LIGHT_SELECTED', { id });
+    });
+
+    events.on('sceneLight:placed', (data?: { id?: string | null; source?: SelectionSource }) => {
+        const source = data?.source ?? 'unknown';
+        if (source !== 'scene') return;
+        const id = typeof data?.id === 'string' ? data.id : null;
+        if (!id) return;
+        postToParent('SCENE_LIGHT_PLACED', { id });
     });
 
     events.on('annotation:selected', (data: { id: string; source?: SelectionSource }) => {

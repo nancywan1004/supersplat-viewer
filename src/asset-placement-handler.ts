@@ -6,6 +6,7 @@ import type { AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from './type
 import { getSelectedSceneEntity } from './state-selectors';
 import { Entity } from 'playcanvas';
 import { loadGsplatAsset } from './loaders/gsplat-asset-loader';
+import { pickWorldFromClientXY } from './picker';
 
 const PLACED_ASSETS_NAME = 'placedAssets';
 
@@ -38,7 +39,7 @@ function getPlacedAssetsParent(app: AppBase): Entity {
     return parent;
 }
 
-/** 相机前方距离，用于 ASSET_PLACE 在相机前方放置 */
+/** 相机前方距离，用于兜底放置位置 */
 const CAMERA_FRONT_DISTANCE = 5;
 
 function getSceneAssetsRestoreController(global: Global): SceneAssetsRestoreController {
@@ -53,7 +54,7 @@ function getSceneAssetsRestoreController(global: Global): SceneAssetsRestoreCont
 }
 
 /**
- * 计算相机前方某距离处的世界坐标（用于协议 ASSET_PLACE「在相机前方 instantiate」）
+ * 计算相机前方某距离处的世界坐标（用于兜底放置）
  */
 export function getPositionInFrontOfCamera(global: Global, distance: number = CAMERA_FRONT_DISTANCE): Vec3 {
     const cam = global.camera;
@@ -312,7 +313,7 @@ export async function placeAsset(global: Global, item: AssetLibraryItem, worldPo
 
 /**
  * 协议放置时，父级常只传 url/name/type，不会携带已加载的 PlayCanvas asset 实例。
- * 这里补齐 mesh/gaussian 的 asset，保证 ASSET_PLACE 只传 URL 也可直接放置。
+ * 这里补齐 mesh/gaussian 的 asset，保证 ASSET_PLACE 只传 URL 也可放置。
  */
 async function hydrateProtocolPlaceItem(global: Global, item: AssetLibraryItem): Promise<AssetLibraryItem | null> {
     if (item.type === 'image') return item;
@@ -519,6 +520,13 @@ export function initAssetPlacementHandler(
     const height = () => app.graphicsDevice.height;
 
     let sceneAssetPicker: any = null;
+    let pendingPlacement: { value: AssetLibraryItem; sceneEntityId?: string } | null = null;
+    let pendingPlacementInFlight = false;
+
+    const clearPendingPlacement = () => {
+        pendingPlacement = null;
+        pendingPlacementInFlight = false;
+    };
 
     const onPointerDown = (e: PointerEvent) => {
         if (!state.editMode || state.editLeftModule !== 'asset' || e.button !== 0) return;
@@ -532,6 +540,37 @@ export function initAssetPlacementHandler(
         const offsetX = e.clientX - rect.left;
         const offsetY = e.clientY - rect.top;
         if (offsetX < 0 || offsetY < 0 || offsetX > rect.width || offsetY > rect.height) return;
+
+        if (pendingPlacement) {
+            if (pendingPlacementInFlight) return;
+            pendingPlacementInFlight = true;
+            void (async () => {
+                try {
+                    const worldPos = await pickWorldFromClientXY(global, e.clientX, e.clientY);
+                    if (!worldPos) return;
+                    const payload = pendingPlacement;
+                    if (!payload) return;
+                    const hydrated = await hydrateProtocolPlaceItem(global, payload.value);
+                    if (!hydrated) return;
+                    const entry = await placeAsset(global, hydrated, worldPos, false);
+                    if (!entry) return;
+                    if (typeof payload.sceneEntityId === 'string' && payload.sceneEntityId.trim().length > 0) {
+                        entry.id = payload.sceneEntityId;
+                    }
+                    state.selectedSceneEntityId = entry.id;
+                    events.fire('sceneAsset:selected');
+                    events.fire('sceneAsset:placed', { id: entry.id, source: 'scene' });
+                    requestAnimationFrame(() => {
+                        events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
+                    });
+                    deps.pushEditHistory?.(global, 'place asset');
+                    clearPendingPlacement();
+                } finally {
+                    pendingPlacementInFlight = false;
+                }
+            })();
+            return;
+        }
 
         const list = state.scenePlacedEntities ?? [];
         if (list.length === 0) return;
@@ -634,28 +673,16 @@ export function initAssetPlacementHandler(
     };
 
     canvas.addEventListener('pointerdown', onPointerDown);
-    const onPlaceFromProtocol = async (payload: { value: AssetLibraryItem; sceneEntityId?: string }) => {
-        const pos = getPositionInFrontOfCamera(global);
-        const hydrated = await hydrateProtocolPlaceItem(global, payload.value);
-        if (!hydrated) return;
-        const entry = await placeAsset(global, hydrated, pos, true);
-        if (entry) {
-            if (typeof payload.sceneEntityId === 'string' && payload.sceneEntityId.trim().length > 0) {
-                entry.id = payload.sceneEntityId;
-            }
-            state.selectedSceneEntityId = entry.id;
-            events.fire('sceneAsset:selected');
-            // 放置完成后下一帧统一走资产 framing，避免首次放置仍停留在旧焦点。
-            requestAnimationFrame(() => {
-                events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
-            });
-            deps.pushEditHistory?.(global, 'place asset');
-        }
+    const onPlaceStart = (payload: { value: AssetLibraryItem; sceneEntityId?: string }) => {
+        pendingPlacement = payload;
+        pendingPlacementInFlight = false;
     };
 
     events.on('assetEdit:copy', onCopy);
     events.on('assetEdit:delete', onDelete);
-    events.on('assetPlacement:place', onPlaceFromProtocol);
+    events.on('assetPlacement:start', onPlaceStart);
+    events.on('assetFacade:exit', clearPendingPlacement);
+    events.on('assetFacade:editModeExit', clearPendingPlacement);
 
     return () => {
         canvas.removeEventListener('pointerdown', onPointerDown);
@@ -665,6 +692,8 @@ export function initAssetPlacementHandler(
         }
         events.off('assetEdit:copy', onCopy);
         events.off('assetEdit:delete', onDelete);
-        events.off('assetPlacement:place', onPlaceFromProtocol);
+        events.off('assetPlacement:start', onPlaceStart);
+        events.off('assetFacade:exit', clearPendingPlacement);
+        events.off('assetFacade:editModeExit', clearPendingPlacement);
     };
 }

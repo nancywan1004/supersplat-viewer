@@ -41,6 +41,39 @@ function applyEnvironmentPreviewVisualPolicy(global: Global): void {
 
 class EnvironmentFacade implements ModuleFacade {
     readonly module = 'environment' as const;
+    private pendingLightPlacement: { id: string; isThreeSixty: boolean } | null = null;
+    private detachScenePointerListener: (() => void) | null = null;
+
+    setScenePointerListenerCleanup(cleanup: () => void): void {
+        this.detachScenePointerListener = cleanup;
+    }
+
+    private clearPendingLightPlacement(ctx: ModuleContext): void {
+        this.pendingLightPlacement = null;
+        ctx.state.lightPlacementActive = false;
+    }
+
+    private startLightPlacement(ctx: ModuleContext, id: string, isThreeSixty: boolean): void {
+        this.pendingLightPlacement = { id, isThreeSixty };
+        ctx.state.lightPlacementActive = true;
+    }
+
+    handleScenePointerWorldClick(global: Global, payload: { position?: { x: number; y: number; z: number } } | { x: number; y: number; z: number }): void {
+        const pending = this.pendingLightPlacement;
+        if (!pending) return;
+        if (!global.state.editMode || global.state.editLeftModule !== 'environment') return;
+        const position = (payload as { position?: { x: number; y: number; z: number } })?.position ?? payload;
+        if (!position) return;
+        const x = Number((position as { x?: number }).x);
+        const y = Number((position as { y?: number }).y);
+        const z = Number((position as { z?: number }).z);
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
+
+        this.pendingLightPlacement = null;
+        global.state.lightPlacementActive = false;
+        applyLightAdd(global, pending.id, pending.isThreeSixty, [x, y, z]);
+        global.events.fire('sceneLight:placed', { id: pending.id, source: 'scene' as SelectionSource });
+    }
 
     private syncPreviewVisualPolicy(ctx: ModuleContext): void {
         applyEnvironmentPreviewVisualPolicy(ctx.global);
@@ -54,6 +87,7 @@ class EnvironmentFacade implements ModuleFacade {
     }
 
     onExit(ctx: ModuleContext): void {
+        this.clearPendingLightPlacement(ctx);
         // 离开 environment（切到 null 或其他模块）时，若当前是 draft 区域则清理草稿与笔刷会话，
         // 避免笔刷模式残留在非环境模块。
         const bloomSes = ensureBloomEditorSession(ctx.global.settings as any);
@@ -71,12 +105,19 @@ class EnvironmentFacade implements ModuleFacade {
     }
 
     onEditModeExit(ctx: ModuleContext): void {
+        this.clearPendingLightPlacement(ctx);
         this.onExit(ctx);
         ctx.events.fire('environmentFacade:editModeExit');
     }
 
     onPreviewModeChanged(ctx: ModuleContext): void {
         this.syncPreviewVisualPolicy(ctx);
+    }
+
+    dispose(): void {
+        this.pendingLightPlacement = null;
+        this.detachScenePointerListener?.();
+        this.detachScenePointerListener = null;
     }
 
     handleCommand(ctx: ModuleContext, command: ModuleCommand): void {
@@ -139,7 +180,7 @@ class EnvironmentFacade implements ModuleFacade {
         case 'LIGHT_ADD': {
             if (typeof pl.id === 'string') {
                 const t = pl.isThreeSixty;
-                applyLightAdd(g, pl.id, typeof t === 'boolean' ? t : undefined);
+                this.startLightPlacement(ctx, pl.id, typeof t === 'boolean' ? t : true);
             }
             break;
         }
@@ -209,6 +250,13 @@ class EnvironmentFacade implements ModuleFacade {
 
 const initEnvironmentFacade = (global: Global): ModuleFacade => {
     const facade = new EnvironmentFacade();
+    const onScenePointerWorldClick = (payload: { position?: { x: number; y: number; z: number } } | { x: number; y: number; z: number }) => {
+        facade.handleScenePointerWorldClick(global, payload);
+    };
+    global.events.on('scenePointerWorldClick', onScenePointerWorldClick);
+    facade.setScenePointerListenerCleanup(() => {
+        global.events.off('scenePointerWorldClick', onScenePointerWorldClick);
+    });
     const orchestrator = (global as any).__moduleOrchestrator as { registerFacade: (f: ModuleFacade) => void } | undefined;
     orchestrator?.registerFacade(facade);
     (global as any).__environmentFacade = facade;

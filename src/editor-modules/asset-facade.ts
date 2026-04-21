@@ -74,7 +74,7 @@ class AssetFacade implements ModuleFacade {
                     : (typeof incoming.sceneEntityId === 'string' && incoming.sceneEntityId.trim().length > 0
                         ? incoming.sceneEntityId
                         : undefined);
-            events.fire('assetPlacement:place', { value: finalValue, sceneEntityId });
+            events.fire('assetPlacement:start', { value: finalValue, sceneEntityId });
             break;
         }
         case 'ASSET_SHOW_HIDE_SET': {
