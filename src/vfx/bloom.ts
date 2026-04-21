@@ -1194,13 +1194,18 @@ export class BloomController {
         const sizeX = aabbMax.x - aabbMin.x;
         const sizeY = aabbMax.y - aabbMin.y;
         const sizeZ = aabbMax.z - aabbMin.z;
+        if (!Number.isFinite(sizeX) || !Number.isFinite(sizeY) || !Number.isFinite(sizeZ)) {
+            return false;
+        }
         const camPos = camera.getPosition();
         const center = new Vec3(
             (aabbMin.x + aabbMax.x) * 0.5,
             (aabbMin.y + aabbMax.y) * 0.5,
             (aabbMin.z + aabbMax.z) * 0.5
         );
-        const centerDistance = Math.max(1e-3, center.distance(camPos));
+        const distRaw = center.distance(camPos);
+        // Math.max(1e-3, NaN) 仍为 NaN，会污染 pixelsPerUnit → maskRadius；相机过渡偶发异常位姿时需兜底。
+        const centerDistance = Number.isFinite(distRaw) ? Math.max(1e-3, distRaw) : 1e-3;
         const fovDeg = (sceneCam as { fov?: number }).fov ?? 60;
         const tanHalfFov = Math.tan((fovDeg * Math.PI / 180) * 0.5);
         const pixelsPerUnit = Math.abs(tanHalfFov) > 1e-6
@@ -1217,6 +1222,10 @@ export class BloomController {
         const maskRadius = Math.max(8, Math.min(24, 8 + voxelMaskPx * 2.4));
         // 轻量平滑强度：近景略强，远景较弱。
         const blurPx = Math.max(0.5, Math.min(2.2, 0.5 + voxelMaskPx * 0.3));
+        // 相机位姿/FOV 未就绪或数值异常时，避免 createRadialGradient 收到 NaN/Infinity（点路径已有同类校验）。
+        if (!Number.isFinite(maskRadius) || !Number.isFinite(blurPx) || maskRadius <= 0) {
+            return false;
+        }
 
         let pixels: Uint8Array | undefined;
         try {
@@ -1243,8 +1252,14 @@ export class BloomController {
                     worldPos.z = aabbMin.z + (iz + 0.5) / VOLUME_TEX_WIDTH * sizeZ;
                     sceneCam.worldToScreen(worldPos, canvasWidth, canvasHeight, screenPos);
                     if (screenPos.z < 0) continue;
+                    if (!Number.isFinite(screenPos.x) || !Number.isFinite(screenPos.y) || !Number.isFinite(screenPos.z)) {
+                        continue;
+                    }
                     const maskX = (screenPos.x / canvasWidth) * MASK_SIZE;
                     const maskY = (1 - screenPos.y / canvasHeight) * MASK_SIZE;
+                    if (!Number.isFinite(maskX) || !Number.isFinite(maskY)) {
+                        continue;
+                    }
                     const g = Math.min(1, val / 255);
                     const gray = Math.round(g * 255);
                     const h = gray.toString(16).padStart(2, '0');
