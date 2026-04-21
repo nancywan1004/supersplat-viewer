@@ -16,6 +16,9 @@ import path from 'path';
 import dts from 'rollup-plugin-dts';
 import crypto from 'crypto';
 
+/** PlayCanvas ESM vendor（与 import map / src/index.html 中文件名一致） */
+const PLAYCANVAS_VENDOR_FILE = 'playcanvas-2.16.1.js';
+
 // 判断是否需要生成完整 package
 const isPackageBuild = process.env.BUILD_PACKAGE === 'true';
 
@@ -225,6 +228,7 @@ const buildCss = {
 // --- Public 构建（本地开发预览，不使用 hash） ---
 const buildPublic = {
     input: 'src/index.ts',
+    external: ['playcanvas'],
     output: {
         dir: 'public',
         format: 'esm',
@@ -361,7 +365,11 @@ const buildDist = {
         },
         { src: 'settings.json', dest: 'dist' },
         // 标注热点 SVG 等图标资源，供 dist 产物直接访问 assets/icons/*
-        { src: 'public/assets/icons/**/*', dest: 'dist/assets/icons' }
+        { src: 'public/assets/icons/**/*', dest: 'dist/assets/icons' },
+        {
+          src: `public/vendor/${PLAYCANVAS_VENDOR_FILE}`,
+          dest: 'dist/vendor'
+        }
       ]
     }),
     terser({

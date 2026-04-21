@@ -6,11 +6,11 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
         <base href="">
         <link rel="stylesheet" href="./index.css">
-        <!-- Import map for playcanvas CDN -->
+        <!-- Import map：PlayCanvas 引擎走本地 vendor（dist 构建会同步复制 vendor） -->
         <script type="importmap">
         {
             "imports": {
-                "playcanvas": "https://cdn.jsdmirror.cn/npm/playcanvas@2.16.1/+esm"
+                "playcanvas": "./vendor/playcanvas-2.16.1.js"
             }
         }
         </script>
