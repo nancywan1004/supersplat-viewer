@@ -51,7 +51,6 @@ export class PlacementMode {
         }
 
         this.state = PlacementState.Following;
-        this.setPlacementCursor(true);
         this.startFollowing();
     }
 
@@ -68,7 +67,6 @@ export class PlacementMode {
         this.detachPointerClickClaimHandler?.();
         this.detachPointerClickClaimHandler = null;
 
-        this.setPlacementCursor(false);
         this.enableInteractions();
         this.state = PlacementState.Inactive;
         this.placeholderAnnotation = null;
@@ -136,17 +134,6 @@ export class PlacementMode {
      */
     setPlaceholderAnnotation(annotation: AnnotationEntity): void {
         this.placeholderAnnotation = annotation;
-    }
-
-    /**
-     * 设置放置模式下的光标样式（使用 crosshair 表示十字拾取光标）
-     * @private
-     */
-    private setPlacementCursor(active: boolean): void {
-        const canvas = this.global.app.graphicsDevice.canvas as HTMLCanvasElement;
-        if (canvas) {
-            canvas.style.cursor = active ? 'crosshair' : '';
-        }
     }
 
     /**

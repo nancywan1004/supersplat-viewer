@@ -1,5 +1,6 @@
 import type { AnnotationData } from '../annotation-toolbar/types';
 import type { Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
+import { setPlacementCursorActive } from '../placement-cursor';
 
 type AnnotationManagerApi = {
     startPlacementWithId?: (id: string) => void;
@@ -46,6 +47,7 @@ class AnnotationFacade implements ModuleFacade {
     onExit(ctx: ModuleContext): void {
         const manager = this.manager(ctx);
         // 兜底清理：无论 UI 是否挂载都保证选中与 gizmo 收敛
+        setPlacementCursorActive(ctx.global, false);
         ctx.events.fire('gizmo:detach');
         manager?.deselectAnnotation?.();
         ctx.events.fire('annotationFacade:exit');
@@ -66,10 +68,14 @@ class AnnotationFacade implements ModuleFacade {
         switch (command.type) {
         case 'ANNOTATION_PLACEMENT_START': {
             const id = (command.payload as { id?: string } | undefined)?.id;
-            if (typeof id === 'string') am?.startPlacementWithId?.(id);
+            if (typeof id === 'string') {
+                setPlacementCursorActive(ctx.global, true);
+                am?.startPlacementWithId?.(id);
+            }
             break;
         }
         case 'ANNOTATION_PLACEMENT_CANCEL':
+            setPlacementCursorActive(ctx.global, false);
             am?.cancelAnnotation?.();
             break;
         case 'ANNOTATION_CONFIRM': {
@@ -81,6 +87,7 @@ class AnnotationFacade implements ModuleFacade {
             const placeholder = am.getPlaceholderAnnotation?.();
             if (placeholder && placeholder.id === id) {
                 am.confirmAnnotation?.(formData);
+                setPlacementCursorActive(ctx.global, false);
             } else {
                 am.updateAnnotation?.(id, formData);
             }

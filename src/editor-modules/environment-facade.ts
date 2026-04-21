@@ -25,6 +25,7 @@ import {
 import type { Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 import type { InputArbiter } from '../input-arbiter';
 import { isEnvironmentDebugVisualEnabled } from '../state-selectors';
+import { setPlacementCursorActive } from '../placement-cursor';
 
 type Payload = Record<string, unknown>;
 
@@ -51,10 +52,12 @@ class EnvironmentFacade implements ModuleFacade {
 
     private clearPendingLightPlacement(ctx: ModuleContext): void {
         this.pendingLightPlacement = null;
+        setPlacementCursorActive(ctx.global, false);
     }
 
     private startLightPlacement(ctx: ModuleContext, id: string, isThreeSixty: boolean): void {
         this.pendingLightPlacement = { id, isThreeSixty };
+        setPlacementCursorActive(ctx.global, true);
     }
 
     handlePointerClickClaim(global: Global, worldPosition: { x: number; y: number; z: number } | null): boolean {
@@ -69,6 +72,7 @@ class EnvironmentFacade implements ModuleFacade {
         if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return true;
 
         this.pendingLightPlacement = null;
+        setPlacementCursorActive(global, false);
         applyLightAdd(global, pending.id, pending.isThreeSixty, [x, y, z]);
         global.events.fire('sceneLight:placed', { id: pending.id, source: 'scene' as SelectionSource });
         return true;

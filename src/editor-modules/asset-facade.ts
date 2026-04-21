@@ -1,7 +1,13 @@
 import type { AssetLibraryItem, Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
+import { setPlacementCursorActive } from '../placement-cursor';
 
 class AssetFacade implements ModuleFacade {
     readonly module = 'asset' as const;
+    private detachSceneAssetPlacedListener: (() => void) | null = null;
+
+    setSceneAssetPlacedListenerCleanup(cleanup: () => void): void {
+        this.detachSceneAssetPlacedListener = cleanup;
+    }
 
     private resolveSceneEntityId(
         ctx: ModuleContext,
@@ -28,6 +34,7 @@ class AssetFacade implements ModuleFacade {
 
     onExit(ctx: ModuleContext): void {
         const { state, events } = ctx;
+        setPlacementCursorActive(ctx.global, false);
         if (state.selectedSceneEntityId) {
             state.selectedSceneEntityId = null;
             events.fire('sceneAsset:selected');
@@ -43,6 +50,11 @@ class AssetFacade implements ModuleFacade {
     }
 
     onPreviewModeChanged(_ctx: ModuleContext): void {}
+
+    dispose(): void {
+        this.detachSceneAssetPlacedListener?.();
+        this.detachSceneAssetPlacedListener = null;
+    }
 
     handleCommand(ctx: ModuleContext, command: ModuleCommand): void {
         const { state, events } = ctx;
@@ -74,6 +86,7 @@ class AssetFacade implements ModuleFacade {
                     : (typeof incoming.sceneEntityId === 'string' && incoming.sceneEntityId.trim().length > 0
                         ? incoming.sceneEntityId
                         : undefined);
+            setPlacementCursorActive(ctx.global, true);
             events.fire('assetPlacement:start', { value: finalValue, sceneEntityId });
             break;
         }
@@ -153,6 +166,13 @@ class AssetFacade implements ModuleFacade {
 
 const initAssetFacade = (global: Global): ModuleFacade => {
     const facade = new AssetFacade();
+    const onSceneAssetPlaced = () => {
+        setPlacementCursorActive(global, false);
+    };
+    global.events.on('sceneAsset:placed', onSceneAssetPlaced);
+    facade.setSceneAssetPlacedListenerCleanup(() => {
+        global.events.off('sceneAsset:placed', onSceneAssetPlaced);
+    });
     const orchestrator = (global as any).__moduleOrchestrator as { registerFacade: (f: ModuleFacade) => void } | undefined;
     orchestrator?.registerFacade(facade);
     (global as any).__assetFacade = facade;
