@@ -544,7 +544,7 @@ export class RevealController {
         try {
             const script = this.gsplatEntity.script.create(GsplatRevealGrowthWave) as any;
             if (script) {
-                // 默认配置：Phase 1 生长固定约 7s，Phase 2 光圈复原固定 1.5s，互不干扰
+                // 默认配置：Phase 1 生长固定约 7s，Phase 2 光圈复原固定 7s，互不干扰
                 const defaultGrowthSpeed = 5.0;
                 const defaultGrowthDuration = 7.0;
                 const defaultRecoverDuration = 7.0;
@@ -557,14 +557,16 @@ export class RevealController {
                 
                 script.growthSpeed = defaultGrowthSpeed * scale;
                 script.growthDuration = defaultGrowthDuration * scale;
-                script.recoverDuration = defaultRecoverDuration; // 固定 1.5s，不参与 scale
+                script.recoverDuration = defaultRecoverDuration; // 固定 7s，不参与 scale
                 script.noiseIntensity = 2.8;
                 script.scatterDistance = 4.0;
                 script.minSize = 0.15;
-                // Phase 2 光圈半径：优先用 config.radius；若有 bbox 则至少为 bbox 外接球半径，保证光圈覆盖全场景
+                // Phase 2 光圈半径：settings.revealEffect.radius 与 bbox 外接球取大，大场景仍保证扫描覆盖
                 const defaultEndRadius = 50;
-                let endRadius = this.config.radius ?? defaultEndRadius;
-                script.endRadius = endRadius;
+                const bboxRadius = this.bbox ? this.bbox.halfExtents.length() : 0;
+                const fromSettings = this.config.radius ?? defaultEndRadius;
+                const fromBbox = bboxRadius > 1e-6 ? bboxRadius * 1.05 : 0;
+                script.endRadius = Math.max(defaultEndRadius, fromSettings, fromBbox);
                 
                 // 设置 topY 和 bottomY（基于 bbox 或默认值）
                 // 注意：growth-wave 是从 bottom 到 top 传播，shader 期望 bottomY > topY
@@ -612,6 +614,8 @@ export class RevealController {
                     growthDuration: script.growthDuration,
                     recoverDuration: script.recoverDuration,
                     endRadius: script.endRadius,
+                    bboxRadius,
+                    revealRadius: fromSettings,
                     noiseIntensity: script.noiseIntensity,
                     scatterDistance: script.scatterDistance,
                     minSize: script.minSize,
