@@ -33,7 +33,9 @@ export function initAnnotationUI(global: Global): () => void {
         uiEl.appendChild(parentDom);
     }
 
-    const annotationManager = new AnnotationManager(global);
+    const existingManager = (global as any).annotationManager as AnnotationManager | undefined;
+    const annotationManager = existingManager ?? new AnnotationManager(global);
+    const ownsAnnotationManager = !existingManager;
     const annotationUI = new AnnotationToolbarUI(container);
 
     let originalAnnotationDataForEdit: AnnotationData | null = null;
@@ -287,7 +289,9 @@ export function initAnnotationUI(global: Global): () => void {
     };
     events.on('annotation.navigate', onAnnotationNavigate);
 
-    (global as any).annotationManager = annotationManager;
+    if (ownsAnnotationManager) {
+        (global as any).annotationManager = annotationManager;
+    }
 
     annotationUI.show();
     updateList();
@@ -308,7 +312,9 @@ export function initAnnotationUI(global: Global): () => void {
         events.off('annotationFacade:editModeExit', onAnnotationFacadeExit);
         events.off('annotation.navigate', onAnnotationNavigate);
         annotationUI.destroy();
-        annotationManager.destroy();
-        delete (global as any).annotationManager;
+        if (ownsAnnotationManager) {
+            annotationManager.destroy();
+            delete (global as any).annotationManager;
+        }
     };
 }
