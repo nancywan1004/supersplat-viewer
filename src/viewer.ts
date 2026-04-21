@@ -56,6 +56,7 @@ import { initEnvironmentFacade } from './editor-modules/environment-facade';
 import { initEffectsFacade } from './editor-modules/effects-facade';
 import { initCommandRegistry } from './editor-modules/command-registry';
 import { DEFAULT_DEFERRED_EDITING_LAYERS } from './render/deferred-editing-visual-sync';
+import { initInputArbiter } from './input-arbiter';
 
 const gammaChunkGlsl = `
 vec3 prepareOutputFromGamma(vec3 gammaColor) {
@@ -195,6 +196,8 @@ class Viewer {
 
         const { app, settings, config, events, state, camera } = global;
         const { graphicsDevice } = app;
+
+        initInputArbiter(global);
 
         // 仅初始化 orchestrator 核心骨架：后续 phase 再逐步注册各模块 facade
         this.moduleOrchestrator = initModuleOrchestrator(global);

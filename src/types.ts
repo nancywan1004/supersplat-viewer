@@ -167,20 +167,14 @@ type State = {
     selectedSceneEntityId?: string | null;
     /** 相机输入是否启用（用于与 Gizmo 交互互斥） */
     cameraControlsEnabled?: boolean;
-    /** 是否处于标注编辑模式 */
-    annotationEditMode?: boolean;
     /** 当前选中的标注 ID */
     selectedAnnotationId?: string | null;
     /** 标注变换模式（与标注模块底部「移动」按钮联动） */
     annotationTransformMode?: AnnotationTransformMode | null;
-    /** 是否处于标注放置模式 */
-    annotationPlacementActive?: boolean;
     /** 当前选中的光源 ID（用于环境模块光照编辑、Gizmo 挂载与列表/场景联动） */
     selectedLightId?: string | null;
     /** 光源变换模式（与环境模块底部工具栏联动） */
     lightTransformMode?: LightTransformMode | null;
-    /** 光源放置态：true 时场景下一次有效点击将用于新建光源落点 */
-    lightPlacementActive?: boolean;
 };
 
 /**

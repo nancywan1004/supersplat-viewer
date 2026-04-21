@@ -23,6 +23,7 @@ import {
     applyShadowSet
 } from './protocol-adapters/environment-protocol-adapter';
 import type { Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
+import type { InputArbiter } from '../input-arbiter';
 import { isEnvironmentDebugVisualEnabled } from '../state-selectors';
 
 type Payload = Record<string, unknown>;
@@ -42,37 +43,35 @@ function applyEnvironmentPreviewVisualPolicy(global: Global): void {
 class EnvironmentFacade implements ModuleFacade {
     readonly module = 'environment' as const;
     private pendingLightPlacement: { id: string; isThreeSixty: boolean } | null = null;
-    private detachScenePointerListener: (() => void) | null = null;
+    private detachPointerClickClaimHandler: (() => void) | null = null;
 
-    setScenePointerListenerCleanup(cleanup: () => void): void {
-        this.detachScenePointerListener = cleanup;
+    setPointerClickClaimHandlerCleanup(cleanup: () => void): void {
+        this.detachPointerClickClaimHandler = cleanup;
     }
 
     private clearPendingLightPlacement(ctx: ModuleContext): void {
         this.pendingLightPlacement = null;
-        ctx.state.lightPlacementActive = false;
     }
 
     private startLightPlacement(ctx: ModuleContext, id: string, isThreeSixty: boolean): void {
         this.pendingLightPlacement = { id, isThreeSixty };
-        ctx.state.lightPlacementActive = true;
     }
 
-    handleScenePointerWorldClick(global: Global, payload: { position?: { x: number; y: number; z: number } } | { x: number; y: number; z: number }): void {
+    handlePointerClickClaim(global: Global, worldPosition: { x: number; y: number; z: number } | null): boolean {
         const pending = this.pendingLightPlacement;
-        if (!pending) return;
-        if (!global.state.editMode || global.state.editLeftModule !== 'environment') return;
-        const position = (payload as { position?: { x: number; y: number; z: number } })?.position ?? payload;
-        if (!position) return;
+        if (!pending) return false;
+        if (!global.state.editMode || global.state.editLeftModule !== 'environment') return false;
+        if (!worldPosition) return true;
+        const position = worldPosition;
         const x = Number((position as { x?: number }).x);
         const y = Number((position as { y?: number }).y);
         const z = Number((position as { z?: number }).z);
-        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return true;
 
         this.pendingLightPlacement = null;
-        global.state.lightPlacementActive = false;
         applyLightAdd(global, pending.id, pending.isThreeSixty, [x, y, z]);
         global.events.fire('sceneLight:placed', { id: pending.id, source: 'scene' as SelectionSource });
+        return true;
     }
 
     private syncPreviewVisualPolicy(ctx: ModuleContext): void {
@@ -116,8 +115,8 @@ class EnvironmentFacade implements ModuleFacade {
 
     dispose(): void {
         this.pendingLightPlacement = null;
-        this.detachScenePointerListener?.();
-        this.detachScenePointerListener = null;
+        this.detachPointerClickClaimHandler?.();
+        this.detachPointerClickClaimHandler = null;
     }
 
     handleCommand(ctx: ModuleContext, command: ModuleCommand): void {
@@ -250,13 +249,15 @@ class EnvironmentFacade implements ModuleFacade {
 
 const initEnvironmentFacade = (global: Global): ModuleFacade => {
     const facade = new EnvironmentFacade();
-    const onScenePointerWorldClick = (payload: { position?: { x: number; y: number; z: number } } | { x: number; y: number; z: number }) => {
-        facade.handleScenePointerWorldClick(global, payload);
-    };
-    global.events.on('scenePointerWorldClick', onScenePointerWorldClick);
-    facade.setScenePointerListenerCleanup(() => {
-        global.events.off('scenePointerWorldClick', onScenePointerWorldClick);
-    });
+    const inputArbiter = (global as any).__inputArbiter as InputArbiter | undefined;
+    if (inputArbiter) {
+        const unregister = inputArbiter.registerPointerClickHandler({
+            id: 'environment.light-placement',
+            priority: 200,
+            handle: ({ worldPosition }) => facade.handlePointerClickClaim(global, worldPosition as { x: number; y: number; z: number } | null)
+        });
+        facade.setPointerClickClaimHandlerCleanup(unregister);
+    }
     const orchestrator = (global as any).__moduleOrchestrator as { registerFacade: (f: ModuleFacade) => void } | undefined;
     orchestrator?.registerFacade(facade);
     (global as any).__environmentFacade = facade;

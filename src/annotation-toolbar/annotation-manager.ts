@@ -106,14 +106,6 @@ export class AnnotationManager {
         }
         this.pendingPlacementId = id;
         this.placementMode.activate();
-        if (this.global.state) {
-            this.global.state.annotationPlacementActive = true;
-        }
-
-        // 更新状态
-        if (this.global.state) {
-            this.global.state.annotationPlacementActive = true;
-        }
     }
 
     /**
@@ -167,11 +159,6 @@ export class AnnotationManager {
         // 取消激活放置模式
         this.placementMode.deactivate();
 
-        // 更新状态
-        if (this.global.state) {
-            this.global.state.annotationPlacementActive = false;
-        }
-
         // 默认选中刚创建的标注（并让列表高亮/可继续操作）
         // 注：不自动打开 Gizmo；需要 Gizmo 仍由底部“移动”显式开启
         this.selectAnnotation(newId, { showGizmo: false });
@@ -215,11 +202,6 @@ export class AnnotationManager {
 
         // 取消激活放置模式
         this.placementMode.cancelPlacement();
-
-        // 更新状态
-        if (this.global.state) {
-            this.global.state.annotationPlacementActive = false;
-        }
     }
 
     /**

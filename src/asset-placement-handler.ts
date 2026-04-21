@@ -7,6 +7,7 @@ import { getSelectedSceneEntity } from './state-selectors';
 import { Entity } from 'playcanvas';
 import { loadGsplatAsset } from './loaders/gsplat-asset-loader';
 import { pickWorldFromClientXY } from './picker';
+import type { InputArbiter } from './input-arbiter';
 
 const PLACED_ASSETS_NAME = 'placedAssets';
 
@@ -522,31 +523,25 @@ export function initAssetPlacementHandler(
     let sceneAssetPicker: any = null;
     let pendingPlacement: { value: AssetLibraryItem; sceneEntityId?: string } | null = null;
     let pendingPlacementInFlight = false;
+    let detachPointerClickClaimHandler: (() => void) | null = null;
 
     const clearPendingPlacement = () => {
         pendingPlacement = null;
         pendingPlacementInFlight = false;
     };
 
-    const onPointerDown = (e: PointerEvent) => {
-        if (!state.editMode || state.editLeftModule !== 'asset' || e.button !== 0) return;
-        // Gizmo 正在处理该指针会话时，屏蔽资产拾取，避免轴与实体重合时误选中实体。
-        if (state.cameraControlsEnabled === false) return;
-
-        e.stopPropagation();
-        e.preventDefault();
-
+    const handleAssetPointerClickClaim = (clientX: number, clientY: number, worldPos: Vec3 | null): boolean => {
+        if (!state.editMode || state.editLeftModule !== 'asset') return false;
         const rect = canvas.getBoundingClientRect();
-        const offsetX = e.clientX - rect.left;
-        const offsetY = e.clientY - rect.top;
-        if (offsetX < 0 || offsetY < 0 || offsetX > rect.width || offsetY > rect.height) return;
+        const offsetX = clientX - rect.left;
+        const offsetY = clientY - rect.top;
+        if (offsetX < 0 || offsetY < 0 || offsetX > rect.width || offsetY > rect.height) return false;
 
         if (pendingPlacement) {
-            if (pendingPlacementInFlight) return;
+            if (pendingPlacementInFlight) return true;
             pendingPlacementInFlight = true;
             void (async () => {
                 try {
-                    const worldPos = await pickWorldFromClientXY(global, e.clientX, e.clientY);
                     if (!worldPos) return;
                     const payload = pendingPlacement;
                     if (!payload) return;
@@ -569,11 +564,11 @@ export function initAssetPlacementHandler(
                     pendingPlacementInFlight = false;
                 }
             })();
-            return;
+            return true;
         }
 
         const list = state.scenePlacedEntities ?? [];
-        if (list.length === 0) return;
+        if (list.length === 0) return true;
 
         const pickerScale = 0.5;
         const pickW = Math.max(1, Math.floor(width() * pickerScale));
@@ -613,6 +608,7 @@ export function initAssetPlacementHandler(
             // 统一走资产 frame 链路（camera-manager 内会按选中资产 bbox 做 framing）。
             events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
         }).catch(() => {});
+        return true;
     };
 
     const onCopy = (payload?: { copyId?: string }) => {
@@ -672,7 +668,14 @@ export function initAssetPlacementHandler(
         deps.pushEditHistory?.(global, 'delete asset');
     };
 
-    canvas.addEventListener('pointerdown', onPointerDown);
+    const inputArbiter = (global as Global & { __inputArbiter?: InputArbiter }).__inputArbiter;
+    if (inputArbiter) {
+        detachPointerClickClaimHandler = inputArbiter.registerPointerClickHandler({
+            id: 'asset.placement-and-selection',
+            priority: 120,
+            handle: ({ clientX, clientY, worldPosition }) => handleAssetPointerClickClaim(clientX, clientY, worldPosition)
+        });
+    }
     const onPlaceStart = (payload: { value: AssetLibraryItem; sceneEntityId?: string }) => {
         pendingPlacement = payload;
         pendingPlacementInFlight = false;
@@ -685,7 +688,8 @@ export function initAssetPlacementHandler(
     events.on('assetFacade:editModeExit', clearPendingPlacement);
 
     return () => {
-        canvas.removeEventListener('pointerdown', onPointerDown);
+        detachPointerClickClaimHandler?.();
+        detachPointerClickClaimHandler = null;
         if (sceneAssetPicker) {
             sceneAssetPicker.destroy();
             sceneAssetPicker = null;

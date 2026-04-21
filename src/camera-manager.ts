@@ -26,6 +26,7 @@ import { SphereConstraint } from './camera-constraints/sphere-constraint';
 import { BoxConstraint } from './camera-constraints/box-constraint';
 import { selectNearestLightAtPosition } from './light';
 import { getSelectedSceneEntity } from './state-selectors';
+import type { InputArbiter } from './input-arbiter';
 
 const tmpCamera = new Camera();
 const tmpv = new Vec3();
@@ -720,14 +721,15 @@ class CameraManager {
             // }
         });
 
-        // 单击拾取：用于光源等场景对象选中（不改变相机）
-        events.on('scenePointerWorldClick', (payload: Vec3 | { position: Vec3; clientX?: number; clientY?: number }) => {
-            if (state.lightPlacementActive) return;
-            const position = (payload as { position?: Vec3 })?.position ?? (payload as Vec3);
-            if (!position) return;
-            const clientX = (payload as { clientX?: number })?.clientX;
-            const clientY = (payload as { clientY?: number })?.clientY;
-            selectNearestLightAtPosition(global, position, clientX, clientY);
+        const inputArbiter = (global as any).__inputArbiter as InputArbiter | undefined;
+        inputArbiter?.registerPointerClickHandler({
+            id: 'camera.light-selection',
+            priority: 10,
+            handle: ({ worldPosition, clientX, clientY }) => {
+                if (!worldPosition) return false;
+                selectNearestLightAtPosition(global, worldPosition, clientX, clientY);
+                return true;
+            }
         });
 
         events.on('annotation.activate', (annotation: Annotation) => {

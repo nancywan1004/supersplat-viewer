@@ -11,6 +11,7 @@ import {
 import type { CameraComponent } from 'playcanvas';
 
 import { MobileFlyInput } from './cameras/mobile-fly-input';
+import type { InputArbiter } from './input-arbiter';
 import { pickWorldFromClientXY } from './picker';
 import type { Global } from './types';
 
@@ -337,14 +338,24 @@ class InputController {
         // 单击拾取：用于场景中单击世界坐标（不改变相机）
         canvas.addEventListener('pointerup', async (event: PointerEvent) => {
             if (!event.isPrimary || event.button !== 0) return;
-            if (state.cameraControlsEnabled === false) return;
             // 仅在画布区域内的左键点击才进行拾取
             const rect = canvas.getBoundingClientRect();
             if (event.clientX < rect.left || event.clientX > rect.right
                 || event.clientY < rect.top || event.clientY > rect.bottom) {
                 return;
             }
+            const cameraControlsEnabled = state.cameraControlsEnabled !== false;
             const result = await pickWorldFromClientXY(this.global, event.clientX, event.clientY);
+            const inputArbiter = (this.global as any).__inputArbiter as InputArbiter | undefined;
+            const dispatchResult = inputArbiter?.dispatchPointerClick({
+                global: this.global,
+                pointerEvent: event,
+                clientX: event.clientX,
+                clientY: event.clientY,
+                worldPosition: result ?? null
+            });
+            if (dispatchResult?.claimed) return;
+            if (!cameraControlsEnabled) return;
             if (result) {
                 // 语义化：场景中一次 pointerup 对应的世界坐标点击
                 events.fire('scenePointerWorldClick', {

@@ -11,8 +11,7 @@ import { Vec3 } from 'playcanvas';
 import { PlacementState } from './types';
 import type { AnnotationEntity } from './annotation-entity';
 import type { Global } from '../types';
-import { pickWorldFromClientXY } from '../picker';
-import { getPositionInFrontOfCamera } from '../asset-placement-handler';
+import type { InputArbiter } from '../input-arbiter';
 
 /**
  * PlacementMode 类
@@ -29,8 +28,8 @@ export class PlacementMode {
     /** Global 引用 */
     private global: Global;
 
-    /** 场景点击事件处理器 */
-    private clickHandler: ((event: MouseEvent) => void) | null = null;
+    /** 输入仲裁器中 pointer click claim handler 的解绑函数 */
+    private detachPointerClickClaimHandler: (() => void) | null = null;
 
     /**
      * 构造函数
@@ -66,11 +65,8 @@ export class PlacementMode {
             return;
         }
 
-        if (this.clickHandler) {
-            const canvas = this.global.app.graphicsDevice.canvas as HTMLCanvasElement;
-            canvas.removeEventListener('click', this.clickHandler);
-            this.clickHandler = null;
-        }
+        this.detachPointerClickClaimHandler?.();
+        this.detachPointerClickClaimHandler = null;
 
         this.setPlacementCursor(false);
         this.enableInteractions();
@@ -103,11 +99,14 @@ export class PlacementMode {
             this.global.events.fire('annotationPlacement:started');
         }
 
-        const canvas = this.global.app.graphicsDevice.canvas as HTMLCanvasElement;
-        this.clickHandler = (event: MouseEvent) => {
-            this.onSceneClick(event);
-        };
-        canvas.addEventListener('click', this.clickHandler);
+        const inputArbiter = (this.global as Global & { __inputArbiter?: InputArbiter }).__inputArbiter;
+        if (inputArbiter) {
+            this.detachPointerClickClaimHandler = inputArbiter.registerPointerClickHandler({
+                id: 'annotation.placement',
+                priority: 150,
+                handle: ({ worldPosition }) => this.onPointerClickClaim(worldPosition)
+            });
+        }
     }
 
     /**
@@ -187,36 +186,27 @@ export class PlacementMode {
     }
 
     /**
-     * 处理场景点击事件
+     * 处理场景点击 claim 事件
      * 
-     * 在点击位置放置标注
+     * 在点击位置放置标注。未命中世界时保持放置态并消费本次点击。
      * 
-     * @param event - 鼠标点击事件
+     * @param worldPosition - 仲裁器提供的世界坐标，未命中时为 null
      * @private
      */
-    private async onSceneClick(event: MouseEvent): Promise<void> {
+    private onPointerClickClaim(worldPosition: Vec3 | null): boolean {
         // 只在跟随状态下处理点击
         if (this.state !== PlacementState.Following) {
-            console.log('[Annotation][PlacementMode] onSceneClick ignored, state=', this.state);
-            return;
+            return false;
         }
 
-        try {
-            const position = await pickWorldFromClientXY(this.global, event.clientX, event.clientY);
-            if (position) {
-                // 触发标注放置事件（由 AnnotationManager 监听并创建或更新占位标注）
-                if (this.global.events) {
-                    this.global.events.fire('annotation:place', position);
-                }
-            } else {
-                // 兜底策略：即便 Picker 没击中几何，也在相机前方放置一个标注，保证交互可用
-                const fallbackPos = getPositionInFrontOfCamera(this.global);
-                if (this.global.events) {
-                    this.global.events.fire('annotation:place', fallbackPos);
-                }
-            }
-        } catch (error) {
-            console.warn('[Annotation][PlacementMode] Failed to pick position for annotation placement:', error);
+        if (!worldPosition) {
+            return true;
         }
+
+        // 触发标注放置事件（由 AnnotationManager 监听并创建或更新占位标注）
+        if (this.global.events) {
+            this.global.events.fire('annotation:place', worldPosition);
+        }
+        return true;
     }
 }
