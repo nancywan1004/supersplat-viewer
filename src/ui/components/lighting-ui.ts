@@ -479,11 +479,11 @@ export function initLightingUI(global: Global): () => void {
                 }
             }
             ses.draftLightRegionCenter = null;
-            // 默认选中新建光源
-            emitLightSelect(nextId, false);
             renderPointLightsList();
             updatePointLightsFromSettings(global);
             events.fire('lighting:changed');
+            // 先创建场景实体再选中，避免「selectedLightId 已切换但实体尚未存在」的瞬时状态。
+            emitLightSelect(nextId, false);
             pushEditHistorySafe();
         });
     }
@@ -525,11 +525,11 @@ export function initLightingUI(global: Global): () => void {
                 }
             }
             ses.draftLightRegionCenter = null;
-            // 默认选中新建光源
-            emitLightSelect(nextId, false);
             renderPointLightsList();
             updatePointLightsFromSettings(global);
             events.fire('lighting:changed');
+            // 先创建场景实体再选中，避免「selectedLightId 已切换但实体尚未存在」的瞬时状态。
+            emitLightSelect(nextId, false);
             pushEditHistorySafe();
         });
     }

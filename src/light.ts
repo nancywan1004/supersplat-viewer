@@ -34,6 +34,18 @@ const isDirectionalLightConfig = (cfg: any): cfg is DirectionalLightConfig =>
 const isSpotLightConfig = (cfg: any): cfg is SpotLightConfig =>
     cfg && cfg.type === 'spot';
 
+const finiteOr = (value: unknown, fallback: number): number =>
+    (typeof value === 'number' && Number.isFinite(value)) ? value : fallback;
+
+const normalizeVec3 = (value: unknown, fallback: [number, number, number]): [number, number, number] => {
+    const arr = Array.isArray(value) ? value : fallback;
+    return [
+        finiteOr(arr[0], fallback[0]),
+        finiteOr(arr[1], fallback[1]),
+        finiteOr(arr[2], fallback[2])
+    ];
+};
+
 /** 平行光实体默认位置（用于主方向光） */
 const DIRECTIONAL_DEFAULT_POSITION: [number, number, number] = [0, 8, 8];
 
@@ -657,14 +669,14 @@ const createSpotLightsFromSettings = (global: Global): void => {
     }
 
     spotConfigs.forEach((cfg: SpotLightConfig, i: number) => {
-        const [x, y, z] = cfg.position ?? [0, 2, 0];
-        const [r, g, b] = cfg.color ?? [1, 1, 1];
-        const intensity = typeof cfg.intensity === 'number' ? cfg.intensity : 1;
-        const pitch = cfg.pitch ?? -45;
-        const yaw = cfg.yaw ?? 0;
-        const innerCone = cfg.innerConeAngle ?? 25;
-        const outerCone = cfg.outerConeAngle ?? 45;
-        const range = typeof cfg.range === 'number' ? cfg.range : 1;
+        const [x, y, z] = normalizeVec3(cfg.position, [0, 2, 0]);
+        const [r, g, b] = normalizeVec3(cfg.color, [1, 1, 1]);
+        const intensity = finiteOr(cfg.intensity, 1);
+        const pitch = finiteOr(cfg.pitch, -45);
+        const yaw = finiteOr(cfg.yaw, 0);
+        const innerCone = finiteOr(cfg.innerConeAngle, 25);
+        const outerCone = finiteOr(cfg.outerConeAngle, 45);
+        const range = finiteOr(cfg.range, 1);
         const enabled = cfg.enabled !== false;
         const { effectiveInnerDeg, effectiveOuterDeg } = getEffectiveSpotConeAngles(innerCone, outerCone);
 
@@ -725,11 +737,11 @@ const createPointLightsFromSettings = (global: Global): void => {
     }
 
     pointConfigs.forEach((cfg: any, i: number) => {
-        const [x, y, z] = cfg.position ?? [0, 0, 0];
-        const [r, g, b] = cfg.color ?? [1, 1, 1];
-        const intensity = typeof cfg.intensity === 'number' ? cfg.intensity : 1;
+        const [x, y, z] = normalizeVec3(cfg.position, [0, 0, 0]);
+        const [r, g, b] = normalizeVec3(cfg.color, [1, 1, 1]);
+        const intensity = finiteOr(cfg.intensity, 1);
         const enabled = cfg.enabled !== false;
-        const range = typeof cfg.range === 'number' ? cfg.range : 1;
+        const range = finiteOr(cfg.range, 1);
 
         let entity = container!.findByName(`pointLight_${i}`) as Entity | undefined;
         if (!entity) {

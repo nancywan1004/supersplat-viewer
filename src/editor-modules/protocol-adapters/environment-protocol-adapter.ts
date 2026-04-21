@@ -44,6 +44,9 @@ function isUserControllableLight(light: LightWithId): boolean {
     return type === 'point' || type === 'spot' || type === undefined;
 }
 
+const finiteOr = (value: unknown, fallback: number): number =>
+    (typeof value === 'number' && Number.isFinite(value)) ? value : fallback;
+
 /** LIGHT_GLOBAL_SET：写 nightMode.fade，并触发 nightFade:set */
 export function applyLightGlobalSet(global: Global, value: number): void {
     const settings = global.settings as ExperienceSettings;
@@ -77,15 +80,20 @@ export function applyLightAdd(
     const bloomSes = ensureBloomEditorSession(settings);
     const center = bloomSes.draftLightRegionCenter ?? null;
     const camPos = getPositionInFrontOfCamera(global);
+    const fallbackPos: [number, number, number] = [camPos.x, camPos.y, camPos.z];
     const position: [number, number, number] = Array.isArray(positionOverride) && positionOverride.length >= 3
         ? [
-            Number(positionOverride[0]),
-            Number(positionOverride[1]),
-            Number(positionOverride[2])
+            finiteOr(positionOverride[0], fallbackPos[0]),
+            finiteOr(positionOverride[1], fallbackPos[1]),
+            finiteOr(positionOverride[2], fallbackPos[2])
         ]
         : center
-            ? [center[0], center[1], center[2]]
-            : [camPos.x, camPos.y, camPos.z];
+            ? [
+                finiteOr(center[0], fallbackPos[0]),
+                finiteOr(center[1], fallbackPos[1]),
+                finiteOr(center[2], fallbackPos[2])
+            ]
+            : fallbackPos;
     if (isThreeSixty) {
         lighting.lights.push({
             id,
@@ -121,14 +129,22 @@ export function applyLightAdd(
     }
     bloomSes.draftLightRegionCenter = null;
     updatePointLightsFromSettings(global);
+    // 父级常紧跟 LIGHT_SELECT / LIGHT_TRANSFORM_MODE，下游先完成本地选中可避免瞬时“有模式无实体”状态。
+    global.state.selectedLightId = id;
+    global.events.fire('sceneLight:selected', { id, source: 'host' });
     global.events.fire('lighting:changed');
     global.events.fire('postEffect:changed');
 }
 
 /** LIGHT_SELECT：仅更新内部选中光源 id（可选，供 UI 使用），并派发 sceneLight:selected 事件 */
 export function applyLightSelect(global: Global, id: string | null, source: 'host' | 'scene' | 'unknown' = 'unknown'): void {
-    (global.state as Record<string, unknown>).selectedLightId = id;
-    global.events.fire('sceneLight:selected', { id, source });
+    const settings = global.settings as ExperienceSettings;
+    const lighting = ensureLighting(settings);
+    const resolvedId = (typeof id === 'string' && id.trim().length > 0)
+        ? (lighting.lights.some((l) => (l as LightWithId).id === id) ? id : null)
+        : null;
+    (global.state as Record<string, unknown>).selectedLightId = resolvedId;
+    global.events.fire('sceneLight:selected', { id: resolvedId, source });
 }
 
 /**
