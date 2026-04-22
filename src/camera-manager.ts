@@ -404,7 +404,7 @@ class CameraManager {
         const baseBoundsEnabled = !config.disableCameraBounds && cameraBoundsCfg?.enabled !== false; // 默认启用
 
         // 无动画时维持更"核心"的收缩范围；有动画时使用 animScaleX/animScaleY
-        const targetScaleFactor = 0.5; // 非动画路径的固定缩放系数
+        const targetScaleFactor = 1; // 非动画路径的固定缩放系数
 
         if (baseBoundsEnabled) {
             // 只有在有动画路径时，才使用 animScaleX/animScaleY 来分别设置各轴缩放
