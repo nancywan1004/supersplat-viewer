@@ -48,6 +48,9 @@ class AnnotationFacade implements ModuleFacade {
         const manager = this.manager(ctx);
         // 兜底清理：无论 UI 是否挂载都保证选中与 gizmo 收敛
         setPlacementCursorActive(ctx.global, false);
+        // 退出 annotation 模块时，强制结束放置会话并清理占位标注，
+        // 避免切模块后仍残留 placement active 状态。
+        manager?.cancelAnnotation?.();
         ctx.events.fire('gizmo:detach');
         manager?.deselectAnnotation?.();
         ctx.events.fire('annotationFacade:exit');
