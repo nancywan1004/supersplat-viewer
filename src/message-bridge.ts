@@ -295,12 +295,8 @@ const initPostMessageBridge = (global: Global) => {
             break;
         case 'ASSET_PLACE':
             if (p.value && typeof p.value === 'object') {
-                const placeValue = p.value as AssetLibraryItem & { id?: string };
-                const sceneEntityId =
-                    typeof placeValue.id === 'string' && placeValue.id.trim().length > 0
-                        ? placeValue.id
-                        : undefined;
-                dispatchAsset(global, 'ASSET_PLACE', { value: placeValue, sceneEntityId });
+                const placeValue = p.value as AssetLibraryItem;
+                dispatchAsset(global, 'ASSET_PLACE', { value: placeValue });
             }
             break;
         case 'ASSET_SHOW_HIDE_SET':

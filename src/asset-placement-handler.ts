@@ -525,6 +525,17 @@ export function initAssetPlacementHandler(
     let pendingPlacementInFlight = false;
     let detachPointerClickClaimHandler: (() => void) | null = null;
 
+    const isValidPlacementWorldPos = (pos: Vec3): boolean => {
+        if (!Number.isFinite(pos.x) || !Number.isFinite(pos.y) || !Number.isFinite(pos.z)) return false;
+        const farClip = Number(camera.camera?.farClip ?? 0);
+        if (Number.isFinite(farClip) && farClip > 0) {
+            const dist = pos.distance(camera.getPosition());
+            // 未命中时 depth pick 常退化到远裁剪面附近点，过滤掉这类“伪命中”。
+            if (dist >= farClip * 0.995) return false;
+        }
+        return true;
+    };
+
     const clearPendingPlacement = () => {
         pendingPlacement = null;
         pendingPlacementInFlight = false;
@@ -543,6 +554,7 @@ export function initAssetPlacementHandler(
             void (async () => {
                 try {
                     if (!worldPos) return;
+                    if (!isValidPlacementWorldPos(worldPos)) return;
                     const payload = pendingPlacement;
                     if (!payload) return;
                     const hydrated = await hydrateProtocolPlaceItem(global, payload.value);

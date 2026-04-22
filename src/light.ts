@@ -311,12 +311,11 @@ const createPickHandleWireMaterial = (): StandardMaterial => {
     return mat;
 };
 
-const ensureLightPickHandleWireMesh = (app: any): Mesh => {
-    const cached = app.__lightPickHandleWireMesh as Mesh | undefined;
-    if (cached) return cached;
-    const mesh = createSphereWireframeMesh(app.graphicsDevice, 40);
-    app.__lightPickHandleWireMesh = mesh;
-    return mesh;
+const createLightPickHandleWireMesh = (app: any): Mesh => {
+    // 不复用全局 Mesh：render 组件销毁时可能回收共享 mesh 的底层 impl，
+    // 导致其它仍在渲染的 pick-handle MeshInstance 读到已销毁资源并在 draw 崩溃。
+    // 点/聚光上限仅 20，独立 mesh 的开销可接受，换取生命周期稳定性。
+    return createSphereWireframeMesh(app.graphicsDevice, 40);
 };
 
 /**
@@ -326,7 +325,7 @@ const ensureLightPickHandle = (global: Global, hostEntity: Entity): void => {
     if ((hostEntity as any).__lightPickHandleEntity) return;
     const app = global.app;
     const layerId = ensureLightVisualLayer(app);
-    const mesh = ensureLightPickHandleWireMesh(app);
+    const mesh = createLightPickHandleWireMesh(app);
     const material = createPickHandleWireMaterial();
     const handle = new Entity('light_pick_handle');
     handle.addComponent('render', {

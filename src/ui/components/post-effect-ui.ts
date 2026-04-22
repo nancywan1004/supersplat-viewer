@@ -41,7 +41,7 @@ const POST_EFFECT_PANEL_HTML = `
       title="Bloom 提取阈值：越低越容易发光（范围更大），越高只保留更亮的高光区域"
     >Threshold (HDR):</label>
     <div class="postEffectSliderWrap">
-      <input type="range" id="bloomThresholdSlider" min="0" max="5" step="0.1" value="0" class="postEffectSlider">
+      <input type="range" id="bloomThresholdSlider" min="0" max="5" step="0.02" value="0" class="postEffectSlider">
       <span id="bloomThresholdValue" class="postEffectSliderValue">0.00</span>
     </div>
   </div>

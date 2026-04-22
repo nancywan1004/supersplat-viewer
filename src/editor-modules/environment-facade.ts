@@ -60,6 +60,16 @@ class EnvironmentFacade implements ModuleFacade {
         setPlacementCursorActive(ctx.global, true);
     }
 
+    private hasDraftLightRegionCenter(global: Global): boolean {
+        const bloomSes = ensureBloomEditorSession(global.settings as any);
+        const center = bloomSes.draftLightRegionCenter;
+        return Array.isArray(center)
+            && center.length >= 3
+            && Number.isFinite(center[0])
+            && Number.isFinite(center[1])
+            && Number.isFinite(center[2]);
+    }
+
     handlePointerClickClaim(global: Global, worldPosition: { x: number; y: number; z: number } | null): boolean {
         const pending = this.pendingLightPlacement;
         if (!pending) return false;
@@ -183,7 +193,15 @@ class EnvironmentFacade implements ModuleFacade {
         case 'LIGHT_ADD': {
             if (typeof pl.id === 'string') {
                 const t = pl.isThreeSixty;
-                this.startLightPlacement(ctx, pl.id, typeof t === 'boolean' ? t : true);
+                const isThreeSixty = typeof t === 'boolean' ? t : true;
+                // 当 LIGHT_BRUSH_FINISH 已写入区域中心时，沿用原有“中心+绑灯”语义直接建灯，
+                // 避免多余的二次场景点击放置；无中心时仍走点击放置。
+                if (this.hasDraftLightRegionCenter(g)) {
+                    this.clearPendingLightPlacement(ctx);
+                    applyLightAdd(g, pl.id, isThreeSixty);
+                } else {
+                    this.startLightPlacement(ctx, pl.id, isThreeSixty);
+                }
             }
             break;
         }

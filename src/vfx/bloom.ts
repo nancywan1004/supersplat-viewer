@@ -37,12 +37,14 @@ uniform sampler2D bloomTexture;
 uniform float bloomIntensity;
 uniform sampler2D bloomMaskTexture;
 uniform float bloomThreshold;
+uniform float bloomThresholdKnee;
 vec3 dBloom;
 vec3 applyBloom(vec3 color, vec2 uv) {
     dBloom = texture2DLod(bloomTexture, uv, 0.0).rgb;
     float mask = texture2DLod(bloomMaskTexture, uv, 0.0).r;
     float lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
-    float brightPass = step(bloomThreshold, lum);
+    float knee = max(1e-4, bloomThresholdKnee);
+    float brightPass = smoothstep(bloomThreshold - knee, bloomThreshold + knee, lum);
     return color + dBloom * bloomIntensity * mask * brightPass;
 }
 #endif
@@ -56,16 +58,27 @@ var bloomMaskTexture: texture_2d<f32>;
 var bloomMaskTextureSampler: sampler;
 uniform bloomIntensity: f32;
 uniform bloomThreshold: f32;
+uniform bloomThresholdKnee: f32;
 var<private> dBloom: vec3f;
 fn applyBloom(color: vec3f, uv: vec2f) -> vec3f {
     dBloom = textureSampleLevel(bloomTexture, bloomTextureSampler, uv, 0.0).rgb;
     let mask = textureSampleLevel(bloomMaskTexture, bloomMaskTextureSampler, uv, 0.0).r;
     let lum = dot(color, vec3f(0.2126, 0.7152, 0.0722));
-    let brightPass = select(0.0, 1.0, lum >= uniform.bloomThreshold);
+    let knee = max(1e-4, uniform.bloomThresholdKnee);
+    let brightPass = smoothstep(uniform.bloomThreshold - knee, uniform.bloomThreshold + knee, lum);
     return color + dBloom * uniform.bloomIntensity * mask * brightPass;
 }
 #endif
 `;
+
+const BLOOM_THRESHOLD_KNEE_MIN = 0.05;
+const BLOOM_THRESHOLD_KNEE_MAX = 0.35;
+
+const getBloomThresholdKnee = (threshold: number): number =>
+    Math.max(
+        BLOOM_THRESHOLD_KNEE_MIN,
+        Math.min(BLOOM_THRESHOLD_KNEE_MAX, threshold * 0.12 + 0.04)
+    );
 
 export interface BloomControllerOptions {
     /** 用于每帧把 bloom mask 写入 scope；在 viewer 有 cameraFrame 时由 controller 调用 */
@@ -327,6 +340,7 @@ export class BloomController {
                 if (maskTex) graphicsDevice.scope.resolve('bloomMaskTexture').setValue(maskTex);
                 const th = Math.max(0, Math.min(5, Number(bloom.threshold ?? 0)));
                 graphicsDevice.scope.resolve('bloomThreshold').setValue(th);
+                graphicsDevice.scope.resolve('bloomThresholdKnee').setValue(getBloomThresholdKnee(th));
             } catch (_) {}
         };
         app.on('frameupdate', onFrameUpdate);
@@ -523,9 +537,17 @@ export class BloomController {
         const regions = bloomSettings.localLightRegions ?? [];
         const activeId = editor.activeLocalLightRegionId ?? null;
         const viewBloomLocalLightsEnabled = this.readViewBloomLocalLightsEnabled();
+        const bloomScope = (bloomSettings as { bloomScope?: 'global' | 'local' }).bloomScope === 'global' ? 'global' : 'local';
 
         const blurLevel = bloomSettings.blurLevel ?? 10;
-        if (bloomSettings.enabled && blurLevel > 0) {
+        // local 模式下，只有“确有局部贡献”时才开启 compose bloom，避免 0->非0 时整场亮度/对比突变。
+        const hasLocalBloomContribution = editor.bloomBrush === true || this.getPointsForMask().length > 0;
+        const shouldEnableComposeBloom =
+            !!bloomSettings.enabled &&
+            blurLevel > 0 &&
+            (bloomScope === 'global' || hasLocalBloomContribution);
+
+        if (shouldEnableComposeBloom) {
             const intensity = Number(bloomSettings.intensity);
             bloom.intensity = Number.isFinite(intensity) ? intensity : 0;
             bloom.blurLevel = Math.max(1, Math.min(5, blurLevel));
@@ -843,6 +865,7 @@ export class BloomController {
             if (maskTex) graphicsDevice.scope.resolve('bloomMaskTexture').setValue(maskTex);
             const th = Math.max(0, Math.min(5, Number(bloom?.threshold ?? 0)));
             graphicsDevice.scope.resolve('bloomThreshold').setValue(th);
+            graphicsDevice.scope.resolve('bloomThresholdKnee').setValue(getBloomThresholdKnee(th));
         } catch (_) {}
     }
 
