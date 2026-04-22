@@ -46,7 +46,7 @@ type InboundPayload =
     | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule | null }
     | { type: 'ASSET_SHOW_HIDE_SET'; id?: string; value?: boolean }
     | { type: 'ASSETS_SHOW_HIDE_SET'; value?: boolean }
-    | { type: 'ASSET_PLACE'; value?: AssetLibraryItem }
+    | { type: 'ASSET_PLACE'; value?: AssetLibraryItem; sceneEntityId?: string }
     | { type: 'ASSET_SELECT'; id?: string | null }
     | { type: 'ASSET_COPY'; id?: string; copyId?: string }
     | { type: 'ASSET_DELETE'; id?: string }
