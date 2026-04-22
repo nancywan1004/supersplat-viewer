@@ -14,6 +14,7 @@ class AnimController implements CameraController {
     onEnter(camera: Camera): void {
         // snap camera to start position
         camera.look(this.animState.position, this.animState.target);
+        camera.fov = this.animState.getFov();
     }
 
     update(deltaTime: number, inputFrame: CameraFrame, camera: Camera) {
@@ -21,6 +22,7 @@ class AnimController implements CameraController {
 
         // update camera pose
         camera.look(this.animState.position, this.animState.target);
+        camera.fov = this.animState.getFov();
 
         // ignore input
         inputFrame.read();
