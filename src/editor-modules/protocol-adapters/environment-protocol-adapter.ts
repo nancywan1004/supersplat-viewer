@@ -4,7 +4,7 @@
  */
 
 import { getPositionInFrontOfCamera } from '../../asset-placement-handler';
-import { updatePointLightsFromSettings } from '../../light';
+import { spotApexToHalfDeg, updatePointLightsFromSettings } from '../../light';
 import type { ExperienceSettings } from '../../schemas/v2';
 import {
     ensureBloom,
@@ -47,12 +47,14 @@ function isUserControllableLight(light: LightWithId): boolean {
 const finiteOr = (value: unknown, fallback: number): number =>
     (typeof value === 'number' && Number.isFinite(value)) ? value : fallback;
 
+/** 输入/输出均为存库整锥顶角（度）；内部用引擎半角做 inner<outer 约束。 */
 const normalizeSpotConeAngles = (inner: number, outer: number): { inner: number; outer: number } => {
-    const safeOuter = Math.max(0.01, Math.min(89.9, Number.isFinite(outer) ? outer : 45));
-    const rawInner = Number.isFinite(inner) ? inner : 25;
+    const outerH = spotApexToHalfDeg(Number.isFinite(outer) ? outer : 90);
+    const innerH = spotApexToHalfDeg(Number.isFinite(inner) ? inner : 50);
+    const safeOuter = Math.max(0.01, Math.min(89.9, outerH));
     const maxInner = Math.max(0, safeOuter - 1);
-    const safeInner = Math.max(0, Math.min(maxInner, rawInner));
-    return { inner: safeInner, outer: safeOuter };
+    const safeInner = Math.max(0, Math.min(maxInner, innerH));
+    return { inner: safeInner * 2, outer: safeOuter * 2 };
 };
 
 /** LIGHT_GLOBAL_SET：写 nightMode.fade，并触发 nightFade:set */
@@ -120,8 +122,8 @@ export function applyLightAdd(
             color: [1, 1, 1],
             intensity: 1,
             range: 1,
-            innerConeAngle: 25,
-            outerConeAngle: 45,
+            innerConeAngle: 50,
+            outerConeAngle: 90,
             enabled: true
         } as LightWithId);
     }
@@ -212,7 +214,7 @@ export function applyLightDetail(
         break;
     case 'LIGHT_INNER_ANGLE_SET':
         if (typeof payload.value === 'number') {
-            const currentOuter = Number((light as any).outerConeAngle ?? 45);
+            const currentOuter = Number((light as any).outerConeAngle ?? 90);
             const normalized = normalizeSpotConeAngles(payload.value, currentOuter);
             (light as Record<string, unknown>).innerConeAngle = normalized.inner;
             (light as Record<string, unknown>).outerConeAngle = normalized.outer;
@@ -221,7 +223,7 @@ export function applyLightDetail(
         break;
     case 'LIGHT_OUTER_ANGLE_SET':
         if (typeof payload.value === 'number') {
-            const currentInner = Number((light as any).innerConeAngle ?? 25);
+            const currentInner = Number((light as any).innerConeAngle ?? 50);
             const normalized = normalizeSpotConeAngles(currentInner, payload.value);
             (light as Record<string, unknown>).innerConeAngle = normalized.inner;
             (light as Record<string, unknown>).outerConeAngle = normalized.outer;
@@ -419,7 +421,7 @@ export function applyBloomLocalLightRegionInnerAngleSet(global: Global, regionId
     if (!light) return;
     const normalized = normalizeSpotConeAngles(
         value,
-        Number((light as any).outerConeAngle ?? 45)
+        Number((light as any).outerConeAngle ?? 90)
     );
     (light as any).innerConeAngle = normalized.inner;
     (light as any).outerConeAngle = normalized.outer;
@@ -440,7 +442,7 @@ export function applyBloomLocalLightRegionOuterAngleSet(global: Global, regionId
     const light = (lighting.lights as any[]).find((l) => l && (l as any).id === region.linkedLightId && (l as any).type === 'spot');
     if (!light) return;
     const normalized = normalizeSpotConeAngles(
-        Number((light as any).innerConeAngle ?? 25),
+        Number((light as any).innerConeAngle ?? 50),
         value
     );
     (light as any).innerConeAngle = normalized.inner;

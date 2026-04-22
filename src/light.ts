@@ -36,9 +36,25 @@ const isSpotLightConfig = (cfg: any): cfg is SpotLightConfig =>
 const finiteOr = (value: unknown, fallback: number): number =>
     (typeof value === 'number' && Number.isFinite(value)) ? value : fallback;
 
+/** 存库与协议中的聚光 inner/outer 为整锥顶角（度，0–180）；PlayCanvas / shader 使用「轴线→锥面」半角（度）。 */
+const DEFAULT_SPOT_APEX_INNER_DEG = 50;
+const DEFAULT_SPOT_APEX_OUTER_DEG = 90;
+
+/** 存库整锥顶角（度，0–180）→ PlayCanvas「轴线→锥面」半角（度）。 */
+function spotApexToHalfDeg(deg: number): number {
+    if (!Number.isFinite(deg)) return deg;
+    return Math.min(180, Math.max(0, deg)) * 0.5;
+}
+
 function normalizeSpotConeAnglesDeg(innerConeDeg: number, outerConeDeg: number) {
-    const safeOuter = Math.max(0.01, Math.min(89.9, Number.isFinite(outerConeDeg) ? outerConeDeg : 45));
-    const rawInner = Number.isFinite(innerConeDeg) ? innerConeDeg : 25;
+    const outerI = spotApexToHalfDeg(
+        Number.isFinite(outerConeDeg) ? outerConeDeg : DEFAULT_SPOT_APEX_OUTER_DEG
+    );
+    const innerI = spotApexToHalfDeg(
+        Number.isFinite(innerConeDeg) ? innerConeDeg : DEFAULT_SPOT_APEX_INNER_DEG
+    );
+    const safeOuter = Math.max(0.01, Math.min(89.9, outerI));
+    const rawInner = innerI;
     // 保证 inner < outer，避免过渡带塌缩导致“outer 看不出效果”。
     const maxInner = Math.max(0, safeOuter - 1);
     const safeInner = Math.max(0, Math.min(maxInner, rawInner));
@@ -556,7 +572,7 @@ const updateSpotGizmoShape = (spotEntity: Entity, range: number, outerConeAngleD
     if (!visual) return;
     const r = Math.max(0.1, Number.isFinite(range) ? range : 1);
     const cfg = (spotEntity as any).__lightConfig as SpotLightConfig | undefined;
-    const outerDegInput = Number.isFinite(outerConeAngleDeg) ? outerConeAngleDeg : 45;
+    const outerDegInput = Number.isFinite(outerConeAngleDeg) ? outerConeAngleDeg : DEFAULT_SPOT_APEX_OUTER_DEG;
     // PlayCanvas spot 角度语义是“半角”（轴线到锥面），可视化半径应为 range * tan(angle)
     const cfgInner = Number.isFinite(cfg?.innerConeAngle) ? Number(cfg?.innerConeAngle) : NaN;
     const fallbackInner = Number.isFinite(cfgInner) ? cfgInner : outerDegInput;
@@ -686,8 +702,8 @@ const createSpotLightsFromSettings = (global: Global): void => {
         const intensity = finiteOr(cfg.intensity, 1);
         const pitch = finiteOr(cfg.pitch, -45);
         const yaw = finiteOr(cfg.yaw, 0);
-        const innerCone = finiteOr(cfg.innerConeAngle, 25);
-        const outerCone = finiteOr(cfg.outerConeAngle, 45);
+        const innerCone = finiteOr(cfg.innerConeAngle, DEFAULT_SPOT_APEX_INNER_DEG);
+        const outerCone = finiteOr(cfg.outerConeAngle, DEFAULT_SPOT_APEX_OUTER_DEG);
         const range = finiteOr(cfg.range, 1);
         const enabled = cfg.enabled !== false;
         const { effectiveInnerDeg, effectiveOuterDeg } = getEffectiveSpotConeAngles(innerCone, outerCone);
@@ -985,6 +1001,7 @@ export {
     initLight,
     collectPointLights,
     collectSpotLights,
+    spotApexToHalfDeg,
     updatePointLightsFromSettings,
     setPointLightsVisualVisible,
     setLightsVisualVisible,

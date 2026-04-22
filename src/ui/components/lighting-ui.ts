@@ -1,6 +1,6 @@
 import type { Global } from '../../types';
 import type { ExperienceSettings } from '../../schemas/v2';
-import { updatePointLightsFromSettings } from '../../light';
+import { spotApexToHalfDeg, updatePointLightsFromSettings } from '../../light';
 import type { PointLightConfig, DirectionalLightConfig, SpotLightConfig } from '../../schemas/v2';
 import { pushEditHistory } from '../../edit-history';
 import { ensureNightMode, ensureLighting } from '../../settings-serialize/settings-serialize-helper';
@@ -40,12 +40,14 @@ const isSpot = (
 ): l is SpotLightConfig =>
     !!l && (l as any).type === 'spot';
 
+/** 输入为存库整锥顶角（度）；在引擎半角空间约束 inner<outer 后，再写回顶角。 */
 const normalizeSpotConeAngles = (inner: number, outer: number): { inner: number; outer: number } => {
-    const safeOuter = Math.max(0.01, Math.min(89.9, Number.isFinite(outer) ? outer : 45));
-    const rawInner = Number.isFinite(inner) ? inner : 25;
+    const outerH = spotApexToHalfDeg(Number.isFinite(outer) ? outer : 90);
+    const innerH = spotApexToHalfDeg(Number.isFinite(inner) ? inner : 50);
+    const safeOuter = Math.max(0.01, Math.min(89.9, outerH));
     const maxInner = Math.max(0, safeOuter - 1);
-    const safeInner = Math.max(0, Math.min(maxInner, rawInner));
-    return { inner: safeInner, outer: safeOuter };
+    const safeInner = Math.max(0, Math.min(maxInner, innerH));
+    return { inner: safeInner * 2, outer: safeOuter * 2 };
 };
 
 /**
@@ -259,8 +261,8 @@ export function initLightingUI(global: Global): () => void {
                 const [sx, sy, sz] = s.position ?? [0, 2, 0];
                 const pitch = s.pitch ?? -45;
                 const yaw = s.yaw ?? 0;
-                const innerCone = s.innerConeAngle ?? 25;
-                const outerCone = s.outerConeAngle ?? 45;
+                const innerCone = s.innerConeAngle ?? 50;
+                const outerCone = s.outerConeAngle ?? 90;
                 const range = typeof s.range === 'number' ? s.range : 1;
                 row.innerHTML = `
                     <div class="pointLightVisual" title="Spot ${spotOrdinal}">
@@ -275,8 +277,8 @@ export function initLightingUI(global: Global): () => void {
                     <span class="pointLightLabel">I</span><input type="number" step="0.1" min="0" data-index="${index}" data-field="intensity" value="${intensity}">
                     <span class="pointLightLabel">Pitch</span><input type="number" step="1" min="-90" max="90" data-index="${index}" data-field="pitch" value="${pitch}">
                     <span class="pointLightLabel">Yaw</span><input type="number" step="1" min="0" max="360" data-index="${index}" data-field="yaw" value="${yaw}">
-                    <span class="pointLightLabel" title="内锥角(°)">Inner</span><input type="number" step="1" min="0" max="90" data-index="${index}" data-field="innerConeAngle" value="${innerCone}" title="内锥角(°)">
-                    <span class="pointLightLabel" title="外锥角(°)">Outer</span><input type="number" step="1" min="0" max="90" data-index="${index}" data-field="outerConeAngle" value="${outerCone}" title="外锥角(°)">
+                    <span class="pointLightLabel" title="内锥整顶角(°)，0–180">Inner</span><input type="number" step="1" min="0" max="180" data-index="${index}" data-field="innerConeAngle" value="${innerCone}" title="内锥整顶角(°)">
+                    <span class="pointLightLabel" title="外锥整顶角(°)，0–180">Outer</span><input type="number" step="1" min="0" max="180" data-index="${index}" data-field="outerConeAngle" value="${outerCone}" title="外锥整顶角(°)">
                     <span class="pointLightLabel">Range</span><input type="number" step="0.1" min="0" data-index="${index}" data-field="range" value="${range}">
                     <button type="button" class="pointLightRemove" data-index="${index}" aria-label="Remove">✕</button>
                 `;
@@ -340,13 +342,13 @@ export function initLightingUI(global: Global): () => void {
                     if (!light || !isSpot(light)) return;
                     const s = light as SpotLightConfig;
                     if (field === 'innerConeAngle') {
-                        s.innerConeAngle = parseFloat((input as HTMLInputElement).value) ?? 25;
+                        s.innerConeAngle = parseFloat((input as HTMLInputElement).value) ?? 50;
                     } else {
-                        s.outerConeAngle = parseFloat((input as HTMLInputElement).value) ?? 45;
+                        s.outerConeAngle = parseFloat((input as HTMLInputElement).value) ?? 90;
                     }
                     const normalized = normalizeSpotConeAngles(
-                        Number(s.innerConeAngle ?? 25),
-                        Number(s.outerConeAngle ?? 45)
+                        Number(s.innerConeAngle ?? 50),
+                        Number(s.outerConeAngle ?? 90)
                     );
                     s.innerConeAngle = normalized.inner;
                     s.outerConeAngle = normalized.outer;
@@ -388,12 +390,12 @@ export function initLightingUI(global: Global): () => void {
                     } else if (field === 'intensity') s.intensity = parseFloat((input as HTMLInputElement).value) || 1;
                     else if (field === 'pitch') s.pitch = parseFloat((input as HTMLInputElement).value) ?? -45;
                     else if (field === 'yaw') s.yaw = parseFloat((input as HTMLInputElement).value) ?? 0;
-                    else if (field === 'innerConeAngle') s.innerConeAngle = parseFloat((input as HTMLInputElement).value) ?? 25;
-                    else if (field === 'outerConeAngle') s.outerConeAngle = parseFloat((input as HTMLInputElement).value) ?? 45;
+                    else if (field === 'innerConeAngle') s.innerConeAngle = parseFloat((input as HTMLInputElement).value) ?? 50;
+                    else if (field === 'outerConeAngle') s.outerConeAngle = parseFloat((input as HTMLInputElement).value) ?? 90;
                     else if (field === 'range') s.range = parseFloat((input as HTMLInputElement).value) ?? 1;
                     const normalized = normalizeSpotConeAngles(
-                        Number(s.innerConeAngle ?? 25),
-                        Number(s.outerConeAngle ?? 45)
+                        Number(s.innerConeAngle ?? 50),
+                        Number(s.outerConeAngle ?? 90)
                     );
                     s.innerConeAngle = normalized.inner;
                     s.outerConeAngle = normalized.outer;

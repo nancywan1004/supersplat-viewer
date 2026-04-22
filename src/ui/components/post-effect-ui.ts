@@ -208,8 +208,8 @@ function renderBloomLocalLightRegionsList(
 
         let linkedLightType: 'point' | 'spot' | null = null;
         let linkedLightIntensity = 1;
-        let linkedInner = 25;
-        let linkedOuter = 45;
+        let linkedInner = 50;
+        let linkedOuter = 90;
         let linkedRange = 10;
         let linkedLightEnabled = false;
         const linkedIdForUI = (region as any).linkedLightId as string | null | undefined;
@@ -222,8 +222,8 @@ function renderBloomLocalLightRegionsList(
                     linkedLightIntensity = typeof light.intensity === 'number' ? light.intensity : 1;
                     if (light.type === 'spot') {
                         linkedLightType = 'spot';
-                        linkedInner = typeof light.innerConeAngle === 'number' ? light.innerConeAngle : 25;
-                        linkedOuter = typeof light.outerConeAngle === 'number' ? light.outerConeAngle : 45;
+                        linkedInner = typeof light.innerConeAngle === 'number' ? light.innerConeAngle : 50;
+                        linkedOuter = typeof light.outerConeAngle === 'number' ? light.outerConeAngle : 90;
                         linkedRange = typeof light.range === 'number' ? light.range : 1;
                     } else {
                         linkedLightType = 'point';

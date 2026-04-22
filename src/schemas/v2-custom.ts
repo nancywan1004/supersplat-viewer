@@ -78,9 +78,9 @@ type SpotLightConfig = {
     pitch?: number,
     /** 偏航角（度），默认 0 */
     yaw?: number,
-    /** 内锥角（度），默认 25 */
+    /** 内锥整顶角（度，0–180），默认 50（等效引擎半角约 25°） */
     innerConeAngle?: number,
-    /** 外锥角（度），默认 45 */
+    /** 外锥整顶角（度，0–180），默认 90（等效引擎半角约 45°） */
     outerConeAngle?: number,
     /** 照射范围（世界单位），默认 10 */
     range?: number,
