@@ -295,10 +295,13 @@ const initPostMessageBridge = (global: Global) => {
             break;
         case 'ASSET_PLACE':
             if (p.value && typeof p.value === 'object') {
-                const placeValue = p.value as AssetLibraryItem & { id?: string };
+                const placeValue = p.value as AssetLibraryItem & { sceneEntityId?: string };
+                // sceneEntityId 必须与资产库 id 分离：
+                // - value.id 是资产库条目 id（可重复用于多次放置）
+                // - sceneEntityId 才是场景实例 id（若未显式提供，由放置链路生成唯一 id）
                 const sceneEntityId =
-                    typeof placeValue.id === 'string' && placeValue.id.trim().length > 0
-                        ? placeValue.id
+                    typeof placeValue.sceneEntityId === 'string' && placeValue.sceneEntityId.trim().length > 0
+                        ? placeValue.sceneEntityId
                         : undefined;
                 dispatchAsset(global, 'ASSET_PLACE', { value: placeValue, sceneEntityId });
             }
