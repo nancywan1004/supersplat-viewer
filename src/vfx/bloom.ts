@@ -537,9 +537,17 @@ export class BloomController {
         const regions = bloomSettings.localLightRegions ?? [];
         const activeId = editor.activeLocalLightRegionId ?? null;
         const viewBloomLocalLightsEnabled = this.readViewBloomLocalLightsEnabled();
+        const bloomScope = (bloomSettings as { bloomScope?: 'global' | 'local' }).bloomScope === 'global' ? 'global' : 'local';
 
         const blurLevel = bloomSettings.blurLevel ?? 10;
-        if (bloomSettings.enabled && blurLevel > 0) {
+        // local 模式下，只有“确有局部贡献”时才开启 compose bloom，避免 0->非0 时整场亮度/对比突变。
+        const hasLocalBloomContribution = editor.bloomBrush === true || this.getPointsForMask().length > 0;
+        const shouldEnableComposeBloom =
+            !!bloomSettings.enabled &&
+            blurLevel > 0 &&
+            (bloomScope === 'global' || hasLocalBloomContribution);
+
+        if (shouldEnableComposeBloom) {
             const intensity = Number(bloomSettings.intensity);
             bloom.intensity = Number.isFinite(intensity) ? intensity : 0;
             bloom.blurLevel = Math.max(1, Math.min(5, blurLevel));
