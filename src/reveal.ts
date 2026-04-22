@@ -1156,7 +1156,7 @@ export class RevealController {
         // 如果 totalDuration 改变且当前特效是需要 totalDuration 的特效，重新创建效果
         else if (newConfig.totalDuration !== undefined && 
                  newConfig.totalDuration !== oldTotalDuration &&
-                 ['rain-v2', 'pieces-recover', 'integrate', 'growth-wave'].includes(this.config.type)) {
+                 ['rain-v2', 'pieces-recover', 'integrate', 'growth-wave', 'sketch'].includes(this.config.type)) {
             this.createEffect(this.config.type);
             console.log('Recreated effect due to totalDuration change');
         }
