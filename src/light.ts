@@ -406,12 +406,10 @@ const collectPointLights = (global: Global): PointLightInfo[] => {
 };
 
 /**
- * 从场景中收集聚光灯信息（spotLights 容器下 type === 'spot' 的实体），上限 10 个。
- * 供 night-mode 等 shader 对高斯施加聚光照明。
- */
-/**
- * 聚光方向须与引擎一致：PlayCanvas 聚光沿实体 -Y 轴照射（forward-renderer 用 getY().mulScalar(-1)），
- * 此处也用 -Y，这样高斯与 mesh 的锥体方向一致。
+ * 从场景收集聚光灯（`spotLights` 下实体），上限 10，供 night-mode 等对高斯打光。
+ * `LightComponent.innerConeAngle` / `outerConeAngle` 与 PlayCanvas 一致，为**半角（度）**；
+ * 此处转为弧度写入 `SpotLightInfo`（**不再**对 settings 整锥顶角做 `spotApexToHalfDeg`，那一步已在 `createSpotLightsFromSettings` 写入实体时完成）。
+ * 方向与引擎一致：聚光沿实体 **-Y** 照射。
  */
 const collectSpotLights = (global: Global): SpotLightInfo[] => {
     const { app } = global;
@@ -941,8 +939,25 @@ const selectNearestLightAtPosition = (
  */
 const updatePointLightsFromSettings = (global: Global): void => {
     const { app } = global;
-    applyDirectionalLightFromSettings(global);
     const configs = global.settings.lighting?.lights;
+    // 点光/聚光高频调参时，避免每次都重写方向光与阴影状态导致整屏闪动。
+    // 仅当方向光相关配置（含 shadow 开关）变化时才同步 directional。
+    const directionalCfg = Array.isArray(configs) ? configs.find(isDirectionalLightConfig) : undefined;
+    const shadowEnabled = (global.settings as any).postEffectSettings?.shadow?.enabled === true;
+    const directionalSignature = JSON.stringify({
+        enabled: directionalCfg?.enabled !== false,
+        intensity: directionalCfg?.intensity ?? 1.5,
+        color: directionalCfg?.color ?? [1, 1, 1],
+        pitch: directionalCfg?.pitch ?? 35,
+        yaw: directionalCfg?.yaw ?? 45,
+        position: directionalCfg?.position ?? DIRECTIONAL_DEFAULT_POSITION,
+        shadowBias: directionalCfg?.shadowBias ?? 0.05,
+        shadowEnabled
+    });
+    if ((app as any).__directionalLightSignature !== directionalSignature) {
+        applyDirectionalLightFromSettings(global);
+        (app as any).__directionalLightSignature = directionalSignature;
+    }
     if (!configs || !Array.isArray(configs)) {
         const c1 = app.root.findByName('pointLights') as Entity | null;
         const c2 = app.root.findByName('spotLights') as Entity | null;
