@@ -99,6 +99,18 @@ class GsplatShaderEffect extends Script {
      */
     _materialLayers: Map<Material, number>;
 
+    /**
+     * 场景 bbox 外接球半径（由上层注入，用于统一 endRadius 自适应）。
+     * @type {number}
+     */
+    sceneBboxRadius: number = 0;
+
+    /**
+     * bbox 半径补偿系数（默认 0.65，给边界留少量余量）。
+     * @type {number}
+     */
+    sceneBboxPaddingScale: number = 0.65;
+
 
     initialize() {
         console.log('GsplatShaderEffect initialize() called for entity:', this.entity.name);
@@ -418,19 +430,52 @@ class GsplatShaderEffect extends Script {
      * @param {number} radius - The new radius value
      */
     setRadius(radius: number) {
+        const safeRadius = Number.isFinite(radius) ? Math.max(0, radius) : 0;
+
         // Default implementation: update radius attribute if it exists
         if (this.hasOwnProperty('radius')) {
-            this.radius = radius;
+            this.radius = safeRadius;
+        }
+
+        let adaptiveEndRadius = safeRadius;
+        if (this.hasOwnProperty('endRadius')) {
+            adaptiveEndRadius = this.resolveAdaptiveEndRadius(safeRadius);
+            (this as any).endRadius = adaptiveEndRadius;
         }
         
         // Update uniform if materials are applied
         if (this.materialsApplied.size > 0) {
-            this.setUniform('uRadius', radius);
+            this.setUniform('uRadius', safeRadius);
             // Also update endRadius if it exists
             if (this.hasOwnProperty('endRadius')) {
-                this.setUniform('uEndRadius', radius);
+                this.setUniform('uEndRadius', adaptiveEndRadius);
             }
         }
+    }
+
+    /**
+     * 由上层（RevealController）注入场景 bbox 半径，供 endRadius 自适应逻辑复用。
+     * @param {number} radius - bbox 外接球半径
+     * @param {number} [paddingScale=0.65] - 半径补偿系数
+     */
+    setSceneBoundsRadius(radius: number, paddingScale: number = 0.65) {
+        this.sceneBboxRadius = Number.isFinite(radius) && radius > 0 ? radius : 0;
+        this.sceneBboxPaddingScale = Number.isFinite(paddingScale) && paddingScale > 0
+            ? paddingScale
+            : 0.65;
+    }
+
+    /**
+     * 统一 endRadius 语义：请求半径与 bbox 半径（含余量）取最大值。
+     * @param {number} requestedRadius - 请求半径（通常来自配置或默认值）
+     * @returns {number} 自适应后的 endRadius
+     */
+    resolveAdaptiveEndRadius(requestedRadius: number): number {
+        const safeRequested = Number.isFinite(requestedRadius) ? Math.max(0, requestedRadius) : 0;
+        const bboxRadius = Number.isFinite(this.sceneBboxRadius) && this.sceneBboxRadius > 1e-6
+            ? this.sceneBboxRadius * this.sceneBboxPaddingScale
+            : 0;
+        return Math.max(safeRequested, bboxRadius);
     }
 
     /**

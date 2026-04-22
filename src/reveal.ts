@@ -51,6 +51,9 @@ export class RevealController {
     private effectEndTime: number | null = null;
     private isTiming: boolean = false;
     private timedEffects = ['rain-v2', 'pieces-recover', 'integrate', 'growth-wave', 'sketch'];
+    private readonly endRadiusBboxPaddingScale = 0.65;
+    /** 半径放大后对传播速度的补偿系数（0~1，越大越接近“完全按半径等比提速”） */
+    private readonly radiusSpeedCompensation = 0.7;
     
     // 时间轴控制相关（唯一来源：state.effectPaused）
     private get effectPaused(): boolean {
@@ -208,7 +211,7 @@ export class RevealController {
                 script.dotTint.set(0, 1, 1); // Cyan
                 script.waveTint.set(1, 0.5, 0); // Orange
                 script.oscillationIntensity = 0.2;
-                script.endRadius = this.config.radius;
+                this.applyAdaptiveEndRadius(script, Number(this.config.radius ?? script.endRadius ?? 0));
                 
                 // 设置 reveal center
                 this.updateScriptCenter(script);
@@ -255,7 +258,7 @@ export class RevealController {
                 script.fallTintIntensity = 0.2;
                 script.hitTint.set(2, 0, 0); // Bright red flash on landing
                 script.hitDuration = 0.5;
-                script.endRadius = this.config.radius;
+                this.applyAdaptiveEndRadius(script, Number(this.config.radius ?? script.endRadius ?? 0));
                 
                 // 设置 reveal center
                 this.updateScriptCenter(script);
@@ -457,7 +460,10 @@ export class RevealController {
                 script.scatterDirection.set(1, 1, 1);
                 script.maxScatterRadius = 4.0;
                 script.waveSpeed = defaultWaveSpeed * scale;
-                script.endRadius = defaultEndRadius;
+                this.applyAdaptiveEndRadius(
+                    script,
+                    Math.max(defaultEndRadius, Number(this.config.radius ?? defaultEndRadius))
+                );
                 
                 // 设置 reveal center
                 this.updateScriptCenter(script);
@@ -561,12 +567,11 @@ export class RevealController {
                 script.noiseIntensity = 2.8;
                 script.scatterDistance = 4.0;
                 script.minSize = 0.15;
-                // Phase 2 光圈半径：settings.revealEffect.radius 与 bbox 外接球取大，大场景仍保证扫描覆盖
                 const defaultEndRadius = 50;
-                const bboxRadius = this.bbox ? this.bbox.halfExtents.length() : 0;
-                const fromSettings = this.config.radius ?? defaultEndRadius;
-                const fromBbox = bboxRadius > 1e-6 ? bboxRadius * 1.05 : 0;
-                script.endRadius = Math.max(defaultEndRadius, fromSettings, fromBbox);
+                this.applyAdaptiveEndRadius(
+                    script,
+                    Math.max(defaultEndRadius, Number(this.config.radius ?? defaultEndRadius))
+                );
                 
                 // 设置 topY 和 bottomY（基于 bbox 或默认值）
                 // 注意：growth-wave 是从 bottom 到 top 传播，shader 期望 bottomY > topY
@@ -614,8 +619,6 @@ export class RevealController {
                     growthDuration: script.growthDuration,
                     recoverDuration: script.recoverDuration,
                     endRadius: script.endRadius,
-                    bboxRadius,
-                    revealRadius: fromSettings,
                     noiseIntensity: script.noiseIntensity,
                     scatterDistance: script.scatterDistance,
                     minSize: script.minSize,
@@ -670,9 +673,12 @@ export class RevealController {
                 // 因此：waveSpeed = endRadius / (totalDuration - sketchDuration - colorizeDuration)
                 script.sketchDuration = defaultSketchDuration * scale;
                 script.colorizeDuration = defaultColorizeDuration * scale;
+                this.applyAdaptiveEndRadius(
+                    script,
+                    Math.max(defaultEndRadius, Number(this.config.radius ?? defaultEndRadius))
+                );
                 const remainingTime = totalDuration - script.sketchDuration - script.colorizeDuration;
-                script.waveSpeed = defaultEndRadius / Math.max(remainingTime, 0.1); // 确保不为0或负数
-                script.endRadius = defaultEndRadius;
+                script.waveSpeed = script.endRadius / Math.max(remainingTime, 0.1); // 确保不为0或负数
                 script.fadeWidthRatio = 0.18;
                 script.sketchIntensity = 1.0;
                 script.sketchContrast = 1.2;
@@ -1176,11 +1182,80 @@ export class RevealController {
 
         try {
             if (newConfig.radius !== undefined) {
-                this.currentScript.setRadius?.(newConfig.radius) || 
-                (this.currentScript.radius = newConfig.radius);
+                const radius = Number(newConfig.radius);
+                if (Number.isFinite(radius)) {
+                    this.applyAdaptiveEndRadius(this.currentScript, Math.max(0, radius));
+                }
             }
         } catch (error) {
             console.warn('Error updating script config:', error);
+        }
+    }
+
+    private getSceneBboxRadius(): number {
+        if (!this.bbox) return 0;
+        const radius = this.bbox.halfExtents.length();
+        return Number.isFinite(radius) && radius > 1e-6 ? radius : 0;
+    }
+
+    private applyAdaptiveEndRadius(script: any, requestedRadius: number) {
+        if (!script) return;
+        const safeRequested = Number.isFinite(requestedRadius) ? Math.max(0, requestedRadius) : 0;
+        const requestedWithDefault = safeRequested > 0 ? safeRequested : Math.max(0, Number(script.endRadius) || 0);
+        const sceneBboxRadius = this.getSceneBboxRadius();
+
+        if (typeof script.setSceneBoundsRadius === 'function') {
+            script.setSceneBoundsRadius(sceneBboxRadius, this.endRadiusBboxPaddingScale);
+        }
+
+        if (typeof script.setRadius === 'function') {
+            script.setRadius(requestedWithDefault);
+        } else {
+            const bboxMinRadius = sceneBboxRadius > 0 ? sceneBboxRadius * this.endRadiusBboxPaddingScale : 0;
+            script.endRadius = Math.max(requestedWithDefault, bboxMinRadius);
+        }
+
+        // 不再基于 prevEndRadius 做逐帧比较，改为按“当前半径放大量”一次性计算速度系数，避免偶发过快。
+        const endRadius = Number(script.endRadius);
+        this.applyRadiusSpeedCompensation(script, requestedWithDefault, endRadius);
+    }
+
+    private applyRadiusSpeedCompensation(script: any, requestedRadius: number, endRadius: number) {
+        if (!script) return;
+        if (!Number.isFinite(requestedRadius) || requestedRadius <= 1e-6) return;
+        if (!Number.isFinite(endRadius) || endRadius <= 1e-6) return;
+
+        const rawScale = endRadius / requestedRadius;
+        if (!Number.isFinite(rawScale) || rawScale <= 0) return;
+        // 线性插值到补偿系数：scale=1 时因子=1，scale 增大时按 compensation 平滑提速
+        const speedFactor = 1 + (rawScale - 1) * this.radiusSpeedCompensation;
+        const safeFactor = Math.max(1, Math.min(3, speedFactor));
+
+        // sketch 的 waveSpeed 已在 create 时按 endRadius 反算，不再二次补偿
+        const isSketch = Number.isFinite(script.sketchDuration) && Number.isFinite(script.colorizeDuration);
+        if (isSketch) return;
+
+        // 避免重复叠乘：记录原始速度参数，每次都从“基线”回算
+        const baseline = script.__radiusSpeedBaseline ?? {};
+        if (!script.__radiusSpeedBaseline) {
+            baseline.speed = Number(script.speed);
+            baseline.acceleration = Number(script.acceleration);
+            baseline.waveSpeed = Number(script.waveSpeed);
+            baseline.waveSpeedDistScale = Number(script.waveSpeedDistScale);
+            script.__radiusSpeedBaseline = baseline;
+        }
+
+        if (Number.isFinite(baseline.speed)) {
+            script.speed = Math.max(1e-6, baseline.speed * safeFactor);
+        }
+        if (Number.isFinite(baseline.acceleration)) {
+            script.acceleration = baseline.acceleration * safeFactor;
+        }
+        if (Number.isFinite(baseline.waveSpeed)) {
+            script.waveSpeed = Math.max(1e-6, baseline.waveSpeed * safeFactor);
+        }
+        if (Number.isFinite(baseline.waveSpeedDistScale)) {
+            script.waveSpeedDistScale = baseline.waveSpeedDistScale / safeFactor;
         }
     }
 
