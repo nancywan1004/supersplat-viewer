@@ -563,6 +563,12 @@ class InputController {
         this._state.shift += key[keyCode.SHIFT];
         this._state.ctrl += key[keyCode.CTRL];
 
+        // 兜底：orbit 已贴近最小缩放距离时，继续滚轮（任意方向）直接切 fly，
+        // 避免偶发未触发 camera-manager 自动切换而出现“滚轮卡死”。
+        if (state.cameraMode === 'orbit' && Math.abs(wheel[0]) > 0 && distance <= 0.56) {
+            state.cameraMode = 'fly';
+        }
+
         // Switch to fly mode when using WASD or Q/E keys
         const hasMovementInput = this._state.axis.length() > 0;
         const hasRollInput = key[keyCode.Q] !== 0 || key[keyCode.E] !== 0;

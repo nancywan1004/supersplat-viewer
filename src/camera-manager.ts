@@ -524,12 +524,20 @@ class CameraManager {
             // This allows seamless transition when user wants to get closer
             // Check target.distance (updated by orbit controller) not this.camera.distance
             if (state.cameraMode === 'orbit' && transitionTimer >= 1) {
-                const minZoomThreshold = 0.55; // Just above the minimum zoom range (0.5)
-                
-                // Switch to fly mode when at minimum zoom distance
-                // This allows user to continue moving closer
-                if (target.distance <= minZoomThreshold) {
-                    console.log('Auto-switching to fly mode: target.distance =', target.distance);
+                const minZoom = controllers.orbit.controller.zoomRange.x;
+                const minZoomThreshold = minZoom + 0.05;
+                // target 为控制器本帧目标，this.camera 为插值后的当前值；二者取最小可覆盖偶发不同步。
+                const effectiveDistance = Math.min(target.distance, this.camera.distance);
+
+                // 到达 orbit 最小缩放壳后自动切 fly，避免滚轮继续缩放时“顶住卡死”。
+                if (effectiveDistance <= minZoomThreshold) {
+                    console.log('Auto-switching to fly mode:', {
+                        effectiveDistance,
+                        targetDistance: target.distance,
+                        currentDistance: this.camera.distance,
+                        minZoomThreshold
+                    });
+                    // 直接写 state，走 observe 自动派发 cameraMode:changed（统一触发 onExit/onEnter）。
                     state.cameraMode = 'fly';
                 }
             }
