@@ -46,7 +46,7 @@ type InboundPayload =
     | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule | null }
     | { type: 'ASSET_SHOW_HIDE_SET'; id?: string; value?: boolean }
     | { type: 'ASSETS_SHOW_HIDE_SET'; value?: boolean }
-    | { type: 'ASSET_PLACE'; value?: AssetLibraryItem; sceneEntityId?: string }
+    | { type: 'ASSET_PLACE'; value?: AssetLibraryItem }
     | { type: 'ASSET_SELECT'; id?: string | null }
     | { type: 'ASSET_COPY'; id?: string; copyId?: string }
     | { type: 'ASSET_DELETE'; id?: string }
@@ -295,15 +295,8 @@ const initPostMessageBridge = (global: Global) => {
             break;
         case 'ASSET_PLACE':
             if (p.value && typeof p.value === 'object') {
-                const placeValue = p.value as AssetLibraryItem & { sceneEntityId?: string };
-                // sceneEntityId 必须与资产库 id 分离：
-                // - value.id 是资产库条目 id（可重复用于多次放置）
-                // - sceneEntityId 才是场景实例 id（若未显式提供，由放置链路生成唯一 id）
-                const sceneEntityId =
-                    typeof placeValue.sceneEntityId === 'string' && placeValue.sceneEntityId.trim().length > 0
-                        ? placeValue.sceneEntityId
-                        : undefined;
-                dispatchAsset(global, 'ASSET_PLACE', { value: placeValue, sceneEntityId });
+                const placeValue = p.value as AssetLibraryItem;
+                dispatchAsset(global, 'ASSET_PLACE', { value: placeValue });
             }
             break;
         case 'ASSET_SHOW_HIDE_SET':

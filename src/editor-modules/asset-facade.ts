@@ -68,24 +68,20 @@ class AssetFacade implements ModuleFacade {
             break;
         }
         case 'ASSET_PLACE': {
-            const payload = command.payload as { value?: unknown; sceneEntityId?: string } | undefined;
+            const payload = command.payload as { value?: unknown } | undefined;
             const raw = payload?.value;
             if (!raw || typeof raw !== 'object') return;
-            const incoming = raw as { id?: string; sceneEntityId?: string } & Partial<AssetLibraryItem>;
+            const incoming = raw as { id?: string } & Partial<AssetLibraryItem>;
             let value: AssetLibraryItem | null = null;
             if (incoming.id && Array.isArray(state.uploadedAssets)) {
                 value = (state.uploadedAssets as AssetLibraryItem[]).find((it) => it.id === incoming.id) ?? null;
             }
             const finalValue = value ?? (raw as AssetLibraryItem);
-            // sceneEntityId 与资产库 item.id 语义不同：
-            // - item.id：资产库条目 id（可重复用于多次放置）
-            // - sceneEntityId：场景内实例 id（必须唯一，未显式提供时由放置链路生成）
+            // 协议收口：ASSET_PLACE 仅使用 value.id 作为场景实例 id。
             const sceneEntityId =
-                typeof payload?.sceneEntityId === 'string' && payload.sceneEntityId.trim().length > 0
-                    ? payload.sceneEntityId
-                    : (typeof incoming.sceneEntityId === 'string' && incoming.sceneEntityId.trim().length > 0
-                        ? incoming.sceneEntityId
-                        : undefined);
+                typeof incoming.id === 'string' && incoming.id.trim().length > 0
+                    ? incoming.id
+                    : undefined;
             setPlacementCursorActive(ctx.global, true);
             events.fire('assetPlacement:start', { value: finalValue, sceneEntityId });
             break;
