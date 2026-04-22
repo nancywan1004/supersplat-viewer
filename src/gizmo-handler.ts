@@ -202,7 +202,8 @@ export function initGizmoHandler(global: Global): () => void {
                     spotRotateState.changed
                     || Math.abs(projected.pitch - spotRotateState.startPitch) > SPOT_ROTATE_EPSILON
                     || Math.abs(projected.yaw - spotRotateState.startYaw) > SPOT_ROTATE_EPSILON;
-                spotRotateState.node.setEulerAngles(projected.pitch, projected.yaw, 0);
+                // 拖拽中不强制覆写 node 旋转，避免与 Gizmo 内部解算“互相拉扯”导致
+                // 在某些视角下 x/z 轴表现为卡死。仅在 transform:end 时统一投影回 pitch/yaw。
                 app.renderNextFrame = true;
             });
 
