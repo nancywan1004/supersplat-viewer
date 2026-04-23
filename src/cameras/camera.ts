@@ -11,6 +11,7 @@ type CameraFrame = InputFrame<{
 const rotation = new Quat();
 const avec = new Vec3();
 const bvec = new Vec3();
+const CAMERA_LOOK_EPSILON = 1e-6;
 
 class Camera {
     position = new Vec3();
@@ -54,8 +55,16 @@ class Camera {
 
     look(from: Vec3, to: Vec3) {
         this.position.copy(from);
-        this.distance = from.distance(to);
-        const dir = avec.sub2(to, from).normalize();
+        const dir = avec.sub2(to, from);
+        const distance = dir.length();
+        if (!Number.isFinite(distance) || distance <= CAMERA_LOOK_EPSILON) {
+            // Preserve the previous orientation and keep a sane positive focus distance.
+            // This prevents invalid normalize(0) from corrupting camera angles and causing black screens.
+            this.distance = Math.max(CAMERA_LOOK_EPSILON, this.distance);
+            return;
+        }
+        this.distance = distance;
+        dir.mulScalar(1 / distance);
         vecToAngles(this.angles, dir);
     }
 

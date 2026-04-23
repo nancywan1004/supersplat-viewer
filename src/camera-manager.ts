@@ -559,7 +559,16 @@ class CameraManager {
             }
             tmpCamera.copy(this.camera);
             // 从相机指向目标的方向，在目标附近取新机位，再 lookAt 目标
-            tmpv.copy(position).sub(this.camera.position).normalize();
+            tmpv.copy(position).sub(this.camera.position);
+            if (tmpv.lengthSq() <= 1e-10) {
+                // 防止点击点与当前相机位置重合导致 look(from,to) 退化为 0 向量。
+                this.camera.calcFocusPoint(tmpFocus);
+                tmpv.copy(tmpFocus).sub(this.camera.position);
+                if (tmpv.lengthSq() <= 1e-10) {
+                    tmpv.set(0, 0, -1);
+                }
+            }
+            tmpv.normalize();
             const currentDistance = position.distance(this.camera.position);
             const zoomRange = controllers.orbit.controller.zoomRange;
             const fallbackDistance = Math.max(ORBIT_FOCUS_MIN_DISTANCE, currentDistance * ORBIT_FOCUS_DISTANCE_SCALE);
