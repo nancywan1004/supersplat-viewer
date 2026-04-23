@@ -119,11 +119,14 @@ const applyPostEffectSettings = (cameraFrame: CameraFrame, settings: PostEffectS
 
 const needsBloomPipeline = (settings: PostEffectSettings): boolean => {
     const bloom = settings?.bloom as any;
-    if (!bloom || bloom.enabled === false) return false;
-    // 不依赖 bloomScope：transform.json 初始为 global，但局部亮灯会话仍需实时预览管线。
+    if (!bloom) return false;
+    const bloomScope = bloom.bloomScope === 'global' ? 'global' : 'local';
+    // local 模式下，允许 intensity=0（并可能伴随 enabled=false）时继续保活管线，
+    // 避免 0->非0 首次切换触发整条后处理路径切换。
+    if (bloomScope === 'global' && bloom.enabled === false) return false;
     const hasRegions = Array.isArray(bloom.localLightRegions) && bloom.localLightRegions.length > 0;
     const brushActive = !!settings?.bloomEditorSession?.bloomBrush;
-    return hasRegions || brushActive;
+    return bloomScope === 'local' || hasRegions || brushActive;
 };
 
 const anyPostEffectEnabled = (settings: PostEffectSettings): boolean => {
@@ -742,10 +745,6 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     app.renderNextFrame = true;
 
                     if (!state.readyToRender) {
-                        // 先挂开场 VFX，再允许上屏：否则首帧会画到「无 gsplatModifyVS」的默认高斯，偶发偏蓝/偏亮闪。
-                        if (state.hasRevealEffect) {
-                            this.revealController?.ensureInitialEffectCreatedBeforeFirstDisplay();
-                        }
                         // we're ready to render once the first sort has completed
                         state.readyToRender = true;
 
@@ -822,9 +821,6 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         // scene is done loading
                         eventHandler.off('frame:ready', readyHandler);
 
-                        if (state.hasRevealEffect) {
-                            this.revealController?.ensureInitialEffectCreatedBeforeFirstDisplay();
-                        }
                         state.readyToRender = true;
 
                         // In LOD mode, ensure animation is started (in case it wasn't started earlier)

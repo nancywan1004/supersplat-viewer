@@ -77,6 +77,7 @@ const BLOOM_THRESHOLD_KNEE_MIN = 0.05;
 const BLOOM_THRESHOLD_KNEE_MAX = 0.35;
 /** 首次激活 compose bloom 时预热帧数，避免初帧采样未稳定输入导致蓝闪 */
 const BLOOM_ACTIVATION_WARMUP_FRAMES = 1;
+const LOCAL_BLOOM_KEEPALIVE_INTENSITY = 1e-6;
 
 const getBloomThresholdKnee = (threshold: number): number =>
     Math.max(
@@ -159,6 +160,7 @@ export class BloomController {
     private global: Global;
     private options: BloomControllerOptions;
     private bloomBrushWhiteTexture: Texture | null = null;
+    private bloomMaskBlackTexture: Texture | null = null;
     private bloomCommittedMaskTexture: Texture | null = null;
     private hasCommittedBloomMask = false;
     private bloomBrushPainter: BloomBrushPainter | null = null;
@@ -287,6 +289,21 @@ export class BloomController {
         });
         this.bloomBrushWhiteTexture.setSource(whiteCanvas);
         this.bloomBrushWhiteTexture.upload();
+        const blackPixelCanvas = document.createElement('canvas');
+        blackPixelCanvas.width = 1;
+        blackPixelCanvas.height = 1;
+        const blackPixelCtx = blackPixelCanvas.getContext('2d')!;
+        blackPixelCtx.fillStyle = '#000000';
+        blackPixelCtx.fillRect(0, 0, 1, 1);
+        this.bloomMaskBlackTexture = new Texture(graphicsDevice, {
+            name: 'bloomMaskBlack',
+            width: 1,
+            height: 1,
+            format: PIXELFORMAT_R8,
+            mipmaps: false
+        });
+        this.bloomMaskBlackTexture.setSource(blackPixelCanvas);
+        this.bloomMaskBlackTexture.upload();
 
         const appCanvas = options.getAppCanvas();
         if (appCanvas) {
@@ -331,6 +348,13 @@ export class BloomController {
             magFilter: FILTER_LINEAR,
             mipmaps: false
         });
+        if (this.worldSpaceMaskCtx && this.worldSpaceMaskCanvas && this.worldSpaceMaskTexture) {
+            this.worldSpaceMaskCtx.fillStyle = '#000000';
+            this.worldSpaceMaskCtx.fillRect(0, 0, MASK_SIZE, MASK_SIZE);
+            this.worldSpaceMaskTexture.setSource(this.worldSpaceMaskCanvas);
+            this.worldSpaceMaskTexture.upload();
+            this.hasWorldSpaceMask = true;
+        }
 
         // PlayCanvas fires 'frameupdate' (lowercase) before update(dt); camera is updated inside update(dt).
         // So we must regenerate world-space mask in 'framerender' (after camera update), not in frameupdate.
@@ -576,8 +600,13 @@ export class BloomController {
             bloom.blurLevel = Math.max(1, Math.min(5, blurLevel));
             cameraFrame.debug = bloomDebug ? 'bloom' : null;
         } else {
-            bloom.intensity = 0;
-            this._pendingComposeBloomWarmupFrames = 0;
+            // local 模式下保持 bloom pass 结构稳定，避免 intensity 0↔非0 首次切换导致整场亮度跳变。
+            const keepaliveActive = bloomScope === 'local';
+            bloom.intensity = keepaliveActive ? LOCAL_BLOOM_KEEPALIVE_INTENSITY : 0;
+            bloom.blurLevel = Math.max(1, Math.min(5, blurLevel));
+            if (!keepaliveActive) {
+                this._pendingComposeBloomWarmupFrames = 0;
+            }
             cameraFrame.debug = null;
         }
         this._lastComposeBloomRequested = composeBloomRequested;
@@ -1505,10 +1534,14 @@ export class BloomController {
      * @private
      */
     private getEffectiveMaskTexture(bloomBrushOn: boolean): Texture | null {
-        const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomScope?: 'global' | 'local' } | undefined;
+        const bloom = this.global.settings?.postEffectSettings?.bloom as { bloomScope?: 'global' | 'local'; enabled?: boolean } | undefined;
         const scope = bloom?.bloomScope === 'global' ? 'global' : 'local';
         if (scope === 'global') {
             return this.bloomBrushWhiteTexture;
+        }
+        // local 模式保活（intensity≈0 且 enabled=false）或 warmup 帧，强制黑 mask 防止首帧蓝闪/残差。
+        if ((bloom?.enabled === false || this._pendingComposeBloomWarmupFrames > 0) && this.bloomMaskBlackTexture) {
+            return this.bloomMaskBlackTexture;
         }
         const hasWorldPoints = this.getPointsForMask().length > 0;
         if (hasWorldPoints && this.hasWorldSpaceMask && this.worldSpaceMaskTexture) {
@@ -1631,6 +1664,7 @@ export class BloomController {
         this._unregisterEvents = [];
         this.bloomBrushPainter = null;
         this.bloomBrushWhiteTexture = null;
+        this.bloomMaskBlackTexture = null;
         this.bloomCommittedMaskTexture = null;
         if (this.worldSpaceMaskTexture) {
             this.worldSpaceMaskTexture.destroy();
