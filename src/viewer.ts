@@ -120,13 +120,11 @@ const applyPostEffectSettings = (cameraFrame: CameraFrame, settings: PostEffectS
 const needsBloomPipeline = (settings: PostEffectSettings): boolean => {
     const bloom = settings?.bloom as any;
     if (!bloom) return false;
-    const bloomScope = bloom.bloomScope === 'global' ? 'global' : 'local';
-    // local 模式下，允许 intensity=0（并可能伴随 enabled=false）时继续保活管线，
-    // 避免 0->非0 首次切换触发整条后处理路径切换。
-    if (bloomScope === 'global' && bloom.enabled === false) return false;
-    const hasRegions = Array.isArray(bloom.localLightRegions) && bloom.localLightRegions.length > 0;
-    const brushActive = !!settings?.bloomEditorSession?.bloomBrush;
-    return bloomScope === 'local' || hasRegions || brushActive;
+    // 对齐 global/local：只要 Bloom blur 配置有效，就保持 CameraFrame/Bloom 路径一致。
+    // 这样 intensity=0 时切 scope 不会因为管线启停差异导致 mesh 观感分叉。
+    const blurLevel = Number(bloom.blurLevel ?? 0);
+    if (!(Number.isFinite(blurLevel) && blurLevel > 0)) return false;
+    return true;
 };
 
 const anyPostEffectEnabled = (settings: PostEffectSettings): boolean => {
