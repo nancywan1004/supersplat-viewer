@@ -162,7 +162,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         }
     }
 
-    // uSphereColors / uSpotColors：TS 已转线性；衰减用 1/(1+d²) 减轻近距 1/r² 过曝（ANGLE/部分 Win GPU 易炸）
+    // uSphereColors / uSpotColors：TS 已转线性；衰减改为 range 归一化（与 light range 语义一致，range 变大时核心亮区同步变大）
     vec3 sum = vec3(0.0);
     for (int i = 0; i < 10; ++i) {
         vec3 pos = uSpherePositions[i];
@@ -171,7 +171,9 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         if (length(pos) > 0.001) {
             float dist = length(pos - wpos);
             if (dist < range && dist > 0.001) {
-                float att = 1.15 / (1.0 + dist * dist);
+                float norm = clamp(dist / max(range, 1e-3), 0.0, 1.0);
+                float att = 1.0 - norm;
+                att *= att;
                 sum += clr * att;
             }
         }
@@ -193,7 +195,9 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         float cosTheta = dot(L, spotDir);
         if (cosTheta <= cosOuter) continue;
         float spotAtt = (cosTheta >= cosInner) ? 1.0 : smoothstep(cosOuter, cosInner, cosTheta);
-        float att = 1.15 / (1.0 + dist * dist);
+        float norm = clamp(dist / max(range, 1e-3), 0.0, 1.0);
+        float att = 1.0 - norm;
+        att *= att;
         sum += spotClr * spotAtt * att;
     }
     sum = clamp(sum, vec3(0.0), vec3(8.0));
@@ -354,7 +358,9 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         if (length(pos) > 0.001) {
             float dist = length(pos - wpos);
             if (dist < range && dist > 0.001) {
-                float att = 1.15 / (1.0 + dist * dist);
+                float norm = clamp(dist / max(range, 1e-3), 0.0, 1.0);
+                float att = 1.0 - norm;
+                att *= att;
                 sum += clr * att;
             }
         }
@@ -376,7 +382,9 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         float cosTheta = dot(L, spotDir);
         if (cosTheta <= cosOuter) continue;
         float spotAtt = (cosTheta >= cosInner) ? 1.0 : smoothstep(cosOuter, cosInner, cosTheta);
-        float att = 1.15 / (1.0 + dist * dist);
+        float norm = clamp(dist / max(range, 1e-3), 0.0, 1.0);
+        float att = 1.0 - norm;
+        att *= att;
         sum += spotClr * spotAtt * att;
     }
     sum = clamp(sum, vec3(0.0), vec3(8.0));
@@ -515,7 +523,9 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         if (length(pos) > 0.001) {
             let dist = length(pos - wpos);
             if (dist < range && dist > 0.001) {
-                let att = 1.15 / (1.0 + dist * dist);
+                let norm = clamp(dist / max(range, 1e-3), 0.0, 1.0);
+                var att = 1.0 - norm;
+                att = att * att;
                 sum = sum + clr * att;
             }
         }
@@ -540,7 +550,9 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         if (cosTheta < cosInner) {
             spotAtt = smoothstep(cosOuter, cosInner, cosTheta);
         }
-        let att = 1.15 / (1.0 + dist * dist);
+        let norm = clamp(dist / max(range, 1e-3), 0.0, 1.0);
+        var att = 1.0 - norm;
+        att = att * att;
         sum = sum + spotClr * spotAtt * att;
     }
     sum = clamp(sum, vec3f(0.0), vec3f(8.0));
@@ -701,7 +713,9 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         if (length(pos) > 0.001) {
             let dist = length(pos - wpos);
             if (dist < range && dist > 0.001) {
-                let att = 1.15 / (1.0 + dist * dist);
+                let norm = clamp(dist / max(range, 1e-3), 0.0, 1.0);
+                var att = 1.0 - norm;
+                att = att * att;
                 sum = sum + clr * att;
             }
         }
@@ -726,7 +740,9 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         if (cosTheta < cosInner) {
             spotAtt = smoothstep(cosOuter, cosInner, cosTheta);
         }
-        let att = 1.15 / (1.0 + dist * dist);
+        let norm = clamp(dist / max(range, 1e-3), 0.0, 1.0);
+        var att = 1.0 - norm;
+        att = att * att;
         sum = sum + spotClr * spotAtt * att;
     }
     sum = clamp(sum, vec3f(0.0), vec3f(8.0));
