@@ -319,6 +319,25 @@ const createLightPickHandleWireMesh = (app: any): Mesh => {
 };
 
 /**
+ * 按「全局线框开关 && 光源自身 enabled」统一刷新单灯线框显隐。
+ * 覆盖点光/聚光线框与拾取球，确保单灯开关时线框同步变化。
+ */
+const refreshSingleLightVisualEnabled = (entity: Entity, visibleToggle: boolean): void => {
+    const lightEnabled = !!entity.light?.enabled;
+    const enabled = visibleToggle && lightEnabled;
+    const pointVisual = (entity as any).__lightVisualEntity as Entity | undefined;
+    const spotVisual = (entity as any).__spotVisualEntity as Entity | undefined;
+    const innerRing = (entity as any).__spotInnerRingEntity as Entity | undefined;
+    const debugDisc = (entity as any).__spotDebugDiscEntity as Entity | undefined;
+    const pick = (entity as any).__lightPickHandleEntity as Entity | undefined;
+    if (pointVisual?.render) pointVisual.render.enabled = enabled;
+    if (spotVisual?.render) spotVisual.render.enabled = enabled;
+    if (innerRing?.render) innerRing.render.enabled = enabled;
+    if (debugDisc?.render) debugDisc.render.enabled = enabled;
+    if (pick?.render) pick.render.enabled = enabled;
+};
+
+/**
  * 在点光/聚光实体原点挂一个小球线框，表示「锥尖 / 灯心」拾取触发区（与 setPointLightsVisualVisible 联动显隐）。
  */
 const ensureLightPickHandle = (global: Global, hostEntity: Entity): void => {
@@ -337,7 +356,7 @@ const ensureLightPickHandle = (global: Global, hostEntity: Entity): void => {
     if (rc) {
         rc.castShadows = false;
         rc.receiveShadows = false;
-        rc.enabled = !!(app as any).__pointLightsVisualVisible;
+        rc.enabled = !!(app as any).__pointLightsVisualVisible && !!hostEntity.light?.enabled;
     }
     const r = Math.max(0.05, LIGHT_PICK_HANDLE_VISUAL_RADIUS);
     handle.setLocalScale(r, r, r);
@@ -468,7 +487,7 @@ const addLightVisual = (global: Global, lightEntity: Entity, r: number, g: numbe
     if (rc) {
         rc.castShadows = false;
         rc.receiveShadows = false;
-        rc.enabled = !!(app as any).__pointLightsVisualVisible;
+        rc.enabled = !!(app as any).__pointLightsVisualVisible && !!lightEntity.light?.enabled;
     }
     lightEntity.addChild(visual);
     (lightEntity as any).__lightVisualEntity = visual;
@@ -512,7 +531,7 @@ const addSpotLightVisual = (global: Global, spotEntity: Entity, r: number, g: nu
     if (rc) {
         rc.castShadows = false;
         rc.receiveShadows = false;
-        rc.enabled = !!(app as any).__pointLightsVisualVisible;
+        rc.enabled = !!(app as any).__pointLightsVisualVisible && !!spotEntity.light?.enabled;
     }
     // 初始局部变换留给 createSpotLightsFromSettings 计算
     visual.setLocalPosition(0, 0, 0);
@@ -532,7 +551,7 @@ const addSpotLightVisual = (global: Global, spotEntity: Entity, r: number, g: nu
     if (innerRc) {
         innerRc.castShadows = false;
         innerRc.receiveShadows = false;
-        innerRc.enabled = !!(app as any).__pointLightsVisualVisible;
+        innerRc.enabled = !!(app as any).__pointLightsVisualVisible && !!spotEntity.light?.enabled;
     }
     innerRing.setLocalPosition(0, 0, 0);
     innerRing.setLocalEulerAngles(0, 0, 0);
@@ -736,6 +755,7 @@ const createSpotLightsFromSettings = (global: Global): void => {
         }
         updateSpotGizmoShape(entity, range, outerCone);
         ensureLightPickHandle(global, entity);
+        refreshSingleLightVisualEnabled(entity, !!(app as any).__pointLightsVisualVisible);
     });
 
     const existing = container!.children.filter(c => c.name.startsWith('spotLight_'));
@@ -796,6 +816,7 @@ const createPointLightsFromSettings = (global: Global): void => {
         }
         updatePointLightRangeVisual(entity, range);
         ensureLightPickHandle(global, entity);
+        refreshSingleLightVisualEnabled(entity, !!(app as any).__pointLightsVisualVisible);
     });
 
     const existing = container!.children.filter(c => c.name.startsWith('pointLight_'));
@@ -816,10 +837,7 @@ const setPointLightsVisualVisible = (global: Global, visible: boolean): void => 
         pointContainer.children.forEach((node) => {
             const entity = node as Entity;
             if (!entity.name.startsWith('pointLight_') || entity.name === 'pointLight_visual') return;
-            const visual = (entity as any).__lightVisualEntity as Entity | undefined;
-            if (visual?.render) visual.render.enabled = visible;
-            const pick = (entity as any).__lightPickHandleEntity as Entity | undefined;
-            if (pick?.render) pick.render.enabled = visible;
+            refreshSingleLightVisualEnabled(entity, visible);
         });
     }
     const spotContainer = app.root.findByName('spotLights') as Entity | null;
@@ -827,14 +845,7 @@ const setPointLightsVisualVisible = (global: Global, visible: boolean): void => 
         spotContainer.children.forEach((node) => {
             const entity = node as Entity;
             if (!entity.name.startsWith('spotLight_') || entity.name === 'spotLight_visual') return;
-            const visual = (entity as any).__spotVisualEntity as Entity | undefined;
-            const innerRing = (entity as any).__spotInnerRingEntity as Entity | undefined;
-            const debugDisc = (entity as any).__spotDebugDiscEntity as Entity | undefined;
-            if (visual?.render) visual.render.enabled = visible;
-            if (innerRing?.render) innerRing.render.enabled = visible;
-            if (debugDisc?.render) debugDisc.render.enabled = visible;
-            const pick = (entity as any).__lightPickHandleEntity as Entity | undefined;
-            if (pick?.render) pick.render.enabled = visible;
+            refreshSingleLightVisualEnabled(entity, visible);
         });
     }
 };
