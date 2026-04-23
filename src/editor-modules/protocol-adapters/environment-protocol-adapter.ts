@@ -386,6 +386,13 @@ export function applyBloomIsLocalSet(global: Global, value: boolean): void {
     const settings = global.settings as ExperienceSettings;
     const b = ensureBloom(settings) as Record<string, unknown>;
     b.bloomScope = value ? 'local' : 'global';
+    // 切到 global 时，按当前 intensity/blurLevel 归一 enabled，
+    // 避免出现 scope 已切换但 enabled 仍为 false 导致“全局辉光不显示”。
+    if (!value) {
+        const intensity = Number((b as { intensity?: number }).intensity ?? 0);
+        const blurLevel = Number((b as { blurLevel?: number }).blurLevel ?? 0);
+        b.enabled = Number.isFinite(intensity) && intensity > 0 && Number.isFinite(blurLevel) && blurLevel > 0;
+    }
     global.events.fire('postEffect:changed');
 }
 
