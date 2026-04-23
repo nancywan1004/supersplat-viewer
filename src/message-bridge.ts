@@ -169,6 +169,10 @@ const initPostMessageBridge = (global: Global) => {
         editModeBaselineString = getComparableSettingsStringFromSnapshot(currentSnapshot);
     };
 
+    const syncOriginalSettings = (snapshot: ExperienceSettings) => {
+        (global as any).__originalSettings = JSON.parse(JSON.stringify(snapshot)) as ExperienceSettings;
+    };
+
     const handleMessage = async (event: MessageEvent) => {
         const payload = event.data as InboundPayload;
         if (!payload?.type) return;
@@ -276,7 +280,8 @@ const initPostMessageBridge = (global: Global) => {
                 break;
             }
             postToParent('SETTINGS_UPDATED');
-            setBaseline();
+            setBaseline(serialized);
+            syncOriginalSettings(serialized);
             break;
         }
         case 'EDIT_MODULE_SET':
