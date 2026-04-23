@@ -75,6 +75,8 @@ fn applyBloom(color: vec3f, uv: vec2f) -> vec3f {
 
 const BLOOM_THRESHOLD_KNEE_MIN = 0.05;
 const BLOOM_THRESHOLD_KNEE_MAX = 0.35;
+/** 首次激活 compose bloom 时预热帧数，避免初帧采样未稳定输入导致蓝闪 */
+const BLOOM_ACTIVATION_WARMUP_FRAMES = 1;
 
 const getBloomThresholdKnee = (threshold: number): number =>
     Math.max(
@@ -217,6 +219,10 @@ export class BloomController {
     private _activeLocalLightRegionId: string | null = null;
     /** 2D mask 缓存：仅当点集或相机变化时重绘，避免每帧清空导致闪动 */
     private _lastMaskSignature: string = '';
+    /** 上一帧是否请求启用 compose bloom（用于检测 false->true 的激活沿） */
+    private _lastComposeBloomRequested = false;
+    /** bloom 激活预热剩余帧数：期间强制 intensity=0，仅让管线和输入稳定 */
+    private _pendingComposeBloomWarmupFrames = 0;
     /**
      * 与「开场 reveal」共用节奏：为 false 时关闭相机 compose bloom 与局部亮灯（体积+mask），避免与 VFX 叠加；
      * 与 bloomBrush 会话无关，reveal 未结束前不放行笔刷/局部亮灯预览。
@@ -552,20 +558,35 @@ export class BloomController {
             !!bloomSettings.enabled &&
             blurLevel > 0 &&
             (bloomScope === 'global' || hasLocalBloomContribution);
+        const requestedIntensity = Number(bloomSettings.intensity);
+        const resolvedIntensity = Number.isFinite(requestedIntensity) ? requestedIntensity : 0;
+        const composeBloomRequested = shouldEnableComposeBloom && resolvedIntensity > 0;
+
+        if (composeBloomRequested && !this._lastComposeBloomRequested) {
+            this._pendingComposeBloomWarmupFrames = BLOOM_ACTIVATION_WARMUP_FRAMES;
+        }
 
         if (shouldEnableComposeBloom) {
-            const intensity = Number(bloomSettings.intensity);
-            bloom.intensity = Number.isFinite(intensity) ? intensity : 0;
+            if (this._pendingComposeBloomWarmupFrames > 0) {
+                bloom.intensity = 0;
+                this._pendingComposeBloomWarmupFrames--;
+            } else {
+                bloom.intensity = resolvedIntensity;
+            }
             bloom.blurLevel = Math.max(1, Math.min(5, blurLevel));
             cameraFrame.debug = bloomDebug ? 'bloom' : null;
         } else {
             bloom.intensity = 0;
+            this._pendingComposeBloomWarmupFrames = 0;
             cameraFrame.debug = null;
         }
+        this._lastComposeBloomRequested = composeBloomRequested;
 
         // reveal 未完成：关闭 compose Bloom、清空局部亮灯体积与 2D mask，不做笔刷预览（不再因 bloomBrush 放行）。
         if (!this._bloomStackUnlocked) {
             bloom.intensity = 0;
+            this._lastComposeBloomRequested = false;
+            this._pendingComposeBloomWarmupFrames = 0;
             cameraFrame.debug = null;
             this.clearWorldSpaceMaskToBlack();
             const nightModeScriptReveal = this.options.getNightModeScript();
@@ -892,6 +913,8 @@ export class BloomController {
     /** 当 CameraFrame 被销毁时调用，重置包装状态 */
     onCameraFrameDestroyed(): void {
         this._cameraFrameUpdateWrapped = false;
+        this._lastComposeBloomRequested = false;
+        this._pendingComposeBloomWarmupFrames = 0;
     }
 
     /**
