@@ -7,14 +7,41 @@ import { collectPointLights, collectSpotLights } from '../../light';
  * （与 modifySplatColor 内 sum / 输出 clamp 配套；要更「亮」可略调大该常数或改多盏灯分布。）
  */
 const LOCAL_LIGHT_LINEAR_PEAK_CAP = 64;
+const LOCAL_LIGHT_LUMA_R = 0.2126;
+const LOCAL_LIGHT_LUMA_G = 0.7152;
+const LOCAL_LIGHT_LUMA_B = 0.0722;
+/** 颜色等亮补偿强度：0=关闭，1=完全按感知亮度对齐（推荐 0.25~0.45） */
+const LOCAL_LIGHT_PERCEPTUAL_BALANCE_STRENGTH = 0.35;
+/** 近中性颜色（接近白）的软压缩：0=关闭，1=最强（推荐 0.15~0.3） */
+const LOCAL_LIGHT_NEUTRAL_SOFT_COMPRESS_STRENGTH = 0.2;
 
 /** 与方向光 uLightColor 一致：sRGB→线性，再乘 intensity×scale；结果按 LOCAL_LIGHT_LINEAR_PEAK_CAP 封顶 */
 function localLightLinearRgb(r: number, g: number, b: number, intensity: number, scale: number): [number, number, number] {
     const lin = (x: number) => Math.pow(Math.max(0, Math.min(1, x)), 2.2);
-    const m = Math.max(0, intensity) * scale;
-    let lr = lin(r) * m;
-    let lg = lin(g) * m;
-    let lb = lin(b) * m;
+    let m = Math.max(0, intensity) * scale;
+    // 白光（接近中性）在三通道同时叠加时更容易显得“炸白”，做一个温和软压缩。
+    const unitR = lin(r);
+    const unitG = lin(g);
+    const unitB = lin(b);
+    const maxUnit = Math.max(unitR, unitG, unitB, 1e-6);
+    const minUnit = Math.min(unitR, unitG, unitB);
+    const chroma = (maxUnit - minUnit) / maxUnit;
+    const neutralWeight = Math.max(0, Math.min(1, 1 - chroma));
+    const neutralCompress = 1 - LOCAL_LIGHT_NEUTRAL_SOFT_COMPRESS_STRENGTH * neutralWeight;
+    m *= neutralCompress;
+    let lr = unitR * m;
+    let lg = unitG * m;
+    let lb = unitB * m;
+    // 同 intensity 下，饱和色主观会比白光暗；做部分等亮补偿，改善“白很亮/彩色偏暗”体感。
+    const luma = lr * LOCAL_LIGHT_LUMA_R + lg * LOCAL_LIGHT_LUMA_G + lb * LOCAL_LIGHT_LUMA_B;
+    if (luma > 1e-6) {
+        const peak = Math.max(lr, lg, lb);
+        const gainTarget = peak / luma;
+        const gain = 1 + (gainTarget - 1) * LOCAL_LIGHT_PERCEPTUAL_BALANCE_STRENGTH;
+        lr *= gain;
+        lg *= gain;
+        lb *= gain;
+    }
     const peak = Math.max(lr, lg, lb, 1e-20);
     if (peak > LOCAL_LIGHT_LINEAR_PEAK_CAP) {
         const s = LOCAL_LIGHT_LINEAR_PEAK_CAP / peak;
