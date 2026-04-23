@@ -20,9 +20,9 @@ import { applySkyboxSphere, removeSkyboxSphere, applySkyboxTexture, type SkyboxO
 
 import { App } from './app';
 import { observe } from './core/observe';
-import { importSettings } from './settings';
-import type { Config, Global } from './types';
 import type { ExperienceSettings } from './schemas/v2';
+import { importSettings } from './settings';
+import type { Config, Global, State } from './types';
 import { initPoster, initUI } from './ui/ui';
 import { Viewer } from './viewer';
 import { initXr } from './xr';
@@ -34,6 +34,8 @@ import { loadGsplatAsset } from './loaders/gsplat-asset-loader';
 import { version as appVersion } from '../package.json';
 import { initPostMessageBridge } from './message-bridge';
 import { initVideoExport } from './render/video-export';
+import { hasRevealEffectFromSettings } from './reveal-policy';
+import { ensureRevealEffect } from './settings-serialize/settings-serialize-helper';
 
 export { loadGsplatAsset };
 
@@ -310,7 +312,14 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     const processedSettings = importSettings(settingsJson);
     if (config.noreveal) {
         processedSettings.revealEffect = undefined;
+    } else {
+        // 缺省 reveal 的 v2 等：补全 `revealEffect` 对象（见 DEFAULT_REVEAL_EFFECT）；transform 迁移路径已在 importSettings 内写入 radial
+        ensureRevealEffect(processedSettings);
     }
+
+    state.hasRevealEffect = hasRevealEffectFromSettings(processedSettings.revealEffect);
+    const importedVfxType = processedSettings.revealEffect?.type;
+    state.vfxType = ((typeof importedVfxType === 'string' && importedVfxType) ? importedVfxType : 'none') as State['vfxType'];
 
     // 保留原始配置副本，供进入 Edit 模式时恢复使用（View 模式的临时修改不污染此副本）
     const originalSettings = JSON.parse(JSON.stringify(processedSettings)) as ExperienceSettings;

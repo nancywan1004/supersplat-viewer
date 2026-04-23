@@ -742,6 +742,10 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     app.renderNextFrame = true;
 
                     if (!state.readyToRender) {
+                        // 先挂开场 VFX，再允许上屏：否则首帧会画到「无 gsplatModifyVS」的默认高斯，偶发偏蓝/偏亮闪。
+                        if (state.hasRevealEffect) {
+                            this.revealController?.ensureInitialEffectCreatedBeforeFirstDisplay();
+                        }
                         // we're ready to render once the first sort has completed
                         state.readyToRender = true;
 
@@ -818,6 +822,9 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         // scene is done loading
                         eventHandler.off('frame:ready', readyHandler);
 
+                        if (state.hasRevealEffect) {
+                            this.revealController?.ensureInitialEffectCreatedBeforeFirstDisplay();
+                        }
                         state.readyToRender = true;
 
                         // In LOD mode, ensure animation is started (in case it wasn't started earlier)

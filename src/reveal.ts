@@ -1,18 +1,20 @@
 import type { Entity, BoundingBox } from 'playcanvas';
 import { Vec3 } from 'playcanvas';
+
+import type { CameraManager } from './camera-manager';
+import { hasRevealEffectFromSettings } from './reveal-policy';
+import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
+import { RevealEffect as RevealConfig } from './settings';
+import { Global } from './types';
+import { GsplatRevealGrowthWave } from './vfx/gsplat-growth-wave';
+import { GsplatIntegrate } from './vfx/gsplat-integrate';
+import { GsplatRevealPerlinWave } from './vfx/gsplat-perlin-wave';
+import { GsplatRevealPiecesRecover } from './vfx/gsplat-pieces-recover';
+import { GsplatRainV2 } from './vfx/gsplat-rain';
+import { GsplatSketch } from './vfx/gsplat-sketch';
 import { GsplatRevealRadial } from './vfx/reveal/gsplat-reveal-radial';
 import { GsplatRevealRain } from './vfx/reveal/gsplat-reveal-rain';
-import { Global } from './types';
-import { RevealEffect as RevealConfig, AnimTrack } from './settings';
-import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import { GsplatRevealSmooth } from './vfx/reveal/gsplat-reveal-smooth';
-import { GsplatRevealPiecesRecover } from './vfx/gsplat-pieces-recover';
-import { GsplatRevealPerlinWave } from './vfx/gsplat-perlin-wave';
-import { GsplatIntegrate } from './vfx/gsplat-integrate';
-import { GsplatRainV2 } from './vfx/gsplat-rain';
-import { GsplatRevealGrowthWave } from './vfx/gsplat-growth-wave';
-import { GsplatSketch } from './vfx/gsplat-sketch';
-import type { CameraManager } from './camera-manager';
 // import { GsplatRevealRadial } from 'playcanvas/scripts/esm/gsplat/reveal-radial.mjs';
 // import { GsplatRevealRain } from 'playcanvas/scripts/esm/gsplat/reveal-rain.mjs';
 
@@ -95,11 +97,8 @@ export class RevealController {
 
         // 不再监听旧的 nightFade:changed(number)，只接受带 source 的 detailed 事件，避免 0 值误判
         
-        // Check if revealEffect is empty or has no type
-        const hasRevealEffect = settings.revealEffect && 
-                                Object.keys(settings.revealEffect).length > 0 && 
-                                settings.revealEffect.type !== 'none';
-        
+        const hasReveal = hasRevealEffectFromSettings(settings.revealEffect);
+
         // Always initialize (VFX effects don't require revealEffect in settings)
         this.config = {
             type: (settings.revealEffect?.type as RevealEffectType) ?? 'none',
@@ -109,11 +108,20 @@ export class RevealController {
         };
 
         console.log('RevealController initialized with config:', this.config);
-        
-        // Set state to indicate reveal effect is available
-        state.hasRevealEffect = !!hasRevealEffect;
+
+        // 与 settings 对齐的 reveal 开关（hasReveal）与当前 VFX 类型（vfxType）。
+        // - `index.ts` 在 import 后通常会已按 `hasRevealEffectFromSettings` 写过 `state.hasRevealEffect`；
+        //   此处再写一次，保证「仅加载场景、未走 main」或后续重构时仍以 settings 为真源。
+        // - `observe` 在赋**相同**布尔值时不会触发 `hasRevealEffect:changed`，因此下面用手动 `events.fire`
+        //   通知只订阅了 `events`、不读 state 的模块（如 Bloom 构造前已注册的路径）。
+        // - 仅在布尔值**发生变化**时 fire：避免与 index 首轮 `false→true` 已派发的事件重复，减少无意义回调。
+        const prevHasReveal = state.hasRevealEffect;
+        state.hasRevealEffect = hasReveal;
         state.vfxType = this.config.type;
         state.vfxActive = false;
+        if (state.hasRevealEffect !== prevHasReveal) {
+            events.fire('hasRevealEffect:changed', state.hasRevealEffect);
+        }
 
         // 统一监听配置变化（包括类型切换和启用状态）
         events.on('revealConfigChanged', (newConfig: Partial<RevealConfig>) => {
@@ -176,7 +184,8 @@ export class RevealController {
         events.fire('revealType:changed', this.config.type);
         
         // 创建初始效果（如果类型不是 none）：
-        // 启动阶段延后到 firstFrame 再创建，避免 gsplat 材质/渲染管线未就绪导致“首个 VFX 不播”。
+        // 主路径：Viewer 在 `readyToRender=true` 之前调用 {@link ensureInitialEffectCreatedBeforeFirstDisplay}，
+        // 避免首帧已上屏却无 VFX 的一帧偏色/蓝光闪。此处仍注册 firstFrame 作为材质晚就绪时的兜底。
         if (this.config.type !== 'none') {
             const createInitial = () => {
                 if (this.currentScript) return;
@@ -188,6 +197,17 @@ export class RevealController {
                 events.once('firstFrame', createInitial);
             }
         }
+    }
+
+    /**
+     * 在首次允许画布绘制（`state.readyToRender=true`）之前创建开场 VFX，避免出现无 shader 的一帧。
+     * 若脚本已存在则 no-op；`firstFrame` 上的兜底仍会尝试创建。
+     */
+    ensureInitialEffectCreatedBeforeFirstDisplay(): void {
+        if (this.config.type === 'none' || this.currentScript) {
+            return;
+        }
+        this.createEffect(this.config.type);
     }
 
     /**

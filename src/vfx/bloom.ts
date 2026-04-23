@@ -7,15 +7,17 @@ import {
     FILTER_LINEAR,
     Vec3
 } from 'playcanvas';
-import type { PostEffectSettings } from '../settings';
-import type { LocalLightRegion, WorldSpaceBloomRegionJSON, ExperienceSettings } from '../schemas/v2';
-import { ensureBloomEditorSession } from '../settings-serialize/settings-serialize-helper';
-import { BloomBrushPainter } from './bloom-brush-painter';
-import { WorldSpaceBloomData } from './world-space-bloom-data';
+
 import { BloomBrushFilter, MAX_POINTS } from './bloom-brush-filter';
-import { buildCommittedBrightnessVolume, buildCommittedBrightnessVolumeFromRegions, type CommittedPointWithBrightness } from './committed-brightness-volume';
 import { BloomBrushFlowController } from './bloom-brush-flow';
+import { BloomBrushPainter } from './bloom-brush-painter';
 import { computeBrushView, type BrushView } from './brush-view';
+import { buildCommittedBrightnessVolume, buildCommittedBrightnessVolumeFromRegions, type CommittedPointWithBrightness } from './committed-brightness-volume';
+import { WorldSpaceBloomData } from './world-space-bloom-data';
+import { hasRevealEffectFromSettings } from '../reveal-policy';
+import type { LocalLightRegion, WorldSpaceBloomRegionJSON, ExperienceSettings } from '../schemas/v2';
+import type { PostEffectSettings } from '../settings';
+import { ensureBloomEditorSession } from '../settings-serialize/settings-serialize-helper';
 import type { Global } from '../types';
 
 const MASK_SIZE = 512;
@@ -226,7 +228,11 @@ export class BloomController {
         this.global = global;
         this.options = options;
 
-        this._bloomStackUnlocked = !global.state.hasRevealEffect;
+        // Viewer 构造早于 RevealController：state.hasRevealEffect 仍为 false，须按 settings 推断，
+        // 否则开场 reveal 前整段会误走「全开 Bloom + 局部亮灯」，firstFrame 创建 VFX 时产生整屏一闪。
+        const revealScheduled = global.state.hasRevealEffect ||
+            hasRevealEffectFromSettings((global.settings as { revealEffect?: { type?: string } }).revealEffect);
+        this._bloomStackUnlocked = !revealScheduled;
         const onHasRevealChanged = (v: boolean) => {
             if (v) {
                 this._bloomStackUnlocked = false;
