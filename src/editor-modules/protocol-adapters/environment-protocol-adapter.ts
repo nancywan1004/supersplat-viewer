@@ -122,6 +122,10 @@ export function applyLightAdd(
             color: [1, 1, 1],
             intensity: 1,
             range: 1,
+            pitch: -45,
+            yaw: 0,
+            roll: 0,
+            rotationQuat: [0, 0, 0, 1],
             innerConeAngle: 50,
             outerConeAngle: 90,
             enabled: true

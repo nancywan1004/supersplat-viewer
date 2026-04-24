@@ -5,6 +5,7 @@ import {
     Mesh,
     MeshInstance,
     PRIMITIVE_LINES,
+    Quat,
     StandardMaterial,
     TEXTUREPROJECTION_CUBE,
     Vec3
@@ -68,6 +69,18 @@ const normalizeVec3 = (value: unknown, fallback: [number, number, number]): [num
         finiteOr(arr[1], fallback[1]),
         finiteOr(arr[2], fallback[2])
     ];
+};
+
+const normalizeQuat4 = (value: unknown): [number, number, number, number] | null => {
+    if (!Array.isArray(value) || value.length < 4) return null;
+    const x = value[0];
+    const y = value[1];
+    const z = value[2];
+    const w = value[3];
+    if (![x, y, z, w].every((n) => typeof n === 'number' && Number.isFinite(n))) return null;
+    const len = Math.hypot(x as number, y as number, z as number, w as number);
+    if (len < 1e-8) return null;
+    return [x / len, y / len, z / len, w / len];
 };
 
 /** 平行光实体默认位置（用于主方向光） */
@@ -625,6 +638,22 @@ const updateSpotGizmoShape = (spotEntity: Entity, range: number, outerConeAngleD
 };
 
 /**
+ * 聚光灯 roll（绕自身照射轴旋转）对圆锥受光分布几乎无影响，但会让线框“看起来旋转”。
+ * 为避免“受光区域与线框不对齐”的观感，线框子节点对父级 roll 做反向补偿。
+ */
+const syncSpotVisualRollCompensation = (spotEntity: Entity): void => {
+    const euler = spotEntity.getEulerAngles?.();
+    if (!euler) return;
+    const roll = euler.z ?? 0;
+    const visual = (spotEntity as any).__spotVisualEntity as Entity | undefined;
+    const innerRing = (spotEntity as any).__spotInnerRingEntity as Entity | undefined;
+    const debugDisc = (spotEntity as any).__spotDebugDiscEntity as Entity | undefined;
+    if (visual) visual.setLocalEulerAngles(0, 0, -roll);
+    if (innerRing) innerRing.setLocalEulerAngles(0, 0, -roll);
+    if (debugDisc) debugDisc.setLocalEulerAngles(0, 0, -roll);
+};
+
+/**
  * 从 settings.lighting.lights 应用平行光到主方向光实体（name='light'）。
  * 若有 type==='directional' 的项则用其配置；否则用默认值。
  */
@@ -718,6 +747,8 @@ const createSpotLightsFromSettings = (global: Global): void => {
         const intensity = finiteOr(cfg.intensity, 1);
         const pitch = finiteOr(cfg.pitch, -45);
         const yaw = finiteOr(cfg.yaw, 0);
+        const roll = finiteOr((cfg as any).roll, 0);
+        const rotationQuat = normalizeQuat4((cfg as any).rotationQuat);
         const innerCone = finiteOr(cfg.innerConeAngle, DEFAULT_SPOT_APEX_INNER_DEG);
         const outerCone = finiteOr(cfg.outerConeAngle, DEFAULT_SPOT_APEX_OUTER_DEG);
         const range = finiteOr(cfg.range, 1);
@@ -743,7 +774,11 @@ const createSpotLightsFromSettings = (global: Global): void => {
         }
         (entity as any).__lightConfig = cfg;
         entity.setPosition(x, y, z);
-        entity.setEulerAngles(pitch, yaw, 0);
+        if (rotationQuat) {
+            entity.setRotation(new Quat(rotationQuat[0], rotationQuat[1], rotationQuat[2], rotationQuat[3]));
+        } else {
+            entity.setEulerAngles(pitch, yaw, roll);
+        }
         if (entity.light) {
             entity.light.enabled = enabled;
             applyLightColorRgb(entity.light, r, g, b);
@@ -754,6 +789,7 @@ const createSpotLightsFromSettings = (global: Global): void => {
             (entity.light as any).range = range;
         }
         updateSpotGizmoShape(entity, range, outerCone);
+        syncSpotVisualRollCompensation(entity);
         ensureLightPickHandle(global, entity);
         refreshSingleLightVisualEnabled(entity, !!(app as any).__pointLightsVisualVisible);
     });
@@ -1031,5 +1067,6 @@ export {
     setPointLightsVisualVisible,
     setLightsVisualVisible,
     selectNearestLightAtPosition,
+    syncSpotVisualRollCompensation,
     updateShadowDistance
 };

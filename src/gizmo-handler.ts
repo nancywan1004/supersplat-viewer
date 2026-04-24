@@ -13,7 +13,7 @@ import {
     isEnvironmentDebugVisualEnabled
 } from './state-selectors';
 import { pushEditHistory } from './edit-history';
-import { updatePointLightsFromSettings } from './light';
+import { syncSpotVisualRollCompensation, updatePointLightsFromSettings } from './light';
 
 function getGizmoAPI(): {
     Gizmo: { createLayer: (app: AppBase) => any };
@@ -51,61 +51,32 @@ const SPOT_ROTATE_EPSILON = 1e-5;
 
 type SpotRotateAxis = 'x' | 'y' | 'z';
 type SpotRotateState = {
-    node: any;
+    targetNode: any;
+    inputNode: any;
     axis: SpotRotateAxis;
     startPitch: number;
     startYaw: number;
+    startRoll: number;
+    startQuat: [number, number, number, number];
     currentPitch: number;
     currentYaw: number;
+    currentRoll: number;
+    currentQuat: [number, number, number, number];
     changed: boolean;
 };
 
 const normalizeYawDegrees = (yaw: number): number => ((yaw % 360) + 360) % 360;
 const SCALE_EPSILON = 1e-6;
-
-const getSpotDirectionFromNode = (node: any): pc.Vec3 | null => {
-    const wt = node?.getWorldTransform?.();
-    if (!wt?.getY) return null;
-    const yAxis = wt.getY(new pc.Vec3());
-    return new pc.Vec3(-yAxis.x, -yAxis.y, -yAxis.z).normalize();
-};
-
-const getSpotYawFromWorldXAxis = (node: any, fallbackYaw: number): number => {
-    const wt = node?.getWorldTransform?.();
-    if (!wt?.getX) return normalizeYawDegrees(fallbackYaw);
-    const xAxis = wt.getX(new pc.Vec3());
-    const planarLength = Math.hypot(xAxis.x, xAxis.z);
-    if (planarLength < SPOT_ROTATE_EPSILON) return normalizeYawDegrees(fallbackYaw);
-    return normalizeYawDegrees(Math.atan2(-xAxis.z, xAxis.x) * pc.math.RAD_TO_DEG);
-};
-
-const getSpotPitchFromDirectionAndYaw = (direction: pc.Vec3, yaw: number): number => {
-    const yawRad = normalizeYawDegrees(yaw) * pc.math.DEG_TO_RAD;
-    const pitchForward = new pc.Vec3(-Math.sin(yawRad), 0, -Math.cos(yawRad));
-    const signedSinPitch = direction.dot(pitchForward);
-    return Math.atan2(signedSinPitch, -direction.y) * pc.math.RAD_TO_DEG;
-};
-
-const projectSpotRotationForAxis = (
-    node: any,
-    axis: SpotRotateAxis,
-    startPitch: number,
-    startYaw: number
-): { pitch: number; yaw: number } | null => {
-    if (axis === 'y') {
-        return {
-            pitch: startPitch,
-            yaw: getSpotYawFromWorldXAxis(node, startYaw)
-        };
-    }
-
-    // x / z 都作为 pitch 的备用手柄；不恢复 z=roll 的旧语义。
-    const direction = getSpotDirectionFromNode(node);
-    if (!direction) return null;
-    return {
-        pitch: getSpotPitchFromDirectionAndYaw(direction, startYaw),
-        yaw: normalizeYawDegrees(startYaw)
-    };
+const normalizeQuat4 = (value: unknown): [number, number, number, number] | null => {
+    if (!Array.isArray(value) || value.length < 4) return null;
+    const x = value[0];
+    const y = value[1];
+    const z = value[2];
+    const w = value[3];
+    if (![x, y, z, w].every((n) => typeof n === 'number' && Number.isFinite(n))) return null;
+    const len = Math.hypot(x as number, y as number, z as number, w as number);
+    if (len < 1e-8) return null;
+    return [x / len, y / len, z / len, w / len];
 };
 
 /**
@@ -117,9 +88,36 @@ export function initGizmoHandler(global: Global): () => void {
     const api = getGizmoAPI();
     let gizmoPointerLocked = false;
     let spotRotateState: SpotRotateState | null = null;
+    let spotRotateProxyNode: any | null = null;
     let shiftPressed = false;
     let shiftUniformScaleActive = false;
     const shiftUniformScaleStart = new Map<any, pc.Vec3>();
+
+    const destroySpotRotateProxy = () => {
+        if (!spotRotateProxyNode) return;
+        spotRotateProxyNode.destroy?.();
+        spotRotateProxyNode = null;
+    };
+
+    const ensureSpotRotateProxy = (targetNode: any): any => {
+        if (spotRotateProxyNode && (spotRotateProxyNode as any).__spotRotateTarget === targetNode) {
+            const p = targetNode.getPosition?.();
+            const q = targetNode.getRotation?.();
+            if (p) spotRotateProxyNode.setPosition(p.x, p.y, p.z);
+            if (q) spotRotateProxyNode.setRotation(q);
+            return spotRotateProxyNode;
+        }
+        destroySpotRotateProxy();
+        const proxy = new pc.Entity('spotRotateProxy');
+        (proxy as any).__spotRotateTarget = targetNode;
+        const p = targetNode.getPosition?.();
+        const q = targetNode.getRotation?.();
+        if (p) proxy.setPosition(p.x, p.y, p.z);
+        if (q) proxy.setRotation(q);
+        app.root.addChild(proxy);
+        spotRotateProxyNode = proxy;
+        return proxy;
+    };
 
     let handler: {
         _gizmos: Record<string, any>;
@@ -167,58 +165,88 @@ export function initGizmoHandler(global: Global): () => void {
                     spotRotateState = null;
                     return;
                 }
-                const node = handler?._nodes?.[0];
-                const cfg = (node as any)?.__lightConfig as any | undefined;
+                const inputNode = handler?._nodes?.[0];
+                const targetNode = (inputNode as any)?.__spotRotateTarget ?? inputNode;
+                const cfg = (targetNode as any)?.__lightConfig as any | undefined;
                 const axis = rotateGizmo._selectedAxis as string | undefined;
-                if (!node || cfg?.type !== 'spot' || (axis !== 'x' && axis !== 'y' && axis !== 'z')) {
+                if (!inputNode || !targetNode || cfg?.type !== 'spot' || (axis !== 'x' && axis !== 'y' && axis !== 'z')) {
                     spotRotateState = null;
                     return;
                 }
-                const startPitch = typeof cfg.pitch === 'number' ? cfg.pitch : 0;
-                const startYaw = typeof cfg.yaw === 'number' ? cfg.yaw : 0;
+                let startPitch = typeof cfg.pitch === 'number' ? cfg.pitch : 0;
+                let startYaw = typeof cfg.yaw === 'number' ? cfg.yaw : 0;
+                let startRoll = typeof (cfg as any).roll === 'number' ? (cfg as any).roll : 0;
+                const startQuat = normalizeQuat4((cfg as any).rotationQuat);
+                // 方案B：保留完整旋转语义，优先 quaternion 真源。
+                if (startQuat) {
+                    const q = new pc.Quat(startQuat[0], startQuat[1], startQuat[2], startQuat[3]);
+                    targetNode.setRotation(q);
+                    inputNode.setRotation(q);
+                } else {
+                    targetNode.setEulerAngles(startPitch, normalizeYawDegrees(startYaw), startRoll);
+                    inputNode.setEulerAngles(startPitch, normalizeYawDegrees(startYaw), startRoll);
+                }
+                const targetPos = targetNode.getPosition?.();
+                if (targetPos) {
+                    inputNode.setPosition(targetPos.x, targetPos.y, targetPos.z);
+                }
+                const resolvedEuler = inputNode.getEulerAngles?.();
+                if (resolvedEuler) {
+                    startPitch = resolvedEuler.x ?? startPitch;
+                    startYaw = resolvedEuler.y ?? startYaw;
+                    startRoll = resolvedEuler.z ?? startRoll;
+                }
+                const resolvedQuat = inputNode.getRotation?.();
+                const quatTuple: [number, number, number, number] = resolvedQuat
+                    ? [resolvedQuat.x, resolvedQuat.y, resolvedQuat.z, resolvedQuat.w]
+                    : [0, 0, 0, 1];
                 spotRotateState = {
-                    node,
+                    targetNode,
+                    inputNode,
                     axis,
                     startPitch,
                     startYaw,
+                    startRoll,
+                    startQuat: quatTuple,
                     currentPitch: startPitch,
                     currentYaw: startYaw,
+                    currentRoll: startRoll,
+                    currentQuat: quatTuple,
                     changed: false
                 };
             });
 
             rotateGizmo.on('transform:move', () => {
                 if (!spotRotateState) return;
-                const projected = projectSpotRotationForAxis(
-                    spotRotateState.node,
-                    spotRotateState.axis,
-                    spotRotateState.startPitch,
-                    spotRotateState.startYaw
-                );
-                if (!projected) return;
-                spotRotateState.currentPitch = projected.pitch;
-                spotRotateState.currentYaw = projected.yaw;
+                const quat = spotRotateState.inputNode.getRotation?.();
+                const euler = spotRotateState.inputNode.getEulerAngles?.();
+                if (!quat || !euler) return;
+                spotRotateState.currentPitch = euler.x ?? 0;
+                spotRotateState.currentYaw = euler.y ?? 0;
+                spotRotateState.currentRoll = euler.z ?? 0;
+                spotRotateState.currentQuat = [quat.x, quat.y, quat.z, quat.w];
                 spotRotateState.changed =
                     spotRotateState.changed
-                    || Math.abs(projected.pitch - spotRotateState.startPitch) > SPOT_ROTATE_EPSILON
-                    || Math.abs(projected.yaw - spotRotateState.startYaw) > SPOT_ROTATE_EPSILON;
-                // 拖拽中不强制覆写 node 旋转，避免与 Gizmo 内部解算“互相拉扯”导致
-                // 在某些视角下 x/z 轴表现为卡死。仅在 transform:end 时统一投影回 pitch/yaw。
+                    || Math.abs(spotRotateState.currentPitch - spotRotateState.startPitch) > SPOT_ROTATE_EPSILON
+                    || Math.abs(spotRotateState.currentYaw - spotRotateState.startYaw) > SPOT_ROTATE_EPSILON
+                    || Math.abs(spotRotateState.currentRoll - spotRotateState.startRoll) > SPOT_ROTATE_EPSILON
+                    || Math.abs(spotRotateState.currentQuat[0] - spotRotateState.startQuat[0]) > SPOT_ROTATE_EPSILON
+                    || Math.abs(spotRotateState.currentQuat[1] - spotRotateState.startQuat[1]) > SPOT_ROTATE_EPSILON
+                    || Math.abs(spotRotateState.currentQuat[2] - spotRotateState.startQuat[2]) > SPOT_ROTATE_EPSILON
+                    || Math.abs(spotRotateState.currentQuat[3] - spotRotateState.startQuat[3]) > SPOT_ROTATE_EPSILON;
+                // 方案B：真实灯跟随代理完整旋转，不再将姿态投影回 roll=0。
+                spotRotateState.targetNode.setRotation(quat);
+                syncSpotVisualRollCompensation(spotRotateState.targetNode);
                 app.renderNextFrame = true;
             });
 
             rotateGizmo.on('transform:end', () => {
                 if (!spotRotateState) return;
-                const projected = projectSpotRotationForAxis(
-                    spotRotateState.node,
-                    spotRotateState.axis,
-                    spotRotateState.startPitch,
-                    spotRotateState.startYaw
-                );
-                if (!projected) return;
-                spotRotateState.currentPitch = projected.pitch;
-                spotRotateState.currentYaw = projected.yaw;
-                spotRotateState.node.setEulerAngles(projected.pitch, projected.yaw, 0);
+                const quat = spotRotateState.inputNode.getRotation?.();
+                if (quat) {
+                    spotRotateState.targetNode.setRotation(quat);
+                    syncSpotVisualRollCompensation(spotRotateState.targetNode);
+                }
             });
 
             const resolveUniformScaleFactor = (axis: string | undefined, start: pc.Vec3, current: pc.Vec3): number => {
@@ -295,26 +323,38 @@ export function initGizmoHandler(global: Global): () => void {
                     if (state.editMode && state.editLeftModule === 'environment' && handler && handler._nodes.length > 0) {
                         let changed = false;
                         handler._nodes.forEach((node: any) => {
-                            const cfg = (node as any).__lightConfig as any | undefined;
+                            const targetNode = (node as any)?.__spotRotateTarget ?? node;
+                            const cfg = (targetNode as any)?.__lightConfig as any | undefined;
                             if (!cfg) return;
-                            const pos = node.getPosition?.();
+                            const pos = targetNode.getPosition?.();
                             if (pos) {
                                 cfg.position = [pos.x, pos.y, pos.z];
                             }
                             if ((cfg as any).type === 'spot') {
-                                if (spotRotateState && spotRotateState.node === node) {
+                                if (spotRotateState && spotRotateState.targetNode === targetNode) {
                                     (cfg as any).pitch = spotRotateState.currentPitch;
                                     (cfg as any).yaw = normalizeYawDegrees(spotRotateState.currentYaw);
+                                    (cfg as any).roll = spotRotateState.currentRoll;
+                                    (cfg as any).rotationQuat = [
+                                        spotRotateState.currentQuat[0],
+                                        spotRotateState.currentQuat[1],
+                                        spotRotateState.currentQuat[2],
+                                        spotRotateState.currentQuat[3]
+                                    ];
                                     changed = changed || spotRotateState.changed;
                                 } else {
-                                    const euler = node.getEulerAngles?.();
-                                    if (euler) {
+                                    const q = targetNode.getRotation?.();
+                                    const euler = targetNode.getEulerAngles?.();
+                                    if (q && euler) {
                                         const pitch = euler.x ?? 0;
                                         let yaw = euler.y ?? 0;
+                                        const roll = euler.z ?? 0;
                                         // yaw 仅做等价归一化，不限制旋转自由度
                                         yaw = ((yaw % 360) + 360) % 360;
                                         (cfg as any).pitch = pitch;
                                         (cfg as any).yaw = yaw;
+                                        (cfg as any).roll = roll;
+                                        (cfg as any).rotationQuat = [q.x, q.y, q.z, q.w];
                                     }
                                 }
                                 spotRotateState = null;
@@ -385,6 +425,7 @@ export function initGizmoHandler(global: Global): () => void {
                     gizmoPointerLocked = false;
                     shiftUniformScaleActive = false;
                     shiftUniformScaleStart.clear();
+                    destroySpotRotateProxy();
                     window.removeEventListener('keydown', onWindowKeyDown, true);
                     window.removeEventListener('keyup', onWindowKeyUp, true);
                     canvas.removeEventListener('pointerdown', onCanvasPointerDownCapture, true);
@@ -443,7 +484,7 @@ export function initGizmoHandler(global: Global): () => void {
 
         const isSpotLightRotate = lightMode === 'rotate' && (lightEntity as any)?.__lightConfig?.type === 'spot';
         if (isSpotLightRotate) {
-            // 聚光灯旋转仅保留 yaw(y) + pitch(x)，不开放 roll(z)/自由旋转。
+            // 方案B：聚光灯旋转开放 x/y/z 三轴，保持完整旋转语义。
             return SPOT_LIGHT_ROTATE_SHAPES;
         }
 
@@ -454,6 +495,7 @@ export function initGizmoHandler(global: Global): () => void {
         if (!handler) return;
 
         let targetNode: any | null = null;
+        let attachNode: any | null = null;
         let gizmoType: string | null = null;
         let selectedLightEntity: any | null = null;
 
@@ -499,16 +541,22 @@ export function initGizmoHandler(global: Global): () => void {
             && (selectedLightEntity as any)?.__lightConfig?.type === 'spot';
         if (!isSpotRotateSelection) {
             spotRotateState = null;
+            destroySpotRotateProxy();
         }
 
         if (targetNode && gizmoType) {
-            handler.add(targetNode, true);
+            attachNode = targetNode;
+            if (isSpotRotateSelection) {
+                attachNode = ensureSpotRotateProxy(targetNode);
+            }
+            handler.add(attachNode, true);
             handler.switch(gizmoType);
             if (isSpotRotateSelection) {
                 (handler._gizmos.rotate as any).coordSpace = 'world';
             }
         } else {
             spotRotateState = null;
+            destroySpotRotateProxy();
             handler.clear();
         }
     };
