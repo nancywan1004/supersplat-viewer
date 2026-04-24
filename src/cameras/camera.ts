@@ -42,9 +42,15 @@ class Camera {
         this.position.lerp(a.position, b.position, t);
         avec.lerp(avec, bvec, t).sub(this.position);
 
-        this.distance = avec.length();
-
-        vecToAngles(this.angles, avec.mulScalar(1.0 / this.distance));
+        const distance = avec.length();
+        if (!Number.isFinite(distance) || distance <= CAMERA_LOOK_EPSILON) {
+            // Guard transition interpolation from normalize(0) / invalid vectors.
+            // Keep previous orientation and a sane positive focus distance to avoid camera NaN (black screen).
+            this.distance = Math.max(CAMERA_LOOK_EPSILON, this.distance);
+        } else {
+            this.distance = distance;
+            vecToAngles(this.angles, avec.mulScalar(1.0 / distance));
+        }
         
         // Preserve roll by interpolating it separately
         // vecToAngles only calculates pitch and yaw, setting roll to 0
