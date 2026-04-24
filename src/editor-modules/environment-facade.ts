@@ -86,6 +86,7 @@ class EnvironmentFacade implements ModuleFacade {
         setPlacementCursorActive(global, false);
         applyLightAdd(global, pending.id, pending.isThreeSixty, [x, y, z]);
         global.events.fire('sceneLight:placed', { id: pending.id, source: 'scene' as SelectionSource });
+        global.events.fire('sceneLight:selected', { id: pending.id, source: 'scene' as SelectionSource });
         return true;
     }
 

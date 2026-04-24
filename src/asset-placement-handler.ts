@@ -589,13 +589,13 @@ export function initAssetPlacementHandler(
                         entry.id = payload.sceneEntityId;
                     }
                     state.selectedSceneEntityId = entry.id;
-                    events.fire('sceneAsset:selected');
                     events.fire('sceneAsset:placed', { id: entry.id, source: 'scene' });
                     console.debug('[AssetPlacement] placed', {
                         id: entry.id,
                         worldPos: [worldPos.x, worldPos.y, worldPos.z],
                         source: 'scene'
                     });
+                    events.fire('sceneAsset:selected', { source: 'scene' });
                     requestAnimationFrame(() => {
                         events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
                     });

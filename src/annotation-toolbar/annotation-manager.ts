@@ -161,7 +161,7 @@ export class AnnotationManager {
 
         // 默认选中刚创建的标注（并让列表高亮/可继续操作）
         // 注：不自动打开 Gizmo；需要 Gizmo 仍由底部“移动”显式开启
-        this.selectAnnotation(newId, { showGizmo: false });
+        this.selectAnnotation(newId, { showGizmo: false, source: 'scene' });
     }
 
     /**
