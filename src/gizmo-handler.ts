@@ -247,28 +247,14 @@ export function initGizmoHandler(global: Global): () => void {
             canvas.addEventListener('pointerdown', onCanvasPointerDownCapture, true);
 
             rotateGizmo.on('transform:start', () => {
-                // console.log('[transform:start] Fired', {
-                //     editMode: state.editMode,
-                //     editLeftModule: state.editLeftModule,
-                //     lightTransformMode: state.lightTransformMode,
-                //     _selectedAxis: rotateGizmo._selectedAxis
-                // });
                 if (state.editMode !== true || state.editLeftModule !== 'environment' || state.lightTransformMode !== 'rotate') {
-                    // console.log('[transform:start] Rejected: wrong mode');
                     spotRotateState = null;
                     return;
                 }
                 const node = handler?._nodes?.[0];
                 const cfg = (node as any)?.__lightConfig as any | undefined;
                 const axis = rotateGizmo._selectedAxis as string | undefined;
-                // console.log('[transform:start] Check', {
-                //     hasNode: !!node,
-                //     type: cfg?.type,
-                //     axis,
-                //     validAxis: axis === 'x' || axis === 'y' || axis === 'z'
-                // });
                 if (!node || cfg?.type !== 'spot' || (axis !== 'x' && axis !== 'y' && axis !== 'z')) {
-                    // console.log('[transform:start] Rejected: invalid node/type/axis');
                     spotRotateState = null;
                     return;
                 }
@@ -283,13 +269,10 @@ export function initGizmoHandler(global: Global): () => void {
                     currentYaw: startYaw,
                     changed: false
                 };
-                // console.log('[transform:start] spotRotateState created', { axis, startPitch, startYaw });
             });
 
             rotateGizmo.on('transform:move', () => {
-                // console.log('[transform:move] Fired', { hasSpotRotateState: !!spotRotateState });
                 if (!spotRotateState) return;
-                // console.log('[transform:move] Processing axis:', spotRotateState.axis);
                 const projected = projectSpotRotationForAxis(
                     spotRotateState.node,
                     spotRotateState.axis,
@@ -297,7 +280,6 @@ export function initGizmoHandler(global: Global): () => void {
                     spotRotateState.startYaw
                 );
                 if (!projected) {
-                    // console.log('[transform:move] No projection result');
                     return;
                 }
                 spotRotateState.currentPitch = projected.pitch;
@@ -306,21 +288,13 @@ export function initGizmoHandler(global: Global): () => void {
                     spotRotateState.changed
                     || Math.abs(projected.pitch - spotRotateState.startPitch) > SPOT_ROTATE_EPSILON
                     || Math.abs(projected.yaw - spotRotateState.startYaw) > SPOT_ROTATE_EPSILON;
-                // console.log('[transform:move] Updated', {
-                //     axis: spotRotateState.axis,
-                //     pitch: spotRotateState.currentPitch.toFixed(2),
-                //     yaw: spotRotateState.currentYaw.toFixed(2),
-                //     changed: spotRotateState.changed
-                // });
                 // 拖拽中不强制覆写 node 旋转，避免与 Gizmo 内部解算"互相拉扯"导致
                 // 在某些视角下 x/z 轴表现为卡死。仅在 transform:end 时统一投影回 pitch/yaw。
                 app.renderNextFrame = true;
             });
 
             rotateGizmo.on('transform:end', () => {
-                // console.log('[transform:end] Fired', { hasSpotRotateState: !!spotRotateState });
                 if (!spotRotateState) {
-                    // console.log('[transform:end] No spotRotateState, returning');
                     return;
                 }
                 const projected = projectSpotRotationForAxis(
@@ -335,11 +309,6 @@ export function initGizmoHandler(global: Global): () => void {
                 spotRotateState.currentPitch = projected.pitch;
                 spotRotateState.currentYaw = projected.yaw;
                 spotRotateState.changed = true;
-                console.log('[transform:end] Updated values', {
-                    axis: spotRotateState.axis,
-                    currentPitch: spotRotateState.currentPitch.toFixed(2),
-                    currentYaw: spotRotateState.currentYaw.toFixed(2)
-                });
             });
 
             const resolveUniformScaleFactor = (axis: string | undefined, start: pc.Vec3, current: pc.Vec3): number => {
@@ -424,18 +393,7 @@ export function initGizmoHandler(global: Global): () => void {
                             }
                             if ((cfg as any).type === 'spot') {
                                 const eulerBefore = node.getEulerAngles?.();
-                                console.log('[pointer:up] Node euler before:', {
-                                    x: eulerBefore?.x.toFixed(2),
-                                    y: eulerBefore?.y.toFixed(2),
-                                    z: eulerBefore?.z.toFixed(2)
-                                });
                                 if (spotRotateState && spotRotateState.node === node && spotRotateState.changed) {
-                                    console.log('[pointer:up] Writing to settings:', {
-                                        axis: spotRotateState.axis,
-                                        pitch: spotRotateState.currentPitch.toFixed(2),
-                                        yaw: spotRotateState.currentYaw.toFixed(2),
-                                        changed: spotRotateState.changed
-                                    });
                                     (cfg as any).pitch = spotRotateState.currentPitch;
                                     (cfg as any).yaw = normalizeYawDegrees(spotRotateState.currentYaw);
                                     changed = true;
@@ -454,28 +412,13 @@ export function initGizmoHandler(global: Global): () => void {
                                 }
                                 // 处理完成后清空 spotRotateState
                                 if (spotRotateState && spotRotateState.node === node) {
-                                    console.log('[pointer:up] Clearing spotRotateState');
                                     spotRotateState = null;
                                 }
                             }
                             changed = true;
                         });
                         if (changed) {
-                            console.log('[pointer:up] Calling updatePointLightsFromSettings');
-                            const node = handler._nodes[0];
-                            const eulerBeforeUpdate = node?.getEulerAngles?.();
-                            console.log('[pointer:up] Node euler before update:', {
-                                x: eulerBeforeUpdate?.x.toFixed(2),
-                                y: eulerBeforeUpdate?.y.toFixed(2),
-                                z: eulerBeforeUpdate?.z.toFixed(2)
-                            });
                             updatePointLightsFromSettings(global);
-                            const eulerAfterUpdate = node?.getEulerAngles?.();
-                            console.log('[pointer:up] Node euler after update:', {
-                                x: eulerAfterUpdate?.x.toFixed(2),
-                                y: eulerAfterUpdate?.y.toFixed(2),
-                                z: eulerAfterUpdate?.z.toFixed(2)
-                            });
                             events.fire('lighting:changed');
                             pushEditHistory(global, 'transform light');
                         }
@@ -591,13 +534,9 @@ export function initGizmoHandler(global: Global): () => void {
         const rotateGizmo = (handler._gizmos as any)?.rotate;
         if (!rotateGizmo || typeof rotateGizmo.enableShape !== 'function') return;
 
-        const enabledArray = Array.from(enabledShapes);
-        console.log('[applyRotateGizmoShapePolicy] Enabling shapes:', enabledArray);
-
         for (const shape of ALL_ROTATE_GIZMO_SHAPES) {
             const isEnabled = enabledShapes.has(shape);
             rotateGizmo.enableShape(shape, isEnabled);
-            console.log(`[applyRotateGizmoShapePolicy] Shape ${shape}: ${isEnabled ? 'enabled' : 'disabled'}`);
         }
     };
 
@@ -622,13 +561,6 @@ export function initGizmoHandler(global: Global): () => void {
 
     const syncGizmoToSelection = () => {
         if (!handler) return;
-
-        console.log('[syncGizmoToSelection] Called', {
-            hasSpotRotateState: !!spotRotateState,
-            spotRotateAxis: spotRotateState?.axis,
-            editMode: state.editMode,
-            lightTransformMode: state.lightTransformMode
-        });
 
         let targetNode: any | null = null;
         let gizmoType: string | null = null;
@@ -674,15 +606,7 @@ export function initGizmoHandler(global: Global): () => void {
         const isSpotRotateSelection =
             gizmoType === 'rotate'
             && (selectedLightEntity as any)?.__lightConfig?.type === 'spot';
-        console.log('[syncGizmoToSelection] isSpotRotateSelection:', isSpotRotateSelection, {
-            gizmoType,
-            lightType: (selectedLightEntity as any)?.__lightConfig?.type,
-            hadSpotRotateState: !!spotRotateState
-        });
         if (!isSpotRotateSelection) {
-            if (spotRotateState) {
-                console.log('[syncGizmoToSelection] Clearing spotRotateState');
-            }
             spotRotateState = null;
             currentSpotAxes = { pitch: 'x', enabled: new Set(['x', 'z']) };
         }
