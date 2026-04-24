@@ -60,6 +60,7 @@ type InboundPayload =
     | { type: 'ANNOTATION_TRANSFORM_MODE'; value?: 'move' | null }
     | { type: 'LIGHT_GLOBAL_SET'; value?: number }
     | { type: 'LIGHT_ADD'; id?: string; isThreeSixty?: boolean }
+    | { type: 'LIGHT_COPY'; id?: string; copyId?: string }
     | { type: 'LIGHT_DELETE'; id?: string }
     | { type: 'LIGHT_TOGGLE_ALL'; value?: boolean }
     | { type: 'LIGHT_TOGGLE'; id?: string; value?: boolean }
@@ -448,6 +449,15 @@ const initPostMessageBridge = (global: Global) => {
         case 'LIGHT_ADD':
             if (typeof p.id === 'string') {
                 dispatchEnvironment(global, 'LIGHT_ADD', p);
+            }
+            break;
+        case 'LIGHT_COPY':
+            if (
+                typeof p.id === 'string' &&
+                typeof p.copyId === 'string' &&
+                p.copyId.trim().length > 0
+            ) {
+                dispatchEnvironment(global, 'LIGHT_COPY', p);
             }
             break;
         case 'LIGHT_DELETE':

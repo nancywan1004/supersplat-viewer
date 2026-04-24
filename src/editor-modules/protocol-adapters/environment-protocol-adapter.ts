@@ -125,7 +125,6 @@ export function applyLightAdd(
             pitch: -45,
             yaw: 0,
             roll: 0,
-            rotationQuat: [0, 0, 0, 1],
             innerConeAngle: 50,
             outerConeAngle: 90,
             enabled: true
@@ -266,6 +265,39 @@ export function applyLightDelete(global: Global, id: string): void {
         global.events.fire('sceneLight:selected', { id: null, source: 'host' });
     }
     updatePointLightsFromSettings(global);
+    global.events.fire('lighting:changed');
+    global.events.fire('postEffect:changed');
+}
+
+/** 与 `ASSET_COPY` 一致：`copyId` 由父级生成并下发；复制点光/聚光配置，略平移位置避免与源灯完全重合。 */
+export function applyLightCopy(global: Global, sourceId: string, copyId: string): void {
+    const sid = typeof sourceId === 'string' ? sourceId.trim() : '';
+    const cid = typeof copyId === 'string' ? copyId.trim() : '';
+    if (!sid || !cid || sid === cid) return;
+
+    const settings = global.settings as ExperienceSettings;
+    const lighting = ensureLighting(settings);
+    const lightsAny = lighting.lights as any[];
+    const src = lightsAny.find((l) => l && l.id === sid);
+    if (!src) return;
+    if (src.type === 'directional') return;
+    if (lightsAny.some((l) => l && l.id === cid)) return;
+
+    const clone = JSON.parse(JSON.stringify(src)) as Record<string, unknown>;
+    clone.id = cid;
+    const pos = clone.position;
+    if (Array.isArray(pos) && pos.length >= 3) {
+        clone.position = [
+            finiteOr(pos[0], 0) + 0.5,
+            finiteOr(pos[1], 0),
+            finiteOr(pos[2], 0)
+        ];
+    }
+
+    lightsAny.push(clone as LightWithId);
+    updatePointLightsFromSettings(global);
+    (global.state as Record<string, unknown>).selectedLightId = cid;
+    global.events.fire('sceneLight:selected', { id: cid, source: 'host' });
     global.events.fire('lighting:changed');
     global.events.fire('postEffect:changed');
 }

@@ -11,6 +11,7 @@ import {
     applyBloomLocalLightRegionRangeSet,
     applyBloomThresholdUpdate,
     applyLightAdd,
+    applyLightCopy,
     applyLightDelete,
     applyLightDetail,
     applyLightGlobalSet,
@@ -207,6 +208,14 @@ class EnvironmentFacade implements ModuleFacade {
         }
         case 'LIGHT_DELETE': {
             if (typeof pl.id === 'string') applyLightDelete(g, pl.id);
+            break;
+        }
+        case 'LIGHT_COPY': {
+            const sid = pl.id;
+            const cid = pl.copyId;
+            if (typeof sid === 'string' && typeof cid === 'string' && cid.trim().length > 0) {
+                applyLightCopy(g, sid, cid);
+            }
             break;
         }
         case 'LIGHT_SELECT': {
