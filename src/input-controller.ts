@@ -25,6 +25,7 @@ const orbitRotate = new Vec3();
 const flyRotate = new Vec3();
 const stickMove = new Vec3();
 const stickRotate = new Vec3();
+const isFiniteVec3 = (v: Vec3): boolean => Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
 
 /**
  * Converts screen space mouse deltas to world space pan vector.
@@ -39,7 +40,10 @@ const stickRotate = new Vec3();
  */
 const screenToWorld = (camera: CameraComponent, dx: number, dy: number, dz: number, out: Vec3 = new Vec3()) => {
     const { system, fov, aspectRatio, horizontalFov, projection, orthoHeight } = camera;
-    const { width, height } = system.app.graphicsDevice.clientRect;
+    const rect = system.app.graphicsDevice.clientRect;
+    const width = Math.max(1, rect.width);
+    const height = Math.max(1, rect.height);
+    const safeDz = Number.isFinite(dz) && dz > 0 ? dz : 1;
 
     // normalize deltas to device coord space
     out.set(
@@ -51,7 +55,7 @@ const screenToWorld = (camera: CameraComponent, dx: number, dy: number, dz: numb
     // calculate half size of the view frustum at the current distance
     const halfSize = tmpV2.set(0, 0, 0);
     if (projection === PROJECTION_PERSPECTIVE) {
-        const halfSlice = dz * Math.tan(0.5 * fov * math.DEG_TO_RAD);
+        const halfSlice = safeDz * Math.tan(0.5 * fov * math.DEG_TO_RAD);
         // if (horizontalFov) {
         //     halfSize.set(
         //         halfSlice,
@@ -565,7 +569,8 @@ class InputController {
 
         // 兜底：orbit 已贴近最小缩放距离时，继续滚轮（任意方向）直接切 fly，
         // 避免偶发未触发 camera-manager 自动切换而出现“滚轮卡死”。
-        if (state.cameraMode === 'orbit' && Math.abs(wheel[0]) > 0 && distance <= 0.56) {
+        const safeDistance = Number.isFinite(distance) && distance > 0 ? distance : this._minPanDistance;
+        if (state.cameraMode === 'orbit' && Math.abs(wheel[0]) > 0 && safeDistance <= 0.56) {
             state.cameraMode = 'fly';
         }
 
@@ -581,21 +586,24 @@ class InputController {
         const double = +(this._state.touches > 1);
         const pan = this._state.mouse[2] || +(button[2] === -1) || double;
 
-        const orbitFactor = fly ? camera.fov / 120 : 1;
+        const orbitFactorRaw = fly ? camera.fov / 120 : 1;
+        const orbitFactor = Number.isFinite(orbitFactorRaw) ? orbitFactorRaw : 1;
 
         const { deltas } = this.frame;
 
         // Use max of actual distance and minimum pan distance to prevent slow panning when zoomed in
-        const effectivePanDistance = Math.max(distance, this._minPanDistance);
+        const effectivePanDistance = Math.max(safeDistance, this._minPanDistance);
 
         // desktop move
         const v = tmpV1.set(0, 0, 0);
         const keyMove = this._state.axis.clone().normalize();
         v.add(keyMove.mulScalar(fly * this.moveSpeed * (this._state.shift ? 4 : this._state.ctrl ? 0.25 : 1) * dt));
         const panMove = screenToWorld(camera, mouse[0], mouse[1], effectivePanDistance);
+        if (!isFiniteVec3(panMove)) panMove.set(0, 0, 0);
         v.add(panMove.mulScalar(pan));
         const wheelMove = new Vec3(0, 0, -wheel[0]);
         v.add(wheelMove.mulScalar(this.wheelSpeed * dt));
+        if (!isFiniteVec3(v)) v.set(0, 0, 0);
         // FIXME: need to flip z axis for orbit camera
         deltas.move.append([v.x, v.y, orbit ? -v.z : v.z]);
 
