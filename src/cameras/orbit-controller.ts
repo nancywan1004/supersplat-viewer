@@ -42,6 +42,19 @@ class OrbitController implements CameraController {
     }
 
     onEnter(camera: Camera): void {
+        // 初始相机在场景包围盒外时，camera.distance 可能非常大：
+        // - 左键旋转会绕超远焦点转，表现为“轻微拖动就飞很远”
+        // - 屏幕位移到世界位移换算会被大 distance 放大，平移/滚轮步长异常
+        // 进入 orbit 时先把 distance 收敛到 zoomRange。
+        // 注意：这里不重算 position，避免在模式切换/点击路径上出现“瞬间吸到某点”的跳变。
+        const clampedDistance = Math.max(
+            this.controller.zoomRange.x,
+            Math.min(this.controller.zoomRange.y, camera.distance)
+        );
+        if (Math.abs(clampedDistance - camera.distance) > 1e-6) {
+            camera.distance = clampedDistance;
+        }
+
         p.position.copy(camera.position);
         p.angles.copy(camera.angles);
         p.distance = camera.distance;

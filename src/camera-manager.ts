@@ -445,7 +445,8 @@ class CameraManager {
         // 这里改为基于"可 frame 场景的距离"的倍数，默认更宽松，手感与 fly 更一致。
         const sceneSize = fusedBbox.halfExtents.length();
         const frameDistance = sceneSize / Math.sin(camera0.fov / 180 * Math.PI * 0.5);
-        const maxZoomMultiplier = 0.5;
+        // 放宽 orbit 最大缩放距离，避免“初始在包围盒外”时一进入 orbit 就被过小上限强制拉近。
+        const maxZoomMultiplier = 4.0;
         const maxZoom = frameDistance * maxZoomMultiplier;
         controllers.orbit.controller.zoomRange = new Vec2(0.5, maxZoom);
         // Fly 的 focusDistance 也 clamp 到同一 zoomRange，保证两种模式 target clamp 时的"相机位置外壳范围"一致
