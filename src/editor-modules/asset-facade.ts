@@ -77,13 +77,9 @@ class AssetFacade implements ModuleFacade {
                 value = (state.uploadedAssets as AssetLibraryItem[]).find((it) => it.id === incoming.id) ?? null;
             }
             const finalValue = value ?? (raw as AssetLibraryItem);
-            // 协议收口：ASSET_PLACE 仅使用 value.id 作为场景实例 id。
-            const sceneEntityId =
-                typeof incoming.id === 'string' && incoming.id.trim().length > 0
-                    ? incoming.id
-                    : undefined;
             setPlacementCursorActive(ctx.global, true);
-            events.fire('assetPlacement:start', { value: finalValue, sceneEntityId });
+            // 每次放置都应生成新的场景实例 id；value.id 仅用于定位资产库条目，不可复用为实例 id。
+            events.fire('assetPlacement:start', { value: finalValue });
             break;
         }
         case 'ASSET_SHOW_HIDE_SET': {
