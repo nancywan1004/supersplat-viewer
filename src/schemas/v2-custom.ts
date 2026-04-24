@@ -78,10 +78,6 @@ type SpotLightConfig = {
     pitch?: number,
     /** 偏航角（度），默认 0 */
     yaw?: number,
-    /** 旋转滚转角（度），默认 0；方案B下允许保留完整旋转语义 */
-    roll?: number,
-    /** 完整旋转四元数 [x,y,z,w]；若提供则优先于 pitch/yaw/roll 作为真源 */
-    rotationQuat?: [number, number, number, number],
     /** 内锥整顶角（度，0–180），默认 50（等效引擎半角约 25°） */
     innerConeAngle?: number,
     /** 外锥整顶角（度，0–180），默认 90（等效引擎半角约 45°） */
