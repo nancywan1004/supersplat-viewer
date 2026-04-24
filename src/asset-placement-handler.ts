@@ -531,7 +531,14 @@ export function initAssetPlacementHandler(
         if (Number.isFinite(farClip) && farClip > 0) {
             const dist = pos.distance(camera.getPosition());
             // 未命中时 depth pick 常退化到远裁剪面附近点，过滤掉这类“伪命中”。
-            if (dist >= farClip * 0.995) return false;
+            if (dist >= farClip * 0.995) {
+                console.warn('[AssetPlacement] reject worldPos near farClip', {
+                    worldPos: [pos.x, pos.y, pos.z],
+                    distance: dist,
+                    farClip
+                });
+                return false;
+            }
         }
         return true;
     };
@@ -553,25 +560,49 @@ export function initAssetPlacementHandler(
             pendingPlacementInFlight = true;
             void (async () => {
                 try {
-                    if (!worldPos) return;
-                    if (!isValidPlacementWorldPos(worldPos)) return;
+                    if (!worldPos) {
+                        console.warn('[AssetPlacement] world pick miss (worldPos=null), ignore placement click');
+                        return;
+                    }
+                    if (!isValidPlacementWorldPos(worldPos)) {
+                        console.warn('[AssetPlacement] invalid worldPos, ignore placement click', {
+                            worldPos: [worldPos.x, worldPos.y, worldPos.z]
+                        });
+                        return;
+                    }
                     const payload = pendingPlacement;
-                    if (!payload) return;
+                    if (!payload) {
+                        console.warn('[AssetPlacement] pendingPlacement lost before placement');
+                        return;
+                    }
                     const hydrated = await hydrateProtocolPlaceItem(global, payload.value);
-                    if (!hydrated) return;
+                    if (!hydrated) {
+                        console.warn('[AssetPlacement] hydrateProtocolPlaceItem failed');
+                        return;
+                    }
                     const entry = await placeAsset(global, hydrated, worldPos, false);
-                    if (!entry) return;
+                    if (!entry) {
+                        console.warn('[AssetPlacement] placeAsset returned null');
+                        return;
+                    }
                     if (typeof payload.sceneEntityId === 'string' && payload.sceneEntityId.trim().length > 0) {
                         entry.id = payload.sceneEntityId;
                     }
                     state.selectedSceneEntityId = entry.id;
                     events.fire('sceneAsset:selected');
                     events.fire('sceneAsset:placed', { id: entry.id, source: 'scene' });
+                    console.debug('[AssetPlacement] placed', {
+                        id: entry.id,
+                        worldPos: [worldPos.x, worldPos.y, worldPos.z],
+                        source: 'scene'
+                    });
                     requestAnimationFrame(() => {
                         events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
                     });
                     deps.pushEditHistory?.(global, 'place asset');
                     clearPendingPlacement();
+                } catch (error) {
+                    console.error('[AssetPlacement] placement flow error', error);
                 } finally {
                     pendingPlacementInFlight = false;
                 }
