@@ -340,12 +340,14 @@ function syncViewSettingsBloomLocalLightsFromToggleAll(global: Global, enabled: 
 }
 
 /**
- * LIGHT_TOGGLE_ALL：用户点光/聚光整闸 + 夜景 fade + `viewSettings.bloom.localLightsEnabled` + 绑灯全关。
- * 灯光数组与 Bloom 总闸分层，避免把「局部亮灯合成」写回 settings。
+ * LIGHT_TOGGLE_ALL：用户点光/聚光整闸 + 夜景 fade + Bloom 总闸同步。
+ * - `bloomScope=local`：沿用 `viewSettings.bloom.localLightsEnabled` 仅控制观看态局部亮灯可见性。
+ * - `bloomScope=global`：同步 `settings.postEffectSettings.bloom.enabled`，支持整场辉光开关。
  */
 export function applyLightToggleAll(global: Global, enabled: boolean): void {
     const settings = global.settings as ExperienceSettings;
     const lighting = ensureLighting(settings);
+    const bloom = ensureBloom(settings) as { bloomScope?: 'global' | 'local'; enabled?: boolean };
     let changed = false;
     for (const l of lighting.lights) {
         if (!isUserControllableLight(l)) continue;
@@ -356,6 +358,11 @@ export function applyLightToggleAll(global: Global, enabled: boolean): void {
         }
     }
     syncViewSettingsBloomLocalLightsFromToggleAll(global, enabled);
+    // 全局 Bloom 模式下，LIGHT_TOGGLE_ALL 直接控制整体辉光总开关。
+    if ((bloom.bloomScope ?? 'local') === 'global' && bloom.enabled !== enabled) {
+        bloom.enabled = enabled;
+        changed = true;
+    }
     if (!enabled && disableLinkedLightsForAllLocalLightRegions(global)) {
         changed = true;
     }
