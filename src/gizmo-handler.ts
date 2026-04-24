@@ -86,14 +86,39 @@ const getSpotYawFromWorldXAxis = (node: any, fallbackYaw: number): number => {
  * 照射方向是局部 -Y 的世界方向
  * yaw = atan2(direction.x, direction.z)
  */
+/**
+ * 从照射方向计算 yaw，保持连续性（避免 180° 跳变）
+ */
 const getSpotYawFromDirection = (node: any, fallbackYaw: number): number => {
     const direction = getSpotDirectionFromNode(node);
     if (!direction) return normalizeYawDegrees(fallbackYaw);
-    // direction.y 接近 ±1 时（垂直照射），使用 fallback
+
     const horizontalLen = Math.hypot(direction.x, direction.z);
     if (horizontalLen < SPOT_ROTATE_EPSILON) return normalizeYawDegrees(fallbackYaw);
-    // yaw: 0 = 正北(-Z), 90 = 正东(+X)
-    return normalizeYawDegrees(Math.atan2(direction.x, direction.z) * pc.math.RAD_TO_DEG);
+
+    // 计算 raw yaw
+    const rawYaw = Math.atan2(direction.x, direction.z) * pc.math.RAD_TO_DEG;
+
+    // 归一化到 [0, 360)
+    const normalizedRaw = normalizeYawDegrees(rawYaw);
+    const normalizedFallback = normalizeYawDegrees(fallbackYaw);
+
+    // 选择最接近 fallback 的等价值（避免 180° 跳变）
+    // atan2 返回 [-180, 180]，normalize 后 [0, 360)，但在 0/360 边界会跳变
+    let bestYaw = normalizedRaw;
+    let minDiff = Math.abs(normalizedRaw - normalizedFallback);
+
+    // 检查 ±360 的等价值
+    for (const offset of [-360, 360]) {
+        const altYaw = normalizedRaw + offset;
+        const diff = Math.abs(altYaw - normalizedFallback);
+        if (diff < minDiff) {
+            minDiff = diff;
+            bestYaw = altYaw;
+        }
+    }
+
+    return normalizeYawDegrees(bestYaw);
 };
 
 const getSpotPitchFromDirectionAndYaw = (direction: pc.Vec3, yaw: number): number => {
