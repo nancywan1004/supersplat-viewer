@@ -827,7 +827,6 @@ const initUI = (global: Global) => {
                 // - 之后选择「不保存并退出」时，回退到最近一次保存的配置
                 editModeEnteredSettingsSnapshot = getComparableSettingsString(global);
                 editModeEnteredSettingsData = JSON.parse(JSON.stringify(payload)) as ExperienceSettings;
-                (global as any).__originalSettings = JSON.parse(JSON.stringify(payload)) as ExperienceSettings;
             });
         }
         if (dom.previewModeBtn) {
