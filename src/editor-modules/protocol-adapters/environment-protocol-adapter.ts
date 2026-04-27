@@ -77,12 +77,14 @@ export function applyLightGlobalSet(global: Global, value: number): void {
  * @param {string} id - 新光源 id
  * @param {boolean} [isThreeSixty=true] - true 点光 / false 聚光
  * @param {[number, number, number] | null | undefined} [positionOverride] - 可选世界坐标（亮灯区域完成落盘时传入 committed 质心）
+ * @param {string} [name] - 可选光源显示名称
  */
 export function applyLightAdd(
     global: Global,
     id: string,
     isThreeSixty = true,
-    positionOverride?: [number, number, number] | null
+    positionOverride?: [number, number, number] | null,
+    name?: string
 ): void {
     const settings = global.settings as ExperienceSettings;
     const lighting = ensureLighting(settings);
@@ -107,6 +109,7 @@ export function applyLightAdd(
     if (isThreeSixty) {
         lighting.lights.push({
             id,
+            name: name || id,
             type: 'point',
             position,
             color: [1, 1, 1],
@@ -117,6 +120,7 @@ export function applyLightAdd(
     } else {
         lighting.lights.push({
             id,
+            name: name || id,
             type: 'spot',
             position,
             color: [1, 1, 1],
@@ -244,6 +248,38 @@ export function applyLightDetail(
     updatePointLightsFromSettings(global);
     global.events.fire('lighting:changed');
     global.events.fire('postEffect:changed');
+}
+
+/**
+ * LIGHT_UPDATE：更新光源通用属性（目前支持 name）。
+ * 与 LIGHT_DETAIL 区分：LIGHT_DETAIL 用于光照参数（intensity/color/angle/range），
+ * LIGHT_UPDATE 用于元数据（name 等）及未来可能的其他通用字段。
+ *
+ * @param {Global} global -
+ * @param {string} id - 光源 id
+ * @param {{ name?: string }} value - 要更新的属性
+ */
+export function applyLightUpdate(global: Global, id: string, value: { name?: string }): void {
+    if (!id || !value || typeof value !== 'object') return;
+    const settings = global.settings as ExperienceSettings;
+    const lighting = settings.lighting;
+    if (!lighting?.lights || !Array.isArray(lighting.lights)) return;
+
+    const light = lighting.lights.find((l: LightWithId) => (l as LightWithId).id === id) as LightWithId | undefined;
+    if (!light) return;
+
+    let changed = false;
+
+    // 更新名称
+    if (typeof value.name === 'string') {
+        (light as any).name = value.name;
+        changed = true;
+    }
+
+    if (!changed) return;
+
+    // 派发 lighting:changed 以通知 UI 刷新列表
+    global.events.fire('lighting:changed');
 }
 
 /** LIGHT_DELETE：从 settings 移除光源并重建场景灯实体（不可删 directional） */

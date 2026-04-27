@@ -59,7 +59,7 @@ type InboundPayload =
     | { type: 'ANNOTATION_EDIT'; id?: string }
     | { type: 'ANNOTATION_TRANSFORM_MODE'; value?: 'move' | null }
     | { type: 'LIGHT_GLOBAL_SET'; value?: number }
-    | { type: 'LIGHT_ADD'; id?: string; isThreeSixty?: boolean }
+    | { type: 'LIGHT_ADD'; id?: string; isThreeSixty?: boolean; name?: string }
     | { type: 'LIGHT_COPY'; id?: string; copyId?: string }
     | { type: 'LIGHT_DELETE'; id?: string }
     | { type: 'LIGHT_TOGGLE_ALL'; value?: boolean }
@@ -71,6 +71,7 @@ type InboundPayload =
     | { type: 'LIGHT_INNER_ANGLE_SET'; id?: string; value?: number }
     | { type: 'LIGHT_OUTER_ANGLE_SET'; id?: string; value?: number }
     | { type: 'LIGHT_RANGE_SET'; id?: string; value?: number }
+    | { type: 'LIGHT_UPDATE'; id?: string; value?: { name?: string } }
     | { type: 'LIGHT_BRUSH_INTENSITY_UPDATE'; id?: string; value?: number }
     | { type: 'LIGHT_BRUSH_INNER_ANGLE_SET'; id?: string; value?: number }
     | { type: 'LIGHT_BRUSH_OUTER_ANGLE_SET'; id?: string; value?: number }
@@ -479,6 +480,7 @@ const initPostMessageBridge = (global: Global) => {
         case 'LIGHT_INNER_ANGLE_SET':
         case 'LIGHT_OUTER_ANGLE_SET':
         case 'LIGHT_RANGE_SET':
+        case 'LIGHT_UPDATE':
             dispatchEnvironment(global, type, p);
             break;
         case 'LIGHT_BRUSH_DELETE':

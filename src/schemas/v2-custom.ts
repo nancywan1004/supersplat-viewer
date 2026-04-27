@@ -46,6 +46,10 @@ type TransformFrame = {
  * - 用于 settings.json 中配置点光源、平行光等
  */
 type PointLightConfig = {
+    type: 'point',
+    id?: string,
+    /** 光源显示名称（用于 UI 列表展示），例如「点光源01」 */
+    name?: string,
     position: [number, number, number],
     color: [number, number, number],
     intensity: number,
@@ -58,6 +62,9 @@ type PointLightConfig = {
 /** 平行光配置（主方向光/太阳，无位置概念，仅方向；用于阴影等）。阴影开关由 postEffectSettings.shadow.enabled 统一控制。 */
 type DirectionalLightConfig = {
     type: 'directional',
+    id?: string,
+    /** 光源显示名称（用于 UI 列表展示），例如「主光源」 */
+    name?: string,
     /** 仅用于锥体可视化与阴影相机参考，默认 [0, 8, 8] */
     position?: [number, number, number],
     color: [number, number, number],
@@ -71,6 +78,9 @@ type DirectionalLightConfig = {
 /** 聚光灯配置：有位置 + 方向，局部锥形照明 */
 type SpotLightConfig = {
     type: 'spot',
+    id?: string,
+    /** 光源显示名称（用于 UI 列表展示），例如「聚光灯01」 */
+    name?: string,
     position: [number, number, number],
     color: [number, number, number],
     intensity: number,

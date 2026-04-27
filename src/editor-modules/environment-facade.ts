@@ -19,6 +19,7 @@ import {
     applyLightToggle,
     applyLightToggleAll,
     applyLightTransformMode,
+    applyLightUpdate,
     applyShadowDirectionSet,
     applyShadowIntensityUpdate,
     applyShadowSet
@@ -44,7 +45,7 @@ function applyEnvironmentPreviewVisualPolicy(global: Global): void {
 
 class EnvironmentFacade implements ModuleFacade {
     readonly module = 'environment' as const;
-    private pendingLightPlacement: { id: string; isThreeSixty: boolean } | null = null;
+    private pendingLightPlacement: { id: string; isThreeSixty: boolean; name?: string } | null = null;
     private detachPointerClickClaimHandler: (() => void) | null = null;
 
     setPointerClickClaimHandlerCleanup(cleanup: () => void): void {
@@ -56,8 +57,8 @@ class EnvironmentFacade implements ModuleFacade {
         setPlacementCursorActive(ctx.global, false);
     }
 
-    private startLightPlacement(ctx: ModuleContext, id: string, isThreeSixty: boolean): void {
-        this.pendingLightPlacement = { id, isThreeSixty };
+    private startLightPlacement(ctx: ModuleContext, id: string, isThreeSixty: boolean, name?: string): void {
+        this.pendingLightPlacement = { id, isThreeSixty, name };
         setPlacementCursorActive(ctx.global, true);
     }
 
@@ -84,7 +85,7 @@ class EnvironmentFacade implements ModuleFacade {
 
         this.pendingLightPlacement = null;
         setPlacementCursorActive(global, false);
-        applyLightAdd(global, pending.id, pending.isThreeSixty, [x, y, z]);
+        applyLightAdd(global, pending.id, pending.isThreeSixty, [x, y, z], pending.name);
         global.events.fire('sceneLight:placed', { id: pending.id, source: 'scene' as SelectionSource });
         global.events.fire('sceneLight:selected', { id: pending.id, source: 'scene' as SelectionSource });
         return true;
@@ -196,13 +197,14 @@ class EnvironmentFacade implements ModuleFacade {
             if (typeof pl.id === 'string') {
                 const t = pl.isThreeSixty;
                 const isThreeSixty = typeof t === 'boolean' ? t : true;
-                // 当 LIGHT_BRUSH_FINISH 已写入区域中心时，沿用原有“中心+绑灯”语义直接建灯，
+                const name = typeof pl.name === 'string' ? pl.name : undefined;
+                // 当 LIGHT_BRUSH_FINISH 已写入区域中心时，沿用原有"中心+绑灯"语义直接建灯，
                 // 避免多余的二次场景点击放置；无中心时仍走点击放置。
                 if (this.hasDraftLightRegionCenter(g)) {
                     this.clearPendingLightPlacement(ctx);
-                    applyLightAdd(g, pl.id, isThreeSixty);
+                    applyLightAdd(g, pl.id, isThreeSixty, undefined, name);
                 } else {
-                    this.startLightPlacement(ctx, pl.id, isThreeSixty);
+                    this.startLightPlacement(ctx, pl.id, isThreeSixty, name);
                 }
             }
             break;
@@ -234,6 +236,14 @@ class EnvironmentFacade implements ModuleFacade {
         case 'LIGHT_RANGE_SET':
             applyLightDetail(g, command.type, pl as { id?: string; value?: number | number[] | boolean });
             break;
+        case 'LIGHT_UPDATE': {
+            const id = pl.id;
+            const v = pl.value;
+            if (typeof id === 'string' && typeof v === 'object' && v !== null) {
+                applyLightUpdate(g, id, v as { name?: string });
+            }
+            break;
+        }
         case 'LIGHT_BRUSH_DELETE':
             applyBloomLocalLightRegionDelete(g, typeof pl.id === 'string' ? pl.id : '');
             break;
