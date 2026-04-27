@@ -313,14 +313,17 @@ export async function placeAsset(global: Global, item: AssetLibraryItem, worldPo
 }
 
 /**
- * 协议放置时，父级常只传 url/name/type，不会携带已加载的 PlayCanvas asset 实例。
- * 这里补齐 mesh/gaussian 的 asset，保证 ASSET_PLACE 只传 URL 也可放置。
+ * 协议放置时，asset-facade 已预加载资产，这里仅做校验和兜底。
+ * 对于从 settings 恢复的链路，仍需处理 asset 缺失的情况。
  */
 async function hydrateProtocolPlaceItem(global: Global, item: AssetLibraryItem): Promise<AssetLibraryItem | null> {
+    // image 不需要预加载
     if (item.type === 'image') return item;
 
+    // facade 层已预加载完成，直接使用
     if (item.asset) return item;
 
+    // 兼容场景：asset 缺失（如旧数据恢复），尝试加载
     const url = item.url || item.filename;
     if (!url) {
         console.warn('[AssetPlacement] protocol place missing url for', item.type);
