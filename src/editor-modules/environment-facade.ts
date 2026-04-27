@@ -203,6 +203,8 @@ class EnvironmentFacade implements ModuleFacade {
                 if (this.hasDraftLightRegionCenter(g)) {
                     this.clearPendingLightPlacement(ctx);
                     applyLightAdd(g, pl.id, isThreeSixty, undefined, name);
+                    // draftRegion 直接建灯触发 placed，source 用 'scene' 与点击放置对齐
+                    g.events.fire('sceneLight:placed', { id: pl.id, source: 'scene' as SelectionSource });
                 } else {
                     this.startLightPlacement(ctx, pl.id, isThreeSixty, name);
                 }
