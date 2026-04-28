@@ -943,8 +943,8 @@ z: ${cameraInfo.target.z.toFixed(6)}
         const postEffectSettings = settings.postEffectSettings;
         const { background } = settings;
 
-        // 强制开启高精度渲染，确保 PBR 材质超过1.0的ambient/diffuse值能正确生效
-        const highPrecisionRendering = true;
+        // hpr override takes precedence over settings.highPrecisionRendering
+        const highPrecisionRendering = config.hpr ?? settings.highPrecisionRendering;
 
         // 无 postEffectSettings 或未启用任一后处理时跳过，避免报错
         // Bloom 语义对齐：局部 Bloom 仅应改变 mask 区域，不应因 blur/enabled 开关导致整条渲染路径突变。
