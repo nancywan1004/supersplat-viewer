@@ -156,6 +156,15 @@ const initAnnotationFacade = (global: Global): ModuleFacade => {
     orchestrator?.registerFacade(facade);
     (global as any).__annotationFacade = facade;
     (global as any).__commandRegistry?.register?.('annotation', facade);
+
+    // TODO: 临时方案 - 监听资产全局显隐变化，同步控制标注显隐（仅在 View 模式生效，不继承到编辑模式）
+    // 后续可能根据设计重构，将资产显隐与标注显隐解耦
+    const handleAssetsVisibilityChanged = ({ visible }: { visible: boolean }) => {
+        const annotationManager = (global as any).annotationManager as { setAllAnnotationsVisible?: (v: boolean) => void } | undefined;
+        annotationManager?.setAllAnnotationsVisible?.(visible);
+    };
+    global.events.on('assets:allVisibilityChanged', handleAssetsVisibilityChanged);
+
     return facade;
 };
 
