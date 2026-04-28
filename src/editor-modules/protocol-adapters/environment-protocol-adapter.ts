@@ -649,6 +649,9 @@ export function applyShadowDirectionSet(global: Global, value: number): void {
     const shadow = ensureShadow(settings) as Record<string, unknown>;
     shadow.lightYaw = yaw;
 
+    // 清除方向光签名缓存，强制 updatePointLightsFromSettings 重新应用方向光
+    (global.app as any).__directionalLightSignature = null;
+
     updatePointLightsFromSettings(global);
     global.events.fire('lighting:changed');
 }
