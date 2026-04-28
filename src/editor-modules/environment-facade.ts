@@ -218,8 +218,9 @@ class EnvironmentFacade implements ModuleFacade {
         case 'LIGHT_COPY': {
             const sid = pl.id;
             const cid = pl.copyId;
+            const cname = pl.copyName;
             if (typeof sid === 'string' && typeof cid === 'string' && cid.trim().length > 0) {
-                applyLightCopy(g, sid, cid);
+                applyLightCopy(g, sid, cid, typeof cname === 'string' ? cname : undefined);
             }
             break;
         }

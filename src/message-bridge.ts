@@ -60,7 +60,7 @@ type InboundPayload =
     | { type: 'ANNOTATION_TRANSFORM_MODE'; value?: 'move' | null }
     | { type: 'LIGHT_GLOBAL_SET'; value?: number }
     | { type: 'LIGHT_ADD'; id?: string; isThreeSixty?: boolean; name?: string }
-    | { type: 'LIGHT_COPY'; id?: string; copyId?: string }
+    | { type: 'LIGHT_COPY'; id?: string; copyId?: string; copyName?: string }
     | { type: 'LIGHT_DELETE'; id?: string }
     | { type: 'LIGHT_TOGGLE_ALL'; value?: boolean }
     | { type: 'LIGHT_TOGGLE'; id?: string; value?: boolean }

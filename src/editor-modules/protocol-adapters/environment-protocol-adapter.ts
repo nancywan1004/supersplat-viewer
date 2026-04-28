@@ -302,8 +302,11 @@ export function applyLightDelete(global: Global, id: string): void {
     global.events.fire('postEffect:changed');
 }
 
-/** 与 `ASSET_COPY` 一致：`copyId` 由父级生成并下发；复制点光/聚光配置，略平移位置避免与源灯完全重合。 */
-export function applyLightCopy(global: Global, sourceId: string, copyId: string): void {
+/**
+ * 与 `ASSET_COPY` 一致：`copyId` 由父级生成并下发；复制点光/聚光配置，略平移位置避免与源灯完全重合。
+ * @param copyName - 可选，副本光源的显示名称
+ */
+export function applyLightCopy(global: Global, sourceId: string, copyId: string, copyName?: string): void {
     const sid = typeof sourceId === 'string' ? sourceId.trim() : '';
     const cid = typeof copyId === 'string' ? copyId.trim() : '';
     if (!sid || !cid || sid === cid) return;
@@ -318,6 +321,9 @@ export function applyLightCopy(global: Global, sourceId: string, copyId: string)
 
     const clone = JSON.parse(JSON.stringify(src)) as Record<string, unknown>;
     clone.id = cid;
+    if (typeof copyName === 'string' && copyName.trim().length > 0) {
+        clone.name = copyName.trim();
+    }
     const pos = clone.position;
     if (Array.isArray(pos) && pos.length >= 3) {
         clone.position = [
