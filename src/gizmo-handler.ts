@@ -48,6 +48,8 @@ type RotateGizmoShape = 'x' | 'y' | 'z' | 'xyz' | 'face';
 const ALL_ROTATE_GIZMO_SHAPES: RotateGizmoShape[] = ['x', 'y', 'z', 'xyz', 'face'];
 const SPOT_ROTATE_EPSILON = 1e-5;
 const SPOT_AXIS_HYSTERESIS = 0.15; // 滞回阈值，防止边界抖动
+const SPOT_YAW_JUMP_GUARD_DEG = 60;
+const SPOT_YAW_GUARD_HORIZONTAL_EPS = 0.12;
 
 type SpotPitchAxis = 'x' | 'z';
 
@@ -64,6 +66,12 @@ type SpotRotateState = {
 
 const normalizeYawDegrees = (yaw: number): number => ((yaw % 360) + 360) % 360;
 const SCALE_EPSILON = 1e-6;
+const shortestAngleDeltaDegrees = (fromDeg: number, toDeg: number): number => {
+    let delta = normalizeYawDegrees(toDeg) - normalizeYawDegrees(fromDeg);
+    if (delta > 180) delta -= 360;
+    if (delta < -180) delta += 360;
+    return delta;
+};
 
 const getSpotDirectionFromNode = (node: any): pc.Vec3 | null => {
     const wt = node?.getWorldTransform?.();
@@ -132,7 +140,8 @@ const projectSpotRotationForAxis = (
     node: any,
     axis: SpotRotateAxis,
     startPitch: number,
-    startYaw: number
+    startYaw: number,
+    prevYaw?: number
 ): { pitch: number; yaw: number } | null => {
     if (axis === 'y') {
         return {
@@ -146,8 +155,17 @@ const projectSpotRotationForAxis = (
     const direction = getSpotDirectionFromNode(node);
     if (!direction) return null;
 
-    // 从照射方向计算 yaw（适用于所有旋转轴）
-    const currentYaw = getSpotYawFromDirection(node, startYaw);
+    const yawSeed = Number.isFinite(prevYaw as number) ? (prevYaw as number) : startYaw;
+    let currentYaw = getSpotYawFromDirection(node, yawSeed);
+    // x/z 轴为 pitch 主操作时，对接近竖直姿态下的 yaw 反解做跳变抑制，
+    // 避免偶发切到另一组等价解（常见为 ±90°突跳），同时不强制锁死 yaw 以避免松手回弹。
+    if (axis === 'x' || axis === 'z') {
+        const horizontalLen = Math.hypot(direction.x, direction.z);
+        const deltaYaw = Math.abs(shortestAngleDeltaDegrees(yawSeed, currentYaw));
+        if (horizontalLen < SPOT_YAW_GUARD_HORIZONTAL_EPS && deltaYaw > SPOT_YAW_JUMP_GUARD_DEG) {
+            currentYaw = normalizeYawDegrees(yawSeed);
+        }
+    }
 
     // 使用新的 yaw 计算 pitch
     const currentPitch = getSpotPitchFromDirectionAndYaw(direction, currentYaw);
@@ -277,7 +295,8 @@ export function initGizmoHandler(global: Global): () => void {
                     spotRotateState.node,
                     spotRotateState.axis,
                     spotRotateState.startPitch,
-                    spotRotateState.startYaw
+                    spotRotateState.startYaw,
+                    spotRotateState.currentYaw
                 );
                 if (!projected) {
                     return;
@@ -301,7 +320,8 @@ export function initGizmoHandler(global: Global): () => void {
                     spotRotateState.node,
                     spotRotateState.axis,
                     spotRotateState.startPitch,
-                    spotRotateState.startYaw
+                    spotRotateState.startYaw,
+                    spotRotateState.currentYaw
                 );
                 if (!projected) return;
                 // 更新最终值，但不应用旋转（让 Gizmo 自己的更新保持）
@@ -392,22 +412,17 @@ export function initGizmoHandler(global: Global): () => void {
                                 cfg.position = [pos.x, pos.y, pos.z];
                             }
                             if ((cfg as any).type === 'spot') {
-                                const eulerBefore = node.getEulerAngles?.();
-                                if (spotRotateState && spotRotateState.node === node && spotRotateState.changed) {
+                                // 仅在 rotate 模式且本次确有旋转投影结果时，才回写 pitch/yaw。
+                                // 避免 rotate -> move 或纯平移时用 Euler 回读覆盖配置，触发上下翻转。
+                                const isLightRotateMode = state.lightTransformMode === 'rotate';
+                                if (
+                                    isLightRotateMode
+                                    && spotRotateState
+                                    && spotRotateState.node === node
+                                    && spotRotateState.changed
+                                ) {
                                     (cfg as any).pitch = spotRotateState.currentPitch;
                                     (cfg as any).yaw = normalizeYawDegrees(spotRotateState.currentYaw);
-                                    changed = true;
-                                } else if (!spotRotateState || !spotRotateState.changed) {
-                                    // 如果没有活跃的 spotRotateState 或没有变化，从节点读取当前值
-                                    const euler = node.getEulerAngles?.();
-                                    if (euler) {
-                                        const pitch = euler.x ?? 0;
-                                        let yaw = euler.y ?? 0;
-                                        // yaw 仅做等价归一化，不限制旋转自由度
-                                        yaw = ((yaw % 360) + 360) % 360;
-                                        (cfg as any).pitch = pitch;
-                                        (cfg as any).yaw = yaw;
-                                    }
                                     changed = true;
                                 }
                                 // 处理完成后清空 spotRotateState
