@@ -185,14 +185,14 @@ const PBR_DETECT_THRESHOLDS = {
 
 /** PBR 亮度提升系数（轻微提亮，突破1.0限制避免被clamp） */
 const PBR_BOOST_FACTORS = {
-    /** ambient 绝对值（轻微提亮至1.2） */
-    ambient: { r: 1.2, g: 1.2, b: 1.2 },
+    /** ambient 绝对值（轻微提亮至1.1） */
+    ambient: { r: 1.1, g: 1.1, b: 1.1 },
     /** 极高光泽度时 diffuse 绝对值（轻微提亮至1.1） */
     diffuse: { r: 1.1, g: 1.1, b: 1.1 },
     /** 自发光颜色（轻微补偿） */
-    emissive: { r: 0.05, g: 0.05, b: 0.05 },
+    emissive: { r: 0.03, g: 0.03, b: 0.03 },
     /** 自发光强度 */
-    emissiveIntensity: 0.6,
+    emissiveIntensity: 0.5,
     /** 需要自发光的阈值 */
     emissiveIntensityThreshold: 0.05
 } as const;
