@@ -183,16 +183,16 @@ const PBR_DETECT_THRESHOLDS = {
     reducedMetalnessScale: 0.7
 } as const;
 
-/** PBR 亮度提升系数 */
+/** PBR 亮度提升系数（轻微提亮，突破1.0限制避免被clamp） */
 const PBR_BOOST_FACTORS = {
-    /** ambient 提升系数 */
-    ambient: 2.0,
-    /** 极高光泽度时 diffuse 提升系数 */
-    diffuse: 1.5,
-    /** 自发光颜色（极微弱灰色） */
-    emissive: { r: 0.03, g: 0.03, b: 0.03 },
+    /** ambient 绝对值（轻微提亮至1.2） */
+    ambient: { r: 1.2, g: 1.2, b: 1.2 },
+    /** 极高光泽度时 diffuse 绝对值（轻微提亮至1.1） */
+    diffuse: { r: 1.1, g: 1.1, b: 1.1 },
+    /** 自发光颜色（轻微补偿） */
+    emissive: { r: 0.05, g: 0.05, b: 0.05 },
     /** 自发光强度 */
-    emissiveIntensity: 0.5,
+    emissiveIntensity: 0.6,
     /** 需要自发光的阈值 */
     emissiveIntensityThreshold: 0.05
 } as const;
@@ -248,19 +248,15 @@ function applyPBRBrightnessBoost(mat: PBRMaterial): void {
         mat.metalness = Math.max(th.reducedMetalnessMin, (metalness ?? 1) * th.reducedMetalnessScale);
     }
 
-    // 提高 ambient 响应
-    mat.ambient.r = Math.min(1, mat.ambient.r * boost.ambient);
-    mat.ambient.g = Math.min(1, mat.ambient.g * boost.ambient);
-    mat.ambient.b = Math.min(1, mat.ambient.b * boost.ambient);
+    // 强制设置高 ambient 值（突破1.0限制，不被clamp）
+    mat.ambient.set(boost.ambient.r, boost.ambient.g, boost.ambient.b);
 
-    // 极高光泽度：额外提高 diffuse 响应
+    // 极高光泽度：强制设置高 diffuse 值（突破1.0限制）
     if ((shininess ?? 0) > th.highShininess) {
-        mat.diffuse.r = Math.min(1, mat.diffuse.r * boost.diffuse);
-        mat.diffuse.g = Math.min(1, mat.diffuse.g * boost.diffuse);
-        mat.diffuse.b = Math.min(1, mat.diffuse.b * boost.diffuse);
+        mat.diffuse.set(boost.diffuse.r, boost.diffuse.g, boost.diffuse.b);
     }
 
-    // 添加轻微自发光补偿
+    // 添加自发光补偿（提高基础可见性）
     const currentIntensity = mat.emissiveIntensity ?? 0;
     if (currentIntensity < boost.emissiveIntensityThreshold) {
         mat.emissive.set(boost.emissive.r, boost.emissive.g, boost.emissive.b);
