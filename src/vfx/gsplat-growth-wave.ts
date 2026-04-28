@@ -11,6 +11,7 @@ uniform float uNoiseIntensity;
 uniform float uScatterDistance;
 uniform float uMinSize;
 uniform float uPointSize;   // 点云阶段固定点大小（参考 splat-overlay-shader 的 splatSize）
+uniform float uPointSizeAdaptiveScale; // 点大小自适应缩放倍数（0-10），远处点自动放大
 uniform float uEndRadius;
 uniform float uGlobalRecoverStart;
 uniform float uBottomY;
@@ -394,7 +395,13 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
             gsplatMakeSpherical(scale, originalSize * 0.001);
             return;
         }
-        gsplatMakeSpherical(scale, uPointSize);
+        // Phase 1 自适应点大小：远处点自动放大，近处点保持小尺寸
+        // normalizedDistance: 0 = 中心附近(近), 1 = 最远处
+        float normalizedDistance = clamp(g_dist / max(uEndRadius, 1.0), 0.0, 1.0);
+        // adaptiveSize = pointSize * (1.0 + normalizedDistance * adaptiveScale)
+        // 近处: ~uPointSize, 远处: uPointSize * (1.0 + adaptiveScale)
+        float adaptiveSize = uPointSize * (1.0 + normalizedDistance * uPointSizeAdaptiveScale);
+        gsplatMakeSpherical(scale, adaptiveSize);
         return;
     }
     if (g_phase == 2.0) {
@@ -504,6 +511,7 @@ uniform uNoiseIntensity: f32;
 uniform uScatterDistance: f32;
 uniform uMinSize: f32;
 uniform uPointSize: f32;   // 点云阶段固定点大小（参考 splat-overlay-shader 的 splatSize）
+uniform uPointSizeAdaptiveScale: f32; // 点大小自适应缩放倍数（0-10），远处点自动放大
 uniform uEndRadius: f32;
 uniform uGlobalRecoverStart: f32;
 uniform uBottomY: f32;
@@ -872,7 +880,13 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
             gsplatMakeSpherical(scale, originalSize * 0.001);
             return;
         }
-        gsplatMakeSpherical(scale, uniform.uPointSize);
+        // Phase 1 自适应点大小：远处点自动放大，近处点保持小尺寸
+        // normalizedDistance: 0 = 中心附近(近), 1 = 最远处
+        let normalizedDistance = clamp(g_dist / max(uniform.uEndRadius, 1.0), 0.0, 1.0);
+        // adaptiveSize = pointSize * (1.0 + normalizedDistance * adaptiveScale)
+        // 近处: ~uPointSize, 远处: uPointSize * (1.0 + adaptiveScale)
+        let adaptiveSize = uniform.uPointSize * (1.0 + normalizedDistance * uniform.uPointSizeAdaptiveScale);
+        gsplatMakeSpherical(scale, adaptiveSize);
         return;
     }
     if (g_phase == 2.0) {
@@ -1049,6 +1063,16 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
     pointSize = 0.008;
 
     /**
+     * Phase 1 点大小自适应缩放倍数（0-10）。
+     * 远处点自动放大以确保可见，近处点保持小尺寸避免过曝。
+     * 公式：adaptiveSize = pointSize * (1.0 + normalizedDistance * adaptiveScale)
+     * 例如：adaptiveScale=3.0 时，远处点大小 = 0.008 * 4 = 0.032
+     * @attribute
+     * @range [0, 10]
+     */
+    pointSizeAdaptiveScale = 5.0;
+
+    /**
      * Phase 2 光圈最大半径：光圈从中心向外扩散到此距离后停止。
      * 若场景很大（粒子离中心很远）而 endRadius 较小，则只有距离中心 ≤ endRadius 的区域会被光圈“复原”，
      * 更远的粒子 g_recoverProgress 始终为 0，会一直保持点云状态，看起来“只扫描了一小部分”。
@@ -1145,6 +1169,7 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
         this.setUniform('uScatterDistance', this.scatterDistance);
         this.setUniform('uMinSize', this.minSize);
         this.setUniform('uPointSize', this.pointSize);
+        this.setUniform('uPointSizeAdaptiveScale', this.pointSizeAdaptiveScale);
         this.setUniform('uEndRadius', this.endRadius);
         this.setUniform('uGlobalRecoverStart', globalRecoverStart);
         this.setUniform('uBottomY', this.bottomY);
