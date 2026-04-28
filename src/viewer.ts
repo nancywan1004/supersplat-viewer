@@ -312,13 +312,11 @@ class Viewer {
                 }
             }
 
-            // suppress rendering till we're ready
-            if (!state.readyToRender) {
-                app.renderNextFrame = false;
-            }
-
+            // 强制渲染优先级最高（用于预热帧），否则在就绪前抑制渲染
             if (this.forceRenderNextFrame) {
                 app.renderNextFrame = true;
+            } else if (!state.readyToRender) {
+                app.renderNextFrame = false;
             }
 
             if (app.renderNextFrame) {
@@ -743,11 +741,26 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     app.renderNextFrame = true;
 
                     if (!state.readyToRender) {
-                        // we're ready to render once the first sort has completed
-                        state.readyToRender = true;
+                        // 关键：先创建 VFX 并预热一帧，再允许上屏显示
+                        // 避免首帧无 shader 的偏色/蓝光闪问题
+                        this.revealController?.ensureInitialEffectCreatedBeforeFirstDisplay?.();
 
-                        // wait for the first valid frame to complete rendering
+                        // 强制渲染一帧（不显示），让 unified 模式创建材质并编译 shader
+                        this.forceRenderNextFrame = true;
+                        app.renderNextFrame = true;
+
+                        // 在当前帧渲染完成后立即允许显示（比 requestAnimationFrame 更可靠）
+                        // 使用 frameend 事件确保 shader 已编译完成
                         app.once('frameend', () => {
+                            if (state.readyToRender) return; // 已被其他路径设置则跳过
+
+                            // we're ready to render once the first sort has completed
+                            state.readyToRender = true;
+
+                            // 清除强制渲染标志，恢复按需渲染
+                            this.forceRenderNextFrame = false;
+
+                            // 触发 firstFrame 事件
                             events.fire('firstFrame');
 
                             // emit first frame event on window
@@ -819,42 +832,56 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         // scene is done loading
                         eventHandler.off('frame:ready', readyHandler);
 
-                        state.readyToRender = true;
+                        // 关键：先创建 VFX 并预热一帧，再允许上屏显示
+                        // 避免首帧无 shader 的偏色/蓝光闪问题
+                        this.revealController?.ensureInitialEffectCreatedBeforeFirstDisplay?.();
 
-                        // In LOD mode, ensure animation is started (in case it wasn't started earlier)
-                        // 有 reveal 时不在此处启动动画，等 revealComplete 后再启动
-                        if (isCustomLod && settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !revealBlocksAnim(state)) {
-                            console.log('LOD mode: all chunks loaded, ensuring animation is playing');
-                            state.animationStarted = true;
-                            state.animationPaused = false;
-                        }
+                        // 强制渲染一帧（不显示），让 unified 模式创建材质并编译 shader
+                        this.forceRenderNextFrame = true;
+                        app.renderNextFrame = true;
 
-                        // handle quality mode changes
-                        const updateLod = () => {
-                            if (isCustomLod) {
-                                const gsplatScene = (app.scene as any).gsplat;
-                                if (gsplatScene && gsplatScene.lodRangeMin !== undefined) {
-                                    gsplat.lodRangeMin = gsplatScene.lodRangeMin;
-                                    gsplat.lodRangeMax = gsplatScene.lodRangeMax;
-                                    if (gsplatScene.splatBudget !== undefined) {
-                                        results[0].gsplat.splatBudget = gsplatScene.splatBudget * 1000000;
-                                    }
-                                }
-                            } else {
-                                const settings = state.hqMode ? quality.high : quality.low;
-                                results[0].gsplat.splatBudget = settings * 1000000;
-                            }
-                        };
-                        events.on('hqMode:changed', updateLod);
-                        updateLod();
-
-                        // debug colorize lods
-                        gsplat.colorizeLod = config.colorize;
-
-                        gsplat.gpuSorting = config.gpusort;
-
-                        // wait for the first valid frame to complete rendering
+                        // 在当前帧渲染完成后立即允许显示（比 requestAnimationFrame 更可靠）
                         app.once('frameend', () => {
+                            if (state.readyToRender) return; // 已被其他路径设置则跳过
+
+                            state.readyToRender = true;
+
+                            // 清除强制渲染标志，恢复按需渲染（场景已加载完成）
+                            this.forceRenderNextFrame = false;
+
+                            // In LOD mode, ensure animation is started (case it wasn't started earlier)
+                            // 有 reveal 时不在此处启动动画，等 revealComplete 后再启动
+                            if (isCustomLod && settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !revealBlocksAnim(state)) {
+                                console.log('LOD mode: all chunks loaded, ensuring animation is playing');
+                                state.animationStarted = true;
+                                state.animationPaused = false;
+                            }
+
+                            // handle quality mode changes
+                            const updateLod = () => {
+                                if (isCustomLod) {
+                                    const gsplatScene = (app.scene as any).gsplat;
+                                    if (gsplatScene && gsplatScene.lodRangeMin !== undefined) {
+                                        gsplat.lodRangeMin = gsplatScene.lodRangeMin;
+                                        gsplat.lodRangeMax = gsplatScene.lodRangeMax;
+                                        if (gsplatScene.splatBudget !== undefined) {
+                                            results[0].gsplat.splatBudget = gsplatScene.splatBudget * 1000000;
+                                        }
+                                    }
+                                } else {
+                                    const settings = state.hqMode ? quality.high : quality.low;
+                                    results[0].gsplat.splatBudget = settings * 1000000;
+                                }
+                            };
+                            events.on('hqMode:changed', updateLod);
+                            updateLod();
+
+                            // debug colorize lods
+                            gsplat.colorizeLod = config.colorize;
+
+                            gsplat.gpuSorting = config.gpusort;
+
+                            // 触发 firstFrame 事件
                             events.fire('firstFrame');
 
                             // emit first frame event on window
