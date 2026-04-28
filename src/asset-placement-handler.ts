@@ -165,21 +165,137 @@ async function instantiateMesh(app: AppBase, item: AssetLibraryItem, position: V
 }
 
 /**
- * 对放置的 mesh 层级做一次材质侧统一配置（当前：StandardMaterial 关闭 scene 级 IBL，便于弱 env 下仍靠光+ambient 可读）。
+// ==================== PBR 材质配置常量 ====================
+
+/** 高反光 PBR 检测阈值 */
+const PBR_DETECT_THRESHOLDS = {
+    /** 高金属度阈值 */
+    metalness: 0.3,
+    /** 高光泽度阈值 */
+    shininess: 60,
+    /** 极高光泽度阈值（用于额外提升） */
+    highShininess: 80,
+    /** 需要降低 metalness 的阈值 */
+    reduceMetalness: 0.8,
+    /** 降低后的 metalness 最小值 */
+    reducedMetalnessMin: 0.6,
+    /** 降低 metalness 的乘数 */
+    reducedMetalnessScale: 0.7
+} as const;
+
+/** PBR 亮度提升系数 */
+const PBR_BOOST_FACTORS = {
+    /** ambient 提升系数 */
+    ambient: 2.0,
+    /** 极高光泽度时 diffuse 提升系数 */
+    diffuse: 1.5,
+    /** 自发光颜色（极微弱灰色） */
+    emissive: { r: 0.03, g: 0.03, b: 0.03 },
+    /** 自发光强度 */
+    emissiveIntensity: 0.5,
+    /** 需要自发光的阈值 */
+    emissiveIntensityThreshold: 0.05
+} as const;
+
+/** 扩展 StandardMaterial 类型，包含 PBR 属性 */
+type PBRMaterial = StandardMaterial & {
+    metalness?: number;
+    useMetalness?: boolean;
+    shininess?: number;
+    clearCoat?: number;
+    useSpecular?: boolean;
+    specularMap?: unknown;
+    glossMap?: unknown;
+    metalnessMap?: unknown;
+    emissiveIntensity?: number;
+};
+
+/**
+ * 检测材质是否为高反光 PBR 材质
+ */
+function isHighReflectivePBRMaterial(mat: PBRMaterial): boolean {
+    const metalness = mat.metalness ?? 0;
+    const useMetalness = mat.useMetalness ?? false;
+    const shininess = mat.shininess ?? 0;
+    const clearCoat = mat.clearCoat ?? 0;
+    const useSpecular = mat.useSpecular ?? false;
+    const hasSpecularMap = !!mat.specularMap;
+    const hasGlossMap = !!mat.glossMap;
+    const hasMetalnessMap = !!mat.metalnessMap;
+
+    return (
+        (useMetalness && metalness > PBR_DETECT_THRESHOLDS.metalness) ||
+        (useSpecular && shininess > PBR_DETECT_THRESHOLDS.shininess) ||
+        clearCoat > 0 ||
+        hasSpecularMap ||
+        hasGlossMap ||
+        hasMetalnessMap
+    );
+}
+
+/**
+ * 应用高反光 PBR 材质亮度提升
+ */
+function applyPBRBrightnessBoost(mat: PBRMaterial): void {
+    const { metalness, useMetalness, shininess } = mat;
+    const th = PBR_DETECT_THRESHOLDS;
+    const boost = PBR_BOOST_FACTORS;
+
+    mat.useSkybox = false;
+
+    // 极高金属度材质：适度降低 metalness 保留漫反射贡献
+    if (useMetalness && (metalness ?? 0) > th.reduceMetalness) {
+        mat.metalness = Math.max(th.reducedMetalnessMin, (metalness ?? 1) * th.reducedMetalnessScale);
+    }
+
+    // 提高 ambient 响应
+    mat.ambient.r = Math.min(1, mat.ambient.r * boost.ambient);
+    mat.ambient.g = Math.min(1, mat.ambient.g * boost.ambient);
+    mat.ambient.b = Math.min(1, mat.ambient.b * boost.ambient);
+
+    // 极高光泽度：额外提高 diffuse 响应
+    if ((shininess ?? 0) > th.highShininess) {
+        mat.diffuse.r = Math.min(1, mat.diffuse.r * boost.diffuse);
+        mat.diffuse.g = Math.min(1, mat.diffuse.g * boost.diffuse);
+        mat.diffuse.b = Math.min(1, mat.diffuse.b * boost.diffuse);
+    }
+
+    // 添加轻微自发光补偿
+    const currentIntensity = mat.emissiveIntensity ?? 0;
+    if (currentIntensity < boost.emissiveIntensityThreshold) {
+        mat.emissive.set(boost.emissive.r, boost.emissive.g, boost.emissive.b);
+        mat.emissiveIntensity = boost.emissiveIntensity;
+    }
+}
+
+/**
+ * 对放置的 mesh 层级做一次材质侧统一配置。
+ * 智能检测高反光 PBR 特征，保留 IBL 反射并提升可读性；
+ * 其他材质关闭 skybox，依赖光+ambient 保持可读性。
  */
 function configurePlacedMeshMaterials(root: Entity): void {
     const visit = (node: Entity) => {
         const render = node.render;
         const instances = render?.meshInstances;
-        if (instances?.length) {
-            for (const mi of instances as any[]) {
-                const mat = mi?.material;
-                if (mat instanceof StandardMaterial) {
-                    mat.useSkybox = false;
-                    mat.update();
-                }
+        if (!instances?.length) {
+            for (const child of node.children as Entity[]) {
+                visit(child);
             }
+            return;
         }
+
+        for (const mi of instances as any[]) {
+            const mat = mi?.material as PBRMaterial | undefined;
+            if (!(mat instanceof StandardMaterial)) continue;
+
+            if (isHighReflectivePBRMaterial(mat)) {
+                applyPBRBrightnessBoost(mat);
+            } else {
+                mat.useSkybox = false;
+            }
+            mat.update();
+        }
+
         for (const child of node.children as Entity[]) {
             visit(child);
         }
