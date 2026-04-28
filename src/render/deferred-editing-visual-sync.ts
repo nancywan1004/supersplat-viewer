@@ -54,9 +54,12 @@ export const DEFAULT_DEFERRED_EDITING_LAYERS: readonly DeferredEditingLayerSpec[
     {
         id: 'annotations.all',
         applyVisibility: (g, v) => {
+            // 优先使用 viewSettings.annotationsVisible（View 模式下的用户显隐意图）
+            // 未设置时默认为 true（标注默认可见）
+            const targetVisible = g.viewSettings?.annotationsVisible ?? true;
             const am = (g as { annotationManager?: { setAllAnnotationsVisible?: (x: boolean) => void } })
                 .annotationManager;
-            am?.setAllAnnotationsVisible?.(v);
+            am?.setAllAnnotationsVisible?.(targetVisible);
         }
     },
     {

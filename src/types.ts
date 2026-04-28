@@ -190,6 +190,13 @@ export type ViewSettings = {
          */
         localLightsEnabled: boolean;
     };
+    /**
+     * 标注显隐状态（View 模式专属，不入库）
+     * - `ASSETS_SHOW_HIDE_SET` 切换资产显隐时同步更新
+     * - `revealComplete` 等恢复 deferred layers 时参考此状态决定是否恢复标注可见性
+     * - 编辑态通常不存在此字段，由模块自身控制
+     */
+    annotationsVisible?: boolean;
 };
 
 type Global = {
