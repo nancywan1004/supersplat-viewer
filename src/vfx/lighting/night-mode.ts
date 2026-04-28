@@ -55,7 +55,8 @@ function localLightLinearRgb(r: number, g: number, b: number, intensity: number,
 /**
  * 调亮/调暗原理（Shader 内 modifySplatColor）：
  * - 线性空间：result = linearColor * mult，再 gamma 写回；g2l/l2g 对底数 clamp，避免 pow(0) / 溢出在 ANGLE 上出 NaN 黑块。
- * - 点光/聚光：TS 侧 sRGB→线性并乘强度，且按 LOCAL_LIGHT_LINEAR_PEAK_CAP 对单灯线性色封顶（极大 intensity 不再线性放大）；shader 内衰减 1.15/(1+d²)，并对 sum/输出 clamp。
+ * - 点光/聚光：TS 侧 sRGB→线性并乘强度，且按 LOCAL_LIGHT_LINEAR_PEAK_CAP 对单灯线性色封顶（极大 intensity 不再线性放大）；
+ *   shader 内距离衰减使用 pow(1 - norm, 2.5)（norm=dist/range），中心1、边缘0，比二次 (1-norm)^2 更陡峭集中，并对 sum/输出 clamp。
  * - 调暗 (f < 0)：mult = mix(1, nightColor, -f)。nightColor = 环境光 + 点光 + 聚光贡献；主光不参与此乘子。
  * - 调亮 (f > 0)：mult = baseBright * (1 + sum + dirContrib)；dirContrib = NdotL * uLightColor（viewDir 零长时回退，避免 normalize(0)）。
  * TS 侧：主光强度 = settings 基准 × (1 + nightFade)；天空球与 fade 同向；Bloom 由 settings 统一控制。
@@ -172,8 +173,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
             float dist = length(pos - wpos);
             if (dist < range && dist > 0.001) {
                 float norm = clamp(dist / max(range, 1e-3), 0.0, 1.0);
-                float att = 1.0 - norm;
-                att *= att;
+                float att = pow(1.0 - norm, 2.5); // 降幂衰减：中心1、边缘0，中段比二次更柔和
                 sum += clr * att;
             }
         }
@@ -196,8 +196,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         if (cosTheta <= cosOuter) continue;
         float spotAtt = (cosTheta >= cosInner) ? 1.0 : smoothstep(cosOuter, cosInner, cosTheta);
         float norm = clamp(dist / max(range, 1e-3), 0.0, 1.0);
-        float att = 1.0 - norm;
-        att *= att;
+        float att = pow(1.0 - norm, 2.5); // 降幂衰减：中心1、边缘0，中段比二次更柔和
         sum += spotClr * spotAtt * att;
     }
     sum = clamp(sum, vec3(0.0), vec3(8.0));
@@ -359,8 +358,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
             float dist = length(pos - wpos);
             if (dist < range && dist > 0.001) {
                 float norm = clamp(dist / max(range, 1e-3), 0.0, 1.0);
-                float att = 1.0 - norm;
-                att *= att;
+                float att = pow(1.0 - norm, 2.5); // 降幂衰减：中心1、边缘0，中段比二次更柔和
                 sum += clr * att;
             }
         }
@@ -383,8 +381,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         if (cosTheta <= cosOuter) continue;
         float spotAtt = (cosTheta >= cosInner) ? 1.0 : smoothstep(cosOuter, cosInner, cosTheta);
         float norm = clamp(dist / max(range, 1e-3), 0.0, 1.0);
-        float att = 1.0 - norm;
-        att *= att;
+        float att = pow(1.0 - norm, 2.5); // 降幂衰减：中心1、边缘0，中段比二次更柔和
         sum += spotClr * spotAtt * att;
     }
     sum = clamp(sum, vec3(0.0), vec3(8.0));
@@ -524,8 +521,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
             let dist = length(pos - wpos);
             if (dist < range && dist > 0.001) {
                 let norm = clamp(dist / max(range, 1e-3), 0.0, 1.0);
-                var att = 1.0 - norm;
-                att = att * att;
+                var att = pow(1.0 - norm, 2.5); // 降幂衰减：中心1、边缘0，中段比二次更柔和
                 sum = sum + clr * att;
             }
         }
@@ -551,8 +547,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
             spotAtt = smoothstep(cosOuter, cosInner, cosTheta);
         }
         let norm = clamp(dist / max(range, 1e-3), 0.0, 1.0);
-        var att = 1.0 - norm;
-        att = att * att;
+        var att = pow(1.0 - norm, 2.5); // 降幂衰减：中心1、边缘0，中段比二次更柔和
         sum = sum + spotClr * spotAtt * att;
     }
     sum = clamp(sum, vec3f(0.0), vec3f(8.0));
@@ -714,8 +709,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
             let dist = length(pos - wpos);
             if (dist < range && dist > 0.001) {
                 let norm = clamp(dist / max(range, 1e-3), 0.0, 1.0);
-                var att = 1.0 - norm;
-                att = att * att;
+                var att = pow(1.0 - norm, 2.5); // 降幂衰减：中心1、边缘0，中段比二次更柔和
                 sum = sum + clr * att;
             }
         }
@@ -741,8 +735,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
             spotAtt = smoothstep(cosOuter, cosInner, cosTheta);
         }
         let norm = clamp(dist / max(range, 1e-3), 0.0, 1.0);
-        var att = 1.0 - norm;
-        att = att * att;
+        var att = pow(1.0 - norm, 2.5); // 降幂衰减：中心1、边缘0，中段比二次更柔和
         sum = sum + spotClr * spotAtt * att;
     }
     sum = clamp(sum, vec3f(0.0), vec3f(8.0));
