@@ -1376,8 +1376,8 @@ class NightMode extends GsplatShaderEffect {
             this.light.light.intensity = targetIntensity;
         }
 
-        // Update skybox intensity: same direction as scene (fade > 0 brighten → brighter sky, fade < 0 darken → dimmer sky)
-        const targetSkyboxIntensity = Math.max(0.2, Math.min(1.5, 1.0 + 0.8 * this.nightFade));
+        // Update skybox intensity: 在当前提亮方案基础上回调一档，避免环境反射过曝。
+        const targetSkyboxIntensity = Math.max(0.23, Math.min(2.0, 1.1 + 1.0 * this.nightFade));
         this.app.scene.skyboxIntensity = targetSkyboxIntensity;
 
         // 仅在 fade 变化时 fire，避免每帧触发 configureCamera

@@ -4,7 +4,7 @@ const skyboxTextureCache = new Map<string, Texture>();
 const skyboxCubemapCache = new Map<string, Texture>();
 const skyboxEntityCache = new Map<string, Entity>();
 let solidEnvAtlasTexture: Texture | null = null;
-const SOLID_ENV_ATLAS_COLOR = new Color(0.72, 0.72, 0.72);
+const SOLID_ENV_ATLAS_COLOR = new Color(1, 1, 1);
 
 export interface SkyboxOptions {
     /** 中心点位置，默认为 (0, 0, 0) */
