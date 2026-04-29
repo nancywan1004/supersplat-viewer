@@ -10,6 +10,7 @@ import { pickWorldFromClientXY } from './picker';
 import type { InputArbiter } from './input-arbiter';
 
 const PLACED_ASSETS_NAME = 'placedAssets';
+const ASSET_LOAD_TIMEOUT_MS = 15000;
 
 export type AssetPlacementHandlerDeps = {
     pushEditHistory?: (global: Global, label?: string) => void;
@@ -42,6 +43,28 @@ function getPlacedAssetsParent(app: AppBase): Entity {
 
 /** 相机前方距离，用于兜底放置位置 */
 const CAMERA_FRONT_DISTANCE = 5;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        let settled = false;
+        const timer = window.setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            reject(new Error(`[AssetPlacement] ${label} timeout (${timeoutMs}ms)`));
+        }, timeoutMs);
+        promise.then((value) => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            resolve(value);
+        }).catch((error) => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            reject(error);
+        });
+    });
+}
 
 function getSceneAssetsRestoreController(global: Global): SceneAssetsRestoreController {
     const anyGlobal = global as Global & { __sceneAssetsRestoreController?: SceneAssetsRestoreController };
@@ -110,7 +133,16 @@ async function instantiateImage(app: AppBase, item: AssetLibraryItem, position: 
             reject(new Error('image asset has no url'));
             return;
         }
+        let settled = false;
+        const timer = window.setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            reject(new Error(`[AssetPlacement] image load timeout (${ASSET_LOAD_TIMEOUT_MS}ms): ${url}`));
+        }, ASSET_LOAD_TIMEOUT_MS);
         (app.assets as any).loadFromUrl(url, 'texture', (err: Error | null, asset: any) => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
             if (err) {
                 reject(err);
                 return;
@@ -373,10 +405,19 @@ export async function placeAsset(global: Global, item: AssetLibraryItem, worldPo
             entity = await instantiateMesh(app, item, worldPos);
         } else if (item.type === 'gaussian') {
             if (!item.asset?.loaded) {
-                await new Promise<void>((resolve, reject) => {
-                    item.asset!.once('load', () => resolve());
-                    item.asset!.on('error', reject);
+                const waitAssetLoaded = new Promise<void>((resolve, reject) => {
+                    const onLoad = () => {
+                        item.asset?.off('error', onError);
+                        resolve();
+                    };
+                    const onError = (err: unknown) => {
+                        item.asset?.off('load', onLoad);
+                        reject(err);
+                    };
+                    item.asset!.once('load', onLoad);
+                    item.asset!.once('error', onError);
                 });
+                await withTimeout(waitAssetLoaded, ASSET_LOAD_TIMEOUT_MS, 'gaussian asset load');
             }
             entity = await instantiateGaussian(app, item, worldPos);
         } else {
@@ -453,8 +494,17 @@ async function hydrateProtocolPlaceItem(global: Global, item: AssetLibraryItem):
         }
 
         if (item.type === 'mesh') {
-            const asset = await new Promise<any>((resolve, reject) => {
+            const meshAssetLoad = new Promise<any>((resolve, reject) => {
+                let settled = false;
+                const timer = window.setTimeout(() => {
+                    if (settled) return;
+                    settled = true;
+                    reject(new Error(`[AssetPlacement] mesh load timeout (${ASSET_LOAD_TIMEOUT_MS}ms): ${url}`));
+                }, ASSET_LOAD_TIMEOUT_MS);
                 (app.assets as any).loadFromUrl(url, 'container', (err: Error | null, loadedAsset: any) => {
+                    if (settled) return;
+                    settled = true;
+                    window.clearTimeout(timer);
                     if (err || !loadedAsset) {
                         reject(err ?? new Error('container asset missing'));
                         return;
@@ -462,6 +512,7 @@ async function hydrateProtocolPlaceItem(global: Global, item: AssetLibraryItem):
                     resolve(loadedAsset);
                 });
             });
+            const asset = await withTimeout(meshAssetLoad, ASSET_LOAD_TIMEOUT_MS + 1000, 'mesh fallback hydrate');
             return { ...item, asset, filename: item.filename ?? url, url };
         }
     } catch (err) {

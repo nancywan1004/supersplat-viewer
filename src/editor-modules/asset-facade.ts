@@ -2,6 +2,8 @@ import type { AssetLibraryItem, Global, ModuleCommand, ModuleContext, ModuleFaca
 import { setPlacementCursorActive } from '../placement-cursor';
 import { loadGsplatAsset } from '../loaders/gsplat-asset-loader';
 
+const ASSET_DOWNLOAD_TIMEOUT_MS = 15000;
+
 class AssetFacade implements ModuleFacade {
     readonly module = 'asset' as const;
     private detachSceneAssetPlacedListener: (() => void) | null = null;
@@ -42,7 +44,18 @@ class AssetFacade implements ModuleFacade {
 
             if (item.type === 'mesh') {
                 const asset = await new Promise<any>((resolve, reject) => {
+                    let settled = false;
+                    const timer = window.setTimeout(() => {
+                        if (settled) return;
+                        settled = true;
+                        this.currentDownloadAbort = null;
+                        reject(new Error(`[AssetFacade] mesh download timeout (${ASSET_DOWNLOAD_TIMEOUT_MS}ms): ${url}`));
+                    }, ASSET_DOWNLOAD_TIMEOUT_MS);
                     const onLoad = (err: Error | null, loadedAsset: any) => {
+                        if (settled) return;
+                        settled = true;
+                        window.clearTimeout(timer);
+                        this.currentDownloadAbort = null;
                         if (err || !loadedAsset) {
                             reject(err ?? new Error('container asset missing'));
                             return;
@@ -52,6 +65,10 @@ class AssetFacade implements ModuleFacade {
 
                     // 注册取消回调，用于中断下载
                     this.currentDownloadAbort = () => {
+                        if (settled) return;
+                        settled = true;
+                        window.clearTimeout(timer);
+                        this.currentDownloadAbort = null;
                         reject(new Error('download cancelled'));
                     };
 
