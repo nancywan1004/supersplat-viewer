@@ -282,6 +282,38 @@ export function applyLightUpdate(global: Global, id: string, value: { name?: str
     global.events.fire('lighting:changed');
 }
 
+/**
+ * LIGHT_REGION_UPDATE：更新局部亮灯区域通用属性（目前支持 name）。
+ * 与 LIGHT_UPDATE 对齐：用于元数据更新，不承载亮度/颜色等专用参数协议。
+ *
+ * @param {Global} global -
+ * @param {string} id - 区域 id
+ * @param {{ name?: string }} value - 要更新的属性
+ */
+export function applyLightRegionUpdate(global: Global, id: string, value: { name?: string }): void {
+    if (!id || !value || typeof value !== 'object') return;
+    const settings = global.settings as ExperienceSettings;
+    const bloom = ensureBloom(settings);
+    const regions = (bloom as { localLightRegions?: Array<{ id: string; name?: string }> }).localLightRegions;
+    if (!Array.isArray(regions)) return;
+
+    const region = regions.find((r) => r && r.id === id);
+    if (!region) return;
+
+    let changed = false;
+
+    // 更新名称
+    if (typeof value.name === 'string') {
+        (region as { name?: string }).name = value.name;
+        changed = true;
+    }
+
+    if (!changed) return;
+
+    // 派发区域列表刷新事件，供 UI/监听方更新区域名称显示
+    global.events.fire('bloomLocalLightRegion:listChanged');
+}
+
 /** LIGHT_DELETE：从 settings 移除光源并重建场景灯实体（不可删 directional） */
 export function applyLightDelete(global: Global, id: string): void {
     if (!id) return;

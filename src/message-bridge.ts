@@ -72,6 +72,7 @@ type InboundPayload =
     | { type: 'LIGHT_OUTER_ANGLE_SET'; id?: string; value?: number }
     | { type: 'LIGHT_RANGE_SET'; id?: string; value?: number }
     | { type: 'LIGHT_UPDATE'; id?: string; value?: { name?: string } }
+    | { type: 'LIGHT_REGION_UPDATE'; id?: string; value?: { name?: string } }
     | { type: 'LIGHT_BRUSH_INTENSITY_UPDATE'; id?: string; value?: number }
     | { type: 'LIGHT_BRUSH_INNER_ANGLE_SET'; id?: string; value?: number }
     | { type: 'LIGHT_BRUSH_OUTER_ANGLE_SET'; id?: string; value?: number }
@@ -481,6 +482,7 @@ const initPostMessageBridge = (global: Global) => {
         case 'LIGHT_OUTER_ANGLE_SET':
         case 'LIGHT_RANGE_SET':
         case 'LIGHT_UPDATE':
+        case 'LIGHT_REGION_UPDATE':
             dispatchEnvironment(global, type, p);
             break;
         case 'LIGHT_BRUSH_DELETE':

@@ -16,6 +16,7 @@ import {
     applyLightDetail,
     applyLightGlobalSet,
     applyLightSelect,
+    applyLightRegionUpdate,
     applyLightToggle,
     applyLightToggleAll,
     applyLightTransformMode,
@@ -244,6 +245,14 @@ class EnvironmentFacade implements ModuleFacade {
             const v = pl.value;
             if (typeof id === 'string' && typeof v === 'object' && v !== null) {
                 applyLightUpdate(g, id, v as { name?: string });
+            }
+            break;
+        }
+        case 'LIGHT_REGION_UPDATE': {
+            const id = pl.id;
+            const v = pl.value;
+            if (typeof id === 'string' && typeof v === 'object' && v !== null) {
+                applyLightRegionUpdate(g, id, v as { name?: string });
             }
             break;
         }
