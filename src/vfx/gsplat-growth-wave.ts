@@ -12,6 +12,9 @@ uniform float uScatterDistance;
 uniform float uMinSize;
 uniform float uPointSize;   // 点云阶段固定点大小（参考 splat-overlay-shader 的 splatSize）
 uniform float uPointSizeAdaptiveScale; // 点大小自适应缩放倍数（0-10），远处点自动放大
+uniform vec3 uViewPos; // 当前相机世界坐标（用于屏幕可见性地板）
+uniform float uMinSizeByViewDistSlope; // 最小可见像素换算的世界尺寸斜率 size ~= dist * slope
+uniform float uScreenFloorMaxScale; // 视距地板对 uPointSize 的最大放大倍数（防近景过糊）
 uniform float uEndRadius;
 uniform float uGlobalRecoverStart;
 uniform float uBottomY;
@@ -401,6 +404,10 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
         // adaptiveSize = pointSize * (1.0 + normalizedDistance * adaptiveScale)
         // 近处: ~uPointSize, 远处: uPointSize * (1.0 + adaptiveScale)
         float adaptiveSize = uPointSize * (1.0 + normalizedDistance * uPointSizeAdaptiveScale);
+        // 屏幕可见性地板：避免远处点掉到亚像素导致“相机拉近才看见”
+        float camDist = length(originalCenter - uViewPos);
+        float minVisibleSize = clamp(camDist * uMinSizeByViewDistSlope, uPointSize * 0.85, uPointSize * uScreenFloorMaxScale);
+        adaptiveSize = max(adaptiveSize, minVisibleSize);
         gsplatMakeSpherical(scale, adaptiveSize);
         return;
     }
@@ -512,6 +519,9 @@ uniform uScatterDistance: f32;
 uniform uMinSize: f32;
 uniform uPointSize: f32;   // 点云阶段固定点大小（参考 splat-overlay-shader 的 splatSize）
 uniform uPointSizeAdaptiveScale: f32; // 点大小自适应缩放倍数（0-10），远处点自动放大
+uniform uViewPos: vec3f; // 当前相机世界坐标（用于屏幕可见性地板）
+uniform uMinSizeByViewDistSlope: f32; // 最小可见像素换算的世界尺寸斜率 size ~= dist * slope
+uniform uScreenFloorMaxScale: f32; // 视距地板对 uPointSize 的最大放大倍数（防近景过糊）
 uniform uEndRadius: f32;
 uniform uGlobalRecoverStart: f32;
 uniform uBottomY: f32;
@@ -885,7 +895,11 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
         let normalizedDistance = clamp(g_dist / max(uniform.uEndRadius, 1.0), 0.0, 1.0);
         // adaptiveSize = pointSize * (1.0 + normalizedDistance * adaptiveScale)
         // 近处: ~uPointSize, 远处: uPointSize * (1.0 + adaptiveScale)
-        let adaptiveSize = uniform.uPointSize * (1.0 + normalizedDistance * uniform.uPointSizeAdaptiveScale);
+        var adaptiveSize = uniform.uPointSize * (1.0 + normalizedDistance * uniform.uPointSizeAdaptiveScale);
+        // 屏幕可见性地板：避免远处点掉到亚像素导致“相机拉近才看见”
+        let camDist = length(originalCenter - uniform.uViewPos);
+        let minVisibleSize = clamp(camDist * uniform.uMinSizeByViewDistSlope, uniform.uPointSize * 0.85, uniform.uPointSize * uniform.uScreenFloorMaxScale);
+        adaptiveSize = max(adaptiveSize, minVisibleSize);
         gsplatMakeSpherical(scale, adaptiveSize);
         return;
     }
@@ -1000,6 +1014,7 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
 
     // Reusable arrays for uniform updates
     _centerArray = [0, 0, 0];
+    _viewPosArray = [0, 0, 0];
 
     /** 进入 Phase 2 时调用一次，可由 reveal 挂接为「用当前相机 target 更新 center」 */
     onPhase2Start?: () => void;
@@ -1071,6 +1086,20 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
      * @range [0, 10]
      */
     pointSizeAdaptiveScale = 5.0;
+
+    /**
+     * 最小屏幕可见像素（用于计算视距尺寸地板），减少远处亚像素丢失。
+     * @attribute
+     * @range [0.5, 4]
+     */
+    minScreenPointPx = 1.25;
+
+    /**
+     * 屏幕可见性地板上限（相对 pointSize 倍数），防止近景被地板推得过大。
+     * @attribute
+     * @range [1, 4]
+     */
+    screenFloorMaxScale = 1.9;
 
     /**
      * Phase 2 光圈最大半径：光圈从中心向外扩散到此距离后停止。
@@ -1145,6 +1174,19 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
         const maxYOffset = heightRange;
         const globalRecoverStart = (this.growthDuration + maxYOffset * verticalSpread) / this.growthSpeed;
 
+        // 使用当前相机参数，把最小屏幕像素换算成世界尺寸斜率：size ~= dist * slope
+        const layerCameras = (this.app.scene as any)?.layers?.cameras as any[] | undefined;
+        const cameraComp: any = (this.camera as any)?.camera ?? (layerCameras && layerCameras.length > 0 ? layerCameras[0] : null);
+        const cameraEntity = cameraComp?.entity;
+        const camPos = cameraEntity?.getPosition?.() ?? this.center;
+        this._viewPosArray[0] = camPos.x;
+        this._viewPosArray[1] = camPos.y;
+        this._viewPosArray[2] = camPos.z;
+        const fovDeg = Number(cameraComp?.fov ?? 60);
+        const fovRad = (fovDeg * Math.PI) / 180;
+        const viewportHeight = Math.max(1, this.app.graphicsDevice.height);
+        const minSizeByViewDistSlope = (2 * Math.tan(fovRad * 0.5) * this.minScreenPointPx) / viewportHeight;
+
         // 进入 Phase 2 时更新一次 center（例如由 reveal 挂接为当前相机 target）
         if (effectTime < globalRecoverStart) {
             this._phase2CenterUpdated = false;
@@ -1170,6 +1212,9 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
         this.setUniform('uMinSize', this.minSize);
         this.setUniform('uPointSize', this.pointSize);
         this.setUniform('uPointSizeAdaptiveScale', this.pointSizeAdaptiveScale);
+        this.setUniform('uViewPos', this._viewPosArray);
+        this.setUniform('uMinSizeByViewDistSlope', minSizeByViewDistSlope);
+        this.setUniform('uScreenFloorMaxScale', this.screenFloorMaxScale);
         this.setUniform('uEndRadius', this.endRadius);
         this.setUniform('uGlobalRecoverStart', globalRecoverStart);
         this.setUniform('uBottomY', this.bottomY);
