@@ -1,6 +1,10 @@
 import { type AppBase, type Entity, Picker as PcPicker, Vec3 } from 'playcanvas';
 import type { Global } from './types';
 
+const isFiniteVec3Like = (v: Vec3 | null | undefined): v is Vec3 => {
+    return !!v && Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
+};
+
 /**
  * 标注放置 / 深度拾取专用 Picker。
  * 使用 PlayCanvas 内置 Picker(depth=true)，走 DEPTH_PICK pass：colorBuffer 出 ID，depthBuffer 出深度，
@@ -41,7 +45,7 @@ class Picker {
         const py = Math.max(0, Math.min(height - 1, Math.floor(y * height)));
 
         const worldPoint = await this.pcPicker.getWorldPointAsync(px, py);
-        return worldPoint;
+        return isFiniteVec3Like(worldPoint) ? worldPoint : null;
     }
 
     release(): void {

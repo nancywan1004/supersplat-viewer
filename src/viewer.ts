@@ -336,6 +336,18 @@ class Viewer {
 
         const applyCamera = (camera: Camera) => {
             const cameraEntity = global.camera;
+            const hasFinitePose =
+                Number.isFinite(camera.position.x) &&
+                Number.isFinite(camera.position.y) &&
+                Number.isFinite(camera.position.z) &&
+                Number.isFinite(camera.angles.x) &&
+                Number.isFinite(camera.angles.y) &&
+                Number.isFinite(camera.angles.z) &&
+                Number.isFinite(camera.distance) &&
+                Number.isFinite(camera.fov);
+            if (!hasFinitePose) {
+                return;
+            }
 
             // Apply position and pitch/yaw to the roll container
             // This keeps pitch/yaw separate from roll

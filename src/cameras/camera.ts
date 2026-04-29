@@ -12,6 +12,7 @@ const rotation = new Quat();
 const avec = new Vec3();
 const bvec = new Vec3();
 const CAMERA_LOOK_EPSILON = 1e-6;
+const isFiniteVec3Like = (v: Vec3): boolean => Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
 
 class Camera {
     position = new Vec3();
@@ -36,6 +37,13 @@ class Camera {
     }
 
     lerp(a: Camera, b: Camera, t: number) {
+        if (!isFiniteVec3Like(a.position) || !isFiniteVec3Like(b.position) ||
+            !isFiniteVec3Like(a.angles) || !isFiniteVec3Like(b.angles) ||
+            !Number.isFinite(a.distance) || !Number.isFinite(b.distance) ||
+            !Number.isFinite(a.fov) || !Number.isFinite(b.fov)) {
+            return;
+        }
+
         a.calcFocusPoint(avec);
         b.calcFocusPoint(bvec);
 
@@ -60,6 +68,9 @@ class Camera {
     }
 
     look(from: Vec3, to: Vec3) {
+        if (!isFiniteVec3Like(from) || !isFiniteVec3Like(to)) {
+            return;
+        }
         this.position.copy(from);
         const dir = avec.sub2(to, from);
         const distance = dir.length();

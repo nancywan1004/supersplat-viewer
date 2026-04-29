@@ -41,6 +41,7 @@ const ASSET_FOCUS_HALF_FOV_FILL = 0.72;
 const GAUSSIAN_ASSET_FOCUS_DISTANCE_SCALE = 0.6;
 /** 极小资产时的最小包围球半径，避免距离退化到 0。 */
 const MIN_FOCUS_RADIUS = 1e-3;
+const isFiniteVec3Like = (v: Vec3): boolean => Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
 
 type FocusTarget = 'asset' | 'annotation' | 'light';
 
@@ -555,6 +556,9 @@ class CameraManager {
          * - 指定 distance 时可用于 bbox framing（例如资产 focus）
          */
         const orbitFocus = (position: Vec3, distance?: number) => {
+            if (!isFiniteVec3Like(position)) {
+                return;
+            }
             if (state.cameraMode !== 'orbit') {
                 state.cameraMode = 'orbit';
             }
@@ -573,11 +577,21 @@ class CameraManager {
             const currentDistance = position.distance(this.camera.position);
             const zoomRange = controllers.orbit.controller.zoomRange;
             const fallbackDistance = Math.max(ORBIT_FOCUS_MIN_DISTANCE, currentDistance * ORBIT_FOCUS_DISTANCE_SCALE);
+            const candidateDistance = distance ?? fallbackDistance;
+            if (!Number.isFinite(candidateDistance)) {
+                return;
+            }
             const targetDistance = Math.max(
                 zoomRange.x,
-                Math.min(zoomRange.y, distance ?? fallbackDistance)
+                Math.min(zoomRange.y, candidateDistance)
             );
+            if (!Number.isFinite(targetDistance)) {
+                return;
+            }
             tmpv.mulScalar(-targetDistance).add(position);
+            if (!isFiniteVec3Like(tmpv)) {
+                return;
+            }
             tmpCamera.position.copy(tmpv);
             tmpCamera.look(tmpv, position);
             controllers.orbit.goto(tmpCamera);
