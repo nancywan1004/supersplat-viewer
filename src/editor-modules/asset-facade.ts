@@ -9,6 +9,8 @@ class AssetFacade implements ModuleFacade {
     private detachSceneAssetPlacedListener: (() => void) | null = null;
     // 当前下载的取消控制器（用于模块退出时中断下载）
     private currentDownloadAbort: (() => void) | null = null;
+    // 资产放置请求版本号（last request wins）
+    private placeRequestVersion = 0;
 
     setSceneAssetPlacedListenerCleanup(cleanup: () => void): void {
         this.detachSceneAssetPlacedListener = cleanup;
@@ -77,6 +79,11 @@ class AssetFacade implements ModuleFacade {
                 return { ...item, asset, filename: item.filename ?? url, url };
             }
         } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            if (message.includes('download cancelled')) {
+                // 新放置请求或模块退出主动取消，不视为错误。
+                return null;
+            }
             console.warn('[AssetFacade] asset hydrate failed:', item.type, url, err);
             return null;
         }
@@ -109,6 +116,7 @@ class AssetFacade implements ModuleFacade {
 
     onExit(ctx: ModuleContext): void {
         const { state, events } = ctx;
+        this.placeRequestVersion++;
 
         // 退出模块时取消正在进行的下载
         if (this.currentDownloadAbort) {
@@ -225,6 +233,8 @@ class AssetFacade implements ModuleFacade {
     // 处理 ASSET_PLACE 命令：先下载资产，完成后再激活放置
     private async handleAssetPlace(ctx: ModuleContext, command: ModuleCommand): Promise<void> {
         const { state, events } = ctx;
+        // 新请求进来，先让旧请求失效（last request wins）
+        const requestVersion = ++this.placeRequestVersion;
         const payload = command.payload as { value?: unknown } | undefined;
         const raw = payload?.value;
         if (!raw || typeof raw !== 'object') return;
@@ -236,11 +246,22 @@ class AssetFacade implements ModuleFacade {
         }
         const finalValue = value ?? (raw as AssetLibraryItem);
 
+        // 新请求到来时，主动取消上一个可取消下载（mesh）
+        if (this.currentDownloadAbort) {
+            this.currentDownloadAbort();
+            this.currentDownloadAbort = null;
+        }
+
         // 立即显示 loading 光标，进入 downloading 状态（禁用放置点击）
         setPlacementCursorActive(ctx.global, true, { loading: true });
 
         // 下载资产
         const hydrated = await this.hydrateAssetForPlacement(ctx.global, finalValue);
+
+        // 若期间已有更新的请求，当前结果作废，避免“旧请求晚返回覆盖新请求”
+        if (requestVersion !== this.placeRequestVersion) {
+            return;
+        }
 
         // 下载完成或失败，清理取消回调
         this.currentDownloadAbort = null;
