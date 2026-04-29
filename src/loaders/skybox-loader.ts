@@ -1,7 +1,10 @@
-import { Texture, Entity, Vec3, AppBase, StandardMaterial, CULLFACE_NONE, Asset, BoundingBox, Color, type TextureHandler } from "playcanvas";
+import { Texture, Entity, Vec3, AppBase, StandardMaterial, CULLFACE_NONE, Asset, BoundingBox, Color, EnvLighting, PIXELFORMAT_RGBA8, type TextureHandler } from "playcanvas";
 
 const skyboxTextureCache = new Map<string, Texture>();
+const skyboxCubemapCache = new Map<string, Texture>();
 const skyboxEntityCache = new Map<string, Entity>();
+let solidEnvAtlasTexture: Texture | null = null;
+const SOLID_ENV_ATLAS_COLOR = new Color(0.72, 0.72, 0.72);
 
 export interface SkyboxOptions {
     /** 中心点位置，默认为 (0, 0, 0) */
@@ -129,18 +132,51 @@ const applySkyboxTexture = async (app: AppBase, url: string) => {
         return;
     }
 
-    const cachedTexture = skyboxTextureCache.get(trimmedUrl);
-    if (cachedTexture) {
-        app.scene.envAtlas = cachedTexture;
-        app.renderNextFrame = true;
-        return;
+    let sourceTexture = skyboxTextureCache.get(trimmedUrl);
+    if (!sourceTexture) {
+        const asset = await loadSkybox(app, trimmedUrl);
+        sourceTexture = asset.resource as Texture;
+        skyboxTextureCache.set(trimmedUrl, sourceTexture);
     }
 
-    const asset = await loadSkybox(app, trimmedUrl);
-    const texture = asset.resource as Texture;
-    skyboxTextureCache.set(trimmedUrl, texture);
-    app.scene.envAtlas = texture;
+    let skyboxCubemap = skyboxCubemapCache.get(trimmedUrl);
+    if (!skyboxCubemap) {
+        skyboxCubemap = EnvLighting.generateSkyboxCubemap(sourceTexture);
+        skyboxCubemapCache.set(trimmedUrl, skyboxCubemap);
+    }
+
+    // 背景显示：走场景 skybox cubemap（不再使用 skybox sphere）。
+    app.scene.skybox = skyboxCubemap;
+    // IBL 仍固定为纯色 envAtlas，便于与背景解耦控制反光基调。
+    app.scene.envAtlas = getOrCreateSolidEnvAtlas(app);
     app.renderNextFrame = true;
+};
+
+const getOrCreateSolidEnvAtlas = (app: AppBase): Texture => {
+    if (solidEnvAtlasTexture) return solidEnvAtlasTexture;
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        throw new Error('[SuperSplat] 无法创建纯色 envAtlas 画布');
+    }
+    const r = Math.round(Math.max(0, Math.min(1, SOLID_ENV_ATLAS_COLOR.r)) * 255);
+    const g = Math.round(Math.max(0, Math.min(1, SOLID_ENV_ATLAS_COLOR.g)) * 255);
+    const b = Math.round(Math.max(0, Math.min(1, SOLID_ENV_ATLAS_COLOR.b)) * 255);
+    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+    ctx.fillRect(0, 0, 1, 1);
+
+    solidEnvAtlasTexture = new Texture(app.graphicsDevice, {
+        name: 'solidEnvAtlas',
+        width: 1,
+        height: 1,
+        format: PIXELFORMAT_RGBA8,
+        mipmaps: false
+    });
+    solidEnvAtlasTexture.setSource(canvas);
+    solidEnvAtlasTexture.upload();
+    return solidEnvAtlasTexture;
 };
 
 /**

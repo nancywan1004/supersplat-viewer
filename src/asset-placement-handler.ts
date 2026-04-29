@@ -183,20 +183,6 @@ const PBR_DETECT_THRESHOLDS = {
     reducedMetalnessScale: 0.7
 } as const;
 
-/** PBR 亮度提升系数（轻微提亮，突破1.0限制避免被clamp） */
-const PBR_BOOST_FACTORS = {
-    /** ambient 绝对值（轻微提亮至1.1） */
-    ambient: { r: 1.1, g: 1.1, b: 1.1 },
-    /** 极高光泽度时 diffuse 绝对值（轻微提亮至1.1） */
-    diffuse: { r: 1.1, g: 1.1, b: 1.1 },
-    /** 自发光颜色（轻微补偿） */
-    emissive: { r: 0.03, g: 0.03, b: 0.03 },
-    /** 自发光强度 */
-    emissiveIntensity: 0.5,
-    /** 需要自发光的阈值 */
-    emissiveIntensityThreshold: 0.05
-} as const;
-
 /** 扩展 StandardMaterial 类型，包含 PBR 属性 */
 type PBRMaterial = StandardMaterial & {
     metalness?: number;
@@ -234,37 +220,6 @@ function isHighReflectivePBRMaterial(mat: PBRMaterial): boolean {
 }
 
 /**
- * 应用高反光 PBR 材质亮度提升
- */
-function applyPBRBrightnessBoost(mat: PBRMaterial): void {
-    const { metalness, useMetalness, shininess } = mat;
-    const th = PBR_DETECT_THRESHOLDS;
-    const boost = PBR_BOOST_FACTORS;
-
-    mat.useSkybox = false;
-
-    // 极高金属度材质：适度降低 metalness 保留漫反射贡献
-    if (useMetalness && (metalness ?? 0) > th.reduceMetalness) {
-        mat.metalness = Math.max(th.reducedMetalnessMin, (metalness ?? 1) * th.reducedMetalnessScale);
-    }
-
-    // 强制设置高 ambient 值（突破1.0限制，不被clamp）
-    mat.ambient.set(boost.ambient.r, boost.ambient.g, boost.ambient.b);
-
-    // 极高光泽度：强制设置高 diffuse 值（突破1.0限制）
-    if ((shininess ?? 0) > th.highShininess) {
-        mat.diffuse.set(boost.diffuse.r, boost.diffuse.g, boost.diffuse.b);
-    }
-
-    // 添加自发光补偿（提高基础可见性）
-    const currentIntensity = mat.emissiveIntensity ?? 0;
-    if (currentIntensity < boost.emissiveIntensityThreshold) {
-        mat.emissive.set(boost.emissive.r, boost.emissive.g, boost.emissive.b);
-        mat.emissiveIntensity = boost.emissiveIntensity;
-    }
-}
-
-/**
  * 对放置的 mesh 层级做一次材质侧统一配置。
  * 智能检测高反光 PBR 特征，保留 IBL 反射并提升可读性；
  * 其他材质关闭 skybox，依赖光+ambient 保持可读性。
@@ -284,9 +239,7 @@ function configurePlacedMeshMaterials(root: Entity): void {
             const mat = mi?.material as PBRMaterial | undefined;
             if (!(mat instanceof StandardMaterial)) continue;
 
-            if (isHighReflectivePBRMaterial(mat)) {
-                applyPBRBrightnessBoost(mat);
-            } else {
+            if (!isHighReflectivePBRMaterial(mat)) {
                 mat.useSkybox = false;
             }
             mat.update();
