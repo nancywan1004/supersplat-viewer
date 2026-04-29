@@ -15,6 +15,8 @@ uniform float uPointSizeAdaptiveScale; // 点大小自适应缩放倍数（0-10�
 uniform vec3 uViewPos; // 当前相机世界坐标（用于屏幕可见性地板）
 uniform float uMinSizeByViewDistSlope; // 最小可见像素换算的世界尺寸斜率 size ~= dist * slope
 uniform float uScreenFloorMaxScale; // 视距地板对 uPointSize 的最大放大倍数（防近景过糊）
+uniform float uSceneDensityNorm; // 场景密度归一化（0=稀疏，1=密集）
+uniform float uSceneDensityInfluence; // 密度补偿影响强度
 uniform float uEndRadius;
 uniform float uGlobalRecoverStart;
 uniform float uBottomY;
@@ -404,6 +406,10 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
         // adaptiveSize = pointSize * (1.0 + normalizedDistance * adaptiveScale)
         // 近处: ~uPointSize, 远处: uPointSize * (1.0 + adaptiveScale)
         float adaptiveSize = uPointSize * (1.0 + normalizedDistance * uPointSizeAdaptiveScale);
+        // 场景密度补偿（强作用版）：稀疏场景放大，密集场景收缩
+        float densityT = clamp((uSceneDensityNorm - 0.5) * uSceneDensityInfluence + 0.5, 0.0, 1.0);
+        float densitySizeMul = mix(1.42, 0.62, densityT);
+        adaptiveSize *= densitySizeMul;
         // 屏幕可见性地板：避免远处点掉到亚像素导致“相机拉近才看见”
         float camDist = length(originalCenter - uViewPos);
         float minVisibleSize = clamp(camDist * uMinSizeByViewDistSlope, uPointSize * 0.85, uPointSize * uScreenFloorMaxScale);
@@ -446,8 +452,10 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         float normalizedDist = distFromCenter / max(uEndRadius, 1.0);
         // 光晕更大：离中心较远的区域也保留较多辉光（软衰减范围加大）
         float distanceGlow = 1.0 + (1.0 - smoothstep(0.0, 0.85, normalizedDist)) * 0.7;
+        float densityT = clamp((uSceneDensityNorm - 0.5) * uSceneDensityInfluence + 0.5, 0.0, 1.0);
+        float sceneGlowFactor = mix(1.22, 0.42, densityT);
         
-        glowIntensity = progressGlow * distanceGlow;
+        glowIntensity = progressGlow * distanceGlow * sceneGlowFactor;
         glowIntensity = clamp(glowIntensity, 0.0, 1.6);
         
         vec3 blueGlow = vec3(0.18, 0.45, 1.0);
@@ -522,6 +530,8 @@ uniform uPointSizeAdaptiveScale: f32; // 点大小自适应缩放倍数（0-10�
 uniform uViewPos: vec3f; // 当前相机世界坐标（用于屏幕可见性地板）
 uniform uMinSizeByViewDistSlope: f32; // 最小可见像素换算的世界尺寸斜率 size ~= dist * slope
 uniform uScreenFloorMaxScale: f32; // 视距地板对 uPointSize 的最大放大倍数（防近景过糊）
+uniform uSceneDensityNorm: f32; // 场景密度归一化（0=稀疏，1=密集）
+uniform uSceneDensityInfluence: f32; // 密度补偿影响强度
 uniform uEndRadius: f32;
 uniform uGlobalRecoverStart: f32;
 uniform uBottomY: f32;
@@ -896,6 +906,10 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
         // adaptiveSize = pointSize * (1.0 + normalizedDistance * adaptiveScale)
         // 近处: ~uPointSize, 远处: uPointSize * (1.0 + adaptiveScale)
         var adaptiveSize = uniform.uPointSize * (1.0 + normalizedDistance * uniform.uPointSizeAdaptiveScale);
+        // 场景密度补偿（强作用版）：稀疏场景放大，密集场景收缩
+        let densityT = clamp((uniform.uSceneDensityNorm - 0.5) * uniform.uSceneDensityInfluence + 0.5, 0.0, 1.0);
+        let densitySizeMul = mix(1.42, 0.62, densityT);
+        adaptiveSize = adaptiveSize * densitySizeMul;
         // 屏幕可见性地板：避免远处点掉到亚像素导致“相机拉近才看见”
         let camDist = length(originalCenter - uniform.uViewPos);
         let minVisibleSize = clamp(camDist * uniform.uMinSizeByViewDistSlope, uniform.uPointSize * 0.85, uniform.uPointSize * uniform.uScreenFloorMaxScale);
@@ -936,8 +950,10 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         let distFromCenter = length(toSplat);
         let normalizedDist = distFromCenter / max(uniform.uEndRadius, 1.0);
         let distanceGlow = 1.0 + (1.0 - smoothstep(0.0, 0.85, normalizedDist)) * 0.7;
+        let densityT = clamp((uniform.uSceneDensityNorm - 0.5) * uniform.uSceneDensityInfluence + 0.5, 0.0, 1.0);
+        let sceneGlowFactor = mix(1.22, 0.42, densityT);
         
-        glowIntensity = progressGlow * distanceGlow;
+        glowIntensity = progressGlow * distanceGlow * sceneGlowFactor;
         glowIntensity = clamp(glowIntensity, 0.0, 1.6);
         
         let blueGlow = vec3f(0.18, 0.45, 1.0);
@@ -1015,6 +1031,8 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
     // Reusable arrays for uniform updates
     _centerArray = [0, 0, 0];
     _viewPosArray = [0, 0, 0];
+    _sceneDensityNorm = 0.5;
+    _sceneDensityInited = false;
 
     /** 进入 Phase 2 时调用一次，可由 reveal 挂接为「用当前相机 target 更新 center」 */
     onPhase2Start?: () => void;
@@ -1075,7 +1093,7 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
      * @attribute
      * @range [0.001, 0.5]
      */
-    pointSize = 0.008;
+    pointSize = 0.006;
 
     /**
      * Phase 1 点大小自适应缩放倍数（0-10）。
@@ -1100,6 +1118,27 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
      * @range [1, 4]
      */
     screenFloorMaxScale = 1.9;
+
+    /**
+     * 场景密度归一化的最小锚点（点数/体积）。越大则更容易被判定为“稀疏”。
+     * @attribute
+     * @range [10, 5000]
+     */
+    densityAnchorMin = 35;
+
+    /**
+     * 场景密度归一化的最大锚点（点数/体积）。越小则更容易被判定为“密集”。
+     * @attribute
+     * @range [1000, 1000000]
+     */
+    densityAnchorMax = 18000;
+
+    /**
+     * 场景密度补偿影响强度。值越大，稀疏/密集两端差异越明显。
+     * @attribute
+     * @range [0.5, 4]
+     */
+    densityInfluence = 2.4;
 
     /**
      * Phase 2 光圈最大半径：光圈从中心向外扩散到此距离后停止。
@@ -1187,6 +1226,10 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
         const viewportHeight = Math.max(1, this.app.graphicsDevice.height);
         const minSizeByViewDistSlope = (2 * Math.tan(fovRad * 0.5) * this.minScreenPointPx) / viewportHeight;
 
+        // 每帧重算，避免场景替换或 bounds 变更后补偿仍停留在旧值
+        this._sceneDensityNorm = this.computeSceneDensityNorm();
+        this._sceneDensityInited = true;
+
         // 进入 Phase 2 时更新一次 center（例如由 reveal 挂接为当前相机 target）
         if (effectTime < globalRecoverStart) {
             this._phase2CenterUpdated = false;
@@ -1215,6 +1258,8 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
         this.setUniform('uViewPos', this._viewPosArray);
         this.setUniform('uMinSizeByViewDistSlope', minSizeByViewDistSlope);
         this.setUniform('uScreenFloorMaxScale', this.screenFloorMaxScale);
+        this.setUniform('uSceneDensityNorm', this._sceneDensityNorm);
+        this.setUniform('uSceneDensityInfluence', this.densityInfluence);
         this.setUniform('uEndRadius', this.endRadius);
         this.setUniform('uGlobalRecoverStart', globalRecoverStart);
         this.setUniform('uBottomY', this.bottomY);
@@ -1254,6 +1299,29 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
      */
     isEffectComplete(globalRecoverStart?: number) {
         return this.effectTime >= this.getCompletionTime(globalRecoverStart);
+    }
+
+    private computeSceneDensityNorm(): number {
+        const gsplatComp: any = this.entity?.gsplat;
+        const resource = gsplatComp?.resource ?? gsplatComp?.instance?.resource;
+        const numSplats = Number(resource?.numSplats ?? 0);
+        const aabb = gsplatComp?.customAabb ?? resource?.aabb;
+        const half = aabb?.halfExtents;
+
+        if (!half || !Number.isFinite(numSplats) || numSplats <= 0) {
+            return 0.5;
+        }
+
+        const sx = Math.max(half.x * 2, 1e-3);
+        const sy = Math.max(half.y * 2, 1e-3);
+        const sz = Math.max(half.z * 2, 1e-3);
+        const volume = Math.max(sx * sy * sz, 1e-3);
+        const density = numSplats / volume;
+
+        const minA = Math.max(1e-3, this.densityAnchorMin);
+        const maxA = Math.max(minA + 1e-3, this.densityAnchorMax);
+        const t = (Math.log(density + 1) - Math.log(minA + 1)) / (Math.log(maxA + 1) - Math.log(minA + 1));
+        return Math.min(1, Math.max(0, t));
     }
 
     /**
