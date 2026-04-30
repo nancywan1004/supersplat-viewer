@@ -541,6 +541,7 @@ export async function restoreSceneAssetsFromSettings(global: Global): Promise<vo
         const posArr = (sa.transform?.position ?? [0, 0, 0]) as number[];
         const rotArr = (sa.transform?.rotation ?? [0, 0, 0]) as number[];
         const scaleArr = (sa.transform?.scale ?? [1, 1, 1]) as number[];
+        const mirrorArr = sa.transform?.mirror as number[] | undefined;
 
         let item: AssetLibraryItem | null = null;
 
@@ -619,7 +620,19 @@ export async function restoreSceneAssetsFromSettings(global: Global): Promise<vo
 
         // 应用保存时记录的旋转、缩放与可见性
         entry.entity.setEulerAngles(rotArr[0] ?? 0, rotArr[1] ?? 0, rotArr[2] ?? 0);
-        entry.entity.setLocalScale(scaleArr[0] ?? 1, scaleArr[1] ?? 1, scaleArr[2] ?? 1);
+        const resolveMirroredScale = (value: number, mirror: number | undefined): number => {
+            const numeric = Number.isFinite(value) ? value : 1;
+            if (mirror === -1 || mirror === 1) {
+                if (numeric === 0) return 0;
+                return Math.abs(numeric) * mirror;
+            }
+            return numeric;
+        };
+        entry.entity.setLocalScale(
+            resolveMirroredScale(scaleArr[0] ?? 1, mirrorArr?.[0]),
+            resolveMirroredScale(scaleArr[1] ?? 1, mirrorArr?.[1]),
+            resolveMirroredScale(scaleArr[2] ?? 1, mirrorArr?.[2])
+        );
         const visible = sa.visible !== false;
         entry.visible = visible;
         entry.entity.enabled = visible;

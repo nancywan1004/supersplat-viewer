@@ -144,6 +144,9 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
         const pos = entry.entity.getPosition();
         const rot = entry.entity.getEulerAngles();
         const scale = entry.entity.getLocalScale();
+        const mirrorX: 1 | -1 = scale.x < 0 ? -1 : 1;
+        const mirrorY: 1 | -1 = scale.y < 0 ? -1 : 1;
+        const mirrorZ: 1 | -1 = scale.z < 0 ? -1 : 1;
 
         return {
             id: entry.id,
@@ -159,7 +162,8 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
             transform: {
                 position: [pos.x, pos.y, pos.z] as [number, number, number],
                 rotation: [rot.x, rot.y, rot.z] as [number, number, number],
-                scale: [scale.x, scale.y, scale.z] as [number, number, number]
+                scale: [scale.x, scale.y, scale.z] as [number, number, number],
+                mirror: [mirrorX, mirrorY, mirrorZ]
             }
         };
     });
