@@ -25,6 +25,8 @@ class OrbitController implements CameraController {
     controller: OrbitControllerPC;
     private targetConstraint: BoxConstraint | null = null;
 
+    fov = 90;
+
     constructor() {
         this.controller = new OrbitControllerPC();
         this.controller.zoomRange = new Vec2(0.5, Infinity); // Minimum zoom distance to preserve pan functionality
@@ -160,6 +162,7 @@ class OrbitController implements CameraController {
 
         camera.angles.copy(pose.angles);
         camera.distance = pose.distance;
+        camera.fov = this.fov;
     }
 
     onExit(_camera: Camera): void {
@@ -222,6 +225,7 @@ class OrbitController implements CameraController {
         p.position.copy(camera.position);
         p.angles.copy(camera.angles);
         p.distance = camera.distance;
+        this.fov = camera.fov;
         this.controller.attach(p, false);
     }
 }

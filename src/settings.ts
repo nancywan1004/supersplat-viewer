@@ -1,5 +1,5 @@
-import { ExperienceSettings as V1, AnimTrack as AnimTrackV1 } from './schemas/v1';
-import { ExperienceSettings as V2, AnimTrack as AnimTrackV2, TransformFrame } from './schemas/v2';
+import { ExperienceSettings as V1, AnimTrack as AnimTrackV1, validateV1 } from './schemas/v1';
+import { ExperienceSettings as V2, AnimTrack as AnimTrackV2, TransformFrame, validateV2 } from './schemas/v2';
 import {
     ensureBloom,
     normalizeHoistBloomSessionFields,
@@ -8,6 +8,7 @@ import {
     normalizeBloomAfterImport
 } from './settings-serialize/settings-serialize-helper';
 import { Vec3 } from 'playcanvas';
+import { assertObject } from './schemas/validate-utils';
 
 type LegacyKeyframes = AnimTrackV1['keyframes'];
 
@@ -177,13 +178,13 @@ const migrateV2 = (v1: V1): V2 => {
         animTracks: v1.animTracks.map((animTrackV1: AnimTrackV1) => {
             return migrateAnimTrackV2(animTrackV1, v1.camera.fov || 60);
         }),
-        cameras: [{
+        cameras: (v1.camera.position && v1.camera.target) ? [{
             initial: {
-                position: (v1.camera.position || [0, 0, 5]) as [number, number, number],
-                target: (v1.camera.target || [0, 0, 0]) as [number, number, number],
+                position: v1.camera.position as [number, number, number],
+                target: v1.camera.target as [number, number, number],
                 fov: v1.camera.fov || 75
             }
-        }],
+        }] : [],
         annotations: [],
         startMode: v1.camera.startAnim === 'animTrack' ? 'animTrack' : 'default',
         hasStartPose: !!(v1.camera.position && v1.camera.target),
@@ -398,5 +399,20 @@ const importSettings = (settings: any): V2 => {
 
 // export the latest/current schema types
 export type { AnimTrack, Camera, Annotation, PostEffectSettings, RevealEffect, TransformFrame, ExperienceSettings } from './schemas/v2';
+// validate unknown data against any supported settings schema version, throwing on invalid input
+const validateSettings = (settings: unknown): void => {
+    const obj = assertObject(settings, 'settings');
+    const version = obj.version;
 
-export { importSettings };
+    if (version === undefined) {
+        validateV1(settings);
+    } else if (version === 2) {
+        validateV2(settings);
+    } else if (typeof version !== 'number') {
+        throw new Error(`settings.version must be a number, got ${typeof version}`);
+    } else {
+        throw new Error(`Unsupported experience settings version: ${version}`);
+    }
+};
+
+export { importSettings, validateSettings };

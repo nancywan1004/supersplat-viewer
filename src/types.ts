@@ -35,7 +35,7 @@ export interface ScenePlacedItem {
     thumbnailUrl?: string;
 }
 
-type CameraMode = 'orbit' | 'anim' | 'fly';
+type CameraMode = 'orbit' | 'anim' | 'fly' | 'walk';
 
 type InputMode = 'desktop' | 'touch';
 
@@ -88,6 +88,7 @@ type Config = {
     skyboxUrl?: string;
     contentUrl?: string;
     contents?: Promise<Response>;
+    collisionUrl?: string;
 
     noui: boolean;
     noBottomUI: boolean;                        // hide bottom UI controls, but keep poster and loading bar
@@ -97,7 +98,7 @@ type Config = {
     hpr?: boolean;                              // override highPrecisionRendering (undefined = use settings)
     ministats: boolean;
     colorize: boolean;                          // render with LOD colorization
-    unified: boolean;                           // force unified rendering mode
+    fullload: boolean;                          // load all streaming LOD data before first frame
     aa: boolean;                                // render with antialiasing
     noreveal: boolean;                          // disable reveal effect transition animation
     showCameraPathVisualizer?: boolean;         // show camera path visualization
@@ -128,13 +129,16 @@ type Config = {
     projectId?: string | number;
     /** 父级透传的 token（用于保存上传鉴权） */
     token?: string;
+    budget?: number;                            // override splat budget in millions (overrides platform + performanceMode table)
+    renderer: 'webgl' | 'cpu-sort' | 'gpu-sort' | 'compute';
+    heatmap: boolean;                           // render heatmap debug overlay (WebGPU only)
 };
 
 // observable state that can change at runtime
 type State = {
     loaded: boolean;                            // true once first frame is rendered
     readyToRender: boolean;                     // don't render till this is set
-    hqMode: boolean;
+    performanceMode: boolean;
     progress: number;                           // content loading progress 0-100
     inputMode: InputMode;
     cameraMode: CameraMode;
@@ -145,6 +149,9 @@ type State = {
     animationStarted: boolean;                  // true once animation has been started (e.g. after reveal or at progress threshold)
     hasAR: boolean;
     hasVR: boolean;
+    hasCollision: boolean;
+    hasVoxelOverlay: boolean;
+    voxelOverlayEnabled: boolean;
     isFullscreen: boolean;
     controlsHidden: boolean;
     hasRevealEffect: boolean;
@@ -175,6 +182,7 @@ type State = {
     selectedLightId?: string | null;
     /** 光源变换模式（与环境模块底部工具栏联动） */
     lightTransformMode?: LightTransformMode | null;
+    gamingControls: boolean;
 };
 
 /**

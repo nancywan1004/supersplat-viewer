@@ -13,11 +13,15 @@ import {
     Vec3
 } from 'playcanvas';
 
+import { createFigure8Track } from './animation/create-figure8-track';
 import { createRotateTrack } from './animation/create-rotate-track';
 import { AnimController } from './cameras/anim-controller';
 import { Camera, type CameraFrame, type CameraController } from './cameras/camera';
 import { FlyController } from './cameras/fly-controller';
 import { OrbitController } from './cameras/orbit-controller';
+import { WalkController } from './cameras/walk-controller';
+import { WalkSource } from './cameras/walk-source';
+import type { Collision } from './collision';
 import { easeOut, smootherStep } from './core/math';
 import { Annotation } from './settings';
 import type { AnimTrack } from './settings';
@@ -327,7 +331,7 @@ class CameraManager {
     private debugBoundsLayerId: number | null = null;
     private cameraEntity: Entity;
 
-    constructor(global: Global, bbox: BoundingBox) {
+    constructor(global: Global, bbox: BoundingBox, collision: Collision | null = null) {
         const { events, settings, state, config, app, camera: cameraEntity } = global;
         this.cameraEntity = cameraEntity;
 
@@ -346,9 +350,12 @@ class CameraManager {
         // this.pickMarker.enabled = false;
         // app.root.addChild(this.pickMarker);
 
-        const camera0 = settings.cameras[0].initial;
-        const frameCamera = createFrameCamera(bbox, camera0.fov);
-        const resetCamera = createCamera(new Vec3(camera0.position), new Vec3(camera0.target), camera0.fov);
+        const camera0 = settings.cameras[0]?.initial;
+        const defaultFov = camera0?.fov ?? 75;
+        const frameCamera = createFrameCamera(bbox, defaultFov);
+        const resetCamera = camera0 ?
+            createCamera(new Vec3(camera0.position), new Vec3(camera0.target), camera0.fov) :
+            frameCamera;
 
         const getAnimTrack = (initial: Camera, isObjectExperience: boolean) => {
             const { animTracks } = settings;
@@ -362,16 +369,20 @@ class CameraManager {
                 initial.calcFocusPoint(tmpv);
                 return createRotateTrack(initial.position, tmpv, initial.fov);
             }
-            return null;
+            // non-object experience: gentle figure-8 motion from inside the scene
+            initial.calcFocusPoint(tmpv);
+            return createFigure8Track(initial.position, tmpv, initial.fov);
+
         };
 
         // object experience starts outside the bounding box
         const isObjectExperience = !bbox.containsPoint(resetCamera.position);
-        const animTrack = getAnimTrack(settings.hasStartPose ? resetCamera : frameCamera, isObjectExperience);
+        const animTrack = getAnimTrack(resetCamera, isObjectExperience);
 
         const controllers = {
             orbit: new OrbitController(),
             fly: new FlyController(),
+            walk: new WalkController(),
             anim: animTrack ? new AnimController(animTrack) : null
         };
         this.animController = controllers.anim;
@@ -461,8 +472,18 @@ class CameraManager {
             controllers.fly.pitchRange = pitchVec2;
         }
 
-        const getController = (cameraMode: 'orbit' | 'anim' | 'fly'): CameraController => {
-            return controllers[cameraMode];
+        controllers.orbit.fov = resetCamera.fov;
+        controllers.fly.fov = resetCamera.fov;
+        controllers.fly.collision = collision;
+        controllers.walk.collision = collision;
+
+        const walkSource = new WalkSource();
+        walkSource.onComplete = () => {
+            events.fire('walkComplete');
+        };
+
+        const getController = (cameraMode: CameraMode): CameraController => {
+            return controllers[cameraMode] as CameraController;
         };
 
         // set the global animation flag
@@ -476,7 +497,11 @@ class CameraManager {
         } else {
             // 读取配置中的初始相机模式，默认为 'orbit'
             const initialMode = settings.initialCameraMode;
-            if (initialMode === 'fly' || initialMode === 'orbit') {
+            if (
+                initialMode === 'fly' ||
+                initialMode === 'orbit' ||
+                (initialMode === 'walk' && !!collision)
+            ) {
                 state.cameraMode = initialMode;
             } else {
                 state.cameraMode = 'orbit'; // 默认值
@@ -487,6 +512,8 @@ class CameraManager {
         const target = new Camera(this.camera);             // the active controller updates this
         const from = new Camera(this.camera);               // stores the previous camera state during transition
         let fromMode: CameraMode = 'orbit';
+        // tracks the mode to restore when exiting walk
+        let preWalkMode: CameraMode = 'orbit';
 
         // enter the initial controller
         getController(state.cameraMode).onEnter(this.camera);
@@ -511,6 +538,10 @@ class CameraManager {
             transitionTimer = Math.min(1, transitionTimer + deltaTime * transitionSpeed);
 
             const controller = getController(state.cameraMode);
+
+            if (state.cameraMode === 'walk') {
+                walkSource.update(dt, this.camera.position, this.camera.angles, frame);
+            }
 
             controller.update(dt, frame, target);
 
@@ -668,7 +699,29 @@ class CameraManager {
                         controllers.anim.onEnter(this.camera);
                     }
                     break;
+                case 'requestFirstPerson':
+                    state.cameraMode = 'fly';
+                    break;
+                case 'toggleWalk':
+                    if (collision) {
+                        if (state.cameraMode === 'walk') {
+                            state.cameraMode = preWalkMode;
+                        } else {
+                            preWalkMode = state.cameraMode;
+                            state.cameraMode = 'walk';
+                        }
+                    }
+                    break;
+                case 'exitWalk':
+                    if (state.cameraMode === 'walk') {
+                        state.cameraMode = preWalkMode;
+                    }
+                    break;
                 case 'cancel':
+                    if (state.cameraMode === 'anim') {
+                        state.cameraMode = fromMode;
+                    }
+                    break;
                 case 'interrupt':
                     if (state.cameraMode === 'anim') {
                         state.cameraMode = fromMode;
@@ -679,6 +732,10 @@ class CameraManager {
 
         // handle camera mode switching
         events.on('cameraMode:changed', (value, prev) => {
+            if (prev === 'walk') {
+                walkSource.cancelWalk();
+            }
+
             // snapshot the current pose before any controller mutation
             startTransition();
 
@@ -792,8 +849,25 @@ class CameraManager {
             );
 
             controllers.orbit.goto(tmpCamera);
-            target.fov = tmpCamera.fov;
             startTransition();
+        });
+
+        // tap-to-walk: start auto-walking toward a picked 3D position
+        events.on('walkTo', (position: Vec3, normal: Vec3) => {
+            if (state.cameraMode === 'walk') {
+                walkSource.walkTo(position);
+                events.fire('walkTarget:set', position, normal);
+            }
+        });
+
+        // cancel any active auto-walk
+        events.on('walkCancel', () => {
+            walkSource.cancelWalk();
+            events.fire('walkTarget:clear');
+        });
+
+        events.on('walkComplete', () => {
+            events.fire('walkTarget:clear');
         });
     }
 

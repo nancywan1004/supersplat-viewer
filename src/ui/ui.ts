@@ -39,14 +39,14 @@ import { applyLightToggleAll, applyLightToggle } from '../editor-modules/protoco
 const initJoystick = (
     dom: Record<string, HTMLElement>,
     events: EventHandler,
-    state: { cameraMode: string; inputMode: string }
+    state: { cameraMode: string; inputMode: string; gamingControls: boolean }
 ) => {
-    // Joystick dimensions (matches SCSS: base height=120, stick size=48)
-    const joystickHeight = 120;
-    const stickSize = 48;
-    const stickCenterY = (joystickHeight - stickSize) / 2; // 36px - top position when centered
-    const stickCenterX = (joystickHeight - stickSize) / 2; // 36px - left position when centered (for 2D mode)
-    const maxStickTravel = stickCenterY; // can travel 36px up or down from center
+    // Joystick dimensions (matches SCSS: base height=100, stick size=40)
+    const joystickHeight = 100;
+    const stickSize = 40;
+    const stickCenterY = (joystickHeight - stickSize) / 2; // 30px - top position when centered
+    const stickCenterX = (joystickHeight - stickSize) / 2; // 30px - left position when centered (for 2D mode)
+    const maxStickTravel = stickCenterY; // can travel 30px up or down from center
 
     // Fixed joystick position (bottom-left corner with safe area)
     const joystickFixedX = 70;
@@ -65,7 +65,7 @@ const initJoystick = (
 
     // Update joystick visibility based on camera mode and input mode
     const updateJoystickVisibility = () => {
-        if (state.cameraMode === 'fly' && state.inputMode === 'touch') {
+        if ((state.cameraMode === 'fly' || state.cameraMode === 'walk') && state.inputMode === 'touch' && state.gamingControls) {
             dom.joystickBase.classList.remove('hidden');
             dom.joystickBase.classList.toggle('mode-2d', joystickMode === '2d');
             dom.joystickBase.style.left = `${joystickFixedX}px`;
@@ -84,6 +84,7 @@ const initJoystick = (
 
     events.on('cameraMode:changed', updateJoystickVisibility);
     events.on('inputMode:changed', updateJoystickVisibility);
+    events.on('gamingControls:changed', updateJoystickVisibility);
     window.addEventListener('resize', updateJoystickVisibility);
 
     // Handle joystick touch input directly on the joystick element
@@ -265,8 +266,13 @@ const initUI = (global: Global) => {
         'buttonContainer',
         'play', 'pause',
         'settings', 'settingsPanel',
-        'orbitCamera', 'flyCamera',
-        'hqCheck', 'hqOption', 'lqCheck', 'lqOption',
+        'orbitCamera', 'flyCamera', 'fpsCamera',
+        'performanceModeRow', 'performanceModeCheck', 'performanceModeOption',
+        'gamingControlsDivider', 'gamingControlsRow', 'gamingControlsCheck', 'gamingControlsOption',
+        'desktopClickToWalk', 'desktopGamingControls',
+        'touchFlyClickToWalk', 'touchFlyGamingControls',
+        'touchClickToWalk', 'touchGamingControls',
+        'walkHint',
         'cameraPathCheck', 'cameraPathOption',
         'cameraBoundsCheck', 'cameraBoundsOption',
         'skyboxRow', 'skyboxSelect',
@@ -278,6 +284,7 @@ const initUI = (global: Global) => {
         'getCameraInfo',
         'loadingText', 'loadingBar', 'loadingIcon',
         'joystickBase', 'joystick',
+        'showVoxels',
         'tooltip',
         'annotationNav', 'annotationPrev', 'annotationNext', 'annotationInfo', 'annotationNavTitle',
         // 'supersplatBranding',
@@ -297,11 +304,21 @@ const initUI = (global: Global) => {
     // Progress is calculated based on threshold, reaching 100% when animation begins
     const hideProgressBarInLodMode = false;
     // Forward wheel events from UI overlays to the canvas so the camera zooms
-    // instead of the page scrolling (e.g. annotation nav, tooltips, hotspots)
+    // instead of the page scrolling (e.g. annotation nav, tooltips, hotspots).
+    // Preserve non-standard wheelDelta fields for input-mode classification.
     const canvas = global.app.graphicsDevice.canvas as HTMLCanvasElement;
     dom.ui.addEventListener('wheel', (event: WheelEvent) => {
         event.preventDefault();
-        canvas.dispatchEvent(new WheelEvent(event.type, event));
+        const forwarded = new WheelEvent(event.type, event);
+        const src = event as WheelEvent & {
+            wheelDelta?: number, wheelDeltaX?: number, wheelDeltaY?: number
+        };
+        for (const key of ['wheelDelta', 'wheelDeltaX', 'wheelDeltaY'] as const) {
+            if (typeof src[key] === 'number') {
+                Object.defineProperty(forwarded, key, { value: src[key], configurable: true });
+            }
+        }
+        canvas.dispatchEvent(forwarded);
     }, { passive: false });
 
     // Handle loading progress updates
@@ -401,22 +418,43 @@ const initUI = (global: Global) => {
         dom.exitFullscreen.classList[value ? 'remove' : 'add']('hidden');
     });
 
-    // HQ mode
-    dom.hqOption.addEventListener('click', () => {
-        state.hqMode = true;
+    // Performance mode toggle
+    dom.performanceModeRow.addEventListener('click', () => {
+        state.performanceMode = !state.performanceMode;
     });
-    dom.lqOption.addEventListener('click', () => {
-        state.hqMode = false;
-    });
-
-    const updateHQ = () => {
-        dom.hqCheck.classList[state.hqMode ? 'add' : 'remove']('active');
-        dom.lqCheck.classList[state.hqMode ? 'remove' : 'add']('active');
+    const updatePerformanceMode = () => {
+        dom.performanceModeCheck.classList.toggle('active', state.performanceMode);
+        localStorage.setItem('performanceMode', String(state.performanceMode));
     };
-    events.on('hqMode:changed', (value) => {
-        updateHQ();
+    events.on('performanceMode:changed', updatePerformanceMode);
+    updatePerformanceMode();
+
+    // Gaming controls toggle (settings row visible on mobile only)
+    dom.gamingControlsRow.addEventListener('click', () => {
+        state.gamingControls = !state.gamingControls;
     });
-    updateHQ();
+    const updateGamingSettingsVisibility = () => {
+        const isDesktop = state.inputMode === 'desktop';
+        dom.gamingControlsDivider.classList.toggle('hidden', isDesktop);
+        dom.gamingControlsRow.classList.toggle('hidden', isDesktop);
+    };
+    events.on('inputMode:changed', updateGamingSettingsVisibility);
+    updateGamingSettingsVisibility();
+
+    const updateGamingControls = () => {
+        dom.gamingControlsCheck.classList.toggle('active', state.gamingControls);
+        if (state.inputMode !== 'desktop') {
+            dom.desktopClickToWalk.classList.toggle('hidden', state.gamingControls);
+            dom.desktopGamingControls.classList.toggle('hidden', !state.gamingControls);
+        }
+        dom.touchFlyClickToWalk.classList.toggle('hidden', state.gamingControls);
+        dom.touchFlyGamingControls.classList.toggle('hidden', !state.gamingControls);
+        dom.touchClickToWalk.classList.toggle('hidden', state.gamingControls);
+        dom.touchGamingControls.classList.toggle('hidden', !state.gamingControls);
+        localStorage.setItem('gamingControls', String(state.gamingControls));
+    };
+    events.on('gamingControls:changed', updateGamingControls);
+    updateGamingControls();
 
     // Skybox selector
     const skyboxRow = dom.skyboxRow;
@@ -1073,17 +1111,21 @@ const initUI = (global: Global) => {
         updateInfoTab('touch');
     });
 
-    dom.info.addEventListener('click', () => {
+    const toggleHelp = () => {
         updateInfoTab(state.inputMode);
         dom.infoPanel.classList.toggle('hidden');
-    });
+    };
+
+    dom.info.addEventListener('click', toggleHelp);
 
     dom.infoPanel.addEventListener('pointerdown', () => {
         dom.infoPanel.classList.add('hidden');
     });
 
     events.on('inputEvent', (event) => {
-        if (event === 'cancel') {
+        if (event === 'toggleHelp') {
+            toggleHelp();
+        } else if (event === 'cancel') {
             // close info panel on cancel
             dom.infoPanel.classList.add('hidden');
             dom.settingsPanel.classList.add('hidden');
@@ -1235,9 +1277,56 @@ const initUI = (global: Global) => {
     });
 
     // Camera mode UI
-    events.on('cameraMode:changed', () => {
-        dom.orbitCamera.classList[state.cameraMode === 'orbit' ? 'add' : 'remove']('active');
-        dom.flyCamera.classList[state.cameraMode === 'fly' ? 'add' : 'remove']('active');
+    const updateCameraModeUI = () => {
+        dom.orbitCamera.classList.toggle('active', state.cameraMode === 'orbit');
+        dom.flyCamera.classList.toggle('active', state.cameraMode === 'fly');
+        dom.fpsCamera.classList.toggle('active', state.cameraMode === 'walk');
+    };
+
+    events.on('cameraMode:changed', updateCameraModeUI);
+
+    // Walk mode hint banner (shown once per session on first walk entry)
+    let walkHintShown = false;
+    const getWalkHintText = () => {
+        if (state.inputMode === 'desktop') {
+            return 'Click to walk. WASD to move freely.';
+        }
+        return state.gamingControls ?
+            'Use the joystick to move. Drag to look around. Tap to jump.' :
+            'Tap to walk. Drag to look around.';
+    };
+
+    events.on('cameraMode:changed', (value: string) => {
+        if (value === 'walk' && !walkHintShown) {
+            walkHintShown = true;
+            dom.walkHint.textContent = getWalkHintText();
+            dom.walkHint.classList.remove('hidden');
+        } else if (value !== 'walk') {
+            dom.walkHint.classList.add('hidden');
+        }
+    });
+    const dismissWalkHint = () => dom.walkHint.classList.add('hidden');
+    dom.walkHint.addEventListener('click', dismissWalkHint);
+    events.on('inputEvent', (type: string) => {
+        if (type === 'interrupt') dismissWalkHint();
+    });
+
+    // Show/hide walk button based on collision data
+    events.on('hasCollision:changed', (value: boolean) => {
+        dom.fpsCamera.classList.toggle('hidden', !value);
+        dom.flyCamera.classList.toggle('middle', value);
+        dom.flyCamera.classList.toggle('right', !value);
+    });
+
+    // Voxel overlay toggle
+    events.on('hasVoxelOverlay:changed', (value: boolean) => {
+        dom.showVoxels.classList.toggle('hidden', !value);
+    });
+    dom.showVoxels.addEventListener('click', () => {
+        state.voxelOverlayEnabled = !state.voxelOverlayEnabled;
+    });
+    events.on('voxelOverlayEnabled:changed', (value: boolean) => {
+        dom.showVoxels.classList.toggle('active', value);
     });
 
     dom.settings.addEventListener('click', () => {
@@ -1252,8 +1341,12 @@ const initUI = (global: Global) => {
         state.cameraMode = 'fly';
     });
 
+    dom.fpsCamera.addEventListener('click', () => {
+        events.fire('inputEvent', 'toggleWalk');
+    });
+
     dom.reset.addEventListener('click', (event) => {
-        events.fire('inputEvent', 'resetAnim', event);
+        events.fire('inputEvent', 'reset', event);
     });
 
     dom.frame.addEventListener('click', (event) => {
@@ -1264,18 +1357,8 @@ const initUI = (global: Global) => {
         events.fire('getCameraInfo');
     });
 
-    // Joystick: when true, initJoystick registers visibility (fly+touch => show); when false, never show.
-    const joystickEnabled = false; // false = 双指 fly 默认，不显示摇杆
-
-    if (joystickEnabled) {
-        initJoystick(dom, events, state);
-        events.fire('joystickElementReady', dom.joystickBase);
-    } else {
-        // 不调用 initJoystick，避免其 updateJoystickVisibility 在 fly+touch 时去掉 hidden
-        dom.joystickBase.classList.add('hidden');
-        events.fire('joystickDisabled');
-    }
-    
+    // Initialize touch joystick (visibility managed by mode + gamingControls)
+    initJoystick(dom, events, state);
 
     // Initialize annotation navigator
     initAnnotationNav(dom, events, state, global.settings.annotations);
@@ -1332,8 +1415,10 @@ const initUI = (global: Global) => {
     tooltip.register(dom.pause, 'Pause', 'top');
     tooltip.register(dom.orbitCamera, 'Orbit Camera', 'top');
     tooltip.register(dom.flyCamera, 'Fly Camera', 'top');
+    tooltip.register(dom.fpsCamera, 'Walk Mode', 'top');
     tooltip.register(dom.reset, 'Reset Camera', 'bottom');
     tooltip.register(dom.frame, 'Frame Scene', 'bottom');
+    tooltip.register(dom.showVoxels, 'Show Voxels', 'top');
     tooltip.register(dom.settings, 'Settings', 'top');
     tooltip.register(dom.info, 'Help', 'top');
     tooltip.register(dom.arMode, 'Enter AR', 'top');

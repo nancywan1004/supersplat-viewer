@@ -37,6 +37,7 @@
 
             const posterUrl = toProxy(url.searchParams.get('poster'));
             const skyboxUrl = toProxy(url.searchParams.get('skybox'));
+            const collisionUrl = url.searchParams.get('collision') ?? url.searchParams.get('voxel');
             const settingsUrl = url.searchParams.has('settings') ? url.searchParams.get('settings') : './settings.json';
             const contentUrl = url.searchParams.has('content') ? url.searchParams.get('content') : './scene.compressed.ply';
             const settingsFetchUrl = toProxy(settingsUrl);
@@ -45,9 +46,28 @@
             const projectId = url.searchParams.get('projectId') ?? undefined;
             const token = url.searchParams.get('token') ?? undefined;
 
+            // ?webgpu picks the best WebGPU renderer for the platform: compute on
+            // macOS (where the raster gpu-sort path stalls) and gpu-sort elsewhere.
+            // Prefer userAgentData when available, fall back to the deprecated
+            // navigator.platform / userAgent. Exclude iPad desktop mode, which
+            // reports as Mac but should not take the macOS path.
+            const uaPlatform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '';
+            const isIPad = navigator.maxTouchPoints > 1 && /Mac/i.test(navigator.platform || '');
+            const isMac = !isIPad && /macOS|Mac/i.test(uaPlatform);
+            const renderer =
+                url.searchParams.has('compute')  ? 'compute' :
+                url.searchParams.has('gpu-sort') ? 'gpu-sort' :
+                url.searchParams.has('cpu-sort') ? 'cpu-sort' :
+                url.searchParams.has('webgpu')   ? (isMac ? 'compute' : 'gpu-sort') :
+                                                   'webgl';
+
+            const budgetParam = url.searchParams.get('budget');
+            const budget = budgetParam !== null ? Number(budgetParam) : undefined;
+
             const sseConfig = {
                 poster: posterUrl && createImage(posterUrl),
                 skyboxUrl,
+                collisionUrl,
                 contentUrl,
                 contents: fetch(contentFetchUrl),
                 noui: url.searchParams.has('noui'),
@@ -69,6 +89,10 @@
                 hpr: url.searchParams.has('hpr') ? ['', '1', 'true', 'enable'].includes(url.searchParams.get('hpr')) : undefined,
                 webgpu: url.searchParams.has('webgpu'),
                 gpusort: url.searchParams.has('gpusort'),
+                renderer,
+                budget,
+                heatmap: url.searchParams.has('heatmap'),
+                fullload: url.searchParams.has('fullload'),
                 projectId,
                 token
             };
@@ -213,6 +237,12 @@
                                 <g class='fill'><use href="#flyIcon"/></g>
                             </svg>
                         </button>
+                        <button id="fpsCamera" class="controlButton toggle right hidden">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">
+                                <g class='stroke'><use href="#walkIcon"/></g>
+                                <g class='fill'><use href="#walkIcon"/></g>
+                            </svg>
+                        </button>
                     </div>
 
                     <div class="buttonGroup">
@@ -226,6 +256,13 @@
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">
                                 <g class='stroke'><use href="#vrIcon"/></g>
                                 <g class='fill'><use href="#vrIcon"/></g>
+                            </svg>
+                        </button>
+
+                        <button id="showVoxels" class="controlButton hidden">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">
+                                <g class='stroke'><use href="#voxelIcon"/></g>
+                                <g class='fill'><use href="#voxelIcon"/></g>
                             </svg>
                         </button>
 
@@ -258,15 +295,18 @@
                 </div>
             </div>
 
-            <!-- Settings Panel（保留项：HQ/LQ、相机路径/边界、天空盒、Frame、Reset、获取相机信息） -->
+            <div id="walkHint" class="walkHint hidden"></div>
+
+            <!-- Settings Panel（保留项：性能模式、相机路径/边界、天空盒、Frame、Reset、获取相机信息） -->
             <div id="settingsPanel" class="hidden">
-                <div class="settingsRow">
-                    <div id="hqCheck" class="checkMark">✓</div>
-                    <div id="hqOption">High Quality Render</div>
+                <div id="performanceModeRow" class="settingsRow">
+                    <div id="performanceModeOption">Performance Mode</div>
+                    <div id="performanceModeCheck" class="toggleSwitch"><div class="toggleTrack"><div class="toggleThumb"></div></div></div>
                 </div>
-                <div class="settingsRow">
-                    <div id="lqCheck" class="checkMark">✓</div>
-                    <div id="lqOption">Low Quality Render</div>
+                <div id="gamingControlsDivider" class="divider"></div>
+                <div id="gamingControlsRow" class="settingsRow">
+                    <div id="gamingControlsOption">Gaming Controls</div>
+                    <div id="gamingControlsCheck" class="toggleSwitch"><div class="toggleTrack"><div class="toggleThumb"></div></div></div>
                 </div>
                 <div class="settingsRow">
                     <div id="cameraPathCheck" class="checkMark hidden">✓</div>
@@ -324,17 +364,6 @@
                                 <span class="control-action">Set Focus</span>
                                 <span class="control-key">Double Click</span>
                             </div>
-                            <div class="control-spacer"></div>
-                            <h1>Fly Mode</h1>
-                            <div class="control-item">
-                                <span class="control-action">Look Around</span>
-                                <span class="control-key">Left Mouse</span>
-                            </div>
-                            <div class="control-item">
-                                <span class="control-action">Fly</span>
-                                <span class="control-key">W,S,A,D</span>
-                            </div>
-                            <div class="control-spacer"></div>
                             <div class="control-item">
                                 <span class="control-action">Frame Scene</span>
                                 <span class="control-key">F</span>
@@ -346,6 +375,72 @@
                             <div class="control-item">
                                 <span class="control-action">Switch Camera Mode</span>
                                 <span class="control-key">C</span>
+                            </div>
+                            <div class="control-spacer"></div>
+                            <h1>Fly Mode</h1>
+                            <div class="control-item">
+                                <span class="control-action">Look Around</span>
+                                <span class="control-key">Click + Drag</span>
+                            </div>
+                            <div class="control-item">
+                                <span class="control-action">Pan</span>
+                                <span class="control-key">Right Mouse</span>
+                            </div>
+                            <div class="control-item">
+                                <span class="control-action">Move</span>
+                                <span class="control-key">W,S,A,D</span>
+                            </div>
+                            <div class="control-spacer"></div>
+                            <h1>Walk Mode</h1>
+                            <div id="desktopClickToWalk">
+                                <div class="control-item">
+                                    <span class="control-action">Walk To</span>
+                                    <span class="control-key">Click</span>
+                                </div>
+                                <div class="control-item">
+                                    <span class="control-action">Look Around</span>
+                                    <span class="control-key">Click + Drag</span>
+                                </div>
+                            </div>
+                            <div id="desktopGamingControls">
+                                <div class="control-item">
+                                    <span class="control-action">Look Around</span>
+                                    <span class="control-key">Mouse</span>
+                                </div>
+                                <div class="control-item">
+                                    <span class="control-action">Move</span>
+                                    <span class="control-key">W,S,A,D</span>
+                                </div>
+                                <div class="control-item">
+                                    <span class="control-action">Jump</span>
+                                    <span class="control-key">Space</span>
+                                </div>
+                            </div>
+                            <div class="control-spacer"></div>
+                            <h1>Mode Switching</h1>
+                            <div class="control-item">
+                                <span class="control-action">Orbit Mode</span>
+                                <span class="control-key">1</span>
+                            </div>
+                            <div class="control-item">
+                                <span class="control-action">Fly Mode</span>
+                                <span class="control-key">2</span>
+                            </div>
+                            <div class="control-item">
+                                <span class="control-action">Walk Mode</span>
+                                <span class="control-key">3</span>
+                            </div>
+                            <div class="control-item">
+                                <span class="control-action">Voxel Overlay</span>
+                                <span class="control-key">V</span>
+                            </div>
+                            <div class="control-item">
+                                <span class="control-action">Play / Pause</span>
+                                <span class="control-key">Space</span>
+                            </div>
+                            <div class="control-item">
+                                <span class="control-action">Toggle Help</span>
+                                <span class="control-key">H</span>
                             </div>
                         </div>
                         <div id="touchInfoPanel" class="hidden">
@@ -369,13 +464,51 @@
                             </div>
                             <div class="control-spacer"></div>
                             <h1>Fly Mode</h1>
-                            <div class="control-item">
-                                <span class="control-action">Look Around</span>
-                                <span class="control-key">Touch on Right</span>
+                            <div id="touchFlyClickToWalk">
+                                <div class="control-item">
+                                    <span class="control-action">Look Around</span>
+                                    <span class="control-key">Touch + Drag</span>
+                                </div>
+                                <div class="control-item">
+                                    <span class="control-action">Move</span>
+                                    <span class="control-key">Pinch / Two Finger Drag</span>
+                                </div>
                             </div>
-                            <div class="control-item">
-                                <span class="control-action">Fly</span>
-                                <span class="control-key">Touch on Left</span>
+                            <div id="touchFlyGamingControls" class="hidden">
+                                <div class="control-item">
+                                    <span class="control-action">Look Around</span>
+                                    <span class="control-key">Touch + Drag</span>
+                                </div>
+                                <div class="control-item">
+                                    <span class="control-action">Move</span>
+                                    <span class="control-key">Joystick</span>
+                                </div>
+                            </div>
+                            <div class="control-spacer"></div>
+                            <h1>Walk Mode</h1>
+                            <div id="touchClickToWalk">
+                                <div class="control-item">
+                                    <span class="control-action">Walk To</span>
+                                    <span class="control-key">Tap</span>
+                                </div>
+                                <div class="control-item">
+                                    <span class="control-action">Look Around</span>
+                                    <span class="control-key">Touch + Drag</span>
+                                </div>
+                            </div>
+                            <div id="touchGamingControls" class="hidden">
+                                <div class="control-item">
+                                    <span class="control-action">Look Around</span>
+                                    <span class="control-key">Touch + Drag</span>
+                                </div>
+                                <div class="control-item">
+                                    <span class="control-action">Move</span>
+                                    <span class="control-key">Joystick</span>
+                                </div>
+                                <div class="control-item">
+                                    <span class="control-action">Jump</span>
+                                    <span class="control-key">Tap</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -432,6 +565,9 @@
             <symbol id="flyIcon" viewBox="-2 -2 20 20">
                 <path fill-rule="evenodd" clip-rule="evenodd" d="M12 1.33337C13.4727 1.33337 14.6666 2.52728 14.6666 4.00004C14.6666 5.4728 13.4727 6.66671 12 6.66671C11.4931 6.66671 11.0194 6.52491 10.6159 6.27934L10.2721 6.62374C10.0345 6.86142 9.90102 7.18411 9.90102 7.52022V8.47986C9.90102 8.81597 10.0345 9.13866 10.2721 9.37634L10.6159 9.72009C11.0193 9.47463 11.4932 9.33337 12 9.33337C13.4727 9.33337 14.6666 10.5273 14.6666 12C14.6666 13.4728 13.4727 14.6667 12 14.6667C10.5272 14.6667 9.33331 13.4728 9.33331 12C9.33331 11.4932 9.47457 11.0194 9.72003 10.6159L9.37628 10.2722C9.1386 10.0345 8.81591 9.90108 8.4798 9.90108H7.52016C7.18405 9.90108 6.86136 10.0345 6.62368 10.2722L6.27928 10.6159C6.52485 11.0195 6.66665 11.4931 6.66665 12C6.66665 13.4728 5.47274 14.6667 3.99998 14.6667C2.52722 14.6667 1.33331 13.4728 1.33331 12C1.33331 10.5273 2.52722 9.33337 3.99998 9.33337C4.50658 9.33337 4.98008 9.47481 5.38344 9.72009L5.72784 9.37634C5.9655 9.13866 6.09894 8.81597 6.09894 8.47986V7.52022C6.09894 7.18411 5.9655 6.86142 5.72784 6.62374L5.38344 6.27934C4.98001 6.52473 4.5067 6.66671 3.99998 6.66671C2.52722 6.66671 1.33331 5.4728 1.33331 4.00004C1.33331 2.52728 2.52722 1.33337 3.99998 1.33337C5.47274 1.33337 6.66665 2.52728 6.66665 4.00004C6.66665 4.50676 6.52467 4.98008 6.27928 5.3835L6.62368 5.72791C6.86136 5.96556 7.18405 6.099 7.52016 6.099H8.4798C8.81591 6.099 9.1386 5.96556 9.37628 5.72791L9.72003 5.3835C9.47475 4.98014 9.33331 4.50664 9.33331 4.00004C9.33331 2.52728 10.5272 1.33337 12 1.33337ZM3.99998 10.3998C3.11632 10.3998 2.39972 11.1164 2.39972 12C2.39972 12.8837 3.11632 13.6003 3.99998 13.6003C4.88364 13.6003 5.60024 12.8837 5.60024 12C5.60024 11.7911 5.55917 11.5919 5.48631 11.4089L4.41469 12.4812C4.16723 12.7284 3.76625 12.7286 3.51886 12.4812C3.27147 12.2338 3.27158 11.8328 3.51886 11.5853L4.59047 10.5131C4.40769 10.4404 4.20862 10.3998 3.99998 10.3998ZM12 10.3998C11.7911 10.3998 11.5918 10.4403 11.4088 10.5131L12.4811 11.5853C12.7284 11.8328 12.7285 12.2338 12.4811 12.4812C12.2337 12.7286 11.8327 12.7284 11.5853 12.4812L10.513 11.4089C10.4402 11.5918 10.3997 11.7912 10.3997 12C10.3997 12.8837 11.1163 13.6003 12 13.6003C12.8836 13.6003 13.6002 12.8837 13.6002 12C13.6002 11.1164 12.8836 10.3998 12 10.3998ZM3.99998 2.39978C3.11632 2.39978 2.39972 3.11639 2.39972 4.00004C2.39972 4.8837 3.11632 5.6003 3.99998 5.6003C4.20871 5.6003 4.40763 5.55909 4.59047 5.48637L3.51886 4.41475C3.27158 4.16729 3.27147 3.76631 3.51886 3.51892C3.76625 3.27153 4.16723 3.27164 4.41469 3.51892L5.48631 4.59054C5.55903 4.40769 5.60024 4.20877 5.60024 4.00004C5.60024 3.11639 4.88364 2.39978 3.99998 2.39978ZM12 2.39978C11.1163 2.39978 10.3997 3.11639 10.3997 4.00004C10.3997 4.20868 10.4403 4.40775 10.513 4.59054L11.5853 3.51892C11.8327 3.27164 12.2337 3.27153 12.4811 3.51892C12.7285 3.76631 12.7284 4.16729 12.4811 4.41475L11.4088 5.48637C11.5918 5.55923 11.791 5.6003 12 5.6003C12.8836 5.6003 13.6002 4.8837 13.6002 4.00004C13.6002 3.11639 12.8836 2.39978 12 2.39978Z"/>
             </symbol>
+            <symbol id="walkIcon" viewBox="-2 -2 20 20">
+                <path d="M9.75 2a1.75 1.75 0 1 1-3.5 0 1.75 1.75 0 0 1 3.5 0zM5.25 4.75h5.5v4.5h-.5v5h-2v-5h-.5v5h-2v-5h-.5z"/>
+            </symbol>
             <symbol id="arIcon" viewBox="0 0 24 24">
                 <path fill-rule="evenodd" clip-rule="evenodd" d="M12 15.3994V6H16.9629C18.2109 6 19.1167 6.1089 19.6797 6.32715C20.248 6.53997 20.7021 6.92247 21.042 7.47363C21.3818 8.02476 21.5518 8.65491 21.5518 9.36426C21.5518 10.2645 21.2943 11.0093 20.7793 11.5986C20.2641 12.1825 19.4938 12.5513 18.4688 12.7041C18.9786 13.0097 19.3983 13.3453 19.7275 13.7109C20.0621 14.0766 20.5113 14.7261 21.0742 15.6592L22.5 18H19.6797L17.9746 15.3887C17.3694 14.4559 16.9555 13.8691 16.7324 13.6289C16.5095 13.3835 16.2729 13.2172 16.0234 13.1299C15.7738 13.0371 15.3777 12.9902 14.8359 12.9902H14.3584V18H10.4053L9.35742 15.2744H4.56055L3.57031 18H1L5.67383 6H8.23633L12 15.3994ZM5.30566 13.252H8.58008L6.92676 8.7998L5.30566 13.252ZM14.3584 11.0752H16.1025C17.2336 11.0752 17.9401 11.0259 18.2217 10.9277C18.5032 10.8295 18.7235 10.66 18.8828 10.4199C19.0421 10.1798 19.1221 9.87966 19.1221 9.51953C19.122 9.11597 19.016 8.79138 18.8037 8.5459C18.5966 8.29488 18.3013 8.13677 17.9189 8.07129C17.7276 8.04401 17.1541 8.03027 16.1982 8.03027H14.3584V11.0752Z"/>
             </symbol>
@@ -458,6 +594,9 @@
             </symbol>
             <symbol id="chevronRightIcon" viewBox="0 0 24 24">
                 <path d="M9 5l7 7-7 7"/>
+            </symbol>
+            <symbol id="voxelIcon" viewBox="0 0 16 16">
+                <path d="M8 1L2 4.5v7L8 15l6-3.5v-7L8 1zm0 1.15L12.85 5 8 7.85 3.15 5 8 2.15zM3 5.85l4.5 2.6v5.1L3 10.95V5.85zm5.5 7.7v-5.1L13 5.85v5.1l-4.5 2.6z"/>
             </symbol>
             <symbol id="exitFullscreenIcon" viewBox="0 0 24 24">
                 <path d="M8 15.0996C8.49706 15.0996 8.90039 15.5029 8.90039 16V21C8.90039 21.4971 8.49706 21.9004 8 21.9004C7.50294 21.9004 7.09961 21.4971 7.09961 21V16.9004H3C2.50294 16.9004 2.09961 16.4971 2.09961 16C2.09961 15.5029 2.50294 15.0996 3 15.0996H8Z" />

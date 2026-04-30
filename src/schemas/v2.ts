@@ -1,4 +1,27 @@
-import type { LodSettings, LodPreset, LodPlatform, RevealEffect, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset, LocalLightRegion, WorldSpaceBloomRegionJSON } from "./v2-custom";
+import type {
+    LodSettings,
+    LodPreset,
+    LodPlatform,
+    RevealEffect,
+    TransformFrame,
+    PointLightConfig,
+    DirectionalLightConfig,
+    SpotLightConfig,
+    LightingSettings,
+    SceneAsset,
+    LocalLightRegion,
+    WorldSpaceBloomRegionJSON
+} from './v2-custom';
+import {
+    assertObject,
+    assertNumber,
+    assertString,
+    assertBoolean,
+    assertEnum,
+    assertArray,
+    assertNumberArray,
+    assertTuple3
+} from './validate-utils';
 
 type AnimTrack = {
     name: string,
@@ -25,12 +48,6 @@ type CameraPose = {
 
 type Camera = {
     initial: CameraPose,
-    /**
-     * 可选：相机俯仰角限制（单位：度）
-     * - 默认值：[-90, 90]
-     * - 第一个值为最小俯仰角（向下看的角度限制）
-     * - 第二个值为最大俯仰角（向上看的角度限制）
-     */
     pitchRange?: [number, number];
 };
 
@@ -42,14 +59,10 @@ type Annotation = {
     imageUrl?: string,
     showTitleWhenCollapsed: boolean,
     collapsed: boolean,
-    extras: any,
+    extras?: any,
     camera: Camera;
 };
 
-/**
- * Bloom 笔刷编辑会话（仅内存）。
- * 与 `postEffectSettings.bloom` 分离：`bloom` 只承载可持久化配置；本段在 serialize 时整段省略。
- */
 type BloomEditorSession = {
     bloomBrush: boolean;
     activeLocalLightRegionId: string | null;
@@ -61,28 +74,17 @@ type PostEffectSettings = {
         enabled: boolean,
         amount: number,
     },
-    /** 可持久化的 Bloom 配置（不含笔刷会话态） */
     bloom: {
         enabled: boolean,
         intensity: number,
         blurLevel: number,
-        /** 亮度阈值，仅高于此值的像素参与 bloom 柔光，0-1 */
         threshold: number,
-        /** 仅显示参与 bloom 的高斯点（调试用） */
         bloomDebug: boolean,
-        /** Bloom 管线范围：'global' 全屏辉光，'local' 仅局部亮灯区域参与 compose mask */
         bloomScope?: 'global' | 'local';
         bloomBrushSize: number,
-        /** 当前绘制会话局部亮度 -1～1（草稿/编辑态滑块，可持久化作为默认笔刷亮度） */
         bloomBrushBrightness?: number,
-        /**
-         * 可选：局部亮灯区域列表。
-         * - 首版策略：一次只激活一个 LocalLightRegion；
-         * - 未来可扩展为多区域叠加。
-         */
         localLightRegions?: LocalLightRegion[];
     },
-    /** 笔刷开关、当前选中区域、新建光源引导点等（仅内存，不入库） */
     bloomEditorSession?: BloomEditorSession,
     grading: {
         enabled: boolean,
@@ -102,24 +104,15 @@ type PostEffectSettings = {
         enabled: boolean,
         intensity: number
     },
-    /** 地面阴影（与 SHADOW_SYSTEM_复用说明 一致：ShadowCatcher + ShadowApply postrender 叠阴影） */
     shadow: {
         enabled: boolean,
-        /** 阴影强度 0~1，越小阴影越淡 */
         darken: number,
-        /** 调试：true 时全屏显示 RT 内容（R 通道灰度） */
         debugRt?: boolean,
-        /** 调试：true 时显示接影平面几何（半透明绿色），用于确认平面位置与范围 */
         debugVisual?: boolean,
-        /** 是否投射阴影，默认false */
         castShadows?: boolean,
-        /** 光源方向俯仰角（度），用于序列化还原 */
         lightPitch?: number,
-        /** 光源方向偏航角（度），用于序列化还原 */
         lightYaw?: number,
-        /** 阴影 bias，用于序列化还原 */
         shadowBias?: number,
-        /** 调试球体半径，用于序列化还原 */
         sphereRadius?: number
     }
 };
@@ -134,64 +127,157 @@ type ExperienceSettings = {
         skyboxUrl?: string
     },
     postEffectSettings: PostEffectSettings,
-
     animTracks: AnimTrack[],
     cameras: Camera[],
     annotations: Annotation[],
-
     startMode: 'default' | 'animTrack' | 'annotation',
-
     hasStartPose?: boolean,
-
     revealEffect?: RevealEffect,
     lodSettings?: LodSettings,
-
-    /**
-     * 可选：光照配置（点光源列表，上限 10 个）
-     * 用于夜间模式等效果，每项包含 position / color / intensity
-     */
     lighting?: LightingSettings,
-
-    /**
-     * 可选：场景亮度配置（保存/加载时序列化）
-     * - fade: 全局亮度 -1~1，负值变暗、正值变亮、0 不变（仅用滑块控制，无开关）
-     * - enabled: 已废弃，仅用于兼容旧配置；新配置只保存 fade
-     */
     nightMode?: {
         fade?: number;
         enabled?: boolean;
     };
-
-    /**
-     * 可选：相机边界策略（不影响旧 settings.json）
-     * - enabled: 是否启用相机移动限制（默认 true）
-     * - animScaleX: X 轴方向的缩放系数（可选，仅在有动画路径时生效）
-     *   可以是单个数值（左右相同）或数组 [left, right]（分别设置左右缩放，默认 1.5）
-     * - animScaleY: Y 轴方向的缩放系数（可选，仅在有动画路径时生效）
-     *   可以是单个数值（上下相同）或数组 [top, bottom]（分别设置上下缩放，默认 1.5）
-     */
     cameraBounds?: {
         enabled?: boolean;
         animScaleX?: number | [number, number];
         animScaleY?: number | [number, number];
     };
-
-    /**
-     * 可选：初始相机模式
-     * - 'orbit': 轨道模式（默认）
-     * - 'fly': 飞行模式
-     * - 如果不设置或没有动画，默认为 'orbit'
-     * - 如果有动画，默认为 'anim'
-     */
     initialCameraMode?: 'orbit' | 'fly';
-
-    /**
-     * 可选：场景中放置的资产列表（编辑模式添加的 mesh / gaussian / image）
-     * - 每一项记录类型、来源 url 以及在世界空间中的变换
-     */
     sceneAssets?: SceneAsset[];
 };
 
+const TONEMAPPING = ['none', 'linear', 'filmic', 'hejl', 'aces', 'aces2', 'neutral'] as const;
+const LOOP_MODES = ['none', 'repeat', 'pingpong'] as const;
+const INTERPOLATIONS = ['step', 'spline'] as const;
+const START_MODES = ['default', 'animTrack', 'annotation'] as const;
+
+const validateAnimTrack = (data: unknown, path: string): AnimTrack => {
+    const obj = assertObject(data, path);
+    assertString(obj.name, `${path}.name`);
+    assertNumber(obj.duration, `${path}.duration`);
+    assertNumber(obj.frameRate, `${path}.frameRate`);
+    assertEnum(obj.loopMode, LOOP_MODES, `${path}.loopMode`);
+    assertEnum(obj.interpolation, INTERPOLATIONS, `${path}.interpolation`);
+    assertNumber(obj.smoothness, `${path}.smoothness`);
+
+    const kf = assertObject(obj.keyframes, `${path}.keyframes`);
+    assertNumberArray(kf.times, `${path}.keyframes.times`);
+    const vals = assertObject(kf.values, `${path}.keyframes.values`);
+    assertNumberArray(vals.position, `${path}.keyframes.values.position`);
+    assertNumberArray(vals.target, `${path}.keyframes.values.target`);
+    assertNumberArray(vals.fov, `${path}.keyframes.values.fov`);
+
+    return data as AnimTrack;
+};
+
+const validateCamera = (data: unknown, path: string): Camera => {
+    const obj = assertObject(data, path);
+    const initial = assertObject(obj.initial, `${path}.initial`);
+    assertTuple3(initial.position, `${path}.initial.position`);
+    assertTuple3(initial.target, `${path}.initial.target`);
+    assertNumber(initial.fov, `${path}.initial.fov`);
+    if (obj.pitchRange !== undefined) {
+        const pitchRange = assertNumberArray(obj.pitchRange, `${path}.pitchRange`);
+        if (pitchRange.length !== 2) {
+            throw new Error(`${path}.pitchRange must have exactly 2 elements`);
+        }
+    }
+    return data as Camera;
+};
+
+const validateAnnotation = (data: unknown, path: string): Annotation => {
+    const obj = assertObject(data, path);
+    assertString(obj.id, `${path}.id`);
+    assertTuple3(obj.position, `${path}.position`);
+    assertString(obj.title, `${path}.title`);
+    assertString(obj.text, `${path}.text`);
+    if (obj.imageUrl !== undefined) assertString(obj.imageUrl, `${path}.imageUrl`);
+    assertBoolean(obj.showTitleWhenCollapsed, `${path}.showTitleWhenCollapsed`);
+    assertBoolean(obj.collapsed, `${path}.collapsed`);
+    validateCamera(obj.camera, `${path}.camera`);
+    return data as Annotation;
+};
+
+const validatePostEffects = (data: unknown, path: string): PostEffectSettings => {
+    const obj = assertObject(data, path);
+
+    const sh = assertObject(obj.sharpness, `${path}.sharpness`);
+    assertBoolean(sh.enabled, `${path}.sharpness.enabled`);
+    assertNumber(sh.amount, `${path}.sharpness.amount`);
+
+    const bl = assertObject(obj.bloom, `${path}.bloom`);
+    assertBoolean(bl.enabled, `${path}.bloom.enabled`);
+    assertNumber(bl.intensity, `${path}.bloom.intensity`);
+    assertNumber(bl.blurLevel, `${path}.bloom.blurLevel`);
+    assertNumber(bl.threshold, `${path}.bloom.threshold`);
+    assertBoolean(bl.bloomDebug, `${path}.bloom.bloomDebug`);
+    assertNumber(bl.bloomBrushSize, `${path}.bloom.bloomBrushSize`);
+    if (bl.bloomScope !== undefined) {
+        assertEnum(bl.bloomScope, ['global', 'local'] as const, `${path}.bloom.bloomScope`);
+    }
+    if (bl.bloomBrushBrightness !== undefined) {
+        assertNumber(bl.bloomBrushBrightness, `${path}.bloom.bloomBrushBrightness`);
+    }
+
+    const gr = assertObject(obj.grading, `${path}.grading`);
+    assertBoolean(gr.enabled, `${path}.grading.enabled`);
+    assertNumber(gr.brightness, `${path}.grading.brightness`);
+    assertNumber(gr.contrast, `${path}.grading.contrast`);
+    assertNumber(gr.saturation, `${path}.grading.saturation`);
+    assertTuple3(gr.tint, `${path}.grading.tint`);
+
+    const vi = assertObject(obj.vignette, `${path}.vignette`);
+    assertBoolean(vi.enabled, `${path}.vignette.enabled`);
+    assertNumber(vi.intensity, `${path}.vignette.intensity`);
+    assertNumber(vi.inner, `${path}.vignette.inner`);
+    assertNumber(vi.outer, `${path}.vignette.outer`);
+    assertNumber(vi.curvature, `${path}.vignette.curvature`);
+
+    const fr = assertObject(obj.fringing, `${path}.fringing`);
+    assertBoolean(fr.enabled, `${path}.fringing.enabled`);
+    assertNumber(fr.intensity, `${path}.fringing.intensity`);
+
+    const shadow = assertObject(obj.shadow, `${path}.shadow`);
+    assertBoolean(shadow.enabled, `${path}.shadow.enabled`);
+    assertNumber(shadow.darken, `${path}.shadow.darken`);
+
+    return data as PostEffectSettings;
+};
+
+const validateV2 = (data: unknown): ExperienceSettings => {
+    const obj = assertObject(data, 'settings');
+
+    if (obj.version !== 2) {
+        throw new Error('settings.version must be 2');
+    }
+
+    assertEnum(obj.tonemapping, TONEMAPPING, 'settings.tonemapping');
+    assertBoolean(obj.highPrecisionRendering, 'settings.highPrecisionRendering');
+    if (obj.soundUrl !== undefined) assertString(obj.soundUrl, 'settings.soundUrl');
+
+    const bg = assertObject(obj.background, 'settings.background');
+    assertTuple3(bg.color, 'settings.background.color');
+    if (bg.skyboxUrl !== undefined) assertString(bg.skyboxUrl, 'settings.background.skyboxUrl');
+
+    validatePostEffects(obj.postEffectSettings, 'settings.postEffectSettings');
+
+    const tracks = assertArray(obj.animTracks, 'settings.animTracks');
+    tracks.forEach((t: unknown, i: number) => validateAnimTrack(t, `settings.animTracks[${i}]`));
+
+    const cameras = assertArray(obj.cameras, 'settings.cameras');
+    cameras.forEach((c: unknown, i: number) => validateCamera(c, `settings.cameras[${i}]`));
+
+    const annotations = assertArray(obj.annotations, 'settings.annotations');
+    annotations.forEach((a: unknown, i: number) => validateAnnotation(a, `settings.annotations[${i}]`));
+
+    assertEnum(obj.startMode, START_MODES, 'settings.startMode');
+
+    return data as ExperienceSettings;
+};
+
+export { validateV2 };
 export type {
     AnimTrack,
     BloomEditorSession,

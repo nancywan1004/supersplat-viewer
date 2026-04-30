@@ -19,6 +19,8 @@ import {
 import { applySkyboxSphere, removeSkyboxSphere, applySkyboxTexture, type SkyboxOptions } from './loaders/skybox-loader';
 
 import { App } from './app';
+import { MeshCollision, loadVoxelCollision } from './collision';
+import type { Collision } from './collision';
 import { observe } from './core/observe';
 import type { ExperienceSettings } from './schemas/v2';
 import { importSettings } from './settings';
@@ -40,7 +42,7 @@ import { ensureRevealEffect } from './settings-serialize/settings-serialize-help
 export { loadGsplatAsset };
 
 const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progress: number) => void, lodLoader?: LodLoader) => {
-    const { contents, contentUrl, unified, aa } = config;
+    const { contents, contentUrl, aa } = config;
     const filename = new URL(contentUrl, location.href).pathname.split('/').pop();
     const shouldEnableLod = lodLoader?.shouldEnableLod(contentUrl) ?? false;
     
@@ -74,7 +76,7 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
                 unified: true,
                 asset
             });
-            const material = entity.gsplat.unified ? app.scene.gsplat.material : entity.gsplat.material;
+            const material = app.scene.gsplat.material;
             material.setDefine('GSPLAT_AA', aa);
             material.setParameter('alphaClip', 1 / 255);
             app.root.addChild(entity);
@@ -157,15 +159,19 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
 };
 
 const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
+    const useWebGPU = config.renderer !== 'webgl';
+
     // Create the graphics device
     const device = await createGraphicsDevice(canvas, {
-        deviceTypes: config.webgpu ? ['webgpu'] : [],
+        deviceTypes: useWebGPU ? ['webgpu'] : [],
         antialias: false,
         depth: true,
         stencil: false,
-        xrCompatible: !config.webgpu,
+        xrCompatible: !useWebGPU,
         powerPreference: 'high-performance'
     });
+
+    console.log(`Renderer: ${device.deviceType}, ${config.renderer === 'webgl' ? 'cpu-sort' : config.renderer}`);
 
     // Set maxPixelRatio so the XR framebuffer scale factor is computed correctly.
     // Regular rendering bypasses maxPixelRatio via the custom initCanvas sizing.
@@ -226,7 +232,7 @@ const initCanvas = (global: Global) => {
         // and resetting canvas dimensions can invalidate the XRWebGLLayer
         if (app.xr?.active) return;
 
-        const s = state.hqMode ? 1.0 : 0.5;
+        const s = state.performanceMode ? 0.5 : 1.0;
         const w = Math.ceil(deviceSize.width * s);
         const h = Math.ceil(deviceSize.height * s);
         if (w !== canvas.width || h !== canvas.height) {
@@ -244,7 +250,7 @@ const initCanvas = (global: Global) => {
     });
     resizeObserver.observe(canvas);
 
-    events.on('hqMode:changed', () => {
+    events.on('performanceMode:changed', () => {
         app.renderNextFrame = true;
     });
 
@@ -264,10 +270,18 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     // create events
     const events = new EventHandler();
 
+    // migrate legacy `retinaDisplay` preference (inverted) to `performanceMode`
+    const legacyRetina = localStorage.getItem('retinaDisplay');
+    if (legacyRetina !== null && localStorage.getItem('performanceMode') === null) {
+        localStorage.setItem('performanceMode', String(legacyRetina === 'false'));
+        localStorage.removeItem('retinaDisplay');
+    }
+    const storedPerformanceMode = localStorage.getItem('performanceMode');
+
     const state = observe(events, {
         loaded: false,
         readyToRender: false,
-        hqMode: true,
+        performanceMode: storedPerformanceMode !== null ? storedPerformanceMode === 'true' : platform.mobile,
         progress: 0,
         inputMode: platform.mobile ? 'touch' : 'desktop',
         cameraMode: 'orbit',
@@ -278,13 +292,16 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         animationStarted: false,
         hasAR: false,
         hasVR: false,
+        hasCollision: false,
+        hasVoxelOverlay: false,
+        voxelOverlayEnabled: false,
         isFullscreen: false,
         controlsHidden: false,
         hasRevealEffect: false,
         showCameraPath: false,
         showCameraBoundingBox: false,
         vfxActive: false,
-        vfxType: 'none' as 'none' | 'grow' | 'pieces-recover' | 'perlin-wave' | 'disintegrate' | 'integrate' | 'growth-wave',
+        vfxType: 'none' as State['vfxType'],
         editMode: false,
         previewMode: false,
         editLeftModule: null,
@@ -305,7 +322,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         // 导出 VFX 视频时的锁，防止实时更新干扰离线渲染
         isExportingVfxVideo: false,
         // 导出前 VFX 播放/暂停状态，导出结束后用于恢复（reveal 会在 setPlayPause 时同步）
-        effectPaused: false
+        effectPaused: false,
+        gamingControls: localStorage.getItem('gamingControls') === 'true'
     });
 
     // 如果设置了 noreveal 参数，清除 reveal effect 配置
@@ -359,7 +377,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     initLight(global);
 
     // Initialize XR support
-    if (!config.webgpu) {
+    if (config.renderer === 'webgl') {
         initXr(global);
     }
 
@@ -417,6 +435,23 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         }
     });
 
+    // Load collision data (type determined by file extension)
+    let collisionLoad: Promise<Collision> | undefined;
+    if (config.collisionUrl) {
+        const ext = new URL(config.collisionUrl, location.href).pathname.split('.').pop()?.toLowerCase();
+        if (ext === 'glb') {
+            collisionLoad = MeshCollision.fromGlb(app, config.collisionUrl).catch((err: Error): null => {
+                console.warn('Failed to load mesh collision:', err);
+                return null;
+            });
+        } else {
+            collisionLoad = loadVoxelCollision(config.collisionUrl).catch((err: Error): null => {
+                console.warn('Failed to load voxel data:', err);
+                return null;
+            });
+        }
+    }
+
     // Load and play sound
     if (global.settings.soundUrl) {
         const sound = new Audio(global.settings.soundUrl);
@@ -432,7 +467,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     }
 
     // Viewer 构造内会 initCommandRegistry 并注册各 facade；postMessage 监听须在此之后挂载，否则编辑类协议无法经 registry 单路径执行。
-    const viewer = new Viewer(global, gsplatLoad, skyboxLoad);
+    const viewer = new Viewer(global, gsplatLoad, skyboxLoad, collisionLoad);
 
     initPostMessageBridge(global);
 

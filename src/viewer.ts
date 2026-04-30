@@ -29,6 +29,8 @@ import {
 import { Annotations } from './annotations';
 import { CameraManager } from './camera-manager';
 import { Camera } from './cameras/camera';
+import type { Collision } from './collision';
+import { VoxelCollision } from './collision';
 import { nearlyEquals } from './core/math';
 import { InputController } from './input-controller';
 import type { ExperienceSettings, PostEffectSettings } from './settings';
@@ -57,15 +59,46 @@ import { initEffectsFacade } from './editor-modules/effects-facade';
 import { initCommandRegistry } from './editor-modules/command-registry';
 import { DEFAULT_DEFERRED_EDITING_LAYERS } from './render/deferred-editing-visual-sync';
 import { initInputArbiter } from './input-arbiter';
+import { VoxelDebugOverlay } from './voxel-debug-overlay';
+import { WalkCursor } from './walk-cursor';
+
+// String.replace wrapper that warns when the source substring is missing, so
+// shader chunk patches against the engine fail loudly instead of silently
+// producing the original chunk.
+const patchChunk = (source: string, search: string, replacement: string, name: string): string => {
+    if (!source.includes(search)) {
+        console.warn(`patchChunk: substring not found in '${name}', shader chunk patch may be out of sync with the engine.`);
+    }
+    return source.replace(search, replacement);
+};
+
+// compute 渲染器在 ?nofx 时也需要 CameraFrame 做 tile composite，因此提供一份全关闭后处理配置。
+const noPostEffects: PostEffectSettings = {
+    sharpness: { enabled: false, amount: 0 },
+    bloom: {
+        enabled: false,
+        intensity: 0,
+        blurLevel: 0,
+        threshold: 0,
+        bloomDebug: false,
+        bloomScope: 'global',
+        bloomBrushSize: 30,
+        bloomBrushBrightness: 1
+    },
+    grading: { enabled: false, brightness: 0, contrast: 1, saturation: 1, tint: [1, 1, 1] },
+    vignette: { enabled: false, intensity: 0, inner: 0, outer: 0, curvature: 0 },
+    fringing: { enabled: false, intensity: 0 },
+    shadow: { enabled: false, darken: 0, debugVisual: false, castShadows: false }
+};
 
 const gammaChunkGlsl = `
-vec3 prepareOutputFromGamma(vec3 gammaColor) {
+vec3 prepareOutputFromGamma(vec3 gammaColor, float depth) {
     return gammaColor;
 }
 `;
 
 const gammaChunkWgsl = `
-fn prepareOutputFromGamma(gammaColor: vec3f) -> vec3f {
+fn prepareOutputFromGamma(gammaColor: vec3f, depth: f32) -> vec3f {
     return gammaColor;
 }
 `;
@@ -183,16 +216,23 @@ class Viewer {
     /** 编辑模块生命周期编排器（orchestrator-core） */
     moduleOrchestrator: ModuleOrchestrator | null = null;
 
+    voxelOverlay: VoxelDebugOverlay | null = null;
+
+    walkCursor: WalkCursor | null = null;
+
     origChunks: {
         glsl: {
-            gsplatOutputVS: string
+            gsplatOutputVS: string,
+            skyboxPS: string
         },
         wgsl: {
-            gsplatOutputVS: string
+            gsplatOutputVS: string,
+            skyboxPS: string,
+            gsplatTileCompositePS: string
         }
     };
 
-    constructor(global: Global, gsplatLoad: Promise<Entity>, skyboxLoad: Promise<void>) {
+    constructor(global: Global, gsplatLoad: Promise<Entity>, skyboxLoad: Promise<void> | undefined, collisionLoad: Promise<Collision> | undefined) {
         this.global = global;
 
         const { app, settings, config, events, state, camera } = global;
@@ -212,33 +252,32 @@ class Viewer {
         // enable anonymous CORS for image loading in safari
         (app.loader.getHandler('texture') as TextureHandler).imgParser.crossOrigin = 'anonymous';
 
-        this.origChunks = {
-            glsl: {
-                gsplatOutputVS: ShaderChunks.get(graphicsDevice, 'glsl').get('gsplatOutputVS')
-            },
-            wgsl: {
-                gsplatOutputVS: ShaderChunks.get(graphicsDevice, 'wgsl').get('gsplatOutputVS')
-            }
-        };
-
         // render skybox as plain equirect
         const glsl = ShaderChunks.get(graphicsDevice, 'glsl');
-        glsl.set('skyboxPS', glsl.get('skyboxPS').replace('mapRoughnessUv(uv, mipLevel)', 'uv'));
+        glsl.set('skyboxPS', patchChunk(glsl.get('skyboxPS'), 'mapRoughnessUv(uv, mipLevel)', 'uv', 'glsl skyboxPS'));
 
         const wgsl = ShaderChunks.get(graphicsDevice, 'wgsl');
-        wgsl.set('skyboxPS', wgsl.get('skyboxPS').replace('mapRoughnessUv(uv, uniform.mipLevel)', 'uv'));
+        wgsl.set('skyboxPS', patchChunk(wgsl.get('skyboxPS'), 'mapRoughnessUv(uv, uniform.mipLevel)', 'uv', 'wgsl skyboxPS'));
+
+        this.origChunks = {
+            glsl: {
+                gsplatOutputVS: glsl.get('gsplatOutputVS'),
+                skyboxPS: glsl.get('skyboxPS')
+            },
+            wgsl: {
+                gsplatOutputVS: wgsl.get('gsplatOutputVS'),
+                skyboxPS: wgsl.get('skyboxPS'),
+                gsplatTileCompositePS: wgsl.get('gsplatTileCompositePS')
+            }
+        };
 
         this.bloomController = new BloomController(global, {
             getCameraFrame: () => this.cameraFrame,
             getAppCanvas: () => (app.graphicsDevice?.canvas as HTMLCanvasElement) ?? document.querySelector('canvas'),
             getNightModeScript: () => this.nightModeScript
         });
-
         // disable auto render, we'll render only when camera changes
         app.autoRender = false;
-
-        // apply camera animation settings
-        camera.camera.aspectRatio = graphicsDevice.width / graphicsDevice.height;
 
         // configure the camera
         this.configureCamera(settings);
@@ -262,7 +301,6 @@ class Viewer {
             app.renderNextFrame = true;
         };
         graphicsDevice.on('resizecanvas', handleResize);
-
         // construct debug ministats
         if (config.ministats) {
             const options = MiniStats.getDefaultOptions() as any;
@@ -360,6 +398,8 @@ class Viewer {
             
             cameraEntity.camera.fov = camera.fov;
 
+            cameraEntity.camera.horizontalFov = graphicsDevice.width > graphicsDevice.height;
+
             // fit clipping planes to bounding box
             const boundRadius = sceneBound.halfExtents.length();
             let clipPadding = 0;
@@ -431,11 +471,15 @@ class Viewer {
                 // apply to the camera entity
                 applyCamera(this.cameraManager.camera);
             }
-            
             // update reveal effect timing
             if (this.revealController) {
                 this.revealController.updateTiming(deltaTime);
             }
+        });
+
+        // Render voxel debug overlay
+        app.on('prerender', () => {
+            this.voxelOverlay?.update();
         });
 
         // unpause the animation on first frame（仅「会结束的 reveal」暂停路径动画，等 revealComplete）
@@ -446,6 +490,21 @@ class Viewer {
             } else {
                 state.animationPaused = !!config.noanim;
             }
+
+            window.scrubTo = (time: number) => {
+                if (!state.hasAnimation) {
+                    return Promise.reject(new Error('No animation track'));
+                }
+
+                state.animationPaused = true;
+                return new Promise<void>((resolve) => {
+                    events.fire('scrubAnim', time);
+                    app.renderNextFrame = true;
+                    app.once('frameend', () => resolve());
+                });
+            };
+
+            window.animationDuration = state.animationDuration;
         });
 
         // 接影几何：从 URL 参数 ?splatMesh= 读取 GLB 路径
@@ -465,12 +524,13 @@ class Viewer {
 
         // wait for the model to load
         console.log('[Shadow] Waiting for Promise.all to resolve...');
-        Promise.all([gsplatLoad, skyboxLoad ?? Promise.resolve(), splatMeshLoad]).then((results) => {
+        Promise.all([gsplatLoad, skyboxLoad ?? Promise.resolve(), splatMeshLoad, collisionLoad ?? Promise.resolve(undefined)]).then((results) => {
             console.log('[Shadow] Promise.all resolved, results count:', results.length);
             try {
             const gsplatEntity = results[0] as Entity;
             const gsplat = gsplatEntity.gsplat as GSplatComponent;
             const meshEntity = results[2] as Entity | null | undefined;
+            const collision = (results[3] as Collision | undefined) ?? null;
             // console.log('[Shadow] gsplatEntity:', gsplatEntity?.name, 'gsplat:', !!gsplat, 'meshEntity:', meshEntity?.name ?? 'null');
 
             // get scene bounding box
@@ -530,12 +590,30 @@ class Viewer {
             };
 
             this.inputController = new InputController(global);
-            
+            this.inputController.collision = collision ?? null;
+            state.hasCollision = !!collision;
+
+            const rendererMode = (config as any).renderer as string | undefined;
+            if (collision instanceof VoxelCollision && rendererMode !== 'webgl') {
+                this.voxelOverlay = new VoxelDebugOverlay(app, collision, camera);
+                this.voxelOverlay.mode = (config as any).heatmap ? 'heatmap' : 'overlay';
+                state.hasVoxelOverlay = true;
+                events.on('voxelOverlayEnabled:changed', (value: boolean) => {
+                    if (this.voxelOverlay) {
+                        this.voxelOverlay.enabled = value;
+                        app.renderNextFrame = true;
+                    }
+                });
+            }
+
             // Set move speed based on scene size (reuse sceneSize from above)
             this.inputController.setMoveSpeedFromSceneSize(sceneSize);
 
             // 先创建 cameraManager，因为 revealController 需要它来获取 targetConstraint
-            this.cameraManager = new CameraManager(global, sceneBound);
+            this.cameraManager = new (CameraManager as any)(global, sceneBound, collision);
+            if (collision) {
+                this.walkCursor = new WalkCursor(app, camera, collision, events, state);
+            }
 
             // NightMode 必须在 RevealController 之前创建：Reveal 构造函数里会立即 createEffect 并 fire('nightMode:exit')。
             // 若 NightMode 尚未注册监听，首次开场的 exit 会丢失，NightMode 仍占用 gsplatModifyVS，与 sketch 等 VFX 互斥失败；
@@ -799,8 +877,15 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         high: 4
                     }
                 };
-
                 const quality = platform.mobile ? ranges.mobile : ranges.desktop;
+                const configAny = config as any;
+                const getBudget = () => {
+                    const budgetOverride = Number(configAny.budget);
+                    if (Number.isFinite(budgetOverride) && budgetOverride > 0) {
+                        return budgetOverride;
+                    }
+                    return state.performanceMode ? quality.low : quality.high;
+                };
 
                 // If using custom LOD (lodLoader), apply component-level parameters from preset stored in scene
                 if (isCustomLod) {
@@ -816,8 +901,19 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         gsplat.lodRangeMax = 5;
                     }
                 } else {
-                    // Default LOD: start in low quality so we can get user interacting asap
-                    results[0].gsplat.splatBudget = quality.low * 1000000;
+                    if (configAny.fullload === true) {
+                        // 吸收 origin：全量模式下首帧前直接拉满预算与 LOD 范围（用于截图等场景）。
+                        results[0].gsplat.splatBudget = getBudget() * 1000000;
+                        gsplat.lodRangeMin = 0;
+                        gsplat.lodRangeMax = 1000;
+                    } else {
+                        // 保留本地：默认低预算快速首帧，同时吸收 origin 的低 LOD 优先策略。
+                        results[0].gsplat.splatBudget = quality.low * 1000000;
+                        const lodLevels = (results[0].gsplat.resource as any)?.octree?.lodLevels;
+                        if (lodLevels) {
+                            gsplat.lodRangeMax = gsplat.lodRangeMin = lodLevels - 1;
+                        }
+                    }
                 }
 
                 // these two allow LOD behind camera to drop, saves lots of splats
@@ -829,8 +925,26 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
                 const eventHandler = app.systems.gsplat;
 
-                // we must force continuous rendering with streaming & lod system
+                // idle timer: force continuous rendering until 4s of inactivity
+                let idleTime = 0;
                 this.forceRenderNextFrame = true;
+
+                app.on('update', (dt: number) => {
+                    idleTime += dt;
+                    this.forceRenderNextFrame = idleTime < 4;
+                });
+
+                events.on('inputEvent', (type: string) => {
+                    if (type !== 'interact') {
+                        idleTime = 0;
+                    }
+                });
+
+                eventHandler.on('frame:ready', (_camera: CameraComponent, _layer: Layer, ready: boolean, loading: number) => {
+                    if (loading > 0 || !ready) {
+                        idleTime = 0;
+                    }
+                });
 
                 let current = 0;
                 let watermark = 1;
@@ -881,11 +995,12 @@ z: ${cameraInfo.target.z.toFixed(6)}
                                         }
                                     }
                                 } else {
-                                    const settings = state.hqMode ? quality.high : quality.low;
-                                    results[0].gsplat.splatBudget = settings * 1000000;
+                                    results[0].gsplat.splatBudget = getBudget() * 1000000;
+                                    gsplat.lodRangeMin = 0;
+                                    gsplat.lodRangeMax = 1000;
                                 }
                             };
-                            events.on('hqMode:changed', updateLod);
+                            events.on('performanceMode:changed', updateLod);
                             updateLod();
 
                             // debug colorize lods
@@ -938,6 +1053,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         }
                     }
                 };
+
                 eventHandler.on('frame:ready', readyHandler);
             }
             } catch (e) {
@@ -970,10 +1086,12 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 needsBloomPipeline(postEffectSettings)
             );
 
-        const enableCameraFrame = !app.xr.active &&
-            !config.nofx &&
+        const rendererMode = (config as any).renderer as string | undefined;
+        const computeRequiresCameraFrame = rendererMode === 'compute';
+        const postFxRequested = !config.nofx &&
             !!postEffectSettings &&
             (anyPostEffectEnabled(postEffectSettings) || highPrecisionRendering || bloomPipelineWanted);
+        const enableCameraFrame = !app.xr.active && (computeRequiresCameraFrame || postFxRequested);
 
         if (enableCameraFrame) {
             if (!this.cameraFrame) {
@@ -986,15 +1104,46 @@ z: ${cameraInfo.target.z.toFixed(6)}
             cameraFrame.rendering.renderFormats = (highPrecisionRendering || bloomPipelineWanted)
                 ? [PIXELFORMAT_RGBA16F, PIXELFORMAT_RGBA32F]
                 : [];
+            cameraFrame.rendering.sceneDepthMap = computeRequiresCameraFrame;
             cameraFrame.enabled = true;
-            applyPostEffectSettings(cameraFrame, postEffectSettings);
-            this.bloomController?.applyToCameraFrame(cameraFrame, postEffectSettings);
-
+            const effectivePostFxSettings = postFxRequested ? postEffectSettings : noPostEffects;
+            applyPostEffectSettings(cameraFrame, effectivePostFxSettings);
+            this.bloomController?.applyToCameraFrame(cameraFrame, effectivePostFxSettings);
             cameraFrame.update();
 
             // force gsplat shader to write gamma-space colors
             ShaderChunks.get(app.graphicsDevice, 'glsl').set('gsplatOutputVS', gammaChunkGlsl);
             ShaderChunks.get(app.graphicsDevice, 'wgsl').set('gsplatOutputVS', gammaChunkWgsl);
+
+            // force skybox shader to write gamma-space colors (inline pow replaces the
+            // gammaCorrectOutput call which is a no-op under CameraFrame's GAMMA_NONE)
+            ShaderChunks.get(app.graphicsDevice, 'glsl').set('skyboxPS',
+                patchChunk(
+                    this.origChunks.glsl.skyboxPS,
+                    'gammaCorrectOutput(toneMap(processEnvironment(linear)))',
+                    'pow(toneMap(processEnvironment(linear)) + 0.0000001, vec3(1.0 / 2.2))',
+                    'glsl skyboxPS gamma override'
+                )
+            );
+            ShaderChunks.get(app.graphicsDevice, 'wgsl').set('skyboxPS',
+                patchChunk(
+                    this.origChunks.wgsl.skyboxPS,
+                    'gammaCorrectOutput(toneMap(processEnvironment(linear)))',
+                    'pow(toneMap(processEnvironment(linear)) + 0.0000001, vec3f(1.0 / 2.2))',
+                    'wgsl skyboxPS gamma override'
+                )
+            );
+
+            // force tile composite shader to write gamma-space colors (inline pow replaces the
+            // gammaCorrectOutput call which is a no-op under CameraFrame's GAMMA_NONE)
+            ShaderChunks.get(app.graphicsDevice, 'wgsl').set('gsplatTileCompositePS',
+                patchChunk(
+                    this.origChunks.wgsl.gsplatTileCompositePS,
+                    'gammaCorrectOutput(toneMap(linear.rgb))',
+                    'pow(toneMap(linear.rgb) + 0.0000001, vec3f(1.0 / 2.2))',
+                    'wgsl gsplatTileCompositePS gamma override'
+                )
+            );
 
             // ensure the final compose blit doesn't perform linear->gamma conversion.
             RenderTarget.prototype.isColorBufferSrgb = function (index) {
@@ -1012,9 +1161,12 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 this.nightModeScript.setBloomBrushParams(false, null, 0.2, undefined);
             }
 
-            // restore gsplat output shader chunks to engine defaults
+            // restore shader chunks to engine defaults
             ShaderChunks.get(app.graphicsDevice, 'glsl').set('gsplatOutputVS', this.origChunks.glsl.gsplatOutputVS);
             ShaderChunks.get(app.graphicsDevice, 'wgsl').set('gsplatOutputVS', this.origChunks.wgsl.gsplatOutputVS);
+            ShaderChunks.get(app.graphicsDevice, 'glsl').set('skyboxPS', this.origChunks.glsl.skyboxPS);
+            ShaderChunks.get(app.graphicsDevice, 'wgsl').set('skyboxPS', this.origChunks.wgsl.skyboxPS);
+            ShaderChunks.get(app.graphicsDevice, 'wgsl').set('gsplatTileCompositePS', this.origChunks.wgsl.gsplatTileCompositePS);
 
             // restore original isColorBufferSrgb behavior
             RenderTarget.prototype.isColorBufferSrgb = origIsColorBufferSrgb;

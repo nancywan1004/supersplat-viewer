@@ -6,6 +6,7 @@ import {
     math
 } from 'playcanvas';
 
+import type { Collision, PushOut } from '../collision';
 import type { CameraFrame, Camera, CameraController } from './camera';
 import type { SphereConstraint } from '../camera-constraints/sphere-constraint';
 import type { BoxConstraint } from '../camera-constraints/box-constraint';
@@ -24,11 +25,16 @@ const tmpNormal = new Vec3();
 const tmpTarget = new Vec3();
 const tmpTargetClamp = new Vec3();
 const tmpRemain = new Vec3();
+/** 相机碰撞球半径（米） */
+const CAMERA_RADIUS = 0.2;
 
 // Damping helper function
 const damp = (damping: number, dt: number) => {
     return 1 - Math.pow(damping, dt * 60);
 };
+
+/** Pre-allocated push-out vector for sphere collision */
+const pushOut: PushOut = { x: 0, y: 0, z: 0 };
 
 class FlyController implements CameraController {
     private _targetPose: Pose;
@@ -49,6 +55,11 @@ class FlyController implements CameraController {
     setFocusDistanceRange(range: Vec2): void {
         this.focusDistanceRange.copy(range);
     }
+
+    fov = 90;
+
+    /** Optional collision for sphere collision with sliding */
+    collision: Collision | null = null;
 
     constructor() {
         this._targetPose = new Pose();
@@ -208,6 +219,21 @@ class FlyController implements CameraController {
         } else {
             this._targetPose.position.copy(tmpPos);
         }
+
+        // 先修正 targetPose：让后续阻尼插值朝“可达安全点”收敛，避免下一帧继续往墙内插值。
+        if (this.collision) {
+            if (this.collision.querySphere(
+                this._targetPose.position.x,
+                this._targetPose.position.y,
+                this._targetPose.position.z,
+                CAMERA_RADIUS,
+                pushOut
+            )) {
+                this._targetPose.position.x += pushOut.x;
+                this._targetPose.position.y += pushOut.y;
+                this._targetPose.position.z += pushOut.z;
+            }
+        }
         
         // Apply damping using Pose.lerp
         this._pose.lerp(
@@ -237,6 +263,23 @@ class FlyController implements CameraController {
             // 没有 box 约束时，用球形硬边界兜底（防止飞到特别远）
             this.constraint.clampToHard(camera.position, camera.position);
             this._pose.position.copy(camera.position);
+        }
+
+        // 再修正当前 pose：处理本帧最终落点碰撞，并同步回写状态避免下一帧“弹回”。
+        if (this.collision) {
+            if (this.collision.querySphere(
+                camera.position.x,
+                camera.position.y,
+                camera.position.z,
+                CAMERA_RADIUS,
+                pushOut
+            )) {
+                camera.position.x += pushOut.x;
+                camera.position.y += pushOut.y;
+                camera.position.z += pushOut.z;
+                this._pose.position.copy(camera.position);
+                this._targetPose.position.copy(camera.position);
+            }
         }
         
         camera.angles.copy(this._pose.angles);
