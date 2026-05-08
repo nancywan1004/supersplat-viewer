@@ -33,6 +33,19 @@ const EXPORT_FRAME_WAIT_MS = 0;
 /** 控制台过滤用：所有 VFX 导出/性能相关 log 均带此 tag，可在 DevTools 中按此关键字过滤 */
 const VFX_EXPORT_LOG_TAG = '[VFX Export]';
 
+function isExportNightDebugEnabled(): boolean {
+    let enabled = (globalThis as any).__DEBUG_EXPORT_NIGHT_MODE__ === true;
+    if (!enabled && typeof window !== 'undefined') {
+        try {
+            enabled = new URLSearchParams(window.location.search).get('debugExportNight') === '1' ||
+                window.localStorage.getItem('__DEBUG_EXPORT_NIGHT_MODE__') === '1';
+        } catch {
+            // ignore
+        }
+    }
+    return enabled;
+}
+
 type ProfileEntry = { name: string; ms: number };
 type FrameProfile = {
     seekAnim: number;
@@ -1567,7 +1580,27 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
             includeVfx && !(videoSettings.useFastExport && videoSettings.fixVfxAtEnd);
         const hadRevealEffect = global.state.hasRevealEffect;
         // 新建门控实例；Reveal 时间源由 initVideoExport 注入的 getRevealExportTimingSource 提供
-        const revealGate = createVfxExportPostRevealSync(getRevealExportTimingSource());
+        const revealSource = getRevealExportTimingSource();
+        const revealGate = createVfxExportPostRevealSync(revealSource);
+        if (isExportNightDebugEnabled()) {
+            let threshold: number | null = null;
+            try {
+                threshold = revealSource ? Number(revealSource.getPostRevealContentThresholdSec()) : null;
+            } catch {
+                threshold = null;
+            }
+            console.log('[ExportNightDebug][VideoExport] export start', {
+                includeVfx,
+                includeVfxTimeline,
+                format: videoSettings.format,
+                useFastExport: !!videoSettings.useFastExport,
+                totalDuration: videoSettings.totalDuration,
+                stateHasRevealEffect: global.state.hasRevealEffect,
+                stateVfxType: (global.state as any).vfxType,
+                revealIsTimed: revealSource ? revealSource.isTimedEffect() : null,
+                revealThresholdSec: threshold
+            });
+        }
 
         // 先锁 viewer，避免 revealRestart 与首帧编码之间仍按正常帧渲染出一帧「带标注/资产」的画面
         stateAny.isExportingVfxVideo = true;
@@ -1594,6 +1627,13 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
         } finally {
             // 恢复编辑层显示；若导出过短未触发帧内 revealComplete，此处补发，避免 Bloom 等仍认为在 reveal 中
             revealGate.finalizeAfterExport(global, { includeVfx, hadRevealEffect });
+            if (isExportNightDebugEnabled()) {
+                console.log('[ExportNightDebug][VideoExport] export finalize', {
+                    includeVfx,
+                    hadRevealEffect,
+                    isExportingBeforeUnlock: !!stateAny.isExportingVfxVideo
+                });
+            }
             cleanup();
 
             // 恢复锁
