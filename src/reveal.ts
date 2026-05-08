@@ -52,7 +52,7 @@ export class RevealController {
     private effectStartTime: number | null = null;
     private effectEndTime: number | null = null;
     private isTiming: boolean = false;
-    private timedEffects = ['rain-v2', 'pieces-recover', 'integrate', 'growth-wave', 'sketch'];
+    private timedEffects = ['radial', 'rain-v2', 'pieces-recover', 'integrate', 'growth-wave', 'sketch'];
     private readonly endRadiusBboxPaddingScale = 0.65;
     /** 半径放大后对传播速度的补偿系数（0~1，越大越接近“完全按半径等比提速”） */
     private readonly radiusSpeedCompensation = 0.7;

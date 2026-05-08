@@ -1599,11 +1599,15 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
             // 恢复锁
             stateAny.isExportingVfxVideo = prevExporting;
 
-            // 延后到下一帧再恢复；用 restoreAfterExport 区分 Timed/非 Timed，避免非 Timed 黑屏；恢复动画播放状态
+            // 延后到下一帧再恢复：
+            // - includeVfx=true：导出前会 revealRestart，从 0 录制到结束；导出后不应再回跳旧时间并自动续播（会出现“再播一遍”）。
+            // - includeVfx=false：维持既有恢复策略，回到导出前时间/播放状态。
             requestAnimationFrame(() => {
-                seekAnimToTimeAndApply(global, prevEffectTime);
-                global.events.fire('effectTimeline:restoreAfterExport', prevEffectTime);
-                global.events.fire('effectPlayPause:set', prevEffectPaused);
+                if (!includeVfx) {
+                    seekAnimToTimeAndApply(global, prevEffectTime);
+                    global.events.fire('effectTimeline:restoreAfterExport', prevEffectTime);
+                    global.events.fire('effectPlayPause:set', prevEffectPaused);
+                }
                 stateAny.animationPaused = prevAnimationPaused;
             });
             // 清理导出句柄
