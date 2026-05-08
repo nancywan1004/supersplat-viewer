@@ -169,7 +169,10 @@ type SceneAsset = {
     },
     transform: {
         position: [number, number, number],
+        /** 兼容字段：旧数据使用欧拉角 */
         rotation: [number, number, number],
+        /** 推荐字段：四元数旋转 [x, y, z, w]，用于规避欧拉角多解 */
+        rotationQuat?: [number, number, number, number],
         scale: [number, number, number],
         /** 每轴镜像符号：-1=镜像翻转，1=正常；用于显式持久化 scale 镜像状态 */
         mirror?: [1 | -1, 1 | -1, 1 | -1]

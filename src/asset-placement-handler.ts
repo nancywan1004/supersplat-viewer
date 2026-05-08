@@ -540,6 +540,7 @@ export async function restoreSceneAssetsFromSettings(global: Global): Promise<vo
         const src = sa.source ?? {};
         const posArr = (sa.transform?.position ?? [0, 0, 0]) as number[];
         const rotArr = (sa.transform?.rotation ?? [0, 0, 0]) as number[];
+        const rotQuatArr = sa.transform?.rotationQuat as number[] | undefined;
         const scaleArr = (sa.transform?.scale ?? [1, 1, 1]) as number[];
         const mirrorArr = sa.transform?.mirror as number[] | undefined;
 
@@ -619,7 +620,24 @@ export async function restoreSceneAssetsFromSettings(global: Global): Promise<vo
         }
 
         // 应用保存时记录的旋转、缩放与可见性
-        entry.entity.setEulerAngles(rotArr[0] ?? 0, rotArr[1] ?? 0, rotArr[2] ?? 0);
+        const hasValidQuat =
+            Array.isArray(rotQuatArr)
+            && rotQuatArr.length >= 4
+            && Number.isFinite(rotQuatArr[0])
+            && Number.isFinite(rotQuatArr[1])
+            && Number.isFinite(rotQuatArr[2])
+            && Number.isFinite(rotQuatArr[3]);
+        if (hasValidQuat) {
+            entry.entity.setLocalRotation(
+                rotQuatArr[0],
+                rotQuatArr[1],
+                rotQuatArr[2],
+                rotQuatArr[3]
+            );
+        } else {
+            // 兼容旧数据：无 rotationQuat 时回退欧拉角
+            entry.entity.setEulerAngles(rotArr[0] ?? 0, rotArr[1] ?? 0, rotArr[2] ?? 0);
+        }
         const resolveMirroredScale = (value: number, mirror: number | undefined): number => {
             const numeric = Number.isFinite(value) ? value : 1;
             if (mirror === -1 || mirror === 1) {
