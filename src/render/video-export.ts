@@ -7,6 +7,7 @@ import {
     type RevealExportTimingSource,
     type VfxExportPostRevealSync
 } from './deferred-editing-visual-sync';
+import { resolveExportTimelinePlan, type AnimLoopMode } from './export-timeline-resolver';
 
 /** `initVideoExport` 依赖注入：由组合根（如 index）在 Viewer 就绪后提供 */
 export type VideoExportInitOptions = {
@@ -908,6 +909,19 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
         viewer.applyCameraFromManager();
     };
 
+    const resolveTimelinePlan = (settings: VideoSettings, includeVfx: boolean) => {
+        const animDuration = (global.state as any).animationDuration as number | undefined;
+        const animLoopMode = ((global.settings as any)?.animTracks?.[0]?.loopMode as AnimLoopMode | undefined) ?? 'repeat';
+        return resolveExportTimelinePlan({
+            includeVfx,
+            syncAnimTrack: settings.syncAnimTrack !== false,
+            vfxDurationSec: global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION,
+            requestedTotalDurationSec: settings.totalDuration,
+            animDurationSec: animDuration,
+            animLoopMode
+        });
+    };
+
     /**
      * 渲染所有帧：与单帧截获完全相同的流程，循环执行。
      * 每帧（若 syncAnimTrack）：先 seek anim 并应用相机 → prepareAndRenderOneFrame → requestAnimationFrame → captureFrame
@@ -927,10 +941,11 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
         const { frameRate, width, height, syncAnimTrack } = settings;
         const evenWidth = width % 2 === 0 ? width : width - 1;
         const evenHeight = height % 2 === 0 ? height : height - 1;
-        const totalDuration = settings.totalDuration ?? global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
         const includeVfx = settings.includeVfx !== false;
+        const timelinePlan = resolveTimelinePlan(settings, includeVfx);
+        const totalDuration = timelinePlan.totalDurationSec;
         // 不包含 VFX 时固定为「VFX 自身总时长」的最后一帧，这样整段视频都能看到完整效果状态（Timed/非 Timed 一致）
-        const vfxTotalDuration = global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+        const vfxTotalDuration = timelinePlan.vfxDurationSec;
         const totalFrames = Math.ceil(totalDuration * frameRate);
         const frameInterval = 1.0 / frameRate;
 
@@ -956,7 +971,7 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
             // 不包含 VFX 时也必须每帧驱动 anim，否则导出的视频里相机不动；包含 VFX 时按 syncAnimTrack 决定是否同步
             if (syncAnimTrack || !includeVfx) {
                 const t0 = VFX_EXPORT_PROFILE ? performance.now() : 0;
-                seekAnimToTimeAndApply(global, frameTime);
+                seekAnimToTimeAndApply(global, timelinePlan.animSeekTimeSecAt(frameTime));
                 if (VFX_EXPORT_PROFILE) frameProfile.seekAnim = performance.now() - t0;
             }
 
@@ -1090,10 +1105,11 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
         const { frameRate, width, height, bitrate, syncAnimTrack } = videoSettings;
         const evenWidth = width % 2 === 0 ? width : width - 1;
         const evenHeight = height % 2 === 0 ? height : height - 1;
-        const totalDuration = videoSettings.totalDuration ?? global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
         const includeVfx = videoSettings.includeVfx !== false && !videoSettings.fixVfxAtEnd;
+        const timelinePlan = resolveTimelinePlan(videoSettings, includeVfx);
+        const totalDuration = timelinePlan.totalDurationSec;
         // 不包含 VFX 时固定为「VFX 自身总时长」的最后一帧，整段视频显示完整效果状态
-        const vfxTotalDuration = global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+        const vfxTotalDuration = timelinePlan.vfxDurationSec;
         const totalFrames = Math.ceil(totalDuration * frameRate);
         const frameInterval = 1.0 / frameRate;
         const frameTimeMs = 1000 / frameRate;
@@ -1224,7 +1240,7 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
                     const effectTime = includeVfx ? frameTime : vfxTotalDuration;
                     // 与离线路径一致：先门控编辑层再 seek 相机与写 VFX 时间
                     revealGate?.syncExportFrame(global, frameTime, { includeVfx });
-                    if (syncAnimTrack || !includeVfx) seekAnimToTimeAndApply(global, frameTime);
+                    if (syncAnimTrack || !includeVfx) seekAnimToTimeAndApply(global, timelinePlan.animSeekTimeSecAt(frameTime));
                     await prepareAndRenderOneFrameToCanvas(global, effectTime, !includeVfx);
                     const bitmap = await createImageBitmap(canvas);
                     const timestampUs = Math.round(frameTime * 1_000_000);
@@ -1371,7 +1387,7 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
                 // 与 renderAllFrames 顺序一致：门控 → 相机 → VFX 时间 → 画到主 canvas
                 revealGate?.syncExportFrame(global, frameTime, { includeVfx });
                 // 不包含 VFX 时也必须每帧驱动 anim，否则导出的视频里相机不动
-                if (syncAnimTrack || !includeVfx) seekAnimToTimeAndApply(global, frameTime);
+                if (syncAnimTrack || !includeVfx) seekAnimToTimeAndApply(global, timelinePlan.animSeekTimeSecAt(frameTime));
                 await prepareAndRenderOneFrameToCanvas(global, effectTime, !includeVfx);
                 updateProgress(frameTime, totalDuration);
                 const elapsed = performance.now() - frameStart;
@@ -1446,7 +1462,9 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
     ): Promise<boolean> => {
         const { startFrame, endFrame, frameRate, width, height, bitrate } = videoSettings;
         const profiler = new ExportProfiler();
-        const totalDuration = videoSettings.totalDuration ?? global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+        const includeVfx = videoSettings.includeVfx !== false;
+        const timelinePlan = resolveTimelinePlan(videoSettings, includeVfx);
+        const totalDuration = timelinePlan.totalDurationSec;
         const totalFrames = Math.ceil(totalDuration * frameRate);
         let didAbort = false;
 

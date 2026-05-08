@@ -26,6 +26,7 @@ import {
 } from './edit-history';
 import type { ExperienceSettings } from './schemas/v2';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
+import { resolveExportTimelinePlan } from './render/export-timeline-resolver';
 import type { CommandRegistry } from './editor-modules/command-registry';
 import { uploadProjectData } from './universe/service';
 
@@ -545,12 +546,18 @@ const initPostMessageBridge = (global: Global) => {
             const resolution = { width: 1920, height: 1080 };
             const width = resolution.width % 2 === 0 ? resolution.width : resolution.width - 1;
             const height = resolution.height % 2 === 0 ? resolution.height : resolution.height - 1;
-            // 默认导出时长：VFX 总时长为下限；animTrack 更长则用 animTrack，更短则仍导出满 VFX totalDuration
+            // 导出时长统一交给 timeline resolver 决策，避免 message-bridge 与导出执行层各自维护策略。
             const vfxDuration = global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
             const animDuration = (global.state as any).animationDuration as number | undefined;
-            const hasAnim =
-                typeof animDuration === 'number' && Number.isFinite(animDuration) && animDuration > 0;
-            const totalDuration = hasAnim ? Math.max(animDuration, vfxDuration) : vfxDuration;
+            const animLoopMode = ((global.settings as any)?.animTracks?.[0]?.loopMode as 'none' | 'repeat' | 'pingpong' | undefined) ?? 'repeat';
+            const totalDuration = resolveExportTimelinePlan({
+                includeVfx,
+                syncAnimTrack: true,
+                vfxDurationSec: vfxDuration,
+                requestedTotalDurationSec: vfxDuration,
+                animDurationSec: animDuration,
+                animLoopMode
+            }).totalDurationSec;
             const videoSettings = {
                 startFrame: 0,
                 endFrame: 0,
