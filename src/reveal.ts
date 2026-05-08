@@ -1387,13 +1387,18 @@ export class RevealController {
         if (!this.currentScript || typeof this.currentScript.setEffectTime !== 'function') {
             return;
         }
-        const totalDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+        const baseDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+        const completionT = Number(this.getPostRevealContentThresholdSec());
+        const completionCeiling =
+            this.timedEffects.includes(this.config.type) && Number.isFinite(completionT) && completionT >= 0
+                ? completionT
+                : baseDuration;
+        const exportCeiling = Math.max(baseDuration, completionCeiling);
         // 导出时 perlin-wave 需要覆盖整段视频时长，不受 revealEffect.totalDuration 限制
         const exportTime = this.config.type === 'perlin-wave'
             ? Math.max(0, time)
-            : Math.max(0, Math.min(time, totalDuration));
+            : Math.max(0, Math.min(time, exportCeiling));
 
-        const completionT = Number(this.getPostRevealContentThresholdSec());
         const completionReached = Number.isFinite(completionT) && completionT >= 0 && exportTime + 1e-4 >= completionT;
         if (!(this as any).__exportCompletionLogged && completionReached) {
             (this as any).__exportCompletionLogged = true;
