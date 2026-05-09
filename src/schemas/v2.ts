@@ -14,7 +14,9 @@ type AnimTrack = {
             target: number[],
             fov: number[],
         }
-    }
+    },
+    fl_loop?: boolean,
+    fl_loopTimeSeconds?: number,
 };
 
 type CameraPose = {

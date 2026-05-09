@@ -236,9 +236,10 @@ class AnimState {
         }
 
         const spline = CubicSpline.fromPoints(times, points, smoothness);
-        const loopSecondsRaw = (track as any).fl_loopTimeSeconds;
+        const loopSecondsRaw = track.fl_loopTimeSeconds;
         const loopFrames = Number.isFinite(loopSecondsRaw) ? Math.max(0, loopSecondsRaw * frameRate) : 0;
-        const loopingFlag = (track as any).fl_loop;
+        const loopingFlag = track.fl_loop;
+        // repeat + 默认开启接缝混合；仅当 fl_loop === false 时关闭（仍 repeat 时间，但不插值末→首）
         const looping = loopMode === 'repeat' && (typeof loopingFlag === 'boolean' ? loopingFlag : true);
 
         return new AnimState(
