@@ -27,6 +27,7 @@ import {
 import type { ExperienceSettings } from './schemas/v2';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import { resolveExportTimelinePlan } from './render/export-timeline-resolver';
+import { getAssetLoader } from './loaders/asset-loader';
 import type { CommandRegistry } from './editor-modules/command-registry';
 import { uploadProjectData } from './universe/service';
 
@@ -543,6 +544,9 @@ const initPostMessageBridge = (global: Global) => {
                 includeVfx: (p as any).includeVfx !== false
             });
             const includeVfx = (p as any).includeVfx !== false;
+            const waitResult = await getAssetLoader(global).waitAllReady();
+            // 与视频导出执行层保持一致：使用导出入口等待得到的真实就绪时刻（秒）。
+            const allAssetsReadyAt = Math.max(0, waitResult.waitMs / 1000);
             const resolution = { width: 1920, height: 1080 };
             const width = resolution.width % 2 === 0 ? resolution.width : resolution.width - 1;
             const height = resolution.height % 2 === 0 ? resolution.height : resolution.height - 1;
@@ -553,11 +557,12 @@ const initPostMessageBridge = (global: Global) => {
             const totalDuration = resolveExportTimelinePlan({
                 includeVfx,
                 syncAnimTrack: true,
-                vfxDurationSec: vfxDuration,
-                requestedTotalDurationSec: vfxDuration,
-                animDurationSec: animDuration,
-                animLoopMode
-            }).totalDurationSec;
+                vfxDuration,
+                requestedTotalDuration: vfxDuration,
+                animDuration,
+                animLoopMode,
+                allAssetsReadyAt
+            }).totalDuration;
             const videoSettings = {
                 startFrame: 0,
                 endFrame: 0,

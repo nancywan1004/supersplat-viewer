@@ -31,6 +31,7 @@ import { LodLoader } from './loaders/lod-loader';
 import { loadSplat } from './loaders/splat-loader';
 import type { AssetSource } from './loaders/asset-source';
 import { loadGsplatAsset } from './loaders/gsplat-asset-loader';
+import { getAssetLoader } from './loaders/asset-loader';
 import { version as appVersion } from '../package.json';
 import { initPostMessageBridge } from './message-bridge';
 import { initVideoExport } from './render/video-export';
@@ -367,13 +368,17 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     initUI(global);
 
     // Load model
-    const gsplatLoad = loadGsplat(
+    const gsplatLoad = getAssetLoader(global).trackPromise(
+        'mainScene',
+        'mainScene:gsplat',
+        loadGsplat(
         app,
         config,
         (progress: number) => {
             state.progress = progress;
         },
         lodLoader
+        )
     );
 
     const skyboxOptions: SkyboxOptions = {

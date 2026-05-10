@@ -1,6 +1,7 @@
 import type { AssetLibraryItem, Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 import { setPlacementCursorActive } from '../placement-cursor';
 import { loadGsplatAsset } from '../loaders/gsplat-asset-loader';
+import { getAssetLoader } from '../loaders/asset-loader';
 
 const ASSET_DOWNLOAD_TIMEOUT_MS = 15000;
 
@@ -34,18 +35,19 @@ class AssetFacade implements ModuleFacade {
         }
 
         const app = global.app;
+        const assetLoader = getAssetLoader(global);
 
         try {
             if (item.type === 'gaussian') {
-                const asset = await loadGsplatAsset(app, {
+                const asset = await assetLoader.trackPromise('placement', 'facade:gaussian', loadGsplatAsset(app, {
                     url,
                     filename: item.filename ?? url
-                } as any);
+                } as any));
                 return { ...item, asset, filename: item.filename ?? url, url };
             }
 
             if (item.type === 'mesh') {
-                const asset = await new Promise<any>((resolve, reject) => {
+                const meshLoadPromise = new Promise<any>((resolve, reject) => {
                     let settled = false;
                     const timer = window.setTimeout(() => {
                         if (settled) return;
@@ -76,6 +78,7 @@ class AssetFacade implements ModuleFacade {
 
                     (app.assets as any).loadFromUrl(url, 'container', onLoad);
                 });
+                const asset = await assetLoader.trackPromise('placement', 'facade:mesh', meshLoadPromise);
                 return { ...item, asset, filename: item.filename ?? url, url };
             }
         } catch (err) {

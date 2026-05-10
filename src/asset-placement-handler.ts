@@ -5,12 +5,17 @@ import type { Global } from './types';
 import type { AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from './types';
 import { getSelectedSceneEntity } from './state-selectors';
 import { Entity } from 'playcanvas';
-import { loadGsplatAsset } from './loaders/gsplat-asset-loader';
+import {
+    DEFAULT_ASSET_LOAD_TIMEOUT_MS,
+    hydrateAssetLibraryItem,
+    loadSceneAssetLibraryItem,
+    withTimeout
+} from './loaders/asset-loader';
 import { pickWorldFromClientXY } from './picker';
 import type { InputArbiter } from './input-arbiter';
 
 const PLACED_ASSETS_NAME = 'placedAssets';
-const ASSET_LOAD_TIMEOUT_MS = 15000;
+const ASSET_LOAD_TIMEOUT_MS = DEFAULT_ASSET_LOAD_TIMEOUT_MS;
 
 export type AssetPlacementHandlerDeps = {
     pushEditHistory?: (global: Global, label?: string) => void;
@@ -43,28 +48,6 @@ function getPlacedAssetsParent(app: AppBase): Entity {
 
 /** 相机前方距离，用于兜底放置位置 */
 const CAMERA_FRONT_DISTANCE = 5;
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-        let settled = false;
-        const timer = window.setTimeout(() => {
-            if (settled) return;
-            settled = true;
-            reject(new Error(`[AssetPlacement] ${label} timeout (${timeoutMs}ms)`));
-        }, timeoutMs);
-        promise.then((value) => {
-            if (settled) return;
-            settled = true;
-            window.clearTimeout(timer);
-            resolve(value);
-        }).catch((error) => {
-            if (settled) return;
-            settled = true;
-            window.clearTimeout(timer);
-            reject(error);
-        });
-    });
-}
 
 function getSceneAssetsRestoreController(global: Global): SceneAssetsRestoreController {
     const anyGlobal = global as Global & { __sceneAssetsRestoreController?: SceneAssetsRestoreController };
@@ -470,57 +453,17 @@ export async function placeAsset(global: Global, item: AssetLibraryItem, worldPo
  * 对于从 settings 恢复的链路，仍需处理 asset 缺失的情况。
  */
 async function hydrateProtocolPlaceItem(global: Global, item: AssetLibraryItem): Promise<AssetLibraryItem | null> {
-    // image 不需要预加载
-    if (item.type === 'image') return item;
-
-    // facade 层已预加载完成，直接使用
-    if (item.asset) return item;
-
-    // 兼容场景：asset 缺失（如旧数据恢复），尝试加载
     const url = item.url || item.filename;
-    if (!url) {
+    if (!url && item.type !== 'image') {
         console.warn('[AssetPlacement] protocol place missing url for', item.type);
         return null;
     }
-
-    const app = global.app;
     try {
-        if (item.type === 'gaussian') {
-            const asset = await loadGsplatAsset(app, {
-                url,
-                filename: item.filename ?? url
-            } as any);
-            return { ...item, asset, filename: item.filename ?? url, url };
-        }
-
-        if (item.type === 'mesh') {
-            const meshAssetLoad = new Promise<any>((resolve, reject) => {
-                let settled = false;
-                const timer = window.setTimeout(() => {
-                    if (settled) return;
-                    settled = true;
-                    reject(new Error(`[AssetPlacement] mesh load timeout (${ASSET_LOAD_TIMEOUT_MS}ms): ${url}`));
-                }, ASSET_LOAD_TIMEOUT_MS);
-                (app.assets as any).loadFromUrl(url, 'container', (err: Error | null, loadedAsset: any) => {
-                    if (settled) return;
-                    settled = true;
-                    window.clearTimeout(timer);
-                    if (err || !loadedAsset) {
-                        reject(err ?? new Error('container asset missing'));
-                        return;
-                    }
-                    resolve(loadedAsset);
-                });
-            });
-            const asset = await withTimeout(meshAssetLoad, ASSET_LOAD_TIMEOUT_MS + 1000, 'mesh fallback hydrate');
-            return { ...item, asset, filename: item.filename ?? url, url };
-        }
+        return await hydrateAssetLibraryItem(global, item, ASSET_LOAD_TIMEOUT_MS);
     } catch (err) {
-        console.warn('[AssetPlacement] protocol asset hydrate failed:', item.type, url, err);
+        console.warn('[AssetPlacement] protocol asset hydrate failed:', item.type, url ?? '-', err);
         return null;
     }
-
-    return item;
 }
 
 /**
@@ -536,8 +479,6 @@ export async function restoreSceneAssetsFromSettings(global: Global): Promise<vo
     if (!state.scenePlacedEntities) state.scenePlacedEntities = [];
 
     for (const sa of sceneAssets) {
-        const type = sa.type as AssetLibraryType;
-        const src = sa.source ?? {};
         const posArr = (sa.transform?.position ?? [0, 0, 0]) as number[];
         const rotArr = (sa.transform?.rotation ?? [0, 0, 0]) as number[];
         const rotQuatArr = sa.transform?.rotationQuat as number[] | undefined;
@@ -545,66 +486,13 @@ export async function restoreSceneAssetsFromSettings(global: Global): Promise<vo
         const mirrorArr = sa.transform?.mirror as number[] | undefined;
 
         let item: AssetLibraryItem | null = null;
-
-        if (type === 'gaussian') {
-            const url = (src.url ?? src.filename) as string | undefined;
-            if (!url) continue;
-            try {
-                const asset = await loadGsplatAsset(app, {
-                    url,
-                    filename: src.filename ?? url
-                } as any);
-                item = {
-                    id: src.assetId ?? nextSceneEntityId(),
-                    type: 'gaussian',
-                    name: sa.name ?? src.filename ?? 'gaussian',
-                    filename: src.filename ?? url,
-                    url,
-                    thumbnailUrl: sa.thumbnailUrl,
-                    asset
-                };
-            } catch (err) {
-                console.warn('[SceneAssets] restore gaussian failed:', err);
-                continue;
-            }
-        } else if (type === 'mesh') {
-            const url = (src.url ?? src.filename) as string | undefined;
-            if (!url) continue;
-            try {
-                const asset = await new Promise<any>((resolve, reject) => {
-                    (app.assets as any).loadFromUrl(url, 'container', (err: Error | null, asset: any) => {
-                        if (err || !asset) {
-                            reject(err ?? new Error('container asset missing'));
-                            return;
-                        }
-                        resolve(asset);
-                    });
-                });
-                item = {
-                    id: src.assetId ?? nextSceneEntityId(),
-                    type: 'mesh',
-                    name: sa.name ?? src.filename ?? 'mesh',
-                    filename: src.filename ?? url,
-                    url,
-                    thumbnailUrl: sa.thumbnailUrl,
-                    asset
-                };
-            } catch (err) {
-                console.warn('[SceneAssets] restore mesh failed:', err);
-                continue;
-            }
-        } else if (type === 'image') {
-            const url = (src.url ?? src.filename) as string | undefined;
-            if (!url) continue;
-            item = {
-                id: src.assetId ?? nextSceneEntityId(),
-                type: 'image',
-                name: sa.name ?? src.filename ?? 'image',
-                filename: src.filename ?? url,
-                url,
-                thumbnailUrl: sa.thumbnailUrl
-            };
-        } else {
+        try {
+            item = await loadSceneAssetLibraryItem(global, sa, nextSceneEntityId, ASSET_LOAD_TIMEOUT_MS);
+        } catch (err) {
+            console.warn('[SceneAssets] restore asset failed:', sa?.type, err);
+            continue;
+        }
+        if (!item) {
             continue;
         }
 
