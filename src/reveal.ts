@@ -90,8 +90,8 @@ export class RevealController {
     private inVfx: boolean = false;
     /** 导出时间轴内，该轮 reveal 是否已完成（用于阻止后续帧误重启脚本） */
     private exportRevealCompleted: boolean = false;
-    /** 导出态下，等待 reveal disable 收尾后再恢复 NightMode（避免同帧 shader chunk 互删） */
-    private pendingExportNightRestore = false;
+    /** 等待 reveal disable 收尾后再恢复 NightMode（避免同帧 shader chunk 互删） */
+    private pendingDeferredNightRestore = false;
 
     constructor(global: Global, bbox: BoundingBox, gsplatEntity: Entity, cameraManager?: CameraManager | null) {
         this.global = global;
@@ -951,15 +951,14 @@ export class RevealController {
                     inVfx: this.inVfx,
                     originalNightFade: this.originalNightFade
                 });
-                // 导出期间 viewer.update 被锁，updateTiming 不会跑到 effectScriptDisabled 分支；
-                // 但此刻 reveal 脚本还会在本帧继续执行 enabled=false -> removeShaders。
-                // 若这里立即 forceReapply，会被同帧 reveal 的 removeShaders 覆盖掉。
-                // 因此延后一帧到 frameend 后再恢复 NightMode。
-                if ((this.global.state as any).isExportingVfxVideo && !this.pendingExportNightRestore) {
-                    this.pendingExportNightRestore = true;
+                // revealComplete 当帧里，reveal 脚本仍可能继续执行 enabled=false -> removeShaders。
+                // 若立即 forceReapply，可能被同帧 removeShaders 覆盖，出现一帧黑闪（compute 路径更明显）。
+                // 统一延后一帧到 frameend 再恢复 NightMode，保证 removeShaders 先结束。
+                if (!this.pendingDeferredNightRestore && this.inVfx && this.originalNightFade !== null) {
+                    this.pendingDeferredNightRestore = true;
                     this.global.app.once('frameend', () => {
-                        this.pendingExportNightRestore = false;
-                        this.restoreNightModeIfNeeded('revealScriptComplete:export:deferred');
+                        this.pendingDeferredNightRestore = false;
+                        this.restoreNightModeIfNeeded('revealScriptComplete:deferred');
                     });
                 }
                 this.global.events.fire('revealComplete');
@@ -1118,7 +1117,13 @@ export class RevealController {
     updateTiming(dt: number) {
         // ── 通用检测：VFX 脚本自然播放完并 disable 了（removeShaders 已删掉材质上的 gsplatModifyVS），恢复 NightMode ──
         // 无论 timed 或 non-timed 特效，只要脚本 disabled 且仍在 inVfx 状态，就需要恢复
-        if (this.currentScript && !this.currentScript.enabled && this.inVfx && this.originalNightFade !== null) {
+        if (
+            this.currentScript &&
+            !this.currentScript.enabled &&
+            this.inVfx &&
+            this.originalNightFade !== null &&
+            !this.pendingDeferredNightRestore
+        ) {
             this.restoreNightModeIfNeeded('effectScriptDisabled');
         }
 
