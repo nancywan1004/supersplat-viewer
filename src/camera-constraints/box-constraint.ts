@@ -32,13 +32,15 @@ export class BoxConstraint {
      * 从原始 bbox 创建一个"收缩"的有效 bbox，支持分别设置左右和上下的缩放系数
      * scaleX: X 轴方向的缩放系数，可以是单个数值（左右相同）或数组 [left, right]
      * scaleY: Y 轴方向的缩放系数，可以是单个数值（上下相同）或数组 [top, bottom]
+     * scaleZ: Z 轴方向的缩放系数，可以是单个数值（两侧相同）或数组 [负 Z, 正 Z]（对应 min.z / max.z 方向）
      * scaleFactor: 默认缩放系数，当某个轴未指定时使用
      */
     static fromBoundingBoxWithAsymmetricScales(
         bbox: BoundingBox,
         scaleFactor: number = 0.7,
         scaleX?: number | [number, number],
-        scaleY?: number | [number, number]
+        scaleY?: number | [number, number],
+        scaleZ?: number | [number, number]
     ): BoxConstraint {
         const min = bbox.getMin();
         const max = bbox.getMax();
@@ -86,10 +88,22 @@ export class BoxConstraint {
             newMinY = center.y - halfExtents.y * bottomScale; // 下面
         }
 
-        // Z 轴使用默认缩放
-        const halfZ = halfExtents.z * scaleFactor;
-        const newMinZ = center.z - halfZ;
-        const newMaxZ = center.z + halfZ;
+        // 处理 Z 轴缩放（与 X 相同：数组为 [min.z 侧, max.z 侧]）
+        let newMinZ: number, newMaxZ: number;
+        if (scaleZ === undefined) {
+            const scale = scaleFactor;
+            const halfZ = halfExtents.z * scale;
+            newMinZ = center.z - halfZ;
+            newMaxZ = center.z + halfZ;
+        } else if (typeof scaleZ === 'number') {
+            const halfZ = halfExtents.z * scaleZ;
+            newMinZ = center.z - halfZ;
+            newMaxZ = center.z + halfZ;
+        } else {
+            const [negZScale, posZScale] = scaleZ;
+            newMinZ = center.z - halfExtents.z * negZScale;
+            newMaxZ = center.z + halfExtents.z * posZScale;
+        }
 
         // 构建新的 bounding box
         const newMin = new Vec3(newMinX, newMinY, newMinZ);
