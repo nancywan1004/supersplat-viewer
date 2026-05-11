@@ -30,9 +30,12 @@ import { Annotations } from './annotations';
 import { CameraManager } from './camera-manager';
 import { Camera } from './cameras/camera';
 import type { Collision } from './collision';
-import { VoxelCollision } from './collision';
+import { MeshCollision, VoxelCollision } from './collision';
 import { nearlyEquals } from './core/math';
 import { InputController } from './input-controller';
+import { MeshDebugOverlay } from './mesh-debug-overlay';
+import { NavCursor } from './nav-cursor';
+import { Picker } from './picker';
 import type { ExperienceSettings, PostEffectSettings } from './settings';
 import type { Global } from './types';
 import { nightDeferredByReveal, revealBlocksAnim } from './reveal-policy';
@@ -60,7 +63,6 @@ import { initCommandRegistry } from './editor-modules/command-registry';
 import { DEFAULT_DEFERRED_EDITING_LAYERS } from './render/deferred-editing-visual-sync';
 import { initInputArbiter } from './input-arbiter';
 import { VoxelDebugOverlay } from './voxel-debug-overlay';
-import { WalkCursor } from './walk-cursor';
 
 // String.replace wrapper that warns when the source substring is missing, so
 // shader chunk patches against the engine fail loudly instead of silently
@@ -190,6 +192,8 @@ class Viewer {
 
     cameraManager: CameraManager;
 
+    picker: Picker;
+
     annotations: Annotations | null = null;
 
     forceRenderNextFrame = false;
@@ -218,7 +222,9 @@ class Viewer {
 
     voxelOverlay: VoxelDebugOverlay | null = null;
 
-    walkCursor: WalkCursor | null = null;
+    meshOverlay: MeshDebugOverlay | null = null;
+
+    navCursor: NavCursor | null = null;
 
     origChunks: {
         glsl: {
@@ -589,7 +595,8 @@ class Viewer {
                 });
             };
 
-            this.inputController = new InputController(global);
+            this.picker = new Picker(app, camera);
+            this.inputController = new InputController(global, this.picker);
             this.inputController.collision = collision ?? null;
             state.hasCollision = !!collision;
 
@@ -597,10 +604,19 @@ class Viewer {
             if (collision instanceof VoxelCollision && rendererMode !== 'webgl') {
                 this.voxelOverlay = new VoxelDebugOverlay(app, collision, camera);
                 this.voxelOverlay.mode = (config as any).heatmap ? 'heatmap' : 'overlay';
-                state.hasVoxelOverlay = true;
-                events.on('voxelOverlayEnabled:changed', (value: boolean) => {
+                state.hasCollisionOverlay = true;
+                events.on('collisionOverlayEnabled:changed', (value: boolean) => {
                     if (this.voxelOverlay) {
                         this.voxelOverlay.enabled = value;
+                        app.renderNextFrame = true;
+                    }
+                });
+            } else if (collision instanceof MeshCollision) {
+                this.meshOverlay = new MeshDebugOverlay(app, collision, camera, !!this.cameraFrame);
+                state.hasCollisionOverlay = true;
+                events.on('collisionOverlayEnabled:changed', (value: boolean) => {
+                    if (this.meshOverlay) {
+                        this.meshOverlay.enabled = value;
                         app.renderNextFrame = true;
                     }
                 });
@@ -611,8 +627,8 @@ class Viewer {
 
             // 先创建 cameraManager，因为 revealController 需要它来获取 targetConstraint
             this.cameraManager = new (CameraManager as any)(global, sceneBound, collision);
-            if (collision) {
-                this.walkCursor = new WalkCursor(app, camera, collision, events, state);
+            if (!config.noui) {
+                this.navCursor = new NavCursor(app, camera, collision ?? null, events, state, this.picker, sceneBound.halfExtents.length());
             }
 
             // NightMode 必须在 RevealController 之前创建：Reveal 构造函数里会立即 createEffect 并 fire('nightMode:exit')。
@@ -1006,7 +1022,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                             // debug colorize lods
                             gsplat.colorizeLod = config.colorize;
 
-                            gsplat.gpuSorting = config.gpusort;
+                            (gsplat as any).gpuSorting = config.gpusort;
 
                             // 触发 firstFrame 事件
                             events.fire('firstFrame');
@@ -1176,6 +1192,9 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 camera.camera.clearColor = new Color(background.color);
             }
         }
+
+        // Mesh overlay 依赖当前 gamma 路径；CameraFrame 开关变化时需要同步。
+        this.meshOverlay?.setCameraFrameEnabled(!!this.cameraFrame);
     }
 
     // Camera path visualizer methods

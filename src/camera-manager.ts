@@ -18,7 +18,9 @@ import { createRotateTrack } from './animation/create-rotate-track';
 import { AnimController } from './cameras/anim-controller';
 import { Camera, type CameraFrame, type CameraController } from './cameras/camera';
 import { FlyController } from './cameras/fly-controller';
+import { FlySource } from './cameras/fly-source';
 import { OrbitController } from './cameras/orbit-controller';
+import type { TargetSource } from './cameras/target-navigation';
 import { WalkController } from './cameras/walk-controller';
 import { WalkSource } from './cameras/walk-source';
 import type { Collision } from './collision';
@@ -479,8 +481,13 @@ class CameraManager {
         controllers.walk.collision = collision;
 
         const walkSource = new WalkSource();
-        walkSource.onComplete = () => {
-            events.fire('walkComplete');
+        const flySource = new FlySource();
+        const sourcesByMode: Partial<Record<CameraMode, TargetSource>> = {
+            walk: walkSource,
+            fly: flySource
+        };
+        walkSource.onComplete = flySource.onComplete = () => {
+            events.fire('navigateComplete');
         };
 
         const getController = (cameraMode: CameraMode): CameraController => {
@@ -523,6 +530,7 @@ class CameraManager {
         // transition state
         const transitionSpeed = 1.0;
         let transitionTimer = 1;
+        let clearOrbitTargetOnTransitionEnd = false;
 
         // start a new camera transition from the current pose
         const startTransition = () => {
@@ -537,13 +545,12 @@ class CameraManager {
             const dt = state.cameraMode === 'anim' && state.animationPaused ? 0 : deltaTime;
 
             // update transition timer
+            const prevTransitionTimer = transitionTimer;
             transitionTimer = Math.min(1, transitionTimer + deltaTime * transitionSpeed);
 
             const controller = getController(state.cameraMode);
 
-            if (state.cameraMode === 'walk') {
-                walkSource.update(dt, this.camera.position, this.camera.angles, frame);
-            }
+            sourcesByMode[state.cameraMode]?.update(dt, this.camera, frame);
 
             controller.update(dt, frame, target);
 
@@ -580,6 +587,11 @@ class CameraManager {
             // update animation timeline
             if (state.cameraMode === 'anim') {
                 state.animationTime = controllers.anim.animState.cursor.value;
+            }
+
+            if (clearOrbitTargetOnTransitionEnd && prevTransitionTimer < 1 && transitionTimer === 1) {
+                clearOrbitTargetOnTransitionEnd = false;
+                events.fire('orbitTarget:clear');
             }
         };
 
@@ -650,7 +662,7 @@ class CameraManager {
         };
 
         // handle input events
-        events.on('inputEvent', (eventName, event) => {
+        events.on('inputEvent', (eventName) => {
             switch (eventName) {
                 case 'frame':
                     // F 键 / UI「Frame」：优先聚焦当前编辑模块下的选中项，否则整场景 framing
@@ -669,14 +681,27 @@ class CameraManager {
                         orbitFocus(tmpFocus);
                         break;
                     }
+                    events.fire('orbitTarget:clear');
                     state.cameraMode = 'orbit';
                     controllers.orbit.goto(frameCamera);
                     startTransition();
                     break;
                 case 'reset':
-                    state.cameraMode = 'orbit';
-                    controllers.orbit.goto(resetCamera);
-                    startTransition();
+                    if (state.cameraMode === 'walk') {
+                        walkSource.cancel();
+                        events.fire('navTarget:clear');
+                        startTransition();
+                        controllers.walk.resetToSpawn(target);
+                    } else if (state.cameraMode === 'fly') {
+                        flySource.cancel();
+                        startTransition();
+                        controllers.fly.resetToSpawn(target);
+                    } else {
+                        events.fire('orbitTarget:clear');
+                        state.cameraMode = 'orbit';
+                        controllers.orbit.goto(resetCamera);
+                        startTransition();
+                    }
                     break;
                 case 'playPause':
                     if (state.hasAnimation) {
@@ -733,10 +758,8 @@ class CameraManager {
         });
 
         // handle camera mode switching
-        events.on('cameraMode:changed', (value, prev) => {
-            if (prev === 'walk') {
-                walkSource.cancelWalk();
-            }
+        events.on('cameraMode:changed', (value: CameraMode, prev: CameraMode) => {
+            sourcesByMode[prev]?.cancel();
 
             // snapshot the current pose before any controller mutation
             startTransition();
@@ -824,9 +847,11 @@ class CameraManager {
         });
 
         events.on('annotation.activate', (annotation: Annotation) => {
+            events.fire('orbitTarget:clear');
+
             // switch to orbit camera on pick (only if not already in orbit mode)
             if (state.cameraMode !== 'orbit') {
-                state.cameraMode = 'orbit';
+            state.cameraMode = 'orbit';
             }
 
             // AnnotationEntity 的 camera 在 data 中；普通 Annotation 可能在 annotation.camera
@@ -854,22 +879,23 @@ class CameraManager {
             startTransition();
         });
 
-        // tap-to-walk: start auto-walking toward a picked 3D position
-        events.on('walkTo', (position: Vec3, normal: Vec3) => {
-            if (state.cameraMode === 'walk') {
-                walkSource.walkTo(position);
-                events.fire('walkTarget:set', position, normal);
+        // tap-to-navigate: start auto-driving the active mode toward a picked position
+        events.on('navigateTo', (position: Vec3, normal: Vec3, speedMul = 1) => {
+            const source = sourcesByMode[state.cameraMode];
+            if (source) {
+                source.navigateTo(position, speedMul);
+                events.fire('navTarget:set', position, normal);
             }
         });
 
-        // cancel any active auto-walk
-        events.on('walkCancel', () => {
-            walkSource.cancelWalk();
-            events.fire('walkTarget:clear');
+        // cancel any active auto-navigation in the current mode
+        events.on('navigateCancel', () => {
+            sourcesByMode[state.cameraMode]?.cancel();
+            events.fire('navTarget:clear');
         });
 
-        events.on('walkComplete', () => {
-            events.fire('walkTarget:clear');
+        events.on('navigateComplete', () => {
+            events.fire('navTarget:clear');
         });
     }
 

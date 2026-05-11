@@ -1318,14 +1318,14 @@ const initUI = (global: Global) => {
         dom.flyCamera.classList.toggle('right', !value);
     });
 
-    // Voxel overlay toggle
-    events.on('hasVoxelOverlay:changed', (value: boolean) => {
+    // Collision overlay toggle（voxel / mesh 共用）
+    events.on('hasCollisionOverlay:changed', (value: boolean) => {
         dom.showVoxels.classList.toggle('hidden', !value);
     });
     dom.showVoxels.addEventListener('click', () => {
-        state.voxelOverlayEnabled = !state.voxelOverlayEnabled;
+        state.collisionOverlayEnabled = !state.collisionOverlayEnabled;
     });
-    events.on('voxelOverlayEnabled:changed', (value: boolean) => {
+    events.on('collisionOverlayEnabled:changed', (value: boolean) => {
         dom.showVoxels.classList.toggle('active', value);
     });
 

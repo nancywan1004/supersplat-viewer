@@ -60,6 +60,10 @@ class FlyController implements CameraController {
 
     /** Optional collision for sphere collision with sliding */
     collision: Collision | null = null;
+    private _spawnPosition = new Vec3();
+    private _spawnAngles = new Vec3();
+    private _spawnDistance = 1;
+    private _hasSpawn = false;
 
     constructor() {
         this._targetPose = new Pose();
@@ -99,6 +103,7 @@ class FlyController implements CameraController {
             this.constraint.clampToSoft(this._targetPose.position, this._targetPose.position);
             this._pose.position.copy(this._targetPose.position);
         }
+        this._storeSpawn();
     }
 
     update(deltaTime: number, inputFrame: CameraFrame, camera: Camera) {
@@ -321,6 +326,27 @@ class FlyController implements CameraController {
             this._targetPose.copy(pose);
         }
         this._pose.copy(this._targetPose);
+    }
+
+    resetToSpawn(camera: Camera): boolean {
+        if (!this._hasSpawn) {
+            return false;
+        }
+
+        this._targetPose.set(this._spawnPosition, this._spawnAngles, this._spawnDistance);
+        this._pose.copy(this._targetPose);
+        camera.position.copy(this._spawnPosition);
+        camera.angles.copy(this._spawnAngles);
+        camera.distance = this._spawnDistance;
+        camera.fov = this.fov;
+        return true;
+    }
+
+    private _storeSpawn() {
+        this._spawnPosition.copy(this._pose.position);
+        this._spawnAngles.copy(this._pose.angles);
+        this._spawnDistance = this._pose.distance;
+        this._hasSpawn = true;
     }
 }
 

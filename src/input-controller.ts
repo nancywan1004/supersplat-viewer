@@ -4,19 +4,20 @@ import type { Collision } from './collision';
 import type { InputArbiter } from './input-arbiter';
 import { InputModeTracker } from './input/app/input-mode-tracker';
 import { ModeShortcuts } from './input/app/mode-shortcuts';
+import { NavInteraction } from './input/app/nav-interaction';
 import { PointerLockManager } from './input/app/pointer-lock';
-import { WalkInteraction } from './input/app/walk-interaction';
 import { GamepadDevice } from './input/devices/gamepad';
 import { KeyboardMouseDevice } from './input/devices/keyboard-mouse';
 import { TouchDevice } from './input/devices/touch';
 import { TrackpadDevice } from './input/devices/trackpad';
 import { pickWorldFromClientXY } from './picker';
 import type { UpdateContext } from './input/shared';
+import type { Picker } from './picker';
 import type { Global } from './types';
 
 /**
  * Coordinator that wires together input devices (keyboard-mouse, touch,
- * trackpad, gamepad) and app-level UX helpers (mode shortcuts, walk
+ * trackpad, gamepad) and app-level UX helpers (mode shortcuts, nav
  * interaction, pointer lock, input-mode tracker), and exposes the
  * resulting per-frame `InputFrame` for the camera manager to consume.
  */
@@ -31,7 +32,7 @@ class InputController {
     private _keyboardMouse = new KeyboardMouseDevice();
     private _touch = new TouchDevice();
     private _gamepad = new GamepadDevice();
-    private _walkInteraction = new WalkInteraction();
+    private _navInteraction: NavInteraction;
     private _pointerLock = new PointerLockManager();
     private _modeShortcuts = new ModeShortcuts();
     private _inputModeTracker = new InputModeTracker();
@@ -104,11 +105,11 @@ class InputController {
     };
 
     set collision(value: Collision | null) {
-        this._walkInteraction.collision = value;
+        this._navInteraction.collision = value;
     }
 
     get collision(): Collision | null {
-        return this._walkInteraction.collision;
+        return this._navInteraction.collision;
     }
 
     setMoveSpeedFromSceneSize(sceneSize: number) {
@@ -126,9 +127,9 @@ class InputController {
     isAnnotationInputFocused(): boolean {
         return this._annotationInputFocused;
     }
-
-    constructor(global: Global) {
+    constructor(global: Global, picker: Picker) {
         this._global = global;
+        this._navInteraction = new NavInteraction(picker);
 
         const { app, events } = global;
         const canvas = app.graphicsDevice.canvas as HTMLCanvasElement;
@@ -142,7 +143,7 @@ class InputController {
         this._touch.attach(canvas, global);
         this._gamepad.attach(canvas, global);
 
-        this._walkInteraction.attach(canvas, global);
+        this._navInteraction.attach(canvas, global);
         this._pointerLock.attach(canvas, global, this._keyboardMouse);
         this._modeShortcuts.attach(global, this._pointerLock);
         this._inputModeTracker.attach(global);

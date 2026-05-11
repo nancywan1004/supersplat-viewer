@@ -1,7 +1,9 @@
-import { math, Vec3, Quat } from 'playcanvas';
+import { math, Vec3 } from 'playcanvas';
 
 import type { Collision, PushOut } from '../collision';
 import type { CameraFrame, Camera, CameraController } from './camera';
+import { applyFrameRotation, setBasisOffset, setYawBasis } from './camera-utils';
+import { findWalkSpawn } from './walk-spawn';
 import { damp } from '../core/math';
 
 const FIXED_DT = 1 / 60;
@@ -18,14 +20,14 @@ const right = new Vec3();
 const moveStep = [0, 0, 0];
 
 const offset = new Vec3();
-const rotation = new Quat();
+const spawnProbe = new Vec3();
 
 /**
- * First-person camera controller with spring-damper suspension over voxel terrain.
+ * First-person camera controller with spring-damper suspension over collision terrain.
  *
  * Movement is constrained to the horizontal plane (XZ) relative to the camera yaw.
  * Vertical positioning uses a spring-damper system that hovers the capsule above the
- * voxel surface, filtering out terrain noise for smooth camera motion. Capsule
+ * collision surface, filtering out terrain noise for smooth camera motion. Capsule
  * collision handles walls and obstacles. When airborne, normal gravity applies.
  */
 class WalkController implements CameraController {
@@ -96,7 +98,7 @@ class WalkController implements CameraController {
 
     /**
      * Target clearance from capsule bottom to ground surface in meters.
-     * The capsule hovers this far above terrain to avoid bouncing on noisy voxels.
+     * The capsule hovers this far above terrain to avoid bouncing on noisy surfaces.
      */
     hoverHeight = 0.2;
 
@@ -116,11 +118,24 @@ class WalkController implements CameraController {
      */
     groundProbeRange = 1.0;
 
+    /**
+     * Maximum vertical raycast distance to search for walk spawn ground.
+     */
+    spawnSearchRange = 1000;
+
     private _position = new Vec3();
 
     private _prevPosition = new Vec3();
 
     private _angles = new Vec3();
+
+    private _distance = 1;
+
+    private _spawnPosition = new Vec3();
+
+    private _spawnAngles = new Vec3();
+
+    private _spawnDistance = 1;
 
     private _velocity = new Vec3();
 
@@ -134,19 +149,22 @@ class WalkController implements CameraController {
 
     private _jumpHeld = false;
 
+    private _spawnGrounded = false;
+
+    private _hasSpawn = false;
+
     onEnter(camera: Camera): void {
         this.goto(camera);
         if (this.collision) {
-            this._resolveSpawnCollision();
-            this._prevPosition.copy(this._position);
-
-            const groundY = this._probeGround(this._position);
-            if (groundY !== null) {
+            this._hasSpawn = false;
+            if (findWalkSpawn(this.collision, camera.position, this, spawnProbe)) {
+                this._position.copy(spawnProbe);
                 this._grounded = true;
                 this._velocity.y = 0;
-                this._position.y = groundY + this.hoverHeight + this.eyeHeight;
-                this._prevPosition.copy(this._position);
+                this._storeSpawn();
             }
+
+            this._prevPosition.copy(this._position);
         }
     }
 
@@ -154,8 +172,7 @@ class WalkController implements CameraController {
         const { move, rotate } = inputFrame.read();
 
         // apply rotation at display rate for responsive mouse look
-        this._angles.add(v.set(-rotate[1], -rotate[0], 0));
-        this._angles.x = math.clamp(this._angles.x, -90, 90);
+        applyFrameRotation(this._angles, rotate);
 
         // accumulate movement input so frames without a physics step don't lose input
         this._pendingMove[0] += move[0];
@@ -186,6 +203,7 @@ class WalkController implements CameraController {
         const alpha = this._accumulator / FIXED_DT;
         camera.position.lerp(this._prevPosition, this._position, alpha);
         camera.angles.set(this._angles.x, this._angles.y, 0);
+        camera.distance = this._distance;
         camera.fov = this.fov;
     }
 
@@ -231,12 +249,8 @@ class WalkController implements CameraController {
         }
 
         // move
-        rotation.setFromEulerAngles(0, this._angles.y, 0);
-        rotation.transformVector(Vec3.FORWARD, forward);
-        rotation.transformVector(Vec3.RIGHT, right);
-        offset.set(0, 0, 0);
-        offset.add(forward.mulScalar(move[2]));
-        offset.add(right.mulScalar(move[0]));
+        setYawBasis(this._angles.y, forward, right);
+        setBasisOffset(offset, move[0], 0, move[2], forward, right, Vec3.UP);
         this._velocity.add(offset.mulScalar(this._grounded ? this.moveGroundSpeed : this.moveAirSpeed));
 
         const dampFactor = this._grounded ? this.velocityDampingGround : this.velocityDampingAir;
@@ -266,11 +280,51 @@ class WalkController implements CameraController {
 
         // angles (clamp pitch to avoid gimbal lock)
         this._angles.set(camera.angles.x, camera.angles.y, 0);
+        this._distance = camera.distance;
 
         // reset velocity and state
+        this._resetMotion();
+    }
+
+    /**
+     * Reset the controller to the spawn pose captured on the last walk-mode entry.
+     *
+     * @param camera - Camera state to update with the spawn pose.
+     * @returns True if a spawn pose was available.
+     */
+    resetToSpawn(camera: Camera): boolean {
+        if (!this._hasSpawn) {
+            return false;
+        }
+
+        this._position.copy(this._spawnPosition);
+        this._prevPosition.copy(this._position);
+        this._angles.copy(this._spawnAngles);
+        this._distance = this._spawnDistance;
+        this._resetMotion();
+        this._grounded = this._spawnGrounded;
+
+        camera.position.copy(this._position);
+        camera.angles.copy(this._angles);
+        camera.distance = this._distance;
+        camera.fov = this.fov;
+
+        return true;
+    }
+
+    private _storeSpawn() {
+        this._spawnPosition.copy(this._position);
+        this._spawnAngles.copy(this._angles);
+        this._spawnDistance = this._distance;
+        this._spawnGrounded = this._grounded;
+        this._hasSpawn = true;
+    }
+
+    private _resetMotion() {
         this._velocity.set(0, 0, 0);
         this._grounded = false;
         this._jumping = false;
+        this._jumpHeld = false;
         this._pendingMove[0] = 0;
         this._pendingMove[1] = 0;
         this._pendingMove[2] = 0;
@@ -278,28 +332,9 @@ class WalkController implements CameraController {
     }
 
     /**
-     * Push the capsule upward until it clears solid geometry, up to a maximum of
-     * 100 iterations. Only used at spawn time to handle the case where walk mode
-     * activates inside a solid region. Per-frame collision resolution is unaffected,
-     * avoiding the ceiling launch bug.
-     */
-    private _resolveSpawnCollision() {
-        const half = this.capsuleHeight * 0.5 - this.capsuleRadius;
-        const minStep = this.capsuleRadius;
-
-        for (let i = 0; i < 100; i++) {
-            const center = this._position.y - this.eyeHeight + this.capsuleHeight * 0.5;
-            if (!this.collision!.queryCapsule(this._position.x, center, this._position.z, half, this.capsuleRadius, out)) {
-                break;
-            }
-            this._position.y += Math.max(out.y, minStep);
-        }
-    }
-
-    /**
      * Cast multiple rays downward to find the average ground surface height.
      * Uses 5 rays (center + 4 cardinal at capsule radius) to spatially filter
-     * noisy voxel heights, giving the spring a smoother target.
+     * noisy collision heights, giving the spring a smoother target.
      *
      * @param pos - Eye position in PlayCanvas world space.
      * @returns Average ground surface Y in PlayCanvas space, or null if no ground found.

@@ -221,11 +221,10 @@ class OrbitController implements CameraController {
             console.log('  distance:', camera.distance);
             console.log('  position in box?', this.targetConstraint.containsPoint(camera.position));
         }
-
+        this.fov = camera.fov;
         p.position.copy(camera.position);
         p.angles.copy(camera.angles);
-        p.distance = camera.distance;
-        this.fov = camera.fov;
+        p.distance = Math.max(camera.distance, this.controller.zoomRange.x);
         this.controller.attach(p, false);
     }
 }
