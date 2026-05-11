@@ -27,6 +27,7 @@ import {
 import type { ExperienceSettings } from './schemas/v2';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import { resolveExportTimelinePlan } from './render/export-timeline-resolver';
+import { buildVideoExportFilename } from './render/video-export';
 import { getAssetLoader } from './loaders/asset-loader';
 import type { CommandRegistry } from './editor-modules/command-registry';
 import { uploadProjectData } from './universe/service';
@@ -96,7 +97,7 @@ type InboundPayload =
     | { type: 'VFX_TYPE_SET'; value?: string }
     | { type: 'VFX_EXIT' }
     | { type: 'VFX_RESTART'; restartAnim?: boolean }
-    | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean }
+    | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean; projectName?: string }
     | { type: 'VIDEO_EXPORT_CANCEL' };
 
 const postToParent = (type: string, data?: Record<string, unknown>) => {
@@ -540,8 +541,13 @@ const initPostMessageBridge = (global: Global) => {
             break;
         }
         case 'VIDEO_EXPORT_START': {
+            const projectName =
+                typeof (p as { projectName?: unknown }).projectName === 'string'
+                    ? (p as { projectName: string }).projectName
+                    : undefined;
             console.log('[MessageBridge] VIDEO_EXPORT_START → start export pipeline', {
-                includeVfx: (p as any).includeVfx !== false
+                includeVfx: (p as any).includeVfx !== false,
+                projectName
             });
             const includeVfx = (p as any).includeVfx !== false;
             const waitResult = await getAssetLoader(global).waitAllReady();
@@ -579,7 +585,8 @@ const initPostMessageBridge = (global: Global) => {
                 syncAnimTrack: true,
                 totalDuration,
                 includeVfx,
-                useFastExport: true
+                useFastExport: true,
+                projectName
             };
             // 有 File System Access API 时先选保存路径；否则走无 fileStream 导出，由 video-export 在 finalize 后触发浏览器下载
             if (!('showSaveFilePicker' in window)) {
@@ -590,7 +597,7 @@ const initPostMessageBridge = (global: Global) => {
             try {
                 const handle = await (window as any).showSaveFilePicker({
                     types: [{ description: 'MP4 Video', accept: { 'video/mp4': ['.mp4'] } }],
-                    suggestedName: 'vfx-timeline.mp4'
+                    suggestedName: buildVideoExportFilename(projectName, 'mp4')
                 });
                 const fileStream = await handle.createWritable();
                 events.fire('render.video', videoSettings, fileStream as any);

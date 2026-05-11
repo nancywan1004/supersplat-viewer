@@ -35,6 +35,20 @@ const EXPORT_FRAME_WAIT_MS = 0;
 /** 控制台过滤用：所有 VFX 导出/性能相关 log 均带此 tag，可在 DevTools 中按此关键字过滤 */
 const VFX_EXPORT_LOG_TAG = '[VFX Export]';
 
+const FALLBACK_VIDEO_EXPORT_PROJECT_SEGMENT = 'export';
+
+/**
+ * 导出视频完整文件名：`<projectName>-video.<ext>`（`projectName` 来自 `VIDEO_EXPORT_START`，会做路径不安全字符清理并截断）
+ */
+export function buildVideoExportFilename(projectName: string | undefined, fileExtension: string): string {
+    const trimmed = (projectName ?? '').trim();
+    const raw = trimmed.length > 0 ? trimmed : FALLBACK_VIDEO_EXPORT_PROJECT_SEGMENT;
+    const cleaned = raw.replace(/[/\\?%*:|"<>]/g, '_').replace(/[\u0000-\u001f]/g, '').trim();
+    const segment = cleaned.slice(0, 200) || FALLBACK_VIDEO_EXPORT_PROJECT_SEGMENT;
+    const ext = fileExtension.replace(/^\./, '');
+    return `${segment}-video.${ext}`;
+}
+
 function isExportNightDebugEnabled(): boolean {
     let enabled = (globalThis as any).__DEBUG_EXPORT_NIGHT_MODE__ === true;
     if (!enabled && typeof window !== 'undefined') {
@@ -150,6 +164,8 @@ type VideoSettings = {
     includeVfx?: boolean;
     /** @deprecated 使用 includeVfx：为 true 时等价于 includeVfx=false */
     fixVfxAtEnd?: boolean;
+    /** 父级 `VIDEO_EXPORT_START.projectName`：导出文件名为 `<projectName>-video.<ext>` */
+    projectName?: string;
 };
 
 /**
@@ -1050,10 +1066,11 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
         _output: Output,
         target: BufferTarget,
         fileStream: FileSystemWritableFileStream | undefined,
-        fileExtension: string
+        fileExtension: string,
+        projectName?: string
     ): Promise<void> => {
         if (fileStream) return;
-        const filename = `supersplat-video.${fileExtension}`;
+        const filename = buildVideoExportFilename(projectName, fileExtension);
         const buf = target.buffer;
         if (!buf || buf.byteLength === 0) {
             console.warn(VFX_EXPORT_LOG_TAG, `No output buffer to download (${filename})`);
@@ -1348,7 +1365,7 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
                     const streamLike = fileStream as unknown as { locked?: boolean; close?: () => Promise<void> };
                     if (streamLike.locked !== true) await streamLike.close?.();
                 } else {
-                    await handleDownload(output, target as BufferTarget, fileStream, encoderConfig.fileExtension);
+                    await handleDownload(output, target as BufferTarget, fileStream, encoderConfig.fileExtension, videoSettings.projectName);
                 }
             } finally {
                 try { worker.terminate(); } catch {}
@@ -1428,7 +1445,7 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
             } else {
                 // 无 FileSystemAccess：直接触发浏览器下载
                 try {
-                    const filename = 'video.webm';
+                    const filename = buildVideoExportFilename(videoSettings.projectName, 'webm');
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
@@ -1575,7 +1592,7 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
             }
 
             // 处理下载（如果没有文件流）
-            await handleDownload(output, target as BufferTarget, fileStream, encoderConfig.fileExtension);
+            await handleDownload(output, target as BufferTarget, fileStream, encoderConfig.fileExtension, videoSettings.projectName);
 
             return true;
         } finally {
