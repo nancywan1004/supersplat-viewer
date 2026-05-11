@@ -15,6 +15,19 @@ const LOCAL_LIGHT_PERCEPTUAL_BALANCE_STRENGTH = 0.35;
 /** 近中性颜色（接近白）的软压缩：0=关闭，1=最强（推荐 0.15~0.3） */
 const LOCAL_LIGHT_NEUTRAL_SOFT_COMPRESS_STRENGTH = 0.2;
 
+function isExportNightDebugEnabled(): boolean {
+    let enabled = (globalThis as any).__DEBUG_EXPORT_NIGHT_MODE__ === true;
+    if (!enabled && typeof window !== 'undefined') {
+        try {
+            enabled = new URLSearchParams(window.location.search).get('debugExportNight') === '1' ||
+                window.localStorage.getItem('__DEBUG_EXPORT_NIGHT_MODE__') === '1';
+        } catch {
+            // ignore
+        }
+    }
+    return enabled;
+}
+
 /** 与方向光 uLightColor 一致：sRGB→线性，再乘 intensity×scale；结果按 LOCAL_LIGHT_LINEAR_PEAK_CAP 封顶 */
 function localLightLinearRgb(r: number, g: number, b: number, intensity: number, scale: number): [number, number, number] {
     const lin = (x: number) => Math.pow(Math.max(0, Math.min(1, x)), 2.2);
@@ -918,6 +931,13 @@ class NightMode extends GsplatShaderEffect {
 
         // 监听 reveal 等互斥效果接管 gsplatModifyVS 的信号：重置亮度为 0 并清空 shader 应用
         this.app.on('nightMode:exit', () => {
+            if (isExportNightDebugEnabled()) {
+                console.log('[ExportNightDebug][NightMode] nightMode:exit', {
+                    suspendedByVfx: this.suspendedByVfx,
+                    materialsApplied: this.materialsApplied.size,
+                    nightFade: this.nightFade
+                });
+            }
             // 进入互斥阶段：完全挂起 NightMode 对 gsplatModifyVS 的写入
             this.suspendedByVfx = true;
             this.nightFade = 0;
@@ -949,6 +969,13 @@ class NightMode extends GsplatShaderEffect {
         // 但 NightMode 的 materialsApplied 并不知情，导致后续 nightFade:set 只更新 uniform 而不重新 apply shader。
         // nightMode:forceReapply 先移除已应用的 shader、清空 materialsApplied，再设 fade 并重新 apply，保证材质上有正确的 shader。
         this.app.on('nightMode:forceReapply', (value: number) => {
+            if (isExportNightDebugEnabled()) {
+                console.log('[ExportNightDebug][NightMode] nightMode:forceReapply start', {
+                    value,
+                    suspendedByVfx: this.suspendedByVfx,
+                    materialsApplied: this.materialsApplied.size
+                });
+            }
             const clampedValue = Math.max(-1, Math.min(1, value));
             this.manualFadeControl = true;
             this.nightFade = clampedValue;
@@ -963,6 +990,13 @@ class NightMode extends GsplatShaderEffect {
             // 必须始终执行：把主光/天空盒强度按新的 nightFade 收回/调整，否则 discard 后场景仍像未复位
             this.updateEffect(this.effectTime, 0);
             this.fireNightFadeChanged('forceReapply');
+            if (isExportNightDebugEnabled()) {
+                console.log('[ExportNightDebug][NightMode] nightMode:forceReapply done', {
+                    nightFade: this.nightFade,
+                    suspendedByVfx: this.suspendedByVfx,
+                    materialsApplied: this.materialsApplied.size
+                });
+            }
         });
     }
 

@@ -415,23 +415,24 @@ class CameraManager {
         // 基础开关：由配置与 settings 决定（不含编辑态临时覆盖）
         const baseBoundsEnabled = !config.disableCameraBounds && cameraBoundsCfg?.enabled !== false; // 默认启用
 
-        // 无动画时维持更"核心"的收缩范围；有动画时使用 animScaleX/animScaleY
+        // 无动画时维持更"核心"的收缩范围；有动画时使用 animScaleX/Y/Z
         const targetScaleFactor = 1; // 非动画路径的固定缩放系数
 
         if (baseBoundsEnabled) {
-            // 只有在有动画路径时，才使用 animScaleX/animScaleY 来分别设置各轴缩放
+            // 只有在有动画路径时，才使用 animScaleX/Y/Z 来分别设置各轴缩放
             // 对于非动画路径，维持原来的 targetScaleFactor 逻辑
             if (usingAnimBbox) {
-                // 使用 animScaleX 和 animScaleY，支持数组格式分别设置左右和上下
-                // 如果没有设置则使用默认值 1.5
+                // 支持数组格式分别设置左右、上下、负 Z/正 Z；未写的轴用 defaultAnimScale
                 const defaultAnimScale = 1.5;
                 const animScaleX = cameraBoundsCfg?.animScaleX ?? defaultAnimScale;
                 const animScaleY = cameraBoundsCfg?.animScaleY ?? defaultAnimScale;
+                const animScaleZ = cameraBoundsCfg?.animScaleZ ?? defaultAnimScale;
                 this.targetConstraint = BoxConstraint.fromBoundingBoxWithAsymmetricScales(
                     fusedBbox,
-                    defaultAnimScale, // Z 轴使用默认值
+                    defaultAnimScale,
                     animScaleX,
-                    animScaleY
+                    animScaleY,
+                    animScaleZ
                 );
             } else {
                 this.targetConstraint = BoxConstraint.fromBoundingBox(fusedBbox, targetScaleFactor);
@@ -511,9 +512,10 @@ class CameraManager {
 
         const target = new Camera(this.camera);             // the active controller updates this
         const from = new Camera(this.camera);               // stores the previous camera state during transition
-        let fromMode: CameraMode = 'orbit';
+
+        let fromMode: CameraMode = settings.initialCameraMode ?? 'orbit';
         // tracks the mode to restore when exiting walk
-        let preWalkMode: CameraMode = 'orbit';
+        let preWalkMode: CameraMode = settings.initialCameraMode ?? 'orbit';
 
         // enter the initial controller
         getController(state.cameraMode).onEnter(this.camera);

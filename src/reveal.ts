@@ -38,6 +38,21 @@ function getNightFadeFromSettings(settings: { nightMode?: { enabled?: boolean; f
     return nightCfg?.enabled ? -0.95 : 0;
 }
 
+function debugExportNight(...args: unknown[]) {
+    let enabled = (globalThis as any).__DEBUG_EXPORT_NIGHT_MODE__ === true;
+    if (!enabled && typeof window !== 'undefined') {
+        try {
+            enabled = new URLSearchParams(window.location.search).get('debugExportNight') === '1' ||
+                window.localStorage.getItem('__DEBUG_EXPORT_NIGHT_MODE__') === '1';
+        } catch {
+            // ignore
+        }
+    }
+    if (enabled) {
+        console.log('[ExportNightDebug][Reveal]', ...args);
+    }
+}
+
 export class RevealController {
     private gsplatEntity: Entity | null = null;
     private config: RevealConfig;
@@ -52,7 +67,7 @@ export class RevealController {
     private effectStartTime: number | null = null;
     private effectEndTime: number | null = null;
     private isTiming: boolean = false;
-    private timedEffects = ['rain-v2', 'pieces-recover', 'integrate', 'growth-wave', 'sketch'];
+    private timedEffects = ['radial', 'rain-v2', 'pieces-recover', 'integrate', 'growth-wave', 'sketch'];
     private readonly endRadiusBboxPaddingScale = 0.65;
     /** 半径放大后对传播速度的补偿系数（0~1，越大越接近“完全按半径等比提速”） */
     private readonly radiusSpeedCompensation = 0.7;
@@ -73,6 +88,10 @@ export class RevealController {
     private currentNightFade: number = 0;
     /** VFX 正在播放中 */
     private inVfx: boolean = false;
+    /** 导出时间轴内，该轮 reveal 是否已完成（用于阻止后续帧误重启脚本） */
+    private exportRevealCompleted: boolean = false;
+    /** 导出态下，等待 reveal disable 收尾后再恢复 NightMode（避免同帧 shader chunk 互删） */
+    private pendingExportNightRestore = false;
 
     constructor(global: Global, bbox: BoundingBox, gsplatEntity: Entity, cameraManager?: CameraManager | null) {
         this.global = global;
@@ -918,10 +937,31 @@ export class RevealController {
 
         this.currentScript = script;
         this.config.type = effectName;
+        this.exportRevealCompleted = false;
+        (this as any).__exportCompletionLogged = false;
 
         // 如果script创建成功，设置效果播放结束的回调（用于在 reveal 播完后再开始动画等）
         if (script) {
             (script as any).onRevealComplete = () => {
+                this.exportRevealCompleted = true;
+                debugExportNight('onRevealComplete fired', {
+                    type: this.config.type,
+                    effectTime: Number((this.currentScript as any)?.effectTime ?? -1).toFixed?.(3) ?? -1,
+                    isExporting: !!(this.global.state as any).isExportingVfxVideo,
+                    inVfx: this.inVfx,
+                    originalNightFade: this.originalNightFade
+                });
+                // 导出期间 viewer.update 被锁，updateTiming 不会跑到 effectScriptDisabled 分支；
+                // 但此刻 reveal 脚本还会在本帧继续执行 enabled=false -> removeShaders。
+                // 若这里立即 forceReapply，会被同帧 reveal 的 removeShaders 覆盖掉。
+                // 因此延后一帧到 frameend 后再恢复 NightMode。
+                if ((this.global.state as any).isExportingVfxVideo && !this.pendingExportNightRestore) {
+                    this.pendingExportNightRestore = true;
+                    this.global.app.once('frameend', () => {
+                        this.pendingExportNightRestore = false;
+                        this.restoreNightModeIfNeeded('revealScriptComplete:export:deferred');
+                    });
+                }
                 this.global.events.fire('revealComplete');
             };
         }
@@ -962,6 +1002,12 @@ export class RevealController {
      */
     private restoreNightModeIfNeeded(reason: string) {
         if (this.originalNightFade === null) {
+            debugExportNight('restoreNightModeIfNeeded skipped (originalNightFade null)', {
+                reason,
+                type: this.config.type,
+                inVfx: this.inVfx,
+                isExporting: !!(this.global.state as any).isExportingVfxVideo
+            });
             return;
         }
         const fade = this.originalNightFade;
@@ -976,6 +1022,12 @@ export class RevealController {
         settingsAny.nightMode.fade = fade;
 
         console.log('[RevealController] Restoring nightFade to', fade, 'due to', reason);
+        debugExportNight('restoreNightModeIfNeeded firing forceReapply', {
+            reason,
+            fade,
+            type: this.config.type,
+            isExporting: !!(this.global.state as any).isExportingVfxVideo
+        });
         // VFX disable 时 GsplatShaderEffect.removeShaders() 把材质上的 gsplatModifyVS 删了，
         // 但 NightMode 的 materialsApplied 不知情，nightFade:set 只会 updateEffect 不会重新 apply shader。
         // 必须用 nightMode:forceReapply 先清 materialsApplied 再重新 apply，才能真正恢复 NightMode shader。
@@ -1294,6 +1346,7 @@ export class RevealController {
         
         // 重置暂停状态
         this.effectPaused = false;
+        this.exportRevealCompleted = false;
 
         // 重新创建效果（会自动根据 autoStart 配置启用，并重置 effectTime）
         this.createEffect(this.config.type);
@@ -1334,13 +1387,51 @@ export class RevealController {
         if (!this.currentScript || typeof this.currentScript.setEffectTime !== 'function') {
             return;
         }
-        const totalDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+        const baseDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+        const completionT = Number(this.getPostRevealContentThresholdSec());
+        const completionCeiling =
+            this.timedEffects.includes(this.config.type) && Number.isFinite(completionT) && completionT >= 0
+                ? completionT
+                : baseDuration;
+        const exportCeiling = Math.max(baseDuration, completionCeiling);
         // 导出时 perlin-wave 需要覆盖整段视频时长，不受 revealEffect.totalDuration 限制
         const exportTime = this.config.type === 'perlin-wave'
             ? Math.max(0, time)
-            : Math.max(0, Math.min(time, totalDuration));
+            : Math.max(0, Math.min(time, exportCeiling));
+
+        const completionReached = Number.isFinite(completionT) && completionT >= 0 && exportTime + 1e-4 >= completionT;
+        if (!(this as any).__exportCompletionLogged && completionReached) {
+            (this as any).__exportCompletionLogged = true;
+            debugExportNight('export completion threshold reached', {
+                type: this.config.type,
+                exportTime: Number(exportTime.toFixed(3)),
+                completionT: Number(completionT.toFixed(3)),
+                scriptEnabled: !!this.currentScript.enabled,
+                isEffectComplete: !!this.currentScript?.isEffectComplete?.(),
+                inVfx: this.inVfx,
+                originalNightFade: this.originalNightFade
+            });
+        }
         
+        if (!this.currentScript.enabled && this.exportRevealCompleted) {
+            debugExportNight('skip re-enable after reveal completed in export', {
+                type: this.config.type,
+                exportTime: Number(exportTime.toFixed(3)),
+                inVfx: this.inVfx,
+                originalNightFade: this.originalNightFade
+            });
+            return;
+        }
+
         if (!this.currentScript.enabled) {
+            debugExportNight('re-enabling script in export tick', {
+                type: this.config.type,
+                exportTime: Number(exportTime.toFixed(3)),
+                completionT: Number.isFinite(completionT) ? Number(completionT.toFixed(3)) : null,
+                completionReached,
+                inVfx: this.inVfx,
+                originalNightFade: this.originalNightFade
+            });
             this.currentScript.enabled = true;
             this.effectStartTime = null;
             this.effectEndTime = null;

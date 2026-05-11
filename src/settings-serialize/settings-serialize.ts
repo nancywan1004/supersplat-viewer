@@ -143,7 +143,11 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
     out.sceneAssets = sceneItems.map((entry) => {
         const pos = entry.entity.getPosition();
         const rot = entry.entity.getEulerAngles();
+        const rotQuat = entry.entity.getLocalRotation();
         const scale = entry.entity.getLocalScale();
+        const mirrorX: 1 | -1 = scale.x < 0 ? -1 : 1;
+        const mirrorY: 1 | -1 = scale.y < 0 ? -1 : 1;
+        const mirrorZ: 1 | -1 = scale.z < 0 ? -1 : 1;
 
         return {
             id: entry.id,
@@ -159,7 +163,9 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
             transform: {
                 position: [pos.x, pos.y, pos.z] as [number, number, number],
                 rotation: [rot.x, rot.y, rot.z] as [number, number, number],
-                scale: [scale.x, scale.y, scale.z] as [number, number, number]
+                rotationQuat: [rotQuat.x, rotQuat.y, rotQuat.z, rotQuat.w] as [number, number, number, number],
+                scale: [scale.x, scale.y, scale.z] as [number, number, number],
+                mirror: [mirrorX, mirrorY, mirrorZ]
             }
         };
     });

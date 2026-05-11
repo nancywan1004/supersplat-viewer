@@ -7,6 +7,8 @@ import {
     type RevealExportTimingSource,
     type VfxExportPostRevealSync
 } from './deferred-editing-visual-sync';
+import { resolveExportTimelinePlan, type AnimLoopMode } from './export-timeline-resolver';
+import { getAssetLoader } from '../loaders/asset-loader';
 
 /** `initVideoExport` 依赖注入：由组合根（如 index）在 Viewer 就绪后提供 */
 export type VideoExportInitOptions = {
@@ -32,6 +34,33 @@ const EXPORT_FRAME_WAIT_MS = 0;
 
 /** 控制台过滤用：所有 VFX 导出/性能相关 log 均带此 tag，可在 DevTools 中按此关键字过滤 */
 const VFX_EXPORT_LOG_TAG = '[VFX Export]';
+
+const FALLBACK_VIDEO_EXPORT_PROJECT_SEGMENT = 'export';
+
+/**
+ * 导出视频完整文件名：`<projectName>-video.<ext>`（`projectName` 来自 `VIDEO_EXPORT_START`，会做路径不安全字符清理并截断）
+ */
+export function buildVideoExportFilename(projectName: string | undefined, fileExtension: string): string {
+    const trimmed = (projectName ?? '').trim();
+    const raw = trimmed.length > 0 ? trimmed : FALLBACK_VIDEO_EXPORT_PROJECT_SEGMENT;
+    const cleaned = raw.replace(/[/\\?%*:|"<>]/g, '_').replace(/[\u0000-\u001f]/g, '').trim();
+    const segment = cleaned.slice(0, 200) || FALLBACK_VIDEO_EXPORT_PROJECT_SEGMENT;
+    const ext = fileExtension.replace(/^\./, '');
+    return `${segment}-video.${ext}`;
+}
+
+function isExportNightDebugEnabled(): boolean {
+    let enabled = (globalThis as any).__DEBUG_EXPORT_NIGHT_MODE__ === true;
+    if (!enabled && typeof window !== 'undefined') {
+        try {
+            enabled = new URLSearchParams(window.location.search).get('debugExportNight') === '1' ||
+                window.localStorage.getItem('__DEBUG_EXPORT_NIGHT_MODE__') === '1';
+        } catch {
+            // ignore
+        }
+    }
+    return enabled;
+}
 
 type ProfileEntry = { name: string; ms: number };
 type FrameProfile = {
@@ -135,6 +164,8 @@ type VideoSettings = {
     includeVfx?: boolean;
     /** @deprecated 使用 includeVfx：为 true 时等价于 includeVfx=false */
     fixVfxAtEnd?: boolean;
+    /** 父级 `VIDEO_EXPORT_START.projectName`：导出文件名为 `<projectName>-video.<ext>` */
+    projectName?: string;
 };
 
 /**
@@ -895,6 +926,20 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
         viewer.applyCameraFromManager();
     };
 
+    const resolveTimelinePlan = (settings: VideoSettings, includeVfx: boolean, allAssetsReadyAt: number) => {
+        const animDuration = (global.state as any).animationDuration as number | undefined;
+        const animLoopMode = ((global.settings as any)?.animTracks?.[0]?.loopMode as AnimLoopMode | undefined) ?? 'repeat';
+        return resolveExportTimelinePlan({
+            includeVfx,
+            syncAnimTrack: settings.syncAnimTrack !== false,
+            vfxDuration: global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION,
+            requestedTotalDuration: settings.totalDuration,
+            animDuration,
+            animLoopMode,
+            allAssetsReadyAt
+        });
+    };
+
     /**
      * 渲染所有帧：与单帧截获完全相同的流程，循环执行。
      * 每帧（若 syncAnimTrack）：先 seek anim 并应用相机 → prepareAndRenderOneFrame → requestAnimationFrame → captureFrame
@@ -906,6 +951,7 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
         encoder: VideoEncoder | null,
         settings: VideoSettings,
         renderManager: RenderManager,
+        allAssetsReadyAt: number,
         profiler?: ExportProfiler,
         signal?: AbortSignal,
         revealGate?: VfxExportPostRevealSync
@@ -914,10 +960,11 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
         const { frameRate, width, height, syncAnimTrack } = settings;
         const evenWidth = width % 2 === 0 ? width : width - 1;
         const evenHeight = height % 2 === 0 ? height : height - 1;
-        const totalDuration = settings.totalDuration ?? global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
         const includeVfx = settings.includeVfx !== false;
+        const timelinePlan = resolveTimelinePlan(settings, includeVfx, allAssetsReadyAt);
+        const totalDuration = timelinePlan.totalDuration;
         // 不包含 VFX 时固定为「VFX 自身总时长」的最后一帧，这样整段视频都能看到完整效果状态（Timed/非 Timed 一致）
-        const vfxTotalDuration = global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+        const vfxTotalDuration = timelinePlan.vfxDuration;
         const totalFrames = Math.ceil(totalDuration * frameRate);
         const frameInterval = 1.0 / frameRate;
 
@@ -943,7 +990,7 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
             // 不包含 VFX 时也必须每帧驱动 anim，否则导出的视频里相机不动；包含 VFX 时按 syncAnimTrack 决定是否同步
             if (syncAnimTrack || !includeVfx) {
                 const t0 = VFX_EXPORT_PROFILE ? performance.now() : 0;
-                seekAnimToTimeAndApply(global, frameTime);
+                seekAnimToTimeAndApply(global, timelinePlan.animSeekAt(frameTime));
                 if (VFX_EXPORT_PROFILE) frameProfile.seekAnim = performance.now() - t0;
             }
 
@@ -1019,10 +1066,11 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
         _output: Output,
         target: BufferTarget,
         fileStream: FileSystemWritableFileStream | undefined,
-        fileExtension: string
+        fileExtension: string,
+        projectName?: string
     ): Promise<void> => {
         if (fileStream) return;
-        const filename = `supersplat-video.${fileExtension}`;
+        const filename = buildVideoExportFilename(projectName, fileExtension);
         const buf = target.buffer;
         if (!buf || buf.byteLength === 0) {
             console.warn(VFX_EXPORT_LOG_TAG, `No output buffer to download (${filename})`);
@@ -1071,16 +1119,18 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
     const performVideoExportFast = async (
         videoSettings: VideoSettings,
         fileStream: FileSystemWritableFileStream | undefined,
+        allAssetsReadyAt: number,
         signal?: AbortSignal,
         revealGate?: VfxExportPostRevealSync
     ): Promise<boolean> => {
         const { frameRate, width, height, bitrate, syncAnimTrack } = videoSettings;
         const evenWidth = width % 2 === 0 ? width : width - 1;
         const evenHeight = height % 2 === 0 ? height : height - 1;
-        const totalDuration = videoSettings.totalDuration ?? global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
         const includeVfx = videoSettings.includeVfx !== false && !videoSettings.fixVfxAtEnd;
+        const timelinePlan = resolveTimelinePlan(videoSettings, includeVfx, allAssetsReadyAt);
+        const totalDuration = timelinePlan.totalDuration;
         // 不包含 VFX 时固定为「VFX 自身总时长」的最后一帧，整段视频显示完整效果状态
-        const vfxTotalDuration = global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+        const vfxTotalDuration = timelinePlan.vfxDuration;
         const totalFrames = Math.ceil(totalDuration * frameRate);
         const frameInterval = 1.0 / frameRate;
         const frameTimeMs = 1000 / frameRate;
@@ -1211,7 +1261,7 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
                     const effectTime = includeVfx ? frameTime : vfxTotalDuration;
                     // 与离线路径一致：先门控编辑层再 seek 相机与写 VFX 时间
                     revealGate?.syncExportFrame(global, frameTime, { includeVfx });
-                    if (syncAnimTrack || !includeVfx) seekAnimToTimeAndApply(global, frameTime);
+                    if (syncAnimTrack || !includeVfx) seekAnimToTimeAndApply(global, timelinePlan.animSeekAt(frameTime));
                     await prepareAndRenderOneFrameToCanvas(global, effectTime, !includeVfx);
                     const bitmap = await createImageBitmap(canvas);
                     const timestampUs = Math.round(frameTime * 1_000_000);
@@ -1315,7 +1365,7 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
                     const streamLike = fileStream as unknown as { locked?: boolean; close?: () => Promise<void> };
                     if (streamLike.locked !== true) await streamLike.close?.();
                 } else {
-                    await handleDownload(output, target as BufferTarget, fileStream, encoderConfig.fileExtension);
+                    await handleDownload(output, target as BufferTarget, fileStream, encoderConfig.fileExtension, videoSettings.projectName);
                 }
             } finally {
                 try { worker.terminate(); } catch {}
@@ -1358,7 +1408,7 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
                 // 与 renderAllFrames 顺序一致：门控 → 相机 → VFX 时间 → 画到主 canvas
                 revealGate?.syncExportFrame(global, frameTime, { includeVfx });
                 // 不包含 VFX 时也必须每帧驱动 anim，否则导出的视频里相机不动
-                if (syncAnimTrack || !includeVfx) seekAnimToTimeAndApply(global, frameTime);
+                if (syncAnimTrack || !includeVfx) seekAnimToTimeAndApply(global, timelinePlan.animSeekAt(frameTime));
                 await prepareAndRenderOneFrameToCanvas(global, effectTime, !includeVfx);
                 updateProgress(frameTime, totalDuration);
                 const elapsed = performance.now() - frameStart;
@@ -1395,7 +1445,7 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
             } else {
                 // 无 FileSystemAccess：直接触发浏览器下载
                 try {
-                    const filename = 'video.webm';
+                    const filename = buildVideoExportFilename(videoSettings.projectName, 'webm');
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
@@ -1428,12 +1478,15 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
     const performVideoExport = async (
         videoSettings: VideoSettings,
         fileStream: FileSystemWritableFileStream | undefined,
+        allAssetsReadyAt: number,
         signal?: AbortSignal,
         revealGate?: VfxExportPostRevealSync
     ): Promise<boolean> => {
         const { startFrame, endFrame, frameRate, width, height, bitrate } = videoSettings;
         const profiler = new ExportProfiler();
-        const totalDuration = videoSettings.totalDuration ?? global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+        const includeVfx = videoSettings.includeVfx !== false;
+        const timelinePlan = resolveTimelinePlan(videoSettings, includeVfx, allAssetsReadyAt);
+        const totalDuration = timelinePlan.totalDuration;
         const totalFrames = Math.ceil(totalDuration * frameRate);
         let didAbort = false;
 
@@ -1483,7 +1536,7 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
             try {
                 // 渲染所有帧（完全离线渲染，不影响主 viewer）
                 profiler.startPhase('renderAllFrames');
-                await renderAllFrames(frameProcessor, encoder, videoSettings, renderManager, profiler, signal, revealGate);
+                await renderAllFrames(frameProcessor, encoder, videoSettings, renderManager, allAssetsReadyAt, profiler, signal, revealGate);
                 profiler.endPhase();
 
                 didAbort = signal?.aborted === true;
@@ -1539,7 +1592,7 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
             }
 
             // 处理下载（如果没有文件流）
-            await handleDownload(output, target as BufferTarget, fileStream, encoderConfig.fileExtension);
+            await handleDownload(output, target as BufferTarget, fileStream, encoderConfig.fileExtension, videoSettings.projectName);
 
             return true;
         } finally {
@@ -1567,7 +1620,32 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
             includeVfx && !(videoSettings.useFastExport && videoSettings.fixVfxAtEnd);
         const hadRevealEffect = global.state.hasRevealEffect;
         // 新建门控实例；Reveal 时间源由 initVideoExport 注入的 getRevealExportTimingSource 提供
-        const revealGate = createVfxExportPostRevealSync(getRevealExportTimingSource());
+        const revealSource = getRevealExportTimingSource();
+        const revealGate = createVfxExportPostRevealSync(revealSource);
+        // 导出入口统一等待资产就绪，并将等待耗时传给 timeline resolver 作为基准时间。
+        const readyWaitResult = await getAssetLoader(global).waitAllReady();
+        // 以导出入口触发时刻为时间零点，记录“资产全部就绪”的真实时刻（秒）。
+        const allAssetsReadyAt = Math.max(0, readyWaitResult.waitMs / 1000);
+        if (isExportNightDebugEnabled()) {
+            let threshold: number | null = null;
+            try {
+                threshold = revealSource ? Number(revealSource.getPostRevealContentThresholdSec()) : null;
+            } catch {
+                threshold = null;
+            }
+            console.log('[ExportNightDebug][VideoExport] export start', {
+                includeVfx,
+                includeVfxTimeline,
+                format: videoSettings.format,
+                useFastExport: !!videoSettings.useFastExport,
+                totalDuration: videoSettings.totalDuration,
+                allAssetsReadyAt,
+                stateHasRevealEffect: global.state.hasRevealEffect,
+                stateVfxType: (global.state as any).vfxType,
+                revealIsTimed: revealSource ? revealSource.isTimedEffect() : null,
+                revealThresholdSec: threshold
+            });
+        }
 
         // 先锁 viewer，避免 revealRestart 与首帧编码之间仍按正常帧渲染出一帧「带标注/资产」的画面
         stateAny.isExportingVfxVideo = true;
@@ -1585,25 +1663,36 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
 
         try {
             if (videoSettings.useFastExport) {
-                return await performVideoExportFast(videoSettings, fileStream, activeAbort.signal, revealGate);
+                return await performVideoExportFast(videoSettings, fileStream, allAssetsReadyAt, activeAbort.signal, revealGate);
             }
-            return await performVideoExport(videoSettings, fileStream, activeAbort.signal, revealGate);
+            return await performVideoExport(videoSettings, fileStream, allAssetsReadyAt, activeAbort.signal, revealGate);
         } catch (error) {
             await handleExportError(error);
             return false;
         } finally {
             // 恢复编辑层显示；若导出过短未触发帧内 revealComplete，此处补发，避免 Bloom 等仍认为在 reveal 中
             revealGate.finalizeAfterExport(global, { includeVfx, hadRevealEffect });
+            if (isExportNightDebugEnabled()) {
+                console.log('[ExportNightDebug][VideoExport] export finalize', {
+                    includeVfx,
+                    hadRevealEffect,
+                    isExportingBeforeUnlock: !!stateAny.isExportingVfxVideo
+                });
+            }
             cleanup();
 
             // 恢复锁
             stateAny.isExportingVfxVideo = prevExporting;
 
-            // 延后到下一帧再恢复；用 restoreAfterExport 区分 Timed/非 Timed，避免非 Timed 黑屏；恢复动画播放状态
+            // 延后到下一帧再恢复：
+            // - includeVfx=true：导出前会 revealRestart，从 0 录制到结束；导出后不应再回跳旧时间并自动续播（会出现“再播一遍”）。
+            // - includeVfx=false：维持既有恢复策略，回到导出前时间/播放状态。
             requestAnimationFrame(() => {
-                seekAnimToTimeAndApply(global, prevEffectTime);
-                global.events.fire('effectTimeline:restoreAfterExport', prevEffectTime);
-                global.events.fire('effectPlayPause:set', prevEffectPaused);
+                if (!includeVfx) {
+                    seekAnimToTimeAndApply(global, prevEffectTime);
+                    global.events.fire('effectTimeline:restoreAfterExport', prevEffectTime);
+                    global.events.fire('effectPlayPause:set', prevEffectPaused);
+                }
                 stateAny.animationPaused = prevAnimationPaused;
             });
             // 清理导出句柄

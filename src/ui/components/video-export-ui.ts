@@ -184,9 +184,11 @@ export function initVideoExportUI(global: Global): () => void {
                 return;
             }
             let fileStream: FileSystemWritableFileStream | undefined;
-            const opts = useFastExport
-                ? { types: [{ description: 'WebM Video', accept: { 'video/webm': ['.webm'] } }], suggestedName: 'vfx-timeline.webm' }
-                : { types: [{ description: 'Video File', accept: { 'video/mp4': ['.mp4'] } }], suggestedName: 'vfx-timeline.mp4' };
+            // 快速导出与离线导出均走 `format: 'mp4'` + WebCodecs 实时封装；保存对话框必须与扩展名一致，否则会选 .mp4 却写入 WebM 或反之。
+            const opts = {
+                types: [{ description: 'MP4 Video', accept: { 'video/mp4': ['.mp4'] } }],
+                suggestedName: 'vfx-timeline.mp4'
+            };
             const handle = await (window as any).showSaveFilePicker(opts);
             fileStream = await handle.createWritable();
             events.fire('render.video', videoSettings, fileStream as any);

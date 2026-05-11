@@ -26,6 +26,9 @@ import {
 } from './edit-history';
 import type { ExperienceSettings } from './schemas/v2';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
+import { resolveExportTimelinePlan } from './render/export-timeline-resolver';
+import { buildVideoExportFilename } from './render/video-export';
+import { getAssetLoader } from './loaders/asset-loader';
 import type { CommandRegistry } from './editor-modules/command-registry';
 import { uploadProjectData } from './universe/service';
 
@@ -94,7 +97,7 @@ type InboundPayload =
     | { type: 'VFX_TYPE_SET'; value?: string }
     | { type: 'VFX_EXIT' }
     | { type: 'VFX_RESTART'; restartAnim?: boolean }
-    | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean }
+    | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean; projectName?: string }
     | { type: 'VIDEO_EXPORT_CANCEL' };
 
 const postToParent = (type: string, data?: Record<string, unknown>) => {
@@ -538,19 +541,34 @@ const initPostMessageBridge = (global: Global) => {
             break;
         }
         case 'VIDEO_EXPORT_START': {
+            const projectName =
+                typeof (p as { projectName?: unknown }).projectName === 'string'
+                    ? (p as { projectName: string }).projectName
+                    : undefined;
             console.log('[MessageBridge] VIDEO_EXPORT_START → start export pipeline', {
-                includeVfx: (p as any).includeVfx !== false
+                includeVfx: (p as any).includeVfx !== false,
+                projectName
             });
             const includeVfx = (p as any).includeVfx !== false;
+            const waitResult = await getAssetLoader(global).waitAllReady();
+            // 与视频导出执行层保持一致：使用导出入口等待得到的真实就绪时刻（秒）。
+            const allAssetsReadyAt = Math.max(0, waitResult.waitMs / 1000);
             const resolution = { width: 1920, height: 1080 };
             const width = resolution.width % 2 === 0 ? resolution.width : resolution.width - 1;
             const height = resolution.height % 2 === 0 ? resolution.height : resolution.height - 1;
-            // 默认导出时长：VFX 总时长为下限；animTrack 更长则用 animTrack，更短则仍导出满 VFX totalDuration
+            // 导出时长统一交给 timeline resolver 决策，避免 message-bridge 与导出执行层各自维护策略。
             const vfxDuration = global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
             const animDuration = (global.state as any).animationDuration as number | undefined;
-            const hasAnim =
-                typeof animDuration === 'number' && Number.isFinite(animDuration) && animDuration > 0;
-            const totalDuration = hasAnim ? Math.max(animDuration, vfxDuration) : vfxDuration;
+            const animLoopMode = ((global.settings as any)?.animTracks?.[0]?.loopMode as 'none' | 'repeat' | 'pingpong' | undefined) ?? 'repeat';
+            const totalDuration = resolveExportTimelinePlan({
+                includeVfx,
+                syncAnimTrack: true,
+                vfxDuration,
+                requestedTotalDuration: vfxDuration,
+                animDuration,
+                animLoopMode,
+                allAssetsReadyAt
+            }).totalDuration;
             const videoSettings = {
                 startFrame: 0,
                 endFrame: 0,
@@ -567,7 +585,8 @@ const initPostMessageBridge = (global: Global) => {
                 syncAnimTrack: true,
                 totalDuration,
                 includeVfx,
-                useFastExport: true
+                useFastExport: true,
+                projectName
             };
             // 有 File System Access API 时先选保存路径；否则走无 fileStream 导出，由 video-export 在 finalize 后触发浏览器下载
             if (!('showSaveFilePicker' in window)) {
@@ -578,7 +597,7 @@ const initPostMessageBridge = (global: Global) => {
             try {
                 const handle = await (window as any).showSaveFilePicker({
                     types: [{ description: 'MP4 Video', accept: { 'video/mp4': ['.mp4'] } }],
-                    suggestedName: 'vfx-timeline.mp4'
+                    suggestedName: buildVideoExportFilename(projectName, 'mp4')
                 });
                 const fileStream = await handle.createWritable();
                 events.fire('render.video', videoSettings, fileStream as any);

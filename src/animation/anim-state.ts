@@ -85,7 +85,10 @@ class AnimState {
         this.looping = looping;
         this.loopFrames = loopFrames;
         this.defaultFov = defaultFov;
-        this.cursor.reset(duration, loopMode);
+        // repeat + 首尾接缝：周期 = 轨道 duration + fl_loopTimeSeconds，混合播完后再取模回到起点
+        const cursorPeriodSec =
+            duration + (looping && loopFrames > 0 ? loopFrames / frameRate : 0);
+        this.cursor.reset(cursorPeriodSec, loopMode);
         this.frameRate = frameRate;
     }
 
@@ -168,6 +171,13 @@ class AnimState {
             return;
         }
 
+        const extendedCycleFrames =
+            this.durationFrames + (this.looping && this.loopFrames > 0 ? this.loopFrames : 0);
+        if (this.looping && this.loopFrames > 0 && frame >= blendEnd && frame < extendedCycleFrames) {
+            this.setFromKey(0);
+            return;
+        }
+
         if (this.interpolation === 'step') {
             const { seg } = this.findSegment(frame);
             this.setFromKey(seg);
@@ -236,9 +246,10 @@ class AnimState {
         }
 
         const spline = CubicSpline.fromPoints(times, points, smoothness);
-        const loopSecondsRaw = (track as any).fl_loopTimeSeconds;
+        const loopSecondsRaw = track.fl_loopTimeSeconds;
         const loopFrames = Number.isFinite(loopSecondsRaw) ? Math.max(0, loopSecondsRaw * frameRate) : 0;
-        const loopingFlag = (track as any).fl_loop;
+        const loopingFlag = track.fl_loop;
+        // repeat + 默认开启接缝混合；仅当 fl_loop === false 时关闭（仍 repeat 时间，但不插值末→首）
         const looping = loopMode === 'repeat' && (typeof loopingFlag === 'boolean' ? loopingFlag : true);
 
         return new AnimState(
