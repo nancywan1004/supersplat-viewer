@@ -404,7 +404,7 @@ class Viewer {
             
             cameraEntity.camera.fov = camera.fov;
 
-            cameraEntity.camera.horizontalFov = graphicsDevice.width > graphicsDevice.height;
+            //cameraEntity.camera.horizontalFov = graphicsDevice.width > graphicsDevice.height;
 
             // fit clipping planes to bounding box
             const boundRadius = sceneBound.halfExtents.length();
@@ -1021,8 +1021,6 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
                             // debug colorize lods
                             gsplat.colorizeLod = config.colorize;
-
-                            (gsplat as any).gpuSorting = config.gpusort;
 
                             // 触发 firstFrame 事件
                             events.fire('firstFrame');

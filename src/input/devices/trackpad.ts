@@ -44,9 +44,9 @@ class TrackpadDevice implements InputDevice {
         if (mode === 'orbit') {
             // route everything
         } else if (isFirstPersonMode && !hasZoomModifier) {
-            // route swipes (with or without shift) to look-around;
-            // pinch / Ctrl+swipe fall through to forward/back. Shift is a
-            // WASD speed modifier in these modes, not a gesture modifier.
+            // In first-person modes, treat two-finger forward/back swipe as
+            // forward/back movement (not pitch rotation). Keep horizontal
+            // swipe for yaw so look-around still works naturally.
         } else {
             return;
         }
@@ -74,12 +74,13 @@ class TrackpadDevice implements InputDevice {
                 this._orbit[1] += deltaY;
             }
         } else {
-            // fly / walk: always rotate (shift is a speed modifier, not a gesture)
+            // fly / walk:
+            // - vertical swipe -> forward/back movement
+            // - horizontal swipe is ignored (do not rotate)
             if (mode === 'fly') {
                 this._global!.events.fire('navigateCancel');
             }
-            this._orbit[0] += deltaX;
-            this._orbit[1] += deltaY;
+            this._zoom += deltaY;
         }
     };
 
@@ -131,11 +132,9 @@ class TrackpadDevice implements InputDevice {
             const zoomZ = this._zoom * this.wheelSpeed * this.trackpadZoomSensitivity * DISPLACEMENT_SCALE;
             deltas.move.append([0, 0, zoomZ]);
         } else if (isFirstPerson) {
-            // fly / walk look-around (only the no-modifier swipe is captured;
-            // pinch / Ctrl-swipe fall through to the wheel→forward path)
-            const v = tmpV.set(this._orbit[0], this._orbit[1], 0);
-            v.mulScalar(this.orbitSpeed * orbitFactor * this.trackpadOrbitSensitivity * DISPLACEMENT_SCALE);
-            deltas.rotate.append([v.x, v.y, 0]);
+            // fly / walk trackpad swipe only drives forward/back movement.
+            const forwardZ = -this._zoom * this.wheelSpeed * this.trackpadZoomSensitivity * DISPLACEMENT_SCALE;
+            deltas.move.append([0, 0, forwardZ]);
         }
 
         this._orbit[0] = this._orbit[1] = 0;

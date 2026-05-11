@@ -7,11 +7,6 @@ import { TAP_EPSILON } from '../shared';
 
 const tmpV = new Vec3();
 
-const canTargetFly = (global: Global) => (
-    global.state.cameraMode === 'fly' &&
-    !(global.state.inputMode === 'desktop' && global.state.gamingControls)
-);
-
 // Mirror gaming-controls speed modifiers: shift = run/boost, ctrl = crawl/slow.
 // Multipliers match keyboard-mouse.ts so click-nav and held-key movement feel the same.
 const computeClickSpeedMul = (event: MouseEvent | undefined, mode: string): number => {
@@ -68,11 +63,9 @@ class NavInteraction {
         const canvas = this._canvas;
         if (!global || !canvas) return;
         const { state } = global;
-        const canClickTarget = state.inputMode === 'desktop' && (
-            (state.cameraMode === 'walk' && !state.gamingControls) ||
-            canTargetFly(global) ||
-            state.cameraMode === 'orbit'
-        );
+        const canClickTarget = state.inputMode === 'desktop' &&
+            state.cameraMode === 'walk' &&
+            !state.gamingControls;
         if (canClickTarget) {
             canvas.style.cursor = this._mouseClickTracking ? 'default' : 'pointer';
         } else {
@@ -130,18 +123,6 @@ class NavInteraction {
         return null;
     }
 
-    private async _flyToPickedPosition(offsetX: number, offsetY: number, event?: MouseEvent) {
-        const global = this._global;
-        if (!global || !canTargetFly(global)) return;
-
-        const request = ++this._targetPickRequest;
-        const target = await this._pickSceneTarget(offsetX, offsetY);
-        if (target && request === this._targetPickRequest && this._global && canTargetFly(this._global)) {
-            const speedMul = computeClickSpeedMul(event, this._global.state.cameraMode);
-            this._global.events.fire('navigateTo', target.position, target.normal, speedMul);
-        }
-    }
-
     private async _focusPickedPosition(offsetX: number, offsetY: number) {
         const global = this._global;
         if (!global || global.state.cameraMode !== 'orbit') return;
@@ -197,7 +178,7 @@ class NavInteraction {
             const prev = this._mouseClickDelta;
             this._mouseClickDelta += Math.abs(event.movementX) + Math.abs(event.movementY);
             if (prev < TAP_EPSILON && this._mouseClickDelta >= TAP_EPSILON) {
-                if ((state.cameraMode === 'walk' && !state.gamingControls) || canTargetFly(global)) {
+                if (state.cameraMode === 'walk' && !state.gamingControls) {
                     events.fire('navigateCancel');
                 }
             }
@@ -223,8 +204,6 @@ class NavInteraction {
                         const speedMul = computeClickSpeedMul(event, state.cameraMode);
                         events.fire('navigateTo', result.position, result.normal, speedMul);
                     }
-                } else if (state.cameraMode === 'fly') {
-                    this._flyToPickedPosition(this._lastPointerOffsetX, this._lastPointerOffsetY, event);
                 } else if (state.cameraMode === 'orbit') {
                     this._focusPickedPosition(this._lastPointerOffsetX, this._lastPointerOffsetY);
                 }
@@ -241,7 +220,7 @@ class NavInteraction {
         const { events, state } = global;
         // dblclick swaps the active mode and uses the picked target:
         //   fly          → orbit, focus orbit at point
-        //   orbit / walk → fly, navigate fly toward point
+        //   orbit / walk → fly (without click-to-fly target navigation)
         const request = ++this._targetPickRequest;
         const target = await this._pickSceneTarget(event.offsetX, event.offsetY);
         if (!target || request !== this._targetPickRequest) return;
@@ -254,9 +233,6 @@ class NavInteraction {
             events.fire('orbitTarget:set', target.position, target.normal);
         } else if (currentMode === 'orbit' || currentMode === 'walk') {
             state.cameraMode = 'fly';
-            // Modifiers apply against the destination mode (fly), not the source.
-            const speedMul = computeClickSpeedMul(event, 'fly');
-            events.fire('navigateTo', target.position, target.normal, speedMul);
         }
     };
 
@@ -274,8 +250,6 @@ class NavInteraction {
             if (result) {
                 events.fire('navigateTo', result.position, result.normal);
             }
-        } else if (state.cameraMode === 'fly') {
-            this._flyToPickedPosition(this._lastPointerOffsetX, this._lastPointerOffsetY);
         } else if (state.cameraMode === 'orbit') {
             this._focusPickedPosition(this._lastPointerOffsetX, this._lastPointerOffsetY);
         }

@@ -498,31 +498,25 @@ class CameraManager {
         state.hasAnimation = !!controllers.anim;
         state.animationDuration = controllers.anim ? controllers.anim.animState.cursor.duration : 0;
 
+        const initialInteractionMode: CameraMode = settings.initialCameraMode === 'fly' ? 'fly' : 'orbit';
+
         // initialize camera mode and initial camera position
-        // 优先使用配置中的 initialCameraMode，如果没有配置则按原有逻辑
+        // 有动画时以 anim 起播；动画被中断后统一回 initialInteractionMode。
         if (state.hasAnimation) {
             state.cameraMode = 'anim';
         } else {
-            // 读取配置中的初始相机模式，默认为 'orbit'
-            const initialMode = settings.initialCameraMode;
-            if (
-                initialMode === 'fly' ||
-                initialMode === 'orbit' ||
-                (initialMode === 'walk' && !!collision)
-            ) {
-                state.cameraMode = initialMode;
-            } else {
-                state.cameraMode = 'orbit'; // 默认值
-            }
+            state.cameraMode = initialInteractionMode;
         }
         this.camera.copy(resetCamera);
 
         const target = new Camera(this.camera);             // the active controller updates this
         const from = new Camera(this.camera);               // stores the previous camera state during transition
 
-        let fromMode: CameraMode = settings.initialCameraMode ?? 'orbit';
+        // 动画模式被打断后固定回 initialInteractionMode（不依赖 fromMode）。
+        const animFallbackMode: CameraMode = initialInteractionMode;
+        let fromMode: CameraMode = animFallbackMode;
         // tracks the mode to restore when exiting walk
-        let preWalkMode: CameraMode = settings.initialCameraMode ?? 'orbit';
+        let preWalkMode: CameraMode = animFallbackMode;
 
         // enter the initial controller
         getController(state.cameraMode).onEnter(this.camera);
@@ -746,12 +740,12 @@ class CameraManager {
                     break;
                 case 'cancel':
                     if (state.cameraMode === 'anim') {
-                        state.cameraMode = fromMode;
+                        state.cameraMode = animFallbackMode;
                     }
                     break;
                 case 'interrupt':
                     if (state.cameraMode === 'anim') {
-                        state.cameraMode = fromMode;
+                        state.cameraMode = animFallbackMode;
                     }
                     break;
             }

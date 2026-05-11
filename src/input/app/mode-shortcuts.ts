@@ -71,9 +71,6 @@ class ModeShortcuts {
                     if (!isCaptureMode(state.cameraMode)) {
                         state.cameraMode = 'fly';
                     }
-                    if (!state.gamingControls) {
-                        state.gamingControls = true;
-                    }
                 }
                 break;
         }

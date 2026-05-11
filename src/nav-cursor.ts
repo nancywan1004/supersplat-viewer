@@ -407,14 +407,7 @@ class NavCursor {
         this.canvas.addEventListener('pointerleave', this.onPointerLeave);
 
         const updateActive = () => {
-            const flyMouseCaptured = (
-                state.cameraMode === 'fly' &&
-                state.inputMode === 'desktop' &&
-                state.gamingControls
-            );
-            this.active = (state.cameraMode === 'walk' && !state.gamingControls) ||
-                          (state.cameraMode === 'fly' && !flyMouseCaptured) ||
-                          state.cameraMode === 'orbit';
+            this.active = state.cameraMode === 'walk' && !state.gamingControls;
             this.surfaceCursorVersion++;
             this.hoverRing.hide();
             if (state.inputMode !== 'desktop') {
