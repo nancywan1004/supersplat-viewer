@@ -259,7 +259,7 @@ button {
     bottom: 120px;
     left: 50%;
     transform: translate(-50%, 0);
-    width: min(380px, calc(100vw - 32px));
+    width: auto;
 
     display: flex;
     flex-direction: column;
