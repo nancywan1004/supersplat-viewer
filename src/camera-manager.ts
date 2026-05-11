@@ -559,9 +559,12 @@ class CameraManager {
             // Auto-switch from orbit to fly when zoomed to minimum distance
             // This allows seamless transition when user wants to get closer
             // Check target.distance (updated by orbit controller) not this.camera.distance
-            if (state.cameraMode === 'orbit' && transitionTimer >= 1) {
+            if (state.cameraMode === 'orbit') {
                 const minZoom = controllers.orbit.controller.zoomRange.x;
-                const minZoomThreshold = minZoom + 0.05;
+                // Trackpad dolly tends to approach min distance in smaller steps
+                // than mouse wheel; use a slightly wider threshold so continuous
+                // zoom-in still transitions to fly as expected.
+                const minZoomThreshold = minZoom + 0.2;
                 // target 为控制器本帧目标，this.camera 为插值后的当前值；二者取最小可覆盖偶发不同步。
                 const effectiveDistance = Math.min(target.distance, this.camera.distance);
 

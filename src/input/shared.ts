@@ -90,6 +90,66 @@ type UpdateContext = {
     touchCount: number;
 };
 
+type OrbitToFlyAutoSwitchOptions = {
+    minDistanceDelta?: number;
+    stuckFramesThreshold?: number;
+};
+
+/**
+ * Tracks orbit-zoom progress and detects when zoom-in intent is still active
+ * but the orbit distance stops decreasing (typically clamped at min zoom),
+ * which should trigger an auto-switch to fly mode.
+ */
+class OrbitToFlyAutoSwitchTracker {
+    private _lastOrbitDistance: number | null = null;
+
+    private _orbitZoomStuckFrames = 0;
+
+    private _minDistanceDelta: number;
+
+    private _stuckFramesThreshold: number;
+
+    constructor(options: OrbitToFlyAutoSwitchOptions = {}) {
+        this._minDistanceDelta = options.minDistanceDelta ?? 1e-3;
+        this._stuckFramesThreshold = options.stuckFramesThreshold ?? 2;
+    }
+
+    update(mode: CameraMode, distance: number, zoomingIn: boolean): boolean {
+        if (mode !== 'orbit') {
+            this.reset();
+            return false;
+        }
+
+        if (!zoomingIn) {
+            this._orbitZoomStuckFrames = 0;
+            this._lastOrbitDistance = distance;
+            return false;
+        }
+
+        let shouldSwitch = false;
+        if (this._lastOrbitDistance !== null) {
+            const distanceDelta = this._lastOrbitDistance - distance;
+            if (distanceDelta < this._minDistanceDelta) {
+                this._orbitZoomStuckFrames++;
+            } else {
+                this._orbitZoomStuckFrames = 0;
+            }
+            if (this._orbitZoomStuckFrames >= this._stuckFramesThreshold) {
+                shouldSwitch = true;
+                this._orbitZoomStuckFrames = 0;
+            }
+        }
+
+        this._lastOrbitDistance = distance;
+        return shouldSwitch;
+    }
+
+    reset(): void {
+        this._lastOrbitDistance = null;
+        this._orbitZoomStuckFrames = 0;
+    }
+}
+
 /** Common shape every input device implements. */
 interface InputDevice {
     attach(canvas: HTMLCanvasElement, global: Global): void;
@@ -102,6 +162,7 @@ export {
     TAP_EPSILON,
     screenToWorld,
     flipZForOrbit,
+    OrbitToFlyAutoSwitchTracker,
     CameraInputFrame,
     UpdateContext,
     InputDevice

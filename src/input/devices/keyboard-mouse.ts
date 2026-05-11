@@ -5,6 +5,7 @@ import type { Global } from '../../types';
 import {
     DISPLACEMENT_SCALE,
     flipZForOrbit,
+    OrbitToFlyAutoSwitchTracker,
     screenToWorld
 } from '../shared';
 import type { CameraInputFrame, InputDevice, UpdateContext } from '../shared';
@@ -70,6 +71,8 @@ class KeyboardMouseDevice implements InputDevice {
 
     private _flyKeyVelocity = new Vec3();
 
+    private _orbitToFlyAutoSwitch = new OrbitToFlyAutoSwitchTracker();
+
     /**
      * Get the underlying source so other code (PointerLockManager) can
      * toggle its private pointer-lock flag, which gates how it consumes
@@ -128,6 +131,11 @@ class KeyboardMouseDevice implements InputDevice {
             events.fire('navigateCancel');
         }
         if (!isFirstPerson && this._axis.length() > 0) {
+            events.fire('inputEvent', 'requestFirstPerson');
+        }
+        // When orbit zoom-in keeps receiving wheel intent but distance no longer
+        // decreases (clamped at min), auto-enter fly.
+        if (this._orbitToFlyAutoSwitch.update(mode, distance, wheel[0] < 0)) {
             events.fire('inputEvent', 'requestFirstPerson');
         }
 

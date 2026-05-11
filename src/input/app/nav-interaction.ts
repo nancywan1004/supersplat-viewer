@@ -204,8 +204,6 @@ class NavInteraction {
                         const speedMul = computeClickSpeedMul(event, state.cameraMode);
                         events.fire('navigateTo', result.position, result.normal, speedMul);
                     }
-                } else if (state.cameraMode === 'orbit') {
-                    this._focusPickedPosition(this._lastPointerOffsetX, this._lastPointerOffsetY);
                 }
             }
         }
@@ -250,8 +248,6 @@ class NavInteraction {
             if (result) {
                 events.fire('navigateTo', result.position, result.normal);
             }
-        } else if (state.cameraMode === 'orbit') {
-            this._focusPickedPosition(this._lastPointerOffsetX, this._lastPointerOffsetY);
         }
     };
 

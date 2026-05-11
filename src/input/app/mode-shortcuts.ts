@@ -66,6 +66,14 @@ class ModeShortcuts {
             case 'r':
                 events.fire('inputEvent', 'reset', event);
                 break;
+            case 'c':
+            case 'C':
+                if (state.cameraMode === 'fly') {
+                    state.cameraMode = 'orbit';
+                } else {
+                    state.cameraMode = 'fly';
+                }
+                break;
             default:
                 if (isWasdKey(event) && state.inputMode === 'desktop') {
                     if (!isCaptureMode(state.cameraMode)) {

@@ -3,6 +3,7 @@ import { Vec3 } from 'playcanvas';
 import type { Global } from '../../types';
 import {
     DISPLACEMENT_SCALE,
+    OrbitToFlyAutoSwitchTracker,
     screenToWorld
 } from '../shared';
 import type { CameraInputFrame, InputDevice, UpdateContext } from '../shared';
@@ -30,6 +31,8 @@ class TrackpadDevice implements InputDevice {
     private _pan: [number, number] = [0, 0];
 
     private _zoom: number = 0;
+
+    private _orbitToFlyAutoSwitch = new OrbitToFlyAutoSwitchTracker();
 
     private _onWheel = (event: WheelEvent) => {
         if (this._classifier.classify(event)) {
@@ -70,8 +73,7 @@ class TrackpadDevice implements InputDevice {
                 this._pan[0] += deltaX;
                 this._pan[1] += deltaY;
             } else {
-                this._orbit[0] += deltaX;
-                this._orbit[1] += deltaY;
+                this._zoom += deltaY;
             }
         } else {
             // fly / walk:
@@ -131,10 +133,19 @@ class TrackpadDevice implements InputDevice {
             // zoom along z; positive deltaY (scroll-down / pinch-in) → zoom out → +z for orbit
             const zoomZ = this._zoom * this.wheelSpeed * this.trackpadZoomSensitivity * DISPLACEMENT_SCALE;
             deltas.move.append([0, 0, zoomZ]);
+
+            // When orbit zoom-in keeps coming but distance no longer decreases
+            // (clamped at min), auto-enter fly.
+            if (this._orbitToFlyAutoSwitch.update('orbit', distance, this._zoom < 0)) {
+                this._global?.events.fire('inputEvent', 'requestFirstPerson');
+            }
         } else if (isFirstPerson) {
             // fly / walk trackpad swipe only drives forward/back movement.
             const forwardZ = -this._zoom * this.wheelSpeed * this.trackpadZoomSensitivity * DISPLACEMENT_SCALE;
             deltas.move.append([0, 0, forwardZ]);
+            this._orbitToFlyAutoSwitch.reset();
+        } else {
+            this._orbitToFlyAutoSwitch.reset();
         }
 
         this._orbit[0] = this._orbit[1] = 0;
