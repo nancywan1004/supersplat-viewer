@@ -70,7 +70,7 @@
     "typescript": "5.9.3"
   },
   "scripts": {
-    "vendor:playcanvas": "curl -fsSL -o public/vendor/playcanvas-2.16.1.js \"https://cdn.jsdelivr.net/npm/playcanvas@2.16.1/+esm\"",
+    "vendor:playcanvas": "curl -fsSL -o public/vendor/playcanvas-2.18.1.js \"https://cdn.jsdelivr.net/npm/playcanvas@2.18.1/+esm\"",
     "build": "rollup -c",
     "build:prod": "NODE_ENV=production rollup -c",
     "build:prod:obfuscate": "NODE_ENV=production OBFUSCATE=true rollup -c",
