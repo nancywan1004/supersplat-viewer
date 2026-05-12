@@ -187,6 +187,13 @@ class InputController {
         const { state } = this._global;
 
         if (state.cameraControlsEnabled === false) {
+            // 相机禁用时若整帧跳过各 device.update，则 PlayCanvas InputSource 的 read()
+            // 不会被调用，鼠标/触控/手柄增量会在底层 InputDelta 中持续 append；
+            // 解锁后首帧 read() 一次性吐出，表现为「松手 / pointer up 后相机跟着跳」。
+            this._keyboardMouse.drainBufferedInput();
+            this._touch.drainBufferedInput();
+            this._trackpad.drainBufferedInput();
+            this._gamepad.drainBufferedInput();
             this.frame = new InputFrame({
                 move: [0, 0, 0],
                 rotate: [0, 0, 0]

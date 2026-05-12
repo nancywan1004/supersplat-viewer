@@ -80,6 +80,16 @@ class TouchDevice implements InputDevice {
         }
     }
 
+    /**
+     * Same rationale as {@link KeyboardMouseDevice#drainBufferedInput}: consume
+     * {@link MultiTouchSource#read} while camera is suppressed so touch/pinch
+     * deltas do not stack across disabled frames.
+     */
+    drainBufferedInput(): void {
+        const { count } = this._source.read();
+        this._touchCount += count[0];
+    }
+
     update(ctx: UpdateContext, frame: CameraInputFrame): void {
         const { touch, pinch, count } = this._source.read();
         const { isFly, isWalk, isFirstPerson, isOrbit, gamingControls, dt, distance, cameraComponent } = ctx;

@@ -27,6 +27,10 @@ class GamepadDevice implements InputDevice {
         this._global = null;
     }
 
+    drainBufferedInput(): void {
+        this._source.read();
+    }
+
     update(ctx: UpdateContext, frame: CameraInputFrame): void {
         const { dt, cameraComponent, isFly, isFirstPerson } = ctx;
         const { leftStick, rightStick } = this._source.read();

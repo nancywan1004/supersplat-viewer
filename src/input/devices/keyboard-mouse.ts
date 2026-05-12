@@ -95,6 +95,20 @@ class KeyboardMouseDevice implements InputDevice {
         // its DOM listeners here.
     }
 
+    /**
+     * When camera input is suppressed (e.g. gizmo drag), {@link InputController}
+     * skips building a frame — but PlayCanvas {@link KeyboardMouseSource} still
+     * accumulates mouse/wheel deltas until {@link KeyboardMouseSource#read} runs.
+     * Call this each update while suppressed so the first frame after unlock does
+     * not apply a burst of buffered movement.
+     */
+    drainBufferedInput(): void {
+        if (!this._global) {
+            return;
+        }
+        this._source.read();
+    }
+
     update(ctx: UpdateContext, frame: CameraInputFrame): void {
         const { keyCode } = KeyboardMouseSource;
         const { key, button, mouse, wheel } = this._source.read();

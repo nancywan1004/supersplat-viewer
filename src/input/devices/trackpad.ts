@@ -114,6 +114,17 @@ class TrackpadDevice implements InputDevice {
         this._zoom = 0;
     }
 
+    /**
+     * Wheel events still fill internal accumulators while camera input is off;
+     * drop them so they are not applied on the first frame after unlock.
+     */
+    drainBufferedInput(): void {
+        this._orbit[0] = this._orbit[1] = 0;
+        this._pan[0] = this._pan[1] = 0;
+        this._zoom = 0;
+        this._orbitToFlyAutoSwitch.reset();
+    }
+
     update(ctx: UpdateContext, frame: CameraInputFrame): void {
         const { isOrbit, isFirstPerson, distance, cameraComponent } = ctx;
         const orbitFactor = isFirstPerson ? cameraComponent.fov / 120 : 1;
