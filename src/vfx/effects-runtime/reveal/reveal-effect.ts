@@ -16,7 +16,7 @@ import {
 } from '../../../settings-serialize/effects-sync';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../../../schemas/v2-custom';
 import { LegacyRevealEffect as RevealConfig } from '../../../settings';
-import { Global, REVEAL_EFFECT_TYPE_VALUES, type RevealEffectType } from '../../../types';
+import { Global, type RevealEffectType } from '../../../types';
 import type { ExperienceSettings } from '../../../schemas/v2';
 import type { EffectsRuntime } from '..';
 import { GsplatRevealGrowthWave } from './gsplat-growth-wave';
@@ -35,12 +35,6 @@ import { GsplatRevealSmooth } from './gsplat-reveal-smooth';
  *
  * **职责**：开场脚本时序与挂载、与 NightMode 首帧互斥、导出门控；基于 `reveal.example.mjs`。
  * **可持续型**（如 `perlin-wave`）：不在本文件声明为 `RevealEffectType`；挂载由 `viewer.ts` 调用 `persistent-effect.ts`，时间轴通过 `bindPersistentTimelineScript` 对齐。
- */
-/**
- * 与 `createEffect` 分派一致的一次性开场 `type` 集合；不含 `none`、不含可持续型。
- * `effects-runtime` 内置 reveal 轨与此同一 `Set` 语义对齐。
- */
-export const REVEAL_EFFECT_TYPES = new Set<string>(REVEAL_EFFECT_TYPE_VALUES);
 
 /** clipPadding: 建议扩展 far；nearMax: 建议 near 的上限。均为可选提示，不是强制值。 */
 export type RevealCameraClipHint = { clipPadding?: number; nearMax?: number };

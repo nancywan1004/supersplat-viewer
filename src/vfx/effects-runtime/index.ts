@@ -8,7 +8,7 @@ export {
     SCENE_GSPLAT_REVEAL_EFFECT_ID,
     SCENE_GSPLAT_PERSISTENT_EFFECT_ID
 } from './effects-runtime';
-export { PERSISTENT_EFFECT_TYPES as PERSISTENT_REVEAL_EFFECT_TYPES } from './persistent/persistent-effect';
+export { PERSISTENT_EFFECT_TYPES as PERSISTENT_REVEAL_EFFECT_TYPES } from './effect-types';
 export type { RevealRuntimeTrackKind, RevealRuntimeTrackSnapshot } from './effects-runtime';
 export { EffectRegistry } from './effect-registry';
 export type { EffectRegistryEntry, EffectGsplatContributionFactory } from './effect-registry';

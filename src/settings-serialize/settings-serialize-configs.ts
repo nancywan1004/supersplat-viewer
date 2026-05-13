@@ -1,7 +1,7 @@
 import type { BloomEditorSession } from '../schemas/v2';
 import type { EffectsSettings } from '../schemas/v2-custom';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../schemas/v2-custom';
-import { SCENE_GSPLAT_PERSISTENT_EFFECT_ID, SCENE_GSPLAT_REVEAL_EFFECT_ID } from '../vfx/effects-runtime/effects-runtime';
+import { SCENE_GSPLAT_PERSISTENT_EFFECT_ID, SCENE_GSPLAT_REVEAL_EFFECT_ID } from '../vfx/effects-runtime/effect-types';
 
 /** nightMode 子树缺省（`ensureNightMode`） */
 export const DEFAULT_NIGHT_MODE = { fade: 0 } as const;

@@ -7,7 +7,7 @@ import type { LegacyRevealEffect } from '../schemas/v2-custom';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../schemas/v2-custom';
 import type { RevealEffectRuntimeStatus, PersistentEffectRuntimeStatus } from '../vfx/effects-runtime/effect-types';
 import type { EffectsRuntimeState, PersistentEffectType, RevealEffectType, State } from '../types';
-import { SCENE_GSPLAT_PERSISTENT_EFFECT_ID, SCENE_GSPLAT_REVEAL_EFFECT_ID } from '../vfx/effects-runtime/effects-runtime';
+import { SCENE_GSPLAT_PERSISTENT_EFFECT_ID, SCENE_GSPLAT_REVEAL_EFFECT_ID } from '../vfx/effects-runtime/effect-types';
 import { hasRevealEffectFromSettings, isPersistentVfx } from '../vfx/effects-runtime/reveal/reveal-policy';
 import { DEFAULT_EFFECTS } from './settings-serialize-configs';
 import { ensureRevealEffect } from './settings-serialize-helper';

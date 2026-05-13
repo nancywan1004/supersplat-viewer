@@ -6,8 +6,8 @@
  * 2. **场景 GSplat reveal 旁路数据**（仅本运行时使用 + 少量模块直接 import 常量）：
  *    - `SCENE_GSPLAT_REVEAL_EFFECT_ID` / `SCENE_GSPLAT_PERSISTENT_EFFECT_ID`：
  *      协议 `EFFECT_*` 与 `settings.effects` 对齐的场景轨道包 id；
- *    - `PERSISTENT_EFFECT_TYPES`：持续型 reveal 类型集合（**定义于** `persistent/persistent-effect.ts`，本文件 import 供内置轨 provider）；
- *    - `REVEAL_EFFECT_TYPES`（**定义于** `reveal/reveal-effect.ts`）：一次性开场 reveal 类型集合，供内置 reveal 轨判定；
+ *    - `PERSISTENT_EFFECT_TYPES`：持续型 id 集合（**定义于** `effect-types.ts`），本文件 import 供内置 persistent 轨 provider；
+ *    - `REVEAL_EFFECT_TYPES`（**定义于** `effect-types.ts`）：一次性开场 reveal 类型集合，供内置 reveal 轨判定；
  *    - `BuiltinReveal*TrackProvider`：把「当前 effectType 算 reveal 轨还是 persistent 轨」封装成可测小类；
  *    - `RevealRuntimeTrackSnapshot`：调试 / 后续协议用的轨活跃快照。
  *
@@ -16,15 +16,11 @@
 import type { Global } from '../../types';
 import { EffectRegistry } from './effect-registry';
 import { GsplatEffectComposer } from './gsplat-effect-composer';
-import { PERSISTENT_EFFECT_TYPES } from './persistent/persistent-effect';
-import { REVEAL_EFFECT_TYPES } from './reveal/reveal-effect';
+import { PERSISTENT_EFFECT_TYPES, REVEAL_EFFECT_TYPES } from './effect-types';
 
 // --- 场景 GSplat reveal：协议 id、持久型集合、内置 reveal/persistent 轨判定 ---
 
-/** 协议与 `settings.effects.reveal` 共用的场景级 GSplat reveal 包 id */
-export const SCENE_GSPLAT_REVEAL_EFFECT_ID = 'scene.gsplat-reveal' as const;
-/** 协议与 `settings.effects.persistent` 共用的场景级 GSplat persistent 包 id */
-export const SCENE_GSPLAT_PERSISTENT_EFFECT_ID = 'scene.gsplat-persistent' as const;
+export { SCENE_GSPLAT_PERSISTENT_EFFECT_ID, SCENE_GSPLAT_REVEAL_EFFECT_ID } from './effect-types';
 
 /** 与 `settings.effects.reveal` / `persistent` 两轨对齐的槽位名（非通用 `EffectLifecycle`） */
 export type RevealRuntimeTrackKind = 'reveal' | 'persistent';

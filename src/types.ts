@@ -1,26 +1,15 @@
 import type { Entity, EventHandler, AppBase, Asset } from 'playcanvas';
 
 import type { ExperienceSettings } from './settings';
-import type {
-    AssetEffectRuntimeStatus,
-    RevealEffectRuntimeStatus,
-    PersistentEffectRuntimeStatus
+import {
+    type AssetEffectRuntimeStatus,
+    type RevealEffectRuntimeStatus,
+    type PersistentEffectRuntimeStatus,
+    PERSISTENT_EFFECT_TYPE_VALUES,
+    REVEAL_EFFECT_TYPE_VALUES
 } from './vfx/effects-runtime/effect-types';
 
-/** 一次性 reveal 类型清单（不含 persistent；不含 none） */
-export const REVEAL_EFFECT_TYPE_VALUES = [
-    'radial',
-    'rain',
-    'rain-v2',
-    'smooth',
-    'pieces-recover',
-    'integrate',
-    'growth-wave',
-    'sketch'
-] as const;
-
-/** 可持续 persistent 类型清单 */
-export const PERSISTENT_EFFECT_TYPE_VALUES = ['perlin-wave'] as const;
+export { PERSISTENT_EFFECT_TYPE_VALUES, REVEAL_EFFECT_TYPE_VALUES };
 
 /** 一次性 reveal 类型（含 none） */
 export type RevealEffectType = 'none' | (typeof REVEAL_EFFECT_TYPE_VALUES)[number];
