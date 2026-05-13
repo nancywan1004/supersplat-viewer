@@ -11,6 +11,7 @@ export {
 export { PERSISTENT_EFFECT_TYPES as PERSISTENT_REVEAL_EFFECT_TYPES } from './persistent/persistent-effect';
 export type { RevealRuntimeTrackKind, RevealRuntimeTrackSnapshot } from './effects-runtime';
 export { EffectRegistry } from './effect-registry';
+export type { EffectRegistryEntry, EffectGsplatContributionFactory } from './effect-registry';
 export { GsplatEffectComposer } from './gsplat-effect-composer';
 export type {
     GsplatContribution,
