@@ -4,7 +4,7 @@
  *
  * 与 viewer 的对应关系（正常浏览）：
  * - `hasRevealEffect` 时，`initAnnotations` / `initSceneAssets` 挂在 `revealComplete` 上，首屏不会立刻出现标注与场景资产。
- * - VFX 导出：**仅 Timed 类**（`RevealController.isTimedEffect()`）才按 `frameTime` 与阈值门控编辑叠加层；radial / smooth / rain 等非 Timed 导出全程视为「已过门控」，叠加层始终可见。
+ * - VFX 导出：**一次性 reveal**（`RevealController.isTimedEffect()`，即非 `none` 且非 persistent）按 `frameTime` 与阈值门控编辑叠加层；**仅 persistent**（如 perlin-wave）或 `none` 时门控不启用。
  *
  * 架构要点：
  * - `DeferredEditingLayerSpec`：单一职责的可视层，可增删或单测 mock。
@@ -14,6 +14,7 @@
 
 import type { Global } from '../types';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../schemas/v2-custom';
+import { getRevealTotalDuration } from '../settings-serialize/effects-sync';
 
 /** 与 `RevealController` 上用于导出门控的方法对齐（避免本模块依赖 Global 或整类循环引用时可只实现这两方法） */
 export type RevealExportTimingSource = {
@@ -79,7 +80,7 @@ function resolveThresholdSec(global: Global, reveal: RevealExportTimingSource | 
             return t;
         }
     }
-    return global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+    return getRevealTotalDuration(global.settings) ?? DEFAULT_VFX_TOTAL_DURATION;
 }
 
 /** 是否对本次导出做「按秒数隐藏编辑层 + synthetic revealComplete」门控（仅 Timed + 含 VFX + 有 reveal） */

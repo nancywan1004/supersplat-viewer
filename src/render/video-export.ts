@@ -9,6 +9,7 @@ import {
 } from './deferred-editing-visual-sync';
 import { resolveExportTimelinePlan, type AnimLoopMode } from './export-timeline-resolver';
 import { getAssetLoader } from '../loaders/asset-loader';
+import { getRevealActiveType, getPersistentEffectPaused, getRevealTotalDuration } from '../settings-serialize/effects-sync';
 
 /** `initVideoExport` 依赖注入：由组合根（如 index）在 Viewer 就绪后提供 */
 export type VideoExportInitOptions = {
@@ -932,7 +933,7 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
         return resolveExportTimelinePlan({
             includeVfx,
             syncAnimTrack: settings.syncAnimTrack !== false,
-            vfxDuration: global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION,
+            vfxDuration: getRevealTotalDuration(global.settings) ?? DEFAULT_VFX_TOTAL_DURATION,
             requestedTotalDuration: settings.totalDuration,
             animDuration,
             animLoopMode,
@@ -1612,7 +1613,7 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
         const stateAny = global.state as any;
         const prevExporting = stateAny.isExportingVfxVideo ?? false;
         const prevEffectTime = lastUiEffectTime;
-        const prevEffectPaused = stateAny.effectPaused ?? false;
+        const prevEffectPaused = getPersistentEffectPaused(global.state);
         const prevAnimationPaused = stateAny.animationPaused ?? false;
         const includeVfx = videoSettings.includeVfx !== false;
         // 与 performVideoExportFast 一致：fixVfxAtEnd 时不在时间轴上 scrub VFX，导出门控也不应按帧隐藏叠加层
@@ -1641,7 +1642,7 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
                 totalDuration: videoSettings.totalDuration,
                 allAssetsReadyAt,
                 stateHasRevealEffect: global.state.hasRevealEffect,
-                stateVfxType: (global.state as any).vfxType,
+                stateVfxType: getRevealActiveType(global.state),
                 revealIsTimed: revealSource ? revealSource.isTimedEffect() : null,
                 revealThresholdSec: threshold
             });

@@ -37,8 +37,13 @@ import { getAssetLoader } from './loaders/asset-loader';
 import { version as appVersion } from '../package.json';
 import { initPostMessageBridge } from './message-bridge';
 import { initVideoExport } from './render/video-export';
-import { hasRevealEffectFromSettings } from './reveal-policy';
 import { ensureRevealEffect } from './settings-serialize/settings-serialize-helper';
+import {
+    createDefaultEffectsRuntimeState,
+    normalizeEffectsOnImport,
+    syncEffectsRuntimeStateFromSettings,
+    hasRevealInSettings
+} from './settings-serialize/effects-sync';
 
 export { loadGsplatAsset };
 
@@ -301,8 +306,6 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         hasRevealEffect: false,
         showCameraPath: false,
         showCameraBoundingBox: false,
-        vfxActive: false,
-        vfxType: 'none' as State['vfxType'],
         editMode: false,
         previewMode: false,
         editLeftModule: null,
@@ -322,23 +325,24 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
 
         // 导出 VFX 视频时的锁，防止实时更新干扰离线渲染
         isExportingVfxVideo: false,
-        // 导出前 VFX 播放/暂停状态，导出结束后用于恢复（reveal 会在 setPlayPause 时同步）
-        effectPaused: false,
-        gamingControls: localStorage.getItem('gamingControls') === 'true'
+        gamingControls: localStorage.getItem('gamingControls') === 'true',
+        // 必须在 observe 初始 keys 内：Proxy 禁止新增顶层属性（见 core/observe.ts）
+        effectsRuntimeState: createDefaultEffectsRuntimeState()
     });
 
     // 如果设置了 noreveal 参数，清除 reveal effect 配置
     const processedSettings = importSettings(settingsJson);
     if (config.noreveal) {
         processedSettings.revealEffect = undefined;
+        delete (processedSettings as Record<string, unknown>).effects;
     } else {
         // 缺省 reveal 的 v2 等：补全 `revealEffect` 对象（见 DEFAULT_REVEAL_EFFECT）；transform 迁移路径已在 importSettings 内写入 radial
         ensureRevealEffect(processedSettings);
+        normalizeEffectsOnImport(processedSettings);
     }
 
-    state.hasRevealEffect = hasRevealEffectFromSettings(processedSettings.revealEffect);
-    const importedVfxType = processedSettings.revealEffect?.type;
-    state.vfxType = ((typeof importedVfxType === 'string' && importedVfxType) ? importedVfxType : 'none') as State['vfxType'];
+    state.hasRevealEffect = hasRevealInSettings(processedSettings);
+    syncEffectsRuntimeStateFromSettings(state, processedSettings);
 
     // 保留原始配置副本，供进入 Edit 模式时恢复使用（View 模式的临时修改不污染此副本）
     const originalSettings = JSON.parse(JSON.stringify(processedSettings)) as ExperienceSettings;

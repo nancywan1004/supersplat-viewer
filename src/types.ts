@@ -1,6 +1,57 @@
 import type { Entity, EventHandler, AppBase, Asset } from 'playcanvas';
 
 import type { ExperienceSettings } from './settings';
+import type {
+    AssetEffectRuntimeStatus,
+    RevealEffectRuntimeStatus,
+    PersistentEffectRuntimeStatus
+} from './vfx/effects-runtime/effect-types';
+
+/** 一次性 reveal 类型清单（不含 persistent；不含 none） */
+export const REVEAL_EFFECT_TYPE_VALUES = [
+    'radial',
+    'rain',
+    'rain-v2',
+    'smooth',
+    'pieces-recover',
+    'integrate',
+    'growth-wave',
+    'sketch'
+] as const;
+
+/** 可持续 persistent 类型清单 */
+export const PERSISTENT_EFFECT_TYPE_VALUES = ['perlin-wave'] as const;
+
+/** 一次性 reveal 类型（含 none） */
+export type RevealEffectType = 'none' | (typeof REVEAL_EFFECT_TYPE_VALUES)[number];
+
+/** 可持续 persistent 类型 */
+export type PersistentEffectType = 'none' |(typeof PERSISTENT_EFFECT_TYPE_VALUES)[number];
+
+/**
+ * 与 `settings.effects` 对应的运行态快照（不入库）；由导入/快照与 reveal 管线同步更新。
+ * **reveal 轨**：`activeType` / `status` 为真源（reveal 无 pause）。
+ * **persistent 轨**：**仅**用 `status: PersistentEffectRuntimeStatus` 表达运行态（`inactive/playing/paused`）；不再额外维护 `enabled` / `effectPaused`。
+ */
+export type EffectsRuntimeState = {
+    reveal: {
+        /** scene reveal 固定 effectId（当前写死为 `scene.gsplat-reveal`） */
+        activeEffectId: string;
+        /** 当前 scene reveal 类型（真源之一） */
+        activeType?: RevealEffectType;
+        status: RevealEffectRuntimeStatus;
+    };
+    persistent: {
+        /** scene persistent 固定 effectId（当前写死为 `scene.gsplat-reveal`） */
+        activeEffectId: string;
+        /** 当前运行中的 persistent 类型（无则为 `undefined`） */
+        activeType?: PersistentEffectType;
+        /** 可持续轨状态真源；`inactive` 表示未激活 */
+        status: PersistentEffectRuntimeStatus;
+    };
+    asset: { instances: Record<string, { effectId: string; status: AssetEffectRuntimeStatus }> };
+    lastError?: { code: string; message: string; effectId?: string; command?: string };
+};
 
 /** 资产库项类型 */
 export type AssetLibraryType = 'image' | 'mesh' | 'gaussian';
@@ -156,8 +207,6 @@ type State = {
     hasRevealEffect: boolean;
     showCameraPath: boolean;                    // show camera path visualization
     showCameraBoundingBox: boolean;            // show camera bounding box (animCoreBbox preferred, fallback to scene bbox)
-    vfxActive: boolean;                        // VFX effect active state
-    vfxType: 'none' | 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch';  // current effect type (includes reveal and VFX)
     syncAnimTrackOnExport?: boolean;           // 导出 VFX 视频时是否同步重播动画轨道（由 reveal-ui 设置，video-export-ui 读取）
     editMode: boolean;                         // true = 编辑模式（显示 rightToolBar），false = 观看模式
     /** 编辑预览模式：true 时隐藏编辑调试组件（操作轴、光源线框） */
@@ -182,6 +231,11 @@ type State = {
     /** 光源变换模式（与环境模块底部工具栏联动） */
     lightTransformMode?: LightTransformMode | null;
     gamingControls: boolean;
+    /**
+     * 特效运行态（与 `settings.effects` 三轨对齐）；不入 `settings.json`。
+     * reveal 写入 `patchRevealRuntimeMirror`；persistent 暂停写入 `patchPersistentRuntimeMirror`。
+     */
+    effectsRuntimeState?: EffectsRuntimeState;
 };
 
 /**

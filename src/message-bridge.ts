@@ -1,6 +1,6 @@
 /**
  * 父级↔Viewer 统一 postMessage 协议桥接
- * 事件名与 payload 以 docs/SaaS第三期 编辑模式交互职责划分.md 为准
+ * 特效入站：`EFFECT_*` + `module: 'effect'` 以 **docs/SaaS第四期编辑模式接口文档.md** 为准；其余命令仍以第三期职责划分文档为准。
  */
 
 import { Global } from './types';
@@ -26,11 +26,19 @@ import {
 } from './edit-history';
 import type { ExperienceSettings } from './schemas/v2';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
+import { EFFECTS_PROTOCOL_MODULE } from './vfx/effects-runtime/effect-types';
+import {
+    paramsPatchHasPersistentKeys,
+    paramsPatchHasRevealKeys,
+    SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+    SCENE_GSPLAT_REVEAL_EFFECT_ID
+} from './editor-modules/protocol-adapters/effects-protocol-adapter';
 import { resolveExportTimelinePlan } from './render/export-timeline-resolver';
 import { buildVideoExportFilename } from './render/video-export';
 import { getAssetLoader } from './loaders/asset-loader';
 import type { CommandRegistry } from './editor-modules/command-registry';
 import { uploadProjectData } from './universe/service';
+import { getRevealActiveType, getRevealTotalDuration } from './settings-serialize/effects-sync';
 
 /** 父级 → Viewer 的 postMessage payload 类型（按文档事件表） */
 type InboundPayload =
@@ -94,9 +102,9 @@ type InboundPayload =
     | { type: 'SHADOW_SET'; value?: boolean }
     | { type: 'SHADOW_INTENSITY_UPDATE'; value?: number }
     | { type: 'SHADOW_DIRECTION_SET'; value?: number }
-    | { type: 'VFX_TYPE_SET'; value?: string }
-    | { type: 'VFX_EXIT' }
-    | { type: 'VFX_RESTART'; restartAnim?: boolean }
+    | { type: 'EFFECT_PARAMS_PATCH'; module: 'effect'; effectId: string; params: Record<string, unknown> }
+    | { type: 'EFFECT_TOGGLE'; module: 'effect'; effectId: string; value: boolean }
+    | { type: 'EFFECT_REPLAY'; module: 'effect'; effectId: string; restartAnim?: boolean }
     | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean; projectName?: string }
     | { type: 'VIDEO_EXPORT_CANCEL' };
 
@@ -208,7 +216,7 @@ const initPostMessageBridge = (global: Global) => {
             if (value) {
                 editModeBaselineString = null;
                 // 进入编辑统一停播当前 VFX（timed / persistent 一致），并在退出编辑后恢复。
-                const hasVfxToResume = state.vfxType !== 'none';
+                const hasVfxToResume = getRevealActiveType(state) !== 'none';
                 if (hasVfxToResume) {
                     events.fire('vfxExit');
                 }
@@ -527,17 +535,70 @@ const initPostMessageBridge = (global: Global) => {
         case 'LIGHT_BRUSH_BLOOM_UPDATE':
             dispatchEnvironment(global, type, p);
             break;
-        case 'VFX_TYPE_SET':
-            if (typeof p.value === 'string') {
-                dispatchEffects(global, 'VFX_TYPE_SET', p.value);
+        case 'EFFECT_PARAMS_PATCH': {
+            if (p.module !== EFFECTS_PROTOCOL_MODULE) {
+                console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: module must be "effect"');
+                break;
             }
-            break;
-        case 'VFX_EXIT': {
-            dispatchEffects(global, 'VFX_EXIT');
+            if (p.effectId !== SCENE_GSPLAT_REVEAL_EFFECT_ID && p.effectId !== SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
+                console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: unsupported effectId', p.effectId);
+                break;
+            }
+            const params = (p as { params?: unknown }).params;
+            if (typeof params !== 'object' || params === null) {
+                console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: params must be object');
+                break;
+            }
+            const pr = { ...(params as Record<string, unknown>) };
+            const valid =
+                p.effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID
+                    ? paramsPatchHasRevealKeys(pr)
+                    : paramsPatchHasPersistentKeys(pr);
+            if (!valid) {
+                console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: invalid params for current effectId');
+                break;
+            }
+            dispatchEffects(global, 'EFFECT_PARAMS_PATCH', {
+                module: EFFECTS_PROTOCOL_MODULE,
+                effectId: p.effectId,
+                params: pr
+            });
             break;
         }
-        case 'VFX_RESTART': {
-            dispatchEffects(global, 'VFX_RESTART', { restartAnim: (p as any).restartAnim });
+        case 'EFFECT_TOGGLE': {
+            if (p.module !== EFFECTS_PROTOCOL_MODULE) {
+                console.warn('[MessageBridge] EFFECT_TOGGLE ignored: module must be "effect"');
+                break;
+            }
+            if (p.effectId !== SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
+                console.warn('[MessageBridge] EFFECT_TOGGLE ignored: unsupported effectId', p.effectId);
+                break;
+            }
+            if (typeof (p as { value?: unknown }).value !== 'boolean') {
+                console.warn('[MessageBridge] EFFECT_TOGGLE ignored: value must be boolean');
+                break;
+            }
+            dispatchEffects(global, 'EFFECT_TOGGLE', {
+                module: EFFECTS_PROTOCOL_MODULE,
+                effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+                value: (p as { value: boolean }).value
+            });
+            break;
+        }
+        case 'EFFECT_REPLAY': {
+            if (p.module !== EFFECTS_PROTOCOL_MODULE) {
+                console.warn('[MessageBridge] EFFECT_REPLAY ignored: module must be "effect"');
+                break;
+            }
+            if (p.effectId !== SCENE_GSPLAT_REVEAL_EFFECT_ID) {
+                console.warn('[MessageBridge] EFFECT_REPLAY ignored: unsupported effectId', p.effectId);
+                break;
+            }
+            dispatchEffects(global, 'EFFECT_REPLAY', {
+                module: EFFECTS_PROTOCOL_MODULE,
+                effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
+                restartAnim: (p as { restartAnim?: boolean }).restartAnim
+            });
             break;
         }
         case 'VIDEO_EXPORT_START': {
@@ -557,7 +618,7 @@ const initPostMessageBridge = (global: Global) => {
             const width = resolution.width % 2 === 0 ? resolution.width : resolution.width - 1;
             const height = resolution.height % 2 === 0 ? resolution.height : resolution.height - 1;
             // 导出时长统一交给 timeline resolver 决策，避免 message-bridge 与导出执行层各自维护策略。
-            const vfxDuration = global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+            const vfxDuration = getRevealTotalDuration(global.settings) ?? DEFAULT_VFX_TOTAL_DURATION;
             const animDuration = (global.state as any).animationDuration as number | undefined;
             const animLoopMode = ((global.settings as any)?.animTracks?.[0]?.loopMode as 'none' | 'repeat' | 'pingpong' | undefined) ?? 'repeat';
             const totalDuration = resolveExportTimelinePlan({

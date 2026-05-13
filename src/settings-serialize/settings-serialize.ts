@@ -2,6 +2,11 @@ import type { Global, ScenePlacedItem } from '../types';
 import type { ExperienceSettings } from '../schemas/v2';
 import type { AnnotationManager } from '../annotation-toolbar/annotation-manager';
 import { DEFAULT_BLOOM, DEFAULT_SHADOW } from './settings-serialize-configs';
+import {
+    flushRevealIntoEffectsForExport,
+    normalizeEffectsOnImport,
+    syncEffectsRuntimeStateFromSettings
+} from './effects-sync';
 
 const defaultPostEffectShadow = () => ({
     enabled: DEFAULT_SHADOW.enabled,
@@ -172,6 +177,11 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
 
     stripBloomSessionFieldsForPersistence(out);
 
+    if (out.version === 2) {
+        flushRevealIntoEffectsForExport(out as ExperienceSettings);
+        delete (out as Record<string, unknown>).revealEffect;
+    }
+
     return out as ExperienceSettings;
 }
 
@@ -202,7 +212,12 @@ export function getComparableSettingsStringFromSnapshot(snapshot: ExperienceSett
  * 将 global.settings 恢复为快照内容（原地替换属性），用于「不保存并退出」时回退。
  */
 export function applySettingsSnapshot(global: Global, snapshot: ExperienceSettings): void {
+    const hadRevealOrEffects = snapshot.revealEffect != null || snapshot.effects != null;
     const gs = global.settings as Record<string, unknown>;
     for (const k of Object.keys(gs)) delete gs[k];
     Object.assign(gs, snapshot);
+    if ((snapshot as { version?: number }).version === 2 && hadRevealOrEffects) {
+        normalizeEffectsOnImport(global.settings as ExperienceSettings);
+    }
+    syncEffectsRuntimeStateFromSettings(global.state, global.settings as ExperienceSettings);
 }

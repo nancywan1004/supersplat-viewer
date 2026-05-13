@@ -1,6 +1,8 @@
-import { Script, Color, Entity, Vec3, Mat4, Texture, PIXELFORMAT_RGBA8 } from 'playcanvas';
-import { GsplatShaderEffect } from '../gsplat-shader-effect';
+import { Script, Color, Entity, Vec3, Mat4, Texture, PIXELFORMAT_RGBA8, type Material } from 'playcanvas';
+import { GsplatShaderEffect } from '../effects-runtime/gsplat-shader-effect';
 import { collectPointLights, collectSpotLights } from '../../light';
+import type { EffectsRuntime } from '../effects-runtime';
+import { emptyShaderBlocks, type GsplatContribution } from '../effects-runtime/gsplat-contribution';
 
 /**
  * 单盏点/聚光：线性色单通道峰值上限。intensity 极大时按峰值等比缩小，保色相，避免 shader 里 sum 立刻顶满仍是一片死白 + ANGLE 数值风险。
@@ -777,6 +779,30 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
 }
 `;
 
+/** NightMode 在 GsplatEffectComposer 中的贡献者 id（与 M3 协议化 id 对齐） */
+const NIGHT_COMPOSER_ID = 'night-mode';
+
+/**
+ * 是否经 `GsplatEffectComposer` 下发 `gsplatModifyVS`（默认 **true**，M3 起为正式路径）。
+ *
+ * @deprecated 回退：设 `globalThis.__NIGHT_MODE_LEGACY_GSPLAT__ = true`，或 URL 参数 `?nightComposer=0` /
+ * `nightComposer=false`，恢复由 `GsplatShaderEffect.applyShaderToMaterial` **直连材质**（与 Reveal/VFX 仍互斥，后续将移除）。
+ */
+function nightModeUsesComposerPath(): boolean {
+    if ((globalThis as any).__NIGHT_MODE_LEGACY_GSPLAT__ === true) {
+        return false;
+    }
+    if (typeof window !== 'undefined') {
+        try {
+            const q = new URLSearchParams(window.location.search).get('nightComposer');
+            if (q === '0' || q === 'false') return false;
+        } catch {
+            // ignore
+        }
+    }
+    return true;
+}
+
 /**
  * Night mode effect for gaussian splats.
  * Creates a night mode lighting effect with ambient lighting and sphere-based lighting.
@@ -884,6 +910,12 @@ class NightMode extends GsplatShaderEffect {
     private manualFadeControl: boolean = true; // Slider-only control, no auto animation
     /** Reveal/VFX 互斥接管期间：禁止 NightMode 往 gsplatModifyVS 写入，避免与 VFX shader 冲突 */
     private suspendedByVfx: boolean = false;
+
+    /** composer 路径：上次 apply 时的材质数量（unified 动态增材质时触发再 apply） */
+    private _lastNightComposerMaterialCount = 0;
+
+    /** shader 变体（如 BloomBrush 开关）递增，驱动 compositionSignature 变化 */
+    private _nightComposerShaderRev = 0;
 
     private fireNightFadeChanged(source: 'set' | 'exit' | 'request' | 'applyFromSettings' | 'forceReapply') {
         // 唯一事件：带来源信息（确定性区分 exit vs set）
@@ -1000,6 +1032,91 @@ class NightMode extends GsplatShaderEffect {
         });
     }
 
+    private getEffectsRuntime(): EffectsRuntime | null {
+        return (this.app as any).effectsRuntime ?? null;
+    }
+
+    /** 与 updateEffect 中「是否挂载夜景 shader」判定一致，供 composer 同步使用 */
+    private nightShaderWanted(): boolean {
+        const global = (this.app as any).__global;
+        const pointLights = global ? collectPointLights(global) : [];
+        const spotLights = global ? collectSpotLights(global) : [];
+        const hasDynamicLocalLights = pointLights.length > 0 || spotLights.length > 0;
+        return Math.abs(this.nightFade) > 1e-6
+            || hasDynamicLocalLights
+            || (this.committedVolumeTexture != null && (this.committedVolumeEncodedBrightness || Math.abs(this.committedBrightness) > 1e-6))
+            || this.bloomBrushActive;
+    }
+
+    /** 将 NightMode 注册为 `full` 贡献者，或在不需时移除（不写材质；由 tryApply / applyShaders 写） */
+    private syncNightComposerContribution(): void {
+        if (!nightModeUsesComposerPath()) return;
+        const rt = this.getEffectsRuntime();
+        if (!rt) return;
+
+        if (this.suspendedByVfx || !this.nightShaderWanted()) {
+            rt.composer.removeContribution(NIGHT_COMPOSER_ID);
+            rt.composer.compose();
+            return;
+        }
+
+        const contrib: GsplatContribution = {
+            id: NIGHT_COMPOSER_ID,
+            priority: 100,
+            scope: 'scene',
+            enabled: true,
+            version: this._nightComposerShaderRev,
+            shaderBlocks: emptyShaderBlocks(),
+            source: 'full',
+            fullModifyGlsl: this.getShaderGLSL(),
+            fullModifyWgsl: this.getShaderWGSL(),
+            capabilities: { exclusiveWithLighting: true, requiresGsplatShaderSlot: true }
+        };
+        rt.composer.setContribution(contrib);
+        rt.composer.compose();
+    }
+
+    private tryApplyNightComposerToMaterials(): void {
+        if (!nightModeUsesComposerPath() || this.materialsApplied.size === 0) return;
+        const rt = this.getEffectsRuntime();
+        if (!rt) return;
+        const last = rt.composer.getLastComposition();
+        if (!last) return;
+        const countChanged = this.materialsApplied.size !== this._lastNightComposerMaterialCount;
+        if (last.signatureChanged || countChanged) {
+            rt.composer.applyComposedToMaterials(this.materialsApplied, last);
+            this._lastNightComposerMaterialCount = this.materialsApplied.size;
+        }
+    }
+
+    /**
+     * @deprecated 旧路径：直连 `material.getShaderChunks().set('gsplatModifyVS')`；默认已由 {@link nightModeUsesComposerPath} 关闭。
+     * 保留至移除 legacy 开关。
+     */
+    applyShaderToMaterial(material: Material) {
+        if (nightModeUsesComposerPath()) {
+            return;
+        }
+        super.applyShaderToMaterial(material);
+    }
+
+    removeShaders() {
+        if (nightModeUsesComposerPath()) {
+            const rt = this.getEffectsRuntime();
+            const mats = new Set(this.materialsApplied);
+            rt?.composer.removeContribution(NIGHT_COMPOSER_ID);
+            rt?.composer.compose();
+            const last = rt?.composer.getLastComposition();
+            if (last && mats.size > 0) {
+                rt!.composer.applyComposedToMaterials(mats, last);
+            }
+            this.materialsApplied.clear();
+            this._lastNightComposerMaterialCount = 0;
+            return;
+        }
+        super.removeShaders();
+    }
+
     applyShaders() {
         if (!this.splat?.gsplat) {
             console.warn('NightMode: splat entity not available');
@@ -1010,6 +1127,16 @@ class NightMode extends GsplatShaderEffect {
             this.applyToUnifiedMaterials();
         } else {
             this.applyToComponentMaterial();
+        }
+
+        if (nightModeUsesComposerPath()) {
+            this.syncNightComposerContribution();
+            const rt = this.getEffectsRuntime();
+            const last = rt?.composer.getLastComposition();
+            if (rt && last && this.materialsApplied.size > 0) {
+                rt.composer.applyComposedToMaterials(this.materialsApplied, last);
+                this._lastNightComposerMaterialCount = this.materialsApplied.size;
+            }
         }
     }
 
@@ -1097,6 +1224,9 @@ class NightMode extends GsplatShaderEffect {
             this._bloomBrushModelViewProj.data.set(modelViewProj);
         }
         if (prevActive !== active && this.materialsApplied.size > 0) {
+            if (nightModeUsesComposerPath()) {
+                this._nightComposerShaderRev++;
+            }
             this.removeShaders();
             this.applyShaders();
         }
@@ -1237,13 +1367,7 @@ class NightMode extends GsplatShaderEffect {
         const global = (this.app as any).__global;
         const pointLights = global ? collectPointLights(global) : [];
         const spotLights = global ? collectSpotLights(global) : [];
-        // 只要场景中存在启用的点光/聚光灯，就保持夜景 shader 挂载，
-        // 避免 nightFade=0 时局部灯光完全失效。
-        const hasDynamicLocalLights = pointLights.length > 0 || spotLights.length > 0;
-        const needShader = Math.abs(this.nightFade) > 1e-6
-            || hasDynamicLocalLights
-            || (this.committedVolumeTexture != null && (this.committedVolumeEncodedBrightness || Math.abs(this.committedBrightness) > 1e-6))
-            || this.bloomBrushActive;
+        const needShader = this.nightShaderWanted();
         if (!needShader && this.materialsApplied.size > 0) {
             // 必须真正从材质上移除 gsplatModifyVS；仅 clear 集合会留下旧 shader/uniform 残留
             this.removeShaders();
@@ -1398,6 +1522,11 @@ class NightMode extends GsplatShaderEffect {
             this.setCommittedUniforms();
         }
 
+        if (nightModeUsesComposerPath()) {
+            this.syncNightComposerContribution();
+            this.tryApplyNightComposerToMaterials();
+        }
+
         // ── 调亮/调暗联动（TS 侧）──
         // 主光：基准强度来自 settings，再乘 (1 + nightFade)。调亮时主光变强，调暗时变弱。
         // Bloom：统一由 settings 控制（configureCamera → applyToCameraFrame），调亮/调暗都使用同一套强度，不在此处改写。
@@ -1473,6 +1602,11 @@ class NightMode extends GsplatShaderEffect {
     }
 
     destroy() {
+        if (nightModeUsesComposerPath()) {
+            const rt = this.getEffectsRuntime();
+            rt?.composer.removeContribution(NIGHT_COMPOSER_ID);
+            rt?.composer.compose();
+        }
         if (this._samplerFallback) {
             this._samplerFallback.destroy();
             this._samplerFallback = null;

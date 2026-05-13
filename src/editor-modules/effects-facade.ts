@@ -1,4 +1,14 @@
-import { applyVfxExit, applyVfxTypeSet } from './protocol-adapters/effects-protocol-adapter';
+import {
+    applyGsplatRevealParamsPatch,
+    applyGsplatPersistentParamsPatch,
+    isEffectProtocolEnvelope,
+    paramsPatchHasRevealKeys,
+    paramsPatchHasPersistentKeys,
+    SCENE_GSPLAT_REVEAL_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_EFFECT_ID
+} from './protocol-adapters/effects-protocol-adapter';
+import { readRevealParams } from '../settings-serialize/effects-sync';
+import { isPersistentVfx } from '../vfx/effects-runtime/reveal/reveal-policy';
 import type { Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 
 class EffectsFacade implements ModuleFacade {
@@ -24,16 +34,40 @@ class EffectsFacade implements ModuleFacade {
     handleCommand(ctx: ModuleContext, command: ModuleCommand): void {
         const { global, events } = ctx;
         switch (command.type) {
-        case 'VFX_TYPE_SET':
-            if (typeof command.payload === 'string') {
-                applyVfxTypeSet(global, command.payload);
+        case 'EFFECT_PARAMS_PATCH': {
+            const raw = command.payload;
+            if (!isEffectProtocolEnvelope(raw)) break;
+            const params = (raw as { params?: unknown }).params;
+            if (typeof params !== 'object' || params === null) break;
+            const pr = params as Record<string, unknown>;
+            if (raw.effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID) {
+                if (!paramsPatchHasRevealKeys(pr)) break;
+                applyGsplatRevealParamsPatch(global, pr);
+            } else if (raw.effectId === SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
+                if (!paramsPatchHasPersistentKeys(pr)) break;
+                applyGsplatPersistentParamsPatch(global, pr);
+            } else {
+                break;
             }
             break;
-        case 'VFX_EXIT':
-            applyVfxExit(global);
+        }
+        case 'EFFECT_TOGGLE': {
+            const raw = command.payload;
+            if (!isEffectProtocolEnvelope(raw)) break;
+            if (raw.effectId !== SCENE_GSPLAT_PERSISTENT_EFFECT_ID) break;
+            const value = (raw as { value?: unknown }).value;
+            if (typeof value !== 'boolean') break;
+            applyGsplatPersistentParamsPatch(global, { enabled: value });
             break;
-        case 'VFX_RESTART': {
-            const restartAnim = (command.payload as { restartAnim?: boolean } | undefined)?.restartAnim !== false;
+        }
+        case 'EFFECT_REPLAY': {
+            const raw = command.payload;
+            if (!isEffectProtocolEnvelope(raw)) break;
+            if (raw.effectId !== SCENE_GSPLAT_REVEAL_EFFECT_ID) break;
+            const revealType = (readRevealParams(global.settings)?.type ?? 'none') as string;
+            // EFFECT_REPLAY 仅对一次性 reveal 生效；persistent-only 场景应忽略。
+            if (revealType === 'none' || isPersistentVfx(revealType)) break;
+            const restartAnim = (raw as { restartAnim?: boolean }).restartAnim !== false;
             events.fire('revealRestart', restartAnim);
             break;
         }

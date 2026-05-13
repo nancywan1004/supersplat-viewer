@@ -1,5 +1,5 @@
 import { Mat4 } from 'playcanvas';
-import { GsplatShaderEffect } from './gsplat-shader-effect';
+import { GsplatShaderEffect } from '../effects-runtime/gsplat-shader-effect';
 import type { Texture } from 'playcanvas';
 import type { Entity } from 'playcanvas';
 

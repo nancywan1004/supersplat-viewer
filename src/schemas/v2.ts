@@ -2,7 +2,7 @@ import type {
     LodSettings,
     LodPreset,
     LodPlatform,
-    RevealEffect,
+    LegacyRevealEffect,
     TransformFrame,
     PointLightConfig,
     DirectionalLightConfig,
@@ -10,7 +10,8 @@ import type {
     LightingSettings,
     SceneAsset,
     LocalLightRegion,
-    WorldSpaceBloomRegionJSON
+    WorldSpaceBloomRegionJSON,
+    EffectsSettings
 } from './v2-custom';
 import {
     assertObject,
@@ -134,7 +135,12 @@ type ExperienceSettings = {
     annotations: Annotation[],
     startMode: 'default' | 'animTrack' | 'annotation',
     hasStartPose?: boolean,
-    revealEffect?: RevealEffect,
+    /**
+     * @deprecated 仅导入旧数据时读取；运行期与导出真源均为 `settings.effects`。
+     */
+    revealEffect?: LegacyRevealEffect,
+    /** 三轨特效持久化；scene reveal **以本节点为导出真源**；`revealEffect` 仅旧数据导入读兼容 */
+    effects?: EffectsSettings,
     lodSettings?: LodSettings,
     lighting?: LightingSettings,
     nightMode?: {
@@ -287,6 +293,25 @@ const validateV2 = (data: unknown): ExperienceSettings => {
 
     assertEnum(obj.startMode, START_MODES, 'settings.startMode');
 
+    if (obj.effects !== undefined) {
+        const ef = assertObject(obj.effects, 'settings.effects');
+        const reveal = assertObject(ef.reveal, 'settings.effects.reveal');
+        assertString(reveal.activeEffectId, 'settings.effects.reveal.activeEffectId');
+        if (typeof reveal.paramsById !== 'object' || reveal.paramsById === null) {
+            throw new Error('settings.effects.reveal.paramsById must be an object');
+        }
+        const pers = assertObject(ef.persistent, 'settings.effects.persistent');
+        assertString(pers.activeEffectId, 'settings.effects.persistent.activeEffectId');
+        assertBoolean(pers.enabled, 'settings.effects.persistent.enabled');
+        if (typeof pers.paramsById !== 'object' || pers.paramsById === null) {
+            throw new Error('settings.effects.persistent.paramsById must be an object');
+        }
+        const asset = assertObject(ef.asset, 'settings.effects.asset');
+        if (typeof asset.defaultParamsById !== 'object' || asset.defaultParamsById === null) {
+            throw new Error('settings.effects.asset.defaultParamsById must be an object');
+        }
+    }
+
     return data as ExperienceSettings;
 };
 
@@ -297,7 +322,8 @@ export type {
     Camera,
     Annotation,
     PostEffectSettings,
-    RevealEffect,
+    LegacyRevealEffect,
+    EffectsSettings,
     LodSettings,
     LodPreset,
     LodPlatform,

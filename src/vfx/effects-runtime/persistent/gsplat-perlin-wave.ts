@@ -1,5 +1,5 @@
 import { Vec3 } from 'playcanvas';
-import { GsplatShaderEffect } from './gsplat-shader-effect';
+import { GsplatShaderEffect } from '../gsplat-shader-effect';
 
 const shaderGLSL = /* glsl */`
 uniform float uTime;
@@ -178,7 +178,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
 /**
  * Perlin Wave reveal effect for gaussian splats.
  * Creates a wave-like motion effect using Perlin noise, with color modulation via 3D sine waves.
- * 
+ *
  * @example
  * // Add the script to a gsplat entity
  * entity.addComponent('script');

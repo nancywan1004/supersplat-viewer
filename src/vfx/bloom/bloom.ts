@@ -14,11 +14,11 @@ import { BloomBrushPainter } from './bloom-brush-painter';
 import { computeBrushView, type BrushView } from './brush-view';
 import { buildCommittedBrightnessVolume, buildCommittedBrightnessVolumeFromRegions, type CommittedPointWithBrightness } from './committed-brightness-volume';
 import { WorldSpaceBloomData } from './world-space-bloom-data';
-import { hasRevealEffectFromSettings } from '../reveal-policy';
-import type { LocalLightRegion, WorldSpaceBloomRegionJSON, ExperienceSettings } from '../schemas/v2';
-import type { PostEffectSettings } from '../settings';
-import { ensureBloomEditorSession } from '../settings-serialize/settings-serialize-helper';
-import type { Global } from '../types';
+import { hasRevealInSettings } from '../../settings-serialize/effects-sync';
+import type { LocalLightRegion, WorldSpaceBloomRegionJSON, ExperienceSettings } from '../../schemas/v2';
+import type { PostEffectSettings } from '../../settings';
+import { ensureBloomEditorSession } from '../../settings-serialize/settings-serialize-helper';
+import type { Global } from '../../types';
 
 const MASK_SIZE = 512;
 /** 与 committed-brightness-volume 一致，用于判断是否为有效 64³ volume 纹理 */
@@ -232,8 +232,8 @@ export class BloomController {
 
         // Viewer 构造早于 RevealController：state.hasRevealEffect 仍为 false，须按 settings 推断，
         // 否则开场 reveal 前整段会误走「全开 Bloom + 局部亮灯」，firstFrame 创建 VFX 时产生整屏一闪。
-        const revealScheduled = global.state.hasRevealEffect ||
-            hasRevealEffectFromSettings((global.settings as { revealEffect?: { type?: string } }).revealEffect);
+        const revealScheduled =
+            global.state.hasRevealEffect || hasRevealInSettings(global.settings as ExperienceSettings);
         this._bloomStackUnlocked = !revealScheduled;
         const onHasRevealChanged = (v: boolean) => {
             if (v) {

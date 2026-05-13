@@ -1,5 +1,6 @@
 import type { Global } from '../../types';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../../schemas/v2-custom';
+import { getRevealTotalDuration } from '../../settings-serialize/effects-sync';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
 const RESOLUTION_PRESETS: Record<string, { width: number; height: number }> = {
@@ -10,10 +11,10 @@ const RESOLUTION_PRESETS: Record<string, { width: number; height: number }> = {
 };
 
 /** 导出进度覆盖层 HTML 模板（挂到 body） */
-const VFX_EXPORT_OVERLAY_HTML = `
+const VIDEO_EXPORT_OVERLAY_HTML = `
 <div id="vfxExportOverlay" class="hidden" style="position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); z-index: 1000;">
   <div style="min-width: 320px; max-width: 480px; padding: 24px 32px; border-radius: 12px; background: rgba(20,20,20,0.95); box-shadow: 0 12px 32px rgba(0,0,0,0.4);">
-    <div style="font-size: 16px; font-weight: 600; color: #fff; margin-bottom: 12px; text-align: center;">正在离线导出 VFX 视频…</div>
+    <div style="font-size: 16px; font-weight: 600; color: #fff; margin-bottom: 12px; text-align: center;">正在离线导出场景特效视频…</div>
     <div style="width: 100%; height: 6px; border-radius: 999px; background: rgba(255,255,255,0.12); overflow: hidden;">
       <div id="vfxExportProgressBar" style="height: 100%; width: 0%; border-radius: 999px; background: linear-gradient(90deg, #4facfe, #00f2fe); transition: width 0.15s ease-out;"></div>
     </div>
@@ -25,8 +26,8 @@ const VFX_EXPORT_OVERLAY_HTML = `
 /** 导出配置：导出时长（秒），与 VFX 面板的「Timed VFX 时长」无关，仅决定视频长度 */
 const DEFAULT_EXPORT_DURATION = 20;
 
-/** VFX 导出行 HTML 模板（挂到 #renderPanelContainer） */
-const VFX_VIDEO_EXPORT_ROW_HTML = `
+/** 视频导出行 HTML 模板（挂到 #renderPanelContainer） */
+const VIDEO_EXPORT_ROW_HTML = `
 <div id="vfxVideoExportRow" class="settingsRow">
   <div class="vfxExportInner">
     <div class="vfxExportRow">
@@ -51,7 +52,7 @@ const VFX_VIDEO_EXPORT_ROW_HTML = `
     </div>
     <div class="vfxExportRow">
       <label class="settingsCheckLabel">
-        <input type="checkbox" id="includeVfxCheck" class="settingsCheck" checked> 导出时包含 VFX 特效（不勾选则仅导出 animTrack，VFX 固定为末尾状态）
+        <input type="checkbox" id="includeVfxCheck" class="settingsCheck" checked> 导出时包含场景特效（不勾选则仅导出 animTrack，特效固定为末尾状态）
       </label>
     </div>
     <button id="vfxVideoExportButton" class="settingsButton" type="button">高兼容导出 (MP4，较慢)</button>
@@ -62,7 +63,7 @@ const VFX_VIDEO_EXPORT_ROW_HTML = `
 `.trim();
 
 /**
- * 初始化 VFX 视频导出相关 UI。
+ * 初始化视频导出相关 UI（与场景 reveal / timed 特效时长参数独立）。
  * 组件自行创建 DOM：进度覆盖层挂到 body，导出行挂到 #renderPanelContainer（由 index.html 中 Render 一级菜单提供）。
  * @returns 清理函数，调用后解除事件并移除创建的 DOM。
  */
@@ -71,7 +72,7 @@ export function initVideoExportUI(global: Global): () => void {
     const editUiTransport = getEditUiTransport(global);
 
     const overlayWrap = document.createElement('div');
-    overlayWrap.innerHTML = VFX_EXPORT_OVERLAY_HTML;
+    overlayWrap.innerHTML = VIDEO_EXPORT_OVERLAY_HTML;
     const overlayRoot = overlayWrap.firstElementChild as HTMLElement;
     document.body.appendChild(overlayRoot);
 
@@ -85,7 +86,7 @@ export function initVideoExportUI(global: Global): () => void {
         return () => {};
     }
 
-    container.innerHTML = VFX_VIDEO_EXPORT_ROW_HTML;
+    container.innerHTML = VIDEO_EXPORT_ROW_HTML;
     const vfxVideoExportRow = container.querySelector('#vfxVideoExportRow') as HTMLElement;
     const vfxVideoExportButton = container.querySelector('#vfxVideoExportButton') as HTMLButtonElement | null;
     const vfxVideoExportFastButton = container.querySelector('#vfxVideoExportFastButton') as HTMLButtonElement | null;
@@ -193,7 +194,7 @@ export function initVideoExportUI(global: Global): () => void {
             fileStream = await handle.createWritable();
             events.fire('render.video', videoSettings, fileStream as any);
         } catch (err) {
-            console.error('Failed to start VFX video export:', err);
+            console.error('Failed to start scene-effects video export:', err);
         }
     };
 
@@ -214,7 +215,7 @@ export function initVideoExportUI(global: Global): () => void {
             };
             const renderManager = new RenderManager(global);
             renderManager.startOffscreenMode(tempSettings);
-            const totalDuration = global.settings?.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+            const totalDuration = getRevealTotalDuration(global.settings) ?? DEFAULT_VFX_TOTAL_DURATION;
             let currentEffectTime = (global.state as any).effectTime || 0;
             if (currentEffectTime === 0) currentEffectTime = totalDuration * 0.5;
             try {

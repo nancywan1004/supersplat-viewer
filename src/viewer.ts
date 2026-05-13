@@ -37,9 +37,11 @@ import { MeshDebugOverlay } from './mesh-debug-overlay';
 import { NavCursor } from './nav-cursor';
 import { Picker } from './picker';
 import type { ExperienceSettings, PostEffectSettings } from './settings';
+import { readPersistentRevealParams, shouldDeferPersistentMount } from './settings-serialize/effects-sync';
 import type { Global } from './types';
-import { nightDeferredByReveal, revealBlocksAnim } from './reveal-policy';
-import { RevealController } from './reveal';
+import { nightDeferredByReveal, revealBlocksAnim } from './vfx/effects-runtime/reveal/reveal-policy';
+import { RevealController } from './vfx/effects-runtime/reveal/reveal-effect';
+import { mountPersistentGsplatByEffectType } from './vfx/effects-runtime/persistent/persistent-effect';
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
 import { getSkyboxRadius } from './loaders/skybox-loader';
 import { isLodMetaFile } from './loaders/lod-loader';
@@ -59,6 +61,7 @@ import { initAssetFacade } from './editor-modules/asset-facade';
 import { initAnnotationFacade } from './editor-modules/annotation-facade';
 import { initEnvironmentFacade } from './editor-modules/environment-facade';
 import { initEffectsFacade } from './editor-modules/effects-facade';
+import { createEffectsRuntime, type EffectsRuntime } from './vfx/effects-runtime';
 import { initCommandRegistry } from './editor-modules/command-registry';
 import { DEFAULT_DEFERRED_EDITING_LAYERS } from './render/deferred-editing-visual-sync';
 import { initInputArbiter } from './input-arbiter';
@@ -220,6 +223,9 @@ class Viewer {
     /** 编辑模块生命周期编排器（orchestrator-core） */
     moduleOrchestrator: ModuleOrchestrator | null = null;
 
+    /** 特效运行时（reveal / persistent / asset）；M1 仅占位，不改变现有 VFX 行为 */
+    effectsRuntime: EffectsRuntime | null = null;
+
     voxelOverlay: VoxelDebugOverlay | null = null;
 
     meshOverlay: MeshDebugOverlay | null = null;
@@ -254,6 +260,9 @@ class Viewer {
         initAnnotationFacade(global);
         initEnvironmentFacade(global);
         initEffectsFacade(global);
+        this.effectsRuntime = createEffectsRuntime(global);
+        (global as any).__effectsRuntime = this.effectsRuntime;
+        (app as any).effectsRuntime = this.effectsRuntime;
 
         // enable anonymous CORS for image loading in safari
         (app.loader.getHandler('texture') as TextureHandler).imgParser.crossOrigin = 'anonymous';
@@ -679,6 +688,21 @@ class Viewer {
                 revealBbox.copy(sceneBound);            // fallback
             }
             this.revealController = new RevealController(global, revealBbox, gsplatEntity, this.cameraManager);
+            global.events.on('persistentGsplatEffectRemountRequested', (restartAnim?: boolean) => {
+                // revealComplete 当帧内 reveal 脚本可能仍在执行 removeShaders；
+                // remount persistent 若同帧进行，可能被旧脚本收尾覆盖。统一延后一帧。
+                global.app.once('frameend', () => {
+                    this.syncPersistentRevealGsplat(gsplatEntity, restartAnim === true);
+                });
+            });
+            const es = global.settings as ExperienceSettings;
+            if (shouldDeferPersistentMount(es)) {
+                events.once('revealComplete', () => {
+                    this.syncPersistentRevealGsplat(gsplatEntity, false);
+                });
+            } else {
+                this.syncPersistentRevealGsplat(gsplatEntity, false);
+            }
             let deferredEditingLayersLocked = false;
             const applyDeferredEditingLayersVisibility = (visible: boolean) => {
                 for (const layer of DEFAULT_DEFERRED_EDITING_LAYERS) {
@@ -1230,6 +1254,37 @@ z: ${cameraInfo.target.z.toFixed(6)}
         if (this.pathVisualizer) {
             this.pathVisualizer.destroy();
             this.pathVisualizer = null;
+        }
+    }
+
+    /**
+     * 可持续 GSplat（如 `perlin-wave`）挂载：与 reveal `RevealController.createEffect` 解耦。
+     */
+    private syncPersistentRevealGsplat(gsplatEntity: Entity, restartAnimTrack: boolean) {
+        const { global } = this;
+        const persistentReveal = readPersistentRevealParams(global.settings as ExperienceSettings);
+        if (!persistentReveal?.type) {
+            return;
+        }
+        const t = persistentReveal.type as string;
+        const rc = this.revealController;
+        if (!rc || !gsplatEntity?.script) {
+            return;
+        }
+        rc.prepareExternalPersistentScriptMount();
+        const script = mountPersistentGsplatByEffectType(
+            t,
+            gsplatEntity,
+            (s) => rc.applyGsplatShaderScriptCenter(s),
+            persistentReveal.autoStart ?? true
+        );
+        if (!script) {
+            return;
+        }
+        rc.bindPersistentTimelineScript(script);
+        (global.app as any).effectsRuntime?.notifyRevealScriptApplied(t);
+        if (restartAnimTrack) {
+            global.events.fire('inputEvent', 'resetAnim');
         }
     }
 }

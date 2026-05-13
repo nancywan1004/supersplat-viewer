@@ -22,10 +22,10 @@ import {
     restorePostEffectsFromSettings
 } from '../edit-history';
 import { showExitEditConfirmModal } from './components/exit-edit-confirm-ui';
-import { initRevealUI } from './components/reveal-ui';
+import { initRevealUI } from './components/effects-ui';
 import { initVideoExportUI } from './components/video-export-ui';
 import { initLightingUI } from './components/lighting-ui';
-import { initPostEffectUI } from './components/post-effect-ui';
+import { initPostEffectUI } from './components/environment-ui';
 import { initAnnotationUI } from './components/annotation-ui';
 import { initEditLeftToolbarUI } from './edit-left-toolbar';
 import { initEditRightToolbarUI } from './edit-right-toolbar';
@@ -34,6 +34,7 @@ import type { Annotation } from '../settings';
 import { getEditUiTransport, sendEditProtocolMessage } from './edit-ui-transport';
 import { applyEnvironmentPreviewVisualPolicy } from '../editor-modules/environment-facade';
 import { applyLightToggleAll, applyLightToggle } from '../editor-modules/protocol-adapters/environment-protocol-adapter';
+import { getRevealActiveType } from '../settings-serialize/effects-sync';
 
 // Initialize the touch joystick for fly mode camera control
 const initJoystick = (
@@ -632,8 +633,8 @@ const initUI = (global: Global) => {
         if (inEdit) {
             if (editUiTransport !== 'message-bridge') {
                 editModeEnteredSettingsSnapshot = null;
-                // internal：进入编辑统一停播当前 VFX，退出编辑后再恢复（timed/persistent 一致）。
-                const hasVfxToResume = state.vfxType !== 'none';
+                // internal：进入编辑统一停播当前场景特效，退出编辑后再恢复（timed/persistent 一致）。
+                const hasVfxToResume = getRevealActiveType(state) !== 'none';
                 if (hasVfxToResume) {
                     events.fire('vfxExit');
                 }
@@ -1065,7 +1066,7 @@ const initUI = (global: Global) => {
         updateEditModeUI();
     }
 
-    // Reveal / VFX、Lighting、PostEffect、VideoExport、Annotation 由独立组件管理，挂载到 edit-right-toolbar 提供的容器（showEditUI 为 false 时不挂载）
+    // Reveal / 场景特效、Lighting、PostEffect、VideoExport、Annotation 由独立组件管理，挂载到 edit-right-toolbar 提供的容器（showEditUI 为 false 时不挂载）
     if (config.showEditUI !== false) {
         initRevealUI(global);
         initVideoExportUI(global);

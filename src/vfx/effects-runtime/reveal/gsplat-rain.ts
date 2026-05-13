@@ -1,7 +1,7 @@
 // Adapted from spark: https://github.com/sparkjsdev/spark 
 
 import { Script, Vec3, Color } from 'playcanvas';
-import { GsplatShaderEffect } from './gsplat-shader-effect';
+import { GsplatShaderEffect } from '../gsplat-shader-effect';
 
 const shaderGLSL = /* glsl */`
 uniform float uTime;

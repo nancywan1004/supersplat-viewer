@@ -1,4 +1,4 @@
-import { GsplatShaderEffect } from './gsplat-shader-effect';
+import { GsplatShaderEffect } from '../effects-runtime/gsplat-shader-effect';
 
 const shaderGLSL = /* glsl */ `
 uniform float uBloomThreshold;

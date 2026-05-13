@@ -1,5 +1,5 @@
 import { Vec3 } from 'playcanvas';
-import { GsplatShaderEffect } from './gsplat-shader-effect';
+import { GsplatShaderEffect } from '../gsplat-shader-effect';
 
 const shaderGLSL = /* glsl */`
 uniform float uTime;

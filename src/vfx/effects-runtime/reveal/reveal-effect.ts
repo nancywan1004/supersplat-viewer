@@ -1,31 +1,47 @@
 import type { Entity, BoundingBox } from 'playcanvas';
 import { Vec3 } from 'playcanvas';
 
-import type { CameraManager } from './camera-manager';
-import { hasRevealEffectFromSettings } from './reveal-policy';
-import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
-import { RevealEffect as RevealConfig } from './settings';
-import { Global } from './types';
-import { GsplatRevealGrowthWave } from './vfx/gsplat-growth-wave';
-import { GsplatIntegrate } from './vfx/gsplat-integrate';
-import { GsplatRevealPerlinWave } from './vfx/gsplat-perlin-wave';
-import { GsplatRevealPiecesRecover } from './vfx/gsplat-pieces-recover';
-import { GsplatRainV2 } from './vfx/gsplat-rain';
-import { GsplatSketch } from './vfx/gsplat-sketch';
-import { GsplatRevealRadial } from './vfx/reveal/gsplat-reveal-radial';
-import { GsplatRevealRain } from './vfx/reveal/gsplat-reveal-rain';
-import { GsplatRevealSmooth } from './vfx/reveal/gsplat-reveal-smooth';
+import type { CameraManager } from '../../../camera-manager';
+import { isRevealTimedVfxType, isPersistentVfx } from './reveal-policy';
+import {
+    clearPersistentRevealTrack,
+    getPersistentEffectPaused,
+    patchRevealSettingsFromParams,
+    readPersistentRevealParams,
+    readRevealParams,
+    hasRevealInSettings,
+    patchRevealRuntimeMirror,
+    patchPersistentRuntimeMirror,
+    syncEffectsRuntimeStateFromSettings
+} from '../../../settings-serialize/effects-sync';
+import { DEFAULT_VFX_TOTAL_DURATION } from '../../../schemas/v2-custom';
+import { LegacyRevealEffect as RevealConfig } from '../../../settings';
+import { Global, REVEAL_EFFECT_TYPE_VALUES, type RevealEffectType } from '../../../types';
+import type { ExperienceSettings } from '../../../schemas/v2';
+import type { EffectsRuntime } from '..';
+import { GsplatRevealGrowthWave } from './gsplat-growth-wave';
+import { GsplatIntegrate } from './gsplat-integrate';
+import { GsplatRevealPiecesRecover } from './gsplat-pieces-recover';
+import { GsplatRainV2 } from './gsplat-rain';
+import { GsplatSketch } from './gsplat-sketch';
+import { GsplatRevealRadial } from './gsplat-reveal-radial';
+import { GsplatRevealRain } from './gsplat-reveal-rain';
+import { GsplatRevealSmooth } from './gsplat-reveal-smooth';
 // import { GsplatRevealRadial } from 'playcanvas/scripts/esm/gsplat/reveal-radial.mjs';
 // import { GsplatRevealRain } from 'playcanvas/scripts/esm/gsplat/reveal-rain.mjs';
 
 /**
- * Script-based Reveal Controller - 基于原始reveal.example.mjs的实现
- * 使用createRadialScript等方法来创建和管理reveal scripts
+ * 场景 GSplat **一次性开场** reveal 主路径（Timed、Reveal 等会阻塞到 `revealComplete`）。
+ *
+ * **职责**：开场脚本时序与挂载、与 NightMode 首帧互斥、导出门控；基于 `reveal.example.mjs`。
+ * **可持续型**（如 `perlin-wave`）：不在本文件声明为 `RevealEffectType`；挂载由 `viewer.ts` 调用 `persistent-effect.ts`，时间轴通过 `bindPersistentTimelineScript` 对齐。
  */
 /**
- * Reveal effect type (including VFX effects)
+ * 与 `createEffect` 分派一致的一次性开场 `type` 集合；不含 `none`、不含可持续型。
+ * `effects-runtime` 内置 reveal 轨与此同一 `Set` 语义对齐。
  */
-export type RevealEffectType = 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch' | 'none';
+export const REVEAL_EFFECT_TYPES = new Set<string>(REVEAL_EFFECT_TYPE_VALUES);
+
 /** clipPadding: 建议扩展 far；nearMax: 建议 near 的上限。均为可选提示，不是强制值。 */
 export type RevealCameraClipHint = { clipPadding?: number; nearMax?: number };
 
@@ -57,6 +73,8 @@ export class RevealController {
     private gsplatEntity: Entity | null = null;
     private config: RevealConfig;
     private currentScript: any = null;
+    /** true 表示 currentScript 由 persistent 轨挂载，不应驱动 reveal timeline。 */
+    private persistentTimelineBound = false;
     private revealCenter: number[] = [0, 0, 0];
     private bbox: BoundingBox | null = null;
     private cameraManager: CameraManager | null = null;
@@ -67,19 +85,10 @@ export class RevealController {
     private effectStartTime: number | null = null;
     private effectEndTime: number | null = null;
     private isTiming: boolean = false;
-    private timedEffects = ['radial', 'rain-v2', 'pieces-recover', 'integrate', 'growth-wave', 'sketch'];
     private readonly endRadiusBboxPaddingScale = 0.65;
     /** 半径放大后对传播速度的补偿系数（0~1，越大越接近“完全按半径等比提速”） */
     private readonly radiusSpeedCompensation = 0.7;
     
-    // 时间轴控制相关（唯一来源：state.effectPaused）
-    private get effectPaused(): boolean {
-        return (this.global.state as any).effectPaused ?? false;
-    }
-    private set effectPaused(v: boolean) {
-        (this.global.state as any).effectPaused = v;
-    }
-
     global: Global;
     /** 进入 VFX 前的 nightFade 快照；仅在从非 none 切入特效时记录，用于结束/切回 none 时恢复全局亮度。
      *  若用户在 VFX 播放中手动调了 nightFade，此值会同步更新为最新值，保证 VFX 结束时恢复到用户期望的亮度。 */
@@ -92,6 +101,12 @@ export class RevealController {
     private exportRevealCompleted: boolean = false;
     /** 等待 reveal disable 收尾后再恢复 NightMode（避免同帧 shader chunk 互删） */
     private pendingDeferredNightRestore = false;
+
+    /** 与 `EffectsRuntime` 同步当前已挂载 reveal 脚本类型（M4：双轨 provider 快照；不改变 revealComplete 语义） */
+    private syncEffectsRuntimeRevealScriptType(effectType: string): void {
+        const rt = (this.global.app as any).effectsRuntime as EffectsRuntime | undefined;
+        rt?.notifyRevealScriptApplied(effectType);
+    }
 
     constructor(global: Global, bbox: BoundingBox, gsplatEntity: Entity, cameraManager?: CameraManager | null) {
         this.global = global;
@@ -116,28 +131,31 @@ export class RevealController {
 
         // 不再监听旧的 nightFade:changed(number)，只接受带 source 的 detailed 事件，避免 0 值误判
         
-        const hasReveal = hasRevealEffectFromSettings(settings.revealEffect);
+        const hasReveal = hasRevealInSettings(settings as ExperienceSettings);
 
-        // Always initialize (VFX effects don't require revealEffect in settings)
+        // Always initialize (VFX effects don't require legacy revealEffect in settings)
+        const revealParams = readRevealParams(settings as ExperienceSettings);
         this.config = {
-            type: (settings.revealEffect?.type as RevealEffectType) ?? 'none',
-            radius: settings.revealEffect?.radius ?? 10,
-            autoStart: settings.revealEffect?.autoStart ?? true,
-            totalDuration: settings.revealEffect?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION
+            type: (revealParams?.type as RevealConfig['type']) ?? 'none',
+            radius: revealParams?.radius ?? 10,
+            autoStart: revealParams?.autoStart ?? true,
+            totalDuration: revealParams?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION
         };
 
         console.log('RevealController initialized with config:', this.config);
 
-        // 与 settings 对齐的 reveal 开关（hasReveal）与当前 VFX 类型（vfxType）。
-        // - `index.ts` 在 import 后通常会已按 `hasRevealEffectFromSettings` 写过 `state.hasRevealEffect`；
+        // 与 settings 对齐的 reveal 开关（hasReveal）与当前 reveal 类型（effectsRuntimeState.reveal.activeType）。
+        // - `index.ts` 在 import 后通常会已按 `hasRevealInSettings` 写过 `state.hasRevealEffect`；
         //   此处再写一次，保证「仅加载场景、未走 main」或后续重构时仍以 settings 为真源。
         // - `observe` 在赋**相同**布尔值时不会触发 `hasRevealEffect:changed`，因此下面用手动 `events.fire`
         //   通知只订阅了 `events`、不读 state 的模块（如 Bloom 构造前已注册的路径）。
         // - 仅在布尔值**发生变化**时 fire：避免与 index 首轮 `false→true` 已派发的事件重复，减少无意义回调。
         const prevHasReveal = state.hasRevealEffect;
         state.hasRevealEffect = hasReveal;
-        state.vfxType = this.config.type;
-        state.vfxActive = false;
+        patchRevealRuntimeMirror(state, {
+            activeType: this.config.type as RevealEffectType,
+            status: 'inactive'
+        });
         if (state.hasRevealEffect !== prevHasReveal) {
             events.fire('hasRevealEffect:changed', state.hasRevealEffect);
         }
@@ -148,9 +166,9 @@ export class RevealController {
             this.updateConfig(newConfig);
         });
 
-        // 父级协议：VFX_EXIT（强制停播但保留配置）
+        // 父级协议：EFFECT_DISABLE（经 vfxExit 事件，强制停播但保留配置）
         events.on('vfxExit', () => {
-            this.forceStopVfx('VFX_EXIT');
+            this.forceStopVfx('EFFECT_DISABLE');
         });
 
         // 统一监听重启请求（所有效果类型）
@@ -166,7 +184,7 @@ export class RevealController {
 
         // 导出结束后恢复：仅 Timed 恢复特效时间；非 Timed 不碰特效时间（保持导出最后一帧状态，避免设回 t=0 导致黑屏）
         events.on('effectTimeline:restoreAfterExport', (time: number) => {
-            if (this.timedEffects.includes(this.config.type)) {
+            if (isRevealTimedVfxType(this.config.type)) {
                 this.setEffectTime(time);
             }
         });
@@ -177,11 +195,11 @@ export class RevealController {
         });
 
         events.on('effectPlayPause:toggle', () => {
-            this.togglePlayPause();
+            this.togglePersistentPlayPause();
         });
 
         events.on('effectPlayPause:set', (paused: boolean) => {
-            this.setPlayPause(paused);
+            this.setPersistentPlayPause(paused);
         });
 
         // 使用相机的 look target 作为默认 reveal center，如果没有则使用 bbox.center
@@ -205,10 +223,10 @@ export class RevealController {
         // 创建初始效果（如果类型不是 none）：
         // 主路径：Viewer 在 `readyToRender=true` 之前调用 {@link ensureInitialEffectCreatedBeforeFirstDisplay}，
         // 避免首帧已上屏却无 VFX 的一帧偏色/蓝光闪。此处仍注册 firstFrame 作为材质晚就绪时的兜底。
-        if (this.config.type !== 'none') {
+        if (this.config.type !== 'none' && !isPersistentVfx(this.config.type as any)) {
             const createInitial = () => {
                 if (this.currentScript) return;
-                this.createEffect(this.config.type);
+                this.createEffect(this.config.type as string);
             };
             if (state.loaded) {
                 createInitial();
@@ -223,10 +241,10 @@ export class RevealController {
      * 若脚本已存在则 no-op；`firstFrame` 上的兜底仍会尝试创建。
      */
     ensureInitialEffectCreatedBeforeFirstDisplay(): void {
-        if (this.config.type === 'none' || this.currentScript) {
+        if (this.config.type === 'none' || this.currentScript || isPersistentVfx(this.config.type as any)) {
             return;
         }
-        this.createEffect(this.config.type);
+        this.createEffect(this.config.type as string);
     }
 
     /**
@@ -530,52 +548,6 @@ export class RevealController {
     }
 
     /**
-     * 创建 perlin-wave 效果脚本
-     */
-    private createPerlinWaveScript() {
-        if (!this.gsplatEntity || !this.gsplatEntity.script) {
-            console.warn('Cannot create perlin-wave script - entity or script component not ready');
-            return null;
-        }
-
-        console.log('Creating perlin-wave reveal script');
-
-        try {
-            const script = this.gsplatEntity.script.create(GsplatRevealPerlinWave) as any;
-            if (script) {
-                // 配置script属性（波长 world 单位：越大波越疏；拱起用 waveAmplitude）
-                script.intensity = 0.8;
-                script.waveAmplitude = 0.2;
-                script.wavelength = 2.5;      // 波长（世界单位），2=较疏，0 则用 waveFrequency
-                script.waveSpeed = 0.5;
-                script.scaleBlend = 0.75;
-                
-                // 设置 reveal center
-                this.updateScriptCenter(script);
-                
-                // 初始状态和 effectTime
-                script.enabled = this.config.autoStart;
-                script.effectTime = 0;
-                
-                console.log('Perlin-wave script created with config:', {
-                    center: script.center,
-                    intensity: script.intensity,
-                    waveAmplitude: script.waveAmplitude,
-                    wavelength: script.wavelength,
-                    waveFrequency: script.waveFrequency,
-                    waveSpeed: script.waveSpeed,
-                    scaleBlend: script.scaleBlend,
-                    enabled: script.enabled
-                });
-            }
-            return script;
-        } catch (error) {
-            console.error('Failed to create perlin-wave script:', error);
-            return null;
-        }
-    }
-
-    /**
      * 创建 growth-wave 效果脚本
      */
     private createGrowthWaveScript() {
@@ -858,9 +830,14 @@ export class RevealController {
     /**
      * 创建指定类型的reveal效果 - 类似原始实现中的createEffect函数
      */
-    private createEffect(effectName: RevealEffectType) {
+    private createEffect(effectName: string) {
         if (!this.gsplatEntity || !this.config) {
             console.log('Cannot create effect - entity not ready or config not set');
+            return;
+        }
+
+        if (isPersistentVfx(effectName as any)) {
+            console.warn('[RevealController] createEffect ignores persistent types:', effectName);
             return;
         }
 
@@ -882,8 +859,6 @@ export class RevealController {
         // 仅在目标类型非 none 时才接管；none 代表「退出特效」，应恢复/保留 NightMode 当前状态。
         if (effectName !== 'none') {
             this.inVfx = true;
-            // 进入播放/启用阶段（语义：当前有特效在运行，供 SaaS/父级状态读取）
-            (this.global.state as any).vfxActive = true;
             // 首次进入 VFX 时记录恢复用 nightFade：须以 settings 为准。
             // RevealController 构造早于 firstFrame 上的 NightMode.applyFromSettings，currentNightFade 可能仍为 0，
             // 若仅用 currentNightFade，restoreNightModeIfNeeded 会把 settings.nightMode.fade 错误写回 0（存盘即丢亮度）。
@@ -914,9 +889,6 @@ export class RevealController {
             case 'pieces-recover':
                 script = this.createPiecesRecoverScript();
                 break;
-            case 'perlin-wave':
-                script = this.createPerlinWaveScript();
-                break;
             case 'integrate':
                 script = this.createIntegrateScript();
                 break;
@@ -936,7 +908,8 @@ export class RevealController {
         }
 
         this.currentScript = script;
-        this.config.type = effectName;
+        this.persistentTimelineBound = false;
+        this.config.type = effectName as RevealConfig['type'];
         this.exportRevealCompleted = false;
         (this as any).__exportCompletionLogged = false;
 
@@ -961,6 +934,11 @@ export class RevealController {
                         this.restoreNightModeIfNeeded('revealScriptComplete:deferred');
                     });
                 }
+                // 须在 revealComplete 之前写入 completed：否则 UI 等监听器仍读到 playing，且 frameend 后无二次刷新会卡住（如 persistent toggle 禁用不解除）。
+                patchRevealRuntimeMirror(this.global.state, {
+                    status: this.config.type === 'none' ? 'inactive' : 'completed'
+                });
+                syncEffectsRuntimeStateFromSettings(this.global.state, this.global.settings as ExperienceSettings);
                 this.global.events.fire('revealComplete');
             };
         }
@@ -970,29 +948,32 @@ export class RevealController {
             // 重置 effectTime
             script.effectTime = 0;
             script.isPaused = false;
-            this.effectPaused = false;
 
             // 根据 autoStart 配置设置启用状态
             script.enabled = this.config.autoStart;
             
             // 如果是需要计时的特效，设置计时监听
-            if (this.timedEffects.includes(effectName)) {
+            if (isRevealTimedVfxType(effectName)) {
                 this.setupTiming(script);
             }
             
             // 触发事件更新 UI
             this.global.events.fire('effectTime:changed', 0);
-            this.global.events.fire('effectPlayPause:changed', false);
         }
         else {
             // type='none' 或创建失败：视为当前无特效在运行
-            (this.global.state as any).vfxActive = false;
             this.inVfx = false;
         }
+
+        patchRevealRuntimeMirror(this.global.state, {
+            activeType: effectName as RevealEffectType,
+            status: (!!script && effectName !== 'none') ? 'playing' : (effectName === 'none' ? 'inactive' : 'completed')
+        });
         
         // 触发事件以更新 UI（统一使用 revealType:changed）
         this.global.events.fire('revealType:changed', effectName);
-        this.global.state.vfxType = effectName as any;
+
+        this.syncEffectsRuntimeRevealScriptType(effectName);
     }
 
     /**
@@ -1012,7 +993,7 @@ export class RevealController {
         const fade = this.originalNightFade;
         this.originalNightFade = null;
         this.inVfx = false;
-        (this.global.state as any).vfxActive = false;
+        patchRevealRuntimeMirror(this.global.state, { status: this.config.type === 'none' ? 'inactive' : 'completed' });
 
         const settingsAny = this.global.settings as any;
         if (!settingsAny.nightMode) {
@@ -1041,18 +1022,18 @@ export class RevealController {
         this.isTiming = false;
         this.effectStartTime = null;
         this.effectEndTime = null;
-        this.effectPaused = false;
 
         // 若之前进入过 VFX，则恢复进入前的 nightFade（或 VFX 中用户 set 的值）
         this.restoreNightModeIfNeeded(reason);
 
         // 标记：当前不在播放中
         this.inVfx = false;
-        (this.global.state as any).vfxActive = false;
+        patchRevealRuntimeMirror(this.global.state, { status: this.config.type === 'none' ? 'inactive' : 'completed' });
         // 强制停播视作「当前 reveal 生命周期已完成」：
         // 统一解锁 deferred editing layers / bloom stack，避免 persistent 或中途停播后资产、标注继续隐藏。
         this.global.events.fire('revealComplete');
-        // 注意：不改 config.type / settings.revealEffect.type / state.vfxType
+        // 注意：不改 config.type / settings.effects.reveal / effectsRuntimeState.reveal.activeType
+        this.syncEffectsRuntimeRevealScriptType('none');
     }
 
     /**
@@ -1127,8 +1108,8 @@ export class RevealController {
             this.restoreNightModeIfNeeded('effectScriptDisabled');
         }
 
-        // 如果是 timed effect 且脚本存在且未暂停，定期触发时间更新事件（用于 UI 更新）
-        if (this.currentScript && this.timedEffects.includes(this.config.type) && !this.effectPaused) {
+        // 一次性 reveal Timed：脚本存在且未暂停时定期触发时间更新（驱动 UI 滑条）
+        if (this.currentScript && !this.persistentTimelineBound && isRevealTimedVfxType(this.config.type)) {
             const currentTime = this.currentScript.effectTime;
             this.global.events.fire('effectTime:changed', currentTime);
         }
@@ -1138,7 +1119,7 @@ export class RevealController {
         }
         
         // 检查特效是否完成
-        if (this.timedEffects.includes(this.config.type) &&
+        if (isRevealTimedVfxType(this.config.type) &&
             this.currentScript.isEffectComplete &&
             this.currentScript.isEffectComplete()) {
             
@@ -1201,6 +1182,7 @@ export class RevealController {
         }
 
         this.currentScript = null;
+        this.persistentTimelineBound = false;
     }
 
     updateConfig(newConfig: Partial<RevealConfig>) {
@@ -1209,19 +1191,23 @@ export class RevealController {
 
         Object.assign(this.config, newConfig);
 
-        // Also update the settings object so UI can read it
-        if (this.global.settings.revealEffect) {
-            Object.assign(this.global.settings.revealEffect, newConfig);
+        // 运行期真源：写 settings.effects.reveal（legacy revealEffect 仅导入兼容读取）
+        if (newConfig.type !== undefined && newConfig.type !== oldType) {
+            if (isPersistentVfx(oldType as any) && !isPersistentVfx(newConfig.type as any)) {
+                clearPersistentRevealTrack(this.global.settings as ExperienceSettings);
+            }
         }
+        patchRevealSettingsFromParams(this.global.settings as ExperienceSettings, newConfig);
+        syncEffectsRuntimeStateFromSettings(this.global.state, this.global.settings);
 
         console.log('Updated reveal config:', this.config);
 
         // 如果类型改变，重新创建效果并重置动画
         if (newConfig.type && newConfig.type !== oldType) {
-            const nextType = newConfig.type as RevealEffectType;
-            const hasReveal = nextType !== 'none';
+            const nextType = newConfig.type as RevealConfig['type'];
+            const hasReveal = hasRevealInSettings(this.global.settings as ExperienceSettings);
             this.global.state.hasRevealEffect = hasReveal;
-            this.global.state.vfxType = nextType as any;
+            patchRevealRuntimeMirror(this.global.state, { activeType: nextType as RevealEffectType });
             this.global.events.fire('hasRevealEffect:changed', hasReveal);
             // 当切回 none 时，视为退出特效，恢复进入特效前的 nightFade
             if (nextType === 'none') {
@@ -1235,11 +1221,16 @@ export class RevealController {
             this.global.events.fire('revealType:changed', nextType);
             // 重置播放动画
             this.global.events.fire('inputEvent', 'resetAnim');
+
+            // 切到 none 时走 `createEffect` 而非 `restart`，需在此显式补挂 persistent；非 none 的补挂由 `restart`→`schedulePersistent…` 统一处理。
+            if (nextType === 'none' && readPersistentRevealParams(this.global.settings as ExperienceSettings) != null) {
+                this.global.events.fire('persistentGsplatEffectRemountRequested', false);
+            }
         }
-        // 如果 totalDuration 改变且当前特效是需要 totalDuration 的特效，重新创建效果
+        // totalDuration 改变时：统一按“一次性 reveal（非 none 且非 persistent）”判定是否重建，避免硬编码类型白名单
         else if (newConfig.totalDuration !== undefined && 
                  newConfig.totalDuration !== oldTotalDuration &&
-                 ['rain-v2', 'pieces-recover', 'integrate', 'growth-wave', 'sketch'].includes(this.config.type)) {
+                 isRevealTimedVfxType(this.config.type)) {
             this.createEffect(this.config.type);
             console.log('Recreated effect due to totalDuration change');
         }
@@ -1336,26 +1327,55 @@ export class RevealController {
         }
     }
 
+    /**
+     * 双轨 persistent 已启用且当前 `config.type` 为一次性 reveal 时，`createEffect`/`restart` 会拆掉 persistent；
+     * 在本轮 reveal 的 `revealComplete` 之后再 remount（与协议层 `applyGsplatPersistentParamsPatch` 语义一致）。
+     */
+    private schedulePersistentGsplatRemountAfterRevealCompleteIfWanted(): void {
+        const rt = this.config.type as string;
+        if (rt === 'none' || isPersistentVfx(rt as any)) {
+            return;
+        }
+        if (readPersistentRevealParams(this.global.settings as ExperienceSettings) == null) {
+            return;
+        }
+        this.global.events.once('revealComplete', () => {
+            this.global.events.fire('persistentGsplatEffectRemountRequested', false);
+        });
+    }
+
     restart(restartAnimTrack: boolean = false) {
         if (!this.config || this.config.type === 'none') {
             console.log('No reveal effect active, cannot restart');
             return;
         }
-        
+
+        if (isPersistentVfx(this.config.type as any)) {
+            console.log('Restarting persistent effect (viewer remount):', this.config.type);
+            if (this.currentScript) {
+                this.currentScript.enabled = false;
+            }
+            this.destroyAllRevealScripts();
+            patchPersistentRuntimeMirror(this.global.state, { status: 'playing' });
+            this.exportRevealCompleted = false;
+            this.global.events.fire('persistentGsplatEffectRemountRequested', restartAnimTrack);
+            return;
+        }
+
         console.log('Restarting reveal effect:', this.config.type, restartAnimTrack ? '(with animTrack)' : '(without animTrack)');
-        
+
         // 先禁用当前效果（如果存在），确保清理状态
         if (this.currentScript) {
             this.currentScript.enabled = false;
         }
-        
-        // 重置暂停状态
-        this.effectPaused = false;
+
         this.exportRevealCompleted = false;
 
         // 重新创建效果（会自动根据 autoStart 配置启用，并重置 effectTime）
-        this.createEffect(this.config.type);
-        
+        this.createEffect(this.config.type as string);
+
+        this.schedulePersistentGsplatRemountAfterRevealCompleteIfWanted();
+
         // 如果启用了重启 animTrack，触发重置动画事件
         if (restartAnimTrack) {
             this.global.events.fire('inputEvent', 'resetAnim');
@@ -1363,10 +1383,10 @@ export class RevealController {
     }
 
     /**
-     * 设置特效时间（用于时间轴拖动；仅 Timed 类型，避免非 Timed 被误触导致黑屏）
+     * 设置特效时间（用于时间轴拖动；一次性 reveal 均为 Timed，persistent 无 scrub）
      */
     setEffectTime(time: number) {
-        if (!this.currentScript || !this.timedEffects.includes(this.config.type)) {
+        if (!this.currentScript || this.persistentTimelineBound || !isRevealTimedVfxType(this.config.type)) {
             return;
         }
         const totalDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
@@ -1395,12 +1415,11 @@ export class RevealController {
         const baseDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
         const completionT = Number(this.getPostRevealContentThresholdSec());
         const completionCeiling =
-            this.timedEffects.includes(this.config.type) && Number.isFinite(completionT) && completionT >= 0
+            isRevealTimedVfxType(this.config.type) && Number.isFinite(completionT) && completionT >= 0
                 ? completionT
                 : baseDuration;
         const exportCeiling = Math.max(baseDuration, completionCeiling);
-        // 导出时 perlin-wave 需要覆盖整段视频时长，不受 revealEffect.totalDuration 限制
-        const exportTime = this.config.type === 'perlin-wave'
+        const exportTime = isPersistentVfx(this.config.type as any)
             ? Math.max(0, time)
             : Math.max(0, Math.min(time, exportCeiling));
 
@@ -1447,7 +1466,6 @@ export class RevealController {
         // 注意：setEffectTime 会立即调用 updateEffect，所以即使 paused，uniforms 也会更新
         if (!this.currentScript.isPaused) {
             this.currentScript.isPaused = true;
-            this.effectPaused = true;
         }
         
         this.currentScript.setEffectTime(exportTime);
@@ -1456,23 +1474,25 @@ export class RevealController {
     }
 
     /**
-     * 切换播放/暂停状态
+     * 仅 **persistent** 可持续特效：切换脚本 `isPaused` 与 `persistent.status`（`playing` ↔ `paused`）。
      */
-    togglePlayPause() {
-        this.setPlayPause(!this.effectPaused);
+    togglePersistentPlayPause() {
+        if (!this.currentScript || !isPersistentVfx(this.config.type as any)) {
+            return;
+        }
+        this.setPersistentPlayPause(!getPersistentEffectPaused(this.global.state));
     }
 
     /**
-     * 设置播放/暂停状态（唯一来源：state.effectPaused）
-     * 对所有有 currentScript 的类型都同步 isPaused，否则导出后非 Timed 会一直暂停、VFX 不继续播。
+     * 仅 **persistent**：`persistent.status` 与脚本 `isPaused` 对齐，并 `effectPlayPause:changed`（供 persistent UI）。
      */
-    setPlayPause(paused: boolean) {
-        if (!this.currentScript) return;
-        this.effectPaused = paused;
-        this.currentScript.isPaused = paused;
-        if (this.timedEffects.includes(this.config.type)) {
-            this.global.events.fire('effectPlayPause:changed', paused);
+    setPersistentPlayPause(paused: boolean) {
+        if (!this.currentScript || !isPersistentVfx(this.config.type as any)) {
+            return;
         }
+        this.currentScript.isPaused = paused;
+        patchPersistentRuntimeMirror(this.global.state, { status: paused ? 'paused' : 'playing' });
+        this.global.events.fire('effectPlayPause:changed', paused);
     }
 
     /**
@@ -1493,10 +1513,10 @@ export class RevealController {
     }
 
     /**
-     * 检查当前特效是否为 timed effect
+     * 是否为「一次性 reveal」Timed VFX（与 {@link isRevealTimedVfxType} 一致；persistent 为 false）。
      */
     isTimedEffect(): boolean {
-        return this.timedEffects.includes(this.config.type);
+        return isRevealTimedVfxType(this.config.type);
     }
 
     /**
@@ -1506,8 +1526,7 @@ export class RevealController {
      *
      * 优先级：
      * 1. `currentScript.getCompletionTime()`（若存在且为有效非负数）——integrate / growth-wave / rain-v2 / sketch 等与 `isEffectComplete` 一致；
-     * 2. Timed（见 timedEffects）与 perlin-wave：回退 `config.totalDuration`；
-     * 3. 其余：回退 `config.totalDuration`。
+     * 2. 一次性 reveal（`isRevealTimedVfxType`）与 persistent：回退 `config.totalDuration`。
      */
     getPostRevealContentThresholdSec(): number {
         const { state } = this.global;
@@ -1520,9 +1539,6 @@ export class RevealController {
             if (Number.isFinite(t) && t >= 0) {
                 return t;
             }
-        }
-        if (this.timedEffects.includes(this.config.type) || this.config.type === 'perlin-wave') {
-            return this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
         }
         return this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
     }
@@ -1607,6 +1623,33 @@ export class RevealController {
     }
 
     /**
+     * Viewer 在挂载 persistent GSplat 脚本前调用：与 reveal `createEffect` 同样接管 `gsplatModifyVS`（NightMode 退出等）。
+     * 不得写 `effectsRuntimeState.reveal.status = 'playing'`：一次性 reveal 已结束时该位应保持 `completed`，
+     * 否则 `syncEffectsRuntimeStateFromSettings` 会粘住 `playing`，导致关闭 persistent 时误判「reveal 仍在播」而跳过 `vfxExit`。
+     */
+    prepareExternalPersistentScriptMount(): void {
+        this.inVfx = true;
+        if (this.originalNightFade === null) {
+            this.originalNightFade = getNightFadeFromSettings(this.global.settings);
+        }
+        this.global.app.fire('nightMode:exit');
+    }
+
+    /** 供 `viewer` 挂载 persistent 脚本时对齐中心（与 reveal 脚本 world/model 规则一致） */
+    applyGsplatShaderScriptCenter(script: any): void {
+        this.updateScriptCenter(script);
+    }
+
+    /** 将 `currentScript` 与 viewer 挂载的 persistent 脚本对齐，供导出时间轴与 `getEffectTime` 使用 */
+    bindPersistentTimelineScript(script: any | null): void {
+        this.currentScript = script;
+        this.persistentTimelineBound = !!script;
+        if (script && typeof script.isPaused === 'boolean') {
+            script.isPaused = getPersistentEffectPaused(this.global.state);
+        }
+    }
+
+    /**
      * 更新脚本的 center（统一处理坐标转换：world space → shader space）
      *
      * Reveal shader 中 modifySplatCenter(inout vec3 center) 接收的坐标空间取决于 unified 模式：
@@ -1646,5 +1689,6 @@ export class RevealController {
     destroy() {
         console.log('Destroying RevealController');
         this.destroyAllRevealScripts();
+        this.syncEffectsRuntimeRevealScriptType('none');
     }
 }

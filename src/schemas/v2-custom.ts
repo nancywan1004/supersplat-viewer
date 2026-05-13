@@ -1,7 +1,10 @@
 /** Timed VFX 默认总时长（秒），唯一默认值来源，修改此处即可全局生效 */
-export const DEFAULT_VFX_TOTAL_DURATION = 12;
+export const DEFAULT_VFX_TOTAL_DURATION = 10;
 
-type RevealEffect = {
+/**
+ * @deprecated legacy 单轨 reveal 字段（仅导入兼容读取，不再作为持久化写入真源）
+ */
+type LegacyRevealEffect = {
     type?: 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch' | 'none',
     radius?: number, // 10
     autoStart?: boolean,
@@ -179,4 +182,26 @@ type SceneAsset = {
     }
 }
 
-export type { RevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset, LocalLightRegion, WorldSpaceBloomRegionJSON };
+/** 三轨特效持久化：reveal / persistent / asset；`enabled` 仅允许出现在 persistent */
+type EffectsRevealTrack = {
+    activeEffectId: string;
+    paramsById: Record<string, Record<string, unknown>>;
+};
+
+type EffectsPersistentTrack = {
+    activeEffectId: string;
+    enabled: boolean;
+    paramsById: Record<string, Record<string, unknown>>;
+};
+
+type EffectsAssetTrack = {
+    defaultParamsById: Record<string, Record<string, unknown>>;
+};
+
+type EffectsSettings = {
+    reveal: EffectsRevealTrack;
+    persistent: EffectsPersistentTrack;
+    asset: EffectsAssetTrack;
+};
+
+export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsAssetTrack };
