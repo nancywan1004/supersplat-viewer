@@ -39,6 +39,7 @@ import { getAssetLoader } from './loaders/asset-loader';
 import type { CommandRegistry } from './editor-modules/command-registry';
 import { uploadProjectData } from './universe/service';
 import { getRevealActiveType, getRevealTotalDuration } from './settings-serialize/effects-sync';
+import { getSelectedSceneAssetType } from './state-selectors';
 
 /** 父级 → Viewer 的 postMessage payload 类型（按文档事件表） */
 type InboundPayload =
@@ -714,7 +715,12 @@ const initPostMessageBridge = (global: Global) => {
         const source = data?.source ?? 'unknown';
         if (source !== 'scene') return;
         const id = state.selectedSceneEntityId ?? null;
-        postToParent('SCENE_ASSET_SELECTED', { id });
+        const assetType = getSelectedSceneAssetType(state, global.settings.sceneAssets);
+        const payload: Record<string, unknown> = { id };
+        if (assetType !== undefined) {
+            payload.assetType = assetType;
+        }
+        postToParent('SCENE_ASSET_SELECTED', payload);
     });
 
     events.on('sceneAsset:placed', (data?: { id?: string | null; source?: SelectionSource }) => {
