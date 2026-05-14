@@ -241,20 +241,30 @@ export function initRevealUI(global: Global): () => void {
         syncEffectsRuntimeStateFromSettings(global.state, global.settings);
 
         const currentReveal = getCurrentVfxType(global);
+        const revealStatus = getRevealStatus(global.state);
+        const revealType = (readRevealParams(global.settings)?.type ?? 'none') as string;
+        const persistentPlaying = global.state.effectsRuntimeState?.persistent?.status === 'playing';
         // 规则：
         // 1) 若当前已有 reveal 类型（非 none），改 persistent 仅更新 persistent 轨配置，不触发 reveal type 改写。
         // 2) 若当前 reveal 为 none，选择 persistent 时才把 type 设为该 persistent，确保能立即生效。
-        if (currentReveal === 'none') {
-            if (type !== 'none') {
-                events.fire('revealConfigChanged', { type });
-            } else {
+        if (type === 'none') {
+            const oneShotRevealPlaying =
+                revealStatus === 'playing' &&
+                revealType !== 'none' &&
+                !isPersistentVfx(revealType) &&
+                !persistentPlaying;
+            if (!oneShotRevealPlaying) {
                 events.fire('vfxExit');
             }
-        } else if (type !== 'none') {
+            events.fire('persistentGsplatEffectRemountRequested', false);
+        } else if (currentReveal === 'none') {
+            if (type !== 'none') {
+                events.fire('revealConfigChanged', { type });
+            }
+        } else {
             // 当前 reveal 轨已占用时：
             // - reveal 播放中：等待 revealComplete 后再挂 persistent（避免打断 reveal）
             // - reveal 已非播放中：可直接触发 remount
-            const revealStatus = getRevealStatus(global.state);
             if (revealStatus === 'playing') {
                 const onRevealComplete = () => {
                     events.fire('persistentGsplatEffectRemountRequested', false);

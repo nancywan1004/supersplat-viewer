@@ -97,10 +97,31 @@ export function applyGsplatRevealTypePatch(global: Global, effectType: string): 
 
 const PERSISTENT_TYPE_SET = new Set<string>(PERSISTENT_EFFECT_TYPE_VALUES as readonly string[]);
 
-function normalizePersistentType(raw: unknown): PersistentEffectType | 'none' | null {
-    if (raw === undefined || raw === null || raw === 'none') return 'none';
+/** 供 `EFFECT_PARAMS_PATCH`（persistent 轨）与读回真源：`none` 含大小写/空白；未知字符串返回 `null`。 */
+export function normalizePersistentType(raw: unknown): PersistentEffectType | 'none' | null {
+    if (raw === undefined || raw === null || raw === false) return 'none';
     if (typeof raw !== 'string') return null;
-    return PERSISTENT_TYPE_SET.has(raw) ? (raw as PersistentEffectType) : null;
+    const t = raw.trim();
+    if (t.length === 0) return 'none';
+    const tl = t.toLowerCase();
+    if (tl === 'none') return 'none';
+    return PERSISTENT_TYPE_SET.has(tl) ? (tl as PersistentEffectType) : null;
+}
+
+/** persistent 轨关闭后：必要时停播 reveal，并发 `persistentGsplatEffectRemountRequested` 让 viewer 拆实体脚本。 */
+function firePersistentGsplatOffFromProtocol(global: Global): void {
+    const settings = global.settings as ExperienceSettings;
+    const revealType = (readRevealParams(settings)?.type ?? 'none') as string;
+    const persistentPlaying = global.state.effectsRuntimeState?.persistent?.status === 'playing';
+    const oneShotRevealPlaying =
+        getRevealStatus(global.state) === 'playing' &&
+        revealType !== 'none' &&
+        !isPersistentVfx(revealType) &&
+        !persistentPlaying;
+    if (!oneShotRevealPlaying) {
+        applyGsplatRevealStopPlayback(global);
+    }
+    global.events.fire('persistentGsplatEffectRemountRequested', false);
 }
 
 /**
@@ -120,6 +141,15 @@ export function applyGsplatPersistentParamsPatch(global: Global, params: Record<
     const settings = global.settings;
     const effects = ensureEffectsSettings(settings);
     const id = SCENE_GSPLAT_PERSISTENT_EFFECT_ID;
+
+    // 与文档一致：`type` 为 none（含 `NONE` / 空白）即关闭可持续轨，清空 scene 包，避免 paramsById 残留脏 type
+    if (hasTypePatch && nextPersistentType === 'none') {
+        clearPersistentRevealTrack(settings as ExperienceSettings);
+        syncEffectsRuntimeStateFromSettings(global.state, settings);
+        firePersistentGsplatOffFromProtocol(global);
+        return;
+    }
+
     const prevPack = (effects.persistent.paramsById[id] as Record<string, unknown> | undefined) ?? {};
     const nextPack = { ...prevPack, ...params } as Record<string, unknown>;
     delete nextPack.enabled;
@@ -128,9 +158,7 @@ export function applyGsplatPersistentParamsPatch(global: Global, params: Record<
     }
     effects.persistent.paramsById[id] = nextPack;
 
-    if (hasTypePatch && nextPersistentType === 'none') {
-        effects.persistent.enabled = false;
-    } else if (hasEnabledPatch) {
+    if (hasEnabledPatch) {
         effects.persistent.enabled = params.enabled as boolean;
     } else if (hasTypePatch && nextPersistentType !== 'none') {
         effects.persistent.enabled = true;
@@ -146,18 +174,7 @@ export function applyGsplatPersistentParamsPatch(global: Global, params: Record<
         // 关闭 persistent 时：
         // - 一次性 reveal 正在播放：不误停 reveal 本体，仅取消/禁止后续 persistent remount；
         // - 其余场景（包括 persistent 正在播放）都应立即停掉当前脚本。
-        const revealType = (readRevealParams(settings)?.type ?? 'none') as string;
-        const persistentPlaying = global.state.effectsRuntimeState?.persistent?.status === 'playing';
-        const oneShotRevealPlaying =
-            getRevealStatus(global.state) === 'playing' &&
-            revealType !== 'none' &&
-            !isPersistentVfx(revealType) &&
-            !persistentPlaying;
-        if (!oneShotRevealPlaying) {
-            applyGsplatRevealStopPlayback(global);
-        }
-        // 与 `vfxExit` 解耦：停播只清 RevealController 指针，实体上 persistent 脚本须由 viewer `syncPersistentRevealGsplat` 拆除。
-        global.events.fire('persistentGsplatEffectRemountRequested', false);
+        firePersistentGsplatOffFromProtocol(global);
         return;
     }
     if (!hasTypePatch && !hasEnabledPatch) {
