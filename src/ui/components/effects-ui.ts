@@ -4,15 +4,14 @@ import { pushEditHistory } from '../../edit-history';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../../schemas/v2-custom';
 import { SCENE_GSPLAT_PERSISTENT_EFFECT_ID, SCENE_GSPLAT_REVEAL_EFFECT_ID } from '../../vfx/effects-runtime/effects-runtime';
 import {
-    ensureEffectsSettings,
     getRevealTotalDuration,
     readRevealParams,
-    syncEffectsRuntimeStateFromSettings,
     getRevealStatus,
     getRevealActiveType
 } from '../../settings-serialize/effects-sync';
 import { EFFECTS_PROTOCOL_MODULE } from '../../vfx/effects-runtime/effect-types';
 import { isPersistentVfx } from '../../vfx/effects-runtime/reveal/reveal-policy';
+import { dispatchEffectsModuleCommand } from '../../editor-modules/effects-facade';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
 const REVEAL_EFFECTS = REVEAL_EFFECT_TYPE_VALUES;
@@ -100,7 +99,6 @@ const REVEAL_PANEL_HTML = (() => {
  */
 export function initRevealUI(global: Global): () => void {
     const { events, state } = global;
-    const editUiTransport = getEditUiTransport(global);
 
     const container = document.getElementById('revealPanelContainer');
     if (!container) return () => {};
@@ -157,18 +155,17 @@ export function initRevealUI(global: Global): () => void {
         }
     };
 
-    const applyPersistentSelection = (type: string) => {
-        const e = ensureEffectsSettings(global.settings);
-        const id = SCENE_GSPLAT_PERSISTENT_EFFECT_ID;
-        if (isPersistentType(type)) {
-            e.persistent.enabled = true;
-            e.persistent.paramsById[id] = {
-                ...(e.persistent.paramsById[id] as Record<string, unknown> | undefined),
-                type
-            };
-        } else {
-            e.persistent.enabled = false;
-            e.persistent.paramsById[id] = {};
+    /** M18：internal 与 message-bridge 共用 `EffectsFacade.handleCommand`（bridge 仅多一层 postMessage）。 */
+    const routeEffectsCommand = (
+        type: 'EFFECT_PARAMS_PATCH' | 'EFFECT_TOGGLE' | 'EFFECT_REPLAY',
+        envelope: Record<string, unknown>
+    ) => {
+        if (getEditUiTransport(global) === 'message-bridge') {
+            sendEditProtocolMessage({ type, ...envelope });
+        } else if (
+            !dispatchEffectsModuleCommand(global, { type, payload: envelope, source: 'host' })
+        ) {
+            console.warn('[effects-ui] effects command dispatch failed', type);
         }
     };
 
@@ -207,103 +204,36 @@ export function initRevealUI(global: Global): () => void {
     const onRevealTypeChange = (event: Event) => {
         const target = (event.target as HTMLSelectElement);
         const type = target.value as RevealType;
-        if (editUiTransport === 'message-bridge') {
-            sendEditProtocolMessage({
-                type: 'EFFECT_PARAMS_PATCH',
-                module: EFFECTS_PROTOCOL_MODULE,
-                effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
-                params: { type }
-            });
-        } else {
-            events.fire('revealConfigChanged', { type });
-        }
+        routeEffectsCommand('EFFECT_PARAMS_PATCH', {
+            module: EFFECTS_PROTOCOL_MODULE,
+            effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
+            params: { type }
+        });
         pushEditHistorySafe();
     };
 
     const onPersistentTypeChange = (event: Event) => {
         const target = (event.target as HTMLSelectElement);
         const type = target.value;
-        if (editUiTransport === 'message-bridge') {
-            sendEditProtocolMessage({
-                type: 'EFFECT_PARAMS_PATCH',
-                module: EFFECTS_PROTOCOL_MODULE,
-                effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
-                params: {
-                    type: type === 'none' ? 'none' : type,
-                    enabled: type !== 'none'
-                }
-            });
-            pushEditHistorySafe();
-            return;
-        }
-
-        applyPersistentSelection(type);
-        syncEffectsRuntimeStateFromSettings(global.state, global.settings);
-
-        const currentReveal = getCurrentVfxType(global);
-        const revealStatus = getRevealStatus(global.state);
-        const revealType = (readRevealParams(global.settings)?.type ?? 'none') as string;
-        const persistentPlaying = global.state.effectsRuntimeState?.persistent?.status === 'playing';
-        // 规则：
-        // 1) 若当前已有 reveal 类型（非 none），改 persistent 仅更新 persistent 轨配置，不触发 reveal type 改写。
-        // 2) 若当前 reveal 为 none，选择 persistent 时才把 type 设为该 persistent，确保能立即生效。
-        if (type === 'none') {
-            const oneShotRevealPlaying =
-                revealStatus === 'playing' &&
-                revealType !== 'none' &&
-                !isPersistentVfx(revealType) &&
-                !persistentPlaying;
-            if (!oneShotRevealPlaying) {
-                events.fire('vfxExit');
+        routeEffectsCommand('EFFECT_PARAMS_PATCH', {
+            module: EFFECTS_PROTOCOL_MODULE,
+            effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+            params: {
+                type: type === 'none' ? 'none' : type,
+                enabled: type !== 'none'
             }
-            events.fire('persistentGsplatEffectRemountRequested', false);
-        } else if (currentReveal === 'none') {
-            if (type !== 'none') {
-                events.fire('revealConfigChanged', { type });
-            }
-        } else {
-            // 当前 reveal 轨已占用时：
-            // - reveal 播放中：等待 revealComplete 后再挂 persistent（避免打断 reveal）
-            // - reveal 已非播放中：可直接触发 remount
-            if (revealStatus === 'playing') {
-                const onRevealComplete = () => {
-                    events.fire('persistentGsplatEffectRemountRequested', false);
-                };
-                events.once('revealComplete', onRevealComplete);
-            } else {
-                events.fire('persistentGsplatEffectRemountRequested', false);
-            }
-        }
-
+        });
         pushEditHistorySafe();
         updateRevealControls();
     };
 
     const onPersistentEnabledChange = (event: Event) => {
         const enabled = (event.target as HTMLInputElement).checked;
-        if (editUiTransport === 'message-bridge') {
-            sendEditProtocolMessage({
-                type: 'EFFECT_TOGGLE',
-                module: EFFECTS_PROTOCOL_MODULE,
-                effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
-                value: enabled
-            });
-            pushEditHistorySafe();
-            return;
-        }
-
-        const e = ensureEffectsSettings(global.settings);
-        e.persistent.enabled = enabled;
-        syncEffectsRuntimeStateFromSettings(global.state, global.settings);
-        if (!enabled) {
-            events.fire('vfxExit');
-            events.fire('persistentGsplatEffectRemountRequested', false);
-        } else {
-            const pType = getPersistentSelection();
-            if (pType !== 'none') {
-                events.fire('persistentGsplatEffectRemountRequested', false);
-            }
-        }
+        routeEffectsCommand('EFFECT_TOGGLE', {
+            module: EFFECTS_PROTOCOL_MODULE,
+            effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+            value: enabled
+        });
         pushEditHistorySafe();
         updateRevealControls();
     };
@@ -312,16 +242,11 @@ export function initRevealUI(global: Global): () => void {
         const target = event.target as HTMLInputElement;
         const totalDurationVal = parseFloat(target.value);
         if (!isNaN(totalDurationVal) && totalDurationVal > 0) {
-            if (editUiTransport === 'message-bridge') {
-                sendEditProtocolMessage({
-                    type: 'EFFECT_PARAMS_PATCH',
-                    module: EFFECTS_PROTOCOL_MODULE,
-                    effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
-                    params: { totalDuration: totalDurationVal }
-                });
-            } else {
-                events.fire('revealConfigChanged', { totalDuration: totalDurationVal });
-            }
+            routeEffectsCommand('EFFECT_PARAMS_PATCH', {
+                module: EFFECTS_PROTOCOL_MODULE,
+                effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
+                params: { totalDuration: totalDurationVal }
+            });
             if (effectTimeline) {
                 effectTimeline.max = (totalDurationVal * 10).toString();
             }
@@ -330,16 +255,11 @@ export function initRevealUI(global: Global): () => void {
     };
 
     const onRevealRestartClick = () => {
-        if (editUiTransport === 'message-bridge') {
-            sendEditProtocolMessage({
-                type: 'EFFECT_REPLAY',
-                module: EFFECTS_PROTOCOL_MODULE,
-                effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
-                restartAnim: restartAnimTrackEnabled
-            });
-        } else {
-            events.fire('revealRestart', restartAnimTrackEnabled);
-        }
+        routeEffectsCommand('EFFECT_REPLAY', {
+            module: EFFECTS_PROTOCOL_MODULE,
+            effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
+            restartAnim: restartAnimTrackEnabled
+        });
     };
 
     let isDraggingTimeline = false;

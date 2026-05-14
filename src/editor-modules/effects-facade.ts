@@ -11,6 +11,21 @@ import { readRevealParams } from '../settings-serialize/effects-sync';
 import { isPersistentVfx } from '../vfx/effects-runtime/reveal/reveal-policy';
 import type { Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 
+/**
+ * 与 `message-bridge` 中 `dispatchEffects` 同路径：经 `CommandRegistry` → `EffectsFacade.handleCommand`。
+ * 供 internal 编辑 UI 直接调用，避免与协议路径分叉。
+ */
+function dispatchEffectsModuleCommand(global: Global, command: ModuleCommand): boolean {
+    const registry = (global as any).__commandRegistry as
+        | { dispatch: (input: { module: 'effects'; command: ModuleCommand }) => boolean }
+        | undefined;
+    if (!registry) {
+        console.warn('[EffectsFacade] dispatchEffectsModuleCommand: command registry not initialized');
+        return false;
+    }
+    return registry.dispatch({ module: 'effects', command });
+}
+
 class EffectsFacade implements ModuleFacade {
     readonly module = 'effects' as const;
 
@@ -89,4 +104,4 @@ const initEffectsFacade = (global: Global): ModuleFacade => {
     return facade;
 };
 
-export { EffectsFacade, initEffectsFacade };
+export { EffectsFacade, initEffectsFacade, dispatchEffectsModuleCommand };

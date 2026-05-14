@@ -37,6 +37,6 @@ export { EFFECTS_PROTOCOL_MODULE, PERLIN_WAVE_REGISTRY_EFFECT_ID } from './effec
 export {
     isOneShotRevealPlayingExclusiveGsplat,
     perlinWaveUsesRegistryComposerPath
-} from './gsplat-modify-pipeline-policy';
+} from './effects-pipeline-policy';
 export { ComposerDiagnosticCode } from './composer-diagnostics';
 export type { ComposedGsplatModifyResult, ComposerDiagnostic, ComposerDiagnosticCodeType } from './composer-diagnostics';

@@ -6,7 +6,7 @@ import { PERLIN_WAVE_REGISTRY_EFFECT_ID } from '../effect-types';
 import {
     isOneShotRevealPlayingExclusiveGsplat,
     perlinWaveUsesRegistryComposerPath
-} from '../gsplat-modify-pipeline-policy';
+} from '../effects-pipeline-policy';
 import { shaderGLSL, shaderWGSL } from './gsplat-perlin-wave-shaders';
 
 /**

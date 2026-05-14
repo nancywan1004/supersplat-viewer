@@ -9,9 +9,9 @@ import {
     clearPersistentRevealTrack,
     ensureEffectsSettings,
     getRevealStatus,
+    patchRevealRuntimeMirror,
     patchRevealSettingsFromParams,
     readRevealParams,
-    patchRevealRuntimeMirror,
     syncEffectsRuntimeStateFromSettings
 } from '../../settings-serialize/effects-sync';
 import type { ExperienceSettings } from '../../schemas/v2';
@@ -58,7 +58,7 @@ export function paramsPatchHasPersistentKeys(params: Record<string, unknown>): b
 
 /**
  * EFFECT_PARAMS_PATCH（scene reveal）：增量写 `settings.effects.reveal`（运行期真源），
- * 并同步 `effectsRuntimeState.reveal.activeType`（当含 `type`）后派发 `revealConfigChanged`。
+ * 并同步 `effectsRuntimeState`（`syncEffectsRuntimeStateFromSettings`）后派发 `revealConfigChanged`。
  */
 export function applyGsplatRevealParamsPatch(global: Global, params: Record<string, unknown>): void {
     if (!paramsPatchHasRevealKeys(params)) return;
@@ -71,7 +71,6 @@ export function applyGsplatRevealParamsPatch(global: Global, params: Record<stri
         if (isPersistentVfx(oldType as any) && !isPersistentVfx(params.type as any)) {
             clearPersistentRevealTrack(settings as ExperienceSettings);
         }
-        patchRevealRuntimeMirror(global.state, { activeType: params.type as RevealEffectType });
         changed.type = params.type;
     }
     if (typeof params.totalDuration === 'number' && !Number.isNaN(params.totalDuration) && params.totalDuration > 0) {
@@ -108,8 +107,18 @@ export function normalizePersistentType(raw: unknown): PersistentEffectType | 'n
     return PERSISTENT_TYPE_SET.has(tl) ? (tl as PersistentEffectType) : null;
 }
 
-/** persistent 轨关闭后：必要时停播 reveal，并发 `persistentGsplatEffectRemountRequested` 让 viewer 拆实体脚本。 */
-function firePersistentGsplatOffFromProtocol(global: Global): void {
+/**
+ * persistent 已在 settings 中处于「关」语义之后调用（M15 单内核）：
+ * 先同步 `effectsRuntimeState`，再按需 `applyGsplatRevealStopPlayback`（一次性 reveal 独占播放时不误停），
+ * 最后 `persistentGsplatEffectRemountRequested(false)` 驱动 viewer 拆实体脚本。
+ */
+export function finalizePersistentGsplatTrackOff(global: Global): void {
+    syncEffectsRuntimeStateFromSettings(global.state, global.settings);
+    dispatchPersistentGsplatTeardownAfterSettingsSync(global);
+}
+
+/** 假定调用前已 `syncEffectsRuntimeStateFromSettings`：仅停播判定 + remount 事件。 */
+function dispatchPersistentGsplatTeardownAfterSettingsSync(global: Global): void {
     const settings = global.settings as ExperienceSettings;
     const revealType = (readRevealParams(settings)?.type ?? 'none') as string;
     const persistentPlaying = global.state.effectsRuntimeState?.persistent?.status === 'playing';
@@ -145,8 +154,7 @@ export function applyGsplatPersistentParamsPatch(global: Global, params: Record<
     // 与文档一致：`type` 为 none（含 `NONE` / 空白）即关闭可持续轨，清空 scene 包，避免 paramsById 残留脏 type
     if (hasTypePatch && nextPersistentType === 'none') {
         clearPersistentRevealTrack(settings as ExperienceSettings);
-        syncEffectsRuntimeStateFromSettings(global.state, settings);
-        firePersistentGsplatOffFromProtocol(global);
+        finalizePersistentGsplatTrackOff(global);
         return;
     }
 
@@ -174,7 +182,7 @@ export function applyGsplatPersistentParamsPatch(global: Global, params: Record<
         // 关闭 persistent 时：
         // - 一次性 reveal 正在播放：不误停 reveal 本体，仅取消/禁止后续 persistent remount；
         // - 其余场景（包括 persistent 正在播放）都应立即停掉当前脚本。
-        firePersistentGsplatOffFromProtocol(global);
+        dispatchPersistentGsplatTeardownAfterSettingsSync(global);
         return;
     }
     if (!hasTypePatch && !hasEnabledPatch) {
@@ -193,7 +201,7 @@ export function applyGsplatPersistentParamsPatch(global: Global, params: Record<
     }
 }
 
-/** 强制停止当前 reveal 播放（保留配置，不改 settings.revealEffect.type）。 */
+/** 强制停止当前 reveal 播放（保留 `settings.effects.reveal` 配置）。 */
 export function applyGsplatRevealStopPlayback(global: Global): void {
     patchRevealRuntimeMirror(global.state, { status: 'completed' });
     syncEffectsRuntimeStateFromSettings(global.state, global.settings);

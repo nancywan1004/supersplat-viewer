@@ -26,7 +26,7 @@ export type EffectsRuntimeState = {
     reveal: {
         /** scene reveal 固定 effectId（当前写死为 `scene.gsplat-reveal`） */
         activeEffectId: string;
-        /** 当前 scene reveal 类型（真源之一） */
+        /** 当前 scene reveal 类型，由 `syncEffectsRuntimeStateFromSettings` 与 `readRevealParams` 对齐 `settings.effects.reveal` */
         activeType?: RevealEffectType;
         status: RevealEffectRuntimeStatus;
     };
@@ -152,7 +152,7 @@ type Config = {
     showEditUI?: boolean;
     /**
      * 内部编辑 UI 的驱动方式（默认 internal）。
-     * - internal：UI 直接走内部 state/events（现状）
+     * - internal：多数模块仍直连 state/events；**effects 轨**经 `CommandRegistry` → `EffectsFacade`（与 bridge 解码后同路径，M18）。
      * - message-bridge：UI 通过 window.postMessage 发送协议命令，由 src/message-bridge.ts 统一映射到内部逻辑
      *   主要用于 E2E 抓包对齐 docs 中的 postMessage 事件表（即使 showEditUI === true 也能强制走协议）
      */

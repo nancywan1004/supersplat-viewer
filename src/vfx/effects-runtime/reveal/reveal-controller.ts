@@ -29,6 +29,7 @@ import {
     rebindPersistentGsplatTimelineFromSettings
 } from '../persistent/persistent-effect';
 import { shouldRequestPersistentGsplatRemount } from './effects-orchestrator';
+import { RevealPersistentGsplatController } from './reveal-persistent-controller';
 import { GsplatRevealGrowthWave } from './gsplat-growth-wave';
 import { GsplatIntegrate } from './gsplat-integrate';
 import { GsplatRevealPiecesRecover } from './gsplat-pieces-recover';
@@ -50,7 +51,7 @@ type OneShotRevealGsplatTeardown = 'replaceOneShot' | 'stopOneShotRebindPersiste
  * 场景 GSplat **一次性开场** reveal 主路径（Timed、Reveal 等会阻塞到 `revealComplete`）。
  *
  * **职责**：开场脚本时序与挂载、与 NightMode 首帧互斥、导出门控；基于 `reveal.example.mjs`。
- * **可持续型**（如 `perlin-wave`）：不在本文件声明为 `RevealEffectType`；挂载由 `viewer.ts` 调用 `persistent-effect.ts`，时间轴通过 `bindPersistentTimelineScript` 对齐。
+ * **可持续型**（如 `perlin-wave`）：实体挂载由 **`persistent-gsplat-lifecycle.ts`** 经 **`runPersistentGsplatEntityLifecycle`** 驱动；与一次性轨的 Night/时间轴衔接由 **`RevealPersistentGsplatController`**（本类组合）承担。
  */
 
 /** clipPadding: 建议扩展 far；nearMax: 建议 near 的上限。均为可选提示，不是强制值。 */
@@ -84,8 +85,8 @@ export class RevealController {
     private gsplatEntity: Entity | null = null;
     private config: RevealConfig;
     private currentScript: any = null;
-    /** true 表示 currentScript 由 persistent 轨挂载，不应驱动 reveal timeline。 */
-    private persistentTimelineBound = false;
+    /** 可持续 GSplat 与 RC 的衔接（Night / 时间轴 / inVfx）；实体 remount 由 viewer → {@link runPersistentGsplatEntityLifecycle}。 */
+    private readonly _persistentGsplat!: RevealPersistentGsplatController;
     private revealCenter: number[] = [0, 0, 0];
     private bbox: BoundingBox | null = null;
     private cameraManager: CameraManager | null = null;
@@ -245,6 +246,32 @@ export class RevealController {
                 events.once('firstFrame', createInitial);
             }
         }
+
+        this._persistentGsplat = new RevealPersistentGsplatController({
+            global: this.global,
+            beforePersistentScriptMount: () => {
+                this.inVfx = true;
+                if (this.originalNightFade === null) {
+                    this.originalNightFade = getNightFadeFromSettings(this.global.settings);
+                }
+                if (!nightModeUsesComposerPath()) {
+                    this.global.app.fire('nightMode:exit');
+                }
+            },
+            afterPersistentScriptUnmount: () => {
+                this.restoreNightModeIfNeeded('persistentGsplatUnmount');
+                this.inVfx = false;
+            },
+            applyShaderScriptCenter: (script: any) => {
+                this.updateScriptCenter(script);
+            },
+            setCurrentScript: (script: any | null) => {
+                this.currentScript = script;
+            },
+            notifyRevealScriptType: (effectType: string) => {
+                this.syncEffectsRuntimeRevealScriptType(effectType);
+            }
+        });
     }
 
     /**
@@ -919,7 +946,7 @@ export class RevealController {
         }
 
         this.currentScript = script;
-        this.persistentTimelineBound = false;
+        this._persistentGsplat.resetPersistentTimelineBound();
         this.config.type = effectName as RevealConfig['type'];
         this.exportRevealCompleted = false;
         (this as any).__exportCompletionLogged = false;
@@ -1110,7 +1137,7 @@ export class RevealController {
         if (
             this.currentScript &&
             !this.currentScript.enabled &&
-            !this.persistentTimelineBound &&
+            !this._persistentGsplat.isPersistentTimelineBound() &&
             this.inVfx &&
             this.originalNightFade !== null &&
             !this.pendingDeferredNightRestore
@@ -1126,7 +1153,7 @@ export class RevealController {
         this.tryRestoreNightAfterOneShotScriptNaturalDisable();
 
         // 一次性 reveal Timed：脚本存在且未暂停时定期触发时间更新（驱动 UI 滑条）
-        if (this.currentScript && !this.persistentTimelineBound && isRevealTimedVfxType(this.config.type)) {
+        if (this.currentScript && !this._persistentGsplat.isPersistentTimelineBound() && isRevealTimedVfxType(this.config.type)) {
             const currentTime = this.currentScript.effectTime;
             this.global.events.fire('effectTime:changed', currentTime);
         }
@@ -1208,7 +1235,7 @@ export class RevealController {
 
         Object.assign(this.config, newConfig);
 
-        // 运行期真源：写 settings.effects.reveal（legacy revealEffect 仅导入兼容读取）
+        // 运行期真源：写 settings.effects.reveal；legacy `revealEffect` 由 patch 内 `syncLegacyRevealEffectShadow` 对齐
         if (newConfig.type !== undefined && newConfig.type !== oldType) {
             if (isPersistentVfx(oldType as any) && !isPersistentVfx(newConfig.type as any)) {
                 clearPersistentRevealTrack(this.global.settings as ExperienceSettings);
@@ -1224,7 +1251,6 @@ export class RevealController {
             const nextType = newConfig.type as RevealConfig['type'];
             const hasReveal = hasRevealInSettings(this.global.settings as ExperienceSettings);
             this.global.state.hasRevealEffect = hasReveal;
-            patchRevealRuntimeMirror(this.global.state, { activeType: nextType as RevealEffectType });
             this.global.events.fire('hasRevealEffect:changed', hasReveal);
             // 当切回 none 时，视为退出特效，恢复进入特效前的 nightFade
             if (nextType === 'none') {
@@ -1384,7 +1410,7 @@ export class RevealController {
             destroyAllPersistentGsplatScriptsOnEntity(this.gsplatEntity);
             destroyAllRevealGsplatScriptsOnEntity(this.gsplatEntity);
             this.currentScript = null;
-            this.persistentTimelineBound = false;
+            this._persistentGsplat.resetPersistentTimelineBound();
             patchPersistentRuntimeMirror(this.global.state, { status: 'playing' });
             this.exportRevealCompleted = false;
             this.global.events.fire('persistentGsplatEffectRemountRequested', restartAnimTrack);
@@ -1415,7 +1441,7 @@ export class RevealController {
      * 设置特效时间（用于时间轴拖动；一次性 reveal 均为 Timed，persistent 无 scrub）
      */
     setEffectTime(time: number) {
-        if (!this.currentScript || this.persistentTimelineBound || !isRevealTimedVfxType(this.config.type)) {
+        if (!this.currentScript || this._persistentGsplat.isPersistentTimelineBound() || !isRevealTimedVfxType(this.config.type)) {
             return;
         }
         const totalDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
@@ -1658,39 +1684,24 @@ export class RevealController {
      * 否则 `syncEffectsRuntimeStateFromSettings` 会粘住 `playing`，导致关闭 persistent 时误判「reveal 仍在播」而跳过 `vfxExit`。
      */
     prepareExternalPersistentScriptMount(): void {
-        this.inVfx = true;
-        if (this.originalNightFade === null) {
-            this.originalNightFade = getNightFadeFromSettings(this.global.settings);
-        }
-        // Composer 路径下 Night 与 persistent 共用合成器槽位，无需再走「互斥清空 Night」；
-        // 否则 `suspendedByVfx` 会一直为 true，`nightFade:set` 无法更新主光/天空盒与 splat 夜景块。
-        if (!nightModeUsesComposerPath()) {
-            this.global.app.fire('nightMode:exit');
-        }
+        this._persistentGsplat.prepareExternalPersistentScriptMount();
     }
 
     /**
      * 配置关闭 persistent 且实体上脚本已销毁后由 Viewer 调用：解除时间轴绑定、退出 inVfx、按快照恢复 NightMode。
      */
     finishPersistentGsplatExternalUnmount(): void {
-        this.bindPersistentTimelineScript(null);
-        this.restoreNightModeIfNeeded('persistentGsplatUnmount');
-        this.inVfx = false;
-        this.syncEffectsRuntimeRevealScriptType('none');
+        this._persistentGsplat.finishPersistentGsplatExternalUnmount();
     }
 
     /** 供 `viewer` 挂载 persistent 脚本时对齐中心（与 reveal 脚本 world/model 规则一致） */
     applyGsplatShaderScriptCenter(script: any): void {
-        this.updateScriptCenter(script);
+        this._persistentGsplat.applyGsplatShaderScriptCenter(script);
     }
 
     /** 将 `currentScript` 与 viewer 挂载的 persistent 脚本对齐，供导出时间轴与 `getEffectTime` 使用 */
     bindPersistentTimelineScript(script: any | null): void {
-        this.currentScript = script;
-        this.persistentTimelineBound = !!script;
-        if (script && typeof script.isPaused === 'boolean') {
-            script.isPaused = getPersistentEffectPaused(this.global.state);
-        }
+        this._persistentGsplat.bindPersistentTimelineScript(script);
     }
 
     /**
@@ -1735,7 +1746,7 @@ export class RevealController {
         destroyAllRevealGsplatScriptsOnEntity(this.gsplatEntity);
         destroyAllPersistentGsplatScriptsOnEntity(this.gsplatEntity);
         this.currentScript = null;
-        this.persistentTimelineBound = false;
+        this._persistentGsplat.resetPersistentTimelineBound();
         this.syncEffectsRuntimeRevealScriptType('none');
     }
 }

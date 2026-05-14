@@ -7,7 +7,7 @@ export type GsplatContributionScope = 'scene' | 'asset';
 /**
  * - `layered`：由 composer 将 header / apply* 拼进统一 modifySplat* 外壳（M2 默认）。
  * - `full`：贡献者提供**完整** `gsplatModifyVS` 文本；与 layered **不可混排**（混排时丢弃 layered 并告警）。
- *   与运行时产品约定对齐：**整段** `gsplatModifyVS` 由 `GsplatShaderEffect` 写入的路径，**仅**在播放**一次性开场 reveal** 时占主导；其余场景以 composer  layered 合成为主（见 `gsplat-modify-pipeline-policy.ts`）。
+ *   与运行时产品约定对齐：**整段** `gsplatModifyVS` 由 `GsplatShaderEffect` 写入的路径，**仅**在播放**一次性开场 reveal** 时占主导；其余场景以 composer  layered 合成为主（见 `effects-pipeline-policy.ts`）。
  */
 export type GsplatContributionSource = 'layered' | 'full';
 

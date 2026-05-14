@@ -3,7 +3,7 @@ import { PERSISTENT_EFFECT_TYPES } from '../effect-types';
 
 /**
  * 与 `effect-types.ts` 中 **`PERSISTENT_EFFECT_TYPES`**（`index` 再导出为 **`PERSISTENT_REVEAL_EFFECT_TYPES`**）同一 `Set` 引用（单一真源）。
- * 与一次性开场 `RevealEffectType` 解耦：可持续类型（如 `perlin-wave`）不在 `reveal-effect.ts` 的 union 中声明。
+ * 与一次性开场 `RevealEffectType` 解耦：可持续类型（如 `perlin-wave`）不在 `reveal-controller.ts` 的 union 中声明。
  */
 export const PERSISTENT_VFX: ReadonlySet<string> = PERSISTENT_EFFECT_TYPES;
 

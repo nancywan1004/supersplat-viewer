@@ -136,10 +136,10 @@ type ExperienceSettings = {
     startMode: 'default' | 'animTrack' | 'annotation',
     hasStartPose?: boolean,
     /**
-     * @deprecated 仅导入旧数据时读取；运行期与导出真源均为 `settings.effects`。
+     * @deprecated 仅导入旧 JSON 与内存读兼容；**编辑/协议写入口**为 `settings.effects.reveal`（`syncLegacyRevealEffectShadow` 对齐本字段）。
      */
     revealEffect?: LegacyRevealEffect,
-    /** 三轨特效持久化；scene reveal **以本节点为导出真源**；`revealEffect` 仅旧数据导入读兼容 */
+    /** 三轨特效持久化；scene reveal 以 **`effects.reveal` 为真源**；`revealEffect` 仅旧数据导入读兼容 */
     effects?: EffectsSettings,
     lodSettings?: LodSettings,
     lighting?: LightingSettings,

@@ -9,7 +9,7 @@ import { GsplatRevealPerlinWave } from './gsplat-perlin-wave';
 /**
  * **可持续（persistent）GSplat 特效**：脚本创建、默认参数与导出/阈值辅助。
  *
- * 后续新增 persistent 类型时：先在 **`effect-types.ts`** 扩展 **`PERSISTENT_EFFECT_TYPE_VALUES`**，再在 **`gsplat-effect-script-registry.ts`** 的 `GSPLAT_PERSISTENT_SCRIPT_NAME_BY_TYPE` 登记 `scriptName`；一次性 reveal 同理扩展 **`REVEAL_EFFECT_TYPE_VALUES`** 与 **`GSPLAT_REVEAL_SCRIPT_NAME_BY_TYPE`**。最后在本文件 `mountPersistentGsplatByEffectType` 增加 `switch` 分支与脚本工厂。
+ * 后续新增 persistent 类型时：先在 **`effect-types.ts`** 扩展 **`PERSISTENT_EFFECT_TYPE_VALUES`**，再在 **`gsplat-effect-script-registry.ts`** 的 `GSPLAT_PERSISTENT_SCRIPT_NAME_BY_TYPE` 登记 `scriptName`；一次性 reveal 同理扩展 **`REVEAL_EFFECT_TYPE_VALUES`** 与 **`GSPLAT_REVEAL_SCRIPT_NAME_BY_TYPE`**。在本文件 `mountPersistentGsplatByEffectType` 增加分支；Viewer 侧 remount 入口见 **`persistent-gsplat-lifecycle.ts`** 的 **`runPersistentGsplatEntityLifecycle`**。
  */
 
 /**

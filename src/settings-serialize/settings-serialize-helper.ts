@@ -112,6 +112,7 @@ export function ensureShadow(settings: ExperienceSettings): NonNullable<Experien
     return (pe as Record<string, unknown>).shadow as NonNullable<ExperienceSettings['postEffectSettings']>['shadow'];
 }
 
+/** 若缺整条 `revealEffect` 则补默认对象；与 `settings.effects.reveal` 对齐由 `syncLegacyRevealEffectShadow`（effects-sync）在写 effects 后统一执行（M16）。 */
 export function ensureRevealEffect(settings: ExperienceSettings): NonNullable<ExperienceSettings['revealEffect']> {
     if (!settings.revealEffect || typeof settings.revealEffect !== 'object') {
         (settings as Record<string, unknown>).revealEffect = { ...DEFAULT_REVEAL_EFFECT };

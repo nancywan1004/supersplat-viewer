@@ -1,7 +1,7 @@
 /**
  * **EffectsRuntime 模块**：
  *
- * 1. **`EffectsRuntime` 类**：特效运行时入口（registry、composer），以及为 `RevealController`（`src/vfx/effects-runtime/reveal/reveal-effect.ts`）
+ * 1. **`EffectsRuntime` 类**：特效运行时入口（registry、composer），以及为 `RevealController`（`src/vfx/effects-runtime/reveal/reveal-controller.ts`）
  *    提供的轻量「快照」能力（`notifyRevealScriptApplied` / `getRevealTrackSnapshot`）。
  * 2. **场景 GSplat reveal 旁路数据**（仅本运行时使用 + 少量模块直接 import 常量）；
  *    persistent 在 `EffectRegistry` 上的工厂表与同步见 **`persistent/persistent-gsplat-registry-factory.ts`**。

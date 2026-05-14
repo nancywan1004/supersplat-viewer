@@ -1,6 +1,8 @@
 /**
- * `settings.effects` 与 `revealEffect` 的镜像、导入归一、运行态 `effectsRuntimeState` 同步。
- * **持久化真源**：`settings.effects`；`revealEffect` 仅导入读兼容，导出前由 `flushRevealIntoEffectsForExport` 刷入 `effects` 后从快照剔除。
+ * `settings.effects`、legacy `revealEffect` 与运行态 `effectsRuntimeState` 的同步（M16）。
+ * **scene reveal 写入口真源**：`settings.effects.reveal`（`patchRevealSettingsFromParams` 等）；持久化 JSON 不写出 `revealEffect`。
+ * **`revealEffect`**：旧 JSON 导入与读兼容；内存中由 `syncLegacyRevealEffectShadow` 与 `readRevealParams` 对齐。
+ * **导出**：`flushRevealIntoEffectsForExport` 将遗留 `revealEffect` 刷入 `effects` 后，快照剔除 `revealEffect` 键。
  */
 import type { ExperienceSettings } from '../schemas/v2';
 import type { LegacyRevealEffect } from '../schemas/v2-custom';
@@ -128,7 +130,23 @@ export function readPersistentRevealParams(settings: ExperienceSettings): Legacy
     return null;
 }
 
-/** 写入 `settings.effects.reveal`（运行期真源）；仅导入兼容路径才会回写 legacy `revealEffect`。 */
+/**
+ * 将 `readRevealParams(settings)`（effects 优先）写回 legacy `revealEffect`，供仍读该字段的路径与旧逻辑对齐（M16）。
+ * 不替代 `settings.effects` 真源；在每次写入 `effects.reveal` 或 `mirrorEffectsSettingsFromReveal` 后调用。
+ */
+export function syncLegacyRevealEffectShadow(settings: ExperienceSettings): void {
+    const merged = readRevealParams(settings);
+    if (!merged) {
+        return;
+    }
+    const rev = ensureRevealEffect(settings);
+    rev.type = merged.type;
+    rev.radius = merged.radius;
+    rev.autoStart = merged.autoStart;
+    rev.totalDuration = merged.totalDuration;
+}
+
+/** 写入 `settings.effects.reveal`（scene reveal 唯一写源）；随后 `syncLegacyRevealEffectShadow` 对齐 legacy 字段。 */
 export function patchRevealSettingsFromParams(settings: ExperienceSettings, patch: Partial<LegacyRevealEffect>): Record<string, unknown> {
     const e = ensureEffectsSettings(settings);
     const id = SCENE_GSPLAT_REVEAL_EFFECT_ID;
@@ -140,6 +158,7 @@ export function patchRevealSettingsFromParams(settings: ExperienceSettings, patc
         totalDuration: typeof patch.totalDuration === 'number' ? patch.totalDuration : (current?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION)
     };
     e.reveal.paramsById[id] = { ...revealToParamRecord(next) };
+    syncLegacyRevealEffectShadow(settings);
 
     return {
         type: next.type,
@@ -203,6 +222,7 @@ export function mirrorEffectsSettingsFromReveal(settings: ExperienceSettings): v
     if (isPersistentVfx(t)) {
         e.persistent.enabled = true;
         e.persistent.paramsById[persistentId] = { ...revealToParamRecord(rev) };
+        syncLegacyRevealEffectShadow(settings);
         return;
     }
 
@@ -219,22 +239,17 @@ export function mirrorEffectsSettingsFromReveal(settings: ExperienceSettings): v
         !isPersistentVfx(t);
 
     if (preservePersistentWithReveal) {
+        syncLegacyRevealEffectShadow(settings);
         return;
     }
 
     pe.enabled = false;
     pe.paramsById[persistentId] = {};
+    syncLegacyRevealEffectShadow(settings);
 }
 
 function applyRevealParams(settings: ExperienceSettings): void {
-    const id = SCENE_GSPLAT_REVEAL_EFFECT_ID;
-    const pack = settings.effects!.reveal.paramsById[id] as Record<string, unknown> | undefined;
-    if (!pack || typeof pack.type !== 'string') return;
-    const rev = ensureRevealEffect(settings);
-    (rev as Record<string, unknown>).type = pack.type;
-    if (typeof pack.radius === 'number') rev.radius = pack.radius;
-    if (typeof pack.autoStart === 'boolean') rev.autoStart = pack.autoStart;
-    if (typeof pack.totalDuration === 'number') rev.totalDuration = pack.totalDuration;
+    syncLegacyRevealEffectShadow(settings);
 }
 
 /**
@@ -331,6 +346,7 @@ export function createDefaultEffectsRuntimeState(): EffectsRuntimeState {
 
 /**
  * 从持久化 settings 推导运行态 `effectsRuntimeState`。
+ * `reveal.activeType` 始终由 `readRevealParams(settings)` 推导；`reveal.status` 在 `playing`/`completed` 等与播放生命周期相关的语义上保留与 `patchRevealRuntimeMirror` 的配合（见 RevealController / 协议停播）。
  * 对经 `observe()` 代理的 `state`（`core/observe.ts`）：`effectsRuntimeState` 必须已在初始 target 的 key 集合内（见 `index.ts`），否则无法新增顶层属性。
  */
 export function syncEffectsRuntimeStateFromSettings(state: State, settings: ExperienceSettings): void {
