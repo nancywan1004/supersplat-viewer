@@ -33,11 +33,16 @@ export function ensureEffectsSettings(settings: ExperienceSettings): NonNullable
         e.persistent = { activeEffectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID, enabled: false, paramsById: {} };
     }
     e.persistent.activeEffectId = SCENE_GSPLAT_PERSISTENT_EFFECT_ID;
-    if (typeof e.persistent.enabled !== 'boolean') {
-        e.persistent.enabled = false;
-    }
     if (!e.persistent.paramsById || typeof e.persistent.paramsById !== 'object') {
         e.persistent.paramsById = {};
+    }
+    // `enabled` 缺省时：若 scene 包已写可持续类型，默认视为开（与 editUI `enabled ?? true` 一致）；否则为关。
+    // 须在 paramsById 归一化之后推断，否则导入仅写 `paramsById` 的 JSON 会在 mirror 时被误判为关并清空 persistent。
+    if (typeof e.persistent.enabled !== 'boolean') {
+        const pid = SCENE_GSPLAT_PERSISTENT_EFFECT_ID;
+        const p = e.persistent.paramsById[pid] as Record<string, unknown> | undefined;
+        const t = p && typeof p.type === 'string' ? p.type : undefined;
+        e.persistent.enabled = !!(t && isPersistentVfx(t));
     }
     if (!e.asset || typeof e.asset !== 'object') {
         e.asset = { defaultParamsById: {} };
@@ -87,12 +92,12 @@ export function getRevealTotalDuration(settings: ExperienceSettings): number {
     return typeof reveal?.totalDuration === 'number' ? reveal.totalDuration : DEFAULT_VFX_TOTAL_DURATION;
 }
 
-/** `effects.persistent` 已启用且含合法可持续 `type` */
+/** `effects.persistent` 视为开（`enabled !== false`）且含合法可持续 `type` */
 function persistentRevealInEffects(settings: ExperienceSettings): boolean {
     ensureEffectsSettings(settings);
     const id = SCENE_GSPLAT_PERSISTENT_EFFECT_ID;
     const pe = settings.effects!.persistent;
-    if (!pe.enabled) return false;
+    if (pe.enabled === false) return false;
     const pack = pe.paramsById[id] as Record<string, unknown> | undefined;
     return !!(pack && typeof pack.type === 'string' && isPersistentVfx(pack.type));
 }
@@ -107,7 +112,7 @@ export function readPersistentRevealParams(settings: ExperienceSettings): Legacy
     ensureEffectsSettings(settings);
     const id = SCENE_GSPLAT_PERSISTENT_EFFECT_ID;
     const pe = settings.effects!.persistent;
-    if (pe.enabled) {
+    if (pe.enabled !== false) {
         const pack = pe.paramsById[id] as Record<string, unknown> | undefined;
         const parsed = parseRevealPack(pack);
         if (parsed && typeof parsed.type === 'string' && isPersistentVfx(parsed.type)) {
@@ -208,7 +213,7 @@ export function mirrorEffectsSettingsFromReveal(settings: ExperienceSettings): v
             ? (existingPersistentPack.type as string)
             : undefined;
     const preservePersistentWithReveal =
-        pe.enabled === true &&
+        pe.enabled !== false &&
         existingPersistentType !== undefined &&
         isPersistentVfx(existingPersistentType) &&
         !isPersistentVfx(t);
@@ -334,18 +339,22 @@ export function syncEffectsRuntimeStateFromSettings(state: State, settings: Expe
     }
     const revealType = (readRevealParams(settings)?.type ?? 'none') as RevealEffectType;
     const persistentReveal = readPersistentRevealParams(settings);
-    const pe = settings.effects?.persistent;
     const persistentActive =
-        persistentReveal != null && (isPersistentVfx(revealType) || pe?.enabled === true);
-
+        persistentReveal != null &&
+        (isPersistentVfx(revealType) || settings.effects!.persistent.enabled !== false);
     const reveal = state.effectsRuntimeState.reveal;
     const prevRevealStatus = reveal.status;
     reveal.activeEffectId = SCENE_GSPLAT_REVEAL_EFFECT_ID;
     reveal.activeType = revealType;
     if (prevRevealStatus === 'playing') {
         reveal.status = 'playing';
+    } else if (revealType === 'none') {
+        reveal.status = 'inactive';
+    } else if (prevRevealStatus === 'completed') {
+        // 已由本轮 reveal 播完写镜；不要用「仅配置存在」误标为 completed（冷导入会漏挂 deferred persistent）
+        reveal.status = 'completed';
     } else {
-        reveal.status = revealType === 'none' ? 'inactive' : 'completed';
+        reveal.status = 'inactive';
     }
 
     const persistent = state.effectsRuntimeState.persistent;

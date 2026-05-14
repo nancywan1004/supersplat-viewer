@@ -633,7 +633,7 @@ const initUI = (global: Global) => {
         if (inEdit) {
             if (editUiTransport !== 'message-bridge') {
                 editModeEnteredSettingsSnapshot = null;
-                // internal：进入编辑统一停播当前场景特效，退出编辑后再恢复（timed/persistent 一致）。
+                // internal：进入编辑停播一次性 reveal，persistent（如 perlin）保留；退出编辑后再恢复 reveal 播放节奏。
                 const hasVfxToResume = getRevealActiveType(state) !== 'none';
                 if (hasVfxToResume) {
                     events.fire('vfxExit');

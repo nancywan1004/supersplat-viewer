@@ -41,7 +41,8 @@ import { readPersistentRevealParams, shouldDeferPersistentMount } from './settin
 import type { Global } from './types';
 import { nightDeferredByReveal, revealBlocksAnim } from './vfx/effects-runtime/reveal/reveal-policy';
 import { RevealController } from './vfx/effects-runtime/reveal/reveal-effect';
-import { mountPersistentGsplatByEffectType } from './vfx/effects-runtime/persistent/persistent-effect';
+import { destroyAllPersistentGsplatScriptsOnEntity } from './vfx/effects-runtime/gsplat-effect-script-registry';
+import { remountPersistentGsplatOnEntity } from './vfx/effects-runtime/persistent/persistent-effect';
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
 import { getSkyboxRadius } from './loaders/skybox-loader';
 import { isLodMetaFile } from './loaders/lod-loader';
@@ -1258,31 +1259,34 @@ z: ${cameraInfo.target.z.toFixed(6)}
     }
 
     /**
-     * 可持续 GSplat（如 `perlin-wave`）挂载：与 reveal `RevealController.createEffect` 解耦。
+     * 可持续 GSplat：读 `settings` → 与 `RevealController` 通过回调协作；**挂载顺序**见 `remountPersistentGsplatOnEntity`。
      */
     private syncPersistentRevealGsplat(gsplatEntity: Entity, restartAnimTrack: boolean) {
         const { global } = this;
         const persistentReveal = readPersistentRevealParams(global.settings as ExperienceSettings);
+        const rc = this.revealController;
         if (!persistentReveal?.type) {
+            destroyAllPersistentGsplatScriptsOnEntity(gsplatEntity);
+            if (rc) {
+                rc.finishPersistentGsplatExternalUnmount();
+            } else {
+                (global.app as any).effectsRuntime?.notifyRevealScriptApplied('none');
+            }
             return;
         }
-        const t = persistentReveal.type as string;
-        const rc = this.revealController;
         if (!rc || !gsplatEntity?.script) {
             return;
         }
-        rc.prepareExternalPersistentScriptMount();
-        const script = mountPersistentGsplatByEffectType(
-            t,
-            gsplatEntity,
-            (s) => rc.applyGsplatShaderScriptCenter(s),
-            persistentReveal.autoStart ?? true
-        );
-        if (!script) {
+        const mounted = remountPersistentGsplatOnEntity(gsplatEntity, persistentReveal, {
+            prepareExternalPersistentScriptMount: () => rc.prepareExternalPersistentScriptMount(),
+            applyGsplatShaderScriptCenter: (s) => rc.applyGsplatShaderScriptCenter(s),
+            bindPersistentTimelineScript: (s) => rc.bindPersistentTimelineScript(s),
+            notifyRevealScriptApplied: (effectType) =>
+                (global.app as any).effectsRuntime?.notifyRevealScriptApplied(effectType)
+        });
+        if (!mounted) {
             return;
         }
-        rc.bindPersistentTimelineScript(script);
-        (global.app as any).effectsRuntime?.notifyRevealScriptApplied(t);
         if (restartAnimTrack) {
             global.events.fire('inputEvent', 'resetAnim');
         }

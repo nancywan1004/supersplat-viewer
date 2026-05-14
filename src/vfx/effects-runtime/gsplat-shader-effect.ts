@@ -504,11 +504,13 @@ class GsplatShaderEffect extends Script {
 
     /**
      * Called by subclasses when the reveal effect has completed.
-     * Invokes onRevealComplete callback once, then subclasses typically set enabled = false.
+     * 先禁用并 removeShaders，再触发 onRevealComplete（revealComplete 会同步挂载 persistent 等，
+     * 若顺序相反，收尾的 delete('gsplatModifyVS') 会清掉刚写上的 persistent chunk）。
      */
     notifyRevealComplete() {
         if (this._revealCompleteFired) return;
         this._revealCompleteFired = true;
+        this.enabled = false;
         this.onRevealComplete?.();
     }
 }

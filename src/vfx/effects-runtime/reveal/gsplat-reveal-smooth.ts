@@ -200,7 +200,6 @@ class GsplatRevealSmooth extends GsplatShaderEffect {
         if (this.isEffectComplete()) {
             console.log('Smooth transition effect completed, disabling');
             this.notifyRevealComplete();
-            this.enabled = false;
             return;
         }
     }

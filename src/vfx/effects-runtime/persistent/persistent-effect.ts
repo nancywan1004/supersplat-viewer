@@ -1,11 +1,15 @@
 import type { Entity } from 'playcanvas';
+import type { ExperienceSettings } from '../../../schemas/v2';
+import { readPersistentRevealParams } from '../../../settings-serialize/effects-sync';
+import { destroyAllPersistentGsplatScriptsOnEntity, getMountedPersistentGsplatScript } from '../gsplat-effect-script-registry';
 import { PERSISTENT_EFFECT_TYPES } from '../effect-types';
+import { isPersistentVfx } from '../reveal/reveal-policy';
 import { GsplatRevealPerlinWave } from './gsplat-perlin-wave';
 
 /**
  * **可持续（persistent）GSplat 特效**：脚本创建、默认参数与导出/阈值辅助。
  *
- * 后续新增 persistent 类型时：先在 **`effect-types.ts`** 扩展 **`PERSISTENT_EFFECT_TYPE_VALUES`**（及由此衍生的 **`PERSISTENT_EFFECT_TYPES`**），再在本文件 `mountPersistentGsplatByEffectType` 增加 `switch` 分支与脚本工厂。
+ * 后续新增 persistent 类型时：先在 **`effect-types.ts`** 扩展 **`PERSISTENT_EFFECT_TYPE_VALUES`**，再在 **`gsplat-effect-script-registry.ts`** 的 `GSPLAT_PERSISTENT_SCRIPT_NAME_BY_TYPE` 登记 `scriptName`；一次性 reveal 同理扩展 **`REVEAL_EFFECT_TYPE_VALUES`** 与 **`GSPLAT_REVEAL_SCRIPT_NAME_BY_TYPE`**。最后在本文件 `mountPersistentGsplatByEffectType` 增加 `switch` 分支与脚本工厂。
  */
 
 /**
@@ -87,4 +91,79 @@ export function clampExportEffectTimeForPersistent(
         return Math.max(0, time);
     }
     return Math.max(0, Math.min(time, exportCeiling));
+}
+
+/**
+ * 在已拆掉一次性 reveal 脚本之后调用：按当前 `settings` 是否仍启用 persistent、以及实体上是否已有对应脚本，
+ * 调用 `bindPersistentTimelineScript(script | null)`，与 `vfxExit` / `teardownOneShotRevealGsplatScripts('stopOneShotRebindPersistentIfConfigured')` 语义一致。
+ * 逻辑集中在此文件，避免在 `RevealController` 内散落 settings 与 registry 对齐代码。
+ */
+export function rebindPersistentGsplatTimelineFromSettings(
+    gsplatEntity: Entity | null | undefined,
+    settings: ExperienceSettings,
+    bindPersistentTimelineScript: (script: any | null) => void
+): void {
+    if (!gsplatEntity?.script) {
+        bindPersistentTimelineScript(null);
+        return;
+    }
+    const persistentCfg = readPersistentRevealParams(settings);
+    const persistentScript = getMountedPersistentGsplatScript(
+        gsplatEntity,
+        persistentCfg?.type as string | undefined
+    ) as any;
+    if (persistentScript && persistentCfg?.type && isPersistentVfx(persistentCfg.type as any)) {
+        bindPersistentTimelineScript(persistentScript);
+    } else {
+        bindPersistentTimelineScript(null);
+    }
+}
+
+/** `forceStopVfx` 末尾与 `EffectsRuntime` 快照对齐：当前 persistent 轨应对应的 effectType（无则 `'none'`）。 */
+export function getPersistentGsplatEffectsRuntimeScriptType(
+    gsplatEntity: Entity | null | undefined,
+    settings: ExperienceSettings
+): string {
+    const pCfg = readPersistentRevealParams(settings);
+    const persistentAlive = getMountedPersistentGsplatScript(gsplatEntity, pCfg?.type as string | undefined);
+    if (persistentAlive && pCfg?.type && isPersistentVfx(pCfg.type as any)) {
+        return pCfg.type as string;
+    }
+    return 'none';
+}
+
+/** Viewer 注入：与 `RevealController` / `EffectsRuntime` 解耦，仅保留挂载所需回调。 */
+export type PersistentGsplatRemountCallbacks = {
+    prepareExternalPersistentScriptMount: () => void;
+    applyGsplatShaderScriptCenter: (script: any) => void;
+    bindPersistentTimelineScript: (script: any | null) => void;
+    notifyRevealScriptApplied: (effectType: string) => void;
+};
+
+/**
+ * 配置启用 persistent 时的**唯一推荐挂载顺序**（先 prepare → 拆掉旧 persistent → create → bind → 快照）。
+ * 与一次性 reveal 的 teardown 分属不同调用栈，由 `persistentGsplatEffectRemountRequested` / 首帧 sync 统一进入。
+ *
+ * @returns 是否成功创建并绑定脚本（`mount` 失败则为 `false`，调用方勿再假定已挂载）
+ */
+export function remountPersistentGsplatOnEntity(
+    gsplatEntity: Entity,
+    persistentReveal: NonNullable<ReturnType<typeof readPersistentRevealParams>>,
+    callbacks: PersistentGsplatRemountCallbacks
+): boolean {
+    callbacks.prepareExternalPersistentScriptMount();
+    destroyAllPersistentGsplatScriptsOnEntity(gsplatEntity);
+    const t = persistentReveal.type as string;
+    const script = mountPersistentGsplatByEffectType(
+        t,
+        gsplatEntity,
+        callbacks.applyGsplatShaderScriptCenter,
+        persistentReveal.autoStart ?? true
+    );
+    if (!script) {
+        return false;
+    }
+    callbacks.bindPersistentTimelineScript(script);
+    callbacks.notifyRevealScriptApplied(t);
+    return true;
 }

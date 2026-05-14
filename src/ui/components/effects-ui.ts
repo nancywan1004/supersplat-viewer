@@ -287,6 +287,7 @@ export function initRevealUI(global: Global): () => void {
         syncEffectsRuntimeStateFromSettings(global.state, global.settings);
         if (!enabled) {
             events.fire('vfxExit');
+            events.fire('persistentGsplatEffectRemountRequested', false);
         } else {
             const pType = getPersistentSelection();
             if (pType !== 'none') {

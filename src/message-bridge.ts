@@ -215,7 +215,7 @@ const initPostMessageBridge = (global: Global) => {
             if (value && config.allowEditMode === false) break;
             if (value) {
                 editModeBaselineString = null;
-                // 进入编辑统一停播当前 VFX（timed / persistent 一致），并在退出编辑后恢复。
+                // 进入编辑停播一次性 reveal，persistent 保留；退出编辑后再恢复 reveal 播放节奏。
                 const hasVfxToResume = getRevealActiveType(state) !== 'none';
                 if (hasVfxToResume) {
                     events.fire('vfxExit');

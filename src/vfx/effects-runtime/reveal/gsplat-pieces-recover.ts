@@ -851,7 +851,6 @@ class GsplatRevealPiecesRecover extends GsplatShaderEffect {
         if (this.isEffectComplete()) {
             console.log('Pieces recover effect completed, disabling');
             this.notifyRevealComplete();
-            this.enabled = false;
             return;
         }
     }

@@ -1,8 +1,9 @@
 import { Script, Color, Entity, Vec3, Mat4, Texture, PIXELFORMAT_RGBA8, type Material } from 'playcanvas';
 import { GsplatShaderEffect } from '../effects-runtime/gsplat-shader-effect';
+import { extractGlslWgslModifyBlocks } from '../effects-runtime/gsplat-effect-layers-extractor';
 import { collectPointLights, collectSpotLights } from '../../light';
 import type { EffectsRuntime } from '../effects-runtime';
-import { emptyShaderBlocks, type GsplatContribution } from '../effects-runtime/gsplat-contribution';
+import type { GsplatContribution } from '../effects-runtime/gsplat-contribution';
 
 /**
  * 单盏点/聚光：线性色单通道峰值上限。intensity 极大时按峰值等比缩小，保色相，避免 shader 里 sum 立刻顶满仍是一片死白 + ANGLE 数值风险。
@@ -788,7 +789,7 @@ const NIGHT_COMPOSER_ID = 'night-mode';
  * @deprecated 回退：设 `globalThis.__NIGHT_MODE_LEGACY_GSPLAT__ = true`，或 URL 参数 `?nightComposer=0` /
  * `nightComposer=false`，恢复由 `GsplatShaderEffect.applyShaderToMaterial` **直连材质**（与 Reveal/VFX 仍互斥，后续将移除）。
  */
-function nightModeUsesComposerPath(): boolean {
+export function nightModeUsesComposerPath(): boolean {
     if ((globalThis as any).__NIGHT_MODE_LEGACY_GSPLAT__ === true) {
         return false;
     }
@@ -1048,7 +1049,7 @@ class NightMode extends GsplatShaderEffect {
             || this.bloomBrushActive;
     }
 
-    /** 将 NightMode 注册为 `full` 贡献者，或在不需时移除（不写材质；由 tryApply / applyShaders 写） */
+    /** 将 NightMode 注册为 `layered` 贡献者（与 persistent perlin 等同槽合成），或在不需时移除。 */
     private syncNightComposerContribution(): void {
         if (!nightModeUsesComposerPath()) return;
         const rt = this.getEffectsRuntime();
@@ -1057,19 +1058,21 @@ class NightMode extends GsplatShaderEffect {
         if (this.suspendedByVfx || !this.nightShaderWanted()) {
             rt.composer.removeContribution(NIGHT_COMPOSER_ID);
             rt.composer.compose();
+            const lastRm = rt.composer.getLastComposition();
+            if (lastRm && this.materialsApplied.size > 0) {
+                rt.composer.applyComposedToMaterials(this.materialsApplied, lastRm);
+            }
             return;
         }
 
+        const shaderBlocks = extractGlslWgslModifyBlocks(this.getShaderGLSL(), this.getShaderWGSL());
         const contrib: GsplatContribution = {
             id: NIGHT_COMPOSER_ID,
             priority: 100,
             scope: 'scene',
             enabled: true,
             version: this._nightComposerShaderRev,
-            shaderBlocks: emptyShaderBlocks(),
-            source: 'full',
-            fullModifyGlsl: this.getShaderGLSL(),
-            fullModifyWgsl: this.getShaderWGSL(),
+            shaderBlocks,
             capabilities: { exclusiveWithLighting: true, requiresGsplatShaderSlot: true }
         };
         rt.composer.setContribution(contrib);

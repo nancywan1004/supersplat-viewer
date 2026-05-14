@@ -156,6 +156,8 @@ export function applyGsplatPersistentParamsPatch(global: Global, params: Record<
         if (!oneShotRevealPlaying) {
             applyGsplatRevealStopPlayback(global);
         }
+        // 与 `vfxExit` 解耦：停播只清 RevealController 指针，实体上 persistent 脚本须由 viewer `syncPersistentRevealGsplat` 拆除。
+        global.events.fire('persistentGsplatEffectRemountRequested', false);
         return;
     }
     if (!hasTypePatch && !hasEnabledPatch) {

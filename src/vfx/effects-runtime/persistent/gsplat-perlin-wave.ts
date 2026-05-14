@@ -1,5 +1,7 @@
-import { Vec3 } from 'playcanvas';
+import { Vec3, type Material } from 'playcanvas';
 import { GsplatShaderEffect } from '../gsplat-shader-effect';
+import { extractGlslWgslModifyBlocks, PERLIN_WAVE_COMPOSER_ID } from '../gsplat-effect-layers-extractor';
+import { nightModeUsesComposerPath } from '../../lighting/night-mode';
 
 const shaderGLSL = /* glsl */`
 uniform float uTime;
@@ -193,6 +195,9 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
 class GsplatRevealPerlinWave extends GsplatShaderEffect {
     static scriptName = 'gsplatRevealPerlinWave';
 
+    /** 仅当 shader 源码变更时需递增以触发 composer 重编译 */
+    private _perlinComposerRev = 0;
+
     // Reusable arrays for uniform updates
     _centerArray = [0, 0, 0];
 
@@ -250,6 +255,69 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
 
     getShaderWGSL() {
         return shaderWGSL;
+    }
+
+    private usesPerlinComposerPath(): boolean {
+        return nightModeUsesComposerPath() && !!(this.app as any).effectsRuntime?.composer;
+    }
+
+    applyShaderToMaterial(material: Material) {
+        if (this.usesPerlinComposerPath()) {
+            return;
+        }
+        super.applyShaderToMaterial(material);
+    }
+
+    applyShaders() {
+        if (!this.usesPerlinComposerPath()) {
+            super.applyShaders();
+            return;
+        }
+        if (this.entity.gsplat?.unified) {
+            this.applyToUnifiedMaterials();
+        } else {
+            this.applyToComponentMaterial();
+        }
+        this.syncPerlinComposerContribution();
+    }
+
+    removeShaders() {
+        if (!this.usesPerlinComposerPath()) {
+            super.removeShaders();
+            return;
+        }
+        if (this.materialsApplied.size === 0) return;
+        const rt = (this.app as any).effectsRuntime;
+        const mats = new Set(this.materialsApplied);
+        rt?.composer.removeContribution(PERLIN_WAVE_COMPOSER_ID);
+        rt?.composer.compose();
+        const last = rt?.composer.getLastComposition();
+        if (last && mats.size > 0) {
+            rt.composer.applyComposedToMaterials(mats, last);
+        }
+        this.materialsApplied.clear();
+    }
+
+    private syncPerlinComposerContribution() {
+        const rt = (this.app as any).effectsRuntime;
+        if (!rt?.composer || this.materialsApplied.size === 0) {
+            return;
+        }
+        const shaderBlocks = extractGlslWgslModifyBlocks(shaderGLSL, shaderWGSL);
+        rt.composer.setContribution({
+            id: PERLIN_WAVE_COMPOSER_ID,
+            priority: 20,
+            scope: 'scene',
+            enabled: true,
+            version: this._perlinComposerRev,
+            shaderBlocks,
+            capabilities: { allowConcurrentWithPersistent: true }
+        });
+        rt.composer.compose();
+        const last = rt.composer.getLastComposition();
+        if (last) {
+            rt.composer.applyComposedToMaterials(this.materialsApplied, last);
+        }
     }
 
     updateEffect(effectTime: number, dt: number) {

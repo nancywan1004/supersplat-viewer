@@ -360,7 +360,6 @@ class GsplatIntegrate extends GsplatShaderEffect {
         if (this.isEffectComplete()) {
             console.log('[Integrate] effect time: ', this.effectTime);
             this.notifyRevealComplete();
-            this.enabled = false;
             return;
         }
     }
