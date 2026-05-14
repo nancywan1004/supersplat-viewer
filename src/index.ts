@@ -45,6 +45,9 @@ import {
     hasRevealInSettings
 } from './settings-serialize/effects-sync';
 
+import { loadGsplatMorphSequence } from './vfx/gsplat-morph';
+
+
 export { loadGsplatAsset };
 
 const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progress: number) => void, lodLoader?: LodLoader) => {
@@ -487,6 +490,27 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     initVideoExport(global, {
         getRevealExportTimingSource: () => viewer.revealController
     });
+
+    const mainGsplatEntity = await gsplatLoad;
+
+    const morph = await loadGsplatMorphSequence(app, [
+        '/morph/1.ply',
+        '/morph/2.ply',
+        '/morph/3.ply',
+        '/morph/4.ply'
+    ], {
+        segmentDuration: 3,
+        loop: true,
+        autoPlay: true,
+        recenterModels: true,
+        normalizeScales: true,
+        targetScale: 10,
+        layers: mainGsplatEntity.gsplat?.layers ? [...mainGsplatEntity.gsplat.layers] : undefined
+    });
+    // 先把 viewer 默认加载的主 gsplat 隐藏掉，不然会和 morph 结果重叠
+    mainGsplatEntity.enabled = false;
+    // 方便你在浏览器控制台里手动调试
+    (window as any).morph = morph;
 
     return viewer;
 };

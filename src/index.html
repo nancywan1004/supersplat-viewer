@@ -40,7 +40,7 @@
             const skyboxUrl = toProxy(url.searchParams.get('skybox'));
             const collisionUrl = url.searchParams.get('collision') ?? url.searchParams.get('voxel');
             const settingsUrl = url.searchParams.has('settings') ? url.searchParams.get('settings') : './settings.json';
-            const contentUrl = url.searchParams.has('content') ? url.searchParams.get('content') : './scene.compressed.ply';
+            const contentUrl = url.searchParams.has('content') ? url.searchParams.get('content') : './scene.sog';
             const settingsFetchUrl = toProxy(settingsUrl);
             const contentFetchUrl = toProxy(contentUrl);
             const splatMeshUrl = url.searchParams.get('splatMesh') || undefined;
