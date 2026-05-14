@@ -2,9 +2,17 @@ import type { Global } from '../../types';
 import type { GsplatContribution } from './gsplat-contribution';
 
 /**
+ * 构造场景级 gsplat contribution 时的上下文（`revision` 参与 composer signature，仅结构/源码变更时递增）。
+ */
+export type EffectGsplatContributionFactoryContext = {
+    global: Global;
+    revision?: number;
+};
+
+/**
  * 由注册项构造场景级 gsplat contribution（返回 null 表示当前上下文不适用，不写入 composer）。
  */
-export type EffectGsplatContributionFactory = (ctx: { global: Global }) => GsplatContribution | null;
+export type EffectGsplatContributionFactory = (ctx: EffectGsplatContributionFactoryContext) => GsplatContribution | null;
 
 /**
  * 单条注册：协议 `effectId` 或内部 `effectType`（如 `perlin-wave`）均可作为 key，由调用方约定唯一性。
@@ -47,10 +55,10 @@ export class EffectRegistry {
         this.entries.clear();
     }
 
-    tryCreateSceneGsplatContribution(effectId: string): GsplatContribution | null {
+    tryCreateSceneGsplatContribution(effectId: string, options?: { revision?: number }): GsplatContribution | null {
         const e = this.entries.get(effectId);
         const fn = e?.createSceneGsplatContribution;
         if (!fn) return null;
-        return fn({ global: this.global });
+        return fn({ global: this.global, revision: options?.revision });
     }
 }

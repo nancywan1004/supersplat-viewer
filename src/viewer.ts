@@ -1263,6 +1263,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
      */
     private syncPersistentRevealGsplat(gsplatEntity: Entity, restartAnimTrack: boolean) {
         const { global } = this;
+        (global.app as any).effectsRuntime?.syncPersistentGsplatRegistryFromSettings?.();
         const persistentReveal = readPersistentRevealParams(global.settings as ExperienceSettings);
         const rc = this.revealController;
         if (!persistentReveal?.type) {

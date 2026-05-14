@@ -42,6 +42,9 @@ export const REVEAL_EFFECT_TYPE_VALUES = [
  */
 export const REVEAL_EFFECT_TYPES = new Set<string>([...REVEAL_EFFECT_TYPE_VALUES]);
 
+/** 与持久类型 `perlin-wave` 一致，供 `EffectRegistry` 注册与 `tryCreateSceneGsplatContribution` 查询 */
+export const PERLIN_WAVE_REGISTRY_EFFECT_ID = 'perlin-wave' as const;
+
 /** 可持续 persistent 类型清单；`src/types.ts` 中 `PersistentEffectType` 与此同源 re-export */
 export const PERSISTENT_EFFECT_TYPE_VALUES = ['perlin-wave'] as const;
 

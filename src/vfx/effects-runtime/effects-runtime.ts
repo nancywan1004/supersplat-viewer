@@ -1,9 +1,11 @@
 /**
- * **EffectsRuntime 模块**（单文件收敛）：
+ * **EffectsRuntime 模块**：
  *
  * 1. **`EffectsRuntime` 类**：特效运行时入口（registry、composer），以及为 `RevealController`（`src/vfx/effects-runtime/reveal/reveal-effect.ts`）
  *    提供的轻量「快照」能力（`notifyRevealScriptApplied` / `getRevealTrackSnapshot`）。
- * 2. **场景 GSplat reveal 旁路数据**（仅本运行时使用 + 少量模块直接 import 常量）：
+ * 2. **场景 GSplat reveal 旁路数据**（仅本运行时使用 + 少量模块直接 import 常量）；
+ *    persistent 在 `EffectRegistry` 上的工厂表与同步见 **`persistent/persistent-gsplat-registry-factory.ts`**。
+ * 3. **旁路数据细节**：
  *    - `SCENE_GSPLAT_REVEAL_EFFECT_ID` / `SCENE_GSPLAT_PERSISTENT_EFFECT_ID`：
  *      协议 `EFFECT_*` 与 `settings.effects` 对齐的场景轨道包 id；
  *    - `PERSISTENT_EFFECT_TYPES`：持续型 id 集合（**定义于** `effect-types.ts`），本文件 import 供内置 persistent 轨 provider；
@@ -13,10 +15,15 @@
  *
  * 若只关心「协议里 scene reveal 的 effectId」，看 **`SCENE_GSPLAT_REVEAL_EFFECT_ID`** 即可。
  */
+import type { Material } from 'playcanvas';
+import type { ExperienceSettings } from '../../settings';
 import type { Global } from '../../types';
 import { EffectRegistry } from './effect-registry';
 import { GsplatEffectComposer } from './gsplat-effect-composer';
+import type { GsplatContribution } from './gsplat-contribution';
+import type { ComposedGsplatModifyResult } from './composer-diagnostics';
 import { PERSISTENT_EFFECT_TYPES, REVEAL_EFFECT_TYPES } from './effect-types';
+import { syncPersistentGsplatRegistryFactories } from './persistent/persistent-gsplat-registry-factory';
 
 // --- 场景 GSplat reveal：协议 id、持久型集合、内置 reveal/persistent 轨判定 ---
 
@@ -61,11 +68,22 @@ export class EffectsRuntime {
     readonly revealTrackProvider = new BuiltinRevealTrackProvider();
     readonly revealPersistentProvider = new BuiltinRevealPersistentTrackProvider();
 
+    private readonly _global: Global;
+
     private _lastRevealScriptEffectType = 'none';
 
     constructor(global: Global) {
+        this._global = global;
         this.registry = new EffectRegistry(global);
         this.composer = new GsplatEffectComposer(global);
+    }
+
+    /**
+     * 按 `global.settings` 中 persistent 真源同步 `EffectRegistry` 内置工厂（按需注册/卸载）。
+     * 应在挂载/卸载 persistent 脚本路径上调用（如 `viewer.syncPersistentRevealGsplat`）；波纹在 `applySceneGsplatFromRegistry` 前也会调用以防漏配。
+     */
+    syncPersistentGsplatRegistryFromSettings(): void {
+        syncPersistentGsplatRegistryFactories(this._global.settings as ExperienceSettings, this.registry);
     }
 
     /**
@@ -89,6 +107,39 @@ export class EffectsRuntime {
             revealTrack: this.getRevealTrackSnapshot(),
             composer: this.composer.getDebugSnapshot()
         };
+    }
+
+    /**
+     * 写入一条场景级 gsplat contribution 并 compose，再应用到给定材质集合（M11：避免业务脚本直接 `composer.setContribution`）。
+     */
+    applySceneGsplatContribution(contribution: GsplatContribution, materials: Set<Material>): ComposedGsplatModifyResult {
+        this.composer.setContribution(contribution);
+        const result = this.composer.compose();
+        if (materials.size > 0) {
+            this.composer.applyComposedToMaterials(materials, result);
+        }
+        return result;
+    }
+
+    /**
+     * 按 contribution `id` 从合成器移除并 compose，再应用到材质（无活跃贡献时会 delete chunk）。
+     */
+    removeSceneGsplatContribution(contributionId: string, materials: Set<Material>): ComposedGsplatModifyResult {
+        this.composer.removeContribution(contributionId);
+        const result = this.composer.compose();
+        if (materials.size > 0) {
+            this.composer.applyComposedToMaterials(materials, result);
+        }
+        return result;
+    }
+
+    /**
+     * 从 `EffectRegistry` 拉取工厂产物并 `applySceneGsplatContribution`；未注册时返回 null。
+     */
+    applySceneGsplatFromRegistry(effectId: string, materials: Set<Material>, options?: { revision?: number }): ComposedGsplatModifyResult | null {
+        const contrib = this.registry.tryCreateSceneGsplatContribution(effectId, options);
+        if (!contrib) return null;
+        return this.applySceneGsplatContribution(contrib, materials);
     }
 
     dispose(): void {

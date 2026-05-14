@@ -11,7 +11,7 @@ export {
 export { PERSISTENT_EFFECT_TYPES as PERSISTENT_REVEAL_EFFECT_TYPES } from './effect-types';
 export type { RevealRuntimeTrackKind, RevealRuntimeTrackSnapshot } from './effects-runtime';
 export { EffectRegistry } from './effect-registry';
-export type { EffectRegistryEntry, EffectGsplatContributionFactory } from './effect-registry';
+export type { EffectRegistryEntry, EffectGsplatContributionFactory, EffectGsplatContributionFactoryContext } from './effect-registry';
 export { GsplatEffectComposer } from './gsplat-effect-composer';
 export type {
     GsplatContribution,
@@ -33,6 +33,10 @@ export type {
     EffectRuntimeStatus,
     EffectsProtocolModule
 } from './effect-types';
-export { EFFECTS_PROTOCOL_MODULE } from './effect-types';
+export { EFFECTS_PROTOCOL_MODULE, PERLIN_WAVE_REGISTRY_EFFECT_ID } from './effect-types';
+export {
+    isOneShotRevealPlayingExclusiveGsplat,
+    perlinWaveUsesRegistryComposerPath
+} from './gsplat-modify-pipeline-policy';
 export { ComposerDiagnosticCode } from './composer-diagnostics';
 export type { ComposedGsplatModifyResult, ComposerDiagnostic, ComposerDiagnosticCodeType } from './composer-diagnostics';

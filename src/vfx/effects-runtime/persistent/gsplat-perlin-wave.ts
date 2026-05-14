@@ -2,180 +2,12 @@ import { Vec3, type Material } from 'playcanvas';
 import { GsplatShaderEffect } from '../gsplat-shader-effect';
 import { extractGlslWgslModifyBlocks, PERLIN_WAVE_COMPOSER_ID } from '../gsplat-effect-layers-extractor';
 import { nightModeUsesComposerPath } from '../../lighting/night-mode';
-
-const shaderGLSL = /* glsl */`
-uniform float uTime;
-uniform vec3 uCenter;
-uniform float uIntensity;
-uniform float uWaveAmplitude;
-uniform float uWaveFrequency;
-uniform float uWaveSpeed;
-uniform float uScaleBlend;
-uniform float uEndRadius;
-
-// Helper functions
-mat2 rot(float a) {
-    float s = sin(a);
-    float c = cos(a);
-    return mat2(c, -s, s, c);
-}
-
-         // Pseudo-random hash function
-          vec3 hash2(vec3 p) {
-            p = fract(p * 0.3183099 + 0.1);
-            p *= 17.0;
-            return fract(vec3(p.x * p.y * p.z, p.x + p.y * p.z, p.x * p.y + p.z));
-          }
-
-          // 3D Perlin-style noise function
-          vec3 noise2(vec3 p) {
-            vec3 i = floor(p);
-            vec3 f = fract(p);
-            f = f * f * (3.0 - 2.0 * f);
-            
-    vec3 n000 = hash2(i + vec3(0, 0, 0));
-    vec3 n100 = hash2(i + vec3(1, 0, 0));
-    vec3 n010 = hash2(i + vec3(0, 1, 0));
-    vec3 n110 = hash2(i + vec3(1, 1, 0));
-    vec3 n001 = hash2(i + vec3(0, 0, 1));
-    vec3 n101 = hash2(i + vec3(1, 0, 1));
-    vec3 n011 = hash2(i + vec3(0, 1, 1));
-    vec3 n111 = hash2(i + vec3(1, 1, 1));
-            
-            vec3 x0 = mix(n000, n100, f.x);
-            vec3 x1 = mix(n010, n110, f.x);
-            vec3 x2 = mix(n001, n101, f.x);
-            vec3 x3 = mix(n011, n111, f.x);
-            
-            vec3 y0 = mix(x0, x1, f.y);
-            vec3 y1 = mix(x2, x3, f.y);
-            
-            return mix(y0, y1, f.z);
-          }
-
-// 3D sine wave effect for color (spatialScale、timeScale 与位移一致，波长/波速都能同时影响位移和颜色)
-vec4 sin3D(vec3 p, float t, float spatialScale, float timeScale) {
-    float m = exp(-2.0 * length(sin(p * 2.0 * spatialScale + t * timeScale))) * 5.0;
-    return vec4(m) + 0.3;
-}
-
-// Shared globals
-float g_dist;
-
-void initShared(vec3 center) {
-    g_dist = length(center - uCenter);
-}
-
-void modifySplatCenter(inout vec3 center) {
-    initShared(center);
-    
-    // Apply Perlin noise offset for wave motion
-    vec3 noiseOffset = uWaveAmplitude * noise2(center * uWaveFrequency + uTime * uWaveSpeed);
-    center += noiseOffset;
-}
-
-void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
-    initShared(modifiedCenter);
-    // No scale modification for perlin wave
-}
-
-void modifySplatColor(vec3 center, inout vec4 color) {
-    initShared(center);
-    
-    // Apply 3D sine wave color effect（波长、波速与位移一致）
-    vec4 e = sin3D(center, uTime, uWaveFrequency, uWaveSpeed * 3.0);
-    color = mix(color, color * e, uIntensity);
-}
-`;
-
-const shaderWGSL = /* wgsl */`
-uniform uTime: f32;
-uniform uCenter: vec3f;
-uniform uIntensity: f32;
-uniform uWaveAmplitude: f32;
-uniform uWaveFrequency: f32;
-uniform uWaveSpeed: f32;
-uniform uScaleBlend: f32;
-
-// Helper functions
-fn rot(a: f32) -> mat2x2f {
-    let s = sin(a);
-    let c = cos(a);
-    return mat2x2f(
-        vec2f(c, -s),
-        vec2f(s, c)
-    );
-}
-
-// Pseudo-random hash function
-fn hash2(p: vec3f) -> vec3f {
-    var p2 = fract(p * 0.3183099 + 0.1);
-    p2 *= 17.0;
-    return fract(vec3f(
-        p2.x * p2.y * p2.z,
-        p2.x + p2.y * p2.z,
-        p2.x * p2.y + p2.z
-    ));
-}
-
-// 3D Perlin-style noise function
-fn noise2(p: vec3f) -> vec3f {
-    let i = floor(p);
-    var f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    
-    let n000 = hash2(i + vec3f(0.0, 0.0, 0.0));
-    let n100 = hash2(i + vec3f(1.0, 0.0, 0.0));
-    let n010 = hash2(i + vec3f(0.0, 1.0, 0.0));
-    let n110 = hash2(i + vec3f(1.0, 1.0, 0.0));
-    let n001 = hash2(i + vec3f(0.0, 0.0, 1.0));
-    let n101 = hash2(i + vec3f(1.0, 0.0, 1.0));
-    let n011 = hash2(i + vec3f(0.0, 1.0, 1.0));
-    let n111 = hash2(i + vec3f(1.0, 1.0, 1.0));
-    
-    let x0 = mix(n000, n100, f.x);
-    let x1 = mix(n010, n110, f.x);
-    let x2 = mix(n001, n101, f.x);
-    let x3 = mix(n011, n111, f.x);
-    
-    let y0 = mix(x0, x1, f.y);
-    let y1 = mix(x2, x3, f.y);
-    
-    return mix(y0, y1, f.z);
-}
-
-// 3D sine wave effect for color (spatialScale、timeScale 与位移一致，波长/波速都能同时影响位移和颜色)
-fn sin3D(p: vec3f, t: f32, spatialScale: f32, timeScale: f32) -> vec4f {
-    let m = exp(-2.0 * length(sin(p * 2.0 * spatialScale + t * timeScale))) * 5.0;
-    return vec4f(m, m, m, 1.0) + vec4f(0.3, 0.3, 0.3, 0.0);
-}
-
-// Shared globals
-var<private> g_dist: f32;
-
-fn initShared(center: vec3f) {
-    g_dist = length(center - uniform.uCenter);
-}
-
-fn modifySplatCenter(center: ptr<function, vec3f>) {
-    initShared(*center);
-    
-    let noiseOffset = uniform.uWaveAmplitude * noise2(*center * uniform.uWaveFrequency + uniform.uTime * uniform.uWaveSpeed);
-    *center = *center + noiseOffset;
-}
-
-fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
-    initShared(modifiedCenter);
-}
-
-fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
-    initShared(center);
-    
-    // Apply 3D sine wave color effect（波长、波速与位移一致）
-    let e = sin3D(center, uniform.uTime, uniform.uWaveFrequency, uniform.uWaveSpeed * 3.0);
-    *color = mix(*color, *color * e, uniform.uIntensity);
-}
-`;
+import { PERLIN_WAVE_REGISTRY_EFFECT_ID } from '../effect-types';
+import {
+    isOneShotRevealPlayingExclusiveGsplat,
+    perlinWaveUsesRegistryComposerPath
+} from '../gsplat-modify-pipeline-policy';
+import { shaderGLSL, shaderWGSL } from './gsplat-perlin-wave-shaders';
 
 /**
  * Perlin Wave reveal effect for gaussian splats.
@@ -197,6 +29,9 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
 
     /** 仅当 shader 源码变更时需递增以触发 composer 重编译 */
     private _perlinComposerRev = 0;
+
+    /** 一次性开场 reveal 独占整段 `gsplatModifyVS` 时，已主动从合成器摘掉波纹 contribution */
+    private _perlinComposerSuppressed = false;
 
     // Reusable arrays for uniform updates
     _centerArray = [0, 0, 0];
@@ -261,6 +96,19 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
         return nightModeUsesComposerPath() && !!(this.app as any).effectsRuntime?.composer;
     }
 
+    private getEffectsRuntime(): any {
+        return (this.app as any).effectsRuntime ?? null;
+    }
+
+    private getAppState() {
+        return (this.app as any).__global?.state;
+    }
+
+    /** 开场一次性 reveal 正在播：整段 `gsplatModifyVS` 由 reveal 脚本独占，波纹不参与合成器 */
+    private shouldSuppressPerlinComposerForOneShotReveal(): boolean {
+        return isOneShotRevealPlayingExclusiveGsplat(this.getAppState());
+    }
+
     applyShaderToMaterial(material: Material) {
         if (this.usesPerlinComposerPath()) {
             return;
@@ -278,6 +126,11 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
         } else {
             this.applyToComponentMaterial();
         }
+        if (this.shouldSuppressPerlinComposerForOneShotReveal()) {
+            this.suppressPerlinComposerContribution();
+            return;
+        }
+        this._perlinComposerSuppressed = false;
         this.syncPerlinComposerContribution();
     }
 
@@ -287,37 +140,59 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
             return;
         }
         if (this.materialsApplied.size === 0) return;
-        const rt = (this.app as any).effectsRuntime;
+        const rt = this.getEffectsRuntime();
         const mats = new Set(this.materialsApplied);
-        rt?.composer.removeContribution(PERLIN_WAVE_COMPOSER_ID);
-        rt?.composer.compose();
-        const last = rt?.composer.getLastComposition();
-        if (last && mats.size > 0) {
-            rt.composer.applyComposedToMaterials(mats, last);
+        if (rt?.removeSceneGsplatContribution) {
+            rt.removeSceneGsplatContribution(PERLIN_WAVE_COMPOSER_ID, mats);
+        } else {
+            rt?.composer.removeContribution(PERLIN_WAVE_COMPOSER_ID);
+            rt?.composer.compose();
+            const last = rt?.composer.getLastComposition();
+            if (last && mats.size > 0) {
+                rt!.composer.applyComposedToMaterials(mats, last);
+            }
         }
         this.materialsApplied.clear();
+        this._perlinComposerSuppressed = false;
     }
 
-    private syncPerlinComposerContribution() {
-        const rt = (this.app as any).effectsRuntime;
+    private suppressPerlinComposerContribution(): void {
+        const rt = this.getEffectsRuntime();
+        if (!rt?.removeSceneGsplatContribution || this.materialsApplied.size === 0) return;
+        if (this._perlinComposerSuppressed) return;
+        rt.removeSceneGsplatContribution(PERLIN_WAVE_COMPOSER_ID, new Set(this.materialsApplied));
+        this._perlinComposerSuppressed = true;
+    }
+
+    private syncPerlinComposerContribution(): void {
+        const rt = this.getEffectsRuntime();
         if (!rt?.composer || this.materialsApplied.size === 0) {
             return;
         }
-        const shaderBlocks = extractGlslWgslModifyBlocks(shaderGLSL, shaderWGSL);
-        rt.composer.setContribution({
-            id: PERLIN_WAVE_COMPOSER_ID,
-            priority: 20,
-            scope: 'scene',
-            enabled: true,
-            version: this._perlinComposerRev,
-            shaderBlocks,
-            capabilities: { allowConcurrentWithPersistent: true }
-        });
-        rt.composer.compose();
-        const last = rt.composer.getLastComposition();
-        if (last) {
-            rt.composer.applyComposedToMaterials(this.materialsApplied, last);
+        if (this.shouldSuppressPerlinComposerForOneShotReveal()) {
+            this.suppressPerlinComposerContribution();
+            return;
         }
+        if (perlinWaveUsesRegistryComposerPath()) {
+            rt.syncPersistentGsplatRegistryFromSettings?.();
+            rt.applySceneGsplatFromRegistry(PERLIN_WAVE_REGISTRY_EFFECT_ID, this.materialsApplied, {
+                revision: this._perlinComposerRev
+            });
+            return;
+        }
+        const shaderBlocks = extractGlslWgslModifyBlocks(shaderGLSL, shaderWGSL);
+        rt.applySceneGsplatContribution(
+            {
+                id: PERLIN_WAVE_COMPOSER_ID,
+                priority: 20,
+                scope: 'scene',
+                enabled: true,
+                version: this._perlinComposerRev,
+                shaderBlocks,
+                capabilities: { allowConcurrentWithPersistent: true }
+            },
+            this.materialsApplied
+        );
     }
 
     updateEffect(effectTime: number, dt: number) {
@@ -336,6 +211,15 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
         this.setUniform('uWaveFrequency', effectiveFrequency);
         this.setUniform('uWaveSpeed', this.waveSpeed);
         this.setUniform('uScaleBlend', this.scaleBlend);
+
+        if (this.usesPerlinComposerPath() && this.materialsApplied.size > 0) {
+            if (this.shouldSuppressPerlinComposerForOneShotReveal()) {
+                this.suppressPerlinComposerContribution();
+            } else if (this._perlinComposerSuppressed) {
+                this._perlinComposerSuppressed = false;
+                this.syncPerlinComposerContribution();
+            }
+        }
     }
 }
 

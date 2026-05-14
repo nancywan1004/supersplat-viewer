@@ -304,6 +304,11 @@ class GsplatShaderEffect extends Script {
         }
     }
 
+    /**
+     * 将子类返回的整段顶点修改 shader 写入材质 `gsplatModifyVS`。
+     * 产品约定：与 `GsplatEffectComposer` 分层合成相对，此「整段写入」路径**仅**在播放**一次性开场 reveal** 时作为主导；
+     * 夜间 / 持续波纹等走合成器时，子类应短路本方法（参见 `GsplatRevealPerlinWave.applyShaderToMaterial`）。
+     */
     applyShaderToMaterial(material: Material) {
         const device = this.app.graphicsDevice;
         const shaderLanguage = device?.isWebGPU ? 'wgsl' : 'glsl';
