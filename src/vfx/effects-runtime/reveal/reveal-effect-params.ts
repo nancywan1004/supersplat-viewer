@@ -108,12 +108,12 @@ const INTEGRATE = new Set([
 
 /**
  * 两阶段：自下而上生长（点云）+ 光圈向外复原。
- * `endRadius` 由 create 时默认与 `applyAdaptiveEndRadius`（bbox 下限）决定，也可经 **`effectParams.endRadius`** 覆盖；`verticalSpread` 常与 Phase1 目标时长、`totalDuration` 耦合。
+ * `endRadius` 由 create 时默认与 `applyAdaptiveEndRadius`（bbox 下限）决定；**Phase2 `recoverDuration` 与 `totalDuration` 对齐**（见 `RevealController.createGrowthWaveScript`）；`verticalSpread` 与 Phase1 目标时长相关。
  */
 const GROWTH_WAVE = new Set([
     'growthSpeed', // Phase1 竖向生长速度
     'growthDuration', // 单点生长动画时长（秒）
-    'recoverDuration', // Phase2 光圈扫出时长（秒）
+    'recoverDuration', // Phase2：`createGrowthWaveScript` 内为 max(0.5, totalDuration − Phase1 结束)；Phase1 超预算时提高 growthSpeed 压缩；`effectParams` 仍可覆盖；类默认 5；@range [0.5,20]
     'noiseIntensity', // 生长/复原噪声
     'scatterDistance', // 生长阶段最大散射位移
     'minSize', // 兼容字段，点云阶段主要见 `pointSize`
