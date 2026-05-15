@@ -1,10 +1,9 @@
 /**
  * 场景 GSplat reveal 协议映射：`EFFECT_PARAMS_PATCH` / `EFFECT_TOGGLE` 对 settings、state 的写入及事件派发。
- * 由 EffectsFacade 调用；入站 payload 须含 `module: 'effect'` 与合法 `effectId`（见 `SCENE_GSPLAT_REVEAL_EFFECT_ID`）。
+ * 由 EffectsFacade 调用；payload 须含合法 `effectId`（见 `SCENE_GSPLAT_REVEAL_EFFECT_ID`）。`module` 可选。
  */
 
-import { EFFECTS_PROTOCOL_MODULE } from '../../vfx/effects-runtime/effect-types';
-import { SCENE_GSPLAT_PERSISTENT_EFFECT_ID, SCENE_GSPLAT_REVEAL_EFFECT_ID } from '../../vfx/effects-runtime/effects-runtime';
+import type { ExperienceSettings } from '../../schemas/v2';
 import {
     clearPersistentRevealTrack,
     ensureEffectsSettings,
@@ -14,42 +13,45 @@ import {
     readRevealParams,
     syncEffectsRuntimeStateFromSettings
 } from '../../settings-serialize/effects-sync';
-import type { ExperienceSettings } from '../../schemas/v2';
 import { PERSISTENT_EFFECT_TYPE_VALUES } from '../../types';
-import type { Global, PersistentEffectType, RevealEffectType } from '../../types';
+import type { Global, PersistentEffectType } from '../../types';
+import { SCENE_GSPLAT_PERSISTENT_EFFECT_ID } from '../../vfx/effects-runtime/effects-runtime';
 import { isPersistentVfx } from '../../vfx/effects-runtime/reveal/reveal-policy';
+import { EFFECTS_PROTOCOL_MODULE, type EffectsProtocolModule } from '../modules-types';
 
 export { SCENE_GSPLAT_REVEAL_EFFECT_ID, SCENE_GSPLAT_PERSISTENT_EFFECT_ID } from '../../vfx/effects-runtime/effects-runtime';
 
 export type EffectProtocolParamsPatchPayload = {
-    module: typeof EFFECTS_PROTOCOL_MODULE;
+    module?: EffectsProtocolModule;
     effectId: string;
     params: Record<string, unknown>;
 };
 
 export type EffectProtocolStopPayload = {
-    module: typeof EFFECTS_PROTOCOL_MODULE;
+    module?: EffectsProtocolModule;
     effectId: string;
 };
 
 export type EffectProtocolReplayPayload = {
-    module: typeof EFFECTS_PROTOCOL_MODULE;
+    module?: EffectsProtocolModule;
     effectId: string;
     restartAnim?: boolean;
 };
 
 export function isEffectProtocolEnvelope(
     p: unknown
-): p is { module: typeof EFFECTS_PROTOCOL_MODULE; effectId: string } {
+): p is { effectId: string; module?: EffectsProtocolModule } {
     if (typeof p !== 'object' || p === null) return false;
     const o = p as Record<string, unknown>;
-    return o.module === EFFECTS_PROTOCOL_MODULE && typeof o.effectId === 'string';
+    if (typeof o.effectId !== 'string') return false;
+    if (o.module === undefined) return true;
+    return o.module === EFFECTS_PROTOCOL_MODULE;
 }
 
 const PATCH_KEYS = ['type', 'totalDuration', 'radius', 'autoStart'] as const;
 
 export function paramsPatchHasRevealKeys(params: Record<string, unknown>): boolean {
-    return PATCH_KEYS.some((k) => params[k] !== undefined);
+    return PATCH_KEYS.some(k => params[k] !== undefined);
 }
 
 export function paramsPatchHasPersistentKeys(params: Record<string, unknown>): boolean {
@@ -59,6 +61,8 @@ export function paramsPatchHasPersistentKeys(params: Record<string, unknown>): b
 /**
  * EFFECT_PARAMS_PATCH（scene reveal）：增量写 `settings.effects.reveal`（运行期真源），
  * 并同步 `effectsRuntimeState`（`syncEffectsRuntimeStateFromSettings`）后派发 `revealConfigChanged`。
+ * @param global
+ * @param params
  */
 export function applyGsplatRevealParamsPatch(global: Global, params: Record<string, unknown>): void {
     if (!paramsPatchHasRevealKeys(params)) return;
@@ -89,14 +93,21 @@ export function applyGsplatRevealParamsPatch(global: Global, params: Record<stri
     global.events.fire('revealConfigChanged', changed);
 }
 
-/** 仅切换类型时走增量补丁（与 `EFFECT_PARAMS_PATCH` 单字段语义一致）。 */
+/**
+ * 仅切换类型时走增量补丁（与 `EFFECT_PARAMS_PATCH` 单字段语义一致）。
+ * @param global
+ * @param effectType
+ */
 export function applyGsplatRevealTypePatch(global: Global, effectType: string): void {
     applyGsplatRevealParamsPatch(global, { type: effectType });
 }
 
 const PERSISTENT_TYPE_SET = new Set<string>(PERSISTENT_EFFECT_TYPE_VALUES as readonly string[]);
 
-/** 供 `EFFECT_PARAMS_PATCH`（persistent 轨）与读回真源：`none` 含大小写/空白；未知字符串返回 `null`。 */
+/**
+ * 供 `EFFECT_PARAMS_PATCH`（persistent 轨）与读回真源：`none` 含大小写/空白；未知字符串返回 `null`。
+ * @param raw
+ */
 export function normalizePersistentType(raw: unknown): PersistentEffectType | 'none' | null {
     if (raw === undefined || raw === null || raw === false) return 'none';
     if (typeof raw !== 'string') return null;
@@ -111,13 +122,17 @@ export function normalizePersistentType(raw: unknown): PersistentEffectType | 'n
  * persistent 已在 settings 中处于「关」语义之后调用（M15 单内核）：
  * 先同步 `effectsRuntimeState`，再按需 `applyGsplatRevealStopPlayback`（一次性 reveal 独占播放时不误停），
  * 最后 `persistentGsplatEffectRemountRequested(false)` 驱动 viewer 拆实体脚本。
+ * @param global
  */
 export function finalizePersistentGsplatTrackOff(global: Global): void {
     syncEffectsRuntimeStateFromSettings(global.state, global.settings);
     dispatchPersistentGsplatTeardownAfterSettingsSync(global);
 }
 
-/** 假定调用前已 `syncEffectsRuntimeStateFromSettings`：仅停播判定 + remount 事件。 */
+/**
+ * 假定调用前已 `syncEffectsRuntimeStateFromSettings`：仅停播判定 + remount 事件。
+ * @param global
+ */
 function dispatchPersistentGsplatTeardownAfterSettingsSync(global: Global): void {
     const settings = global.settings as ExperienceSettings;
     const revealType = (readRevealParams(settings)?.type ?? 'none') as string;
@@ -138,6 +153,8 @@ function dispatchPersistentGsplatTeardownAfterSettingsSync(global: Global): void
  * - 仅写 `settings.effects.persistent`；
  * - 若 reveal 轨为空，则用 persistent 类型激活播放；
  * - 若 reveal 正在播放，则延迟到 `revealComplete` 后 remount persistent。
+ * @param global
+ * @param params
  */
 export function applyGsplatPersistentParamsPatch(global: Global, params: Record<string, unknown>): void {
     if (!paramsPatchHasPersistentKeys(params)) return;
@@ -201,7 +218,10 @@ export function applyGsplatPersistentParamsPatch(global: Global, params: Record<
     }
 }
 
-/** 强制停止当前 reveal 播放（保留 `settings.effects.reveal` 配置）。 */
+/**
+ * 强制停止当前 reveal 播放（保留 `settings.effects.reveal` 配置）。
+ * @param global
+ */
 export function applyGsplatRevealStopPlayback(global: Global): void {
     patchRevealRuntimeMirror(global.state, { status: 'completed' });
     syncEffectsRuntimeStateFromSettings(global.state, global.settings);

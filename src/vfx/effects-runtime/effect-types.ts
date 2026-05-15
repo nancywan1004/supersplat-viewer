@@ -13,10 +13,6 @@ export type AssetEffectRuntimeStatus = 'inactive' | 'playing' | 'completed';
 /** 兼容聚合类型（无 idle/stopped/error） */
 export type EffectRuntimeStatus = RevealEffectRuntimeStatus | PersistentEffectRuntimeStatus | AssetEffectRuntimeStatus;
 
-/** 协议入站/出站固定 module 值 */
-export const EFFECTS_PROTOCOL_MODULE = 'effect' as const;
-export type EffectsProtocolModule = typeof EFFECTS_PROTOCOL_MODULE;
-
 // --- 协议 effectId（与 `settings.effects.*.activeEffectId` 对齐）；集中在此避免与 `types` / `effects-sync` 环依赖 ---
 
 /** 协议与 `settings.effects.reveal` 共用的场景级 GSplat reveal 包 id */

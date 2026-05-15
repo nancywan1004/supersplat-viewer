@@ -1,18 +1,10 @@
 /**
  * 父级↔Viewer 统一 postMessage 协议桥接
- * 特效入站：`EFFECT_*` + `module: 'effect'` 以 **docs/SaaS第四期编辑模式接口文档.md** 为准；其余命令仍以第三期职责划分文档为准。
+ * 入站 `EFFECT_*`：`module` 可选；若传则须为 **`effects`**（与 {@link MESSAGE_BRIDGE_MODULE.effects} 一致）。`effectId` 与参数见 **docs/SaaS第四期编辑模式接口文档.md**。
+ * 出站：仅与 **`editLeftModule`** 域相关的事件在 payload 中带 **`module`**（`asset` / `annotation` / `environment` / `effects`），定义见 **`editor-modules/modules-types`** 中的 {@link MESSAGE_BRIDGE_MODULE}。
  */
 
-import { Global } from './types';
-import type { AssetLibraryItem } from './types';
-import type { EditLeftModule } from './types';
 import type { AnnotationData } from './annotation-toolbar/types';
-import {
-    serializeExperienceSettings,
-    getComparableSettingsString,
-    getComparableSettingsStringFromSnapshot,
-    applySettingsSnapshot
-} from './settings-serialize/settings-serialize';
 import {
     requestSceneAssetsRestore
 } from './asset-placement-handler';
@@ -24,22 +16,29 @@ import {
     restoreLightingFromSettings,
     restorePostEffectsFromSettings
 } from './edit-history';
-import type { ExperienceSettings } from './schemas/v2';
-import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
-import { EFFECTS_PROTOCOL_MODULE } from './vfx/effects-runtime/effect-types';
+import type { CommandRegistry } from './editor-modules/command-registry';
+import { MESSAGE_BRIDGE_MODULE } from './editor-modules/modules-types';
 import {
     paramsPatchHasPersistentKeys,
     paramsPatchHasRevealKeys,
     SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
     SCENE_GSPLAT_REVEAL_EFFECT_ID
 } from './editor-modules/protocol-adapters/effects-protocol-adapter';
+import { getAssetLoader } from './loaders/asset-loader';
 import { resolveExportTimelinePlan } from './render/export-timeline-resolver';
 import { buildVideoExportFilename } from './render/video-export';
-import { getAssetLoader } from './loaders/asset-loader';
-import type { CommandRegistry } from './editor-modules/command-registry';
-import { uploadProjectData } from './universe/service';
+import type { ExperienceSettings } from './schemas/v2';
+import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import { getRevealActiveType, getRevealTotalDuration } from './settings-serialize/effects-sync';
+import {
+    serializeExperienceSettings,
+    getComparableSettingsString,
+    getComparableSettingsStringFromSnapshot,
+    applySettingsSnapshot
+} from './settings-serialize/settings-serialize';
 import { getSelectedSceneAssetType } from './state-selectors';
+import type { AssetLibraryItem, EditLeftModule, Global } from './types';
+import { uploadProjectData } from './universe/service';
 
 /** 父级 → Viewer 的 postMessage payload 类型（按文档事件表） */
 type InboundPayload =
@@ -103,20 +102,25 @@ type InboundPayload =
     | { type: 'SHADOW_SET'; value?: boolean }
     | { type: 'SHADOW_INTENSITY_UPDATE'; value?: number }
     | { type: 'SHADOW_DIRECTION_SET'; value?: number }
-    | { type: 'EFFECT_PARAMS_PATCH'; module: 'effect'; effectId: string; params: Record<string, unknown> }
-    | { type: 'EFFECT_TOGGLE'; module: 'effect'; effectId: string; value: boolean }
-    | { type: 'EFFECT_REPLAY'; module: 'effect'; effectId: string; restartAnim?: boolean }
+    | { type: 'EFFECT_PARAMS_PATCH'; module?: 'effects'; effectId: string; params: Record<string, unknown> }
+    | { type: 'EFFECT_TOGGLE'; module?: 'effects'; effectId: string; value: boolean }
+    | { type: 'EFFECT_REPLAY'; module?: 'effects'; effectId: string; restartAnim?: boolean }
     | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean; projectName?: string }
     | { type: 'VIDEO_EXPORT_CANCEL' };
 
 const postToParent = (type: string, data?: Record<string, unknown>) => {
-    window.parent.postMessage(data ? { type, ...data } : { type }, '*');
-    console.log('[MessageBridge] postToParent', type, data);
+    const message = (data ? { type, ...data } : { type }) as Record<string, unknown>;
+    window.parent.postMessage(message, '*');
+    // 与父级实际收到的 body 一致（避免只看 `data` 时与 `{ type, ...data }` 合并结果不一致）
+    console.log('[MessageBridge] postToParent', message);
 };
 
 type SelectionSource = 'host' | 'scene' | 'unknown';
 
-/** 编辑协议经 CommandRegistry → Facade 单路径；须在 Viewer 构造（注册 registry）之后再挂载 message 监听。 */
+/**
+ * 编辑协议经 CommandRegistry → Facade 单路径；须在 Viewer 构造（注册 registry）之后再挂载 message 监听。
+ * @param g
+ */
 const editRegistry = (g: Global): CommandRegistry => {
     const r = (g as unknown as { __commandRegistry?: CommandRegistry }).__commandRegistry;
     if (!r) {
@@ -129,41 +133,46 @@ const editRegistry = (g: Global): CommandRegistry => {
 
 const HOST_CMD_SOURCE = 'host' as SelectionSource;
 
-/** 父级协议 → registry → 各模块 facade；与 `editRegistry` 同级，统一 `source: host`。 */
+/**
+ * 父级协议 → registry → 各模块 facade；与 `editRegistry` 同级，统一 `source: host`。
+ * @param g
+ * @param cmdType
+ * @param payload
+ */
 const dispatchAsset = (g: Global, cmdType: string, payload?: unknown) => {
     editRegistry(g).dispatch({
-        module: 'asset',
+        module: MESSAGE_BRIDGE_MODULE.asset,
         command:
-            payload === undefined
-                ? { type: cmdType, source: HOST_CMD_SOURCE }
-                : { type: cmdType, payload, source: HOST_CMD_SOURCE }
+            payload === undefined ?
+                { type: cmdType, source: HOST_CMD_SOURCE } :
+                { type: cmdType, payload, source: HOST_CMD_SOURCE }
     });
 };
 
 const dispatchAnnotation = (g: Global, cmdType: string, payload?: unknown) => {
     editRegistry(g).dispatch({
-        module: 'annotation',
+        module: MESSAGE_BRIDGE_MODULE.annotation,
         command:
-            payload === undefined
-                ? { type: cmdType, source: HOST_CMD_SOURCE }
-                : { type: cmdType, payload, source: HOST_CMD_SOURCE }
+            payload === undefined ?
+                { type: cmdType, source: HOST_CMD_SOURCE } :
+                { type: cmdType, payload, source: HOST_CMD_SOURCE }
     });
 };
 
 const dispatchEnvironment = (g: Global, cmdType: string, payload: Record<string, unknown>) => {
     editRegistry(g).dispatch({
-        module: 'environment',
+        module: MESSAGE_BRIDGE_MODULE.environment,
         command: { type: cmdType, payload, source: HOST_CMD_SOURCE }
     });
 };
 
 const dispatchEffects = (g: Global, cmdType: string, payload?: unknown) => {
     editRegistry(g).dispatch({
-        module: 'effects',
+        module: MESSAGE_BRIDGE_MODULE.effects,
         command:
-            payload === undefined
-                ? { type: cmdType, source: HOST_CMD_SOURCE }
-                : { type: cmdType, payload, source: HOST_CMD_SOURCE }
+            payload === undefined ?
+                { type: cmdType, source: HOST_CMD_SOURCE } :
+                { type: cmdType, payload, source: HOST_CMD_SOURCE }
     });
 };
 
@@ -192,494 +201,491 @@ const initPostMessageBridge = (global: Global) => {
         const type = payload.type;
 
         switch (type) {
-        case 'CAMERA_MODE_SWITCH':
-            if (p.value === 'orbit' || p.value === 'fly') {
-                if (state.cameraMode === p.value) break;
-                cameraModeChangeSource = 'host';
-                state.cameraMode = p.value;
-            }
-            break;
-        case 'CAMERA_RESET':
-            events.fire('inputEvent', 'reset');
-            break;
-        case 'SKYBOX_SWITCH':
-            if (typeof p.value === 'string') events.fire('skyboxSwitch', p.value);
-            break;
-        case 'ANIMATION_RESET':
-            events.fire('inputEvent', 'resetAnim');
-            break;
-        case 'ANIMATION_PLAY_PAUSE':
-            events.fire('inputEvent', 'playPause');
-            break;
-        case 'EDIT_MODE_SET': {
-            const value = p.value === true;
-            if (value && config.allowEditMode === false) break;
-            if (value) {
-                editModeBaselineString = null;
-                // 进入编辑停播一次性 reveal，persistent 保留；退出编辑后再恢复 reveal 播放节奏。
-                const hasVfxToResume = getRevealActiveType(state) !== 'none';
-                if (hasVfxToResume) {
-                    events.fire('vfxExit');
+            case 'CAMERA_MODE_SWITCH':
+                if (p.value === 'orbit' || p.value === 'fly') {
+                    if (state.cameraMode === p.value) break;
+                    cameraModeChangeSource = 'host';
+                    state.cameraMode = p.value;
                 }
-                // View -> Edit：先恢复到原始配置（View 模式的临时修改不保留）
-                const originalSettings = (global as any).__originalSettings as ExperienceSettings | undefined;
-                if (originalSettings) {
+                break;
+            case 'CAMERA_RESET':
+                events.fire('inputEvent', 'reset');
+                break;
+            case 'SKYBOX_SWITCH':
+                if (typeof p.value === 'string') events.fire('skyboxSwitch', p.value);
+                break;
+            case 'ANIMATION_RESET':
+                events.fire('inputEvent', 'resetAnim');
+                break;
+            case 'ANIMATION_PLAY_PAUSE':
+                events.fire('inputEvent', 'playPause');
+                break;
+            case 'EDIT_MODE_SET': {
+                const value = p.value === true;
+                if (value && config.allowEditMode === false) break;
+                if (value) {
+                    editModeBaselineString = null;
+                    // 进入编辑停播一次性 reveal，persistent 保留；退出编辑后再恢复 reveal 播放节奏。
+                    const hasVfxToResume = getRevealActiveType(state) !== 'none';
+                    if (hasVfxToResume) {
+                        events.fire('vfxExit');
+                    }
+                    // View -> Edit：先恢复到原始配置（View 模式的临时修改不保留）
+                    const originalSettings = (global as any).__originalSettings as ExperienceSettings | undefined;
+                    if (originalSettings) {
                     // 立即设置基线（使用原始配置，确保用户快速退出也能正确恢复）
-                    editModeBaselineData = JSON.parse(JSON.stringify(originalSettings)) as ExperienceSettings;
+                        editModeBaselineData = JSON.parse(JSON.stringify(originalSettings)) as ExperienceSettings;
 
-                    applySettingsSnapshot(global, JSON.parse(JSON.stringify(originalSettings)) as ExperienceSettings);
-                    await requestSceneAssetsRestore(global, { reason: 'edit-enter' });
+                        applySettingsSnapshot(global, JSON.parse(JSON.stringify(originalSettings)) as ExperienceSettings);
+                        await requestSceneAssetsRestore(global, { reason: 'edit-enter' });
+                        restoreAnnotationsFromSettings(global);
+                        restoreLightingFromSettings(global);
+                        restorePostEffectsFromSettings(global);
+                    }
+                }
+                state.editMode = !!p.value;
+                if (value) {
+                // 通过 EDIT_MODE_SET 进入编辑模式时：默认不选中任何模块（null）
+                    state.editLeftModule = null;
+                    events.fire('editLeftModule:changed', null);
+                    const initialSnapshot = serializeExperienceSettings(global);
+                    setBaseline(initialSnapshot);
+                    initEditHistory(global, initialSnapshot);
+                    if (config.trackEditHistory) {
+                        postToParent('EDIT_HISTORY_STATE', { canUndo: canUndo(global), canRedo: canRedo(global) });
+                    }
+                }
+                break;
+            }
+            case 'EDIT_MODE_EXIT_REQUEST': {
+                const needsSave = editModeBaselineString != null && getComparableSettingsString(global) !== editModeBaselineString;
+                postToParent('EDIT_EXIT_NEEDS_SAVE', { value: needsSave });
+                break;
+            }
+            case 'EDIT_MODE_EXIT_DISCARD': {
+                if (editModeBaselineData) {
+                    applySettingsSnapshot(global, editModeBaselineData);
+                    await requestSceneAssetsRestore(global, { reason: 'edit-discard' });
                     restoreAnnotationsFromSettings(global);
+                    // 统一通过 helper 按当前 settings 重置 Lighting / NightMode / PostEffect
                     restoreLightingFromSettings(global);
                     restorePostEffectsFromSettings(global);
                 }
-            }
-            state.editMode = !!p.value;
-            if (value) {
-                // 通过 EDIT_MODE_SET 进入编辑模式时：默认不选中任何模块（null）
-                state.editLeftModule = null;
-                events.fire('editLeftModule:changed', null);
-                const initialSnapshot = serializeExperienceSettings(global);
-                setBaseline(initialSnapshot);
-                initEditHistory(global, initialSnapshot);
-                if (config.trackEditHistory) {
-                    postToParent('EDIT_HISTORY_STATE', { canUndo: canUndo(global), canRedo: canRedo(global) });
-                }
-            }
-            break;
-        }
-        case 'EDIT_MODE_EXIT_REQUEST': {
-            const needsSave = editModeBaselineString != null && getComparableSettingsString(global) !== editModeBaselineString;
-            postToParent('EDIT_EXIT_NEEDS_SAVE', { value: needsSave });
-            break;
-        }
-        case 'EDIT_MODE_EXIT_DISCARD': {
-            if (editModeBaselineData) {
-                applySettingsSnapshot(global, editModeBaselineData);
-                await requestSceneAssetsRestore(global, { reason: 'edit-discard' });
-                restoreAnnotationsFromSettings(global);
-                // 统一通过 helper 按当前 settings 重置 Lighting / NightMode / PostEffect
-                restoreLightingFromSettings(global);
-                restorePostEffectsFromSettings(global);
-            }
-            state.editMode = false;
-            break;
-        }
-        case 'EDIT_UNDO': {
-            const { undo } = await import('./edit-history');
-            await undo(global);
-            break;
-        }
-        case 'EDIT_REDO': {
-            const { redo } = await import('./edit-history');
-            await redo(global);
-            break;
-        }
-        case 'PREVIEW_MODE_SET': {
-            state.previewMode = p.value === true;
-            break;
-        }
-        case 'SETTINGS_SAVE': {
-            const serialized = serializeExperienceSettings(global);
-            const jsonString = JSON.stringify(serialized, null, 2);
-            const projectId = global.config.projectId;
-            const token = global.config.token;
-            const uploadResult = await uploadProjectData(projectId ?? '', token ?? '', jsonString);
-            if (uploadResult.ok === false) {
-                console.error('[MessageBridge] SETTINGS_SAVE 上传失败，已取消 SETTINGS_UPDATED 回传', uploadResult.message);
-                postToParent('SETTINGS_SAVE_FAILED', { message: uploadResult.message });
+                state.editMode = false;
                 break;
             }
-            postToParent('SETTINGS_UPDATED');
-            setBaseline();
-            break;
-        }
-        case 'EDIT_MODULE_SET':
-            if (p.value == null) {
-                state.editLeftModule = null;
-                events.fire('editLeftModule:changed', null);
+            case 'EDIT_UNDO': {
+                const { undo } = await import('./edit-history');
+                await undo(global);
                 break;
             }
-            if (typeof p.value === 'string') {
-                const valid: EditLeftModule[] = ['gs', 'asset', 'annotation', 'environment', 'camera', 'effects'];
-                if (valid.includes(p.value as EditLeftModule)) {
-                    state.editLeftModule = p.value as EditLeftModule;
-                    events.fire('editLeftModule:changed', p.value);
+            case 'EDIT_REDO': {
+                const { redo } = await import('./edit-history');
+                await redo(global);
+                break;
+            }
+            case 'PREVIEW_MODE_SET': {
+                state.previewMode = p.value === true;
+                break;
+            }
+            case 'SETTINGS_SAVE': {
+                const serialized = serializeExperienceSettings(global);
+                const jsonString = JSON.stringify(serialized, null, 2);
+                const projectId = global.config.projectId;
+                const token = global.config.token;
+                const uploadResult = await uploadProjectData(projectId ?? '', token ?? '', jsonString);
+                if (uploadResult.ok === false) {
+                    console.error('[MessageBridge] SETTINGS_SAVE 上传失败，已取消 SETTINGS_UPDATED 回传', uploadResult.message);
+                    postToParent('SETTINGS_SAVE_FAILED', { message: uploadResult.message });
+                    break;
                 }
+                postToParent('SETTINGS_UPDATED');
+                setBaseline();
+                break;
             }
-            break;
-        case 'ASSET_PLACE':
-            if (p.value && typeof p.value === 'object') {
-                const placeValue = p.value as AssetLibraryItem;
-                dispatchAsset(global, 'ASSET_PLACE', { value: placeValue });
-            }
-            break;
-        case 'ASSET_SHOW_HIDE_SET':
-            if (
-                Array.isArray(state.scenePlacedEntities) &&
+            case 'EDIT_MODULE_SET':
+                if (p.value == null) {
+                    state.editLeftModule = null;
+                    events.fire('editLeftModule:changed', null);
+                    break;
+                }
+                if (typeof p.value === 'string') {
+                    const valid: EditLeftModule[] = ['gs', 'asset', 'annotation', 'environment', 'camera', 'effects'];
+                    if (valid.includes(p.value as EditLeftModule)) {
+                        state.editLeftModule = p.value as EditLeftModule;
+                        events.fire('editLeftModule:changed', p.value);
+                    }
+                }
+                break;
+            case 'ASSET_PLACE':
+                if (p.value && typeof p.value === 'object') {
+                    const placeValue = p.value as AssetLibraryItem;
+                    dispatchAsset(global, 'ASSET_PLACE', { value: placeValue });
+                }
+                break;
+            case 'ASSET_SHOW_HIDE_SET':
+                if (
+                    Array.isArray(state.scenePlacedEntities) &&
                 typeof p.id === 'string' &&
                 typeof p.value === 'boolean'
-            ) {
-                dispatchAsset(global, 'ASSET_SHOW_HIDE_SET', { id: p.id, value: p.value });
-            }
-            break;
-        case 'ASSETS_SHOW_HIDE_SET':
-            if (typeof p.value === 'boolean' && Array.isArray(state.scenePlacedEntities)) {
-                dispatchAsset(global, 'ASSETS_SHOW_HIDE_SET', { value: p.value });
-            }
-            break;
-        case 'ASSET_SELECT':
-        {
-            const targetId = (p.id !== undefined ? p.id : null) as string | null;
-            dispatchAsset(global, 'ASSET_SELECT', { id: targetId });
-            const resolvedId = state.selectedSceneEntityId;
-            const requested = typeof targetId === 'string' && targetId.trim().length > 0 ? targetId : null;
-            const resolvedEntry =
-                typeof resolvedId === 'string'
-                    ? state.scenePlacedEntities?.find((it) => it?.id === resolvedId) ?? null
-                    : null;
-            const matchedRequested =
+                ) {
+                    dispatchAsset(global, 'ASSET_SHOW_HIDE_SET', { id: p.id, value: p.value });
+                }
+                break;
+            case 'ASSETS_SHOW_HIDE_SET':
+                if (typeof p.value === 'boolean' && Array.isArray(state.scenePlacedEntities)) {
+                    dispatchAsset(global, 'ASSETS_SHOW_HIDE_SET', { value: p.value });
+                }
+                break;
+            case 'ASSET_SELECT':
+            {
+                const targetId = (p.id !== undefined ? p.id : null) as string | null;
+                dispatchAsset(global, 'ASSET_SELECT', { id: targetId });
+                const resolvedId = state.selectedSceneEntityId;
+                const requested = typeof targetId === 'string' && targetId.trim().length > 0 ? targetId : null;
+                const resolvedEntry =
+                typeof resolvedId === 'string' ?
+                    state.scenePlacedEntities?.find(it => it?.id === resolvedId) ?? null :
+                    null;
+                const matchedRequested =
                 !!resolvedEntry &&
                 !!requested &&
                 resolvedEntry.id === requested;
-            // 仅在“请求 id 成功命中场景实例”时触发 frame；未命中时不飞。
-            if (state.editMode && matchedRequested) {
-                events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
+                // 仅在“请求 id 成功命中场景实例”时触发 frame；未命中时不飞。
+                if (state.editMode && matchedRequested) {
+                    events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
+                }
+                break;
             }
-            break;
-        }
-        case 'ASSET_COPY':
-            if (
-                typeof p.id === 'string' &&
+            case 'ASSET_COPY':
+                if (
+                    typeof p.id === 'string' &&
                 typeof p.copyId === 'string' &&
                 p.copyId.trim().length > 0
-            ) {
-                dispatchAsset(global, 'ASSET_COPY', { id: p.id, copyId: p.copyId });
-            }
-            break;
-        case 'ASSET_DELETE':
-            if (typeof p.id === 'string') {
-                dispatchAsset(global, 'ASSET_DELETE', { id: p.id });
-            }
-            break;
-        case 'ASSET_TRANSFORM_MODE': {
-            dispatchAsset(global, 'ASSET_TRANSFORM_MODE', {
-                value: p.value as 'move' | 'rotate' | 'scale' | undefined
-            });
-            break;
-        }
-        case 'ANNOTATION_PLACEMENT_START':
-            if (typeof p.id === 'string') {
-                dispatchAnnotation(global, 'ANNOTATION_PLACEMENT_START', { id: p.id });
-            }
-            break;
-        case 'ANNOTATION_PLACEMENT_CANCEL': {
-            dispatchAnnotation(global, 'ANNOTATION_PLACEMENT_CANCEL');
-            break;
-        }
-        case 'ANNOTATION_CONFIRM': {
-            const id = p.id as string | undefined;
-            const value = p.value as Partial<AnnotationData> | undefined;
-            if (!id) break;
-            dispatchAnnotation(global, 'ANNOTATION_CONFIRM', { id, value });
-            break;
-        }
-        case 'ANNOTATION_UPDATE': {
-            const id = p.id as string | undefined;
-            const value = p.value as Partial<AnnotationData> | undefined;
-            if (!id || !value) break;
-            dispatchAnnotation(global, 'ANNOTATION_UPDATE', { id, value });
-            break;
-        }
-        case 'ANNOTATION_DELETE':
-            if (typeof p.id === 'string') {
-                dispatchAnnotation(global, 'ANNOTATION_DELETE', { id: p.id });
-            }
-            break;
-        case 'ANNOTATION_EDIT': {
-            const id = p.id as string | undefined;
-            if (!id) break;
-            dispatchAnnotation(global, 'ANNOTATION_EDIT', { id });
-            break;
-        }
-        case 'ANNOTATION_TRANSFORM_MODE': {
-            dispatchAnnotation(global, 'ANNOTATION_TRANSFORM_MODE', { value: p.value });
-            break;
-        }
-        case 'LIGHT_GLOBAL_SET': {
-            const lightGlobalVal = (p as { value?: number }).value;
-            if (typeof lightGlobalVal === 'number') dispatchEnvironment(global, 'LIGHT_GLOBAL_SET', p);
-            break;
-        }
-        case 'LIGHT_TOGGLE_ALL': {
-            const v = (p as { value?: boolean }).value;
-            if (typeof v === 'boolean') dispatchEnvironment(global, 'LIGHT_TOGGLE_ALL', p);
-            break;
-        }
-        case 'LIGHT_TOGGLE': {
-            const id = (p as { id?: string }).id;
-            const v = (p as { value?: boolean }).value;
-            if (typeof id === 'string' && typeof v === 'boolean') {
-                dispatchEnvironment(global, 'LIGHT_TOGGLE', p);
-            }
-            break;
-        }
-        case 'BLOOM_INTENSITY_UPDATE':
-        {
-            const bloomIntVal = (p as { value?: number }).value;
-            if (typeof bloomIntVal === 'number') dispatchEnvironment(global, 'BLOOM_INTENSITY_UPDATE', p);
-            break;
-        }
-        case 'BLOOM_THRESHOLD_UPDATE': {
-            const bloomThrVal = (p as { value?: number }).value;
-            if (typeof bloomThrVal === 'number') dispatchEnvironment(global, 'BLOOM_THRESHOLD_UPDATE', p);
-            break;
-        }
-        case 'BLOOM_BLUR_SET': {
-            const bloomBlurVal = (p as { value?: number }).value;
-            if (typeof bloomBlurVal === 'number') dispatchEnvironment(global, 'BLOOM_BLUR_SET', p);
-            break;
-        }
-        case 'BLOOM_IS_LOCAL_SET': {
-            const v = (p as { value?: boolean }).value;
-            if (typeof v === 'boolean') dispatchEnvironment(global, 'BLOOM_IS_LOCAL_SET', p);
-            break;
-        }
-        case 'SHADOW_SET': {
-            const shadowVal = (p as { value?: boolean }).value;
-            if (typeof shadowVal === 'boolean') dispatchEnvironment(global, 'SHADOW_SET', p);
-            break;
-        }
-        case 'SHADOW_INTENSITY_UPDATE': {
-            const shadowIntVal = (p as { value?: number }).value;
-            if (typeof shadowIntVal === 'number') dispatchEnvironment(global, 'SHADOW_INTENSITY_UPDATE', p);
-            break;
-        }
-        case 'SHADOW_DIRECTION_SET': {
-            const shadowDirVal = (p as { value?: number }).value;
-            if (typeof shadowDirVal === 'number') dispatchEnvironment(global, 'SHADOW_DIRECTION_SET', p);
-            break;
-        }
-        case 'LIGHT_ADD':
-            if (typeof p.id === 'string') {
-                dispatchEnvironment(global, 'LIGHT_ADD', p);
-            }
-            break;
-        case 'LIGHT_COPY':
-            if (
-                typeof p.id === 'string' &&
-                typeof p.copyId === 'string' &&
-                p.copyId.trim().length > 0
-            ) {
-                dispatchEnvironment(global, 'LIGHT_COPY', p);
-            }
-            break;
-        case 'LIGHT_DELETE':
-            if (typeof p.id === 'string') {
-                dispatchEnvironment(global, 'LIGHT_DELETE', p);
-            }
-            break;
-        case 'LIGHT_SELECT':
-        {
-            dispatchEnvironment(global, 'LIGHT_SELECT', p);
-            break;
-        }
-        case 'LIGHT_TRANSFORM_MODE': {
-            dispatchEnvironment(global, 'LIGHT_TRANSFORM_MODE', p);
-            break;
-        }
-        case 'LIGHT_INTENSITY_UPDATE':
-        case 'LIGHT_COLOR_UPDATE':
-        case 'LIGHT_INNER_ANGLE_SET':
-        case 'LIGHT_OUTER_ANGLE_SET':
-        case 'LIGHT_RANGE_SET':
-        case 'LIGHT_UPDATE':
-        case 'LIGHT_REGION_UPDATE':
-            dispatchEnvironment(global, type, p);
-            break;
-        case 'LIGHT_BRUSH_DELETE':
-            dispatchEnvironment(global, 'LIGHT_BRUSH_DELETE', p);
-            break;
-        case 'LIGHT_BRUSH_INTENSITY_UPDATE': {
-            const v = (p as { value?: number }).value;
-            if (typeof v === 'number') {
-                dispatchEnvironment(global, 'LIGHT_BRUSH_INTENSITY_UPDATE', p);
-            }
-            break;
-        }
-        case 'LIGHT_BRUSH_INNER_ANGLE_SET': {
-            const v = (p as { value?: number }).value;
-            if (typeof v === 'number') {
-                dispatchEnvironment(global, 'LIGHT_BRUSH_INNER_ANGLE_SET', p);
-            }
-            break;
-        }
-        case 'LIGHT_BRUSH_OUTER_ANGLE_SET': {
-            const v = (p as { value?: number }).value;
-            if (typeof v === 'number') {
-                dispatchEnvironment(global, 'LIGHT_BRUSH_OUTER_ANGLE_SET', p);
-            }
-            break;
-        }
-        case 'LIGHT_BRUSH_RANGE_SET': {
-            const v = (p as { value?: number }).value;
-            if (typeof v === 'number') {
-                dispatchEnvironment(global, 'LIGHT_BRUSH_RANGE_SET', p);
-            }
-            break;
-        }
-        case 'LIGHT_BRUSH_START':
-        case 'LIGHT_ERASER_START':
-        case 'LIGHT_BRUSH_CLEAR':
-        case 'LIGHT_BRUSH_COLOR_UPDATE':
-        case 'LIGHT_BRUSH_FINISH':
-        case 'LIGHT_BRUSH_BLOOM_UPDATE':
-            dispatchEnvironment(global, type, p);
-            break;
-        case 'EFFECT_PARAMS_PATCH': {
-            if (p.module !== EFFECTS_PROTOCOL_MODULE) {
-                console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: module must be "effect"');
+                ) {
+                    dispatchAsset(global, 'ASSET_COPY', { id: p.id, copyId: p.copyId });
+                }
                 break;
-            }
-            if (p.effectId !== SCENE_GSPLAT_REVEAL_EFFECT_ID && p.effectId !== SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
-                console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: unsupported effectId', p.effectId);
+            case 'ASSET_DELETE':
+                if (typeof p.id === 'string') {
+                    dispatchAsset(global, 'ASSET_DELETE', { id: p.id });
+                }
                 break;
-            }
-            const params = (p as { params?: unknown }).params;
-            if (typeof params !== 'object' || params === null) {
-                console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: params must be object');
-                break;
-            }
-            const pr = { ...(params as Record<string, unknown>) };
-            const valid =
-                p.effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID
-                    ? paramsPatchHasRevealKeys(pr)
-                    : paramsPatchHasPersistentKeys(pr);
-            if (!valid) {
-                console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: invalid params for current effectId');
-                break;
-            }
-            dispatchEffects(global, 'EFFECT_PARAMS_PATCH', {
-                module: EFFECTS_PROTOCOL_MODULE,
-                effectId: p.effectId,
-                params: pr
-            });
-            break;
-        }
-        case 'EFFECT_TOGGLE': {
-            if (p.module !== EFFECTS_PROTOCOL_MODULE) {
-                console.warn('[MessageBridge] EFFECT_TOGGLE ignored: module must be "effect"');
-                break;
-            }
-            if (p.effectId !== SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
-                console.warn('[MessageBridge] EFFECT_TOGGLE ignored: unsupported effectId', p.effectId);
-                break;
-            }
-            if (typeof (p as { value?: unknown }).value !== 'boolean') {
-                console.warn('[MessageBridge] EFFECT_TOGGLE ignored: value must be boolean');
-                break;
-            }
-            dispatchEffects(global, 'EFFECT_TOGGLE', {
-                module: EFFECTS_PROTOCOL_MODULE,
-                effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
-                value: (p as { value: boolean }).value
-            });
-            break;
-        }
-        case 'EFFECT_REPLAY': {
-            if (p.module !== EFFECTS_PROTOCOL_MODULE) {
-                console.warn('[MessageBridge] EFFECT_REPLAY ignored: module must be "effect"');
-                break;
-            }
-            if (p.effectId !== SCENE_GSPLAT_REVEAL_EFFECT_ID) {
-                console.warn('[MessageBridge] EFFECT_REPLAY ignored: unsupported effectId', p.effectId);
-                break;
-            }
-            dispatchEffects(global, 'EFFECT_REPLAY', {
-                module: EFFECTS_PROTOCOL_MODULE,
-                effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
-                restartAnim: (p as { restartAnim?: boolean }).restartAnim
-            });
-            break;
-        }
-        case 'VIDEO_EXPORT_START': {
-            const projectName =
-                typeof (p as { projectName?: unknown }).projectName === 'string'
-                    ? (p as { projectName: string }).projectName
-                    : undefined;
-            console.log('[MessageBridge] VIDEO_EXPORT_START → start export pipeline', {
-                includeVfx: (p as any).includeVfx !== false,
-                projectName
-            });
-            const includeVfx = (p as any).includeVfx !== false;
-            const waitResult = await getAssetLoader(global).waitAllReady();
-            // 与视频导出执行层保持一致：使用导出入口等待得到的真实就绪时刻（秒）。
-            const allAssetsReadyAt = Math.max(0, waitResult.waitMs / 1000);
-            const resolution = { width: 1920, height: 1080 };
-            const width = resolution.width % 2 === 0 ? resolution.width : resolution.width - 1;
-            const height = resolution.height % 2 === 0 ? resolution.height : resolution.height - 1;
-            // 导出时长统一交给 timeline resolver 决策，避免 message-bridge 与导出执行层各自维护策略。
-            const vfxDuration = getRevealTotalDuration(global.settings) ?? DEFAULT_VFX_TOTAL_DURATION;
-            const animDuration = (global.state as any).animationDuration as number | undefined;
-            const animLoopMode = ((global.settings as any)?.animTracks?.[0]?.loopMode as 'none' | 'repeat' | 'pingpong' | undefined) ?? 'repeat';
-            const totalDuration = resolveExportTimelinePlan({
-                includeVfx,
-                syncAnimTrack: true,
-                vfxDuration,
-                requestedTotalDuration: vfxDuration,
-                animDuration,
-                animLoopMode,
-                allAssetsReadyAt
-            }).totalDuration;
-            const videoSettings = {
-                startFrame: 0,
-                endFrame: 0,
-                frameRate: 30,
-                width,
-                height,
-                bitrate: 5_000_000,
-                transparentBg: false,
-                showDebug: false,
-                // 协议默认走“极速导出 MP4”（实时渲染 + WebCodecs 编码）
-                format: 'mp4' as const,
-                codec: 'h264' as const,
-                // 导出默认重启 animTrack
-                syncAnimTrack: true,
-                totalDuration,
-                includeVfx,
-                useFastExport: true,
-                projectName
-            };
-            // 有 File System Access API 时先选保存路径；否则走无 fileStream 导出，由 video-export 在 finalize 后触发浏览器下载
-            if (!('showSaveFilePicker' in window)) {
-                console.warn('[MessageBridge] showSaveFilePicker unavailable, export will use in-memory encode + download');
-                events.fire('render.video', videoSettings);
-                break;
-            }
-            try {
-                const handle = await (window as any).showSaveFilePicker({
-                    types: [{ description: 'MP4 Video', accept: { 'video/mp4': ['.mp4'] } }],
-                    suggestedName: buildVideoExportFilename(projectName, 'mp4')
+            case 'ASSET_TRANSFORM_MODE': {
+                dispatchAsset(global, 'ASSET_TRANSFORM_MODE', {
+                    value: p.value as 'move' | 'rotate' | 'scale' | undefined
                 });
-                const fileStream = await handle.createWritable();
-                events.fire('render.video', videoSettings, fileStream as any);
-            } catch {
-                console.log('file picker failed, auto export');
-                events.fire('render.video', videoSettings);
+                break;
+            }
+            case 'ANNOTATION_PLACEMENT_START':
+                if (typeof p.id === 'string') {
+                    dispatchAnnotation(global, 'ANNOTATION_PLACEMENT_START', { id: p.id });
+                }
+                break;
+            case 'ANNOTATION_PLACEMENT_CANCEL': {
+                dispatchAnnotation(global, 'ANNOTATION_PLACEMENT_CANCEL');
+                break;
+            }
+            case 'ANNOTATION_CONFIRM': {
+                const id = p.id as string | undefined;
+                const value = p.value as Partial<AnnotationData> | undefined;
+                if (!id) break;
+                dispatchAnnotation(global, 'ANNOTATION_CONFIRM', { id, value });
+                break;
+            }
+            case 'ANNOTATION_UPDATE': {
+                const id = p.id as string | undefined;
+                const value = p.value as Partial<AnnotationData> | undefined;
+                if (!id || !value) break;
+                dispatchAnnotation(global, 'ANNOTATION_UPDATE', { id, value });
+                break;
+            }
+            case 'ANNOTATION_DELETE':
+                if (typeof p.id === 'string') {
+                    dispatchAnnotation(global, 'ANNOTATION_DELETE', { id: p.id });
+                }
+                break;
+            case 'ANNOTATION_EDIT': {
+                const id = p.id as string | undefined;
+                if (!id) break;
+                dispatchAnnotation(global, 'ANNOTATION_EDIT', { id });
+                break;
+            }
+            case 'ANNOTATION_TRANSFORM_MODE': {
+                dispatchAnnotation(global, 'ANNOTATION_TRANSFORM_MODE', { value: p.value });
+                break;
+            }
+            case 'LIGHT_GLOBAL_SET': {
+                const lightGlobalVal = (p as { value?: number }).value;
+                if (typeof lightGlobalVal === 'number') dispatchEnvironment(global, 'LIGHT_GLOBAL_SET', p);
+                break;
+            }
+            case 'LIGHT_TOGGLE_ALL': {
+                const v = (p as { value?: boolean }).value;
+                if (typeof v === 'boolean') dispatchEnvironment(global, 'LIGHT_TOGGLE_ALL', p);
+                break;
+            }
+            case 'LIGHT_TOGGLE': {
+                const id = (p as { id?: string }).id;
+                const v = (p as { value?: boolean }).value;
+                if (typeof id === 'string' && typeof v === 'boolean') {
+                    dispatchEnvironment(global, 'LIGHT_TOGGLE', p);
+                }
+                break;
+            }
+            case 'BLOOM_INTENSITY_UPDATE':
+            {
+                const bloomIntVal = (p as { value?: number }).value;
+                if (typeof bloomIntVal === 'number') dispatchEnvironment(global, 'BLOOM_INTENSITY_UPDATE', p);
+                break;
+            }
+            case 'BLOOM_THRESHOLD_UPDATE': {
+                const bloomThrVal = (p as { value?: number }).value;
+                if (typeof bloomThrVal === 'number') dispatchEnvironment(global, 'BLOOM_THRESHOLD_UPDATE', p);
+                break;
+            }
+            case 'BLOOM_BLUR_SET': {
+                const bloomBlurVal = (p as { value?: number }).value;
+                if (typeof bloomBlurVal === 'number') dispatchEnvironment(global, 'BLOOM_BLUR_SET', p);
+                break;
+            }
+            case 'BLOOM_IS_LOCAL_SET': {
+                const v = (p as { value?: boolean }).value;
+                if (typeof v === 'boolean') dispatchEnvironment(global, 'BLOOM_IS_LOCAL_SET', p);
+                break;
+            }
+            case 'SHADOW_SET': {
+                const shadowVal = (p as { value?: boolean }).value;
+                if (typeof shadowVal === 'boolean') dispatchEnvironment(global, 'SHADOW_SET', p);
+                break;
+            }
+            case 'SHADOW_INTENSITY_UPDATE': {
+                const shadowIntVal = (p as { value?: number }).value;
+                if (typeof shadowIntVal === 'number') dispatchEnvironment(global, 'SHADOW_INTENSITY_UPDATE', p);
+                break;
+            }
+            case 'SHADOW_DIRECTION_SET': {
+                const shadowDirVal = (p as { value?: number }).value;
+                if (typeof shadowDirVal === 'number') dispatchEnvironment(global, 'SHADOW_DIRECTION_SET', p);
+                break;
+            }
+            case 'LIGHT_ADD':
+                if (typeof p.id === 'string') {
+                    dispatchEnvironment(global, 'LIGHT_ADD', p);
+                }
+                break;
+            case 'LIGHT_COPY':
+                if (
+                    typeof p.id === 'string' &&
+                typeof p.copyId === 'string' &&
+                p.copyId.trim().length > 0
+                ) {
+                    dispatchEnvironment(global, 'LIGHT_COPY', p);
+                }
+                break;
+            case 'LIGHT_DELETE':
+                if (typeof p.id === 'string') {
+                    dispatchEnvironment(global, 'LIGHT_DELETE', p);
+                }
+                break;
+            case 'LIGHT_SELECT':
+            {
+                dispatchEnvironment(global, 'LIGHT_SELECT', p);
+                break;
+            }
+            case 'LIGHT_TRANSFORM_MODE': {
+                dispatchEnvironment(global, 'LIGHT_TRANSFORM_MODE', p);
+                break;
+            }
+            case 'LIGHT_INTENSITY_UPDATE':
+            case 'LIGHT_COLOR_UPDATE':
+            case 'LIGHT_INNER_ANGLE_SET':
+            case 'LIGHT_OUTER_ANGLE_SET':
+            case 'LIGHT_RANGE_SET':
+            case 'LIGHT_UPDATE':
+            case 'LIGHT_REGION_UPDATE':
+                dispatchEnvironment(global, type, p);
+                break;
+            case 'LIGHT_BRUSH_DELETE':
+                dispatchEnvironment(global, 'LIGHT_BRUSH_DELETE', p);
+                break;
+            case 'LIGHT_BRUSH_INTENSITY_UPDATE': {
+                const v = (p as { value?: number }).value;
+                if (typeof v === 'number') {
+                    dispatchEnvironment(global, 'LIGHT_BRUSH_INTENSITY_UPDATE', p);
+                }
+                break;
+            }
+            case 'LIGHT_BRUSH_INNER_ANGLE_SET': {
+                const v = (p as { value?: number }).value;
+                if (typeof v === 'number') {
+                    dispatchEnvironment(global, 'LIGHT_BRUSH_INNER_ANGLE_SET', p);
+                }
+                break;
+            }
+            case 'LIGHT_BRUSH_OUTER_ANGLE_SET': {
+                const v = (p as { value?: number }).value;
+                if (typeof v === 'number') {
+                    dispatchEnvironment(global, 'LIGHT_BRUSH_OUTER_ANGLE_SET', p);
+                }
+                break;
+            }
+            case 'LIGHT_BRUSH_RANGE_SET': {
+                const v = (p as { value?: number }).value;
+                if (typeof v === 'number') {
+                    dispatchEnvironment(global, 'LIGHT_BRUSH_RANGE_SET', p);
+                }
+                break;
+            }
+            case 'LIGHT_BRUSH_START':
+            case 'LIGHT_ERASER_START':
+            case 'LIGHT_BRUSH_CLEAR':
+            case 'LIGHT_BRUSH_COLOR_UPDATE':
+            case 'LIGHT_BRUSH_FINISH':
+            case 'LIGHT_BRUSH_BLOOM_UPDATE':
+                dispatchEnvironment(global, type, p);
+                break;
+            case 'EFFECT_PARAMS_PATCH': {
+                if (p.module !== undefined && p.module !== MESSAGE_BRIDGE_MODULE.effects) {
+                    console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: module must be "effects" when present');
+                    break;
+                }
+                if (p.effectId !== SCENE_GSPLAT_REVEAL_EFFECT_ID && p.effectId !== SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
+                    console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: unsupported effectId', p.effectId);
+                    break;
+                }
+                const params = (p as { params?: unknown }).params;
+                if (typeof params !== 'object' || params === null) {
+                    console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: params must be object');
+                    break;
+                }
+                const pr = { ...(params as Record<string, unknown>) };
+                const valid =
+                p.effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID ?
+                    paramsPatchHasRevealKeys(pr) :
+                    paramsPatchHasPersistentKeys(pr);
+                if (!valid) {
+                    console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: invalid params for current effectId');
+                    break;
+                }
+                dispatchEffects(global, 'EFFECT_PARAMS_PATCH', {
+                    effectId: p.effectId as string,
+                    params: pr
+                });
+                break;
+            }
+            case 'EFFECT_TOGGLE': {
+                if (p.module !== undefined && p.module !== MESSAGE_BRIDGE_MODULE.effects) {
+                    console.warn('[MessageBridge] EFFECT_TOGGLE ignored: module must be "effects" when present');
+                    break;
+                }
+                if (p.effectId !== SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
+                    console.warn('[MessageBridge] EFFECT_TOGGLE ignored: unsupported effectId', p.effectId);
+                    break;
+                }
+                if (typeof (p as { value?: unknown }).value !== 'boolean') {
+                    console.warn('[MessageBridge] EFFECT_TOGGLE ignored: value must be boolean');
+                    break;
+                }
+                dispatchEffects(global, 'EFFECT_TOGGLE', {
+                    effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+                    value: (p as { value: boolean }).value
+                });
+                break;
+            }
+            case 'EFFECT_REPLAY': {
+                if (p.module !== undefined && p.module !== MESSAGE_BRIDGE_MODULE.effects) {
+                    console.warn('[MessageBridge] EFFECT_REPLAY ignored: module must be "effects" when present');
+                    break;
+                }
+                if (p.effectId !== SCENE_GSPLAT_REVEAL_EFFECT_ID) {
+                    console.warn('[MessageBridge] EFFECT_REPLAY ignored: unsupported effectId', p.effectId);
+                    break;
+                }
+                dispatchEffects(global, 'EFFECT_REPLAY', {
+                    effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
+                    restartAnim: (p as { restartAnim?: boolean }).restartAnim
+                });
+                break;
+            }
+            case 'VIDEO_EXPORT_START': {
+                const projectName =
+                typeof (p as { projectName?: unknown }).projectName === 'string' ?
+                    (p as { projectName: string }).projectName :
+                    undefined;
+                console.log('[MessageBridge] VIDEO_EXPORT_START → start export pipeline', {
+                    includeVfx: (p as any).includeVfx !== false,
+                    projectName
+                });
+                const includeVfx = (p as any).includeVfx !== false;
+                const waitResult = await getAssetLoader(global).waitAllReady();
+                // 与视频导出执行层保持一致：使用导出入口等待得到的真实就绪时刻（秒）。
+                const allAssetsReadyAt = Math.max(0, waitResult.waitMs / 1000);
+                const resolution = { width: 1920, height: 1080 };
+                const width = resolution.width % 2 === 0 ? resolution.width : resolution.width - 1;
+                const height = resolution.height % 2 === 0 ? resolution.height : resolution.height - 1;
+                // 导出时长统一交给 timeline resolver 决策，避免 message-bridge 与导出执行层各自维护策略。
+                const vfxDuration = getRevealTotalDuration(global.settings) ?? DEFAULT_VFX_TOTAL_DURATION;
+                const animDuration = (global.state as any).animationDuration as number | undefined;
+                const animLoopMode = ((global.settings as any)?.animTracks?.[0]?.loopMode as 'none' | 'repeat' | 'pingpong' | undefined) ?? 'repeat';
+                const totalDuration = resolveExportTimelinePlan({
+                    includeVfx,
+                    syncAnimTrack: true,
+                    vfxDuration,
+                    requestedTotalDuration: vfxDuration,
+                    animDuration,
+                    animLoopMode,
+                    allAssetsReadyAt
+                }).totalDuration;
+                const videoSettings = {
+                    startFrame: 0,
+                    endFrame: 0,
+                    frameRate: 30,
+                    width,
+                    height,
+                    bitrate: 5_000_000,
+                    transparentBg: false,
+                    showDebug: false,
+                    // 协议默认走“极速导出 MP4”（实时渲染 + WebCodecs 编码）
+                    format: 'mp4' as const,
+                    codec: 'h264' as const,
+                    // 导出默认重启 animTrack
+                    syncAnimTrack: true,
+                    totalDuration,
+                    includeVfx,
+                    useFastExport: true,
+                    projectName
+                };
+                // 有 File System Access API 时先选保存路径；否则走无 fileStream 导出，由 video-export 在 finalize 后触发浏览器下载
+                if (!('showSaveFilePicker' in window)) {
+                    console.warn('[MessageBridge] showSaveFilePicker unavailable, export will use in-memory encode + download');
+                    events.fire('render.video', videoSettings);
+                    break;
+                }
+                try {
+                    const handle = await (window as any).showSaveFilePicker({
+                        types: [{ description: 'MP4 Video', accept: { 'video/mp4': ['.mp4'] } }],
+                        suggestedName: buildVideoExportFilename(projectName, 'mp4')
+                    });
+                    const fileStream = await handle.createWritable();
+                    events.fire('render.video', videoSettings, fileStream as any);
+                } catch {
+                    console.log('file picker failed, auto export');
+                    events.fire('render.video', videoSettings);
                 // console.log('[MessageBridge] file picker cancelled or denied');
                 // postToParent('VIDEO_EXPORT_CANCELLED');
+                }
+                break;
             }
-            break;
-        }
-        case 'VIDEO_EXPORT_CANCEL': {
+            case 'VIDEO_EXPORT_CANCEL': {
             // 停止当前导出（优先用于快速导出 MediaRecorder）
             // 注意：真正的“导出完成”仍由 Viewer 在 progressEnd 时 postToParent('VIDEO_EXPORT_END') 上报父级
-            videoExportCancelled = true;
-            events.fire('render.video.stop');
-            break;
-        }
-        default:
-            break;
+                videoExportCancelled = true;
+                events.fire('render.video.stop');
+                break;
+            }
+            default:
+                break;
         }
     };
 
@@ -716,7 +722,7 @@ const initPostMessageBridge = (global: Global) => {
         if (source !== 'scene') return;
         const id = state.selectedSceneEntityId ?? null;
         const assetType = getSelectedSceneAssetType(state, global.settings.sceneAssets);
-        const payload: Record<string, unknown> = { id };
+        const payload: Record<string, unknown> = { module: MESSAGE_BRIDGE_MODULE.asset, id };
         if (assetType !== undefined) {
             payload.assetType = assetType;
         }
@@ -728,14 +734,14 @@ const initPostMessageBridge = (global: Global) => {
         if (source !== 'scene') return;
         const id = typeof data?.id === 'string' ? data.id : null;
         if (!id) return;
-        postToParent('SCENE_ASSET_PLACED', { id });
+        postToParent('SCENE_ASSET_PLACED', { module: MESSAGE_BRIDGE_MODULE.asset, id });
     });
 
     events.on('sceneLight:selected', (data: { id: string | null; source?: SelectionSource }) => {
         const source = data?.source ?? 'unknown';
         if (source !== 'scene') return;
         const id = data.id ?? null;
-        postToParent('SCENE_LIGHT_SELECTED', { id });
+        postToParent('SCENE_LIGHT_SELECTED', { module: MESSAGE_BRIDGE_MODULE.environment, id });
     });
 
     events.on('sceneLight:placed', (data?: { id?: string | null; source?: SelectionSource }) => {
@@ -743,14 +749,14 @@ const initPostMessageBridge = (global: Global) => {
         if (source !== 'scene') return;
         const id = typeof data?.id === 'string' ? data.id : null;
         if (!id) return;
-        postToParent('SCENE_LIGHT_PLACED', { id });
+        postToParent('SCENE_LIGHT_PLACED', { module: MESSAGE_BRIDGE_MODULE.environment, id });
     });
 
     events.on('annotation:selected', (data: { id: string; source?: SelectionSource }) => {
         const source = data?.source ?? 'unknown';
         if (source !== 'scene') return;
         const id = data.id;
-        postToParent('SCENE_ANNOTATION_SELECTED', { id });
+        postToParent('SCENE_ANNOTATION_SELECTED', { module: MESSAGE_BRIDGE_MODULE.annotation, id });
     });
 
     // 统一上报“进入标注编辑”并附带初始化数据（不区分选中来源）
@@ -759,6 +765,7 @@ const initPostMessageBridge = (global: Global) => {
         const serialized = selected?.serialize?.();
         if (!serialized?.id) return;
         postToParent('SCENE_ANNOTATION_EDIT_START', {
+            module: MESSAGE_BRIDGE_MODULE.annotation,
             id: serialized.id,
             value: {
                 title: serialized.title ?? '',
@@ -776,9 +783,9 @@ const initPostMessageBridge = (global: Global) => {
 
     events.on('progressEnd', () => {
         if (videoExportCancelled) {
-            postToParent('VIDEO_EXPORT_CANCELLED');
+            postToParent('VIDEO_EXPORT_CANCELLED', { module: MESSAGE_BRIDGE_MODULE.effects });
         } else {
-            postToParent('VIDEO_EXPORT_END');
+            postToParent('VIDEO_EXPORT_END', { module: MESSAGE_BRIDGE_MODULE.effects });
         }
         videoExportCancelled = false;
     });
@@ -786,7 +793,7 @@ const initPostMessageBridge = (global: Global) => {
     events.on('progressStart', () => {
         // 开始导出：默认认为走“结束”，除非后续收到取消
         videoExportCancelled = false;
-        postToParent('VIDEO_EXPORT_STARTED');
+        postToParent('VIDEO_EXPORT_STARTED', { module: MESSAGE_BRIDGE_MODULE.effects });
     });
 };
 

@@ -30,10 +30,9 @@ export type {
     RevealEffectRuntimeStatus,
     PersistentEffectRuntimeStatus,
     AssetEffectRuntimeStatus,
-    EffectRuntimeStatus,
-    EffectsProtocolModule
+    EffectRuntimeStatus
 } from './effect-types';
-export { EFFECTS_PROTOCOL_MODULE, PERLIN_WAVE_REGISTRY_EFFECT_ID } from './effect-types';
+export { PERLIN_WAVE_REGISTRY_EFFECT_ID } from './effect-types';
 export {
     isOneShotRevealPlayingExclusiveGsplat,
     perlinWaveUsesRegistryComposerPath
