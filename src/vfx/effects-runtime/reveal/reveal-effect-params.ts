@@ -11,131 +11,155 @@ import { Color, Vec3 } from 'playcanvas';
  * - **布尔**：`useCameraDistance`、`pointSizeScaleByScene`。
  * - **数值**：其余键需为有限 `number`，且脚本上须已存在该属性名（含各特效 **`endRadius`** / smooth 的 **`maxRadius`** 等空间尺度专参）。
  *
- * 各字段语义以对应 **`Gsplat*`** 脚本类上的 `@attribute` 与 shader uniform 为准；下列注释为便于宿主联调的摘要（**类默认** / **create 初值** / **`@range`**）。
- *
- * **radial 与 `totalDuration`**：`RevealController.applyRadialRevealTotalDurationConstraint` 在 **`applyRevealEffectParamsToScript` 之后**反算 `speed`（rain / smooth 未接同逻辑）。
+ * 各字段语义以对应 **`Gsplat*`** 脚本类上的 `@attribute` 与 shader uniform 为准；下列注释为便于宿主联调的摘要。
  */
 
-// --- radial：`GsplatRevealRadial`；create 初值见 `RevealController.createRadialScript`，`speed` 可被 `applyRadialRevealTotalDurationConstraint` 再改 ---
+// --- radial：`GsplatRevealRadial` -------------------------------------------------
+// `totalDuration` 约束抬升波抵达 `endRadius`：`RevealController.applyRadialRevealTotalDurationConstraint` 在 **`applyRevealEffectParamsToScript` 之后**反算 speed（rain/smooth 未接此逻辑）。
+
+/** 径向点阵 reveal：中心外扩波 + 抬升波；初始 `endRadius` 由 create 内 `applyAdaptiveEndRadius` 决定，可用 **`effectParams.endRadius`** 覆盖。 */
 const RADIAL = new Set([
-    'speed', // 类 1，create 5；@range [0,10]；uSpeed
-    'acceleration', // 类 5，create 0；@range [0,5]
-    'delay', // 类 2，create 0.5；@range [0,10]；抬升波相对点阵延迟（秒）
-    'endRadius', // 类 25 + `applyAdaptiveEndRadius`；@range [0,500]
-    'oscillationIntensity', // 类 0.1，create 0.2；@range [0,1]
-    'dotTint', // Color [r,g,b]；类/ create (0,1,1)
-    'waveTint' // Color；类 (5,0,0)，create (1,0.5,0)
+    'speed', // 外圈点阵波沿径向推进的速度系数（与 shader 中 uSpeed 一致）
+    'acceleration', // 点阵波加速度（uAcceleration）
+    'delay', // 抬升波相对点阵波延迟启动时间（秒，uDelay）
+    'endRadius', // 抬升波外沿（世界单位，uEndRadius）；在自适应半径之后写入，可覆盖默认值
+    'oscillationIntensity', // 抬升阶段振荡强度（0–1 量级，uOscillationIntensity）
+    'dotTint', // 点阵阶段 tint，Color，JSON 为 [r,g,b]
+    'waveTint' // 抬升/波前 tint，Color，JSON 为 [r,g,b]
 ]);
 
-// --- rain：`GsplatRevealRain`；create 见 `createRainScript` ---
+// --- rain（经典雨）：`GsplatRevealRain` -------------------------------------------
+
+/** 自上而下「雨滴」落点 + 触地高亮；初始 `endRadius` 由 create 内自适应半径决定，可用 **`effectParams.endRadius`** 覆盖。 */
 const RAIN = new Set([
-    'distance', // 默认 30（create）；@range [0,50]
-    'endRadius', // 类 25 + 自适应；@range [0,500]
-    'speed', // 类 2，create 3；@range [0,10]
-    'acceleration', // 默认 0；@range [0,5]
-    'flightTime', // 默认 2；@range [0.1,5]
-    'rainSize', // 默认 0.015；@range [0,0.1]
-    'rotation', // 默认 0.9；@range [0,2]（整圈比例语义见脚本）
-    'fallTintIntensity', // 默认 0.2；@range [0,1]
-    'hitDuration', // 默认 0.5；@range [0,2]
-    'fallTint', // Color；(0,1,1) create
-    'hitTint' // Color；(2,0,0) create
+    'distance', // 雨滴生成平面与中心的大致距离尺度
+    'endRadius', // 雨区 xz 外沿（世界单位，uEndRadius）
+    'speed', // 下落速度
+    'acceleration', // 竖直下落加速度
+    'flightTime', // 单滴飞行时间（秒），影响触地节奏
+    'rainSize', // 雨点大小（屏幕/世界尺度相关）
+    'rotation', // 下落过程旋转量（0–1 为「整圈」比例类语义，见脚本）
+    'fallTintIntensity', // 下落段 tint 强度
+    'hitDuration', // 触地高亮持续时间（秒）
+    'fallTint', // 下落 tint，Color → [r,g,b]
+    'hitTint' // 触地闪色，Color → [r,g,b]
 ]);
 
-// --- rain-v2：`GsplatRainV2`；`bottomY`/`rainHeight`/`maxDist2D` 常由 bbox 与 `createRainV2Script` 写入；`timeScale` 由 `totalDuration` 反算 ---
+// --- rain-v2：`GsplatRainV2` ------------------------------------------------------
+
+/**
+ * 简化雨：自 `bottomY` 向上「长」回 splat 原位；完成条件与 `timeScale`、`maxDist2D` 强相关。
+ * 若改 `bottomY`/`rainHeight`/`maxDist2D`，需理解其与 `RevealController` 内 bbox 初始化可能叠加。
+ */
 const RAIN_V2 = new Set([
-    'intensity', // 默认 1；@range [0,1]
-    'hitDuration', // 类 2；@range [0,5]（create 未改）
-    'hitTint', // Color；(2,0,0) 类默认
-    'bottomY', // 类 -10；create 多来自 bbox
-    'rainHeight', // 类 15；create 多来自 bbox
-    'maxDist2D', // 类 10；create 多来自 bbox xz
-    'timeScale' // 类 1；create 由 totalDuration 与完成时间反算
+    'intensity', // 整体强度 0–1（uIntensity）
+    'hitDuration', // 落位后红色淡出时长（秒）
+    'hitTint', // 落位闪色 [r,g,b]
+    'bottomY', // 雨层起始世界 Y（通常低于场景）
+    'rainHeight', // 雨层厚度（世界单位）
+    'maxDist2D', // xz 平面最远影响距离；与 `totalDuration` 推导的 timeScale 共同决定节奏
+    'timeScale' // effectTime 缩放；若不设则由 `totalDuration` 与几何在 create 时反算
 ]);
 
-// --- smooth：`GsplatRevealSmooth`；create 仅 center/enabled，余为类默认 ---
+// --- smooth：`GsplatRevealSmooth` -------------------------------------------------
+
+/** 平滑球形 reveal；默认 `maxRadius` 见类定义，可用 **`effectParams.maxRadius`** 覆盖（脚本字段名非 endRadius）。 */
 const SMOOTH = new Set([
-    'maxRadius', // 默认 50；@range [0,500]
-    'fadeWidthRatio', // 默认 0.1；@range [0,1]
-    'transitionEffect', // 默认 1；@range [1,4]（曲线/形态枚举）
-    'growthSpeed' // 默认 5；@range [0,50]；半径增长（单位/秒）
+    'maxRadius', // 球形渐显外半径（世界单位）
+    'fadeWidthRatio', // 过渡带宽度占半径比例
+    'transitionEffect', // 过渡曲线/形态枚举（脚本内语义）
+    'growthSpeed' // 可见性向内/向外增长速度
 ]);
 
-// --- pieces-recover：`GsplatRevealPiecesRecover`；create 按 `totalDuration` 缩放多段时长，见 `createPiecesRecoverScript` ---
+// --- pieces-recover：`GsplatRevealPiecesRecover` ---------------------------------
+
+/** 碎片飞散再收回；时间与 `totalDuration` 在 create 时按比例缩放；**`effectParams.endRadius`** 可覆盖波前外沿（uEndRadius）。 */
 const PIECES_RECOVER = new Set([
-    'scatterDistance', // 类 6，create 常 4；@range [0,50]
-    'endRadius', // 类 25 + 自适应；@range [0,500]
-    'scatterDuration', // 类 6，create scaled；@range [0.1,20]
-    'holdDuration', // 类 0；@range [0,5]
-    'recoverDuration', // 类 10，create scaled；@range [0.5,20]
-    'noiseIntensity', // 类 0.8，create 0.3；@range [0,2]
-    'scatterDirection', // Vec3 [x,y,z]；create (1,1,1)
-    'maxScatterRadius', // 类 5，create 4；@range [0,50]
-    'waveSpeed', // 类 6，create scaled；@range [0.1,100]
-    'springStiffness', // 默认 5；@range [0,10]
-    'waveSpeedDistScale', // 默认 0.02；@range [0,0.2]
-    'pointSize', // 默认 0.01；@range [0.001,0.5]
-    'pointSizeScaleByScene', // boolean；类 true
-    'scatterIntensity', // 类默认 1.8（超出脚本标注 @range [0,1] 的上限，以运行类为准）；create 未改
-    'tangentTwist', // 默认 0.2；@range [0,1]
-    'radialExpand', // 默认 0；@range [0,1]
-    'smokeDrift' // 默认 0.5；@range [0,1]
+    'scatterDistance', // 单点飞散位移幅度（世界单位）
+    'endRadius', // 收回波前最大半径（世界单位，uEndRadius）
+    'scatterDuration', // 飞散段时长（秒）
+    'holdDuration', // 飞散后保持/悬停（秒）
+    'recoverDuration', // 收回段时长（秒）
+    'noiseIntensity', // 飞散噪声强度
+    'scatterDirection', // 主飞散方向 Vec3，JSON [x,y,z]
+    'maxScatterRadius', // 飞散位移上限半径
+    'waveSpeed', // 波前推进速度（与距离场相关）
+    'springStiffness', // 收回弹性（越大越快回弹）
+    'waveSpeedDistScale', // 波速随距离修正系数
+    'pointSize', // 飞散点渲染尺度
+    'pointSizeScaleByScene', // 是否按场景尺度自动放大点（boolean）
+    'scatterIntensity', // 飞散阶段视觉强度
+    'tangentTwist', // 切向扭转量
+    'radialExpand', // 径向膨胀附加量
+    'smokeDrift' // 烟状漂移量
 ]);
 
-// --- integrate：`GsplatIntegrate`；`verticalSpread` 常由 totalDuration 与高度在 create 中反算 ---
+// --- integrate：`GsplatIntegrate` -----------------------------------------------
+
+/** 竖向波前「融合」显现；`verticalSpread` 常由 `totalDuration` 与 bbox 高度在 create 时反算，也可直接覆盖。 */
 const INTEGRATE = new Set([
-    'intensity', // 默认 0.5；@range [0,1]
-    'speed', // 默认 0.8；@range [0,1]（脚本注释：传播速度）
-    'waveSpeed', // 默认 1；@range [0,5]
-    'waveFrequency' // 默认 3；@range [0,10]
+    'intensity', // 整体亮度/对比权重
+    'speed', // 竖向推进主速度（与 wave 相位相关）
+    'waveSpeed', // 波前调制速度
+    'waveFrequency' // 波前空间频率
 ]);
 
-// --- growth-wave：`GsplatRevealGrowthWave`；create 覆写 growthSpeed/growthDuration/noiseIntensity 等，见 `createGrowthWaveScript` ---
+// --- growth-wave：`GsplatRevealGrowthWave` ---------------------------------------
+
+/**
+ * 两阶段：自下而上生长（点云）+ 光圈向外复原。
+ * `endRadius` 由 create 时默认与 `applyAdaptiveEndRadius`（bbox 下限）决定，也可经 **`effectParams.endRadius`** 覆盖；`verticalSpread` 常与 Phase1 目标时长、`totalDuration` 耦合。
+ */
 const GROWTH_WAVE = new Set([
-    'growthSpeed', // 类 5；create 乘 scale 使 Phase1 约 7s，见 `createGrowthWaveScript`；@range [0.1,50]
-    'growthDuration', // 类 7，create 缩放；@range [0.5,20]
-    'recoverDuration', // 类 5，create 固定 7；@range [0.5,20]
-    'noiseIntensity', // 类 0.8，create 2.8；@range [0,2]
-    'scatterDistance', // 类 4；@range [0,50]
-    'minSize', // 已弃用，类 0.05；create 0.15；@range [0.01,1]
-    'pointSize', // 类 0.006；@range [0.001,0.5]
-    'pointSizeAdaptiveScale', // 类 5；@range [0,10]
-    'minScreenPointPx', // 类 1.25；@range [0.5,4]
-    'screenFloorMaxScale', // 类 1.9；@range [1,4]
-    'densityAnchorMin', // 类 35；@range [10,5000]
-    'densityAnchorMax', // 类 18000；@range [1000,1000000]
-    'densityInfluence', // 类 2.4；@range [0.5,4]
-    'endRadius', // 类 50 + 自适应；@range [0,500]
-    'bottomY', // 类 -10；create 多来自 bbox
-    'topY', // 类 10；create 多来自 bbox
-    'edgeAreaMin', // 已弃用；@range [0,20]
-    'edgeAreaMax', // 已弃用；@range [0,50]
-    'edgeAnisoMin', // 已弃用；@range [1,20]
-    'verticalSpread' // 可选；未设时 create 用 growthSpeed 与高度反算；@range [0.01,100]
+    'growthSpeed', // Phase1 竖向生长速度
+    'growthDuration', // 单点生长动画时长（秒）
+    'recoverDuration', // Phase2 光圈扫出时长（秒）
+    'noiseIntensity', // 生长/复原噪声
+    'scatterDistance', // 生长阶段最大散射位移
+    'minSize', // 兼容字段，点云阶段主要见 `pointSize`
+    'pointSize', // 点云 splat 尺寸（世界单位）
+    'pointSizeAdaptiveScale', // 远处点放大倍数（0–10）
+    'minScreenPointPx', // 屏幕可见像素地板
+    'screenFloorMaxScale', // 视距地板对 pointSize 的最大放大
+    'densityAnchorMin', // 场景密度归一化低端锚点
+    'densityAnchorMax', // 场景密度归一化高端锚点
+    'densityInfluence', // 密度补偿强度
+    'endRadius', // Phase2 光圈最大半径（世界单位，uEndRadius）；可与 create 默认 + 自适应叠加理解，写入在后者之后
+    'bottomY', // 生长起始世界 Y（与 integrate 约定：大 Y 为视觉「底」）
+    'topY', // 生长上界世界 Y
+    'edgeAreaMin', // 已弃用边缘过滤，保留兼容
+    'edgeAreaMax',
+    'edgeAnisoMin',
+    'verticalSpread' // 竖向波前 spread；不设则由内建公式与 totalDuration 推导
 ]);
 
-// --- sketch：`GsplatSketch`；create 覆写时长/波速/多项视觉参数，见 `createSketchScript` ---
+// --- sketch：`GsplatSketch` --------------------------------------------------------
+
+/**
+ * 素描 → 上色 reveal；`waveSpeed`/`sketchDuration`/`colorizeDuration` 常与 `totalDuration`、默认 `endRadius` 在 create 中联立反算；可用 **`effectParams.endRadius`** 等单独覆盖。
+ * `useCameraDistance`：传播距离是否用 xz 到 `uCenter`（与 rain-v2 对齐）而非相机 eye。
+ */
 const SKETCH = new Set([
-    'waveSpeed', // 类 10，create 由 endRadius 与剩余时间反算；@range [0.1,100]
-    'endRadius', // 类 200 + 自适应；@range [0,1000]
-    'sketchDuration', // 类 1.5，create ×scale；@range [0.5,30]
-    'colorizeDuration', // 类 5，create ×scale；@range [0.5,30]
-    'fadeWidthRatio', // 类 0.1，create 0.18；@range [0,1]
-    'sketchIntensity', // 默认 1；@range [0,1]
-    'sketchContrast', // 默认 1.2；@range [0.5,3]
-    'draftFeel', // 类 1，create 0.65；@range [0,1]
-    'shadeLevels', // 默认 5；@range [2,8]
-    'hatchDensity', // 类 25，create 8；@range [1,25]
-    'hatchStrength', // 类 1，create 0.65；@range [0,1]
-    'paperTintAmount', // 类 0.8，create 0.4；@range [0,1]
-    'paperTint', // number[3]；create [0.97,0.95,0.90]
-    'grainFreq', // 默认 25；@range [5,50]
-    'grainAmp', // 默认 0.06；@range [0,0.15]
-    'colorizeSharpness', // 类 0.35，create 0.3；@range [0,1]
-    'colorizeSpread', // 类 0.2，create 0.08；@range [0,0.2]
-    'colorizeDensity', // 类 0.5，create 0.25；@range [0,0.5]
-    'colorizeAlphaGrain', // 类 1，create 0.5；@range [0,1]
-    'useCameraDistance' // boolean；create true
+    'waveSpeed', // 素描波前径向扩展速度
+    'endRadius', // 素描+上色波前外沿（世界单位，uEndRadius）
+    'sketchDuration', // 素描阶段时长（秒）
+    'colorizeDuration', // 上色阶段时长（秒）
+    'fadeWidthRatio', // 波前过渡带宽度 / 半径比
+    'sketchIntensity', // 素描线浓度
+    'sketchContrast', // 素描对比度
+    'draftFeel', // 草图感 / 未完成感混合
+    'shadeLevels', // 量化明暗层数
+    'hatchDensity', // 排线密度
+    'hatchStrength', // 排线强度
+    'paperTintAmount', // 画纸底色混合量
+    'paperTint', // 画纸色 [r,g,b] → 脚本 `number[3]`
+    'grainFreq', // 颗粒噪声频率
+    'grainAmp', // 颗粒振幅
+    'colorizeSharpness', // 上色边缘锐度
+    'colorizeSpread', // 上色扩散
+    'colorizeDensity', // 上色密度
+    'colorizeAlphaGrain', // 上色 Alpha 颗粒
+    'useCameraDistance' // boolean：是否用相机距离模式（见类注释）
 ]);
 
 /** `settings.effects.reveal.type` 字符串 → 允许出现在 `effectParams` 内的键集合 */

@@ -3,7 +3,7 @@ import { Vec3 } from 'playcanvas';
 /**
  * 可持续 **persistent** 轨的 **`settings.effects.persistent` → `effectParams`** 白名单与写入逻辑。
  *
- * - 协议：`EFFECT_PARAMS_PATCH`（`effectId === scene.gsplat-persistent`）的 `params.effectParams`；存盘包为 **`type` / `autoStart` / `effectParams`**，**无** `totalDuration`（与 reveal 轨区分）。
+ * - 协议：`EFFECT_PARAMS_PATCH`（`effectId === scene.gsplat-persistent`）的 `params.effectParams`（与 reveal 轨同形）。
  * - 仅当 `key` 落在当前 `type` 对应集合内时才写入脚本；其余键静默忽略。
  * - **数值**：有限 `number`，且脚本上须已存在该属性名。
  * - **`center`**：`[x, y, z]` 写入 `Vec3`。
@@ -11,16 +11,16 @@ import { Vec3 } from 'playcanvas';
  * 新增 persistent 类型：扩展 **`BY_TYPE`** 与下方 `Set`，并在 **`mountPersistentGsplatByEffectType`** 创建脚本后调用 **`applyPersistentEffectParamsToScript`**。
  */
 
-// --- perlin-wave：`GsplatRevealPerlinWave`（`gsplat-perlin-wave.ts`）+ `createPerlinWaveRevealScript` 初值 ---
+// --- perlin-wave：`GsplatRevealPerlinWave` ---------------------------------------
 
 const PERLIN_WAVE = new Set([
-    'intensity', // 默认 0.8（create），类 0.5；@range [0,1]
-    'waveAmplitude', // 默认 0.2（create），类 0.1；@range [0,2]
-    'waveFrequency', // 默认 1.0（类，create 未改）；@range [0,10]；wavelength≤0 时参与 uWaveFrequency
-    'wavelength', // 默认 2.5（create），类 0；@range [0,100]；>0 时优先于 waveFrequency
-    'waveSpeed', // 默认 0.5（create），类 1.0；@range [0,5]
-    'scaleBlend', // 默认 0.75（create），类 0；@range [0,1]
-    'center' // Vec3，类 (0,0,0)；常由 updateScriptCenter 覆盖；JSON [x,y,z]
+    'intensity', // 色彩调制强度 0–1
+    'waveAmplitude', // Perlin 位移振幅
+    'waveFrequency', // 当 wavelength ≤ 0 时用于推导空间频率
+    'wavelength', // 波长（世界单位）；>0 时优先于 waveFrequency
+    'waveSpeed', // 动画时间速度
+    'scaleBlend', // 尺度混合 0–1
+    'center' // 效果原点 [x,y,z] → Vec3
 ]);
 
 const BY_TYPE: Record<string, ReadonlySet<string>> = {
