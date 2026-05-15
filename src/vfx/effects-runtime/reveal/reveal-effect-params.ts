@@ -9,20 +9,20 @@ import { Color, Vec3 } from 'playcanvas';
  * - **方向**（`scatterDirection`）：`[x, y, z]`，写入 `Vec3`。
  * - **纸张色**（`paperTint`）：`[r, g, b]`，写入脚本上的 `number[]`。
  * - **布尔**：`useCameraDistance`、`pointSizeScaleByScene`。
- * - **数值**：其余键需为有限 `number`，且脚本上须已存在该属性名（含各特效 **`endRadius`** / smooth 的 **`maxRadius`** 等空间尺度专参）。
+ * - **数值**：其余键需为有限 `number`，且脚本上须已存在该属性名（含各特效 **`endRadius`** / **`maxEndRadius`** / smooth 的 **`maxRadius`** 等空间尺度专参）。
  *
  * 各字段语义以对应 **`Gsplat*`** 脚本类上的 `@attribute` 与 shader uniform 为准；下列注释为便于宿主联调的摘要。
  */
 
 // --- radial：`GsplatRevealRadial` -------------------------------------------------
-// `totalDuration` 约束抬升波抵达 `endRadius`：`RevealController.applyRadialRevealTotalDurationConstraint` 在 **`applyRevealEffectParamsToScript` 之后**反算 speed（rain/smooth 未接此逻辑）。
+// radial / sketch：`totalDuration` 与有效 `endRadius` 在脚本 `syncSpeedToTotalDuration` 内共同反算传播速度。
 
-/** 径向点阵 reveal：中心外扩波 + 抬升波；初始 `endRadius` 由 create 内 `applyAdaptiveEndRadius` 决定，可用 **`effectParams.endRadius`** 覆盖。 */
+/** 径向点阵 reveal：有效 `endRadius` 由 create + bbox 自适应决定；外部仅 **`maxEndRadius`** 作上界（默认 50）。 */
 const RADIAL = new Set([
     'speed', // 外圈点阵波沿径向推进的速度系数（与 shader 中 uSpeed 一致）
     'acceleration', // 点阵波加速度（uAcceleration）
     'delay', // 抬升波相对点阵波延迟启动时间（秒，uDelay）
-    'endRadius', // 抬升波外沿（世界单位，uEndRadius）；在自适应半径之后写入，可覆盖默认值
+    'maxEndRadius', // 参与半径上界（世界单位）；有效 endRadius = min(自适应, maxEndRadius)
     'oscillationIntensity', // 抬升阶段振荡强度（0–1 量级，uOscillationIntensity）
     'dotTint', // 点阵阶段 tint，Color，JSON 为 [r,g,b]
     'waveTint' // 抬升/波前 tint，Color，JSON 为 [r,g,b]
@@ -108,7 +108,7 @@ const INTEGRATE = new Set([
 
 /**
  * 两阶段：自下而上生长（点云）+ 光圈向外复原。
- * `endRadius` 由 create 时默认与 `applyAdaptiveEndRadius`（bbox 下限）决定；**Phase2 `recoverDuration` 与 `totalDuration` 对齐**（见 `RevealController.createGrowthWaveScript`）；`verticalSpread` 与 Phase1 目标时长相关。
+ * 有效 `endRadius` 由 create + bbox 自适应决定；外部仅 **`maxEndRadius`**（默认 50）。`syncSpeedToTotalDuration` 对齐 Phase2 与 `totalDuration`。
  */
 const GROWTH_WAVE = new Set([
     'growthSpeed', // Phase1 竖向生长速度
@@ -124,7 +124,7 @@ const GROWTH_WAVE = new Set([
     'densityAnchorMin', // 场景密度归一化低端锚点
     'densityAnchorMax', // 场景密度归一化高端锚点
     'densityInfluence', // 密度补偿强度
-    'endRadius', // Phase2 光圈最大半径（世界单位，uEndRadius）；可与 create 默认 + 自适应叠加理解，写入在后者之后
+    'maxEndRadius', // Phase2 光圈半径上界（世界单位）；默认 50
     'bottomY', // 生长起始世界 Y（与 integrate 约定：大 Y 为视觉「底」）
     'topY', // 生长上界世界 Y
     'edgeAreaMin', // 已弃用边缘过滤，保留兼容
@@ -138,12 +138,12 @@ const GROWTH_WAVE = new Set([
 // --- sketch：`GsplatSketch` --------------------------------------------------------
 
 /**
- * 素描 → 上色 reveal；`waveSpeed`/`sketchDuration`/`colorizeDuration` 常与 `totalDuration`、默认 `endRadius` 在 create 中联立反算；可用 **`effectParams.endRadius`** 等单独覆盖。
+ * 素描 → 上色 reveal；有效 `endRadius` 由自适应决定；外部仅 **`maxEndRadius`**（默认 50）；`syncSpeedToTotalDuration` 与 `totalDuration` 反算 `waveSpeed`。
  * `useCameraDistance`：传播距离是否用 xz 到 `uCenter`（与 rain-v2 对齐）而非相机 eye。
  */
 const SKETCH = new Set([
-    'waveSpeed', // 素描波前径向扩展速度
-    'endRadius', // 素描+上色波前外沿（世界单位，uEndRadius）
+    'waveSpeed', // 素描波前速度（通常由 syncSpeedToTotalDuration 按 totalDuration 重算）
+    'maxEndRadius', // 素描+上色波前外沿上界（世界单位）；默认 50
     'sketchDuration', // 素描阶段时长（秒）
     'colorizeDuration', // 上色阶段时长（秒）
     'fadeWidthRatio', // 波前过渡带宽度 / 半径比

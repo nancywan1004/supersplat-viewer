@@ -112,8 +112,8 @@ void initShared(vec3 center) {
         float colorizeT = min(uTime - g_tColorizeStart, uColorizeDuration);
         colorizeRadius = (colorizeT / uColorizeDuration) * uEndRadius;
     }
-    // 上色过渡带加宽，使素描→彩色过渡更明显
-    float colorizeBand = uEndRadius * uFadeWidthRatio * 6.0;
+    // 上色空间过渡带宽（内外各半）：≈ 2×ratio×endRadius。原 *6 易使带宽大于可视范围，fadeWidthRatio 调节几乎无感
+    float colorizeBand = uEndRadius * clamp(uFadeWidthRatio, 0.02, 1.0) * 2.0;
     float colorizeOuter = colorizeRadius + colorizeBand * 0.5;
     float colorizeInner = max(0.0, colorizeRadius - colorizeBand * 0.5);
     if (colorizeDist <= colorizeInner) {
@@ -196,13 +196,13 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         // 素描阶段：完全素描
         sketchProgress = 1.0;
     } else if (g_phase == 2.0) {
-        // 上色阶段：与素描一致的时空顺序，加宽过渡带使过渡更明显
-        float transitionBand = mix(1.0, 0.2, uColorizeSharpness);
+        // 上色阶段：与素描一致的时空顺序；锐度同时收窄 smoothstep 窗口并在进度域压曲线，避免「怎么拧都差不多」
+        float transitionBand = mix(1.0, 0.06, uColorizeSharpness);
         float tMin = 0.5 - transitionBand * 0.5;
         float tMax = 0.5 + transitionBand * 0.5;
         float t = smoothstep(tMin, tMax, g_colorizeProgress);
-        sketchProgress = 1.0 - t;
-        // 轻微缓动，让半素描半彩色的过渡区更可见
+        float tShaped = pow(t, mix(1.0, 0.28, uColorizeSharpness));
+        sketchProgress = 1.0 - tShaped;
         sketchProgress = pow(sketchProgress, 0.9);
     } else {
         // 完成阶段：完全彩色
@@ -396,8 +396,8 @@ fn initShared(center: vec3f) {
         let colorizeT = min(uniform.uTime - g_tColorizeStart, uniform.uColorizeDuration);
         colorizeRadius = (colorizeT / uniform.uColorizeDuration) * uniform.uEndRadius;
     }
-    // 上色过渡带加宽，使素描→彩色过渡更明显
-    let colorizeBand = uniform.uEndRadius * uniform.uFadeWidthRatio * 6.0;
+    // 与 GLSL 一致：上色空间带宽 ≈ 2×ratio×endRadius
+    let colorizeBand = uniform.uEndRadius * clamp(uniform.uFadeWidthRatio, 0.02, 1.0) * 2.0;
     let colorizeOuter = colorizeRadius + colorizeBand * 0.5;
     let colorizeInner = max(0.0, colorizeRadius - colorizeBand * 0.5);
     if (colorizeDist <= colorizeInner) {
@@ -478,13 +478,12 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         // 素描阶段：完全素描
         sketchProgress = 1.0;
     } else if (g_phase == 2.0) {
-        // 上色阶段：与素描一致的时空顺序，加宽过渡带使过渡更明显
-        let transitionBand = mix(1.0, 0.2, uniform.uColorizeSharpness);
+        let transitionBand = mix(1.0, 0.06, uniform.uColorizeSharpness);
         let tMin = 0.5 - transitionBand * 0.5;
         let tMax = 0.5 + transitionBand * 0.5;
         let t = smoothstep(tMin, tMax, g_colorizeProgress);
-        sketchProgress = 1.0 - t;
-        // 轻微缓动，让半素描半彩色的过渡区更可见
+        let tShaped = pow(t, mix(1.0, 0.28, uniform.uColorizeSharpness));
+        sketchProgress = 1.0 - tShaped;
         sketchProgress = pow(sketchProgress, 0.9);
     } else {
         // 完成阶段：完全彩色
@@ -616,18 +615,46 @@ class GsplatSketch extends GsplatShaderEffect {
     colorizeDuration = 5.0;
 
     /**
-     * 渐变宽度比例（相对于当前半径）
+     * 波前软边（素描展开环）相对当前半径的比例；上色阶段空间过渡带宽约为其 ×2×endRadius（见着色器）。
      * @attribute
-     * @range [0, 1]
+     * @range [0.02, 1]
      */
     fadeWidthRatio = 0.1;
 
     /**
-     * 最大处理半径（超出此半径的点不参与效果）
+     * 素描/上色波前外沿（世界单位，uEndRadius）。由 `setRadius` / `commitEffectiveEndRadius` 写入，勿经 effectParams 直改。
      * @attribute
      * @range [0, 1000]
      */
     endRadius = 200.0;
+
+    /**
+     * 参与半径上界（世界单位）。有效半径 = min(bbox 自适应, maxEndRadius)。
+     * @attribute
+     */
+    maxEndRadius = 50;
+
+    /**
+     * 按有效 `endRadius` 与 `totalDuration` 反算 `waveSpeed`。
+     */
+    syncSpeedToTotalDuration(totalDuration: number): void {
+        this.commitEffectiveEndRadius();
+        if (!Number.isFinite(totalDuration) || totalDuration <= 0) {
+            return;
+        }
+        if (!Number.isFinite(this.sketchDuration) || !Number.isFinite(this.colorizeDuration)) {
+            return;
+        }
+        const remainingTime = totalDuration - this.sketchDuration - this.colorizeDuration;
+        const endR = Number(this.endRadius);
+        if (!Number.isFinite(endR) || endR <= 0) {
+            return;
+        }
+        this.waveSpeed = endR / Math.max(remainingTime, 0.1);
+        if (this.materialsApplied.size > 0) {
+            this.setUniform('uWaveSpeed', this.waveSpeed);
+        }
+    }
 
     /**
      * 素描效果强度（0-1）
@@ -700,7 +727,7 @@ class GsplatSketch extends GsplatShaderEffect {
     grainAmp = 0.06;
 
     /**
-     * 上色过渡边缘锐度（0-1），越小过渡带越宽、过渡越明显
+     * 上色时素描→彩色在过渡区内的锐度（0 最柔和，1 最利）。与 fadeWidthRatio 共同作用：前者偏「沿波前的一圈有多厚」，后者偏「圈内进度切换有多陡」。
      * @attribute
      * @range [0, 1]
      */

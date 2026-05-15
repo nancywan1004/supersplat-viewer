@@ -30,6 +30,7 @@ import {
 } from '../persistent/persistent-effect';
 import { shouldRequestPersistentGsplatRemount } from './effects-orchestrator';
 import { applyRevealEffectParamsToScript } from './reveal-effect-params';
+import type { RevealParticipationSyncContext } from '../gsplat-shader-effect';
 import { RevealPersistentGsplatController } from './reveal-persistent-controller';
 import { GsplatRevealGrowthWave } from './gsplat-growth-wave';
 import { GsplatIntegrate } from './gsplat-integrate';
@@ -655,27 +656,16 @@ export class RevealController {
                     script.verticalSpread = script.growthSpeed / Math.max(heightRange, 0.001);
                 }
 
-                const maxYOffset = heightRange;
-                const totalDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
-                const computePhase1End = () =>
-                    script.growthSpeed > 1e-6
-                        ? (script.growthDuration + maxYOffset * script.verticalSpread) / script.growthSpeed
-                        : defaultGrowthPhaseTime;
-
-                let phase1End = computePhase1End();
-                const phase1Budget = Math.max(0.01, totalDuration - minRecoverDuration);
-                if (phase1End > phase1Budget + 1e-4) {
-                    const mult = phase1End / phase1Budget;
-                    script.growthSpeed *= mult;
-                    phase1End = computePhase1End();
-                }
-                script.recoverDuration = Math.max(minRecoverDuration, totalDuration - phase1End);
-
                 // 初始状态和 effectTime
                 script.enabled = this.config.autoStart;
                 script.effectTime = 0;
 
-                const actualTotalDuration = phase1End + script.recoverDuration;
+                const totalDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+                const phase1End =
+                    script.growthSpeed > 1e-6
+                        ? (script.growthDuration + heightRange * script.verticalSpread) / script.growthSpeed
+                        : defaultGrowthPhaseTime;
+                const actualTotalDuration = phase1End + (script.recoverDuration ?? minRecoverDuration);
                 
                 console.log('Growth-wave script created with config:', {
                     center: script.center,
@@ -738,13 +728,9 @@ export class RevealController {
                 // 因此：waveSpeed = endRadius / (totalDuration - sketchDuration - colorizeDuration)
                 script.sketchDuration = defaultSketchDuration * scale;
                 script.colorizeDuration = defaultColorizeDuration * scale;
-                this.applyAdaptiveEndRadius(
-                    script,
-                    defaultEndRadius
-                );
-                const remainingTime = totalDuration - script.sketchDuration - script.colorizeDuration;
-                script.waveSpeed = script.endRadius / Math.max(remainingTime, 0.1); // 确保不为0或负数
-                script.fadeWidthRatio = 0.18;
+                // 请求半径用 0：有效外沿 = max(bbox 自适应, maxEndRadius 上界)，不再硬编码 200 抬高下限
+                this.applyAdaptiveEndRadius(script, 0);
+                script.fadeWidthRatio = 0.55;
                 script.sketchIntensity = 1.0;
                 script.sketchContrast = 1.2;
                 script.draftFeel = 0.65;
@@ -758,7 +744,7 @@ export class RevealController {
                 script.colorizeAlphaGrain = 0.5;
                 script.grainFreq = 25.0;
                 script.grainAmp = 0.06;
-                script.colorizeSharpness = 0.3;
+                script.colorizeSharpness = 0.35;                
                 
                 // 与 rain-v2 一致：素描+上色按 xz 到相机焦点（updateScriptCenter）由内向外，不用相机 eye 球面距
                 script.useCameraDistance = true;
@@ -963,9 +949,7 @@ export class RevealController {
 
         if (script) {
             applyRevealEffectParamsToScript(script, effectName, this.config.effectParams);
-            if (effectName === 'radial') {
-                this.applyRadialRevealTotalDurationConstraint(script);
-            }
+            this.syncRevealParticipation(script);
         }
 
         this.currentScript = script;
@@ -1330,54 +1314,29 @@ export class RevealController {
 
         try {
             applyRevealEffectParamsToScript(this.currentScript, this.config.type as string, this.config.effectParams);
-            if (this.config.type === 'radial') {
-                this.applyRadialRevealTotalDurationConstraint(this.currentScript);
-            }
+            this.syncRevealParticipation(this.currentScript);
         } catch (error) {
             console.warn('Error updating script config:', error);
         }
     }
 
-    /**
-     * radial：抬升波抵达 `endRadius` 的时刻须与公共字段 `totalDuration` 一致（与 `GsplatRevealRadial.getCompletionTime` 同式）。
-     * 在 `effectParams` 可能改写 `delay`/`acceleration`/`endRadius` 之后调用；按当前参数反算 `speed`。
-     */
-    private applyRadialRevealTotalDurationConstraint(script: any): void {
-        if (!script || this.config.type !== 'radial') return;
-        const totalDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
-        if (!Number.isFinite(totalDuration) || totalDuration <= 0) return;
+    private buildRevealParticipationContext(requestedRadius?: number): RevealParticipationSyncContext {
+        return {
+            requestedRadius,
+            sceneBboxRadius: this.getSceneBboxRadius(),
+            bboxPaddingScale: this.endRadiusBboxPaddingScale,
+            totalDuration: this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION,
+            effectParams: this.config.effectParams,
+            radiusSpeedCompensation: this.radiusSpeedCompensation
+        };
+    }
 
-        const delay = Number(script.delay);
-        const endR = Number(script.endRadius);
-        const accel = Number(script.acceleration);
-        if (!Number.isFinite(delay) || !Number.isFinite(endR) || endR <= 0) return;
-
-        const span = Math.max(totalDuration - delay, 0.05);
-        const linear = !Number.isFinite(accel) || Math.abs(accel) < 1e-9;
-
-        if (linear) {
-            const sp = endR / span;
-            if (Number.isFinite(sp) && sp > 0) {
-                script.speed = sp;
-            }
-        } else {
-            const t = span;
-            const v = (endR - 0.5 * accel * t * t) / t;
-            if (Number.isFinite(v) && v > 0) {
-                script.speed = v;
-            } else {
-                script.acceleration = 0;
-                script.speed = endR / span;
-            }
+    /** 将场景 bbox / config 交给脚本，由脚本自行同步参与半径与速度。 */
+    private syncRevealParticipation(script: any, requestedRadius?: number): void {
+        if (typeof script?.syncRevealParticipation !== 'function') {
+            return;
         }
-
-        const baseline = script.__radiusSpeedBaseline;
-        if (baseline && typeof baseline === 'object') {
-            baseline.speed = Number(script.speed);
-            if (Number.isFinite(script.acceleration)) {
-                baseline.acceleration = Number(script.acceleration);
-            }
-        }
+        script.syncRevealParticipation(this.buildRevealParticipationContext(requestedRadius));
     }
 
     private getSceneBboxRadius(): number {
@@ -1387,64 +1346,7 @@ export class RevealController {
     }
 
     private applyAdaptiveEndRadius(script: any, requestedRadius: number) {
-        if (!script) return;
-        const safeRequested = Number.isFinite(requestedRadius) ? Math.max(0, requestedRadius) : 0;
-        const requestedWithDefault = safeRequested > 0 ? safeRequested : Math.max(0, Number(script.endRadius) || 0);
-        const sceneBboxRadius = this.getSceneBboxRadius();
-
-        if (typeof script.setSceneBoundsRadius === 'function') {
-            script.setSceneBoundsRadius(sceneBboxRadius, this.endRadiusBboxPaddingScale);
-        }
-
-        if (typeof script.setRadius === 'function') {
-            script.setRadius(requestedWithDefault);
-        } else {
-            const bboxMinRadius = sceneBboxRadius > 0 ? sceneBboxRadius * this.endRadiusBboxPaddingScale : 0;
-            script.endRadius = Math.max(requestedWithDefault, bboxMinRadius);
-        }
-
-        // 不再基于 prevEndRadius 做逐帧比较，改为按“当前半径放大量”一次性计算速度系数，避免偶发过快。
-        const endRadius = Number(script.endRadius);
-        this.applyRadiusSpeedCompensation(script, requestedWithDefault, endRadius);
-    }
-
-    private applyRadiusSpeedCompensation(script: any, requestedRadius: number, endRadius: number) {
-        if (!script) return;
-        if (!Number.isFinite(requestedRadius) || requestedRadius <= 1e-6) return;
-        if (!Number.isFinite(endRadius) || endRadius <= 1e-6) return;
-
-        const rawScale = endRadius / requestedRadius;
-        if (!Number.isFinite(rawScale) || rawScale <= 0) return;
-        // 线性插值到补偿系数：scale=1 时因子=1，scale 增大时按 compensation 平滑提速
-        const speedFactor = 1 + (rawScale - 1) * this.radiusSpeedCompensation;
-        const safeFactor = Math.max(1, Math.min(3, speedFactor));
-
-        // sketch 的 waveSpeed 已在 create 时按 endRadius 反算，不再二次补偿
-        const isSketch = Number.isFinite(script.sketchDuration) && Number.isFinite(script.colorizeDuration);
-        if (isSketch) return;
-
-        // 避免重复叠乘：记录原始速度参数，每次都从“基线”回算
-        const baseline = script.__radiusSpeedBaseline ?? {};
-        if (!script.__radiusSpeedBaseline) {
-            baseline.speed = Number(script.speed);
-            baseline.acceleration = Number(script.acceleration);
-            baseline.waveSpeed = Number(script.waveSpeed);
-            baseline.waveSpeedDistScale = Number(script.waveSpeedDistScale);
-            script.__radiusSpeedBaseline = baseline;
-        }
-
-        if (Number.isFinite(baseline.speed)) {
-            script.speed = Math.max(1e-6, baseline.speed * safeFactor);
-        }
-        if (Number.isFinite(baseline.acceleration)) {
-            script.acceleration = baseline.acceleration * safeFactor;
-        }
-        if (Number.isFinite(baseline.waveSpeed)) {
-            script.waveSpeed = Math.max(1e-6, baseline.waveSpeed * safeFactor);
-        }
-        if (Number.isFinite(baseline.waveSpeedDistScale)) {
-            script.waveSpeedDistScale = baseline.waveSpeedDistScale / safeFactor;
-        }
+        this.syncRevealParticipation(script, requestedRadius);
     }
 
     /**

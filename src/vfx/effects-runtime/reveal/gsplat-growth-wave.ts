@@ -1147,14 +1147,49 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
     densityInfluence = 2.4;
 
     /**
-     * Phase 2 光圈最大半径：光圈从中心向外扩散到此距离后停止。
-     * 若场景很大（粒子离中心很远）而 endRadius 较小，则只有距离中心 ≤ endRadius 的区域会被光圈“复原”，
-     * 更远的粒子 g_recoverProgress 始终为 0，会一直保持点云状态，看起来“只扫描了一小部分”。
-     * 解决办法：调高 endRadius，使其大于场景中需要被光圈覆盖的最大距离（如 bbox 半径或视距）。
+     * Phase 2 光圈外沿（世界单位，uEndRadius）。由 `setRadius` / `commitEffectiveEndRadius` 写入，勿经 effectParams 直改。
      * @attribute
      * @range [0, 500]
      */
     endRadius = 50.0;
+
+    /**
+     * 参与半径上界（世界单位）。有效半径 = min(bbox 自适应, maxEndRadius)。
+     * @attribute
+     */
+    maxEndRadius = 50;
+
+    /**
+     * 刷新有效 `endRadius`，并按 `totalDuration` 对齐 Phase1/Phase2（`recoverDuration` 与波前速度）。
+     */
+    syncSpeedToTotalDuration(totalDuration: number): void {
+        this.commitEffectiveEndRadius();
+        if (!Number.isFinite(totalDuration) || totalDuration <= 0) {
+            return;
+        }
+
+        const minRecoverDuration = 0.5;
+        const heightRange = Math.abs(this.topY - this.bottomY);
+        const defaultGrowthPhaseTime = 7.0;
+
+        const computePhase1End = () =>
+            this.growthSpeed > 1e-6
+                ? (this.growthDuration + heightRange * (this.verticalSpread ?? 0)) / this.growthSpeed
+                : defaultGrowthPhaseTime;
+
+        let phase1End = computePhase1End();
+        const phase1Budget = Math.max(0.01, totalDuration - minRecoverDuration);
+        if (phase1End > phase1Budget + 1e-4) {
+            const mult = phase1End / phase1Budget;
+            this.growthSpeed *= mult;
+            phase1End = computePhase1End();
+        }
+        this.recoverDuration = Math.max(minRecoverDuration, totalDuration - phase1End);
+
+        if (this.materialsApplied.size > 0) {
+            this.setUniform('uEndRadius', this.endRadius);
+        }
+    }
 
     /**
      * Bottom Y coordinate where growth starts

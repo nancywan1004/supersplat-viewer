@@ -1,5 +1,23 @@
 import { Script, Entity, Material, Camera, Layer, Vec3, CameraComponent } from 'playcanvas';
 
+/** 子类可选的参与半径字段（基类无此属性，运行时由 `hasOwnProperty` 判定）。 */
+interface GsplatParticipationRadiusHost {
+    endRadius?: number;
+    maxEndRadius?: number;
+}
+
+/** RevealController 注入的场景几何；参与半径与速度在脚本内完成。 */
+export type RevealParticipationSyncContext = {
+    /** 省略时沿用 `participationRadiusRequest` / 当前 `endRadius` */
+    requestedRadius?: number;
+    sceneBboxRadius: number;
+    bboxPaddingScale: number;
+    totalDuration: number;
+    effectParams?: Record<string, unknown> | null;
+    /** 无 `syncSpeedToTotalDuration` 的脚本用于 bbox 放大后的速度补偿 */
+    radiusSpeedCompensation?: number;
+};
+
 /**
  * Base class for gsplat shader effects.
  * Handles common functionality like material management, shader application,
@@ -434,25 +452,55 @@ class GsplatShaderEffect extends Script {
      * This is a convenience method that subclasses can override for custom behavior.
      * @param {number} radius - The new radius value
      */
+    /** create / `setRadius` 写入的请求半径，供 `commitEffectiveEndRadius` 在 `maxEndRadius` 更新后重算。 */
+    protected participationRadiusRequest = 0;
+
+    /**
+     * 在 bbox 自适应半径之上应用 `maxEndRadius` 上界（脚本存在该属性且 > 0 时）。
+     */
+    protected finalizeParticipationRadius(adaptiveRadius: number): number {
+        const cap = (this as GsplatParticipationRadiusHost).maxEndRadius;
+        if (typeof cap === 'number' && Number.isFinite(cap) && cap > 0) {
+            return Math.min(adaptiveRadius, cap);
+        }
+        return adaptiveRadius;
+    }
+
+    /**
+     * 按当前 `participationRadiusRequest` 与 `maxEndRadius` 刷新有效 `endRadius`（须在 effectParams 写入 `maxEndRadius` 之后调用）。
+     */
+    commitEffectiveEndRadius(): void {
+        // PlayCanvas 子类字段常在原型链上，hasOwnProperty 会为 false 导致 cap 永不生效
+        if (!('endRadius' in this)) {
+            return;
+        }
+        const adaptive = this.resolveAdaptiveEndRadius(this.participationRadiusRequest);
+        const effective = this.finalizeParticipationRadius(adaptive);
+        (this as GsplatParticipationRadiusHost).endRadius = effective;
+        if (this.materialsApplied.size > 0) {
+            this.setUniform('uEndRadius', effective);
+        }
+    }
+
     setRadius(radius: number) {
         const safeRadius = Number.isFinite(radius) ? Math.max(0, radius) : 0;
+        this.participationRadiusRequest = safeRadius;
 
         // Default implementation: update radius attribute if it exists
-        if (this.hasOwnProperty('radius')) {
+        if ('radius' in this) {
             this.radius = safeRadius;
         }
 
         let adaptiveEndRadius = safeRadius;
-        if (this.hasOwnProperty('endRadius')) {
-            adaptiveEndRadius = this.resolveAdaptiveEndRadius(safeRadius);
-            (this as any).endRadius = adaptiveEndRadius;
+        if ('endRadius' in this) {
+            adaptiveEndRadius = this.finalizeParticipationRadius(this.resolveAdaptiveEndRadius(safeRadius));
+            (this as GsplatParticipationRadiusHost).endRadius = adaptiveEndRadius;
         }
         
         // Update uniform if materials are applied
         if (this.materialsApplied.size > 0) {
             this.setUniform('uRadius', safeRadius);
-            // Also update endRadius if it exists
-            if (this.hasOwnProperty('endRadius')) {
+            if ('endRadius' in this) {
                 this.setUniform('uEndRadius', adaptiveEndRadius);
             }
         }
@@ -481,6 +529,91 @@ class GsplatShaderEffect extends Script {
             ? this.sceneBboxRadius * this.sceneBboxPaddingScale
             : 0;
         return Math.max(safeRequested, bboxRadius);
+    }
+
+    /**
+     * bbox 自适应参与半径、可选 `maxEndRadius`、并按 `totalDuration` 对齐传播速度。
+     * 子类实现 `syncSpeedToTotalDuration` 时由本方法调用；否则走 legacy 速度补偿。
+     */
+    syncRevealParticipation(ctx: RevealParticipationSyncContext): void {
+        const host = this as GsplatParticipationRadiusHost;
+
+        if ('maxEndRadius' in this && ctx.effectParams) {
+            const cap = ctx.effectParams.maxEndRadius;
+            if (typeof cap === 'number' && Number.isFinite(cap) && cap > 0) {
+                host.maxEndRadius = cap;
+            }
+        }
+
+        const hasExplicitRequest =
+            ctx.requestedRadius !== undefined && Number.isFinite(ctx.requestedRadius);
+        const safeRequested = hasExplicitRequest ? Math.max(0, ctx.requestedRadius!) : -1;
+        const requestedWithDefault = safeRequested >= 0
+            ? safeRequested
+            : Math.max(0, this.participationRadiusRequest || Number(host.endRadius) || 0);
+
+        this.setSceneBoundsRadius(ctx.sceneBboxRadius, ctx.bboxPaddingScale);
+        this.setRadius(requestedWithDefault);
+
+        const syncSpeed = (this as { syncSpeedToTotalDuration?: (t: number) => void }).syncSpeedToTotalDuration;
+        if (typeof syncSpeed === 'function') {
+            syncSpeed.call(this, ctx.totalDuration);
+            return;
+        }
+
+        const compensation = ctx.radiusSpeedCompensation ?? 0.7;
+        this.applyRevealRadiusSpeedCompensation(
+            requestedWithDefault,
+            Number(host.endRadius),
+            compensation
+        );
+    }
+
+    /**
+     * bbox 放大 endRadius 后，对 rain / pieces-recover 等未实现 `syncSpeedToTotalDuration` 的脚本做一次性速度补偿。
+     */
+    private applyRevealRadiusSpeedCompensation(
+        requestedRadius: number,
+        endRadius: number,
+        radiusSpeedCompensation: number
+    ): void {
+        const script = this as Record<string, unknown>;
+        if (!Number.isFinite(requestedRadius) || requestedRadius <= 1e-6) return;
+        if (!Number.isFinite(endRadius) || endRadius <= 1e-6) return;
+
+        const rawScale = endRadius / requestedRadius;
+        if (!Number.isFinite(rawScale) || rawScale <= 0) return;
+
+        const speedFactor = 1 + (rawScale - 1) * radiusSpeedCompensation;
+        const safeFactor = Math.max(1, Math.min(3, speedFactor));
+
+        const baseline = (script.__radiusSpeedBaseline ?? {}) as Record<string, number>;
+        if (!script.__radiusSpeedBaseline) {
+            baseline.speed = Number((this as { speed?: number }).speed);
+            baseline.acceleration = Number((this as { acceleration?: number }).acceleration);
+            baseline.waveSpeed = Number((this as { waveSpeed?: number }).waveSpeed);
+            baseline.waveSpeedDistScale = Number((this as { waveSpeedDistScale?: number }).waveSpeedDistScale);
+            script.__radiusSpeedBaseline = baseline;
+        }
+
+        const self = this as {
+            speed?: number;
+            acceleration?: number;
+            waveSpeed?: number;
+            waveSpeedDistScale?: number;
+        };
+        if (Number.isFinite(baseline.speed)) {
+            self.speed = Math.max(1e-6, baseline.speed * safeFactor);
+        }
+        if (Number.isFinite(baseline.acceleration)) {
+            self.acceleration = baseline.acceleration * safeFactor;
+        }
+        if (Number.isFinite(baseline.waveSpeed)) {
+            self.waveSpeed = Math.max(1e-6, baseline.waveSpeed * safeFactor);
+        }
+        if (Number.isFinite(baseline.waveSpeedDistScale)) {
+            self.waveSpeedDistScale = baseline.waveSpeedDistScale / safeFactor;
+        }
     }
 
     /**

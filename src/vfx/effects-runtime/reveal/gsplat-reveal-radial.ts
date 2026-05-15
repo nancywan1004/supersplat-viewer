@@ -271,11 +271,66 @@ class GsplatRevealRadial extends GsplatShaderEffect {
     oscillationIntensity = 0.1;
 
     /**
-     * Distance at which to disable effect for performance
+     * 抬升波外沿（世界单位，uEndRadius）。由 `setRadius` / `commitEffectiveEndRadius` 写入，勿经 effectParams 直改。
      * @attribute
-     * @range [0, 500]
      */
     endRadius = 25;
+
+    /**
+     * 参与半径上界（世界单位）。有效半径 = min(bbox 自适应, maxEndRadius)。
+     * @attribute
+     */
+    maxEndRadius = 50;
+
+    /**
+     * 按有效 `endRadius` 与 `totalDuration` 反算 `speed`，使抬升波在总时长内抵达外沿。
+     */
+    syncSpeedToTotalDuration(totalDuration: number): void {
+        this.commitEffectiveEndRadius();
+        if (!Number.isFinite(totalDuration) || totalDuration <= 0) {
+            return;
+        }
+
+        const delay = Number(this.delay);
+        const endR = Number(this.endRadius);
+        const accel = Number(this.acceleration);
+        if (!Number.isFinite(delay) || !Number.isFinite(endR) || endR <= 0) {
+            return;
+        }
+
+        const span = Math.max(totalDuration - delay, 0.05);
+        const linear = !Number.isFinite(accel) || Math.abs(accel) < 1e-9;
+
+        if (linear) {
+            const sp = endR / span;
+            if (Number.isFinite(sp) && sp > 0) {
+                this.speed = sp;
+            }
+        } else {
+            const t = span;
+            const v = (endR - 0.5 * accel * t * t) / t;
+            if (Number.isFinite(v) && v > 0) {
+                this.speed = v;
+            } else {
+                this.acceleration = 0;
+                this.speed = endR / span;
+            }
+        }
+
+        const baseline = (this as { __radiusSpeedBaseline?: { speed?: number; acceleration?: number } })
+            .__radiusSpeedBaseline;
+        if (baseline && typeof baseline === 'object') {
+            baseline.speed = Number(this.speed);
+            if (Number.isFinite(this.acceleration)) {
+                baseline.acceleration = Number(this.acceleration);
+            }
+        }
+
+        if (this.materialsApplied.size > 0) {
+            this.setUniform('uSpeed', this.speed);
+            this.setUniform('uAcceleration', this.acceleration);
+        }
+    }
 
     getShaderGLSL() {
         return shaderGLSL;
