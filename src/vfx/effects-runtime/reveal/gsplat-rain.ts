@@ -52,7 +52,8 @@ void initShared(vec3 originalCenter) {
     if (g_hasReached > 0.5) {
         // Calculate progress range for red effect
         float progressAfterReach = max(0.0, g_rainProgress - progressWhenReached);
-        float maxProgressForFade = 0.3; // Progress range for fade-out (can be adjusted via uniform if needed)
+        // uHitDuration：落位后闪色在 g_rainProgress 上的淡出宽度（约 0.15×秒，默认 2s→0.3）
+        float maxProgressForFade = clamp(uHitDuration * 0.15, 0.05, 1.0);
         
         // Calculate fade: starts at 1.0 when just reached, fades to 0.0 after maxProgressForFade
         // Use smoothstep for smooth transition
@@ -115,13 +116,13 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     // These were computed from originalCenter in modifyCenter
     float alpha = smoothstep(uBottomY, g_originalY, g_rainY);
     
-    // Apply intensity to alpha
-    color.a *= mix(1.0, alpha, uIntensity);
-
-    // 上升段（自下而上长回原位，未落位前）
+    // 上升段着色（在 alpha 衰减前混合，避免低 alpha 时 tint 完全看不见）
     if (g_hasReached < 0.5 && g_rainProgress > 0.001) {
         color.rgb = mix(color.rgb, uRiseTint, uRiseTintIntensity);
     }
+
+    // Apply intensity to alpha
+    color.a *= mix(1.0, alpha, uIntensity);
     
     // Apply red tint when reaching original position (hit effect)
     // Use the fade factor calculated in initShared
@@ -186,7 +187,7 @@ fn initShared(originalCenter: vec3f) {
     if (g_hasReached > 0.5) {
         // Calculate progress range for red effect
         let progressAfterReach = max(0.0, g_rainProgress - progressWhenReached);
-        let maxProgressForFade = 0.3; // Progress range for fade-out (can be adjusted via uniform if needed)
+        let maxProgressForFade = clamp(uniform.uHitDuration * 0.15, 0.05, 1.0);
         
         // Calculate fade: starts at 1.0 when just reached, fades to 0.0 after maxProgressForFade
         // Use smoothstep for smooth transition
@@ -250,12 +251,11 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     // These were computed from originalCenter in modifyCenter
     let alpha = smoothstep(uniform.uBottomY, g_originalY, g_rainY);
     
-    // Apply intensity to alpha
-    (*color).a *= mix(1.0, alpha, uniform.uIntensity);
-
     if (g_hasReached < 0.5 && g_rainProgress > 0.001) {
         (*color).rgb = mix((*color).rgb, uniform.uRiseTint, uniform.uRiseTintIntensity);
     }
+
+    (*color).a *= mix(1.0, alpha, uniform.uIntensity);
     
     // Apply red tint when reaching original position (hit effect)
     // Use the fade factor calculated in initShared
@@ -327,7 +327,7 @@ class GsplatRainV2 extends GsplatShaderEffect {
     hitTint: Color = new Color(2, 0, 0);
 
     /**
-     * Duration of hit tint flash in seconds (longer duration creates wider boundary expansion effect)
+     * 落位闪色淡出时长（秒）；shader 中映射为 g_rainProgress 淡出宽度（×0.15，默认约 0.3）
      * @attribute
      * @range [0, 5]
      */
