@@ -799,6 +799,7 @@ export class RevealController {
                 script.speed = 0.8;
                 script.waveSpeed = 1.0;
                 script.waveFrequency = 3.0;
+                script.waveAmplitude = 0.5;
                 
                 // 设置 AABB（如果 bbox 存在）
                 if (this.bbox) {

@@ -6,7 +6,8 @@ import { Color, Vec3 } from 'playcanvas';
  * - 协议：`EFFECT_PARAMS_PATCH` 的 `params.effectParams`（扁平 `key → value`）。
  * - 仅当 `key` 落在当前 `type` 对应集合内时才写入脚本；其余键静默忽略。
  * - **颜色**（`dotTint` / `waveTint` / `fallTint` / `riseTint` / `hitTint` / **`phase1CloudTint` / `phase2HaloTint`**（growth-wave））：`[r, g, b]` 数值数组，写入 `Color`。
- * - **方向**（`scatterDirection`）：`[x, y, z]`，写入 `Vec3`。
+ * - **方向 / AABB**（`scatterDirection`、`aabbMin`、`aabbMax`）：`[x, y, z]`，写入 `Vec3`。
+ * - **integrate xz 裁剪**（`aabbXZMin`、`aabbXZMax`）：`[x, z]`，仅改水平范围，保留 create 时的 Y。
  * - **纸张色**（`paperTint`）：`[r, g, b]`，写入脚本上的 `number[]`。
  * - **布尔**：`useCameraDistance`、`pointSizeScaleByScene`。
  * - **数值**：其余键需为有限 `number`，且脚本上须已存在该属性名（含各特效 **`endRadius`** / **`maxEndRadius`** / smooth 的 **`maxRadius`** 等空间尺度专参）。
@@ -99,12 +100,18 @@ const PIECES_RECOVER = new Set([
 
 // --- integrate：`GsplatIntegrate` -----------------------------------------------
 
-/** 竖向波前「融合」显现；`verticalSpread` 常由 `totalDuration` 与 bbox 高度在 create 时反算，也可直接覆盖。 */
+/** 竖向波前「融合」显现；`verticalSpread` 常由 `totalDuration` 与 bbox 高度在 create 时反算。AABB 默认来自场景 bbox，可用专参覆盖。 */
 const INTEGRATE = new Set([
-    'intensity', // 整体亮度/对比权重
+    'intensity', // 整合阶段整体强度权重（与 wave 径向扩展相乘）
     'speed', // 竖向推进主速度（与 wave 相位相关）
     'waveSpeed', // 波前调制速度
-    'waveFrequency' // 波前空间频率
+    'waveFrequency', // 波前空间频率
+    'waveAmplitude', // xz 径向弹动振幅（uWaveAmplitude，默认 0.5）
+    'verticalSpread', // 竖向波前 spread
+    'aabbMin', // 参与区域 AABB 最小角 [x,y,z] → Vec3
+    'aabbMax', // 参与区域 AABB 最大角 [x,y,z] → Vec3
+    'aabbXZMin', // 仅覆盖水平 min：[x, z]，不改 Y
+    'aabbXZMax' // 仅覆盖水平 max：[x, z]，不改 Y
 ]);
 
 // --- growth-wave：`GsplatRevealGrowthWave` ---------------------------------------
@@ -184,6 +191,12 @@ function isColorTriple(v: unknown): v is [number, number, number] {
     return Array.isArray(v) && v.length >= 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x));
 }
 
+/** JSON 数组是否为长度≥2 的有限数字对（integrate xz AABB） */
+function isXZPair(v: unknown): v is [number, number] {
+    return Array.isArray(v) && v.length >= 2 && typeof v[0] === 'number' && typeof v[1] === 'number' &&
+        Number.isFinite(v[0]) && Number.isFinite(v[1]);
+}
+
 /** 将 `[r,g,b]` 写入脚本上的 `Color` 属性 */
 function trySetColor(script: any, key: string, v: unknown): boolean {
     if (!isColorTriple(v)) return false;
@@ -250,8 +263,18 @@ export function applyRevealEffectParamsToScript(
             trySetColor(script, rawKey, rawVal);
             continue;
         }
-        if (rawKey === 'scatterDirection') {
+        if (rawKey === 'scatterDirection' || rawKey === 'aabbMin' || rawKey === 'aabbMax') {
             trySetVec3(script, rawKey, rawVal);
+            continue;
+        }
+        if (rawKey === 'aabbXZMin' && isXZPair(rawVal) && script.aabbMin instanceof Vec3) {
+            script.aabbMin.x = rawVal[0];
+            script.aabbMin.z = rawVal[1];
+            continue;
+        }
+        if (rawKey === 'aabbXZMax' && isXZPair(rawVal) && script.aabbMax instanceof Vec3) {
+            script.aabbMax.x = rawVal[0];
+            script.aabbMax.z = rawVal[1];
             continue;
         }
         if (rawKey === 'paperTint') {

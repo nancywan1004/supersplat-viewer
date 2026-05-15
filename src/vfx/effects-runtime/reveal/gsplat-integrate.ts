@@ -7,6 +7,7 @@ uniform float uIntensity;
 uniform float uSpeed;
 uniform float uWaveSpeed;
 uniform float uWaveFrequency;
+uniform float uWaveAmplitude;
 uniform float uTopY;
 uniform float uBottomY;
 uniform float uVerticalSpread;
@@ -76,8 +77,7 @@ void modifySplatCenter(inout vec3 center) {
     float radius = length(xz);
     vec2 direction = radius > 0.001 ? normalize(xz) : vec2(1.0, 0.0);
     
-    // 向外扩展，带弹动效果（减小振幅系数，使波形更柔和）
-    float expandAmount = uIntensity * bounce * 0.5;
+    float expandAmount = uIntensity * bounce * uWaveAmplitude;
     xz += direction * expandAmount;
     
     center.xz = xz;
@@ -123,6 +123,7 @@ uniform uIntensity: f32;
 uniform uSpeed: f32;
 uniform uWaveSpeed: f32;
 uniform uWaveFrequency: f32;
+uniform uWaveAmplitude: f32;
 uniform uTopY: f32;
 uniform uBottomY: f32;
 uniform uVerticalSpread: f32;
@@ -195,8 +196,7 @@ fn modifySplatCenter(center: ptr<function, vec3f>) {
     let radius = length(xz);
     let direction = select(vec2f(1.0, 0.0), normalize(xz), radius > 0.001);
     
-    // 向外扩展，带弹动效果（减小振幅系数，使波形更柔和）
-    let expandAmount = uniform.uIntensity * bounce * 0.5;
+    let expandAmount = uniform.uIntensity * bounce * uniform.uWaveAmplitude;
     xz = xz + direction * expandAmount;
     
     (*center).x = xz.x;
@@ -291,6 +291,13 @@ class GsplatIntegrate extends GsplatShaderEffect {
     waveFrequency = 3.0;
 
     /**
+     * xz 平面径向弹动振幅（expandAmount = intensity × bounce × waveAmplitude）
+     * @attribute
+     * @range [0, 2]
+     */
+    waveAmplitude = 0.5;
+
+    /**
      * Bottom Y coordinate where integration starts.
      * 约定：bottomY 是视觉上的底部，对应更大的 Y 值；topY 是视觉上的顶部，对应更小的 Y 值。
      * @attribute
@@ -340,6 +347,7 @@ class GsplatIntegrate extends GsplatShaderEffect {
         this.setUniform('uSpeed', this.speed);
         this.setUniform('uWaveSpeed', this.waveSpeed);
         this.setUniform('uWaveFrequency', this.waveFrequency);
+        this.setUniform('uWaveAmplitude', this.waveAmplitude);
         this.setUniform('uTopY', this.topY);
         this.setUniform('uBottomY', this.bottomY);
         this.setUniform('uVerticalSpread', this.verticalSpread);
