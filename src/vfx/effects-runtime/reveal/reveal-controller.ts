@@ -398,7 +398,10 @@ export class RevealController {
             if (script) {
                 // 配置script属性
                 script.intensity = 1.0;
-                
+                script.rainSize = 0.05;
+                script.riseTint.set(0, 1, 1);
+                script.riseTintIntensity = 0.2;
+
                 // 根据场景包围盒设置底部Y和高度
                 let maxDist2D = 10.0; // 默认最大距离
                 if (this.bbox) {

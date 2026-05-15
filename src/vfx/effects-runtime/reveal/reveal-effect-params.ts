@@ -5,7 +5,7 @@ import { Color, Vec3 } from 'playcanvas';
  *
  * - 协议：`EFFECT_PARAMS_PATCH` 的 `params.effectParams`（扁平 `key → value`）。
  * - 仅当 `key` 落在当前 `type` 对应集合内时才写入脚本；其余键静默忽略。
- * - **颜色**（`dotTint` / `waveTint` / `fallTint` / `hitTint` / **`phase1CloudTint` / `phase2HaloTint`**（growth-wave））：`[r, g, b]` 数值数组，写入 `Color`。
+ * - **颜色**（`dotTint` / `waveTint` / `fallTint` / `riseTint` / `hitTint` / **`phase1CloudTint` / `phase2HaloTint`**（growth-wave））：`[r, g, b]` 数值数组，写入 `Color`。
  * - **方向**（`scatterDirection`）：`[x, y, z]`，写入 `Vec3`。
  * - **纸张色**（`paperTint`）：`[r, g, b]`，写入脚本上的 `number[]`。
  * - **布尔**：`useCameraDistance`、`pointSizeScaleByScene`。
@@ -53,6 +53,9 @@ const RAIN = new Set([
  */
 const RAIN_V2 = new Set([
     'intensity', // 整体强度 0–1（uIntensity）
+    'rainSize', // 上升阶段雨点尺度（uRainSize）
+    'riseTintIntensity', // 上升段 tint 混合强度 0–1（rain-v2 自下而上，非 classic rain 下落段）
+    'riseTint', // 上升段 tint，Color → [r,g,b]
     'hitDuration', // 落位后红色淡出时长（秒）
     'hitTint', // 落位闪色 [r,g,b]
     'bottomY', // 雨层起始世界 Y（通常低于场景）
@@ -239,6 +242,7 @@ export function applyRevealEffectParamsToScript(
             rawKey === 'dotTint' ||
             rawKey === 'waveTint' ||
             rawKey === 'fallTint' ||
+            rawKey === 'riseTint' ||
             rawKey === 'hitTint' ||
             rawKey === 'phase1CloudTint' ||
             rawKey === 'phase2HaloTint'

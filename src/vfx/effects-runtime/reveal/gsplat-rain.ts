@@ -7,6 +7,9 @@ const shaderGLSL = /* glsl */`
 uniform float uTime;
 uniform float uIntensity;
 uniform vec3 uCenter;
+uniform float uRainSize;
+uniform vec3 uRiseTint;
+uniform float uRiseTintIntensity;
 uniform vec3 uHitTint;
 uniform float uHitDuration;
 uniform float uBottomY;
@@ -84,7 +87,7 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
     }
     
     float progressWhenReached = max(0.001, (g_originalY - uBottomY) / uRainHeight);
-    float smallDotSize = 0.05;
+    float smallDotSize = uRainSize;
     float scaleFactor;
     
     if (g_hasReached > 0.5) {
@@ -114,6 +117,11 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     
     // Apply intensity to alpha
     color.a *= mix(1.0, alpha, uIntensity);
+
+    // 上升段（自下而上长回原位，未落位前）
+    if (g_hasReached < 0.5 && g_rainProgress > 0.001) {
+        color.rgb = mix(color.rgb, uRiseTint, uRiseTintIntensity);
+    }
     
     // Apply red tint when reaching original position (hit effect)
     // Use the fade factor calculated in initShared
@@ -129,6 +137,9 @@ const shaderWGSL = /* wgsl */`
 uniform uTime: f32;
 uniform uIntensity: f32;
 uniform uCenter: vec3f;
+uniform uRainSize: f32;
+uniform uRiseTint: vec3f;
+uniform uRiseTintIntensity: f32;
 uniform uHitTint: vec3f;
 uniform uHitDuration: f32;
 uniform uBottomY: f32;
@@ -211,7 +222,7 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
     }
     
     let progressWhenReached = max(0.001, (g_originalY - uniform.uBottomY) / uniform.uRainHeight);
-    let smallDotSize: f32 = 0.05;
+    let smallDotSize: f32 = uniform.uRainSize;
     var scaleFactor: f32;
     
     if (g_hasReached > 0.5) {
@@ -241,6 +252,10 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     
     // Apply intensity to alpha
     (*color).a *= mix(1.0, alpha, uniform.uIntensity);
+
+    if (g_hasReached < 0.5 && g_rainProgress > 0.001) {
+        (*color).rgb = mix((*color).rgb, uniform.uRiseTint, uniform.uRiseTintIntensity);
+    }
     
     // Apply red tint when reaching original position (hit effect)
     // Use the fade factor calculated in initShared
@@ -269,6 +284,7 @@ class GsplatRainV2 extends GsplatShaderEffect {
 
     // Reusable arrays for uniform updates
     _centerArray = [0, 0, 0];
+    _riseTintArray = [0, 0, 0];
     _hitTintArray = [0, 0, 0];
 
     /**
@@ -279,10 +295,30 @@ class GsplatRainV2 extends GsplatShaderEffect {
     intensity: number = 1.0;
 
     /**
+     * Size of particles while rising (matches prior shader default 0.05)
+     * @attribute
+     * @range [0, 0.1]
+     */
+    rainSize = 0.05;
+
+    /**
      * Center point for the rain effect
      * @attribute
      */
     center: Vec3 = new Vec3(0, 0, 0);
+
+    /**
+     * Color during rise phase (bottom → original position)
+     * @attribute
+     */
+    riseTint = new Color(0, 1, 1);
+
+    /**
+     * Blend intensity between original color and rise tint (0=original, 1=full tint)
+     * @attribute
+     * @range [0, 1]
+     */
+    riseTintIntensity = 0.2;
 
     /**
      * Additive color when splat reaches its original position (hit flash)
@@ -338,6 +374,13 @@ class GsplatRainV2 extends GsplatShaderEffect {
         // Update uniforms
         this.setUniform('uTime', scaledTime);
         this.setUniform('uIntensity', this.intensity);
+        this.setUniform('uRainSize', this.rainSize);
+
+        this._riseTintArray[0] = this.riseTint.r;
+        this._riseTintArray[1] = this.riseTint.g;
+        this._riseTintArray[2] = this.riseTint.b;
+        this.setUniform('uRiseTint', this._riseTintArray);
+        this.setUniform('uRiseTintIntensity', this.riseTintIntensity);
         
         this._centerArray[0] = this.center.x;
         this._centerArray[1] = this.center.y;
