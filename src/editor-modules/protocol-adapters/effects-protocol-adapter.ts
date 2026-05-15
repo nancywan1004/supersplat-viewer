@@ -1,102 +1,130 @@
 /**
- * 场景 GSplat reveal 协议映射：`EFFECT_PARAMS_PATCH` / `EFFECT_TOGGLE` 对 settings、state 的写入及事件派发。
- * 由 EffectsFacade 调用；入站 payload 须含 `module: 'effect'` 与合法 `effectId`（见 `SCENE_GSPLAT_REVEAL_EFFECT_ID`）。
+ * 场景 GSplat reveal / persistent 协议映射：`EFFECT_PARAMS_PATCH` / `EFFECT_TOGGLE` 对 settings、state 的写入及事件派发。
+ * reveal：`params` → `patchRevealSettingsFromParams`；persistent：`params`（`type` / `enabled` / `autoStart` / `effectParams`）→ `patchPersistentSettingsFromParams`（**persistent 包无** `totalDuration`）。
+ * 由 EffectsFacade 调用；payload 须含合法 `effectId`（见 `SCENE_GSPLAT_REVEAL_EFFECT_ID`）。`module` 可选。
  */
 
-import { EFFECTS_PROTOCOL_MODULE } from '../../vfx/effects-runtime/effect-types';
-import { SCENE_GSPLAT_PERSISTENT_EFFECT_ID, SCENE_GSPLAT_REVEAL_EFFECT_ID } from '../../vfx/effects-runtime/effects-runtime';
+import type { ExperienceSettings } from '../../schemas/v2';
+import type { LegacyRevealEffect } from '../../schemas/v2-custom';
 import {
     clearPersistentRevealTrack,
     ensureEffectsSettings,
     getRevealStatus,
+    patchPersistentSettingsFromParams,
     patchRevealRuntimeMirror,
     patchRevealSettingsFromParams,
     readRevealParams,
     syncEffectsRuntimeStateFromSettings
 } from '../../settings-serialize/effects-sync';
-import type { ExperienceSettings } from '../../schemas/v2';
 import { PERSISTENT_EFFECT_TYPE_VALUES } from '../../types';
-import type { Global, PersistentEffectType, RevealEffectType } from '../../types';
+import type { Global, PersistentEffectType } from '../../types';
+import { SCENE_GSPLAT_PERSISTENT_EFFECT_ID } from '../../vfx/effects-runtime/effects-runtime';
 import { isPersistentVfx } from '../../vfx/effects-runtime/reveal/reveal-policy';
+import { EFFECTS_PROTOCOL_MODULE, type EffectsProtocolModule } from '../modules-types';
 
 export { SCENE_GSPLAT_REVEAL_EFFECT_ID, SCENE_GSPLAT_PERSISTENT_EFFECT_ID } from '../../vfx/effects-runtime/effects-runtime';
 
 export type EffectProtocolParamsPatchPayload = {
-    module: typeof EFFECTS_PROTOCOL_MODULE;
+    module?: EffectsProtocolModule;
     effectId: string;
     params: Record<string, unknown>;
 };
 
 export type EffectProtocolStopPayload = {
-    module: typeof EFFECTS_PROTOCOL_MODULE;
+    module?: EffectsProtocolModule;
     effectId: string;
 };
 
 export type EffectProtocolReplayPayload = {
-    module: typeof EFFECTS_PROTOCOL_MODULE;
+    module?: EffectsProtocolModule;
     effectId: string;
     restartAnim?: boolean;
 };
 
 export function isEffectProtocolEnvelope(
     p: unknown
-): p is { module: typeof EFFECTS_PROTOCOL_MODULE; effectId: string } {
+): p is { effectId: string; module?: EffectsProtocolModule } {
     if (typeof p !== 'object' || p === null) return false;
     const o = p as Record<string, unknown>;
-    return o.module === EFFECTS_PROTOCOL_MODULE && typeof o.effectId === 'string';
+    if (typeof o.effectId !== 'string') return false;
+    if (o.module === undefined) return true;
+    return o.module === EFFECTS_PROTOCOL_MODULE;
 }
 
-const PATCH_KEYS = ['type', 'totalDuration', 'radius', 'autoStart'] as const;
+const PATCH_KEYS = ['type', 'totalDuration', 'autoStart'] as const;
 
 export function paramsPatchHasRevealKeys(params: Record<string, unknown>): boolean {
-    return PATCH_KEYS.some((k) => params[k] !== undefined);
+    if (params.effectParams !== undefined) {
+        if (params.effectParams === null) return true;
+        return typeof params.effectParams === 'object' && !Array.isArray(params.effectParams);
+    }
+    return PATCH_KEYS.some(k => params[k] !== undefined);
 }
 
 export function paramsPatchHasPersistentKeys(params: Record<string, unknown>): boolean {
-    return Object.keys(params).length > 0;
+    if (Object.prototype.hasOwnProperty.call(params, 'type')) return true;
+    if (typeof params.enabled === 'boolean') return true;
+    if (Object.prototype.hasOwnProperty.call(params, 'effectParams')) return true;
+    if (typeof params.autoStart === 'boolean') return true;
+    return false;
 }
 
 /**
  * EFFECT_PARAMS_PATCH（scene reveal）：增量写 `settings.effects.reveal`（运行期真源），
  * 并同步 `effectsRuntimeState`（`syncEffectsRuntimeStateFromSettings`）后派发 `revealConfigChanged`。
+ * @param global
+ * @param params
  */
 export function applyGsplatRevealParamsPatch(global: Global, params: Record<string, unknown>): void {
     if (!paramsPatchHasRevealKeys(params)) return;
     const settings = global.settings;
-    const changed: Record<string, unknown> = {};
     const current = readRevealParams(settings);
+
+    const patch: Partial<LegacyRevealEffect> = {};
 
     if (typeof params.type === 'string') {
         const oldType = (current?.type ?? 'none') as string;
         if (isPersistentVfx(oldType as any) && !isPersistentVfx(params.type as any)) {
             clearPersistentRevealTrack(settings as ExperienceSettings);
         }
-        changed.type = params.type;
+        patch.type = params.type as LegacyRevealEffect['type'];
     }
     if (typeof params.totalDuration === 'number' && !Number.isNaN(params.totalDuration) && params.totalDuration > 0) {
-        changed.totalDuration = params.totalDuration;
-    }
-    if (typeof params.radius === 'number' && !Number.isNaN(params.radius)) {
-        changed.radius = params.radius;
+        patch.totalDuration = params.totalDuration;
     }
     if (typeof params.autoStart === 'boolean') {
-        changed.autoStart = params.autoStart;
+        patch.autoStart = params.autoStart;
+    }
+    if (params.effectParams !== undefined) {
+        if (params.effectParams === null) {
+            patch.effectParams = {};
+        } else if (typeof params.effectParams === 'object' && !Array.isArray(params.effectParams)) {
+            patch.effectParams = params.effectParams as Record<string, unknown>;
+        }
     }
 
-    if (Object.keys(changed).length === 0) return;
-    patchRevealSettingsFromParams(settings, changed);
+    if (Object.keys(patch).length === 0) return;
+
+    const merged = patchRevealSettingsFromParams(settings as ExperienceSettings, patch);
     syncEffectsRuntimeStateFromSettings(global.state, settings);
-    global.events.fire('revealConfigChanged', changed);
+    global.events.fire('revealConfigChanged', merged);
 }
 
-/** 仅切换类型时走增量补丁（与 `EFFECT_PARAMS_PATCH` 单字段语义一致）。 */
+/**
+ * 仅切换类型时走增量补丁（与 `EFFECT_PARAMS_PATCH` 单字段语义一致）。
+ * @param global
+ * @param effectType
+ */
 export function applyGsplatRevealTypePatch(global: Global, effectType: string): void {
     applyGsplatRevealParamsPatch(global, { type: effectType });
 }
 
 const PERSISTENT_TYPE_SET = new Set<string>(PERSISTENT_EFFECT_TYPE_VALUES as readonly string[]);
 
-/** 供 `EFFECT_PARAMS_PATCH`（persistent 轨）与读回真源：`none` 含大小写/空白；未知字符串返回 `null`。 */
+/**
+ * 供 `EFFECT_PARAMS_PATCH`（persistent 轨）与读回真源：`none` 含大小写/空白；未知字符串返回 `null`。
+ * @param raw
+ */
 export function normalizePersistentType(raw: unknown): PersistentEffectType | 'none' | null {
     if (raw === undefined || raw === null || raw === false) return 'none';
     if (typeof raw !== 'string') return null;
@@ -111,13 +139,17 @@ export function normalizePersistentType(raw: unknown): PersistentEffectType | 'n
  * persistent 已在 settings 中处于「关」语义之后调用（M15 单内核）：
  * 先同步 `effectsRuntimeState`，再按需 `applyGsplatRevealStopPlayback`（一次性 reveal 独占播放时不误停），
  * 最后 `persistentGsplatEffectRemountRequested(false)` 驱动 viewer 拆实体脚本。
+ * @param global
  */
 export function finalizePersistentGsplatTrackOff(global: Global): void {
     syncEffectsRuntimeStateFromSettings(global.state, global.settings);
     dispatchPersistentGsplatTeardownAfterSettingsSync(global);
 }
 
-/** 假定调用前已 `syncEffectsRuntimeStateFromSettings`：仅停播判定 + remount 事件。 */
+/**
+ * 假定调用前已 `syncEffectsRuntimeStateFromSettings`：仅停播判定 + remount 事件。
+ * @param global
+ */
 function dispatchPersistentGsplatTeardownAfterSettingsSync(global: Global): void {
     const settings = global.settings as ExperienceSettings;
     const revealType = (readRevealParams(settings)?.type ?? 'none') as string;
@@ -138,12 +170,16 @@ function dispatchPersistentGsplatTeardownAfterSettingsSync(global: Global): void
  * - 仅写 `settings.effects.persistent`；
  * - 若 reveal 轨为空，则用 persistent 类型激活播放；
  * - 若 reveal 正在播放，则延迟到 `revealComplete` 后 remount persistent。
+ * @param global
+ * @param params
  */
 export function applyGsplatPersistentParamsPatch(global: Global, params: Record<string, unknown>): void {
     if (!paramsPatchHasPersistentKeys(params)) return;
 
     const hasTypePatch = Object.prototype.hasOwnProperty.call(params, 'type');
     const hasEnabledPatch = typeof params.enabled === 'boolean';
+    const hasEffectParamsPatch = Object.prototype.hasOwnProperty.call(params, 'effectParams');
+    const hasAutoStartPatch = typeof params.autoStart === 'boolean';
     const nextPersistentType = hasTypePatch ? normalizePersistentType(params.type) : null;
     if (hasTypePatch && nextPersistentType === null) return;
 
@@ -158,34 +194,43 @@ export function applyGsplatPersistentParamsPatch(global: Global, params: Record<
         return;
     }
 
-    const prevPack = (effects.persistent.paramsById[id] as Record<string, unknown> | undefined) ?? {};
-    const nextPack = { ...prevPack, ...params } as Record<string, unknown>;
-    delete nextPack.enabled;
-    if (hasTypePatch) {
-        nextPack.type = nextPersistentType;
+    const persistentPatch: Partial<LegacyRevealEffect> = {};
+    if (hasTypePatch && nextPersistentType !== null) {
+        persistentPatch.type = nextPersistentType as LegacyRevealEffect['type'];
     }
-    effects.persistent.paramsById[id] = nextPack;
+    if (hasAutoStartPatch) {
+        persistentPatch.autoStart = params.autoStart as boolean;
+    }
+    if (hasEffectParamsPatch) {
+        if (params.effectParams === null) {
+            persistentPatch.effectParams = null;
+        } else if (typeof params.effectParams === 'object' && !Array.isArray(params.effectParams)) {
+            persistentPatch.effectParams = params.effectParams as Record<string, unknown>;
+        }
+    }
+
+    if (Object.keys(persistentPatch).length > 0) {
+        patchPersistentSettingsFromParams(settings as ExperienceSettings, persistentPatch);
+    }
 
     if (hasEnabledPatch) {
         effects.persistent.enabled = params.enabled as boolean;
-    } else if (hasTypePatch && nextPersistentType !== 'none') {
+    } else if (hasTypePatch && nextPersistentType !== null && nextPersistentType !== 'none') {
         effects.persistent.enabled = true;
     }
     syncEffectsRuntimeStateFromSettings(global.state, settings);
 
-    const effectiveTypeRaw = nextPack.type;
-    const effectivePersistentType = normalizePersistentType(effectiveTypeRaw);
+    const nextPack = (effects.persistent.paramsById[id] as Record<string, unknown> | undefined) ?? {};
+    const effectivePersistentType = normalizePersistentType(nextPack.type);
     const hasEffectivePersistentType = effectivePersistentType !== null && effectivePersistentType !== 'none';
     const currentRevealType = readRevealParams(settings)?.type ?? 'none';
 
     if (effects.persistent.enabled === false || !hasEffectivePersistentType) {
-        // 关闭 persistent 时：
-        // - 一次性 reveal 正在播放：不误停 reveal 本体，仅取消/禁止后续 persistent remount；
-        // - 其余场景（包括 persistent 正在播放）都应立即停掉当前脚本。
         dispatchPersistentGsplatTeardownAfterSettingsSync(global);
         return;
     }
-    if (!hasTypePatch && !hasEnabledPatch) {
+    const packMutated = Object.keys(persistentPatch).length > 0;
+    if (!hasTypePatch && !hasEnabledPatch && !packMutated) {
         return;
     }
     if (currentRevealType === 'none') {
@@ -201,7 +246,10 @@ export function applyGsplatPersistentParamsPatch(global: Global, params: Record<
     }
 }
 
-/** 强制停止当前 reveal 播放（保留 `settings.effects.reveal` 配置）。 */
+/**
+ * 强制停止当前 reveal 播放（保留 `settings.effects.reveal` 配置）。
+ * @param global
+ */
 export function applyGsplatRevealStopPlayback(global: Global): void {
     patchRevealRuntimeMirror(global.state, { status: 'completed' });
     syncEffectsRuntimeStateFromSettings(global.state, global.settings);

@@ -9,7 +9,6 @@ import {
     getRevealStatus,
     getRevealActiveType
 } from '../../settings-serialize/effects-sync';
-import { EFFECTS_PROTOCOL_MODULE } from '../../vfx/effects-runtime/effect-types';
 import { isPersistentVfx } from '../../vfx/effects-runtime/reveal/reveal-policy';
 import { dispatchEffectsModuleCommand } from '../../editor-modules/effects-facade';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
@@ -205,7 +204,6 @@ export function initRevealUI(global: Global): () => void {
         const target = (event.target as HTMLSelectElement);
         const type = target.value as RevealType;
         routeEffectsCommand('EFFECT_PARAMS_PATCH', {
-            module: EFFECTS_PROTOCOL_MODULE,
             effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
             params: { type }
         });
@@ -216,7 +214,6 @@ export function initRevealUI(global: Global): () => void {
         const target = (event.target as HTMLSelectElement);
         const type = target.value;
         routeEffectsCommand('EFFECT_PARAMS_PATCH', {
-            module: EFFECTS_PROTOCOL_MODULE,
             effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
             params: {
                 type: type === 'none' ? 'none' : type,
@@ -230,7 +227,6 @@ export function initRevealUI(global: Global): () => void {
     const onPersistentEnabledChange = (event: Event) => {
         const enabled = (event.target as HTMLInputElement).checked;
         routeEffectsCommand('EFFECT_TOGGLE', {
-            module: EFFECTS_PROTOCOL_MODULE,
             effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
             value: enabled
         });
@@ -243,7 +239,6 @@ export function initRevealUI(global: Global): () => void {
         const totalDurationVal = parseFloat(target.value);
         if (!isNaN(totalDurationVal) && totalDurationVal > 0) {
             routeEffectsCommand('EFFECT_PARAMS_PATCH', {
-                module: EFFECTS_PROTOCOL_MODULE,
                 effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
                 params: { totalDuration: totalDurationVal }
             });
@@ -256,7 +251,6 @@ export function initRevealUI(global: Global): () => void {
 
     const onRevealRestartClick = () => {
         routeEffectsCommand('EFFECT_REPLAY', {
-            module: EFFECTS_PROTOCOL_MODULE,
             effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
             restartAnim: restartAnimTrackEnabled
         });

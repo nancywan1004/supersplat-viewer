@@ -190,8 +190,7 @@ const migrateV2 = (v1: V1): V2 => {
         hasStartPose: !!(v1.camera.position && v1.camera.target),
         revealEffect: {
             type: 'radial',
-            autoStart: true,
-            radius: 50
+            autoStart: true
         }
     };
 };
@@ -348,8 +347,7 @@ const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: numb
         hasStartPose: true,
         revealEffect: {
             type: 'radial',
-            autoStart: true,
-            radius: 50
+            autoStart: true
         }
     };
 };

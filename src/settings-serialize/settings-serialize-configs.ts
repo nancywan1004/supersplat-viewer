@@ -37,7 +37,6 @@ export const DEFAULT_SHADOW = {
 /** 与 `settings.ts` 新建体验 / v1→v2 迁移中的 `revealEffect` 默认一致（`ensureRevealEffect` 仅在缺整条对象时补全） */
 export const DEFAULT_REVEAL_EFFECT = {
     type: 'radial' as const,
-    radius: 50,
     autoStart: true,
     totalDuration: DEFAULT_VFX_TOTAL_DURATION
 };

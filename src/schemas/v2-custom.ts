@@ -6,9 +6,13 @@ export const DEFAULT_VFX_TOTAL_DURATION = 10;
  */
 type LegacyRevealEffect = {
     type?: 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch' | 'none',
-    radius?: number, // 10
     autoStart?: boolean,
-    totalDuration?: number // 总时长（秒），用于 rain-v2, pieces-recover, integrate, growth-wave, sketch，默认见 DEFAULT_VFX_TOTAL_DURATION
+    totalDuration?: number, // 总时长（秒）：**仅一次性 reveal 轨**（Timed VFX 等）；**persistent 轨 `paramsById` 不持久化此字段**。默认见 DEFAULT_VFX_TOTAL_DURATION
+    /**
+     * 按当前 `type` 生效的脚本级参数（扁平 key→值）；协议 `EFFECT_PARAMS_PATCH.params.effectParams`。
+     * **reveal 轨**：白名单见 `reveal-effect-params.ts`；**persistent 轨**（如 `perlin-wave`）：白名单见 `persistent-effect-params.ts`。
+     */
+    effectParams?: Record<string, unknown>
 }
 
 type LodPlatform = 'desktop-max' | 'desktop' | 'mobile-max' | 'mobile'

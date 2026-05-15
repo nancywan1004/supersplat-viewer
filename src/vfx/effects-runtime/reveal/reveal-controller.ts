@@ -29,6 +29,8 @@ import {
     rebindPersistentGsplatTimelineFromSettings
 } from '../persistent/persistent-effect';
 import { shouldRequestPersistentGsplatRemount } from './effects-orchestrator';
+import { applyRevealEffectParamsToScript } from './reveal-effect-params';
+import type { RevealParticipationSyncContext } from '../gsplat-shader-effect';
 import { RevealPersistentGsplatController } from './reveal-persistent-controller';
 import { GsplatRevealGrowthWave } from './gsplat-growth-wave';
 import { GsplatIntegrate } from './gsplat-integrate';
@@ -149,9 +151,14 @@ export class RevealController {
         const revealParams = readRevealParams(settings as ExperienceSettings);
         this.config = {
             type: (revealParams?.type as RevealConfig['type']) ?? 'none',
-            radius: revealParams?.radius ?? 10,
             autoStart: revealParams?.autoStart ?? true,
-            totalDuration: revealParams?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION
+            totalDuration: revealParams?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION,
+            effectParams:
+                revealParams?.effectParams &&
+                typeof revealParams.effectParams === 'object' &&
+                !Array.isArray(revealParams.effectParams)
+                    ? { ...(revealParams.effectParams as Record<string, unknown>) }
+                    : undefined
         };
 
         console.log('RevealController initialized with config:', this.config);
@@ -306,7 +313,7 @@ export class RevealController {
                 script.dotTint.set(0, 1, 1); // Cyan
                 script.waveTint.set(1, 0.5, 0); // Orange
                 script.oscillationIntensity = 0.2;
-                this.applyAdaptiveEndRadius(script, Number(this.config.radius ?? script.endRadius ?? 0));
+                this.applyAdaptiveEndRadius(script, 0);
                 
                 // 设置 reveal center
                 this.updateScriptCenter(script);
@@ -353,7 +360,7 @@ export class RevealController {
                 script.fallTintIntensity = 0.2;
                 script.hitTint.set(2, 0, 0); // Bright red flash on landing
                 script.hitDuration = 0.5;
-                this.applyAdaptiveEndRadius(script, Number(this.config.radius ?? script.endRadius ?? 0));
+                this.applyAdaptiveEndRadius(script, 0);
                 
                 // 设置 reveal center
                 this.updateScriptCenter(script);
@@ -391,7 +398,10 @@ export class RevealController {
             if (script) {
                 // 配置script属性
                 script.intensity = 1.0;
-                
+                script.rainSize = 0.05;
+                script.riseTint.set(0, 1, 1);
+                script.riseTintIntensity = 0.2;
+
                 // 根据场景包围盒设置底部Y和高度
                 let maxDist2D = 10.0; // 默认最大距离
                 if (this.bbox) {
@@ -493,10 +503,6 @@ export class RevealController {
         try {
             const script = this.gsplatEntity.script.create(GsplatRevealSmooth) as any;
             if (script) {
-                // 配置script属性
-                script.maxRadius = this.config.radius;
-                
-                // 设置 reveal center
                 this.updateScriptCenter(script);
                 
                 // 初始状态和 effectTime
@@ -557,7 +563,7 @@ export class RevealController {
                 script.waveSpeed = defaultWaveSpeed * scale;
                 this.applyAdaptiveEndRadius(
                     script,
-                    Math.max(defaultEndRadius, Number(this.config.radius ?? defaultEndRadius))
+                    defaultEndRadius
                 );
                 
                 // 设置 reveal center
@@ -599,27 +605,26 @@ export class RevealController {
         try {
             const script = this.gsplatEntity.script.create(GsplatRevealGrowthWave) as any;
             if (script) {
-                // 默认配置：Phase 1 生长固定约 7s，Phase 2 光圈复原固定 7s，互不干扰
+                // 默认配置：Phase 1 目标约 7s（由 scale + verticalSpread 保证）；Phase 2 时长由 totalDuration 扣减 Phase1，避免整体超出公共 totalDuration
                 const defaultGrowthSpeed = 5.0;
                 const defaultGrowthDuration = 7.0;
-                const defaultRecoverDuration = 7.0;
                 const defaultGrowthPhaseTime = 7.0; // Phase 1 目标时长，不随 totalDuration 拉长
-                
+                const minRecoverDuration = 0.5; // 与 `GsplatRevealGrowthWave.recoverDuration` @range 下限一致
+
                 // 基于 Phase 1 目标时长计算 scale，避免缩短 Phase 2 时把 Phase 1 拉长
                 // topParticleGrowthEnd ≈ growthDuration/growthSpeed + 1（默认 verticalSpread 下）
                 const defaultTopParticleGrowthEnd = defaultGrowthDuration / defaultGrowthSpeed + 1.0;
                 const scale = defaultGrowthPhaseTime / defaultTopParticleGrowthEnd;
-                
+
                 script.growthSpeed = defaultGrowthSpeed * scale;
                 script.growthDuration = defaultGrowthDuration * scale;
-                script.recoverDuration = defaultRecoverDuration; // 固定 7s，不参与 scale
                 script.noiseIntensity = 2.8;
                 script.scatterDistance = 4.0;
                 script.minSize = 0.15;
                 const defaultEndRadius = 50;
                 this.applyAdaptiveEndRadius(
                     script,
-                    Math.max(defaultEndRadius, Number(this.config.radius ?? defaultEndRadius))
+                    defaultEndRadius
                 );
                 
                 // 设置 topY 和 bottomY（基于 bbox 或默认值）
@@ -653,14 +658,17 @@ export class RevealController {
                 } else {
                     script.verticalSpread = script.growthSpeed / Math.max(heightRange, 0.001);
                 }
-                
+
                 // 初始状态和 effectTime
                 script.enabled = this.config.autoStart;
                 script.effectTime = 0;
-                
-                const maxYOffset = heightRange;
-                const topParticleGrowthEnd = (script.growthDuration + maxYOffset * script.verticalSpread) / script.growthSpeed;
-                const actualTotalDuration = topParticleGrowthEnd + script.recoverDuration;
+
+                const totalDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+                const phase1End =
+                    script.growthSpeed > 1e-6
+                        ? (script.growthDuration + heightRange * script.verticalSpread) / script.growthSpeed
+                        : defaultGrowthPhaseTime;
+                const actualTotalDuration = phase1End + (script.recoverDuration ?? minRecoverDuration);
                 
                 console.log('Growth-wave script created with config:', {
                     center: script.center,
@@ -675,9 +683,10 @@ export class RevealController {
                     bottomY: script.bottomY,
                     heightRange,
                     verticalSpread: script.verticalSpread,
-                    topParticleGrowthEnd,
+                    phase1End,
                     actualTotalDuration,
                     phase1Target: defaultGrowthPhaseTime,
+                    totalDuration,
                     enabled: script.enabled
                 });
             }
@@ -722,13 +731,9 @@ export class RevealController {
                 // 因此：waveSpeed = endRadius / (totalDuration - sketchDuration - colorizeDuration)
                 script.sketchDuration = defaultSketchDuration * scale;
                 script.colorizeDuration = defaultColorizeDuration * scale;
-                this.applyAdaptiveEndRadius(
-                    script,
-                    Math.max(defaultEndRadius, Number(this.config.radius ?? defaultEndRadius))
-                );
-                const remainingTime = totalDuration - script.sketchDuration - script.colorizeDuration;
-                script.waveSpeed = script.endRadius / Math.max(remainingTime, 0.1); // 确保不为0或负数
-                script.fadeWidthRatio = 0.18;
+                // 请求半径用 0：有效外沿 = max(bbox 自适应, maxEndRadius 上界)，不再硬编码 200 抬高下限
+                this.applyAdaptiveEndRadius(script, 0);
+                script.fadeWidthRatio = 0.55;
                 script.sketchIntensity = 1.0;
                 script.sketchContrast = 1.2;
                 script.draftFeel = 0.65;
@@ -742,7 +747,7 @@ export class RevealController {
                 script.colorizeAlphaGrain = 0.5;
                 script.grainFreq = 25.0;
                 script.grainAmp = 0.06;
-                script.colorizeSharpness = 0.3;
+                script.colorizeSharpness = 0.35;                
                 
                 // 与 rain-v2 一致：素描+上色按 xz 到相机焦点（updateScriptCenter）由内向外，不用相机 eye 球面距
                 script.useCameraDistance = true;
@@ -794,6 +799,7 @@ export class RevealController {
                 script.speed = 0.8;
                 script.waveSpeed = 1.0;
                 script.waveFrequency = 3.0;
+                script.waveAmplitude = 0.5;
                 
                 // 设置 AABB（如果 bbox 存在）
                 if (this.bbox) {
@@ -943,6 +949,11 @@ export class RevealController {
             default:
                 console.warn('Unknown effect type:', effectName);
                 script = this.createRadialScript();
+        }
+
+        if (script) {
+            applyRevealEffectParamsToScript(script, effectName, this.config.effectParams);
+            this.syncRevealParticipation(script);
         }
 
         this.currentScript = script;
@@ -1233,15 +1244,23 @@ export class RevealController {
         const oldType = this.config.type;
         const oldTotalDuration = this.config.totalDuration;
 
-        Object.assign(this.config, newConfig);
-
-        // 运行期真源：写 settings.effects.reveal；legacy `revealEffect` 由 patch 内 `syncLegacyRevealEffectShadow` 对齐
         if (newConfig.type !== undefined && newConfig.type !== oldType) {
             if (isPersistentVfx(oldType as any) && !isPersistentVfx(newConfig.type as any)) {
                 clearPersistentRevealTrack(this.global.settings as ExperienceSettings);
             }
         }
-        patchRevealSettingsFromParams(this.global.settings as ExperienceSettings, newConfig);
+
+        patchRevealSettingsFromParams(this.global.settings as ExperienceSettings, newConfig as Partial<RevealConfig>);
+        const rp = readRevealParams(this.global.settings as ExperienceSettings);
+        if (rp) {
+            this.config.type = (rp.type as RevealConfig['type']) ?? 'none';
+            this.config.autoStart = rp.autoStart ?? true;
+            this.config.totalDuration = rp.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+            this.config.effectParams =
+                rp.effectParams && typeof rp.effectParams === 'object' && !Array.isArray(rp.effectParams)
+                    ? { ...(rp.effectParams as Record<string, unknown>) }
+                    : undefined;
+        }
         syncEffectsRuntimeStateFromSettings(this.global.state, this.global.settings);
 
         console.log('Updated reveal config:', this.config);
@@ -1298,15 +1317,30 @@ export class RevealController {
         console.log('Updating current script config');
 
         try {
-            if (newConfig.radius !== undefined) {
-                const radius = Number(newConfig.radius);
-                if (Number.isFinite(radius)) {
-                    this.applyAdaptiveEndRadius(this.currentScript, Math.max(0, radius));
-                }
-            }
+            applyRevealEffectParamsToScript(this.currentScript, this.config.type as string, this.config.effectParams);
+            this.syncRevealParticipation(this.currentScript);
         } catch (error) {
             console.warn('Error updating script config:', error);
         }
+    }
+
+    private buildRevealParticipationContext(requestedRadius?: number): RevealParticipationSyncContext {
+        return {
+            requestedRadius,
+            sceneBboxRadius: this.getSceneBboxRadius(),
+            bboxPaddingScale: this.endRadiusBboxPaddingScale,
+            totalDuration: this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION,
+            effectParams: this.config.effectParams,
+            radiusSpeedCompensation: this.radiusSpeedCompensation
+        };
+    }
+
+    /** 将场景 bbox / config 交给脚本，由脚本自行同步参与半径与速度。 */
+    private syncRevealParticipation(script: any, requestedRadius?: number): void {
+        if (typeof script?.syncRevealParticipation !== 'function') {
+            return;
+        }
+        script.syncRevealParticipation(this.buildRevealParticipationContext(requestedRadius));
     }
 
     private getSceneBboxRadius(): number {
@@ -1316,64 +1350,7 @@ export class RevealController {
     }
 
     private applyAdaptiveEndRadius(script: any, requestedRadius: number) {
-        if (!script) return;
-        const safeRequested = Number.isFinite(requestedRadius) ? Math.max(0, requestedRadius) : 0;
-        const requestedWithDefault = safeRequested > 0 ? safeRequested : Math.max(0, Number(script.endRadius) || 0);
-        const sceneBboxRadius = this.getSceneBboxRadius();
-
-        if (typeof script.setSceneBoundsRadius === 'function') {
-            script.setSceneBoundsRadius(sceneBboxRadius, this.endRadiusBboxPaddingScale);
-        }
-
-        if (typeof script.setRadius === 'function') {
-            script.setRadius(requestedWithDefault);
-        } else {
-            const bboxMinRadius = sceneBboxRadius > 0 ? sceneBboxRadius * this.endRadiusBboxPaddingScale : 0;
-            script.endRadius = Math.max(requestedWithDefault, bboxMinRadius);
-        }
-
-        // 不再基于 prevEndRadius 做逐帧比较，改为按“当前半径放大量”一次性计算速度系数，避免偶发过快。
-        const endRadius = Number(script.endRadius);
-        this.applyRadiusSpeedCompensation(script, requestedWithDefault, endRadius);
-    }
-
-    private applyRadiusSpeedCompensation(script: any, requestedRadius: number, endRadius: number) {
-        if (!script) return;
-        if (!Number.isFinite(requestedRadius) || requestedRadius <= 1e-6) return;
-        if (!Number.isFinite(endRadius) || endRadius <= 1e-6) return;
-
-        const rawScale = endRadius / requestedRadius;
-        if (!Number.isFinite(rawScale) || rawScale <= 0) return;
-        // 线性插值到补偿系数：scale=1 时因子=1，scale 增大时按 compensation 平滑提速
-        const speedFactor = 1 + (rawScale - 1) * this.radiusSpeedCompensation;
-        const safeFactor = Math.max(1, Math.min(3, speedFactor));
-
-        // sketch 的 waveSpeed 已在 create 时按 endRadius 反算，不再二次补偿
-        const isSketch = Number.isFinite(script.sketchDuration) && Number.isFinite(script.colorizeDuration);
-        if (isSketch) return;
-
-        // 避免重复叠乘：记录原始速度参数，每次都从“基线”回算
-        const baseline = script.__radiusSpeedBaseline ?? {};
-        if (!script.__radiusSpeedBaseline) {
-            baseline.speed = Number(script.speed);
-            baseline.acceleration = Number(script.acceleration);
-            baseline.waveSpeed = Number(script.waveSpeed);
-            baseline.waveSpeedDistScale = Number(script.waveSpeedDistScale);
-            script.__radiusSpeedBaseline = baseline;
-        }
-
-        if (Number.isFinite(baseline.speed)) {
-            script.speed = Math.max(1e-6, baseline.speed * safeFactor);
-        }
-        if (Number.isFinite(baseline.acceleration)) {
-            script.acceleration = baseline.acceleration * safeFactor;
-        }
-        if (Number.isFinite(baseline.waveSpeed)) {
-            script.waveSpeed = Math.max(1e-6, baseline.waveSpeed * safeFactor);
-        }
-        if (Number.isFinite(baseline.waveSpeedDistScale)) {
-            script.waveSpeedDistScale = baseline.waveSpeedDistScale / safeFactor;
-        }
+        this.syncRevealParticipation(script, requestedRadius);
     }
 
     /**
