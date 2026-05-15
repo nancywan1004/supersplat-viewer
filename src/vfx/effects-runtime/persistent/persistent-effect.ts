@@ -5,11 +5,12 @@ import { destroyAllPersistentGsplatScriptsOnEntity, getMountedPersistentGsplatSc
 import { PERSISTENT_EFFECT_TYPES } from '../effect-types';
 import { isPersistentVfx } from '../reveal/reveal-policy';
 import { GsplatRevealPerlinWave } from './gsplat-perlin-wave';
+import { applyPersistentEffectParamsToScript } from './persistent-effect-params';
 
 /**
  * **可持续（persistent）GSplat 特效**：脚本创建、默认参数与导出/阈值辅助。
  *
- * 后续新增 persistent 类型时：先在 **`effect-types.ts`** 扩展 **`PERSISTENT_EFFECT_TYPE_VALUES`**，再在 **`gsplat-effect-script-registry.ts`** 的 `GSPLAT_PERSISTENT_SCRIPT_NAME_BY_TYPE` 登记 `scriptName`；一次性 reveal 同理扩展 **`REVEAL_EFFECT_TYPE_VALUES`** 与 **`GSPLAT_REVEAL_SCRIPT_NAME_BY_TYPE`**。在本文件 `mountPersistentGsplatByEffectType` 增加分支；Viewer 侧 remount 入口见 **`persistent-gsplat-lifecycle.ts`** 的 **`runPersistentGsplatEntityLifecycle`**。
+ * 后续新增 persistent 类型时：先在 **`effect-types.ts`** 扩展 **`PERSISTENT_EFFECT_TYPE_VALUES`**，再在 **`gsplat-effect-script-registry.ts`** 的 `GSPLAT_PERSISTENT_SCRIPT_NAME_BY_TYPE` 登记 `scriptName`；一次性 reveal 同理扩展 **`REVEAL_EFFECT_TYPE_VALUES`** 与 **`GSPLAT_REVEAL_SCRIPT_NAME_BY_TYPE`**。在本文件 `mountPersistentGsplatByEffectType` 增加分支；专参白名单见 **`persistent-effect-params.ts`**。Viewer 侧 remount 入口见 **`persistent-gsplat-lifecycle.ts`** 的 **`runPersistentGsplatEntityLifecycle`**。
  */
 
 /**
@@ -19,14 +20,15 @@ export function mountPersistentGsplatByEffectType(
     effectType: string,
     gsplatEntity: Entity,
     updateScriptCenter: (script: any) => void,
-    autoStart: boolean
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
 ): any | null {
     if (!PERSISTENT_EFFECT_TYPES.has(effectType)) {
         return null;
     }
     switch (effectType) {
         case 'perlin-wave':
-            return createPerlinWaveRevealScript(gsplatEntity, updateScriptCenter, autoStart);
+            return createPerlinWaveRevealScript(gsplatEntity, updateScriptCenter, autoStart, effectParams);
         default:
             console.warn('[persistent-effect] persistent type in registry but no mount branch:', effectType);
             return null;
@@ -37,7 +39,8 @@ export function mountPersistentGsplatByEffectType(
 export function createPerlinWaveRevealScript(
     gsplatEntity: Entity,
     updateScriptCenter: (script: any) => void,
-    autoStart: boolean
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
 ): any | null {
     if (!gsplatEntity.script) {
         console.warn('Cannot create perlin-wave script - entity or script component not ready');
@@ -56,6 +59,8 @@ export function createPerlinWaveRevealScript(
             script.scaleBlend = 0.75;
 
             updateScriptCenter(script);
+
+            applyPersistentEffectParamsToScript(script, 'perlin-wave', effectParams ?? undefined);
 
             script.enabled = autoStart;
             script.effectTime = 0;
@@ -158,7 +163,8 @@ export function remountPersistentGsplatOnEntity(
         t,
         gsplatEntity,
         callbacks.applyGsplatShaderScriptCenter,
-        persistentReveal.autoStart ?? true
+        persistentReveal.autoStart ?? true,
+        persistentReveal.effectParams
     );
     if (!script) {
         return false;

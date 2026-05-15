@@ -29,6 +29,7 @@ import {
     rebindPersistentGsplatTimelineFromSettings
 } from '../persistent/persistent-effect';
 import { shouldRequestPersistentGsplatRemount } from './effects-orchestrator';
+import { applyRevealEffectParamsToScript } from './reveal-effect-params';
 import { RevealPersistentGsplatController } from './reveal-persistent-controller';
 import { GsplatRevealGrowthWave } from './gsplat-growth-wave';
 import { GsplatIntegrate } from './gsplat-integrate';
@@ -149,9 +150,14 @@ export class RevealController {
         const revealParams = readRevealParams(settings as ExperienceSettings);
         this.config = {
             type: (revealParams?.type as RevealConfig['type']) ?? 'none',
-            radius: revealParams?.radius ?? 10,
             autoStart: revealParams?.autoStart ?? true,
-            totalDuration: revealParams?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION
+            totalDuration: revealParams?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION,
+            effectParams:
+                revealParams?.effectParams &&
+                typeof revealParams.effectParams === 'object' &&
+                !Array.isArray(revealParams.effectParams)
+                    ? { ...(revealParams.effectParams as Record<string, unknown>) }
+                    : undefined
         };
 
         console.log('RevealController initialized with config:', this.config);
@@ -306,7 +312,7 @@ export class RevealController {
                 script.dotTint.set(0, 1, 1); // Cyan
                 script.waveTint.set(1, 0.5, 0); // Orange
                 script.oscillationIntensity = 0.2;
-                this.applyAdaptiveEndRadius(script, Number(this.config.radius ?? script.endRadius ?? 0));
+                this.applyAdaptiveEndRadius(script, 0);
                 
                 // 设置 reveal center
                 this.updateScriptCenter(script);
@@ -353,7 +359,7 @@ export class RevealController {
                 script.fallTintIntensity = 0.2;
                 script.hitTint.set(2, 0, 0); // Bright red flash on landing
                 script.hitDuration = 0.5;
-                this.applyAdaptiveEndRadius(script, Number(this.config.radius ?? script.endRadius ?? 0));
+                this.applyAdaptiveEndRadius(script, 0);
                 
                 // 设置 reveal center
                 this.updateScriptCenter(script);
@@ -493,10 +499,6 @@ export class RevealController {
         try {
             const script = this.gsplatEntity.script.create(GsplatRevealSmooth) as any;
             if (script) {
-                // 配置script属性
-                script.maxRadius = this.config.radius;
-                
-                // 设置 reveal center
                 this.updateScriptCenter(script);
                 
                 // 初始状态和 effectTime
@@ -557,7 +559,7 @@ export class RevealController {
                 script.waveSpeed = defaultWaveSpeed * scale;
                 this.applyAdaptiveEndRadius(
                     script,
-                    Math.max(defaultEndRadius, Number(this.config.radius ?? defaultEndRadius))
+                    defaultEndRadius
                 );
                 
                 // 设置 reveal center
@@ -619,7 +621,7 @@ export class RevealController {
                 const defaultEndRadius = 50;
                 this.applyAdaptiveEndRadius(
                     script,
-                    Math.max(defaultEndRadius, Number(this.config.radius ?? defaultEndRadius))
+                    defaultEndRadius
                 );
                 
                 // 设置 topY 和 bottomY（基于 bbox 或默认值）
@@ -724,7 +726,7 @@ export class RevealController {
                 script.colorizeDuration = defaultColorizeDuration * scale;
                 this.applyAdaptiveEndRadius(
                     script,
-                    Math.max(defaultEndRadius, Number(this.config.radius ?? defaultEndRadius))
+                    defaultEndRadius
                 );
                 const remainingTime = totalDuration - script.sketchDuration - script.colorizeDuration;
                 script.waveSpeed = script.endRadius / Math.max(remainingTime, 0.1); // 确保不为0或负数
@@ -943,6 +945,13 @@ export class RevealController {
             default:
                 console.warn('Unknown effect type:', effectName);
                 script = this.createRadialScript();
+        }
+
+        if (script) {
+            applyRevealEffectParamsToScript(script, effectName, this.config.effectParams);
+            if (effectName === 'radial') {
+                this.applyRadialRevealTotalDurationConstraint(script);
+            }
         }
 
         this.currentScript = script;
@@ -1233,15 +1242,23 @@ export class RevealController {
         const oldType = this.config.type;
         const oldTotalDuration = this.config.totalDuration;
 
-        Object.assign(this.config, newConfig);
-
-        // 运行期真源：写 settings.effects.reveal；legacy `revealEffect` 由 patch 内 `syncLegacyRevealEffectShadow` 对齐
         if (newConfig.type !== undefined && newConfig.type !== oldType) {
             if (isPersistentVfx(oldType as any) && !isPersistentVfx(newConfig.type as any)) {
                 clearPersistentRevealTrack(this.global.settings as ExperienceSettings);
             }
         }
-        patchRevealSettingsFromParams(this.global.settings as ExperienceSettings, newConfig);
+
+        patchRevealSettingsFromParams(this.global.settings as ExperienceSettings, newConfig as Partial<RevealConfig>);
+        const rp = readRevealParams(this.global.settings as ExperienceSettings);
+        if (rp) {
+            this.config.type = (rp.type as RevealConfig['type']) ?? 'none';
+            this.config.autoStart = rp.autoStart ?? true;
+            this.config.totalDuration = rp.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+            this.config.effectParams =
+                rp.effectParams && typeof rp.effectParams === 'object' && !Array.isArray(rp.effectParams)
+                    ? { ...(rp.effectParams as Record<string, unknown>) }
+                    : undefined;
+        }
         syncEffectsRuntimeStateFromSettings(this.global.state, this.global.settings);
 
         console.log('Updated reveal config:', this.config);
@@ -1298,14 +1315,54 @@ export class RevealController {
         console.log('Updating current script config');
 
         try {
-            if (newConfig.radius !== undefined) {
-                const radius = Number(newConfig.radius);
-                if (Number.isFinite(radius)) {
-                    this.applyAdaptiveEndRadius(this.currentScript, Math.max(0, radius));
-                }
+            applyRevealEffectParamsToScript(this.currentScript, this.config.type as string, this.config.effectParams);
+            if (this.config.type === 'radial') {
+                this.applyRadialRevealTotalDurationConstraint(this.currentScript);
             }
         } catch (error) {
             console.warn('Error updating script config:', error);
+        }
+    }
+
+    /**
+     * radial：抬升波抵达 `endRadius` 的时刻须与公共字段 `totalDuration` 一致（与 `GsplatRevealRadial.getCompletionTime` 同式）。
+     * 在 `effectParams` 可能改写 `delay`/`acceleration`/`endRadius` 之后调用；按当前参数反算 `speed`。
+     */
+    private applyRadialRevealTotalDurationConstraint(script: any): void {
+        if (!script || this.config.type !== 'radial') return;
+        const totalDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
+        if (!Number.isFinite(totalDuration) || totalDuration <= 0) return;
+
+        const delay = Number(script.delay);
+        const endR = Number(script.endRadius);
+        const accel = Number(script.acceleration);
+        if (!Number.isFinite(delay) || !Number.isFinite(endR) || endR <= 0) return;
+
+        const span = Math.max(totalDuration - delay, 0.05);
+        const linear = !Number.isFinite(accel) || Math.abs(accel) < 1e-9;
+
+        if (linear) {
+            const sp = endR / span;
+            if (Number.isFinite(sp) && sp > 0) {
+                script.speed = sp;
+            }
+        } else {
+            const t = span;
+            const v = (endR - 0.5 * accel * t * t) / t;
+            if (Number.isFinite(v) && v > 0) {
+                script.speed = v;
+            } else {
+                script.acceleration = 0;
+                script.speed = endR / span;
+            }
+        }
+
+        const baseline = script.__radiusSpeedBaseline;
+        if (baseline && typeof baseline === 'object') {
+            baseline.speed = Number(script.speed);
+            if (Number.isFinite(script.acceleration)) {
+                baseline.acceleration = Number(script.acceleration);
+            }
         }
     }
 
