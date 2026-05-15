@@ -5,7 +5,7 @@ import { Color, Vec3 } from 'playcanvas';
  *
  * - 协议：`EFFECT_PARAMS_PATCH` 的 `params.effectParams`（扁平 `key → value`）。
  * - 仅当 `key` 落在当前 `type` 对应集合内时才写入脚本；其余键静默忽略。
- * - **颜色**（`dotTint` / `waveTint` / `fallTint` / `hitTint`）：`[r, g, b]` 数值数组，写入 `Color`。
+ * - **颜色**（`dotTint` / `waveTint` / `fallTint` / `hitTint` / **`phase1CloudTint` / `phase2HaloTint`**（growth-wave））：`[r, g, b]` 数值数组，写入 `Color`。
  * - **方向**（`scatterDirection`）：`[x, y, z]`，写入 `Vec3`。
  * - **纸张色**（`paperTint`）：`[r, g, b]`，写入脚本上的 `number[]`。
  * - **布尔**：`useCameraDistance`、`pointSizeScaleByScene`。
@@ -130,7 +130,9 @@ const GROWTH_WAVE = new Set([
     'edgeAreaMin', // 已弃用边缘过滤，保留兼容
     'edgeAreaMax',
     'edgeAnisoMin',
-    'verticalSpread' // 竖向波前 spread；不设则由内建公式与 totalDuration 推导
+    'verticalSpread', // 竖向波前 spread；不设则由内建公式与 totalDuration 推导
+    'phase1CloudTint', // Phase1 点云/蓝辉 additive，Color → [r,g,b]；默认 (0.18,0.45,1)
+    'phase2HaloTint' // Phase2 金环 additive，Color → [r,g,b]；默认 (1,0.82,0.52)
 ]);
 
 // --- sketch：`GsplatSketch` --------------------------------------------------------
@@ -164,14 +166,14 @@ const SKETCH = new Set([
 
 /** `settings.effects.reveal.type` 字符串 → 允许出现在 `effectParams` 内的键集合 */
 const BY_TYPE: Record<string, ReadonlySet<string>> = {
-    radial: RADIAL,
-    rain: RAIN,
+    'radial': RADIAL,
+    'rain': RAIN,
     'rain-v2': RAIN_V2,
-    smooth: SMOOTH,
+    'smooth': SMOOTH,
     'pieces-recover': PIECES_RECOVER,
-    integrate: INTEGRATE,
+    'integrate': INTEGRATE,
     'growth-wave': GROWTH_WAVE,
-    sketch: SKETCH
+    'sketch': SKETCH
 };
 
 /** JSON 数组是否为长度≥3 的有限数字三元组（用于 Color / Vec3 / paperTint） */
@@ -233,7 +235,14 @@ export function applyRevealEffectParamsToScript(
         if (!allowed.has(rawKey)) continue;
         if (rawVal === undefined) continue;
 
-        if (rawKey === 'dotTint' || rawKey === 'waveTint' || rawKey === 'fallTint' || rawKey === 'hitTint') {
+        if (
+            rawKey === 'dotTint' ||
+            rawKey === 'waveTint' ||
+            rawKey === 'fallTint' ||
+            rawKey === 'hitTint' ||
+            rawKey === 'phase1CloudTint' ||
+            rawKey === 'phase2HaloTint'
+        ) {
             trySetColor(script, rawKey, rawVal);
             continue;
         }

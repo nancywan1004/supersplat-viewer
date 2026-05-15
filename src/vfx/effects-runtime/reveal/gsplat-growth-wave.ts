@@ -1,4 +1,4 @@
-import { Vec3 } from 'playcanvas';
+import { Color, Vec3 } from 'playcanvas';
 import { GsplatShaderEffect } from '../gsplat-shader-effect';
 
 const shaderGLSL = /* glsl */`
@@ -25,6 +25,8 @@ uniform float uEdgeAreaMin;
 uniform float uEdgeAreaMax;
 uniform float uEdgeAnisoMin;
 uniform float uVerticalSpread;
+uniform vec3 uPhase1CloudTint; // Phase1 点云/蓝辉 additive 色
+uniform vec3 uPhase2HaloTint;  // Phase2 金环 additive 色
 
 // Hash function for per-splat randomization
 float hash(vec3 p) {
@@ -458,7 +460,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         glowIntensity = progressGlow * distanceGlow * sceneGlowFactor;
         glowIntensity = clamp(glowIntensity, 0.0, 1.6);
         
-        vec3 blueGlow = vec3(0.18, 0.45, 1.0);
+        vec3 blueGlow = uPhase1CloudTint;
         // 仅 Phase 1 加蓝辉光；Phase 2 不加，避免未复原区整片发蓝导致光圈显得很宽
         if (g_phase == 1.0) {
             color.rgb += blueGlow * glowIntensity * 0.58;
@@ -492,7 +494,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
             float haloCore = 1.0 - smoothstep(0.0, haloWidth * 0.5, distToHalo);
             // 不再用 haloSoft，避免环变宽；只保留最外缘窄带
             float haloEdge = smoothstep(haloWidth * 0.6, haloWidth, distToHalo) * (1.0 - smoothstep(haloWidth, haloWidth * 1.08, distToHalo));
-            vec3 haloColor = vec3(1.0, 0.82, 0.52);   // 金粉色
+            vec3 haloColor = uPhase2HaloTint;
             // 金粉闪烁：对比拉大（暗时接近灭、亮时明显闪），三频叠加 + 加快速度
             float h1 = hash(center);
             float h2 = hash(center + vec3(10.0, 20.0, 30.0));
@@ -540,6 +542,8 @@ uniform uEdgeAreaMin: f32;
 uniform uEdgeAreaMax: f32;
 uniform uEdgeAnisoMin: f32;
 uniform uVerticalSpread: f32;
+uniform uPhase1CloudTint: vec3f;
+uniform uPhase2HaloTint: vec3f;
 
 // Hash function for per-splat randomization
 fn hash(p: vec3f) -> f32 {
@@ -956,7 +960,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         glowIntensity = progressGlow * distanceGlow * sceneGlowFactor;
         glowIntensity = clamp(glowIntensity, 0.0, 1.6);
         
-        let blueGlow = vec3f(0.18, 0.45, 1.0);
+        let blueGlow = uniform.uPhase1CloudTint;
         // 仅 Phase 1 加蓝辉光；Phase 2 不加，避免未复原区整片发蓝导致光圈显得很宽
         if (g_phase == 1.0) {
             (*color).rgb = (*color).rgb + blueGlow * glowIntensity * 0.58;
@@ -989,7 +993,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
             let haloBand = 1.0 - smoothstep(0.0, haloWidth, distToHalo);
             let haloCore = 1.0 - smoothstep(0.0, haloWidth * 0.5, distToHalo);
             let haloEdge = smoothstep(haloWidth * 0.6, haloWidth, distToHalo) * (1.0 - smoothstep(haloWidth, haloWidth * 1.08, distToHalo));
-            let haloColor = vec3f(1.0, 0.82, 0.52);   // 金粉色
+            let haloColor = uniform.uPhase2HaloTint;
             let h1 = hash(center);
             let h2 = hash(center + vec3f(10.0, 20.0, 30.0));
             let h3 = hash(center + vec3f(50.0, 100.0, 150.0));
@@ -1031,6 +1035,8 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
     // Reusable arrays for uniform updates
     _centerArray = [0, 0, 0];
     _viewPosArray = [0, 0, 0];
+    _phase1CloudTintArray = [0, 0, 0];
+    _phase2HaloTintArray = [0, 0, 0];
     _sceneDensityNorm = 0.5;
     _sceneDensityInited = false;
 
@@ -1194,6 +1200,18 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
      */
     verticalSpread?: number;
 
+    /**
+     * Phase 1：点云/蓝辉 additive 色调（`modifySplatColor` 中替代原硬编码蓝）
+     * @attribute
+     */
+    phase1CloudTint = new Color(0.18, 0.45, 1.0);
+
+    /**
+     * Phase 2：金环 halo additive 色调
+     * @attribute
+     */
+    phase2HaloTint = new Color(1.0, 0.82, 0.52);
+
     getShaderGLSL() {
         return shaderGLSL;
     }
@@ -1268,6 +1286,15 @@ class GsplatRevealGrowthWave extends GsplatShaderEffect {
         this.setUniform('uEdgeAreaMax', this.edgeAreaMax);
         this.setUniform('uEdgeAnisoMin', this.edgeAnisoMin);
         this.setUniform('uVerticalSpread', verticalSpread);
+
+        this._phase1CloudTintArray[0] = this.phase1CloudTint.r;
+        this._phase1CloudTintArray[1] = this.phase1CloudTint.g;
+        this._phase1CloudTintArray[2] = this.phase1CloudTint.b;
+        this.setUniform('uPhase1CloudTint', this._phase1CloudTintArray);
+        this._phase2HaloTintArray[0] = this.phase2HaloTint.r;
+        this._phase2HaloTintArray[1] = this.phase2HaloTint.g;
+        this._phase2HaloTintArray[2] = this.phase2HaloTint.b;
+        this.setUniform('uPhase2HaloTint', this._phase2HaloTintArray);
 
         // Check if effect is complete
         if (this.isEffectComplete(globalRecoverStart)) {
