@@ -3,10 +3,10 @@ import {
     Entity,
     GSplatData,
     GSplatResource,
-    WORKBUFFER_UPDATE_ALWAYS,
     WORKBUFFER_UPDATE_ONCE,
     type AppBase
 } from 'playcanvas';
+import * as pc from 'playcanvas';
 
 import type { AssetSource } from '../loaders/asset-source';
 
@@ -33,10 +33,11 @@ interface SplatArrays {
 
 interface LoadedMorphModel {
     name: string;
-    asset: Asset;
-    resource: GSplatResource;
-    data: GSplatData;
     splats: SplatArrays;
+    /** 仅当 `retainSourceAssets: true` 时保留，便于调试；默认已卸载以省显存/内存。 */
+    asset?: Asset;
+    resource?: GSplatResource;
+    data?: GSplatData;
 }
 
 interface PairCorrespondence {
@@ -45,22 +46,70 @@ interface PairCorrespondence {
     matchedB: Uint32Array;
 }
 
+type CorrespondenceStrategy = 'resample' | 'greedy';
+
 export interface GsplatMorphOptions {
     segmentDuration?: number;
     loop?: boolean;
     autoPlay?: boolean;
     /**
-     * 为 true（默认）时，在 `playing` 且存在 morph 段期间临时将 `app.autoRender = true`（每帧都走完整 render，最稳但最费 GPU）。
-     * 为 false 时只靠 `renderNextFrame` + `gsplat:sorted` 补帧（更省电）；若仍遇偶发停更可改回 true。
+     * 为 true 时，在 `playing` 且存在 morph 段期间临时将 `app.autoRender = true`（每帧完整 render，最稳但最费）。
+     * 为 false（默认）时只靠 `renderNextFrame` + `gsplat:sorted` 补帧；若偶发停画可改 true。
      */
     continuousAppRender?: boolean;
     unified?: boolean;
     layers?: number[];
     entityName?: string;
     fadeLogMin?: number; /** 仅用于输出缓冲大于本段 `max(|A|,|B|)` 时的尾部占位（极小高斯），不参与段内配对。 */
+    /**
+     * 为 true 时保留各 keyframe 加载后的 `Asset` / `GSplatResource`（与 `splats` 并存，占显存与内存）。
+     * 默认 false：在 `readSplatArrays` 完成后立即 `unload` + `assets.remove`，仅保留 CPU 侧 `splats` 供 morph（显著减轻 keyframe 多时 GPU/重复数据压力）。
+     */
+    retainSourceAssets?: boolean;
     recenterModels?: boolean;
     normalizeScales?: boolean;
     targetScale?: number;
+    /**
+     * 播放时限制「插值 + 写回 GSplatResource」的频率（墙钟）。0 表示不限制。
+     * `_time` 仍每帧累加，仅减轻 CPU/GPU 上传；seek/stop/段末等会强制刷新。
+     */
+    morphPresentMaxHz?: number;
+    /**
+     * 为 false 时：高阶 SH（`f_rest_*`）只在每段切换或 `seek` 后的首次呈现时重算并重传 GPU，
+     * 其余帧只 morph 位置/尺度/不透明度/旋转与 DC 颜色，可明显减压（大 ply 常为 45 维 rest）。
+     */
+    morphAnimateSphericalHarmonics?: boolean;
+    /**
+     * Prefer the PlayCanvas unified GPU splat path when the runtime exposes
+     * GSplatContainer / GSplatProcessor. This removes the per-frame CPU
+     * interpolation and full texture upload that makes multi-million point
+     * morphs stall the main thread. Older PlayCanvas builds fall back to the
+     * compatible CPU path automatically.
+     */
+    preferGpuMorph?: boolean;
+    /**
+     * CPU fallback only: update CPU sort centers at this maximum frequency.
+     * Keeping this below the visual morph rate avoids a second multi-million
+     * point pass every frame. 0 means every presented morph frame.
+     */
+    sortCentersMaxHz?: number;
+    /**
+     * CPU fallback only: use normalized quaternion lerp instead of exact slerp.
+     * This is visually close for frame-to-frame morphing and much cheaper at
+     * 2M+ splats.
+     */
+    fastQuaternionNlerp?: boolean;
+    /**
+     * `resample` is the fastest deterministic index mapping. `greedy` builds an
+     * approximate nearest-neighbor correspondence once during loading using
+     * position + DC color, then reuses that table during playback.
+     */
+    correspondenceStrategy?: CorrespondenceStrategy;
+    greedySpatialWeight?: number;
+    greedyColorWeight?: number;
+    greedyGridCellSize?: number;
+    greedySearchRadiusCells?: number;
+    greedyMaxCandidatesPerPoint?: number;
 }
 
 const MAX_MORPH_MODELS = 4;
@@ -68,7 +117,13 @@ const MAX_SH_REST_PROPS = 45;
 const DEFAULT_SEGMENT_DURATION = 1.5;
 const DEFAULT_FADE_LOG_MIN = -6.0;
 const DEFAULT_TARGET_SCALE = 10.0;
+const DEFAULT_SORT_CENTERS_MAX_HZ = 6;
+const DEFAULT_GREEDY_SPATIAL_WEIGHT = 0.7;
+const DEFAULT_GREEDY_COLOR_WEIGHT = 0.3;
+const DEFAULT_GREEDY_SEARCH_RADIUS_CELLS = 1;
+const DEFAULT_GREEDY_MAX_CANDIDATES = 48;
 const VALID_REST_PROP_COUNTS = [0, 9, 24, 45] as const;
+const SH_C0 = 0.28209479177387814;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
@@ -109,6 +164,168 @@ const resolveMorphSource = (source: MorphSource, index: number) => {
         filename: source.filename || safeFilenameFromUrl(url),
         cleanupUrl: null as string | null
     };
+};
+
+interface SogImage {
+    width: number;
+    height: number;
+    rgba: Uint8ClampedArray;
+}
+
+interface SogMeta {
+    version: number;
+    count: number;
+    means: { mins: number[]; maxs: number[]; files: string[] };
+    scales: { codebook: number[]; files: string[] };
+    quats: { files: string[] };
+    sh0: { codebook: number[]; files: string[] };
+    shN?: { count: number; bands: number; codebook: number[]; files: string[] };
+}
+
+const isSogFilename = (filename: string) => filename.toLowerCase().split('?')[0].endsWith('.sog');
+
+const normalizeSogPath = (path: string) => path.replace(/\\/g, '/').replace(/^\/+/, '');
+
+const findSogFile = (files: Map<string, Uint8Array>, filename: string) => {
+    const normalized = normalizeSogPath(filename);
+    const direct = files.get(normalized.toLowerCase());
+    if (direct) {
+        return direct;
+    }
+
+    const suffix = `/${normalized.toLowerCase()}`;
+    for (const [key, bytes] of files) {
+        if (key.endsWith(suffix) || key.split('/').pop() === normalized.toLowerCase()) {
+            return bytes;
+        }
+    }
+
+    throw new Error(`SOG archive is missing '${filename}'`);
+};
+
+const decodeImageRgba = async (filename: string, bytes: Uint8Array): Promise<SogImage> => {
+    const blob = new Blob([bytes], { type: filename.toLowerCase().endsWith('.webp') ? 'image/webp' : 'image/png' });
+    const bitmap = await createImageBitmap(blob);
+    try {
+        const canvas = typeof OffscreenCanvas !== 'undefined'
+            ? new OffscreenCanvas(bitmap.width, bitmap.height)
+            : Object.assign(document.createElement('canvas'), { width: bitmap.width, height: bitmap.height });
+        const ctx = canvas.getContext('2d', { willReadFrequently: true } as any);
+        if (!ctx) {
+            throw new Error(`Unable to create 2D canvas while decoding '${filename}'`);
+        }
+        ctx.drawImage(bitmap, 0, 0);
+        const image = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+        return { width: bitmap.width, height: bitmap.height, rgba: image.data };
+    } finally {
+        bitmap.close?.();
+    }
+};
+
+const imageByte = (image: SogImage, index: number, channel: number) => image.rgba[index * 4 + channel];
+
+const unlogSogPosition = (value: number) => Math.sign(value) * (Math.exp(Math.abs(value)) - 1);
+
+const logit = (alpha: number) => {
+    const a = clamp(alpha, 1e-6, 1 - 1e-6);
+    return Math.log(a / (1 - a));
+};
+
+const toSmallestThreeComponent = (value: number) => (value / 255 - 0.5) * 2 / Math.SQRT2;
+
+const shBandsToRestCount = (bands: number) => {
+    if (bands <= 0) {
+        return 0;
+    }
+    return normalizeRestPropCount((bands + 1) * (bands + 1) * 3 - 3);
+};
+
+const readSogArchive = async (url: string) => {
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch SOG '${url}': ${response.status} ${response.statusText}`);
+    }
+
+    const archiveBytes = new Uint8Array(await response.arrayBuffer());
+    const { unzipSync } = await import('fflate');
+    const entries = unzipSync(archiveBytes);
+    const files = new Map<string, Uint8Array>();
+    for (const [name, bytes] of Object.entries(entries)) {
+        files.set(normalizeSogPath(name).toLowerCase(), bytes as Uint8Array);
+    }
+
+    return files;
+};
+
+const loadSogAsGSplatData = async (url: string): Promise<GSplatData> => {
+    const files = await readSogArchive(url);
+    const metaText = new TextDecoder().decode(findSogFile(files, 'meta.json'));
+    const meta = JSON.parse(metaText) as SogMeta;
+
+    if (meta.version !== 2) {
+        throw new Error(`Unsupported SOG version ${meta.version}; only version 2 is supported`);
+    }
+    if (!meta.count || meta.count <= 0) {
+        throw new Error('SOG contains no splats');
+    }
+
+    const decodeNamedImage = async (filename: string) => decodeImageRgba(filename, findSogFile(files, filename));
+    const meansLower = await decodeNamedImage(meta.means.files[0]);
+    const meansUpper = await decodeNamedImage(meta.means.files[1]);
+    const scales = await decodeNamedImage(meta.scales.files[0]);
+    const quats = await decodeNamedImage(meta.quats.files[0]);
+    const sh0 = await decodeNamedImage(meta.sh0.files[0]);
+    const restCount = shBandsToRestCount(meta.shN?.files?.length ? meta.shN.bands : 0);
+    const restCoeffCount = restCount / 3;
+    const shNCentroids = restCount > 0 ? await decodeNamedImage(meta.shN!.files[0]) : null;
+    const shNLabels = restCount > 0 ? await decodeNamedImage(meta.shN!.files[1]) : null;
+    const { data, arrays } = createMutableGSplatData(meta.count, restCount);
+
+    for (let i = 0; i < meta.count; i++) {
+        const x = imageByte(meansLower, i, 0) | (imageByte(meansUpper, i, 0) << 8);
+        const y = imageByte(meansLower, i, 1) | (imageByte(meansUpper, i, 1) << 8);
+        const z = imageByte(meansLower, i, 2) | (imageByte(meansUpper, i, 2) << 8);
+
+        arrays.x[i] = unlogSogPosition(meta.means.mins[0] + (meta.means.maxs[0] - meta.means.mins[0]) * (x / 65535));
+        arrays.y[i] = unlogSogPosition(meta.means.mins[1] + (meta.means.maxs[1] - meta.means.mins[1]) * (y / 65535));
+        arrays.z[i] = unlogSogPosition(meta.means.mins[2] + (meta.means.maxs[2] - meta.means.mins[2]) * (z / 65535));
+
+        arrays.scale0[i] = meta.scales.codebook[imageByte(scales, i, 0)];
+        arrays.scale1[i] = meta.scales.codebook[imageByte(scales, i, 1)];
+        arrays.scale2[i] = meta.scales.codebook[imageByte(scales, i, 2)];
+
+        const qa = toSmallestThreeComponent(imageByte(quats, i, 0));
+        const qb = toSmallestThreeComponent(imageByte(quats, i, 1));
+        const qc = toSmallestThreeComponent(imageByte(quats, i, 2));
+        const mode = imageByte(quats, i, 3) - 252;
+        const qd = Math.sqrt(Math.max(0, 1 - (qa * qa + qb * qb + qc * qc)));
+        if (mode === 0) {
+            arrays.rot1[i] = qd; arrays.rot2[i] = qa; arrays.rot3[i] = qb; arrays.rot0[i] = qc;
+        } else if (mode === 1) {
+            arrays.rot1[i] = qa; arrays.rot2[i] = qd; arrays.rot3[i] = qb; arrays.rot0[i] = qc;
+        } else if (mode === 2) {
+            arrays.rot1[i] = qa; arrays.rot2[i] = qb; arrays.rot3[i] = qd; arrays.rot0[i] = qc;
+        } else {
+            arrays.rot1[i] = qa; arrays.rot2[i] = qb; arrays.rot3[i] = qc; arrays.rot0[i] = qd;
+        }
+
+        arrays.fdc0[i] = meta.sh0.codebook[imageByte(sh0, i, 0)];
+        arrays.fdc1[i] = meta.sh0.codebook[imageByte(sh0, i, 1)];
+        arrays.fdc2[i] = meta.sh0.codebook[imageByte(sh0, i, 2)];
+        arrays.opacity[i] = logit(imageByte(sh0, i, 3) / 255);
+
+        if (restCount > 0 && shNCentroids && shNLabels && meta.shN) {
+            const label = imageByte(shNLabels, i, 0) | (imageByte(shNLabels, i, 1) << 8);
+            for (let coeff = 0; coeff < restCoeffCount; coeff++) {
+                const centroidIndex = (label % 64) * restCoeffCount + coeff + Math.floor(label / 64) * shNCentroids.width;
+                arrays.rest[coeff][i] = meta.shN.codebook[imageByte(shNCentroids, centroidIndex, 0)];
+                arrays.rest[coeff + restCoeffCount][i] = meta.shN.codebook[imageByte(shNCentroids, centroidIndex, 1)];
+                arrays.rest[coeff + restCoeffCount * 2][i] = meta.shN.codebook[imageByte(shNCentroids, centroidIndex, 2)];
+            }
+        }
+    }
+
+    return data;
 };
 
 const getRequiredProp = (data: GSplatData, name: string) => {
@@ -355,6 +572,465 @@ const slerpQuat = (
     };
 };
 // 构建帧索引对应表
+const nlerpQuat = (
+    ax: number, ay: number, az: number, aw: number,
+    bx: number, by: number, bz: number, bw: number,
+    t: number
+) => {
+    let dot = ax * bx + ay * by + az * bz + aw * bw;
+    if (dot < 0) {
+        bx = -bx;
+        by = -by;
+        bz = -bz;
+        bw = -bw;
+    }
+
+    return normalizeQuat(
+        ax + (bx - ax) * t,
+        ay + (by - ay) * t,
+        az + (bz - az) * t,
+        aw + (bw - aw) * t
+    );
+};
+
+type GpuSplatContainer = {
+    centers: Float32Array;
+    aabb: any;
+    getTexture: (name: string) => { lock: () => Float32Array | Uint16Array; unlock: () => void };
+    update: (numSplats: number, centersUpdated?: boolean) => void;
+    destroy?: () => void;
+};
+
+type GpuMorphModel = {
+    container: GpuSplatContainer;
+    count: number;
+};
+
+const floatToHalf = (value: number) => {
+    const packing = (pc as any).FloatPacking;
+    if (packing?.float2Half) {
+        return packing.float2Half(value);
+    }
+
+    const floatView = new Float32Array(1);
+    const int32View = new Int32Array(floatView.buffer);
+    floatView[0] = value;
+    const x = int32View[0];
+    let bits = (x >> 16) & 0x8000;
+    let m = (x >> 12) & 0x07ff;
+    const e = (x >> 23) & 0xff;
+
+    if (e < 103) {
+        return bits;
+    }
+    if (e > 142) {
+        bits |= 0x7c00;
+        return bits | ((e === 255 ? 0 : 1) && (x & 0x007fffff));
+    }
+    if (e < 113) {
+        m |= 0x0800;
+        return bits | ((m >> (114 - e)) + ((m >> (113 - e)) & 1));
+    }
+
+    return bits | ((e - 112) << 10) | ((m >> 1) + (m & 1));
+};
+
+const writeHalfOrFloat = (array: Float32Array | Uint16Array, index: number, value: number) => {
+    array[index] = array instanceof Float32Array ? value : floatToHalf(value);
+};
+
+const sigmoid = (value: number) => 1 / (1 + Math.exp(-value));
+
+const createAabbFromModels = (models: LoadedMorphModel[]) => {
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let minZ = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    let maxZ = Number.NEGATIVE_INFINITY;
+
+    for (const { splats } of models) {
+        for (let i = 0; i < splats.count; i++) {
+            minX = Math.min(minX, splats.x[i]);
+            minY = Math.min(minY, splats.y[i]);
+            minZ = Math.min(minZ, splats.z[i]);
+            maxX = Math.max(maxX, splats.x[i]);
+            maxY = Math.max(maxY, splats.y[i]);
+            maxZ = Math.max(maxZ, splats.z[i]);
+        }
+    }
+
+    if (!Number.isFinite(minX)) {
+        return new pc.BoundingBox(new pc.Vec3(), new pc.Vec3(1, 1, 1));
+    }
+
+    return new pc.BoundingBox(
+        new pc.Vec3((minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5),
+        new pc.Vec3(
+            Math.max(0.001, (maxX - minX) * 0.5),
+            Math.max(0.001, (maxY - minY) * 0.5),
+            Math.max(0.001, (maxZ - minZ) * 0.5)
+        )
+    );
+};
+
+const fillGpuContainerFromSplats = (container: GpuSplatContainer, splats: SplatArrays) => {
+    const centerData = container.getTexture('dataCenter').lock();
+    const colorData = container.getTexture('dataColor').lock();
+    const scaleData = container.getTexture('dataScale').lock();
+    const rotationData = container.getTexture('dataRotation').lock();
+
+    for (let i = 0; i < splats.count; i++) {
+        const c4 = i * 4;
+        const c3 = i * 3;
+
+        centerData[c4] = splats.x[i];
+        centerData[c4 + 1] = splats.y[i];
+        centerData[c4 + 2] = splats.z[i];
+        centerData[c4 + 3] = 1;
+
+        writeHalfOrFloat(colorData, c4, clamp(splats.fdc0[i] * SH_C0 + 0.5, 0, 1));
+        writeHalfOrFloat(colorData, c4 + 1, clamp(splats.fdc1[i] * SH_C0 + 0.5, 0, 1));
+        writeHalfOrFloat(colorData, c4 + 2, clamp(splats.fdc2[i] * SH_C0 + 0.5, 0, 1));
+        writeHalfOrFloat(colorData, c4 + 3, sigmoid(splats.opacity[i]));
+
+        writeHalfOrFloat(scaleData, c4, Math.exp(splats.scale0[i]));
+        writeHalfOrFloat(scaleData, c4 + 1, Math.exp(splats.scale1[i]));
+        writeHalfOrFloat(scaleData, c4 + 2, Math.exp(splats.scale2[i]));
+        writeHalfOrFloat(scaleData, c4 + 3, 0);
+
+        const q = normalizeQuat(splats.rot1[i], splats.rot2[i], splats.rot3[i], splats.rot0[i]);
+        writeHalfOrFloat(rotationData, c4, q.x);
+        writeHalfOrFloat(rotationData, c4 + 1, q.y);
+        writeHalfOrFloat(rotationData, c4 + 2, q.z);
+        writeHalfOrFloat(rotationData, c4 + 3, q.w);
+
+        container.centers[c3] = splats.x[i];
+        container.centers[c3 + 1] = splats.y[i];
+        container.centers[c3 + 2] = splats.z[i];
+    }
+
+    container.getTexture('dataCenter').unlock();
+    container.getTexture('dataColor').unlock();
+    container.getTexture('dataScale').unlock();
+    container.getTexture('dataRotation').unlock();
+};
+
+const writeGpuSplat = (
+    centerData: Float32Array | Uint16Array,
+    colorData: Float32Array | Uint16Array,
+    scaleData: Float32Array | Uint16Array,
+    rotationData: Float32Array | Uint16Array,
+    centers: Float32Array,
+    write: number,
+    splats: SplatArrays,
+    src: number,
+    invisible = false,
+    fadeLogMin = DEFAULT_FADE_LOG_MIN
+) => {
+    const c4 = write * 4;
+    const c3 = write * 3;
+    centerData[c4] = splats.x[src] ?? 0;
+    centerData[c4 + 1] = splats.y[src] ?? 0;
+    centerData[c4 + 2] = splats.z[src] ?? 0;
+    centerData[c4 + 3] = 1;
+
+    writeHalfOrFloat(colorData, c4, clamp((splats.fdc0[src] ?? 0) * SH_C0 + 0.5, 0, 1));
+    writeHalfOrFloat(colorData, c4 + 1, clamp((splats.fdc1[src] ?? 0) * SH_C0 + 0.5, 0, 1));
+    writeHalfOrFloat(colorData, c4 + 2, clamp((splats.fdc2[src] ?? 0) * SH_C0 + 0.5, 0, 1));
+    writeHalfOrFloat(colorData, c4 + 3, invisible ? sigmoid(fadeLogMin) : sigmoid(splats.opacity[src] ?? fadeLogMin));
+
+    const scale0 = invisible ? fadeLogMin : (splats.scale0[src] ?? fadeLogMin);
+    const scale1 = invisible ? fadeLogMin : (splats.scale1[src] ?? fadeLogMin);
+    const scale2 = invisible ? fadeLogMin : (splats.scale2[src] ?? fadeLogMin);
+    writeHalfOrFloat(scaleData, c4, Math.exp(scale0));
+    writeHalfOrFloat(scaleData, c4 + 1, Math.exp(scale1));
+    writeHalfOrFloat(scaleData, c4 + 2, Math.exp(scale2));
+    writeHalfOrFloat(scaleData, c4 + 3, 0);
+
+    const q = normalizeQuat(splats.rot1[src] ?? 0, splats.rot2[src] ?? 0, splats.rot3[src] ?? 0, splats.rot0[src] ?? 1);
+    writeHalfOrFloat(rotationData, c4, q.x);
+    writeHalfOrFloat(rotationData, c4 + 1, q.y);
+    writeHalfOrFloat(rotationData, c4 + 2, q.z);
+    writeHalfOrFloat(rotationData, c4 + 3, q.w);
+
+    centers[c3] = splats.x[src] ?? 0;
+    centers[c3 + 1] = splats.y[src] ?? 0;
+    centers[c3 + 2] = splats.z[src] ?? 0;
+};
+
+const fillGpuContainerFromMapping = (
+    container: GpuSplatContainer,
+    splats: SplatArrays,
+    indices: Uint32Array,
+    outputCount: number,
+    fadeLogMin = DEFAULT_FADE_LOG_MIN
+) => {
+    const centerData = container.getTexture('dataCenter').lock();
+    const colorData = container.getTexture('dataColor').lock();
+    const scaleData = container.getTexture('dataScale').lock();
+    const rotationData = container.getTexture('dataRotation').lock();
+    const fallback = splats.count > 0 ? 0 : -1;
+
+    for (let i = 0; i < outputCount; i++) {
+        if (i < indices.length) {
+            writeGpuSplat(centerData, colorData, scaleData, rotationData, container.centers, i, splats, indices[i], false, fadeLogMin);
+        } else if (fallback >= 0) {
+            writeGpuSplat(centerData, colorData, scaleData, rotationData, container.centers, i, splats, fallback, true, fadeLogMin);
+        }
+    }
+
+    container.getTexture('dataCenter').unlock();
+    container.getTexture('dataColor').unlock();
+    container.getTexture('dataScale').unlock();
+    container.getTexture('dataRotation').unlock();
+    container.update(outputCount, true);
+};
+
+class GpuMorphRuntime {
+    readonly resource: GpuSplatContainer;
+
+    private readonly _accumulator: GpuSplatContainer;
+
+    private readonly _models: GpuMorphModel[];
+
+    private readonly _sourceModels: LoadedMorphModel[];
+
+    private readonly _device: any;
+
+    private readonly _outputCount: number;
+
+    private readonly _fadeLogMin: number;
+
+    private readonly _correspondences?: Map<string, PairCorrespondence>;
+
+    private readonly _pairSourceA?: GpuSplatContainer;
+
+    private readonly _pairSourceB?: GpuSplatContainer;
+
+    private readonly _copyAndWeightGLSL = `
+        uniform float uWeight;
+
+        uint resampledSourceIndex() {
+            if (srcNumSplats == 0u) {
+                return 0u;
+            }
+            if (srcNumSplats >= dstNumSplats) {
+                return min(splat.index, srcNumSplats - 1u);
+            }
+            return min(uint(floor(float(splat.index) * float(srcNumSplats) / float(dstNumSplats))), srcNumSplats - 1u);
+        }
+
+        void process() {
+            setSplat(resampledSourceIndex());
+            writeDataCenter(vec4(getCenter() * uWeight, 0.0));
+            vec4 color = getColor();
+            color.a = log(max(color.a, 0.000001) / max(1.0 - color.a, 0.000001));
+            writeDataColor(color * uWeight);
+            writeDataScale(vec4(log(max(getScale(), vec3(0.000001))) * uWeight, 0.0));
+            writeDataRotation(getRotation() * uWeight);
+        }
+    `;
+
+    private readonly _copyAndWeightWGSL = `
+        uniform uWeight: f32;
+
+        fn resampledSourceIndex() -> u32 {
+            if (uniform.srcNumSplats == 0u) {
+                return 0u;
+            }
+            if (uniform.srcNumSplats >= uniform.dstNumSplats) {
+                return min(splat.index, uniform.srcNumSplats - 1u);
+            }
+            return min(u32(floor(f32(splat.index) * f32(uniform.srcNumSplats) / f32(uniform.dstNumSplats))), uniform.srcNumSplats - 1u);
+        }
+
+        fn process() {
+            setSplat(resampledSourceIndex());
+            writeDataCenter(vec4f(getCenter() * uniform.uWeight, 0.0));
+            var color = getColor();
+            color.a = log(max(color.a, 0.000001) / max(1.0 - color.a, 0.000001));
+            writeDataColor(color * uniform.uWeight);
+            writeDataScale(vec4f(log(max(getScale(), vec3f(0.000001))) * uniform.uWeight, 0.0));
+            writeDataRotation(getRotation() * uniform.uWeight);
+        }
+    `;
+
+    private readonly _normalizeGLSL = `
+        void process() {
+            writeDataCenter(vec4(getCenter(), 1.0));
+            vec4 color = getColor();
+            color.a = 1.0 / (1.0 + exp(-color.a));
+            writeDataColor(color);
+            writeDataScale(vec4(exp(getScale()), 0.0));
+            writeDataRotation(normalize(getRotation()));
+        }
+    `;
+
+    private readonly _normalizeWGSL = `
+        fn process() {
+            writeDataCenter(vec4f(getCenter(), 1.0));
+            var color = getColor();
+            color.a = 1.0 / (1.0 + exp(-color.a));
+            writeDataColor(color);
+            writeDataScale(vec4f(exp(getScale()), 0.0));
+            writeDataRotation(normalize(getRotation()));
+        }
+    `;
+
+    private _pairIndex = -1;
+
+    private _processorA: any;
+
+    private _processorB: any;
+
+    private _normalizeProcessor: any;
+
+    constructor(
+        app: AppBase,
+        models: LoadedMorphModel[],
+        outputCount: number,
+        correspondences?: Map<string, PairCorrespondence>,
+        fadeLogMin = DEFAULT_FADE_LOG_MIN
+    ) {
+        const GSplatFormat = (pc as any).GSplatFormat;
+        const GSplatContainer = (pc as any).GSplatContainer;
+        const GSplatProcessor = (pc as any).GSplatProcessor;
+        if (!GSplatFormat?.createDefaultFormat || !GSplatContainer || !GSplatProcessor) {
+            throw new Error('Current PlayCanvas build does not expose GSplatContainer / GSplatProcessor');
+        }
+
+        this._device = app.graphicsDevice;
+        this._sourceModels = models;
+        this._outputCount = outputCount;
+        this._correspondences = correspondences;
+        this._fadeLogMin = fadeLogMin;
+        const aabb = createAabbFromModels(models);
+        const format = GSplatFormat.createDefaultFormat(this._device);
+        this._models = correspondences ? [] : models.map((model) => {
+            const container = new GSplatContainer(this._device, model.splats.count, format) as GpuSplatContainer;
+            fillGpuContainerFromSplats(container, model.splats);
+            container.aabb = aabb;
+            container.update(model.splats.count, true);
+            return { container, count: model.splats.count };
+        });
+
+        this._accumulator = new GSplatContainer(this._device, outputCount, format) as GpuSplatContainer;
+        this.resource = new GSplatContainer(this._device, outputCount, format) as GpuSplatContainer;
+        if (correspondences) {
+            this._pairSourceA = new GSplatContainer(this._device, outputCount, format) as GpuSplatContainer;
+            this._pairSourceB = new GSplatContainer(this._device, outputCount, format) as GpuSplatContainer;
+            this._pairSourceA.aabb = aabb;
+            this._pairSourceB.aabb = aabb;
+            this._pairSourceA.update(outputCount, true);
+            this._pairSourceB.update(outputCount, true);
+        }
+        this._accumulator.aabb = aabb;
+        this.resource.aabb = aabb;
+        this._accumulator.update(outputCount, true);
+        this.resource.update(outputCount, true);
+    }
+
+    apply(pairIndex: number, t: number) {
+        if (this._pairIndex !== pairIndex) {
+            this.destroyProcessors();
+            this._pairIndex = pairIndex;
+            const GSplatProcessor = (pc as any).GSplatProcessor;
+            let sourceA = this._models[pairIndex]?.container;
+            let sourceB = this._models[pairIndex + 1]?.container;
+            const correspondence = this._correspondences?.get(`${pairIndex}:${pairIndex + 1}`);
+            if (correspondence && this._pairSourceA && this._pairSourceB) {
+                fillGpuContainerFromMapping(
+                    this._pairSourceA,
+                    this._sourceModels[pairIndex].splats,
+                    correspondence.matchedA,
+                    this._outputCount,
+                    this._fadeLogMin
+                );
+                fillGpuContainerFromMapping(
+                    this._pairSourceB,
+                    this._sourceModels[pairIndex + 1].splats,
+                    correspondence.matchedB,
+                    this._outputCount,
+                    this._fadeLogMin
+                );
+                sourceA = this._pairSourceA;
+                sourceB = this._pairSourceB;
+            }
+            if (!sourceA || !sourceB) {
+                throw new Error(`Missing GPU morph source containers for pair ${pairIndex}:${pairIndex + 1}`);
+            }
+            this._processorA = new GSplatProcessor(
+                this._device,
+                { resource: sourceA },
+                { resource: this._accumulator, streams: ['dataCenter', 'dataColor', 'dataScale', 'dataRotation'] },
+                { processGLSL: this._copyAndWeightGLSL, processWGSL: this._copyAndWeightWGSL }
+            );
+            this._processorB = new GSplatProcessor(
+                this._device,
+                { resource: sourceB },
+                { resource: this._accumulator, streams: ['dataCenter', 'dataColor', 'dataScale', 'dataRotation'] },
+                { processGLSL: this._copyAndWeightGLSL, processWGSL: this._copyAndWeightWGSL }
+            );
+            this._processorB.blendState = (pc as any).BlendState.ADDBLEND;
+            this._normalizeProcessor = new GSplatProcessor(
+                this._device,
+                { resource: this._accumulator },
+                { resource: this.resource, streams: ['dataCenter', 'dataColor', 'dataScale', 'dataRotation'] },
+                { processGLSL: this._normalizeGLSL, processWGSL: this._normalizeWGSL }
+            );
+        }
+
+        this._processorA.setParameter('uWeight', 1 - t);
+        this._processorA.process();
+        this._processorB.setParameter('uWeight', t);
+        this._processorB.process();
+        this._normalizeProcessor.process();
+    }
+
+    updateSortCenters(models: LoadedMorphModel[], pairIndex: number, t: number) {
+        const a = models[pairIndex].splats;
+        const b = models[pairIndex + 1].splats;
+        const centers = this.resource.centers;
+        const outN = centers.length / 3;
+        const inv = 1 - t;
+        const correspondence = this._correspondences?.get(`${pairIndex}:${pairIndex + 1}`);
+
+        for (let i = 0; i < outN; i++) {
+            const ia = correspondence && i < correspondence.matchedA.length
+                ? correspondence.matchedA[i]
+                : (a.count >= outN ? i : Math.min(Math.floor((i * a.count) / outN), a.count - 1));
+            const ib = correspondence && i < correspondence.matchedB.length
+                ? correspondence.matchedB[i]
+                : (b.count >= outN ? i : Math.min(Math.floor((i * b.count) / outN), b.count - 1));
+            const base = i * 3;
+            centers[base] = a.x[ia] * inv + b.x[ib] * t;
+            centers[base + 1] = a.y[ia] * inv + b.y[ib] * t;
+            centers[base + 2] = a.z[ia] * inv + b.z[ib] * t;
+        }
+
+        this.resource.update(outN, true);
+    }
+
+    destroy() {
+        this.destroyProcessors();
+        this._models.forEach(model => model.container.destroy?.());
+        this._pairSourceA?.destroy?.();
+        this._pairSourceB?.destroy?.();
+        this._accumulator.destroy?.();
+        this.resource.destroy?.();
+    }
+
+    private destroyProcessors() {
+        this._processorA?.destroy?.();
+        this._processorB?.destroy?.();
+        this._normalizeProcessor?.destroy?.();
+        this._processorA = undefined;
+        this._processorB = undefined;
+        this._normalizeProcessor = undefined;
+    }
+}
+
 class GaussianInterpolatorRuntime {
     readonly models: LoadedMorphModel[];
 
@@ -362,9 +1038,12 @@ class GaussianInterpolatorRuntime {
 
     readonly fadeLogMin: number;
 
-    constructor(models: LoadedMorphModel[], fadeLogMin: number) {
+    private readonly _options: GsplatMorphOptions;
+
+    constructor(models: LoadedMorphModel[], fadeLogMin: number, options: GsplatMorphOptions = {}) {
         this.models = models;
         this.fadeLogMin = fadeLogMin;
+        this._options = options;
         this.buildCorrespondences();
     }
 
@@ -377,9 +1056,157 @@ class GaussianInterpolatorRuntime {
             const j = i + 1;
             this.correspondences.set(
                 this.pairKey(i, j),
-                this.correspondMaxResample(this.models[i].splats, this.models[j].splats)
+                this._options.correspondenceStrategy === 'greedy'
+                    ? this.correspondGreedyApprox(this.models[i].splats, this.models[j].splats)
+                    : this.correspondMaxResample(this.models[i].splats, this.models[j].splats)
             );
         }
+    }
+
+    private estimateGreedyCellSize(a: SplatArrays, b: SplatArrays) {
+        const explicit = this._options.greedyGridCellSize;
+        if (explicit && Number.isFinite(explicit) && explicit > 0) {
+            return explicit;
+        }
+
+        let minX = Number.POSITIVE_INFINITY;
+        let minY = Number.POSITIVE_INFINITY;
+        let minZ = Number.POSITIVE_INFINITY;
+        let maxX = Number.NEGATIVE_INFINITY;
+        let maxY = Number.NEGATIVE_INFINITY;
+        let maxZ = Number.NEGATIVE_INFINITY;
+        for (const splats of [a, b]) {
+            for (let i = 0; i < splats.count; i += Math.max(1, Math.floor(splats.count / 200000))) {
+                minX = Math.min(minX, splats.x[i]);
+                minY = Math.min(minY, splats.y[i]);
+                minZ = Math.min(minZ, splats.z[i]);
+                maxX = Math.max(maxX, splats.x[i]);
+                maxY = Math.max(maxY, splats.y[i]);
+                maxZ = Math.max(maxZ, splats.z[i]);
+            }
+        }
+
+        const volume = Math.max(1e-9, (maxX - minX) * (maxY - minY) * (maxZ - minZ));
+        const densityCell = Math.cbrt(volume / Math.max(1, Math.min(a.count, b.count)));
+        return Math.max(1e-5, densityCell * 2.5);
+    }
+
+    private correspondGreedyApprox(a: SplatArrays, b: SplatArrays): PairCorrespondence {
+        const na = a.count;
+        const nb = b.count;
+        const outN = Math.max(na, nb);
+        if (outN === 0 || na === 0 || nb === 0) {
+            return { matchedA: new Uint32Array(0), matchedB: new Uint32Array(0) };
+        }
+
+        const cellSize = this.estimateGreedyCellSize(a, b);
+        const radius = Math.max(0, Math.floor(this._options.greedySearchRadiusCells ?? DEFAULT_GREEDY_SEARCH_RADIUS_CELLS));
+        const maxCandidates = Math.max(1, this._options.greedyMaxCandidatesPerPoint ?? DEFAULT_GREEDY_MAX_CANDIDATES);
+        const spatialWeight = this._options.greedySpatialWeight ?? DEFAULT_GREEDY_SPATIAL_WEIGHT;
+        const colorWeight = this._options.greedyColorWeight ?? DEFAULT_GREEDY_COLOR_WEIGHT;
+        const grid = new Map<string, number[]>();
+        const keyOf = (x: number, y: number, z: number) =>
+            `${Math.floor(x / cellSize)},${Math.floor(y / cellSize)},${Math.floor(z / cellSize)}`;
+
+        for (let i = 0; i < nb; i++) {
+            const key = keyOf(b.x[i], b.y[i], b.z[i]);
+            const bucket = grid.get(key);
+            if (bucket) {
+                bucket.push(i);
+            } else {
+                grid.set(key, [i]);
+            }
+        }
+
+        const usedB = new Uint8Array(nb);
+        const matchedA = new Uint32Array(outN);
+        const matchedB = new Uint32Array(outN);
+        let write = 0;
+        let nextUnusedB = 0;
+        const takeFallbackB = (preferred: number) => {
+            if (!usedB[preferred]) {
+                return preferred;
+            }
+            while (nextUnusedB < nb && usedB[nextUnusedB]) {
+                nextUnusedB++;
+            }
+            return nextUnusedB < nb ? nextUnusedB : preferred;
+        };
+
+        for (let ia = 0; ia < na && write < outN; ia++, write++) {
+            const cx = Math.floor(a.x[ia] / cellSize);
+            const cy = Math.floor(a.y[ia] / cellSize);
+            const cz = Math.floor(a.z[ia] / cellSize);
+            let best = -1;
+            let bestCost = Number.POSITIVE_INFINITY;
+            let tested = 0;
+
+            for (let dz = -radius; dz <= radius && tested < maxCandidates; dz++) {
+                for (let dy = -radius; dy <= radius && tested < maxCandidates; dy++) {
+                    for (let dx = -radius; dx <= radius && tested < maxCandidates; dx++) {
+                        const bucket = grid.get(`${cx + dx},${cy + dy},${cz + dz}`);
+                        if (!bucket) {
+                            continue;
+                        }
+                        for (let n = 0; n < bucket.length && tested < maxCandidates; n++) {
+                            const ib = bucket[n];
+                            if (usedB[ib]) {
+                                continue;
+                            }
+                            tested++;
+                            const px = (a.x[ia] - b.x[ib]) / cellSize;
+                            const py = (a.y[ia] - b.y[ib]) / cellSize;
+                            const pz = (a.z[ia] - b.z[ib]) / cellSize;
+                            const cr = a.fdc0[ia] - b.fdc0[ib];
+                            const cg = a.fdc1[ia] - b.fdc1[ib];
+                            const cb = a.fdc2[ia] - b.fdc2[ib];
+                            const cost = spatialWeight * (px * px + py * py + pz * pz) + colorWeight * (cr * cr + cg * cg + cb * cb);
+                            if (cost < bestCost) {
+                                bestCost = cost;
+                                best = ib;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (best < 0) {
+                best = takeFallbackB(nb <= 1 ? 0 : Math.min(Math.floor((ia * nb) / na), nb - 1));
+            }
+
+            usedB[best] = 1;
+            matchedA[write] = ia;
+            matchedB[write] = best;
+        }
+
+        if (nb > na) {
+            for (let ib = 0; ib < nb && write < outN; ib++) {
+                if (usedB[ib]) {
+                    continue;
+                }
+                matchedA[write] = na <= 1 ? 0 : Math.min(Math.floor((ib * na) / nb), na - 1);
+                matchedB[write] = ib;
+                write++;
+            }
+        }
+
+        for (; write < outN; write++) {
+            matchedA[write] = na - 1;
+            matchedB[write] = nb - 1;
+        }
+
+        console.info('[GsplatMorph] greedy correspondence built', {
+            a: na,
+            b: nb,
+            out: outN,
+            cellSize,
+            radius,
+            maxCandidates,
+            spatialWeight,
+            colorWeight
+        });
+
+        return { matchedA, matchedB };
     }
 
     /**
@@ -457,7 +1284,7 @@ class GaussianInterpolatorRuntime {
         };
     }
 
-    interpolateBetween(idxA: number, idxB: number, t: number, output: SplatArrays) {
+    interpolateBetween(idxA: number, idxB: number, t: number, output: SplatArrays, writeRestSh = true, fastQuaternionNlerp = true) {
         if (!(t >= 0 && t <= 1)) {
             throw new Error(`Interpolation t must be in [0, 1], got ${t}`);
         }
@@ -489,21 +1316,29 @@ class GaussianInterpolatorRuntime {
             output.scale2[write] = a.scale2[src] * (1 - t) + b.scale2[dst] * t;
             output.opacity[write] = a.opacity[src] * (1 - t) + b.opacity[dst] * t;
 
-            const q = slerpQuat(
-                a.rot1[src], a.rot2[src], a.rot3[src], a.rot0[src],
-                b.rot1[dst], b.rot2[dst], b.rot3[dst], b.rot0[dst],
-                t
-            );
+            const q = fastQuaternionNlerp
+                ? nlerpQuat(
+                    a.rot1[src], a.rot2[src], a.rot3[src], a.rot0[src],
+                    b.rot1[dst], b.rot2[dst], b.rot3[dst], b.rot0[dst],
+                    t
+                )
+                : slerpQuat(
+                    a.rot1[src], a.rot2[src], a.rot3[src], a.rot0[src],
+                    b.rot1[dst], b.rot2[dst], b.rot3[dst], b.rot0[dst],
+                    t
+                );
 
             output.rot0[write] = q.w;
             output.rot1[write] = q.x;
             output.rot2[write] = q.y;
             output.rot3[write] = q.z;
 
-            for (let restIndex = 0; restIndex < output.rest.length; restIndex++) {
-                const av = restIndex < a.rest.length ? a.rest[restIndex][src] : 0;
-                const bv = restIndex < b.rest.length ? b.rest[restIndex][dst] : 0;
-                output.rest[restIndex][write] = av * (1 - t) + bv * t;
+            if (writeRestSh) {
+                for (let restIndex = 0; restIndex < output.rest.length; restIndex++) {
+                    const av = restIndex < a.rest.length ? a.rest[restIndex][src] : 0;
+                    const bv = restIndex < b.rest.length ? b.rest[restIndex][dst] : 0;
+                    output.rest[restIndex][write] = av * (1 - t) + bv * t;
+                }
             }
         }
 
@@ -524,8 +1359,10 @@ class GaussianInterpolatorRuntime {
             output.scale2[write] = this.fadeLogMin;
             output.opacity[write] = this.fadeLogMin;
 
-            for (let restIndex = 0; restIndex < output.rest.length; restIndex++) {
-                output.rest[restIndex][write] = 0;
+            if (writeRestSh) {
+                for (let restIndex = 0; restIndex < output.rest.length; restIndex++) {
+                    output.rest[restIndex][write] = 0;
+                }
             }
         }
     }
@@ -538,6 +1375,45 @@ const loadMorphModel = async (
     options: GsplatMorphOptions
 ) => {
     const resolved = resolveMorphSource(source, index);
+
+    if (isSogFilename(resolved.filename) || isSogFilename(resolved.url)) {
+        try {
+            const data = await loadSogAsGSplatData(resolved.url);
+            const splats = readSplatArrays(data);
+            preprocessModel(splats, options);
+
+            const resource = new GSplatResource(app.graphicsDevice, data);
+            const asset = new Asset(resolved.filename, 'gsplat', {
+                url: resolved.url,
+                filename: resolved.filename
+            });
+            asset.resource = resource;
+            asset.loaded = true;
+
+            if (options.retainSourceAssets) {
+                app.assets.add(asset);
+                asset.fire('load', asset);
+                return {
+                    name: resolved.filename,
+                    asset,
+                    resource,
+                    data,
+                    splats
+                } satisfies LoadedMorphModel;
+            }
+
+            resource.destroy?.();
+            return {
+                name: resolved.filename,
+                splats
+            } satisfies LoadedMorphModel;
+        } finally {
+            if (resolved.cleanupUrl) {
+                URL.revokeObjectURL(resolved.cleanupUrl);
+            }
+        }
+    }
+
     const asset = new Asset(resolved.filename, 'gsplat', {
         url: resolved.url,
         filename: resolved.filename
@@ -567,11 +1443,21 @@ const loadMorphModel = async (
         const splats = readSplatArrays(data);
         preprocessModel(splats, options);
 
+        if (options.retainSourceAssets) {
+            return {
+                name: resolved.filename,
+                asset: loaded,
+                resource,
+                data,
+                splats
+            } satisfies LoadedMorphModel;
+        }
+
+        loaded.unload();
+        app.assets.remove(loaded);
+
         return {
             name: resolved.filename,
-            asset: loaded,
-            resource,
-            data,
             splats
         } satisfies LoadedMorphModel;
     } finally {
@@ -588,17 +1474,19 @@ export class GsplatMorphController {
 
     readonly asset: Asset;
 
-    readonly resource: GSplatResource;
+    readonly resource: GSplatResource | GpuSplatContainer;
 
-    readonly outputData: GSplatData;
+    readonly outputData?: GSplatData;
 
-    readonly output: SplatArrays;
+    readonly output?: SplatArrays;
 
     readonly models: LoadedMorphModel[];
 
-    readonly interpolator: GaussianInterpolatorRuntime;
+    readonly interpolator?: GaussianInterpolatorRuntime;
 
     private readonly _centers: Float32Array;
+
+    private readonly _gpuRuntime?: GpuMorphRuntime;
 
     private readonly _morphOptions: GsplatMorphOptions;
 
@@ -617,9 +1505,6 @@ export class GsplatMorphController {
      */
     private readonly _onGsplatSorted: () => void;
 
-    /** 暂停时单次 seek/stop 等仍会 push，需要至少呈现一帧。 */
-    private _needsPresentFrame = false;
-
     /** `continuousAppRender` 生效时暂存的 Viewer 关闭前的 `app.autoRender`。 */
     private _savedAppAutoRender: boolean | undefined;
 
@@ -633,29 +1518,79 @@ export class GsplatMorphController {
 
     private _time = 0;
 
+    /** 墙钟节流用；`morphPresentMaxHz` 为 0 时不使用。 */
+    private _lastMorphPresentMs = Number.NEGATIVE_INFINITY;
+
+    private readonly _morphPresentMaxHz: number;
+
+    private readonly _morphAnimateSh: boolean;
+
+    private readonly _fastQuaternionNlerp: boolean;
+
+    private readonly _sortCentersMaxHz: number;
+
+    private _lastSortCentersMs = Number.NEGATIVE_INFINITY;
+
+    /** 与 `morphAnimateSphericalHarmonics === false` 配合：段切换时重算并重传 `f_rest_*`。 */
+    private _lastPairIndexForSh = -1;
+
+    /** `pushOutputToResource` 已执行，本帧 `framerender` 需再拉高 `renderNextFrame`（防 Viewer 清掉）。 */
+    private _morphPushedThisFrame = false;
+
     constructor(app: AppBase, models: LoadedMorphModel[], options: GsplatMorphOptions = {}) {
         this._morphOptions = options;
         this.app = app;
         this.models = models;
-        this.interpolator = new GaussianInterpolatorRuntime(models, options.fadeLogMin ?? DEFAULT_FADE_LOG_MIN);
 
         // 构建输出缓冲区
         const maxSplats = Math.max(...models.map(model => model.splats.count));
         const restPropCount = normalizeRestPropCount(Math.max(...models.map(model => model.splats.rest.length)));
-        const { data, arrays } = createMutableGSplatData(maxSplats, restPropCount);
+        const fadeLogMin = options.fadeLogMin ?? DEFAULT_FADE_LOG_MIN;
+        const useGreedyCorrespondence = options.correspondenceStrategy === 'greedy';
+        const correspondenceInterpolator = useGreedyCorrespondence
+            ? new GaussianInterpolatorRuntime(models, fadeLogMin, options)
+            : undefined;
 
-        this.outputData = data;
-        this.output = arrays;
-        // 用这块数据创建可被 gsplat 组件使用的资源。
-        this.resource = new GSplatResource(app.graphicsDevice, this.outputData);
-        this._centers = this.resource.centers ?? new Float32Array(maxSplats * 3);
-        this.resource.centers = this._centers;
+        let gpuRuntime: GpuMorphRuntime | undefined;
+        if (options.preferGpuMorph ?? true) {
+            try {
+                gpuRuntime = new GpuMorphRuntime(
+                    app,
+                    models,
+                    maxSplats,
+                    correspondenceInterpolator?.correspondences,
+                    fadeLogMin
+                );
+                console.info('[GsplatMorph] GPU morph path enabled: interpolation runs through GSplatProcessor.');
+                if (restPropCount > 0) {
+                    console.info('[GsplatMorph] GPU morph path uses SH0/DC color for animation; high-order SH stays disabled to avoid multi-million coefficient uploads.');
+                }
+            } catch (err) {
+                console.warn('[GsplatMorph] GPU morph path unavailable; falling back to CPU uploads.', err);
+            }
+        }
+
+        this._gpuRuntime = gpuRuntime;
+        if (this._gpuRuntime) {
+            this.interpolator = correspondenceInterpolator;
+            this.resource = this._gpuRuntime.resource;
+            this._centers = this.resource.centers;
+        } else {
+            this.interpolator = correspondenceInterpolator ?? new GaussianInterpolatorRuntime(models, fadeLogMin, options);
+            const { data, arrays } = createMutableGSplatData(maxSplats, restPropCount);
+            this.outputData = data;
+            this.output = arrays;
+            // Create the mutable resource used by the gsplat component.
+            this.resource = new GSplatResource(app.graphicsDevice, this.outputData);
+            this._centers = this.resource.centers ?? new Float32Array(maxSplats * 3);
+            this.resource.centers = this._centers;
+        }
 
         this.asset = new Asset(options.entityName || 'gsplatMorphAsset', 'gsplat', {
             url: `gsplat-morph://${Date.now()}`,
             filename: `${options.entityName || 'gsplatMorph'}.ply`
         });
-        this.asset.resource = this.resource;
+        this.asset.resource = this.resource as any;
         this.asset.loaded = true;
         app.assets.add(this.asset);
         this.asset.fire('load', this.asset);
@@ -672,6 +1607,10 @@ export class GsplatMorphController {
         this._segmentDuration = Math.max(0.001, options.segmentDuration ?? DEFAULT_SEGMENT_DURATION);
         this._loop = options.loop ?? true;
         this._playing = options.autoPlay ?? true;
+        this._morphPresentMaxHz = Math.max(0, options.morphPresentMaxHz ?? 0);
+        this._morphAnimateSh = options.morphAnimateSphericalHarmonics ?? true;
+        this._fastQuaternionNlerp = options.fastQuaternionNlerp ?? true;
+        this._sortCentersMaxHz = Math.max(0, options.sortCentersMaxHz ?? DEFAULT_SORT_CENTERS_MAX_HZ);
         this._onFrameUpdate = (ms: number) => {
             let dt = ms / 1000;
             dt = clamp(dt, 0, this.app.maxDeltaTime);
@@ -682,18 +1621,20 @@ export class GsplatMorphController {
             if (this.segmentCount === 0) {
                 return;
             }
-            this.requestMorphPresentFrame();
-            this._needsPresentFrame = false;
+            if (this._morphPushedThisFrame) {
+                this.app.renderNextFrame = true;
+                this._morphPushedThisFrame = false;
+            }
         };
 
         this._onGsplatSorted = () => {
-            this.requestMorphPresentFrame();
+            this.app.renderNextFrame = true;
         };
 
-        this.applyCurrentFrame();
         app.on('frameupdate', this._onFrameUpdate);
         app.on('framerender', this._onAfterFrameRender);
         app.scene.on('gsplat:sorted', this._onGsplatSorted);
+        this.applyCurrentFrame(true);
         this.syncMorphDrivenAppRender();
     }
 
@@ -703,7 +1644,8 @@ export class GsplatMorphController {
 
     set segmentDuration(value: number) {
         this._segmentDuration = Math.max(0.001, value);
-        this.applyCurrentFrame();
+        this._lastPairIndexForSh = -1;
+        this.applyCurrentFrame(true);
     }
 
     get loop() {
@@ -751,7 +1693,8 @@ export class GsplatMorphController {
     set interpolationValue(value: number) {
         if (this.segmentCount === 0) {
             this._time = 0;
-            this.applyCurrentFrame();
+            this._lastPairIndexForSh = -1;
+            this.applyCurrentFrame(true);
             return;
         }
 
@@ -759,32 +1702,37 @@ export class GsplatMorphController {
         this._time = clampedValue >= this.modelCount
             ? this.totalDuration
             : (clampedValue - 1) * this._segmentDuration;
-        this.applyCurrentFrame();
+        this._lastPairIndexForSh = -1;
+        this.applyCurrentFrame(true);
     }
 
     play() {
         this._playing = true;
         this.syncMorphDrivenAppRender();
+        this.applyCurrentFrame(true);
         return this;
     }
 
     pause() {
         this._playing = false;
         this.syncMorphDrivenAppRender();
+        this.applyCurrentFrame(true);
         return this;
     }
 
     stop() {
         this._playing = false;
         this._time = 0;
-        this.applyCurrentFrame();
+        this._lastPairIndexForSh = -1;
+        this.applyCurrentFrame(true);
         this.syncMorphDrivenAppRender();
         return this;
     }
 
     seek(timeSeconds: number) {
         this._time = Math.max(0, timeSeconds);
-        this.applyCurrentFrame();
+        this._lastPairIndexForSh = -1;
+        this.applyCurrentFrame(true);
         return this;
     }
 
@@ -799,7 +1747,12 @@ export class GsplatMorphController {
             return;
         }
 
-        const stats = this.interpolator.getIndexPairingDiagnostics(segmentIndex, idxB, sampleStride);
+        const interpolator = this.interpolator ?? new GaussianInterpolatorRuntime(
+            this.models,
+            this._morphOptions.fadeLogMin ?? DEFAULT_FADE_LOG_MIN,
+            this._morphOptions
+        );
+        const stats = interpolator.getIndexPairingDiagnostics(segmentIndex, idxB, sampleStride);
         if (!stats) {
             console.warn('[GsplatMorph] logMorphDiagnostics: 无配对数据');
             return;
@@ -821,10 +1774,13 @@ export class GsplatMorphController {
 
         this.asset.unload();
         this.app.assets.remove(this.asset);
+        this._gpuRuntime?.destroy();
 
         this.models.forEach((model) => {
-            model.asset.unload();
-            this.app.assets.remove(model.asset);
+            if (model.asset) {
+                model.asset.unload();
+                this.app.assets.remove(model.asset);
+            }
         });
     }
 
@@ -842,7 +1798,7 @@ export class GsplatMorphController {
         }
 
         this._time = Math.min(this._time + dt, totalDuration);
-        this.applyCurrentFrame();
+        this.applyCurrentFrame(this._time >= totalDuration);
 
         if (this._time >= totalDuration) {
             this._playing = false;
@@ -850,9 +1806,18 @@ export class GsplatMorphController {
         }
     }
     // 立刻根据当前 _time 算一帧并推到 GPU。
-    private applyCurrentFrame() {
+    /** `forceMorphPresent`：绕过 `morphPresentMaxHz` 节流（seek/stop/段末等）。 */
+    private applyCurrentFrame(forceMorphPresent = false) {
         if (this.segmentCount === 0) {
             return;
+        }
+
+        if (this._playing && !forceMorphPresent && this._morphPresentMaxHz > 0) {
+            const minMs = 1000 / this._morphPresentMaxHz;
+            const now = performance.now();
+            if (now - this._lastMorphPresentMs < minMs) {
+                return;
+            }
         }
 
         const totalDuration = this.totalDuration;
@@ -887,47 +1852,92 @@ export class GsplatMorphController {
     }
 
     private applyPair(pairIndex: number, t: number) {
-        this.interpolator.interpolateBetween(pairIndex, pairIndex + 1, t, this.output);
-        this.pushOutputToResource();
+        if (this._gpuRuntime) {
+            const segmentChanged = this._lastPairIndexForSh !== pairIndex;
+            this._lastPairIndexForSh = pairIndex;
+            this._gpuRuntime.apply(pairIndex, t);
+            this.pushGpuOutputToResource(segmentChanged);
+            return;
+        }
+
+        const segmentChanged = this._lastPairIndexForSh !== pairIndex;
+        this._lastPairIndexForSh = pairIndex;
+        const writeRestSh = this._morphAnimateSh || segmentChanged;
+        this.interpolator!.interpolateBetween(pairIndex, pairIndex + 1, t, this.output!, writeRestSh, this._fastQuaternionNlerp);
+        this.pushOutputToResource(writeRestSh, segmentChanged);
     }
 
-    private pushOutputToResource() {
-        this.resource.updateColorData(this.outputData);
-        this.resource.updateTransformData(this.outputData);
+    private pushOutputToResource(uploadShData: boolean, forceSortCenters = false) {
+        const resource = this.resource as GSplatResource;
+        const outputData = this.outputData!;
+        const output = this.output!;
+        resource.updateColorData(outputData);
+        resource.updateTransformData(outputData);
 
-        if (this.output.rest.length > 0) {
-            this.resource.updateSHData(this.outputData);
+        if (output.rest.length > 0 && uploadShData) {
+            resource.updateSHData(outputData);
         }
 
-        for (let i = 0; i < this.output.count; i++) {
-            const base = i * 3;
-            this._centers[base] = this.output.x[i];
-            this._centers[base + 1] = this.output.y[i];
-            this._centers[base + 2] = this.output.z[i];
+        const now = performance.now();
+        const shouldUpdateCenters =
+            forceSortCenters ||
+            this._sortCentersMaxHz === 0 ||
+            now - this._lastSortCentersMs >= 1000 / this._sortCentersMaxHz;
+
+        if (shouldUpdateCenters) {
+            for (let i = 0; i < output.count; i++) {
+                const base = i * 3;
+                this._centers[base] = output.x[i];
+                this._centers[base + 1] = output.y[i];
+                this._centers[base + 2] = output.z[i];
+            }
+
+            resource.centersVersion++;
+            outputData.calcAabb(resource.aabb);
+            resource.mesh?.aabb.copy(resource.aabb);
+            this._lastSortCentersMs = now;
         }
 
-        this.resource.centersVersion++;
-        this.outputData.calcAabb(this.resource.aabb);
-        this.resource.mesh?.aabb.copy(this.resource.aabb);
-
-        // unified gsplat：仅改 resource 纹理时 entity 矩阵未变，AUTO 不会重刷 work buffer。
-        // morph 在 `frameupdate` 写数据（早于本帧 `systems.fire('update')`），此处标 ONCE 让本帧 GSplat 刷新 work buffer。
         const gsplat = this.entity.gsplat;
         if (gsplat) {
-            gsplat.workBufferUpdate = this._playing ? WORKBUFFER_UPDATE_ALWAYS : WORKBUFFER_UPDATE_ONCE;        }
+            gsplat.workBufferUpdate = WORKBUFFER_UPDATE_ONCE;
+        }
 
-        // supersplat-viewer：`autoRender=false` 时 Viewer 可能在 `framerender` 清掉 `renderNextFrame`；
-        // 连续渲染模式下由 `app.autoRender` 负责每帧 render，此处不必重复拉高。
         this.app.renderNextFrame = true;
+        this._morphPushedThisFrame = true;
+        this._lastMorphPresentMs = now;
     }
 
-    /**
-     * 在「非每帧 autoRender」路径下请求下一帧绘制（含 Viewer 清掉 renderNextFrame 后的再拉高，以及 Worker 排序晚到后的补帧）。
-     */
-    private requestMorphPresentFrame() {
-        if (this._playing || this._needsPresentFrame) {
-            this.app.renderNextFrame = true;
+    private pushGpuOutputToResource(forceSortCenters = false) {
+        const now = performance.now();
+        const shouldUpdateCenters =
+            forceSortCenters ||
+            this._sortCentersMaxHz === 0 ||
+            now - this._lastSortCentersMs >= 1000 / this._sortCentersMaxHz;
+
+        if (shouldUpdateCenters) {
+            const totalDuration = this.totalDuration;
+            const clampedTime = !this._loop && this._time >= totalDuration
+                ? totalDuration
+                : this.resolvePlaybackTime();
+            const segmentIndex = Math.min(
+                this.segmentCount - 1,
+                Math.floor(clampedTime / this._segmentDuration)
+            );
+            const segmentStart = segmentIndex * this._segmentDuration;
+            const localT = clamp((clampedTime - segmentStart) / this._segmentDuration, 0, 1);
+            this._gpuRuntime!.updateSortCenters(this.models, segmentIndex, localT);
+            this._lastSortCentersMs = now;
         }
+
+        const gsplat = this.entity.gsplat;
+        if (gsplat) {
+            gsplat.workBufferUpdate = WORKBUFFER_UPDATE_ONCE;
+        }
+
+        this.app.renderNextFrame = true;
+        this._morphPushedThisFrame = true;
+        this._lastMorphPresentMs = now;
     }
 
     /**
@@ -936,7 +1946,7 @@ export class GsplatMorphController {
      */
     private syncMorphDrivenAppRender() {
         const wantOverride =
-            (this._morphOptions.continuousAppRender ?? true) &&
+            (this._morphOptions.continuousAppRender ?? false) &&
             this._playing &&
             this.segmentCount > 0;
 

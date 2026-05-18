@@ -491,21 +491,33 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         getRevealExportTimingSource: () => viewer.revealController
     });
 
+    // DEMO
     const mainGsplatEntity = await gsplatLoad;
-
     const morph = await loadGsplatMorphSequence(app, [
         '/morph/1.ply',
         '/morph/2.ply',
         '/morph/3.ply',
-        '/morph/4.ply'
+        '/morph/5.sog'
     ], {
         segmentDuration: 3,
         loop: true,
         autoPlay: true,
+        /** 大场景：限制 morph 全量插值+上传频率；此前 index 已传但控制器未实现，故无效果 */
+        morphPresentMaxHz: 12,
+        /** 段内不重算/不重传 f_rest_*（仅段切换时刷新 SH），可再省大量 CPU/GPU；要最高画质删此项或设 true */
+        morphAnimateSphericalHarmonics: false,
+        /** 默认 false；若 morph 不刷新再设 true */
+        continuousAppRender: false,
         recenterModels: true,
         normalizeScales: true,
         targetScale: 10,
-        layers: mainGsplatEntity.gsplat?.layers ? [...mainGsplatEntity.gsplat.layers] : undefined
+        layers: mainGsplatEntity.gsplat?.layers ? [...mainGsplatEntity.gsplat.layers] : undefined,
+
+        correspondenceStrategy: 'greedy',
+        greedySpatialWeight: 0.7,
+        greedyColorWeight: 0.3,
+        greedySearchRadiusCells: 1,
+        greedyMaxCandidatesPerPoint: 48
     });
     // 先把 viewer 默认加载的主 gsplat 隐藏掉，不然会和 morph 结果重叠
     mainGsplatEntity.enabled = false;
