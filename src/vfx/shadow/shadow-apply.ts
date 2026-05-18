@@ -17,6 +17,7 @@ import {
     SEMANTIC_POSITION
 } from 'playcanvas';
 import type { Global } from '../../types';
+import { isShadowOutputEnabled } from './shadow-pipeline';
 
 /**
  * 与 Physics_Relighting_Demo 的 shadow-apply.mjs 完全一致的 shader：
@@ -302,6 +303,7 @@ class ShadowApplyRt extends Script {
         // 位置/旋转在 update() 中与主相机同步
         shadowMaskCamera.setPosition(mainCamEntity.getPosition());
         shadowMaskCamera.setRotation(mainCamEntity.getRotation());
+        shadowMaskCamera.enabled = false;
         app.root.addChild(shadowMaskCamera);
 
         this._shadowMaskCamera = shadowMaskCamera;
@@ -319,10 +321,15 @@ class ShadowApplyRt extends Script {
             { vertex_position: SEMANTIC_POSITION }
         );
 
+        const events = global.events;
+
         // ─── postrender：与 Demo 完全一致 ───
         let _postrenderCount = 0;
         app.on('postrender', () => {
             _postrenderCount++;
+            if (!global || !isShadowOutputEnabled(global)) {
+                return;
+            }
             const shadowSettingsNow = (global.settings.postEffectSettings.shadow || {}) as {
                 enabled?: boolean;
                 darken?: number;
@@ -375,7 +382,6 @@ class ShadowApplyRt extends Script {
         });
 
         // ─── 监听 UI 事件：生成/清除 testSphere / testSplat ───
-        const events = global.events;
         events.on('shadow:spawnSphere', (data: { x: number; y: number; z: number; radius?: number }) => {
             this.spawnTestSphere(data, data.radius);
         });
@@ -421,13 +427,20 @@ class ShadowApplyRt extends Script {
 
     update() {
         if (!this._inited || !this.global?.camera) return;
+        const global = this.global;
         const shadowLayer = this._shadowLayer;
-        const shadowSettings = this.global.settings.postEffectSettings?.shadow as {
+        const shadowSettings = global.settings.postEffectSettings?.shadow as {
             debugVisual?: boolean; enabled?: boolean; castShadows?: boolean;
         } | undefined;
 
+        const outputEnabled = isShadowOutputEnabled(global);
+
+        if (this._shadowMaskCamera) {
+            this._shadowMaskCamera.enabled = outputEnabled && shadowSettings?.enabled === true;
+        }
+
         const debugVisual = shadowSettings?.debugVisual === true;
-        const meshCastShadows = shadowSettings?.castShadows !== false;
+        const meshCastShadows = shadowSettings?.castShadows !== false && outputEnabled;
 
         // ─── 接影几何层 + 材质管理 ───
         if (shadowLayer && this._shadowGeomEntity && this._debugLayer) {

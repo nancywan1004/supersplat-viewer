@@ -102,6 +102,8 @@ export type InitShadowCatcherOptions = {
     parentEntity?: Entity;
     /** 接影几何实体（如 GLB 实例）；若有则不再创建平面 */
     meshEntity?: Entity;
+    /** 创建后接影根节点是否 enabled */
+    active?: boolean;
 };
 
 /**
@@ -122,6 +124,7 @@ function initShadowCatcher(
     const debugVisual = options?.debugVisual ?? false;
     const parentEntity = options?.parentEntity;
     const meshEntity = options?.meshEntity;
+    const active = options?.active === true;
     const root = app.root;
 
     // 创建统一的 ShadowMat
@@ -171,6 +174,7 @@ function initShadowCatcher(
         // GLB mesh 保持原始变换，不施加平面缩放
         script.isExternalMesh = true;
         script.setupMaterial(shadowMat);
+        entity.enabled = active;
 
         console.log('[initShadowCatcher] Created with GLB mesh (isExternalMesh=true), material applied after geometry set');
         return entity;
@@ -202,6 +206,7 @@ function initShadowCatcher(
     script.scale.set(sizeX, 1, sizeZ);
     // 平面已经在创建时使用了 ShadowMat，再调一次确保一致
     script.setupMaterial(shadowMat);
+    entity.enabled = active;
 
     console.log('[initShadowCatcher] Created with default plane');
     return entity;

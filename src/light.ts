@@ -1012,6 +1012,15 @@ const initLight = (global: Global): Entity => {
  * 根据场景包围盒大小动态设置方向光的 shadowDistance。
  * 应在场景加载后、获得 sceneBound 时调用。
  */
+/** 运行时开关主方向光 shadow map（由 shadow-pipeline 在 reveal 门控期间调用） */
+const setDirectionalCastShadowsEnabled = (global: Global, enabled: boolean): void => {
+    const lightEntity = global.app.root.findByName('light') as Entity | null;
+    if (lightEntity?.light) {
+        lightEntity.light.castShadows = enabled;
+        (global.app as { renderNextFrame?: boolean }).renderNextFrame = true;
+    }
+};
+
 const updateShadowDistance = (global: Global, sceneSize: number): void => {
     const lightEntity = global.app.root.findByName('light') as Entity | null;
     if (lightEntity?.light) {
@@ -1031,5 +1040,6 @@ export {
     setPointLightsVisualVisible,
     setLightsVisualVisible,
     selectNearestLightAtPosition,
-    updateShadowDistance
+    updateShadowDistance,
+    setDirectionalCastShadowsEnabled
 };

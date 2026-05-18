@@ -48,9 +48,7 @@ import { isLodMetaFile } from './loaders/lod-loader';
 import { BloomController } from './vfx/bloom';
 import { loadSplatMesh } from './loaders/splat-mesh-loader';
 import { NightMode } from './vfx/lighting/night-mode';
-import { initShadowCatcher } from './vfx/shadow/shadow-catcher';
-import { ShadowApplyRt } from './vfx/shadow/shadow-apply';
-import { updateShadowDistance } from './light';
+import { notifyViewportReadyForShadow, scheduleShadowPipeline } from './vfx/shadow/shadow-pipeline';
 import { initAssetPlacementHandler, requestSceneAssetsRestore } from './asset-placement-handler';
 import { pushEditHistory } from './edit-history';
 import { initGizmoHandler } from './gizmo-handler';
@@ -291,6 +289,7 @@ class Viewer {
             getAppCanvas: () => (app.graphicsDevice?.canvas as HTMLCanvasElement) ?? document.querySelector('canvas'),
             getNightModeScript: () => this.nightModeScript
         });
+
         // disable auto render, we'll render only when camera changes
         app.autoRender = false;
 
@@ -554,32 +553,11 @@ class Viewer {
                 sceneBound.setFromTransformedAabb(gsplatBbox, gsplatEntity.getWorldTransform());
             }
 
-            // 根据场景大小动态更新方向光的 shadowDistance
-            const sceneSize = sceneBound.halfExtents.length();
-            updateShadowDistance(global, sceneSize);
-
-            // 阴影管线：有 GLB 则用 mesh 接影，否则用平面（与 Physics_Relighting_Demo 一致）
-            const shadowOpts = settings.postEffectSettings.shadow as { debugVisual?: boolean } | undefined;
-            // console.log('[Shadow] initShadowCatcher called with:', {
-            //     hasMeshEntity: !!meshEntity,
-            //     meshEntityName: meshEntity?.name,
-            //     meshEntityChildren: meshEntity?.children?.length,
-            //     sceneBoundCenter: sceneBound.center.toString(),
-            //     sceneBoundHalf: sceneBound.halfExtents.toString()
-            // });
-            initShadowCatcher(app, sceneBound, {
-                debugVisual: shadowOpts?.debugVisual ?? false,
-                parentEntity: gsplatEntity,
-                meshEntity: meshEntity ?? undefined
-            });
-            // 必须在 create 之前注入 global：initialize() 在 create() 时同步执行，此时 script.global 尚未被赋值
-            (app as any).__shadowApplyGlobal = global;
-            if (!app.root.script) {
-                app.root.addComponent('script');
-            }
-            const applyScript = app.root.script.create(ShadowApplyRt) as unknown as ShadowApplyRt;
-            applyScript.global = global;
-            delete (app as any).__shadowApplyGlobal;
+            const shadowPipelineMount = {
+                sceneBound,
+                gsplatEntity,
+                meshEntity: meshEntity ?? null
+            };
 
             // 标注系统初始化时机：
             // - 若有 reveal / VFX（开场播放），则等 revealComplete 后再初始化，避免动画期间热点/tooltip 干扰观感
@@ -631,7 +609,7 @@ class Viewer {
                 });
             }
 
-            // Set move speed based on scene size (reuse sceneSize from above)
+            const sceneSize = sceneBound.halfExtents.length();
             this.inputController.setMoveSpeedFromSceneSize(sceneSize);
 
             // 先创建 cameraManager，因为 revealController 需要它来获取 targetConstraint
@@ -688,6 +666,7 @@ class Viewer {
                 revealBbox.copy(sceneBound);            // fallback
             }
             this.revealController = new RevealController(global, revealBbox, gsplatEntity, this.cameraManager);
+            scheduleShadowPipeline(global, shadowPipelineMount);
             global.events.on('persistentGsplatEffectRemountRequested', (restartAnim?: boolean) => {
                 // revealComplete 当帧内 reveal 脚本可能仍在执行 removeShaders；
                 // remount persistent 若同帧进行，可能被旧脚本收尾覆盖。统一延后一帧。
@@ -886,6 +865,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
                             // we're ready to render once the first sort has completed
                             state.readyToRender = true;
+                            notifyViewportReadyForShadow(global);
 
                             // 清除强制渲染标志，恢复按需渲染
                             this.forceRenderNextFrame = false;
@@ -1011,6 +991,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                             if (state.readyToRender) return; // 已被其他路径设置则跳过
 
                             state.readyToRender = true;
+                            notifyViewportReadyForShadow(global);
 
                             // 清除强制渲染标志，恢复按需渲染（场景已加载完成）
                             this.forceRenderNextFrame = false;
