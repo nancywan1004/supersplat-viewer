@@ -27,6 +27,18 @@ const BY_TYPE: Record<string, ReadonlySet<string>> = {
     'perlin-wave': PERLIN_WAVE
 };
 
+export type PersistentParamFieldKind = 'number' | 'vec3';
+
+/** 当前 persistent `type` 在 param 白名单中的全部键（Set 插入顺序） */
+export function getPersistentEffectParamKeys(effectType: string): readonly string[] {
+    const set = BY_TYPE[effectType];
+    return set ? Array.from(set) : [];
+}
+
+export function getPersistentParamFieldKind(key: string): PersistentParamFieldKind {
+    return key === 'center' ? 'vec3' : 'number';
+}
+
 function isVec3Triple(v: unknown): v is [number, number, number] {
     return Array.isArray(v) && v.length >= 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x));
 }

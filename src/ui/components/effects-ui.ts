@@ -12,6 +12,8 @@ import {
 import { isPersistentVfx } from '../../vfx/effects-runtime/reveal/reveal-policy';
 import { dispatchEffectsModuleCommand } from '../../editor-modules/effects-facade';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
+import { getPersistentParamSpecs, getRevealParamSpecs } from './effect-params-ui-schema';
+import { mountEffectParamsPanel, type EffectParamsPanelHandle } from './effect-params-panel';
 
 const REVEAL_EFFECTS = REVEAL_EFFECT_TYPE_VALUES;
 const PERSISTENT_EFFECTS = PERSISTENT_EFFECT_TYPE_VALUES;
@@ -60,6 +62,7 @@ const REVEAL_PANEL_HTML = (() => {
       <span id="effectTimeDisplay" class="effectTimeDisplay">0.0s</span>
     </div>
   </div>
+  <div id="revealEffectParamsPanel" class="effectParamsPanel hidden"></div>
   </fieldset>
   <fieldset class="effectsTrackFieldset" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:10px 12px;margin-bottom:10px">
     <legend style="padding:0 6px;font-size:13px;font-weight:600">Scene（GSplat）— Persistent</legend>
@@ -75,6 +78,7 @@ const REVEAL_PANEL_HTML = (() => {
         <option value="perlin-wave">Perlin Wave</option>
       </select>
     </div>
+    <div id="persistentEffectParamsPanel" class="effectParamsPanel hidden"></div>
   </fieldset>
   <fieldset class="effectsTrackFieldset effectsTrackAsset" style="border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px 12px;margin-bottom:10px;opacity:0.85">
     <legend style="padding:0 6px;font-size:13px;font-weight:600">Asset 特效</legend>
@@ -135,6 +139,13 @@ export function initRevealUI(global: Global): () => void {
     const effectTimeDisplay = container.querySelector('#effectTimeDisplay');
     const restartAnimTrackCheck = container.querySelector('#restartAnimTrackCheck');
     const restartAnimTrackOption = container.querySelector('#restartAnimTrackOption');
+    const revealEffectParamsPanelEl = container.querySelector('#revealEffectParamsPanel') as HTMLElement | null;
+    const persistentEffectParamsPanelEl = container.querySelector('#persistentEffectParamsPanel') as HTMLElement | null;
+
+    let revealParamsPanel: EffectParamsPanelHandle | null = null;
+    let persistentParamsPanel: EffectParamsPanelHandle | null = null;
+    let revealParamsPanelType = '';
+    let persistentParamsPanelType = '';
 
     // 默认开启：导出时通常需要重启相机 animTrack（与 message-bridge 的默认 syncAnimTrack=true 对齐）
     let restartAnimTrackEnabled = true;
@@ -176,7 +187,6 @@ export function initRevealUI(global: Global): () => void {
         if (byFixedId && typeof byFixedId.type === 'string' && isPersistentType(byFixedId.type)) {
             return byFixedId;
         }
-        // 兼容旧数据：若 key 非固定 id，也尝试从首个合法 persistent pack 推断默认值。
         for (const value of Object.values(paramsById)) {
             const pack = value as Record<string, unknown> | undefined;
             if (pack && typeof pack.type === 'string' && isPersistentType(pack.type)) {
@@ -196,8 +206,91 @@ export function initRevealUI(global: Global): () => void {
         if (pType === 'none') {
             return false;
         }
-        // settings.effects.persistent.enabled 未写入时默认 true
         return global.settings.effects?.persistent?.enabled ?? true;
+    };
+
+    const readRevealEffectParams = (): Record<string, unknown> => {
+        const ep = readRevealParams(global.settings)?.effectParams;
+        if (ep && typeof ep === 'object' && !Array.isArray(ep)) {
+            return { ...(ep as Record<string, unknown>) };
+        }
+        return {};
+    };
+
+    const readPersistentEffectParams = (): Record<string, unknown> => {
+        const ep = readPersistentPack()?.effectParams;
+        if (ep && typeof ep === 'object' && !Array.isArray(ep)) {
+            return { ...(ep as Record<string, unknown>) };
+        }
+        return {};
+    };
+
+    const patchRevealEffectParams = (partial: Record<string, unknown>) => {
+        if (Object.keys(partial).length === 0) return;
+        routeEffectsCommand('EFFECT_PARAMS_PATCH', {
+            effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
+            params: { effectParams: partial }
+        });
+        pushEditHistorySafe();
+    };
+
+    const patchPersistentEffectParams = (partial: Record<string, unknown>) => {
+        if (Object.keys(partial).length === 0) return;
+        routeEffectsCommand('EFFECT_PARAMS_PATCH', {
+            effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+            params: { effectParams: partial }
+        });
+        pushEditHistorySafe();
+    };
+
+    const ensureRevealParamsPanel = (effectType: string) => {
+        if (!revealEffectParamsPanelEl) return;
+        if (effectType === 'none' || !isRevealType(effectType)) {
+            revealParamsPanel?.destroy();
+            revealParamsPanel = null;
+            revealParamsPanelType = '';
+            revealEffectParamsPanelEl.classList.add('hidden');
+            return;
+        }
+        if (revealParamsPanelType !== effectType) {
+            revealParamsPanel?.destroy();
+            revealParamsPanel = mountEffectParamsPanel({
+                container: revealEffectParamsPanelEl,
+                specs: getRevealParamSpecs(effectType),
+                onPatch: patchRevealEffectParams
+            });
+            revealParamsPanelType = effectType;
+        }
+        revealParamsPanel?.syncFromValues(readRevealEffectParams());
+        revealParamsPanel?.setVisible(true);
+    };
+
+    const ensurePersistentParamsPanel = (effectType: string, enabled: boolean) => {
+        if (!persistentEffectParamsPanelEl) return;
+        if (!enabled || effectType === 'none' || !isPersistentType(effectType)) {
+            persistentParamsPanel?.destroy();
+            persistentParamsPanel = null;
+            persistentParamsPanelType = '';
+            persistentEffectParamsPanelEl.classList.add('hidden');
+            return;
+        }
+        if (persistentParamsPanelType !== effectType) {
+            persistentParamsPanel?.destroy();
+            persistentParamsPanel = mountEffectParamsPanel({
+                container: persistentEffectParamsPanelEl,
+                specs: getPersistentParamSpecs(effectType),
+                onPatch: patchPersistentEffectParams
+            });
+            persistentParamsPanelType = effectType;
+        }
+        persistentParamsPanel?.syncFromValues(readPersistentEffectParams());
+        persistentParamsPanel?.setVisible(true);
+    };
+
+    const syncEffectParamsPanels = () => {
+        const revealTrackType = (readRevealParams(global.settings)?.type ?? 'none') as string;
+        ensureRevealParamsPanel(revealTrackType);
+        ensurePersistentParamsPanel(getPersistentSelection(), getPersistentEnabled());
     };
 
     const onRevealTypeChange = (event: Event) => {
@@ -367,6 +460,7 @@ export function initRevealUI(global: Global): () => void {
                     effectTimelineRow.classList.add('hidden');
                 }
             }
+            syncEffectParamsPanels();
         }
     };
 
@@ -384,6 +478,15 @@ export function initRevealUI(global: Global): () => void {
             revealType.value = newConfig.type;
         }
         updateRevealControls();
+        if (newConfig?.effectParams && revealParamsPanel) {
+            revealParamsPanel.syncFromValues(readRevealEffectParams());
+        }
+    };
+
+    const onPersistentRevealConfigChanged = () => {
+        if (persistentParamsPanel) {
+            persistentParamsPanel.syncFromValues(readPersistentEffectParams());
+        }
     };
 
     if (restartAnimTrackCheck && restartAnimTrackOption) {
@@ -404,8 +507,13 @@ export function initRevealUI(global: Global): () => void {
     events.on('hasRevealEffect:changed', onHasRevealEffectChanged);
     events.on('revealType:changed', onRevealTypeChanged);
     events.on('revealConfigChanged', onRevealConfigChangedForControls);
+    events.on('persistentRevealConfigChanged', onPersistentRevealConfigChanged);
     events.on('revealComplete', scheduleRevealControlsRefresh);
     events.on('revealRestart', scheduleRevealControlsRefresh);
+
+    for (const panelEl of [revealEffectParamsPanelEl, persistentEffectParamsPanelEl]) {
+        panelEl?.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
+    }
 
     updateRevealControls();
 
@@ -428,8 +536,12 @@ export function initRevealUI(global: Global): () => void {
         events.off('hasRevealEffect:changed', onHasRevealEffectChanged);
         events.off('revealType:changed', onRevealTypeChanged);
         events.off('revealConfigChanged', onRevealConfigChangedForControls);
+        events.off('persistentRevealConfigChanged', onPersistentRevealConfigChanged);
         events.off('revealComplete', scheduleRevealControlsRefresh);
         events.off('revealRestart', scheduleRevealControlsRefresh);
+
+        revealParamsPanel?.destroy();
+        persistentParamsPanel?.destroy();
 
         if (effectsDebugTimer !== undefined) clearInterval(effectsDebugTimer);
         effectsDebugEl?.remove();

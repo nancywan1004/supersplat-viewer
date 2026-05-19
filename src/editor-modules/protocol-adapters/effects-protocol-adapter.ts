@@ -229,6 +229,20 @@ export function applyGsplatPersistentParamsPatch(global: Global, params: Record<
         dispatchPersistentGsplatTeardownAfterSettingsSync(global);
         return;
     }
+
+    const effectParamsOnlyPatch =
+        hasEffectParamsPatch &&
+        !hasTypePatch &&
+        !hasEnabledPatch &&
+        !hasAutoStartPatch;
+    if (effectParamsOnlyPatch) {
+        global.events.fire('persistentRevealConfigChanged', {
+            type: effectivePersistentType,
+            effectParams: nextPack.effectParams
+        });
+        return;
+    }
+
     const packMutated = Object.keys(persistentPatch).length > 0;
     if (!hasTypePatch && !hasEnabledPatch && !packMutated) {
         return;

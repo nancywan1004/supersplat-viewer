@@ -29,6 +29,7 @@ import {
     rebindPersistentGsplatTimelineFromSettings
 } from '../persistent/persistent-effect';
 import { shouldRequestPersistentGsplatRemount } from './effects-orchestrator';
+import { applyPersistentEffectParamsToScript } from '../persistent/persistent-effect-params';
 import { applyRevealEffectParamsToScript } from './reveal-effect-params';
 import type { RevealParticipationSyncContext } from '../gsplat-shader-effect';
 import { RevealPersistentGsplatController } from './reveal-persistent-controller';
@@ -183,6 +184,17 @@ export class RevealController {
         events.on('revealConfigChanged', (newConfig: Partial<RevealConfig>) => {
             console.log('Reveal config changed:', newConfig);
             this.updateConfig(newConfig);
+        });
+
+        events.on('persistentRevealConfigChanged', (pack: { type?: string; effectParams?: Record<string, unknown> }) => {
+            if (!this._persistentGsplat.isPersistentTimelineBound() || !this.currentScript) {
+                return;
+            }
+            const t = pack?.type;
+            if (!t || !isPersistentVfx(t as any)) {
+                return;
+            }
+            applyPersistentEffectParamsToScript(this.currentScript, t, pack.effectParams ?? undefined);
         });
 
         // 协议 / UI：强制结束「一次性 reveal」播放；persistent **实体脚本**不由此处创建/销毁，仅可能重绑指针（见 `teardownOneShotRevealGsplatScripts`）。
@@ -1313,6 +1325,7 @@ export class RevealController {
      */
     private updateCurrentScriptConfig(newConfig: Partial<RevealConfig>) {
         if (!this.currentScript) return;
+        if (this._persistentGsplat.isPersistentTimelineBound()) return;
 
         console.log('Updating current script config');
 

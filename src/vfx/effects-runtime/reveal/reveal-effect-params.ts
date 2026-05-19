@@ -186,6 +186,40 @@ const BY_TYPE: Record<string, ReadonlySet<string>> = {
     'sketch': SKETCH
 };
 
+/** VFX 面板控件类型（与 {@link applyRevealEffectParamsToScript} 写入语义对齐） */
+export type RevealParamFieldKind = 'number' | 'color' | 'boolean' | 'vec3' | 'vec2xz';
+
+/** 当前 reveal `type` 在 param 白名单中的全部键（Set 插入顺序） */
+export function getRevealEffectParamKeys(effectType: string): readonly string[] {
+    const set = BY_TYPE[effectType];
+    return set ? Array.from(set) : [];
+}
+
+export function getRevealParamFieldKind(key: string): RevealParamFieldKind {
+    if (
+        key === 'dotTint' ||
+        key === 'waveTint' ||
+        key === 'fallTint' ||
+        key === 'riseTint' ||
+        key === 'hitTint' ||
+        key === 'phase1CloudTint' ||
+        key === 'phase2HaloTint' ||
+        key === 'paperTint'
+    ) {
+        return 'color';
+    }
+    if (key === 'useCameraDistance' || key === 'pointSizeScaleByScene') {
+        return 'boolean';
+    }
+    if (key === 'scatterDirection' || key === 'aabbMin' || key === 'aabbMax') {
+        return 'vec3';
+    }
+    if (key === 'aabbXZMin' || key === 'aabbXZMax') {
+        return 'vec2xz';
+    }
+    return 'number';
+}
+
 /** JSON 数组是否为长度≥3 的有限数字三元组（用于 Color / Vec3 / paperTint） */
 function isColorTriple(v: unknown): v is [number, number, number] {
     return Array.isArray(v) && v.length >= 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x));
