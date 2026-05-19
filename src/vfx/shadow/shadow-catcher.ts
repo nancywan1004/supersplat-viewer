@@ -133,6 +133,13 @@ function initShadowCatcher(
     const searchRoot = parentEntity ?? root;
     let entity = searchRoot.findByName('shadowCatcher') as Entity | null;
 
+    /** 主 `gsplat` 使用 `setLocalEulerAngles(0,0,180)`；接影挂在其子树下时用局部 Z=-180° 抵消，与 collision / GLB 世界顶点一致 */
+    const applyGsplatChildRotationCancel = (catcher: Entity) => {
+        if (parentEntity && catcher.parent === parentEntity) {
+            catcher.setLocalEulerAngles(0, 0, -180);
+        }
+    };
+
     if (entity) {
         // 已存在，更新位置和参数
         if (!meshEntity && parentEntity) {
@@ -141,6 +148,7 @@ function initShadowCatcher(
             const groundY = center.y - half.y;
             entity.setPosition(center.x, groundY, center.z);
         }
+        applyGsplatChildRotationCancel(entity);
         const script = entity.script?.get('shadowCatcher') as unknown as ShadowCatcher | undefined;
         if (script) {
             script.scale.set(sizeX, 1, sizeZ);
@@ -161,6 +169,7 @@ function initShadowCatcher(
         if (parentEntity) {
             parentEntity.addChild(entity);
             entity.setLocalPosition(0, 0, 0);
+            applyGsplatChildRotationCancel(entity);
         } else {
             root.addChild(entity);
         }
@@ -184,6 +193,7 @@ function initShadowCatcher(
     if (parentEntity) {
         parentEntity.addChild(entity);
         entity.setLocalPosition(0, -half.y, 0);
+        applyGsplatChildRotationCancel(entity);
     } else {
         const groundY = center.y - half.y;
         entity.setPosition(center.x, groundY, center.z);
