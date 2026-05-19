@@ -421,6 +421,9 @@ export class Annotation extends Script {
         Annotation.videoPreviewEl = document.createElement('video');
         Annotation.videoPreviewEl.controls = true;
         Annotation.videoPreviewEl.playsInline = true;
+        // 全屏预览须可出声（用户点击缩略后 play，属用户手势）；与 tooltip 内 muted 海报区分
+        Annotation.videoPreviewEl.muted = false;
+        Annotation.videoPreviewEl.removeAttribute('muted');
         Annotation.videoPreviewOverlay.appendChild(Annotation.videoPreviewEl);
         Annotation.videoPreviewOverlay.addEventListener('click', (ev) => {
             if (ev.target === Annotation.videoPreviewEl) {
@@ -438,6 +441,9 @@ export class Annotation extends Script {
             }
             Annotation.closeMediaPreviews();
             Annotation.videoPreviewEl.src = url;
+            Annotation.videoPreviewEl.muted = false;
+            Annotation.videoPreviewEl.removeAttribute('muted');
+            Annotation.videoThumbPosterEl?.pause();
             Annotation.videoPreviewOverlay.style.display = 'flex';
             void Annotation.videoPreviewEl.play();
         });
@@ -497,6 +503,8 @@ export class Annotation extends Script {
             Annotation.videoPreviewEl.pause();
             Annotation.videoPreviewEl.removeAttribute('src');
             Annotation.videoPreviewEl.load();
+            Annotation.videoPreviewEl.muted = false;
+            Annotation.videoPreviewEl.removeAttribute('muted');
         }
     }
 
