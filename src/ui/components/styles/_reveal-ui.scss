@@ -40,12 +40,22 @@
     border-top: 1px solid rgba(255, 255, 255, 0.08);
     max-height: 280px;
     overflow-y: auto;
+
+    /* 窄行内数字输入：略小字号与内边距，避免截断 */
+    .settingsInput,
+    .effectParamAxisInput {
+        font-size: 11px;
+        padding: 2px 4px;
+        line-height: 1.25;
+    }
 }
 
 .effectParamRow {
+    display: flex;
     align-items: center;
     gap: 8px;
     min-height: 28px;
+    flex-wrap: nowrap;
 }
 
 .effectParamLabel {
@@ -92,36 +102,59 @@
 }
 
 .effectParamVecWrap {
-    flex: 1;
+    flex: 1 1 0;
     display: flex;
-    flex-wrap: wrap;
-    gap: 4px 6px;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 4px;
     min-width: 0;
 }
 
 .effectParamAxis {
     display: flex;
+    flex-direction: row;
     align-items: center;
-    gap: 4px;
+    gap: 3px;
+    flex: 1 1 0;
+    min-width: 0;
 }
 
 .effectParamAxisLabel {
+    flex: 0 0 auto;
     font-size: 10px;
-    opacity: 0.7;
-    width: 12px;
+    opacity: 0.75;
+    width: 11px;
+    text-align: center;
 }
 
 .effectParamAxisInput {
-    width: 56px;
-    min-width: 56px;
+    flex: 1 1 0;
+    width: 100%;
+    min-width: 0;
+    max-width: 80px;
 }
 
+/* vec3 / 颜色：标签与 X/Y/Z（或 R/G/B）同一行，避免换行遮挡 */
 .effectParamRowVec,
 .effectParamRowColor {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
 
-    .effectParamLabel {
-        flex: 0 0 100%;
-        margin-bottom: 2px;
+    > .effectParamLabel {
+        flex: 0 0 28%;
+        max-width: 36%;
+        min-width: 0;
+        margin-bottom: 0;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        line-height: 1.25;
     }
+}
+
+/* 覆盖父级 .settingsRow > label 的 min-width:80px，否则 vec 行被挤换行 */
+#settingsPanel .effectParamRowVec.settingsRow > label.effectParamLabel,
+#settingsPanel .effectParamRowColor.settingsRow > label.effectParamLabel,
+#revealPanel .effectParamRowVec.settingsRow > label.effectParamLabel,
+#revealPanel .effectParamRowColor.settingsRow > label.effectParamLabel {
+    min-width: 0;
 }
