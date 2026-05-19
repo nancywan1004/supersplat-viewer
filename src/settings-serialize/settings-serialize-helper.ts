@@ -104,6 +104,7 @@ export function ensureShadow(settings: ExperienceSettings): NonNullable<Experien
         (pe as Record<string, unknown>).shadow = { ...DEFAULT_SHADOW };
     } else {
         const sh = (pe as Record<string, unknown>).shadow as Record<string, unknown>;
+        if (typeof sh.enabled !== 'boolean') sh.enabled = DEFAULT_SHADOW.enabled;
         if (typeof sh.darken !== 'number') sh.darken = DEFAULT_SHADOW.darken;
         if (sh.castShadows === undefined) sh.castShadows = DEFAULT_SHADOW.castShadows;
         if (sh.debugVisual === undefined) sh.debugVisual = DEFAULT_SHADOW.debugVisual;
