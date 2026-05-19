@@ -20,6 +20,7 @@ import {
     BLENDMODE_ONE_MINUS_SRC_ALPHA,
     BLENDMODE_SRC_ALPHA
 } from 'playcanvas';
+import { normalizeAnnotationMediaFields } from './annotation-toolbar/media-fields';
 
 // clamp the vertices of the hotspot so it is never clipped by the near or far plane
 const depthClampGlsl = `
@@ -81,6 +82,14 @@ export class Annotation extends Script {
     static imagePreviewOverlay: HTMLDivElement | null = null;
 
     static imagePreviewImg: HTMLImageElement | null = null;
+
+    static videoThumbDom: HTMLDivElement | null = null;
+
+    static videoThumbPosterEl: HTMLVideoElement | null = null;
+
+    static videoPreviewOverlay: HTMLDivElement | null = null;
+
+    static videoPreviewEl: HTMLVideoElement | null = null;
 
     static layers: Layer[] = [];
 
@@ -239,11 +248,50 @@ export class Annotation extends Script {
                 justify-content: center;
                 z-index: 9999;
             }
-            .pc-annotation-image-preview-overlay img {
+            .pc-annotation-image-preview-overlay img,
+            .pc-annotation-image-preview-overlay video {
                 max-width: 80vw;
                 max-height: 80vh;
                 border-radius: 8px;
                 box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+            }
+            .pc-annotation-video-thumb {
+                display: none;
+                position: relative;
+                max-width: 100%;
+                max-height: 100px;
+                margin-top: 4px;
+                border-radius: 4px;
+                overflow: hidden;
+                cursor: pointer;
+                background: rgba(0,0,0,0.35);
+            }
+            .pc-annotation-video-thumb-poster {
+                display: block;
+                width: 100%;
+                max-height: 100px;
+                object-fit: cover;
+                pointer-events: none;
+            }
+            .pc-annotation-video-play-icon {
+                position: absolute;
+                left: 50%;
+                top: 50%;
+                transform: translate(-50%, -50%);
+                width: 36px;
+                height: 36px;
+                border-radius: 50%;
+                background: rgba(0,0,0,0.55);
+                pointer-events: none;
+            }
+            .pc-annotation-video-play-icon::after {
+                content: '';
+                position: absolute;
+                left: 14px;
+                top: 10px;
+                border-style: solid;
+                border-width: 8px 0 8px 14px;
+                border-color: transparent transparent transparent #fff;
             }
         `;
 
@@ -322,10 +370,11 @@ export class Annotation extends Script {
         Annotation.imagePreviewOverlay.style.display = 'none';
         Annotation.imagePreviewImg = document.createElement('img');
         Annotation.imagePreviewOverlay.appendChild(Annotation.imagePreviewImg);
-        Annotation.imagePreviewOverlay.addEventListener('click', () => {
-            if (Annotation.imagePreviewOverlay) {
-                Annotation.imagePreviewOverlay.style.display = 'none';
+        Annotation.imagePreviewOverlay.addEventListener('click', (ev) => {
+            if (ev.target === Annotation.imagePreviewImg) {
+                return;
             }
+            Annotation.closeMediaPreviews();
         });
 
         if (Annotation.imageDom) {
@@ -333,6 +382,7 @@ export class Annotation extends Script {
                 ev.stopPropagation();
                 const src = Annotation.imageDom!.src;
                 if (!src) return;
+                Annotation.closeMediaPreviews();
                 if (Annotation.imagePreviewImg) {
                     Annotation.imagePreviewImg.src = src;
                 }
@@ -347,8 +397,107 @@ export class Annotation extends Script {
             });
         }
 
+        Annotation.videoThumbDom = document.createElement('div');
+        Annotation.videoThumbDom.className = 'pc-annotation-video-thumb';
+        Annotation.videoThumbDom.setAttribute('role', 'button');
+        Annotation.videoThumbDom.setAttribute('aria-label', '播放视频');
+
+        Annotation.videoThumbPosterEl = document.createElement('video');
+        Annotation.videoThumbPosterEl.className = 'pc-annotation-video-thumb-poster';
+        Annotation.videoThumbPosterEl.preload = 'metadata';
+        Annotation.videoThumbPosterEl.muted = true;
+        Annotation.videoThumbPosterEl.playsInline = true;
+        Annotation.videoThumbDom.appendChild(Annotation.videoThumbPosterEl);
+
+        const videoPlayIcon = document.createElement('span');
+        videoPlayIcon.className = 'pc-annotation-video-play-icon';
+        Annotation.videoThumbDom.appendChild(videoPlayIcon);
+
+        Annotation.tooltipDom.appendChild(Annotation.videoThumbDom);
+
+        Annotation.videoPreviewOverlay = document.createElement('div');
+        Annotation.videoPreviewOverlay.className = 'pc-annotation-image-preview-overlay';
+        Annotation.videoPreviewOverlay.style.display = 'none';
+        Annotation.videoPreviewEl = document.createElement('video');
+        Annotation.videoPreviewEl.controls = true;
+        Annotation.videoPreviewEl.playsInline = true;
+        Annotation.videoPreviewOverlay.appendChild(Annotation.videoPreviewEl);
+        Annotation.videoPreviewOverlay.addEventListener('click', (ev) => {
+            if (ev.target === Annotation.videoPreviewEl) {
+                return;
+            }
+            Annotation.closeMediaPreviews();
+        });
+        Annotation.videoPreviewEl.addEventListener('click', (ev) => ev.stopPropagation());
+
+        Annotation.videoThumbDom.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const url = Annotation.videoThumbDom?.dataset.videoUrl;
+            if (!url || !Annotation.videoPreviewEl || !Annotation.videoPreviewOverlay) {
+                return;
+            }
+            Annotation.closeMediaPreviews();
+            Annotation.videoPreviewEl.src = url;
+            Annotation.videoPreviewOverlay.style.display = 'flex';
+            void Annotation.videoPreviewEl.play();
+        });
+
+        Annotation.videoThumbPosterEl.addEventListener('error', () => {
+            if (Annotation.videoThumbDom) {
+                Annotation.videoThumbDom.style.display = 'none';
+            }
+            if (Annotation.videoThumbPosterEl) {
+                Annotation.videoThumbPosterEl.removeAttribute('src');
+            }
+        });
+
         Annotation.parentDom.appendChild(Annotation.tooltipDom);
         Annotation.parentDom.appendChild(Annotation.imagePreviewOverlay);
+        Annotation.parentDom.appendChild(Annotation.videoPreviewOverlay);
+    }
+
+    /** Sync tooltip image/video (mutually exclusive). */
+    static syncTooltipMedia(imageUrl?: string, videoUrl?: string): void {
+        const media = normalizeAnnotationMediaFields({ imageUrl, videoUrl });
+
+        if (Annotation.imageDom) {
+            Annotation.imageDom.style.display = 'none';
+            Annotation.imageDom.removeAttribute('src');
+        }
+        if (Annotation.videoThumbDom) {
+            Annotation.videoThumbDom.style.display = 'none';
+            delete Annotation.videoThumbDom.dataset.videoUrl;
+        }
+        if (Annotation.videoThumbPosterEl) {
+            Annotation.videoThumbPosterEl.removeAttribute('src');
+        }
+
+        if (media.imageUrl && Annotation.imageDom) {
+            Annotation.imageDom.src = media.imageUrl;
+            Annotation.imageDom.style.display = 'block';
+        } else if (media.videoUrl && Annotation.videoThumbDom && Annotation.videoThumbPosterEl) {
+            Annotation.videoThumbDom.dataset.videoUrl = media.videoUrl;
+            Annotation.videoThumbPosterEl.src = media.videoUrl;
+            Annotation.videoThumbDom.style.display = 'block';
+        }
+    }
+
+    /** Close fullscreen image/video previews and stop playback. */
+    static closeMediaPreviews(): void {
+        if (Annotation.imagePreviewOverlay) {
+            Annotation.imagePreviewOverlay.style.display = 'none';
+        }
+        if (Annotation.imagePreviewImg) {
+            Annotation.imagePreviewImg.removeAttribute('src');
+        }
+        if (Annotation.videoPreviewOverlay) {
+            Annotation.videoPreviewOverlay.style.display = 'none';
+        }
+        if (Annotation.videoPreviewEl) {
+            Annotation.videoPreviewEl.pause();
+            Annotation.videoPreviewEl.removeAttribute('src');
+            Annotation.videoPreviewEl.load();
+        }
     }
 
     /**
@@ -663,6 +812,7 @@ export class Annotation extends Script {
             Annotation.tooltipDom.style.visibility = 'hidden';
             Annotation.tooltipDom.style.opacity = '0';
         }
+        Annotation.closeMediaPreviews();
     }
 
     /**

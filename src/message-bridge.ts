@@ -771,6 +771,7 @@ const initPostMessageBridge = (global: Global) => {
                 title: serialized.title ?? '',
                 text: serialized.text ?? '',
                 imageUrl: serialized.imageUrl,
+                videoUrl: serialized.videoUrl,
                 showTitleWhenCollapsed: serialized.showTitleWhenCollapsed ?? false
             }
         });

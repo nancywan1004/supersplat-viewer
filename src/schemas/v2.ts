@@ -60,6 +60,7 @@ type Annotation = {
     title: string,
     text: string,
     imageUrl?: string,
+    videoUrl?: string,
     showTitleWhenCollapsed: boolean,
     collapsed: boolean,
     extras?: any,
@@ -213,6 +214,7 @@ const validateAnnotation = (data: unknown, path: string): Annotation => {
     assertString(obj.title, `${path}.title`);
     assertString(obj.text, `${path}.text`);
     if (obj.imageUrl !== undefined) assertString(obj.imageUrl, `${path}.imageUrl`);
+    if (obj.videoUrl !== undefined) assertString(obj.videoUrl, `${path}.videoUrl`);
     assertBoolean(obj.showTitleWhenCollapsed, `${path}.showTitleWhenCollapsed`);
     assertBoolean(obj.collapsed, `${path}.collapsed`);
     validateCamera(obj.camera, `${path}.camera`);

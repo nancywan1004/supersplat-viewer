@@ -1,3 +1,4 @@
+import { normalizeAnnotationMediaFields } from '../annotation-toolbar/media-fields';
 import type {
     Annotation,
     Camera,
@@ -149,12 +150,16 @@ export function normalizeImportedAnnotation(ann: unknown): Annotation | null {
     const camera: Camera = a.camera && typeof a.camera === 'object' && (a.camera as any).initial
         ? (a.camera as Camera)
         : { initial: { position: [0, 0, 0], target: [0, 0, 0], fov: 60 } };
+    const media = normalizeAnnotationMediaFields({
+        imageUrl: typeof a.imageUrl === 'string' ? a.imageUrl : undefined,
+        videoUrl: typeof a.videoUrl === 'string' ? a.videoUrl : undefined
+    });
     return {
         id,
         position: pos,
         title: typeof a.title === 'string' ? a.title : '',
         text: typeof a.text === 'string' ? a.text : '',
-        imageUrl: typeof a.imageUrl === 'string' ? a.imageUrl : undefined,
+        ...media,
         showTitleWhenCollapsed: Boolean(a.showTitleWhenCollapsed),
         collapsed: Boolean(a.collapsed),
         extras: a.extras && typeof a.extras === 'object' ? a.extras : {},

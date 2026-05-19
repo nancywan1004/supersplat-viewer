@@ -1,3 +1,4 @@
+import { normalizeAnnotationMediaFields } from '../annotation-toolbar/media-fields';
 import type { AnnotationData } from '../annotation-toolbar/types';
 import type { Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 import { setPlacementCursorActive } from '../placement-cursor';
@@ -24,10 +25,15 @@ function formDataFromPartial(value: Partial<AnnotationData> | undefined, allowEm
             ? { title: '', text: '', showTitleWhenCollapsed: false }
             : null;
     }
+    const media = normalizeAnnotationMediaFields({
+        imageUrl: value.imageUrl === null ? '' : value.imageUrl,
+        videoUrl: value.videoUrl === null ? '' : value.videoUrl
+    });
     return {
         title: value.title ?? '',
         text: value.text ?? '',
-        imageUrl: value.imageUrl === null ? '' : value.imageUrl,
+        imageUrl: media.imageUrl,
+        videoUrl: media.videoUrl,
         showTitleWhenCollapsed: value.showTitleWhenCollapsed ?? false
     };
 }

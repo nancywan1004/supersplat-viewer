@@ -9,6 +9,7 @@
 
 import { Vec3, Entity } from 'playcanvas';
 import { Annotation } from '../annotation';
+import { normalizeAnnotationMediaFields } from './media-fields';
 import type { AnnotationData, AnnotationFormData } from './types';
 import type { Global } from '../types';
 
@@ -129,8 +130,13 @@ export class AnnotationEntity extends Annotation {
             this.data.text = data.text;
         }
 
-        if (data.imageUrl !== undefined) {
-            this.data.imageUrl = data.imageUrl;
+        if (data.imageUrl !== undefined || data.videoUrl !== undefined) {
+            const media = normalizeAnnotationMediaFields({
+                imageUrl: data.imageUrl !== undefined ? data.imageUrl : this.data.imageUrl,
+                videoUrl: data.videoUrl !== undefined ? data.videoUrl : this.data.videoUrl
+            });
+            this.data.imageUrl = media.imageUrl;
+            this.data.videoUrl = media.videoUrl;
         }
 
         if (data.showTitleWhenCollapsed !== undefined) {
@@ -186,16 +192,7 @@ export class AnnotationEntity extends Annotation {
         Annotation.tooltipDom!.classList.toggle('pc-annotation--selected', this.selectedVisual);
         Annotation.titleDom!.textContent = this.title;
         Annotation.textDom!.textContent = this.text;
-        if (Annotation.imageDom) {
-            if (this.data?.imageUrl) {
-                Annotation.imageDom.src = this.data.imageUrl;
-                Annotation.imageDom.style.display = 'block';
-            } else {
-                // 无图片时彻底移除占位：清空 src 并隐藏
-                Annotation.imageDom.removeAttribute('src');
-                Annotation.imageDom.style.display = 'none';
-            }
-        }
+        Annotation.syncTooltipMedia(this.data?.imageUrl, this.data?.videoUrl);
         this._update();
         this.fire('show', this);
     }
@@ -329,6 +326,7 @@ export class AnnotationEntity extends Annotation {
             title: this.title,
             text: this.text,
             imageUrl: this.data.imageUrl,
+            videoUrl: this.data.videoUrl,
             showTitleWhenCollapsed: this.data.showTitleWhenCollapsed,
             // collapsed 字段仅为兼容旧数据，始终视为默认收起
             collapsed: false,

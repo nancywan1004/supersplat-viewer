@@ -13,8 +13,10 @@ export interface AnnotationFormData {
     title: string;
     /** 正文（最大 50 字符） */
     text: string;
-    /** 可选图片 URL */
+    /** 可选图片 URL（与 videoUrl 互斥） */
     imageUrl?: string;
+    /** 可选视频 URL（与 imageUrl 互斥） */
+    videoUrl?: string;
     /** 收起时是否显示标题 */
     showTitleWhenCollapsed: boolean;
 }
@@ -28,6 +30,7 @@ export interface AnnotationData extends Annotation {
     title: string;
     text: string;
     imageUrl?: string;
+    videoUrl?: string;
     showTitleWhenCollapsed: boolean;
     collapsed: boolean;
 }
