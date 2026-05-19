@@ -182,6 +182,19 @@ void initShared(vec3 center) {
     }
 }
 
+// Phase1/Phase2 共用：自适应点云尺寸（径向距离 + 密度 + 屏幕可见性地板）
+float computePointCloudSize(vec3 originalCenter) {
+    float normalizedDistance = clamp(g_dist / max(uEndRadius, 1.0), 0.0, 1.0);
+    float adaptiveSize = uPointSize * (1.0 + normalizedDistance * uPointSizeAdaptiveScale);
+    float densityT = clamp((uSceneDensityNorm - 0.5) * uSceneDensityInfluence + 0.5, 0.0, 1.0);
+    float densitySizeMul = mix(1.42, 0.62, densityT);
+    adaptiveSize *= densitySizeMul;
+    float camDist = length(originalCenter - uViewPos);
+    float minVisibleSize = clamp(camDist * uMinSizeByViewDistSlope, uPointSize * 0.85, uPointSize * uScreenFloorMaxScale);
+    adaptiveSize = max(adaptiveSize, minVisibleSize);
+    return adaptiveSize;
+}
+
 void modifySplatCenter(inout vec3 center) {
     vec3 originalCenter = center;
     
@@ -402,31 +415,19 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
             gsplatMakeSpherical(scale, originalSize * 0.001);
             return;
         }
-        // Phase 1 自适应点大小：远处点自动放大，近处点保持小尺寸
-        // normalizedDistance: 0 = 中心附近(近), 1 = 最远处
-        float normalizedDistance = clamp(g_dist / max(uEndRadius, 1.0), 0.0, 1.0);
-        // adaptiveSize = pointSize * (1.0 + normalizedDistance * adaptiveScale)
-        // 近处: ~uPointSize, 远处: uPointSize * (1.0 + adaptiveScale)
-        float adaptiveSize = uPointSize * (1.0 + normalizedDistance * uPointSizeAdaptiveScale);
-        // 场景密度补偿（强作用版）：稀疏场景放大，密集场景收缩
-        float densityT = clamp((uSceneDensityNorm - 0.5) * uSceneDensityInfluence + 0.5, 0.0, 1.0);
-        float densitySizeMul = mix(1.42, 0.62, densityT);
-        adaptiveSize *= densitySizeMul;
-        // 屏幕可见性地板：避免远处点掉到亚像素导致“相机拉近才看见”
-        float camDist = length(originalCenter - uViewPos);
-        float minVisibleSize = clamp(camDist * uMinSizeByViewDistSlope, uPointSize * 0.85, uPointSize * uScreenFloorMaxScale);
-        adaptiveSize = max(adaptiveSize, minVisibleSize);
+        float adaptiveSize = computePointCloudSize(originalCenter);
         gsplatMakeSpherical(scale, adaptiveSize);
         return;
     }
     if (g_phase == 2.0) {
+        float pointCloudSize = computePointCloudSize(originalCenter);
         if (g_recoverProgress <= 0.0) {
-            gsplatMakeSpherical(scale, uPointSize);
+            gsplatMakeSpherical(scale, pointCloudSize);
             return;
         }
         float easedT = clamp(1.0 - pow(1.0 - g_recoverProgress, 4.0), 0.0, 1.0);
-        // 直接对 scale 向量插值：从点大小过渡回原始各向异性，避免整段用球形导致的模糊感
-        vec3 pointScale = vec3(uPointSize);
+        // 从与 Phase1 一致的点云尺寸过渡回原始各向异性
+        vec3 pointScale = vec3(pointCloudSize);
         scale = mix(pointScale, originalScale, easedT);
         return;
     }
@@ -699,6 +700,18 @@ fn initShared(center: vec3f) {
     }
 }
 
+fn computePointCloudSize(originalCenter: vec3f) -> f32 {
+    let normalizedDistance = clamp(g_dist / max(uniform.uEndRadius, 1.0), 0.0, 1.0);
+    var adaptiveSize = uniform.uPointSize * (1.0 + normalizedDistance * uniform.uPointSizeAdaptiveScale);
+    let densityT = clamp((uniform.uSceneDensityNorm - 0.5) * uniform.uSceneDensityInfluence + 0.5, 0.0, 1.0);
+    let densitySizeMul = mix(1.42, 0.62, densityT);
+    adaptiveSize = adaptiveSize * densitySizeMul;
+    let camDist = length(originalCenter - uniform.uViewPos);
+    let minVisibleSize = clamp(camDist * uniform.uMinSizeByViewDistSlope, uniform.uPointSize * 0.85, uniform.uPointSize * uniform.uScreenFloorMaxScale);
+    adaptiveSize = max(adaptiveSize, minVisibleSize);
+    return adaptiveSize;
+}
+
 fn modifySplatCenter(center: ptr<function, vec3f>) {
     let originalCenter = *center;
     
@@ -904,30 +917,18 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
             gsplatMakeSpherical(scale, originalSize * 0.001);
             return;
         }
-        // Phase 1 自适应点大小：远处点自动放大，近处点保持小尺寸
-        // normalizedDistance: 0 = 中心附近(近), 1 = 最远处
-        let normalizedDistance = clamp(g_dist / max(uniform.uEndRadius, 1.0), 0.0, 1.0);
-        // adaptiveSize = pointSize * (1.0 + normalizedDistance * adaptiveScale)
-        // 近处: ~uPointSize, 远处: uPointSize * (1.0 + adaptiveScale)
-        var adaptiveSize = uniform.uPointSize * (1.0 + normalizedDistance * uniform.uPointSizeAdaptiveScale);
-        // 场景密度补偿（强作用版）：稀疏场景放大，密集场景收缩
-        let densityT = clamp((uniform.uSceneDensityNorm - 0.5) * uniform.uSceneDensityInfluence + 0.5, 0.0, 1.0);
-        let densitySizeMul = mix(1.42, 0.62, densityT);
-        adaptiveSize = adaptiveSize * densitySizeMul;
-        // 屏幕可见性地板：避免远处点掉到亚像素导致“相机拉近才看见”
-        let camDist = length(originalCenter - uniform.uViewPos);
-        let minVisibleSize = clamp(camDist * uniform.uMinSizeByViewDistSlope, uniform.uPointSize * 0.85, uniform.uPointSize * uniform.uScreenFloorMaxScale);
-        adaptiveSize = max(adaptiveSize, minVisibleSize);
+        let adaptiveSize = computePointCloudSize(originalCenter);
         gsplatMakeSpherical(scale, adaptiveSize);
         return;
     }
     if (g_phase == 2.0) {
+        let pointCloudSize = computePointCloudSize(originalCenter);
         if (g_recoverProgress <= 0.0) {
-            gsplatMakeSpherical(scale, uniform.uPointSize);
+            gsplatMakeSpherical(scale, pointCloudSize);
             return;
         }
         let easedT = clamp(1.0 - pow(1.0 - g_recoverProgress, 4.0), 0.0, 1.0);
-        let pointScale = vec3f(uniform.uPointSize);
+        let pointScale = vec3f(pointCloudSize);
         *scale = mix(pointScale, originalScale, easedT);
         return;
     }
