@@ -86,6 +86,9 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
     if (!Array.isArray(bg.color) || bg.color.length !== 3) {
         bg.color = [0, 0, 0];
     }
+    if (typeof bg.skyboxUrl === 'string' && !bg.skyboxUrl.trim()) {
+        delete bg.skyboxUrl;
+    }
     if (!out.postEffectSettings || typeof out.postEffectSettings !== 'object') {
         out.postEffectSettings = defaultPostEffectSettings();
     } else {

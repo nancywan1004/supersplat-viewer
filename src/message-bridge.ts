@@ -14,7 +14,8 @@ import {
     canRedo,
     restoreAnnotationsFromSettings,
     restoreLightingFromSettings,
-    restorePostEffectsFromSettings
+    restorePostEffectsFromSettings,
+    restoreSkyboxFromSettings
 } from './edit-history';
 import type { CommandRegistry } from './editor-modules/command-registry';
 import { MESSAGE_BRIDGE_MODULE } from './editor-modules/modules-types';
@@ -253,6 +254,7 @@ const initPostMessageBridge = (global: Global) => {
                         restoreAnnotationsFromSettings(global);
                         restoreLightingFromSettings(global);
                         restorePostEffectsFromSettings(global);
+                        restoreSkyboxFromSettings(global);
                     }
                 }
                 state.editMode = !!p.value;
@@ -279,6 +281,7 @@ const initPostMessageBridge = (global: Global) => {
                     // 统一通过 helper 按当前 settings 重置 Lighting / NightMode / PostEffect
                     restoreLightingFromSettings(global);
                     restorePostEffectsFromSettings(global);
+                    restoreSkyboxFromSettings(global);
                 }
                 state.editMode = false;
                 break;

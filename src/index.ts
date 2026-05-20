@@ -12,13 +12,11 @@ import {
     type AppBase,
     GSplatResource,
     revision as engineRevision,
-    version as engineVersion,
-    Vec3
+    version as engineVersion
 } from 'playcanvas';
 
-import { applySkyboxSphere, removeSkyboxSphere, applySkyboxTexture, type SkyboxOptions } from './loaders/skybox-loader';
-
 import { App } from './app';
+import { applySkyboxTexture, clearSkyboxDisplay } from './loaders/skybox-loader';
 import { MeshCollision, loadVoxelCollision } from './collision';
 import type { Collision } from './collision';
 import { observe } from './core/observe';
@@ -38,7 +36,11 @@ import { version as appVersion } from '../package.json';
 import { initPostMessageBridge } from './message-bridge';
 import { ensureViewSettings } from './view-settings';
 import { initVideoExport } from './render/video-export';
-import { ensureRevealEffect } from './settings-serialize/settings-serialize-helper';
+import {
+    ensureRevealEffect,
+    resolveInitialSkyboxUrl,
+    setSkyboxUrlInSettings
+} from './settings-serialize/settings-serialize-helper';
 import {
     createDefaultEffectsRuntimeState,
     normalizeEffectsOnImport,
@@ -345,6 +347,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     state.hasRevealEffect = hasRevealInSettings(processedSettings);
     syncEffectsRuntimeStateFromSettings(state, processedSettings);
 
+    const initialSkyboxUrl = resolveInitialSkyboxUrl(processedSettings, config.skyboxUrl);
+
     // 保留原始配置副本，供进入 Edit 模式时恢复使用（View 模式的临时修改不污染此副本）
     const originalSettings = JSON.parse(JSON.stringify(processedSettings)) as ExperienceSettings;
 
@@ -406,42 +410,30 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         )
     );
 
-    const skyboxOptions: SkyboxOptions = {
-        center: new Vec3(0, 0, 0),
-        radius: 5000,
-        rotation: new Vec3(0, 0, 0)
-    };
-
-    // Load skybox
-    const skyboxLoad = config.skyboxUrl && applySkyboxTexture(app, config.skyboxUrl);
-    //const skyboxLoad = config.skyboxUrl ? applySkyboxSphere(app, config.skyboxUrl, skyboxOptions).then(() => {}) : Promise.resolve();
+    // Load skybox from settings (URL param bootstraps into settings when absent)
+    const skyboxLoad = initialSkyboxUrl ? applySkyboxTexture(app, initialSkyboxUrl) : undefined;
 
     if (skyboxLoad) {
         skyboxLoad.then(() => {
-            events.fire('skyboxSelectionSynced', config.skyboxUrl ?? '');
+            events.fire('skyboxSelectionSynced', initialSkyboxUrl ?? '');
         }).catch((err) => {
             console.warn('[SuperSplat] 初始化天空盒失败：', err);
         });
     }
 
     events.on('skyboxSwitch', async (url?: string | null) => {
-        if (!url) {
-            // 移除所有天空盒实体
-            removeSkyboxSphere(app);
-            app.scene.envAtlas = null;
-            app.renderNextFrame = true;
+        setSkyboxUrlInSettings(global.settings, url);
+
+        const trimmed = typeof url === 'string' ? url.trim() : '';
+        if (!trimmed) {
+            clearSkyboxDisplay(app);
             events.fire('skyboxSelectionSynced', '');
             return;
         }
 
         try {
-            // 切换天空盒时，先移除旧的 sphere 实体（如果有不同 URL 的）
-            // 注意：applySkyboxSphere 内部会处理相同 URL 的复用，所以这里可以不移除
-            // 但如果需要确保只有一个天空盒，可以在这里移除所有旧的
-            removeSkyboxSphere(app); // 可选：确保只有一个天空盒
-            await applySkyboxTexture(app, url);
-            //await applySkyboxSphere(app, url, skyboxOptions);
-            events.fire('skyboxSelectionSynced', url);
+            await applySkyboxTexture(app, trimmed);
+            events.fire('skyboxSelectionSynced', trimmed);
         } catch (err) {
             console.warn('[SuperSplat] 切换天空盒失败：', err);
         }

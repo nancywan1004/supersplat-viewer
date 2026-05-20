@@ -6,7 +6,8 @@ import {
     normalizeImportedAnnotation,
     normalizeBloomLocalLightRegions,
     normalizeBloomAfterImport,
-    ensureSceneMediaHotspot
+    ensureSceneMediaHotspot,
+    ensureBackground
 } from './settings-serialize/settings-serialize-helper';
 import { Vec3 } from 'playcanvas';
 import { assertObject } from './schemas/validate-utils';
@@ -393,6 +394,7 @@ const importSettings = (settings: any): V2 => {
     normalizeBloomAfterImport(result);
     normalizeBloomLocalLightRegions(result);
     ensureSceneMediaHotspot(result);
+    ensureBackground(result);
 
     return result;
 };

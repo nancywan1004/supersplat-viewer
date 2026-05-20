@@ -10,6 +10,7 @@ import {
     getComparableSettingsStringFromSnapshot,
     applySettingsSnapshot
 } from '../settings-serialize/settings-serialize';
+import { readSkyboxUrlFromSettings } from '../settings-serialize/settings-serialize-helper';
 import { requestSceneAssetsRestore } from '../asset-placement-handler';
 import {
     initEditHistory,
@@ -19,7 +20,8 @@ import {
     redo,
     restoreAnnotationsFromSettings,
     restoreLightingFromSettings,
-    restorePostEffectsFromSettings
+    restorePostEffectsFromSettings,
+    restoreSkyboxFromSettings
 } from '../edit-history';
 import { showExitEditConfirmModal } from './components/exit-edit-confirm-ui';
 import { initRevealUI } from './components/effects-ui';
@@ -522,7 +524,7 @@ const initUI = (global: Global) => {
                 })
                 .filter((item): item is { label: string; value: string } => !!item?.value);
 
-            const current = config.skyboxUrl ?? '';
+            const current = readSkyboxUrlFromSettings(global.settings) ?? config.skyboxUrl ?? '';
 
             skyboxSelect.innerHTML = '';
 
@@ -654,6 +656,7 @@ const initUI = (global: Global) => {
                     restoreAnnotationsFromSettings(global);
                     restoreLightingFromSettings(global);
                     restorePostEffectsFromSettings(global);
+                    restoreSkyboxFromSettings(global);
                 }
 
                 const initialSnapshot = serializeExperienceSettings(global);
@@ -772,6 +775,7 @@ const initUI = (global: Global) => {
                         restoreAnnotationsFromSettings(global);
                         restoreLightingFromSettings(global);
                         restorePostEffectsFromSettings(global);
+                    restoreSkyboxFromSettings(global);
                     }
                     state.editMode = false;
                     return;
@@ -804,6 +808,7 @@ const initUI = (global: Global) => {
                         // 统一通过 helper 按当前 settings 重置 Lighting / NightMode / PostEffect
                         restoreLightingFromSettings(global);
                         restorePostEffectsFromSettings(global);
+                    restoreSkyboxFromSettings(global);
                         state.editMode = false;
                     }
                 });

@@ -45,6 +45,53 @@ export function ensureSceneMediaHotspot(settings: ExperienceSettings): SceneMedi
     return root.sceneMediaHotspot as SceneMediaHotspotSettings;
 }
 
+export function ensureBackground(settings: ExperienceSettings): ExperienceSettings['background'] {
+    const root = settings as Record<string, unknown>;
+    if (!root.background || typeof root.background !== 'object') {
+        root.background = { color: [0, 0, 0] as [number, number, number] };
+    }
+    const bg = root.background as Record<string, unknown>;
+    if (!Array.isArray(bg.color) || bg.color.length !== 3) {
+        bg.color = [0, 0, 0];
+    }
+    return root.background as ExperienceSettings['background'];
+}
+
+/** 读取存盘天空盒 URL；空字符串视为未设置 */
+export function readSkyboxUrlFromSettings(settings: ExperienceSettings): string | undefined {
+    const bg = settings.background;
+    if (!bg || typeof bg !== 'object') return undefined;
+    const url = (bg as { skyboxUrl?: unknown }).skyboxUrl;
+    if (typeof url !== 'string') return undefined;
+    const trimmed = url.trim();
+    return trimmed || undefined;
+}
+
+/** 写入或清除 `settings.background.skyboxUrl` */
+export function setSkyboxUrlInSettings(settings: ExperienceSettings, url: string | null | undefined): void {
+    const bg = ensureBackground(settings) as Record<string, unknown>;
+    const trimmed = typeof url === 'string' ? url.trim() : '';
+    if (trimmed) {
+        bg.skyboxUrl = trimmed;
+    } else {
+        delete bg.skyboxUrl;
+    }
+}
+
+/**
+ * 启动时解析天空盒：优先 settings，其次 URL 参数；若仅有 URL 参数则回写 settings 便于存盘。
+ */
+export function resolveInitialSkyboxUrl(settings: ExperienceSettings, configSkyboxUrl?: string): string | undefined {
+    const fromSettings = readSkyboxUrlFromSettings(settings);
+    if (fromSettings) return fromSettings;
+    const fromConfig = typeof configSkyboxUrl === 'string' ? configSkyboxUrl.trim() : '';
+    if (fromConfig) {
+        setSkyboxUrlInSettings(settings, fromConfig);
+        return fromConfig;
+    }
+    return undefined;
+}
+
 /** 父级 `MEDIA_HOTSPOT_SET`：仅合并传入的有限数值字段 */
 export function patchSceneMediaHotspot(
     settings: ExperienceSettings,
