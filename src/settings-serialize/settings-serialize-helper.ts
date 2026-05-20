@@ -1,3 +1,12 @@
+import {
+    DEFAULT_BLOOM,
+    DEFAULT_BLOOM_EDITOR_SESSION,
+    DEFAULT_LIGHTING_ROOT,
+    DEFAULT_NIGHT_MODE,
+    DEFAULT_REVEAL_EFFECT,
+    DEFAULT_SCENE_MEDIA_HOTSPOT,
+    DEFAULT_SHADOW
+} from './settings-serialize-configs';
 import { normalizeAnnotationMediaFields } from '../annotation-toolbar/media-fields';
 import type {
     Annotation,
@@ -6,19 +15,34 @@ import type {
     ExperienceSettings,
     PointLightConfig,
     DirectionalLightConfig,
-    SpotLightConfig
+    SpotLightConfig,
+    SceneMediaHotspotSettings
 } from '../schemas/v2';
-import {
-    DEFAULT_BLOOM,
-    DEFAULT_BLOOM_EDITOR_SESSION,
-    DEFAULT_LIGHTING_ROOT,
-    DEFAULT_NIGHT_MODE,
-    DEFAULT_REVEAL_EFFECT,
-    DEFAULT_SHADOW
-} from './settings-serialize-configs';
 
 /** 光源配置项在运行时应带稳定 id（列表 / Gizmo / 协议共用） */
 export type LightWithId = (PointLightConfig | DirectionalLightConfig | SpotLightConfig) & { id?: string };
+
+export function ensureSceneMediaHotspot(settings: ExperienceSettings): SceneMediaHotspotSettings {
+    const root = settings as Record<string, unknown>;
+    if (!root.sceneMediaHotspot || typeof root.sceneMediaHotspot !== 'object') {
+        root.sceneMediaHotspot = { ...DEFAULT_SCENE_MEDIA_HOTSPOT };
+    }
+    const sm = root.sceneMediaHotspot as Record<string, unknown>;
+    if (typeof sm.videoTriggerDistanceM !== 'number' || !Number.isFinite(sm.videoTriggerDistanceM)) {
+        sm.videoTriggerDistanceM = DEFAULT_SCENE_MEDIA_HOTSPOT.videoTriggerDistanceM;
+    }
+    if (typeof sm.audioTriggerDistanceM !== 'number' || !Number.isFinite(sm.audioTriggerDistanceM)) {
+        sm.audioTriggerDistanceM = DEFAULT_SCENE_MEDIA_HOTSPOT.audioTriggerDistanceM;
+    }
+    if (typeof sm.coneHalfDeg !== 'number' || !Number.isFinite(sm.coneHalfDeg)) {
+        sm.coneHalfDeg = DEFAULT_SCENE_MEDIA_HOTSPOT.coneHalfDeg;
+    }
+    // 旧版曾持久化以下字段，不再进入 settings；导入时剥离
+    delete sm.minToggleIntervalMs;
+    delete sm.hysteresisM;
+    delete sm.showAudioIcon;
+    return root.sceneMediaHotspot as SceneMediaHotspotSettings;
+}
 
 export function ensureNightMode(settings: ExperienceSettings): { fade?: number } {
     if (!settings.nightMode || typeof settings.nightMode !== 'object') {

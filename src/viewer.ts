@@ -52,6 +52,7 @@ import { initShadowCatcher } from './vfx/shadow/shadow-catcher';
 import { ShadowApplyRt } from './vfx/shadow/shadow-apply';
 import { updateShadowDistance } from './light';
 import { initAssetPlacementHandler, requestSceneAssetsRestore } from './asset-placement-handler';
+import { initMediaHotspotController } from './scene-assets/media-hotspot-controller';
 import { pushEditHistory } from './edit-history';
 import { initGizmoHandler } from './gizmo-handler';
 import { initAnnotationGizmoHandler } from './annotation-toolbar/annotation-gizmo-handler';
@@ -213,6 +214,9 @@ class Viewer {
 
     /** 资产放置 handler 清理函数 */
     cleanupAssetPlacementHandler: (() => void) | null = null;
+
+    /** 音视频热区播控卸载 */
+    cleanupMediaHotspotController: (() => void) | null = null;
 
     /** Gizmo handler 清理函数 */
     cleanupGizmoHandler: (() => void) | null = null;
@@ -859,6 +863,8 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 this.cleanupGizmoHandler = initGizmoHandler(global);
                 this.cleanupAnnotationGizmoHandler = initAnnotationGizmoHandler(global);
             }
+
+            this.cleanupMediaHotspotController = initMediaHotspotController(global);
 
             const { instance } = gsplat;
             if (instance) {

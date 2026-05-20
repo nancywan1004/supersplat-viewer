@@ -22,8 +22,8 @@ class AssetFacade implements ModuleFacade {
         global: Global,
         item: AssetLibraryItem
     ): Promise<AssetLibraryItem | null> {
-        // image 不需要预下载（在 place 时异步加载）
-        if (item.type === 'image') return item;
+        // image / video / audio 不需要预下载 PlayCanvas Asset
+        if (item.type === 'image' || item.type === 'video' || item.type === 'audio') return item;
 
         // 已有 asset 直接返回
         if (item.asset) return item;
@@ -276,10 +276,11 @@ class AssetFacade implements ModuleFacade {
             return;
         }
 
-        // 下载成功，切换到 awaitingPlacement 状态（正常放置光标，允许点击）
-        setPlacementCursorActive(ctx.global, true, { loading: false });
+        // 视频首帧由 placement-handler 预热并接管光标；其余类型此处切回可点击十字
+        if (hydrated.type !== 'video') {
+            setPlacementCursorActive(ctx.global, true, { loading: false });
+        }
 
-        // 发送放置开始事件，携带已下载的资产
         events.fire('assetPlacement:start', { value: hydrated });
     }
 

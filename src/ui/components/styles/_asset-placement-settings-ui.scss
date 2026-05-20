@@ -24,6 +24,19 @@
             flex-shrink: 0;
         }
     }
+    .asset-media-url-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 10px;
+        .asset-media-url-input {
+            flex: 1;
+            min-width: 0;
+        }
+        .settingsButton {
+            flex-shrink: 0;
+        }
+    }
     .asset-preview-grid {
         display: grid;
         grid-template-columns: repeat(2, 1fr);

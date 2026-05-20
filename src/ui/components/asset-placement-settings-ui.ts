@@ -1,14 +1,59 @@
-import type { Global } from '../../types';
-import type { AssetLibraryItem, AssetLibraryType } from '../../types';
-import { loadGsplatAsset } from '../../loaders/gsplat-asset-loader';
 import { getSceneAssetListHTML, bindSceneAssetList } from './scene-asset-list-ui';
+import { loadGsplatAsset } from '../../loaders/gsplat-asset-loader';
+import type { ExperienceSettings } from '../../schemas/v2';
+import { ensureSceneMediaHotspot } from '../../settings-serialize/settings-serialize-helper';
+import { getSelectedScenePlacedItem } from '../../state-selectors';
+import type { Global, AssetLibraryItem, AssetLibraryType } from '../../types';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
-const ASSET_TYPE_ACCEPT: Record<AssetLibraryType, string> = {
+/** 仅 image / mesh / gaussian 走本地上传；video / audio 仅支持 URL 添加 */
+const ASSET_FILE_UPLOAD_ACCEPT: Partial<Record<AssetLibraryType, string>> = {
     image: '.jpg,.jpeg,.png,image/jpeg,image/png',
     mesh: '.glb,model/gltf-binary',
     gaussian: '.sog,.splat,.ply'
 };
+
+function isVideoOrAudioAssetType(t: AssetLibraryType): boolean {
+    return t === 'video' || t === 'audio';
+}
+
+// 危险协议前缀（拆开写避免 no-script-url 误报字面量）
+const DANGEROUS_URL_PROTOCOL = `${'java'}${'script'}:`;
+
+/**
+ * 解析为可加载的绝对 URL；拒绝 blob、脚本协议等。
+ * @param raw - 用户输入的 URL 或相对路径
+ * @returns 规范化后的 href，或无法解析/不允许时 `null`
+ */
+function resolveRemoteMediaUrl(raw: string): string | null {
+    const s = raw.trim();
+    if (!s) return null;
+    let u: URL;
+    try {
+        u = new URL(s, window.location.href);
+    } catch {
+        return null;
+    }
+    const proto = u.protocol.toLowerCase();
+    if (proto === 'blob:' || proto === DANGEROUS_URL_PROTOCOL) return null;
+    return u.href;
+}
+
+/**
+ * @param href - 已解析的绝对 URL
+ * @returns 用于列表展示的短名称（路径末段或 hostname）
+ */
+function displayNameFromMediaUrl(href: string): string {
+    try {
+        const u = new URL(href);
+        const parts = u.pathname.split('/').filter(Boolean);
+        const last = parts.pop();
+        if (last) return decodeURIComponent(last);
+        return u.hostname || href;
+    } catch {
+        return href;
+    }
+}
 
 const TRASH_SVG =
     '<svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
@@ -18,10 +63,10 @@ function renderAssetPreviewGrid(
     global: Global,
     typeSelect: HTMLSelectElement | null
 ): void {
-    const { state, events, app } = global;
+    const { state, events } = global;
     const editUiTransport = getEditUiTransport(global);
     const currentType = (typeSelect?.value ?? 'mesh') as AssetLibraryType;
-    const list = (state.uploadedAssets ?? []).filter((item) => item.type === currentType);
+    const list = (state.uploadedAssets ?? []).filter(item => item.type === currentType);
     gridEl.innerHTML = '';
 
     list.forEach((item) => {
@@ -54,9 +99,11 @@ function renderAssetPreviewGrid(
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             const arr = state.uploadedAssets!;
-            const idx = arr.findIndex((a) => a.id === item.id);
+            const idx = arr.findIndex(a => a.id === item.id);
             if (idx >= 0) {
-                if (item.type === 'image' && item.url) URL.revokeObjectURL(item.url);
+                if ((item.type === 'image' || item.type === 'video' || item.type === 'audio') && item.url?.startsWith('blob:')) {
+                    URL.revokeObjectURL(item.url);
+                }
                 arr.splice(idx, 1);
                 events.fire('assetLibrary:removed', item);
                 renderAssetPreviewGrid(gridEl, global, typeSelect);
@@ -67,7 +114,7 @@ function renderAssetPreviewGrid(
         slot.appendChild(deleteBtn);
 
         // 点击资产格子：进入一次性放置态，随后在画布点击一次完成放置
-        slot.addEventListener('dragstart', (e) => e.preventDefault());
+        slot.addEventListener('dragstart', e => e.preventDefault());
         slot.addEventListener('click', (e) => {
             if ((e.target as HTMLElement).closest('.asset-preview-delete')) return;
             if (editUiTransport !== 'message-bridge') {
@@ -83,8 +130,9 @@ function renderAssetPreviewGrid(
 }
 
 /**
- * 资产放置设置组件：资产类型选择、上传按钮、资产预览网格、场景资产列表。
+ * 资产放置设置组件：资产类型选择、本地上传（图/mesh/gsplat）或 URL 添加（音视频）、预览网格、场景资产列表。
  * 场景资产列表嵌套在 subpanel 内，与资产放置设置一起折叠。
+ * @returns 组件根 HTML 字符串
  */
 export function getAssetPlacementSettingsHTML(): string {
     return `
@@ -99,11 +147,38 @@ export function getAssetPlacementSettingsHTML(): string {
                 <option value="image">image (JPG/PNG)</option>
                 <option value="mesh" selected>mesh (.glb)</option>
                 <option value="gaussian">gaussian (.sog/.splat/.ply)</option>
+                <option value="video">video (URL)</option>
+                <option value="audio">audio (URL)</option>
             </select>
             <button type="button" id="uploadAssetBtn" class="settingsButton">上传资产</button>
         </div>
+        <div id="assetMediaUrlRow" class="asset-media-url-row hidden">
+            <input type="text" id="assetMediaUrl" class="settingsSelect asset-media-url-input" placeholder="https://… 或 /path/to/file.mp4" autocomplete="off" aria-label="音视频媒体 URL" />
+            <button type="button" id="addMediaUrlBtn" class="settingsButton">添加</button>
+        </div>
         <input type="file" id="assetFileInput" class="hidden" accept="" tabindex="-1" aria-hidden="true" />
         <div class="asset-preview-grid" id="assetPreviewGrid">
+        </div>
+        <div class="media-hotspot-panel" id="mediaHotspotPanel">
+            <div class="settingsRow submenuHeader expanded" style="margin-top:6px;">音视频热区</div>
+            <div class="settingsRow">
+                <label for="mhVideoDist">视频触发距离 (m)</label>
+                <input type="range" id="mhVideoDist" min="1" max="80" step="0.5" />
+                <span id="mhVideoDistVal" class="settingsValueLabel"></span>
+            </div>
+            <div class="settingsRow">
+                <label for="mhAudioDist">音频触发距离 (m)</label>
+                <input type="range" id="mhAudioDist" min="1" max="80" step="0.5" />
+                <span id="mhAudioDistVal" class="settingsValueLabel"></span>
+            </div>
+            <div class="settingsRow">
+                <label for="mhCone">视锥半角 (°)</label>
+                <input type="range" id="mhCone" min="15" max="85" step="1" />
+                <span id="mhConeVal" class="settingsValueLabel"></span>
+            </div>
+            <div class="settingsRow">
+                <button type="button" id="mhBaselineBtn" class="settingsButton">从当前视角设基准距离</button>
+            </div>
         </div>
         ${getSceneAssetListHTML()}
     </div>
@@ -116,10 +191,10 @@ function nextAssetId(): string {
 }
 
 /**
- * 绑定资产放置设置面板的类型选择、上传、网格渲染、场景资产列表等交互。
+ * 绑定资产放置设置面板的类型选择、本地上传或 URL 添加、网格渲染、场景资产列表等交互。
  * 折叠/展开由 edit-right-toolbar 的 bindSubpanel 统一处理。
- * @param root 组件根元素（含 data-asset-placement-root 的容器，内含 data-scene-asset-list-root）
- * @param global 全局对象（用于 app、state、events）
+ * @param {HTMLElement | null} root - 组件根元素（含 data-asset-placement-root 的容器，内含 data-scene-asset-list-root）
+ * @param {Global} global - 全局对象（用于 app、state、events）
  * @returns 清理函数
  */
 export function bindAssetPlacementSettings(root: HTMLElement | null, global: Global): () => void {
@@ -132,7 +207,10 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
     const typeSelect = root.querySelector<HTMLSelectElement>('#assetTypeSelect');
     const uploadBtn = root.querySelector<HTMLButtonElement>('#uploadAssetBtn');
     const fileInput = root.querySelector<HTMLInputElement>('#assetFileInput');
-    if (!typeSelect || !uploadBtn || !fileInput) return () => {};
+    const mediaUrlRow = root.querySelector<HTMLElement>('#assetMediaUrlRow');
+    const mediaUrlInput = root.querySelector<HTMLInputElement>('#assetMediaUrl');
+    const addMediaUrlBtn = root.querySelector<HTMLButtonElement>('#addMediaUrlBtn');
+    if (!typeSelect || !uploadBtn || !fileInput || !mediaUrlRow || !mediaUrlInput || !addMediaUrlBtn) return () => {};
 
     if (!state.uploadedAssets) state.uploadedAssets = [];
 
@@ -171,11 +249,20 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
 
     const updateFileAccept = () => {
         const type = (typeSelect.value || 'mesh') as AssetLibraryType;
-        fileInput.accept = ASSET_TYPE_ACCEPT[type] ?? ASSET_TYPE_ACCEPT.mesh;
+        fileInput.accept = ASSET_FILE_UPLOAD_ACCEPT[type] ?? ASSET_FILE_UPLOAD_ACCEPT.mesh ?? '';
     };
-    updateFileAccept();
-    const typeSelectHandler = () => {
+
+    const syncAssetTypeControls = () => {
         updateFileAccept();
+        const type = (typeSelect.value || 'mesh') as AssetLibraryType;
+        const media = isVideoOrAudioAssetType(type);
+        uploadBtn.classList.toggle('hidden', media);
+        mediaUrlRow.classList.toggle('hidden', !media);
+    };
+    syncAssetTypeControls();
+
+    const typeSelectHandler = () => {
+        syncAssetTypeControls();
         if (gridEl) renderAssetPreviewGrid(gridEl, global, typeSelect);
     };
     typeSelect.addEventListener('change', typeSelectHandler);
@@ -186,6 +273,7 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         input.value = '';
         if (!file) return;
         const type = (typeSelect.value || 'mesh') as AssetLibraryType;
+        if (isVideoOrAudioAssetType(type)) return;
         const name = file.name || '未命名';
         const id = nextAssetId();
 
@@ -253,7 +341,111 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
     };
 
     fileInput.addEventListener('change', handleFileSelect);
-    uploadBtn.addEventListener('click', () => fileInput.click());
+    uploadBtn.addEventListener('click', () => {
+        const t = (typeSelect.value || 'mesh') as AssetLibraryType;
+        if (isVideoOrAudioAssetType(t)) return;
+        fileInput.click();
+    });
+
+    const addMediaFromUrl = () => {
+        const type = (typeSelect.value || 'mesh') as AssetLibraryType;
+        if (!isVideoOrAudioAssetType(type)) return;
+        const url = resolveRemoteMediaUrl(mediaUrlInput.value);
+        if (!url) {
+            console.warn('[AssetPlacement] 无效的媒体 URL（需为 http(s)、相对路径等，不支持 blob）');
+            return;
+        }
+        const id = nextAssetId();
+        const name = displayNameFromMediaUrl(url);
+        const item: AssetLibraryItem = {
+            id,
+            type,
+            name,
+            filename: name,
+            url
+        };
+        state.uploadedAssets!.push(item);
+        events.fire('assetLibrary:added', [item]);
+        mediaUrlInput.value = '';
+    };
+    addMediaUrlBtn.addEventListener('click', addMediaFromUrl);
+    const onMediaUrlKeydown = (e: KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            addMediaFromUrl();
+        }
+    };
+    mediaUrlInput.addEventListener('keydown', onMediaUrlKeydown);
+
+    const mhVideoDist = root.querySelector<HTMLInputElement>('#mhVideoDist');
+    const mhAudioDist = root.querySelector<HTMLInputElement>('#mhAudioDist');
+    const mhCone = root.querySelector<HTMLInputElement>('#mhCone');
+    const mhBaselineBtn = root.querySelector<HTMLButtonElement>('#mhBaselineBtn');
+    const mhVideoDistVal = root.querySelector<HTMLSpanElement>('#mhVideoDistVal');
+    const mhAudioDistVal = root.querySelector<HTMLSpanElement>('#mhAudioDistVal');
+    const mhConeVal = root.querySelector<HTMLSpanElement>('#mhConeVal');
+
+    const editUiTransport = getEditUiTransport(global);
+
+    const readSm = () => ensureSceneMediaHotspot(global.settings as ExperienceSettings);
+
+    const pushHotspotToParent = () => {
+        if (editUiTransport !== 'message-bridge') return;
+        const sm = readSm();
+        sendEditProtocolMessage({
+            type: 'MEDIA_HOTSPOT_SET',
+            value: {
+                videoTriggerDistanceM: sm.videoTriggerDistanceM,
+                audioTriggerDistanceM: sm.audioTriggerDistanceM,
+                coneHalfDeg: sm.coneHalfDeg
+            }
+        });
+    };
+
+    const syncHotspotUi = () => {
+        const sm = readSm();
+        if (mhVideoDist) mhVideoDist.value = String(sm.videoTriggerDistanceM);
+        if (mhAudioDist) mhAudioDist.value = String(sm.audioTriggerDistanceM);
+        if (mhCone) mhCone.value = String(sm.coneHalfDeg);
+        if (mhVideoDistVal) mhVideoDistVal.textContent = `${sm.videoTriggerDistanceM.toFixed(1)} m`;
+        if (mhAudioDistVal) mhAudioDistVal.textContent = `${sm.audioTriggerDistanceM.toFixed(1)} m`;
+        if (mhConeVal) mhConeVal.textContent = `${sm.coneHalfDeg}°`;
+    };
+
+    const onHotspotField = () => {
+        const sm = readSm();
+        if (mhVideoDist) sm.videoTriggerDistanceM = Number(mhVideoDist.value);
+        if (mhAudioDist) sm.audioTriggerDistanceM = Number(mhAudioDist.value);
+        if (mhCone) sm.coneHalfDeg = Number(mhCone.value);
+        syncHotspotUi();
+        events.fire('sceneMediaHotspot:changed');
+        pushHotspotToParent();
+    };
+
+    syncHotspotUi();
+    mhVideoDist?.addEventListener('input', onHotspotField);
+    mhAudioDist?.addEventListener('input', onHotspotField);
+    mhCone?.addEventListener('input', onHotspotField);
+
+    const onHotspotExternal = () => syncHotspotUi();
+    events.on('sceneMediaHotspot:changed', onHotspotExternal);
+
+    const onBaselineClick = () => {
+        const sel = getSelectedScenePlacedItem(state);
+        const t = sel?.assetType;
+        if (!sel?.entity || (t !== 'video' && t !== 'audio')) {
+            console.warn('[MediaHotspot] 请先选中场景中的 video 或 audio 资产');
+            return;
+        }
+        const dist = global.camera.getPosition().distance(sel.entity.getPosition());
+        const sm = readSm();
+        if (t === 'video') sm.videoTriggerDistanceM = dist;
+        else sm.audioTriggerDistanceM = dist;
+        syncHotspotUi();
+        events.fire('sceneMediaHotspot:changed');
+        pushHotspotToParent();
+    };
+    mhBaselineBtn?.addEventListener('click', onBaselineClick);
 
     return () => {
         unbindList();
@@ -263,5 +455,12 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         }
         typeSelect.removeEventListener('change', typeSelectHandler);
         fileInput.removeEventListener('change', handleFileSelect);
+        addMediaUrlBtn.removeEventListener('click', addMediaFromUrl);
+        mediaUrlInput.removeEventListener('keydown', onMediaUrlKeydown);
+        mhVideoDist?.removeEventListener('input', onHotspotField);
+        mhAudioDist?.removeEventListener('input', onHotspotField);
+        mhCone?.removeEventListener('input', onHotspotField);
+        mhBaselineBtn?.removeEventListener('click', onBaselineClick);
+        events.off('sceneMediaHotspot:changed', onHotspotExternal);
     };
 }

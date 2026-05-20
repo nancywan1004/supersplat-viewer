@@ -9,6 +9,7 @@ import type {
     SpotLightConfig,
     LightingSettings,
     SceneAsset,
+    SceneMediaHotspotSettings,
     LocalLightRegion,
     WorldSpaceBloomRegionJSON,
     EffectsSettings
@@ -166,6 +167,8 @@ type ExperienceSettings = {
     };
     initialCameraMode?: 'orbit' | 'fly';
     sceneAssets?: SceneAsset[];
+    /** 场景音视频热区全局参数（可选；缺省由 `ensureSceneMediaHotspot` 补齐） */
+    sceneMediaHotspot?: SceneMediaHotspotSettings;
 };
 
 const TONEMAPPING = ['none', 'linear', 'filmic', 'hejl', 'aces', 'aces2', 'neutral'] as const;
@@ -314,6 +317,13 @@ const validateV2 = (data: unknown): ExperienceSettings => {
         }
     }
 
+    if (obj.sceneMediaHotspot !== undefined) {
+        const sm = assertObject(obj.sceneMediaHotspot, 'settings.sceneMediaHotspot');
+        assertNumber(sm.videoTriggerDistanceM, 'settings.sceneMediaHotspot.videoTriggerDistanceM');
+        assertNumber(sm.audioTriggerDistanceM, 'settings.sceneMediaHotspot.audioTriggerDistanceM');
+        assertNumber(sm.coneHalfDeg, 'settings.sceneMediaHotspot.coneHalfDeg');
+    }
+
     return data as ExperienceSettings;
 };
 
@@ -337,4 +347,5 @@ export type {
     LightingSettings,
     WorldSpaceBloomRegionJSON,
     LocalLightRegion,
+    SceneMediaHotspotSettings
 };

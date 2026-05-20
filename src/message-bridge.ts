@@ -36,6 +36,7 @@ import {
     getComparableSettingsStringFromSnapshot,
     applySettingsSnapshot
 } from './settings-serialize/settings-serialize';
+import { ensureSceneMediaHotspot } from './settings-serialize/settings-serialize-helper';
 import { getSelectedSceneAssetType } from './state-selectors';
 import type { AssetLibraryItem, EditLeftModule, Global } from './types';
 import { uploadProjectData } from './universe/service';
@@ -53,6 +54,14 @@ type InboundPayload =
     | { type: 'EDIT_UNDO' }
     | { type: 'EDIT_REDO' }
     | { type: 'PREVIEW_MODE_SET'; value?: boolean }
+    | {
+        type: 'MEDIA_HOTSPOT_SET';
+        value?: Partial<{
+            videoTriggerDistanceM: number;
+            audioTriggerDistanceM: number;
+            coneHalfDeg: number;
+        }>;
+    }
     | { type: 'SETTINGS_SAVE' }
     | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule | null }
     | { type: 'ASSET_SHOW_HIDE_SET'; id?: string; value?: boolean }
@@ -230,6 +239,9 @@ const initPostMessageBridge = (global: Global) => {
                     if (hasVfxToResume) {
                         events.fire('vfxExit');
                     }
+                    // 先清空模块，避免 sceneAssets 恢复结束后覆盖用户已选模块
+                    state.editLeftModule = null;
+                    events.fire('editLeftModule:changed', null);
                     // View -> Edit：先恢复到原始配置（View 模式的临时修改不保留）
                     const originalSettings = (global as any).__originalSettings as ExperienceSettings | undefined;
                     if (originalSettings) {
@@ -245,9 +257,6 @@ const initPostMessageBridge = (global: Global) => {
                 }
                 state.editMode = !!p.value;
                 if (value) {
-                // 通过 EDIT_MODE_SET 进入编辑模式时：默认不选中任何模块（null）
-                    state.editLeftModule = null;
-                    events.fire('editLeftModule:changed', null);
                     const initialSnapshot = serializeExperienceSettings(global);
                     setBaseline(initialSnapshot);
                     initEditHistory(global, initialSnapshot);
@@ -285,7 +294,28 @@ const initPostMessageBridge = (global: Global) => {
                 break;
             }
             case 'PREVIEW_MODE_SET': {
-                state.previewMode = p.value === true;
+                const next = p.value === true;
+                if (state.previewMode !== next) {
+                    state.previewMode = next;
+                }
+                if (next) {
+                    events.fire('mediaHotspot:userActivate');
+                }
+                break;
+            }
+            case 'MEDIA_HOTSPOT_SET': {
+                const patch = (p as { value?: Record<string, unknown> }).value;
+                if (!patch || typeof patch !== 'object') break;
+                const sm = ensureSceneMediaHotspot(global.settings as ExperienceSettings);
+                const assignNum = (key: keyof typeof sm, v: unknown) => {
+                    if (typeof v === 'number' && Number.isFinite(v)) {
+                        (sm as any)[key] = v;
+                    }
+                };
+                assignNum('videoTriggerDistanceM', patch.videoTriggerDistanceM);
+                assignNum('audioTriggerDistanceM', patch.audioTriggerDistanceM);
+                assignNum('coneHalfDeg', patch.coneHalfDeg);
+                events.fire('sceneMediaHotspot:changed');
                 break;
             }
             case 'SETTINGS_SAVE': {

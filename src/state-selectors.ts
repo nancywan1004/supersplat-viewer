@@ -29,7 +29,7 @@ export function getSelectedSceneAssetType(
     if (!Array.isArray(sceneAssetsFromSettings)) return undefined;
     const row = sceneAssetsFromSettings.find((s) => s?.id === id);
     const t = row?.type;
-    return t === 'image' || t === 'mesh' || t === 'gaussian' ? t : undefined;
+    return t === 'image' || t === 'mesh' || t === 'gaussian' || t === 'video' || t === 'audio' ? t : undefined;
 }
 
 export function isAssetDebugVisualEnabled(state: State): boolean {

@@ -196,6 +196,9 @@ async function loadTypedAsset(app: AppBase, type: AssetLibraryType, url: string,
     if (type === 'mesh') {
         return loadMeshAsset(app, url, timeoutMs);
     }
+    if (type === 'video' || type === 'audio') {
+        return undefined;
+    }
     return undefined;
 }
 
@@ -204,8 +207,8 @@ export async function hydrateAssetLibraryItem(
     item: AssetLibraryItem,
     timeoutMs: number = DEFAULT_ASSET_LOAD_TIMEOUT_MS
 ): Promise<AssetLibraryItem | null> {
-    // image 在放置时即时加载纹理，不进入预加载/ready 聚合。
-    if (item.type === 'image') return item;
+    // image / video / audio 在放置时即时加载，不进入预加载/ready 聚合。
+    if (item.type === 'image' || item.type === 'video' || item.type === 'audio') return item;
     if (item.asset) return item;
 
     const url = item.url || item.filename;
@@ -251,8 +254,8 @@ export async function loadSceneAssetLibraryItem(
         thumbnailUrl: sceneAsset.thumbnailUrl
     };
 
-    // image 恢复不做预下载，仅构造 item 交给放置阶段处理。
-    if (type === 'image') {
+    // image / video / audio 恢复不做预下载，仅构造 item 交给放置阶段处理。
+    if (type === 'image' || type === 'video' || type === 'audio') {
         return base;
     }
 

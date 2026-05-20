@@ -43,7 +43,7 @@ export type EffectsRuntimeState = {
 };
 
 /** 资产库项类型 */
-export type AssetLibraryType = 'image' | 'mesh' | 'gaussian';
+export type AssetLibraryType = 'image' | 'mesh' | 'gaussian' | 'video' | 'audio';
 
 /** 资产库单项（上传后的资产） */
 export interface AssetLibraryItem {

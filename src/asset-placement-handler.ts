@@ -1,20 +1,47 @@
 import type { AppBase } from 'playcanvas';
 import * as pc from 'playcanvas';
-import { Vec3, Quat, StandardMaterial, CULLFACE_NONE, Color, BLEND_NONE } from 'playcanvas';
-import type { Global } from './types';
-import type { AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from './types';
+import {
+    Entity,
+    Vec3,
+    Quat,
+    StandardMaterial,
+    CULLFACE_NONE,
+    BLEND_NONE,
+    Texture,
+    PIXELFORMAT_RGBA8,
+    FILTER_LINEAR,
+    ADDRESS_CLAMP_TO_EDGE
+} from 'playcanvas';
+import type { Global, AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from './types';
 import { getSelectedSceneEntity } from './state-selectors';
-import { Entity } from 'playcanvas';
 import {
     DEFAULT_ASSET_LOAD_TIMEOUT_MS,
     hydrateAssetLibraryItem,
     loadSceneAssetLibraryItem,
     withTimeout
 } from './loaders/asset-loader';
-import { pickWorldFromClientXY } from './picker';
 import type { InputArbiter } from './input-arbiter';
+import { setPlacedMediaRuntime, type PlacedMediaRuntime } from './scene-assets/media-runtime';
+import { syncPlacedAudioIconEditor } from './scene-assets/media-hotspot-controller';
+import { setPlacementCursorActive } from './placement-cursor';
+import {
+    acquirePlacedVideoForPlacement,
+    cancelVideoPlacementPreload,
+    startVideoPlacementPreload,
+    type VideoPlacementPreloadHandle
+} from './scene-assets/video-placement-preload';
+import {
+    createPlacedVideoTextureFromVideo,
+    initPlacedVideoTexture,
+    PLACED_VIDEO_INITIAL_LOAD_TIMEOUT_MS,
+    PLACED_VIDEO_PLACEMENT_TIMEOUT_MS,
+    unmountPlacedVideoFromDom
+} from './scene-assets/video-texture';
+import { loadBillboardTextureFromImageUrl } from './scene-assets/image-billboard-texture';
+import { removeSceneAssetFromSettings } from './settings-serialize/settings-serialize';
 
 const PLACED_ASSETS_NAME = 'placedAssets';
+const AUDIO_SPEAKER_ICON_URL = '/assets/icons/speaker.svg';
 const ASSET_LOAD_TIMEOUT_MS = DEFAULT_ASSET_LOAD_TIMEOUT_MS;
 
 export type AssetPlacementHandlerDeps = {
@@ -92,7 +119,7 @@ function applyPlacedEntityYawToFaceCamera(entity: Entity, global: Global, assetT
     const pos = entity.getPosition();
     const yawDeg = computeYawDegToFaceCameraHorizontal(pos, camPos);
 
-    if (assetType === 'image') {
+    if (assetType === 'image' || assetType === 'video') {
         entity.setLocalEulerAngles(-90, yawDeg, 180);
         return;
     }
@@ -327,6 +354,145 @@ async function instantiateGaussian(app: AppBase, item: AssetLibraryItem, positio
     return entity;
 }
 
+const AUDIO_ICON_CHILD = 'audioHotspotIcon';
+
+async function instantiateVideo(
+    app: AppBase,
+    item: AssetLibraryItem,
+    position: Vec3,
+    loadMode: 'placement' | 'restore' = 'restore'
+): Promise<Entity> {
+    const url = item.url || item.filename;
+    if (!url) {
+        throw new Error('video asset has no url');
+    }
+    let video: HTMLVideoElement;
+    let texture;
+    if (loadMode === 'placement') {
+        video = await acquirePlacedVideoForPlacement(url, PLACED_VIDEO_PLACEMENT_TIMEOUT_MS);
+        texture = createPlacedVideoTextureFromVideo(app, video, `placed-video-${item.id}`);
+    } else {
+        video = document.createElement('video');
+        texture = await initPlacedVideoTexture(
+            app,
+            video,
+            url,
+            `placed-video-${item.id}`,
+            PLACED_VIDEO_INITIAL_LOAD_TIMEOUT_MS
+        );
+    }
+
+    const w = Math.max(2, video.videoWidth || 1280);
+    const h = Math.max(2, video.videoHeight || 720);
+    const aspect = w / h;
+
+    const mat = new StandardMaterial();
+    // 与图片资产一致：近似 unlit 卡片 + alpha 通道走 cutout，避免与 gsplat 混合排序问题。
+    mat.useLighting = false;
+    mat.diffuse.set(0, 0, 0);
+    mat.emissiveMap = texture;
+    mat.emissive.set(1, 1, 1);
+    mat.opacityMap = texture;
+    mat.opacityMapChannel = 'a';
+    mat.blendType = BLEND_NONE;
+    mat.alphaTest = 0.5;
+    mat.cull = CULLFACE_NONE;
+    mat.update();
+
+    const entity = new Entity(item.name || 'video');
+    entity.addComponent('render', {
+        type: 'plane',
+        material: mat,
+        castShadows: false,
+        receiveShadows: true
+    });
+    entity.setPosition(position);
+    const base = 2;
+    entity.setLocalScale(base * aspect, base, 1);
+
+    const runtime: PlacedMediaRuntime = {
+        kind: 'video',
+        videoEl: video,
+        texture,
+        isLive: false
+    };
+    setPlacedMediaRuntime(entity, runtime);
+    // 纹理已 setSource(video) 并停在首帧；热区内 play + texture.upload() 轮询。
+
+    entity.on('destroy', () => {
+        unmountPlacedVideoFromDom(video);
+        try {
+            texture.destroy();
+        } catch {
+            // ignore
+        }
+    });
+
+    return entity;
+}
+
+async function instantiateAudio(app: AppBase, item: AssetLibraryItem, position: Vec3): Promise<Entity> {
+    const url = item.url || item.filename;
+    if (!url) {
+        throw new Error('audio asset has no url');
+    }
+    const audio = document.createElement('audio');
+    audio.preload = 'auto';
+    audio.loop = true;
+    audio.src = url;
+
+    const root = new Entity(item.name || 'audio');
+    root.setPosition(position);
+
+    const tex = await loadBillboardTextureFromImageUrl(
+        app.graphicsDevice,
+        AUDIO_SPEAKER_ICON_URL,
+        'placed-audio-speaker-icon',
+        ASSET_LOAD_TIMEOUT_MS
+    );
+    const mat = new StandardMaterial();
+    mat.useLighting = false;
+    mat.diffuse.set(0, 0, 0);
+    mat.emissiveMap = tex;
+    mat.emissive.set(1, 1, 1);
+    mat.opacityMap = tex;
+    mat.opacityMapChannel = 'a';
+    mat.blendType = BLEND_NONE;
+    mat.alphaTest = 0.5;
+    mat.cull = CULLFACE_NONE;
+    mat.update();
+
+    const iconEntity = new Entity(AUDIO_ICON_CHILD);
+    iconEntity.addComponent('render', {
+        type: 'plane',
+        material: mat,
+        castShadows: false,
+        receiveShadows: false
+    });
+    iconEntity.setLocalScale(1, 1, 1);
+    iconEntity.setLocalPosition(0, 0, 0);
+    iconEntity.enabled = false;
+    root.addChild(iconEntity);
+
+    setPlacedMediaRuntime(root, { kind: 'audio', audioEl: audio, iconEntity });
+    root.on('destroy', () => {
+        try {
+            audio.pause();
+            audio.removeAttribute('src');
+            audio.load();
+        } catch {
+            // ignore
+        }
+        try {
+            tex.destroy();
+        } catch {
+            // ignore
+        }
+    });
+
+    return root;
+}
+
 export function computeEntityWorldCenter(entity: Entity): Vec3 | null {
     const anyEntity = entity as any;
     let worldCenter: Vec3 | null = null;
@@ -374,7 +540,13 @@ export function computeEntityWorldCenter(entity: Entity): Vec3 | null {
     return worldCenter;
 }
 
-export async function placeAsset(global: Global, item: AssetLibraryItem, worldPos: Vec3, alignCenterToCameraHeight: boolean = false): Promise<ScenePlacedItem | null> {
+export async function placeAsset(
+    global: Global,
+    item: AssetLibraryItem,
+    worldPos: Vec3,
+    alignCenterToCameraHeight: boolean = false,
+    opts?: { videoLoadMode?: 'placement' | 'restore' }
+): Promise<ScenePlacedItem | null> {
     const { app, state, events } = global;
     if (!state.scenePlacedEntities) state.scenePlacedEntities = [];
 
@@ -403,6 +575,10 @@ export async function placeAsset(global: Global, item: AssetLibraryItem, worldPo
                 await withTimeout(waitAssetLoaded, ASSET_LOAD_TIMEOUT_MS, 'gaussian asset load');
             }
             entity = await instantiateGaussian(app, item, worldPos);
+        } else if (item.type === 'video') {
+            entity = await instantiateVideo(app, item, worldPos, opts?.videoLoadMode ?? 'restore');
+        } else if (item.type === 'audio') {
+            entity = await instantiateAudio(app, item, worldPos);
         } else {
             return null;
         }
@@ -418,7 +594,9 @@ export async function placeAsset(global: Global, item: AssetLibraryItem, worldPo
         configurePlacedMeshMaterials(entity);
     }
 
-    applyPlacedEntityYawToFaceCamera(entity, global, item.type);
+    if (item.type !== 'audio') {
+        applyPlacedEntityYawToFaceCamera(entity, global, item.type);
+    }
 
     if (alignCenterToCameraHeight) {
         const center = computeEntityWorldCenter(entity);
@@ -444,6 +622,11 @@ export async function placeAsset(global: Global, item: AssetLibraryItem, worldPo
         thumbnailUrl: item.thumbnailUrl
     };
     state.scenePlacedEntities.push(entry);
+
+    if (item.type === 'audio') {
+        syncPlacedAudioIconEditor(global, entity);
+    }
+
     events.fire('sceneAssets:added', entry);
     return entry;
 }
@@ -475,7 +658,7 @@ export async function restoreSceneAssetsFromSettings(global: Global): Promise<vo
     const sceneAssets: any[] | undefined = settings.sceneAssets;
     if (!Array.isArray(sceneAssets) || sceneAssets.length === 0) return;
 
-    const { app, state } = global;
+    const { state } = global;
     if (!state.scenePlacedEntities) state.scenePlacedEntities = [];
 
     for (const sa of sceneAssets) {
@@ -608,6 +791,8 @@ export function initAssetPlacementHandler(
     let sceneAssetPicker: any = null;
     let pendingPlacement: { value: AssetLibraryItem; sceneEntityId?: string } | null = null;
     let pendingPlacementInFlight = false;
+    let videoPreloadHandle: VideoPlacementPreloadHandle | null = null;
+    let videoPreloadReady = true;
     let detachPointerClickClaimHandler: (() => void) | null = null;
 
     const isValidPlacementWorldPos = (pos: Vec3): boolean => {
@@ -628,9 +813,24 @@ export function initAssetPlacementHandler(
         return true;
     };
 
+    const syncVideoPlacementCursor = () => {
+        if (!pendingPlacement) return;
+        if (pendingPlacement.value.type !== 'video') {
+            setPlacementCursorActive(global, true, { loading: false });
+            return;
+        }
+        setPlacementCursorActive(global, true, {
+            loading: pendingPlacementInFlight || !videoPreloadReady
+        });
+    };
+
     const clearPendingPlacement = () => {
+        cancelVideoPlacementPreload();
+        videoPreloadHandle = null;
+        videoPreloadReady = true;
         pendingPlacement = null;
         pendingPlacementInFlight = false;
+        setPlacementCursorActive(global, false);
     };
 
     const handleAssetPointerClickClaim = (clientX: number, clientY: number, worldPos: Vec3 | null): boolean => {
@@ -643,6 +843,7 @@ export function initAssetPlacementHandler(
         if (pendingPlacement) {
             if (pendingPlacementInFlight) return true;
             pendingPlacementInFlight = true;
+            syncVideoPlacementCursor();
             void (async () => {
                 try {
                     if (!worldPos) {
@@ -665,7 +866,9 @@ export function initAssetPlacementHandler(
                         console.warn('[AssetPlacement] hydrateProtocolPlaceItem failed');
                         return;
                     }
-                    const entry = await placeAsset(global, hydrated, worldPos, false);
+                    const entry = await placeAsset(global, hydrated, worldPos, false, {
+                        videoLoadMode: hydrated.type === 'video' ? 'placement' : 'restore'
+                    });
                     if (!entry) {
                         console.warn('[AssetPlacement] placeAsset returned null');
                         return;
@@ -690,6 +893,7 @@ export function initAssetPlacementHandler(
                     console.error('[AssetPlacement] placement flow error', error);
                 } finally {
                     pendingPlacementInFlight = false;
+                    syncVideoPlacementCursor();
                 }
             })();
             return true;
@@ -805,8 +1009,43 @@ export function initAssetPlacementHandler(
         });
     }
     const onPlaceStart = (payload: { value: AssetLibraryItem; sceneEntityId?: string }) => {
+        cancelVideoPlacementPreload();
+        videoPreloadHandle = null;
+        videoPreloadReady = true;
         pendingPlacement = payload;
         pendingPlacementInFlight = false;
+
+        const item = payload.value;
+        if (item.type === 'video') {
+            const url = item.url || item.filename;
+            if (!url) {
+                setPlacementCursorActive(global, true, { loading: false });
+                return;
+            }
+            videoPreloadReady = false;
+            setPlacementCursorActive(global, true, { loading: true });
+            videoPreloadHandle = startVideoPlacementPreload(url);
+            void videoPreloadHandle.ready
+                .then(() => {
+                    videoPreloadReady = true;
+                    if (pendingPlacement?.value?.id === item.id) {
+                        syncVideoPlacementCursor();
+                    }
+                })
+                .catch(() => {
+                    videoPreloadReady = true;
+                    if (pendingPlacement?.value?.id === item.id) {
+                        syncVideoPlacementCursor();
+                    }
+                });
+            return;
+        }
+
+        setPlacementCursorActive(global, true, { loading: false });
+    };
+
+    const onSceneAssetRemoved = (entry: ScenePlacedItem) => {
+        removeSceneAssetFromSettings(global, entry.id);
     };
 
     events.on('assetEdit:copy', onCopy);
@@ -814,6 +1053,7 @@ export function initAssetPlacementHandler(
     events.on('assetPlacement:start', onPlaceStart);
     events.on('assetFacade:exit', clearPendingPlacement);
     events.on('assetFacade:editModeExit', clearPendingPlacement);
+    events.on('sceneAssets:removed', onSceneAssetRemoved);
 
     return () => {
         detachPointerClickClaimHandler?.();
@@ -827,5 +1067,6 @@ export function initAssetPlacementHandler(
         events.off('assetPlacement:start', onPlaceStart);
         events.off('assetFacade:exit', clearPendingPlacement);
         events.off('assetFacade:editModeExit', clearPendingPlacement);
+        events.off('sceneAssets:removed', onSceneAssetRemoved);
     };
 }

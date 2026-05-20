@@ -2,6 +2,7 @@ import { Vec3 } from 'playcanvas';
 
 import type { Collision } from '../../collision';
 import type { Picker } from '../../picker';
+import { isPlacementCursorActive } from '../../placement-cursor';
 import type { Global } from '../../types';
 import { TAP_EPSILON } from '../shared';
 
@@ -62,6 +63,7 @@ class NavInteraction {
         const global = this._global;
         const canvas = this._canvas;
         if (!global || !canvas) return;
+        if (isPlacementCursorActive()) return;
         const { state } = global;
         const canClickTarget = state.inputMode === 'desktop' &&
             state.cameraMode === 'walk' &&
