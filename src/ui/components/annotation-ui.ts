@@ -112,6 +112,7 @@ export function initAnnotationUI(global: Global): () => void {
                         title: originalAnnotationDataForEdit.title,
                         text: originalAnnotationDataForEdit.text,
                         imageUrl: originalAnnotationDataForEdit.imageUrl,
+                        videoUrl: originalAnnotationDataForEdit.videoUrl,
                         showTitleWhenCollapsed: originalAnnotationDataForEdit.showTitleWhenCollapsed
                     });
                     annotation.setCollapsed(originalAnnotationDataForEdit.collapsed);
@@ -262,6 +263,7 @@ export function initAnnotationUI(global: Global): () => void {
                         title: originalAnnotationDataForEdit.title,
                         text: originalAnnotationDataForEdit.text,
                         imageUrl: originalAnnotationDataForEdit.imageUrl,
+                        videoUrl: originalAnnotationDataForEdit.videoUrl,
                         showTitleWhenCollapsed: originalAnnotationDataForEdit.showTitleWhenCollapsed
                     });
                     annotation.setCollapsed(originalAnnotationDataForEdit.collapsed);

@@ -14,7 +14,8 @@ import {
     canRedo,
     restoreAnnotationsFromSettings,
     restoreLightingFromSettings,
-    restorePostEffectsFromSettings
+    restorePostEffectsFromSettings,
+    restoreSkyboxFromSettings
 } from './edit-history';
 import type { CommandRegistry } from './editor-modules/command-registry';
 import { MESSAGE_BRIDGE_MODULE } from './editor-modules/modules-types';
@@ -27,7 +28,7 @@ import {
 import { getAssetLoader } from './loaders/asset-loader';
 import { resolveExportTimelinePlan } from './render/export-timeline-resolver';
 import { buildVideoExportFilename } from './render/video-export';
-import type { ExperienceSettings } from './schemas/v2';
+import type { ExperienceSettings, SceneMediaHotspotSettings } from './schemas/v2';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import { getRevealActiveType, getRevealTotalDuration } from './settings-serialize/effects-sync';
 import {
@@ -36,6 +37,11 @@ import {
     getComparableSettingsStringFromSnapshot,
     applySettingsSnapshot
 } from './settings-serialize/settings-serialize';
+import {
+    applySceneMediaHotspotBaselineFromView,
+    patchSceneMediaHotspot
+} from './settings-serialize/settings-serialize-helper';
+import { applyViewMediaMuteSet } from './view-settings';
 import { getSelectedSceneAssetType } from './state-selectors';
 import type { AssetLibraryItem, EditLeftModule, Global } from './types';
 import { uploadProjectData } from './universe/service';
@@ -53,6 +59,9 @@ type InboundPayload =
     | { type: 'EDIT_UNDO' }
     | { type: 'EDIT_REDO' }
     | { type: 'PREVIEW_MODE_SET'; value?: boolean }
+    | { type: 'MEDIA_HOTSPOT_SET'; value?: Partial<SceneMediaHotspotSettings> }
+    | { type: 'MEDIA_HOTSPOT_SET_BASELINE'; id: string; target: 'video' | 'audio' }
+    | { type: 'VIEW_MEDIA_MUTE_SET'; value?: boolean }
     | { type: 'SETTINGS_SAVE' }
     | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule | null }
     | { type: 'ASSET_SHOW_HIDE_SET'; id?: string; value?: boolean }
@@ -62,6 +71,7 @@ type InboundPayload =
     | { type: 'ASSET_COPY'; id?: string; copyId?: string }
     | { type: 'ASSET_DELETE'; id?: string }
     | { type: 'ASSET_TRANSFORM_MODE'; value?: 'move' | 'rotate' | 'scale' }
+    | { type: 'ASSET_VIDEO_CURVATURE_SET'; id?: string; value?: number }
     | { type: 'ANNOTATION_PLACEMENT_START'; id?: string }
     | { type: 'ANNOTATION_PLACEMENT_CANCEL' }
     | { type: 'ANNOTATION_CONFIRM'; id?: string; value?: Partial<AnnotationData> }
@@ -230,6 +240,9 @@ const initPostMessageBridge = (global: Global) => {
                     if (hasVfxToResume) {
                         events.fire('vfxExit');
                     }
+                    // 先清空模块，避免 sceneAssets 恢复结束后覆盖用户已选模块
+                    state.editLeftModule = null;
+                    events.fire('editLeftModule:changed', null);
                     // View -> Edit：先恢复到原始配置（View 模式的临时修改不保留）
                     const originalSettings = (global as any).__originalSettings as ExperienceSettings | undefined;
                     if (originalSettings) {
@@ -241,13 +254,11 @@ const initPostMessageBridge = (global: Global) => {
                         restoreAnnotationsFromSettings(global);
                         restoreLightingFromSettings(global);
                         restorePostEffectsFromSettings(global);
+                        restoreSkyboxFromSettings(global);
                     }
                 }
                 state.editMode = !!p.value;
                 if (value) {
-                // 通过 EDIT_MODE_SET 进入编辑模式时：默认不选中任何模块（null）
-                    state.editLeftModule = null;
-                    events.fire('editLeftModule:changed', null);
                     const initialSnapshot = serializeExperienceSettings(global);
                     setBaseline(initialSnapshot);
                     initEditHistory(global, initialSnapshot);
@@ -270,6 +281,7 @@ const initPostMessageBridge = (global: Global) => {
                     // 统一通过 helper 按当前 settings 重置 Lighting / NightMode / PostEffect
                     restoreLightingFromSettings(global);
                     restorePostEffectsFromSettings(global);
+                    restoreSkyboxFromSettings(global);
                 }
                 state.editMode = false;
                 break;
@@ -285,7 +297,51 @@ const initPostMessageBridge = (global: Global) => {
                 break;
             }
             case 'PREVIEW_MODE_SET': {
-                state.previewMode = p.value === true;
+                const next = p.value === true;
+                if (state.previewMode !== next) {
+                    state.previewMode = next;
+                }
+                if (next) {
+                    events.fire('mediaHotspot:userActivate');
+                }
+                break;
+            }
+            case 'MEDIA_HOTSPOT_SET': {
+                const patch = (payload as Extract<InboundPayload, { type: 'MEDIA_HOTSPOT_SET' }>).value;
+                if (!patch) break;
+                patchSceneMediaHotspot(global.settings as ExperienceSettings, patch);
+                events.fire('sceneMediaHotspot:changed');
+                break;
+            }
+            case 'VIEW_MEDIA_MUTE_SET':
+                if (typeof p.value === 'boolean') {
+                    applyViewMediaMuteSet(global, p.value);
+                }
+                break;
+            case 'MEDIA_HOTSPOT_SET_BASELINE': {
+                const msg = payload as Extract<InboundPayload, { type: 'MEDIA_HOTSPOT_SET_BASELINE' }>;
+                const id = typeof msg.id === 'string' ? msg.id.trim() : '';
+                if (!id) {
+                    console.warn('[MessageBridge] MEDIA_HOTSPOT_SET_BASELINE missing id');
+                    break;
+                }
+                if (msg.target !== 'video' && msg.target !== 'audio') {
+                    console.warn('[MessageBridge] MEDIA_HOTSPOT_SET_BASELINE invalid target');
+                    break;
+                }
+                const result = applySceneMediaHotspotBaselineFromView(global, {
+                    sceneEntityId: id,
+                    target: msg.target
+                });
+                if (result.ok === false) {
+                    console.warn('[MessageBridge] MEDIA_HOTSPOT_SET_BASELINE failed:', result.reason, { id });
+                    break;
+                }
+                events.fire('sceneMediaHotspot:changed');
+                postToParent('SCENE_MEDIA_HOTSPOT_CHANGED', {
+                    module: MESSAGE_BRIDGE_MODULE.asset,
+                    value: result.settings
+                });
                 break;
             }
             case 'SETTINGS_SAVE': {
@@ -377,6 +433,11 @@ const initPostMessageBridge = (global: Global) => {
                 });
                 break;
             }
+            case 'ASSET_VIDEO_CURVATURE_SET':
+                if (typeof p.id === 'string' && typeof p.value === 'number') {
+                    dispatchAsset(global, 'ASSET_VIDEO_CURVATURE_SET', { id: p.id, value: p.value });
+                }
+                break;
             case 'ANNOTATION_PLACEMENT_START':
                 if (typeof p.id === 'string') {
                     dispatchAnnotation(global, 'ANNOTATION_PLACEMENT_START', { id: p.id });
@@ -771,6 +832,7 @@ const initPostMessageBridge = (global: Global) => {
                 title: serialized.title ?? '',
                 text: serialized.text ?? '',
                 imageUrl: serialized.imageUrl,
+                videoUrl: serialized.videoUrl,
                 showTitleWhenCollapsed: serialized.showTitleWhenCollapsed ?? false
             }
         });

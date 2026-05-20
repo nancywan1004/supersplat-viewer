@@ -3,6 +3,11 @@ import type { Global } from './types';
 const PLACEMENT_CURSOR = "url('/assets/icons/placement.svg') 16 16, crosshair";
 const LOADING_CURSOR = 'wait'; // 系统等待光标
 
+let placementCursorActive = false;
+
+/** 资产/标注等放置模式激活中（避免 nav-interaction 把 canvas.cursor 清掉） */
+const isPlacementCursorActive = (): boolean => placementCursorActive;
+
 const getCanvasElement = (global: Global): HTMLCanvasElement | null => {
     return (global.app.graphicsDevice.canvas as HTMLCanvasElement) ?? null;
 };
@@ -17,6 +22,8 @@ const setPlacementCursorActive = (global: Global, active: boolean, opts?: { load
     const canvas = getCanvasElement(global);
     if (!canvas) return;
 
+    placementCursorActive = active;
+
     if (!active) {
         canvas.style.cursor = '';
         return;
@@ -26,4 +33,4 @@ const setPlacementCursorActive = (global: Global, active: boolean, opts?: { load
     canvas.style.cursor = opts?.loading ? LOADING_CURSOR : PLACEMENT_CURSOR;
 };
 
-export { setPlacementCursorActive };
+export { isPlacementCursorActive, setPlacementCursorActive };

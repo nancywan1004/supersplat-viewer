@@ -485,6 +485,7 @@ export class AnnotationManager {
             title: preset?.title ?? '请先确认放置位置',
             text: preset?.text ?? '',
             imageUrl: preset?.imageUrl,
+            videoUrl: preset?.videoUrl,
             showTitleWhenCollapsed: preset?.showTitleWhenCollapsed ?? false,
             // collapsed 在新语义下仅用于兼容老数据，这里始终以默认收起为准
             collapsed: true,

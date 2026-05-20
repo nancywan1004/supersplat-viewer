@@ -1,5 +1,6 @@
 import type { Global, ScenePlacedItem } from '../types';
 import type { ExperienceSettings } from '../schemas/v2';
+import type { SceneAsset } from '../schemas/v2-custom';
 import type { AnnotationManager } from '../annotation-toolbar/annotation-manager';
 import { DEFAULT_BLOOM, DEFAULT_SHADOW } from './settings-serialize-configs';
 import {
@@ -85,6 +86,9 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
     if (!Array.isArray(bg.color) || bg.color.length !== 3) {
         bg.color = [0, 0, 0];
     }
+    if (typeof bg.skyboxUrl === 'string' && !bg.skyboxUrl.trim()) {
+        delete bg.skyboxUrl;
+    }
     if (!out.postEffectSettings || typeof out.postEffectSettings !== 'object') {
         out.postEffectSettings = defaultPostEffectSettings();
     } else {
@@ -143,37 +147,7 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
         out.annotations = [];
     }
 
-    // 将当前场景中的可编辑资产列表序列化到 settings.sceneAssets
-    const sceneItems = (global.state.scenePlacedEntities ?? []) as ScenePlacedItem[];
-    out.sceneAssets = sceneItems.map((entry) => {
-        const pos = entry.entity.getPosition();
-        const rot = entry.entity.getEulerAngles();
-        const rotQuat = entry.entity.getLocalRotation();
-        const scale = entry.entity.getLocalScale();
-        const mirrorX: 1 | -1 = scale.x < 0 ? -1 : 1;
-        const mirrorY: 1 | -1 = scale.y < 0 ? -1 : 1;
-        const mirrorZ: 1 | -1 = scale.z < 0 ? -1 : 1;
-
-        return {
-            id: entry.id,
-            type: entry.assetType ?? 'gaussian',
-            name: entry.name,
-            visible: entry.visible,
-            thumbnailUrl: entry.thumbnailUrl,
-            source: {
-                assetId: entry.assetId,
-                filename: entry.filename,
-                url: entry.url
-            },
-            transform: {
-                position: [pos.x, pos.y, pos.z] as [number, number, number],
-                rotation: [rot.x, rot.y, rot.z] as [number, number, number],
-                rotationQuat: [rotQuat.x, rotQuat.y, rotQuat.z, rotQuat.w] as [number, number, number, number],
-                scale: [scale.x, scale.y, scale.z] as [number, number, number],
-                mirror: [mirrorX, mirrorY, mirrorZ]
-            }
-        };
-    });
+    out.sceneAssets = buildSceneAssetsForPersistence(global);
 
     stripBloomSessionFieldsForPersistence(out);
 
@@ -183,6 +157,68 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
     }
 
     return out as ExperienceSettings;
+}
+
+/** 将运行态已放置实体序列化为 settings.sceneAssets 条目 */
+export function serializeScenePlacedItem(entry: ScenePlacedItem): SceneAsset {
+    const pos = entry.entity.getPosition();
+    const rot = entry.entity.getEulerAngles();
+    const rotQuat = entry.entity.getLocalRotation();
+    const scale = entry.entity.getLocalScale();
+    const mirrorX: 1 | -1 = scale.x < 0 ? -1 : 1;
+    const mirrorY: 1 | -1 = scale.y < 0 ? -1 : 1;
+    const mirrorZ: 1 | -1 = scale.z < 0 ? -1 : 1;
+
+    const transform: SceneAsset['transform'] = {
+        position: [pos.x, pos.y, pos.z] as [number, number, number],
+        rotation: [rot.x, rot.y, rot.z] as [number, number, number],
+        rotationQuat: [rotQuat.x, rotQuat.y, rotQuat.z, rotQuat.w] as [number, number, number, number],
+        scale: [scale.x, scale.y, scale.z] as [number, number, number],
+        mirror: [mirrorX, mirrorY, mirrorZ]
+    };
+    if (
+        entry.assetType === 'video'
+        && typeof entry.horizontalCurvature === 'number'
+        && entry.horizontalCurvature > 0
+    ) {
+        transform.horizontalCurvature = entry.horizontalCurvature;
+    }
+
+    return {
+        id: entry.id,
+        type: entry.assetType ?? 'gaussian',
+        name: entry.name,
+        visible: entry.visible,
+        thumbnailUrl: entry.thumbnailUrl,
+        source: {
+            assetId: entry.assetId,
+            filename: entry.filename,
+            url: entry.url
+        },
+        transform
+    };
+}
+
+/**
+ * 持久化 sceneAssets：以运行态为准，并保留 settings 中尚未恢复进场景的条目
+ *（例如 video 因 CORS/超时未 place 成功时，避免保存把 JSON 里的配置抹掉）。
+ */
+export function buildSceneAssetsForPersistence(global: Global): SceneAsset[] {
+    const sceneItems = (global.state.scenePlacedEntities ?? []) as ScenePlacedItem[];
+    const runtimeSerialized = sceneItems.map(serializeScenePlacedItem);
+    const runtimeIds = new Set(runtimeSerialized.map((s) => s.id));
+    const settings = global.settings as ExperienceSettings;
+    const preserved = (settings.sceneAssets ?? []).filter(
+        (sa): sa is SceneAsset => typeof sa?.id === 'string' && sa.id.length > 0 && !runtimeIds.has(sa.id)
+    );
+    return [...runtimeSerialized, ...preserved];
+}
+
+/** 用户从场景删除资产时，同步剔除 settings.sceneAssets，避免下次保存被 merge 复活 */
+export function removeSceneAssetFromSettings(global: Global, id: string): void {
+    const settings = global.settings as ExperienceSettings;
+    if (!Array.isArray(settings.sceneAssets)) return;
+    settings.sceneAssets = settings.sceneAssets.filter((a) => a.id !== id);
 }
 
 /** 递归按 key 排序对象，用于生成可比较的字符串（避免 key 顺序导致误判） */

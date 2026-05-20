@@ -10,6 +10,7 @@ import {
     getComparableSettingsStringFromSnapshot,
     applySettingsSnapshot
 } from '../settings-serialize/settings-serialize';
+import { readSkyboxUrlFromSettings } from '../settings-serialize/settings-serialize-helper';
 import { requestSceneAssetsRestore } from '../asset-placement-handler';
 import {
     initEditHistory,
@@ -19,7 +20,8 @@ import {
     redo,
     restoreAnnotationsFromSettings,
     restoreLightingFromSettings,
-    restorePostEffectsFromSettings
+    restorePostEffectsFromSettings,
+    restoreSkyboxFromSettings
 } from '../edit-history';
 import { showExitEditConfirmModal } from './components/exit-edit-confirm-ui';
 import { initRevealUI } from './components/effects-ui';
@@ -34,6 +36,7 @@ import type { Annotation } from '../settings';
 import { getEditUiTransport, sendEditProtocolMessage } from './edit-ui-transport';
 import { applyEnvironmentPreviewVisualPolicy } from '../editor-modules/environment-facade';
 import { applyLightToggleAll, applyLightToggle } from '../editor-modules/protocol-adapters/environment-protocol-adapter';
+import { applyViewMediaMuteSet } from '../view-settings';
 import { getRevealActiveType } from '../settings-serialize/effects-sync';
 
 // Initialize the touch joystick for fly mode camera control
@@ -291,7 +294,8 @@ const initUI = (global: Global) => {
         // 'supersplatBranding',
         // View 模式调试按钮（右上角编辑按钮旁）
         'viewDebugToggleAssets', 'viewDebugLightsAllOn', 'viewDebugLightsAllOff',
-        'viewDebugRegionSelect', 'viewDebugToggleRegionLight'
+        'viewDebugRegionSelect', 'viewDebugToggleRegionLight',
+        'viewDebugMediaMute', 'viewDebugMediaUnmute'
     ].reduce((acc: Record<string, HTMLElement>, id) => {
         acc[id] = document.getElementById(id);
         return acc;
@@ -520,7 +524,7 @@ const initUI = (global: Global) => {
                 })
                 .filter((item): item is { label: string; value: string } => !!item?.value);
 
-            const current = config.skyboxUrl ?? '';
+            const current = readSkyboxUrlFromSettings(global.settings) ?? config.skyboxUrl ?? '';
 
             skyboxSelect.innerHTML = '';
 
@@ -581,7 +585,7 @@ const initUI = (global: Global) => {
     const updatePreviewModeButton = () => {
         if (!dom.previewModeBtn) return;
         const inPreviewMode = state.previewMode === true;
-        dom.previewModeBtn.textContent = inPreviewMode ? '显示调试组件' : '隐藏调试组件';
+        dom.previewModeBtn.textContent = inPreviewMode ? '退出预览模式' : '进入预览模式';
     };
     const applyEditChromeVisibility = (inEdit: boolean) => {
         if (config.showEditUI === false) return;
@@ -590,7 +594,6 @@ const initUI = (global: Global) => {
             leftMount.classList.toggle('hidden', !inEdit);
         }
         if (dom.rightToolBar) {
-            // editLeftModule === null 时：不显示任何模块面板
             const showRight = inEdit && state.editLeftModule != null;
             dom.rightToolBar.classList.toggle('hidden', !showRight);
         }
@@ -638,6 +641,10 @@ const initUI = (global: Global) => {
                 if (hasVfxToResume) {
                     events.fire('vfxExit');
                 }
+                // 进入编辑时先清空模块（在异步恢复之前），避免 sceneAssets 恢复结束后覆盖用户已选模块
+                state.editLeftModule = null;
+                events.fire('editLeftModule:changed', null);
+
                 // 进入编辑统一恢复原始配置（避免资产异步未完成时基线快照不一致）。
                 const originalSettings = (global as any).__originalSettings as ExperienceSettings | undefined;
                 if (originalSettings) {
@@ -649,17 +656,13 @@ const initUI = (global: Global) => {
                     restoreAnnotationsFromSettings(global);
                     restoreLightingFromSettings(global);
                     restorePostEffectsFromSettings(global);
+                    restoreSkyboxFromSettings(global);
                 }
-
-                // 每次进入编辑模式时默认不选中任何模块（null）
-                state.editLeftModule = null;
-                events.fire('editLeftModule:changed', null);
 
                 const initialSnapshot = serializeExperienceSettings(global);
                 initEditHistory(global, initialSnapshot);
                 editModeEnteredSettingsData = JSON.parse(JSON.stringify(initialSnapshot)) as ExperienceSettings;
                 editModeEnteredSettingsSnapshot = getComparableSettingsStringFromSnapshot(initialSnapshot);
-                // 恢复流程中会重置 editLeftModule，完成后再同步一次显隐状态
                 applyEditChromeVisibility(state.editMode);
             }
         }
@@ -772,6 +775,7 @@ const initUI = (global: Global) => {
                         restoreAnnotationsFromSettings(global);
                         restoreLightingFromSettings(global);
                         restorePostEffectsFromSettings(global);
+                    restoreSkyboxFromSettings(global);
                     }
                     state.editMode = false;
                     return;
@@ -804,6 +808,7 @@ const initUI = (global: Global) => {
                         // 统一通过 helper 按当前 settings 重置 Lighting / NightMode / PostEffect
                         restoreLightingFromSettings(global);
                         restorePostEffectsFromSettings(global);
+                    restoreSkyboxFromSettings(global);
                         state.editMode = false;
                     }
                 });
@@ -873,9 +878,15 @@ const initUI = (global: Global) => {
                 const nextValue = state.previewMode !== true;
                 if (editUiTransport === 'message-bridge') {
                     sendEditProtocolMessage({ type: 'PREVIEW_MODE_SET', value: nextValue });
+                    if (nextValue) {
+                        events.fire('mediaHotspot:userActivate');
+                    }
                     return;
                 }
                 state.previewMode = nextValue;
+                if (nextValue) {
+                    events.fire('mediaHotspot:userActivate');
+                }
             });
             updatePreviewModeButton();
         }
@@ -949,12 +960,10 @@ const initUI = (global: Global) => {
                     || state.editLeftModule === 'environment';
                 bottomMount.classList.toggle('hidden', !showBottomBar);
             }
-            // 右侧面板：null 表示未选模块 => 隐藏右侧栏
             if (dom.rightToolBar) {
                 const showRight = state.editMode && state.editLeftModule != null;
                 dom.rightToolBar.classList.toggle('hidden', !showRight);
             }
-            // 进入/离开环境模块时交给 facade 策略统一刷新（含 preview 约束）。
             applyEnvironmentPreviewVisualPolicy(global);
         });
         updateEditModeUI();
@@ -1008,6 +1017,26 @@ const initUI = (global: Global) => {
                 sendEditProtocolMessage({ type: 'LIGHT_TOGGLE_ALL', value: false });
             } else {
                 applyLightToggleAll(global, false);
+            }
+        });
+    }
+
+    if (dom.viewDebugMediaMute) {
+        dom.viewDebugMediaMute.addEventListener('click', () => {
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'VIEW_MEDIA_MUTE_SET', value: true });
+            } else {
+                applyViewMediaMuteSet(global, true);
+            }
+        });
+    }
+
+    if (dom.viewDebugMediaUnmute) {
+        dom.viewDebugMediaUnmute.addEventListener('click', () => {
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'VIEW_MEDIA_MUTE_SET', value: false });
+            } else {
+                applyViewMediaMuteSet(global, false);
             }
         });
     }
@@ -1429,7 +1458,7 @@ const initUI = (global: Global) => {
     tooltip.register(dom.saveSettingsBtn, 'Save Settings', 'top');
     tooltip.register(dom.undoEditBtn, 'Undo (Ctrl/Cmd+Z)', 'top');
     tooltip.register(dom.redoEditBtn, 'Redo (Ctrl/Cmd+Shift+Z)', 'top');
-    tooltip.register(dom.previewModeBtn, 'Toggle Preview Mode', 'top');
+    tooltip.register(dom.previewModeBtn, '预览体验：隐藏操作轴与调试线框，并启用音视频热区自动播控', 'top');
 
     // 全局 Undo/Redo 快捷键，仅在编辑模式下生效
     const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);

@@ -1,3 +1,15 @@
+import {
+    DEFAULT_BLOOM,
+    DEFAULT_BLOOM_EDITOR_SESSION,
+    DEFAULT_LIGHTING_ROOT,
+    DEFAULT_NIGHT_MODE,
+    DEFAULT_REVEAL_EFFECT,
+    DEFAULT_SCENE_MEDIA_HOTSPOT,
+    DEFAULT_SHADOW
+} from './settings-serialize-configs';
+import { normalizeAnnotationMediaFields } from '../annotation-toolbar/media-fields';
+import { viewAxisDepthM } from '../scene-assets/media/media-view-depth';
+import type { Global } from '../types';
 import type {
     Annotation,
     Camera,
@@ -5,19 +17,146 @@ import type {
     ExperienceSettings,
     PointLightConfig,
     DirectionalLightConfig,
-    SpotLightConfig
+    SpotLightConfig,
+    SceneMediaHotspotSettings
 } from '../schemas/v2';
-import {
-    DEFAULT_BLOOM,
-    DEFAULT_BLOOM_EDITOR_SESSION,
-    DEFAULT_LIGHTING_ROOT,
-    DEFAULT_NIGHT_MODE,
-    DEFAULT_REVEAL_EFFECT,
-    DEFAULT_SHADOW
-} from './settings-serialize-configs';
 
 /** 光源配置项在运行时应带稳定 id（列表 / Gizmo / 协议共用） */
 export type LightWithId = (PointLightConfig | DirectionalLightConfig | SpotLightConfig) & { id?: string };
+
+export function ensureSceneMediaHotspot(settings: ExperienceSettings): SceneMediaHotspotSettings {
+    const root = settings as Record<string, unknown>;
+    if (!root.sceneMediaHotspot || typeof root.sceneMediaHotspot !== 'object') {
+        root.sceneMediaHotspot = { ...DEFAULT_SCENE_MEDIA_HOTSPOT };
+    }
+    const sm = root.sceneMediaHotspot as Record<string, unknown>;
+    if (typeof sm.videoTriggerDistanceM !== 'number' || !Number.isFinite(sm.videoTriggerDistanceM)) {
+        sm.videoTriggerDistanceM = DEFAULT_SCENE_MEDIA_HOTSPOT.videoTriggerDistanceM;
+    }
+    if (typeof sm.audioTriggerDistanceM !== 'number' || !Number.isFinite(sm.audioTriggerDistanceM)) {
+        sm.audioTriggerDistanceM = DEFAULT_SCENE_MEDIA_HOTSPOT.audioTriggerDistanceM;
+    }
+    if (typeof sm.coneHalfDeg !== 'number' || !Number.isFinite(sm.coneHalfDeg)) {
+        sm.coneHalfDeg = DEFAULT_SCENE_MEDIA_HOTSPOT.coneHalfDeg;
+    }
+    // 旧版曾持久化以下字段，不再进入 settings；导入时剥离
+    delete sm.minToggleIntervalMs;
+    delete sm.hysteresisM;
+    delete sm.showAudioIcon;
+    return root.sceneMediaHotspot as SceneMediaHotspotSettings;
+}
+
+export function ensureBackground(settings: ExperienceSettings): ExperienceSettings['background'] {
+    const root = settings as Record<string, unknown>;
+    if (!root.background || typeof root.background !== 'object') {
+        root.background = { color: [0, 0, 0] as [number, number, number] };
+    }
+    const bg = root.background as Record<string, unknown>;
+    if (!Array.isArray(bg.color) || bg.color.length !== 3) {
+        bg.color = [0, 0, 0];
+    }
+    return root.background as ExperienceSettings['background'];
+}
+
+/** 读取存盘天空盒 URL；空字符串视为未设置 */
+export function readSkyboxUrlFromSettings(settings: ExperienceSettings): string | undefined {
+    const bg = settings.background;
+    if (!bg || typeof bg !== 'object') return undefined;
+    const url = (bg as { skyboxUrl?: unknown }).skyboxUrl;
+    if (typeof url !== 'string') return undefined;
+    const trimmed = url.trim();
+    return trimmed || undefined;
+}
+
+/** 写入或清除 `settings.background.skyboxUrl` */
+export function setSkyboxUrlInSettings(settings: ExperienceSettings, url: string | null | undefined): void {
+    const bg = ensureBackground(settings) as Record<string, unknown>;
+    const trimmed = typeof url === 'string' ? url.trim() : '';
+    if (trimmed) {
+        bg.skyboxUrl = trimmed;
+    } else {
+        delete bg.skyboxUrl;
+    }
+}
+
+/**
+ * 启动时解析天空盒：优先 settings，其次 URL 参数；若仅有 URL 参数则回写 settings 便于存盘。
+ */
+export function resolveInitialSkyboxUrl(settings: ExperienceSettings, configSkyboxUrl?: string): string | undefined {
+    const fromSettings = readSkyboxUrlFromSettings(settings);
+    if (fromSettings) return fromSettings;
+    const fromConfig = typeof configSkyboxUrl === 'string' ? configSkyboxUrl.trim() : '';
+    if (fromConfig) {
+        setSkyboxUrlInSettings(settings, fromConfig);
+        return fromConfig;
+    }
+    return undefined;
+}
+
+/** 父级 `MEDIA_HOTSPOT_SET`：仅合并传入的有限数值字段 */
+export function patchSceneMediaHotspot(
+    settings: ExperienceSettings,
+    patch: Partial<SceneMediaHotspotSettings>
+): SceneMediaHotspotSettings {
+    const sm = ensureSceneMediaHotspot(settings);
+    if (typeof patch.videoTriggerDistanceM === 'number' && Number.isFinite(patch.videoTriggerDistanceM)) {
+        sm.videoTriggerDistanceM = patch.videoTriggerDistanceM;
+    }
+    if (typeof patch.audioTriggerDistanceM === 'number' && Number.isFinite(patch.audioTriggerDistanceM)) {
+        sm.audioTriggerDistanceM = patch.audioTriggerDistanceM;
+    }
+    if (typeof patch.coneHalfDeg === 'number' && Number.isFinite(patch.coneHalfDeg)) {
+        sm.coneHalfDeg = patch.coneHalfDeg;
+    }
+    return sm;
+}
+
+export type MediaHotspotBaselineResult =
+    | { ok: true; target: 'video' | 'audio'; distanceM: number; settings: SceneMediaHotspotSettings }
+    | { ok: false; reason: string };
+
+export type ApplySceneMediaHotspotBaselineOptions = {
+    /** 场景已放置资产 id（`scenePlacedEntities[].id`） */
+    sceneEntityId: string;
+    target: 'video' | 'audio';
+};
+
+/**
+ * 将「当前相机沿视线到指定 video/audio 锚点」的视轴深度写入对应触发半径。
+ * 协议须传 `id` + `target`；内置 UI 用当前 `selectedSceneEntityId`。
+ */
+export function applySceneMediaHotspotBaselineFromView(
+    global: Global,
+    opts: ApplySceneMediaHotspotBaselineOptions
+): MediaHotspotBaselineResult {
+    const list = global.state.scenePlacedEntities ?? [];
+    const sel = list.find((e) => e.id === opts.sceneEntityId) ?? null;
+    if (!sel?.entity) {
+        return { ok: false, reason: 'asset_not_found' };
+    }
+
+    const assetType = sel.assetType;
+    if (assetType !== 'video' && assetType !== 'audio') {
+        return { ok: false, reason: 'asset_not_video_or_audio' };
+    }
+    if (assetType !== opts.target) {
+        return { ok: false, reason: 'target_mismatch_selected_asset' };
+    }
+
+    const distanceM = viewAxisDepthM(global.camera, sel.entity.getPosition());
+    if (!Number.isFinite(distanceM) || distanceM <= 0) {
+        return { ok: false, reason: 'invalid_distance' };
+    }
+
+    const sm = ensureSceneMediaHotspot(global.settings as ExperienceSettings);
+    if (opts.target === 'video') {
+        sm.videoTriggerDistanceM = distanceM;
+    } else {
+        sm.audioTriggerDistanceM = distanceM;
+    }
+
+    return { ok: true, target: opts.target, distanceM, settings: sm };
+}
 
 export function ensureNightMode(settings: ExperienceSettings): { fade?: number } {
     if (!settings.nightMode || typeof settings.nightMode !== 'object') {
@@ -150,12 +289,16 @@ export function normalizeImportedAnnotation(ann: unknown): Annotation | null {
     const camera: Camera = a.camera && typeof a.camera === 'object' && (a.camera as any).initial
         ? (a.camera as Camera)
         : { initial: { position: [0, 0, 0], target: [0, 0, 0], fov: 60 } };
+    const media = normalizeAnnotationMediaFields({
+        imageUrl: typeof a.imageUrl === 'string' ? a.imageUrl : undefined,
+        videoUrl: typeof a.videoUrl === 'string' ? a.videoUrl : undefined
+    });
     return {
         id,
         position: pos,
         title: typeof a.title === 'string' ? a.title : '',
         text: typeof a.text === 'string' ? a.text : '',
-        imageUrl: typeof a.imageUrl === 'string' ? a.imageUrl : undefined,
+        ...media,
         showTitleWhenCollapsed: Boolean(a.showTitleWhenCollapsed),
         collapsed: Boolean(a.collapsed),
         extras: a.extras && typeof a.extras === 'object' ? a.extras : {},

@@ -6,7 +6,9 @@ import {
     normalizeHoistBloomSessionFields,
     normalizeImportedAnnotation,
     normalizeBloomLocalLightRegions,
-    normalizeBloomAfterImport
+    normalizeBloomAfterImport,
+    ensureSceneMediaHotspot,
+    ensureBackground
 } from './settings-serialize/settings-serialize-helper';
 import { Vec3 } from 'playcanvas';
 import { assertObject } from './schemas/validate-utils';
@@ -394,12 +396,14 @@ const importSettings = (settings: any): V2 => {
     ensureShadow(result);
     normalizeBloomAfterImport(result);
     normalizeBloomLocalLightRegions(result);
+    ensureSceneMediaHotspot(result);
+    ensureBackground(result);
 
     return result;
 };
 
 // export the latest/current schema types
-export type { AnimTrack, Camera, Annotation, PostEffectSettings, LegacyRevealEffect, TransformFrame, ExperienceSettings, EffectsSettings } from './schemas/v2';
+export type { AnimTrack, Camera, Annotation, PostEffectSettings, LegacyRevealEffect, TransformFrame, ExperienceSettings, EffectsSettings, SceneMediaHotspotSettings } from './schemas/v2';
 // validate unknown data against any supported settings schema version, throwing on invalid input
 const validateSettings = (settings: unknown): void => {
     const obj = assertObject(settings, 'settings');

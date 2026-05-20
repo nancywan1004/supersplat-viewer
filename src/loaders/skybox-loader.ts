@@ -191,52 +191,31 @@ const isLocalDevelopment = (): boolean => {
 };
 
 /**
- * 获取代理服务器地址
- * - 本地开发环境：使用 localhost:3001 或通过 URL 参数配置
- * - 生产环境：使用当前域名的相对路径（同域名代理）
+ * 获取本地开发代理基址（与 index.html `toProxy` 一致：`/api/proxy?url=`）
  */
-const getProxyServerUrl = (): string => {
-    if (typeof window === 'undefined') {
-        return 'http://localhost:3001';
-    }
-    
-    // 允许通过 URL 参数配置代理服务器地址
+const getLocalDevProxyBase = (): string => {
     const params = new URLSearchParams(window.location.search);
     const proxyServer = params.get('proxyServer');
     if (proxyServer) {
-        return proxyServer;
+        return `${proxyServer.replace(/\/$/, '')}/api/proxy?url=`;
     }
-    
-    // 本地开发环境使用 localhost:3001
-    if (isLocalDevelopment()) {
-        return 'http://localhost:3001';
-    }
-    
-    // 生产环境使用当前域名的相对路径（同域名代理）
-    // 这样会自动使用 https://3dgs-viewer.bdnrc.org.cn/proxy/cdn/
-    return '';
+    const proxyPort = params.get('proxyPort') || '3001';
+    return `http://localhost:${proxyPort}/api/proxy?url=`;
 };
 
 /**
  * 将 CDN URL 转换为代理 URL（如果需要）
- * - 本地开发环境：使用 localhost:3001 代理服务器
- * - 生产环境：使用当前域名的 /proxy/cdn/ 路径（同域名代理）
+ * - 本地开发：`scripts/proxy-server.js` 的 `/api/proxy?url=<encoded>`
+ * - 生产环境：同域名 `/proxy/cdn/`（nginx rewrite）
  */
 const getProxiedUrl = (url: string): string => {
-    // 如果 URL 来自 unicity-cdn.bdnrc.org.cn，使用代理
     if (url.includes('unicity-cdn.bdnrc.org.cn')) {
         try {
             const urlObj = new URL(url);
-            const proxyServerUrl = getProxyServerUrl();
-            
-            // 构建代理 URL
-            if (proxyServerUrl) {
-                // 本地开发环境：使用完整的代理服务器地址
-                return `${proxyServerUrl}/proxy/cdn${urlObj.pathname}${urlObj.search}`;
-            } else {
-                // 生产环境：使用相对路径（同域名代理）
-                return `/proxy/cdn${urlObj.pathname}${urlObj.search}`;
+            if (isLocalDevelopment()) {
+                return `${getLocalDevProxyBase()}${encodeURIComponent(url)}`;
             }
+            return `/proxy/cdn${urlObj.pathname}${urlObj.search}`;
         } catch (e) {
             console.warn('[SuperSplat] URL 解析失败，使用原始 URL:', e);
             return url;
@@ -286,6 +265,14 @@ const loadSkyboxDirect = (app: AppBase, url: string): Promise<Asset> => {
     });
 };
 
+/** 清除 cubemap / sphere 天空盒显示，并恢复独立纯色 envAtlas */
+const clearSkyboxDisplay = (app: AppBase) => {
+    removeSkyboxSphere(app);
+    app.scene.skybox = null;
+    app.scene.envAtlas = getOrCreateSolidEnvAtlas(app);
+    app.renderNextFrame = true;
+};
+
 /**
  * 获取天空盒的实际半径
  * 如果存在天空盒实体，返回其实际半径；否则返回 0
@@ -310,4 +297,4 @@ const getSkyboxRadius = (app: AppBase, url?: string): number => {
     return 0;
 };
 
-export { applySkyboxSphere, removeSkyboxSphere, applySkyboxTexture, getSkyboxRadius };
+export { applySkyboxSphere, removeSkyboxSphere, applySkyboxTexture, clearSkyboxDisplay, getSkyboxRadius };

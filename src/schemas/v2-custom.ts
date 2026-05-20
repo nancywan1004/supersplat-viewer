@@ -28,7 +28,7 @@ type LodSettings = {
     lodUpdateDistance?: number, // 0.5
     lodUnderfillLimit?: number, // 5
     cameraPosition?: number[], // [[10.3, 2, -10]
-    eulerAngles?: number[], //[-90, 0, 0]
+    eulerAngles?: number[], // [-90, 0, 0]
     moveSpeed?: number, // 4
     moveFastSpeed?: number, // 15
     enableOrbit?: boolean, // false
@@ -162,9 +162,19 @@ type LocalLightRegion = {
     linkedLightId?: string | null;
 };
 
+/** 场景音视频热区：仅全局触发距离与视锥半角（持久化于 settings 根） */
+type SceneMediaHotspotSettings = {
+    /** 视频触发球半径（米） */
+    videoTriggerDistanceM: number;
+    /** 音频触发球半径（米） */
+    audioTriggerDistanceM: number;
+    /** 相机前向与「相机→锚点」夹角半角上限（度），总锥约 `2 * coneHalfDeg` */
+    coneHalfDeg: number;
+};
+
 type SceneAsset = {
     id: string,
-    type: 'image' | 'mesh' | 'gaussian',
+    type: 'image' | 'mesh' | 'gaussian' | 'video' | 'audio',
     name: string,
     visible: boolean,
     /** 对应源资产库条目的缩略图 URL（可选，持久化到 settings.sceneAssets） */
@@ -182,7 +192,9 @@ type SceneAsset = {
         rotationQuat?: [number, number, number, number],
         scale: [number, number, number],
         /** 每轴镜像符号：-1=镜像翻转，1=正常；用于显式持久化 scale 镜像状态 */
-        mirror?: [1 | -1, 1 | -1, 1 | -1]
+        mirror?: [1 | -1, 1 | -1, 1 | -1],
+        /** 仅 video：0 平面，(0,1] 横向曲度（绕竖直轴 / 屏幕宽度方向） */
+        horizontalCurvature?: number
     }
 }
 
@@ -208,4 +220,4 @@ type EffectsSettings = {
     asset: EffectsAssetTrack;
 };
 
-export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsAssetTrack };
+export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset, SceneMediaHotspotSettings, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsAssetTrack };

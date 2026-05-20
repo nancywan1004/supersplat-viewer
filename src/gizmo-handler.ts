@@ -487,19 +487,19 @@ export function initGizmoHandler(global: Global): () => void {
                     _type = type ?? 'translate';
                     const g = _gizmos[_type] ?? _gizmos.translate;
                     g.attach(_nodes);
-                    // 坐标空间策略：
-                    // - scale: local（符合建模直觉）
-                    // - translate: world（符合场景编辑直觉）
-                    // - rotate: 默认 world，但 spot light 使用 local（对齐锥体局部坐标系）
+                    const currentNode = _nodes[0];
+                    const lightCfg = currentNode ? (currentNode as any).__lightConfig as { type?: string } | undefined : undefined;
+                    const isSceneAsset = !lightCfg;
+                    const isSpotLight = lightCfg?.type === 'spot';
+                    // 坐标空间：
+                    // - 场景资产（mesh/gaussian/image/video）：一律 local，与实体朝向一致，且与存盘 local rotation 一致
+                    // - 环境光源：translate world；spot rotate local；其余 rotate world
                     if (_type === 'scale') {
                         g.coordSpace = 'local';
                     } else if (_type === 'rotate') {
-                        // 检查当前选中的节点是否是 spot light
-                        const currentNode = _nodes[0];
-                        const isSpot = currentNode && (currentNode as any).__lightConfig?.type === 'spot';
-                        g.coordSpace = isSpot ? 'local' : 'world';
+                        g.coordSpace = isSceneAsset || isSpotLight ? 'local' : 'world';
                     } else {
-                        g.coordSpace = 'world';
+                        g.coordSpace = isSceneAsset ? 'local' : 'world';
                     }
                 },
                 destroy() {

@@ -1,5 +1,6 @@
 import type { AssetLibraryItem, Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 import { setPlacementCursorActive } from '../placement-cursor';
+import { applyViewAnnotationsVisible } from '../view-settings';
 import { loadGsplatAsset } from '../loaders/gsplat-asset-loader';
 import { getAssetLoader } from '../loaders/asset-loader';
 
@@ -22,8 +23,8 @@ class AssetFacade implements ModuleFacade {
         global: Global,
         item: AssetLibraryItem
     ): Promise<AssetLibraryItem | null> {
-        // image 不需要预下载（在 place 时异步加载）
-        if (item.type === 'image') return item;
+        // image / video / audio 不需要预下载 PlayCanvas Asset
+        if (item.type === 'image' || item.type === 'video' || item.type === 'audio') return item;
 
         // 已有 asset 直接返回
         if (item.asset) return item;
@@ -187,10 +188,7 @@ class AssetFacade implements ModuleFacade {
             }
             // 记录用户显隐意图到 viewSettings（View 模式专属）
             // revealComplete 等恢复 deferred layers 时会参考此状态
-            if (!ctx.global.viewSettings) {
-                ctx.global.viewSettings = { bloom: { localLightsEnabled: true } };
-            }
-            ctx.global.viewSettings.annotationsVisible = visible;
+            applyViewAnnotationsVisible(ctx.global, visible);
             // TODO: 临时方案 - ASSETS_SHOW_HIDE_SET 同时控制所有标注显隐（仅在 View 模式生效）
             // 通过事件驱动方式通知 annotation 模块，后续可能根据设计重构解耦
             ctx.events.fire('assets:allVisibilityChanged', { visible });
@@ -226,6 +224,12 @@ class AssetFacade implements ModuleFacade {
                 state.assetTransformMode = undefined;
                 events.fire('assetTransformMode:changed', undefined as any);
             }
+            break;
+        }
+        case 'ASSET_VIDEO_CURVATURE_SET': {
+            const pl = command.payload as { id?: string; value?: number } | undefined;
+            if (typeof pl?.id !== 'string' || typeof pl?.value !== 'number') return;
+            events.fire('assetEdit:videoCurvature', { id: pl.id, value: pl.value });
             break;
         }
         default:
@@ -276,10 +280,11 @@ class AssetFacade implements ModuleFacade {
             return;
         }
 
-        // 下载成功，切换到 awaitingPlacement 状态（正常放置光标，允许点击）
-        setPlacementCursorActive(ctx.global, true, { loading: false });
+        // 视频首帧由 placement-handler 预热并接管光标；其余类型此处切回可点击十字
+        if (hydrated.type !== 'video') {
+            setPlacementCursorActive(ctx.global, true, { loading: false });
+        }
 
-        // 发送放置开始事件，携带已下载的资产
         events.fire('assetPlacement:start', { value: hydrated });
     }
 

@@ -44,12 +44,14 @@ import { RevealController } from './vfx/effects-runtime/reveal/reveal-controller
 import { runPersistentGsplatEntityLifecycle } from './vfx/effects-runtime/persistent/persistent-gsplat-lifecycle';
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
 import { getSkyboxRadius } from './loaders/skybox-loader';
+import { readSkyboxUrlFromSettings } from './settings-serialize/settings-serialize-helper';
 import { isLodMetaFile } from './loaders/lod-loader';
 import { BloomController } from './vfx/bloom';
 import { loadSplatMesh } from './loaders/splat-mesh-loader';
 import { NightMode } from './vfx/lighting/night-mode';
 import { notifyViewportReadyForShadow, scheduleShadowPipeline } from './vfx/shadow/shadow-pipeline';
 import { initAssetPlacementHandler, requestSceneAssetsRestore } from './asset-placement-handler';
+import { initMediaHotspotController } from './scene-assets/media/media-hotspot-controller';
 import { pushEditHistory } from './edit-history';
 import { initGizmoHandler } from './gizmo-handler';
 import { initAnnotationGizmoHandler } from './annotation-toolbar/annotation-gizmo-handler';
@@ -211,6 +213,9 @@ class Viewer {
 
     /** 资产放置 handler 清理函数 */
     cleanupAssetPlacementHandler: (() => void) | null = null;
+
+    /** 音视频热区播控卸载 */
+    cleanupMediaHotspotController: (() => void) | null = null;
 
     /** Gizmo handler 清理函数 */
     cleanupGizmoHandler: (() => void) | null = null;
@@ -437,7 +442,7 @@ class Viewer {
             let far = Math.max(dist + boundRadius + clipPadding, 1e-2);
             
             // 获取天空盒的实际半径，如果存在天空盒，确保 farClip 足够大以包含它
-            const skyboxRadius = getSkyboxRadius(app, config.skyboxUrl);
+            const skyboxRadius = getSkyboxRadius(app, readSkyboxUrlFromSettings(settings));
             if (skyboxRadius > 0) {
                 // 使用固定的天空盒半径，计算相机到天空盒边缘的最大距离
                 // 假设天空盒中心在原点 (0, 0, 0)，计算相机到原点的距离 + 半径
@@ -838,6 +843,8 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 this.cleanupGizmoHandler = initGizmoHandler(global);
                 this.cleanupAnnotationGizmoHandler = initAnnotationGizmoHandler(global);
             }
+
+            this.cleanupMediaHotspotController = initMediaHotspotController(global);
 
             const { instance } = gsplat;
             if (instance) {
