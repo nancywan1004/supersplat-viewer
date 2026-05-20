@@ -8,6 +8,7 @@ import {
     DEFAULT_SHADOW
 } from './settings-serialize-configs';
 import { normalizeAnnotationMediaFields } from '../annotation-toolbar/media-fields';
+import { viewAxisDepthM } from '../scene-assets/media/media-view-depth';
 import type { Global } from '../types';
 import type {
     Annotation,
@@ -121,7 +122,7 @@ export type ApplySceneMediaHotspotBaselineOptions = {
 };
 
 /**
- * 「当前相机 ↔ 指定 video/audio 锚点」距离写入对应触发半径。
+ * 将「当前相机沿视线到指定 video/audio 锚点」的视轴深度写入对应触发半径。
  * 协议须传 `id` + `target`；内置 UI 用当前 `selectedSceneEntityId`。
  */
 export function applySceneMediaHotspotBaselineFromView(
@@ -142,7 +143,7 @@ export function applySceneMediaHotspotBaselineFromView(
         return { ok: false, reason: 'target_mismatch_selected_asset' };
     }
 
-    const distanceM = global.camera.getPosition().distance(sel.entity.getPosition());
+    const distanceM = viewAxisDepthM(global.camera, sel.entity.getPosition());
     if (!Number.isFinite(distanceM) || distanceM <= 0) {
         return { ok: false, reason: 'invalid_distance' };
     }

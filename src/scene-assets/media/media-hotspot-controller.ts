@@ -17,6 +17,7 @@ import {
     type PlacedAudioRuntime,
     type PlacedVideoRuntime
 } from './media-runtime';
+import { cameraForwardWorld } from './media-view-depth';
 import {
     pausePlacedVideoTexture,
     playPlacedVideoTexture,
@@ -41,16 +42,10 @@ function isPlacedAssetsRootEnabled(global: Global): boolean {
     return root.enabled;
 }
 
-function cameraForwardWorld(cam: pc.Entity): pc.Vec3 {
-    const z = cam.getWorldTransform().getZ();
-    z.mulScalar(-1);
-    z.normalize();
-    return z;
-}
-
 type QualifiedMedia = {
     id: string;
-    dist: number;
+    /** 视轴深度（米），用于阈值与「最近」排序 */
+    depthM: number;
     entry: ScenePlacedItem;
 };
 
@@ -77,20 +72,22 @@ function qualifyPlacedMedia(global: Global): { videos: QualifiedMedia[]; audios:
 
         const anchor = entry.entity.getPosition();
         const to = anchor.clone().sub(eye);
-        const dist = to.length();
-        if (dist < 1e-6) continue;
-        to.mulScalar(1 / dist);
+        const euclidean = to.length();
+        if (euclidean < 1e-6) continue;
+        const depthM = forward.dot(to);
+        if (depthM <= 0) continue;
+        to.mulScalar(1 / euclidean);
         if (forward.dot(to) < cosCone) continue;
 
-        if (kind === 'video' && dist <= videoR) {
-            videos.push({ id: entry.id, dist, entry });
-        } else if (kind === 'audio' && dist <= audioR) {
-            audios.push({ id: entry.id, dist, entry });
+        if (kind === 'video' && depthM <= videoR) {
+            videos.push({ id: entry.id, depthM, entry });
+        } else if (kind === 'audio' && depthM <= audioR) {
+            audios.push({ id: entry.id, depthM, entry });
         }
     }
 
-    videos.sort((a, b) => a.dist - b.dist);
-    audios.sort((a, b) => a.dist - b.dist);
+    videos.sort((a, b) => a.depthM - b.depthM);
+    audios.sort((a, b) => a.depthM - b.depthM);
     return { videos, audios };
 }
 
