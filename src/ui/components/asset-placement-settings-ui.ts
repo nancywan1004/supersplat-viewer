@@ -1,8 +1,12 @@
 import { getSceneAssetListHTML, bindSceneAssetList } from './scene-asset-list-ui';
 import { loadGsplatAsset } from '../../loaders/gsplat-asset-loader';
-import type { ExperienceSettings } from '../../schemas/v2';
-import { ensureSceneMediaHotspot } from '../../settings-serialize/settings-serialize-helper';
-import { getSelectedScenePlacedItem } from '../../state-selectors';
+import type { ExperienceSettings, SceneMediaHotspotSettings } from '../../schemas/v2';
+import {
+    applySceneMediaHotspotBaselineFromView,
+    ensureSceneMediaHotspot,
+    patchSceneMediaHotspot
+} from '../../settings-serialize/settings-serialize-helper';
+import { getSelectedSceneAssetType } from '../../state-selectors';
 import type { Global, AssetLibraryItem, AssetLibraryType } from '../../types';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
@@ -387,23 +391,8 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
 
     const editUiTransport = getEditUiTransport(global);
 
-    const readSm = () => ensureSceneMediaHotspot(global.settings as ExperienceSettings);
-
-    const pushHotspotToParent = () => {
-        if (editUiTransport !== 'message-bridge') return;
-        const sm = readSm();
-        sendEditProtocolMessage({
-            type: 'MEDIA_HOTSPOT_SET',
-            value: {
-                videoTriggerDistanceM: sm.videoTriggerDistanceM,
-                audioTriggerDistanceM: sm.audioTriggerDistanceM,
-                coneHalfDeg: sm.coneHalfDeg
-            }
-        });
-    };
-
     const syncHotspotUi = () => {
-        const sm = readSm();
+        const sm = ensureSceneMediaHotspot(global.settings as ExperienceSettings);
         if (mhVideoDist) mhVideoDist.value = String(sm.videoTriggerDistanceM);
         if (mhAudioDist) mhAudioDist.value = String(sm.audioTriggerDistanceM);
         if (mhCone) mhCone.value = String(sm.coneHalfDeg);
@@ -412,14 +401,21 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         if (mhConeVal) mhConeVal.textContent = `${sm.coneHalfDeg}°`;
     };
 
+    const buildHotspotPatch = (): Partial<SceneMediaHotspotSettings> => ({
+        videoTriggerDistanceM: mhVideoDist ? Number(mhVideoDist.value) : undefined,
+        audioTriggerDistanceM: mhAudioDist ? Number(mhAudioDist.value) : undefined,
+        coneHalfDeg: mhCone ? Number(mhCone.value) : undefined
+    });
+
     const onHotspotField = () => {
-        const sm = readSm();
-        if (mhVideoDist) sm.videoTriggerDistanceM = Number(mhVideoDist.value);
-        if (mhAudioDist) sm.audioTriggerDistanceM = Number(mhAudioDist.value);
-        if (mhCone) sm.coneHalfDeg = Number(mhCone.value);
+        const patch = buildHotspotPatch();
+        if (editUiTransport === 'message-bridge') {
+            sendEditProtocolMessage({ type: 'MEDIA_HOTSPOT_SET', value: patch });
+            return;
+        }
+        patchSceneMediaHotspot(global.settings as ExperienceSettings, patch);
         syncHotspotUi();
         events.fire('sceneMediaHotspot:changed');
-        pushHotspotToParent();
     };
 
     syncHotspotUi();
@@ -431,19 +427,23 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
     events.on('sceneMediaHotspot:changed', onHotspotExternal);
 
     const onBaselineClick = () => {
-        const sel = getSelectedScenePlacedItem(state);
-        const t = sel?.assetType;
-        if (!sel?.entity || (t !== 'video' && t !== 'audio')) {
+        const id = state.selectedSceneEntityId;
+        const target = getSelectedSceneAssetType(state, global.settings.sceneAssets);
+        if (!id || (target !== 'video' && target !== 'audio')) {
             console.warn('[MediaHotspot] 请先选中场景中的 video 或 audio 资产');
             return;
         }
-        const dist = global.camera.getPosition().distance(sel.entity.getPosition());
-        const sm = readSm();
-        if (t === 'video') sm.videoTriggerDistanceM = dist;
-        else sm.audioTriggerDistanceM = dist;
+        if (editUiTransport === 'message-bridge') {
+            sendEditProtocolMessage({ type: 'MEDIA_HOTSPOT_SET_BASELINE', id, target });
+            return;
+        }
+        const result = applySceneMediaHotspotBaselineFromView(global, { sceneEntityId: id, target });
+        if (result.ok === false) {
+            console.warn('[MediaHotspot] 设基准距离失败', result.reason);
+            return;
+        }
         syncHotspotUi();
         events.fire('sceneMediaHotspot:changed');
-        pushHotspotToParent();
     };
     mhBaselineBtn?.addEventListener('click', onBaselineClick);
 

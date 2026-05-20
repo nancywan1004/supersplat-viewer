@@ -27,7 +27,7 @@ import {
 import { getAssetLoader } from './loaders/asset-loader';
 import { resolveExportTimelinePlan } from './render/export-timeline-resolver';
 import { buildVideoExportFilename } from './render/video-export';
-import type { ExperienceSettings } from './schemas/v2';
+import type { ExperienceSettings, SceneMediaHotspotSettings } from './schemas/v2';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import { getRevealActiveType, getRevealTotalDuration } from './settings-serialize/effects-sync';
 import {
@@ -36,7 +36,10 @@ import {
     getComparableSettingsStringFromSnapshot,
     applySettingsSnapshot
 } from './settings-serialize/settings-serialize';
-import { ensureSceneMediaHotspot } from './settings-serialize/settings-serialize-helper';
+import {
+    applySceneMediaHotspotBaselineFromView,
+    patchSceneMediaHotspot
+} from './settings-serialize/settings-serialize-helper';
 import { getSelectedSceneAssetType } from './state-selectors';
 import type { AssetLibraryItem, EditLeftModule, Global } from './types';
 import { uploadProjectData } from './universe/service';
@@ -54,14 +57,8 @@ type InboundPayload =
     | { type: 'EDIT_UNDO' }
     | { type: 'EDIT_REDO' }
     | { type: 'PREVIEW_MODE_SET'; value?: boolean }
-    | {
-        type: 'MEDIA_HOTSPOT_SET';
-        value?: Partial<{
-            videoTriggerDistanceM: number;
-            audioTriggerDistanceM: number;
-            coneHalfDeg: number;
-        }>;
-    }
+    | { type: 'MEDIA_HOTSPOT_SET'; value?: Partial<SceneMediaHotspotSettings> }
+    | { type: 'MEDIA_HOTSPOT_SET_BASELINE'; id: string; target: 'video' | 'audio' }
     | { type: 'SETTINGS_SAVE' }
     | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule | null }
     | { type: 'ASSET_SHOW_HIDE_SET'; id?: string; value?: boolean }
@@ -304,18 +301,36 @@ const initPostMessageBridge = (global: Global) => {
                 break;
             }
             case 'MEDIA_HOTSPOT_SET': {
-                const patch = (p as { value?: Record<string, unknown> }).value;
-                if (!patch || typeof patch !== 'object') break;
-                const sm = ensureSceneMediaHotspot(global.settings as ExperienceSettings);
-                const assignNum = (key: keyof typeof sm, v: unknown) => {
-                    if (typeof v === 'number' && Number.isFinite(v)) {
-                        (sm as any)[key] = v;
-                    }
-                };
-                assignNum('videoTriggerDistanceM', patch.videoTriggerDistanceM);
-                assignNum('audioTriggerDistanceM', patch.audioTriggerDistanceM);
-                assignNum('coneHalfDeg', patch.coneHalfDeg);
+                const patch = (payload as Extract<InboundPayload, { type: 'MEDIA_HOTSPOT_SET' }>).value;
+                if (!patch) break;
+                patchSceneMediaHotspot(global.settings as ExperienceSettings, patch);
                 events.fire('sceneMediaHotspot:changed');
+                break;
+            }
+            case 'MEDIA_HOTSPOT_SET_BASELINE': {
+                const msg = payload as Extract<InboundPayload, { type: 'MEDIA_HOTSPOT_SET_BASELINE' }>;
+                const id = typeof msg.id === 'string' ? msg.id.trim() : '';
+                if (!id) {
+                    console.warn('[MessageBridge] MEDIA_HOTSPOT_SET_BASELINE missing id');
+                    break;
+                }
+                if (msg.target !== 'video' && msg.target !== 'audio') {
+                    console.warn('[MessageBridge] MEDIA_HOTSPOT_SET_BASELINE invalid target');
+                    break;
+                }
+                const result = applySceneMediaHotspotBaselineFromView(global, {
+                    sceneEntityId: id,
+                    target: msg.target
+                });
+                if (result.ok === false) {
+                    console.warn('[MessageBridge] MEDIA_HOTSPOT_SET_BASELINE failed:', result.reason, { id });
+                    break;
+                }
+                events.fire('sceneMediaHotspot:changed');
+                postToParent('SCENE_MEDIA_HOTSPOT_CHANGED', {
+                    module: MESSAGE_BRIDGE_MODULE.asset,
+                    value: result.settings
+                });
                 break;
             }
             case 'SETTINGS_SAVE': {

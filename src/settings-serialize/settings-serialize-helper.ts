@@ -8,6 +8,7 @@ import {
     DEFAULT_SHADOW
 } from './settings-serialize-configs';
 import { normalizeAnnotationMediaFields } from '../annotation-toolbar/media-fields';
+import type { Global } from '../types';
 import type {
     Annotation,
     Camera,
@@ -42,6 +43,71 @@ export function ensureSceneMediaHotspot(settings: ExperienceSettings): SceneMedi
     delete sm.hysteresisM;
     delete sm.showAudioIcon;
     return root.sceneMediaHotspot as SceneMediaHotspotSettings;
+}
+
+/** 父级 `MEDIA_HOTSPOT_SET`：仅合并传入的有限数值字段 */
+export function patchSceneMediaHotspot(
+    settings: ExperienceSettings,
+    patch: Partial<SceneMediaHotspotSettings>
+): SceneMediaHotspotSettings {
+    const sm = ensureSceneMediaHotspot(settings);
+    if (typeof patch.videoTriggerDistanceM === 'number' && Number.isFinite(patch.videoTriggerDistanceM)) {
+        sm.videoTriggerDistanceM = patch.videoTriggerDistanceM;
+    }
+    if (typeof patch.audioTriggerDistanceM === 'number' && Number.isFinite(patch.audioTriggerDistanceM)) {
+        sm.audioTriggerDistanceM = patch.audioTriggerDistanceM;
+    }
+    if (typeof patch.coneHalfDeg === 'number' && Number.isFinite(patch.coneHalfDeg)) {
+        sm.coneHalfDeg = patch.coneHalfDeg;
+    }
+    return sm;
+}
+
+export type MediaHotspotBaselineResult =
+    | { ok: true; target: 'video' | 'audio'; distanceM: number; settings: SceneMediaHotspotSettings }
+    | { ok: false; reason: string };
+
+export type ApplySceneMediaHotspotBaselineOptions = {
+    /** 场景已放置资产 id（`scenePlacedEntities[].id`） */
+    sceneEntityId: string;
+    target: 'video' | 'audio';
+};
+
+/**
+ * 「当前相机 ↔ 指定 video/audio 锚点」距离写入对应触发半径。
+ * 协议须传 `id` + `target`；内置 UI 用当前 `selectedSceneEntityId`。
+ */
+export function applySceneMediaHotspotBaselineFromView(
+    global: Global,
+    opts: ApplySceneMediaHotspotBaselineOptions
+): MediaHotspotBaselineResult {
+    const list = global.state.scenePlacedEntities ?? [];
+    const sel = list.find((e) => e.id === opts.sceneEntityId) ?? null;
+    if (!sel?.entity) {
+        return { ok: false, reason: 'asset_not_found' };
+    }
+
+    const assetType = sel.assetType;
+    if (assetType !== 'video' && assetType !== 'audio') {
+        return { ok: false, reason: 'asset_not_video_or_audio' };
+    }
+    if (assetType !== opts.target) {
+        return { ok: false, reason: 'target_mismatch_selected_asset' };
+    }
+
+    const distanceM = global.camera.getPosition().distance(sel.entity.getPosition());
+    if (!Number.isFinite(distanceM) || distanceM <= 0) {
+        return { ok: false, reason: 'invalid_distance' };
+    }
+
+    const sm = ensureSceneMediaHotspot(global.settings as ExperienceSettings);
+    if (opts.target === 'video') {
+        sm.videoTriggerDistanceM = distanceM;
+    } else {
+        sm.audioTriggerDistanceM = distanceM;
+    }
+
+    return { ok: true, target: opts.target, distanceM, settings: sm };
 }
 
 export function ensureNightMode(settings: ExperienceSettings): { fade?: number } {
