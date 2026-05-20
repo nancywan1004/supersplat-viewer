@@ -13,6 +13,7 @@ import {
     ADDRESS_CLAMP_TO_EDGE,
     MeshInstance
 } from 'playcanvas';
+import type { SceneAsset } from './schemas/v2-custom';
 import type { Global, AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from './types';
 import { getSelectedSceneEntity } from './state-selectors';
 import {
@@ -701,94 +702,178 @@ async function hydrateProtocolPlaceItem(global: Global, item: AssetLibraryItem):
     }
 }
 
+function sceneAssetSourceFingerprint(sa: Pick<SceneAsset, 'source'>): string {
+    const s = sa.source ?? {};
+    return `${s.assetId ?? ''}|${s.url ?? ''}|${s.filename ?? ''}`;
+}
+
+function placedItemSourceFingerprint(entry: ScenePlacedItem): string {
+    return `${entry.assetId ?? ''}|${entry.url ?? ''}|${entry.filename ?? ''}`;
+}
+
+function canReuseScenePlacedEntry(entry: ScenePlacedItem, sa: SceneAsset): boolean {
+    return entry.assetType === sa.type
+        && placedItemSourceFingerprint(entry) === sceneAssetSourceFingerprint(sa);
+}
+
+/** 将 settings 中记录的变换、可见性、缩略图等应用到已存在的放置实体（不重新加载资产）。 */
+function applySceneAssetTransformToEntry(global: Global, entry: ScenePlacedItem, sa: SceneAsset): void {
+    const rotArr = (sa.transform?.rotation ?? [0, 0, 0]) as number[];
+    const rotQuatArr = sa.transform?.rotationQuat as number[] | undefined;
+    const scaleArr = (sa.transform?.scale ?? [1, 1, 1]) as number[];
+    const mirrorArr = sa.transform?.mirror as number[] | undefined;
+
+    if (sa.name) {
+        entry.name = sa.name;
+    }
+    if (typeof sa.thumbnailUrl === 'string' && sa.thumbnailUrl.length > 0) {
+        entry.thumbnailUrl = sa.thumbnailUrl;
+    }
+
+    const hasValidQuat =
+        Array.isArray(rotQuatArr)
+        && rotQuatArr.length >= 4
+        && Number.isFinite(rotQuatArr[0])
+        && Number.isFinite(rotQuatArr[1])
+        && Number.isFinite(rotQuatArr[2])
+        && Number.isFinite(rotQuatArr[3]);
+    if (hasValidQuat) {
+        entry.entity.setLocalRotation(
+            rotQuatArr[0],
+            rotQuatArr[1],
+            rotQuatArr[2],
+            rotQuatArr[3]
+        );
+    } else {
+        entry.entity.setEulerAngles(rotArr[0] ?? 0, rotArr[1] ?? 0, rotArr[2] ?? 0);
+    }
+    const resolveMirroredScale = (value: number, mirror: number | undefined): number => {
+        const numeric = Number.isFinite(value) ? value : 1;
+        if (mirror === -1 || mirror === 1) {
+            if (numeric === 0) return 0;
+            return Math.abs(numeric) * mirror;
+        }
+        return numeric;
+    };
+    entry.entity.setLocalScale(
+        resolveMirroredScale(scaleArr[0] ?? 1, mirrorArr?.[0]),
+        resolveMirroredScale(scaleArr[1] ?? 1, mirrorArr?.[1]),
+        resolveMirroredScale(scaleArr[2] ?? 1, mirrorArr?.[2])
+    );
+
+    const visible = sa.visible !== false;
+    entry.visible = visible;
+    entry.entity.enabled = visible;
+
+    if (sa.type === 'video') {
+        const curvature =
+            typeof sa.transform?.horizontalCurvature === 'number'
+                ? sa.transform.horizontalCurvature
+                : 0;
+        applyVideoHorizontalCurvature(global, entry.id, curvature);
+    }
+}
+
+async function loadAndPlaceSceneAssetFromSettings(global: Global, sa: SceneAsset): Promise<void> {
+    const posArr = (sa.transform?.position ?? [0, 0, 0]) as number[];
+
+    let item: AssetLibraryItem | null = null;
+    try {
+        item = await loadSceneAssetLibraryItem(global, sa, nextSceneEntityId, ASSET_LOAD_TIMEOUT_MS);
+    } catch (err) {
+        console.warn('[SceneAssets] restore asset failed:', sa?.type, err);
+        return;
+    }
+    if (!item) return;
+
+    const pos = new Vec3(posArr[0] ?? 0, posArr[1] ?? 0, posArr[2] ?? 0);
+    const savedCurvature =
+        sa.type === 'video' && typeof sa.transform?.horizontalCurvature === 'number'
+            ? sa.transform.horizontalCurvature
+            : 0;
+    const entry = await placeAsset(global, item, pos, false, {
+        ...(sa.type === 'video' ? { horizontalCurvature: savedCurvature } : {})
+    });
+    if (!entry) return;
+
+    if (sa.id) {
+        entry.id = sa.id;
+    }
+    applySceneAssetTransformToEntry(global, entry, sa);
+}
+
+/**
+ * View → Edit：按 settings 真源就地同步已放置实体，避免 clear+全量 reload 导致大资产闪灭。
+ * 显隐/变换以 settings.sceneAssets 为准，不沿用 view 下仅改 runtime 的状态。
+ */
+export async function syncScenePlacedEntitiesFromSettings(global: Global): Promise<void> {
+    const settings: any = global.settings as any;
+    const sceneAssets: SceneAsset[] = Array.isArray(settings?.sceneAssets) ? settings.sceneAssets : [];
+    const { state, events } = global;
+    if (!state.scenePlacedEntities) state.scenePlacedEntities = [];
+
+    const settingsById = new Map<string, SceneAsset>();
+    for (const sa of sceneAssets) {
+        if (sa?.id) settingsById.set(sa.id, sa);
+    }
+
+    const matchedSettingIds = new Set<string>();
+    const toRemove: ScenePlacedItem[] = [];
+
+    for (const entry of [...state.scenePlacedEntities]) {
+        const sa = settingsById.get(entry.id);
+        if (!sa || !canReuseScenePlacedEntry(entry, sa)) {
+            entry.entity.destroy();
+            toRemove.push(entry);
+            continue;
+        }
+        matchedSettingIds.add(sa.id);
+        const posArr = (sa.transform?.position ?? [0, 0, 0]) as number[];
+        entry.entity.setLocalPosition(posArr[0] ?? 0, posArr[1] ?? 0, posArr[2] ?? 0);
+        applySceneAssetTransformToEntry(global, entry, sa);
+    }
+
+    for (const entry of toRemove) {
+        const idx = state.scenePlacedEntities!.indexOf(entry);
+        if (idx >= 0) state.scenePlacedEntities!.splice(idx, 1);
+        events.fire('sceneAssets:removed', entry);
+    }
+
+    if (
+        state.selectedSceneEntityId
+        && !state.scenePlacedEntities!.some((e) => e.id === state.selectedSceneEntityId)
+    ) {
+        state.selectedSceneEntityId = null;
+        events.fire('sceneAsset:selected');
+    }
+
+    for (const sa of sceneAssets) {
+        if (!sa?.id || matchedSettingIds.has(sa.id)) continue;
+        await loadAndPlaceSceneAssetFromSettings(global, sa);
+    }
+}
+
 /**
  * 从 settings.sceneAssets 还原场景中的资产实体，并写入 state.scenePlacedEntities。
  * 支持 image / mesh / gaussian，使用 source.url / source.filename 重新加载资产。
  */
 export async function restoreSceneAssetsFromSettings(global: Global): Promise<void> {
     const settings: any = global.settings as any;
-    const sceneAssets: any[] | undefined = settings.sceneAssets;
+    const sceneAssets: SceneAsset[] | undefined = settings.sceneAssets;
     if (!Array.isArray(sceneAssets) || sceneAssets.length === 0) return;
 
     const { state } = global;
     if (!state.scenePlacedEntities) state.scenePlacedEntities = [];
 
     for (const sa of sceneAssets) {
-        const posArr = (sa.transform?.position ?? [0, 0, 0]) as number[];
-        const rotArr = (sa.transform?.rotation ?? [0, 0, 0]) as number[];
-        const rotQuatArr = sa.transform?.rotationQuat as number[] | undefined;
-        const scaleArr = (sa.transform?.scale ?? [1, 1, 1]) as number[];
-        const mirrorArr = sa.transform?.mirror as number[] | undefined;
-
-        let item: AssetLibraryItem | null = null;
-        try {
-            item = await loadSceneAssetLibraryItem(global, sa, nextSceneEntityId, ASSET_LOAD_TIMEOUT_MS);
-        } catch (err) {
-            console.warn('[SceneAssets] restore asset failed:', sa?.type, err);
-            continue;
-        }
-        if (!item) {
-            continue;
-        }
-
-        const pos = new Vec3(posArr[0] ?? 0, posArr[1] ?? 0, posArr[2] ?? 0);
-        const savedCurvature =
-            sa.type === 'video' && typeof sa.transform?.horizontalCurvature === 'number'
-                ? sa.transform.horizontalCurvature
-                : 0;
-        const entry = await placeAsset(global, item, pos, false, {
-            ...(sa.type === 'video' ? { horizontalCurvature: savedCurvature } : {})
-        });
-        if (!entry) continue;
-
-        if (sa.id) {
-            entry.id = sa.id;
-        }
-        if (typeof sa.thumbnailUrl === 'string' && sa.thumbnailUrl.length > 0) {
-            entry.thumbnailUrl = sa.thumbnailUrl;
-        }
-
-        // 应用保存时记录的旋转、缩放与可见性
-        const hasValidQuat =
-            Array.isArray(rotQuatArr)
-            && rotQuatArr.length >= 4
-            && Number.isFinite(rotQuatArr[0])
-            && Number.isFinite(rotQuatArr[1])
-            && Number.isFinite(rotQuatArr[2])
-            && Number.isFinite(rotQuatArr[3]);
-        if (hasValidQuat) {
-            entry.entity.setLocalRotation(
-                rotQuatArr[0],
-                rotQuatArr[1],
-                rotQuatArr[2],
-                rotQuatArr[3]
-            );
-        } else {
-            // 兼容旧数据：无 rotationQuat 时回退欧拉角
-            entry.entity.setEulerAngles(rotArr[0] ?? 0, rotArr[1] ?? 0, rotArr[2] ?? 0);
-        }
-        const resolveMirroredScale = (value: number, mirror: number | undefined): number => {
-            const numeric = Number.isFinite(value) ? value : 1;
-            if (mirror === -1 || mirror === 1) {
-                if (numeric === 0) return 0;
-                return Math.abs(numeric) * mirror;
-            }
-            return numeric;
-        };
-        entry.entity.setLocalScale(
-            resolveMirroredScale(scaleArr[0] ?? 1, mirrorArr?.[0]),
-            resolveMirroredScale(scaleArr[1] ?? 1, mirrorArr?.[1]),
-            resolveMirroredScale(scaleArr[2] ?? 1, mirrorArr?.[2])
-        );
-        const visible = sa.visible !== false;
-        entry.visible = visible;
-        entry.entity.enabled = visible;
+        await loadAndPlaceSceneAssetFromSettings(global, sa);
     }
 }
 
 /**
  * 统一调度 sceneAssets → scenePlacedEntities 的恢复链路：
  * - startup 可选择 defer 到 revealComplete；
+ * - edit-enter 默认就地 sync（不 clear），避免大资产闪灭；discard/history 仍全量 clear+restore；
  * - 后续 edit/discard/history restore 会提升 version，使旧的 startup defer 自动失效；
  * - 所有实际恢复都串行执行，避免与其他 restore 链并发交错。
  */
@@ -797,15 +882,20 @@ export async function requestSceneAssetsRestore(global: Global, options: SceneAs
     const version = controller.version + 1;
     controller.version = version;
 
+    const clearBeforeRestore =
+        options.clearBeforeRestore ?? (options.reason !== 'edit-enter');
+
     const invoke = async (): Promise<void> => {
         const previousTask = controller.activePromise;
         const task = (async (): Promise<void> => {
             await previousTask.catch((): void => undefined);
             if (controller.version !== version) return;
-            if (options.clearBeforeRestore !== false) {
+            if (clearBeforeRestore) {
                 clearScenePlacedEntities(global);
+                await restoreSceneAssetsFromSettings(global);
+            } else {
+                await syncScenePlacedEntitiesFromSettings(global);
             }
-            await restoreSceneAssetsFromSettings(global);
         })();
         controller.activePromise = task;
         await task;
