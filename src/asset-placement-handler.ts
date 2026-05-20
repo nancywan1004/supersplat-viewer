@@ -88,6 +88,13 @@ function getPlacedAssetsParent(app: AppBase): Entity {
 /** 相机前方距离，用于兜底放置位置 */
 const CAMERA_FRONT_DISTANCE = 5;
 
+/** image / video 平面默认立屏（PlayCanvas plane 在 XZ）；仅实例化时写入，放置时只改 yaw（与 mesh 一致） */
+const PLANE_CARD_DEFAULT_EULER = { x: -90, y: 0, z: 180 };
+
+function applyDefaultPlaneCardOrientation(entity: Entity): void {
+    entity.setLocalEulerAngles(PLANE_CARD_DEFAULT_EULER.x, PLANE_CARD_DEFAULT_EULER.y, PLANE_CARD_DEFAULT_EULER.z);
+}
+
 function getSceneAssetsRestoreController(global: Global): SceneAssetsRestoreController {
     const anyGlobal = global as Global & { __sceneAssetsRestoreController?: SceneAssetsRestoreController };
     if (!anyGlobal.__sceneAssetsRestoreController) {
@@ -121,20 +128,14 @@ function computeYawDegToFaceCameraHorizontal(entityPos: Vec3, camPos: Vec3): num
 }
 
 /**
- * 放置后只调整 yaw，使水平面上指向相机；保留原有 pitch/roll。
- * 图片：维持原立屏姿态 pitch=-90、roll=180，仅改 Y。
- * 高斯：unified 需 Z=180，但与航向若写进同一组 intrinsic XYZ 欧拉会耦合成「左右镜像」体感；
- * 改用四元数先 Rz(180) 再绕世界 Y 转航向（mul2(yaw, fix)）。
+ * 放置后只调整水平航向 yaw，使实体在 XZ 平面上朝向相机；保留既有 pitch/roll（与 mesh 一致）。
+ * image/video 的 pitch/roll 已在实例化时由 `applyDefaultPlaneCardOrientation` 写好，此处仅改 Y。
+ * 高斯：unified 需额外 Z=180，用 mul2(yaw, Rz180) 与航向解耦。
  */
 function applyPlacedEntityYawToFaceCamera(entity: Entity, global: Global, assetType: AssetLibraryType) {
     const camPos = global.camera.getPosition();
     const pos = entity.getPosition();
     const yawDeg = computeYawDegToFaceCameraHorizontal(pos, camPos);
-
-    if (assetType === 'image' || assetType === 'video') {
-        entity.setLocalEulerAngles(-90, yawDeg, 180);
-        return;
-    }
 
     if (assetType === 'gaussian') {
         const qFix = new Quat().setFromEulerAngles(0, 0, 180);
@@ -199,6 +200,7 @@ async function instantiateImage(app: AppBase, item: AssetLibraryItem, position: 
             entity.setPosition(position);
             const s = 2;
             entity.setLocalScale(s, s, 1);
+            applyDefaultPlaneCardOrientation(entity);
             resolve(entity);
         });
     });
@@ -426,6 +428,7 @@ async function instantiateVideo(
     entity.setPosition(position);
     const base = 2;
     entity.setLocalScale(base * aspect, base, 1);
+    applyDefaultPlaneCardOrientation(entity);
 
     const runtime: PlacedMediaRuntime = {
         kind: 'video',

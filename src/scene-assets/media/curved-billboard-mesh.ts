@@ -26,11 +26,20 @@ export function clampVideoHorizontalCurvature(value: number): number {
 }
 
 /**
+ * 自定义 PlaneGeometry 与内置 `render.type:'plane'` 绕序相反；翻转局部 X 后贴图左右与 image 一致。
+ */
+function mirrorPlaneGeometryWidth(geometry: PlaneGeometry): void {
+    const positions = geometry.positions;
+    if (!positions) return;
+    for (let i = 0; i < positions.length; i += 3) {
+        positions[i] = -positions[i];
+    }
+    geometry.calculateNormals();
+}
+
+/**
  * 维持 PlaneGeometry 与内置 `render.type:'plane'` 一致的朝向（XZ 平面、法线 +Y），
  * 仅沿局部 X（宽度）做圆柱弧弯曲（凹向 -Y，朝外）。
- *
- * 注意：视频资产仍会沿用既有 `setLocalEulerAngles(-90, yaw, 180)` 姿态逻辑，
- * 这里必须保持原始 plane 朝向，否则会出现“平躺”。
  */
 function bendPlaneGeometryHorizontalArc(geometry: PlaneGeometry, curvature: number): void {
     const positions = geometry.positions;
@@ -67,6 +76,7 @@ function buildBillboardGeometry(curvature: number): PlaneGeometry {
         widthSegments: VIDEO_CURVED_WIDTH_SEGMENTS,
         lengthSegments: VIDEO_CURVED_LENGTH_SEGMENTS
     });
+    mirrorPlaneGeometryWidth(geometry);
     bendPlaneGeometryHorizontalArc(geometry, curvature);
     return geometry;
 }
