@@ -9,6 +9,8 @@ export type PlacedVideoRuntime = {
     texture: Texture;
     /** 热区内为 true：由 `tickPlacedVideoTextureUploads` 轮询 `texture.upload()` */
     isLive: boolean;
+    /** 横向曲度 [0,1]，0 为平面 */
+    horizontalCurvature: number;
 };
 
 export type PlacedAudioRuntime = {

@@ -192,7 +192,9 @@ type SceneAsset = {
         rotationQuat?: [number, number, number, number],
         scale: [number, number, number],
         /** 每轴镜像符号：-1=镜像翻转，1=正常；用于显式持久化 scale 镜像状态 */
-        mirror?: [1 | -1, 1 | -1, 1 | -1]
+        mirror?: [1 | -1, 1 | -1, 1 | -1],
+        /** 仅 video：0 平面，(0,1] 横向曲度（绕竖直轴 / 屏幕宽度方向） */
+        horizontalCurvature?: number
     }
 }
 

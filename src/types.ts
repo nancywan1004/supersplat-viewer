@@ -73,6 +73,8 @@ export interface ScenePlacedItem {
     url?: string;
     /** 对应源资产库条目的缩略图 URL（serialize 到 settings.sceneAssets.thumbnailUrl） */
     thumbnailUrl?: string;
+    /** 仅 video：横向曲度 [0,1]，0 为平面 */
+    horizontalCurvature?: number;
 }
 
 type CameraMode = 'orbit' | 'anim' | 'fly' | 'walk';

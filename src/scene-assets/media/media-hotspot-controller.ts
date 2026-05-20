@@ -9,8 +9,8 @@
 
 import * as pc from 'playcanvas';
 
-import { ensureSceneMediaHotspot } from '../settings-serialize/settings-serialize-helper';
-import type { Global, ScenePlacedItem } from '../types';
+import { ensureSceneMediaHotspot } from '../../settings-serialize/settings-serialize-helper';
+import type { Global, ScenePlacedItem } from '../../types';
 import {
     getPlacedMediaRuntime,
     type PlacedAudioRuntime,

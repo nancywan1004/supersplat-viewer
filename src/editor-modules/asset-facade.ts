@@ -228,6 +228,12 @@ class AssetFacade implements ModuleFacade {
             }
             break;
         }
+        case 'ASSET_VIDEO_CURVATURE_SET': {
+            const pl = command.payload as { id?: string; value?: number } | undefined;
+            if (typeof pl?.id !== 'string' || typeof pl?.value !== 'number') return;
+            events.fire('assetEdit:videoCurvature', { id: pl.id, value: pl.value });
+            break;
+        }
         default:
             break;
         }

@@ -1,5 +1,7 @@
+import { applyVideoHorizontalCurvature } from '../../asset-placement-handler';
 import { getSceneAssetListHTML, bindSceneAssetList } from './scene-asset-list-ui';
 import { loadGsplatAsset } from '../../loaders/gsplat-asset-loader';
+import { clampVideoHorizontalCurvature, VIDEO_HORIZONTAL_MAX_ARC_DEG } from '../../scene-assets/media/curved-billboard-mesh';
 import type { ExperienceSettings, SceneMediaHotspotSettings } from '../../schemas/v2';
 import {
     applySceneMediaHotspotBaselineFromView,
@@ -182,6 +184,14 @@ export function getAssetPlacementSettingsHTML(): string {
             </div>
             <div class="settingsRow">
                 <button type="button" id="mhBaselineBtn" class="settingsButton">从当前视角设基准距离</button>
+            </div>
+        </div>
+        <div class="video-curvature-panel hidden" id="videoCurvaturePanel">
+            <div class="settingsRow submenuHeader" style="margin-top:6px;">视频曲度</div>
+            <div class="settingsRow">
+                <label for="videoCurvature">横向曲度</label>
+                <input type="range" id="videoCurvature" min="0" max="100" step="1" />
+                <span id="videoCurvatureVal" class="settingsValueLabel"></span>
             </div>
         </div>
         ${getSceneAssetListHTML()}
@@ -447,6 +457,49 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
     };
     mhBaselineBtn?.addEventListener('click', onBaselineClick);
 
+    const videoCurvaturePanel = root.querySelector<HTMLElement>('#videoCurvaturePanel');
+    const videoCurvatureInput = root.querySelector<HTMLInputElement>('#videoCurvature');
+    const videoCurvatureVal = root.querySelector<HTMLSpanElement>('#videoCurvatureVal');
+
+    const readSelectedVideoCurvature = (): number => {
+        const id = state.selectedSceneEntityId;
+        if (!id) return 0;
+        const entry = state.scenePlacedEntities?.find((it) => it?.id === id);
+        return clampVideoHorizontalCurvature(entry?.horizontalCurvature ?? 0);
+    };
+
+    const syncVideoCurvatureUi = () => {
+        const isVideo =
+            !!state.selectedSceneEntityId && getSelectedSceneAssetType(state, global.settings.sceneAssets) === 'video';
+        if (videoCurvaturePanel) {
+            videoCurvaturePanel.classList.toggle('hidden', !isVideo);
+        }
+        if (!isVideo || !videoCurvatureInput) return;
+        const c = readSelectedVideoCurvature();
+        const pct = Math.round(c * 100);
+        const arcDeg = (c * VIDEO_HORIZONTAL_MAX_ARC_DEG).toFixed(0);
+        videoCurvatureInput.value = String(pct);
+        if (videoCurvatureVal) videoCurvatureVal.textContent = `${pct}% (${arcDeg}°)`;
+    };
+
+    const onVideoCurvatureInput = () => {
+        const id = state.selectedSceneEntityId;
+        if (!id || getSelectedSceneAssetType(state, global.settings.sceneAssets) !== 'video') return;
+        const curvature = clampVideoHorizontalCurvature(Number(videoCurvatureInput?.value ?? 0) / 100);
+        applyVideoHorizontalCurvature(global, id, curvature);
+        if (editUiTransport === 'message-bridge') {
+            sendEditProtocolMessage({ type: 'ASSET_VIDEO_CURVATURE_SET', id, value: curvature });
+        }
+        syncVideoCurvatureUi();
+    };
+
+    syncVideoCurvatureUi();
+    videoCurvatureInput?.addEventListener('input', onVideoCurvatureInput);
+    const onSceneAssetSelectedForCurvature = () => syncVideoCurvatureUi();
+    events.on('sceneAsset:selected', onSceneAssetSelectedForCurvature);
+    events.on('sceneAssets:added', onSceneAssetSelectedForCurvature);
+    events.on('sceneAssets:removed', onSceneAssetSelectedForCurvature);
+
     return () => {
         unbindList();
         if (gridEl && onLibraryChange) {
@@ -462,5 +515,9 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         mhCone?.removeEventListener('input', onHotspotField);
         mhBaselineBtn?.removeEventListener('click', onBaselineClick);
         events.off('sceneMediaHotspot:changed', onHotspotExternal);
+        videoCurvatureInput?.removeEventListener('input', onVideoCurvatureInput);
+        events.off('sceneAsset:selected', onSceneAssetSelectedForCurvature);
+        events.off('sceneAssets:added', onSceneAssetSelectedForCurvature);
+        events.off('sceneAssets:removed', onSceneAssetSelectedForCurvature);
     };
 }

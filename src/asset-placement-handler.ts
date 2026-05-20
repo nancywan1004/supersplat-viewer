@@ -10,7 +10,8 @@ import {
     Texture,
     PIXELFORMAT_RGBA8,
     FILTER_LINEAR,
-    ADDRESS_CLAMP_TO_EDGE
+    ADDRESS_CLAMP_TO_EDGE,
+    MeshInstance
 } from 'playcanvas';
 import type { Global, AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from './types';
 import { getSelectedSceneEntity } from './state-selectors';
@@ -21,23 +22,33 @@ import {
     withTimeout
 } from './loaders/asset-loader';
 import type { InputArbiter } from './input-arbiter';
-import { setPlacedMediaRuntime, type PlacedMediaRuntime } from './scene-assets/media-runtime';
-import { syncPlacedAudioIconEditor } from './scene-assets/media-hotspot-controller';
+import {
+    clampVideoHorizontalCurvature,
+    createCurvedBillboardMesh,
+    rebuildVideoRenderMesh
+} from './scene-assets/media/curved-billboard-mesh';
+import {
+    getPlacedMediaRuntime,
+    setPlacedMediaRuntime,
+    type PlacedMediaRuntime,
+    type PlacedVideoRuntime
+} from './scene-assets/media/media-runtime';
+import { syncPlacedAudioIconEditor } from './scene-assets/media/media-hotspot-controller';
 import { setPlacementCursorActive } from './placement-cursor';
 import {
     acquirePlacedVideoForPlacement,
     cancelVideoPlacementPreload,
     startVideoPlacementPreload,
     type VideoPlacementPreloadHandle
-} from './scene-assets/video-placement-preload';
+} from './scene-assets/media/video-placement-preload';
 import {
     createPlacedVideoTextureFromVideo,
     initPlacedVideoTexture,
     PLACED_VIDEO_INITIAL_LOAD_TIMEOUT_MS,
     PLACED_VIDEO_PLACEMENT_TIMEOUT_MS,
     unmountPlacedVideoFromDom
-} from './scene-assets/video-texture';
-import { loadBillboardTextureFromImageUrl } from './scene-assets/image-billboard-texture';
+} from './scene-assets/media/video-texture';
+import { loadBillboardTextureFromImageUrl } from './scene-assets/media/image-billboard-texture';
 import { removeSceneAssetFromSettings } from './settings-serialize/settings-serialize';
 
 const PLACED_ASSETS_NAME = 'placedAssets';
@@ -182,7 +193,7 @@ async function instantiateImage(app: AppBase, item: AssetLibraryItem, position: 
                 type: 'plane',
                 material: mat,
                 castShadows: false,
-                receiveShadows: true
+                receiveShadows: false
             });
             entity.setPosition(position);
             const s = 2;
@@ -360,7 +371,8 @@ async function instantiateVideo(
     app: AppBase,
     item: AssetLibraryItem,
     position: Vec3,
-    loadMode: 'placement' | 'restore' = 'restore'
+    loadMode: 'placement' | 'restore' = 'restore',
+    horizontalCurvature: number = 0
 ): Promise<Entity> {
     const url = item.url || item.filename;
     if (!url) {
@@ -399,12 +411,16 @@ async function instantiateVideo(
     mat.cull = CULLFACE_NONE;
     mat.update();
 
+    const curvature = clampVideoHorizontalCurvature(horizontalCurvature);
+    const mesh = createCurvedBillboardMesh(app.graphicsDevice, curvature);
+    const meshInstance = new MeshInstance(mesh, mat);
+    meshInstance.cull = false;
+
     const entity = new Entity(item.name || 'video');
     entity.addComponent('render', {
-        type: 'plane',
-        material: mat,
+        meshInstances: [meshInstance],
         castShadows: false,
-        receiveShadows: true
+        receiveShadows: false
     });
     entity.setPosition(position);
     const base = 2;
@@ -414,7 +430,8 @@ async function instantiateVideo(
         kind: 'video',
         videoEl: video,
         texture,
-        isLive: false
+        isLive: false,
+        horizontalCurvature: curvature
     };
     setPlacedMediaRuntime(entity, runtime);
     // 纹理已 setSource(video) 并停在首帧；热区内 play + texture.upload() 轮询。
@@ -540,12 +557,38 @@ export function computeEntityWorldCenter(entity: Entity): Vec3 | null {
     return worldCenter;
 }
 
+/**
+ * 更新已放置视频资产的横向曲度（绕竖直轴 / 屏幕宽度方向）。
+ * @returns 是否成功找到并更新 video 实例
+ */
+export function applyVideoHorizontalCurvature(
+    global: Global,
+    sceneAssetId: string,
+    curvature: number,
+    deps?: Pick<AssetPlacementHandlerDeps, 'pushEditHistory'>
+): boolean {
+    const entry = global.state.scenePlacedEntities?.find(
+        (it) => it?.id === sceneAssetId && it.assetType === 'video'
+    );
+    if (!entry?.entity) return false;
+
+    const runtime = getPlacedMediaRuntime(entry.entity);
+    if (!runtime || runtime.kind !== 'video') return false;
+
+    const clamped = clampVideoHorizontalCurvature(curvature);
+    rebuildVideoRenderMesh(entry.entity, clamped);
+    runtime.horizontalCurvature = clamped;
+    entry.horizontalCurvature = clamped;
+    deps?.pushEditHistory?.(global, 'video curvature');
+    return true;
+}
+
 export async function placeAsset(
     global: Global,
     item: AssetLibraryItem,
     worldPos: Vec3,
     alignCenterToCameraHeight: boolean = false,
-    opts?: { videoLoadMode?: 'placement' | 'restore' }
+    opts?: { videoLoadMode?: 'placement' | 'restore'; horizontalCurvature?: number }
 ): Promise<ScenePlacedItem | null> {
     const { app, state, events } = global;
     if (!state.scenePlacedEntities) state.scenePlacedEntities = [];
@@ -576,7 +619,13 @@ export async function placeAsset(
             }
             entity = await instantiateGaussian(app, item, worldPos);
         } else if (item.type === 'video') {
-            entity = await instantiateVideo(app, item, worldPos, opts?.videoLoadMode ?? 'restore');
+            entity = await instantiateVideo(
+                app,
+                item,
+                worldPos,
+                opts?.videoLoadMode ?? 'restore',
+                opts?.horizontalCurvature ?? 0
+            );
         } else if (item.type === 'audio') {
             entity = await instantiateAudio(app, item, worldPos);
         } else {
@@ -610,6 +659,8 @@ export async function placeAsset(
             }
         }
     }
+    const videoRuntime =
+        item.type === 'video' ? (getPlacedMediaRuntime(entity) as PlacedVideoRuntime | undefined) : undefined;
     const entry: ScenePlacedItem = {
         id: nextSceneEntityId(),
         name: item.name || entity.name || '资产',
@@ -619,7 +670,8 @@ export async function placeAsset(
         assetId: item.id,
         filename: item.filename,
         url: item.url,
-        thumbnailUrl: item.thumbnailUrl
+        thumbnailUrl: item.thumbnailUrl,
+        horizontalCurvature: videoRuntime?.horizontalCurvature
     };
     state.scenePlacedEntities.push(entry);
 
@@ -680,7 +732,13 @@ export async function restoreSceneAssetsFromSettings(global: Global): Promise<vo
         }
 
         const pos = new Vec3(posArr[0] ?? 0, posArr[1] ?? 0, posArr[2] ?? 0);
-        const entry = await placeAsset(global, item, pos, false);
+        const savedCurvature =
+            sa.type === 'video' && typeof sa.transform?.horizontalCurvature === 'number'
+                ? sa.transform.horizontalCurvature
+                : 0;
+        const entry = await placeAsset(global, item, pos, false, {
+            ...(sa.type === 'video' ? { horizontalCurvature: savedCurvature } : {})
+        });
         if (!entry) continue;
 
         if (sa.id) {
@@ -1048,8 +1106,14 @@ export function initAssetPlacementHandler(
         removeSceneAssetFromSettings(global, entry.id);
     };
 
+    const onVideoCurvature = (payload: { id?: string; value?: number }) => {
+        if (typeof payload?.id !== 'string' || typeof payload?.value !== 'number') return;
+        applyVideoHorizontalCurvature(global, payload.id, payload.value, deps);
+    };
+
     events.on('assetEdit:copy', onCopy);
     events.on('assetEdit:delete', onDelete);
+    events.on('assetEdit:videoCurvature', onVideoCurvature);
     events.on('assetPlacement:start', onPlaceStart);
     events.on('assetFacade:exit', clearPendingPlacement);
     events.on('assetFacade:editModeExit', clearPendingPlacement);
@@ -1064,6 +1128,7 @@ export function initAssetPlacementHandler(
         }
         events.off('assetEdit:copy', onCopy);
         events.off('assetEdit:delete', onDelete);
+        events.off('assetEdit:videoCurvature', onVideoCurvature);
         events.off('assetPlacement:start', onPlaceStart);
         events.off('assetFacade:exit', clearPendingPlacement);
         events.off('assetFacade:editModeExit', clearPendingPlacement);

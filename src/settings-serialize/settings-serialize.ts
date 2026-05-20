@@ -166,6 +166,21 @@ export function serializeScenePlacedItem(entry: ScenePlacedItem): SceneAsset {
     const mirrorY: 1 | -1 = scale.y < 0 ? -1 : 1;
     const mirrorZ: 1 | -1 = scale.z < 0 ? -1 : 1;
 
+    const transform: SceneAsset['transform'] = {
+        position: [pos.x, pos.y, pos.z] as [number, number, number],
+        rotation: [rot.x, rot.y, rot.z] as [number, number, number],
+        rotationQuat: [rotQuat.x, rotQuat.y, rotQuat.z, rotQuat.w] as [number, number, number, number],
+        scale: [scale.x, scale.y, scale.z] as [number, number, number],
+        mirror: [mirrorX, mirrorY, mirrorZ]
+    };
+    if (
+        entry.assetType === 'video'
+        && typeof entry.horizontalCurvature === 'number'
+        && entry.horizontalCurvature > 0
+    ) {
+        transform.horizontalCurvature = entry.horizontalCurvature;
+    }
+
     return {
         id: entry.id,
         type: entry.assetType ?? 'gaussian',
@@ -177,13 +192,7 @@ export function serializeScenePlacedItem(entry: ScenePlacedItem): SceneAsset {
             filename: entry.filename,
             url: entry.url
         },
-        transform: {
-            position: [pos.x, pos.y, pos.z] as [number, number, number],
-            rotation: [rot.x, rot.y, rot.z] as [number, number, number],
-            rotationQuat: [rotQuat.x, rotQuat.y, rotQuat.z, rotQuat.w] as [number, number, number, number],
-            scale: [scale.x, scale.y, scale.z] as [number, number, number],
-            mirror: [mirrorX, mirrorY, mirrorZ]
-        }
+        transform
     };
 }
 
