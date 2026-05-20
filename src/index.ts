@@ -36,6 +36,7 @@ import { loadGsplatAsset } from './loaders/gsplat-asset-loader';
 import { getAssetLoader } from './loaders/asset-loader';
 import { version as appVersion } from '../package.json';
 import { initPostMessageBridge } from './message-bridge';
+import { ensureViewSettings } from './view-settings';
 import { initVideoExport } from './render/video-export';
 import { ensureRevealEffect } from './settings-serialize/settings-serialize-helper';
 import {
@@ -355,6 +356,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         events,
         camera
     };
+
+    ensureViewSettings(global);
 
     // 将原始配置挂载到 global 供后续恢复使用
     (global as any).__originalSettings = originalSettings;

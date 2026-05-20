@@ -40,6 +40,7 @@ import {
     applySceneMediaHotspotBaselineFromView,
     patchSceneMediaHotspot
 } from './settings-serialize/settings-serialize-helper';
+import { applyViewMediaMuteSet } from './view-settings';
 import { getSelectedSceneAssetType } from './state-selectors';
 import type { AssetLibraryItem, EditLeftModule, Global } from './types';
 import { uploadProjectData } from './universe/service';
@@ -59,6 +60,7 @@ type InboundPayload =
     | { type: 'PREVIEW_MODE_SET'; value?: boolean }
     | { type: 'MEDIA_HOTSPOT_SET'; value?: Partial<SceneMediaHotspotSettings> }
     | { type: 'MEDIA_HOTSPOT_SET_BASELINE'; id: string; target: 'video' | 'audio' }
+    | { type: 'VIEW_MEDIA_MUTE_SET'; value?: boolean }
     | { type: 'SETTINGS_SAVE' }
     | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule | null }
     | { type: 'ASSET_SHOW_HIDE_SET'; id?: string; value?: boolean }
@@ -308,6 +310,11 @@ const initPostMessageBridge = (global: Global) => {
                 events.fire('sceneMediaHotspot:changed');
                 break;
             }
+            case 'VIEW_MEDIA_MUTE_SET':
+                if (typeof p.value === 'boolean') {
+                    applyViewMediaMuteSet(global, p.value);
+                }
+                break;
             case 'MEDIA_HOTSPOT_SET_BASELINE': {
                 const msg = payload as Extract<InboundPayload, { type: 'MEDIA_HOTSPOT_SET_BASELINE' }>;
                 const id = typeof msg.id === 'string' ? msg.id.trim() : '';

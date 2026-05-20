@@ -34,6 +34,7 @@ import type { Annotation } from '../settings';
 import { getEditUiTransport, sendEditProtocolMessage } from './edit-ui-transport';
 import { applyEnvironmentPreviewVisualPolicy } from '../editor-modules/environment-facade';
 import { applyLightToggleAll, applyLightToggle } from '../editor-modules/protocol-adapters/environment-protocol-adapter';
+import { applyViewMediaMuteSet } from '../view-settings';
 import { getRevealActiveType } from '../settings-serialize/effects-sync';
 
 // Initialize the touch joystick for fly mode camera control
@@ -291,7 +292,8 @@ const initUI = (global: Global) => {
         // 'supersplatBranding',
         // View 模式调试按钮（右上角编辑按钮旁）
         'viewDebugToggleAssets', 'viewDebugLightsAllOn', 'viewDebugLightsAllOff',
-        'viewDebugRegionSelect', 'viewDebugToggleRegionLight'
+        'viewDebugRegionSelect', 'viewDebugToggleRegionLight',
+        'viewDebugMediaMute', 'viewDebugMediaUnmute'
     ].reduce((acc: Record<string, HTMLElement>, id) => {
         acc[id] = document.getElementById(id);
         return acc;
@@ -1010,6 +1012,26 @@ const initUI = (global: Global) => {
                 sendEditProtocolMessage({ type: 'LIGHT_TOGGLE_ALL', value: false });
             } else {
                 applyLightToggleAll(global, false);
+            }
+        });
+    }
+
+    if (dom.viewDebugMediaMute) {
+        dom.viewDebugMediaMute.addEventListener('click', () => {
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'VIEW_MEDIA_MUTE_SET', value: true });
+            } else {
+                applyViewMediaMuteSet(global, true);
+            }
+        });
+    }
+
+    if (dom.viewDebugMediaUnmute) {
+        dom.viewDebugMediaUnmute.addEventListener('click', () => {
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'VIEW_MEDIA_MUTE_SET', value: false });
+            } else {
+                applyViewMediaMuteSet(global, false);
             }
         });
     }

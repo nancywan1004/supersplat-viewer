@@ -1,5 +1,6 @@
 import type { AssetLibraryItem, Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 import { setPlacementCursorActive } from '../placement-cursor';
+import { applyViewAnnotationsVisible } from '../view-settings';
 import { loadGsplatAsset } from '../loaders/gsplat-asset-loader';
 import { getAssetLoader } from '../loaders/asset-loader';
 
@@ -187,10 +188,7 @@ class AssetFacade implements ModuleFacade {
             }
             // 记录用户显隐意图到 viewSettings（View 模式专属）
             // revealComplete 等恢复 deferred layers 时会参考此状态
-            if (!ctx.global.viewSettings) {
-                ctx.global.viewSettings = { bloom: { localLightsEnabled: true } };
-            }
-            ctx.global.viewSettings.annotationsVisible = visible;
+            applyViewAnnotationsVisible(ctx.global, visible);
             // TODO: 临时方案 - ASSETS_SHOW_HIDE_SET 同时控制所有标注显隐（仅在 View 模式生效）
             // 通过事件驱动方式通知 annotation 模块，后续可能根据设计重构解耦
             ctx.events.fire('assets:allVisibilityChanged', { visible });

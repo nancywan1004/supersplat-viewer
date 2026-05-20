@@ -231,7 +231,7 @@ type State = {
 
 /**
  * 观看态/会话级「视图设置」：与 `global.settings`（`ExperienceSettings`）**并列**、**不入库**。
- * 只放「Viewer 里需要单独持有一份、又不能写回 JSON」的字段；由 `Viewer` 注入，编辑态通常不存在。
+ * 读写与缺省补齐统一经 {@link ./view-settings.ts}（`ensureViewSettings` 及各 `applyView*`）。
  */
 export type ViewSettings = {
     bloom: {
@@ -249,6 +249,13 @@ export type ViewSettings = {
      * - 编辑态通常不存在此字段，由模块自身控制
      */
     annotationsVisible?: boolean;
+    /**
+     * 场景 video/audio 热区全局静音（View 模式专属，不入库）
+     * - `VIEW_MEDIA_MUTE_SET` 写入
+     * - `true` 时热区播控强制无声（视频 muted、音频 pause）
+     * - 默认 `false`
+     */
+    mediaMuted?: boolean;
 };
 
 type Global = {

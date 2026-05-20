@@ -11,6 +11,7 @@ import * as pc from 'playcanvas';
 
 import { ensureSceneMediaHotspot } from '../../settings-serialize/settings-serialize-helper';
 import type { Global, ScenePlacedItem } from '../../types';
+import { readViewMediaMuted } from '../../view-settings';
 import {
     getPlacedMediaRuntime,
     type PlacedAudioRuntime,
@@ -226,6 +227,8 @@ function applyHotspotPlayback(
     evalState.lastVideoSoundId = desiredVideoSound;
     evalState.lastAudioSoundId = desiredAudioSound;
 
+    const viewMediaMuted = readViewMediaMuted(global);
+
     const videoIdSet = new Set(videos.map(v => v.id));
     const audioIdSet = new Set(audios.map(a => a.id));
     const list = global.state.scenePlacedEntities ?? [];
@@ -243,7 +246,7 @@ function applyHotspotPlayback(
             }
             playPlacedVideoTexture(entity, m);
             const winner = entry.id === desiredVideoSound;
-            m.videoEl.muted = !(winner && evalState.userUnlocked);
+            m.videoEl.muted = viewMediaMuted || !(winner && evalState.userUnlocked);
         }
 
         if (m.kind === 'audio') {
@@ -261,7 +264,7 @@ function applyHotspotPlayback(
             }
 
             const winner = entry.id === desiredAudioSound;
-            if (winner && evalState.userUnlocked) {
+            if (winner && evalState.userUnlocked && !viewMediaMuted) {
                 a.volume = 1;
                 a.play().catch(() => {
                     // ignore autoplay / decode errors
@@ -432,7 +435,12 @@ export function initMediaHotspotController(global: Global): () => void {
         syncPlacedAudioIconEditor(global, entry.entity);
     };
 
+    const onViewMediaMutedChanged = () => {
+        forceHotspotEval();
+    };
+
     events.on('sceneMediaHotspot:changed', onHotspotChanged);
+    events.on('viewMediaMuted:changed', onViewMediaMutedChanged);
     events.on('previewMode:changed', onPreviewModeChanged);
     events.on('mediaHotspot:userActivate', onUserActivate);
     events.on('editMode:changed', onEditModeChanged);
@@ -445,6 +453,7 @@ export function initMediaHotspotController(global: Global): () => void {
         window.removeEventListener('pageshow', onPageVisible);
         app.off('update', onUpdate);
         events.off('sceneMediaHotspot:changed', onHotspotChanged);
+        events.off('viewMediaMuted:changed', onViewMediaMutedChanged);
         events.off('previewMode:changed', onPreviewModeChanged);
         events.off('mediaHotspot:userActivate', onUserActivate);
         events.off('editMode:changed', onEditModeChanged);
