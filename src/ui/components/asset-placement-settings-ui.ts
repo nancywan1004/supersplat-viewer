@@ -178,7 +178,7 @@ export function getAssetPlacementSettingsHTML(): string {
                 <span id="mhAudioDistVal" class="settingsValueLabel"></span>
             </div>
             <div class="settingsRow">
-                <label for="mhCone">视锥半角 (°)</label>
+                <label for="mhCone" title="半角；总张角约为 2× 该值（如 60°≈120° 视锥）">视锥半角 (°)</label>
                 <input type="range" id="mhCone" min="15" max="85" step="1" />
                 <span id="mhConeVal" class="settingsValueLabel"></span>
             </div>

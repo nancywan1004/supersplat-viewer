@@ -17,7 +17,7 @@ import {
     type PlacedAudioRuntime,
     type PlacedVideoRuntime
 } from './media-runtime';
-import { cameraForwardWorld } from './media-view-depth';
+import { cameraForwardWorld, evaluateMediaHotspotAnchor } from './media-view-depth';
 import {
     pausePlacedVideoTexture,
     playPlacedVideoTexture,
@@ -71,17 +71,15 @@ function qualifyPlacedMedia(global: Global): { videos: QualifiedMedia[]; audios:
         if (kind !== 'video' && kind !== 'audio') continue;
 
         const anchor = entry.entity.getPosition();
-        const to = anchor.clone().sub(eye);
-        const euclidean = to.length();
-        if (euclidean < 1e-6) continue;
-        const depthM = forward.dot(to);
-        if (depthM <= 0) continue;
-        to.mulScalar(1 / euclidean);
-        if (forward.dot(to) < cosCone) continue;
+        const maxDepthM = kind === 'video' ? videoR : audioR;
+        const evalResult = evaluateMediaHotspotAnchor(eye, forward, anchor, maxDepthM, cosCone);
+        //console.log('evalResult', evalResult);
+        if (!evalResult.ok) continue;
 
-        if (kind === 'video' && depthM <= videoR) {
+        const { depthM } = evalResult;
+        if (kind === 'video') {
             videos.push({ id: entry.id, depthM, entry });
-        } else if (kind === 'audio' && depthM <= audioR) {
+        } else {
             audios.push({ id: entry.id, depthM, entry });
         }
     }
