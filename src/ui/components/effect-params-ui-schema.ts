@@ -174,18 +174,41 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     wavelength: '波长 (世界单位)',
     waveSpeed: '动画速度',
     scaleBlend: '尺度混合',
-    center: '效果原点'
+    center: '效果原点',
+    pointSize: '光点大小',
+    sparkleDensity: '光点密度',
+    twinkleSpeed: '闪烁速度',
+    twinkleMin: '最暗亮度',
+    twinkleSharpness: '闪烁锐利度',
+    brightness: '亮度',
+    lightTint: '光点颜色'
+};
+
+const PERSISTENT_NUMBER_RANGES: Record<string, NumberRange> = {
+    pointSize: { min: 0.002, max: 0.1, step: 0.001, default: 0.02 },
+    sparkleDensity: { min: 0, max: 1, step: 0.05, default: 0.5 },
+    twinkleSpeed: { min: 0, max: 10, step: 0.1, default: 5 },
+    twinkleMin: { min: 0, max: 0.5, step: 0.05, default: 0 },
+    twinkleSharpness: { min: 0.5, max: 8, step: 0.1, default: 3 },
+    brightness: { min: 0.2, max: 5, step: 0.1, default: 2 }
 };
 
 const buildPersistentSpec = (key: string): EffectParamUiSpec => {
     const kind = getPersistentParamFieldKind(key);
     const base: EffectParamUiSpec = { key, label: PERSISTENT_PARAM_LABELS[key] ?? labelForKey(key), kind };
+    if (kind === 'color') {
+        base.step = 0.01;
+        base.default = [1, 1, 1];
+        base.min = 0;
+        base.max = 2;
+        return base;
+    }
     if (kind === 'vec3') {
         base.step = 0.1;
         base.default = [0, 0, 0];
         return base;
     }
-    const range = REVEAL_NUMBER_RANGES[key];
+    const range = PERSISTENT_NUMBER_RANGES[key] ?? REVEAL_NUMBER_RANGES[key];
     if (range) {
         return { ...base, ...range };
     }

@@ -1,4 +1,4 @@
-import { Vec3 } from 'playcanvas';
+import { Color, Vec3 } from 'playcanvas';
 
 /**
  * 可持续 **persistent** 轨的 **`settings.effects.persistent` → `effectParams`** 白名单与写入逻辑。
@@ -23,11 +23,23 @@ const PERLIN_WAVE = new Set([
     'center' // 效果原点 [x,y,z] → Vec3
 ]);
 
+const SPARKLE_TWINKLE = new Set([
+    'pointSize',
+    'sparkleDensity',
+    'twinkleSpeed',
+    'twinkleMin',
+    'twinkleSharpness',
+    'brightness',
+    'lightTint',
+    'center'
+]);
+
 const BY_TYPE: Record<string, ReadonlySet<string>> = {
-    'perlin-wave': PERLIN_WAVE
+    'perlin-wave': PERLIN_WAVE,
+    'sparkle-twinkle': SPARKLE_TWINKLE
 };
 
-export type PersistentParamFieldKind = 'number' | 'vec3';
+export type PersistentParamFieldKind = 'number' | 'vec3' | 'color';
 
 /** 当前 persistent `type` 在 param 白名单中的全部键（Set 插入顺序） */
 export function getPersistentEffectParamKeys(effectType: string): readonly string[] {
@@ -36,7 +48,9 @@ export function getPersistentEffectParamKeys(effectType: string): readonly strin
 }
 
 export function getPersistentParamFieldKind(key: string): PersistentParamFieldKind {
-    return key === 'center' ? 'vec3' : 'number';
+    if (key === 'lightTint') return 'color';
+    if (key === 'center') return 'vec3';
+    return 'number';
 }
 
 function isVec3Triple(v: unknown): v is [number, number, number] {
@@ -53,6 +67,20 @@ function trySetVec3(script: any, key: string, v: unknown): boolean {
     return false;
 }
 
+function isColorTriple(v: unknown): v is [number, number, number] {
+    return Array.isArray(v) && v.length >= 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x));
+}
+
+function trySetColor(script: any, key: string, v: unknown): boolean {
+    if (!isColorTriple(v)) return false;
+    const cur = script[key];
+    if (cur instanceof Color) {
+        cur.set(v[0], v[1], v[2]);
+        return true;
+    }
+    return false;
+}
+
 function trySetNumber(script: any, key: string, v: unknown): boolean {
     if (typeof v !== 'number' || !Number.isFinite(v)) return false;
     if (!(key in script)) return false;
@@ -60,9 +88,7 @@ function trySetNumber(script: any, key: string, v: unknown): boolean {
     return true;
 }
 
-/**
- * 将 `effectParams` 中属于当前 persistent `effectType` 白名单的项写入已挂载脚本（在 **`create*Script` 默认值与 `updateScriptCenter` 之后**调用）。
- */
+/** 将 `effectParams` 白名单项写入已挂载脚本（在 create*Script 默认值与 updateScriptCenter 之后调用）。 */
 export function applyPersistentEffectParamsToScript(
     script: any,
     effectType: string,
@@ -77,6 +103,10 @@ export function applyPersistentEffectParamsToScript(
         if (rawVal === undefined) continue;
         if (rawKey === 'center') {
             trySetVec3(script, rawKey, rawVal);
+            continue;
+        }
+        if (rawKey === 'lightTint') {
+            trySetColor(script, rawKey, rawVal);
             continue;
         }
         trySetNumber(script, rawKey, rawVal);

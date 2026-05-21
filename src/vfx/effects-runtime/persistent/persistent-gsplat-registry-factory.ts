@@ -3,7 +3,7 @@ import { readPersistentRevealParams } from '../../../settings-serialize/effects-
 import type { EffectRegistry } from '../effect-registry';
 import { extractGlslWgslModifyBlocks, PERLIN_WAVE_COMPOSER_ID } from '../gsplat-effect-layers-extractor';
 import { PERLIN_WAVE_REGISTRY_EFFECT_ID } from '../effect-types';
-import { shaderGLSL, shaderWGSL } from './gsplat-perlin-wave-shaders';
+import { shaderGLSL as perlinShaderGLSL, shaderWGSL as perlinShaderWGSL } from './gsplat-perlin-wave-shaders';
 
 /** key 与 `readPersistentRevealParams` 的 `type` 一致；无配置时不注册任何项 */
 const PERSISTENT_GSPLAT_REGISTRY_FACTORIES: Record<string, (registry: EffectRegistry) => void> = {
@@ -11,7 +11,7 @@ const PERSISTENT_GSPLAT_REGISTRY_FACTORIES: Record<string, (registry: EffectRegi
         registry.register({
             id: PERLIN_WAVE_REGISTRY_EFFECT_ID,
             createSceneGsplatContribution: (ctx) => {
-                const shaderBlocks = extractGlslWgslModifyBlocks(shaderGLSL, shaderWGSL);
+                const shaderBlocks = extractGlslWgslModifyBlocks(perlinShaderGLSL, perlinShaderWGSL);
                 return {
                     id: PERLIN_WAVE_COMPOSER_ID,
                     priority: 20,

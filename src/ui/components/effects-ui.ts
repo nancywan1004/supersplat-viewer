@@ -76,6 +76,7 @@ const REVEAL_PANEL_HTML = (() => {
       <select id="persistentType" class="settingsSelect">
         <option value="none">None</option>
         <option value="perlin-wave">Perlin Wave</option>
+        <option value="sparkle-twinkle">亮光细闪</option>
       </select>
     </div>
     <div id="persistentEffectParamsPanel" class="effectParamsPanel hidden"></div>
