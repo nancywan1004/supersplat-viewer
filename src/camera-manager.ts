@@ -355,7 +355,7 @@ class CameraManager {
         const camera0 = settings.cameras[0]?.initial;
         const defaultFov = camera0?.fov ?? 75;
         const frameCamera = createFrameCamera(bbox, defaultFov);
-        const resetCamera = camera0 ?
+        let resetCamera = camera0 ?
             createCamera(new Vec3(camera0.position), new Vec3(camera0.target), camera0.fov) :
             frameCamera;
 
@@ -752,6 +752,29 @@ class CameraManager {
                     }
                     break;
             }
+        });
+
+        events.on('camera:syncPrimaryInitial', () => {
+            const initial = settings.cameras[0]?.initial;
+            if (!initial) return;
+            resetCamera = createCamera(
+                new Vec3(initial.position),
+                new Vec3(initial.target),
+                initial.fov
+            );
+            this.camera.copy(resetCamera);
+            target.copy(resetCamera);
+            const mode = state.cameraMode;
+            if (mode === 'walk') {
+                controllers.walk.resetToSpawn(target);
+            } else if (mode === 'fly') {
+                controllers.fly.resetToSpawn(target);
+            } else if (mode === 'orbit') {
+                events.fire('orbitTarget:clear');
+                controllers.orbit.goto(resetCamera);
+            }
+            getController(mode).onEnter(this.camera);
+            startTransition();
         });
 
         // handle camera mode switching

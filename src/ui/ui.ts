@@ -11,6 +11,7 @@ import {
     applySettingsSnapshot
 } from '../settings-serialize/settings-serialize';
 import { readSkyboxUrlFromSettings } from '../settings-serialize/settings-serialize-helper';
+import { downloadExperienceSettingsLocally } from '../render/project-thumbnail';
 import { requestSceneAssetsRestore } from '../asset-placement-handler';
 import {
     initEditHistory,
@@ -786,14 +787,7 @@ const initUI = (global: Global) => {
                 }
                 showExitEditConfirmModal({
                     onSave: () => {
-                        const payload = serializeExperienceSettings(global);
-                        const jsonString = JSON.stringify(payload, null, 2);
-                        const a = document.createElement('a');
-                        a.href = URL.createObjectURL(new Blob([jsonString], { type: 'application/json' }));
-                        a.download = 'settings.json';
-                        a.click();
-                        URL.revokeObjectURL(a.href);
-                        window.parent.postMessage({ type: 'SETTINGS_UPDATED', message: 'settings updated', payload: jsonString }, '*');
+                        downloadExperienceSettingsLocally(global);
                         state.editMode = false;
                     },
                     onDiscard: async () => {
@@ -857,15 +851,8 @@ const initUI = (global: Global) => {
                         .catch(() => {});
                     return;
                 }
+                downloadExperienceSettingsLocally(global);
                 const payload = serializeExperienceSettings(global);
-                const jsonString = JSON.stringify(payload, null, 2);
-                const a = document.createElement('a');
-                a.href = URL.createObjectURL(new Blob([jsonString], { type: 'application/json' }));
-                a.download = 'settings.json';
-                a.click();
-                URL.revokeObjectURL(a.href);
-                window.parent.postMessage({ type: 'SETTINGS_UPDATED', message: 'settings updated', payload: jsonString }, '*');
-
                 // 编辑模式下手动点击「保存配置」后，将当前配置视为最新快照：
                 // - 下次比较是否有改动时，以本次保存后的配置为基准
                 // - 之后选择「不保存并退出」时，回退到最近一次保存的配置

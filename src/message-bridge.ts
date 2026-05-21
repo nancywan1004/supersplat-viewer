@@ -44,8 +44,10 @@ import {
 import { applyViewMediaMuteSet } from './view-settings';
 import { getSelectedSceneAssetType } from './state-selectors';
 import type { AssetLibraryItem, EditLeftModule, Global } from './types';
-import { captureAndUploadProjectThumbnail } from './render/project-thumbnail';
-import { uploadProjectData } from './universe/service';
+import {
+    captureDefaultViewAndStageThumbnail,
+    persistExperienceSettingsToCloud
+} from './render/project-thumbnail';
 
 /** 父级 → Viewer 的 postMessage payload 类型（按文档事件表） */
 type InboundPayload =
@@ -118,7 +120,7 @@ type InboundPayload =
     | { type: 'EFFECT_REPLAY'; module?: 'effects'; effectId: string; restartAnim?: boolean }
     | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean; projectName?: string }
     | { type: 'VIDEO_EXPORT_CANCEL' }
-    | { type: 'PROJECT_THUMBNAIL_CAPTURE_UPLOAD' };
+    | { type: 'CAMERA_DEFAULT_VIEW_CAPTURE' };
 
 const postToParent = (type: string, data?: Record<string, unknown>) => {
     const message = (data ? { type, ...data } : { type }) as Record<string, unknown>;
@@ -347,14 +349,10 @@ const initPostMessageBridge = (global: Global) => {
                 break;
             }
             case 'SETTINGS_SAVE': {
-                const serialized = serializeExperienceSettings(global);
-                const jsonString = JSON.stringify(serialized, null, 2);
-                const projectId = global.config.projectId;
-                const token = global.config.token;
-                const uploadResult = await uploadProjectData(projectId ?? '', token ?? '', jsonString);
-                if (uploadResult.ok === false) {
-                    console.error('[MessageBridge] SETTINGS_SAVE 上传失败，已取消 SETTINGS_UPDATED 回传', uploadResult.message);
-                    postToParent('SETTINGS_SAVE_FAILED', { message: uploadResult.message });
+                const saveResult = await persistExperienceSettingsToCloud(global);
+                if (saveResult.ok === false) {
+                    console.error('[MessageBridge] SETTINGS_SAVE 失败', saveResult.message);
+                    postToParent('SETTINGS_SAVE_FAILED', { message: saveResult.message });
                     break;
                 }
                 postToParent('SETTINGS_UPDATED');
@@ -747,18 +745,17 @@ const initPostMessageBridge = (global: Global) => {
                 events.fire('render.video.stop');
                 break;
             }
-            case 'PROJECT_THUMBNAIL_CAPTURE_UPLOAD': {
-                const thumbResult = await captureAndUploadProjectThumbnail(global);
-                if (thumbResult.ok === false) {
-                    postToParent('PROJECT_THUMBNAIL_UPLOAD_FAILED', {
-                        module: MESSAGE_BRIDGE_MODULE.effects,
-                        message: thumbResult.message
+            case 'CAMERA_DEFAULT_VIEW_CAPTURE': {
+                const captureResult = await captureDefaultViewAndStageThumbnail(global);
+                if (captureResult.ok === false) {
+                    postToParent('CAMERA_DEFAULT_VIEW_CAPTURE_FAILED', {
+                        module: MESSAGE_BRIDGE_MODULE.camera,
+                        message: captureResult.message
                     });
                     break;
                 }
-                postToParent('PROJECT_THUMBNAIL_UPLOAD_END', {
-                    module: MESSAGE_BRIDGE_MODULE.effects,
-                    thumbnailUrl: thumbResult.thumbnailUrl
+                postToParent('CAMERA_DEFAULT_VIEW_CAPTURED', {
+                    module: MESSAGE_BRIDGE_MODULE.camera
                 });
                 break;
             }
