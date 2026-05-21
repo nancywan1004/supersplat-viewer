@@ -46,6 +46,10 @@ import {
 } from './settings-serialize/effects-sync';
 
 import { loadGsplatMorphSequence } from './vfx/gsplat-morph';
+import { createGsplatWobbleEffect, removeGsplatWobbleEffect, type GsplatWobbleOptions } from './vfx/gsplat-wobble';
+import { createGsplatFallingPetals, type GsplatFallingPetalsOptions } from './vfx/gsplat-falling-petals';
+import { createGsplatFallingWeather, type GsplatFallingWeatherOptions } from './vfx/gsplat-falling-weather';
+
 
 
 export { loadGsplatAsset };
@@ -165,6 +169,57 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
             app.assets.load(asset);
         });
     }
+};
+
+/**
+ * 加载 wobble 用 gsplat（.splat / .ply / .sog 等），unified=false，shader 仅作用于本实体材质。
+ * @param url public 路径，如 `/wobble/model.ply`
+ */
+const loadSplatTest = async (
+    app: AppBase,
+    url: string,
+    aa: boolean,
+    lodLoader?: LodLoader,
+    entityName = 'gsplat'
+): Promise<Entity> => {
+    const filename = new URL(url, location.href).pathname.split('/').pop();
+    const shouldEnableLod = lodLoader?.shouldEnableLod(url) ?? false;
+    const isSplat = (filename || url).toLowerCase().endsWith('.splat');
+
+    const finishEntity = (entity: Entity, asset: Asset) => {
+        entity.setLocalEulerAngles(0, 0, 180);
+        entity.addComponent('gsplat', { unified: false, asset });
+        const material = entity.gsplat!.material;
+        material.setDefine('GSPLAT_AA', aa);
+        material.setParameter('alphaClip', 1 / 255);
+        app.root.addChild(entity);
+        if (shouldEnableLod && lodLoader && entity.gsplat) {
+            lodLoader.applyLodPreset(entity.gsplat);
+        }
+        return entity;
+    };
+
+    if (isSplat) {
+        const asset = await loadGsplatAsset(app, { url, filename });
+        if (asset.loaded) {
+            return finishEntity(new Entity(entityName), asset);
+        }
+        return new Promise<Entity>((resolve, reject) => {
+            asset.once('load', () => resolve(finishEntity(new Entity(entityName), asset)));
+            asset.once('error', reject);
+        });
+    }
+
+    const asset = new Asset(filename, 'gsplat', { url, filename });
+    return new Promise<Entity>((resolve, reject) => {
+        asset.on('load', () => resolve(finishEntity(new Entity(entityName), asset)));
+        asset.on('error', (err) => {
+            console.log(err);
+            reject(err);
+        });
+        app.assets.add(asset);
+        app.assets.load(asset);
+    });
 };
 
 const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
@@ -493,39 +548,98 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
 
     // DEMO
     const mainGsplatEntity = await gsplatLoad;
-    const morph = await loadGsplatMorphSequence(app, [
-        '/morph/1.ply',
-        '/morph/2.ply',
-        '/morph/3.ply',
-        '/morph/5.sog'
-    ], {
-        segmentDuration: 3,
-        loop: true,
-        autoPlay: true,
-        /** 大场景：限制 morph 全量插值+上传频率；此前 index 已传但控制器未实现，故无效果 */
-        morphPresentMaxHz: 12,
-        /** 段内不重算/不重传 f_rest_*（仅段切换时刷新 SH），可再省大量 CPU/GPU；要最高画质删此项或设 true */
-        morphAnimateSphericalHarmonics: false,
-        /** 默认 false；若 morph 不刷新再设 true */
-        continuousAppRender: false,
-        recenterModels: true,
-        normalizeScales: true,
-        targetScale: 10,
-        layers: mainGsplatEntity.gsplat?.layers ? [...mainGsplatEntity.gsplat.layers] : undefined,
+    // const morph = await loadGsplatMorphSequence(app, [
+    //     '/morph/1.ply',
+    //     '/morph/2.ply',
+    //     '/morph/3.ply',
+    //     '/morph/5.sog'
+    // ], {
+    //     segmentDuration: 3,
+    //     loop: true,
+    //     autoPlay: true,
+    //     /** 大场景：限制 morph 全量插值+上传频率；此前 index 已传但控制器未实现，故无效果 */
+    //     morphPresentMaxHz: 12,
+    //     /** 段内不重算/不重传 f_rest_*（仅段切换时刷新 SH），可再省大量 CPU/GPU；要最高画质删此项或设 true */
+    //     morphAnimateSphericalHarmonics: false,
+    //     /** 默认 false；若 morph 不刷新再设 true */
+    //     continuousAppRender: false,
+    //     recenterModels: true,
+    //     normalizeScales: true,
+    //     targetScale: 10,
+    //     layers: mainGsplatEntity.gsplat?.layers ? [...mainGsplatEntity.gsplat.layers] : undefined,
 
-        correspondenceStrategy: 'greedy',
-        greedySpatialWeight: 0.7,
-        greedyColorWeight: 0.3,
-        greedySearchRadiusCells: 1,
-        greedyMaxCandidatesPerPoint: 48
+    //     correspondenceStrategy: 'greedy',
+    //     greedySpatialWeight: 0.7,
+    //     greedyColorWeight: 0.3,
+    //     greedySearchRadiusCells: 1,
+    //     greedyMaxCandidatesPerPoint: 48
+    // });
+    // 隐藏主场景 gsplat：必须在 firstFrame 之后，否则 Viewer 等不到 sort/frame:ready，加载会卡在 100%
+    events.once('firstFrame', () => {
+        mainGsplatEntity.enabled = false;
+        app.renderNextFrame = true;
     });
-    // 先把 viewer 默认加载的主 gsplat 隐藏掉，不然会和 morph 结果重叠
-    mainGsplatEntity.enabled = false;
-    // 方便你在浏览器控制台里手动调试
-    (window as any).morph = morph;
+    // // 方便你在浏览器控制台里手动调试
+    // (window as any).morph = morph;
 
+    //----DEMO wobble Effect
+    const wobbleTarget = await loadSplatTest(app, '/wobble/model.sog', config.aa);
+    wobbleTarget.setLocalPosition(0, 0, 2.0);
+
+    (window as any).enableGsplatWobble = (options?: GsplatWobbleOptions) => createGsplatWobbleEffect(wobbleTarget, options);
+    (window as any).disableGsplatWobble = () => removeGsplatWobbleEffect(wobbleTarget);
+
+    const wobbleParam = new URLSearchParams(window.location.search).get('wobble');
+    if (wobbleParam === '1' || wobbleParam === 'true') {
+        createGsplatWobbleEffect(wobbleTarget);
+    }
+
+    // const fallingWeather = createGsplatFallingWeather(app, {
+    //     followEntity: camera,
+    //     enabled: false
+    // });
+    // const fallingPetals = createGsplatFallingPetals(app, {
+    //     followEntity: camera,
+    //     enabled: false
+    // });
+    // (window as any).gsplatFallingWeather = fallingWeather;
+    // (window as any).gsplatFallingPetals = fallingPetals;
+    // (window as any).showGsplatRain = (options?: GsplatFallingWeatherOptions) => {
+    //     fallingPetals.hide();
+    //     fallingWeather.showRain(options);
+    // };
+    // (window as any).showGsplatSnow = (options?: GsplatFallingWeatherOptions) => {
+    //     fallingPetals.hide();
+    //     fallingWeather.showSnow(options);
+    // };
+    // (window as any).showGsplatPetals = (options?: GsplatFallingPetalsOptions) => {
+    //     fallingWeather.hide();
+    //     fallingPetals.show(options);
+    // };
+    // (window as any).hideGsplatFallingWeather = () => {
+    //     fallingWeather.hide();
+    //     fallingPetals.hide();
+    // };
+
+    // const weatherParam = new URLSearchParams(window.location.search).get('weather');
+    // const petalTextureUrl = new URLSearchParams(window.location.search).get('petalTexture') ?? undefined;
+    // if (weatherParam === 'rain' || weatherParam === 'snow') {
+    //     fallingWeather.show(weatherParam);
+    //     fallingPetals.hide();
+    // } else if (weatherParam === 'petals') {
+    //     fallingWeather.hide();
+    //     fallingPetals.show({
+    //         petalTextureUrl: petalTextureUrl ?? '/textures/petal.png'
+    //     });
+    // }
     return viewer;
 };
+
+
+/** 从 public 路径加载独立 gsplat，默认使用非 unified 材质，方便只对它施加 shader 特效。 */
+const loadIsolatedGsplatFromPublic = (app: AppBase, url: string, config: Config, lodLoader?: LodLoader) =>
+    loadGsplat(app, { ...config, contentUrl: url, contents: undefined }, () => {}, lodLoader);
+                
 
 console.log(`SuperSplat Viewer v${appVersion} | Engine v${engineVersion} (${engineRevision})`);
 

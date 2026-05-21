@@ -6,7 +6,9 @@ import { Vec3 } from 'playcanvas';
  * - 协议：`EFFECT_PARAMS_PATCH`（`effectId === scene.gsplat-persistent`）的 `params.effectParams`（与 reveal 轨同形）。
  * - 仅当 `key` 落在当前 `type` 对应集合内时才写入脚本；其余键静默忽略。
  * - **数值**：有限 `number`，且脚本上须已存在该属性名。
- * - **`center`**：`[x, y, z]` 写入 `Vec3`。
+ * - **`center` / `extents`**：`[x, y, z]` 写入 `Vec3`。
+ * - **颜色三元组**：`color` / `fogColor` 写入 `[r,g,b]`。
+ * - **字符串 / 布尔值**：当前仅用于 falling effects 的贴图 URL、渲染与雾开关。
  *
  * 新增 persistent 类型：扩展 **`BY_TYPE`** 与下方 `Set`，并在 **`mountPersistentGsplatByEffectType`** 创建脚本后调用 **`applyPersistentEffectParamsToScript`**。
  */
@@ -23,12 +25,45 @@ const PERLIN_WAVE = new Set([
     'center' // 效果原点 [x,y,z] → Vec3
 ]);
 
+const FALLING_PETALS = new Set([
+    'opacity',
+    'color',
+    'extents',
+    'petalParticleCount',
+    'petalTextureUrl',
+    'continuousRender'
+]);
+
+const FALLING_WEATHER = new Set([
+    'speed',
+    'drift',
+    'opacity',
+    'color',
+    'particleMinSize',
+    'particleMaxSize',
+    'elongate',
+    'flutter',
+    'tumble',
+    'density',
+    'extents',
+    'angle',
+    'fogDensity',
+    'fogColor',
+    'exposure',
+    'useFog',
+    'continuousRender',
+    'restoreSceneAtmosphere'
+]);
+
 const BY_TYPE: Record<string, ReadonlySet<string>> = {
-    'perlin-wave': PERLIN_WAVE
+    'perlin-wave': PERLIN_WAVE,
+    'falling-petals': FALLING_PETALS,
+    'falling-rain': FALLING_WEATHER,
+    'falling-snow': FALLING_WEATHER
 };
 
 function isVec3Triple(v: unknown): v is [number, number, number] {
-    return Array.isArray(v) && v.length >= 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x));
+    return Array.isArray(v) && v.length >= 3 && v.every(x => typeof x === 'number' && Number.isFinite(x));
 }
 
 function trySetVec3(script: any, key: string, v: unknown): boolean {
@@ -41,8 +76,33 @@ function trySetVec3(script: any, key: string, v: unknown): boolean {
     return false;
 }
 
+function trySetTriple(script: any, key: string, v: unknown): boolean {
+    if (!isVec3Triple(v)) return false;
+    if (!(key in script)) return false;
+    const cur = script[key];
+    if (Array.isArray(cur)) {
+        script[key] = [v[0], v[1], v[2]];
+        return true;
+    }
+    return trySetVec3(script, key, v);
+}
+
 function trySetNumber(script: any, key: string, v: unknown): boolean {
     if (typeof v !== 'number' || !Number.isFinite(v)) return false;
+    if (!(key in script)) return false;
+    script[key] = v;
+    return true;
+}
+
+function trySetString(script: any, key: string, v: unknown): boolean {
+    if (typeof v !== 'string') return false;
+    if (!(key in script)) return false;
+    script[key] = v;
+    return true;
+}
+
+function trySetBoolean(script: any, key: string, v: unknown): boolean {
+    if (typeof v !== 'boolean') return false;
     if (!(key in script)) return false;
     script[key] = v;
     return true;
@@ -63,10 +123,16 @@ export function applyPersistentEffectParamsToScript(
     for (const [rawKey, rawVal] of Object.entries(effectParams)) {
         if (!allowed.has(rawKey)) continue;
         if (rawVal === undefined) continue;
-        if (rawKey === 'center') {
+        if (rawKey === 'center' || rawKey === 'extents') {
             trySetVec3(script, rawKey, rawVal);
             continue;
         }
-        trySetNumber(script, rawKey, rawVal);
+        if (rawKey === 'color' || rawKey === 'fogColor') {
+            trySetTriple(script, rawKey, rawVal);
+            continue;
+        }
+        if (trySetNumber(script, rawKey, rawVal)) continue;
+        if (trySetString(script, rawKey, rawVal)) continue;
+        trySetBoolean(script, rawKey, rawVal);
     }
 }

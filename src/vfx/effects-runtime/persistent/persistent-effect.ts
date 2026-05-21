@@ -4,6 +4,7 @@ import { readPersistentRevealParams } from '../../../settings-serialize/effects-
 import { destroyAllPersistentGsplatScriptsOnEntity, getMountedPersistentGsplatScript } from '../gsplat-effect-script-registry';
 import { PERSISTENT_EFFECT_TYPES } from '../effect-types';
 import { isPersistentVfx } from '../reveal/reveal-policy';
+import { GsplatPersistentFallingPetals, GsplatPersistentFallingWeather } from './falling-weather-persistent';
 import { GsplatRevealPerlinWave } from './gsplat-perlin-wave';
 import { applyPersistentEffectParamsToScript } from './persistent-effect-params';
 
@@ -29,9 +30,65 @@ export function mountPersistentGsplatByEffectType(
     switch (effectType) {
         case 'perlin-wave':
             return createPerlinWaveRevealScript(gsplatEntity, updateScriptCenter, autoStart, effectParams);
+        case 'falling-petals':
+            return createFallingPetalsScript(gsplatEntity, autoStart, effectParams);
+        case 'falling-rain':
+            return createFallingWeatherScript('rain', gsplatEntity, autoStart, effectParams);
+        case 'falling-snow':
+            return createFallingWeatherScript('snow', gsplatEntity, autoStart, effectParams);
         default:
             console.warn('[persistent-effect] persistent type in registry but no mount branch:', effectType);
             return null;
+    }
+}
+
+export function createFallingPetalsScript(
+    gsplatEntity: Entity,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn('Cannot create falling-petals script - entity or script component not ready');
+        return null;
+    }
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentFallingPetals) as any;
+        if (script) {
+            applyPersistentEffectParamsToScript(script, 'falling-petals', effectParams ?? undefined);
+            script.enabled = autoStart;
+            script.applyConfig?.();
+        }
+        return script;
+    } catch (error) {
+        console.error('Failed to create falling-petals persistent script:', error);
+        return null;
+    }
+}
+
+export function createFallingWeatherScript(
+    mode: 'rain' | 'snow',
+    gsplatEntity: Entity,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn(`Cannot create falling-${mode} script - entity or script component not ready`);
+        return null;
+    }
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentFallingWeather) as any;
+        if (script) {
+            script.setModeDefaults?.(mode);
+            applyPersistentEffectParamsToScript(script, `falling-${mode}`, effectParams ?? undefined);
+            script.enabled = autoStart;
+            script.applyConfig?.();
+        }
+        return script;
+    } catch (error) {
+        console.error(`Failed to create falling-${mode} persistent script:`, error);
+        return null;
     }
 }
 

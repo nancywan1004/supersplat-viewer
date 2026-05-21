@@ -97,13 +97,39 @@ const noPostEffects: PostEffectSettings = {
 };
 
 const gammaChunkGlsl = `
+#include "decodePS"
+#include "fogPS"
+
+#if FOG != NONE && !defined(GSPLAT_NO_FOG)
+    #define GSPLAT_FOG
+#endif
+
 vec3 prepareOutputFromGamma(vec3 gammaColor, float depth) {
+    #ifdef GSPLAT_FOG
+        vec3 linear = decodeGamma(gammaColor);
+        linear = addFog(linear, depth);
+        return pow(linear + 0.0000001, vec3(1.0 / 2.2));
+    #endif
+
     return gammaColor;
 }
 `;
 
 const gammaChunkWgsl = `
+#include "decodePS"
+#include "fogPS"
+
+#if FOG != NONE && !defined(GSPLAT_NO_FOG)
+    #define GSPLAT_FOG
+#endif
+
 fn prepareOutputFromGamma(gammaColor: vec3f, depth: f32) -> vec3f {
+    #ifdef GSPLAT_FOG
+        var linear = decodeGamma3(gammaColor);
+        linear = addFog(linear, depth);
+        return pow(linear + vec3f(0.0000001), vec3f(1.0 / 2.2));
+    #endif
+
     return gammaColor;
 }
 `;

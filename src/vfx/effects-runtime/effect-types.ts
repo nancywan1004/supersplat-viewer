@@ -42,7 +42,12 @@ export const REVEAL_EFFECT_TYPES = new Set<string>([...REVEAL_EFFECT_TYPE_VALUES
 export const PERLIN_WAVE_REGISTRY_EFFECT_ID = 'perlin-wave' as const;
 
 /** 可持续 persistent 类型清单；`src/types.ts` 中 `PersistentEffectType` 与此同源 re-export */
-export const PERSISTENT_EFFECT_TYPE_VALUES = ['perlin-wave'] as const;
+export const PERSISTENT_EFFECT_TYPE_VALUES = [
+    'perlin-wave',
+    'falling-petals',
+    'falling-rain',
+    'falling-snow'
+] as const;
 
 /**
  * 可持续 persistent 类型 id 集合（与 {@link PERSISTENT_EFFECT_TYPE_VALUES} 同源）。

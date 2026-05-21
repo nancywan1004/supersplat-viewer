@@ -73,7 +73,67 @@ const REVEAL_PANEL_HTML = (() => {
       <select id="persistentType" class="settingsSelect">
         <option value="none">None</option>
         <option value="perlin-wave">Perlin Wave</option>
+        <option value="falling-petals">Falling Petals</option>
+        <option value="falling-rain">Falling Rain</option>
+        <option value="falling-snow">Falling Snow</option>
       </select>
+    </div>
+    <div id="persistentPetalsControls" class="hidden" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08)">
+      <div class="settingsRow">
+        <label for="petalsTextureUrl">Petal Texture:</label>
+        <input type="text" id="petalsTextureUrl" class="settingsInput" value="/textures/petal.png">
+      </div>
+      <div class="settingsRow">
+        <label for="petalsCount">Petal Count:</label>
+        <input type="number" id="petalsCount" class="settingsInput" min="100" max="12000" step="100" value="3600">
+      </div>
+      <div class="settingsRow">
+        <label for="petalsOpacity">Petal Opacity:</label>
+        <input type="number" id="petalsOpacity" class="settingsInput" min="0" max="1" step="0.05" value="0.95">
+      </div>
+      <div class="settingsRow">
+        <label>Petal Box XYZ:</label>
+        <input type="number" id="petalsExtentX" class="settingsInput" min="1" max="120" step="1" value="36" style="width:64px">
+        <input type="number" id="petalsExtentY" class="settingsInput" min="1" max="120" step="1" value="42" style="width:64px">
+        <input type="number" id="petalsExtentZ" class="settingsInput" min="1" max="120" step="1" value="32" style="width:64px">
+      </div>
+    </div>
+    <div id="persistentWeatherControls" class="hidden" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08)">
+      <div class="settingsRow">
+        <label for="weatherDensity">Density:</label>
+        <input type="number" id="weatherDensity" class="settingsInput" min="0.1" max="8" step="0.1" value="1.5">
+      </div>
+      <div class="settingsRow">
+        <label for="weatherSpeed">Speed:</label>
+        <input type="number" id="weatherSpeed" class="settingsInput" min="0" max="30" step="0.1" value="2">
+      </div>
+      <div class="settingsRow">
+        <label for="weatherOpacity">Opacity:</label>
+        <input type="number" id="weatherOpacity" class="settingsInput" min="0" max="1" step="0.05" value="0.85">
+      </div>
+      <div class="settingsRow">
+        <label for="weatherDrift">Drift:</label>
+        <input type="number" id="weatherDrift" class="settingsInput" min="0" max="4" step="0.01" value="0.4">
+      </div>
+      <div class="settingsRow">
+        <label>Weather Box XYZ:</label>
+        <input type="number" id="weatherExtentX" class="settingsInput" min="1" max="80" step="1" value="12" style="width:64px">
+        <input type="number" id="weatherExtentY" class="settingsInput" min="1" max="80" step="1" value="12" style="width:64px">
+        <input type="number" id="weatherExtentZ" class="settingsInput" min="1" max="80" step="1" value="12" style="width:64px">
+      </div>
+      <div class="settingsRow">
+        <label>Size Min/Max:</label>
+        <input type="number" id="weatherMinSize" class="settingsInput" min="0.001" max="0.1" step="0.001" value="0.006" style="width:72px">
+        <input type="number" id="weatherMaxSize" class="settingsInput" min="0.001" max="0.1" step="0.001" value="0.012" style="width:72px">
+      </div>
+      <div class="settingsRow">
+        <label for="weatherElongate">Elongate:</label>
+        <input type="number" id="weatherElongate" class="settingsInput" min="0.1" max="40" step="0.1" value="1">
+      </div>
+      <div class="settingsRow">
+        <label for="weatherUseFog">Use Fog:</label>
+        <input type="checkbox" id="weatherUseFog" class="settingsCheckbox" checked>
+      </div>
     </div>
   </fieldset>
   <fieldset class="effectsTrackFieldset effectsTrackAsset" style="border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px 12px;margin-bottom:10px;opacity:0.85">
@@ -97,7 +157,7 @@ const REVEAL_PANEL_HTML = (() => {
  * @returns 清理函数，调用后解除事件并移除创建的 DOM。
  */
 export function initRevealUI(global: Global): () => void {
-    const { events, state } = global;
+    const { events } = global;
 
     const container = document.getElementById('revealPanelContainer');
     if (!container) return () => {};
@@ -110,8 +170,8 @@ export function initRevealUI(global: Global): () => void {
         effectsDebugEl = document.createElement('pre');
         effectsDebugEl.id = 'effectsDebugStrip';
         effectsDebugEl.style.cssText =
-            'font-size:10px;opacity:0.88;max-height:140px;overflow:auto;margin:8px 0 0;padding:8px;'
-            + 'background:rgba(0,0,0,0.35);border-radius:6px;white-space:pre-wrap;word-break:break-all';
+            'font-size:10px;opacity:0.88;max-height:140px;overflow:auto;margin:8px 0 0;padding:8px;' +
+            'background:rgba(0,0,0,0.35);border-radius:6px;white-space:pre-wrap;word-break:break-all';
         effectsDebugEl.title = '?effectsDebug=1 — state.effectsRuntimeState + settings.effects';
         revealPanel.appendChild(effectsDebugEl);
         const tick = () => {
@@ -127,6 +187,25 @@ export function initRevealUI(global: Global): () => void {
     const revealType = container.querySelector('#revealType') as HTMLSelectElement | null;
     const persistentType = container.querySelector('#persistentType') as HTMLSelectElement | null;
     const persistentEnabled = container.querySelector('#persistentEnabled') as HTMLInputElement | null;
+    const persistentPetalsControls = container.querySelector('#persistentPetalsControls') as HTMLElement | null;
+    const persistentWeatherControls = container.querySelector('#persistentWeatherControls') as HTMLElement | null;
+    const petalsTextureUrl = container.querySelector('#petalsTextureUrl') as HTMLInputElement | null;
+    const petalsCount = container.querySelector('#petalsCount') as HTMLInputElement | null;
+    const petalsOpacity = container.querySelector('#petalsOpacity') as HTMLInputElement | null;
+    const petalsExtentX = container.querySelector('#petalsExtentX') as HTMLInputElement | null;
+    const petalsExtentY = container.querySelector('#petalsExtentY') as HTMLInputElement | null;
+    const petalsExtentZ = container.querySelector('#petalsExtentZ') as HTMLInputElement | null;
+    const weatherDensity = container.querySelector('#weatherDensity') as HTMLInputElement | null;
+    const weatherSpeed = container.querySelector('#weatherSpeed') as HTMLInputElement | null;
+    const weatherOpacity = container.querySelector('#weatherOpacity') as HTMLInputElement | null;
+    const weatherDrift = container.querySelector('#weatherDrift') as HTMLInputElement | null;
+    const weatherExtentX = container.querySelector('#weatherExtentX') as HTMLInputElement | null;
+    const weatherExtentY = container.querySelector('#weatherExtentY') as HTMLInputElement | null;
+    const weatherExtentZ = container.querySelector('#weatherExtentZ') as HTMLInputElement | null;
+    const weatherMinSize = container.querySelector('#weatherMinSize') as HTMLInputElement | null;
+    const weatherMaxSize = container.querySelector('#weatherMaxSize') as HTMLInputElement | null;
+    const weatherElongate = container.querySelector('#weatherElongate') as HTMLInputElement | null;
+    const weatherUseFog = container.querySelector('#weatherUseFog') as HTMLInputElement | null;
     const revealRestart = container.querySelector('#revealRestart');
     const totalDurationRow = container.querySelector('#totalDurationRow') as HTMLElement | null;
     const totalDuration = container.querySelector('#totalDuration') as HTMLInputElement | null;
@@ -200,6 +279,148 @@ export function initRevealUI(global: Global): () => void {
         return global.settings.effects?.persistent?.enabled ?? true;
     };
 
+    let updateRevealControls = () => {};
+
+    const getDefaultPersistentEffectParams = (type: string): Record<string, unknown> => {
+        if (type === 'falling-petals') {
+            return {
+                petalTextureUrl: '/textures/petal.png',
+                petalParticleCount: 3600,
+                opacity: 0.95,
+                extents: [36, 42, 32]
+            };
+        }
+        if (type === 'falling-rain') {
+            return {
+                density: 1.5,
+                speed: 10,
+                opacity: 0.65,
+                drift: 0.02,
+                extents: [12, 12, 12],
+                particleMinSize: 0.003,
+                particleMaxSize: 0.003,
+                elongate: 20,
+                useFog: true
+            };
+        }
+        if (type === 'falling-snow') {
+            return {
+                density: 1.5,
+                speed: 2,
+                opacity: 0.85,
+                drift: 0.4,
+                extents: [12, 12, 12],
+                particleMinSize: 0.006,
+                particleMaxSize: 0.012,
+                elongate: 1,
+                useFog: true
+            };
+        }
+        return {};
+    };
+
+    const getPersistentEffectParams = (): Record<string, unknown> => {
+        const pack = readPersistentPack();
+        const effectParams = pack?.effectParams;
+        return effectParams && typeof effectParams === 'object' ? effectParams as Record<string, unknown> : {};
+    };
+
+    const patchPersistentEffectParams = (effectParams: Record<string, unknown>) => {
+        routeEffectsCommand('EFFECT_PARAMS_PATCH', {
+            effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+            params: { effectParams }
+        });
+        pushEditHistorySafe();
+    };
+
+    const readNumberInput = (input: HTMLInputElement | null, fallback: number): number => {
+        if (!input) return fallback;
+        const value = Number.parseFloat(input.value);
+        return Number.isFinite(value) ? value : fallback;
+    };
+
+    const writeNumberInput = (input: HTMLInputElement | null, value: unknown, fallback: number) => {
+        if (!input) return;
+        input.value = (typeof value === 'number' && Number.isFinite(value) ? value : fallback).toString();
+    };
+
+    const writeTextInput = (input: HTMLInputElement | null, value: unknown, fallback: string) => {
+        if (!input) return;
+        input.value = typeof value === 'string' ? value : fallback;
+    };
+
+    const readTriple = (
+        x: HTMLInputElement | null,
+        y: HTMLInputElement | null,
+        z: HTMLInputElement | null,
+        fallback: [number, number, number]
+    ): [number, number, number] => [
+        readNumberInput(x, fallback[0]),
+        readNumberInput(y, fallback[1]),
+        readNumberInput(z, fallback[2])
+    ];
+
+    const writeTriple = (
+        inputs: [HTMLInputElement | null, HTMLInputElement | null, HTMLInputElement | null],
+        value: unknown,
+        fallback: [number, number, number]
+    ) => {
+        const triple = Array.isArray(value) && value.length >= 3 ? value : fallback;
+        writeNumberInput(inputs[0], triple[0], fallback[0]);
+        writeNumberInput(inputs[1], triple[1], fallback[1]);
+        writeNumberInput(inputs[2], triple[2], fallback[2]);
+    };
+
+    const updatePersistentParamControls = () => {
+        const pType = getPersistentSelection();
+        const params = getPersistentEffectParams();
+        persistentPetalsControls?.classList[pType === 'falling-petals' ? 'remove' : 'add']('hidden');
+        const showWeatherControls = pType === 'falling-rain' || pType === 'falling-snow';
+        persistentWeatherControls?.classList[showWeatherControls ? 'remove' : 'add']('hidden');
+
+        writeTextInput(petalsTextureUrl, params.petalTextureUrl, '/textures/petal.png');
+        writeNumberInput(petalsCount, params.petalParticleCount, 3600);
+        writeNumberInput(petalsOpacity, params.opacity, 0.95);
+        writeTriple([petalsExtentX, petalsExtentY, petalsExtentZ], params.extents, [36, 42, 32]);
+
+        const isRain = pType === 'falling-rain';
+        writeNumberInput(weatherDensity, params.density, 1.5);
+        writeNumberInput(weatherSpeed, params.speed, isRain ? 10 : 2);
+        writeNumberInput(weatherOpacity, params.opacity, isRain ? 0.65 : 0.85);
+        writeNumberInput(weatherDrift, params.drift, isRain ? 0.02 : 0.4);
+        writeTriple([weatherExtentX, weatherExtentY, weatherExtentZ], params.extents, [12, 12, 12]);
+        writeNumberInput(weatherMinSize, params.particleMinSize, isRain ? 0.003 : 0.006);
+        writeNumberInput(weatherMaxSize, params.particleMaxSize, isRain ? 0.003 : 0.012);
+        writeNumberInput(weatherElongate, params.elongate, isRain ? 20 : 1);
+        if (weatherUseFog) {
+            weatherUseFog.checked = typeof params.useFog === 'boolean' ? params.useFog : true;
+        }
+    };
+
+    const onPetalsParamsChange = () => {
+        patchPersistentEffectParams({
+            petalTextureUrl: petalsTextureUrl?.value || '/textures/petal.png',
+            petalParticleCount: readNumberInput(petalsCount, 3600),
+            opacity: readNumberInput(petalsOpacity, 0.95),
+            extents: readTriple(petalsExtentX, petalsExtentY, petalsExtentZ, [36, 42, 32])
+        });
+    };
+
+    const onWeatherParamsChange = () => {
+        const isRain = getPersistentSelection() === 'falling-rain';
+        patchPersistentEffectParams({
+            density: readNumberInput(weatherDensity, 1.5),
+            speed: readNumberInput(weatherSpeed, isRain ? 10 : 2),
+            opacity: readNumberInput(weatherOpacity, isRain ? 0.65 : 0.85),
+            drift: readNumberInput(weatherDrift, isRain ? 0.02 : 0.4),
+            extents: readTriple(weatherExtentX, weatherExtentY, weatherExtentZ, [12, 12, 12]),
+            particleMinSize: readNumberInput(weatherMinSize, isRain ? 0.003 : 0.006),
+            particleMaxSize: readNumberInput(weatherMaxSize, isRain ? 0.003 : 0.012),
+            elongate: readNumberInput(weatherElongate, isRain ? 20 : 1),
+            useFog: weatherUseFog?.checked ?? true
+        });
+    };
+
     const onRevealTypeChange = (event: Event) => {
         const target = (event.target as HTMLSelectElement);
         const type = target.value as RevealType;
@@ -217,7 +438,8 @@ export function initRevealUI(global: Global): () => void {
             effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
             params: {
                 type: type === 'none' ? 'none' : type,
-                enabled: type !== 'none'
+                enabled: type !== 'none',
+                effectParams: getDefaultPersistentEffectParams(type)
             }
         });
         pushEditHistorySafe();
@@ -310,7 +532,7 @@ export function initRevealUI(global: Global): () => void {
         queueMicrotask(() => updateRevealControls());
     };
 
-    const updateRevealControls = () => {
+    updateRevealControls = () => {
         revealPanel.classList.remove('hidden');
         if (revealType) {
             const revealTrackType = (readRevealParams(global.settings)?.type ?? 'none') as string;
@@ -335,10 +557,11 @@ export function initRevealUI(global: Global): () => void {
                     revealTrackType !== 'none' &&
                     !isPersistentVfx(revealTrackType);
                 persistentEnabled.disabled = oneShotRevealPlaying;
-                persistentEnabled.title = oneShotRevealPlaying
-                    ? 'reveal 播放中不可切换，待 revealComplete 后可操作'
-                    : '';
+                persistentEnabled.title = oneShotRevealPlaying ?
+                    'reveal 播放中不可切换，待 revealComplete 后可操作' :
+                    '';
             }
+            updatePersistentParamControls();
             const showTotalDuration = revealTrackType !== 'none' && isRevealType(revealTrackType);
             if (totalDurationRow) {
                 if (showTotalDuration) {
@@ -393,6 +616,23 @@ export function initRevealUI(global: Global): () => void {
     revealType?.addEventListener('change', onRevealTypeChange);
     persistentType?.addEventListener('change', onPersistentTypeChange);
     persistentEnabled?.addEventListener('change', onPersistentEnabledChange);
+    petalsTextureUrl?.addEventListener('change', onPetalsParamsChange);
+    petalsCount?.addEventListener('change', onPetalsParamsChange);
+    petalsOpacity?.addEventListener('change', onPetalsParamsChange);
+    petalsExtentX?.addEventListener('change', onPetalsParamsChange);
+    petalsExtentY?.addEventListener('change', onPetalsParamsChange);
+    petalsExtentZ?.addEventListener('change', onPetalsParamsChange);
+    weatherDensity?.addEventListener('change', onWeatherParamsChange);
+    weatherSpeed?.addEventListener('change', onWeatherParamsChange);
+    weatherOpacity?.addEventListener('change', onWeatherParamsChange);
+    weatherDrift?.addEventListener('change', onWeatherParamsChange);
+    weatherExtentX?.addEventListener('change', onWeatherParamsChange);
+    weatherExtentY?.addEventListener('change', onWeatherParamsChange);
+    weatherExtentZ?.addEventListener('change', onWeatherParamsChange);
+    weatherMinSize?.addEventListener('change', onWeatherParamsChange);
+    weatherMaxSize?.addEventListener('change', onWeatherParamsChange);
+    weatherElongate?.addEventListener('change', onWeatherParamsChange);
+    weatherUseFog?.addEventListener('change', onWeatherParamsChange);
     totalDuration?.addEventListener('change', onTotalDurationChange);
     revealRestart?.addEventListener('click', onRevealRestartClick);
     effectTimeline?.addEventListener('pointerdown', onEffectTimelinePointerDown);
@@ -417,6 +657,23 @@ export function initRevealUI(global: Global): () => void {
         revealType?.removeEventListener('change', onRevealTypeChange);
         persistentType?.removeEventListener('change', onPersistentTypeChange);
         persistentEnabled?.removeEventListener('change', onPersistentEnabledChange);
+        petalsTextureUrl?.removeEventListener('change', onPetalsParamsChange);
+        petalsCount?.removeEventListener('change', onPetalsParamsChange);
+        petalsOpacity?.removeEventListener('change', onPetalsParamsChange);
+        petalsExtentX?.removeEventListener('change', onPetalsParamsChange);
+        petalsExtentY?.removeEventListener('change', onPetalsParamsChange);
+        petalsExtentZ?.removeEventListener('change', onPetalsParamsChange);
+        weatherDensity?.removeEventListener('change', onWeatherParamsChange);
+        weatherSpeed?.removeEventListener('change', onWeatherParamsChange);
+        weatherOpacity?.removeEventListener('change', onWeatherParamsChange);
+        weatherDrift?.removeEventListener('change', onWeatherParamsChange);
+        weatherExtentX?.removeEventListener('change', onWeatherParamsChange);
+        weatherExtentY?.removeEventListener('change', onWeatherParamsChange);
+        weatherExtentZ?.removeEventListener('change', onWeatherParamsChange);
+        weatherMinSize?.removeEventListener('change', onWeatherParamsChange);
+        weatherMaxSize?.removeEventListener('change', onWeatherParamsChange);
+        weatherElongate?.removeEventListener('change', onWeatherParamsChange);
+        weatherUseFog?.removeEventListener('change', onWeatherParamsChange);
         totalDuration?.removeEventListener('change', onTotalDurationChange);
         revealRestart?.removeEventListener('click', onRevealRestartClick);
         effectTimeline?.removeEventListener('pointerdown', onEffectTimelinePointerDown);

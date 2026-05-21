@@ -166,167 +166,7 @@ const resolveMorphSource = (source: MorphSource, index: number) => {
     };
 };
 
-interface SogImage {
-    width: number;
-    height: number;
-    rgba: Uint8ClampedArray;
-}
-
-interface SogMeta {
-    version: number;
-    count: number;
-    means: { mins: number[]; maxs: number[]; files: string[] };
-    scales: { codebook: number[]; files: string[] };
-    quats: { files: string[] };
-    sh0: { codebook: number[]; files: string[] };
-    shN?: { count: number; bands: number; codebook: number[]; files: string[] };
-}
-
 const isSogFilename = (filename: string) => filename.toLowerCase().split('?')[0].endsWith('.sog');
-
-const normalizeSogPath = (path: string) => path.replace(/\\/g, '/').replace(/^\/+/, '');
-
-const findSogFile = (files: Map<string, Uint8Array>, filename: string) => {
-    const normalized = normalizeSogPath(filename);
-    const direct = files.get(normalized.toLowerCase());
-    if (direct) {
-        return direct;
-    }
-
-    const suffix = `/${normalized.toLowerCase()}`;
-    for (const [key, bytes] of files) {
-        if (key.endsWith(suffix) || key.split('/').pop() === normalized.toLowerCase()) {
-            return bytes;
-        }
-    }
-
-    throw new Error(`SOG archive is missing '${filename}'`);
-};
-
-const decodeImageRgba = async (filename: string, bytes: Uint8Array): Promise<SogImage> => {
-    const blob = new Blob([bytes], { type: filename.toLowerCase().endsWith('.webp') ? 'image/webp' : 'image/png' });
-    const bitmap = await createImageBitmap(blob);
-    try {
-        const canvas = typeof OffscreenCanvas !== 'undefined'
-            ? new OffscreenCanvas(bitmap.width, bitmap.height)
-            : Object.assign(document.createElement('canvas'), { width: bitmap.width, height: bitmap.height });
-        const ctx = canvas.getContext('2d', { willReadFrequently: true } as any);
-        if (!ctx) {
-            throw new Error(`Unable to create 2D canvas while decoding '${filename}'`);
-        }
-        ctx.drawImage(bitmap, 0, 0);
-        const image = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
-        return { width: bitmap.width, height: bitmap.height, rgba: image.data };
-    } finally {
-        bitmap.close?.();
-    }
-};
-
-const imageByte = (image: SogImage, index: number, channel: number) => image.rgba[index * 4 + channel];
-
-const unlogSogPosition = (value: number) => Math.sign(value) * (Math.exp(Math.abs(value)) - 1);
-
-const logit = (alpha: number) => {
-    const a = clamp(alpha, 1e-6, 1 - 1e-6);
-    return Math.log(a / (1 - a));
-};
-
-const toSmallestThreeComponent = (value: number) => (value / 255 - 0.5) * 2 / Math.SQRT2;
-
-const shBandsToRestCount = (bands: number) => {
-    if (bands <= 0) {
-        return 0;
-    }
-    return normalizeRestPropCount((bands + 1) * (bands + 1) * 3 - 3);
-};
-
-const readSogArchive = async (url: string) => {
-    const response = await fetch(url);
-    if (!response.ok) {
-        throw new Error(`Failed to fetch SOG '${url}': ${response.status} ${response.statusText}`);
-    }
-
-    const archiveBytes = new Uint8Array(await response.arrayBuffer());
-    const { unzipSync } = await import('fflate');
-    const entries = unzipSync(archiveBytes);
-    const files = new Map<string, Uint8Array>();
-    for (const [name, bytes] of Object.entries(entries)) {
-        files.set(normalizeSogPath(name).toLowerCase(), bytes as Uint8Array);
-    }
-
-    return files;
-};
-
-const loadSogAsGSplatData = async (url: string): Promise<GSplatData> => {
-    const files = await readSogArchive(url);
-    const metaText = new TextDecoder().decode(findSogFile(files, 'meta.json'));
-    const meta = JSON.parse(metaText) as SogMeta;
-
-    if (meta.version !== 2) {
-        throw new Error(`Unsupported SOG version ${meta.version}; only version 2 is supported`);
-    }
-    if (!meta.count || meta.count <= 0) {
-        throw new Error('SOG contains no splats');
-    }
-
-    const decodeNamedImage = async (filename: string) => decodeImageRgba(filename, findSogFile(files, filename));
-    const meansLower = await decodeNamedImage(meta.means.files[0]);
-    const meansUpper = await decodeNamedImage(meta.means.files[1]);
-    const scales = await decodeNamedImage(meta.scales.files[0]);
-    const quats = await decodeNamedImage(meta.quats.files[0]);
-    const sh0 = await decodeNamedImage(meta.sh0.files[0]);
-    const restCount = shBandsToRestCount(meta.shN?.files?.length ? meta.shN.bands : 0);
-    const restCoeffCount = restCount / 3;
-    const shNCentroids = restCount > 0 ? await decodeNamedImage(meta.shN!.files[0]) : null;
-    const shNLabels = restCount > 0 ? await decodeNamedImage(meta.shN!.files[1]) : null;
-    const { data, arrays } = createMutableGSplatData(meta.count, restCount);
-
-    for (let i = 0; i < meta.count; i++) {
-        const x = imageByte(meansLower, i, 0) | (imageByte(meansUpper, i, 0) << 8);
-        const y = imageByte(meansLower, i, 1) | (imageByte(meansUpper, i, 1) << 8);
-        const z = imageByte(meansLower, i, 2) | (imageByte(meansUpper, i, 2) << 8);
-
-        arrays.x[i] = unlogSogPosition(meta.means.mins[0] + (meta.means.maxs[0] - meta.means.mins[0]) * (x / 65535));
-        arrays.y[i] = unlogSogPosition(meta.means.mins[1] + (meta.means.maxs[1] - meta.means.mins[1]) * (y / 65535));
-        arrays.z[i] = unlogSogPosition(meta.means.mins[2] + (meta.means.maxs[2] - meta.means.mins[2]) * (z / 65535));
-
-        arrays.scale0[i] = meta.scales.codebook[imageByte(scales, i, 0)];
-        arrays.scale1[i] = meta.scales.codebook[imageByte(scales, i, 1)];
-        arrays.scale2[i] = meta.scales.codebook[imageByte(scales, i, 2)];
-
-        const qa = toSmallestThreeComponent(imageByte(quats, i, 0));
-        const qb = toSmallestThreeComponent(imageByte(quats, i, 1));
-        const qc = toSmallestThreeComponent(imageByte(quats, i, 2));
-        const mode = imageByte(quats, i, 3) - 252;
-        const qd = Math.sqrt(Math.max(0, 1 - (qa * qa + qb * qb + qc * qc)));
-        if (mode === 0) {
-            arrays.rot1[i] = qd; arrays.rot2[i] = qa; arrays.rot3[i] = qb; arrays.rot0[i] = qc;
-        } else if (mode === 1) {
-            arrays.rot1[i] = qa; arrays.rot2[i] = qd; arrays.rot3[i] = qb; arrays.rot0[i] = qc;
-        } else if (mode === 2) {
-            arrays.rot1[i] = qa; arrays.rot2[i] = qb; arrays.rot3[i] = qd; arrays.rot0[i] = qc;
-        } else {
-            arrays.rot1[i] = qa; arrays.rot2[i] = qb; arrays.rot3[i] = qc; arrays.rot0[i] = qd;
-        }
-
-        arrays.fdc0[i] = meta.sh0.codebook[imageByte(sh0, i, 0)];
-        arrays.fdc1[i] = meta.sh0.codebook[imageByte(sh0, i, 1)];
-        arrays.fdc2[i] = meta.sh0.codebook[imageByte(sh0, i, 2)];
-        arrays.opacity[i] = logit(imageByte(sh0, i, 3) / 255);
-
-        if (restCount > 0 && shNCentroids && shNLabels && meta.shN) {
-            const label = imageByte(shNLabels, i, 0) | (imageByte(shNLabels, i, 1) << 8);
-            for (let coeff = 0; coeff < restCoeffCount; coeff++) {
-                const centroidIndex = (label % 64) * restCoeffCount + coeff + Math.floor(label / 64) * shNCentroids.width;
-                arrays.rest[coeff][i] = meta.shN.codebook[imageByte(shNCentroids, centroidIndex, 0)];
-                arrays.rest[coeff + restCoeffCount][i] = meta.shN.codebook[imageByte(shNCentroids, centroidIndex, 1)];
-                arrays.rest[coeff + restCoeffCount * 2][i] = meta.shN.codebook[imageByte(shNCentroids, centroidIndex, 2)];
-            }
-        }
-    }
-
-    return data;
-};
 
 const getRequiredProp = (data: GSplatData, name: string) => {
     const prop = data.getProp(name) as ArrayLike<number> | null;
@@ -1375,51 +1215,22 @@ const loadMorphModel = async (
     options: GsplatMorphOptions
 ) => {
     const resolved = resolveMorphSource(source, index);
-
-    if (isSogFilename(resolved.filename) || isSogFilename(resolved.url)) {
-        try {
-            const data = await loadSogAsGSplatData(resolved.url);
-            const splats = readSplatArrays(data);
-            preprocessModel(splats, options);
-
-            const resource = new GSplatResource(app.graphicsDevice, data);
-            const asset = new Asset(resolved.filename, 'gsplat', {
-                url: resolved.url,
-                filename: resolved.filename
-            });
-            asset.resource = resource;
-            asset.loaded = true;
-
-            if (options.retainSourceAssets) {
-                app.assets.add(asset);
-                asset.fire('load', asset);
-                return {
-                    name: resolved.filename,
-                    asset,
-                    resource,
-                    data,
-                    splats
-                } satisfies LoadedMorphModel;
-            }
-
-            resource.destroy?.();
-            return {
-                name: resolved.filename,
-                splats
-            } satisfies LoadedMorphModel;
-        } finally {
-            if (resolved.cleanupUrl) {
-                URL.revokeObjectURL(resolved.cleanupUrl);
-            }
-        }
-    }
+    const sogSource = isSogFilename(resolved.filename) || isSogFilename(resolved.url);
+    const fileContents = typeof source !== 'string' && source.contents
+        ? await source.contents.arrayBuffer()
+        : undefined;
 
     const asset = new Asset(resolved.filename, 'gsplat', {
         url: resolved.url,
-        filename: resolved.filename
+        filename: resolved.filename,
+        ...(fileContents ? { contents: fileContents } : {})
     }, {
         reorder: false
     });
+
+    if (sogSource) {
+        asset.data = { decompress: true };
+    }
 
     app.assets.add(asset);
 
@@ -1437,7 +1248,11 @@ const loadMorphModel = async (
 
         const data = resource.gsplatData as GSplatData | undefined;
         if (!data) {
-            throw new Error(`加载 ${resolved.filename} 失败: gsplatData 不存在`);
+            throw new Error(
+                sogSource
+                    ? `加载 ${resolved.filename} 失败: SOG 需解压为 GSplatData（请确认 PlayCanvas 支持 asset.data.decompress）`
+                    : `加载 ${resolved.filename} 失败: gsplatData 不存在`
+            );
         }
 
         const splats = readSplatArrays(data);
@@ -1985,7 +1800,7 @@ export const loadGsplatMorphSequence = async (
     }
 
     if (clippedSources.length < 2) {
-        throw new Error('Gsplat morph 至少需要 2 个 PLY 文件。');
+        throw new Error('Gsplat morph 至少需要 2 个关键帧文件（.ply / .sog 等）。');
     }
 
     const models = await Promise.all(
