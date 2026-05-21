@@ -371,6 +371,10 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         uploadedAssets: [],
         scenePlacedEntities: [],
         selectedSceneEntityId: null,
+        /** 物体特效面板子类型（internal 场景列表 morph 多选） */
+        assetEffectUiSubtype: null,
+        /** 当前配置槽 GS 变形关键帧 entity id 列表 */
+        assetEffectsMorphKeyframeIds: [] as string[],
         cameraControlsEnabled: true,
 
         // 标注相关状态
@@ -575,10 +579,10 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     //     greedyMaxCandidatesPerPoint: 48
     // });
     // 隐藏主场景 gsplat：必须在 firstFrame 之后，否则 Viewer 等不到 sort/frame:ready，加载会卡在 100%
-    events.once('firstFrame', () => {
-        mainGsplatEntity.enabled = false;
-        app.renderNextFrame = true;
-    });
+    // events.once('firstFrame', () => {
+    //     mainGsplatEntity.enabled = false;
+    //     app.renderNextFrame = true;
+    // });
     // // 方便你在浏览器控制台里手动调试
     // (window as any).morph = morph;
 

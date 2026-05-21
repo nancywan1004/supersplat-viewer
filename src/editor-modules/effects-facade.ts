@@ -1,4 +1,10 @@
 import {
+    applyAssetEffectParamsPatch,
+    applyAssetEffectStart,
+    applyAssetEffectStop,
+    isAssetEffectProtocolEnvelope
+} from './protocol-adapters/asset-effects-protocol-adapter';
+import {
     applyGsplatRevealParamsPatch,
     applyGsplatPersistentParamsPatch,
     isEffectProtocolEnvelope,
@@ -7,9 +13,18 @@ import {
     SCENE_GSPLAT_REVEAL_EFFECT_ID,
     SCENE_GSPLAT_PERSISTENT_EFFECT_ID
 } from './protocol-adapters/effects-protocol-adapter';
+import { resolveAssetEffectType } from '../vfx/effects-runtime/effect-types';
+import { normalizeAssetEffectEnvelope } from './protocol-adapters/asset-effects-protocol-adapter';
 import { readRevealParams } from '../settings-serialize/effects-sync';
 import { isPersistentVfx } from '../vfx/effects-runtime/reveal/reveal-policy';
-import type { Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
+import type {
+    Global,
+    ModuleCommand,
+    ModuleContext,
+    ModuleFacade,
+    ModuleLifecycleReason,
+    SelectionSource
+} from '../types';
 
 /**
  * 与 `message-bridge` 中 `dispatchEffects` 同路径：经 `CommandRegistry` → `EffectsFacade.handleCommand`。
@@ -51,6 +66,11 @@ class EffectsFacade implements ModuleFacade {
         switch (command.type) {
         case 'EFFECT_PARAMS_PATCH': {
             const raw = command.payload;
+            if (isAssetEffectProtocolEnvelope(raw)) {
+                if (!resolveAssetEffectType(raw.effectId, raw.params)) break;
+                applyAssetEffectParamsPatch(global, normalizeAssetEffectEnvelope(raw));
+                break;
+            }
             if (!isEffectProtocolEnvelope(raw)) break;
             const params = (raw as { params?: unknown }).params;
             if (typeof params !== 'object' || params === null) break;
@@ -64,6 +84,20 @@ class EffectsFacade implements ModuleFacade {
             } else {
                 break;
             }
+            break;
+        }
+        case 'EFFECT_START': {
+            const raw = command.payload;
+            if (!isAssetEffectProtocolEnvelope(raw)) break;
+            if (!resolveAssetEffectType(raw.effectId, raw.params)) break;
+            applyAssetEffectStart(global, normalizeAssetEffectEnvelope(raw));
+            break;
+        }
+        case 'EFFECT_STOP': {
+            const raw = command.payload;
+            if (!isAssetEffectProtocolEnvelope(raw)) break;
+            if (!resolveAssetEffectType(raw.effectId, raw.params)) break;
+            applyAssetEffectStop(global, normalizeAssetEffectEnvelope(raw));
             break;
         }
         case 'EFFECT_TOGGLE': {
@@ -95,13 +129,49 @@ class EffectsFacade implements ModuleFacade {
     selectById(_ctx: ModuleContext, _id: string | null, _source: SelectionSource): void {}
 }
 
+/** 左侧「物体特效」模块门面：命令与场景特效共用 EffectsFacade，生命周期独立注册便于编排器切换。 */
+class AssetEffectsFacade implements ModuleFacade {
+    readonly module = 'assetEffects' as const;
+
+    constructor(private readonly _sceneEffects: EffectsFacade) {}
+
+    onEnter(ctx: ModuleContext): void {
+        this._sceneEffects.onEnter(ctx);
+        ctx.events.fire('assetEffectsFacade:enter');
+    }
+
+    onExit(ctx: ModuleContext, reason?: ModuleLifecycleReason): void {
+        this._sceneEffects.onExit(ctx, reason);
+        ctx.events.fire('assetEffectsFacade:exit');
+    }
+
+    onEditModeExit(ctx: ModuleContext): void {
+        this._sceneEffects.onEditModeExit(ctx);
+    }
+
+    onPreviewModeChanged(ctx: ModuleContext, previewMode: boolean): void {
+        this._sceneEffects.onPreviewModeChanged?.(ctx, previewMode);
+    }
+
+    handleCommand(ctx: ModuleContext, command: ModuleCommand): void {
+        this._sceneEffects.handleCommand(ctx, command);
+    }
+
+    selectById(ctx: ModuleContext, id: string | null, source: SelectionSource): void {
+        this._sceneEffects.selectById(ctx, id, source);
+    }
+}
+
 const initEffectsFacade = (global: Global): ModuleFacade => {
     const facade = new EffectsFacade();
+    const assetEffectsFacade = new AssetEffectsFacade(facade);
     const orchestrator = (global as any).__moduleOrchestrator as { registerFacade: (f: ModuleFacade) => void } | undefined;
     orchestrator?.registerFacade(facade);
+    orchestrator?.registerFacade(assetEffectsFacade);
     (global as any).__effectsFacade = facade;
+    (global as any).__assetEffectsFacade = assetEffectsFacade;
     (global as any).__commandRegistry?.register?.('effects', facade);
     return facade;
 };
 
-export { EffectsFacade, initEffectsFacade, dispatchEffectsModuleCommand };
+export { EffectsFacade, AssetEffectsFacade, initEffectsFacade, dispatchEffectsModuleCommand };

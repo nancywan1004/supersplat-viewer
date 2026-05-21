@@ -198,8 +198,18 @@ type EffectsPersistentTrack = {
     paramsById: Record<string, Record<string, unknown>>;
 };
 
+/** 单物体实例配置（与 scene 包内字段同形：`type` / `autoStart` / `effectParams`） */
+type EffectsAssetInstance = {
+    type: string;
+    enabled?: boolean;
+    autoStart?: boolean;
+    effectParams?: Record<string, unknown>;
+};
+
 type EffectsAssetTrack = {
+    activeEffectId: string;
     defaultParamsById: Record<string, Record<string, unknown>>;
+    instancesByTargetId?: Record<string, EffectsAssetInstance>;
 };
 
 type EffectsSettings = {
@@ -208,4 +218,4 @@ type EffectsSettings = {
     asset: EffectsAssetTrack;
 };
 
-export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsAssetTrack };
+export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsAssetTrack, EffectsAssetInstance };

@@ -23,6 +23,7 @@ import {
 } from '../edit-history';
 import { showExitEditConfirmModal } from './components/exit-edit-confirm-ui';
 import { initRevealUI } from './components/effects-ui';
+import { initAssetEffectsUI } from './components/asset-effects-ui';
 import { initVideoExportUI } from './components/video-export-ui';
 import { initLightingUI } from './components/lighting-ui';
 import { initPostEffectUI } from './components/environment-ui';
@@ -1069,6 +1070,7 @@ const initUI = (global: Global) => {
     // Reveal / 场景特效、Lighting、PostEffect、VideoExport、Annotation 由独立组件管理，挂载到 edit-right-toolbar 提供的容器（showEditUI 为 false 时不挂载）
     if (config.showEditUI !== false) {
         initRevealUI(global);
+        initAssetEffectsUI(global);
         initVideoExportUI(global);
         initLightingUI(global);
         initPostEffectUI(global);

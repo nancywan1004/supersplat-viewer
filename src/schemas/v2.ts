@@ -307,8 +307,22 @@ const validateV2 = (data: unknown): ExperienceSettings => {
             throw new Error('settings.effects.persistent.paramsById must be an object');
         }
         const asset = assertObject(ef.asset, 'settings.effects.asset');
+        assertString(asset.activeEffectId, 'settings.effects.asset.activeEffectId');
         if (typeof asset.defaultParamsById !== 'object' || asset.defaultParamsById === null) {
             throw new Error('settings.effects.asset.defaultParamsById must be an object');
+        }
+        if (asset.instancesByTargetId !== undefined) {
+            if (typeof asset.instancesByTargetId !== 'object' || asset.instancesByTargetId === null) {
+                throw new Error('settings.effects.asset.instancesByTargetId must be an object');
+            }
+            for (const [tid, inst] of Object.entries(asset.instancesByTargetId as Record<string, unknown>)) {
+                const o = assertObject(inst, `settings.effects.asset.instancesByTargetId[${tid}]`);
+                const typeKey = typeof o.type === 'string' ? 'type' : typeof o.effectId === 'string' ? 'effectId' : null;
+                if (!typeKey) {
+                    throw new Error(`settings.effects.asset.instancesByTargetId[${tid}] must have type or effectId`);
+                }
+                assertString(o[typeKey], `settings.effects.asset.instancesByTargetId[${tid}].${typeKey}`);
+            }
         }
     }
 

@@ -3,19 +3,22 @@ import type { Entity, EventHandler, AppBase, Asset } from 'playcanvas';
 import type { ExperienceSettings } from './settings';
 import {
     type AssetEffectRuntimeStatus,
+    type AssetEffectType,
     type RevealEffectRuntimeStatus,
     type PersistentEffectRuntimeStatus,
+    ASSET_EFFECT_TYPE_VALUES,
     PERSISTENT_EFFECT_TYPE_VALUES,
     REVEAL_EFFECT_TYPE_VALUES
 } from './vfx/effects-runtime/effect-types';
 
-export { PERSISTENT_EFFECT_TYPE_VALUES, REVEAL_EFFECT_TYPE_VALUES };
+export { ASSET_EFFECT_TYPE_VALUES, PERSISTENT_EFFECT_TYPE_VALUES, REVEAL_EFFECT_TYPE_VALUES };
+export type { AssetEffectType } from './vfx/effects-runtime/effect-types';
 
 /** 一次性 reveal 类型（含 none） */
 export type RevealEffectType = 'none' | (typeof REVEAL_EFFECT_TYPE_VALUES)[number];
 
 /** 可持续 persistent 类型 */
-export type PersistentEffectType = 'none' |(typeof PERSISTENT_EFFECT_TYPE_VALUES)[number];
+export type PersistentEffectType = 'none' | (typeof PERSISTENT_EFFECT_TYPE_VALUES)[number];
 
 /**
  * 与 `settings.effects` 对应的运行态快照（不入库）；由导入/快照与 reveal 管线同步更新。
@@ -38,7 +41,10 @@ export type EffectsRuntimeState = {
         /** 可持续轨状态真源；`inactive` 表示未激活 */
         status: PersistentEffectRuntimeStatus;
     };
-    asset: { instances: Record<string, { effectId: string; status: AssetEffectRuntimeStatus }> };
+    asset: {
+        activeEffectId: string;
+        instances: Record<string, { activeType?: AssetEffectType; status: AssetEffectRuntimeStatus }>;
+    };
     lastError?: { code: string; message: string; effectId?: string; command?: string };
 };
 
@@ -80,7 +86,7 @@ type CameraMode = 'orbit' | 'anim' | 'fly' | 'walk';
 type InputMode = 'desktop' | 'touch';
 
 /** 编辑模式左侧工具箱当前选中的模块 */
-type EditLeftModule = 'gs' | 'asset' | 'annotation' | 'environment' | 'camera' | 'effects';
+type EditLeftModule = 'gs' | 'asset' | 'annotation' | 'environment' | 'camera' | 'effects' | 'assetEffects';
 
 /** 资产变换模式（移动/旋转/缩放） */
 type AssetTransformMode = 'move' | 'rotate' | 'scale';
@@ -209,6 +215,10 @@ type State = {
     scenePlacedEntities?: ScenePlacedItem[];
     /** 当前选中的场景实体 id（用于列表高亮、Gizmo、复制删除；实体通过 getSelectedSceneEntity(state) 获取） */
     selectedSceneEntityId?: string | null;
+    /** 物体特效面板当前子类型（供场景列表 GS 变形关键帧多选） */
+    assetEffectUiSubtype?: string | null;
+    /** 当前配置槽的 GS 变形关键帧 scene entity id 序列（与 settings.effects.asset 同步） */
+    assetEffectsMorphKeyframeIds?: string[];
     /** 相机输入是否启用（用于与 Gizmo 交互互斥） */
     cameraControlsEnabled?: boolean;
     /** 当前选中的标注 ID */

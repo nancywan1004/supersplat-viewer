@@ -9,7 +9,15 @@ import type { LegacyRevealEffect } from '../schemas/v2-custom';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../schemas/v2-custom';
 import type { RevealEffectRuntimeStatus, PersistentEffectRuntimeStatus } from '../vfx/effects-runtime/effect-types';
 import type { EffectsRuntimeState, PersistentEffectType, RevealEffectType, State } from '../types';
-import { SCENE_GSPLAT_PERSISTENT_EFFECT_ID, SCENE_GSPLAT_REVEAL_EFFECT_ID } from '../vfx/effects-runtime/effect-types';
+import {
+    ASSET_EFFECT_TYPES,
+    ASSET_GSPLAT_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+    SCENE_GSPLAT_REVEAL_EFFECT_ID,
+    defaultAssetEffectType,
+    type AssetEffectType
+} from '../vfx/effects-runtime/effect-types';
+import type { EffectsAssetInstance } from '../schemas/v2-custom';
 import { hasRevealEffectFromSettings, isPersistentVfx } from '../vfx/effects-runtime/reveal/reveal-policy';
 import { DEFAULT_EFFECTS } from './settings-serialize-configs';
 import { ensureRevealEffect } from './settings-serialize-helper';
@@ -47,12 +55,193 @@ export function ensureEffectsSettings(settings: ExperienceSettings): NonNullable
         e.persistent.enabled = !!(t && isPersistentVfx(t));
     }
     if (!e.asset || typeof e.asset !== 'object') {
-        e.asset = { defaultParamsById: {} };
+        e.asset = { activeEffectId: ASSET_GSPLAT_EFFECT_ID, defaultParamsById: {}, instancesByTargetId: {} };
     }
+    e.asset.activeEffectId = ASSET_GSPLAT_EFFECT_ID;
     if (!e.asset.defaultParamsById || typeof e.asset.defaultParamsById !== 'object') {
         e.asset.defaultParamsById = {};
     }
+    if (!e.asset.instancesByTargetId || typeof e.asset.instancesByTargetId !== 'object') {
+        e.asset.instancesByTargetId = {};
+    }
     return e;
+}
+
+function parseAssetInstanceType(raw: Record<string, unknown>): AssetEffectType | null {
+    const t = typeof raw.type === 'string' ? raw.type : typeof raw.effectId === 'string' ? raw.effectId : null;
+    if (t && ASSET_EFFECT_TYPES.has(t)) {
+        return t as AssetEffectType;
+    }
+    return null;
+}
+
+function parseAssetDefaultPack(pack: Record<string, unknown> | undefined): EffectsAssetInstance | null {
+    if (!pack) {
+        return null;
+    }
+    const type = parseAssetInstanceType(pack);
+    if (!type) {
+        return null;
+    }
+    const out: EffectsAssetInstance = {
+        type,
+        autoStart: typeof pack.autoStart === 'boolean' ? pack.autoStart : false
+    };
+    if (typeof pack.enabled === 'boolean') {
+        out.enabled = pack.enabled;
+    }
+    if (pack.effectParams && typeof pack.effectParams === 'object' && !Array.isArray(pack.effectParams)) {
+        const ep = { ...(pack.effectParams as Record<string, unknown>) };
+        if (Object.keys(ep).length > 0) {
+            out.effectParams = ep;
+        }
+    }
+    return out;
+}
+
+/** 读取物体轨包默认参（`defaultParamsById[asset.gsplat-effects]`） */
+export function readAssetDefaultParams(settings: ExperienceSettings): EffectsAssetInstance | null {
+    const e = ensureEffectsSettings(settings);
+    const pack = e.asset.defaultParamsById[ASSET_GSPLAT_EFFECT_ID] as Record<string, unknown> | undefined;
+    return parseAssetDefaultPack(pack);
+}
+
+/** 读取某 `sceneAsset.id` 上的物体特效实例配置 */
+export function readAssetInstanceParams(
+    settings: ExperienceSettings,
+    targetId: string
+): EffectsAssetInstance | null {
+    const e = ensureEffectsSettings(settings);
+    const inst = e.asset.instancesByTargetId![targetId];
+    if (!inst || typeof inst !== 'object') {
+        return null;
+    }
+    const raw = inst as Record<string, unknown>;
+    const resolvedType = parseAssetInstanceType(raw) ?? defaultAssetEffectType();
+    const out: EffectsAssetInstance = { type: resolvedType };
+    if (typeof inst.enabled === 'boolean') {
+        out.enabled = inst.enabled;
+    }
+    if (typeof inst.autoStart === 'boolean') {
+        out.autoStart = inst.autoStart;
+    }
+    if (inst.effectParams !== undefined && typeof inst.effectParams === 'object' && !Array.isArray(inst.effectParams)) {
+        out.effectParams = { ...(inst.effectParams as Record<string, unknown>) };
+    }
+    return out;
+}
+
+/** 写入 `settings.effects.asset.instancesByTargetId[targetId]` */
+export function patchAssetInstanceFromParams(
+    settings: ExperienceSettings,
+    targetId: string,
+    patch: {
+        type?: string;
+        /** @deprecated 导入兼容 */
+        effectId?: string;
+        enabled?: boolean;
+        autoStart?: boolean;
+        effectParams?: Record<string, unknown> | null;
+    }
+): EffectsAssetInstance {
+    const e = ensureEffectsSettings(settings);
+    const map = e.asset.instancesByTargetId!;
+    const current = readAssetInstanceParams(settings, targetId);
+    const patchTypeRaw = patch.type ?? patch.effectId;
+    const oldType = current?.type ?? defaultAssetEffectType();
+    const nextType = (
+        typeof patchTypeRaw === 'string' && ASSET_EFFECT_TYPES.has(patchTypeRaw) ?
+            (patchTypeRaw as AssetEffectType) :
+            oldType
+    ) as AssetEffectType;
+    const typeIsChanging = typeof patchTypeRaw === 'string' && patchTypeRaw !== oldType;
+
+    let nextEffectParams: Record<string, unknown> =
+        current?.effectParams && typeof current.effectParams === 'object' && !Array.isArray(current.effectParams)
+            ? { ...(current.effectParams as Record<string, unknown>) }
+            : {};
+
+    if (typeIsChanging && patch.effectParams === undefined) {
+        nextEffectParams = {};
+    }
+
+    const defaults = readAssetDefaultParams(settings);
+    const defaultEp =
+        defaults?.type === nextType &&
+        defaults.effectParams &&
+        typeof defaults.effectParams === 'object' &&
+        !Array.isArray(defaults.effectParams) ?
+            (defaults.effectParams as Record<string, unknown>) :
+            {};
+    if (!current && Object.keys(nextEffectParams).length === 0 && Object.keys(defaultEp).length > 0) {
+        nextEffectParams = { ...defaultEp };
+    }
+
+    if (patch.effectParams !== undefined) {
+        if (patch.effectParams === null) {
+            nextEffectParams = {};
+        } else if (typeof patch.effectParams === 'object' && !Array.isArray(patch.effectParams)) {
+            const incoming = patch.effectParams as Record<string, unknown>;
+            if (typeIsChanging) {
+                nextEffectParams = { ...incoming };
+            } else {
+                nextEffectParams = { ...nextEffectParams, ...incoming };
+            }
+        }
+    }
+
+    const next: EffectsAssetInstance = {
+        type: nextType,
+        enabled: typeof patch.enabled === 'boolean' ? patch.enabled : (current?.enabled ?? true),
+        autoStart: typeof patch.autoStart === 'boolean' ? patch.autoStart : (current?.autoStart ?? false),
+        ...(Object.keys(nextEffectParams).length > 0 ? { effectParams: nextEffectParams } : {})
+    };
+    map[targetId] = next;
+    return next;
+}
+
+/** 更新 `state.effectsRuntimeState.asset.instances[targetId]` */
+export function patchAssetRuntimeMirror(
+    state: State,
+    targetId: string,
+    patch: Partial<{
+        activeType: AssetEffectType;
+        status: import('../vfx/effects-runtime/effect-types').AssetEffectRuntimeStatus;
+    }>
+): void {
+    if (!state.effectsRuntimeState) {
+        state.effectsRuntimeState = createDefaultEffectsRuntimeState();
+    }
+    const asset = state.effectsRuntimeState.asset;
+    const prev = asset.instances[targetId];
+    asset.instances[targetId] = {
+        activeType: patch.activeType ?? prev?.activeType ?? defaultAssetEffectType(),
+        status: patch.status ?? prev?.status ?? 'inactive'
+    };
+}
+
+/** 从 settings 实例表同步 asset 运行态（不触发播放） */
+export function syncAssetInstancesRuntimeFromSettings(state: State, settings: ExperienceSettings): void {
+    if (!state.effectsRuntimeState) {
+        state.effectsRuntimeState = createDefaultEffectsRuntimeState();
+    }
+    const map = ensureEffectsSettings(settings).asset.instancesByTargetId ?? {};
+    const runtime = state.effectsRuntimeState.asset.instances;
+    for (const targetId of Object.keys(runtime)) {
+        if (!map[targetId]) {
+            delete runtime[targetId];
+        }
+    }
+    for (const [targetId, inst] of Object.entries(map)) {
+        const enabled = inst.enabled !== false;
+        const prev = runtime[targetId];
+        const raw = inst as Record<string, unknown>;
+        const activeType = parseAssetInstanceType(raw) ?? defaultAssetEffectType();
+        runtime[targetId] = {
+            activeType,
+            status: enabled ? (prev?.status === 'playing' ? 'playing' : 'inactive') : 'inactive'
+        };
+    }
 }
 
 function revealToParamRecord(rev: LegacyRevealEffect): Record<string, unknown> {
@@ -485,7 +674,7 @@ export function createDefaultEffectsRuntimeState(): EffectsRuntimeState {
             activeType: 'none'
         },
         persistent: { activeEffectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID, status: 'inactive' },
-        asset: { instances: {} }
+        asset: { activeEffectId: ASSET_GSPLAT_EFFECT_ID, instances: {} }
     };
 }
 
@@ -527,4 +716,7 @@ export function syncEffectsRuntimeStateFromSettings(state: State, settings: Expe
         persistent.activeType = persistentReveal?.type as PersistentEffectType;
         persistent.status = 'playing';
     }
+
+    state.effectsRuntimeState.asset.activeEffectId = ASSET_GSPLAT_EFFECT_ID;
+    syncAssetInstancesRuntimeFromSettings(state, settings);
 }

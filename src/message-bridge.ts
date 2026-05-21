@@ -18,6 +18,12 @@ import {
 } from './edit-history';
 import type { CommandRegistry } from './editor-modules/command-registry';
 import { MESSAGE_BRIDGE_MODULE } from './editor-modules/modules-types';
+import { paramsPatchHasAssetKeys } from './vfx/effects-runtime/asset/asset-effect-params';
+import {
+    normalizeAssetEffectEnvelope,
+    type AssetEffectProtocolEnvelope
+} from './editor-modules/protocol-adapters/asset-effects-protocol-adapter';
+import { ASSET_GSPLAT_EFFECT_ID, resolveAssetEffectType } from './vfx/effects-runtime/effect-types';
 import {
     paramsPatchHasPersistentKeys,
     paramsPatchHasRevealKeys,
@@ -102,9 +108,11 @@ type InboundPayload =
     | { type: 'SHADOW_SET'; value?: boolean }
     | { type: 'SHADOW_INTENSITY_UPDATE'; value?: number }
     | { type: 'SHADOW_DIRECTION_SET'; value?: number }
-    | { type: 'EFFECT_PARAMS_PATCH'; module?: 'effects'; effectId: string; params: Record<string, unknown> }
+    | { type: 'EFFECT_PARAMS_PATCH'; module?: 'effects'; effectId: string; params?: Record<string, unknown>; targetId?: string }
     | { type: 'EFFECT_TOGGLE'; module?: 'effects'; effectId: string; value: boolean }
     | { type: 'EFFECT_REPLAY'; module?: 'effects'; effectId: string; restartAnim?: boolean }
+    | { type: 'EFFECT_START'; module?: 'effects'; effectId: string; targetId: string; params?: Record<string, unknown> }
+    | { type: 'EFFECT_STOP'; module?: 'effects'; effectId: string; targetId: string }
     | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean; projectName?: string }
     | { type: 'VIDEO_EXPORT_CANCEL' };
 
@@ -310,7 +318,15 @@ const initPostMessageBridge = (global: Global) => {
                     break;
                 }
                 if (typeof p.value === 'string') {
-                    const valid: EditLeftModule[] = ['gs', 'asset', 'annotation', 'environment', 'camera', 'effects'];
+                    const valid: EditLeftModule[] = [
+                        'gs',
+                        'asset',
+                        'annotation',
+                        'environment',
+                        'camera',
+                        'effects',
+                        'assetEffects'
+                    ];
                     if (valid.includes(p.value as EditLeftModule)) {
                         state.editLeftModule = p.value as EditLeftModule;
                         events.fire('editLeftModule:changed', p.value);
@@ -352,7 +368,7 @@ const initPostMessageBridge = (global: Global) => {
                 !!requested &&
                 resolvedEntry.id === requested;
                 // 仅在“请求 id 成功命中场景实例”时触发 frame；未命中时不飞。
-                if (state.editMode && matchedRequested) {
+                if (state.editMode && state.editLeftModule === 'asset' && matchedRequested) {
                     events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
                 }
                 break;
@@ -550,6 +566,28 @@ const initPostMessageBridge = (global: Global) => {
                     console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: module must be "effects" when present');
                     break;
                 }
+                const targetId = (p as { targetId?: unknown }).targetId;
+                if (typeof targetId === 'string') {
+                    const params = (p as { params?: unknown }).params;
+                    const pr =
+                        typeof params === 'object' && params !== null ?
+                            { ...(params as Record<string, unknown>) } :
+                            {};
+                    if (!resolveAssetEffectType(p.effectId as string, pr)) {
+                        break;
+                    }
+                    if (!paramsPatchHasAssetKeys(pr)) {
+                        console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: invalid asset params');
+                        break;
+                    }
+                    const env = normalizeAssetEffectEnvelope({
+                        effectId: p.effectId as string,
+                        targetId,
+                        params: pr
+                    });
+                    dispatchEffects(global, 'EFFECT_PARAMS_PATCH', env);
+                    break;
+                }
                 if (p.effectId !== SCENE_GSPLAT_REVEAL_EFFECT_ID && p.effectId !== SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
                     console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: unsupported effectId', p.effectId);
                     break;
@@ -572,6 +610,61 @@ const initPostMessageBridge = (global: Global) => {
                     effectId: p.effectId as string,
                     params: pr
                 });
+                break;
+            }
+            case 'EFFECT_START': {
+                if (p.module !== undefined && p.module !== MESSAGE_BRIDGE_MODULE.effects) {
+                    break;
+                }
+                const targetId = (p as { targetId?: unknown }).targetId;
+                const effectId = (p as { effectId?: unknown }).effectId;
+                if (typeof targetId !== 'string' || typeof effectId !== 'string') {
+                    console.warn('[MessageBridge] EFFECT_START ignored: targetId and effectId required');
+                    break;
+                }
+                const params =
+                    typeof (p as { params?: unknown }).params === 'object' &&
+                    (p as { params?: unknown }).params !== null ?
+                        ((p as { params: Record<string, unknown> }).params) :
+                        {};
+                if (!resolveAssetEffectType(effectId, params)) {
+                    console.warn(
+                        '[MessageBridge] EFFECT_START ignored: require effectId',
+                        ASSET_GSPLAT_EFFECT_ID,
+                        '+ params.type (legacy: effectId as type)'
+                    );
+                    break;
+                }
+                dispatchEffects(
+                    global,
+                    'EFFECT_START',
+                    normalizeAssetEffectEnvelope({ effectId, targetId, params } as AssetEffectProtocolEnvelope)
+                );
+                break;
+            }
+            case 'EFFECT_STOP': {
+                if (p.module !== undefined && p.module !== MESSAGE_BRIDGE_MODULE.effects) {
+                    break;
+                }
+                const targetId = (p as { targetId?: unknown }).targetId;
+                const effectId = (p as { effectId?: unknown }).effectId;
+                if (typeof targetId !== 'string' || typeof effectId !== 'string') {
+                    console.warn('[MessageBridge] EFFECT_STOP ignored: targetId and effectId required');
+                    break;
+                }
+                const params =
+                    typeof (p as { params?: unknown }).params === 'object' &&
+                    (p as { params?: unknown }).params !== null ?
+                        ((p as { params: Record<string, unknown> }).params) :
+                        {};
+                if (!resolveAssetEffectType(effectId, params)) {
+                    break;
+                }
+                dispatchEffects(
+                    global,
+                    'EFFECT_STOP',
+                    normalizeAssetEffectEnvelope({ effectId, targetId, params } as AssetEffectProtocolEnvelope)
+                );
                 break;
             }
             case 'EFFECT_TOGGLE': {

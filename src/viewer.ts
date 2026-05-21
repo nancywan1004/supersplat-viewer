@@ -61,6 +61,7 @@ import { initAssetFacade } from './editor-modules/asset-facade';
 import { initAnnotationFacade } from './editor-modules/annotation-facade';
 import { initEnvironmentFacade } from './editor-modules/environment-facade';
 import { initEffectsFacade } from './editor-modules/effects-facade';
+import { createAssetEffectsController, type AssetEffectsController } from './vfx/effects-runtime/asset/asset-effects-controller';
 import { createEffectsRuntime, type EffectsRuntime } from './vfx/effects-runtime';
 import { initCommandRegistry } from './editor-modules/command-registry';
 import { DEFAULT_DEFERRED_EDITING_LAYERS } from './render/deferred-editing-visual-sync';
@@ -251,6 +252,8 @@ class Viewer {
 
     /** 特效运行时（reveal / persistent / asset）；M1 仅占位，不改变现有 VFX 行为 */
     effectsRuntime: EffectsRuntime | null = null;
+
+    assetEffectsController: AssetEffectsController | null = null;
 
     voxelOverlay: VoxelDebugOverlay | null = null;
 
@@ -714,6 +717,9 @@ class Viewer {
                 revealBbox.copy(sceneBound);            // fallback
             }
             this.revealController = new RevealController(global, revealBbox, gsplatEntity, this.cameraManager);
+            this.assetEffectsController = createAssetEffectsController(global);
+            (global as any).__assetEffectsController = this.assetEffectsController;
+
             global.events.on('persistentGsplatEffectRemountRequested', (restartAnim?: boolean) => {
                 // revealComplete 当帧内 reveal 脚本可能仍在执行 removeShaders；
                 // remount persistent 若同帧进行，可能被旧脚本收尾覆盖。统一延后一帧。

@@ -136,10 +136,6 @@ const REVEAL_PANEL_HTML = (() => {
       </div>
     </div>
   </fieldset>
-  <fieldset class="effectsTrackFieldset effectsTrackAsset" style="border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px 12px;margin-bottom:10px;opacity:0.85">
-    <legend style="padding:0 6px;font-size:13px;font-weight:600">Asset 特效</legend>
-    <p class="effectsTrackHint" style="font-size:11px;opacity:0.75;margin:0;line-height:1.35">占位：<code>settings.effects.asset</code> 与资产轨协议尚未接 UI。</p>
-  </fieldset>
   <div class="settingsRow">
     <button id="revealRestart" class="settingsButton" type="button">Restart Effect</button>
   </div>

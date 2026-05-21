@@ -54,3 +54,55 @@ export const PERSISTENT_EFFECT_TYPE_VALUES = [
  * `reveal-policy` 的 `PERSISTENT_VFX`、`effects-runtime` 内置 persistent 轨、`mountPersistentGsplatByEffectType` 均与此同一 `Set` 引用对齐。
  */
 export const PERSISTENT_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSISTENT_EFFECT_TYPE_VALUES);
+
+// --- 物体轨 asset（与 reveal / persistent 同形：固定包 id + 包内 `type`）---
+
+/** 协议与 `settings.effects.asset` 共用的物体轨 GSplat 包 id */
+export const ASSET_GSPLAT_EFFECT_ID = 'asset.gsplat-effects' as const;
+
+/**
+ * 物体特效 `type` 清单（GS变形 / 静物活化）；`src/types.ts` 中 `AssetEffectType` 与此同源 re-export。
+ * 存盘与协议样式字段为 **`type`**（`instancesByTargetId[targetId].type` 或 `params.type`），非包 id。
+ */
+export const ASSET_EFFECT_TYPE_VALUES = ['gsplat-morph', 'gsplat-wobble'] as const;
+
+export type AssetEffectType = (typeof ASSET_EFFECT_TYPE_VALUES)[number];
+
+/**
+ * 与 `AssetEffectsController` 分派一致的物体 `type` 集合。
+ */
+export const ASSET_EFFECT_TYPES: ReadonlySet<string> = new Set(ASSET_EFFECT_TYPE_VALUES);
+
+/** 协议 `effectId` 是否为物体轨固定包 id */
+export function isAssetGsplatPackageId(id: string): boolean {
+    return id === ASSET_GSPLAT_EFFECT_ID;
+}
+
+/**
+ * 从协议 `effectId` + `params.type` 解析物体特效样式（与 scene reveal 的 `params.type` 一致）。
+ * 兼容旧协议：`effectId` 可直接为 `gsplat-morph` 等 type。
+ * @param {string} effectId
+ * @param {Record<string, unknown>} [params]
+ * @returns {AssetEffectType | null}
+ */
+export function resolveAssetEffectType(
+    effectId: string,
+    params?: Record<string, unknown>
+): AssetEffectType | null {
+    if (ASSET_EFFECT_TYPES.has(effectId)) {
+        return effectId as AssetEffectType;
+    }
+    if (!isAssetGsplatPackageId(effectId)) {
+        return null;
+    }
+    const t = params?.type;
+    if (typeof t === 'string' && ASSET_EFFECT_TYPES.has(t)) {
+        return t as AssetEffectType;
+    }
+    return null;
+}
+
+/** 默认样式（清单首项，`gsplat-morph`） */
+export function defaultAssetEffectType(): AssetEffectType {
+    return ASSET_EFFECT_TYPE_VALUES[0];
+}

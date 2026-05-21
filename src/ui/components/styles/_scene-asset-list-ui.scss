@@ -32,6 +32,10 @@
             outline: 2px solid $clr-accent;
             outline-offset: -2px;
         }
+        &.morph-keyframe {
+            border-left: 3px solid #7cb342;
+            padding-left: 7px;
+        }
         .scene-asset-name {
             flex: 1;
             min-width: 0;

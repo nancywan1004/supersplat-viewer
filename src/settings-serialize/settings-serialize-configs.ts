@@ -1,7 +1,11 @@
 import type { BloomEditorSession } from '../schemas/v2';
 import type { EffectsSettings } from '../schemas/v2-custom';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../schemas/v2-custom';
-import { SCENE_GSPLAT_PERSISTENT_EFFECT_ID, SCENE_GSPLAT_REVEAL_EFFECT_ID } from '../vfx/effects-runtime/effect-types';
+import {
+    ASSET_GSPLAT_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+    SCENE_GSPLAT_REVEAL_EFFECT_ID
+} from '../vfx/effects-runtime/effect-types';
 
 /** nightMode 子树缺省（`ensureNightMode`） */
 export const DEFAULT_NIGHT_MODE = { fade: 0 } as const;
@@ -45,5 +49,5 @@ export const DEFAULT_REVEAL_EFFECT = {
 export const DEFAULT_EFFECTS: EffectsSettings = {
     reveal: { activeEffectId: SCENE_GSPLAT_REVEAL_EFFECT_ID, paramsById: {} },
     persistent: { activeEffectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID, enabled: false, paramsById: {} },
-    asset: { defaultParamsById: {} }
+    asset: { activeEffectId: ASSET_GSPLAT_EFFECT_ID, defaultParamsById: {}, instancesByTargetId: {} }
 };
