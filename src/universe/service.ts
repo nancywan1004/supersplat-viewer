@@ -44,7 +44,10 @@ export const getProjectThumbnailFilename = (projectId: string | number): string 
 const UPDATE_PROJECT_DATA="/app/api/v1/project/version/create";   //post 更新项目文件
 /** 登记项目缩略图 CDN URL（PNG 须先经 OSS 上传） */
 const UPDATE_PROJECT_THUMBNAIL = '/app/api/v1/saas/project/image';
-//const GET_PRIGINAL_DATA="/app/api/v1/project/version/";  //get  {projectId}/original  获取初始版本模型文件
+/** GET `/app/api/v1/project/version/{projectId}/original` — 初始版本模型文件列表 */
+const GET_ORIGINAL_PROJECT_FILES = '/app/api/v1/project/version';
+/** 初始版本相机路径文件名（匹配列表项 `fileName` 的 basename） */
+export const TRANSFORM_JSON_BASENAME = 'transform.json';
 const GET_SINGLE_STSTOKEN="/oss/api/v1/oss/ststoken";  //post 单文件上传临时凭证
 const GET_MULTIPART_STSTOKEN="/oss/api/v1/oss/multipart/init" ; //post 大文件上传临时凭证
 const CHUNKSIZE=10485760;  //分片大小 10M
@@ -135,15 +138,22 @@ type UploadFile = {
 /**
  * 获取项目原始数据-response
  */
+export type OriginalProjectFileEntry = {
+    fileName: string;
+    fileType: string;
+    fileUrl: string;
+};
+
 type GetProjectData_Response={
     code: number;
-    data: {
-        fileName: string;
-        fileType: string;
-        fileUrl: string;
-    }[];
+    data: OriginalProjectFileEntry[];
     message: string;
 };
+
+export type FetchOriginalTransformResult =
+    | { ok: true; found: true; transform: unknown; fileUrl: string }
+    | { ok: true; found: false }
+    | { ok: false; message: string };
 /**
  * 获取单文件上传临时凭证-request
  */
@@ -373,6 +383,103 @@ export type OssUploadResult = {
  * @param body 请求的 body
  * @returns 返回解析后的 JSON 数据
  */
+const fetchCloudJsonGet = async <TResponse>(url: string): Promise<TResponse> => {
+    let response: Response;
+    try {
+        response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                Authorization: getToken() ?? ''
+            }
+        });
+    } catch (error) {
+        logApi('GET', url, undefined, { error: String(error) });
+        throw error;
+    }
+
+    if (!response.ok) {
+        let text = '';
+        try {
+            text = await response.text();
+        } catch {
+            // ignore
+        }
+        logApi('GET', url, undefined, { status: response.status, text });
+        throw new Error(`请求失败，状态码: ${response.status}`);
+    }
+
+    const json = await response.json() as TResponse;
+    logApi('GET', url, undefined, json);
+    return json;
+};
+
+/** 列表项 `fileName` 的 basename 是否为 `transform.json` */
+export const isTransformJsonFileName = (fileName: string): boolean => {
+    const base = fileName.replace(/\\/g, '/').split('/').pop() ?? '';
+    return base === TRANSFORM_JSON_BASENAME;
+};
+
+/**
+ * 获取项目初始版本文件列表（未编辑过的原始模型包）。
+ */
+export const fetchOriginalProjectFiles = async (
+    projectId: number | string
+): Promise<OriginalProjectFileEntry[]> => {
+    const id = String(projectId).trim();
+    if (!id) {
+        throw new Error('缺少 projectId');
+    }
+    const url = `${API_HOST}${GET_ORIGINAL_PROJECT_FILES}/${encodeURIComponent(id)}/original`;
+    const response = await fetchCloudJsonGet<GetProjectData_Response>(url);
+    const isSuccess = response.code === 200 || response.code === 1;
+    if (!isSuccess || !Array.isArray(response.data)) {
+        const apiMsg = typeof response.message === 'string' && response.message.trim()
+            ? response.message.trim()
+            : '';
+        throw new Error(apiMsg || `获取初始版本文件列表失败（code=${response.code}）`);
+    }
+    return response.data;
+};
+
+/**
+ * 从初始版本文件列表中定位 `transform.json` 并下载 JSON 内容。
+ */
+export const fetchOriginalTransform = async (
+    projectId: number | string,
+    token: string
+): Promise<FetchOriginalTransformResult> => {
+    if (!token) {
+        return { ok: false, message: '缺少 token' };
+    }
+    if (projectId == null || projectId === '') {
+        return { ok: false, message: '缺少 projectId' };
+    }
+
+    setUniverseAuthContext({ token });
+
+    try {
+        const files = await fetchOriginalProjectFiles(projectId);
+        const entry = files.find((f) => typeof f.fileName === 'string' && isTransformJsonFileName(f.fileName));
+        if (!entry?.fileUrl) {
+            return { ok: true, found: false };
+        }
+
+        const fileResponse = await fetch(entry.fileUrl);
+        if (!fileResponse.ok) {
+            return {
+                ok: false,
+                message: `下载 transform.json 失败（HTTP ${fileResponse.status}）`
+            };
+        }
+        const transform = await fileResponse.json() as unknown;
+        return { ok: true, found: true, transform, fileUrl: entry.fileUrl };
+    } catch (error) {
+        console.error('fetchOriginalTransform 失败:', error);
+        const message = error instanceof Error ? error.message : String(error);
+        return { ok: false, message };
+    }
+};
+
 const fetchCloudJsonPost = async <TResponse>(
     url: string,
     body: unknown

@@ -315,6 +315,14 @@ class CameraManager {
     /** 动画控制器（用于导出时按时间轴 seek 相机） */
     animController: AnimController | null = null;
 
+    /** `inputEvent` / seek 使用的控制器集合（settings 重置时需同步 anim 槽） */
+    private controllersBundle: {
+        orbit: OrbitController;
+        fly: FlyController;
+        walk: WalkController;
+        anim: AnimController | null;
+    } | null = null;
+
     // visual marker for picked point
     private pickMarker: Entity | null = null;
 
@@ -332,10 +340,14 @@ class CameraManager {
     private cameraBoundsVisualizer: Entity | null = null;
     private debugBoundsLayerId: number | null = null;
     private cameraEntity: Entity;
+    private readonly settings: Global['settings'];
+    private readonly state: Global['state'];
 
     constructor(global: Global, bbox: BoundingBox, collision: Collision | null = null) {
         const { events, settings, state, config, app, camera: cameraEntity } = global;
         this.cameraEntity = cameraEntity;
+        this.settings = settings;
+        this.state = state;
 
         // // Create a visual marker for picked points
         // const markerMaterial = new StandardMaterial();
@@ -388,6 +400,7 @@ class CameraManager {
             anim: animTrack ? new AnimController(animTrack) : null
         };
         this.animController = controllers.anim;
+        this.controllersBundle = controllers;
 
         // 约束边界（融合策略）：
         // - 若有动画路径：用 anim AABB 与 scene AABB 做 union（避免 anim→orbit / orbit→fly 切换时发生 clamp 跳变）
@@ -917,6 +930,31 @@ class CameraManager {
         events.on('navigateComplete', () => {
             events.fire('navTarget:clear');
         });
+    }
+
+    /**
+     * settings 从 transform.json 全量重置后，按当前 `settings.animTracks` 重建 AnimController。
+     */
+    reloadAnimFromSettings(): void {
+        const bundle = this.controllersBundle;
+        if (!bundle) return;
+
+        const { animTracks, startMode } = this.settings;
+        let next: AnimController | null = null;
+        if (animTracks && animTracks.length > 0 && startMode === 'animTrack') {
+            next = new AnimController(animTracks[0]);
+        }
+
+        bundle.anim = next;
+        this.animController = next;
+        this.state.hasAnimation = !!next;
+        this.state.animationDuration = next ? next.animState.cursor.duration : 0;
+
+        if (next) {
+            this.state.cameraMode = 'anim';
+            this.state.animationPaused = false;
+            next.onEnter(this.camera);
+        }
     }
 
     /**

@@ -12,6 +12,7 @@ import {
 } from '../settings-serialize/settings-serialize';
 import { readSkyboxUrlFromSettings } from '../settings-serialize/settings-serialize-helper';
 import { downloadExperienceSettingsLocally } from '../render/project-thumbnail';
+import { resetSceneSettings } from '../settings-reset';
 import { requestSceneAssetsRestore } from '../asset-placement-handler';
 import {
     initEditHistory,
@@ -25,6 +26,8 @@ import {
     restoreSkyboxFromSettings
 } from '../edit-history';
 import { showExitEditConfirmModal } from './components/exit-edit-confirm-ui';
+import { showEditToast } from './components/edit-toast-ui';
+import { confirmSceneReset } from './components/settings-reset-confirm-ui';
 import { initRevealUI } from './components/effects-ui';
 import { initVideoExportUI } from './components/video-export-ui';
 import { initLightingUI } from './components/lighting-ui';
@@ -263,7 +266,7 @@ const initUI = (global: Global) => {
     const dom = [
         'ui',
         'controlsWrap',
-        'editModeStrip', 'editModeBtn', 'exitEditBtn', 'saveSettingsBtn', 'undoEditBtn', 'redoEditBtn', 'rightToolBar',
+        'editModeStrip', 'editModeBtn', 'exitEditBtn', 'resetSettingsBtn', 'saveSettingsBtn', 'undoEditBtn', 'redoEditBtn', 'rightToolBar',
         'arMode', 'vrMode',
         'enterFullscreen', 'exitFullscreen',
         'info', 'infoPanel', 'desktopTab', 'touchTab', 'desktopInfoPanel', 'touchInfoPanel',
@@ -583,6 +586,7 @@ const initUI = (global: Global) => {
     let editModeEnteredSettingsSnapshot: string | null = null;
     /** 进入编辑模式时的 settings 完整数据，用于「不保存并退出」时回退场景 */
     let editModeEnteredSettingsData: ExperienceSettings | null = null;
+    const resetSettingsBtn = dom.resetSettingsBtn as HTMLButtonElement | null;
     const updatePreviewModeButton = () => {
         if (!dom.previewModeBtn) return;
         const inPreviewMode = state.previewMode === true;
@@ -615,6 +619,9 @@ const initUI = (global: Global) => {
         }
         if (dom.exitEditBtn) {
             dom.exitEditBtn.classList.toggle('hidden', !inEdit);
+        }
+        if (resetSettingsBtn) {
+            resetSettingsBtn.classList.toggle('hidden', !inEdit);
         }
         if (dom.saveSettingsBtn) {
             dom.saveSettingsBtn.classList.toggle('hidden', !inEdit);
@@ -805,6 +812,98 @@ const initUI = (global: Global) => {
                     restoreSkyboxFromSettings(global);
                         state.editMode = false;
                     }
+                });
+            });
+        }
+        const syncResetBaseline = () => {
+            const payload = serializeExperienceSettings(global);
+            editModeEnteredSettingsData = JSON.parse(JSON.stringify(payload)) as ExperienceSettings;
+            editModeEnteredSettingsSnapshot = getComparableSettingsStringFromSnapshot(payload);
+            if (config.trackEditHistory) {
+                initEditHistory(global, editModeEnteredSettingsData);
+                events.fire('editHistory:stateChanged', {
+                    canUndo: canUndo(global),
+                    canRedo: canRedo(global)
+                });
+            }
+        };
+
+        const runSettingsReset = async () => {
+            const btn = resetSettingsBtn;
+            if (!btn) return;
+            const label = btn.textContent ?? '重置场景';
+            btn.disabled = true;
+            btn.textContent = '重置中…';
+
+            try {
+                if (editUiTransport === 'message-bridge') {
+                    const waitForResetResult = (timeoutMs = 30000) =>
+                        new Promise<{ pathFrom?: string }>((resolve, reject) => {
+                            const onMsg = (ev: MessageEvent) => {
+                                const data = ev.data as {
+                                    type?: string;
+                                    message?: string;
+                                    pathFrom?: string;
+                                };
+                                if (!data?.type) return;
+                                if (
+                                    data.type !== 'SETTINGS_RESET_APPLIED'
+                                    && data.type !== 'SETTINGS_RESET_FAILED'
+                                ) {
+                                    return;
+                                }
+                                window.removeEventListener('message', onMsg);
+                                clearTimeout(to);
+                                if (data.type === 'SETTINGS_RESET_FAILED') {
+                                    reject(new Error(
+                                        typeof data.message === 'string' && data.message
+                                            ? data.message
+                                            : 'SETTINGS_RESET_FAILED'
+                                    ));
+                                    return;
+                                }
+                                resolve({ pathFrom: data.pathFrom });
+                            };
+                            const to = window.setTimeout(() => {
+                                window.removeEventListener('message', onMsg);
+                                reject(new Error('timeout waiting for SETTINGS_RESET_APPLIED'));
+                            }, timeoutMs);
+                            window.addEventListener('message', onMsg);
+                        });
+
+                    sendEditProtocolMessage({ type: 'SETTINGS_RESET' });
+                    const applied = await waitForResetResult();
+                    syncResetBaseline();
+                    const msg = applied.pathFrom === 'original'
+                        ? '场景已重置（已应用云端初始相机路径）'
+                        : '场景已重置（未找到 transform.json，已保留当前动画路径与默认视角）';
+                    showEditToast(msg, 'success');
+                } else {
+                    const result = await resetSceneSettings(global);
+                    if (result.ok === false) {
+                        showEditToast(result.message || '重置失败', 'error');
+                        return;
+                    }
+                    syncResetBaseline();
+                    const msg = result.pathFrom === 'original'
+                        ? '场景已重置（已应用云端初始相机路径）'
+                        : '场景已重置（未找到 transform.json，已保留当前动画路径与默认视角）';
+                    showEditToast(msg, 'success');
+                }
+            } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                showEditToast(message || '重置失败', 'error');
+            } finally {
+                btn.textContent = label;
+                btn.disabled = false;
+            }
+        };
+
+        if (resetSettingsBtn) {
+            resetSettingsBtn.addEventListener('click', () => {
+                if (!state.editMode) return;
+                confirmSceneReset({
+                    onConfirm: () => runSettingsReset()
                 });
             });
         }
@@ -1442,6 +1541,11 @@ const initUI = (global: Global) => {
     tooltip.register(dom.vrMode, 'Enter VR', 'top');
     tooltip.register(dom.enterFullscreen, 'Fullscreen', 'top');
     tooltip.register(dom.exitFullscreen, 'Fullscreen', 'top');
+    tooltip.register(
+        resetSettingsBtn,
+        '重置场景：优先云端 transform.json 相机路径；无文件则保留当前 animTrack 与默认视角',
+        'top'
+    );
     tooltip.register(dom.saveSettingsBtn, 'Save Settings', 'top');
     tooltip.register(dom.undoEditBtn, 'Undo (Ctrl/Cmd+Z)', 'top');
     tooltip.register(dom.redoEditBtn, 'Redo (Ctrl/Cmd+Shift+Z)', 'top');

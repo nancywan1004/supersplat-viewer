@@ -1,0 +1,64 @@
+/* 编辑模式顶栏下方轻提示 */
+.edit-toast-root {
+    position: fixed;
+    top: calc(var(--edit-top-bar-height, 48px) + 8px + env(safe-area-inset-top));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+    max-width: min(92vw, 520px);
+}
+
+.edit-toast {
+    pointer-events: auto;
+    padding: 10px 16px;
+    font-size: 14px;
+    line-height: 1.45;
+    color: $clr-text;
+    background: rgba(28, 32, 38, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+    opacity: 0;
+    transform: translateY(-6px);
+    transition: opacity 0.22s ease, transform 0.22s ease;
+    cursor: pointer;
+
+    &.edit-toast--visible {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    &.edit-toast--success {
+        border-color: rgba(80, 200, 120, 0.45);
+    }
+
+    &.edit-toast--error {
+        border-color: rgba(255, 100, 90, 0.5);
+    }
+
+    &.edit-toast--info {
+        border-color: rgba(255, 160, 80, 0.4);
+    }
+}
+
+.settings-reset-confirm-dialog .settings-reset-confirm-desc {
+    margin: 0 0 18px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: $clr-text-dark;
+}
+
+.settings-reset-confirm-dialog .settings-reset-confirm-ok {
+    background: rgba(255, 140, 60, 0.9);
+    color: #fff;
+    border-color: rgba(255, 140, 60, 0.9);
+
+    &:hover {
+        filter: brightness(1.08);
+    }
+}

@@ -48,6 +48,7 @@ import {
     captureDefaultViewAndStageThumbnail,
     persistExperienceSettingsToCloud
 } from './render/project-thumbnail';
+import { resetSceneSettings } from './settings-reset';
 
 /** 父级 → Viewer 的 postMessage payload 类型（按文档事件表） */
 type InboundPayload =
@@ -66,6 +67,7 @@ type InboundPayload =
     | { type: 'MEDIA_HOTSPOT_SET_BASELINE'; id: string; target: 'video' | 'audio' }
     | { type: 'VIEW_MEDIA_MUTE_SET'; value?: boolean }
     | { type: 'SETTINGS_SAVE' }
+    | { type: 'SETTINGS_RESET' }
     | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule | null }
     | { type: 'ASSET_SHOW_HIDE_SET'; id?: string; value?: boolean }
     | { type: 'ASSETS_SHOW_HIDE_SET'; value?: boolean }
@@ -357,6 +359,27 @@ const initPostMessageBridge = (global: Global) => {
                 }
                 postToParent('SETTINGS_UPDATED');
                 setBaseline();
+                break;
+            }
+            case 'SETTINGS_RESET': {
+                const resetResult = await resetSceneSettings(global);
+                if (resetResult.ok === false) {
+                    console.error('[MessageBridge] SETTINGS_RESET 失败', resetResult.message);
+                    postToParent('SETTINGS_RESET_FAILED', { message: resetResult.message });
+                    break;
+                }
+                if (state.editMode) {
+                    const initialSnapshot = serializeExperienceSettings(global);
+                    setBaseline(initialSnapshot);
+                    if (config.trackEditHistory) {
+                        initEditHistory(global, initialSnapshot);
+                        postToParent('EDIT_HISTORY_STATE', { canUndo: canUndo(global), canRedo: canRedo(global) });
+                    }
+                } else {
+                    (global as { __originalSettings?: ExperienceSettings }).__originalSettings =
+                        JSON.parse(JSON.stringify(global.settings)) as ExperienceSettings;
+                }
+                postToParent('SETTINGS_RESET_APPLIED', { pathFrom: resetResult.pathFrom });
                 break;
             }
             case 'EDIT_MODULE_SET':

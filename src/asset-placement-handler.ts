@@ -61,7 +61,7 @@ export type AssetPlacementHandlerDeps = {
 };
 
 type SceneAssetsRestoreOptions = {
-    reason?: 'startup' | 'edit-enter' | 'edit-discard' | 'history-restore';
+    reason?: 'startup' | 'edit-enter' | 'edit-discard' | 'history-restore' | 'settings-reset';
     deferUntilRevealComplete?: boolean;
     clearBeforeRestore?: boolean;
 };
