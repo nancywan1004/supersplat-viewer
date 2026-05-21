@@ -35,8 +35,15 @@ const UPLOADED_FILE_HOST = ENV_CONFIG.uploadedFileHost;
 //#endregion
 
 export const SPLATFILENAME='point_cloud.splat',SOGFILENAME='point_cloud.sog',SETTINGFILENAME='settings.json';
+/** 项目缩略图本地/OSS 文件名：`{projectId}-thumbnail.jpg` */
+export const getProjectThumbnailFilename = (projectId: string | number): string => {
+    const id = String(projectId).trim().replace(/[^a-zA-Z0-9._-]+/g, '_') || 'project';
+    return `${id}-thumbnail.jpg`;
+};
 
 const UPDATE_PROJECT_DATA="/app/api/v1/project/version/create";   //post 更新项目文件
+/** 登记项目缩略图 CDN URL（PNG 须先经 OSS 上传） */
+const UPDATE_PROJECT_THUMBNAIL = '/app/api/v1/saas/project/image';
 //const GET_PRIGINAL_DATA="/app/api/v1/project/version/";  //get  {projectId}/original  获取初始版本模型文件
 const GET_SINGLE_STSTOKEN="/oss/api/v1/oss/ststoken";  //post 单文件上传临时凭证
 const GET_MULTIPART_STSTOKEN="/oss/api/v1/oss/multipart/init" ; //post 大文件上传临时凭证
@@ -95,6 +102,26 @@ type UpdateProjectResponse = {
     data: number | null;
     message: string;
 };
+
+/** 项目缩略图登记请求（`POST /app/api/v1/saas/project/image`） */
+type UpdateProjectThumbnailRequest = {
+    fileType: 'SNAPSHOT';
+    projectId: number;
+    /** 存储位置（与 Universe 约定：2 = OSS/CDN） */
+    storageLocation: number;
+    url: string;
+};
+
+type UpdateProjectThumbnailResponse = {
+    code: number;
+    data: unknown;
+    message: string;
+};
+
+/** 项目缩略图上传（OSS + 登记接口）结果 */
+export type ProjectThumbnailUploadResult =
+    | { ok: true; thumbnailUrl: string }
+    | { ok: false; message: string };
 
 /**
  * 上传的文件类型
@@ -240,6 +267,64 @@ export const updateProjectData = async (projectId: number | string, inputFiles: 
  * 上传项目 settings.json（仅单文件）。
  * 会强制使用统一文件名 settings.json，接口 type 会自动走 setting。
  */
+/**
+ * 上传当前视口 PNG 为项目缩略图：先 OSS，再调用 {@link UPDATE_PROJECT_THUMBNAIL} 登记 URL。
+ */
+export const uploadProjectThumbnail = async (
+    projectId: number | string,
+    token: string,
+    imageBlob: Blob
+): Promise<ProjectThumbnailUploadResult> => {
+    if (projectId == null || projectId === '') {
+        const message = '缺少 projectId';
+        console.error('uploadProjectThumbnail', message);
+        return { ok: false, message };
+    }
+    if (!token) {
+        const message = '缺少 token';
+        console.error('uploadProjectThumbnail', message);
+        return { ok: false, message };
+    }
+    if (!imageBlob || imageBlob.size <= 0) {
+        return { ok: false, message: '截图数据为空' };
+    }
+
+    setUniverseAuthContext({ token });
+
+    try {
+        const file = new File([imageBlob], getProjectThumbnailFilename(projectId), { type: 'image/jpeg' });
+        const oss = await uploadFileToAliyun(file, 2, projectId);
+        const response = await postProjectThumbnail({
+            fileType: 'SNAPSHOT',
+            projectId: Number(projectId),
+            storageLocation: 2,
+            url: oss.fileUrl
+        });
+        const isSuccess = response.code === 1 || response.code === 200;
+        if (!isSuccess) {
+            const apiMsg = typeof response.message === 'string' && response.message.trim()
+                ? response.message.trim()
+                : '';
+            return {
+                ok: false,
+                message: apiMsg || `缩略图登记失败（接口 code=${response.code}）`
+            };
+        }
+        return { ok: true, thumbnailUrl: oss.fileUrl };
+    } catch (error) {
+        console.error('上传项目缩略图失败:', error);
+        const message = error instanceof Error ? error.message : String(error);
+        return { ok: false, message };
+    }
+};
+
+const postProjectThumbnail = async (
+    payload: UpdateProjectThumbnailRequest
+): Promise<UpdateProjectThumbnailResponse> => {
+    const url = `${API_HOST}${UPDATE_PROJECT_THUMBNAIL}`;
+    return await fetchCloudJsonPost<UpdateProjectThumbnailResponse>(url, payload);
+};
+
 export const uploadProjectData = async (
     projectId: number | string,
     token: string,

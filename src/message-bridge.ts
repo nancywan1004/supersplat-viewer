@@ -44,6 +44,7 @@ import {
 import { applyViewMediaMuteSet } from './view-settings';
 import { getSelectedSceneAssetType } from './state-selectors';
 import type { AssetLibraryItem, EditLeftModule, Global } from './types';
+import { captureAndUploadProjectThumbnail } from './render/project-thumbnail';
 import { uploadProjectData } from './universe/service';
 
 /** 父级 → Viewer 的 postMessage payload 类型（按文档事件表） */
@@ -116,7 +117,8 @@ type InboundPayload =
     | { type: 'EFFECT_TOGGLE'; module?: 'effects'; effectId: string; value: boolean }
     | { type: 'EFFECT_REPLAY'; module?: 'effects'; effectId: string; restartAnim?: boolean }
     | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean; projectName?: string }
-    | { type: 'VIDEO_EXPORT_CANCEL' };
+    | { type: 'VIDEO_EXPORT_CANCEL' }
+    | { type: 'PROJECT_THUMBNAIL_CAPTURE_UPLOAD' };
 
 const postToParent = (type: string, data?: Record<string, unknown>) => {
     const message = (data ? { type, ...data } : { type }) as Record<string, unknown>;
@@ -743,6 +745,21 @@ const initPostMessageBridge = (global: Global) => {
             // 注意：真正的“导出完成”仍由 Viewer 在 progressEnd 时 postToParent('VIDEO_EXPORT_END') 上报父级
                 videoExportCancelled = true;
                 events.fire('render.video.stop');
+                break;
+            }
+            case 'PROJECT_THUMBNAIL_CAPTURE_UPLOAD': {
+                const thumbResult = await captureAndUploadProjectThumbnail(global);
+                if (thumbResult.ok === false) {
+                    postToParent('PROJECT_THUMBNAIL_UPLOAD_FAILED', {
+                        module: MESSAGE_BRIDGE_MODULE.effects,
+                        message: thumbResult.message
+                    });
+                    break;
+                }
+                postToParent('PROJECT_THUMBNAIL_UPLOAD_END', {
+                    module: MESSAGE_BRIDGE_MODULE.effects,
+                    thumbnailUrl: thumbResult.thumbnailUrl
+                });
                 break;
             }
             default:
