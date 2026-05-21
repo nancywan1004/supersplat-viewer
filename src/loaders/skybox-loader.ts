@@ -25,7 +25,7 @@ const applySkyboxSphere = async (
 ) => {
     const trimmedUrl = url?.trim();
     if (!trimmedUrl) {
-        console.warn('[SuperSplat] SKYBOX_SWITCH 缺少有效的 URL');
+        console.warn('[SuperSplat] SKYBOX_SET 缺少有效的 URL');
         return;
     }
 
@@ -128,7 +128,7 @@ const removeSkyboxSphere = (app: AppBase, url?: string) => {
 const applySkyboxTexture = async (app: AppBase, url: string) => {
     const trimmedUrl = url?.trim();
     if (!trimmedUrl) {
-        console.warn('[SuperSplat] SKYBOX_SWITCH 缺少有效的 URL');
+        console.warn('[SuperSplat] SKYBOX_SET 缺少有效的 URL');
         return;
     }
 

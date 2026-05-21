@@ -54,7 +54,7 @@ import { resetSceneSettings } from './settings-reset';
 type InboundPayload =
     | { type: 'CAMERA_MODE_SWITCH'; value?: 'orbit' | 'fly' }
     | { type: 'CAMERA_RESET' }
-    | { type: 'SKYBOX_SWITCH'; value?: string }
+    | { type: 'SKYBOX_SET'; value?: string }
     | { type: 'ANIMATION_RESET' }
     | { type: 'ANIMATION_PLAY_PAUSE' }
     | { type: 'EDIT_MODE_SET'; value?: boolean }
@@ -227,8 +227,10 @@ const initPostMessageBridge = (global: Global) => {
             case 'CAMERA_RESET':
                 events.fire('inputEvent', 'reset');
                 break;
-            case 'SKYBOX_SWITCH':
-                if (typeof p.value === 'string') events.fire('skyboxSwitch', p.value);
+            case 'SKYBOX_SET':
+                if (typeof p.value === 'string') {
+                    events.fire('skyboxSet', p.value);
+                }
                 break;
             case 'ANIMATION_RESET':
                 events.fire('inputEvent', 'resetAnim');

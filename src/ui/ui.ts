@@ -553,7 +553,7 @@ const initUI = (global: Global) => {
     if (skyboxSelect) {
         skyboxSelect.addEventListener('change', (event) => {
             const value = (event.target as HTMLSelectElement).value;
-            events.fire('skyboxSwitch', value || null);
+            events.fire('skyboxSet', value || null);
         });
 
         events.on('skyboxSelectionSynced', (value?: string | null) => {
