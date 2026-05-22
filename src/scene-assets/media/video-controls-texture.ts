@@ -75,7 +75,7 @@ const SCRATCH_SCREEN = new Vec3();
 const RAY_FAR = new Vec3();
 const RAY_DIR = new Vec3();
 const TO_PLANE = new Vec3();
-const PLANE_NORMAL_LOCAL = new Vec3(0, 0, 1);
+const PLANE_NORMAL_LOCAL = new Vec3(0, 1, 0);
 const PLANE_NORMAL_WORLD = new Vec3();
 const INV_WORLD = new Mat4();
 
@@ -483,7 +483,7 @@ function pickViaRayPlane(
     const lx = SCRATCH_SCREEN.x;
     const ly = SCRATCH_SCREEN.y;
     const lz = SCRATCH_SCREEN.z;
-    if (Math.abs(lx) > 0.52 || Math.abs(ly) > 0.52 || Math.abs(lz) > zSlack) {
+    if (Math.abs(lx) > 0.52 || Math.abs(lz) > 0.52 || Math.abs(ly) > zSlack) {
         vcLog('pick:fail', {
             entryId: debugEntryId,
             reason: 'localBounds',
@@ -497,7 +497,7 @@ function pickViaRayPlane(
 
     // geometry 已 mirror 局部 X；纹理与 composite 均为左上原点
     const px = (0.5 - lx) * texW;
-    const py = (0.5 - ly) * texH;
+    const py = (0.5 - lz) * texH;
     if (px < 0 || py < 0 || px > texW || py > texH) return null;
 
     if (debugEntryId) {
@@ -506,56 +506,7 @@ function pickViaRayPlane(
     return { px, py };
 }
 
-/** 屏幕 [0,1] 归一化坐标判定播控（与肉眼所见一致，自动尝试 U/V 翻转） */
-function hitTestScreenNormalized(
-    u: number,
-    v: number,
-    texW: number,
-    texH: number,
-    layout: VideoControlsLayout
-): VideoControlHit {
-    const chromeTopV = layout.chromeTop / texH;
-    if (v < chromeTopV - 0.01) return 'surface';
-
-    const padU = 16 / texW;
-    const padV = 16 / texH;
-    const playLeftU = layout.playLeft / texW;
-    const playRightU = (layout.playLeft + layout.playSize) / texW;
-    const playTopV = layout.playTop / texH;
-    const playBottomV = (layout.playTop + layout.playSize) / texH;
-
-    if (
-        u >= playLeftU - padU
-        && u <= playRightU + padU
-        && v >= playTopV - padV
-        && v <= playBottomV + padV
-    ) {
-        return 'play';
-    }
-
-    const trackLeftU = layout.trackLeft / texW;
-    const seekTopV = (layout.timeY - layout.fontSize - 6) / texH;
-    const seekBottomV = (layout.trackY + layout.trackH + layout.fontSize + 10) / texH;
-    if (
-        u >= trackLeftU - padU
-        && u < playLeftU - padU * 0.4
-        && v >= seekTopV
-        && v <= seekBottomV
-    ) {
-        return 'seek';
-    }
-
-    return 'surface';
-}
-
-function seekPxFromScreenU(u: number, layout: VideoControlsLayout, texW: number): number {
-    const trackW = Math.max(1, layout.trackRight - layout.trackLeft);
-    const uPx = u * texW;
-    const t = (uPx - layout.trackLeft) / trackW;
-    return layout.trackLeft + Math.max(0, Math.min(1, t)) * trackW;
-}
-
-/** 屏幕粗筛 → 屏幕归一化播控命中 → 纹理像素候选回退 */
+/** 屏幕粗筛 → 射线命中实际 3D quad → 纹理像素播控命中 */
 function resolveControlHitAtCanvas(
     global: Global,
     cam: CameraComponent,
@@ -573,36 +524,6 @@ function resolveControlHitAtCanvas(
     }
 
     const layout = computeVideoControlsLayout(texW, texH);
-    const boxW = Math.max(1, bounds.maxX - bounds.minX);
-    const boxH = Math.max(1, bounds.maxY - bounds.minY);
-    const u0 = (canvasX - bounds.minX) / boxW;
-    const v0 = (canvasY - bounds.minY) / boxH;
-
-    for (const u of [u0, 1 - u0]) {
-        for (const v of [v0, 1 - v0]) {
-            const action = hitTestScreenNormalized(u, v, texW, texH, layout);
-            if (action !== 'play' && action !== 'seek') continue;
-            const px = action === 'seek'
-                ? seekPxFromScreenU(u, layout, texW)
-                : layout.playLeft + layout.playSize * 0.5;
-            if (debugEntryId) {
-                vcLog('hit:resolved', {
-                    entryId: debugEntryId,
-                    via: 'screenNorm',
-                    u,
-                    v,
-                    u0,
-                    v0,
-                    action,
-                    px
-                });
-            }
-            return { px, py: v * texH, action };
-        }
-    }
-
-    const pxScreen = u0 * texW;
-    const pyScreen = v0 * texH;
     const pick = pickViaRayPlane(
         global,
         cam,
@@ -614,6 +535,7 @@ function resolveControlHitAtCanvas(
         zSlack,
         debugEntryId
     );
+    if (!pick) return null;
 
     type Cand = { px: number; py: number; via: string };
     const seen = new Set<string>();
@@ -625,16 +547,8 @@ function resolveControlHitAtCanvas(
         cands.push({ px, py, via });
     };
 
-    if (pick) {
-        add(pick.px, pick.py, 'ray');
-        add(pick.px, texH - pick.py, 'rayFlipY');
-    }
-    add(pxScreen, pyScreen, 'screen');
-    add(pxScreen, texH - pyScreen, 'screenFlipY');
-    if (pick) {
-        add(pxScreen, pick.py, 'screenPx+rayPy');
-        add(pick.px, pyScreen, 'rayPx+screenPy');
-    }
+    add(pick.px, pick.py, 'ray');
+    add(pick.px, texH - pick.py, 'rayFlipY');
 
     let surfaceFallback: { px: number; py: number; action: VideoControlHit } | null = null;
     for (const c of cands) {

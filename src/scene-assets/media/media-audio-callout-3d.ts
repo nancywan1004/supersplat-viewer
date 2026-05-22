@@ -16,6 +16,7 @@ import {
     Color,
     CULLFACE_NONE,
     FILTER_LINEAR,
+    Mat4,
     Mesh,
     MeshInstance,
     PIXELFORMAT_RGBA8,
@@ -57,6 +58,14 @@ const depthClampWgsl = `
 `;
 
 const PROJ_VEC = new Vec3();
+const AUDIO_RAY_FAR = new Vec3();
+const AUDIO_RAY_DIR = new Vec3();
+const AUDIO_TO_PLANE = new Vec3();
+const AUDIO_HIT_WORLD = new Vec3();
+const AUDIO_LOCAL_HIT = new Vec3();
+const AUDIO_INV_WORLD = new Mat4();
+const AUDIO_PLANE_NORMAL_LOCAL = new Vec3(0, 1, 0);
+const AUDIO_PLANE_NORMAL_WORLD = new Vec3();
 const OVERLAY_OPACITY = 0.25;
 
 export const AUDIO_CALLOUT_TEX_W = 512;
@@ -619,60 +628,7 @@ export function initAudioCallout3dSystem(global: Global): () => void {
     };
 }
 
-// --- 屏幕空间点击（与 video 播控类似，基于 mesh 屏幕包围盒） ---
-
-type ScreenBounds = { minX: number; minY: number; maxX: number; maxY: number };
-
-function buildEntityScreenBounds(cam: CameraComponent, entity: Entity): ScreenBounds | null {
-    const scratch = new Vec3();
-    const anyEntity = entity as Entity & {
-        render?: { meshInstances?: { aabb?: { getMin?: () => Vec3; getMax?: () => Vec3; center: Vec3; halfExtents: Vec3 } }[] };
-    };
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    let anyVisible = false;
-
-    const collect = (node: Entity) => {
-        const r = node.render;
-        if (r?.meshInstances) {
-            for (const mi of r.meshInstances) {
-                const aabb = mi.aabb;
-                if (!aabb) continue;
-                const miMin = aabb.getMin?.() ?? new Vec3().copy(aabb.center).sub(aabb.halfExtents);
-                const miMax = aabb.getMax?.() ?? new Vec3().copy(aabb.center).add(aabb.halfExtents);
-                const corners = [
-                    new Vec3(miMin.x, miMin.y, miMin.z),
-                    new Vec3(miMax.x, miMin.y, miMin.z),
-                    new Vec3(miMin.x, miMax.y, miMin.z),
-                    new Vec3(miMax.x, miMax.y, miMin.z),
-                    new Vec3(miMin.x, miMin.y, miMax.z),
-                    new Vec3(miMax.x, miMin.y, miMax.z),
-                    new Vec3(miMin.x, miMax.y, miMax.z),
-                    new Vec3(miMax.x, miMax.y, miMax.z)
-                ];
-                for (const c of corners) {
-                    cam.viewMatrix.transformPoint(c, PROJ_VEC);
-                    if (PROJ_VEC.z >= 0) continue;
-                    cam.worldToScreen(c, scratch);
-                    minX = Math.min(minX, scratch.x);
-                    minY = Math.min(minY, scratch.y);
-                    maxX = Math.max(maxX, scratch.x);
-                    maxY = Math.max(maxY, scratch.y);
-                    anyVisible = true;
-                }
-            }
-        }
-        for (const child of node.children as Entity[]) {
-            collect(child);
-        }
-    };
-
-    collect(entity);
-    if (!anyVisible || maxX <= minX || maxY <= minY) return null;
-    return { minX, minY, maxX, maxY };
-}
+// --- 3D quad 射线点击（避免非正视角下屏幕 AABB 误触） ---
 
 function hitTestPlayNormalized(u: number, v: number, layout: AudioCalloutLayout): boolean {
     const px = layout.playCenterX;
@@ -684,23 +640,56 @@ function hitTestPlayNormalized(u: number, v: number, layout: AudioCalloutLayout)
     return u >= playLeftU && u <= playRightU && v >= playTopV && v <= playBottomV;
 }
 
-/** 屏幕归一化命中；尝试 U/V 翻转以兼容投影镜像（与 video 播控一致）。 */
-function hitTestPlayInBounds(
+function pickCalloutUvViaRayPlane(
+    global: Global,
+    cam: CameraComponent,
+    calloutRoot: Entity,
     canvasX: number,
-    canvasY: number,
-    bounds: ScreenBounds,
-    layout: AudioCalloutLayout
-): boolean {
-    const boxW = Math.max(1, bounds.maxX - bounds.minX);
-    const boxH = Math.max(1, bounds.maxY - bounds.minY);
-    const u0 = (canvasX - bounds.minX) / boxW;
-    const v0 = (canvasY - bounds.minY) / boxH;
-    for (const u of [u0, 1 - u0]) {
-        for (const v of [v0, 1 - v0]) {
-            if (hitTestPlayNormalized(u, v, layout)) return true;
-        }
+    canvasY: number
+): { u: number; v: number } | null {
+    const rayOrigin = global.camera.getPosition();
+    cam.screenToWorld(canvasX, canvasY, cam.farClip, AUDIO_RAY_FAR);
+    AUDIO_RAY_DIR.sub2(AUDIO_RAY_FAR, rayOrigin);
+    const rayLen = AUDIO_RAY_DIR.length();
+    if (rayLen < 1e-5) return null;
+    AUDIO_RAY_DIR.mulScalar(1 / rayLen);
+
+    const planePoint = calloutRoot.getPosition();
+    calloutRoot.getWorldTransform().transformVector(AUDIO_PLANE_NORMAL_LOCAL, AUDIO_PLANE_NORMAL_WORLD);
+    AUDIO_PLANE_NORMAL_WORLD.normalize();
+    AUDIO_TO_PLANE.sub2(planePoint, rayOrigin);
+    if (AUDIO_PLANE_NORMAL_WORLD.dot(AUDIO_TO_PLANE) < 0) {
+        AUDIO_PLANE_NORMAL_WORLD.mulScalar(-1);
     }
-    return false;
+
+    const denom = AUDIO_RAY_DIR.dot(AUDIO_PLANE_NORMAL_WORLD);
+    if (Math.abs(denom) < 1e-5) return null;
+
+    const t = AUDIO_TO_PLANE.dot(AUDIO_PLANE_NORMAL_WORLD) / denom;
+    if (t < 0) return null;
+
+    AUDIO_HIT_WORLD.set(
+        rayOrigin.x + AUDIO_RAY_DIR.x * t,
+        rayOrigin.y + AUDIO_RAY_DIR.y * t,
+        rayOrigin.z + AUDIO_RAY_DIR.z * t
+    );
+
+    cam.viewMatrix.transformPoint(AUDIO_HIT_WORLD, PROJ_VEC);
+    if (PROJ_VEC.z >= 0) return null;
+
+    AUDIO_INV_WORLD.invert(calloutRoot.getWorldTransform());
+    AUDIO_INV_WORLD.transformPoint(AUDIO_HIT_WORLD, AUDIO_LOCAL_HIT);
+    const lx = AUDIO_LOCAL_HIT.x;
+    const ly = AUDIO_LOCAL_HIT.y;
+    const lz = AUDIO_LOCAL_HIT.z;
+    if (Math.abs(lx) > 0.52 || Math.abs(lz) > 0.52 || Math.abs(ly) > 0.12) {
+        return null;
+    }
+
+    return {
+        u: lx + 0.5,
+        v: 0.5 - lz
+    };
 }
 
 function toggleAudioPlayback(global: Global, entry: ScenePlacedItem, m: PlacedAudioRuntime): void {
@@ -747,16 +736,8 @@ function findAudioPlayHit(global: Global, canvasX: number, canvasY: number): {
         const callout = calloutsByEntryId.get(entry.id);
         if (!callout?.calloutRoot.enabled) continue;
 
-        const bounds = buildEntityScreenBounds(cam, callout.calloutRoot);
-        if (!bounds) continue;
-        if (
-            canvasX < bounds.minX - 8
-            || canvasX > bounds.maxX + 8
-            || canvasY < bounds.minY - 8
-            || canvasY > bounds.maxY + 8
-        ) {
-            continue;
-        }
+        const hitUv = pickCalloutUvViaRayPlane(global, cam, callout.calloutRoot, canvasX, canvasY);
+        if (!hitUv) continue;
         const layout = measureCtx
             ? computeAudioCalloutLayout(AUDIO_CALLOUT_TEX_W, measureCtx, entry.name || '音频')
             : {
@@ -764,7 +745,17 @@ function findAudioPlayHit(global: Global, canvasX: number, canvasY: number): {
                 playCenterY: LABEL_TOP + AUDIO_TOOLTIP_TEX_H + LABEL_PLAY_GAP + PLAY_ICON_H * 0.5,
                 playRadius: Math.max(PLAY_ICON_W, PLAY_ICON_H) * 0.5
             };
-        if (!hitTestPlayInBounds(canvasX, canvasY, bounds, layout)) continue;
+        let playHit = false;
+        for (const u of [hitUv.u, 1 - hitUv.u]) {
+            for (const v of [hitUv.v, 1 - hitUv.v]) {
+                if (hitTestPlayNormalized(u, v, layout)) {
+                    playHit = true;
+                    break;
+                }
+            }
+            if (playHit) break;
+        }
+        if (!playHit) continue;
 
         const depth = eye.distance(entry.entity.getPosition());
         if (!best || depth < best.depth) {
@@ -810,20 +801,6 @@ export function tryClaimAudioCalloutPointerDown(global: Global, e: PointerEvent)
     return true;
 }
 
-function isPointInScreenBounds(
-    canvasX: number,
-    canvasY: number,
-    bounds: ScreenBounds,
-    pad = 8
-): boolean {
-    return (
-        canvasX >= bounds.minX - pad
-        && canvasX <= bounds.maxX + pad
-        && canvasY >= bounds.minY - pad
-        && canvasY <= bounds.maxY + pad
-    );
-}
-
 /** 点击 callout 任意可见区域时选中音频（编辑模式场景点击，非仅播放钮）。 */
 export function findAudioCalloutSelectHitFromClient(
     global: Global,
@@ -845,8 +822,8 @@ export function findAudioCalloutSelectHitFromClient(
         const callout = calloutsByEntryId.get(entry.id);
         if (!callout?.calloutRoot.enabled) continue;
 
-        const bounds = buildEntityScreenBounds(cam, callout.calloutRoot);
-        if (!bounds || !isPointInScreenBounds(pt.x, pt.y, bounds)) continue;
+        const hitUv = pickCalloutUvViaRayPlane(global, cam, callout.calloutRoot, pt.x, pt.y);
+        if (!hitUv) continue;
 
         const depth = eye.distance(entry.entity.getPosition());
         if (!best || depth < best.depth) {
