@@ -41,6 +41,25 @@
             text-overflow: ellipsis;
             white-space: nowrap;
         }
+        .scene-asset-hotspot-autoplay {
+            flex-shrink: 0;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            color: $clr-text-dark;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+            input[type='checkbox'] {
+                margin: 0;
+                cursor: pointer;
+                accent-color: $clr-accent;
+            }
+            &:hover {
+                color: $clr-text;
+            }
+        }
         .scene-asset-visibility {
             flex-shrink: 0;
             width: 32px;

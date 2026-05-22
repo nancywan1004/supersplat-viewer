@@ -89,7 +89,7 @@ export type ScenePlacedMediaRuntime = {
     manualLatch?: boolean;
     /** 当前是否为热区有声赢家 */
     hotspotPlaying?: boolean;
-    /** 上一评估帧是否在热区内（距离 + 视锥，与 qualifyPlacedMedia 一致） */
+    /** 上一评估帧是否在热区内（video：视轴深度+视锥；audio：欧氏距离） */
     inHotspotZone?: boolean;
 };
 

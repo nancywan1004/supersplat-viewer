@@ -11,9 +11,14 @@ import {
     ensureScenePlacedMediaRuntime,
     getPlacedMediaRuntime,
     type PlacedAudioRuntime,
+    type PlacedMediaRuntime,
     type PlacedVideoRuntime
 } from './media-runtime';
-import { cameraForwardWorld, evaluateMediaHotspotAnchor } from './media-view-depth';
+import {
+    cameraForwardWorld,
+    evaluateAudioHotspotAnchor,
+    evaluateMediaHotspotAnchor
+} from './media-view-depth';
 import {
     pausePlacedVideoTexture,
     playPlacedVideoTexture,
@@ -38,6 +43,26 @@ function isPlacedAssetsRootEnabled(global: Global): boolean {
 
 function isHotspotAutoplayEnabled(entry: ScenePlacedItem): boolean {
     return entry.hotspotAutoplay !== false;
+}
+
+/** 隐藏或未启用、关闭热区自动播的 video/audio 不参与热区判定与声道互斥 */
+function isPlacedMediaHotspotEligible(entry: ScenePlacedItem, kind: 'video' | 'audio'): boolean {
+    if (!entry?.entity || entry.visible === false || entry.entity.enabled === false) {
+        return false;
+    }
+    if (!isHotspotAutoplayEnabled(entry)) {
+        return false;
+    }
+    const media = getPlacedMediaRuntime(entry.entity);
+    return !!media && media.kind === kind;
+}
+
+function pickQualifiedSoundId(
+    desiredId: string | null,
+    qualified: QualifiedMedia[]
+): string | null {
+    if (!desiredId) return null;
+    return qualified.some((q) => q.id === desiredId) ? desiredId : null;
 }
 
 type QualifiedMedia = {
@@ -69,32 +94,28 @@ function readSceneHotspotParams(global: Global): SceneHotspotParams {
 type HotspotZoneEval = { inZone: boolean; depthM?: number };
 
 /**
- * 单条目是否处于热区：视轴深度 ≤ 触发半径，且锚点在视锥锥内（与 settings.sceneMediaHotspot 一致）。
+ * 单条目是否处于热区：video = 视轴深度 + 视锥；audio = 欧氏距离（与 settings.sceneMediaHotspot 一致）。
  */
 function evaluateEntryHotspotZone(
     entry: ScenePlacedItem,
     kind: 'video' | 'audio',
     params: SceneHotspotParams
 ): HotspotZoneEval {
-    if (!entry?.entity || entry.visible === false || entry.entity.enabled === false) {
-        return { inZone: false };
-    }
-    if (!isHotspotAutoplayEnabled(entry)) {
-        return { inZone: false };
-    }
-    const media = getPlacedMediaRuntime(entry.entity);
-    if (!media || media.kind !== kind) {
+    if (!isPlacedMediaHotspotEligible(entry, kind)) {
         return { inZone: false };
     }
 
-    const maxDepthM = kind === 'video' ? params.videoTriggerDistanceM : params.audioTriggerDistanceM;
-    const evalResult = evaluateMediaHotspotAnchor(
-        params.eye,
-        params.forward,
-        entry.entity.getPosition(),
-        maxDepthM,
-        params.cosCone
-    );
+    const anchor = entry.entity.getPosition();
+    const evalResult =
+        kind === 'audio'
+            ? evaluateAudioHotspotAnchor(params.eye, anchor, params.audioTriggerDistanceM)
+            : evaluateMediaHotspotAnchor(
+                params.eye,
+                params.forward,
+                anchor,
+                params.videoTriggerDistanceM,
+                params.cosCone
+            );
     if (!evalResult.ok) {
         return { inZone: false };
     }
@@ -177,13 +198,13 @@ function setEntryHotspotPlaying(
     global.events.fire('mediaOverlay:playbackChanged', { id: entry.id, kind, playing });
 }
 
-/** 离开热区（距离+视锥）后清除手动暂停，下次进入可再次热区自动播放 */
+/** 离开热区（距离）后清除手动暂停，下次进入可再次热区自动播放 */
 function clearUserPausedAfterHotspotExit(entry: ScenePlacedItem): void {
     if (!entry.mediaRuntime?.userPaused) return;
     entry.mediaRuntime.userPaused = false;
 }
 
-/** 检测从热区内 → 热区外的边沿，仅在真正离开距离+视锥时重置 userPaused */
+/** 检测从热区内 → 热区外的边沿，仅在真正离开热区距离时重置 userPaused */
 function syncHotspotZoneTransition(entry: ScenePlacedItem, inZone: boolean): void {
     const wasInZone = entry.mediaRuntime?.inHotspotZone === true;
     if (wasInZone && !inZone) {
@@ -194,11 +215,34 @@ function syncHotspotZoneTransition(entry: ScenePlacedItem, inZone: boolean): voi
     }
 }
 
-function pauseAudioAndVideoPosters(global: Global): void {
+/** 编辑非预览下用户通过 callout / 视频播控手动播放（非热区自动播）。 */
+function isUserManualMediaActive(entry: ScenePlacedItem, m: PlacedMediaRuntime): boolean {
+    const rt = entry.mediaRuntime;
+    if (!rt || rt.userPaused) return false;
+    if (m.kind === 'audio') {
+        return !m.audioEl.paused && m.audioEl.volume > 0;
+    }
+    if (m.kind === 'video') {
+        return m.isLive && !m.videoEl.paused && !m.videoEl.ended;
+    }
+    return false;
+}
+
+function pauseAudioAndVideoPosters(global: Global, options?: { preserveManualPlayback?: boolean }): void {
+    const preserveManual =
+        options?.preserveManualPlayback === true && isEditModeWithoutPreview(global);
     const list = global.state.scenePlacedEntities ?? [];
     for (const entry of list) {
         const m = entry.entity ? getPlacedMediaRuntime(entry.entity) : undefined;
         if (!m) continue;
+        if (
+            preserveManual
+            && (m.kind === 'video' || m.kind === 'audio')
+            && isPlacedMediaHotspotEligible(entry, m.kind)
+            && isUserManualMediaActive(entry, m)
+        ) {
+            continue;
+        }
         if (m.kind === 'video' && entry.entity) {
             pausePlacedVideoTexture(m);
             setEntryHotspotPlaying(global, entry, 'video', false);
@@ -243,14 +287,22 @@ function applyHotspotPlayback(
     const aChanged = desiredAudioSound !== evalState.lastAudioSoundId;
     if ((vChanged || aChanged) && (evalState.lastVideoSoundId || evalState.lastAudioSoundId)) {
         if (now - evalState.lastSwitchMs < cooldown) {
-            desiredVideoSound = evalState.lastVideoSoundId;
-            desiredAudioSound = evalState.lastVideoSoundId ? null : evalState.lastAudioSoundId;
+            desiredVideoSound =
+                pickQualifiedSoundId(evalState.lastVideoSoundId, videos) ?? (videos[0]?.id ?? null);
+            desiredAudioSound = desiredVideoSound
+                ? null
+                : (pickQualifiedSoundId(evalState.lastAudioSoundId, audios) ?? (audios[0]?.id ?? null));
         } else {
             evalState.lastSwitchMs = now;
         }
     } else if (vChanged || aChanged) {
         evalState.lastSwitchMs = now;
     }
+
+    desiredVideoSound = pickQualifiedSoundId(desiredVideoSound, videos) ?? (videos[0]?.id ?? null);
+    desiredAudioSound = desiredVideoSound
+        ? null
+        : (pickQualifiedSoundId(desiredAudioSound, audios) ?? (audios[0]?.id ?? null));
 
     evalState.lastVideoSoundId = desiredVideoSound;
     evalState.lastAudioSoundId = desiredAudioSound;
@@ -265,6 +317,11 @@ function applyHotspotPlayback(
         if (m.kind === 'video') {
             const entity = entry.entity;
             if (!entity) continue;
+            if (!isPlacedMediaHotspotEligible(entry, 'video')) {
+                pausePlacedVideoTexture(m);
+                setEntryHotspotPlaying(global, entry, 'video', false);
+                continue;
+            }
             const { inZone: inHotspotZone } = evaluateEntryHotspotZone(entry, 'video', hotspotParams);
             syncHotspotZoneTransition(entry, inHotspotZone);
             const winner = entry.id === desiredVideoSound;
@@ -294,6 +351,11 @@ function applyHotspotPlayback(
 
         if (m.kind === 'audio') {
             const a = m.audioEl;
+            if (!isPlacedMediaHotspotEligible(entry, 'audio')) {
+                pausePlacedAudio(m);
+                setEntryHotspotPlaying(global, entry, 'audio', false);
+                continue;
+            }
             const { inZone: inHotspotZone } = evaluateEntryHotspotZone(entry, 'audio', hotspotParams);
             syncHotspotZoneTransition(entry, inHotspotZone);
 
@@ -397,7 +459,7 @@ export function initMediaHotspotController(global: Global): () => void {
         }
         uploadToggle = !uploadToggle;
         if (isEditModeWithoutPreview(global)) {
-            pauseAudioAndVideoPosters(global);
+            pauseAudioAndVideoPosters(global, { preserveManualPlayback: true });
         } else {
             runMediaHotspotEvaluation(global, evalState);
         }

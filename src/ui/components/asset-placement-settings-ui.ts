@@ -1,4 +1,5 @@
 import { applyMediaHotspotAutoplay, applyVideoHorizontalCurvature } from '../../asset-placement-handler';
+import { pushEditHistory } from '../../edit-history';
 import { getSceneAssetListHTML, bindSceneAssetList } from './scene-asset-list-ui';
 import { loadGsplatAsset } from '../../loaders/gsplat-asset-loader';
 import { clampVideoHorizontalCurvature, VIDEO_HORIZONTAL_MAX_ARC_DEG } from '../../scene-assets/media/curved-billboard-mesh';
@@ -8,7 +9,7 @@ import {
     ensureSceneMediaHotspot,
     patchSceneMediaHotspot
 } from '../../settings-serialize/settings-serialize-helper';
-import { getSelectedSceneAssetType } from '../../state-selectors';
+import { getSelectedSceneAssetType, getSelectedScenePlacedItem } from '../../state-selectors';
 import type { Global, AssetLibraryItem, AssetLibraryType } from '../../types';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
@@ -176,11 +177,6 @@ export function getAssetPlacementSettingsHTML(): string {
                 <label for="mhAudioDist">音频触发距离 (m)</label>
                 <input type="range" id="mhAudioDist" min="1" max="80" step="0.5" />
                 <span id="mhAudioDistVal" class="settingsValueLabel"></span>
-            </div>
-            <div class="settingsRow">
-                <label for="mhCone" title="半角；总张角约为 2× 该值（如 60°≈120° 视锥）">视锥半角 (°)</label>
-                <input type="range" id="mhCone" min="15" max="85" step="1" />
-                <span id="mhConeVal" class="settingsValueLabel"></span>
             </div>
             <div class="settingsRow">
                 <button type="button" id="mhBaselineBtn" class="settingsButton">从当前视角设基准距离</button>
@@ -400,11 +396,9 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
 
     const mhVideoDist = root.querySelector<HTMLInputElement>('#mhVideoDist');
     const mhAudioDist = root.querySelector<HTMLInputElement>('#mhAudioDist');
-    const mhCone = root.querySelector<HTMLInputElement>('#mhCone');
     const mhBaselineBtn = root.querySelector<HTMLButtonElement>('#mhBaselineBtn');
     const mhVideoDistVal = root.querySelector<HTMLSpanElement>('#mhVideoDistVal');
     const mhAudioDistVal = root.querySelector<HTMLSpanElement>('#mhAudioDistVal');
-    const mhConeVal = root.querySelector<HTMLSpanElement>('#mhConeVal');
 
     const editUiTransport = getEditUiTransport(global);
 
@@ -412,16 +406,13 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         const sm = ensureSceneMediaHotspot(global.settings as ExperienceSettings);
         if (mhVideoDist) mhVideoDist.value = String(sm.videoTriggerDistanceM);
         if (mhAudioDist) mhAudioDist.value = String(sm.audioTriggerDistanceM);
-        if (mhCone) mhCone.value = String(sm.coneHalfDeg);
         if (mhVideoDistVal) mhVideoDistVal.textContent = `${sm.videoTriggerDistanceM.toFixed(1)} m`;
         if (mhAudioDistVal) mhAudioDistVal.textContent = `${sm.audioTriggerDistanceM.toFixed(1)} m`;
-        if (mhConeVal) mhConeVal.textContent = `${sm.coneHalfDeg}°`;
     };
 
     const buildHotspotPatch = (): Partial<SceneMediaHotspotSettings> => ({
         videoTriggerDistanceM: mhVideoDist ? Number(mhVideoDist.value) : undefined,
-        audioTriggerDistanceM: mhAudioDist ? Number(mhAudioDist.value) : undefined,
-        coneHalfDeg: mhCone ? Number(mhCone.value) : undefined
+        audioTriggerDistanceM: mhAudioDist ? Number(mhAudioDist.value) : undefined
     });
 
     const onHotspotField = () => {
@@ -438,7 +429,6 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
     syncHotspotUi();
     mhVideoDist?.addEventListener('input', onHotspotField);
     mhAudioDist?.addEventListener('input', onHotspotField);
-    mhCone?.addEventListener('input', onHotspotField);
 
     const onHotspotExternal = () => syncHotspotUi();
     events.on('sceneMediaHotspot:changed', onHotspotExternal);
@@ -511,18 +501,21 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
     const mediaHotspotAutoplayCheck = root.querySelector<HTMLInputElement>('#mediaHotspotAutoplayCheck');
 
     const readSelectedMediaAutoplay = (): boolean => {
-        const id = state.selectedSceneEntityId;
-        if (!id) return true;
-        const entry = state.scenePlacedEntities?.find((it) => it?.id === id);
-        if (entry && entry.hotspotAutoplay === false) return false;
-        const sa = (global.settings as ExperienceSettings).sceneAssets?.find((a) => a.id === id);
+        const entry = getSelectedScenePlacedItem(state);
+        if (!entry) return true;
+        if (entry.hotspotAutoplay === false) return false;
+        const sa = (global.settings as ExperienceSettings).sceneAssets?.find((a) => a.id === entry.id);
         return sa?.hotspotAutoplay !== false;
     };
 
     const syncMediaAutoplayUi = () => {
-        const t = state.selectedSceneEntityId
-            ? getSelectedSceneAssetType(state, global.settings.sceneAssets)
-            : null;
+        const entry = getSelectedScenePlacedItem(state);
+        const t =
+            entry?.assetType === 'video' || entry?.assetType === 'audio'
+                ? entry.assetType
+                : state.selectedSceneEntityId
+                    ? getSelectedSceneAssetType(state, global.settings.sceneAssets)
+                    : null;
         const isMedia = t === 'video' || t === 'audio';
         if (mediaAutoplayPanel) {
             mediaAutoplayPanel.classList.toggle('hidden', !isMedia);
@@ -534,12 +527,19 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
     const onMediaAutoplayChange = () => {
         const id = state.selectedSceneEntityId;
         if (!id || !mediaHotspotAutoplayCheck) return;
-        const t = getSelectedSceneAssetType(state, global.settings.sceneAssets);
+        const entry = getSelectedScenePlacedItem(state);
+        const t =
+            entry?.assetType === 'video' || entry?.assetType === 'audio'
+                ? entry.assetType
+                : getSelectedSceneAssetType(state, global.settings.sceneAssets);
         if (t !== 'video' && t !== 'audio') return;
         const value = mediaHotspotAutoplayCheck.checked;
-        applyMediaHotspotAutoplay(global, id, value);
         if (editUiTransport === 'message-bridge') {
             sendEditProtocolMessage({ type: 'ASSET_MEDIA_HOTSPOT_AUTOPLAY_SET', id, value });
+            return;
+        }
+        if (applyMediaHotspotAutoplay(global, id, value)) {
+            pushEditHistory(global, 'toggle media hotspot autoplay');
         }
     };
 
@@ -563,7 +563,6 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         mediaUrlInput.removeEventListener('keydown', onMediaUrlKeydown);
         mhVideoDist?.removeEventListener('input', onHotspotField);
         mhAudioDist?.removeEventListener('input', onHotspotField);
-        mhCone?.removeEventListener('input', onHotspotField);
         mhBaselineBtn?.removeEventListener('click', onBaselineClick);
         events.off('sceneMediaHotspot:changed', onHotspotExternal);
         videoCurvatureInput?.removeEventListener('input', onVideoCurvatureInput);

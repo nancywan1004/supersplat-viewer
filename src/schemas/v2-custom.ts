@@ -162,13 +162,13 @@ type LocalLightRegion = {
     linkedLightId?: string | null;
 };
 
-/** 场景音视频热区：仅全局触发距离与视锥半角（持久化于 settings 根） */
+/** 场景音视频热区：视频视轴深度+视锥，音频欧氏距离（持久化于 settings 根） */
 type SceneMediaHotspotSettings = {
-    /** 视频触发球半径（米） */
+    /** 视频触发半径（米，沿相机前向 viewDepth） */
     videoTriggerDistanceM: number;
-    /** 音频触发球半径（米） */
+    /** 音频触发半径（米，欧氏） */
     audioTriggerDistanceM: number;
-    /** 相机前向与「相机→锚点」夹角半角上限（度），总锥约 `2 * coneHalfDeg` */
+    /** 视频视锥半角（度）；总锥约 `2 × coneHalfDeg` */
     coneHalfDeg: number;
 };
 

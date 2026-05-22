@@ -4,6 +4,7 @@ import {
     Entity,
     Vec3,
     Quat,
+    Color,
     StandardMaterial,
     CULLFACE_NONE,
     BLEND_NONE,
@@ -48,6 +49,8 @@ import {
     PLACED_VIDEO_PLACEMENT_TIMEOUT_MS,
     unmountPlacedVideoFromDom
 } from './scene-assets/media/video-texture';
+import { AUDIO_CALLOUT_WORLD_H, findAudioCalloutSelectHitFromClient } from './scene-assets/media/media-audio-callout-3d';
+import { getSceneAssetPickLayer, getSceneAssetPickerLayers } from './scene-assets/scene-asset-pick-layer';
 import { removeSceneAssetFromSettings } from './settings-serialize/settings-serialize';
 import { syncGsplatShadowCastingFromSettings } from './vfx/shadow/gsplat-shadow-cast';
 import type { ExperienceSettings } from './settings';
@@ -449,7 +452,7 @@ async function instantiateVideo(
     return entity;
 }
 
-async function instantiateAudio(_app: AppBase, item: AssetLibraryItem, position: Vec3): Promise<Entity> {
+async function instantiateAudio(app: AppBase, item: AssetLibraryItem, position: Vec3): Promise<Entity> {
     const url = item.url || item.filename;
     if (!url) {
         throw new Error('audio asset has no url');
@@ -461,6 +464,27 @@ async function instantiateAudio(_app: AppBase, item: AssetLibraryItem, position:
 
     const root = new Entity(item.name || 'audio');
     root.setPosition(position);
+
+    // 音频 callout 在 HotspotBase/Overlay；场景 Picker 仅扫 World 层，需不可见拾取体才能选中与挂 Gizmo。
+    const pickMat = new StandardMaterial();
+    pickMat.useLighting = false;
+    pickMat.diffuse = Color.BLACK;
+    pickMat.opacity = 0.001;
+    pickMat.alphaTest = 0;
+    pickMat.depthWrite = false;
+    pickMat.blendType = BLEND_NONE;
+    pickMat.cull = CULLFACE_NONE;
+    pickMat.update();
+    const pickRadius = AUDIO_CALLOUT_WORLD_H * 0.45;
+    const pickLayer = getSceneAssetPickLayer(app);
+    root.addComponent('render', {
+        type: 'sphere',
+        material: pickMat,
+        layers: [pickLayer.id],
+        castShadows: false,
+        receiveShadows: false
+    });
+    root.setLocalScale(pickRadius, pickRadius, pickRadius);
 
     setPlacedMediaRuntime(root, { kind: 'audio', audioEl: audio });
     root.on('destroy', () => {
@@ -1049,6 +1073,17 @@ export function initAssetPlacementHandler(
         const list = state.scenePlacedEntities ?? [];
         if (list.length === 0) return true;
 
+        const audioSelect = findAudioCalloutSelectHitFromClient(global, clientX, clientY);
+        if (audioSelect) {
+            const prevSelectedId = state.selectedSceneEntityId;
+            state.selectedSceneEntityId = audioSelect.id;
+            events.fire('sceneAsset:selected', { source: 'scene' });
+            if (prevSelectedId !== audioSelect.id) {
+                events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
+            }
+            return true;
+        }
+
         const pickerScale = 0.5;
         const pickW = Math.max(1, Math.floor(width() * pickerScale));
         const pickH = Math.max(1, Math.floor(height() * pickerScale));
@@ -1063,8 +1098,7 @@ export function initAssetPlacementHandler(
             sceneAssetPicker = new (pc as any).Picker(app, pickW, pickH, false);
         }
         sceneAssetPicker.resize(pickW, pickH);
-        const worldLayer = app.scene.layers.getLayerByName('World');
-        sceneAssetPicker.prepare(camera.camera, app.scene, worldLayer ? [worldLayer] : undefined);
+        sceneAssetPicker.prepare(camera.camera, app.scene, getSceneAssetPickerLayers(app));
 
         sceneAssetPicker.getSelectionAsync(pickX, pickY, 1, 1).then((selection: any[]) => {
             if (selection.length === 0) return;
