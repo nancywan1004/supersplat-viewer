@@ -1,18 +1,11 @@
 <svg width="32" height="34" viewBox="0 0 32 34" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g opacity="0.57">
-<circle cx="16.0015" cy="17.334" r="16" fill="black"/>
-<circle cx="16.0015" cy="17.334" r="15.3333" stroke="white" stroke-opacity="0.1" stroke-width="1.33333"/>
-</g>
 <g opacity="0.84" filter="url(#filter1_f_7723_23381)">
 <circle cx="14.6668" cy="14.6673" r="9.33333" fill="#2061FD"/>
 </g>
 <g opacity="0.93" filter="url(#filter2_f_7723_23381)">
 <circle cx="18.6681" cy="21.3327" r="6.66667" fill="#20A1FD"/>
 </g>
-<g opacity="0.3">
-<circle cx="16.0015" cy="17.334" r="16" fill="black" fill-opacity="0.11"/>
-<circle cx="16.0015" cy="17.334" r="15.3333" stroke="white" stroke-opacity="0.1" stroke-width="1.33333"/>
-</g>
+<circle cx="16.0015" cy="17.334" r="15.3333" fill="#2061FD" fill-opacity="0.14"/>
 <circle cx="16.0015" cy="17.334" r="15.3333" stroke="#2061FD" stroke-width="1.33333"/>
 <path d="M21.4158 17.3627C21.7161 17.6029 21.7161 18.0596 21.4158 18.2998L12.9763 25.0514C12.5834 25.3657 12.0015 25.086 12.0015 24.5829L12.0015 11.0796C12.0015 10.5765 12.5834 10.2968 12.9763 10.6111L21.4158 17.3627Z" fill="white"/>
 <defs>

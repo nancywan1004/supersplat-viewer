@@ -32,6 +32,7 @@ import type { Global, ScenePlacedItem } from '../../types';
 import { readViewMediaMuted } from '../../view-settings';
 import { ensureHotspotDepthLayers, type HotspotDepthLayers } from '../hotspot-depth-layers';
 import { getSceneAssetPickLayer } from '../scene-asset-pick-layer';
+import { userPauseSceneMedia, userPlaySceneMedia } from './scene-media-playback';
 import {
     ensureScenePlacedMediaRuntime,
     getPlacedMediaRuntime,
@@ -696,29 +697,13 @@ function toggleAudioPlayback(global: Global, entry: ScenePlacedItem, m: PlacedAu
     if (readViewMediaMuted(global)) return;
 
     const a = m.audioEl;
-    const rt = ensureScenePlacedMediaRuntime(entry);
     if (a.paused || a.volume === 0) {
-        rt.userPaused = false;
-        a.volume = 1;
-        a.play().catch(() => {});
+        userPlaySceneMedia(global, entry);
     } else {
-        rt.userPaused = true;
-        try {
-            a.pause();
-        } catch {
-            // ignore
-        }
-        a.volume = 0;
+        userPauseSceneMedia(global, entry);
     }
     const callout = calloutsByEntryId.get(entry.id);
     if (callout) syncCalloutTexture(global, entry, callout, m);
-    global.events.fire('mediaOverlay:playbackChanged', {
-        id: entry.id,
-        kind: 'audio',
-        playing: isAudioVisuallyPlaying(global, m)
-    });
-    global.events.fire('mediaOverlay:userPlayback');
-    global.events.fire('mediaHotspot:userActivate');
 }
 
 function findAudioPlayHit(global: Global, canvasX: number, canvasY: number): {

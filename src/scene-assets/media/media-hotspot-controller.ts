@@ -1,5 +1,6 @@
 /**
- * 场景已放置 **video / audio** 的热区自动播控（Viewer 或 **编辑 + 预览模式**）。
+ * 场景已放置 video/audio 的**热区评估**（距离、视锥、赢家、冷却）。
+ * 实际 play/pause / 互斥 / 用户意图见 {@link ./scene-media-playback.ts}。
  */
 
 import * as pc from 'playcanvas';
@@ -10,8 +11,6 @@ import { readViewMediaMuted } from '../../view-settings';
 import {
     ensureScenePlacedMediaRuntime,
     getPlacedMediaRuntime,
-    type PlacedAudioRuntime,
-    type PlacedMediaRuntime,
     type PlacedVideoRuntime
 } from './media-runtime';
 import {
@@ -20,10 +19,15 @@ import {
     evaluateMediaHotspotAnchor
 } from './media-view-depth';
 import {
-    pausePlacedVideoTexture,
-    playPlacedVideoTexture,
-    tickPlacedVideoTextureUploads
-} from './video-texture';
+    clearAllSceneMediaPlaybackFlags,
+    clearSceneMediaUserSession,
+    getActiveSceneMediaEntryId,
+    isSceneMediaEntryBlockedByActive,
+    pauseAllSceneMedia,
+    pauseSceneMediaEntry,
+    playSceneMediaEntry
+} from './scene-media-playback';
+import { tickPlacedVideoTextureUploads } from './video-texture';
 
 const EVAL_INTERVAL_MS = 120;
 /** 不写入 settings：有声赢家切换冷却（毫秒） */
@@ -93,9 +97,6 @@ function readSceneHotspotParams(global: Global): SceneHotspotParams {
 
 type HotspotZoneEval = { inZone: boolean; depthM?: number };
 
-/**
- * 单条目是否处于热区：video = 视轴深度 + 视锥；audio = 欧氏距离（与 settings.sceneMediaHotspot 一致）。
- */
 function evaluateEntryHotspotZone(
     entry: ScenePlacedItem,
     kind: 'video' | 'audio',
@@ -105,7 +106,7 @@ function evaluateEntryHotspotZone(
         return { inZone: false };
     }
 
-    const anchor = entry.entity.getPosition();
+    const anchor = entry.entity!.getPosition();
     const evalResult =
         kind === 'audio'
             ? evaluateAudioHotspotAnchor(params.eye, anchor, params.audioTriggerDistanceM)
@@ -165,58 +166,12 @@ function isEditModeWithoutPreview(global: Global): boolean {
     return state.editMode === true && state.previewMode !== true;
 }
 
-function pausePlacedAudio(m: PlacedAudioRuntime): void {
-    try {
-        m.audioEl.pause();
-    } catch {
-        // ignore
-    }
-    m.audioEl.volume = 0;
-}
-
-function clearAllHotspotPlayingFlags(global: Global): void {
-    const { events } = global;
-    for (const entry of global.state.scenePlacedEntities ?? []) {
-        if (!entry.mediaRuntime?.hotspotPlaying) continue;
-        ensureScenePlacedMediaRuntime(entry).hotspotPlaying = false;
-        const kind = entry.assetType === 'video' ? 'video' : entry.assetType === 'audio' ? 'audio' : null;
-        if (kind) {
-            events.fire('mediaOverlay:playbackChanged', { id: entry.id, kind, playing: false });
-        }
-    }
-}
-
-function setEntryHotspotPlaying(
-    global: Global,
-    entry: ScenePlacedItem,
-    kind: 'video' | 'audio',
-    playing: boolean
-): void {
-    const rt = ensureScenePlacedMediaRuntime(entry);
-    if (rt.hotspotPlaying === playing) return;
-    rt.hotspotPlaying = playing;
-    global.events.fire('mediaOverlay:playbackChanged', { id: entry.id, kind, playing });
-}
-
-/** 离开热区（距离）后清除手动暂停，下次进入可再次热区自动播放 */
+/** 离开热区后清除 userPaused，下次进入可再次热区自动播放 */
 function clearUserPausedAfterHotspotExit(entry: ScenePlacedItem): void {
     if (!entry.mediaRuntime?.userPaused) return;
     entry.mediaRuntime.userPaused = false;
 }
 
-/**
- * 进入预览或观看（退出编辑）时清除编辑期手动播控标记，使热区自动播与 Viewer 一致。
- */
-function clearAllUserManualMediaOverrides(global: Global): void {
-    for (const entry of global.state.scenePlacedEntities ?? []) {
-        const rt = entry.mediaRuntime;
-        if (!rt) continue;
-        rt.userPaused = false;
-        rt.manualLatch = false;
-    }
-}
-
-/** 检测从热区内 → 热区外的边沿，仅在真正离开热区距离时重置 userPaused */
 function syncHotspotZoneTransition(entry: ScenePlacedItem, inZone: boolean): void {
     const wasInZone = entry.mediaRuntime?.inHotspotZone === true;
     if (wasInZone && !inZone) {
@@ -227,59 +182,12 @@ function syncHotspotZoneTransition(entry: ScenePlacedItem, inZone: boolean): voi
     }
 }
 
-/** 编辑非预览下用户通过 callout / 视频播控手动播放（非热区自动播）。 */
-function isUserManualMediaActive(entry: ScenePlacedItem, m: PlacedMediaRuntime): boolean {
-    const rt = entry.mediaRuntime;
-    if (!rt || rt.userPaused) return false;
-    if (m.kind === 'audio') {
-        return !m.audioEl.paused && m.audioEl.volume > 0;
-    }
-    if (m.kind === 'video') {
-        return m.isLive && !m.videoEl.paused && !m.videoEl.ended;
-    }
-    return false;
-}
-
-function pauseAudioAndVideoPosters(global: Global, options?: { preserveManualPlayback?: boolean }): void {
-    const preserveManual =
-        options?.preserveManualPlayback === true && isEditModeWithoutPreview(global);
-    const list = global.state.scenePlacedEntities ?? [];
-    for (const entry of list) {
-        const m = entry.entity ? getPlacedMediaRuntime(entry.entity) : undefined;
-        if (!m) continue;
-        if (
-            preserveManual
-            && (m.kind === 'video' || m.kind === 'audio')
-            && isPlacedMediaHotspotEligible(entry, m.kind)
-            && isUserManualMediaActive(entry, m)
-        ) {
-            continue;
-        }
-        if (m.kind === 'video' && entry.entity) {
-            pausePlacedVideoTexture(m);
-            setEntryHotspotPlaying(global, entry, 'video', false);
-            continue;
-        }
-        if (m.kind === 'audio') {
-            pausePlacedAudio(m);
-            setEntryHotspotPlaying(global, entry, 'audio', false);
-        }
-    }
-}
-
-function pauseAllMedia(global: Global): void {
-    const list = global.state.scenePlacedEntities ?? [];
-    for (const entry of list) {
-        const m = entry.entity ? getPlacedMediaRuntime(entry.entity) : undefined;
-        if (!m) continue;
-        if (m.kind === 'video' && entry.entity) {
-            pausePlacedVideoTexture(m);
-            setEntryHotspotPlaying(global, entry, 'video', false);
-        }
-        if (m.kind === 'audio') {
-            pausePlacedAudio(m);
-            setEntryHotspotPlaying(global, entry, 'audio', false);
-        }
+/** 编辑非预览：热区门关闭，仅保留用户手动占用的互斥槽 */
+function pausePostersExceptActiveUserSlot(global: Global): void {
+    const preserveId = getActiveSceneMediaEntryId();
+    for (const entry of global.state.scenePlacedEntities ?? []) {
+        if (preserveId && entry.id === preserveId) continue;
+        pauseSceneMediaEntry(global, entry, { releaseActiveSlot: false });
     }
 }
 
@@ -327,78 +235,57 @@ function applyHotspotPlayback(
         if (!m) continue;
 
         if (m.kind === 'video') {
-            const entity = entry.entity;
-            if (!entity) continue;
             if (!isPlacedMediaHotspotEligible(entry, 'video')) {
-                pausePlacedVideoTexture(m);
-                setEntryHotspotPlaying(global, entry, 'video', false);
+                pauseSceneMediaEntry(global, entry);
                 continue;
             }
             const { inZone: inHotspotZone } = evaluateEntryHotspotZone(entry, 'video', hotspotParams);
             syncHotspotZoneTransition(entry, inHotspotZone);
-            const winner = entry.id === desiredVideoSound;
+
+            if (!inHotspotZone) {
+                pauseSceneMediaEntry(global, entry);
+                continue;
+            }
+
             const shouldPlay =
-                inHotspotZone
-                && winner
+                entry.id === desiredVideoSound
+                && !isSceneMediaEntryBlockedByActive(entry.id)
                 && !entry.mediaRuntime?.userPaused
                 && evalState.userUnlocked
                 && !viewMediaMuted;
 
-            if (!inHotspotZone) {
-                pausePlacedVideoTexture(m);
-                setEntryHotspotPlaying(global, entry, 'video', false);
-                continue;
-            }
-
             if (shouldPlay) {
-                playPlacedVideoTexture(entity, m);
-                m.videoEl.muted = false;
-                setEntryHotspotPlaying(global, entry, 'video', true);
+                playSceneMediaEntry(global, entry, 'hotspot');
             } else {
-                pausePlacedVideoTexture(m);
-                setEntryHotspotPlaying(global, entry, 'video', false);
+                pauseSceneMediaEntry(global, entry);
             }
             continue;
         }
 
         if (m.kind === 'audio') {
-            const a = m.audioEl;
             if (!isPlacedMediaHotspotEligible(entry, 'audio')) {
-                pausePlacedAudio(m);
-                setEntryHotspotPlaying(global, entry, 'audio', false);
+                pauseSceneMediaEntry(global, entry);
                 continue;
             }
             const { inZone: inHotspotZone } = evaluateEntryHotspotZone(entry, 'audio', hotspotParams);
             syncHotspotZoneTransition(entry, inHotspotZone);
 
-            if (desiredVideoSound) {
-                pausePlacedAudio(m);
-                setEntryHotspotPlaying(global, entry, 'audio', false);
+            if (desiredVideoSound || !inHotspotZone) {
+                pauseSceneMediaEntry(global, entry);
                 continue;
             }
 
-            if (!inHotspotZone) {
-                pausePlacedAudio(m);
-                setEntryHotspotPlaying(global, entry, 'audio', false);
-                continue;
-            }
-
-            const winner = entry.id === desiredAudioSound;
             const shouldPlay =
-                winner
+                entry.id === desiredAudioSound
+                && !isSceneMediaEntryBlockedByActive(entry.id)
                 && !entry.mediaRuntime?.userPaused
                 && evalState.userUnlocked
                 && !viewMediaMuted;
 
             if (shouldPlay) {
-                a.volume = 1;
-                a.play().catch(() => {
-                    // ignore autoplay / decode errors
-                });
-                setEntryHotspotPlaying(global, entry, 'audio', true);
+                playSceneMediaEntry(global, entry, 'hotspot');
             } else {
-                pausePlacedAudio(m);
-                setEntryHotspotPlaying(global, entry, 'audio', false);
+                pauseSceneMediaEntry(global, entry);
             }
         }
     }
@@ -410,17 +297,15 @@ function runMediaHotspotEvaluation(
     options?: { force?: boolean }
 ): boolean {
     if (evalState.pageHidden) {
-        pauseAllMedia(global);
+        pauseAllSceneMedia(global);
         return false;
     }
     if (!isPlacedAssetsRootEnabled(global)) {
-        pauseAllMedia(global);
+        pauseAllSceneMedia(global);
         return false;
     }
     if (!isHotspotGateOpen(global)) {
-        pauseAudioAndVideoPosters(global, {
-            preserveManualPlayback: isEditModeWithoutPreview(global)
-        });
+        pausePostersExceptActiveUserSlot(global);
         return false;
     }
 
@@ -468,12 +353,12 @@ export function initMediaHotspotController(global: Global): () => void {
 
     const onUpdate = () => {
         if (evalState.pageHidden) {
-            pauseAllMedia(global);
+            pauseAllSceneMedia(global);
             return;
         }
         uploadToggle = !uploadToggle;
         if (isEditModeWithoutPreview(global)) {
-            pauseAudioAndVideoPosters(global, { preserveManualPlayback: true });
+            pausePostersExceptActiveUserSlot(global);
         } else {
             runMediaHotspotEvaluation(global, evalState);
         }
@@ -482,14 +367,14 @@ export function initMediaHotspotController(global: Global): () => void {
 
     const onPageHidden = () => {
         evalState.pageHidden = true;
-        pauseAllMedia(global);
+        pauseAllSceneMedia(global);
     };
 
     const onPageVisible = () => {
         evalState.pageHidden = false;
         evalState.lastEvalMs = 0;
         if (isEditModeWithoutPreview(global)) {
-            pauseAudioAndVideoPosters(global);
+            pauseAllSceneMedia(global);
         } else {
             runMediaHotspotEvaluation(global, evalState, { force: true });
         }
@@ -514,7 +399,7 @@ export function initMediaHotspotController(global: Global): () => void {
     const onPreviewModeChanged = (previewMode: boolean) => {
         if (previewMode) {
             evalState.userUnlocked = true;
-            clearAllUserManualMediaOverrides(global);
+            clearSceneMediaUserSession(global);
             evalState.lastVideoSoundId = null;
             evalState.lastAudioSoundId = null;
             evalState.lastEvalMs = 0;
@@ -528,7 +413,6 @@ export function initMediaHotspotController(global: Global): () => void {
 
     const onUserActivate = () => {
         evalState.userUnlocked = true;
-        // 编辑非预览：热区门关闭，forceEval 只会 pause 海报且不带 preserve，会抵消视频/音频手动播控
         if (!isEditModeWithoutPreview(global)) {
             forceHotspotEval();
         }
@@ -540,14 +424,14 @@ export function initMediaHotspotController(global: Global): () => void {
             evalState.userUnlocked = false;
             evalState.lastVideoSoundId = null;
             evalState.lastAudioSoundId = null;
-            clearAllUserManualMediaOverrides(global);
+            clearSceneMediaUserSession(global);
         }
         if (evalState.pageHidden) {
-            pauseAllMedia(global);
+            pauseAllSceneMedia(global);
             return;
         }
         if (isEditModeWithoutPreview(global)) {
-            pauseAudioAndVideoPosters(global);
+            pauseAllSceneMedia(global);
         } else {
             runMediaHotspotEvaluation(global, evalState, { force: true });
         }
@@ -582,7 +466,7 @@ export function initMediaHotspotController(global: Global): () => void {
         events.off('mediaOverlay:userPlayback', onOverlayUserPlayback);
         events.off('editMode:changed', onEditModeChanged);
         events.off('sceneAsset:hotspotAutoplayChanged', onHotspotChanged);
-        clearAllHotspotPlayingFlags(global);
-        pauseAllMedia(global);
+        clearAllSceneMediaPlaybackFlags(global);
+        pauseAllSceneMedia(global);
     };
 }

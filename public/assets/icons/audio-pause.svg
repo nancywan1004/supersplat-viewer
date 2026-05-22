@@ -1,18 +1,11 @@
 <svg width="32" height="34" viewBox="0 0 32 34" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g opacity="0.57">
-<circle cx="16.001" cy="17.334" r="16" fill="black"/>
-<circle cx="16.001" cy="17.334" r="15.3333" stroke="white" stroke-opacity="0.1" stroke-width="1.33333"/>
-</g>
 <g opacity="0.84" filter="url(#filter1_f_7753_31530)">
 <circle cx="14.6663" cy="14.6673" r="9.33333" fill="#2061FD"/>
 </g>
 <g opacity="0.93" filter="url(#filter2_f_7753_31530)">
 <circle cx="18.6676" cy="21.3327" r="6.66667" fill="#20A1FD"/>
 </g>
-<g opacity="0.3">
-<circle cx="16.001" cy="17.334" r="16" fill="black" fill-opacity="0.11"/>
-<circle cx="16.001" cy="17.334" r="15.3333" stroke="white" stroke-opacity="0.1" stroke-width="1.33333"/>
-</g>
+<circle cx="16.001" cy="17.334" r="15.3333" fill="#2061FD" fill-opacity="0.14"/>
 <circle cx="16.001" cy="17.334" r="15.3333" stroke="#2061FD" stroke-width="1.33333"/>
 <path d="M14.001 23.834H10.001V9.83398H14.001V23.834ZM22.001 23.834H18.001V9.83398H22.001V23.834Z" fill="white"/>
 <defs>

@@ -83,13 +83,13 @@ export interface ScenePlacedItem {
 
 /** 已放置音/视频条目的运行态（挂在 ScenePlacedItem.mediaRuntime，不入库） */
 export type ScenePlacedMediaRuntime = {
-    /** 用户手动暂停后，热区不再自动 play */
+    /** 用户显式暂停；热区评估不得自动 play（见 scene-media-playback） */
     userPaused?: boolean;
-    /** 用户手动播放后，视频控件保持可见（仅 video） */
+    /** 用户手动播放后视频播控条保持可见（仅 video） */
     manualLatch?: boolean;
-    /** 当前是否为热区有声赢家 */
+    /** 是否正在播放（热区或手动）；UI 同步用，由 scene-media-playback 维护 */
     hotspotPlaying?: boolean;
-    /** 上一评估帧是否在热区内（video：视轴深度+视锥；audio：欧氏距离） */
+    /** 上一热区评估帧是否在触发区内 */
     inHotspotZone?: boolean;
 };
 

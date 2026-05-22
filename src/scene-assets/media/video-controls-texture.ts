@@ -9,7 +9,7 @@ import { hitSceneGizmoAtClient } from '../../gizmo-handler';
 import type { Global, ScenePlacedItem } from '../../types';
 import { readViewMediaMuted } from '../../view-settings';
 import { ensureScenePlacedMediaRuntime, getPlacedMediaRuntime, type PlacedVideoRuntime } from './media-runtime';
-import { pausePlacedVideoTexture, playPlacedVideoTexture } from './video-texture';
+import { userPauseSceneMedia, userPlaySceneMedia } from './scene-media-playback';
 
 const PROJ_VEC = new Vec3();
 const CANVAS_MAX_EDGE = 1920;
@@ -720,27 +720,15 @@ function toggleVideoPlay(global: Global, entry: ScenePlacedItem, m: PlacedVideoR
     }
 
     touchChromeHover(entry.id);
-    const entity = entry.entity!;
     const video = m.videoEl;
-    const rt = ensureScenePlacedMediaRuntime(entry);
     if (video.paused) {
-        rt.userPaused = false;
-        rt.manualLatch = true;
-        playPlacedVideoTexture(entity, m);
-        video.muted = false;
-        video.play().catch((err) => {
-            vcLog('toggle:playRejected', { entryId: entry.id, err: String(err) });
-        });
+        userPlaySceneMedia(global, entry);
         vcLog('toggle:play', { entryId: entry.id });
     } else {
-        rt.userPaused = true;
-        pausePlacedVideoTexture(m);
+        userPauseSceneMedia(global, entry);
         vcLog('toggle:pause', { entryId: entry.id });
     }
     syncVideoTextureWithControls(global, entry, m);
-    // 须在切播完成后再通知热区：否则编辑模式下 onUserActivate→forceHotspotEval 会先无 preserve 地 pause 掉手动播放
-    global.events.fire('mediaOverlay:userPlayback');
-    global.events.fire('mediaHotspot:userActivate');
 }
 
 function resolvePointerOnCanvas(
