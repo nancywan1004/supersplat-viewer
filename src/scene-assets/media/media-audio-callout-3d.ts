@@ -1,6 +1,6 @@
 /**
- * 音频 callout：与 Annotation 相同的热区深度方案（HotspotBase depthTest + HotspotOverlay 半透明）。
- * 视觉在 3D 纹理上绘制，参与深度缓冲，可被 gsplat 遮挡。
+ * 音频 callout：HotspotBase/Overlay 排在 World 透明（高斯）之后；Base depthTest、不写 depth。
+ * 视觉在 3D 纹理上绘制；mesh 仍可通过 depthTest 遮挡，高斯不写 depth 故叠在高斯上须后排绘制。
  */
 
 import {
@@ -16,7 +16,6 @@ import {
     Color,
     CULLFACE_NONE,
     FILTER_LINEAR,
-    Layer,
     Mesh,
     MeshInstance,
     PIXELFORMAT_RGBA8,
@@ -30,6 +29,7 @@ import {
 import { hitSceneGizmoAtClient } from '../../gizmo-handler';
 import type { Global, ScenePlacedItem } from '../../types';
 import { readViewMediaMuted } from '../../view-settings';
+import { ensureHotspotDepthLayers, type HotspotDepthLayers } from '../hotspot-depth-layers';
 import { getSceneAssetPickLayer } from '../scene-asset-pick-layer';
 import {
     ensureScenePlacedMediaRuntime,
@@ -61,8 +61,8 @@ const OVERLAY_OPACITY = 0.25;
 
 export const AUDIO_CALLOUT_TEX_W = 512;
 
-const AUDIO_PLAY_ICON_URL = '/assets/icons/audio-play.svg';
-const AUDIO_PAUSE_ICON_URL = '/assets/icons/audio-pause.svg';
+const AUDIO_PLAY_ICON_URL = '/assets/icons/audio-play.svg?v=2';
+const AUDIO_PAUSE_ICON_URL = '/assets/icons/audio-pause.svg?v=2';
 
 /** 设计稿 tooltip 尺寸（纹理像素） */
 export const AUDIO_TOOLTIP_TEX_W = 141;
@@ -107,11 +107,6 @@ type AudioCallout3d = {
     lastPaint: AudioPaintState | null;
 };
 
-type HotspotDepthLayers = {
-    baseLayer: Layer;
-    overlayLayer: Layer;
-};
-
 let sharedMesh: Mesh | null = null;
 let layers: HotspotDepthLayers | null = null;
 let cameraEntity: Entity | null = null;
@@ -133,6 +128,19 @@ function getMeasureCanvasCtx(): CanvasRenderingContext2D | null {
 
 function isAudioCalloutIconsReady(): boolean {
     return !!(audioPlayIconCanvas && audioPauseIconCanvas);
+}
+
+/** Canvas 直出 RGBA 预乘，避免半透明黑/蓝边在 3D 直出 alpha 混合时染黑场景。 */
+function premultiplyCanvasAlpha(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+    const imageData = ctx.getImageData(0, 0, w, h);
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+        const a = data[i + 3] / 255;
+        data[i] = Math.round(data[i] * a);
+        data[i + 1] = Math.round(data[i + 1] * a);
+        data[i + 2] = Math.round(data[i + 2] * a);
+    }
+    ctx.putImageData(imageData, 0, 0);
 }
 
 /** 预栅格化到独立 canvas，再合成到 callout 主纹理。 */
@@ -159,6 +167,7 @@ async function loadIconRasterCanvas(url: string): Promise<HTMLCanvasElement | nu
         if (!ctx) return null;
         ctx.clearRect(0, 0, PLAY_ICON_W, PLAY_ICON_H);
         ctx.drawImage(img, 0, 0, PLAY_ICON_W, PLAY_ICON_H);
+        premultiplyCanvasAlpha(ctx, PLAY_ICON_W, PLAY_ICON_H);
         return canvas;
     } catch {
         return null;
@@ -237,37 +246,6 @@ function computeAudioCalloutLayout(texW: number, ctx: CanvasRenderingContext2D, 
     return { playCenterX, playCenterY, playRadius };
 }
 
-function ensureHotspotDepthLayers(app: AppBase, camEntity: Entity): HotspotDepthLayers {
-    if (layers) return layers;
-
-    const sceneLayers = app.scene.layers;
-    const worldLayer = sceneLayers.getLayerByName('World');
-    if (!worldLayer) {
-        throw new Error('World layer missing for audio callout depth layers');
-    }
-
-    let baseLayer = sceneLayers.getLayerByName('HotspotBase');
-    let overlayLayer = sceneLayers.getLayerByName('HotspotOverlay');
-
-    if (!baseLayer) {
-        baseLayer = new Layer({ name: 'HotspotBase' });
-        sceneLayers.insert(baseLayer, sceneLayers.getOpaqueIndex(worldLayer) + 1);
-    }
-    if (!overlayLayer) {
-        overlayLayer = new Layer({ name: 'HotspotOverlay' });
-        sceneLayers.insert(overlayLayer, sceneLayers.getTransparentIndex(worldLayer) + 1);
-    }
-
-    const cam = camEntity.camera;
-    const layerIds = new Set(cam.layers);
-    layerIds.add(baseLayer.id);
-    layerIds.add(overlayLayer.id);
-    cam.layers = [...layerIds];
-
-    layers = { baseLayer, overlayLayer };
-    return layers;
-}
-
 /** 与 Annotation 相同：无 X 镜像的平面，配合 camera billboard + rotateLocal(90,0,0)。 */
 function ensureSharedMesh(app: AppBase): Mesh {
     if (!sharedMesh) {
@@ -286,15 +264,16 @@ function createCalloutMaterial(texture: Texture, opacity: number, depthTest: boo
     material.emissiveMap = texture;
     material.opacityMap = texture;
     material.opacity = opacity;
-    material.alphaTest = 0.01;
+    material.alphaTest = 0.001;
+    // 纹理已预乘 alpha：用 ONE / ONE_MINUS_SRC_ALPHA，避免半透明像素把场景染黑一圈
     material.blendState = new BlendState(
         true,
         BLENDEQUATION_ADD,
-        BLENDMODE_SRC_ALPHA,
+        BLENDMODE_ONE,
         BLENDMODE_ONE_MINUS_SRC_ALPHA,
         BLENDEQUATION_ADD,
         BLENDMODE_ONE,
-        BLENDMODE_ONE
+        BLENDMODE_ONE_MINUS_SRC_ALPHA
     );
     material.depthTest = depthTest;
     material.depthWrite = depthWrite;
@@ -401,6 +380,7 @@ function syncCalloutTexture(global: Global, entry: ScenePlacedItem, callout: Aud
 
     callout.lastPaint = { name, playing, iconReady };
     drawAudioCallout(callout.ctx, AUDIO_CALLOUT_TEX_W, AUDIO_CALLOUT_TEX_H, name, playing);
+    premultiplyCanvasAlpha(callout.ctx, AUDIO_CALLOUT_TEX_W, AUDIO_CALLOUT_TEX_H);
     try {
         callout.texture.upload();
     } catch {
@@ -444,7 +424,10 @@ function createAudioCallout3d(global: Global, entry: ScenePlacedItem, m: PlacedA
     if (!audioEntity || !cameraEntity) return null;
 
     const { app } = global;
-    const { baseLayer, overlayLayer } = ensureHotspotDepthLayers(app, cameraEntity);
+    if (!layers) {
+        layers = ensureHotspotDepthLayers(app, cameraEntity);
+    }
+    const { baseLayer, overlayLayer } = layers;
     const mesh = ensureSharedMesh(app);
 
     const canvas = document.createElement('canvas');
@@ -464,7 +447,7 @@ function createAudioCallout3d(global: Global, entry: ScenePlacedItem, m: PlacedA
     texture.setSource(canvas);
 
     const materials = [
-        createCalloutMaterial(texture, 1, true, true),
+        createCalloutMaterial(texture, 1, true, false),
         createCalloutMaterial(texture, OVERLAY_OPACITY, false, false)
     ];
 
@@ -602,7 +585,7 @@ export function prerenderAudioCallouts(global: Global): void {
 export function initAudioCallout3dSystem(global: Global): () => void {
     const { app, events } = global;
     cameraEntity = global.camera;
-    ensureHotspotDepthLayers(app, cameraEntity);
+    layers = ensureHotspotDepthLayers(app, cameraEntity);
     ensureSharedMesh(app);
     void loadAudioCalloutIcons(() => invalidateAllCalloutTextures(global));
 

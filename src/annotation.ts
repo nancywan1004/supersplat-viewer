@@ -21,6 +21,7 @@ import {
     BLENDMODE_SRC_ALPHA
 } from 'playcanvas';
 import { normalizeAnnotationMediaFields } from './annotation-toolbar/media-fields';
+import { ensureHotspotDepthLayers, syncHotspotLayersAfterGsplat } from './scene-assets/hotspot-depth-layers';
 
 // clamp the vertices of the hotspot so it is never clipped by the near or far plane
 const depthClampGlsl = `
@@ -308,6 +309,7 @@ export class Annotation extends Script {
      */
     static _initializeStatic(app: AppBase) {
         if (Annotation.styleSheet) {
+            syncHotspotLayersAfterGsplat(app);
             return;
         }
 
@@ -317,29 +319,12 @@ export class Annotation extends Script {
             Annotation.parentDom = document.body;
         }
 
-        const { layers } = app.scene;
-        const worldLayer = layers.getLayerByName('World');
-
-        const createLayer = (name: string, semitrans: boolean) => {
-            const layer = new Layer({ name: name });
-            const idx = semitrans ? layers.getTransparentIndex(worldLayer) : layers.getOpaqueIndex(worldLayer);
-            layers.insert(layer, idx + 1);
-            return layer;
-        };
-
-        Annotation.layers = [
-            createLayer('HotspotBase', false),
-            createLayer('HotspotOverlay', true)
-        ];
-
         if (Annotation.camera === null) {
             Annotation.camera = app.root.findComponent('camera').entity;
         }
 
-        Annotation.camera.camera.layers = [
-            ...Annotation.camera.camera.layers,
-            ...Annotation.layers.map(layer => layer.id)
-        ];
+        const { baseLayer, overlayLayer } = ensureHotspotDepthLayers(app, Annotation.camera);
+        Annotation.layers = [baseLayer, overlayLayer];
 
         Annotation.mesh = Mesh.fromGeometry(app.graphicsDevice, new PlaneGeometry({
             widthSegments: 1,
@@ -640,7 +625,7 @@ export class Annotation extends Script {
             Annotation._createHotspotMaterial(this.texture, {
                 opacity: 1,
                 depthTest: true,
-                depthWrite: true
+                depthWrite: false
             }),
             Annotation._createHotspotMaterial(this.texture, {
                 opacity: 0.25,
