@@ -49,6 +49,7 @@ import { isLodMetaFile } from './loaders/lod-loader';
 import { BloomController } from './vfx/bloom';
 import { loadSplatMesh } from './loaders/splat-mesh-loader';
 import { NightMode } from './vfx/lighting/night-mode';
+import { isShadowSystemEnabled, syncGsplatShadowCastingFromSettings } from './vfx/shadow/gsplat-shadow-cast';
 import { initShadowCatcher } from './vfx/shadow/shadow-catcher';
 import { ShadowApplyRt } from './vfx/shadow/shadow-apply';
 import { updateShadowDistance } from './light';
@@ -95,7 +96,7 @@ const noPostEffects: PostEffectSettings = {
     grading: { enabled: false, brightness: 0, contrast: 1, saturation: 1, tint: [1, 1, 1] },
     vignette: { enabled: false, intensity: 0, inner: 0, outer: 0, curvature: 0 },
     fringing: { enabled: false, intensity: 0 },
-    shadow: { enabled: false, darken: 0, debugVisual: false, castShadows: false }
+    shadow: { darken: 0, debugVisual: false, castShadows: false }
 };
 
 const gammaChunkGlsl = `
@@ -167,12 +168,12 @@ const needsBloomPipeline = (settings: PostEffectSettings): boolean => {
     return true;
 };
 
-const anyPostEffectEnabled = (settings: PostEffectSettings): boolean => {
+const anyPostEffectEnabled = (settings: PostEffectSettings, config: Global['config']): boolean => {
     const bloomOn = settings.bloom.enabled && (
         Number(settings.bloom.intensity) > 0 ||
         needsBloomPipeline(settings)
     );
-    const shadowOn = (settings as any).shadow?.enabled === true;
+    const shadowOn = isShadowSystemEnabled({ config });
     return (settings.sharpness.enabled && settings.sharpness.amount > 0) ||
         bloomOn ||
         (settings.grading.enabled) ||
@@ -308,6 +309,7 @@ class Viewer {
 
         events.on('postEffect:changed', () => {
             this.configureCamera(global.settings);
+            syncGsplatShadowCastingFromSettings(global);
             app.renderNextFrame = true;
         });
         app.on('nightFade:changedDetailed', () => {
@@ -548,6 +550,7 @@ class Viewer {
             console.log('[Shadow] Promise.all resolved, results count:', results.length);
             try {
             const gsplatEntity = results[0] as Entity;
+            syncGsplatShadowCastingFromSettings(global, gsplatEntity);
             const gsplat = gsplatEntity.gsplat as GSplatComponent;
             const meshEntity = results[2] as Entity | null | undefined;
             const collision = (results[3] as Collision | undefined) ?? null;
@@ -1135,7 +1138,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
         const computeRequiresCameraFrame = rendererMode === 'compute';
         const postFxRequested = !config.nofx &&
             !!postEffectSettings &&
-            (anyPostEffectEnabled(postEffectSettings) || highPrecisionRendering || bloomPipelineWanted);
+            (anyPostEffectEnabled(postEffectSettings, config) || highPrecisionRendering || bloomPipelineWanted);
         const enableCameraFrame = !app.xr.active && (computeRequiresCameraFrame || postFxRequested);
 
         if (enableCameraFrame) {

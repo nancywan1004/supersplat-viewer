@@ -10,7 +10,6 @@ import {
 } from './effects-sync';
 
 const defaultPostEffectShadow = () => ({
-    enabled: DEFAULT_SHADOW.enabled,
     darken: DEFAULT_SHADOW.darken,
     debugVisual: DEFAULT_SHADOW.debugVisual,
     castShadows: false

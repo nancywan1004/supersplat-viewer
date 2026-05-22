@@ -7,6 +7,7 @@ import {
 import type { Global } from '../../types';
 import type { ExperienceSettings } from '../../schemas/v2';
 import { updatePointLightsFromSettings } from '../../light';
+import { isShadowSystemEnabled } from '../../vfx/shadow/gsplat-shadow-cast';
 import { pushEditHistory } from '../../edit-history';
 import {
     ensureBloom as ensureBloomFromAdapter,
@@ -150,7 +151,6 @@ const ensureBloom = (settings: Global['settings']): BloomSettings => {
 };
 
 type ShadowSettings = {
-    enabled: boolean;
     darken: number;
     castShadows?: boolean;
     debugVisual?: boolean;
@@ -700,7 +700,7 @@ export function initPostEffectUI(global: Global): () => void {
         refreshRegionList();
         syncDrawModeUiFromSession();
         const sh = ensureShadow(settings);
-        if (shadowEnableCheck) shadowEnableCheck.classList.toggle('active', sh.enabled);
+        if (shadowEnableCheck) shadowEnableCheck.classList.toggle('active', isShadowSystemEnabled(global));
         if (shadowCastCheck) shadowCastCheck.classList.toggle('active', sh.castShadows !== false);
         const darken = Math.max(0, Math.min(1, Number(sh.darken ?? 0)));
         if (shadowDarkenSlider) shadowDarkenSlider.value = String(darken);
@@ -923,25 +923,10 @@ export function initPostEffectUI(global: Global): () => void {
     }
 
     if (shadowEnableOption && shadowEnableCheck) {
-        const toggleShadow = () => {
-            const editUiTransport = getEditUiTransport(global);
-            if (editUiTransport === 'message-bridge') {
-                const sh = ensureShadow(settings);
-                const nextEnabled = !sh.enabled;
-                sendEditProtocolMessage({ type: 'SHADOW_SET', value: nextEnabled });
-                // 立即本地更新样式，避免父级尚未回写 settings 时勾选状态不变的错觉
-                shadowEnableCheck.classList.toggle('active', nextEnabled);
-                return;
-            }
-            const sh = ensureShadow(settings);
-            sh.enabled = !sh.enabled;
-            syncFromSettings();
-            updatePointLightsFromSettings(global);
-            firePostEffectChanged();
-            pushEditHistorySafe();
-        };
-        shadowEnableOption.addEventListener('click', toggleShadow);
-        shadowEnableCheck.addEventListener('click', toggleShadow);
+        shadowEnableOption.title = '由 URL ?splatMesh= 控制，不可在面板切换';
+        shadowEnableOption.style.opacity = '0.55';
+        shadowEnableOption.style.pointerEvents = 'none';
+        shadowEnableCheck.style.pointerEvents = 'none';
     }
 
     if (shadowCastOption && shadowCastCheck) {

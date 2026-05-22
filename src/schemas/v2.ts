@@ -110,7 +110,6 @@ type PostEffectSettings = {
         intensity: number
     },
     shadow: {
-        enabled: boolean,
         darken: number,
         debugRt?: boolean,
         debugVisual?: boolean,
@@ -264,7 +263,6 @@ const validatePostEffects = (data: unknown, path: string): PostEffectSettings =>
     assertNumber(fr.intensity, `${path}.fringing.intensity`);
 
     const shadow = assertObject(obj.shadow, `${path}.shadow`);
-    assertBoolean(shadow.enabled, `${path}.shadow.enabled`);
     assertNumber(shadow.darken, `${path}.shadow.darken`);
 
     return data as PostEffectSettings;

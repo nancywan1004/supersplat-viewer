@@ -51,6 +51,7 @@ import {
 } from './scene-assets/media/video-texture';
 import { loadBillboardTextureFromImageUrl } from './scene-assets/media/image-billboard-texture';
 import { removeSceneAssetFromSettings } from './settings-serialize/settings-serialize';
+import { syncGsplatShadowCastingFromSettings } from './vfx/shadow/gsplat-shadow-cast';
 
 const PLACED_ASSETS_NAME = 'placedAssets';
 const AUDIO_SPEAKER_ICON_URL = '/assets/icons/speaker.svg';
@@ -359,7 +360,7 @@ async function instantiateGaussian(app: AppBase, item: AssetLibraryItem, positio
     const asset = item.asset;
     if (!asset) throw new Error('gaussian asset not ready');
     const entity = new Entity(item.name || 'gsplat');
-    entity.addComponent('gsplat', { unified: true, asset, castShadows: true });
+    entity.addComponent('gsplat', { unified: true, asset, castShadows: false });
     const material = entity.gsplat!.unified ? app.scene.gsplat.material : entity.gsplat!.material;
     // 尽量与主场景 gsplat 的配置保持一致，开启 AA 并设置 alphaClip
     material.setDefine('GSPLAT_AA', true);
@@ -679,6 +680,10 @@ export async function placeAsset(
     };
     state.scenePlacedEntities.push(entry);
 
+    if (item.type === 'gaussian') {
+        syncGsplatShadowCastingFromSettings(global);
+    }
+
     if (item.type === 'audio') {
         syncPlacedAudioIconEditor(global, entity);
     }
@@ -899,6 +904,7 @@ export async function requestSceneAssetsRestore(global: Global, options: SceneAs
             } else {
                 await syncScenePlacedEntitiesFromSettings(global);
             }
+            syncGsplatShadowCastingFromSettings(global);
         })();
         controller.activePromise = task;
         await task;

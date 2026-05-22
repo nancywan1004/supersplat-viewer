@@ -637,12 +637,9 @@ export function applyBloomLocalLightRegionDelete(global: Global, regionId: strin
     global.events.fire('bloomLocalLightRegion:listChanged');
 }
 
-/** SHADOW_SET */
-export function applyShadowSet(global: Global, enabled: boolean): void {
-    const settings = global.settings as ExperienceSettings;
-    const s = ensureShadow(settings);
-    (s as Record<string, unknown>).enabled = enabled;
-    global.events.fire('postEffect:changed');
+/** @deprecated `SHADOW_SET` / `shadow.enabled` 已废弃；阴影由 URL `?splatMesh=` 决定。 */
+export function applyShadowSet(_global: Global, _enabled: boolean): void {
+    // no-op
 }
 
 /** SHADOW_INTENSITY_UPDATE → shadow.darken (0~1) */

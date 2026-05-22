@@ -171,7 +171,6 @@ const migrateV2 = (v1: V1): V2 => {
                 intensity: 0.5
             },
             shadow: {
-                enabled: true,
                 darken: 0,
                 debugVisual: false,
                 castShadows: false
@@ -315,7 +314,6 @@ const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: numb
                 intensity: 0.5
             },
             shadow: {
-                enabled: false,
                 darken: 0,
                 debugVisual: false,
                 castShadows: false
