@@ -60,6 +60,19 @@ class InputController {
         }
     };
 
+    private _onPointerDownArbiter = (event: PointerEvent) => {
+        const arbiter = (this._global as Global & { __inputArbiter?: InputArbiter }).__inputArbiter;
+        const result = arbiter?.dispatchPointerDown({
+            global: this._global,
+            pointerEvent: event,
+            clientX: event.clientX,
+            clientY: event.clientY
+        });
+        if (!result?.claimed) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+    };
+
     private _onPointerDownRefocus = (event: PointerEvent) => {
         const canvas = this._global.app.graphicsDevice.canvas as HTMLCanvasElement;
         if (!event.isPrimary || typeof canvas.focus !== 'function') return;
@@ -147,6 +160,9 @@ class InputController {
         this._pointerLock.attach(canvas, global, this._keyboardMouse);
         this._modeShortcuts.attach(global, this._pointerLock);
         this._inputModeTracker.attach(global);
+
+        // 须在 PlayCanvas / 相机设备之后注册 capture，同元素上后注册的先执行，播控 claim 可拦住轨道拖拽。
+        canvas.addEventListener('pointerdown', this._onPointerDownArbiter, { capture: true });
 
         ['wheel', 'pointerdown', 'contextmenu', 'keydown'].forEach((eventName) => {
             canvas.addEventListener(eventName, (event) => {

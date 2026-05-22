@@ -75,7 +75,23 @@ export interface ScenePlacedItem {
     thumbnailUrl?: string;
     /** 仅 video：横向曲度 [0,1]，0 为平面 */
     horizontalCurvature?: number;
+    /** video / audio：热区自动播放；缺省 true，不入 settings 序列化时仅显式 false */
+    hotspotAutoplay?: boolean;
+    /** 音/视频会话态（不入 settings） */
+    mediaRuntime?: ScenePlacedMediaRuntime;
 }
+
+/** 已放置音/视频条目的运行态（挂在 ScenePlacedItem.mediaRuntime，不入库） */
+export type ScenePlacedMediaRuntime = {
+    /** 用户手动暂停后，热区不再自动 play */
+    userPaused?: boolean;
+    /** 用户手动播放后，视频控件保持可见（仅 video） */
+    manualLatch?: boolean;
+    /** 当前是否为热区有声赢家 */
+    hotspotPlaying?: boolean;
+    /** 上一评估帧是否在热区内（距离 + 视锥，与 qualifyPlacedMedia 一致） */
+    inHotspotZone?: boolean;
+};
 
 type CameraMode = 'orbit' | 'anim' | 'fly' | 'walk';
 

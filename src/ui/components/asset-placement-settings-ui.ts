@@ -1,4 +1,4 @@
-import { applyVideoHorizontalCurvature } from '../../asset-placement-handler';
+import { applyMediaHotspotAutoplay, applyVideoHorizontalCurvature } from '../../asset-placement-handler';
 import { getSceneAssetListHTML, bindSceneAssetList } from './scene-asset-list-ui';
 import { loadGsplatAsset } from '../../loaders/gsplat-asset-loader';
 import { clampVideoHorizontalCurvature, VIDEO_HORIZONTAL_MAX_ARC_DEG } from '../../scene-assets/media/curved-billboard-mesh';
@@ -192,6 +192,13 @@ export function getAssetPlacementSettingsHTML(): string {
                 <label for="videoCurvature">横向曲度</label>
                 <input type="range" id="videoCurvature" min="0" max="100" step="1" />
                 <span id="videoCurvatureVal" class="settingsValueLabel"></span>
+            </div>
+        </div>
+        <div class="media-autoplay-panel hidden" id="mediaAutoplayPanel">
+            <div class="settingsRow submenuHeader" style="margin-top:6px;">媒体播控</div>
+            <div class="settingsRow">
+                <label for="mediaHotspotAutoplayCheck">热区自动播放</label>
+                <input type="checkbox" id="mediaHotspotAutoplayCheck" />
             </div>
         </div>
         ${getSceneAssetListHTML()}
@@ -500,6 +507,50 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
     events.on('sceneAssets:added', onSceneAssetSelectedForCurvature);
     events.on('sceneAssets:removed', onSceneAssetSelectedForCurvature);
 
+    const mediaAutoplayPanel = root.querySelector<HTMLElement>('#mediaAutoplayPanel');
+    const mediaHotspotAutoplayCheck = root.querySelector<HTMLInputElement>('#mediaHotspotAutoplayCheck');
+
+    const readSelectedMediaAutoplay = (): boolean => {
+        const id = state.selectedSceneEntityId;
+        if (!id) return true;
+        const entry = state.scenePlacedEntities?.find((it) => it?.id === id);
+        if (entry && entry.hotspotAutoplay === false) return false;
+        const sa = (global.settings as ExperienceSettings).sceneAssets?.find((a) => a.id === id);
+        return sa?.hotspotAutoplay !== false;
+    };
+
+    const syncMediaAutoplayUi = () => {
+        const t = state.selectedSceneEntityId
+            ? getSelectedSceneAssetType(state, global.settings.sceneAssets)
+            : null;
+        const isMedia = t === 'video' || t === 'audio';
+        if (mediaAutoplayPanel) {
+            mediaAutoplayPanel.classList.toggle('hidden', !isMedia);
+        }
+        if (!isMedia || !mediaHotspotAutoplayCheck) return;
+        mediaHotspotAutoplayCheck.checked = readSelectedMediaAutoplay();
+    };
+
+    const onMediaAutoplayChange = () => {
+        const id = state.selectedSceneEntityId;
+        if (!id || !mediaHotspotAutoplayCheck) return;
+        const t = getSelectedSceneAssetType(state, global.settings.sceneAssets);
+        if (t !== 'video' && t !== 'audio') return;
+        const value = mediaHotspotAutoplayCheck.checked;
+        applyMediaHotspotAutoplay(global, id, value);
+        if (editUiTransport === 'message-bridge') {
+            sendEditProtocolMessage({ type: 'ASSET_MEDIA_HOTSPOT_AUTOPLAY_SET', id, value });
+        }
+    };
+
+    syncMediaAutoplayUi();
+    mediaHotspotAutoplayCheck?.addEventListener('change', onMediaAutoplayChange);
+    const onSceneAssetSelectedForAutoplay = () => syncMediaAutoplayUi();
+    events.on('sceneAsset:selected', onSceneAssetSelectedForAutoplay);
+    events.on('sceneAssets:added', onSceneAssetSelectedForAutoplay);
+    events.on('sceneAssets:removed', onSceneAssetSelectedForAutoplay);
+    events.on('sceneAsset:hotspotAutoplayChanged', onSceneAssetSelectedForAutoplay);
+
     return () => {
         unbindList();
         if (gridEl && onLibraryChange) {
@@ -519,5 +570,10 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         events.off('sceneAsset:selected', onSceneAssetSelectedForCurvature);
         events.off('sceneAssets:added', onSceneAssetSelectedForCurvature);
         events.off('sceneAssets:removed', onSceneAssetSelectedForCurvature);
+        mediaHotspotAutoplayCheck?.removeEventListener('change', onMediaAutoplayChange);
+        events.off('sceneAsset:selected', onSceneAssetSelectedForAutoplay);
+        events.off('sceneAssets:added', onSceneAssetSelectedForAutoplay);
+        events.off('sceneAssets:removed', onSceneAssetSelectedForAutoplay);
+        events.off('sceneAsset:hotspotAutoplayChanged', onSceneAssetSelectedForAutoplay);
     };
 }

@@ -77,6 +77,7 @@ type InboundPayload =
     | { type: 'ASSET_DELETE'; id?: string }
     | { type: 'ASSET_TRANSFORM_MODE'; value?: 'move' | 'rotate' | 'scale' }
     | { type: 'ASSET_VIDEO_CURVATURE_SET'; id?: string; value?: number }
+    | { type: 'ASSET_MEDIA_HOTSPOT_AUTOPLAY_SET'; id?: string; value?: boolean }
     | { type: 'ANNOTATION_PLACEMENT_START'; id?: string }
     | { type: 'ANNOTATION_PLACEMENT_CANCEL' }
     | { type: 'ANNOTATION_CONFIRM'; id?: string; value?: Partial<AnnotationData> }
@@ -461,6 +462,11 @@ const initPostMessageBridge = (global: Global) => {
             case 'ASSET_VIDEO_CURVATURE_SET':
                 if (typeof p.id === 'string' && typeof p.value === 'number') {
                     dispatchAsset(global, 'ASSET_VIDEO_CURVATURE_SET', { id: p.id, value: p.value });
+                }
+                break;
+            case 'ASSET_MEDIA_HOTSPOT_AUTOPLAY_SET':
+                if (typeof p.id === 'string' && typeof p.value === 'boolean') {
+                    dispatchAsset(global, 'ASSET_MEDIA_HOTSPOT_AUTOPLAY_SET', { id: p.id, value: p.value });
                 }
                 break;
             case 'ANNOTATION_PLACEMENT_START':

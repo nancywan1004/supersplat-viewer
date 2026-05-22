@@ -183,9 +183,10 @@ export function serializeScenePlacedItem(entry: ScenePlacedItem): SceneAsset {
         transform.horizontalCurvature = entry.horizontalCurvature;
     }
 
-    return {
+    const assetType = entry.assetType ?? 'gaussian';
+    const out: SceneAsset = {
         id: entry.id,
-        type: entry.assetType ?? 'gaussian',
+        type: assetType,
         name: entry.name,
         visible: entry.visible,
         thumbnailUrl: entry.thumbnailUrl,
@@ -196,6 +197,13 @@ export function serializeScenePlacedItem(entry: ScenePlacedItem): SceneAsset {
         },
         transform
     };
+    if (
+        (assetType === 'video' || assetType === 'audio')
+        && entry.hotspotAutoplay === false
+    ) {
+        out.hotspotAutoplay = false;
+    }
+    return out;
 }
 
 /**

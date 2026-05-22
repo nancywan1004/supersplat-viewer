@@ -184,6 +184,8 @@ type SceneAsset = {
         filename?: string,
         url?: string
     },
+    /** video / audio：是否参与热区自动触发；缺省 true */
+    hotspotAutoplay?: boolean,
     transform: {
         position: [number, number, number],
         /** 兼容字段：旧数据使用欧拉角 */

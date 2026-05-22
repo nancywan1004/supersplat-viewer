@@ -55,6 +55,11 @@ import { ShadowApplyRt } from './vfx/shadow/shadow-apply';
 import { updateShadowDistance } from './light';
 import { initAssetPlacementHandler, requestSceneAssetsRestore } from './asset-placement-handler';
 import { initMediaHotspotController } from './scene-assets/media/media-hotspot-controller';
+import { initMediaOverlayUi } from './scene-assets/media/media-overlay-ui';
+import {
+    initVideoControlsInteraction,
+    initVideoControlsTexture
+} from './scene-assets/media/video-controls-texture';
 import { pushEditHistory } from './edit-history';
 import { initGizmoHandler } from './gizmo-handler';
 import { initAnnotationGizmoHandler } from './annotation-toolbar/annotation-gizmo-handler';
@@ -219,6 +224,9 @@ class Viewer {
 
     /** 音视频热区播控卸载 */
     cleanupMediaHotspotController: (() => void) | null = null;
+    cleanupMediaOverlayUi: (() => void) | null = null;
+    cleanupVideoControlsTexture: (() => void) | null = null;
+    cleanupVideoControlsInteraction: (() => void) | null = null;
 
     /** Gizmo handler 清理函数 */
     cleanupGizmoHandler: (() => void) | null = null;
@@ -869,6 +877,11 @@ z: ${cameraInfo.target.z.toFixed(6)}
             }
 
             this.cleanupMediaHotspotController = initMediaHotspotController(global);
+            this.cleanupMediaOverlayUi = initMediaOverlayUi(global);
+            this.cleanupVideoControlsTexture = initVideoControlsTexture(global);
+            if (canvasEl) {
+                this.cleanupVideoControlsInteraction = initVideoControlsInteraction(global, canvasEl);
+            }
 
             const { instance } = gsplat;
             if (instance) {
