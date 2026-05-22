@@ -27,6 +27,7 @@ import {
     type Quat
 } from 'playcanvas';
 
+import { hitSceneGizmoAtClient } from '../../gizmo-handler';
 import type { Global, ScenePlacedItem } from '../../types';
 import { readViewMediaMuted } from '../../view-settings';
 import { getSceneAssetPickLayer } from '../scene-asset-pick-layer';
@@ -720,8 +721,6 @@ function hitTestPlayInBounds(
 }
 
 function toggleAudioPlayback(global: Global, entry: ScenePlacedItem, m: PlacedAudioRuntime): void {
-    global.events.fire('mediaOverlay:userPlayback');
-    global.events.fire('mediaHotspot:userActivate');
     if (readViewMediaMuted(global)) return;
 
     const a = m.audioEl;
@@ -746,6 +745,8 @@ function toggleAudioPlayback(global: Global, entry: ScenePlacedItem, m: PlacedAu
         kind: 'audio',
         playing: isAudioVisuallyPlaying(global, m)
     });
+    global.events.fire('mediaOverlay:userPlayback');
+    global.events.fire('mediaHotspot:userActivate');
 }
 
 function findAudioPlayHit(global: Global, canvasX: number, canvasY: number): {
@@ -806,6 +807,9 @@ function clientToCanvas(canvas: HTMLCanvasElement, global: Global, clientX: numb
 }
 
 export function tryClaimAudioCalloutPointerDown(global: Global, e: PointerEvent): boolean {
+    if (global.state.gizmoPointerActive || hitSceneGizmoAtClient(global, e.clientX, e.clientY)) {
+        return false;
+    }
     if (!e.isPrimary || e.button !== 0) return false;
     const canvas = interactionCanvas;
     if (!canvas) return false;

@@ -204,6 +204,18 @@ function clearUserPausedAfterHotspotExit(entry: ScenePlacedItem): void {
     entry.mediaRuntime.userPaused = false;
 }
 
+/**
+ * 进入预览或观看（退出编辑）时清除编辑期手动播控标记，使热区自动播与 Viewer 一致。
+ */
+function clearAllUserManualMediaOverrides(global: Global): void {
+    for (const entry of global.state.scenePlacedEntities ?? []) {
+        const rt = entry.mediaRuntime;
+        if (!rt) continue;
+        rt.userPaused = false;
+        rt.manualLatch = false;
+    }
+}
+
 /** 检测从热区内 → 热区外的边沿，仅在真正离开热区距离时重置 userPaused */
 function syncHotspotZoneTransition(entry: ScenePlacedItem, inZone: boolean): void {
     const wasInZone = entry.mediaRuntime?.inHotspotZone === true;
@@ -406,7 +418,9 @@ function runMediaHotspotEvaluation(
         return false;
     }
     if (!isHotspotGateOpen(global)) {
-        pauseAudioAndVideoPosters(global);
+        pauseAudioAndVideoPosters(global, {
+            preserveManualPlayback: isEditModeWithoutPreview(global)
+        });
         return false;
     }
 
@@ -500,6 +514,10 @@ export function initMediaHotspotController(global: Global): () => void {
     const onPreviewModeChanged = (previewMode: boolean) => {
         if (previewMode) {
             evalState.userUnlocked = true;
+            clearAllUserManualMediaOverrides(global);
+            evalState.lastVideoSoundId = null;
+            evalState.lastAudioSoundId = null;
+            evalState.lastEvalMs = 0;
         }
         forceHotspotEval();
     };
@@ -510,7 +528,10 @@ export function initMediaHotspotController(global: Global): () => void {
 
     const onUserActivate = () => {
         evalState.userUnlocked = true;
-        forceHotspotEval();
+        // 编辑非预览：热区门关闭，forceEval 只会 pause 海报且不带 preserve，会抵消视频/音频手动播控
+        if (!isEditModeWithoutPreview(global)) {
+            forceHotspotEval();
+        }
     };
 
     const onEditModeChanged = () => {
@@ -519,6 +540,7 @@ export function initMediaHotspotController(global: Global): () => void {
             evalState.userUnlocked = false;
             evalState.lastVideoSoundId = null;
             evalState.lastAudioSoundId = null;
+            clearAllUserManualMediaOverrides(global);
         }
         if (evalState.pageHidden) {
             pauseAllMedia(global);

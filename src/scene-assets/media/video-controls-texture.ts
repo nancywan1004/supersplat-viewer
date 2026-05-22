@@ -5,6 +5,7 @@
 
 import { type CameraComponent, type Entity, Mat4, Vec3 } from 'playcanvas';
 
+import { hitSceneGizmoAtClient } from '../../gizmo-handler';
 import type { Global, ScenePlacedItem } from '../../types';
 import { readViewMediaMuted } from '../../view-settings';
 import { ensureScenePlacedMediaRuntime, getPlacedMediaRuntime, type PlacedVideoRuntime } from './media-runtime';
@@ -799,8 +800,6 @@ function findVideoHitAtClient(
 }
 
 function toggleVideoPlay(global: Global, entry: ScenePlacedItem, m: PlacedVideoRuntime): void {
-    global.events.fire('mediaOverlay:userPlayback');
-    global.events.fire('mediaHotspot:userActivate');
     if (readViewMediaMuted(global)) {
         vcLog('toggle:blocked', { entryId: entry.id, reason: 'viewMediaMuted' });
         return;
@@ -825,6 +824,9 @@ function toggleVideoPlay(global: Global, entry: ScenePlacedItem, m: PlacedVideoR
         vcLog('toggle:pause', { entryId: entry.id });
     }
     syncVideoTextureWithControls(global, entry, m);
+    // 须在切播完成后再通知热区：否则编辑模式下 onUserActivate→forceHotspotEval 会先无 preserve 地 pause 掉手动播放
+    global.events.fire('mediaOverlay:userPlayback');
+    global.events.fire('mediaHotspot:userActivate');
 }
 
 function resolvePointerOnCanvas(
@@ -886,6 +888,9 @@ function applyHoverFromPointer(global: Global, canvasX: number, canvasY: number)
 
 /** 由 InputArbiter 在相机 pointerdown 之前调用；命中视频则 claim。 */
 export function tryClaimVideoControlsPointerDown(global: Global, e: PointerEvent): boolean {
+    if (global.state.gizmoPointerActive || hitSceneGizmoAtClient(global, e.clientX, e.clientY)) {
+        return false;
+    }
     vcLog('pointerdown:received', {
         isPrimary: e.isPrimary,
         button: e.button,

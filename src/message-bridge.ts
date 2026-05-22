@@ -309,6 +309,7 @@ const initPostMessageBridge = (global: Global) => {
                 const next = p.value === true;
                 if (state.previewMode !== next) {
                     state.previewMode = next;
+                    events.fire('previewMode:changed', next);
                 }
                 if (next) {
                     events.fire('mediaHotspot:userActivate');

@@ -317,6 +317,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         scenePlacedEntities: [],
         selectedSceneEntityId: null,
         cameraControlsEnabled: true,
+        gizmoPointerActive: false,
+        suppressAssetPointerClick: false,
 
         // 标注相关状态
         selectedAnnotationId: null,

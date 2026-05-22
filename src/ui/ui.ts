@@ -970,6 +970,7 @@ const initUI = (global: Global) => {
                     return;
                 }
                 state.previewMode = nextValue;
+                events.fire('previewMode:changed', nextValue);
                 if (nextValue) {
                     events.fire('mediaHotspot:userActivate');
                 }

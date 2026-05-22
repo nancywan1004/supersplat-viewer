@@ -229,6 +229,10 @@ type State = {
     selectedSceneEntityId?: string | null;
     /** 相机输入是否启用（用于与 Gizmo 交互互斥） */
     cameraControlsEnabled?: boolean;
+    /** 正在拖拽场景/光源 Gizmo（pointerdown 命中轴起至 pointerup） */
+    gizmoPointerActive?: boolean;
+    /** 刚结束 Gizmo 手势：跳过一次资产模块 pointerup 场景选中，避免与 Gizmo 松手冲突 */
+    suppressAssetPointerClick?: boolean;
     /** 当前选中的标注 ID */
     selectedAnnotationId?: string | null;
     /** 标注变换模式（与标注模块底部「移动」按钮联动） */

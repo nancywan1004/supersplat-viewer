@@ -23,6 +23,7 @@ import {
     loadSceneAssetLibraryItem,
     withTimeout
 } from './loaders/asset-loader';
+import { hitSceneGizmoAtClient } from './gizmo-handler';
 import type { InputArbiter } from './input-arbiter';
 import {
     clampVideoHorizontalCurvature,
@@ -1006,6 +1007,13 @@ export function initAssetPlacementHandler(
 
     const handleAssetPointerClickClaim = (clientX: number, clientY: number, worldPos: Vec3 | null): boolean => {
         if (!state.editMode || state.editLeftModule !== 'asset') return false;
+        if (state.suppressAssetPointerClick) {
+            state.suppressAssetPointerClick = false;
+            return false;
+        }
+        if (state.gizmoPointerActive || hitSceneGizmoAtClient(global, clientX, clientY)) {
+            return false;
+        }
         const rect = canvas.getBoundingClientRect();
         const offsetX = clientX - rect.left;
         const offsetY = clientY - rect.top;
