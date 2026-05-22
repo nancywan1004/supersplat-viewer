@@ -96,6 +96,33 @@ export function resolveMorphKeyframeUrlsFromEntityIds(global: Global, entityIds:
     return resolveMorphKeyframeUrlsFromTargetIds(global, entityIds);
 }
 
+export function resolveMorphKeyframeEntitiesFromEntityIds(global: Global, entityIds: string[]): Entity[] | null {
+    if (!Array.isArray(entityIds) || entityIds.length < 2) {
+        return null;
+    }
+    const entities: Entity[] = [];
+    for (const id of entityIds) {
+        const entity = resolveAssetEffectGsplatEntity(global, id);
+        if (!entity) {
+            return null;
+        }
+        entities.push(entity);
+    }
+    return entities;
+}
+
+export function resolveMorphKeyframeEntitiesFromEffectParams(
+    global: Global,
+    ep: Record<string, unknown>,
+    runtimeKeyframeEntities?: Entity[]
+): Entity[] | null {
+    if (runtimeKeyframeEntities && runtimeKeyframeEntities.length >= 2 && runtimeKeyframeEntities.every((e) => !!e?.gsplat)) {
+        return runtimeKeyframeEntities;
+    }
+    const entityIds = readMorphKeyframeEntityIds(ep);
+    return entityIds ? resolveMorphKeyframeEntitiesFromEntityIds(global, entityIds) : null;
+}
+
 function resolveMorphUrlsFromRuntimeEntities(global: Global, entities: Entity[]): string[] | null {
     if (entities.length < 2) {
         return null;

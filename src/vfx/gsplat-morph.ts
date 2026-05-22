@@ -3,6 +3,7 @@ import {
     Entity,
     GSplatData,
     GSplatResource,
+    Mat4,
     WORKBUFFER_UPDATE_ONCE,
     type AppBase
 } from 'playcanvas';
@@ -48,8 +49,30 @@ interface PairCorrespondence {
 
 type CorrespondenceStrategy = 'resample' | 'greedy';
 
+interface MorphPointCloudFrame {
+    strength: number;
+    pointSize: number;
+    tint: [number, number, number];
+    glowStrength: number;
+    opacity: number;
+    density: number;
+    scatterDistance: number;
+    revealProgress: number;
+    topY: number;
+    bottomY: number;
+}
+
+interface MorphPlaybackState {
+    pairIndex: number;
+    t: number;
+    pointCloudStrength: number;
+    pointCloudRevealProgress: number;
+}
+
 export interface GsplatMorphOptions {
     segmentDuration?: number;
+    /** 每段变形到下一个关键帧后停顿时长（秒）。默认 1 秒。 */
+    segmentHoldDuration?: number;
     loop?: boolean;
     autoPlay?: boolean;
     /**
@@ -60,12 +83,13 @@ export interface GsplatMorphOptions {
     unified?: boolean;
     layers?: number[];
     entityName?: string;
-    fadeLogMin?: number; /** 仅用于输出缓冲大于本段 `max(|A|,|B|)` 时的尾部占位（极小高斯），不参与段内配对。 */
+    fadeLogMin?: number; /** 用于隐藏小点数端多余输出槽和尾部占位（极小高斯），不参与配对求解。 */
     /**
      * 为 true 时保留各 keyframe 加载后的 `Asset` / `GSplatResource`（与 `splats` 并存，占显存与内存）。
      * 默认 false：在 `readSplatArrays` 完成后立即 `unload` + `assets.remove`，仅保留 CPU 侧 `splats` 供 morph（显著减轻 keyframe 多时 GPU/重复数据压力）。
      */
     retainSourceAssets?: boolean;
+    /** Center-align every keyframe before correspondence/interpolation. Defaults to true. */
     recenterModels?: boolean;
     normalizeScales?: boolean;
     targetScale?: number;
@@ -100,9 +124,9 @@ export interface GsplatMorphOptions {
      */
     fastQuaternionNlerp?: boolean;
     /**
-     * `resample` is the fastest deterministic index mapping. `greedy` builds an
-     * approximate nearest-neighbor correspondence once during loading using
-     * position + DC color, then reuses that table during playback.
+     * `greedy` is the default matcher: one-time approximate nearest matching
+     * by position, plus optional DC color weight, then reusable nearest-neighbor
+     * fill for count mismatches. `resample` is faster to initialize but only maps by index.
      */
     correspondenceStrategy?: CorrespondenceStrategy;
     greedySpatialWeight?: number;
@@ -110,22 +134,91 @@ export interface GsplatMorphOptions {
     greedyGridCellSize?: number;
     greedySearchRadiusCells?: number;
     greedyMaxCandidatesPerPoint?: number;
+    /** A-B 变形途中临时转为点云感，复用 growth-wave 的球形小点思路。默认 true。 */
+    morphPointCloudEffect?: boolean;
+    /** 点云阶段固定点大小（世界单位）。默认 0.0015。 */
+    morphPointCloudPointSize?: number;
+    /** 点云强度倍率；变形段从 0->1，到达端点后直接切回 GS。默认 1.5。 */
+    morphPointCloudStrength?: number;
+    /** 点云辉光色调 RGB 0–1。默认 (0, 145/255, 1)。 */
+    morphPointCloudTint?: [number, number, number];
+    /** 点云阶段颜色辉光强度。默认 1.7。 */
+    morphPointCloudGlowStrength?: number;
+    /** 点云阶段目标不透明度（0-1）。默认 0.88。 */
+    morphPointCloudOpacity?: number;
+    /** 点云阶段可见点比例（0-1）。默认 0.32，避免全部高斯堆成实体。 */
+    morphPointCloudDensity?: number;
+    /** 点云阶段随机散开距离（世界单位）；不传时按模型包围盒自适应。 */
+    morphPointCloudScatterDistance?: number;
+    /** GS 与点云之间的短切换时长（秒）。默认 0.08 秒。 */
+    morphPointCloudEdgeDuration?: number;
+    /** 点云到达目标形态后保持完整点云的时长（秒），随后切回 GS。默认 0.35 秒。 */
+    morphPointCloudHoldDuration?: number;
+    /** 完整点云从顶部光圈扫描恢复成 GS 的时长（秒）。默认 0.85 秒。 */
+    morphPointCloudRevealDuration?: number;
+    /**
+     * Scene entities used as visual keyframes. They are never transformed by
+     * the morph runtime; when provided, the generated morph entity copies the
+     * first entity's world transform and temporarily hides these sources.
+     */
+    sourceEntities?: Entity[];
+    /** Hide sourceEntities while the morph controller is alive. Defaults to true. */
+    hideSourceEntities?: boolean;
+    /** Internal: precomputed by loadGsplatMorphSequence to keep setup responsive. */
+    prebuiltInterpolator?: GaussianInterpolatorRuntime;
 }
 
 const MAX_MORPH_MODELS = 4;
 const MAX_SH_REST_PROPS = 45;
 const DEFAULT_SEGMENT_DURATION = 1.5;
+const DEFAULT_SEGMENT_HOLD_DURATION = 1.0;
 const DEFAULT_FADE_LOG_MIN = -6.0;
 const DEFAULT_TARGET_SCALE = 10.0;
 const DEFAULT_SORT_CENTERS_MAX_HZ = 6;
 const DEFAULT_GREEDY_SPATIAL_WEIGHT = 0.7;
-const DEFAULT_GREEDY_COLOR_WEIGHT = 0.3;
-const DEFAULT_GREEDY_SEARCH_RADIUS_CELLS = 1;
-const DEFAULT_GREEDY_MAX_CANDIDATES = 48;
+const DEFAULT_GREEDY_COLOR_WEIGHT = 0.0;
+const DEFAULT_GREEDY_SEARCH_RADIUS_CELLS = 2;
+const DEFAULT_GREEDY_MAX_CANDIDATES = 96;
+const DEFAULT_GREEDY_GLOBAL_FALLBACK_SAMPLES = 2048;
+const DEFAULT_MORPH_BUILD_YIELD_MS = 8;
+const DEFAULT_MORPH_POINT_CLOUD_POINT_SIZE = 0.0015;
+const DEFAULT_MORPH_POINT_CLOUD_STRENGTH = 1.5;
+const DEFAULT_MORPH_POINT_CLOUD_GLOW_STRENGTH = 1.7;
+const DEFAULT_MORPH_POINT_CLOUD_OPACITY = 0.88;
+const DEFAULT_MORPH_POINT_CLOUD_DENSITY = 0.32;
+const DEFAULT_MORPH_POINT_CLOUD_TINT: [number, number, number] = [0, 145 / 255, 1];
+const DEFAULT_MORPH_POINT_CLOUD_EDGE_DURATION = 0.08;
+const DEFAULT_MORPH_POINT_CLOUD_HOLD_DURATION = 0.7;
+const DEFAULT_MORPH_POINT_CLOUD_REVEAL_DURATION = 0.85;
 const VALID_REST_PROP_COUNTS = [0, 9, 24, 45] as const;
 const SH_C0 = 0.28209479177387814;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+const smoothstep = (edge0: number, edge1: number, value: number) => {
+    const t = clamp((value - edge0) / Math.max(edge1 - edge0, 1e-6), 0, 1);
+    return t * t * (3 - 2 * t);
+};
+const fract = (value: number) => value - Math.floor(value);
+const hash01 = (value: number) => fract(Math.sin(value * 127.1 + 311.7) * 43758.5453123);
+
+const randomUnitDir = (seed: number) => {
+    const z = hash01(seed + 17.0) * 2 - 1;
+    const theta = hash01(seed + 29.0) * Math.PI * 2;
+    const r = Math.sqrt(Math.max(0, 1 - z * z));
+    return {
+        x: Math.cos(theta) * r,
+        y: Math.sin(theta) * r,
+        z
+    };
+};
+
+const yieldToBrowser = () => new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => resolve());
+        return;
+    }
+    setTimeout(resolve, 0);
+});
 
 const safeFilenameFromUrl = (url: string) => {
     try {
@@ -167,6 +260,22 @@ const resolveMorphSource = (source: MorphSource, index: number) => {
 };
 
 const isSogFilename = (filename: string) => filename.toLowerCase().split('?')[0].endsWith('.sog');
+
+const getEntityGsplatSource = (entity: Entity | undefined) => {
+    const gsplat = entity?.gsplat as any;
+    const asset = gsplat?.asset as Asset | undefined;
+    const resource = (asset?.resource ?? gsplat?.resource) as GSplatResource | undefined;
+    const data = resource?.gsplatData as GSplatData | undefined;
+    if (!resource || !data) {
+        return null;
+    }
+
+    return {
+        asset,
+        resource,
+        data
+    };
+};
 
 const getRequiredProp = (data: GSplatData, name: string) => {
     const prop = data.getProp(name) as ArrayLike<number> | null;
@@ -290,12 +399,86 @@ const normalizeScale = (model: SplatArrays, targetScale: number) => {
 
 // 去中心+尺度归一化
 const preprocessModel = (model: SplatArrays, options: GsplatMorphOptions) => {
-    if (options.recenterModels ?? true) {
+    const hasSceneSourceTransforms = !!options.sourceEntities?.length;
+    if (options.recenterModels ?? !hasSceneSourceTransforms) {
         recenterPointCloud(model);
     }
 
-    if (options.normalizeScales ?? true) {
+    if (options.normalizeScales ?? !hasSceneSourceTransforms) {
         normalizeScale(model, options.targetScale ?? DEFAULT_TARGET_SCALE);
+    }
+};
+
+const quatMulValues = (
+    ax: number,
+    ay: number,
+    az: number,
+    aw: number,
+    bx: number,
+    by: number,
+    bz: number,
+    bw: number
+) => ({
+    x: aw * bx + ax * bw + ay * bz - az * by,
+    y: aw * by - ax * bz + ay * bw + az * bx,
+    z: aw * bz + ax * by - ay * bx + az * bw,
+    w: aw * bw - ax * bx - ay * by - az * bz
+});
+
+const bakeEntityTransformIntoSplats = (
+    splats: SplatArrays,
+    sourceEntity: Entity | undefined,
+    anchorEntity: Entity | undefined
+) => {
+    if (!sourceEntity || !anchorEntity || splats.count === 0) {
+        return;
+    }
+
+    const invAnchor = new Mat4();
+    const rel = new Mat4();
+    invAnchor.copy(anchorEntity.getWorldTransform()).invert();
+    rel.mul2(invAnchor, sourceEntity.getWorldTransform());
+
+    const p = new pc.Vec3();
+    const out = new pc.Vec3();
+    for (let i = 0; i < splats.count; i++) {
+        p.set(splats.x[i], splats.y[i], splats.z[i]);
+        rel.transformPoint(p, out);
+        splats.x[i] = out.x;
+        splats.y[i] = out.y;
+        splats.z[i] = out.z;
+    }
+
+    const axis = new pc.Vec3();
+    const relScaleX = Math.max(rel.transformVector(pc.Vec3.RIGHT, axis).length(), 1e-6);
+    const relScaleY = Math.max(rel.transformVector(pc.Vec3.UP, axis).length(), 1e-6);
+    const relScaleZ = Math.max(rel.transformVector(pc.Vec3.FORWARD, axis).length(), 1e-6);
+    const logScaleX = Math.log(relScaleX);
+    const logScaleY = Math.log(relScaleY);
+    const logScaleZ = Math.log(relScaleZ);
+
+    const anchorRotInv = anchorEntity.getRotation().clone().invert();
+    const sourceRot = sourceEntity.getRotation();
+    const relRot = anchorRotInv.mul(sourceRot);
+    for (let i = 0; i < splats.count; i++) {
+        const q = quatMulValues(
+            relRot.x,
+            relRot.y,
+            relRot.z,
+            relRot.w,
+            splats.rot1[i],
+            splats.rot2[i],
+            splats.rot3[i],
+            splats.rot0[i]
+        );
+        const invLen = 1 / Math.max(Math.hypot(q.x, q.y, q.z, q.w), 1e-6);
+        splats.rot1[i] = q.x * invLen;
+        splats.rot2[i] = q.y * invLen;
+        splats.rot3[i] = q.z * invLen;
+        splats.rot0[i] = q.w * invLen;
+        splats.scale0[i] += logScaleX;
+        splats.scale1[i] += logScaleY;
+        splats.scale2[i] += logScaleZ;
     }
 };
 
@@ -614,7 +797,18 @@ const fillGpuContainerFromMapping = (
 
     for (let i = 0; i < outputCount; i++) {
         if (i < indices.length) {
-            writeGpuSplat(centerData, colorData, scaleData, rotationData, container.centers, i, splats, indices[i], false, fadeLogMin);
+            writeGpuSplat(
+                centerData,
+                colorData,
+                scaleData,
+                rotationData,
+                container.centers,
+                i,
+                splats,
+                indices[i],
+                i >= splats.count,
+                fadeLogMin
+            );
         } else if (fallback >= 0) {
             writeGpuSplat(centerData, colorData, scaleData, rotationData, container.centers, i, splats, fallback, true, fadeLogMin);
         }
@@ -697,23 +891,129 @@ class GpuMorphRuntime {
     `;
 
     private readonly _normalizeGLSL = `
+        uniform float uPointCloudStrength;
+        uniform float uPointCloudPointSize;
+        uniform vec3 uPointCloudTint;
+        uniform float uPointCloudGlowStrength;
+        uniform float uPointCloudOpacity;
+        uniform float uPointCloudDensity;
+        uniform float uPointCloudScatterDistance;
+        uniform float uPointCloudRevealProgress;
+        uniform float uPointCloudTopY;
+        uniform float uPointCloudBottomY;
+
+        float morphHash(float n) {
+            return fract(sin(n * 127.1 + 311.7) * 43758.5453123);
+        }
+
+        vec3 morphRandomDir(float seed) {
+            float z = morphHash(seed + 17.0) * 2.0 - 1.0;
+            float theta = morphHash(seed + 29.0) * 6.2831853;
+            float r = sqrt(max(0.0, 1.0 - z * z));
+            return vec3(cos(theta) * r, sin(theta) * r, z);
+        }
+
         void process() {
-            writeDataCenter(vec4(getCenter(), 1.0));
+            vec3 center = getCenter();
             vec4 color = getColor();
             color.a = 1.0 / (1.0 + exp(-color.a));
+            vec3 scale = exp(getScale());
+            float cloud = clamp(uPointCloudStrength, 0.0, 1.0);
+            if (cloud > 0.0) {
+                float seed = float(splat.index) + 13.37;
+                float localCloud = cloud;
+                float haloBand = 0.0;
+                if (uPointCloudRevealProgress >= 0.0) {
+                    float height = max(0.000001, uPointCloudTopY - uPointCloudBottomY);
+                    float yT = clamp((uPointCloudTopY - center.y) / height, 0.0, 1.0);
+                    float bandWidth = 0.045;
+                    float recovered = 1.0 - smoothstep(uPointCloudRevealProgress - bandWidth, uPointCloudRevealProgress + bandWidth, yT);
+                    localCloud *= 1.0 - recovered;
+                    haloBand = (1.0 - smoothstep(0.0, bandWidth, abs(yT - uPointCloudRevealProgress))) * step(0.0, uPointCloudRevealProgress) * step(uPointCloudRevealProgress, 1.0);
+                }
+                float slotVisible = step(0.01, color.a);
+                float visible = step(morphHash(seed), clamp(uPointCloudDensity, 0.0, 1.0)) * slotVisible;
+                vec3 dir = morphRandomDir(seed);
+                float distMul = 0.45 + morphHash(seed + 43.0) * 0.9;
+                center += dir * uPointCloudScatterDistance * distMul * localCloud;
+                float pointSize = max(uPointCloudPointSize, 0.000001);
+                scale = mix(scale, vec3(pointSize), localCloud);
+                float sparkle = 0.85 + morphHash(seed + 71.0) * 0.35;
+                vec3 cloudColor = color.rgb * (1.0 + uPointCloudGlowStrength * 0.28 * sparkle);
+                cloudColor += uPointCloudTint * uPointCloudGlowStrength * 0.58 * sparkle;
+                color.rgb = mix(color.rgb, cloudColor, localCloud);
+                color.rgb += (vec3(0.96, 1.0, 1.0) + uPointCloudTint * 0.8) * haloBand * 2.2;
+                float targetAlpha = mix(0.001, clamp(uPointCloudOpacity, 0.0, 1.0), visible);
+                color.a = mix(color.a, targetAlpha, localCloud);
+                color.rgb = clamp(color.rgb, vec3(0.0), vec3(4.5));
+            }
+            writeDataCenter(vec4(center, 1.0));
             writeDataColor(color);
-            writeDataScale(vec4(exp(getScale()), 0.0));
+            writeDataScale(vec4(scale, 0.0));
             writeDataRotation(normalize(getRotation()));
         }
     `;
 
     private readonly _normalizeWGSL = `
+        uniform uPointCloudStrength: f32;
+        uniform uPointCloudPointSize: f32;
+        uniform uPointCloudTint: vec3f;
+        uniform uPointCloudGlowStrength: f32;
+        uniform uPointCloudOpacity: f32;
+        uniform uPointCloudDensity: f32;
+        uniform uPointCloudScatterDistance: f32;
+        uniform uPointCloudRevealProgress: f32;
+        uniform uPointCloudTopY: f32;
+        uniform uPointCloudBottomY: f32;
+
+        fn morphHash(n: f32) -> f32 {
+            return fract(sin(n * 127.1 + 311.7) * 43758.5453123);
+        }
+
+        fn morphRandomDir(seed: f32) -> vec3f {
+            let z = morphHash(seed + 17.0) * 2.0 - 1.0;
+            let theta = morphHash(seed + 29.0) * 6.2831853;
+            let r = sqrt(max(0.0, 1.0 - z * z));
+            return vec3f(cos(theta) * r, sin(theta) * r, z);
+        }
+
         fn process() {
-            writeDataCenter(vec4f(getCenter(), 1.0));
+            var center = getCenter();
             var color = getColor();
             color.a = 1.0 / (1.0 + exp(-color.a));
+            var scale = exp(getScale());
+            let cloud = clamp(uniform.uPointCloudStrength, 0.0, 1.0);
+            if (cloud > 0.0) {
+                let seed = f32(splat.index) + 13.37;
+                var localCloud = cloud;
+                var haloBand = 0.0;
+                if (uniform.uPointCloudRevealProgress >= 0.0) {
+                    let height = max(0.000001, uniform.uPointCloudTopY - uniform.uPointCloudBottomY);
+                    let yT = clamp((uniform.uPointCloudTopY - center.y) / height, 0.0, 1.0);
+                    let bandWidth = 0.045;
+                    let recovered = 1.0 - smoothstep(uniform.uPointCloudRevealProgress - bandWidth, uniform.uPointCloudRevealProgress + bandWidth, yT);
+                    localCloud = localCloud * (1.0 - recovered);
+                    haloBand = (1.0 - smoothstep(0.0, bandWidth, abs(yT - uniform.uPointCloudRevealProgress))) * step(0.0, uniform.uPointCloudRevealProgress) * step(uniform.uPointCloudRevealProgress, 1.0);
+                }
+                let slotVisible = step(0.01, color.a);
+                let visible = step(morphHash(seed), clamp(uniform.uPointCloudDensity, 0.0, 1.0)) * slotVisible;
+                let dir = morphRandomDir(seed);
+                let distMul = 0.45 + morphHash(seed + 43.0) * 0.9;
+                center = center + dir * uniform.uPointCloudScatterDistance * distMul * localCloud;
+                let pointSize = max(uniform.uPointCloudPointSize, 0.000001);
+                scale = mix(scale, vec3f(pointSize), localCloud);
+                let sparkle = 0.85 + morphHash(seed + 71.0) * 0.35;
+                var cloudColor = color.rgb * (1.0 + uniform.uPointCloudGlowStrength * 0.28 * sparkle);
+                cloudColor = cloudColor + uniform.uPointCloudTint * uniform.uPointCloudGlowStrength * 0.58 * sparkle;
+                color.rgb = mix(color.rgb, cloudColor, localCloud);
+                color.rgb = color.rgb + (vec3f(0.96, 1.0, 1.0) + uniform.uPointCloudTint * 0.8) * haloBand * 2.2;
+                let targetAlpha = mix(0.001, clamp(uniform.uPointCloudOpacity, 0.0, 1.0), visible);
+                color.a = mix(color.a, targetAlpha, localCloud);
+                color.rgb = clamp(color.rgb, vec3f(0.0), vec3f(4.5));
+            }
+            writeDataCenter(vec4f(center, 1.0));
             writeDataColor(color);
-            writeDataScale(vec4f(exp(getScale()), 0.0));
+            writeDataScale(vec4f(scale, 0.0));
             writeDataRotation(normalize(getRotation()));
         }
     `;
@@ -771,7 +1071,7 @@ class GpuMorphRuntime {
         this.resource.update(outputCount, true);
     }
 
-    apply(pairIndex: number, t: number) {
+    apply(pairIndex: number, t: number, pointCloud?: MorphPointCloudFrame) {
         if (this._pairIndex !== pairIndex) {
             this.destroyProcessors();
             this._pairIndex = pairIndex;
@@ -825,6 +1125,16 @@ class GpuMorphRuntime {
         this._processorA.process();
         this._processorB.setParameter('uWeight', t);
         this._processorB.process();
+        this._normalizeProcessor.setParameter('uPointCloudStrength', pointCloud?.strength ?? 0);
+        this._normalizeProcessor.setParameter('uPointCloudPointSize', pointCloud?.pointSize ?? DEFAULT_MORPH_POINT_CLOUD_POINT_SIZE);
+        this._normalizeProcessor.setParameter('uPointCloudTint', pointCloud?.tint ?? DEFAULT_MORPH_POINT_CLOUD_TINT);
+        this._normalizeProcessor.setParameter('uPointCloudGlowStrength', pointCloud?.glowStrength ?? DEFAULT_MORPH_POINT_CLOUD_GLOW_STRENGTH);
+        this._normalizeProcessor.setParameter('uPointCloudOpacity', pointCloud?.opacity ?? DEFAULT_MORPH_POINT_CLOUD_OPACITY);
+        this._normalizeProcessor.setParameter('uPointCloudDensity', pointCloud?.density ?? DEFAULT_MORPH_POINT_CLOUD_DENSITY);
+        this._normalizeProcessor.setParameter('uPointCloudScatterDistance', pointCloud?.scatterDistance ?? 0);
+        this._normalizeProcessor.setParameter('uPointCloudRevealProgress', pointCloud?.revealProgress ?? -1);
+        this._normalizeProcessor.setParameter('uPointCloudTopY', pointCloud?.topY ?? 1);
+        this._normalizeProcessor.setParameter('uPointCloudBottomY', pointCloud?.bottomY ?? 0);
         this._normalizeProcessor.process();
     }
 
@@ -880,11 +1190,13 @@ class GaussianInterpolatorRuntime {
 
     private readonly _options: GsplatMorphOptions;
 
-    constructor(models: LoadedMorphModel[], fadeLogMin: number, options: GsplatMorphOptions = {}) {
+    constructor(models: LoadedMorphModel[], fadeLogMin: number, options: GsplatMorphOptions = {}, buildNow = true) {
         this.models = models;
         this.fadeLogMin = fadeLogMin;
         this._options = options;
-        this.buildCorrespondences();
+        if (buildNow) {
+            this.buildCorrespondences();
+        }
     }
 
     private pairKey(idxA: number, idxB: number) {
@@ -896,10 +1208,25 @@ class GaussianInterpolatorRuntime {
             const j = i + 1;
             this.correspondences.set(
                 this.pairKey(i, j),
-                this._options.correspondenceStrategy === 'greedy'
+                (this._options.correspondenceStrategy ?? 'greedy') === 'greedy'
                     ? this.correspondGreedyApprox(this.models[i].splats, this.models[j].splats)
                     : this.correspondMaxResample(this.models[i].splats, this.models[j].splats)
             );
+        }
+    }
+
+    async buildCorrespondencesAsync(onProgress?: (done: number, total: number) => void) {
+        const total = Math.max(0, this.models.length - 1);
+        for (let i = 0; i < total; i++) {
+            const j = i + 1;
+            this.correspondences.set(
+                this.pairKey(i, j),
+                (this._options.correspondenceStrategy ?? 'greedy') === 'greedy'
+                    ? await this.correspondGreedyApproxAsync(this.models[i].splats, this.models[j].splats)
+                    : this.correspondMaxResample(this.models[i].splats, this.models[j].splats)
+            );
+            onProgress?.(i + 1, total);
+            await yieldToBrowser();
         }
     }
 
@@ -944,88 +1271,189 @@ class GaussianInterpolatorRuntime {
         const maxCandidates = Math.max(1, this._options.greedyMaxCandidatesPerPoint ?? DEFAULT_GREEDY_MAX_CANDIDATES);
         const spatialWeight = this._options.greedySpatialWeight ?? DEFAULT_GREEDY_SPATIAL_WEIGHT;
         const colorWeight = this._options.greedyColorWeight ?? DEFAULT_GREEDY_COLOR_WEIGHT;
+        const useColorCost = colorWeight > 0;
+        const smallIsA = na <= nb;
+        const small = smallIsA ? a : b;
+        const large = smallIsA ? b : a;
+        const nSmall = small.count;
+        const nLarge = large.count;
         const grid = new Map<string, number[]>();
         const keyOf = (x: number, y: number, z: number) =>
             `${Math.floor(x / cellSize)},${Math.floor(y / cellSize)},${Math.floor(z / cellSize)}`;
 
-        for (let i = 0; i < nb; i++) {
-            const key = keyOf(b.x[i], b.y[i], b.z[i]);
-            const bucket = grid.get(key);
+        const addToGrid = (targetGrid: Map<string, number[]>, splats: SplatArrays, index: number) => {
+            const key = keyOf(splats.x[index], splats.y[index], splats.z[index]);
+            const bucket = targetGrid.get(key);
             if (bucket) {
-                bucket.push(i);
+                bucket.push(index);
             } else {
-                grid.set(key, [i]);
+                targetGrid.set(key, [index]);
+            }
+        };
+
+        for (let i = 0; i < nLarge; i++) {
+            addToGrid(grid, large, i);
+        }
+
+        const smallGrid = nLarge > nSmall ? new Map<string, number[]>() : null;
+        if (smallGrid) {
+            for (let i = 0; i < nSmall; i++) {
+                addToGrid(smallGrid, small, i);
             }
         }
 
-        const usedB = new Uint8Array(nb);
+        const usedLarge = new Uint8Array(nLarge);
         const matchedA = new Uint32Array(outN);
         const matchedB = new Uint32Array(outN);
         let write = 0;
-        let nextUnusedB = 0;
-        const takeFallbackB = (preferred: number) => {
-            if (!usedB[preferred]) {
-                return preferred;
+        let nextUnusedLarge = 0;
+        const candidateCost = (
+            source: SplatArrays,
+            sourceIndex: number,
+            target: SplatArrays,
+            targetIndex: number
+        ) => {
+            const px = (source.x[sourceIndex] - target.x[targetIndex]) / cellSize;
+            const py = (source.y[sourceIndex] - target.y[targetIndex]) / cellSize;
+            const pz = (source.z[sourceIndex] - target.z[targetIndex]) / cellSize;
+            const spatialCost = spatialWeight * (px * px + py * py + pz * pz);
+            if (!useColorCost) {
+                return spatialCost;
             }
-            while (nextUnusedB < nb && usedB[nextUnusedB]) {
-                nextUnusedB++;
-            }
-            return nextUnusedB < nb ? nextUnusedB : preferred;
+            const cr = source.fdc0[sourceIndex] - target.fdc0[targetIndex];
+            const cg = source.fdc1[sourceIndex] - target.fdc1[targetIndex];
+            const cb = source.fdc2[sourceIndex] - target.fdc2[targetIndex];
+            return spatialCost + colorWeight * (cr * cr + cg * cg + cb * cb);
         };
 
-        for (let ia = 0; ia < na && write < outN; ia++, write++) {
-            const cx = Math.floor(a.x[ia] / cellSize);
-            const cy = Math.floor(a.y[ia] / cellSize);
-            const cz = Math.floor(a.z[ia] / cellSize);
+        const findGlobalApproxLargeForSmall = (smallIndex: number, requireUnused: boolean) => {
+            let best = -1;
+            let bestCost = Number.POSITIVE_INFINITY;
+            const samples = Math.min(nLarge, DEFAULT_GREEDY_GLOBAL_FALLBACK_SAMPLES);
+            const stride = Math.max(1, Math.floor(nLarge / samples));
+            const offset = nLarge > 0 ? smallIndex % stride : 0;
+
+            for (let i = offset; i < nLarge; i += stride) {
+                if (requireUnused && usedLarge[i]) {
+                    continue;
+                }
+                const cost = candidateCost(small, smallIndex, large, i);
+                if (cost < bestCost) {
+                    bestCost = cost;
+                    best = i;
+                }
+            }
+
+            if (requireUnused && best < 0) {
+                while (nextUnusedLarge < nLarge && usedLarge[nextUnusedLarge]) {
+                    nextUnusedLarge++;
+                }
+                return nextUnusedLarge < nLarge ? nextUnusedLarge : -1;
+            }
+
+            return best;
+        };
+
+        const findBestLargeForSmall = (
+            smallIndex: number,
+            requireUnused: boolean,
+            searchRadius = radius,
+            candidateLimit = maxCandidates
+        ) => {
+            const cx = Math.floor(small.x[smallIndex] / cellSize);
+            const cy = Math.floor(small.y[smallIndex] / cellSize);
+            const cz = Math.floor(small.z[smallIndex] / cellSize);
             let best = -1;
             let bestCost = Number.POSITIVE_INFINITY;
             let tested = 0;
 
-            for (let dz = -radius; dz <= radius && tested < maxCandidates; dz++) {
-                for (let dy = -radius; dy <= radius && tested < maxCandidates; dy++) {
-                    for (let dx = -radius; dx <= radius && tested < maxCandidates; dx++) {
+            for (let dz = -searchRadius; dz <= searchRadius && tested < candidateLimit; dz++) {
+                for (let dy = -searchRadius; dy <= searchRadius && tested < candidateLimit; dy++) {
+                    for (let dx = -searchRadius; dx <= searchRadius && tested < candidateLimit; dx++) {
                         const bucket = grid.get(`${cx + dx},${cy + dy},${cz + dz}`);
                         if (!bucket) {
                             continue;
                         }
-                        for (let n = 0; n < bucket.length && tested < maxCandidates; n++) {
-                            const ib = bucket[n];
-                            if (usedB[ib]) {
+                        for (let n = 0; n < bucket.length && tested < candidateLimit; n++) {
+                            const largeIndex = bucket[n];
+                            if (requireUnused && usedLarge[largeIndex]) {
                                 continue;
                             }
                             tested++;
-                            const px = (a.x[ia] - b.x[ib]) / cellSize;
-                            const py = (a.y[ia] - b.y[ib]) / cellSize;
-                            const pz = (a.z[ia] - b.z[ib]) / cellSize;
-                            const cr = a.fdc0[ia] - b.fdc0[ib];
-                            const cg = a.fdc1[ia] - b.fdc1[ib];
-                            const cb = a.fdc2[ia] - b.fdc2[ib];
-                            const cost = spatialWeight * (px * px + py * py + pz * pz) + colorWeight * (cr * cr + cg * cg + cb * cb);
+                            const cost = candidateCost(small, smallIndex, large, largeIndex);
                             if (cost < bestCost) {
                                 bestCost = cost;
-                                best = ib;
+                                best = largeIndex;
                             }
                         }
                     }
                 }
             }
 
+            return best;
+        };
+
+        for (let smallIndex = 0; smallIndex < nSmall && write < outN; smallIndex++, write++) {
+            let best = findBestLargeForSmall(smallIndex, true);
+            if (best < 0 && radius < 6) {
+                best = findBestLargeForSmall(smallIndex, true, Math.min(6, radius + 2), maxCandidates * 2);
+            }
             if (best < 0) {
-                best = takeFallbackB(nb <= 1 ? 0 : Math.min(Math.floor((ia * nb) / na), nb - 1));
+                best = findGlobalApproxLargeForSmall(smallIndex, true);
+            }
+            if (best < 0) {
+                best = 0;
             }
 
-            usedB[best] = 1;
-            matchedA[write] = ia;
-            matchedB[write] = best;
+            usedLarge[best] = 1;
+            if (smallIsA) {
+                matchedA[write] = smallIndex;
+                matchedB[write] = best;
+            } else {
+                matchedA[write] = best;
+                matchedB[write] = smallIndex;
+            }
         }
 
-        if (nb > na) {
-            for (let ib = 0; ib < nb && write < outN; ib++) {
-                if (usedB[ib]) {
+        if (nLarge > nSmall && smallGrid) {
+            for (let largeIndex = 0; largeIndex < nLarge && write < outN; largeIndex++) {
+                if (usedLarge[largeIndex]) {
                     continue;
                 }
-                matchedA[write] = na <= 1 ? 0 : Math.min(Math.floor((ib * na) / nb), na - 1);
-                matchedB[write] = ib;
+                let nearestSmall = this.findNearestApproxIndex(
+                    large,
+                    largeIndex,
+                    small,
+                    smallGrid,
+                    cellSize,
+                    radius,
+                    maxCandidates,
+                    spatialWeight,
+                    colorWeight
+                );
+                if (nearestSmall < 0 && radius < 6) {
+                    nearestSmall = this.findNearestApproxIndex(
+                        large,
+                        largeIndex,
+                        small,
+                        smallGrid,
+                        cellSize,
+                        Math.min(6, radius + 2),
+                        maxCandidates * 2,
+                        spatialWeight,
+                        colorWeight
+                    );
+                }
+                const smallIndex = nearestSmall >= 0
+                    ? nearestSmall
+                    : this.findGlobalApproxIndex(large, largeIndex, small, cellSize, spatialWeight, colorWeight);
+                if (smallIsA) {
+                    matchedA[write] = smallIndex;
+                    matchedB[write] = largeIndex;
+                } else {
+                    matchedA[write] = largeIndex;
+                    matchedB[write] = smallIndex;
+                }
                 write++;
             }
         }
@@ -1039,14 +1467,288 @@ class GaussianInterpolatorRuntime {
             a: na,
             b: nb,
             out: outN,
+            small: nSmall,
+            large: nLarge,
             cellSize,
             radius,
             maxCandidates,
+            globalFallbackSamples: DEFAULT_GREEDY_GLOBAL_FALLBACK_SAMPLES,
             spatialWeight,
             colorWeight
         });
 
         return { matchedA, matchedB };
+    }
+
+    private async correspondGreedyApproxAsync(a: SplatArrays, b: SplatArrays): Promise<PairCorrespondence> {
+        const na = a.count;
+        const nb = b.count;
+        const outN = Math.max(na, nb);
+        if (outN === 0 || na === 0 || nb === 0) {
+            return { matchedA: new Uint32Array(0), matchedB: new Uint32Array(0) };
+        }
+
+        let lastYield = performance.now();
+        const maybeYield = async () => {
+            const now = performance.now();
+            if (now - lastYield < DEFAULT_MORPH_BUILD_YIELD_MS) {
+                return;
+            }
+            await yieldToBrowser();
+            lastYield = performance.now();
+        };
+
+        const cellSize = this.estimateGreedyCellSize(a, b);
+        const radius = Math.max(0, Math.floor(this._options.greedySearchRadiusCells ?? DEFAULT_GREEDY_SEARCH_RADIUS_CELLS));
+        const maxCandidates = Math.max(1, this._options.greedyMaxCandidatesPerPoint ?? DEFAULT_GREEDY_MAX_CANDIDATES);
+        const spatialWeight = this._options.greedySpatialWeight ?? DEFAULT_GREEDY_SPATIAL_WEIGHT;
+        const colorWeight = this._options.greedyColorWeight ?? DEFAULT_GREEDY_COLOR_WEIGHT;
+        const useColorCost = colorWeight > 0;
+        const smallIsA = na <= nb;
+        const small = smallIsA ? a : b;
+        const large = smallIsA ? b : a;
+        const nSmall = small.count;
+        const nLarge = large.count;
+        const grid = new Map<string, number[]>();
+        const smallGrid = nLarge > nSmall ? new Map<string, number[]>() : null;
+        const keyOf = (x: number, y: number, z: number) =>
+            `${Math.floor(x / cellSize)},${Math.floor(y / cellSize)},${Math.floor(z / cellSize)}`;
+        const addToGrid = (targetGrid: Map<string, number[]>, splats: SplatArrays, index: number) => {
+            const key = keyOf(splats.x[index], splats.y[index], splats.z[index]);
+            const bucket = targetGrid.get(key);
+            if (bucket) {
+                bucket.push(index);
+            } else {
+                targetGrid.set(key, [index]);
+            }
+        };
+
+        for (let i = 0; i < nLarge; i++) {
+            addToGrid(grid, large, i);
+            if ((i & 0x3fff) === 0) await maybeYield();
+        }
+        if (smallGrid) {
+            for (let i = 0; i < nSmall; i++) {
+                addToGrid(smallGrid, small, i);
+                if ((i & 0x3fff) === 0) await maybeYield();
+            }
+        }
+
+        const usedLarge = new Uint8Array(nLarge);
+        const matchedA = new Uint32Array(outN);
+        const matchedB = new Uint32Array(outN);
+        let write = 0;
+        let nextUnusedLarge = 0;
+        const cost = (si: number, li: number) => {
+            const px = (small.x[si] - large.x[li]) / cellSize;
+            const py = (small.y[si] - large.y[li]) / cellSize;
+            const pz = (small.z[si] - large.z[li]) / cellSize;
+            const spatialCost = spatialWeight * (px * px + py * py + pz * pz);
+            if (!useColorCost) {
+                return spatialCost;
+            }
+            const cr = small.fdc0[si] - large.fdc0[li];
+            const cg = small.fdc1[si] - large.fdc1[li];
+            const cb = small.fdc2[si] - large.fdc2[li];
+            return spatialCost + colorWeight * (cr * cr + cg * cg + cb * cb);
+        };
+        const globalUnusedLarge = (si: number) => {
+            let best = -1;
+            let bestCost = Number.POSITIVE_INFINITY;
+            const samples = Math.min(nLarge, DEFAULT_GREEDY_GLOBAL_FALLBACK_SAMPLES);
+            const stride = Math.max(1, Math.floor(nLarge / samples));
+            for (let li = si % stride; li < nLarge; li += stride) {
+                if (usedLarge[li]) continue;
+                const c = cost(si, li);
+                if (c < bestCost) {
+                    bestCost = c;
+                    best = li;
+                }
+            }
+            if (best >= 0) return best;
+            while (nextUnusedLarge < nLarge && usedLarge[nextUnusedLarge]) nextUnusedLarge++;
+            return nextUnusedLarge < nLarge ? nextUnusedLarge : 0;
+        };
+        const bestLarge = (si: number, searchRadius: number, candidateLimit: number) => {
+            const cx = Math.floor(small.x[si] / cellSize);
+            const cy = Math.floor(small.y[si] / cellSize);
+            const cz = Math.floor(small.z[si] / cellSize);
+            let best = -1;
+            let bestCost = Number.POSITIVE_INFINITY;
+            let tested = 0;
+            for (let dz = -searchRadius; dz <= searchRadius && tested < candidateLimit; dz++) {
+                for (let dy = -searchRadius; dy <= searchRadius && tested < candidateLimit; dy++) {
+                    for (let dx = -searchRadius; dx <= searchRadius && tested < candidateLimit; dx++) {
+                        const bucket = grid.get(`${cx + dx},${cy + dy},${cz + dz}`);
+                        if (!bucket) continue;
+                        for (let k = 0; k < bucket.length && tested < candidateLimit; k++) {
+                            const li = bucket[k];
+                            if (usedLarge[li]) continue;
+                            tested++;
+                            const c = cost(si, li);
+                            if (c < bestCost) {
+                                bestCost = c;
+                                best = li;
+                            }
+                        }
+                    }
+                }
+            }
+            return best;
+        };
+
+        for (let si = 0; si < nSmall && write < outN; si++, write++) {
+            let li = bestLarge(si, radius, maxCandidates);
+            if (li < 0 && radius < 6) {
+                li = bestLarge(si, Math.min(6, radius + 2), maxCandidates * 2);
+            }
+            if (li < 0) {
+                li = globalUnusedLarge(si);
+            }
+            usedLarge[li] = 1;
+            if (smallIsA) {
+                matchedA[write] = si;
+                matchedB[write] = li;
+            } else {
+                matchedA[write] = li;
+                matchedB[write] = si;
+            }
+            if ((si & 0x7ff) === 0) await maybeYield();
+        }
+
+        if (nLarge > nSmall && smallGrid) {
+            for (let li = 0; li < nLarge && write < outN; li++) {
+                if (usedLarge[li]) {
+                    continue;
+                }
+                let si = this.findNearestApproxIndex(large, li, small, smallGrid, cellSize, radius, maxCandidates, spatialWeight, colorWeight);
+                if (si < 0 && radius < 6) {
+                    si = this.findNearestApproxIndex(large, li, small, smallGrid, cellSize, Math.min(6, radius + 2), maxCandidates * 2, spatialWeight, colorWeight);
+                }
+                if (si < 0) {
+                    si = this.findGlobalApproxIndex(large, li, small, cellSize, spatialWeight, colorWeight);
+                }
+                if (smallIsA) {
+                    matchedA[write] = si;
+                    matchedB[write] = li;
+                } else {
+                    matchedA[write] = li;
+                    matchedB[write] = si;
+                }
+                write++;
+                if ((li & 0x7ff) === 0) await maybeYield();
+            }
+        }
+
+        for (; write < outN; write++) {
+            matchedA[write] = na - 1;
+            matchedB[write] = nb - 1;
+        }
+
+        console.info('[GsplatMorph] greedy correspondence built async', {
+            a: na,
+            b: nb,
+            out: outN,
+            cellSize,
+            radius,
+            maxCandidates,
+            globalFallbackSamples: DEFAULT_GREEDY_GLOBAL_FALLBACK_SAMPLES,
+            spatialWeight,
+            colorWeight
+        });
+
+        return { matchedA, matchedB };
+    }
+
+    private findNearestApproxIndex(
+        source: SplatArrays,
+        sourceIndex: number,
+        target: SplatArrays,
+        targetGrid: Map<string, number[]>,
+        cellSize: number,
+        radius: number,
+        maxCandidates: number,
+        spatialWeight: number,
+        colorWeight: number
+    ) {
+        const cx = Math.floor(source.x[sourceIndex] / cellSize);
+        const cy = Math.floor(source.y[sourceIndex] / cellSize);
+        const cz = Math.floor(source.z[sourceIndex] / cellSize);
+        const useColorCost = colorWeight > 0;
+        let best = -1;
+        let bestCost = Number.POSITIVE_INFINITY;
+        let tested = 0;
+
+        for (let dz = -radius; dz <= radius && tested < maxCandidates; dz++) {
+            for (let dy = -radius; dy <= radius && tested < maxCandidates; dy++) {
+                for (let dx = -radius; dx <= radius && tested < maxCandidates; dx++) {
+                    const bucket = targetGrid.get(`${cx + dx},${cy + dy},${cz + dz}`);
+                    if (!bucket) {
+                        continue;
+                    }
+                    for (let n = 0; n < bucket.length && tested < maxCandidates; n++) {
+                        const targetIndex = bucket[n];
+                        tested++;
+                        const px = (source.x[sourceIndex] - target.x[targetIndex]) / cellSize;
+                        const py = (source.y[sourceIndex] - target.y[targetIndex]) / cellSize;
+                        const pz = (source.z[sourceIndex] - target.z[targetIndex]) / cellSize;
+                        let cost = spatialWeight * (px * px + py * py + pz * pz);
+                        if (useColorCost) {
+                            const cr = source.fdc0[sourceIndex] - target.fdc0[targetIndex];
+                            const cg = source.fdc1[sourceIndex] - target.fdc1[targetIndex];
+                            const cb = source.fdc2[sourceIndex] - target.fdc2[targetIndex];
+                            cost += colorWeight * (cr * cr + cg * cg + cb * cb);
+                        }
+                        if (cost < bestCost) {
+                            bestCost = cost;
+                            best = targetIndex;
+                        }
+                    }
+                }
+            }
+        }
+
+        return best;
+    }
+
+    private findGlobalApproxIndex(
+        source: SplatArrays,
+        sourceIndex: number,
+        target: SplatArrays,
+        cellSize: number,
+        spatialWeight: number,
+        colorWeight: number
+    ) {
+        const n = target.count;
+        if (n <= 0) {
+            return 0;
+        }
+
+        let best = 0;
+        let bestCost = Number.POSITIVE_INFINITY;
+        const useColorCost = colorWeight > 0;
+        const samples = Math.min(n, DEFAULT_GREEDY_GLOBAL_FALLBACK_SAMPLES);
+        const stride = Math.max(1, Math.floor(n / samples));
+        const offset = sourceIndex % stride;
+
+        for (let i = offset; i < n; i += stride) {
+            const px = (source.x[sourceIndex] - target.x[i]) / cellSize;
+            const py = (source.y[sourceIndex] - target.y[i]) / cellSize;
+            const pz = (source.z[sourceIndex] - target.z[i]) / cellSize;
+            let cost = spatialWeight * (px * px + py * py + pz * pz);
+            if (useColorCost) {
+                const cr = source.fdc0[sourceIndex] - target.fdc0[i];
+                const cg = source.fdc1[sourceIndex] - target.fdc1[i];
+                const cb = source.fdc2[sourceIndex] - target.fdc2[i];
+                cost += colorWeight * (cr * cr + cg * cg + cb * cb);
+            }
+            if (cost < bestCost) {
+                bestCost = cost;
+                best = i;
+            }
+        }
+
+        return best;
     }
 
     /**
@@ -1124,7 +1826,15 @@ class GaussianInterpolatorRuntime {
         };
     }
 
-    interpolateBetween(idxA: number, idxB: number, t: number, output: SplatArrays, writeRestSh = true, fastQuaternionNlerp = true) {
+    interpolateBetween(
+        idxA: number,
+        idxB: number,
+        t: number,
+        output: SplatArrays,
+        writeRestSh = true,
+        fastQuaternionNlerp = true,
+        pointCloud?: MorphPointCloudFrame
+    ) {
         if (!(t >= 0 && t <= 1)) {
             throw new Error(`Interpolation t must be in [0, 1], got ${t}`);
         }
@@ -1138,23 +1848,106 @@ class GaussianInterpolatorRuntime {
         }
 
         let write = 0;
+        const cloud = clamp(pointCloud?.strength ?? 0, 0, 1);
+        const pointLogScale = Math.log(Math.max(pointCloud?.pointSize ?? DEFAULT_MORPH_POINT_CLOUD_POINT_SIZE, 1e-6));
+        const glowStrength = pointCloud?.glowStrength ?? DEFAULT_MORPH_POINT_CLOUD_GLOW_STRENGTH;
+        const tint = pointCloud?.tint ?? DEFAULT_MORPH_POINT_CLOUD_TINT;
+        const targetOpacity = clamp(pointCloud?.opacity ?? DEFAULT_MORPH_POINT_CLOUD_OPACITY, 1e-4, 1 - 1e-4);
+        const targetOpacityLogit = Math.log(targetOpacity / (1 - targetOpacity));
+        const cloudDensity = clamp(pointCloud?.density ?? DEFAULT_MORPH_POINT_CLOUD_DENSITY, 0, 1);
+        const hiddenOpacityLogit = Math.log(0.001 / 0.999);
+        const scatterDistance = Math.max(0, pointCloud?.scatterDistance ?? 0);
 
         for (let i = 0; i < correspondence.matchedA.length; i++, write++) {
             const src = correspondence.matchedA[i];
             const dst = correspondence.matchedB[i];
+            const aVisible = i < a.count;
+            const bVisible = i < b.count;
+            const aScale0 = aVisible ? a.scale0[src] : this.fadeLogMin;
+            const aScale1 = aVisible ? a.scale1[src] : this.fadeLogMin;
+            const aScale2 = aVisible ? a.scale2[src] : this.fadeLogMin;
+            const bScale0 = bVisible ? b.scale0[dst] : this.fadeLogMin;
+            const bScale1 = bVisible ? b.scale1[dst] : this.fadeLogMin;
+            const bScale2 = bVisible ? b.scale2[dst] : this.fadeLogMin;
+            const aOpacity = aVisible ? a.opacity[src] : this.fadeLogMin;
+            const bOpacity = bVisible ? b.opacity[dst] : this.fadeLogMin;
 
             output.x[write] = a.x[src] * (1 - t) + b.x[dst] * t;
             output.y[write] = a.y[src] * (1 - t) + b.y[dst] * t;
             output.z[write] = a.z[src] * (1 - t) + b.z[dst] * t;
+            let localCloud = cloud;
+            let haloBand = 0;
+            if (cloud > 0 && pointCloud && pointCloud.revealProgress >= 0) {
+                const height = Math.max(1e-6, pointCloud.topY - pointCloud.bottomY);
+                const yT = clamp((pointCloud.topY - output.y[write]) / height, 0, 1);
+                const bandWidth = 0.045;
+                const recovered = 1 - smoothstep(pointCloud.revealProgress - bandWidth, pointCloud.revealProgress + bandWidth, yT);
+                localCloud *= 1 - recovered;
+                haloBand = (1 - smoothstep(0, bandWidth, Math.abs(yT - pointCloud.revealProgress))) *
+                    (pointCloud.revealProgress >= 0 && pointCloud.revealProgress <= 1 ? 1 : 0);
+            }
+            if (localCloud > 0 && scatterDistance > 0) {
+                const seed = write + 13.37;
+                const dir = randomUnitDir(seed);
+                const distMul = 0.45 + hash01(seed + 43.0) * 0.9;
+                const scatter = scatterDistance * distMul * localCloud;
+                output.x[write] += dir.x * scatter;
+                output.y[write] += dir.y * scatter;
+                output.z[write] += dir.z * scatter;
+            }
 
             output.fdc0[write] = a.fdc0[src] * (1 - t) + b.fdc0[dst] * t;
             output.fdc1[write] = a.fdc1[src] * (1 - t) + b.fdc1[dst] * t;
             output.fdc2[write] = a.fdc2[src] * (1 - t) + b.fdc2[dst] * t;
+            if (cloud > 0) {
+                const sparkle = 0.85 + hash01(write + 84.37) * 0.35;
+                const baseRgb: [number, number, number] = [
+                    output.fdc0[write] * SH_C0 + 0.5,
+                    output.fdc1[write] * SH_C0 + 0.5,
+                    output.fdc2[write] * SH_C0 + 0.5
+                ];
+                const glow = glowStrength * sparkle;
+                const targetRgb: [number, number, number] = [
+                    clamp(baseRgb[0] * (1 + glow * 0.28) + tint[0] * glow * 0.58, 0, 4.5),
+                    clamp(baseRgb[1] * (1 + glow * 0.28) + tint[1] * glow * 0.58, 0, 4.5),
+                    clamp(baseRgb[2] * (1 + glow * 0.28) + tint[2] * glow * 0.58, 0, 4.5)
+                ];
+                const targetFdc: [number, number, number] = [
+                    (targetRgb[0] - 0.5) / SH_C0,
+                    (targetRgb[1] - 0.5) / SH_C0,
+                    (targetRgb[2] - 0.5) / SH_C0
+                ];
+                const colorMix = localCloud;
+                output.fdc0[write] = output.fdc0[write] * (1 - colorMix) + targetFdc[0] * colorMix;
+                output.fdc1[write] = output.fdc1[write] * (1 - colorMix) + targetFdc[1] * colorMix;
+                output.fdc2[write] = output.fdc2[write] * (1 - colorMix) + targetFdc[2] * colorMix;
+                if (haloBand > 0) {
+                    const haloRgb: [number, number, number] = [
+                        clamp(baseRgb[0] + (0.96 + tint[0] * 0.8) * haloBand * 2.2, 0, 4.5),
+                        clamp(baseRgb[1] + (1.0 + tint[1] * 0.8) * haloBand * 2.2, 0, 4.5),
+                        clamp(baseRgb[2] + (1.0 + tint[2] * 0.8) * haloBand * 2.2, 0, 4.5)
+                    ];
+                    output.fdc0[write] = (haloRgb[0] - 0.5) / SH_C0;
+                    output.fdc1[write] = (haloRgb[1] - 0.5) / SH_C0;
+                    output.fdc2[write] = (haloRgb[2] - 0.5) / SH_C0;
+                }
+            }
 
-            output.scale0[write] = a.scale0[src] * (1 - t) + b.scale0[dst] * t;
-            output.scale1[write] = a.scale1[src] * (1 - t) + b.scale1[dst] * t;
-            output.scale2[write] = a.scale2[src] * (1 - t) + b.scale2[dst] * t;
-            output.opacity[write] = a.opacity[src] * (1 - t) + b.opacity[dst] * t;
+            output.scale0[write] = aScale0 * (1 - t) + bScale0 * t;
+            output.scale1[write] = aScale1 * (1 - t) + bScale1 * t;
+            output.scale2[write] = aScale2 * (1 - t) + bScale2 * t;
+            if (localCloud > 0) {
+                output.scale0[write] = output.scale0[write] * (1 - localCloud) + pointLogScale * localCloud;
+                output.scale1[write] = output.scale1[write] * (1 - localCloud) + pointLogScale * localCloud;
+                output.scale2[write] = output.scale2[write] * (1 - localCloud) + pointLogScale * localCloud;
+            }
+            output.opacity[write] = aOpacity * (1 - t) + bOpacity * t;
+            if (localCloud > 0) {
+                const baseOpacity = sigmoid(output.opacity[write]);
+                const visible = baseOpacity > 0.01 && hash01(write + 13.37) <= cloudDensity;
+                const pointOpacity = visible ? targetOpacityLogit : hiddenOpacityLogit;
+                output.opacity[write] = output.opacity[write] * (1 - localCloud) + pointOpacity * localCloud;
+            }
 
             const q = fastQuaternionNlerp
                 ? nlerpQuat(
@@ -1215,6 +2008,28 @@ const loadMorphModel = async (
     options: GsplatMorphOptions
 ) => {
     const resolved = resolveMorphSource(source, index);
+    const sourceEntity = options.sourceEntities?.[index];
+    const entitySource = getEntityGsplatSource(sourceEntity);
+    if (entitySource) {
+        const splats = readSplatArrays(entitySource.data);
+        bakeEntityTransformIntoSplats(
+            splats,
+            sourceEntity,
+            options.sourceEntities?.[0]
+        );
+        preprocessModel(splats, options);
+        console.info('[GsplatMorph] using scene entity gsplat resource for keyframe', {
+            index,
+            entity: sourceEntity?.name,
+            url: resolved.url,
+            splats: splats.count
+        });
+        return {
+            name: sourceEntity?.name || resolved.filename,
+            splats
+        } satisfies LoadedMorphModel;
+    }
+
     const sogSource = isSogFilename(resolved.filename) || isSogFilename(resolved.url);
     const fileContents = typeof source !== 'string' && source.contents
         ? await source.contents.arrayBuffer()
@@ -1256,6 +2071,11 @@ const loadMorphModel = async (
         }
 
         const splats = readSplatArrays(data);
+        bakeEntityTransformIntoSplats(
+            splats,
+            options.sourceEntities?.[index],
+            options.sourceEntities?.[0]
+        );
         preprocessModel(splats, options);
 
         if (options.retainSourceAssets) {
@@ -1327,6 +2147,8 @@ export class GsplatMorphController {
 
     private _segmentDuration: number;
 
+    private _segmentHoldDuration: number;
+
     private _loop: boolean;
 
     private _playing: boolean;
@@ -1344,6 +2166,10 @@ export class GsplatMorphController {
 
     private readonly _sortCentersMaxHz: number;
 
+    private readonly _morphPointCloudAutoScatterDistance: number;
+    private readonly _morphPointCloudTopY: number;
+    private readonly _morphPointCloudBottomY: number;
+
     private _lastSortCentersMs = Number.NEGATIVE_INFINITY;
 
     /** 与 `morphAnimateSphericalHarmonics === false` 配合：段切换时重算并重传 `f_rest_*`。 */
@@ -1351,6 +2177,8 @@ export class GsplatMorphController {
 
     /** `pushOutputToResource` 已执行，本帧 `framerender` 需再拉高 `renderNextFrame`（防 Viewer 清掉）。 */
     private _morphPushedThisFrame = false;
+
+    private readonly _hiddenSourceStates: { entity: Entity; enabled: boolean }[] = [];
 
     constructor(app: AppBase, models: LoadedMorphModel[], options: GsplatMorphOptions = {}) {
         this._morphOptions = options;
@@ -1361,10 +2189,19 @@ export class GsplatMorphController {
         const maxSplats = Math.max(...models.map(model => model.splats.count));
         const restPropCount = normalizeRestPropCount(Math.max(...models.map(model => model.splats.rest.length)));
         const fadeLogMin = options.fadeLogMin ?? DEFAULT_FADE_LOG_MIN;
-        const useGreedyCorrespondence = options.correspondenceStrategy === 'greedy';
-        const correspondenceInterpolator = useGreedyCorrespondence
-            ? new GaussianInterpolatorRuntime(models, fadeLogMin, options)
-            : undefined;
+        const morphAabb = createAabbFromModels(models);
+        this._morphPointCloudAutoScatterDistance = Math.max(
+            0.02,
+            morphAabb.halfExtents.length() * 0.08
+        );
+        this._morphPointCloudTopY = morphAabb.center.y + morphAabb.halfExtents.y;
+        this._morphPointCloudBottomY = morphAabb.center.y - morphAabb.halfExtents.y;
+        const useGreedyCorrespondence = (options.correspondenceStrategy ?? 'greedy') === 'greedy';
+        const correspondenceInterpolator = options.prebuiltInterpolator ?? (
+            useGreedyCorrespondence
+                ? new GaussianInterpolatorRuntime(models, fadeLogMin, options)
+                : undefined
+        );
 
         let gpuRuntime: GpuMorphRuntime | undefined;
         if (options.preferGpuMorph ?? true) {
@@ -1411,15 +2248,36 @@ export class GsplatMorphController {
         this.asset.fire('load', this.asset);
 
         this.entity = new Entity(options.entityName || 'gsplatMorph');
-        this.entity.setLocalEulerAngles(0, 0, 180);
-        this.entity.addComponent('gsplat', {
+        const anchorEntity = options.sourceEntities?.find((entity) => !!entity);
+        if (anchorEntity) {
+            this.entity.setPosition(anchorEntity.getPosition());
+            this.entity.setRotation(anchorEntity.getRotation());
+            this.entity.setLocalScale(anchorEntity.getLocalScale());
+        } else {
+            this.entity.setLocalEulerAngles(0, 0, 180);
+        }
+        const gsplatComponentData: {
+            unified: boolean;
+            asset: Asset;
+            layers?: number[];
+        } = {
             unified: options.unified ?? true,
-            asset: this.asset,
-            layers: options.layers
-        } as any);
+            asset: this.asset
+        };
+        // 勿传 layers: undefined — PlayCanvas gsplat setter 会读 layers.length 并报错
+        if (Array.isArray(options.layers) && options.layers.length > 0) {
+            gsplatComponentData.layers = options.layers;
+        } else {
+            const worldLayer = app.scene.layers.getLayerByName('World');
+            if (worldLayer) {
+                gsplatComponentData.layers = [worldLayer.id];
+            }
+        }
+        this.entity.addComponent('gsplat', gsplatComponentData as any);
         app.root.addChild(this.entity);
 
         this._segmentDuration = Math.max(0.001, options.segmentDuration ?? DEFAULT_SEGMENT_DURATION);
+        this._segmentHoldDuration = Math.max(0, options.segmentHoldDuration ?? DEFAULT_SEGMENT_HOLD_DURATION);
         this._loop = options.loop ?? true;
         this._playing = options.autoPlay ?? true;
         this._morphPresentMaxHz = Math.max(0, options.morphPresentMaxHz ?? 0);
@@ -1450,6 +2308,7 @@ export class GsplatMorphController {
         app.on('framerender', this._onAfterFrameRender);
         app.scene.on('gsplat:sorted', this._onGsplatSorted);
         this.applyCurrentFrame(true);
+        this.syncPlaybackVisibility();
         this.syncMorphDrivenAppRender();
     }
 
@@ -1459,6 +2318,16 @@ export class GsplatMorphController {
 
     set segmentDuration(value: number) {
         this._segmentDuration = Math.max(0.001, value);
+        this._lastPairIndexForSh = -1;
+        this.applyCurrentFrame(true);
+    }
+
+    get segmentHoldDuration() {
+        return this._segmentHoldDuration;
+    }
+
+    set segmentHoldDuration(value: number) {
+        this._segmentHoldDuration = Math.max(0, value);
         this._lastPairIndexForSh = -1;
         this.applyCurrentFrame(true);
     }
@@ -1484,7 +2353,11 @@ export class GsplatMorphController {
     }
 
     get totalDuration() {
-        return this.segmentCount * this._segmentDuration;
+        return this.segmentCount * (this._segmentDuration + this._segmentHoldDuration);
+    }
+
+    private get loopCycleDuration() {
+        return this.segmentCount * 2 * (this._segmentDuration + this._segmentHoldDuration);
     }
 
     get interpolationValue() {
@@ -1500,9 +2373,8 @@ export class GsplatMorphController {
             return this.modelCount;
         }
 
-        const clampedTime = this.resolvePlaybackTime();
-
-        return clampedTime / this._segmentDuration + 1;
+        const state = this.resolvePlaybackState();
+        return state.pairIndex + state.t + 1;
     }
 
     set interpolationValue(value: number) {
@@ -1516,13 +2388,14 @@ export class GsplatMorphController {
         const clampedValue = clamp(value, 1, this.modelCount);
         this._time = clampedValue >= this.modelCount
             ? this.totalDuration
-            : (clampedValue - 1) * this._segmentDuration;
+            : (clampedValue - 1) * (this._segmentDuration + this._segmentHoldDuration);
         this._lastPairIndexForSh = -1;
         this.applyCurrentFrame(true);
     }
 
     play() {
         this._playing = true;
+        this.syncPlaybackVisibility();
         this.syncMorphDrivenAppRender();
         this.applyCurrentFrame(true);
         return this;
@@ -1539,7 +2412,7 @@ export class GsplatMorphController {
         this._playing = false;
         this._time = 0;
         this._lastPairIndexForSh = -1;
-        this.applyCurrentFrame(true);
+        this.syncPlaybackVisibility();
         this.syncMorphDrivenAppRender();
         return this;
     }
@@ -1575,8 +2448,8 @@ export class GsplatMorphController {
 
         console.log('[GsplatMorph] index-pairing stats', stats);
         console.log(
-            '[GsplatMorph] 插值规则：`max(|A|,|B|)` 条输出；多的一侧连续下标，少的一侧 `floor(i*small/large)` 多对一；' +
-            '每条均为两侧全属性 lerp + 四元数 slerp，无 fade。与旧版 min+leftover 的 Python 若要对齐，需改 Python 配对策略。'
+            '[GsplatMorph] 插值规则：默认 greedy 使用位置+DC 颜色近似配对；较少点数的一侧先一对一匹配，较多点数剩余点复用最近邻补齐；' +
+            '`resample` 策略则仅按索引比例映射。多出来的点会参与变形，但在小点数目标端缩小并透明隐藏。'
         );
     }
 
@@ -1585,6 +2458,7 @@ export class GsplatMorphController {
         this.app.off('frameupdate', this._onFrameUpdate);
         this.app.off('framerender', this._onAfterFrameRender);
         this.app.scene.off('gsplat:sorted', this._onGsplatSorted);
+        this.restoreSourceEntities(true);
         this.entity.destroy();
 
         this.asset.unload();
@@ -1599,6 +2473,42 @@ export class GsplatMorphController {
         });
     }
 
+    private hideSourceEntities() {
+        if (this._morphOptions.hideSourceEntities === false) {
+            return;
+        }
+        if (this._hiddenSourceStates.length > 0) {
+            return;
+        }
+        const seen = new Set<Entity>();
+        for (const entity of this._morphOptions.sourceEntities ?? []) {
+            if (!entity || seen.has(entity)) {
+                continue;
+            }
+            seen.add(entity);
+            this._hiddenSourceStates.push({ entity, enabled: entity.enabled });
+            entity.enabled = false;
+        }
+    }
+
+    private restoreSourceEntities(forceEnabled = false) {
+        for (const { entity, enabled } of this._hiddenSourceStates) {
+            entity.enabled = forceEnabled ? true : enabled;
+        }
+        this._hiddenSourceStates.length = 0;
+    }
+
+    private syncPlaybackVisibility() {
+        if (this._playing) {
+            this.entity.enabled = true;
+            this.hideSourceEntities();
+        } else {
+            this.restoreSourceEntities(true);
+            this.entity.enabled = false;
+        }
+        this.app.renderNextFrame = true;
+    }
+
     update(dt: number) {
         if (!this._playing || this.segmentCount === 0 || !Number.isFinite(dt) || dt <= 0) {
             return;
@@ -1606,7 +2516,7 @@ export class GsplatMorphController {
 
         const totalDuration = this.totalDuration;
         if (this._loop) {
-            const cycleDuration = totalDuration * 2;
+            const cycleDuration = this.loopCycleDuration;
             this._time = cycleDuration > 0 ? (this._time + dt) % cycleDuration : 0;
             this.applyCurrentFrame();
             return;
@@ -1617,6 +2527,7 @@ export class GsplatMorphController {
 
         if (this._time >= totalDuration) {
             this._playing = false;
+            this.syncPlaybackVisibility();
             this.syncMorphDrivenAppRender();
         }
     }
@@ -1637,40 +2548,160 @@ export class GsplatMorphController {
 
         const totalDuration = this.totalDuration;
         if (!this._loop && this._time >= totalDuration) {
-            this.applyPair(this.segmentCount - 1, 1);
+            this.applyPair(this.segmentCount - 1, 1, 0);
             return;
         }
 
-        const clampedTime = this.resolvePlaybackTime();
-
-        const segmentIndex = Math.min(
-            this.segmentCount - 1,
-            Math.floor(clampedTime / this._segmentDuration)
-        );
-        const segmentStart = segmentIndex * this._segmentDuration;
-        const localT = clamp((clampedTime - segmentStart) / this._segmentDuration, 0, 1);
-
-        this.applyPair(segmentIndex, localT);
+        const state = this.resolvePlaybackState();
+        this.applyPair(state.pairIndex, state.t, state.pointCloudStrength, state.pointCloudRevealProgress);
     }
 
-    private resolvePlaybackTime() {
+    private resolvePlaybackState(): MorphPlaybackState {
         const totalDuration = this.totalDuration;
         if (!this._loop || totalDuration <= 0) {
-            return clamp(this._time, 0, totalDuration);
+            return this.playbackStateFromForwardTime(clamp(this._time, 0, totalDuration));
         }
 
-        const cycleDuration = totalDuration * 2;
+        const cycleDuration = this.loopCycleDuration;
         const wrappedTime = ((this._time % cycleDuration) + cycleDuration) % cycleDuration;
-        return wrappedTime <= totalDuration
-            ? wrappedTime
-            : cycleDuration - wrappedTime;
+        return this.playbackStateFromLoopTime(wrappedTime);
     }
 
-    private applyPair(pairIndex: number, t: number) {
+    private playbackStateFromForwardTime(time: number): MorphPlaybackState {
+        if (this.segmentCount <= 0) {
+            return { pairIndex: 0, t: 0, pointCloudStrength: 0, pointCloudRevealProgress: -1 };
+        }
+
+        const segmentSpan = this._segmentDuration + this._segmentHoldDuration;
+        const index = Math.min(this.segmentCount - 1, Math.floor(time / Math.max(segmentSpan, 0.001)));
+        const local = time - index * segmentSpan;
+        if (local >= this._segmentDuration) {
+            const reveal = this.pointCloudRevealState(local - this._segmentDuration);
+            return { pairIndex: index, t: 1, pointCloudStrength: reveal.strength, pointCloudRevealProgress: reveal.progress };
+        }
+
+        const phase = this.pointCloudMorphPhase(local);
+        return { pairIndex: index, t: phase.t, pointCloudStrength: phase.pointCloudStrength, pointCloudRevealProgress: -1 };
+    }
+
+    private playbackStateFromLoopTime(time: number): MorphPlaybackState {
+        if (this.segmentCount <= 0) {
+            return { pairIndex: 0, t: 0, pointCloudStrength: 0, pointCloudRevealProgress: -1 };
+        }
+
+        const segmentSpan = this._segmentDuration + this._segmentHoldDuration;
+        const legCount = this.segmentCount * 2;
+        const legIndex = Math.min(legCount - 1, Math.floor(time / Math.max(segmentSpan, 0.001)));
+        const local = time - legIndex * segmentSpan;
+        const inHold = local >= this._segmentDuration;
+        const morphPhase = inHold ? null : this.pointCloudMorphPhase(local);
+        const revealPhase = inHold ? this.pointCloudRevealState(local - this._segmentDuration) : null;
+        const t = inHold ? 1 : morphPhase!.t;
+        const pointCloudStrength = inHold ? revealPhase!.strength : morphPhase!.pointCloudStrength;
+        const pointCloudRevealProgress = inHold ? revealPhase!.progress : -1;
+
+        if (legIndex < this.segmentCount) {
+            return {
+                pairIndex: legIndex,
+                t,
+                pointCloudStrength,
+                pointCloudRevealProgress
+            };
+        }
+
+        const reverseLegIndex = legIndex - this.segmentCount;
+        return {
+            pairIndex: this.segmentCount - 1 - reverseLegIndex,
+            t: 1 - t,
+            pointCloudStrength,
+            pointCloudRevealProgress
+        };
+    }
+
+    private pointCloudRevealState(localHoldTime: number) {
+        const revealDuration = this.pointCloudRevealDuration();
+        if (this._morphOptions.morphPointCloudEffect === false || revealDuration <= 1e-6) {
+            return { strength: 0, progress: -1 };
+        }
+
+        const progress = clamp(localHoldTime / revealDuration, 0, 1);
+        if (progress >= 1) {
+            return { strength: 0, progress: -1 };
+        }
+
+        return { strength: 1, progress };
+    }
+
+    private pointCloudMorphPhase(localTime: number) {
+        const duration = Math.max(this._segmentDuration, 1e-6);
+        if (this._morphOptions.morphPointCloudEffect === false) {
+            return {
+                t: clamp(localTime / duration, 0, 1),
+                pointCloudStrength: 0
+            };
+        }
+
+        const edgeDuration = this.pointCloudEdgeDuration();
+        if (edgeDuration <= 1e-6) {
+            return {
+                t: clamp(localTime / duration, 0, 1),
+                pointCloudStrength: 1
+            };
+        }
+
+        const cloudInDuration = edgeDuration;
+        const cloudHoldDuration = this.pointCloudHoldDuration(edgeDuration);
+        const travelDuration = Math.max(1e-6, duration - cloudInDuration - cloudHoldDuration);
+        if (localTime < cloudInDuration) {
+            return {
+                t: 0,
+                pointCloudStrength: clamp(localTime / cloudInDuration, 0, 1)
+            };
+        }
+
+        if (localTime < cloudInDuration + travelDuration) {
+            return {
+                t: clamp((localTime - cloudInDuration) / travelDuration, 0, 1),
+                pointCloudStrength: 1
+            };
+        }
+
+        return {
+            t: 1,
+            pointCloudStrength: 1
+        };
+    }
+
+    private pointCloudEdgeDuration() {
+        const requested = this._morphOptions.morphPointCloudEdgeDuration ?? DEFAULT_MORPH_POINT_CLOUD_EDGE_DURATION;
+        return Math.min(
+            Math.max(0, requested),
+            Math.max(0, this._segmentDuration * 0.45)
+        );
+    }
+
+    private pointCloudHoldDuration(edgeDuration: number) {
+        const requested = this._morphOptions.morphPointCloudHoldDuration ?? DEFAULT_MORPH_POINT_CLOUD_HOLD_DURATION;
+        return Math.min(
+            Math.max(0, requested),
+            Math.max(0, this._segmentDuration - edgeDuration - 1e-6)
+        );
+    }
+
+    private pointCloudRevealDuration() {
+        const requested = this._morphOptions.morphPointCloudRevealDuration ?? DEFAULT_MORPH_POINT_CLOUD_REVEAL_DURATION;
+        return Math.min(
+            Math.max(0, requested),
+            Math.max(0, this._segmentHoldDuration)
+        );
+    }
+
+    private applyPair(pairIndex: number, t: number, pointCloudStrength: number, pointCloudRevealProgress = -1) {
+        const pointCloud = this.resolvePointCloudFrame(pointCloudStrength, t, pointCloudRevealProgress);
         if (this._gpuRuntime) {
             const segmentChanged = this._lastPairIndexForSh !== pairIndex;
             this._lastPairIndexForSh = pairIndex;
-            this._gpuRuntime.apply(pairIndex, t);
+            this._gpuRuntime.apply(pairIndex, t, pointCloud);
             this.pushGpuOutputToResource(segmentChanged);
             return;
         }
@@ -1678,8 +2709,65 @@ export class GsplatMorphController {
         const segmentChanged = this._lastPairIndexForSh !== pairIndex;
         this._lastPairIndexForSh = pairIndex;
         const writeRestSh = this._morphAnimateSh || segmentChanged;
-        this.interpolator!.interpolateBetween(pairIndex, pairIndex + 1, t, this.output!, writeRestSh, this._fastQuaternionNlerp);
+        this.interpolator!.interpolateBetween(
+            pairIndex,
+            pairIndex + 1,
+            t,
+            this.output!,
+            writeRestSh,
+            this._fastQuaternionNlerp,
+            pointCloud
+        );
         this.pushOutputToResource(writeRestSh, segmentChanged);
+    }
+
+    private resolvePointCloudFrame(pointCloudStrength: number, t: number, revealProgress = -1): MorphPointCloudFrame | undefined {
+        if (this._morphOptions.morphPointCloudEffect === false) {
+            return undefined;
+        }
+
+        const strengthScale = Math.max(
+            0,
+            this._morphOptions.morphPointCloudStrength ?? DEFAULT_MORPH_POINT_CLOUD_STRENGTH
+        );
+        const strength = clamp(pointCloudStrength * strengthScale, 0, 1);
+        if (strength <= 1e-4) {
+            return undefined;
+        }
+        const endpointFactor = 1 - Math.sin(clamp(t, 0, 1) * Math.PI);
+        const travelFactor = 1 - endpointFactor;
+        const configuredDensity = clamp(
+            this._morphOptions.morphPointCloudDensity ?? DEFAULT_MORPH_POINT_CLOUD_DENSITY,
+            0,
+            1
+        );
+        const configuredScatterDistance = Math.max(
+            0,
+            this._morphOptions.morphPointCloudScatterDistance ?? this._morphPointCloudAutoScatterDistance
+        );
+
+        return {
+            strength,
+            pointSize: Math.max(
+                1e-6,
+                this._morphOptions.morphPointCloudPointSize ?? DEFAULT_MORPH_POINT_CLOUD_POINT_SIZE
+            ),
+            tint: this._morphOptions.morphPointCloudTint ?? DEFAULT_MORPH_POINT_CLOUD_TINT,
+            glowStrength: Math.max(
+                0,
+                this._morphOptions.morphPointCloudGlowStrength ?? DEFAULT_MORPH_POINT_CLOUD_GLOW_STRENGTH
+            ),
+            opacity: clamp(
+                this._morphOptions.morphPointCloudOpacity ?? DEFAULT_MORPH_POINT_CLOUD_OPACITY,
+                0,
+                1
+            ),
+            density: configuredDensity * travelFactor + endpointFactor,
+            scatterDistance: configuredScatterDistance * travelFactor,
+            revealProgress,
+            topY: this._morphPointCloudTopY,
+            bottomY: this._morphPointCloudBottomY
+        };
     }
 
     private pushOutputToResource(uploadShData: boolean, forceSortCenters = false) {
@@ -1731,17 +2819,10 @@ export class GsplatMorphController {
             now - this._lastSortCentersMs >= 1000 / this._sortCentersMaxHz;
 
         if (shouldUpdateCenters) {
-            const totalDuration = this.totalDuration;
-            const clampedTime = !this._loop && this._time >= totalDuration
-                ? totalDuration
-                : this.resolvePlaybackTime();
-            const segmentIndex = Math.min(
-                this.segmentCount - 1,
-                Math.floor(clampedTime / this._segmentDuration)
-            );
-            const segmentStart = segmentIndex * this._segmentDuration;
-            const localT = clamp((clampedTime - segmentStart) / this._segmentDuration, 0, 1);
-            this._gpuRuntime!.updateSortCenters(this.models, segmentIndex, localT);
+            const state = !this._loop && this._time >= this.totalDuration
+                ? { pairIndex: this.segmentCount - 1, t: 1 }
+                : this.resolvePlaybackState();
+            this._gpuRuntime!.updateSortCenters(this.models, state.pairIndex, state.t);
             this._lastSortCentersMs = now;
         }
 
@@ -1803,9 +2884,31 @@ export const loadGsplatMorphSequence = async (
         throw new Error('Gsplat morph 至少需要 2 个关键帧文件（.ply / .sog 等）。');
     }
 
+    if (options.sourceEntities?.length && options.sourceEntities.length !== clippedSources.length) {
+        console.warn('[GsplatMorph] sourceEntities/source URL count mismatch; keyframes without a matching entity will fall back to URL loading.', {
+            sources: clippedSources.length,
+            sourceEntities: options.sourceEntities.length
+        });
+    }
+
     const models = await Promise.all(
         clippedSources.map((source, index) => loadMorphModel(app, source, index, options))
     );
 
-    return new GsplatMorphController(app, models, options);
+    const fadeLogMin = options.fadeLogMin ?? DEFAULT_FADE_LOG_MIN;
+    const useGreedyCorrespondence = (options.correspondenceStrategy ?? 'greedy') === 'greedy';
+    const prebuiltInterpolator = useGreedyCorrespondence
+        ? new GaussianInterpolatorRuntime(models, fadeLogMin, options, false)
+        : undefined;
+    if (prebuiltInterpolator) {
+        console.info('[GsplatMorph] building correspondence asynchronously to keep the UI responsive...');
+        await prebuiltInterpolator.buildCorrespondencesAsync((done, total) => {
+            console.info('[GsplatMorph] correspondence progress', { done, total });
+        });
+    }
+
+    return new GsplatMorphController(app, models, {
+        ...options,
+        prebuiltInterpolator
+    });
 };

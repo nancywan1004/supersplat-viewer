@@ -7,6 +7,7 @@ import { ASSET_EFFECT_TYPE_VALUES } from '../effect-types';
 
 const GSPLAT_MORPH = new Set([
     'segmentDuration',
+    'segmentHoldDuration',
     'loop',
     'autoPlay',
     'continuousAppRender',
@@ -24,6 +25,18 @@ const GSPLAT_MORPH = new Set([
     'greedyGridCellSize',
     'greedySearchRadiusCells',
     'greedyMaxCandidatesPerPoint',
+    'morphPointCloudEffect',
+    'morphPointCloudPointSize',
+    'morphPointCloudStrength',
+    'morphPointCloudTint',
+    'morphPointCloudGlowStrength',
+    'morphPointCloudOpacity',
+    'morphPointCloudDensity',
+    'morphPointCloudScatterDistance',
+    'morphPointCloudEdgeDuration',
+    'morphPointCloudHoldDuration',
+    'morphPointCloudRevealDuration',
+    'hideSourceEntities',
     'keyframeUrls',
     /** @deprecated 使用 keyframeEntityIds；保留兼容 bridge / 旧配置 */
     'keyframeTargetIds',
@@ -95,7 +108,7 @@ export function filterAssetEffectParams(
             }
             continue;
         }
-        if (k === 'goldColor') {
+        if (k === 'goldColor' || k === 'morphPointCloudTint') {
             if (
                 Array.isArray(v) &&
                 v.length === 3 &&

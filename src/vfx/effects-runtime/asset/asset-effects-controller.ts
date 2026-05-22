@@ -21,6 +21,7 @@ import {
 import { ASSET_EFFECT_TYPE_VALUES, type AssetEffectType } from '../effect-types';
 import type { AssetEffectStartEntities } from './asset-effect-entity';
 import {
+    resolveMorphKeyframeEntitiesFromEffectParams,
     resolveMorphKeyframeUrlsFromEffectParams,
     resolveWobbleEntityFromEffectParams
 } from './asset-effect-entity';
@@ -192,6 +193,11 @@ export class AssetEffectsController {
             ep,
             entities?.keyframeEntities
         );
+        const sourceEntities = resolveMorphKeyframeEntitiesFromEffectParams(
+            this._global,
+            ep,
+            entities?.keyframeEntities
+        );
         if (!urls) {
             const msg =
                 'gsplat-morph requires effectParams.keyframeEntityIds (≥2) or keyframeUrls (≥2)';
@@ -203,6 +209,7 @@ export class AssetEffectsController {
 
         const morphOpts: GsplatMorphOptions = {
             segmentDuration: typeof ep.segmentDuration === 'number' ? ep.segmentDuration : undefined,
+            segmentHoldDuration: typeof ep.segmentHoldDuration === 'number' ? ep.segmentHoldDuration : undefined,
             loop: typeof ep.loop === 'boolean' ? ep.loop : undefined,
             autoPlay: typeof ep.autoPlay === 'boolean' ? ep.autoPlay : true,
             morphPresentMaxHz: typeof ep.morphPresentMaxHz === 'number' ? ep.morphPresentMaxHz : undefined,
@@ -223,6 +230,23 @@ export class AssetEffectsController {
             greedyGridCellSize: typeof ep.greedyGridCellSize === 'number' ? ep.greedyGridCellSize : undefined,
             greedySearchRadiusCells: typeof ep.greedySearchRadiusCells === 'number' ? ep.greedySearchRadiusCells : undefined,
             greedyMaxCandidatesPerPoint: typeof ep.greedyMaxCandidatesPerPoint === 'number' ? ep.greedyMaxCandidatesPerPoint : undefined,
+            morphPointCloudEffect: typeof ep.morphPointCloudEffect === 'boolean' ? ep.morphPointCloudEffect : undefined,
+            morphPointCloudPointSize: typeof ep.morphPointCloudPointSize === 'number' ? ep.morphPointCloudPointSize : undefined,
+            morphPointCloudStrength: typeof ep.morphPointCloudStrength === 'number' ? ep.morphPointCloudStrength : undefined,
+            morphPointCloudTint: Array.isArray(ep.morphPointCloudTint) &&
+                ep.morphPointCloudTint.length === 3 &&
+                ep.morphPointCloudTint.every((v) => typeof v === 'number' && Number.isFinite(v))
+                ? ep.morphPointCloudTint as [number, number, number]
+                : undefined,
+            morphPointCloudGlowStrength: typeof ep.morphPointCloudGlowStrength === 'number' ? ep.morphPointCloudGlowStrength : undefined,
+            morphPointCloudOpacity: typeof ep.morphPointCloudOpacity === 'number' ? ep.morphPointCloudOpacity : undefined,
+            morphPointCloudDensity: typeof ep.morphPointCloudDensity === 'number' ? ep.morphPointCloudDensity : undefined,
+            morphPointCloudScatterDistance: typeof ep.morphPointCloudScatterDistance === 'number' ? ep.morphPointCloudScatterDistance : undefined,
+            morphPointCloudEdgeDuration: typeof ep.morphPointCloudEdgeDuration === 'number' ? ep.morphPointCloudEdgeDuration : undefined,
+            morphPointCloudHoldDuration: typeof ep.morphPointCloudHoldDuration === 'number' ? ep.morphPointCloudHoldDuration : undefined,
+            morphPointCloudRevealDuration: typeof ep.morphPointCloudRevealDuration === 'number' ? ep.morphPointCloudRevealDuration : undefined,
+            sourceEntities: sourceEntities ?? undefined,
+            hideSourceEntities: typeof ep.hideSourceEntities === 'boolean' ? ep.hideSourceEntities : undefined,
             entityName: typeof ep.entityName === 'string' ? ep.entityName : `morph-${targetId}`
         };
 

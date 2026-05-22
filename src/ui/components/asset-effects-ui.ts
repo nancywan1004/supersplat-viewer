@@ -76,8 +76,61 @@ export const ASSET_EFFECTS_PANEL_HTML = `
     </div>
     <div class="settingsRow">
       <label for="assetMorphLoop">循环:</label>
-      <input type="checkbox" id="assetMorphLoop" class="settingsCheckbox">
+      <input type="checkbox" id="assetMorphLoop" class="settingsCheckbox" checked>
     </div>
+    <details style="font-size:11px;margin:4px 0 6px" open>
+      <summary style="cursor:pointer;opacity:0.8">点云过渡</summary>
+      <div class="settingsRow">
+        <label for="assetMorphPointCloudEffect">启用:</label>
+        <input type="checkbox" id="assetMorphPointCloudEffect" class="settingsCheckbox" checked>
+      </div>
+      <div class="settingsRow">
+        <label for="assetMorphPointCloudPointSize" class="postEffectLabel">点大小:</label>
+        <div class="postEffectSliderWrap">
+          <input type="range" id="assetMorphPointCloudPointSize" class="postEffectSlider" min="0.0005" max="0.02" step="0.0005" value="0.001">
+          <span id="assetMorphPointCloudPointSizeVal" class="postEffectSliderValue">0.001</span>
+        </div>
+      </div>
+      <div class="settingsRow">
+        <label for="assetMorphPointCloudStrength" class="postEffectLabel">点云强度:</label>
+        <div class="postEffectSliderWrap">
+          <input type="range" id="assetMorphPointCloudStrength" class="postEffectSlider" min="0" max="2" step="0.05" value="1.5">
+          <span id="assetMorphPointCloudStrengthVal" class="postEffectSliderValue">1.50</span>
+        </div>
+      </div>
+      <div class="settingsRow">
+        <label for="assetMorphPointCloudGlowStrength" class="postEffectLabel">辉光强度:</label>
+        <div class="postEffectSliderWrap">
+          <input type="range" id="assetMorphPointCloudGlowStrength" class="postEffectSlider" min="0" max="2" step="0.05" value="1.7">
+          <span id="assetMorphPointCloudGlowStrengthVal" class="postEffectSliderValue">1.70</span>
+        </div>
+      </div>
+      <div class="settingsRow">
+        <label for="assetMorphPointCloudOpacity" class="postEffectLabel">点不透明度:</label>
+        <div class="postEffectSliderWrap">
+          <input type="range" id="assetMorphPointCloudOpacity" class="postEffectSlider" min="0.05" max="1" step="0.01" value="0.88">
+          <span id="assetMorphPointCloudOpacityVal" class="postEffectSliderValue">0.88</span>
+        </div>
+      </div>
+      <div class="settingsRow">
+        <label for="assetMorphPointCloudDensity" class="postEffectLabel">可见点比例:</label>
+        <div class="postEffectSliderWrap">
+          <input type="range" id="assetMorphPointCloudDensity" class="postEffectSlider" min="0.05" max="1" step="0.01" value="0.32">
+          <span id="assetMorphPointCloudDensityVal" class="postEffectSliderValue">0.32</span>
+        </div>
+      </div>
+      <div class="settingsRow">
+        <label for="assetMorphPointCloudScatterDistance" class="postEffectLabel">散开距离:</label>
+        <div class="postEffectSliderWrap">
+          <input type="range" id="assetMorphPointCloudScatterDistance" class="postEffectSlider" min="0" max="5" step="0.05" value="0">
+          <span id="assetMorphPointCloudScatterDistanceVal" class="postEffectSliderValue">自动</span>
+        </div>
+      </div>
+      <div class="settingsRow" style="align-items:center;gap:8px">
+        <label for="assetMorphPointCloudTint">辉光颜色:</label>
+        <input type="color" id="assetMorphPointCloudTint" value="#0091ff" title="变形中途点云辉光色调">
+      </div>
+    </details>
   </div>
   <div id="assetWobbleParams" class="assetEffectParamsBlock hidden">
     <p class="effectsTrackHint" style="font-size:11px;opacity:0.75;margin:0 0 6px">仅支持已放置的 <strong>Gaussian</strong> 资产；拖动滑条实时预览（需已播放）。</p>
@@ -137,6 +190,9 @@ export const ASSET_EFFECTS_PANEL_HTML = `
 `.trim();
 
 const DEFAULT_WOBBLE_HALO_RGB: [number, number, number] = [1, 0.85, 0];
+const DEFAULT_MORPH_POINT_CLOUD_TINT_RGB: [number, number, number] = [0, 145 / 255, 1];
+/** 与 gsplat-morph DEFAULT_MORPH_POINT_CLOUD_POINT_SIZE 一致。 */
+const DEFAULT_MORPH_POINT_CLOUD_POINT_SIZE = 0.001;
 
 function rgb01ToHex(rgb: [number, number, number]): string {
     const c = (v: number) =>
@@ -210,6 +266,14 @@ function readEffectParamsFromDom(
     morphUrls: HTMLTextAreaElement | null,
     morphSeg: HTMLInputElement | null,
     morphLoop: HTMLInputElement | null,
+    morphPointCloudEffect: HTMLInputElement | null,
+    morphPointCloudPointSize: HTMLInputElement | null,
+    morphPointCloudStrength: HTMLInputElement | null,
+    morphPointCloudGlowStrength: HTMLInputElement | null,
+    morphPointCloudOpacity: HTMLInputElement | null,
+    morphPointCloudDensity: HTMLInputElement | null,
+    morphPointCloudScatterDistance: HTMLInputElement | null,
+    morphPointCloudTint: HTMLInputElement | null,
     wobbleAmp: HTMLInputElement | null,
     wobbleFreq: HTMLInputElement | null,
     wobbleBounce: HTMLInputElement | null,
@@ -231,6 +295,39 @@ function readEffectParamsFromDom(
         }
         if (morphLoop) {
             ep.loop = morphLoop.checked;
+        }
+        if (morphPointCloudEffect) {
+            ep.morphPointCloudEffect = morphPointCloudEffect.checked;
+        }
+        if (morphPointCloudPointSize) {
+            const v = Number(morphPointCloudPointSize.value);
+            if (!Number.isNaN(v) && v > 0) ep.morphPointCloudPointSize = v;
+        }
+        if (morphPointCloudStrength) {
+            const v = Number(morphPointCloudStrength.value);
+            if (!Number.isNaN(v)) ep.morphPointCloudStrength = v;
+        }
+        if (morphPointCloudGlowStrength) {
+            const v = Number(morphPointCloudGlowStrength.value);
+            if (!Number.isNaN(v)) ep.morphPointCloudGlowStrength = v;
+        }
+        if (morphPointCloudOpacity) {
+            const v = Number(morphPointCloudOpacity.value);
+            if (!Number.isNaN(v)) ep.morphPointCloudOpacity = v;
+        }
+        if (morphPointCloudDensity) {
+            const v = Number(morphPointCloudDensity.value);
+            if (!Number.isNaN(v)) ep.morphPointCloudDensity = v;
+        }
+        if (morphPointCloudScatterDistance) {
+            const v = Number(morphPointCloudScatterDistance.value);
+            if (!Number.isNaN(v) && v > 0) ep.morphPointCloudScatterDistance = v;
+        }
+        if (morphPointCloudTint) {
+            const rgb = hexToRgb01(morphPointCloudTint.value);
+            if (rgb) {
+                ep.morphPointCloudTint = rgb;
+            }
         }
         return ep;
     }
@@ -279,6 +376,14 @@ function fillDomFromEffectParams(
     morphUrls: HTMLTextAreaElement | null,
     morphSeg: HTMLInputElement | null,
     morphLoop: HTMLInputElement | null,
+    morphPointCloudEffect: HTMLInputElement | null,
+    morphPointCloudPointSize: HTMLInputElement | null,
+    morphPointCloudStrength: HTMLInputElement | null,
+    morphPointCloudGlowStrength: HTMLInputElement | null,
+    morphPointCloudOpacity: HTMLInputElement | null,
+    morphPointCloudDensity: HTMLInputElement | null,
+    morphPointCloudScatterDistance: HTMLInputElement | null,
+    morphPointCloudTint: HTMLInputElement | null,
     wobbleAmp: HTMLInputElement | null,
     wobbleFreq: HTMLInputElement | null,
     wobbleBounce: HTMLInputElement | null,
@@ -301,8 +406,50 @@ function fillDomFromEffectParams(
         if (morphSeg && typeof ep?.segmentDuration === 'number') {
             morphSeg.value = String(ep.segmentDuration);
         }
-        if (morphLoop && typeof ep?.loop === 'boolean') {
-            morphLoop.checked = ep.loop;
+        if (morphLoop) {
+            morphLoop.checked = typeof ep?.loop === 'boolean' ? ep.loop : true;
+        }
+        if (morphPointCloudEffect) {
+            morphPointCloudEffect.checked = typeof ep?.morphPointCloudEffect === 'boolean' ? ep.morphPointCloudEffect : true;
+        }
+        if (morphPointCloudPointSize) {
+            morphPointCloudPointSize.value = String(
+                typeof ep?.morphPointCloudPointSize === 'number'
+                    ? ep.morphPointCloudPointSize
+                    : DEFAULT_MORPH_POINT_CLOUD_POINT_SIZE
+            );
+        }
+        if (morphPointCloudStrength) {
+            morphPointCloudStrength.value = String(
+                typeof ep?.morphPointCloudStrength === 'number' ? ep.morphPointCloudStrength : 1.5
+            );
+        }
+        if (morphPointCloudGlowStrength) {
+            morphPointCloudGlowStrength.value = String(
+                typeof ep?.morphPointCloudGlowStrength === 'number' ? ep.morphPointCloudGlowStrength : 1.7
+            );
+        }
+        if (morphPointCloudOpacity) {
+            morphPointCloudOpacity.value = String(
+                typeof ep?.morphPointCloudOpacity === 'number' ? ep.morphPointCloudOpacity : 0.88
+            );
+        }
+        if (morphPointCloudDensity) {
+            morphPointCloudDensity.value = String(
+                typeof ep?.morphPointCloudDensity === 'number' ? ep.morphPointCloudDensity : 0.32
+            );
+        }
+        if (morphPointCloudScatterDistance) {
+            morphPointCloudScatterDistance.value = String(
+                typeof ep?.morphPointCloudScatterDistance === 'number' ? ep.morphPointCloudScatterDistance : 0
+            );
+        }
+        if (morphPointCloudTint) {
+            const tint = ep?.morphPointCloudTint;
+            morphPointCloudTint.value =
+                Array.isArray(tint) && tint.length === 3 && tint.every((n) => typeof n === 'number')
+                    ? rgb01ToHex(tint as [number, number, number])
+                    : rgb01ToHex(DEFAULT_MORPH_POINT_CLOUD_TINT_RGB);
         }
         return;
     }
@@ -388,6 +535,20 @@ export function initAssetEffectsUI(global: Global): () => void {
     const morphUrls = fieldset.querySelector('#assetMorphKeyframeUrls') as HTMLTextAreaElement | null;
     const morphSeg = fieldset.querySelector('#assetMorphSegmentDuration') as HTMLInputElement | null;
     const morphLoop = fieldset.querySelector('#assetMorphLoop') as HTMLInputElement | null;
+    const morphPointCloudEffect = fieldset.querySelector('#assetMorphPointCloudEffect') as HTMLInputElement | null;
+    const morphPointCloudPointSize = fieldset.querySelector('#assetMorphPointCloudPointSize') as HTMLInputElement | null;
+    const morphPointCloudStrength = fieldset.querySelector('#assetMorphPointCloudStrength') as HTMLInputElement | null;
+    const morphPointCloudGlowStrength = fieldset.querySelector('#assetMorphPointCloudGlowStrength') as HTMLInputElement | null;
+    const morphPointCloudOpacity = fieldset.querySelector('#assetMorphPointCloudOpacity') as HTMLInputElement | null;
+    const morphPointCloudDensity = fieldset.querySelector('#assetMorphPointCloudDensity') as HTMLInputElement | null;
+    const morphPointCloudScatterDistance = fieldset.querySelector('#assetMorphPointCloudScatterDistance') as HTMLInputElement | null;
+    const morphPointCloudTint = fieldset.querySelector('#assetMorphPointCloudTint') as HTMLInputElement | null;
+    const morphPointCloudPointSizeVal = fieldset.querySelector('#assetMorphPointCloudPointSizeVal') as HTMLElement | null;
+    const morphPointCloudStrengthVal = fieldset.querySelector('#assetMorphPointCloudStrengthVal') as HTMLElement | null;
+    const morphPointCloudGlowStrengthVal = fieldset.querySelector('#assetMorphPointCloudGlowStrengthVal') as HTMLElement | null;
+    const morphPointCloudOpacityVal = fieldset.querySelector('#assetMorphPointCloudOpacityVal') as HTMLElement | null;
+    const morphPointCloudDensityVal = fieldset.querySelector('#assetMorphPointCloudDensityVal') as HTMLElement | null;
+    const morphPointCloudScatterDistanceVal = fieldset.querySelector('#assetMorphPointCloudScatterDistanceVal') as HTMLElement | null;
     const wobbleAmp = fieldset.querySelector('#assetWobbleAmplitude') as HTMLInputElement | null;
     const wobbleFreq = fieldset.querySelector('#assetWobbleFrequency') as HTMLInputElement | null;
     const wobbleBounce = fieldset.querySelector('#assetWobbleBounceAmplitude') as HTMLInputElement | null;
@@ -491,6 +652,14 @@ export function initAssetEffectsUI(global: Global): () => void {
                         morphUrls,
                         morphSeg,
                         morphLoop,
+                        morphPointCloudEffect,
+                        morphPointCloudPointSize,
+                        morphPointCloudStrength,
+                        morphPointCloudGlowStrength,
+                        morphPointCloudOpacity,
+                        morphPointCloudDensity,
+                        morphPointCloudScatterDistance,
+                        morphPointCloudTint,
                         wobbleAmp,
                         wobbleFreq,
                         wobbleBounce,
@@ -574,6 +743,14 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphUrls,
                 morphSeg,
                 morphLoop,
+                morphPointCloudEffect,
+                morphPointCloudPointSize,
+                morphPointCloudStrength,
+                morphPointCloudGlowStrength,
+                morphPointCloudOpacity,
+                morphPointCloudDensity,
+                morphPointCloudScatterDistance,
+                morphPointCloudTint,
                 wobbleAmp,
                 wobbleFreq,
                 wobbleBounce,
@@ -583,6 +760,7 @@ export function initAssetEffectsUI(global: Global): () => void {
                 wobbleHaloColor
             );
             syncWobbleHaloUi();
+            syncMorphPointCloudLabels();
             syncWobbleSliderLabels();
             renderMorphKeyframeList();
         }
@@ -615,6 +793,14 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphUrls,
                 morphSeg,
                 morphLoop,
+                morphPointCloudEffect,
+                morphPointCloudPointSize,
+                morphPointCloudStrength,
+                morphPointCloudGlowStrength,
+                morphPointCloudOpacity,
+                morphPointCloudDensity,
+                morphPointCloudScatterDistance,
+                morphPointCloudTint,
                 wobbleAmp,
                 wobbleFreq,
                 wobbleBounce,
@@ -636,8 +822,37 @@ export function initAssetEffectsUI(global: Global): () => void {
         patchEffectParams(false);
     };
 
+    const onMorphParamsLive = () => {
+        if (typeSelect?.value !== MORPH_TYPE) {
+            return;
+        }
+        patchEffectParams(false);
+    };
+
     const onParamsBlur = () => {
         patchEffectParams(true);
+    };
+
+    const syncMorphPointCloudLabels = () => {
+        if (morphPointCloudPointSize && morphPointCloudPointSizeVal) {
+            morphPointCloudPointSizeVal.textContent = formatSliderValue(Number(morphPointCloudPointSize.value), 3);
+        }
+        if (morphPointCloudStrength && morphPointCloudStrengthVal) {
+            morphPointCloudStrengthVal.textContent = formatSliderValue(Number(morphPointCloudStrength.value), 2);
+        }
+        if (morphPointCloudGlowStrength && morphPointCloudGlowStrengthVal) {
+            morphPointCloudGlowStrengthVal.textContent = formatSliderValue(Number(morphPointCloudGlowStrength.value), 2);
+        }
+        if (morphPointCloudOpacity && morphPointCloudOpacityVal) {
+            morphPointCloudOpacityVal.textContent = formatSliderValue(Number(morphPointCloudOpacity.value), 2);
+        }
+        if (morphPointCloudDensity && morphPointCloudDensityVal) {
+            morphPointCloudDensityVal.textContent = formatSliderValue(Number(morphPointCloudDensity.value), 2);
+        }
+        if (morphPointCloudScatterDistance && morphPointCloudScatterDistanceVal) {
+            const v = Number(morphPointCloudScatterDistance.value);
+            morphPointCloudScatterDistanceVal.textContent = v > 0 ? formatSliderValue(v, 2) : '自动';
+        }
     };
 
     const syncWobbleSliderLabels = () => {
@@ -744,6 +959,14 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphUrls,
                 morphSeg,
                 morphLoop,
+                morphPointCloudEffect,
+                morphPointCloudPointSize,
+                morphPointCloudStrength,
+                morphPointCloudGlowStrength,
+                morphPointCloudOpacity,
+                morphPointCloudDensity,
+                morphPointCloudScatterDistance,
+                morphPointCloudTint,
                 wobbleAmp,
                 wobbleFreq,
                 wobbleBounce,
@@ -775,6 +998,14 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphUrls,
                 morphSeg,
                 morphLoop,
+                morphPointCloudEffect,
+                morphPointCloudPointSize,
+                morphPointCloudStrength,
+                morphPointCloudGlowStrength,
+                morphPointCloudOpacity,
+                morphPointCloudDensity,
+                morphPointCloudScatterDistance,
+                morphPointCloudTint,
                 wobbleAmp,
                 wobbleFreq,
                 wobbleBounce,
@@ -811,6 +1042,14 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphUrls,
                 morphSeg,
                 morphLoop,
+                morphPointCloudEffect,
+                morphPointCloudPointSize,
+                morphPointCloudStrength,
+                morphPointCloudGlowStrength,
+                morphPointCloudOpacity,
+                morphPointCloudDensity,
+                morphPointCloudScatterDistance,
+                morphPointCloudTint,
                 wobbleAmp,
                 wobbleFreq,
                 wobbleBounce,
@@ -841,6 +1080,28 @@ export function initAssetEffectsUI(global: Global): () => void {
     morphUrls?.addEventListener('change', onParamsBlur);
     morphSeg?.addEventListener('change', onParamsBlur);
     morphLoop?.addEventListener('change', onParamsBlur);
+    morphPointCloudEffect?.addEventListener('change', onParamsBlur);
+    morphPointCloudTint?.addEventListener('input', onMorphParamsLive);
+    morphPointCloudTint?.addEventListener('change', onParamsBlur);
+    const unbindMorphSliders: Array<() => void> = [];
+    if (morphPointCloudPointSize) {
+        unbindMorphSliders.push(bindSliderLive(morphPointCloudPointSize, morphPointCloudPointSizeVal, 3, onMorphParamsLive, onParamsBlur));
+    }
+    if (morphPointCloudStrength) {
+        unbindMorphSliders.push(bindSliderLive(morphPointCloudStrength, morphPointCloudStrengthVal, 2, onMorphParamsLive, onParamsBlur));
+    }
+    if (morphPointCloudGlowStrength) {
+        unbindMorphSliders.push(bindSliderLive(morphPointCloudGlowStrength, morphPointCloudGlowStrengthVal, 2, onMorphParamsLive, onParamsBlur));
+    }
+    if (morphPointCloudOpacity) {
+        unbindMorphSliders.push(bindSliderLive(morphPointCloudOpacity, morphPointCloudOpacityVal, 2, onMorphParamsLive, onParamsBlur));
+    }
+    if (morphPointCloudDensity) {
+        unbindMorphSliders.push(bindSliderLive(morphPointCloudDensity, morphPointCloudDensityVal, 2, onMorphParamsLive, onParamsBlur));
+    }
+    if (morphPointCloudScatterDistance) {
+        unbindMorphSliders.push(bindSliderLive(morphPointCloudScatterDistance, morphPointCloudScatterDistanceVal, 2, onMorphParamsLive, onParamsBlur));
+    }
     const unbindWobbleSliders: Array<() => void> = [];
     if (wobbleAmp) {
         unbindWobbleSliders.push(bindSliderLive(wobbleAmp, wobbleAmpVal, 2, onWobbleParamsLive, onParamsBlur));
@@ -902,6 +1163,7 @@ export function initAssetEffectsUI(global: Global): () => void {
     events.on('assetEffect:morphKeyframesChanged', onMorphKeyframesChanged);
 
     syncWobbleHaloUi();
+    syncMorphPointCloudLabels();
     refreshTargetLabel();
 
     return () => {
@@ -919,6 +1181,10 @@ export function initAssetEffectsUI(global: Global): () => void {
         morphUrls?.removeEventListener('change', onParamsBlur);
         morphSeg?.removeEventListener('change', onParamsBlur);
         morphLoop?.removeEventListener('change', onParamsBlur);
+        morphPointCloudEffect?.removeEventListener('change', onParamsBlur);
+        morphPointCloudTint?.removeEventListener('input', onMorphParamsLive);
+        morphPointCloudTint?.removeEventListener('change', onParamsBlur);
+        unbindMorphSliders.forEach((fn) => fn());
         unbindWobbleSliders.forEach((fn) => fn());
         wobbleHaloEnabled?.removeEventListener('change', onHaloEnabledChange);
         wobbleHaloColor?.removeEventListener('input', onHaloColorLive);
