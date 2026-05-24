@@ -50,7 +50,7 @@ import {
     PLACED_VIDEO_PLACEMENT_TIMEOUT_MS,
     unmountPlacedVideoFromDom
 } from './scene-assets/media/video-texture';
-import { AUDIO_CALLOUT_WORLD_H, findAudioCalloutSelectHitFromClient } from './scene-assets/media/media-audio-callout-3d';
+import { AUDIO_CALLOUT_WORLD_H, findAudioCalloutSelectHitFromClient } from './scene-assets/media/audio-callout';
 import { getSceneAssetPickLayer, getSceneAssetPickerLayers } from './scene-assets/scene-asset-pick-layer';
 import { removeSceneAssetFromSettings } from './settings-serialize/settings-serialize';
 import { syncGsplatShadowCastingFromSettings } from './vfx/shadow/gsplat-shadow-cast';

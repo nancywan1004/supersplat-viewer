@@ -55,7 +55,7 @@ import { ShadowApplyRt } from './vfx/shadow/shadow-apply';
 import { updateShadowDistance } from './light';
 import { initAssetPlacementHandler, requestSceneAssetsRestore } from './asset-placement-handler';
 import { initMediaHotspotController } from './scene-assets/media/media-hotspot-controller';
-import { initMediaOverlayUi } from './scene-assets/media/media-overlay-ui';
+import { initSceneAudioCallout } from './scene-assets/media/audio-callout';
 import {
     initVideoControlsInteraction,
     initVideoControlsTexture
@@ -224,7 +224,7 @@ class Viewer {
 
     /** 音视频热区播控卸载 */
     cleanupMediaHotspotController: (() => void) | null = null;
-    cleanupMediaOverlayUi: (() => void) | null = null;
+    cleanupSceneAudioCallout: (() => void) | null = null;
     cleanupVideoControlsTexture: (() => void) | null = null;
     cleanupVideoControlsInteraction: (() => void) | null = null;
 
@@ -877,7 +877,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
             }
 
             this.cleanupMediaHotspotController = initMediaHotspotController(global);
-            this.cleanupMediaOverlayUi = initMediaOverlayUi(global);
+            this.cleanupSceneAudioCallout = initSceneAudioCallout(global);
             this.cleanupVideoControlsTexture = initVideoControlsTexture(global);
             if (canvasEl) {
                 this.cleanupVideoControlsInteraction = initVideoControlsInteraction(global, canvasEl);

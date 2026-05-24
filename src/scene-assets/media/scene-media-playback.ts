@@ -6,7 +6,7 @@
  * - **本文件**：何时 play/pause、全局互斥、用户意图（`userPaused`）、UI 事件。
  * - **`media-hotspot-controller.ts`**：是否「该由热区自动播」——触发距离/视锥、赢家、冷却、
  *   `userUnlocked`、编辑非预览门；满足条件后调用本模块的 `playSceneMediaEntry(..., 'hotspot')`。
- * - **`video-controls-texture.ts` / `media-audio-callout-3d.ts`**：命中与绘制；用户点击走
+ * - **`video-controls-texture.ts` / `audio-callout.ts`**：命中与绘制；用户点击走
  *   `userPlaySceneMedia` / `userPauseSceneMedia`。
  *
  * ## 核心不变量

@@ -34,14 +34,14 @@ const TIME_LABEL_ABOVE_TRACK_GAP_PX = 6;
 const CONTROLS_IDLE_HIDE_MS = 3000;
 
 /**
- * 播控点击排查日志。默认开启；关闭：`localStorage.setItem('debugVideoControls', '0')`
- * 再开：`localStorage.removeItem('debugVideoControls')` 或设为 `'1'`
+ * 播控点击排查日志。默认关闭；开启：`localStorage.setItem('debugVideoControls', '1')`
+ * 关闭：`localStorage.removeItem('debugVideoControls')` 或设为 `'0'`
  */
 function vcDebugEnabled(): boolean {
     try {
-        return localStorage.getItem('debugVideoControls') !== '0';
+        return localStorage.getItem('debugVideoControls') === '1';
     } catch {
-        return true;
+        return false;
     }
 }
 
@@ -966,15 +966,16 @@ export function tickVideoControlsTextures(global: Global): void {
 export function initVideoControlsInteraction(global: Global, canvas: HTMLCanvasElement): () => void {
     interactionCanvas = canvas;
     interactionGlobal = global;
-    const metrics = getCanvasMetrics(global, canvas);
-    const videoCount = (global.state.scenePlacedEntities ?? []).filter((e) => e.assetType === 'video').length;
-    console.warn('[VideoControls] init', {
-        canvasId: canvas.id,
-        metrics,
-        videoCount,
-        debugLogs: vcDebugEnabled(),
-        hasInputArbiter: !!(global as Global & { __inputArbiter?: unknown }).__inputArbiter
-    });
+    if (vcDebugEnabled()) {
+        const metrics = getCanvasMetrics(global, canvas);
+        const videoCount = (global.state.scenePlacedEntities ?? []).filter((e) => e.assetType === 'video').length;
+        vcLog('init', {
+            canvasId: canvas.id,
+            metrics,
+            videoCount,
+            hasInputArbiter: !!(global as Global & { __inputArbiter?: unknown }).__inputArbiter
+        });
+    }
 
     let detachPointerDown: (() => void) | null = null;
     const arbiter = (global as Global & { __inputArbiter?: import('../../input-arbiter').InputArbiter }).__inputArbiter;

@@ -592,7 +592,7 @@ export function prerenderAudioCallouts(global: Global): void {
     }
 }
 
-export function initAudioCallout3dSystem(global: Global): () => void {
+function initAudioCalloutSystem(global: Global): () => void {
     const { app, events } = global;
     cameraEntity = global.camera;
     layers = ensureHotspotDepthLayers(app, cameraEntity);
@@ -819,7 +819,7 @@ export function findAudioCalloutSelectHitFromClient(
     return best?.entry ?? null;
 }
 
-export function initAudioCalloutInteraction(global: Global, canvas: HTMLCanvasElement): () => void {
+function initAudioCalloutInteraction(global: Global, canvas: HTMLCanvasElement): () => void {
     interactionCanvas = canvas;
     interactionGlobal = global;
 
@@ -838,5 +838,16 @@ export function initAudioCalloutInteraction(global: Global, canvas: HTMLCanvasEl
         detach = null;
         interactionCanvas = null;
         interactionGlobal = null;
+    };
+}
+
+/** Viewer 入口：音频 callout 渲染与指针交互 */
+export function initSceneAudioCallout(global: Global): () => void {
+    const canvas = global.app.graphicsDevice.canvas as HTMLCanvasElement | undefined;
+    const cleanupSystem = initAudioCalloutSystem(global);
+    const cleanupInteraction = canvas ? initAudioCalloutInteraction(global, canvas) : () => {};
+    return () => {
+        cleanupInteraction();
+        cleanupSystem();
     };
 }
