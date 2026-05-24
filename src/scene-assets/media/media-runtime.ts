@@ -18,6 +18,8 @@ export type PlacedVideoRuntime = {
     compositeCtx?: CanvasRenderingContext2D;
     /** texture 当前是否以 compositeCanvas 为源 */
     controlsOverlayActive?: boolean;
+    /** 与 PlayCanvas Texture.setSource 绑定一致，避免同帧重复 setSource 破坏 GPU impl */
+    textureSourceKind?: 'video' | 'composite';
 };
 
 export type PlacedAudioRuntime = {

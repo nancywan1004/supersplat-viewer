@@ -19,6 +19,9 @@ export const PLACED_VIDEO_INITIAL_LOAD_TIMEOUT_MS = 45000;
 /** 编辑放置模式：首帧预热与点击放置（远程大文件通常仍受网络限制） */
 export const PLACED_VIDEO_PLACEMENT_TIMEOUT_MS = 20000;
 
+const pendingTextureUploads = new Set<PlacedVideoRuntime>();
+let textureUploadFlushRegistered = false;
+
 function configurePlacedVideoElement(video: HTMLVideoElement): void {
     video.crossOrigin = 'anonymous';
     video.muted = true;
@@ -64,10 +67,95 @@ function createVideoTexture(device: GraphicsDevice, name: string): Texture {
     });
 }
 
-function resizeVideoTextureFromMetadata(texture: Texture, video: HTMLVideoElement): void {
+export function resizeVideoTextureFromMetadata(texture: Texture, video: HTMLVideoElement): void {
     const w = Math.max(2, video.videoWidth || 4);
     const h = Math.max(2, video.videoHeight || 4);
     texture.resize(w, h);
+}
+
+function resizeVideoTextureFromCanvas(texture: Texture, canvas: HTMLCanvasElement): void {
+    const w = Math.max(2, canvas.width || 4);
+    const h = Math.max(2, canvas.height || 4);
+    texture.resize(w, h);
+}
+
+function textureHasUploadableSource(texture: Texture): boolean {
+    try {
+        const src = texture.getSource(0) as unknown;
+        if (!src) return false;
+        if (src instanceof HTMLVideoElement) {
+            return src.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+        }
+        if (src instanceof HTMLCanvasElement) {
+            return src.width >= 2 && src.height >= 2;
+        }
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * 安全 upload：避免无源/零尺寸时在 render 阶段触发 `impl` 未定义。
+ */
+export function safeUploadPlacedVideoTexture(m: PlacedVideoRuntime): void {
+    const tex = m.texture;
+    if (!tex?.device || tex.width < 2 || tex.height < 2) return;
+    if (!textureHasUploadableSource(tex)) return;
+    try {
+        tex.upload();
+    } catch {
+        // ignore
+    }
+}
+
+/** 在 prerender（draw 之前）统一 flush，避免 update 与 render 同帧争用纹理 impl */
+export function requestPlacedVideoTextureUpload(m: PlacedVideoRuntime): void {
+    pendingTextureUploads.add(m);
+}
+
+export function initPlacedVideoTextureUploadFlush(app: AppBase): () => void {
+    if (textureUploadFlushRegistered) {
+        return () => {};
+    }
+    textureUploadFlushRegistered = true;
+    const onPrerender = () => {
+        for (const m of pendingTextureUploads) {
+            safeUploadPlacedVideoTexture(m);
+        }
+        pendingTextureUploads.clear();
+    };
+    app.on('prerender', onPrerender);
+    return () => {
+        textureUploadFlushRegistered = false;
+        app.off('prerender', onPrerender);
+    };
+}
+
+/**
+ * 按当前 `controlsOverlayActive` 绑定 video 或 composite canvas；仅在源类型变化时 setSource/resize。
+ */
+export function syncPlacedVideoTextureBinding(m: PlacedVideoRuntime): void {
+    const tex = m.texture;
+    const want: 'video' | 'composite' = m.controlsOverlayActive ? 'composite' : 'video';
+
+    if (want === 'composite') {
+        const canvas = m.compositeCanvas;
+        if (!canvas || canvas.width < 2 || canvas.height < 2) return;
+        const sizeChanged = tex.width !== canvas.width || tex.height !== canvas.height;
+        if (m.textureSourceKind !== 'composite' || sizeChanged) {
+            resizeVideoTextureFromCanvas(tex, canvas);
+            tex.setSource(canvas);
+            m.textureSourceKind = 'composite';
+        }
+        return;
+    }
+
+    if (m.textureSourceKind !== 'video') {
+        resizeVideoTextureFromMetadata(tex, m.videoEl);
+        tex.setSource(m.videoEl);
+        m.textureSourceKind = 'video';
+    }
 }
 
 export function bindVideoTextureFirstFrame(texture: Texture, video: HTMLVideoElement): void {
@@ -149,12 +237,8 @@ export function awaitPlacedVideoFirstFrame(
         }, { once: true });
 
         video.addEventListener('progress', onProgress);
-
         video.addEventListener('error', () => {
-            const mediaErr = video.error;
-            finish(() => reject(new Error(
-                `[PlacedVideo] load error: ${url} code=${mediaErr?.code ?? '?'} ${mediaErr?.message ?? ''}`
-            )));
+            finish(() => reject(new Error(`[PlacedVideo] load error: ${url}`)));
         }, { once: true });
 
         video.src = url;
@@ -164,8 +248,6 @@ export function awaitPlacedVideoFirstFrame(
 
 /**
  * 按 PlayCanvas video-texture 流程：先等首帧，再 `setSource` + `upload()`。
- *
- * @see https://github.com/playcanvas/engine/blob/main/examples/src/examples/graphics/video-texture.example.mjs
  */
 export async function initPlacedVideoTexture(
     app: AppBase,
@@ -201,10 +283,8 @@ export function pausePlacedVideoTexture(m: PlacedVideoRuntime): void {
         // ignore
     }
     m.videoEl.muted = true;
-    try {
-        m.texture.upload();
-    } catch {
-        // ignore
+    if (!m.controlsOverlayActive) {
+        requestPlacedVideoTextureUpload(m);
     }
 }
 
@@ -230,11 +310,7 @@ export function playPlacedVideoTexture(entity: Entity, m: PlacedVideoRuntime): v
 export function tickPlacedVideoTextureUploads(videos: PlacedVideoRuntime[], uploadThisFrame: boolean): void {
     if (!uploadThisFrame) return;
     for (const m of videos) {
-        if (!m.isLive) continue;
-        try {
-            m.texture.upload();
-        } catch {
-            // ignore
-        }
+        if (!m.isLive || m.controlsOverlayActive) continue;
+        requestPlacedVideoTextureUpload(m);
     }
 }

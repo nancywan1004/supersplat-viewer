@@ -27,7 +27,7 @@ import {
     pauseSceneMediaEntry,
     playSceneMediaEntry
 } from './scene-media-playback';
-import { tickPlacedVideoTextureUploads } from './video-texture';
+import { initPlacedVideoTextureUploadFlush, tickPlacedVideoTextureUploads } from './video-texture';
 
 const EVAL_INTERVAL_MS = 120;
 /** 不写入 settings：有声赢家切换冷却（毫秒） */
@@ -326,6 +326,7 @@ function runMediaHotspotEvaluation(
  */
 export function initMediaHotspotController(global: Global): () => void {
     const { app, events } = global;
+    const cleanupTextureUploadFlush = initPlacedVideoTextureUploadFlush(app);
     const evalState: HotspotEvalState = {
         lastEvalMs: 0,
         lastVideoSoundId: null,
@@ -454,6 +455,7 @@ export function initMediaHotspotController(global: Global): () => void {
     events.on('sceneAsset:hotspotAutoplayChanged', onHotspotChanged);
 
     return () => {
+        cleanupTextureUploadFlush();
         window.removeEventListener('pointerdown', onPointerDown, true);
         document.removeEventListener('visibilitychange', onVisibilityChange);
         window.removeEventListener('pagehide', onPageHidden);

@@ -8,8 +8,14 @@ import { type CameraComponent, type Entity, Mat4, Vec3 } from 'playcanvas';
 import { hitSceneGizmoAtClient } from '../../gizmo-handler';
 import type { Global, ScenePlacedItem } from '../../types';
 import { readViewMediaMuted } from '../../view-settings';
+import { intersectRayLocalVideoMesh } from './curved-billboard-mesh';
 import { ensureScenePlacedMediaRuntime, getPlacedMediaRuntime, type PlacedVideoRuntime } from './media-runtime';
 import { userPauseSceneMedia, userPlaySceneMedia } from './scene-media-playback';
+import {
+    initPlacedVideoTextureUploadFlush,
+    requestPlacedVideoTextureUpload,
+    syncPlacedVideoTextureBinding
+} from './video-texture';
 
 const PROJ_VEC = new Vec3();
 const CANVAS_MAX_EDGE = 1920;
@@ -74,10 +80,10 @@ const HIT_WORLD = new Vec3();
 const SCRATCH_SCREEN = new Vec3();
 const RAY_FAR = new Vec3();
 const RAY_DIR = new Vec3();
-const TO_PLANE = new Vec3();
-const PLANE_NORMAL_LOCAL = new Vec3(0, 1, 0);
-const PLANE_NORMAL_WORLD = new Vec3();
 const INV_WORLD = new Mat4();
+const LOCAL_RAY_ORIGIN = new Vec3();
+const LOCAL_RAY_DIR = new Vec3();
+const LOCAL_HIT = new Vec3();
 
 type ScreenBounds = { minX: number; minY: number; maxX: number; maxY: number };
 
@@ -341,13 +347,9 @@ export function syncVideoTextureWithControls(
 ): void {
     if (!isVideoControlsEligible(entry)) {
         if (m.controlsOverlayActive) {
-            m.texture.setSource(m.videoEl);
             m.controlsOverlayActive = false;
-            try {
-                m.texture.upload();
-            } catch {
-                // ignore
-            }
+            syncPlacedVideoTextureBinding(m);
+            requestPlacedVideoTextureUpload(m);
         }
         return;
     }
@@ -356,27 +358,19 @@ export function syncVideoTextureWithControls(
 
     if (!paintChrome) {
         if (m.controlsOverlayActive) {
-            m.texture.setSource(m.videoEl);
             m.controlsOverlayActive = false;
-            try {
-                m.texture.upload();
-            } catch {
-                // ignore
-            }
+            syncPlacedVideoTextureBinding(m);
+            requestPlacedVideoTextureUpload(m);
         }
         return;
     }
 
     drawVideoComposite(m, entry.id, true);
     if (!m.controlsOverlayActive) {
-        m.texture.setSource(m.compositeCanvas!);
         m.controlsOverlayActive = true;
     }
-    try {
-        m.texture.upload();
-    } catch {
-        // ignore
-    }
+    syncPlacedVideoTextureBinding(m);
+    requestPlacedVideoTextureUpload(m);
 }
 
 /** mesh AABB 投影到 canvas 的包围盒（与 worldToScreen 同坐标系，曲屏/旋转均适用） */
@@ -436,18 +430,22 @@ function isCanvasPointInScreenBounds(
     );
 }
 
-/** 射线 ↔ 局部平面（回退；曲屏时 z 容差放宽） */
-function pickViaRayPlane(
+/** 局部命中点是否在相机前方（view 空间 z < 0） */
+function isEntityLocalPointVisible(entity: Entity, cam: CameraComponent, localPt: Vec3): boolean {
+    HIT_WORLD.copy(localPt);
+    entity.getWorldTransform().transformPoint(HIT_WORLD, HIT_WORLD);
+    cam.viewMatrix.transformPoint(HIT_WORLD, PROJ_VEC);
+    return PROJ_VEC.z < 0;
+}
+
+/** 屏幕点 → 实体局部空间的单位射线 */
+function castCanvasRayToEntityLocal(
     global: Global,
     cam: CameraComponent,
     entity: Entity,
     canvasX: number,
-    canvasY: number,
-    texW: number,
-    texH: number,
-    zSlack: number,
-    debugEntryId?: string
-): { px: number; py: number } | null {
+    canvasY: number
+): { origin: Vec3; dir: Vec3 } | null {
     const rayOrigin = global.camera.getPosition();
     cam.screenToWorld(canvasX, canvasY, cam.farClip, RAY_FAR);
     RAY_DIR.sub2(RAY_FAR, rayOrigin);
@@ -455,55 +453,128 @@ function pickViaRayPlane(
     if (rayLen < 1e-5) return null;
     RAY_DIR.mulScalar(1 / rayLen);
 
-    const planePoint = entity.getPosition();
-    entity.getWorldTransform().transformVector(PLANE_NORMAL_LOCAL, PLANE_NORMAL_WORLD);
-    PLANE_NORMAL_WORLD.normalize();
-    TO_PLANE.sub2(planePoint, rayOrigin);
-    if (PLANE_NORMAL_WORLD.dot(TO_PLANE) < 0) {
-        PLANE_NORMAL_WORLD.mulScalar(-1);
-    }
+    INV_WORLD.invert(entity.getWorldTransform());
+    LOCAL_RAY_ORIGIN.copy(rayOrigin);
+    INV_WORLD.transformPoint(LOCAL_RAY_ORIGIN, LOCAL_RAY_ORIGIN);
+    LOCAL_RAY_DIR.copy(RAY_DIR);
+    INV_WORLD.transformVector(LOCAL_RAY_DIR, LOCAL_RAY_DIR);
+    const localLen = LOCAL_RAY_DIR.length();
+    if (localLen < 1e-8) return null;
+    LOCAL_RAY_DIR.mulScalar(1 / localLen);
+    return { origin: LOCAL_RAY_ORIGIN, dir: LOCAL_RAY_DIR };
+}
 
-    const denom = RAY_DIR.dot(PLANE_NORMAL_WORLD);
+/** 曲度 0：射线 ↔ 局部 XZ 平面（y = 0，法线 +Y） */
+function pickViaRayPlaneLocal(
+    entity: Entity,
+    cam: CameraComponent,
+    localRay: { origin: Vec3; dir: Vec3 },
+    texW: number,
+    texH: number,
+    debugEntryId?: string,
+    lySlack = 0.12
+): { px: number; py: number } | null {
+    const denom = localRay.dir.y;
     if (Math.abs(denom) < 1e-5) return null;
 
-    const t = TO_PLANE.dot(PLANE_NORMAL_WORLD) / denom;
+    const t = -localRay.origin.y / denom;
     if (t < 0) return null;
 
-    HIT_WORLD.set(
-        rayOrigin.x + RAY_DIR.x * t,
-        rayOrigin.y + RAY_DIR.y * t,
-        rayOrigin.z + RAY_DIR.z * t
-    );
-
-    cam.viewMatrix.transformPoint(HIT_WORLD, PROJ_VEC);
-    if (PROJ_VEC.z >= 0) return null;
-
-    INV_WORLD.invert(entity.getWorldTransform());
-    INV_WORLD.transformPoint(HIT_WORLD, SCRATCH_SCREEN);
-    const lx = SCRATCH_SCREEN.x;
-    const ly = SCRATCH_SCREEN.y;
-    const lz = SCRATCH_SCREEN.z;
-    if (Math.abs(lx) > 0.52 || Math.abs(lz) > 0.52 || Math.abs(ly) > zSlack) {
+    const lx = localRay.origin.x + localRay.dir.x * t;
+    const ly = localRay.origin.y + localRay.dir.y * t;
+    const lz = localRay.origin.z + localRay.dir.z * t;
+    if (!isEntityLocalPointVisible(entity, cam, LOCAL_HIT.set(lx, ly, lz))) {
+        return null;
+    }
+    if (Math.abs(lx) > 0.52 || Math.abs(lz) > 0.52 || Math.abs(ly) > lySlack) {
         vcLog('pick:fail', {
             entryId: debugEntryId,
             reason: 'localBounds',
             local: [lx, ly, lz],
-            zSlack,
-            canvasX,
-            canvasY
+            lySlack
         });
         return null;
     }
 
-    // geometry 已 mirror 局部 X；纹理与 composite 均为左上原点
     const px = (0.5 - lx) * texW;
     const py = (0.5 - lz) * texH;
     if (px < 0 || py < 0 || px > texW || py > texH) return null;
 
     if (debugEntryId) {
-        vcLog('pick:ok', { entryId: debugEntryId, via: 'rayPlane', px, py, canvasX, canvasY });
+        vcLog('pick:ok', { entryId: debugEntryId, via: 'rayPlane', px, py });
     }
     return { px, py };
+}
+
+/** 平面或横向弧面求交（曲屏与 mesh 几何一致，避免平面近似导致边缘点不上） */
+function pickViaRayVideoSurface(
+    global: Global,
+    cam: CameraComponent,
+    entity: Entity,
+    canvasX: number,
+    canvasY: number,
+    texW: number,
+    texH: number,
+    horizontalCurvature: number,
+    debugEntryId?: string
+): { px: number; py: number } | null {
+    const localRay = castCanvasRayToEntityLocal(global, cam, entity, canvasX, canvasY);
+    if (!localRay) return null;
+
+    const curved = horizontalCurvature > 0.01;
+    if (!curved) {
+        return pickViaRayPlaneLocal(entity, cam, localRay, texW, texH, debugEntryId);
+    }
+
+    const meshHit = intersectRayLocalVideoMesh(localRay.origin, localRay.dir, horizontalCurvature);
+    if (meshHit && isEntityLocalPointVisible(entity, cam, meshHit.point)) {
+        const px = (0.5 - meshHit.gx) * texW;
+        const py = (0.5 - meshHit.gz) * texH;
+        if (px >= -4 && py >= -4 && px <= texW + 4 && py <= texH + 4) {
+            if (debugEntryId) {
+                vcLog('pick:ok', {
+                    entryId: debugEntryId,
+                    via: 'rayMesh',
+                    px,
+                    py,
+                    gx: meshHit.gx,
+                    gz: meshHit.gz,
+                    canvasX,
+                    canvasY
+                });
+            }
+            return { px, py };
+        }
+    }
+
+    const jitter = [[-3, 0], [3, 0], [0, -3], [0, 3], [-2, -2], [2, 2]] as const;
+    for (const [dx, dy] of jitter) {
+        const jr = castCanvasRayToEntityLocal(global, cam, entity, canvasX + dx, canvasY + dy);
+        if (!jr) continue;
+        const jhit = intersectRayLocalVideoMesh(jr.origin, jr.dir, horizontalCurvature);
+        if (!jhit || !isEntityLocalPointVisible(entity, cam, jhit.point)) continue;
+        const px = (0.5 - jhit.gx) * texW;
+        const py = (0.5 - jhit.gz) * texH;
+        if (px >= -4 && py >= -4 && px <= texW + 4 && py <= texH + 4) {
+            if (debugEntryId) {
+                vcLog('pick:ok', { entryId: debugEntryId, via: 'rayMeshJitter', dx, dy, px, py });
+            }
+            return { px, py };
+        }
+    }
+
+    const planeFallback = pickViaRayPlaneLocal(entity, cam, localRay, texW, texH, debugEntryId, 0.55);
+    if (planeFallback) {
+        if (debugEntryId) {
+            vcLog('pick:ok', { entryId: debugEntryId, via: 'rayPlaneFallback', ...planeFallback });
+        }
+        return planeFallback;
+    }
+
+    if (debugEntryId) {
+        vcLog('pick:fail', { entryId: debugEntryId, reason: 'rayMesh', canvasX, canvasY, horizontalCurvature });
+    }
+    return null;
 }
 
 /** 屏幕粗筛 → 射线命中实际 3D quad → 纹理像素播控命中 */
@@ -515,16 +586,17 @@ function resolveControlHitAtCanvas(
     canvasY: number,
     texW: number,
     texH: number,
-    zSlack: number,
+    horizontalCurvature: number,
     debugEntryId?: string
 ): { px: number; py: number; action: VideoControlHit } | null {
     const bounds = buildEntityScreenBounds(cam, entity);
-    if (!bounds || !isCanvasPointInScreenBounds(canvasX, canvasY, bounds)) {
+    const screenPad = horizontalCurvature > 0.01 ? 14 : 6;
+    if (!bounds || !isCanvasPointInScreenBounds(canvasX, canvasY, bounds, screenPad)) {
         return null;
     }
 
     const layout = computeVideoControlsLayout(texW, texH);
-    const pick = pickViaRayPlane(
+    const pick = pickViaRayVideoSurface(
         global,
         cam,
         entity,
@@ -532,7 +604,7 @@ function resolveControlHitAtCanvas(
         canvasY,
         texW,
         texH,
-        zSlack,
+        horizontalCurvature,
         debugEntryId
     );
     if (!pick) return null;
@@ -664,7 +736,6 @@ function findVideoHitAtClient(
         if (m?.kind !== 'video') continue;
 
         const { w, h } = videoTexturePixelSize(m);
-        const zSlack = m.horizontalCurvature > 0.01 ? 0.55 : 0.12;
         const layout = computeVideoControlsLayout(w, h);
         const resolved = resolveControlHitAtCanvas(
             global,
@@ -674,7 +745,7 @@ function findVideoHitAtClient(
             canvasY,
             w,
             h,
-            zSlack,
+            m.horizontalCurvature,
             debug ? entry.id : undefined
         );
         if (!resolved) continue;
@@ -851,8 +922,16 @@ function handlePointerMove(global: Global, e: PointerEvent): void {
     const cam = global.camera.camera;
     const { w, h } = videoTexturePixelSize(m);
     const layout = computeVideoControlsLayout(w, h);
-    const zSlack = m.horizontalCurvature > 0.01 ? 0.55 : 0.12;
-    const resolved = resolveControlHitAtCanvas(global, cam, entry.entity, ptr.x, ptr.y, w, h, zSlack);
+    const resolved = resolveControlHitAtCanvas(
+        global,
+        cam,
+        entry.entity,
+        ptr.x,
+        ptr.y,
+        w,
+        h,
+        m.horizontalCurvature
+    );
     if (!resolved) return;
     seekFromTextureX(resolved.px, layout, m.videoEl);
     touchChromeHover(entry.id);
@@ -953,6 +1032,7 @@ export function initVideoControlsInteraction(global: Global, canvas: HTMLCanvasE
  */
 export function initVideoControlsTexture(global: Global): () => void {
     const { app, events } = global;
+    const cleanupTextureUploadFlush = initPlacedVideoTextureUploadFlush(app);
 
     const onUpdate = () => tickVideoControlsTextures(global);
     const onPlaybackChanged = (payload: { id?: string; kind?: string; playing?: boolean }) => {
@@ -971,6 +1051,7 @@ export function initVideoControlsTexture(global: Global): () => void {
     events.on('sceneAssets:removed', onUpdate);
 
     return () => {
+        cleanupTextureUploadFlush();
         app.off('update', onUpdate);
         events.off('mediaOverlay:playbackChanged', onPlaybackChanged);
         events.off('sceneAssets:added', onUpdate);
