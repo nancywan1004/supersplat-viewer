@@ -85,11 +85,27 @@ const TOOLTIP_PAD_X = 14;
 const TOOLTIP_PAD_Y = 10;
 const TOOLTIP_RADIUS = 4;
 const TOOLTIP_LINE_H = 16;
+/** 非播放态沿用 Annotation 描边 */
 const TOOLTIP_BORDER = 'rgba(0, 191, 255, 0.41)';
 
-/** SVG 原尺寸 32×34，纹理上约 2× 绘制 */
-const PLAY_ICON_W = 64;
-const PLAY_ICON_H = 68;
+/** 播放中标题描边（设计稿） */
+const TITLE_BORDER_W = 2;
+const TITLE_BORDER_ANIM_MS = 2500;
+const TITLE_GLOW_COLOR = '#1FE1FF';
+/** 无场景采样时的毛玻璃底（Canvas 无法做真实 backdrop-filter） */
+const TITLE_GLASS_FILL = 'rgba(8, 22, 58, 0.58)';
+const TITLE_CONIC_STOPS: ReadonlyArray<[number, string]> = [
+    [0, '#0A2EA5'],
+    [96.92 / 360, '#E8F3FF'],
+    [159.23 / 360, '#47C3FF'],
+    [219.81 / 360, '#1FE1FF'],
+    [292.5 / 360, '#2061FD'],
+    [1, '#133A97']
+];
+
+/** SVG 原尺寸 32×32，纹理上约 2× 绘制 */
+const PLAY_ICON_W = 32;
+const PLAY_ICON_H = 32;
 const PLAY_HIT_PAD = 10;
 const LABEL_TOP = 14;
 const LABEL_PLAY_GAP = 10;
@@ -105,7 +121,13 @@ type AudioCalloutLayout = {
     playRadius: number;
 };
 
-type AudioPaintState = { name: string; playing: boolean; iconReady: boolean };
+type AudioPaintState = {
+    name: string;
+    playing: boolean;
+    iconReady: boolean;
+    /** 播放中描边动画帧（约 60fps 量化） */
+    borderAnimTick: number;
+};
 
 type AudioCallout3d = {
     entryId: string;
@@ -316,7 +338,7 @@ function roundRectPath(
     ctx.closePath();
 }
 
-/** 与 `.pc-annotation` / `.pc-annotation--selected` 一致 */
+/** 与 `.pc-annotation` / `.pc-annotation--selected` 一致（非播放态） */
 function drawAnnotationTooltipLabel(
     ctx: CanvasRenderingContext2D,
     box: TooltipBox,
@@ -346,17 +368,96 @@ function drawAnnotationTooltipLabel(
     ctx.fillText(displayName, x + width * 0.5, y + height * 0.5);
 }
 
+function createTitleConicGradient(
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    startDeg: number
+): CanvasGradient {
+    const g = ctx.createConicGradient((startDeg * Math.PI) / 180, cx, cy);
+    for (const [t, color] of TITLE_CONIC_STOPS) {
+        g.addColorStop(t, color);
+    }
+    return g;
+}
+
+/**
+ * 播放中：圆锥渐变描边顺时针流动（2.5s/圈）+ 外发光 + 毛玻璃底。
+ * `animTimeMs` 为 `performance.now()`，与 CSS `from 90deg` 圆锥渐变一致。
+ */
+function drawPlayingAudioTitleTooltip(
+    ctx: CanvasRenderingContext2D,
+    box: TooltipBox,
+    animTimeMs: number
+): void {
+    const { x, y, width, height, displayName } = box;
+    const cx = x + width * 0.5;
+    const cy = y + height * 0.5;
+    const r = TOOLTIP_RADIUS;
+
+    ctx.save();
+    ctx.shadowColor = TITLE_GLOW_COLOR;
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    roundRectPath(ctx, x, y, width, height, r);
+    ctx.strokeStyle = 'rgba(31, 225, 255, 0.45)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+
+    roundRectPath(ctx, x, y, width, height, r);
+    ctx.fillStyle = TITLE_GLASS_FILL;
+    ctx.fill();
+
+    const cycle = (animTimeMs % TITLE_BORDER_ANIM_MS) / TITLE_BORDER_ANIM_MS;
+    const startDeg = 90 + cycle * 360;
+
+    const inset = TITLE_BORDER_W * 0.5;
+    roundRectPath(
+        ctx,
+        x + inset,
+        y + inset,
+        width - TITLE_BORDER_W,
+        height - TITLE_BORDER_W,
+        Math.max(0, r - inset)
+    );
+    ctx.lineWidth = TITLE_BORDER_W;
+    ctx.strokeStyle = createTitleConicGradient(ctx, cx, cy, startDeg);
+    ctx.stroke();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = TOOLTIP_FONT;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(displayName, cx, cy);
+}
+
+function drawAudioTitleTooltip(
+    ctx: CanvasRenderingContext2D,
+    box: TooltipBox,
+    playing: boolean,
+    animTimeMs: number
+): void {
+    if (playing) {
+        drawPlayingAudioTitleTooltip(ctx, box, animTimeMs);
+    } else {
+        drawAnnotationTooltipLabel(ctx, box, false);
+    }
+}
+
 function drawAudioCallout(
     ctx: CanvasRenderingContext2D,
     w: number,
     h: number,
     name: string,
-    playing: boolean
+    playing: boolean,
+    animTimeMs: number
 ): void {
     ctx.clearRect(0, 0, w, h);
 
     const tooltip = measureAnnotationTooltipBox(ctx, name);
-    drawAnnotationTooltipLabel(ctx, tooltip, playing);
+    drawAudioTitleTooltip(ctx, tooltip, playing, animTimeMs);
 
     const layout = computeAudioCalloutLayout(w, ctx, name);
     const controlIcon = getAudioControlIconCanvas(playing);
@@ -380,16 +481,25 @@ function syncCalloutTexture(global: Global, entry: ScenePlacedItem, callout: Aud
     const name = entry.name || '音频';
     const playing = isAudioVisuallyPlaying(global, m);
     const iconReady = isAudioCalloutIconsReady();
+    const borderAnimTick = playing ? Math.floor(performance.now() / 16) : -1;
     if (
         callout.lastPaint?.name === name
         && callout.lastPaint?.playing === playing
         && callout.lastPaint?.iconReady === iconReady
+        && callout.lastPaint?.borderAnimTick === borderAnimTick
     ) {
         return;
     }
 
-    callout.lastPaint = { name, playing, iconReady };
-    drawAudioCallout(callout.ctx, AUDIO_CALLOUT_TEX_W, AUDIO_CALLOUT_TEX_H, name, playing);
+    callout.lastPaint = { name, playing, iconReady, borderAnimTick };
+    drawAudioCallout(
+        callout.ctx,
+        AUDIO_CALLOUT_TEX_W,
+        AUDIO_CALLOUT_TEX_H,
+        name,
+        playing,
+        performance.now()
+    );
     premultiplyCanvasAlpha(callout.ctx, AUDIO_CALLOUT_TEX_W, AUDIO_CALLOUT_TEX_H);
     try {
         callout.texture.upload();
