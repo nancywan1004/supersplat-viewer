@@ -84,9 +84,14 @@ export class Annotation extends Script {
 
     static imagePreviewImg: HTMLImageElement | null = null;
 
-    static videoThumbDom: HTMLDivElement | null = null;
+    /** tooltip 内嵌视频容器（展开时小窗播放） */
+    static videoInlineDom: HTMLDivElement | null = null;
 
-    static videoThumbPosterEl: HTMLVideoElement | null = null;
+    static videoInlineEl: HTMLVideoElement | null = null;
+
+    static videoFsBtn: HTMLButtonElement | null = null;
+
+    static videoPlayBtn: HTMLButtonElement | null = null;
 
     static videoPreviewOverlay: HTMLDivElement | null = null;
 
@@ -149,7 +154,7 @@ export class Annotation extends Script {
                 font-size: 14px;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
                 pointer-events: auto;
-                max-width: 200px;
+                max-width: 280px;
                 word-wrap: break-word;
                 overflow-x: visible;
                 white-space: normal;
@@ -256,43 +261,88 @@ export class Annotation extends Script {
                 border-radius: 8px;
                 box-shadow: 0 12px 40px rgba(0,0,0,0.5);
             }
-            .pc-annotation-video-thumb {
+            .pc-annotation-video-inline {
                 display: none;
                 position: relative;
-                max-width: 100%;
-                max-height: 100px;
-                margin-top: 4px;
-                border-radius: 4px;
+                width: 100%;
+                margin-top: 8px;
+                border-radius: 6px;
                 overflow: hidden;
-                cursor: pointer;
-                background: rgba(0,0,0,0.35);
+                background: rgba(0, 0, 0, 0.35);
             }
-            .pc-annotation-video-thumb-poster {
+            .pc-annotation-video-inline-el {
                 display: block;
                 width: 100%;
-                max-height: 100px;
+                max-height: 148px;
+                min-height: 88px;
                 object-fit: cover;
+                background: #0a1020;
                 pointer-events: none;
             }
-            .pc-annotation-video-play-icon {
+            .pc-annotation-video-fs-btn {
                 position: absolute;
-                left: 50%;
-                top: 50%;
-                transform: translate(-50%, -50%);
-                width: 36px;
-                height: 36px;
-                border-radius: 50%;
-                background: rgba(0,0,0,0.55);
-                pointer-events: none;
+                top: 8px;
+                right: 8px;
+                z-index: 2;
+                width: 28px;
+                height: 28px;
+                padding: 0;
+                border: none;
+                border-radius: 4px;
+                background: rgba(0, 0, 0, 0.5);
+                cursor: pointer;
+                box-sizing: border-box;
             }
-            .pc-annotation-video-play-icon::after {
+            .pc-annotation-video-fs-btn::before,
+            .pc-annotation-video-fs-btn::after {
                 content: '';
                 position: absolute;
-                left: 14px;
-                top: 10px;
+                width: 7px;
+                height: 7px;
+                border: 1.5px solid rgba(255, 255, 255, 0.9);
+            }
+            .pc-annotation-video-fs-btn::before {
+                top: 5px;
+                left: 5px;
+                border-right: none;
+                border-bottom: none;
+            }
+            .pc-annotation-video-fs-btn::after {
+                right: 5px;
+                bottom: 5px;
+                border-left: none;
+                border-top: none;
+            }
+            .pc-annotation-video-play-btn {
+                position: absolute;
+                right: 10px;
+                bottom: 10px;
+                z-index: 2;
+                width: 40px;
+                height: 40px;
+                padding: 0;
+                border: none;
+                border-radius: 50%;
+                background: rgba(0, 0, 0, 0.55);
+                cursor: pointer;
+            }
+            .pc-annotation-video-play-btn::after {
+                content: '';
+                position: absolute;
+                left: 15px;
+                top: 11px;
                 border-style: solid;
-                border-width: 8px 0 8px 14px;
+                border-width: 9px 0 9px 14px;
                 border-color: transparent transparent transparent #fff;
+            }
+            .pc-annotation-video-play-btn.is-playing::after {
+                left: 13px;
+                top: 12px;
+                border: none;
+                width: 4px;
+                height: 16px;
+                background: #fff;
+                box-shadow: 8px 0 0 #fff;
             }
         `;
 
@@ -382,23 +432,76 @@ export class Annotation extends Script {
             });
         }
 
-        Annotation.videoThumbDom = document.createElement('div');
-        Annotation.videoThumbDom.className = 'pc-annotation-video-thumb';
-        Annotation.videoThumbDom.setAttribute('role', 'button');
-        Annotation.videoThumbDom.setAttribute('aria-label', '播放视频');
+        Annotation.videoInlineDom = document.createElement('div');
+        Annotation.videoInlineDom.className = 'pc-annotation-video-inline';
 
-        Annotation.videoThumbPosterEl = document.createElement('video');
-        Annotation.videoThumbPosterEl.className = 'pc-annotation-video-thumb-poster';
-        Annotation.videoThumbPosterEl.preload = 'metadata';
-        Annotation.videoThumbPosterEl.muted = true;
-        Annotation.videoThumbPosterEl.playsInline = true;
-        Annotation.videoThumbDom.appendChild(Annotation.videoThumbPosterEl);
+        Annotation.videoInlineEl = document.createElement('video');
+        Annotation.videoInlineEl.className = 'pc-annotation-video-inline-el';
+        Annotation.videoInlineEl.preload = 'metadata';
+        Annotation.videoInlineEl.playsInline = true;
+        Annotation.videoInlineEl.setAttribute('playsinline', '');
+        Annotation.videoInlineEl.controls = false;
+        Annotation.videoInlineDom.appendChild(Annotation.videoInlineEl);
 
-        const videoPlayIcon = document.createElement('span');
-        videoPlayIcon.className = 'pc-annotation-video-play-icon';
-        Annotation.videoThumbDom.appendChild(videoPlayIcon);
+        Annotation.videoFsBtn = document.createElement('button');
+        Annotation.videoFsBtn.type = 'button';
+        Annotation.videoFsBtn.className = 'pc-annotation-video-fs-btn';
+        Annotation.videoFsBtn.setAttribute('aria-label', '全屏播放');
+        Annotation.videoInlineDom.appendChild(Annotation.videoFsBtn);
 
-        Annotation.tooltipDom.appendChild(Annotation.videoThumbDom);
+        Annotation.videoPlayBtn = document.createElement('button');
+        Annotation.videoPlayBtn.type = 'button';
+        Annotation.videoPlayBtn.className = 'pc-annotation-video-play-btn';
+        Annotation.videoPlayBtn.setAttribute('aria-label', '播放或暂停');
+        Annotation.videoInlineDom.appendChild(Annotation.videoPlayBtn);
+
+        Annotation.tooltipDom.appendChild(Annotation.videoInlineDom);
+
+        const syncInlinePlayBtn = () => Annotation._syncInlineVideoPlayButton();
+
+        Annotation.videoInlineEl.addEventListener('play', syncInlinePlayBtn);
+        Annotation.videoInlineEl.addEventListener('pause', syncInlinePlayBtn);
+        Annotation.videoInlineEl.addEventListener('ended', syncInlinePlayBtn);
+
+        Annotation.videoPlayBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const el = Annotation.videoInlineEl;
+            if (!el?.src) return;
+            if (el.paused || el.ended) {
+                el.muted = false;
+                el.removeAttribute('muted');
+                void el.play();
+            } else {
+                el.pause();
+            }
+        });
+
+        Annotation.videoFsBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const inline = Annotation.videoInlineEl;
+            const url = inline?.src;
+            if (!url || !Annotation.videoPreviewEl || !Annotation.videoPreviewOverlay) {
+                return;
+            }
+            const t = inline.currentTime;
+            inline.pause();
+            Annotation.videoPreviewEl.src = url;
+            Annotation.videoPreviewEl.currentTime = Number.isFinite(t) ? t : 0;
+            Annotation.videoPreviewEl.muted = false;
+            Annotation.videoPreviewEl.removeAttribute('muted');
+            Annotation.videoPreviewOverlay.style.display = 'flex';
+            void Annotation.videoPreviewEl.play();
+            Annotation._syncInlineVideoPlayButton();
+        });
+
+        Annotation.videoInlineEl.addEventListener('error', () => {
+            if (Annotation.videoInlineDom) {
+                Annotation.videoInlineDom.style.display = 'none';
+            }
+            if (Annotation.videoInlineEl) {
+                Annotation.videoInlineEl.removeAttribute('src');
+            }
+        });
 
         Annotation.videoPreviewOverlay = document.createElement('div');
         Annotation.videoPreviewOverlay.className = 'pc-annotation-image-preview-overlay';
@@ -418,30 +521,6 @@ export class Annotation extends Script {
         });
         Annotation.videoPreviewEl.addEventListener('click', (ev) => ev.stopPropagation());
 
-        Annotation.videoThumbDom.addEventListener('click', (ev) => {
-            ev.stopPropagation();
-            const url = Annotation.videoThumbDom?.dataset.videoUrl;
-            if (!url || !Annotation.videoPreviewEl || !Annotation.videoPreviewOverlay) {
-                return;
-            }
-            Annotation.closeMediaPreviews();
-            Annotation.videoPreviewEl.src = url;
-            Annotation.videoPreviewEl.muted = false;
-            Annotation.videoPreviewEl.removeAttribute('muted');
-            Annotation.videoThumbPosterEl?.pause();
-            Annotation.videoPreviewOverlay.style.display = 'flex';
-            void Annotation.videoPreviewEl.play();
-        });
-
-        Annotation.videoThumbPosterEl.addEventListener('error', () => {
-            if (Annotation.videoThumbDom) {
-                Annotation.videoThumbDom.style.display = 'none';
-            }
-            if (Annotation.videoThumbPosterEl) {
-                Annotation.videoThumbPosterEl.removeAttribute('src');
-            }
-        });
-
         Annotation.parentDom.appendChild(Annotation.tooltipDom);
         Annotation.parentDom.appendChild(Annotation.imagePreviewOverlay);
         Annotation.parentDom.appendChild(Annotation.videoPreviewOverlay);
@@ -455,22 +534,59 @@ export class Annotation extends Script {
             Annotation.imageDom.style.display = 'none';
             Annotation.imageDom.removeAttribute('src');
         }
-        if (Annotation.videoThumbDom) {
-            Annotation.videoThumbDom.style.display = 'none';
-            delete Annotation.videoThumbDom.dataset.videoUrl;
+        Annotation.pauseInlineVideo();
+        if (Annotation.videoInlineDom) {
+            Annotation.videoInlineDom.style.display = 'none';
+            delete Annotation.videoInlineDom.dataset.videoUrl;
         }
-        if (Annotation.videoThumbPosterEl) {
-            Annotation.videoThumbPosterEl.removeAttribute('src');
+        if (Annotation.videoInlineEl) {
+            Annotation.videoInlineEl.removeAttribute('src');
+            Annotation.videoInlineEl.load();
         }
 
         if (media.imageUrl && Annotation.imageDom) {
             Annotation.imageDom.src = media.imageUrl;
             Annotation.imageDom.style.display = 'block';
-        } else if (media.videoUrl && Annotation.videoThumbDom && Annotation.videoThumbPosterEl) {
-            Annotation.videoThumbDom.dataset.videoUrl = media.videoUrl;
-            Annotation.videoThumbPosterEl.src = media.videoUrl;
-            Annotation.videoThumbDom.style.display = 'block';
+        } else if (media.videoUrl && Annotation.videoInlineDom && Annotation.videoInlineEl) {
+            Annotation.videoInlineDom.dataset.videoUrl = media.videoUrl;
+            Annotation.videoInlineEl.src = media.videoUrl;
+            Annotation.videoInlineDom.style.display = 'block';
+            Annotation._syncInlineVideoPlayButton();
         }
+    }
+
+    static _syncInlineVideoPlayButton(): void {
+        const btn = Annotation.videoPlayBtn;
+        const el = Annotation.videoInlineEl;
+        if (!btn || !el) return;
+        const playing = !el.paused && !el.ended;
+        btn.classList.toggle('is-playing', playing);
+        btn.setAttribute('aria-label', playing ? '暂停' : '播放');
+    }
+
+    static pauseInlineVideo(): void {
+        const el = Annotation.videoInlineEl;
+        if (!el) return;
+        el.pause();
+        Annotation._syncInlineVideoPlayButton();
+    }
+
+    /** 锚定展开时在小窗内自动播放（点击热点展开属用户手势，可出声） */
+    static playInlineVideo(opts?: { unmuted?: boolean }): void {
+        const el = Annotation.videoInlineEl;
+        if (!el?.src || Annotation.videoInlineDom?.style.display === 'none') {
+            return;
+        }
+        if (opts?.unmuted) {
+            el.muted = false;
+            el.removeAttribute('muted');
+        }
+        void el.play().catch(() => {
+            // 自动播放策略失败时保持静音海报，用户可点播放钮
+            el.muted = true;
+            void el.play().catch(() => {});
+        });
+        Annotation._syncInlineVideoPlayButton();
     }
 
     /** Close fullscreen image/video previews and stop playback. */
@@ -491,6 +607,7 @@ export class Annotation extends Script {
             Annotation.videoPreviewEl.muted = false;
             Annotation.videoPreviewEl.removeAttribute('muted');
         }
+        Annotation.pauseInlineVideo();
     }
 
     /**
@@ -781,6 +898,7 @@ export class Annotation extends Script {
      * @private
      */
     hideTooltip() {
+        Annotation.pauseInlineVideo();
         Annotation.activeAnnotation = null;
         Annotation.tooltipDom.style.opacity = '0';
 
