@@ -54,6 +54,7 @@ import { resetSceneSettings } from './settings-reset';
 type InboundPayload =
     | { type: 'CAMERA_MODE_SWITCH'; value?: 'orbit' | 'fly' }
     | { type: 'CAMERA_RESET' }
+    | { type: 'CAMERA_PITCH_RANGE_SET'; value?: [number, number] }
     | { type: 'SKYBOX_SET'; value?: string }
     | { type: 'ANIMATION_RESET' }
     | { type: 'ANIMATION_PLAY_PAUSE' }
@@ -228,6 +229,29 @@ const initPostMessageBridge = (global: Global) => {
             case 'CAMERA_RESET':
                 events.fire('inputEvent', 'reset');
                 break;
+            case 'CAMERA_PITCH_RANGE_SET': {
+                const raw = (p as { value?: unknown }).value;
+                if (!Array.isArray(raw) || raw.length !== 2) {
+                    console.warn('[MessageBridge] CAMERA_PITCH_RANGE_SET ignored: value must be [min, max]');
+                    break;
+                }
+                const min = Number(raw[0]);
+                const max = Number(raw[1]);
+                if (!Number.isFinite(min) || !Number.isFinite(max) || min > max) {
+                    console.warn('[MessageBridge] CAMERA_PITCH_RANGE_SET ignored: invalid range', raw);
+                    break;
+                }
+                const range: [number, number] = [
+                    Math.max(-90, Math.min(90, min)),
+                    Math.max(-90, Math.min(90, max))
+                ];
+                const cameras = (global.settings as ExperienceSettings).cameras;
+                if (Array.isArray(cameras) && cameras[0]) {
+                    cameras[0].pitchRange = range;
+                }
+                events.fire('camera:pitchRangeChanged', range);
+                break;
+            }
             case 'SKYBOX_SET':
                 if (typeof p.value === 'string') {
                     events.fire('skyboxSet', p.value);

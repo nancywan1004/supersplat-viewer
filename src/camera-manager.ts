@@ -480,13 +480,20 @@ class CameraManager {
         // Fly 的 focusDistance 也 clamp 到同一 zoomRange，保证两种模式 target clamp 时的"相机位置外壳范围"一致
         controllers.fly.setFocusDistanceRange(controllers.orbit.controller.zoomRange);
 
-        // 应用俯仰角限制配置
-        const pitchRange = settings.cameras[0].pitchRange;
-        if (pitchRange && Array.isArray(pitchRange) && pitchRange.length === 2) {
-            const pitchVec2 = new Vec2(pitchRange[0], pitchRange[1]);
+        // 俯仰角限制：构造与协议 CAMERA_PITCH_RANGE_SET 复用同一应用路径，避免行为分叉。
+        const applyPitchRange = (range: [number, number] | number[] | undefined | null) => {
+            if (!range || !Array.isArray(range) || range.length !== 2) return;
+            const [min, max] = range;
+            if (!Number.isFinite(min) || !Number.isFinite(max)) return;
+            const pitchVec2 = new Vec2(min, max);
             controllers.orbit.controller.pitchRange = pitchVec2;
             controllers.fly.pitchRange = pitchVec2;
-        }
+        };
+        applyPitchRange(settings.cameras[0].pitchRange);
+
+        events.on('camera:pitchRangeChanged', (range: [number, number]) => {
+            applyPitchRange(range);
+        });
 
         controllers.orbit.fov = resetCamera.fov;
         controllers.fly.fov = resetCamera.fov;
