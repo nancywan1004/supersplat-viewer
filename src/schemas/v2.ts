@@ -317,9 +317,10 @@ const validateV2 = (data: unknown): ExperienceSettings => {
 
     if (obj.sceneMediaHotspot !== undefined) {
         const sm = assertObject(obj.sceneMediaHotspot, 'settings.sceneMediaHotspot');
-        assertNumber(sm.videoTriggerDistanceM, 'settings.sceneMediaHotspot.videoTriggerDistanceM');
-        assertNumber(sm.audioTriggerDistanceM, 'settings.sceneMediaHotspot.audioTriggerDistanceM');
         assertNumber(sm.coneHalfDeg, 'settings.sceneMediaHotspot.coneHalfDeg');
+        if (sm.hotspotAutoplayEnabled !== undefined) {
+            assertBoolean(sm.hotspotAutoplayEnabled, 'settings.sceneMediaHotspot.hotspotAutoplayEnabled');
+        }
     }
 
     return data as ExperienceSettings;

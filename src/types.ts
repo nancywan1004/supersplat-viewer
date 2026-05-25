@@ -75,8 +75,8 @@ export interface ScenePlacedItem {
     thumbnailUrl?: string;
     /** 仅 video：横向曲度 [0,1]，0 为平面 */
     horizontalCurvature?: number;
-    /** video / audio：热区自动播放；缺省 true，不入 settings 序列化时仅显式 false */
-    hotspotAutoplay?: boolean;
+    /** video / audio：热区触发距离（米） */
+    triggerDistanceM?: number;
     /** 音/视频会话态（不入 settings） */
     mediaRuntime?: ScenePlacedMediaRuntime;
 }

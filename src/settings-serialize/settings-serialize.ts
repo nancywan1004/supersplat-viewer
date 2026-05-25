@@ -197,11 +197,11 @@ export function serializeScenePlacedItem(entry: ScenePlacedItem): SceneAsset {
         },
         transform
     };
-    if (
-        (assetType === 'video' || assetType === 'audio')
-        && entry.hotspotAutoplay === false
-    ) {
-        out.hotspotAutoplay = false;
+    if (assetType === 'video' || assetType === 'audio') {
+        const dist = entry.triggerDistanceM;
+        if (typeof dist === 'number' && Number.isFinite(dist) && dist > 0) {
+            out.triggerDistanceM = dist;
+        }
     }
     return out;
 }

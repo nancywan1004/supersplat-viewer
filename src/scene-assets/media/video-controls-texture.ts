@@ -10,6 +10,7 @@ import type { Global, ScenePlacedItem } from '../../types';
 import { readViewMediaMuted } from '../../view-settings';
 import { intersectRayLocalVideoMesh } from './curved-billboard-mesh';
 import { ensureScenePlacedMediaRuntime, getPlacedMediaRuntime, type PlacedVideoRuntime } from './media-runtime';
+import { isMediaConsumptionMode } from './media-hotspot-params';
 import { userPauseSceneMedia, userPlaySceneMedia } from './scene-media-playback';
 import {
     initPlacedVideoTextureUploadFlush,
@@ -123,8 +124,14 @@ function clientToCanvas(metrics: CanvasMetrics, clientX: number, clientY: number
     };
 }
 
-function isVideoControlsEligible(entry: ScenePlacedItem): boolean {
-    return !!(entry.entity?.enabled && entry.visible !== false && entry.assetType === 'video');
+function isVideoControlsEligible(entry: ScenePlacedItem, global?: Global): boolean {
+    if (!entry.entity?.enabled || entry.visible === false || entry.assetType !== 'video') {
+        return false;
+    }
+    if (global && isMediaConsumptionMode(global)) {
+        return entry.mediaRuntime?.inHotspotZone === true;
+    }
+    return true;
 }
 
 function getChromeState(entryId: string): VideoChromeState {
@@ -334,10 +341,10 @@ function drawVideoComposite(m: PlacedVideoRuntime, entryId: string, paintChrome:
 }
 
 /**
- * 视频可见时始终参与播控逻辑；仅 hover/交互时在纹理上绘制控件条。
+ * Viewer/预览：仅在热区内的视频参与播控（绘制 + 命中）；编辑非预览不受热区限制。
  */
-export function shouldShowVideoControls(_global: Global, entry: ScenePlacedItem): boolean {
-    return isVideoControlsEligible(entry);
+export function shouldShowVideoControls(global: Global, entry: ScenePlacedItem): boolean {
+    return isVideoControlsEligible(entry, global);
 }
 
 export function syncVideoTextureWithControls(
@@ -345,7 +352,7 @@ export function syncVideoTextureWithControls(
     entry: ScenePlacedItem,
     m: PlacedVideoRuntime
 ): void {
-    if (!isVideoControlsEligible(entry)) {
+    if (!isVideoControlsEligible(entry, global)) {
         if (m.controlsOverlayActive) {
             m.controlsOverlayActive = false;
             syncPlacedVideoTextureBinding(m);
@@ -724,7 +731,7 @@ function findVideoHitAtClient(
 
     const cam = global.camera.camera;
     const eye = global.camera.getPosition();
-    const eligible = (global.state.scenePlacedEntities ?? []).filter((e) => isVideoControlsEligible(e));
+    const eligible = (global.state.scenePlacedEntities ?? []).filter((e) => isVideoControlsEligible(e, global));
     if (debug) {
         vcLog('findHit:start', {
             canvasX,
@@ -971,7 +978,7 @@ export function tickVideoControlsTextures(global: Global): void {
     pruneChromeState(global);
 
     for (const entry of global.state.scenePlacedEntities ?? []) {
-        if (!isVideoControlsEligible(entry) || !entry.entity) continue;
+        if (!isVideoControlsEligible(entry, global) || !entry.entity) continue;
         const m = getPlacedMediaRuntime(entry.entity);
         if (m?.kind !== 'video') continue;
 

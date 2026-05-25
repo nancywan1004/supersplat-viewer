@@ -3,26 +3,28 @@
  *
  * ## 职责边界
  *
- * - **本文件**：何时 play/pause、全局互斥、用户意图（`userPaused`）、UI 事件。
+ * - **本文件**：play/pause 与"出声"的分轨互斥、用户意图（`userPaused`）、UI 事件。
  * - **`media-hotspot-controller.ts`**：是否「该由热区自动播」——触发距离/视锥、赢家、冷却、
- *   `userUnlocked`、编辑非预览门；满足条件后调用本模块的 `playSceneMediaEntry(..., 'hotspot')`。
+ *   `userUnlocked`、编辑非预览门；满足后调用 `ensureSceneVideoFramePlaying` / `playSceneMediaEntry`。
  * - **`video-controls-texture.ts` / `audio-callout.ts`**：命中与绘制；用户点击走
  *   `userPlaySceneMedia` / `userPauseSceneMedia`。
  *
  * ## 核心不变量
  *
- * 1. **互斥**：`activeSceneMediaEntryId` 非空时，全局至多一条 video/audio 出声；
- *    热区自动播与手动播共用该槽，不区分两套 policy。
- * 2. **用户意图**：`userPaused === true` 时，热区评估不得对本条调用 play（手动暂停）。
- *    被互斥停掉的其它条**不**自动设 `userPaused`，以便离开互斥后仍可热区自动播。
- * 3. **UI**：`mediaRuntime.hotspotPlaying` 与 `mediaOverlay:playbackChanged` 仅经
- *    `syncEntryPlaybackUi` 更新（字段名历史遗留，手动播也走同一路径）。
+ * 1. **出声唯一**：`activeSceneMediaEntryId` 指当前出声的 entry；视频赢家优先于音频。
+ * 2. **画面非互斥**：热区内的视频允许同时推帧 + 静音（仅赢家不静音）。音频没有画面，
+ *    非赢家直接 pause。
+ * 3. **用户意图**：`userPaused === true` 阻止热区评估 play 本条；被静音的其它视频不会
+ *    被自动写 `userPaused`，离开热区或赢家变更后仍可继续/不再发声。
+ * 4. **UI**：`mediaRuntime.hotspotPlaying` 与 `mediaOverlay:playbackChanged` 仅经
+ *    `syncEntryPlaybackUi` 更新（手动播 / 热区播共用）。
  *
  * ## 调用关系（简图）
  *
- *   用户点击播放钮 → userPlaySceneMedia → playSceneMediaEntry(source:'user')
- *   热区评估 shouldPlay → playSceneMediaEntry(source:'hotspot')
- *   二者均会 pause 其余条目并写入 activeSceneMediaEntryId
+ *   控制器视频循环  → ensureSceneVideoFramePlaying(entry, { muted })
+ *   控制器音频循环  → playSceneMediaEntry(audio, 'hotspot')
+ *   用户点击播放钮  → userPlaySceneMedia → playSceneMediaEntry(entry, 'user')
+ *   赢家收尾        → setActiveSceneMediaSoundId(videoOwner ?? audioOwner)
  */
 
 import type { Global, ScenePlacedItem } from '../../types';
@@ -50,11 +52,11 @@ export function getActiveSceneMediaEntryId(): string | null {
 }
 
 /**
- * 热区评估用：若已有其它条目占槽，本条不应再被自动拉起。
- * （手动播 A 时，热区赢家 B 的 shouldPlay 仍为 true 但不应抢槽。）
+ * 由热区控制器在每帧评估收尾时统一更新出声槽。
+ * 单独暴露（不在 play/pause 内部修改）以避免循环中间状态被外部观察到。
  */
-export function isSceneMediaEntryBlockedByActive(entryId: string): boolean {
-    return activeSceneMediaEntryId !== null && activeSceneMediaEntryId !== entryId;
+export function setActiveSceneMediaSoundId(id: string | null): void {
+    activeSceneMediaEntryId = id;
 }
 
 // --- 底层 pause / UI 同步（不对外导出，避免绕过互斥与事件） ---
@@ -108,10 +110,28 @@ function pauseSceneMediaEntryInternal(
     }
 }
 
-/** 互斥 play 的前置步骤：静音/暂停列表中除赢家外的所有 media */
-function pauseAllSceneMediaExcept(global: Global, exceptEntryId: string): void {
+/** 把除赢家外、当前 isLive 的视频静音；不停止推帧。 */
+function muteOtherPlacedVideosKeepFrame(global: Global, exceptEntryId: string | null): void {
     for (const entry of global.state.scenePlacedEntities ?? []) {
-        if (entry.id === exceptEntryId) continue;
+        if (exceptEntryId && entry.id === exceptEntryId) continue;
+        const entity = entry.entity;
+        if (!entity) continue;
+        const m = getPlacedMediaRuntime(entity);
+        if (!m || m.kind !== 'video') continue;
+        if (m.isLive) {
+            m.videoEl.muted = true;
+        }
+    }
+}
+
+/** 暂停除指定 id 之外的所有 audio（audio 无静音概念，直接 pause）。 */
+function pauseOtherPlacedAudios(global: Global, exceptEntryId: string | null): void {
+    for (const entry of global.state.scenePlacedEntities ?? []) {
+        if (exceptEntryId && entry.id === exceptEntryId) continue;
+        const entity = entry.entity;
+        if (!entity) continue;
+        const m = getPlacedMediaRuntime(entity);
+        if (!m || m.kind !== 'audio') continue;
         pauseSceneMediaEntryInternal(global, entry, false);
     }
 }
@@ -119,7 +139,35 @@ function pauseAllSceneMediaExcept(global: Global, exceptEntryId: string): void {
 // --- 对外播控 API（热区与用户入口均应经此） ---
 
 /**
- * 播放指定条目：占互斥槽 → 暂停其余 → 启动 video 纹理链或 audio 元素。
+ * 让指定视频「保持画面推帧 + 受控静音」。不修改 `activeSceneMediaEntryId`，
+ * 由调用方在循环收尾通过 {@link setActiveSceneMediaSoundId} 决定出声归属。
+ */
+export function ensureSceneVideoFramePlaying(
+    global: Global,
+    entry: ScenePlacedItem,
+    options: { muted: boolean }
+): boolean {
+    const entity = entry.entity;
+    if (!entity) return false;
+    const m = getPlacedMediaRuntime(entity);
+    if (!m || m.kind !== 'video') return false;
+
+    playPlacedVideoTexture(entity, m);
+    m.videoEl.muted = options.muted;
+    if (m.videoEl.paused) {
+        m.videoEl.play().catch(() => {
+            // ignore autoplay / decode errors
+        });
+    }
+    syncEntryPlaybackUi(global, entry, 'video', true);
+    return true;
+}
+
+/**
+ * 让指定 media 出声：
+ * - video：本条非静音播放；其它视频静音但继续推帧；所有 audio 暂停。
+ * - audio：本条出声播放；其它 audio 暂停；所有视频静音（保持画面）。
+ *
  * 不修改其它条目的 `userPaused`。
  */
 export function playSceneMediaEntry(
@@ -133,9 +181,10 @@ export function playSceneMediaEntry(
     if (!m || (m.kind !== 'video' && m.kind !== 'audio')) return false;
 
     activeSceneMediaEntryId = entry.id;
-    pauseAllSceneMediaExcept(global, entry.id);
 
     if (m.kind === 'video') {
+        muteOtherPlacedVideosKeepFrame(global, entry.id);
+        pauseOtherPlacedAudios(global, null);
         playPlacedVideoTexture(entity, m);
         m.videoEl.muted = false;
         m.videoEl.play().catch(() => {
@@ -148,6 +197,8 @@ export function playSceneMediaEntry(
         return true;
     }
 
+    muteOtherPlacedVideosKeepFrame(global, null);
+    pauseOtherPlacedAudios(global, entry.id);
     m.audioEl.volume = 1;
     m.audioEl.play().catch(() => {
         // ignore autoplay / decode errors

@@ -6,6 +6,7 @@
 import * as pc from 'playcanvas';
 
 import { ensureSceneMediaHotspot } from '../../settings-serialize/settings-serialize-helper';
+import type { ExperienceSettings } from '../../schemas/v2';
 import type { Global, ScenePlacedItem } from '../../types';
 import { readViewMediaMuted } from '../../view-settings';
 import {
@@ -14,6 +15,11 @@ import {
     type PlacedVideoRuntime
 } from './media-runtime';
 import {
+    isHotspotGateOpen,
+    readEntryTriggerDistanceM,
+    readGlobalVideoHotspotAutoplayEnabledFromSettings
+} from './media-hotspot-params';
+import {
     cameraForwardWorld,
     evaluateAudioHotspotAnchor,
     evaluateMediaHotspotAnchor
@@ -21,11 +27,12 @@ import {
 import {
     clearAllSceneMediaPlaybackFlags,
     clearSceneMediaUserSession,
+    ensureSceneVideoFramePlaying,
     getActiveSceneMediaEntryId,
-    isSceneMediaEntryBlockedByActive,
     pauseAllSceneMedia,
     pauseSceneMediaEntry,
-    playSceneMediaEntry
+    playSceneMediaEntry,
+    setActiveSceneMediaSoundId
 } from './scene-media-playback';
 import { initPlacedVideoTextureUploadFlush, tickPlacedVideoTextureUploads } from './video-texture';
 
@@ -33,32 +40,18 @@ const EVAL_INTERVAL_MS = 120;
 /** 不写入 settings：有声赢家切换冷却（毫秒） */
 const MEDIA_HOTSPOT_MIN_TOGGLE_INTERVAL_MS = 500;
 
-function isHotspotGateOpen(global: Global): boolean {
-    const { state } = global;
-    if (!state.editMode) return true;
-    return state.previewMode === true;
-}
-
 function isPlacedAssetsRootEnabled(global: Global): boolean {
     const root = global.app.root.findByName('placedAssets') as { enabled?: boolean } | null;
     if (!root || typeof root.enabled !== 'boolean') return true;
     return root.enabled;
 }
 
-function isHotspotAutoplayEnabled(entry: ScenePlacedItem): boolean {
-    return entry.hotspotAutoplay !== false;
-}
-
-/** 隐藏或未启用、关闭热区自动播的 video/audio 不参与热区判定与声道互斥 */
-function isPlacedMediaHotspotEligible(entry: ScenePlacedItem, kind: 'video' | 'audio'): boolean {
+function isPlacedMediaVisible(entry: ScenePlacedItem): boolean {
     if (!entry?.entity || entry.visible === false || entry.entity.enabled === false) {
         return false;
     }
-    if (!isHotspotAutoplayEnabled(entry)) {
-        return false;
-    }
     const media = getPlacedMediaRuntime(entry.entity);
-    return !!media && media.kind === kind;
+    return !!media && (media.kind === 'video' || media.kind === 'audio');
 }
 
 function pickQualifiedSoundId(
@@ -79,19 +72,17 @@ type SceneHotspotParams = {
     eye: pc.Vec3;
     forward: pc.Vec3;
     cosCone: number;
-    videoTriggerDistanceM: number;
-    audioTriggerDistanceM: number;
+    settings: ExperienceSettings;
 };
 
 function readSceneHotspotParams(global: Global): SceneHotspotParams {
-    const sm = ensureSceneMediaHotspot(global.settings as any);
+    const sm = ensureSceneMediaHotspot(global.settings as ExperienceSettings);
     const halfRad = sm.coneHalfDeg * pc.math.DEG_TO_RAD;
     return {
         eye: global.camera.getPosition(),
         forward: cameraForwardWorld(global.camera),
         cosCone: Math.cos(halfRad),
-        videoTriggerDistanceM: Math.max(0.01, sm.videoTriggerDistanceM),
-        audioTriggerDistanceM: Math.max(0.01, sm.audioTriggerDistanceM)
+        settings: global.settings as ExperienceSettings
     };
 }
 
@@ -102,19 +93,24 @@ function evaluateEntryHotspotZone(
     kind: 'video' | 'audio',
     params: SceneHotspotParams
 ): HotspotZoneEval {
-    if (!isPlacedMediaHotspotEligible(entry, kind)) {
+    if (!isPlacedMediaVisible(entry)) {
+        return { inZone: false };
+    }
+    const media = getPlacedMediaRuntime(entry.entity!);
+    if (!media || media.kind !== kind) {
         return { inZone: false };
     }
 
     const anchor = entry.entity!.getPosition();
+    const maxDepthM = readEntryTriggerDistanceM(entry, kind, params.settings);
     const evalResult =
         kind === 'audio'
-            ? evaluateAudioHotspotAnchor(params.eye, anchor, params.audioTriggerDistanceM)
+            ? evaluateAudioHotspotAnchor(params.eye, anchor, maxDepthM)
             : evaluateMediaHotspotAnchor(
                 params.eye,
                 params.forward,
                 anchor,
-                params.videoTriggerDistanceM,
+                maxDepthM,
                 params.cosCone
             );
     if (!evalResult.ok) {
@@ -125,7 +121,8 @@ function evaluateEntryHotspotZone(
 
 function qualifyPlacedMedia(
     global: Global,
-    params: SceneHotspotParams
+    params: SceneHotspotParams,
+    options: { globalVideoAutoplay: boolean }
 ): { videos: QualifiedMedia[]; audios: QualifiedMedia[] } {
     const videos: QualifiedMedia[] = [];
     const audios: QualifiedMedia[] = [];
@@ -136,11 +133,13 @@ function qualifyPlacedMedia(
         if (!media) continue;
         const kind = media.kind;
         if (kind !== 'video' && kind !== 'audio') continue;
+        if (entry.mediaRuntime?.userPaused === true) continue;
 
         const zone = evaluateEntryHotspotZone(entry, kind, params);
         if (!zone.inZone || zone.depthM === undefined) continue;
 
         if (kind === 'video') {
+            if (!options.globalVideoAutoplay) continue;
             videos.push({ id: entry.id, depthM: zone.depthM, entry });
         } else {
             audios.push({ id: entry.id, depthM: zone.depthM, entry });
@@ -191,6 +190,16 @@ function pausePostersExceptActiveUserSlot(global: Global): void {
     }
 }
 
+/**
+ * 出声赢家选取：
+ * 1. 当前 `activeSceneMediaEntryId` 仍在候选集中 → 沿用（尊重用户手动偏好 / 上一帧赢家）。
+ * 2. 否则取距离最近者。
+ */
+function pickPreferredSoundId(candidates: QualifiedMedia[], preferred: string | null): string | null {
+    if (preferred && candidates.some(c => c.id === preferred)) return preferred;
+    return candidates[0]?.id ?? null;
+}
+
 function applyHotspotPlayback(
     global: Global,
     evalState: HotspotEvalState,
@@ -199,8 +208,9 @@ function applyHotspotPlayback(
     audios: QualifiedMedia[],
     now: number
 ): void {
-    let desiredVideoSound = videos.length > 0 ? videos[0].id : null;
-    let desiredAudioSound = desiredVideoSound ? null : (audios.length > 0 ? audios[0].id : null);
+    const preferred = getActiveSceneMediaEntryId();
+    let desiredVideoSound = pickPreferredSoundId(videos, preferred);
+    let desiredAudioSound = desiredVideoSound ? null : pickPreferredSoundId(audios, preferred);
 
     const cooldown = Math.max(0, MEDIA_HOTSPOT_MIN_TOGGLE_INTERVAL_MS);
     const vChanged = desiredVideoSound !== evalState.lastVideoSoundId;
@@ -228,67 +238,66 @@ function applyHotspotPlayback(
     evalState.lastAudioSoundId = desiredAudioSound;
 
     const viewMediaMuted = readViewMediaMuted(global);
+    const globalVideoAutoplay = readGlobalVideoHotspotAutoplayEnabledFromSettings(hotspotParams.settings);
     const list = global.state.scenePlacedEntities ?? [];
+
+    let videoSoundOwner: string | null = null;
 
     for (const entry of list) {
         const m = entry.entity ? getPlacedMediaRuntime(entry.entity) : undefined;
-        if (!m) continue;
+        if (!m || m.kind !== 'video') continue;
 
-        if (m.kind === 'video') {
-            if (!isPlacedMediaHotspotEligible(entry, 'video')) {
-                pauseSceneMediaEntry(global, entry);
-                continue;
-            }
-            const { inZone: inHotspotZone } = evaluateEntryHotspotZone(entry, 'video', hotspotParams);
-            syncHotspotZoneTransition(entry, inHotspotZone);
+        if (!isPlacedMediaVisible(entry)) {
+            pauseSceneMediaEntry(global, entry, { releaseActiveSlot: false });
+            continue;
+        }
+        const { inZone: inHotspotZone } = evaluateEntryHotspotZone(entry, 'video', hotspotParams);
+        syncHotspotZoneTransition(entry, inHotspotZone);
 
-            if (!inHotspotZone) {
-                pauseSceneMediaEntry(global, entry);
-                continue;
-            }
-
-            const shouldPlay =
-                entry.id === desiredVideoSound
-                && !isSceneMediaEntryBlockedByActive(entry.id)
-                && !entry.mediaRuntime?.userPaused
-                && evalState.userUnlocked
-                && !viewMediaMuted;
-
-            if (shouldPlay) {
-                playSceneMediaEntry(global, entry, 'hotspot');
-            } else {
-                pauseSceneMediaEntry(global, entry);
-            }
+        if (!inHotspotZone
+            || !globalVideoAutoplay
+            || entry.mediaRuntime?.userPaused === true
+            || !evalState.userUnlocked
+        ) {
+            pauseSceneMediaEntry(global, entry, { releaseActiveSlot: false });
             continue;
         }
 
-        if (m.kind === 'audio') {
-            if (!isPlacedMediaHotspotEligible(entry, 'audio')) {
-                pauseSceneMediaEntry(global, entry);
-                continue;
-            }
-            const { inZone: inHotspotZone } = evaluateEntryHotspotZone(entry, 'audio', hotspotParams);
-            syncHotspotZoneTransition(entry, inHotspotZone);
+        const wantSound = entry.id === desiredVideoSound && !viewMediaMuted;
+        ensureSceneVideoFramePlaying(global, entry, { muted: !wantSound });
+        if (wantSound) videoSoundOwner = entry.id;
+    }
 
-            if (desiredVideoSound || !inHotspotZone) {
-                pauseSceneMediaEntry(global, entry);
-                continue;
-            }
+    let audioSoundOwner: string | null = null;
 
-            const shouldPlay =
-                entry.id === desiredAudioSound
-                && !isSceneMediaEntryBlockedByActive(entry.id)
-                && !entry.mediaRuntime?.userPaused
-                && evalState.userUnlocked
-                && !viewMediaMuted;
+    for (const entry of list) {
+        const m = entry.entity ? getPlacedMediaRuntime(entry.entity) : undefined;
+        if (!m || m.kind !== 'audio') continue;
 
-            if (shouldPlay) {
-                playSceneMediaEntry(global, entry, 'hotspot');
-            } else {
-                pauseSceneMediaEntry(global, entry);
-            }
+        if (!isPlacedMediaVisible(entry)) {
+            pauseSceneMediaEntry(global, entry, { releaseActiveSlot: false });
+            continue;
+        }
+        const { inZone: inHotspotZone } = evaluateEntryHotspotZone(entry, 'audio', hotspotParams);
+        syncHotspotZoneTransition(entry, inHotspotZone);
+
+        const shouldPlay =
+            inHotspotZone
+            && videoSoundOwner === null
+            && entry.id === desiredAudioSound
+            && entry.mediaRuntime?.userPaused !== true
+            && evalState.userUnlocked
+            && !viewMediaMuted;
+
+        if (shouldPlay) {
+            playSceneMediaEntry(global, entry, 'hotspot');
+            audioSoundOwner = entry.id;
+        } else {
+            pauseSceneMediaEntry(global, entry, { releaseActiveSlot: false });
         }
     }
+
+    setActiveSceneMediaSoundId(videoSoundOwner ?? audioSoundOwner);
 }
 
 function runMediaHotspotEvaluation(
@@ -316,7 +325,8 @@ function runMediaHotspotEvaluation(
     evalState.lastEvalMs = now;
 
     const hotspotParams = readSceneHotspotParams(global);
-    const { videos, audios } = qualifyPlacedMedia(global, hotspotParams);
+    const globalVideoAutoplay = readGlobalVideoHotspotAutoplayEnabledFromSettings(hotspotParams.settings);
+    const { videos, audios } = qualifyPlacedMedia(global, hotspotParams, { globalVideoAutoplay });
     applyHotspotPlayback(global, evalState, hotspotParams, videos, audios, now);
     return true;
 }
@@ -363,7 +373,22 @@ export function initMediaHotspotController(global: Global): () => void {
         } else {
             runMediaHotspotEvaluation(global, evalState);
         }
-        tickPlacedVideoTextureUploads(collectLiveVideos(), uploadToggle);
+        if (uploadToggle) {
+            tickPlacedVideoTextureUploads(collectLiveVideos(), uploadToggle);
+        }
+    };
+
+    const forceHotspotEval = () => {
+        runMediaHotspotEvaluation(global, evalState, { force: true });
+    };
+
+    const onVisibilityChange = () => {
+        evalState.pageHidden = document.hidden;
+        if (evalState.pageHidden) {
+            pauseAllSceneMedia(global);
+        } else {
+            forceHotspotEval();
+        }
     };
 
     const onPageHidden = () => {
@@ -373,28 +398,7 @@ export function initMediaHotspotController(global: Global): () => void {
 
     const onPageVisible = () => {
         evalState.pageHidden = false;
-        evalState.lastEvalMs = 0;
-        if (isEditModeWithoutPreview(global)) {
-            pauseAllSceneMedia(global);
-        } else {
-            runMediaHotspotEvaluation(global, evalState, { force: true });
-        }
-    };
-
-    const onVisibilityChange = () => {
-        if (document.hidden) onPageHidden();
-        else onPageVisible();
-    };
-
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    window.addEventListener('pagehide', onPageHidden);
-    window.addEventListener('pageshow', onPageVisible);
-
-    app.on('update', onUpdate);
-
-    const forceHotspotEval = () => {
-        evalState.lastEvalMs = 0;
-        runMediaHotspotEvaluation(global, evalState, { force: true });
+        forceHotspotEval();
     };
 
     const onPreviewModeChanged = (previewMode: boolean) => {
@@ -447,12 +451,17 @@ export function initMediaHotspotController(global: Global): () => void {
     };
 
     events.on('sceneMediaHotspot:changed', onHotspotChanged);
+    events.on('sceneAsset:triggerDistanceChanged', onHotspotChanged);
     events.on('viewMediaMuted:changed', onViewMediaMutedChanged);
     events.on('previewMode:changed', onPreviewModeChanged);
     events.on('mediaHotspot:userActivate', onUserActivate);
     events.on('mediaOverlay:userPlayback', onOverlayUserPlayback);
     events.on('editMode:changed', onEditModeChanged);
-    events.on('sceneAsset:hotspotAutoplayChanged', onHotspotChanged);
+
+    app.on('update', onUpdate);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', onPageHidden);
+    window.addEventListener('pageshow', onPageVisible);
 
     return () => {
         cleanupTextureUploadFlush();
@@ -462,12 +471,12 @@ export function initMediaHotspotController(global: Global): () => void {
         window.removeEventListener('pageshow', onPageVisible);
         app.off('update', onUpdate);
         events.off('sceneMediaHotspot:changed', onHotspotChanged);
+        events.off('sceneAsset:triggerDistanceChanged', onHotspotChanged);
         events.off('viewMediaMuted:changed', onViewMediaMutedChanged);
         events.off('previewMode:changed', onPreviewModeChanged);
         events.off('mediaHotspot:userActivate', onUserActivate);
         events.off('mediaOverlay:userPlayback', onOverlayUserPlayback);
         events.off('editMode:changed', onEditModeChanged);
-        events.off('sceneAsset:hotspotAutoplayChanged', onHotspotChanged);
         clearAllSceneMediaPlaybackFlags(global);
         pauseAllSceneMedia(global);
     };

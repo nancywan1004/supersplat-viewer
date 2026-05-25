@@ -1,4 +1,8 @@
-import { applyMediaHotspotAutoplay, applyVideoHorizontalCurvature } from '../../scene-assets/asset-placement-handler';
+import {
+    applySceneAssetTriggerDistanceM,
+    applyVideoHorizontalCurvature
+} from '../../scene-assets/asset-placement-handler';
+import { readEntryTriggerDistanceM } from '../../scene-assets/media/media-hotspot-params';
 import { pushEditHistory } from '../../edit-history';
 import { getSceneAssetListHTML, bindSceneAssetList } from './scene-asset-list-ui';
 import { loadGsplatAsset } from '../../loaders/gsplat-asset-loader';
@@ -7,7 +11,8 @@ import type { ExperienceSettings, SceneMediaHotspotSettings } from '../../schema
 import {
     applySceneMediaHotspotBaselineFromView,
     ensureSceneMediaHotspot,
-    patchSceneMediaHotspot
+    patchSceneMediaHotspot,
+    readGlobalVideoHotspotAutoplayEnabled
 } from '../../settings-serialize/settings-serialize-helper';
 import { getSelectedSceneAssetType, getSelectedScenePlacedItem } from '../../state-selectors';
 import type { Global, AssetLibraryItem, AssetLibraryType } from '../../types';
@@ -169,14 +174,16 @@ export function getAssetPlacementSettingsHTML(): string {
         <div class="media-hotspot-panel" id="mediaHotspotPanel">
             <div class="settingsRow submenuHeader expanded" style="margin-top:6px;">音视频热区</div>
             <div class="settingsRow">
-                <label for="mhVideoDist">视频触发距离 (m)</label>
-                <input type="range" id="mhVideoDist" min="1" max="80" step="0.5" />
-                <span id="mhVideoDistVal" class="settingsValueLabel"></span>
+                <label for="mhGlobalAutoplay">视频热区自动播放</label>
+                <input type="checkbox" id="mhGlobalAutoplay" checked />
             </div>
+        </div>
+        <div class="media-trigger-distance-panel hidden" id="mediaTriggerDistancePanel">
+            <div class="settingsRow submenuHeader" style="margin-top:6px;">触发距离</div>
             <div class="settingsRow">
-                <label for="mhAudioDist">音频触发距离 (m)</label>
-                <input type="range" id="mhAudioDist" min="1" max="80" step="0.5" />
-                <span id="mhAudioDistVal" class="settingsValueLabel"></span>
+                <label for="mhAssetDist">距离 (m)</label>
+                <input type="range" id="mhAssetDist" min="1" max="80" step="0.5" />
+                <span id="mhAssetDistVal" class="settingsValueLabel"></span>
             </div>
             <div class="settingsRow">
                 <button type="button" id="mhBaselineBtn" class="settingsButton">从当前视角设基准距离</button>
@@ -188,13 +195,6 @@ export function getAssetPlacementSettingsHTML(): string {
                 <label for="videoCurvature">横向曲度</label>
                 <input type="range" id="videoCurvature" min="0" max="100" step="1" />
                 <span id="videoCurvatureVal" class="settingsValueLabel"></span>
-            </div>
-        </div>
-        <div class="media-autoplay-panel hidden" id="mediaAutoplayPanel">
-            <div class="settingsRow submenuHeader" style="margin-top:6px;">媒体播控</div>
-            <div class="settingsRow">
-                <label for="mediaHotspotAutoplayCheck">热区自动播放</label>
-                <input type="checkbox" id="mediaHotspotAutoplayCheck" />
             </div>
         </div>
         ${getSceneAssetListHTML()}
@@ -394,44 +394,80 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
     };
     mediaUrlInput.addEventListener('keydown', onMediaUrlKeydown);
 
-    const mhVideoDist = root.querySelector<HTMLInputElement>('#mhVideoDist');
-    const mhAudioDist = root.querySelector<HTMLInputElement>('#mhAudioDist');
+    const mhGlobalAutoplay = root.querySelector<HTMLInputElement>('#mhGlobalAutoplay');
+    const mediaTriggerDistancePanel = root.querySelector<HTMLElement>('#mediaTriggerDistancePanel');
+    const mhAssetDist = root.querySelector<HTMLInputElement>('#mhAssetDist');
     const mhBaselineBtn = root.querySelector<HTMLButtonElement>('#mhBaselineBtn');
-    const mhVideoDistVal = root.querySelector<HTMLSpanElement>('#mhVideoDistVal');
-    const mhAudioDistVal = root.querySelector<HTMLSpanElement>('#mhAudioDistVal');
+    const mhAssetDistVal = root.querySelector<HTMLSpanElement>('#mhAssetDistVal');
 
     const editUiTransport = getEditUiTransport(global);
 
-    const syncHotspotUi = () => {
-        const sm = ensureSceneMediaHotspot(global.settings as ExperienceSettings);
-        if (mhVideoDist) mhVideoDist.value = String(sm.videoTriggerDistanceM);
-        if (mhAudioDist) mhAudioDist.value = String(sm.audioTriggerDistanceM);
-        if (mhVideoDistVal) mhVideoDistVal.textContent = `${sm.videoTriggerDistanceM.toFixed(1)} m`;
-        if (mhAudioDistVal) mhAudioDistVal.textContent = `${sm.audioTriggerDistanceM.toFixed(1)} m`;
+    const syncGlobalHotspotUi = () => {
+        const settings = global.settings as ExperienceSettings;
+        if (mhGlobalAutoplay) {
+            mhGlobalAutoplay.checked = readGlobalVideoHotspotAutoplayEnabled(settings);
+        }
     };
 
-    const buildHotspotPatch = (): Partial<SceneMediaHotspotSettings> => ({
-        videoTriggerDistanceM: mhVideoDist ? Number(mhVideoDist.value) : undefined,
-        audioTriggerDistanceM: mhAudioDist ? Number(mhAudioDist.value) : undefined
-    });
-
-    const onHotspotField = () => {
-        const patch = buildHotspotPatch();
+    const onGlobalAutoplayChange = () => {
+        if (!mhGlobalAutoplay) return;
+        const value = mhGlobalAutoplay.checked;
+        const patch: Partial<SceneMediaHotspotSettings> = { hotspotAutoplayEnabled: value };
         if (editUiTransport === 'message-bridge') {
             sendEditProtocolMessage({ type: 'MEDIA_HOTSPOT_SET', value: patch });
             return;
         }
         patchSceneMediaHotspot(global.settings as ExperienceSettings, patch);
-        syncHotspotUi();
+        syncGlobalHotspotUi();
         events.fire('sceneMediaHotspot:changed');
     };
 
-    syncHotspotUi();
-    mhVideoDist?.addEventListener('input', onHotspotField);
-    mhAudioDist?.addEventListener('input', onHotspotField);
+    syncGlobalHotspotUi();
+    mhGlobalAutoplay?.addEventListener('change', onGlobalAutoplayChange);
 
-    const onHotspotExternal = () => syncHotspotUi();
+    const onHotspotExternal = () => syncGlobalHotspotUi();
     events.on('sceneMediaHotspot:changed', onHotspotExternal);
+
+    const syncPerAssetDistanceUi = () => {
+        const entry = getSelectedScenePlacedItem(state);
+        const t =
+            entry?.assetType === 'video' || entry?.assetType === 'audio'
+                ? entry.assetType
+                : state.selectedSceneEntityId
+                    ? getSelectedSceneAssetType(state, global.settings.sceneAssets)
+                    : null;
+        const isMedia = t === 'video' || t === 'audio';
+        if (mediaTriggerDistancePanel) {
+            mediaTriggerDistancePanel.classList.toggle('hidden', !isMedia);
+        }
+        if (!isMedia || !mhAssetDist || !entry) return;
+        const dist = readEntryTriggerDistanceM(entry, t, global.settings as ExperienceSettings);
+        mhAssetDist.value = String(dist);
+        if (mhAssetDistVal) mhAssetDistVal.textContent = `${dist.toFixed(1)} m`;
+    };
+
+    const onAssetDistInput = () => {
+        const id = state.selectedSceneEntityId;
+        if (!id || !mhAssetDist) return;
+        const entry = getSelectedScenePlacedItem(state);
+        const t =
+            entry?.assetType === 'video' || entry?.assetType === 'audio'
+                ? entry.assetType
+                : getSelectedSceneAssetType(state, global.settings.sceneAssets);
+        if (t !== 'video' && t !== 'audio') return;
+        const value = Number(mhAssetDist.value);
+        if (editUiTransport === 'message-bridge') {
+            sendEditProtocolMessage({ type: 'ASSET_MEDIA_HOTSPOT_RANGE_SET', id, value });
+            return;
+        }
+        if (applySceneAssetTriggerDistanceM(global, id, value)) {
+            pushEditHistory(global, 'set media trigger distance');
+        }
+        syncPerAssetDistanceUi();
+    };
+
+    syncPerAssetDistanceUi();
+    mhAssetDist?.addEventListener('input', onAssetDistInput);
 
     const onBaselineClick = () => {
         const id = state.selectedSceneEntityId;
@@ -441,18 +477,27 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
             return;
         }
         if (editUiTransport === 'message-bridge') {
-            sendEditProtocolMessage({ type: 'MEDIA_HOTSPOT_SET_BASELINE', id, target });
+            sendEditProtocolMessage({ type: 'MEDIA_HOTSPOT_SET_BASELINE', id });
             return;
         }
-        const result = applySceneMediaHotspotBaselineFromView(global, { sceneEntityId: id, target });
+        const result = applySceneMediaHotspotBaselineFromView(global, { sceneEntityId: id });
         if (result.ok === false) {
             console.warn('[MediaHotspot] 设基准距离失败', result.reason);
             return;
         }
-        syncHotspotUi();
-        events.fire('sceneMediaHotspot:changed');
+        syncPerAssetDistanceUi();
+        events.fire('sceneAsset:triggerDistanceChanged', {
+            id: result.id,
+            triggerDistanceM: result.triggerDistanceM
+        });
     };
     mhBaselineBtn?.addEventListener('click', onBaselineClick);
+
+    const onSceneAssetSelectedForDistance = () => syncPerAssetDistanceUi();
+    events.on('sceneAsset:selected', onSceneAssetSelectedForDistance);
+    events.on('sceneAssets:added', onSceneAssetSelectedForDistance);
+    events.on('sceneAssets:removed', onSceneAssetSelectedForDistance);
+    events.on('sceneAsset:triggerDistanceChanged', onSceneAssetSelectedForDistance);
 
     const videoCurvaturePanel = root.querySelector<HTMLElement>('#videoCurvaturePanel');
     const videoCurvatureInput = root.querySelector<HTMLInputElement>('#videoCurvature');
@@ -497,60 +542,6 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
     events.on('sceneAssets:added', onSceneAssetSelectedForCurvature);
     events.on('sceneAssets:removed', onSceneAssetSelectedForCurvature);
 
-    const mediaAutoplayPanel = root.querySelector<HTMLElement>('#mediaAutoplayPanel');
-    const mediaHotspotAutoplayCheck = root.querySelector<HTMLInputElement>('#mediaHotspotAutoplayCheck');
-
-    const readSelectedMediaAutoplay = (): boolean => {
-        const entry = getSelectedScenePlacedItem(state);
-        if (!entry) return true;
-        if (entry.hotspotAutoplay === false) return false;
-        const sa = (global.settings as ExperienceSettings).sceneAssets?.find((a) => a.id === entry.id);
-        return sa?.hotspotAutoplay !== false;
-    };
-
-    const syncMediaAutoplayUi = () => {
-        const entry = getSelectedScenePlacedItem(state);
-        const t =
-            entry?.assetType === 'video' || entry?.assetType === 'audio'
-                ? entry.assetType
-                : state.selectedSceneEntityId
-                    ? getSelectedSceneAssetType(state, global.settings.sceneAssets)
-                    : null;
-        const isMedia = t === 'video' || t === 'audio';
-        if (mediaAutoplayPanel) {
-            mediaAutoplayPanel.classList.toggle('hidden', !isMedia);
-        }
-        if (!isMedia || !mediaHotspotAutoplayCheck) return;
-        mediaHotspotAutoplayCheck.checked = readSelectedMediaAutoplay();
-    };
-
-    const onMediaAutoplayChange = () => {
-        const id = state.selectedSceneEntityId;
-        if (!id || !mediaHotspotAutoplayCheck) return;
-        const entry = getSelectedScenePlacedItem(state);
-        const t =
-            entry?.assetType === 'video' || entry?.assetType === 'audio'
-                ? entry.assetType
-                : getSelectedSceneAssetType(state, global.settings.sceneAssets);
-        if (t !== 'video' && t !== 'audio') return;
-        const value = mediaHotspotAutoplayCheck.checked;
-        if (editUiTransport === 'message-bridge') {
-            sendEditProtocolMessage({ type: 'ASSET_MEDIA_HOTSPOT_AUTOPLAY_SET', id, value });
-            return;
-        }
-        if (applyMediaHotspotAutoplay(global, id, value)) {
-            pushEditHistory(global, 'toggle media hotspot autoplay');
-        }
-    };
-
-    syncMediaAutoplayUi();
-    mediaHotspotAutoplayCheck?.addEventListener('change', onMediaAutoplayChange);
-    const onSceneAssetSelectedForAutoplay = () => syncMediaAutoplayUi();
-    events.on('sceneAsset:selected', onSceneAssetSelectedForAutoplay);
-    events.on('sceneAssets:added', onSceneAssetSelectedForAutoplay);
-    events.on('sceneAssets:removed', onSceneAssetSelectedForAutoplay);
-    events.on('sceneAsset:hotspotAutoplayChanged', onSceneAssetSelectedForAutoplay);
-
     return () => {
         unbindList();
         if (gridEl && onLibraryChange) {
@@ -561,18 +552,17 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         fileInput.removeEventListener('change', handleFileSelect);
         addMediaUrlBtn.removeEventListener('click', addMediaFromUrl);
         mediaUrlInput.removeEventListener('keydown', onMediaUrlKeydown);
-        mhVideoDist?.removeEventListener('input', onHotspotField);
-        mhAudioDist?.removeEventListener('input', onHotspotField);
+        mhGlobalAutoplay?.removeEventListener('change', onGlobalAutoplayChange);
+        mhAssetDist?.removeEventListener('input', onAssetDistInput);
         mhBaselineBtn?.removeEventListener('click', onBaselineClick);
         events.off('sceneMediaHotspot:changed', onHotspotExternal);
+        events.off('sceneAsset:selected', onSceneAssetSelectedForDistance);
+        events.off('sceneAssets:added', onSceneAssetSelectedForDistance);
+        events.off('sceneAssets:removed', onSceneAssetSelectedForDistance);
+        events.off('sceneAsset:triggerDistanceChanged', onSceneAssetSelectedForDistance);
         videoCurvatureInput?.removeEventListener('input', onVideoCurvatureInput);
         events.off('sceneAsset:selected', onSceneAssetSelectedForCurvature);
         events.off('sceneAssets:added', onSceneAssetSelectedForCurvature);
         events.off('sceneAssets:removed', onSceneAssetSelectedForCurvature);
-        mediaHotspotAutoplayCheck?.removeEventListener('change', onMediaAutoplayChange);
-        events.off('sceneAsset:selected', onSceneAssetSelectedForAutoplay);
-        events.off('sceneAssets:added', onSceneAssetSelectedForAutoplay);
-        events.off('sceneAssets:removed', onSceneAssetSelectedForAutoplay);
-        events.off('sceneAsset:hotspotAutoplayChanged', onSceneAssetSelectedForAutoplay);
     };
 }

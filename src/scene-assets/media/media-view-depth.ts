@@ -11,7 +11,7 @@ export function cameraForwardWorld(cam: pc.Entity): Vec3 {
 
 /**
  * 锚点相对相机的视轴深度：沿相机 forward 的分量，仅取前方（≥0）。
- * 与视频热区 `videoTriggerDistanceM` 及 video baseline 共用。
+ * 与视频热区 `SceneAsset.triggerDistanceM` 及 video baseline 共用。
  */
 export function viewAxisDepthM(cam: pc.Entity, anchorWorld: Vec3): number {
     const eye = cam.getPosition();

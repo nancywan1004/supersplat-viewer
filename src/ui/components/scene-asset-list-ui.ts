@@ -1,17 +1,6 @@
-import { applyMediaHotspotAutoplay } from '../../scene-assets/asset-placement-handler';
 import type { Global, ScenePlacedItem } from '../../types';
 import { pushEditHistory } from '../../edit-history';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
-
-function isMediaSceneAsset(entry: ScenePlacedItem): boolean {
-    return entry.assetType === 'video' || entry.assetType === 'audio';
-}
-
-function readSceneAssetHotspotAutoplay(global: Global, entry: ScenePlacedItem): boolean {
-    if (entry.hotspotAutoplay === false) return false;
-    const sa = global.settings.sceneAssets?.find((a) => a.id === entry.id);
-    return sa?.hotspotAutoplay !== false;
-}
 
 const EYE_SVG =
     '<svg class="icon-eye" viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>';
@@ -65,38 +54,6 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
         deleteBtn.title = '移除';
         deleteBtn.setAttribute('aria-label', '移除');
 
-        let hotspotAutoplayWrap: HTMLLabelElement | null = null;
-        if (isMediaSceneAsset(entry)) {
-            hotspotAutoplayWrap = document.createElement('label');
-            hotspotAutoplayWrap.className = 'scene-asset-hotspot-autoplay';
-            hotspotAutoplayWrap.title = '热区自动播放';
-            const hotspotAutoplayCheck = document.createElement('input');
-            hotspotAutoplayCheck.type = 'checkbox';
-            hotspotAutoplayCheck.checked = readSceneAssetHotspotAutoplay(global, entry);
-            hotspotAutoplayCheck.setAttribute('aria-label', '热区自动播放');
-            const hotspotAutoplayText = document.createElement('span');
-            hotspotAutoplayText.className = 'scene-asset-hotspot-autoplay-label';
-            hotspotAutoplayText.textContent = '热区';
-            hotspotAutoplayWrap.appendChild(hotspotAutoplayCheck);
-            hotspotAutoplayWrap.appendChild(hotspotAutoplayText);
-            hotspotAutoplayCheck.addEventListener('click', (e) => e.stopPropagation());
-            hotspotAutoplayCheck.addEventListener('change', (e) => {
-                e.stopPropagation();
-                const value = hotspotAutoplayCheck.checked;
-                if (editUiTransport === 'message-bridge') {
-                    sendEditProtocolMessage({
-                        type: 'ASSET_MEDIA_HOTSPOT_AUTOPLAY_SET',
-                        id: entry.id,
-                        value
-                    });
-                    return;
-                }
-                if (applyMediaHotspotAutoplay(global, entry.id, value)) {
-                    pushEditHistory(global, 'toggle media hotspot autoplay');
-                }
-            });
-        }
-
         const toggleVisibility = (e: Event) => {
             e.stopPropagation();
             const nextVisible = !entry.visible;
@@ -139,7 +96,6 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
             if (
                 (e.target as HTMLElement).closest('.scene-asset-delete')
                 || (e.target as HTMLElement).closest('.scene-asset-visibility')
-                || (e.target as HTMLElement).closest('.scene-asset-hotspot-autoplay')
             ) {
                 return;
             }
@@ -149,15 +105,11 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
             }
             state.selectedSceneEntityId = entry.id;
             events.fire('sceneAsset:selected', { source: 'host' });
-            // internal 模式下场景列表点击也应与协议 ASSET_SELECT 对齐，统一触发资产聚焦。
             events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
             renderSceneAssetList(listEl, global);
         });
 
         li.appendChild(nameSpan);
-        if (hotspotAutoplayWrap) {
-            li.appendChild(hotspotAutoplayWrap);
-        }
         li.appendChild(eyeBtn);
         li.appendChild(eyeOffBtn);
         li.appendChild(deleteBtn);
@@ -186,7 +138,6 @@ export function bindSceneAssetList(root: HTMLElement | null, global: Global): ()
     events.on('sceneAssets:removed', onSceneListChange);
     events.on('sceneAssets:cleared', onSceneListChange);
     events.on('sceneAsset:selected', onSceneListChange);
-    events.on('sceneAsset:hotspotAutoplayChanged', onSceneListChange);
     events.on('editLeftModule:changed', onSceneListChange);
 
     return () => {
@@ -194,7 +145,6 @@ export function bindSceneAssetList(root: HTMLElement | null, global: Global): ()
         events.off('sceneAssets:removed', onSceneListChange);
         events.off('sceneAssets:cleared', onSceneListChange);
         events.off('sceneAsset:selected', onSceneListChange);
-        events.off('sceneAsset:hotspotAutoplayChanged', onSceneListChange);
         events.off('editLeftModule:changed', onSceneListChange);
     };
 }

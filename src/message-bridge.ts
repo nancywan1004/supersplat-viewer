@@ -6,6 +6,7 @@
 
 import type { AnnotationData } from './annotation-toolbar/types';
 import {
+    applySceneAssetTriggerDistanceM,
     requestSceneAssetsRestore
 } from './scene-assets/asset-placement-handler';
 import {
@@ -65,7 +66,8 @@ type InboundPayload =
     | { type: 'EDIT_REDO' }
     | { type: 'PREVIEW_MODE_SET'; value?: boolean }
     | { type: 'MEDIA_HOTSPOT_SET'; value?: Partial<SceneMediaHotspotSettings> }
-    | { type: 'MEDIA_HOTSPOT_SET_BASELINE'; id: string; target: 'video' | 'audio' }
+    | { type: 'MEDIA_HOTSPOT_SET_BASELINE'; id: string }
+    | { type: 'ASSET_MEDIA_HOTSPOT_RANGE_SET'; id?: string; value?: number }
     | { type: 'VIEW_MEDIA_MUTE_SET'; value?: boolean }
     | { type: 'SETTINGS_SAVE' }
     | { type: 'SETTINGS_RESET' }
@@ -78,7 +80,6 @@ type InboundPayload =
     | { type: 'ASSET_DELETE'; id?: string }
     | { type: 'ASSET_TRANSFORM_MODE'; value?: 'move' | 'rotate' | 'scale' }
     | { type: 'ASSET_VIDEO_CURVATURE_SET'; id?: string; value?: number }
-    | { type: 'ASSET_MEDIA_HOTSPOT_AUTOPLAY_SET'; id?: string; value?: boolean }
     | { type: 'ANNOTATION_PLACEMENT_START'; id?: string }
     | { type: 'ANNOTATION_PLACEMENT_CANCEL' }
     | { type: 'ANNOTATION_CONFIRM'; id?: string; value?: Partial<AnnotationData> }
@@ -359,23 +360,27 @@ const initPostMessageBridge = (global: Global) => {
                     console.warn('[MessageBridge] MEDIA_HOTSPOT_SET_BASELINE missing id');
                     break;
                 }
-                if (msg.target !== 'video' && msg.target !== 'audio') {
-                    console.warn('[MessageBridge] MEDIA_HOTSPOT_SET_BASELINE invalid target');
-                    break;
-                }
-                const result = applySceneMediaHotspotBaselineFromView(global, {
-                    sceneEntityId: id,
-                    target: msg.target
-                });
+                const result = applySceneMediaHotspotBaselineFromView(global, { sceneEntityId: id });
                 if (result.ok === false) {
                     console.warn('[MessageBridge] MEDIA_HOTSPOT_SET_BASELINE failed:', result.reason, { id });
                     break;
                 }
-                events.fire('sceneMediaHotspot:changed');
-                postToParent('SCENE_MEDIA_HOTSPOT_CHANGED', {
-                    module: MESSAGE_BRIDGE_MODULE.asset,
-                    value: result.settings
+                events.fire('sceneAsset:triggerDistanceChanged', {
+                    id: result.id,
+                    triggerDistanceM: result.triggerDistanceM
                 });
+                postToParent('SCENE_ASSET_MEDIA_TRIGGER_DISTANCE_CHANGED', {
+                    module: MESSAGE_BRIDGE_MODULE.asset,
+                    id: result.id,
+                    value: { triggerDistanceM: result.triggerDistanceM }
+                });
+                break;
+            }
+            case 'ASSET_MEDIA_HOTSPOT_RANGE_SET': {
+                const pl = payload as Extract<InboundPayload, { type: 'ASSET_MEDIA_HOTSPOT_RANGE_SET' }>;
+                const id = typeof pl.id === 'string' ? pl.id.trim() : '';
+                if (!id || typeof pl.value !== 'number') break;
+                applySceneAssetTriggerDistanceM(global, id, pl.value);
                 break;
             }
             case 'SETTINGS_SAVE': {
@@ -487,11 +492,6 @@ const initPostMessageBridge = (global: Global) => {
             case 'ASSET_VIDEO_CURVATURE_SET':
                 if (typeof p.id === 'string' && typeof p.value === 'number') {
                     dispatchAsset(global, 'ASSET_VIDEO_CURVATURE_SET', { id: p.id, value: p.value });
-                }
-                break;
-            case 'ASSET_MEDIA_HOTSPOT_AUTOPLAY_SET':
-                if (typeof p.id === 'string' && typeof p.value === 'boolean') {
-                    dispatchAsset(global, 'ASSET_MEDIA_HOTSPOT_AUTOPLAY_SET', { id: p.id, value: p.value });
                 }
                 break;
             case 'ANNOTATION_PLACEMENT_START':

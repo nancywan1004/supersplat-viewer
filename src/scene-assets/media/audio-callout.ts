@@ -32,6 +32,7 @@ import type { Global, ScenePlacedItem } from '../../types';
 import { readViewMediaMuted } from '../../view-settings';
 import { ensureHotspotDepthLayers, type HotspotDepthLayers } from '../hotspot-depth-layers';
 import { getSceneAssetPickLayer } from '../scene-asset-pick-layer';
+import { isMediaConsumptionMode } from './media-hotspot-params';
 import { userPauseSceneMedia, userPlaySceneMedia } from './scene-media-playback';
 import {
     ensureScenePlacedMediaRuntime,
@@ -473,7 +474,10 @@ function isAudioVisuallyPlaying(global: Global, m: PlacedAudioRuntime): boolean 
     return !m.audioEl.paused && m.audioEl.volume > 0;
 }
 
-function isAudioCalloutEligible(entry: ScenePlacedItem): boolean {
+function isAudioCalloutEligible(entry: ScenePlacedItem, global?: Global): boolean {
+    if (global && isMediaConsumptionMode(global)) {
+        return false;
+    }
     return !!(entry.entity?.enabled && entry.visible !== false && entry.assetType === 'audio');
 }
 
@@ -518,7 +522,7 @@ function updateCalloutBillboard(global: Global, entry: ScenePlacedItem, callout:
     const audioEntity = entry.entity;
     if (!cam || !audioEntity) return;
 
-    if (!isAudioCalloutEligible(entry)) {
+    if (!isAudioCalloutEligible(entry, global)) {
         callout.calloutRoot.enabled = false;
         return;
     }
@@ -827,7 +831,7 @@ function findAudioPlayHit(global: Global, canvasX: number, canvasY: number): {
     let best: { entry: ScenePlacedItem; m: PlacedAudioRuntime; depth: number } | null = null;
 
     for (const entry of global.state.scenePlacedEntities ?? []) {
-        if (!isAudioCalloutEligible(entry) || !entry.entity) continue;
+        if (!isAudioCalloutEligible(entry, global) || !entry.entity) continue;
         const callout = calloutsByEntryId.get(entry.id);
         if (!callout?.calloutRoot.enabled) continue;
 
@@ -876,6 +880,9 @@ function clientToCanvas(canvas: HTMLCanvasElement, global: Global, clientX: numb
 }
 
 export function tryClaimAudioCalloutPointerDown(global: Global, e: PointerEvent): boolean {
+    if (isMediaConsumptionMode(global)) {
+        return false;
+    }
     if (global.state.gizmoPointerActive || hitSceneGizmoAtClient(global, e.clientX, e.clientY)) {
         return false;
     }
@@ -902,6 +909,9 @@ export function findAudioCalloutSelectHitFromClient(
     clientX: number,
     clientY: number
 ): ScenePlacedItem | null {
+    if (isMediaConsumptionMode(global)) {
+        return null;
+    }
     const canvas = interactionCanvas ?? (global.app.graphicsDevice.canvas as HTMLCanvasElement | undefined);
     if (!canvas) return null;
 
@@ -913,7 +923,7 @@ export function findAudioCalloutSelectHitFromClient(
     const eye = global.camera.getPosition();
 
     for (const entry of global.state.scenePlacedEntities ?? []) {
-        if (!isAudioCalloutEligible(entry) || !entry.entity) continue;
+        if (!isAudioCalloutEligible(entry, global) || !entry.entity) continue;
         const callout = calloutsByEntryId.get(entry.id);
         if (!callout?.calloutRoot.enabled) continue;
 

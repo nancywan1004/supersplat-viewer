@@ -30,6 +30,7 @@ import {
     createCurvedBillboardMesh,
     rebuildVideoRenderMesh
 } from './media/curved-billboard-mesh';
+import { defaultTriggerDistanceMForAssetType } from './media/media-hotspot-params';
 import {
     getPlacedMediaRuntime,
     setPlacedMediaRuntime,
@@ -663,8 +664,7 @@ export async function placeAsset(
         url: item.url,
         thumbnailUrl: item.thumbnailUrl,
         horizontalCurvature: videoRuntime?.horizontalCurvature,
-        hotspotAutoplay:
-            item.type === 'video' || item.type === 'audio' ? true : undefined
+        triggerDistanceM: defaultTriggerDistanceMForAssetType(item.type)
     };
     state.scenePlacedEntities.push(entry);
 
@@ -766,33 +766,18 @@ function applySceneAssetTransformToEntry(global: Global, entry: ScenePlacedItem,
     }
 
     if (sa.type === 'video' || sa.type === 'audio') {
-        entry.hotspotAutoplay = sa.hotspotAutoplay !== false;
+        const dist =
+            typeof sa.triggerDistanceM === 'number' && Number.isFinite(sa.triggerDistanceM) && sa.triggerDistanceM > 0
+                ? sa.triggerDistanceM
+                : defaultTriggerDistanceMForAssetType(sa.type);
+        if (dist !== undefined) {
+            entry.triggerDistanceM = dist;
+            sa.triggerDistanceM = dist;
+        }
     }
 }
 
-/**
- * 更新场景 video/audio 的热区自动播放开关（settings + 运行态）。
- */
-export function applyMediaHotspotAutoplay(global: Global, sceneAssetId: string, value: boolean): boolean {
-    const settings = global.settings as ExperienceSettings;
-    if (!Array.isArray(settings.sceneAssets)) settings.sceneAssets = [];
-    const sa = settings.sceneAssets.find((a) => a.id === sceneAssetId);
-    if (!sa || (sa.type !== 'video' && sa.type !== 'audio')) return false;
-
-    if (value) {
-        delete sa.hotspotAutoplay;
-    } else {
-        sa.hotspotAutoplay = false;
-    }
-
-    const entry = global.state.scenePlacedEntities?.find((e) => e.id === sceneAssetId);
-    if (entry) {
-        entry.hotspotAutoplay = value;
-    }
-
-    global.events.fire('sceneAsset:hotspotAutoplayChanged', { id: sceneAssetId, value });
-    return true;
-}
+export { applySceneAssetTriggerDistanceM } from '../settings-serialize/settings-serialize-helper';
 
 async function loadAndPlaceSceneAssetFromSettings(global: Global, sa: SceneAsset): Promise<void> {
     const posArr = (sa.transform?.position ?? [0, 0, 0]) as number[];
@@ -820,9 +805,6 @@ async function loadAndPlaceSceneAssetFromSettings(global: Global, sa: SceneAsset
         entry.id = sa.id;
     }
     applySceneAssetTransformToEntry(global, entry, sa);
-    if (sa.type === 'video' || sa.type === 'audio') {
-        entry.hotspotAutoplay = sa.hotspotAutoplay !== false;
-    }
 }
 
 /**

@@ -162,12 +162,10 @@ type LocalLightRegion = {
     linkedLightId?: string | null;
 };
 
-/** 场景音视频热区：视频视轴深度+视锥，音频欧氏距离（持久化于 settings 根） */
+/** 场景音视频热区全局参数（持久化于 settings 根；触发距离在 sceneAssets[]） */
 type SceneMediaHotspotSettings = {
-    /** 视频触发半径（米，沿相机前向 viewDepth） */
-    videoTriggerDistanceM: number;
-    /** 音频触发半径（米，欧氏） */
-    audioTriggerDistanceM: number;
+    /** 视频是否由热区自动播放；缺省 true，显式 false 时入库 */
+    hotspotAutoplayEnabled?: boolean;
     /** 视频视锥半角（度）；总锥约 `2 × coneHalfDeg` */
     coneHalfDeg: number;
 };
@@ -184,8 +182,8 @@ type SceneAsset = {
         filename?: string,
         url?: string
     },
-    /** video / audio：是否参与热区自动触发；缺省 true */
-    hotspotAutoplay?: boolean,
+    /** video / audio：热区触发距离（米）；video 用视轴深度，audio 用欧氏距离 */
+    triggerDistanceM?: number,
     transform: {
         position: [number, number, number],
         /** 兼容字段：旧数据使用欧拉角 */
