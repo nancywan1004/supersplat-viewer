@@ -292,34 +292,23 @@ export class Annotation extends Script {
                 background: rgba(0, 0, 0, 0.5);
                 cursor: pointer;
                 box-sizing: border-box;
+                display: flex;
+                align-items: center;
+                justify-content: center;
             }
-            .pc-annotation-video-fs-btn::before,
-            .pc-annotation-video-fs-btn::after {
-                content: '';
-                position: absolute;
-                width: 7px;
-                height: 7px;
-                border: 1.5px solid rgba(255, 255, 255, 0.9);
-            }
-            .pc-annotation-video-fs-btn::before {
-                top: 5px;
-                left: 5px;
-                border-right: none;
-                border-bottom: none;
-            }
-            .pc-annotation-video-fs-btn::after {
-                right: 5px;
-                bottom: 5px;
-                border-left: none;
-                border-top: none;
+            .pc-annotation-video-fs-btn__img {
+                width: 16px;
+                height: 16px;
+                display: block;
+                pointer-events: none;
             }
             .pc-annotation-video-play-btn {
                 position: absolute;
                 right: 10px;
                 bottom: 10px;
                 z-index: 2;
-                width: 40px;
-                height: 40px;
+                width: 28px;
+                height: 28px;
                 padding: 0;
                 border: none;
                 border-radius: 50%;
@@ -329,20 +318,20 @@ export class Annotation extends Script {
             .pc-annotation-video-play-btn::after {
                 content: '';
                 position: absolute;
-                left: 15px;
-                top: 11px;
+                left: 10px;
+                top: 8px;
                 border-style: solid;
-                border-width: 9px 0 9px 14px;
+                border-width: 6px 0 6px 10px;
                 border-color: transparent transparent transparent #fff;
             }
             .pc-annotation-video-play-btn.is-playing::after {
-                left: 13px;
-                top: 12px;
+                left: 9px;
+                top: 8px;
                 border: none;
-                width: 4px;
-                height: 16px;
+                width: 3px;
+                height: 12px;
                 background: #fff;
-                box-shadow: 8px 0 0 #fff;
+                box-shadow: 6px 0 0 #fff;
             }
         `;
 
@@ -447,6 +436,11 @@ export class Annotation extends Script {
         Annotation.videoFsBtn.type = 'button';
         Annotation.videoFsBtn.className = 'pc-annotation-video-fs-btn';
         Annotation.videoFsBtn.setAttribute('aria-label', '全屏播放');
+        const videoFsIcon = document.createElement('img');
+        videoFsIcon.src = '/assets/icons/expand.svg';
+        videoFsIcon.alt = '';
+        videoFsIcon.className = 'pc-annotation-video-fs-btn__img';
+        Annotation.videoFsBtn.appendChild(videoFsIcon);
         Annotation.videoInlineDom.appendChild(Annotation.videoFsBtn);
 
         Annotation.videoPlayBtn = document.createElement('button');
