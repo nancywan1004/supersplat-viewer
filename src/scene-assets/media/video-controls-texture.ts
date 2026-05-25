@@ -6,6 +6,7 @@
 import { type CameraComponent, type Entity, Mat4, Vec3 } from 'playcanvas';
 
 import { hitSceneGizmoAtClient } from '../../gizmo-handler';
+import { isPlacementCursorActive } from '../../placement-cursor';
 import type { Global, ScenePlacedItem } from '../../types';
 import { readViewMediaMuted } from '../../view-settings';
 import { intersectRayLocalVideoMesh } from './curved-billboard-mesh';
@@ -847,6 +848,12 @@ function resolvePointerOnCanvas(
     return { x, y, metrics };
 }
 
+/** 放置模式激活时不改 canvas 光标（与 nav-interaction 一致，保留 placement.svg / wait） */
+function syncVideoControlsCanvasCursor(hoverUi: 'play' | 'seek' | null): void {
+    if (!interactionCanvas || isPlacementCursorActive()) return;
+    interactionCanvas.style.cursor = hoverUi ? 'pointer' : '';
+}
+
 function clearVideoHoverState(global: Global): void {
     if (hoveredVideoEntryId) {
         setChromeHoverAction(hoveredVideoEntryId, null);
@@ -857,9 +864,7 @@ function clearVideoHoverState(global: Global): void {
         }
         hoveredVideoEntryId = null;
     }
-    if (interactionCanvas) {
-        interactionCanvas.style.cursor = '';
-    }
+    syncVideoControlsCanvasCursor(null);
 }
 
 function applyHoverFromPointer(global: Global, canvasX: number, canvasY: number): void {
@@ -875,18 +880,14 @@ function applyHoverFromPointer(global: Global, canvasX: number, canvasY: number)
     }
     hoveredVideoEntryId = nextId;
     if (!hit) {
-        if (interactionCanvas) {
-            interactionCanvas.style.cursor = '';
-        }
+        syncVideoControlsCanvasCursor(null);
         return;
     }
 
     touchChromeHover(hit.entry.id);
     const hoverUi = hit.action === 'play' || hit.action === 'seek' ? hit.action : null;
     setChromeHoverAction(hit.entry.id, hoverUi);
-    if (interactionCanvas) {
-        interactionCanvas.style.cursor = hoverUi ? 'pointer' : '';
-    }
+    syncVideoControlsCanvasCursor(hoverUi);
     syncVideoTextureWithControls(global, hit.entry, hit.m);
 }
 
