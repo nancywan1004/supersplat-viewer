@@ -66,7 +66,7 @@ type InboundPayload =
     | { type: 'EDIT_REDO' }
     | { type: 'PREVIEW_MODE_SET'; value?: boolean }
     | { type: 'MEDIA_HOTSPOT_SET'; value?: Partial<SceneMediaHotspotSettings> }
-    | { type: 'MEDIA_HOTSPOT_SET_BASELINE'; id: string }
+    | { type: 'ASSET_MEDIA_HOTSPOT_BASELINE_SET'; id: string }
     | { type: 'ASSET_MEDIA_HOTSPOT_RANGE_SET'; id?: string; value?: number }
     | { type: 'VIEW_MEDIA_MUTE_SET'; value?: boolean }
     | { type: 'SETTINGS_SAVE' }
@@ -353,16 +353,16 @@ const initPostMessageBridge = (global: Global) => {
                     applyViewMediaMuteSet(global, p.value);
                 }
                 break;
-            case 'MEDIA_HOTSPOT_SET_BASELINE': {
-                const msg = payload as Extract<InboundPayload, { type: 'MEDIA_HOTSPOT_SET_BASELINE' }>;
+            case 'ASSET_MEDIA_HOTSPOT_BASELINE_SET': {
+                const msg = payload as Extract<InboundPayload, { type: 'ASSET_MEDIA_HOTSPOT_BASELINE_SET' }>;
                 const id = typeof msg.id === 'string' ? msg.id.trim() : '';
                 if (!id) {
-                    console.warn('[MessageBridge] MEDIA_HOTSPOT_SET_BASELINE missing id');
+                    console.warn('[MessageBridge] ASSET_MEDIA_HOTSPOT_BASELINE_SET missing id');
                     break;
                 }
                 const result = applySceneMediaHotspotBaselineFromView(global, { sceneEntityId: id });
                 if (result.ok === false) {
-                    console.warn('[MessageBridge] MEDIA_HOTSPOT_SET_BASELINE failed:', result.reason, { id });
+                    console.warn('[MessageBridge] ASSET_MEDIA_HOTSPOT_BASELINE_SET failed:', result.reason, { id });
                     break;
                 }
                 events.fire('sceneAsset:triggerDistanceChanged', {
