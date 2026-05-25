@@ -1,4 +1,4 @@
-import { applyMediaHotspotAutoplay } from '../asset-placement-handler';
+import { applyMediaHotspotAutoplay } from '../scene-assets/asset-placement-handler';
 import type { AssetLibraryItem, Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 import { setPlacementCursorActive } from '../placement-cursor';
 import { applyViewAnnotationsVisible } from '../view-settings';

@@ -68,7 +68,7 @@ type VideoControlsLayout = {
     fontSize: number;
 };
 
-type VideoControlHit = 'play' | 'seek' | 'surface';
+type VideoControlHit = 'play' | 'seek';
 
 type VideoChromeState = {
     lastHoverMs: number;
@@ -622,27 +622,21 @@ function resolveControlHitAtCanvas(
     add(pick.px, pick.py, 'ray');
     add(pick.px, texH - pick.py, 'rayFlipY');
 
-    let surfaceFallback: { px: number; py: number; action: VideoControlHit } | null = null;
     for (const c of cands) {
         const action = hitTestTextureControls(c.px, c.py, layout, texH, debugEntryId);
-        if (!action) continue;
-        if (action === 'play' || action === 'seek') {
-            if (debugEntryId) {
-                vcLog('hit:resolved', {
-                    entryId: debugEntryId,
-                    via: c.via,
-                    action,
-                    px: c.px,
-                    py: c.py
-                });
-            }
-            return { px: c.px, py: c.py, action };
+        if (action !== 'play' && action !== 'seek') continue;
+        if (debugEntryId) {
+            vcLog('hit:resolved', {
+                entryId: debugEntryId,
+                via: c.via,
+                action,
+                px: c.px,
+                py: c.py
+            });
         }
-        if (!surfaceFallback) {
-            surfaceFallback = { px: c.px, py: c.py, action };
-        }
+        return { px: c.px, py: c.py, action };
     }
-    return surfaceFallback;
+    return null;
 }
 
 /** 纹理像素坐标 → 播控命中（与绘制布局一致） */
@@ -685,8 +679,7 @@ function hitTestTextureControls(
 
     if (inPlay) return 'play';
     if (inSeekBand) return 'seek';
-    if (inChrome) return 'surface';
-    return 'surface';
+    return null;
 }
 
 function seekFromTextureX(px: number, layout: VideoControlsLayout, video: HTMLVideoElement): void {
@@ -836,6 +829,21 @@ function resolvePointerOnCanvas(
     return { x, y, metrics };
 }
 
+function clearVideoHoverState(global: Global): void {
+    if (hoveredVideoEntryId) {
+        setChromeHoverAction(hoveredVideoEntryId, null);
+        const prev = global.state.scenePlacedEntities?.find((e) => e.id === hoveredVideoEntryId);
+        if (prev?.entity) {
+            const pm = getPlacedMediaRuntime(prev.entity);
+            if (pm?.kind === 'video') syncVideoTextureWithControls(global, prev, pm);
+        }
+        hoveredVideoEntryId = null;
+    }
+    if (interactionCanvas) {
+        interactionCanvas.style.cursor = '';
+    }
+}
+
 function applyHoverFromPointer(global: Global, canvasX: number, canvasY: number): void {
     const hit = findVideoHitAtClient(global, canvasX, canvasY, false);
     const nextId = hit?.entry.id ?? null;
@@ -848,7 +856,12 @@ function applyHoverFromPointer(global: Global, canvasX: number, canvasY: number)
         }
     }
     hoveredVideoEntryId = nextId;
-    if (!hit) return;
+    if (!hit) {
+        if (interactionCanvas) {
+            interactionCanvas.style.cursor = '';
+        }
+        return;
+    }
 
     touchChromeHover(hit.entry.id);
     const hoverUi = hit.action === 'play' || hit.action === 'seek' ? hit.action : null;
@@ -896,11 +909,6 @@ export function tryClaimVideoControlsPointerDown(global: Global, e: PointerEvent
         return true;
     }
 
-    if (hit.action === 'surface') {
-        toggleVideoPlay(global, hit.entry, hit.m);
-        return true;
-    }
-
     dragSeekEntryId = hit.entry.id;
     seekFromTextureX(hit.px, hit.layout, hit.m.videoEl);
     vcLog('pointerdown:seek', { entryId: hit.entry.id, px: hit.px, currentTime: hit.m.videoEl.currentTime });
@@ -910,7 +918,10 @@ export function tryClaimVideoControlsPointerDown(global: Global, e: PointerEvent
 
 function handlePointerMove(global: Global, e: PointerEvent): void {
     const ptr = resolvePointerOnCanvas(e);
-    if (!ptr) return;
+    if (!ptr) {
+        clearVideoHoverState(global);
+        return;
+    }
 
     applyHoverFromPointer(global, ptr.x, ptr.y);
 
@@ -995,15 +1006,8 @@ export function initVideoControlsInteraction(global: Global, canvas: HTMLCanvasE
     };
     const onUp = () => handlePointerUp(global);
     const onLeave = () => {
-        if (!hoveredVideoEntryId || !interactionGlobal) return;
-        setChromeHoverAction(hoveredVideoEntryId, null);
-        const entry = interactionGlobal.state.scenePlacedEntities?.find((e) => e.id === hoveredVideoEntryId);
-        if (entry?.entity) {
-            const m = getPlacedMediaRuntime(entry.entity);
-            if (m?.kind === 'video') syncVideoTextureWithControls(interactionGlobal, entry, m);
-        }
-        hoveredVideoEntryId = null;
-        if (interactionCanvas) interactionCanvas.style.cursor = '';
+        if (!interactionGlobal) return;
+        clearVideoHoverState(interactionGlobal);
     };
 
     canvas.addEventListener('pointermove', onMove, { passive: true });

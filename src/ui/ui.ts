@@ -13,7 +13,7 @@ import {
 import { readSkyboxUrlFromSettings } from '../settings-serialize/settings-serialize-helper';
 import { downloadExperienceSettingsLocally } from '../render/project-thumbnail';
 import { resetSceneSettings } from '../settings-reset';
-import { requestSceneAssetsRestore } from '../asset-placement-handler';
+import { requestSceneAssetsRestore } from '../scene-assets/asset-placement-handler';
 import {
     initEditHistory,
     canUndo,

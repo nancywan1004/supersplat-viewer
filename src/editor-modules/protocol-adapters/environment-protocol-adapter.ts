@@ -3,7 +3,7 @@
  * 由 EnvironmentFacade 调用；其它模块如需相同语义可直接 import 本文件。
  */
 
-import { getPositionInFrontOfCamera } from '../../asset-placement-handler';
+import { getPositionInFrontOfCamera } from '../../scene-assets/asset-placement-handler';
 import { spotApexToHalfDeg, updatePointLightsFromSettings } from '../../light';
 import type { ExperienceSettings } from '../../schemas/v2';
 import {

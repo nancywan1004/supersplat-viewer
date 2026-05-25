@@ -53,7 +53,7 @@ import { isShadowSystemEnabled, syncGsplatShadowCastingFromSettings } from './vf
 import { initShadowCatcher } from './vfx/shadow/shadow-catcher';
 import { ShadowApplyRt } from './vfx/shadow/shadow-apply';
 import { updateShadowDistance } from './light';
-import { initAssetPlacementHandler, requestSceneAssetsRestore } from './asset-placement-handler';
+import { initAssetPlacementHandler, requestSceneAssetsRestore } from './scene-assets/asset-placement-handler';
 import { initMediaHotspotController } from './scene-assets/media/media-hotspot-controller';
 import { initSceneAudioCallout } from './scene-assets/media/audio-callout';
 import {

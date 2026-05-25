@@ -7,7 +7,7 @@
 import type { AnnotationData } from './annotation-toolbar/types';
 import {
     requestSceneAssetsRestore
-} from './asset-placement-handler';
+} from './scene-assets/asset-placement-handler';
 import {
     initEditHistory,
     canUndo,

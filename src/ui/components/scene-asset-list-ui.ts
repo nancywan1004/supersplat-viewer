@@ -1,4 +1,4 @@
-import { applyMediaHotspotAutoplay } from '../../asset-placement-handler';
+import { applyMediaHotspotAutoplay } from '../../scene-assets/asset-placement-handler';
 import type { Global, ScenePlacedItem } from '../../types';
 import { pushEditHistory } from '../../edit-history';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';

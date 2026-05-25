@@ -1,7 +1,7 @@
 import type { Global } from './types';
 import type { ExperienceSettings } from './schemas/v2';
 import { serializeExperienceSettings, applySettingsSnapshot } from './settings-serialize/settings-serialize';
-import { requestSceneAssetsRestore } from './asset-placement-handler';
+import { requestSceneAssetsRestore } from './scene-assets/asset-placement-handler';
 import type { AnnotationManager } from './annotation-toolbar/annotation-manager';
 import { updatePointLightsFromSettings } from './light';
 import { readSkyboxUrlFromSettings } from './settings-serialize/settings-serialize-helper';

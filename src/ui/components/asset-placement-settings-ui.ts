@@ -1,4 +1,4 @@
-import { applyMediaHotspotAutoplay, applyVideoHorizontalCurvature } from '../../asset-placement-handler';
+import { applyMediaHotspotAutoplay, applyVideoHorizontalCurvature } from '../../scene-assets/asset-placement-handler';
 import { pushEditHistory } from '../../edit-history';
 import { getSceneAssetListHTML, bindSceneAssetList } from './scene-asset-list-ui';
 import { loadGsplatAsset } from '../../loaders/gsplat-asset-loader';

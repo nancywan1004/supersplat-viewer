@@ -14,47 +14,47 @@ import {
     ADDRESS_CLAMP_TO_EDGE,
     MeshInstance
 } from 'playcanvas';
-import type { SceneAsset } from './schemas/v2-custom';
-import type { Global, AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from './types';
-import { getSelectedSceneEntity } from './state-selectors';
+import type { SceneAsset } from '../schemas/v2-custom';
+import type { Global, AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from '../types';
+import { getSelectedSceneEntity } from '../state-selectors';
 import {
     DEFAULT_ASSET_LOAD_TIMEOUT_MS,
     hydrateAssetLibraryItem,
     loadSceneAssetLibraryItem,
     withTimeout
-} from './loaders/asset-loader';
-import { hitSceneGizmoAtClient } from './gizmo-handler';
-import type { InputArbiter } from './input-arbiter';
+} from '../loaders/asset-loader';
+import { hitSceneGizmoAtClient } from '../gizmo-handler';
+import type { InputArbiter } from '../input-arbiter';
 import {
     clampVideoHorizontalCurvature,
     createCurvedBillboardMesh,
     rebuildVideoRenderMesh
-} from './scene-assets/media/curved-billboard-mesh';
+} from './media/curved-billboard-mesh';
 import {
     getPlacedMediaRuntime,
     setPlacedMediaRuntime,
     type PlacedMediaRuntime,
     type PlacedVideoRuntime
-} from './scene-assets/media/media-runtime';
-import { setPlacementCursorActive } from './placement-cursor';
+} from './media/media-runtime';
+import { setPlacementCursorActive } from '../placement-cursor';
 import {
     acquirePlacedVideoForPlacement,
     cancelVideoPlacementPreload,
     startVideoPlacementPreload,
     type VideoPlacementPreloadHandle
-} from './scene-assets/media/video-placement-preload';
+} from './media/video-placement-preload';
 import {
     createPlacedVideoTextureFromVideo,
     initPlacedVideoTexture,
     PLACED_VIDEO_INITIAL_LOAD_TIMEOUT_MS,
     PLACED_VIDEO_PLACEMENT_TIMEOUT_MS,
     unmountPlacedVideoFromDom
-} from './scene-assets/media/video-texture';
-import { AUDIO_CALLOUT_WORLD_H, findAudioCalloutSelectHitFromClient } from './scene-assets/media/audio-callout';
-import { getSceneAssetPickLayer, getSceneAssetPickerLayers } from './scene-assets/scene-asset-pick-layer';
-import { removeSceneAssetFromSettings } from './settings-serialize/settings-serialize';
-import { syncGsplatShadowCastingFromSettings } from './vfx/shadow/gsplat-shadow-cast';
-import type { ExperienceSettings } from './settings';
+} from './media/video-texture';
+import { AUDIO_CALLOUT_WORLD_H, findAudioCalloutSelectHitFromClient } from './media/audio-callout';
+import { getSceneAssetPickLayer, getSceneAssetPickerLayers } from './scene-asset-pick-layer';
+import { removeSceneAssetFromSettings } from '../settings-serialize/settings-serialize';
+import { syncGsplatShadowCastingFromSettings } from '../vfx/shadow/gsplat-shadow-cast';
+import type { ExperienceSettings } from '../settings';
 
 const PLACED_ASSETS_NAME = 'placedAssets';
 const ASSET_LOAD_TIMEOUT_MS = DEFAULT_ASSET_LOAD_TIMEOUT_MS;
