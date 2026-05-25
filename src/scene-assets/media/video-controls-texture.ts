@@ -547,7 +547,13 @@ function pickViaRayVideoSurface(
         }
     }
 
-    const jitter = [[-3, 0], [3, 0], [0, -3], [0, 3], [-2, -2], [2, 2]] as const;
+    // 曲度越大、弧端按钮屏幕投影越小，jitter 步长按曲度线性放宽
+    const j1 = 3 + Math.round(horizontalCurvature * 5);
+    const j2 = 2 + Math.round(horizontalCurvature * 4);
+    const jitter: ReadonlyArray<readonly [number, number]> = [
+        [-j1, 0], [j1, 0], [0, -j1], [0, j1],
+        [-j2, -j2], [j2, j2], [-j2, j2], [j2, -j2]
+    ];
     for (const [dx, dy] of jitter) {
         const jr = castCanvasRayToEntityLocal(global, cam, entity, canvasX + dx, canvasY + dy);
         if (!jr) continue;
@@ -590,7 +596,10 @@ function resolveControlHitAtCanvas(
     debugEntryId?: string
 ): { px: number; py: number; action: VideoControlHit } | null {
     const bounds = buildEntityScreenBounds(cam, entity);
-    const screenPad = horizontalCurvature > 0.01 ? 14 : 6;
+    // 曲度越大、按钮在弧端的屏幕投影越小：粗筛 pad 随曲度线性放宽
+    const screenPad = horizontalCurvature > 0.01
+        ? 14 + Math.round(horizontalCurvature * 30)
+        : 6;
     if (!bounds || !isCanvasPointInScreenBounds(canvasX, canvasY, bounds, screenPad)) {
         return null;
     }
@@ -622,8 +631,10 @@ function resolveControlHitAtCanvas(
     add(pick.px, pick.py, 'ray');
     add(pick.px, texH - pick.py, 'rayFlipY');
 
+    // 纹理空间命中容差随曲度放大：弧最右端 px≈texW，差几像素就漏
+    const playPad = 12 + Math.round(horizontalCurvature * 24);
     for (const c of cands) {
-        const action = hitTestTextureControls(c.px, c.py, layout, texH, debugEntryId);
+        const action = hitTestTextureControls(c.px, c.py, layout, texH, debugEntryId, playPad);
         if (action !== 'play' && action !== 'seek') continue;
         if (debugEntryId) {
             vcLog('hit:resolved', {
@@ -645,9 +656,9 @@ function hitTestTextureControls(
     py: number,
     layout: VideoControlsLayout,
     texH: number,
-    debugEntryId?: string
+    debugEntryId?: string,
+    playPad: number = 12
 ): VideoControlHit | null {
-    const playPad = 12;
     const inPlay =
         px >= layout.playLeft - playPad
         && px <= layout.playLeft + layout.playSize + playPad

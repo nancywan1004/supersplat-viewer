@@ -93,7 +93,7 @@ const TITLE_BORDER_W = 2;
 const TITLE_BORDER_ANIM_MS = 2500;
 const TITLE_GLOW_COLOR = '#1FE1FF';
 /** 无场景采样时的毛玻璃底（Canvas 无法做真实 backdrop-filter） */
-const TITLE_GLASS_FILL = 'rgba(8, 22, 58, 0.58)';
+const TITLE_GLASS_FILL = 'rgba(0, 0, 0, 0.5)';
 const TITLE_CONIC_STOPS: ReadonlyArray<[number, string]> = [
     [0, '#0A2EA5'],
     [96.92 / 360, '#E8F3FF'],
@@ -106,7 +106,7 @@ const TITLE_CONIC_STOPS: ReadonlyArray<[number, string]> = [
 /** SVG 原尺寸 32×32，纹理上约 2× 绘制 */
 const PLAY_ICON_W = 32;
 const PLAY_ICON_H = 32;
-const PLAY_HIT_PAD = 10;
+const PLAY_HIT_PAD = 24;
 const LABEL_TOP = 14;
 const LABEL_PLAY_GAP = 10;
 

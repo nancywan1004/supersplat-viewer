@@ -11,8 +11,8 @@ import {
 /** 归一化曲度上限：1 对应 `VIDEO_HORIZONTAL_MAX_ARC_DEG` 整弧张角 */
 export const VIDEO_HORIZONTAL_CURVATURE_MAX = 1;
 
-/** 曲度为 1 时，屏幕宽度方向总张角（度） */
-export const VIDEO_HORIZONTAL_MAX_ARC_DEG = 270;
+/** 曲度为 1 时，屏幕宽度方向总张角（度），上限 180°（半圆）以避免观感反卷 */
+export const VIDEO_HORIZONTAL_MAX_ARC_DEG = 180;
 
 export const VIDEO_CURVED_WIDTH_SEGMENTS = 48;
 export const VIDEO_CURVED_LENGTH_SEGMENTS = 1;
