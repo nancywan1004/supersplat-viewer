@@ -32,7 +32,7 @@ import type { Global, ScenePlacedItem } from '../../types';
 import { readViewMediaMuted } from '../../view-settings';
 import { ensureHotspotDepthLayers, type HotspotDepthLayers } from '../hotspot-depth-layers';
 import { getSceneAssetPickLayer } from '../scene-asset-pick-layer';
-import { isMediaConsumptionMode } from './media-hotspot-params';
+import { isMediaConsumptionMode, readShowAudioCalloutInViewerFromSettings } from './media-hotspot-params';
 import { userPauseSceneMedia, userPlaySceneMedia } from './scene-media-playback';
 import {
     ensureScenePlacedMediaRuntime,
@@ -476,7 +476,8 @@ function isAudioVisuallyPlaying(global: Global, m: PlacedAudioRuntime): boolean 
 
 function isAudioCalloutEligible(entry: ScenePlacedItem, global?: Global): boolean {
     if (global && isMediaConsumptionMode(global)) {
-        return false;
+        // 浏览模式（Viewer / 编辑预览）默认隐藏，仅当 settings.audio.showCalloutInViewer === true 时显示
+        if (!readShowAudioCalloutInViewerFromSettings(global.settings)) return false;
     }
     return !!(entry.entity?.enabled && entry.visible !== false && entry.assetType === 'audio');
 }
@@ -880,7 +881,9 @@ function clientToCanvas(canvas: HTMLCanvasElement, global: Global, clientX: numb
 }
 
 export function tryClaimAudioCalloutPointerDown(global: Global, e: PointerEvent): boolean {
-    if (isMediaConsumptionMode(global)) {
+    const inConsumption = isMediaConsumptionMode(global);
+    // 浏览模式下仅当显示 callout 开关打开才接管点击
+    if (inConsumption && !readShowAudioCalloutInViewerFromSettings(global.settings)) {
         return false;
     }
     if (global.state.gizmoPointerActive || hitSceneGizmoAtClient(global, e.clientX, e.clientY)) {
@@ -896,8 +899,11 @@ export function tryClaimAudioCalloutPointerDown(global: Global, e: PointerEvent)
     const hit = findAudioPlayHit(global, pt.x, pt.y);
     if (!hit) return false;
 
-    global.state.selectedSceneEntityId = hit.entry.id;
-    global.events.fire('sceneAsset:selected', { source: 'scene' });
+    // 浏览模式下仅 toggle 播放，不修改场景选中
+    if (!inConsumption) {
+        global.state.selectedSceneEntityId = hit.entry.id;
+        global.events.fire('sceneAsset:selected', { source: 'scene' });
+    }
 
     toggleAudioPlayback(global, hit.entry, hit.m);
     return true;

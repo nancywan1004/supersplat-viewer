@@ -13,6 +13,7 @@ import {
     ensureSceneMediaHotspot,
     patchSceneMediaHotspot,
     readGlobalAudioHotspotAutoplayEnabled,
+    readGlobalShowAudioCalloutInViewer,
     readGlobalVideoHotspotAutoplayEnabled
 } from '../../settings-serialize/settings-serialize-helper';
 import { getSelectedSceneAssetType, getSelectedScenePlacedItem } from '../../state-selectors';
@@ -181,6 +182,10 @@ export function getAssetPlacementSettingsHTML(): string {
             <div class="settingsRow">
                 <label for="mhGlobalAudioAutoplay">音频热区自动播放</label>
                 <input type="checkbox" id="mhGlobalAudioAutoplay" checked />
+            </div>
+            <div class="settingsRow">
+                <label for="mhGlobalAudioCalloutInViewer">浏览模式显示音频图标</label>
+                <input type="checkbox" id="mhGlobalAudioCalloutInViewer" checked />
             </div>
         </div>
         <div class="media-trigger-distance-panel hidden" id="mediaTriggerDistancePanel">
@@ -401,6 +406,7 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
 
     const mhGlobalAutoplay = root.querySelector<HTMLInputElement>('#mhGlobalAutoplay');
     const mhGlobalAudioAutoplay = root.querySelector<HTMLInputElement>('#mhGlobalAudioAutoplay');
+    const mhGlobalAudioCalloutInViewer = root.querySelector<HTMLInputElement>('#mhGlobalAudioCalloutInViewer');
     const mediaTriggerDistancePanel = root.querySelector<HTMLElement>('#mediaTriggerDistancePanel');
     const mhAssetDist = root.querySelector<HTMLInputElement>('#mhAssetDist');
     const mhBaselineBtn = root.querySelector<HTMLButtonElement>('#mhBaselineBtn');
@@ -415,6 +421,9 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         }
         if (mhGlobalAudioAutoplay) {
             mhGlobalAudioAutoplay.checked = readGlobalAudioHotspotAutoplayEnabled(settings);
+        }
+        if (mhGlobalAudioCalloutInViewer) {
+            mhGlobalAudioCalloutInViewer.checked = readGlobalShowAudioCalloutInViewer(settings);
         }
     };
 
@@ -438,9 +447,15 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         sendOrApplyHotspotPatch({ audio: { hotspotAutoplayEnabled: mhGlobalAudioAutoplay.checked } });
     };
 
+    const onGlobalAudioCalloutInViewerChange = () => {
+        if (!mhGlobalAudioCalloutInViewer) return;
+        sendOrApplyHotspotPatch({ audio: { showCalloutInViewer: mhGlobalAudioCalloutInViewer.checked } });
+    };
+
     syncGlobalHotspotUi();
     mhGlobalAutoplay?.addEventListener('change', onGlobalAutoplayChange);
     mhGlobalAudioAutoplay?.addEventListener('change', onGlobalAudioAutoplayChange);
+    mhGlobalAudioCalloutInViewer?.addEventListener('change', onGlobalAudioCalloutInViewerChange);
 
     const onHotspotExternal = () => syncGlobalHotspotUi();
     events.on('sceneMediaHotspot:changed', onHotspotExternal);
@@ -571,6 +586,7 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         mediaUrlInput.removeEventListener('keydown', onMediaUrlKeydown);
         mhGlobalAutoplay?.removeEventListener('change', onGlobalAutoplayChange);
         mhGlobalAudioAutoplay?.removeEventListener('change', onGlobalAudioAutoplayChange);
+        mhGlobalAudioCalloutInViewer?.removeEventListener('change', onGlobalAudioCalloutInViewerChange);
         mhAssetDist?.removeEventListener('input', onAssetDistInput);
         mhBaselineBtn?.removeEventListener('click', onBaselineClick);
         events.off('sceneMediaHotspot:changed', onHotspotExternal);

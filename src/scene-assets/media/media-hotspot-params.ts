@@ -47,6 +47,13 @@ export function readGlobalAudioHotspotAutoplayEnabledFromSettings(settings: Expe
     return sm.audio?.hotspotAutoplayEnabled !== false;
 }
 
+/** 浏览模式（Viewer / 编辑预览）下是否显示音频 callout；缺省 true */
+export function readShowAudioCalloutInViewerFromSettings(settings: ExperienceSettings): boolean {
+    const sm = settings.sceneMediaHotspot;
+    if (!sm || typeof sm !== 'object') return true;
+    return sm.audio?.showCalloutInViewer !== false;
+}
+
 export function defaultTriggerDistanceMForAssetType(type: SceneAsset['type']): number | undefined {
     if (type === 'video') return DEFAULT_VIDEO_TRIGGER_DISTANCE_M;
     if (type === 'audio') return DEFAULT_AUDIO_TRIGGER_DISTANCE_M;

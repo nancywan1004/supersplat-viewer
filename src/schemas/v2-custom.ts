@@ -175,6 +175,11 @@ type SceneMediaHotspotSettings = {
     audio: {
         /** 是否由热区自动播放；缺省 true，显式 false 时入库 */
         hotspotAutoplayEnabled?: boolean;
+        /**
+         * 浏览模式（Viewer / 编辑预览）下是否显示音频 callout 与播放按钮；
+         * 缺省 true（浏览模式可见且可手动 toggle），显式 false 时入库。
+         */
+        showCalloutInViewer?: boolean;
     };
 };
 

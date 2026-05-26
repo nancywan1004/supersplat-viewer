@@ -39,7 +39,18 @@ export function readGlobalAudioHotspotAutoplayEnabled(settings: ExperienceSettin
     return sm.audio?.hotspotAutoplayEnabled !== false;
 }
 
-/** 嵌套子节点 `ensure`：必填字段缺失则补默认；`hotspotAutoplayEnabled` 仅在显式 false 时入库 */
+/** 浏览模式下是否显示音频 callout；缺省 true（仅显式 false 入库） */
+export function readGlobalShowAudioCalloutInViewer(settings: ExperienceSettings): boolean {
+    const sm = settings.sceneMediaHotspot;
+    if (!sm || typeof sm !== 'object') return true;
+    return sm.audio?.showCalloutInViewer !== false;
+}
+
+/**
+ * 嵌套子节点 `ensure`：必填字段缺失则补默认；可选 boolean 字段按「仅非默认值入库」清洗。
+ * - `hotspotAutoplayEnabled`：默认 true，仅显式 false 入库；
+ * - `audio.showCalloutInViewer`：默认 true，仅显式 false 入库。
+ */
 function ensureHotspotSubtree(
     sm: Record<string, unknown>,
     key: 'video' | 'audio'
@@ -55,6 +66,11 @@ function ensureHotspotSubtree(
     }
     if (node.hotspotAutoplayEnabled !== false) {
         delete node.hotspotAutoplayEnabled;
+    }
+    if (key === 'audio') {
+        if (node.showCalloutInViewer !== false) {
+            delete node.showCalloutInViewer;
+        }
     }
     return node;
 }
@@ -143,6 +159,11 @@ export function patchSceneMediaHotspot(
             aRec.hotspotAutoplayEnabled = false;
         } else if (patch.audio.hotspotAutoplayEnabled === true) {
             delete aRec.hotspotAutoplayEnabled;
+        }
+        if (patch.audio.showCalloutInViewer === false) {
+            aRec.showCalloutInViewer = false;
+        } else if (patch.audio.showCalloutInViewer === true) {
+            delete aRec.showCalloutInViewer;
         }
     }
     return sm;

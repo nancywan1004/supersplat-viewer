@@ -333,6 +333,12 @@ const validateV2 = (data: unknown): ExperienceSettings => {
                 'settings.sceneMediaHotspot.audio.hotspotAutoplayEnabled'
             );
         }
+        if (a.showCalloutInViewer !== undefined) {
+            assertBoolean(
+                a.showCalloutInViewer,
+                'settings.sceneMediaHotspot.audio.showCalloutInViewer'
+            );
+        }
     }
 
     return data as ExperienceSettings;
