@@ -476,10 +476,10 @@ function isAudioVisuallyPlaying(global: Global, m: PlacedAudioRuntime): boolean 
 
 function isAudioCalloutEligible(entry: ScenePlacedItem, global?: Global): boolean {
     if (global && isMediaConsumptionMode(global)) {
-        // 浏览模式（Viewer / 编辑预览）：受 settings.audio.showCalloutInViewer 控制，
-        // 且仅在热区内才可见，与视频控件「热区内才可交互」对齐
+        // 浏览模式（Viewer / 编辑预览）：仅受 settings.audio.showCalloutInViewer 控制；
+        // 不随热区进出动态隐藏 callout，避免引入「走近/远离自动显隐」的额外视觉行为。
+        // （热区内才可点击播放由 tryClaimAudioCalloutPointerDown 单独把关。）
         if (!readShowAudioCalloutInViewerFromSettings(global.settings)) return false;
-        if (entry.mediaRuntime?.inHotspotZone !== true) return false;
     }
     return !!(entry.entity?.enabled && entry.visible !== false && entry.assetType === 'audio');
 }
@@ -530,8 +530,6 @@ function updateCalloutBillboard(global: Global, entry: ScenePlacedItem, callout:
         return;
     }
 
-    callout.calloutRoot.enabled = true;
-
     const worldPos = audioEntity.getPosition();
     cam.camera.viewMatrix.transformPoint(worldPos, PROJ_VEC);
     if (PROJ_VEC.z >= 0) {
@@ -539,11 +537,14 @@ function updateCalloutBillboard(global: Global, entry: ScenePlacedItem, callout:
         return;
     }
 
+    // 先完成 transform / scale，再 enabled；避免初始化时一帧「平躺」渲染
     updateHotspotTransform(callout.calloutRoot, cam.getRotation());
 
     const aspect = AUDIO_CALLOUT_TEX_W / AUDIO_CALLOUT_TEX_H;
     const h = AUDIO_CALLOUT_WORLD_H;
     callout.calloutRoot.setLocalScale(h * aspect, h, 1);
+
+    callout.calloutRoot.enabled = true;
 }
 
 function createAudioCallout3d(global: Global, entry: ScenePlacedItem, m: PlacedAudioRuntime): AudioCallout3d | null {
@@ -579,6 +580,9 @@ function createAudioCallout3d(global: Global, entry: ScenePlacedItem, m: PlacedA
     ];
 
     const calloutRoot = new Entity('audio-callout-3d');
+    // 初始 disabled：避免「先平躺一帧再 billboard 立起来」的视觉跳变；
+    // 由 updateCalloutBillboard 在完成 transform / scale 后再启用。
+    calloutRoot.enabled = false;
     audioEntity.addChild(calloutRoot);
 
     const base = new Entity('base');
@@ -615,6 +619,18 @@ function createAudioCallout3d(global: Global, entry: ScenePlacedItem, m: PlacedA
 }
 
 function destroyAudioCallout3d(callout: AudioCallout3d): void {
+    // 销毁顺序：Entity 先于 material / texture。
+    // 原因：Entity.destroy() 会同步移除 render component 与其 MeshInstance 在 layer 上的引用；
+    // 若先 destroy material/texture，再 destroy entity，本帧已被 cull 建入的可见 MeshInstance
+    // 在下一次 renderForward 取 `material.impl` 时会得到 undefined，触发
+    // `Cannot read properties of undefined (reading 'impl')`。
+    // 同时先 disable 一帧，保证下次 cull 不会再收纳本 instance。
+    try {
+        callout.calloutRoot.enabled = false;
+        callout.calloutRoot.destroy();
+    } catch {
+        // ignore
+    }
     callout.materials.forEach((mat) => {
         try {
             mat.destroy();
@@ -627,7 +643,6 @@ function destroyAudioCallout3d(callout: AudioCallout3d): void {
     } catch {
         // ignore
     }
-    callout.calloutRoot.destroy();
 }
 
 /** 已放置音频：拾取球只在 SceneAssetPick 层（不参与相机渲染，避免叠在视频前出现黑块）。 */
@@ -901,7 +916,12 @@ export function tryClaimAudioCalloutPointerDown(global: Global, e: PointerEvent)
     const hit = findAudioPlayHit(global, pt.x, pt.y);
     if (!hit) return false;
 
-    // 浏览模式下仅 toggle 播放，不修改场景选中
+    // 浏览模式：callout 在热区外只是占位（保持图标可见），不响应点击；
+    // 否则 manualHeld 会被热区评估立刻释放并 pause，造成「点一下闪一下又停」。
+    if (inConsumption && hit.entry.mediaRuntime?.inHotspotZone !== true) {
+        return false;
+    }
+
     if (!inConsumption) {
         global.state.selectedSceneEntityId = hit.entry.id;
         global.events.fire('sceneAsset:selected', { source: 'scene' });
