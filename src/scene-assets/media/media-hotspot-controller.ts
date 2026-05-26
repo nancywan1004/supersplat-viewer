@@ -27,12 +27,12 @@ import {
 } from './media-view-depth';
 import {
     clearAllSceneMediaPlaybackFlags,
-    clearSceneMediaUserSession,
     ensureSceneVideoFramePlaying,
     getActiveSceneMediaEntryId,
     pauseAllSceneMedia,
     pauseSceneMediaEntry,
     playSceneMediaEntry,
+    resetAllSceneMediaToInitial,
     setActiveSceneMediaSoundId
 } from './scene-media-playback';
 import { initPlacedVideoTextureUploadFlush, tickPlacedVideoTextureUploads } from './video-texture';
@@ -183,15 +183,6 @@ function syncHotspotZoneTransition(entry: ScenePlacedItem, inZone: boolean): voi
     }
 }
 
-/** 编辑非预览：热区门关闭，仅保留用户手动占用的互斥槽 */
-function pausePostersExceptActiveUserSlot(global: Global): void {
-    const preserveId = getActiveSceneMediaEntryId();
-    for (const entry of global.state.scenePlacedEntities ?? []) {
-        if (preserveId && entry.id === preserveId) continue;
-        pauseSceneMediaEntry(global, entry, { releaseActiveSlot: false });
-    }
-}
-
 /**
  * 出声赢家选取：
  * 1. 当前 `activeSceneMediaEntryId` 仍在候选集中 → 沿用（尊重用户手动偏好 / 上一帧赢家）。
@@ -292,7 +283,7 @@ function applyHotspotPlayback(
             && !viewMediaMuted;
 
         if (shouldPlay) {
-            playSceneMediaEntry(global, entry, 'hotspot');
+            playSceneMediaEntry(global, entry);
             audioSoundOwner = entry.id;
         } else {
             pauseSceneMediaEntry(global, entry, { releaseActiveSlot: false });
@@ -316,7 +307,9 @@ function runMediaHotspotEvaluation(
         return false;
     }
     if (!isHotspotGateOpen(global)) {
-        pausePostersExceptActiveUserSlot(global);
+        // 编辑非预览：热区门关闭，不评估也不强制 pause；
+        // 进入该模式时已由 onPreviewModeChanged / onEditModeChanged 调
+        // resetAllSceneMediaToInitial 统一停 + 归零，之后只允许手动播放。
         return false;
     }
 
@@ -374,9 +367,9 @@ export function initMediaHotspotController(global: Global): () => void {
             return;
         }
         uploadToggle = !uploadToggle;
-        if (isEditModeWithoutPreview(global)) {
-            pausePostersExceptActiveUserSlot(global);
-        } else {
+        // 编辑非预览模式下不再做热区评估也不强制 pause；
+        // 这样用户在编辑模式手动播放的视频可持续推帧而不被打断。
+        if (!isEditModeWithoutPreview(global)) {
             runMediaHotspotEvaluation(global, evalState);
         }
         if (uploadToggle) {
@@ -408,13 +401,16 @@ export function initMediaHotspotController(global: Global): () => void {
     };
 
     const onPreviewModeChanged = (previewMode: boolean) => {
+        // 任意 preview 切换都按「初始态」处理：停 + 进度归零 + 清 flag。
+        // - 进预览：随后 forceHotspotEval 按 settings 决定是否自动播。
+        // - 退预览（回编辑非预览）：保持初始态，等待用户手动播放。
+        evalState.lastVideoSoundId = null;
+        evalState.lastAudioSoundId = null;
+        evalState.lastEvalMs = 0;
         if (previewMode) {
             evalState.userUnlocked = true;
-            clearSceneMediaUserSession(global);
-            evalState.lastVideoSoundId = null;
-            evalState.lastAudioSoundId = null;
-            evalState.lastEvalMs = 0;
         }
+        resetAllSceneMediaToInitial(global);
         forceHotspotEval();
     };
 
@@ -430,22 +426,17 @@ export function initMediaHotspotController(global: Global): () => void {
     };
 
     const onEditModeChanged = () => {
+        // view ⇄ edit 切换：与 preview 切换一致——统一初始态。
+        // 退到 viewer 时把 userUnlocked 重置为 false，让首次 pointerdown 重新解锁声音。
+        evalState.lastVideoSoundId = null;
+        evalState.lastAudioSoundId = null;
         evalState.lastEvalMs = 0;
         if (!global.state.editMode) {
             evalState.userUnlocked = false;
-            evalState.lastVideoSoundId = null;
-            evalState.lastAudioSoundId = null;
-            clearSceneMediaUserSession(global);
         }
-        if (evalState.pageHidden) {
-            pauseAllSceneMedia(global);
-            return;
-        }
-        if (isEditModeWithoutPreview(global)) {
-            pauseAllSceneMedia(global);
-        } else {
-            runMediaHotspotEvaluation(global, evalState, { force: true });
-        }
+        resetAllSceneMediaToInitial(global);
+        if (evalState.pageHidden) return;
+        forceHotspotEval();
     };
 
     const onViewMediaMutedChanged = () => {
