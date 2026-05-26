@@ -5,6 +5,7 @@ import { destroyAllPersistentGsplatScriptsOnEntity, getMountedPersistentGsplatSc
 import { PERSISTENT_EFFECT_TYPES } from '../effect-types';
 import { isPersistentVfx } from '../reveal/reveal-policy';
 import { GsplatRevealPerlinWave } from './gsplat-perlin-wave';
+import { GsplatPersistentOverallWave } from './gsplat-overall-wave';
 import { GsplatPersistentSparkleTwinkle } from './gsplat-sparkle-twinkle';
 import { applyPersistentEffectParamsToScript } from './persistent-effect-params';
 
@@ -32,6 +33,8 @@ export function mountPersistentGsplatByEffectType(
             return createPerlinWaveRevealScript(gsplatEntity, updateScriptCenter, autoStart, effectParams);
         case 'sparkle-twinkle':
             return createSparkleTwinkleScript(gsplatEntity, updateScriptCenter, autoStart, effectParams);
+        case 'overall-wave':
+            return createOverallWaveScript(gsplatEntity, updateScriptCenter, autoStart, effectParams);
         default:
             console.warn('[persistent-effect] persistent type in registry but no mount branch:', effectType);
             return null;
@@ -82,6 +85,32 @@ export function createPerlinWaveRevealScript(
         return script;
     } catch (error) {
         console.error('Failed to create perlin-wave reveal script:', error);
+        return null;
+    }
+}
+
+export function createOverallWaveScript(
+    gsplatEntity: Entity,
+    updateScriptCenter: (script: any) => void,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn('Cannot create overall-wave script - entity or script component not ready');
+        return null;
+    }
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentOverallWave) as any;
+        if (!script) return null;
+
+        updateScriptCenter(script);
+        applyPersistentEffectParamsToScript(script, 'overall-wave', effectParams ?? undefined);
+        script.enabled = autoStart;
+        script.effectTime = 0;
+        return script;
+    } catch (error) {
+        console.error('Failed to create overall-wave script:', error);
         return null;
     }
 }

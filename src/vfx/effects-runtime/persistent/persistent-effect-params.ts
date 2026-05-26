@@ -1,4 +1,5 @@
 import { Color, Vec3 } from 'playcanvas';
+import { clampOverallWaveNoiseType } from './gsplat-overall-wave';
 
 /**
  * 可持续 **persistent** 轨的 **`settings.effects.persistent` → `effectParams`** 白名单与写入逻辑。
@@ -37,12 +38,25 @@ const SPARKLE_TWINKLE = new Set([
     'center'
 ]);
 
+const OVERALL_WAVE = new Set([
+    'noiseType',
+    'waveAmplitude',
+    'waveSpeed',
+    'wavelength',
+    'intensity',
+    'crestTint',
+    'troughTint',
+    'waveDirection',
+    'center'
+]);
+
 const BY_TYPE: Record<string, ReadonlySet<string>> = {
     'perlin-wave': PERLIN_WAVE,
-    'sparkle-twinkle': SPARKLE_TWINKLE
+    'sparkle-twinkle': SPARKLE_TWINKLE,
+    'overall-wave': OVERALL_WAVE
 };
 
-export type PersistentParamFieldKind = 'number' | 'vec3' | 'color' | 'boolean';
+export type PersistentParamFieldKind = 'number' | 'vec3' | 'color' | 'boolean' | 'enum';
 
 /** 当前 persistent `type` 在 param 白名单中的全部键（Set 插入顺序） */
 export function getPersistentEffectParamKeys(effectType: string): readonly string[] {
@@ -53,9 +67,10 @@ export function getPersistentEffectParamKeys(effectType: string): readonly strin
 const SPARKLE_COLOR_KEYS = new Set(['lightTint1', 'lightTint2', 'lightTint3']);
 
 export function getPersistentParamFieldKind(key: string): PersistentParamFieldKind {
-    if (SPARKLE_COLOR_KEYS.has(key) || key === 'lightTint') return 'color';
+    if (key === 'noiseType') return 'enum';
+    if (key === 'crestTint' || key === 'troughTint' || SPARKLE_COLOR_KEYS.has(key) || key === 'lightTint') return 'color';
     if (key === 'colorBlendMode') return 'boolean';
-    if (key === 'center') return 'vec3';
+    if (key === 'center' || key === 'waveDirection') return 'vec3';
     return 'number';
 }
 
@@ -121,8 +136,18 @@ export function applyPersistentEffectParamsToScript(
         }
         if (!allowed.has(rawKey)) continue;
         if (rawVal === undefined) continue;
-        if (rawKey === 'center') {
+        if (rawKey === 'center' || rawKey === 'waveDirection') {
             trySetVec3(script, rawKey, rawVal);
+            continue;
+        }
+        if (rawKey === 'crestTint' || rawKey === 'troughTint') {
+            trySetColor(script, rawKey, rawVal);
+            continue;
+        }
+        if (rawKey === 'noiseType' && effectType === 'overall-wave') {
+            if (typeof rawVal === 'number' && Number.isFinite(rawVal)) {
+                script.noiseType = clampOverallWaveNoiseType(rawVal);
+            }
             continue;
         }
         if (rawKey === 'lightTint') {

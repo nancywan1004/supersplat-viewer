@@ -204,6 +204,51 @@ const createAxisInputs = (
     };
 };
 
+const createEnumControl = (
+    spec: EffectParamUiSpec,
+    onChange: (key: string, value: number) => void
+): ControlEntry => {
+    const row = document.createElement('div');
+    row.className = 'effectParamRow settingsRow';
+
+    const label = document.createElement('label');
+    label.className = 'effectParamLabel';
+    label.textContent = spec.label;
+    label.title = spec.key;
+
+    const select = document.createElement('select');
+    select.className = 'settingsSelect effectParamSelect';
+
+    const options = spec.options ?? [];
+    for (const opt of options) {
+        const o = document.createElement('option');
+        o.value = String(opt.value);
+        o.textContent = opt.label;
+        select.appendChild(o);
+    }
+
+    const emit = () => {
+        const num = parseInt(select.value, 10);
+        if (!Number.isFinite(num)) return;
+        onChange(spec.key, num);
+    };
+
+    select.addEventListener('change', emit);
+    row.appendChild(label);
+    row.appendChild(select);
+
+    return {
+        spec,
+        row,
+        write: (value: unknown) => {
+            const num = isFiniteNumber(value)
+                ? value
+                : (isFiniteNumber(spec.default as number) ? (spec.default as number) : 0);
+            select.value = String(num);
+        }
+    };
+};
+
 const createColorControl = (
     spec: EffectParamUiSpec,
     onChange: (key: string, value: [number, number, number]) => void
@@ -222,6 +267,8 @@ const createControl = (
     switch (spec.kind as EffectParamKind) {
     case 'boolean':
         return createBooleanControl(spec, onChange);
+    case 'enum':
+        return createEnumControl(spec, onChange);
     case 'color':
         return createColorControl(spec, onChange);
     case 'vec3':

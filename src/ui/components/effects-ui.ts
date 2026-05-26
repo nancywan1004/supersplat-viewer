@@ -77,6 +77,7 @@ const REVEAL_PANEL_HTML = (() => {
         <option value="none">None</option>
         <option value="perlin-wave">Perlin Wave</option>
         <option value="sparkle-twinkle">亮光细闪</option>
+        <option value="overall-wave">整体波动</option>
       </select>
     </div>
     <div id="persistentEffectParamsPanel" class="effectParamsPanel hidden"></div>
@@ -147,6 +148,7 @@ export function initRevealUI(global: Global): () => void {
     let persistentParamsPanel: EffectParamsPanelHandle | null = null;
     let revealParamsPanelType = '';
     let persistentParamsPanelType = '';
+    let persistentParamsSpecsSig = '';
 
     // 默认开启：导出时通常需要重启相机 animTrack（与 message-bridge 的默认 syncAnimTrack=true 对齐）
     let restartAnimTrackEnabled = true;
@@ -237,11 +239,15 @@ export function initRevealUI(global: Global): () => void {
 
     const patchPersistentEffectParams = (partial: Record<string, unknown>) => {
         if (Object.keys(partial).length === 0) return;
+        const mergedParams = { ...readPersistentEffectParams(), ...partial };
         routeEffectsCommand('EFFECT_PARAMS_PATCH', {
             effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
             params: { effectParams: partial }
         });
         pushEditHistorySafe();
+        if (getPersistentSelection() === 'overall-wave' && Object.prototype.hasOwnProperty.call(partial, 'noiseType')) {
+            ensurePersistentParamsPanel(getPersistentSelection(), getPersistentEnabled(), mergedParams);
+        }
     };
 
     const ensureRevealParamsPanel = (effectType: string) => {
@@ -266,25 +272,34 @@ export function initRevealUI(global: Global): () => void {
         revealParamsPanel?.setVisible(true);
     };
 
-    const ensurePersistentParamsPanel = (effectType: string, enabled: boolean) => {
+    const ensurePersistentParamsPanel = (
+        effectType: string,
+        enabled: boolean,
+        effectValues?: Record<string, unknown>
+    ) => {
         if (!persistentEffectParamsPanelEl) return;
         if (!enabled || effectType === 'none' || !isPersistentType(effectType)) {
             persistentParamsPanel?.destroy();
             persistentParamsPanel = null;
             persistentParamsPanelType = '';
+            persistentParamsSpecsSig = '';
             persistentEffectParamsPanelEl.classList.add('hidden');
             return;
         }
-        if (persistentParamsPanelType !== effectType) {
+        const values = effectValues ?? readPersistentEffectParams();
+        const specs = getPersistentParamSpecs(effectType, values);
+        const specsSig = specs.map((s) => s.key).join(',');
+        if (persistentParamsPanelType !== effectType || persistentParamsSpecsSig !== specsSig) {
             persistentParamsPanel?.destroy();
             persistentParamsPanel = mountEffectParamsPanel({
                 container: persistentEffectParamsPanelEl,
-                specs: getPersistentParamSpecs(effectType),
+                specs,
                 onPatch: patchPersistentEffectParams
             });
             persistentParamsPanelType = effectType;
+            persistentParamsSpecsSig = specsSig;
         }
-        persistentParamsPanel?.syncFromValues(readPersistentEffectParams());
+        persistentParamsPanel?.syncFromValues(values);
         persistentParamsPanel?.setVisible(true);
     };
 

@@ -2,6 +2,10 @@ import {
     getPersistentEffectParamKeys,
     getPersistentParamFieldKind
 } from '../../vfx/effects-runtime/persistent/persistent-effect-params';
+import {
+    OVERALL_WAVE_DEFAULTS,
+    clampOverallWaveNoiseType
+} from '../../vfx/effects-runtime/persistent/gsplat-overall-wave';
 import { SPARKLE_DEFAULT_LIGHT_TINTS } from '../../vfx/effects-runtime/persistent/gsplat-sparkle-twinkle';
 import {
     getRevealEffectParamKeys,
@@ -9,7 +13,12 @@ import {
     type RevealParamFieldKind
 } from '../../vfx/effects-runtime/reveal/reveal-effect-params';
 
-export type EffectParamKind = RevealParamFieldKind | 'vec3';
+export type EffectParamKind = RevealParamFieldKind | 'vec3' | 'enum';
+
+export interface EffectParamEnumOption {
+    value: number;
+    label: string;
+}
 
 export interface EffectParamUiSpec {
     key: string;
@@ -19,6 +28,7 @@ export interface EffectParamUiSpec {
     max?: number;
     step?: number;
     default?: number | boolean | [number, number, number] | [number, number];
+    options?: readonly EffectParamEnumOption[];
 }
 
 type NumberRange = Pick<EffectParamUiSpec, 'min' | 'max' | 'step' | 'default'>;
@@ -172,10 +182,10 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     intensity: '颜色强度',
     waveAmplitude: '位移振幅',
     waveFrequency: '空间频率',
-    wavelength: '波长 (世界单位)',
-    waveSpeed: '动画速度',
+    wavelength: '波纹间距',
+    waveSpeed: '波动速度',
     scaleBlend: '尺度混合',
-    center: '效果原点',
+    center: '效果中心',
     pointSize: '光点大小',
     sparkleDensity: '光点密度',
     twinkleSpeed: '闪烁速度',
@@ -187,6 +197,44 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     lightTint3: '光点颜色 3',
     colorBlendMode: '颜色混合'
 };
+
+/** 临时调试 UI：整体波动中文文案与控件范围（默认数值取自 {@link OVERALL_WAVE_DEFAULTS}） */
+const OVERALL_WAVE_NOISE_TYPE_OPTIONS: readonly EffectParamEnumOption[] = [
+    { value: 0, label: '雾涌起伏' },
+    { value: 1, label: '逐浪传行' }
+];
+
+const OVERALL_WAVE_PARAM_UI: Partial<
+    Record<keyof typeof OVERALL_WAVE_DEFAULTS, { min?: number; max?: number; step?: number; label?: string }>
+> = {
+    noiseType: { label: '波动类型' },
+    intensity: { min: 0, max: 3, step: 0.05, label: '起伏明暗（波峰亮、波谷暗）' },
+    waveAmplitude: { min: 0, max: 1.5, step: 0.02, label: '位移振幅' },
+    waveSpeed: { min: 0.05, max: 5, step: 0.05, label: '波动速度' },
+    wavelength: { min: 1, max: 15, step: 0.5, label: '波纹间距' },
+    crestTint: { min: 0, max: 2, step: 0.01, label: '亮区颜色' },
+    troughTint: { min: 0, max: 2, step: 0.01, label: '暗区颜色' },
+    waveDirection: { label: '波列传播方向' },
+    center: { label: '效果中心' }
+};
+
+function overallWaveShowsWaveDirection(noiseType: unknown): boolean {
+    return typeof noiseType === 'number' && clampOverallWaveNoiseType(noiseType) === 1;
+}
+
+function applyOverallWaveParamUiSpec(spec: EffectParamUiSpec): void {
+    const key = spec.key as keyof typeof OVERALL_WAVE_DEFAULTS;
+    const ui = OVERALL_WAVE_PARAM_UI[key];
+    if (ui?.label) spec.label = ui.label;
+    if (key in OVERALL_WAVE_DEFAULTS) {
+        const d = OVERALL_WAVE_DEFAULTS[key];
+        spec.default = Array.isArray(d) ? ([...d] as [number, number, number]) : d;
+    }
+    if (!ui) return;
+    if (ui.min !== undefined) spec.min = ui.min;
+    if (ui.max !== undefined) spec.max = ui.max;
+    if (ui.step !== undefined) spec.step = ui.step;
+}
 
 const PERSISTENT_NUMBER_RANGES: Record<string, NumberRange> = {
     pointSize: { min: 0.002, max: 0.1, step: 0.001, default: 0.02 },
@@ -224,10 +272,31 @@ const buildPersistentSpec = (key: string): EffectParamUiSpec => {
     return { ...base, min: 0, max: 10, step: 0.01 };
 };
 
+const buildOverallWaveParamSpec = (key: string): EffectParamUiSpec => {
+    const kind = getPersistentParamFieldKind(key);
+    const spec: EffectParamUiSpec = { key, label: key, kind };
+    if (kind === 'enum') {
+        spec.options = OVERALL_WAVE_NOISE_TYPE_OPTIONS;
+    }
+    if (kind === 'vec3') {
+        spec.step = 0.1;
+    }
+    applyOverallWaveParamUiSpec(spec);
+    return spec;
+};
+
 export function getRevealParamSpecs(effectType: string): EffectParamUiSpec[] {
     return getRevealEffectParamKeys(effectType).map(buildRevealSpec);
 }
 
-export function getPersistentParamSpecs(effectType: string): EffectParamUiSpec[] {
+export function getPersistentParamSpecs(
+    effectType: string,
+    effectValues?: Record<string, unknown>
+): EffectParamUiSpec[] {
+    if (effectType === 'overall-wave') {
+        return getPersistentEffectParamKeys(effectType)
+            .filter((key) => key !== 'waveDirection' || overallWaveShowsWaveDirection(effectValues?.noiseType))
+            .map(buildOverallWaveParamSpec);
+    }
     return getPersistentEffectParamKeys(effectType).map(buildPersistentSpec);
 }

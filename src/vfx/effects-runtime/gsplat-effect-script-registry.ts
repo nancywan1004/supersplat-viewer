@@ -1,6 +1,7 @@
 import type { Entity } from 'playcanvas';
 import { PERSISTENT_EFFECT_TYPE_VALUES, REVEAL_EFFECT_TYPE_VALUES } from './effect-types';
 import { GsplatRevealPerlinWave } from './persistent/gsplat-perlin-wave';
+import { GsplatPersistentOverallWave } from './persistent/gsplat-overall-wave';
 import { GsplatPersistentSparkleTwinkle } from './persistent/gsplat-sparkle-twinkle';
 
 type RevealEffectId = (typeof REVEAL_EFFECT_TYPE_VALUES)[number];
@@ -33,7 +34,8 @@ export function gsplatScriptNameForRevealEffectType(effectType: string): string 
  */
 export const GSPLAT_PERSISTENT_SCRIPT_NAME_BY_TYPE = {
     'perlin-wave': GsplatRevealPerlinWave.scriptName,
-    'sparkle-twinkle': GsplatPersistentSparkleTwinkle.scriptName
+    'sparkle-twinkle': GsplatPersistentSparkleTwinkle.scriptName,
+    'overall-wave': GsplatPersistentOverallWave.scriptName
 } as const satisfies Record<PersistentEffectId, string>;
 
 export const ALL_GSPLAT_PERSISTENT_SCRIPT_NAMES: ReadonlySet<string> = new Set(Object.values(GSPLAT_PERSISTENT_SCRIPT_NAME_BY_TYPE));
