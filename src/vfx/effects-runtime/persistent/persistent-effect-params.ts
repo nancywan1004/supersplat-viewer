@@ -30,7 +30,10 @@ const SPARKLE_TWINKLE = new Set([
     'twinkleMin',
     'twinkleSharpness',
     'brightness',
-    'lightTint',
+    'lightTint1',
+    'lightTint2',
+    'lightTint3',
+    'colorBlendMode',
     'center'
 ]);
 
@@ -39,7 +42,7 @@ const BY_TYPE: Record<string, ReadonlySet<string>> = {
     'sparkle-twinkle': SPARKLE_TWINKLE
 };
 
-export type PersistentParamFieldKind = 'number' | 'vec3' | 'color';
+export type PersistentParamFieldKind = 'number' | 'vec3' | 'color' | 'boolean';
 
 /** 当前 persistent `type` 在 param 白名单中的全部键（Set 插入顺序） */
 export function getPersistentEffectParamKeys(effectType: string): readonly string[] {
@@ -47,8 +50,11 @@ export function getPersistentEffectParamKeys(effectType: string): readonly strin
     return set ? Array.from(set) : [];
 }
 
+const SPARKLE_COLOR_KEYS = new Set(['lightTint1', 'lightTint2', 'lightTint3']);
+
 export function getPersistentParamFieldKind(key: string): PersistentParamFieldKind {
-    if (key === 'lightTint') return 'color';
+    if (SPARKLE_COLOR_KEYS.has(key) || key === 'lightTint') return 'color';
+    if (key === 'colorBlendMode') return 'boolean';
     if (key === 'center') return 'vec3';
     return 'number';
 }
@@ -88,6 +94,13 @@ function trySetNumber(script: any, key: string, v: unknown): boolean {
     return true;
 }
 
+function trySetBoolean(script: any, key: string, v: unknown): boolean {
+    if (typeof v !== 'boolean') return false;
+    if (!(key in script)) return false;
+    script[key] = v;
+    return true;
+}
+
 /** 将 `effectParams` 白名单项写入已挂载脚本（在 create*Script 默认值与 updateScriptCenter 之后调用）。 */
 export function applyPersistentEffectParamsToScript(
     script: any,
@@ -98,7 +111,14 @@ export function applyPersistentEffectParamsToScript(
     const allowed = BY_TYPE[effectType];
     if (!allowed) return;
 
-    for (const [rawKey, rawVal] of Object.entries(effectParams)) {
+    for (let [rawKey, rawVal] of Object.entries(effectParams)) {
+        // 旧键 colorCycleMode：语义与 colorBlendMode 相反，迁移时取反
+        if (rawKey === 'colorCycleMode' && allowed.has('colorBlendMode')) {
+            rawKey = 'colorBlendMode';
+            if (typeof rawVal === 'boolean') {
+                rawVal = !rawVal;
+            }
+        }
         if (!allowed.has(rawKey)) continue;
         if (rawVal === undefined) continue;
         if (rawKey === 'center') {
@@ -106,7 +126,15 @@ export function applyPersistentEffectParamsToScript(
             continue;
         }
         if (rawKey === 'lightTint') {
+            trySetColor(script, 'lightTint1', rawVal);
+            continue;
+        }
+        if (SPARKLE_COLOR_KEYS.has(rawKey)) {
             trySetColor(script, rawKey, rawVal);
+            continue;
+        }
+        if (getPersistentParamFieldKind(rawKey) === 'boolean') {
+            trySetBoolean(script, rawKey, rawVal);
             continue;
         }
         trySetNumber(script, rawKey, rawVal);

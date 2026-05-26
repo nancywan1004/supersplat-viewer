@@ -365,7 +365,10 @@ class GsplatPersistentSparkleTwinkle extends Script {
     twinkleMin = 0;
     twinkleSharpness = 3.0;
     brightness = 2;
-    lightTint = new Color(1, 1, 1);
+    lightTint1 = new Color(1, 0.5, 0.5);
+    lightTint2 = new Color(1, 0.85, 0.4);
+    lightTint3 = new Color(0.4, 0.8, 1);
+    colorBlendMode = false;
 
     private overlayEntity: Entity | null = null;
     private material: ShaderMaterial | null = null;
@@ -464,7 +467,10 @@ class GsplatPersistentSparkleTwinkle extends Script {
         material.setParameter('uTwinkleMin', this.twinkleMin);
         material.setParameter('uTwinkleSharpness', this.twinkleSharpness);
         material.setParameter('uBrightness', this.brightness);
-        material.setParameter('uLightTint', [this.lightTint.r, this.lightTint.g, this.lightTint.b]);
+        material.setParameter('uLightTint1', [this.lightTint1.r, this.lightTint1.g, this.lightTint1.b]);
+        material.setParameter('uLightTint2', [this.lightTint2.r, this.lightTint2.g, this.lightTint2.b]);
+        material.setParameter('uLightTint3', [this.lightTint3.r, this.lightTint3.g, this.lightTint3.b]);
+        material.setParameter('uColorBlendMode', this.colorBlendMode ? 1 : 0);
 
         if (size !== this.cachedPointSize) {
             this.cachedPointSize = size;

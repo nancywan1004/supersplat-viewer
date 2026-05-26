@@ -181,7 +181,10 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     twinkleMin: '最暗亮度',
     twinkleSharpness: '闪烁锐利度',
     brightness: '亮度',
-    lightTint: '光点颜色'
+    lightTint1: '光点颜色 1',
+    lightTint2: '光点颜色 2',
+    lightTint3: '光点颜色 3',
+    colorBlendMode: '颜色混合'
 };
 
 const PERSISTENT_NUMBER_RANGES: Record<string, NumberRange> = {
@@ -198,9 +201,19 @@ const buildPersistentSpec = (key: string): EffectParamUiSpec => {
     const base: EffectParamUiSpec = { key, label: PERSISTENT_PARAM_LABELS[key] ?? labelForKey(key), kind };
     if (kind === 'color') {
         base.step = 0.01;
-        base.default = [1, 1, 1];
+        if (key === 'lightTint2') {
+            base.default = [1, 0.85, 0.4];
+        } else if (key === 'lightTint3') {
+            base.default = [0.4, 0.8, 1];
+        } else {
+            base.default = [1, 0.5, 0.5];
+        }
         base.min = 0;
         base.max = 2;
+        return base;
+    }
+    if (kind === 'boolean') {
+        base.default = false;
         return base;
     }
     if (kind === 'vec3') {

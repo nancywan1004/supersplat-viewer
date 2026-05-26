@@ -107,6 +107,7 @@ const createBooleanControl = (
 
     const check = document.createElement('div');
     check.className = 'checkMark';
+    check.textContent = '✓';
     const option = document.createElement('div');
     option.className = 'effectParamCheckLabel';
     option.textContent = spec.label;
