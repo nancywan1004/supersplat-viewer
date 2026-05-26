@@ -22,6 +22,11 @@ import {
 } from 'playcanvas';
 import { normalizeAnnotationMediaFields } from './annotation-toolbar/media-fields';
 import { ensureHotspotDepthLayers, syncHotspotLayersAfterGsplat } from './scene-assets/hotspot-depth-layers';
+import {
+    getActiveSceneMediaEntryId,
+    setAnnotationFullscreenVideoActive
+} from './scene-assets/media/scene-media-playback';
+import type { Global } from './types';
 
 // clamp the vertices of the hotspot so it is never clipped by the near or far plane
 const depthClampGlsl = `
@@ -90,6 +95,13 @@ export class Annotation extends Script {
     static videoInlineEl: HTMLVideoElement | null = null;
 
     static videoFsBtn: HTMLButtonElement | null = null;
+
+    /**
+     * 由 `AnnotationEntity` 首次构造时注入；用于 static handler（fs / 关闭大屏等）
+     * 与 `scene-media-playback` 通信触发场景媒体压制状态变更。
+     * 单 Global 场景下注入一次即可。
+     */
+    static globalRef: Global | null = null;
 
     static videoPlayBtn: HTMLButtonElement | null = null;
 
@@ -485,6 +497,8 @@ export class Annotation extends Script {
             Annotation.videoPreviewEl.removeAttribute('muted');
             Annotation.videoPreviewOverlay.style.display = 'flex';
             void Annotation.videoPreviewEl.play();
+            // 进入大屏：压制场景音视频（场景视频静音保帧、场景音频暂停），让大屏独占声音
+            Annotation._setSceneSuppress(true);
             Annotation._syncInlineVideoPlayButton();
         });
 
@@ -511,7 +525,8 @@ export class Annotation extends Script {
             if (ev.target === Annotation.videoPreviewEl) {
                 return;
             }
-            Annotation.closeMediaPreviews();
+            // 用户主动关闭 video 大屏：解除场景压制 + inline 静音继续播
+            Annotation.closeMediaPreviews({ keepInlineMutedPlaying: true });
         });
         Annotation.videoPreviewEl.addEventListener('click', (ev) => ev.stopPropagation());
 
@@ -565,15 +580,30 @@ export class Annotation extends Script {
         Annotation._syncInlineVideoPlayButton();
     }
 
-    /** 锚定展开时在小窗内自动播放（点击热点展开属用户手势，可出声） */
-    static playInlineVideo(opts?: { unmuted?: boolean }): void {
+    /**
+     * 锚定展开时在小窗内自动播放（点击热点展开属用户手势，可出声）。
+     *
+     * @param opts.unmuted 锚定展开默认希望"有声"播放；但若场景中已有音视频在出声
+     *   （`getActiveSceneMediaEntryId() !== null`），则改为静音播放以避免互相打扰，
+     *   用户可后续点 inline 播放钮或 fs 按钮显式 unmute / 进大屏。
+     * @param opts.forceMuted 强制静音（用于「退出大屏后 inline 默认继续静音播放」场景）。
+     */
+    static playInlineVideo(opts?: { unmuted?: boolean; forceMuted?: boolean }): void {
         const el = Annotation.videoInlineEl;
         if (!el?.src || Annotation.videoInlineDom?.style.display === 'none') {
             return;
         }
-        if (opts?.unmuted) {
-            el.muted = false;
-            el.removeAttribute('muted');
+        if (opts?.forceMuted) {
+            el.muted = true;
+            el.setAttribute('muted', '');
+        } else if (opts?.unmuted) {
+            const sceneSounding = getActiveSceneMediaEntryId() !== null;
+            el.muted = sceneSounding;
+            if (sceneSounding) {
+                el.setAttribute('muted', '');
+            } else {
+                el.removeAttribute('muted');
+            }
         }
         void el.play().catch(() => {
             // 自动播放策略失败时保持静音海报，用户可点播放钮
@@ -583,8 +613,23 @@ export class Annotation extends Script {
         Annotation._syncInlineVideoPlayButton();
     }
 
-    /** Close fullscreen image/video previews and stop playback. */
-    static closeMediaPreviews(): void {
+    /** 通知场景媒体压制开关变更；通过 `globalRef.events` 触发控制器立即重算 */
+    static _setSceneSuppress(active: boolean): void {
+        if (!Annotation.globalRef) return;
+        setAnnotationFullscreenVideoActive(Annotation.globalRef, active);
+    }
+
+    /**
+     * Close fullscreen image/video previews and stop playback.
+     *
+     * @param opts.keepInlineMutedPlaying 用户主动关闭 video 大屏时传 true：
+     *   - 解除场景媒体压制（场景音视频恢复声音）；
+     *   - inline 视频静音继续播放（不暂停、不归零进度）。
+     *   其它路径（_hideElements 等）保持旧行为：pause inline。
+     */
+    static closeMediaPreviews(opts?: { keepInlineMutedPlaying?: boolean }): void {
+        const wasVideoFullscreen = Annotation.videoPreviewOverlay?.style.display === 'flex';
+
         if (Annotation.imagePreviewOverlay) {
             Annotation.imagePreviewOverlay.style.display = 'none';
         }
@@ -601,7 +646,18 @@ export class Annotation extends Script {
             Annotation.videoPreviewEl.muted = false;
             Annotation.videoPreviewEl.removeAttribute('muted');
         }
-        Annotation.pauseInlineVideo();
+
+        // 关闭 video 大屏 → 解除场景媒体压制（idempotent，关 image 大屏也安全）
+        if (wasVideoFullscreen) {
+            Annotation._setSceneSuppress(false);
+        }
+
+        if (opts?.keepInlineMutedPlaying) {
+            // 退出大屏后 inline 默认继续静音播放
+            Annotation.playInlineVideo({ forceMuted: true });
+        } else {
+            Annotation.pauseInlineVideo();
+        }
     }
 
     /**

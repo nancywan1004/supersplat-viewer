@@ -67,6 +67,29 @@ export function clearManualHeldSceneMediaEntryIdIf(id: string | null): void {
 }
 
 /**
+ * 「标注视频大屏播放」是否正在进行——为 true 时控制器把场景音视频视为
+ * 与 `viewMediaMuted=true` 等价（视频静音保帧、音频 pause），让标注大屏独占声音；
+ * 关闭大屏后恢复场景媒体声音。
+ *
+ * 写入由 annotation 模块负责；状态全局共享，避免多 entity / static handler 通信。
+ */
+let annotationFullscreenVideoActive = false;
+
+export function isAnnotationFullscreenVideoActive(): boolean {
+    return annotationFullscreenVideoActive;
+}
+
+/**
+ * 切换标注大屏压制态。变化时 fire `annotationFullscreenVideo:changed`，
+ * 让控制器立即重算一次（绕过冷却 / EVAL_INTERVAL_MS）。
+ */
+export function setAnnotationFullscreenVideoActive(global: Global, active: boolean): void {
+    if (annotationFullscreenVideoActive === active) return;
+    annotationFullscreenVideoActive = active;
+    global.events?.fire('annotationFullscreenVideo:changed', { active });
+}
+
+/**
  * 由热区控制器在每帧评估收尾时统一更新出声槽。
  * 单独暴露（不在 play/pause 内部修改）以避免循环中间状态被外部观察到。
  */

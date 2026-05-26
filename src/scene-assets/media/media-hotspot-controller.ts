@@ -31,6 +31,7 @@ import {
     ensureSceneVideoFramePlaying,
     getActiveSceneMediaEntryId,
     getManualHeldSceneMediaEntryId,
+    isAnnotationFullscreenVideoActive,
     pauseAllSceneMedia,
     pauseSceneMediaEntry,
     playSceneMediaEntry,
@@ -266,7 +267,9 @@ function applyHotspotPlayback(
         evalState.lastAudioSoundId = desiredAudioSound;
     }
 
-    const viewMediaMuted = readViewMediaMuted(global);
+    // sceneSuppress：场景音视频应被「压制」（视频静音保帧、音频暂停）的统一开关。
+    // 来源：View 全局静音 `viewMediaMuted`，或标注大屏正在播放（独占声音）。
+    const sceneSuppress = readViewMediaMuted(global) || isAnnotationFullscreenVideoActive();
     const globalVideoAutoplay = readGlobalVideoHotspotAutoplayEnabledFromSettings(hotspotParams.settings);
     const list = global.state.scenePlacedEntities ?? [];
 
@@ -294,7 +297,7 @@ function applyHotspotPlayback(
             continue;
         }
 
-        const wantSound = entry.id === desiredVideoSound && !viewMediaMuted;
+        const wantSound = entry.id === desiredVideoSound && !sceneSuppress;
         ensureSceneVideoFramePlaying(global, entry, { muted: !wantSound });
         if (wantSound) videoSoundOwner = entry.id;
     }
@@ -318,7 +321,7 @@ function applyHotspotPlayback(
             && entry.id === desiredAudioSound
             && entry.mediaRuntime?.userPaused !== true
             && evalState.userUnlocked
-            && !viewMediaMuted;
+            && !sceneSuppress;
 
         if (shouldPlay) {
             playSceneMediaEntry(global, entry);
@@ -490,6 +493,7 @@ export function initMediaHotspotController(global: Global): () => void {
     events.on('sceneMediaHotspot:changed', onHotspotChanged);
     events.on('sceneAsset:triggerDistanceChanged', onHotspotChanged);
     events.on('viewMediaMuted:changed', onViewMediaMutedChanged);
+    events.on('annotationFullscreenVideo:changed', onViewMediaMutedChanged);
     events.on('previewMode:changed', onPreviewModeChanged);
     events.on('mediaHotspot:userActivate', onUserActivate);
     events.on('mediaOverlay:userPlayback', onOverlayUserPlayback);
@@ -510,6 +514,7 @@ export function initMediaHotspotController(global: Global): () => void {
         events.off('sceneMediaHotspot:changed', onHotspotChanged);
         events.off('sceneAsset:triggerDistanceChanged', onHotspotChanged);
         events.off('viewMediaMuted:changed', onViewMediaMutedChanged);
+        events.off('annotationFullscreenVideo:changed', onViewMediaMutedChanged);
         events.off('previewMode:changed', onPreviewModeChanged);
         events.off('mediaHotspot:userActivate', onUserActivate);
         events.off('mediaOverlay:userPlayback', onOverlayUserPlayback);
