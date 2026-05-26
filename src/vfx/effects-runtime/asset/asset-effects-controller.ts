@@ -62,6 +62,55 @@ export function buildWobbleOptions(ep: Record<string, unknown>): GsplatWobbleOpt
     return opts;
 }
 
+export function buildMorphOptions(ep: Record<string, unknown>): GsplatMorphOptions {
+    const opts: GsplatMorphOptions = {
+        segmentDuration: typeof ep.segmentDuration === 'number' ? ep.segmentDuration : undefined,
+        segmentHoldDuration: typeof ep.segmentHoldDuration === 'number' ? ep.segmentHoldDuration : undefined,
+        loop: typeof ep.loop === 'boolean' ? ep.loop : undefined,
+        autoPlay: typeof ep.autoPlay === 'boolean' ? ep.autoPlay : true,
+        morphPresentMaxHz: typeof ep.morphPresentMaxHz === 'number' ? ep.morphPresentMaxHz : undefined,
+        morphAnimateSphericalHarmonics:
+            typeof ep.morphAnimateSphericalHarmonics === 'boolean' ? ep.morphAnimateSphericalHarmonics : undefined,
+        preferGpuMorph: typeof ep.preferGpuMorph === 'boolean' ? ep.preferGpuMorph : undefined,
+        recenterModels: typeof ep.recenterModels === 'boolean' ? ep.recenterModels : undefined,
+        normalizeScales: typeof ep.normalizeScales === 'boolean' ? ep.normalizeScales : undefined,
+        targetScale: typeof ep.targetScale === 'number' ? ep.targetScale : undefined,
+        sortCentersMaxHz: typeof ep.sortCentersMaxHz === 'number' ? ep.sortCentersMaxHz : undefined,
+        fastQuaternionNlerp: typeof ep.fastQuaternionNlerp === 'boolean' ? ep.fastQuaternionNlerp : undefined,
+        buildGreedyInBackground: typeof ep.buildGreedyInBackground === 'boolean' ? ep.buildGreedyInBackground : true,
+        correspondenceStrategy:
+            ep.correspondenceStrategy === 'greedy' || ep.correspondenceStrategy === 'resample'
+                ? ep.correspondenceStrategy
+                : undefined,
+        greedySpatialWeight: typeof ep.greedySpatialWeight === 'number' ? ep.greedySpatialWeight : undefined,
+        greedyColorWeight: typeof ep.greedyColorWeight === 'number' ? ep.greedyColorWeight : undefined,
+        greedyGridCellSize: typeof ep.greedyGridCellSize === 'number' ? ep.greedyGridCellSize : undefined,
+        greedySearchRadiusCells: typeof ep.greedySearchRadiusCells === 'number' ? ep.greedySearchRadiusCells : undefined,
+        greedyMaxCandidatesPerPoint: typeof ep.greedyMaxCandidatesPerPoint === 'number' ? ep.greedyMaxCandidatesPerPoint : undefined,
+        morphPointCloudEffect: typeof ep.morphPointCloudEffect === 'boolean' ? ep.morphPointCloudEffect : undefined,
+        morphPointCloudPointSize: typeof ep.morphPointCloudPointSize === 'number' ? ep.morphPointCloudPointSize : undefined,
+        morphPointCloudMinScreenPx: typeof ep.morphPointCloudMinScreenPx === 'number' ? ep.morphPointCloudMinScreenPx : undefined,
+        morphPointCloudScreenFloorMaxScale:
+            typeof ep.morphPointCloudScreenFloorMaxScale === 'number' ? ep.morphPointCloudScreenFloorMaxScale : undefined,
+        morphPointCloudStrength: typeof ep.morphPointCloudStrength === 'number' ? ep.morphPointCloudStrength : undefined,
+        morphPointCloudTint: Array.isArray(ep.morphPointCloudTint) &&
+            ep.morphPointCloudTint.length === 3 &&
+            ep.morphPointCloudTint.every((v) => typeof v === 'number' && Number.isFinite(v))
+            ? ep.morphPointCloudTint as [number, number, number]
+            : undefined,
+        morphPointCloudGlowStrength: typeof ep.morphPointCloudGlowStrength === 'number' ? ep.morphPointCloudGlowStrength : undefined,
+        morphPointCloudOpacity: typeof ep.morphPointCloudOpacity === 'number' ? ep.morphPointCloudOpacity : undefined,
+        morphPointCloudDensity: typeof ep.morphPointCloudDensity === 'number' ? ep.morphPointCloudDensity : undefined,
+        morphPointCloudScatterDistance: typeof ep.morphPointCloudScatterDistance === 'number' ? ep.morphPointCloudScatterDistance : undefined,
+        morphPointCloudEdgeDuration: typeof ep.morphPointCloudEdgeDuration === 'number' ? ep.morphPointCloudEdgeDuration : undefined,
+        morphPointCloudHoldDuration: typeof ep.morphPointCloudHoldDuration === 'number' ? ep.morphPointCloudHoldDuration : undefined,
+        morphPointCloudRevealDuration: typeof ep.morphPointCloudRevealDuration === 'number' ? ep.morphPointCloudRevealDuration : undefined,
+        hideSourceEntities: typeof ep.hideSourceEntities === 'boolean' ? ep.hideSourceEntities : undefined,
+        entityName: typeof ep.entityName === 'string' ? ep.entityName : undefined
+    };
+    return opts;
+}
+
 export class AssetEffectsController {
     private readonly _global: Global;
     private readonly _app: AppBase;
@@ -120,7 +169,7 @@ export class AssetEffectsController {
             return;
         }
         const entry = this._active.get(payload.targetId);
-        if (!entry || entry.type !== GSPLAT_WOBBLE_TYPE) {
+        if (!entry) {
             return;
         }
         const inst = readAssetInstanceParams(
@@ -131,6 +180,13 @@ export class AssetEffectsController {
             ...(inst?.effectParams ?? {}),
             ...(payload.params?.effectParams ?? {})
         };
+        if (entry.type === GSPLAT_MORPH_TYPE) {
+            entry.morph?.setOptions(buildMorphOptions(ep));
+            return;
+        }
+        if (entry.type !== GSPLAT_WOBBLE_TYPE) {
+            return;
+        }
         let script = entry.wobbleScript;
         if (!script && entry.wobbleEntity?.script) {
             script = entry.wobbleEntity.script.get(GsplatWobbleEffect.scriptName) as unknown as GsplatWobbleEffect | null;
@@ -208,45 +264,8 @@ export class AssetEffectsController {
         }
 
         const morphOpts: GsplatMorphOptions = {
-            segmentDuration: typeof ep.segmentDuration === 'number' ? ep.segmentDuration : undefined,
-            segmentHoldDuration: typeof ep.segmentHoldDuration === 'number' ? ep.segmentHoldDuration : undefined,
-            loop: typeof ep.loop === 'boolean' ? ep.loop : undefined,
-            autoPlay: typeof ep.autoPlay === 'boolean' ? ep.autoPlay : true,
-            morphPresentMaxHz: typeof ep.morphPresentMaxHz === 'number' ? ep.morphPresentMaxHz : undefined,
-            morphAnimateSphericalHarmonics:
-                typeof ep.morphAnimateSphericalHarmonics === 'boolean' ? ep.morphAnimateSphericalHarmonics : undefined,
-            preferGpuMorph: typeof ep.preferGpuMorph === 'boolean' ? ep.preferGpuMorph : undefined,
-            recenterModels: typeof ep.recenterModels === 'boolean' ? ep.recenterModels : undefined,
-            normalizeScales: typeof ep.normalizeScales === 'boolean' ? ep.normalizeScales : undefined,
-            targetScale: typeof ep.targetScale === 'number' ? ep.targetScale : undefined,
-            sortCentersMaxHz: typeof ep.sortCentersMaxHz === 'number' ? ep.sortCentersMaxHz : undefined,
-            fastQuaternionNlerp: typeof ep.fastQuaternionNlerp === 'boolean' ? ep.fastQuaternionNlerp : undefined,
-            correspondenceStrategy:
-                ep.correspondenceStrategy === 'greedy' || ep.correspondenceStrategy === 'resample'
-                    ? ep.correspondenceStrategy
-                    : undefined,
-            greedySpatialWeight: typeof ep.greedySpatialWeight === 'number' ? ep.greedySpatialWeight : undefined,
-            greedyColorWeight: typeof ep.greedyColorWeight === 'number' ? ep.greedyColorWeight : undefined,
-            greedyGridCellSize: typeof ep.greedyGridCellSize === 'number' ? ep.greedyGridCellSize : undefined,
-            greedySearchRadiusCells: typeof ep.greedySearchRadiusCells === 'number' ? ep.greedySearchRadiusCells : undefined,
-            greedyMaxCandidatesPerPoint: typeof ep.greedyMaxCandidatesPerPoint === 'number' ? ep.greedyMaxCandidatesPerPoint : undefined,
-            morphPointCloudEffect: typeof ep.morphPointCloudEffect === 'boolean' ? ep.morphPointCloudEffect : undefined,
-            morphPointCloudPointSize: typeof ep.morphPointCloudPointSize === 'number' ? ep.morphPointCloudPointSize : undefined,
-            morphPointCloudStrength: typeof ep.morphPointCloudStrength === 'number' ? ep.morphPointCloudStrength : undefined,
-            morphPointCloudTint: Array.isArray(ep.morphPointCloudTint) &&
-                ep.morphPointCloudTint.length === 3 &&
-                ep.morphPointCloudTint.every((v) => typeof v === 'number' && Number.isFinite(v))
-                ? ep.morphPointCloudTint as [number, number, number]
-                : undefined,
-            morphPointCloudGlowStrength: typeof ep.morphPointCloudGlowStrength === 'number' ? ep.morphPointCloudGlowStrength : undefined,
-            morphPointCloudOpacity: typeof ep.morphPointCloudOpacity === 'number' ? ep.morphPointCloudOpacity : undefined,
-            morphPointCloudDensity: typeof ep.morphPointCloudDensity === 'number' ? ep.morphPointCloudDensity : undefined,
-            morphPointCloudScatterDistance: typeof ep.morphPointCloudScatterDistance === 'number' ? ep.morphPointCloudScatterDistance : undefined,
-            morphPointCloudEdgeDuration: typeof ep.morphPointCloudEdgeDuration === 'number' ? ep.morphPointCloudEdgeDuration : undefined,
-            morphPointCloudHoldDuration: typeof ep.morphPointCloudHoldDuration === 'number' ? ep.morphPointCloudHoldDuration : undefined,
-            morphPointCloudRevealDuration: typeof ep.morphPointCloudRevealDuration === 'number' ? ep.morphPointCloudRevealDuration : undefined,
+            ...buildMorphOptions(ep),
             sourceEntities: sourceEntities ?? undefined,
-            hideSourceEntities: typeof ep.hideSourceEntities === 'boolean' ? ep.hideSourceEntities : undefined,
             entityName: typeof ep.entityName === 'string' ? ep.entityName : `morph-${targetId}`,
             onCorrespondenceStatus: status => {
                 this._global.events.fire('assetEffect:morphCorrespondenceStatus', {

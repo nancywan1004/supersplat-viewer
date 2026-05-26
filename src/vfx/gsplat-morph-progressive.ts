@@ -150,19 +150,23 @@ export interface GsplatMorphOptions {
     progressivePairFlightWindow?: number;
     /** A-B 变形途中临时转为点云感，复用 growth-wave 的球形小点思路。默认 true。 */
     morphPointCloudEffect?: boolean;
-    /** 点云阶段固定点大小（世界单位）。默认 0.0015。 */
+    /** 点云阶段固定点大小（世界单位）。默认 0.00015。 */
     morphPointCloudPointSize?: number;
+    /** 点云阶段屏幕最小可见尺寸（像素）；设为 0 可关闭距离/FOV 保底。默认 1.25。 */
+    morphPointCloudMinScreenPx?: number;
+    /** 屏幕尺寸保底相对 `morphPointCloudPointSize` 的最大放大倍数。默认 32。 */
+    morphPointCloudScreenFloorMaxScale?: number;
     /** 点云强度倍率；变形段从 0->1，到达端点后直接切回 GS。默认 1.5。 */
     morphPointCloudStrength?: number;
     /** 点云辉光色调 RGB 0–1。默认 (0, 145/255, 1)。 */
     morphPointCloudTint?: [number, number, number];
-    /** 点云阶段颜色辉光强度。默认 1.7。 */
+    /** 点云阶段颜色辉光强度。默认 1.2。 */
     morphPointCloudGlowStrength?: number;
     /** 点云阶段目标不透明度（0-1）。默认 0.88。 */
     morphPointCloudOpacity?: number;
     /** 点云阶段可见点比例（0-1）。默认 0.32，避免全部高斯堆成实体。 */
     morphPointCloudDensity?: number;
-    /** 点云阶段随机散开距离（世界单位）。默认 0.05。 */
+    /** 点云阶段随机散开距离（世界单位）。默认 0.25。 */
     morphPointCloudScatterDistance?: number;
     /** GS 与点云之间的短切换时长（秒）。默认 0.08 秒。 */
     morphPointCloudEdgeDuration?: number;
@@ -204,14 +208,14 @@ const DEFAULT_GREEDY_MAX_CANDIDATES = 96;
 const DEFAULT_GREEDY_GLOBAL_FALLBACK_SAMPLES = 2048;
 const DEFAULT_MORPH_BUILD_YIELD_MS = 2;
 const DEFAULT_PROGRESSIVE_PAIR_FLIGHT_WINDOW = 0.12;
-const DEFAULT_MORPH_POINT_CLOUD_POINT_SIZE = 0.0015;
+const DEFAULT_MORPH_POINT_CLOUD_POINT_SIZE = 0.00015;
 const DEFAULT_MORPH_POINT_CLOUD_MIN_SCREEN_PX = 1.25;
 const DEFAULT_MORPH_POINT_CLOUD_SCREEN_FLOOR_MAX_SCALE = 32;
 const DEFAULT_MORPH_POINT_CLOUD_STRENGTH = 1.5;
-const DEFAULT_MORPH_POINT_CLOUD_GLOW_STRENGTH = 1.7;
+const DEFAULT_MORPH_POINT_CLOUD_GLOW_STRENGTH = 1.2;
 const DEFAULT_MORPH_POINT_CLOUD_OPACITY = 0.88;
 const DEFAULT_MORPH_POINT_CLOUD_DENSITY = 0.32;
-const DEFAULT_MORPH_POINT_CLOUD_SCATTER_DISTANCE = 0.05;
+const DEFAULT_MORPH_POINT_CLOUD_SCATTER_DISTANCE = 0.25;
 const DEFAULT_MORPH_POINT_CLOUD_TINT: [number, number, number] = [0, 145 / 255, 1];
 const DEFAULT_MORPH_POINT_CLOUD_EDGE_DURATION = 0.08;
 const DEFAULT_MORPH_POINT_CLOUD_HOLD_DURATION = 0.7;
@@ -300,22 +304,52 @@ const resolveMorphSource = (source: MorphSource, index: number) => {
     };
 };
 
-const isSogFilename = (filename: string) => filename.toLowerCase().split('?')[0].endsWith('.sog');
-
 const getEntityGsplatSource = (entity: Entity | undefined) => {
     const gsplat = entity?.gsplat as any;
     const asset = gsplat?.asset as Asset | undefined;
     const resource = (asset?.resource ?? gsplat?.resource) as GSplatResource | undefined;
-    const data = resource?.gsplatData as GSplatData | undefined;
-    if (!resource || !data) {
+    if (!resource) {
         return null;
     }
 
     return {
         asset,
-        resource,
-        data
+        resource
     };
+};
+
+const isReadableGsplatData = (data: unknown): data is GSplatData => {
+    const record = data as { getProp?: unknown; numSplats?: unknown } | null | undefined;
+    return !!record && typeof record.getProp === 'function' && typeof record.numSplats === 'number';
+};
+
+const resolveReadableGsplatData = async (
+    resource: GSplatResource | undefined,
+    label: string
+): Promise<GSplatData> => {
+    const data = resource?.gsplatData as unknown;
+    if (isReadableGsplatData(data)) {
+        return data;
+    }
+
+    const decompress = (data as { decompress?: unknown } | null | undefined)?.decompress;
+    if (typeof decompress === 'function') {
+        const decompressed = await decompress.call(data);
+        if (isReadableGsplatData(decompressed)) {
+            return decompressed;
+        }
+    }
+
+    throw new Error(`加载 ${label} 失败: gsplatData 不可读（PLY/SOG morph 需要可解压为 GSplatData）`);
+};
+
+const createGsplatFileContents = (contents: ArrayBuffer | undefined) => {
+    if (!contents) {
+        return undefined;
+    }
+    // PlayCanvas' PLY parser expects a Response-like object with `.body`;
+    // SOG accepts either Response or ArrayBuffer. Use Response so both paths work.
+    return typeof Response !== 'undefined' ? new Response(contents) : contents;
 };
 
 const getRequiredProp = (data: GSplatData, name: string) => {
@@ -2123,7 +2157,11 @@ const loadMorphModel = async (
     const sourceEntity = options.sourceEntities?.[index];
     const entitySource = getEntityGsplatSource(sourceEntity);
     if (entitySource) {
-        const splats = readSplatArrays(entitySource.data);
+        const data = await resolveReadableGsplatData(
+            entitySource.resource,
+            sourceEntity?.name || resolved.filename
+        );
+        const splats = readSplatArrays(data);
         bakeEntityTransformIntoSplats(
             splats,
             sourceEntity,
@@ -2142,22 +2180,24 @@ const loadMorphModel = async (
         } satisfies LoadedMorphModel;
     }
 
-    const sogSource = isSogFilename(resolved.filename) || isSogFilename(resolved.url);
     const fileContents = typeof source !== 'string' && source.contents
         ? await source.contents.arrayBuffer()
         : undefined;
 
-    const asset = new Asset(resolved.filename, 'gsplat', {
+    const assetFile = {
         url: resolved.url,
         filename: resolved.filename,
-        ...(fileContents ? { contents: fileContents } : {})
-    }, {
-        reorder: false
-    });
+        ...(fileContents ? { contents: createGsplatFileContents(fileContents) } : {})
+    } as {
+        url: string;
+        filename: string;
+        contents?: ArrayBuffer | Response;
+    };
 
-    if (sogSource) {
-        asset.data = { decompress: true };
-    }
+    const asset = new Asset(resolved.filename, 'gsplat', assetFile as any, {
+        reorder: false,
+        decompress: true
+    });
 
     app.assets.add(asset);
 
@@ -2173,14 +2213,7 @@ const loadMorphModel = async (
             throw new Error(`加载 ${resolved.filename} 失败: resource 为空`);
         }
 
-        const data = resource.gsplatData as GSplatData | undefined;
-        if (!data) {
-            throw new Error(
-                sogSource
-                    ? `加载 ${resolved.filename} 失败: SOG 需解压为 GSplatData（请确认 PlayCanvas 支持 asset.data.decompress）`
-                    : `加载 ${resolved.filename} 失败: gsplatData 不存在`
-            );
-        }
+        const data = await resolveReadableGsplatData(resource, resolved.filename);
 
         const splats = readSplatArrays(data);
         bakeEntityTransformIntoSplats(
@@ -2576,6 +2609,24 @@ export class GsplatMorphController {
         this.applyCurrentFrame(true);
     }
 
+    setOptions(options: Partial<GsplatMorphOptions>) {
+        if (this._destroyed) {
+            return;
+        }
+
+        Object.assign(this._morphOptions, options);
+        if (typeof options.segmentDuration === 'number') {
+            this.segmentDuration = options.segmentDuration;
+        }
+        if (typeof options.segmentHoldDuration === 'number') {
+            this.segmentHoldDuration = options.segmentHoldDuration;
+        }
+        if (typeof options.loop === 'boolean') {
+            this.loop = options.loop;
+        }
+        this.applyCurrentFrame(true);
+    }
+
     destroy() {
         this._destroyed = true;
         this.disarmAppAutoRenderOverride();
@@ -2909,8 +2960,20 @@ export class GsplatMorphController {
         const fovRad = (fovDeg * Math.PI) / 180;
         const viewportHeight = Math.max(1, this.app.graphicsDevice.height);
         const worldUnitsPerPixel = (2 * Math.tan(fovRad * 0.5) * distance) / viewportHeight;
-        const minVisibleSize = worldUnitsPerPixel * DEFAULT_MORPH_POINT_CLOUD_MIN_SCREEN_PX;
-        const maxVisibleSize = configuredPointSize * DEFAULT_MORPH_POINT_CLOUD_SCREEN_FLOOR_MAX_SCALE;
+        const minScreenPx = Math.max(
+            0,
+            this._morphOptions.morphPointCloudMinScreenPx ?? DEFAULT_MORPH_POINT_CLOUD_MIN_SCREEN_PX
+        );
+        if (minScreenPx <= 1e-6) {
+            return configuredPointSize;
+        }
+
+        const floorMaxScale = Math.max(
+            1,
+            this._morphOptions.morphPointCloudScreenFloorMaxScale ?? DEFAULT_MORPH_POINT_CLOUD_SCREEN_FLOOR_MAX_SCALE
+        );
+        const minVisibleSize = worldUnitsPerPixel * minScreenPx;
+        const maxVisibleSize = configuredPointSize * floorMaxScale;
 
         return Math.max(configuredPointSize, Math.min(minVisibleSize, maxVisibleSize));
     }

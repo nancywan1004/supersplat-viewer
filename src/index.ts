@@ -45,6 +45,7 @@ import {
     hasRevealInSettings
 } from './settings-serialize/effects-sync';
 
+import { loadGsplatMorphSequence } from './vfx/gsplat-morph';
 
 
 export { loadGsplatAsset };
@@ -164,57 +165,6 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
             app.assets.load(asset);
         });
     }
-};
-
-/**
- * 加载 wobble 用 gsplat（.splat / .ply / .sog 等），unified=false，shader 仅作用于本实体材质。
- * @param url public 路径，如 `/wobble/model.ply`
- */
-const loadSplatTest = async (
-    app: AppBase,
-    url: string,
-    aa: boolean,
-    lodLoader?: LodLoader,
-    entityName = 'gsplat'
-): Promise<Entity> => {
-    const filename = new URL(url, location.href).pathname.split('/').pop();
-    const shouldEnableLod = lodLoader?.shouldEnableLod(url) ?? false;
-    const isSplat = (filename || url).toLowerCase().endsWith('.splat');
-
-    const finishEntity = (entity: Entity, asset: Asset) => {
-        entity.setLocalEulerAngles(0, 0, 180);
-        entity.addComponent('gsplat', { unified: false, asset });
-        const material = entity.gsplat!.material;
-        material.setDefine('GSPLAT_AA', aa);
-        material.setParameter('alphaClip', 1 / 255);
-        app.root.addChild(entity);
-        if (shouldEnableLod && lodLoader && entity.gsplat) {
-            lodLoader.applyLodPreset(entity.gsplat);
-        }
-        return entity;
-    };
-
-    if (isSplat) {
-        const asset = await loadGsplatAsset(app, { url, filename });
-        if (asset.loaded) {
-            return finishEntity(new Entity(entityName), asset);
-        }
-        return new Promise<Entity>((resolve, reject) => {
-            asset.once('load', () => resolve(finishEntity(new Entity(entityName), asset)));
-            asset.once('error', reject);
-        });
-    }
-
-    const asset = new Asset(filename, 'gsplat', { url, filename });
-    return new Promise<Entity>((resolve, reject) => {
-        asset.on('load', () => resolve(finishEntity(new Entity(entityName), asset)));
-        asset.on('error', (err) => {
-            console.log(err);
-            reject(err);
-        });
-        app.assets.add(asset);
-        app.assets.load(asset);
-    });
 };
 
 const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
@@ -366,10 +316,6 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         uploadedAssets: [],
         scenePlacedEntities: [],
         selectedSceneEntityId: null,
-        /** 物体特效面板子类型（internal 场景列表 morph 多选） */
-        assetEffectUiSubtype: null,
-        /** 当前配置槽 GS 变形关键帧 entity id 列表 */
-        assetEffectsMorphKeyframeIds: [] as string[],
         cameraControlsEnabled: true,
 
         // 标注相关状态
@@ -545,14 +491,29 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         getRevealExportTimingSource: () => viewer.revealController
     });
 
+    const mainGsplatEntity = await gsplatLoad;
+
+    const morph = await loadGsplatMorphSequence(app, [
+        '/morph/1.ply',
+        '/morph/2.ply',
+        '/morph/3.ply',
+        '/morph/4.ply'
+    ], {
+        segmentDuration: 3,
+        loop: true,
+        autoPlay: true,
+        recenterModels: true,
+        normalizeScales: true,
+        targetScale: 10,
+        layers: mainGsplatEntity.gsplat?.layers ? [...mainGsplatEntity.gsplat.layers] : undefined
+    });
+    // 先把 viewer 默认加载的主 gsplat 隐藏掉，不然会和 morph 结果重叠
+    mainGsplatEntity.enabled = false;
+    // 方便你在浏览器控制台里手动调试
+    (window as any).morph = morph;
+
     return viewer;
 };
-
-
-/** 从 public 路径加载独立 gsplat，默认使用非 unified 材质，方便只对它施加 shader 特效。 */
-const loadIsolatedGsplatFromPublic = (app: AppBase, url: string, config: Config, lodLoader?: LodLoader) =>
-    loadGsplat(app, { ...config, contentUrl: url, contents: undefined }, () => {}, lodLoader);
-                
 
 console.log(`SuperSplat Viewer v${appVersion} | Engine v${engineVersion} (${engineRevision})`);
 
