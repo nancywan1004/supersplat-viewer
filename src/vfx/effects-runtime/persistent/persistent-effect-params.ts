@@ -7,8 +7,8 @@ import { Vec3 } from 'playcanvas';
  * - 仅当 `key` 落在当前 `type` 对应集合内时才写入脚本；其余键静默忽略。
  * - **数值**：有限 `number`，且脚本上须已存在该属性名。
  * - **`center` / `extents`**：`[x, y, z]` 写入 `Vec3`。
- * - **颜色三元组**：`color` / `fogColor` 写入 `[r,g,b]`。
- * - **字符串 / 布尔值**：当前仅用于 falling effects 的贴图 URL、渲染与雾开关。
+ * - **颜色三元组**：`color` / `cameraClearColor` 写入 `[r,g,b]`。
+ * - **字符串 / 布尔值**：当前仅用于 falling effects 的贴图 URL、渲染与雾配置。
  *
  * 新增 persistent 类型：扩展 **`BY_TYPE`** 与下方 `Set`，并在 **`mountPersistentGsplatByEffectType`** 创建脚本后调用 **`applyPersistentEffectParamsToScript`**。
  */
@@ -28,6 +28,8 @@ const PERLIN_WAVE = new Set([
 const FALLING_PETALS = new Set([
     'opacity',
     'color',
+    'glowColor',
+    'glowStrength',
     'extents',
     'petalParticleCount',
     'petalTextureUrl',
@@ -48,9 +50,10 @@ const FALLING_WEATHER = new Set([
     'extents',
     'angle',
     'fogDensity',
-    'fogColor',
     'exposure',
     'useFog',
+    'cameraClearColor',
+    'useCameraClearColor',
     'continuousRender',
     'restoreSceneAtmosphere'
 ]);
@@ -127,7 +130,7 @@ export function applyPersistentEffectParamsToScript(
             trySetVec3(script, rawKey, rawVal);
             continue;
         }
-        if (rawKey === 'color' || rawKey === 'fogColor') {
+        if (rawKey === 'color' || rawKey === 'glowColor' || rawKey === 'cameraClearColor') {
             trySetTriple(script, rawKey, rawVal);
             continue;
         }

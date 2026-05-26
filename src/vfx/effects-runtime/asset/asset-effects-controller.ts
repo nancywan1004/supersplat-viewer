@@ -11,7 +11,7 @@ import {
     GsplatMorphController,
     loadGsplatMorphSequence,
     type GsplatMorphOptions
-} from '../../gsplat-morph';
+} from '../../gsplat-morph-progressive';
 import {
     createGsplatWobbleEffect,
     GsplatWobbleEffect,
@@ -247,7 +247,14 @@ export class AssetEffectsController {
             morphPointCloudRevealDuration: typeof ep.morphPointCloudRevealDuration === 'number' ? ep.morphPointCloudRevealDuration : undefined,
             sourceEntities: sourceEntities ?? undefined,
             hideSourceEntities: typeof ep.hideSourceEntities === 'boolean' ? ep.hideSourceEntities : undefined,
-            entityName: typeof ep.entityName === 'string' ? ep.entityName : `morph-${targetId}`
+            entityName: typeof ep.entityName === 'string' ? ep.entityName : `morph-${targetId}`,
+            onCorrespondenceStatus: status => {
+                this._global.events.fire('assetEffect:morphCorrespondenceStatus', {
+                    targetId,
+                    type: GSPLAT_MORPH_TYPE,
+                    ...status
+                });
+            }
         };
 
         try {

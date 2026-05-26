@@ -580,6 +580,7 @@ export function initAssetEffectsUI(global: Global): () => void {
     const btnStart = fieldset.querySelector('#assetEffectStart');
     const btnStop = fieldset.querySelector('#assetEffectStop');
     const statusEl = fieldset.querySelector('#assetEffectStatus');
+    const morphCorrespondenceStatusByTarget = new Map<string, string>();
 
     const { events } = global;
 
@@ -611,6 +612,23 @@ export function initAssetEffectsUI(global: Global): () => void {
         if ((global.state as { editMode?: boolean }).editMode) {
             pushEditHistory(global, 'asset effect');
         }
+    };
+
+    const formatMorphCorrespondenceStatus = (payload: Record<string, unknown>) => {
+        const strategy = payload.strategy === 'greedy' || payload.strategy === 'resample' ? payload.strategy : 'resample';
+        const phase = typeof payload.phase === 'string' ? payload.phase : 'ready';
+        if (phase === 'building') {
+            const done = typeof payload.done === 'number' ? payload.done : 0;
+            const total = typeof payload.total === 'number' ? payload.total : 0;
+            return total > 0 ? `greedy 计算中 ${done}/${total}` : 'greedy 计算中';
+        }
+        if (phase === 'preview') {
+            return 'resample 快速预览';
+        }
+        if (phase === 'failed') {
+            return 'greedy 失败，保留 resample';
+        }
+        return strategy === 'greedy' ? '已切换 greedy' : 'resample';
     };
 
     const renderMorphKeyframeList = () => {
@@ -704,7 +722,31 @@ export function initAssetEffectsUI(global: Global): () => void {
         const inst = readAssetInstanceParams(global.settings, targetId);
         const label = ASSET_EFFECT_LABEL[inst?.type ?? runtime?.activeType ?? ''] ?? inst?.type ?? '—';
         const st = runtime?.status ?? 'inactive';
-        statusEl.textContent = `状态: ${label} / ${st}`;
+        const morphRoute = morphCorrespondenceStatusByTarget.get(targetId);
+        statusEl.textContent = `状态: ${label} / ${st}${morphRoute ? ` / 匹配: ${morphRoute}` : ''}`;
+    };
+
+    const onMorphCorrespondenceStatus = (payload: unknown) => {
+        if (!payload || typeof payload !== 'object') {
+            return;
+        }
+        const record = payload as Record<string, unknown>;
+        const targetId = typeof record.targetId === 'string' ? record.targetId : '';
+        if (!targetId) {
+            return;
+        }
+        morphCorrespondenceStatusByTarget.set(targetId, formatMorphCorrespondenceStatus(record));
+        refreshStatus();
+    };
+
+    const onAssetEffectStopped = (payload: unknown) => {
+        if (payload && typeof payload === 'object') {
+            const targetId = (payload as Record<string, unknown>).targetId;
+            if (typeof targetId === 'string') {
+                morphCorrespondenceStatusByTarget.delete(targetId);
+            }
+        }
+        refreshStatus();
     };
 
     const refreshTargetLabel = () => {
@@ -1154,13 +1196,17 @@ export function initAssetEffectsUI(global: Global): () => void {
     btnStart?.addEventListener('click', onStart);
     btnStop?.addEventListener('click', onStop);
 
-    const onSelectionChanged = () => refreshTargetLabel();
+    const onSelectionChanged = () => {
+        refreshTargetLabel();
+        refreshStatus();
+    };
     events.on('sceneAsset:selected', onSelectionChanged);
     events.on('assetEffect:started', refreshStatus);
-    events.on('assetEffect:stopped', refreshStatus);
+    events.on('assetEffect:stopped', onAssetEffectStopped);
     events.on('assetEffect:error', refreshStatus);
     events.on('assetEffect:configChanged', refreshStatus);
     events.on('assetEffect:morphKeyframesChanged', onMorphKeyframesChanged);
+    events.on('assetEffect:morphCorrespondenceStatus', onMorphCorrespondenceStatus);
 
     syncWobbleHaloUi();
     syncMorphPointCloudLabels();
@@ -1193,10 +1239,11 @@ export function initAssetEffectsUI(global: Global): () => void {
         btnStop?.removeEventListener('click', onStop);
         events.off('sceneAsset:selected', onSelectionChanged);
         events.off('assetEffect:started', refreshStatus);
-        events.off('assetEffect:stopped', refreshStatus);
+        events.off('assetEffect:stopped', onAssetEffectStopped);
         events.off('assetEffect:error', refreshStatus);
         events.off('assetEffect:configChanged', refreshStatus);
         events.off('assetEffect:morphKeyframesChanged', onMorphKeyframesChanged);
+        events.off('assetEffect:morphCorrespondenceStatus', onMorphCorrespondenceStatus);
         global.state.assetEffectUiSubtype = null;
         global.state.assetEffectsMorphKeyframeIds = [];
     };

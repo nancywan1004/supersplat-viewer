@@ -1,4 +1,4 @@
-import { Entity, Script, Vec3 } from 'playcanvas';
+import { Entity, FOG_EXP, FOG_EXP2, FOG_LINEAR, Script, Vec3 } from 'playcanvas';
 
 import {
     createGsplatFallingPetals,
@@ -33,11 +33,15 @@ export class GsplatPersistentFallingPetals extends Script {
 
     color: [number, number, number] = [...GSPLAT_FALLING_PETALS_PRESET.color];
 
+    glowColor: [number, number, number] = [...GSPLAT_FALLING_PETALS_PRESET.glowColor];
+
+    glowStrength = GSPLAT_FALLING_PETALS_PRESET.glowStrength;
+
     extents = new Vec3(...GSPLAT_FALLING_PETALS_PRESET.extents);
 
     petalParticleCount = GSPLAT_FALLING_PETALS_PRESET.petalParticleCount;
 
-    petalTextureUrl = '/textures/petal.png';
+    petalTextureUrl = '/textures/petal-atlas.png';
 
     private _petals: GsplatFallingPetals | null = null;
 
@@ -57,6 +61,8 @@ export class GsplatPersistentFallingPetals extends Script {
             continuousRender: this.continuousRender,
             opacity: this.opacity,
             color: [...this.color] as [number, number, number],
+            glowColor: [...this.glowColor] as [number, number, number],
+            glowStrength: this.glowStrength,
             extents: [this.extents.x, this.extents.y, this.extents.z] as [number, number, number],
             petalParticleCount: this.petalParticleCount,
             petalTextureUrl: this.petalTextureUrl
@@ -103,7 +109,7 @@ export class GsplatPersistentFallingWeather extends Script {
 
     drift = 0.4;
 
-    opacity = 0.85;
+    opacity = 0.8;
 
     color: [number, number, number] = [1, 1, 1];
 
@@ -113,19 +119,29 @@ export class GsplatPersistentFallingWeather extends Script {
 
     elongate = 1;
 
-    flutter = 0.12;
+    flutter = 0;
 
-    tumble = 0.15;
+    tumble = 0;
 
     angle = 0;
 
-    fogDensity = 0.005;
+    fogDensity = 0.010;
+
+    fogType: typeof FOG_EXP | typeof FOG_EXP2 | typeof FOG_LINEAR = FOG_EXP;
+
+    fogStart = 0;
+
+    fogEnd = 0;
 
     fogColor: [number, number, number] = [1, 1, 1];
 
-    exposure = 0.3;
+    exposure = 0.5;
 
     useFog = true;
+
+    cameraClearColor: [number, number, number] = [0.8, 0.8, 0.8];
+
+    useCameraClearColor = true;
 
     private _weather: GsplatFallingWeather | null = null;
 
@@ -152,9 +168,14 @@ export class GsplatPersistentFallingWeather extends Script {
         }
         this.angle = preset.angle ?? this.angle;
         this.fogDensity = preset.fogDensity ?? this.fogDensity;
+        this.fogType = preset.fogType ?? this.fogType;
+        this.fogStart = preset.fogStart ?? this.fogStart;
+        this.fogEnd = preset.fogEnd ?? this.fogEnd;
         this.fogColor = preset.fogColor ? [...preset.fogColor] : this.fogColor;
         this.exposure = preset.exposure ?? this.exposure;
         this.useFog = preset.useFog ?? this.useFog;
+        this.cameraClearColor = preset.cameraClearColor ? [...preset.cameraClearColor] : this.cameraClearColor;
+        this.useCameraClearColor = preset.useCameraClearColor ?? this.useCameraClearColor;
     }
 
     applyConfig() {
@@ -180,9 +201,14 @@ export class GsplatPersistentFallingWeather extends Script {
             tumble: this.tumble,
             angle: this.angle,
             fogDensity: this.fogDensity,
+            fogType: this.fogType,
+            fogStart: this.fogStart,
+            fogEnd: this.fogEnd,
             fogColor: [...this.fogColor] as [number, number, number],
             exposure: this.exposure,
-            useFog: this.useFog
+            useFog: this.useFog,
+            cameraClearColor: [...this.cameraClearColor] as [number, number, number],
+            useCameraClearColor: this.useCameraClearColor
         };
 
         if (!this.enabled) {

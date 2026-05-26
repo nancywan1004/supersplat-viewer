@@ -49,6 +49,16 @@ interface PairCorrespondence {
 
 type CorrespondenceStrategy = 'resample' | 'greedy';
 
+type CorrespondenceRuntimePhase = 'preview' | 'building' | 'ready' | 'failed';
+
+interface CorrespondenceRuntimeStatus {
+    strategy: CorrespondenceStrategy;
+    phase: CorrespondenceRuntimePhase;
+    done?: number;
+    total?: number;
+    error?: unknown;
+}
+
 interface MorphPointCloudFrame {
     strength: number;
     pointSize: number;
@@ -156,6 +166,8 @@ export interface GsplatMorphOptions {
     morphPointCloudHoldDuration?: number;
     /** 完整点云从顶部光圈扫描恢复成 GS 的时长（秒）。默认 0.85 秒。 */
     morphPointCloudRevealDuration?: number;
+    /** Runtime-only: reports whether morph is using the fast preview route or upgraded greedy route. */
+    onCorrespondenceStatus?: (status: CorrespondenceRuntimeStatus) => void;
     /**
      * Scene entities used as visual keyframes. They are never transformed by
      * the morph runtime; when provided, the generated morph entity copies the
@@ -180,7 +192,7 @@ const DEFAULT_GREEDY_COLOR_WEIGHT = 0.0;
 const DEFAULT_GREEDY_SEARCH_RADIUS_CELLS = 2;
 const DEFAULT_GREEDY_MAX_CANDIDATES = 96;
 const DEFAULT_GREEDY_GLOBAL_FALLBACK_SAMPLES = 2048;
-const DEFAULT_MORPH_BUILD_YIELD_MS = 8;
+const DEFAULT_MORPH_BUILD_YIELD_MS = 2;
 const DEFAULT_MORPH_POINT_CLOUD_POINT_SIZE = 0.0015;
 const DEFAULT_MORPH_POINT_CLOUD_STRENGTH = 1.5;
 const DEFAULT_MORPH_POINT_CLOUD_GLOW_STRENGTH = 1.7;
@@ -189,7 +201,7 @@ const DEFAULT_MORPH_POINT_CLOUD_DENSITY = 0.32;
 const DEFAULT_MORPH_POINT_CLOUD_TINT: [number, number, number] = [0, 145 / 255, 1];
 const DEFAULT_MORPH_POINT_CLOUD_EDGE_DURATION = 0.08;
 const DEFAULT_MORPH_POINT_CLOUD_HOLD_DURATION = 0.7;
-const DEFAULT_MORPH_POINT_CLOUD_REVEAL_DURATION = 0.85;
+const DEFAULT_MORPH_POINT_CLOUD_REVEAL_DURATION = 0.425;
 const VALID_REST_PROP_COUNTS = [0, 9, 24, 45] as const;
 const SH_C0 = 0.28209479177387814;
 
@@ -214,7 +226,7 @@ const randomUnitDir = (seed: number) => {
 
 const yieldToBrowser = () => new Promise<void>((resolve) => {
     if (typeof requestAnimationFrame === 'function') {
-        requestAnimationFrame(() => resolve());
+        requestAnimationFrame(() => setTimeout(resolve, 0));
         return;
     }
     setTimeout(resolve, 0);
@@ -836,7 +848,7 @@ class GpuMorphRuntime {
 
     private readonly _fadeLogMin: number;
 
-    private readonly _correspondences?: Map<string, PairCorrespondence>;
+    private _correspondences?: Map<string, PairCorrespondence>;
 
     private readonly _pairSourceA?: GpuSplatContainer;
 
@@ -1160,6 +1172,12 @@ class GpuMorphRuntime {
         }
 
         this.resource.update(outN, true);
+    }
+
+    replaceCorrespondences(correspondences: Map<string, PairCorrespondence>) {
+        this._correspondences = correspondences;
+        this._pairIndex = -1;
+        this.destroyProcessors();
     }
 
     destroy() {
@@ -1525,12 +1543,12 @@ class GaussianInterpolatorRuntime {
 
         for (let i = 0; i < nLarge; i++) {
             addToGrid(grid, large, i);
-            if ((i & 0x3fff) === 0) await maybeYield();
+            if ((i & 0x7ff) === 0) await maybeYield();
         }
         if (smallGrid) {
             for (let i = 0; i < nSmall; i++) {
                 addToGrid(smallGrid, small, i);
-                if ((i & 0x3fff) === 0) await maybeYield();
+                if ((i & 0x7ff) === 0) await maybeYield();
             }
         }
 
@@ -1613,7 +1631,7 @@ class GaussianInterpolatorRuntime {
                 matchedA[write] = li;
                 matchedB[write] = si;
             }
-            if ((si & 0x7ff) === 0) await maybeYield();
+            if ((si & 0x1ff) === 0) await maybeYield();
         }
 
         if (nLarge > nSmall && smallGrid) {
@@ -1636,7 +1654,7 @@ class GaussianInterpolatorRuntime {
                     matchedB[write] = si;
                 }
                 write++;
-                if ((li & 0x7ff) === 0) await maybeYield();
+                if ((li & 0x1ff) === 0) await maybeYield();
             }
         }
 
@@ -2117,7 +2135,7 @@ export class GsplatMorphController {
 
     readonly models: LoadedMorphModel[];
 
-    readonly interpolator?: GaussianInterpolatorRuntime;
+    interpolator?: GaussianInterpolatorRuntime;
 
     private readonly _centers: Float32Array;
 
@@ -2179,6 +2197,8 @@ export class GsplatMorphController {
     private _morphPushedThisFrame = false;
 
     private readonly _hiddenSourceStates: { entity: Entity; enabled: boolean }[] = [];
+
+    private _destroyed = false;
 
     constructor(app: AppBase, models: LoadedMorphModel[], options: GsplatMorphOptions = {}) {
         this._morphOptions = options;
@@ -2453,7 +2473,18 @@ export class GsplatMorphController {
         );
     }
 
+    replaceInterpolator(interpolator: GaussianInterpolatorRuntime) {
+        if (this._destroyed) {
+            return;
+        }
+        this.interpolator = interpolator;
+        this._gpuRuntime?.replaceCorrespondences(interpolator.correspondences);
+        this._lastPairIndexForSh = -1;
+        this.applyCurrentFrame(true);
+    }
+
     destroy() {
+        this._destroyed = true;
         this.disarmAppAutoRenderOverride();
         this.app.off('frameupdate', this._onFrameUpdate);
         this.app.off('framerender', this._onAfterFrameRender);
@@ -2896,19 +2927,59 @@ export const loadGsplatMorphSequence = async (
     );
 
     const fadeLogMin = options.fadeLogMin ?? DEFAULT_FADE_LOG_MIN;
-    const useGreedyCorrespondence = (options.correspondenceStrategy ?? 'greedy') === 'greedy';
-    const prebuiltInterpolator = useGreedyCorrespondence
-        ? new GaussianInterpolatorRuntime(models, fadeLogMin, options, false)
-        : undefined;
-    if (prebuiltInterpolator) {
-        console.info('[GsplatMorph] building correspondence asynchronously to keep the UI responsive...');
-        await prebuiltInterpolator.buildCorrespondencesAsync((done, total) => {
-            console.info('[GsplatMorph] correspondence progress', { done, total });
-        });
-    }
-
-    return new GsplatMorphController(app, models, {
+    const previewOptions: GsplatMorphOptions = {
         ...options,
-        prebuiltInterpolator
+        correspondenceStrategy: 'resample'
+    };
+    const previewInterpolator = new GaussianInterpolatorRuntime(models, fadeLogMin, previewOptions);
+    const controller = new GsplatMorphController(app, models, {
+        ...options,
+        prebuiltInterpolator: previewInterpolator
     });
+    options.onCorrespondenceStatus?.({
+        strategy: 'resample',
+        phase: 'preview'
+    });
+
+    const { prebuiltInterpolator: _discard, ...greedyOptions } = options;
+    void (async () => {
+        try {
+            console.info('[GsplatMorph] preview uses resample; building greedy correspondence in background...');
+            options.onCorrespondenceStatus?.({
+                strategy: 'greedy',
+                phase: 'building',
+                done: 0,
+                total: Math.max(0, models.length - 1)
+            });
+            await yieldToBrowser();
+            const greedyInterpolator = new GaussianInterpolatorRuntime(models, fadeLogMin, {
+                ...greedyOptions,
+                correspondenceStrategy: 'greedy'
+            }, false);
+            await greedyInterpolator.buildCorrespondencesAsync((done, total) => {
+                console.info('[GsplatMorph] greedy correspondence progress', { done, total });
+                options.onCorrespondenceStatus?.({
+                    strategy: 'greedy',
+                    phase: 'building',
+                    done,
+                    total
+                });
+            });
+            controller.replaceInterpolator(greedyInterpolator);
+            options.onCorrespondenceStatus?.({
+                strategy: 'greedy',
+                phase: 'ready'
+            });
+            console.info('[GsplatMorph] greedy correspondence ready; morph route upgraded.');
+        } catch (err) {
+            options.onCorrespondenceStatus?.({
+                strategy: 'greedy',
+                phase: 'failed',
+                error: err
+            });
+            console.warn('[GsplatMorph] greedy correspondence build failed; keeping resample preview route.', err);
+        }
+    })();
+
+    return controller;
 };

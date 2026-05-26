@@ -3,6 +3,8 @@ import {
     Color,
     Entity,
     FOG_EXP,
+    FOG_EXP2,
+    FOG_LINEAR,
     FOG_NONE,
     GSplatContainer,
     GSplatFormat,
@@ -28,9 +30,14 @@ export interface GsplatFallingWeatherPreset {
     extents?: [number, number, number];
     angle?: number;
     fogDensity?: number;
+    fogType?: typeof FOG_EXP | typeof FOG_EXP2 | typeof FOG_LINEAR;
+    fogStart?: number;
+    fogEnd?: number;
     fogColor?: [number, number, number];
     exposure?: number;
     useFog?: boolean;
+    cameraClearColor?: [number, number, number];
+    useCameraClearColor?: boolean;
 }
 
 export interface GsplatFallingWeatherOptions extends Partial<GsplatFallingWeatherPreset> {
@@ -45,25 +52,30 @@ const WEATHER_PRESETS: Record<Exclude<GsplatFallingWeatherMode, 'none'>, GsplatF
     snow: {
         speed: 2.0,
         drift: 0.4,
-        opacity: 0.85,
+        opacity: 0.8,
         color: [1, 1, 1],
         particleMinSize: 0.006,
         particleMaxSize: 0.012,
         elongate: 1.0,
-        flutter: 0.12,
-        tumble: 0.15,
+        flutter: 0.0,
+        tumble: 0.0,
         density: 1.5,
         extents: [12, 12, 12],
         angle: 0,
-        fogDensity: 0.005,
+        fogDensity: 0.010,
+        fogType: FOG_EXP,
+        fogStart: 0,
+        fogEnd: 0,
         fogColor: [1, 1, 1],
-        exposure: 0.3,
-        useFog: true
+        exposure: 0.8,
+        useFog: true,
+        cameraClearColor: [0.8, 0.8, 0.8],
+        useCameraClearColor: true
     },
     rain: {
         speed: 10,
-        drift: 0.02,
-        opacity: 0.65,
+        drift: 0,
+        opacity: 0.57,
         color: [0.812, 0.812, 0.812],
         particleMinSize: 0.003,
         particleMaxSize: 0.003,
@@ -73,10 +85,15 @@ const WEATHER_PRESETS: Record<Exclude<GsplatFallingWeatherMode, 'none'>, GsplatF
         density: 1.5,
         extents: [12, 12, 12],
         angle: 0,
-        fogDensity: 0.005,
+        fogDensity: 0.010,
+        fogType: FOG_EXP,
+        fogStart: 0,
+        fogEnd: 0,
         fogColor: [1, 1, 1],
-        exposure: 0.3,
-        useFog: true
+        exposure: 0.5,
+        useFog: true,
+        cameraClearColor: [0.8, 0.8, 0.8],
+        useCameraClearColor: true
     }
 };
 
@@ -111,11 +128,21 @@ export class GsplatFallingWeather extends Script {
 
     fogDensity = 0;
 
+    fogType: typeof FOG_EXP | typeof FOG_EXP2 | typeof FOG_LINEAR = FOG_EXP;
+
+    fogStart = 0;
+
+    fogEnd = 0;
+
     fogColor: [number, number, number] = [1, 1, 1];
 
     exposure = 1;
 
     useFog = true;
+
+    cameraClearColor: [number, number, number] = [0.6, 0.65, 0.75];
+
+    useCameraClearColor = true;
 
     restoreSceneAtmosphere = true;
 
@@ -140,10 +167,13 @@ export class GsplatFallingWeather extends Script {
     private _autoRenderOverridden = false;
 
     private _sceneAtmosphereSnapshot: {
-        fogType: typeof FOG_NONE | typeof FOG_EXP | string;
+        fogType: typeof FOG_NONE | typeof FOG_EXP | typeof FOG_EXP2 | typeof FOG_LINEAR | string;
         fogDensity: number;
+        fogStart: number;
+        fogEnd: number;
         fogColor: Color;
         exposure: number;
+        cameraClearColor?: Color;
         gsplatUseFog?: boolean;
     } | null = null;
 
@@ -356,9 +386,14 @@ export class GsplatFallingWeather extends Script {
         if (options.flutter !== undefined) this.flutter = options.flutter;
         if (options.tumble !== undefined) this.tumble = options.tumble;
         if (options.fogDensity !== undefined) this.fogDensity = options.fogDensity;
+        if (options.fogType === FOG_EXP || options.fogType === FOG_EXP2 || options.fogType === FOG_LINEAR) this.fogType = options.fogType;
+        if (options.fogStart !== undefined) this.fogStart = options.fogStart;
+        if (options.fogEnd !== undefined) this.fogEnd = options.fogEnd;
         if (options.fogColor) this.fogColor = [...options.fogColor];
         if (options.exposure !== undefined) this.exposure = options.exposure;
         if (options.useFog !== undefined) this.useFog = options.useFog;
+        if (options.cameraClearColor) this.cameraClearColor = [...options.cameraClearColor];
+        if (options.useCameraClearColor !== undefined) this.useCameraClearColor = options.useCameraClearColor;
         if (options.angle !== undefined) this.entity.setLocalEulerAngles(options.angle, 0, 0);
         if (options.enabled !== undefined) this.enabled = options.enabled;
         if (this.enabled && (!this._container || gridChanged)) {
@@ -545,10 +580,15 @@ export class GsplatFallingWeather extends Script {
         this.captureAtmosphereSnapshot();
 
         const scene = this.app.scene;
-        const wantFog = this.useFog && this.fogDensity > 0;
-        scene.fog.type = wantFog ? FOG_EXP : FOG_NONE;
-        scene.fog.density = wantFog ? this.fogDensity : 0;
-        scene.fog.color.set(this.fogColor[0], this.fogColor[1], this.fogColor[2]);
+        const fogType = this.getEffectiveFogType();
+        const fogRange = this.getEffectiveLinearFogRange();
+        const wantFog = this.useFog && this.fogDensity > 0 && (fogType === FOG_LINEAR ? fogRange.end > fogRange.start : true);
+        scene.fog.type = wantFog ? fogType : FOG_NONE;
+        scene.fog.density = wantFog ? this.getEffectiveFogDensity() : 0;
+        scene.fog.start = fogRange.start;
+        scene.fog.end = fogRange.end;
+        const fogColor = this.getEffectiveFogColor();
+        scene.fog.color.set(fogColor[0], fogColor[1], fogColor[2]);
         scene.exposure = this.exposure;
 
         const gsplatScene = (scene as any).gsplat;
@@ -557,6 +597,11 @@ export class GsplatFallingWeather extends Script {
         }
         if (gsplatScene?.material?.update) {
             gsplatScene.material.update();
+        }
+
+        const camera = this.getFollowCameraComponent();
+        if (camera && this.useCameraClearColor) {
+            camera.clearColor.set(this.cameraClearColor[0], this.cameraClearColor[1], this.cameraClearColor[2]);
         }
 
         this.app.renderNextFrame = true;
@@ -569,11 +614,15 @@ export class GsplatFallingWeather extends Script {
 
         const scene = this.app.scene;
         const gsplatScene = (scene as any).gsplat;
+        const camera = this.getFollowCameraComponent();
         this._sceneAtmosphereSnapshot = {
             fogType: scene.fog.type,
             fogDensity: scene.fog.density,
+            fogStart: scene.fog.start,
+            fogEnd: scene.fog.end,
             fogColor: scene.fog.color.clone(),
             exposure: scene.exposure,
+            cameraClearColor: camera?.clearColor?.clone?.(),
             gsplatUseFog: gsplatScene?.useFog
         };
     }
@@ -587,6 +636,8 @@ export class GsplatFallingWeather extends Script {
         const scene = this.app.scene;
         scene.fog.type = snapshot.fogType as any;
         scene.fog.density = snapshot.fogDensity;
+        scene.fog.start = snapshot.fogStart;
+        scene.fog.end = snapshot.fogEnd;
         scene.fog.color.copy(snapshot.fogColor);
         scene.exposure = snapshot.exposure;
 
@@ -597,9 +648,52 @@ export class GsplatFallingWeather extends Script {
         if (gsplatScene?.material?.update) {
             gsplatScene.material.update();
         }
+        const camera = this.getFollowCameraComponent();
+        if (camera && snapshot.cameraClearColor) {
+            camera.clearColor.copy(snapshot.cameraClearColor);
+        }
 
         this._sceneAtmosphereSnapshot = null;
         this.app.renderNextFrame = true;
+    }
+
+    private getFollowCameraComponent() {
+        const target = this.followEntity ?? this.entity;
+        return (target as any).camera ?? null;
+    }
+
+    private getEffectiveFogType() {
+        return this.fogType;
+    }
+
+    private getEffectiveLinearFogRange() {
+        const start = Math.max(0, this.fogStart);
+        const visibility = this.getEffectiveLinearFogVisibility();
+        return {
+            start,
+            end: start + visibility
+        };
+    }
+
+    private getEffectiveLinearFogVisibility() {
+        const referenceDensity = this.mode === 'rain' ? 0.0018 : 0.0025;
+        const baseVisibility = Math.max(this.fogEnd, this.mode === 'rain' ? 420 : 360);
+        const density = Math.max(this.fogDensity, 0.0001);
+        const densityScale = Math.sqrt(Math.min(Math.max(density / referenceDensity, 0.05), 16));
+        return Math.min(1200, Math.max(180, baseVisibility / densityScale));
+    }
+
+    private getEffectiveFogDensity() {
+        const density = Math.max(this.fogDensity, 0);
+        return density;
+    }
+
+    private getEffectiveFogColor(): [number, number, number] {
+        return [
+            Number.isFinite(this.fogColor[0]) ? this.fogColor[0] : 1,
+            Number.isFinite(this.fogColor[1]) ? this.fogColor[1] : 1,
+            Number.isFinite(this.fogColor[2]) ? this.fogColor[2] : 1
+        ];
     }
 
     private syncContinuousRender() {
