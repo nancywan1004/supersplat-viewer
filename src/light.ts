@@ -11,6 +11,7 @@ import {
 } from 'playcanvas';
 import type { GraphicsDevice } from 'playcanvas';
 import type { Global } from './types';
+import { isShadowSystemEnabled } from './vfx/shadow/shadow-system';
 import type { DirectionalLightConfig, SpotLightConfig } from './schemas/v2';
 
 const MAX_POINT_LIGHTS = 10;
@@ -678,8 +679,7 @@ const applyDirectionalLightFromSettings = (global: Global): void => {
     const intensity = typeof cfg?.intensity === 'number' ? cfg.intensity : 1.5;
     const shadowBias = typeof cfg?.shadowBias === 'number' ? cfg.shadowBias : 0.05;
     const enabled = cfg?.enabled !== false;
-    // 平行光是否投射阴影由 postEffectSettings.shadow.enabled 统一控制
-    const castShadows = (settings as any).postEffectSettings?.shadow?.enabled === true;
+    const castShadows = isShadowSystemEnabled(global);
 
     lightEntity.setPosition(pos[0], pos[1], pos[2]);
     lightEntity.setEulerAngles(pitch, yaw, 0);
@@ -953,7 +953,7 @@ const updatePointLightsFromSettings = (global: Global): void => {
     // 点光/聚光高频调参时，避免每次都重写方向光与阴影状态导致整屏闪动。
     // 仅当方向光相关配置（含 shadow 开关）变化时才同步 directional。
     const directionalCfg = Array.isArray(configs) ? configs.find(isDirectionalLightConfig) : undefined;
-    const shadowEnabled = (global.settings as any).postEffectSettings?.shadow?.enabled === true;
+    const shadowEnabled = isShadowSystemEnabled(global);
     const directionalSignature = JSON.stringify({
         enabled: directionalCfg?.enabled !== false,
         intensity: directionalCfg?.intensity ?? 1.5,
@@ -1012,7 +1012,7 @@ const initLight = (global: Global): Entity => {
  * 根据场景包围盒大小动态设置方向光的 shadowDistance。
  * 应在场景加载后、获得 sceneBound 时调用。
  */
-/** 运行时开关主方向光 shadow map（由 shadow-pipeline 在 reveal 门控期间调用） */
+/** 运行时开关主方向光 shadow map（由 shadow-system 在 reveal 门控期间调用） */
 const setDirectionalCastShadowsEnabled = (global: Global, enabled: boolean): void => {
     const lightEntity = global.app.root.findByName('light') as Entity | null;
     if (lightEntity?.light) {

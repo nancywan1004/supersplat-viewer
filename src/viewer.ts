@@ -49,9 +49,21 @@ import { isLodMetaFile } from './loaders/lod-loader';
 import { BloomController } from './vfx/bloom';
 import { loadSplatMesh } from './loaders/splat-mesh-loader';
 import { NightMode } from './vfx/lighting/night-mode';
-import { notifyViewportReadyForShadow, scheduleShadowPipeline } from './vfx/shadow/shadow-pipeline';
-import { initAssetPlacementHandler, requestSceneAssetsRestore } from './asset-placement-handler';
+import {
+    isShadowSystemEnabled,
+    notifyViewportReadyForShadow,
+    scheduleShadowPipeline
+} from './vfx/shadow/shadow-system';
+import { initShadowCatcher } from './vfx/shadow/shadow-catcher';
+import { ShadowApplyRt } from './vfx/shadow/shadow-apply';
+import { updateShadowDistance } from './light';
+import { initAssetPlacementHandler, requestSceneAssetsRestore } from './scene-assets/asset-placement-handler';
 import { initMediaHotspotController } from './scene-assets/media/media-hotspot-controller';
+import { initSceneAudioCallout } from './scene-assets/media/audio-callout';
+import {
+    initVideoControlsInteraction,
+    initVideoControlsTexture
+} from './scene-assets/media/video-controls-texture';
 import { pushEditHistory } from './edit-history';
 import { initGizmoHandler } from './gizmo-handler';
 import { initAnnotationGizmoHandler } from './annotation-toolbar/annotation-gizmo-handler';
@@ -93,7 +105,7 @@ const noPostEffects: PostEffectSettings = {
     grading: { enabled: false, brightness: 0, contrast: 1, saturation: 1, tint: [1, 1, 1] },
     vignette: { enabled: false, intensity: 0, inner: 0, outer: 0, curvature: 0 },
     fringing: { enabled: false, intensity: 0 },
-    shadow: { enabled: false, darken: 0, debugVisual: false, castShadows: false }
+    shadow: { darken: 0, debugVisual: false, castShadows: false }
 };
 
 const gammaChunkGlsl = `
@@ -165,12 +177,12 @@ const needsBloomPipeline = (settings: PostEffectSettings): boolean => {
     return true;
 };
 
-const anyPostEffectEnabled = (settings: PostEffectSettings): boolean => {
+const anyPostEffectEnabled = (settings: PostEffectSettings, config: Global['config']): boolean => {
     const bloomOn = settings.bloom.enabled && (
         Number(settings.bloom.intensity) > 0 ||
         needsBloomPipeline(settings)
     );
-    const shadowOn = (settings as any).shadow?.enabled === true;
+    const shadowOn = isShadowSystemEnabled({ config });
     return (settings.sharpness.enabled && settings.sharpness.amount > 0) ||
         bloomOn ||
         (settings.grading.enabled) ||
@@ -216,6 +228,9 @@ class Viewer {
 
     /** 音视频热区播控卸载 */
     cleanupMediaHotspotController: (() => void) | null = null;
+    cleanupSceneAudioCallout: (() => void) | null = null;
+    cleanupVideoControlsTexture: (() => void) | null = null;
+    cleanupVideoControlsInteraction: (() => void) | null = null;
 
     /** Gizmo handler 清理函数 */
     cleanupGizmoHandler: (() => void) | null = null;
@@ -845,6 +860,11 @@ z: ${cameraInfo.target.z.toFixed(6)}
             }
 
             this.cleanupMediaHotspotController = initMediaHotspotController(global);
+            this.cleanupSceneAudioCallout = initSceneAudioCallout(global);
+            this.cleanupVideoControlsTexture = initVideoControlsTexture(global);
+            if (canvasEl) {
+                this.cleanupVideoControlsInteraction = initVideoControlsInteraction(global, canvasEl);
+            }
 
             const { instance } = gsplat;
             if (instance) {
@@ -1116,7 +1136,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
         const computeRequiresCameraFrame = rendererMode === 'compute';
         const postFxRequested = !config.nofx &&
             !!postEffectSettings &&
-            (anyPostEffectEnabled(postEffectSettings) || highPrecisionRendering || bloomPipelineWanted);
+            (anyPostEffectEnabled(postEffectSettings, config) || highPrecisionRendering || bloomPipelineWanted);
         const enableCameraFrame = !app.xr.active && (computeRequiresCameraFrame || postFxRequested);
 
         if (enableCameraFrame) {

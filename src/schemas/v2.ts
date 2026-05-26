@@ -10,6 +10,7 @@ import type {
     LightingSettings,
     SceneAsset,
     SceneMediaHotspotSettings,
+    SceneMediaHotspotPatch,
     LocalLightRegion,
     WorldSpaceBloomRegionJSON,
     EffectsSettings
@@ -110,7 +111,6 @@ type PostEffectSettings = {
         intensity: number
     },
     shadow: {
-        enabled: boolean,
         darken: number,
         debugRt?: boolean,
         debugVisual?: boolean,
@@ -264,7 +264,6 @@ const validatePostEffects = (data: unknown, path: string): PostEffectSettings =>
     assertNumber(fr.intensity, `${path}.fringing.intensity`);
 
     const shadow = assertObject(obj.shadow, `${path}.shadow`);
-    assertBoolean(shadow.enabled, `${path}.shadow.enabled`);
     assertNumber(shadow.darken, `${path}.shadow.darken`);
 
     return data as PostEffectSettings;
@@ -319,9 +318,21 @@ const validateV2 = (data: unknown): ExperienceSettings => {
 
     if (obj.sceneMediaHotspot !== undefined) {
         const sm = assertObject(obj.sceneMediaHotspot, 'settings.sceneMediaHotspot');
-        assertNumber(sm.videoTriggerDistanceM, 'settings.sceneMediaHotspot.videoTriggerDistanceM');
-        assertNumber(sm.audioTriggerDistanceM, 'settings.sceneMediaHotspot.audioTriggerDistanceM');
-        assertNumber(sm.coneHalfDeg, 'settings.sceneMediaHotspot.coneHalfDeg');
+        const v = assertObject(sm.video, 'settings.sceneMediaHotspot.video');
+        assertNumber(v.coneHalfDeg, 'settings.sceneMediaHotspot.video.coneHalfDeg');
+        if (v.hotspotAutoplayEnabled !== undefined) {
+            assertBoolean(
+                v.hotspotAutoplayEnabled,
+                'settings.sceneMediaHotspot.video.hotspotAutoplayEnabled'
+            );
+        }
+        const a = assertObject(sm.audio, 'settings.sceneMediaHotspot.audio');
+        if (a.hotspotAutoplayEnabled !== undefined) {
+            assertBoolean(
+                a.hotspotAutoplayEnabled,
+                'settings.sceneMediaHotspot.audio.hotspotAutoplayEnabled'
+            );
+        }
     }
 
     return data as ExperienceSettings;
@@ -347,5 +358,6 @@ export type {
     LightingSettings,
     WorldSpaceBloomRegionJSON,
     LocalLightRegion,
-    SceneMediaHotspotSettings
+    SceneMediaHotspotSettings,
+    SceneMediaHotspotPatch
 };

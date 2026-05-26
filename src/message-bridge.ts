@@ -6,8 +6,9 @@
 
 import type { AnnotationData } from './annotation-toolbar/types';
 import {
+    applySceneAssetTriggerDistanceM,
     requestSceneAssetsRestore
-} from './asset-placement-handler';
+} from './scene-assets/asset-placement-handler';
 import {
     initEditHistory,
     canUndo,
@@ -28,7 +29,7 @@ import {
 import { getAssetLoader } from './loaders/asset-loader';
 import { resolveExportTimelinePlan } from './render/export-timeline-resolver';
 import { buildVideoExportFilename } from './render/video-export';
-import type { ExperienceSettings, SceneMediaHotspotSettings } from './schemas/v2';
+import type { ExperienceSettings, SceneMediaHotspotPatch } from './schemas/v2';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import { getRevealActiveType, getRevealTotalDuration } from './settings-serialize/effects-sync';
 import {
@@ -44,13 +45,18 @@ import {
 import { applyViewMediaMuteSet } from './view-settings';
 import { getSelectedSceneAssetType } from './state-selectors';
 import type { AssetLibraryItem, EditLeftModule, Global } from './types';
-import { uploadProjectData } from './universe/service';
+import {
+    captureDefaultViewAndStageThumbnail,
+    persistExperienceSettingsToCloud
+} from './render/project-thumbnail';
+import { resetSceneSettings } from './settings-reset';
 
 /** 父级 → Viewer 的 postMessage payload 类型（按文档事件表） */
 type InboundPayload =
     | { type: 'CAMERA_MODE_SWITCH'; value?: 'orbit' | 'fly' }
     | { type: 'CAMERA_RESET' }
-    | { type: 'SKYBOX_SWITCH'; value?: string }
+    | { type: 'CAMERA_PITCH_RANGE_SET'; value?: [number, number] }
+    | { type: 'SKYBOX_SET'; value?: string }
     | { type: 'ANIMATION_RESET' }
     | { type: 'ANIMATION_PLAY_PAUSE' }
     | { type: 'EDIT_MODE_SET'; value?: boolean }
@@ -59,10 +65,12 @@ type InboundPayload =
     | { type: 'EDIT_UNDO' }
     | { type: 'EDIT_REDO' }
     | { type: 'PREVIEW_MODE_SET'; value?: boolean }
-    | { type: 'MEDIA_HOTSPOT_SET'; value?: Partial<SceneMediaHotspotSettings> }
-    | { type: 'MEDIA_HOTSPOT_SET_BASELINE'; id: string; target: 'video' | 'audio' }
+    | { type: 'MEDIA_HOTSPOT_SET'; value?: SceneMediaHotspotPatch }
+    | { type: 'ASSET_MEDIA_HOTSPOT_BASELINE_SET'; id: string }
+    | { type: 'ASSET_MEDIA_HOTSPOT_RANGE_SET'; id?: string; value?: number }
     | { type: 'VIEW_MEDIA_MUTE_SET'; value?: boolean }
     | { type: 'SETTINGS_SAVE' }
+    | { type: 'SETTINGS_RESET' }
     | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule | null }
     | { type: 'ASSET_SHOW_HIDE_SET'; id?: string; value?: boolean }
     | { type: 'ASSETS_SHOW_HIDE_SET'; value?: boolean }
@@ -116,7 +124,8 @@ type InboundPayload =
     | { type: 'EFFECT_TOGGLE'; module?: 'effects'; effectId: string; value: boolean }
     | { type: 'EFFECT_REPLAY'; module?: 'effects'; effectId: string; restartAnim?: boolean }
     | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean; projectName?: string }
-    | { type: 'VIDEO_EXPORT_CANCEL' };
+    | { type: 'VIDEO_EXPORT_CANCEL' }
+    | { type: 'CAMERA_DEFAULT_VIEW_CAPTURE' };
 
 const postToParent = (type: string, data?: Record<string, unknown>) => {
     const message = (data ? { type, ...data } : { type }) as Record<string, unknown>;
@@ -221,8 +230,33 @@ const initPostMessageBridge = (global: Global) => {
             case 'CAMERA_RESET':
                 events.fire('inputEvent', 'reset');
                 break;
-            case 'SKYBOX_SWITCH':
-                if (typeof p.value === 'string') events.fire('skyboxSwitch', p.value);
+            case 'CAMERA_PITCH_RANGE_SET': {
+                const raw = (p as { value?: unknown }).value;
+                if (!Array.isArray(raw) || raw.length !== 2) {
+                    console.warn('[MessageBridge] CAMERA_PITCH_RANGE_SET ignored: value must be [min, max]');
+                    break;
+                }
+                const min = Number(raw[0]);
+                const max = Number(raw[1]);
+                if (!Number.isFinite(min) || !Number.isFinite(max) || min > max) {
+                    console.warn('[MessageBridge] CAMERA_PITCH_RANGE_SET ignored: invalid range', raw);
+                    break;
+                }
+                const range: [number, number] = [
+                    Math.max(-90, Math.min(90, min)),
+                    Math.max(-90, Math.min(90, max))
+                ];
+                const cameras = (global.settings as ExperienceSettings).cameras;
+                if (Array.isArray(cameras) && cameras[0]) {
+                    cameras[0].pitchRange = range;
+                }
+                events.fire('camera:pitchRangeChanged', range);
+                break;
+            }
+            case 'SKYBOX_SET':
+                if (typeof p.value === 'string') {
+                    events.fire('skyboxSet', p.value);
+                }
                 break;
             case 'ANIMATION_RESET':
                 events.fire('inputEvent', 'resetAnim');
@@ -300,6 +334,7 @@ const initPostMessageBridge = (global: Global) => {
                 const next = p.value === true;
                 if (state.previewMode !== next) {
                     state.previewMode = next;
+                    events.fire('previewMode:changed', next);
                 }
                 if (next) {
                     events.fire('mediaHotspot:userActivate');
@@ -318,45 +353,66 @@ const initPostMessageBridge = (global: Global) => {
                     applyViewMediaMuteSet(global, p.value);
                 }
                 break;
-            case 'MEDIA_HOTSPOT_SET_BASELINE': {
-                const msg = payload as Extract<InboundPayload, { type: 'MEDIA_HOTSPOT_SET_BASELINE' }>;
+            case 'ASSET_MEDIA_HOTSPOT_BASELINE_SET': {
+                const msg = payload as Extract<InboundPayload, { type: 'ASSET_MEDIA_HOTSPOT_BASELINE_SET' }>;
                 const id = typeof msg.id === 'string' ? msg.id.trim() : '';
                 if (!id) {
-                    console.warn('[MessageBridge] MEDIA_HOTSPOT_SET_BASELINE missing id');
+                    console.warn('[MessageBridge] ASSET_MEDIA_HOTSPOT_BASELINE_SET missing id');
                     break;
                 }
-                if (msg.target !== 'video' && msg.target !== 'audio') {
-                    console.warn('[MessageBridge] MEDIA_HOTSPOT_SET_BASELINE invalid target');
-                    break;
-                }
-                const result = applySceneMediaHotspotBaselineFromView(global, {
-                    sceneEntityId: id,
-                    target: msg.target
-                });
+                const result = applySceneMediaHotspotBaselineFromView(global, { sceneEntityId: id });
                 if (result.ok === false) {
-                    console.warn('[MessageBridge] MEDIA_HOTSPOT_SET_BASELINE failed:', result.reason, { id });
+                    console.warn('[MessageBridge] ASSET_MEDIA_HOTSPOT_BASELINE_SET failed:', result.reason, { id });
                     break;
                 }
-                events.fire('sceneMediaHotspot:changed');
-                postToParent('SCENE_MEDIA_HOTSPOT_CHANGED', {
+                events.fire('sceneAsset:triggerDistanceChanged', {
+                    id: result.id,
+                    triggerDistanceM: result.triggerDistanceM
+                });
+                postToParent('SCENE_ASSET_MEDIA_TRIGGER_DISTANCE_CHANGED', {
                     module: MESSAGE_BRIDGE_MODULE.asset,
-                    value: result.settings
+                    id: result.id,
+                    value: { triggerDistanceM: result.triggerDistanceM }
                 });
                 break;
             }
+            case 'ASSET_MEDIA_HOTSPOT_RANGE_SET': {
+                const pl = payload as Extract<InboundPayload, { type: 'ASSET_MEDIA_HOTSPOT_RANGE_SET' }>;
+                const id = typeof pl.id === 'string' ? pl.id.trim() : '';
+                if (!id || typeof pl.value !== 'number') break;
+                applySceneAssetTriggerDistanceM(global, id, pl.value);
+                break;
+            }
             case 'SETTINGS_SAVE': {
-                const serialized = serializeExperienceSettings(global);
-                const jsonString = JSON.stringify(serialized, null, 2);
-                const projectId = global.config.projectId;
-                const token = global.config.token;
-                const uploadResult = await uploadProjectData(projectId ?? '', token ?? '', jsonString);
-                if (uploadResult.ok === false) {
-                    console.error('[MessageBridge] SETTINGS_SAVE 上传失败，已取消 SETTINGS_UPDATED 回传', uploadResult.message);
-                    postToParent('SETTINGS_SAVE_FAILED', { message: uploadResult.message });
+                const saveResult = await persistExperienceSettingsToCloud(global);
+                if (saveResult.ok === false) {
+                    console.error('[MessageBridge] SETTINGS_SAVE 失败', saveResult.message);
+                    postToParent('SETTINGS_SAVE_FAILED', { message: saveResult.message });
                     break;
                 }
                 postToParent('SETTINGS_UPDATED');
                 setBaseline();
+                break;
+            }
+            case 'SETTINGS_RESET': {
+                const resetResult = await resetSceneSettings(global);
+                if (resetResult.ok === false) {
+                    console.error('[MessageBridge] SETTINGS_RESET 失败', resetResult.message);
+                    postToParent('SETTINGS_RESET_FAILED', { message: resetResult.message });
+                    break;
+                }
+                if (state.editMode) {
+                    const initialSnapshot = serializeExperienceSettings(global);
+                    setBaseline(initialSnapshot);
+                    if (config.trackEditHistory) {
+                        initEditHistory(global, initialSnapshot);
+                        postToParent('EDIT_HISTORY_STATE', { canUndo: canUndo(global), canRedo: canRedo(global) });
+                    }
+                } else {
+                    (global as { __originalSettings?: ExperienceSettings }).__originalSettings =
+                        JSON.parse(JSON.stringify(global.settings)) as ExperienceSettings;
+                }
+                postToParent('SETTINGS_RESET_APPLIED', { pathFrom: resetResult.pathFrom });
                 break;
             }
             case 'EDIT_MODULE_SET':
@@ -743,6 +799,20 @@ const initPostMessageBridge = (global: Global) => {
             // 注意：真正的“导出完成”仍由 Viewer 在 progressEnd 时 postToParent('VIDEO_EXPORT_END') 上报父级
                 videoExportCancelled = true;
                 events.fire('render.video.stop');
+                break;
+            }
+            case 'CAMERA_DEFAULT_VIEW_CAPTURE': {
+                const captureResult = await captureDefaultViewAndStageThumbnail(global);
+                if (captureResult.ok === false) {
+                    postToParent('CAMERA_DEFAULT_VIEW_CAPTURE_FAILED', {
+                        module: MESSAGE_BRIDGE_MODULE.camera,
+                        message: captureResult.message
+                    });
+                    break;
+                }
+                postToParent('CAMERA_DEFAULT_VIEW_CAPTURED', {
+                    module: MESSAGE_BRIDGE_MODULE.camera
+                });
                 break;
             }
             default:

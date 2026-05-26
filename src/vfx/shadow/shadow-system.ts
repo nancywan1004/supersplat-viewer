@@ -1,4 +1,15 @@
-import type { BoundingBox, Entity } from 'playcanvas';
+/**
+ * 阴影子系统统一入口。
+ *
+ * 两层门控（均需满足才完整出阴影）：
+ * 1. **Capability** `isShadowSystemEnabled` — 场景是否配置 mesh（URL `?splatMesh=`）
+ *    - 高斯 castShadows、平行光 shadow map、是否挂载接影管线
+ * 2. **Output** `isShadowOutputEnabled` — 本帧是否允许接影叠屏
+ *    - `readyToRender` + 管线已 `activateOutput`（含 reveal 门控）
+ *
+ * 渲染实现仍分散在 shadow-catcher / shadow-apply；本文件只负责策略与生命周期。
+ */
+import type { BoundingBox, Entity, GSplatComponent } from 'playcanvas';
 
 import type { ExperienceSettings } from '../../schemas/v2';
 import type { Global } from '../../types';
@@ -8,6 +19,37 @@ import { isRevealTimedVfxType, revealBlocksAnim } from '../effects-runtime/revea
 import { initShadowCatcher } from './shadow-catcher';
 import { ShadowApplyRt } from './shadow-apply';
 
+// ─── Capability：场景是否具备 mesh 阴影能力 ─────────────────────────────────
+
+/** 仅由 URL `?splatMesh=` 决定（`shadow.enabled` 已废弃，存盘字段可保留但不会被读取）。 */
+export function isShadowSystemEnabled(global: Pick<Global, 'config'>): boolean {
+    const url = typeof global.config.splatMeshUrl === 'string' ? global.config.splatMeshUrl.trim() : '';
+    return url.length > 0;
+}
+
+export function applyGsplatCastShadows(gsplat: GSplatComponent | null | undefined, enabled: boolean): void {
+    if (gsplat) {
+        gsplat.castShadows = enabled;
+    }
+}
+
+/**
+ * 主场景与放置高斯须保持相同的 castShadows，否则 PlayCanvas unified 会为「仅投射阴影」的 placement
+ * 单独创建 gsplatManagerShadow，在开启阴影时触发前向颜色异常（蓝绿花屏）。
+ */
+export function syncGsplatShadowCastingFromSettings(global: Global, mainGsplatEntity?: Entity | null): void {
+    const enabled = isShadowSystemEnabled(global);
+    const main = mainGsplatEntity ?? (global.app.root.findByName('gsplat') as Entity | null);
+    applyGsplatCastShadows(main?.gsplat, enabled);
+
+    for (const entry of global.state.scenePlacedEntities ?? []) {
+        if (entry.assetType !== 'gaussian' || !entry.entity?.gsplat) continue;
+        applyGsplatCastShadows(entry.entity.gsplat, enabled);
+    }
+}
+
+// ─── Pipeline：接影挂载、reveal 门控与输出时序 ─────────────────────────────
+
 export type ShadowPipelineMount = {
     sceneBound: BoundingBox;
     gsplatEntity: Entity;
@@ -16,7 +58,7 @@ export type ShadowPipelineMount = {
 
 type ShadowPipelineRuntime = {
     apply: ShadowApplyRt | null;
-    /** 允许接影叠屏与 mesh 投射阴影（readyToRender 仍须为 true） */
+    /** 允许接影叠屏与接影 mesh 参与本帧（仍须 `readyToRender`） */
     outputEnabled: boolean;
 };
 
@@ -31,14 +73,6 @@ const getRuntime = (global: Global): ShadowPipelineRuntime => {
     return runtime;
 };
 
-const isShadowEnabledInSettings = (global: Global): boolean =>
-    (global.settings.postEffectSettings?.shadow as { enabled?: boolean } | undefined)?.enabled === true;
-
-/**
- * 是否应推迟接影 mount/输出至 `revealComplete`。
- * 优先用 settings 中的 timed reveal 类型（与 Bloom 一致），避免 `scheduleShadowPipeline`
- * 早于 RevealController 时 `effectsRuntimeState.reveal.activeType` 仍为 `none` 而误走立即 mount。
- */
 const shouldDeferShadowMountUntilRevealComplete = (global: Global): boolean => {
     const revealType = readRevealParams(global.settings as ExperienceSettings)?.type ?? 'none';
     if (isRevealTimedVfxType(revealType)) {
@@ -54,12 +88,14 @@ const setCatcherActive = (global: Global, active: boolean) => {
     }
 };
 
-/** 接影叠屏与接影 mesh 是否允许参与本帧渲染 */
+/** 接影叠屏是否允许参与本帧渲染（须同时具备 mesh 能力与管线 output）。 */
 export const isShadowOutputEnabled = (global: Global): boolean =>
-    global.state.readyToRender === true && getRuntime(global).outputEnabled;
+    isShadowSystemEnabled(global)
+    && global.state.readyToRender === true
+    && getRuntime(global).outputEnabled;
 
 const syncDirectionalShadowCasting = (global: Global) => {
-    if (!isShadowEnabledInSettings(global)) {
+    if (!isShadowSystemEnabled(global)) {
         return;
     }
     const { app } = global;
@@ -79,16 +115,12 @@ const deactivateOutput = (global: Global) => {
     const runtime = getRuntime(global);
     runtime.outputEnabled = false;
     setCatcherActive(global, false);
-    if (isShadowEnabledInSettings(global)) {
+    if (isShadowSystemEnabled(global)) {
         setDirectionalCastShadowsEnabled(global, false);
     }
     (global.app as { renderNextFrame?: boolean }).renderNextFrame = true;
 };
 
-/**
- * 挂载接影几何与 ShadowApplyRt（幂等）。
- * @param active 创建后是否立即可输出；开场 reveal 应在 `revealComplete` 后再 mount 并置 true。
- */
 export const mountShadowPipeline = (
     global: Global,
     mount: ShadowPipelineMount,
@@ -143,20 +175,15 @@ const bindOpeningRevealGate = (global: Global, mount: ShadowPipelineMount) => {
     events.on('revealRestart', onRevealRestart);
 };
 
-/**
- * 按场景配置挂载阴影管线并绑定与开场 reveal 的门控。
- * - 阻塞型开场 reveal：推迟 mount 至 `revealComplete`，此前无接影 GLB、无方向光投影。
- * - 其余场景：立即 mount，在 `notifyViewportReadyForShadow` 后启用输出。
- */
 export const scheduleShadowPipeline = (global: Global, mount: ShadowPipelineMount): ShadowApplyRt | null => {
-    if (!isShadowEnabledInSettings(global)) {
+    syncGsplatShadowCastingFromSettings(global, mount.gsplatEntity);
+
+    if (!isShadowSystemEnabled(global)) {
         return null;
     }
 
     if (shouldDeferShadowMountUntilRevealComplete(global)) {
-        if (isShadowEnabledInSettings(global)) {
-            setDirectionalCastShadowsEnabled(global, false);
-        }
+        setDirectionalCastShadowsEnabled(global, false);
         bindOpeningRevealGate(global, mount);
         return null;
     }
@@ -166,9 +193,6 @@ export const scheduleShadowPipeline = (global: Global, mount: ShadowPipelineMoun
     return apply;
 };
 
-/**
- * 首屏可上屏（`readyToRender`）后调用，启用接影输出。无开场 reveal 时与 mount 配对使用。
- */
 export const notifyViewportReadyForShadow = (global: Global) => {
     if (!getRuntime(global).apply || shouldDeferShadowMountUntilRevealComplete(global)) {
         return;

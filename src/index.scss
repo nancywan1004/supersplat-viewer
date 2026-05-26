@@ -132,6 +132,13 @@ button {
 .edit-mode-exit {
     margin-right: 0;
 }
+.edit-mode-reset {
+    border-color: rgba(255, 160, 80, 0.45);
+    &:hover:not([disabled]):not(.edit-mode-btn-disabled) {
+        background: darken($clr-bkg-light, 3%);
+        border-color: rgba(255, 160, 80, 0.7);
+    }
+}
 .edit-mode-strip .edit-mode-btn {
     pointer-events: auto;
 }
@@ -158,6 +165,7 @@ button {
 }
 
 @import 'ui/components/styles/exit-edit-confirm-ui';
+@import 'ui/components/styles/edit-toast-ui';
 
 /* 编辑模式工具栏（左/右/底） */
 @import 'ui/styles/edit-left-toolbar';

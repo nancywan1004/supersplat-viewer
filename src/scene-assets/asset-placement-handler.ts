@@ -4,6 +4,7 @@ import {
     Entity,
     Vec3,
     Quat,
+    Color,
     StandardMaterial,
     CULLFACE_NONE,
     BLEND_NONE,
@@ -13,47 +14,50 @@ import {
     ADDRESS_CLAMP_TO_EDGE,
     MeshInstance
 } from 'playcanvas';
-import type { SceneAsset } from './schemas/v2-custom';
-import type { Global, AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from './types';
-import { getSelectedSceneEntity } from './state-selectors';
+import type { SceneAsset } from '../schemas/v2-custom';
+import type { Global, AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from '../types';
+import { getSelectedSceneEntity } from '../state-selectors';
 import {
     DEFAULT_ASSET_LOAD_TIMEOUT_MS,
     hydrateAssetLibraryItem,
     loadSceneAssetLibraryItem,
     withTimeout
-} from './loaders/asset-loader';
-import type { InputArbiter } from './input-arbiter';
+} from '../loaders/asset-loader';
+import { hitSceneGizmoAtClient } from '../gizmo-handler';
+import type { InputArbiter } from '../input-arbiter';
 import {
     clampVideoHorizontalCurvature,
     createCurvedBillboardMesh,
     rebuildVideoRenderMesh
-} from './scene-assets/media/curved-billboard-mesh';
+} from './media/curved-billboard-mesh';
+import { defaultTriggerDistanceMForAssetType } from './media/media-hotspot-params';
 import {
     getPlacedMediaRuntime,
     setPlacedMediaRuntime,
     type PlacedMediaRuntime,
     type PlacedVideoRuntime
-} from './scene-assets/media/media-runtime';
-import { syncPlacedAudioIconEditor } from './scene-assets/media/media-hotspot-controller';
-import { setPlacementCursorActive } from './placement-cursor';
+} from './media/media-runtime';
+import { setPlacementCursorActive } from '../placement-cursor';
 import {
     acquirePlacedVideoForPlacement,
     cancelVideoPlacementPreload,
     startVideoPlacementPreload,
     type VideoPlacementPreloadHandle
-} from './scene-assets/media/video-placement-preload';
+} from './media/video-placement-preload';
 import {
     createPlacedVideoTextureFromVideo,
     initPlacedVideoTexture,
     PLACED_VIDEO_INITIAL_LOAD_TIMEOUT_MS,
     PLACED_VIDEO_PLACEMENT_TIMEOUT_MS,
     unmountPlacedVideoFromDom
-} from './scene-assets/media/video-texture';
-import { loadBillboardTextureFromImageUrl } from './scene-assets/media/image-billboard-texture';
-import { removeSceneAssetFromSettings } from './settings-serialize/settings-serialize';
+} from './media/video-texture';
+import { AUDIO_CALLOUT_WORLD_H, findAudioCalloutSelectHitFromClient } from './media/audio-callout';
+import { getSceneAssetPickLayer, getSceneAssetPickerLayers } from './scene-asset-pick-layer';
+import { removeSceneAssetFromSettings } from '../settings-serialize/settings-serialize';
+import { syncGsplatShadowCastingFromSettings } from '../vfx/shadow/shadow-system';
+import type { ExperienceSettings } from '../settings';
 
 const PLACED_ASSETS_NAME = 'placedAssets';
-const AUDIO_SPEAKER_ICON_URL = '/assets/icons/speaker.svg';
 const ASSET_LOAD_TIMEOUT_MS = DEFAULT_ASSET_LOAD_TIMEOUT_MS;
 
 export type AssetPlacementHandlerDeps = {
@@ -61,7 +65,7 @@ export type AssetPlacementHandlerDeps = {
 };
 
 type SceneAssetsRestoreOptions = {
-    reason?: 'startup' | 'edit-enter' | 'edit-discard' | 'history-restore';
+    reason?: 'startup' | 'edit-enter' | 'edit-discard' | 'history-restore' | 'settings-reset';
     deferUntilRevealComplete?: boolean;
     clearBeforeRestore?: boolean;
 };
@@ -359,7 +363,7 @@ async function instantiateGaussian(app: AppBase, item: AssetLibraryItem, positio
     const asset = item.asset;
     if (!asset) throw new Error('gaussian asset not ready');
     const entity = new Entity(item.name || 'gsplat');
-    entity.addComponent('gsplat', { unified: true, asset, castShadows: true });
+    entity.addComponent('gsplat', { unified: true, asset, castShadows: false });
     const material = entity.gsplat!.unified ? app.scene.gsplat.material : entity.gsplat!.material;
     // 尽量与主场景 gsplat 的配置保持一致，开启 AA 并设置 alphaClip
     material.setDefine('GSPLAT_AA', true);
@@ -367,8 +371,6 @@ async function instantiateGaussian(app: AppBase, item: AssetLibraryItem, positio
     entity.setPosition(position);
     return entity;
 }
-
-const AUDIO_ICON_CHILD = 'audioHotspotIcon';
 
 async function instantiateVideo(
     app: AppBase,
@@ -465,47 +467,33 @@ async function instantiateAudio(app: AppBase, item: AssetLibraryItem, position: 
     const root = new Entity(item.name || 'audio');
     root.setPosition(position);
 
-    const tex = await loadBillboardTextureFromImageUrl(
-        app.graphicsDevice,
-        AUDIO_SPEAKER_ICON_URL,
-        'placed-audio-speaker-icon',
-        ASSET_LOAD_TIMEOUT_MS
-    );
-    const mat = new StandardMaterial();
-    mat.useLighting = false;
-    mat.diffuse.set(0, 0, 0);
-    mat.emissiveMap = tex;
-    mat.emissive.set(1, 1, 1);
-    mat.opacityMap = tex;
-    mat.opacityMapChannel = 'a';
-    mat.blendType = BLEND_NONE;
-    mat.alphaTest = 0.5;
-    mat.cull = CULLFACE_NONE;
-    mat.update();
-
-    const iconEntity = new Entity(AUDIO_ICON_CHILD);
-    iconEntity.addComponent('render', {
-        type: 'plane',
-        material: mat,
+    // 音频 callout 在 HotspotBase/Overlay；场景 Picker 仅扫 World 层，需不可见拾取体才能选中与挂 Gizmo。
+    const pickMat = new StandardMaterial();
+    pickMat.useLighting = false;
+    pickMat.diffuse = Color.BLACK;
+    pickMat.opacity = 0.001;
+    pickMat.alphaTest = 0;
+    pickMat.depthWrite = false;
+    pickMat.blendType = BLEND_NONE;
+    pickMat.cull = CULLFACE_NONE;
+    pickMat.update();
+    const pickRadius = AUDIO_CALLOUT_WORLD_H * 0.45;
+    const pickLayer = getSceneAssetPickLayer(app);
+    root.addComponent('render', {
+        type: 'sphere',
+        material: pickMat,
+        layers: [pickLayer.id],
         castShadows: false,
         receiveShadows: false
     });
-    iconEntity.setLocalScale(1, 1, 1);
-    iconEntity.setLocalPosition(0, 0, 0);
-    iconEntity.enabled = false;
-    root.addChild(iconEntity);
+    root.setLocalScale(pickRadius, pickRadius, pickRadius);
 
-    setPlacedMediaRuntime(root, { kind: 'audio', audioEl: audio, iconEntity });
+    setPlacedMediaRuntime(root, { kind: 'audio', audioEl: audio });
     root.on('destroy', () => {
         try {
             audio.pause();
             audio.removeAttribute('src');
             audio.load();
-        } catch {
-            // ignore
-        }
-        try {
-            tex.destroy();
         } catch {
             // ignore
         }
@@ -675,12 +663,13 @@ export async function placeAsset(
         filename: item.filename,
         url: item.url,
         thumbnailUrl: item.thumbnailUrl,
-        horizontalCurvature: videoRuntime?.horizontalCurvature
+        horizontalCurvature: videoRuntime?.horizontalCurvature,
+        triggerDistanceM: defaultTriggerDistanceMForAssetType(item.type)
     };
     state.scenePlacedEntities.push(entry);
 
-    if (item.type === 'audio') {
-        syncPlacedAudioIconEditor(global, entity);
+    if (item.type === 'gaussian') {
+        syncGsplatShadowCastingFromSettings(global);
     }
 
     events.fire('sceneAssets:added', entry);
@@ -775,7 +764,20 @@ function applySceneAssetTransformToEntry(global: Global, entry: ScenePlacedItem,
                 : 0;
         applyVideoHorizontalCurvature(global, entry.id, curvature);
     }
+
+    if (sa.type === 'video' || sa.type === 'audio') {
+        const dist =
+            typeof sa.triggerDistanceM === 'number' && Number.isFinite(sa.triggerDistanceM) && sa.triggerDistanceM > 0
+                ? sa.triggerDistanceM
+                : defaultTriggerDistanceMForAssetType(sa.type);
+        if (dist !== undefined) {
+            entry.triggerDistanceM = dist;
+            sa.triggerDistanceM = dist;
+        }
+    }
 }
+
+export { applySceneAssetTriggerDistanceM } from '../settings-serialize/settings-serialize-helper';
 
 async function loadAndPlaceSceneAssetFromSettings(global: Global, sa: SceneAsset): Promise<void> {
     const posArr = (sa.transform?.position ?? [0, 0, 0]) as number[];
@@ -899,6 +901,7 @@ export async function requestSceneAssetsRestore(global: Global, options: SceneAs
             } else {
                 await syncScenePlacedEntitiesFromSettings(global);
             }
+            syncGsplatShadowCastingFromSettings(global);
         })();
         controller.activePromise = task;
         await task;
@@ -986,6 +989,13 @@ export function initAssetPlacementHandler(
 
     const handleAssetPointerClickClaim = (clientX: number, clientY: number, worldPos: Vec3 | null): boolean => {
         if (!state.editMode || state.editLeftModule !== 'asset') return false;
+        if (state.suppressAssetPointerClick) {
+            state.suppressAssetPointerClick = false;
+            return false;
+        }
+        if (state.gizmoPointerActive || hitSceneGizmoAtClient(global, clientX, clientY)) {
+            return false;
+        }
         const rect = canvas.getBoundingClientRect();
         const offsetX = clientX - rect.left;
         const offsetY = clientY - rect.top;
@@ -1053,6 +1063,17 @@ export function initAssetPlacementHandler(
         const list = state.scenePlacedEntities ?? [];
         if (list.length === 0) return true;
 
+        const audioSelect = findAudioCalloutSelectHitFromClient(global, clientX, clientY);
+        if (audioSelect) {
+            const prevSelectedId = state.selectedSceneEntityId;
+            state.selectedSceneEntityId = audioSelect.id;
+            events.fire('sceneAsset:selected', { source: 'scene' });
+            if (prevSelectedId !== audioSelect.id) {
+                events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
+            }
+            return true;
+        }
+
         const pickerScale = 0.5;
         const pickW = Math.max(1, Math.floor(width() * pickerScale));
         const pickH = Math.max(1, Math.floor(height() * pickerScale));
@@ -1067,8 +1088,7 @@ export function initAssetPlacementHandler(
             sceneAssetPicker = new (pc as any).Picker(app, pickW, pickH, false);
         }
         sceneAssetPicker.resize(pickW, pickH);
-        const worldLayer = app.scene.layers.getLayerByName('World');
-        sceneAssetPicker.prepare(camera.camera, app.scene, worldLayer ? [worldLayer] : undefined);
+        sceneAssetPicker.prepare(camera.camera, app.scene, getSceneAssetPickerLayers(app));
 
         sceneAssetPicker.getSelectionAsync(pickX, pickY, 1, 1).then((selection: any[]) => {
             if (selection.length === 0) return;

@@ -75,7 +75,23 @@ export interface ScenePlacedItem {
     thumbnailUrl?: string;
     /** 仅 video：横向曲度 [0,1]，0 为平面 */
     horizontalCurvature?: number;
+    /** video / audio：热区触发距离（米） */
+    triggerDistanceM?: number;
+    /** 音/视频会话态（不入 settings） */
+    mediaRuntime?: ScenePlacedMediaRuntime;
 }
+
+/** 已放置音/视频条目的运行态（挂在 ScenePlacedItem.mediaRuntime，不入库） */
+export type ScenePlacedMediaRuntime = {
+    /** 用户显式暂停；热区评估不得自动 play（见 scene-media-playback） */
+    userPaused?: boolean;
+    /** 用户手动播放后视频播控条保持可见（仅 video） */
+    manualLatch?: boolean;
+    /** 是否正在播放（热区或手动）；UI 同步用，由 scene-media-playback 维护 */
+    hotspotPlaying?: boolean;
+    /** 上一热区评估帧是否在触发区内 */
+    inHotspotZone?: boolean;
+};
 
 type CameraMode = 'orbit' | 'anim' | 'fly' | 'walk';
 
@@ -213,6 +229,10 @@ type State = {
     selectedSceneEntityId?: string | null;
     /** 相机输入是否启用（用于与 Gizmo 交互互斥） */
     cameraControlsEnabled?: boolean;
+    /** 正在拖拽场景/光源 Gizmo（pointerdown 命中轴起至 pointerup） */
+    gizmoPointerActive?: boolean;
+    /** 刚结束 Gizmo 手势：跳过一次资产模块 pointerup 场景选中，避免与 Gizmo 松手冲突 */
+    suppressAssetPointerClick?: boolean;
     /** 当前选中的标注 ID */
     selectedAnnotationId?: string | null;
     /** 标注变换模式（与标注模块底部「移动」按钮联动） */

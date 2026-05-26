@@ -137,7 +137,7 @@
         <!-- VFX 进度覆盖层与 Reveal/导出 UI 由 reveal-ui、video-export-ui 组件在 JS 中创建 -->
 
         <div id="ui">
-            <!-- 顶部栏：左侧留白供上级页面注入项目名称；非编辑时仅右侧「编辑」；编辑时「退出」+「撤销」+「重做」+「保存」 -->
+            <!-- 顶部栏：左侧留白供上级页面注入项目名称；非编辑时仅右侧「编辑」；编辑时「退出」+「撤销」+「重做」+「重置场景」+「保存」 -->
             <div id="editModeStrip" class="edit-mode-strip">
                 <button type="button" id="exitEditBtn" class="edit-mode-btn edit-mode-exit hidden">退出</button>
                 <div id="editModeProjectNameSlot" class="edit-mode-strip-project-slot"></div>
@@ -146,10 +146,13 @@
                 <button type="button" id="viewDebugLightsAllOff" class="edit-mode-btn">Lights Off</button>
                 <select id="viewDebugRegionSelect" class="edit-mode-btn" style="min-width:6em;margin-left:2px;"></select>
                 <button type="button" id="viewDebugToggleRegionLight" class="edit-mode-btn">Toggle 区域灯</button>
+                <button type="button" id="viewDebugMediaMute" class="edit-mode-btn">Media Mute</button>
+                <button type="button" id="viewDebugMediaUnmute" class="edit-mode-btn">Media Unmute</button>
                 <button type="button" id="editModeBtn" class="edit-mode-btn">编辑</button>
                 <button type="button" id="undoEditBtn" class="edit-mode-btn edit-mode-undo hidden" disabled>撤销</button>
                 <button type="button" id="redoEditBtn" class="edit-mode-btn edit-mode-redo hidden" disabled>重做</button>
-                <button type="button" id="previewModeBtn" class="edit-mode-btn hidden">隐藏调试组件</button>
+                <button type="button" id="previewModeBtn" class="edit-mode-btn hidden">进入预览模式</button>
+                <button type="button" id="resetSettingsBtn" class="edit-mode-btn edit-mode-reset hidden">重置场景</button>
                 <button type="button" id="saveSettingsBtn" class="edit-mode-btn edit-mode-save hidden">保存</button>
             </div>
             <!-- 编辑模式三个挂载点（仅 edit 模式显示），内容由对应组件注入 -->

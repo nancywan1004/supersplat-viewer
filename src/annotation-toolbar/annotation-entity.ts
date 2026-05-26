@@ -185,6 +185,7 @@ export class AnnotationEntity extends Annotation {
      * @param _fromHover - 为 true 时表示由 hover 触发，仅短期展开
      */
     showTooltip(_fromHover?: boolean): void {
+        const anchoredExpand = this.anchored && !_fromHover;
         Annotation.activeAnnotation = this;
         Annotation.tooltipDom!.style.visibility = 'visible';
         Annotation.tooltipDom!.style.opacity = '1';
@@ -193,6 +194,11 @@ export class AnnotationEntity extends Annotation {
         Annotation.titleDom!.textContent = this.title;
         Annotation.textDom!.textContent = this.text;
         Annotation.syncTooltipMedia(this.data?.imageUrl, this.data?.videoUrl);
+        if (anchoredExpand && this.data?.videoUrl) {
+            Annotation.playInlineVideo({ unmuted: true });
+        } else if (_fromHover) {
+            Annotation.pauseInlineVideo();
+        }
         this._update();
         this.fire('show', this);
     }
@@ -211,6 +217,7 @@ export class AnnotationEntity extends Annotation {
      * 重写：隐藏时仅控制 tooltip，不修改锚定状态
      */
     hideTooltip(): void {
+        Annotation.pauseInlineVideo();
         if (Annotation.tooltipDom) {
             Annotation.tooltipDom.classList.remove('pc-annotation--selected');
         }

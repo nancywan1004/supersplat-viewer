@@ -1,14 +1,21 @@
-import { applyVideoHorizontalCurvature } from '../../asset-placement-handler';
+import {
+    applySceneAssetTriggerDistanceM,
+    applyVideoHorizontalCurvature
+} from '../../scene-assets/asset-placement-handler';
+import { readEntryTriggerDistanceM } from '../../scene-assets/media/media-hotspot-params';
+import { pushEditHistory } from '../../edit-history';
 import { getSceneAssetListHTML, bindSceneAssetList } from './scene-asset-list-ui';
 import { loadGsplatAsset } from '../../loaders/gsplat-asset-loader';
 import { clampVideoHorizontalCurvature, VIDEO_HORIZONTAL_MAX_ARC_DEG } from '../../scene-assets/media/curved-billboard-mesh';
-import type { ExperienceSettings, SceneMediaHotspotSettings } from '../../schemas/v2';
+import type { ExperienceSettings, SceneMediaHotspotPatch } from '../../schemas/v2';
 import {
     applySceneMediaHotspotBaselineFromView,
     ensureSceneMediaHotspot,
-    patchSceneMediaHotspot
+    patchSceneMediaHotspot,
+    readGlobalAudioHotspotAutoplayEnabled,
+    readGlobalVideoHotspotAutoplayEnabled
 } from '../../settings-serialize/settings-serialize-helper';
-import { getSelectedSceneAssetType } from '../../state-selectors';
+import { getSelectedSceneAssetType, getSelectedScenePlacedItem } from '../../state-selectors';
 import type { Global, AssetLibraryItem, AssetLibraryType } from '../../types';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
@@ -168,19 +175,20 @@ export function getAssetPlacementSettingsHTML(): string {
         <div class="media-hotspot-panel" id="mediaHotspotPanel">
             <div class="settingsRow submenuHeader expanded" style="margin-top:6px;">音视频热区</div>
             <div class="settingsRow">
-                <label for="mhVideoDist">视频触发距离 (m)</label>
-                <input type="range" id="mhVideoDist" min="1" max="80" step="0.5" />
-                <span id="mhVideoDistVal" class="settingsValueLabel"></span>
+                <label for="mhGlobalAutoplay">视频热区自动播放</label>
+                <input type="checkbox" id="mhGlobalAutoplay" checked />
             </div>
             <div class="settingsRow">
-                <label for="mhAudioDist">音频触发距离 (m)</label>
-                <input type="range" id="mhAudioDist" min="1" max="80" step="0.5" />
-                <span id="mhAudioDistVal" class="settingsValueLabel"></span>
+                <label for="mhGlobalAudioAutoplay">音频热区自动播放</label>
+                <input type="checkbox" id="mhGlobalAudioAutoplay" checked />
             </div>
+        </div>
+        <div class="media-trigger-distance-panel hidden" id="mediaTriggerDistancePanel">
+            <div class="settingsRow submenuHeader" style="margin-top:6px;">触发距离</div>
             <div class="settingsRow">
-                <label for="mhCone">视锥半角 (°)</label>
-                <input type="range" id="mhCone" min="15" max="85" step="1" />
-                <span id="mhConeVal" class="settingsValueLabel"></span>
+                <label for="mhAssetDist">距离 (m)</label>
+                <input type="range" id="mhAssetDist" min="1" max="80" step="0.5" />
+                <span id="mhAssetDistVal" class="settingsValueLabel"></span>
             </div>
             <div class="settingsRow">
                 <button type="button" id="mhBaselineBtn" class="settingsButton">从当前视角设基准距离</button>
@@ -391,50 +399,92 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
     };
     mediaUrlInput.addEventListener('keydown', onMediaUrlKeydown);
 
-    const mhVideoDist = root.querySelector<HTMLInputElement>('#mhVideoDist');
-    const mhAudioDist = root.querySelector<HTMLInputElement>('#mhAudioDist');
-    const mhCone = root.querySelector<HTMLInputElement>('#mhCone');
+    const mhGlobalAutoplay = root.querySelector<HTMLInputElement>('#mhGlobalAutoplay');
+    const mhGlobalAudioAutoplay = root.querySelector<HTMLInputElement>('#mhGlobalAudioAutoplay');
+    const mediaTriggerDistancePanel = root.querySelector<HTMLElement>('#mediaTriggerDistancePanel');
+    const mhAssetDist = root.querySelector<HTMLInputElement>('#mhAssetDist');
     const mhBaselineBtn = root.querySelector<HTMLButtonElement>('#mhBaselineBtn');
-    const mhVideoDistVal = root.querySelector<HTMLSpanElement>('#mhVideoDistVal');
-    const mhAudioDistVal = root.querySelector<HTMLSpanElement>('#mhAudioDistVal');
-    const mhConeVal = root.querySelector<HTMLSpanElement>('#mhConeVal');
+    const mhAssetDistVal = root.querySelector<HTMLSpanElement>('#mhAssetDistVal');
 
     const editUiTransport = getEditUiTransport(global);
 
-    const syncHotspotUi = () => {
-        const sm = ensureSceneMediaHotspot(global.settings as ExperienceSettings);
-        if (mhVideoDist) mhVideoDist.value = String(sm.videoTriggerDistanceM);
-        if (mhAudioDist) mhAudioDist.value = String(sm.audioTriggerDistanceM);
-        if (mhCone) mhCone.value = String(sm.coneHalfDeg);
-        if (mhVideoDistVal) mhVideoDistVal.textContent = `${sm.videoTriggerDistanceM.toFixed(1)} m`;
-        if (mhAudioDistVal) mhAudioDistVal.textContent = `${sm.audioTriggerDistanceM.toFixed(1)} m`;
-        if (mhConeVal) mhConeVal.textContent = `${sm.coneHalfDeg}°`;
+    const syncGlobalHotspotUi = () => {
+        const settings = global.settings as ExperienceSettings;
+        if (mhGlobalAutoplay) {
+            mhGlobalAutoplay.checked = readGlobalVideoHotspotAutoplayEnabled(settings);
+        }
+        if (mhGlobalAudioAutoplay) {
+            mhGlobalAudioAutoplay.checked = readGlobalAudioHotspotAutoplayEnabled(settings);
+        }
     };
 
-    const buildHotspotPatch = (): Partial<SceneMediaHotspotSettings> => ({
-        videoTriggerDistanceM: mhVideoDist ? Number(mhVideoDist.value) : undefined,
-        audioTriggerDistanceM: mhAudioDist ? Number(mhAudioDist.value) : undefined,
-        coneHalfDeg: mhCone ? Number(mhCone.value) : undefined
-    });
-
-    const onHotspotField = () => {
-        const patch = buildHotspotPatch();
+    const sendOrApplyHotspotPatch = (patch: SceneMediaHotspotPatch) => {
         if (editUiTransport === 'message-bridge') {
             sendEditProtocolMessage({ type: 'MEDIA_HOTSPOT_SET', value: patch });
             return;
         }
         patchSceneMediaHotspot(global.settings as ExperienceSettings, patch);
-        syncHotspotUi();
+        syncGlobalHotspotUi();
         events.fire('sceneMediaHotspot:changed');
     };
 
-    syncHotspotUi();
-    mhVideoDist?.addEventListener('input', onHotspotField);
-    mhAudioDist?.addEventListener('input', onHotspotField);
-    mhCone?.addEventListener('input', onHotspotField);
+    const onGlobalAutoplayChange = () => {
+        if (!mhGlobalAutoplay) return;
+        sendOrApplyHotspotPatch({ video: { hotspotAutoplayEnabled: mhGlobalAutoplay.checked } });
+    };
 
-    const onHotspotExternal = () => syncHotspotUi();
+    const onGlobalAudioAutoplayChange = () => {
+        if (!mhGlobalAudioAutoplay) return;
+        sendOrApplyHotspotPatch({ audio: { hotspotAutoplayEnabled: mhGlobalAudioAutoplay.checked } });
+    };
+
+    syncGlobalHotspotUi();
+    mhGlobalAutoplay?.addEventListener('change', onGlobalAutoplayChange);
+    mhGlobalAudioAutoplay?.addEventListener('change', onGlobalAudioAutoplayChange);
+
+    const onHotspotExternal = () => syncGlobalHotspotUi();
     events.on('sceneMediaHotspot:changed', onHotspotExternal);
+
+    const syncPerAssetDistanceUi = () => {
+        const entry = getSelectedScenePlacedItem(state);
+        const t =
+            entry?.assetType === 'video' || entry?.assetType === 'audio'
+                ? entry.assetType
+                : state.selectedSceneEntityId
+                    ? getSelectedSceneAssetType(state, global.settings.sceneAssets)
+                    : null;
+        const isMedia = t === 'video' || t === 'audio';
+        if (mediaTriggerDistancePanel) {
+            mediaTriggerDistancePanel.classList.toggle('hidden', !isMedia);
+        }
+        if (!isMedia || !mhAssetDist || !entry) return;
+        const dist = readEntryTriggerDistanceM(entry, t, global.settings as ExperienceSettings);
+        mhAssetDist.value = String(dist);
+        if (mhAssetDistVal) mhAssetDistVal.textContent = `${dist.toFixed(1)} m`;
+    };
+
+    const onAssetDistInput = () => {
+        const id = state.selectedSceneEntityId;
+        if (!id || !mhAssetDist) return;
+        const entry = getSelectedScenePlacedItem(state);
+        const t =
+            entry?.assetType === 'video' || entry?.assetType === 'audio'
+                ? entry.assetType
+                : getSelectedSceneAssetType(state, global.settings.sceneAssets);
+        if (t !== 'video' && t !== 'audio') return;
+        const value = Number(mhAssetDist.value);
+        if (editUiTransport === 'message-bridge') {
+            sendEditProtocolMessage({ type: 'ASSET_MEDIA_HOTSPOT_RANGE_SET', id, value });
+            return;
+        }
+        if (applySceneAssetTriggerDistanceM(global, id, value)) {
+            pushEditHistory(global, 'set media trigger distance');
+        }
+        syncPerAssetDistanceUi();
+    };
+
+    syncPerAssetDistanceUi();
+    mhAssetDist?.addEventListener('input', onAssetDistInput);
 
     const onBaselineClick = () => {
         const id = state.selectedSceneEntityId;
@@ -444,18 +494,27 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
             return;
         }
         if (editUiTransport === 'message-bridge') {
-            sendEditProtocolMessage({ type: 'MEDIA_HOTSPOT_SET_BASELINE', id, target });
+            sendEditProtocolMessage({ type: 'ASSET_MEDIA_HOTSPOT_BASELINE_SET', id });
             return;
         }
-        const result = applySceneMediaHotspotBaselineFromView(global, { sceneEntityId: id, target });
+        const result = applySceneMediaHotspotBaselineFromView(global, { sceneEntityId: id });
         if (result.ok === false) {
             console.warn('[MediaHotspot] 设基准距离失败', result.reason);
             return;
         }
-        syncHotspotUi();
-        events.fire('sceneMediaHotspot:changed');
+        syncPerAssetDistanceUi();
+        events.fire('sceneAsset:triggerDistanceChanged', {
+            id: result.id,
+            triggerDistanceM: result.triggerDistanceM
+        });
     };
     mhBaselineBtn?.addEventListener('click', onBaselineClick);
+
+    const onSceneAssetSelectedForDistance = () => syncPerAssetDistanceUi();
+    events.on('sceneAsset:selected', onSceneAssetSelectedForDistance);
+    events.on('sceneAssets:added', onSceneAssetSelectedForDistance);
+    events.on('sceneAssets:removed', onSceneAssetSelectedForDistance);
+    events.on('sceneAsset:triggerDistanceChanged', onSceneAssetSelectedForDistance);
 
     const videoCurvaturePanel = root.querySelector<HTMLElement>('#videoCurvaturePanel');
     const videoCurvatureInput = root.querySelector<HTMLInputElement>('#videoCurvature');
@@ -510,11 +569,15 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         fileInput.removeEventListener('change', handleFileSelect);
         addMediaUrlBtn.removeEventListener('click', addMediaFromUrl);
         mediaUrlInput.removeEventListener('keydown', onMediaUrlKeydown);
-        mhVideoDist?.removeEventListener('input', onHotspotField);
-        mhAudioDist?.removeEventListener('input', onHotspotField);
-        mhCone?.removeEventListener('input', onHotspotField);
+        mhGlobalAutoplay?.removeEventListener('change', onGlobalAutoplayChange);
+        mhGlobalAudioAutoplay?.removeEventListener('change', onGlobalAudioAutoplayChange);
+        mhAssetDist?.removeEventListener('input', onAssetDistInput);
         mhBaselineBtn?.removeEventListener('click', onBaselineClick);
         events.off('sceneMediaHotspot:changed', onHotspotExternal);
+        events.off('sceneAsset:selected', onSceneAssetSelectedForDistance);
+        events.off('sceneAssets:added', onSceneAssetSelectedForDistance);
+        events.off('sceneAssets:removed', onSceneAssetSelectedForDistance);
+        events.off('sceneAsset:triggerDistanceChanged', onSceneAssetSelectedForDistance);
         videoCurvatureInput?.removeEventListener('input', onVideoCurvatureInput);
         events.off('sceneAsset:selected', onSceneAssetSelectedForCurvature);
         events.off('sceneAssets:added', onSceneAssetSelectedForCurvature);

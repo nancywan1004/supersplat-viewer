@@ -44,6 +44,21 @@ const MODE_TO_GIZMO_TYPE: Record<AssetTransformMode, string> = {
     scale: 'scale'
 };
 
+type GizmoHitTest = (canvasX: number, canvasY: number) => boolean;
+
+let sceneGizmoHitTest: GizmoHitTest | null = null;
+
+/** 屏幕坐标是否命中当前场景 Transform Gizmo（供音视频播控 arbiter 避让）。 */
+export function hitSceneGizmoAtClient(global: Global, clientX: number, clientY: number): boolean {
+    if (!global.state.editMode || !sceneGizmoHitTest) return false;
+    const canvas = global.app.graphicsDevice.canvas as HTMLCanvasElement;
+    const rect = canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    if (x < 0 || y < 0 || x > rect.width || y > rect.height) return false;
+    return sceneGizmoHitTest(x, y);
+}
+
 type RotateGizmoShape = 'x' | 'y' | 'z' | 'xyz' | 'face';
 const ALL_ROTATE_GIZMO_SHAPES: RotateGizmoShape[] = ['x', 'y', 'z', 'xyz', 'face'];
 const SPOT_ROTATE_EPSILON = 1e-5;
@@ -246,21 +261,26 @@ export function initGizmoHandler(global: Global): () => void {
             };
             const rotateGizmo = _gizmos.rotate;
             const scaleGizmo = _gizmos.scale;
+            const hitGizmoAtCanvas = (x: number, y: number): boolean => {
+                if (!handler || handler._nodes.length === 0) return false;
+                const g: any = handler.gizmo;
+                if (!g || typeof g._getSelection !== 'function') return false;
+                const hit = g._getSelection(x, y);
+                return Array.isArray(hit) && hit.length > 0;
+            };
+            sceneGizmoHitTest = hitGizmoAtCanvas;
+
             const onCanvasPointerDownCapture = (ev: PointerEvent) => {
                 if (!ev.isPrimary || ev.button !== 0 || !state.editMode) return;
-                if (!handler || handler._nodes.length === 0) return;
-                const g: any = handler.gizmo;
-                if (!g || typeof g._getSelection !== 'function') return;
                 const rect = canvas.getBoundingClientRect();
                 const x = ev.clientX - rect.left;
                 const y = ev.clientY - rect.top;
                 if (x < 0 || y < 0 || x > rect.width || y > rect.height) return;
-                const hit = g._getSelection(x, y);
-                if (Array.isArray(hit) && hit.length > 0) {
-                    gizmoPointerLocked = true;
-                    state.cameraControlsEnabled = false;
-                    events.fire('cameraControls:flushInputs');
-                }
+                if (!hitGizmoAtCanvas(x, y)) return;
+                gizmoPointerLocked = true;
+                state.gizmoPointerActive = true;
+                state.cameraControlsEnabled = false;
+                events.fire('cameraControls:flushInputs');
             };
             canvas.addEventListener('pointerdown', onCanvasPointerDownCapture, true);
 
@@ -387,11 +407,13 @@ export function initGizmoHandler(global: Global): () => void {
                 gizmo.on('pointer:down', (_x: number, _y: number, meshInstance: any) => {
                     if (meshInstance) {
                         gizmoPointerLocked = true;
+                        state.gizmoPointerActive = true;
                         state.cameraControlsEnabled = false;
                     }
                 });
                 gizmo.on('pointer:up', () => {
                     gizmoPointerLocked = false;
+                    state.gizmoPointerActive = false;
                     // 先清空一次相机输入增量，再重新开启相机控制，避免「松手瞬间相机跳一下」
                     events.fire('cameraControls:flushInputs');
                     state.cameraControlsEnabled = true;
@@ -445,6 +467,8 @@ export function initGizmoHandler(global: Global): () => void {
             const onWindowPointerUp = (ev: PointerEvent) => {
                 if (ev.button !== 0 || !gizmoPointerLocked) return;
                 gizmoPointerLocked = false;
+                state.gizmoPointerActive = false;
+                state.suppressAssetPointerClick = true;
                 shiftUniformScaleActive = false;
                 shiftUniformScaleStart.clear();
                 events.fire('cameraControls:flushInputs');
@@ -504,6 +528,7 @@ export function initGizmoHandler(global: Global): () => void {
                 },
                 destroy() {
                     gizmoPointerLocked = false;
+                    state.gizmoPointerActive = false;
                     shiftUniformScaleActive = false;
                     shiftUniformScaleStart.clear();
                     window.removeEventListener('keydown', onWindowKeyDown, true);
@@ -700,5 +725,8 @@ export function initGizmoHandler(global: Global): () => void {
         events.off('previewMode:changed', onPreviewModeChanged as any);
         app.off('update', onUpdate);
         handler?.destroy();
+        sceneGizmoHitTest = null;
+        state.gizmoPointerActive = false;
+        state.suppressAssetPointerClick = false;
     };
 }

@@ -317,6 +317,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         scenePlacedEntities: [],
         selectedSceneEntityId: null,
         cameraControlsEnabled: true,
+        gizmoPointerActive: false,
+        suppressAssetPointerClick: false,
 
         // 标注相关状态
         selectedAnnotationId: null,
@@ -421,8 +423,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         });
     }
 
-    events.on('skyboxSwitch', async (url?: string | null) => {
-        setSkyboxUrlInSettings(global.settings, url);
+    events.on('skyboxSet', async (url?: string | null) => {
+        setSkyboxUrlInSettings(global.settings, url ?? null);
 
         const trimmed = typeof url === 'string' ? url.trim() : '';
         if (!trimmed) {
@@ -435,7 +437,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
             await applySkyboxTexture(app, trimmed);
             events.fire('skyboxSelectionSynced', trimmed);
         } catch (err) {
-            console.warn('[SuperSplat] 切换天空盒失败：', err);
+            console.warn('[SuperSplat] 设置天空盒失败：', err);
         }
     });
 

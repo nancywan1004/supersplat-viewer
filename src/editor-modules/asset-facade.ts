@@ -1,3 +1,4 @@
+import { applySceneAssetTriggerDistanceM } from '../scene-assets/asset-placement-handler';
 import type { AssetLibraryItem, Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 import { setPlacementCursorActive } from '../placement-cursor';
 import { applyViewAnnotationsVisible } from '../view-settings';
@@ -230,6 +231,12 @@ class AssetFacade implements ModuleFacade {
             const pl = command.payload as { id?: string; value?: number } | undefined;
             if (typeof pl?.id !== 'string' || typeof pl?.value !== 'number') return;
             events.fire('assetEdit:videoCurvature', { id: pl.id, value: pl.value });
+            break;
+        }
+        case 'ASSET_MEDIA_HOTSPOT_RANGE_SET': {
+            const pl = command.payload as { id?: string; value?: number } | undefined;
+            if (typeof pl?.id !== 'string' || typeof pl?.value !== 'number') return;
+            applySceneAssetTriggerDistanceM(ctx.global, pl.id, pl.value);
             break;
         }
         default:

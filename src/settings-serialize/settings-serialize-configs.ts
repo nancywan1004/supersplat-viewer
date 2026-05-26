@@ -27,18 +27,25 @@ export const DEFAULT_BLOOM_EDITOR_SESSION: BloomEditorSession = {
 };
 
 export const DEFAULT_SHADOW = {
-    enabled: true,
     darken: 0,
     castShadows: true,
     debugVisual: false,
     sphereRadius: 0.5
 } as const;
 
-/** 场景音视频热区默认（仅写入 settings 的字段，`ensureSceneMediaHotspot`） */
+/** 单资产缺省触发距离（`readEntryTriggerDistanceM` 回退） */
+export const DEFAULT_VIDEO_TRIGGER_DISTANCE_M = 10;
+export const DEFAULT_AUDIO_TRIGGER_DISTANCE_M = 8;
+
+/** 场景音视频热区全局默认（`ensureSceneMediaHotspot`） */
 export const DEFAULT_SCENE_MEDIA_HOTSPOT = {
-    videoTriggerDistanceM: 10,
-    audioTriggerDistanceM: 8,
-    coneHalfDeg: 60
+    video: {
+        hotspotAutoplayEnabled: true,
+        coneHalfDeg: 60
+    },
+    audio: {
+        hotspotAutoplayEnabled: true
+    }
 } as const;
 
 /** 与 `settings.ts` 新建体验 / v1→v2 迁移中的 `revealEffect` 默认一致（`ensureRevealEffect` 仅在缺整条对象时补全） */

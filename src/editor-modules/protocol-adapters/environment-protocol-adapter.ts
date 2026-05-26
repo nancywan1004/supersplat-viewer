@@ -3,7 +3,7 @@
  * 由 EnvironmentFacade 调用；其它模块如需相同语义可直接 import 本文件。
  */
 
-import { getPositionInFrontOfCamera } from '../../asset-placement-handler';
+import { getPositionInFrontOfCamera } from '../../scene-assets/asset-placement-handler';
 import { spotApexToHalfDeg, updatePointLightsFromSettings } from '../../light';
 import type { ExperienceSettings } from '../../schemas/v2';
 import {
@@ -637,12 +637,9 @@ export function applyBloomLocalLightRegionDelete(global: Global, regionId: strin
     global.events.fire('bloomLocalLightRegion:listChanged');
 }
 
-/** SHADOW_SET */
-export function applyShadowSet(global: Global, enabled: boolean): void {
-    const settings = global.settings as ExperienceSettings;
-    const s = ensureShadow(settings);
-    (s as Record<string, unknown>).enabled = enabled;
-    global.events.fire('postEffect:changed');
+/** @deprecated `SHADOW_SET` / `shadow.enabled` 已废弃；阴影由 URL `?splatMesh=` 决定。 */
+export function applyShadowSet(_global: Global, _enabled: boolean): void {
+    // no-op
 }
 
 /** SHADOW_INTENSITY_UPDATE → shadow.darken (0~1) */

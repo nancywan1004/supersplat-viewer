@@ -17,7 +17,7 @@ import {
     SEMANTIC_POSITION
 } from 'playcanvas';
 import type { Global } from '../../types';
-import { isShadowOutputEnabled } from './shadow-pipeline';
+import { isShadowOutputEnabled, isShadowSystemEnabled } from './shadow-system';
 
 /**
  * 与 Physics_Relighting_Demo 的 shadow-apply.mjs 完全一致的 shader：
@@ -29,7 +29,7 @@ import { isShadowOutputEnabled } from './shadow-pipeline';
  * - 我们不做任何阴影投影计算。shadowTex 的内容 100% 由 PlayCanvas 引擎在「阴影相机
  *   渲染接影面」时写入：接影面使用 LIT_SHADOW_CATCHER 材质，引擎采样光源的 shadow map 写出 R=0/1。
  * - 当该相机带 renderTarget（我们的 shadowMaskCamera）时，引擎在此 pass 里只合入
- *   平行光（directional）的 shadow map；平行光是否投射阴影由 postEffectSettings.shadow.enabled 统一控制。
+ *   平行光（directional）的 shadow map；平行光是否投射阴影由 URL `?splatMesh=` 决定。
  */
 const shadowApplyVs = /* glsl */ `
     attribute vec2 vertex_position;
@@ -231,9 +231,10 @@ class ShadowApplyRt extends Script {
             }
         }
         const shadowSettings = global.settings.postEffectSettings.shadow as {
-            debugVisual?: boolean; enabled?: boolean;
+            debugVisual?: boolean;
         } | undefined;
         const debugVisual = shadowSettings?.debugVisual === true;
+        const shadowSystemEnabled = isShadowSystemEnabled(global);
 
         // ─── 接影几何 → 放到 ShadowMask 层 ───
         const shadowCatcherRoot = app.root.findByName('shadowCatcher') as Entity | null;
@@ -263,7 +264,7 @@ class ShadowApplyRt extends Script {
             shadowLayerId: shadowLayer?.id,
             debugLayerId: debugLayer?.id,
             debugVisual,
-            shadowEnabled: shadowSettings?.enabled,
+            shadowSystemEnabled,
             foundGeomEntity: !!geomEntity,
             mainCameraLayers: mainCamComp.layers,
             lightCastShadows: lightEntity?.light?.castShadows ?? 'N/A',
@@ -328,20 +329,16 @@ class ShadowApplyRt extends Script {
         app.on('postrender', () => {
             _postrenderCount++;
             if (!global || !isShadowOutputEnabled(global)) {
+                if (_postrenderCount <= 3 && !isShadowSystemEnabled(global)) {
+                    console.log('[Shadow] postrender skipped (no splatMesh URL param).');
+                }
                 return;
             }
             const shadowSettingsNow = (global.settings.postEffectSettings.shadow || {}) as {
-                enabled?: boolean;
                 darken?: number;
                 debugRt?: boolean;
                 debugVisual?: boolean;
             };
-            if (!shadowSettingsNow.enabled) {
-                if (_postrenderCount <= 3) {
-                    console.log('[Shadow] postrender skipped (shadow.enabled is false).');
-                }
-                return;
-            }
             // debugVisual 时不叠阴影（此时材质已切换为 debugMaterial，RT 无意义）
             if (shadowSettingsNow.debugVisual) {
                 return;
@@ -430,13 +427,14 @@ class ShadowApplyRt extends Script {
         const global = this.global;
         const shadowLayer = this._shadowLayer;
         const shadowSettings = global.settings.postEffectSettings?.shadow as {
-            debugVisual?: boolean; enabled?: boolean; castShadows?: boolean;
+            debugVisual?: boolean;
+            castShadows?: boolean;
         } | undefined;
 
         const outputEnabled = isShadowOutputEnabled(global);
 
         if (this._shadowMaskCamera) {
-            this._shadowMaskCamera.enabled = outputEnabled && shadowSettings?.enabled === true;
+            this._shadowMaskCamera.enabled = outputEnabled;
         }
 
         const debugVisual = shadowSettings?.debugVisual === true;

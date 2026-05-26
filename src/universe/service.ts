@@ -35,9 +35,19 @@ const UPLOADED_FILE_HOST = ENV_CONFIG.uploadedFileHost;
 //#endregion
 
 export const SPLATFILENAME='point_cloud.splat',SOGFILENAME='point_cloud.sog',SETTINGFILENAME='settings.json';
+/** 项目缩略图本地/OSS 文件名：`{projectId}-thumbnail.jpg` */
+export const getProjectThumbnailFilename = (projectId: string | number): string => {
+    const id = String(projectId).trim().replace(/[^a-zA-Z0-9._-]+/g, '_') || 'project';
+    return `${id}-thumbnail.jpg`;
+};
 
 const UPDATE_PROJECT_DATA="/app/api/v1/project/version/create";   //post 更新项目文件
-//const GET_PRIGINAL_DATA="/app/api/v1/project/version/";  //get  {projectId}/original  获取初始版本模型文件
+/** 登记项目缩略图 CDN URL（PNG 须先经 OSS 上传） */
+const UPDATE_PROJECT_THUMBNAIL = '/app/api/v1/saas/project/image';
+/** GET `/app/api/v1/project/version/{projectId}/original` — 初始版本模型文件列表 */
+const GET_ORIGINAL_PROJECT_FILES = '/app/api/v1/project/version';
+/** 初始版本相机路径文件名（匹配列表项 `fileName` 的 basename） */
+export const TRANSFORM_JSON_BASENAME = 'transform.json';
 const GET_SINGLE_STSTOKEN="/oss/api/v1/oss/ststoken";  //post 单文件上传临时凭证
 const GET_MULTIPART_STSTOKEN="/oss/api/v1/oss/multipart/init" ; //post 大文件上传临时凭证
 const CHUNKSIZE=10485760;  //分片大小 10M
@@ -96,6 +106,26 @@ type UpdateProjectResponse = {
     message: string;
 };
 
+/** 项目缩略图登记请求（`POST /app/api/v1/saas/project/image`） */
+type UpdateProjectThumbnailRequest = {
+    fileType: 'SNAPSHOT';
+    projectId: number;
+    /** 存储位置（与 Universe 约定：2 = OSS/CDN） */
+    storageLocation: number;
+    url: string;
+};
+
+type UpdateProjectThumbnailResponse = {
+    code: number;
+    data: unknown;
+    message: string;
+};
+
+/** 项目缩略图上传（OSS + 登记接口）结果 */
+export type ProjectThumbnailUploadResult =
+    | { ok: true; thumbnailUrl: string }
+    | { ok: false; message: string };
+
 /**
  * 上传的文件类型
  */
@@ -108,15 +138,22 @@ type UploadFile = {
 /**
  * 获取项目原始数据-response
  */
+export type OriginalProjectFileEntry = {
+    fileName: string;
+    fileType: string;
+    fileUrl: string;
+};
+
 type GetProjectData_Response={
     code: number;
-    data: {
-        fileName: string;
-        fileType: string;
-        fileUrl: string;
-    }[];
+    data: OriginalProjectFileEntry[];
     message: string;
 };
+
+export type FetchOriginalTransformResult =
+    | { ok: true; found: true; transform: unknown; fileUrl: string }
+    | { ok: true; found: false }
+    | { ok: false; message: string };
 /**
  * 获取单文件上传临时凭证-request
  */
@@ -240,6 +277,64 @@ export const updateProjectData = async (projectId: number | string, inputFiles: 
  * 上传项目 settings.json（仅单文件）。
  * 会强制使用统一文件名 settings.json，接口 type 会自动走 setting。
  */
+/**
+ * 上传当前视口 PNG 为项目缩略图：先 OSS，再调用 {@link UPDATE_PROJECT_THUMBNAIL} 登记 URL。
+ */
+export const uploadProjectThumbnail = async (
+    projectId: number | string,
+    token: string,
+    imageBlob: Blob
+): Promise<ProjectThumbnailUploadResult> => {
+    if (projectId == null || projectId === '') {
+        const message = '缺少 projectId';
+        console.error('uploadProjectThumbnail', message);
+        return { ok: false, message };
+    }
+    if (!token) {
+        const message = '缺少 token';
+        console.error('uploadProjectThumbnail', message);
+        return { ok: false, message };
+    }
+    if (!imageBlob || imageBlob.size <= 0) {
+        return { ok: false, message: '截图数据为空' };
+    }
+
+    setUniverseAuthContext({ token });
+
+    try {
+        const file = new File([imageBlob], getProjectThumbnailFilename(projectId), { type: 'image/jpeg' });
+        const oss = await uploadFileToAliyun(file, 2, projectId);
+        const response = await postProjectThumbnail({
+            fileType: 'SNAPSHOT',
+            projectId: Number(projectId),
+            storageLocation: 2,
+            url: oss.fileUrl
+        });
+        const isSuccess = response.code === 1 || response.code === 200;
+        if (!isSuccess) {
+            const apiMsg = typeof response.message === 'string' && response.message.trim()
+                ? response.message.trim()
+                : '';
+            return {
+                ok: false,
+                message: apiMsg || `缩略图登记失败（接口 code=${response.code}）`
+            };
+        }
+        return { ok: true, thumbnailUrl: oss.fileUrl };
+    } catch (error) {
+        console.error('上传项目缩略图失败:', error);
+        const message = error instanceof Error ? error.message : String(error);
+        return { ok: false, message };
+    }
+};
+
+const postProjectThumbnail = async (
+    payload: UpdateProjectThumbnailRequest
+): Promise<UpdateProjectThumbnailResponse> => {
+    const url = `${API_HOST}${UPDATE_PROJECT_THUMBNAIL}`;
+    return await fetchCloudJsonPost<UpdateProjectThumbnailResponse>(url, payload);
+};
+
 export const uploadProjectData = async (
     projectId: number | string,
     token: string,
@@ -288,6 +383,103 @@ export type OssUploadResult = {
  * @param body 请求的 body
  * @returns 返回解析后的 JSON 数据
  */
+const fetchCloudJsonGet = async <TResponse>(url: string): Promise<TResponse> => {
+    let response: Response;
+    try {
+        response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                Authorization: getToken() ?? ''
+            }
+        });
+    } catch (error) {
+        logApi('GET', url, undefined, { error: String(error) });
+        throw error;
+    }
+
+    if (!response.ok) {
+        let text = '';
+        try {
+            text = await response.text();
+        } catch {
+            // ignore
+        }
+        logApi('GET', url, undefined, { status: response.status, text });
+        throw new Error(`请求失败，状态码: ${response.status}`);
+    }
+
+    const json = await response.json() as TResponse;
+    logApi('GET', url, undefined, json);
+    return json;
+};
+
+/** 列表项 `fileName` 的 basename 是否为 `transform.json` */
+export const isTransformJsonFileName = (fileName: string): boolean => {
+    const base = fileName.replace(/\\/g, '/').split('/').pop() ?? '';
+    return base === TRANSFORM_JSON_BASENAME;
+};
+
+/**
+ * 获取项目初始版本文件列表（未编辑过的原始模型包）。
+ */
+export const fetchOriginalProjectFiles = async (
+    projectId: number | string
+): Promise<OriginalProjectFileEntry[]> => {
+    const id = String(projectId).trim();
+    if (!id) {
+        throw new Error('缺少 projectId');
+    }
+    const url = `${API_HOST}${GET_ORIGINAL_PROJECT_FILES}/${encodeURIComponent(id)}/original`;
+    const response = await fetchCloudJsonGet<GetProjectData_Response>(url);
+    const isSuccess = response.code === 200 || response.code === 1;
+    if (!isSuccess || !Array.isArray(response.data)) {
+        const apiMsg = typeof response.message === 'string' && response.message.trim()
+            ? response.message.trim()
+            : '';
+        throw new Error(apiMsg || `获取初始版本文件列表失败（code=${response.code}）`);
+    }
+    return response.data;
+};
+
+/**
+ * 从初始版本文件列表中定位 `transform.json` 并下载 JSON 内容。
+ */
+export const fetchOriginalTransform = async (
+    projectId: number | string,
+    token: string
+): Promise<FetchOriginalTransformResult> => {
+    if (!token) {
+        return { ok: false, message: '缺少 token' };
+    }
+    if (projectId == null || projectId === '') {
+        return { ok: false, message: '缺少 projectId' };
+    }
+
+    setUniverseAuthContext({ token });
+
+    try {
+        const files = await fetchOriginalProjectFiles(projectId);
+        const entry = files.find((f) => typeof f.fileName === 'string' && isTransformJsonFileName(f.fileName));
+        if (!entry?.fileUrl) {
+            return { ok: true, found: false };
+        }
+
+        const fileResponse = await fetch(entry.fileUrl);
+        if (!fileResponse.ok) {
+            return {
+                ok: false,
+                message: `下载 transform.json 失败（HTTP ${fileResponse.status}）`
+            };
+        }
+        const transform = await fileResponse.json() as unknown;
+        return { ok: true, found: true, transform, fileUrl: entry.fileUrl };
+    } catch (error) {
+        console.error('fetchOriginalTransform 失败:', error);
+        const message = error instanceof Error ? error.message : String(error);
+        return { ok: false, message };
+    }
+};
+
 const fetchCloudJsonPost = async <TResponse>(
     url: string,
     body: unknown

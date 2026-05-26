@@ -1,5 +1,4 @@
-import type { Global } from '../../types';
-import type { ScenePlacedItem } from '../../types';
+import type { Global, ScenePlacedItem } from '../../types';
 import { pushEditHistory } from '../../edit-history';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
@@ -94,14 +93,18 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
             }
         });
         li.addEventListener('click', (e) => {
-            if ((e.target as HTMLElement).closest('.scene-asset-delete') || (e.target as HTMLElement).closest('.scene-asset-visibility')) return;
+            if (
+                (e.target as HTMLElement).closest('.scene-asset-delete')
+                || (e.target as HTMLElement).closest('.scene-asset-visibility')
+            ) {
+                return;
+            }
             if (editUiTransport === 'message-bridge') {
                 sendEditProtocolMessage({ type: 'ASSET_SELECT', id: entry.id });
                 return;
             }
             state.selectedSceneEntityId = entry.id;
             events.fire('sceneAsset:selected', { source: 'host' });
-            // internal 模式下场景列表点击也应与协议 ASSET_SELECT 对齐，统一触发资产聚焦。
             events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
             renderSceneAssetList(listEl, global);
         });

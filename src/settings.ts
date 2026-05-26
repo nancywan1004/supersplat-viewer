@@ -172,7 +172,6 @@ const migrateV2 = (v1: V1): V2 => {
                 intensity: 0.5
             },
             shadow: {
-                enabled: true,
                 darken: 0,
                 debugVisual: false,
                 castShadows: false
@@ -403,7 +402,7 @@ const importSettings = (settings: any): V2 => {
 };
 
 // export the latest/current schema types
-export type { AnimTrack, Camera, Annotation, PostEffectSettings, LegacyRevealEffect, TransformFrame, ExperienceSettings, EffectsSettings, SceneMediaHotspotSettings } from './schemas/v2';
+export type { AnimTrack, Camera, Annotation, PostEffectSettings, LegacyRevealEffect, TransformFrame, ExperienceSettings, EffectsSettings, SceneMediaHotspotSettings, SceneMediaHotspotPatch } from './schemas/v2';
 // validate unknown data against any supported settings schema version, throwing on invalid input
 const validateSettings = (settings: unknown): void => {
     const obj = assertObject(settings, 'settings');

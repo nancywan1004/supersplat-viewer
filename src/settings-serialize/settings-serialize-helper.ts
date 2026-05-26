@@ -8,7 +8,8 @@ import {
     DEFAULT_SHADOW
 } from './settings-serialize-configs';
 import { normalizeAnnotationMediaFields } from '../annotation-toolbar/media-fields';
-import { viewAxisDepthM } from '../scene-assets/media/media-view-depth';
+import { defaultTriggerDistanceMForAssetType } from '../scene-assets/media/media-hotspot-params';
+import { euclideanDistanceM, viewAxisDepthM } from '../scene-assets/media/media-view-depth';
 import type { Global } from '../types';
 import type {
     Annotation,
@@ -18,31 +19,57 @@ import type {
     PointLightConfig,
     DirectionalLightConfig,
     SpotLightConfig,
-    SceneMediaHotspotSettings
+    SceneMediaHotspotSettings,
+    SceneMediaHotspotPatch
 } from '../schemas/v2';
+import type { SceneAsset } from '../schemas/v2-custom';
 
 /** 光源配置项在运行时应带稳定 id（列表 / Gizmo / 协议共用） */
 export type LightWithId = (PointLightConfig | DirectionalLightConfig | SpotLightConfig) & { id?: string };
 
+export function readGlobalVideoHotspotAutoplayEnabled(settings: ExperienceSettings): boolean {
+    const sm = settings.sceneMediaHotspot;
+    if (!sm || typeof sm !== 'object') return true;
+    return sm.video?.hotspotAutoplayEnabled !== false;
+}
+
+export function readGlobalAudioHotspotAutoplayEnabled(settings: ExperienceSettings): boolean {
+    const sm = settings.sceneMediaHotspot;
+    if (!sm || typeof sm !== 'object') return true;
+    return sm.audio?.hotspotAutoplayEnabled !== false;
+}
+
+/** 嵌套子节点 `ensure`：必填字段缺失则补默认；`hotspotAutoplayEnabled` 仅在显式 false 时入库 */
+function ensureHotspotSubtree(
+    sm: Record<string, unknown>,
+    key: 'video' | 'audio'
+): Record<string, unknown> {
+    if (!sm[key] || typeof sm[key] !== 'object') {
+        sm[key] = { ...DEFAULT_SCENE_MEDIA_HOTSPOT[key] };
+    }
+    const node = sm[key] as Record<string, unknown>;
+    if (key === 'video') {
+        if (typeof node.coneHalfDeg !== 'number' || !Number.isFinite(node.coneHalfDeg)) {
+            node.coneHalfDeg = DEFAULT_SCENE_MEDIA_HOTSPOT.video.coneHalfDeg;
+        }
+    }
+    if (node.hotspotAutoplayEnabled !== false) {
+        delete node.hotspotAutoplayEnabled;
+    }
+    return node;
+}
+
 export function ensureSceneMediaHotspot(settings: ExperienceSettings): SceneMediaHotspotSettings {
     const root = settings as Record<string, unknown>;
     if (!root.sceneMediaHotspot || typeof root.sceneMediaHotspot !== 'object') {
-        root.sceneMediaHotspot = { ...DEFAULT_SCENE_MEDIA_HOTSPOT };
+        root.sceneMediaHotspot = {
+            video: { ...DEFAULT_SCENE_MEDIA_HOTSPOT.video },
+            audio: { ...DEFAULT_SCENE_MEDIA_HOTSPOT.audio }
+        };
     }
     const sm = root.sceneMediaHotspot as Record<string, unknown>;
-    if (typeof sm.videoTriggerDistanceM !== 'number' || !Number.isFinite(sm.videoTriggerDistanceM)) {
-        sm.videoTriggerDistanceM = DEFAULT_SCENE_MEDIA_HOTSPOT.videoTriggerDistanceM;
-    }
-    if (typeof sm.audioTriggerDistanceM !== 'number' || !Number.isFinite(sm.audioTriggerDistanceM)) {
-        sm.audioTriggerDistanceM = DEFAULT_SCENE_MEDIA_HOTSPOT.audioTriggerDistanceM;
-    }
-    if (typeof sm.coneHalfDeg !== 'number' || !Number.isFinite(sm.coneHalfDeg)) {
-        sm.coneHalfDeg = DEFAULT_SCENE_MEDIA_HOTSPOT.coneHalfDeg;
-    }
-    // 旧版曾持久化以下字段，不再进入 settings；导入时剥离
-    delete sm.minToggleIntervalMs;
-    delete sm.hysteresisM;
-    delete sm.showAudioIcon;
+    ensureHotspotSubtree(sm, 'video');
+    ensureHotspotSubtree(sm, 'audio');
     return root.sceneMediaHotspot as SceneMediaHotspotSettings;
 }
 
@@ -93,69 +120,145 @@ export function resolveInitialSkyboxUrl(settings: ExperienceSettings, configSkyb
     return undefined;
 }
 
-/** 父级 `MEDIA_HOTSPOT_SET`：仅合并传入的有限数值字段 */
+/** 父级 `MEDIA_HOTSPOT_SET`：嵌套 patch，仅合并 video / audio 子节点的全局热区字段 */
 export function patchSceneMediaHotspot(
     settings: ExperienceSettings,
-    patch: Partial<SceneMediaHotspotSettings>
+    patch: SceneMediaHotspotPatch
 ): SceneMediaHotspotSettings {
     const sm = ensureSceneMediaHotspot(settings);
-    if (typeof patch.videoTriggerDistanceM === 'number' && Number.isFinite(patch.videoTriggerDistanceM)) {
-        sm.videoTriggerDistanceM = patch.videoTriggerDistanceM;
+    if (patch.video && typeof patch.video === 'object') {
+        const vRec = sm.video as Record<string, unknown>;
+        if (patch.video.hotspotAutoplayEnabled === false) {
+            vRec.hotspotAutoplayEnabled = false;
+        } else if (patch.video.hotspotAutoplayEnabled === true) {
+            delete vRec.hotspotAutoplayEnabled;
+        }
+        if (typeof patch.video.coneHalfDeg === 'number' && Number.isFinite(patch.video.coneHalfDeg)) {
+            sm.video.coneHalfDeg = patch.video.coneHalfDeg;
+        }
     }
-    if (typeof patch.audioTriggerDistanceM === 'number' && Number.isFinite(patch.audioTriggerDistanceM)) {
-        sm.audioTriggerDistanceM = patch.audioTriggerDistanceM;
-    }
-    if (typeof patch.coneHalfDeg === 'number' && Number.isFinite(patch.coneHalfDeg)) {
-        sm.coneHalfDeg = patch.coneHalfDeg;
+    if (patch.audio && typeof patch.audio === 'object') {
+        const aRec = sm.audio as Record<string, unknown>;
+        if (patch.audio.hotspotAutoplayEnabled === false) {
+            aRec.hotspotAutoplayEnabled = false;
+        } else if (patch.audio.hotspotAutoplayEnabled === true) {
+            delete aRec.hotspotAutoplayEnabled;
+        }
     }
     return sm;
 }
 
 export type MediaHotspotBaselineResult =
-    | { ok: true; target: 'video' | 'audio'; distanceM: number; settings: SceneMediaHotspotSettings }
+    | { ok: true; id: string; assetType: 'video' | 'audio'; triggerDistanceM: number }
     | { ok: false; reason: string };
 
 export type ApplySceneMediaHotspotBaselineOptions = {
-    /** 场景已放置资产 id（`scenePlacedEntities[].id`） */
+    /** 场景已放置资产 id（`scenePlacedEntities[].id` / `sceneAssets[].id`） */
     sceneEntityId: string;
-    target: 'video' | 'audio';
 };
 
+function resolveSceneMediaAsset(
+    global: Global,
+    sceneEntityId: string
+): { sa: SceneAsset; entry: NonNullable<typeof global.state.scenePlacedEntities>[number] } | null {
+    const settings = global.settings as ExperienceSettings;
+    if (!Array.isArray(settings.sceneAssets)) settings.sceneAssets = [];
+    const entry = global.state.scenePlacedEntities?.find((e) => e.id === sceneEntityId);
+    if (!entry) return null;
+
+    let sa = settings.sceneAssets.find((a) => a.id === sceneEntityId);
+    const assetType = entry.assetType;
+    if (!sa && (assetType === 'video' || assetType === 'audio')) {
+        const pos = entry.entity.getPosition();
+        const scale = entry.entity.getLocalScale();
+        const distDefault = defaultTriggerDistanceMForAssetType(assetType)!;
+        sa = {
+            id: entry.id,
+            type: assetType,
+            name: entry.name,
+            visible: entry.visible !== false,
+            source: {
+                assetId: entry.assetId,
+                filename: entry.filename,
+                url: entry.url
+            },
+            transform: {
+                position: [pos.x, pos.y, pos.z],
+                rotation: [0, 0, 0],
+                scale: [scale.x, scale.y, scale.z]
+            },
+            triggerDistanceM:
+                typeof entry.triggerDistanceM === 'number' && entry.triggerDistanceM > 0
+                    ? entry.triggerDistanceM
+                    : distDefault
+        };
+        if (
+            assetType === 'video'
+            && typeof entry.horizontalCurvature === 'number'
+            && entry.horizontalCurvature > 0
+        ) {
+            sa.transform.horizontalCurvature = entry.horizontalCurvature;
+        }
+        settings.sceneAssets.push(sa);
+    }
+    if (!sa) return null;
+    return { sa, entry };
+}
+
 /**
- * 将「当前相机沿视线到指定 video/audio 锚点」的视轴深度写入对应触发半径。
- * 协议须传 `id` + `target`；内置 UI 用当前 `selectedSceneEntityId`。
+ * 将当前相机到锚点的距离写入该资产的 `triggerDistanceM`：video = 视轴深度，audio = 欧氏距离。
  */
 export function applySceneMediaHotspotBaselineFromView(
     global: Global,
     opts: ApplySceneMediaHotspotBaselineOptions
 ): MediaHotspotBaselineResult {
-    const list = global.state.scenePlacedEntities ?? [];
-    const sel = list.find((e) => e.id === opts.sceneEntityId) ?? null;
-    if (!sel?.entity) {
+    const resolved = resolveSceneMediaAsset(global, opts.sceneEntityId);
+    if (!resolved) {
+        return { ok: false, reason: 'asset_not_found' };
+    }
+    const { sa, entry } = resolved;
+    if (sa.type !== 'video' && sa.type !== 'audio') {
+        return { ok: false, reason: 'asset_not_video_or_audio' };
+    }
+    const anchor = entry.entity?.getPosition();
+    if (!anchor) {
         return { ok: false, reason: 'asset_not_found' };
     }
 
-    const assetType = sel.assetType;
-    if (assetType !== 'video' && assetType !== 'audio') {
-        return { ok: false, reason: 'asset_not_video_or_audio' };
-    }
-    if (assetType !== opts.target) {
-        return { ok: false, reason: 'target_mismatch_selected_asset' };
-    }
-
-    const distanceM = viewAxisDepthM(global.camera, sel.entity.getPosition());
+    const distanceM =
+        sa.type === 'video'
+            ? viewAxisDepthM(global.camera, anchor)
+            : euclideanDistanceM(global.camera.getPosition(), anchor);
     if (!Number.isFinite(distanceM) || distanceM <= 0) {
         return { ok: false, reason: 'invalid_distance' };
     }
 
-    const sm = ensureSceneMediaHotspot(global.settings as ExperienceSettings);
-    if (opts.target === 'video') {
-        sm.videoTriggerDistanceM = distanceM;
-    } else {
-        sm.audioTriggerDistanceM = distanceM;
-    }
+    const triggerDistanceM = Math.max(0.01, distanceM);
+    sa.triggerDistanceM = triggerDistanceM;
+    entry.triggerDistanceM = triggerDistanceM;
 
-    return { ok: true, target: opts.target, distanceM, settings: sm };
+    return { ok: true, id: sa.id, assetType: sa.type, triggerDistanceM };
+}
+
+/** 写入单条 video/audio 的触发距离（settings + 运行态） */
+export function applySceneAssetTriggerDistanceM(
+    global: Global,
+    sceneAssetId: string,
+    valueM: number
+): boolean {
+    if (!Number.isFinite(valueM) || valueM <= 0) return false;
+    const resolved = resolveSceneMediaAsset(global, sceneAssetId);
+    if (!resolved) return false;
+    const { sa, entry } = resolved;
+    if (sa.type !== 'video' && sa.type !== 'audio') return false;
+
+    const triggerDistanceM = Math.max(0.01, valueM);
+    sa.triggerDistanceM = triggerDistanceM;
+    if (entry) {
+        entry.triggerDistanceM = triggerDistanceM;
+    }
+    global.events.fire('sceneAsset:triggerDistanceChanged', { id: sceneAssetId, triggerDistanceM });
+    return true;
 }
 
 export function ensureNightMode(settings: ExperienceSettings): { fade?: number } {

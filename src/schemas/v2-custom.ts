@@ -66,7 +66,7 @@ type PointLightConfig = {
     enabled?: boolean
 };
 
-/** 平行光配置（主方向光/太阳，无位置概念，仅方向；用于阴影等）。阴影开关由 postEffectSettings.shadow.enabled 统一控制。 */
+/** 平行光配置（主方向光/太阳，无位置概念，仅方向；用于阴影等）。阴影开关由 URL `?splatMesh=` 决定。 */
 type DirectionalLightConfig = {
     type: 'directional',
     id?: string,
@@ -162,14 +162,26 @@ type LocalLightRegion = {
     linkedLightId?: string | null;
 };
 
-/** 场景音视频热区：仅全局触发距离与视锥半角（持久化于 settings 根） */
+/** 场景音视频热区全局参数（持久化于 settings 根；触发距离在 sceneAssets[]） */
 type SceneMediaHotspotSettings = {
-    /** 视频触发球半径（米） */
-    videoTriggerDistanceM: number;
-    /** 音频触发球半径（米） */
-    audioTriggerDistanceM: number;
-    /** 相机前向与「相机→锚点」夹角半角上限（度），总锥约 `2 * coneHalfDeg` */
-    coneHalfDeg: number;
+    /** 视频热区全局参数 */
+    video: {
+        /** 是否由热区自动播放；缺省 true，显式 false 时入库 */
+        hotspotAutoplayEnabled?: boolean;
+        /** 视锥半角（度）；总锥约 `2 × coneHalfDeg` */
+        coneHalfDeg: number;
+    };
+    /** 音频热区全局参数（音频用纯欧氏距离，无视锥） */
+    audio: {
+        /** 是否由热区自动播放；缺省 true，显式 false 时入库 */
+        hotspotAutoplayEnabled?: boolean;
+    };
+};
+
+/** 父级 `MEDIA_HOTSPOT_SET` 入站 payload；video / audio 子节点字段均可部分提供 */
+type SceneMediaHotspotPatch = {
+    video?: Partial<SceneMediaHotspotSettings['video']>;
+    audio?: Partial<SceneMediaHotspotSettings['audio']>;
 };
 
 type SceneAsset = {
@@ -184,6 +196,8 @@ type SceneAsset = {
         filename?: string,
         url?: string
     },
+    /** video / audio：热区触发距离（米）；video 用视轴深度，audio 用欧氏距离 */
+    triggerDistanceM?: number,
     transform: {
         position: [number, number, number],
         /** 兼容字段：旧数据使用欧拉角 */
@@ -220,4 +234,4 @@ type EffectsSettings = {
     asset: EffectsAssetTrack;
 };
 
-export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset, SceneMediaHotspotSettings, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsAssetTrack };
+export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset, SceneMediaHotspotSettings, SceneMediaHotspotPatch, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsAssetTrack };

@@ -10,7 +10,6 @@ import {
 } from './effects-sync';
 
 const defaultPostEffectShadow = () => ({
-    enabled: DEFAULT_SHADOW.enabled,
     darken: DEFAULT_SHADOW.darken,
     debugVisual: DEFAULT_SHADOW.debugVisual,
     castShadows: false
@@ -184,9 +183,10 @@ export function serializeScenePlacedItem(entry: ScenePlacedItem): SceneAsset {
         transform.horizontalCurvature = entry.horizontalCurvature;
     }
 
-    return {
+    const assetType = entry.assetType ?? 'gaussian';
+    const out: SceneAsset = {
         id: entry.id,
-        type: entry.assetType ?? 'gaussian',
+        type: assetType,
         name: entry.name,
         visible: entry.visible,
         thumbnailUrl: entry.thumbnailUrl,
@@ -197,6 +197,13 @@ export function serializeScenePlacedItem(entry: ScenePlacedItem): SceneAsset {
         },
         transform
     };
+    if (assetType === 'video' || assetType === 'audio') {
+        const dist = entry.triggerDistanceM;
+        if (typeof dist === 'number' && Number.isFinite(dist) && dist > 0) {
+            out.triggerDistanceM = dist;
+        }
+    }
+    return out;
 }
 
 /**
