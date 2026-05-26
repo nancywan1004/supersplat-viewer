@@ -353,6 +353,13 @@ function createSparkleMaterial(): ShaderMaterial {
     return material;
 }
 
+/** 亮光细闪三档光点色默认值（脚本与 effect-params UI 共用） */
+export const SPARKLE_DEFAULT_LIGHT_TINTS = {
+    lightTint1: [1, 1, 1],
+    lightTint2: [0.2, 1, 1],
+    lightTint3: [0.2, 0.5, 1]
+} as const satisfies Record<string, readonly [number, number, number]>;
+
 class GsplatPersistentSparkleTwinkle extends Script {
     static scriptName = 'gsplatPersistentSparkleTwinkle';
 
@@ -365,9 +372,9 @@ class GsplatPersistentSparkleTwinkle extends Script {
     twinkleMin = 0;
     twinkleSharpness = 3.0;
     brightness = 2;
-    lightTint1 = new Color(1, 0.5, 0.5);
-    lightTint2 = new Color(1, 0.85, 0.4);
-    lightTint3 = new Color(0.4, 0.8, 1);
+    lightTint1 = new Color(...SPARKLE_DEFAULT_LIGHT_TINTS.lightTint1);
+    lightTint2 = new Color(...SPARKLE_DEFAULT_LIGHT_TINTS.lightTint2);
+    lightTint3 = new Color(...SPARKLE_DEFAULT_LIGHT_TINTS.lightTint3);
     colorBlendMode = false;
 
     private overlayEntity: Entity | null = null;

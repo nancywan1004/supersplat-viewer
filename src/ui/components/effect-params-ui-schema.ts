@@ -2,6 +2,7 @@ import {
     getPersistentEffectParamKeys,
     getPersistentParamFieldKind
 } from '../../vfx/effects-runtime/persistent/persistent-effect-params';
+import { SPARKLE_DEFAULT_LIGHT_TINTS } from '../../vfx/effects-runtime/persistent/gsplat-sparkle-twinkle';
 import {
     getRevealEffectParamKeys,
     getRevealParamFieldKind,
@@ -201,13 +202,8 @@ const buildPersistentSpec = (key: string): EffectParamUiSpec => {
     const base: EffectParamUiSpec = { key, label: PERSISTENT_PARAM_LABELS[key] ?? labelForKey(key), kind };
     if (kind === 'color') {
         base.step = 0.01;
-        if (key === 'lightTint2') {
-            base.default = [1, 0.85, 0.4];
-        } else if (key === 'lightTint3') {
-            base.default = [0.4, 0.8, 1];
-        } else {
-            base.default = [1, 0.5, 0.5];
-        }
+        const sparkleTint = SPARKLE_DEFAULT_LIGHT_TINTS[key as keyof typeof SPARKLE_DEFAULT_LIGHT_TINTS];
+        base.default = sparkleTint ? [...sparkleTint] : [1, 1, 1];
         base.min = 0;
         base.max = 2;
         return base;
