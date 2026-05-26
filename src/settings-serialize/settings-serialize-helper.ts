@@ -19,7 +19,8 @@ import type {
     PointLightConfig,
     DirectionalLightConfig,
     SpotLightConfig,
-    SceneMediaHotspotSettings
+    SceneMediaHotspotSettings,
+    SceneMediaHotspotPatch
 } from '../schemas/v2';
 import type { SceneAsset } from '../schemas/v2-custom';
 
@@ -29,21 +30,46 @@ export type LightWithId = (PointLightConfig | DirectionalLightConfig | SpotLight
 export function readGlobalVideoHotspotAutoplayEnabled(settings: ExperienceSettings): boolean {
     const sm = settings.sceneMediaHotspot;
     if (!sm || typeof sm !== 'object') return true;
-    return (sm as SceneMediaHotspotSettings).hotspotAutoplayEnabled !== false;
+    return sm.video?.hotspotAutoplayEnabled !== false;
+}
+
+export function readGlobalAudioHotspotAutoplayEnabled(settings: ExperienceSettings): boolean {
+    const sm = settings.sceneMediaHotspot;
+    if (!sm || typeof sm !== 'object') return true;
+    return sm.audio?.hotspotAutoplayEnabled !== false;
+}
+
+/** 嵌套子节点 `ensure`：必填字段缺失则补默认；`hotspotAutoplayEnabled` 仅在显式 false 时入库 */
+function ensureHotspotSubtree(
+    sm: Record<string, unknown>,
+    key: 'video' | 'audio'
+): Record<string, unknown> {
+    if (!sm[key] || typeof sm[key] !== 'object') {
+        sm[key] = { ...DEFAULT_SCENE_MEDIA_HOTSPOT[key] };
+    }
+    const node = sm[key] as Record<string, unknown>;
+    if (key === 'video') {
+        if (typeof node.coneHalfDeg !== 'number' || !Number.isFinite(node.coneHalfDeg)) {
+            node.coneHalfDeg = DEFAULT_SCENE_MEDIA_HOTSPOT.video.coneHalfDeg;
+        }
+    }
+    if (node.hotspotAutoplayEnabled !== false) {
+        delete node.hotspotAutoplayEnabled;
+    }
+    return node;
 }
 
 export function ensureSceneMediaHotspot(settings: ExperienceSettings): SceneMediaHotspotSettings {
     const root = settings as Record<string, unknown>;
     if (!root.sceneMediaHotspot || typeof root.sceneMediaHotspot !== 'object') {
-        root.sceneMediaHotspot = { ...DEFAULT_SCENE_MEDIA_HOTSPOT };
+        root.sceneMediaHotspot = {
+            video: { ...DEFAULT_SCENE_MEDIA_HOTSPOT.video },
+            audio: { ...DEFAULT_SCENE_MEDIA_HOTSPOT.audio }
+        };
     }
     const sm = root.sceneMediaHotspot as Record<string, unknown>;
-    if (typeof sm.coneHalfDeg !== 'number' || !Number.isFinite(sm.coneHalfDeg)) {
-        sm.coneHalfDeg = DEFAULT_SCENE_MEDIA_HOTSPOT.coneHalfDeg;
-    }
-    if (sm.hotspotAutoplayEnabled !== false) {
-        delete sm.hotspotAutoplayEnabled;
-    }
+    ensureHotspotSubtree(sm, 'video');
+    ensureHotspotSubtree(sm, 'audio');
     return root.sceneMediaHotspot as SceneMediaHotspotSettings;
 }
 
@@ -94,20 +120,30 @@ export function resolveInitialSkyboxUrl(settings: ExperienceSettings, configSkyb
     return undefined;
 }
 
-/** 父级 `MEDIA_HOTSPOT_SET`：仅合并全局热区字段 */
+/** 父级 `MEDIA_HOTSPOT_SET`：嵌套 patch，仅合并 video / audio 子节点的全局热区字段 */
 export function patchSceneMediaHotspot(
     settings: ExperienceSettings,
-    patch: Partial<SceneMediaHotspotSettings>
+    patch: SceneMediaHotspotPatch
 ): SceneMediaHotspotSettings {
     const sm = ensureSceneMediaHotspot(settings);
-    const smRec = sm as Record<string, unknown>;
-    if (patch.hotspotAutoplayEnabled === false) {
-        smRec.hotspotAutoplayEnabled = false;
-    } else if (patch.hotspotAutoplayEnabled === true) {
-        delete smRec.hotspotAutoplayEnabled;
+    if (patch.video && typeof patch.video === 'object') {
+        const vRec = sm.video as Record<string, unknown>;
+        if (patch.video.hotspotAutoplayEnabled === false) {
+            vRec.hotspotAutoplayEnabled = false;
+        } else if (patch.video.hotspotAutoplayEnabled === true) {
+            delete vRec.hotspotAutoplayEnabled;
+        }
+        if (typeof patch.video.coneHalfDeg === 'number' && Number.isFinite(patch.video.coneHalfDeg)) {
+            sm.video.coneHalfDeg = patch.video.coneHalfDeg;
+        }
     }
-    if (typeof patch.coneHalfDeg === 'number' && Number.isFinite(patch.coneHalfDeg)) {
-        sm.coneHalfDeg = patch.coneHalfDeg;
+    if (patch.audio && typeof patch.audio === 'object') {
+        const aRec = sm.audio as Record<string, unknown>;
+        if (patch.audio.hotspotAutoplayEnabled === false) {
+            aRec.hotspotAutoplayEnabled = false;
+        } else if (patch.audio.hotspotAutoplayEnabled === true) {
+            delete aRec.hotspotAutoplayEnabled;
+        }
     }
     return sm;
 }

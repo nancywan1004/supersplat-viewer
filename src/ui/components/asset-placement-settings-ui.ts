@@ -7,11 +7,12 @@ import { pushEditHistory } from '../../edit-history';
 import { getSceneAssetListHTML, bindSceneAssetList } from './scene-asset-list-ui';
 import { loadGsplatAsset } from '../../loaders/gsplat-asset-loader';
 import { clampVideoHorizontalCurvature, VIDEO_HORIZONTAL_MAX_ARC_DEG } from '../../scene-assets/media/curved-billboard-mesh';
-import type { ExperienceSettings, SceneMediaHotspotSettings } from '../../schemas/v2';
+import type { ExperienceSettings, SceneMediaHotspotPatch } from '../../schemas/v2';
 import {
     applySceneMediaHotspotBaselineFromView,
     ensureSceneMediaHotspot,
     patchSceneMediaHotspot,
+    readGlobalAudioHotspotAutoplayEnabled,
     readGlobalVideoHotspotAutoplayEnabled
 } from '../../settings-serialize/settings-serialize-helper';
 import { getSelectedSceneAssetType, getSelectedScenePlacedItem } from '../../state-selectors';
@@ -176,6 +177,10 @@ export function getAssetPlacementSettingsHTML(): string {
             <div class="settingsRow">
                 <label for="mhGlobalAutoplay">视频热区自动播放</label>
                 <input type="checkbox" id="mhGlobalAutoplay" checked />
+            </div>
+            <div class="settingsRow">
+                <label for="mhGlobalAudioAutoplay">音频热区自动播放</label>
+                <input type="checkbox" id="mhGlobalAudioAutoplay" checked />
             </div>
         </div>
         <div class="media-trigger-distance-panel hidden" id="mediaTriggerDistancePanel">
@@ -395,6 +400,7 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
     mediaUrlInput.addEventListener('keydown', onMediaUrlKeydown);
 
     const mhGlobalAutoplay = root.querySelector<HTMLInputElement>('#mhGlobalAutoplay');
+    const mhGlobalAudioAutoplay = root.querySelector<HTMLInputElement>('#mhGlobalAudioAutoplay');
     const mediaTriggerDistancePanel = root.querySelector<HTMLElement>('#mediaTriggerDistancePanel');
     const mhAssetDist = root.querySelector<HTMLInputElement>('#mhAssetDist');
     const mhBaselineBtn = root.querySelector<HTMLButtonElement>('#mhBaselineBtn');
@@ -407,12 +413,12 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         if (mhGlobalAutoplay) {
             mhGlobalAutoplay.checked = readGlobalVideoHotspotAutoplayEnabled(settings);
         }
+        if (mhGlobalAudioAutoplay) {
+            mhGlobalAudioAutoplay.checked = readGlobalAudioHotspotAutoplayEnabled(settings);
+        }
     };
 
-    const onGlobalAutoplayChange = () => {
-        if (!mhGlobalAutoplay) return;
-        const value = mhGlobalAutoplay.checked;
-        const patch: Partial<SceneMediaHotspotSettings> = { hotspotAutoplayEnabled: value };
+    const sendOrApplyHotspotPatch = (patch: SceneMediaHotspotPatch) => {
         if (editUiTransport === 'message-bridge') {
             sendEditProtocolMessage({ type: 'MEDIA_HOTSPOT_SET', value: patch });
             return;
@@ -422,8 +428,19 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         events.fire('sceneMediaHotspot:changed');
     };
 
+    const onGlobalAutoplayChange = () => {
+        if (!mhGlobalAutoplay) return;
+        sendOrApplyHotspotPatch({ video: { hotspotAutoplayEnabled: mhGlobalAutoplay.checked } });
+    };
+
+    const onGlobalAudioAutoplayChange = () => {
+        if (!mhGlobalAudioAutoplay) return;
+        sendOrApplyHotspotPatch({ audio: { hotspotAutoplayEnabled: mhGlobalAudioAutoplay.checked } });
+    };
+
     syncGlobalHotspotUi();
     mhGlobalAutoplay?.addEventListener('change', onGlobalAutoplayChange);
+    mhGlobalAudioAutoplay?.addEventListener('change', onGlobalAudioAutoplayChange);
 
     const onHotspotExternal = () => syncGlobalHotspotUi();
     events.on('sceneMediaHotspot:changed', onHotspotExternal);
@@ -553,6 +570,7 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         addMediaUrlBtn.removeEventListener('click', addMediaFromUrl);
         mediaUrlInput.removeEventListener('keydown', onMediaUrlKeydown);
         mhGlobalAutoplay?.removeEventListener('change', onGlobalAutoplayChange);
+        mhGlobalAudioAutoplay?.removeEventListener('change', onGlobalAudioAutoplayChange);
         mhAssetDist?.removeEventListener('input', onAssetDistInput);
         mhBaselineBtn?.removeEventListener('click', onBaselineClick);
         events.off('sceneMediaHotspot:changed', onHotspotExternal);

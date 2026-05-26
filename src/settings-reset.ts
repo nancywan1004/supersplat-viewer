@@ -80,7 +80,7 @@ function settingsKeepCamera(global: Global, noReveal?: boolean): ExperienceSetti
     snapshot.annotations = [];
     snapshot.lighting = JSON.parse(JSON.stringify(DEFAULT_LIGHTING_ROOT));
     snapshot.nightMode = { ...DEFAULT_NIGHT_MODE };
-    snapshot.sceneMediaHotspot = { ...DEFAULT_SCENE_MEDIA_HOTSPOT };
+    snapshot.sceneMediaHotspot = JSON.parse(JSON.stringify(DEFAULT_SCENE_MEDIA_HOTSPOT));
     snapshot.postEffectSettings = {
         sharpness: { enabled: false, amount: 0 },
         bloom: {

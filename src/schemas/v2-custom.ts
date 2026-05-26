@@ -164,10 +164,24 @@ type LocalLightRegion = {
 
 /** 场景音视频热区全局参数（持久化于 settings 根；触发距离在 sceneAssets[]） */
 type SceneMediaHotspotSettings = {
-    /** 视频是否由热区自动播放；缺省 true，显式 false 时入库 */
-    hotspotAutoplayEnabled?: boolean;
-    /** 视频视锥半角（度）；总锥约 `2 × coneHalfDeg` */
-    coneHalfDeg: number;
+    /** 视频热区全局参数 */
+    video: {
+        /** 是否由热区自动播放；缺省 true，显式 false 时入库 */
+        hotspotAutoplayEnabled?: boolean;
+        /** 视锥半角（度）；总锥约 `2 × coneHalfDeg` */
+        coneHalfDeg: number;
+    };
+    /** 音频热区全局参数（音频用纯欧氏距离，无视锥） */
+    audio: {
+        /** 是否由热区自动播放；缺省 true，显式 false 时入库 */
+        hotspotAutoplayEnabled?: boolean;
+    };
+};
+
+/** 父级 `MEDIA_HOTSPOT_SET` 入站 payload；video / audio 子节点字段均可部分提供 */
+type SceneMediaHotspotPatch = {
+    video?: Partial<SceneMediaHotspotSettings['video']>;
+    audio?: Partial<SceneMediaHotspotSettings['audio']>;
 };
 
 type SceneAsset = {
@@ -220,4 +234,4 @@ type EffectsSettings = {
     asset: EffectsAssetTrack;
 };
 
-export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset, SceneMediaHotspotSettings, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsAssetTrack };
+export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset, SceneMediaHotspotSettings, SceneMediaHotspotPatch, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsAssetTrack };

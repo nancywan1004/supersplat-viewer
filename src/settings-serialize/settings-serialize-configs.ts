@@ -39,8 +39,13 @@ export const DEFAULT_AUDIO_TRIGGER_DISTANCE_M = 8;
 
 /** 场景音视频热区全局默认（`ensureSceneMediaHotspot`） */
 export const DEFAULT_SCENE_MEDIA_HOTSPOT = {
-    hotspotAutoplayEnabled: true,
-    coneHalfDeg: 60
+    video: {
+        hotspotAutoplayEnabled: true,
+        coneHalfDeg: 60
+    },
+    audio: {
+        hotspotAutoplayEnabled: true
+    }
 } as const;
 
 /** 与 `settings.ts` 新建体验 / v1→v2 迁移中的 `revealEffect` 默认一致（`ensureRevealEffect` 仅在缺整条对象时补全） */

@@ -17,6 +17,7 @@ import {
 import {
     isHotspotGateOpen,
     readEntryTriggerDistanceM,
+    readGlobalAudioHotspotAutoplayEnabledFromSettings,
     readGlobalVideoHotspotAutoplayEnabledFromSettings
 } from './media-hotspot-params';
 import {
@@ -77,7 +78,7 @@ type SceneHotspotParams = {
 
 function readSceneHotspotParams(global: Global): SceneHotspotParams {
     const sm = ensureSceneMediaHotspot(global.settings as ExperienceSettings);
-    const halfRad = sm.coneHalfDeg * pc.math.DEG_TO_RAD;
+    const halfRad = sm.video.coneHalfDeg * pc.math.DEG_TO_RAD;
     return {
         eye: global.camera.getPosition(),
         forward: cameraForwardWorld(global.camera),
@@ -122,7 +123,7 @@ function evaluateEntryHotspotZone(
 function qualifyPlacedMedia(
     global: Global,
     params: SceneHotspotParams,
-    options: { globalVideoAutoplay: boolean }
+    options: { globalVideoAutoplay: boolean; globalAudioAutoplay: boolean }
 ): { videos: QualifiedMedia[]; audios: QualifiedMedia[] } {
     const videos: QualifiedMedia[] = [];
     const audios: QualifiedMedia[] = [];
@@ -142,6 +143,7 @@ function qualifyPlacedMedia(
             if (!options.globalVideoAutoplay) continue;
             videos.push({ id: entry.id, depthM: zone.depthM, entry });
         } else {
+            if (!options.globalAudioAutoplay) continue;
             audios.push({ id: entry.id, depthM: zone.depthM, entry });
         }
     }
@@ -326,7 +328,11 @@ function runMediaHotspotEvaluation(
 
     const hotspotParams = readSceneHotspotParams(global);
     const globalVideoAutoplay = readGlobalVideoHotspotAutoplayEnabledFromSettings(hotspotParams.settings);
-    const { videos, audios } = qualifyPlacedMedia(global, hotspotParams, { globalVideoAutoplay });
+    const globalAudioAutoplay = readGlobalAudioHotspotAutoplayEnabledFromSettings(hotspotParams.settings);
+    const { videos, audios } = qualifyPlacedMedia(global, hotspotParams, {
+        globalVideoAutoplay,
+        globalAudioAutoplay
+    });
     applyHotspotPlayback(global, evalState, hotspotParams, videos, audios, now);
     return true;
 }

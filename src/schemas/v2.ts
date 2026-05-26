@@ -10,6 +10,7 @@ import type {
     LightingSettings,
     SceneAsset,
     SceneMediaHotspotSettings,
+    SceneMediaHotspotPatch,
     LocalLightRegion,
     WorldSpaceBloomRegionJSON,
     EffectsSettings
@@ -317,9 +318,20 @@ const validateV2 = (data: unknown): ExperienceSettings => {
 
     if (obj.sceneMediaHotspot !== undefined) {
         const sm = assertObject(obj.sceneMediaHotspot, 'settings.sceneMediaHotspot');
-        assertNumber(sm.coneHalfDeg, 'settings.sceneMediaHotspot.coneHalfDeg');
-        if (sm.hotspotAutoplayEnabled !== undefined) {
-            assertBoolean(sm.hotspotAutoplayEnabled, 'settings.sceneMediaHotspot.hotspotAutoplayEnabled');
+        const v = assertObject(sm.video, 'settings.sceneMediaHotspot.video');
+        assertNumber(v.coneHalfDeg, 'settings.sceneMediaHotspot.video.coneHalfDeg');
+        if (v.hotspotAutoplayEnabled !== undefined) {
+            assertBoolean(
+                v.hotspotAutoplayEnabled,
+                'settings.sceneMediaHotspot.video.hotspotAutoplayEnabled'
+            );
+        }
+        const a = assertObject(sm.audio, 'settings.sceneMediaHotspot.audio');
+        if (a.hotspotAutoplayEnabled !== undefined) {
+            assertBoolean(
+                a.hotspotAutoplayEnabled,
+                'settings.sceneMediaHotspot.audio.hotspotAutoplayEnabled'
+            );
         }
     }
 
@@ -346,5 +358,6 @@ export type {
     LightingSettings,
     WorldSpaceBloomRegionJSON,
     LocalLightRegion,
-    SceneMediaHotspotSettings
+    SceneMediaHotspotSettings,
+    SceneMediaHotspotPatch
 };

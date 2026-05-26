@@ -38,7 +38,13 @@ export function readEntryTriggerDistanceM(
 export function readGlobalVideoHotspotAutoplayEnabledFromSettings(settings: ExperienceSettings): boolean {
     const sm = settings.sceneMediaHotspot;
     if (!sm || typeof sm !== 'object') return true;
-    return sm.hotspotAutoplayEnabled !== false;
+    return sm.video?.hotspotAutoplayEnabled !== false;
+}
+
+export function readGlobalAudioHotspotAutoplayEnabledFromSettings(settings: ExperienceSettings): boolean {
+    const sm = settings.sceneMediaHotspot;
+    if (!sm || typeof sm !== 'object') return true;
+    return sm.audio?.hotspotAutoplayEnabled !== false;
 }
 
 export function defaultTriggerDistanceMForAssetType(type: SceneAsset['type']): number | undefined {
