@@ -55,6 +55,21 @@ type GsplatBboxSource = {
 
 type CameraLayers = { layers: number[] };
 
+/** 脚本初始属性默认值（与 settings `effectParams` 未指定时一致） */
+export const SPARKLE_TWINKLE_DEFAULTS = {
+    center: [0, 0, 0] as [number, number, number],
+    pointSize: 0.02,
+    sparkleDensity: 0.5,
+    twinkleSpeed: 5,
+    twinkleMin: 0,
+    twinkleSharpness: 3,
+    brightness: 2,
+    lightTint1: [1, 1, 1] as [number, number, number],
+    lightTint2: [0.2, 1, 1] as [number, number, number],
+    lightTint3: [0.2, 0.5, 1] as [number, number, number],
+    colorBlendMode: false
+} as const;
+
 function getOrCreateSparkleLayer(app: AppBase): number {
     if (sparkleLayerId != null) {
         return sparkleLayerId;
@@ -74,7 +89,7 @@ function getOrCreateSparkleLayer(app: AppBase): number {
     return sparkleLayerId;
 }
 
-/** 确保 Sparkle 层在相机列表中；有变更时触发 CameraFrame 重建 */
+/** 确保 Sparkle 渲染层在相机列表中；有变更时触发 CameraFrame 重建 */
 function syncSparkleRenderLayer(app: AppBase): number {
     const layerId = getOrCreateSparkleLayer(app);
     let patched = false;
@@ -353,29 +368,25 @@ function createSparkleMaterial(): ShaderMaterial {
     return material;
 }
 
-/** 亮光细闪三档光点色默认值（脚本与 effect-params UI 共用） */
-export const SPARKLE_DEFAULT_LIGHT_TINTS = {
-    lightTint1: [1, 1, 1],
-    lightTint2: [0.2, 1, 1],
-    lightTint3: [0.2, 0.5, 1]
-} as const satisfies Record<string, readonly [number, number, number]>;
-
+/**
+ * 亮光细闪：在 gsplat 上采样光点位置，用独立 billboard 层叠加闪烁高光（不经 gsplat shader composer）。
+ */
 class GsplatPersistentSparkleTwinkle extends Script {
     static scriptName = 'gsplatPersistentSparkleTwinkle';
 
     effectTime = 0;
     isPaused = false;
-    center = new Vec3(0, 0, 0);
-    pointSize = 0.02;
-    sparkleDensity = 0.5;
-    twinkleSpeed = 5;
-    twinkleMin = 0;
-    twinkleSharpness = 3.0;
-    brightness = 2;
-    lightTint1 = new Color(...SPARKLE_DEFAULT_LIGHT_TINTS.lightTint1);
-    lightTint2 = new Color(...SPARKLE_DEFAULT_LIGHT_TINTS.lightTint2);
-    lightTint3 = new Color(...SPARKLE_DEFAULT_LIGHT_TINTS.lightTint3);
-    colorBlendMode = false;
+    center = new Vec3(...SPARKLE_TWINKLE_DEFAULTS.center);
+    pointSize = SPARKLE_TWINKLE_DEFAULTS.pointSize;
+    sparkleDensity = SPARKLE_TWINKLE_DEFAULTS.sparkleDensity;
+    twinkleSpeed = SPARKLE_TWINKLE_DEFAULTS.twinkleSpeed;
+    twinkleMin = SPARKLE_TWINKLE_DEFAULTS.twinkleMin;
+    twinkleSharpness = SPARKLE_TWINKLE_DEFAULTS.twinkleSharpness;
+    brightness = SPARKLE_TWINKLE_DEFAULTS.brightness;
+    lightTint1 = new Color(...SPARKLE_TWINKLE_DEFAULTS.lightTint1);
+    lightTint2 = new Color(...SPARKLE_TWINKLE_DEFAULTS.lightTint2);
+    lightTint3 = new Color(...SPARKLE_TWINKLE_DEFAULTS.lightTint3);
+    colorBlendMode = SPARKLE_TWINKLE_DEFAULTS.colorBlendMode;
 
     private overlayEntity: Entity | null = null;
     private material: ShaderMaterial | null = null;
@@ -434,6 +445,7 @@ class GsplatPersistentSparkleTwinkle extends Script {
         this.destroyOverlay(true);
     }
 
+    /** 布局参数变更后重建 billboard 网格（如 density / center / pointSize） */
     requestRebuild() {
         this.lastLayoutKey = '';
         this.pendingMount = true;

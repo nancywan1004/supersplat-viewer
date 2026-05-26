@@ -6,7 +6,7 @@ import {
     OVERALL_WAVE_DEFAULTS,
     clampOverallWaveNoiseType
 } from '../../vfx/effects-runtime/persistent/gsplat-overall-wave';
-import { SPARKLE_DEFAULT_LIGHT_TINTS } from '../../vfx/effects-runtime/persistent/gsplat-sparkle-twinkle';
+import { SPARKLE_TWINKLE_DEFAULTS } from '../../vfx/effects-runtime/persistent/gsplat-sparkle-twinkle';
 import {
     getRevealEffectParamKeys,
     getRevealParamFieldKind,
@@ -185,18 +185,42 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     wavelength: '波纹间距',
     waveSpeed: '波动速度',
     scaleBlend: '尺度混合',
-    center: '效果中心',
-    pointSize: '光点大小',
-    sparkleDensity: '光点密度',
-    twinkleSpeed: '闪烁速度',
-    twinkleMin: '最暗亮度',
-    twinkleSharpness: '闪烁锐利度',
-    brightness: '亮度',
-    lightTint1: '光点颜色 1',
-    lightTint2: '光点颜色 2',
-    lightTint3: '光点颜色 3',
-    colorBlendMode: '颜色混合'
+    center: '效果中心'
 };
+
+/** 临时调试 UI：亮光细闪中文文案与控件范围（默认数值取自 {@link SPARKLE_TWINKLE_DEFAULTS}） */
+const SPARKLE_TWINKLE_PARAM_UI: Partial<
+    Record<
+        keyof typeof SPARKLE_TWINKLE_DEFAULTS,
+        { min?: number; max?: number; step?: number; label?: string }
+    >
+> = {
+    pointSize: { min: 0.002, max: 0.1, step: 0.001, label: '光点大小' },
+    sparkleDensity: { min: 0, max: 1, step: 0.05, label: '光点密度' },
+    twinkleSpeed: { min: 0, max: 10, step: 0.1, label: '闪烁速度' },
+    twinkleMin: { min: 0, max: 0.5, step: 0.05, label: '最暗亮度' },
+    twinkleSharpness: { min: 0.5, max: 8, step: 0.1, label: '闪烁锐利度' },
+    brightness: { min: 0.2, max: 5, step: 0.1, label: '亮度' },
+    lightTint1: { min: 0, max: 2, step: 0.01, label: '光点颜色 1' },
+    lightTint2: { min: 0, max: 2, step: 0.01, label: '光点颜色 2' },
+    lightTint3: { min: 0, max: 2, step: 0.01, label: '光点颜色 3' },
+    colorBlendMode: { label: '颜色混合' },
+    center: { label: '效果中心' }
+};
+
+function applySparkleTwinkleParamUiSpec(spec: EffectParamUiSpec): void {
+    const key = spec.key as keyof typeof SPARKLE_TWINKLE_DEFAULTS;
+    const ui = SPARKLE_TWINKLE_PARAM_UI[key];
+    if (ui?.label) spec.label = ui.label;
+    if (key in SPARKLE_TWINKLE_DEFAULTS) {
+        const d = SPARKLE_TWINKLE_DEFAULTS[key];
+        spec.default = Array.isArray(d) ? ([...d] as [number, number, number]) : d;
+    }
+    if (!ui) return;
+    if (ui.min !== undefined) spec.min = ui.min;
+    if (ui.max !== undefined) spec.max = ui.max;
+    if (ui.step !== undefined) spec.step = ui.step;
+}
 
 /** 临时调试 UI：整体波动中文文案与控件范围（默认数值取自 {@link OVERALL_WAVE_DEFAULTS}） */
 const OVERALL_WAVE_NOISE_TYPE_OPTIONS: readonly EffectParamEnumOption[] = [
@@ -236,22 +260,12 @@ function applyOverallWaveParamUiSpec(spec: EffectParamUiSpec): void {
     if (ui.step !== undefined) spec.step = ui.step;
 }
 
-const PERSISTENT_NUMBER_RANGES: Record<string, NumberRange> = {
-    pointSize: { min: 0.002, max: 0.1, step: 0.001, default: 0.02 },
-    sparkleDensity: { min: 0, max: 1, step: 0.05, default: 0.5 },
-    twinkleSpeed: { min: 0, max: 10, step: 0.1, default: 5 },
-    twinkleMin: { min: 0, max: 0.5, step: 0.05, default: 0 },
-    twinkleSharpness: { min: 0.5, max: 8, step: 0.1, default: 3 },
-    brightness: { min: 0.2, max: 5, step: 0.1, default: 2 }
-};
-
 const buildPersistentSpec = (key: string): EffectParamUiSpec => {
     const kind = getPersistentParamFieldKind(key);
     const base: EffectParamUiSpec = { key, label: PERSISTENT_PARAM_LABELS[key] ?? labelForKey(key), kind };
     if (kind === 'color') {
         base.step = 0.01;
-        const sparkleTint = SPARKLE_DEFAULT_LIGHT_TINTS[key as keyof typeof SPARKLE_DEFAULT_LIGHT_TINTS];
-        base.default = sparkleTint ? [...sparkleTint] : [1, 1, 1];
+        base.default = [1, 1, 1];
         base.min = 0;
         base.max = 2;
         return base;
@@ -265,11 +279,24 @@ const buildPersistentSpec = (key: string): EffectParamUiSpec => {
         base.default = [0, 0, 0];
         return base;
     }
-    const range = PERSISTENT_NUMBER_RANGES[key] ?? REVEAL_NUMBER_RANGES[key];
+    const range = REVEAL_NUMBER_RANGES[key];
     if (range) {
         return { ...base, ...range };
     }
     return { ...base, min: 0, max: 10, step: 0.01 };
+};
+
+const buildSparkleTwinkleParamSpec = (key: string): EffectParamUiSpec => {
+    const kind = getPersistentParamFieldKind(key);
+    const spec: EffectParamUiSpec = { key, label: key, kind };
+    if (kind === 'vec3') {
+        spec.step = 0.1;
+    }
+    if (kind === 'color') {
+        spec.step = 0.01;
+    }
+    applySparkleTwinkleParamUiSpec(spec);
+    return spec;
 };
 
 const buildOverallWaveParamSpec = (key: string): EffectParamUiSpec => {
@@ -293,6 +320,9 @@ export function getPersistentParamSpecs(
     effectType: string,
     effectValues?: Record<string, unknown>
 ): EffectParamUiSpec[] {
+    if (effectType === 'sparkle-twinkle') {
+        return getPersistentEffectParamKeys(effectType).map(buildSparkleTwinkleParamSpec);
+    }
     if (effectType === 'overall-wave') {
         return getPersistentEffectParamKeys(effectType)
             .filter((key) => key !== 'waveDirection' || overallWaveShowsWaveDirection(effectValues?.noiseType))

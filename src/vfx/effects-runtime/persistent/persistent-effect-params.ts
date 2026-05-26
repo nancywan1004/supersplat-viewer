@@ -1,5 +1,4 @@
 import { Color, Vec3 } from 'playcanvas';
-import { clampOverallWaveNoiseType } from './gsplat-overall-wave';
 
 /**
  * 可持续 **persistent** 轨的 **`settings.effects.persistent` → `effectParams`** 白名单与写入逻辑。
@@ -68,7 +67,7 @@ const SPARKLE_COLOR_KEYS = new Set(['lightTint1', 'lightTint2', 'lightTint3']);
 
 export function getPersistentParamFieldKind(key: string): PersistentParamFieldKind {
     if (key === 'noiseType') return 'enum';
-    if (key === 'crestTint' || key === 'troughTint' || SPARKLE_COLOR_KEYS.has(key) || key === 'lightTint') return 'color';
+    if (key === 'crestTint' || key === 'troughTint' || SPARKLE_COLOR_KEYS.has(key)) return 'color';
     if (key === 'colorBlendMode') return 'boolean';
     if (key === 'center' || key === 'waveDirection') return 'vec3';
     return 'number';
@@ -126,14 +125,7 @@ export function applyPersistentEffectParamsToScript(
     const allowed = BY_TYPE[effectType];
     if (!allowed) return;
 
-    for (let [rawKey, rawVal] of Object.entries(effectParams)) {
-        // 旧键 colorCycleMode：语义与 colorBlendMode 相反，迁移时取反
-        if (rawKey === 'colorCycleMode' && allowed.has('colorBlendMode')) {
-            rawKey = 'colorBlendMode';
-            if (typeof rawVal === 'boolean') {
-                rawVal = !rawVal;
-            }
-        }
+    for (const [rawKey, rawVal] of Object.entries(effectParams)) {
         if (!allowed.has(rawKey)) continue;
         if (rawVal === undefined) continue;
         if (rawKey === 'center' || rawKey === 'waveDirection') {
@@ -142,16 +134,6 @@ export function applyPersistentEffectParamsToScript(
         }
         if (rawKey === 'crestTint' || rawKey === 'troughTint') {
             trySetColor(script, rawKey, rawVal);
-            continue;
-        }
-        if (rawKey === 'noiseType' && effectType === 'overall-wave') {
-            if (typeof rawVal === 'number' && Number.isFinite(rawVal)) {
-                script.noiseType = clampOverallWaveNoiseType(rawVal);
-            }
-            continue;
-        }
-        if (rawKey === 'lightTint') {
-            trySetColor(script, 'lightTint1', rawVal);
             continue;
         }
         if (SPARKLE_COLOR_KEYS.has(rawKey)) {
