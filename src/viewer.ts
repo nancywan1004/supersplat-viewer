@@ -49,6 +49,7 @@ import { isLodMetaFile } from './loaders/lod-loader';
 import { BloomController } from './vfx/bloom';
 import { loadSplatMesh } from './loaders/splat-mesh-loader';
 import { NightMode } from './vfx/lighting/night-mode';
+import { initTorchLight } from './vfx/lighting/torch-light-controller';
 import { isShadowSystemEnabled, syncGsplatShadowCastingFromSettings } from './vfx/shadow/gsplat-shadow-cast';
 import { initShadowCatcher } from './vfx/shadow/shadow-catcher';
 import { ShadowApplyRt } from './vfx/shadow/shadow-apply';
@@ -688,6 +689,10 @@ class Viewer {
                     splat: gsplatEntity ? 'found' : 'not found'
                 });
             }
+
+            // 全局手电筒（单例 spot）：放在 NightMode 之后、RevealController 之前，
+            // 以便首次 active 切换时 NightMode 的 `collectSpotLights` 能立刻看到它。
+            initTorchLight(global);
             
             // ── 关键：根据 unified 模式选择正确的坐标空间 ──
             // PlayCanvas gsplat 的 modifySplatCenter 在两种模式下接收不同坐标空间：

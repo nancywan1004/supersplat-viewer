@@ -12,10 +12,12 @@ import {
     ensureLighting,
     ensureNightMode,
     ensureShadow,
+    patchTorchLight,
     type LightWithId
 } from '../../settings-serialize/settings-serialize-helper';
-import { applyViewBloomLocalLightsEnabled } from '../../view-settings';
+import { applyViewBloomLocalLightsEnabled, applyViewTorchActive } from '../../view-settings';
 import type { Global } from '../../types';
+import type { TorchLightSettings } from '../../schemas/v2-custom';
 
 /**
  * 分配不与现有 `lighting.lights[*].id` 冲突的用户光 id（`light-<n>`，与 Lighting 面板一致）。
@@ -672,4 +674,31 @@ export function applyShadowDirectionSet(global: Global, value: number): void {
 
     updatePointLightsFromSettings(global);
     global.events.fire('lighting:changed');
+}
+
+/**
+ * `TORCH_TOGGLE`：全局手电筒开关。
+ * - 只写 `viewSettings.torch.active`（不入库），由 `TorchLightController` 在 update 中读取
+ * - 与 `LIGHT_TOGGLE_ALL` 解耦：关用户灯时手电筒仍可独立开启
+ * - 协议入站不回传，避免循环
+ */
+export function applyTorchToggle(global: Global, enabled: boolean): boolean {
+    return applyViewTorchActive(global, enabled);
+}
+
+/**
+ * `TORCH_PARAMS_SET`：合并部分参数到 `settings.lighting.torch`，clamp/归一后即时刷新实体。
+ * - 派发 `torchParams:changed`，`TorchLightController` 监听并把新参数写到实体光源组件
+ * - 返回合并后的完整 `TorchLightSettings`（仅供本地 UI 同步使用，不再有出站协议）
+ */
+export function applyTorchParamsSet(
+    global: Global,
+    partial: Partial<TorchLightSettings>
+): TorchLightSettings {
+    const settings = global.settings as ExperienceSettings;
+    const next = patchTorchLight(settings, partial);
+    global.events.fire('torchParams:changed', { value: next });
+    // 同时发 lighting:changed 以触发任何监听 lighting 相关变化的辅助流程
+    global.events.fire('lighting:changed');
+    return next;
 }

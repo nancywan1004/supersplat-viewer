@@ -429,6 +429,9 @@ const collectPointLights = (global: Global): PointLightInfo[] => {
  * `LightComponent.innerConeAngle` / `outerConeAngle` 与 PlayCanvas 一致，为**半角（度）**；
  * 此处转为弧度写入 `SpotLightInfo`（**不再**对 settings 整锥顶角做 `spotApexToHalfDeg`，那一步已在 `createSpotLightsFromSettings` 写入实体时完成）。
  * 方向与引擎一致：聚光沿实体 **-Y** 照射。
+ *
+ * 注：手电筒当前以 **point light** 形态实现，自动通过 `collectPointLights` 的递归遍历被纳入，
+ * 不在本函数中处理。
  */
 const collectSpotLights = (global: Global): SpotLightInfo[] => {
     const { app } = global;

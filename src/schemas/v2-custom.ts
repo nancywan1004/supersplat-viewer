@@ -104,9 +104,39 @@ type SpotLightConfig = {
     enabled?: boolean
 };
 
+/**
+ * 全局「手电筒」配置（单例，**不进入** `lights[]`）：
+ * - 运行时为跟随光标的 PointLight，位置 = `screenToWorld(mouse, exploreDistance)`
+ * - 实际作用半径 = `range + exploreDistance`（在 controller 里联动，避免「靠近反而黑」）
+ * - 仅参数持久化，开关与运行态在 `ViewSettings.torch`（不入库）
+ * - 全局最多一份，因此挂在 `LightingSettings.torch` 而非数组项
+ */
+type TorchLightSettings = {
+    /** sRGB [0,1] 三分量 */
+    color: [number, number, number];
+    /** 光强（与点光语义一致） */
+    intensity: number;
+    /** UI 上「光源前方再往前能照多远」（世界单位，clamp 0–20）；与 exploreDistance 相加得到 PointLight 实际半径 */
+    range: number;
+    /**
+     * 手电筒沿光标视线的「探索距离」（世界单位，沿相机 forward 的 view-space Z）。
+     *
+     * 由用户在 UI 调节；不依赖 GPU pick → 完全跟手且无 GPU 抖动。
+     * 视觉规则：值越小光圈越靠近相机（看近物明显），越大越靠近远景。
+     * 默认 8，clamp 0.5–30。
+     */
+    exploreDistance?: number;
+    /** 内锥整顶角（度，0–180），默认 35；当前 PointLight 形态不使用，保留以备将来 SpotLight 切换 */
+    innerConeAngle?: number;
+    /** 外锥整顶角（度，0–180），默认 70；当前 PointLight 形态不使用，保留以备将来 SpotLight 切换 */
+    outerConeAngle?: number;
+};
+
 type LightingSettings = {
     /** 点光源 + 平行光（最多一个） + 聚光灯 */
-    lights: (PointLightConfig | DirectionalLightConfig | SpotLightConfig)[]
+    lights: (PointLightConfig | DirectionalLightConfig | SpotLightConfig)[],
+    /** 全局手电筒（单例）；缺失时由 `ensureTorchLight` 补齐默认 */
+    torch?: TorchLightSettings
 };
 
 /**
@@ -239,4 +269,4 @@ type EffectsSettings = {
     asset: EffectsAssetTrack;
 };
 
-export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset, SceneMediaHotspotSettings, SceneMediaHotspotPatch, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsAssetTrack };
+export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, TorchLightSettings, LightingSettings, SceneAsset, SceneMediaHotspotSettings, SceneMediaHotspotPatch, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsAssetTrack };

@@ -1,11 +1,16 @@
 import type { Global } from '../../types';
 import type { ExperienceSettings } from '../../schemas/v2';
 import { spotApexToHalfDeg, updatePointLightsFromSettings } from '../../light';
-import type { PointLightConfig, DirectionalLightConfig, SpotLightConfig } from '../../schemas/v2';
+import type { PointLightConfig, DirectionalLightConfig, SpotLightConfig, TorchLightSettings } from '../../schemas/v2-custom';
 import { pushEditHistory } from '../../edit-history';
-import { ensureNightMode, ensureLighting } from '../../settings-serialize/settings-serialize-helper';
+import { ensureNightMode, ensureLighting, ensureTorchLight } from '../../settings-serialize/settings-serialize-helper';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 import { applyEnvironmentPreviewVisualPolicy } from '../../editor-modules/environment-facade';
+import {
+    applyTorchParamsSet,
+    applyTorchToggle
+} from '../../editor-modules/protocol-adapters/environment-protocol-adapter';
+import { applyViewTorchActive, readViewTorchActive } from '../../view-settings';
 
 const LIGHTING_PANEL_HTML = `
 <div class="lightingPanel">
@@ -25,6 +30,37 @@ const LIGHTING_PANEL_HTML = `
   <div class="settingsRow" style="flex-wrap:wrap;gap:6px;">
     <button id="addPointLight" type="button" class="settingsButton">+ Point</button>
     <button id="addSpotLight" type="button" class="settingsButton">+ Spot</button>
+  </div>
+
+  <div class="lightingSectionLabel">手电筒（全局）</div>
+  <div class="settingsRow">
+    <div id="torchEnableCheck" class="checkMark">✓</div>
+    <div id="torchEnableOption" class="lightingOption">启用（跟随鼠标）</div>
+  </div>
+  <div class="settingsRow">
+    <label for="torchColorInput" class="lightingLabel">Color:</label>
+    <input type="color" id="torchColorInput" value="#ffeed9" class="lightingColorInput">
+  </div>
+  <div class="settingsRow">
+    <label for="torchIntensitySlider" class="lightingLabel">Intensity:</label>
+    <div class="lightingSliderWrap">
+      <input type="range" id="torchIntensitySlider" min="0" max="10" step="0.1" value="7" class="lightingSlider">
+      <span id="torchIntensityValue" class="lightingSliderValue">7.0</span>
+    </div>
+  </div>
+  <div class="settingsRow">
+    <label for="torchRangeSlider" class="lightingLabel" title="光源前方还能继续往前照多远（与探索距离自动相加得到 PointLight 实际作用半径）">Range:</label>
+    <div class="lightingSliderWrap">
+      <input type="range" id="torchRangeSlider" min="0" max="20" step="0.1" value="5.5" class="lightingSlider">
+      <span id="torchRangeValue" class="lightingSliderValue">5.5</span>
+    </div>
+  </div>
+  <div class="settingsRow">
+    <label for="torchExploreSlider" class="lightingLabel" title="光源沿视线放置在相机前方多少米；UI 上的 Range 表示在此基础上再往前能照多远">探索距离:</label>
+    <div class="lightingSliderWrap">
+      <input type="range" id="torchExploreSlider" min="0.5" max="30" step="0.1" value="8" class="lightingSlider">
+      <span id="torchExploreValue" class="lightingSliderValue">8.0</span>
+    </div>
   </div>
 </div>
 `.trim();
@@ -557,12 +593,130 @@ export function initLightingUI(global: Global): () => void {
         });
     }
 
+    // ─────────────────────────────────────────────────────────────────
+    // 手电筒（全局）：开关 + 颜色 + 强度 + Range
+    // - 开关写 viewSettings.torch.active（不入库）
+    // - 颜色/强度/Range 写 settings.lighting.torch（入库），经 TORCH_PARAMS_SET 协议或本地 applyTorchParamsSet
+    // ─────────────────────────────────────────────────────────────────
+    const torchEnableCheck = container.querySelector('#torchEnableCheck') as HTMLElement | null;
+    const torchEnableOption = container.querySelector('#torchEnableOption') as HTMLElement | null;
+    const torchColorInput = container.querySelector('#torchColorInput') as HTMLInputElement | null;
+    const torchIntensitySlider = container.querySelector('#torchIntensitySlider') as HTMLInputElement | null;
+    const torchIntensityValue = container.querySelector('#torchIntensityValue') as HTMLElement | null;
+    const torchRangeSlider = container.querySelector('#torchRangeSlider') as HTMLInputElement | null;
+    const torchRangeValue = container.querySelector('#torchRangeValue') as HTMLElement | null;
+    const torchExploreSlider = container.querySelector('#torchExploreSlider') as HTMLInputElement | null;
+    const torchExploreValue = container.querySelector('#torchExploreValue') as HTMLElement | null;
+
+    const refreshTorchActiveUi = () => {
+        if (!torchEnableCheck) return;
+        const active = readViewTorchActive(global);
+        torchEnableCheck.classList.toggle('active', active);
+    };
+    const refreshTorchParamsUi = () => {
+        const cfg = ensureTorchLight(global.settings as ExperienceSettings);
+        if (torchColorInput) {
+            torchColorInput.value = rgbToHex(cfg.color[0], cfg.color[1], cfg.color[2]);
+        }
+        if (torchIntensitySlider) {
+            torchIntensitySlider.value = String(cfg.intensity);
+        }
+        if (torchIntensityValue) {
+            torchIntensityValue.textContent = (cfg.intensity ?? 0).toFixed(1);
+        }
+        if (torchRangeSlider) {
+            torchRangeSlider.value = String(cfg.range);
+        }
+        if (torchRangeValue) {
+            torchRangeValue.textContent = (cfg.range ?? 0).toFixed(1);
+        }
+        const explore = (cfg as any).exploreDistance ?? 5;
+        if (torchExploreSlider) {
+            torchExploreSlider.value = String(explore);
+        }
+        if (torchExploreValue) {
+            torchExploreValue.textContent = (explore as number).toFixed(1);
+        }
+    };
+
+    refreshTorchActiveUi();
+    refreshTorchParamsUi();
+
+    const sendTorchToggle = (next: boolean) => {
+        if (editUiTransport === 'message-bridge') {
+            sendEditProtocolMessage({ type: 'TORCH_TOGGLE', value: next });
+            // 与 View 顶栏一致：同步直写本地 viewSettings，保证按钮态即时生效。
+            applyViewTorchActive(global, next);
+        } else {
+            applyTorchToggle(global, next);
+        }
+    };
+    const sendTorchParamsPatch = (partial: Partial<TorchLightSettings>) => {
+        if (editUiTransport === 'message-bridge') {
+            sendEditProtocolMessage({ type: 'TORCH_PARAMS_SET', value: partial });
+            // 同步直写本地，保证 UI 即时生效；message-bridge 回环时 source='host' 不会重复写入意义。
+            applyTorchParamsSet(global, partial);
+        } else {
+            applyTorchParamsSet(global, partial);
+        }
+    };
+
+    const onTorchToggleClick = () => {
+        sendTorchToggle(!readViewTorchActive(global));
+    };
+    torchEnableCheck?.addEventListener('click', onTorchToggleClick);
+    torchEnableOption?.addEventListener('click', onTorchToggleClick);
+
+    torchColorInput?.addEventListener('input', () => {
+        const hex = torchColorInput.value;
+        const [r, g, b] = hexToRgb(hex);
+        sendTorchParamsPatch({ color: [r, g, b] });
+        pushEditHistorySafe();
+    });
+    torchIntensitySlider?.addEventListener('input', () => {
+        const v = parseFloat(torchIntensitySlider.value);
+        if (Number.isFinite(v)) {
+            if (torchIntensityValue) torchIntensityValue.textContent = v.toFixed(1);
+            sendTorchParamsPatch({ intensity: v });
+        }
+    });
+    torchIntensitySlider?.addEventListener('change', () => {
+        pushEditHistorySafe();
+    });
+    torchRangeSlider?.addEventListener('input', () => {
+        const v = parseFloat(torchRangeSlider.value);
+        if (Number.isFinite(v)) {
+            if (torchRangeValue) torchRangeValue.textContent = v.toFixed(1);
+            sendTorchParamsPatch({ range: v });
+        }
+    });
+    torchRangeSlider?.addEventListener('change', () => {
+        pushEditHistorySafe();
+    });
+    torchExploreSlider?.addEventListener('input', () => {
+        const v = parseFloat(torchExploreSlider.value);
+        if (Number.isFinite(v)) {
+            if (torchExploreValue) torchExploreValue.textContent = v.toFixed(1);
+            sendTorchParamsPatch({ exploreDistance: v } as Partial<TorchLightSettings>);
+        }
+    });
+    torchExploreSlider?.addEventListener('change', () => {
+        pushEditHistorySafe();
+    });
+
+    const torchActiveListener = () => refreshTorchActiveUi();
+    const torchParamsListener = () => refreshTorchParamsUi();
+    events.on('torchActive:changed', torchActiveListener);
+    events.on('torchParams:changed', torchParamsListener);
+
     return () => {
         if (onEnvironmentLifecycle) {
             global.events.off('environmentFacade:enter', onEnvironmentLifecycle);
             global.events.off('environmentFacade:exit', onEnvironmentLifecycle);
             global.events.off('environmentFacade:editModeExit', onEnvironmentLifecycle);
         }
+        events.off('torchActive:changed', torchActiveListener);
+        events.off('torchParams:changed', torchParamsListener);
         container.innerHTML = '';
     };
 }
