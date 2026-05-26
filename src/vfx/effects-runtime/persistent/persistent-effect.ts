@@ -100,14 +100,29 @@ export function createOverallWaveScript(
         return null;
     }
 
+    console.log('Creating overall-wave script');
+
     try {
         const script = gsplatEntity.script.create(GsplatPersistentOverallWave) as any;
-        if (!script) return null;
+        if (script) {
+            updateScriptCenter(script);
+            applyPersistentEffectParamsToScript(script, 'overall-wave', effectParams ?? undefined);
+            script.enabled = autoStart;
+            script.effectTime = 0;
 
-        updateScriptCenter(script);
-        applyPersistentEffectParamsToScript(script, 'overall-wave', effectParams ?? undefined);
-        script.enabled = autoStart;
-        script.effectTime = 0;
+            console.log('Overall-wave script created with config:', {
+                center: script.center,
+                noiseType: script.noiseType,
+                waveDirection: script.waveDirection,
+                waveAmplitude: script.waveAmplitude,
+                wavelength: script.wavelength,
+                waveSpeed: script.waveSpeed,
+                intensity: script.intensity,
+                crestTint: script.crestTint,
+                troughTint: script.troughTint,
+                enabled: script.enabled
+            });
+        }
         return script;
     } catch (error) {
         console.error('Failed to create overall-wave script:', error);
@@ -126,15 +141,32 @@ export function createSparkleTwinkleScript(
         return null;
     }
 
+    console.log('Creating sparkle-twinkle script');
+
     try {
         const script = gsplatEntity.script.create(GsplatPersistentSparkleTwinkle) as any;
-        if (!script) return null;
+        if (script) {
+            updateScriptCenter(script);
+            applyPersistentEffectParamsToScript(script, 'sparkle-twinkle', effectParams ?? undefined);
+            script.requestRebuild?.();
+            script.enabled = autoStart;
+            script.effectTime = 0;
 
-        updateScriptCenter(script);
-        applyPersistentEffectParamsToScript(script, 'sparkle-twinkle', effectParams ?? undefined);
-        script.requestRebuild?.();
-        script.enabled = autoStart;
-        script.effectTime = 0;
+            console.log('Sparkle-twinkle script created with config:', {
+                center: script.center,
+                pointSize: script.pointSize,
+                sparkleDensity: script.sparkleDensity,
+                twinkleSpeed: script.twinkleSpeed,
+                twinkleMin: script.twinkleMin,
+                twinkleSharpness: script.twinkleSharpness,
+                brightness: script.brightness,
+                lightTint1: script.lightTint1,
+                lightTint2: script.lightTint2,
+                lightTint3: script.lightTint3,
+                colorBlendMode: script.colorBlendMode,
+                enabled: script.enabled
+            });
+        }
         return script;
     } catch (error) {
         console.error('Failed to create sparkle-twinkle script:', error);
