@@ -476,8 +476,10 @@ function isAudioVisuallyPlaying(global: Global, m: PlacedAudioRuntime): boolean 
 
 function isAudioCalloutEligible(entry: ScenePlacedItem, global?: Global): boolean {
     if (global && isMediaConsumptionMode(global)) {
-        // 浏览模式（Viewer / 编辑预览）默认隐藏，仅当 settings.audio.showCalloutInViewer === true 时显示
+        // 浏览模式（Viewer / 编辑预览）：受 settings.audio.showCalloutInViewer 控制，
+        // 且仅在热区内才可见，与视频控件「热区内才可交互」对齐
         if (!readShowAudioCalloutInViewerFromSettings(global.settings)) return false;
+        if (entry.mediaRuntime?.inHotspotZone !== true) return false;
     }
     return !!(entry.entity?.enabled && entry.visible !== false && entry.assetType === 'audio');
 }

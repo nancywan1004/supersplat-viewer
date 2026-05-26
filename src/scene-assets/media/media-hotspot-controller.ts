@@ -27,8 +27,10 @@ import {
 } from './media-view-depth';
 import {
     clearAllSceneMediaPlaybackFlags,
+    clearManualHeldSceneMediaEntryIdIf,
     ensureSceneVideoFramePlaying,
     getActiveSceneMediaEntryId,
+    getManualHeldSceneMediaEntryId,
     pauseAllSceneMedia,
     pauseSceneMediaEntry,
     playSceneMediaEntry,
@@ -123,7 +125,12 @@ function evaluateEntryHotspotZone(
 function qualifyPlacedMedia(
     global: Global,
     params: SceneHotspotParams,
-    options: { globalVideoAutoplay: boolean; globalAudioAutoplay: boolean }
+    options: {
+        globalVideoAutoplay: boolean;
+        globalAudioAutoplay: boolean;
+        /** 用户手动锁定 id：该条即使 settings.autoplay=false 仍进入候选集 */
+        manualHeldId: string | null;
+    }
 ): { videos: QualifiedMedia[]; audios: QualifiedMedia[] } {
     const videos: QualifiedMedia[] = [];
     const audios: QualifiedMedia[] = [];
@@ -139,11 +146,13 @@ function qualifyPlacedMedia(
         const zone = evaluateEntryHotspotZone(entry, kind, params);
         if (!zone.inZone || zone.depthM === undefined) continue;
 
+        const isManualHeld = options.manualHeldId !== null && entry.id === options.manualHeldId;
+
         if (kind === 'video') {
-            if (!options.globalVideoAutoplay) continue;
+            if (!options.globalVideoAutoplay && !isManualHeld) continue;
             videos.push({ id: entry.id, depthM: zone.depthM, entry });
         } else {
-            if (!options.globalAudioAutoplay) continue;
+            if (!options.globalAudioAutoplay && !isManualHeld) continue;
             audios.push({ id: entry.id, depthM: zone.depthM, entry });
         }
     }
@@ -201,34 +210,61 @@ function applyHotspotPlayback(
     audios: QualifiedMedia[],
     now: number
 ): void {
-    const preferred = getActiveSceneMediaEntryId();
-    let desiredVideoSound = pickPreferredSoundId(videos, preferred);
-    let desiredAudioSound = desiredVideoSound ? null : pickPreferredSoundId(audios, preferred);
-
-    const cooldown = Math.max(0, MEDIA_HOTSPOT_MIN_TOGGLE_INTERVAL_MS);
-    const vChanged = desiredVideoSound !== evalState.lastVideoSoundId;
-    const aChanged = desiredAudioSound !== evalState.lastAudioSoundId;
-    if ((vChanged || aChanged) && (evalState.lastVideoSoundId || evalState.lastAudioSoundId)) {
-        if (now - evalState.lastSwitchMs < cooldown) {
-            desiredVideoSound =
-                pickQualifiedSoundId(evalState.lastVideoSoundId, videos) ?? (videos[0]?.id ?? null);
-            desiredAudioSound = desiredVideoSound
-                ? null
-                : (pickQualifiedSoundId(evalState.lastAudioSoundId, audios) ?? (audios[0]?.id ?? null));
-        } else {
-            evalState.lastSwitchMs = now;
-        }
-    } else if (vChanged || aChanged) {
-        evalState.lastSwitchMs = now;
+    // 1) 用户手动锁定优先级最高：若该 id 仍在合格集中 → 直接定为赢家，覆盖热区评估与冷却。
+    const manualHeldId = getManualHeldSceneMediaEntryId();
+    const manualIsVideo = manualHeldId !== null && videos.some(v => v.id === manualHeldId);
+    const manualIsAudio = manualHeldId !== null && !manualIsVideo && audios.some(a => a.id === manualHeldId);
+    if (manualHeldId !== null && !manualIsVideo && !manualIsAudio) {
+        // manualHeld 已失效（离开热区 / 不可见 / 被删 / userPaused 等）→ 释放锁定
+        clearManualHeldSceneMediaEntryIdIf(manualHeldId);
     }
 
-    desiredVideoSound = pickQualifiedSoundId(desiredVideoSound, videos) ?? (videos[0]?.id ?? null);
-    desiredAudioSound = desiredVideoSound
-        ? null
-        : (pickQualifiedSoundId(desiredAudioSound, audios) ?? (audios[0]?.id ?? null));
+    let desiredVideoSound: string | null;
+    let desiredAudioSound: string | null;
 
-    evalState.lastVideoSoundId = desiredVideoSound;
-    evalState.lastAudioSoundId = desiredAudioSound;
+    if (manualIsVideo) {
+        desiredVideoSound = manualHeldId;
+        desiredAudioSound = null;
+        evalState.lastVideoSoundId = desiredVideoSound;
+        evalState.lastAudioSoundId = null;
+        evalState.lastSwitchMs = now;
+    } else if (manualIsAudio) {
+        desiredVideoSound = null;
+        desiredAudioSound = manualHeldId;
+        evalState.lastVideoSoundId = null;
+        evalState.lastAudioSoundId = desiredAudioSound;
+        evalState.lastSwitchMs = now;
+    } else {
+        // 2) 无手动锁定：按原热区优先级 + 冷却选赢家
+        const preferred = getActiveSceneMediaEntryId();
+        desiredVideoSound = pickPreferredSoundId(videos, preferred);
+        desiredAudioSound = desiredVideoSound ? null : pickPreferredSoundId(audios, preferred);
+
+        const cooldown = Math.max(0, MEDIA_HOTSPOT_MIN_TOGGLE_INTERVAL_MS);
+        const vChanged = desiredVideoSound !== evalState.lastVideoSoundId;
+        const aChanged = desiredAudioSound !== evalState.lastAudioSoundId;
+        if ((vChanged || aChanged) && (evalState.lastVideoSoundId || evalState.lastAudioSoundId)) {
+            if (now - evalState.lastSwitchMs < cooldown) {
+                desiredVideoSound =
+                    pickQualifiedSoundId(evalState.lastVideoSoundId, videos) ?? (videos[0]?.id ?? null);
+                desiredAudioSound = desiredVideoSound
+                    ? null
+                    : (pickQualifiedSoundId(evalState.lastAudioSoundId, audios) ?? (audios[0]?.id ?? null));
+            } else {
+                evalState.lastSwitchMs = now;
+            }
+        } else if (vChanged || aChanged) {
+            evalState.lastSwitchMs = now;
+        }
+
+        desiredVideoSound = pickQualifiedSoundId(desiredVideoSound, videos) ?? (videos[0]?.id ?? null);
+        desiredAudioSound = desiredVideoSound
+            ? null
+            : (pickQualifiedSoundId(desiredAudioSound, audios) ?? (audios[0]?.id ?? null));
+
+        evalState.lastVideoSoundId = desiredVideoSound;
+        evalState.lastAudioSoundId = desiredAudioSound;
+    }
 
     const viewMediaMuted = readViewMediaMuted(global);
     const globalVideoAutoplay = readGlobalVideoHotspotAutoplayEnabledFromSettings(hotspotParams.settings);
@@ -247,8 +283,10 @@ function applyHotspotPlayback(
         const { inZone: inHotspotZone } = evaluateEntryHotspotZone(entry, 'video', hotspotParams);
         syncHotspotZoneTransition(entry, inHotspotZone);
 
+        // 手动锁定的视频条目即使 globalVideoAutoplay=false 也允许播放
+        const isManualVideoOwner = manualIsVideo && entry.id === manualHeldId;
         if (!inHotspotZone
-            || !globalVideoAutoplay
+            || (!globalVideoAutoplay && !isManualVideoOwner)
             || entry.mediaRuntime?.userPaused === true
             || !evalState.userUnlocked
         ) {
@@ -322,9 +360,11 @@ function runMediaHotspotEvaluation(
     const hotspotParams = readSceneHotspotParams(global);
     const globalVideoAutoplay = readGlobalVideoHotspotAutoplayEnabledFromSettings(hotspotParams.settings);
     const globalAudioAutoplay = readGlobalAudioHotspotAutoplayEnabledFromSettings(hotspotParams.settings);
+    const manualHeldId = getManualHeldSceneMediaEntryId();
     const { videos, audios } = qualifyPlacedMedia(global, hotspotParams, {
         globalVideoAutoplay,
-        globalAudioAutoplay
+        globalAudioAutoplay,
+        manualHeldId
     });
     applyHotspotPlayback(global, evalState, hotspotParams, videos, audios, now);
     return true;
