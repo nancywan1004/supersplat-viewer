@@ -249,6 +249,13 @@ type PickPosition = {
     isComputeRenderer: boolean;
 };
 
+export type PickerDepthMap = {
+    texture: Texture;
+    width: number;
+    height: number;
+    camera: PickCameraSnapshot;
+};
+
 // Shared buffer for half-to-float conversion
 const float32 = new Float32Array(1);
 const uint32 = new Uint32Array(float32.buffer);
@@ -524,6 +531,8 @@ class Picker {
 
     pickSurface: (x: number, y: number) => Promise<PickSurface | null>;
 
+    prepareDepthMap: () => PickerDepthMap | null;
+
     release: () => void;
 
     constructor(app: AppBase, camera: Entity) {
@@ -730,6 +739,34 @@ class Picker {
             return { width: pickWidth, height: pickHeight, screenX, screenY, isComputeRenderer, pickCamera };
         };
 
+        const prepareDepthMap = (): PickerDepthMap | null => {
+            const width = Math.floor(graphicsDevice.width);
+            const height = Math.floor(graphicsDevice.height);
+            if (width <= 0 || height <= 0) {
+                return null;
+            }
+
+            const worldLayer = app.scene.layers.getLayerByName('World');
+            if (!worldLayer) {
+                return null;
+            }
+
+            const isComputeRenderer = app.scene.gsplat.currentRenderer === GSPLAT_RENDERER_COMPUTE;
+            // The compute renderer's depth path is owned by the engine picker and is not exposed as
+            // a reusable texture here. Raster gsplat scenes use our accum target directly.
+            if (isComputeRenderer) {
+                return null;
+            }
+
+            ensureRendered(width, height, false, worldLayer);
+            return {
+                texture: accumBuffer,
+                width,
+                height,
+                camera: getCacheCameraSnapshot()
+            };
+        };
+
         const pickPosition = async (x: number, y: number): Promise<PickPosition | null> => {
             const sample = prepareSample(x, y);
             if (!sample) {
@@ -862,6 +899,8 @@ class Picker {
         this.pick = (x: number, y: number) => serializePick(() => pick(x, y));
 
         this.pickSurface = (x: number, y: number) => serializePick(() => pickSurface(x, y));
+
+        this.prepareDepthMap = prepareDepthMap;
 
         this.release = () => {
             if (chunksPatched) {

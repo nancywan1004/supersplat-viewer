@@ -325,7 +325,6 @@ class Viewer {
             this.configureCamera(global.settings);
             app.renderNextFrame = true;
         });
-
         // handle canvas resize - update aspect ratio and trigger render
         const handleResize = () => {
             camera.camera.aspectRatio = graphicsDevice.width / graphicsDevice.height;
@@ -622,6 +621,7 @@ class Viewer {
             };
 
             this.picker = new Picker(app, camera);
+            (app as any).__picker = this.picker;
             this.inputController = new InputController(global, this.picker);
             this.inputController.collision = collision ?? null;
             state.hasCollision = !!collision;

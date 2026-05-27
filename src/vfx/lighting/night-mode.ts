@@ -2,6 +2,8 @@ import { Script, Color, Entity, Vec3, Mat4, Texture, PIXELFORMAT_RGBA8, type Mat
 import { GsplatShaderEffect } from '../effects-runtime/gsplat-shader-effect';
 import { extractGlslWgslModifyBlocks } from '../effects-runtime/gsplat-effect-layers-extractor';
 import { collectPointLights, collectSpotLights } from '../../light';
+import { ensureTorchLight } from '../../settings-serialize/settings-serialize-helper';
+import { getTorchLightWorldPosition, isTorchEntityEnabled } from './torch-light-controller';
 import type { EffectsRuntime } from '../effects-runtime';
 import type { GsplatContribution } from '../effects-runtime/gsplat-contribution';
 
@@ -85,6 +87,9 @@ uniform vec3 uSpotPositions[10];
 uniform vec3 uSpotDirections[10];
 uniform vec3 uSpotColors[10];
 uniform vec4 uSpotParams[10];  // x=innerConeRad, y=outerConeRad, z=range, w=enabled
+uniform vec3 uTorchWorldPos;
+uniform vec3 uTorchColor;
+uniform vec4 uTorchParams; // x=range, y=enabled, z=hasWorldPos
 uniform float uNightFade;
 uniform float uBrightFactor;
 uniform vec3 uNightAmbient;
@@ -104,6 +109,15 @@ uniform float uCommittedTintVolumeActive; // 1 = 使用纹理，0 = 使用 unifo
 
 vec3 l2g(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(1.0 / 2.2)); }
 vec3 g2l(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(2.2)); }
+void addDepthTorchContribution(vec3 wpos, inout vec3 sum) {
+    if (uTorchParams.y < 0.5 || uTorchParams.z < 0.5) return;
+    float range = max(uTorchParams.x, 1e-3);
+    float dist = length(uTorchWorldPos - wpos);
+    if (dist >= range || dist <= 0.001) return;
+    float norm = clamp(dist / range, 0.0, 1.0);
+    float att = pow(1.0 - norm, 2.5);
+    sum += uTorchColor * att;
+}
 vec3 applyCommittedBrightness(vec3 srgbColor, float brightness) {
     float b = clamp(brightness, -1.0, 1.0);
     vec3 linearColor = g2l(srgbColor);
@@ -194,6 +208,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
             }
         }
     }
+    addDepthTorchContribution(wpos, sum);
     for (int i = 0; i < 10; ++i) {
         if (uSpotParams[i].w < 0.5) continue;
         vec3 spotPos = uSpotPositions[i];
@@ -253,6 +268,9 @@ uniform vec3 uSpotPositions[10];
 uniform vec3 uSpotDirections[10];
 uniform vec3 uSpotColors[10];
 uniform vec4 uSpotParams[10];
+uniform vec3 uTorchWorldPos;
+uniform vec3 uTorchColor;
+uniform vec4 uTorchParams;
 uniform float uNightFade;
 uniform float uBrightFactor;
 uniform vec3 uNightAmbient;
@@ -277,6 +295,15 @@ uniform float uCommittedTintVolumeActive;
 
 vec3 l2g(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(1.0 / 2.2)); }
 vec3 g2l(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(2.2)); }
+void addDepthTorchContribution(vec3 wpos, inout vec3 sum) {
+    if (uTorchParams.y < 0.5 || uTorchParams.z < 0.5) return;
+    float range = max(uTorchParams.x, 1e-3);
+    float dist = length(uTorchWorldPos - wpos);
+    if (dist >= range || dist <= 0.001) return;
+    float norm = clamp(dist / range, 0.0, 1.0);
+    float att = pow(1.0 - norm, 2.5);
+    sum += uTorchColor * att;
+}
 vec3 applyCommittedBrightness(vec3 srgbColor, float brightness) {
     float b = clamp(brightness, -1.0, 1.0);
     vec3 linearColor = g2l(srgbColor);
@@ -379,6 +406,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
             }
         }
     }
+    addDepthTorchContribution(wpos, sum);
     for (int i = 0; i < 10; ++i) {
         if (uSpotParams[i].w < 0.5) continue;
         vec3 spotPos = uSpotPositions[i];
@@ -434,6 +462,9 @@ uniform uSpotPositions: array<vec3f, 10>;
 uniform uSpotDirections: array<vec3f, 10>;
 uniform uSpotColors: array<vec3f, 10>;
 uniform uSpotParams: array<vec4f, 10>;
+uniform uTorchWorldPos: vec3f;
+uniform uTorchColor: vec3f;
+uniform uTorchParams: vec4f;
 uniform uNightFade: f32;
 uniform uBrightFactor: f32;
 uniform uNightAmbient: vec3f;
@@ -455,6 +486,15 @@ uniform uCommittedTintVolumeActive: f32;
 
 fn l2g(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(1.0 / 2.2)); }
 fn g2l(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(2.2)); }
+fn addDepthTorchContribution(wpos: vec3f, sum: ptr<function, vec3f>) {
+    if (uniform.uTorchParams.y < 0.5 || uniform.uTorchParams.z < 0.5) { return; }
+    let range = max(uniform.uTorchParams.x, 1e-3);
+    let dist = length(uniform.uTorchWorldPos - wpos);
+    if (dist >= range || dist <= 0.001) { return; }
+    let norm = clamp(dist / range, 0.0, 1.0);
+    let att = pow(1.0 - norm, 2.5);
+    (*sum) = (*sum) + uniform.uTorchColor * att;
+}
 fn applyCommittedBrightness(srgbColor: vec3f, brightness: f32) -> vec3f {
     let b = clamp(brightness, -1.0, 1.0);
     let linearColor = g2l(srgbColor);
@@ -542,6 +582,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
             }
         }
     }
+    addDepthTorchContribution(wpos, &sum);
     for (var i = 0u; i < 10u; i++) {
         if (uniform.uSpotParams[i].w < 0.5) { continue; }
         let spotPos = uniform.uSpotPositions[i];
@@ -601,6 +642,9 @@ uniform uSpotPositions: array<vec3f, 10>;
 uniform uSpotDirections: array<vec3f, 10>;
 uniform uSpotColors: array<vec3f, 10>;
 uniform uSpotParams: array<vec4f, 10>;
+uniform uTorchWorldPos: vec3f;
+uniform uTorchColor: vec3f;
+uniform uTorchParams: vec4f;
 uniform uNightFade: f32;
 uniform uBrightFactor: f32;
 uniform uNightAmbient: vec3f;
@@ -628,6 +672,15 @@ uniform uCommittedTintVolumeActive: f32;
 
 fn l2g(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(1.0 / 2.2)); }
 fn g2l(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(2.2)); }
+fn addDepthTorchContribution(wpos: vec3f, sum: ptr<function, vec3f>) {
+    if (uniform.uTorchParams.y < 0.5 || uniform.uTorchParams.z < 0.5) { return; }
+    let range = max(uniform.uTorchParams.x, 1e-3);
+    let dist = length(uniform.uTorchWorldPos - wpos);
+    if (dist >= range || dist <= 0.001) { return; }
+    let norm = clamp(dist / range, 0.0, 1.0);
+    let att = pow(1.0 - norm, 2.5);
+    (*sum) = (*sum) + uniform.uTorchColor * att;
+}
 fn applyCommittedBrightness(srgbColor: vec3f, brightness: f32) -> vec3f {
     let b = clamp(brightness, -1.0, 1.0);
     let linearColor = g2l(srgbColor);
@@ -730,6 +783,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
             }
         }
     }
+    addDepthTorchContribution(wpos, &sum);
     for (var i = 0u; i < 10u; i++) {
         if (uniform.uSpotParams[i].w < 0.5) { continue; }
         let spotPos = uniform.uSpotPositions[i];
@@ -1042,7 +1096,8 @@ class NightMode extends GsplatShaderEffect {
         const global = (this.app as any).__global;
         const pointLights = global ? collectPointLights(global) : [];
         const spotLights = global ? collectSpotLights(global) : [];
-        const hasDynamicLocalLights = pointLights.length > 0 || spotLights.length > 0;
+        const hasTorchLight = global ? isTorchEntityEnabled(global) : false;
+        const hasDynamicLocalLights = pointLights.length > 0 || spotLights.length > 0 || hasTorchLight;
         return Math.abs(this.nightFade) > 1e-6
             || hasDynamicLocalLights
             || (this.committedVolumeTexture != null && (this.committedVolumeEncodedBrightness || Math.abs(this.committedBrightness) > 1e-6))
@@ -1455,6 +1510,7 @@ class NightMode extends GsplatShaderEffect {
 
         // Update uniforms on all applied materials (only if shaders are applied)
         if (this.materialsApplied.size > 0) {
+            const fb = this.ensureSamplerFallbackTexture();
             this.setUniform('uSpherePositions[0]', positions);
             this.setUniform('uSphereColors[0]', colors);
             this.setUniform('uSphereRanges[0]', ranges);
@@ -1470,6 +1526,19 @@ class NightMode extends GsplatShaderEffect {
                 this.nightAmbient.b
             ]);
             this.setUniform('uModelMatrix', modelMatrix);
+            const torchWorldPos = global ? getTorchLightWorldPosition(global) : null;
+            const torchCfg = global ? ensureTorchLight(global.settings as any) : null;
+            const torchActive = !!(global && torchCfg && torchWorldPos && isTorchEntityEnabled(global));
+            if (torchActive && torchCfg && torchWorldPos) {
+                const [tr, tg, tb] = localLightLinearRgb(torchCfg.color[0], torchCfg.color[1], torchCfg.color[2], torchCfg.intensity ?? 1, scale);
+                this.setUniform('uTorchWorldPos', [torchWorldPos.x, torchWorldPos.y, torchWorldPos.z]);
+                this.setUniform('uTorchColor', [tr, tg, tb]);
+                this.setUniform('uTorchParams', [Math.max(0, torchCfg.range ?? 1), 1, 1, 0]);
+            } else {
+                this.setUniform('uTorchWorldPos', [0, 0, 0]);
+                this.setUniform('uTorchColor', [0, 0, 0]);
+                this.setUniform('uTorchParams', [0, 0, 0, 0]);
+            }
             // 无论 fade 正负，统一传入平行光与相机位置，保证所有光源都参与计算
             const camPos = this.camera?.getPosition();
             if (camPos) {
@@ -1496,7 +1565,6 @@ class NightMode extends GsplatShaderEffect {
                 this.setUniform('uLightDir', [0, 1, 0]);
                 this.setUniform('uLightColor', [0, 0, 0]);
             }
-            const fb = this.ensureSamplerFallbackTexture();
             if (this.bloomBrushActive && this.bloomBrushMask && this.camera?.camera && this.splat) {
                 const cam = this.camera.camera;
                 if (isUnified) {

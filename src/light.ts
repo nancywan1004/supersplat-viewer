@@ -409,7 +409,7 @@ const collectPointLights = (global: Global): PointLightInfo[] => {
     const result: PointLightInfo[] = [];
     const visit = (e: Entity) => {
         if (result.length >= MAX_POINT_LIGHTS) return;
-        if (e.light && (e.light as any).type === 'point' && e.light.enabled) {
+        if (e.light && (e.light as any).type === 'point' && e.light.enabled && !e.tags.has('torchLight')) {
             const pos = e.getPosition();
             result.push({
                 position: new Vec3(pos.x, pos.y, pos.z),
