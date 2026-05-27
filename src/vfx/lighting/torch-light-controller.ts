@@ -1,4 +1,4 @@
-import { Color, Entity, Vec3 } from 'playcanvas';
+import { Color, Entity, Ray, Vec3 } from 'playcanvas';
 
 import { ensureTorchLight } from '../../settings-serialize/settings-serialize-helper';
 import { ensureViewSettings } from '../../view-settings';
@@ -17,7 +17,9 @@ import type { TorchLightSettings } from '../../schemas/v2-custom';
  * - 参数（颜色 / 强度 / range）来自 `settings.lighting.torch`（持久化）
  * - 启停由 `viewSettings.torch.active` 控制（不入库）
  * - **位置（跟手关键）**：
- *   - 鼠标移动或相机矩阵变化后，最多约 30Hz 调用 `Picker.pickSurface` 更新世界落点
+ *   - 鼠标移动或相机矩阵变化后，最多约 30Hz 同步做一次 mesh AABB 射线求交（CPU），
+ *     并触发一次 `Picker.pickSurface`（异步，gsplat 表面）；两者取离相机更近的命中点
+ *   - 这样 mesh 在 picker 的深度纹理里不可见的问题被 mesh 求交补齐，光标停在 mesh 上时光源贴在 mesh 表面
  *   - shader 每个 splat 只做世界距离衰减，不再重复采 depthMap / 反投影
  * - **拾取兜底**：拾取未命中或还未首次返回时，光源回退到相机前方
  *   `TORCH_FALLBACK_DISTANCE` 米处；PointLight 的 `range` 直接使用 `cfg.range`。
@@ -27,11 +29,33 @@ const TORCH_PICK_THROTTLE_MS = 33;
 const CAMERA_CHANGE_EPSILON = 1e-5;
 /** 拾取兜底距离（世界单位）：未命中时光源沿相机 forward 放在此距离处 */
 const TORCH_FALLBACK_DISTANCE = 5;
+/** 求 mesh AABB 命中时跳过的辅助 entity tag（光源 gizmo、拾取手柄、手电筒自身 visual 等） */
+const TORCH_MESH_HELPER_TAGS = new Set<string>([
+    'torchLight',
+    'pointLight',
+    'spotLight',
+    'light',
+    'lightVisual',
+    'lightHandle',
+    'pickHandle'
+]);
+/** 同名 helper entity 名（自上而下遍历到此名时即视为 helper） */
+const TORCH_MESH_HELPER_NAMES = new Set<string>([
+    'torchLight',
+    'pointLights',
+    'spotLights',
+    'lightVisual',
+    'lightHandle',
+    'pickHandle'
+]);
 
 const _tmpForward = new Vec3();
 const _tmpCamPos = new Vec3();
 const _tmpFallbackPos = new Vec3();
 const _tmpWorld = new Vec3();
+const _tmpRayDir = new Vec3();
+const _tmpAabbHit = new Vec3();
+const _torchRay = new Ray();
 
 type TorchControllerHandle = {
     setActive(active: boolean): void;
@@ -191,6 +215,84 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         runtime.pickDirty = true;
     };
 
+    /**
+     * 判断某 entity 及其祖先链是否属于辅助 helper（光源 gizmo / 拾取手柄 / 手电筒自身 visual 等），
+     * 是则在 mesh 射线求交中跳过，避免光源跳到 helper 小球上。
+     */
+    const isTorchHelperEntity = (e: Entity): boolean => {
+        let cur: Entity | null = e;
+        while (cur) {
+            if (TORCH_MESH_HELPER_NAMES.has(cur.name)) return true;
+            const tagList = (cur.tags as unknown as { _list?: string[] })?._list;
+            if (tagList) {
+                for (let i = 0; i < tagList.length; i++) {
+                    if (TORCH_MESH_HELPER_TAGS.has(tagList[i])) return true;
+                }
+            }
+            cur = cur.parent as Entity | null;
+        }
+        return false;
+    };
+
+    /**
+     * 在当前光标视线方向上对场景所有 mesh 的 world-space AABB 做最近命中求交。
+     * gsplat 不在此遍历中（无 RenderComponent），光源 / 拾取 helper 通过 tag/name 跳过。
+     */
+    const computeMeshHit = (clientX: number, clientY: number): { pos: Vec3; distSq: number } | null => {
+        const cv = app.graphicsDevice.canvas as HTMLCanvasElement;
+        const rect = cv.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return null;
+        const sx = clientX - rect.left;
+        const sy = clientY - rect.top;
+        const camComp = (global.camera as unknown as { camera?: { screenToWorld?: (x: number, y: number, z: number, out: Vec3) => Vec3; farClip: number } }).camera;
+        if (!camComp?.screenToWorld) return null;
+
+        const farPoint = camComp.screenToWorld(sx, sy, camComp.farClip ?? 1000, _tmpWorld);
+        if (!farPoint || !Number.isFinite(farPoint.x) || !Number.isFinite(farPoint.y) || !Number.isFinite(farPoint.z)) {
+            return null;
+        }
+
+        const origin = global.camera.getPosition();
+        _tmpRayDir.set(farPoint.x - origin.x, farPoint.y - origin.y, farPoint.z - origin.z);
+        const len = _tmpRayDir.length();
+        if (len < 1e-6) return null;
+        _tmpRayDir.mulScalar(1 / len);
+        _torchRay.origin.copy(origin);
+        _torchRay.direction.copy(_tmpRayDir);
+
+        const renders = app.root.findComponents('render') as unknown as Array<{
+            entity: Entity;
+            enabled: boolean;
+            meshInstances: Array<{ visible: boolean; aabb: { intersectsRay(ray: Ray, out?: Vec3): boolean } }>;
+        }>;
+
+        let bestDistSq = Infinity;
+        let bestHit: Vec3 | null = null;
+        for (let i = 0; i < renders.length; i++) {
+            const rc = renders[i];
+            if (!rc.enabled) continue;
+            const e = rc.entity;
+            if (!e || !e.enabled || isTorchHelperEntity(e)) continue;
+            const meshInstances = rc.meshInstances;
+            if (!meshInstances) continue;
+            for (let j = 0; j < meshInstances.length; j++) {
+                const mi = meshInstances[j];
+                if (!mi.visible || !mi.aabb) continue;
+                if (!mi.aabb.intersectsRay(_torchRay, _tmpAabbHit)) continue;
+                const dx = _tmpAabbHit.x - origin.x;
+                const dy = _tmpAabbHit.y - origin.y;
+                const dz = _tmpAabbHit.z - origin.z;
+                const distSq = dx * dx + dy * dy + dz * dz;
+                if (distSq < bestDistSq) {
+                    bestDistSq = distSq;
+                    bestHit = bestHit ?? new Vec3();
+                    bestHit.copy(_tmpAabbHit);
+                }
+            }
+        }
+        return bestHit ? { pos: bestHit, distSq: bestDistSq } : null;
+    };
+
     const scheduleWorldPick = () => {
         if (!runtime.pickDirty || runtime.pickInFlight) return;
 
@@ -203,24 +305,52 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         const picker = (app as unknown as {
             __picker?: { pickSurface?: (x: number, y: number) => Promise<{ position: Vec3 } | null> };
         }).__picker;
-        if (!picker?.pickSurface) return;
+
+        // 同步：mesh AABB 射线求交（先于 picker 异步结果生效，光标停在 mesh 上立即贴合）
+        const cx = runtime.lastClientX;
+        const cy = runtime.lastClientY;
+        const meshHit = (cx !== null && cy !== null) ? computeMeshHit(cx, cy) : null;
+        if (meshHit) {
+            runtime.worldPos.copy(meshHit.pos);
+            runtime.hasWorldPos = true;
+        }
+
+        if (!picker?.pickSurface) {
+            // 无 picker：mesh hit 已经是最终结果，可以直接消费 dirty
+            if (meshHit) {
+                runtime.pickDirty = false;
+                runtime.lastPickTime = now;
+            }
+            return;
+        }
 
         const generation = ++runtime.pickGeneration;
         runtime.pickDirty = false;
         runtime.pickInFlight = true;
         runtime.lastPickTime = now;
 
+        // 异步回调里不能复用模块级 _tmpCamPos（会被 onUpdate 改写），单独 snapshot 一份相机位置
+        const camPosSnapshot = new Vec3().copy(global.camera.getPosition());
+        const meshDistSqSnapshot = meshHit ? meshHit.distSq : Infinity;
+
         picker.pickSurface(point.x, point.y).then((surface) => {
             if (runtime.destroyed || generation !== runtime.pickGeneration) return;
             const pos = surface?.position;
-            if (pos && Number.isFinite(pos.x) && Number.isFinite(pos.y) && Number.isFinite(pos.z)) {
-                runtime.worldPos.copy(pos);
+            const gsplatValid = pos && Number.isFinite(pos.x) && Number.isFinite(pos.y) && Number.isFinite(pos.z);
+            if (gsplatValid) {
+                const dx = pos!.x - camPosSnapshot.x;
+                const dy = pos!.y - camPosSnapshot.y;
+                const dz = pos!.z - camPosSnapshot.z;
+                const gsplatDistSq = dx * dx + dy * dy + dz * dz;
+                if (gsplatDistSq < meshDistSqSnapshot) {
+                    runtime.worldPos.copy(pos!);
+                }
                 runtime.hasWorldPos = true;
-            } else {
+            } else if (!meshHit) {
                 runtime.hasWorldPos = false;
             }
         }).catch(() => {
-            if (!runtime.destroyed && generation === runtime.pickGeneration) {
+            if (!runtime.destroyed && generation === runtime.pickGeneration && !meshHit) {
                 runtime.hasWorldPos = false;
             }
         }).finally(() => {
