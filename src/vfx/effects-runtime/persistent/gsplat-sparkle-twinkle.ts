@@ -67,7 +67,7 @@ export const SPARKLE_TWINKLE_DEFAULTS = {
     lightTint1: [1, 1, 1] as [number, number, number],
     lightTint2: [0.2, 1, 1] as [number, number, number],
     lightTint3: [0.2, 0.5, 1] as [number, number, number],
-    colorBlendMode: false
+    colorBlendMode:true
 } as const;
 
 function getOrCreateSparkleLayer(app: AppBase): number {

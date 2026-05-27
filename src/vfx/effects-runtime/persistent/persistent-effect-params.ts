@@ -55,9 +55,9 @@ const BUTTERFLY_PARTICLE = new Set([
     'twinkleMin',
     'twinkleSharpness',
     'brightness',
-    'goldTint',
-    'midTint',
-    'darkTint',
+    'baseColor',
+    'cycleColor1',
+    'cycleColor2',
     'colorCycleEnabled',
     'colorCycleSpeed',
     'sparkleTrailStrength',
@@ -84,7 +84,7 @@ export function getPersistentEffectParamKeys(effectType: string): readonly strin
 }
 
 const SPARKLE_COLOR_KEYS = new Set(['lightTint1', 'lightTint2', 'lightTint3']);
-const BUTTERFLY_COLOR_KEYS = new Set(['goldTint', 'midTint', 'darkTint', 'gsLightColor']);
+const BUTTERFLY_COLOR_KEYS = new Set(['baseColor', 'cycleColor1', 'cycleColor2', 'gsLightColor']);
 
 export function getPersistentParamFieldKind(key: string): PersistentParamFieldKind {
     if (key === 'noiseType') return 'enum';
@@ -155,10 +155,6 @@ export function applyPersistentEffectParamsToScript(
 
     for (const [rawKey, rawVal] of Object.entries(effectParams)) {
         if (rawVal === undefined) continue;
-        if (effectType === 'butterfly-particle' && rawKey === 'rainbowColors') {
-            trySetBoolean(script, 'colorCycleEnabled', rawVal);
-            continue;
-        }
         if (!allowed.has(rawKey)) continue;
         if (rawKey === 'center' || rawKey === 'waveDirection') {
             trySetVec3(script, rawKey, rawVal);

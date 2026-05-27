@@ -249,6 +249,12 @@ export function initRevealUI(global: Global): () => void {
         if (getPersistentSelection() === 'overall-wave' && Object.prototype.hasOwnProperty.call(partial, 'noiseType')) {
             ensurePersistentParamsPanel(getPersistentSelection(), getPersistentEnabled(), mergedParams);
         }
+        if (
+            getPersistentSelection() === 'butterfly-particle' &&
+            Object.prototype.hasOwnProperty.call(partial, 'colorCycleEnabled')
+        ) {
+            ensurePersistentParamsPanel(getPersistentSelection(), getPersistentEnabled(), mergedParams);
+        }
     };
 
     const ensureRevealParamsPanel = (effectType: string) => {

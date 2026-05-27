@@ -189,7 +189,7 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     center: '效果中心'
 };
 
-/** 临时调试 UI：亮光细闪中文文案与控件范围（默认数值取自 {@link SPARKLE_TWINKLE_DEFAULTS}） */
+/** 亮光细闪中文文案与控件范围（默认数值取自 {@link SPARKLE_TWINKLE_DEFAULTS}） */
 const SPARKLE_TWINKLE_PARAM_UI: Partial<
     Record<
         keyof typeof SPARKLE_TWINKLE_DEFAULTS,
@@ -221,9 +221,9 @@ const BUTTERFLY_PARTICLE_PARAM_UI: Partial<
     twinkleMin: { min: 0, max: 0.85, step: 0.05, label: '最暗亮度' },
     twinkleSharpness: { min: 0.5, max: 8, step: 0.1, label: '闪烁锐利度' },
     brightness: { min: 0.2, max: 5, step: 0.1, label: '亮度' },
-    goldTint: { label: '颜色 1' },
-    midTint: { label: '颜色 2' },
-    darkTint: { label: '颜色 3' },
+    baseColor: { label: '基础颜色' },
+    cycleColor1: { label: '循环颜色 1' },
+    cycleColor2: { label: '循环颜色 2' },
     colorCycleEnabled: { label: '颜色循环' },
     colorCycleSpeed: { min: 0.05, max: 2, step: 0.05, label: '循环速度' },
     sparkleTrailStrength: { min: 0, max: 2, step: 0.05, label: '拖尾强度' },
@@ -233,6 +233,15 @@ const BUTTERFLY_PARTICLE_PARAM_UI: Partial<
     gsLightColor: { label: '光源颜色' },
     center: { label: '效果中心' }
 };
+
+const BUTTERFLY_COLOR_CYCLE_PARAM_KEYS = new Set(['cycleColor1', 'cycleColor2', 'colorCycleSpeed']);
+
+function butterflyShowsColorCycleParams(colorCycleEnabled: unknown): boolean {
+    if (typeof colorCycleEnabled === 'boolean') {
+        return colorCycleEnabled;
+    }
+    return BUTTERFLY_PARTICLE_DEFAULTS.colorCycleEnabled;
+}
 
 function applyButterflyParticleParamUiSpec(spec: EffectParamUiSpec): void {
     const key = spec.key as keyof typeof BUTTERFLY_PARTICLE_DEFAULTS;
@@ -379,7 +388,13 @@ export function getPersistentParamSpecs(
         return getPersistentEffectParamKeys(effectType).map(buildSparkleTwinkleParamSpec);
     }
     if (effectType === 'butterfly-particle') {
-        return getPersistentEffectParamKeys(effectType).map(buildButterflyParticleParamSpec);
+        return getPersistentEffectParamKeys(effectType)
+            .filter(
+                (key) =>
+                    !BUTTERFLY_COLOR_CYCLE_PARAM_KEYS.has(key) ||
+                    butterflyShowsColorCycleParams(effectValues?.colorCycleEnabled)
+            )
+            .map(buildButterflyParticleParamSpec);
     }
     if (effectType === 'overall-wave') {
         return getPersistentEffectParamKeys(effectType)

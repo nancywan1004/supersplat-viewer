@@ -936,16 +936,18 @@ export const BUTTERFLY_PARTICLE_DEFAULTS = {
     pointSize: 0.004,
     twinkleSpeed: 4.5,
     twinkleMin: 0,
-    twinkleSharpness: 2.4,
+    twinkleSharpness: 3,
     brightness: 2.2,
-    /** 三种主色（同亮度；未开循环时仅用颜色 1 基础蓝）。 */
-    goldTint: [0.28, 0.52, 0.98] as [number, number, number],
-    midTint: [22 / 255, 184 / 255, 156 / 255] as [number, number, number],
-    darkTint: [91 / 255, 114 / 255, 164 / 255] as [number, number, number],
+    /** 基础色（未开循环时蝴蝶与拖尾使用）。 */
+    baseColor: [0.28, 0.52, 0.98] as [number, number, number],
+    /** 颜色循环：循环色 1（#16B89C）。 */
+    cycleColor1: [22 / 255, 184 / 255, 156 / 255] as [number, number, number],
+    /** 颜色循环：循环色 2（#5B72A4）。 */
+    cycleColor2: [91 / 255, 114 / 255, 164 / 255] as [number, number, number],
     /** 开启后蝴蝶与拖尾在三种颜色间循环过渡。 */
     colorCycleEnabled: false,
     /** 完整三色循环频率（次/秒，越大越快）。 */
-    colorCycleSpeed: 0.2,
+    colorCycleSpeed: 1,
     sparkleTrailStrength: 1,
     gsLightEnabled: true,
     gsLightIntensity: 1,
@@ -965,10 +967,9 @@ class GsplatPersistentButterflyParticle extends Script {
     twinkleMin = BUTTERFLY_PARTICLE_DEFAULTS.twinkleMin;
     twinkleSharpness = BUTTERFLY_PARTICLE_DEFAULTS.twinkleSharpness;
     brightness = BUTTERFLY_PARTICLE_DEFAULTS.brightness;
-    /** 颜色 1 / 2 / 3（同亮度主色）。 */
-    goldTint = new Color(...BUTTERFLY_PARTICLE_DEFAULTS.goldTint);
-    midTint = new Color(...BUTTERFLY_PARTICLE_DEFAULTS.midTint);
-    darkTint = new Color(...BUTTERFLY_PARTICLE_DEFAULTS.darkTint);
+    baseColor = new Color(...BUTTERFLY_PARTICLE_DEFAULTS.baseColor);
+    cycleColor1 = new Color(...BUTTERFLY_PARTICLE_DEFAULTS.cycleColor1);
+    cycleColor2 = new Color(...BUTTERFLY_PARTICLE_DEFAULTS.cycleColor2);
     colorCycleEnabled = BUTTERFLY_PARTICLE_DEFAULTS.colorCycleEnabled;
     colorCycleSpeed = BUTTERFLY_PARTICLE_DEFAULTS.colorCycleSpeed;
     /** 移动时洒落闪烁下坠的魔法光屑强度。 */
@@ -1610,9 +1611,17 @@ class GsplatPersistentButterflyParticle extends Script {
               [this._cameraPos.x, this._cameraPos.y, this._cameraPos.z] as [number, number, number])
             : null;
 
-        const colorA = [this.goldTint.r, this.goldTint.g, this.goldTint.b] as [number, number, number];
-        const colorB = [this.midTint.r, this.midTint.g, this.midTint.b] as [number, number, number];
-        const colorC = [this.darkTint.r, this.darkTint.g, this.darkTint.b] as [number, number, number];
+        const colorA = [this.baseColor.r, this.baseColor.g, this.baseColor.b] as [number, number, number];
+        const colorB = [this.cycleColor1.r, this.cycleColor1.g, this.cycleColor1.b] as [
+            number,
+            number,
+            number
+        ];
+        const colorC = [this.cycleColor2.r, this.cycleColor2.g, this.cycleColor2.b] as [
+            number,
+            number,
+            number
+        ];
 
         const applyTo = (
             material: ShaderMaterial | null,
