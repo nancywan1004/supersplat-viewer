@@ -57,6 +57,8 @@ const TORCH_DEPTH_JUMP_MIN_DELTA = 0.35;
 const TORCH_FAR_DEPTH_CONFIRM_MS = 90;
 /** 二次确认时，两次远深度差异小于该比例才视为同一远表面 */
 const TORCH_FAR_DEPTH_CONFIRM_TOLERANCE = 0.15;
+/** mesh 与 gsplat 深度差小于此值视为叠层，保持上一帧来源避免每帧抢答闪烁 */
+const TORCH_MESH_GSPLAT_HYSTERESIS_M = 0.2;
 /** 求 mesh AABB 命中时跳过的辅助 entity tag（光源 gizmo、拾取手柄、手电筒自身 visual 等） */
 const TORCH_MESH_HELPER_TAGS = new Set<string>([
     'torchLight',
@@ -349,7 +351,11 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         return tEnter + (tMax - tEnter) * TORCH_MESH_AABB_DEPTH_ALONG;
     };
 
-    /** mesh 与 gsplat 同时命中时取离相机更近的一侧 */
+    /**
+     * mesh 与 gsplat 同时命中时：
+     * - 深度差明显：取更近一侧
+     * - 叠层区（深度接近）：保持上一帧来源，避免 mesh AABB / picker 每帧交替抢答导致闪烁
+     */
     const resolveTorchPickDepth = (
         meshDist: number | null,
         meshRangeBoost: number,
@@ -361,6 +367,14 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         }
         if (gsplatDist === null) {
             return { distance: meshDist, fromMesh: true, rangeBoost: meshRangeBoost };
+        }
+
+        const gap = Math.abs(meshDist - gsplatDist);
+        if (gap < TORCH_MESH_GSPLAT_HYSTERESIS_M && runtime.hasWorldPos) {
+            if (runtime.lastPickFromMesh) {
+                return { distance: meshDist, fromMesh: true, rangeBoost: meshRangeBoost };
+            }
+            return { distance: gsplatDist, fromMesh: false, rangeBoost: 0 };
         }
         if (gsplatDist <= meshDist) {
             return { distance: gsplatDist, fromMesh: false, rangeBoost: 0 };
@@ -474,6 +488,10 @@ export function initTorchLight(global: Global): TorchControllerHandle {
 
         const prev = runtime.lastDistance;
         const delta = Math.abs(distance - prev);
+        const sourceFlip = fromMesh !== runtime.lastPickFromMesh;
+        if (sourceFlip && delta < TORCH_MESH_GSPLAT_HYSTERESIS_M) {
+            return false;
+        }
         const minDist = Math.max(1e-6, Math.min(distance, prev));
         const isLargeJump = delta >= TORCH_DEPTH_JUMP_MIN_DELTA &&
             (Math.max(distance, prev) / minDist) >= TORCH_DEPTH_JUMP_RATIO;
@@ -559,11 +577,6 @@ export function initTorchLight(global: Global): TorchControllerHandle {
                 runtime.lastPickTime = now;
             }
             return;
-        }
-
-        if (meshDistSnapshot !== null) {
-            const meshOnly = resolveTorchPickDepth(meshDistSnapshot, meshBoostSnapshot, null);
-            if (meshOnly) applyResolvedPick(meshOnly, now);
         }
 
         const generation = ++runtime.pickGeneration;
