@@ -37,8 +37,13 @@ export class GsplatPersistentFallingPetals extends Script {
 
     glowStrength = GSPLAT_FALLING_PETALS_PRESET.glowStrength;
 
+    glowWidth = GSPLAT_FALLING_PETALS_PRESET.glowWidth;
+
     extents = new Vec3(...GSPLAT_FALLING_PETALS_PRESET.extents);
 
+    density = GSPLAT_FALLING_PETALS_PRESET.density;
+
+    /** @deprecated Use density. Kept for old persistent configs. */
     petalParticleCount = GSPLAT_FALLING_PETALS_PRESET.petalParticleCount;
 
     petalTextureUrl = '/textures/petal-atlas.png';
@@ -63,8 +68,9 @@ export class GsplatPersistentFallingPetals extends Script {
             color: [...this.color] as [number, number, number],
             glowColor: [...this.glowColor] as [number, number, number],
             glowStrength: this.glowStrength,
+            glowWidth: this.glowWidth,
             extents: [this.extents.x, this.extents.y, this.extents.z] as [number, number, number],
-            petalParticleCount: this.petalParticleCount,
+            density: this.density,
             petalTextureUrl: this.petalTextureUrl
         };
 
@@ -101,7 +107,7 @@ export class GsplatPersistentFallingWeather extends Script {
 
     restoreSceneAtmosphere = true;
 
-    extents = new Vec3(12, 12, 12);
+    extents = new Vec3(12, 12, 24);
 
     density = 1.5;
 
@@ -110,6 +116,10 @@ export class GsplatPersistentFallingWeather extends Script {
     drift = 0.4;
 
     opacity = 0.8;
+
+    globalOpacity = 1;
+
+    farOpacity = 0.4;
 
     color: [number, number, number] = [1, 1, 1];
 
@@ -156,6 +166,8 @@ export class GsplatPersistentFallingWeather extends Script {
         this.speed = preset.speed;
         this.drift = preset.drift;
         this.opacity = preset.opacity;
+        this.globalOpacity = preset.globalOpacity;
+        this.farOpacity = preset.farOpacity;
         this.color = [...preset.color];
         this.particleMinSize = preset.particleMinSize;
         this.particleMaxSize = preset.particleMaxSize;
@@ -193,6 +205,8 @@ export class GsplatPersistentFallingWeather extends Script {
             speed: this.speed,
             drift: this.drift,
             opacity: this.opacity,
+            globalOpacity: this.globalOpacity,
+            farOpacity: this.farOpacity,
             color: [...this.color] as [number, number, number],
             particleMinSize: this.particleMinSize,
             particleMaxSize: this.particleMaxSize,

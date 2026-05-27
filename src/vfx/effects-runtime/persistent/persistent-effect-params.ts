@@ -30,7 +30,10 @@ const FALLING_PETALS = new Set([
     'color',
     'glowColor',
     'glowStrength',
+    'glowWidth',
     'extents',
+    'density',
+    /** @deprecated 使用 density；保留兼容旧配置 */
     'petalParticleCount',
     'petalTextureUrl',
     'continuousRender'
@@ -40,6 +43,8 @@ const FALLING_WEATHER = new Set([
     'speed',
     'drift',
     'opacity',
+    'globalOpacity',
+    'farOpacity',
     'color',
     'particleMinSize',
     'particleMaxSize',
@@ -113,6 +118,10 @@ function trySetBoolean(script: any, key: string, v: unknown): boolean {
 
 /**
  * 将 `effectParams` 中属于当前 persistent `effectType` 白名单的项写入已挂载脚本（在 **`create*Script` 默认值与 `updateScriptCenter` 之后**调用）。
+ *
+ * @param script - 已创建的 persistent effect 脚本实例。
+ * @param effectType - 当前 persistent effect 类型。
+ * @param effectParams - 外部传入的参数表。
  */
 export function applyPersistentEffectParamsToScript(
     script: any,
@@ -132,6 +141,12 @@ export function applyPersistentEffectParamsToScript(
         }
         if (rawKey === 'color' || rawKey === 'glowColor' || rawKey === 'cameraClearColor') {
             trySetTriple(script, rawKey, rawVal);
+            continue;
+        }
+        if (effectType === 'falling-petals' && rawKey === 'petalParticleCount') {
+            if (typeof rawVal === 'number' && Number.isFinite(rawVal) && 'density' in script) {
+                script.density = rawVal / 6000;
+            }
             continue;
         }
         if (trySetNumber(script, rawKey, rawVal)) continue;

@@ -26,11 +26,14 @@ export interface GsplatFallingPetalsOptions {
     continuousRender?: boolean;
     petalTexture?: Texture | null;
     petalTextureUrl?: string;
+    density?: number;
+    /** @deprecated Use density. 3000 petals maps to density 0.5. */
     petalParticleCount?: number;
     opacity?: number;
     color?: [number, number, number];
     glowColor?: [number, number, number];
     glowStrength?: number;
+    glowWidth?: number;
     extents?: [number, number, number];
     speed?: number;
     drift?: number;
@@ -42,14 +45,18 @@ export interface GsplatFallingPetalsOptions {
 }
 
 const DEFAULT_ATLAS_URL = '/textures/petal-atlas.png';
+const PETAL_COUNT_PER_DENSITY = 6000;
 
 const PETAL_PRESET = {
     opacity: 0.92,
     color: [1, 1, 1] as [number, number, number],
     glowColor: [1, 1, 1] as [number, number, number],
     glowStrength: 0.3,
-    extents: [36, 42, 32] as [number, number, number],
-    petalParticleCount: 3000,
+    glowWidth: 1,
+    extents: [36, 42, 64] as [number, number, number],
+    density: 0.7,
+    /** @deprecated Use density. 4200 petals maps to density 0.7. */
+    petalParticleCount: 4200,
     speed: 2.2,
     drift: 0.5,
     flutter: 0.28,
@@ -104,6 +111,8 @@ export class GsplatFallingPetals extends Script {
 
     glowStrength = PETAL_PRESET.glowStrength;
 
+    glowWidth = PETAL_PRESET.glowWidth;
+
     extents = new Vec3(...PETAL_PRESET.extents);
 
     speed = PETAL_PRESET.speed;
@@ -132,7 +141,7 @@ export class GsplatFallingPetals extends Script {
 
     private _petalTextureAsset: Asset | null = null;
 
-    private _petalParticleCount = PETAL_PRESET.petalParticleCount;
+    density = PETAL_PRESET.density;
 
     private _petalLayer: Layer | null = null;
 
@@ -145,6 +154,8 @@ export class GsplatFallingPetals extends Script {
     private _time = 0;
 
     private _gridHalfArray = [0, 0, 0];
+
+    private _baseCellArray = [0, 0, 0];
 
     private _cameraOffsetArray = [0, 0, 0];
 
@@ -168,14 +179,21 @@ export class GsplatFallingPetals extends Script {
         if (options.continuousRender !== undefined) this.continuousRender = options.continuousRender;
         if (options.petalTexture !== undefined) this.setPetalTexture(options.petalTexture);
         if (options.petalTextureUrl) this.loadPetalTexture(options.petalTextureUrl);
-        if (options.petalParticleCount !== undefined && options.petalParticleCount !== this._petalParticleCount) {
-            this._petalParticleCount = options.petalParticleCount;
+        const nextDensity = options.density ?? (
+            options.petalParticleCount !== undefined ? options.petalParticleCount / PETAL_COUNT_PER_DENSITY : undefined
+        );
+        if (nextDensity !== undefined && nextDensity !== this.density) {
+            this.density = nextDensity;
             rebuild = true;
         }
         if (options.opacity !== undefined) this.opacity = options.opacity;
         if (options.color) this.color = [...options.color];
         if (options.glowColor) this.glowColor = [...options.glowColor];
         if (options.glowStrength !== undefined) this.glowStrength = options.glowStrength;
+        if (options.glowWidth !== undefined && options.glowWidth !== this.glowWidth) {
+            this.glowWidth = options.glowWidth;
+            rebuild = true;
+        }
         if (options.extents) this.extents.set(options.extents[0], options.extents[1], options.extents[2]);
         if (options.speed !== undefined) this.speed = options.speed;
         if (options.drift !== undefined) this.drift = options.drift;
@@ -337,7 +355,9 @@ export class GsplatFallingPetals extends Script {
         const halfX = this.getHalfCells(this.extents.x);
         const halfY = this.getHalfCells(this.extents.y);
         const halfZ = this.getHalfCells(this.extents.z);
+        const gridX = halfX * 2;
         const gridY = halfY * 2;
+        const gridZ = halfZ * 2;
         const tileCount = Math.max(1, this.atlasColumns * this.atlasRows);
         const corners = [
             [-1, -1],
@@ -349,9 +369,9 @@ export class GsplatFallingPetals extends Script {
         for (let i = 0; i < count; i++) {
             const hero = rng() > 0.96 ? lerp(1.25, 1.85, rng()) : 1;
             const seed: PetalSeed = {
-                ox: Math.floor(lerp(-halfX, halfX, rng())),
+                ox: Math.floor(rng() * gridX),
                 oy: Math.floor(rng() * gridY),
-                oz: Math.floor(lerp(-halfZ, halfZ, rng())),
+                oz: Math.floor(rng() * gridZ),
                 tile: Math.floor(rng() * tileCount),
                 size: lerp(this.petalMinSize, this.petalMaxSize, Math.pow(rng(), 1.75)) * hero,
                 aspect: lerp(0.55, 0.95, rng()),
@@ -419,6 +439,8 @@ export class GsplatFallingPetals extends Script {
     }
 
     private createMaterial() {
+        const glowWidth = this.getClampedGlowWidth();
+        const glowMaxScale = this.formatShaderFloat(1 + 0.58 * glowWidth);
         const material = new ShaderMaterial();
         material.cull = CULLFACE_NONE;
         material.blendType = BLEND_NORMAL;
@@ -439,6 +461,7 @@ export class GsplatFallingPetals extends Script {
                 uniform float uTime;
                 uniform float uCellSize;
                 uniform vec3 uGridHalf;
+                uniform vec3 uBaseCell;
                 uniform vec3 uCameraOffset;
                 uniform vec3 uRight;
                 uniform vec3 uUp;
@@ -463,19 +486,33 @@ export class GsplatFallingPetals extends Script {
                     return t * t * (3.0 - 2.0 * t);
                 }
 
+                float positiveMod(float v, float m) {
+                    return v - floor(v / m) * m;
+                }
+
+                float wrappedCell(float seedCell, float baseCell, float gridSize, float halfGrid) {
+                    return positiveMod(seedCell - positiveMod(baseCell, gridSize) + gridSize, gridSize) - halfGrid;
+                }
+
                 void main(void) {
                     vec4 s0 = vertex_texCoord1;
                     vec4 s1 = vertex_texCoord2;
                     vec4 s2 = vertex_texCoord3;
+                    float gridX = uGridHalf.x * 2.0;
                     float gridY = uGridHalf.y * 2.0;
-                    float fall = fract((s0.y + s1.y * 0.159154943) / gridY - uTime * uSpeed * s1.x / gridY);
+                    float gridZ = uGridHalf.z * 2.0;
+                    float cellX = wrappedCell(s0.x, uBaseCell.x, gridX, uGridHalf.x);
+                    float cellY = wrappedCell(s0.y, uBaseCell.y, gridY, uGridHalf.y);
+                    float cellZ = wrappedCell(s0.z, uBaseCell.z, gridZ, uGridHalf.z);
+                    float fall = fract((cellY + uGridHalf.y + s1.y * 0.159154943) / gridY - uTime * uSpeed * s1.x / gridY);
                     float sway = sin(uTime * mix(0.55, 1.25, s1.x) + s1.y);
                     float flutterWave = sin(uTime * mix(1.2, 2.8, s1.x) + s1.y * 1.73);
-                    vec3 center = vec3(
-                        (s0.x + 0.5 + (sway * s2.z + flutterWave * 0.35) * uDrift) * uCellSize,
+                    vec3 gridCenter = vec3(
+                        (cellX + 0.5 + (sway * s2.z + flutterWave * 0.35) * uDrift) * uCellSize,
                         (-uGridHalf.y + fall * gridY) * uCellSize,
-                        (s0.z + 0.5 + (cos(uTime * 0.7 + s1.y) * s2.w + flutterWave * 0.25) * uDrift) * uCellSize
+                        (cellZ + 0.5 + (cos(uTime * 0.7 + s1.y) * s2.w + flutterWave * 0.25) * uDrift) * uCellSize
                     );
+                    vec3 center = gridCenter;
 
                     float roll = s1.z + sin(uTime * 1.1 + s1.y) * 0.85;
                     float tiltX = sin(uTime * s2.x + s1.y) * (0.3 + uFlutter);
@@ -486,7 +523,10 @@ export class GsplatFallingPetals extends Script {
                     vec3 axisV = (-uRight * sr + uUp * cr) * s0.w * s1.w + uForward * tiltX * s0.w * 0.55;
                     vec3 localPos = center + axisU * vertex_position.x + axisV * vertex_position.y;
 
-                    float yNorm = (center.y / uCellSize + uGridHalf.y) / gridY;
+                    float yNorm = (gridCenter.y / uCellSize + uGridHalf.y) / gridY;
+                    float viewDepth = dot(gridCenter - uCameraOffset, uForward);
+                    float depthNorm = saturate((viewDepth / uCellSize + uGridHalf.z) / max(0.000001, uGridHalf.z * 2.0));
+                    float depthFade = mix(1.0, 0.4, smoother(0.82, 1.0, depthNorm));
                     float wrapFade = smoother(0.015, 0.1, yNorm) * (1.0 - smoother(0.9, 0.985, yNorm));
                     float shade = saturate(vertex_color.r);
                     float warm = vertex_color.g;
@@ -494,7 +534,7 @@ export class GsplatFallingPetals extends Script {
 
                     gl_Position = matrix_viewProjection * matrix_model * vec4(localPos, 1.0);
                     vUv0 = vertex_texCoord0;
-                    vColor = vec4(tint, uOpacity * wrapFade);
+                    vColor = vec4(tint, uOpacity * wrapFade * depthFade);
                 }
             `,
             vertexWGSL: /* wgsl */`
@@ -510,6 +550,7 @@ export class GsplatFallingPetals extends Script {
                 uniform uTime: f32;
                 uniform uCellSize: f32;
                 uniform uGridHalf: vec3f;
+                uniform uBaseCell: vec3f;
                 uniform uCameraOffset: vec3f;
                 uniform uRight: vec3f;
                 uniform uUp: vec3f;
@@ -534,20 +575,34 @@ export class GsplatFallingPetals extends Script {
                     return t * t * (3.0 - 2.0 * t);
                 }
 
+                fn positiveMod(v: f32, m: f32) -> f32 {
+                    return v - floor(v / m) * m;
+                }
+
+                fn wrappedCell(seedCell: f32, baseCell: f32, gridSize: f32, halfGrid: f32) -> f32 {
+                    return positiveMod(seedCell - positiveMod(baseCell, gridSize) + gridSize, gridSize) - halfGrid;
+                }
+
                 @vertex fn vertexMain(input: VertexInput) -> VertexOutput {
                     var output: VertexOutput;
                     let s0 = input.vertex_texCoord1;
                     let s1 = input.vertex_texCoord2;
                     let s2 = input.vertex_texCoord3;
+                    let gridX = uniform.uGridHalf.x * 2.0;
                     let gridY = uniform.uGridHalf.y * 2.0;
-                    let fall = fract((s0.y + s1.y * 0.159154943) / gridY - uniform.uTime * uniform.uSpeed * s1.x / gridY);
+                    let gridZ = uniform.uGridHalf.z * 2.0;
+                    let cellX = wrappedCell(s0.x, uniform.uBaseCell.x, gridX, uniform.uGridHalf.x);
+                    let cellY = wrappedCell(s0.y, uniform.uBaseCell.y, gridY, uniform.uGridHalf.y);
+                    let cellZ = wrappedCell(s0.z, uniform.uBaseCell.z, gridZ, uniform.uGridHalf.z);
+                    let fall = fract((cellY + uniform.uGridHalf.y + s1.y * 0.159154943) / gridY - uniform.uTime * uniform.uSpeed * s1.x / gridY);
                     let sway = sin(uniform.uTime * mix(0.55, 1.25, s1.x) + s1.y);
                     let flutterWave = sin(uniform.uTime * mix(1.2, 2.8, s1.x) + s1.y * 1.73);
-                    let center = vec3f(
-                        (s0.x + 0.5 + (sway * s2.z + flutterWave * 0.35) * uniform.uDrift) * uniform.uCellSize,
+                    let gridCenter = vec3f(
+                        (cellX + 0.5 + (sway * s2.z + flutterWave * 0.35) * uniform.uDrift) * uniform.uCellSize,
                         (-uniform.uGridHalf.y + fall * gridY) * uniform.uCellSize,
-                        (s0.z + 0.5 + (cos(uniform.uTime * 0.7 + s1.y) * s2.w + flutterWave * 0.25) * uniform.uDrift) * uniform.uCellSize
+                        (cellZ + 0.5 + (cos(uniform.uTime * 0.7 + s1.y) * s2.w + flutterWave * 0.25) * uniform.uDrift) * uniform.uCellSize
                     );
+                    let center = gridCenter;
 
                     let roll = s1.z + sin(uniform.uTime * 1.1 + s1.y) * 0.85;
                     let tiltX = sin(uniform.uTime * s2.x + s1.y) * (0.3 + uniform.uFlutter);
@@ -558,7 +613,10 @@ export class GsplatFallingPetals extends Script {
                     let axisV = (-uniform.uRight * sr + uniform.uUp * cr) * s0.w * s1.w + uniform.uForward * tiltX * s0.w * 0.55;
                     let localPos = center + axisU * input.vertex_position.x + axisV * input.vertex_position.y;
 
-                    let yNorm = (center.y / uniform.uCellSize + uniform.uGridHalf.y) / gridY;
+                    let yNorm = (gridCenter.y / uniform.uCellSize + uniform.uGridHalf.y) / gridY;
+                    let viewDepth = dot(gridCenter - uniform.uCameraOffset, uniform.uForward);
+                    let depthNorm = saturate((viewDepth / uniform.uCellSize + uniform.uGridHalf.z) / max(0.000001, uniform.uGridHalf.z * 2.0));
+                    let depthFade = mix(1.0, 0.4, smoother(0.82, 1.0, depthNorm));
                     let wrapFade = smoother(0.015, 0.1, yNorm) * (1.0 - smoother(0.9, 0.985, yNorm));
                     let shade = saturate(input.vertex_color.r);
                     let warm = input.vertex_color.g;
@@ -566,7 +624,7 @@ export class GsplatFallingPetals extends Script {
 
                     output.position = uniform.matrix_viewProjection * uniform.matrix_model * vec4f(localPos, 1.0);
                     output.vUv0 = input.vertex_texCoord0;
-                    output.vColor = vec4f(tint, uniform.uOpacity * wrapFade);
+                    output.vColor = vec4f(tint, uniform.uOpacity * wrapFade * depthFade);
                     return output;
                 }
             `,
@@ -577,29 +635,41 @@ export class GsplatFallingPetals extends Script {
                 uniform vec3 uGlowColor;
                 uniform float uGlowStrength;
 
-                float sampleMaxAlpha(vec2 uv, float r) {
-                    float a = texture2D(colorMap, uv + vec2( r,  0.0)).a;
-                    a = max(a, texture2D(colorMap, uv + vec2(-r,  0.0)).a);
-                    a = max(a, texture2D(colorMap, uv + vec2(0.0,  r)).a);
-                    a = max(a, texture2D(colorMap, uv + vec2(0.0, -r)).a);
-                    a = max(a, texture2D(colorMap, uv + vec2( r,  r)).a);
-                    a = max(a, texture2D(colorMap, uv + vec2(-r,  r)).a);
-                    a = max(a, texture2D(colorMap, uv + vec2( r, -r)).a);
-                    a = max(a, texture2D(colorMap, uv + vec2(-r, -r)).a);
-                    return a;
+                float expandedPetalAlpha(vec2 uv, float scale) {
+                    vec2 atlasGrid = vec2(${this.atlasColumns}.0, ${this.atlasRows}.0);
+                    vec2 tile = floor(uv * atlasGrid);
+                    vec2 local = fract(uv * atlasGrid);
+                    vec2 scaledLocal = vec2(0.5) + (local - vec2(0.5)) / scale;
+                    scaledLocal = clamp(scaledLocal, vec2(0.018), vec2(0.982));
+                    return texture2D(colorMap, (tile + scaledLocal) / atlasGrid).a;
+                }
+
+                float softGlowAlpha(vec2 uv, float baseA) {
+                    float maxScale = ${glowMaxScale};
+                    float outerA = expandedPetalAlpha(uv, maxScale);
+                    float hit = smoothstep(0.03, 0.28, outerA);
+                    float lo = 1.0;
+                    float hi = maxScale;
+                    for (int i = 0; i < 6; i++) {
+                        float mid = (lo + hi) * 0.5;
+                        float a = expandedPetalAlpha(uv, mid);
+                        if (a > 0.18) {
+                            hi = mid;
+                        } else {
+                            lo = mid;
+                        }
+                    }
+                    float edgeDist = clamp((hi - 1.0) / max(0.0001, maxScale - 1.0), 0.0, 1.0);
+                    float halo = pow(1.0 - smoothstep(0.0, 1.0, edgeDist), 1.35) * hit;
+                    float outside = 1.0 - smoothstep(0.03, 0.62, baseA);
+                    return halo * outside;
                 }
 
                 void main(void) {
                     vec4 tex = texture2D(colorMap, vUv0);
-                    float nearAlpha = sampleMaxAlpha(vUv0, 0.0045);
-                    float midAlpha = sampleMaxAlpha(vUv0, 0.010);
-                    float farAlpha = sampleMaxAlpha(vUv0, 0.018);
 
                     float baseAlpha = tex.a * vColor.a;
-                    float glowMask = max(nearAlpha - tex.a, 0.0) * 0.54;
-                    glowMask += max(midAlpha - tex.a, 0.0) * 0.30;
-                    glowMask += max(farAlpha - tex.a, 0.0) * 0.16;
-                    float glowAlpha = glowMask * vColor.a * uGlowStrength * 0.72;
+                    float glowAlpha = softGlowAlpha(vUv0, tex.a) * vColor.a * uGlowStrength * 1.05;
                     float alpha = max(baseAlpha, glowAlpha);
                     if (alpha < 0.015) {
                         discard;
@@ -619,30 +689,42 @@ export class GsplatFallingPetals extends Script {
                 var colorMap: texture_2d<f32>;
                 var colorMapSampler: sampler;
 
-                fn sampleMaxAlpha(uv: vec2f, r: f32) -> f32 {
-                    var a = textureSample(colorMap, colorMapSampler, uv + vec2f( r, 0.0)).a;
-                    a = max(a, textureSample(colorMap, colorMapSampler, uv + vec2f(-r, 0.0)).a);
-                    a = max(a, textureSample(colorMap, colorMapSampler, uv + vec2f(0.0,  r)).a);
-                    a = max(a, textureSample(colorMap, colorMapSampler, uv + vec2f(0.0, -r)).a);
-                    a = max(a, textureSample(colorMap, colorMapSampler, uv + vec2f( r,  r)).a);
-                    a = max(a, textureSample(colorMap, colorMapSampler, uv + vec2f(-r,  r)).a);
-                    a = max(a, textureSample(colorMap, colorMapSampler, uv + vec2f( r, -r)).a);
-                    a = max(a, textureSample(colorMap, colorMapSampler, uv + vec2f(-r, -r)).a);
-                    return a;
+                fn expandedPetalAlpha(uv: vec2f, scale: f32) -> f32 {
+                    let atlasGrid = vec2f(${this.atlasColumns}.0, ${this.atlasRows}.0);
+                    let tile = floor(uv * atlasGrid);
+                    let local = fract(uv * atlasGrid);
+                    var scaledLocal = vec2f(0.5) + (local - vec2f(0.5)) / scale;
+                    scaledLocal = clamp(scaledLocal, vec2f(0.018), vec2f(0.982));
+                    return textureSample(colorMap, colorMapSampler, (tile + scaledLocal) / atlasGrid).a;
+                }
+
+                fn softGlowAlpha(uv: vec2f, baseA: f32) -> f32 {
+                    let maxScale = ${glowMaxScale};
+                    let outerA = expandedPetalAlpha(uv, maxScale);
+                    let hit = smoothstep(0.03, 0.28, outerA);
+                    var lo = 1.0;
+                    var hi = maxScale;
+                    for (var i = 0; i < 6; i = i + 1) {
+                        let mid = (lo + hi) * 0.5;
+                        let a = expandedPetalAlpha(uv, mid);
+                        if (a > 0.18) {
+                            hi = mid;
+                        } else {
+                            lo = mid;
+                        }
+                    }
+                    let edgeDist = clamp((hi - 1.0) / max(0.0001, maxScale - 1.0), 0.0, 1.0);
+                    let halo = pow(1.0 - smoothstep(0.0, 1.0, edgeDist), 1.35) * hit;
+                    let outside = 1.0 - smoothstep(0.03, 0.62, baseA);
+                    return halo * outside;
                 }
 
                 @fragment fn fragmentMain(input: FragmentInput) -> FragmentOutput {
                     var output: FragmentOutput;
                     let tex = textureSample(colorMap, colorMapSampler, input.vUv0);
-                    let nearAlpha = sampleMaxAlpha(input.vUv0, 0.0045);
-                    let midAlpha = sampleMaxAlpha(input.vUv0, 0.010);
-                    let farAlpha = sampleMaxAlpha(input.vUv0, 0.018);
 
                     let baseAlpha = tex.a * input.vColor.a;
-                    var glowMask = max(nearAlpha - tex.a, 0.0) * 0.54;
-                    glowMask = glowMask + max(midAlpha - tex.a, 0.0) * 0.30;
-                    glowMask = glowMask + max(farAlpha - tex.a, 0.0) * 0.16;
-                    let glowAlpha = glowMask * input.vColor.a * uniform.uGlowStrength * 0.72;
+                    let glowAlpha = softGlowAlpha(input.vUv0, tex.a) * input.vColor.a * uniform.uGlowStrength * 1.05;
                     let alpha = max(baseAlpha, glowAlpha);
                     if (alpha < 0.015) {
                         discard;
@@ -684,6 +766,9 @@ export class GsplatFallingPetals extends Script {
         const bcZ = Math.floor(pos.z / cs);
 
         this._petalEntity!.setPosition(bcX * cs, bcY * cs, bcZ * cs);
+        this._baseCellArray[0] = bcX;
+        this._baseCellArray[1] = bcY;
+        this._baseCellArray[2] = bcZ;
         this._cameraOffsetArray[0] = pos.x - bcX * cs;
         this._cameraOffsetArray[1] = pos.y - bcY * cs;
         this._cameraOffsetArray[2] = pos.z - bcZ * cs;
@@ -715,6 +800,7 @@ export class GsplatFallingPetals extends Script {
         this._material.setParameter('uTime', this._time);
         this._material.setParameter('uCellSize', this.getCellSize());
         this._material.setParameter('uGridHalf', this._gridHalfArray);
+        this._material.setParameter('uBaseCell', this._baseCellArray);
         this._material.setParameter('uCameraOffset', this._cameraOffsetArray);
         this._material.setParameter('uRight', this._rightArray);
         this._material.setParameter('uUp', this._upArray);
@@ -735,7 +821,16 @@ export class GsplatFallingPetals extends Script {
     }
 
     private getParticleCount() {
-        return Math.min(12000, Math.max(1, Math.floor(this._petalParticleCount)));
+        return Math.min(12000, Math.max(1, Math.floor(this.density * PETAL_COUNT_PER_DENSITY)));
+    }
+
+    private getClampedGlowWidth() {
+        return Math.min(3, Math.max(0.1, Number.isFinite(this.glowWidth) ? this.glowWidth : PETAL_PRESET.glowWidth));
+    }
+
+    private formatShaderFloat(value: number) {
+        const finite = Number.isFinite(value) ? value : 0;
+        return finite.toFixed(6).replace(/0+$/, '').replace(/\.$/, '.0');
     }
 
     private getHalfCells(extent: number) {
@@ -818,10 +913,11 @@ export class GsplatFallingPetals extends Script {
         if (!this._petalEntity?.render) {
             return;
         }
+        const halfExtent = Math.max(this.extents.x, this.extents.y, this.extents.z, this.petalMaxSize * 4) + this.getCellSize();
         const half = new Vec3(
-            Math.max(this.extents.x, this.petalMaxSize * 4),
-            Math.max(this.extents.y, this.petalMaxSize * 4),
-            Math.max(this.extents.z, this.petalMaxSize * 4)
+            halfExtent,
+            halfExtent,
+            halfExtent
         );
         this._petalEntity.render.customAabb = new BoundingBox(Vec3.ZERO, half);
     }

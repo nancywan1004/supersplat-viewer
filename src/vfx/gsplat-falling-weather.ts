@@ -20,6 +20,8 @@ export interface GsplatFallingWeatherPreset {
     speed: number;
     drift: number;
     opacity: number;
+    globalOpacity: number;
+    farOpacity: number;
     color: [number, number, number];
     particleMinSize: number;
     particleMaxSize: number;
@@ -53,6 +55,8 @@ const WEATHER_PRESETS: Record<Exclude<GsplatFallingWeatherMode, 'none'>, GsplatF
         speed: 2.0,
         drift: 0.4,
         opacity: 0.8,
+        globalOpacity: 1.0,
+        farOpacity: 0.4,
         color: [1, 1, 1],
         particleMinSize: 0.006,
         particleMaxSize: 0.012,
@@ -60,7 +64,7 @@ const WEATHER_PRESETS: Record<Exclude<GsplatFallingWeatherMode, 'none'>, GsplatF
         flutter: 0.0,
         tumble: 0.0,
         density: 1.5,
-        extents: [12, 12, 12],
+        extents: [12, 12, 24],
         angle: 0,
         fogDensity: 0.010,
         fogType: FOG_EXP,
@@ -76,6 +80,8 @@ const WEATHER_PRESETS: Record<Exclude<GsplatFallingWeatherMode, 'none'>, GsplatF
         speed: 10,
         drift: 0,
         opacity: 0.57,
+        globalOpacity: 1.0,
+        farOpacity: 0.4,
         color: [0.812, 0.812, 0.812],
         particleMinSize: 0.003,
         particleMaxSize: 0.003,
@@ -83,7 +89,7 @@ const WEATHER_PRESETS: Record<Exclude<GsplatFallingWeatherMode, 'none'>, GsplatF
         flutter: 0.0,
         tumble: 0.0,
         density: 1.5,
-        extents: [12, 12, 12],
+        extents: [12, 12, 24],
         angle: 0,
         fogDensity: 0.010,
         fogType: FOG_EXP,
@@ -100,7 +106,7 @@ const WEATHER_PRESETS: Record<Exclude<GsplatFallingWeatherMode, 'none'>, GsplatF
 export class GsplatFallingWeather extends Script {
     static scriptName = 'gsplatFallingWeather';
 
-    extents = new Vec3(12, 12, 12);
+    extents = new Vec3(12, 12, 24);
 
     density = 2;
 
@@ -113,6 +119,10 @@ export class GsplatFallingWeather extends Script {
     drift = 0.15;
 
     opacity = 0.8;
+
+    globalOpacity = 1.0;
+
+    farOpacity = 0.4;
 
     color: [number, number, number] = [1, 1, 1];
 
@@ -201,6 +211,8 @@ export class GsplatFallingWeather extends Script {
                 uniform float uSpeed;
                 uniform float uDrift;
                 uniform float uOpacity;
+                uniform float uGlobalOpacity;
+                uniform float uFarOpacity;
                 uniform vec3 uColor;
                 uniform vec2 uParticleSize;
                 uniform float uElongate;
@@ -256,7 +268,8 @@ export class GsplatFallingWeather extends Script {
                     float dist = length(weatherLocalPos - camOffset);
                     float maxDist = min(uGridHalf.x, uGridHalf.z) * uCellSize * 0.9;
                     float fade = 1.0 - smoothstep(maxDist * 0.6, maxDist, dist);
-                    float alpha = mix(0.5, 0.9, weatherHash(weatherWC + 20.0)) * fade * uOpacity;
+                    float distanceOpacity = mix(clamp(uFarOpacity, 0.0, 1.0), 1.0, fade);
+                    float alpha = mix(0.5, 0.9, weatherHash(weatherWC + 20.0)) * distanceOpacity * uOpacity * uGlobalOpacity;
                     return vec4(uColor, alpha);
                 }
 
@@ -281,6 +294,8 @@ export class GsplatFallingWeather extends Script {
                 uniform uSpeed: f32;
                 uniform uDrift: f32;
                 uniform uOpacity: f32;
+                uniform uGlobalOpacity: f32;
+                uniform uFarOpacity: f32;
                 uniform uColor: vec3f;
                 uniform uParticleSize: vec2f;
                 uniform uElongate: f32;
@@ -336,7 +351,8 @@ export class GsplatFallingWeather extends Script {
                     let dist = length(weatherLocalPos - camOffset);
                     let maxDist = min(uniform.uGridHalf.x, uniform.uGridHalf.z) * uniform.uCellSize * 0.9;
                     let fade = 1.0 - smoothstep(maxDist * 0.6, maxDist, dist);
-                    let alpha = mix(0.5, 0.9, weatherHash(weatherWC + 20.0)) * fade * uniform.uOpacity;
+                    let distanceOpacity = mix(clamp(uniform.uFarOpacity, 0.0, 1.0), 1.0, fade);
+                    let alpha = mix(0.5, 0.9, weatherHash(weatherWC + 20.0)) * distanceOpacity * uniform.uOpacity * uniform.uGlobalOpacity;
                     return vec4f(uniform.uColor, alpha);
                 }
 
@@ -379,6 +395,8 @@ export class GsplatFallingWeather extends Script {
         if (options.speed !== undefined) this.speed = options.speed;
         if (options.drift !== undefined) this.drift = options.drift;
         if (options.opacity !== undefined) this.opacity = options.opacity;
+        if (options.globalOpacity !== undefined) this.globalOpacity = options.globalOpacity;
+        if (options.farOpacity !== undefined) this.farOpacity = options.farOpacity;
         if (options.color) this.color = [...options.color];
         if (options.particleMinSize !== undefined) this.particleMinSize = options.particleMinSize;
         if (options.particleMaxSize !== undefined) this.particleMaxSize = options.particleMaxSize;
@@ -488,6 +506,8 @@ export class GsplatFallingWeather extends Script {
         gs.setParameter('uSpeed', this.speed);
         gs.setParameter('uDrift', this.drift);
         gs.setParameter('uOpacity', this.opacity);
+        gs.setParameter('uGlobalOpacity', this.globalOpacity);
+        gs.setParameter('uFarOpacity', this.farOpacity);
         gs.setParameter('uColor', this.color);
         gs.setParameter('uParticleSize', this._particleSizeArray);
         gs.setParameter('uElongate', this.elongate);

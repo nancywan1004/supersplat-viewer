@@ -84,8 +84,8 @@ const REVEAL_PANEL_HTML = (() => {
         <input type="text" id="petalsTextureUrl" class="settingsInput" value="/textures/petal-atlas.png">
       </div>
       <div class="settingsRow">
-        <label for="petalsCount">Petal Count:</label>
-        <input type="number" id="petalsCount" class="settingsInput" min="100" max="12000" step="100" value="3000">
+        <label for="petalsDensity">Petal Density:</label>
+        <input type="number" id="petalsDensity" class="settingsInput" min="0.05" max="2" step="0.05" value="0.7">
       </div>
       <div class="settingsRow">
         <label for="petalsOpacity">Petal Opacity:</label>
@@ -96,6 +96,10 @@ const REVEAL_PANEL_HTML = (() => {
         <input type="number" id="petalsGlowStrength" class="settingsInput" min="0" max="3" step="0.05" value="0.3">
       </div>
       <div class="settingsRow">
+        <label for="petalsGlowWidth">Glow Width:</label>
+        <input type="number" id="petalsGlowWidth" class="settingsInput" min="0.1" max="3" step="0.05" value="1">
+      </div>
+      <div class="settingsRow">
         <label for="petalsGlowColor">Glow Color:</label>
         <input type="color" id="petalsGlowColor" class="settingsInput" value="#ffffff" style="height:26px">
       </div>
@@ -103,7 +107,7 @@ const REVEAL_PANEL_HTML = (() => {
         <label>Petal Box XYZ:</label>
         <input type="number" id="petalsExtentX" class="settingsInput" min="1" max="120" step="1" value="36" style="width:64px">
         <input type="number" id="petalsExtentY" class="settingsInput" min="1" max="120" step="1" value="42" style="width:64px">
-        <input type="number" id="petalsExtentZ" class="settingsInput" min="1" max="120" step="1" value="32" style="width:64px">
+        <input type="number" id="petalsExtentZ" class="settingsInput" min="1" max="120" step="1" value="64" style="width:64px">
       </div>
     </div>
     <div id="persistentWeatherControls" class="hidden" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08)">
@@ -123,6 +127,16 @@ const REVEAL_PANEL_HTML = (() => {
         <span id="weatherOpacityValue" class="settingsValue">0.85</span>
       </div>
       <div class="settingsRow">
+        <label for="weatherGlobalOpacity">Global Opacity:</label>
+        <input type="range" id="weatherGlobalOpacity" class="settingsInput" min="0" max="1" step="0.01" value="1">
+        <span id="weatherGlobalOpacityValue" class="settingsValue">1.00</span>
+      </div>
+      <div class="settingsRow">
+        <label for="weatherFarOpacity">Far Opacity:</label>
+        <input type="range" id="weatherFarOpacity" class="settingsInput" min="0" max="1" step="0.01" value="0.4">
+        <span id="weatherFarOpacityValue" class="settingsValue">0.40</span>
+      </div>
+      <div class="settingsRow">
         <label for="weatherDrift">Drift:</label>
         <input type="range" id="weatherDrift" class="settingsInput" min="0" max="2" step="0.01" value="0.4">
         <span id="weatherDriftValue" class="settingsValue">0.40</span>
@@ -131,7 +145,7 @@ const REVEAL_PANEL_HTML = (() => {
         <label>Weather Box XYZ:</label>
         <input type="number" id="weatherExtentX" class="settingsInput" min="1" max="80" step="1" value="12" style="width:64px">
         <input type="number" id="weatherExtentY" class="settingsInput" min="1" max="80" step="1" value="12" style="width:64px">
-        <input type="number" id="weatherExtentZ" class="settingsInput" min="1" max="80" step="1" value="12" style="width:64px">
+        <input type="number" id="weatherExtentZ" class="settingsInput" min="1" max="80" step="1" value="24" style="width:64px">
       </div>
       <div class="settingsRow">
         <label>Size Min/Max:</label>
@@ -217,9 +231,10 @@ export function initRevealUI(global: Global): () => void {
     const persistentPetalsControls = container.querySelector('#persistentPetalsControls') as HTMLElement | null;
     const persistentWeatherControls = container.querySelector('#persistentWeatherControls') as HTMLElement | null;
     const petalsTextureUrl = container.querySelector('#petalsTextureUrl') as HTMLInputElement | null;
-    const petalsCount = container.querySelector('#petalsCount') as HTMLInputElement | null;
+    const petalsDensity = container.querySelector('#petalsDensity') as HTMLInputElement | null;
     const petalsOpacity = container.querySelector('#petalsOpacity') as HTMLInputElement | null;
     const petalsGlowStrength = container.querySelector('#petalsGlowStrength') as HTMLInputElement | null;
+    const petalsGlowWidth = container.querySelector('#petalsGlowWidth') as HTMLInputElement | null;
     const petalsGlowColor = container.querySelector('#petalsGlowColor') as HTMLInputElement | null;
     const petalsExtentX = container.querySelector('#petalsExtentX') as HTMLInputElement | null;
     const petalsExtentY = container.querySelector('#petalsExtentY') as HTMLInputElement | null;
@@ -230,6 +245,10 @@ export function initRevealUI(global: Global): () => void {
     const weatherSpeedValue = container.querySelector('#weatherSpeedValue') as HTMLElement | null;
     const weatherOpacity = container.querySelector('#weatherOpacity') as HTMLInputElement | null;
     const weatherOpacityValue = container.querySelector('#weatherOpacityValue') as HTMLElement | null;
+    const weatherGlobalOpacity = container.querySelector('#weatherGlobalOpacity') as HTMLInputElement | null;
+    const weatherGlobalOpacityValue = container.querySelector('#weatherGlobalOpacityValue') as HTMLElement | null;
+    const weatherFarOpacity = container.querySelector('#weatherFarOpacity') as HTMLInputElement | null;
+    const weatherFarOpacityValue = container.querySelector('#weatherFarOpacityValue') as HTMLElement | null;
     const weatherDrift = container.querySelector('#weatherDrift') as HTMLInputElement | null;
     const weatherDriftValue = container.querySelector('#weatherDriftValue') as HTMLElement | null;
     const weatherExtentX = container.querySelector('#weatherExtentX') as HTMLInputElement | null;
@@ -325,11 +344,12 @@ export function initRevealUI(global: Global): () => void {
         if (type === 'falling-petals') {
             return {
                 petalTextureUrl: '/textures/petal-atlas.png',
-                petalParticleCount: 3000,
+                density: 0.7,
                 opacity: 0.95,
                 glowColor: [1, 1, 1],
                 glowStrength: 0.3,
-                extents: [36, 42, 32]
+                glowWidth: 1,
+                extents: [36, 42, 64]
             };
         }
         if (type === 'falling-rain') {
@@ -337,8 +357,10 @@ export function initRevealUI(global: Global): () => void {
                 density: 1.5,
                 speed: 10,
                 opacity: 0.65,
+                globalOpacity: 1,
+                farOpacity: 0.4,
                 drift: 0.02,
-                extents: [12, 12, 12],
+                extents: [12, 12, 24],
                 particleMinSize: 0.003,
                 particleMaxSize: 0.003,
                 elongate: 20,
@@ -354,8 +376,10 @@ export function initRevealUI(global: Global): () => void {
                 density: 1.5,
                 speed: 2,
                 opacity: 0.85,
+                globalOpacity: 1,
+                farOpacity: 0.4,
                 drift: 0.4,
-                extents: [12, 12, 12],
+                extents: [12, 12, 24],
                 particleMinSize: 0.006,
                 particleMaxSize: 0.012,
                 elongate: 1,
@@ -468,20 +492,25 @@ export function initRevealUI(global: Global): () => void {
         persistentWeatherControls?.classList[showWeatherControls ? 'remove' : 'add']('hidden');
 
         writeTextInput(petalsTextureUrl, params.petalTextureUrl, '/textures/petal-atlas.png');
-        writeNumberInput(petalsCount, params.petalParticleCount, 3000);
+        const legacyPetalCount = typeof params.petalParticleCount === 'number' ? params.petalParticleCount : undefined;
+        const petalDensity = typeof params.density === 'number' ? params.density : legacyPetalCount !== undefined ? legacyPetalCount / 6000 : 0.7;
+        writeNumberInput(petalsDensity, petalDensity, 0.7);
         writeNumberInput(petalsOpacity, params.opacity, 0.95);
         writeNumberInput(petalsGlowStrength, params.glowStrength, 0.3);
+        writeNumberInput(petalsGlowWidth, params.glowWidth, 1);
         if (petalsGlowColor) {
             petalsGlowColor.value = rgbTripleToHex(params.glowColor, [1, 1, 1]);
         }
-        writeTriple([petalsExtentX, petalsExtentY, petalsExtentZ], params.extents, [36, 42, 32]);
+        writeTriple([petalsExtentX, petalsExtentY, petalsExtentZ], params.extents, [36, 42, 64]);
 
         const isRain = pType === 'falling-rain';
         writeSlider(weatherDensity, weatherDensityValue, params.density, 1.5, 1);
         writeSlider(weatherSpeed, weatherSpeedValue, params.speed, isRain ? 10 : 2, 1);
         writeSlider(weatherOpacity, weatherOpacityValue, params.opacity, isRain ? 0.65 : 0.85, 2);
+        writeSlider(weatherGlobalOpacity, weatherGlobalOpacityValue, params.globalOpacity, 1, 2);
+        writeSlider(weatherFarOpacity, weatherFarOpacityValue, params.farOpacity, 0.4, 2);
         writeSlider(weatherDrift, weatherDriftValue, params.drift, isRain ? 0.02 : 0.4, 2);
-        writeTriple([weatherExtentX, weatherExtentY, weatherExtentZ], params.extents, [12, 12, 12]);
+        writeTriple([weatherExtentX, weatherExtentY, weatherExtentZ], params.extents, [12, 12, 24]);
         writeNumberInput(weatherMinSize, params.particleMinSize, isRain ? 0.003 : 0.006);
         writeNumberInput(weatherMaxSize, params.particleMaxSize, isRain ? 0.003 : 0.012);
         writeSlider(weatherElongate, weatherElongateValue, params.elongate, isRain ? 20 : 1, 1);
@@ -501,11 +530,12 @@ export function initRevealUI(global: Global): () => void {
     const onPetalsParamsChange = () => {
         patchPersistentEffectParams({
             petalTextureUrl: petalsTextureUrl?.value || '/textures/petal-atlas.png',
-            petalParticleCount: readNumberInput(petalsCount, 3000),
+            density: readNumberInput(petalsDensity, 0.7),
             opacity: readNumberInput(petalsOpacity, 0.95),
             glowStrength: readNumberInput(petalsGlowStrength, 0.3),
+            glowWidth: readNumberInput(petalsGlowWidth, 1),
             glowColor: hexToRgbTriple(petalsGlowColor?.value, [1, 1, 1]),
-            extents: readTriple(petalsExtentX, petalsExtentY, petalsExtentZ, [36, 42, 32])
+            extents: readTriple(petalsExtentX, petalsExtentY, petalsExtentZ, [36, 42, 64])
         });
     };
 
@@ -515,8 +545,10 @@ export function initRevealUI(global: Global): () => void {
             density: readNumberInput(weatherDensity, 1.5),
             speed: readNumberInput(weatherSpeed, isRain ? 10 : 2),
             opacity: readNumberInput(weatherOpacity, isRain ? 0.65 : 0.85),
+            globalOpacity: readNumberInput(weatherGlobalOpacity, 1),
+            farOpacity: readNumberInput(weatherFarOpacity, 0.4),
             drift: readNumberInput(weatherDrift, isRain ? 0.02 : 0.4),
-            extents: readTriple(weatherExtentX, weatherExtentY, weatherExtentZ, [12, 12, 12]),
+            extents: readTriple(weatherExtentX, weatherExtentY, weatherExtentZ, [12, 12, 24]),
             particleMinSize: readNumberInput(weatherMinSize, isRain ? 0.003 : 0.006),
             particleMaxSize: readNumberInput(weatherMaxSize, isRain ? 0.003 : 0.012),
             elongate: readNumberInput(weatherElongate, isRain ? 20 : 1),
@@ -532,6 +564,8 @@ export function initRevealUI(global: Global): () => void {
         syncSliderValue(weatherDensity, weatherDensityValue, 1);
         syncSliderValue(weatherSpeed, weatherSpeedValue, 1);
         syncSliderValue(weatherOpacity, weatherOpacityValue, 2);
+        syncSliderValue(weatherGlobalOpacity, weatherGlobalOpacityValue, 2);
+        syncSliderValue(weatherFarOpacity, weatherFarOpacityValue, 2);
         syncSliderValue(weatherDrift, weatherDriftValue, 2);
         syncSliderValue(weatherElongate, weatherElongateValue, 1);
         syncSliderValue(weatherFogDensity, weatherFogDensityValue, 4);
@@ -735,9 +769,10 @@ export function initRevealUI(global: Global): () => void {
     persistentType?.addEventListener('change', onPersistentTypeChange);
     persistentEnabled?.addEventListener('change', onPersistentEnabledChange);
     petalsTextureUrl?.addEventListener('change', onPetalsParamsChange);
-    petalsCount?.addEventListener('change', onPetalsParamsChange);
+    petalsDensity?.addEventListener('change', onPetalsParamsChange);
     petalsOpacity?.addEventListener('change', onPetalsParamsChange);
     petalsGlowStrength?.addEventListener('change', onPetalsParamsChange);
+    petalsGlowWidth?.addEventListener('change', onPetalsParamsChange);
     petalsGlowColor?.addEventListener('input', onPetalsParamsChange);
     petalsGlowColor?.addEventListener('change', onPetalsParamsChange);
     petalsExtentX?.addEventListener('change', onPetalsParamsChange);
@@ -746,6 +781,8 @@ export function initRevealUI(global: Global): () => void {
     weatherDensity?.addEventListener('input', onWeatherSliderInput);
     weatherSpeed?.addEventListener('input', onWeatherSliderInput);
     weatherOpacity?.addEventListener('input', onWeatherSliderInput);
+    weatherGlobalOpacity?.addEventListener('input', onWeatherSliderInput);
+    weatherFarOpacity?.addEventListener('input', onWeatherSliderInput);
     weatherDrift?.addEventListener('change', onWeatherParamsChange);
     weatherDrift?.addEventListener('input', onWeatherSliderInput);
     weatherExtentX?.addEventListener('change', onWeatherParamsChange);
@@ -784,9 +821,10 @@ export function initRevealUI(global: Global): () => void {
         persistentType?.removeEventListener('change', onPersistentTypeChange);
         persistentEnabled?.removeEventListener('change', onPersistentEnabledChange);
         petalsTextureUrl?.removeEventListener('change', onPetalsParamsChange);
-        petalsCount?.removeEventListener('change', onPetalsParamsChange);
+        petalsDensity?.removeEventListener('change', onPetalsParamsChange);
         petalsOpacity?.removeEventListener('change', onPetalsParamsChange);
         petalsGlowStrength?.removeEventListener('change', onPetalsParamsChange);
+        petalsGlowWidth?.removeEventListener('change', onPetalsParamsChange);
         petalsGlowColor?.removeEventListener('input', onPetalsParamsChange);
         petalsGlowColor?.removeEventListener('change', onPetalsParamsChange);
         petalsExtentX?.removeEventListener('change', onPetalsParamsChange);
@@ -795,6 +833,8 @@ export function initRevealUI(global: Global): () => void {
         weatherDensity?.removeEventListener('input', onWeatherSliderInput);
         weatherSpeed?.removeEventListener('input', onWeatherSliderInput);
         weatherOpacity?.removeEventListener('input', onWeatherSliderInput);
+        weatherGlobalOpacity?.removeEventListener('input', onWeatherSliderInput);
+        weatherFarOpacity?.removeEventListener('input', onWeatherSliderInput);
         weatherDrift?.removeEventListener('change', onWeatherParamsChange);
         weatherDrift?.removeEventListener('input', onWeatherSliderInput);
         weatherExtentX?.removeEventListener('change', onWeatherParamsChange);
