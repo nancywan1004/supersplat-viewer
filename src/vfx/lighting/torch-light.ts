@@ -18,7 +18,8 @@ import type { TorchLightSettings } from '../../schemas/v2-custom';
  * - 启停由 `viewSettings.torch.active` 控制（不入库）；编辑模式下切换左侧模块时自动关闭
  * - **位置（跟手关键）**：
  *   - 鼠标移动或相机矩阵变化后，最多约 30Hz 同步做一次 mesh AABB 射线求交（CPU），
- *     并触发一次 `Picker.pickSurface`（异步，gsplat 表面）；两者取离相机更近的命中点
+ *     并触发一次 `Picker.pickSurface`（异步，gsplat 表面）；叠层 mesh 取叠层内最远深度，
+ *     gsplat 须明显比 mesh 更近才覆盖 mesh；大 mesh 按 AABB 尺寸动态加大 range
  *   - 这样 mesh 在 picker 的深度纹理里不可见的问题被 mesh 求交补齐，光标停在 mesh 上时光源贴在 mesh 表面
  *   - shader 每个 splat 只做世界距离衰减，不再重复采 depthMap / 反投影
  * - **拾取兜底**：拾取未命中或还未首次返回时，光源回退到相机前方
@@ -29,6 +30,21 @@ const TORCH_PICK_THROTTLE_MS = 33;
 const CAMERA_CHANGE_EPSILON = 1e-5;
 /** 拾取兜底距离（世界单位）：未命中时光源沿相机 forward 放在此距离处 */
 const TORCH_FALLBACK_DISTANCE = 5;
+/**
+ * 沿视线向相机回拉光源，避免落在 mesh AABB 内/薄壳内部导致 PlayCanvas 点光打不到表面。
+ * gsplat 走 night-mode 的 uTorchWorldPos，mesh 走引擎 PointLight，此处主要修复后者。
+ */
+const TORCH_SURFACE_BIAS_M = 0.12;
+/** mesh AABB 命中时略加大回拉（AABB 比真实三角面更“鼓”） */
+const TORCH_MESH_SURFACE_BIAS_M = 0.22;
+/** 同一像素下多个 mesh AABB 命中深度差在此内视为「叠层」，取最远一层作为光源深度 */
+const TORCH_MESH_OVERLAP_DEPTH_M = 0.35;
+/** 命中 mesh 的 AABB 最大边长超过该值时，按尺寸额外放大点光 range（大 mesh 局部更易照亮） */
+const TORCH_MESH_RANGE_BOOST_MIN_EXTENT_M = 2.5;
+const TORCH_MESH_RANGE_BOOST_FACTOR = 0.4;
+const TORCH_MESH_RANGE_BOOST_MAX_M = 12;
+/** gsplat picker 须明显比 mesh 更近才覆盖 mesh 深度，避免透过 mesh 误采 splat */
+const TORCH_PICKER_MESH_PRIORITY_M = 0.1;
 /** 深度跳变锁定窗口：第一次跳变立即接受，随后短时间忽略反向大跳，避免深度边界来回闪烁 */
 const TORCH_DEPTH_JUMP_LOCK_MS = 75;
 /** 深度相对变化超过该比例视为“大跳变”（例如近/远表面切换），小变化仍立即跟随 */
@@ -104,6 +120,10 @@ type TorchRuntimeState = {
     cameraWorldSnapshot: Float32Array;
     cameraProjSnapshot: Float32Array;
     destroyed: boolean;
+    /** 最近一次有效深度是否来自 mesh AABB（用于加大表面回拉） */
+    lastPickFromMesh: boolean;
+    /** 大 mesh / 叠层拾取时附加到 cfg.range 的额外世界单位（同步 mesh 实体与 gsplat uniform） */
+    meshRangeBoost: number;
 };
 
 /**
@@ -156,7 +176,9 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         cameraSnapshotValid: false,
         cameraWorldSnapshot: new Float32Array(16),
         cameraProjSnapshot: new Float32Array(16),
-        destroyed: false
+        destroyed: false,
+        lastPickFromMesh: false,
+        meshRangeBoost: 0
     };
 
     /**
@@ -263,11 +285,26 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         return false;
     };
 
+    const meshAabbMaxExtentM = (aabb: { halfExtents: { x: number; y: number; z: number } }): number => {
+        const h = aabb.halfExtents;
+        return 2 * Math.max(h.x, h.y, h.z);
+    };
+
+    const meshRangeBoostFromExtent = (extentM: number): number => {
+        if (!Number.isFinite(extentM) || extentM <= TORCH_MESH_RANGE_BOOST_MIN_EXTENT_M) return 0;
+        return Math.min(
+            TORCH_MESH_RANGE_BOOST_MAX_M,
+            (extentM - TORCH_MESH_RANGE_BOOST_MIN_EXTENT_M) * TORCH_MESH_RANGE_BOOST_FACTOR
+        );
+    };
+
     /**
-     * 在当前光标视线方向上对场景所有 mesh 的 world-space AABB 做最近命中求交。
-     * gsplat 不在此遍历中（无 RenderComponent），光源 / 拾取 helper 通过 tag/name 跳过。
+     * 在当前光标视线方向上对场景所有 mesh 的 world-space AABB 求交。
+     * - 收集全部命中，按深度排序
+     * - 与最近命中深度差 ≤ TORCH_MESH_OVERLAP_DEPTH_M 的视为叠层，取**最远**一层作为光源深度（叠层都能进 range）
+     * - 按叠层内最大 AABB 尺寸附加 range boost
      */
-    const computeMeshHit = (clientX: number, clientY: number): { pos: Vec3; distSq: number } | null => {
+    const computeMeshPickResult = (clientX: number, clientY: number): { distance: number; rangeBoost: number } | null => {
         const cv = app.graphicsDevice.canvas as HTMLCanvasElement;
         const rect = cv.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) return null;
@@ -292,11 +329,16 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         const renders = app.root.findComponents('render') as unknown as Array<{
             entity: Entity;
             enabled: boolean;
-            meshInstances: Array<{ visible: boolean; aabb: { intersectsRay(ray: Ray, out?: Vec3): boolean } }>;
+            meshInstances: Array<{
+                visible: boolean;
+                aabb: {
+                    intersectsRay(ray: Ray, out?: Vec3): boolean;
+                    halfExtents: { x: number; y: number; z: number };
+                };
+            }>;
         }>;
 
-        let bestDistSq = Infinity;
-        let bestHit: Vec3 | null = null;
+        const hits: { dist: number; extent: number }[] = [];
         for (let i = 0; i < renders.length; i++) {
             const rc = renders[i];
             if (!rc.enabled) continue;
@@ -311,15 +353,26 @@ export function initTorchLight(global: Global): TorchControllerHandle {
                 const dx = _tmpAabbHit.x - origin.x;
                 const dy = _tmpAabbHit.y - origin.y;
                 const dz = _tmpAabbHit.z - origin.z;
-                const distSq = dx * dx + dy * dy + dz * dz;
-                if (distSq < bestDistSq) {
-                    bestDistSq = distSq;
-                    bestHit = bestHit ?? new Vec3();
-                    bestHit.copy(_tmpAabbHit);
-                }
+                const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                if (!Number.isFinite(dist) || dist <= 0) continue;
+                hits.push({ dist, extent: meshAabbMaxExtentM(mi.aabb) });
             }
         }
-        return bestHit ? { pos: bestHit, distSq: bestDistSq } : null;
+        if (hits.length === 0) return null;
+        hits.sort((a, b) => a.dist - b.dist);
+
+        const nearest = hits[0].dist;
+        let pickDist = nearest;
+        let maxExtent = hits[0].extent;
+        for (let k = 1; k < hits.length; k++) {
+            if (hits[k].dist - nearest > TORCH_MESH_OVERLAP_DEPTH_M) break;
+            pickDist = Math.max(pickDist, hits[k].dist);
+            maxExtent = Math.max(maxExtent, hits[k].extent);
+        }
+        return {
+            distance: pickDist,
+            rangeBoost: meshRangeBoostFromExtent(maxExtent)
+        };
     };
 
     /**
@@ -328,11 +381,29 @@ export function initTorchLight(global: Global): TorchControllerHandle {
      * - 大跳变：第一次立即接受，并打开短锁
      * - 锁定期间再次出现大跳变：忽略，避免深度边界处在近/远表面之间来回闪
      */
-    const applyPickedDistance = (distance: number, now: number): boolean => {
+    /** 将世界落点沿视线略向相机回拉，使 PointLight 位于表面前方而非 AABB/壳体内 */
+    const applySurfaceBiasTowardCamera = (worldPos: Vec3, fromMesh: boolean, rayDistance: number) => {
+        const origin = global.camera.getPosition();
+        _tmpRayDir.set(worldPos.x - origin.x, worldPos.y - origin.y, worldPos.z - origin.z);
+        const len = _tmpRayDir.length();
+        const fixed = fromMesh ? TORCH_MESH_SURFACE_BIAS_M : TORCH_SURFACE_BIAS_M;
+        const proportional = rayDistance * (fromMesh ? 0.02 : 0.008);
+        const bias = Math.min(fixed + proportional, len * 0.08);
+        if (len <= bias + 1e-4) return;
+        const scale = bias / len;
+        worldPos.set(
+            worldPos.x - _tmpRayDir.x * scale,
+            worldPos.y - _tmpRayDir.y * scale,
+            worldPos.z - _tmpRayDir.z * scale
+        );
+    };
+
+    const applyPickedDistance = (distance: number, now: number, fromMesh: boolean): boolean => {
         if (!Number.isFinite(distance) || distance <= 0) return false;
         if (!runtime.hasWorldPos || runtime.lastDistance <= 0) {
             runtime.lastDistance = distance;
             runtime.hasWorldPos = true;
+            runtime.lastPickFromMesh = fromMesh;
             runtime.pendingFarDistance = 0;
             runtime.pendingFarUntil = Number.NEGATIVE_INFINITY;
             return true;
@@ -375,6 +446,7 @@ export function initTorchLight(global: Global): TorchControllerHandle {
 
         runtime.lastDistance = distance;
         runtime.hasWorldPos = true;
+        runtime.lastPickFromMesh = fromMesh;
         if (isLargeJump) {
             runtime.depthJumpLockUntil = now + TORCH_DEPTH_JUMP_LOCK_MS;
         }
@@ -398,15 +470,18 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         // 注意此处不再保存 mesh 命中的世界点本身（位置每帧由 onUpdate 用当前光标视线 × lastDistance 重算）
         const cx = runtime.lastClientX;
         const cy = runtime.lastClientY;
-        const meshHit = (cx !== null && cy !== null) ? computeMeshHit(cx, cy) : null;
-        const meshDistSnapshot = meshHit ? Math.sqrt(meshHit.distSq) : Infinity;
-        if (meshHit) {
-            applyPickedDistance(meshDistSnapshot, now);
+        const meshPick = (cx !== null && cy !== null) ? computeMeshPickResult(cx, cy) : null;
+        const meshDistSnapshot = meshPick?.distance ?? Infinity;
+        if (meshPick) {
+            runtime.meshRangeBoost = meshPick.rangeBoost;
+            applyPickedDistance(meshDistSnapshot, now, true);
+        } else {
+            runtime.meshRangeBoost = 0;
         }
 
         if (!picker?.pickSurface) {
             // 无 picker：mesh hit 已经是最终结果，可以直接消费 dirty
-            if (meshHit) {
+            if (meshPick) {
                 runtime.pickDirty = false;
                 runtime.lastPickTime = now;
             }
@@ -433,15 +508,17 @@ export function initTorchLight(global: Global): TorchControllerHandle {
                 const pickerDist = Math.sqrt(dx * dx + dy * dy + dz * dz);
                 // picker 拿到的世界点本身可能 stale（对应发起拾取时的旧像素），
                 // 但「沿视线距离」是几何深度信息，复用到当前光标方向上即可
-                if (pickerDist < meshDistSnapshot || !meshHit) {
-                    applyPickedDistance(pickerDist, callbackNow);
+                const meshClearlyCloser = meshPick && pickerDist >= meshDistSnapshot - TORCH_PICKER_MESH_PRIORITY_M;
+                if (!meshClearlyCloser) {
+                    applyPickedDistance(pickerDist, callbackNow, false);
+                    runtime.meshRangeBoost = 0;
                 }
                 runtime.hasWorldPos = true;
-            } else if (!meshHit && !runtime.hasWorldPos) {
+            } else if (!meshPick && !runtime.hasWorldPos) {
                 runtime.hasWorldPos = false;
             }
         }).catch(() => {
-            if (!runtime.destroyed && generation === runtime.pickGeneration && !meshHit && !runtime.hasWorldPos) {
+            if (!runtime.destroyed && generation === runtime.pickGeneration && !meshPick && !runtime.hasWorldPos) {
                 runtime.hasWorldPos = false;
             }
         }).finally(() => {
@@ -487,7 +564,8 @@ export function initTorchLight(global: Global): TorchControllerHandle {
 
         const cfg = ensureTorchLight(settings) as TorchLightSettings;
         const userRange = Math.max(0, cfg.range ?? 12);
-        (entity.light as unknown as { range: number }).range = userRange;
+        const rangeBoost = runtime.lastPickFromMesh ? runtime.meshRangeBoost : 0;
+        (entity.light as unknown as { range: number }).range = userRange + rangeBoost;
 
         let pos: Vec3 | null = null;
         if (runtime.hasWorldPos &&
@@ -547,7 +625,10 @@ export function initTorchLight(global: Global): TorchControllerHandle {
             return;
         }
 
-        entity.setPosition(pos.x, pos.y, pos.z);
+        runtime.worldPos.copy(pos);
+        const rayDist = runtime.lastDistance > 0 ? runtime.lastDistance : runtime.worldPos.distance(global.camera.getPosition());
+        applySurfaceBiasTowardCamera(runtime.worldPos, runtime.lastPickFromMesh, rayDist);
+        entity.setPosition(runtime.worldPos.x, runtime.worldPos.y, runtime.worldPos.z);
         entity.light.enabled = true;
     };
     app.on('update', onUpdate);
@@ -639,4 +720,14 @@ export function getTorchLightWorldPosition(global: Global): Vec3 | null {
     const runtime = handle ? (handle as unknown as { __runtime?: TorchRuntimeState }).__runtime : undefined;
     if (!runtime?.hasWorldPos) return null;
     return runtime.worldPos;
+}
+
+/** 读取手电筒当前有效照射半径（settings.range + 大 mesh 动态加成）。 */
+export function getTorchLightEffectiveRange(global: Global): number {
+    const cfg = ensureTorchLight(global.settings as ExperienceSettings) as TorchLightSettings;
+    const base = Math.max(0, cfg.range ?? 12);
+    const handle = (global as unknown as { __torchLight?: TorchControllerHandle }).__torchLight;
+    const runtime = handle ? (handle as unknown as { __runtime?: TorchRuntimeState }).__runtime : undefined;
+    const boost = runtime?.lastPickFromMesh ? runtime.meshRangeBoost : 0;
+    return base + boost;
 }

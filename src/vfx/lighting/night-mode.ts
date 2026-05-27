@@ -3,7 +3,7 @@ import { GsplatShaderEffect } from '../effects-runtime/gsplat-shader-effect';
 import { extractGlslWgslModifyBlocks } from '../effects-runtime/gsplat-effect-layers-extractor';
 import { collectPointLights, collectSpotLights } from '../../light';
 import { ensureTorchLight } from '../../settings-serialize/settings-serialize-helper';
-import { getTorchLightWorldPosition, isTorchEntityEnabled } from './torch-light';
+import { getTorchLightEffectiveRange, getTorchLightWorldPosition, isTorchEntityEnabled } from './torch-light';
 import type { EffectsRuntime } from '../effects-runtime';
 import type { GsplatContribution } from '../effects-runtime/gsplat-contribution';
 
@@ -1533,7 +1533,7 @@ class NightMode extends GsplatShaderEffect {
                 const [tr, tg, tb] = localLightLinearRgb(torchCfg.color[0], torchCfg.color[1], torchCfg.color[2], torchCfg.intensity ?? 1, scale);
                 this.setUniform('uTorchWorldPos', [torchWorldPos.x, torchWorldPos.y, torchWorldPos.z]);
                 this.setUniform('uTorchColor', [tr, tg, tb]);
-                this.setUniform('uTorchParams', [Math.max(0, torchCfg.range ?? 1), 1, 1, 0]);
+                this.setUniform('uTorchParams', [Math.max(0, getTorchLightEffectiveRange(global)), 1, 1, 0]);
             } else {
                 this.setUniform('uTorchWorldPos', [0, 0, 0]);
                 this.setUniform('uTorchColor', [0, 0, 0]);
