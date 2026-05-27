@@ -1,7 +1,8 @@
 /**
- * 放置 mesh / 放置高斯的 shadow-apply（B 管线）排除 mask。
+ * 放置资产 shadow-apply（B 管线）排除 mask。
  * 专用相机（priority 1）只渲染 PlacedMeshExclude 层到离屏 RT；
- * mesh：prerender:layer 临时白模（R=1）；高斯：同层正常绘制，叠影 shader 取 max(rgb)（不用 alpha）。
+ * mesh / image / video：prerender:layer 临时白模（R=1）；
+ * gaussian：同层正常绘制，叠影 shader 取 max(rgb)（不用 alpha）。
  * 主相机 layers 不含 PlacedMeshExclude。
  */
 import {
@@ -51,30 +52,38 @@ export function countPlacedGaussians(global: Global): number {
     ).length;
 }
 
-/** 需要 exclude mask 的放置资产（mesh + gaussian）。 */
-export function countPlacedExcludeAssets(global: Global): number {
-    return countPlacedMeshes(global) + countPlacedGaussians(global);
+function countPlacedRenderCards(global: Global): number {
+    return (global.state.scenePlacedEntities ?? []).filter(
+        (e) =>
+            e.entity
+            && (e.assetType === 'mesh' || e.assetType === 'image' || e.assetType === 'video')
+    ).length;
 }
 
-/** 为放置 mesh / 高斯追加 PlacedMeshExclude 层；主相机 layers 不含此层。 */
+/** 需要 exclude mask 的放置资产（mesh / image / video / gaussian）。 */
+export function countPlacedExcludeAssets(global: Global): number {
+    return countPlacedRenderCards(global) + countPlacedGaussians(global);
+}
+
+/** 为放置 render 资产与 gaussian 追加 PlacedMeshExclude 层；主相机 layers 不含此层。 */
 export function syncPlacedMeshExcludeLayers(global: Global): void {
     const layer = getPlacedMeshExcludeLayer(global.app);
     const layerId = layer.id;
 
-    const visitMesh = (node: Entity) => {
+    const visitRender = (node: Entity) => {
         if (node.render) {
             const current = [...(node.render.layers as number[])];
             if (!current.includes(layerId)) {
                 node.render.layers = [...current, layerId];
             }
         }
-        node.children.forEach((child) => visitMesh(child as Entity));
+        node.children.forEach((child) => visitRender(child as Entity));
     };
 
     for (const entry of global.state.scenePlacedEntities ?? []) {
         if (!entry.entity) continue;
-        if (entry.assetType === 'mesh') {
-            visitMesh(entry.entity);
+        if (entry.assetType === 'mesh' || entry.assetType === 'image' || entry.assetType === 'video') {
+            visitRender(entry.entity);
         } else if (entry.assetType === 'gaussian' && entry.entity.gsplat) {
             const current = [...(entry.entity.gsplat.layers as number[])];
             if (!current.includes(layerId)) {
@@ -258,8 +267,10 @@ export class PlacedMeshExcludeMask {
         };
 
         for (const entry of global.state.scenePlacedEntities ?? []) {
-            if (entry.assetType !== 'mesh' || !entry.entity) continue;
-            visit(entry.entity);
+            if (!entry.entity) continue;
+            if (entry.assetType === 'mesh' || entry.assetType === 'image' || entry.assetType === 'video') {
+                visit(entry.entity);
+            }
         }
     }
 }
