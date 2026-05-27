@@ -17,8 +17,9 @@ export function loadSplatMesh(app: AppBase, url: string): Promise<Entity> {
                 reject(new Error('splatMesh: container has no instantiateRenderEntity'));
                 return;
             }
+            // 接影 GLB：initShadowCatcher → ShadowMat 会再设 receiveShadows=true；此处仅作加载默认值。
             const entity = asset.resource.instantiateRenderEntity({
-                castShadows: true,     // 同时作为阴影投射体（支持自阴影/光影变化）
+                castShadows: false,
                 receiveShadows: true
             });
             console.log('splatMesh loaded', entity);

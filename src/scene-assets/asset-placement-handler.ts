@@ -668,7 +668,7 @@ export async function placeAsset(
     };
     state.scenePlacedEntities.push(entry);
 
-    if (item.type === 'gaussian') {
+    if (item.type === 'gaussian' || item.type === 'mesh') {
         syncGsplatShadowCastingFromSettings(global);
     }
 

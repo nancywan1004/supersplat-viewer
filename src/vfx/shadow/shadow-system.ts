@@ -2,9 +2,11 @@
  * 阴影子系统统一入口。
  *
  * 两层门控（均需满足才完整出阴影）：
- * 1. **Capability** `isShadowSystemEnabled` — 场景是否配置 mesh（URL `?splatMesh=`）
- *    - 高斯 castShadows、平行光 shadow map、是否挂载接影管线
- * 2. **Output** `isShadowOutputEnabled` — 本帧是否允许接影叠屏
+ * 1. **Capability** `hasShadowCapability` — 场景是否配置 mesh（URL `?splatMesh=`）
+ *    - 放置高斯 / mesh 的 castShadows（主场景高斯恒 false）、平行光 shadow map、接影管线
+ *    - 放置 mesh：引擎 receiveShadows（A）；高斯接影叠屏（B）由 shadow-apply 处理
+ * 2. **Enablement/Output** `isShadowSystemEnabled` + `isShadowOutputEnabled`
+ *    - 手动开关 `settings.postEffectSettings.shadow.enabled`
  *    - `readyToRender` + 管线已 `activateOutput`（含 reveal 门控）
  *
  * 渲染实现仍分散在 shadow-catcher / shadow-apply；本文件只负责策略与生命周期。
@@ -16,15 +18,28 @@ import type { Global } from '../../types';
 import { setDirectionalCastShadowsEnabled, updatePointLightsFromSettings, updateShadowDistance } from '../../light';
 import { readRevealParams } from '../../settings-serialize/effects-sync';
 import { isRevealTimedVfxType, revealBlocksAnim } from '../effects-runtime/reveal/reveal-policy';
+import { syncPlacedMeshExcludeLayers } from './shadow-apply-exclude-mask';
 import { initShadowCatcher } from './shadow-catcher';
 import { ShadowApplyRt } from './shadow-apply';
 
+/** 主场景 unified 高斯不参与 GSPLAT_SHADOW 投射，勿与 shadow.enabled 同步。 */
+const MAIN_GSPLAT_CAST_SHADOWS = false;
+
 // ─── Capability：场景是否具备 mesh 阴影能力 ─────────────────────────────────
 
-/** 仅由 URL `?splatMesh=` 决定（`shadow.enabled` 已废弃，存盘字段可保留但不会被读取）。 */
-export function isShadowSystemEnabled(global: Pick<Global, 'config'>): boolean {
+/** URL `?splatMesh=` 仅作为阴影系统前置能力条件。 */
+export function hasShadowCapability(global: Pick<Global, 'config'>): boolean {
     const url = typeof global.config.splatMeshUrl === 'string' ? global.config.splatMeshUrl.trim() : '';
     return url.length > 0;
+}
+
+/** 阴影系统总开关：手动开关 + URL 前置能力。 */
+export function isShadowSystemEnabled(global: Pick<Global, 'config' | 'settings'>): boolean {
+    if (!hasShadowCapability(global)) {
+        return false;
+    }
+    const enabled = (global.settings.postEffectSettings?.shadow as { enabled?: boolean } | undefined)?.enabled;
+    return enabled !== false;
 }
 
 export function applyGsplatCastShadows(gsplat: GSplatComponent | null | undefined, enabled: boolean): void {
@@ -33,19 +48,36 @@ export function applyGsplatCastShadows(gsplat: GSplatComponent | null | undefine
     }
 }
 
+/** 放置 mesh：投射进 shadow map（A）；引擎 receiveShadows；不参与 B 叠影（exclude mask）。 */
+export function applyPlacedMeshShadowFlags(entity: Entity, shadowEnabled: boolean): void {
+    const visit = (node: Entity) => {
+        if (node.render) {
+            node.render.castShadows = shadowEnabled;
+            node.render.receiveShadows = shadowEnabled;
+        }
+        node.children.forEach((child) => visit(child as Entity));
+    };
+    visit(entity);
+}
+
 /**
- * 主场景与放置高斯须保持相同的 castShadows，否则 PlayCanvas unified 会为「仅投射阴影」的 placement
- * 单独创建 gsplatManagerShadow，在开启阴影时触发前向颜色异常（蓝绿花屏）。
+ * 主场景高斯 castShadows 恒 false；放置高斯随 shadow.enabled 投射（unified 花屏风险需实测）。
+ * 放置 mesh：cast + receiveShadows（A），shadow-apply 通过 exclude mask 排除 B。
  */
 export function syncGsplatShadowCastingFromSettings(global: Global, mainGsplatEntity?: Entity | null): void {
     const enabled = isShadowSystemEnabled(global);
     const main = mainGsplatEntity ?? (global.app.root.findByName('gsplat') as Entity | null);
-    applyGsplatCastShadows(main?.gsplat, enabled);
+    applyGsplatCastShadows(main?.gsplat, MAIN_GSPLAT_CAST_SHADOWS);
 
     for (const entry of global.state.scenePlacedEntities ?? []) {
-        if (entry.assetType !== 'gaussian' || !entry.entity?.gsplat) continue;
-        applyGsplatCastShadows(entry.entity.gsplat, enabled);
+        if (!entry.entity) continue;
+        if (entry.assetType === 'gaussian' && entry.entity.gsplat) {
+            applyGsplatCastShadows(entry.entity.gsplat, enabled);
+        } else if (entry.assetType === 'mesh') {
+            applyPlacedMeshShadowFlags(entry.entity, enabled);
+        }
     }
+    syncPlacedMeshExcludeLayers(global);
 }
 
 // ─── Pipeline：接影挂载、reveal 门控与输出时序 ─────────────────────────────

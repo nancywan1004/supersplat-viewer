@@ -27,6 +27,7 @@ export const DEFAULT_BLOOM_EDITOR_SESSION: BloomEditorSession = {
 };
 
 export const DEFAULT_SHADOW = {
+    enabled: false,
     darken: 0,
     castShadows: true,
     debugVisual: false,

@@ -17,6 +17,7 @@ import {
     SEMANTIC_POSITION
 } from 'playcanvas';
 import type { Global } from '../../types';
+import { PlacedMeshExcludeMask, syncPlacedMeshExcludeLayers } from './shadow-apply-exclude-mask';
 import { isShadowOutputEnabled, isShadowSystemEnabled } from './shadow-system';
 
 /**
@@ -29,7 +30,7 @@ import { isShadowOutputEnabled, isShadowSystemEnabled } from './shadow-system';
  * - 我们不做任何阴影投影计算。shadowTex 的内容 100% 由 PlayCanvas 引擎在「阴影相机
  *   渲染接影面」时写入：接影面使用 LIT_SHADOW_CATCHER 材质，引擎采样光源的 shadow map 写出 R=0/1。
  * - 当该相机带 renderTarget（我们的 shadowMaskCamera）时，引擎在此 pass 里只合入
- *   平行光（directional）的 shadow map；平行光是否投射阴影由 URL `?splatMesh=` 决定。
+ *   平行光（directional）的 shadow map；平行光是否投射阴影由 `shadow.enabled` 控制，且需满足 URL `?splatMesh=` 前置条件。
  */
 const shadowApplyVs = /* glsl */ `
     attribute vec2 vertex_position;
@@ -40,15 +41,28 @@ const shadowApplyVs = /* glsl */ `
 
 const shadowApplyFs = /* glsl */ `
     uniform sampler2D shadowTex;
+    uniform sampler2D excludeMask;
     uniform float intensity;
     uniform float debugRt;
+    uniform float debugExcludeMask;
+    uniform float useExclude;
     void main(void) {
-        float r = texelFetch(shadowTex, ivec2(gl_FragCoord.xy), 0).r;
+        ivec2 px = ivec2(gl_FragCoord.xy);
+        if (debugExcludeMask > 0.5) {
+            float ex = useExclude > 0.5 ? texelFetch(excludeMask, px, 0).r : 0.0;
+            gl_FragColor = vec4(ex, ex, ex, 1.0);
+            return;
+        }
+        float r = texelFetch(shadowTex, px, 0).r;
         if (debugRt > 0.5) {
             gl_FragColor = vec4(r, r, r, 1.0);
         } else {
-            float blend = 1.0 - r;
-            gl_FragColor = vec4(0.0, 0.0, 0.0, blend * intensity);
+            float blend = (1.0 - r) * intensity;
+            if (useExclude > 0.5) {
+                float ex = texelFetch(excludeMask, px, 0).r;
+                blend *= (1.0 - ex);
+            }
+            gl_FragColor = vec4(0.0, 0.0, 0.0, blend);
         }
     }
 `;
@@ -70,8 +84,10 @@ class ShadowApplyRt extends Script {
 
     private _inited = false;
     private _shadowMaskCamera: Entity | null = null;
+    private _placedMeshExcludeMask: PlacedMeshExcludeMask | null = null;
     private _shadowGeomEntity: Entity | null = null;
     private _shadowLayer: Layer | null = null;
+    private _excludeMaskDummyTex: Texture | null = null;
     /** 用于 "Show shadow plane" 时把接影平面画在最上层 */
     private _debugLayer: Layer | null = null;
     /** 动态生成的 testSphere 列表 */
@@ -313,6 +329,23 @@ class ShadowApplyRt extends Script {
             renderTarget: !!smCamComp.renderTarget
         });
 
+        this._placedMeshExcludeMask = new PlacedMeshExcludeMask(device);
+        this._placedMeshExcludeMask.init(global);
+        this._excludeMaskDummyTex = new Texture(device, {
+            name: 'placedMeshExcludeDummy',
+            width: 1,
+            height: 1,
+            format: PIXELFORMAT_RGBA8,
+            mipmaps: false
+        });
+        syncPlacedMeshExcludeLayers(global);
+
+        const events = global.events;
+        const onSceneAssetsChanged = () => syncPlacedMeshExcludeLayers(global);
+        events.on('sceneAssets:added', onSceneAssetsChanged);
+        events.on('sceneAssets:removed', onSceneAssetsChanged);
+        events.on('sceneAssets:cleared', onSceneAssetsChanged);
+
         // ─── Shader ───
         const shader = createShaderFromCode(
             device,
@@ -321,8 +354,6 @@ class ShadowApplyRt extends Script {
             'shadowApply',
             { vertex_position: SEMANTIC_POSITION }
         );
-
-        const events = global.events;
 
         // ─── postrender：与 Demo 完全一致 ───
         let _postrenderCount = 0;
@@ -338,6 +369,7 @@ class ShadowApplyRt extends Script {
                 darken?: number;
                 debugRt?: boolean;
                 debugVisual?: boolean;
+                debugExcludeMask?: boolean;
             };
             // debugVisual 时不叠阴影（此时材质已切换为 debugMaterial，RT 无意义）
             if (shadowSettingsNow.debugVisual) {
@@ -347,16 +379,27 @@ class ShadowApplyRt extends Script {
             if (shadowRt.width !== device.width || shadowRt.height !== device.height) {
                 shadowRt.resize(device.width, device.height);
             }
+            this._placedMeshExcludeMask?.resize(device.width, device.height);
 
             // intensity = darken：darken=0 不压暗，darken=1 最深
             const darken = Math.max(0, Math.min(1, Number(shadowSettingsNow.darken ?? 0)));
             const intensity = darken;
             const debugRt = shadowSettingsNow.debugRt === true ? 1 : 0;
+            const debugExcludeMask = shadowSettingsNow.debugExcludeMask === true ? 1 : 0;
+
+            const useExcludeMask = this._placedMeshExcludeMask?.isMaskReady(global) === true;
+            const excludeTex = useExcludeMask
+                ? this._placedMeshExcludeMask!.getTexture()
+                : this._excludeMaskDummyTex;
+            const useExclude = useExcludeMask ? 1 : 0;
 
             // shadowTex 由引擎写入（仅平行光参与），此处只做 (1-R)*intensity 叠黑，无自算投影
             device.scope.resolve('shadowTex')?.setValue(shadowTex);
+            device.scope.resolve('excludeMask')?.setValue(excludeTex ?? shadowTex);
             device.scope.resolve('intensity')?.setValue(intensity);
             device.scope.resolve('debugRt')?.setValue(debugRt);
+            device.scope.resolve('debugExcludeMask')?.setValue(debugExcludeMask);
+            device.scope.resolve('useExclude')?.setValue(useExclude);
 
             if (debugRt > 0.5) {
                 device.setBlendState(BlendState.NOBLEND);
@@ -364,6 +407,8 @@ class ShadowApplyRt extends Script {
                 device.setBlendState(BlendState.ALPHABLEND);
             }
             device.setDepthState(DepthState.NODEPTH);
+            // exclude mask 相机可能改动当前 RT，叠影必须回到 backbuffer / CameraFrame 输出
+            device.setRenderTarget(null);
             drawQuadWithShader(device, null, shader);
 
             // if (_postrenderCount <= 3 || _postrenderCount % 300 === 0) {
@@ -518,18 +563,22 @@ class ShadowApplyRt extends Script {
             }
         }
 
-        // ─── 同步阴影相机 ───
-        if (this._shadowMaskCamera && this.global.camera) {
+        // ─── 同步阴影相机 / exclude mask 相机 ───
+        if (this.global.camera) {
             const mainCamEntity = this.global.camera;
-            this._shadowMaskCamera.setPosition(mainCamEntity.getPosition());
-            this._shadowMaskCamera.setRotation(mainCamEntity.getRotation());
-            if (this._shadowMaskCamera.camera && mainCamEntity.camera) {
-                const smCam = this._shadowMaskCamera.camera;
-                const mainCam = mainCamEntity.camera;
-                if (smCam.fov !== mainCam.fov) smCam.fov = mainCam.fov;
-                if (smCam.nearClip !== mainCam.nearClip) smCam.nearClip = mainCam.nearClip;
-                if (smCam.farClip !== mainCam.farClip) smCam.farClip = mainCam.farClip;
+            if (this._shadowMaskCamera) {
+                this._shadowMaskCamera.setPosition(mainCamEntity.getPosition());
+                this._shadowMaskCamera.setRotation(mainCamEntity.getRotation());
+                if (this._shadowMaskCamera.camera && mainCamEntity.camera) {
+                    const smCam = this._shadowMaskCamera.camera;
+                    const mainCam = mainCamEntity.camera;
+                    if (smCam.fov !== mainCam.fov) smCam.fov = mainCam.fov;
+                    if (smCam.nearClip !== mainCam.nearClip) smCam.nearClip = mainCam.nearClip;
+                    if (smCam.farClip !== mainCam.farClip) smCam.farClip = mainCam.farClip;
+                }
             }
+            this._placedMeshExcludeMask?.syncFromMain(mainCamEntity);
+            this._placedMeshExcludeMask?.setOutputEnabled(outputEnabled, global);
         }
 
         this._debugLogTicks++;

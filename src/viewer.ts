@@ -177,12 +177,16 @@ const needsBloomPipeline = (settings: PostEffectSettings): boolean => {
     return true;
 };
 
-const anyPostEffectEnabled = (settings: PostEffectSettings, config: Global['config']): boolean => {
+const anyPostEffectEnabled = (
+    settings: PostEffectSettings,
+    config: Global['config'],
+    allSettings: ExperienceSettings
+): boolean => {
     const bloomOn = settings.bloom.enabled && (
         Number(settings.bloom.intensity) > 0 ||
         needsBloomPipeline(settings)
     );
-    const shadowOn = isShadowSystemEnabled({ config });
+    const shadowOn = isShadowSystemEnabled({ config, settings: allSettings });
     return (settings.sharpness.enabled && settings.sharpness.amount > 0) ||
         bloomOn ||
         (settings.grading.enabled) ||
@@ -1136,7 +1140,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
         const computeRequiresCameraFrame = rendererMode === 'compute';
         const postFxRequested = !config.nofx &&
             !!postEffectSettings &&
-            (anyPostEffectEnabled(postEffectSettings, config) || highPrecisionRendering || bloomPipelineWanted);
+            (anyPostEffectEnabled(postEffectSettings, config, settings as ExperienceSettings) || highPrecisionRendering || bloomPipelineWanted);
         const enableCameraFrame = !app.xr.active && (computeRequiresCameraFrame || postFxRequested);
 
         if (enableCameraFrame) {

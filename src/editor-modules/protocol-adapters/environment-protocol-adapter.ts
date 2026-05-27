@@ -5,6 +5,7 @@
 
 import { getPositionInFrontOfCamera } from '../../scene-assets/asset-placement-handler';
 import { spotApexToHalfDeg, updatePointLightsFromSettings } from '../../light';
+import { syncGsplatShadowCastingFromSettings } from '../../vfx/shadow/shadow-system';
 import type { ExperienceSettings } from '../../schemas/v2';
 import {
     ensureBloom,
@@ -637,9 +638,15 @@ export function applyBloomLocalLightRegionDelete(global: Global, regionId: strin
     global.events.fire('bloomLocalLightRegion:listChanged');
 }
 
-/** @deprecated `SHADOW_SET` / `shadow.enabled` 已废弃；阴影由 URL `?splatMesh=` 决定。 */
-export function applyShadowSet(_global: Global, _enabled: boolean): void {
-    // no-op
+/** SHADOW_SET：写 `shadow.enabled`（`splatMeshUrl` 仅前置条件）。 */
+export function applyShadowSet(global: Global, enabled: boolean): void {
+    const settings = global.settings as ExperienceSettings;
+    const s = ensureShadow(settings) as Record<string, unknown>;
+    s.enabled = enabled;
+    syncGsplatShadowCastingFromSettings(global);
+    (global.app as { __directionalLightSignature?: string }).__directionalLightSignature = undefined;
+    updatePointLightsFromSettings(global);
+    global.events.fire('postEffect:changed');
 }
 
 /** SHADOW_INTENSITY_UPDATE → shadow.darken (0~1) */
