@@ -32,7 +32,6 @@ const GS_LIGHT_NAME = 'butterflyGsLight';
 /** 移动时沿路径洒落、闪烁下坠的魔法粒子。 */
 const SPARKLE_MAX = 1400;
 const SPARKLE_EMIT_DIST = 0.006;
-const SPARKLE_CAM_MOVE_DIST = 0.006;
 /** 静止 / idle 扇翅（移动 blend=0）。 */
 const WING_FLAP_IDLE_SPEED = 1.5;
 const WING_FLAP_IDLE_AMP = 0.25;
@@ -83,9 +82,6 @@ const WING_CORNER_ROUND_OUTER = 0.12;
 /** 前/后翅铰链靠近，缩小两翅之间的缝隙。 */
 const FORE_HINGE_Y = 0.01;
 const HIND_HINGE_Y = 0.1;
-const THORAX_Y = 0.08;
-const WING_PUFF_LAYERS = 2;
-const PUFF_SPACING = 1.75;
 /** 粒子噪波位移：振幅与速度。 */
 const PARTICLE_JITTER_AMP = 0.015;
 const PARTICLE_JITTER_SPEED = 5.4;
@@ -228,6 +224,7 @@ function getOrCreateButterflyLayer(app: AppBase): number {
     return butterflyLayerId;
 }
 
+/** 确保 Butterfly 渲染层在相机列表中；有变更时触发 CameraFrame 重建 */
 function syncButterflyRenderLayer(app: AppBase): number {
     const layerId = getOrCreateButterflyLayer(app);
     let patched = false;
@@ -263,28 +260,17 @@ function syncButterflyRenderLayer(app: AppBase): number {
     return layerId;
 }
 
-function readSceneBbox(gsplat: GsplatBboxSource): { min: Vec3; max: Vec3; center: Vec3; radius: number } | null {
+function readSceneBboxRadius(gsplat: GsplatBboxSource): number {
     const aabb = gsplat?.customAabb ?? gsplat?.resource?.aabb;
-    if (!aabb?.center || !aabb?.halfExtents) {
-        return null;
+    if (!aabb?.halfExtents) {
+        return SCENE_REF_RADIUS;
     }
-    const c = aabb.center;
     const h = aabb.halfExtents;
-    const min = new Vec3(c.x - h.x, c.y - h.y, c.z - h.z);
-    const max = new Vec3(c.x + h.x, c.y + h.y, c.z + h.z);
     let radius = Math.max(h.x, h.y, h.z);
     if (!Number.isFinite(radius) || radius < 1e-6) {
         radius = h.length();
     }
-    if (!Number.isFinite(radius) || radius < 1e-6) {
-        radius = SCENE_REF_RADIUS;
-    }
-    return { min, max, center: c.clone(), radius };
-}
-
-function readSceneBboxRadius(gsplat: GsplatBboxSource): number {
-    const box = readSceneBbox(gsplat);
-    return box?.radius ?? SCENE_REF_RADIUS;
+    return Number.isFinite(radius) && radius > 1e-6 ? radius : SCENE_REF_RADIUS;
 }
 
 function worldPointToOverlayLocal(gsplatEntity: Entity, world: Vec3, out: Vec3): void {
@@ -470,26 +456,6 @@ function wingColorMix(part: number, s: number, t: number, edgeDist: number, seed
     }
     const glowCore = 0.68 + (1 - s) * 0.2 + splatHash(s, t * 2, seed + part) * 0.18;
     return Math.min(0.96, glowCore);
-}
-
-function puffAroundWingPoint(
-    pt: { lx: number; ly: number; lz: number; wingCoord: number },
-    side: number,
-    s: number,
-    layer: number,
-    part: number
-): { lx: number; ly: number; lz: number } {
-    const sphere = sampleUnitSphere(layer, pt.lx * 31, pt.ly * 17 + part);
-    const radial = 0.65 + splatHash(layer, s, part) * 0.35;
-    const puff = PUFF_SPACING * radial;
-    const spanScale = (0.042 + (1 - s * 0.3) * 0.038) * puff;
-    const chordScale = (0.034 + (1 - s * 0.25) * 0.032) * puff;
-    const liftScale = (0.048 + pt.wingCoord * 0.036) * puff;
-    return {
-        lx: pt.lx + side * sphere.x * spanScale,
-        ly: pt.ly + sphere.y * chordScale,
-        lz: pt.lz + sphere.z * liftScale
-    };
 }
 
 function generateButterflyParticles(): ButterflyParticle[] {
@@ -855,7 +821,7 @@ function applyWingFlap(
     }
 }
 
-function createBillboardMaterial(device: AppBase['graphicsDevice'], uniqueName: string): ShaderMaterial {
+function createButterflyBillboardMaterial(uniqueName: string): ShaderMaterial {
     const material = new ShaderMaterial();
     material.cull = CULLFACE_NONE;
     material.blendType = BLEND_ADDITIVE;
@@ -877,15 +843,14 @@ function createBillboardMaterial(device: AppBase['graphicsDevice'], uniqueName: 
     return material;
 }
 
-function buildBillboardMesh(
+function buildButterflyBodyMesh(
     device: AppBase['graphicsDevice'],
     x: Float32Array,
     y: Float32Array,
     z: Float32Array,
     phases: Float32Array,
-    colorMix: Float32Array,
-    uniqueName: string
-): { mesh: Mesh; material: ShaderMaterial } | null {
+    colorMix: Float32Array
+): Mesh | null {
     const n = x.length;
     if (n < 1) {
         return null;
@@ -927,10 +892,10 @@ function buildBillboardMesh(
     mesh.setVertexStream(SEMANTIC_TEXCOORD3, weightAttr, 1);
     mesh.setIndices(indices);
     mesh.update(PRIMITIVE_TRIANGLES);
-    return { mesh, material: createBillboardMaterial(device, uniqueName) };
+    return mesh;
 }
 
-/** 与脚本属性默认一致，供 UI / 协议默认值对齐。 */
+/** 脚本初始属性默认值（与 settings `effectParams` 未指定时一致） */
 export const BUTTERFLY_PARTICLE_DEFAULTS = {
     center: [0, 0, 0] as [number, number, number],
     pointSize: 0.004,
@@ -938,15 +903,10 @@ export const BUTTERFLY_PARTICLE_DEFAULTS = {
     twinkleMin: 0,
     twinkleSharpness: 3,
     brightness: 2.2,
-    /** 基础色（未开循环时蝴蝶与拖尾使用）。 */
     baseColor: [0.28, 0.52, 0.98] as [number, number, number],
-    /** 颜色循环：循环色 1（#16B89C）。 */
     cycleColor1: [22 / 255, 184 / 255, 156 / 255] as [number, number, number],
-    /** 颜色循环：循环色 2（#5B72A4）。 */
     cycleColor2: [91 / 255, 114 / 255, 164 / 255] as [number, number, number],
-    /** 开启后蝴蝶与拖尾在三种颜色间循环过渡。 */
     colorCycleEnabled: false,
-    /** 完整三色循环频率（次/秒，越大越快）。 */
     colorCycleSpeed: 1,
     sparkleTrailStrength: 1,
     gsLightEnabled: true,
@@ -955,6 +915,9 @@ export const BUTTERFLY_PARTICLE_DEFAULTS = {
     gsLightColor: [1, 1, 1] as [number, number, number]
 } as const;
 
+/**
+ * 琉光飞蝶：相机前方 billboard 蝴蝶 + 移动拖尾光屑 + 可选点光源（不经 gsplat shader composer）。
+ */
 class GsplatPersistentButterflyParticle extends Script {
     static scriptName = 'gsplatPersistentButterflyParticle';
 
@@ -963,7 +926,6 @@ class GsplatPersistentButterflyParticle extends Script {
     center = new Vec3(...BUTTERFLY_PARTICLE_DEFAULTS.center);
     pointSize = BUTTERFLY_PARTICLE_DEFAULTS.pointSize;
     twinkleSpeed = BUTTERFLY_PARTICLE_DEFAULTS.twinkleSpeed;
-    /** 闪烁最暗时的亮度比例（0–1），越小明暗对比越强。 */
     twinkleMin = BUTTERFLY_PARTICLE_DEFAULTS.twinkleMin;
     twinkleSharpness = BUTTERFLY_PARTICLE_DEFAULTS.twinkleSharpness;
     brightness = BUTTERFLY_PARTICLE_DEFAULTS.brightness;
@@ -972,9 +934,7 @@ class GsplatPersistentButterflyParticle extends Script {
     cycleColor2 = new Color(...BUTTERFLY_PARTICLE_DEFAULTS.cycleColor2);
     colorCycleEnabled = BUTTERFLY_PARTICLE_DEFAULTS.colorCycleEnabled;
     colorCycleSpeed = BUTTERFLY_PARTICLE_DEFAULTS.colorCycleSpeed;
-    /** 移动时洒落闪烁下坠的魔法光屑强度。 */
     sparkleTrailStrength = BUTTERFLY_PARTICLE_DEFAULTS.sparkleTrailStrength;
-    /** 随蝴蝶移动的点光源，经 NightMode 照亮途经高斯点。 */
     gsLightEnabled = BUTTERFLY_PARTICLE_DEFAULTS.gsLightEnabled;
     gsLightIntensity = BUTTERFLY_PARTICLE_DEFAULTS.gsLightIntensity;
     gsLightRange = BUTTERFLY_PARTICLE_DEFAULTS.gsLightRange;
@@ -1019,12 +979,10 @@ class GsplatPersistentButterflyParticle extends Script {
     private sparkleParticles: SparkleParticle[] = [];
     private sparkleHasPrevFrame = false;
     private mounted = false;
-    private motionInitialized = false;
     private cameraEntity: Entity | null = null;
     private cachedPointSize = -1;
     private readonly _cameraPos = new Vec3();
     private meshPositionScratch = new Float32Array(0);
-    private renderLayerSynced = false;
 
     initialize() {
         this.effectTime = 0;
@@ -1059,14 +1017,11 @@ class GsplatPersistentButterflyParticle extends Script {
         if (!this.enabled) {
             return;
         }
+        syncButterflyRenderLayer(this.app as AppBase);
+
         if (!this.mounted) {
             this.mountOverlay();
             return;
-        }
-
-        if (!this.renderLayerSynced) {
-            syncButterflyRenderLayer(this.app as AppBase);
-            this.renderLayerSynced = true;
         }
 
         this.updateCameraFollow(dt);
@@ -1106,7 +1061,6 @@ class GsplatPersistentButterflyParticle extends Script {
         this.mouseDragYawOffset = 0;
         this.mouseDragActive = false;
         this.prevCamYawForHeadValid = false;
-        this.motionInitialized = true;
         this.updateCameraFollow(0);
         this.prevFrameButterflyPos.copy(this.worldPos);
         const cam = this.resolveCameraEntity();
@@ -1116,7 +1070,6 @@ class GsplatPersistentButterflyParticle extends Script {
         this.rebuildSparkleMesh();
     }
 
-    /** 每帧：相机前方固定距离；位置随相机，头部绕 Y 在「正前方」基准 ±40° 内转向。 */
     private updateCameraFollow(dt: number) {
         const cam = this.resolveCameraEntity();
         const camFwdForYaw = _camFwd;
@@ -1143,10 +1096,6 @@ class GsplatPersistentButterflyParticle extends Script {
         }
     }
 
-    /**
-     * 正前方 = headForwardYawRef（或鼠标按下瞬间的朝向）。
-     * A/D：按住转向，松键回正；鼠标拖拽：单次按下→松开累计 ≤40°，拖拽中不回正，松手回正。
-     */
     private updateButterflyHeadYaw(camFwd: Vec3, dt: number) {
         updateLastFlatCamFwd(camFwd, this.lastFlatCamFwd, _flatCamFwd);
         const camYaw = Math.atan2(_flatCamFwd.x, _flatCamFwd.z);
@@ -1198,7 +1147,6 @@ class GsplatPersistentButterflyParticle extends Script {
                 -limit,
                 Math.min(limit, this.mouseDragYawOffset + this.headYawOffset)
             );
-            // 相对当前相机视线偏转，保证单次拖拽从屏幕看不超过 ±40°
             butterflyYaw = camYaw + combinedOffset;
         } else {
             if (this.mouseDragActive) {
@@ -1235,7 +1183,6 @@ class GsplatPersistentButterflyParticle extends Script {
         computeButterflyWorldOrientFromFlatFwd(_lookTarget, _butterflyWorldOrient);
     }
 
-    /** 左键 orbit 拖拽，或 pointer lock 下的视角旋转。 */
     private isViewRotateDragHeld(): boolean {
         const canvas = this.app.graphicsDevice.canvas as HTMLCanvasElement | undefined;
         if (canvas && document.pointerLockElement === canvas) {
@@ -1250,7 +1197,6 @@ class GsplatPersistentButterflyParticle extends Script {
         );
     }
 
-    /** A/← = 向左转头，D/→ = 向右转头。 */
     private readAdKeyAxis(): number {
         const keyboard = (this.app as AppWithExtras).keyboard;
         if (!keyboard) {
@@ -1263,11 +1209,7 @@ class GsplatPersistentButterflyParticle extends Script {
         return left - right;
     }
 
-    /**
-     * 根据蝴蝶/相机每帧位移驱动扇翅：移动时 blend 缓升至满速，静止时缓回 idle。
-     * 不依赖位移量大小（WASD 恒速），仅区分是否在动。
-     */
-    private updateMovementWingFlap(dt: number) {
+    private readMotionDeltas(): { butterflyDelta: number; camDelta: number } {
         const cam = this.resolveCameraEntity();
         if (cam) {
             cam.getWorldTransform().getTranslation(this._cameraPos);
@@ -1280,6 +1222,11 @@ class GsplatPersistentButterflyParticle extends Script {
             camPos && this.sparkleHasPrevFrame
                 ? this.prevFrameCamPos.distance(camPos)
                 : 0;
+        return { butterflyDelta, camDelta };
+    }
+
+    private updateMovementWingFlap(dt: number) {
+        const { butterflyDelta, camDelta } = this.readMotionDeltas();
         const isMoving =
             butterflyDelta > WING_FLAP_MOVE_EPS || camDelta > WING_FLAP_MOVE_EPS;
         const targetBlend = isMoving ? 1 : 0;
@@ -1339,7 +1286,6 @@ class GsplatPersistentButterflyParticle extends Script {
         }
     }
 
-    /** 暂停特效时仍同步上一帧位置，避免恢复移动后误判为静止。 */
     private syncSparkleTrailPrevFrame() {
         this.prevFrameButterflyPos.copy(this.worldPos);
         const cam = this.resolveCameraEntity();
@@ -1349,23 +1295,21 @@ class GsplatPersistentButterflyParticle extends Script {
         this.sparkleHasPrevFrame = true;
     }
 
-    /** 蝴蝶/相机移动时在身后洒落光屑；按每帧位移持续发射（非仅首次）。 */
     private updateSparkleTrail(dt: number) {
         const cam = this.resolveCameraEntity();
+        let camPos: Vec3 | null = null;
         if (cam) {
             cam.getWorldTransform().getTranslation(this._cameraPos);
+            camPos = this._cameraPos;
         }
-        const camPos = cam ? this._cameraPos : null;
         const scale = this.resolveButterflyMeshScale();
         const emitDist = SPARKLE_EMIT_DIST * Math.max(0.35, scale);
 
-        const butterflyDelta = this.sparkleHasPrevFrame
-            ? this.prevFrameButterflyPos.distance(this.worldPos)
-            : 1;
-        const camDelta =
-            camPos && this.sparkleHasPrevFrame
-                ? this.prevFrameCamPos.distance(camPos)
-                : 1;
+        let { butterflyDelta, camDelta } = this.readMotionDeltas();
+        if (!this.sparkleHasPrevFrame) {
+            butterflyDelta = 1;
+            camDelta = 1;
+        }
         const isMoving =
             !this.sparkleHasPrevFrame || butterflyDelta > 1e-6 || camDelta > 1e-6;
 
@@ -1663,20 +1607,18 @@ class GsplatPersistentButterflyParticle extends Script {
 
         applyWingFlap(this.template, 0, this.currentWingFlapAmplitude, 0, this.animX, this.animY, this.animZ);
 
-        const built = buildBillboardMesh(
+        const mesh = buildButterflyBodyMesh(
             app.graphicsDevice,
             this.animX,
             this.animY,
             this.animZ,
             this.phases,
-            this.colorMix,
-            'butterflyParticleBillboard'
+            this.colorMix
         );
-        if (!built) {
+        if (!mesh) {
             return;
         }
-        const { mesh, material } = built;
-
+        const material = createButterflyBillboardMaterial('butterflyParticleBillboard');
         const instance = new MeshInstance(mesh, material);
         instance.cull = false;
 
@@ -1688,10 +1630,7 @@ class GsplatPersistentButterflyParticle extends Script {
         });
 
         const sparkleTrail = new Entity(SPARKLE_TRAIL_ROOT_NAME);
-        this.sparkleTrailMaterial = createBillboardMaterial(
-            app.graphicsDevice,
-            'butterflySparkleTrailBillboard'
-        );
+        this.sparkleTrailMaterial = createButterflyBillboardMaterial('butterflySparkleTrailBillboard');
         sparkleTrail.addComponent('render', {
             meshInstances: [],
             layers: [syncButterflyRenderLayer(app)],
@@ -1711,13 +1650,8 @@ class GsplatPersistentButterflyParticle extends Script {
 
         const scale = this.resolveButterflyMeshScale();
         overlay.setLocalScale(scale, scale, scale);
-
-        if (!this.motionInitialized) {
-            this.resetMotionState();
-        } else {
-            worldPointToOverlayLocal(this.entity, this.worldPos, _worldPos);
-            overlay.setLocalPosition(_worldPos.x, _worldPos.y, _worldPos.z);
-        }
+        worldPointToOverlayLocal(this.entity, this.worldPos, _worldPos);
+        overlay.setLocalPosition(_worldPos.x, _worldPos.y, _worldPos.z);
 
         this.pushUniforms();
         app.renderNextFrame = true;
@@ -1725,8 +1659,6 @@ class GsplatPersistentButterflyParticle extends Script {
 
     private destroyOverlay() {
         this.mounted = false;
-        this.motionInitialized = false;
-        this.renderLayerSynced = false;
         this.butterflyMaterial = null;
         this.sparkleTrailMaterial = null;
         this.butterflyMesh = null;
