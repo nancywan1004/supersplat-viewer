@@ -22,8 +22,8 @@
  * ## 调用关系（简图）
  *
  *   控制器视频循环  → ensureSceneVideoFramePlaying(entry, { muted })
- *   控制器音频循环  → playSceneMediaEntry(audio, 'hotspot')
- *   用户点击播放钮  → userPlaySceneMedia → playSceneMediaEntry(entry, 'user')
+ *   控制器音频循环  → playSceneMediaEntry(audio)
+ *   用户点击播放钮  → userPlaySceneMedia → playSceneMediaEntry(entry)
  *   赢家收尾        → setActiveSceneMediaSoundId(videoOwner ?? audioOwner)
  */
 
@@ -36,19 +36,57 @@ import {
 } from './media-runtime';
 import { pausePlacedVideoTexture, playPlacedVideoTexture } from './video-texture';
 
-/**
- * 播放入口来源。仅影响副作用，不改变互斥规则：
- * - `user`：视频会设 `manualLatch`（播控条保持可见）
- * - `hotspot`：由热区赢家逻辑触发，不写 manualLatch
- */
-export type SceneMediaPlaySource = 'hotspot' | 'user';
-
 /** 当前占用「唯一出声槽」的 scene 条目 id；null 表示无活跃媒体 */
 let activeSceneMediaEntryId: string | null = null;
 
-/** 供热区控制器在编辑非预览下保留手动播放条（pausePostersExceptActiveUserSlot） */
+/**
+ * 当前由「用户手动播放」hold 住的 scene 条目 id；具有**最高出声优先级**。
+ * - 仅 {@link userPlaySceneMedia} 写入；
+ * - {@link userPauseSceneMedia} / {@link pauseAllSceneMedia} / {@link resetAllSceneMediaToInitial}
+ *   以及 release 槽位的暂停路径清空；
+ * - 热区控制器每帧检测；若该 id 已不在热区合格集中（离开热区、被禁用、被删等），
+ *   通过 {@link clearManualHeldSceneMediaEntryIdIf} 主动释放，回到纯热区评估。
+ */
+let manualHeldSceneMediaEntryId: string | null = null;
+
+/** 当前出声 entry（热区赢家或用户手动播放） */
 export function getActiveSceneMediaEntryId(): string | null {
     return activeSceneMediaEntryId;
+}
+
+/** 当前由用户手动播放 hold 的 entry id；null 表示无手动锁定 */
+export function getManualHeldSceneMediaEntryId(): string | null {
+    return manualHeldSceneMediaEntryId;
+}
+
+/** 若当前 manualHeld 等于指定 id，则清空（供控制器在该条失效时释放锁定） */
+export function clearManualHeldSceneMediaEntryIdIf(id: string | null): void {
+    if (id !== null && manualHeldSceneMediaEntryId === id) {
+        manualHeldSceneMediaEntryId = null;
+    }
+}
+
+/**
+ * 「标注视频大屏播放」是否正在进行——为 true 时控制器把场景音视频视为
+ * 与 `viewMediaMuted=true` 等价（视频静音保帧、音频 pause），让标注大屏独占声音；
+ * 关闭大屏后恢复场景媒体声音。
+ *
+ * 写入由 annotation 模块负责；状态全局共享，避免多 entity / static handler 通信。
+ */
+let annotationFullscreenVideoActive = false;
+
+export function isAnnotationFullscreenVideoActive(): boolean {
+    return annotationFullscreenVideoActive;
+}
+
+/**
+ * 切换标注大屏压制态。变化时 fire `annotationFullscreenVideo:changed`，
+ * 让控制器立即重算一次（绕过冷却 / EVAL_INTERVAL_MS）。
+ */
+export function setAnnotationFullscreenVideoActive(global: Global, active: boolean): void {
+    if (annotationFullscreenVideoActive === active) return;
+    annotationFullscreenVideoActive = active;
+    global.events?.fire('annotationFullscreenVideo:changed', { active });
 }
 
 /**
@@ -105,8 +143,13 @@ function pauseSceneMediaEntryInternal(
         syncEntryPlaybackUi(global, entry, 'audio', false);
     }
 
-    if (releaseActiveSlot && activeSceneMediaEntryId === entry.id) {
-        activeSceneMediaEntryId = null;
+    if (releaseActiveSlot) {
+        if (activeSceneMediaEntryId === entry.id) {
+            activeSceneMediaEntryId = null;
+        }
+        if (manualHeldSceneMediaEntryId === entry.id) {
+            manualHeldSceneMediaEntryId = null;
+        }
     }
 }
 
@@ -172,8 +215,7 @@ export function ensureSceneVideoFramePlaying(
  */
 export function playSceneMediaEntry(
     global: Global,
-    entry: ScenePlacedItem,
-    source: SceneMediaPlaySource
+    entry: ScenePlacedItem
 ): boolean {
     const entity = entry.entity;
     if (!entity) return false;
@@ -190,9 +232,6 @@ export function playSceneMediaEntry(
         m.videoEl.play().catch(() => {
             // ignore autoplay / decode errors
         });
-        if (source === 'user') {
-            ensureScenePlacedMediaRuntime(entry).manualLatch = true;
-        }
         syncEntryPlaybackUi(global, entry, 'video', true);
         return true;
     }
@@ -220,25 +259,40 @@ export function pauseSceneMediaEntry(
     pauseSceneMediaEntryInternal(global, entry, options?.releaseActiveSlot !== false);
 }
 
-/** 页面隐藏、placedAssets 禁用、退出编辑等：停全部并清空互斥槽 */
+/** 页面隐藏、placedAssets 禁用等：停全部并清空互斥槽 + 手动锁定（不重置进度，便于恢复） */
 export function pauseAllSceneMedia(global: Global): void {
     activeSceneMediaEntryId = null;
+    manualHeldSceneMediaEntryId = null;
     for (const entry of global.state.scenePlacedEntities ?? []) {
         pauseSceneMediaEntryInternal(global, entry, false);
     }
 }
 
 /**
- * 进入预览或退出编辑到 Viewer：重置用户会话标记，使热区行为与观看模式一致。
- * 不主动 pause 元素（由随后热区评估或 pauseAll 负责）。
+ * 模式切换（view ⇄ edit、preview on/off）统一入口：
+ * 把所有 video/audio **回到初始态**——
+ * 停止播放、currentTime 归零、清 `userPaused` / `manualLatch` / 互斥槽，
+ * 并广播 `mediaOverlay:playbackChanged` 让控件刷新。
+ * 调用方随后再触发热区评估即可按 settings 重新决定是否自动播。
  */
-export function clearSceneMediaUserSession(global: Global): void {
+export function resetAllSceneMediaToInitial(global: Global): void {
     activeSceneMediaEntryId = null;
+    manualHeldSceneMediaEntryId = null;
     for (const entry of global.state.scenePlacedEntities ?? []) {
-        const rt = entry.mediaRuntime;
-        if (!rt) continue;
+        const entity = entry.entity;
+        const m = entity ? getPlacedMediaRuntime(entity) : null;
+        const rt = ensureScenePlacedMediaRuntime(entry);
         rt.userPaused = false;
         rt.manualLatch = false;
+        if (m?.kind === 'video') {
+            pausePlacedVideoTexture(m);
+            try { m.videoEl.currentTime = 0; } catch { /* ignore */ }
+            syncEntryPlaybackUi(global, entry, 'video', false);
+        } else if (m?.kind === 'audio') {
+            pausePlacedAudio(m);
+            try { m.audioEl.currentTime = 0; } catch { /* ignore */ }
+            syncEntryPlaybackUi(global, entry, 'audio', false);
+        }
     }
 }
 
@@ -257,14 +311,21 @@ export function clearAllSceneMediaPlaybackFlags(global: Global): void {
 
 // --- 用户手势入口（video-controls / audio-callout 专用） ---
 
-/** 播放钮：清除 userPaused → play → 通知热区（解锁 userUnlocked） */
+/**
+ * 播放钮：清 userPaused，写入「手动锁定」槽（最高优先级），出声播放，
+ * 并通知热区控制器立即重算（绕过冷却）。
+ */
 export function userPlaySceneMedia(global: Global, entry: ScenePlacedItem): void {
     ensureScenePlacedMediaRuntime(entry).userPaused = false;
-    playSceneMediaEntry(global, entry, 'user');
+    manualHeldSceneMediaEntryId = entry.id;
+    playSceneMediaEntry(global, entry);
     notifySceneMediaUserGesture(global);
 }
 
-/** 暂停钮：userPaused 阻止热区再播 → pause 并释放互斥槽 */
+/**
+ * 暂停钮：设 userPaused 阻止本条再被热区自动播；释放出声槽 + 手动锁定；
+ * 通知热区控制器重算（manualHeld 释放后回到纯热区评估）。
+ */
 export function userPauseSceneMedia(global: Global, entry: ScenePlacedItem): void {
     ensureScenePlacedMediaRuntime(entry).userPaused = true;
     pauseSceneMediaEntry(global, entry, { releaseActiveSlot: true });

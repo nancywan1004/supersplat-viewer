@@ -44,7 +44,8 @@ export const DEFAULT_SCENE_MEDIA_HOTSPOT = {
         coneHalfDeg: 60
     },
     audio: {
-        hotspotAutoplayEnabled: true
+        hotspotAutoplayEnabled: true,
+        showCalloutInViewer: true
     }
 } as const;
 

@@ -48,6 +48,10 @@ export class AnnotationEntity extends Annotation {
         (this as any).closeOnDocumentClick = false;
         // 热点纹理不绘制 id，标题由 collapsedTitleSpan 根据 showTitleWhenCollapsed 显示
         this.label = '';
+        // 注入 globalRef：让 Annotation 的 static handler（fs / 关闭大屏）能 fire 事件
+        if (!Annotation.globalRef && this.global) {
+            Annotation.globalRef = this.global;
+        }
         super.initialize();
 
         // 收起时显示的标题：pill 样式由 .pc-annotation-collapsed-title 控制
