@@ -1,9 +1,9 @@
 import { Color, Entity, Ray, Vec3 } from 'playcanvas';
 
 import { ensureTorchLight } from '../../settings-serialize/settings-serialize-helper';
-import { ensureViewSettings } from '../../view-settings';
+import { applyViewTorchActive, ensureViewSettings, readViewTorchActive } from '../../view-settings';
 import { setTorchCursorActive } from '../../placement-cursor';
-import type { Global } from '../../types';
+import type { EditLeftModule, Global } from '../../types';
 import type { ExperienceSettings } from '../../schemas/v2';
 import type { TorchLightSettings } from '../../schemas/v2-custom';
 
@@ -15,7 +15,7 @@ import type { TorchLightSettings } from '../../schemas/v2-custom';
  * - 实体名固定为 `torchLight`，挂在 `app.root` 下独立容器（不进 `pointLights`，
  *   规避 `updatePointLightsFromSettings` 的 destroy 误删）
  * - 参数（颜色 / 强度 / range）来自 `settings.lighting.torch`（持久化）
- * - 启停由 `viewSettings.torch.active` 控制（不入库）
+ * - 启停由 `viewSettings.torch.active` 控制（不入库）；编辑模式下切换左侧模块时自动关闭
  * - **位置（跟手关键）**：
  *   - 鼠标移动或相机矩阵变化后，最多约 30Hz 同步做一次 mesh AABB 射线求交（CPU），
  *     并触发一次 `Picker.pickSurface`（异步，gsplat 表面）；两者取离相机更近的命中点
@@ -558,6 +558,23 @@ export function initTorchLight(global: Global): TorchControllerHandle {
     };
     events.on('torchParams:changed', onTorchParamsChanged);
 
+    /** 编辑模式下切换左侧模块（含取消选中 → null）时关闭手电筒，避免与模块内拾取/笔刷冲突 */
+    let lastEditLeftModule: EditLeftModule | null = global.state.editLeftModule ?? null;
+    const onEditLeftModuleChanged = (next: EditLeftModule | null) => {
+        const normalized: EditLeftModule | null = next ?? null;
+        if (!global.state.editMode) {
+            lastEditLeftModule = normalized;
+            return;
+        }
+        if (normalized === lastEditLeftModule) return;
+        lastEditLeftModule = normalized;
+        if (readViewTorchActive(global)) {
+            applyViewTorchActive(global, false);
+            onUpdate();
+        }
+    };
+    events.on('editLeftModule:changed', onEditLeftModuleChanged);
+
     const handle: TorchControllerHandle = {
         get entity() {
             return entity as Entity;
@@ -580,6 +597,7 @@ export function initTorchLight(global: Global): TorchControllerHandle {
             } catch { /* ignore */ }
             app.off('update', onUpdate);
             events.off('torchParams:changed', onTorchParamsChanged);
+            events.off('editLeftModule:changed', onEditLeftModuleChanged);
             setTorchCursorActive(global, false);
             try {
                 if (container) (container as Entity).destroy();
