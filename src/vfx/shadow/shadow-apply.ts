@@ -49,7 +49,11 @@ const shadowApplyFs = /* glsl */ `
     void main(void) {
         ivec2 px = ivec2(gl_FragCoord.xy);
         if (debugExcludeMask > 0.5) {
-            float ex = useExclude > 0.5 ? texelFetch(excludeMask, px, 0).r : 0.0;
+            float ex = 0.0;
+            if (useExclude > 0.5) {
+                vec4 exS = texelFetch(excludeMask, px, 0);
+                ex = max(exS.r, max(exS.g, exS.b));
+            }
             gl_FragColor = vec4(ex, ex, ex, 1.0);
             return;
         }
@@ -59,7 +63,9 @@ const shadowApplyFs = /* glsl */ `
         } else {
             float blend = (1.0 - r) * intensity;
             if (useExclude > 0.5) {
-                float ex = texelFetch(excludeMask, px, 0).r;
+                vec4 exS = texelFetch(excludeMask, px, 0);
+                // 勿用 alpha：exclude RT clearColor 为 (0,0,0,1)，取 a 会整屏排除、地面阴影消失
+                float ex = max(exS.r, max(exS.g, exS.b));
                 blend *= (1.0 - ex);
             }
             gl_FragColor = vec4(0.0, 0.0, 0.0, blend);
