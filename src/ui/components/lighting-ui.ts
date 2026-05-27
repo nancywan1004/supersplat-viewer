@@ -49,17 +49,10 @@ const LIGHTING_PANEL_HTML = `
     </div>
   </div>
   <div class="settingsRow">
-    <label for="torchRangeSlider" class="lightingLabel" title="光源前方还能继续往前照多远（与探索距离自动相加得到 PointLight 实际作用半径）">Range:</label>
+    <label for="torchRangeSlider" class="lightingLabel" title="PointLight 的有效照射半径（世界单位）；光源贴在拾取得到的表面位置">Range:</label>
     <div class="lightingSliderWrap">
       <input type="range" id="torchRangeSlider" min="0" max="20" step="0.1" value="5.5" class="lightingSlider">
       <span id="torchRangeValue" class="lightingSliderValue">5.5</span>
-    </div>
-  </div>
-  <div class="settingsRow">
-    <label for="torchExploreSlider" class="lightingLabel" title="光源沿视线放置在相机前方多少米；UI 上的 Range 表示在此基础上再往前能照多远">探索距离:</label>
-    <div class="lightingSliderWrap">
-      <input type="range" id="torchExploreSlider" min="0.5" max="30" step="0.1" value="8" class="lightingSlider">
-      <span id="torchExploreValue" class="lightingSliderValue">8.0</span>
     </div>
   </div>
 </div>
@@ -605,8 +598,6 @@ export function initLightingUI(global: Global): () => void {
     const torchIntensityValue = container.querySelector('#torchIntensityValue') as HTMLElement | null;
     const torchRangeSlider = container.querySelector('#torchRangeSlider') as HTMLInputElement | null;
     const torchRangeValue = container.querySelector('#torchRangeValue') as HTMLElement | null;
-    const torchExploreSlider = container.querySelector('#torchExploreSlider') as HTMLInputElement | null;
-    const torchExploreValue = container.querySelector('#torchExploreValue') as HTMLElement | null;
 
     const refreshTorchActiveUi = () => {
         if (!torchEnableCheck) return;
@@ -629,13 +620,6 @@ export function initLightingUI(global: Global): () => void {
         }
         if (torchRangeValue) {
             torchRangeValue.textContent = (cfg.range ?? 0).toFixed(1);
-        }
-        const explore = (cfg as any).exploreDistance ?? 5;
-        if (torchExploreSlider) {
-            torchExploreSlider.value = String(explore);
-        }
-        if (torchExploreValue) {
-            torchExploreValue.textContent = (explore as number).toFixed(1);
         }
     };
 
@@ -691,16 +675,6 @@ export function initLightingUI(global: Global): () => void {
         }
     });
     torchRangeSlider?.addEventListener('change', () => {
-        pushEditHistorySafe();
-    });
-    torchExploreSlider?.addEventListener('input', () => {
-        const v = parseFloat(torchExploreSlider.value);
-        if (Number.isFinite(v)) {
-            if (torchExploreValue) torchExploreValue.textContent = v.toFixed(1);
-            sendTorchParamsPatch({ exploreDistance: v } as Partial<TorchLightSettings>);
-        }
-    });
-    torchExploreSlider?.addEventListener('change', () => {
         pushEditHistorySafe();
     });
 

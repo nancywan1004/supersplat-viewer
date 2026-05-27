@@ -14,20 +14,19 @@ import type { TorchLightSettings } from '../../schemas/v2-custom';
  *
  * - 实体名固定为 `torchLight`，挂在 `app.root` 下独立容器（不进 `pointLights`，
  *   规避 `updatePointLightsFromSettings` 的 destroy 误删）
- * - 参数（颜色 / 强度 / range / exploreDistance）来自 `settings.lighting.torch`（持久化）
+ * - 参数（颜色 / 强度 / range）来自 `settings.lighting.torch`（持久化）
  * - 启停由 `viewSettings.torch.active` 控制（不入库）
  * - **位置（跟手关键）**：
  *   - 鼠标移动或相机矩阵变化后，最多约 30Hz 调用 `Picker.pickSurface` 更新世界落点
  *   - shader 每个 splat 只做世界距离衰减，不再重复采 depthMap / 反投影
- * - **effectiveRange 联动**（避免「靠近相机反而黑」的反直觉）：
- *   - 光源在「视线上 exploreDistance 处」，到相机的距离 ≈ exploreDistance
- *   - PointLight 的有效作用半径 = `cfg.range + max(0, exploreDistance)`
- *   - 这样无论 exploreDistance 大小，「相机 → 光源」整条视线段都在球内
- *   - UI 上 `Range` 语义 = 「光源前方再往前能照多远」
+ * - **拾取兜底**：拾取未命中或还未首次返回时，光源回退到相机前方
+ *   `TORCH_FALLBACK_DISTANCE` 米处；PointLight 的 `range` 直接使用 `cfg.range`。
  */
 const TORCH_ENTITY_NAME = 'torchLight';
 const TORCH_PICK_THROTTLE_MS = 33;
 const CAMERA_CHANGE_EPSILON = 1e-5;
+/** 拾取兜底距离（世界单位）：未命中时光源沿相机 forward 放在此距离处 */
+const TORCH_FALLBACK_DISTANCE = 5;
 
 const _tmpForward = new Vec3();
 const _tmpCamPos = new Vec3();
@@ -109,7 +108,7 @@ export function initTorchLight(global: Global): TorchControllerHandle {
 
     /**
      * 把 settings.lighting.torch 的「颜色 / 强度」写到光组件上。
-     * `range` 由 `onUpdate` 每帧根据 `cfg.range + cfg.exploreDistance` 计算并写入。
+     * `range` 由 `onUpdate` 每帧直接写入 `cfg.range`。
      */
     const applyParamsToEntity = () => {
         const cfg = ensureTorchLight(settings) as TorchLightSettings;
@@ -129,9 +128,9 @@ export function initTorchLight(global: Global): TorchControllerHandle {
     };
 
     /**
-     * 把 client(x,y) + 距离投影到世界空间。
+     * 把 client(x,y) + 距离投影到世界空间（仅用于拾取兜底）。
      * - 使用 `CameraComponent.screenToWorld`，默认采用 `canvas.clientWidth/Height`（CSS 像素）
-     * - `cameraz` 是沿相机 forward 的 view-space Z（不是欧氏距离），与 `exploreDistance` 语义一致
+     * - `cameraz` 是沿相机 forward 的 view-space Z（不是欧氏距离）
      */
     const computeWorldOnRay = (clientX: number, clientY: number, distance: number): Vec3 | null => {
         const cv = app.graphicsDevice.canvas as HTMLCanvasElement;
@@ -244,8 +243,8 @@ export function initTorchLight(global: Global): TorchControllerHandle {
     /**
      * 每帧：
      *  1. 计算 enabled，切换 cursor 与 light.enabled
-     *  2. 写 effectiveRange = cfg.range + exploreDistance
-     *  3. 把 PointLight 放在「鼠标视线上 exploreDistance 处」
+     *  2. light.range 直接使用 cfg.range
+     *  3. 优先使用拾取得到的世界落点；未命中则回退到相机前方 TORCH_FALLBACK_DISTANCE 处
      */
     let lastEnabledState = false;
     const onUpdate = () => {
@@ -266,16 +265,14 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         scheduleWorldPick();
 
         const cfg = ensureTorchLight(settings) as TorchLightSettings;
-        const distance = cfg.exploreDistance ?? 5;
         const userRange = Math.max(0, cfg.range ?? 12);
-        const effectiveRange = userRange + Math.max(0, distance);
-        (entity.light as unknown as { range: number }).range = effectiveRange;
+        (entity.light as unknown as { range: number }).range = userRange;
 
         let pos: Vec3 | null = null;
         if (runtime.hasWorldPos) {
             pos = runtime.worldPos;
         } else if (runtime.lastClientX !== null && runtime.lastClientY !== null) {
-            pos = computeWorldOnRay(runtime.lastClientX, runtime.lastClientY, distance);
+            pos = computeWorldOnRay(runtime.lastClientX, runtime.lastClientY, TORCH_FALLBACK_DISTANCE);
         }
 
         // 兜底：未发生过 pointermove → 沿相机 forward 放置
@@ -288,9 +285,9 @@ export function initTorchLight(global: Global): TorchControllerHandle {
             if (fl > 1e-6) {
                 _tmpForward.mulScalar(1 / fl);
                 _tmpFallbackPos.set(
-                    camPos.x + _tmpForward.x * distance,
-                    camPos.y + _tmpForward.y * distance,
-                    camPos.z + _tmpForward.z * distance
+                    camPos.x + _tmpForward.x * TORCH_FALLBACK_DISTANCE,
+                    camPos.y + _tmpForward.y * TORCH_FALLBACK_DISTANCE,
+                    camPos.z + _tmpForward.z * TORCH_FALLBACK_DISTANCE
                 );
                 pos = _tmpFallbackPos;
                 runtime.screenU = 0.5;

@@ -7,8 +7,6 @@ import {
     DEFAULT_SCENE_MEDIA_HOTSPOT,
     DEFAULT_SHADOW,
     DEFAULT_TORCH_LIGHT,
-    TORCH_EXPLORE_DISTANCE_MAX,
-    TORCH_EXPLORE_DISTANCE_MIN,
     TORCH_RANGE_MAX
 } from './settings-serialize-configs';
 import { normalizeAnnotationMediaFields } from '../annotation-toolbar/media-fields';
@@ -345,11 +343,6 @@ export function ensureTorchLight(settings: ExperienceSettings): TorchLightSettin
     } else {
         t.range = Math.max(0, Math.min(TORCH_RANGE_MAX, t.range as number));
     }
-    if (typeof t.exploreDistance !== 'number' || !Number.isFinite(t.exploreDistance)) {
-        t.exploreDistance = DEFAULT_TORCH_LIGHT.exploreDistance ?? 5;
-    } else {
-        t.exploreDistance = Math.max(TORCH_EXPLORE_DISTANCE_MIN, Math.min(TORCH_EXPLORE_DISTANCE_MAX, t.exploreDistance as number));
-    }
     t.innerConeAngle = clampTorchAngleDeg(t.innerConeAngle, DEFAULT_TORCH_LIGHT.innerConeAngle ?? 35);
     t.outerConeAngle = clampTorchAngleDeg(t.outerConeAngle, DEFAULT_TORCH_LIGHT.outerConeAngle ?? 70);
     if ((t.innerConeAngle as number) > (t.outerConeAngle as number)) {
@@ -374,9 +367,6 @@ export function patchTorchLight(settings: ExperienceSettings, partial: Partial<T
     }
     if ((partial as Record<string, unknown>).range !== undefined) {
         next.range = (partial as Record<string, unknown>).range;
-    }
-    if ((partial as Record<string, unknown>).exploreDistance !== undefined) {
-        next.exploreDistance = (partial as Record<string, unknown>).exploreDistance;
     }
     if ((partial as Record<string, unknown>).innerConeAngle !== undefined) {
         next.innerConeAngle = (partial as Record<string, unknown>).innerConeAngle;

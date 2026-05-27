@@ -14,16 +14,12 @@ export const DEFAULT_TORCH_LIGHT: TorchLightSettings = {
     color: [1, 0.95, 0.85],
     intensity: 7.0,
     range: 5.5,
-    exploreDistance: 8.0,
     innerConeAngle: 35,
     outerConeAngle: 70
 };
 
 /** 手电筒 `range` 协议/UI 上限（与点光 `LIGHT_RANGE_SET` 0–20 对齐） */
 export const TORCH_RANGE_MAX = 20;
-/** 手电筒「探索距离」UI / 协议下限与上限（沿视线 view-space Z，世界单位） */
-export const TORCH_EXPLORE_DISTANCE_MIN = 0.5;
-export const TORCH_EXPLORE_DISTANCE_MAX = 30;
 
 export const DEFAULT_BLOOM = {
     enabled: false,
