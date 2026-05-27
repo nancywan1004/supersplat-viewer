@@ -1,10 +1,10 @@
 import {
     Asset,
-    BLEND_NORMAL,
+    BLEND_ADDITIVEALPHA,
+    BLEND_NONE,
     BoundingBox,
     CULLFACE_NONE,
     Entity,
-    Layer,
     Mesh,
     MeshInstance,
     Script,
@@ -133,19 +133,19 @@ export class GsplatFallingPetals extends Script {
 
     private _mesh: Mesh | null = null;
 
-    private _material: ShaderMaterial | null = null;
+    private _bodyMaterial: ShaderMaterial | null = null;
 
-    private _meshInstance: MeshInstance | null = null;
+    private _glowMaterial: ShaderMaterial | null = null;
+
+    private _bodyMeshInstance: MeshInstance | null = null;
+
+    private _glowMeshInstance: MeshInstance | null = null;
 
     private _petalTexture: Texture | null = null;
 
     private _petalTextureAsset: Asset | null = null;
 
     density = PETAL_PRESET.density;
-
-    private _petalLayer: Layer | null = null;
-
-    private _cameraEntity: Entity | null = null;
 
     private _savedAppAutoRender: boolean | undefined;
 
@@ -270,11 +270,11 @@ export class GsplatFallingPetals extends Script {
     destroy() {
         this.app.off('update', this._onAppUpdate);
         this.disarmContinuousRender();
-        this.removePetalLayer();
         if (this._petalEntity) {
             this._petalEntity.destroy();
             this._petalEntity = null;
         }
+        this.destroyMaterials();
         if (this._mesh) {
             this._mesh.destroy();
             this._mesh = null;
@@ -286,7 +286,7 @@ export class GsplatFallingPetals extends Script {
     }
 
     private _onAppUpdate = (dt: number) => {
-        if (!this.enabled || !this._petalEntity || !this._material) {
+        if (!this.enabled || !this._petalEntity || !this._bodyMaterial || !this._glowMaterial) {
             return;
         }
 
@@ -304,6 +304,7 @@ export class GsplatFallingPetals extends Script {
             this._petalEntity.destroy();
             this._petalEntity = null;
         }
+        this.destroyMaterials();
         if (this._mesh) {
             this._mesh.destroy();
             this._mesh = null;
@@ -325,17 +326,22 @@ export class GsplatFallingPetals extends Script {
         this._mesh.setIndices(meshData.indices);
         this._mesh.update();
 
-        this._material = this.createMaterial();
+        this._bodyMaterial = this.createMaterial('body');
+        this._glowMaterial = this.createMaterial('glow');
         this.applyTextureToMaterial();
 
-        this._meshInstance = new MeshInstance(this._mesh, this._material, this._petalEntity);
-        this._meshInstance.castShadow = false;
-        this._meshInstance.receiveShadow = false;
+        this._bodyMeshInstance = new MeshInstance(this._mesh, this._bodyMaterial, this._petalEntity);
+        this._bodyMeshInstance.castShadow = false;
+        this._bodyMeshInstance.receiveShadow = false;
+
+        this._glowMeshInstance = new MeshInstance(this._mesh, this._glowMaterial, this._petalEntity);
+        this._glowMeshInstance.castShadow = false;
+        this._glowMeshInstance.receiveShadow = false;
 
         this._petalEntity.addComponent('render', {
             type: 'asset',
-            meshInstances: [this._meshInstance],
-            layers: [this.ensurePetalLayer().id]
+            meshInstances: [this._bodyMeshInstance, this._glowMeshInstance],
+            layers: [this.getWorldLayerId()]
         } as any);
         this.updateCustomAabb();
     }
@@ -438,16 +444,18 @@ export class GsplatFallingPetals extends Script {
         return { positions, uvs, seed0, seed1, seed2, colors, indices };
     }
 
-    private createMaterial() {
+    private createMaterial(pass: 'body' | 'glow') {
         const glowWidth = this.getClampedGlowWidth();
         const glowMaxScale = this.formatShaderFloat(1 + 0.58 * glowWidth);
         const material = new ShaderMaterial();
+        material.name = pass === 'body' ? 'GsplatFallingPetalsBody' : 'GsplatFallingPetalsGlow';
         material.cull = CULLFACE_NONE;
-        material.blendType = BLEND_NORMAL;
-        material.depthTest = false;
-        material.depthWrite = false;
+        material.blendType = pass === 'body' ? BLEND_NONE : BLEND_ADDITIVEALPHA;
+        material.depthTest = true;
+        material.depthWrite = pass === 'body';
+        material.alphaTest = pass === 'body' ? 0.34 : 0;
         material.shaderDesc = {
-            uniqueName: 'GsplatTexturedFallingPetalsGpu',
+            uniqueName: pass === 'body' ? 'GsplatTexturedFallingPetalsBodyGpu' : 'GsplatTexturedFallingPetalsGlowGpu',
             vertexGLSL: /* glsl */`
                 attribute vec3 vertex_position;
                 attribute vec2 vertex_texCoord0;
@@ -669,16 +677,20 @@ export class GsplatFallingPetals extends Script {
                     vec4 tex = texture2D(colorMap, vUv0);
 
                     float baseAlpha = tex.a * vColor.a;
+                    if (${pass === 'body' ? 'true' : 'false'}) {
+                        if (baseAlpha < 0.34) {
+                            discard;
+                        }
+                        gl_FragColor = vec4(tex.rgb * vColor.rgb, 1.0);
+                        return;
+                    }
+
                     float glowAlpha = softGlowAlpha(vUv0, tex.a) * vColor.a * uGlowStrength * 1.05;
-                    float alpha = max(baseAlpha, glowAlpha);
-                    if (alpha < 0.015) {
+                    if (glowAlpha < 0.01) {
                         discard;
                     }
 
-                    vec3 baseColor = tex.rgb * vColor.rgb;
-                    float glowMix = clamp(glowAlpha / max(alpha, 0.0001), 0.0, 1.0);
-                    vec3 color = mix(baseColor, uGlowColor, glowMix);
-                    gl_FragColor = vec4(color, alpha);
+                    gl_FragColor = vec4(uGlowColor, glowAlpha);
                 }
             `,
             fragmentWGSL: /* wgsl */`
@@ -724,16 +736,20 @@ export class GsplatFallingPetals extends Script {
                     let tex = textureSample(colorMap, colorMapSampler, input.vUv0);
 
                     let baseAlpha = tex.a * input.vColor.a;
+                    if (${pass === 'body' ? 'true' : 'false'}) {
+                        if (baseAlpha < 0.34) {
+                            discard;
+                        }
+                        output.color = vec4f(tex.rgb * input.vColor.rgb, 1.0);
+                        return output;
+                    }
+
                     let glowAlpha = softGlowAlpha(input.vUv0, tex.a) * input.vColor.a * uniform.uGlowStrength * 1.05;
-                    let alpha = max(baseAlpha, glowAlpha);
-                    if (alpha < 0.015) {
+                    if (glowAlpha < 0.01) {
                         discard;
                     }
 
-                    let baseColor = tex.rgb * input.vColor.rgb;
-                    let glowMix = clamp(glowAlpha / max(alpha, 0.0001), 0.0, 1.0);
-                    let color = mix(baseColor, uniform.uGlowColor, glowMix);
-                    output.color = vec4f(color, alpha);
+                    output.color = vec4f(uniform.uGlowColor, glowAlpha);
                     return output;
                 }
             `,
@@ -751,11 +767,13 @@ export class GsplatFallingPetals extends Script {
     }
 
     private applyTextureToMaterial() {
-        if (!this._material || !this._petalTexture) {
+        if (!this._petalTexture) {
             return;
         }
-        this._material.setParameter('colorMap', this._petalTexture);
-        this._material.update();
+        for (const material of this.getMaterials()) {
+            material.setParameter('colorMap', this._petalTexture);
+            material.update();
+        }
     }
 
     private syncPetalField(target: Entity) {
@@ -772,11 +790,11 @@ export class GsplatFallingPetals extends Script {
         this._cameraOffsetArray[0] = pos.x - bcX * cs;
         this._cameraOffsetArray[1] = pos.y - bcY * cs;
         this._cameraOffsetArray[2] = pos.z - bcZ * cs;
-        this.syncCameraLayer();
     }
 
     private syncMaterialUniforms(target: Entity) {
-        if (!this._material) {
+        const materials = this.getMaterials();
+        if (!materials.length) {
             return;
         }
 
@@ -797,21 +815,36 @@ export class GsplatFallingPetals extends Script {
         this._forwardArray[1] = forward.y;
         this._forwardArray[2] = forward.z;
 
-        this._material.setParameter('uTime', this._time);
-        this._material.setParameter('uCellSize', this.getCellSize());
-        this._material.setParameter('uGridHalf', this._gridHalfArray);
-        this._material.setParameter('uBaseCell', this._baseCellArray);
-        this._material.setParameter('uCameraOffset', this._cameraOffsetArray);
-        this._material.setParameter('uRight', this._rightArray);
-        this._material.setParameter('uUp', this._upArray);
-        this._material.setParameter('uForward', this._forwardArray);
-        this._material.setParameter('uSpeed', this.speed);
-        this._material.setParameter('uDrift', this.drift);
-        this._material.setParameter('uFlutter', this.flutter);
-        this._material.setParameter('uOpacity', this.opacity);
-        this._material.setParameter('uColor', this.color);
-        this._material.setParameter('uGlowColor', this.glowColor);
-        this._material.setParameter('uGlowStrength', this.glowStrength);
+        for (const material of materials) {
+            material.setParameter('uTime', this._time);
+            material.setParameter('uCellSize', this.getCellSize());
+            material.setParameter('uGridHalf', this._gridHalfArray);
+            material.setParameter('uBaseCell', this._baseCellArray);
+            material.setParameter('uCameraOffset', this._cameraOffsetArray);
+            material.setParameter('uRight', this._rightArray);
+            material.setParameter('uUp', this._upArray);
+            material.setParameter('uForward', this._forwardArray);
+            material.setParameter('uSpeed', this.speed);
+            material.setParameter('uDrift', this.drift);
+            material.setParameter('uFlutter', this.flutter);
+            material.setParameter('uOpacity', this.opacity);
+            material.setParameter('uColor', this.color);
+            material.setParameter('uGlowColor', this.glowColor);
+            material.setParameter('uGlowStrength', this.glowStrength);
+        }
+    }
+
+    private getMaterials() {
+        return [this._bodyMaterial, this._glowMaterial].filter((material): material is ShaderMaterial => !!material);
+    }
+
+    private destroyMaterials() {
+        this._bodyMaterial?.destroy();
+        this._glowMaterial?.destroy();
+        this._bodyMaterial = null;
+        this._glowMaterial = null;
+        this._bodyMeshInstance = null;
+        this._glowMeshInstance = null;
     }
 
     private getCellSize() {
@@ -849,64 +882,12 @@ export class GsplatFallingPetals extends Script {
         this._petalEntity.enabled = this.enabled;
         if (this._petalEntity.render) {
             this._petalEntity.render.enabled = this.enabled;
-            this._petalEntity.render.layers = [this.ensurePetalLayer().id];
+            this._petalEntity.render.layers = [this.getWorldLayerId()];
         }
-        this.syncCameraLayer();
     }
 
-    private ensurePetalLayer() {
-        if (this._petalLayer) {
-            return this._petalLayer;
-        }
-
-        const layers = this.app.scene.layers;
-        const worldLayer = layers.getLayerByName('World');
-        const layer = new Layer({
-            name: 'FallingPetalsOverlay',
-            clearColorBuffer: false,
-            clearDepthBuffer: false
-        });
-
-        if (worldLayer) {
-            layers.insert(layer, layers.getTransparentIndex(worldLayer) + 1);
-        } else {
-            layers.push(layer);
-        }
-
-        this._petalLayer = layer;
-        this.syncCameraLayer();
-        return layer;
-    }
-
-    private syncCameraLayer() {
-        const layer = this._petalLayer;
-        const cameraEntity = this.followEntity?.camera ? this.followEntity : null;
-        if (!layer || !cameraEntity?.camera) {
-            return;
-        }
-
-        if (this._cameraEntity && this._cameraEntity !== cameraEntity && this._cameraEntity.camera) {
-            this._cameraEntity.camera.layers = this._cameraEntity.camera.layers.filter(id => id !== layer.id);
-        }
-
-        if (!cameraEntity.camera.layers.includes(layer.id)) {
-            cameraEntity.camera.layers = [...cameraEntity.camera.layers, layer.id];
-        }
-        this._cameraEntity = cameraEntity;
-    }
-
-    private removePetalLayer() {
-        const layer = this._petalLayer;
-        if (!layer) {
-            return;
-        }
-
-        if (this._cameraEntity?.camera) {
-            this._cameraEntity.camera.layers = this._cameraEntity.camera.layers.filter(id => id !== layer.id);
-        }
-        this.app.scene.layers.remove(layer);
-        this._petalLayer = null;
-        this._cameraEntity = null;
+    private getWorldLayerId() {
+        return this.app.scene.layers.getLayerByName('World')?.id ?? 0;
     }
 
     private updateCustomAabb() {
