@@ -78,6 +78,7 @@ const REVEAL_PANEL_HTML = (() => {
         <option value="perlin-wave">Perlin Wave</option>
         <option value="sparkle-twinkle">亮光细闪</option>
         <option value="overall-wave">整体波动</option>
+        <option value="butterfly-particle">琉光飞蝶</option>
       </select>
     </div>
     <div id="persistentEffectParamsPanel" class="effectParamsPanel hidden"></div>

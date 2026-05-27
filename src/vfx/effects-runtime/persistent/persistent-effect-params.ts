@@ -49,10 +49,30 @@ const OVERALL_WAVE = new Set([
     'center'
 ]);
 
+const BUTTERFLY_PARTICLE = new Set([
+    'pointSize',
+    'twinkleSpeed',
+    'twinkleMin',
+    'twinkleSharpness',
+    'brightness',
+    'goldTint',
+    'midTint',
+    'darkTint',
+    'colorCycleEnabled',
+    'colorCycleSpeed',
+    'sparkleTrailStrength',
+    'gsLightEnabled',
+    'gsLightIntensity',
+    'gsLightRange',
+    'gsLightColor',
+    'center'
+]);
+
 const BY_TYPE: Record<string, ReadonlySet<string>> = {
     'perlin-wave': PERLIN_WAVE,
     'sparkle-twinkle': SPARKLE_TWINKLE,
-    'overall-wave': OVERALL_WAVE
+    'overall-wave': OVERALL_WAVE,
+    'butterfly-particle': BUTTERFLY_PARTICLE
 };
 
 export type PersistentParamFieldKind = 'number' | 'vec3' | 'color' | 'boolean' | 'enum';
@@ -64,11 +84,19 @@ export function getPersistentEffectParamKeys(effectType: string): readonly strin
 }
 
 const SPARKLE_COLOR_KEYS = new Set(['lightTint1', 'lightTint2', 'lightTint3']);
+const BUTTERFLY_COLOR_KEYS = new Set(['goldTint', 'midTint', 'darkTint', 'gsLightColor']);
 
 export function getPersistentParamFieldKind(key: string): PersistentParamFieldKind {
     if (key === 'noiseType') return 'enum';
-    if (key === 'crestTint' || key === 'troughTint' || SPARKLE_COLOR_KEYS.has(key)) return 'color';
-    if (key === 'colorBlendMode') return 'boolean';
+    if (
+        key === 'crestTint' ||
+        key === 'troughTint' ||
+        SPARKLE_COLOR_KEYS.has(key) ||
+        BUTTERFLY_COLOR_KEYS.has(key)
+    ) {
+        return 'color';
+    }
+    if (key === 'colorBlendMode' || key === 'colorCycleEnabled' || key === 'gsLightEnabled') return 'boolean';
     if (key === 'center' || key === 'waveDirection') return 'vec3';
     return 'number';
 }
@@ -126,13 +154,17 @@ export function applyPersistentEffectParamsToScript(
     if (!allowed) return;
 
     for (const [rawKey, rawVal] of Object.entries(effectParams)) {
-        if (!allowed.has(rawKey)) continue;
         if (rawVal === undefined) continue;
+        if (effectType === 'butterfly-particle' && rawKey === 'rainbowColors') {
+            trySetBoolean(script, 'colorCycleEnabled', rawVal);
+            continue;
+        }
+        if (!allowed.has(rawKey)) continue;
         if (rawKey === 'center' || rawKey === 'waveDirection') {
             trySetVec3(script, rawKey, rawVal);
             continue;
         }
-        if (rawKey === 'crestTint' || rawKey === 'troughTint') {
+        if (rawKey === 'crestTint' || rawKey === 'troughTint' || BUTTERFLY_COLOR_KEYS.has(rawKey)) {
             trySetColor(script, rawKey, rawVal);
             continue;
         }

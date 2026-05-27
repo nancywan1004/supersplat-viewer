@@ -6,6 +6,7 @@ import {
     OVERALL_WAVE_DEFAULTS,
     clampOverallWaveNoiseType
 } from '../../vfx/effects-runtime/persistent/gsplat-overall-wave';
+import { BUTTERFLY_PARTICLE_DEFAULTS } from '../../vfx/effects-runtime/persistent/gsplat-butterfly-particle';
 import { SPARKLE_TWINKLE_DEFAULTS } from '../../vfx/effects-runtime/persistent/gsplat-sparkle-twinkle';
 import {
     getRevealEffectParamKeys,
@@ -208,6 +209,60 @@ const SPARKLE_TWINKLE_PARAM_UI: Partial<
     center: { label: '效果中心' }
 };
 
+/** 蝴蝶粒子：中文文案与控件范围（默认取自 {@link BUTTERFLY_PARTICLE_DEFAULTS}） */
+const BUTTERFLY_PARTICLE_PARAM_UI: Partial<
+    Record<
+        keyof typeof BUTTERFLY_PARTICLE_DEFAULTS,
+        { min?: number; max?: number; step?: number; label?: string }
+    >
+> = {
+    pointSize: { min: 0.001, max: 0.01, step: 0.0005, label: '光点大小' },
+    twinkleSpeed: { min: 0, max: 10, step: 0.1, label: '闪烁速度' },
+    twinkleMin: { min: 0, max: 0.85, step: 0.05, label: '最暗亮度' },
+    twinkleSharpness: { min: 0.5, max: 8, step: 0.1, label: '闪烁锐利度' },
+    brightness: { min: 0.2, max: 5, step: 0.1, label: '亮度' },
+    goldTint: { label: '颜色 1' },
+    midTint: { label: '颜色 2' },
+    darkTint: { label: '颜色 3' },
+    colorCycleEnabled: { label: '颜色循环' },
+    colorCycleSpeed: { min: 0.05, max: 2, step: 0.05, label: '循环速度' },
+    sparkleTrailStrength: { min: 0, max: 2, step: 0.05, label: '拖尾强度' },
+    gsLightEnabled: { label: '照亮高斯点光源' },
+    gsLightIntensity: { min: 0, max: 5, step: 0.1, label: '光源强度' },
+    gsLightRange: { min: 0, max: 15, step: 0.5, label: '光源范围' },
+    gsLightColor: { label: '光源颜色' },
+    center: { label: '效果中心' }
+};
+
+function applyButterflyParticleParamUiSpec(spec: EffectParamUiSpec): void {
+    const key = spec.key as keyof typeof BUTTERFLY_PARTICLE_DEFAULTS;
+    const ui = BUTTERFLY_PARTICLE_PARAM_UI[key];
+    if (ui?.label) spec.label = ui.label;
+    if (key in BUTTERFLY_PARTICLE_DEFAULTS) {
+        const d = BUTTERFLY_PARTICLE_DEFAULTS[key];
+        spec.default = Array.isArray(d) ? ([...d] as [number, number, number]) : d;
+    }
+    if (!ui) return;
+    if (ui.min !== undefined) spec.min = ui.min;
+    if (ui.max !== undefined) spec.max = ui.max;
+    if (ui.step !== undefined) spec.step = ui.step;
+}
+
+const buildButterflyParticleParamSpec = (key: string): EffectParamUiSpec => {
+    const kind = getPersistentParamFieldKind(key);
+    const spec: EffectParamUiSpec = { key, label: key, kind };
+    if (kind === 'vec3') {
+        spec.step = 0.1;
+    }
+    if (kind === 'color') {
+        spec.step = 0.01;
+        spec.min = 0;
+        spec.max = 2;
+    }
+    applyButterflyParticleParamUiSpec(spec);
+    return spec;
+};
+
 function applySparkleTwinkleParamUiSpec(spec: EffectParamUiSpec): void {
     const key = spec.key as keyof typeof SPARKLE_TWINKLE_DEFAULTS;
     const ui = SPARKLE_TWINKLE_PARAM_UI[key];
@@ -322,6 +377,9 @@ export function getPersistentParamSpecs(
 ): EffectParamUiSpec[] {
     if (effectType === 'sparkle-twinkle') {
         return getPersistentEffectParamKeys(effectType).map(buildSparkleTwinkleParamSpec);
+    }
+    if (effectType === 'butterfly-particle') {
+        return getPersistentEffectParamKeys(effectType).map(buildButterflyParticleParamSpec);
     }
     if (effectType === 'overall-wave') {
         return getPersistentEffectParamKeys(effectType)

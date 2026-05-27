@@ -35,7 +35,8 @@ export type {
 export {
     PERLIN_WAVE_REGISTRY_EFFECT_ID,
     SPARKLE_TWINKLE_REGISTRY_EFFECT_ID,
-    OVERALL_WAVE_REGISTRY_EFFECT_ID
+    OVERALL_WAVE_REGISTRY_EFFECT_ID,
+    BUTTERFLY_PARTICLE_REGISTRY_EFFECT_ID
 } from './effect-types';
 export {
     isOneShotRevealPlayingExclusiveGsplat,
