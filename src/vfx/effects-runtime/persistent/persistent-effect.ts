@@ -5,6 +5,9 @@ import { destroyAllPersistentGsplatScriptsOnEntity, getMountedPersistentGsplatSc
 import { PERSISTENT_EFFECT_TYPES } from '../effect-types';
 import { isPersistentVfx } from '../reveal/reveal-policy';
 import { GsplatRevealPerlinWave } from './gsplat-perlin-wave';
+import { GsplatPersistentOverallWave } from './gsplat-overall-wave';
+import { GsplatPersistentButterflyParticle } from './gsplat-butterfly-particle';
+import { GsplatPersistentSparkleTwinkle } from './gsplat-sparkle-twinkle';
 import { applyPersistentEffectParamsToScript } from './persistent-effect-params';
 
 /**
@@ -29,6 +32,12 @@ export function mountPersistentGsplatByEffectType(
     switch (effectType) {
         case 'perlin-wave':
             return createPerlinWaveRevealScript(gsplatEntity, updateScriptCenter, autoStart, effectParams);
+        case 'sparkle-twinkle':
+            return createSparkleTwinkleScript(gsplatEntity, updateScriptCenter, autoStart, effectParams);
+        case 'overall-wave':
+            return createOverallWaveScript(gsplatEntity, updateScriptCenter, autoStart, effectParams);
+        case 'butterfly-particle':
+            return createButterflyParticleScript(gsplatEntity, updateScriptCenter, autoStart, effectParams);
         default:
             console.warn('[persistent-effect] persistent type in registry but no mount branch:', effectType);
             return null;
@@ -79,6 +88,132 @@ export function createPerlinWaveRevealScript(
         return script;
     } catch (error) {
         console.error('Failed to create perlin-wave reveal script:', error);
+        return null;
+    }
+}
+
+export function createOverallWaveScript(
+    gsplatEntity: Entity,
+    updateScriptCenter: (script: any) => void,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn('Cannot create overall-wave script - entity or script component not ready');
+        return null;
+    }
+
+    console.log('Creating overall-wave script');
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentOverallWave) as any;
+        if (script) {
+            updateScriptCenter(script);
+            applyPersistentEffectParamsToScript(script, 'overall-wave', effectParams ?? undefined);
+            script.enabled = autoStart;
+            script.effectTime = 0;
+
+            console.log('Overall-wave script created with config:', {
+                center: script.center,
+                noiseType: script.noiseType,
+                waveDirection: script.waveDirection,
+                waveAmplitude: script.waveAmplitude,
+                wavelength: script.wavelength,
+                waveSpeed: script.waveSpeed,
+                intensity: script.intensity,
+                crestTint: script.crestTint,
+                troughTint: script.troughTint,
+                enabled: script.enabled
+            });
+        }
+        return script;
+    } catch (error) {
+        console.error('Failed to create overall-wave script:', error);
+        return null;
+    }
+}
+
+export function createButterflyParticleScript(
+    gsplatEntity: Entity,
+    updateScriptCenter: (script: any) => void,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn('Cannot create butterfly-particle script - entity or script component not ready');
+        return null;
+    }
+
+    console.log('Creating butterfly-particle script');
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentButterflyParticle) as any;
+        if (script) {
+            updateScriptCenter(script);
+            applyPersistentEffectParamsToScript(script, 'butterfly-particle', effectParams ?? undefined);
+            script.requestRebuild?.();
+            script.enabled = autoStart;
+            script.effectTime = 0;
+
+            console.log('Butterfly-particle script created with config:', {
+                center: script.center,
+                pointSize: script.pointSize,
+                twinkleSpeed: script.twinkleSpeed,
+                twinkleMin: script.twinkleMin,
+                brightness: script.brightness,
+                gsLightEnabled: script.gsLightEnabled,
+                gsLightIntensity: script.gsLightIntensity,
+                gsLightRange: script.gsLightRange,
+                enabled: script.enabled
+            });
+        }
+        return script;
+    } catch (error) {
+        console.error('Failed to create butterfly-particle script:', error);
+        return null;
+    }
+}
+
+export function createSparkleTwinkleScript(
+    gsplatEntity: Entity,
+    updateScriptCenter: (script: any) => void,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn('Cannot create sparkle-twinkle script - entity or script component not ready');
+        return null;
+    }
+
+    console.log('Creating sparkle-twinkle script');
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentSparkleTwinkle) as any;
+        if (script) {
+            updateScriptCenter(script);
+            applyPersistentEffectParamsToScript(script, 'sparkle-twinkle', effectParams ?? undefined);
+            script.requestRebuild?.();
+            script.enabled = autoStart;
+            script.effectTime = 0;
+
+            console.log('Sparkle-twinkle script created with config:', {
+                center: script.center,
+                pointSize: script.pointSize,
+                sparkleDensity: script.sparkleDensity,
+                twinkleSpeed: script.twinkleSpeed,
+                twinkleMin: script.twinkleMin,
+                twinkleSharpness: script.twinkleSharpness,
+                brightness: script.brightness,
+                lightTint1: script.lightTint1,
+                lightTint2: script.lightTint2,
+                lightTint3: script.lightTint3,
+                colorBlendMode: script.colorBlendMode,
+                enabled: script.enabled
+            });
+        }
+        return script;
+    } catch (error) {
+        console.error('Failed to create sparkle-twinkle script:', error);
         return null;
     }
 }
