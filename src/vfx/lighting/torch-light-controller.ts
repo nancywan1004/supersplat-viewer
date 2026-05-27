@@ -29,6 +29,16 @@ const TORCH_PICK_THROTTLE_MS = 33;
 const CAMERA_CHANGE_EPSILON = 1e-5;
 /** 拾取兜底距离（世界单位）：未命中时光源沿相机 forward 放在此距离处 */
 const TORCH_FALLBACK_DISTANCE = 5;
+/** 深度跳变锁定窗口：第一次跳变立即接受，随后短时间忽略反向大跳，避免深度边界来回闪烁 */
+const TORCH_DEPTH_JUMP_LOCK_MS = 75;
+/** 深度相对变化超过该比例视为“大跳变”（例如近/远表面切换），小变化仍立即跟随 */
+const TORCH_DEPTH_JUMP_RATIO = 1.35;
+/** 深度绝对变化小于该值（世界单位）时不视为大跳变，避免近距离小误差触发锁定 */
+const TORCH_DEPTH_JUMP_MIN_DELTA = 0.35;
+/** 大幅变远需要二次确认的最长等待时间；避免单帧漏到背景远深度造成闪烁 */
+const TORCH_FAR_DEPTH_CONFIRM_MS = 90;
+/** 二次确认时，两次远深度差异小于该比例才视为同一远表面 */
+const TORCH_FAR_DEPTH_CONFIRM_TOLERANCE = 0.15;
 /** 求 mesh AABB 命中时跳过的辅助 entity tag（光源 gizmo、拾取手柄、手电筒自身 visual 等） */
 const TORCH_MESH_HELPER_TAGS = new Set<string>([
     'torchLight',
@@ -69,8 +79,23 @@ type TorchRuntimeState = {
     lastClientY: number | null;
     screenU: number | null;
     screenV: number | null;
+    /** 上次最终写入实体的世界位置（用作 shader uniform 缓存与回退） */
     worldPos: Vec3;
+    /** 是否拥有有效拾取距离（首次拾取成功后为 true） */
     hasWorldPos: boolean;
+    /**
+     * **方向用当前光标、深度用上次拾取** 模型的核心：
+     * 上次成功拾取（mesh AABB 或 gsplat picker）得到的「沿相机视线的世界欧氏距离」。
+     * 每帧 onUpdate 用「当前光标视线方向 × lastDistance」实时合成 worldPos，
+     * 这样 picker 异步 stale（结果对应旧光标像素）不会把光源拉去旧位置，
+     * 而是被解读为「同一深度，跟当前光标视线滑动」—— 跨越深度边界时一次到位。
+     */
+    lastDistance: number;
+    /** 深度跳变锁定截止时间（ms）；只限制深度反复切换，不影响每帧光标方向 */
+    depthJumpLockUntil: number;
+    /** 待确认的远深度候选；用于过滤单帧漏到背景的 picker 远点 */
+    pendingFarDistance: number;
+    pendingFarUntil: number;
     pickDirty: boolean;
     pickInFlight: boolean;
     lastPickTime: number;
@@ -120,6 +145,10 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         screenV: null,
         worldPos: new Vec3(),
         hasWorldPos: false,
+        lastDistance: 0,
+        depthJumpLockUntil: Number.NEGATIVE_INFINITY,
+        pendingFarDistance: 0,
+        pendingFarUntil: Number.NEGATIVE_INFINITY,
         pickDirty: true,
         pickInFlight: false,
         lastPickTime: Number.NEGATIVE_INFINITY,
@@ -293,6 +322,65 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         return bestHit ? { pos: bestHit, distSq: bestDistSq } : null;
     };
 
+    /**
+     * 只对“深度”做跳变锁，不平滑也不延迟光标方向：
+     * - 首次 / 小变化：立即接受
+     * - 大跳变：第一次立即接受，并打开短锁
+     * - 锁定期间再次出现大跳变：忽略，避免深度边界处在近/远表面之间来回闪
+     */
+    const applyPickedDistance = (distance: number, now: number): boolean => {
+        if (!Number.isFinite(distance) || distance <= 0) return false;
+        if (!runtime.hasWorldPos || runtime.lastDistance <= 0) {
+            runtime.lastDistance = distance;
+            runtime.hasWorldPos = true;
+            runtime.pendingFarDistance = 0;
+            runtime.pendingFarUntil = Number.NEGATIVE_INFINITY;
+            return true;
+        }
+
+        const prev = runtime.lastDistance;
+        const delta = Math.abs(distance - prev);
+        const minDist = Math.max(1e-6, Math.min(distance, prev));
+        const isLargeJump = delta >= TORCH_DEPTH_JUMP_MIN_DELTA &&
+            (Math.max(distance, prev) / minDist) >= TORCH_DEPTH_JUMP_RATIO;
+
+        // 单帧远深度最容易造成“闪到背景一下”。远跳先挂起，下一次仍然命中相近远深度再接受；
+        // 跳近不等待，避免光标移到前景物体时出现明显深度延迟。
+        if (isLargeJump && distance > prev) {
+            if (runtime.pendingFarDistance <= 0) {
+                runtime.pendingFarDistance = distance;
+                runtime.pendingFarUntil = now + TORCH_FAR_DEPTH_CONFIRM_MS;
+                return false;
+            }
+
+            const farDelta = Math.abs(distance - runtime.pendingFarDistance);
+            const farTolerance = Math.max(
+                TORCH_DEPTH_JUMP_MIN_DELTA,
+                runtime.pendingFarDistance * TORCH_FAR_DEPTH_CONFIRM_TOLERANCE
+            );
+            if (farDelta > farTolerance && now < runtime.pendingFarUntil) {
+                runtime.pendingFarDistance = distance;
+                return false;
+            }
+            runtime.pendingFarDistance = 0;
+            runtime.pendingFarUntil = Number.NEGATIVE_INFINITY;
+        } else {
+            runtime.pendingFarDistance = 0;
+            runtime.pendingFarUntil = Number.NEGATIVE_INFINITY;
+        }
+
+        if (isLargeJump && now < runtime.depthJumpLockUntil) {
+            return false;
+        }
+
+        runtime.lastDistance = distance;
+        runtime.hasWorldPos = true;
+        if (isLargeJump) {
+            runtime.depthJumpLockUntil = now + TORCH_DEPTH_JUMP_LOCK_MS;
+        }
+        return true;
+    };
+
     const scheduleWorldPick = () => {
         if (!runtime.pickDirty || runtime.pickInFlight) return;
 
@@ -306,13 +394,14 @@ export function initTorchLight(global: Global): TorchControllerHandle {
             __picker?: { pickSurface?: (x: number, y: number) => Promise<{ position: Vec3 } | null> };
         }).__picker;
 
-        // 同步：mesh AABB 射线求交（先于 picker 异步结果生效，光标停在 mesh 上立即贴合）
+        // 同步：mesh AABB 射线求交。命中即写入「沿视线的欧氏距离」缓存；
+        // 注意此处不再保存 mesh 命中的世界点本身（位置每帧由 onUpdate 用当前光标视线 × lastDistance 重算）
         const cx = runtime.lastClientX;
         const cy = runtime.lastClientY;
         const meshHit = (cx !== null && cy !== null) ? computeMeshHit(cx, cy) : null;
+        const meshDistSnapshot = meshHit ? Math.sqrt(meshHit.distSq) : Infinity;
         if (meshHit) {
-            runtime.worldPos.copy(meshHit.pos);
-            runtime.hasWorldPos = true;
+            applyPickedDistance(meshDistSnapshot, now);
         }
 
         if (!picker?.pickSurface) {
@@ -331,26 +420,28 @@ export function initTorchLight(global: Global): TorchControllerHandle {
 
         // 异步回调里不能复用模块级 _tmpCamPos（会被 onUpdate 改写），单独 snapshot 一份相机位置
         const camPosSnapshot = new Vec3().copy(global.camera.getPosition());
-        const meshDistSqSnapshot = meshHit ? meshHit.distSq : Infinity;
 
         picker.pickSurface(point.x, point.y).then((surface) => {
             if (runtime.destroyed || generation !== runtime.pickGeneration) return;
+            const callbackNow = typeof performance !== 'undefined' ? performance.now() : Date.now();
             const pos = surface?.position;
             const gsplatValid = pos && Number.isFinite(pos.x) && Number.isFinite(pos.y) && Number.isFinite(pos.z);
             if (gsplatValid) {
                 const dx = pos!.x - camPosSnapshot.x;
                 const dy = pos!.y - camPosSnapshot.y;
                 const dz = pos!.z - camPosSnapshot.z;
-                const gsplatDistSq = dx * dx + dy * dy + dz * dz;
-                if (gsplatDistSq < meshDistSqSnapshot) {
-                    runtime.worldPos.copy(pos!);
+                const pickerDist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                // picker 拿到的世界点本身可能 stale（对应发起拾取时的旧像素），
+                // 但「沿视线距离」是几何深度信息，复用到当前光标方向上即可
+                if (pickerDist < meshDistSnapshot || !meshHit) {
+                    applyPickedDistance(pickerDist, callbackNow);
                 }
                 runtime.hasWorldPos = true;
-            } else if (!meshHit) {
+            } else if (!meshHit && !runtime.hasWorldPos) {
                 runtime.hasWorldPos = false;
             }
         }).catch(() => {
-            if (!runtime.destroyed && generation === runtime.pickGeneration && !meshHit) {
+            if (!runtime.destroyed && generation === runtime.pickGeneration && !meshHit && !runtime.hasWorldPos) {
                 runtime.hasWorldPos = false;
             }
         }).finally(() => {
@@ -399,9 +490,36 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         (entity.light as unknown as { range: number }).range = userRange;
 
         let pos: Vec3 | null = null;
-        if (runtime.hasWorldPos) {
-            pos = runtime.worldPos;
-        } else if (runtime.lastClientX !== null && runtime.lastClientY !== null) {
+        if (runtime.hasWorldPos &&
+            runtime.lastDistance > 0 &&
+            runtime.lastClientX !== null &&
+            runtime.lastClientY !== null) {
+            // 关键：方向用当前光标实时视线，深度用上次拾取得到的视线长度
+            // —— picker 异步 stale / mesh 异步覆盖时，光源仍贴当前光标方向，避免「闪回鼠标路径上的旧位置」
+            const cv = app.graphicsDevice.canvas as HTMLCanvasElement;
+            const rect = cv.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                const sx = runtime.lastClientX - rect.left;
+                const sy = runtime.lastClientY - rect.top;
+                const camComp = (global.camera as unknown as { camera?: { screenToWorld?: (x: number, y: number, z: number, out: Vec3) => Vec3; farClip: number } }).camera;
+                if (camComp?.screenToWorld) {
+                    const farPoint = camComp.screenToWorld(sx, sy, camComp.farClip ?? 1000, _tmpWorld);
+                    const origin = global.camera.getPosition();
+                    _tmpRayDir.set(farPoint.x - origin.x, farPoint.y - origin.y, farPoint.z - origin.z);
+                    const rayLen = _tmpRayDir.length();
+                    if (rayLen > 1e-6) {
+                        const k = runtime.lastDistance / rayLen;
+                        runtime.worldPos.set(
+                            origin.x + _tmpRayDir.x * k,
+                            origin.y + _tmpRayDir.y * k,
+                            origin.z + _tmpRayDir.z * k
+                        );
+                        pos = runtime.worldPos;
+                    }
+                }
+            }
+        }
+        if (!pos && runtime.lastClientX !== null && runtime.lastClientY !== null) {
             pos = computeWorldOnRay(runtime.lastClientX, runtime.lastClientY, TORCH_FALLBACK_DISTANCE);
         }
 
