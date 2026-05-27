@@ -18,8 +18,8 @@ import type { TorchLightSettings } from '../../schemas/v2-custom';
  * - 启停由 `viewSettings.torch.active` 控制（不入库）；编辑模式下切换左侧模块时自动关闭
  * - **位置（跟手关键）**：
  *   - 鼠标移动或相机矩阵变化后，最多约 30Hz 同步做一次 mesh AABB 射线求交（CPU），
- *     并触发一次 `Picker.pickSurface`（异步，gsplat 表面）；mesh 用**缩小**后的 AABB
- *     沿盒深方向内收深度；与 gsplat 深度接近时在过渡带内 smoothstep 混合；大 mesh 动态加大 range
+ *     并触发一次 `Picker.pickSurface`（异步，优先 `nearestPosition` 邻域最近深度）；
+ *     mesh 用缩小 AABB；mesh/gsplat 同时命中取更近一侧；大 mesh 动态加大 range
  *   - 这样 mesh 在 picker 的深度纹理里不可见的问题被 mesh 求交补齐，光标停在 mesh 上时光源贴在 mesh 表面
  *   - shader 每个 splat 只做世界距离衰减，不再重复采 depthMap / 反投影
  * - **拾取兜底**：拾取未命中或还未首次返回时，光源回退到相机前方
@@ -41,12 +41,8 @@ const TORCH_MESH_SURFACE_BIAS_M = 0.22;
 const TORCH_MESH_AABB_SHRINK = 0.78;
 /** 命中缩小盒后，深度取 entry→exit 的该比例（避免贴在最外层鼓包面上） */
 const TORCH_MESH_AABB_DEPTH_ALONG = 0.2;
-/** 同一像素下多个 mesh 命中深度差在此内视为叠层，在最近深度上略向远推（非直接取最远） */
+/** 同一像素下多个 mesh 命中深度差在此内视为叠层，仍取最近深度（不向远推，避免打到后面） */
 const TORCH_MESH_OVERLAP_DEPTH_M = 0.22;
-/** 叠层时最多向远推 (farthest-nearest)×该系数 */
-const TORCH_MESH_OVERLAP_PUSH_FRAC = 0.32;
-/** mesh 与 gsplat 深度差在此内 smoothstep 混合，减轻边界切换生硬感 */
-const TORCH_MESH_GSPLAT_BLEND_M = 0.55;
 /** 命中 mesh 的 AABB 最大边长超过该值时，按尺寸额外放大点光 range（大 mesh 局部更易照亮） */
 const TORCH_MESH_RANGE_BOOST_MIN_EXTENT_M = 2.5;
 const TORCH_MESH_RANGE_BOOST_FACTOR = 0.4;
@@ -89,11 +85,6 @@ const _tmpRayDir = new Vec3();
 const _tmpAabbMin = new Vec3();
 const _tmpAabbMax = new Vec3();
 const _torchRay = new Ray();
-
-const smoothstep01 = (t: number): number => {
-    const x = Math.max(0, Math.min(1, t));
-    return x * x * (3 - 2 * x);
-};
 
 type TorchControllerHandle = {
     setActive(active: boolean): void;
@@ -358,9 +349,7 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         return tEnter + (tMax - tEnter) * TORCH_MESH_AABB_DEPTH_ALONG;
     };
 
-    /**
-     * mesh 与 gsplat 深度接近时平滑混合；相差较大时取更近一侧。
-     */
+    /** mesh 与 gsplat 同时命中时取离相机更近的一侧 */
     const resolveTorchPickDepth = (
         meshDist: number | null,
         meshRangeBoost: number,
@@ -373,18 +362,7 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         if (gsplatDist === null) {
             return { distance: meshDist, fromMesh: true, rangeBoost: meshRangeBoost };
         }
-
-        const diff = meshDist - gsplatDist;
-        const zone = TORCH_MESH_GSPLAT_BLEND_M;
-        if (Math.abs(diff) <= zone) {
-            const t = smoothstep01((diff + zone) / (2 * zone));
-            return {
-                distance: gsplatDist + (meshDist - gsplatDist) * t,
-                fromMesh: t >= 0.5,
-                rangeBoost: meshRangeBoost * t
-            };
-        }
-        if (gsplatDist < meshDist) {
+        if (gsplatDist <= meshDist) {
             return { distance: gsplatDist, fromMesh: false, rangeBoost: 0 };
         }
         return { distance: meshDist, fromMesh: true, rangeBoost: meshRangeBoost };
@@ -449,17 +427,13 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         hits.sort((a, b) => a.dist - b.dist);
 
         const nearest = hits[0].dist;
-        let farthestInStack = nearest;
         let maxExtent = hits[0].extent;
         for (let k = 1; k < hits.length; k++) {
             if (hits[k].dist - nearest > TORCH_MESH_OVERLAP_DEPTH_M) break;
-            farthestInStack = Math.max(farthestInStack, hits[k].dist);
             maxExtent = Math.max(maxExtent, hits[k].extent);
         }
-        const stackGap = farthestInStack - nearest;
-        const pickDist = nearest + stackGap * TORCH_MESH_OVERLAP_PUSH_FRAC;
         return {
-            distance: pickDist,
+            distance: nearest,
             rangeBoost: meshRangeBoostFromExtent(maxExtent)
         };
     };
@@ -552,7 +526,9 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         if (!point) return;
 
         const picker = (app as unknown as {
-            __picker?: { pickSurface?: (x: number, y: number) => Promise<{ position: Vec3 } | null> };
+            __picker?: {
+                pickSurface?: (x: number, y: number) => Promise<{ position: Vec3; nearestPosition?: Vec3 } | null>;
+            };
         }).__picker;
 
         // 同步：mesh AABB 射线求交。命中即写入「沿视线的欧氏距离」缓存；
@@ -585,7 +561,6 @@ export function initTorchLight(global: Global): TorchControllerHandle {
             return;
         }
 
-        // 先同步写入 mesh 深度，gsplat 回调返回后再在过渡带内与 picker 混合
         if (meshDistSnapshot !== null) {
             const meshOnly = resolveTorchPickDepth(meshDistSnapshot, meshBoostSnapshot, null);
             if (meshOnly) applyResolvedPick(meshOnly, now);
@@ -602,7 +577,7 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         picker.pickSurface(point.x, point.y).then((surface) => {
             if (runtime.destroyed || generation !== runtime.pickGeneration) return;
             const callbackNow = typeof performance !== 'undefined' ? performance.now() : Date.now();
-            const pos = surface?.position;
+            const pos = surface?.nearestPosition ?? surface?.position;
             const gsplatValid = pos && Number.isFinite(pos.x) && Number.isFinite(pos.y) && Number.isFinite(pos.z);
             if (gsplatValid) {
                 const dx = pos!.x - camPosSnapshot.x;
