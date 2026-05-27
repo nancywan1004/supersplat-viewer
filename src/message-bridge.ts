@@ -29,7 +29,7 @@ import {
 import { getAssetLoader } from './loaders/asset-loader';
 import { resolveExportTimelinePlan } from './render/export-timeline-resolver';
 import { buildVideoExportFilename } from './render/video-export';
-import type { ExperienceSettings, SceneMediaHotspotPatch } from './schemas/v2';
+import type { ExperienceSettings, SceneMediaHotspotPatch, TorchLightSettings } from './schemas/v2';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import { getRevealActiveType, getRevealTotalDuration } from './settings-serialize/effects-sync';
 import {
@@ -70,13 +70,7 @@ type InboundPayload =
     | { type: 'ASSET_MEDIA_HOTSPOT_RANGE_SET'; id?: string; value?: number }
     | { type: 'VIEW_MEDIA_MUTE_SET'; value?: boolean }
     | { type: 'TORCH_TOGGLE'; value?: boolean }
-    | { type: 'TORCH_PARAMS_SET'; value?: Partial<{
-        color: [number, number, number];
-        intensity: number;
-        range: number;
-        innerConeAngle: number;
-        outerConeAngle: number;
-    }> }
+    | { type: 'TORCH_PARAMS_SET'; value?: Partial<TorchLightSettings> }
     | { type: 'SETTINGS_SAVE' }
     | { type: 'SETTINGS_RESET' }
     | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule | null }

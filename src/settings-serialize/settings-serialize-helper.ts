@@ -36,11 +36,6 @@ function normalizeTorchColor(input: unknown, fallback: [number, number, number])
     return [clamp01(input[0], fallback[0]), clamp01(input[1], fallback[1]), clamp01(input[2], fallback[2])];
 }
 
-function clampTorchAngleDeg(input: unknown, fallback: number): number {
-    if (typeof input !== 'number' || !Number.isFinite(input)) return fallback;
-    return Math.max(0, Math.min(180, input));
-}
-
 /** 光源配置项在运行时应带稳定 id（列表 / Gizmo / 协议共用） */
 export type LightWithId = (PointLightConfig | DirectionalLightConfig | SpotLightConfig) & { id?: string };
 
@@ -321,9 +316,9 @@ export function ensureLighting(settings: ExperienceSettings): { lights: LightWit
 }
 
 /**
- * 确保 `settings.lighting.torch` 单例存在并补齐缺省字段（颜色/强度/range/锥角）。
+ * 确保 `settings.lighting.torch` 单例存在并补齐缺省字段（颜色/强度/range）。
  * - 与 `ensureLighting` 串联使用；运行时开关另存于 `viewSettings.torch.active`，不入库
- * - `range` 收敛到 [0, TORCH_RANGE_MAX]，角度收敛到 [0, 180]
+ * - `range` 收敛到 [0, TORCH_RANGE_MAX]
  */
 export function ensureTorchLight(settings: ExperienceSettings): TorchLightSettings {
     ensureLighting(settings);
@@ -342,11 +337,6 @@ export function ensureTorchLight(settings: ExperienceSettings): TorchLightSettin
         t.range = DEFAULT_TORCH_LIGHT.range;
     } else {
         t.range = Math.max(0, Math.min(TORCH_RANGE_MAX, t.range as number));
-    }
-    t.innerConeAngle = clampTorchAngleDeg(t.innerConeAngle, DEFAULT_TORCH_LIGHT.innerConeAngle ?? 35);
-    t.outerConeAngle = clampTorchAngleDeg(t.outerConeAngle, DEFAULT_TORCH_LIGHT.outerConeAngle ?? 70);
-    if ((t.innerConeAngle as number) > (t.outerConeAngle as number)) {
-        t.innerConeAngle = t.outerConeAngle;
     }
     return lighting.torch as TorchLightSettings;
 }
@@ -367,12 +357,6 @@ export function patchTorchLight(settings: ExperienceSettings, partial: Partial<T
     }
     if ((partial as Record<string, unknown>).range !== undefined) {
         next.range = (partial as Record<string, unknown>).range;
-    }
-    if ((partial as Record<string, unknown>).innerConeAngle !== undefined) {
-        next.innerConeAngle = (partial as Record<string, unknown>).innerConeAngle;
-    }
-    if ((partial as Record<string, unknown>).outerConeAngle !== undefined) {
-        next.outerConeAngle = (partial as Record<string, unknown>).outerConeAngle;
     }
     const lighting = (settings as Record<string, unknown>).lighting as { torch?: TorchLightSettings };
     lighting.torch = next as unknown as TorchLightSettings;

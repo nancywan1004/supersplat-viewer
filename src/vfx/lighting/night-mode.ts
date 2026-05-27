@@ -3,7 +3,7 @@ import { GsplatShaderEffect } from '../effects-runtime/gsplat-shader-effect';
 import { extractGlslWgslModifyBlocks } from '../effects-runtime/gsplat-effect-layers-extractor';
 import { collectPointLights, collectSpotLights } from '../../light';
 import { ensureTorchLight } from '../../settings-serialize/settings-serialize-helper';
-import { getTorchLightWorldPosition, isTorchEntityEnabled } from './torch-light-controller';
+import { getTorchLightWorldPosition, isTorchEntityEnabled } from './torch-light';
 import type { EffectsRuntime } from '../effects-runtime';
 import type { GsplatContribution } from '../effects-runtime/gsplat-contribution';
 

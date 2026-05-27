@@ -13,9 +13,7 @@ export const DEFAULT_LIGHTING_ROOT: { lights: unknown[] } = { lights: [] };
 export const DEFAULT_TORCH_LIGHT: TorchLightSettings = {
     color: [1, 0.95, 0.85],
     intensity: 7.0,
-    range: 5.5,
-    innerConeAngle: 35,
-    outerConeAngle: 70
+    range: 5.5
 };
 
 /** 手电筒 `range` 协议/UI 上限（与点光 `LIGHT_RANGE_SET` 0–20 对齐） */

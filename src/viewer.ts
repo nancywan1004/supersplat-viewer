@@ -49,7 +49,7 @@ import { isLodMetaFile } from './loaders/lod-loader';
 import { BloomController } from './vfx/bloom';
 import { loadSplatMesh } from './loaders/splat-mesh-loader';
 import { NightMode } from './vfx/lighting/night-mode';
-import { initTorchLight } from './vfx/lighting/torch-light-controller';
+import { initTorchLight } from './vfx/lighting/torch-light';
 import { isShadowSystemEnabled, syncGsplatShadowCastingFromSettings } from './vfx/shadow/gsplat-shadow-cast';
 import { initShadowCatcher } from './vfx/shadow/shadow-catcher';
 import { ShadowApplyRt } from './vfx/shadow/shadow-apply';

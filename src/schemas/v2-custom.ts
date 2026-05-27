@@ -118,10 +118,6 @@ type TorchLightSettings = {
     intensity: number;
     /** PointLight 有效作用半径（世界单位，clamp 0–20）；光源贴在拾取表面 */
     range: number;
-    /** 内锥整顶角（度，0–180），默认 35；当前 PointLight 形态不使用，保留以备将来 SpotLight 切换 */
-    innerConeAngle?: number;
-    /** 外锥整顶角（度，0–180），默认 70；当前 PointLight 形态不使用，保留以备将来 SpotLight 切换 */
-    outerConeAngle?: number;
 };
 
 type LightingSettings = {
