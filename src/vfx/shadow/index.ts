@@ -5,6 +5,7 @@ export {
     syncGsplatShadowCastingFromSettings,
     isShadowOutputEnabled,
     mountShadowPipeline,
+    suspendShadowPipelineForGsplatLoad,
     scheduleShadowPipeline,
     notifyViewportReadyForShadow,
     getShadowApplyScript

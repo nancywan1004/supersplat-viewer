@@ -54,7 +54,7 @@ import {
 import { AUDIO_CALLOUT_WORLD_H, findAudioCalloutSelectHitFromClient } from './media/audio-callout';
 import { getSceneAssetPickLayer, getSceneAssetPickerLayers } from './scene-asset-pick-layer';
 import { removeSceneAssetFromSettings } from '../settings-serialize/settings-serialize';
-import { syncGsplatShadowCastingFromSettings } from '../vfx/shadow';
+import { suspendShadowPipelineForGsplatLoad, syncGsplatShadowCastingFromSettings } from '../vfx/shadow';
 import type { ExperienceSettings } from '../settings';
 
 const PLACED_ASSETS_NAME = 'placedAssets';
@@ -372,6 +372,26 @@ async function instantiateGaussian(app: AppBase, item: AssetLibraryItem, positio
     return entity;
 }
 
+function resumeShadowAfterStableFrames(global: Global, resume: () => void): void {
+    let stableFrames = 0;
+    const wait = () => {
+        if (!global.state.readyToRender) {
+            global.app.once('frameend', wait);
+            (global.app as { renderNextFrame?: boolean }).renderNextFrame = true;
+            return;
+        }
+        stableFrames += 1;
+        if (stableFrames < 2) {
+            global.app.once('frameend', wait);
+            (global.app as { renderNextFrame?: boolean }).renderNextFrame = true;
+            return;
+        }
+        resume();
+    };
+    global.app.once('frameend', wait);
+    (global.app as { renderNextFrame?: boolean }).renderNextFrame = true;
+}
+
 async function instantiateVideo(
     app: AppBase,
     item: AssetLibraryItem,
@@ -587,6 +607,7 @@ export async function placeAsset(
 
     const parent = getPlacedAssetsParent(app);
     let entity: Entity;
+    let resumeShadowAfterGaussianLoad: (() => void) | null = null;
 
     try {
         if (item.type === 'image') {
@@ -594,6 +615,7 @@ export async function placeAsset(
         } else if (item.type === 'mesh') {
             entity = await instantiateMesh(app, item, worldPos);
         } else if (item.type === 'gaussian') {
+            resumeShadowAfterGaussianLoad = suspendShadowPipelineForGsplatLoad(global);
             if (!item.asset?.loaded) {
                 const waitAssetLoaded = new Promise<void>((resolve, reject) => {
                     const onLoad = () => {
@@ -624,6 +646,7 @@ export async function placeAsset(
             return null;
         }
     } catch (err) {
+        resumeShadowAfterGaussianLoad?.();
         console.warn('[AssetPlacement] instantiate failed:', err);
         events.fire('assetPlacement:error', { item, error: err });
         return null;
@@ -673,6 +696,9 @@ export async function placeAsset(
     }
 
     events.fire('sceneAssets:added', entry);
+    if (resumeShadowAfterGaussianLoad) {
+        resumeShadowAfterStableFrames(global, resumeShadowAfterGaussianLoad);
+    }
     return entry;
 }
 
@@ -1145,9 +1171,18 @@ export function initAssetPlacementHandler(
             url: entry.url,
             thumbnailUrl: entry.thumbnailUrl
         };
+        const resumeShadowAfterGaussianClone = entry.assetType === 'gaussian'
+            ? suspendShadowPipelineForGsplatLoad(global)
+            : null;
         state.scenePlacedEntities!.push(newEntry);
         state.selectedSceneEntityId = newEntry.id;
+        if (entry.assetType === 'gaussian' || entry.assetType === 'mesh') {
+            syncGsplatShadowCastingFromSettings(global);
+        }
         events.fire('sceneAssets:added', newEntry);
+        if (resumeShadowAfterGaussianClone) {
+            resumeShadowAfterStableFrames(global, resumeShadowAfterGaussianClone);
+        }
         events.fire('sceneAsset:selected');
         // 复制成功后聚焦到新副本，避免仍停留在原资产视角。
         requestAnimationFrame(() => {

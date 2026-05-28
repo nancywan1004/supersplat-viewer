@@ -57,15 +57,16 @@ export function applyPlacedMeshShadowFlags(entity: Entity, shadowEnabled: boolea
  */
 export function syncGsplatShadowCastingFromSettings(global: Global, mainGsplatEntity?: Entity | null): void {
     const enabled = isShadowSystemEnabled(global);
+    const shadowFlagsEnabled = enabled && !isShadowPipelineSuspended(global);
     const main = mainGsplatEntity ?? (global.app.root.findByName('gsplat') as Entity | null);
     applyGsplatCastShadows(main?.gsplat, MAIN_GSPLAT_CAST_SHADOWS);
 
     for (const entry of global.state.scenePlacedEntities ?? []) {
         if (!entry.entity) continue;
         if (entry.assetType === 'gaussian' && entry.entity.gsplat) {
-            applyGsplatCastShadows(entry.entity.gsplat, enabled);
+            applyGsplatCastShadows(entry.entity.gsplat, shadowFlagsEnabled);
         } else if (entry.assetType === 'mesh') {
-            applyPlacedMeshShadowFlags(entry.entity, enabled);
+            applyPlacedMeshShadowFlags(entry.entity, shadowFlagsEnabled);
         }
     }
     syncPlacedMeshExcludeLayers(global);
@@ -83,6 +84,10 @@ type ShadowPipelineRuntime = {
     apply: ShadowApplyRt | null;
     /** 允许接影叠屏与接影 mesh 参与本帧（仍须 `readyToRender`） */
     outputEnabled: boolean;
+    /** 高斯资产加载 / 初次稳定渲染期间暂停 shadow 输出与 placed gaussian caster。 */
+    suspendCount: number;
+    /** 暂停前是否有激活的 shadow output，释放最后一个暂停锁时用于恢复。 */
+    restoreOutputAfterSuspend: boolean;
 };
 
 const runtimeByGlobal = new WeakMap<Global, ShadowPipelineRuntime>();
@@ -90,11 +95,14 @@ const runtimeByGlobal = new WeakMap<Global, ShadowPipelineRuntime>();
 const getRuntime = (global: Global): ShadowPipelineRuntime => {
     let runtime = runtimeByGlobal.get(global);
     if (!runtime) {
-        runtime = { apply: null, outputEnabled: false };
+        runtime = { apply: null, outputEnabled: false, suspendCount: 0, restoreOutputAfterSuspend: false };
         runtimeByGlobal.set(global, runtime);
     }
     return runtime;
 };
+
+const isShadowPipelineSuspended = (global: Global): boolean =>
+    getRuntime(global).suspendCount > 0;
 
 const shouldDeferShadowMountUntilRevealComplete = (global: Global): boolean => {
     const revealStatus = global.state.effectsRuntimeState?.reveal?.status;
@@ -122,6 +130,7 @@ const setCatcherActive = (global: Global, active: boolean) => {
 export const isShadowOutputEnabled = (global: Global): boolean =>
     isShadowSystemEnabled(global)
     && global.state.readyToRender === true
+    && !isShadowPipelineSuspended(global)
     && getRuntime(global).outputEnabled;
 
 const syncDirectionalShadowCasting = (global: Global) => {
@@ -151,6 +160,37 @@ const deactivateOutput = (global: Global) => {
         setDirectionalCastShadowsEnabled(global, false);
     }
     (global.app as { renderNextFrame?: boolean }).renderNextFrame = true;
+};
+
+export const suspendShadowPipelineForGsplatLoad = (global: Global): (() => void) => {
+    const runtime = getRuntime(global);
+    if (runtime.outputEnabled) {
+        runtime.restoreOutputAfterSuspend = true;
+    }
+    runtime.suspendCount += 1;
+    syncGsplatShadowCastingFromSettings(global);
+    deactivateOutput(global);
+
+    let released = false;
+    return () => {
+        if (released) return;
+        released = true;
+        runtime.suspendCount = Math.max(0, runtime.suspendCount - 1);
+        syncGsplatShadowCastingFromSettings(global);
+        if (
+            runtime.suspendCount === 0
+            && runtime.apply
+            && runtime.restoreOutputAfterSuspend
+            && isShadowSystemEnabled(global)
+            && global.state.readyToRender
+            && !shouldDeferShadowMountUntilRevealComplete(global)
+        ) {
+            runtime.restoreOutputAfterSuspend = false;
+            activateOutput(global);
+        } else if (runtime.suspendCount === 0) {
+            runtime.restoreOutputAfterSuspend = false;
+        }
+    };
 };
 
 export const mountShadowPipeline = (
