@@ -692,17 +692,18 @@ class Viewer {
                 revealBbox.copy(sceneBound);            // fallback
             }
             this.revealController = new RevealController(global, revealBbox, gsplatEntity, this.cameraManager);
-            scheduleShadowPipeline(global, shadowPipelineMount);
-            let lastShadowSystemEnabled = isShadowSystemEnabled(global);
-            events.on('postEffect:changed', () => {
-                const shadowSystemEnabled = isShadowSystemEnabled(global);
-                if (!lastShadowSystemEnabled && shadowSystemEnabled) {
-                    scheduleShadowPipeline(global, shadowPipelineMount);
-                    if (state.readyToRender) {
-                        notifyViewportReadyForShadow(global);
-                    }
+            const ensureShadowPipelineReady = () => {
+                if (!isShadowSystemEnabled(global)) {
+                    return;
                 }
-                lastShadowSystemEnabled = shadowSystemEnabled;
+                scheduleShadowPipeline(global, shadowPipelineMount);
+                if (state.readyToRender) {
+                    notifyViewportReadyForShadow(global);
+                }
+            };
+            ensureShadowPipelineReady();
+            events.on('postEffect:changed', () => {
+                ensureShadowPipelineReady();
             });
             global.events.on('persistentGsplatEffectRemountRequested', (restartAnim?: boolean) => {
                 // revealComplete 当帧内 reveal 脚本可能仍在执行 removeShaders；
@@ -909,7 +910,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
                             // we're ready to render once the first sort has completed
                             state.readyToRender = true;
-                            notifyViewportReadyForShadow(global);
+                            ensureShadowPipelineReady();
 
                             // 清除强制渲染标志，恢复按需渲染
                             this.forceRenderNextFrame = false;
@@ -1035,7 +1036,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                             if (state.readyToRender) return; // 已被其他路径设置则跳过
 
                             state.readyToRender = true;
-                            notifyViewportReadyForShadow(global);
+                            ensureShadowPipelineReady();
 
                             // 清除强制渲染标志，恢复按需渲染（场景已加载完成）
                             this.forceRenderNextFrame = false;
