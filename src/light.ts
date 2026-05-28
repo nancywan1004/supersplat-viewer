@@ -409,7 +409,7 @@ const collectPointLights = (global: Global): PointLightInfo[] => {
     const result: PointLightInfo[] = [];
     const visit = (e: Entity) => {
         if (result.length >= MAX_POINT_LIGHTS) return;
-        if (e.light && (e.light as any).type === 'point' && e.light.enabled) {
+        if (e.light && (e.light as any).type === 'point' && e.light.enabled && !e.tags.has('torchLight')) {
             const pos = e.getPosition();
             result.push({
                 position: new Vec3(pos.x, pos.y, pos.z),
@@ -429,6 +429,9 @@ const collectPointLights = (global: Global): PointLightInfo[] => {
  * `LightComponent.innerConeAngle` / `outerConeAngle` 与 PlayCanvas 一致，为**半角（度）**；
  * 此处转为弧度写入 `SpotLightInfo`（**不再**对 settings 整锥顶角做 `spotApexToHalfDeg`，那一步已在 `createSpotLightsFromSettings` 写入实体时完成）。
  * 方向与引擎一致：聚光沿实体 **-Y** 照射。
+ *
+ * 注：手电筒为独立 PointLight 实体（`torchLight` tag），**不**进入本函数的 `uSphere*` 数组；
+ * gsplat 侧由 `night-mode` 的 `uTorchWorldPos` 单独注入，mesh 侧由引擎对该实体做动态光照。
  */
 const collectSpotLights = (global: Global): SpotLightInfo[] => {
     const { app } = global;

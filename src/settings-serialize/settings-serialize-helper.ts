@@ -5,7 +5,9 @@ import {
     DEFAULT_NIGHT_MODE,
     DEFAULT_REVEAL_EFFECT,
     DEFAULT_SCENE_MEDIA_HOTSPOT,
-    DEFAULT_SHADOW
+    DEFAULT_SHADOW,
+    DEFAULT_TORCH_LIGHT,
+    TORCH_RANGE_MAX
 } from './settings-serialize-configs';
 import { normalizeAnnotationMediaFields } from '../annotation-toolbar/media-fields';
 import { defaultTriggerDistanceMForAssetType } from '../scene-assets/media/media-hotspot-params';
@@ -22,7 +24,17 @@ import type {
     SceneMediaHotspotSettings,
     SceneMediaHotspotPatch
 } from '../schemas/v2';
-import type { SceneAsset } from '../schemas/v2-custom';
+import type { SceneAsset, TorchLightSettings } from '../schemas/v2-custom';
+
+/** 把任意输入收敛为 sRGB [0,1] 三分量；非法分量退回 fallback。 */
+function normalizeTorchColor(input: unknown, fallback: [number, number, number]): [number, number, number] {
+    if (!Array.isArray(input)) return fallback;
+    const clamp01 = (v: unknown, fb: number) => {
+        if (typeof v !== 'number' || !Number.isFinite(v)) return fb;
+        return Math.max(0, Math.min(1, v));
+    };
+    return [clamp01(input[0], fallback[0]), clamp01(input[1], fallback[1]), clamp01(input[2], fallback[2])];
+}
 
 /** 光源配置项在运行时应带稳定 id（列表 / Gizmo / 协议共用） */
 export type LightWithId = (PointLightConfig | DirectionalLightConfig | SpotLightConfig) & { id?: string };
@@ -301,6 +313,54 @@ export function ensureLighting(settings: ExperienceSettings): { lights: LightWit
         }
     });
     return lighting;
+}
+
+/**
+ * 确保 `settings.lighting.torch` 单例存在并补齐缺省字段（颜色/强度/range）。
+ * - 与 `ensureLighting` 串联使用；运行时开关另存于 `viewSettings.torch.active`，不入库
+ * - `range` 收敛到 [0, TORCH_RANGE_MAX]
+ */
+export function ensureTorchLight(settings: ExperienceSettings): TorchLightSettings {
+    ensureLighting(settings);
+    const lighting = (settings as Record<string, unknown>).lighting as { torch?: TorchLightSettings };
+    if (!lighting.torch || typeof lighting.torch !== 'object') {
+        lighting.torch = { ...DEFAULT_TORCH_LIGHT };
+    }
+    const t = lighting.torch as Record<string, unknown>;
+    t.color = normalizeTorchColor(t.color, [...DEFAULT_TORCH_LIGHT.color] as [number, number, number]);
+    if (typeof t.intensity !== 'number' || !Number.isFinite(t.intensity)) {
+        t.intensity = DEFAULT_TORCH_LIGHT.intensity;
+    } else {
+        t.intensity = Math.max(0, t.intensity as number);
+    }
+    if (typeof t.range !== 'number' || !Number.isFinite(t.range)) {
+        t.range = DEFAULT_TORCH_LIGHT.range;
+    } else {
+        t.range = Math.max(0, Math.min(TORCH_RANGE_MAX, t.range as number));
+    }
+    return lighting.torch as TorchLightSettings;
+}
+
+/**
+ * `TORCH_PARAMS_SET` 入站合并：把 partial 写到 `settings.lighting.torch`，并做 clamp/归一。
+ * 返回最终生效的完整 TorchLightSettings。
+ */
+export function patchTorchLight(settings: ExperienceSettings, partial: Partial<TorchLightSettings>): TorchLightSettings {
+    const cur = ensureTorchLight(settings);
+    if (!partial || typeof partial !== 'object') return cur;
+    const next = { ...cur } as Record<string, unknown>;
+    if (Array.isArray((partial as Record<string, unknown>).color)) {
+        next.color = (partial as Record<string, unknown>).color;
+    }
+    if ((partial as Record<string, unknown>).intensity !== undefined) {
+        next.intensity = (partial as Record<string, unknown>).intensity;
+    }
+    if ((partial as Record<string, unknown>).range !== undefined) {
+        next.range = (partial as Record<string, unknown>).range;
+    }
+    const lighting = (settings as Record<string, unknown>).lighting as { torch?: TorchLightSettings };
+    lighting.torch = next as unknown as TorchLightSettings;
+    return ensureTorchLight(settings);
 }
 
 export function ensurePostEffectSettings(settings: ExperienceSettings): NonNullable<ExperienceSettings['postEffectSettings']> {

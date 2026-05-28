@@ -8,7 +8,8 @@ import {
     normalizeBloomLocalLightRegions,
     normalizeBloomAfterImport,
     ensureSceneMediaHotspot,
-    ensureBackground
+    ensureBackground,
+    ensureTorchLight
 } from './settings-serialize/settings-serialize-helper';
 import { Vec3 } from 'playcanvas';
 import { assertObject } from './schemas/validate-utils';
@@ -397,6 +398,7 @@ const importSettings = (settings: any): V2 => {
     normalizeBloomLocalLightRegions(result);
     ensureSceneMediaHotspot(result);
     ensureBackground(result);
+    ensureTorchLight(result);
 
     return result;
 };

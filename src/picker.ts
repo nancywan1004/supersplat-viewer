@@ -225,8 +225,19 @@ const NORMAL_SAMPLE_DIRECTIONS = [
     [1, -1]
 ] as const;
 
+/** pick 深度累加有效 alpha 下限（暗部叶/高斯在 1e-6~1e-5 下易被整像素丢弃） */
+const PICK_SURFACE_MIN_ALPHA = 2e-5;
+/** 邻域最近深度搜索半径（像素）；中心无效时仍可从邻域命中前景 splat */
+const PICK_NEAREST_RADIUS_PX = 3;
+
 type PickSurface = {
+    /** 光标中心像素的 alpha 加权深度（与历史行为一致） */
     position: Vec3;
+    /**
+     * 光标邻域内**最近**有效表面（相机距离最小）。
+     * 半透明/很暗的高斯在中心像素 alpha 低时，加权深度易落到后方；手电筒等跟手拾取应优先用此字段。
+     */
+    nearestPosition?: Vec3;
     normal: Vec3;
 };
 
@@ -247,6 +258,13 @@ type PickPosition = {
     width: number;
     height: number;
     isComputeRenderer: boolean;
+};
+
+export type PickerDepthMap = {
+    texture: Texture;
+    width: number;
+    height: number;
+    camera: PickCameraSnapshot;
 };
 
 // Shared buffer for half-to-float conversion
@@ -524,6 +542,8 @@ class Picker {
 
     pickSurface: (x: number, y: number) => Promise<PickSurface | null>;
 
+    prepareDepthMap: () => PickerDepthMap | null;
+
     release: () => void;
 
     constructor(app: AppBase, camera: Entity) {
@@ -639,7 +659,7 @@ class Picker {
                 const transmittance = half2Float(pixels[index + 3]);
                 const alpha = 1 - transmittance;
 
-                if (!Number.isFinite(r) || !Number.isFinite(alpha) || alpha < 1e-6) {
+                if (!Number.isFinite(r) || !Number.isFinite(alpha) || alpha < PICK_SURFACE_MIN_ALPHA) {
                     return null;
                 }
 
@@ -730,6 +750,34 @@ class Picker {
             return { width: pickWidth, height: pickHeight, screenX, screenY, isComputeRenderer, pickCamera };
         };
 
+        const prepareDepthMap = (): PickerDepthMap | null => {
+            const width = Math.floor(graphicsDevice.width);
+            const height = Math.floor(graphicsDevice.height);
+            if (width <= 0 || height <= 0) {
+                return null;
+            }
+
+            const worldLayer = app.scene.layers.getLayerByName('World');
+            if (!worldLayer) {
+                return null;
+            }
+
+            const isComputeRenderer = app.scene.gsplat.currentRenderer === GSPLAT_RENDERER_COMPUTE;
+            // The compute renderer's depth path is owned by the engine picker and is not exposed as
+            // a reusable texture here. Raster gsplat scenes use our accum target directly.
+            if (isComputeRenderer) {
+                return null;
+            }
+
+            ensureRendered(width, height, false, worldLayer);
+            return {
+                texture: accumBuffer,
+                width,
+                height,
+                camera: getCacheCameraSnapshot()
+            };
+        };
+
         const pickPosition = async (x: number, y: number): Promise<PickPosition | null> => {
             const sample = prepareSample(x, y);
             if (!sample) {
@@ -810,7 +858,26 @@ class Picker {
                 pickCamera
             );
 
-            const position = rasterBlock(screenX, screenY);
+            let nearestPosition: Vec3 | null = null;
+            let nearestDistSq = Infinity;
+            const camPos = pickCamera.position;
+            const nearestR = PICK_NEAREST_RADIUS_PX;
+            for (let py = screenY - nearestR; py <= screenY + nearestR; py++) {
+                for (let px = screenX - nearestR; px <= screenX + nearestR; px++) {
+                    const pt = rasterBlock(px, py);
+                    if (!pt) continue;
+                    const dx = pt.x - camPos.x;
+                    const dy = pt.y - camPos.y;
+                    const dz = pt.z - camPos.z;
+                    const distSq = dx * dx + dy * dy + dz * dz;
+                    if (distSq < nearestDistSq) {
+                        nearestDistSq = distSq;
+                        nearestPosition = pt;
+                    }
+                }
+            }
+
+            const position = rasterBlock(screenX, screenY) ?? nearestPosition;
             if (!position) {
                 return null;
             }
@@ -835,11 +902,12 @@ class Picker {
                 });
             });
 
-            const toCamera = setCameraFacingNormal(pickCamera.position, position, new Vec3());
+            const anchorPos = nearestPosition ?? position;
+            const toCamera = setCameraFacingNormal(pickCamera.position, anchorPos, new Vec3());
 
             // Collect every valid 3D sample: the picked position plus all ring
             // samples that didn't fall off-screen or fail the depth read.
-            const fitPoints: Vec3[] = [position];
+            const fitPoints: Vec3[] = [anchorPos];
             for (let i = 0; i < sampleRings.length; i++) {
                 const ring = sampleRings[i];
                 for (let j = 0; j < ring.length; j++) {
@@ -855,6 +923,7 @@ class Picker {
 
             return {
                 position,
+                nearestPosition: nearestPosition ?? position,
                 normal
             };
         };
@@ -862,6 +931,8 @@ class Picker {
         this.pick = (x: number, y: number) => serializePick(() => pick(x, y));
 
         this.pickSurface = (x: number, y: number) => serializePick(() => pickSurface(x, y));
+
+        this.prepareDepthMap = prepareDepthMap;
 
         this.release = () => {
             if (chunksPatched) {

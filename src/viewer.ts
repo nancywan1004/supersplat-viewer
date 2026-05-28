@@ -54,6 +54,7 @@ import {
     notifyViewportReadyForShadow,
     scheduleShadowPipeline
 } from './vfx/shadow/shadow-system';
+import { initTorchLight } from './vfx/lighting/torch-light';
 import { initShadowCatcher } from './vfx/shadow/shadow-catcher';
 import { ShadowApplyRt } from './vfx/shadow/shadow-apply';
 import { updateShadowDistance } from './light';
@@ -332,7 +333,6 @@ class Viewer {
             this.configureCamera(global.settings);
             app.renderNextFrame = true;
         });
-
         // handle canvas resize - update aspect ratio and trigger render
         const handleResize = () => {
             camera.camera.aspectRatio = graphicsDevice.width / graphicsDevice.height;
@@ -607,6 +607,7 @@ class Viewer {
             };
 
             this.picker = new Picker(app, camera);
+            (app as any).__picker = this.picker;
             this.inputController = new InputController(global, this.picker);
             this.inputController.collision = collision ?? null;
             state.hasCollision = !!collision;
@@ -674,6 +675,10 @@ class Viewer {
                     splat: gsplatEntity ? 'found' : 'not found'
                 });
             }
+
+            // 全局手电筒（单例 spot）：放在 NightMode 之后、RevealController 之前，
+            // 以便首次 active 切换时 NightMode 的 `collectSpotLights` 能立刻看到它。
+            initTorchLight(global);
             
             // ── 关键：根据 unified 模式选择正确的坐标空间 ──
             // PlayCanvas gsplat 的 modifySplatCenter 在两种模式下接收不同坐标空间：

@@ -27,6 +27,7 @@ import {
     ensureLighting,
     ensureRevealEffect,
     ensureSceneMediaHotspot,
+    ensureTorchLight,
     normalizeBloomAfterImport,
     normalizeBloomLocalLightRegions
 } from './settings-serialize/settings-serialize-helper';
@@ -115,6 +116,7 @@ function settingsKeepCamera(global: Global, noReveal?: boolean): ExperienceSetti
     }
 
     ensureLighting(snapshot);
+    ensureTorchLight(snapshot);
     ensureBloom(snapshot);
     ensureBloomEditorSession(snapshot);
     normalizeBloomAfterImport(snapshot);
