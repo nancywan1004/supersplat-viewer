@@ -53,10 +53,10 @@ const PETAL_PRESET = {
     glowColor: [1, 1, 1] as [number, number, number],
     glowStrength: 0.3,
     glowWidth: 1,
-    extents: [36, 42, 64] as [number, number, number],
-    density: 0.7,
-    /** @deprecated Use density. 4200 petals maps to density 0.7. */
-    petalParticleCount: 4200,
+    extents: [36, 24, 72] as [number, number, number],
+    density: 1,
+    /** @deprecated Use density. 6000 petals maps to density 1. */
+    petalParticleCount: 6000,
     speed: 2.2,
     drift: 0.5,
     flutter: 0.28,
@@ -186,7 +186,7 @@ export class GsplatFallingPetals extends Script {
             this.density = nextDensity;
             rebuild = true;
         }
-        if (options.opacity !== undefined) this.opacity = options.opacity;
+        if (options.opacity !== undefined) this.opacity = 1;
         if (options.color) this.color = [...options.color];
         if (options.glowColor) this.glowColor = [...options.glowColor];
         if (options.glowStrength !== undefined) this.glowStrength = options.glowStrength;
@@ -286,7 +286,7 @@ export class GsplatFallingPetals extends Script {
     }
 
     private _onAppUpdate = (dt: number) => {
-        if (!this.enabled || !this._petalEntity || !this._bodyMaterial || !this._glowMaterial) {
+        if (!this.enabled || !this._petalEntity || !this._bodyMaterial) {
             return;
         }
 
@@ -327,20 +327,15 @@ export class GsplatFallingPetals extends Script {
         this._mesh.update();
 
         this._bodyMaterial = this.createMaterial('body');
-        this._glowMaterial = this.createMaterial('glow');
         this.applyTextureToMaterial();
 
         this._bodyMeshInstance = new MeshInstance(this._mesh, this._bodyMaterial, this._petalEntity);
         this._bodyMeshInstance.castShadow = false;
         this._bodyMeshInstance.receiveShadow = false;
 
-        this._glowMeshInstance = new MeshInstance(this._mesh, this._glowMaterial, this._petalEntity);
-        this._glowMeshInstance.castShadow = false;
-        this._glowMeshInstance.receiveShadow = false;
-
         this._petalEntity.addComponent('render', {
             type: 'asset',
-            meshInstances: [this._bodyMeshInstance, this._glowMeshInstance],
+            meshInstances: [this._bodyMeshInstance],
             layers: [this.getWorldLayerId()]
         } as any);
         this.updateCustomAabb();
@@ -827,7 +822,7 @@ export class GsplatFallingPetals extends Script {
             material.setParameter('uSpeed', this.speed);
             material.setParameter('uDrift', this.drift);
             material.setParameter('uFlutter', this.flutter);
-            material.setParameter('uOpacity', this.opacity);
+            material.setParameter('uOpacity', 1);
             material.setParameter('uColor', this.color);
             material.setParameter('uGlowColor', this.glowColor);
             material.setParameter('uGlowStrength', this.glowStrength);
@@ -835,7 +830,7 @@ export class GsplatFallingPetals extends Script {
     }
 
     private getMaterials() {
-        return [this._bodyMaterial, this._glowMaterial].filter((material): material is ShaderMaterial => !!material);
+        return [this._bodyMaterial].filter((material): material is ShaderMaterial => !!material);
     }
 
     private destroyMaterials() {
