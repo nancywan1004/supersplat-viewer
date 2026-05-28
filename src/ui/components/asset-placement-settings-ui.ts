@@ -5,7 +5,6 @@ import {
 import { readEntryTriggerDistanceM } from '../../scene-assets/media/media-hotspot-params';
 import { pushEditHistory } from '../../edit-history';
 import { getSceneAssetListHTML, bindSceneAssetList } from './scene-asset-list-ui';
-import { loadGsplatAsset } from '../../loaders/gsplat-asset-loader';
 import { clampVideoHorizontalCurvature, VIDEO_HORIZONTAL_MAX_ARC_DEG } from '../../scene-assets/media/curved-billboard-mesh';
 import type { ExperienceSettings, SceneMediaHotspotPatch } from '../../schemas/v2';
 import {
@@ -20,17 +19,6 @@ import { getSelectedSceneAssetType, getSelectedScenePlacedItem } from '../../sta
 import type { Global, AssetLibraryItem, AssetLibraryType } from '../../types';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
-/** 仅 image / mesh / gaussian 走本地上传；video / audio 仅支持 URL 添加 */
-const ASSET_FILE_UPLOAD_ACCEPT: Partial<Record<AssetLibraryType, string>> = {
-    image: '.jpg,.jpeg,.png,image/jpeg,image/png',
-    mesh: '.glb,model/gltf-binary',
-    gaussian: '.sog,.splat,.ply'
-};
-
-function isVideoOrAudioAssetType(t: AssetLibraryType): boolean {
-    return t === 'video' || t === 'audio';
-}
-
 // 危险协议前缀（拆开写避免 no-script-url 误报字面量）
 const DANGEROUS_URL_PROTOCOL = `${'java'}${'script'}:`;
 
@@ -39,7 +27,7 @@ const DANGEROUS_URL_PROTOCOL = `${'java'}${'script'}:`;
  * @param raw - 用户输入的 URL 或相对路径
  * @returns 规范化后的 href，或无法解析/不允许时 `null`
  */
-function resolveRemoteMediaUrl(raw: string): string | null {
+function resolveRemoteAssetUrl(raw: string): string | null {
     const s = raw.trim();
     if (!s) return null;
     let u: URL;
@@ -115,7 +103,7 @@ function renderAssetPreviewGrid(
             const arr = state.uploadedAssets!;
             const idx = arr.findIndex(a => a.id === item.id);
             if (idx >= 0) {
-                if ((item.type === 'image' || item.type === 'video' || item.type === 'audio') && item.url?.startsWith('blob:')) {
+                if ((item.type === 'image' || item.type === 'video' || item.type === 'audio' || item.type === 'gaussian') && item.url?.startsWith('blob:')) {
                     URL.revokeObjectURL(item.url);
                 }
                 arr.splice(idx, 1);
@@ -144,7 +132,7 @@ function renderAssetPreviewGrid(
 }
 
 /**
- * 资产放置设置组件：资产类型选择、本地上传（图/mesh/gsplat）或 URL 添加（音视频）、预览网格、场景资产列表。
+ * 资产放置设置组件：资产类型选择、URL 添加、预览网格、场景资产列表。
  * 场景资产列表嵌套在 subpanel 内，与资产放置设置一起折叠。
  * @returns 组件根 HTML 字符串
  */
@@ -164,13 +152,11 @@ export function getAssetPlacementSettingsHTML(): string {
                 <option value="video">video (URL)</option>
                 <option value="audio">audio (URL)</option>
             </select>
-            <button type="button" id="uploadAssetBtn" class="settingsButton">上传资产</button>
         </div>
-        <div id="assetMediaUrlRow" class="asset-media-url-row hidden">
-            <input type="text" id="assetMediaUrl" class="settingsSelect asset-media-url-input" placeholder="https://… 或 /path/to/file.mp4" autocomplete="off" aria-label="音视频媒体 URL" />
+        <div id="assetMediaUrlRow" class="asset-media-url-row">
+            <input type="text" id="assetMediaUrl" class="settingsSelect asset-media-url-input" placeholder="https://… 或 /path/to/asset" autocomplete="off" aria-label="资产 URL" />
             <button type="button" id="addMediaUrlBtn" class="settingsButton">添加</button>
         </div>
-        <input type="file" id="assetFileInput" class="hidden" accept="" tabindex="-1" aria-hidden="true" />
         <div class="asset-preview-grid" id="assetPreviewGrid">
         </div>
         <div class="media-hotspot-panel" id="mediaHotspotPanel">
@@ -218,7 +204,7 @@ function nextAssetId(): string {
 }
 
 /**
- * 绑定资产放置设置面板的类型选择、本地上传或 URL 添加、网格渲染、场景资产列表等交互。
+ * 绑定资产放置设置面板的类型选择、URL 添加、网格渲染、场景资产列表等交互。
  * 折叠/展开由 edit-right-toolbar 的 bindSubpanel 统一处理。
  * @param {HTMLElement | null} root - 组件根元素（含 data-asset-placement-root 的容器，内含 data-scene-asset-list-root）
  * @param {Global} global - 全局对象（用于 app、state、events）
@@ -230,14 +216,12 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
     const listRoot = root.querySelector<HTMLElement>('[data-scene-asset-list-root]');
     const unbindList = bindSceneAssetList(listRoot, global);
 
-    const { app, state, events } = global;
+    const { state, events } = global;
     const typeSelect = root.querySelector<HTMLSelectElement>('#assetTypeSelect');
-    const uploadBtn = root.querySelector<HTMLButtonElement>('#uploadAssetBtn');
-    const fileInput = root.querySelector<HTMLInputElement>('#assetFileInput');
     const mediaUrlRow = root.querySelector<HTMLElement>('#assetMediaUrlRow');
     const mediaUrlInput = root.querySelector<HTMLInputElement>('#assetMediaUrl');
     const addMediaUrlBtn = root.querySelector<HTMLButtonElement>('#addMediaUrlBtn');
-    if (!typeSelect || !uploadBtn || !fileInput || !mediaUrlRow || !mediaUrlInput || !addMediaUrlBtn) return () => {};
+    if (!typeSelect || !mediaUrlRow || !mediaUrlInput || !addMediaUrlBtn) return () => {};
 
     if (!state.uploadedAssets) state.uploadedAssets = [];
 
@@ -249,42 +233,34 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         events.on('assetLibrary:added', onLibraryChange);
         events.on('assetLibrary:removed', onLibraryChange);
 
-        // 如果当前还没有任何上传资产，初始化一个本地示例资产（/assets/gsplat/biker.sog）
+        // 如果当前还没有任何上传资产，初始化一个本地示例资产（仅登记 URL，按需加载）
         if (state.uploadedAssets.length === 0) {
-            (async () => {
-                try {
-                    const asset = await loadGsplatAsset(app, {
-                        url: '/assets/gsplat/biker.sog',
-                        filename: 'biker.sog'
-                    } as any);
-                    const gaussianDemoItem: AssetLibraryItem = {
-                        id: nextAssetId(),
-                        type: 'gaussian',
-                        name: 'biker (demo)',
-                        filename: 'biker.sog',
-                        url: '/assets/gsplat/biker.sog',
-                        asset
-                    };
-                    state.uploadedAssets!.push(gaussianDemoItem);
-                    events.fire('assetLibrary:added', [gaussianDemoItem]);
-                } catch (err) {
-                    console.warn('[AssetPlacement] 初始化示例资产失败:', err);
-                }
-            })();
+            const gaussianDemoItem: AssetLibraryItem = {
+                id: nextAssetId(),
+                type: 'gaussian',
+                name: 'biker (demo)',
+                filename: 'biker.sog',
+                url: '/assets/gsplat/biker.sog'
+            };
+            state.uploadedAssets!.push(gaussianDemoItem);
+            events.fire('assetLibrary:added', [gaussianDemoItem]);
         }
     }
 
-    const updateFileAccept = () => {
-        const type = (typeSelect.value || 'mesh') as AssetLibraryType;
-        fileInput.accept = ASSET_FILE_UPLOAD_ACCEPT[type] ?? ASSET_FILE_UPLOAD_ACCEPT.mesh ?? '';
-    };
-
     const syncAssetTypeControls = () => {
-        updateFileAccept();
         const type = (typeSelect.value || 'mesh') as AssetLibraryType;
-        const media = isVideoOrAudioAssetType(type);
-        uploadBtn.classList.toggle('hidden', media);
-        mediaUrlRow.classList.toggle('hidden', !media);
+        const hint =
+            type === 'image'
+                ? 'https://.../xx.png 或 /assets/xx.png'
+                : type === 'mesh'
+                    ? 'https://.../xx.glb 或 /assets/xx.glb'
+                    : type === 'gaussian'
+                        ? 'https://.../xx.sog 或 /assets/xx.sog'
+                        : type === 'video'
+                            ? 'https://.../xx.mp4 或 /assets/xx.mp4'
+                            : 'https://.../xx.mp3 或 /assets/xx.mp3';
+        mediaUrlInput.placeholder = hint;
+        mediaUrlRow.classList.remove('hidden');
     };
     syncAssetTypeControls();
 
@@ -294,92 +270,11 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
     };
     typeSelect.addEventListener('change', typeSelectHandler);
 
-    const handleFileSelect = async (e: Event) => {
-        const input = e.target as HTMLInputElement;
-        const file = input.files?.[0];
-        input.value = '';
-        if (!file) return;
-        const type = (typeSelect.value || 'mesh') as AssetLibraryType;
-        if (isVideoOrAudioAssetType(type)) return;
-        const name = file.name || '未命名';
-        const id = nextAssetId();
-
-        try {
-            if (type === 'image') {
-                const url = URL.createObjectURL(file);
-                const item: AssetLibraryItem = {
-                    id,
-                    type: 'image',
-                    name,
-                    filename: file.name,
-                    url,
-                    file,
-                    thumbnailUrl: url
-                };
-                state.uploadedAssets!.push(item);
-                events.fire('assetLibrary:added', [item]);
-                return;
-            }
-            if (type === 'mesh') {
-                const url = URL.createObjectURL(file);
-                await new Promise<void>((resolve, reject) => {
-                    (app.assets as any).loadFromUrl(url, 'container', (err: Error | null, asset: any) => {
-                        URL.revokeObjectURL(url);
-                        if (err) {
-                            reject(err);
-                            return;
-                        }
-                        if (!asset?.resource?.instantiateRenderEntity) {
-                            reject(new Error('container has no instantiateRenderEntity'));
-                            return;
-                        }
-                        const item: AssetLibraryItem = {
-                            id,
-                            type: 'mesh',
-                            name,
-                            filename: file.name,
-                            url,
-                            asset
-                        };
-                        state.uploadedAssets!.push(item);
-                        events.fire('assetLibrary:added', [item]);
-                        resolve();
-                    });
-                });
-                return;
-            }
-            if (type === 'gaussian') {
-                const assetSource = { filename: file.name, contents: file };
-                const asset = await loadGsplatAsset(app, assetSource);
-                const item: AssetLibraryItem = {
-                    id,
-                    type: 'gaussian',
-                    name,
-                    filename: file.name,
-                    asset
-                };
-                state.uploadedAssets!.push(item);
-                events.fire('assetLibrary:added', [item]);
-            }
-        } catch (err) {
-            console.warn('[AssetPlacement] 上传失败:', err);
-            events.fire('assetLibrary:error', { id, error: err });
-        }
-    };
-
-    fileInput.addEventListener('change', handleFileSelect);
-    uploadBtn.addEventListener('click', () => {
-        const t = (typeSelect.value || 'mesh') as AssetLibraryType;
-        if (isVideoOrAudioAssetType(t)) return;
-        fileInput.click();
-    });
-
     const addMediaFromUrl = () => {
         const type = (typeSelect.value || 'mesh') as AssetLibraryType;
-        if (!isVideoOrAudioAssetType(type)) return;
-        const url = resolveRemoteMediaUrl(mediaUrlInput.value);
+        const url = resolveRemoteAssetUrl(mediaUrlInput.value);
         if (!url) {
-            console.warn('[AssetPlacement] 无效的媒体 URL（需为 http(s)、相对路径等，不支持 blob）');
+            console.warn('[AssetPlacement] 无效的资产 URL（需为 http(s)、相对路径等，不支持 blob）');
             return;
         }
         const id = nextAssetId();
@@ -389,7 +284,8 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
             type,
             name,
             filename: name,
-            url
+            url,
+            thumbnailUrl: type === 'image' ? url : undefined
         };
         state.uploadedAssets!.push(item);
         events.fire('assetLibrary:added', [item]);
@@ -581,7 +477,6 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
             events.off('assetLibrary:removed', onLibraryChange);
         }
         typeSelect.removeEventListener('change', typeSelectHandler);
-        fileInput.removeEventListener('change', handleFileSelect);
         addMediaUrlBtn.removeEventListener('click', addMediaFromUrl);
         mediaUrlInput.removeEventListener('keydown', onMediaUrlKeydown);
         mhGlobalAutoplay?.removeEventListener('change', onGlobalAutoplayChange);
