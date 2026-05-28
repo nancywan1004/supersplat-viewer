@@ -681,6 +681,13 @@ class Picker {
             // Enable gsplat IDs only while rendering the pick target so we
             // don't pay the memory/perf cost between pick passes.
             const prevEnableIds = app.scene.gsplat.enableIds;
+            // Shadow 子相机会在同帧参与渲染，可能干扰 pickSurface 的深度来源。
+            // 拾取期间临时关掉，确保只由主相机视角产出拾取深度。
+            const shadowMaskCameraEntity = app.root.findByName('shadowMaskCamera') as Entity | null;
+            const shadowMaskCameraWasEnabled = shadowMaskCameraEntity?.enabled === true;
+            if (shadowMaskCameraWasEnabled && shadowMaskCameraEntity) {
+                shadowMaskCameraEntity.enabled = false;
+            }
             app.scene.gsplat.enableIds = true;
             try {
                 if (isComputeRenderer) {
@@ -716,6 +723,9 @@ class Picker {
                 cacheValid = true;
             } finally {
                 app.scene.gsplat.enableIds = prevEnableIds;
+                if (shadowMaskCameraWasEnabled && shadowMaskCameraEntity) {
+                    shadowMaskCameraEntity.enabled = true;
+                }
             }
         };
 

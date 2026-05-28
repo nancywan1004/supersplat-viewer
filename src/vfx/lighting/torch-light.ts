@@ -74,6 +74,8 @@ const TORCH_MESH_HELPER_NAMES = new Set<string>([
     'torchLight',
     'pointLights',
     'spotLights',
+    'shadowCatcher',
+    'ShadowCatcherGeometry',
     'lightVisual',
     'lightHandle',
     'pickHandle'
