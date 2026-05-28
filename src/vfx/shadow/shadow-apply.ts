@@ -18,7 +18,12 @@ import {
 } from 'playcanvas';
 import type { Global } from '../../types';
 import { PlacedMeshExcludeMask, syncPlacedMeshExcludeLayers } from './shadow-apply-exclude-mask';
-import { isShadowOutputEnabled, isShadowSystemEnabled } from './shadow-system';
+import { isShadowSystemEnabled } from './shadow-policy';
+
+const isShadowOutputEnabledForApply = (global: Global): boolean =>
+    isShadowSystemEnabled(global)
+    && global.state.readyToRender === true
+    && (global.app as { __shadowOutputEnabled?: boolean }).__shadowOutputEnabled === true;
 
 /**
  * 与 Physics_Relighting_Demo 的 shadow-apply.mjs 完全一致的 shader：
@@ -365,7 +370,7 @@ class ShadowApplyRt extends Script {
         let _postrenderCount = 0;
         app.on('postrender', () => {
             _postrenderCount++;
-            if (!global || !isShadowOutputEnabled(global)) {
+            if (!global || !isShadowOutputEnabledForApply(global)) {
                 if (_postrenderCount <= 3 && !isShadowSystemEnabled(global)) {
                     console.log('[Shadow] postrender skipped (no splatMesh URL param).');
                 }
@@ -482,7 +487,7 @@ class ShadowApplyRt extends Script {
             castShadows?: boolean;
         } | undefined;
 
-        const outputEnabled = isShadowOutputEnabled(global);
+        const outputEnabled = isShadowOutputEnabledForApply(global);
 
         if (this._shadowMaskCamera) {
             this._shadowMaskCamera.enabled = outputEnabled;

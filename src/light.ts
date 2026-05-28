@@ -11,7 +11,7 @@ import {
 } from 'playcanvas';
 import type { GraphicsDevice } from 'playcanvas';
 import type { Global } from './types';
-import { isShadowSystemEnabled } from './vfx/shadow/shadow-system';
+import { isShadowSystemEnabled } from './vfx/shadow/shadow-policy';
 import type { DirectionalLightConfig, SpotLightConfig } from './schemas/v2';
 
 const MAX_POINT_LIGHTS = 10;

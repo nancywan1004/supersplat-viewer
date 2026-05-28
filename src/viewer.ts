@@ -52,12 +52,9 @@ import { NightMode } from './vfx/lighting/night-mode';
 import {
     isShadowSystemEnabled,
     notifyViewportReadyForShadow,
-    scheduleShadowPipeline
-} from './vfx/shadow/shadow-system';
+    scheduleShadowPipeline,
+} from './vfx/shadow';
 import { initTorchLight } from './vfx/lighting/torch-light';
-import { initShadowCatcher } from './vfx/shadow/shadow-catcher';
-import { ShadowApplyRt } from './vfx/shadow/shadow-apply';
-import { updateShadowDistance } from './light';
 import { initAssetPlacementHandler, requestSceneAssetsRestore } from './scene-assets/asset-placement-handler';
 import { initMediaHotspotController } from './scene-assets/media/media-hotspot-controller';
 import { initSceneAudioCallout } from './scene-assets/media/audio-callout';
@@ -696,6 +693,17 @@ class Viewer {
             }
             this.revealController = new RevealController(global, revealBbox, gsplatEntity, this.cameraManager);
             scheduleShadowPipeline(global, shadowPipelineMount);
+            let lastShadowSystemEnabled = isShadowSystemEnabled(global);
+            events.on('postEffect:changed', () => {
+                const shadowSystemEnabled = isShadowSystemEnabled(global);
+                if (!lastShadowSystemEnabled && shadowSystemEnabled) {
+                    scheduleShadowPipeline(global, shadowPipelineMount);
+                    if (state.readyToRender) {
+                        notifyViewportReadyForShadow(global);
+                    }
+                }
+                lastShadowSystemEnabled = shadowSystemEnabled;
+            });
             global.events.on('persistentGsplatEffectRemountRequested', (restartAnim?: boolean) => {
                 // revealComplete 当帧内 reveal 脚本可能仍在执行 removeShaders；
                 // remount persistent 若同帧进行，可能被旧脚本收尾覆盖。统一延后一帧。

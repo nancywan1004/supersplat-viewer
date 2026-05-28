@@ -21,26 +21,15 @@ import { isRevealTimedVfxType, revealBlocksAnim } from '../effects-runtime/revea
 import { syncPlacedMeshExcludeLayers } from './shadow-apply-exclude-mask';
 import { initShadowCatcher } from './shadow-catcher';
 import { ShadowApplyRt } from './shadow-apply';
+import {
+    hasShadowCapability,
+    isShadowSystemEnabled
+} from './shadow-policy';
 
 /** 主场景 unified 高斯不参与 GSPLAT_SHADOW 投射，勿与 shadow.enabled 同步。 */
 const MAIN_GSPLAT_CAST_SHADOWS = false;
 
 // ─── Capability：场景是否具备 mesh 阴影能力 ─────────────────────────────────
-
-/** URL `?splatMesh=` 仅作为阴影系统前置能力条件。 */
-export function hasShadowCapability(global: Pick<Global, 'config'>): boolean {
-    const url = typeof global.config.splatMeshUrl === 'string' ? global.config.splatMeshUrl.trim() : '';
-    return url.length > 0;
-}
-
-/** 阴影系统总开关：手动开关 + URL 前置能力。 */
-export function isShadowSystemEnabled(global: Pick<Global, 'config' | 'settings'>): boolean {
-    if (!hasShadowCapability(global)) {
-        return false;
-    }
-    const enabled = (global.settings.postEffectSettings?.shadow as { enabled?: boolean } | undefined)?.enabled;
-    return enabled !== false;
-}
 
 export function applyGsplatCastShadows(gsplat: GSplatComponent | null | undefined, enabled: boolean): void {
     if (gsplat) {
@@ -108,6 +97,13 @@ const getRuntime = (global: Global): ShadowPipelineRuntime => {
 };
 
 const shouldDeferShadowMountUntilRevealComplete = (global: Global): boolean => {
+    const revealStatus = global.state.effectsRuntimeState?.reveal?.status;
+    if (revealStatus === 'playing') {
+        return true;
+    }
+    if (revealStatus === 'completed' || revealStatus === 'inactive') {
+        return false;
+    }
     const revealType = readRevealParams(global.settings as ExperienceSettings)?.type ?? 'none';
     if (isRevealTimedVfxType(revealType)) {
         return true;
@@ -140,6 +136,7 @@ const syncDirectionalShadowCasting = (global: Global) => {
 const activateOutput = (global: Global) => {
     const runtime = getRuntime(global);
     runtime.outputEnabled = true;
+    (global.app as { __shadowOutputEnabled?: boolean }).__shadowOutputEnabled = true;
     setCatcherActive(global, true);
     syncDirectionalShadowCasting(global);
     (global.app as { renderNextFrame?: boolean }).renderNextFrame = true;
@@ -148,6 +145,7 @@ const activateOutput = (global: Global) => {
 const deactivateOutput = (global: Global) => {
     const runtime = getRuntime(global);
     runtime.outputEnabled = false;
+    (global.app as { __shadowOutputEnabled?: boolean }).__shadowOutputEnabled = false;
     setCatcherActive(global, false);
     if (isShadowSystemEnabled(global)) {
         setDirectionalCastShadowsEnabled(global, false);
@@ -187,6 +185,7 @@ export const mountShadowPipeline = (
 
     runtime.apply = apply;
     runtime.outputEnabled = active;
+    (global.app as { __shadowOutputEnabled?: boolean }).__shadowOutputEnabled = active;
     return apply;
 };
 

@@ -54,7 +54,7 @@ import {
 import { AUDIO_CALLOUT_WORLD_H, findAudioCalloutSelectHitFromClient } from './media/audio-callout';
 import { getSceneAssetPickLayer, getSceneAssetPickerLayers } from './scene-asset-pick-layer';
 import { removeSceneAssetFromSettings } from '../settings-serialize/settings-serialize';
-import { syncGsplatShadowCastingFromSettings } from '../vfx/shadow/shadow-system';
+import { syncGsplatShadowCastingFromSettings } from '../vfx/shadow';
 import type { ExperienceSettings } from '../settings';
 
 const PLACED_ASSETS_NAME = 'placedAssets';

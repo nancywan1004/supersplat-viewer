@@ -7,7 +7,7 @@ import {
 import type { Global } from '../../types';
 import type { ExperienceSettings } from '../../schemas/v2';
 import { updatePointLightsFromSettings } from '../../light';
-import { hasShadowCapability, syncGsplatShadowCastingFromSettings } from '../../vfx/shadow/shadow-system';
+import { hasShadowCapability, syncGsplatShadowCastingFromSettings } from '../../vfx/shadow';
 import { pushEditHistory } from '../../edit-history';
 import {
     ensureBloom as ensureBloomFromAdapter,

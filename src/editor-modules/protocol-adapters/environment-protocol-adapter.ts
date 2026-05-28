@@ -5,7 +5,7 @@
 
 import { getPositionInFrontOfCamera } from '../../scene-assets/asset-placement-handler';
 import { spotApexToHalfDeg, updatePointLightsFromSettings } from '../../light';
-import { syncGsplatShadowCastingFromSettings } from '../../vfx/shadow/shadow-system';
+import { syncGsplatShadowCastingFromSettings } from '../../vfx/shadow';
 import type { ExperienceSettings } from '../../schemas/v2';
 import {
     ensureBloom,
