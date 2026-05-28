@@ -17,6 +17,12 @@ export interface GsplatWobbleOptions {
     enabled?: boolean;
     continuousRender?: boolean;
     amplitude?: number;
+    /**
+     * @deprecated 已合并到 `amplitude`；若仅传此字段，会映射为 `amplitude = electronicYawAmplitude * 0.3`。
+     */
+    electronicYawAmplitude?: number;
+    wobbleAxis?: 'x' | 'z';
+    motionMode?: 'wobble' | 'electronic' | 'deepMeditation';
     frequency?: number;
     heightScale?: number;
     /** 弹跳峰值高度（世界单位），与模型 bbox 无关：jumpY = bounceShape × bounceAmplitude */
@@ -35,6 +41,9 @@ export interface GsplatWobbleOptions {
     colorBandStart?: number;
     colorBandEnd?: number;
     goldColor?: [number, number, number];
+    haloWidth?: number;
+    haloSpeed?: number;
+    haloOpacity?: number;
     /** 跳动时沿 Y 轴拉伸强度（0~1 推荐 0.2~0.5） */
     bounceStretch?: number;
     /**
@@ -52,6 +61,8 @@ const TAU = Math.PI * 2;
 const shaderGLSL = /* glsl */`
 uniform float uTime;
 uniform float uWobbleAmplitude;
+uniform float uWobbleAxis;
+uniform float uWobbleMotionMode;
 uniform float uWobbleFrequency;
 uniform float uWobbleHeightScale;
 uniform float uWobbleBounceShape;
@@ -61,6 +72,9 @@ uniform float uWobbleColorMix;
 uniform float uWobbleColorBandStart;
 uniform float uWobbleColorBandEnd;
 uniform vec3 uWobbleGoldColor;
+uniform float uWobbleHaloWidth;
+uniform float uWobbleHaloSpeed;
+uniform float uWobbleHaloOpacity;
 uniform float uWobbleBounceStretch;
 uniform float uWobbleWorldSpace;
 uniform mat4 uWobbleInvModelWorld;
@@ -68,6 +82,38 @@ uniform mat4 uWobbleModelWorld;
 uniform float uWobbleMinRelLocal;
 uniform float uWobbleWorldBottomY;
 uniform float uWobbleWorldHeight;
+uniform vec3 uWobbleWorldCenter;
+uniform vec3 uWobbleLocalCenter;
+uniform vec3 uWobbleLocalHalfExtents;
+
+float wobbleHash13(vec3 p) {
+    return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
+}
+
+mat2 wobbleRot2(float a) {
+    float s = sin(a);
+    float c = cos(a);
+    return mat2(c, -s, s, c);
+}
+
+float wobbleSmoothstepAny(float edge0, float edge1, float x) {
+    float t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+// 统一 UI「动作幅度」（uWobbleAmplitude）在不同动作模式下映射为不同强度区间。
+// 校准：与 Electronic 共用同一滑条值时，扭动映射更柔和，避免位移过大。
+float wobbleAmpWobble() {
+    return uWobbleAmplitude * (1.0 / 3.0);
+}
+
+float wobbleAmpElectronic() {
+    return min(max(uWobbleAmplitude / 0.3, 0.0), 4.0);
+}
+
+float wobbleAmpDeepMeditation() {
+    return min(max(uWobbleAmplitude / 0.4, 0.0), 3.0);
+}
 
 void modifySplatCenter(inout vec3 center) {
     float b = uWobbleBounceShape;
@@ -91,7 +137,47 @@ void modifySplatCenter(inout vec3 center) {
         vec3 localC = uWobbleWorldSpace > 0.5
             ? (uWobbleInvModelWorld * vec4(worldC, 1.0)).xyz
             : center;
-        localC.x += sin(wobblePhase) * uWobbleAmplitude * heightIntensity * uWobbleStrength;
+        if (uWobbleMotionMode < 0.5) {
+            float ampRand = mix(0.8, 1.2, wobbleHash13(localC * 17.0 + vec3(0.37, 1.79, 2.41)));
+            float wave = sin(wobblePhase) * ampRand * uWobbleStrength;
+            float offset = wave * wobbleAmpWobble() * heightIntensity;
+            localC.x += offset * (1.0 - uWobbleAxis);
+            localC.z += offset * uWobbleAxis;
+        } else if (uWobbleMotionMode < 1.5) {
+            float ampScale = wobbleAmpElectronic();
+            float height01 = clamp((worldC.y - uWobbleWorldBottomY) / max(uWobbleWorldHeight, 0.001), 0.0, 1.0);
+            float fixedHeight01 = clamp(uWobbleMinRelLocal / max(uWobbleWorldHeight, 0.001), 0.0, 0.95);
+            float active01 = clamp((height01 - fixedHeight01) / max(1.0 - fixedHeight01, 0.001), 0.0, 1.0);
+            float anchor = smoothstep(0.0, 0.18, active01);
+            float upperBody = smoothstep(0.08, 0.85, active01);
+            float phase = uWobbleLocalTime * max(uWobbleFrequency, 0.001) * 0.4;
+            float side = sin(phase);
+            float bow = 0.65 + 0.35 * sin(phase - 0.9);
+            float motionMask = anchor * upperBody;
+            vec3 yawWorldC = worldC;
+            float yawAngle = 0.22 * side * ampScale * uWobbleStrength * motionMask;
+            yawWorldC.xz = uWobbleWorldCenter.xz + wobbleRot2(yawAngle) * (yawWorldC.xz - uWobbleWorldCenter.xz);
+            float bowAngle = -0.06 * bow * ampScale * uWobbleStrength * motionMask;
+            vec2 bowPivot = vec2(uWobbleWorldBottomY + uWobbleWorldHeight * (fixedHeight01 + 0.18), uWobbleWorldCenter.z);
+            yawWorldC.yz = wobbleRot2(bowAngle) * (yawWorldC.yz - bowPivot) + bowPivot;
+            localC = (uWobbleInvModelWorld * vec4(yawWorldC, 1.0)).xyz;
+        } else {
+            float ampScale = wobbleAmpDeepMeditation();
+            float b = sin(uWobbleLocalTime * 1.5) * ampScale * uWobbleStrength;
+            vec3 halfExt = max(uWobbleLocalHalfExtents, vec3(0.001));
+            float height01 = clamp((worldC.y - uWobbleWorldBottomY) / max(uWobbleWorldHeight, 0.001), 0.0, 1.0);
+            vec3 refPos = (localC - uWobbleLocalCenter) / halfExt;
+            refPos.y = mix(-1.0, -3.0, height01);
+            vec3 refBase = refPos;
+            refPos.yz = wobbleRot2(wobbleSmoothstepAny(-1.0, -3.0, refPos.y) * 0.15 * -b) * refPos.yz;
+            refPos.z += 0.3;
+            refPos.y += 1.2;
+            refPos *= 1.0 + exp(-3.0 * length(refPos)) * b;
+            refPos.z -= 0.3;
+            refPos.y -= 1.2;
+            localC += (refPos - refBase) * halfExt;
+        }
+
         center = uWobbleWorldSpace > 0.5
             ? (uWobbleModelWorld * vec4(localC, 1.0)).xyz
             : localC;
@@ -123,9 +209,10 @@ float wobbleRelHeight(vec3 center) {
 
 void modifySplatColor(vec3 center, inout vec4 clr) {
     float relH = wobbleRelHeight(center);
-    float sineValue = abs(sin(uWobbleLocalTime * uWobbleFrequency + relH));
+    float sineValue = abs(sin(uWobbleLocalTime * uWobbleFrequency * uWobbleHaloSpeed + relH));
     float activity = uWobbleStrength;
-    float blend = smoothstep(uWobbleColorBandStart, uWobbleColorBandEnd, sineValue) * uWobbleColorMix * activity;
+    float bandStart = max(0.0, 1.0 - uWobbleHaloWidth);
+    float blend = smoothstep(bandStart, 1.0, sineValue) * uWobbleColorMix * uWobbleHaloOpacity * activity;
     clr.xyz = mix(clr.xyz, uWobbleGoldColor, blend);
 }
 `;
@@ -133,6 +220,8 @@ void modifySplatColor(vec3 center, inout vec4 clr) {
 const shaderWGSL = /* wgsl */`
 uniform uTime: f32;
 uniform uWobbleAmplitude: f32;
+uniform uWobbleAxis: f32;
+uniform uWobbleMotionMode: f32;
 uniform uWobbleFrequency: f32;
 uniform uWobbleHeightScale: f32;
 uniform uWobbleBounceShape: f32;
@@ -142,6 +231,9 @@ uniform uWobbleColorMix: f32;
 uniform uWobbleColorBandStart: f32;
 uniform uWobbleColorBandEnd: f32;
 uniform uWobbleGoldColor: vec3f;
+uniform uWobbleHaloWidth: f32;
+uniform uWobbleHaloSpeed: f32;
+uniform uWobbleHaloOpacity: f32;
 uniform uWobbleBounceStretch: f32;
 uniform uWobbleWorldSpace: f32;
 uniform uWobbleInvModelWorld: mat4x4<f32>;
@@ -149,6 +241,36 @@ uniform uWobbleModelWorld: mat4x4<f32>;
 uniform uWobbleMinRelLocal: f32;
 uniform uWobbleWorldBottomY: f32;
 uniform uWobbleWorldHeight: f32;
+uniform uWobbleWorldCenter: vec3f;
+uniform uWobbleLocalCenter: vec3f;
+uniform uWobbleLocalHalfExtents: vec3f;
+
+fn wobbleHash13(p: vec3f) -> f32 {
+    return fract(sin(dot(p, vec3f(127.1, 311.7, 74.7))) * 43758.5453123);
+}
+
+fn wobbleRot2(v: vec2f, a: f32) -> vec2f {
+    let s = sin(a);
+    let c = cos(a);
+    return vec2f(c * v.x - s * v.y, s * v.x + c * v.y);
+}
+
+fn wobbleSmoothstepAny(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+fn wobbleAmpWobble() -> f32 {
+    return uniform.uWobbleAmplitude * (1.0 / 3.0);
+}
+
+fn wobbleAmpElectronic() -> f32 {
+    return min(max(uniform.uWobbleAmplitude / 0.3, 0.0), 4.0);
+}
+
+fn wobbleAmpDeepMeditation() -> f32 {
+    return min(max(uniform.uWobbleAmplitude / 0.4, 0.0), 3.0);
+}
 
 fn wobbleRelHeight(center: vec3f) -> f32 {
     let worldC = select(
@@ -189,7 +311,56 @@ fn modifySplatCenter(center: ptr<function, vec3f>) {
             (uniform.uWobbleInvModelWorld * vec4f(worldC, 1.0)).xyz,
             uniform.uWobbleWorldSpace > 0.5
         );
-        localC.x += sin(wobblePhase) * uniform.uWobbleAmplitude * heightIntensity * uniform.uWobbleStrength;
+        if (uniform.uWobbleMotionMode < 0.5) {
+            let ampRand = mix(0.8, 1.2, wobbleHash13(localC * 17.0 + vec3f(0.37, 1.79, 2.41)));
+            let wave = sin(wobblePhase) * ampRand * uniform.uWobbleStrength;
+            let offset = wave * wobbleAmpWobble() * heightIntensity;
+            localC.x += offset * (1.0 - uniform.uWobbleAxis);
+            localC.z += offset * uniform.uWobbleAxis;
+        } else if (uniform.uWobbleMotionMode < 1.5) {
+            let ampScale = wobbleAmpElectronic();
+            let height01 = clamp((worldC.y - uniform.uWobbleWorldBottomY) / max(uniform.uWobbleWorldHeight, 0.001), 0.0, 1.0);
+            let fixedHeight01 = clamp(uniform.uWobbleMinRelLocal / max(uniform.uWobbleWorldHeight, 0.001), 0.0, 0.95);
+            let active01 = clamp((height01 - fixedHeight01) / max(1.0 - fixedHeight01, 0.001), 0.0, 1.0);
+            let anchor = smoothstep(0.0, 0.18, active01);
+            let upperBody = smoothstep(0.08, 0.85, active01);
+            let phase = uniform.uWobbleLocalTime * max(uniform.uWobbleFrequency, 0.001) * 0.4;
+            let side = sin(phase);
+            let bow = 0.65 + 0.35 * sin(phase - 0.9);
+            let motionMask = anchor * upperBody;
+            var yawWorldC = worldC;
+            let yawAngle = 0.22 * side * ampScale * uniform.uWobbleStrength * motionMask;
+            let yawXz = uniform.uWobbleWorldCenter.xz + wobbleRot2(yawWorldC.xz - uniform.uWobbleWorldCenter.xz, yawAngle);
+            yawWorldC.x = yawXz.x;
+            yawWorldC.z = yawXz.y;
+            let bowAngle = -0.06 * bow * ampScale * uniform.uWobbleStrength * motionMask;
+            let bowPivot = vec2f(
+                uniform.uWobbleWorldBottomY + uniform.uWobbleWorldHeight * (fixedHeight01 + 0.18),
+                uniform.uWobbleWorldCenter.z
+            );
+            let bowYz = wobbleRot2(yawWorldC.yz - bowPivot, bowAngle) + bowPivot;
+            yawWorldC.y = bowYz.x;
+            yawWorldC.z = bowYz.y;
+            localC = (uniform.uWobbleInvModelWorld * vec4f(yawWorldC, 1.0)).xyz;
+        } else {
+            let ampScale = wobbleAmpDeepMeditation();
+            let b = sin(uniform.uWobbleLocalTime * 1.5) * ampScale * uniform.uWobbleStrength;
+            let halfExt = max(uniform.uWobbleLocalHalfExtents, vec3f(0.001));
+            let height01 = clamp((worldC.y - uniform.uWobbleWorldBottomY) / max(uniform.uWobbleWorldHeight, 0.001), 0.0, 1.0);
+            var refPos = (localC - uniform.uWobbleLocalCenter) / halfExt;
+            refPos.y = mix(-1.0, -3.0, height01);
+            let refBase = refPos;
+            let yz = wobbleRot2(refPos.yz, wobbleSmoothstepAny(-1.0, -3.0, refPos.y) * 0.15 * -b);
+            refPos.y = yz.x;
+            refPos.z = yz.y;
+            refPos.z += 0.3;
+            refPos.y += 1.2;
+            refPos *= 1.0 + exp(-3.0 * length(refPos)) * b;
+            refPos.z -= 0.3;
+            refPos.y -= 1.2;
+            localC += (refPos - refBase) * halfExt;
+        }
+
         *center = select(
             localC,
             (uniform.uWobbleModelWorld * vec4f(localC, 1.0)).xyz,
@@ -218,10 +389,11 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
 
 fn modifySplatColor(center: vec3f, clr: ptr<function, vec4f>) {
     let relH = wobbleRelHeight(center);
-    let sineValue = abs(sin(uniform.uWobbleLocalTime * uniform.uWobbleFrequency + relH));
+    let sineValue = abs(sin(uniform.uWobbleLocalTime * uniform.uWobbleFrequency * uniform.uWobbleHaloSpeed + relH));
     let activity = uniform.uWobbleStrength;
-    let blend = smoothstep(uniform.uWobbleColorBandStart, uniform.uWobbleColorBandEnd, sineValue) *
-        uniform.uWobbleColorMix * activity;
+    let bandStart = max(0.0, 1.0 - uniform.uWobbleHaloWidth);
+    let blend = smoothstep(bandStart, 1.0, sineValue) *
+        uniform.uWobbleColorMix * uniform.uWobbleHaloOpacity * activity;
     (*clr) = vec4f(mix((*clr).xyz, uniform.uWobbleGoldColor, blend), (*clr).a);
 }
 `;
@@ -229,7 +401,11 @@ fn modifySplatColor(center: vec3f, clr: ptr<function, vec4f>) {
 export class GsplatWobbleEffect extends GsplatShaderEffect {
     static scriptName = 'gsplatWobbleEffect';
 
-    amplitude = 0.3;
+    amplitude = 0.7;
+
+    wobbleAxis: 'x' | 'z' = 'x';
+
+    motionMode: 'wobble' | 'electronic' | 'deepMeditation' = 'wobble';
 
     frequency = 5.0;
 
@@ -262,6 +438,12 @@ export class GsplatWobbleEffect extends GsplatShaderEffect {
     colorBandEnd = 1.0;
 
     goldColor = [...DEFAULT_GOLD];
+
+    haloWidth = 0.1;
+
+    haloSpeed = 1.0;
+
+    haloOpacity = 1.0;
 
     /** 跳动 Y 轴拉伸强度（实体 scale + 高斯 scale/center） */
     bounceStretch = 0.75;
@@ -391,7 +573,16 @@ export class GsplatWobbleEffect extends GsplatShaderEffect {
 
     setOptions(options: GsplatWobbleOptions = {}) {
         if (options.continuousRender !== undefined) this.continuousRender = options.continuousRender;
-        if (options.amplitude !== undefined) this.amplitude = options.amplitude;
+        if (options.amplitude !== undefined) {
+            this.amplitude = options.amplitude;
+        } else if (options.electronicYawAmplitude !== undefined) {
+            // 向后兼容旧配置：旧参数 1.0 对应统一幅度 0.3
+            this.amplitude = Math.max(0, options.electronicYawAmplitude) * 0.3;
+        }
+        if (options.wobbleAxis === 'x' || options.wobbleAxis === 'z') this.wobbleAxis = options.wobbleAxis;
+        if (options.motionMode === 'wobble' || options.motionMode === 'electronic' || options.motionMode === 'deepMeditation') {
+            this.motionMode = options.motionMode;
+        }
         if (options.frequency !== undefined) this.frequency = options.frequency;
         if (options.heightScale !== undefined) this.heightScale = options.heightScale;
         if (options.bounceAmplitude !== undefined) this.bounceAmplitude = options.bounceAmplitude;
@@ -406,6 +597,9 @@ export class GsplatWobbleEffect extends GsplatShaderEffect {
         if (options.colorBandStart !== undefined) this.colorBandStart = options.colorBandStart;
         if (options.colorBandEnd !== undefined) this.colorBandEnd = options.colorBandEnd;
         if (options.goldColor) this.goldColor = [...options.goldColor];
+        if (options.haloWidth !== undefined) this.haloWidth = Math.max(0.001, options.haloWidth);
+        if (options.haloSpeed !== undefined) this.haloSpeed = Math.max(0, options.haloSpeed);
+        if (options.haloOpacity !== undefined) this.haloOpacity = Math.max(0, Math.min(1, options.haloOpacity));
         if (options.bounceStretch !== undefined) this.bounceStretch = Math.max(0, options.bounceStretch);
         if (options.wobbleAnchorLift !== undefined) {
             this.wobbleAnchorLift = Math.min(1, Math.max(0, options.wobbleAnchorLift));
@@ -427,6 +621,11 @@ export class GsplatWobbleEffect extends GsplatShaderEffect {
 
         this.setUniform('uTime', effectTime);
         this.setUniform('uWobbleAmplitude', this.amplitude);
+        this.setUniform('uWobbleAxis', this.wobbleAxis === 'z' ? 1 : 0);
+        this.setUniform(
+            'uWobbleMotionMode',
+            this.motionMode === 'deepMeditation' ? 2 : this.motionMode === 'electronic' ? 1 : 0
+        );
         this.setUniform('uWobbleFrequency', this.frequency);
         this.setUniform('uWobbleHeightScale', this.heightScale);
         this.setUniform('uWobbleBounceShape', cycle.bounceShape);
@@ -436,11 +635,19 @@ export class GsplatWobbleEffect extends GsplatShaderEffect {
         this.setUniform('uWobbleColorBandStart', this.colorBandStart);
         this.setUniform('uWobbleColorBandEnd', this.colorBandEnd);
         this.setUniform('uWobbleGoldColor', this.goldColor);
+        this.setUniform('uWobbleHaloWidth', this.haloWidth);
+        this.setUniform('uWobbleHaloSpeed', this.haloSpeed);
+        this.setUniform('uWobbleHaloOpacity', this.haloOpacity);
         this.setUniform('uWobbleBounceStretch', this.bounceStretch);
         this.setUniform('uWobbleWorldSpace', this.usesWorldSpaceShader() ? 1 : 0);
         this.setUniform('uWobbleMinRelLocal', this._minRelLocal);
         this.setUniform('uWobbleWorldBottomY', this._worldBottomY);
         this.setUniform('uWobbleWorldHeight', this._worldHeight);
+        this.setUniform('uWobbleWorldCenter', [
+            this._worldAabb.center.x,
+            this._worldAabb.center.y,
+            this._worldAabb.center.z
+        ]);
     }
 
     destroy() {
@@ -453,6 +660,13 @@ export class GsplatWobbleEffect extends GsplatShaderEffect {
      * 周期状态：连跳 bounceCount 下（仅弹跳），再扭动一段（仅扭动）。
      */
     computeCycleState(effectTime: number) {
+        if (this.motionMode !== 'wobble') {
+            return {
+                bounceShape: 0,
+                wobbleStrength: 1,
+                wobbleLocalTime: effectTime
+            };
+        }
         const cycleLen = Math.max(this.cycleDuration, 0.01);
         const hopLen = Math.max(this.bounceDuration, 0.05);
         const hops = Math.max(1, Math.floor(this.bounceCount));
@@ -533,9 +747,19 @@ export class GsplatWobbleEffect extends GsplatShaderEffect {
 
         const lift = Math.min(1, Math.max(0, this.wobbleAnchorLift));
         this._minRelLocal = lift * this._worldHeight;
-
         this.setUniform('uWobbleInvModelWorld', mat4ToShaderArray(this._invModelWorld));
         this.setUniform('uWobbleModelWorld', mat4ToShaderArray(this._modelWorld));
+        this.setUniform('uWobbleWorldCenter', [
+            this._worldAabb.center.x,
+            this._worldAabb.center.y,
+            this._worldAabb.center.z
+        ]);
+        this.setUniform('uWobbleLocalCenter', [this._localAabb.center.x, this._localAabb.center.y, this._localAabb.center.z]);
+        this.setUniform('uWobbleLocalHalfExtents', [
+            this._localAabb.halfExtents.x,
+            this._localAabb.halfExtents.y,
+            this._localAabb.halfExtents.z
+        ]);
     }
 
     private applyEntityBounce(bounceShape: number) {

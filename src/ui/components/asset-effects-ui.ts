@@ -149,11 +149,26 @@ export const ASSET_EFFECTS_PANEL_HTML = `
   <div id="assetWobbleParams" class="assetEffectParamsBlock hidden">
     <p class="effectsTrackHint" style="font-size:11px;opacity:0.75;margin:0 0 6px">仅支持已放置的 <strong>Gaussian</strong> 资产；拖动滑条实时预览（需已播放）。</p>
     <div class="settingsRow">
-      <label for="assetWobbleAmplitude" class="postEffectLabel">扭动幅度:</label>
+      <label for="assetWobbleAmplitude" id="assetWobbleAmplitudeLabel" class="postEffectLabel" title="统一幅度（默认 0.7）。扭动映射更柔和；摇头晃脑/瞌睡虫自动映射。">动作幅度:</label>
       <div class="postEffectSliderWrap">
-        <input type="range" id="assetWobbleAmplitude" class="postEffectSlider" min="0" max="2" step="0.05" value="0.3">
-        <span id="assetWobbleAmplitudeVal" class="postEffectSliderValue">0.30</span>
+        <input type="range" id="assetWobbleAmplitude" class="postEffectSlider" min="0" max="2" step="0.05" value="0.7">
+        <span id="assetWobbleAmplitudeVal" class="postEffectSliderValue">0.70</span>
       </div>
+    </div>
+    <div class="settingsRow">
+      <label for="assetWobbleAxis" class="postEffectLabel">变形轴:</label>
+      <select id="assetWobbleAxis" class="settingsSelect">
+        <option value="x">X轴</option>
+        <option value="z">Z轴</option>
+      </select>
+    </div>
+    <div class="settingsRow">
+      <label for="assetWobbleMotionMode" class="postEffectLabel">动作模式:</label>
+      <select id="assetWobbleMotionMode" class="settingsSelect">
+        <option value="wobble">扭动</option>
+        <option value="electronic">摇头晃脑</option>
+        <option value="deepMeditation">瞌睡虫</option>
+      </select>
     </div>
     <div class="settingsRow">
       <label for="assetWobbleFrequency" class="postEffectLabel">扭动频率:</label>
@@ -189,8 +204,26 @@ export const ASSET_EFFECTS_PANEL_HTML = `
       <span style="font-size:11px;opacity:0.75">开启辉光（关闭后仅保留跳动/扭动与拉伸）</span>
     </div>
     <div class="settingsRow" style="align-items:center;gap:8px" id="assetWobbleHaloColorRow">
-      <label for="assetWobbleHaloColor">光圈颜色:</label>
+      <label for="assetWobbleHaloColor">光圈颜色/透明度:</label>
       <input type="color" id="assetWobbleHaloColor" value="#ffd900" title="跳动/扭动时高斯辉光色调">
+      <div class="postEffectSliderWrap" style="min-width:180px">
+        <input type="range" id="assetWobbleHaloOpacity" class="postEffectSlider" min="0" max="1" step="0.01" value="1">
+        <span id="assetWobbleHaloOpacityVal" class="postEffectSliderValue">1.00</span>
+      </div>
+    </div>
+    <div class="settingsRow" id="assetWobbleHaloWidthRow">
+      <label for="assetWobbleHaloWidth" class="postEffectLabel">光圈宽度:</label>
+      <div class="postEffectSliderWrap">
+        <input type="range" id="assetWobbleHaloWidth" class="postEffectSlider" min="0.01" max="1" step="0.01" value="0.1">
+        <span id="assetWobbleHaloWidthVal" class="postEffectSliderValue">0.10</span>
+      </div>
+    </div>
+    <div class="settingsRow" id="assetWobbleHaloSpeedRow">
+      <label for="assetWobbleHaloSpeed" class="postEffectLabel">光圈速度:</label>
+      <div class="postEffectSliderWrap">
+        <input type="range" id="assetWobbleHaloSpeed" class="postEffectSlider" min="0" max="4" step="0.05" value="1">
+        <span id="assetWobbleHaloSpeedVal" class="postEffectSliderValue">1.00</span>
+      </div>
     </div>
   </div>
   <div class="settingsRow" style="gap:8px;margin-top:8px">
@@ -291,12 +324,17 @@ function readEffectParamsFromDom(
     morphPointCloudScatterDistance: HTMLInputElement | null,
     morphPointCloudTint: HTMLInputElement | null,
     wobbleAmp: HTMLInputElement | null,
+    wobbleAxis: HTMLSelectElement | null,
+    wobbleMotionMode: HTMLSelectElement | null,
     wobbleFreq: HTMLInputElement | null,
     wobbleBounce: HTMLInputElement | null,
     wobbleStretch: HTMLInputElement | null,
     wobbleAnchorLiftPct: HTMLInputElement | null,
     wobbleHaloEnabled: HTMLInputElement | null,
-    wobbleHaloColor: HTMLInputElement | null
+    wobbleHaloColor: HTMLInputElement | null,
+    wobbleHaloWidth: HTMLInputElement | null,
+    wobbleHaloSpeed: HTMLInputElement | null,
+    wobbleHaloOpacity: HTMLInputElement | null
 ): Record<string, unknown> {
     if (type === MORPH_TYPE) {
         const keyframeEntityIds = [...(global.state.assetEffectsMorphKeyframeIds ?? [])];
@@ -364,6 +402,16 @@ function readEffectParamsFromDom(
         const v = Number(wobbleAmp.value);
         if (!Number.isNaN(v)) ep.amplitude = v;
     }
+    if (wobbleAxis?.value === 'x' || wobbleAxis?.value === 'z') {
+        ep.wobbleAxis = wobbleAxis.value;
+    }
+    if (
+        wobbleMotionMode?.value === 'wobble' ||
+        wobbleMotionMode?.value === 'electronic' ||
+        wobbleMotionMode?.value === 'deepMeditation'
+    ) {
+        ep.motionMode = wobbleMotionMode.value;
+    }
     if (wobbleFreq) {
         const v = Number(wobbleFreq.value);
         if (!Number.isNaN(v)) ep.frequency = v;
@@ -390,6 +438,18 @@ function readEffectParamsFromDom(
             ep.goldColor = rgb;
         }
     }
+    if (wobbleHaloWidth) {
+        const v = Number(wobbleHaloWidth.value);
+        if (!Number.isNaN(v)) ep.haloWidth = v;
+    }
+    if (wobbleHaloSpeed) {
+        const v = Number(wobbleHaloSpeed.value);
+        if (!Number.isNaN(v)) ep.haloSpeed = v;
+    }
+    if (wobbleHaloOpacity) {
+        const v = Number(wobbleHaloOpacity.value);
+        if (!Number.isNaN(v)) ep.haloOpacity = v;
+    }
     return ep;
 }
 
@@ -411,12 +471,17 @@ function fillDomFromEffectParams(
     morphPointCloudScatterDistance: HTMLInputElement | null,
     morphPointCloudTint: HTMLInputElement | null,
     wobbleAmp: HTMLInputElement | null,
+    wobbleAxis: HTMLSelectElement | null,
+    wobbleMotionMode: HTMLSelectElement | null,
     wobbleFreq: HTMLInputElement | null,
     wobbleBounce: HTMLInputElement | null,
     wobbleStretch: HTMLInputElement | null,
     wobbleAnchorLiftPct: HTMLInputElement | null,
     wobbleHaloEnabled: HTMLInputElement | null,
-    wobbleHaloColor: HTMLInputElement | null
+    wobbleHaloColor: HTMLInputElement | null,
+    wobbleHaloWidth: HTMLInputElement | null,
+    wobbleHaloSpeed: HTMLInputElement | null,
+    wobbleHaloOpacity: HTMLInputElement | null
 ) {
     if (type === MORPH_TYPE) {
         const ids = ep?.keyframeEntityIds ?? ep?.keyframeTargetIds;
@@ -491,7 +556,17 @@ function fillDomFromEffectParams(
         }
         return;
     }
-    if (wobbleAmp && typeof ep?.amplitude === 'number') wobbleAmp.value = String(ep.amplitude);
+    if (wobbleAxis) {
+        wobbleAxis.value = ep?.wobbleAxis === 'z' ? 'z' : 'x';
+    }
+    if (wobbleMotionMode) {
+        wobbleMotionMode.value =
+            ep?.motionMode === 'electronic' || ep?.motionMode === 'deepMeditation' ? ep.motionMode : 'wobble';
+    }
+    if (wobbleAmp) {
+        const amp = typeof ep?.amplitude === 'number' ? ep.amplitude : 0.7;
+        wobbleAmp.value = String(amp);
+    }
     if (wobbleFreq && typeof ep?.frequency === 'number') wobbleFreq.value = String(ep.frequency);
     if (wobbleBounce && typeof ep?.bounceAmplitude === 'number') wobbleBounce.value = String(ep.bounceAmplitude);
     if (wobbleStretch && typeof ep?.bounceStretch === 'number') {
@@ -518,6 +593,9 @@ function fillDomFromEffectParams(
             wobbleHaloColor.value = rgb01ToHex(DEFAULT_WOBBLE_HALO_RGB);
         }
     }
+    if (wobbleHaloWidth) wobbleHaloWidth.value = String(typeof ep?.haloWidth === 'number' ? ep.haloWidth : 0.1);
+    if (wobbleHaloSpeed) wobbleHaloSpeed.value = String(typeof ep?.haloSpeed === 'number' ? ep.haloSpeed : 1);
+    if (wobbleHaloOpacity) wobbleHaloOpacity.value = String(typeof ep?.haloOpacity === 'number' ? ep.haloOpacity : 1);
 }
 
 const MORPH_ENTITY_HINT =
@@ -596,22 +674,53 @@ export function initAssetEffectsUI(global: Global): () => void {
     const wobbleBounce = fieldset.querySelector('#assetWobbleBounceAmplitude') as HTMLInputElement | null;
     const wobbleStretch = fieldset.querySelector('#assetWobbleBounceStretch') as HTMLInputElement | null;
     const wobbleAnchorLiftPct = fieldset.querySelector('#assetWobbleAnchorLiftPct') as HTMLInputElement | null;
+    const wobbleAxis = fieldset.querySelector('#assetWobbleAxis') as HTMLSelectElement | null;
     const wobbleAmpVal = fieldset.querySelector('#assetWobbleAmplitudeVal') as HTMLElement | null;
     const wobbleFreqVal = fieldset.querySelector('#assetWobbleFrequencyVal') as HTMLElement | null;
     const wobbleBounceVal = fieldset.querySelector('#assetWobbleBounceAmplitudeVal') as HTMLElement | null;
     const wobbleStretchVal = fieldset.querySelector('#assetWobbleBounceStretchVal') as HTMLElement | null;
     const wobbleAnchorLiftPctVal = fieldset.querySelector('#assetWobbleAnchorLiftPctVal') as HTMLElement | null;
+    const wobbleMotionMode = fieldset.querySelector('#assetWobbleMotionMode') as HTMLSelectElement | null;
+    const wobbleAmplitudeLabel = fieldset.querySelector('#assetWobbleAmplitudeLabel') as HTMLLabelElement | null;
     const wobbleHaloEnabled = fieldset.querySelector('#assetWobbleHaloEnabled') as HTMLInputElement | null;
     const wobbleHaloColor = fieldset.querySelector('#assetWobbleHaloColor') as HTMLInputElement | null;
     const wobbleHaloColorRow = fieldset.querySelector('#assetWobbleHaloColorRow') as HTMLElement | null;
+    const wobbleHaloWidth = fieldset.querySelector('#assetWobbleHaloWidth') as HTMLInputElement | null;
+    const wobbleHaloSpeed = fieldset.querySelector('#assetWobbleHaloSpeed') as HTMLInputElement | null;
+    const wobbleHaloOpacity = fieldset.querySelector('#assetWobbleHaloOpacity') as HTMLInputElement | null;
+    const wobbleHaloWidthVal = fieldset.querySelector('#assetWobbleHaloWidthVal') as HTMLElement | null;
+    const wobbleHaloSpeedVal = fieldset.querySelector('#assetWobbleHaloSpeedVal') as HTMLElement | null;
+    const wobbleHaloOpacityVal = fieldset.querySelector('#assetWobbleHaloOpacityVal') as HTMLElement | null;
+    const wobbleHaloWidthRow = fieldset.querySelector('#assetWobbleHaloWidthRow') as HTMLElement | null;
+    const wobbleHaloSpeedRow = fieldset.querySelector('#assetWobbleHaloSpeedRow') as HTMLElement | null;
+
+    const WOBBLE_AMPLITUDE_HINT: Record<string, string> = {
+        wobble: '扭动：幅度 × 1/3（同一滑条值下更柔和）',
+        electronic: '摇头晃脑：幅度 ÷ 0.3 映射左右摆头与轻微前俯',
+        deepMeditation: '瞌睡虫：幅度 ÷ 0.4 映射呼吸形变'
+    };
+
+    const syncWobbleModeUi = () => {
+        const mode = wobbleMotionMode?.value ?? 'wobble';
+        const hint = WOBBLE_AMPLITUDE_HINT[mode] ?? WOBBLE_AMPLITUDE_HINT.wobble;
+        if (wobbleAmplitudeLabel) {
+            wobbleAmplitudeLabel.title = hint;
+        }
+        if (wobbleAmp) {
+            wobbleAmp.title = hint;
+        }
+    };
 
     const syncWobbleHaloUi = () => {
         const on = wobbleHaloEnabled?.checked !== false;
         if (wobbleHaloColor) {
             wobbleHaloColor.disabled = !on;
         }
-        if (wobbleHaloColorRow) {
-            wobbleHaloColorRow.style.opacity = on ? '1' : '0.45';
+        if (wobbleHaloWidth) wobbleHaloWidth.disabled = !on;
+        if (wobbleHaloSpeed) wobbleHaloSpeed.disabled = !on;
+        if (wobbleHaloOpacity) wobbleHaloOpacity.disabled = !on;
+        for (const row of [wobbleHaloColorRow, wobbleHaloWidthRow, wobbleHaloSpeedRow]) {
+            if (row) row.style.opacity = on ? '1' : '0.45';
         }
     };
     const btnMorphAdd = fieldset.querySelector('#assetMorphAddFromSelection');
@@ -723,12 +832,17 @@ export function initAssetEffectsUI(global: Global): () => void {
                         morphPointCloudScatterDistance,
                         morphPointCloudTint,
                         wobbleAmp,
+                        wobbleAxis,
+                        wobbleMotionMode,
                         wobbleFreq,
                         wobbleBounce,
                         wobbleStretch,
                         wobbleAnchorLiftPct,
                         wobbleHaloEnabled,
-                        wobbleHaloColor
+                        wobbleHaloColor,
+                        wobbleHaloWidth,
+                        wobbleHaloSpeed,
+                        wobbleHaloOpacity
                     )
                 );
                 pushHistorySafe();
@@ -840,13 +954,19 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphPointCloudScatterDistance,
                 morphPointCloudTint,
                 wobbleAmp,
+                wobbleAxis,
+                wobbleMotionMode,
                 wobbleFreq,
                 wobbleBounce,
                 wobbleStretch,
                 wobbleAnchorLiftPct,
                 wobbleHaloEnabled,
-                wobbleHaloColor
+                wobbleHaloColor,
+                wobbleHaloWidth,
+                wobbleHaloSpeed,
+                wobbleHaloOpacity
             );
+            syncWobbleModeUi();
             syncWobbleHaloUi();
             syncMorphPointCloudLabels();
             syncWobbleSliderLabels();
@@ -858,6 +978,7 @@ export function initAssetEffectsUI(global: Global): () => void {
 
     const onTypeChange = () => {
         syncTypePanels();
+        syncWobbleModeUi();
         const targetId = getSelectedTargetId(global);
         if (!targetId || !typeSelect) {
             return;
@@ -892,12 +1013,17 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphPointCloudScatterDistance,
                 morphPointCloudTint,
                 wobbleAmp,
+                wobbleAxis,
+                wobbleMotionMode,
                 wobbleFreq,
                 wobbleBounce,
                 wobbleStretch,
                 wobbleAnchorLiftPct,
                 wobbleHaloEnabled,
-                wobbleHaloColor
+                wobbleHaloColor,
+                wobbleHaloWidth,
+                wobbleHaloSpeed,
+                wobbleHaloOpacity
             )
         );
         if (commitHistory) {
@@ -966,6 +1092,15 @@ export function initAssetEffectsUI(global: Global): () => void {
         }
         if (wobbleAnchorLiftPct && wobbleAnchorLiftPctVal) {
             wobbleAnchorLiftPctVal.textContent = `${Math.round(Number(wobbleAnchorLiftPct.value))}%`;
+        }
+        if (wobbleHaloWidth && wobbleHaloWidthVal) {
+            wobbleHaloWidthVal.textContent = formatSliderValue(Number(wobbleHaloWidth.value), 2);
+        }
+        if (wobbleHaloSpeed && wobbleHaloSpeedVal) {
+            wobbleHaloSpeedVal.textContent = formatSliderValue(Number(wobbleHaloSpeed.value), 2);
+        }
+        if (wobbleHaloOpacity && wobbleHaloOpacityVal) {
+            wobbleHaloOpacityVal.textContent = formatSliderValue(Number(wobbleHaloOpacity.value), 2);
         }
     };
 
@@ -1066,12 +1201,17 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphPointCloudScatterDistance,
                 morphPointCloudTint,
                 wobbleAmp,
+                wobbleAxis,
+                wobbleMotionMode,
                 wobbleFreq,
                 wobbleBounce,
                 wobbleStretch,
                 wobbleAnchorLiftPct,
                 wobbleHaloEnabled,
-                wobbleHaloColor
+                wobbleHaloColor,
+                wobbleHaloWidth,
+                wobbleHaloSpeed,
+                wobbleHaloOpacity
             )
         );
     };
@@ -1107,12 +1247,17 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphPointCloudScatterDistance,
                 morphPointCloudTint,
                 wobbleAmp,
+                wobbleAxis,
+                wobbleMotionMode,
                 wobbleFreq,
                 wobbleBounce,
                 wobbleStretch,
                 wobbleAnchorLiftPct,
                 wobbleHaloEnabled,
-                wobbleHaloColor
+                wobbleHaloColor,
+                wobbleHaloWidth,
+                wobbleHaloSpeed,
+                wobbleHaloOpacity
             );
             const ids = ep.keyframeEntityIds ?? ep.keyframeTargetIds;
             const urls = ep.keyframeUrls;
@@ -1153,12 +1298,17 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphPointCloudScatterDistance,
                 morphPointCloudTint,
                 wobbleAmp,
+                wobbleAxis,
+                wobbleMotionMode,
                 wobbleFreq,
                 wobbleBounce,
                 wobbleStretch,
                 wobbleAnchorLiftPct,
                 wobbleHaloEnabled,
-                wobbleHaloColor
+                wobbleHaloColor,
+                wobbleHaloWidth,
+                wobbleHaloSpeed,
+                wobbleHaloOpacity
             )
         );
         refreshStatus();
@@ -1252,6 +1402,11 @@ export function initAssetEffectsUI(global: Global): () => void {
     if (wobbleAmp) {
         unbindWobbleSliders.push(bindSliderLive(wobbleAmp, wobbleAmpVal, 2, onWobbleParamsLive, onParamsBlur));
     }
+    wobbleAxis?.addEventListener('change', onParamsBlur);
+    wobbleMotionMode?.addEventListener('change', () => {
+        syncWobbleModeUi();
+        onParamsBlur();
+    });
     if (wobbleFreq) {
         unbindWobbleSliders.push(bindSliderLive(wobbleFreq, wobbleFreqVal, 1, onWobbleParamsLive, onParamsBlur));
     }
@@ -1283,6 +1438,15 @@ export function initAssetEffectsUI(global: Global): () => void {
             wobbleAnchorLiftPct.removeEventListener('change', onAnchorLiftChange);
         });
     }
+    if (wobbleHaloWidth) {
+        unbindWobbleSliders.push(bindSliderLive(wobbleHaloWidth, wobbleHaloWidthVal, 2, onWobbleParamsLive, onParamsBlur));
+    }
+    if (wobbleHaloSpeed) {
+        unbindWobbleSliders.push(bindSliderLive(wobbleHaloSpeed, wobbleHaloSpeedVal, 2, onWobbleParamsLive, onParamsBlur));
+    }
+    if (wobbleHaloOpacity) {
+        unbindWobbleSliders.push(bindSliderLive(wobbleHaloOpacity, wobbleHaloOpacityVal, 2, onWobbleParamsLive, onParamsBlur));
+    }
     const onHaloEnabledChange = () => {
         syncWobbleHaloUi();
         onWobbleParamsLive();
@@ -1312,6 +1476,7 @@ export function initAssetEffectsUI(global: Global): () => void {
     events.on('assetEffect:morphKeyframesChanged', onMorphKeyframesChanged);
     events.on('assetEffect:morphCorrespondenceStatus', onMorphCorrespondenceStatus);
 
+    syncWobbleModeUi();
     syncWobbleHaloUi();
     syncMorphPointCloudLabels();
     refreshTargetLabel();
@@ -1336,6 +1501,8 @@ export function initAssetEffectsUI(global: Global): () => void {
         morphPointCloudTint?.removeEventListener('change', onParamsBlur);
         unbindMorphSliders.forEach((fn) => fn());
         unbindWobbleSliders.forEach((fn) => fn());
+        wobbleAxis?.removeEventListener('change', onParamsBlur);
+        wobbleMotionMode?.removeEventListener('change', onParamsBlur);
         wobbleHaloEnabled?.removeEventListener('change', onHaloEnabledChange);
         wobbleHaloColor?.removeEventListener('input', onHaloColorLive);
         wobbleHaloColor?.removeEventListener('change', onParamsBlur);

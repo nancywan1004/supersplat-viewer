@@ -39,7 +39,16 @@ const GSPLAT_WOBBLE_TYPE = ASSET_EFFECT_TYPE_VALUES[1];
 export function buildWobbleOptions(ep: Record<string, unknown>): GsplatWobbleOptions {
     const opts: GsplatWobbleOptions = {};
     if (typeof ep.continuousRender === 'boolean') opts.continuousRender = ep.continuousRender;
-    if (typeof ep.amplitude === 'number') opts.amplitude = ep.amplitude;
+    if (typeof ep.amplitude === 'number') {
+        opts.amplitude = ep.amplitude;
+    } else if (typeof ep.electronicYawAmplitude === 'number') {
+        // backward compatible: old 1.0 ~= new amplitude 0.3
+        opts.amplitude = Math.max(0, ep.electronicYawAmplitude) * 0.3;
+    }
+    if (ep.wobbleAxis === 'x' || ep.wobbleAxis === 'z') opts.wobbleAxis = ep.wobbleAxis;
+    if (ep.motionMode === 'wobble' || ep.motionMode === 'electronic' || ep.motionMode === 'deepMeditation') {
+        opts.motionMode = ep.motionMode;
+    }
     if (typeof ep.frequency === 'number') opts.frequency = ep.frequency;
     if (typeof ep.heightScale === 'number') opts.heightScale = ep.heightScale;
     if (typeof ep.bounceAmplitude === 'number') opts.bounceAmplitude = ep.bounceAmplitude;
@@ -56,6 +65,9 @@ export function buildWobbleOptions(ep: Record<string, unknown>): GsplatWobbleOpt
     if (Array.isArray(ep.goldColor) && ep.goldColor.length === 3) {
         opts.goldColor = ep.goldColor as [number, number, number];
     }
+    if (typeof ep.haloWidth === 'number') opts.haloWidth = ep.haloWidth;
+    if (typeof ep.haloSpeed === 'number') opts.haloSpeed = ep.haloSpeed;
+    if (typeof ep.haloOpacity === 'number') opts.haloOpacity = ep.haloOpacity;
     if (typeof ep.bounceStretch === 'number') opts.bounceStretch = ep.bounceStretch;
     if (typeof ep.wobbleAnchorLift === 'number') opts.wobbleAnchorLift = ep.wobbleAnchorLift;
     if (typeof ep.anchorLift === 'number') opts.anchorLift = ep.anchorLift;
