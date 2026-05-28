@@ -23,7 +23,7 @@ import {
     loadSceneAssetLibraryItem,
     withTimeout
 } from '../loaders/asset-loader';
-import { hitSceneGizmoAtClient } from '../gizmo-handler';
+import { hitSceneGizmoAtClient } from '../gizmo-hit-test';
 import type { InputArbiter } from '../input-arbiter';
 import {
     clampVideoHorizontalCurvature,

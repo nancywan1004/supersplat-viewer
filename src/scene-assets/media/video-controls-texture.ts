@@ -5,7 +5,7 @@
 
 import { type CameraComponent, type Entity, Mat4, Vec3 } from 'playcanvas';
 
-import { hitSceneGizmoAtClient } from '../../gizmo-handler';
+import { hitSceneGizmoAtClient } from '../../gizmo-hit-test';
 import { isPlacementCursorActive } from '../../placement-cursor';
 import type { Global, ScenePlacedItem } from '../../types';
 import { readViewMediaMuted } from '../../view-settings';

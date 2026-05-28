@@ -12,6 +12,7 @@ import {
     isAssetDebugVisualEnabled,
     isEnvironmentDebugVisualEnabled
 } from './state-selectors';
+import { setSceneGizmoHitTest } from './gizmo-hit-test';
 import { pushEditHistory } from './edit-history';
 import { updatePointLightsFromSettings } from './light';
 
@@ -43,21 +44,6 @@ const MODE_TO_GIZMO_TYPE: Record<AssetTransformMode, string> = {
     rotate: 'rotate',
     scale: 'scale'
 };
-
-type GizmoHitTest = (canvasX: number, canvasY: number) => boolean;
-
-let sceneGizmoHitTest: GizmoHitTest | null = null;
-
-/** 屏幕坐标是否命中当前场景 Transform Gizmo（供音视频播控 arbiter 避让）。 */
-export function hitSceneGizmoAtClient(global: Global, clientX: number, clientY: number): boolean {
-    if (!global.state.editMode || !sceneGizmoHitTest) return false;
-    const canvas = global.app.graphicsDevice.canvas as HTMLCanvasElement;
-    const rect = canvas.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
-    if (x < 0 || y < 0 || x > rect.width || y > rect.height) return false;
-    return sceneGizmoHitTest(x, y);
-}
 
 type RotateGizmoShape = 'x' | 'y' | 'z' | 'xyz' | 'face';
 const ALL_ROTATE_GIZMO_SHAPES: RotateGizmoShape[] = ['x', 'y', 'z', 'xyz', 'face'];
@@ -268,7 +254,7 @@ export function initGizmoHandler(global: Global): () => void {
                 const hit = g._getSelection(x, y);
                 return Array.isArray(hit) && hit.length > 0;
             };
-            sceneGizmoHitTest = hitGizmoAtCanvas;
+            setSceneGizmoHitTest(hitGizmoAtCanvas);
 
             const onCanvasPointerDownCapture = (ev: PointerEvent) => {
                 if (!ev.isPrimary || ev.button !== 0 || !state.editMode) return;
@@ -725,7 +711,7 @@ export function initGizmoHandler(global: Global): () => void {
         events.off('previewMode:changed', onPreviewModeChanged as any);
         app.off('update', onUpdate);
         handler?.destroy();
-        sceneGizmoHitTest = null;
+        setSceneGizmoHitTest(null);
         state.gizmoPointerActive = false;
         state.suppressAssetPointerClick = false;
     };
