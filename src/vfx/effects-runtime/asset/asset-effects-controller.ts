@@ -11,7 +11,7 @@ import {
     GsplatMorphController,
     loadGsplatMorphSequence,
     type GsplatMorphOptions
-} from '../../gsplat-morph-progressive';
+} from '../../gsplat-morph-progressive-v2';
 import {
     createGsplatWobbleEffect,
     GsplatWobbleEffect,
@@ -80,20 +80,25 @@ export function buildMorphOptions(ep: Record<string, unknown>): GsplatMorphOptio
         segmentHoldDuration: typeof ep.segmentHoldDuration === 'number' ? ep.segmentHoldDuration : undefined,
         loop: typeof ep.loop === 'boolean' ? ep.loop : undefined,
         autoPlay: typeof ep.autoPlay === 'boolean' ? ep.autoPlay : true,
-        morphPresentMaxHz: typeof ep.morphPresentMaxHz === 'number' ? ep.morphPresentMaxHz : undefined,
+        // 大 splat 下默认做插值节流，避免每帧全量 CPU 插值/上传导致卡顿
+        morphPresentMaxHz: typeof ep.morphPresentMaxHz === 'number' ? ep.morphPresentMaxHz : 24,
         morphAnimateSphericalHarmonics:
-            typeof ep.morphAnimateSphericalHarmonics === 'boolean' ? ep.morphAnimateSphericalHarmonics : undefined,
-        preferGpuMorph: typeof ep.preferGpuMorph === 'boolean' ? ep.preferGpuMorph : undefined,
+            // 默认关闭逐帧高阶 SH 动画，只在段切换时更新，显著减轻主线程压力
+            typeof ep.morphAnimateSphericalHarmonics === 'boolean' ? ep.morphAnimateSphericalHarmonics : false,
+        // v2 默认走 CPU 路径，避免 GPU morph 在部分场景出现团块/球化过渡
+        preferGpuMorph: typeof ep.preferGpuMorph === 'boolean' ? ep.preferGpuMorph : false,
         recenterModels: typeof ep.recenterModels === 'boolean' ? ep.recenterModels : undefined,
         normalizeScales: typeof ep.normalizeScales === 'boolean' ? ep.normalizeScales : undefined,
         targetScale: typeof ep.targetScale === 'number' ? ep.targetScale : undefined,
-        sortCentersMaxHz: typeof ep.sortCentersMaxHz === 'number' ? ep.sortCentersMaxHz : undefined,
+        // 排序中心更新同样节流，降低额外大数组写回成本
+        sortCentersMaxHz: typeof ep.sortCentersMaxHz === 'number' ? ep.sortCentersMaxHz : 6,
+        progressivePairFlight: typeof ep.progressivePairFlight === 'boolean' ? ep.progressivePairFlight : true,
         fastQuaternionNlerp: typeof ep.fastQuaternionNlerp === 'boolean' ? ep.fastQuaternionNlerp : undefined,
         buildGreedyInBackground: typeof ep.buildGreedyInBackground === 'boolean' ? ep.buildGreedyInBackground : true,
         correspondenceStrategy:
             ep.correspondenceStrategy === 'greedy' || ep.correspondenceStrategy === 'resample'
                 ? ep.correspondenceStrategy
-                : undefined,
+                : 'resample',
         greedySpatialWeight: typeof ep.greedySpatialWeight === 'number' ? ep.greedySpatialWeight : undefined,
         greedyColorWeight: typeof ep.greedyColorWeight === 'number' ? ep.greedyColorWeight : undefined,
         greedyGridCellSize: typeof ep.greedyGridCellSize === 'number' ? ep.greedyGridCellSize : undefined,
