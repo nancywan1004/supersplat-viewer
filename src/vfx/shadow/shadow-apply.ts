@@ -352,7 +352,10 @@ class ShadowApplyRt extends Script {
         syncPlacedMeshExcludeLayers(global);
 
         const events = global.events;
-        const onSceneAssetsChanged = () => syncPlacedMeshExcludeLayers(global);
+        const onSceneAssetsChanged = () => {
+            syncPlacedMeshExcludeLayers(global);
+            this._placedMeshExcludeMask?.refreshGsplatExcludeMaskMaterials(global);
+        };
         events.on('sceneAssets:added', onSceneAssetsChanged);
         events.on('sceneAssets:removed', onSceneAssetsChanged);
         events.on('sceneAssets:cleared', onSceneAssetsChanged);

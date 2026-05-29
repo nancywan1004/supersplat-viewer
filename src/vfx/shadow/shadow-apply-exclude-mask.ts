@@ -2,7 +2,7 @@
  * 放置资产 shadow-apply（B 管线）排除 mask。
  * 专用相机（priority 1）只渲染 PlacedMeshExclude 层到离屏 RT；
  * mesh / image / video：prerender:layer 临时白模（R=1）；
- * gaussian：同层正常绘制，叠影 shader 取 max(rgb)（不用 alpha）。
+ * gaussian：同层真实 splat 绘制，gsplatPS 输出纯白（mask-only，轮廓与 splat 一致）。
  * 主相机 layers 不含 PlacedMeshExclude。
  */
 import {
@@ -15,12 +15,15 @@ import {
     Texture,
     Entity,
     type AppBase,
+    type Camera,
     type CameraComponent,
     type GraphicsDevice,
+    type Material,
     type MeshInstance
 } from 'playcanvas';
 
 import type { Global } from '../../types';
+import { applyGsplatExcludeMaskShaderToMaterial } from './gsplat-exclude-mask-shader';
 
 const PLACED_MESH_EXCLUDE_LAYER_NAME = 'PlacedMeshExclude';
 
@@ -128,8 +131,20 @@ export class PlacedMeshExcludeMask {
 
     private _inited = false;
 
+    private _onGsplatMaterialCreated: ((material: Material, camera: Camera, layer: Layer) => void) | null =
+        null;
+
     constructor(private readonly device: GraphicsDevice) {
         this._whiteMat = createMaskWriteMaterial();
+    }
+
+    /** exclude 相机 unified gsplat 材质就绪后 patch 为 mask-only 输出。 */
+    refreshGsplatExcludeMaskMaterials(global: Global): void {
+        if (!this._excludeCamComp || !this._excludeLayer) return;
+        const mat = global.app.systems.gsplat.getMaterial(this._excludeCamComp.camera, this._excludeLayer);
+        if (mat) {
+            applyGsplatExcludeMaskShaderToMaterial(mat, this.device);
+        }
     }
 
     private readonly _onPrerenderLayer = (
@@ -182,6 +197,14 @@ export class PlacedMeshExcludeMask {
 
         app.scene.on('prerender:layer', this._onPrerenderLayer);
         app.scene.on('postrender:layer', this._onPostrenderLayer);
+
+        this._onGsplatMaterialCreated = (material, camera, layer) => {
+            if (camera !== this._excludeCamComp?.camera || layer !== this._excludeLayer) return;
+            applyGsplatExcludeMaskShaderToMaterial(material, this.device);
+        };
+        app.systems.gsplat.on('material:created', this._onGsplatMaterialCreated);
+
+        this.refreshGsplatExcludeMaskMaterials(global);
         this._inited = true;
     }
 
@@ -242,7 +265,11 @@ export class PlacedMeshExcludeMask {
 
     setOutputEnabled(outputEnabled: boolean, global: Global): void {
         if (!this._excludeCameraEntity) return;
-        this._excludeCameraEntity.enabled = outputEnabled && countPlacedExcludeAssets(global) > 0;
+        const active = outputEnabled && countPlacedExcludeAssets(global) > 0;
+        this._excludeCameraEntity.enabled = active;
+        if (active) {
+            this.refreshGsplatExcludeMaskMaterials(global);
+        }
     }
 
     private setPlacedMeshMaterials(global: Global, useMaskMaterial: boolean): void {
