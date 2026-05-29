@@ -5,7 +5,7 @@ export const DEFAULT_VFX_TOTAL_DURATION = 10;
  * @deprecated legacy 单轨 reveal 字段（仅导入兼容读取，不再作为持久化写入真源）
  */
 type LegacyRevealEffect = {
-    type?: 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'falling-petals' | 'falling-rain' | 'falling-snow' | 'nostalgic-comic' | 'yiyun-dianran' | 'integrate' | 'growth-wave' | 'sketch' | 'none',
+    type?: 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'falling-petals' | 'falling-rain' | 'falling-snow' | 'nostalgic-comic' | 'yiyun-dianran' | 'palette-pixel' | 'integrate' | 'growth-wave' | 'sketch' | 'none',
     autoStart?: boolean,
     totalDuration?: number, // 总时长（秒）：**仅一次性 reveal 轨**（Timed VFX 等）；**persistent 轨 `paramsById` 不持久化此字段**。默认见 DEFAULT_VFX_TOTAL_DURATION
     /**

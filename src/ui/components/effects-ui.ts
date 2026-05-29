@@ -10,6 +10,10 @@ import {
     getRevealActiveType
 } from '../../settings-serialize/effects-sync';
 import { isPersistentVfx } from '../../vfx/effects-runtime/reveal/reveal-policy';
+import {
+    DEFAULT_PALETTE_PIXEL_SETTINGS,
+    PALETTE_PIXEL_SIZE_STEPS
+} from '../../vfx/stylisation/palette-pixel';
 import { dispatchEffectsModuleCommand } from '../../editor-modules/effects-facade';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
@@ -78,6 +82,7 @@ const REVEAL_PANEL_HTML = (() => {
         <option value="falling-snow">Falling Snow</option>
         <option value="nostalgic-comic">Nostalgic Comic</option>
         <option value="yiyun-dianran">意韵点染</option>
+        <option value="palette-pixel">像素色板</option>
       </select>
     </div>
     <div id="persistentPetalsControls" class="hidden" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08)">
@@ -186,6 +191,43 @@ const REVEAL_PANEL_HTML = (() => {
         <input type="color" id="yiyunDianranGlowColor" class="settingsInput" value="#002fa7">
       </div>
     </div>
+    <div id="persistentPalettePixelControls" class="hidden" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08)">
+      <div class="settingsRow">
+        <label for="palettePixelSize" class="postEffectLabel">马赛克大小:</label>
+        <select id="palettePixelSize" class="settingsSelect">
+          <option value="300">300</option>
+          <option value="400">400</option>
+          <option value="500">500</option>
+          <option value="600">600</option>
+          <option value="700">700</option>
+          <option value="800">800</option>
+          <option value="900">900</option>
+        </select>
+      </div>
+      <div class="settingsRow">
+        <label for="palettePixelPalette" class="postEffectLabel">色板选择:</label>
+        <select id="palettePixelPalette" class="settingsSelect">
+          <option value="1">1. 碧空跃金</option>
+          <option value="2">2. 墨雅灰绿</option>
+          <option value="3">3. 鲜活绿动</option>
+          <option value="4">4. 暖暮霞光</option>
+          <option value="5">5. 活力撞色</option>
+          <option value="6">6. 火山灰岩</option>
+          <option value="7">7. 夜色霓虹</option>
+        </select>
+      </div>
+      <div class="settingsRow">
+        <label for="palettePixelLevels" class="postEffectLabel">明度分阶数量:</label>
+        <input type="number" id="palettePixelLevels" class="settingsInput" min="2" max="20" step="1" value="12">
+      </div>
+      <div class="settingsRow">
+        <label for="palettePixelNoise" class="postEffectLabel">噪波:</label>
+        <div class="postEffectSliderWrap">
+          <input type="range" id="palettePixelNoise" class="postEffectSlider" min="0" max="0.08" step="0.001" value="0.05">
+          <span id="palettePixelNoiseVal" class="postEffectSliderValue">0.050</span>
+        </div>
+      </div>
+    </div>
     <div id="persistentNostalgicComicControls" class="hidden" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08)">
       <div class="settingsRow">
         <label for="nostalgicComicLevelCount" class="postEffectLabel">明度分阶数量:</label>
@@ -262,6 +304,7 @@ export function initRevealUI(global: Global): () => void {
     const persistentPetalsControls = container.querySelector('#persistentPetalsControls') as HTMLElement | null;
     const persistentWeatherControls = container.querySelector('#persistentWeatherControls') as HTMLElement | null;
     const persistentYiyunDianranControls = container.querySelector('#persistentYiyunDianranControls') as HTMLElement | null;
+    const persistentPalettePixelControls = container.querySelector('#persistentPalettePixelControls') as HTMLElement | null;
     const persistentNostalgicComicControls = container.querySelector('#persistentNostalgicComicControls') as HTMLElement | null;
     const petalsTextureUrl = container.querySelector('#petalsTextureUrl') as HTMLInputElement | null;
     const petalsDensity = container.querySelector('#petalsDensity') as HTMLInputElement | null;
@@ -299,6 +342,11 @@ export function initRevealUI(global: Global): () => void {
     const yiyunDianranGlowIntensity = container.querySelector('#yiyunDianranGlowIntensity') as HTMLInputElement | null;
     const yiyunDianranGlowIntensityVal = container.querySelector('#yiyunDianranGlowIntensityVal') as HTMLElement | null;
     const yiyunDianranGlowColor = container.querySelector('#yiyunDianranGlowColor') as HTMLInputElement | null;
+    const palettePixelSize = container.querySelector('#palettePixelSize') as HTMLSelectElement | null;
+    const palettePixelPalette = container.querySelector('#palettePixelPalette') as HTMLSelectElement | null;
+    const palettePixelLevels = container.querySelector('#palettePixelLevels') as HTMLInputElement | null;
+    const palettePixelNoise = container.querySelector('#palettePixelNoise') as HTMLInputElement | null;
+    const palettePixelNoiseVal = container.querySelector('#palettePixelNoiseVal') as HTMLElement | null;
     const nostalgicComicLevelCount = container.querySelector('#nostalgicComicLevelCount') as HTMLInputElement | null;
     const nostalgicComicEdgeThreshold = container.querySelector('#nostalgicComicEdgeThreshold') as HTMLInputElement | null;
     const nostalgicComicEdgeThresholdVal = container.querySelector('#nostalgicComicEdgeThresholdVal') as HTMLElement | null;
@@ -442,6 +490,14 @@ export function initRevealUI(global: Global): () => void {
                 glowColor: [0.0, 0.184, 0.655]
             };
         }
+        if (type === 'palette-pixel') {
+            return {
+                pixelSize: DEFAULT_PALETTE_PIXEL_SETTINGS.pixelSize,
+                paletteIndex: DEFAULT_PALETTE_PIXEL_SETTINGS.paletteIndex,
+                levels: DEFAULT_PALETTE_PIXEL_SETTINGS.levels,
+                ditherSpread: DEFAULT_PALETTE_PIXEL_SETTINGS.ditherSpread
+            };
+        }
         return {};
     };
 
@@ -543,6 +599,7 @@ export function initRevealUI(global: Global): () => void {
         const showWeatherControls = pType === 'falling-rain' || pType === 'falling-snow';
         persistentWeatherControls?.classList[showWeatherControls ? 'remove' : 'add']('hidden');
         persistentYiyunDianranControls?.classList[pType === 'yiyun-dianran' ? 'remove' : 'add']('hidden');
+        persistentPalettePixelControls?.classList[pType === 'palette-pixel' ? 'remove' : 'add']('hidden');
         persistentNostalgicComicControls?.classList[pType === 'nostalgic-comic' ? 'remove' : 'add']('hidden');
 
         writeTextInput(petalsTextureUrl, params.petalTextureUrl, '/textures/petal-atlas.png');
@@ -579,6 +636,34 @@ export function initRevealUI(global: Global): () => void {
         if (yiyunDianranGlowColor) {
             yiyunDianranGlowColor.value = rgbTripleToHex(params.glowColor, [0.0, 0.184, 0.655]);
         }
+
+        if (palettePixelSize) {
+            const pixelSize = typeof params.pixelSize === 'number' && Number.isFinite(params.pixelSize)
+                ? params.pixelSize
+                : DEFAULT_PALETTE_PIXEL_SETTINGS.pixelSize;
+            const snapped = (PALETTE_PIXEL_SIZE_STEPS as readonly number[]).includes(pixelSize)
+                ? pixelSize
+                : DEFAULT_PALETTE_PIXEL_SETTINGS.pixelSize;
+            palettePixelSize.value = String(snapped);
+        }
+        if (palettePixelPalette) {
+            const idx = typeof params.paletteIndex === 'number' && Number.isFinite(params.paletteIndex)
+                ? Math.min(7, Math.max(1, Math.floor(params.paletteIndex)))
+                : DEFAULT_PALETTE_PIXEL_SETTINGS.paletteIndex;
+            palettePixelPalette.value = String(idx);
+        }
+        writeNumberInput(
+            palettePixelLevels,
+            params.levels,
+            DEFAULT_PALETTE_PIXEL_SETTINGS.levels
+        );
+        writeSlider(
+            palettePixelNoise,
+            palettePixelNoiseVal,
+            params.ditherSpread,
+            DEFAULT_PALETTE_PIXEL_SETTINGS.ditherSpread,
+            3
+        );
 
         writeNumberInput(nostalgicComicLevelCount, params.levelCount, 6);
         writeSlider(nostalgicComicEdgeThreshold, nostalgicComicEdgeThresholdVal, params.edgeThreshold, 0.8, 2);
@@ -647,6 +732,26 @@ export function initRevealUI(global: Global): () => void {
         syncSliderValue(yiyunDianranSaturation, yiyunDianranSaturationVal, 2);
         syncSliderValue(yiyunDianranGlowIntensity, yiyunDianranGlowIntensityVal, 3);
         onYiyunDianranParamsChange();
+    };
+
+    const onPalettePixelParamsChange = () => {
+        const paletteRaw = palettePixelPalette ? Number.parseInt(palettePixelPalette.value, 10) : NaN;
+        const paletteIndex = Number.isFinite(paletteRaw)
+            ? Math.min(7, Math.max(1, paletteRaw))
+            : DEFAULT_PALETTE_PIXEL_SETTINGS.paletteIndex;
+        const pixelRaw = palettePixelSize ? Number.parseInt(palettePixelSize.value, 10) : NaN;
+        const pixelSize = Number.isFinite(pixelRaw) ? pixelRaw : DEFAULT_PALETTE_PIXEL_SETTINGS.pixelSize;
+        patchPersistentEffectParams({
+            pixelSize,
+            paletteIndex,
+            levels: readNumberInput(palettePixelLevels, DEFAULT_PALETTE_PIXEL_SETTINGS.levels),
+            ditherSpread: readNumberInput(palettePixelNoise, DEFAULT_PALETTE_PIXEL_SETTINGS.ditherSpread)
+        });
+    };
+
+    const onPalettePixelNoiseInput = () => {
+        syncSliderValue(palettePixelNoise, palettePixelNoiseVal, 3);
+        onPalettePixelParamsChange();
     };
 
     const onNostalgicComicParamsChange = () => {
@@ -885,6 +990,10 @@ export function initRevealUI(global: Global): () => void {
     yiyunDianranSaturation?.addEventListener('input', onYiyunDianranSliderInput);
     yiyunDianranGlowIntensity?.addEventListener('input', onYiyunDianranSliderInput);
     yiyunDianranGlowColor?.addEventListener('input', onYiyunDianranParamsChange);
+    palettePixelSize?.addEventListener('change', onPalettePixelParamsChange);
+    palettePixelPalette?.addEventListener('change', onPalettePixelParamsChange);
+    palettePixelLevels?.addEventListener('change', onPalettePixelParamsChange);
+    palettePixelNoise?.addEventListener('input', onPalettePixelNoiseInput);
     nostalgicComicLevelCount?.addEventListener('change', onNostalgicComicParamsChange);
     nostalgicComicEdgeThreshold?.addEventListener('input', onNostalgicComicSliderInput);
     nostalgicComicPaperColor?.addEventListener('input', onNostalgicComicParamsChange);
@@ -940,6 +1049,10 @@ export function initRevealUI(global: Global): () => void {
         yiyunDianranSaturation?.removeEventListener('input', onYiyunDianranSliderInput);
         yiyunDianranGlowIntensity?.removeEventListener('input', onYiyunDianranSliderInput);
         yiyunDianranGlowColor?.removeEventListener('input', onYiyunDianranParamsChange);
+        palettePixelSize?.removeEventListener('change', onPalettePixelParamsChange);
+        palettePixelPalette?.removeEventListener('change', onPalettePixelParamsChange);
+        palettePixelLevels?.removeEventListener('change', onPalettePixelParamsChange);
+        palettePixelNoise?.removeEventListener('input', onPalettePixelNoiseInput);
         nostalgicComicLevelCount?.removeEventListener('change', onNostalgicComicParamsChange);
         nostalgicComicEdgeThreshold?.removeEventListener('input', onNostalgicComicSliderInput);
         nostalgicComicPaperColor?.removeEventListener('input', onNostalgicComicParamsChange);

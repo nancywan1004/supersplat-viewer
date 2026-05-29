@@ -6,6 +6,7 @@ import { PERSISTENT_EFFECT_TYPES } from '../effect-types';
 import { isPersistentVfx } from '../reveal/reveal-policy';
 import { GsplatPersistentFallingPetals, GsplatPersistentFallingWeather } from './falling-weather-persistent';
 import { GsplatPersistentNostalgicComic } from './nostalgic-comic-persistent';
+import { GsplatPersistentPalettePixel } from './palette-pixel-persistent';
 import { GsplatPersistentYiyunDianran } from './yiyun-dianran-persistent';
 import { GsplatRevealPerlinWave } from './gsplat-perlin-wave';
 import { applyPersistentEffectParamsToScript } from './persistent-effect-params';
@@ -42,6 +43,8 @@ export function mountPersistentGsplatByEffectType(
             return createNostalgicComicScript(gsplatEntity, autoStart, effectParams);
         case 'yiyun-dianran':
             return createYiyunDianranScript(gsplatEntity, autoStart, effectParams);
+        case 'palette-pixel':
+            return createPalettePixelScript(gsplatEntity, autoStart, effectParams);
         default:
             console.warn('[persistent-effect] persistent type in registry but no mount branch:', effectType);
             return null;
@@ -68,6 +71,30 @@ export function createYiyunDianranScript(
         return script;
     } catch (error) {
         console.error('Failed to create yiyun-dianran persistent script:', error);
+        return null;
+    }
+}
+
+export function createPalettePixelScript(
+    gsplatEntity: Entity,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn('Cannot create palette-pixel script - entity or script component not ready');
+        return null;
+    }
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentPalettePixel) as any;
+        if (script) {
+            applyPersistentEffectParamsToScript(script, 'palette-pixel', effectParams ?? undefined);
+            script.enabled = autoStart;
+            script.applyConfig?.();
+        }
+        return script;
+    } catch (error) {
+        console.error('Failed to create palette-pixel persistent script:', error);
         return null;
     }
 }

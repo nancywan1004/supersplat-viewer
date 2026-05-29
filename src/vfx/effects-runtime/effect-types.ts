@@ -48,7 +48,8 @@ export const PERSISTENT_EFFECT_TYPE_VALUES = [
     'falling-rain',
     'falling-snow',
     'nostalgic-comic',
-    'yiyun-dianran'
+    'yiyun-dianran',
+    'palette-pixel'
 ] as const;
 
 /**

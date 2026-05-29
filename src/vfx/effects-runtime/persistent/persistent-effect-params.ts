@@ -77,13 +77,21 @@ const YIYUN_DIANRAN = new Set([
     'glowColor'
 ]);
 
+const PALETTE_PIXEL = new Set([
+    'pixelSize',
+    'paletteIndex',
+    'levels',
+    'ditherSpread'
+]);
+
 const BY_TYPE: Record<string, ReadonlySet<string>> = {
     'perlin-wave': PERLIN_WAVE,
     'falling-petals': FALLING_PETALS,
     'falling-rain': FALLING_WEATHER,
     'falling-snow': FALLING_WEATHER,
     'nostalgic-comic': NOSTALGIC_COMIC,
-    'yiyun-dianran': YIYUN_DIANRAN
+    'yiyun-dianran': YIYUN_DIANRAN,
+    'palette-pixel': PALETTE_PIXEL
 };
 
 function isVec3Triple(v: unknown): v is [number, number, number] {

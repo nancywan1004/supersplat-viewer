@@ -222,6 +222,14 @@ const isYiyunDianranPersistentActive = (settings: ExperienceSettings): boolean =
     return persistent?.type === 'yiyun-dianran';
 };
 
+const isPalettePixelPersistentActive = (settings: ExperienceSettings): boolean => {
+    if (settings.effects?.persistent?.enabled === false) {
+        return false;
+    }
+    const persistent = readPersistentRevealParams(settings);
+    return persistent?.type === 'palette-pixel';
+};
+
 const YIYUN_DIANRAN_PAPER_CLEAR = new Color(0.98, 0.94, 0.85, 1);
 
 const vec = new Vec3();
@@ -1185,7 +1193,11 @@ z: ${cameraInfo.target.z.toFixed(6)}
             (anyPostEffectEnabled(postEffectSettings) ||
                 highPrecisionRendering ||
                 bloomPipelineWanted);
-        const enableCameraFrame = !app.xr.active && (computeRequiresCameraFrame || postFxRequested);
+        const enableCameraFrame = !app.xr.active && (
+            computeRequiresCameraFrame ||
+            postFxRequested ||
+            isPalettePixelPersistentActive(settings)
+        );
 
         if (enableCameraFrame) {
             if (!this.cameraFrame) {
