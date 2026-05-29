@@ -43,8 +43,8 @@ export type PalettePixelSettings = {
     levels: number;
     /**
      * 色阶映射域（色盘一行 {@link PALETTE_LUMA_STEP_COUNT} 色）：1 不变。
-     * [0,1]：先把场景明度域映射到色盘占用索引段（如 5~11），再绕其中点（如 8）向内压缩，有效跨度 levelRange×20；
-     * (1,2]：绕整盘中心对称，有效色数 = 20×(levelRange−1)（如 1.5→10 色，2→20 色）。
+     * [0,1)：先把场景明度域映射到色盘占用索引段（如 5~11），再绕占用段中心向内压缩。
+     * (1,2]：同样绕占用段中心向外扩张（乘系数），不仅扩大可搜索范围，也会同步放大原始命中索引位移。
      */
     levelRange: number;
     ditherSpread: number;
@@ -152,6 +152,21 @@ const snapPixelSize = (v: number): number => {
     return best;
 };
 
+/**
+ * 兼容两种 levelRange 输入协议：
+ * - 旧协议：直接传 [0,2]；
+ * - 新协议：UI 在 >1 分段映射到 [0,20]（表示有效色数）。
+ *   这里将 [0,20] 映射回 shader 使用的 [1,2]。
+ */
+const normalizeLevelRange = (raw: unknown): number => {
+    const v = finiteOr(raw, DEFAULT_PALETTE_PIXEL_SETTINGS.levelRange);
+    if (v > 2) {
+        const effectiveCount = clamp(v, 0, PALETTE_LUMA_STEP_COUNT);
+        return clamp(1 + (effectiveCount / PALETTE_LUMA_STEP_COUNT), 1, 2);
+    }
+    return clamp(v, 0, 2);
+};
+
 export function normalizePalettePixelSettings(raw: unknown): PalettePixelSettings {
     const obj = (raw && typeof raw === 'object') ? raw as Record<string, unknown> : {};
     return {
@@ -160,7 +175,7 @@ export function normalizePalettePixelSettings(raw: unknown): PalettePixelSetting
         // 业务定义：有效编号仅 1~7，明确去掉 0 号位
         paletteIndex: clamp(Math.floor(finiteOr(obj.paletteIndex, DEFAULT_PALETTE_PIXEL_SETTINGS.paletteIndex)), 1, 7),
         levels: clamp(Math.floor(finiteOr(obj.levels, DEFAULT_PALETTE_PIXEL_SETTINGS.levels)), 2, 20),
-        levelRange: clamp(finiteOr(obj.levelRange, DEFAULT_PALETTE_PIXEL_SETTINGS.levelRange), 0, 2),
+        levelRange: normalizeLevelRange(obj.levelRange),
         ditherSpread: clamp(finiteOr(obj.ditherSpread, DEFAULT_PALETTE_PIXEL_SETTINGS.ditherSpread), 0, 0.08)
     };
 }
@@ -313,22 +328,23 @@ class PalettePixelPostEffect extends PostEffect {
                 float searchMax = paletteIdxMax;
 
                 if (uLevelRange < 1.0) {
-                    // [0,1]：绕占用段中心向内压缩（如 5~11 绕 8）
+                    // [0,1)：绕占用段中心向内压缩（如 5~11 绕 8）
                     float ratio = uLevelRange;
-                    float span = ratio * PALETTE_STEPS;
                     float fullIdx = mix(sceneIdxMin, sceneIdxMax, sceneT);
+                    float baseHalfSpan = max((sceneIdxMax - sceneIdxMin) * 0.5, 0.5);
+                    float mappedHalfSpan = max(baseHalfSpan * ratio, 0.5);
                     targetIdx = centerIdx + (fullIdx - centerIdx) * ratio;
-                    searchMin = max(0.0, centerIdx - span * 0.5);
-                    searchMax = min(paletteIdxMax, centerIdx + span * 0.5);
+                    searchMin = max(0.0, centerIdx - mappedHalfSpan);
+                    searchMax = min(paletteIdxMax, centerIdx + mappedHalfSpan);
                 } else if (uLevelRange > 1.0) {
-                    // (1,2]：整盘 20 色，有效跨度 = 20×(levelRange-1)，绕色盘中心对称
-                    float stretch = uLevelRange - 1.0;
-                    float effectiveCount = PALETTE_STEPS * stretch;
-                    float paletteCenter = paletteIdxMax * 0.5;
-                    float effectiveHalfSpan = max((effectiveCount - 1.0) * 0.5, 0.0);
-                    targetIdx = paletteCenter + (sceneT - 0.5) * 2.0 * effectiveHalfSpan;
-                    searchMin = max(0.0, paletteCenter - effectiveHalfSpan);
-                    searchMax = min(paletteIdxMax, paletteCenter + effectiveHalfSpan);
+                    // (1,2]：绕占用段中心向外扩张（乘系数），原命中索引位移也同步放大
+                    float ratio = uLevelRange;
+                    float fullIdx = mix(sceneIdxMin, sceneIdxMax, sceneT);
+                    float baseHalfSpan = max((sceneIdxMax - sceneIdxMin) * 0.5, 0.5);
+                    float mappedHalfSpan = min(baseHalfSpan * ratio, PALETTE_STEPS * 0.5);
+                    targetIdx = centerIdx + (fullIdx - centerIdx) * ratio;
+                    searchMin = max(0.0, centerIdx - mappedHalfSpan);
+                    searchMax = min(paletteIdxMax, centerIdx + mappedHalfSpan);
                 } else {
                     targetIdx = mix(sceneIdxMin, sceneIdxMax, sceneT);
                     searchMin = sceneIdxMin;
