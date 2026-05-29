@@ -1,5 +1,4 @@
 import {
-    getSceneAssetCollisionRuntime,
     isSceneAssetCollisionRuntimeActive,
     normalizeSceneAssetCollisionScale,
     patchSceneAssetCollisionRuntimeState,
@@ -8,6 +7,7 @@ import {
     type SceneAssetCollisionAxisScale
 } from '../../scene-assets/collision/scene-asset-collision';
 import { getSceneAssetCollisionDebugVisual } from '../../scene-assets/collision/scene-asset-collision-debug';
+import { getCameraCollisionManager } from '../../collision/camera-collision-manager';
 import type { Global } from '../../types';
 
 export function syncSceneAssetCollisionFromState(global: Global): void {
@@ -22,15 +22,15 @@ export function getCameraSettingsHTML(): string {
         <span>物理碰撞</span>
     </div>
     <div id="cameraSettingsSubpanel" class="subpanel">
-        <div class="settingsRow camera-settings-hint" id="sceneAssetCollisionHint">
-            对所有可见 mesh/gaussian 放置项生效；Fly / Orbit 推开，仅 Viewer 或编辑预览阻挡相机。线框显示全部碰撞盒。
+        <div class="settingsRow camera-settings-hint" id="cameraCollisionHint">
+            统一控制场景 collision 网格（Walk/Fly 贴地推开）与放置资产 AABB（Fly/Orbit）；仅 Viewer 或编辑预览生效。场景网格调试线框见顶栏「Show Collision」。
         </div>
         <div class="settingsRow">
-            <label for="sceneAssetCollisionEnabled">放置资产包围盒碰撞</label>
-            <input type="checkbox" id="sceneAssetCollisionEnabled" />
+            <label for="cameraCollisionEnabled">启用物理碰撞</label>
+            <input type="checkbox" id="cameraCollisionEnabled" />
         </div>
         <div class="settingsRow">
-            <label for="sceneAssetCollisionDebugVisual">显示碰撞 AABB 线框</label>
+            <label for="sceneAssetCollisionDebugVisual">显示放置资产碰撞 AABB 线框</label>
             <input type="checkbox" id="sceneAssetCollisionDebugVisual" />
         </div>
         <div id="sceneAssetCollisionScalePanel">
@@ -97,11 +97,12 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
     const { events } = global;
     syncSceneAssetCollisionFromState(global);
     const readRs = () => readSceneAssetCollisionRuntimeState(global);
+    const collisionMgr = () => getCameraCollisionManager(global);
 
-    const enabledInput = root.querySelector<HTMLInputElement>('#sceneAssetCollisionEnabled');
+    const enabledInput = root.querySelector<HTMLInputElement>('#cameraCollisionEnabled');
     const debugVisualInput = root.querySelector<HTMLInputElement>('#sceneAssetCollisionDebugVisual');
     const autoFitInput = root.querySelector<HTMLInputElement>('#sceneAssetCollisionAutoFit');
-    const hintEl = root.querySelector<HTMLElement>('#sceneAssetCollisionHint');
+    const hintEl = root.querySelector<HTMLElement>('#cameraCollisionHint');
     const scalePanel = root.querySelector<HTMLElement>('#sceneAssetCollisionScalePanel');
     const manualScalePanel = root.querySelector<HTMLElement>('#sceneAssetCollisionManualScalePanel');
 
@@ -146,16 +147,30 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
 
     const updateActiveHint = () => {
         if (!hintEl) return;
-        const rs = readRs();
-        const active = isSceneAssetCollisionRuntimeActive(global, rs.enabled);
-        const base = '对所有可见 mesh/gaussian 放置项生效；Fly / Orbit 推开，仅 Viewer 或编辑预览阻挡相机。线框显示全部碰撞盒。';
-        if (!rs.enabled) {
+        const enabled = collisionMgr().readEnabled();
+        if (enabledInput) {
+            enabledInput.checked = enabled;
+        }
+        const hasSceneMesh = global.state.hasCollision;
+        const base =
+            '统一控制场景 collision 网格（Walk/Fly 贴地推开）与放置资产 AABB（Fly/Orbit）；仅 Viewer 或编辑预览生效。'
+            + (hasSceneMesh ? ' 场景网格调试线框见顶栏「Show Collision」。' : '');
+        if (!enabled) {
             hintEl.textContent = base;
             return;
         }
-        hintEl.textContent = active
-            ? `${base} 当前已启用碰撞推开。`
-            : `${base} 已开启开关，进入 Viewer 或预览模式后生效。`;
+        const active = collisionMgr().isRuntimeActive();
+        const parts: string[] = [];
+        if (active) {
+            parts.push('当前已启用物理碰撞。');
+            if (hasSceneMesh) parts.push('场景网格已参与 Walk/Fly。');
+            if (isSceneAssetCollisionRuntimeActive(global, enabled)) {
+                parts.push('放置资产 AABB 已参与 Fly/Orbit。');
+            }
+        } else {
+            parts.push('已开启开关，进入 Viewer 或预览模式后生效。');
+        }
+        hintEl.textContent = `${base} ${parts.join('')}`;
     };
 
     const readAxisFromBindings = (bindings: AxisBinding[]): SceneAssetCollisionAxisScale => {
@@ -217,19 +232,17 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
 
     let onEnabledChange: (() => void) | null = null;
     if (enabledInput) {
-        enabledInput.checked = readRs().enabled;
+        enabledInput.checked = collisionMgr().readEnabled();
         onEnabledChange = () => {
-            patchSceneAssetCollisionRuntimeState(global, { enabled: enabledInput.checked });
-            syncSceneAssetCollisionRuntime(global);
+            collisionMgr().setEnabled(enabledInput.checked);
             if (scalePanel) {
                 scalePanel.classList.toggle('hidden', !enabledInput.checked);
             }
             updateActiveHint();
-            events.fire('sceneAssetCollision:changed');
         };
         enabledInput.addEventListener('change', onEnabledChange);
         if (scalePanel) {
-            scalePanel.classList.toggle('hidden', !readRs().enabled);
+            scalePanel.classList.toggle('hidden', !collisionMgr().readEnabled());
         }
     }
 

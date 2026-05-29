@@ -279,4 +279,5 @@ export function applySettingsSnapshot(global: Global, snapshot: ExperienceSettin
     syncEffectsRuntimeStateFromSettings(global.state, global.settings as ExperienceSettings);
     applySceneAssetCollisionFromSettings(global);
     syncSceneAssetCollisionRuntime(global);
+    global.events.fire('cameraCollision:changed');
 }

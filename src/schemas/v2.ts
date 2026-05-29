@@ -175,7 +175,7 @@ type ExperienceSettings = {
     sceneAssets?: SceneAsset[];
     /** 场景音视频热区全局参数（可选；缺省由 `ensureSceneMediaHotspot` 补齐） */
     sceneMediaHotspot?: SceneMediaHotspotSettings;
-    /** 放置资产 AABB 相机碰撞（开关、手动 XYZ、autoFit；不含调试线框） */
+    /** 相机物理碰撞：`enabled` 总开关（场景 mesh + 放置资产 AABB）；`scale` 仅放置资产 */
     sceneAssetCollision?: SceneAssetCollisionSettings;
 };
 

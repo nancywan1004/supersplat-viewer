@@ -337,6 +337,14 @@ class CameraManager {
     getTargetConstraint(): BoxConstraint | null {
         return this.targetConstraint;
     }
+
+    /** 更新 urlParam 加载的 Collision 在 walk / fly 上的引用（与放置资产 AABB 推开独立） */
+    setUrlParamCollision(collision: Collision | null): void {
+        const bundle = this.controllersBundle;
+        if (!bundle) return;
+        bundle.fly.collision = collision;
+        bundle.walk.collision = collision;
+    }
     private constraintVisualizer: Entity | null = null;
     private cameraBoundsVisualizer: Entity | null = null;
     private debugBoundsLayerId: number | null = null;

@@ -44,7 +44,7 @@ export type EffectsRuntimeState = {
 
 /**
  * 放置资产碰撞会话运行态（`global.state` / observe；`debugVisual` 不入 settings.json）。
- * 持久化字段与 `settings.sceneAssetCollision`（{@link SceneAssetCollisionSettings}）对齐。
+ * 持久化字段与 `settings.sceneAssetCollision` 对齐；`enabled` 为场景 mesh + 放置资产 AABB 总开关。
  */
 export type SceneAssetCollisionRuntimeState = SceneAssetCollisionSettings & {
     debugVisual: boolean;

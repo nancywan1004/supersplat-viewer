@@ -9,6 +9,7 @@ import type {
     SceneAssetCollisionSettings,
     SceneAssetCollisionSettingsPatch
 } from '../../schemas/v2-custom';
+import { getCameraCollisionManager } from '../../collision/camera-collision-manager';
 import type { AssetLibraryType, Global, SceneAssetCollisionRuntimeState, ScenePlacedItem } from '../../types';
 
 export type {
@@ -755,9 +756,7 @@ export class SceneAssetMultiAabbCollision implements Collision {
 
 export function isSceneAssetCollisionRuntimeActive(global: Global, enabled: boolean): boolean {
     if (!enabled) return false;
-    const { state } = global;
-    if (!state.editMode) return true;
-    return state.previewMode === true;
+    return getCameraCollisionManager(global).isRuntimeActive();
 }
 
 /**

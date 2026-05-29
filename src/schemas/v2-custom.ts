@@ -226,8 +226,9 @@ type SceneAssetCollisionScale = {
     autoFit?: boolean;
 };
 
-/** 写入 settings.json 的放置资产碰撞配置（不含调试线框） */
+/** 写入 settings.json 的相机物理碰撞配置（不含调试线框） */
 type SceneAssetCollisionSettings = {
+    /** 总开关：场景 collision mesh + 放置资产 AABB */
     enabled: boolean;
     scale: SceneAssetCollisionScale;
 };

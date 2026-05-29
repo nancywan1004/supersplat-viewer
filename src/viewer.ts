@@ -31,6 +31,7 @@ import { CameraManager } from './camera-manager';
 import { Camera } from './cameras/camera';
 import type { Collision } from './collision';
 import { MeshCollision, VoxelCollision } from './collision';
+import { getCameraCollisionManager } from './collision/camera-collision-manager';
 import { nearlyEquals } from './core/math';
 import { InputController } from './input-controller';
 import { MeshDebugOverlay } from './mesh-debug-overlay';
@@ -232,6 +233,12 @@ class Viewer {
 
     /** sceneAsset AABB 碰撞运行时清理 */
     cleanupSceneAssetCollision: (() => void) | null = null;
+
+    /** 相机物理碰撞 Manager 清理 */
+    cleanupCameraCollision: (() => void) | null = null;
+
+    /** urlParam 加载的原始场景碰撞（与开关/编辑态门控无关，供 debug overlay 使用） */
+    baseSceneCollision: Collision | null = null;
 
     /** 音视频热区播控卸载 */
     cleanupMediaHotspotController: (() => void) | null = null;
@@ -611,8 +618,12 @@ class Viewer {
             this.picker = new Picker(app, camera);
             (app as any).__picker = this.picker;
             this.inputController = new InputController(global, this.picker);
-            this.inputController.collision = collision ?? null;
-            state.hasCollision = !!collision;
+            this.baseSceneCollision = collision ?? null;
+            state.hasCollision = !!this.baseSceneCollision;
+            const cameraCollision = getCameraCollisionManager(global);
+            cameraCollision.setUrlCollisionSource(this.baseSceneCollision);
+            const gatedUrlCollision = cameraCollision.resolveActiveUrlCollision();
+            this.inputController.collision = gatedUrlCollision;
 
             const rendererMode = (config as any).renderer as string | undefined;
             if (collision instanceof VoxelCollision && rendererMode !== 'webgl') {
@@ -640,10 +651,33 @@ class Viewer {
             this.inputController.setMoveSpeedFromSceneSize(sceneSize);
 
             // 先创建 cameraManager，因为 revealController 需要它来获取 targetConstraint
-            this.cameraManager = new (CameraManager as any)(global, sceneBound, collision);
+            this.cameraManager = new (CameraManager as any)(global, sceneBound, gatedUrlCollision);
             if (!config.noui) {
-                this.navCursor = new NavCursor(app, camera, collision ?? null, events, state, this.picker, sceneBound.halfExtents.length());
+                this.navCursor = new NavCursor(
+                    app,
+                    camera,
+                    gatedUrlCollision,
+                    events,
+                    state,
+                    this.picker,
+                    sceneBound.halfExtents.length()
+                );
             }
+
+            cameraCollision.attachConsumers({
+                applyUrlCollision: (gated) => {
+                    if (this.inputController) {
+                        this.inputController.collision = gated;
+                    }
+                    if (this.cameraManager) {
+                        this.cameraManager.setUrlParamCollision(gated);
+                    }
+                    if (this.navCursor) {
+                        this.navCursor.setCollision(gated);
+                    }
+                }
+            });
+            this.cleanupCameraCollision = cameraCollision.start();
 
             // NightMode 必须在 RevealController 之前创建：Reveal 构造函数里会立即 createEffect 并 fire('nightMode:exit')。
             // 若 NightMode 尚未注册监听，首次开场的 exit 会丢失，NightMode 仍占用 gsplatModifyVS，与 sketch 等 VFX 互斥失败；
