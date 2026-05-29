@@ -1,7 +1,7 @@
 import type { Entity, EventHandler, AppBase, Asset } from 'playcanvas';
 
 import type { Picker } from './picker';
-import type { ExperienceSettings, SceneAssetCollisionSettings } from './settings';
+import type { ExperienceSettings, SceneCollisionSettings } from './settings';
 import {
     type AssetEffectRuntimeStatus,
     type RevealEffectRuntimeStatus,
@@ -45,9 +45,9 @@ export type EffectsRuntimeState = {
 
 /**
  * 放置资产碰撞会话运行态（`global.state` / observe；`debugVisual` 不入 settings.json）。
- * 持久化字段与 `settings.sceneAssetCollision` 对齐；`enabled` 为场景 mesh + 放置资产 AABB 总开关。
+ * 持久化字段来自 `settings.collision`；`enabled` 为场景 mesh + 放置资产 AABB 总开关。
  */
-export type SceneAssetCollisionRuntimeState = SceneAssetCollisionSettings & {
+export type SceneAssetCollisionRuntimeState = SceneCollisionSettings & {
     debugVisual: boolean;
 };
 
@@ -249,7 +249,7 @@ type State = {
     selectedLightId?: string | null;
     /** 光源变换模式（与环境模块底部工具栏联动） */
     lightTransformMode?: LightTransformMode | null;
-    /** 放置资产 AABB 碰撞会话运行态；持久化见 `settings.sceneAssetCollision` */
+    /** 放置资产 AABB 碰撞会话运行态；持久化见 `settings.collision` */
     sceneAssetCollisionRuntimeState?: SceneAssetCollisionRuntimeState;
     gamingControls: boolean;
     /**

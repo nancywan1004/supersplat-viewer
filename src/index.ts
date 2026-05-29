@@ -49,6 +49,7 @@ import {
     applySceneAssetCollisionFromSettings,
     createDefaultSceneAssetCollisionRuntimeState
 } from './scene-assets/collision/scene-asset-collision';
+import { getCameraCollisionManager } from './collision/camera-collision-manager';
 
 export { loadGsplatAsset };
 
@@ -372,6 +373,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
 
     ensureViewSettings(global);
     applySceneAssetCollisionFromSettings(global);
+    getCameraCollisionManager(global).configure();
 
     // 将原始配置挂载到 global 供后续恢复使用
     (global as any).__originalSettings = originalSettings;

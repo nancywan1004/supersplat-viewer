@@ -14,8 +14,8 @@ import type {
     SceneMediaHotspotPatch,
     SceneMediaHotspotVideoSettings,
     SceneMediaHotspotAudioSettings,
-    SceneAssetCollisionSettings,
-    SceneAssetCollisionSettingsPatch,
+    SceneCollisionSettings,
+    SceneCollisionSettingsPatch,
     LocalLightRegion,
     WorldSpaceBloomRegionJSON,
     EffectsSettings
@@ -175,8 +175,8 @@ type ExperienceSettings = {
     sceneAssets?: SceneAsset[];
     /** 场景音视频热区全局参数（可选；缺省由 `ensureSceneMediaHotspot` 补齐） */
     sceneMediaHotspot?: SceneMediaHotspotSettings;
-    /** 相机物理碰撞：`enabled` 总开关（场景 mesh + 放置资产 AABB）；`scale` 仅放置资产 */
-    sceneAssetCollision?: SceneAssetCollisionSettings;
+    /** 碰撞配置：场景 mesh URL + 物理碰撞总开关 + 放置资产 AABB 缩放 */
+    collision?: SceneCollisionSettings;
 };
 
 const TONEMAPPING = ['none', 'linear', 'filmic', 'hejl', 'aces', 'aces2', 'neutral'] as const;
@@ -350,13 +350,16 @@ const validateV2 = (data: unknown): ExperienceSettings => {
         }
     }
 
-    if (obj.sceneAssetCollision !== undefined) {
-        const sac = assertObject(obj.sceneAssetCollision, 'settings.sceneAssetCollision');
-        if (sac.enabled !== undefined) {
-            assertBoolean(sac.enabled, 'settings.sceneAssetCollision.enabled');
+    if (obj.collision !== undefined) {
+        const collision = assertObject(obj.collision, 'settings.collision');
+        if (collision.url !== undefined) {
+            assertString(collision.url, 'settings.collision.url');
         }
-        if (sac.scale !== undefined) {
-            assertObject(sac.scale, 'settings.sceneAssetCollision.scale');
+        if (collision.enabled !== undefined) {
+            assertBoolean(collision.enabled, 'settings.collision.enabled');
+        }
+        if (collision.scale !== undefined) {
+            assertObject(collision.scale, 'settings.collision.scale');
         }
     }
 
@@ -388,6 +391,6 @@ export type {
     SceneMediaHotspotPatch,
     SceneMediaHotspotVideoSettings,
     SceneMediaHotspotAudioSettings,
-    SceneAssetCollisionSettings,
-    SceneAssetCollisionSettingsPatch
+    SceneCollisionSettings,
+    SceneCollisionSettingsPatch
 };

@@ -1,4 +1,4 @@
-export { hasShadowCapability, isShadowSystemEnabled } from './shadow-policy';
+export { hasShadowSceneMesh, isShadowSystemEnabled } from './shadow-policy';
 export {
     applyGsplatCastShadows,
     applyPlacedMeshShadowFlags,

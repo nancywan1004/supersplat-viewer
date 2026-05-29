@@ -1,5 +1,4 @@
 import {
-    isSceneAssetCollisionRuntimeActive,
     normalizeSceneAssetCollisionScale,
     patchSceneAssetCollisionRuntimeState,
     readSceneAssetCollisionRuntimeState,
@@ -8,6 +7,8 @@ import {
 } from '../../scene-assets/collision/scene-asset-collision';
 import { getSceneAssetCollisionDebugVisual } from '../../scene-assets/collision/scene-asset-collision-debug';
 import {
+    collisionActive,
+    collisionEnabled,
     getCameraCollisionManager
 } from '../../collision/camera-collision-manager';
 import type { Global } from '../../types';
@@ -149,7 +150,7 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
 
     const updateActiveHint = () => {
         if (!hintEl) return;
-        const enabled = collisionMgr().readEnabled();
+        const enabled = collisionEnabled(global);
         if (enabledInput) {
             enabledInput.checked = enabled;
         }
@@ -162,13 +163,17 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
             hintEl.textContent = base;
             return;
         }
-        const active = collisionMgr().isRuntimeActive();
+        const active = collisionActive(global);
         const parts: string[] = [];
         if (active) {
             parts.push('当前已启用物理碰撞。');
             if (hasSceneMeshUrl) {
                 if (urlLoadState === 'loading') {
-                    parts.push('场景网格加载中…');
+                    parts.push(
+                        collisionMgr().getCollisionUrl()
+                            ? '场景网格加载中…'
+                            : '正在向 Universe 生成场景碰撞网格…'
+                    );
                 } else if (urlLoadState === 'ready') {
                     parts.push('场景网格已参与 Walk/Fly。');
                 } else if (urlLoadState === 'failed') {
@@ -177,7 +182,7 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
                     parts.push('场景网格将在需要时加载。');
                 }
             }
-            if (isSceneAssetCollisionRuntimeActive(global, enabled)) {
+            if (enabled && collisionActive(global)) {
                 parts.push('放置资产 AABB 已参与 Fly/Orbit。');
             }
         } else {
@@ -245,7 +250,7 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
 
     let onEnabledChange: (() => void) | null = null;
     if (enabledInput) {
-        enabledInput.checked = collisionMgr().readEnabled();
+        enabledInput.checked = collisionEnabled(global);
         onEnabledChange = () => {
             collisionMgr().setEnabled(enabledInput.checked);
             if (scalePanel) {
@@ -255,7 +260,7 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
         };
         enabledInput.addEventListener('change', onEnabledChange);
         if (scalePanel) {
-            scalePanel.classList.toggle('hidden', !collisionMgr().readEnabled());
+            scalePanel.classList.toggle('hidden', !collisionEnabled(global));
         }
     }
 

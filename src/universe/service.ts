@@ -32,6 +32,7 @@ const ENV_CONFIG = CURRENT_ENV === 'prod' ? PROD_ENV_CONFIG : TEST_ENV_CONFIG;
 const API_HOST = ENV_CONFIG.apiHost;
 const UPLOADED_FILE_HOST = ENV_CONFIG.uploadedFileHost;
 // export const VIEWER_HOST = ENV_CONFIG.viewerHost;
+export const buildUniverseApiUrl = (path: string): string => `${API_HOST}${path}`;
 //#endregion
 
 export const SPLATFILENAME='point_cloud.splat',SOGFILENAME='point_cloud.sog',SETTINGFILENAME='settings.json';
@@ -46,6 +47,8 @@ const UPDATE_PROJECT_DATA="/app/api/v1/project/version/create";   //post 更新�
 const UPDATE_PROJECT_THUMBNAIL = '/app/api/v1/saas/project/image';
 /** GET `/app/api/v1/project/version/{projectId}/original` — 初始版本模型文件列表 */
 const GET_ORIGINAL_PROJECT_FILES = '/app/api/v1/project/version';
+/** GET `/app/api/v1/project/version/{projectId}` — 当前版本模型文件列表 */
+const GET_LATEST_PROJECT_FILES = '/app/api/v1/project/version';
 /** 初始版本相机路径文件名（匹配列表项 `fileName` 的 basename） */
 export const TRANSFORM_JSON_BASENAME = 'transform.json';
 const GET_SINGLE_STSTOKEN="/oss/api/v1/oss/ststoken";  //post 单文件上传临时凭证
@@ -59,7 +62,7 @@ type UniverseAuthContext = {
 
 let universeAuthContext: UniverseAuthContext = {};
 
-const setUniverseAuthContext = (context: UniverseAuthContext) => {
+export const setUniverseAuthContext = (context: UniverseAuthContext) => {
     universeAuthContext = {
         ...universeAuthContext,
         ...context
@@ -428,6 +431,18 @@ export const isTransformJsonFileName = (fileName: string): boolean => {
 /**
  * 获取项目初始版本文件列表（未编辑过的原始模型包）。
  */
+const fetchProjectFilesFromUrl = async (url: string, errorLabel: string): Promise<OriginalProjectFileEntry[]> => {
+    const response = await fetchCloudJsonGet<GetProjectData_Response>(url);
+    const isSuccess = response.code === 200 || response.code === 1;
+    if (!isSuccess || !Array.isArray(response.data)) {
+        const apiMsg = typeof response.message === 'string' && response.message.trim()
+            ? response.message.trim()
+            : '';
+        throw new Error(apiMsg || `${errorLabel}（code=${response.code}）`);
+    }
+    return response.data;
+};
+
 export const fetchOriginalProjectFiles = async (
     projectId: number | string
 ): Promise<OriginalProjectFileEntry[]> => {
@@ -436,15 +451,19 @@ export const fetchOriginalProjectFiles = async (
         throw new Error('缺少 projectId');
     }
     const url = `${API_HOST}${GET_ORIGINAL_PROJECT_FILES}/${encodeURIComponent(id)}/original`;
-    const response = await fetchCloudJsonGet<GetProjectData_Response>(url);
-    const isSuccess = response.code === 200 || response.code === 1;
-    if (!isSuccess || !Array.isArray(response.data)) {
-        const apiMsg = typeof response.message === 'string' && response.message.trim()
-            ? response.message.trim()
-            : '';
-        throw new Error(apiMsg || `获取初始版本文件列表失败（code=${response.code}）`);
+    return fetchProjectFilesFromUrl(url, '获取初始版本文件列表失败');
+};
+
+/** 当前版本项目文件列表（碰撞 GLB 等） */
+export const fetchLatestProjectFiles = async (
+    projectId: number | string
+): Promise<OriginalProjectFileEntry[]> => {
+    const id = String(projectId).trim();
+    if (!id) {
+        throw new Error('缺少 projectId');
     }
-    return response.data;
+    const url = `${API_HOST}${GET_LATEST_PROJECT_FILES}/${encodeURIComponent(id)}`;
+    return fetchProjectFilesFromUrl(url, '获取当前版本文件列表失败');
 };
 
 /**
@@ -520,6 +539,9 @@ const fetchCloudJsonPost = async <TResponse>(
     logApi('POST', url, body, json);
     return json;
 };
+
+export const fetchUniverseJsonGet = fetchCloudJsonGet;
+export const fetchUniverseJsonPost = fetchCloudJsonPost;
 
 const getSingleStsToken = async (payload: Single_STSTOKEN_Request): Promise<Single_STSTOKEN_Response['data']> => {
     const url = `${API_HOST}${GET_SINGLE_STSTOKEN}`;

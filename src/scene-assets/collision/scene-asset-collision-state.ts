@@ -1,12 +1,12 @@
 import type {
     SceneAssetCollisionAxisScale,
     SceneAssetCollisionScale,
-    SceneAssetCollisionSettingsPatch
+    SceneCollisionSettingsPatch
 } from '../../schemas/v2-custom';
 import type { Global, SceneAssetCollisionRuntimeState } from '../../types';
 
 /** 设置面板 / state 写入时可接受的缩放参数（含历史标量） */
-export type SceneAssetCollisionScaleInput = NonNullable<SceneAssetCollisionSettingsPatch['scale']>;
+export type SceneAssetCollisionScaleInput = NonNullable<SceneCollisionSettingsPatch['scale']>;
 
 export const DEFAULT_SCENE_ASSET_COLLISION_AXIS_SCALE: SceneAssetCollisionAxisScale = {
     x: 1,

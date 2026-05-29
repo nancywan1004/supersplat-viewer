@@ -6,10 +6,11 @@ import type { ExperienceSettings } from '../../schemas/v2';
 import type {
     SceneAssetCollisionAxisScale,
     SceneAssetCollisionScale,
-    SceneAssetCollisionSettings,
-    SceneAssetCollisionSettingsPatch
+    SceneCollisionSettings,
+    SceneCollisionSettingsPatch
 } from '../../schemas/v2-custom';
-import { isCameraCollisionRuntimeActive } from '../../collision/camera-collision-gate';
+import { collisionActive } from '../../collision/camera-collision-manager';
+import { resolveCollisionUrl } from '../../collision/scene-collision-source';
 import type { AssetLibraryType, Global, SceneAssetCollisionRuntimeState, ScenePlacedItem } from '../../types';
 import {
     clampAutoFitFactor,
@@ -43,8 +44,8 @@ export {
 export type {
     SceneAssetCollisionAxisScale,
     SceneAssetCollisionScale,
-    SceneAssetCollisionSettings,
-    SceneAssetCollisionSettingsPatch
+    SceneCollisionSettings,
+    SceneCollisionSettingsPatch
 };
 export type { SceneAssetCollisionRuntimeState } from '../../types';
 
@@ -59,18 +60,9 @@ export function syncSceneAssetCollisionRuntime(global: Global): void {
     runtime.setScale(rs.scale);
 }
 
-export function sceneAssetCollisionSettingsFromRuntimeState(
-    rs: SceneAssetCollisionRuntimeState
-): SceneAssetCollisionSettings {
-    return {
-        enabled: rs.enabled,
-        scale: normalizeSceneAssetCollisionScale(rs.scale)
-    };
-}
-
 /** 从 settings 恢复碰撞配置到 state（保留当前 debugVisual，不写入 settings） */
 export function applySceneAssetCollisionFromSettings(global: Global): void {
-    const persisted = (global.settings as ExperienceSettings).sceneAssetCollision;
+    const persisted = (global.settings as ExperienceSettings).collision;
     if (!persisted) {
         return;
     }
@@ -82,12 +74,20 @@ export function applySceneAssetCollisionFromSettings(global: Global): void {
     });
 }
 
-/** 将当前 state 碰撞配置写入 global.settings，供存盘序列化 */
-export function persistSceneAssetCollisionToSettings(global: Global): void {
+/** 将 runtime 与当前生效的 collision URL 写入 `settings.collision`，供存盘序列化 */
+export function persistCollisionToSettings(global: Global): void {
+    const rs = readSceneAssetCollisionRuntimeState(global);
     const settings = global.settings as ExperienceSettings;
-    settings.sceneAssetCollision = sceneAssetCollisionSettingsFromRuntimeState(
-        readSceneAssetCollisionRuntimeState(global)
-    );
+    const url = resolveCollisionUrl(global)?.url;
+    settings.collision = {
+        ...settings.collision,
+        enabled: rs.enabled,
+        scale: normalizeSceneAssetCollisionScale(rs.scale),
+        ...(url ? { url } : {})
+    };
+    if (!url && settings.collision) {
+        delete settings.collision.url;
+    }
 }
 
 const COLLIDABLE_ASSET_TYPES: ReadonlySet<AssetLibraryType> = new Set(['mesh', 'gaussian']);
@@ -671,10 +671,6 @@ export class SceneAssetMultiAabbCollision implements Collision {
     }
 }
 
-export function isSceneAssetCollisionRuntimeActive(global: Global, enabled: boolean): boolean {
-    if (!enabled) return false;
-    return isCameraCollisionRuntimeActive(global);
-}
 
 /**
  * 管理场景中所有可碰撞放置资产的 AABB 碰撞体构建与缓存失效。
@@ -732,7 +728,7 @@ export class SceneAssetCollisionRuntime {
     }
 
     isActive(): boolean {
-        return isSceneAssetCollisionRuntimeActive(this.global, this.enabled);
+        return this.enabled && collisionActive(this.global);
     }
 
     markDirty(): void {

@@ -5,7 +5,7 @@ import type { AnnotationManager } from '../annotation-toolbar/annotation-manager
 import { DEFAULT_BLOOM, DEFAULT_SHADOW } from './settings-serialize-configs';
 import {
     applySceneAssetCollisionFromSettings,
-    persistSceneAssetCollisionToSettings,
+    persistCollisionToSettings,
     syncSceneAssetCollisionRuntime
 } from '../scene-assets/collision/scene-asset-collision';
 import { serializeSceneMediaHotspotForPersistence } from './settings-serialize-helper';
@@ -154,10 +154,20 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
 
     out.sceneAssets = buildSceneAssetsForPersistence(global);
 
-    persistSceneAssetCollisionToSettings(global);
-    const collisionPersisted = (global.settings as ExperienceSettings).sceneAssetCollision;
-    if (collisionPersisted) {
-        out.sceneAssetCollision = JSON.parse(JSON.stringify(collisionPersisted));
+    delete (out as Record<string, unknown>).sceneAssetCollision;
+
+    persistCollisionToSettings(global);
+    const collision = (global.settings as ExperienceSettings).collision;
+    if (collision && typeof collision === 'object') {
+        out.collision = JSON.parse(JSON.stringify(collision));
+        const url = typeof collision.url === 'string' ? collision.url.trim() : '';
+        if (url) {
+            (out.collision as { url?: string }).url = url;
+        } else {
+            delete (out.collision as { url?: string }).url;
+        }
+    } else {
+        delete (out as Record<string, unknown>).collision;
     }
 
     out.sceneMediaHotspot = serializeSceneMediaHotspotForPersistence(global.settings as ExperienceSettings);

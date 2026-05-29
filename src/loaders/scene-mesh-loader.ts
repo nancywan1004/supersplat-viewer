@@ -3,11 +3,11 @@ import type { AppBase, Entity } from 'playcanvas';
 import { MeshCollision } from '../collision/mesh-collision';
 
 export type SceneMeshLoadResult = {
-    meshEntity: Entity;
+    sceneMeshEntity: Entity;
     meshCollision: MeshCollision;
 };
 
-export function isGlbUrl(url: string): boolean {
+export function isSceneMeshGlbUrl(url: string): boolean {
     try {
         const ext = new URL(url, typeof location !== 'undefined' ? location.href : undefined).pathname
             .split('.')
@@ -19,18 +19,15 @@ export function isGlbUrl(url: string): boolean {
     }
 }
 
-/** GLB 型 `?collision=`：同时用于物理碰撞与阴影接影。 */
-export function resolveSceneMeshUrl(collisionUrl?: string): string | undefined {
+/** 从 collision URL 解析 scene mesh（GLB）地址；非 GLB（如 voxel 包）返回 undefined。 */
+export function sceneMeshUrl(collisionUrl?: string): string | undefined {
     const collision = typeof collisionUrl === 'string' ? collisionUrl.trim() : '';
-    if (collision && isGlbUrl(collision)) {
+    if (collision && isSceneMeshGlbUrl(collision)) {
         return collision;
     }
     return undefined;
 }
 
-/**
- * 单次加载 GLB：同时产出接影 Entity 与 MeshCollision（同一 container，一次网络请求）。
- */
 export function loadSceneMesh(app: AppBase, url: string): Promise<SceneMeshLoadResult | null> {
     const baseUrl =
         typeof location !== 'undefined' && location?.href ? new URL(url, location.href).href : url;
@@ -56,11 +53,11 @@ export function loadSceneMesh(app: AppBase, url: string): Promise<SceneMeshLoadR
                 try {
                     const renders = asset.resource.renders ?? [];
                     const meshCollision = MeshCollision.fromContainerRenders(renders);
-                    const meshEntity = asset.resource.instantiateRenderEntity({
+                    const sceneMeshEntity = asset.resource.instantiateRenderEntity({
                         castShadows: false,
                         receiveShadows: true
                     });
-                    resolve({ meshEntity, meshCollision });
+                    resolve({ sceneMeshEntity, meshCollision });
                 } catch (loadErr) {
                     console.warn('[SceneMesh] parse failed:', url, loadErr);
                     resolve(null);

@@ -2,16 +2,13 @@ import type { Entity } from 'playcanvas';
 
 import type { Collision } from './collision';
 import { loadVoxelCollision } from './voxel-collision';
+import { isSceneMeshGlbUrl, loadSceneMesh, sceneMeshUrl } from '../loaders/scene-mesh-loader';
 import {
-    isGlbUrl,
-    loadSceneMesh,
-    resolveSceneMeshUrl
-} from '../loaders/scene-mesh-loader';
-import {
-    isCameraCollisionEditContextActive,
-    isCameraCollisionRuntimeActive,
-    readSceneAssetCollisionEnabled
-} from './camera-collision-gate';
+    canGenerateCollision,
+    ensureCollisionUrl,
+    resolveCollisionUrl,
+    SCENE_COLLISION_CHANGED
+} from './scene-collision-source';
 import {
     patchSceneAssetCollisionRuntimeState,
     SCENE_ASSET_COLLISION_APPLY_RUNTIME_STATE
@@ -19,12 +16,11 @@ import {
 import { isShadowSystemEnabled } from '../vfx/shadow/shadow-policy';
 import type { Global } from '../types';
 
-/** 将门控后的 urlParam 碰撞写入 walk / fly / input / nav */
+/** 将门控后的 collision 写入 walk / fly / input / nav */
 export type CameraCollisionConsumers = {
     applyUrlCollision: (collision: Collision | null) => void;
 };
 
-/** `cameraCollision:load` 载荷：urlParam 场景 mesh / voxel 懒加载状态 */
 export type CollisionLoadState = 'idle' | 'loading' | 'ready' | 'failed';
 
 export type CollisionLoadPayload = {
@@ -33,18 +29,34 @@ export type CollisionLoadPayload = {
 };
 
 export type SceneMeshReadyPayload = {
-    meshEntity: Entity;
+    sceneMeshEntity: Entity;
 };
 
+/** 物理碰撞总开关（`settings.collision.enabled` → runtime state） */
+export function collisionEnabled(global: Global): boolean {
+    return global.state.sceneAssetCollisionRuntimeState?.enabled === true;
+}
+
+function collisionContext(global: Global): boolean {
+    const { state } = global;
+    if (!state.editMode) {
+        return true;
+    }
+    return state.previewMode === true;
+}
+
+/** 总开关 + 可挡相机上下文 */
+export function collisionActive(global: Global): boolean {
+    return collisionEnabled(global) && collisionContext(global);
+}
+
 /**
- * 相机物理碰撞 + 场景 GLB（阴影接影与 collision 共用 mesh）统一调度。
+ * 相机 collision + scene mesh（GLB 接影与 mesh 物理碰撞同源）统一调度。
  */
 export class CameraCollisionManager {
     private urlCollision: Collision | null = null;
 
-    private meshEntity: Entity | null = null;
-
-    private collisionUrl: string | undefined;
+    private sceneMeshEntity: Entity | null = null;
 
     private loadState: CollisionLoadState = 'idle';
 
@@ -56,46 +68,31 @@ export class CameraCollisionManager {
 
     private readonly onContextOrToggleChanged = () => {
         this.syncConsumers();
-        void this.maybeEnsureSceneMeshResourcesLoaded();
+        this.scheduleSceneMeshLoad();
     };
 
     constructor(private readonly global: Global) {}
 
-    /** 登记 urlParam（不触发下载） */
-    configure(opts: { collisionUrl?: string }): void {
-        const collision = typeof opts.collisionUrl === 'string' ? opts.collisionUrl.trim() : '';
-        this.collisionUrl = collision || undefined;
-        if (this.collisionUrl) {
-            this.global.state.hasCollision = true;
-        }
+    configure(): void {
+        this.syncHasCollision();
     }
 
+    /** settings / URL 参数解析出的 collision 资源（GLB 或 voxel 包） */
     getCollisionUrl(): string | undefined {
-        return this.collisionUrl;
+        return resolveCollisionUrl(this.global)?.url;
     }
 
-    getSceneMeshUrl(): string | undefined {
-        return resolveSceneMeshUrl(this.collisionUrl);
+    private syncHasCollision(): void {
+        this.global.state.hasCollision =
+            !!resolveCollisionUrl(this.global) || canGenerateCollision(this.global);
     }
 
     getLoadState(): CollisionLoadState {
         return this.loadState;
     }
 
-    getShadowMeshEntity(): Entity | null {
-        return this.meshEntity;
-    }
-
-    readEnabled(): boolean {
-        return readSceneAssetCollisionEnabled(this.global);
-    }
-
-    isEditContextActive(): boolean {
-        return isCameraCollisionEditContextActive(this.global);
-    }
-
-    isRuntimeActive(): boolean {
-        return isCameraCollisionRuntimeActive(this.global);
+    getSceneMeshEntity(): Entity | null {
+        return this.sceneMeshEntity;
     }
 
     setEnabled(enabled: boolean): void {
@@ -103,20 +100,12 @@ export class CameraCollisionManager {
         this.global.events.fire(SCENE_ASSET_COLLISION_APPLY_RUNTIME_STATE);
         this.global.events.fire('cameraCollision:changed');
         this.global.events.fire('sceneAssetCollision:changed');
-        void this.maybeEnsureSceneMeshResourcesLoaded();
+        this.scheduleSceneMeshLoad();
     }
 
-    /** @deprecated 使用 ensureSceneMeshResourcesLoaded */
-    ensureUrlCollisionLoaded(): Promise<void> {
-        return this.ensureSceneMeshResourcesLoaded();
-    }
-
-    /**
-     * 按需加载：GLB（接影 + MeshCollision 单次请求）、voxel 碰撞包。
-     * 触发条件：物理碰撞总开关且 Viewer/预览，或阴影系统已开启且存在 GLB URL。
-     */
-    async ensureSceneMeshResourcesLoaded(): Promise<void> {
-        if (!this.shouldLoadSceneResources()) {
+    /** 按需加载 scene mesh（GLB）与/或 voxel collision。 */
+    async ensureSceneMeshLoaded(): Promise<void> {
+        if (!this.shouldLoadSceneMesh()) {
             return;
         }
         if (this.loadState === 'ready' && this.isLoadSatisfied()) {
@@ -129,8 +118,19 @@ export class CameraCollisionManager {
             this.loadState = 'idle';
         }
 
-        const plan = this.buildLoadPlan();
-        if (!plan.loadGlb && !plan.loadVoxel) {
+        let collisionUrl = this.getCollisionUrl();
+        if (!collisionUrl && this.shouldFetchCollisionFromUniverse()) {
+            const result = await ensureCollisionUrl(this.global);
+            this.syncHasCollision();
+            if (result.ok === false) {
+                console.warn('[CameraCollision] collision URL:', result.message);
+            } else {
+                collisionUrl = result.url;
+            }
+        }
+
+        const plan = this.sceneMeshLoadPlan(collisionUrl);
+        if (!plan.loadSceneMesh && !plan.loadVoxelCollision) {
             return;
         }
 
@@ -140,28 +140,28 @@ export class CameraCollisionManager {
 
         const { app } = this.global;
         this.loadPromise = (async () => {
-            let glbOk = !plan.loadGlb;
-            let voxelOk = !plan.loadVoxel;
+            let sceneMeshOk = !plan.loadSceneMesh;
+            let voxelOk = !plan.loadVoxelCollision;
 
             try {
-                if (plan.loadGlb && plan.glbUrl) {
-                    const result = await loadSceneMesh(app, plan.glbUrl);
+                if (plan.loadSceneMesh && plan.sceneMeshUrl) {
+                    const result = await loadSceneMesh(app, plan.sceneMeshUrl);
                     if (result) {
-                        this.meshEntity = result.meshEntity;
-                        if (plan.applyGlbCollision) {
+                        this.sceneMeshEntity = result.sceneMeshEntity;
+                        if (plan.applySceneMeshCollision) {
                             this.urlCollision = result.meshCollision;
                         }
                         this.global.events.fire('sceneMesh:ready', {
-                            meshEntity: result.meshEntity
+                            sceneMeshEntity: result.sceneMeshEntity
                         } satisfies SceneMeshReadyPayload);
-                        glbOk = true;
+                        sceneMeshOk = true;
                     } else {
-                        glbOk = false;
+                        sceneMeshOk = false;
                     }
                 }
 
-                if (plan.loadVoxel && this.collisionUrl) {
-                    const voxel = await loadVoxelCollision(this.collisionUrl);
+                if (plan.loadVoxelCollision && collisionUrl) {
+                    const voxel = await loadVoxelCollision(collisionUrl);
                     if (voxel) {
                         this.urlCollision = voxel;
                         voxelOk = true;
@@ -170,7 +170,7 @@ export class CameraCollisionManager {
                     }
                 }
 
-                if (glbOk && voxelOk) {
+                if (sceneMeshOk && voxelOk) {
                     this.loadState = 'ready';
                     this.emitLoadState('ready');
                 } else {
@@ -190,51 +190,62 @@ export class CameraCollisionManager {
         return this.loadPromise;
     }
 
-    private buildLoadPlan(): {
-        glbUrl?: string;
-        loadGlb: boolean;
-        loadVoxel: boolean;
-        applyGlbCollision: boolean;
+    private shouldFetchCollisionFromUniverse(): boolean {
+        if (!canGenerateCollision(this.global)) {
+            return false;
+        }
+        return collisionActive(this.global) || isShadowSystemEnabled(this.global);
+    }
+
+    private sceneMeshLoadPlan(collisionUrl?: string): {
+        sceneMeshUrl?: string;
+        loadSceneMesh: boolean;
+        loadVoxelCollision: boolean;
+        applySceneMeshCollision: boolean;
     } {
-        const glbUrl = resolveSceneMeshUrl(this.collisionUrl);
-        const needCollision = !!this.collisionUrl && this.isRuntimeActive();
-        const needShadowGlb = isShadowSystemEnabled(this.global) && !!glbUrl;
-        const collisionIsGlb = !!this.collisionUrl && isGlbUrl(this.collisionUrl);
-        const collisionIsVoxel = !!this.collisionUrl && !collisionIsGlb;
+        const url = collisionUrl ?? this.getCollisionUrl();
+        const meshUrl = sceneMeshUrl(url);
+        const needCollision = !!url && collisionActive(this.global);
+        const needShadowSceneMesh = isShadowSystemEnabled(this.global) && !!meshUrl;
+        const collisionIsSceneMeshGlb = !!url && isSceneMeshGlbUrl(url);
+        const collisionIsVoxel = !!url && !collisionIsSceneMeshGlb;
 
-        const loadGlb = !!glbUrl && (needShadowGlb || (needCollision && collisionIsGlb));
-        const loadVoxel = needCollision && collisionIsVoxel;
-        const applyGlbCollision = needCollision && collisionIsGlb;
+        const loadSceneMesh = !!meshUrl && (needShadowSceneMesh || (needCollision && collisionIsSceneMeshGlb));
+        const loadVoxelCollision = needCollision && collisionIsVoxel;
+        const applySceneMeshCollision = needCollision && collisionIsSceneMeshGlb;
 
-        return { glbUrl, loadGlb, loadVoxel, applyGlbCollision };
+        return { sceneMeshUrl: meshUrl, loadSceneMesh, loadVoxelCollision, applySceneMeshCollision };
     }
 
     private isLoadSatisfied(): boolean {
-        const plan = this.buildLoadPlan();
-        if (plan.loadGlb && !this.meshEntity) {
+        const plan = this.sceneMeshLoadPlan();
+        if (plan.loadSceneMesh && !this.sceneMeshEntity) {
             return false;
         }
-        if (plan.applyGlbCollision && !this.urlCollision) {
+        if (plan.applySceneMeshCollision && !this.urlCollision) {
             return false;
         }
-        if (plan.loadVoxel && !this.urlCollision) {
+        if (plan.loadVoxelCollision && !this.urlCollision) {
             return false;
         }
         return true;
     }
 
-    private shouldLoadSceneResources(): boolean {
-        const glbUrl = resolveSceneMeshUrl(this.collisionUrl);
-        const needCollision = !!this.collisionUrl && this.isRuntimeActive();
-        const needShadowGlb = isShadowSystemEnabled(this.global) && !!glbUrl;
-        return needCollision || needShadowGlb;
+    private shouldLoadSceneMesh(): boolean {
+        const url = this.getCollisionUrl();
+        const meshUrl = sceneMeshUrl(url);
+        const needCollision = !!url && collisionActive(this.global);
+        const needShadowSceneMesh = isShadowSystemEnabled(this.global)
+            && (!!meshUrl || canGenerateCollision(this.global));
+        const needUniverse = !url && this.shouldFetchCollisionFromUniverse();
+        return needCollision || needShadowSceneMesh || needUniverse;
     }
 
-    private maybeEnsureSceneMeshResourcesLoaded(): void {
-        if (!this.shouldLoadSceneResources()) {
+    private scheduleSceneMeshLoad(): void {
+        if (!this.shouldLoadSceneMesh()) {
             return;
         }
-        void this.ensureSceneMeshResourcesLoaded();
+        void this.ensureSceneMeshLoaded();
     }
 
     private emitLoadState(state: CollisionLoadState, error?: unknown): void {
@@ -242,24 +253,24 @@ export class CameraCollisionManager {
         this.global.events.fire('cameraCollision:load', payload);
     }
 
-    setUrlCollisionSource(collision: Collision | null): void {
+    setCollision(collision: Collision | null): void {
         this.urlCollision = collision;
-        this.loadState = collision ? 'ready' : this.collisionUrl ? this.loadState : 'idle';
+        this.loadState = collision ? 'ready' : this.getCollisionUrl() ? this.loadState : 'idle';
         this.syncConsumers();
         if (collision) {
             this.emitLoadState('ready');
         }
     }
 
-    getUrlCollisionSource(): Collision | null {
+    getCollision(): Collision | null {
         return this.urlCollision;
     }
 
-    resolveActiveUrlCollision(): Collision | null {
+    activeCollision(): Collision | null {
         if (this.loadState !== 'ready' || !this.urlCollision) {
             return null;
         }
-        if (!this.isRuntimeActive()) {
+        if (!collisionActive(this.global)) {
             return null;
         }
         return this.urlCollision;
@@ -271,7 +282,7 @@ export class CameraCollisionManager {
     }
 
     syncConsumers(): void {
-        this.consumers?.applyUrlCollision(this.resolveActiveUrlCollision());
+        this.consumers?.applyUrlCollision(this.activeCollision());
     }
 
     start(): () => void {
@@ -284,10 +295,17 @@ export class CameraCollisionManager {
         events.on('previewMode:changed', this.onContextOrToggleChanged);
         events.on('cameraCollision:changed', this.onContextOrToggleChanged);
         events.on('postEffect:changed', this.onContextOrToggleChanged);
+        events.on(SCENE_COLLISION_CHANGED, this.onSceneCollisionChanged);
+        this.syncHasCollision();
         this.syncConsumers();
-        void this.maybeEnsureSceneMeshResourcesLoaded();
+        this.scheduleSceneMeshLoad();
         return () => this.stop();
     }
+
+    private readonly onSceneCollisionChanged = () => {
+        this.syncHasCollision();
+        this.scheduleSceneMeshLoad();
+    };
 
     stop(): void {
         if (!this.started) return;
@@ -297,6 +315,7 @@ export class CameraCollisionManager {
         events.off('previewMode:changed', this.onContextOrToggleChanged);
         events.off('cameraCollision:changed', this.onContextOrToggleChanged);
         events.off('postEffect:changed', this.onContextOrToggleChanged);
+        events.off(SCENE_COLLISION_CHANGED, this.onSceneCollisionChanged);
     }
 }
 

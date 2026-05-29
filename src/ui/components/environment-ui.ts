@@ -7,7 +7,7 @@ import {
 import type { Global } from '../../types';
 import type { ExperienceSettings } from '../../schemas/v2';
 import { updatePointLightsFromSettings } from '../../light';
-import { hasShadowCapability, syncGsplatShadowCastingFromSettings } from '../../vfx/shadow';
+import { hasShadowSceneMesh, syncGsplatShadowCastingFromSettings } from '../../vfx/shadow';
 import { pushEditHistory } from '../../edit-history';
 import {
     ensureBloom as ensureBloomFromAdapter,
@@ -703,7 +703,7 @@ export function initPostEffectUI(global: Global): () => void {
         const sh = ensureShadow(settings);
         if (shadowEnableCheck) shadowEnableCheck.classList.toggle('active', sh.enabled !== false);
         if (shadowEnableOption) {
-            const canEnableShadow = hasShadowCapability(global);
+            const canEnableShadow = hasShadowSceneMesh(global);
             shadowEnableOption.title = canEnableShadow ? '' : '缺少 GLB 型 collision URL，当前场景不支持阴影';
             shadowEnableOption.style.opacity = canEnableShadow ? '1' : '0.55';
         }
@@ -930,7 +930,7 @@ export function initPostEffectUI(global: Global): () => void {
 
     if (shadowEnableOption && shadowEnableCheck) {
         const toggleShadowEnable = () => {
-            if (!hasShadowCapability(global)) return;
+            if (!hasShadowSceneMesh(global)) return;
             const sh = ensureShadow(settings);
             const enabled = sh.enabled === false;
             const editTransport = getEditUiTransport(global);

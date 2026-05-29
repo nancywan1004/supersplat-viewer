@@ -226,15 +226,19 @@ type SceneAssetCollisionScale = {
     autoFit?: boolean;
 };
 
-/** 写入 settings.json 的相机物理碰撞配置（不含调试线框） */
-type SceneAssetCollisionSettings = {
+/** 写入 settings.json 的碰撞配置：场景 mesh URL + 相机物理碰撞总开关 + 放置资产 AABB 缩放 */
+type SceneCollisionSettings = {
+    /** GLB 或 voxel 包 URL；Universe 生成后写入；优先于 URL 参数 `?collision=` */
+    url?: string;
     /** 总开关：场景 collision mesh + 放置资产 AABB */
-    enabled: boolean;
-    scale: SceneAssetCollisionScale;
+    enabled?: boolean;
+    /** 仅放置资产 AABB 使用的缩放参数 */
+    scale?: SceneAssetCollisionScale;
 };
 
-/** 设置面板 / 协议 patch（含历史标量 gaussian/mesh） */
-type SceneAssetCollisionSettingsPatch = {
+/** 设置面板 / 协议对 `settings.collision` 的部分更新 */
+type SceneCollisionSettingsPatch = {
+    url?: string;
     enabled?: boolean;
     scale?: {
         gaussian?: SceneAssetCollisionAxisScale | number;
@@ -293,4 +297,4 @@ type EffectsSettings = {
     asset: EffectsAssetTrack;
 };
 
-export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, TorchLightSettings, LightingSettings, SceneAsset, SceneMediaHotspotVideoSettings, SceneMediaHotspotAudioSettings, SceneMediaHotspotSettings, SceneMediaHotspotPatch, SceneAssetCollisionAxisScale, SceneAssetCollisionScale, SceneAssetCollisionSettings, SceneAssetCollisionSettingsPatch, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsAssetTrack };
+export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, TorchLightSettings, LightingSettings, SceneAsset, SceneMediaHotspotVideoSettings, SceneMediaHotspotAudioSettings, SceneMediaHotspotSettings, SceneMediaHotspotPatch, SceneCollisionSettings, SceneCollisionSettingsPatch, SceneAssetCollisionAxisScale, SceneAssetCollisionScale, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsAssetTrack };

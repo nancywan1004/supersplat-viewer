@@ -404,7 +404,7 @@ const importSettings = (settings: any): V2 => {
 };
 
 // export the latest/current schema types
-export type { AnimTrack, Camera, Annotation, PostEffectSettings, LegacyRevealEffect, TransformFrame, ExperienceSettings, EffectsSettings, SceneMediaHotspotSettings, SceneMediaHotspotPatch, SceneMediaHotspotVideoSettings, SceneMediaHotspotAudioSettings, SceneAssetCollisionSettings, SceneAssetCollisionSettingsPatch } from './schemas/v2';
+export type { AnimTrack, Camera, Annotation, PostEffectSettings, LegacyRevealEffect, TransformFrame, ExperienceSettings, EffectsSettings, SceneMediaHotspotSettings, SceneMediaHotspotPatch, SceneMediaHotspotVideoSettings, SceneMediaHotspotAudioSettings, SceneCollisionSettings, SceneCollisionSettingsPatch } from './schemas/v2';
 // validate unknown data against any supported settings schema version, throwing on invalid input
 const validateSettings = (settings: unknown): void => {
     const obj = assertObject(settings, 'settings');

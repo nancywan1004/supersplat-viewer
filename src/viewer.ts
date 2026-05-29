@@ -55,7 +55,7 @@ import { isLodMetaFile } from './loaders/lod-loader';
 import { BloomController } from './vfx/bloom';
 import { NightMode } from './vfx/lighting/night-mode';
 import {
-    hasShadowCapability,
+    hasShadowSceneMesh,
     isShadowSystemEnabled,
     notifyViewportReadyForShadow,
     scheduleShadowPipeline,
@@ -291,17 +291,17 @@ class Viewer {
         const { graphicsDevice } = app;
 
         const collisionMgr = getCameraCollisionManager(global);
-        collisionMgr.configure({ collisionUrl: config.collisionUrl });
+        collisionMgr.configure();
         events.on('cameraCollision:load', (payload: CollisionLoadPayload) => {
             if (payload.state === 'ready') {
-                const sceneCollision = collisionMgr.getUrlCollisionSource();
+                const sceneCollision = collisionMgr.getCollision();
                 if (sceneCollision) {
                     this.bindSceneCollisionDebugOverlay(sceneCollision);
                 }
             }
         });
         events.on('sceneMesh:ready', (_payload: SceneMeshReadyPayload) => {
-            this.applyShadowMeshEntity(collisionMgr.getShadowMeshEntity());
+            this.applyShadowMeshEntity(collisionMgr.getSceneMeshEntity());
         });
 
         initInputArbiter(global);
@@ -593,7 +593,7 @@ class Viewer {
                 gsplatEntity,
                 meshEntity: null
             };
-            const preloadedShadowMesh = getCameraCollisionManager(global).getShadowMeshEntity();
+            const preloadedShadowMesh = getCameraCollisionManager(global).getSceneMeshEntity();
             if (preloadedShadowMesh) {
                 this.applyShadowMeshEntity(preloadedShadowMesh);
             }
@@ -628,7 +628,7 @@ class Viewer {
             // 场景 ?collision= 网格（与接影 GLB 同源）；总开关 + Viewer/预览 + 懒加载就绪后非 null。
             // 放置资产 AABB 不在此注入，由 CameraManager 的 sceneAssetCollisionResolver 处理。
             const collisionMgr = getCameraCollisionManager(global);
-            const sceneCollision = collisionMgr.resolveActiveUrlCollision();
+            const sceneCollision = collisionMgr.activeCollision();
             this.inputController.collision = sceneCollision;
 
             const sceneSize = sceneBound.halfExtents.length();
@@ -722,8 +722,8 @@ class Viewer {
                 }
                 const collisionMgr = getCameraCollisionManager(global);
                 // 配置了 GLB collision 时先懒加载接影 mesh，避免用默认平面占位且后续不更新
-                if (hasShadowCapability(global) && !this.shadowPipelineMount.meshEntity) {
-                    void collisionMgr.ensureSceneMeshResourcesLoaded();
+                if (hasShadowSceneMesh(global) && !this.shadowPipelineMount.meshEntity) {
+                    void collisionMgr.ensureSceneMeshLoaded();
                     return;
                 }
                 scheduleShadowPipeline(global, this.shadowPipelineMount);
