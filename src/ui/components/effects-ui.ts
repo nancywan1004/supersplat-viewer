@@ -77,7 +77,7 @@ const REVEAL_PANEL_HTML = (() => {
         <option value="falling-rain">Falling Rain</option>
         <option value="falling-snow">Falling Snow</option>
         <option value="nostalgic-comic">Nostalgic Comic</option>
-        <option value="yiyun-dianran">逸云点染</option>
+        <option value="yiyun-dianran">意韵点染</option>
       </select>
     </div>
     <div id="persistentPetalsControls" class="hidden" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08)">
