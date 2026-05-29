@@ -28,8 +28,8 @@ export type NostalgicComicApplyOptions = {
 
 export const DEFAULT_NOSTALGIC_COMIC_SETTINGS: NostalgicComicSettings = {
     enabled: false,
-    levelCount: 6,
-    edgeThreshold: 0.8,
+    levelCount: 5,
+    edgeThreshold: 0.5,
     paperColor: [0.96, 0.94, 0.89],
     lightColor: [0.85, 0.85, 0.85],
     strokeColor: [0.15, 0.15, 0.15]
@@ -57,8 +57,8 @@ export function normalizeNostalgicComicSettings(raw: unknown): NostalgicComicSet
     const obj = (raw && typeof raw === 'object') ? raw as Record<string, unknown> : {};
     return {
         enabled: !!obj.enabled,
-        levelCount: Math.max(3, Math.min(16, Math.round(finiteOr(obj.levelCount, DEFAULT_NOSTALGIC_COMIC_SETTINGS.levelCount)))),
-        edgeThreshold: Math.max(0.05, Math.min(8, finiteOr(obj.edgeThreshold, DEFAULT_NOSTALGIC_COMIC_SETTINGS.edgeThreshold))),
+        levelCount: Math.max(3, Math.min(7, Math.round(finiteOr(obj.levelCount, DEFAULT_NOSTALGIC_COMIC_SETTINGS.levelCount)))),
+        edgeThreshold: Math.max(0.3, Math.min(3, finiteOr(obj.edgeThreshold, DEFAULT_NOSTALGIC_COMIC_SETTINGS.edgeThreshold))),
         paperColor: normalizeColor(obj.paperColor, DEFAULT_NOSTALGIC_COMIC_SETTINGS.paperColor),
         lightColor: normalizeColor(obj.lightColor, DEFAULT_NOSTALGIC_COMIC_SETTINGS.lightColor),
         strokeColor: normalizeColor(obj.strokeColor, DEFAULT_NOSTALGIC_COMIC_SETTINGS.strokeColor)

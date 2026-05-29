@@ -173,6 +173,10 @@ const REVEAL_PANEL_HTML = (() => {
     </div>
     <div id="persistentYiyunDianranControls" class="hidden" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08)">
       <div class="settingsRow">
+        <label for="yiyunDianranPostEffectEnabled">相机后处理:</label>
+        <input type="checkbox" id="yiyunDianranPostEffectEnabled" class="settingsCheckbox" checked>
+      </div>
+      <div class="settingsRow">
         <label for="yiyunDianranSaturation" class="postEffectLabel">基础点色彩饱和度:</label>
         <div class="postEffectSliderWrap">
           <input type="range" id="yiyunDianranSaturation" class="postEffectSlider" min="1" max="1.6" step="0.01" value="1.2">
@@ -221,6 +225,13 @@ const REVEAL_PANEL_HTML = (() => {
         <input type="number" id="palettePixelLevels" class="settingsInput" min="2" max="20" step="1" value="12">
       </div>
       <div class="settingsRow">
+        <label for="palettePixelLevelRange" class="postEffectLabel">色阶映射域:</label>
+        <div class="postEffectSliderWrap">
+          <input type="range" id="palettePixelLevelRange" class="postEffectSlider" min="0" max="2" step="0.01" value="1">
+          <span id="palettePixelLevelRangeVal" class="postEffectSliderValue">1.00</span>
+        </div>
+      </div>
+      <div class="settingsRow">
         <label for="palettePixelNoise" class="postEffectLabel">噪波:</label>
         <div class="postEffectSliderWrap">
           <input type="range" id="palettePixelNoise" class="postEffectSlider" min="0" max="0.08" step="0.001" value="0.05">
@@ -231,13 +242,13 @@ const REVEAL_PANEL_HTML = (() => {
     <div id="persistentNostalgicComicControls" class="hidden" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08)">
       <div class="settingsRow">
         <label for="nostalgicComicLevelCount" class="postEffectLabel">明度分阶数量:</label>
-        <input type="number" id="nostalgicComicLevelCount" class="settingsInput" min="3" max="16" step="1" value="6">
+        <input type="number" id="nostalgicComicLevelCount" class="settingsInput" min="3" max="7" step="1" value="5">
       </div>
       <div class="settingsRow">
         <label for="nostalgicComicEdgeThreshold" class="postEffectLabel">线稿边缘敏感度:</label>
         <div class="postEffectSliderWrap">
-          <input type="range" id="nostalgicComicEdgeThreshold" class="postEffectSlider" min="0.05" max="8" step="0.05" value="0.8">
-          <span id="nostalgicComicEdgeThresholdVal" class="postEffectSliderValue">0.80</span>
+          <input type="range" id="nostalgicComicEdgeThreshold" class="postEffectSlider" min="0.3" max="3" step="0.05" value="0.5">
+          <span id="nostalgicComicEdgeThresholdVal" class="postEffectSliderValue">0.50</span>
         </div>
       </div>
       <div class="settingsRow">
@@ -337,6 +348,7 @@ export function initRevealUI(global: Global): () => void {
     const weatherUseFog = container.querySelector('#weatherUseFog') as HTMLInputElement | null;
     const weatherBgColor = container.querySelector('#weatherBgColor') as HTMLInputElement | null;
     const weatherUseCameraClearColor = container.querySelector('#weatherUseCameraClearColor') as HTMLInputElement | null;
+    const yiyunDianranPostEffectEnabled = container.querySelector('#yiyunDianranPostEffectEnabled') as HTMLInputElement | null;
     const yiyunDianranSaturation = container.querySelector('#yiyunDianranSaturation') as HTMLInputElement | null;
     const yiyunDianranSaturationVal = container.querySelector('#yiyunDianranSaturationVal') as HTMLElement | null;
     const yiyunDianranGlowIntensity = container.querySelector('#yiyunDianranGlowIntensity') as HTMLInputElement | null;
@@ -345,6 +357,8 @@ export function initRevealUI(global: Global): () => void {
     const palettePixelSize = container.querySelector('#palettePixelSize') as HTMLSelectElement | null;
     const palettePixelPalette = container.querySelector('#palettePixelPalette') as HTMLSelectElement | null;
     const palettePixelLevels = container.querySelector('#palettePixelLevels') as HTMLInputElement | null;
+    const palettePixelLevelRange = container.querySelector('#palettePixelLevelRange') as HTMLInputElement | null;
+    const palettePixelLevelRangeVal = container.querySelector('#palettePixelLevelRangeVal') as HTMLElement | null;
     const palettePixelNoise = container.querySelector('#palettePixelNoise') as HTMLInputElement | null;
     const palettePixelNoiseVal = container.querySelector('#palettePixelNoiseVal') as HTMLElement | null;
     const nostalgicComicLevelCount = container.querySelector('#nostalgicComicLevelCount') as HTMLInputElement | null;
@@ -476,8 +490,8 @@ export function initRevealUI(global: Global): () => void {
         }
         if (type === 'nostalgic-comic') {
             return {
-                levelCount: 6,
-                edgeThreshold: 0.8,
+                levelCount: 5,
+                edgeThreshold: 0.5,
                 paperColor: [0.96, 0.94, 0.89],
                 lightColor: [0.85, 0.85, 0.85],
                 strokeColor: [0.15, 0.15, 0.15]
@@ -485,6 +499,7 @@ export function initRevealUI(global: Global): () => void {
         }
         if (type === 'yiyun-dianran') {
             return {
+                postEffectEnabled: true,
                 saturation: 1.2,
                 glowIntensity: 0.05,
                 glowColor: [0.0, 0.184, 0.655]
@@ -495,6 +510,7 @@ export function initRevealUI(global: Global): () => void {
                 pixelSize: DEFAULT_PALETTE_PIXEL_SETTINGS.pixelSize,
                 paletteIndex: DEFAULT_PALETTE_PIXEL_SETTINGS.paletteIndex,
                 levels: DEFAULT_PALETTE_PIXEL_SETTINGS.levels,
+                levelRange: DEFAULT_PALETTE_PIXEL_SETTINGS.levelRange,
                 ditherSpread: DEFAULT_PALETTE_PIXEL_SETTINGS.ditherSpread
             };
         }
@@ -631,6 +647,12 @@ export function initRevealUI(global: Global): () => void {
             weatherUseCameraClearColor.checked = typeof params.useCameraClearColor === 'boolean' ? params.useCameraClearColor : true;
         }
 
+        if (yiyunDianranPostEffectEnabled) {
+            yiyunDianranPostEffectEnabled.checked = typeof params.postEffectEnabled === 'boolean'
+                ? params.postEffectEnabled
+                : true;
+        }
+
         writeSlider(yiyunDianranSaturation, yiyunDianranSaturationVal, params.saturation, 1.2, 2);
         writeSlider(yiyunDianranGlowIntensity, yiyunDianranGlowIntensityVal, params.glowIntensity, 0.05, 3);
         if (yiyunDianranGlowColor) {
@@ -658,6 +680,13 @@ export function initRevealUI(global: Global): () => void {
             DEFAULT_PALETTE_PIXEL_SETTINGS.levels
         );
         writeSlider(
+            palettePixelLevelRange,
+            palettePixelLevelRangeVal,
+            params.levelRange,
+            DEFAULT_PALETTE_PIXEL_SETTINGS.levelRange,
+            2
+        );
+        writeSlider(
             palettePixelNoise,
             palettePixelNoiseVal,
             params.ditherSpread,
@@ -665,8 +694,8 @@ export function initRevealUI(global: Global): () => void {
             3
         );
 
-        writeNumberInput(nostalgicComicLevelCount, params.levelCount, 6);
-        writeSlider(nostalgicComicEdgeThreshold, nostalgicComicEdgeThresholdVal, params.edgeThreshold, 0.8, 2);
+        writeNumberInput(nostalgicComicLevelCount, params.levelCount, 5);
+        writeSlider(nostalgicComicEdgeThreshold, nostalgicComicEdgeThresholdVal, params.edgeThreshold, 0.5, 2);
         if (nostalgicComicPaperColor) {
             nostalgicComicPaperColor.value = rgbTripleToHex(params.paperColor, [0.96, 0.94, 0.89]);
         }
@@ -722,6 +751,7 @@ export function initRevealUI(global: Global): () => void {
 
     const onYiyunDianranParamsChange = () => {
         patchPersistentEffectParams({
+            postEffectEnabled: yiyunDianranPostEffectEnabled?.checked ?? true,
             saturation: readNumberInput(yiyunDianranSaturation, 1.2),
             glowIntensity: readNumberInput(yiyunDianranGlowIntensity, 0.05),
             glowColor: hexToRgbTriple(yiyunDianranGlowColor?.value, [0.0, 0.184, 0.655])
@@ -745,8 +775,14 @@ export function initRevealUI(global: Global): () => void {
             pixelSize,
             paletteIndex,
             levels: readNumberInput(palettePixelLevels, DEFAULT_PALETTE_PIXEL_SETTINGS.levels),
+            levelRange: readNumberInput(palettePixelLevelRange, DEFAULT_PALETTE_PIXEL_SETTINGS.levelRange),
             ditherSpread: readNumberInput(palettePixelNoise, DEFAULT_PALETTE_PIXEL_SETTINGS.ditherSpread)
         });
+    };
+
+    const onPalettePixelLevelRangeInput = () => {
+        syncSliderValue(palettePixelLevelRange, palettePixelLevelRangeVal, 2);
+        onPalettePixelParamsChange();
     };
 
     const onPalettePixelNoiseInput = () => {
@@ -756,8 +792,8 @@ export function initRevealUI(global: Global): () => void {
 
     const onNostalgicComicParamsChange = () => {
         patchPersistentEffectParams({
-            levelCount: readNumberInput(nostalgicComicLevelCount, 6),
-            edgeThreshold: readNumberInput(nostalgicComicEdgeThreshold, 0.8),
+            levelCount: readNumberInput(nostalgicComicLevelCount, 5),
+            edgeThreshold: readNumberInput(nostalgicComicEdgeThreshold, 0.5),
             paperColor: hexToRgbTriple(nostalgicComicPaperColor?.value, [0.96, 0.94, 0.89]),
             lightColor: hexToRgbTriple(nostalgicComicLightColor?.value, [0.85, 0.85, 0.85]),
             strokeColor: hexToRgbTriple(nostalgicComicStrokeColor?.value, [0.15, 0.15, 0.15])
@@ -987,12 +1023,14 @@ export function initRevealUI(global: Global): () => void {
     weatherUseFog?.addEventListener('change', onWeatherParamsChange);
     weatherBgColor?.addEventListener('input', onWeatherParamsChange);
     weatherUseCameraClearColor?.addEventListener('change', onWeatherParamsChange);
+    yiyunDianranPostEffectEnabled?.addEventListener('change', onYiyunDianranParamsChange);
     yiyunDianranSaturation?.addEventListener('input', onYiyunDianranSliderInput);
     yiyunDianranGlowIntensity?.addEventListener('input', onYiyunDianranSliderInput);
     yiyunDianranGlowColor?.addEventListener('input', onYiyunDianranParamsChange);
     palettePixelSize?.addEventListener('change', onPalettePixelParamsChange);
     palettePixelPalette?.addEventListener('change', onPalettePixelParamsChange);
     palettePixelLevels?.addEventListener('change', onPalettePixelParamsChange);
+    palettePixelLevelRange?.addEventListener('input', onPalettePixelLevelRangeInput);
     palettePixelNoise?.addEventListener('input', onPalettePixelNoiseInput);
     nostalgicComicLevelCount?.addEventListener('change', onNostalgicComicParamsChange);
     nostalgicComicEdgeThreshold?.addEventListener('input', onNostalgicComicSliderInput);
@@ -1046,12 +1084,14 @@ export function initRevealUI(global: Global): () => void {
         weatherUseFog?.removeEventListener('change', onWeatherParamsChange);
         weatherBgColor?.removeEventListener('input', onWeatherParamsChange);
         weatherUseCameraClearColor?.removeEventListener('change', onWeatherParamsChange);
+        yiyunDianranPostEffectEnabled?.removeEventListener('change', onYiyunDianranParamsChange);
         yiyunDianranSaturation?.removeEventListener('input', onYiyunDianranSliderInput);
         yiyunDianranGlowIntensity?.removeEventListener('input', onYiyunDianranSliderInput);
         yiyunDianranGlowColor?.removeEventListener('input', onYiyunDianranParamsChange);
         palettePixelSize?.removeEventListener('change', onPalettePixelParamsChange);
         palettePixelPalette?.removeEventListener('change', onPalettePixelParamsChange);
         palettePixelLevels?.removeEventListener('change', onPalettePixelParamsChange);
+        palettePixelLevelRange?.removeEventListener('input', onPalettePixelLevelRangeInput);
         palettePixelNoise?.removeEventListener('input', onPalettePixelNoiseInput);
         nostalgicComicLevelCount?.removeEventListener('change', onNostalgicComicParamsChange);
         nostalgicComicEdgeThreshold?.removeEventListener('input', onNostalgicComicSliderInput);

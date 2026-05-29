@@ -41,6 +41,12 @@ export type PalettePixelSettings = {
     pixelSize: number;
     paletteIndex: number;
     levels: number;
+    /**
+     * 色阶映射域（色盘一行 {@link PALETTE_LUMA_STEP_COUNT} 色）：1 不变。
+     * [0,1]：先把场景明度域映射到色盘占用索引段（如 5~11），再绕其中点（如 8）向内压缩，有效跨度 levelRange×20；
+     * (1,2]：绕整盘中心对称，有效色数 = 20×(levelRange−1)（如 1.5→10 色，2→20 色）。
+     */
+    levelRange: number;
     ditherSpread: number;
 };
 
@@ -49,11 +55,79 @@ export const DEFAULT_PALETTE_PIXEL_SETTINGS: PalettePixelSettings = {
     pixelSize: 300,
     paletteIndex: 5,
     levels: 12,
+    levelRange: 1,
     ditherSpread: 0.05
 };
 
 /** 马赛克大小可选档位（与产品配置表一致） */
 export const PALETTE_PIXEL_SIZE_STEPS = [300, 400, 500, 600, 700, 800, 900] as const;
+
+/** 色盘每行按明度排列的颜色数（与 shader `PALETTE_STEPS` 一致） */
+export const PALETTE_LUMA_STEP_COUNT = 20;
+
+const LUMA_DOMAIN_ANALYSIS_SIZE = 48;
+
+const LUMA_DOMAIN_ANALYSIS_INTERVAL_FRAMES = 24;
+
+const lumaFromRgb = (r: number, g: number, b: number): number =>
+    0.299 * r + 0.587 * g + 0.114 * b;
+
+const finalizeSceneLumaDomain = (min: number, max: number): { min: number; max: number } => {
+    let lo = Math.min(min, max);
+    let hi = Math.max(min, max);
+    if (hi - lo < 0.02) {
+        const c = (lo + hi) * 0.5;
+        lo = c - 0.01;
+        hi = c + 0.01;
+    }
+    return {
+        min: Math.max(0, Math.min(1, lo)),
+        max: Math.max(0, Math.min(1, hi))
+    };
+};
+
+/** 估计当前画面在色盘上占用的明度域（用于 levelRange≠1 的压缩/拉伸）。 */
+export async function estimateSceneLumaDomain(
+    device: GraphicsDevice,
+    texture: Texture
+): Promise<{ min: number; max: number }> {
+    const w = Math.min(LUMA_DOMAIN_ANALYSIS_SIZE, texture.width);
+    const h = Math.min(LUMA_DOMAIN_ANALYSIS_SIZE, texture.height);
+    if (w < 1 || h < 1) {
+        return { min: 0, max: 1 };
+    }
+
+    const readTextureAsync = (device as GraphicsDevice & {
+        readTextureAsync?: (
+            tex: Texture,
+            x: number,
+            y: number,
+            width: number,
+            height: number,
+            options?: { immediate?: boolean }
+        ) => Promise<Uint8Array>;
+    }).readTextureAsync;
+
+    if (!readTextureAsync) {
+        return { min: 0, max: 1 };
+    }
+
+    try {
+        const data = await readTextureAsync(texture, 0, 0, w, h, { immediate: true });
+        let min = 1;
+        let max = 0;
+        for (let i = 0, n = w * h; i < n; i++) {
+            const o = i * 4;
+            const l = lumaFromRgb(data[o] / 255, data[o + 1] / 255, data[o + 2] / 255);
+            if (l < min) min = l;
+            if (l > max) max = l;
+        }
+        const pad = Math.max(0.01, (max - min) * 0.04);
+        return finalizeSceneLumaDomain(min - pad, max + pad);
+    } catch {
+        return { min: 0, max: 1 };
+    }
+}
 
 export type PalettePixelApplyOptions = {
     getCameraFrame?: () => CameraFrame | null | undefined;
@@ -86,6 +160,7 @@ export function normalizePalettePixelSettings(raw: unknown): PalettePixelSetting
         // 业务定义：有效编号仅 1~7，明确去掉 0 号位
         paletteIndex: clamp(Math.floor(finiteOr(obj.paletteIndex, DEFAULT_PALETTE_PIXEL_SETTINGS.paletteIndex)), 1, 7),
         levels: clamp(Math.floor(finiteOr(obj.levels, DEFAULT_PALETTE_PIXEL_SETTINGS.levels)), 2, 20),
+        levelRange: clamp(finiteOr(obj.levelRange, DEFAULT_PALETTE_PIXEL_SETTINGS.levelRange), 0, 2),
         ditherSpread: clamp(finiteOr(obj.ditherSpread, DEFAULT_PALETTE_PIXEL_SETTINGS.ditherSpread), 0, 0.08)
     };
 }
@@ -97,6 +172,38 @@ const hexToRgb = (hex: string): Rgb => {
         parseInt(text.slice(2, 4), 16) / 255,
         parseInt(text.slice(4, 6), 16) / 255
     ];
+};
+
+/** 在当前色盘行上，找与给定明度最接近的色块索引（0~19）。 */
+const nearestPaletteIndexForLuma = (paletteRow: number, luma: number): number => {
+    const row = PALETTES_HEX[Math.max(0, Math.min(6, paletteRow))];
+    let bestIdx = 0;
+    let bestDiff = Infinity;
+    for (let i = 0; i < PALETTE_LUMA_STEP_COUNT; i++) {
+        const [r, g, b] = hexToRgb(row[i]);
+        const diff = Math.abs(lumaFromRgb(r, g, b) - luma);
+        if (diff < bestDiff) {
+            bestDiff = diff;
+            bestIdx = i;
+        }
+    }
+    return bestIdx;
+};
+
+/** 场景明度域在色盘行上占用的索引区间 [min, max]（如 luma 域 → 5~11）。 */
+export const scenePaletteIndexRange = (
+    paletteRow: number,
+    lumaMin: number,
+    lumaMax: number
+): { min: number; max: number } => {
+    let min = nearestPaletteIndexForLuma(paletteRow, lumaMin);
+    let max = nearestPaletteIndexForLuma(paletteRow, lumaMax);
+    if (min > max) {
+        const t = min;
+        min = max;
+        max = t;
+    }
+    return { min, max };
 };
 
 const buildPaletteTexture = (device: GraphicsDevice): Texture => {
@@ -135,6 +242,19 @@ class PalettePixelPostEffect extends PostEffect {
     private readonly paletteTex: Texture;
     private settings: PalettePixelSettings = DEFAULT_PALETTE_PIXEL_SETTINGS;
 
+    lumaDomainMin = 0;
+
+    lumaDomainMax = 1;
+
+    /** 场景明度域映射到当前色盘行的占用索引（压缩时绕 (min+max)/2 收拢）。 */
+    scenePaletteIdxMin = 0;
+
+    scenePaletteIdxMax = PALETTE_LUMA_STEP_COUNT - 1;
+
+    private lumaAnalysisInFlight = false;
+
+    private framesUntilLumaAnalysis = 0;
+
     constructor(device: GraphicsDevice) {
         super(device);
         this.paletteTex = buildPaletteTexture(device);
@@ -158,6 +278,13 @@ class PalettePixelPostEffect extends PostEffect {
             uniform float uPaletteRow;
             uniform float uDitherSpread;
             uniform float uLevels;
+            uniform float uLevelRange;
+            uniform float uLumaDomainMin;
+            uniform float uLumaDomainMax;
+            uniform float uScenePaletteIdxMin;
+            uniform float uScenePaletteIdxMax;
+
+            const float PALETTE_STEPS = 20.0;
 
             float getLuminance(vec3 color) {
                 return dot(color, vec3(0.299, 0.587, 0.114));
@@ -174,24 +301,51 @@ class PalettePixelPostEffect extends PostEffect {
                 float luma = getLuminance(originalColor);
                 float noise = randomNoise(gridUv) - 0.5;
                 float ditheredLuma = clamp(luma + noise * uDitherSpread, 0.0, 1.0);
+                float domainSpan = max(uLumaDomainMax - uLumaDomainMin, 0.001);
+                float paletteIdxMax = PALETTE_STEPS - 1.0;
+                float sceneT = clamp((ditheredLuma - uLumaDomainMin) / domainSpan, 0.0, 1.0);
+                float sceneIdxMin = uScenePaletteIdxMin;
+                float sceneIdxMax = uScenePaletteIdxMax;
+                float centerIdx = (sceneIdxMin + sceneIdxMax) * 0.5;
 
-                float steps = max(1.0, uLevels - 1.0);
-                float quantizedLuma = floor(ditheredLuma * steps + 0.5) / steps;
+                float targetIdx;
+                float searchMin = 0.0;
+                float searchMax = paletteIdxMax;
 
-                vec3 bestColor = vec3(0.0);
-                float minLumaDiff = 999.0;
-                float vTex = (uPaletteRow + 0.5) / 7.0;
-
-                for (int i = 0; i < 20; i++) {
-                    float uTex = (float(i) + 0.5) / 20.0;
-                    vec3 palColor = texture2D(uPaletteTex, vec2(uTex, vTex)).rgb;
-                    float palLuma = getLuminance(palColor);
-                    float lumaDiff = abs(palLuma - quantizedLuma);
-                    if (lumaDiff < minLumaDiff) {
-                        minLumaDiff = lumaDiff;
-                        bestColor = palColor;
-                    }
+                if (uLevelRange < 1.0) {
+                    // [0,1]：绕占用段中心向内压缩（如 5~11 绕 8）
+                    float ratio = uLevelRange;
+                    float span = ratio * PALETTE_STEPS;
+                    float fullIdx = mix(sceneIdxMin, sceneIdxMax, sceneT);
+                    targetIdx = centerIdx + (fullIdx - centerIdx) * ratio;
+                    searchMin = max(0.0, centerIdx - span * 0.5);
+                    searchMax = min(paletteIdxMax, centerIdx + span * 0.5);
+                } else if (uLevelRange > 1.0) {
+                    // (1,2]：整盘 20 色，有效跨度 = 20×(levelRange-1)，绕色盘中心对称
+                    float stretch = uLevelRange - 1.0;
+                    float effectiveCount = PALETTE_STEPS * stretch;
+                    float paletteCenter = paletteIdxMax * 0.5;
+                    float effectiveHalfSpan = max((effectiveCount - 1.0) * 0.5, 0.0);
+                    targetIdx = paletteCenter + (sceneT - 0.5) * 2.0 * effectiveHalfSpan;
+                    searchMin = max(0.0, paletteCenter - effectiveHalfSpan);
+                    searchMax = min(paletteIdxMax, paletteCenter + effectiveHalfSpan);
+                } else {
+                    targetIdx = mix(sceneIdxMin, sceneIdxMax, sceneT);
+                    searchMin = sceneIdxMin;
+                    searchMax = sceneIdxMax;
                 }
+
+                targetIdx = clamp(targetIdx, searchMin, searchMax);
+
+                float idxSpan = max(searchMax - searchMin, 0.001);
+                float steps = max(1.0, uLevels - 1.0);
+                float idxT = (targetIdx - searchMin) / idxSpan;
+                float quantizedT = floor(idxT * steps + 0.5) / steps;
+                float finalIdx = clamp(searchMin + quantizedT * idxSpan, 0.0, paletteIdxMax);
+
+                float vTex = (uPaletteRow + 0.5) / 7.0;
+                float uTex = (floor(finalIdx + 0.5) + 0.5) / PALETTE_STEPS;
+                vec3 bestColor = texture2D(uPaletteTex, vec2(uTex, vTex)).rgb;
 
                 gl_FragColor = vec4(bestColor, 1.0);
             }
@@ -206,6 +360,48 @@ class PalettePixelPostEffect extends PostEffect {
 
     setSettings(raw: unknown): void {
         this.settings = normalizePalettePixelSettings(raw);
+        if (this.settings.levelRange !== 1) {
+            this.framesUntilLumaAnalysis = 0;
+        }
+        this.updateScenePaletteOccupancy();
+    }
+
+    resetLumaDomain(): void {
+        this.lumaDomainMin = 0;
+        this.lumaDomainMax = 1;
+        this.updateScenePaletteOccupancy();
+    }
+
+    private updateScenePaletteOccupancy(): void {
+        const row = this.settings.paletteIndex - 1;
+        const { min, max } = scenePaletteIndexRange(row, this.lumaDomainMin, this.lumaDomainMax);
+        this.scenePaletteIdxMin = min;
+        this.scenePaletteIdxMax = max;
+    }
+
+    requestLumaDomainAnalysis(sourceTexture: Texture | null | undefined): void {
+        if (!sourceTexture || this.settings.levelRange === 1) {
+            return;
+        }
+        if (this.lumaAnalysisInFlight) {
+            return;
+        }
+        if (this.framesUntilLumaAnalysis > 0) {
+            this.framesUntilLumaAnalysis--;
+            return;
+        }
+        this.framesUntilLumaAnalysis = LUMA_DOMAIN_ANALYSIS_INTERVAL_FRAMES;
+        this.lumaAnalysisInFlight = true;
+        estimateSceneLumaDomain(this.device, sourceTexture)
+            .then(({ min, max }) => {
+                this.lumaDomainMin = min;
+                this.lumaDomainMax = max;
+                this.updateScenePaletteOccupancy();
+            })
+            .catch(() => { /* keep previous domain */ })
+            .finally(() => {
+                this.lumaAnalysisInFlight = false;
+            });
     }
 
     destroy(): void {
@@ -213,16 +409,27 @@ class PalettePixelPostEffect extends PostEffect {
     }
 
     render(inputTarget: any, outputTarget: any, rect: any): void {
+        const colorBuffer = inputTarget?.colorBuffer as Texture | undefined;
+        this.requestLumaDomainAnalysis(colorBuffer);
+
         const scope = this.device.scope;
         const s = this.settings;
         const paletteRow = s.paletteIndex - 1;
+        if (s.levelRange !== 1) {
+            this.updateScenePaletteOccupancy();
+        }
 
-        scope.resolve('uColorBuffer').setValue(inputTarget.colorBuffer);
+        scope.resolve('uColorBuffer').setValue(colorBuffer);
         scope.resolve('uPaletteTex').setValue(this.paletteTex);
         scope.resolve('uPixelSize').setValue(s.pixelSize);
         scope.resolve('uPaletteRow').setValue(paletteRow);
         scope.resolve('uDitherSpread').setValue(s.ditherSpread);
         scope.resolve('uLevels').setValue(s.levels);
+        scope.resolve('uLevelRange').setValue(s.levelRange);
+        scope.resolve('uLumaDomainMin').setValue(this.lumaDomainMin);
+        scope.resolve('uLumaDomainMax').setValue(this.lumaDomainMax);
+        scope.resolve('uScenePaletteIdxMin').setValue(this.scenePaletteIdxMin);
+        scope.resolve('uScenePaletteIdxMax').setValue(this.scenePaletteIdxMax);
 
         this.drawQuad(outputTarget, this.shader, rect);
     }
@@ -361,6 +568,7 @@ export class PalettePixelController {
         this.cameraFrameBridge.setSettings(settings);
 
         if (!settings.enabled) {
+            this.effect.resetLumaDomain();
             this.unmountAll();
             return;
         }

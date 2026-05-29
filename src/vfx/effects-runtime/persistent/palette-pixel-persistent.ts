@@ -22,6 +22,8 @@ export class GsplatPersistentPalettePixel extends Script {
 
     levels = DEFAULT_PALETTE_PIXEL_SETTINGS.levels;
 
+    levelRange = DEFAULT_PALETTE_PIXEL_SETTINGS.levelRange;
+
     ditherSpread = DEFAULT_PALETTE_PIXEL_SETTINGS.ditherSpread;
 
     private _controller: PalettePixelController | null = null;
@@ -57,6 +59,7 @@ export class GsplatPersistentPalettePixel extends Script {
             pixelSize: this.pixelSize,
             paletteIndex: this.paletteIndex,
             levels: this.levels,
+            levelRange: this.levelRange,
             ditherSpread: this.ditherSpread
         }, { getCameraFrame: getCameraFrame as () => import('playcanvas').CameraFrame | null });
     }

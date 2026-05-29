@@ -22,6 +22,8 @@ export class GsplatPersistentYiyunDianran extends Script {
 
     glowColor: [number, number, number] = [...DEFAULT_YIYUN_DIANRAN_SETTINGS.glowColor];
 
+    postEffectEnabled = DEFAULT_YIYUN_DIANRAN_SETTINGS.postEffectEnabled;
+
     private _controller: YiyunDianranController | null = null;
 
     private _camera: CameraComponent | null = null;
@@ -65,6 +67,7 @@ export class GsplatPersistentYiyunDianran extends Script {
 
         this._controller.apply({
             enabled: this.enabled,
+            postEffectEnabled: this.postEffectEnabled,
             saturation: this.saturation,
             glowIntensity: this.glowIntensity,
             glowColor: [...this.glowColor]

@@ -19,6 +19,8 @@ import {
 
 export type YiyunDianranSettings = {
     enabled: boolean;
+    /** 相机全屏后处理（纸张/景深/描边）；关闭时仅保留 GSplat 点着色 */
+    postEffectEnabled: boolean;
     saturation: number;
     glowIntensity: number;
     glowColor: [number, number, number];
@@ -31,6 +33,7 @@ export type YiyunDianranApplyOptions = {
 
 export const DEFAULT_YIYUN_DIANRAN_SETTINGS: YiyunDianranSettings = {
     enabled: false,
+    postEffectEnabled: true,
     saturation: 1.2,
     glowIntensity: 0.05,
     glowColor: [0.0, 0.184, 0.655]
@@ -60,6 +63,9 @@ export function normalizeYiyunDianranSettings(raw: unknown): YiyunDianranSetting
     const obj = (raw && typeof raw === 'object') ? raw as Record<string, unknown> : {};
     return {
         enabled: !!obj.enabled,
+        postEffectEnabled: typeof obj.postEffectEnabled === 'boolean'
+            ? obj.postEffectEnabled
+            : DEFAULT_YIYUN_DIANRAN_SETTINGS.postEffectEnabled,
         saturation: clamp(finiteOr(obj.saturation, DEFAULT_YIYUN_DIANRAN_SETTINGS.saturation), 1, 1.6),
         glowIntensity: clamp(finiteOr(obj.glowIntensity, DEFAULT_YIYUN_DIANRAN_SETTINGS.glowIntensity), 0, 0.1),
         glowColor: normalizeColor(obj.glowColor, DEFAULT_YIYUN_DIANRAN_SETTINGS.glowColor)
@@ -524,17 +530,14 @@ export class YiyunDianranController {
             return;
         }
 
-        const cameraFrame = options.getCameraFrame?.();
-        if (cameraFrame?.enabled && this.cameraFrameBridge.mount(cameraFrame)) {
-            this.unmountLegacy();
+        if (this.settings.postEffectEnabled) {
+            this.mountPostProcessing(options.getCameraFrame);
         } else {
-            this.cameraFrameBridge.unmount();
-            this.mountLegacy();
+            this.unmountPostProcessing();
         }
 
         this.setupGsplatShader();
         this.syncGsplatUniforms();
-        this.applyCameraState();
         this.app.renderNextFrame = true;
     }
 
@@ -551,6 +554,23 @@ export class YiyunDianranController {
         this.effectTime = Math.max(0, time);
         this.syncGsplatUniforms();
         this.app.renderNextFrame = true;
+    }
+
+    private mountPostProcessing(getCameraFrame?: () => CameraFrame | null | undefined): void {
+        const cameraFrame = getCameraFrame?.();
+        if (cameraFrame?.enabled && this.cameraFrameBridge.mount(cameraFrame)) {
+            this.unmountLegacy();
+        } else {
+            this.cameraFrameBridge.unmount();
+            this.mountLegacy();
+        }
+        this.applyCameraState();
+    }
+
+    private unmountPostProcessing(): void {
+        this.cameraFrameBridge.unmount();
+        this.unmountLegacy();
+        this.restoreClearColor();
     }
 
     private mountLegacy(): void {
@@ -574,10 +594,8 @@ export class YiyunDianranController {
     }
 
     private unmountAll(): void {
-        this.cameraFrameBridge.unmount();
-        this.unmountLegacy();
+        this.unmountPostProcessing();
         this.removeGsplatShader();
-        this.restoreClearColor();
         this.targetGsplat = null;
         this.app.renderNextFrame = true;
     }

@@ -72,6 +72,7 @@ const NOSTALGIC_COMIC = new Set([
 ]);
 
 const YIYUN_DIANRAN = new Set([
+    'postEffectEnabled',
     'saturation',
     'glowIntensity',
     'glowColor'
@@ -81,6 +82,7 @@ const PALETTE_PIXEL = new Set([
     'pixelSize',
     'paletteIndex',
     'levels',
+    'levelRange',
     'ditherSpread'
 ]);
 
