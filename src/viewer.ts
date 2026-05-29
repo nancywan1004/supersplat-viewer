@@ -56,6 +56,8 @@ import {
 } from './vfx/shadow';
 import { initTorchLight } from './vfx/lighting/torch-light';
 import { initAssetPlacementHandler, requestSceneAssetsRestore } from './scene-assets/asset-placement-handler';
+import { initSceneAssetCollision } from './scene-assets/collision/scene-asset-collision';
+import { initSceneAssetCollisionDebug } from './scene-assets/collision/scene-asset-collision-debug';
 import { initMediaHotspotController } from './scene-assets/media/media-hotspot-controller';
 import { initSceneAudioCallout } from './scene-assets/media/audio-callout';
 import {
@@ -227,6 +229,9 @@ class Viewer {
 
     /** 资产放置 handler 清理函数 */
     cleanupAssetPlacementHandler: (() => void) | null = null;
+
+    /** sceneAsset AABB 碰撞运行时清理 */
+    cleanupSceneAssetCollision: (() => void) | null = null;
 
     /** 音视频热区播控卸载 */
     cleanupMediaHotspotController: (() => void) | null = null;
@@ -876,6 +881,13 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 this.cleanupGizmoHandler = initGizmoHandler(global);
                 this.cleanupAnnotationGizmoHandler = initAnnotationGizmoHandler(global);
             }
+
+            const cleanupSceneAssetCollision = initSceneAssetCollision(global);
+            const cleanupSceneAssetCollisionDebug = initSceneAssetCollisionDebug(global);
+            this.cleanupSceneAssetCollision = () => {
+                cleanupSceneAssetCollisionDebug();
+                cleanupSceneAssetCollision();
+            };
 
             this.cleanupMediaHotspotController = initMediaHotspotController(global);
             this.cleanupSceneAudioCallout = initSceneAudioCallout(global);

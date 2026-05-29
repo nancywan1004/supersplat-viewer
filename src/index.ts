@@ -47,6 +47,10 @@ import {
     syncEffectsRuntimeStateFromSettings,
     hasRevealInSettings
 } from './settings-serialize/effects-sync';
+import {
+    applySceneAssetCollisionFromSettings,
+    createDefaultSceneAssetCollisionRuntimeState
+} from './scene-assets/collision/scene-asset-collision';
 
 export { loadGsplatAsset };
 
@@ -332,6 +336,9 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
 
         // 导出 VFX 视频时的锁，防止实时更新干扰离线渲染
         isExportingVfxVideo: false,
+
+        sceneAssetCollisionRuntimeState: createDefaultSceneAssetCollisionRuntimeState(),
+
         gamingControls: localStorage.getItem('gamingControls') === 'true',
         // 必须在 observe 初始 keys 内：Proxy 禁止新增顶层属性（见 core/observe.ts）
         effectsRuntimeState: createDefaultEffectsRuntimeState()
@@ -366,6 +373,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     };
 
     ensureViewSettings(global);
+    applySceneAssetCollisionFromSettings(global);
 
     // 将原始配置挂载到 global 供后续恢复使用
     (global as any).__originalSettings = originalSettings;

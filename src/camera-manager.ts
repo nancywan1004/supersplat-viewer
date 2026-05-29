@@ -24,6 +24,7 @@ import type { TargetSource } from './cameras/target-navigation';
 import { WalkController } from './cameras/walk-controller';
 import { WalkSource } from './cameras/walk-source';
 import type { Collision } from './collision';
+import { getSceneAssetCollisionRuntime } from './scene-assets/collision/scene-asset-collision';
 import { easeOut, smootherStep } from './core/math';
 import { Annotation } from './settings';
 import type { AnimTrack } from './settings';
@@ -499,6 +500,9 @@ class CameraManager {
         controllers.fly.fov = resetCamera.fov;
         controllers.fly.collision = collision;
         controllers.walk.collision = collision;
+        const sceneAssetCollisionResolver = () => getSceneAssetCollisionRuntime(global).getCollision();
+        controllers.fly.setSceneAssetCollisionResolver(sceneAssetCollisionResolver);
+        controllers.orbit.setSceneAssetCollisionResolver(sceneAssetCollisionResolver);
 
         const walkSource = new WalkSource();
         const flySource = new FlySource();

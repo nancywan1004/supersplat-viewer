@@ -12,6 +12,10 @@ import type {
     SceneAsset,
     SceneMediaHotspotSettings,
     SceneMediaHotspotPatch,
+    SceneMediaHotspotVideoSettings,
+    SceneMediaHotspotAudioSettings,
+    SceneAssetCollisionSettings,
+    SceneAssetCollisionSettingsPatch,
     LocalLightRegion,
     WorldSpaceBloomRegionJSON,
     EffectsSettings
@@ -171,6 +175,8 @@ type ExperienceSettings = {
     sceneAssets?: SceneAsset[];
     /** 场景音视频热区全局参数（可选；缺省由 `ensureSceneMediaHotspot` 补齐） */
     sceneMediaHotspot?: SceneMediaHotspotSettings;
+    /** 放置资产 AABB 相机碰撞（开关、手动 XYZ、autoFit；不含调试线框） */
+    sceneAssetCollision?: SceneAssetCollisionSettings;
 };
 
 const TONEMAPPING = ['none', 'linear', 'filmic', 'hejl', 'aces', 'aces2', 'neutral'] as const;
@@ -344,6 +350,16 @@ const validateV2 = (data: unknown): ExperienceSettings => {
         }
     }
 
+    if (obj.sceneAssetCollision !== undefined) {
+        const sac = assertObject(obj.sceneAssetCollision, 'settings.sceneAssetCollision');
+        if (sac.enabled !== undefined) {
+            assertBoolean(sac.enabled, 'settings.sceneAssetCollision.enabled');
+        }
+        if (sac.scale !== undefined) {
+            assertObject(sac.scale, 'settings.sceneAssetCollision.scale');
+        }
+    }
+
     return data as ExperienceSettings;
 };
 
@@ -369,5 +385,9 @@ export type {
     WorldSpaceBloomRegionJSON,
     LocalLightRegion,
     SceneMediaHotspotSettings,
-    SceneMediaHotspotPatch
+    SceneMediaHotspotPatch,
+    SceneMediaHotspotVideoSettings,
+    SceneMediaHotspotAudioSettings,
+    SceneAssetCollisionSettings,
+    SceneAssetCollisionSettingsPatch
 };

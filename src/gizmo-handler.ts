@@ -407,6 +407,7 @@ export function initGizmoHandler(global: Global): () => void {
                     // 资产模式：记录资产变换历史
                     if (state.editMode && state.selectedSceneEntityId && handler && handler._nodes.length > 0 && state.editLeftModule === 'asset') {
                         pushEditHistory(global, 'transform asset');
+                        events.fire('sceneAsset:collisionDirty');
                     }
 
                     // 光源模式：将 Gizmo 上的变换回写到 settings.lighting，并刷新光源实体

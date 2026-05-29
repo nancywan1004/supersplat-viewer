@@ -4,6 +4,12 @@ import type { SceneAsset } from '../schemas/v2-custom';
 import type { AnnotationManager } from '../annotation-toolbar/annotation-manager';
 import { DEFAULT_BLOOM, DEFAULT_SHADOW } from './settings-serialize-configs';
 import {
+    applySceneAssetCollisionFromSettings,
+    persistSceneAssetCollisionToSettings,
+    syncSceneAssetCollisionRuntime
+} from '../scene-assets/collision/scene-asset-collision';
+import { serializeSceneMediaHotspotForPersistence } from './settings-serialize-helper';
+import {
     flushRevealIntoEffectsForExport,
     normalizeEffectsOnImport,
     syncEffectsRuntimeStateFromSettings
@@ -148,6 +154,14 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
 
     out.sceneAssets = buildSceneAssetsForPersistence(global);
 
+    persistSceneAssetCollisionToSettings(global);
+    const collisionPersisted = (global.settings as ExperienceSettings).sceneAssetCollision;
+    if (collisionPersisted) {
+        out.sceneAssetCollision = JSON.parse(JSON.stringify(collisionPersisted));
+    }
+
+    out.sceneMediaHotspot = serializeSceneMediaHotspotForPersistence(global.settings as ExperienceSettings);
+
     stripBloomSessionFieldsForPersistence(out);
 
     if (out.version === 2) {
@@ -263,4 +277,6 @@ export function applySettingsSnapshot(global: Global, snapshot: ExperienceSettin
         normalizeEffectsOnImport(global.settings as ExperienceSettings);
     }
     syncEffectsRuntimeStateFromSettings(global.state, global.settings as ExperienceSettings);
+    applySceneAssetCollisionFromSettings(global);
+    syncSceneAssetCollisionRuntime(global);
 }

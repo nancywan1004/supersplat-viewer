@@ -180,31 +180,66 @@ type LocalLightRegion = {
     linkedLightId?: string | null;
 };
 
+/** 场景音视频热区 — 视频全局参数 */
+type SceneMediaHotspotVideoSettings = {
+    /** 是否由热区自动播放；缺省 true，显式 false 时入库 */
+    hotspotAutoplayEnabled?: boolean;
+    /** 视锥半角（度）；总锥约 `2 × coneHalfDeg` */
+    coneHalfDeg: number;
+};
+
+/** 场景音视频热区 — 音频全局参数（纯欧氏距离，无视锥） */
+type SceneMediaHotspotAudioSettings = {
+    /** 是否由热区自动播放；缺省 true，显式 false 时入库 */
+    hotspotAutoplayEnabled?: boolean;
+    /**
+     * 浏览模式（Viewer / 编辑预览）下是否显示音频 callout 与播放按钮；
+     * 缺省 true（浏览模式可见且可手动 toggle），显式 false 时入库。
+     */
+    showCalloutInViewer?: boolean;
+};
+
 /** 场景音视频热区全局参数（持久化于 settings 根；触发距离在 sceneAssets[]） */
 type SceneMediaHotspotSettings = {
-    /** 视频热区全局参数 */
-    video: {
-        /** 是否由热区自动播放；缺省 true，显式 false 时入库 */
-        hotspotAutoplayEnabled?: boolean;
-        /** 视锥半角（度）；总锥约 `2 × coneHalfDeg` */
-        coneHalfDeg: number;
-    };
-    /** 音频热区全局参数（音频用纯欧氏距离，无视锥） */
-    audio: {
-        /** 是否由热区自动播放；缺省 true，显式 false 时入库 */
-        hotspotAutoplayEnabled?: boolean;
-        /**
-         * 浏览模式（Viewer / 编辑预览）下是否显示音频 callout 与播放按钮；
-         * 缺省 true（浏览模式可见且可手动 toggle），显式 false 时入库。
-         */
-        showCalloutInViewer?: boolean;
-    };
+    video: SceneMediaHotspotVideoSettings;
+    audio: SceneMediaHotspotAudioSettings;
 };
 
 /** 父级 `MEDIA_HOTSPOT_SET` 入站 payload；video / audio 子节点字段均可部分提供 */
 type SceneMediaHotspotPatch = {
-    video?: Partial<SceneMediaHotspotSettings['video']>;
-    audio?: Partial<SceneMediaHotspotSettings['audio']>;
+    video?: Partial<SceneMediaHotspotVideoSettings>;
+    audio?: Partial<SceneMediaHotspotAudioSettings>;
+};
+
+/** 放置资产 AABB 碰撞 — 各向缩放（相对渲染包围盒） */
+type SceneAssetCollisionAxisScale = {
+    x: number;
+    y: number;
+    z: number;
+};
+
+/** 放置资产 AABB 碰撞 — 高斯 / mesh 缩放与 autoFit 模式 */
+type SceneAssetCollisionScale = {
+    gaussian: SceneAssetCollisionAxisScale;
+    mesh: SceneAssetCollisionAxisScale;
+    /** true：仅自动贴合；false：仅使用 gaussian/mesh 手动 XYZ */
+    autoFit?: boolean;
+};
+
+/** 写入 settings.json 的放置资产碰撞配置（不含调试线框） */
+type SceneAssetCollisionSettings = {
+    enabled: boolean;
+    scale: SceneAssetCollisionScale;
+};
+
+/** 设置面板 / 协议 patch（含历史标量 gaussian/mesh） */
+type SceneAssetCollisionSettingsPatch = {
+    enabled?: boolean;
+    scale?: {
+        gaussian?: SceneAssetCollisionAxisScale | number;
+        mesh?: SceneAssetCollisionAxisScale | number;
+        autoFit?: boolean;
+    };
 };
 
 type SceneAsset = {
@@ -257,4 +292,4 @@ type EffectsSettings = {
     asset: EffectsAssetTrack;
 };
 
-export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, TorchLightSettings, LightingSettings, SceneAsset, SceneMediaHotspotSettings, SceneMediaHotspotPatch, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsAssetTrack };
+export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, TorchLightSettings, LightingSettings, SceneAsset, SceneMediaHotspotVideoSettings, SceneMediaHotspotAudioSettings, SceneMediaHotspotSettings, SceneMediaHotspotPatch, SceneAssetCollisionAxisScale, SceneAssetCollisionScale, SceneAssetCollisionSettings, SceneAssetCollisionSettingsPatch, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsAssetTrack };

@@ -1,6 +1,6 @@
 import type { Entity, EventHandler, AppBase, Asset } from 'playcanvas';
 
-import type { ExperienceSettings } from './settings';
+import type { ExperienceSettings, SceneAssetCollisionSettings } from './settings';
 import {
     type AssetEffectRuntimeStatus,
     type RevealEffectRuntimeStatus,
@@ -40,6 +40,14 @@ export type EffectsRuntimeState = {
     };
     asset: { instances: Record<string, { effectId: string; status: AssetEffectRuntimeStatus }> };
     lastError?: { code: string; message: string; effectId?: string; command?: string };
+};
+
+/**
+ * 放置资产碰撞会话运行态（`global.state` / observe；`debugVisual` 不入 settings.json）。
+ * 持久化字段与 `settings.sceneAssetCollision`（{@link SceneAssetCollisionSettings}）对齐。
+ */
+export type SceneAssetCollisionRuntimeState = SceneAssetCollisionSettings & {
+    debugVisual: boolean;
 };
 
 /** 资产库项类型 */
@@ -241,6 +249,8 @@ type State = {
     selectedLightId?: string | null;
     /** 光源变换模式（与环境模块底部工具栏联动） */
     lightTransformMode?: LightTransformMode | null;
+    /** 放置资产 AABB 碰撞会话运行态；持久化见 `settings.sceneAssetCollision` */
+    sceneAssetCollisionRuntimeState?: SceneAssetCollisionRuntimeState;
     gamingControls: boolean;
     /**
      * 特效运行态（与 `settings.effects` 三轨对齐）；不入 `settings.json`。
