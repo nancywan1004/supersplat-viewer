@@ -52,7 +52,8 @@ import {
     unmountPlacedVideoFromDom
 } from './media/video-texture';
 import { AUDIO_CALLOUT_WORLD_H, findAudioCalloutSelectHitFromClient } from './media/audio-callout';
-import { getSceneAssetPickLayer, getSceneAssetPickerLayers } from './scene-asset-pick-layer';
+import { getSceneAssetPickLayer } from './scene-asset-pick-layer';
+import { configurePlacedGaussianPickLayer, pickScenePlacedEntryAtScreen } from './scene-asset-selection-pick';
 import { removeSceneAssetFromSettings } from '../settings-serialize/settings-serialize';
 import { suspendShadowPipelineForGsplatLoad, syncGsplatShadowCastingFromSettings } from '../vfx/shadow';
 import type { ExperienceSettings } from '../settings';
@@ -369,6 +370,7 @@ async function instantiateGaussian(app: AppBase, item: AssetLibraryItem, positio
     material.setDefine('GSPLAT_AA', true);
     material.setParameter('alphaClip', 1 / 255);
     entity.setPosition(position);
+    configurePlacedGaussianPickLayer(app, entity);
     return entity;
 }
 
@@ -1106,35 +1108,26 @@ export function initAssetPlacementHandler(
         const pickX = Math.floor((offsetX / rect.width) * pickW);
         const pickY = Math.floor((offsetY / rect.height) * pickH);
 
-        if ((app.scene as any).gsplat) {
-            (app.scene as any).gsplat.enableIds = true;
-        }
-        // depth=false：实体选中只需 ID 缓冲；深度拾取由标注 Picker 用 pc.Picker(..., true) + getWorldPointAsync 单独处理。
         if (!sceneAssetPicker) {
             sceneAssetPicker = new (pc as any).Picker(app, pickW, pickH, false);
         }
         sceneAssetPicker.resize(pickW, pickH);
-        sceneAssetPicker.prepare(camera.camera, app.scene, getSceneAssetPickerLayers(app));
 
-        sceneAssetPicker.getSelectionAsync(pickX, pickY, 1, 1).then((selection: any[]) => {
-            if (selection.length === 0) return;
-            const picked = selection[0];
-            // Unified 模式下拾取 gsplat 返回 GSplatComponent（有 .entity）；拾取 mesh / plane 返回 MeshInstance（有 .node）
-            const entity = picked.entity ?? picked.node ?? null;
-            if (!entity) return;
-            // 对于 mesh，MeshInstance.node 可能是挂在 ScenePlacedItem.entity 下的子节点，这里同时兼容「自身」与「子层级命中」
-            const entry = list.find((item) => {
-                if (item.entity === entity) return true;
-                const anyEntity = entity as any;
-                return typeof anyEntity.isDescendantOf === 'function' && anyEntity.isDescendantOf(item.entity);
-            });
+        void pickScenePlacedEntryAtScreen(
+            global,
+            app,
+            camera,
+            sceneAssetPicker,
+            pickX,
+            pickY,
+            clientX,
+            clientY
+        ).then((entry) => {
             if (!entry) return;
             const prevSelectedId = state.selectedSceneEntityId;
             state.selectedSceneEntityId = entry.id;
             events.fire('sceneAsset:selected', { source: 'scene' });
-            // 仅当场景点击导致“选中对象变化”时，才触发聚焦。
             if (prevSelectedId === entry.id) return;
-            // 统一走资产 frame 链路（camera-manager 内会按选中资产 bbox 做 framing）。
             events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
         }).catch(() => {});
         return true;
@@ -1156,6 +1149,9 @@ export function initAssetPlacementHandler(
         parent.addChild(clone);
         if (entry.assetType === 'mesh') {
             configurePlacedMeshMaterials(clone);
+        }
+        if (entry.assetType === 'gaussian') {
+            configurePlacedGaussianPickLayer(app, clone);
         }
         const copiedId = (typeof payload?.copyId === 'string' && payload.copyId.trim().length > 0)
             ? payload.copyId

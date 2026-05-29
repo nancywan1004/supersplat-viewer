@@ -545,11 +545,7 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         const point = updateScreenUv(runtime.lastClientX, runtime.lastClientY);
         if (!point) return;
 
-        const picker = (app as unknown as {
-            __picker?: {
-                pickSurface?: (x: number, y: number) => Promise<{ position: Vec3; nearestPosition?: Vec3 } | null>;
-            };
-        }).__picker;
+        const picker = global.picker;
 
         // 同步：mesh AABB 射线求交。命中即写入「沿视线的欧氏距离」缓存；
         // 注意此处不再保存 mesh 命中的世界点本身（位置每帧由 onUpdate 用当前光标视线 × lastDistance 重算）

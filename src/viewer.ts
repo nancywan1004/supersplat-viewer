@@ -622,7 +622,7 @@ class Viewer {
             };
 
             this.picker = new Picker(app, camera);
-            (app as any).__picker = this.picker;
+            global.picker = this.picker;
             this.inputController = new InputController(global, this.picker);
 
             // 场景 ?collision= 网格（与接影 GLB 同源）；总开关 + Viewer/预览 + 懒加载就绪后非 null。

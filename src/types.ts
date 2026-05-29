@@ -1,5 +1,6 @@
 import type { Entity, EventHandler, AppBase, Asset } from 'playcanvas';
 
+import type { Picker } from './picker';
 import type { ExperienceSettings, SceneAssetCollisionSettings } from './settings';
 import {
     type AssetEffectRuntimeStatus,
@@ -304,6 +305,8 @@ type Global = {
     camera: Entity;
     /** 见 {@link ViewSettings} */
     viewSettings?: ViewSettings;
+    /** Viewer 注入的共享深度拾取器；未注入时由 `pickWorldFromClientXY` 懒创建 */
+    picker?: Picker;
 };
 
 export {
