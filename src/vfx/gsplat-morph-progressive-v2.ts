@@ -131,9 +131,9 @@ export interface GsplatMorphOptions {
      */
     fastQuaternionNlerp?: boolean;
     /**
-     * `greedy` is the default matcher: one-time approximate nearest matching
-     * by position, plus optional DC color weight, then reusable nearest-neighbor
-     * fill for count mismatches. `resample` is faster to initialize but only maps by index.
+     * 配对表仅在加载时构建一次，变形播放中不会重算。
+     * `resample`（默认）：按索引比例映射，O(n) 极快，配合 progressivePairFlight 足够。
+     * `greedy`：位置/颜色近似最近邻，大点云很慢，仅质量要求高时启用。
      */
     correspondenceStrategy?: CorrespondenceStrategy;
     greedySpatialWeight?: number;
@@ -143,9 +143,54 @@ export interface GsplatMorphOptions {
     greedyMaxCandidatesPerPoint?: number;
     /** 按配对顺序逐步从 A 飞向 B。默认 true；关闭后恢复整段统一 t 插值。 */
     progressivePairFlight?: boolean;
-    /** 每个配对点的飞行重叠窗口（0-1）。越小越接近 A1->B1、A2->B2 依次飞；默认 0.12。 */
+    /**
+     * 飞行重叠窗口（0–1）。单粒子从起飞到落地的 globalT 时长；越小则相邻粒子起飞间隔越大。默认 0.5。
+     */
     progressivePairFlightWindow?: number;
-    /** A-B 变形途中临时转为点云感，复用 growth-wave 的球形小点思路。默认 true。 */
+    /**
+     * 配对索引错峰权重（0–1）。与 sA/sB 空间相位混合，拉大「先飞 / 后飞」时间差并保持通道连续。默认 0.48。
+     */
+    progressivePairFlightStagger?: number;
+    /**
+     * A/B 分离消散与生成：A 按 sA 从靠 B 侧先散，B 按 sB 从靠 A 侧先生；
+     * 中间段才成通道粒子。默认 true。false 时退回单一 localT 对称插值。
+     */
+    progressivePairAsymmetricDissolve?: boolean;
+    /**
+     * A→B 非圆形沙漏：粒子仍从 A 形体各点飞向 B 目标，仅在中间段向轴线径向收束成细腰。
+     * 与点云 morphPointCloud* 无关。
+     */
+    morphHourglassChannel?: boolean;
+    morphHourglassStrength?: number;
+    /** @deprecated 圆形管道遗留，径向收束模式下忽略。 */
+    morphHourglassEndRadiusFrac?: number;
+    /** 腰部径向保留比例 0–1（相对当前点到轴距离），越小腰越细。默认 0.14。 */
+    morphHourglassWaistRatio?: number;
+    /** 收腰沿程锐度，越大越集中在中间。默认 2.6。 */
+    morphHourglassWaistPinch?: number;
+    /** @deprecated 圆形管道遗留，径向收束模式下忽略。 */
+    morphHourglassShellBias?: number;
+    /** 收束段的扰动幅度 × A→B 间距。默认 0.012（主扰动由 Spark hash 承担）。 */
+    morphHourglassPerturbAmp?: number;
+    /**
+     * Spark Disintegrate 式 hash 位移强度（× A→B 间距），见 spark splat-shader-effects。
+     * 默认 0.048。
+     */
+    morphHourglassSparkIntensity?: number;
+    /** Spark Disintegrate 切向扭转强度。默认 1.0。 */
+    morphHourglassSparkTwist?: number;
+    /** 通道粒子飞行中的时间随机漂移（× A→B 间距）。默认 0.026。 */
+    morphHourglassSparkDrift?: number;
+    /** 通道粒子直径 = A→B 间距 × 该比例（再与绝对上限、单 splat 尺度取 min）。默认 0.004。 */
+    morphHourglassParticleScaleFrac?: number;
+    /** 固定世界单位粒子直径；仅在不使用 scaleFrac 时生效。 */
+    morphHourglassParticleLogScale?: number;
+    morphHourglassTintA?: [number, number, number];
+    morphHourglassTintB?: [number, number, number];
+    morphHourglassTintMix?: number;
+    /** 飞行点贴到沙漏管道表面的强度 0–1。默认 0.92。 */
+    morphHourglassConform?: number;
+    /** A-B 变形途中临时转为点云感（v2 未实现，保留兼容）。 */
     morphPointCloudEffect?: boolean;
     /** 点云阶段固定点大小（世界单位）。默认 0.00015。 */
     morphPointCloudPointSize?: number;
@@ -174,7 +219,8 @@ export interface GsplatMorphOptions {
     /** Runtime-only: reports whether morph is using the fast preview route or upgraded greedy route. */
     onCorrespondenceStatus?: (status: CorrespondenceRuntimeStatus) => void;
     /**
-     * Build greedy correspondence while the resample preview is already visible.
+     * 启动后用 resample 先播 morph，再在后台构建 greedy 并热替换插值器。
+     * 默认 false：greedy 与变形播放无关，且大点云下会长时间占满主线程。
      * Disabled by default because the greedy matcher still runs on the browser
      * main thread and can starve morph presentation on large splats.
      */
@@ -204,9 +250,75 @@ const DEFAULT_GREEDY_SEARCH_RADIUS_CELLS = 2;
 const DEFAULT_GREEDY_MAX_CANDIDATES = 96;
 const DEFAULT_GREEDY_GLOBAL_FALLBACK_SAMPLES = 2048;
 const DEFAULT_MORPH_BUILD_YIELD_MS = 2;
-const DEFAULT_PROGRESSIVE_PAIR_FLIGHT_WINDOW = 0.12;
+const DEFAULT_PROGRESSIVE_PAIR_FLIGHT_WINDOW = 0.5;
+const DEFAULT_PROGRESSIVE_PAIR_FLIGHT_STAGGER = 0.48;
+const DEFAULT_MORPH_HOURGLASS_STRENGTH = 1.0;
+const DEFAULT_MORPH_HOURGLASS_WAIST_RADIAL_MIN = 0.14;
+const DEFAULT_MORPH_HOURGLASS_WAIST_PINCH = 2.6;
+const DEFAULT_MORPH_HOURGLASS_PERTURB_AMP = 0.012;
+const DEFAULT_MORPH_HOURGLASS_SPARK_INTENSITY = 0.048;
+const DEFAULT_MORPH_HOURGLASS_SPARK_TWIST = 1.0;
+const DEFAULT_MORPH_HOURGLASS_SPARK_DRIFT = 0.026;
+/** Spark disintegrate 约 0.01 量级；大场景再按 A→B 间距上限裁剪。 */
+const DEFAULT_MORPH_HOURGLASS_PARTICLE_SCALE_FRAC = 0.004;
+const MORPH_HOURGLASS_PARTICLE_MAX_DIAMETER = 0.012;
+const DEFAULT_MORPH_HOURGLASS_TINT_A: [number, number, number] = [0.95, 0.22, 0.28];
+const DEFAULT_MORPH_HOURGLASS_TINT_B: [number, number, number] = [0.25, 0.42, 0.98];
+/** 0 = 不改颜色，完全用 A→B 插值后的 GS 原色。 */
+const DEFAULT_MORPH_HOURGLASS_TINT_MIX = 0;
+const DEFAULT_MORPH_HOURGLASS_CONFORM = 0.78;
+const DEFAULT_MORPH_HOURGLASS_MIN_OPACITY_LOG = -0.2;
 const VALID_REST_PROP_COUNTS = [0, 9, 24, 45] as const;
 const SH_C0 = 0.28209479177387814;
+
+interface MorphHourglassSettings {
+    enabled: boolean;
+    strength: number;
+    waistRadialMin: number;
+    waistPinch: number;
+    perturbAmp: number;
+    sparkIntensity: number;
+    sparkTwist: number;
+    sparkDrift: number;
+    particleScaleFrac: number;
+    particleLogScale?: number;
+    tintA: [number, number, number];
+    tintB: [number, number, number];
+    tintMix: number;
+    conform: number;
+    minOpacityLog: number;
+}
+
+const resolveMorphHourglassSettings = (options: GsplatMorphOptions = {}): MorphHourglassSettings => ({
+    enabled: options.morphHourglassChannel ?? true,
+    strength: options.morphHourglassStrength ?? DEFAULT_MORPH_HOURGLASS_STRENGTH,
+    waistRadialMin: options.morphHourglassWaistRatio ?? DEFAULT_MORPH_HOURGLASS_WAIST_RADIAL_MIN,
+    waistPinch: options.morphHourglassWaistPinch ?? DEFAULT_MORPH_HOURGLASS_WAIST_PINCH,
+    perturbAmp: options.morphHourglassPerturbAmp ?? DEFAULT_MORPH_HOURGLASS_PERTURB_AMP,
+    sparkIntensity: options.morphHourglassSparkIntensity ?? DEFAULT_MORPH_HOURGLASS_SPARK_INTENSITY,
+    sparkTwist: options.morphHourglassSparkTwist ?? DEFAULT_MORPH_HOURGLASS_SPARK_TWIST,
+    sparkDrift: options.morphHourglassSparkDrift ?? DEFAULT_MORPH_HOURGLASS_SPARK_DRIFT,
+    particleScaleFrac: options.morphHourglassParticleScaleFrac ?? DEFAULT_MORPH_HOURGLASS_PARTICLE_SCALE_FRAC,
+    particleLogScale: options.morphHourglassParticleLogScale,
+    tintA: options.morphHourglassTintA ?? DEFAULT_MORPH_HOURGLASS_TINT_A,
+    tintB: options.morphHourglassTintB ?? DEFAULT_MORPH_HOURGLASS_TINT_B,
+    tintMix: options.morphHourglassTintMix ?? DEFAULT_MORPH_HOURGLASS_TINT_MIX,
+    conform: options.morphHourglassConform ?? DEFAULT_MORPH_HOURGLASS_CONFORM,
+    minOpacityLog: DEFAULT_MORPH_HOURGLASS_MIN_OPACITY_LOG
+});
+
+/** 通道粒子目标直径（世界单位）：min(间距×比例, 绝对上限)。 */
+const resolveHourglassParticleDiameter = (axis: PairAxisParams, settings: MorphHourglassSettings) => {
+    if (typeof settings.particleLogScale === 'number' && Number.isFinite(settings.particleLogScale)) {
+        return Math.exp(settings.particleLogScale);
+    }
+    const spanDiameter = axis.projSpan * settings.particleScaleFrac;
+    return Math.min(Math.max(spanDiameter, 1e-5), MORPH_HOURGLASS_PARTICLE_MAX_DIAMETER);
+};
+
+const resolveHourglassParticleLogScale = (axis: PairAxisParams, settings: MorphHourglassSettings) => {
+    return Math.log(resolveHourglassParticleDiameter(axis, settings));
+};
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const smoothstep = (edge0: number, edge1: number, value: number) => {
@@ -246,6 +358,288 @@ const resolveDirectionalFlightT = (
     const reverseProgress = 1 - clamp(globalT, 0, 1);
     return 1 - smoothstep(0, 1, clamp((reverseProgress - delay) / travelWindow, 0, 1));
 };
+
+interface AsymmetricMorphWeights {
+    goneA: number;
+    presentB: number;
+    posT: number;
+    weightA: number;
+    weightB: number;
+    inChannel: boolean;
+    channelBand: number;
+    blendA: number;
+    blendB: number;
+}
+
+/** 配对索引 0–1 + 轻微哈希，避免同 sA 带内同时起飞。 */
+const resolvePairFlightPhase = (pairIndex: number, pairCount: number) => {
+    if (pairCount <= 1) {
+        return 0.5;
+    }
+    const base = pairIndex / Math.max(1, pairCount - 1);
+    const jitter = (hourglassSplatHash(pairIndex, 4.7) - 0.5) * 0.07;
+    return clamp(base + jitter, 0, 1);
+};
+
+/** A 按 sA 消散、B 按 sB 生成；pairPhase 拉开相邻粒子起飞间隔。 */
+const resolveAsymmetricMorphWeights = (
+    globalT: number,
+    sA: number,
+    sB: number,
+    pairPhase: number,
+    progressivePairFlight: boolean,
+    window: number,
+    stagger: number,
+    reversePlayback: boolean
+): AsymmetricMorphWeights => {
+    if (!progressivePairFlight) {
+        const u = clamp(globalT, 0, 1);
+        return {
+            goneA: u,
+            presentB: u,
+            posT: u,
+            weightA: 1 - u,
+            weightB: u,
+            inChannel: u > 0.04 && u < 0.96,
+            channelBand: clamp(4 * u * (1 - u), 0, 1),
+            blendA: 1 - u,
+            blendB: u
+        };
+    }
+
+    const staggerMix = clamp(stagger, 0, 1);
+    const spatialLeave = Math.pow(clamp(1 - sA, 0, 1), 1.45);
+    const spatialArrive = Math.pow(clamp(sB, 0, 1), 1.45);
+    const phaseLeaveA = clamp(spatialLeave * (1 - staggerMix) + pairPhase * staggerMix, 0, 1);
+    const phaseArriveB = clamp(spatialArrive * (1 - staggerMix) + pairPhase * staggerMix, 0, 1);
+    const travelWindow = clamp(window, 0.12, 1);
+
+    const goneA = resolveDirectionalFlightT(globalT, phaseLeaveA, true, travelWindow, reversePlayback);
+    const presentB = resolveDirectionalFlightT(globalT, phaseArriveB, true, travelWindow, reversePlayback);
+    const weightA = 1 - goneA;
+    const weightB = presentB;
+
+    const flightPhase = clamp(phaseLeaveA * 0.52 + phaseArriveB * 0.48, 0, 1);
+    const posT = resolveDirectionalFlightT(globalT, flightPhase, true, travelWindow, reversePlayback);
+
+    const channelBand = clamp(goneA * (1 - presentB), 0, 1);
+    const inChannel = goneA > 0.04 && presentB < 0.96 && posT > 0.02 && posT < 0.98;
+    const blendA = weightA;
+    const blendB = weightB;
+
+    return { goneA, presentB, posT, weightA, weightB, inChannel, channelBand, blendA, blendB };
+};
+
+/** 沿 A→B 轴：两端 0、中间 1，用于只在腰段径向收束。 */
+const hourglassWaistProfile = (axisS: number, waistPinch: number) => {
+    const u = 1 - Math.abs(2 * clamp(axisS, 0, 1) - 1);
+    return Math.pow(u, Math.max(0.5, waistPinch));
+};
+
+const hourglassSplatHash = (seed: number, salt: number) => {
+    const x = Math.sin((seed + 1) * 12.9898 + salt * 78.233) * 43758.5453;
+    return x - Math.floor(x);
+};
+
+/** Spark disintegrate: fract(sin(p * 123.456) * 123.456) per component */
+const sparkHash3 = (x: number, y: number, z: number) => {
+    const fract = (v: number) => v - Math.floor(v);
+    return {
+        x: fract(Math.sin(x * 123.456) * 123.456),
+        y: fract(Math.sin(y * 123.456) * 123.456),
+        z: fract(Math.sin(z * 123.456) * 123.456)
+    };
+};
+
+const rgbToFdc = (r: number, g: number, b: number) => ({
+    f0: (r - 0.5) / SH_C0,
+    f1: (g - 0.5) / SH_C0,
+    f2: (b - 0.5) / SH_C0
+});
+
+/**
+ * 非圆形沙漏：保留 A→B 插值/渐进飞行的位置，仅在腰段把径向分量向轴线收紧。
+ * 两端自然保持 A/B 形体散开的 GS 分布。
+ */
+const applyHourglassChannelToSplat = (
+    writeIndex: number,
+    globalT: number,
+    morphWeights: AsymmetricMorphWeights,
+    axis: PairAxisParams,
+    settings: MorphHourglassSettings,
+    output: SplatArrays
+) => {
+    if (!settings.enabled) {
+        return;
+    }
+
+    const morphActive = smoothstep(0.01, 0.05, globalT) * (1 - smoothstep(0.95, 0.99, globalT));
+    const channelWeight = morphActive * morphWeights.channelBand;
+    if (channelWeight <= 0.008) {
+        return;
+    }
+
+    let px = output.x[writeIndex];
+    let py = output.y[writeIndex];
+    let pz = output.z[writeIndex];
+
+    const proj = (px - axis.originX) * axis.dirX
+        + (py - axis.originY) * axis.dirY
+        + (pz - axis.originZ) * axis.dirZ;
+    const axisS = clamp((proj - axis.projMin) / axis.projSpan, 0, 1);
+    const pinchProfile = hourglassWaistProfile(axisS, settings.waistPinch);
+    if (pinchProfile <= 0.001) {
+        return;
+    }
+
+    const ax = axis.originX + axis.dirX * proj;
+    const ay = axis.originY + axis.dirY * proj;
+    const az = axis.originZ + axis.dirZ * proj;
+
+    let rx = px - ax;
+    let ry = py - ay;
+    let rz = pz - az;
+    const axial = rx * axis.dirX + ry * axis.dirY + rz * axis.dirZ;
+    rx -= axis.dirX * axial;
+    ry -= axis.dirY * axial;
+    rz -= axis.dirZ * axial;
+
+    const pinchAmt = clamp(channelWeight * pinchProfile * settings.strength * settings.conform, 0, 1);
+    const radialScale = 1 - (1 - settings.waistRadialMin) * pinchAmt;
+    rx *= radialScale;
+    ry *= radialScale;
+    rz *= radialScale;
+
+    const wobble = settings.perturbAmp * axis.projSpan * pinchProfile * channelWeight;
+    const seed = writeIndex;
+    const flowPhase = globalT * Math.PI * 2 + morphWeights.posT * Math.PI * 1.35 + seed * 0.17;
+    let perpX = axis.dirY;
+    let perpY = -axis.dirX;
+    let perpZ = 0;
+    if (Math.hypot(perpX, perpY, perpZ) < 0.1) {
+        perpX = 0;
+        perpY = axis.dirZ;
+        perpZ = -axis.dirY;
+    }
+    const pl = Math.max(1e-6, Math.hypot(perpX, perpY, perpZ));
+    perpX /= pl;
+    perpY /= pl;
+    perpZ /= pl;
+    const perp2X = axis.dirY * perpZ - axis.dirZ * perpY;
+    const perp2Y = axis.dirZ * perpX - axis.dirX * perpZ;
+    const perp2Z = axis.dirX * perpY - axis.dirY * perpX;
+    px = ax + axis.dirX * axial + rx
+        + perpX * Math.sin(flowPhase * 1.1 + seed) * wobble
+        + perp2X * Math.cos(flowPhase * 0.85 + seed * 2.3) * wobble;
+    py = ay + axis.dirY * axial + ry
+        + perpY * Math.sin(flowPhase * 1.1 + seed) * wobble
+        + perp2Y * Math.cos(flowPhase * 0.85 + seed * 2.3) * wobble;
+    pz = az + axis.dirZ * axial + rz
+        + perpZ * Math.sin(flowPhase * 1.1 + seed) * wobble
+        + perp2Z * Math.cos(flowPhase * 0.85 + seed * 2.3) * wobble;
+
+    const particleBand = clamp(channelWeight * pinchProfile * settings.strength, 0, 1);
+    if (particleBand > 0.02) {
+        const sparkPhase = Math.sin(
+            globalT * Math.PI * 2
+            + morphWeights.posT * Math.PI
+            + axisS * 4
+            - proj * 0.5
+            + seed * 0.11
+        );
+        const sparkTt = smoothstep(-1, 0.5, -sparkPhase) * channelWeight * pinchProfile;
+
+        const hashPos = sparkHash3(px * 0.65, py * 0.65, pz * 0.65);
+        const jitter = settings.sparkIntensity * axis.projSpan * particleBand;
+        px += (hashPos.x * 2 - 1) * jitter;
+        py += (hashPos.y * 2 - 1) * jitter;
+        pz += (hashPos.z * 2 - 1) * jitter;
+
+        let srx = px - ax;
+        let sry = py - ay;
+        let srz = pz - az;
+        const saxial = srx * axis.dirX + sry * axis.dirY + srz * axis.dirZ;
+        srx -= axis.dirX * saxial;
+        sry -= axis.dirY * saxial;
+        srz -= axis.dirZ * saxial;
+        let ru = srx * perpX + sry * perpY + srz * perpZ;
+        let rv = srx * perp2X + sry * perp2Y + srz * perp2Z;
+        const twistAng = sparkTt * 2 + saxial * 2 * sparkTt * settings.sparkTwist;
+        const cosA = Math.cos(twistAng);
+        const sinA = Math.sin(twistAng);
+        const ru2 = ru * cosA - rv * sinA;
+        const rv2 = ru * sinA + rv * cosA;
+        ru = ru2;
+        rv = rv2;
+        px = ax + axis.dirX * saxial + perpX * ru + perp2X * rv;
+        py = ay + axis.dirY * saxial + perpY * ru + perp2Y * rv;
+        pz = az + axis.dirZ * saxial + perpZ * ru + perp2Z * rv;
+
+        const rh = sparkHash3(seed * 0.071, axisS * 5.31, proj * 0.019);
+        const t1 = globalT * Math.PI * 2 + morphWeights.posT * 4.5 + rh.x * Math.PI * 2;
+        const t2 = globalT * 5.1 + morphWeights.posT * 3.7 + rh.y * Math.PI * 2 + seed * 0.31;
+        const t3 = globalT * 7.2 + morphWeights.posT * 5.3 + rh.z * Math.PI * 2 + seed * 0.19;
+        const driftAmp = settings.sparkDrift * axis.projSpan * particleBand;
+        const rh2 = sparkHash3(seed, t1 * 0.13, t2 * 0.11);
+        px += (perpX * Math.sin(t1 * (1.15 + rh.x * 0.4) + seed)
+            + perp2X * Math.cos(t2 * (0.95 + rh.y * 0.5) + seed * 2.1)) * driftAmp;
+        py += (perpY * Math.sin(t1 * (1.15 + rh.x * 0.4) + seed)
+            + perp2Y * Math.cos(t2 * (0.95 + rh.y * 0.5) + seed * 2.1)) * driftAmp;
+        pz += (perpZ * Math.sin(t1 * (1.15 + rh.x * 0.4) + seed)
+            + perp2Z * Math.cos(t2 * (0.95 + rh.y * 0.5) + seed * 2.1)) * driftAmp;
+        const drift2 = driftAmp * 0.55;
+        px += (perpX * Math.sin(t2 * 2.3 + rh2.y * 12) + perp2X * Math.sin(t1 * 1.9 + rh2.z * 12)) * drift2;
+        py += (perpY * Math.sin(t2 * 2.3 + rh2.y * 12) + perp2Y * Math.sin(t1 * 1.9 + rh2.z * 12)) * drift2;
+        pz += (perpZ * Math.sin(t2 * 2.3 + rh2.y * 12) + perp2Z * Math.sin(t1 * 1.9 + rh2.z * 12)) * drift2;
+        const driftAx = driftAmp * 0.22 * Math.sin(t3 * 0.6 + seed * 0.07);
+        px += axis.dirX * driftAx;
+        py += axis.dirY * driftAx;
+        pz += axis.dirZ * driftAx;
+
+        const particleLin = resolveHourglassParticleDiameter(axis, settings);
+        const scaleBlend = clamp(particleBand, 0, 1);
+        const splatLin0 = Math.exp(output.scale0[writeIndex]);
+        const splatLin1 = Math.exp(output.scale1[writeIndex]);
+        const splatLin2 = Math.exp(output.scale2[writeIndex]);
+        const currentRms = Math.sqrt((splatLin0 * splatLin0 + splatLin1 * splatLin1 + splatLin2 * splatLin2) / 3);
+        const targetLin = currentRms * (1 - scaleBlend) + particleLin * scaleBlend;
+        const targetLog = Math.log(Math.max(targetLin, 1e-6));
+        output.scale0[writeIndex] = targetLog;
+        output.scale1[writeIndex] = targetLog;
+        output.scale2[writeIndex] = targetLog;
+        const invBlend = 1 - scaleBlend;
+        output.rot0[writeIndex] = output.rot0[writeIndex] * invBlend + 1 * scaleBlend;
+        output.rot1[writeIndex] *= invBlend;
+        output.rot2[writeIndex] *= invBlend;
+        output.rot3[writeIndex] *= invBlend;
+        const rl = Math.hypot(output.rot0[writeIndex], output.rot1[writeIndex], output.rot2[writeIndex], output.rot3[writeIndex]);
+        if (rl > 1e-8) {
+            output.rot0[writeIndex] /= rl;
+            output.rot1[writeIndex] /= rl;
+            output.rot2[writeIndex] /= rl;
+            output.rot3[writeIndex] /= rl;
+        }
+    }
+
+    output.x[writeIndex] = px;
+    output.y[writeIndex] = py;
+    output.z[writeIndex] = pz;
+
+    if (settings.tintMix <= 0) {
+        return;
+    }
+
+    const effect = clamp(channelWeight * settings.strength, 0, 1);
+    const tintR = settings.tintA[0] * (1 - axisS) + settings.tintB[0] * axisS;
+    const tintG = settings.tintA[1] * (1 - axisS) + settings.tintB[1] * axisS;
+    const tintB = settings.tintA[2] * (1 - axisS) + settings.tintB[2] * axisS;
+    const tint = rgbToFdc(tintR, tintG, tintB);
+    const tintMix = effect * settings.tintMix;
+    output.fdc0[writeIndex] = output.fdc0[writeIndex] * (1 - tintMix) + tint.f0 * tintMix;
+    output.fdc1[writeIndex] = output.fdc1[writeIndex] * (1 - tintMix) + tint.f1 * tintMix;
+    output.fdc2[writeIndex] = output.fdc2[writeIndex] * (1 - tintMix) + tint.f2 * tintMix;
+};
+
 const yieldToBrowser = () => new Promise<void>((resolve) => {
     if (typeof requestAnimationFrame === 'function') {
         requestAnimationFrame(() => setTimeout(resolve, 0));
@@ -904,6 +1298,8 @@ class GpuMorphRuntime {
 
     private readonly _progressivePairFlightWindow: number;
 
+    private readonly _hourglass: MorphHourglassSettings;
+
     private readonly _pairAxisParams: PairAxisParams[];
 
     private _correspondences?: Map<string, PairCorrespondence>;
@@ -1023,28 +1419,326 @@ class GpuMorphRuntime {
     `;
 
     private readonly _normalizeGLSL = `
+        uniform float uGlobalT;
+        uniform float uHourglassEnabled;
+        uniform float uHourglassStrength;
+        uniform float uHourglassWaistRatio;
+        uniform float uHourglassWaistPinch;
+        uniform float uHourglassPerturbAmp;
+        uniform float uHourglassSparkIntensity;
+        uniform float uHourglassSparkTwist;
+        uniform float uHourglassSparkDrift;
+        uniform float uHourglassParticleLogScale;
+        uniform float uHourglassParticleScaleFrac;
+        uniform float uHourglassParticleMaxDiameter;
+        uniform float uHourglassTintMix;
+        uniform float uHourglassConform;
+        uniform float uMorphLocalT;
+        uniform vec3 uHourglassTintA;
+        uniform vec3 uHourglassTintB;
+        uniform vec3 uPairAxisOrigin;
+        uniform vec3 uPairAxisDir;
+        uniform float uPairProjMin;
+        uniform float uPairProjSpan;
+
+        mat2 rot2(float a) {
+            float s = sin(a);
+            float c = cos(a);
+            return mat2(c, -s, s, c);
+        }
+
+        vec3 sparkHash3(vec3 p) {
+            return fract(sin(p * 123.456) * 123.456);
+        }
+
+        void hourglassRadialPinch(
+            inout vec3 center,
+            out float axisS,
+            out float pinchProfile,
+            out float particleBand,
+            out float morphActive
+        ) {
+            axisS = 0.0;
+            pinchProfile = 0.0;
+            particleBand = 0.0;
+            morphActive = 0.0;
+            if (uHourglassEnabled < 0.5) {
+                return;
+            }
+            morphActive = smoothstep(0.02, 0.08, uGlobalT) * (1.0 - smoothstep(0.9, 0.98, uGlobalT));
+            if (morphActive <= 0.03) {
+                return;
+            }
+            float projected = dot(center - uPairAxisOrigin, uPairAxisDir);
+            axisS = clamp((projected - uPairProjMin) / max(uPairProjSpan, 0.0001), 0.0, 1.0);
+            float u = 1.0 - abs(2.0 * axisS - 1.0);
+            pinchProfile = pow(max(u, 0.0), max(uHourglassWaistPinch, 0.5));
+            if (pinchProfile <= 0.001) {
+                return;
+            }
+            vec3 axisPoint = uPairAxisOrigin + uPairAxisDir * projected;
+            vec3 radial = center - axisPoint;
+            float axial = dot(radial, uPairAxisDir);
+            radial -= uPairAxisDir * axial;
+            float pinchAmt = clamp(morphActive * pinchProfile * uHourglassStrength * uHourglassConform, 0.0, 1.0);
+            float radialScale = 1.0 - (1.0 - uHourglassWaistRatio) * pinchAmt;
+            radial *= radialScale;
+            vec3 perp = normalize(cross(uPairAxisDir, vec3(0.0, 1.0, 0.0)));
+            if (length(perp) < 0.1) {
+                perp = normalize(cross(uPairAxisDir, vec3(1.0, 0.0, 0.0)));
+            }
+            vec3 perp2 = normalize(cross(uPairAxisDir, perp));
+            float wobble = uHourglassPerturbAmp * uPairProjSpan * pinchProfile * morphActive;
+            float flowPhase = uGlobalT * 6.2831853 + uMorphLocalT * 3.14159265 + float(splat.index) * 0.17;
+            center = axisPoint + uPairAxisDir * axial + radial;
+            center += perp * sin(flowPhase * 1.1 + float(splat.index)) * wobble;
+            center += perp2 * cos(flowPhase * 0.85 + float(splat.index) * 2.3) * wobble;
+            particleBand = clamp(morphActive * pinchProfile * uHourglassStrength, 0.0, 1.0);
+        }
+
+        void applySparkDisintegrate(
+            inout vec3 center,
+            float axisS,
+            float pinchProfile,
+            float particleBand,
+            float morphActive,
+            out float sparkTt
+        ) {
+            sparkTt = 0.0;
+            if (particleBand <= 0.02) {
+                return;
+            }
+            float projected = dot(center - uPairAxisOrigin, uPairAxisDir);
+            vec3 axisPoint = uPairAxisOrigin + uPairAxisDir * projected;
+            vec3 h = sparkHash3(center * 0.65 + vec3(float(splat.index) * 0.013));
+            center += (h * 2.0 - 1.0) * uHourglassSparkIntensity * uPairProjSpan * particleBand;
+
+            float sparkPhase = sin(
+                uGlobalT * 6.2831853 + uMorphLocalT * 3.14159265 + axisS * 4.0 - projected * 0.5 + float(splat.index) * 0.11
+            );
+            sparkTt = smoothstep(-1.0, 0.5, -sparkPhase) * pinchProfile * morphActive;
+
+            vec3 radial = center - axisPoint;
+            float axial = dot(radial, uPairAxisDir);
+            radial -= uPairAxisDir * axial;
+            vec3 perp = normalize(cross(uPairAxisDir, vec3(0.0, 1.0, 0.0)));
+            if (length(perp) < 0.1) {
+                perp = normalize(cross(uPairAxisDir, vec3(1.0, 0.0, 0.0)));
+            }
+            vec3 perp2 = normalize(cross(uPairAxisDir, perp));
+            vec2 rp = vec2(dot(radial, perp), dot(radial, perp2));
+            float ang = sparkTt * 2.0 + axial * 2.0 * sparkTt * uHourglassSparkTwist;
+            rp = rot2(ang) * rp;
+            center = axisPoint + uPairAxisDir * axial + perp * rp.x + perp2 * rp.y;
+
+            float seed = float(splat.index);
+            vec3 rh = sparkHash3(vec3(seed * 0.071, axisS * 5.31, projected * 0.019));
+            float t1 = uGlobalT * 6.2831853 + uMorphLocalT * 4.5 + rh.x * 6.2831853;
+            float t2 = uGlobalT * 5.1 + uMorphLocalT * 3.7 + rh.y * 6.2831853 + seed * 0.31;
+            float t3 = uGlobalT * 7.2 + uMorphLocalT * 5.3 + rh.z * 6.2831853 + seed * 0.19;
+            float driftAmp = uHourglassSparkDrift * uPairProjSpan * particleBand;
+            vec3 rh2 = sparkHash3(vec3(seed, t1 * 0.13, t2 * 0.11));
+            vec3 drift = (perp * sin(t1 * (1.15 + rh.x * 0.4) + seed)
+                + perp2 * cos(t2 * (0.95 + rh.y * 0.5) + seed * 2.1)) * driftAmp;
+            drift += (perp * sin(t2 * 2.3 + rh2.y * 12.0) + perp2 * sin(t1 * 1.9 + rh2.z * 12.0)) * driftAmp * 0.55;
+            drift += uPairAxisDir * sin(t3 * 0.6 + seed * 0.07) * driftAmp * 0.22;
+            center += drift;
+        }
+
         void process() {
             vec3 center = getCenter();
+            float axisS = 0.0;
+            float pinchProfile = 0.0;
+            float particleBand = 0.0;
+            float morphActive = 0.0;
+            hourglassRadialPinch(center, axisS, pinchProfile, particleBand, morphActive);
+            float sparkTt = 0.0;
+            applySparkDisintegrate(center, axisS, pinchProfile, particleBand, morphActive, sparkTt);
             vec4 color = getColor();
+            float hgEffect = particleBand;
+            if (hgEffect > 0.03 && uHourglassTintMix > 0.001) {
+                vec3 tint = mix(uHourglassTintA, uHourglassTintB, axisS);
+                color.rgb = mix(color.rgb, tint, hgEffect * uHourglassTintMix);
+            }
             color.a = 1.0 / (1.0 + exp(-color.a));
             vec3 scale = exp(getScale());
+            vec4 rot = normalize(getRotation());
+            if (particleBand > 0.02) {
+                float particleSize = min(
+                    uPairProjSpan * uHourglassParticleScaleFrac,
+                    uHourglassParticleMaxDiameter
+                );
+                float currentRms = sqrt(dot(scale, scale) / 3.0);
+                float scaleBlend = clamp(particleBand, 0.0, 1.0);
+                float targetSize = mix(currentRms, particleSize, scaleBlend);
+                scale = vec3(targetSize);
+                vec4 idRot = vec4(0.0, 0.0, 0.0, 1.0);
+                rot = normalize(mix(rot, idRot, scaleBlend));
+            }
             writeDataCenter(vec4(center, 1.0));
             writeDataColor(color);
             writeDataScale(vec4(scale, 0.0));
-            writeDataRotation(normalize(getRotation()));
+            writeDataRotation(rot);
         }
     `;
 
     private readonly _normalizeWGSL = `
+        uniform uGlobalT: f32;
+        uniform uHourglassEnabled: f32;
+        uniform uHourglassStrength: f32;
+        uniform uHourglassWaistRatio: f32;
+        uniform uHourglassWaistPinch: f32;
+        uniform uHourglassPerturbAmp: f32;
+        uniform uHourglassSparkIntensity: f32;
+        uniform uHourglassSparkTwist: f32;
+        uniform uHourglassSparkDrift: f32;
+        uniform uHourglassParticleLogScale: f32;
+        uniform uHourglassParticleScaleFrac: f32;
+        uniform uHourglassParticleMaxDiameter: f32;
+        uniform uHourglassTintMix: f32;
+        uniform uHourglassConform: f32;
+        uniform uMorphLocalT: f32;
+        uniform uHourglassTintA: vec3f;
+        uniform uHourglassTintB: vec3f;
+        uniform uPairAxisOrigin: vec3f;
+        uniform uPairAxisDir: vec3f;
+        uniform uPairProjMin: f32;
+        uniform uPairProjSpan: f32;
+
+        fn rot2(a: f32) -> mat2x2f {
+            let s = sin(a);
+            let c = cos(a);
+            return mat2x2f(c, -s, s, c);
+        }
+
+        fn sparkHash3(p: vec3f) -> vec3f {
+            return fract(sin(p * 123.456) * 123.456);
+        }
+
+        fn hourglassRadialPinch(
+            center: ptr<function, vec3f>,
+            axisS: ptr<function, f32>,
+            pinchProfile: ptr<function, f32>,
+            particleBand: ptr<function, f32>,
+            morphActive: ptr<function, f32>
+        ) {
+            if (uniform.uHourglassEnabled < 0.5) {
+                return;
+            }
+            *morphActive = smoothstep(0.02, 0.08, uniform.uGlobalT) * (1.0 - smoothstep(0.9, 0.98, uniform.uGlobalT));
+            if (*morphActive <= 0.03) {
+                return;
+            }
+            let projected = dot(*center - uniform.uPairAxisOrigin, uniform.uPairAxisDir);
+            *axisS = clamp((projected - uniform.uPairProjMin) / max(uniform.uPairProjSpan, 0.0001), 0.0, 1.0);
+            let u = 1.0 - abs(2.0 * *axisS - 1.0);
+            *pinchProfile = pow(max(u, 0.0), max(uniform.uHourglassWaistPinch, 0.5));
+            if (*pinchProfile <= 0.001) {
+                return;
+            }
+            let axisPoint = uniform.uPairAxisOrigin + uniform.uPairAxisDir * projected;
+            var radial = *center - axisPoint;
+            let axial = dot(radial, uniform.uPairAxisDir);
+            radial -= uniform.uPairAxisDir * axial;
+            let pinchAmt = clamp(*morphActive * *pinchProfile * uniform.uHourglassStrength * uniform.uHourglassConform, 0.0, 1.0);
+            let radialScale = 1.0 - (1.0 - uniform.uHourglassWaistRatio) * pinchAmt;
+            radial *= radialScale;
+            var perp = normalize(cross(uniform.uPairAxisDir, vec3f(0.0, 1.0, 0.0)));
+            if (length(perp) < 0.1) {
+                perp = normalize(cross(uniform.uPairAxisDir, vec3f(1.0, 0.0, 0.0)));
+            }
+            let perp2 = normalize(cross(uniform.uPairAxisDir, perp));
+            let wobble = uniform.uHourglassPerturbAmp * uniform.uPairProjSpan * *pinchProfile * *morphActive;
+            let flowPhase = uniform.uGlobalT * 6.2831853 + uniform.uMorphLocalT * 3.14159265 + f32(splat.index) * 0.17;
+            *center = axisPoint + uniform.uPairAxisDir * axial + radial;
+            *center += perp * sin(flowPhase * 1.1 + f32(splat.index)) * wobble;
+            *center += perp2 * cos(flowPhase * 0.85 + f32(splat.index) * 2.3) * wobble;
+            *particleBand = clamp(*morphActive * *pinchProfile * uniform.uHourglassStrength, 0.0, 1.0);
+        }
+
+        fn applySparkDisintegrate(
+            center: ptr<function, vec3f>,
+            axisS: f32,
+            pinchProfile: f32,
+            particleBand: f32,
+            morphActive: f32,
+            sparkTt: ptr<function, f32>
+        ) {
+            *sparkTt = 0.0;
+            if (particleBand <= 0.02) {
+                return;
+            }
+            let projected = dot(*center - uniform.uPairAxisOrigin, uniform.uPairAxisDir);
+            let axisPoint = uniform.uPairAxisOrigin + uniform.uPairAxisDir * projected;
+            let h = sparkHash3(*center * 0.65 + vec3f(f32(splat.index) * 0.013));
+            *center += (h * 2.0 - 1.0) * uniform.uHourglassSparkIntensity * uniform.uPairProjSpan * particleBand;
+
+            let sparkPhase = sin(
+                uniform.uGlobalT * 6.2831853 + uniform.uMorphLocalT * 3.14159265 + axisS * 4.0 - projected * 0.5 + f32(splat.index) * 0.11
+            );
+            *sparkTt = smoothstep(-1.0, 0.5, -sparkPhase) * pinchProfile * morphActive;
+
+            var radial = *center - axisPoint;
+            let axial = dot(radial, uniform.uPairAxisDir);
+            radial -= uniform.uPairAxisDir * axial;
+            var perp = normalize(cross(uniform.uPairAxisDir, vec3f(0.0, 1.0, 0.0)));
+            if (length(perp) < 0.1) {
+                perp = normalize(cross(uniform.uPairAxisDir, vec3f(1.0, 0.0, 0.0)));
+            }
+            let perp2 = normalize(cross(uniform.uPairAxisDir, perp));
+            var rp = vec2f(dot(radial, perp), dot(radial, perp2));
+            let ang = *sparkTt * 2.0 + axial * 2.0 * *sparkTt * uniform.uHourglassSparkTwist;
+            rp = rot2(ang) * rp;
+            *center = axisPoint + uniform.uPairAxisDir * axial + perp * rp.x + perp2 * rp.y;
+
+            let seed = f32(splat.index);
+            let rh = sparkHash3(vec3f(seed * 0.071, axisS * 5.31, projected * 0.019));
+            let t1 = uniform.uGlobalT * 6.2831853 + uniform.uMorphLocalT * 4.5 + rh.x * 6.2831853;
+            let t2 = uniform.uGlobalT * 5.1 + uniform.uMorphLocalT * 3.7 + rh.y * 6.2831853 + seed * 0.31;
+            let t3 = uniform.uGlobalT * 7.2 + uniform.uMorphLocalT * 5.3 + rh.z * 6.2831853 + seed * 0.19;
+            let driftAmp = uniform.uHourglassSparkDrift * uniform.uPairProjSpan * particleBand;
+            let rh2 = sparkHash3(vec3f(seed, t1 * 0.13, t2 * 0.11));
+            var drift = (perp * sin(t1 * (1.15 + rh.x * 0.4) + seed)
+                + perp2 * cos(t2 * (0.95 + rh.y * 0.5) + seed * 2.1)) * driftAmp;
+            drift += (perp * sin(t2 * 2.3 + rh2.y * 12.0) + perp2 * sin(t1 * 1.9 + rh2.z * 12.0)) * driftAmp * 0.55;
+            drift += uniform.uPairAxisDir * sin(t3 * 0.6 + seed * 0.07) * driftAmp * 0.22;
+            *center += drift;
+        }
+
         fn process() {
             var center = getCenter();
+            var axisS = 0.0;
+            var pinchProfile = 0.0;
+            var particleBand = 0.0;
+            var morphActive = 0.0;
+            hourglassRadialPinch(&center, &axisS, &pinchProfile, &particleBand, &morphActive);
+            var sparkTt = 0.0;
+            applySparkDisintegrate(&center, axisS, pinchProfile, particleBand, morphActive, &sparkTt);
             var color = getColor();
+            let hgEffect = particleBand;
+            if (hgEffect > 0.03 && uniform.uHourglassTintMix > 0.001) {
+                let tint = mix(uniform.uHourglassTintA, uniform.uHourglassTintB, axisS);
+                color = vec4f(mix(color.rgb, tint, hgEffect * uniform.uHourglassTintMix), color.a);
+            }
             color.a = 1.0 / (1.0 + exp(-color.a));
             var scale = exp(getScale());
+            var rot = normalize(getRotation());
+            if (particleBand > 0.02) {
+                let particleSize = min(
+                    uniform.uPairProjSpan * uniform.uHourglassParticleScaleFrac,
+                    uniform.uHourglassParticleMaxDiameter
+                );
+                let currentRms = sqrt(dot(scale, scale) / 3.0);
+                let scaleBlend = clamp(particleBand, 0.0, 1.0);
+                let targetSize = mix(currentRms, particleSize, scaleBlend);
+                scale = vec3f(targetSize);
+                let idRot = vec4f(0.0, 0.0, 0.0, 1.0);
+                rot = normalize(mix(rot, idRot, scaleBlend));
+            }
             writeDataCenter(vec4f(center, 1.0));
             writeDataColor(color);
             writeDataScale(vec4f(scale, 0.0));
-            writeDataRotation(normalize(getRotation()));
+            writeDataRotation(rot);
         }
     `;
 
@@ -1078,6 +1772,7 @@ class GpuMorphRuntime {
         this._fadeLogMin = fadeLogMin;
         this._progressivePairFlight = options.progressivePairFlight ?? true;
         this._progressivePairFlightWindow = options.progressivePairFlightWindow ?? DEFAULT_PROGRESSIVE_PAIR_FLIGHT_WINDOW;
+        this._hourglass = resolveMorphHourglassSettings(options);
         this._pairAxisParams = this.buildPairAxisParams(models);
         const aabb = createAabbFromModels(models);
         const format = GSplatFormat.createDefaultFormat(this._device);
@@ -1176,7 +1871,37 @@ class GpuMorphRuntime {
         this._processorB.setParameter('uPairProjSpan', axis.projSpan);
         this._processorB.setParameter('uReversePlayback', reversePlayback ? 1 : 0);
         this._processorB.process();
+        this._setHourglassNormalizeParams(t, pairIndex);
         this._normalizeProcessor.process();
+    }
+
+    private _setHourglassNormalizeParams(t: number, pairIndex: number) {
+        const hg = this._hourglass;
+        const axis = this._pairAxisParams[Math.max(0, Math.min(pairIndex, this._pairAxisParams.length - 1))];
+        this._normalizeProcessor.setParameter('uGlobalT', t);
+        this._normalizeProcessor.setParameter('uHourglassEnabled', hg.enabled ? 1 : 0);
+        this._normalizeProcessor.setParameter('uHourglassStrength', hg.strength);
+        this._normalizeProcessor.setParameter('uHourglassWaistRatio', hg.waistRadialMin);
+        this._normalizeProcessor.setParameter('uHourglassWaistPinch', hg.waistPinch);
+        this._normalizeProcessor.setParameter('uHourglassPerturbAmp', hg.perturbAmp);
+        this._normalizeProcessor.setParameter('uHourglassSparkIntensity', hg.sparkIntensity);
+        this._normalizeProcessor.setParameter('uHourglassSparkTwist', hg.sparkTwist);
+        this._normalizeProcessor.setParameter('uHourglassSparkDrift', hg.sparkDrift);
+        this._normalizeProcessor.setParameter('uMorphLocalT', t);
+        this._normalizeProcessor.setParameter(
+            'uHourglassParticleLogScale',
+            resolveHourglassParticleLogScale(axis, hg)
+        );
+        this._normalizeProcessor.setParameter('uHourglassParticleScaleFrac', hg.particleScaleFrac);
+        this._normalizeProcessor.setParameter('uHourglassParticleMaxDiameter', MORPH_HOURGLASS_PARTICLE_MAX_DIAMETER);
+        this._normalizeProcessor.setParameter('uHourglassTintMix', hg.tintMix);
+        this._normalizeProcessor.setParameter('uHourglassConform', hg.conform);
+        this._normalizeProcessor.setParameter('uHourglassTintA', hg.tintA);
+        this._normalizeProcessor.setParameter('uHourglassTintB', hg.tintB);
+        this._normalizeProcessor.setParameter('uPairAxisOrigin', [axis.originX, axis.originY, axis.originZ]);
+        this._normalizeProcessor.setParameter('uPairAxisDir', [axis.dirX, axis.dirY, axis.dirZ]);
+        this._normalizeProcessor.setParameter('uPairProjMin', axis.projMin);
+        this._normalizeProcessor.setParameter('uPairProjSpan', axis.projSpan);
     }
 
     updateSortCenters(models: LoadedMorphModel[], pairIndex: number, t: number, reversePlayback = false) {
@@ -1374,7 +2099,7 @@ class GaussianInterpolatorRuntime {
             const j = i + 1;
             this.correspondences.set(
                 this.pairKey(i, j),
-                (this._options.correspondenceStrategy ?? 'greedy') === 'greedy'
+                (this._options.correspondenceStrategy ?? 'resample') === 'greedy'
                     ? this.correspondGreedyApprox(this.models[i].splats, this.models[j].splats)
                     : this.correspondMaxResample(this.models[i].splats, this.models[j].splats)
             );
@@ -1387,7 +2112,7 @@ class GaussianInterpolatorRuntime {
             const j = i + 1;
             this.correspondences.set(
                 this.pairKey(i, j),
-                (this._options.correspondenceStrategy ?? 'greedy') === 'greedy'
+                (this._options.correspondenceStrategy ?? 'resample') === 'greedy'
                     ? await this.correspondGreedyApproxAsync(this.models[i].splats, this.models[j].splats)
                     : this.correspondMaxResample(this.models[i].splats, this.models[j].splats)
             );
@@ -2016,6 +2741,8 @@ class GaussianInterpolatorRuntime {
         let write = 0;
         const progressivePairFlight = this._options.progressivePairFlight ?? true;
         const progressivePairFlightWindow = this._options.progressivePairFlightWindow ?? DEFAULT_PROGRESSIVE_PAIR_FLIGHT_WINDOW;
+        const asymmetricDissolve = this._options.progressivePairAsymmetricDissolve ?? true;
+        const hourglass = resolveMorphHourglassSettings(this._options);
         const slotCount = correspondence.matchedA.length;
         const axis = this.getPairAxisParams(idxA, idxB);
 
@@ -2026,18 +2753,7 @@ class GaussianInterpolatorRuntime {
             const projB = (b.x[dst] - axis.originX) * axis.dirX + (b.y[dst] - axis.originY) * axis.dirY + (b.z[dst] - axis.originZ) * axis.dirZ;
             const sA = clamp((projA - axis.projMin) / axis.projSpan, 0, 1);
             const sB = clamp((projB - axis.projMin) / axis.projSpan, 0, 1);
-            let phase = progressivePairFlight
-                ? clamp((1 - sA + sB) * 0.5, 0, 1)
-                : (slotCount <= 1 ? 0 : i / Math.max(1, slotCount - 1));
-            phase = Math.pow(phase, 1.8);
-            const localT = resolveDirectionalFlightT(
-                t,
-                phase,
-                progressivePairFlight,
-                progressivePairFlightWindow,
-                reversePlayback
-            );
-            const invT = 1 - localT;
+
             const aVisible = src < a.count;
             const bVisible = dst < b.count;
             const aScale0 = aVisible ? a.scale0[src] : this.fadeLogMin;
@@ -2049,29 +2765,99 @@ class GaussianInterpolatorRuntime {
             const aOpacity = aVisible ? a.opacity[src] : this.fadeLogMin;
             const bOpacity = bVisible ? b.opacity[dst] : this.fadeLogMin;
 
-            output.x[write] = a.x[src] * invT + b.x[dst] * localT;
-            output.y[write] = a.y[src] * invT + b.y[dst] * localT;
-            output.z[write] = a.z[src] * invT + b.z[dst] * localT;
+            let posT: number;
+            let blendA: number;
+            let blendB: number;
+            let morphWeights: AsymmetricMorphWeights;
 
-            output.fdc0[write] = a.fdc0[src] * invT + b.fdc0[dst] * localT;
-            output.fdc1[write] = a.fdc1[src] * invT + b.fdc1[dst] * localT;
-            output.fdc2[write] = a.fdc2[src] * invT + b.fdc2[dst] * localT;
+            const pairPhase = resolvePairFlightPhase(i, slotCount);
+            const flightStagger = this._options.progressivePairFlightStagger ?? DEFAULT_PROGRESSIVE_PAIR_FLIGHT_STAGGER;
 
-            output.scale0[write] = aScale0 * invT + bScale0 * localT;
-            output.scale1[write] = aScale1 * invT + bScale1 * localT;
-            output.scale2[write] = aScale2 * invT + bScale2 * localT;
-            output.opacity[write] = aOpacity * invT + bOpacity * localT;
+            if (asymmetricDissolve && progressivePairFlight) {
+                morphWeights = resolveAsymmetricMorphWeights(
+                    t, sA, sB, pairPhase, true, progressivePairFlightWindow, flightStagger, reversePlayback
+                );
+                posT = morphWeights.posT;
+                blendA = morphWeights.blendA;
+                blendB = morphWeights.blendB;
+            } else {
+                let phase = progressivePairFlight
+                    ? clamp((1 - sA + sB) * 0.5 * (1 - flightStagger) + pairPhase * flightStagger, 0, 1)
+                    : pairPhase;
+                phase = Math.pow(phase, 1.8);
+                const localT = resolveDirectionalFlightT(
+                    t,
+                    phase,
+                    progressivePairFlight,
+                    progressivePairFlightWindow,
+                    reversePlayback
+                );
+                posT = localT;
+                blendA = 1 - localT;
+                blendB = localT;
+                const legacyChannel = clamp(4 * localT * (1 - localT), 0, 1);
+                morphWeights = {
+                    goneA: localT,
+                    presentB: localT,
+                    posT: localT,
+                    weightA: 1 - localT,
+                    weightB: localT,
+                    inChannel: localT > 0.04 && localT < 0.96,
+                    channelBand: legacyChannel,
+                    blendA,
+                    blendB
+                };
+            }
+
+            const invPosT = 1 - posT;
+            const bodySum = morphWeights.weightA + morphWeights.weightB;
+
+            if (bodySum < 0.02 && morphWeights.channelBand < 0.04) {
+                output.x[write] = a.x[src];
+                output.y[write] = a.y[src];
+                output.z[write] = a.z[src];
+                output.fdc0[write] = a.fdc0[src];
+                output.fdc1[write] = a.fdc1[src];
+                output.fdc2[write] = a.fdc2[src];
+                output.scale0[write] = this.fadeLogMin;
+                output.scale1[write] = this.fadeLogMin;
+                output.scale2[write] = this.fadeLogMin;
+                output.opacity[write] = this.fadeLogMin;
+                output.rot0[write] = aVisible ? a.rot0[src] : 1;
+                output.rot1[write] = aVisible ? a.rot1[src] : 0;
+                output.rot2[write] = aVisible ? a.rot2[src] : 0;
+                output.rot3[write] = aVisible ? a.rot3[src] : 0;
+                if (writeRestSh) {
+                    for (let restIndex = 0; restIndex < output.rest.length; restIndex++) {
+                        output.rest[restIndex][write] = 0;
+                    }
+                }
+                continue;
+            }
+
+            output.x[write] = a.x[src] * invPosT + b.x[dst] * posT;
+            output.y[write] = a.y[src] * invPosT + b.y[dst] * posT;
+            output.z[write] = a.z[src] * invPosT + b.z[dst] * posT;
+
+            output.fdc0[write] = a.fdc0[src] * blendA + b.fdc0[dst] * blendB;
+            output.fdc1[write] = a.fdc1[src] * blendA + b.fdc1[dst] * blendB;
+            output.fdc2[write] = a.fdc2[src] * blendA + b.fdc2[dst] * blendB;
+
+            output.scale0[write] = aScale0 * blendA + bScale0 * blendB;
+            output.scale1[write] = aScale1 * blendA + bScale1 * blendB;
+            output.scale2[write] = aScale2 * blendA + bScale2 * blendB;
+            output.opacity[write] = aOpacity * blendA + bOpacity * blendB;
 
             const q = fastQuaternionNlerp
                 ? nlerpQuat(
                     a.rot1[src], a.rot2[src], a.rot3[src], a.rot0[src],
                     b.rot1[dst], b.rot2[dst], b.rot3[dst], b.rot0[dst],
-                    localT
+                    posT
                 )
                 : slerpQuat(
                     a.rot1[src], a.rot2[src], a.rot3[src], a.rot0[src],
                     b.rot1[dst], b.rot2[dst], b.rot3[dst], b.rot0[dst],
-                    localT
+                    posT
                 );
 
             output.rot0[write] = q.w;
@@ -2083,9 +2869,11 @@ class GaussianInterpolatorRuntime {
                 for (let restIndex = 0; restIndex < output.rest.length; restIndex++) {
                     const av = restIndex < a.rest.length ? a.rest[restIndex][src] : 0;
                     const bv = restIndex < b.rest.length ? b.rest[restIndex][dst] : 0;
-                    output.rest[restIndex][write] = av * invT + bv * localT;
+                    output.rest[restIndex][write] = av * blendA + bv * blendB;
                 }
             }
+
+            applyHourglassChannelToSplat(write, t, morphWeights, axis, hourglass, output);
         }
 
         const fallback = a.count > 0 ? a : b;
@@ -2299,7 +3087,7 @@ export class GsplatMorphController {
         const maxSplats = Math.max(...models.map(model => model.splats.count));
         const restPropCount = normalizeRestPropCount(Math.max(...models.map(model => model.splats.rest.length)));
         const fadeLogMin = options.fadeLogMin ?? DEFAULT_FADE_LOG_MIN;
-        const useGreedyCorrespondence = (options.correspondenceStrategy ?? 'greedy') === 'greedy';
+        const useGreedyCorrespondence = (options.correspondenceStrategy ?? 'resample') === 'greedy';
         const correspondenceInterpolator = options.prebuiltInterpolator ?? (
             useGreedyCorrespondence
                 ? new GaussianInterpolatorRuntime(models, fadeLogMin, options)
@@ -2552,7 +3340,7 @@ export class GsplatMorphController {
 
         console.log('[GsplatMorph] index-pairing stats', stats);
         console.log(
-            '[GsplatMorph] 插值规则：默认 greedy 使用位置+DC 颜色近似配对；较少点数的一侧先一对一匹配，较多点数剩余点复用最近邻补齐；' +
+            '[GsplatMorph] 插值规则：默认 resample 按索引比例配对（快）；greedy 为可选的质量模式（加载时一次性构建，播放中不重算）；' +
             '`resample` 策略则仅按索引比例映射。多出来的点会参与变形，但在小点数目标端缩小并透明隐藏。'
         );
     }

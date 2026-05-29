@@ -93,18 +93,57 @@ export function buildMorphOptions(ep: Record<string, unknown>): GsplatMorphOptio
         // 排序中心更新同样节流，降低额外大数组写回成本
         sortCentersMaxHz: typeof ep.sortCentersMaxHz === 'number' ? ep.sortCentersMaxHz : 6,
         progressivePairFlight: typeof ep.progressivePairFlight === 'boolean' ? ep.progressivePairFlight : true,
-        fastQuaternionNlerp: typeof ep.fastQuaternionNlerp === 'boolean' ? ep.fastQuaternionNlerp : undefined,
-        buildGreedyInBackground: typeof ep.buildGreedyInBackground === 'boolean' ? ep.buildGreedyInBackground : true,
+        progressivePairFlightWindow:
+            typeof ep.progressivePairFlightWindow === 'number' ? ep.progressivePairFlightWindow : 0.55,
+        progressivePairFlightStagger:
+            typeof ep.progressivePairFlightStagger === 'number' ? ep.progressivePairFlightStagger : 0.48,
+        progressivePairDissolveALeaveScale:
+            typeof ep.progressivePairDissolveALeaveScale === 'number' ? ep.progressivePairDissolveALeaveScale : 1.32,
+        progressivePairDissolveARate:
+            typeof ep.progressivePairDissolveARate === 'number' ? ep.progressivePairDissolveARate : 1.24,
+        progressivePairArrivePhaseScale:
+            typeof ep.progressivePairArrivePhaseScale === 'number' ? ep.progressivePairArrivePhaseScale : 0.52,
+        progressivePairDissolveBArriveScale:
+            typeof ep.progressivePairDissolveBArriveScale === 'number' ? ep.progressivePairDissolveBArriveScale : 1.12,
         correspondenceStrategy:
-            ep.correspondenceStrategy === 'greedy' || ep.correspondenceStrategy === 'resample'
+            ep.correspondenceStrategy === 'resample' || ep.correspondenceStrategy === 'axis' || ep.correspondenceStrategy === 'greedy'
                 ? ep.correspondenceStrategy
-                : 'resample',
+                : 'axis',
+        progressivePairAsymmetricDissolve:
+            typeof ep.progressivePairAsymmetricDissolve === 'boolean' ? ep.progressivePairAsymmetricDissolve : true,
+        morphHourglassChannel: typeof ep.morphHourglassChannel === 'boolean' ? ep.morphHourglassChannel : true,
+        morphHourglassStrength:
+            typeof ep.morphHourglassStrength === 'number'
+                ? ep.morphHourglassStrength
+                : typeof ep.morphPointCloudStrength === 'number'
+                    ? ep.morphPointCloudStrength
+                    : undefined,
+        morphHourglassEndRadiusFrac:
+            typeof ep.morphHourglassEndRadiusFrac === 'number' ? ep.morphHourglassEndRadiusFrac : undefined,
+        morphHourglassWaistRatio:
+            typeof ep.morphHourglassWaistRatio === 'number' ? ep.morphHourglassWaistRatio : undefined,
+        morphHourglassConform: typeof ep.morphHourglassConform === 'number' ? ep.morphHourglassConform : undefined,
+        morphHourglassSparkIntensity:
+            typeof ep.morphHourglassSparkIntensity === 'number' ? ep.morphHourglassSparkIntensity : undefined,
+        morphHourglassSparkTwist:
+            typeof ep.morphHourglassSparkTwist === 'number' ? ep.morphHourglassSparkTwist : undefined,
+        morphHourglassSparkDrift:
+            typeof ep.morphHourglassSparkDrift === 'number' ? ep.morphHourglassSparkDrift : undefined,
+        morphHourglassParticleScaleFrac:
+            typeof ep.morphHourglassParticleScaleFrac === 'number'
+                ? ep.morphHourglassParticleScaleFrac
+                : undefined,
+        morphHourglassTintMix:
+            typeof ep.morphHourglassTintMix === 'number' ? ep.morphHourglassTintMix : 0,
+        morphPointCloudEffect: typeof ep.morphPointCloudEffect === 'boolean' ? ep.morphPointCloudEffect : false,
+        fastQuaternionNlerp: typeof ep.fastQuaternionNlerp === 'boolean' ? ep.fastQuaternionNlerp : undefined,
+        // 变形播放中不需要 greedy；后台构建会占满主线程导致卡顿。需要语义配对时再显式开启。
+        buildGreedyInBackground: typeof ep.buildGreedyInBackground === 'boolean' ? ep.buildGreedyInBackground : false,
         greedySpatialWeight: typeof ep.greedySpatialWeight === 'number' ? ep.greedySpatialWeight : undefined,
         greedyColorWeight: typeof ep.greedyColorWeight === 'number' ? ep.greedyColorWeight : undefined,
         greedyGridCellSize: typeof ep.greedyGridCellSize === 'number' ? ep.greedyGridCellSize : undefined,
         greedySearchRadiusCells: typeof ep.greedySearchRadiusCells === 'number' ? ep.greedySearchRadiusCells : undefined,
         greedyMaxCandidatesPerPoint: typeof ep.greedyMaxCandidatesPerPoint === 'number' ? ep.greedyMaxCandidatesPerPoint : undefined,
-        morphPointCloudEffect: typeof ep.morphPointCloudEffect === 'boolean' ? ep.morphPointCloudEffect : undefined,
         morphPointCloudPointSize: typeof ep.morphPointCloudPointSize === 'number' ? ep.morphPointCloudPointSize : undefined,
         morphPointCloudMinScreenPx: typeof ep.morphPointCloudMinScreenPx === 'number' ? ep.morphPointCloudMinScreenPx : undefined,
         morphPointCloudScreenFloorMaxScale:

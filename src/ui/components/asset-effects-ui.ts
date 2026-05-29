@@ -79,16 +79,17 @@ export const ASSET_EFFECTS_PANEL_HTML = `
       <input type="checkbox" id="assetMorphLoop" class="settingsCheckbox" checked>
     </div>
     <details style="font-size:11px;margin:4px 0 6px" open>
-      <summary style="cursor:pointer;opacity:0.8">点云过渡</summary>
+      <summary style="cursor:pointer;opacity:0.8" title="v2：A→B 平放沙漏形 GS 通道；下列滑条控制通道外观">沙漏通道（变形中途）</summary>
+      <p class="effectsTrackHint" style="font-size:10px;opacity:0.7;margin:0 0 6px">A 形体各点飞向 B；中间向轴线收束成细腰（非圆形管道），两端保持原 GS 散开形状。</p>
       <div class="settingsRow">
-        <label for="assetMorphPointCloudEffect">启用:</label>
-        <input type="checkbox" id="assetMorphPointCloudEffect" class="settingsCheckbox" checked>
+        <label for="assetMorphPointCloudEffect" title="v2 未使用，可忽略">点云(旧):</label>
+        <input type="checkbox" id="assetMorphPointCloudEffect" class="settingsCheckbox">
       </div>
       <div class="settingsRow">
-        <label for="assetMorphPointCloudPointSize" class="postEffectLabel">点大小:</label>
+        <label for="assetMorphPointCloudPointSize" class="postEffectLabel" title="通道粒子直径 = A→B 间距 × 该比例">通道粒子/间距:</label>
         <div class="postEffectSliderWrap">
-          <input type="range" id="assetMorphPointCloudPointSize" class="postEffectSlider" min="0.00001" max="0.0015" step="0.00001" value="0.00015">
-          <span id="assetMorphPointCloudPointSizeVal" class="postEffectSliderValue">0.00015</span>
+          <input type="range" id="assetMorphPointCloudPointSize" class="postEffectSlider" min="0.01" max="0.12" step="0.005" value="0.04">
+          <span id="assetMorphPointCloudPointSizeVal" class="postEffectSliderValue">4%</span>
         </div>
       </div>
       <div class="settingsRow">
@@ -106,7 +107,7 @@ export const ASSET_EFFECTS_PANEL_HTML = `
         </div>
       </div>
       <div class="settingsRow">
-        <label for="assetMorphPointCloudStrength" class="postEffectLabel">点云强度:</label>
+        <label for="assetMorphPointCloudStrength" class="postEffectLabel" title="通道贴合沙漏路径的强度">通道贴合:</label>
         <div class="postEffectSliderWrap">
           <input type="range" id="assetMorphPointCloudStrength" class="postEffectSlider" min="0" max="2" step="0.05" value="1.5">
           <span id="assetMorphPointCloudStrengthVal" class="postEffectSliderValue">1.50</span>
@@ -139,10 +140,6 @@ export const ASSET_EFFECTS_PANEL_HTML = `
           <input type="range" id="assetMorphPointCloudScatterDistance" class="postEffectSlider" min="0" max="5" step="0.05" value="0.25">
           <span id="assetMorphPointCloudScatterDistanceVal" class="postEffectSliderValue">0.25</span>
         </div>
-      </div>
-      <div class="settingsRow" style="align-items:center;gap:8px">
-        <label for="assetMorphPointCloudTint">辉光颜色:</label>
-        <input type="color" id="assetMorphPointCloudTint" value="#0091ff" title="变形中途点云辉光色调">
       </div>
     </details>
   </div>
@@ -355,7 +352,9 @@ function readEffectParamsFromDom(
         }
         if (morphPointCloudPointSize) {
             const v = Number(morphPointCloudPointSize.value);
-            if (!Number.isNaN(v) && v > 0) ep.morphPointCloudPointSize = v;
+            if (!Number.isNaN(v) && v > 0) {
+                ep.morphHourglassParticleScaleFrac = v;
+            }
         }
         if (morphPointCloudMinScreenPx) {
             const v = Number(morphPointCloudMinScreenPx.value);
@@ -501,14 +500,13 @@ function fillDomFromEffectParams(
             morphLoop.checked = typeof ep?.loop === 'boolean' ? ep.loop : true;
         }
         if (morphPointCloudEffect) {
-            morphPointCloudEffect.checked = typeof ep?.morphPointCloudEffect === 'boolean' ? ep.morphPointCloudEffect : true;
+            morphPointCloudEffect.checked = typeof ep?.morphPointCloudEffect === 'boolean' ? ep.morphPointCloudEffect : false;
         }
         if (morphPointCloudPointSize) {
-            morphPointCloudPointSize.value = String(
-                typeof ep?.morphPointCloudPointSize === 'number'
-                    ? ep.morphPointCloudPointSize
-                    : DEFAULT_MORPH_POINT_CLOUD_POINT_SIZE
-            );
+            const scaleFrac = typeof ep?.morphHourglassParticleScaleFrac === 'number'
+                ? ep.morphHourglassParticleScaleFrac
+                : 0.004;
+            morphPointCloudPointSize.value = String(scaleFrac);
         }
         if (morphPointCloudMinScreenPx) {
             morphPointCloudMinScreenPx.value = String(
@@ -1051,7 +1049,8 @@ export function initAssetEffectsUI(global: Global): () => void {
 
     const syncMorphPointCloudLabels = () => {
         if (morphPointCloudPointSize && morphPointCloudPointSizeVal) {
-            morphPointCloudPointSizeVal.textContent = formatSliderValue(Number(morphPointCloudPointSize.value), 5);
+            const pct = Math.round(Number(morphPointCloudPointSize.value) * 1000) / 10;
+            morphPointCloudPointSizeVal.textContent = `${pct}%`;
         }
         if (morphPointCloudMinScreenPx && morphPointCloudMinScreenPxVal) {
             morphPointCloudMinScreenPxVal.textContent = `${formatSliderValue(Number(morphPointCloudMinScreenPx.value), 2)}px`;
@@ -1337,7 +1336,19 @@ export function initAssetEffectsUI(global: Global): () => void {
     morphPointCloudTint?.addEventListener('change', onParamsBlur);
     const unbindMorphSliders: Array<() => void> = [];
     if (morphPointCloudPointSize) {
-        unbindMorphSliders.push(bindSliderLive(morphPointCloudPointSize, morphPointCloudPointSizeVal, 5, onMorphParamsLive, onParamsBlur));
+        const onChannelScaleInput = () => {
+            if (morphPointCloudPointSizeVal) {
+                const pct = Math.round(Number(morphPointCloudPointSize.value) * 1000) / 10;
+                morphPointCloudPointSizeVal.textContent = `${pct}%`;
+            }
+            onMorphParamsLive();
+        };
+        morphPointCloudPointSize.addEventListener('input', onChannelScaleInput);
+        morphPointCloudPointSize.addEventListener('change', onParamsBlur);
+        unbindMorphSliders.push(() => {
+            morphPointCloudPointSize.removeEventListener('input', onChannelScaleInput);
+            morphPointCloudPointSize.removeEventListener('change', onParamsBlur);
+        });
     }
     if (morphPointCloudMinScreenPx) {
         const syncMinScreenPxLabel = () => {
