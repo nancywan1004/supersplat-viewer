@@ -55,6 +55,7 @@ import { isLodMetaFile } from './loaders/lod-loader';
 import { BloomController } from './vfx/bloom';
 import { NightMode } from './vfx/lighting/night-mode';
 import {
+    hasShadowCapability,
     isShadowSystemEnabled,
     notifyViewportReadyForShadow,
     scheduleShadowPipeline,
@@ -717,6 +718,12 @@ class Viewer {
             this.revealController = new RevealController(global, revealBbox, gsplatEntity, this.cameraManager);
             const ensureShadowPipelineReady = () => {
                 if (!isShadowSystemEnabled(global) || !this.shadowPipelineMount) {
+                    return;
+                }
+                const collisionMgr = getCameraCollisionManager(global);
+                // 配置了 GLB collision 时先懒加载接影 mesh，避免用默认平面占位且后续不更新
+                if (hasShadowCapability(global) && !this.shadowPipelineMount.meshEntity) {
+                    void collisionMgr.ensureSceneMeshResourcesLoaded();
                     return;
                 }
                 scheduleShadowPipeline(global, this.shadowPipelineMount);

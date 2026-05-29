@@ -141,22 +141,29 @@ function initShadowCatcher(
     };
 
     if (entity) {
-        // 已存在，更新位置和参数
-        if (!meshEntity && parentEntity) {
-            entity.setLocalPosition(0, -half.y, 0);
-        } else if (!meshEntity) {
-            const groundY = center.y - half.y;
-            entity.setPosition(center.x, groundY, center.z);
-        }
-        applyGsplatChildRotationCancel(entity);
         const script = entity.script?.get('shadowCatcher') as unknown as ShadowCatcher | undefined;
-        if (script) {
-            script.scale.set(sizeX, 1, sizeZ);
-            script.debugVisual = debugVisual;
-            // 重新应用材质（确保 GLB mesh 材质正确）
-            script.setupMaterial(shadowMat);
+        // 懒加载 GLB 就绪前可能已用默认平面挂载；收到 mesh 后拆掉平面 catcher 并重建
+        if (meshEntity && script && !script.isExternalMesh) {
+            entity.destroy();
+            entity = null;
+        } else {
+            if (!meshEntity && parentEntity) {
+                entity.setLocalPosition(0, -half.y, 0);
+            } else if (!meshEntity) {
+                const groundY = center.y - half.y;
+                entity.setPosition(center.x, groundY, center.z);
+            }
+            applyGsplatChildRotationCancel(entity);
+            if (script) {
+                script.scale.set(sizeX, 1, sizeZ);
+                script.debugVisual = debugVisual;
+                script.setupMaterial(shadowMat);
+            }
+            if (active) {
+                entity.enabled = true;
+            }
+            return entity;
         }
-        return entity;
     }
 
     entity = new Entity('shadowCatcher');

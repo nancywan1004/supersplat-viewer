@@ -199,19 +199,20 @@ export const mountShadowPipeline = (
     active = false
 ): ShadowApplyRt => {
     const runtime = getRuntime(global);
-    if (runtime.apply) {
-        return runtime.apply;
-    }
-
     const { app, settings } = global;
     const shadow = settings.postEffectSettings?.shadow as { debugVisual?: boolean } | undefined;
 
+    // 每次挂载都刷新接影几何（GLB 懒加载完成后会再次进入，不可因 apply 已存在而跳过）
     initShadowCatcher(app, mount.sceneBound, {
         debugVisual: shadow?.debugVisual ?? false,
         parentEntity: mount.gsplatEntity,
         meshEntity: mount.meshEntity ?? undefined,
-        active
+        active: runtime.apply ? runtime.outputEnabled : active
     });
+
+    if (runtime.apply) {
+        return runtime.apply;
+    }
 
     (app as { __shadowApplyGlobal?: Global }).__shadowApplyGlobal = global;
     if (!app.root.script) {
