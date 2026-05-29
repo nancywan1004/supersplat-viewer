@@ -214,6 +214,16 @@ const isNostalgicComicPersistentActive = (settings: ExperienceSettings): boolean
     return persistent?.type === 'nostalgic-comic';
 };
 
+const isYiyunDianranPersistentActive = (settings: ExperienceSettings): boolean => {
+    if (settings.effects?.persistent?.enabled === false) {
+        return false;
+    }
+    const persistent = readPersistentRevealParams(settings);
+    return persistent?.type === 'yiyun-dianran';
+};
+
+const YIYUN_DIANRAN_PAPER_CLEAR = new Color(0.98, 0.94, 0.85, 1);
+
 const vec = new Vec3();
 
 // store the original isColorBufferSrgb so the override in updatePostEffects is idempotent
@@ -1188,7 +1198,8 @@ z: ${cameraInfo.target.z.toFixed(6)}
             cameraFrame.rendering.renderFormats = (highPrecisionRendering || bloomPipelineWanted)
                 ? [PIXELFORMAT_RGBA16F, PIXELFORMAT_RGBA32F]
                 : [];
-            cameraFrame.rendering.sceneDepthMap = computeRequiresCameraFrame;
+            cameraFrame.rendering.sceneDepthMap =
+                computeRequiresCameraFrame || isYiyunDianranPersistentActive(settings);
             cameraFrame.enabled = true;
             const effectivePostFxSettings = postFxRequested ? postEffectSettings : noPostEffects;
             applyPostEffectSettings(cameraFrame, effectivePostFxSettings);
@@ -1237,6 +1248,9 @@ z: ${cameraInfo.target.z.toFixed(6)}
             if (isNostalgicComicPersistentActive(settings)) {
                 camera.camera.clearColorBuffer = true;
                 camera.camera.clearColor = new Color(1, 1, 1, 0);
+            } else if (isYiyunDianranPersistentActive(settings)) {
+                camera.camera.clearColorBuffer = true;
+                camera.camera.clearColor = YIYUN_DIANRAN_PAPER_CLEAR.clone();
             } else {
                 camera.camera.clearColor = new Color(background.color);
             }
@@ -1265,6 +1279,9 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 if (isNostalgicComicPersistentActive(settings)) {
                     camera.camera.clearColorBuffer = true;
                     camera.camera.clearColor = new Color(1, 1, 1, 0);
+                } else if (isYiyunDianranPersistentActive(settings)) {
+                    camera.camera.clearColorBuffer = true;
+                    camera.camera.clearColor = YIYUN_DIANRAN_PAPER_CLEAR.clone();
                 } else {
                     camera.camera.clearColor = new Color(background.color);
                 }

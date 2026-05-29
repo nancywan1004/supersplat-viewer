@@ -77,6 +77,7 @@ const REVEAL_PANEL_HTML = (() => {
         <option value="falling-rain">Falling Rain</option>
         <option value="falling-snow">Falling Snow</option>
         <option value="nostalgic-comic">Nostalgic Comic</option>
+        <option value="yiyun-dianran">逸云点染</option>
       </select>
     </div>
     <div id="persistentPetalsControls" class="hidden" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08)">
@@ -165,6 +166,26 @@ const REVEAL_PANEL_HTML = (() => {
         <input type="checkbox" id="weatherUseCameraClearColor" class="settingsCheckbox" checked>
       </div>
     </div>
+    <div id="persistentYiyunDianranControls" class="hidden" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08)">
+      <div class="settingsRow">
+        <label for="yiyunDianranSaturation" class="postEffectLabel">基础点色彩饱和度:</label>
+        <div class="postEffectSliderWrap">
+          <input type="range" id="yiyunDianranSaturation" class="postEffectSlider" min="1" max="1.6" step="0.01" value="1.2">
+          <span id="yiyunDianranSaturationVal" class="postEffectSliderValue">1.20</span>
+        </div>
+      </div>
+      <div class="settingsRow">
+        <label for="yiyunDianranGlowIntensity" class="postEffectLabel">全局发光强度:</label>
+        <div class="postEffectSliderWrap">
+          <input type="range" id="yiyunDianranGlowIntensity" class="postEffectSlider" min="0" max="0.1" step="0.001" value="0.05">
+          <span id="yiyunDianranGlowIntensityVal" class="postEffectSliderValue">0.050</span>
+        </div>
+      </div>
+      <div class="settingsRow">
+        <label for="yiyunDianranGlowColor" class="postEffectLabel">发光颜色:</label>
+        <input type="color" id="yiyunDianranGlowColor" class="settingsInput" value="#002fa7">
+      </div>
+    </div>
     <div id="persistentNostalgicComicControls" class="hidden" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08)">
       <div class="settingsRow">
         <label for="nostalgicComicLevelCount" class="postEffectLabel">明度分阶数量:</label>
@@ -240,6 +261,7 @@ export function initRevealUI(global: Global): () => void {
     const persistentEnabled = container.querySelector('#persistentEnabled') as HTMLInputElement | null;
     const persistentPetalsControls = container.querySelector('#persistentPetalsControls') as HTMLElement | null;
     const persistentWeatherControls = container.querySelector('#persistentWeatherControls') as HTMLElement | null;
+    const persistentYiyunDianranControls = container.querySelector('#persistentYiyunDianranControls') as HTMLElement | null;
     const persistentNostalgicComicControls = container.querySelector('#persistentNostalgicComicControls') as HTMLElement | null;
     const petalsTextureUrl = container.querySelector('#petalsTextureUrl') as HTMLInputElement | null;
     const petalsDensity = container.querySelector('#petalsDensity') as HTMLInputElement | null;
@@ -272,6 +294,11 @@ export function initRevealUI(global: Global): () => void {
     const weatherUseFog = container.querySelector('#weatherUseFog') as HTMLInputElement | null;
     const weatherBgColor = container.querySelector('#weatherBgColor') as HTMLInputElement | null;
     const weatherUseCameraClearColor = container.querySelector('#weatherUseCameraClearColor') as HTMLInputElement | null;
+    const yiyunDianranSaturation = container.querySelector('#yiyunDianranSaturation') as HTMLInputElement | null;
+    const yiyunDianranSaturationVal = container.querySelector('#yiyunDianranSaturationVal') as HTMLElement | null;
+    const yiyunDianranGlowIntensity = container.querySelector('#yiyunDianranGlowIntensity') as HTMLInputElement | null;
+    const yiyunDianranGlowIntensityVal = container.querySelector('#yiyunDianranGlowIntensityVal') as HTMLElement | null;
+    const yiyunDianranGlowColor = container.querySelector('#yiyunDianranGlowColor') as HTMLInputElement | null;
     const nostalgicComicLevelCount = container.querySelector('#nostalgicComicLevelCount') as HTMLInputElement | null;
     const nostalgicComicEdgeThreshold = container.querySelector('#nostalgicComicEdgeThreshold') as HTMLInputElement | null;
     const nostalgicComicEdgeThresholdVal = container.querySelector('#nostalgicComicEdgeThresholdVal') as HTMLElement | null;
@@ -408,6 +435,13 @@ export function initRevealUI(global: Global): () => void {
                 strokeColor: [0.15, 0.15, 0.15]
             };
         }
+        if (type === 'yiyun-dianran') {
+            return {
+                saturation: 1.2,
+                glowIntensity: 0.05,
+                glowColor: [0.0, 0.184, 0.655]
+            };
+        }
         return {};
     };
 
@@ -508,6 +542,7 @@ export function initRevealUI(global: Global): () => void {
         persistentPetalsControls?.classList[pType === 'falling-petals' ? 'remove' : 'add']('hidden');
         const showWeatherControls = pType === 'falling-rain' || pType === 'falling-snow';
         persistentWeatherControls?.classList[showWeatherControls ? 'remove' : 'add']('hidden');
+        persistentYiyunDianranControls?.classList[pType === 'yiyun-dianran' ? 'remove' : 'add']('hidden');
         persistentNostalgicComicControls?.classList[pType === 'nostalgic-comic' ? 'remove' : 'add']('hidden');
 
         writeTextInput(petalsTextureUrl, params.petalTextureUrl, '/textures/petal-atlas.png');
@@ -537,6 +572,12 @@ export function initRevealUI(global: Global): () => void {
         }
         if (weatherUseCameraClearColor) {
             weatherUseCameraClearColor.checked = typeof params.useCameraClearColor === 'boolean' ? params.useCameraClearColor : true;
+        }
+
+        writeSlider(yiyunDianranSaturation, yiyunDianranSaturationVal, params.saturation, 1.2, 2);
+        writeSlider(yiyunDianranGlowIntensity, yiyunDianranGlowIntensityVal, params.glowIntensity, 0.05, 3);
+        if (yiyunDianranGlowColor) {
+            yiyunDianranGlowColor.value = rgbTripleToHex(params.glowColor, [0.0, 0.184, 0.655]);
         }
 
         writeNumberInput(nostalgicComicLevelCount, params.levelCount, 6);
@@ -592,6 +633,20 @@ export function initRevealUI(global: Global): () => void {
         syncSliderValue(weatherFogDensity, weatherFogDensityValue, 4);
         syncSliderValue(weatherExposure, weatherExposureValue, 2);
         onWeatherParamsChange();
+    };
+
+    const onYiyunDianranParamsChange = () => {
+        patchPersistentEffectParams({
+            saturation: readNumberInput(yiyunDianranSaturation, 1.2),
+            glowIntensity: readNumberInput(yiyunDianranGlowIntensity, 0.05),
+            glowColor: hexToRgbTriple(yiyunDianranGlowColor?.value, [0.0, 0.184, 0.655])
+        });
+    };
+
+    const onYiyunDianranSliderInput = () => {
+        syncSliderValue(yiyunDianranSaturation, yiyunDianranSaturationVal, 2);
+        syncSliderValue(yiyunDianranGlowIntensity, yiyunDianranGlowIntensityVal, 3);
+        onYiyunDianranParamsChange();
     };
 
     const onNostalgicComicParamsChange = () => {
@@ -827,6 +882,9 @@ export function initRevealUI(global: Global): () => void {
     weatherUseFog?.addEventListener('change', onWeatherParamsChange);
     weatherBgColor?.addEventListener('input', onWeatherParamsChange);
     weatherUseCameraClearColor?.addEventListener('change', onWeatherParamsChange);
+    yiyunDianranSaturation?.addEventListener('input', onYiyunDianranSliderInput);
+    yiyunDianranGlowIntensity?.addEventListener('input', onYiyunDianranSliderInput);
+    yiyunDianranGlowColor?.addEventListener('input', onYiyunDianranParamsChange);
     nostalgicComicLevelCount?.addEventListener('change', onNostalgicComicParamsChange);
     nostalgicComicEdgeThreshold?.addEventListener('input', onNostalgicComicSliderInput);
     nostalgicComicPaperColor?.addEventListener('input', onNostalgicComicParamsChange);
@@ -879,6 +937,9 @@ export function initRevealUI(global: Global): () => void {
         weatherUseFog?.removeEventListener('change', onWeatherParamsChange);
         weatherBgColor?.removeEventListener('input', onWeatherParamsChange);
         weatherUseCameraClearColor?.removeEventListener('change', onWeatherParamsChange);
+        yiyunDianranSaturation?.removeEventListener('input', onYiyunDianranSliderInput);
+        yiyunDianranGlowIntensity?.removeEventListener('input', onYiyunDianranSliderInput);
+        yiyunDianranGlowColor?.removeEventListener('input', onYiyunDianranParamsChange);
         nostalgicComicLevelCount?.removeEventListener('change', onNostalgicComicParamsChange);
         nostalgicComicEdgeThreshold?.removeEventListener('input', onNostalgicComicSliderInput);
         nostalgicComicPaperColor?.removeEventListener('input', onNostalgicComicParamsChange);

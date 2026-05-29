@@ -71,12 +71,19 @@ const NOSTALGIC_COMIC = new Set([
     'strokeColor'
 ]);
 
+const YIYUN_DIANRAN = new Set([
+    'saturation',
+    'glowIntensity',
+    'glowColor'
+]);
+
 const BY_TYPE: Record<string, ReadonlySet<string>> = {
     'perlin-wave': PERLIN_WAVE,
     'falling-petals': FALLING_PETALS,
     'falling-rain': FALLING_WEATHER,
     'falling-snow': FALLING_WEATHER,
-    'nostalgic-comic': NOSTALGIC_COMIC
+    'nostalgic-comic': NOSTALGIC_COMIC,
+    'yiyun-dianran': YIYUN_DIANRAN
 };
 
 function isVec3Triple(v: unknown): v is [number, number, number] {

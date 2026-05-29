@@ -6,6 +6,7 @@ import { PERSISTENT_EFFECT_TYPES } from '../effect-types';
 import { isPersistentVfx } from '../reveal/reveal-policy';
 import { GsplatPersistentFallingPetals, GsplatPersistentFallingWeather } from './falling-weather-persistent';
 import { GsplatPersistentNostalgicComic } from './nostalgic-comic-persistent';
+import { GsplatPersistentYiyunDianran } from './yiyun-dianran-persistent';
 import { GsplatRevealPerlinWave } from './gsplat-perlin-wave';
 import { applyPersistentEffectParamsToScript } from './persistent-effect-params';
 
@@ -39,9 +40,35 @@ export function mountPersistentGsplatByEffectType(
             return createFallingWeatherScript('snow', gsplatEntity, autoStart, effectParams);
         case 'nostalgic-comic':
             return createNostalgicComicScript(gsplatEntity, autoStart, effectParams);
+        case 'yiyun-dianran':
+            return createYiyunDianranScript(gsplatEntity, autoStart, effectParams);
         default:
             console.warn('[persistent-effect] persistent type in registry but no mount branch:', effectType);
             return null;
+    }
+}
+
+export function createYiyunDianranScript(
+    gsplatEntity: Entity,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn('Cannot create yiyun-dianran script - entity or script component not ready');
+        return null;
+    }
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentYiyunDianran) as any;
+        if (script) {
+            applyPersistentEffectParamsToScript(script, 'yiyun-dianran', effectParams ?? undefined);
+            script.enabled = autoStart;
+            script.applyConfig?.();
+        }
+        return script;
+    } catch (error) {
+        console.error('Failed to create yiyun-dianran persistent script:', error);
+        return null;
     }
 }
 
