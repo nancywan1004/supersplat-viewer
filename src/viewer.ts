@@ -31,7 +31,12 @@ import { CameraManager } from './camera-manager';
 import { Camera } from './cameras/camera';
 import type { Collision } from './collision';
 import { MeshCollision, VoxelCollision } from './collision';
-import { getCameraCollisionManager } from './collision/camera-collision-manager';
+import {
+    getCameraCollisionManager,
+    type CollisionLoadPayload,
+    type SceneMeshReadyPayload
+} from './collision/camera-collision-manager';
+import type { ShadowPipelineMount } from './vfx/shadow/shadow-system';
 import { nearlyEquals } from './core/math';
 import { InputController } from './input-controller';
 import { MeshDebugOverlay } from './mesh-debug-overlay';
@@ -48,7 +53,6 @@ import { getSkyboxRadius } from './loaders/skybox-loader';
 import { readSkyboxUrlFromSettings } from './settings-serialize/settings-serialize-helper';
 import { isLodMetaFile } from './loaders/lod-loader';
 import { BloomController } from './vfx/bloom';
-import { loadSplatMesh } from './loaders/splat-mesh-loader';
 import { NightMode } from './vfx/lighting/night-mode';
 import {
     isShadowSystemEnabled,
@@ -240,6 +244,9 @@ class Viewer {
     /** urlParam 加载的原始场景碰撞（与开关/编辑态门控无关，供 debug overlay 使用） */
     baseSceneCollision: Collision | null = null;
 
+    /** 阴影管线挂载参数（GLB 懒加载完成后热更新 meshEntity） */
+    private shadowPipelineMount: ShadowPipelineMount | null = null;
+
     /** 音视频热区播控卸载 */
     cleanupMediaHotspotController: (() => void) | null = null;
     cleanupSceneAudioCallout: (() => void) | null = null;
@@ -276,11 +283,25 @@ class Viewer {
         }
     };
 
-    constructor(global: Global, gsplatLoad: Promise<Entity>, skyboxLoad: Promise<void> | undefined, collisionLoad: Promise<Collision> | undefined) {
+    constructor(global: Global, gsplatLoad: Promise<Entity>, skyboxLoad: Promise<void> | undefined) {
         this.global = global;
 
         const { app, settings, config, events, state, camera } = global;
         const { graphicsDevice } = app;
+
+        const collisionMgr = getCameraCollisionManager(global);
+        collisionMgr.configure({ collisionUrl: config.collisionUrl });
+        events.on('cameraCollision:load', (payload: CollisionLoadPayload) => {
+            if (payload.state === 'ready') {
+                const sceneCollision = collisionMgr.getUrlCollisionSource();
+                if (sceneCollision) {
+                    this.bindSceneCollisionDebugOverlay(sceneCollision);
+                }
+            }
+        });
+        events.on('sceneMesh:ready', (_payload: SceneMeshReadyPayload) => {
+            this.applyShadowMeshEntity(collisionMgr.getShadowMeshEntity());
+        });
 
         initInputArbiter(global);
 
@@ -554,31 +575,11 @@ class Viewer {
             window.animationDuration = state.animationDuration;
         });
 
-        // 接影几何：从 URL 参数 ?splatMesh= 读取 GLB 路径
-        console.log('[Shadow] config.splatMeshUrl =', config.splatMeshUrl);
-        const splatMeshLoad = config.splatMeshUrl
-            ? loadSplatMesh(app, config.splatMeshUrl).then((entity) => {
-                console.log('[Shadow] splatMesh loaded successfully:', entity?.name, 'render:', !!entity?.render, 'children:', entity?.children?.length);
-                return entity;
-            }).catch((err: unknown): null => {
-                console.warn('[Shadow] splatMesh load failed, falling back to plane', config.splatMeshUrl, err);
-                return null;
-            })
-            : (() => {
-                console.log('[Shadow] No splatMeshUrl in URL params, will create default plane. Add ?splatMesh=/assets/mesh/blue.glb to URL to use GLB mesh.');
-                return Promise.resolve(null as Entity | null);
-            })();
-
-        // wait for the model to load
-        console.log('[Shadow] Waiting for Promise.all to resolve...');
-        Promise.all([gsplatLoad, skyboxLoad ?? Promise.resolve(), splatMeshLoad, collisionLoad ?? Promise.resolve(undefined)]).then((results) => {
-            console.log('[Shadow] Promise.all resolved, results count:', results.length);
+        // wait for the model to load（接影 GLB 与 collision 共用 mesh，由 CameraCollisionManager 懒加载）
+        Promise.all([gsplatLoad, skyboxLoad ?? Promise.resolve()]).then((results) => {
             try {
             const gsplatEntity = results[0] as Entity;
             const gsplat = gsplatEntity.gsplat as GSplatComponent;
-            const meshEntity = results[2] as Entity | null | undefined;
-            const collision = (results[3] as Collision | undefined) ?? null;
-            // console.log('[Shadow] gsplatEntity:', gsplatEntity?.name, 'gsplat:', !!gsplat, 'meshEntity:', meshEntity?.name ?? 'null');
 
             // get scene bounding box
             const gsplatBbox = gsplat?.customAabb;
@@ -586,11 +587,15 @@ class Viewer {
                 sceneBound.setFromTransformedAabb(gsplatBbox, gsplatEntity.getWorldTransform());
             }
 
-            const shadowPipelineMount = {
+            this.shadowPipelineMount = {
                 sceneBound,
                 gsplatEntity,
-                meshEntity: meshEntity ?? null
+                meshEntity: null
             };
+            const preloadedShadowMesh = getCameraCollisionManager(global).getShadowMeshEntity();
+            if (preloadedShadowMesh) {
+                this.applyShadowMeshEntity(preloadedShadowMesh);
+            }
 
             // 标注系统初始化时机：
             // - 若有 reveal / VFX（开场播放），则等 revealComplete 后再初始化，避免动画期间热点/tooltip 干扰观感
@@ -618,45 +623,23 @@ class Viewer {
             this.picker = new Picker(app, camera);
             (app as any).__picker = this.picker;
             this.inputController = new InputController(global, this.picker);
-            this.baseSceneCollision = collision ?? null;
-            state.hasCollision = !!this.baseSceneCollision;
-            const cameraCollision = getCameraCollisionManager(global);
-            cameraCollision.setUrlCollisionSource(this.baseSceneCollision);
-            const gatedUrlCollision = cameraCollision.resolveActiveUrlCollision();
-            this.inputController.collision = gatedUrlCollision;
 
-            const rendererMode = (config as any).renderer as string | undefined;
-            if (collision instanceof VoxelCollision && rendererMode !== 'webgl') {
-                this.voxelOverlay = new VoxelDebugOverlay(app, collision, camera);
-                this.voxelOverlay.mode = (config as any).heatmap ? 'heatmap' : 'overlay';
-                state.hasCollisionOverlay = true;
-                events.on('collisionOverlayEnabled:changed', (value: boolean) => {
-                    if (this.voxelOverlay) {
-                        this.voxelOverlay.enabled = value;
-                        app.renderNextFrame = true;
-                    }
-                });
-            } else if (collision instanceof MeshCollision) {
-                this.meshOverlay = new MeshDebugOverlay(app, collision, camera, !!this.cameraFrame);
-                state.hasCollisionOverlay = true;
-                events.on('collisionOverlayEnabled:changed', (value: boolean) => {
-                    if (this.meshOverlay) {
-                        this.meshOverlay.enabled = value;
-                        app.renderNextFrame = true;
-                    }
-                });
-            }
+            // 场景 ?collision= 网格（与接影 GLB 同源）；总开关 + Viewer/预览 + 懒加载就绪后非 null。
+            // 放置资产 AABB 不在此注入，由 CameraManager 的 sceneAssetCollisionResolver 处理。
+            const collisionMgr = getCameraCollisionManager(global);
+            const sceneCollision = collisionMgr.resolveActiveUrlCollision();
+            this.inputController.collision = sceneCollision;
 
             const sceneSize = sceneBound.halfExtents.length();
             this.inputController.setMoveSpeedFromSceneSize(sceneSize);
 
             // 先创建 cameraManager，因为 revealController 需要它来获取 targetConstraint
-            this.cameraManager = new (CameraManager as any)(global, sceneBound, gatedUrlCollision);
+            this.cameraManager = new (CameraManager as any)(global, sceneBound, sceneCollision);
             if (!config.noui) {
                 this.navCursor = new NavCursor(
                     app,
                     camera,
-                    gatedUrlCollision,
+                    sceneCollision,
                     events,
                     state,
                     this.picker,
@@ -664,20 +647,21 @@ class Viewer {
                 );
             }
 
-            cameraCollision.attachConsumers({
-                applyUrlCollision: (gated) => {
+            // 懒加载完成或总开关/模式变化时，同步 walk、fly、input、nav 上的场景碰撞引用
+            collisionMgr.attachConsumers({
+                applyUrlCollision: (collision) => {
                     if (this.inputController) {
-                        this.inputController.collision = gated;
+                        this.inputController.collision = collision;
                     }
                     if (this.cameraManager) {
-                        this.cameraManager.setUrlParamCollision(gated);
+                        this.cameraManager.setUrlParamCollision(collision);
                     }
                     if (this.navCursor) {
-                        this.navCursor.setCollision(gated);
+                        this.navCursor.setCollision(collision);
                     }
                 }
             });
-            this.cleanupCameraCollision = cameraCollision.start();
+            this.cleanupCameraCollision = collisionMgr.start();
 
             // NightMode 必须在 RevealController 之前创建：Reveal 构造函数里会立即 createEffect 并 fire('nightMode:exit')。
             // 若 NightMode 尚未注册监听，首次开场的 exit 会丢失，NightMode 仍占用 gsplatModifyVS，与 sketch 等 VFX 互斥失败；
@@ -732,10 +716,10 @@ class Viewer {
             }
             this.revealController = new RevealController(global, revealBbox, gsplatEntity, this.cameraManager);
             const ensureShadowPipelineReady = () => {
-                if (!isShadowSystemEnabled(global)) {
+                if (!isShadowSystemEnabled(global) || !this.shadowPipelineMount) {
                     return;
                 }
-                scheduleShadowPipeline(global, shadowPipelineMount);
+                scheduleShadowPipeline(global, this.shadowPipelineMount);
                 if (state.readyToRender) {
                     notifyViewportReadyForShadow(global);
                 }
@@ -1289,6 +1273,55 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
         // Mesh overlay 依赖当前 gamma 路径；CameraFrame 开关变化时需要同步。
         this.meshOverlay?.setCameraFrameEnabled(!!this.cameraFrame);
+    }
+
+    /** 接影 GLB 懒加载完成后更新 shadow mount 并尝试挂载阴影管线 */
+    private applyShadowMeshEntity(meshEntity: Entity | null): void {
+        if (!meshEntity || !this.shadowPipelineMount) {
+            return;
+        }
+        this.shadowPipelineMount.meshEntity = meshEntity;
+        const { global } = this;
+        if (!isShadowSystemEnabled(global)) {
+            return;
+        }
+        scheduleShadowPipeline(global, this.shadowPipelineMount);
+        if (global.state.readyToRender) {
+            notifyViewportReadyForShadow(global);
+        }
+    }
+
+    /** urlParam 碰撞懒加载完成后挂载 debug 线框（与门控无关，仅可视化） */
+    private bindSceneCollisionDebugOverlay(collision: Collision): void {
+        const { app, config, events, state, camera } = this.global;
+        this.baseSceneCollision = collision;
+        const rendererMode = (config as { renderer?: string }).renderer;
+        if (collision instanceof VoxelCollision && rendererMode !== 'webgl') {
+            if (this.voxelOverlay) {
+                return;
+            }
+            this.voxelOverlay = new VoxelDebugOverlay(app, collision, camera);
+            this.voxelOverlay.mode = (config as { heatmap?: boolean }).heatmap ? 'heatmap' : 'overlay';
+            state.hasCollisionOverlay = true;
+            events.on('collisionOverlayEnabled:changed', (value: boolean) => {
+                if (this.voxelOverlay) {
+                    this.voxelOverlay.enabled = value;
+                    app.renderNextFrame = true;
+                }
+            });
+        } else if (collision instanceof MeshCollision) {
+            if (this.meshOverlay) {
+                return;
+            }
+            this.meshOverlay = new MeshDebugOverlay(app, collision, camera, !!this.cameraFrame);
+            state.hasCollisionOverlay = true;
+            events.on('collisionOverlayEnabled:changed', (value: boolean) => {
+                if (this.meshOverlay) {
+                    this.meshOverlay.enabled = value;
+                    app.renderNextFrame = true;
+                }
+            });
+        }
     }
 
     // Camera path visualizer methods

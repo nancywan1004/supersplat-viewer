@@ -154,6 +154,7 @@ type Config = {
     skyboxUrl?: string;
     contentUrl?: string;
     contents?: Promise<Response>;
+    /** 场景碰撞资源 URL（`?collision=` / `?voxel=`）；GLB 时同时用于阴影接影 */
     collisionUrl?: string;
 
     noui: boolean;
@@ -168,8 +169,6 @@ type Config = {
     aa: boolean;                                // render with antialiasing
     noreveal: boolean;                          // disable reveal effect transition animation
     showCameraPathVisualizer?: boolean;         // show camera path visualization
-    /** 接影几何 GLB 的 URL（如 /assets/mesh/gabriel.glb），由 urlParam splatMesh 传入；无则用平面 */
-    splatMeshUrl?: string;
     /** 是否允许进入编辑模式（默认 true）；设为 false 时不显示编辑按钮且不响应进入编辑的 postMessage */
     allowEditMode?: boolean;
     /** 是否启用编辑历史与撤销/重做（默认 false）；为 true 时才会记录历史并显示撤销/重做按钮及快捷键 */

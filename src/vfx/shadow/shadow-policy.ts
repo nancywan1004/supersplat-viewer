@@ -1,11 +1,11 @@
+import { resolveSceneMeshUrl } from '../../loaders/scene-mesh-loader';
 import type { Global } from '../../types';
 
 type ShadowEnableInputs = Pick<Global, 'config' | 'settings'>;
 
-/** URL `?splatMesh=` 仅作为阴影系统前置能力条件。 */
+/** 已配置 GLB 型 `?collision=`（接影与物理碰撞共用）。 */
 export function hasShadowCapability(global: Pick<Global, 'config'>): boolean {
-    const url = typeof global.config.splatMeshUrl === 'string' ? global.config.splatMeshUrl.trim() : '';
-    return url.length > 0;
+    return !!resolveSceneMeshUrl(global.config.collisionUrl);
 }
 
 /** 阴影系统总开关：手动开关 + URL 前置能力。 */

@@ -704,7 +704,7 @@ export function initPostEffectUI(global: Global): () => void {
         if (shadowEnableCheck) shadowEnableCheck.classList.toggle('active', sh.enabled !== false);
         if (shadowEnableOption) {
             const canEnableShadow = hasShadowCapability(global);
-            shadowEnableOption.title = canEnableShadow ? '' : '缺少 splatMeshUrl，当前场景不支持阴影';
+            shadowEnableOption.title = canEnableShadow ? '' : '缺少 GLB 型 collision URL，当前场景不支持阴影';
             shadowEnableOption.style.opacity = canEnableShadow ? '1' : '0.55';
         }
         if (shadowCastCheck) shadowCastCheck.classList.toggle('active', sh.castShadows !== false);

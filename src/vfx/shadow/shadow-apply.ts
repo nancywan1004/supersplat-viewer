@@ -35,7 +35,7 @@ const isShadowOutputEnabledForApply = (global: Global): boolean =>
  * - 我们不做任何阴影投影计算。shadowTex 的内容 100% 由 PlayCanvas 引擎在「阴影相机
  *   渲染接影面」时写入：接影面使用 LIT_SHADOW_CATCHER 材质，引擎采样光源的 shadow map 写出 R=0/1。
  * - 当该相机带 renderTarget（我们的 shadowMaskCamera）时，引擎在此 pass 里只合入
- *   平行光（directional）的 shadow map；平行光是否投射阴影由 `shadow.enabled` 控制，且需满足 URL `?splatMesh=` 前置条件。
+ *   平行光（directional）的 shadow map；平行光是否投射阴影由 `shadow.enabled` 控制，且需满足 GLB 型 `?collision=` 前置条件。
  */
 const shadowApplyVs = /* glsl */ `
     attribute vec2 vertex_position;
@@ -375,7 +375,7 @@ class ShadowApplyRt extends Script {
             _postrenderCount++;
             if (!global || !isShadowOutputEnabledForApply(global)) {
                 if (_postrenderCount <= 3 && !isShadowSystemEnabled(global)) {
-                    console.log('[Shadow] postrender skipped (no splatMesh URL param).');
+                    console.log('[Shadow] postrender skipped (no GLB collision URL).');
                 }
                 return;
             }

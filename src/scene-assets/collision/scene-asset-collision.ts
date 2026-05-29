@@ -9,8 +9,36 @@ import type {
     SceneAssetCollisionSettings,
     SceneAssetCollisionSettingsPatch
 } from '../../schemas/v2-custom';
-import { getCameraCollisionManager } from '../../collision/camera-collision-manager';
+import { isCameraCollisionRuntimeActive } from '../../collision/camera-collision-gate';
 import type { AssetLibraryType, Global, SceneAssetCollisionRuntimeState, ScenePlacedItem } from '../../types';
+import {
+    clampAutoFitFactor,
+    clampAxisScale,
+    createDefaultSceneAssetCollisionRuntimeState,
+    DEFAULT_SCENE_ASSET_COLLISION_AXIS_SCALE,
+    DEFAULT_SCENE_ASSET_COLLISION_SCALE,
+    normalizeAxisScale,
+    normalizeSceneAssetCollisionRuntimeState,
+    normalizeSceneAssetCollisionScale,
+    patchSceneAssetCollisionRuntimeState,
+    readSceneAssetCollisionRuntimeState,
+    SCENE_ASSET_COLLISION_APPLY_RUNTIME_STATE,
+    writeSceneAssetCollisionRuntimeState,
+    type SceneAssetCollisionScaleInput
+} from './scene-asset-collision-state';
+
+export type { SceneAssetCollisionScaleInput } from './scene-asset-collision-state';
+export {
+    createDefaultSceneAssetCollisionRuntimeState,
+    DEFAULT_SCENE_ASSET_COLLISION_AXIS_SCALE,
+    DEFAULT_SCENE_ASSET_COLLISION_SCALE,
+    normalizeAxisScale,
+    normalizeSceneAssetCollisionRuntimeState,
+    normalizeSceneAssetCollisionScale,
+    patchSceneAssetCollisionRuntimeState,
+    readSceneAssetCollisionRuntimeState,
+    writeSceneAssetCollisionRuntimeState
+} from './scene-asset-collision-state';
 
 export type {
     SceneAssetCollisionAxisScale,
@@ -20,119 +48,8 @@ export type {
 };
 export type { SceneAssetCollisionRuntimeState } from '../../types';
 
-/** 设置面板 / state 写入时可接受的缩放参数（含历史标量） */
-export type SceneAssetCollisionScaleInput = NonNullable<SceneAssetCollisionSettingsPatch['scale']>;
-
 /** 相机与放置资产 AABB 碰撞时使用的球体半径（米） */
 export const SCENE_ASSET_CAMERA_COLLISION_RADIUS = 0.3;
-
-/** 默认 AABB 相对实体包围盒的各向缩放（1 = 与渲染 AABB 一致） */
-export const DEFAULT_SCENE_ASSET_COLLISION_AXIS_SCALE: SceneAssetCollisionAxisScale = {
-    x: 1,
-    y: 1,
-    z: 1
-};
-
-export const DEFAULT_SCENE_ASSET_COLLISION_SCALE = {
-    gaussian: { x: 0.85, y: 0.85, z: 0.85 },
-    mesh: { x: 0.57, y: 0.85, z: 0.85 },
-    autoFit: false
-} as const;
-
-const AXIS_SCALE_MIN = 0.5;
-const AXIS_SCALE_MAX = 1.5;
-const AUTO_FIT_AXIS_MIN = 0.55;
-const AUTO_FIT_AXIS_MAX = 1;
-
-function clampAxisScale(value: number): number {
-    if (!Number.isFinite(value) || value <= 0) return 1;
-    return Math.min(AXIS_SCALE_MAX, Math.max(AXIS_SCALE_MIN, value));
-}
-
-function clampAutoFitFactor(value: number): number {
-    if (!Number.isFinite(value) || value <= 0) return 1;
-    return Math.min(AUTO_FIT_AXIS_MAX, Math.max(AUTO_FIT_AXIS_MIN, value));
-}
-
-/** 将历史标量缩放迁移为各向缩放 */
-export function normalizeAxisScale(
-    value: number | SceneAssetCollisionAxisScale | undefined,
-    fallback: SceneAssetCollisionAxisScale
-): SceneAssetCollisionAxisScale {
-    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-        const s = clampAxisScale(value);
-        return { x: s, y: s, z: s };
-    }
-    if (value && typeof value === 'object') {
-        return {
-            x: clampAxisScale(value.x ?? fallback.x),
-            y: clampAxisScale(value.y ?? fallback.y),
-            z: clampAxisScale(value.z ?? fallback.z)
-        };
-    }
-    return { ...fallback };
-}
-
-export function normalizeSceneAssetCollisionScale(
-    scale: SceneAssetCollisionScaleInput | SceneAssetCollisionScale | undefined
-): SceneAssetCollisionScale {
-    const def = DEFAULT_SCENE_ASSET_COLLISION_SCALE;
-    const raw = scale;
-    return {
-        gaussian: normalizeAxisScale(raw?.gaussian, def.gaussian),
-        mesh: normalizeAxisScale(raw?.mesh, def.mesh),
-        autoFit: raw?.autoFit ?? def.autoFit
-    };
-}
-
-export function createDefaultSceneAssetCollisionRuntimeState(): SceneAssetCollisionRuntimeState {
-    return {
-        enabled: false,
-        scale: normalizeSceneAssetCollisionScale(DEFAULT_SCENE_ASSET_COLLISION_SCALE),
-        debugVisual: false
-    };
-}
-
-export function normalizeSceneAssetCollisionRuntimeState(
-    value: Partial<SceneAssetCollisionRuntimeState> | undefined
-): SceneAssetCollisionRuntimeState {
-    const def = createDefaultSceneAssetCollisionRuntimeState();
-    if (!value) return def;
-    return {
-        enabled: typeof value.enabled === 'boolean' ? value.enabled : def.enabled,
-        scale: normalizeSceneAssetCollisionScale(value.scale ?? def.scale),
-        debugVisual: typeof value.debugVisual === 'boolean' ? value.debugVisual : def.debugVisual
-    };
-}
-
-/** 从 global.state 读取并归一化（真源在 state；碰撞 Runtime 类为派生缓存） */
-export function readSceneAssetCollisionRuntimeState(global: Global): SceneAssetCollisionRuntimeState {
-    return normalizeSceneAssetCollisionRuntimeState(global.state.sceneAssetCollisionRuntimeState);
-}
-
-/** 整体替换 state 上的运行态（observe 会触发 sceneAssetCollisionRuntimeState:changed） */
-export function writeSceneAssetCollisionRuntimeState(
-    global: Global,
-    next: SceneAssetCollisionRuntimeState
-): SceneAssetCollisionRuntimeState {
-    const normalized = normalizeSceneAssetCollisionRuntimeState(next);
-    global.state.sceneAssetCollisionRuntimeState = normalized;
-    return normalized;
-}
-
-export function patchSceneAssetCollisionRuntimeState(
-    global: Global,
-    patch: Partial<SceneAssetCollisionRuntimeState> & { scale?: SceneAssetCollisionScaleInput }
-): SceneAssetCollisionRuntimeState {
-    const current = readSceneAssetCollisionRuntimeState(global);
-    return writeSceneAssetCollisionRuntimeState(global, {
-        ...current,
-        ...patch,
-        scale: patch.scale !== undefined
-            ? normalizeSceneAssetCollisionScale({ ...current.scale, ...patch.scale })
-            : current.scale
-    });
-}
 
 export function syncSceneAssetCollisionRuntime(global: Global): void {
     const rs = readSceneAssetCollisionRuntimeState(global);
@@ -756,7 +673,7 @@ export class SceneAssetMultiAabbCollision implements Collision {
 
 export function isSceneAssetCollisionRuntimeActive(global: Global, enabled: boolean): boolean {
     if (!enabled) return false;
-    return getCameraCollisionManager(global).isRuntimeActive();
+    return isCameraCollisionRuntimeActive(global);
 }
 
 /**
@@ -908,8 +825,10 @@ export function initSceneAssetCollision(global: Global): () => void {
 
     syncSceneAssetCollisionRuntime(global);
 
+    const applyRuntimeState = () => syncSceneAssetCollisionRuntime(global);
     const markDirty = () => runtime.markDirty();
 
+    events.on(SCENE_ASSET_COLLISION_APPLY_RUNTIME_STATE, applyRuntimeState);
     events.on('sceneAssets:added', markDirty);
     events.on('sceneAssets:removed', markDirty);
     events.on('sceneAssets:cleared', markDirty);
@@ -919,6 +838,7 @@ export function initSceneAssetCollision(global: Global): () => void {
     events.on('sceneAsset:collisionDirty', markDirty);
 
     return () => {
+        events.off(SCENE_ASSET_COLLISION_APPLY_RUNTIME_STATE, applyRuntimeState);
         events.off('sceneAssets:added', markDirty);
         events.off('sceneAssets:removed', markDirty);
         events.off('sceneAssets:cleared', markDirty);

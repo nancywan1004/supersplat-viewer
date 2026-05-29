@@ -7,7 +7,9 @@ import {
     type SceneAssetCollisionAxisScale
 } from '../../scene-assets/collision/scene-asset-collision';
 import { getSceneAssetCollisionDebugVisual } from '../../scene-assets/collision/scene-asset-collision-debug';
-import { getCameraCollisionManager } from '../../collision/camera-collision-manager';
+import {
+    getCameraCollisionManager
+} from '../../collision/camera-collision-manager';
 import type { Global } from '../../types';
 
 export function syncSceneAssetCollisionFromState(global: Global): void {
@@ -151,10 +153,11 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
         if (enabledInput) {
             enabledInput.checked = enabled;
         }
-        const hasSceneMesh = global.state.hasCollision;
+        const hasSceneMeshUrl = global.state.hasCollision;
+        const urlLoadState = collisionMgr().getLoadState();
         const base =
             '统一控制场景 collision 网格（Walk/Fly 贴地推开）与放置资产 AABB（Fly/Orbit）；仅 Viewer 或编辑预览生效。'
-            + (hasSceneMesh ? ' 场景网格调试线框见顶栏「Show Collision」。' : '');
+            + (hasSceneMeshUrl ? ' 场景网格调试线框见顶栏「Show Collision」。' : '');
         if (!enabled) {
             hintEl.textContent = base;
             return;
@@ -163,7 +166,17 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
         const parts: string[] = [];
         if (active) {
             parts.push('当前已启用物理碰撞。');
-            if (hasSceneMesh) parts.push('场景网格已参与 Walk/Fly。');
+            if (hasSceneMeshUrl) {
+                if (urlLoadState === 'loading') {
+                    parts.push('场景网格加载中…');
+                } else if (urlLoadState === 'ready') {
+                    parts.push('场景网格已参与 Walk/Fly。');
+                } else if (urlLoadState === 'failed') {
+                    parts.push('场景网格加载失败。');
+                } else {
+                    parts.push('场景网格将在需要时加载。');
+                }
+            }
             if (isSceneAssetCollisionRuntimeActive(global, enabled)) {
                 parts.push('放置资产 AABB 已参与 Fly/Orbit。');
             }
@@ -266,6 +279,8 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
     const onModeChanged = () => updateActiveHint();
     events.on('editMode:changed', onModeChanged);
     events.on('previewMode:changed', onModeChanged);
+    events.on('cameraCollision:changed', onModeChanged);
+    events.on('cameraCollision:load', onModeChanged);
 
     return () => {
         if (debugVisualInput && onDebugVisualChange) {
@@ -282,5 +297,7 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
         }
         events.off('editMode:changed', onModeChanged);
         events.off('previewMode:changed', onModeChanged);
+        events.off('cameraCollision:changed', onModeChanged);
+        events.off('cameraCollision:load', onModeChanged);
     };
 }

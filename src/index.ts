@@ -17,8 +17,6 @@ import {
 
 import { App } from './app';
 import { applySkyboxTexture, clearSkyboxDisplay } from './loaders/skybox-loader';
-import { MeshCollision, loadVoxelCollision } from './collision';
-import type { Collision } from './collision';
 import { observe } from './core/observe';
 import type { ExperienceSettings } from './schemas/v2';
 import { importSettings } from './settings';
@@ -451,23 +449,6 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         }
     });
 
-    // Load collision data (type determined by file extension)
-    let collisionLoad: Promise<Collision> | undefined;
-    if (config.collisionUrl) {
-        const ext = new URL(config.collisionUrl, location.href).pathname.split('.').pop()?.toLowerCase();
-        if (ext === 'glb') {
-            collisionLoad = MeshCollision.fromGlb(app, config.collisionUrl).catch((err: Error): null => {
-                console.warn('Failed to load mesh collision:', err);
-                return null;
-            });
-        } else {
-            collisionLoad = loadVoxelCollision(config.collisionUrl).catch((err: Error): null => {
-                console.warn('Failed to load voxel data:', err);
-                return null;
-            });
-        }
-    }
-
     // Load and play sound
     if (global.settings.soundUrl) {
         const sound = new Audio(global.settings.soundUrl);
@@ -483,7 +464,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     }
 
     // Viewer 构造内会 initCommandRegistry 并注册各 facade；postMessage 监听须在此之后挂载，否则编辑类协议无法经 registry 单路径执行。
-    const viewer = new Viewer(global, gsplatLoad, skyboxLoad, collisionLoad);
+    const viewer = new Viewer(global, gsplatLoad, skyboxLoad);
 
     initPostMessageBridge(global);
 

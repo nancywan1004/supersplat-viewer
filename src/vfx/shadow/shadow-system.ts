@@ -2,7 +2,7 @@
  * 阴影子系统统一入口。
  *
  * 两层门控（均需满足才完整出阴影）：
- * 1. **Capability** `hasShadowCapability` — 场景是否配置 mesh（URL `?splatMesh=`）
+ * 1. **Capability** `hasShadowCapability` — 场景是否配置 GLB 型 `?collision=`
  *    - 放置高斯 / mesh 的 castShadows（主场景高斯恒 false）、平行光 shadow map、接影管线
  *    - 放置 mesh：引擎 receiveShadows（A）；高斯接影叠屏（B）由 shadow-apply 处理
  * 2. **Enablement/Output** `isShadowSystemEnabled` + `isShadowOutputEnabled`

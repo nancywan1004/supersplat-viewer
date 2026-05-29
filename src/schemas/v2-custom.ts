@@ -66,7 +66,7 @@ type PointLightConfig = {
     enabled?: boolean
 };
 
-/** 平行光配置（主方向光/太阳，无位置概念，仅方向；用于阴影等）。阴影由 `shadow.enabled` 控制，URL `?splatMesh=` 仅作前置条件。 */
+/** 平行光配置（主方向光/太阳，无位置概念，仅方向；用于阴影等）。阴影由 `shadow.enabled` 控制，GLB 型 `?collision=` 为接影前置条件。 */
 type DirectionalLightConfig = {
     type: 'directional',
     id?: string,

@@ -640,7 +640,7 @@ export function applyBloomLocalLightRegionDelete(global: Global, regionId: strin
     global.events.fire('bloomLocalLightRegion:listChanged');
 }
 
-/** SHADOW_SET：写 `shadow.enabled`（`splatMeshUrl` 仅前置条件）。 */
+/** SHADOW_SET：写 `shadow.enabled`（GLB 型 `collision` URL 为接影前置条件）。 */
 export function applyShadowSet(global: Global, enabled: boolean): void {
     const settings = global.settings as ExperienceSettings;
     const s = ensureShadow(settings) as Record<string, unknown>;
