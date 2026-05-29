@@ -1,6 +1,7 @@
 import type { Entity } from 'playcanvas';
 import { PERSISTENT_EFFECT_TYPE_VALUES, REVEAL_EFFECT_TYPE_VALUES } from './effect-types';
 import { GsplatPersistentFallingPetals, GsplatPersistentFallingWeather } from './persistent/falling-weather-persistent';
+import { GsplatPersistentNostalgicComic } from './persistent/nostalgic-comic-persistent';
 import { GsplatRevealPerlinWave } from './persistent/gsplat-perlin-wave';
 
 type RevealEffectId = (typeof REVEAL_EFFECT_TYPE_VALUES)[number];
@@ -35,7 +36,8 @@ export const GSPLAT_PERSISTENT_SCRIPT_NAME_BY_TYPE = {
     'perlin-wave': GsplatRevealPerlinWave.scriptName,
     'falling-petals': GsplatPersistentFallingPetals.scriptName,
     'falling-rain': GsplatPersistentFallingWeather.scriptName,
-    'falling-snow': GsplatPersistentFallingWeather.scriptName
+    'falling-snow': GsplatPersistentFallingWeather.scriptName,
+    'nostalgic-comic': GsplatPersistentNostalgicComic.scriptName
 } as const satisfies Record<PersistentEffectId, string>;
 
 export const ALL_GSPLAT_PERSISTENT_SCRIPT_NAMES: ReadonlySet<string> = new Set(Object.values(GSPLAT_PERSISTENT_SCRIPT_NAME_BY_TYPE));

@@ -76,6 +76,7 @@ const REVEAL_PANEL_HTML = (() => {
         <option value="falling-petals">Falling Petals</option>
         <option value="falling-rain">Falling Rain</option>
         <option value="falling-snow">Falling Snow</option>
+        <option value="nostalgic-comic">Nostalgic Comic</option>
       </select>
     </div>
     <div id="persistentPetalsControls" class="hidden" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08)">
@@ -164,6 +165,31 @@ const REVEAL_PANEL_HTML = (() => {
         <input type="checkbox" id="weatherUseCameraClearColor" class="settingsCheckbox" checked>
       </div>
     </div>
+    <div id="persistentNostalgicComicControls" class="hidden" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08)">
+      <div class="settingsRow">
+        <label for="nostalgicComicLevelCount" class="postEffectLabel">明度分阶数量:</label>
+        <input type="number" id="nostalgicComicLevelCount" class="settingsInput" min="3" max="16" step="1" value="6">
+      </div>
+      <div class="settingsRow">
+        <label for="nostalgicComicEdgeThreshold" class="postEffectLabel">线稿边缘敏感度:</label>
+        <div class="postEffectSliderWrap">
+          <input type="range" id="nostalgicComicEdgeThreshold" class="postEffectSlider" min="0.05" max="8" step="0.05" value="0.8">
+          <span id="nostalgicComicEdgeThresholdVal" class="postEffectSliderValue">0.80</span>
+        </div>
+      </div>
+      <div class="settingsRow">
+        <label for="nostalgicComicPaperColor" class="postEffectLabel">背景/纸张颜色:</label>
+        <input type="color" id="nostalgicComicPaperColor" class="settingsInput" value="#f5f0e3">
+      </div>
+      <div class="settingsRow">
+        <label for="nostalgicComicLightColor" class="postEffectLabel">物体亮部颜色:</label>
+        <input type="color" id="nostalgicComicLightColor" class="settingsInput" value="#d9d9d9">
+      </div>
+      <div class="settingsRow">
+        <label for="nostalgicComicStrokeColor" class="postEffectLabel">物体暗部/线稿颜色:</label>
+        <input type="color" id="nostalgicComicStrokeColor" class="settingsInput" value="#262626">
+      </div>
+    </div>
   </fieldset>
   <div class="settingsRow">
     <button id="revealRestart" class="settingsButton" type="button">Restart Effect</button>
@@ -214,6 +240,7 @@ export function initRevealUI(global: Global): () => void {
     const persistentEnabled = container.querySelector('#persistentEnabled') as HTMLInputElement | null;
     const persistentPetalsControls = container.querySelector('#persistentPetalsControls') as HTMLElement | null;
     const persistentWeatherControls = container.querySelector('#persistentWeatherControls') as HTMLElement | null;
+    const persistentNostalgicComicControls = container.querySelector('#persistentNostalgicComicControls') as HTMLElement | null;
     const petalsTextureUrl = container.querySelector('#petalsTextureUrl') as HTMLInputElement | null;
     const petalsDensity = container.querySelector('#petalsDensity') as HTMLInputElement | null;
     const petalsExtentX = container.querySelector('#petalsExtentX') as HTMLInputElement | null;
@@ -245,6 +272,12 @@ export function initRevealUI(global: Global): () => void {
     const weatherUseFog = container.querySelector('#weatherUseFog') as HTMLInputElement | null;
     const weatherBgColor = container.querySelector('#weatherBgColor') as HTMLInputElement | null;
     const weatherUseCameraClearColor = container.querySelector('#weatherUseCameraClearColor') as HTMLInputElement | null;
+    const nostalgicComicLevelCount = container.querySelector('#nostalgicComicLevelCount') as HTMLInputElement | null;
+    const nostalgicComicEdgeThreshold = container.querySelector('#nostalgicComicEdgeThreshold') as HTMLInputElement | null;
+    const nostalgicComicEdgeThresholdVal = container.querySelector('#nostalgicComicEdgeThresholdVal') as HTMLElement | null;
+    const nostalgicComicPaperColor = container.querySelector('#nostalgicComicPaperColor') as HTMLInputElement | null;
+    const nostalgicComicLightColor = container.querySelector('#nostalgicComicLightColor') as HTMLInputElement | null;
+    const nostalgicComicStrokeColor = container.querySelector('#nostalgicComicStrokeColor') as HTMLInputElement | null;
     const revealRestart = container.querySelector('#revealRestart');
     const totalDurationRow = container.querySelector('#totalDurationRow') as HTMLElement | null;
     const totalDuration = container.querySelector('#totalDuration') as HTMLInputElement | null;
@@ -366,6 +399,15 @@ export function initRevealUI(global: Global): () => void {
                 useCameraClearColor: true
             };
         }
+        if (type === 'nostalgic-comic') {
+            return {
+                levelCount: 6,
+                edgeThreshold: 0.8,
+                paperColor: [0.96, 0.94, 0.89],
+                lightColor: [0.85, 0.85, 0.85],
+                strokeColor: [0.15, 0.15, 0.15]
+            };
+        }
         return {};
     };
 
@@ -466,6 +508,7 @@ export function initRevealUI(global: Global): () => void {
         persistentPetalsControls?.classList[pType === 'falling-petals' ? 'remove' : 'add']('hidden');
         const showWeatherControls = pType === 'falling-rain' || pType === 'falling-snow';
         persistentWeatherControls?.classList[showWeatherControls ? 'remove' : 'add']('hidden');
+        persistentNostalgicComicControls?.classList[pType === 'nostalgic-comic' ? 'remove' : 'add']('hidden');
 
         writeTextInput(petalsTextureUrl, params.petalTextureUrl, '/textures/petal-atlas.png');
         const legacyPetalCount = typeof params.petalParticleCount === 'number' ? params.petalParticleCount : undefined;
@@ -494,6 +537,18 @@ export function initRevealUI(global: Global): () => void {
         }
         if (weatherUseCameraClearColor) {
             weatherUseCameraClearColor.checked = typeof params.useCameraClearColor === 'boolean' ? params.useCameraClearColor : true;
+        }
+
+        writeNumberInput(nostalgicComicLevelCount, params.levelCount, 6);
+        writeSlider(nostalgicComicEdgeThreshold, nostalgicComicEdgeThresholdVal, params.edgeThreshold, 0.8, 2);
+        if (nostalgicComicPaperColor) {
+            nostalgicComicPaperColor.value = rgbTripleToHex(params.paperColor, [0.96, 0.94, 0.89]);
+        }
+        if (nostalgicComicLightColor) {
+            nostalgicComicLightColor.value = rgbTripleToHex(params.lightColor, [0.85, 0.85, 0.85]);
+        }
+        if (nostalgicComicStrokeColor) {
+            nostalgicComicStrokeColor.value = rgbTripleToHex(params.strokeColor, [0.15, 0.15, 0.15]);
         }
     };
 
@@ -537,6 +592,21 @@ export function initRevealUI(global: Global): () => void {
         syncSliderValue(weatherFogDensity, weatherFogDensityValue, 4);
         syncSliderValue(weatherExposure, weatherExposureValue, 2);
         onWeatherParamsChange();
+    };
+
+    const onNostalgicComicParamsChange = () => {
+        patchPersistentEffectParams({
+            levelCount: readNumberInput(nostalgicComicLevelCount, 6),
+            edgeThreshold: readNumberInput(nostalgicComicEdgeThreshold, 0.8),
+            paperColor: hexToRgbTriple(nostalgicComicPaperColor?.value, [0.96, 0.94, 0.89]),
+            lightColor: hexToRgbTriple(nostalgicComicLightColor?.value, [0.85, 0.85, 0.85]),
+            strokeColor: hexToRgbTriple(nostalgicComicStrokeColor?.value, [0.15, 0.15, 0.15])
+        });
+    };
+
+    const onNostalgicComicSliderInput = () => {
+        syncSliderValue(nostalgicComicEdgeThreshold, nostalgicComicEdgeThresholdVal, 2);
+        onNostalgicComicParamsChange();
     };
 
     const onRevealTypeChange = (event: Event) => {
@@ -757,6 +827,11 @@ export function initRevealUI(global: Global): () => void {
     weatherUseFog?.addEventListener('change', onWeatherParamsChange);
     weatherBgColor?.addEventListener('input', onWeatherParamsChange);
     weatherUseCameraClearColor?.addEventListener('change', onWeatherParamsChange);
+    nostalgicComicLevelCount?.addEventListener('change', onNostalgicComicParamsChange);
+    nostalgicComicEdgeThreshold?.addEventListener('input', onNostalgicComicSliderInput);
+    nostalgicComicPaperColor?.addEventListener('input', onNostalgicComicParamsChange);
+    nostalgicComicLightColor?.addEventListener('input', onNostalgicComicParamsChange);
+    nostalgicComicStrokeColor?.addEventListener('input', onNostalgicComicParamsChange);
     totalDuration?.addEventListener('change', onTotalDurationChange);
     revealRestart?.addEventListener('click', onRevealRestartClick);
     effectTimeline?.addEventListener('pointerdown', onEffectTimelinePointerDown);
@@ -804,6 +879,11 @@ export function initRevealUI(global: Global): () => void {
         weatherUseFog?.removeEventListener('change', onWeatherParamsChange);
         weatherBgColor?.removeEventListener('input', onWeatherParamsChange);
         weatherUseCameraClearColor?.removeEventListener('change', onWeatherParamsChange);
+        nostalgicComicLevelCount?.removeEventListener('change', onNostalgicComicParamsChange);
+        nostalgicComicEdgeThreshold?.removeEventListener('input', onNostalgicComicSliderInput);
+        nostalgicComicPaperColor?.removeEventListener('input', onNostalgicComicParamsChange);
+        nostalgicComicLightColor?.removeEventListener('input', onNostalgicComicParamsChange);
+        nostalgicComicStrokeColor?.removeEventListener('input', onNostalgicComicParamsChange);
         totalDuration?.removeEventListener('change', onTotalDurationChange);
         revealRestart?.removeEventListener('click', onRevealRestartClick);
         effectTimeline?.removeEventListener('pointerdown', onEffectTimelinePointerDown);

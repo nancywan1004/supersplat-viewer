@@ -5,6 +5,7 @@ import { destroyAllPersistentGsplatScriptsOnEntity, getMountedPersistentGsplatSc
 import { PERSISTENT_EFFECT_TYPES } from '../effect-types';
 import { isPersistentVfx } from '../reveal/reveal-policy';
 import { GsplatPersistentFallingPetals, GsplatPersistentFallingWeather } from './falling-weather-persistent';
+import { GsplatPersistentNostalgicComic } from './nostalgic-comic-persistent';
 import { GsplatRevealPerlinWave } from './gsplat-perlin-wave';
 import { applyPersistentEffectParamsToScript } from './persistent-effect-params';
 
@@ -36,9 +37,35 @@ export function mountPersistentGsplatByEffectType(
             return createFallingWeatherScript('rain', gsplatEntity, autoStart, effectParams);
         case 'falling-snow':
             return createFallingWeatherScript('snow', gsplatEntity, autoStart, effectParams);
+        case 'nostalgic-comic':
+            return createNostalgicComicScript(gsplatEntity, autoStart, effectParams);
         default:
             console.warn('[persistent-effect] persistent type in registry but no mount branch:', effectType);
             return null;
+    }
+}
+
+export function createNostalgicComicScript(
+    gsplatEntity: Entity,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn('Cannot create nostalgic-comic script - entity or script component not ready');
+        return null;
+    }
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentNostalgicComic) as any;
+        if (script) {
+            applyPersistentEffectParamsToScript(script, 'nostalgic-comic', effectParams ?? undefined);
+            script.enabled = autoStart;
+            script.applyConfig?.();
+        }
+        return script;
+    } catch (error) {
+        console.error('Failed to create nostalgic-comic persistent script:', error);
+        return null;
     }
 }
 

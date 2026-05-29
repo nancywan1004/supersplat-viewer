@@ -63,11 +63,20 @@ const FALLING_WEATHER = new Set([
     'restoreSceneAtmosphere'
 ]);
 
+const NOSTALGIC_COMIC = new Set([
+    'levelCount',
+    'edgeThreshold',
+    'paperColor',
+    'lightColor',
+    'strokeColor'
+]);
+
 const BY_TYPE: Record<string, ReadonlySet<string>> = {
     'perlin-wave': PERLIN_WAVE,
     'falling-petals': FALLING_PETALS,
     'falling-rain': FALLING_WEATHER,
-    'falling-snow': FALLING_WEATHER
+    'falling-snow': FALLING_WEATHER,
+    'nostalgic-comic': NOSTALGIC_COMIC
 };
 
 function isVec3Triple(v: unknown): v is [number, number, number] {
@@ -139,7 +148,14 @@ export function applyPersistentEffectParamsToScript(
             trySetVec3(script, rawKey, rawVal);
             continue;
         }
-        if (rawKey === 'color' || rawKey === 'glowColor' || rawKey === 'cameraClearColor') {
+        if (
+            rawKey === 'color' ||
+            rawKey === 'glowColor' ||
+            rawKey === 'cameraClearColor' ||
+            rawKey === 'paperColor' ||
+            rawKey === 'lightColor' ||
+            rawKey === 'strokeColor'
+        ) {
             trySetTriple(script, rawKey, rawVal);
             continue;
         }

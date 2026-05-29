@@ -37,7 +37,7 @@ import { MeshDebugOverlay } from './mesh-debug-overlay';
 import { NavCursor } from './nav-cursor';
 import { Picker } from './picker';
 import type { ExperienceSettings, PostEffectSettings } from './settings';
-import { shouldDeferPersistentMount } from './settings-serialize/effects-sync';
+import { readPersistentRevealParams, shouldDeferPersistentMount } from './settings-serialize/effects-sync';
 import type { Global } from './types';
 import { nightDeferredByReveal, revealBlocksAnim } from './vfx/effects-runtime/reveal/reveal-policy';
 import { RevealController } from './vfx/effects-runtime/reveal/reveal-controller';
@@ -206,6 +206,14 @@ const anyPostEffectEnabled = (settings: PostEffectSettings): boolean => {
         shadowOn;
 };
 
+const isNostalgicComicPersistentActive = (settings: ExperienceSettings): boolean => {
+    if (settings.effects?.persistent?.enabled === false) {
+        return false;
+    }
+    const persistent = readPersistentRevealParams(settings);
+    return persistent?.type === 'nostalgic-comic';
+};
+
 const vec = new Vec3();
 
 // store the original isColorBufferSrgb so the override in updatePostEffects is idempotent
@@ -315,8 +323,11 @@ class Viewer {
             }
         };
 
+        const getCameraFrame = () => this.cameraFrame;
+        (app as { getCameraFrame?: () => CameraFrame | null }).getCameraFrame = getCameraFrame;
+
         this.bloomController = new BloomController(global, {
-            getCameraFrame: () => this.cameraFrame,
+            getCameraFrame,
             getAppCanvas: () => (app.graphicsDevice?.canvas as HTMLCanvasElement) ?? document.querySelector('canvas'),
             getNightModeScript: () => this.nightModeScript
         });
@@ -721,6 +732,7 @@ class Viewer {
             (global as any).__assetEffectsController = this.assetEffectsController;
 
             global.events.on('persistentGsplatEffectRemountRequested', (restartAnim?: boolean) => {
+                this.configureCamera(global.settings);
                 // revealComplete 当帧内 reveal 脚本可能仍在执行 removeShaders；
                 // remount persistent 若同帧进行，可能被旧脚本收尾覆盖。统一延后一帧。
                 global.app.once('frameend', () => {
@@ -1160,7 +1172,9 @@ z: ${cameraInfo.target.z.toFixed(6)}
         const computeRequiresCameraFrame = rendererMode === 'compute';
         const postFxRequested = !config.nofx &&
             !!postEffectSettings &&
-            (anyPostEffectEnabled(postEffectSettings) || highPrecisionRendering || bloomPipelineWanted);
+            (anyPostEffectEnabled(postEffectSettings) ||
+                highPrecisionRendering ||
+                bloomPipelineWanted);
         const enableCameraFrame = !app.xr.active && (computeRequiresCameraFrame || postFxRequested);
 
         if (enableCameraFrame) {
@@ -1220,7 +1234,12 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 return this === app.graphicsDevice.backBuffer ? true : origIsColorBufferSrgb.call(this, index);
             };
 
-            camera.camera.clearColor = new Color(background.color);
+            if (isNostalgicComicPersistentActive(settings)) {
+                camera.camera.clearColorBuffer = true;
+                camera.camera.clearColor = new Color(1, 1, 1, 0);
+            } else {
+                camera.camera.clearColor = new Color(background.color);
+            }
         } else {
             if (this.cameraFrame) {
                 this.bloomController?.onCameraFrameDestroyed();
@@ -1243,7 +1262,12 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
             if (!app.xr.active) {
                 camera.camera.toneMapping = tonemapTable[settings.tonemapping];
-                camera.camera.clearColor = new Color(background.color);
+                if (isNostalgicComicPersistentActive(settings)) {
+                    camera.camera.clearColorBuffer = true;
+                    camera.camera.clearColor = new Color(1, 1, 1, 0);
+                } else {
+                    camera.camera.clearColor = new Color(background.color);
+                }
             }
         }
 
