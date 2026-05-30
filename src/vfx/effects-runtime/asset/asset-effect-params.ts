@@ -28,12 +28,15 @@ const GSPLAT_MORPH = new Set([
     'greedyMaxCandidatesPerPoint',
     'progressivePairFlightWindow',
     'progressivePairFlightStagger',
+    'progressivePairFlightEase',
+    'progressivePairFlightPosEase',
     'progressivePairAsymmetricDissolve',
     'morphHourglassChannel',
     'morphHourglassStrength',
     'morphHourglassEndRadiusFrac',
     'morphHourglassWaistRatio',
     'morphHourglassParticleScaleFrac',
+    'morphHourglassPerturbAmp',
     'morphHourglassSparkIntensity',
     'morphHourglassSparkTwist',
     'morphHourglassSparkDrift',
@@ -92,6 +95,14 @@ const GSPLAT_WOBBLE = new Set([
     'entityName'
 ]);
 
+const PROGRESSIVE_PAIR_FLIGHT_EASE_VALUES = new Set([
+    'linear',
+    'smoothstep',
+    'easeIn',
+    'easeOut',
+    'easeInOut'
+]);
+
 const BY_TYPE: Record<string, ReadonlySet<string>> = {
     [ASSET_EFFECT_TYPE_VALUES[0]]: GSPLAT_MORPH,
     [ASSET_EFFECT_TYPE_VALUES[1]]: GSPLAT_WOBBLE
@@ -125,6 +136,12 @@ export function filterAssetEffectParams(
         }
         if (k === 'entityId') {
             if (typeof v === 'string' && v.length > 0) {
+                out[k] = v;
+            }
+            continue;
+        }
+        if (k === 'progressivePairFlightEase' || k === 'progressivePairFlightPosEase') {
+            if (typeof v === 'string' && PROGRESSIVE_PAIR_FLIGHT_EASE_VALUES.has(v)) {
                 out[k] = v;
             }
             continue;
