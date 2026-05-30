@@ -10,7 +10,8 @@ import type { ExperienceSettings } from '../../../schemas/v2';
 import {
     GsplatMorphController,
     loadGsplatMorphSequence,
-    type GsplatMorphOptions
+    type GsplatMorphOptions,
+    type ProgressivePairFlightEase
 } from '../../gsplat-morph-progressive-v2';
 import {
     createGsplatWobbleEffect,
@@ -74,9 +75,23 @@ export function buildWobbleOptions(ep: Record<string, unknown>): GsplatWobbleOpt
     return opts;
 }
 
+const PROGRESSIVE_PAIR_FLIGHT_EASE_VALUES = new Set<string>([
+    'linear',
+    'smoothstep',
+    'easeIn',
+    'easeOut',
+    'easeInOut'
+]);
+
+function resolveProgressivePairFlightEaseParam(value: unknown): ProgressivePairFlightEase | undefined {
+    return typeof value === 'string' && PROGRESSIVE_PAIR_FLIGHT_EASE_VALUES.has(value)
+        ? (value as ProgressivePairFlightEase)
+        : undefined;
+}
+
 export function buildMorphOptions(ep: Record<string, unknown>): GsplatMorphOptions {
     const opts: GsplatMorphOptions = {
-        segmentDuration: typeof ep.segmentDuration === 'number' ? ep.segmentDuration : undefined,
+        segmentDuration: typeof ep.segmentDuration === 'number' ? ep.segmentDuration : 10,
         segmentHoldDuration: typeof ep.segmentHoldDuration === 'number' ? ep.segmentHoldDuration : undefined,
         loop: typeof ep.loop === 'boolean' ? ep.loop : undefined,
         autoPlay: typeof ep.autoPlay === 'boolean' ? ep.autoPlay : true,
@@ -94,9 +109,11 @@ export function buildMorphOptions(ep: Record<string, unknown>): GsplatMorphOptio
         sortCentersMaxHz: typeof ep.sortCentersMaxHz === 'number' ? ep.sortCentersMaxHz : 6,
         progressivePairFlight: typeof ep.progressivePairFlight === 'boolean' ? ep.progressivePairFlight : true,
         progressivePairFlightWindow:
-            typeof ep.progressivePairFlightWindow === 'number' ? ep.progressivePairFlightWindow : 0.55,
+            typeof ep.progressivePairFlightWindow === 'number' ? ep.progressivePairFlightWindow : 0.12,
         progressivePairFlightStagger:
-            typeof ep.progressivePairFlightStagger === 'number' ? ep.progressivePairFlightStagger : 0.48,
+            typeof ep.progressivePairFlightStagger === 'number' ? ep.progressivePairFlightStagger : 1,
+        progressivePairFlightEase: resolveProgressivePairFlightEaseParam(ep.progressivePairFlightEase),
+        progressivePairFlightPosEase: resolveProgressivePairFlightEaseParam(ep.progressivePairFlightPosEase),
         progressivePairDissolveALeaveScale:
             typeof ep.progressivePairDissolveALeaveScale === 'number' ? ep.progressivePairDissolveALeaveScale : 1.32,
         progressivePairDissolveARate:
@@ -123,6 +140,8 @@ export function buildMorphOptions(ep: Record<string, unknown>): GsplatMorphOptio
         morphHourglassWaistRatio:
             typeof ep.morphHourglassWaistRatio === 'number' ? ep.morphHourglassWaistRatio : undefined,
         morphHourglassConform: typeof ep.morphHourglassConform === 'number' ? ep.morphHourglassConform : undefined,
+        morphHourglassPerturbAmp:
+            typeof ep.morphHourglassPerturbAmp === 'number' ? ep.morphHourglassPerturbAmp : undefined,
         morphHourglassSparkIntensity:
             typeof ep.morphHourglassSparkIntensity === 'number' ? ep.morphHourglassSparkIntensity : undefined,
         morphHourglassSparkTwist:

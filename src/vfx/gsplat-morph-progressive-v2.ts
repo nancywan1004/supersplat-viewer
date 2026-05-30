@@ -144,13 +144,22 @@ export interface GsplatMorphOptions {
     /** 按配对顺序逐步从 A 飞向 B。默认 true；关闭后恢复整段统一 t 插值。 */
     progressivePairFlight?: boolean;
     /**
-     * 飞行重叠窗口（0–1）。单粒子从起飞到落地的 globalT 时长；越小则相邻粒子起飞间隔越大。默认 0.5。
+     * 飞行重叠窗口（0–1）。单粒子从起飞到落地的 globalT 时长；越小则相邻粒子起飞间隔越大。默认 0.12。
      */
     progressivePairFlightWindow?: number;
     /**
-     * 配对索引错峰权重（0–1）。与 sA/sB 空间相位混合，拉大「先飞 / 后飞」时间差并保持通道连续。默认 0.48。
+     * 配对索引错峰权重（0–1）。与 sA/sB 空间相位混合，拉大「先飞 / 后飞」时间差并保持通道连续。默认 1。
      */
     progressivePairFlightStagger?: number;
+    /**
+     * 单粒子飞行进度缓动：linear | smoothstep | easeIn | easeOut | easeInOut。默认 smoothstep。
+     * 作用于 goneA / presentB 等消散与生成节奏。
+     */
+    progressivePairFlightEase?: ProgressivePairFlightEase;
+    /**
+     * 位置插值 posT 专用缓动；省略时与 progressivePairFlightEase 相同。
+     */
+    progressivePairFlightPosEase?: ProgressivePairFlightEase;
     /**
      * A/B 分离消散与生成：A 按 sA 从靠 B 侧先散，B 按 sB 从靠 A 侧先生；
      * 中间段才成通道粒子。默认 true。false 时退回单一 localT 对称插值。
@@ -181,7 +190,7 @@ export interface GsplatMorphOptions {
     morphHourglassSparkTwist?: number;
     /** 通道粒子飞行中的时间随机漂移（× A→B 间距）。默认 0.026。 */
     morphHourglassSparkDrift?: number;
-    /** 通道粒子直径 = A→B 间距 × 该比例（再与绝对上限、单 splat 尺度取 min）。默认 0.004。 */
+    /** 通道粒子直径 = A→B 间距 × 该比例（上限为间距 × 2%）。默认 0.006（0.6%）。 */
     morphHourglassParticleScaleFrac?: number;
     /** 固定世界单位粒子直径；仅在不使用 scaleFrac 时生效。 */
     morphHourglassParticleLogScale?: number;
@@ -237,9 +246,45 @@ export interface GsplatMorphOptions {
     prebuiltInterpolator?: GaussianInterpolatorRuntime;
 }
 
+export type ProgressivePairFlightEase = 'linear' | 'smoothstep' | 'easeIn' | 'easeOut' | 'easeInOut';
+
+const PROGRESSIVE_PAIR_FLIGHT_EASE_VALUES: readonly ProgressivePairFlightEase[] = [
+    'linear',
+    'smoothstep',
+    'easeIn',
+    'easeOut',
+    'easeInOut'
+];
+
+const DEFAULT_PROGRESSIVE_PAIR_FLIGHT_EASE: ProgressivePairFlightEase = 'smoothstep';
+
+const resolveProgressivePairFlightEase = (value?: string): ProgressivePairFlightEase => {
+    if (value && (PROGRESSIVE_PAIR_FLIGHT_EASE_VALUES as readonly string[]).includes(value)) {
+        return value as ProgressivePairFlightEase;
+    }
+    return DEFAULT_PROGRESSIVE_PAIR_FLIGHT_EASE;
+};
+
+const applyProgressivePairFlightEase = (t: number, ease: ProgressivePairFlightEase) => {
+    const u = clamp(t, 0, 1);
+    switch (ease) {
+        case 'linear':
+            return u;
+        case 'easeIn':
+            return u * u * u;
+        case 'easeOut':
+            return 1 - Math.pow(1 - u, 3);
+        case 'easeInOut':
+            return u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+        case 'smoothstep':
+        default:
+            return u * u * (3 - 2 * u);
+    }
+};
+
 const MAX_MORPH_MODELS = 4;
 const MAX_SH_REST_PROPS = 45;
-const DEFAULT_SEGMENT_DURATION = 1.5;
+const DEFAULT_SEGMENT_DURATION = 10;
 const DEFAULT_SEGMENT_HOLD_DURATION = 1.0;
 const DEFAULT_FADE_LOG_MIN = -6.0;
 const DEFAULT_TARGET_SCALE = 10.0;
@@ -250,8 +295,8 @@ const DEFAULT_GREEDY_SEARCH_RADIUS_CELLS = 2;
 const DEFAULT_GREEDY_MAX_CANDIDATES = 96;
 const DEFAULT_GREEDY_GLOBAL_FALLBACK_SAMPLES = 2048;
 const DEFAULT_MORPH_BUILD_YIELD_MS = 2;
-const DEFAULT_PROGRESSIVE_PAIR_FLIGHT_WINDOW = 0.5;
-const DEFAULT_PROGRESSIVE_PAIR_FLIGHT_STAGGER = 0.48;
+const DEFAULT_PROGRESSIVE_PAIR_FLIGHT_WINDOW = 0.12;
+const DEFAULT_PROGRESSIVE_PAIR_FLIGHT_STAGGER = 1;
 const DEFAULT_MORPH_HOURGLASS_STRENGTH = 1.0;
 const DEFAULT_MORPH_HOURGLASS_WAIST_RADIAL_MIN = 0.14;
 const DEFAULT_MORPH_HOURGLASS_WAIST_PINCH = 2.6;
@@ -259,9 +304,12 @@ const DEFAULT_MORPH_HOURGLASS_PERTURB_AMP = 0.012;
 const DEFAULT_MORPH_HOURGLASS_SPARK_INTENSITY = 0.048;
 const DEFAULT_MORPH_HOURGLASS_SPARK_TWIST = 1.0;
 const DEFAULT_MORPH_HOURGLASS_SPARK_DRIFT = 0.026;
+/** 通道内流动动画相对 globalT 的时间倍率（仅影响扰动相位，不改变变形进度）。 */
+const MORPH_HOURGLASS_FLOW_TIME_SCALE = 4;
 /** Spark disintegrate 约 0.01 量级；大场景再按 A→B 间距上限裁剪。 */
-const DEFAULT_MORPH_HOURGLASS_PARTICLE_SCALE_FRAC = 0.004;
-const MORPH_HOURGLASS_PARTICLE_MAX_DIAMETER = 0.012;
+/** 通道粒子直径上限 = A→B 间距 × 该比例（与 UI 滑条 max 对齐）。 */
+const MORPH_HOURGLASS_PARTICLE_MAX_SCALE_FRAC = 0.02;
+const DEFAULT_MORPH_HOURGLASS_PARTICLE_SCALE_FRAC = 0.006;
 const DEFAULT_MORPH_HOURGLASS_TINT_A: [number, number, number] = [0.95, 0.22, 0.28];
 const DEFAULT_MORPH_HOURGLASS_TINT_B: [number, number, number] = [0.25, 0.42, 0.98];
 /** 0 = 不改颜色，完全用 A→B 插值后的 GS 原色。 */
@@ -307,13 +355,21 @@ const resolveMorphHourglassSettings = (options: GsplatMorphOptions = {}): MorphH
     minOpacityLog: DEFAULT_MORPH_HOURGLASS_MIN_OPACITY_LOG
 });
 
-/** 通道粒子目标直径（世界单位）：min(间距×比例, 绝对上限)。 */
+/** 通道粒子目标直径（世界单位）：间距 × 比例，上限为间距 × {@link MORPH_HOURGLASS_PARTICLE_MAX_SCALE_FRAC}。 */
+const resolveHourglassParticleMaxDiameter = (axis: PairAxisParams) =>
+    Math.max(axis.projSpan * MORPH_HOURGLASS_PARTICLE_MAX_SCALE_FRAC, 1e-5);
+
 const resolveHourglassParticleDiameter = (axis: PairAxisParams, settings: MorphHourglassSettings) => {
     if (typeof settings.particleLogScale === 'number' && Number.isFinite(settings.particleLogScale)) {
         return Math.exp(settings.particleLogScale);
     }
-    const spanDiameter = axis.projSpan * settings.particleScaleFrac;
-    return Math.min(Math.max(spanDiameter, 1e-5), MORPH_HOURGLASS_PARTICLE_MAX_DIAMETER);
+    const frac = clamp(
+        settings.particleScaleFrac,
+        1e-5,
+        MORPH_HOURGLASS_PARTICLE_MAX_SCALE_FRAC
+    );
+    const spanDiameter = axis.projSpan * frac;
+    return Math.min(Math.max(spanDiameter, 1e-5), resolveHourglassParticleMaxDiameter(axis));
 };
 
 const resolveHourglassParticleLogScale = (axis: PairAxisParams, settings: MorphHourglassSettings) => {
@@ -338,25 +394,29 @@ const resolveProgressivePairT = (
 
     const travelWindow = clamp(window, 1e-4, 1);
     const delay = (slotIndex / Math.max(1, slotCount - 1)) * (1 - travelWindow);
-    return smoothstep(0, 1, clamp((globalT - delay) / travelWindow, 0, 1));
+    const linear = clamp((globalT - delay) / travelWindow, 0, 1);
+    return applyProgressivePairFlightEase(linear, DEFAULT_PROGRESSIVE_PAIR_FLIGHT_EASE);
 };
 const resolveDirectionalFlightT = (
     globalT: number,
     phase: number,
     enabled: boolean,
     window: number,
-    reverse = false
+    reverse = false,
+    ease: ProgressivePairFlightEase = DEFAULT_PROGRESSIVE_PAIR_FLIGHT_EASE
 ) => {
     if (!enabled) {
-        return clamp(globalT, 0, 1);
+        return applyProgressivePairFlightEase(clamp(globalT, 0, 1), ease);
     }
     const travelWindow = clamp(window, 1e-4, 1);
     const delay = clamp(phase, 0, 1) * (1 - travelWindow);
     if (!reverse) {
-        return smoothstep(0, 1, clamp((globalT - delay) / travelWindow, 0, 1));
+        const linear = clamp((globalT - delay) / travelWindow, 0, 1);
+        return applyProgressivePairFlightEase(linear, ease);
     }
     const reverseProgress = 1 - clamp(globalT, 0, 1);
-    return 1 - smoothstep(0, 1, clamp((reverseProgress - delay) / travelWindow, 0, 1));
+    const linear = clamp((reverseProgress - delay) / travelWindow, 0, 1);
+    return 1 - applyProgressivePairFlightEase(linear, ease);
 };
 
 interface AsymmetricMorphWeights {
@@ -390,14 +450,17 @@ const resolveAsymmetricMorphWeights = (
     progressivePairFlight: boolean,
     window: number,
     stagger: number,
-    reversePlayback: boolean
+    reversePlayback: boolean,
+    flightEase: ProgressivePairFlightEase,
+    posEase: ProgressivePairFlightEase
 ): AsymmetricMorphWeights => {
     if (!progressivePairFlight) {
-        const u = clamp(globalT, 0, 1);
+        const u = applyProgressivePairFlightEase(clamp(globalT, 0, 1), flightEase);
+        const pos = applyProgressivePairFlightEase(clamp(globalT, 0, 1), posEase);
         return {
             goneA: u,
             presentB: u,
-            posT: u,
+            posT: pos,
             weightA: 1 - u,
             weightB: u,
             inChannel: u > 0.04 && u < 0.96,
@@ -410,17 +473,26 @@ const resolveAsymmetricMorphWeights = (
     const staggerMix = clamp(stagger, 0, 1);
     const spatialLeave = Math.pow(clamp(1 - sA, 0, 1), 1.45);
     const spatialArrive = Math.pow(clamp(sB, 0, 1), 1.45);
-    const phaseLeaveA = clamp(spatialLeave * (1 - staggerMix) + pairPhase * staggerMix, 0, 1);
-    const phaseArriveB = clamp(spatialArrive * (1 - staggerMix) + pairPhase * staggerMix, 0, 1);
+    let phaseLeaveA: number;
+    let phaseArriveB: number;
+    if (staggerMix <= 1e-4) {
+        // 纯空间波：成对粒子共用 A 侧空间相位，避免 sA/sB 不一致造成长时间低透明度通道堆叠。
+        const spatialFlightPhase = spatialLeave;
+        phaseLeaveA = spatialFlightPhase;
+        phaseArriveB = spatialFlightPhase;
+    } else {
+        phaseLeaveA = clamp(spatialLeave * (1 - staggerMix) + pairPhase * staggerMix, 0, 1);
+        phaseArriveB = clamp(spatialArrive * (1 - staggerMix) + pairPhase * staggerMix, 0, 1);
+    }
     const travelWindow = clamp(window, 0.12, 1);
 
-    const goneA = resolveDirectionalFlightT(globalT, phaseLeaveA, true, travelWindow, reversePlayback);
-    const presentB = resolveDirectionalFlightT(globalT, phaseArriveB, true, travelWindow, reversePlayback);
+    const goneA = resolveDirectionalFlightT(globalT, phaseLeaveA, true, travelWindow, reversePlayback, flightEase);
+    const presentB = resolveDirectionalFlightT(globalT, phaseArriveB, true, travelWindow, reversePlayback, flightEase);
     const weightA = 1 - goneA;
     const weightB = presentB;
 
     const flightPhase = clamp(phaseLeaveA * 0.52 + phaseArriveB * 0.48, 0, 1);
-    const posT = resolveDirectionalFlightT(globalT, flightPhase, true, travelWindow, reversePlayback);
+    const posT = resolveDirectionalFlightT(globalT, flightPhase, true, travelWindow, reversePlayback, posEase);
 
     const channelBand = clamp(goneA * (1 - presentB), 0, 1);
     const inChannel = goneA > 0.04 && presentB < 0.96 && posT > 0.02 && posT < 0.98;
@@ -510,9 +582,10 @@ const applyHourglassChannelToSplat = (
     ry *= radialScale;
     rz *= radialScale;
 
-    const wobble = settings.perturbAmp * axis.projSpan * pinchProfile * channelWeight;
+    const wobble = settings.perturbAmp * axis.projSpan * clamp(channelWeight * settings.strength, 0, 1);
     const seed = writeIndex;
-    const flowPhase = globalT * Math.PI * 2 + morphWeights.posT * Math.PI * 1.35 + seed * 0.17;
+    const flowTime = globalT * MORPH_HOURGLASS_FLOW_TIME_SCALE;
+    const flowPhase = flowTime * Math.PI * 2 + morphWeights.posT * Math.PI * 1.35 + seed * 0.17;
     let perpX = axis.dirY;
     let perpY = -axis.dirX;
     let perpZ = 0;
@@ -538,10 +611,11 @@ const applyHourglassChannelToSplat = (
         + perpZ * Math.sin(flowPhase * 1.1 + seed) * wobble
         + perp2Z * Math.cos(flowPhase * 0.85 + seed * 2.3) * wobble;
 
-    const particleBand = clamp(channelWeight * pinchProfile * settings.strength, 0, 1);
+    // 通道粒子尺寸仅随 channelWeight；pinchProfile 只控制径向收束/扰动，避免路径中段与两端尺寸悬殊。
+    const particleBand = clamp(channelWeight * settings.strength, 0, 1);
     if (particleBand > 0.02) {
         const sparkPhase = Math.sin(
-            globalT * Math.PI * 2
+            flowTime * Math.PI * 2
             + morphWeights.posT * Math.PI
             + axisS * 4
             - proj * 0.5
@@ -576,9 +650,9 @@ const applyHourglassChannelToSplat = (
         pz = az + axis.dirZ * saxial + perpZ * ru + perp2Z * rv;
 
         const rh = sparkHash3(seed * 0.071, axisS * 5.31, proj * 0.019);
-        const t1 = globalT * Math.PI * 2 + morphWeights.posT * 4.5 + rh.x * Math.PI * 2;
-        const t2 = globalT * 5.1 + morphWeights.posT * 3.7 + rh.y * Math.PI * 2 + seed * 0.31;
-        const t3 = globalT * 7.2 + morphWeights.posT * 5.3 + rh.z * Math.PI * 2 + seed * 0.19;
+        const t1 = flowTime * Math.PI * 2 + morphWeights.posT * 4.5 + rh.x * Math.PI * 2;
+        const t2 = flowTime * 5.1 + morphWeights.posT * 3.7 + rh.y * Math.PI * 2 + seed * 0.31;
+        const t3 = flowTime * 7.2 + morphWeights.posT * 5.3 + rh.z * Math.PI * 2 + seed * 0.19;
         const driftAmp = settings.sparkDrift * axis.projSpan * particleBand;
         const rh2 = sparkHash3(seed, t1 * 0.13, t2 * 0.11);
         px += (perpX * Math.sin(t1 * (1.15 + rh.x * 0.4) + seed)
@@ -1298,6 +1372,8 @@ class GpuMorphRuntime {
 
     private readonly _progressivePairFlightWindow: number;
 
+    private readonly _progressivePairFlightPosEase: ProgressivePairFlightEase;
+
     private readonly _hourglass: MorphHourglassSettings;
 
     private readonly _pairAxisParams: PairAxisParams[];
@@ -1772,6 +1848,9 @@ class GpuMorphRuntime {
         this._fadeLogMin = fadeLogMin;
         this._progressivePairFlight = options.progressivePairFlight ?? true;
         this._progressivePairFlightWindow = options.progressivePairFlightWindow ?? DEFAULT_PROGRESSIVE_PAIR_FLIGHT_WINDOW;
+        this._progressivePairFlightPosEase = options.progressivePairFlightPosEase
+            ? resolveProgressivePairFlightEase(options.progressivePairFlightPosEase)
+            : resolveProgressivePairFlightEase(options.progressivePairFlightEase);
         this._hourglass = resolveMorphHourglassSettings(options);
         this._pairAxisParams = this.buildPairAxisParams(models);
         const aabb = createAabbFromModels(models);
@@ -1893,7 +1972,10 @@ class GpuMorphRuntime {
             resolveHourglassParticleLogScale(axis, hg)
         );
         this._normalizeProcessor.setParameter('uHourglassParticleScaleFrac', hg.particleScaleFrac);
-        this._normalizeProcessor.setParameter('uHourglassParticleMaxDiameter', MORPH_HOURGLASS_PARTICLE_MAX_DIAMETER);
+        this._normalizeProcessor.setParameter(
+            'uHourglassParticleMaxDiameter',
+            resolveHourglassParticleMaxDiameter(axis)
+        );
         this._normalizeProcessor.setParameter('uHourglassTintMix', hg.tintMix);
         this._normalizeProcessor.setParameter('uHourglassConform', hg.conform);
         this._normalizeProcessor.setParameter('uHourglassTintA', hg.tintA);
@@ -1932,7 +2014,8 @@ class GpuMorphRuntime {
                 phase,
                 this._progressivePairFlight,
                 this._progressivePairFlightWindow,
-                reversePlayback
+                reversePlayback,
+                this._progressivePairFlightPosEase
             );
             const inv = 1 - localT;
             const base = i * 3;
@@ -2042,6 +2125,10 @@ class GaussianInterpolatorRuntime {
         if (buildNow) {
             this.buildCorrespondences();
         }
+    }
+
+    mergeOptions(options: Partial<GsplatMorphOptions>) {
+        Object.assign(this._options, options);
     }
 
     private pairKey(idxA: number, idxB: number) {
@@ -2745,6 +2832,10 @@ class GaussianInterpolatorRuntime {
         const hourglass = resolveMorphHourglassSettings(this._options);
         const slotCount = correspondence.matchedA.length;
         const axis = this.getPairAxisParams(idxA, idxB);
+        const flightEase = resolveProgressivePairFlightEase(this._options.progressivePairFlightEase);
+        const posEase = this._options.progressivePairFlightPosEase
+            ? resolveProgressivePairFlightEase(this._options.progressivePairFlightPosEase)
+            : flightEase;
 
         for (let i = 0; i < correspondence.matchedA.length; i++, write++) {
             const src = correspondence.matchedA[i];
@@ -2775,7 +2866,8 @@ class GaussianInterpolatorRuntime {
 
             if (asymmetricDissolve && progressivePairFlight) {
                 morphWeights = resolveAsymmetricMorphWeights(
-                    t, sA, sB, pairPhase, true, progressivePairFlightWindow, flightStagger, reversePlayback
+                    t, sA, sB, pairPhase, true, progressivePairFlightWindow, flightStagger, reversePlayback,
+                    flightEase, posEase
                 );
                 posT = morphWeights.posT;
                 blendA = morphWeights.blendA;
@@ -2790,7 +2882,8 @@ class GaussianInterpolatorRuntime {
                     phase,
                     progressivePairFlight,
                     progressivePairFlightWindow,
-                    reversePlayback
+                    reversePlayback,
+                    posEase
                 );
                 posT = localT;
                 blendA = 1 - localT;
@@ -2839,14 +2932,19 @@ class GaussianInterpolatorRuntime {
             output.y[write] = a.y[src] * invPosT + b.y[dst] * posT;
             output.z[write] = a.z[src] * invPosT + b.z[dst] * posT;
 
-            output.fdc0[write] = a.fdc0[src] * blendA + b.fdc0[dst] * blendB;
-            output.fdc1[write] = a.fdc1[src] * blendA + b.fdc1[dst] * blendB;
-            output.fdc2[write] = a.fdc2[src] * blendA + b.fdc2[dst] * blendB;
+            // 通道飞行：位置用 posT，但颜色/透明度若仍用 blendA/B（A 已散、B 未到时会≈0）会插成黑色。
+            const inChannelBlend = morphWeights.channelBand > 0.04;
+            const attrBlendA = inChannelBlend ? invPosT : blendA;
+            const attrBlendB = inChannelBlend ? posT : blendB;
 
-            output.scale0[write] = aScale0 * blendA + bScale0 * blendB;
-            output.scale1[write] = aScale1 * blendA + bScale1 * blendB;
-            output.scale2[write] = aScale2 * blendA + bScale2 * blendB;
-            output.opacity[write] = aOpacity * blendA + bOpacity * blendB;
+            output.fdc0[write] = a.fdc0[src] * attrBlendA + b.fdc0[dst] * attrBlendB;
+            output.fdc1[write] = a.fdc1[src] * attrBlendA + b.fdc1[dst] * attrBlendB;
+            output.fdc2[write] = a.fdc2[src] * attrBlendA + b.fdc2[dst] * attrBlendB;
+
+            output.scale0[write] = aScale0 * attrBlendA + bScale0 * attrBlendB;
+            output.scale1[write] = aScale1 * attrBlendA + bScale1 * attrBlendB;
+            output.scale2[write] = aScale2 * attrBlendA + bScale2 * attrBlendB;
+            output.opacity[write] = aOpacity * attrBlendA + bOpacity * attrBlendB;
 
             const q = fastQuaternionNlerp
                 ? nlerpQuat(
@@ -2869,7 +2967,7 @@ class GaussianInterpolatorRuntime {
                 for (let restIndex = 0; restIndex < output.rest.length; restIndex++) {
                     const av = restIndex < a.rest.length ? a.rest[restIndex][src] : 0;
                     const bv = restIndex < b.rest.length ? b.rest[restIndex][dst] : 0;
-                    output.rest[restIndex][write] = av * blendA + bv * blendB;
+                    output.rest[restIndex][write] = av * attrBlendA + bv * attrBlendB;
                 }
             }
 
@@ -3361,6 +3459,7 @@ export class GsplatMorphController {
         }
 
         Object.assign(this._morphOptions, options);
+        this.interpolator?.mergeOptions(options);
         if (typeof options.segmentDuration === 'number') {
             this.segmentDuration = options.segmentDuration;
         }

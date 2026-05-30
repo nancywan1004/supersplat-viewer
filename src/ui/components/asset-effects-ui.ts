@@ -72,73 +72,73 @@ export const ASSET_EFFECTS_PANEL_HTML = `
     </details>
     <div class="settingsRow">
       <label for="assetMorphSegmentDuration">段时长 (s):</label>
-      <input type="number" id="assetMorphSegmentDuration" class="settingsInput" min="0.1" max="120" step="0.1" value="2">
+      <input type="number" id="assetMorphSegmentDuration" class="settingsInput" min="0.1" max="120" step="0.1" value="10">
     </div>
     <div class="settingsRow">
       <label for="assetMorphLoop">循环:</label>
       <input type="checkbox" id="assetMorphLoop" class="settingsCheckbox" checked>
     </div>
     <details style="font-size:11px;margin:4px 0 6px" open>
-      <summary style="cursor:pointer;opacity:0.8" title="v2：A→B 平放沙漏形 GS 通道；下列滑条控制通道外观">沙漏通道（变形中途）</summary>
-      <p class="effectsTrackHint" style="font-size:10px;opacity:0.7;margin:0 0 6px">A 形体各点飞向 B；中间向轴线收束成细腰（非圆形管道），两端保持原 GS 散开形状。</p>
+      <summary style="cursor:pointer;opacity:0.8" title="控制 A→B 变形时各粒子起飞/到达的时间差">粒子飞行时序</summary>
+      <p class="effectsTrackHint" style="font-size:10px;opacity:0.7;margin:0 0 6px">飞行窗口越小，相邻粒子间隔越大；配对错峰越大，越按配对顺序依次飞行。</p>
       <div class="settingsRow">
-        <label for="assetMorphPointCloudEffect" title="v2 未使用，可忽略">点云(旧):</label>
-        <input type="checkbox" id="assetMorphPointCloudEffect" class="settingsCheckbox">
-      </div>
-      <div class="settingsRow">
-        <label for="assetMorphPointCloudPointSize" class="postEffectLabel" title="通道粒子直径 = A→B 间距 × 该比例">通道粒子/间距:</label>
+        <label for="assetMorphFlightWindow" class="postEffectLabel" title="单粒子在整段变形 globalT 上的飞行时长；越小则相邻粒子起飞间隔越大">飞行重叠窗口:</label>
         <div class="postEffectSliderWrap">
-          <input type="range" id="assetMorphPointCloudPointSize" class="postEffectSlider" min="0.01" max="0.12" step="0.005" value="0.04">
-          <span id="assetMorphPointCloudPointSizeVal" class="postEffectSliderValue">4%</span>
+          <input type="range" id="assetMorphFlightWindow" class="postEffectSlider" min="0.12" max="1" step="0.01" value="0.12">
+          <span id="assetMorphFlightWindowVal" class="postEffectSliderValue">0.12</span>
         </div>
       </div>
       <div class="settingsRow">
-        <label for="assetMorphPointCloudMinScreenPx" class="postEffectLabel" title="相机较远时把世界尺寸抬到至少多少屏幕像素；0 表示关闭保底">最小屏幕像素:</label>
+        <label for="assetMorphFlightStagger" class="postEffectLabel" title="配对索引相位权重；越大越按配对顺序依次飞，越小越按空间位置（A 侧先散、B 侧先生）">配对错峰:</label>
         <div class="postEffectSliderWrap">
-          <input type="range" id="assetMorphPointCloudMinScreenPx" class="postEffectSlider" min="0" max="3" step="0.05" value="1.25">
-          <span id="assetMorphPointCloudMinScreenPxVal" class="postEffectSliderValue">1.25px</span>
+          <input type="range" id="assetMorphFlightStagger" class="postEffectSlider" min="0" max="1" step="0.01" value="1">
+          <span id="assetMorphFlightStaggerVal" class="postEffectSliderValue">1.00</span>
         </div>
       </div>
       <div class="settingsRow">
-        <label for="assetMorphPointCloudScreenFloorMaxScale" class="postEffectLabel" title="屏幕像素保底最多把点大小放大到基础点大小的多少倍">保底放大上限:</label>
+        <label for="assetMorphFlightEase" class="postEffectLabel" title="控制 A 消散 / B 生成的进度曲线（goneA、presentB）">飞行缓动:</label>
+        <select id="assetMorphFlightEase" class="settingsSelect">
+          <option value="smoothstep">smoothstep（默认）</option>
+          <option value="linear">linear</option>
+          <option value="easeIn">easeIn</option>
+          <option value="easeOut">easeOut</option>
+          <option value="easeInOut">easeInOut</option>
+        </select>
+      </div>
+      <div class="settingsRow">
+        <label for="assetMorphFlightPosEase" class="postEffectLabel" title="位置插值 posT 专用；选「同飞行缓动」则与上一项一致">位置缓动:</label>
+        <select id="assetMorphFlightPosEase" class="settingsSelect">
+          <option value="">同飞行缓动</option>
+          <option value="smoothstep">smoothstep</option>
+          <option value="linear">linear</option>
+          <option value="easeIn">easeIn</option>
+          <option value="easeOut">easeOut</option>
+          <option value="easeInOut">easeInOut</option>
+        </select>
+      </div>
+    </details>
+    <details style="font-size:11px;margin:4px 0 6px" open>
+      <summary style="cursor:pointer;opacity:0.8" title="v2：A→B 平放沙漏形 GS 通道">沙漏通道（变形中途）</summary>
+      <p class="effectsTrackHint" style="font-size:10px;opacity:0.7;margin:0 0 6px">A 形体各点飞向 B；中间向轴线收束成细腰，两端保持原 GS 散开形状。</p>
+      <div class="settingsRow">
+        <label for="assetMorphPointCloudPointSize" class="postEffectLabel" title="通道段 splat 目标直径 = A→B 间距 × 该比例（0.2%～2%）；仅在变形中途通道生效">通道粒子/间距:</label>
         <div class="postEffectSliderWrap">
-          <input type="range" id="assetMorphPointCloudScreenFloorMaxScale" class="postEffectSlider" min="1" max="64" step="1" value="32">
-          <span id="assetMorphPointCloudScreenFloorMaxScaleVal" class="postEffectSliderValue">32x</span>
+          <input type="range" id="assetMorphPointCloudPointSize" class="postEffectSlider" min="0.002" max="0.02" step="0.001" value="0.006">
+          <span id="assetMorphPointCloudPointSizeVal" class="postEffectSliderValue">0.6%</span>
         </div>
       </div>
       <div class="settingsRow">
-        <label for="assetMorphPointCloudStrength" class="postEffectLabel" title="通道贴合沙漏路径的强度">通道贴合:</label>
+        <label for="assetMorphPointCloudStrength" class="postEffectLabel" title="通道收束/扰动/粒子形态的总强度">通道贴合:</label>
         <div class="postEffectSliderWrap">
-          <input type="range" id="assetMorphPointCloudStrength" class="postEffectSlider" min="0" max="2" step="0.05" value="1.5">
-          <span id="assetMorphPointCloudStrengthVal" class="postEffectSliderValue">1.50</span>
+          <input type="range" id="assetMorphPointCloudStrength" class="postEffectSlider" min="0" max="2" step="0.05" value="1">
+          <span id="assetMorphPointCloudStrengthVal" class="postEffectSliderValue">1.00</span>
         </div>
       </div>
       <div class="settingsRow">
-        <label for="assetMorphPointCloudGlowStrength" class="postEffectLabel">辉光强度:</label>
+        <label for="assetMorphHourglassPerturb" class="postEffectLabel" title="通道飞行中的位移扰动 = A→B 间距 × 该比例">通道扰动幅度:</label>
         <div class="postEffectSliderWrap">
-          <input type="range" id="assetMorphPointCloudGlowStrength" class="postEffectSlider" min="0" max="2" step="0.05" value="1.2">
-          <span id="assetMorphPointCloudGlowStrengthVal" class="postEffectSliderValue">1.20</span>
-        </div>
-      </div>
-      <div class="settingsRow">
-        <label for="assetMorphPointCloudOpacity" class="postEffectLabel">点不透明度:</label>
-        <div class="postEffectSliderWrap">
-          <input type="range" id="assetMorphPointCloudOpacity" class="postEffectSlider" min="0.05" max="1" step="0.01" value="0.88">
-          <span id="assetMorphPointCloudOpacityVal" class="postEffectSliderValue">0.88</span>
-        </div>
-      </div>
-      <div class="settingsRow">
-        <label for="assetMorphPointCloudDensity" class="postEffectLabel">可见点比例:</label>
-        <div class="postEffectSliderWrap">
-          <input type="range" id="assetMorphPointCloudDensity" class="postEffectSlider" min="0.05" max="1" step="0.01" value="0.32">
-          <span id="assetMorphPointCloudDensityVal" class="postEffectSliderValue">0.32</span>
-        </div>
-      </div>
-      <div class="settingsRow">
-        <label for="assetMorphPointCloudScatterDistance" class="postEffectLabel">散开距离:</label>
-        <div class="postEffectSliderWrap">
-          <input type="range" id="assetMorphPointCloudScatterDistance" class="postEffectSlider" min="0" max="5" step="0.05" value="0.25">
-          <span id="assetMorphPointCloudScatterDistanceVal" class="postEffectSliderValue">0.25</span>
+          <input type="range" id="assetMorphHourglassPerturb" class="postEffectSlider" min="0" max="0.15" step="0.002" value="0.048">
+          <span id="assetMorphHourglassPerturbVal" class="postEffectSliderValue">4.8%</span>
         </div>
       </div>
     </details>
@@ -234,9 +234,24 @@ export const ASSET_EFFECTS_PANEL_HTML = `
 `.trim();
 
 const DEFAULT_WOBBLE_HALO_RGB: [number, number, number] = [1, 0.85, 0];
-const DEFAULT_MORPH_POINT_CLOUD_TINT_RGB: [number, number, number] = [0, 145 / 255, 1];
-/** 与 gsplat-morph DEFAULT_MORPH_POINT_CLOUD_POINT_SIZE 一致。 */
-const DEFAULT_MORPH_POINT_CLOUD_POINT_SIZE = 0.00015;
+const DEFAULT_MORPH_SEGMENT_DURATION = 10;
+const DEFAULT_MORPH_FLIGHT_WINDOW = 0.12;
+const DEFAULT_MORPH_FLIGHT_STAGGER = 1;
+const DEFAULT_MORPH_FLIGHT_EASE = 'smoothstep';
+const DEFAULT_MORPH_HOURGLASS_PARTICLE_SCALE_FRAC = 0.006;
+const MORPH_FLIGHT_EASE_VALUES = ['linear', 'smoothstep', 'easeIn', 'easeOut', 'easeInOut'] as const;
+
+function isMorphFlightEase(value: string): value is (typeof MORPH_FLIGHT_EASE_VALUES)[number] {
+    return (MORPH_FLIGHT_EASE_VALUES as readonly string[]).includes(value);
+}
+/** 与 gsplat-morph-progressive-v2 DEFAULT_MORPH_HOURGLASS_SPARK_INTENSITY 一致。 */
+const DEFAULT_MORPH_HOURGLASS_SPARK_INTENSITY = 0.048;
+const DEFAULT_MORPH_HOURGLASS_PERTURB_AMP = 0.012;
+const DEFAULT_MORPH_HOURGLASS_SPARK_DRIFT = 0.026;
+const MORPH_HOURGLASS_PERTURB_AMP_RATIO =
+    DEFAULT_MORPH_HOURGLASS_PERTURB_AMP / DEFAULT_MORPH_HOURGLASS_SPARK_INTENSITY;
+const MORPH_HOURGLASS_SPARK_DRIFT_RATIO =
+    DEFAULT_MORPH_HOURGLASS_SPARK_DRIFT / DEFAULT_MORPH_HOURGLASS_SPARK_INTENSITY;
 
 function rgb01ToHex(rgb: [number, number, number]): string {
     const c = (v: number) =>
@@ -310,16 +325,13 @@ function readEffectParamsFromDom(
     morphUrls: HTMLTextAreaElement | null,
     morphSeg: HTMLInputElement | null,
     morphLoop: HTMLInputElement | null,
-    morphPointCloudEffect: HTMLInputElement | null,
-    morphPointCloudPointSize: HTMLInputElement | null,
-    morphPointCloudMinScreenPx: HTMLInputElement | null,
-    morphPointCloudScreenFloorMaxScale: HTMLInputElement | null,
-    morphPointCloudStrength: HTMLInputElement | null,
-    morphPointCloudGlowStrength: HTMLInputElement | null,
-    morphPointCloudOpacity: HTMLInputElement | null,
-    morphPointCloudDensity: HTMLInputElement | null,
-    morphPointCloudScatterDistance: HTMLInputElement | null,
-    morphPointCloudTint: HTMLInputElement | null,
+    morphFlightWindow: HTMLInputElement | null,
+    morphFlightStagger: HTMLInputElement | null,
+    morphFlightEase: HTMLSelectElement | null,
+    morphFlightPosEase: HTMLSelectElement | null,
+    morphChannelParticleScale: HTMLInputElement | null,
+    morphChannelStrength: HTMLInputElement | null,
+    morphHourglassPerturb: HTMLInputElement | null,
     wobbleAmp: HTMLInputElement | null,
     wobbleAxis: HTMLSelectElement | null,
     wobbleMotionMode: HTMLSelectElement | null,
@@ -347,47 +359,48 @@ function readEffectParamsFromDom(
         if (morphLoop) {
             ep.loop = morphLoop.checked;
         }
-        if (morphPointCloudEffect) {
-            ep.morphPointCloudEffect = morphPointCloudEffect.checked;
+        if (morphFlightWindow) {
+            const v = Number(morphFlightWindow.value);
+            if (!Number.isNaN(v) && v >= 0.12 && v <= 1) {
+                ep.progressivePairFlightWindow = v;
+            }
         }
-        if (morphPointCloudPointSize) {
-            const v = Number(morphPointCloudPointSize.value);
-            if (!Number.isNaN(v) && v > 0) {
+        if (morphFlightStagger) {
+            const v = Number(morphFlightStagger.value);
+            if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+                ep.progressivePairFlightStagger = v;
+            }
+        }
+        if (morphFlightEase) {
+            const v = morphFlightEase.value;
+            if (isMorphFlightEase(v)) {
+                ep.progressivePairFlightEase = v;
+            }
+        }
+        if (morphFlightPosEase) {
+            const v = morphFlightPosEase.value;
+            if (v !== '' && isMorphFlightEase(v)) {
+                ep.progressivePairFlightPosEase = v;
+            }
+        }
+        if (morphChannelParticleScale) {
+            const v = Number(morphChannelParticleScale.value);
+            if (!Number.isNaN(v) && v >= 0.002 && v <= 0.02) {
                 ep.morphHourglassParticleScaleFrac = v;
             }
         }
-        if (morphPointCloudMinScreenPx) {
-            const v = Number(morphPointCloudMinScreenPx.value);
-            if (!Number.isNaN(v) && v >= 0) ep.morphPointCloudMinScreenPx = v;
+        if (morphChannelStrength) {
+            const v = Number(morphChannelStrength.value);
+            if (!Number.isNaN(v)) {
+                ep.morphHourglassStrength = v;
+            }
         }
-        if (morphPointCloudScreenFloorMaxScale) {
-            const v = Number(morphPointCloudScreenFloorMaxScale.value);
-            if (!Number.isNaN(v) && v >= 1) ep.morphPointCloudScreenFloorMaxScale = v;
-        }
-        if (morphPointCloudStrength) {
-            const v = Number(morphPointCloudStrength.value);
-            if (!Number.isNaN(v)) ep.morphPointCloudStrength = v;
-        }
-        if (morphPointCloudGlowStrength) {
-            const v = Number(morphPointCloudGlowStrength.value);
-            if (!Number.isNaN(v)) ep.morphPointCloudGlowStrength = v;
-        }
-        if (morphPointCloudOpacity) {
-            const v = Number(morphPointCloudOpacity.value);
-            if (!Number.isNaN(v)) ep.morphPointCloudOpacity = v;
-        }
-        if (morphPointCloudDensity) {
-            const v = Number(morphPointCloudDensity.value);
-            if (!Number.isNaN(v)) ep.morphPointCloudDensity = v;
-        }
-        if (morphPointCloudScatterDistance) {
-            const v = Number(morphPointCloudScatterDistance.value);
-            if (!Number.isNaN(v) && v > 0) ep.morphPointCloudScatterDistance = v;
-        }
-        if (morphPointCloudTint) {
-            const rgb = hexToRgb01(morphPointCloudTint.value);
-            if (rgb) {
-                ep.morphPointCloudTint = rgb;
+        if (morphHourglassPerturb) {
+            const v = Number(morphHourglassPerturb.value);
+            if (!Number.isNaN(v) && v >= 0) {
+                ep.morphHourglassSparkIntensity = v;
+                ep.morphHourglassPerturbAmp = v * MORPH_HOURGLASS_PERTURB_AMP_RATIO;
+                ep.morphHourglassSparkDrift = v * MORPH_HOURGLASS_SPARK_DRIFT_RATIO;
             }
         }
         return ep;
@@ -459,16 +472,13 @@ function fillDomFromEffectParams(
     morphUrls: HTMLTextAreaElement | null,
     morphSeg: HTMLInputElement | null,
     morphLoop: HTMLInputElement | null,
-    morphPointCloudEffect: HTMLInputElement | null,
-    morphPointCloudPointSize: HTMLInputElement | null,
-    morphPointCloudMinScreenPx: HTMLInputElement | null,
-    morphPointCloudScreenFloorMaxScale: HTMLInputElement | null,
-    morphPointCloudStrength: HTMLInputElement | null,
-    morphPointCloudGlowStrength: HTMLInputElement | null,
-    morphPointCloudOpacity: HTMLInputElement | null,
-    morphPointCloudDensity: HTMLInputElement | null,
-    morphPointCloudScatterDistance: HTMLInputElement | null,
-    morphPointCloudTint: HTMLInputElement | null,
+    morphFlightWindow: HTMLInputElement | null,
+    morphFlightStagger: HTMLInputElement | null,
+    morphFlightEase: HTMLSelectElement | null,
+    morphFlightPosEase: HTMLSelectElement | null,
+    morphChannelParticleScale: HTMLInputElement | null,
+    morphChannelStrength: HTMLInputElement | null,
+    morphHourglassPerturb: HTMLInputElement | null,
     wobbleAmp: HTMLInputElement | null,
     wobbleAxis: HTMLSelectElement | null,
     wobbleMotionMode: HTMLSelectElement | null,
@@ -495,62 +505,58 @@ function fillDomFromEffectParams(
         }
         if (morphSeg && typeof ep?.segmentDuration === 'number') {
             morphSeg.value = String(ep.segmentDuration);
+        } else if (morphSeg) {
+            morphSeg.value = String(DEFAULT_MORPH_SEGMENT_DURATION);
         }
         if (morphLoop) {
             morphLoop.checked = typeof ep?.loop === 'boolean' ? ep.loop : true;
         }
-        if (morphPointCloudEffect) {
-            morphPointCloudEffect.checked = typeof ep?.morphPointCloudEffect === 'boolean' ? ep.morphPointCloudEffect : false;
+        if (morphFlightWindow) {
+            morphFlightWindow.value = String(
+                typeof ep?.progressivePairFlightWindow === 'number'
+                    ? ep.progressivePairFlightWindow
+                    : DEFAULT_MORPH_FLIGHT_WINDOW
+            );
         }
-        if (morphPointCloudPointSize) {
+        if (morphFlightStagger) {
+            morphFlightStagger.value = String(
+                typeof ep?.progressivePairFlightStagger === 'number'
+                    ? ep.progressivePairFlightStagger
+                    : DEFAULT_MORPH_FLIGHT_STAGGER
+            );
+        }
+        if (morphFlightEase) {
+            morphFlightEase.value =
+                typeof ep?.progressivePairFlightEase === 'string' && isMorphFlightEase(ep.progressivePairFlightEase)
+                    ? ep.progressivePairFlightEase
+                    : DEFAULT_MORPH_FLIGHT_EASE;
+        }
+        if (morphFlightPosEase) {
+            morphFlightPosEase.value =
+                typeof ep?.progressivePairFlightPosEase === 'string' && isMorphFlightEase(ep.progressivePairFlightPosEase)
+                    ? ep.progressivePairFlightPosEase
+                    : '';
+        }
+        if (morphChannelParticleScale) {
             const scaleFrac = typeof ep?.morphHourglassParticleScaleFrac === 'number'
                 ? ep.morphHourglassParticleScaleFrac
-                : 0.004;
-            morphPointCloudPointSize.value = String(scaleFrac);
+                : DEFAULT_MORPH_HOURGLASS_PARTICLE_SCALE_FRAC;
+            morphChannelParticleScale.value = String(Math.min(0.02, Math.max(0.002, scaleFrac)));
         }
-        if (morphPointCloudMinScreenPx) {
-            morphPointCloudMinScreenPx.value = String(
-                typeof ep?.morphPointCloudMinScreenPx === 'number' ? ep.morphPointCloudMinScreenPx : 1.25
+        if (morphChannelStrength) {
+            const strength = typeof ep?.morphHourglassStrength === 'number'
+                ? ep.morphHourglassStrength
+                : typeof ep?.morphPointCloudStrength === 'number'
+                    ? ep.morphPointCloudStrength
+                    : 1;
+            morphChannelStrength.value = String(strength);
+        }
+        if (morphHourglassPerturb) {
+            morphHourglassPerturb.value = String(
+                typeof ep?.morphHourglassSparkIntensity === 'number'
+                    ? ep.morphHourglassSparkIntensity
+                    : DEFAULT_MORPH_HOURGLASS_SPARK_INTENSITY
             );
-        }
-        if (morphPointCloudScreenFloorMaxScale) {
-            morphPointCloudScreenFloorMaxScale.value = String(
-                typeof ep?.morphPointCloudScreenFloorMaxScale === 'number'
-                    ? ep.morphPointCloudScreenFloorMaxScale
-                    : 32
-            );
-        }
-        if (morphPointCloudStrength) {
-            morphPointCloudStrength.value = String(
-                typeof ep?.morphPointCloudStrength === 'number' ? ep.morphPointCloudStrength : 1.5
-            );
-        }
-        if (morphPointCloudGlowStrength) {
-            morphPointCloudGlowStrength.value = String(
-                typeof ep?.morphPointCloudGlowStrength === 'number' ? ep.morphPointCloudGlowStrength : 1.2
-            );
-        }
-        if (morphPointCloudOpacity) {
-            morphPointCloudOpacity.value = String(
-                typeof ep?.morphPointCloudOpacity === 'number' ? ep.morphPointCloudOpacity : 0.88
-            );
-        }
-        if (morphPointCloudDensity) {
-            morphPointCloudDensity.value = String(
-                typeof ep?.morphPointCloudDensity === 'number' ? ep.morphPointCloudDensity : 0.32
-            );
-        }
-        if (morphPointCloudScatterDistance) {
-            morphPointCloudScatterDistance.value = String(
-                typeof ep?.morphPointCloudScatterDistance === 'number' ? ep.morphPointCloudScatterDistance : 0.25
-            );
-        }
-        if (morphPointCloudTint) {
-            const tint = ep?.morphPointCloudTint;
-            morphPointCloudTint.value =
-                Array.isArray(tint) && tint.length === 3 && tint.every((n) => typeof n === 'number')
-                    ? rgb01ToHex(tint as [number, number, number])
-                    : rgb01ToHex(DEFAULT_MORPH_POINT_CLOUD_TINT_RGB);
         }
         return;
     }
@@ -649,24 +655,18 @@ export function initAssetEffectsUI(global: Global): () => void {
     const morphUrls = fieldset.querySelector('#assetMorphKeyframeUrls') as HTMLTextAreaElement | null;
     const morphSeg = fieldset.querySelector('#assetMorphSegmentDuration') as HTMLInputElement | null;
     const morphLoop = fieldset.querySelector('#assetMorphLoop') as HTMLInputElement | null;
-    const morphPointCloudEffect = fieldset.querySelector('#assetMorphPointCloudEffect') as HTMLInputElement | null;
-    const morphPointCloudPointSize = fieldset.querySelector('#assetMorphPointCloudPointSize') as HTMLInputElement | null;
-    const morphPointCloudMinScreenPx = fieldset.querySelector('#assetMorphPointCloudMinScreenPx') as HTMLInputElement | null;
-    const morphPointCloudScreenFloorMaxScale = fieldset.querySelector('#assetMorphPointCloudScreenFloorMaxScale') as HTMLInputElement | null;
-    const morphPointCloudStrength = fieldset.querySelector('#assetMorphPointCloudStrength') as HTMLInputElement | null;
-    const morphPointCloudGlowStrength = fieldset.querySelector('#assetMorphPointCloudGlowStrength') as HTMLInputElement | null;
-    const morphPointCloudOpacity = fieldset.querySelector('#assetMorphPointCloudOpacity') as HTMLInputElement | null;
-    const morphPointCloudDensity = fieldset.querySelector('#assetMorphPointCloudDensity') as HTMLInputElement | null;
-    const morphPointCloudScatterDistance = fieldset.querySelector('#assetMorphPointCloudScatterDistance') as HTMLInputElement | null;
-    const morphPointCloudTint = fieldset.querySelector('#assetMorphPointCloudTint') as HTMLInputElement | null;
-    const morphPointCloudPointSizeVal = fieldset.querySelector('#assetMorphPointCloudPointSizeVal') as HTMLElement | null;
-    const morphPointCloudMinScreenPxVal = fieldset.querySelector('#assetMorphPointCloudMinScreenPxVal') as HTMLElement | null;
-    const morphPointCloudScreenFloorMaxScaleVal = fieldset.querySelector('#assetMorphPointCloudScreenFloorMaxScaleVal') as HTMLElement | null;
-    const morphPointCloudStrengthVal = fieldset.querySelector('#assetMorphPointCloudStrengthVal') as HTMLElement | null;
-    const morphPointCloudGlowStrengthVal = fieldset.querySelector('#assetMorphPointCloudGlowStrengthVal') as HTMLElement | null;
-    const morphPointCloudOpacityVal = fieldset.querySelector('#assetMorphPointCloudOpacityVal') as HTMLElement | null;
-    const morphPointCloudDensityVal = fieldset.querySelector('#assetMorphPointCloudDensityVal') as HTMLElement | null;
-    const morphPointCloudScatterDistanceVal = fieldset.querySelector('#assetMorphPointCloudScatterDistanceVal') as HTMLElement | null;
+    const morphFlightWindow = fieldset.querySelector('#assetMorphFlightWindow') as HTMLInputElement | null;
+    const morphFlightStagger = fieldset.querySelector('#assetMorphFlightStagger') as HTMLInputElement | null;
+    const morphFlightEase = fieldset.querySelector('#assetMorphFlightEase') as HTMLSelectElement | null;
+    const morphFlightPosEase = fieldset.querySelector('#assetMorphFlightPosEase') as HTMLSelectElement | null;
+    const morphFlightWindowVal = fieldset.querySelector('#assetMorphFlightWindowVal') as HTMLElement | null;
+    const morphFlightStaggerVal = fieldset.querySelector('#assetMorphFlightStaggerVal') as HTMLElement | null;
+    const morphChannelParticleScale = fieldset.querySelector('#assetMorphPointCloudPointSize') as HTMLInputElement | null;
+    const morphChannelStrength = fieldset.querySelector('#assetMorphPointCloudStrength') as HTMLInputElement | null;
+    const morphHourglassPerturb = fieldset.querySelector('#assetMorphHourglassPerturb') as HTMLInputElement | null;
+    const morphChannelParticleScaleVal = fieldset.querySelector('#assetMorphPointCloudPointSizeVal') as HTMLElement | null;
+    const morphChannelStrengthVal = fieldset.querySelector('#assetMorphPointCloudStrengthVal') as HTMLElement | null;
+    const morphHourglassPerturbVal = fieldset.querySelector('#assetMorphHourglassPerturbVal') as HTMLElement | null;
     const wobbleAmp = fieldset.querySelector('#assetWobbleAmplitude') as HTMLInputElement | null;
     const wobbleFreq = fieldset.querySelector('#assetWobbleFrequency') as HTMLInputElement | null;
     const wobbleBounce = fieldset.querySelector('#assetWobbleBounceAmplitude') as HTMLInputElement | null;
@@ -819,16 +819,13 @@ export function initAssetEffectsUI(global: Global): () => void {
                         morphUrls,
                         morphSeg,
                         morphLoop,
-                        morphPointCloudEffect,
-                        morphPointCloudPointSize,
-                        morphPointCloudMinScreenPx,
-                        morphPointCloudScreenFloorMaxScale,
-                        morphPointCloudStrength,
-                        morphPointCloudGlowStrength,
-                        morphPointCloudOpacity,
-                        morphPointCloudDensity,
-                        morphPointCloudScatterDistance,
-                        morphPointCloudTint,
+                        morphFlightWindow,
+                        morphFlightStagger,
+                        morphFlightEase,
+                        morphFlightPosEase,
+                        morphChannelParticleScale,
+                        morphChannelStrength,
+                        morphHourglassPerturb,
                         wobbleAmp,
                         wobbleAxis,
                         wobbleMotionMode,
@@ -941,16 +938,13 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphUrls,
                 morphSeg,
                 morphLoop,
-                morphPointCloudEffect,
-                morphPointCloudPointSize,
-                morphPointCloudMinScreenPx,
-                morphPointCloudScreenFloorMaxScale,
-                morphPointCloudStrength,
-                morphPointCloudGlowStrength,
-                morphPointCloudOpacity,
-                morphPointCloudDensity,
-                morphPointCloudScatterDistance,
-                morphPointCloudTint,
+                morphFlightWindow,
+                morphFlightStagger,
+                morphFlightEase,
+                morphFlightPosEase,
+                morphChannelParticleScale,
+                morphChannelStrength,
+                morphHourglassPerturb,
                 wobbleAmp,
                 wobbleAxis,
                 wobbleMotionMode,
@@ -966,7 +960,7 @@ export function initAssetEffectsUI(global: Global): () => void {
             );
             syncWobbleModeUi();
             syncWobbleHaloUi();
-            syncMorphPointCloudLabels();
+            syncMorphSliderLabels();
             syncWobbleSliderLabels();
             renderMorphKeyframeList();
         }
@@ -1000,16 +994,13 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphUrls,
                 morphSeg,
                 morphLoop,
-                morphPointCloudEffect,
-                morphPointCloudPointSize,
-                morphPointCloudMinScreenPx,
-                morphPointCloudScreenFloorMaxScale,
-                morphPointCloudStrength,
-                morphPointCloudGlowStrength,
-                morphPointCloudOpacity,
-                morphPointCloudDensity,
-                morphPointCloudScatterDistance,
-                morphPointCloudTint,
+                morphFlightWindow,
+                morphFlightStagger,
+                morphFlightEase,
+                morphFlightPosEase,
+                morphChannelParticleScale,
+                morphChannelStrength,
+                morphHourglassPerturb,
                 wobbleAmp,
                 wobbleAxis,
                 wobbleMotionMode,
@@ -1047,32 +1038,23 @@ export function initAssetEffectsUI(global: Global): () => void {
         patchEffectParams(true);
     };
 
-    const syncMorphPointCloudLabels = () => {
-        if (morphPointCloudPointSize && morphPointCloudPointSizeVal) {
-            const pct = Math.round(Number(morphPointCloudPointSize.value) * 1000) / 10;
-            morphPointCloudPointSizeVal.textContent = `${pct}%`;
+    const syncMorphSliderLabels = () => {
+        if (morphFlightWindow && morphFlightWindowVal) {
+            morphFlightWindowVal.textContent = formatSliderValue(Number(morphFlightWindow.value), 2);
         }
-        if (morphPointCloudMinScreenPx && morphPointCloudMinScreenPxVal) {
-            morphPointCloudMinScreenPxVal.textContent = `${formatSliderValue(Number(morphPointCloudMinScreenPx.value), 2)}px`;
+        if (morphFlightStagger && morphFlightStaggerVal) {
+            morphFlightStaggerVal.textContent = formatSliderValue(Number(morphFlightStagger.value), 2);
         }
-        if (morphPointCloudScreenFloorMaxScale && morphPointCloudScreenFloorMaxScaleVal) {
-            morphPointCloudScreenFloorMaxScaleVal.textContent = `${Math.round(Number(morphPointCloudScreenFloorMaxScale.value))}x`;
+        if (morphChannelParticleScale && morphChannelParticleScaleVal) {
+            const pct = Math.round(Number(morphChannelParticleScale.value) * 10000) / 100;
+            morphChannelParticleScaleVal.textContent = `${pct}%`;
         }
-        if (morphPointCloudStrength && morphPointCloudStrengthVal) {
-            morphPointCloudStrengthVal.textContent = formatSliderValue(Number(morphPointCloudStrength.value), 2);
+        if (morphChannelStrength && morphChannelStrengthVal) {
+            morphChannelStrengthVal.textContent = formatSliderValue(Number(morphChannelStrength.value), 2);
         }
-        if (morphPointCloudGlowStrength && morphPointCloudGlowStrengthVal) {
-            morphPointCloudGlowStrengthVal.textContent = formatSliderValue(Number(morphPointCloudGlowStrength.value), 2);
-        }
-        if (morphPointCloudOpacity && morphPointCloudOpacityVal) {
-            morphPointCloudOpacityVal.textContent = formatSliderValue(Number(morphPointCloudOpacity.value), 2);
-        }
-        if (morphPointCloudDensity && morphPointCloudDensityVal) {
-            morphPointCloudDensityVal.textContent = formatSliderValue(Number(morphPointCloudDensity.value), 2);
-        }
-        if (morphPointCloudScatterDistance && morphPointCloudScatterDistanceVal) {
-            const v = Number(morphPointCloudScatterDistance.value);
-            morphPointCloudScatterDistanceVal.textContent = v > 0 ? formatSliderValue(v, 2) : '自动';
+        if (morphHourglassPerturb && morphHourglassPerturbVal) {
+            const pct = Math.round(Number(morphHourglassPerturb.value) * 1000) / 10;
+            morphHourglassPerturbVal.textContent = `${pct}%`;
         }
     };
 
@@ -1189,16 +1171,13 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphUrls,
                 morphSeg,
                 morphLoop,
-                morphPointCloudEffect,
-                morphPointCloudPointSize,
-                morphPointCloudMinScreenPx,
-                morphPointCloudScreenFloorMaxScale,
-                morphPointCloudStrength,
-                morphPointCloudGlowStrength,
-                morphPointCloudOpacity,
-                morphPointCloudDensity,
-                morphPointCloudScatterDistance,
-                morphPointCloudTint,
+                morphFlightWindow,
+                morphFlightStagger,
+                morphFlightEase,
+                morphFlightPosEase,
+                morphChannelParticleScale,
+                morphChannelStrength,
+                morphHourglassPerturb,
                 wobbleAmp,
                 wobbleAxis,
                 wobbleMotionMode,
@@ -1235,16 +1214,13 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphUrls,
                 morphSeg,
                 morphLoop,
-                morphPointCloudEffect,
-                morphPointCloudPointSize,
-                morphPointCloudMinScreenPx,
-                morphPointCloudScreenFloorMaxScale,
-                morphPointCloudStrength,
-                morphPointCloudGlowStrength,
-                morphPointCloudOpacity,
-                morphPointCloudDensity,
-                morphPointCloudScatterDistance,
-                morphPointCloudTint,
+                morphFlightWindow,
+                morphFlightStagger,
+                morphFlightEase,
+                morphFlightPosEase,
+                morphChannelParticleScale,
+                morphChannelStrength,
+                morphHourglassPerturb,
                 wobbleAmp,
                 wobbleAxis,
                 wobbleMotionMode,
@@ -1286,16 +1262,13 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphUrls,
                 morphSeg,
                 morphLoop,
-                morphPointCloudEffect,
-                morphPointCloudPointSize,
-                morphPointCloudMinScreenPx,
-                morphPointCloudScreenFloorMaxScale,
-                morphPointCloudStrength,
-                morphPointCloudGlowStrength,
-                morphPointCloudOpacity,
-                morphPointCloudDensity,
-                morphPointCloudScatterDistance,
-                morphPointCloudTint,
+                morphFlightWindow,
+                morphFlightStagger,
+                morphFlightEase,
+                morphFlightPosEase,
+                morphChannelParticleScale,
+                morphChannelStrength,
+                morphHourglassPerturb,
                 wobbleAmp,
                 wobbleAxis,
                 wobbleMotionMode,
@@ -1331,83 +1304,55 @@ export function initAssetEffectsUI(global: Global): () => void {
     morphUrls?.addEventListener('change', onParamsBlur);
     morphSeg?.addEventListener('change', onParamsBlur);
     morphLoop?.addEventListener('change', onParamsBlur);
-    morphPointCloudEffect?.addEventListener('change', onParamsBlur);
-    morphPointCloudTint?.addEventListener('input', onMorphParamsLive);
-    morphPointCloudTint?.addEventListener('change', onParamsBlur);
+    morphFlightEase?.addEventListener('change', onParamsBlur);
+    morphFlightPosEase?.addEventListener('change', onParamsBlur);
     const unbindMorphSliders: Array<() => void> = [];
-    if (morphPointCloudPointSize) {
+    if (morphFlightWindow) {
+        unbindMorphSliders.push(bindSliderLive(morphFlightWindow, morphFlightWindowVal, 2, onMorphParamsLive, onParamsBlur));
+    }
+    if (morphFlightStagger) {
+        unbindMorphSliders.push(bindSliderLive(morphFlightStagger, morphFlightStaggerVal, 2, onMorphParamsLive, onParamsBlur));
+    }
+    if (morphChannelParticleScale) {
         const onChannelScaleInput = () => {
-            if (morphPointCloudPointSizeVal) {
-                const pct = Math.round(Number(morphPointCloudPointSize.value) * 1000) / 10;
-                morphPointCloudPointSizeVal.textContent = `${pct}%`;
+            if (morphChannelParticleScaleVal) {
+                const pct = Math.round(Number(morphChannelParticleScale.value) * 10000) / 100;
+                morphChannelParticleScaleVal.textContent = `${pct}%`;
             }
             onMorphParamsLive();
         };
-        morphPointCloudPointSize.addEventListener('input', onChannelScaleInput);
-        morphPointCloudPointSize.addEventListener('change', onParamsBlur);
+        morphChannelParticleScale.addEventListener('input', onChannelScaleInput);
+        morphChannelParticleScale.addEventListener('change', onParamsBlur);
         unbindMorphSliders.push(() => {
-            morphPointCloudPointSize.removeEventListener('input', onChannelScaleInput);
-            morphPointCloudPointSize.removeEventListener('change', onParamsBlur);
+            morphChannelParticleScale.removeEventListener('input', onChannelScaleInput);
+            morphChannelParticleScale.removeEventListener('change', onParamsBlur);
         });
     }
-    if (morphPointCloudMinScreenPx) {
-        const syncMinScreenPxLabel = () => {
-            if (morphPointCloudMinScreenPxVal) {
-                morphPointCloudMinScreenPxVal.textContent = `${formatSliderValue(Number(morphPointCloudMinScreenPx.value), 2)}px`;
+    if (morphChannelStrength) {
+        unbindMorphSliders.push(bindSliderLive(morphChannelStrength, morphChannelStrengthVal, 2, onMorphParamsLive, onParamsBlur));
+    }
+    if (morphHourglassPerturb) {
+        const syncPerturbLabel = () => {
+            if (morphHourglassPerturbVal) {
+                const pct = Math.round(Number(morphHourglassPerturb.value) * 1000) / 10;
+                morphHourglassPerturbVal.textContent = `${pct}%`;
             }
         };
-        const onMinScreenPxInput = () => {
-            syncMinScreenPxLabel();
+        const onPerturbInput = () => {
+            syncPerturbLabel();
             onMorphParamsLive();
         };
-        const onMinScreenPxChange = () => {
-            syncMinScreenPxLabel();
+        const onPerturbChange = () => {
+            syncPerturbLabel();
             onParamsBlur();
         };
-        morphPointCloudMinScreenPx.addEventListener('input', onMinScreenPxInput);
-        morphPointCloudMinScreenPx.addEventListener('change', onMinScreenPxChange);
-        syncMinScreenPxLabel();
+        morphHourglassPerturb.addEventListener('input', onPerturbInput);
+        morphHourglassPerturb.addEventListener('change', onPerturbChange);
+        syncPerturbLabel();
         unbindMorphSliders.push(() => {
-            morphPointCloudMinScreenPx.removeEventListener('input', onMinScreenPxInput);
-            morphPointCloudMinScreenPx.removeEventListener('change', onMinScreenPxChange);
+            morphHourglassPerturb.removeEventListener('input', onPerturbInput);
+            morphHourglassPerturb.removeEventListener('change', onPerturbChange);
         });
-    }
-    if (morphPointCloudScreenFloorMaxScale) {
-        const syncFloorScaleLabel = () => {
-            if (morphPointCloudScreenFloorMaxScaleVal) {
-                morphPointCloudScreenFloorMaxScaleVal.textContent = `${Math.round(Number(morphPointCloudScreenFloorMaxScale.value))}x`;
-            }
-        };
-        const onFloorScaleInput = () => {
-            syncFloorScaleLabel();
-            onMorphParamsLive();
-        };
-        const onFloorScaleChange = () => {
-            syncFloorScaleLabel();
-            onParamsBlur();
-        };
-        morphPointCloudScreenFloorMaxScale.addEventListener('input', onFloorScaleInput);
-        morphPointCloudScreenFloorMaxScale.addEventListener('change', onFloorScaleChange);
-        syncFloorScaleLabel();
-        unbindMorphSliders.push(() => {
-            morphPointCloudScreenFloorMaxScale.removeEventListener('input', onFloorScaleInput);
-            morphPointCloudScreenFloorMaxScale.removeEventListener('change', onFloorScaleChange);
-        });
-    }
-    if (morphPointCloudStrength) {
-        unbindMorphSliders.push(bindSliderLive(morphPointCloudStrength, morphPointCloudStrengthVal, 2, onMorphParamsLive, onParamsBlur));
-    }
-    if (morphPointCloudGlowStrength) {
-        unbindMorphSliders.push(bindSliderLive(morphPointCloudGlowStrength, morphPointCloudGlowStrengthVal, 2, onMorphParamsLive, onParamsBlur));
-    }
-    if (morphPointCloudOpacity) {
-        unbindMorphSliders.push(bindSliderLive(morphPointCloudOpacity, morphPointCloudOpacityVal, 2, onMorphParamsLive, onParamsBlur));
-    }
-    if (morphPointCloudDensity) {
-        unbindMorphSliders.push(bindSliderLive(morphPointCloudDensity, morphPointCloudDensityVal, 2, onMorphParamsLive, onParamsBlur));
-    }
-    if (morphPointCloudScatterDistance) {
-        unbindMorphSliders.push(bindSliderLive(morphPointCloudScatterDistance, morphPointCloudScatterDistanceVal, 2, onMorphParamsLive, onParamsBlur));
     }
     const unbindWobbleSliders: Array<() => void> = [];
     if (wobbleAmp) {
@@ -1489,7 +1434,7 @@ export function initAssetEffectsUI(global: Global): () => void {
 
     syncWobbleModeUi();
     syncWobbleHaloUi();
-    syncMorphPointCloudLabels();
+    syncMorphSliderLabels();
     refreshTargetLabel();
 
     return () => {
@@ -1507,9 +1452,8 @@ export function initAssetEffectsUI(global: Global): () => void {
         morphUrls?.removeEventListener('change', onParamsBlur);
         morphSeg?.removeEventListener('change', onParamsBlur);
         morphLoop?.removeEventListener('change', onParamsBlur);
-        morphPointCloudEffect?.removeEventListener('change', onParamsBlur);
-        morphPointCloudTint?.removeEventListener('input', onMorphParamsLive);
-        morphPointCloudTint?.removeEventListener('change', onParamsBlur);
+        morphFlightEase?.removeEventListener('change', onParamsBlur);
+        morphFlightPosEase?.removeEventListener('change', onParamsBlur);
         unbindMorphSliders.forEach((fn) => fn());
         unbindWobbleSliders.forEach((fn) => fn());
         wobbleAxis?.removeEventListener('change', onParamsBlur);
