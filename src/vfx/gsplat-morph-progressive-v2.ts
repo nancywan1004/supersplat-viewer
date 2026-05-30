@@ -2044,6 +2044,10 @@ class GaussianInterpolatorRuntime {
         }
     }
 
+    mergeOptions(options: Partial<GsplatMorphOptions>) {
+        Object.assign(this._options, options);
+    }
+
     private pairKey(idxA: number, idxB: number) {
         return `${idxA}:${idxB}`;
     }
@@ -3361,6 +3365,7 @@ export class GsplatMorphController {
         }
 
         Object.assign(this._morphOptions, options);
+        this.interpolator?.mergeOptions(options);
         if (typeof options.segmentDuration === 'number') {
             this.segmentDuration = options.segmentDuration;
         }

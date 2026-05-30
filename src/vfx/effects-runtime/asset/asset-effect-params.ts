@@ -27,6 +27,7 @@ const GSPLAT_MORPH = new Set([
     'greedySearchRadiusCells',
     'greedyMaxCandidatesPerPoint',
     'progressivePairFlightWindow',
+    'progressivePairFlightStagger',
     'progressivePairAsymmetricDissolve',
     'morphHourglassChannel',
     'morphHourglassStrength',

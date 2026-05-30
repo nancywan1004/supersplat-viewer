@@ -79,6 +79,24 @@ export const ASSET_EFFECTS_PANEL_HTML = `
       <input type="checkbox" id="assetMorphLoop" class="settingsCheckbox" checked>
     </div>
     <details style="font-size:11px;margin:4px 0 6px" open>
+      <summary style="cursor:pointer;opacity:0.8" title="控制 A→B 变形时各粒子起飞/到达的时间差">粒子飞行时序</summary>
+      <p class="effectsTrackHint" style="font-size:10px;opacity:0.7;margin:0 0 6px">飞行窗口越小，相邻粒子间隔越大；配对错峰越大，越按配对顺序依次飞行。</p>
+      <div class="settingsRow">
+        <label for="assetMorphFlightWindow" class="postEffectLabel" title="单粒子在整段变形 globalT 上的飞行时长；越小则相邻粒子起飞间隔越大">飞行重叠窗口:</label>
+        <div class="postEffectSliderWrap">
+          <input type="range" id="assetMorphFlightWindow" class="postEffectSlider" min="0.12" max="1" step="0.01" value="0.55">
+          <span id="assetMorphFlightWindowVal" class="postEffectSliderValue">0.55</span>
+        </div>
+      </div>
+      <div class="settingsRow">
+        <label for="assetMorphFlightStagger" class="postEffectLabel" title="配对索引相位权重；越大越按配对顺序依次飞，越小越按空间位置（A 侧先散、B 侧先生）">配对错峰:</label>
+        <div class="postEffectSliderWrap">
+          <input type="range" id="assetMorphFlightStagger" class="postEffectSlider" min="0" max="1" step="0.01" value="0.48">
+          <span id="assetMorphFlightStaggerVal" class="postEffectSliderValue">0.48</span>
+        </div>
+      </div>
+    </details>
+    <details style="font-size:11px;margin:4px 0 6px" open>
       <summary style="cursor:pointer;opacity:0.8" title="v2：A→B 平放沙漏形 GS 通道；下列滑条控制通道外观">沙漏通道（变形中途）</summary>
       <p class="effectsTrackHint" style="font-size:10px;opacity:0.7;margin:0 0 6px">A 形体各点飞向 B；中间向轴线收束成细腰（非圆形管道），两端保持原 GS 散开形状。</p>
       <div class="settingsRow">
@@ -237,6 +255,8 @@ const DEFAULT_WOBBLE_HALO_RGB: [number, number, number] = [1, 0.85, 0];
 const DEFAULT_MORPH_POINT_CLOUD_TINT_RGB: [number, number, number] = [0, 145 / 255, 1];
 /** 与 gsplat-morph DEFAULT_MORPH_POINT_CLOUD_POINT_SIZE 一致。 */
 const DEFAULT_MORPH_POINT_CLOUD_POINT_SIZE = 0.00015;
+const DEFAULT_MORPH_FLIGHT_WINDOW = 0.55;
+const DEFAULT_MORPH_FLIGHT_STAGGER = 0.48;
 
 function rgb01ToHex(rgb: [number, number, number]): string {
     const c = (v: number) =>
@@ -310,6 +330,8 @@ function readEffectParamsFromDom(
     morphUrls: HTMLTextAreaElement | null,
     morphSeg: HTMLInputElement | null,
     morphLoop: HTMLInputElement | null,
+    morphFlightWindow: HTMLInputElement | null,
+    morphFlightStagger: HTMLInputElement | null,
     morphPointCloudEffect: HTMLInputElement | null,
     morphPointCloudPointSize: HTMLInputElement | null,
     morphPointCloudMinScreenPx: HTMLInputElement | null,
@@ -346,6 +368,18 @@ function readEffectParamsFromDom(
         }
         if (morphLoop) {
             ep.loop = morphLoop.checked;
+        }
+        if (morphFlightWindow) {
+            const v = Number(morphFlightWindow.value);
+            if (!Number.isNaN(v) && v >= 0.12 && v <= 1) {
+                ep.progressivePairFlightWindow = v;
+            }
+        }
+        if (morphFlightStagger) {
+            const v = Number(morphFlightStagger.value);
+            if (!Number.isNaN(v) && v >= 0 && v <= 1) {
+                ep.progressivePairFlightStagger = v;
+            }
         }
         if (morphPointCloudEffect) {
             ep.morphPointCloudEffect = morphPointCloudEffect.checked;
@@ -459,6 +493,8 @@ function fillDomFromEffectParams(
     morphUrls: HTMLTextAreaElement | null,
     morphSeg: HTMLInputElement | null,
     morphLoop: HTMLInputElement | null,
+    morphFlightWindow: HTMLInputElement | null,
+    morphFlightStagger: HTMLInputElement | null,
     morphPointCloudEffect: HTMLInputElement | null,
     morphPointCloudPointSize: HTMLInputElement | null,
     morphPointCloudMinScreenPx: HTMLInputElement | null,
@@ -498,6 +534,20 @@ function fillDomFromEffectParams(
         }
         if (morphLoop) {
             morphLoop.checked = typeof ep?.loop === 'boolean' ? ep.loop : true;
+        }
+        if (morphFlightWindow) {
+            morphFlightWindow.value = String(
+                typeof ep?.progressivePairFlightWindow === 'number'
+                    ? ep.progressivePairFlightWindow
+                    : DEFAULT_MORPH_FLIGHT_WINDOW
+            );
+        }
+        if (morphFlightStagger) {
+            morphFlightStagger.value = String(
+                typeof ep?.progressivePairFlightStagger === 'number'
+                    ? ep.progressivePairFlightStagger
+                    : DEFAULT_MORPH_FLIGHT_STAGGER
+            );
         }
         if (morphPointCloudEffect) {
             morphPointCloudEffect.checked = typeof ep?.morphPointCloudEffect === 'boolean' ? ep.morphPointCloudEffect : false;
@@ -649,6 +699,10 @@ export function initAssetEffectsUI(global: Global): () => void {
     const morphUrls = fieldset.querySelector('#assetMorphKeyframeUrls') as HTMLTextAreaElement | null;
     const morphSeg = fieldset.querySelector('#assetMorphSegmentDuration') as HTMLInputElement | null;
     const morphLoop = fieldset.querySelector('#assetMorphLoop') as HTMLInputElement | null;
+    const morphFlightWindow = fieldset.querySelector('#assetMorphFlightWindow') as HTMLInputElement | null;
+    const morphFlightStagger = fieldset.querySelector('#assetMorphFlightStagger') as HTMLInputElement | null;
+    const morphFlightWindowVal = fieldset.querySelector('#assetMorphFlightWindowVal') as HTMLElement | null;
+    const morphFlightStaggerVal = fieldset.querySelector('#assetMorphFlightStaggerVal') as HTMLElement | null;
     const morphPointCloudEffect = fieldset.querySelector('#assetMorphPointCloudEffect') as HTMLInputElement | null;
     const morphPointCloudPointSize = fieldset.querySelector('#assetMorphPointCloudPointSize') as HTMLInputElement | null;
     const morphPointCloudMinScreenPx = fieldset.querySelector('#assetMorphPointCloudMinScreenPx') as HTMLInputElement | null;
@@ -819,6 +873,8 @@ export function initAssetEffectsUI(global: Global): () => void {
                         morphUrls,
                         morphSeg,
                         morphLoop,
+                        morphFlightWindow,
+                        morphFlightStagger,
                         morphPointCloudEffect,
                         morphPointCloudPointSize,
                         morphPointCloudMinScreenPx,
@@ -941,6 +997,8 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphUrls,
                 morphSeg,
                 morphLoop,
+                morphFlightWindow,
+                morphFlightStagger,
                 morphPointCloudEffect,
                 morphPointCloudPointSize,
                 morphPointCloudMinScreenPx,
@@ -1000,6 +1058,8 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphUrls,
                 morphSeg,
                 morphLoop,
+                morphFlightWindow,
+                morphFlightStagger,
                 morphPointCloudEffect,
                 morphPointCloudPointSize,
                 morphPointCloudMinScreenPx,
@@ -1048,6 +1108,12 @@ export function initAssetEffectsUI(global: Global): () => void {
     };
 
     const syncMorphPointCloudLabels = () => {
+        if (morphFlightWindow && morphFlightWindowVal) {
+            morphFlightWindowVal.textContent = formatSliderValue(Number(morphFlightWindow.value), 2);
+        }
+        if (morphFlightStagger && morphFlightStaggerVal) {
+            morphFlightStaggerVal.textContent = formatSliderValue(Number(morphFlightStagger.value), 2);
+        }
         if (morphPointCloudPointSize && morphPointCloudPointSizeVal) {
             const pct = Math.round(Number(morphPointCloudPointSize.value) * 1000) / 10;
             morphPointCloudPointSizeVal.textContent = `${pct}%`;
@@ -1189,6 +1255,8 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphUrls,
                 morphSeg,
                 morphLoop,
+                morphFlightWindow,
+                morphFlightStagger,
                 morphPointCloudEffect,
                 morphPointCloudPointSize,
                 morphPointCloudMinScreenPx,
@@ -1235,6 +1303,8 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphUrls,
                 morphSeg,
                 morphLoop,
+                morphFlightWindow,
+                morphFlightStagger,
                 morphPointCloudEffect,
                 morphPointCloudPointSize,
                 morphPointCloudMinScreenPx,
@@ -1286,6 +1356,8 @@ export function initAssetEffectsUI(global: Global): () => void {
                 morphUrls,
                 morphSeg,
                 morphLoop,
+                morphFlightWindow,
+                morphFlightStagger,
                 morphPointCloudEffect,
                 morphPointCloudPointSize,
                 morphPointCloudMinScreenPx,
@@ -1335,6 +1407,12 @@ export function initAssetEffectsUI(global: Global): () => void {
     morphPointCloudTint?.addEventListener('input', onMorphParamsLive);
     morphPointCloudTint?.addEventListener('change', onParamsBlur);
     const unbindMorphSliders: Array<() => void> = [];
+    if (morphFlightWindow) {
+        unbindMorphSliders.push(bindSliderLive(morphFlightWindow, morphFlightWindowVal, 2, onMorphParamsLive, onParamsBlur));
+    }
+    if (morphFlightStagger) {
+        unbindMorphSliders.push(bindSliderLive(morphFlightStagger, morphFlightStaggerVal, 2, onMorphParamsLive, onParamsBlur));
+    }
     if (morphPointCloudPointSize) {
         const onChannelScaleInput = () => {
             if (morphPointCloudPointSizeVal) {
