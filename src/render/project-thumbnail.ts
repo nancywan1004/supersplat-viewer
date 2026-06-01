@@ -136,6 +136,7 @@ async function uploadPendingProjectThumbnailIfAny(global: Global): Promise<Proje
 
 /**
  * 序列化 settings 并上传云端：若有暂存缩略图则先登记，再上传 settings.json。
+ * settings OSS 路径见 `universe/service.buildSettingsUploadObjectKey`（`<projectId>/<timestamp>/settings.json`）。
  */
 export async function persistExperienceSettingsToCloud(global: Global): Promise<SettingsSavePipelineResult> {
     const serialized = serializeExperienceSettings(global);

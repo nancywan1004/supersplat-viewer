@@ -66,7 +66,7 @@ type PointLightConfig = {
     enabled?: boolean
 };
 
-/** 平行光配置（主方向光/太阳，无位置概念，仅方向；用于阴影等）。阴影开关由 URL `?splatMesh=` 决定。 */
+/** 平行光配置（主方向光/太阳，无位置概念，仅方向；用于阴影等）。阴影由 `shadow.enabled` 控制，URL `?splatMesh=` 仅作前置条件。 */
 type DirectionalLightConfig = {
     type: 'directional',
     id?: string,
@@ -104,9 +104,27 @@ type SpotLightConfig = {
     enabled?: boolean
 };
 
+/**
+ * 全局「手电筒」配置（单例，**不进入** `lights[]`）：
+ * - 运行时为跟随光标的 PointLight，位置由 `Picker.pickSurface` 拾取得到的世界落点决定
+ * - 拾取未命中时回退到相机前方常量距离（见 controller 内 `TORCH_FALLBACK_DISTANCE`）
+ * - 仅参数持久化，开关与运行态在 `ViewSettings.torch`（不入库）
+ * - 全局最多一份，因此挂在 `LightingSettings.torch` 而非数组项
+ */
+type TorchLightSettings = {
+    /** sRGB [0,1] 三分量 */
+    color: [number, number, number];
+    /** 光强（与点光语义一致） */
+    intensity: number;
+    /** PointLight 有效作用半径（世界单位，clamp 0–20）；光源贴在拾取表面 */
+    range: number;
+};
+
 type LightingSettings = {
     /** 点光源 + 平行光（最多一个） + 聚光灯 */
-    lights: (PointLightConfig | DirectionalLightConfig | SpotLightConfig)[]
+    lights: (PointLightConfig | DirectionalLightConfig | SpotLightConfig)[],
+    /** 全局手电筒（单例）；缺失时由 `ensureTorchLight` 补齐默认 */
+    torch?: TorchLightSettings
 };
 
 /**
@@ -239,4 +257,4 @@ type EffectsSettings = {
     asset: EffectsAssetTrack;
 };
 
-export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset, SceneMediaHotspotSettings, SceneMediaHotspotPatch, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsAssetTrack };
+export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, TorchLightSettings, LightingSettings, SceneAsset, SceneMediaHotspotSettings, SceneMediaHotspotPatch, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsAssetTrack };

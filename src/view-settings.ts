@@ -9,11 +9,15 @@ export const DEFAULT_VIEW_MEDIA_MUTED = false;
 /** 观看态标注默认可见 */
 export const DEFAULT_VIEW_ANNOTATIONS_VISIBLE = true;
 
+/** 全局手电筒默认关闭（仅会话态，不入库） */
+export const DEFAULT_VIEW_TORCH_ACTIVE = false;
+
 export function createDefaultViewSettings(): ViewSettings {
     return {
         bloom: { localLightsEnabled: DEFAULT_VIEW_BLOOM_LOCAL_LIGHTS_ENABLED },
         mediaMuted: DEFAULT_VIEW_MEDIA_MUTED,
-        annotationsVisible: DEFAULT_VIEW_ANNOTATIONS_VISIBLE
+        annotationsVisible: DEFAULT_VIEW_ANNOTATIONS_VISIBLE,
+        torch: { active: DEFAULT_VIEW_TORCH_ACTIVE }
     };
 }
 
@@ -36,6 +40,11 @@ export function ensureViewSettings(global: Global): ViewSettings {
     }
     if (typeof vs.annotationsVisible !== 'boolean') {
         vs.annotationsVisible = DEFAULT_VIEW_ANNOTATIONS_VISIBLE;
+    }
+    if (!vs.torch || typeof vs.torch !== 'object') {
+        vs.torch = { active: DEFAULT_VIEW_TORCH_ACTIVE };
+    } else if (typeof vs.torch.active !== 'boolean') {
+        vs.torch.active = DEFAULT_VIEW_TORCH_ACTIVE;
     }
     return vs;
 }
@@ -73,4 +82,23 @@ export function readViewAnnotationsVisible(global: Global): boolean {
 
 export function readViewBloomLocalLightsEnabled(global: Global): boolean {
     return ensureViewSettings(global).bloom.localLightsEnabled !== false;
+}
+
+/**
+ * `TORCH_TOGGLE`：全局手电筒开关（仅 viewSettings，不入库）。
+ * 与 `applyViewMediaMuteSet` 保持相同返回与事件语义。
+ * @returns 是否发生变更
+ */
+export function applyViewTorchActive(global: Global, active: boolean): boolean {
+    const vs = ensureViewSettings(global);
+    const next = !!active;
+    if (!vs.torch) vs.torch = { active: next };
+    if (vs.torch.active === next) return false;
+    vs.torch.active = next;
+    global.events.fire('torchActive:changed', { value: next });
+    return true;
+}
+
+export function readViewTorchActive(global: Global): boolean {
+    return ensureViewSettings(global).torch?.active === true;
 }

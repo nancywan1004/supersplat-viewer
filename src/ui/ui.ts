@@ -40,7 +40,7 @@ import type { Annotation } from '../settings';
 import { getEditUiTransport, sendEditProtocolMessage } from './edit-ui-transport';
 import { applyEnvironmentPreviewVisualPolicy } from '../editor-modules/environment-facade';
 import { applyLightToggleAll, applyLightToggle } from '../editor-modules/protocol-adapters/environment-protocol-adapter';
-import { applyViewMediaMuteSet } from '../view-settings';
+import { applyViewMediaMuteSet, applyViewTorchActive, readViewTorchActive } from '../view-settings';
 import { getRevealActiveType } from '../settings-serialize/effects-sync';
 
 // Initialize the touch joystick for fly mode camera control
@@ -299,7 +299,8 @@ const initUI = (global: Global) => {
         // View 模式调试按钮（右上角编辑按钮旁）
         'viewDebugToggleAssets', 'viewDebugLightsAllOn', 'viewDebugLightsAllOff',
         'viewDebugRegionSelect', 'viewDebugToggleRegionLight',
-        'viewDebugMediaMute', 'viewDebugMediaUnmute'
+        'viewDebugMediaMute', 'viewDebugMediaUnmute',
+        'viewDebugTorchToggle'
     ].reduce((acc: Record<string, HTMLElement>, id) => {
         acc[id] = document.getElementById(id);
         return acc;
@@ -1126,6 +1127,31 @@ const initUI = (global: Global) => {
                 applyViewMediaMuteSet(global, false);
             }
         });
+    }
+
+    // 手电筒（全局单例 spot）：View 顶栏仅 Toggle；参数编辑在 Edit Lighting 面板。
+    const torchToggleBtn = dom.viewDebugTorchToggle as HTMLButtonElement | undefined;
+    if (torchToggleBtn) {
+        const refreshTorchToggleStyle = () => {
+            const active = readViewTorchActive(global);
+            torchToggleBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+            torchToggleBtn.classList.toggle('active', active);
+        };
+        refreshTorchToggleStyle();
+        torchToggleBtn.addEventListener('click', () => {
+            const next = !readViewTorchActive(global);
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'TORCH_TOGGLE', value: next });
+                // message-bridge 模式：父级回环写入后由 torchActive:changed 触发刷新；
+                // 但 internal 与 host 入站均同步走 applyViewTorchActive → torchActive:changed，
+                // 这里也直接调用以避免父级未回环时按钮态滞后。
+                applyViewTorchActive(global, next);
+            } else {
+                applyViewTorchActive(global, next);
+            }
+        });
+        // 任意路径写入 `viewSettings.torch.active` 都会触发 `torchActive:changed`，刷新按钮态。
+        events.on('torchActive:changed', refreshTorchToggleStyle);
     }
 
     // 单个局部亮灯区域：下拉选区域，点击「Toggle 区域灯」切换该区域绑定光源的开关

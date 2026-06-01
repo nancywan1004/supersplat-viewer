@@ -7,7 +7,7 @@ import {
 import type { Global } from '../../types';
 import type { ExperienceSettings } from '../../schemas/v2';
 import { updatePointLightsFromSettings } from '../../light';
-import { isShadowSystemEnabled } from '../../vfx/shadow/gsplat-shadow-cast';
+import { hasShadowCapability, syncGsplatShadowCastingFromSettings } from '../../vfx/shadow';
 import { pushEditHistory } from '../../edit-history';
 import {
     ensureBloom as ensureBloomFromAdapter,
@@ -151,6 +151,7 @@ const ensureBloom = (settings: Global['settings']): BloomSettings => {
 };
 
 type ShadowSettings = {
+    enabled?: boolean;
     darken: number;
     castShadows?: boolean;
     debugVisual?: boolean;
@@ -700,7 +701,12 @@ export function initPostEffectUI(global: Global): () => void {
         refreshRegionList();
         syncDrawModeUiFromSession();
         const sh = ensureShadow(settings);
-        if (shadowEnableCheck) shadowEnableCheck.classList.toggle('active', isShadowSystemEnabled(global));
+        if (shadowEnableCheck) shadowEnableCheck.classList.toggle('active', sh.enabled !== false);
+        if (shadowEnableOption) {
+            const canEnableShadow = hasShadowCapability(global);
+            shadowEnableOption.title = canEnableShadow ? '' : '缺少 splatMeshUrl，当前场景不支持阴影';
+            shadowEnableOption.style.opacity = canEnableShadow ? '1' : '0.55';
+        }
         if (shadowCastCheck) shadowCastCheck.classList.toggle('active', sh.castShadows !== false);
         const darken = Math.max(0, Math.min(1, Number(sh.darken ?? 0)));
         if (shadowDarkenSlider) shadowDarkenSlider.value = String(darken);
@@ -923,10 +929,24 @@ export function initPostEffectUI(global: Global): () => void {
     }
 
     if (shadowEnableOption && shadowEnableCheck) {
-        shadowEnableOption.title = '由 URL ?splatMesh= 控制，不可在面板切换';
-        shadowEnableOption.style.opacity = '0.55';
-        shadowEnableOption.style.pointerEvents = 'none';
-        shadowEnableCheck.style.pointerEvents = 'none';
+        const toggleShadowEnable = () => {
+            if (!hasShadowCapability(global)) return;
+            const sh = ensureShadow(settings);
+            const enabled = sh.enabled === false;
+            const editTransport = getEditUiTransport(global);
+            if (editTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'SHADOW_SET', value: enabled });
+            } else {
+                sh.enabled = enabled;
+                syncGsplatShadowCastingFromSettings(global);
+                updatePointLightsFromSettings(global);
+                firePostEffectChanged();
+            }
+            syncFromSettings();
+            pushEditHistorySafe();
+        };
+        shadowEnableOption.addEventListener('click', toggleShadowEnable);
+        shadowEnableCheck.addEventListener('click', toggleShadowEnable);
     }
 
     if (shadowCastOption && shadowCastCheck) {

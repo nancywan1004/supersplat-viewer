@@ -26,7 +26,7 @@ const tmpTarget = new Vec3();
 const tmpTargetClamp = new Vec3();
 const tmpRemain = new Vec3();
 /** 相机碰撞球半径（米） */
-const CAMERA_RADIUS = 0.2;
+const CAMERA_RADIUS = 0.3;
 
 // Damping helper function
 const damp = (damping: number, dt: number) => {

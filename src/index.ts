@@ -83,7 +83,8 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
             entity.setLocalEulerAngles(0, 0, 180);
             entity.addComponent('gsplat', {
                 unified: true,
-                asset
+                asset,
+                castShadows: false
             });
             const material = app.scene.gsplat.material;
             material.setDefine('GSPLAT_AA', aa);
@@ -129,7 +130,8 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
                 entity.setLocalEulerAngles(0, 0, 180);
                 entity.addComponent('gsplat', {
                     unified: true,
-                    asset
+                    asset,
+                    castShadows: false
                 });
                 // don't support AA in unified mode yet
                 if (aa && !entity.gsplat.unified) {

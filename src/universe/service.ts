@@ -224,8 +224,13 @@ export type ProjectDataUploadResult =
  * 流程：上传阿里云 -> 组装 files 请求体 -> 调用接口
  * @param projectId 项目ID
  * @param inputFiles 支持单文件或最多两个文件
+ * @param uploadTimestamp settings.json 的 OSS 版本目录时间戳（毫秒）；未传时各文件独立生成
  */
-export const updateProjectData = async (projectId: number | string, inputFiles: File | File[]): Promise<ProjectDataUploadResult> => {
+export const updateProjectData = async (
+    projectId: number | string,
+    inputFiles: File | File[],
+    uploadTimestamp?: number
+): Promise<ProjectDataUploadResult> => {
     const files = Array.isArray(inputFiles) ? inputFiles : [inputFiles];
 
     if (files.length === 0) {
@@ -237,7 +242,7 @@ export const updateProjectData = async (projectId: number | string, inputFiles: 
 
     try {
         const uploadResults = await Promise.all(
-            files.map((file) => uploadFileToAliyun(file, 2, projectId))
+            files.map((file) => uploadFileToAliyun(file, 2, projectId, uploadTimestamp))
         );
 
         const payloadFiles: UploadFile[] = files.map((file, index) => ({
@@ -276,6 +281,7 @@ export const updateProjectData = async (projectId: number | string, inputFiles: 
 /**
  * 上传项目 settings.json（仅单文件）。
  * 会强制使用统一文件名 settings.json，接口 type 会自动走 setting。
+ * OSS 对象路径（有 projectId）：`<STS baseDir>/<projectId>/<timestamp>/settings.json`。
  */
 /**
  * 上传当前视口 PNG 为项目缩略图：先 OSS，再调用 {@link UPDATE_PROJECT_THUMBNAIL} 登记 URL。
@@ -354,7 +360,7 @@ export const uploadProjectData = async (
     setUniverseAuthContext({ token });
     const jsonString = typeof settingsJson === 'string' ? settingsJson : JSON.stringify(settingsJson, null, 2);
     const settingsFile = new File([jsonString], SETTINGFILENAME, { type: 'application/json' });
-    return updateProjectData(projectId, settingsFile);
+    return updateProjectData(projectId, settingsFile, Date.now());
 };
 
 /**
@@ -590,21 +596,58 @@ const buildUploadedFileUrl = (objectKey: string) => {
 };
 
 /**
- * settings 文件上传时，强制对象名尾部为 settings.json，避免时间戳命名影响识别。
+ * 从 STS 返回的 objectKey 提取目录前缀（保留尾部 `/`）。
  */
-const resolveUploadObjectKey = (objectKey: string, fileName: string, projectId?: number | string) => {
-    if (fileName.toLowerCase() !== SETTINGFILENAME) return objectKey;
-    const normalizedProjectId = String(projectId ?? '').trim();
+const extractStsBaseDir = (objectKey: string): string => {
     const key = objectKey.replace(/^\/+/, '');
     const slashIndex = key.lastIndexOf('/');
-    const baseDir = slashIndex >= 0 ? key.slice(0, slashIndex + 1) : '';
-    if (!normalizedProjectId) return `${baseDir}${SETTINGFILENAME}`;
-    return `${baseDir}${normalizedProjectId}/${SETTINGFILENAME}`;
+    return slashIndex >= 0 ? key.slice(0, slashIndex + 1) : '';
 };
 
-const uploadSingleToOss = async (file: File, sts: Single_STSTOKEN_Response['data'], projectId?: number | string) => {
+/**
+ * settings.json 的 OSS 对象 key（相对 bucket）。
+ * - 有 projectId：`<baseDir><projectId>/<uploadTimestamp>/settings.json`
+ * - 无 projectId：`<baseDir>settings.json`
+ */
+export const buildSettingsUploadObjectKey = (
+    baseDir: string,
+    projectId?: number | string,
+    uploadTimestamp: number = Date.now()
+): string => {
+    const normalizedProjectId = String(projectId ?? '').trim();
+    if (!normalizedProjectId) {
+        return `${baseDir}${SETTINGFILENAME}`;
+    }
+    return `${baseDir}${normalizedProjectId}/${uploadTimestamp}/${SETTINGFILENAME}`;
+};
+
+/**
+ * 非 settings 文件沿用 STS objectKey；settings 走 {@link buildSettingsUploadObjectKey}。
+ */
+const resolveUploadObjectKey = (
+    objectKey: string,
+    fileName: string,
+    projectId?: number | string,
+    uploadTimestamp?: number
+): string => {
+    if (fileName.toLowerCase() !== SETTINGFILENAME) {
+        return objectKey;
+    }
+    return buildSettingsUploadObjectKey(
+        extractStsBaseDir(objectKey),
+        projectId,
+        uploadTimestamp ?? Date.now()
+    );
+};
+
+const uploadSingleToOss = async (
+    file: File,
+    sts: Single_STSTOKEN_Response['data'],
+    projectId?: number | string,
+    uploadTimestamp?: number
+) => {
     const client = createOssClient(sts);
-    const targetObjectKey = resolveUploadObjectKey(sts.objectKey, file.name, projectId);
+    const targetObjectKey = resolveUploadObjectKey(sts.objectKey, file.name, projectId, uploadTimestamp);
     const result = await client.put(targetObjectKey, file, {
         mime: file.type || 'application/octet-stream'
     });
@@ -617,10 +660,18 @@ const uploadSingleToOss = async (file: File, sts: Single_STSTOKEN_Response['data
 /**
  * 上传文件到阿里云 OSS。
  * 自动按文件大小选择：小文件走单文件上传，大文件走分片上传。
+ * settings.json 在有 projectId 时使用 `<baseDir>/<projectId>/<uploadTimestamp>/settings.json`。
  * @param file 需要上传的文件
  * @param type 文件类型（1-物体，2-场景）
+ * @param projectId 项目 ID（仅 settings.json 用于拼 OSS 路径）
+ * @param uploadTimestamp settings 版本目录时间戳（毫秒）；未传时于解析路径时生成
  */
-export const uploadFileToAliyun = async (file: File, type = 2, projectId?: number | string): Promise<OssUploadResult> => {
+export const uploadFileToAliyun = async (
+    file: File,
+    type = 2,
+    projectId?: number | string,
+    uploadTimestamp?: number
+): Promise<OssUploadResult> => {
     if (!file) {
         throw new Error('文件不能为空');
     }
@@ -635,7 +686,7 @@ export const uploadFileToAliyun = async (file: File, type = 2, projectId?: numbe
             fileName: file.name
         });
 
-        const uploadedObjectKey = await uploadSingleToOss(file, sts, projectId);
+        const uploadedObjectKey = await uploadSingleToOss(file, sts, projectId, uploadTimestamp);
         return {
             fileName: file.name,
             fileSize: file.size,
@@ -653,7 +704,7 @@ export const uploadFileToAliyun = async (file: File, type = 2, projectId?: numbe
     });
 
     const client = createOssClient(multipartSts);
-    const targetObjectKey = resolveUploadObjectKey(multipartSts.objectKey, file.name, projectId);
+    const targetObjectKey = resolveUploadObjectKey(multipartSts.objectKey, file.name, projectId, uploadTimestamp);
     await client.multipartUpload(targetObjectKey, file, {
         partSize: multipartSts.chunkSize || CHUNKSIZE
     });

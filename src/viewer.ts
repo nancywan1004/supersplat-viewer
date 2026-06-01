@@ -49,10 +49,12 @@ import { isLodMetaFile } from './loaders/lod-loader';
 import { BloomController } from './vfx/bloom';
 import { loadSplatMesh } from './loaders/splat-mesh-loader';
 import { NightMode } from './vfx/lighting/night-mode';
-import { isShadowSystemEnabled, syncGsplatShadowCastingFromSettings } from './vfx/shadow/gsplat-shadow-cast';
-import { initShadowCatcher } from './vfx/shadow/shadow-catcher';
-import { ShadowApplyRt } from './vfx/shadow/shadow-apply';
-import { updateShadowDistance } from './light';
+import {
+    isShadowSystemEnabled,
+    notifyViewportReadyForShadow,
+    scheduleShadowPipeline,
+} from './vfx/shadow';
+import { initTorchLight } from './vfx/lighting/torch-light';
 import { initAssetPlacementHandler, requestSceneAssetsRestore } from './scene-assets/asset-placement-handler';
 import { initMediaHotspotController } from './scene-assets/media/media-hotspot-controller';
 import { initSceneAudioCallout } from './scene-assets/media/audio-callout';
@@ -173,12 +175,16 @@ const needsBloomPipeline = (settings: PostEffectSettings): boolean => {
     return true;
 };
 
-const anyPostEffectEnabled = (settings: PostEffectSettings, config: Global['config']): boolean => {
+const anyPostEffectEnabled = (
+    settings: PostEffectSettings,
+    config: Global['config'],
+    allSettings: ExperienceSettings
+): boolean => {
     const bloomOn = settings.bloom.enabled && (
         Number(settings.bloom.intensity) > 0 ||
         needsBloomPipeline(settings)
     );
-    const shadowOn = isShadowSystemEnabled({ config });
+    const shadowOn = isShadowSystemEnabled({ config, settings: allSettings });
     return (settings.sharpness.enabled && settings.sharpness.amount > 0) ||
         bloomOn ||
         (settings.grading.enabled) ||
@@ -305,6 +311,7 @@ class Viewer {
             getAppCanvas: () => (app.graphicsDevice?.canvas as HTMLCanvasElement) ?? document.querySelector('canvas'),
             getNightModeScript: () => this.nightModeScript
         });
+
         // disable auto render, we'll render only when camera changes
         app.autoRender = false;
 
@@ -317,14 +324,12 @@ class Viewer {
 
         events.on('postEffect:changed', () => {
             this.configureCamera(global.settings);
-            syncGsplatShadowCastingFromSettings(global);
             app.renderNextFrame = true;
         });
         app.on('nightFade:changedDetailed', () => {
             this.configureCamera(global.settings);
             app.renderNextFrame = true;
         });
-
         // handle canvas resize - update aspect ratio and trigger render
         const handleResize = () => {
             camera.camera.aspectRatio = graphicsDevice.width / graphicsDevice.height;
@@ -558,7 +563,6 @@ class Viewer {
             console.log('[Shadow] Promise.all resolved, results count:', results.length);
             try {
             const gsplatEntity = results[0] as Entity;
-            syncGsplatShadowCastingFromSettings(global, gsplatEntity);
             const gsplat = gsplatEntity.gsplat as GSplatComponent;
             const meshEntity = results[2] as Entity | null | undefined;
             const collision = (results[3] as Collision | undefined) ?? null;
@@ -570,32 +574,11 @@ class Viewer {
                 sceneBound.setFromTransformedAabb(gsplatBbox, gsplatEntity.getWorldTransform());
             }
 
-            // 根据场景大小动态更新方向光的 shadowDistance
-            const sceneSize = sceneBound.halfExtents.length();
-            updateShadowDistance(global, sceneSize);
-
-            // 阴影管线：有 GLB 则用 mesh 接影，否则用平面（与 Physics_Relighting_Demo 一致）
-            const shadowOpts = settings.postEffectSettings.shadow as { debugVisual?: boolean } | undefined;
-            // console.log('[Shadow] initShadowCatcher called with:', {
-            //     hasMeshEntity: !!meshEntity,
-            //     meshEntityName: meshEntity?.name,
-            //     meshEntityChildren: meshEntity?.children?.length,
-            //     sceneBoundCenter: sceneBound.center.toString(),
-            //     sceneBoundHalf: sceneBound.halfExtents.toString()
-            // });
-            initShadowCatcher(app, sceneBound, {
-                debugVisual: shadowOpts?.debugVisual ?? false,
-                parentEntity: gsplatEntity,
-                meshEntity: meshEntity ?? undefined
-            });
-            // 必须在 create 之前注入 global：initialize() 在 create() 时同步执行，此时 script.global 尚未被赋值
-            (app as any).__shadowApplyGlobal = global;
-            if (!app.root.script) {
-                app.root.addComponent('script');
-            }
-            const applyScript = app.root.script.create(ShadowApplyRt) as unknown as ShadowApplyRt;
-            applyScript.global = global;
-            delete (app as any).__shadowApplyGlobal;
+            const shadowPipelineMount = {
+                sceneBound,
+                gsplatEntity,
+                meshEntity: meshEntity ?? null
+            };
 
             // 标注系统初始化时机：
             // - 若有 reveal / VFX（开场播放），则等 revealComplete 后再初始化，避免动画期间热点/tooltip 干扰观感
@@ -621,6 +604,7 @@ class Viewer {
             };
 
             this.picker = new Picker(app, camera);
+            (app as any).__picker = this.picker;
             this.inputController = new InputController(global, this.picker);
             this.inputController.collision = collision ?? null;
             state.hasCollision = !!collision;
@@ -647,7 +631,7 @@ class Viewer {
                 });
             }
 
-            // Set move speed based on scene size (reuse sceneSize from above)
+            const sceneSize = sceneBound.halfExtents.length();
             this.inputController.setMoveSpeedFromSceneSize(sceneSize);
 
             // 先创建 cameraManager，因为 revealController 需要它来获取 targetConstraint
@@ -688,6 +672,10 @@ class Viewer {
                     splat: gsplatEntity ? 'found' : 'not found'
                 });
             }
+
+            // 全局手电筒（单例 spot）：放在 NightMode 之后、RevealController 之前，
+            // 以便首次 active 切换时 NightMode 的 `collectSpotLights` 能立刻看到它。
+            initTorchLight(global);
             
             // ── 关键：根据 unified 模式选择正确的坐标空间 ──
             // PlayCanvas gsplat 的 modifySplatCenter 在两种模式下接收不同坐标空间：
@@ -704,6 +692,19 @@ class Viewer {
                 revealBbox.copy(sceneBound);            // fallback
             }
             this.revealController = new RevealController(global, revealBbox, gsplatEntity, this.cameraManager);
+            const ensureShadowPipelineReady = () => {
+                if (!isShadowSystemEnabled(global)) {
+                    return;
+                }
+                scheduleShadowPipeline(global, shadowPipelineMount);
+                if (state.readyToRender) {
+                    notifyViewportReadyForShadow(global);
+                }
+            };
+            ensureShadowPipelineReady();
+            events.on('postEffect:changed', () => {
+                ensureShadowPipelineReady();
+            });
             global.events.on('persistentGsplatEffectRemountRequested', (restartAnim?: boolean) => {
                 // revealComplete 当帧内 reveal 脚本可能仍在执行 removeShaders；
                 // remount persistent 若同帧进行，可能被旧脚本收尾覆盖。统一延后一帧。
@@ -909,6 +910,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
                             // we're ready to render once the first sort has completed
                             state.readyToRender = true;
+                            ensureShadowPipelineReady();
 
                             // 清除强制渲染标志，恢复按需渲染
                             this.forceRenderNextFrame = false;
@@ -1034,6 +1036,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                             if (state.readyToRender) return; // 已被其他路径设置则跳过
 
                             state.readyToRender = true;
+                            ensureShadowPipelineReady();
 
                             // 清除强制渲染标志，恢复按需渲染（场景已加载完成）
                             this.forceRenderNextFrame = false;
@@ -1151,7 +1154,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
         const computeRequiresCameraFrame = rendererMode === 'compute';
         const postFxRequested = !config.nofx &&
             !!postEffectSettings &&
-            (anyPostEffectEnabled(postEffectSettings, config) || highPrecisionRendering || bloomPipelineWanted);
+            (anyPostEffectEnabled(postEffectSettings, config, settings as ExperienceSettings) || highPrecisionRendering || bloomPipelineWanted);
         const enableCameraFrame = !app.xr.active && (computeRequiresCameraFrame || postFxRequested);
 
         if (enableCameraFrame) {

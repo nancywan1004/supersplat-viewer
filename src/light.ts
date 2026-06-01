@@ -11,7 +11,7 @@ import {
 } from 'playcanvas';
 import type { GraphicsDevice } from 'playcanvas';
 import type { Global } from './types';
-import { isShadowSystemEnabled } from './vfx/shadow/gsplat-shadow-cast';
+import { isShadowSystemEnabled } from './vfx/shadow/shadow-policy';
 import type { DirectionalLightConfig, SpotLightConfig } from './schemas/v2';
 
 const MAX_POINT_LIGHTS = 10;
@@ -409,7 +409,7 @@ const collectPointLights = (global: Global): PointLightInfo[] => {
     const result: PointLightInfo[] = [];
     const visit = (e: Entity) => {
         if (result.length >= MAX_POINT_LIGHTS) return;
-        if (e.light && (e.light as any).type === 'point' && e.light.enabled) {
+        if (e.light && (e.light as any).type === 'point' && e.light.enabled && !e.tags.has('torchLight')) {
             const pos = e.getPosition();
             result.push({
                 position: new Vec3(pos.x, pos.y, pos.z),
@@ -429,6 +429,9 @@ const collectPointLights = (global: Global): PointLightInfo[] => {
  * `LightComponent.innerConeAngle` / `outerConeAngle` 与 PlayCanvas 一致，为**半角（度）**；
  * 此处转为弧度写入 `SpotLightInfo`（**不再**对 settings 整锥顶角做 `spotApexToHalfDeg`，那一步已在 `createSpotLightsFromSettings` 写入实体时完成）。
  * 方向与引擎一致：聚光沿实体 **-Y** 照射。
+ *
+ * 注：手电筒为独立 PointLight 实体（`torchLight` tag），**不**进入本函数的 `uSphere*` 数组；
+ * gsplat 侧由 `night-mode` 的 `uTorchWorldPos` 单独注入，mesh 侧由引擎对该实体做动态光照。
  */
 const collectSpotLights = (global: Global): SpotLightInfo[] => {
     const { app } = global;
@@ -1012,6 +1015,15 @@ const initLight = (global: Global): Entity => {
  * 根据场景包围盒大小动态设置方向光的 shadowDistance。
  * 应在场景加载后、获得 sceneBound 时调用。
  */
+/** 运行时开关主方向光 shadow map（由 shadow-system 在 reveal 门控期间调用） */
+const setDirectionalCastShadowsEnabled = (global: Global, enabled: boolean): void => {
+    const lightEntity = global.app.root.findByName('light') as Entity | null;
+    if (lightEntity?.light) {
+        lightEntity.light.castShadows = enabled;
+        (global.app as { renderNextFrame?: boolean }).renderNextFrame = true;
+    }
+};
+
 const updateShadowDistance = (global: Global, sceneSize: number): void => {
     const lightEntity = global.app.root.findByName('light') as Entity | null;
     if (lightEntity?.light) {
@@ -1031,5 +1043,6 @@ export {
     setPointLightsVisualVisible,
     setLightsVisualVisible,
     selectNearestLightAtPosition,
-    updateShadowDistance
+    updateShadowDistance,
+    setDirectionalCastShadowsEnabled
 };

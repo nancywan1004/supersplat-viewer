@@ -29,7 +29,7 @@ import {
 import { getAssetLoader } from './loaders/asset-loader';
 import { resolveExportTimelinePlan } from './render/export-timeline-resolver';
 import { buildVideoExportFilename } from './render/video-export';
-import type { ExperienceSettings, SceneMediaHotspotPatch } from './schemas/v2';
+import type { ExperienceSettings, SceneMediaHotspotPatch, TorchLightSettings } from './schemas/v2';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import { getRevealActiveType, getRevealTotalDuration } from './settings-serialize/effects-sync';
 import {
@@ -69,6 +69,8 @@ type InboundPayload =
     | { type: 'ASSET_MEDIA_HOTSPOT_BASELINE_SET'; id: string }
     | { type: 'ASSET_MEDIA_HOTSPOT_RANGE_SET'; id?: string; value?: number }
     | { type: 'VIEW_MEDIA_MUTE_SET'; value?: boolean }
+    | { type: 'TORCH_TOGGLE'; value?: boolean }
+    | { type: 'TORCH_PARAMS_SET'; value?: Partial<TorchLightSettings> }
     | { type: 'SETTINGS_SAVE' }
     | { type: 'SETTINGS_RESET' }
     | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule | null }
@@ -353,6 +355,18 @@ const initPostMessageBridge = (global: Global) => {
                     applyViewMediaMuteSet(global, p.value);
                 }
                 break;
+            case 'TORCH_TOGGLE':
+                if (typeof p.value === 'boolean') {
+                    dispatchEnvironment(global, 'TORCH_TOGGLE', p);
+                }
+                break;
+            case 'TORCH_PARAMS_SET': {
+                const torchVal = (p as { value?: unknown }).value;
+                if (torchVal && typeof torchVal === 'object') {
+                    dispatchEnvironment(global, 'TORCH_PARAMS_SET', p);
+                }
+                break;
+            }
             case 'ASSET_MEDIA_HOTSPOT_BASELINE_SET': {
                 const msg = payload as Extract<InboundPayload, { type: 'ASSET_MEDIA_HOTSPOT_BASELINE_SET' }>;
                 const id = typeof msg.id === 'string' ? msg.id.trim() : '';
