@@ -30,6 +30,8 @@ export type CollisionLoadState = 'idle' | 'loading' | 'ready' | 'failed';
 export type CollisionLoadPayload = {
     state: CollisionLoadState;
     error?: unknown;
+    /** `ready` / `failed` 时携带，供出站按 collision / shadow intent 选择 `module`。 */
+    intent?: SceneMeshLoadIntent;
 };
 
 export type SceneMeshReadyPayload = {
@@ -65,6 +67,9 @@ export class CameraCollisionManager {
     private loadState: CollisionLoadState = 'idle';
 
     private loadPromise: Promise<void> | null = null;
+
+    /** 当前或最近一次 in-flight scene mesh 加载所合并的 intent（出站用）。 */
+    private activeLoadIntent: SceneMeshLoadIntent | null = null;
 
     private consumers: CameraCollisionConsumers | null = null;
 
@@ -129,6 +134,7 @@ export class CameraCollisionManager {
 
     /** 按需加载 scene mesh（GLB）与/或 voxel collision。 */
     async ensureSceneMeshLoaded(intent?: SceneMeshLoadIntent): Promise<void> {
+        this.mergeActiveLoadIntent(intent);
         if (!this.shouldLoadSceneMesh(intent)) {
             return;
         }
@@ -285,9 +291,31 @@ export class CameraCollisionManager {
         void this.ensureSceneMeshLoaded();
     }
 
+    private mergeActiveLoadIntent(intent?: SceneMeshLoadIntent): void {
+        if (!intent?.wantCollision && !intent?.wantShadow) {
+            return;
+        }
+        const prev = this.activeLoadIntent ?? {};
+        this.activeLoadIntent = {
+            wantCollision: prev.wantCollision || intent.wantCollision,
+            wantShadow: prev.wantShadow || intent.wantShadow
+        };
+    }
+
     private emitLoadState(state: CollisionLoadState, error?: unknown): void {
-        const payload: CollisionLoadPayload = error !== undefined ? { state, error } : { state };
+        const intent =
+            state === 'ready' || state === 'failed' ? this.consumeActiveLoadIntentForTerminal(state) : undefined;
+        const payload: CollisionLoadPayload =
+            error !== undefined ? { state, error, ...(intent ? { intent } : {}) } : { state, ...(intent ? { intent } : {}) };
         this.global.events.fire('cameraCollision:load', payload);
+    }
+
+    private consumeActiveLoadIntentForTerminal(state: CollisionLoadState): SceneMeshLoadIntent | undefined {
+        const intent = this.activeLoadIntent ?? undefined;
+        if (state === 'ready' || state === 'failed') {
+            this.activeLoadIntent = null;
+        }
+        return intent;
     }
 
     setCollision(collision: Collision | null): void {

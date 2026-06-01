@@ -26,7 +26,7 @@ import {
     isShadowSystemEnabled
 } from './shadow-policy';
 
-/** Viewer 内部事件；出站协议名为 `SHADOW_SYSTEM_READY`（见 message-bridge）。 */
+/** Viewer 内部事件；出站 `SHADOW_SYSTEM_READY` 仅在 {@link isShadowOutputEnabled} 为真时 post（见 message-bridge）。 */
 export const SHADOW_SYSTEM_READY = 'shadowSystem:ready';
 
 /** 主场景 unified 高斯不参与 GSPLAT_SHADOW 投射，勿与 shadow.enabled 同步。 */
@@ -152,7 +152,7 @@ const activateOutput = (global: Global) => {
     setCatcherActive(global, true);
     syncDirectionalShadowCasting(global);
     (global.app as { renderNextFrame?: boolean }).renderNextFrame = true;
-    if (isShadowSystemEnabled(global)) {
+    if (isShadowOutputEnabled(global)) {
         global.events.fire(SHADOW_SYSTEM_READY);
     }
 };

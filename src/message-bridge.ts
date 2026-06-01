@@ -57,9 +57,12 @@ import {
     buildCollisionSystemReadyPayload,
     buildSceneMeshLoadFailedPayload,
     buildSceneMeshLoadFinishedPayload,
-    buildShadowSystemReadyPayload
+    resolveSceneMeshLoadOutboundModules
 } from './editor-modules/protocol-adapters/collision-protocol-adapter';
-import { applyShadowSetFromHost } from './editor-modules/protocol-adapters/environment-protocol-adapter';
+import {
+    applyShadowSetFromHost,
+    buildShadowSystemReadyPayload
+} from './editor-modules/protocol-adapters/environment-protocol-adapter';
 import {
     COLLISION_SYSTEM_READY,
     type CollisionLoadPayload
@@ -914,10 +917,15 @@ const initPostMessageBridge = (global: Global) => {
         if (suppressCollisionOutbound) {
             return;
         }
+        const modules = resolveSceneMeshLoadOutboundModules(global, payload.intent);
         if (payload.state === 'ready') {
-            postToParent('SCENE_MESH_LOAD_FINISHED', buildSceneMeshLoadFinishedPayload(global));
+            for (const module of modules) {
+                postToParent('SCENE_MESH_LOAD_FINISHED', buildSceneMeshLoadFinishedPayload(global, module));
+            }
         } else if (payload.state === 'failed') {
-            postToParent('SCENE_MESH_LOAD_FAILED', buildSceneMeshLoadFailedPayload(global, payload.error));
+            for (const module of modules) {
+                postToParent('SCENE_MESH_LOAD_FAILED', buildSceneMeshLoadFailedPayload(global, module, payload.error));
+            }
         }
     });
 
@@ -932,10 +940,10 @@ const initPostMessageBridge = (global: Global) => {
         if (suppressCollisionOutbound) {
             return;
         }
-        postToParent(
-            'SHADOW_SYSTEM_READY',
-            buildShadowSystemReadyPayload(global, isShadowOutputEnabled(global))
-        );
+        if (!isShadowOutputEnabled(global)) {
+            return;
+        }
+        postToParent('SHADOW_SYSTEM_READY', buildShadowSystemReadyPayload());
     });
 
     events.on('editHistory:stateChanged', (data: { canUndo: boolean; canRedo: boolean }) => {

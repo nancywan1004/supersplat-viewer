@@ -1,9 +1,8 @@
-import {
-    collisionActive,
-    collisionEnabled,
-    getCameraCollisionManager
-} from '../../collision/camera-collision-manager';
+import { collisionEnabled, getCameraCollisionManager } from '../../collision/camera-collision-manager';
+import type { SceneMeshLoadIntent } from '../../collision/scene-mesh-load-intent';
 import { ensureSceneMeshForIntent } from '../../collision/scene-mesh-load-orchestrator';
+import { isShadowSystemEnabled } from '../../vfx/shadow/shadow-policy';
+import { MESSAGE_BRIDGE_MODULE } from '../modules-types';
 import { resolveCollisionUrl, setCollisionUrl } from '../../collision/scene-collision-source';
 import {
     patchSceneAssetCollisionRuntimeState,
@@ -17,28 +16,50 @@ import {
 import type { SceneCollisionSettingsPatch } from '../../schemas/v2-custom';
 import type { Global } from '../../types';
 
+export type SceneMeshLoadBridgeModule =
+    | typeof MESSAGE_BRIDGE_MODULE.camera
+    | typeof MESSAGE_BRIDGE_MODULE.environment;
+
 export type SceneMeshLoadFinishedPayload = {
-    module: 'camera';
+    module: SceneMeshLoadBridgeModule;
     collisionUrl?: string;
 };
 
 export type SceneMeshLoadFailedPayload = {
-    module: 'camera';
+    module: SceneMeshLoadBridgeModule;
     collisionUrl?: string;
     message?: string;
 };
 
+/** 按加载 intent 决定出站 `module`；双 intent 时返回两项，由 message-bridge 各发一条。 */
+export function resolveSceneMeshLoadOutboundModules(
+    global: Global,
+    intent?: SceneMeshLoadIntent
+): SceneMeshLoadBridgeModule[] {
+    const hasExplicitIntent = intent?.wantCollision === true || intent?.wantShadow === true;
+    const wantCollision = hasExplicitIntent
+        ? intent?.wantCollision === true
+        : collisionEnabled(global);
+    const wantShadow = hasExplicitIntent
+        ? intent?.wantShadow === true
+        : isShadowSystemEnabled(global);
+    const modules: SceneMeshLoadBridgeModule[] = [];
+    if (wantCollision) {
+        modules.push(MESSAGE_BRIDGE_MODULE.camera);
+    }
+    if (wantShadow) {
+        modules.push(MESSAGE_BRIDGE_MODULE.environment);
+    }
+    if (modules.length === 0) {
+        modules.push(MESSAGE_BRIDGE_MODULE.camera);
+    }
+    return modules;
+}
+
+/** 出站即表示碰撞已开启且资源就绪；`enabled` / `active` 由事件语义隐含，不再重复携带。 */
 export type CollisionSystemReadyPayload = {
     module: 'camera';
-    enabled: boolean;
-    active: boolean;
     collisionUrl?: string;
-};
-
-export type ShadowSystemReadyPayload = {
-    module: 'camera';
-    enabled: boolean;
-    outputActive: boolean;
 };
 
 const collisionLoadErrorMessage = (error: unknown): string | undefined => {
@@ -51,22 +72,26 @@ const collisionLoadErrorMessage = (error: unknown): string | undefined => {
     return String(error);
 };
 
-export function buildSceneMeshLoadFinishedPayload(global: Global): SceneMeshLoadFinishedPayload {
+export function buildSceneMeshLoadFinishedPayload(
+    global: Global,
+    module: SceneMeshLoadBridgeModule
+): SceneMeshLoadFinishedPayload {
     const collisionUrl = resolveCollisionUrl(global)?.url;
     return {
-        module: 'camera',
+        module,
         ...(collisionUrl ? { collisionUrl } : {})
     };
 }
 
 export function buildSceneMeshLoadFailedPayload(
     global: Global,
+    module: SceneMeshLoadBridgeModule,
     error?: unknown
 ): SceneMeshLoadFailedPayload {
     const collisionUrl = resolveCollisionUrl(global)?.url;
     const message = collisionLoadErrorMessage(error);
     return {
-        module: 'camera',
+        module,
         ...(collisionUrl ? { collisionUrl } : {}),
         ...(message ? { message } : {})
     };
@@ -76,21 +101,7 @@ export function buildCollisionSystemReadyPayload(global: Global): CollisionSyste
     const collisionUrl = resolveCollisionUrl(global)?.url;
     return {
         module: 'camera',
-        enabled: collisionEnabled(global),
-        active: collisionActive(global),
         ...(collisionUrl ? { collisionUrl } : {})
-    };
-}
-
-export function buildShadowSystemReadyPayload(
-    global: Global,
-    outputActive: boolean
-): ShadowSystemReadyPayload {
-    const shadow = global.settings.postEffectSettings?.shadow as { enabled?: boolean } | undefined;
-    return {
-        module: 'camera',
-        enabled: shadow?.enabled !== false,
-        outputActive
     };
 }
 
