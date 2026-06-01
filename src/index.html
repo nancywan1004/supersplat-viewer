@@ -79,10 +79,10 @@
                 unified: url.searchParams.has('unified'),
                 aa: url.searchParams.has('aa'),
                 noreveal: url.searchParams.has('noreveal'),
-                noBottomUI: false,  // url.searchParams.has('noBottomUI')
+                noBottomUI: true,  // url.searchParams.has('noBottomUI')
                 splatMeshUrl,
                 allowEditMode: !url.searchParams.has('noEditMode'),
-                showEditUI: true,
+                showEditUI: false,
                 disableCameraBounds: false,
                 trackEditHistory: false, //url.searchParams.get('trackEditHistory') !== 'false',
                 editUiTransport: url.searchParams.get('editUiTransport') === 'message-bridge' ? 'message-bridge' : 'internal',
