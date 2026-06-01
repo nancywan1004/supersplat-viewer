@@ -33,7 +33,7 @@ const PALETTES_HEX: ReadonlyArray<ReadonlyArray<string>> = [
     ['#262338', '#382E44', '#463750', '#5B465A', '#684F5C', '#825D63', '#9D6968', '#B9786A', '#C38366', '#D09168', '#D8A16E', '#DBA971', '#E4B578', '#E9C17E', '#F0CD86', '#F3D694', '#F6DB9B', '#F9E1A3', '#FBE6AE', '#FDECC1'],
     ['#101E27', '#143544', '#164A5E', '#1F685D', '#234D7D', '#346D91', '#158A6D', '#1B9D7C', '#E34540', '#DB6840', '#EC7C45', '#30AB90', '#E79A4F', '#3CB99D', '#E2B561', '#DDBF88', '#B0CEBE', '#D7DFC8', '#F0E3B6', '#FDFDFD'],
     ['#323558', '#464C72', '#545E84', '#667291', '#71809E', '#7C8BA8', '#DE413E', '#8A99B5', '#91AD9B', '#90A8BD', '#9DB6C5', '#A8C7A8', '#A9CBDC', '#BBD2DE', '#C2DAE3', '#CDE0E7', '#D8EAE4', '#E4EBE5', '#EFF0EA', '#FBFBF9'],
-    ['#111124', '#151633', '#181A40', '#1F2149', '#24285B', '#28306A', '#2F3D84', '#34479A', '#3C53AF', '#4360C4', '#546ECA', '#657BD2', '#914453', '#AC5160', '#C46669', '#D78078', '#E89781', '#F3BA91', '#F9DEA0', '#FEFEFE']
+    ["#000649", "#62adb4", "#245e7c", "#2c4fa8", "#814bba", "#62daff", "#faa762", "#ffc5e9", "#cdfab1", "#90A8BD", "#9DB6C5", "#ba931f", "#a0f8d3", "#a5d8f3", "#b789f7", "#86cce6", "#a9f4db", "#f8baff", "#8cff7f", "#ffff9d"]
 ] as const;
 
 export type PalettePixelSettings = {
