@@ -2,7 +2,8 @@ import {
     allocateNextUserLightId,
     applyLightAdd,
     applyLightToggle,
-    applyShadowDirectionSet
+    applyShadowDirectionSet,
+    applyShadowSetFromHost
 } from '../../editor-modules/protocol-adapters/environment-protocol-adapter';
 import type { Global } from '../../types';
 import type { ExperienceSettings } from '../../schemas/v2';
@@ -937,10 +938,7 @@ export function initPostEffectUI(global: Global): () => void {
             if (editTransport === 'message-bridge') {
                 sendEditProtocolMessage({ type: 'SHADOW_SET', value: enabled });
             } else {
-                sh.enabled = enabled;
-                syncGsplatShadowCastingFromSettings(global);
-                updatePointLightsFromSettings(global);
-                firePostEffectChanged();
+                void applyShadowSetFromHost(global, enabled);
             }
             syncFromSettings();
             pushEditHistorySafe();

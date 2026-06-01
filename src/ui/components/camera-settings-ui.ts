@@ -11,6 +11,7 @@ import {
     collisionEnabled,
     getCameraCollisionManager
 } from '../../collision/camera-collision-manager';
+import { applyCollisionSetFromHost } from '../../editor-modules/protocol-adapters/collision-protocol-adapter';
 import type { Global } from '../../types';
 
 export function syncSceneAssetCollisionFromState(global: Global): void {
@@ -252,11 +253,13 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
     if (enabledInput) {
         enabledInput.checked = collisionEnabled(global);
         onEnabledChange = () => {
-            collisionMgr().setEnabled(enabledInput.checked);
-            if (scalePanel) {
-                scalePanel.classList.toggle('hidden', !enabledInput.checked);
-            }
-            updateActiveHint();
+            const enabled = enabledInput.checked;
+            void applyCollisionSetFromHost(global, enabled).finally(() => {
+                if (scalePanel) {
+                    scalePanel.classList.toggle('hidden', !enabledInput.checked);
+                }
+                updateActiveHint();
+            });
         };
         enabledInput.addEventListener('change', onEnabledChange);
         if (scalePanel) {

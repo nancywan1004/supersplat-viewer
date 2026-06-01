@@ -5,6 +5,7 @@
 
 import { getPositionInFrontOfCamera } from '../../scene-assets/asset-placement-handler';
 import { spotApexToHalfDeg, updatePointLightsFromSettings } from '../../light';
+import { ensureSceneMeshForIntent } from '../../collision/scene-mesh-load-orchestrator';
 import { syncGsplatShadowCastingFromSettings } from '../../vfx/shadow';
 import type { ExperienceSettings } from '../../schemas/v2';
 import {
@@ -649,6 +650,20 @@ export function applyShadowSet(global: Global, enabled: boolean): void {
     (global.app as { __directionalLightSignature?: string }).__directionalLightSignature = undefined;
     updatePointLightsFromSettings(global);
     global.events.fire('postEffect:changed');
+}
+
+/** 父级 / 协议开启阴影：先确保 scene mesh 已加载，再写入 settings。 */
+export async function applyShadowSetFromHost(global: Global, enabled: boolean): Promise<void> {
+    if (!enabled) {
+        applyShadowSet(global, false);
+        return;
+    }
+    const meshResult = await ensureSceneMeshForIntent(global, { wantShadow: true });
+    if (meshResult.ok === false) {
+        console.warn('[Shadow] SHADOW_SET enable failed:', meshResult.message);
+        return;
+    }
+    applyShadowSet(global, true);
 }
 
 /** SHADOW_INTENSITY_UPDATE → shadow.darken (0~1) */

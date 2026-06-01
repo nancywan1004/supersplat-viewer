@@ -8,7 +8,8 @@ export {
     suspendShadowPipelineForGsplatLoad,
     scheduleShadowPipeline,
     notifyViewportReadyForShadow,
-    getShadowApplyScript
+    getShadowApplyScript,
+    SHADOW_SYSTEM_READY
 } from './shadow-system';
 export type { ShadowPipelineMount } from './shadow-system';
 export { initShadowCatcher, ShadowCatcher } from './shadow-catcher';

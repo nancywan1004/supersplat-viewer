@@ -14,7 +14,11 @@ import {
     SCENE_ASSET_COLLISION_APPLY_RUNTIME_STATE
 } from '../scene-assets/collision/scene-asset-collision-state';
 import { isShadowSystemEnabled } from '../vfx/shadow/shadow-policy';
+import type { SceneMeshLoadIntent } from './scene-mesh-load-intent';
 import type { Global } from '../types';
+
+/** Viewer 内部事件；出站协议名为 `COLLISION_SYSTEM_READY`（见 message-bridge）。 */
+export const COLLISION_SYSTEM_READY = 'collisionSystem:ready';
 
 /** 将门控后的 collision 写入 walk / fly / input / nav */
 export type CameraCollisionConsumers = {
@@ -101,14 +105,34 @@ export class CameraCollisionManager {
         this.global.events.fire('cameraCollision:changed');
         this.global.events.fire('sceneAssetCollision:changed');
         this.scheduleSceneMeshLoad();
+        if (enabled) {
+            this.syncConsumers();
+            if (this.isSceneMeshReady({ wantCollision: true })) {
+                this.emitCollisionSystemReadyIfApplicable();
+            }
+        }
+    }
+
+    isSceneMeshReady(intent?: SceneMeshLoadIntent): boolean {
+        if (this.loadState !== 'ready') {
+            return false;
+        }
+        return this.isLoadSatisfied(intent);
+    }
+
+    needsSceneMeshLoad(intent?: SceneMeshLoadIntent): boolean {
+        if (this.shouldLoadSceneMesh(intent)) {
+            return !this.isSceneMeshReady(intent);
+        }
+        return false;
     }
 
     /** 按需加载 scene mesh（GLB）与/或 voxel collision。 */
-    async ensureSceneMeshLoaded(): Promise<void> {
-        if (!this.shouldLoadSceneMesh()) {
+    async ensureSceneMeshLoaded(intent?: SceneMeshLoadIntent): Promise<void> {
+        if (!this.shouldLoadSceneMesh(intent)) {
             return;
         }
-        if (this.loadState === 'ready' && this.isLoadSatisfied()) {
+        if (this.isSceneMeshReady(intent)) {
             return;
         }
         if (this.loadState === 'loading' && this.loadPromise) {
@@ -129,7 +153,7 @@ export class CameraCollisionManager {
             }
         }
 
-        const plan = this.sceneMeshLoadPlan(collisionUrl);
+        const plan = this.sceneMeshLoadPlan(collisionUrl, intent);
         if (!plan.loadSceneMesh && !plan.loadVoxelCollision) {
             return;
         }
@@ -173,6 +197,7 @@ export class CameraCollisionManager {
                 if (sceneMeshOk && voxelOk) {
                     this.loadState = 'ready';
                     this.emitLoadState('ready');
+                    this.emitCollisionSystemReadyIfApplicable();
                 } else {
                     this.loadState = 'failed';
                     this.emitLoadState('failed');
@@ -190,14 +215,23 @@ export class CameraCollisionManager {
         return this.loadPromise;
     }
 
-    private shouldFetchCollisionFromUniverse(): boolean {
+    private shouldFetchCollisionFromUniverse(intent?: SceneMeshLoadIntent): boolean {
         if (!canGenerateCollision(this.global)) {
             return false;
         }
-        return collisionActive(this.global) || isShadowSystemEnabled(this.global);
+        const wantCollision = intent?.wantCollision ?? collisionActive(this.global);
+        const wantShadow = intent?.wantShadow ?? isShadowSystemEnabled(this.global);
+        return wantCollision || wantShadow;
     }
 
-    private sceneMeshLoadPlan(collisionUrl?: string): {
+    emitCollisionSystemReadyIfApplicable(): void {
+        if (!collisionEnabled(this.global)) {
+            return;
+        }
+        this.global.events.fire(COLLISION_SYSTEM_READY);
+    }
+
+    sceneMeshLoadPlan(collisionUrl?: string, intent?: SceneMeshLoadIntent): {
         sceneMeshUrl?: string;
         loadSceneMesh: boolean;
         loadVoxelCollision: boolean;
@@ -205,8 +239,10 @@ export class CameraCollisionManager {
     } {
         const url = collisionUrl ?? this.getCollisionUrl();
         const meshUrl = sceneMeshUrl(url);
-        const needCollision = !!url && collisionActive(this.global);
-        const needShadowSceneMesh = isShadowSystemEnabled(this.global) && !!meshUrl;
+        const wantCollision = intent?.wantCollision ?? collisionActive(this.global);
+        const wantShadow = intent?.wantShadow ?? isShadowSystemEnabled(this.global);
+        const needCollision = !!url && wantCollision;
+        const needShadowSceneMesh = wantShadow && (!!meshUrl || canGenerateCollision(this.global));
         const collisionIsSceneMeshGlb = !!url && isSceneMeshGlbUrl(url);
         const collisionIsVoxel = !!url && !collisionIsSceneMeshGlb;
 
@@ -217,8 +253,8 @@ export class CameraCollisionManager {
         return { sceneMeshUrl: meshUrl, loadSceneMesh, loadVoxelCollision, applySceneMeshCollision };
     }
 
-    private isLoadSatisfied(): boolean {
-        const plan = this.sceneMeshLoadPlan();
+    private isLoadSatisfied(intent?: SceneMeshLoadIntent): boolean {
+        const plan = this.sceneMeshLoadPlan(undefined, intent);
         if (plan.loadSceneMesh && !this.sceneMeshEntity) {
             return false;
         }
@@ -231,13 +267,14 @@ export class CameraCollisionManager {
         return true;
     }
 
-    private shouldLoadSceneMesh(): boolean {
+    private shouldLoadSceneMesh(intent?: SceneMeshLoadIntent): boolean {
         const url = this.getCollisionUrl();
         const meshUrl = sceneMeshUrl(url);
-        const needCollision = !!url && collisionActive(this.global);
-        const needShadowSceneMesh = isShadowSystemEnabled(this.global)
-            && (!!meshUrl || canGenerateCollision(this.global));
-        const needUniverse = !url && this.shouldFetchCollisionFromUniverse();
+        const wantCollision = intent?.wantCollision ?? collisionActive(this.global);
+        const wantShadow = intent?.wantShadow ?? isShadowSystemEnabled(this.global);
+        const needCollision = !!url && wantCollision;
+        const needShadowSceneMesh = wantShadow && (!!meshUrl || canGenerateCollision(this.global));
+        const needUniverse = !url && this.shouldFetchCollisionFromUniverse(intent);
         return needCollision || needShadowSceneMesh || needUniverse;
     }
 
