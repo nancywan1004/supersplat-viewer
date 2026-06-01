@@ -51,9 +51,9 @@ export function applyPlacedMeshShadowFlags(entity: Entity, shadowEnabled: boolea
 
 /**
  * 主场景高斯 castShadows 恒 false；放置高斯随 shadow.enabled 投射（unified 花屏风险需实测）。
- * 放置 mesh：cast + receiveShadows（A），shadow-apply 通过 exclude mask 排除 B。
- * 放置高斯：可 cast；B 叠影在自身屏幕区域由 exclude mask 排除。
- * 放置 image / video：与 mesh 相同，exclude 层 + 白模 mask，避免 B 横切叠影。
+ * 放置 mesh：cast + receiveShadows（A）；B 叠影由 ShadowReceiverOccluder 深度预写排除。
+ * 放置高斯：可 cast；B 叠影在自身屏幕区域由 exclude mask（G）排除。
+ * 放置 image / video：与 mesh 相同，ShadowReceiverOccluder 处理 B 遮挡。
  */
 export function syncGsplatShadowCastingFromSettings(global: Global, mainGsplatEntity?: Entity | null): void {
     const enabled = isShadowSystemEnabled(global);

@@ -17,7 +17,11 @@ import {
     SEMANTIC_POSITION
 } from 'playcanvas';
 import type { Global } from '../../types';
-import { PlacedMeshExcludeMask, syncPlacedMeshExcludeLayers } from './shadow-apply-exclude-mask';
+import {
+    PlacedMeshExcludeMask,
+    createShadowPassDepthTexture,
+    syncPlacedMeshExcludeLayers
+} from './shadow-apply-exclude-mask';
 import { isShadowSystemEnabled } from './shadow-policy';
 
 const isShadowOutputEnabledForApply = (global: Global): boolean =>
@@ -44,13 +48,19 @@ const shadowApplyVs = /* glsl */ `
     }
 `;
 
+/** 与 shadowMaskCamera（含 ShadowReceiverOccluder）深度比较，避免屏幕轮廓在前景遮挡处仍抠掉叠影。 */
+const EXCLUDE_DEPTH_BIAS = 0.0005;
+
 const shadowApplyFs = /* glsl */ `
     uniform sampler2D shadowTex;
     uniform sampler2D excludeMask;
+    uniform sampler2D excludeDepthTex;
+    uniform sampler2D shadowDepthTex;
     uniform float intensity;
     uniform float debugRt;
     uniform float debugExcludeMask;
     uniform float useExclude;
+    uniform float excludeDepthBias;
 
     void main(void) {
         ivec2 px = ivec2(gl_FragCoord.xy);
@@ -71,9 +81,15 @@ const shadowApplyFs = /* glsl */ `
             if (useExclude > 0.5) {
                 vec4 exS = texelFetch(excludeMask, px, 0);
                 // 勿用 alpha：exclude RT clearColor 为 (0,0,0,1)，取 a 会整屏排除、地面阴影消失。
-                // R=放置 render 资产，仅供 debug；render 资产已在 shadowMaskCamera 深度预写层遮挡接影。
-                // G/B=放置 gsplat，仍保持屏幕空间排除。
                 float gsplatMask = max(exS.g, exS.b);
+                if (gsplatMask > 0.001) {
+                    float exDepth = texelFetch(excludeDepthTex, px, 0).r;
+                    float occluderDepth = texelFetch(shadowDepthTex, px, 0).r;
+                    // 更近的深度值更小；放置高斯比 shadow pass 中已写入的几何更远则不应抠洞。
+                    if (exDepth > occluderDepth + excludeDepthBias) {
+                        gsplatMask = 0.0;
+                    }
+                }
                 blend *= (1.0 - gsplatMask);
             }
             gl_FragColor = vec4(0.0, 0.0, 0.0, blend);
@@ -427,9 +443,15 @@ class ShadowApplyRt extends Script {
             format: PIXELFORMAT_RGBA8,
             mipmaps: false
         });
+        const shadowDepthTex = createShadowPassDepthTexture(
+            device,
+            device.width,
+            device.height,
+            'shadowMaskDepth'
+        );
         const shadowRt = new RenderTarget({
             colorBuffer: shadowTex,
-            depth: true
+            depthBuffer: shadowDepthTex
         });
         smCamComp.renderTarget = shadowRt;
 
@@ -513,15 +535,21 @@ class ShadowApplyRt extends Script {
             const excludeTex = useExcludeMask
                 ? this._placedMeshExcludeMask!.getTexture()
                 : this._excludeMaskDummyTex;
+            const excludeDepthTex = useExcludeMask
+                ? this._placedMeshExcludeMask!.getDepthTexture()
+                : this._excludeMaskDummyTex;
             const useExclude = useExcludeMask ? 1 : 0;
 
             // shadowTex 由引擎写入（仅平行光参与），此处只做 (1-R)*intensity 叠黑，无自算投影
             device.scope.resolve('shadowTex')?.setValue(shadowTex);
             device.scope.resolve('excludeMask')?.setValue(excludeTex ?? shadowTex);
+            device.scope.resolve('excludeDepthTex')?.setValue(excludeDepthTex ?? shadowTex);
+            device.scope.resolve('shadowDepthTex')?.setValue(shadowDepthTex);
             device.scope.resolve('intensity')?.setValue(intensity);
             device.scope.resolve('debugRt')?.setValue(debugRt);
             device.scope.resolve('debugExcludeMask')?.setValue(debugExcludeMask);
             device.scope.resolve('useExclude')?.setValue(useExclude);
+            device.scope.resolve('excludeDepthBias')?.setValue(EXCLUDE_DEPTH_BIAS);
 
             if (debugRt > 0.5) {
                 device.setBlendState(BlendState.NOBLEND);
