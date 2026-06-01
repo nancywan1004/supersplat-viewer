@@ -16,19 +16,19 @@ const safeChunkReplace = (s: string, find: string | RegExp, repl: string) => {
     return out;
 };
 
-/** 通过 alpha 测试的 splat 片元输出纯白，供 exclude RT 采样（不依赖 splat 颜色亮度）。 */
+/** 通过 alpha 测试的 splat 片元输出绿色，和 render 资产的红色 mask 区分。 */
 export const patchGsplatExcludeMaskGlsl = (chunk: string) =>
     safeChunkReplace(
         chunk,
         'gl_FragColor = vec4(gaussianColor.xyz * alpha, alpha);',
-        'gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);'
+        'gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);'
     );
 
 export const patchGsplatExcludeMaskWgsl = (chunk: string) =>
     safeChunkReplace(
         chunk,
         'output.color = vec4f(vec3f(gaussianColor.xyz * alpha), f32(alpha));',
-        'output.color = vec4f(1.0, 1.0, 1.0, 1.0);'
+        'output.color = vec4f(0.0, 1.0, 0.0, 1.0);'
     );
 
 const resolveGsplatPsChunk = (device: GraphicsDevice, material: Material, lang: string) => {

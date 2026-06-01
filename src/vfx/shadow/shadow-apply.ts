@@ -51,6 +51,7 @@ const shadowApplyFs = /* glsl */ `
     uniform float debugRt;
     uniform float debugExcludeMask;
     uniform float useExclude;
+
     void main(void) {
         ivec2 px = ivec2(gl_FragCoord.xy);
         if (debugExcludeMask > 0.5) {
@@ -69,9 +70,11 @@ const shadowApplyFs = /* glsl */ `
             float blend = (1.0 - r) * intensity;
             if (useExclude > 0.5) {
                 vec4 exS = texelFetch(excludeMask, px, 0);
-                // 勿用 alpha：exclude RT clearColor 为 (0,0,0,1)，取 a 会整屏排除、地面阴影消失
-                float ex = max(exS.r, max(exS.g, exS.b));
-                blend *= (1.0 - ex);
+                // 勿用 alpha：exclude RT clearColor 为 (0,0,0,1)，取 a 会整屏排除、地面阴影消失。
+                // R=放置 render 资产，仅供 debug；render 资产已在 shadowMaskCamera 深度预写层遮挡接影。
+                // G/B=放置 gsplat，仍保持屏幕空间排除。
+                float gsplatMask = max(exS.g, exS.b);
+                blend *= (1.0 - gsplatMask);
             }
             gl_FragColor = vec4(0.0, 0.0, 0.0, blend);
         }
@@ -98,7 +101,10 @@ class ShadowApplyRt extends Script {
     private _placedMeshExcludeMask: PlacedMeshExcludeMask | null = null;
     private _shadowGeomEntity: Entity | null = null;
     private _shadowLayer: Layer | null = null;
+    private _shadowOccluderLayer: Layer | null = null;
     private _excludeMaskDummyTex: Texture | null = null;
+    private _shadowOccluderMaterial: StandardMaterial | null = null;
+    private readonly _savedShadowOccluderMaterials = new WeakMap<object, object>();
     /** 用于 "Show shadow plane" 时把接影平面画在最上层 */
     private _debugLayer: Layer | null = null;
     /** 动态生成的 testSphere 列表 */
@@ -220,6 +226,92 @@ class ShadowApplyRt extends Script {
         console.log('[Shadow] clearTestSplats: all test splats removed');
     }
 
+    private _getShadowOccluderMaterial(): StandardMaterial {
+        if (!this._shadowOccluderMaterial) {
+            const mat = new StandardMaterial();
+            mat.useLighting = false;
+            mat.useSkybox = false;
+            mat.useFog = false;
+            mat.useTonemap = false;
+            mat.blendType = BLEND_NONE;
+            mat.depthTest = true;
+            mat.depthWrite = true;
+            mat.redWrite = false;
+            mat.greenWrite = false;
+            mat.blueWrite = false;
+            mat.alphaWrite = false;
+            mat.update();
+            this._shadowOccluderMaterial = mat;
+        }
+        return this._shadowOccluderMaterial;
+    }
+
+    private _setShadowReceiverOccluderMaterials(global: Global, useOccluderMaterial: boolean): void {
+        const visit = (node: Entity) => {
+            const instances = node.render?.meshInstances as unknown[] | undefined;
+            if (instances?.length) {
+                for (const mi of instances as Array<{ material: object }>) {
+                    if (useOccluderMaterial) {
+                        if (!this._savedShadowOccluderMaterials.has(mi)) {
+                            this._savedShadowOccluderMaterials.set(mi, mi.material);
+                        }
+                        mi.material = this._getShadowOccluderMaterial();
+                    } else {
+                        const orig = this._savedShadowOccluderMaterials.get(mi);
+                        if (orig) {
+                            mi.material = orig;
+                        }
+                    }
+                }
+            }
+            node.children.forEach((child) => visit(child as Entity));
+        };
+
+        for (const entry of global.state.scenePlacedEntities ?? []) {
+            if (!entry.entity) continue;
+            if (entry.assetType === 'mesh' || entry.assetType === 'image' || entry.assetType === 'video') {
+                visit(entry.entity);
+            }
+        }
+    }
+
+    private _syncShadowReceiverOccluderLayers(global: Global): void {
+        const layer = this._shadowOccluderLayer;
+        if (!layer) return;
+        const layerId = layer.id;
+
+        const visit = (node: Entity) => {
+            if (node.render) {
+                const current = [...(node.render.layers as number[])];
+                if (!current.includes(layerId)) {
+                    node.render.layers = [...current, layerId];
+                }
+            }
+            node.children.forEach((child) => visit(child as Entity));
+        };
+
+        for (const entry of global.state.scenePlacedEntities ?? []) {
+            if (!entry.entity) continue;
+            if (entry.assetType === 'mesh' || entry.assetType === 'image' || entry.assetType === 'video') {
+                visit(entry.entity);
+            }
+        }
+    }
+
+    private readonly _onShadowOccluderPrerenderLayer = (cam: unknown, layer: Layer) => {
+        if (!this.global || cam !== this._shadowMaskCamera?.camera || layer !== this._shadowOccluderLayer) {
+            return;
+        }
+        this._setShadowReceiverOccluderMaterials(this.global, true);
+    };
+
+    private readonly _onShadowOccluderPostrenderLayer = (cam: unknown, layer: Layer) => {
+        if (!this.global || cam !== this._shadowMaskCamera?.camera || layer !== this._shadowOccluderLayer) {
+            return;
+        }
+        this._setShadowReceiverOccluderMaterials(this.global, false);
+    };
+
     initialize() {
         const app = this.app as any;
         const global = app.__shadowApplyGlobal ?? this.global;
@@ -240,6 +332,17 @@ class ShadowApplyRt extends Script {
             layers.insert(shadowLayer, layers.layerList.length);
         }
         this._shadowLayer = shadowLayer;
+
+        let shadowOccluderLayer = layers.getLayerByName('ShadowReceiverOccluder') as Layer | null;
+        if (!shadowOccluderLayer) {
+            shadowOccluderLayer = new Layer({ name: 'ShadowReceiverOccluder' });
+            const shadowLayerIndex = layers.layerList.indexOf(shadowLayer);
+            layers.insert(
+                shadowOccluderLayer,
+                shadowLayerIndex >= 0 ? shadowLayerIndex : layers.layerList.length
+            );
+        }
+        this._shadowOccluderLayer = shadowOccluderLayer;
 
         let debugLayer = layers.getLayerByName('ShadowDebug') as Layer | null;
         if (!debugLayer) {
@@ -280,6 +383,8 @@ class ShadowApplyRt extends Script {
             setLayersOnHierarchy(geomEntity);
         }
         app.scene.layers.markDirty();
+        app.scene.on('prerender:layer', this._onShadowOccluderPrerenderLayer);
+        app.scene.on('postrender:layer', this._onShadowOccluderPostrenderLayer);
 
         const mainCamEntity = global.camera;
         const mainCamComp = mainCamEntity?.camera;
@@ -289,6 +394,7 @@ class ShadowApplyRt extends Script {
 
         console.log('[Shadow] ShadowApplyRt init', {
             shadowLayerId: shadowLayer?.id,
+            shadowOccluderLayerId: shadowOccluderLayer?.id,
             debugLayerId: debugLayer?.id,
             debugVisual,
             shadowSystemEnabled,
@@ -309,7 +415,7 @@ class ShadowApplyRt extends Script {
             farClip: mainCamComp.farClip
         });
         const smCamComp = shadowMaskCamera.camera!;
-        smCamComp.layers = [shadowLayer.id];
+        smCamComp.layers = [shadowOccluderLayer.id, shadowLayer.id];
         // 确保阴影相机在主相机之前渲染（低 priority = 先渲染）
         smCamComp.priority = -1;
 
@@ -350,10 +456,12 @@ class ShadowApplyRt extends Script {
             mipmaps: false
         });
         syncPlacedMeshExcludeLayers(global);
+        this._syncShadowReceiverOccluderLayers(global);
 
         const events = global.events;
         const onSceneAssetsChanged = () => {
             syncPlacedMeshExcludeLayers(global);
+            this._syncShadowReceiverOccluderLayers(global);
             this._placedMeshExcludeMask?.refreshGsplatExcludeMaskMaterials(global);
         };
         events.on('sceneAssets:added', onSceneAssetsChanged);

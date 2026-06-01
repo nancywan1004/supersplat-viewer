@@ -1,8 +1,8 @@
 /**
  * 放置资产 shadow-apply（B 管线）排除 mask。
  * 专用相机（priority 1）只渲染 PlacedMeshExclude 层到离屏 RT；
- * mesh / image / video：prerender:layer 临时白模（R=1）；
- * gaussian：同层真实 splat 绘制，gsplatPS 输出纯白（mask-only，轮廓与 splat 一致）。
+ * mesh / image / video：prerender:layer 临时红模（R=1，仅供 debug；B 遮挡由 ShadowReceiverOccluder 深度层处理）；
+ * gaussian：同层真实 splat 绘制，gsplatPS 输出绿色（G=1，轮廓与 splat 一致）。
  * 主相机 layers 不含 PlacedMeshExclude。
  */
 import {
@@ -102,7 +102,7 @@ function createMaskWriteMaterial(): StandardMaterial {
     mat.useSkybox = false;
     mat.useFog = false;
     mat.useTonemap = false;
-    mat.emissive.set(1, 1, 1);
+    mat.emissive.set(1, 0, 0);
     mat.diffuse.set(0, 0, 0);
     mat.specular.set(0, 0, 0);
     mat.blendType = BLEND_NONE;
@@ -113,7 +113,7 @@ function createMaskWriteMaterial(): StandardMaterial {
 }
 
 export class PlacedMeshExcludeMask {
-    private readonly _whiteMat: StandardMaterial;
+    private readonly _renderMaskMat: StandardMaterial;
 
     private readonly _savedMaterials = new WeakMap<object, object>();
 
@@ -135,7 +135,7 @@ export class PlacedMeshExcludeMask {
         null;
 
     constructor(private readonly device: GraphicsDevice) {
-        this._whiteMat = createMaskWriteMaterial();
+        this._renderMaskMat = createMaskWriteMaterial();
     }
 
     /** exclude 相机 unified gsplat 材质就绪后 patch 为 mask-only 输出。 */
@@ -281,7 +281,7 @@ export class PlacedMeshExcludeMask {
                         if (!this._savedMaterials.has(mi)) {
                             this._savedMaterials.set(mi, mi.material);
                         }
-                        mi.material = this._whiteMat;
+                        mi.material = this._renderMaskMat;
                     } else {
                         const orig = this._savedMaterials.get(mi);
                         if (orig) {
