@@ -1,6 +1,7 @@
 import type { Entity, EventHandler, AppBase, Asset } from 'playcanvas';
 
-import type { ExperienceSettings } from './settings';
+import type { Picker } from './picker';
+import type { ExperienceSettings, SceneCollisionSettings } from './settings';
 import {
     type AssetEffectRuntimeStatus,
     type RevealEffectRuntimeStatus,
@@ -40,6 +41,14 @@ export type EffectsRuntimeState = {
     };
     asset: { instances: Record<string, { effectId: string; status: AssetEffectRuntimeStatus }> };
     lastError?: { code: string; message: string; effectId?: string; command?: string };
+};
+
+/**
+ * 放置资产碰撞会话运行态（`global.state` / observe；`debugVisual` 不入 settings.json）。
+ * 持久化字段来自 `settings.collision`；`enabled` 为场景 mesh + 放置资产 AABB 总开关。
+ */
+export type SceneAssetCollisionRuntimeState = SceneCollisionSettings & {
+    debugVisual: boolean;
 };
 
 /** 资产库项类型 */
@@ -146,6 +155,7 @@ type Config = {
     skyboxUrl?: string;
     contentUrl?: string;
     contents?: Promise<Response>;
+    /** 场景碰撞资源 URL（`?collision=` / `?voxel=`）；GLB 时同时用于阴影接影 */
     collisionUrl?: string;
 
     noui: boolean;
@@ -160,8 +170,6 @@ type Config = {
     aa: boolean;                                // render with antialiasing
     noreveal: boolean;                          // disable reveal effect transition animation
     showCameraPathVisualizer?: boolean;         // show camera path visualization
-    /** 接影几何 GLB 的 URL（如 /assets/mesh/gabriel.glb），由 urlParam splatMesh 传入；无则用平面 */
-    splatMeshUrl?: string;
     /** 是否允许进入编辑模式（默认 true）；设为 false 时不显示编辑按钮且不响应进入编辑的 postMessage */
     allowEditMode?: boolean;
     /** 是否启用编辑历史与撤销/重做（默认 false）；为 true 时才会记录历史并显示撤销/重做按钮及快捷键 */
@@ -241,6 +249,8 @@ type State = {
     selectedLightId?: string | null;
     /** 光源变换模式（与环境模块底部工具栏联动） */
     lightTransformMode?: LightTransformMode | null;
+    /** 放置资产 AABB 碰撞会话运行态；持久化见 `settings.collision` */
+    sceneAssetCollisionRuntimeState?: SceneAssetCollisionRuntimeState;
     gamingControls: boolean;
     /**
      * 特效运行态（与 `settings.effects` 三轨对齐）；不入 `settings.json`。
@@ -295,6 +305,8 @@ type Global = {
     camera: Entity;
     /** 见 {@link ViewSettings} */
     viewSettings?: ViewSettings;
+    /** Viewer 注入的共享深度拾取器；未注入时由 `pickWorldFromClientXY` 懒创建 */
+    picker?: Picker;
 };
 
 export {

@@ -27,6 +27,8 @@ import type { TorchLightSettings } from '../../schemas/v2-custom';
  */
 const TORCH_ENTITY_NAME = 'torchLight';
 const TORCH_PICK_THROTTLE_MS = 33;
+/** pickSurface 超时未返回时强制解除 pickInFlight，避免后续拾取永久阻塞 */
+const TORCH_PICK_IN_FLIGHT_TIMEOUT_MS = 400;
 const CAMERA_CHANGE_EPSILON = 1e-5;
 /** 拾取兜底距离（世界单位）：未命中时光源沿相机 forward 放在此距离处 */
 const TORCH_FALLBACK_DISTANCE = 5;
@@ -536,7 +538,43 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         return true;
     };
 
+    const resetPickRuntime = () => {
+        runtime.hasWorldPos = false;
+        runtime.lastDistance = 0;
+        runtime.lastPickFromMesh = false;
+        runtime.meshRangeBoost = 0;
+        runtime.depthJumpLockUntil = Number.NEGATIVE_INFINITY;
+        runtime.pendingFarDistance = 0;
+        runtime.pendingFarUntil = Number.NEGATIVE_INFINITY;
+        runtime.pickInFlight = false;
+        runtime.pickGeneration++;
+        runtime.pickDirty = true;
+        runtime.lastPickTime = Number.NEGATIVE_INFINITY;
+    };
+
+    const resolvePickClientXY = (): { clientX: number; clientY: number } | null => {
+        const cv = app.graphicsDevice.canvas as HTMLCanvasElement;
+        const rect = cv.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return null;
+        if (runtime.lastClientX !== null && runtime.lastClientY !== null) {
+            return { clientX: runtime.lastClientX, clientY: runtime.lastClientY };
+        }
+        return {
+            clientX: rect.left + rect.width * 0.5,
+            clientY: rect.top + rect.height * 0.5
+        };
+    };
+
+    const commitResolvedPick = (
+        resolved: { distance: number; fromMesh: boolean; rangeBoost: number },
+        at: number
+    ) => {
+        runtime.meshRangeBoost = resolved.rangeBoost;
+        applyPickedDistance(resolved.distance, at, resolved.fromMesh);
+    };
+
     const scheduleWorldPick = () => {
+        if (!global.state.readyToRender) return;
         if (!runtime.pickDirty || runtime.pickInFlight) return;
 
         const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -545,28 +583,19 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         const point = updateScreenUv(runtime.lastClientX, runtime.lastClientY);
         if (!point) return;
 
-        const picker = (app as unknown as {
-            __picker?: {
-                pickSurface?: (x: number, y: number) => Promise<{ position: Vec3; nearestPosition?: Vec3 } | null>;
-            };
-        }).__picker;
+        const picker = global.picker;
 
-        // 同步：mesh AABB 射线求交。命中即写入「沿视线的欧氏距离」缓存；
-        // 注意此处不再保存 mesh 命中的世界点本身（位置每帧由 onUpdate 用当前光标视线 × lastDistance 重算）
-        const cx = runtime.lastClientX;
-        const cy = runtime.lastClientY;
-        const meshPick = (cx !== null && cy !== null) ? computeMeshPickResult(cx, cy) : null;
+        const pickClient = resolvePickClientXY();
+        if (!pickClient) return;
+
+        // 同步 mesh AABB；与 gsplat pickSurface 在同一轮异步回调里合并提交，避免刷新后时序不同导致深度不一致
+        const meshPick = computeMeshPickResult(pickClient.clientX, pickClient.clientY);
         const meshDistSnapshot = meshPick?.distance ?? null;
         const meshBoostSnapshot = meshPick?.rangeBoost ?? 0;
 
-        const applyResolvedPick = (resolved: { distance: number; fromMesh: boolean; rangeBoost: number }, at: number) => {
-            runtime.meshRangeBoost = resolved.rangeBoost;
-            applyPickedDistance(resolved.distance, at, resolved.fromMesh);
-        };
-
         if (!picker?.pickSurface) {
             if (meshDistSnapshot !== null) {
-                applyResolvedPick({
+                commitResolvedPick({
                     distance: meshDistSnapshot,
                     fromMesh: true,
                     rangeBoost: meshBoostSnapshot
@@ -574,10 +603,8 @@ export function initTorchLight(global: Global): TorchControllerHandle {
             } else {
                 runtime.meshRangeBoost = 0;
             }
-            if (meshPick) {
-                runtime.pickDirty = false;
-                runtime.lastPickTime = now;
-            }
+            runtime.pickDirty = false;
+            runtime.lastPickTime = now;
             return;
         }
 
@@ -586,7 +613,6 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         runtime.pickInFlight = true;
         runtime.lastPickTime = now;
 
-        // 异步回调里不能复用模块级 _tmpCamPos（会被 onUpdate 改写），单独 snapshot 一份相机位置
         const camPosSnapshot = new Vec3().copy(global.camera.getPosition());
 
         picker.pickSurface(point.x, point.y).then((surface) => {
@@ -601,21 +627,38 @@ export function initTorchLight(global: Global): TorchControllerHandle {
                 const pickerDist = Math.sqrt(dx * dx + dy * dy + dz * dz);
                 const resolved = resolveTorchPickDepth(meshDistSnapshot, meshBoostSnapshot, pickerDist);
                 if (resolved) {
-                    applyResolvedPick(resolved, callbackNow);
-                    runtime.hasWorldPos = true;
+                    commitResolvedPick(resolved, callbackNow);
                 }
-            } else if (!meshPick && !runtime.hasWorldPos) {
-                runtime.hasWorldPos = false;
+            } else if (meshDistSnapshot !== null) {
+                commitResolvedPick({
+                    distance: meshDistSnapshot,
+                    fromMesh: true,
+                    rangeBoost: meshBoostSnapshot
+                }, callbackNow);
             }
         }).catch(() => {
-            if (!runtime.destroyed && generation === runtime.pickGeneration && !meshPick && !runtime.hasWorldPos) {
-                runtime.hasWorldPos = false;
+            if (runtime.destroyed || generation !== runtime.pickGeneration) return;
+            if (meshDistSnapshot !== null) {
+                commitResolvedPick({
+                    distance: meshDistSnapshot,
+                    fromMesh: true,
+                    rangeBoost: meshBoostSnapshot
+                }, typeof performance !== 'undefined' ? performance.now() : Date.now());
             }
         }).finally(() => {
-            if (!runtime.destroyed && generation === runtime.pickGeneration) {
+            if (runtime.destroyed) return;
+            if (generation === runtime.pickGeneration) {
                 runtime.pickInFlight = false;
             }
         });
+    };
+
+    const recoverStuckPickInFlight = (now: number) => {
+        if (!runtime.pickInFlight) return;
+        if (now - runtime.lastPickTime <= TORCH_PICK_IN_FLIGHT_TIMEOUT_MS) return;
+        runtime.pickInFlight = false;
+        runtime.pickGeneration++;
+        runtime.pickDirty = true;
     };
 
     const onPointerMove = (event: PointerEvent) => {
@@ -641,6 +684,9 @@ export function initTorchLight(global: Global): TorchControllerHandle {
 
         if (enabled !== lastEnabledState) {
             setTorchCursorActive(global, enabled);
+            if (enabled) {
+                resetPickRuntime();
+            }
             lastEnabledState = enabled;
         }
 
@@ -650,6 +696,8 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         }
 
         markPickDirtyIfCameraChanged();
+        const pickNow = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        recoverStuckPickInFlight(pickNow);
         scheduleWorldPick();
 
         const cfg = ensureTorchLight(settings) as TorchLightSettings;
@@ -658,17 +706,15 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         (entity.light as unknown as { range: number }).range = userRange + rangeBoost;
 
         let pos: Vec3 | null = null;
+        const pickClient = resolvePickClientXY();
         if (runtime.hasWorldPos &&
             runtime.lastDistance > 0 &&
-            runtime.lastClientX !== null &&
-            runtime.lastClientY !== null) {
-            // 关键：方向用当前光标实时视线，深度用上次拾取得到的视线长度
-            // —— picker 异步 stale / mesh 异步覆盖时，光源仍贴当前光标方向，避免「闪回鼠标路径上的旧位置」
+            pickClient) {
             const cv = app.graphicsDevice.canvas as HTMLCanvasElement;
             const rect = cv.getBoundingClientRect();
             if (rect.width > 0 && rect.height > 0) {
-                const sx = runtime.lastClientX - rect.left;
-                const sy = runtime.lastClientY - rect.top;
+                const sx = pickClient.clientX - rect.left;
+                const sy = pickClient.clientY - rect.top;
                 const camComp = (global.camera as unknown as { camera?: { screenToWorld?: (x: number, y: number, z: number, out: Vec3) => Vec3; farClip: number } }).camera;
                 if (camComp?.screenToWorld) {
                     const farPoint = camComp.screenToWorld(sx, sy, camComp.farClip ?? 1000, _tmpWorld);
@@ -687,11 +733,11 @@ export function initTorchLight(global: Global): TorchControllerHandle {
                 }
             }
         }
-        if (!pos && runtime.lastClientX !== null && runtime.lastClientY !== null) {
-            pos = computeWorldOnRay(runtime.lastClientX, runtime.lastClientY, TORCH_FALLBACK_DISTANCE);
+        if (!pos && pickClient) {
+            pos = computeWorldOnRay(pickClient.clientX, pickClient.clientY, TORCH_FALLBACK_DISTANCE);
         }
 
-        // 兜底：未发生过 pointermove → 沿相机 forward 放置
+        // 兜底：画布尺寸异常
         if (!pos) {
             const cam = global.camera;
             const camPos = _tmpCamPos.copy(cam.getPosition());
@@ -754,7 +800,7 @@ export function initTorchLight(global: Global): TorchControllerHandle {
             const vs = ensureViewSettings(global);
             if (!vs.torch) vs.torch = { active: false };
             vs.torch.active = !!active;
-            if (active) runtime.pickDirty = true;
+            if (active) resetPickRuntime();
             onUpdate();
         },
         refreshParamsFromSettings() {
@@ -804,8 +850,9 @@ export function getTorchLightScreenUv(global: Global): { u: number; v: number } 
     return { u: runtime.screenU, v: runtime.screenV };
 }
 
-/** 读取手电筒当前缓存的深度拾取世界坐标；未命中时返回 null。 */
+/** 读取手电筒当前缓存的深度拾取世界坐标；未成功拾取时返回 null（高斯 shader 不应用兜底光斑）。 */
 export function getTorchLightWorldPosition(global: Global): Vec3 | null {
+    if (!isTorchEntityEnabled(global)) return null;
     const handle = (global as unknown as { __torchLight?: TorchControllerHandle }).__torchLight;
     const runtime = handle ? (handle as unknown as { __runtime?: TorchRuntimeState }).__runtime : undefined;
     if (!runtime?.hasWorldPos) return null;

@@ -58,6 +58,31 @@ export function readGlobalShowAudioCalloutInViewer(settings: ExperienceSettings)
     return sm.audio?.showCalloutInViewer !== false;
 }
 
+export function readGlobalVideoConeHalfDeg(settings: ExperienceSettings): number {
+    const v = settings.sceneMediaHotspot?.video?.coneHalfDeg;
+    if (typeof v === 'number' && Number.isFinite(v)) {
+        return v;
+    }
+    return DEFAULT_SCENE_MEDIA_HOTSPOT.video.coneHalfDeg;
+}
+
+/** 存盘用：展开热区全局参数为完整字段（含默认值） */
+export function serializeSceneMediaHotspotForPersistence(
+    settings: ExperienceSettings
+): SceneMediaHotspotSettings {
+    ensureSceneMediaHotspot(settings);
+    return {
+        video: {
+            coneHalfDeg: readGlobalVideoConeHalfDeg(settings),
+            hotspotAutoplayEnabled: readGlobalVideoHotspotAutoplayEnabled(settings)
+        },
+        audio: {
+            hotspotAutoplayEnabled: readGlobalAudioHotspotAutoplayEnabled(settings),
+            showCalloutInViewer: readGlobalShowAudioCalloutInViewer(settings)
+        }
+    };
+}
+
 /**
  * 嵌套子节点 `ensure`：必填字段缺失则补默认；可选 boolean 字段按「仅非默认值入库」清洗。
  * - `hotspotAutoplayEnabled`：默认 true，仅显式 false 入库；

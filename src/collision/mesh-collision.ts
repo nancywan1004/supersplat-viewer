@@ -790,6 +790,14 @@ class MeshCollision implements Collision {
 
     // ---- Static factory ----
 
+    /** 从已加载的 container `renders` 构建碰撞（与接影 `instantiateRenderEntity` 共用同一 GLB 资源）。 */
+    static fromContainerRenders(renders: unknown[]): MeshCollision {
+        if (!renders?.length) {
+            throw new Error('GLB contains no mesh data');
+        }
+        return buildMeshCollisionFromContainerRenders(renders as ContainerRenderAsset[]);
+    }
+
     /**
      * Load a GLB file via the PlayCanvas asset system, extract mesh geometry,
      * and construct a MeshCollision. The GLB entity is not added to the scene;
@@ -809,73 +817,14 @@ class MeshCollision implements Collision {
             };
 
             asset.on('load', () => {
-                const renders = (asset.resource as any).renders as any[];
-                if (!renders || renders.length === 0) {
+                try {
+                    const renders = (asset.resource as { renders?: unknown[] }).renders ?? [];
+                    resolve(MeshCollision.fromContainerRenders(renders));
+                } catch (err) {
+                    reject(err instanceof Error ? err : new Error(String(err)));
+                } finally {
                     cleanup();
-                    reject(new Error('GLB contains no mesh data'));
-                    return;
                 }
-
-                const allPositions: number[] = [];
-                const allIndices: number[] = [];
-                let vertexOffset = 0;
-
-                for (const renderAsset of renders) {
-                    const render = renderAsset.resource;
-                    for (let m = 0; m < render.meshes.length; m++) {
-                        const mesh = render.meshes[m];
-                        const vb = mesh.vertexBuffer;
-                        const ib = mesh.indexBuffer[0];
-
-                        if (!vb || !ib) continue;
-
-                        const format = vb.format;
-                        let posElement: any = null;
-                        for (let e = 0; e < format.elements.length; e++) {
-                            if (format.elements[e].name === SEMANTIC_POSITION) {
-                                posElement = format.elements[e];
-                                break;
-                            }
-                        }
-                        if (!posElement) continue;
-
-                        const data = new Float32Array(vb.storage);
-                        const stride = format.size / 4;
-                        const offset = posElement.offset / 4;
-                        const numVerts = vb.numVertices;
-
-                        for (let v = 0; v < numVerts; v++) {
-                            const base = v * stride + offset;
-                            allPositions.push(data[base], data[base + 1], data[base + 2]);
-                        }
-
-                        const indexData = ib.format === INDEXFORMAT_UINT32 ?
-                            new Uint32Array(ib.storage) :
-                            new Uint16Array(ib.storage);
-
-                        for (const prim of mesh.primitive) {
-                            for (let i = 0; i < prim.count; i++) {
-                                allIndices.push(indexData[prim.base + i] + vertexOffset);
-                            }
-                        }
-
-                        vertexOffset += numVerts;
-                    }
-                }
-
-                if (allIndices.length === 0) {
-                    cleanup();
-                    reject(new Error('GLB meshes contain no triangle data'));
-                    return;
-                }
-
-                const collision = new MeshCollision(
-                    new Float32Array(allPositions),
-                    new Uint32Array(allIndices)
-                );
-
-                cleanup();
-                resolve(collision);
             });
 
             asset.on('error', (err: string) => {
@@ -887,6 +836,74 @@ class MeshCollision implements Collision {
             app.assets.load(asset);
         });
     }
+}
+
+type ContainerRenderAsset = {
+    resource: {
+        meshes: Array<{
+            vertexBuffer?: { format: { elements: Array<{ name: string; offset: number }>; size: number }; storage: ArrayBuffer; numVertices: number };
+            indexBuffer: Array<{ format: number; storage: ArrayBuffer }>;
+            primitive: Array<{ base: number; count: number }>;
+        }>;
+    };
+};
+
+function buildMeshCollisionFromContainerRenders(renders: ContainerRenderAsset[]): MeshCollision {
+    const allPositions: number[] = [];
+    const allIndices: number[] = [];
+    let vertexOffset = 0;
+
+    for (const renderAsset of renders) {
+        const render = renderAsset.resource;
+        for (let m = 0; m < render.meshes.length; m++) {
+            const mesh = render.meshes[m];
+            const vb = mesh.vertexBuffer;
+            const ib = mesh.indexBuffer[0];
+
+            if (!vb || !ib) continue;
+
+            const format = vb.format;
+            let posElement: { offset: number } | null = null;
+            for (let e = 0; e < format.elements.length; e++) {
+                if (format.elements[e].name === SEMANTIC_POSITION) {
+                    posElement = format.elements[e];
+                    break;
+                }
+            }
+            if (!posElement) continue;
+
+            const data = new Float32Array(vb.storage);
+            const stride = format.size / 4;
+            const offset = posElement.offset / 4;
+            const numVerts = vb.numVertices;
+
+            for (let v = 0; v < numVerts; v++) {
+                const base = v * stride + offset;
+                allPositions.push(data[base], data[base + 1], data[base + 2]);
+            }
+
+            const indexData = ib.format === INDEXFORMAT_UINT32 ?
+                new Uint32Array(ib.storage) :
+                new Uint16Array(ib.storage);
+
+            for (const prim of mesh.primitive) {
+                for (let i = 0; i < prim.count; i++) {
+                    allIndices.push(indexData[prim.base + i] + vertexOffset);
+                }
+            }
+
+            vertexOffset += numVerts;
+        }
+    }
+
+    if (allIndices.length === 0) {
+        throw new Error('GLB meshes contain no triangle data');
+    }
+
+    return new MeshCollision(
+        new Float32Array(allPositions),
+        new Uint32Array(allIndices)
+    );
 }
 
 export { MeshCollision };

@@ -68,7 +68,7 @@ type PointLightConfig = {
     enabled?: boolean
 };
 
-/** 平行光配置（主方向光/太阳，无位置概念，仅方向；用于阴影等）。阴影由 `shadow.enabled` 控制，URL `?splatMesh=` 仅作前置条件。 */
+/** 平行光配置（主方向光/太阳，无位置概念，仅方向；用于阴影等）。阴影由 `shadow.enabled` 控制，GLB 型 `?collision=` 为接影前置条件。 */
 type DirectionalLightConfig = {
     type: 'directional',
     id?: string,
@@ -182,31 +182,71 @@ type LocalLightRegion = {
     linkedLightId?: string | null;
 };
 
+/** 场景音视频热区 — 视频全局参数 */
+type SceneMediaHotspotVideoSettings = {
+    /** 是否由热区自动播放；缺省 true，显式 false 时入库 */
+    hotspotAutoplayEnabled?: boolean;
+    /** 视锥半角（度）；总锥约 `2 × coneHalfDeg` */
+    coneHalfDeg: number;
+};
+
+/** 场景音视频热区 — 音频全局参数（纯欧氏距离，无视锥） */
+type SceneMediaHotspotAudioSettings = {
+    /** 是否由热区自动播放；缺省 true，显式 false 时入库 */
+    hotspotAutoplayEnabled?: boolean;
+    /**
+     * 浏览模式（Viewer / 编辑预览）下是否显示音频 callout 与播放按钮；
+     * 缺省 true（浏览模式可见且可手动 toggle），显式 false 时入库。
+     */
+    showCalloutInViewer?: boolean;
+};
+
 /** 场景音视频热区全局参数（持久化于 settings 根；触发距离在 sceneAssets[]） */
 type SceneMediaHotspotSettings = {
-    /** 视频热区全局参数 */
-    video: {
-        /** 是否由热区自动播放；缺省 true，显式 false 时入库 */
-        hotspotAutoplayEnabled?: boolean;
-        /** 视锥半角（度）；总锥约 `2 × coneHalfDeg` */
-        coneHalfDeg: number;
-    };
-    /** 音频热区全局参数（音频用纯欧氏距离，无视锥） */
-    audio: {
-        /** 是否由热区自动播放；缺省 true，显式 false 时入库 */
-        hotspotAutoplayEnabled?: boolean;
-        /**
-         * 浏览模式（Viewer / 编辑预览）下是否显示音频 callout 与播放按钮；
-         * 缺省 true（浏览模式可见且可手动 toggle），显式 false 时入库。
-         */
-        showCalloutInViewer?: boolean;
-    };
+    video: SceneMediaHotspotVideoSettings;
+    audio: SceneMediaHotspotAudioSettings;
 };
 
 /** 父级 `MEDIA_HOTSPOT_SET` 入站 payload；video / audio 子节点字段均可部分提供 */
 type SceneMediaHotspotPatch = {
-    video?: Partial<SceneMediaHotspotSettings['video']>;
-    audio?: Partial<SceneMediaHotspotSettings['audio']>;
+    video?: Partial<SceneMediaHotspotVideoSettings>;
+    audio?: Partial<SceneMediaHotspotAudioSettings>;
+};
+
+/** 放置资产 AABB 碰撞 — 各向缩放（相对渲染包围盒） */
+type SceneAssetCollisionAxisScale = {
+    x: number;
+    y: number;
+    z: number;
+};
+
+/** 放置资产 AABB 碰撞 — 高斯 / mesh 缩放与 autoFit 模式 */
+type SceneAssetCollisionScale = {
+    gaussian: SceneAssetCollisionAxisScale;
+    mesh: SceneAssetCollisionAxisScale;
+    /** true：仅自动贴合；false：仅使用 gaussian/mesh 手动 XYZ */
+    autoFit?: boolean;
+};
+
+/** 写入 settings.json 的碰撞配置：场景 mesh URL + 相机物理碰撞总开关 + 放置资产 AABB 缩放 */
+type SceneCollisionSettings = {
+    /** GLB 或 voxel 包 URL；Universe 生成后写入；优先于 URL 参数 `?collision=` */
+    url?: string;
+    /** 总开关：场景 collision mesh + 放置资产 AABB */
+    enabled?: boolean;
+    /** 仅放置资产 AABB 使用的缩放参数 */
+    scale?: SceneAssetCollisionScale;
+};
+
+/** 设置面板 / 协议对 `settings.collision` 的部分更新 */
+type SceneCollisionSettingsPatch = {
+    url?: string;
+    enabled?: boolean;
+    scale?: {
+        gaussian?: SceneAssetCollisionAxisScale | number;
+        mesh?: SceneAssetCollisionAxisScale | number;
+        autoFit?: boolean;
+    };
 };
 
 type SceneAsset = {
@@ -288,5 +328,11 @@ export type {
     EffectsRevealTrack,
     EffectsPersistentSceneTrack,
     EffectsAssetTrack,
-    PersistentSceneEffectEntry
+    PersistentSceneEffectEntry,
+    SceneMediaHotspotVideoSettings,
+    SceneMediaHotspotAudioSettings, 
+    SceneCollisionSettings, 
+    SceneCollisionSettingsPatch,
+    SceneAssetCollisionAxisScale, 
+    SceneAssetCollisionScale,
 };

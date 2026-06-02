@@ -1,31 +1,50 @@
 /**
- * 放置资产 shadow-apply（B 管线）排除 mask。
+ * 放置高斯 shadow-apply（B 管线）排除 mask。
  * 专用相机（priority 1）只渲染 PlacedMeshExclude 层到离屏 RT；
- * mesh / image / video：prerender:layer 临时白模（R=1）；
- * gaussian：同层真实 splat 绘制，gsplatPS 输出纯白（mask-only，轮廓与 splat 一致）。
+ * 放置高斯：gsplatPS 输出绿色（G=1，轮廓与 splat 一致）。
+ * 放置 mesh / image / video 的 B 遮挡由 ShadowReceiverOccluder 深度预写处理，不再挂本层。
  * 主相机 layers 不含 PlacedMeshExclude。
  */
 import {
-    BLEND_NONE,
+    ADDRESS_CLAMP_TO_EDGE,
     Color,
+    FILTER_NEAREST,
     Layer,
+    PIXELFORMAT_DEPTH,
     PIXELFORMAT_RGBA8,
     RenderTarget,
-    StandardMaterial,
     Texture,
     Entity,
     type AppBase,
     type Camera,
     type CameraComponent,
     type GraphicsDevice,
-    type Material,
-    type MeshInstance
+    type Material
 } from 'playcanvas';
 
 import type { Global } from '../../types';
 import { applyGsplatExcludeMaskShaderToMaterial } from './gsplat-exclude-mask-shader';
 
 const PLACED_MESH_EXCLUDE_LAYER_NAME = 'PlacedMeshExclude';
+
+/** B 管线离屏 pass 共用的可采样深度纹理（与主相机同投影，深度值可比）。 */
+export const createShadowPassDepthTexture = (
+    device: GraphicsDevice,
+    width: number,
+    height: number,
+    name: string
+): Texture =>
+    new Texture(device, {
+        name,
+        width,
+        height,
+        format: PIXELFORMAT_DEPTH,
+        mipmaps: false,
+        minFilter: FILTER_NEAREST,
+        magFilter: FILTER_NEAREST,
+        addressU: ADDRESS_CLAMP_TO_EDGE,
+        addressV: ADDRESS_CLAMP_TO_EDGE
+    });
 
 let excludeLayerSingleton: Layer | null = null;
 
@@ -55,38 +74,34 @@ export function countPlacedGaussians(global: Global): number {
     ).length;
 }
 
-function countPlacedRenderCards(global: Global): number {
-    return (global.state.scenePlacedEntities ?? []).filter(
-        (e) =>
-            e.entity
-            && (e.assetType === 'mesh' || e.assetType === 'image' || e.assetType === 'video')
-    ).length;
-}
-
-/** 需要 exclude mask 的放置资产（mesh / image / video / gaussian）。 */
+/** 需要 exclude mask 相机的放置资产（仅放置高斯）。 */
 export function countPlacedExcludeAssets(global: Global): number {
-    return countPlacedRenderCards(global) + countPlacedGaussians(global);
+    return countPlacedGaussians(global);
 }
 
-/** 为放置 render 资产与 gaussian 追加 PlacedMeshExclude 层；主相机 layers 不含此层。 */
+/**
+ * 为放置高斯追加 PlacedMeshExclude 层，并从 render 资产上移除该层（避免历史残留）。
+ * 主相机 layers 不含此层。
+ */
 export function syncPlacedMeshExcludeLayers(global: Global): void {
     const layer = getPlacedMeshExcludeLayer(global.app);
     const layerId = layer.id;
 
-    const visitRender = (node: Entity) => {
+    const stripRenderExcludeLayer = (node: Entity) => {
         if (node.render) {
             const current = [...(node.render.layers as number[])];
-            if (!current.includes(layerId)) {
-                node.render.layers = [...current, layerId];
+            const filtered = current.filter((id) => id !== layerId);
+            if (filtered.length !== current.length) {
+                node.render.layers = filtered;
             }
         }
-        node.children.forEach((child) => visitRender(child as Entity));
+        node.children.forEach((child) => stripRenderExcludeLayer(child as Entity));
     };
 
     for (const entry of global.state.scenePlacedEntities ?? []) {
         if (!entry.entity) continue;
         if (entry.assetType === 'mesh' || entry.assetType === 'image' || entry.assetType === 'video') {
-            visitRender(entry.entity);
+            stripRenderExcludeLayer(entry.entity);
         } else if (entry.assetType === 'gaussian' && entry.entity.gsplat) {
             const current = [...(entry.entity.gsplat.layers as number[])];
             if (!current.includes(layerId)) {
@@ -96,28 +111,10 @@ export function syncPlacedMeshExcludeLayers(global: Global): void {
     }
 }
 
-function createMaskWriteMaterial(): StandardMaterial {
-    const mat = new StandardMaterial();
-    mat.useLighting = false;
-    mat.useSkybox = false;
-    mat.useFog = false;
-    mat.useTonemap = false;
-    mat.emissive.set(1, 1, 1);
-    mat.diffuse.set(0, 0, 0);
-    mat.specular.set(0, 0, 0);
-    mat.blendType = BLEND_NONE;
-    mat.depthWrite = true;
-    mat.depthTest = true;
-    mat.update();
-    return mat;
-}
-
 export class PlacedMeshExcludeMask {
-    private readonly _whiteMat: StandardMaterial;
-
-    private readonly _savedMaterials = new WeakMap<object, object>();
-
     private _excludeTex: Texture | null = null;
+
+    private _excludeDepthTex: Texture | null = null;
 
     private _excludeRt: RenderTarget | null = null;
 
@@ -134,9 +131,7 @@ export class PlacedMeshExcludeMask {
     private _onGsplatMaterialCreated: ((material: Material, camera: Camera, layer: Layer) => void) | null =
         null;
 
-    constructor(private readonly device: GraphicsDevice) {
-        this._whiteMat = createMaskWriteMaterial();
-    }
+    constructor(private readonly device: GraphicsDevice) {}
 
     /** exclude 相机 unified gsplat 材质就绪后 patch 为 mask-only 输出。 */
     refreshGsplatExcludeMaskMaterials(global: Global): void {
@@ -146,28 +141,6 @@ export class PlacedMeshExcludeMask {
             applyGsplatExcludeMaskShaderToMaterial(mat, this.device);
         }
     }
-
-    private readonly _onPrerenderLayer = (
-        cam: CameraComponent,
-        layer: Layer,
-        _transparent: boolean
-    ) => {
-        if (!this._global || cam !== this._excludeCamComp || layer !== this._excludeLayer) {
-            return;
-        }
-        this.setPlacedMeshMaterials(this._global, true);
-    };
-
-    private readonly _onPostrenderLayer = (
-        cam: CameraComponent,
-        layer: Layer,
-        _transparent: boolean
-    ) => {
-        if (!this._global || cam !== this._excludeCamComp || layer !== this._excludeLayer) {
-            return;
-        }
-        this.setPlacedMeshMaterials(this._global, false);
-    };
 
     init(global: Global): void {
         if (this._inited) return;
@@ -195,9 +168,6 @@ export class PlacedMeshExcludeMask {
         this._excludeCameraEntity = excludeCamEntity;
         this._excludeCamComp = camComp;
 
-        app.scene.on('prerender:layer', this._onPrerenderLayer);
-        app.scene.on('postrender:layer', this._onPostrenderLayer);
-
         this._onGsplatMaterialCreated = (material, camera, layer) => {
             if (camera !== this._excludeCamComp?.camera || layer !== this._excludeLayer) return;
             applyGsplatExcludeMaskShaderToMaterial(material, this.device);
@@ -217,9 +187,15 @@ export class PlacedMeshExcludeMask {
                 format: PIXELFORMAT_RGBA8,
                 mipmaps: false
             });
+            this._excludeDepthTex = createShadowPassDepthTexture(
+                this.device,
+                width,
+                height,
+                'placedMeshExcludeDepth'
+            );
             this._excludeRt = new RenderTarget({
                 colorBuffer: this._excludeTex,
-                depth: true
+                depthBuffer: this._excludeDepthTex
             });
             if (this._excludeCamComp) {
                 this._excludeCamComp.renderTarget = this._excludeRt;
@@ -238,6 +214,10 @@ export class PlacedMeshExcludeMask {
 
     getTexture(): Texture | null {
         return this._excludeTex;
+    }
+
+    getDepthTexture(): Texture | null {
+        return this._excludeDepthTex;
     }
 
     /** 本帧 exclude RT 已由专用相机写入，postrender 直接采样即可。 */
@@ -269,35 +249,6 @@ export class PlacedMeshExcludeMask {
         this._excludeCameraEntity.enabled = active;
         if (active) {
             this.refreshGsplatExcludeMaskMaterials(global);
-        }
-    }
-
-    private setPlacedMeshMaterials(global: Global, useMaskMaterial: boolean): void {
-        const visit = (node: Entity) => {
-            const instances = node.render?.meshInstances as MeshInstance[] | undefined;
-            if (instances?.length) {
-                for (const mi of instances) {
-                    if (useMaskMaterial) {
-                        if (!this._savedMaterials.has(mi)) {
-                            this._savedMaterials.set(mi, mi.material);
-                        }
-                        mi.material = this._whiteMat;
-                    } else {
-                        const orig = this._savedMaterials.get(mi);
-                        if (orig) {
-                            mi.material = orig as MeshInstance['material'];
-                        }
-                    }
-                }
-            }
-            node.children.forEach((child) => visit(child as Entity));
-        };
-
-        for (const entry of global.state.scenePlacedEntities ?? []) {
-            if (!entry.entity) continue;
-            if (entry.assetType === 'mesh' || entry.assetType === 'image' || entry.assetType === 'video') {
-                visit(entry.entity);
-            }
         }
     }
 }

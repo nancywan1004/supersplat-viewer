@@ -1,7 +1,7 @@
 /**
  * 父级↔Viewer 统一 postMessage 协议桥接
  * 入站 `EFFECT_*`：`module` 可选；若传则须为 **`effects`**（与 {@link MESSAGE_BRIDGE_MODULE.effects} 一致）。`effectId` 与参数见 **docs/SaaS第四期编辑模式接口文档.md**。
- * 出站：仅与 **`editLeftModule`** 域相关的事件在 payload 中带 **`module`**（`asset` / `annotation` / `environment` / `effects`），定义见 **`editor-modules/modules-types`** 中的 {@link MESSAGE_BRIDGE_MODULE}。
+ * 出站：与 **`editLeftModule`** 域相关的事件在 payload 中带 **`module`**（`asset` / `annotation` / `environment` / `camera` / `effects`），定义见 **`editor-modules/modules-types`** 中的 {@link MESSAGE_BRIDGE_MODULE}。
  */
 
 import type { AnnotationData } from './annotation-toolbar/types';
@@ -50,6 +50,21 @@ import {
     persistExperienceSettingsToCloud
 } from './render/project-thumbnail';
 import { resetSceneSettings } from './settings-reset';
+import type { SceneCollisionSettingsPatch } from './schemas/v2-custom';
+import {
+    applyCollisionPatchFromHost,
+    applyCollisionSetFromHost,
+    buildSceneMeshLoadFailedPayload,
+    buildSceneMeshLoadFinishedPayload,
+    resolveSceneMeshLoadOutboundModules
+} from './editor-modules/protocol-adapters/collision-protocol-adapter';
+import { applyShadowSetFromHost } from './editor-modules/protocol-adapters/environment-protocol-adapter';
+import {
+    COLLISION_SYSTEM_READY,
+    type CollisionLoadPayload
+} from './collision/camera-collision-manager';
+import { resolveCollisionUrl } from './collision/scene-collision-source';
+import { SHADOW_SYSTEM_READY, isShadowOutputEnabled } from './vfx/shadow';
 
 /** 父级 → Viewer 的 postMessage payload 类型（按文档事件表） */
 type InboundPayload =
@@ -129,7 +144,9 @@ type InboundPayload =
     | { type: 'EFFECT_REPLAY'; module?: 'effects'; effectId: string; restartAnim?: boolean }
     | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean; projectName?: string }
     | { type: 'VIDEO_EXPORT_CANCEL' }
-    | { type: 'CAMERA_DEFAULT_VIEW_CAPTURE' };
+    | { type: 'CAMERA_DEFAULT_VIEW_CAPTURE' }
+    | { type: 'COLLISION_SET'; value?: boolean }
+    | { type: 'COLLISION_PATCH'; value?: SceneCollisionSettingsPatch };
 
 const postToParent = (type: string, data?: Record<string, unknown>) => {
     const message = (data ? { type, ...data } : { type }) as Record<string, unknown>;
@@ -203,6 +220,8 @@ const initPostMessageBridge = (global: Global) => {
     const { state, events, config } = global;
     const g = global as any;
     let cameraModeChangeSource: SelectionSource = 'unknown';
+    /** 父级下发 COLLISION_* / SHADOW_SET 时置 true，屏蔽由此触发的 scene mesh / 系统就绪出站（防回环）。 */
+    let suppressCollisionOutbound = false;
     // 用闭包变量记录本次导出是否被外部取消，避免向 global.state（可能是 Proxy）新增属性
     let videoExportCancelled = false;
 
@@ -589,7 +608,15 @@ const initPostMessageBridge = (global: Global) => {
             }
             case 'SHADOW_SET': {
                 const shadowVal = (p as { value?: boolean }).value;
-                if (typeof shadowVal === 'boolean') dispatchEnvironment(global, 'SHADOW_SET', p);
+                if (typeof shadowVal !== 'boolean') {
+                    break;
+                }
+                suppressCollisionOutbound = true;
+                try {
+                    void applyShadowSetFromHost(global, shadowVal);
+                } finally {
+                    suppressCollisionOutbound = false;
+                }
                 break;
             }
             case 'SHADOW_INTENSITY_UPDATE': {
@@ -879,6 +906,33 @@ const initPostMessageBridge = (global: Global) => {
                 });
                 break;
             }
+            case 'COLLISION_SET': {
+                if (typeof p.value !== 'boolean') {
+                    console.warn('[MessageBridge] COLLISION_SET ignored: value must be boolean');
+                    break;
+                }
+                suppressCollisionOutbound = true;
+                try {
+                    void applyCollisionSetFromHost(global, p.value);
+                } finally {
+                    suppressCollisionOutbound = false;
+                }
+                break;
+            }
+            case 'COLLISION_PATCH': {
+                const patch = (p as { value?: unknown }).value;
+                if (!patch || typeof patch !== 'object') {
+                    console.warn('[MessageBridge] COLLISION_PATCH ignored: value must be object');
+                    break;
+                }
+                suppressCollisionOutbound = true;
+                try {
+                    void applyCollisionPatchFromHost(global, patch as SceneCollisionSettingsPatch);
+                } finally {
+                    suppressCollisionOutbound = false;
+                }
+                break;
+            }
             default:
                 break;
         }
@@ -904,6 +958,43 @@ const initPostMessageBridge = (global: Global) => {
         if (config.trackEditHistory) {
             postToParent('EDIT_HISTORY_STATE', { canUndo: canUndo(global), canRedo: canRedo(global) });
         }
+    });
+
+    events.on('cameraCollision:load', (payload: CollisionLoadPayload) => {
+        if (suppressCollisionOutbound) {
+            return;
+        }
+        const modules = resolveSceneMeshLoadOutboundModules(global, payload.intent);
+        if (payload.state === 'ready') {
+            for (const module of modules) {
+                postToParent('SCENE_MESH_LOAD_FINISHED', buildSceneMeshLoadFinishedPayload(global, module));
+            }
+        } else if (payload.state === 'failed') {
+            for (const module of modules) {
+                postToParent('SCENE_MESH_LOAD_FAILED', buildSceneMeshLoadFailedPayload(global, module, payload.error));
+            }
+        }
+    });
+
+    events.on(COLLISION_SYSTEM_READY, () => {
+        if (suppressCollisionOutbound) {
+            return;
+        }
+        const collisionUrl = resolveCollisionUrl(global)?.url;
+        postToParent('COLLISION_SYSTEM_READY', {
+            module: MESSAGE_BRIDGE_MODULE.camera,
+            ...(collisionUrl ? { collisionUrl } : {})
+        });
+    });
+
+    events.on(SHADOW_SYSTEM_READY, () => {
+        if (suppressCollisionOutbound) {
+            return;
+        }
+        if (!isShadowOutputEnabled(global)) {
+            return;
+        }
+        postToParent('SHADOW_SYSTEM_READY', { module: MESSAGE_BRIDGE_MODULE.environment });
     });
 
     events.on('editHistory:stateChanged', (data: { canUndo: boolean; canRedo: boolean }) => {

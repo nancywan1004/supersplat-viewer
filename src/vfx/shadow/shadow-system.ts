@@ -2,7 +2,7 @@
  * 阴影子系统统一入口。
  *
  * 两层门控（均需满足才完整出阴影）：
- * 1. **Capability** `hasShadowCapability` — 场景是否配置 mesh（URL `?splatMesh=`）
+ * 1. **Capability** `hasShadowSceneMesh` — 是否具备接影用 scene mesh GLB
  *    - 放置高斯 / mesh 的 castShadows（主场景高斯恒 false）、平行光 shadow map、接影管线
  *    - 放置 mesh：引擎 receiveShadows（A）；高斯接影叠屏（B）由 shadow-apply 处理
  * 2. **Enablement/Output** `isShadowSystemEnabled` + `isShadowOutputEnabled`
@@ -22,9 +22,12 @@ import { syncPlacedMeshExcludeLayers } from './shadow-apply-exclude-mask';
 import { initShadowCatcher } from './shadow-catcher';
 import { ShadowApplyRt } from './shadow-apply';
 import {
-    hasShadowCapability,
+    hasShadowSceneMesh,
     isShadowSystemEnabled
 } from './shadow-policy';
+
+/** Viewer 内部事件；出站 `SHADOW_SYSTEM_READY` 仅在 {@link isShadowOutputEnabled} 为真时 post（见 message-bridge）。 */
+export const SHADOW_SYSTEM_READY = 'shadowSystem:ready';
 
 /** 主场景 unified 高斯不参与 GSPLAT_SHADOW 投射，勿与 shadow.enabled 同步。 */
 const MAIN_GSPLAT_CAST_SHADOWS = false;
@@ -51,9 +54,9 @@ export function applyPlacedMeshShadowFlags(entity: Entity, shadowEnabled: boolea
 
 /**
  * 主场景高斯 castShadows 恒 false；放置高斯随 shadow.enabled 投射（unified 花屏风险需实测）。
- * 放置 mesh：cast + receiveShadows（A），shadow-apply 通过 exclude mask 排除 B。
- * 放置高斯：可 cast；B 叠影在自身屏幕区域由 exclude mask 排除。
- * 放置 image / video：与 mesh 相同，exclude 层 + 白模 mask，避免 B 横切叠影。
+ * 放置 mesh：cast + receiveShadows（A）；B 叠影由 ShadowReceiverOccluder 深度预写排除。
+ * 放置高斯：可 cast；B 叠影在自身屏幕区域由 exclude mask（G）排除。
+ * 放置 image / video：与 mesh 相同，ShadowReceiverOccluder 处理 B 遮挡。
  */
 export function syncGsplatShadowCastingFromSettings(global: Global, mainGsplatEntity?: Entity | null): void {
     const enabled = isShadowSystemEnabled(global);
@@ -149,6 +152,9 @@ const activateOutput = (global: Global) => {
     setCatcherActive(global, true);
     syncDirectionalShadowCasting(global);
     (global.app as { renderNextFrame?: boolean }).renderNextFrame = true;
+    if (isShadowOutputEnabled(global)) {
+        global.events.fire(SHADOW_SYSTEM_READY);
+    }
 };
 
 const deactivateOutput = (global: Global) => {
@@ -199,19 +205,20 @@ export const mountShadowPipeline = (
     active = false
 ): ShadowApplyRt => {
     const runtime = getRuntime(global);
-    if (runtime.apply) {
-        return runtime.apply;
-    }
-
     const { app, settings } = global;
     const shadow = settings.postEffectSettings?.shadow as { debugVisual?: boolean } | undefined;
 
+    // 每次挂载都刷新接影几何（GLB 懒加载完成后会再次进入，不可因 apply 已存在而跳过）
     initShadowCatcher(app, mount.sceneBound, {
         debugVisual: shadow?.debugVisual ?? false,
         parentEntity: mount.gsplatEntity,
         meshEntity: mount.meshEntity ?? undefined,
-        active
+        active: runtime.apply ? runtime.outputEnabled : active
     });
+
+    if (runtime.apply) {
+        return runtime.apply;
+    }
 
     (app as { __shadowApplyGlobal?: Global }).__shadowApplyGlobal = global;
     if (!app.root.script) {

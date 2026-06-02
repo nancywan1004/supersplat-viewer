@@ -2,12 +2,13 @@ import {
     allocateNextUserLightId,
     applyLightAdd,
     applyLightToggle,
-    applyShadowDirectionSet
+    applyShadowDirectionSet,
+    applyShadowSetFromHost
 } from '../../editor-modules/protocol-adapters/environment-protocol-adapter';
 import type { Global } from '../../types';
 import type { ExperienceSettings } from '../../schemas/v2';
 import { updatePointLightsFromSettings } from '../../light';
-import { hasShadowCapability, syncGsplatShadowCastingFromSettings } from '../../vfx/shadow';
+import { hasShadowSceneMesh, syncGsplatShadowCastingFromSettings } from '../../vfx/shadow';
 import { pushEditHistory } from '../../edit-history';
 import {
     ensureBloom as ensureBloomFromAdapter,
@@ -703,8 +704,8 @@ export function initPostEffectUI(global: Global): () => void {
         const sh = ensureShadow(settings);
         if (shadowEnableCheck) shadowEnableCheck.classList.toggle('active', sh.enabled !== false);
         if (shadowEnableOption) {
-            const canEnableShadow = hasShadowCapability(global);
-            shadowEnableOption.title = canEnableShadow ? '' : '缺少 splatMeshUrl，当前场景不支持阴影';
+            const canEnableShadow = hasShadowSceneMesh(global);
+            shadowEnableOption.title = canEnableShadow ? '' : '缺少 GLB 型 collision URL，当前场景不支持阴影';
             shadowEnableOption.style.opacity = canEnableShadow ? '1' : '0.55';
         }
         if (shadowCastCheck) shadowCastCheck.classList.toggle('active', sh.castShadows !== false);
@@ -930,17 +931,14 @@ export function initPostEffectUI(global: Global): () => void {
 
     if (shadowEnableOption && shadowEnableCheck) {
         const toggleShadowEnable = () => {
-            if (!hasShadowCapability(global)) return;
+            if (!hasShadowSceneMesh(global)) return;
             const sh = ensureShadow(settings);
             const enabled = sh.enabled === false;
             const editTransport = getEditUiTransport(global);
             if (editTransport === 'message-bridge') {
                 sendEditProtocolMessage({ type: 'SHADOW_SET', value: enabled });
             } else {
-                sh.enabled = enabled;
-                syncGsplatShadowCastingFromSettings(global);
-                updatePointLightsFromSettings(global);
-                firePostEffectChanged();
+                void applyShadowSetFromHost(global, enabled);
             }
             syncFromSettings();
             pushEditHistorySafe();

@@ -664,6 +664,10 @@ class NavCursor {
         this.targetRing.render(this.targetPos, this.targetNormal);
     }
 
+    setCollision(collision: Collision | null): void {
+        this.collision = collision;
+    }
+
     destroy() {
         this.app.off('prerender', this.onPrerender);
         this.canvas.removeEventListener('pointermove', this.onPointerMove);

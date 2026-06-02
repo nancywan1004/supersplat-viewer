@@ -17,8 +17,6 @@ import {
 
 import { App } from './app';
 import { applySkyboxTexture, clearSkyboxDisplay } from './loaders/skybox-loader';
-import { MeshCollision, loadVoxelCollision } from './collision';
-import type { Collision } from './collision';
 import { observe } from './core/observe';
 import type { ExperienceSettings } from './schemas/v2';
 import { importSettings } from './settings';
@@ -47,6 +45,11 @@ import {
     syncEffectsRuntimeStateFromSettings,
     hasRevealInSettings
 } from './settings-serialize/effects-sync';
+import {
+    applySceneAssetCollisionFromSettings,
+    createDefaultSceneAssetCollisionRuntimeState
+} from './scene-assets/collision/scene-asset-collision';
+import { getCameraCollisionManager } from './collision/camera-collision-manager';
 
 export { loadGsplatAsset };
 
@@ -332,6 +335,9 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
 
         // 导出 VFX 视频时的锁，防止实时更新干扰离线渲染
         isExportingVfxVideo: false,
+
+        sceneAssetCollisionRuntimeState: createDefaultSceneAssetCollisionRuntimeState(),
+
         gamingControls: localStorage.getItem('gamingControls') === 'true',
         // 必须在 observe 初始 keys 内：Proxy 禁止新增顶层属性（见 core/observe.ts）
         effectsRuntimeState: createDefaultEffectsRuntimeState()
@@ -366,6 +372,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     };
 
     ensureViewSettings(global);
+    applySceneAssetCollisionFromSettings(global);
+    getCameraCollisionManager(global).configure();
 
     // 将原始配置挂载到 global 供后续恢复使用
     (global as any).__originalSettings = originalSettings;
@@ -443,23 +451,6 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         }
     });
 
-    // Load collision data (type determined by file extension)
-    let collisionLoad: Promise<Collision> | undefined;
-    if (config.collisionUrl) {
-        const ext = new URL(config.collisionUrl, location.href).pathname.split('.').pop()?.toLowerCase();
-        if (ext === 'glb') {
-            collisionLoad = MeshCollision.fromGlb(app, config.collisionUrl).catch((err: Error): null => {
-                console.warn('Failed to load mesh collision:', err);
-                return null;
-            });
-        } else {
-            collisionLoad = loadVoxelCollision(config.collisionUrl).catch((err: Error): null => {
-                console.warn('Failed to load voxel data:', err);
-                return null;
-            });
-        }
-    }
-
     // Load and play sound
     if (global.settings.soundUrl) {
         const sound = new Audio(global.settings.soundUrl);
@@ -475,7 +466,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     }
 
     // Viewer 构造内会 initCommandRegistry 并注册各 facade；postMessage 监听须在此之后挂载，否则编辑类协议无法经 registry 单路径执行。
-    const viewer = new Viewer(global, gsplatLoad, skyboxLoad, collisionLoad);
+    const viewer = new Viewer(global, gsplatLoad, skyboxLoad);
 
     initPostMessageBridge(global);
 

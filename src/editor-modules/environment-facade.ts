@@ -24,6 +24,7 @@ import {
     applyShadowDirectionSet,
     applyShadowIntensityUpdate,
     applyShadowSet,
+    applyShadowSetFromHost,
     applyTorchParamsSet,
     applyTorchToggle
 } from './protocol-adapters/environment-protocol-adapter';
@@ -184,7 +185,7 @@ class EnvironmentFacade implements ModuleFacade {
         }
         case 'SHADOW_SET': {
             const v = pl.value;
-            if (typeof v === 'boolean') applyShadowSet(g, v);
+            if (typeof v === 'boolean') void applyShadowSetFromHost(g, v);
             break;
         }
         case 'SHADOW_INTENSITY_UPDATE': {

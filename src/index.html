@@ -43,7 +43,6 @@
             const contentUrl = url.searchParams.has('content') ? url.searchParams.get('content') : './scene.compressed.ply';
             const settingsFetchUrl = toProxy(settingsUrl);
             const contentFetchUrl = toProxy(contentUrl);
-            const splatMeshUrl = url.searchParams.get('splatMesh') || undefined;
             const projectId = url.searchParams.get('projectId') ?? undefined;
             const token = url.searchParams.get('token') ?? undefined;
 
@@ -80,7 +79,6 @@
                 aa: url.searchParams.has('aa'),
                 noreveal: url.searchParams.has('noreveal'),
                 noBottomUI: true,  // url.searchParams.has('noBottomUI')
-                splatMeshUrl,
                 allowEditMode: !url.searchParams.has('noEditMode'),
                 showEditUI: false,
                 disableCameraBounds: false,

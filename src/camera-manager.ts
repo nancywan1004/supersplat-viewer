@@ -24,6 +24,7 @@ import type { TargetSource } from './cameras/target-navigation';
 import { WalkController } from './cameras/walk-controller';
 import { WalkSource } from './cameras/walk-source';
 import type { Collision } from './collision';
+import { getSceneAssetCollisionRuntime } from './scene-assets/collision/scene-asset-collision';
 import { easeOut, smootherStep } from './core/math';
 import { Annotation } from './settings';
 import type { AnimTrack } from './settings';
@@ -336,6 +337,14 @@ class CameraManager {
     getTargetConstraint(): BoxConstraint | null {
         return this.targetConstraint;
     }
+
+    /** 更新 urlParam 加载的 Collision 在 walk / fly 上的引用（与放置资产 AABB 推开独立） */
+    setUrlParamCollision(collision: Collision | null): void {
+        const bundle = this.controllersBundle;
+        if (!bundle) return;
+        bundle.fly.collision = collision;
+        bundle.walk.collision = collision;
+    }
     private constraintVisualizer: Entity | null = null;
     private cameraBoundsVisualizer: Entity | null = null;
     private debugBoundsLayerId: number | null = null;
@@ -499,6 +508,9 @@ class CameraManager {
         controllers.fly.fov = resetCamera.fov;
         controllers.fly.collision = collision;
         controllers.walk.collision = collision;
+        const sceneAssetCollisionResolver = () => getSceneAssetCollisionRuntime(global).getCollision();
+        controllers.fly.setSceneAssetCollisionResolver(sceneAssetCollisionResolver);
+        controllers.orbit.setSceneAssetCollisionResolver(sceneAssetCollisionResolver);
 
         const walkSource = new WalkSource();
         const flySource = new FlySource();

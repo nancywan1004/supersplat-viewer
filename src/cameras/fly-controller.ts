@@ -7,6 +7,7 @@ import {
 } from 'playcanvas';
 
 import type { Collision, PushOut } from '../collision';
+import { SCENE_ASSET_CAMERA_COLLISION_RADIUS } from '../scene-assets/collision/scene-asset-collision';
 import type { CameraFrame, Camera, CameraController } from './camera';
 import type { SphereConstraint } from '../camera-constraints/sphere-constraint';
 import type { BoxConstraint } from '../camera-constraints/box-constraint';
@@ -25,8 +26,7 @@ const tmpNormal = new Vec3();
 const tmpTarget = new Vec3();
 const tmpTargetClamp = new Vec3();
 const tmpRemain = new Vec3();
-/** 相机碰撞球半径（米） */
-const CAMERA_RADIUS = 0.3;
+const CAMERA_RADIUS = SCENE_ASSET_CAMERA_COLLISION_RADIUS;
 
 // Damping helper function
 const damp = (damping: number, dt: number) => {
@@ -60,6 +60,10 @@ class FlyController implements CameraController {
 
     /** Optional collision for sphere collision with sliding */
     collision: Collision | null = null;
+
+    /** sceneAsset AABB 碰撞（由 CameraManager 注入，阶段一） */
+    private sceneAssetCollisionResolver: (() => Collision | null) | null = null;
+
     private _spawnPosition = new Vec3();
     private _spawnAngles = new Vec3();
     private _spawnDistance = 1;
@@ -82,6 +86,15 @@ class FlyController implements CameraController {
      */
     setTargetConstraint(constraint: BoxConstraint | null): void {
         this.targetConstraint = constraint;
+    }
+
+    setSceneAssetCollisionResolver(resolver: (() => Collision | null) | null): void {
+        this.sceneAssetCollisionResolver = resolver;
+    }
+
+    private _applySceneAssetSpherePush(x: number, y: number, z: number): boolean {
+        const col = this.sceneAssetCollisionResolver?.();
+        return !!col?.querySphere(x, y, z, CAMERA_RADIUS, pushOut);
     }
 
     onEnter(camera: Camera): void {
@@ -239,6 +252,15 @@ class FlyController implements CameraController {
                 this._targetPose.position.z += pushOut.z;
             }
         }
+        if (this._applySceneAssetSpherePush(
+            this._targetPose.position.x,
+            this._targetPose.position.y,
+            this._targetPose.position.z
+        )) {
+            this._targetPose.position.x += pushOut.x;
+            this._targetPose.position.y += pushOut.y;
+            this._targetPose.position.z += pushOut.z;
+        }
         
         // Apply damping using Pose.lerp
         this._pose.lerp(
@@ -286,7 +308,14 @@ class FlyController implements CameraController {
                 this._targetPose.position.copy(camera.position);
             }
         }
-        
+        if (this._applySceneAssetSpherePush(camera.position.x, camera.position.y, camera.position.z)) {
+            camera.position.x += pushOut.x;
+            camera.position.y += pushOut.y;
+            camera.position.z += pushOut.z;
+            this._pose.position.copy(camera.position);
+            this._targetPose.position.copy(camera.position);
+        }
+
         camera.angles.copy(this._pose.angles);
         camera.distance = this._pose.distance;
     }

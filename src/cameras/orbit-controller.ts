@@ -6,8 +6,12 @@ import {
     Quat
 } from 'playcanvas';
 
+import type { Collision, PushOut } from '../collision';
 import type { Camera, CameraFrame, CameraController } from './camera';
 import type { BoxConstraint } from '../camera-constraints/box-constraint';
+import { SCENE_ASSET_CAMERA_COLLISION_RADIUS } from '../scene-assets/collision/scene-asset-collision';
+
+const pushOut: PushOut = { x: 0, y: 0, z: 0 };
 
 const p = new Pose();
 const tmpVec = new Vec3();
@@ -25,6 +29,8 @@ class OrbitController implements CameraController {
     controller: OrbitControllerPC;
     private targetConstraint: BoxConstraint | null = null;
 
+    private sceneAssetCollisionResolver: (() => Collision | null) | null = null;
+
     fov = 90;
 
     constructor() {
@@ -41,6 +47,15 @@ class OrbitController implements CameraController {
      */
     setTargetConstraint(constraint: BoxConstraint | null): void {
         this.targetConstraint = constraint;
+    }
+
+    setSceneAssetCollisionResolver(resolver: (() => Collision | null) | null): void {
+        this.sceneAssetCollisionResolver = resolver;
+    }
+
+    private _applySceneAssetSpherePush(x: number, y: number, z: number): boolean {
+        const col = this.sceneAssetCollisionResolver?.();
+        return !!col?.querySphere(x, y, z, SCENE_ASSET_CAMERA_COLLISION_RADIUS, pushOut);
     }
 
     onEnter(camera: Camera): void {
@@ -159,6 +174,13 @@ class OrbitController implements CameraController {
         }
 
         camera.position.copy(pose.position);
+        if (this._applySceneAssetSpherePush(camera.position.x, camera.position.y, camera.position.z)) {
+            camera.position.x += pushOut.x;
+            camera.position.y += pushOut.y;
+            camera.position.z += pushOut.z;
+            p.position.copy(camera.position);
+            this.controller.attach(p, false);
+        }
 
         camera.angles.copy(pose.angles);
         camera.distance = pose.distance;

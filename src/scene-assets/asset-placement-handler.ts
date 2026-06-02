@@ -16,7 +16,11 @@ import {
 } from 'playcanvas';
 import type { SceneAsset } from '../schemas/v2-custom';
 import type { Global, AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from '../types';
-import { getSelectedSceneEntity } from '../state-selectors';
+import {
+    getSelectedSceneEntity,
+    isAssetScenePickEventOnlyMode,
+    isSceneAssetPickableInViewerMode
+} from '../state-selectors';
 import {
     DEFAULT_ASSET_LOAD_TIMEOUT_MS,
     hydrateAssetLibraryItem,
@@ -52,7 +56,8 @@ import {
     unmountPlacedVideoFromDom
 } from './media/video-texture';
 import { AUDIO_CALLOUT_WORLD_H, findAudioCalloutSelectHitFromClient } from './media/audio-callout';
-import { getSceneAssetPickLayer, getSceneAssetPickerLayers } from './scene-asset-pick-layer';
+import { getSceneAssetPickLayer } from './scene-asset-pick-layer';
+import { configurePlacedGaussianPickLayer, pickScenePlacedEntryAtScreen } from './scene-asset-selection-pick';
 import { removeSceneAssetFromSettings } from '../settings-serialize/settings-serialize';
 import { suspendShadowPipelineForGsplatLoad, syncGsplatShadowCastingFromSettings } from '../vfx/shadow';
 import type { ExperienceSettings } from '../settings';
@@ -369,6 +374,7 @@ async function instantiateGaussian(app: AppBase, item: AssetLibraryItem, positio
     material.setDefine('GSPLAT_AA', true);
     material.setParameter('alphaClip', 1 / 255);
     entity.setPosition(position);
+    configurePlacedGaussianPickLayer(app, entity);
     return entity;
 }
 
@@ -958,6 +964,22 @@ export function clearScenePlacedEntities(global: Global): void {
     global.events.fire('sceneAssets:cleared');
 }
 
+function applySceneAssetSelectedFromScenePick(
+    global: Global,
+    entryId: string,
+    options: { focusOnChange: boolean }
+): void {
+    const { state, events } = global;
+    const prevSelectedId = state.selectedSceneEntityId;
+    state.selectedSceneEntityId = entryId;
+    events.fire('sceneAsset:selected', { source: 'scene' });
+    if (options.focusOnChange && prevSelectedId !== entryId) {
+        requestAnimationFrame(() => {
+            events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
+        });
+    }
+}
+
 export function initAssetPlacementHandler(
     global: Global,
     canvas: HTMLCanvasElement,
@@ -1014,7 +1036,9 @@ export function initAssetPlacementHandler(
     };
 
     const handleAssetPointerClickClaim = (clientX: number, clientY: number, worldPos: Vec3 | null): boolean => {
-        if (!state.editMode || state.editLeftModule !== 'asset') return false;
+        const pickEventOnly = isAssetScenePickEventOnlyMode(state);
+        const editAsset = !pickEventOnly && state.editMode && state.editLeftModule === 'asset';
+        if (!pickEventOnly && !editAsset) return false;
         if (state.suppressAssetPointerClick) {
             state.suppressAssetPointerClick = false;
             return false;
@@ -1027,7 +1051,7 @@ export function initAssetPlacementHandler(
         const offsetY = clientY - rect.top;
         if (offsetX < 0 || offsetY < 0 || offsetX > rect.width || offsetY > rect.height) return false;
 
-        if (pendingPlacement) {
+        if (editAsset && pendingPlacement) {
             if (pendingPlacementInFlight) return true;
             pendingPlacementInFlight = true;
             syncVideoPlacementCursor();
@@ -1070,10 +1094,7 @@ export function initAssetPlacementHandler(
                         worldPos: [worldPos.x, worldPos.y, worldPos.z],
                         source: 'scene'
                     });
-                    events.fire('sceneAsset:selected', { source: 'scene' });
-                    requestAnimationFrame(() => {
-                        events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
-                    });
+                    applySceneAssetSelectedFromScenePick(global, entry.id, { focusOnChange: true });
                     deps.pushEditHistory?.(global, 'place asset');
                     clearPendingPlacement();
                 } catch (error) {
@@ -1087,17 +1108,19 @@ export function initAssetPlacementHandler(
         }
 
         const list = state.scenePlacedEntities ?? [];
-        if (list.length === 0) return true;
+        if (list.length === 0) return editAsset;
 
-        const audioSelect = findAudioCalloutSelectHitFromClient(global, clientX, clientY);
-        if (audioSelect) {
-            const prevSelectedId = state.selectedSceneEntityId;
-            state.selectedSceneEntityId = audioSelect.id;
-            events.fire('sceneAsset:selected', { source: 'scene' });
-            if (prevSelectedId !== audioSelect.id) {
-                events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
+        const pickableList = pickEventOnly
+            ? list.filter((entry) => isSceneAssetPickableInViewerMode(entry.assetType))
+            : list;
+        if (pickEventOnly && pickableList.length === 0) return false;
+
+        if (editAsset) {
+            const audioSelect = findAudioCalloutSelectHitFromClient(global, clientX, clientY);
+            if (audioSelect) {
+                applySceneAssetSelectedFromScenePick(global, audioSelect.id, { focusOnChange: true });
+                return true;
             }
-            return true;
         }
 
         const pickerScale = 0.5;
@@ -1106,38 +1129,26 @@ export function initAssetPlacementHandler(
         const pickX = Math.floor((offsetX / rect.width) * pickW);
         const pickY = Math.floor((offsetY / rect.height) * pickH);
 
-        if ((app.scene as any).gsplat) {
-            (app.scene as any).gsplat.enableIds = true;
-        }
-        // depth=false：实体选中只需 ID 缓冲；深度拾取由标注 Picker 用 pc.Picker(..., true) + getWorldPointAsync 单独处理。
         if (!sceneAssetPicker) {
             sceneAssetPicker = new (pc as any).Picker(app, pickW, pickH, false);
         }
         sceneAssetPicker.resize(pickW, pickH);
-        sceneAssetPicker.prepare(camera.camera, app.scene, getSceneAssetPickerLayers(app));
 
-        sceneAssetPicker.getSelectionAsync(pickX, pickY, 1, 1).then((selection: any[]) => {
-            if (selection.length === 0) return;
-            const picked = selection[0];
-            // Unified 模式下拾取 gsplat 返回 GSplatComponent（有 .entity）；拾取 mesh / plane 返回 MeshInstance（有 .node）
-            const entity = picked.entity ?? picked.node ?? null;
-            if (!entity) return;
-            // 对于 mesh，MeshInstance.node 可能是挂在 ScenePlacedItem.entity 下的子节点，这里同时兼容「自身」与「子层级命中」
-            const entry = list.find((item) => {
-                if (item.entity === entity) return true;
-                const anyEntity = entity as any;
-                return typeof anyEntity.isDescendantOf === 'function' && anyEntity.isDescendantOf(item.entity);
-            });
+        void pickScenePlacedEntryAtScreen(
+            global,
+            app,
+            camera,
+            sceneAssetPicker,
+            pickX,
+            pickY,
+            clientX,
+            clientY
+        ).then((entry) => {
             if (!entry) return;
-            const prevSelectedId = state.selectedSceneEntityId;
-            state.selectedSceneEntityId = entry.id;
-            events.fire('sceneAsset:selected', { source: 'scene' });
-            // 仅当场景点击导致“选中对象变化”时，才触发聚焦。
-            if (prevSelectedId === entry.id) return;
-            // 统一走资产 frame 链路（camera-manager 内会按选中资产 bbox 做 framing）。
-            events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
+            if (pickEventOnly && !isSceneAssetPickableInViewerMode(entry.assetType)) return;
+            applySceneAssetSelectedFromScenePick(global, entry.id, { focusOnChange: editAsset });
         }).catch(() => {});
-        return true;
+        return editAsset;
     };
 
     const onCopy = (payload?: { copyId?: string }) => {
@@ -1156,6 +1167,9 @@ export function initAssetPlacementHandler(
         parent.addChild(clone);
         if (entry.assetType === 'mesh') {
             configurePlacedMeshMaterials(clone);
+        }
+        if (entry.assetType === 'gaussian') {
+            configurePlacedGaussianPickLayer(app, clone);
         }
         const copiedId = (typeof payload?.copyId === 'string' && payload.copyId.trim().length > 0)
             ? payload.copyId
