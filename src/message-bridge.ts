@@ -18,12 +18,10 @@ import {
 } from './edit-history';
 import type { CommandRegistry } from './editor-modules/command-registry';
 import { MESSAGE_BRIDGE_MODULE } from './editor-modules/modules-types';
-import { paramsPatchHasAssetKeys } from './vfx/effects-runtime/asset/asset-effect-params';
 import {
     normalizeAssetEffectEnvelope,
     type AssetEffectProtocolEnvelope
 } from './editor-modules/protocol-adapters/asset-effects-protocol-adapter';
-import { ASSET_GSPLAT_EFFECT_ID, resolveAssetEffectType } from './vfx/effects-runtime/effect-types';
 import {
     paramsPatchHasPersistentKeys,
     paramsPatchHasRevealKeys,
@@ -45,6 +43,16 @@ import {
 import { getSelectedSceneAssetType } from './state-selectors';
 import type { AssetLibraryItem, EditLeftModule, Global } from './types';
 import { uploadProjectData } from './universe/service';
+import { paramsPatchHasAssetKeys } from './vfx/effects-runtime/asset/asset-effect-params';
+import {
+    ASSET_EFFECT_TYPES,
+    ASSET_GSPLAT_EFFECT_ID,
+    PERSISTENT_CAMERA_EFFECT_TYPES,
+    PERSISTENT_STYLIZATION_EFFECT_TYPES,
+    SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID,
+    resolveAssetEffectType
+} from './vfx/effects-runtime/effect-types';
 
 /** 父级 → Viewer 的 postMessage payload 类型（按文档事件表） */
 type InboundPayload =
@@ -183,6 +191,81 @@ const dispatchEffects = (g: Global, cmdType: string, payload?: unknown) => {
                 { type: cmdType, payload, source: HOST_CMD_SOURCE }
     });
 };
+
+type NormalizedEffectParamsPatch = {
+    params: Record<string, unknown>;
+    enable?: boolean;
+    isNewShape: boolean;
+};
+
+const EFFECT_PARAMS_LEGACY_KEYS = new Set(['type', 'effectId', 'enabled', 'enable', 'autoStart', 'effectParams']);
+const MESSAGE_BRIDGE_STYLIZATION_EFFECT_TYPES = new Set(
+    [...PERSISTENT_STYLIZATION_EFFECT_TYPES].filter(type => type !== 'perlin-wave')
+);
+
+/**
+ * New host protocol:
+ * params: { "<effect-type>": { enable?: boolean, ...effectParams } }
+ * Internal adapters still consume { type, enabled, effectParams }, so normalize at the bridge boundary.
+ * @param effectId - Protocol effect package id.
+ * @param params - Incoming `EFFECT_PARAMS_PATCH.params`.
+ * @returns Normalized params, or null when the new shape is malformed.
+ */
+function normalizeEffectParamsPatch(
+    effectId: string,
+    params: Record<string, unknown>
+): NormalizedEffectParamsPatch | null {
+    const entries = Object.entries(params).filter(([key]) => !EFFECT_PARAMS_LEGACY_KEYS.has(key));
+    if (entries.length === 0) {
+        return { params, isNewShape: false };
+    }
+    if (entries.length !== 1) {
+        return null;
+    }
+
+    const [effectType, rawPatch] = entries[0]!;
+    if (typeof rawPatch !== 'object' || rawPatch === null || Array.isArray(rawPatch)) {
+        return null;
+    }
+
+    if ((effectId === ASSET_GSPLAT_EFFECT_ID || ASSET_EFFECT_TYPES.has(effectId)) && !ASSET_EFFECT_TYPES.has(effectType)) {
+        return null;
+    }
+    if (
+        effectId === SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID &&
+        !PERSISTENT_CAMERA_EFFECT_TYPES.has(effectType)
+    ) {
+        return null;
+    }
+    if (
+        effectId === SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID &&
+        !MESSAGE_BRIDGE_STYLIZATION_EFFECT_TYPES.has(effectType)
+    ) {
+        return null;
+    }
+
+    const raw = rawPatch as Record<string, unknown>;
+    const effectParams: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(raw)) {
+        if (key !== 'enable') {
+            effectParams[key] = value;
+        }
+    }
+
+    const normalized: Record<string, unknown> = { type: effectType };
+    if (typeof raw.enable === 'boolean') {
+        normalized.enabled = raw.enable;
+    }
+    if (Object.keys(effectParams).length > 0) {
+        normalized.effectParams = effectParams;
+    }
+
+    return {
+        params: normalized,
+        enable: typeof raw.enable === 'boolean' ? raw.enable : undefined,
+        isNewShape: true
+    };
+}
 
 const initPostMessageBridge = (global: Global) => {
     const { state, events, config } = global;
@@ -569,10 +652,18 @@ const initPostMessageBridge = (global: Global) => {
                 const targetId = (p as { targetId?: unknown }).targetId;
                 if (typeof targetId === 'string') {
                     const params = (p as { params?: unknown }).params;
-                    const pr =
+                    const rawParams =
                         typeof params === 'object' && params !== null ?
                             { ...(params as Record<string, unknown>) } :
                             {};
+                    const normalized = normalizeEffectParamsPatch(p.effectId as string, rawParams);
+                    if (!normalized) {
+                        console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: invalid asset params shape');
+                        break;
+                    }
+                    const pr = normalized.isNewShape && normalized.params.effectParams === undefined ?
+                        { ...normalized.params, effectParams: {} } :
+                        normalized.params;
                     if (!resolveAssetEffectType(p.effectId as string, pr)) {
                         break;
                     }
@@ -585,7 +676,14 @@ const initPostMessageBridge = (global: Global) => {
                         targetId,
                         params: pr
                     });
-                    dispatchEffects(global, 'EFFECT_PARAMS_PATCH', env);
+                    if (normalized.isNewShape && normalized.enable === true) {
+                        dispatchEffects(global, 'EFFECT_START', env);
+                    } else if (normalized.isNewShape && normalized.enable === false) {
+                        dispatchEffects(global, 'EFFECT_PARAMS_PATCH', env);
+                        dispatchEffects(global, 'EFFECT_STOP', env);
+                    } else {
+                        dispatchEffects(global, 'EFFECT_PARAMS_PATCH', env);
+                    }
                     break;
                 }
                 if (p.effectId !== SCENE_GSPLAT_REVEAL_EFFECT_ID && !isPersistentProtocolEffectId(p.effectId as string)) {
@@ -597,7 +695,13 @@ const initPostMessageBridge = (global: Global) => {
                     console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: params must be object');
                     break;
                 }
-                const pr = { ...(params as Record<string, unknown>) };
+                const rawParams = { ...(params as Record<string, unknown>) };
+                const normalized = normalizeEffectParamsPatch(p.effectId as string, rawParams);
+                if (!normalized) {
+                    console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: invalid params shape');
+                    break;
+                }
+                const pr = normalized.params;
                 const valid =
                 p.effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID ?
                     paramsPatchHasRevealKeys(pr) :
