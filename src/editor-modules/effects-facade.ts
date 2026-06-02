@@ -1,6 +1,7 @@
 import {
     applyAssetEffectParamsPatch,
     applyAssetEffectStart,
+    readAssetEffectInstanceForTarget,
     applyAssetEffectStop,
     isAssetEffectProtocolEnvelope
 } from './protocol-adapters/asset-effects-protocol-adapter';
@@ -13,9 +14,22 @@ import {
     paramsPatchHasPersistentKeys,
     SCENE_GSPLAT_REVEAL_EFFECT_ID
 } from './protocol-adapters/effects-protocol-adapter';
-import { resolveAssetEffectType } from '../vfx/effects-runtime/effect-types';
+import {
+    ASSET_GSPLAT_EFFECT_ID,
+    PERSISTENT_CAMERA_EFFECT_TYPES,
+    PERSISTENT_STYLIZATION_EFFECT_TYPES,
+    SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID,
+    resolveAssetEffectType
+} from '../vfx/effects-runtime/effect-types';
 import { normalizeAssetEffectEnvelope } from './protocol-adapters/asset-effects-protocol-adapter';
-import { readRevealParams } from '../settings-serialize/effects-sync';
+import {
+    clearPersistentSubTrack,
+    patchAssetRuntimeMirror,
+    patchAssetInstanceFromParams,
+    readRevealParams,
+    syncEffectsRuntimeStateFromSettings
+} from '../settings-serialize/effects-sync';
 import { isPersistentVfx } from '../vfx/effects-runtime/reveal/reveal-policy';
 import type {
     Global,
@@ -25,6 +39,10 @@ import type {
     ModuleLifecycleReason,
     SelectionSource
 } from '../types';
+
+const EFFECT_ADD_STYLIZATION_TYPES = new Set(
+    [...PERSISTENT_STYLIZATION_EFFECT_TYPES].filter(type => type !== 'perlin-wave')
+);
 
 /**
  * 与 `message-bridge` 中 `dispatchEffects` 同路径：经 `CommandRegistry` → `EffectsFacade.handleCommand`。
@@ -64,6 +82,82 @@ class EffectsFacade implements ModuleFacade {
     handleCommand(ctx: ModuleContext, command: ModuleCommand): void {
         const { global, events } = ctx;
         switch (command.type) {
+        case 'EFFECT_ADD': {
+            const raw = command.payload;
+            if (!raw || typeof raw !== 'object') break;
+            const effectId = (raw as { effectId?: unknown }).effectId;
+            const effectType = (raw as { effectType?: unknown }).effectType;
+            const paramsRaw = (raw as { params?: unknown }).params;
+            const params =
+                paramsRaw && typeof paramsRaw === 'object' && !Array.isArray(paramsRaw) ?
+                    (paramsRaw as Record<string, unknown>) :
+                    {};
+            if (typeof effectId !== 'string' || typeof effectType !== 'string') break;
+            if (effectId === ASSET_GSPLAT_EFFECT_ID) {
+                const targetId = (raw as { targetId?: unknown }).targetId;
+                if (typeof targetId !== 'string') break;
+                if (effectType === '') {
+                    const current = readAssetEffectInstanceForTarget(global, targetId);
+                    const runtimeType = global.state.effectsRuntimeState?.asset?.instances?.[targetId]?.activeType;
+                    const stopType =
+                        current?.type ??
+                        (typeof runtimeType === 'string' ? runtimeType : null);
+                    if (current) {
+                        patchAssetInstanceFromParams(global.settings, targetId, { enabled: false });
+                    }
+                    syncEffectsRuntimeStateFromSettings(global.state, global.settings);
+                    patchAssetRuntimeMirror(global.state, targetId, { status: 'inactive' });
+                    if (stopType) {
+                        applyAssetEffectStop(global, normalizeAssetEffectEnvelope({
+                            effectId: ASSET_GSPLAT_EFFECT_ID,
+                            targetId,
+                            params: { type: stopType }
+                        }));
+                    }
+                    break;
+                }
+                applyAssetEffectStart(global, normalizeAssetEffectEnvelope({
+                    effectId,
+                    targetId,
+                    params: { ...params, type: effectType, enabled: true, autoStart: true }
+                }));
+                break;
+            }
+            if (!isPersistentProtocolEffectId(effectId)) break;
+            if (effectType !== '') {
+                if (
+                    effectId === SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID &&
+                    !PERSISTENT_CAMERA_EFFECT_TYPES.has(effectType)
+                ) {
+                    break;
+                }
+                if (
+                    effectId === SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID &&
+                    !EFFECT_ADD_STYLIZATION_TYPES.has(effectType)
+                ) {
+                    break;
+                }
+            }
+            if (effectType === '') {
+                if (
+                    effectId === SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID ||
+                    effectId === SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID
+                ) {
+                    clearPersistentSubTrack(global.settings, effectId);
+                }
+                syncEffectsRuntimeStateFromSettings(global.state, global.settings);
+                global.events.fire('persistentGsplatEffectRemountRequested', false);
+                break;
+            }
+            applyGsplatPersistentParamsPatch(global, {
+                type: effectType,
+                enabled: true,
+                autoStart: true,
+                effectParams: params
+            });
+            global.events.fire('persistentGsplatEffectRemountRequested', false);
+            break;
+        }
         case 'EFFECT_PARAMS_PATCH': {
             const raw = command.payload;
             if (isAssetEffectProtocolEnvelope(raw)) {

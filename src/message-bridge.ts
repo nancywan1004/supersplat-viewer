@@ -121,6 +121,7 @@ type InboundPayload =
     | { type: 'EFFECT_REPLAY'; module?: 'effects'; effectId: string; restartAnim?: boolean }
     | { type: 'EFFECT_START'; module?: 'effects'; effectId: string; targetId: string; params?: Record<string, unknown> }
     | { type: 'EFFECT_STOP'; module?: 'effects'; effectId: string; targetId: string }
+    | { type: 'EFFECT_ADD'; module?: 'effects'; effectId: string; effectType: string; targetId?: string; params?: Record<string, unknown> }
     | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean; projectName?: string }
     | { type: 'VIDEO_EXPORT_CANCEL' };
 
@@ -769,6 +770,62 @@ const initPostMessageBridge = (global: Global) => {
                     'EFFECT_STOP',
                     normalizeAssetEffectEnvelope({ effectId, targetId, params } as AssetEffectProtocolEnvelope)
                 );
+                break;
+            }
+            case 'EFFECT_ADD': {
+                if (p.module !== undefined && p.module !== MESSAGE_BRIDGE_MODULE.effects) {
+                    console.warn('[MessageBridge] EFFECT_ADD ignored: module must be "effects" when present');
+                    break;
+                }
+                const effectId = (p as { effectId?: unknown }).effectId;
+                const effectType = (p as { effectType?: unknown }).effectType;
+                const targetId = (p as { targetId?: unknown }).targetId;
+                const paramsRaw = (p as { params?: unknown }).params;
+                const params =
+                    paramsRaw && typeof paramsRaw === 'object' && !Array.isArray(paramsRaw) ?
+                        (paramsRaw as Record<string, unknown>) :
+                        {};
+                if (typeof effectId !== 'string' || typeof effectType !== 'string') {
+                    console.warn('[MessageBridge] EFFECT_ADD ignored: effectId and effectType must be string');
+                    break;
+                }
+                if (effectId === SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID && effectType !== '') {
+                    if (!PERSISTENT_CAMERA_EFFECT_TYPES.has(effectType)) {
+                        console.warn('[MessageBridge] EFFECT_ADD ignored: invalid camera effectType', effectType);
+                        break;
+                    }
+                    dispatchEffects(global, 'EFFECT_ADD', { effectId, effectType, params });
+                    break;
+                }
+                if (effectId === SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID && effectType !== '') {
+                    if (!MESSAGE_BRIDGE_STYLIZATION_EFFECT_TYPES.has(effectType)) {
+                        console.warn('[MessageBridge] EFFECT_ADD ignored: invalid stylization effectType', effectType);
+                        break;
+                    }
+                    dispatchEffects(global, 'EFFECT_ADD', { effectId, effectType, params });
+                    break;
+                }
+                if (
+                    (effectId === SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID ||
+                        effectId === SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID) &&
+                    effectType === ''
+                ) {
+                    dispatchEffects(global, 'EFFECT_ADD', { effectId, effectType, params });
+                    break;
+                }
+                if (effectId === ASSET_GSPLAT_EFFECT_ID) {
+                    if (typeof targetId !== 'string') {
+                        console.warn('[MessageBridge] EFFECT_ADD ignored: targetId required for asset.gsplat-effects');
+                        break;
+                    }
+                    if (effectType !== '' && !ASSET_EFFECT_TYPES.has(effectType)) {
+                        console.warn('[MessageBridge] EFFECT_ADD ignored: invalid asset effectType', effectType);
+                        break;
+                    }
+                    dispatchEffects(global, 'EFFECT_ADD', { effectId, effectType, targetId, params });
+                    break;
+                }
+                console.warn('[MessageBridge] EFFECT_ADD ignored: unsupported effectId', effectId);
                 break;
             }
             case 'EFFECT_TOGGLE': {

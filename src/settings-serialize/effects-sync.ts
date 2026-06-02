@@ -744,6 +744,32 @@ export function clearPersistentRevealTrack(settings: ExperienceSettings): void {
     e.persistent.stylization!.paramsById[SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID] = {};
 }
 
+function hasValidPersistentSubTrack(
+    persistent: NonNullable<ExperienceSettings['effects']>['persistent'],
+    name: PersistentSubTrackName
+): boolean {
+    const pack = getPersistentPackForSubTrack(persistent, name);
+    return parsePersistentPack(pack) !== null;
+}
+
+export function clearPersistentSubTrack(
+    settings: ExperienceSettings,
+    effectId: typeof SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID | typeof SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID
+): boolean {
+    const e = ensureEffectsSettings(settings);
+    const name: PersistentSubTrackName =
+        effectId === SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID ? 'camera' : 'stylization';
+    const track = ensurePersistentSubTrack(e.persistent, name);
+    track.paramsById[effectId] = {};
+    const hasCamera = hasValidPersistentSubTrack(e.persistent, 'camera');
+    const hasStylization = hasValidPersistentSubTrack(e.persistent, 'stylization');
+    const hasAny = hasCamera || hasStylization;
+    if (!hasAny) {
+        e.persistent.enabled = false;
+    }
+    return hasAny;
+}
+
 /**
  * 导出前调用：若仍存在内存里的 `revealEffect`，先镜像进 `effects`，保证 JSON 以 **`effects` 为唯一 scene reveal 真源**。
  * 调用方随后应从快照对象上 **删除 `revealEffect` 键**（不再写入 settings.json）。
