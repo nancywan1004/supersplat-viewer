@@ -1,3 +1,4 @@
+import { normalizeAnnotationMediaFields } from '../../annotation-toolbar/media-fields';
 import type { Global } from '../../types';
 import type { Annotation } from '../../settings';
 import { pushEditHistory } from '../../edit-history';
@@ -20,11 +21,21 @@ const ANNOTATION_SETTINGS_HTML = `
                 <label for="annotationBodyInput">正文:</label>
                 <textarea id="annotationBodyInput" class="settingsInput annotation-body-input" placeholder="Description..." maxlength="50" rows="3"></textarea>
             </div>
-            <div class="settingsRow">
-                <span class="annotation-label">图片:</span>
-                <div class="annotation-image-upload" id="annotationImageUpload">
-                    <span class="annotation-image-plus">+</span>
-                    <input type="file" id="annotationImageInput" accept="image/jpeg,image/png" class="hidden" tabindex="-1" />
+            <div class="settingsRow annotation-media-settings-row">
+                <span class="annotation-label">媒体:</span>
+                <div class="annotation-radio-group annotation-media-type-group">
+                    <label class="annotation-radio"><input type="radio" name="annotationMediaType" value="none" checked /> 无</label>
+                    <label class="annotation-radio"><input type="radio" name="annotationMediaType" value="image" /> 图片</label>
+                    <label class="annotation-radio"><input type="radio" name="annotationMediaType" value="video" /> 视频</label>
+                </div>
+                <div class="annotation-media-panel hidden" id="annotationImagePanel">
+                    <div class="annotation-image-upload" id="annotationImageUpload">
+                        <span class="annotation-image-plus">+</span>
+                        <input type="file" id="annotationImageInput" accept="image/jpeg,image/png" class="hidden" tabindex="-1" />
+                    </div>
+                </div>
+                <div class="annotation-media-panel hidden" id="annotationVideoPanel">
+                    <input type="url" id="annotationVideoUrlInput" class="settingsInput" placeholder="视频 URL（https://...）" />
                 </div>
             </div>
             <div class="settingsRow">
@@ -81,17 +92,48 @@ export function bindAnnotationSettings(root: HTMLElement | null, global: Global)
     const bodyInput = root.querySelector<HTMLTextAreaElement>('#annotationBodyInput');
     const imageUpload = root.querySelector<HTMLElement>('#annotationImageUpload');
     const imageInput = root.querySelector<HTMLInputElement>('#annotationImageInput');
+    const imagePanel = root.querySelector<HTMLElement>('#annotationImagePanel');
+    const videoPanel = root.querySelector<HTMLElement>('#annotationVideoPanel');
+    const videoUrlInput = root.querySelector<HTMLInputElement>('#annotationVideoUrlInput');
+    const mediaTypeRadios = root.querySelectorAll<HTMLInputElement>('input[name="annotationMediaType"]');
     const confirmBtn = root.querySelector<HTMLButtonElement>('#annotationConfirmPlaceBtn');
     const cancelPlaceBtn = root.querySelector<HTMLButtonElement>('#annotationCancelPlaceBtn');
     const selectedActions = root.querySelector<HTMLElement>('#annotationSelectedActions');
     const moveBtn = root.querySelector<HTMLButtonElement>('#annotationMoveBtn');
     const deleteBtn = root.querySelector<HTMLButtonElement>('#annotationDeleteBtn');
 
-    if (!header || !panel || !arrow || !newBtn || !placementHint || !form || !titleInput || !bodyInput || !imageUpload || !imageInput || !confirmBtn || !cancelPlaceBtn || !selectedActions || !moveBtn || !deleteBtn) return () => {};
+    if (!header || !panel || !arrow || !newBtn || !placementHint || !form || !titleInput || !bodyInput || !imageUpload || !imageInput || !imagePanel || !videoPanel || !videoUrlInput || !confirmBtn || !cancelPlaceBtn || !selectedActions || !moveBtn || !deleteBtn) return () => {};
 
     let annotationPlacementActive = false;
     let pendingPlacementPosition: [number, number, number] | null = null;
     let pendingImageDataUrl: string | null = null;
+
+    const getSelectedMediaType = (): 'none' | 'image' | 'video' => {
+        const checked = root.querySelector<HTMLInputElement>('input[name="annotationMediaType"]:checked');
+        const value = checked?.value;
+        if (value === 'image' || value === 'video') {
+            return value;
+        }
+        return 'none';
+    };
+
+    const updateMediaPanels = () => {
+        const type = getSelectedMediaType();
+        imagePanel.classList.toggle('hidden', type !== 'image');
+        videoPanel.classList.toggle('hidden', type !== 'video');
+        if (type !== 'image') {
+            pendingImageDataUrl = null;
+            imageInput.value = '';
+            imageUpload.querySelector('.annotation-image-preview')?.remove();
+        }
+        if (type !== 'video') {
+            videoUrlInput.value = '';
+        }
+    };
+
+    mediaTypeRadios.forEach((radio) => {
+        radio.addEventListener('change', updateMediaPanels);
+    });
 
     const toggle = () => {
         const isHidden = panel.classList.contains('hidden');
@@ -136,6 +178,9 @@ export function bindAnnotationSettings(root: HTMLElement | null, global: Global)
         if (titleInput) titleInput.value = '';
         if (bodyInput) bodyInput.value = '';
         if (imageInput) imageInput.value = '';
+        const noneMedia = root.querySelector<HTMLInputElement>('input[name="annotationMediaType"][value="none"]');
+        if (noneMedia) noneMedia.checked = true;
+        updateMediaPanels();
         const yesRadio = root.querySelector<HTMLInputElement>('input[name="annotationShowTitle"][value="yes"]');
         if (yesRadio) yesRadio.checked = true;
         state.selectedAnnotationId = null;
@@ -160,6 +205,9 @@ export function bindAnnotationSettings(root: HTMLElement | null, global: Global)
         if (!file) return;
         const reader = new FileReader();
         reader.onload = () => {
+            const imageRadio = root.querySelector<HTMLInputElement>('input[name="annotationMediaType"][value="image"]');
+            if (imageRadio) imageRadio.checked = true;
+            updateMediaPanels();
             pendingImageDataUrl = typeof reader.result === 'string' ? reader.result : null;
             const existing = imageUpload.querySelector<HTMLImageElement>('.annotation-image-preview');
             const img = existing ?? document.createElement('img');
@@ -181,12 +229,18 @@ export function bindAnnotationSettings(root: HTMLElement | null, global: Global)
         const body = (bodyInput?.value ?? '').trim();
         const showTitleWhenCollapsed = root.querySelector<HTMLInputElement>('input[name="annotationShowTitle"]:checked')?.value !== 'no';
 
+        const mediaType = getSelectedMediaType();
+        const media = normalizeAnnotationMediaFields({
+            imageUrl: mediaType === 'image' ? (pendingImageDataUrl ?? undefined) : undefined,
+            videoUrl: mediaType === 'video' ? (videoUrlInput.value.trim() || undefined) : undefined
+        });
+
         const ann: Annotation = {
             id: `annotation-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
             position: pendingPlacementPosition,
             title,
             text: body,
-            imageUrl: pendingImageDataUrl ?? undefined,
+            ...media,
             showTitleWhenCollapsed,
             collapsed: true,
             extras: {},
@@ -197,6 +251,7 @@ export function bindAnnotationSettings(root: HTMLElement | null, global: Global)
         annotationPlacementActive = false;
         pendingPlacementPosition = null;
         pendingImageDataUrl = null;
+        videoUrlInput.value = '';
         events.fire('annotation:placementMode', { active: false });
 
         global.settings.annotations = global.settings.annotations ?? [];

@@ -1,5 +1,6 @@
 import { EventHandler } from 'playcanvas';
 
+import { shouldUseTouchJoystickMove } from '../input/touch-joystick-ui';
 import { Tooltip } from '../tooltip';
 import { Global } from '../types';
 import { isLodMetaFile } from '../loaders/lod-loader';
@@ -10,7 +11,10 @@ import {
     getComparableSettingsStringFromSnapshot,
     applySettingsSnapshot
 } from '../settings-serialize/settings-serialize';
-import { requestSceneAssetsRestore } from '../asset-placement-handler';
+import { readSkyboxUrlFromSettings } from '../settings-serialize/settings-serialize-helper';
+import { downloadExperienceSettingsLocally } from '../render/project-thumbnail';
+import { resetSceneSettings } from '../settings-reset';
+import { requestSceneAssetsRestore } from '../scene-assets/asset-placement-handler';
 import {
     initEditHistory,
     canUndo,
@@ -19,9 +23,12 @@ import {
     redo,
     restoreAnnotationsFromSettings,
     restoreLightingFromSettings,
-    restorePostEffectsFromSettings
+    restorePostEffectsFromSettings,
+    restoreSkyboxFromSettings
 } from '../edit-history';
 import { showExitEditConfirmModal } from './components/exit-edit-confirm-ui';
+import { showEditToast } from './components/edit-toast-ui';
+import { confirmSceneReset } from './components/settings-reset-confirm-ui';
 import { initRevealUI } from './components/effects-ui';
 import { initAssetEffectsUI } from './components/asset-effects-ui';
 import { initVideoExportUI } from './components/video-export-ui';
@@ -35,63 +42,101 @@ import type { Annotation } from '../settings';
 import { getEditUiTransport, sendEditProtocolMessage } from './edit-ui-transport';
 import { applyEnvironmentPreviewVisualPolicy } from '../editor-modules/environment-facade';
 import { applyLightToggleAll, applyLightToggle } from '../editor-modules/protocol-adapters/environment-protocol-adapter';
+import { applyViewMediaMuteSet, applyViewTorchActive, readViewTorchActive } from '../view-settings';
 import { getRevealActiveType } from '../settings-serialize/effects-sync';
 
 // Initialize the touch joystick for fly mode camera control
 const initJoystick = (
     dom: Record<string, HTMLElement>,
     events: EventHandler,
-    state: { cameraMode: string; inputMode: string; gamingControls: boolean }
+    state: { cameraMode: string; inputMode: string; gamingControls: boolean; hasRevealEffect?: boolean }
 ) => {
-    // Joystick dimensions (matches SCSS: base height=100, stick size=40)
-    const joystickHeight = 100;
-    const stickSize = 40;
+    if (!dom.joystickBase || !dom.joystick || !dom.joystickLookBase || !dom.joystickLook) {
+        console.warn('[Joystick] missing joystick dom nodes, skip init');
+        return;
+    }
+
+    // Joystick dimensions (matches SCSS)
+    const joystickHeight = 112;
+    const stickSize = 44;
     const stickCenterY = (joystickHeight - stickSize) / 2; // 30px - top position when centered
     const stickCenterX = (joystickHeight - stickSize) / 2; // 30px - left position when centered (for 2D mode)
     const maxStickTravel = stickCenterY; // can travel 30px up or down from center
 
-    // Fixed joystick position (bottom-left corner with safe area)
-    const joystickFixedX = 70;
-    const joystickFixedY = () => window.innerHeight - 140;
+    // Fixed positions (bottom corners with safe area)
+    const joystickLeft = 84;
+    const lookJoystickLeft = () => window.innerWidth - 84;
+    const joystickBottom = 'calc(env(safe-area-inset-bottom, 0px) + 48px)';
 
     // Joystick touch state
     let joystickPointerId: number | null = null;
     let joystickValueX = 0; // -1 to 1, negative = left, positive = right
-    let joystickValueY = 0; // -1 to 1, negative = forward, positive = backward
+    let joystickValueY = 0; // -1 to 1, negative = up/forward on the UI, positive = down/backward
+    let joystickLookPointerId: number | null = null;
+    let joystickLookValueX = 0; // -1 to 1, negative = look left, positive = look right
+    let joystickLookValueY = 0; // -1 to 1, negative = look up, positive = look down
 
-    // Joystick mode: '1d' for vertical only, '2d' for full directional
-    let joystickMode: '1d' | '2d' = '2d';
+    const getElementCenter = (element: HTMLElement) => {
+        const rect = element.getBoundingClientRect();
+        return {
+            x: rect.left + rect.width * 0.5,
+            y: rect.top + rect.height * 0.5
+        };
+    };
 
-    // Double-tap detection for mode toggle
-    let lastTapTime = 0;
+    // Gate joystick visibility until reveal phase completes.
+    let revealReady = !state.hasRevealEffect;
 
-    // Update joystick visibility based on camera mode and input mode
+    // Joystick: touch + landscape only (portrait uses two-finger fly)
     const updateJoystickVisibility = () => {
-        if ((state.cameraMode === 'fly' || state.cameraMode === 'walk') && state.inputMode === 'touch' && state.gamingControls) {
+        const joystickEnabled = revealReady && shouldUseTouchJoystickMove(state);
+        if (joystickEnabled) {
             dom.joystickBase.classList.remove('hidden');
-            dom.joystickBase.classList.toggle('mode-2d', joystickMode === '2d');
-            dom.joystickBase.style.left = `${joystickFixedX}px`;
-            dom.joystickBase.style.top = `${joystickFixedY()}px`;
-            // Center the stick
+            dom.joystickLookBase.classList.remove('hidden');
+            dom.joystickBase.classList.add('mode-2d');
+            dom.joystickLookBase.classList.add('mode-2d');
+            dom.joystickBase.style.left = `${joystickLeft}px`;
+            dom.joystickBase.style.right = '';
+            dom.joystickBase.style.top = '';
+            dom.joystickBase.style.bottom = joystickBottom;
+            dom.joystickLookBase.style.left = `${lookJoystickLeft()}px`;
+            dom.joystickLookBase.style.right = '';
+            dom.joystickLookBase.style.top = '';
+            dom.joystickLookBase.style.bottom = joystickBottom;
             dom.joystick.style.top = `${stickCenterY}px`;
-            if (joystickMode === '2d') {
-                dom.joystick.style.left = `${stickCenterX}px`;
-            } else {
-                dom.joystick.style.left = '8px'; // Reset to 1D centered position
-            }
+            dom.joystickLook.style.top = `${stickCenterY}px`;
+            dom.joystick.style.left = `${stickCenterX}px`;
+            dom.joystickLook.style.left = `${stickCenterX}px`;
         } else {
             dom.joystickBase.classList.add('hidden');
+            dom.joystickLookBase.classList.add('hidden');
+            events.fire('joystickInput', { x: 0, y: 0 });
+            events.fire('joystickLookInput', { x: 0, y: 0 });
         }
+        events.fire('touchJoystickUi', {
+            active: joystickEnabled
+        });
     };
 
     events.on('cameraMode:changed', updateJoystickVisibility);
     events.on('inputMode:changed', updateJoystickVisibility);
     events.on('gamingControls:changed', updateJoystickVisibility);
+    events.on('hasRevealEffect:changed', (value: boolean) => {
+        revealReady = !value;
+        updateJoystickVisibility();
+    });
+    events.once('revealComplete', () => {
+        revealReady = true;
+        updateJoystickVisibility();
+    });
     window.addEventListener('resize', updateJoystickVisibility);
+    window.matchMedia('(orientation: landscape)').addEventListener('change', updateJoystickVisibility);
+    updateJoystickVisibility();
 
     // Handle joystick touch input directly on the joystick element
     const updateJoystickStick = (clientX: number, clientY: number) => {
-        const baseY = joystickFixedY();
+        const center = getElementCenter(dom.joystickBase);
+        const baseY = center.y;
         // Calculate Y offset from joystick center (positive = down/backward)
         const offsetY = clientY - baseY;
         // Clamp to max travel and normalize to -1 to 1
@@ -101,34 +146,35 @@ const initJoystick = (
         // Update stick visual Y position
         dom.joystick.style.top = `${stickCenterY + clampedOffsetY}px`;
 
-        // Handle X axis in 2D mode
-        if (joystickMode === '2d') {
-            const baseX = joystickFixedX;
-            const offsetX = clientX - baseX;
-            const clampedOffsetX = Math.max(-maxStickTravel, Math.min(maxStickTravel, offsetX));
-            joystickValueX = clampedOffsetX / maxStickTravel;
+        const baseX = center.x;
+        const offsetX = clientX - baseX;
+        const clampedOffsetX = Math.max(-maxStickTravel, Math.min(maxStickTravel, offsetX));
+        joystickValueX = clampedOffsetX / maxStickTravel;
 
-            // Update stick visual X position
-            dom.joystick.style.left = `${stickCenterX + clampedOffsetX}px`;
-        } else {
-            joystickValueX = 0;
-        }
+        // Update stick visual X position
+        dom.joystick.style.left = `${stickCenterX + clampedOffsetX}px`;
 
         // Fire input event for the input controller
         events.fire('joystickInput', { x: joystickValueX, y: joystickValueY });
     };
 
-    dom.joystickBase.addEventListener('pointerdown', (event: PointerEvent) => {
-        // Double-tap detection for mode toggle
-        const now = Date.now();
-        if (now - lastTapTime < 300) {
-            joystickMode = joystickMode === '1d' ? '2d' : '1d';
-            updateJoystickVisibility();
-            lastTapTime = 0;
-        } else {
-            lastTapTime = now;
-        }
+    const updateLookJoystickStick = (clientX: number, clientY: number) => {
+        const center = getElementCenter(dom.joystickLookBase);
+        const baseX = center.x;
+        const baseY = center.y;
+        const offsetX = clientX - baseX;
+        const offsetY = clientY - baseY;
+        const clampedOffsetX = Math.max(-maxStickTravel, Math.min(maxStickTravel, offsetX));
+        const clampedOffsetY = Math.max(-maxStickTravel, Math.min(maxStickTravel, offsetY));
+        joystickLookValueX = clampedOffsetX / maxStickTravel;
+        joystickLookValueY = clampedOffsetY / maxStickTravel;
 
+        dom.joystickLook.style.left = `${stickCenterX + clampedOffsetX}px`;
+        dom.joystickLook.style.top = `${stickCenterY + clampedOffsetY}px`;
+        events.fire('joystickLookInput', { x: joystickLookValueX, y: joystickLookValueY });
+    };
+
+    dom.joystickBase.addEventListener('pointerdown', (event: PointerEvent) => {
         if (joystickPointerId !== null) return; // Already tracking a touch
 
         joystickPointerId = event.pointerId;
@@ -155,9 +201,7 @@ const initJoystick = (
 
         // Reset stick to center
         dom.joystick.style.top = `${stickCenterY}px`;
-        if (joystickMode === '2d') {
-            dom.joystick.style.left = `${stickCenterX}px`;
-        }
+        dom.joystick.style.left = `${stickCenterX}px`;
 
         // Fire input event with zero values
         events.fire('joystickInput', { x: 0, y: 0 });
@@ -167,6 +211,38 @@ const initJoystick = (
 
     dom.joystickBase.addEventListener('pointerup', endJoystickTouch);
     dom.joystickBase.addEventListener('pointercancel', endJoystickTouch);
+
+    dom.joystickLookBase.addEventListener('pointerdown', (event: PointerEvent) => {
+        if (joystickLookPointerId !== null) return;
+
+        joystickLookPointerId = event.pointerId;
+        dom.joystickLookBase.setPointerCapture(event.pointerId);
+        updateLookJoystickStick(event.clientX, event.clientY);
+        event.preventDefault();
+        event.stopPropagation();
+    });
+
+    dom.joystickLookBase.addEventListener('pointermove', (event: PointerEvent) => {
+        if (event.pointerId !== joystickLookPointerId) return;
+
+        updateLookJoystickStick(event.clientX, event.clientY);
+        event.preventDefault();
+    });
+
+    const endLookJoystickTouch = (event: PointerEvent) => {
+        if (event.pointerId !== joystickLookPointerId) return;
+
+        joystickLookPointerId = null;
+        joystickLookValueX = 0;
+        joystickLookValueY = 0;
+        dom.joystickLook.style.left = `${stickCenterX}px`;
+        dom.joystickLook.style.top = `${stickCenterY}px`;
+        events.fire('joystickLookInput', { x: 0, y: 0 });
+        dom.joystickLookBase.releasePointerCapture(event.pointerId);
+    };
+
+    dom.joystickLookBase.addEventListener('pointerup', endLookJoystickTouch);
+    dom.joystickLookBase.addEventListener('pointercancel', endLookJoystickTouch);
 };
 
 // Initialize the annotation navigator for stepping between annotations
@@ -260,7 +336,7 @@ const initUI = (global: Global) => {
     const dom = [
         'ui',
         'controlsWrap',
-        'editModeStrip', 'editModeBtn', 'exitEditBtn', 'saveSettingsBtn', 'undoEditBtn', 'redoEditBtn', 'rightToolBar',
+        'editModeStrip', 'editModeBtn', 'exitEditBtn', 'resetSettingsBtn', 'saveSettingsBtn', 'undoEditBtn', 'redoEditBtn', 'rightToolBar',
         'arMode', 'vrMode',
         'enterFullscreen', 'exitFullscreen',
         'info', 'infoPanel', 'desktopTab', 'touchTab', 'desktopInfoPanel', 'touchInfoPanel',
@@ -286,13 +362,16 @@ const initUI = (global: Global) => {
         'getCameraInfo',
         'loadingText', 'loadingBar', 'loadingIcon',
         'joystickBase', 'joystick',
+        'joystickLookBase', 'joystickLook',
         'showCollision',
         'tooltip',
         'annotationNav', 'annotationPrev', 'annotationNext', 'annotationInfo', 'annotationNavTitle',
         // 'supersplatBranding',
         // View 模式调试按钮（右上角编辑按钮旁）
         'viewDebugToggleAssets', 'viewDebugLightsAllOn', 'viewDebugLightsAllOff',
-        'viewDebugRegionSelect', 'viewDebugToggleRegionLight'
+        'viewDebugRegionSelect', 'viewDebugToggleRegionLight',
+        'viewDebugMediaMute', 'viewDebugMediaUnmute',
+        'viewDebugTorchToggle'
     ].reduce((acc: Record<string, HTMLElement>, id) => {
         acc[id] = document.getElementById(id);
         return acc;
@@ -406,7 +485,7 @@ const initUI = (global: Global) => {
 
     // toggle fullscreen when user switches between landscape portrait
     // orientation
-    screen?.orientation?.addEventListener('change', (event) => {
+    screen?.orientation?.addEventListener('change', () => {
         if (['landscape-primary', 'landscape-secondary'].includes(screen.orientation.type)) {
             requestFullscreen();
         } else {
@@ -521,7 +600,7 @@ const initUI = (global: Global) => {
                 })
                 .filter((item): item is { label: string; value: string } => !!item?.value);
 
-            const current = config.skyboxUrl ?? '';
+            const current = readSkyboxUrlFromSettings(global.settings) ?? config.skyboxUrl ?? '';
 
             skyboxSelect.innerHTML = '';
 
@@ -546,7 +625,7 @@ const initUI = (global: Global) => {
     if (skyboxSelect) {
         skyboxSelect.addEventListener('change', (event) => {
             const value = (event.target as HTMLSelectElement).value;
-            events.fire('skyboxSwitch', value || null);
+            events.fire('skyboxSet', value || null);
         });
 
         events.on('skyboxSelectionSynced', (value?: string | null) => {
@@ -579,10 +658,11 @@ const initUI = (global: Global) => {
     let editModeEnteredSettingsSnapshot: string | null = null;
     /** 进入编辑模式时的 settings 完整数据，用于「不保存并退出」时回退场景 */
     let editModeEnteredSettingsData: ExperienceSettings | null = null;
+    const resetSettingsBtn = dom.resetSettingsBtn as HTMLButtonElement | null;
     const updatePreviewModeButton = () => {
         if (!dom.previewModeBtn) return;
         const inPreviewMode = state.previewMode === true;
-        dom.previewModeBtn.textContent = inPreviewMode ? '显示调试组件' : '隐藏调试组件';
+        dom.previewModeBtn.textContent = inPreviewMode ? '退出预览模式' : '进入预览模式';
     };
     const applyEditChromeVisibility = (inEdit: boolean) => {
         if (config.showEditUI === false) return;
@@ -591,7 +671,6 @@ const initUI = (global: Global) => {
             leftMount.classList.toggle('hidden', !inEdit);
         }
         if (dom.rightToolBar) {
-            // editLeftModule === null 时：不显示任何模块面板
             const showRight = inEdit && state.editLeftModule != null;
             dom.rightToolBar.classList.toggle('hidden', !showRight);
         }
@@ -612,6 +691,9 @@ const initUI = (global: Global) => {
         }
         if (dom.exitEditBtn) {
             dom.exitEditBtn.classList.toggle('hidden', !inEdit);
+        }
+        if (resetSettingsBtn) {
+            resetSettingsBtn.classList.toggle('hidden', !inEdit);
         }
         if (dom.saveSettingsBtn) {
             dom.saveSettingsBtn.classList.toggle('hidden', !inEdit);
@@ -639,6 +721,10 @@ const initUI = (global: Global) => {
                 if (hasVfxToResume) {
                     events.fire('vfxExit');
                 }
+                // 进入编辑时先清空模块（在异步恢复之前），避免 sceneAssets 恢复结束后覆盖用户已选模块
+                state.editLeftModule = null;
+                events.fire('editLeftModule:changed', null);
+
                 // 进入编辑统一恢复原始配置（避免资产异步未完成时基线快照不一致）。
                 const originalSettings = (global as any).__originalSettings as ExperienceSettings | undefined;
                 if (originalSettings) {
@@ -650,17 +736,13 @@ const initUI = (global: Global) => {
                     restoreAnnotationsFromSettings(global);
                     restoreLightingFromSettings(global);
                     restorePostEffectsFromSettings(global);
+                    restoreSkyboxFromSettings(global);
                 }
-
-                // 每次进入编辑模式时默认不选中任何模块（null）
-                state.editLeftModule = null;
-                events.fire('editLeftModule:changed', null);
 
                 const initialSnapshot = serializeExperienceSettings(global);
                 initEditHistory(global, initialSnapshot);
                 editModeEnteredSettingsData = JSON.parse(JSON.stringify(initialSnapshot)) as ExperienceSettings;
                 editModeEnteredSettingsSnapshot = getComparableSettingsStringFromSnapshot(initialSnapshot);
-                // 恢复流程中会重置 editLeftModule，完成后再同步一次显隐状态
                 applyEditChromeVisibility(state.editMode);
             }
         }
@@ -773,6 +855,7 @@ const initUI = (global: Global) => {
                         restoreAnnotationsFromSettings(global);
                         restoreLightingFromSettings(global);
                         restorePostEffectsFromSettings(global);
+                    restoreSkyboxFromSettings(global);
                     }
                     state.editMode = false;
                     return;
@@ -783,14 +866,7 @@ const initUI = (global: Global) => {
                 }
                 showExitEditConfirmModal({
                     onSave: () => {
-                        const payload = serializeExperienceSettings(global);
-                        const jsonString = JSON.stringify(payload, null, 2);
-                        const a = document.createElement('a');
-                        a.href = URL.createObjectURL(new Blob([jsonString], { type: 'application/json' }));
-                        a.download = 'settings.json';
-                        a.click();
-                        URL.revokeObjectURL(a.href);
-                        window.parent.postMessage({ type: 'SETTINGS_UPDATED', message: 'settings updated', payload: jsonString }, '*');
+                        downloadExperienceSettingsLocally(global);
                         state.editMode = false;
                     },
                     onDiscard: async () => {
@@ -805,8 +881,101 @@ const initUI = (global: Global) => {
                         // 统一通过 helper 按当前 settings 重置 Lighting / NightMode / PostEffect
                         restoreLightingFromSettings(global);
                         restorePostEffectsFromSettings(global);
+                    restoreSkyboxFromSettings(global);
                         state.editMode = false;
                     }
+                });
+            });
+        }
+        const syncResetBaseline = () => {
+            const payload = serializeExperienceSettings(global);
+            editModeEnteredSettingsData = JSON.parse(JSON.stringify(payload)) as ExperienceSettings;
+            editModeEnteredSettingsSnapshot = getComparableSettingsStringFromSnapshot(payload);
+            if (config.trackEditHistory) {
+                initEditHistory(global, editModeEnteredSettingsData);
+                events.fire('editHistory:stateChanged', {
+                    canUndo: canUndo(global),
+                    canRedo: canRedo(global)
+                });
+            }
+        };
+
+        const runSettingsReset = async () => {
+            const btn = resetSettingsBtn;
+            if (!btn) return;
+            const label = btn.textContent ?? '重置场景';
+            btn.disabled = true;
+            btn.textContent = '重置中…';
+
+            try {
+                if (editUiTransport === 'message-bridge') {
+                    const waitForResetResult = (timeoutMs = 30000) =>
+                        new Promise<{ pathFrom?: string }>((resolve, reject) => {
+                            const onMsg = (ev: MessageEvent) => {
+                                const data = ev.data as {
+                                    type?: string;
+                                    message?: string;
+                                    pathFrom?: string;
+                                };
+                                if (!data?.type) return;
+                                if (
+                                    data.type !== 'SETTINGS_RESET_APPLIED'
+                                    && data.type !== 'SETTINGS_RESET_FAILED'
+                                ) {
+                                    return;
+                                }
+                                window.removeEventListener('message', onMsg);
+                                clearTimeout(to);
+                                if (data.type === 'SETTINGS_RESET_FAILED') {
+                                    reject(new Error(
+                                        typeof data.message === 'string' && data.message
+                                            ? data.message
+                                            : 'SETTINGS_RESET_FAILED'
+                                    ));
+                                    return;
+                                }
+                                resolve({ pathFrom: data.pathFrom });
+                            };
+                            const to = window.setTimeout(() => {
+                                window.removeEventListener('message', onMsg);
+                                reject(new Error('timeout waiting for SETTINGS_RESET_APPLIED'));
+                            }, timeoutMs);
+                            window.addEventListener('message', onMsg);
+                        });
+
+                    sendEditProtocolMessage({ type: 'SETTINGS_RESET' });
+                    const applied = await waitForResetResult();
+                    syncResetBaseline();
+                    const msg = applied.pathFrom === 'original'
+                        ? '场景已重置（已应用云端初始相机路径）'
+                        : '场景已重置（未找到 transform.json，已保留当前动画路径与默认视角）';
+                    showEditToast(msg, 'success');
+                } else {
+                    const result = await resetSceneSettings(global);
+                    if (result.ok === false) {
+                        showEditToast(result.message || '重置失败', 'error');
+                        return;
+                    }
+                    syncResetBaseline();
+                    const msg = result.pathFrom === 'original'
+                        ? '场景已重置（已应用云端初始相机路径）'
+                        : '场景已重置（未找到 transform.json，已保留当前动画路径与默认视角）';
+                    showEditToast(msg, 'success');
+                }
+            } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                showEditToast(message || '重置失败', 'error');
+            } finally {
+                btn.textContent = label;
+                btn.disabled = false;
+            }
+        };
+
+        if (resetSettingsBtn) {
+            resetSettingsBtn.addEventListener('click', () => {
+                if (!state.editMode) return;
+                confirmSceneReset({
+                    onConfirm: () => runSettingsReset()
                 });
             });
         }
@@ -853,15 +1022,8 @@ const initUI = (global: Global) => {
                         .catch(() => {});
                     return;
                 }
+                downloadExperienceSettingsLocally(global);
                 const payload = serializeExperienceSettings(global);
-                const jsonString = JSON.stringify(payload, null, 2);
-                const a = document.createElement('a');
-                a.href = URL.createObjectURL(new Blob([jsonString], { type: 'application/json' }));
-                a.download = 'settings.json';
-                a.click();
-                URL.revokeObjectURL(a.href);
-                window.parent.postMessage({ type: 'SETTINGS_UPDATED', message: 'settings updated', payload: jsonString }, '*');
-
                 // 编辑模式下手动点击「保存配置」后，将当前配置视为最新快照：
                 // - 下次比较是否有改动时，以本次保存后的配置为基准
                 // - 之后选择「不保存并退出」时，回退到最近一次保存的配置
@@ -874,9 +1036,16 @@ const initUI = (global: Global) => {
                 const nextValue = state.previewMode !== true;
                 if (editUiTransport === 'message-bridge') {
                     sendEditProtocolMessage({ type: 'PREVIEW_MODE_SET', value: nextValue });
+                    if (nextValue) {
+                        events.fire('mediaHotspot:userActivate');
+                    }
                     return;
                 }
                 state.previewMode = nextValue;
+                events.fire('previewMode:changed', nextValue);
+                if (nextValue) {
+                    events.fire('mediaHotspot:userActivate');
+                }
             });
             updatePreviewModeButton();
         }
@@ -950,12 +1119,10 @@ const initUI = (global: Global) => {
                     || state.editLeftModule === 'environment';
                 bottomMount.classList.toggle('hidden', !showBottomBar);
             }
-            // 右侧面板：null 表示未选模块 => 隐藏右侧栏
             if (dom.rightToolBar) {
                 const showRight = state.editMode && state.editLeftModule != null;
                 dom.rightToolBar.classList.toggle('hidden', !showRight);
             }
-            // 进入/离开环境模块时交给 facade 策略统一刷新（含 preview 约束）。
             applyEnvironmentPreviewVisualPolicy(global);
         });
         updateEditModeUI();
@@ -1011,6 +1178,51 @@ const initUI = (global: Global) => {
                 applyLightToggleAll(global, false);
             }
         });
+    }
+
+    if (dom.viewDebugMediaMute) {
+        dom.viewDebugMediaMute.addEventListener('click', () => {
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'VIEW_MEDIA_MUTE_SET', value: true });
+            } else {
+                applyViewMediaMuteSet(global, true);
+            }
+        });
+    }
+
+    if (dom.viewDebugMediaUnmute) {
+        dom.viewDebugMediaUnmute.addEventListener('click', () => {
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'VIEW_MEDIA_MUTE_SET', value: false });
+            } else {
+                applyViewMediaMuteSet(global, false);
+            }
+        });
+    }
+
+    // 手电筒（全局单例 spot）：View 顶栏仅 Toggle；参数编辑在 Edit Lighting 面板。
+    const torchToggleBtn = dom.viewDebugTorchToggle as HTMLButtonElement | undefined;
+    if (torchToggleBtn) {
+        const refreshTorchToggleStyle = () => {
+            const active = readViewTorchActive(global);
+            torchToggleBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+            torchToggleBtn.classList.toggle('active', active);
+        };
+        refreshTorchToggleStyle();
+        torchToggleBtn.addEventListener('click', () => {
+            const next = !readViewTorchActive(global);
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'TORCH_TOGGLE', value: next });
+                // message-bridge 模式：父级回环写入后由 torchActive:changed 触发刷新；
+                // 但 internal 与 host 入站均同步走 applyViewTorchActive → torchActive:changed，
+                // 这里也直接调用以避免父级未回环时按钮态滞后。
+                applyViewTorchActive(global, next);
+            } else {
+                applyViewTorchActive(global, next);
+            }
+        });
+        // 任意路径写入 `viewSettings.torch.active` 都会触发 `torchActive:changed`，刷新按钮态。
+        events.on('torchActive:changed', refreshTorchToggleStyle);
     }
 
     // 单个局部亮灯区域：下拉选区域，点击「Toggle 区域灯」切换该区域绑定光源的开关
@@ -1428,10 +1640,15 @@ const initUI = (global: Global) => {
     tooltip.register(dom.vrMode, 'Enter VR', 'top');
     tooltip.register(dom.enterFullscreen, 'Fullscreen', 'top');
     tooltip.register(dom.exitFullscreen, 'Fullscreen', 'top');
+    tooltip.register(
+        resetSettingsBtn,
+        '重置场景：优先云端 transform.json 相机路径；无文件则保留当前 animTrack 与默认视角',
+        'top'
+    );
     tooltip.register(dom.saveSettingsBtn, 'Save Settings', 'top');
     tooltip.register(dom.undoEditBtn, 'Undo (Ctrl/Cmd+Z)', 'top');
     tooltip.register(dom.redoEditBtn, 'Redo (Ctrl/Cmd+Shift+Z)', 'top');
-    tooltip.register(dom.previewModeBtn, 'Toggle Preview Mode', 'top');
+    tooltip.register(dom.previewModeBtn, '预览体验：隐藏操作轴与调试线框，并启用音视频热区自动播控', 'top');
 
     // 全局 Undo/Redo 快捷键，仅在编辑模式下生效
     const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);

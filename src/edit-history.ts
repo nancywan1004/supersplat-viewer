@@ -1,9 +1,10 @@
 import type { Global } from './types';
 import type { ExperienceSettings } from './schemas/v2';
 import { serializeExperienceSettings, applySettingsSnapshot } from './settings-serialize/settings-serialize';
-import { requestSceneAssetsRestore } from './asset-placement-handler';
+import { requestSceneAssetsRestore } from './scene-assets/asset-placement-handler';
 import type { AnnotationManager } from './annotation-toolbar/annotation-manager';
 import { updatePointLightsFromSettings } from './light';
+import { readSkyboxUrlFromSettings } from './settings-serialize/settings-serialize-helper';
 
 export type EditSnapshot = ExperienceSettings;
 
@@ -120,6 +121,12 @@ export function restorePostEffectsFromSettings(global: Global): void {
     global.events.fire('bloomLocalLightRegion:listChanged');
 }
 
+/** 按当前 settings.background.skyboxUrl 重新应用天空盒（含清除） */
+export function restoreSkyboxFromSettings(global: Global): void {
+    const url = readSkyboxUrlFromSettings(global.settings as ExperienceSettings);
+    global.events.fire('skyboxSet', url ?? null);
+}
+
 export async function restoreSnapshot(global: Global, snapshot: EditSnapshot): Promise<void> {
     if (isRestoring) return;
 
@@ -133,6 +140,7 @@ export async function restoreSnapshot(global: Global, snapshot: EditSnapshot): P
         // Restore lighting / night mode / post effects from the snapshot
         restoreLightingFromSettings(global);
         restorePostEffectsFromSettings(global);
+        restoreSkyboxFromSettings(global);
     } finally {
         isRestoring = false;
         global.events.fire('editHistory:restoring', false);

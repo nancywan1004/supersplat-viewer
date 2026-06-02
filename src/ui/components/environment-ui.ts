@@ -2,11 +2,13 @@ import {
     allocateNextUserLightId,
     applyLightAdd,
     applyLightToggle,
-    applyShadowDirectionSet
+    applyShadowDirectionSet,
+    applyShadowSetFromHost
 } from '../../editor-modules/protocol-adapters/environment-protocol-adapter';
 import type { Global } from '../../types';
 import type { ExperienceSettings } from '../../schemas/v2';
 import { updatePointLightsFromSettings } from '../../light';
+import { hasShadowSceneMesh, syncGsplatShadowCastingFromSettings } from '../../vfx/shadow';
 import { pushEditHistory } from '../../edit-history';
 import {
     ensureBloom as ensureBloomFromAdapter,
@@ -150,7 +152,7 @@ const ensureBloom = (settings: Global['settings']): BloomSettings => {
 };
 
 type ShadowSettings = {
-    enabled: boolean;
+    enabled?: boolean;
     darken: number;
     castShadows?: boolean;
     debugVisual?: boolean;
@@ -700,7 +702,12 @@ export function initPostEffectUI(global: Global): () => void {
         refreshRegionList();
         syncDrawModeUiFromSession();
         const sh = ensureShadow(settings);
-        if (shadowEnableCheck) shadowEnableCheck.classList.toggle('active', sh.enabled);
+        if (shadowEnableCheck) shadowEnableCheck.classList.toggle('active', sh.enabled !== false);
+        if (shadowEnableOption) {
+            const canEnableShadow = hasShadowSceneMesh(global);
+            shadowEnableOption.title = canEnableShadow ? '' : '缺少 GLB 型 collision URL，当前场景不支持阴影';
+            shadowEnableOption.style.opacity = canEnableShadow ? '1' : '0.55';
+        }
         if (shadowCastCheck) shadowCastCheck.classList.toggle('active', sh.castShadows !== false);
         const darken = Math.max(0, Math.min(1, Number(sh.darken ?? 0)));
         if (shadowDarkenSlider) shadowDarkenSlider.value = String(darken);
@@ -923,25 +930,21 @@ export function initPostEffectUI(global: Global): () => void {
     }
 
     if (shadowEnableOption && shadowEnableCheck) {
-        const toggleShadow = () => {
-            const editUiTransport = getEditUiTransport(global);
-            if (editUiTransport === 'message-bridge') {
-                const sh = ensureShadow(settings);
-                const nextEnabled = !sh.enabled;
-                sendEditProtocolMessage({ type: 'SHADOW_SET', value: nextEnabled });
-                // 立即本地更新样式，避免父级尚未回写 settings 时勾选状态不变的错觉
-                shadowEnableCheck.classList.toggle('active', nextEnabled);
-                return;
-            }
+        const toggleShadowEnable = () => {
+            if (!hasShadowSceneMesh(global)) return;
             const sh = ensureShadow(settings);
-            sh.enabled = !sh.enabled;
+            const enabled = sh.enabled === false;
+            const editTransport = getEditUiTransport(global);
+            if (editTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'SHADOW_SET', value: enabled });
+            } else {
+                void applyShadowSetFromHost(global, enabled);
+            }
             syncFromSettings();
-            updatePointLightsFromSettings(global);
-            firePostEffectChanged();
             pushEditHistorySafe();
         };
-        shadowEnableOption.addEventListener('click', toggleShadow);
-        shadowEnableCheck.addEventListener('click', toggleShadow);
+        shadowEnableOption.addEventListener('click', toggleShadowEnable);
+        shadowEnableCheck.addEventListener('click', toggleShadowEnable);
     }
 
     if (shadowCastOption && shadowCastCheck) {

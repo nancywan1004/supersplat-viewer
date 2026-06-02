@@ -809,7 +809,7 @@ export function initAssetEffectsUI(global: Global): () => void {
         const stopPayload = {
             effectId: ASSET_GSPLAT_EFFECT_ID,
             targetId,
-            params: { type, enabled: false }
+            params: { type, enable: false }
         };
         const envelope = {
             effectId: ASSET_GSPLAT_EFFECT_ID,

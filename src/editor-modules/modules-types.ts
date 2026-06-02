@@ -6,6 +6,7 @@ export const MESSAGE_BRIDGE_MODULE = {
     asset: 'asset' as const,
     annotation: 'annotation' as const,
     environment: 'environment' as const,
+    camera: 'camera' as const,
     effects: 'effects' as const
 } as const;
 

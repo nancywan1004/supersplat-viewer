@@ -1,20 +1,22 @@
 /**
  * 父级↔Viewer 统一 postMessage 协议桥接
  * 入站 `EFFECT_*`：`module` 可选；若传则须为 **`effects`**（与 {@link MESSAGE_BRIDGE_MODULE.effects} 一致）。`effectId` 与参数见 **docs/SaaS第四期编辑模式接口文档.md**。
- * 出站：仅与 **`editLeftModule`** 域相关的事件在 payload 中带 **`module`**（`asset` / `annotation` / `environment` / `effects`），定义见 **`editor-modules/modules-types`** 中的 {@link MESSAGE_BRIDGE_MODULE}。
+ * 出站：与 **`editLeftModule`** 域相关的事件在 payload 中带 **`module`**（`asset` / `annotation` / `environment` / `camera` / `effects`），定义见 **`editor-modules/modules-types`** 中的 {@link MESSAGE_BRIDGE_MODULE}。
  */
 
 import type { AnnotationData } from './annotation-toolbar/types';
 import {
+    applySceneAssetTriggerDistanceM,
     requestSceneAssetsRestore
-} from './asset-placement-handler';
+} from './scene-assets/asset-placement-handler';
 import {
     initEditHistory,
     canUndo,
     canRedo,
     restoreAnnotationsFromSettings,
     restoreLightingFromSettings,
-    restorePostEffectsFromSettings
+    restorePostEffectsFromSettings,
+    restoreSkyboxFromSettings
 } from './edit-history';
 import type { CommandRegistry } from './editor-modules/command-registry';
 import { MESSAGE_BRIDGE_MODULE } from './editor-modules/modules-types';
@@ -31,7 +33,7 @@ import {
 import { getAssetLoader } from './loaders/asset-loader';
 import { resolveExportTimelinePlan } from './render/export-timeline-resolver';
 import { buildVideoExportFilename } from './render/video-export';
-import type { ExperienceSettings } from './schemas/v2';
+import type { ExperienceSettings, SceneMediaHotspotPatch, TorchLightSettings } from './schemas/v2';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import { getRevealActiveType, getRevealTotalDuration } from './settings-serialize/effects-sync';
 import {
@@ -40,25 +42,51 @@ import {
     getComparableSettingsStringFromSnapshot,
     applySettingsSnapshot
 } from './settings-serialize/settings-serialize';
+import {
+    applySceneMediaHotspotBaselineFromView,
+    patchSceneMediaHotspot
+} from './settings-serialize/settings-serialize-helper';
+import { applyViewMediaMuteSet } from './view-settings';
 import { getSelectedSceneAssetType } from './state-selectors';
 import type { AssetLibraryItem, EditLeftModule, Global } from './types';
-import { uploadProjectData } from './universe/service';
 import { paramsPatchHasAssetKeys } from './vfx/effects-runtime/asset/asset-effect-params';
 import {
     ASSET_EFFECT_TYPES,
     ASSET_GSPLAT_EFFECT_ID,
     PERSISTENT_CAMERA_EFFECT_TYPES,
     PERSISTENT_STYLIZATION_EFFECT_TYPES,
+    SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
     SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID,
     SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID,
     resolveAssetEffectType
 } from './vfx/effects-runtime/effect-types';
+import {
+    captureDefaultViewAndStageThumbnail,
+    persistExperienceSettingsToCloud
+} from './render/project-thumbnail';
+import { resetSceneSettings } from './settings-reset';
+import type { SceneCollisionSettingsPatch } from './schemas/v2-custom';
+import {
+    applyCollisionPatchFromHost,
+    applyCollisionSetFromHost,
+    buildSceneMeshLoadFailedPayload,
+    buildSceneMeshLoadFinishedPayload,
+    resolveSceneMeshLoadOutboundModules
+} from './editor-modules/protocol-adapters/collision-protocol-adapter';
+import { applyShadowSetFromHost } from './editor-modules/protocol-adapters/environment-protocol-adapter';
+import {
+    COLLISION_SYSTEM_READY,
+    type CollisionLoadPayload
+} from './collision/camera-collision-manager';
+import { resolveCollisionUrl } from './collision/scene-collision-source';
+import { SHADOW_SYSTEM_READY, isShadowOutputEnabled } from './vfx/shadow';
 
 /** 父级 → Viewer 的 postMessage payload 类型（按文档事件表） */
 type InboundPayload =
     | { type: 'CAMERA_MODE_SWITCH'; value?: 'orbit' | 'fly' }
     | { type: 'CAMERA_RESET' }
-    | { type: 'SKYBOX_SWITCH'; value?: string }
+    | { type: 'CAMERA_PITCH_RANGE_SET'; value?: [number, number] }
+    | { type: 'SKYBOX_SET'; value?: string }
     | { type: 'ANIMATION_RESET' }
     | { type: 'ANIMATION_PLAY_PAUSE' }
     | { type: 'EDIT_MODE_SET'; value?: boolean }
@@ -67,7 +95,14 @@ type InboundPayload =
     | { type: 'EDIT_UNDO' }
     | { type: 'EDIT_REDO' }
     | { type: 'PREVIEW_MODE_SET'; value?: boolean }
+    | { type: 'MEDIA_HOTSPOT_SET'; value?: SceneMediaHotspotPatch }
+    | { type: 'ASSET_MEDIA_HOTSPOT_BASELINE_SET'; id: string }
+    | { type: 'ASSET_MEDIA_HOTSPOT_RANGE_SET'; id?: string; value?: number }
+    | { type: 'VIEW_MEDIA_MUTE_SET'; value?: boolean }
+    | { type: 'TORCH_TOGGLE'; value?: boolean }
+    | { type: 'TORCH_PARAMS_SET'; value?: Partial<TorchLightSettings> }
     | { type: 'SETTINGS_SAVE' }
+    | { type: 'SETTINGS_RESET' }
     | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule | null }
     | { type: 'ASSET_SHOW_HIDE_SET'; id?: string; value?: boolean }
     | { type: 'ASSETS_SHOW_HIDE_SET'; value?: boolean }
@@ -76,6 +111,7 @@ type InboundPayload =
     | { type: 'ASSET_COPY'; id?: string; copyId?: string }
     | { type: 'ASSET_DELETE'; id?: string }
     | { type: 'ASSET_TRANSFORM_MODE'; value?: 'move' | 'rotate' | 'scale' }
+    | { type: 'ASSET_VIDEO_CURVATURE_SET'; id?: string; value?: number }
     | { type: 'ANNOTATION_PLACEMENT_START'; id?: string }
     | { type: 'ANNOTATION_PLACEMENT_CANCEL' }
     | { type: 'ANNOTATION_CONFIRM'; id?: string; value?: Partial<AnnotationData> }
@@ -117,14 +153,17 @@ type InboundPayload =
     | { type: 'SHADOW_INTENSITY_UPDATE'; value?: number }
     | { type: 'SHADOW_DIRECTION_SET'; value?: number }
     | { type: 'EFFECT_PARAMS_PATCH'; module?: 'effects'; effectId: string; params?: Record<string, unknown>; targetId?: string }
-    | { type: 'EFFECT_TOGGLE'; module?: 'effects'; effectId: string; value: boolean }
+    | { type: 'EFFECT_TOGGLE'; module?: 'effects'; effectId: string; params: Record<string, unknown> }
     | { type: 'EFFECT_REPLAY'; module?: 'effects'; effectId: string; restartAnim?: boolean }
     | { type: 'EFFECT_START'; module?: 'effects'; effectId: string; targetId: string; params?: Record<string, unknown> }
     | { type: 'EFFECT_STOP'; module?: 'effects'; effectId: string; targetId: string }
     | { type: 'EFFECT_ADD'; module?: 'effects'; effectId: string; effectType: string; targetId?: string; params?: Record<string, unknown> }
     | { type: 'EFFECT_DELETE'; module?: 'effects'; effectId: string; effectType?: string; targetId?: string }
     | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean; projectName?: string }
-    | { type: 'VIDEO_EXPORT_CANCEL' };
+    | { type: 'VIDEO_EXPORT_CANCEL' }
+    | { type: 'CAMERA_DEFAULT_VIEW_CAPTURE' }
+    | { type: 'COLLISION_SET'; value?: boolean }
+    | { type: 'COLLISION_PATCH'; value?: SceneCollisionSettingsPatch };
 
 const postToParent = (type: string, data?: Record<string, unknown>) => {
     const message = (data ? { type, ...data } : { type }) as Record<string, unknown>;
@@ -200,7 +239,7 @@ type NormalizedEffectParamsPatch = {
     isNewShape: boolean;
 };
 
-const EFFECT_PARAMS_LEGACY_KEYS = new Set(['type', 'effectId', 'enabled', 'enable', 'autoStart', 'effectParams']);
+const EFFECT_PARAMS_LEGACY_KEYS = new Set(['type', 'effectId', 'enable', 'autoStart', 'effectParams']);
 const MESSAGE_BRIDGE_STYLIZATION_EFFECT_TYPES = new Set(
     [...PERSISTENT_STYLIZATION_EFFECT_TYPES].filter(type => type !== 'perlin-wave')
 );
@@ -217,6 +256,10 @@ function normalizeEffectParamsPatch(
     effectId: string,
     params: Record<string, unknown>
 ): NormalizedEffectParamsPatch | null {
+    if (effectId !== ASSET_GSPLAT_EFFECT_ID && !ASSET_EFFECT_TYPES.has(effectId)) {
+        return { params, isNewShape: false };
+    }
+
     const entries = Object.entries(params).filter(([key]) => !EFFECT_PARAMS_LEGACY_KEYS.has(key));
     if (entries.length === 0) {
         return { params, isNewShape: false };
@@ -256,7 +299,7 @@ function normalizeEffectParamsPatch(
 
     const normalized: Record<string, unknown> = { type: effectType };
     if (typeof raw.enable === 'boolean') {
-        normalized.enabled = raw.enable;
+        normalized.enable = raw.enable;
     }
     if (Object.keys(effectParams).length > 0) {
         normalized.effectParams = effectParams;
@@ -273,6 +316,8 @@ const initPostMessageBridge = (global: Global) => {
     const { state, events, config } = global;
     const g = global as any;
     let cameraModeChangeSource: SelectionSource = 'unknown';
+    /** 父级下发 COLLISION_* / SHADOW_SET 时置 true，屏蔽由此触发的 scene mesh / 系统就绪出站（防回环）。 */
+    let suppressCollisionOutbound = false;
     // 用闭包变量记录本次导出是否被外部取消，避免向 global.state（可能是 Proxy）新增属性
     let videoExportCancelled = false;
 
@@ -304,8 +349,33 @@ const initPostMessageBridge = (global: Global) => {
             case 'CAMERA_RESET':
                 events.fire('inputEvent', 'reset');
                 break;
-            case 'SKYBOX_SWITCH':
-                if (typeof p.value === 'string') events.fire('skyboxSwitch', p.value);
+            case 'CAMERA_PITCH_RANGE_SET': {
+                const raw = (p as { value?: unknown }).value;
+                if (!Array.isArray(raw) || raw.length !== 2) {
+                    console.warn('[MessageBridge] CAMERA_PITCH_RANGE_SET ignored: value must be [min, max]');
+                    break;
+                }
+                const min = Number(raw[0]);
+                const max = Number(raw[1]);
+                if (!Number.isFinite(min) || !Number.isFinite(max) || min > max) {
+                    console.warn('[MessageBridge] CAMERA_PITCH_RANGE_SET ignored: invalid range', raw);
+                    break;
+                }
+                const range: [number, number] = [
+                    Math.max(-90, Math.min(90, min)),
+                    Math.max(-90, Math.min(90, max))
+                ];
+                const cameras = (global.settings as ExperienceSettings).cameras;
+                if (Array.isArray(cameras) && cameras[0]) {
+                    cameras[0].pitchRange = range;
+                }
+                events.fire('camera:pitchRangeChanged', range);
+                break;
+            }
+            case 'SKYBOX_SET':
+                if (typeof p.value === 'string') {
+                    events.fire('skyboxSet', p.value);
+                }
                 break;
             case 'ANIMATION_RESET':
                 events.fire('inputEvent', 'resetAnim');
@@ -323,6 +393,9 @@ const initPostMessageBridge = (global: Global) => {
                     if (hasVfxToResume) {
                         events.fire('vfxExit');
                     }
+                    // 先清空模块，避免 sceneAssets 恢复结束后覆盖用户已选模块
+                    state.editLeftModule = null;
+                    events.fire('editLeftModule:changed', null);
                     // View -> Edit：先恢复到原始配置（View 模式的临时修改不保留）
                     const originalSettings = (global as any).__originalSettings as ExperienceSettings | undefined;
                     if (originalSettings) {
@@ -334,13 +407,11 @@ const initPostMessageBridge = (global: Global) => {
                         restoreAnnotationsFromSettings(global);
                         restoreLightingFromSettings(global);
                         restorePostEffectsFromSettings(global);
+                        restoreSkyboxFromSettings(global);
                     }
                 }
                 state.editMode = !!p.value;
                 if (value) {
-                // 通过 EDIT_MODE_SET 进入编辑模式时：默认不选中任何模块（null）
-                    state.editLeftModule = null;
-                    events.fire('editLeftModule:changed', null);
                     const initialSnapshot = serializeExperienceSettings(global);
                     setBaseline(initialSnapshot);
                     initEditHistory(global, initialSnapshot);
@@ -363,6 +434,7 @@ const initPostMessageBridge = (global: Global) => {
                     // 统一通过 helper 按当前 settings 重置 Lighting / NightMode / PostEffect
                     restoreLightingFromSettings(global);
                     restorePostEffectsFromSettings(global);
+                    restoreSkyboxFromSettings(global);
                 }
                 state.editMode = false;
                 break;
@@ -378,22 +450,100 @@ const initPostMessageBridge = (global: Global) => {
                 break;
             }
             case 'PREVIEW_MODE_SET': {
-                state.previewMode = p.value === true;
+                const next = p.value === true;
+                if (state.previewMode !== next) {
+                    state.previewMode = next;
+                    events.fire('previewMode:changed', next);
+                }
+                if (next) {
+                    events.fire('mediaHotspot:userActivate');
+                }
+                break;
+            }
+            case 'MEDIA_HOTSPOT_SET': {
+                const patch = (payload as Extract<InboundPayload, { type: 'MEDIA_HOTSPOT_SET' }>).value;
+                if (!patch) break;
+                patchSceneMediaHotspot(global.settings as ExperienceSettings, patch);
+                events.fire('sceneMediaHotspot:changed');
+                break;
+            }
+            case 'VIEW_MEDIA_MUTE_SET':
+                if (typeof p.value === 'boolean') {
+                    applyViewMediaMuteSet(global, p.value);
+                }
+                break;
+            case 'TORCH_TOGGLE':
+                if (typeof p.value === 'boolean') {
+                    dispatchEnvironment(global, 'TORCH_TOGGLE', p);
+                }
+                break;
+            case 'TORCH_PARAMS_SET': {
+                const torchVal = (p as { value?: unknown }).value;
+                if (torchVal && typeof torchVal === 'object') {
+                    dispatchEnvironment(global, 'TORCH_PARAMS_SET', p);
+                }
+                break;
+            }
+            case 'ASSET_MEDIA_HOTSPOT_BASELINE_SET': {
+                const msg = payload as Extract<InboundPayload, { type: 'ASSET_MEDIA_HOTSPOT_BASELINE_SET' }>;
+                const id = typeof msg.id === 'string' ? msg.id.trim() : '';
+                if (!id) {
+                    console.warn('[MessageBridge] ASSET_MEDIA_HOTSPOT_BASELINE_SET missing id');
+                    break;
+                }
+                const result = applySceneMediaHotspotBaselineFromView(global, { sceneEntityId: id });
+                if (result.ok === false) {
+                    console.warn('[MessageBridge] ASSET_MEDIA_HOTSPOT_BASELINE_SET failed:', result.reason, { id });
+                    break;
+                }
+                events.fire('sceneAsset:triggerDistanceChanged', {
+                    id: result.id,
+                    triggerDistanceM: result.triggerDistanceM
+                });
+                postToParent('SCENE_ASSET_MEDIA_TRIGGER_DISTANCE_CHANGED', {
+                    module: MESSAGE_BRIDGE_MODULE.asset,
+                    id: result.id,
+                    value: { triggerDistanceM: result.triggerDistanceM }
+                });
+                break;
+            }
+            case 'ASSET_MEDIA_HOTSPOT_RANGE_SET': {
+                const pl = payload as Extract<InboundPayload, { type: 'ASSET_MEDIA_HOTSPOT_RANGE_SET' }>;
+                const id = typeof pl.id === 'string' ? pl.id.trim() : '';
+                if (!id || typeof pl.value !== 'number') break;
+                applySceneAssetTriggerDistanceM(global, id, pl.value);
                 break;
             }
             case 'SETTINGS_SAVE': {
-                const serialized = serializeExperienceSettings(global);
-                const jsonString = JSON.stringify(serialized, null, 2);
-                const projectId = global.config.projectId;
-                const token = global.config.token;
-                const uploadResult = await uploadProjectData(projectId ?? '', token ?? '', jsonString);
-                if (uploadResult.ok === false) {
-                    console.error('[MessageBridge] SETTINGS_SAVE 上传失败，已取消 SETTINGS_UPDATED 回传', uploadResult.message);
-                    postToParent('SETTINGS_SAVE_FAILED', { message: uploadResult.message });
+                const saveResult = await persistExperienceSettingsToCloud(global);
+                if (saveResult.ok === false) {
+                    console.error('[MessageBridge] SETTINGS_SAVE 失败', saveResult.message);
+                    postToParent('SETTINGS_SAVE_FAILED', { message: saveResult.message });
                     break;
                 }
                 postToParent('SETTINGS_UPDATED');
                 setBaseline();
+                break;
+            }
+            case 'SETTINGS_RESET': {
+                const resetResult = await resetSceneSettings(global);
+                if (resetResult.ok === false) {
+                    console.error('[MessageBridge] SETTINGS_RESET 失败', resetResult.message);
+                    postToParent('SETTINGS_RESET_FAILED', { message: resetResult.message });
+                    break;
+                }
+                if (state.editMode) {
+                    const initialSnapshot = serializeExperienceSettings(global);
+                    setBaseline(initialSnapshot);
+                    if (config.trackEditHistory) {
+                        initEditHistory(global, initialSnapshot);
+                        postToParent('EDIT_HISTORY_STATE', { canUndo: canUndo(global), canRedo: canRedo(global) });
+                    }
+                } else {
+                    (global as { __originalSettings?: ExperienceSettings }).__originalSettings =
+                        JSON.parse(JSON.stringify(global.settings)) as ExperienceSettings;
+                }
+                postToParent('SETTINGS_RESET_APPLIED', { pathFrom: resetResult.pathFrom });
                 break;
             }
             case 'EDIT_MODULE_SET':
@@ -478,6 +628,11 @@ const initPostMessageBridge = (global: Global) => {
                 });
                 break;
             }
+            case 'ASSET_VIDEO_CURVATURE_SET':
+                if (typeof p.id === 'string' && typeof p.value === 'number') {
+                    dispatchAsset(global, 'ASSET_VIDEO_CURVATURE_SET', { id: p.id, value: p.value });
+                }
+                break;
             case 'ANNOTATION_PLACEMENT_START':
                 if (typeof p.id === 'string') {
                     dispatchAnnotation(global, 'ANNOTATION_PLACEMENT_START', { id: p.id });
@@ -557,7 +712,15 @@ const initPostMessageBridge = (global: Global) => {
             }
             case 'SHADOW_SET': {
                 const shadowVal = (p as { value?: boolean }).value;
-                if (typeof shadowVal === 'boolean') dispatchEnvironment(global, 'SHADOW_SET', p);
+                if (typeof shadowVal !== 'boolean') {
+                    break;
+                }
+                suppressCollisionOutbound = true;
+                try {
+                    void applyShadowSetFromHost(global, shadowVal);
+                } finally {
+                    suppressCollisionOutbound = false;
+                }
                 break;
             }
             case 'SHADOW_INTENSITY_UPDATE': {
@@ -789,6 +952,14 @@ const initPostMessageBridge = (global: Global) => {
                     console.warn('[MessageBridge] EFFECT_ADD ignored: effectId and effectType must be string');
                     break;
                 }
+                if (effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID) {
+                    dispatchEffects(global, 'EFFECT_ADD', { effectId, effectType });
+                    break;
+                }
+                if (effectId === SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
+                    dispatchEffects(global, 'EFFECT_ADD', { effectId, effectType, params });
+                    break;
+                }
                 if (effectId === SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID && effectType !== '') {
                     if (!PERSISTENT_CAMERA_EFFECT_TYPES.has(effectType)) {
                         console.warn('[MessageBridge] EFFECT_ADD ignored: invalid camera effectType', effectType);
@@ -845,9 +1016,17 @@ const initPostMessageBridge = (global: Global) => {
                     break;
                 }
                 if (
+                    effectId === SCENE_GSPLAT_PERSISTENT_EFFECT_ID ||
                     effectId === SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID ||
                     effectId === SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID
                 ) {
+                    dispatchEffects(global, 'EFFECT_DELETE', {
+                        effectId,
+                        ...(typeof effectType === 'string' ? { effectType } : {})
+                    });
+                    break;
+                }
+                if (effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID) {
                     dispatchEffects(global, 'EFFECT_DELETE', { effectId });
                     break;
                 }
@@ -874,13 +1053,21 @@ const initPostMessageBridge = (global: Global) => {
                     console.warn('[MessageBridge] EFFECT_TOGGLE ignored: unsupported effectId', p.effectId);
                     break;
                 }
-                if (typeof (p as { value?: unknown }).value !== 'boolean') {
-                    console.warn('[MessageBridge] EFFECT_TOGGLE ignored: value must be boolean');
+                const toggleParams = (p as { params?: unknown }).params;
+                if (typeof toggleParams !== 'object' || toggleParams === null) {
+                    console.warn('[MessageBridge] EFFECT_TOGGLE ignored: params must be object');
                     break;
                 }
-                dispatchEffects(global, 'EFFECT_TOGGLE', {
-                    effectId: p.effectId,
-                    value: (p as { value: boolean }).value
+                const tpr = { ...(toggleParams as Record<string, unknown>) };
+                if (!paramsPatchHasPersistentKeys(tpr)) {
+                    console.warn(
+                        '[MessageBridge] EFFECT_TOGGLE ignored: params must be single nested persistent type block'
+                    );
+                    break;
+                }
+                dispatchEffects(global, 'EFFECT_PARAMS_PATCH', {
+                    effectId: p.effectId as string,
+                    params: tpr
                 });
                 break;
             }
@@ -975,6 +1162,47 @@ const initPostMessageBridge = (global: Global) => {
                 events.fire('render.video.stop');
                 break;
             }
+            case 'CAMERA_DEFAULT_VIEW_CAPTURE': {
+                const captureResult = await captureDefaultViewAndStageThumbnail(global);
+                if (captureResult.ok === false) {
+                    postToParent('CAMERA_DEFAULT_VIEW_CAPTURE_FAILED', {
+                        module: MESSAGE_BRIDGE_MODULE.camera,
+                        message: captureResult.message
+                    });
+                    break;
+                }
+                postToParent('CAMERA_DEFAULT_VIEW_CAPTURED', {
+                    module: MESSAGE_BRIDGE_MODULE.camera
+                });
+                break;
+            }
+            case 'COLLISION_SET': {
+                if (typeof p.value !== 'boolean') {
+                    console.warn('[MessageBridge] COLLISION_SET ignored: value must be boolean');
+                    break;
+                }
+                suppressCollisionOutbound = true;
+                try {
+                    void applyCollisionSetFromHost(global, p.value);
+                } finally {
+                    suppressCollisionOutbound = false;
+                }
+                break;
+            }
+            case 'COLLISION_PATCH': {
+                const patch = (p as { value?: unknown }).value;
+                if (!patch || typeof patch !== 'object') {
+                    console.warn('[MessageBridge] COLLISION_PATCH ignored: value must be object');
+                    break;
+                }
+                suppressCollisionOutbound = true;
+                try {
+                    void applyCollisionPatchFromHost(global, patch as SceneCollisionSettingsPatch);
+                } finally {
+                    suppressCollisionOutbound = false;
+                }
+                break;
+            }
             default:
                 break;
         }
@@ -1000,6 +1228,43 @@ const initPostMessageBridge = (global: Global) => {
         if (config.trackEditHistory) {
             postToParent('EDIT_HISTORY_STATE', { canUndo: canUndo(global), canRedo: canRedo(global) });
         }
+    });
+
+    events.on('cameraCollision:load', (payload: CollisionLoadPayload) => {
+        if (suppressCollisionOutbound) {
+            return;
+        }
+        const modules = resolveSceneMeshLoadOutboundModules(global, payload.intent);
+        if (payload.state === 'ready') {
+            for (const module of modules) {
+                postToParent('SCENE_MESH_LOAD_FINISHED', buildSceneMeshLoadFinishedPayload(global, module));
+            }
+        } else if (payload.state === 'failed') {
+            for (const module of modules) {
+                postToParent('SCENE_MESH_LOAD_FAILED', buildSceneMeshLoadFailedPayload(global, module, payload.error));
+            }
+        }
+    });
+
+    events.on(COLLISION_SYSTEM_READY, () => {
+        if (suppressCollisionOutbound) {
+            return;
+        }
+        const collisionUrl = resolveCollisionUrl(global)?.url;
+        postToParent('COLLISION_SYSTEM_READY', {
+            module: MESSAGE_BRIDGE_MODULE.camera,
+            ...(collisionUrl ? { collisionUrl } : {})
+        });
+    });
+
+    events.on(SHADOW_SYSTEM_READY, () => {
+        if (suppressCollisionOutbound) {
+            return;
+        }
+        if (!isShadowOutputEnabled(global)) {
+            return;
+        }
+        postToParent('SHADOW_SYSTEM_READY', { module: MESSAGE_BRIDGE_MODULE.environment });
     });
 
     events.on('editHistory:stateChanged', (data: { canUndo: boolean; canRedo: boolean }) => {
@@ -1062,6 +1327,7 @@ const initPostMessageBridge = (global: Global) => {
                 title: serialized.title ?? '',
                 text: serialized.text ?? '',
                 imageUrl: serialized.imageUrl,
+                videoUrl: serialized.videoUrl,
                 showTitleWhenCollapsed: serialized.showTitleWhenCollapsed ?? false
             }
         });

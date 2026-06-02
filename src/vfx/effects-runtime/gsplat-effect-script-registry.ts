@@ -5,6 +5,9 @@ import { GsplatPersistentNostalgicComic } from './persistent/nostalgic-comic-per
 import { GsplatPersistentPalettePixel } from './persistent/palette-pixel-persistent';
 import { GsplatPersistentYiyunDianran } from './persistent/yiyun-dianran-persistent';
 import { GsplatRevealPerlinWave } from './persistent/gsplat-perlin-wave';
+import { GsplatPersistentOverallWave } from './persistent/gsplat-overall-wave';
+import { GsplatPersistentButterflyParticle } from './persistent/gsplat-butterfly-particle';
+import { GsplatPersistentSparkleTwinkle } from './persistent/gsplat-sparkle-twinkle';
 
 type RevealEffectId = (typeof REVEAL_EFFECT_TYPE_VALUES)[number];
 type PersistentEffectId = (typeof PERSISTENT_EFFECT_TYPE_VALUES)[number];
@@ -41,7 +44,10 @@ export const GSPLAT_PERSISTENT_SCRIPT_NAME_BY_TYPE = {
     'falling-snow': GsplatPersistentFallingWeather.scriptName,
     'nostalgic-comic': GsplatPersistentNostalgicComic.scriptName,
     'yiyun-dianran': GsplatPersistentYiyunDianran.scriptName,
-    'palette-pixel': GsplatPersistentPalettePixel.scriptName
+    'palette-pixel': GsplatPersistentPalettePixel.scriptName,
+    'sparkle-twinkle': GsplatPersistentSparkleTwinkle.scriptName,
+    'overall-wave': GsplatPersistentOverallWave.scriptName,
+    'butterfly-particle': GsplatPersistentButterflyParticle.scriptName
 } as const satisfies Record<PersistentEffectId, string>;
 
 export const ALL_GSPLAT_PERSISTENT_SCRIPT_NAMES: ReadonlySet<string> = new Set(Object.values(GSPLAT_PERSISTENT_SCRIPT_NAME_BY_TYPE));
@@ -61,6 +67,25 @@ export function destroyAllRevealGsplatScriptsOnEntity(entity: Entity | null | un
         } catch (e) {
             console.warn('[gsplat-effect-script-registry] destroy reveal script failed:', name, e);
         }
+    }
+}
+
+/** 仅销毁指定 persistent 类型的脚本（不碰其它 persistent / reveal）。 */
+export function destroyPersistentGsplatScriptOnEntity(
+    entity: Entity | null | undefined,
+    effectType: string
+): void {
+    if (!entity?.script) {
+        return;
+    }
+    const name = gsplatScriptNameForPersistentEffectType(effectType);
+    if (!name) {
+        return;
+    }
+    try {
+        entity.script.destroy(name);
+    } catch (e) {
+        console.warn('[gsplat-effect-script-registry] destroy persistent script failed:', name, e);
     }
 }
 
@@ -91,4 +116,22 @@ export function getMountedPersistentGsplatScript(
         return null;
     }
     return entity.script.get(sn) ?? null;
+}
+
+/** 遍历已挂载的 persistent 脚本（`types` 缺省时扫描全部已知 scriptName） */
+export function forEachMountedPersistentGsplatScript(
+    entity: Entity | null | undefined,
+    types: Iterable<string> | undefined,
+    fn: (effectType: string, script: unknown) => void
+): void {
+    if (!entity?.script) {
+        return;
+    }
+    const iter = types ?? PERSISTENT_EFFECT_TYPE_VALUES;
+    for (const effectType of iter) {
+        const script = getMountedPersistentGsplatScript(entity, effectType);
+        if (script) {
+            fn(effectType, script);
+        }
+    }
 }

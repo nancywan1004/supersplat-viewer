@@ -24,6 +24,7 @@ import type { TargetSource } from './cameras/target-navigation';
 import { WalkController } from './cameras/walk-controller';
 import { WalkSource } from './cameras/walk-source';
 import type { Collision } from './collision';
+import { getSceneAssetCollisionRuntime } from './scene-assets/collision/scene-asset-collision';
 import { easeOut, smootherStep } from './core/math';
 import { Annotation } from './settings';
 import type { AnimTrack } from './settings';
@@ -315,6 +316,14 @@ class CameraManager {
     /** 动画控制器（用于导出时按时间轴 seek 相机） */
     animController: AnimController | null = null;
 
+    /** `inputEvent` / seek 使用的控制器集合（settings 重置时需同步 anim 槽） */
+    private controllersBundle: {
+        orbit: OrbitController;
+        fly: FlyController;
+        walk: WalkController;
+        anim: AnimController | null;
+    } | null = null;
+
     // visual marker for picked point
     private pickMarker: Entity | null = null;
 
@@ -328,14 +337,26 @@ class CameraManager {
     getTargetConstraint(): BoxConstraint | null {
         return this.targetConstraint;
     }
+
+    /** 更新 urlParam 加载的 Collision 在 walk / fly 上的引用（与放置资产 AABB 推开独立） */
+    setUrlParamCollision(collision: Collision | null): void {
+        const bundle = this.controllersBundle;
+        if (!bundle) return;
+        bundle.fly.collision = collision;
+        bundle.walk.collision = collision;
+    }
     private constraintVisualizer: Entity | null = null;
     private cameraBoundsVisualizer: Entity | null = null;
     private debugBoundsLayerId: number | null = null;
     private cameraEntity: Entity;
+    private readonly settings: Global['settings'];
+    private readonly state: Global['state'];
 
     constructor(global: Global, bbox: BoundingBox, collision: Collision | null = null) {
         const { events, settings, state, config, app, camera: cameraEntity } = global;
         this.cameraEntity = cameraEntity;
+        this.settings = settings;
+        this.state = state;
 
         // // Create a visual marker for picked points
         // const markerMaterial = new StandardMaterial();
@@ -355,7 +376,7 @@ class CameraManager {
         const camera0 = settings.cameras[0]?.initial;
         const defaultFov = camera0?.fov ?? 75;
         const frameCamera = createFrameCamera(bbox, defaultFov);
-        const resetCamera = camera0 ?
+        let resetCamera = camera0 ?
             createCamera(new Vec3(camera0.position), new Vec3(camera0.target), camera0.fov) :
             frameCamera;
 
@@ -388,6 +409,7 @@ class CameraManager {
             anim: animTrack ? new AnimController(animTrack) : null
         };
         this.animController = controllers.anim;
+        this.controllersBundle = controllers;
 
         // 约束边界（融合策略）：
         // - 若有动画路径：用 anim AABB 与 scene AABB 做 union（避免 anim→orbit / orbit→fly 切换时发生 clamp 跳变）
@@ -467,18 +489,28 @@ class CameraManager {
         // Fly 的 focusDistance 也 clamp 到同一 zoomRange，保证两种模式 target clamp 时的"相机位置外壳范围"一致
         controllers.fly.setFocusDistanceRange(controllers.orbit.controller.zoomRange);
 
-        // 应用俯仰角限制配置
-        const pitchRange = settings.cameras[0].pitchRange;
-        if (pitchRange && Array.isArray(pitchRange) && pitchRange.length === 2) {
-            const pitchVec2 = new Vec2(pitchRange[0], pitchRange[1]);
+        // 俯仰角限制：构造与协议 CAMERA_PITCH_RANGE_SET 复用同一应用路径，避免行为分叉。
+        const applyPitchRange = (range: [number, number] | number[] | undefined | null) => {
+            if (!range || !Array.isArray(range) || range.length !== 2) return;
+            const [min, max] = range;
+            if (!Number.isFinite(min) || !Number.isFinite(max)) return;
+            const pitchVec2 = new Vec2(min, max);
             controllers.orbit.controller.pitchRange = pitchVec2;
             controllers.fly.pitchRange = pitchVec2;
-        }
+        };
+        applyPitchRange(settings.cameras[0].pitchRange);
+
+        events.on('camera:pitchRangeChanged', (range: [number, number]) => {
+            applyPitchRange(range);
+        });
 
         controllers.orbit.fov = resetCamera.fov;
         controllers.fly.fov = resetCamera.fov;
         controllers.fly.collision = collision;
         controllers.walk.collision = collision;
+        const sceneAssetCollisionResolver = () => getSceneAssetCollisionRuntime(global).getCollision();
+        controllers.fly.setSceneAssetCollisionResolver(sceneAssetCollisionResolver);
+        controllers.orbit.setSceneAssetCollisionResolver(sceneAssetCollisionResolver);
 
         const walkSource = new WalkSource();
         const flySource = new FlySource();
@@ -754,6 +786,29 @@ class CameraManager {
             }
         });
 
+        events.on('camera:syncPrimaryInitial', () => {
+            const initial = settings.cameras[0]?.initial;
+            if (!initial) return;
+            resetCamera = createCamera(
+                new Vec3(initial.position),
+                new Vec3(initial.target),
+                initial.fov
+            );
+            this.camera.copy(resetCamera);
+            target.copy(resetCamera);
+            const mode = state.cameraMode;
+            if (mode === 'walk') {
+                controllers.walk.resetToSpawn(target);
+            } else if (mode === 'fly') {
+                controllers.fly.resetToSpawn(target);
+            } else if (mode === 'orbit') {
+                events.fire('orbitTarget:clear');
+                controllers.orbit.goto(resetCamera);
+            }
+            getController(mode).onEnter(this.camera);
+            startTransition();
+        });
+
         // handle camera mode switching
         events.on('cameraMode:changed', (value: CameraMode, prev: CameraMode) => {
             sourcesByMode[prev]?.cancel();
@@ -894,6 +949,31 @@ class CameraManager {
         events.on('navigateComplete', () => {
             events.fire('navTarget:clear');
         });
+    }
+
+    /**
+     * settings 从 transform.json 全量重置后，按当前 `settings.animTracks` 重建 AnimController。
+     */
+    reloadAnimFromSettings(): void {
+        const bundle = this.controllersBundle;
+        if (!bundle) return;
+
+        const { animTracks, startMode } = this.settings;
+        let next: AnimController | null = null;
+        if (animTracks && animTracks.length > 0 && startMode === 'animTrack') {
+            next = new AnimController(animTracks[0]);
+        }
+
+        bundle.anim = next;
+        this.animController = next;
+        this.state.hasAnimation = !!next;
+        this.state.animationDuration = next ? next.animState.cursor.duration : 0;
+
+        if (next) {
+            this.state.cameraMode = 'anim';
+            this.state.animationPaused = false;
+            next.onEnter(this.camera);
+        }
     }
 
     /**

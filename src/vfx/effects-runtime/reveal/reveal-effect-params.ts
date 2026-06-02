@@ -3,7 +3,7 @@ import { Color, Vec3 } from 'playcanvas';
 /**
  * 一次性 reveal 的 **`settings.effects.reveal` → `effectParams`** 白名单与写入逻辑。
  *
- * - 协议：`EFFECT_PARAMS_PATCH` 的 `params.effectParams`（扁平 `key → value`）。
+ * - 协议：`EFFECT_PARAMS_PATCH.params` 为 `{ [type]: { …专参 } }`，专参为类型块内扁平 `key → value`。
  * - 仅当 `key` 落在当前 `type` 对应集合内时才写入脚本；其余键静默忽略。
  * - **颜色**（`dotTint` / `waveTint` / `fallTint` / `riseTint` / `hitTint` / **`phase1CloudTint` / `phase2HaloTint`**（growth-wave））：`[r, g, b]` 数值数组，写入 `Color`。
  * - **方向 / AABB**（`scatterDirection`、`aabbMin`、`aabbMax`）：`[x, y, z]`，写入 `Vec3`。
@@ -185,6 +185,40 @@ const BY_TYPE: Record<string, ReadonlySet<string>> = {
     'growth-wave': GROWTH_WAVE,
     'sketch': SKETCH
 };
+
+/** VFX 面板控件类型（与 {@link applyRevealEffectParamsToScript} 写入语义对齐） */
+export type RevealParamFieldKind = 'number' | 'color' | 'boolean' | 'vec3' | 'vec2xz';
+
+/** 当前 reveal `type` 在 param 白名单中的全部键（Set 插入顺序） */
+export function getRevealEffectParamKeys(effectType: string): readonly string[] {
+    const set = BY_TYPE[effectType];
+    return set ? Array.from(set) : [];
+}
+
+export function getRevealParamFieldKind(key: string): RevealParamFieldKind {
+    if (
+        key === 'dotTint' ||
+        key === 'waveTint' ||
+        key === 'fallTint' ||
+        key === 'riseTint' ||
+        key === 'hitTint' ||
+        key === 'phase1CloudTint' ||
+        key === 'phase2HaloTint' ||
+        key === 'paperTint'
+    ) {
+        return 'color';
+    }
+    if (key === 'useCameraDistance' || key === 'pointSizeScaleByScene') {
+        return 'boolean';
+    }
+    if (key === 'scatterDirection' || key === 'aabbMin' || key === 'aabbMax') {
+        return 'vec3';
+    }
+    if (key === 'aabbXZMin' || key === 'aabbXZMax') {
+        return 'vec2xz';
+    }
+    return 'number';
+}
 
 /** JSON 数组是否为长度≥3 的有限数字三元组（用于 Color / Vec3 / paperTint） */
 function isColorTriple(v: unknown): v is [number, number, number] {

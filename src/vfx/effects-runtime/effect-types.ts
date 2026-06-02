@@ -17,8 +17,8 @@ export type EffectRuntimeStatus = RevealEffectRuntimeStatus | PersistentEffectRu
 
 /** 协议与 `settings.effects.reveal` 共用的场景级 GSplat reveal 包 id */
 export const SCENE_GSPLAT_REVEAL_EFFECT_ID = 'scene.gsplat-reveal' as const;
-/** 协议与 `settings.effects.persistent` 共用的场景级 GSplat persistent 包 id */
-export const SCENE_GSPLAT_PERSISTENT_EFFECT_ID = 'scene.gsplat-persistent' as const;
+/** 协议与 `settings.effects.persistent.scene` 共用的场景级 GSplat persistent 包 id */
+export const SCENE_GSPLAT_PERSISTENT_EFFECT_ID = 'scene.gsplat-persistent-scene' as const;
 /** 协议与 `settings.effects.persistent.camera` 共用的镜头级 persistent 包 id */
 export const SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID = 'scene.gsplat-persistent-camera' as const;
 /** 协议与 `settings.effects.persistent.stylization` 共用的风格化 persistent 包 id */
@@ -45,6 +45,12 @@ export const REVEAL_EFFECT_TYPES = new Set<string>([...REVEAL_EFFECT_TYPE_VALUES
 /** 与持久类型 `perlin-wave` 一致，供 `EffectRegistry` 注册与 `tryCreateSceneGsplatContribution` 查询 */
 export const PERLIN_WAVE_REGISTRY_EFFECT_ID = 'perlin-wave' as const;
 
+export const SPARKLE_TWINKLE_REGISTRY_EFFECT_ID = 'sparkle-twinkle' as const;
+
+export const OVERALL_WAVE_REGISTRY_EFFECT_ID = 'overall-wave' as const;
+
+export const BUTTERFLY_PARTICLE_REGISTRY_EFFECT_ID = 'butterfly-particle' as const;
+
 /** 可持续 persistent 类型清单；`src/types.ts` 中 `PersistentEffectType` 与此同源 re-export */
 export const PERSISTENT_EFFECT_TYPE_VALUES = [
     'perlin-wave',
@@ -53,7 +59,10 @@ export const PERSISTENT_EFFECT_TYPE_VALUES = [
     'falling-snow',
     'nostalgic-comic',
     'yiyun-dianran',
-    'palette-pixel'
+    'palette-pixel',
+    'sparkle-twinkle',
+    'overall-wave',
+    'butterfly-particle'
 ] as const;
 
 /**
@@ -62,6 +71,13 @@ export const PERSISTENT_EFFECT_TYPE_VALUES = [
  */
 export const PERSISTENT_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSISTENT_EFFECT_TYPE_VALUES);
 
+export const PERSISTENT_SCENE_EFFECT_TYPE_VALUES = [
+    'perlin-wave',
+    'sparkle-twinkle',
+    'overall-wave',
+    'butterfly-particle'
+] as const;
+
 export const PERSISTENT_CAMERA_EFFECT_TYPE_VALUES = [
     'falling-petals',
     'falling-rain',
@@ -69,23 +85,27 @@ export const PERSISTENT_CAMERA_EFFECT_TYPE_VALUES = [
 ] as const;
 
 export const PERSISTENT_STYLIZATION_EFFECT_TYPE_VALUES = [
-    'perlin-wave',
     'nostalgic-comic',
     'yiyun-dianran',
     'palette-pixel'
 ] as const;
 
+export const PERSISTENT_SCENE_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSISTENT_SCENE_EFFECT_TYPE_VALUES);
 export const PERSISTENT_CAMERA_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSISTENT_CAMERA_EFFECT_TYPE_VALUES);
 export const PERSISTENT_STYLIZATION_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSISTENT_STYLIZATION_EFFECT_TYPE_VALUES);
 
-export type PersistentEffectBucket = 'camera' | 'stylization';
+export type PersistentEffectBucket = 'scene' | 'camera' | 'stylization';
 
 export function persistentEffectBucketForType(effectType: string | undefined): PersistentEffectBucket {
-    return effectType && PERSISTENT_CAMERA_EFFECT_TYPES.has(effectType) ? 'camera' : 'stylization';
+    if (effectType && PERSISTENT_CAMERA_EFFECT_TYPES.has(effectType)) return 'camera';
+    if (effectType && PERSISTENT_STYLIZATION_EFFECT_TYPES.has(effectType)) return 'stylization';
+    return 'scene';
 }
 
 export function persistentEffectIdForBucket(bucket: PersistentEffectBucket): string {
-    return bucket === 'camera' ? SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID : SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID;
+    if (bucket === 'camera') return SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID;
+    if (bucket === 'stylization') return SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID;
+    return SCENE_GSPLAT_PERSISTENT_EFFECT_ID;
 }
 
 // --- 物体轨 asset（与 reveal / persistent 同形：固定包 id + 包内 `type`）---
@@ -139,3 +159,9 @@ export function resolveAssetEffectType(
 export function defaultAssetEffectType(): AssetEffectType {
     return ASSET_EFFECT_TYPE_VALUES[0];
 }
+
+/**
+ * 场景级 gsplat 合成槽上限：夜景（1）+ 全部可持续 persistent 可多选 layered 并存。
+ * 供 {@link GsplatEffectComposer} / {@link EffectsRuntime} 默认 `maxSceneContributors`。
+ */
+export const GSPLAT_MAX_SCENE_CONTRIBUTORS = 1 + PERSISTENT_EFFECT_TYPE_VALUES.length;

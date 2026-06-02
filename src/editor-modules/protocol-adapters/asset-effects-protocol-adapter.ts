@@ -77,19 +77,19 @@ function mergeStartParams(
     params?: Record<string, unknown>
 ): {
     type: string;
-    enabled?: boolean;
+    enable?: boolean;
     autoStart?: boolean;
     effectParams?: Record<string, unknown>;
 } {
     const patch: {
         type: string;
-        enabled?: boolean;
+        enable?: boolean;
         autoStart?: boolean;
         effectParams?: Record<string, unknown>;
-    } = { type: effectType, enabled: true };
+    } = { type: effectType, enable: true };
 
-    if (typeof params?.enabled === 'boolean') {
-        patch.enabled = params.enabled;
+    if (typeof params?.enable === 'boolean') {
+        patch.enable = params.enable;
     }
     if (typeof params?.autoStart === 'boolean') {
         patch.autoStart = params.autoStart;
@@ -209,7 +209,7 @@ export function applyAssetEffectStop(global: Global, envelope: AssetEffectProtoc
         effectType === 'gsplat-morph'
             ? (findAssetMorphOwnerTargetId(global.settings as ExperienceSettings, envelope.targetId) ?? envelope.targetId)
             : envelope.targetId;
-    patchAssetInstanceFromParams(global.settings as ExperienceSettings, storageTargetId, { enabled: false });
+    patchAssetInstanceFromParams(global.settings as ExperienceSettings, storageTargetId, { enable: false });
     syncEffectsRuntimeStateFromSettings(global.state, global.settings);
     patchAssetRuntimeMirror(global.state, storageTargetId, { status: 'inactive' });
 
@@ -238,7 +238,7 @@ export function applyAssetEffectParamsPatch(global: Global, envelope: AssetEffec
 
     const patch: {
         type?: string;
-        enabled?: boolean;
+        enable?: boolean;
         autoStart?: boolean;
         effectParams?: Record<string, unknown> | null;
     } = { type: effectType };
@@ -246,8 +246,8 @@ export function applyAssetEffectParamsPatch(global: Global, envelope: AssetEffec
     if (typeof params.type === 'string') {
         patch.type = params.type;
     }
-    if (typeof params.enabled === 'boolean') {
-        patch.enabled = params.enabled;
+    if (typeof params.enable === 'boolean') {
+        patch.enable = params.enable;
     }
     if (typeof params.autoStart === 'boolean') {
         patch.autoStart = params.autoStart;
@@ -263,7 +263,7 @@ export function applyAssetEffectParamsPatch(global: Global, envelope: AssetEffec
 
     const settings = global.settings as ExperienceSettings;
     const patchTargetId =
-        effectType === 'gsplat-morph' && patch.enabled === false
+        effectType === 'gsplat-morph' && patch.enable === false
             ? (findAssetMorphOwnerTargetId(settings, envelope.targetId) ?? envelope.targetId)
             : envelope.targetId;
     const merged = patchAssetInstanceFromParams(settings, patchTargetId, patch);
@@ -276,7 +276,7 @@ export function applyAssetEffectParamsPatch(global: Global, envelope: AssetEffec
         type: merged.type,
         params: merged
     });
-    if (merged.enabled === false) {
+    if (merged.enable === false) {
         global.events.fire('assetEffect:stop', {
             targetId: storageTargetId,
             type: merged.type

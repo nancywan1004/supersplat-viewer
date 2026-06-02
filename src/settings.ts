@@ -2,10 +2,14 @@ import { ExperienceSettings as V1, AnimTrack as AnimTrackV1, validateV1 } from '
 import { ExperienceSettings as V2, AnimTrack as AnimTrackV2, TransformFrame, validateV2 } from './schemas/v2';
 import {
     ensureBloom,
+    ensureShadow,
     normalizeHoistBloomSessionFields,
     normalizeImportedAnnotation,
     normalizeBloomLocalLightRegions,
-    normalizeBloomAfterImport
+    normalizeBloomAfterImport,
+    ensureSceneMediaHotspot,
+    ensureBackground,
+    ensureTorchLight
 } from './settings-serialize/settings-serialize-helper';
 import { Vec3 } from 'playcanvas';
 import { assertObject } from './schemas/validate-utils';
@@ -169,7 +173,6 @@ const migrateV2 = (v1: V1): V2 => {
                 intensity: 0.5
             },
             shadow: {
-                enabled: true,
                 darken: 0,
                 debugVisual: false,
                 castShadows: false
@@ -272,12 +275,12 @@ const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: numb
     // Calculate duration based on number of frames and frame rate
     const duration = (transforms.length - 1) / frameRate;
     
-    return {
-        version: 2,
-        tonemapping: 'none',
+    const result = {
+        version: 2 as const,
+        tonemapping: 'none' as const,
         highPrecisionRendering: false,
         background: {
-            color: [0, 0, 0]
+            color: [0, 0, 0] as [number, number, number]
         },
         postEffectSettings: {
             sharpness: {
@@ -290,7 +293,7 @@ const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: numb
                 blurLevel: 10,
                 threshold: 0,
                 bloomDebug: false,
-                bloomScope: 'global',
+                bloomScope: 'global' as const,
                 bloomBrushSize: 30,
                 bloomBrushBrightness: 1
             },
@@ -299,7 +302,7 @@ const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: numb
                 brightness: 0,
                 contrast: 1,
                 saturation: 1,
-                tint: [1, 1, 1]
+                tint: [1, 1, 1] as [number, number, number]
             },
             vignette: {
                 enabled: false,
@@ -313,7 +316,6 @@ const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: numb
                 intensity: 0.5
             },
             shadow: {
-                enabled: false,
                 darken: 0,
                 debugVisual: false,
                 castShadows: false
@@ -323,8 +325,8 @@ const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: numb
             name: 'Camera Path',
             duration: duration,
             frameRate: frameRate,
-            loopMode: 'repeat',
-            interpolation: 'spline',
+            loopMode: 'repeat' as const,
+            interpolation: 'spline' as const,
             smoothness: 1,  // 增加平滑度：0 = 线性，1 = 最平滑
             keyframes: {
                 times: times,
@@ -342,14 +344,16 @@ const migrateTransformToV2 = (transforms: TransformFrame[], targetDistance: numb
                 fov: initialFov
             }
         }],
-        annotations: [],
-        startMode: 'animTrack',
+        annotations: [] as V2['annotations'],
+        startMode: 'animTrack' as const,
         hasStartPose: true,
         revealEffect: {
-            type: 'radial',
+            type: 'radial' as const,
             autoStart: true
         }
-    };
+    } as V2;
+    ensureShadow(result);
+    return result;
 };
 
 
@@ -387,16 +391,20 @@ const importSettings = (settings: any): V2 => {
         normalizeHoistBloomSessionFields(result.postEffectSettings as any);
     }
 
-    // 先保证 bloom 对象存在，再规范化区域与会话
+    // 先保证 bloom / shadow 对象存在，再规范化区域与会话
     ensureBloom(result);
+    ensureShadow(result);
     normalizeBloomAfterImport(result);
     normalizeBloomLocalLightRegions(result);
+    ensureSceneMediaHotspot(result);
+    ensureBackground(result);
+    ensureTorchLight(result);
 
     return result;
 };
 
 // export the latest/current schema types
-export type { AnimTrack, Camera, Annotation, PostEffectSettings, LegacyRevealEffect, TransformFrame, ExperienceSettings, EffectsSettings } from './schemas/v2';
+export type { AnimTrack, Camera, Annotation, PostEffectSettings, LegacyRevealEffect, TransformFrame, ExperienceSettings, EffectsSettings, SceneMediaHotspotSettings, SceneMediaHotspotPatch, SceneMediaHotspotVideoSettings, SceneMediaHotspotAudioSettings, SceneCollisionSettings, SceneCollisionSettingsPatch } from './schemas/v2';
 // validate unknown data against any supported settings schema version, throwing on invalid input
 const validateSettings = (settings: unknown): void => {
     const obj = assertObject(settings, 'settings');

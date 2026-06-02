@@ -3,8 +3,10 @@
  * 由 EnvironmentFacade 调用；其它模块如需相同语义可直接 import 本文件。
  */
 
-import { getPositionInFrontOfCamera } from '../../asset-placement-handler';
+import { getPositionInFrontOfCamera } from '../../scene-assets/asset-placement-handler';
 import { spotApexToHalfDeg, updatePointLightsFromSettings } from '../../light';
+import { ensureSceneMeshForIntent } from '../../collision/scene-mesh-load-orchestrator';
+import { syncGsplatShadowCastingFromSettings } from '../../vfx/shadow';
 import type { ExperienceSettings } from '../../schemas/v2';
 import {
     ensureBloom,
@@ -12,9 +14,12 @@ import {
     ensureLighting,
     ensureNightMode,
     ensureShadow,
+    patchTorchLight,
     type LightWithId
 } from '../../settings-serialize/settings-serialize-helper';
+import { applyViewBloomLocalLightsEnabled, applyViewTorchActive } from '../../view-settings';
 import type { Global } from '../../types';
+import type { TorchLightSettings } from '../../schemas/v2-custom';
 
 /**
  * 分配不与现有 `lighting.lights[*].id` 冲突的用户光 id（`light-<n>`，与 Lighting 面板一致）。
@@ -402,18 +407,6 @@ export function disableLinkedLightsForAllLocalLightRegions(global: Global): bool
 }
 
 /**
- * 将整场景用户灯总闸同步到 `global.viewSettings.bloom.localLightsEnabled`（仅观看路径已注入 `viewSettings` 时）。
- *
- * @param {Global} global - 全局上下文
- * @param {boolean} enabled - 与 `LIGHT_TOGGLE_ALL` / `applyLightToggleAll` 一致
- */
-function syncViewSettingsBloomLocalLightsFromToggleAll(global: Global, enabled: boolean): void {
-    const bloom = global.viewSettings?.bloom;
-    if (!bloom) return;
-    bloom.localLightsEnabled = enabled;
-}
-
-/**
  * LIGHT_TOGGLE_ALL：用户点光/聚光整闸 + 夜景 fade + Bloom 总闸同步。
  * - `bloomScope=local`：沿用 `viewSettings.bloom.localLightsEnabled` 仅控制观看态局部亮灯可见性。
  * - `bloomScope=global`：同步 `settings.postEffectSettings.bloom.enabled`，支持整场辉光开关。
@@ -431,7 +424,7 @@ export function applyLightToggleAll(global: Global, enabled: boolean): void {
             changed = true;
         }
     }
-    syncViewSettingsBloomLocalLightsFromToggleAll(global, enabled);
+    applyViewBloomLocalLightsEnabled(global, enabled);
     // 全局 Bloom 模式下，LIGHT_TOGGLE_ALL 直接控制整体辉光总开关。
     if ((bloom.bloomScope ?? 'local') === 'global' && bloom.enabled !== enabled) {
         bloom.enabled = enabled;
@@ -648,12 +641,29 @@ export function applyBloomLocalLightRegionDelete(global: Global, regionId: strin
     global.events.fire('bloomLocalLightRegion:listChanged');
 }
 
-/** SHADOW_SET */
+/** SHADOW_SET：写 `shadow.enabled`（GLB 型 `collision` URL 为接影前置条件）。 */
 export function applyShadowSet(global: Global, enabled: boolean): void {
     const settings = global.settings as ExperienceSettings;
-    const s = ensureShadow(settings);
-    (s as Record<string, unknown>).enabled = enabled;
+    const s = ensureShadow(settings) as Record<string, unknown>;
+    s.enabled = enabled;
+    syncGsplatShadowCastingFromSettings(global);
+    (global.app as { __directionalLightSignature?: string }).__directionalLightSignature = undefined;
+    updatePointLightsFromSettings(global);
     global.events.fire('postEffect:changed');
+}
+
+/** 父级 / 协议开启阴影：先确保 scene mesh 已加载，再写入 settings。 */
+export async function applyShadowSetFromHost(global: Global, enabled: boolean): Promise<void> {
+    if (!enabled) {
+        applyShadowSet(global, false);
+        return;
+    }
+    const meshResult = await ensureSceneMeshForIntent(global, { wantShadow: true });
+    if (meshResult.ok === false) {
+        console.warn('[Shadow] SHADOW_SET enable failed:', meshResult.message);
+        return;
+    }
+    applyShadowSet(global, true);
 }
 
 /** SHADOW_INTENSITY_UPDATE → shadow.darken (0~1) */
@@ -686,4 +696,31 @@ export function applyShadowDirectionSet(global: Global, value: number): void {
 
     updatePointLightsFromSettings(global);
     global.events.fire('lighting:changed');
+}
+
+/**
+ * `TORCH_TOGGLE`：全局手电筒开关。
+ * - 只写 `viewSettings.torch.active`（不入库），由 `TorchLightController` 在 update 中读取
+ * - 与 `LIGHT_TOGGLE_ALL` 解耦：关用户灯时手电筒仍可独立开启
+ * - 协议入站不回传，避免循环
+ */
+export function applyTorchToggle(global: Global, enabled: boolean): boolean {
+    return applyViewTorchActive(global, enabled);
+}
+
+/**
+ * `TORCH_PARAMS_SET`：合并部分参数到 `settings.lighting.torch`，clamp/归一后即时刷新实体。
+ * - 派发 `torchParams:changed`，`TorchLightController` 监听并把新参数写到实体光源组件
+ * - 返回合并后的完整 `TorchLightSettings`（仅供本地 UI 同步使用，不再有出站协议）
+ */
+export function applyTorchParamsSet(
+    global: Global,
+    partial: Partial<TorchLightSettings>
+): TorchLightSettings {
+    const settings = global.settings as ExperienceSettings;
+    const next = patchTorchLight(settings, partial);
+    global.events.fire('torchParams:changed', { value: next });
+    // 同时发 lighting:changed 以触发任何监听 lighting 相关变化的辅助流程
+    global.events.fire('lighting:changed');
+    return next;
 }

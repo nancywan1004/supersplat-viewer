@@ -12,6 +12,7 @@ import {
     isAssetDebugVisualEnabled,
     isEnvironmentDebugVisualEnabled
 } from './state-selectors';
+import { setSceneGizmoHitTest } from './gizmo-hit-test';
 import { pushEditHistory } from './edit-history';
 import { updatePointLightsFromSettings } from './light';
 
@@ -246,21 +247,26 @@ export function initGizmoHandler(global: Global): () => void {
             };
             const rotateGizmo = _gizmos.rotate;
             const scaleGizmo = _gizmos.scale;
+            const hitGizmoAtCanvas = (x: number, y: number): boolean => {
+                if (!handler || handler._nodes.length === 0) return false;
+                const g: any = handler.gizmo;
+                if (!g || typeof g._getSelection !== 'function') return false;
+                const hit = g._getSelection(x, y);
+                return Array.isArray(hit) && hit.length > 0;
+            };
+            setSceneGizmoHitTest(hitGizmoAtCanvas);
+
             const onCanvasPointerDownCapture = (ev: PointerEvent) => {
                 if (!ev.isPrimary || ev.button !== 0 || !state.editMode) return;
-                if (!handler || handler._nodes.length === 0) return;
-                const g: any = handler.gizmo;
-                if (!g || typeof g._getSelection !== 'function') return;
                 const rect = canvas.getBoundingClientRect();
                 const x = ev.clientX - rect.left;
                 const y = ev.clientY - rect.top;
                 if (x < 0 || y < 0 || x > rect.width || y > rect.height) return;
-                const hit = g._getSelection(x, y);
-                if (Array.isArray(hit) && hit.length > 0) {
-                    gizmoPointerLocked = true;
-                    state.cameraControlsEnabled = false;
-                    events.fire('cameraControls:flushInputs');
-                }
+                if (!hitGizmoAtCanvas(x, y)) return;
+                gizmoPointerLocked = true;
+                state.gizmoPointerActive = true;
+                state.cameraControlsEnabled = false;
+                events.fire('cameraControls:flushInputs');
             };
             canvas.addEventListener('pointerdown', onCanvasPointerDownCapture, true);
 
@@ -387,11 +393,13 @@ export function initGizmoHandler(global: Global): () => void {
                 gizmo.on('pointer:down', (_x: number, _y: number, meshInstance: any) => {
                     if (meshInstance) {
                         gizmoPointerLocked = true;
+                        state.gizmoPointerActive = true;
                         state.cameraControlsEnabled = false;
                     }
                 });
                 gizmo.on('pointer:up', () => {
                     gizmoPointerLocked = false;
+                    state.gizmoPointerActive = false;
                     // 先清空一次相机输入增量，再重新开启相机控制，避免「松手瞬间相机跳一下」
                     events.fire('cameraControls:flushInputs');
                     state.cameraControlsEnabled = true;
@@ -399,6 +407,7 @@ export function initGizmoHandler(global: Global): () => void {
                     // 资产模式：记录资产变换历史
                     if (state.editMode && state.selectedSceneEntityId && handler && handler._nodes.length > 0 && state.editLeftModule === 'asset') {
                         pushEditHistory(global, 'transform asset');
+                        events.fire('sceneAsset:collisionDirty');
                     }
 
                     // 光源模式：将 Gizmo 上的变换回写到 settings.lighting，并刷新光源实体
@@ -445,6 +454,8 @@ export function initGizmoHandler(global: Global): () => void {
             const onWindowPointerUp = (ev: PointerEvent) => {
                 if (ev.button !== 0 || !gizmoPointerLocked) return;
                 gizmoPointerLocked = false;
+                state.gizmoPointerActive = false;
+                state.suppressAssetPointerClick = true;
                 shiftUniformScaleActive = false;
                 shiftUniformScaleStart.clear();
                 events.fire('cameraControls:flushInputs');
@@ -487,23 +498,24 @@ export function initGizmoHandler(global: Global): () => void {
                     _type = type ?? 'translate';
                     const g = _gizmos[_type] ?? _gizmos.translate;
                     g.attach(_nodes);
-                    // 坐标空间策略：
-                    // - scale: local（符合建模直觉）
-                    // - translate: world（符合场景编辑直觉）
-                    // - rotate: 默认 world，但 spot light 使用 local（对齐锥体局部坐标系）
+                    const currentNode = _nodes[0];
+                    const lightCfg = currentNode ? (currentNode as any).__lightConfig as { type?: string } | undefined : undefined;
+                    const isSceneAsset = !lightCfg;
+                    const isSpotLight = lightCfg?.type === 'spot';
+                    // 坐标空间：
+                    // - 场景资产（mesh/gaussian/image/video）：一律 local，与实体朝向一致，且与存盘 local rotation 一致
+                    // - 环境光源：translate world；spot rotate local；其余 rotate world
                     if (_type === 'scale') {
                         g.coordSpace = 'local';
                     } else if (_type === 'rotate') {
-                        // 检查当前选中的节点是否是 spot light
-                        const currentNode = _nodes[0];
-                        const isSpot = currentNode && (currentNode as any).__lightConfig?.type === 'spot';
-                        g.coordSpace = isSpot ? 'local' : 'world';
+                        g.coordSpace = isSceneAsset || isSpotLight ? 'local' : 'world';
                     } else {
-                        g.coordSpace = 'world';
+                        g.coordSpace = isSceneAsset ? 'local' : 'world';
                     }
                 },
                 destroy() {
                     gizmoPointerLocked = false;
+                    state.gizmoPointerActive = false;
                     shiftUniformScaleActive = false;
                     shiftUniformScaleStart.clear();
                     window.removeEventListener('keydown', onWindowKeyDown, true);
@@ -700,5 +712,8 @@ export function initGizmoHandler(global: Global): () => void {
         events.off('previewMode:changed', onPreviewModeChanged as any);
         app.off('update', onUpdate);
         handler?.destroy();
+        setSceneGizmoHitTest(null);
+        state.gizmoPointerActive = false;
+        state.suppressAssetPointerClick = false;
     };
 }

@@ -5,11 +5,13 @@ export const DEFAULT_VFX_TOTAL_DURATION = 10;
  * @deprecated legacy 单轨 reveal 字段（仅导入兼容读取，不再作为持久化写入真源）
  */
 type LegacyRevealEffect = {
-    type?: 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'falling-petals' | 'falling-rain' | 'falling-snow' | 'nostalgic-comic' | 'yiyun-dianran' | 'palette-pixel' | 'integrate' | 'growth-wave' | 'sketch' | 'none',
+    type?: 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'falling-petals' | 'falling-rain' | 'falling-snow' | 'nostalgic-comic' | 'yiyun-dianran' | 'palette-pixel' | 'sparkle-twinkle' | 'overall-wave' | 'butterfly-particle' | 'integrate' | 'growth-wave' | 'sketch' | 'none',
+    /** 为 `false` 时保留 `type` 与专参于 settings，但不在场景中挂载/播放 */
+    enable?: boolean,
     autoStart?: boolean,
     totalDuration?: number, // 总时长（秒）：**仅一次性 reveal 轨**（Timed VFX 等）；**persistent 轨 `paramsById` 不持久化此字段**。默认见 DEFAULT_VFX_TOTAL_DURATION
     /**
-     * 按当前 `type` 生效的脚本级参数（扁平 key→值）；协议 `EFFECT_PARAMS_PATCH.params.effectParams`。
+     * 按当前 `type` 生效的脚本级参数（扁平 key→值）；协议见 `EFFECT_PARAMS_PATCH.params.[type]`。
      * **reveal 轨**：白名单见 `reveal-effect-params.ts`；**persistent 轨**（如 `perlin-wave`）：白名单见 `persistent-effect-params.ts`。
      */
     effectParams?: Record<string, unknown>
@@ -28,7 +30,7 @@ type LodSettings = {
     lodUpdateDistance?: number, // 0.5
     lodUnderfillLimit?: number, // 5
     cameraPosition?: number[], // [[10.3, 2, -10]
-    eulerAngles?: number[], //[-90, 0, 0]
+    eulerAngles?: number[], // [-90, 0, 0]
     moveSpeed?: number, // 4
     moveFastSpeed?: number, // 15
     enableOrbit?: boolean, // false
@@ -66,7 +68,7 @@ type PointLightConfig = {
     enabled?: boolean
 };
 
-/** 平行光配置（主方向光/太阳，无位置概念，仅方向；用于阴影等）。阴影开关由 postEffectSettings.shadow.enabled 统一控制。 */
+/** 平行光配置（主方向光/太阳，无位置概念，仅方向；用于阴影等）。阴影由 `shadow.enabled` 控制，GLB 型 `?collision=` 为接影前置条件。 */
 type DirectionalLightConfig = {
     type: 'directional',
     id?: string,
@@ -104,9 +106,27 @@ type SpotLightConfig = {
     enabled?: boolean
 };
 
+/**
+ * 全局「手电筒」配置（单例，**不进入** `lights[]`）：
+ * - 运行时为跟随光标的 PointLight，位置由 `Picker.pickSurface` 拾取得到的世界落点决定
+ * - 拾取未命中时回退到相机前方常量距离（见 controller 内 `TORCH_FALLBACK_DISTANCE`）
+ * - 仅参数持久化，开关与运行态在 `ViewSettings.torch`（不入库）
+ * - 全局最多一份，因此挂在 `LightingSettings.torch` 而非数组项
+ */
+type TorchLightSettings = {
+    /** sRGB [0,1] 三分量 */
+    color: [number, number, number];
+    /** 光强（与点光语义一致） */
+    intensity: number;
+    /** PointLight 有效作用半径（世界单位，clamp 0–20）；光源贴在拾取表面 */
+    range: number;
+};
+
 type LightingSettings = {
     /** 点光源 + 平行光（最多一个） + 聚光灯 */
-    lights: (PointLightConfig | DirectionalLightConfig | SpotLightConfig)[]
+    lights: (PointLightConfig | DirectionalLightConfig | SpotLightConfig)[],
+    /** 全局手电筒（单例）；缺失时由 `ensureTorchLight` 补齐默认 */
+    torch?: TorchLightSettings
 };
 
 /**
@@ -162,9 +182,76 @@ type LocalLightRegion = {
     linkedLightId?: string | null;
 };
 
+/** 场景音视频热区 — 视频全局参数 */
+type SceneMediaHotspotVideoSettings = {
+    /** 是否由热区自动播放；缺省 true，显式 false 时入库 */
+    hotspotAutoplayEnabled?: boolean;
+    /** 视锥半角（度）；总锥约 `2 × coneHalfDeg` */
+    coneHalfDeg: number;
+};
+
+/** 场景音视频热区 — 音频全局参数（纯欧氏距离，无视锥） */
+type SceneMediaHotspotAudioSettings = {
+    /** 是否由热区自动播放；缺省 true，显式 false 时入库 */
+    hotspotAutoplayEnabled?: boolean;
+    /**
+     * 浏览模式（Viewer / 编辑预览）下是否显示音频 callout 与播放按钮；
+     * 缺省 true（浏览模式可见且可手动 toggle），显式 false 时入库。
+     */
+    showCalloutInViewer?: boolean;
+};
+
+/** 场景音视频热区全局参数（持久化于 settings 根；触发距离在 sceneAssets[]） */
+type SceneMediaHotspotSettings = {
+    video: SceneMediaHotspotVideoSettings;
+    audio: SceneMediaHotspotAudioSettings;
+};
+
+/** 父级 `MEDIA_HOTSPOT_SET` 入站 payload；video / audio 子节点字段均可部分提供 */
+type SceneMediaHotspotPatch = {
+    video?: Partial<SceneMediaHotspotVideoSettings>;
+    audio?: Partial<SceneMediaHotspotAudioSettings>;
+};
+
+/** 放置资产 AABB 碰撞 — 各向缩放（相对渲染包围盒） */
+type SceneAssetCollisionAxisScale = {
+    x: number;
+    y: number;
+    z: number;
+};
+
+/** 放置资产 AABB 碰撞 — 高斯 / mesh 缩放与 autoFit 模式 */
+type SceneAssetCollisionScale = {
+    gaussian: SceneAssetCollisionAxisScale;
+    mesh: SceneAssetCollisionAxisScale;
+    /** true：仅自动贴合；false：仅使用 gaussian/mesh 手动 XYZ */
+    autoFit?: boolean;
+};
+
+/** 写入 settings.json 的碰撞配置：场景 mesh URL + 相机物理碰撞总开关 + 放置资产 AABB 缩放 */
+type SceneCollisionSettings = {
+    /** GLB 或 voxel 包 URL；Universe 生成后写入；优先于 URL 参数 `?collision=` */
+    url?: string;
+    /** 总开关：场景 collision mesh + 放置资产 AABB */
+    enabled?: boolean;
+    /** 仅放置资产 AABB 使用的缩放参数 */
+    scale?: SceneAssetCollisionScale;
+};
+
+/** 设置面板 / 协议对 `settings.collision` 的部分更新 */
+type SceneCollisionSettingsPatch = {
+    url?: string;
+    enabled?: boolean;
+    scale?: {
+        gaussian?: SceneAssetCollisionAxisScale | number;
+        mesh?: SceneAssetCollisionAxisScale | number;
+        autoFit?: boolean;
+    };
+};
+
 type SceneAsset = {
     id: string,
-    type: 'image' | 'mesh' | 'gaussian',
+    type: 'image' | 'mesh' | 'gaussian' | 'video' | 'audio',
     name: string,
     visible: boolean,
     /** 对应源资产库条目的缩略图 URL（可选，持久化到 settings.sceneAssets） */
@@ -174,6 +261,8 @@ type SceneAsset = {
         filename?: string,
         url?: string
     },
+    /** video / audio：热区触发距离（米）；video 用视轴深度，audio 用欧氏距离 */
+    triggerDistanceM?: number,
     transform: {
         position: [number, number, number],
         /** 兼容字段：旧数据使用欧拉角 */
@@ -182,22 +271,16 @@ type SceneAsset = {
         rotationQuat?: [number, number, number, number],
         scale: [number, number, number],
         /** 每轴镜像符号：-1=镜像翻转，1=正常；用于显式持久化 scale 镜像状态 */
-        mirror?: [1 | -1, 1 | -1, 1 | -1]
+        mirror?: [1 | -1, 1 | -1, 1 | -1],
+        /** 仅 video：0 平面，(0,1] 横向曲度（绕竖直轴 / 屏幕宽度方向） */
+        horizontalCurvature?: number
     }
 }
 
-/** 三轨特效持久化：reveal / persistent / asset；`enabled` 仅允许出现在 persistent */
+/** 三轨特效持久化：reveal / persistent / asset；`enable` 出现在 reveal / persistent 类型块 */
 type EffectsRevealTrack = {
     activeEffectId: string;
     paramsById: Record<string, Record<string, unknown>>;
-};
-
-type EffectsPersistentTrack = {
-    activeEffectId?: string;
-    enabled?: boolean;
-    paramsById?: Record<string, Record<string, unknown>>;
-    camera?: EffectsPersistentSubTrack;
-    stylization?: EffectsPersistentSubTrack;
 };
 
 type EffectsPersistentSubTrack = {
@@ -208,21 +291,60 @@ type EffectsPersistentSubTrack = {
 /** 单物体实例配置（与 scene 包内字段同形：`type` / `autoStart` / `effectParams`） */
 type EffectsAssetInstance = {
     type: string;
-    enabled?: boolean;
+    enable?: boolean;
     autoStart?: boolean;
     effectParams?: Record<string, unknown>;
 };
 
 type EffectsAssetTrack = {
     activeEffectId: string;
-    defaultParamsById?: Record<string, Record<string, unknown>>;
     instancesByTargetId?: Record<string, EffectsAssetInstance>;
 };
 
 type EffectsSettings = {
     reveal: EffectsRevealTrack;
-    persistent: EffectsPersistentTrack;
+    persistent: {
+        scene: EffectsPersistentSubTrack;
+        camera: EffectsPersistentSubTrack;
+        stylization: EffectsPersistentSubTrack;
+    };
     asset: EffectsAssetTrack;
 };
 
-export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, LightingSettings, SceneAsset, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsPersistentSubTrack, EffectsAssetTrack, EffectsAssetInstance };
+/** persistent 单类型配置（`paramsById[id]` 内 `{ [type]: { enable, …专参 } }` 的一项） */
+type PersistentSceneEffectEntry = {
+    type: string;
+    enable: boolean;
+    autoStart: boolean;
+    effectParams?: Record<string, unknown>;
+};
+
+export type {
+    LegacyRevealEffect,
+    LodSettings,
+    LodPreset,
+    LodPlatform,
+    TransformFrame,
+    PointLightConfig,
+    DirectionalLightConfig,
+    SpotLightConfig,
+    TorchLightSettings,
+    LightingSettings,
+    SceneAsset,
+    SceneMediaHotspotSettings,
+    SceneMediaHotspotPatch,
+    LocalLightRegion,
+    WorldSpaceBloomRegionJSON,
+    EffectsSettings,
+    EffectsRevealTrack,
+    EffectsPersistentSubTrack,
+    EffectsAssetTrack,
+    EffectsAssetInstance,
+    PersistentSceneEffectEntry,
+    SceneMediaHotspotVideoSettings,
+    SceneMediaHotspotAudioSettings, 
+    SceneCollisionSettings, 
+    SceneCollisionSettingsPatch,
+    SceneAssetCollisionAxisScale, 
+    SceneAssetCollisionScale,
+};

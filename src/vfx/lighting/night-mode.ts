@@ -2,6 +2,8 @@ import { Script, Color, Entity, Vec3, Mat4, Texture, PIXELFORMAT_RGBA8, type Mat
 import { GsplatShaderEffect } from '../effects-runtime/gsplat-shader-effect';
 import { extractGlslWgslModifyBlocks } from '../effects-runtime/gsplat-effect-layers-extractor';
 import { collectPointLights, collectSpotLights } from '../../light';
+import { ensureTorchLight } from '../../settings-serialize/settings-serialize-helper';
+import { getTorchLightEffectiveRange, getTorchLightWorldPosition, isTorchEntityEnabled } from './torch-light';
 import type { EffectsRuntime } from '../effects-runtime';
 import type { GsplatContribution } from '../effects-runtime/gsplat-contribution';
 
@@ -85,6 +87,9 @@ uniform vec3 uSpotPositions[10];
 uniform vec3 uSpotDirections[10];
 uniform vec3 uSpotColors[10];
 uniform vec4 uSpotParams[10];  // x=innerConeRad, y=outerConeRad, z=range, w=enabled
+uniform vec3 uTorchWorldPos;
+uniform vec3 uTorchColor;
+uniform vec4 uTorchParams; // x=range, y=enabled, z=hasWorldPos
 uniform float uNightFade;
 uniform float uBrightFactor;
 uniform vec3 uNightAmbient;
@@ -104,6 +109,17 @@ uniform float uCommittedTintVolumeActive; // 1 = 使用纹理，0 = 使用 unifo
 
 vec3 l2g(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(1.0 / 2.2)); }
 vec3 g2l(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(2.2)); }
+void addDepthTorchContribution(vec3 wpos, inout vec3 sum, inout vec3 torchLift) {
+    if (uTorchParams.y < 0.5 || uTorchParams.z < 0.5) return;
+    float range = max(uTorchParams.x, 1e-3);
+    float dist = length(uTorchWorldPos - wpos);
+    if (dist >= range || dist <= 0.001) return;
+    float norm = clamp(dist / range, 0.0, 1.0);
+    float att = pow(1.0 - norm, 2.5);
+    vec3 torch = uTorchColor * att;
+    sum += torch;
+    torchLift += torch;
+}
 vec3 applyCommittedBrightness(vec3 srgbColor, float brightness) {
     float b = clamp(brightness, -1.0, 1.0);
     vec3 linearColor = g2l(srgbColor);
@@ -181,6 +197,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
 
     // uSphereColors / uSpotColors：TS 已转线性；衰减改为 range 归一化（与 light range 语义一致，range 变大时核心亮区同步变大）
     vec3 sum = vec3(0.0);
+    vec3 torchLift = vec3(0.0);
     for (int i = 0; i < 10; ++i) {
         vec3 pos = uSpherePositions[i];
         vec3 clr = uSphereColors[i];
@@ -194,6 +211,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
             }
         }
     }
+    addDepthTorchContribution(wpos, sum, torchLift);
     for (int i = 0; i < 10; ++i) {
         if (uSpotParams[i].w < 0.5) continue;
         vec3 spotPos = uSpotPositions[i];
@@ -218,10 +236,15 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     sum = clamp(sum, vec3(0.0), vec3(8.0));
 
     vec3 linearColor = g2l(color.rgb);
+    float lumLin = dot(linearColor, vec3(0.2126, 0.7152, 0.0722));
+    float torchDarkW = 1.0 - smoothstep(0.01, 0.18, lumLin);
+    float maxCh = max(max(linearColor.r, linearColor.g), linearColor.b);
+    vec3 baseHue = linearColor / max(maxCh, 1e-4);
+    vec3 torchAdd = torchLift * (0.012 * torchDarkW) * mix(vec3(1.0), baseHue, 0.82);
     float f = uNightFade;
     // 全局亮度为 0 时仍允许点光/聚光生效（不施加 night fade，只应用局部灯光）
     if (abs(f) < 5e-5) {
-        vec3 outLin = clamp(linearColor * (vec3(1.0) + sum), vec3(0.0), vec3(24.0));
+        vec3 outLin = clamp(linearColor * (vec3(1.0) + sum) + torchAdd, vec3(0.0), vec3(24.0));
         color.rgb = l2g(outLin);
         return;
     }
@@ -240,7 +263,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         // 调暗：同样让平行光参与，不再与调亮分支做“光源参与”差异化
         mult = mix(vec3(1.0), nightColor + dirContrib, -f);
     }
-    color.rgb = l2g(clamp(linearColor * mult, vec3(0.0), vec3(24.0)));
+    color.rgb = l2g(clamp(linearColor * mult + torchAdd, vec3(0.0), vec3(24.0)));
 }
 `;
 
@@ -253,6 +276,9 @@ uniform vec3 uSpotPositions[10];
 uniform vec3 uSpotDirections[10];
 uniform vec3 uSpotColors[10];
 uniform vec4 uSpotParams[10];
+uniform vec3 uTorchWorldPos;
+uniform vec3 uTorchColor;
+uniform vec4 uTorchParams;
 uniform float uNightFade;
 uniform float uBrightFactor;
 uniform vec3 uNightAmbient;
@@ -277,6 +303,17 @@ uniform float uCommittedTintVolumeActive;
 
 vec3 l2g(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(1.0 / 2.2)); }
 vec3 g2l(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(2.2)); }
+void addDepthTorchContribution(vec3 wpos, inout vec3 sum, inout vec3 torchLift) {
+    if (uTorchParams.y < 0.5 || uTorchParams.z < 0.5) return;
+    float range = max(uTorchParams.x, 1e-3);
+    float dist = length(uTorchWorldPos - wpos);
+    if (dist >= range || dist <= 0.001) return;
+    float norm = clamp(dist / range, 0.0, 1.0);
+    float att = pow(1.0 - norm, 2.5);
+    vec3 torch = uTorchColor * att;
+    sum += torch;
+    torchLift += torch;
+}
 vec3 applyCommittedBrightness(vec3 srgbColor, float brightness) {
     float b = clamp(brightness, -1.0, 1.0);
     vec3 linearColor = g2l(srgbColor);
@@ -366,6 +403,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     }
 
     vec3 sum = vec3(0.0);
+    vec3 torchLift = vec3(0.0);
     for (int i = 0; i < 10; ++i) {
         vec3 pos = uSpherePositions[i];
         vec3 clr = uSphereColors[i];
@@ -379,6 +417,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
             }
         }
     }
+    addDepthTorchContribution(wpos, sum, torchLift);
     for (int i = 0; i < 10; ++i) {
         if (uSpotParams[i].w < 0.5) continue;
         vec3 spotPos = uSpotPositions[i];
@@ -403,9 +442,14 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     sum = clamp(sum, vec3(0.0), vec3(8.0));
 
     vec3 linearColor = g2l(color.rgb);
+    float lumLin = dot(linearColor, vec3(0.2126, 0.7152, 0.0722));
+    float torchDarkW = 1.0 - smoothstep(0.01, 0.18, lumLin);
+    float maxCh = max(max(linearColor.r, linearColor.g), linearColor.b);
+    vec3 baseHue = linearColor / max(maxCh, 1e-4);
+    vec3 torchAdd = torchLift * (0.012 * torchDarkW) * mix(vec3(1.0), baseHue, 0.82);
     float f = uNightFade;
     if (abs(f) < 5e-5) {
-        vec3 outLin = clamp(linearColor * (vec3(1.0) + sum), vec3(0.0), vec3(24.0));
+        vec3 outLin = clamp(linearColor * (vec3(1.0) + sum) + torchAdd, vec3(0.0), vec3(24.0));
         color.rgb = l2g(outLin);
         return;
     }
@@ -422,7 +466,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     } else {
         mult = mix(vec3(1.0), nightColor + dirContrib, -f);
     }
-    color.rgb = l2g(clamp(linearColor * mult, vec3(0.0), vec3(24.0)));
+    color.rgb = l2g(clamp(linearColor * mult + torchAdd, vec3(0.0), vec3(24.0)));
 }
 `;
 
@@ -434,6 +478,9 @@ uniform uSpotPositions: array<vec3f, 10>;
 uniform uSpotDirections: array<vec3f, 10>;
 uniform uSpotColors: array<vec3f, 10>;
 uniform uSpotParams: array<vec4f, 10>;
+uniform uTorchWorldPos: vec3f;
+uniform uTorchColor: vec3f;
+uniform uTorchParams: vec4f;
 uniform uNightFade: f32;
 uniform uBrightFactor: f32;
 uniform uNightAmbient: vec3f;
@@ -455,6 +502,17 @@ uniform uCommittedTintVolumeActive: f32;
 
 fn l2g(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(1.0 / 2.2)); }
 fn g2l(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(2.2)); }
+fn addDepthTorchContribution(wpos: vec3f, sum: ptr<function, vec3f>, torchLift: ptr<function, vec3f>) {
+    if (uniform.uTorchParams.y < 0.5 || uniform.uTorchParams.z < 0.5) { return; }
+    let range = max(uniform.uTorchParams.x, 1e-3);
+    let dist = length(uniform.uTorchWorldPos - wpos);
+    if (dist >= range || dist <= 0.001) { return; }
+    let norm = clamp(dist / range, 0.0, 1.0);
+    let att = pow(1.0 - norm, 2.5);
+    let torch = uniform.uTorchColor * att;
+    (*sum) = (*sum) + torch;
+    (*torchLift) = (*torchLift) + torch;
+}
 fn applyCommittedBrightness(srgbColor: vec3f, brightness: f32) -> vec3f {
     let b = clamp(brightness, -1.0, 1.0);
     let linearColor = g2l(srgbColor);
@@ -529,6 +587,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     }
 
     var sum = vec3f(0.0);
+    var torchLift = vec3f(0.0);
     for (var i = 0u; i < 10u; i++) {
         let pos = uniform.uSpherePositions[i];
         let clr = uniform.uSphereColors[i];
@@ -542,6 +601,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
             }
         }
     }
+    addDepthTorchContribution(wpos, &sum, &torchLift);
     for (var i = 0u; i < 10u; i++) {
         if (uniform.uSpotParams[i].w < 0.5) { continue; }
         let spotPos = uniform.uSpotPositions[i];
@@ -569,9 +629,14 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     sum = clamp(sum, vec3f(0.0), vec3f(8.0));
 
     let linearColor = g2l((*color).rgb);
+    let lumLin = dot(linearColor, vec3f(0.2126, 0.7152, 0.0722));
+    let torchDarkW = 1.0 - smoothstep(0.01, 0.18, lumLin);
+    let maxCh = max(max(linearColor.r, linearColor.g), linearColor.b);
+    let baseHue = linearColor / max(maxCh, 1e-4);
+    let torchAdd = torchLift * (0.012 * torchDarkW) * mix(vec3f(1.0), baseHue, 0.82);
     let f = uniform.uNightFade;
     if (abs(f) < 5e-5) {
-        let outLin = clamp(linearColor * (vec3f(1.0) + sum), vec3f(0.0), vec3f(24.0));
+        let outLin = clamp(linearColor * (vec3f(1.0) + sum) + torchAdd, vec3f(0.0), vec3f(24.0));
         (*color).rgb = l2g(outLin);
         return;
     }
@@ -588,7 +653,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     } else {
         mult = mix(vec3f(1.0), nightColor + dirContrib, -f);
     }
-    (*color).rgb = l2g(clamp(linearColor * mult, vec3f(0.0), vec3f(24.0)));
+    (*color).rgb = l2g(clamp(linearColor * mult + torchAdd, vec3f(0.0), vec3f(24.0)));
 }
 `;
 
@@ -601,6 +666,9 @@ uniform uSpotPositions: array<vec3f, 10>;
 uniform uSpotDirections: array<vec3f, 10>;
 uniform uSpotColors: array<vec3f, 10>;
 uniform uSpotParams: array<vec4f, 10>;
+uniform uTorchWorldPos: vec3f;
+uniform uTorchColor: vec3f;
+uniform uTorchParams: vec4f;
 uniform uNightFade: f32;
 uniform uBrightFactor: f32;
 uniform uNightAmbient: vec3f;
@@ -628,6 +696,17 @@ uniform uCommittedTintVolumeActive: f32;
 
 fn l2g(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(1.0 / 2.2)); }
 fn g2l(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(2.2)); }
+fn addDepthTorchContribution(wpos: vec3f, sum: ptr<function, vec3f>, torchLift: ptr<function, vec3f>) {
+    if (uniform.uTorchParams.y < 0.5 || uniform.uTorchParams.z < 0.5) { return; }
+    let range = max(uniform.uTorchParams.x, 1e-3);
+    let dist = length(uniform.uTorchWorldPos - wpos);
+    if (dist >= range || dist <= 0.001) { return; }
+    let norm = clamp(dist / range, 0.0, 1.0);
+    let att = pow(1.0 - norm, 2.5);
+    let torch = uniform.uTorchColor * att;
+    (*sum) = (*sum) + torch;
+    (*torchLift) = (*torchLift) + torch;
+}
 fn applyCommittedBrightness(srgbColor: vec3f, brightness: f32) -> vec3f {
     let b = clamp(brightness, -1.0, 1.0);
     let linearColor = g2l(srgbColor);
@@ -717,6 +796,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     }
 
     var sum = vec3f(0.0);
+    var torchLift = vec3f(0.0);
     for (var i = 0u; i < 10u; i++) {
         let pos = uniform.uSpherePositions[i];
         let clr = uniform.uSphereColors[i];
@@ -730,6 +810,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
             }
         }
     }
+    addDepthTorchContribution(wpos, &sum, &torchLift);
     for (var i = 0u; i < 10u; i++) {
         if (uniform.uSpotParams[i].w < 0.5) { continue; }
         let spotPos = uniform.uSpotPositions[i];
@@ -757,9 +838,14 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     sum = clamp(sum, vec3f(0.0), vec3f(8.0));
 
     let linearColor = g2l((*color).rgb);
+    let lumLin = dot(linearColor, vec3f(0.2126, 0.7152, 0.0722));
+    let torchDarkW = 1.0 - smoothstep(0.01, 0.18, lumLin);
+    let maxCh = max(max(linearColor.r, linearColor.g), linearColor.b);
+    let baseHue = linearColor / max(maxCh, 1e-4);
+    let torchAdd = torchLift * (0.012 * torchDarkW) * mix(vec3f(1.0), baseHue, 0.82);
     let f = uniform.uNightFade;
     if (abs(f) < 5e-5) {
-        let outLin = clamp(linearColor * (vec3f(1.0) + sum), vec3f(0.0), vec3f(24.0));
+        let outLin = clamp(linearColor * (vec3f(1.0) + sum) + torchAdd, vec3f(0.0), vec3f(24.0));
         (*color).rgb = l2g(outLin);
         return;
     }
@@ -776,7 +862,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     } else {
         mult = mix(vec3f(1.0), nightColor + dirContrib, -f);
     }
-    (*color).rgb = l2g(clamp(linearColor * mult, vec3f(0.0), vec3f(24.0)));
+    (*color).rgb = l2g(clamp(linearColor * mult + torchAdd, vec3f(0.0), vec3f(24.0)));
 }
 `;
 
@@ -1042,7 +1128,8 @@ class NightMode extends GsplatShaderEffect {
         const global = (this.app as any).__global;
         const pointLights = global ? collectPointLights(global) : [];
         const spotLights = global ? collectSpotLights(global) : [];
-        const hasDynamicLocalLights = pointLights.length > 0 || spotLights.length > 0;
+        const hasTorchLight = global ? isTorchEntityEnabled(global) : false;
+        const hasDynamicLocalLights = pointLights.length > 0 || spotLights.length > 0 || hasTorchLight;
         return Math.abs(this.nightFade) > 1e-6
             || hasDynamicLocalLights
             || (this.committedVolumeTexture != null && (this.committedVolumeEncodedBrightness || Math.abs(this.committedBrightness) > 1e-6))
@@ -1455,6 +1542,7 @@ class NightMode extends GsplatShaderEffect {
 
         // Update uniforms on all applied materials (only if shaders are applied)
         if (this.materialsApplied.size > 0) {
+            const fb = this.ensureSamplerFallbackTexture();
             this.setUniform('uSpherePositions[0]', positions);
             this.setUniform('uSphereColors[0]', colors);
             this.setUniform('uSphereRanges[0]', ranges);
@@ -1470,6 +1558,19 @@ class NightMode extends GsplatShaderEffect {
                 this.nightAmbient.b
             ]);
             this.setUniform('uModelMatrix', modelMatrix);
+            const torchWorldPos = global ? getTorchLightWorldPosition(global) : null;
+            const torchCfg = global ? ensureTorchLight(global.settings as any) : null;
+            const torchActive = !!(global && torchCfg && torchWorldPos && isTorchEntityEnabled(global));
+            if (torchActive && torchCfg && torchWorldPos) {
+                const [tr, tg, tb] = localLightLinearRgb(torchCfg.color[0], torchCfg.color[1], torchCfg.color[2], torchCfg.intensity ?? 1, scale);
+                this.setUniform('uTorchWorldPos', [torchWorldPos.x, torchWorldPos.y, torchWorldPos.z]);
+                this.setUniform('uTorchColor', [tr, tg, tb]);
+                this.setUniform('uTorchParams', [Math.max(0, getTorchLightEffectiveRange(global)), 1, 1, 0]);
+            } else {
+                this.setUniform('uTorchWorldPos', [0, 0, 0]);
+                this.setUniform('uTorchColor', [0, 0, 0]);
+                this.setUniform('uTorchParams', [0, 0, 0, 0]);
+            }
             // 无论 fade 正负，统一传入平行光与相机位置，保证所有光源都参与计算
             const camPos = this.camera?.getPosition();
             if (camPos) {
@@ -1496,7 +1597,6 @@ class NightMode extends GsplatShaderEffect {
                 this.setUniform('uLightDir', [0, 1, 0]);
                 this.setUniform('uLightColor', [0, 0, 0]);
             }
-            const fb = this.ensureSamplerFallbackTexture();
             if (this.bloomBrushActive && this.bloomBrushMask && this.camera?.camera && this.splat) {
                 const cam = this.camera.camera;
                 if (isUnified) {
@@ -1542,8 +1642,15 @@ class NightMode extends GsplatShaderEffect {
             this.light.light.intensity = targetIntensity;
         }
 
-        // Update skybox intensity: 在当前提亮方案基础上回调一档，避免环境反射过曝。
-        const targetSkyboxIntensity = Math.max(0.23, Math.min(2.0, 1.1 + 1.0 * this.nightFade));
+        // Update skybox intensity:
+        // - 有 skybox：随 nightFade 调整，避免环境反射过曝。
+        // - 无 skybox：强制 0，避免纯色 envAtlas 在背景通道显白。
+        const globalAny = (this.app as any).__global;
+        const rawSkyboxUrl = globalAny?.settings?.background?.skyboxUrl;
+        const hasSkybox = typeof rawSkyboxUrl === 'string' && rawSkyboxUrl.trim().length > 0;
+        const targetSkyboxIntensity = hasSkybox
+            ? Math.max(0.23, Math.min(2.0, 1.1 + 1.0 * this.nightFade))
+            : 0;
         this.app.scene.skyboxIntensity = targetSkyboxIntensity;
 
         // 仅在 fade 变化时 fire，避免每帧触发 configureCamera

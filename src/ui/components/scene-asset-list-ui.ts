@@ -1,5 +1,4 @@
-import type { Global } from '../../types';
-import type { ScenePlacedItem } from '../../types';
+import type { Global, ScenePlacedItem } from '../../types';
 import { pushEditHistory } from '../../edit-history';
 import { ASSET_EFFECT_TYPE_VALUES } from '../../vfx/effects-runtime/effect-types';
 import { isPlacedGaussianItem } from '../../vfx/effects-runtime/asset/asset-scene-target';
@@ -108,7 +107,12 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
             }
         });
         li.addEventListener('click', (e) => {
-            if ((e.target as HTMLElement).closest('.scene-asset-delete') || (e.target as HTMLElement).closest('.scene-asset-visibility')) return;
+            if (
+                (e.target as HTMLElement).closest('.scene-asset-delete')
+                || (e.target as HTMLElement).closest('.scene-asset-visibility')
+            ) {
+                return;
+            }
             if (morphPick && isPlacedGaussianItem(entry)) {
                 const ids = [...(state.assetEffectsMorphKeyframeIds ?? [])];
                 const idx = ids.indexOf(entry.id);
@@ -128,9 +132,7 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
             }
             state.selectedSceneEntityId = entry.id;
             events.fire('sceneAsset:selected', { source: 'host' });
-            if (state.editLeftModule === 'asset') {
-                events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
-            }
+            events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
             renderSceneAssetList(listEl, global);
         });
 

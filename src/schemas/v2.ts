@@ -7,8 +7,15 @@ import type {
     PointLightConfig,
     DirectionalLightConfig,
     SpotLightConfig,
+    TorchLightSettings,
     LightingSettings,
     SceneAsset,
+    SceneMediaHotspotSettings,
+    SceneMediaHotspotPatch,
+    SceneMediaHotspotVideoSettings,
+    SceneMediaHotspotAudioSettings,
+    SceneCollisionSettings,
+    SceneCollisionSettingsPatch,
     LocalLightRegion,
     WorldSpaceBloomRegionJSON,
     EffectsSettings
@@ -60,6 +67,7 @@ type Annotation = {
     title: string,
     text: string,
     imageUrl?: string,
+    videoUrl?: string,
     showTitleWhenCollapsed: boolean,
     collapsed: boolean,
     extras?: any,
@@ -108,7 +116,7 @@ type PostEffectSettings = {
         intensity: number
     },
     shadow: {
-        enabled: boolean,
+        enabled?: boolean,
         darken: number,
         debugRt?: boolean,
         debugVisual?: boolean,
@@ -165,6 +173,10 @@ type ExperienceSettings = {
     };
     initialCameraMode?: 'orbit' | 'fly';
     sceneAssets?: SceneAsset[];
+    /** 场景音视频热区全局参数（可选；缺省由 `ensureSceneMediaHotspot` 补齐） */
+    sceneMediaHotspot?: SceneMediaHotspotSettings;
+    /** 碰撞配置：场景 mesh URL + 物理碰撞总开关 + 放置资产 AABB 缩放 */
+    collision?: SceneCollisionSettings;
 };
 
 const TONEMAPPING = ['none', 'linear', 'filmic', 'hejl', 'aces', 'aces2', 'neutral'] as const;
@@ -213,6 +225,7 @@ const validateAnnotation = (data: unknown, path: string): Annotation => {
     assertString(obj.title, `${path}.title`);
     assertString(obj.text, `${path}.text`);
     if (obj.imageUrl !== undefined) assertString(obj.imageUrl, `${path}.imageUrl`);
+    if (obj.videoUrl !== undefined) assertString(obj.videoUrl, `${path}.videoUrl`);
     assertBoolean(obj.showTitleWhenCollapsed, `${path}.showTitleWhenCollapsed`);
     assertBoolean(obj.collapsed, `${path}.collapsed`);
     validateCamera(obj.camera, `${path}.camera`);
@@ -259,7 +272,7 @@ const validatePostEffects = (data: unknown, path: string): PostEffectSettings =>
     assertNumber(fr.intensity, `${path}.fringing.intensity`);
 
     const shadow = assertObject(obj.shadow, `${path}.shadow`);
-    assertBoolean(shadow.enabled, `${path}.shadow.enabled`);
+    if (shadow.enabled !== undefined) assertBoolean(shadow.enabled, `${path}.shadow.enabled`);
     assertNumber(shadow.darken, `${path}.shadow.darken`);
 
     return data as PostEffectSettings;
@@ -301,32 +314,15 @@ const validateV2 = (data: unknown): ExperienceSettings => {
             throw new Error('settings.effects.reveal.paramsById must be an object');
         }
         const pers = assertObject(ef.persistent, 'settings.effects.persistent');
-        if (pers.activeEffectId !== undefined) {
-            assertString(pers.activeEffectId, 'settings.effects.persistent.activeEffectId');
-        }
-        if (pers.enabled !== undefined) {
-            assertBoolean(pers.enabled, 'settings.effects.persistent.enabled');
-        }
-        if (pers.paramsById !== undefined && (typeof pers.paramsById !== 'object' || pers.paramsById === null)) {
-            throw new Error('settings.effects.persistent.paramsById must be an object');
-        }
-        for (const subTrackName of ['camera', 'stylization'] as const) {
-            if (pers[subTrackName] !== undefined) {
-                const subTrack = assertObject(pers[subTrackName], `settings.effects.persistent.${subTrackName}`);
-                assertString(subTrack.activeEffectId, `settings.effects.persistent.${subTrackName}.activeEffectId`);
-                if (typeof subTrack.paramsById !== 'object' || subTrack.paramsById === null) {
-                    throw new Error(`settings.effects.persistent.${subTrackName}.paramsById must be an object`);
-                }
+        for (const subTrackName of ['scene', 'camera', 'stylization'] as const) {
+            const subTrack = assertObject(pers[subTrackName], `settings.effects.persistent.${subTrackName}`);
+            assertString(subTrack.activeEffectId, `settings.effects.persistent.${subTrackName}.activeEffectId`);
+            if (typeof subTrack.paramsById !== 'object' || subTrack.paramsById === null) {
+                throw new Error(`settings.effects.persistent.${subTrackName}.paramsById must be an object`);
             }
         }
         const asset = assertObject(ef.asset, 'settings.effects.asset');
         assertString(asset.activeEffectId, 'settings.effects.asset.activeEffectId');
-        if (
-            asset.defaultParamsById !== undefined &&
-            (typeof asset.defaultParamsById !== 'object' || asset.defaultParamsById === null)
-        ) {
-            throw new Error('settings.effects.asset.defaultParamsById must be an object');
-        }
         if (asset.instancesByTargetId !== undefined) {
             if (typeof asset.instancesByTargetId !== 'object' || asset.instancesByTargetId === null) {
                 throw new Error('settings.effects.asset.instancesByTargetId must be an object');
@@ -339,6 +335,44 @@ const validateV2 = (data: unknown): ExperienceSettings => {
                 }
                 assertString(o[typeKey], `settings.effects.asset.instancesByTargetId[${tid}].${typeKey}`);
             }
+        }
+    }
+
+    if (obj.sceneMediaHotspot !== undefined) {
+        const sm = assertObject(obj.sceneMediaHotspot, 'settings.sceneMediaHotspot');
+        const v = assertObject(sm.video, 'settings.sceneMediaHotspot.video');
+        assertNumber(v.coneHalfDeg, 'settings.sceneMediaHotspot.video.coneHalfDeg');
+        if (v.hotspotAutoplayEnabled !== undefined) {
+            assertBoolean(
+                v.hotspotAutoplayEnabled,
+                'settings.sceneMediaHotspot.video.hotspotAutoplayEnabled'
+            );
+        }
+        const a = assertObject(sm.audio, 'settings.sceneMediaHotspot.audio');
+        if (a.hotspotAutoplayEnabled !== undefined) {
+            assertBoolean(
+                a.hotspotAutoplayEnabled,
+                'settings.sceneMediaHotspot.audio.hotspotAutoplayEnabled'
+            );
+        }
+        if (a.showCalloutInViewer !== undefined) {
+            assertBoolean(
+                a.showCalloutInViewer,
+                'settings.sceneMediaHotspot.audio.showCalloutInViewer'
+            );
+        }
+    }
+
+    if (obj.collision !== undefined) {
+        const collision = assertObject(obj.collision, 'settings.collision');
+        if (collision.url !== undefined) {
+            assertString(collision.url, 'settings.collision.url');
+        }
+        if (collision.enabled !== undefined) {
+            assertBoolean(collision.enabled, 'settings.collision.enabled');
+        }
+        if (collision.scale !== undefined) {
+            assertObject(collision.scale, 'settings.collision.scale');
         }
     }
 
@@ -362,7 +396,14 @@ export type {
     PointLightConfig,
     DirectionalLightConfig,
     SpotLightConfig,
+    TorchLightSettings,
     LightingSettings,
     WorldSpaceBloomRegionJSON,
     LocalLightRegion,
+    SceneMediaHotspotSettings,
+    SceneMediaHotspotPatch,
+    SceneMediaHotspotVideoSettings,
+    SceneMediaHotspotAudioSettings,
+    SceneCollisionSettings,
+    SceneCollisionSettingsPatch
 };

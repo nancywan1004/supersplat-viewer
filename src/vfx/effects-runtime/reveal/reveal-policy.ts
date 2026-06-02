@@ -8,19 +8,31 @@ import { PERSISTENT_EFFECT_TYPES } from '../effect-types';
 export const PERSISTENT_VFX: ReadonlySet<string> = PERSISTENT_EFFECT_TYPES;
 
 /**
+ * 开场 reveal 是否在场景中生效（`type !== 'none'` 且 `enable !== false`）。
+ */
+export function isRevealEffectActiveInScene(
+    revealEffect: { type?: string; enable?: boolean } | null | undefined
+): boolean {
+    if (!revealEffect || typeof revealEffect !== 'object') {
+        return false;
+    }
+    if (!revealEffect.type || revealEffect.type === 'none') {
+        return false;
+    }
+    return revealEffect.enable !== false;
+}
+
+/**
  * 与 `RevealController` 首帧 `hasRevealEffect` 判定一致；供 Bloom 等在 Viewer 构造阶段
  *（控制器尚未创建）推断是否应锁定 bloom 栈，避免首帧前整屏 Bloom/局部亮灯一闪。
  *
- * @param {{ type?: string } | null | undefined} revealEffect - `settings.revealEffect` 或等价对象。
- * @returns {boolean} 是否视为存在开场 / VFX reveal（`type === 'none'` 或空对象则为 false）。
+ * @param {{ type?: string; enable?: boolean } | null | undefined} revealEffect - `settings.revealEffect` 或等价对象。
+ * @returns {boolean} 是否视为存在且启用的开场 / VFX reveal。
  */
-export function hasRevealEffectFromSettings(revealEffect: { type?: string } | null | undefined): boolean {
-    return !!(
-        revealEffect &&
-        typeof revealEffect === 'object' &&
-        Object.keys(revealEffect).length > 0 &&
-        revealEffect.type !== 'none'
-    );
+export function hasRevealEffectFromSettings(
+    revealEffect: { type?: string; enable?: boolean } | null | undefined
+): boolean {
+    return isRevealEffectActiveInScene(revealEffect);
 }
 
 /**

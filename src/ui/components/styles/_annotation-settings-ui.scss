@@ -47,6 +47,20 @@
             min-height: 60px;
             resize: vertical;
         }
+        .annotation-media-settings-row {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        .annotation-media-type-group {
+            margin-top: 4px;
+        }
+        .annotation-media-panel {
+            width: 100%;
+            margin-top: 8px;
+            &.hidden {
+                display: none;
+            }
+        }
         .annotation-image-upload {
             width: 80px;
             height: 80px;

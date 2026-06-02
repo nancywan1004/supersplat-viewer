@@ -1,6 +1,7 @@
 import type { Entity, EventHandler, AppBase, Asset } from 'playcanvas';
 
-import type { ExperienceSettings } from './settings';
+import type { Picker } from './picker';
+import type { ExperienceSettings, SceneCollisionSettings } from './settings';
 import {
     type AssetEffectRuntimeStatus,
     type AssetEffectType,
@@ -34,10 +35,10 @@ export type EffectsRuntimeState = {
         status: RevealEffectRuntimeStatus;
     };
     persistent: {
-        /** scene persistent 固定 effectId（当前写死为 `scene.gsplat-reveal`） */
+        /** scene persistent 固定 effectId（`scene.gsplat-persistent-scene`） */
         activeEffectId: string;
-        /** 当前运行中的 persistent 类型（无则为 `undefined`） */
-        activeType?: PersistentEffectType;
+        /** 当前运行中的 persistent 类型列表（多选；无则为 `undefined`） */
+        activeTypes?: PersistentEffectType[];
         /** 可持续轨状态真源；`inactive` 表示未激活 */
         status: PersistentEffectRuntimeStatus;
     };
@@ -48,8 +49,16 @@ export type EffectsRuntimeState = {
     lastError?: { code: string; message: string; effectId?: string; command?: string };
 };
 
+/**
+ * 放置资产碰撞会话运行态（`global.state` / observe；`debugVisual` 不入 settings.json）。
+ * 持久化字段来自 `settings.collision`；`enabled` 为场景 mesh + 放置资产 AABB 总开关。
+ */
+export type SceneAssetCollisionRuntimeState = SceneCollisionSettings & {
+    debugVisual: boolean;
+};
+
 /** 资产库项类型 */
-export type AssetLibraryType = 'image' | 'mesh' | 'gaussian';
+export type AssetLibraryType = 'image' | 'mesh' | 'gaussian' | 'video' | 'audio';
 
 /** 资产库单项（上传后的资产） */
 export interface AssetLibraryItem {
@@ -79,7 +88,25 @@ export interface ScenePlacedItem {
     url?: string;
     /** 对应源资产库条目的缩略图 URL（serialize 到 settings.sceneAssets.thumbnailUrl） */
     thumbnailUrl?: string;
+    /** 仅 video：横向曲度 [0,1]，0 为平面 */
+    horizontalCurvature?: number;
+    /** video / audio：热区触发距离（米） */
+    triggerDistanceM?: number;
+    /** 音/视频会话态（不入 settings） */
+    mediaRuntime?: ScenePlacedMediaRuntime;
 }
+
+/** 已放置音/视频条目的运行态（挂在 ScenePlacedItem.mediaRuntime，不入库） */
+export type ScenePlacedMediaRuntime = {
+    /** 用户显式暂停；热区评估不得自动 play（见 scene-media-playback） */
+    userPaused?: boolean;
+    /** 用户手动播放后视频播控条保持可见（仅 video） */
+    manualLatch?: boolean;
+    /** 是否正在播放（热区或手动）；UI 同步用，由 scene-media-playback 维护 */
+    hotspotPlaying?: boolean;
+    /** 上一热区评估帧是否在触发区内 */
+    inHotspotZone?: boolean;
+};
 
 type CameraMode = 'orbit' | 'anim' | 'fly' | 'walk';
 
@@ -134,6 +161,7 @@ type Config = {
     skyboxUrl?: string;
     contentUrl?: string;
     contents?: Promise<Response>;
+    /** 场景碰撞资源 URL（`?collision=` / `?voxel=`）；GLB 时同时用于阴影接影 */
     collisionUrl?: string;
 
     noui: boolean;
@@ -148,8 +176,6 @@ type Config = {
     aa: boolean;                                // render with antialiasing
     noreveal: boolean;                          // disable reveal effect transition animation
     showCameraPathVisualizer?: boolean;         // show camera path visualization
-    /** 接影几何 GLB 的 URL（如 /assets/mesh/gabriel.glb），由 urlParam splatMesh 传入；无则用平面 */
-    splatMeshUrl?: string;
     /** 是否允许进入编辑模式（默认 true）；设为 false 时不显示编辑按钮且不响应进入编辑的 postMessage */
     allowEditMode?: boolean;
     /** 是否启用编辑历史与撤销/重做（默认 false）；为 true 时才会记录历史并显示撤销/重做按钮及快捷键 */
@@ -221,6 +247,10 @@ type State = {
     assetEffectsMorphKeyframeIds?: string[];
     /** 相机输入是否启用（用于与 Gizmo 交互互斥） */
     cameraControlsEnabled?: boolean;
+    /** 正在拖拽场景/光源 Gizmo（pointerdown 命中轴起至 pointerup） */
+    gizmoPointerActive?: boolean;
+    /** 刚结束 Gizmo 手势：跳过一次资产模块 pointerup 场景选中，避免与 Gizmo 松手冲突 */
+    suppressAssetPointerClick?: boolean;
     /** 当前选中的标注 ID */
     selectedAnnotationId?: string | null;
     /** 标注变换模式（与标注模块底部「移动」按钮联动） */
@@ -229,6 +259,8 @@ type State = {
     selectedLightId?: string | null;
     /** 光源变换模式（与环境模块底部工具栏联动） */
     lightTransformMode?: LightTransformMode | null;
+    /** 放置资产 AABB 碰撞会话运行态；持久化见 `settings.collision` */
+    sceneAssetCollisionRuntimeState?: SceneAssetCollisionRuntimeState;
     gamingControls: boolean;
     /**
      * 特效运行态（与 `settings.effects` 三轨对齐）；不入 `settings.json`。
@@ -239,7 +271,7 @@ type State = {
 
 /**
  * 观看态/会话级「视图设置」：与 `global.settings`（`ExperienceSettings`）**并列**、**不入库**。
- * 只放「Viewer 里需要单独持有一份、又不能写回 JSON」的字段；由 `Viewer` 注入，编辑态通常不存在。
+ * 读写与缺省补齐统一经 {@link ./view-settings.ts}（`ensureViewSettings` 及各 `applyView*`）。
  */
 export type ViewSettings = {
     bloom: {
@@ -257,6 +289,21 @@ export type ViewSettings = {
      * - 编辑态通常不存在此字段，由模块自身控制
      */
     annotationsVisible?: boolean;
+    /**
+     * 场景 video/audio 热区全局静音（View 模式专属，不入库）
+     * - `VIEW_MEDIA_MUTE_SET` 写入
+     * - `true` 时热区播控强制无声（视频 muted、音频 pause）
+     * - 默认 `false`
+     */
+    mediaMuted?: boolean;
+    /**
+     * 全局手电筒会话态（不入库）
+     * - `active`：开关，由 `TORCH_TOGGLE` / View 顶栏 / Edit 面板写入
+     * - 参数（颜色/强度/range/锥角）持久化于 `settings.lighting.torch`
+     */
+    torch?: {
+        active: boolean;
+    };
 };
 
 type Global = {
@@ -268,6 +315,8 @@ type Global = {
     camera: Entity;
     /** 见 {@link ViewSettings} */
     viewSettings?: ViewSettings;
+    /** Viewer 注入的共享深度拾取器；未注入时由 `pickWorldFromClientXY` 懒创建 */
+    picker?: Picker;
 };
 
 export {

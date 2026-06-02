@@ -1,9 +1,9 @@
-import { Vec3 } from 'playcanvas';
+import { Color, Vec3 } from 'playcanvas';
 
 /**
- * 可持续 **persistent** 轨的 **`settings.effects.persistent` → `effectParams`** 白名单与写入逻辑。
+ * 可持续 **persistent scene** 轨的 **`settings.effects.persistent.scene` → 各 `type` 块内专参** 白名单与写入逻辑。
  *
- * - 协议：`EFFECT_PARAMS_PATCH`（`effectId === scene.gsplat-persistent`）的 `params.effectParams`（与 reveal 轨同形）。
+ * - 协议（postMessage）：`effectId === scene.gsplat-persistent-scene` 时 `params` 为 `{ [type]: { enable?, …专参 } }`（与 reveal 嵌套一致）。
  * - 仅当 `key` 落在当前 `type` 对应集合内时才写入脚本；其余键静默忽略。
  * - **数值**：有限 `number`，且脚本上须已存在该属性名。
  * - **`center` / `extents`**：`[x, y, z]` 写入 `Vec3`。
@@ -86,6 +86,51 @@ const PALETTE_PIXEL = new Set([
     'ditherSpread'
 ]);
 
+const SPARKLE_TWINKLE = new Set([
+    'pointSize',
+    'sparkleDensity',
+    'twinkleSpeed',
+    'twinkleMin',
+    'twinkleSharpness',
+    'brightness',
+    'lightTint1',
+    'lightTint2',
+    'lightTint3',
+    'colorBlendMode',
+    'center'
+]);
+
+const OVERALL_WAVE = new Set([
+    'noiseType',
+    'waveAmplitude',
+    'waveSpeed',
+    'wavelength',
+    'intensity',
+    'crestTint',
+    'troughTint',
+    'waveDirection',
+    'center'
+]);
+
+const BUTTERFLY_PARTICLE = new Set([
+    'pointSize',
+    'twinkleSpeed',
+    'twinkleMin',
+    'twinkleSharpness',
+    'brightness',
+    'baseColor',
+    'cycleColor1',
+    'cycleColor2',
+    'colorCycleEnabled',
+    'colorCycleSpeed',
+    'sparkleTrailStrength',
+    'gsLightEnabled',
+    'gsLightIntensity',
+    'gsLightRange',
+    'gsLightColor',
+    'center'
+]);
+
 const BY_TYPE: Record<string, ReadonlySet<string>> = {
     'perlin-wave': PERLIN_WAVE,
     'falling-petals': FALLING_PETALS,
@@ -93,8 +138,56 @@ const BY_TYPE: Record<string, ReadonlySet<string>> = {
     'falling-snow': FALLING_WEATHER,
     'nostalgic-comic': NOSTALGIC_COMIC,
     'yiyun-dianran': YIYUN_DIANRAN,
-    'palette-pixel': PALETTE_PIXEL
+    'palette-pixel': PALETTE_PIXEL,
+    'sparkle-twinkle': SPARKLE_TWINKLE,
+    'overall-wave': OVERALL_WAVE,
+    'butterfly-particle': BUTTERFLY_PARTICLE
 };
+
+export type PersistentParamFieldKind = 'number' | 'vec3' | 'color' | 'boolean' | 'enum' | 'text';
+
+/** 当前 persistent `type` 在 param 白名单中的全部键（Set 插入顺序） */
+export function getPersistentEffectParamKeys(effectType: string): readonly string[] {
+    const set = BY_TYPE[effectType];
+    return set ? Array.from(set) : [];
+}
+
+const SPARKLE_COLOR_KEYS = new Set(['lightTint1', 'lightTint2', 'lightTint3']);
+const BUTTERFLY_COLOR_KEYS = new Set(['baseColor', 'cycleColor1', 'cycleColor2', 'gsLightColor']);
+const ARRAY_COLOR_KEYS = new Set([
+    'color',
+    'glowColor',
+    'cameraClearColor',
+    'paperColor',
+    'lightColor',
+    'strokeColor'
+]);
+
+export function getPersistentParamFieldKind(key: string): PersistentParamFieldKind {
+    if (key === 'noiseType') return 'enum';
+    if (key === 'petalTextureUrl') return 'text';
+    if (
+        key === 'crestTint' ||
+        key === 'troughTint' ||
+        SPARKLE_COLOR_KEYS.has(key) ||
+        BUTTERFLY_COLOR_KEYS.has(key) ||
+        ARRAY_COLOR_KEYS.has(key)
+    ) {
+        return 'color';
+    }
+    if (
+        key === 'colorBlendMode' ||
+        key === 'colorCycleEnabled' ||
+        key === 'gsLightEnabled' ||
+        key === 'postEffectEnabled' ||
+        key === 'continuousRender' ||
+        key === 'useFog' ||
+        key === 'useCameraClearColor' ||
+        key === 'restoreSceneAtmosphere'
+    ) return 'boolean';
+    if (key === 'center' || key === 'waveDirection' || key === 'extents') return 'vec3';
+    return 'number';
+}
 
 function isVec3Triple(v: unknown): v is [number, number, number] {
     return Array.isArray(v) && v.length >= 3 && v.every(x => typeof x === 'number' && Number.isFinite(x));
@@ -119,6 +212,20 @@ function trySetTriple(script: any, key: string, v: unknown): boolean {
         return true;
     }
     return trySetVec3(script, key, v);
+}
+
+function isColorTriple(v: unknown): v is [number, number, number] {
+    return Array.isArray(v) && v.length >= 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x));
+}
+
+function trySetColor(script: any, key: string, v: unknown): boolean {
+    if (!isColorTriple(v)) return false;
+    const cur = script[key];
+    if (cur instanceof Color) {
+        cur.set(v[0], v[1], v[2]);
+        return true;
+    }
+    return false;
 }
 
 function trySetNumber(script: any, key: string, v: unknown): boolean {
@@ -159,21 +266,24 @@ export function applyPersistentEffectParamsToScript(
     if (!allowed) return;
 
     for (const [rawKey, rawVal] of Object.entries(effectParams)) {
-        if (!allowed.has(rawKey)) continue;
         if (rawVal === undefined) continue;
+        if (!allowed.has(rawKey)) continue;
         if (rawKey === 'center' || rawKey === 'extents') {
             trySetVec3(script, rawKey, rawVal);
             continue;
         }
+        if (rawKey === 'waveDirection') {
+            trySetVec3(script, rawKey, rawVal);
+            continue;
+        }
         if (
-            rawKey === 'color' ||
-            rawKey === 'glowColor' ||
-            rawKey === 'cameraClearColor' ||
-            rawKey === 'paperColor' ||
-            rawKey === 'lightColor' ||
-            rawKey === 'strokeColor'
+            ARRAY_COLOR_KEYS.has(rawKey)
         ) {
             trySetTriple(script, rawKey, rawVal);
+            continue;
+        }
+        if (rawKey === 'crestTint' || rawKey === 'troughTint' || BUTTERFLY_COLOR_KEYS.has(rawKey) || SPARKLE_COLOR_KEYS.has(rawKey)) {
+            trySetColor(script, rawKey, rawVal) || trySetTriple(script, rawKey, rawVal);
             continue;
         }
         if (effectType === 'falling-petals' && rawKey === 'petalParticleCount') {

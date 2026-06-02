@@ -23,8 +23,12 @@ import {
     applyLightUpdate,
     applyShadowDirectionSet,
     applyShadowIntensityUpdate,
-    applyShadowSet
+    applyShadowSet,
+    applyShadowSetFromHost,
+    applyTorchParamsSet,
+    applyTorchToggle
 } from './protocol-adapters/environment-protocol-adapter';
+import type { TorchLightSettings } from '../schemas/v2-custom';
 import type { Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 import type { InputArbiter } from '../input-arbiter';
 import { isEnvironmentDebugVisualEnabled } from '../state-selectors';
@@ -181,7 +185,7 @@ class EnvironmentFacade implements ModuleFacade {
         }
         case 'SHADOW_SET': {
             const v = pl.value;
-            if (typeof v === 'boolean') applyShadowSet(g, v);
+            if (typeof v === 'boolean') void applyShadowSetFromHost(g, v);
             break;
         }
         case 'SHADOW_INTENSITY_UPDATE': {
@@ -291,6 +295,18 @@ class EnvironmentFacade implements ModuleFacade {
         case 'LIGHT_BRUSH_BLOOM_UPDATE':
             ctx.events.fire('messageBridge:lightBrush', { type: command.type, payload: pl });
             break;
+        case 'TORCH_TOGGLE': {
+            const v = pl.value;
+            if (typeof v === 'boolean') applyTorchToggle(g, v);
+            break;
+        }
+        case 'TORCH_PARAMS_SET': {
+            const v = pl.value;
+            if (v && typeof v === 'object') {
+                applyTorchParamsSet(g, v as Partial<TorchLightSettings>);
+            }
+            break;
+        }
         default:
             break;
         }

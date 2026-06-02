@@ -119,18 +119,10 @@ export function buildMorphOptions(ep: Record<string, unknown>): GsplatMorphOptio
             typeof ep.progressivePairFlightStagger === 'number' ? ep.progressivePairFlightStagger : 1,
         progressivePairFlightEase: resolveProgressivePairFlightEaseParam(ep.progressivePairFlightEase),
         progressivePairFlightPosEase: resolveProgressivePairFlightEaseParam(ep.progressivePairFlightPosEase),
-        progressivePairDissolveALeaveScale:
-            typeof ep.progressivePairDissolveALeaveScale === 'number' ? ep.progressivePairDissolveALeaveScale : 1.32,
-        progressivePairDissolveARate:
-            typeof ep.progressivePairDissolveARate === 'number' ? ep.progressivePairDissolveARate : 1.24,
-        progressivePairArrivePhaseScale:
-            typeof ep.progressivePairArrivePhaseScale === 'number' ? ep.progressivePairArrivePhaseScale : 0.52,
-        progressivePairDissolveBArriveScale:
-            typeof ep.progressivePairDissolveBArriveScale === 'number' ? ep.progressivePairDissolveBArriveScale : 1.12,
         correspondenceStrategy:
-            ep.correspondenceStrategy === 'resample' || ep.correspondenceStrategy === 'axis' || ep.correspondenceStrategy === 'greedy'
+            ep.correspondenceStrategy === 'resample' || ep.correspondenceStrategy === 'greedy'
                 ? ep.correspondenceStrategy
-                : 'axis',
+                : 'greedy',
         progressivePairAsymmetricDissolve:
             typeof ep.progressivePairAsymmetricDissolve === 'boolean' ? ep.progressivePairAsymmetricDissolve : true,
         morphHourglassChannel: typeof ep.morphHourglassChannel === 'boolean' ? ep.morphHourglassChannel : true,

@@ -31,27 +31,48 @@ import { CameraManager } from './camera-manager';
 import { Camera } from './cameras/camera';
 import type { Collision } from './collision';
 import { MeshCollision, VoxelCollision } from './collision';
+import {
+    getCameraCollisionManager,
+    type CollisionLoadPayload,
+    type SceneMeshReadyPayload
+} from './collision/camera-collision-manager';
+import type { ShadowPipelineMount } from './vfx/shadow/shadow-system';
 import { nearlyEquals } from './core/math';
 import { InputController } from './input-controller';
 import { MeshDebugOverlay } from './mesh-debug-overlay';
 import { NavCursor } from './nav-cursor';
 import { Picker } from './picker';
 import type { ExperienceSettings, PostEffectSettings } from './settings';
-import { readPersistentRevealParams, shouldDeferPersistentMount } from './settings-serialize/effects-sync';
+import { readPersistentTrackEffects, shouldDeferPersistentMount } from './settings-serialize/effects-sync';
 import type { Global } from './types';
 import { nightDeferredByReveal, revealBlocksAnim } from './vfx/effects-runtime/reveal/reveal-policy';
 import { RevealController } from './vfx/effects-runtime/reveal/reveal-controller';
-import { runPersistentGsplatEntityLifecycle } from './vfx/effects-runtime/persistent/persistent-gsplat-lifecycle';
+import {
+    applyPersistentSceneEffectEnableChange,
+    runPersistentGsplatEntityLifecycle
+} from './vfx/effects-runtime/persistent/persistent-gsplat-lifecycle';
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
 import { getSkyboxRadius } from './loaders/skybox-loader';
+import { readSkyboxUrlFromSettings } from './settings-serialize/settings-serialize-helper';
 import { isLodMetaFile } from './loaders/lod-loader';
 import { BloomController } from './vfx/bloom';
-import { loadSplatMesh } from './loaders/splat-mesh-loader';
 import { NightMode } from './vfx/lighting/night-mode';
-import { initShadowCatcher } from './vfx/shadow/shadow-catcher';
-import { ShadowApplyRt } from './vfx/shadow/shadow-apply';
-import { updateShadowDistance } from './light';
-import { initAssetPlacementHandler, requestSceneAssetsRestore } from './asset-placement-handler';
+import {
+    hasShadowSceneMesh,
+    isShadowSystemEnabled,
+    notifyViewportReadyForShadow,
+    scheduleShadowPipeline,
+} from './vfx/shadow';
+import { initTorchLight } from './vfx/lighting/torch-light';
+import { initAssetPlacementHandler, requestSceneAssetsRestore } from './scene-assets/asset-placement-handler';
+import { initSceneAssetCollision } from './scene-assets/collision/scene-asset-collision';
+import { initSceneAssetCollisionDebug } from './scene-assets/collision/scene-asset-collision-debug';
+import { initMediaHotspotController } from './scene-assets/media/media-hotspot-controller';
+import { initSceneAudioCallout } from './scene-assets/media/audio-callout';
+import {
+    initVideoControlsInteraction,
+    initVideoControlsTexture
+} from './scene-assets/media/video-controls-texture';
 import { pushEditHistory } from './edit-history';
 import { initGizmoHandler } from './gizmo-handler';
 import { initAnnotationGizmoHandler } from './annotation-toolbar/annotation-gizmo-handler';
@@ -94,7 +115,7 @@ const noPostEffects: PostEffectSettings = {
     grading: { enabled: false, brightness: 0, contrast: 1, saturation: 1, tint: [1, 1, 1] },
     vignette: { enabled: false, intensity: 0, inner: 0, outer: 0, curvature: 0 },
     fringing: { enabled: false, intensity: 0 },
-    shadow: { enabled: false, darken: 0, debugVisual: false, castShadows: false }
+    shadow: { darken: 0, debugVisual: false, castShadows: false }
 };
 
 const gammaChunkGlsl = `
@@ -192,12 +213,16 @@ const needsBloomPipeline = (settings: PostEffectSettings): boolean => {
     return true;
 };
 
-const anyPostEffectEnabled = (settings: PostEffectSettings): boolean => {
+const anyPostEffectEnabled = (
+    settings: PostEffectSettings,
+    config: Global['config'],
+    allSettings: ExperienceSettings
+): boolean => {
     const bloomOn = settings.bloom.enabled && (
         Number(settings.bloom.intensity) > 0 ||
         needsBloomPipeline(settings)
     );
-    const shadowOn = (settings as any).shadow?.enabled === true;
+    const shadowOn = isShadowSystemEnabled({ config, settings: allSettings });
     return (settings.sharpness.enabled && settings.sharpness.amount > 0) ||
         bloomOn ||
         (settings.grading.enabled) ||
@@ -207,26 +232,19 @@ const anyPostEffectEnabled = (settings: PostEffectSettings): boolean => {
 };
 
 const isNostalgicComicPersistentActive = (settings: ExperienceSettings): boolean => {
-    if (settings.effects?.persistent?.enabled === false) {
-        return false;
-    }
-    const persistent = readPersistentRevealParams(settings);
-    return persistent?.type === 'nostalgic-comic';
+    return readPersistentTrackEffects(settings, 'stylization').some(e => e.type === 'nostalgic-comic');
 };
 
 const isYiyunDianranPersistentActive = (settings: ExperienceSettings): boolean => {
-    if (settings.effects?.persistent?.enabled === false) {
-        return false;
-    }
-    const persistent = readPersistentRevealParams(settings);
-    return persistent?.type === 'yiyun-dianran';
+    return readPersistentTrackEffects(settings, 'stylization').some(e => e.type === 'yiyun-dianran');
 };
 
 const isYiyunDianranPostEffectActive = (settings: ExperienceSettings): boolean => {
     if (!isYiyunDianranPersistentActive(settings)) {
         return false;
     }
-    const params = readPersistentRevealParams(settings)?.effectParams;
+    const params = readPersistentTrackEffects(settings, 'stylization', { includeDisabled: true })
+        .find(e => e.type === 'yiyun-dianran')?.effectParams;
     if (params && typeof params === 'object' && typeof params.postEffectEnabled === 'boolean') {
         return params.postEffectEnabled;
     }
@@ -234,11 +252,7 @@ const isYiyunDianranPostEffectActive = (settings: ExperienceSettings): boolean =
 };
 
 const isPalettePixelPersistentActive = (settings: ExperienceSettings): boolean => {
-    if (settings.effects?.persistent?.enabled === false) {
-        return false;
-    }
-    const persistent = readPersistentRevealParams(settings);
-    return persistent?.type === 'palette-pixel';
+    return readPersistentTrackEffects(settings, 'stylization').some(e => e.type === 'palette-pixel');
 };
 
 const YIYUN_DIANRAN_PAPER_CLEAR = new Color(0.98, 0.94, 0.85, 1);
@@ -278,6 +292,24 @@ class Viewer {
     /** 资产放置 handler 清理函数 */
     cleanupAssetPlacementHandler: (() => void) | null = null;
 
+    /** sceneAsset AABB 碰撞运行时清理 */
+    cleanupSceneAssetCollision: (() => void) | null = null;
+
+    /** 相机物理碰撞 Manager 清理 */
+    cleanupCameraCollision: (() => void) | null = null;
+
+    /** urlParam 加载的原始场景碰撞（与开关/编辑态门控无关，供 debug overlay 使用） */
+    baseSceneCollision: Collision | null = null;
+
+    /** 阴影管线挂载参数（GLB 懒加载完成后热更新 meshEntity） */
+    private shadowPipelineMount: ShadowPipelineMount | null = null;
+
+    /** 音视频热区播控卸载 */
+    cleanupMediaHotspotController: (() => void) | null = null;
+    cleanupSceneAudioCallout: (() => void) | null = null;
+    cleanupVideoControlsTexture: (() => void) | null = null;
+    cleanupVideoControlsInteraction: (() => void) | null = null;
+
     /** Gizmo handler 清理函数 */
     cleanupGizmoHandler: (() => void) | null = null;
 
@@ -310,11 +342,25 @@ class Viewer {
         }
     };
 
-    constructor(global: Global, gsplatLoad: Promise<Entity>, skyboxLoad: Promise<void> | undefined, collisionLoad: Promise<Collision> | undefined) {
+    constructor(global: Global, gsplatLoad: Promise<Entity>, skyboxLoad: Promise<void> | undefined) {
         this.global = global;
 
         const { app, settings, config, events, state, camera } = global;
         const { graphicsDevice } = app;
+
+        const collisionMgr = getCameraCollisionManager(global);
+        collisionMgr.configure();
+        events.on('cameraCollision:load', (payload: CollisionLoadPayload) => {
+            if (payload.state === 'ready') {
+                const sceneCollision = collisionMgr.getCollision();
+                if (sceneCollision) {
+                    this.bindSceneCollisionDebugOverlay(sceneCollision);
+                }
+            }
+        });
+        events.on('sceneMesh:ready', (_payload: SceneMeshReadyPayload) => {
+            this.applyShadowMeshEntity(collisionMgr.getSceneMeshEntity());
+        });
 
         initInputArbiter(global);
 
@@ -360,6 +406,7 @@ class Viewer {
             getAppCanvas: () => (app.graphicsDevice?.canvas as HTMLCanvasElement) ?? document.querySelector('canvas'),
             getNightModeScript: () => this.nightModeScript
         });
+
         // disable auto render, we'll render only when camera changes
         app.autoRender = false;
 
@@ -378,7 +425,6 @@ class Viewer {
             this.configureCamera(global.settings);
             app.renderNextFrame = true;
         });
-
         // handle canvas resize - update aspect ratio and trigger render
         const handleResize = () => {
             camera.camera.aspectRatio = graphicsDevice.width / graphicsDevice.height;
@@ -507,7 +553,7 @@ class Viewer {
             let far = Math.max(dist + boundRadius + clipPadding, 1e-2);
             
             // 获取天空盒的实际半径，如果存在天空盒，确保 farClip 足够大以包含它
-            const skyboxRadius = getSkyboxRadius(app, config.skyboxUrl);
+            const skyboxRadius = getSkyboxRadius(app, readSkyboxUrlFromSettings(settings));
             if (skyboxRadius > 0) {
                 // 使用固定的天空盒半径，计算相机到天空盒边缘的最大距离
                 // 假设天空盒中心在原点 (0, 0, 0)，计算相机到原点的距离 + 半径
@@ -591,31 +637,11 @@ class Viewer {
             window.animationDuration = state.animationDuration;
         });
 
-        // 接影几何：从 URL 参数 ?splatMesh= 读取 GLB 路径
-        console.log('[Shadow] config.splatMeshUrl =', config.splatMeshUrl);
-        const splatMeshLoad = config.splatMeshUrl
-            ? loadSplatMesh(app, config.splatMeshUrl).then((entity) => {
-                console.log('[Shadow] splatMesh loaded successfully:', entity?.name, 'render:', !!entity?.render, 'children:', entity?.children?.length);
-                return entity;
-            }).catch((err: unknown): null => {
-                console.warn('[Shadow] splatMesh load failed, falling back to plane', config.splatMeshUrl, err);
-                return null;
-            })
-            : (() => {
-                console.log('[Shadow] No splatMeshUrl in URL params, will create default plane. Add ?splatMesh=/assets/mesh/blue.glb to URL to use GLB mesh.');
-                return Promise.resolve(null as Entity | null);
-            })();
-
-        // wait for the model to load
-        console.log('[Shadow] Waiting for Promise.all to resolve...');
-        Promise.all([gsplatLoad, skyboxLoad ?? Promise.resolve(), splatMeshLoad, collisionLoad ?? Promise.resolve(undefined)]).then((results) => {
-            console.log('[Shadow] Promise.all resolved, results count:', results.length);
+        // wait for the model to load（接影 GLB 与 collision 共用 mesh，由 CameraCollisionManager 懒加载）
+        Promise.all([gsplatLoad, skyboxLoad ?? Promise.resolve()]).then((results) => {
             try {
             const gsplatEntity = results[0] as Entity;
             const gsplat = gsplatEntity.gsplat as GSplatComponent;
-            const meshEntity = results[2] as Entity | null | undefined;
-            const collision = (results[3] as Collision | undefined) ?? null;
-            // console.log('[Shadow] gsplatEntity:', gsplatEntity?.name, 'gsplat:', !!gsplat, 'meshEntity:', meshEntity?.name ?? 'null');
 
             // get scene bounding box
             const gsplatBbox = gsplat?.customAabb;
@@ -623,32 +649,15 @@ class Viewer {
                 sceneBound.setFromTransformedAabb(gsplatBbox, gsplatEntity.getWorldTransform());
             }
 
-            // 根据场景大小动态更新方向光的 shadowDistance
-            const sceneSize = sceneBound.halfExtents.length();
-            updateShadowDistance(global, sceneSize);
-
-            // 阴影管线：有 GLB 则用 mesh 接影，否则用平面（与 Physics_Relighting_Demo 一致）
-            const shadowOpts = settings.postEffectSettings.shadow as { debugVisual?: boolean } | undefined;
-            // console.log('[Shadow] initShadowCatcher called with:', {
-            //     hasMeshEntity: !!meshEntity,
-            //     meshEntityName: meshEntity?.name,
-            //     meshEntityChildren: meshEntity?.children?.length,
-            //     sceneBoundCenter: sceneBound.center.toString(),
-            //     sceneBoundHalf: sceneBound.halfExtents.toString()
-            // });
-            initShadowCatcher(app, sceneBound, {
-                debugVisual: shadowOpts?.debugVisual ?? false,
-                parentEntity: gsplatEntity,
-                meshEntity: meshEntity ?? undefined
-            });
-            // 必须在 create 之前注入 global：initialize() 在 create() 时同步执行，此时 script.global 尚未被赋值
-            (app as any).__shadowApplyGlobal = global;
-            if (!app.root.script) {
-                app.root.addComponent('script');
+            this.shadowPipelineMount = {
+                sceneBound,
+                gsplatEntity,
+                meshEntity: null
+            };
+            const preloadedShadowMesh = getCameraCollisionManager(global).getSceneMeshEntity();
+            if (preloadedShadowMesh) {
+                this.applyShadowMeshEntity(preloadedShadowMesh);
             }
-            const applyScript = app.root.script.create(ShadowApplyRt) as unknown as ShadowApplyRt;
-            applyScript.global = global;
-            delete (app as any).__shadowApplyGlobal;
 
             // 标注系统初始化时机：
             // - 若有 reveal / VFX（开场播放），则等 revealComplete 后再初始化，避免动画期间热点/tooltip 干扰观感
@@ -674,40 +683,47 @@ class Viewer {
             };
 
             this.picker = new Picker(app, camera);
+            global.picker = this.picker;
             this.inputController = new InputController(global, this.picker);
-            this.inputController.collision = collision ?? null;
-            state.hasCollision = !!collision;
 
-            const rendererMode = (config as any).renderer as string | undefined;
-            if (collision instanceof VoxelCollision && rendererMode !== 'webgl') {
-                this.voxelOverlay = new VoxelDebugOverlay(app, collision, camera);
-                this.voxelOverlay.mode = (config as any).heatmap ? 'heatmap' : 'overlay';
-                state.hasCollisionOverlay = true;
-                events.on('collisionOverlayEnabled:changed', (value: boolean) => {
-                    if (this.voxelOverlay) {
-                        this.voxelOverlay.enabled = value;
-                        app.renderNextFrame = true;
-                    }
-                });
-            } else if (collision instanceof MeshCollision) {
-                this.meshOverlay = new MeshDebugOverlay(app, collision, camera, !!this.cameraFrame);
-                state.hasCollisionOverlay = true;
-                events.on('collisionOverlayEnabled:changed', (value: boolean) => {
-                    if (this.meshOverlay) {
-                        this.meshOverlay.enabled = value;
-                        app.renderNextFrame = true;
-                    }
-                });
-            }
+            // 场景 ?collision= 网格（与接影 GLB 同源）；总开关 + Viewer/预览 + 懒加载就绪后非 null。
+            // 放置资产 AABB 不在此注入，由 CameraManager 的 sceneAssetCollisionResolver 处理。
+            const collisionMgr = getCameraCollisionManager(global);
+            const sceneCollision = collisionMgr.activeCollision();
+            this.inputController.collision = sceneCollision;
 
-            // Set move speed based on scene size (reuse sceneSize from above)
+            const sceneSize = sceneBound.halfExtents.length();
             this.inputController.setMoveSpeedFromSceneSize(sceneSize);
 
             // 先创建 cameraManager，因为 revealController 需要它来获取 targetConstraint
-            this.cameraManager = new (CameraManager as any)(global, sceneBound, collision);
+            this.cameraManager = new (CameraManager as any)(global, sceneBound, sceneCollision);
             if (!config.noui) {
-                this.navCursor = new NavCursor(app, camera, collision ?? null, events, state, this.picker, sceneBound.halfExtents.length());
+                this.navCursor = new NavCursor(
+                    app,
+                    camera,
+                    sceneCollision,
+                    events,
+                    state,
+                    this.picker,
+                    sceneBound.halfExtents.length()
+                );
             }
+
+            // 懒加载完成或总开关/模式变化时，同步 walk、fly、input、nav 上的场景碰撞引用
+            collisionMgr.attachConsumers({
+                applyUrlCollision: (collision) => {
+                    if (this.inputController) {
+                        this.inputController.collision = collision;
+                    }
+                    if (this.cameraManager) {
+                        this.cameraManager.setUrlParamCollision(collision);
+                    }
+                    if (this.navCursor) {
+                        this.navCursor.setCollision(collision);
+                    }
+                }
+            });
+            this.cleanupCameraCollision = collisionMgr.start();
 
             // NightMode 必须在 RevealController 之前创建：Reveal 构造函数里会立即 createEffect 并 fire('nightMode:exit')。
             // 若 NightMode 尚未注册监听，首次开场的 exit 会丢失，NightMode 仍占用 gsplatModifyVS，与 sketch 等 VFX 互斥失败；
@@ -741,6 +757,10 @@ class Viewer {
                     splat: gsplatEntity ? 'found' : 'not found'
                 });
             }
+
+            // 全局手电筒（单例 spot）：放在 NightMode 之后、RevealController 之前，
+            // 以便首次 active 切换时 NightMode 的 `collectSpotLights` 能立刻看到它。
+            initTorchLight(global);
             
             // ── 关键：根据 unified 模式选择正确的坐标空间 ──
             // PlayCanvas gsplat 的 modifySplatCenter 在两种模式下接收不同坐标空间：
@@ -760,6 +780,25 @@ class Viewer {
             this.assetEffectsController = createAssetEffectsController(global);
             (global as any).__assetEffectsController = this.assetEffectsController;
 
+            const ensureShadowPipelineReady = () => {
+                if (!isShadowSystemEnabled(global) || !this.shadowPipelineMount) {
+                    return;
+                }
+                const collisionMgr = getCameraCollisionManager(global);
+                // 配置了 GLB collision 时先懒加载接影 mesh，避免用默认平面占位且后续不更新
+                if (hasShadowSceneMesh(global) && !this.shadowPipelineMount.meshEntity) {
+                    void collisionMgr.ensureSceneMeshLoaded();
+                    return;
+                }
+                scheduleShadowPipeline(global, this.shadowPipelineMount);
+                if (state.readyToRender) {
+                    notifyViewportReadyForShadow(global);
+                }
+            };
+            ensureShadowPipelineReady();
+            events.on('postEffect:changed', () => {
+                ensureShadowPipelineReady();
+            });
             global.events.on('persistentGsplatEffectRemountRequested', (restartAnim?: boolean) => {
                 this.configureCamera(global.settings);
                 // revealComplete 当帧内 reveal 脚本可能仍在执行 removeShaders；
@@ -768,6 +807,18 @@ class Viewer {
                     this.syncPersistentRevealGsplat(gsplatEntity, restartAnim === true);
                 });
             });
+            global.events.on(
+                'persistentGsplatEffectEnableChanged',
+                (payload: { effectType?: string; enable?: boolean }) => {
+                    const effectType = payload?.effectType;
+                    if (typeof effectType !== 'string') {
+                        return;
+                    }
+                    global.app.once('frameend', () => {
+                        this.applyPersistentSceneEffectEnable(gsplatEntity, effectType, payload.enable === true);
+                    });
+                }
+            );
             const es = global.settings as ExperienceSettings;
             if (shouldDeferPersistentMount(es)) {
                 events.once('revealComplete', () => {
@@ -933,6 +984,20 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 this.cleanupAnnotationGizmoHandler = initAnnotationGizmoHandler(global);
             }
 
+            const cleanupSceneAssetCollision = initSceneAssetCollision(global);
+            const cleanupSceneAssetCollisionDebug = initSceneAssetCollisionDebug(global);
+            this.cleanupSceneAssetCollision = () => {
+                cleanupSceneAssetCollisionDebug();
+                cleanupSceneAssetCollision();
+            };
+
+            this.cleanupMediaHotspotController = initMediaHotspotController(global);
+            this.cleanupSceneAudioCallout = initSceneAudioCallout(global);
+            this.cleanupVideoControlsTexture = initVideoControlsTexture(global);
+            if (canvasEl) {
+                this.cleanupVideoControlsInteraction = initVideoControlsInteraction(global, canvasEl);
+            }
+
             const { instance } = gsplat;
             if (instance) {
                 // kick off gsplat sorting immediately now that camera is in position
@@ -959,6 +1024,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
                             // we're ready to render once the first sort has completed
                             state.readyToRender = true;
+                            ensureShadowPipelineReady();
 
                             // 清除强制渲染标志，恢复按需渲染
                             this.forceRenderNextFrame = false;
@@ -1084,6 +1150,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                             if (state.readyToRender) return; // 已被其他路径设置则跳过
 
                             state.readyToRender = true;
+                            ensureShadowPipelineReady();
 
                             // 清除强制渲染标志，恢复按需渲染（场景已加载完成）
                             this.forceRenderNextFrame = false;
@@ -1201,7 +1268,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
         const computeRequiresCameraFrame = rendererMode === 'compute';
         const postFxRequested = !config.nofx &&
             !!postEffectSettings &&
-            (anyPostEffectEnabled(postEffectSettings) ||
+            (anyPostEffectEnabled(postEffectSettings, config, settings as ExperienceSettings) ||
                 highPrecisionRendering ||
                 bloomPipelineWanted);
         const enableCameraFrame = !app.xr.active && (
@@ -1315,6 +1382,55 @@ z: ${cameraInfo.target.z.toFixed(6)}
         this.meshOverlay?.setCameraFrameEnabled(!!this.cameraFrame);
     }
 
+    /** 接影 GLB 懒加载完成后更新 shadow mount 并尝试挂载阴影管线 */
+    private applyShadowMeshEntity(meshEntity: Entity | null): void {
+        if (!meshEntity || !this.shadowPipelineMount) {
+            return;
+        }
+        this.shadowPipelineMount.meshEntity = meshEntity;
+        const { global } = this;
+        if (!isShadowSystemEnabled(global)) {
+            return;
+        }
+        scheduleShadowPipeline(global, this.shadowPipelineMount);
+        if (global.state.readyToRender) {
+            notifyViewportReadyForShadow(global);
+        }
+    }
+
+    /** urlParam 碰撞懒加载完成后挂载 debug 线框（与门控无关，仅可视化） */
+    private bindSceneCollisionDebugOverlay(collision: Collision): void {
+        const { app, config, events, state, camera } = this.global;
+        this.baseSceneCollision = collision;
+        const rendererMode = (config as { renderer?: string }).renderer;
+        if (collision instanceof VoxelCollision && rendererMode !== 'webgl') {
+            if (this.voxelOverlay) {
+                return;
+            }
+            this.voxelOverlay = new VoxelDebugOverlay(app, collision, camera);
+            this.voxelOverlay.mode = (config as { heatmap?: boolean }).heatmap ? 'heatmap' : 'overlay';
+            state.hasCollisionOverlay = true;
+            events.on('collisionOverlayEnabled:changed', (value: boolean) => {
+                if (this.voxelOverlay) {
+                    this.voxelOverlay.enabled = value;
+                    app.renderNextFrame = true;
+                }
+            });
+        } else if (collision instanceof MeshCollision) {
+            if (this.meshOverlay) {
+                return;
+            }
+            this.meshOverlay = new MeshDebugOverlay(app, collision, camera, !!this.cameraFrame);
+            state.hasCollisionOverlay = true;
+            events.on('collisionOverlayEnabled:changed', (value: boolean) => {
+                if (this.meshOverlay) {
+                    this.meshOverlay.enabled = value;
+                    app.renderNextFrame = true;
+                }
+            });
+        }
+    }
+
     // Camera path visualizer methods
     updateCameraPathVisualizer(options: VisualizerOptions) {
         if (!this.pathVisualizer) {
@@ -1363,6 +1479,20 @@ z: ${cameraInfo.target.z.toFixed(6)}
             gsplatEntity,
             revealController: this.revealController,
             restartAnimTrack
+        });
+    }
+
+    private applyPersistentSceneEffectEnable(
+        gsplatEntity: Entity,
+        effectType: string,
+        enable: boolean
+    ): void {
+        applyPersistentSceneEffectEnableChange({
+            global: this.global,
+            gsplatEntity,
+            revealController: this.revealController,
+            effectType,
+            enable
         });
     }
 }

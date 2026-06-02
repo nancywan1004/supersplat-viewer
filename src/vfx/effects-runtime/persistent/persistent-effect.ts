@@ -1,6 +1,7 @@
 import type { Entity } from 'playcanvas';
 import type { ExperienceSettings } from '../../../schemas/v2';
-import { readActivePersistentRevealParams, readPersistentRevealParams } from '../../../settings-serialize/effects-sync';
+import type { PersistentSceneEffectEntry } from '../../../schemas/v2-custom';
+import { readActivePersistentEffects } from '../../../settings-serialize/effects-sync';
 import { destroyAllPersistentGsplatScriptsOnEntity, getMountedPersistentGsplatScript } from '../gsplat-effect-script-registry';
 import { PERSISTENT_EFFECT_TYPES } from '../effect-types';
 import { isPersistentVfx } from '../reveal/reveal-policy';
@@ -9,6 +10,9 @@ import { GsplatPersistentNostalgicComic } from './nostalgic-comic-persistent';
 import { GsplatPersistentPalettePixel } from './palette-pixel-persistent';
 import { GsplatPersistentYiyunDianran } from './yiyun-dianran-persistent';
 import { GsplatRevealPerlinWave } from './gsplat-perlin-wave';
+import { GsplatPersistentOverallWave } from './gsplat-overall-wave';
+import { GsplatPersistentButterflyParticle } from './gsplat-butterfly-particle';
+import { GsplatPersistentSparkleTwinkle } from './gsplat-sparkle-twinkle';
 import { applyPersistentEffectParamsToScript } from './persistent-effect-params';
 
 /**
@@ -45,6 +49,12 @@ export function mountPersistentGsplatByEffectType(
             return createYiyunDianranScript(gsplatEntity, autoStart, effectParams);
         case 'palette-pixel':
             return createPalettePixelScript(gsplatEntity, autoStart, effectParams);
+        case 'sparkle-twinkle':
+            return createSparkleTwinkleScript(gsplatEntity, updateScriptCenter, autoStart, effectParams);
+        case 'overall-wave':
+            return createOverallWaveScript(gsplatEntity, updateScriptCenter, autoStart, effectParams);
+        case 'butterfly-particle':
+            return createButterflyParticleScript(gsplatEntity, updateScriptCenter, autoStart, effectParams);
         default:
             console.warn('[persistent-effect] persistent type in registry but no mount branch:', effectType);
             return null;
@@ -221,6 +231,132 @@ export function createPerlinWaveRevealScript(
     }
 }
 
+export function createOverallWaveScript(
+    gsplatEntity: Entity,
+    updateScriptCenter: (script: any) => void,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn('Cannot create overall-wave script - entity or script component not ready');
+        return null;
+    }
+
+    console.log('Creating overall-wave script');
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentOverallWave) as any;
+        if (script) {
+            updateScriptCenter(script);
+            applyPersistentEffectParamsToScript(script, 'overall-wave', effectParams ?? undefined);
+            script.enabled = autoStart;
+            script.effectTime = 0;
+
+            console.log('Overall-wave script created with config:', {
+                center: script.center,
+                noiseType: script.noiseType,
+                waveDirection: script.waveDirection,
+                waveAmplitude: script.waveAmplitude,
+                wavelength: script.wavelength,
+                waveSpeed: script.waveSpeed,
+                intensity: script.intensity,
+                crestTint: script.crestTint,
+                troughTint: script.troughTint,
+                enabled: script.enabled
+            });
+        }
+        return script;
+    } catch (error) {
+        console.error('Failed to create overall-wave script:', error);
+        return null;
+    }
+}
+
+export function createButterflyParticleScript(
+    gsplatEntity: Entity,
+    updateScriptCenter: (script: any) => void,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn('Cannot create butterfly-particle script - entity or script component not ready');
+        return null;
+    }
+
+    console.log('Creating butterfly-particle script');
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentButterflyParticle) as any;
+        if (script) {
+            updateScriptCenter(script);
+            applyPersistentEffectParamsToScript(script, 'butterfly-particle', effectParams ?? undefined);
+            script.requestRebuild?.();
+            script.enabled = autoStart;
+            script.effectTime = 0;
+
+            console.log('Butterfly-particle script created with config:', {
+                center: script.center,
+                pointSize: script.pointSize,
+                twinkleSpeed: script.twinkleSpeed,
+                twinkleMin: script.twinkleMin,
+                brightness: script.brightness,
+                gsLightEnabled: script.gsLightEnabled,
+                gsLightIntensity: script.gsLightIntensity,
+                gsLightRange: script.gsLightRange,
+                enabled: script.enabled
+            });
+        }
+        return script;
+    } catch (error) {
+        console.error('Failed to create butterfly-particle script:', error);
+        return null;
+    }
+}
+
+export function createSparkleTwinkleScript(
+    gsplatEntity: Entity,
+    updateScriptCenter: (script: any) => void,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn('Cannot create sparkle-twinkle script - entity or script component not ready');
+        return null;
+    }
+
+    console.log('Creating sparkle-twinkle script');
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentSparkleTwinkle) as any;
+        if (script) {
+            updateScriptCenter(script);
+            applyPersistentEffectParamsToScript(script, 'sparkle-twinkle', effectParams ?? undefined);
+            script.requestRebuild?.();
+            script.enabled = autoStart;
+            script.effectTime = 0;
+
+            console.log('Sparkle-twinkle script created with config:', {
+                center: script.center,
+                pointSize: script.pointSize,
+                sparkleDensity: script.sparkleDensity,
+                twinkleSpeed: script.twinkleSpeed,
+                twinkleMin: script.twinkleMin,
+                twinkleSharpness: script.twinkleSharpness,
+                brightness: script.brightness,
+                lightTint1: script.lightTint1,
+                lightTint2: script.lightTint2,
+                lightTint3: script.lightTint3,
+                colorBlendMode: script.colorBlendMode,
+                enabled: script.enabled
+            });
+        }
+        return script;
+    } catch (error) {
+        console.error('Failed to create sparkle-twinkle script:', error);
+        return null;
+    }
+}
+
 /**
  * 导出时间轴上的 effectTime 截断策略。
  * `unboundedOnVideoExport === true` 时（如 perlin-wave）覆盖整段视频时长，不按 `exportCeiling` 截断。
@@ -250,16 +386,15 @@ export function rebindPersistentGsplatTimelineFromSettings(
         bindPersistentTimelineScript(null);
         return;
     }
-    const persistentCfg = readPersistentRevealParams(settings);
-    const persistentScript = getMountedPersistentGsplatScript(
-        gsplatEntity,
-        persistentCfg?.type as string | undefined
-    ) as any;
-    if (persistentScript && persistentCfg?.type && isPersistentVfx(persistentCfg.type as any)) {
-        bindPersistentTimelineScript(persistentScript);
-    } else {
-        bindPersistentTimelineScript(null);
+    const enabled = readActivePersistentEffects(settings);
+    let primary: any = null;
+    for (const entry of enabled) {
+        const script = getMountedPersistentGsplatScript(gsplatEntity, entry.type) as any;
+        if (script && !primary) {
+            primary = script;
+        }
     }
+    bindPersistentTimelineScript(primary);
 }
 
 /** `forceStopVfx` 末尾与 `EffectsRuntime` 快照对齐：当前 persistent 轨应对应的 effectType（无则 `'none'`）。 */
@@ -267,12 +402,16 @@ export function getPersistentGsplatEffectsRuntimeScriptType(
     gsplatEntity: Entity | null | undefined,
     settings: ExperienceSettings
 ): string {
-    const pCfg = readPersistentRevealParams(settings);
-    const persistentAlive = getMountedPersistentGsplatScript(gsplatEntity, pCfg?.type as string | undefined);
-    if (persistentAlive && pCfg?.type && isPersistentVfx(pCfg.type as any)) {
-        return pCfg.type as string;
+    const enabled = readActivePersistentEffects(settings);
+    if (enabled.length === 0) {
+        return 'none';
     }
-    return 'none';
+    for (const entry of enabled) {
+        if (getMountedPersistentGsplatScript(gsplatEntity, entry.type)) {
+            return entry.type;
+        }
+    }
+    return enabled[0].type;
 }
 
 /** Viewer 注入：与 `RevealController` / `EffectsRuntime` 解耦，仅保留挂载所需回调。 */
@@ -289,62 +428,58 @@ export type PersistentGsplatRemountCallbacks = {
  *
  * @returns 是否成功创建并绑定脚本（`mount` 失败则为 `false`，调用方勿再假定已挂载）
  */
-export function remountPersistentGsplatOnEntity(
+/** 按 scene persistent 多选配置挂载全部 `enable` 为 true 的类型；时间轴绑定第一个成功挂载的脚本。 */
+export function remountPersistentSceneGsplatOnEntity(
     gsplatEntity: Entity,
-    persistentReveal: NonNullable<ReturnType<typeof readPersistentRevealParams>>,
+    entries: PersistentSceneEffectEntry[],
     callbacks: PersistentGsplatRemountCallbacks
 ): boolean {
     callbacks.prepareExternalPersistentScriptMount();
     destroyAllPersistentGsplatScriptsOnEntity(gsplatEntity);
-    const t = persistentReveal.type as string;
-    const script = mountPersistentGsplatByEffectType(
-        t,
-        gsplatEntity,
-        callbacks.applyGsplatShaderScriptCenter,
-        persistentReveal.autoStart ?? true,
-        persistentReveal.effectParams
-    );
-    if (!script) {
+    let primary: any = null;
+    const mountedTypes: string[] = [];
+    for (const entry of entries) {
+        if (!entry.enable) {
+            continue;
+        }
+        const script = mountPersistentGsplatByEffectType(
+            entry.type,
+            gsplatEntity,
+            callbacks.applyGsplatShaderScriptCenter,
+            entry.autoStart ?? true,
+            entry.effectParams
+        );
+        if (script) {
+            mountedTypes.push(entry.type);
+            if (!primary) {
+                primary = script;
+            }
+        }
+    }
+    if (!primary) {
         return false;
     }
-    callbacks.bindPersistentTimelineScript(script);
-    callbacks.notifyRevealScriptApplied(t);
+    callbacks.bindPersistentTimelineScript(primary);
+    callbacks.notifyRevealScriptApplied(mountedTypes.join('+') || 'none');
     return true;
 }
 
-/**
- * 按当前 active persistent 子轨批量挂载脚本；不同 effect-id 的子轨允许共存。
- * @returns 是否至少成功创建并绑定了一个 persistent 脚本
- */
-export function remountPersistentGsplatEffectsOnEntity(
+/** @deprecated 使用 {@link remountPersistentSceneGsplatOnEntity} */
+export function remountPersistentGsplatOnEntity(
     gsplatEntity: Entity,
-    persistentReveals: ReturnType<typeof readActivePersistentRevealParams>,
+    persistentReveal: { type: string; autoStart?: boolean; effectParams?: Record<string, unknown> },
     callbacks: PersistentGsplatRemountCallbacks
 ): boolean {
-    callbacks.prepareExternalPersistentScriptMount();
-    destroyAllPersistentGsplatScriptsOnEntity(gsplatEntity);
-
-    let mounted = false;
-    let lastScript: any | null = null;
-    let lastType = 'none';
-    for (const persistentReveal of persistentReveals) {
-        const t = persistentReveal.type as string;
-        const script = mountPersistentGsplatByEffectType(
-            t,
-            gsplatEntity,
-            callbacks.applyGsplatShaderScriptCenter,
-            persistentReveal.autoStart ?? true,
-            persistentReveal.effectParams
-        );
-        if (!script) {
-            continue;
-        }
-        mounted = true;
-        lastScript = script;
-        lastType = t;
-    }
-
-    callbacks.bindPersistentTimelineScript(lastScript);
-    callbacks.notifyRevealScriptApplied(lastType);
-    return mounted;
+    return remountPersistentSceneGsplatOnEntity(
+        gsplatEntity,
+        [
+            {
+                type: persistentReveal.type,
+                enable: true,
+                autoStart: persistentReveal.autoStart ?? true,
+                effectParams: persistentReveal.effectParams
+            }
+        ],
+        callbacks
+    );
 }

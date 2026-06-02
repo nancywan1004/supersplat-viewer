@@ -2,6 +2,7 @@ import { Vec3 } from 'playcanvas';
 
 import type { Collision } from '../../collision';
 import type { Picker } from '../../picker';
+import { isPlacementCursorActive } from '../../placement-cursor';
 import type { Global } from '../../types';
 import { TAP_EPSILON } from '../shared';
 
@@ -54,6 +55,17 @@ class NavInteraction {
 
     private _lastTap = { time: 0, x: 0, y: 0 };
 
+    private _lastMobileTap = { time: 0, offsetX: 0, offsetY: 0 };
+
+    private _touchTapTracking: {
+        pointerId: number;
+        startClientX: number;
+        startClientY: number;
+        startOffsetX: number;
+        startOffsetY: number;
+        maxDelta: number;
+    } | null = null;
+
     constructor(picker: Picker) {
         this._picker = picker;
     }
@@ -62,6 +74,7 @@ class NavInteraction {
         const global = this._global;
         const canvas = this._canvas;
         if (!global || !canvas) return;
+        if (isPlacementCursorActive()) return;
         const { state } = global;
         const canClickTarget = state.inputMode === 'desktop' &&
             state.cameraMode === 'walk' &&
@@ -75,6 +88,7 @@ class NavInteraction {
 
     private _onCameraModeChanged = () => {
         this._targetPickRequest++;
+        this._lastMobileTap.time = 0;
         this._updateCursor();
     };
 
@@ -136,6 +150,27 @@ class NavInteraction {
         }
     }
 
+    private async _handleDoubleTapAt(offsetX: number, offsetY: number) {
+        const global = this._global;
+        if (!global) return;
+        const { events } = global;
+
+        // dblclick swaps the active mode and uses the picked target:
+        //   fly          → orbit, focus orbit at point
+        //   orbit / walk → fly (without click-to-fly target navigation)
+        const request = ++this._targetPickRequest;
+        const target = await this._pickSceneTarget(offsetX, offsetY);
+        if (!target || request !== this._targetPickRequest) return;
+
+        const currentMode = this._global?.state.cameraMode;
+        if (currentMode === 'fly') {
+            // 'pick' switches mode to orbit, which cancels the active fly nav
+            // and would clobber any pre-set orbit target — set it after.
+            events.fire('pick', target.position);
+            events.fire('orbitTarget:set', target.position, target.normal);
+        }
+    }
+
     private _onPointerDown = (event: PointerEvent) => {
         const global = this._global;
         if (!global) return;
@@ -152,20 +187,31 @@ class NavInteraction {
             this._updateCursor();
         }
 
-        // Manual double-click/tap detection for platforms that do not emit
-        // reliable native dblclick events on the canvas.
-        const now = Date.now();
-        const delay = Math.max(0, now - this._lastTap.time);
-        if (delay < 300 &&
-            Math.abs(event.clientX - this._lastTap.x) < 8 &&
-            Math.abs(event.clientY - this._lastTap.y) < 8) {
-            this._suppressClick = true;
-            events.fire('inputEvent', 'dblclick', event);
-            this._lastTap.time = 0;
-        } else {
-            this._lastTap.time = now;
-            this._lastTap.x = event.clientX;
-            this._lastTap.y = event.clientY;
+        if (event.pointerType !== 'touch') {
+            // Manual double-click detection for platforms that do not emit
+            // reliable native dblclick events on the canvas.
+            const now = Date.now();
+            const delay = Math.max(0, now - this._lastTap.time);
+            if (delay < 300 &&
+                Math.abs(event.clientX - this._lastTap.x) < 8 &&
+                Math.abs(event.clientY - this._lastTap.y) < 8) {
+                this._suppressClick = true;
+                events.fire('inputEvent', 'dblclick', event);
+                this._lastTap.time = 0;
+            } else {
+                this._lastTap.time = now;
+                this._lastTap.x = event.clientX;
+                this._lastTap.y = event.clientY;
+            }
+        } else if (event.isPrimary) {
+            this._touchTapTracking = {
+                pointerId: event.pointerId,
+                startClientX: event.clientX,
+                startClientY: event.clientY,
+                startOffsetX: event.offsetX,
+                startOffsetY: event.offsetY,
+                maxDelta: 0
+            };
         }
     };
 
@@ -182,6 +228,15 @@ class NavInteraction {
                     events.fire('navigateCancel');
                 }
             }
+        } else if (event.pointerType === 'touch' &&
+            this._touchTapTracking &&
+            event.pointerId === this._touchTapTracking.pointerId) {
+            const dx = event.clientX - this._touchTapTracking.startClientX;
+            const dy = event.clientY - this._touchTapTracking.startClientY;
+            this._touchTapTracking.maxDelta = Math.max(
+                this._touchTapTracking.maxDelta,
+                Math.abs(dx) + Math.abs(dy)
+            );
         }
     };
 
@@ -206,6 +261,44 @@ class NavInteraction {
                     }
                 }
             }
+        } else if (event.pointerType === 'touch' &&
+            this._touchTapTracking &&
+            event.pointerId === this._touchTapTracking.pointerId) {
+            const tracking = this._touchTapTracking;
+            this._touchTapTracking = null;
+
+            const endDelta = Math.abs(event.clientX - tracking.startClientX) +
+                Math.abs(event.clientY - tracking.startClientY);
+            const tapDelta = Math.max(tracking.maxDelta, endDelta);
+            if (tapDelta >= 28) {
+                this._lastMobileTap.time = 0;
+                return;
+            }
+
+            const now = Date.now();
+            const delay = Math.max(0, now - this._lastMobileTap.time);
+            const offsetX = event.offsetX || tracking.startOffsetX;
+            const offsetY = event.offsetY || tracking.startOffsetY;
+            if (delay < 420 &&
+                Math.abs(offsetX - this._lastMobileTap.offsetX) < 36 &&
+                Math.abs(offsetY - this._lastMobileTap.offsetY) < 36) {
+                this._lastMobileTap.time = 0;
+                this._suppressClick = true;
+                events.fire('inputEvent', 'dblclick', event);
+                event.preventDefault();
+                return;
+            }
+
+            this._lastMobileTap.time = now;
+            this._lastMobileTap.offsetX = offsetX;
+            this._lastMobileTap.offsetY = offsetY;
+        }
+    };
+
+    private _onPointerCancel = (event: PointerEvent) => {
+        if (this._touchTapTracking?.pointerId === event.pointerId) {
+            this._touchTapTracking = null;
+            this._lastMobileTap.time = 0;
         }
     };
 
@@ -215,26 +308,10 @@ class NavInteraction {
         if (!global || !canvas) return;
         if (eventName !== 'dblclick') return;
         if (!(event instanceof MouseEvent)) return;
-        const { events, state } = global;
-        // dblclick swaps the active mode and uses the picked target:
-        //   fly          → orbit, focus orbit at point
-        //   orbit / walk → fly (without click-to-fly target navigation)
-        const request = ++this._targetPickRequest;
-        const target = await this._pickSceneTarget(event.offsetX, event.offsetY);
-        if (!target || request !== this._targetPickRequest) return;
-
-        const currentMode = this._global?.state.cameraMode;
-        if (currentMode === 'fly') {
-            // 'pick' switches mode to orbit, which cancels the active fly nav
-            // and would clobber any pre-set orbit target — set it after.
-            events.fire('pick', target.position);
-            events.fire('orbitTarget:set', target.position, target.normal);
-        } else if (currentMode === 'orbit' || currentMode === 'walk') {
-            state.cameraMode = 'fly';
-        }
+        await this._handleDoubleTapAt(event.offsetX, event.offsetY);
     };
 
-    private _onMobileTap = () => {
+    private _onMobileTap = async () => {
         const global = this._global;
         if (!global) return;
         const { state, events } = global;
@@ -259,6 +336,7 @@ class NavInteraction {
         canvas.addEventListener('pointerdown', this._onPointerDown);
         canvas.addEventListener('pointermove', this._onPointerMove);
         canvas.addEventListener('pointerup', this._onPointerUp);
+        canvas.addEventListener('pointercancel', this._onPointerCancel);
 
         // double-click/tap fallback -> fly target or orbit focus (skipped in walk mode)
         events.on('inputEvent', this._onInputEvent);
@@ -277,6 +355,7 @@ class NavInteraction {
             this._canvas.removeEventListener('pointerdown', this._onPointerDown);
             this._canvas.removeEventListener('pointermove', this._onPointerMove);
             this._canvas.removeEventListener('pointerup', this._onPointerUp);
+            this._canvas.removeEventListener('pointercancel', this._onPointerCancel);
         }
         if (this._global) {
             const { events } = this._global;

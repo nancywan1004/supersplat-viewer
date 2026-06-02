@@ -20,6 +20,13 @@ import {
     BLENDMODE_ONE_MINUS_SRC_ALPHA,
     BLENDMODE_SRC_ALPHA
 } from 'playcanvas';
+import { normalizeAnnotationMediaFields } from './annotation-toolbar/media-fields';
+import { ensureHotspotDepthLayers, syncHotspotLayersAfterGsplat } from './scene-assets/hotspot-depth-layers';
+import {
+    getActiveSceneMediaEntryId,
+    setAnnotationFullscreenVideoActive
+} from './scene-assets/media/scene-media-playback';
+import type { Global } from './types';
 
 // clamp the vertices of the hotspot so it is never clipped by the near or far plane
 const depthClampGlsl = `
@@ -82,6 +89,26 @@ export class Annotation extends Script {
 
     static imagePreviewImg: HTMLImageElement | null = null;
 
+    /** tooltip 内嵌视频容器（展开时小窗播放） */
+    static videoInlineDom: HTMLDivElement | null = null;
+
+    static videoInlineEl: HTMLVideoElement | null = null;
+
+    static videoFsBtn: HTMLButtonElement | null = null;
+
+    /**
+     * 由 `AnnotationEntity` 首次构造时注入；用于 static handler（fs / 关闭大屏等）
+     * 与 `scene-media-playback` 通信触发场景媒体压制状态变更。
+     * 单 Global 场景下注入一次即可。
+     */
+    static globalRef: Global | null = null;
+
+    static videoPlayBtn: HTMLButtonElement | null = null;
+
+    static videoPreviewOverlay: HTMLDivElement | null = null;
+
+    static videoPreviewEl: HTMLVideoElement | null = null;
+
     static layers: Layer[] = [];
 
     static mesh: Mesh | null = null;
@@ -139,7 +166,7 @@ export class Annotation extends Script {
                 font-size: 14px;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
                 pointer-events: auto;
-                max-width: 200px;
+                max-width: 280px;
                 word-wrap: break-word;
                 overflow-x: visible;
                 white-space: normal;
@@ -239,11 +266,84 @@ export class Annotation extends Script {
                 justify-content: center;
                 z-index: 9999;
             }
-            .pc-annotation-image-preview-overlay img {
+            .pc-annotation-image-preview-overlay img,
+            .pc-annotation-image-preview-overlay video {
                 max-width: 80vw;
                 max-height: 80vh;
                 border-radius: 8px;
                 box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+            }
+            .pc-annotation-video-inline {
+                display: none;
+                position: relative;
+                width: 100%;
+                margin-top: 8px;
+                border-radius: 6px;
+                overflow: hidden;
+                background: rgba(0, 0, 0, 0.35);
+            }
+            .pc-annotation-video-inline-el {
+                display: block;
+                width: 100%;
+                max-height: 148px;
+                min-height: 88px;
+                object-fit: cover;
+                background: #0a1020;
+                pointer-events: none;
+            }
+            .pc-annotation-video-fs-btn {
+                position: absolute;
+                top: 8px;
+                right: 8px;
+                z-index: 2;
+                width: 28px;
+                height: 28px;
+                padding: 0;
+                border: none;
+                border-radius: 4px;
+                background: rgba(0, 0, 0, 0.5);
+                cursor: pointer;
+                box-sizing: border-box;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .pc-annotation-video-fs-btn__img {
+                width: 16px;
+                height: 16px;
+                display: block;
+                pointer-events: none;
+            }
+            .pc-annotation-video-play-btn {
+                position: absolute;
+                right: 10px;
+                bottom: 10px;
+                z-index: 2;
+                width: 28px;
+                height: 28px;
+                padding: 0;
+                border: none;
+                border-radius: 50%;
+                background: rgba(0, 0, 0, 0.55);
+                cursor: pointer;
+            }
+            .pc-annotation-video-play-btn::after {
+                content: '';
+                position: absolute;
+                left: 10px;
+                top: 8px;
+                border-style: solid;
+                border-width: 6px 0 6px 10px;
+                border-color: transparent transparent transparent #fff;
+            }
+            .pc-annotation-video-play-btn.is-playing::after {
+                left: 9px;
+                top: 8px;
+                border: none;
+                width: 3px;
+                height: 12px;
+                background: #fff;
+                box-shadow: 6px 0 0 #fff;
             }
         `;
 
@@ -260,6 +360,7 @@ export class Annotation extends Script {
      */
     static _initializeStatic(app: AppBase) {
         if (Annotation.styleSheet) {
+            syncHotspotLayersAfterGsplat(app);
             return;
         }
 
@@ -269,29 +370,12 @@ export class Annotation extends Script {
             Annotation.parentDom = document.body;
         }
 
-        const { layers } = app.scene;
-        const worldLayer = layers.getLayerByName('World');
-
-        const createLayer = (name: string, semitrans: boolean) => {
-            const layer = new Layer({ name: name });
-            const idx = semitrans ? layers.getTransparentIndex(worldLayer) : layers.getOpaqueIndex(worldLayer);
-            layers.insert(layer, idx + 1);
-            return layer;
-        };
-
-        Annotation.layers = [
-            createLayer('HotspotBase', false),
-            createLayer('HotspotOverlay', true)
-        ];
-
         if (Annotation.camera === null) {
             Annotation.camera = app.root.findComponent('camera').entity;
         }
 
-        Annotation.camera.camera.layers = [
-            ...Annotation.camera.camera.layers,
-            ...Annotation.layers.map(layer => layer.id)
-        ];
+        const { baseLayer, overlayLayer } = ensureHotspotDepthLayers(app, Annotation.camera);
+        Annotation.layers = [baseLayer, overlayLayer];
 
         Annotation.mesh = Mesh.fromGeometry(app.graphicsDevice, new PlaneGeometry({
             widthSegments: 1,
@@ -322,10 +406,11 @@ export class Annotation extends Script {
         Annotation.imagePreviewOverlay.style.display = 'none';
         Annotation.imagePreviewImg = document.createElement('img');
         Annotation.imagePreviewOverlay.appendChild(Annotation.imagePreviewImg);
-        Annotation.imagePreviewOverlay.addEventListener('click', () => {
-            if (Annotation.imagePreviewOverlay) {
-                Annotation.imagePreviewOverlay.style.display = 'none';
+        Annotation.imagePreviewOverlay.addEventListener('click', (ev) => {
+            if (ev.target === Annotation.imagePreviewImg) {
+                return;
             }
+            Annotation.closeMediaPreviews();
         });
 
         if (Annotation.imageDom) {
@@ -333,6 +418,7 @@ export class Annotation extends Script {
                 ev.stopPropagation();
                 const src = Annotation.imageDom!.src;
                 if (!src) return;
+                Annotation.closeMediaPreviews();
                 if (Annotation.imagePreviewImg) {
                     Annotation.imagePreviewImg.src = src;
                 }
@@ -347,8 +433,231 @@ export class Annotation extends Script {
             });
         }
 
+        Annotation.videoInlineDom = document.createElement('div');
+        Annotation.videoInlineDom.className = 'pc-annotation-video-inline';
+
+        Annotation.videoInlineEl = document.createElement('video');
+        Annotation.videoInlineEl.className = 'pc-annotation-video-inline-el';
+        Annotation.videoInlineEl.preload = 'metadata';
+        Annotation.videoInlineEl.playsInline = true;
+        Annotation.videoInlineEl.setAttribute('playsinline', '');
+        Annotation.videoInlineEl.controls = false;
+        Annotation.videoInlineDom.appendChild(Annotation.videoInlineEl);
+
+        Annotation.videoFsBtn = document.createElement('button');
+        Annotation.videoFsBtn.type = 'button';
+        Annotation.videoFsBtn.className = 'pc-annotation-video-fs-btn';
+        Annotation.videoFsBtn.setAttribute('aria-label', '全屏播放');
+        const videoFsIcon = document.createElement('img');
+        videoFsIcon.src = '/assets/icons/expand.svg';
+        videoFsIcon.alt = '';
+        videoFsIcon.className = 'pc-annotation-video-fs-btn__img';
+        Annotation.videoFsBtn.appendChild(videoFsIcon);
+        Annotation.videoInlineDom.appendChild(Annotation.videoFsBtn);
+
+        Annotation.videoPlayBtn = document.createElement('button');
+        Annotation.videoPlayBtn.type = 'button';
+        Annotation.videoPlayBtn.className = 'pc-annotation-video-play-btn';
+        Annotation.videoPlayBtn.setAttribute('aria-label', '播放或暂停');
+        Annotation.videoInlineDom.appendChild(Annotation.videoPlayBtn);
+
+        Annotation.tooltipDom.appendChild(Annotation.videoInlineDom);
+
+        const syncInlinePlayBtn = () => Annotation._syncInlineVideoPlayButton();
+
+        Annotation.videoInlineEl.addEventListener('play', syncInlinePlayBtn);
+        Annotation.videoInlineEl.addEventListener('pause', syncInlinePlayBtn);
+        Annotation.videoInlineEl.addEventListener('ended', syncInlinePlayBtn);
+
+        Annotation.videoPlayBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const el = Annotation.videoInlineEl;
+            if (!el?.src) return;
+            if (el.paused || el.ended) {
+                el.muted = false;
+                el.removeAttribute('muted');
+                void el.play();
+            } else {
+                el.pause();
+            }
+        });
+
+        Annotation.videoFsBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const inline = Annotation.videoInlineEl;
+            const url = inline?.src;
+            if (!url || !Annotation.videoPreviewEl || !Annotation.videoPreviewOverlay) {
+                return;
+            }
+            const t = inline.currentTime;
+            inline.pause();
+            Annotation.videoPreviewEl.src = url;
+            Annotation.videoPreviewEl.currentTime = Number.isFinite(t) ? t : 0;
+            Annotation.videoPreviewEl.muted = false;
+            Annotation.videoPreviewEl.removeAttribute('muted');
+            Annotation.videoPreviewOverlay.style.display = 'flex';
+            void Annotation.videoPreviewEl.play();
+            // 进入大屏：压制场景音视频（场景视频静音保帧、场景音频暂停），让大屏独占声音
+            Annotation._setSceneSuppress(true);
+            Annotation._syncInlineVideoPlayButton();
+        });
+
+        Annotation.videoInlineEl.addEventListener('error', () => {
+            if (Annotation.videoInlineDom) {
+                Annotation.videoInlineDom.style.display = 'none';
+            }
+            if (Annotation.videoInlineEl) {
+                Annotation.videoInlineEl.removeAttribute('src');
+            }
+        });
+
+        Annotation.videoPreviewOverlay = document.createElement('div');
+        Annotation.videoPreviewOverlay.className = 'pc-annotation-image-preview-overlay';
+        Annotation.videoPreviewOverlay.style.display = 'none';
+        Annotation.videoPreviewEl = document.createElement('video');
+        Annotation.videoPreviewEl.controls = true;
+        Annotation.videoPreviewEl.playsInline = true;
+        // 全屏预览须可出声（用户点击缩略后 play，属用户手势）；与 tooltip 内 muted 海报区分
+        Annotation.videoPreviewEl.muted = false;
+        Annotation.videoPreviewEl.removeAttribute('muted');
+        Annotation.videoPreviewOverlay.appendChild(Annotation.videoPreviewEl);
+        Annotation.videoPreviewOverlay.addEventListener('click', (ev) => {
+            if (ev.target === Annotation.videoPreviewEl) {
+                return;
+            }
+            // 用户主动关闭 video 大屏：解除场景压制 + inline 静音继续播
+            Annotation.closeMediaPreviews({ keepInlineMutedPlaying: true });
+        });
+        Annotation.videoPreviewEl.addEventListener('click', (ev) => ev.stopPropagation());
+
         Annotation.parentDom.appendChild(Annotation.tooltipDom);
         Annotation.parentDom.appendChild(Annotation.imagePreviewOverlay);
+        Annotation.parentDom.appendChild(Annotation.videoPreviewOverlay);
+    }
+
+    /** Sync tooltip image/video (mutually exclusive). */
+    static syncTooltipMedia(imageUrl?: string, videoUrl?: string): void {
+        const media = normalizeAnnotationMediaFields({ imageUrl, videoUrl });
+
+        if (Annotation.imageDom) {
+            Annotation.imageDom.style.display = 'none';
+            Annotation.imageDom.removeAttribute('src');
+        }
+        Annotation.pauseInlineVideo();
+        if (Annotation.videoInlineDom) {
+            Annotation.videoInlineDom.style.display = 'none';
+            delete Annotation.videoInlineDom.dataset.videoUrl;
+        }
+        if (Annotation.videoInlineEl) {
+            Annotation.videoInlineEl.removeAttribute('src');
+            Annotation.videoInlineEl.load();
+        }
+
+        if (media.imageUrl && Annotation.imageDom) {
+            Annotation.imageDom.src = media.imageUrl;
+            Annotation.imageDom.style.display = 'block';
+        } else if (media.videoUrl && Annotation.videoInlineDom && Annotation.videoInlineEl) {
+            Annotation.videoInlineDom.dataset.videoUrl = media.videoUrl;
+            Annotation.videoInlineEl.src = media.videoUrl;
+            Annotation.videoInlineDom.style.display = 'block';
+            Annotation._syncInlineVideoPlayButton();
+        }
+    }
+
+    static _syncInlineVideoPlayButton(): void {
+        const btn = Annotation.videoPlayBtn;
+        const el = Annotation.videoInlineEl;
+        if (!btn || !el) return;
+        const playing = !el.paused && !el.ended;
+        btn.classList.toggle('is-playing', playing);
+        btn.setAttribute('aria-label', playing ? '暂停' : '播放');
+    }
+
+    static pauseInlineVideo(): void {
+        const el = Annotation.videoInlineEl;
+        if (!el) return;
+        el.pause();
+        Annotation._syncInlineVideoPlayButton();
+    }
+
+    /**
+     * 锚定展开时在小窗内自动播放（点击热点展开属用户手势，可出声）。
+     *
+     * @param opts.unmuted 锚定展开默认希望"有声"播放；但若场景中已有音视频在出声
+     *   （`getActiveSceneMediaEntryId() !== null`），则改为静音播放以避免互相打扰，
+     *   用户可后续点 inline 播放钮或 fs 按钮显式 unmute / 进大屏。
+     * @param opts.forceMuted 强制静音（用于「退出大屏后 inline 默认继续静音播放」场景）。
+     */
+    static playInlineVideo(opts?: { unmuted?: boolean; forceMuted?: boolean }): void {
+        const el = Annotation.videoInlineEl;
+        if (!el?.src || Annotation.videoInlineDom?.style.display === 'none') {
+            return;
+        }
+        if (opts?.forceMuted) {
+            el.muted = true;
+            el.setAttribute('muted', '');
+        } else if (opts?.unmuted) {
+            const sceneSounding = getActiveSceneMediaEntryId() !== null;
+            el.muted = sceneSounding;
+            if (sceneSounding) {
+                el.setAttribute('muted', '');
+            } else {
+                el.removeAttribute('muted');
+            }
+        }
+        void el.play().catch(() => {
+            // 自动播放策略失败时保持静音海报，用户可点播放钮
+            el.muted = true;
+            void el.play().catch(() => {});
+        });
+        Annotation._syncInlineVideoPlayButton();
+    }
+
+    /** 通知场景媒体压制开关变更；通过 `globalRef.events` 触发控制器立即重算 */
+    static _setSceneSuppress(active: boolean): void {
+        if (!Annotation.globalRef) return;
+        setAnnotationFullscreenVideoActive(Annotation.globalRef, active);
+    }
+
+    /**
+     * Close fullscreen image/video previews and stop playback.
+     *
+     * @param opts.keepInlineMutedPlaying 用户主动关闭 video 大屏时传 true：
+     *   - 解除场景媒体压制（场景音视频恢复声音）；
+     *   - inline 视频静音继续播放（不暂停、不归零进度）。
+     *   其它路径（_hideElements 等）保持旧行为：pause inline。
+     */
+    static closeMediaPreviews(opts?: { keepInlineMutedPlaying?: boolean }): void {
+        const wasVideoFullscreen = Annotation.videoPreviewOverlay?.style.display === 'flex';
+
+        if (Annotation.imagePreviewOverlay) {
+            Annotation.imagePreviewOverlay.style.display = 'none';
+        }
+        if (Annotation.imagePreviewImg) {
+            Annotation.imagePreviewImg.removeAttribute('src');
+        }
+        if (Annotation.videoPreviewOverlay) {
+            Annotation.videoPreviewOverlay.style.display = 'none';
+        }
+        if (Annotation.videoPreviewEl) {
+            Annotation.videoPreviewEl.pause();
+            Annotation.videoPreviewEl.removeAttribute('src');
+            Annotation.videoPreviewEl.load();
+            Annotation.videoPreviewEl.muted = false;
+            Annotation.videoPreviewEl.removeAttribute('muted');
+        }
+
+        // 关闭 video 大屏 → 解除场景媒体压制（idempotent，关 image 大屏也安全）
+        if (wasVideoFullscreen) {
+            Annotation._setSceneSuppress(false);
+        }
+
+        if (opts?.keepInlineMutedPlaying) {
+            // 退出大屏后 inline 默认继续静音播放
+            Annotation.playInlineVideo({ forceMuted: true });
+        } else {
+            Annotation.pauseInlineVideo();
+        }
     }
 
     /**
@@ -483,7 +792,7 @@ export class Annotation extends Script {
             Annotation._createHotspotMaterial(this.texture, {
                 opacity: 1,
                 depthTest: true,
-                depthWrite: true
+                depthWrite: false
             }),
             Annotation._createHotspotMaterial(this.texture, {
                 opacity: 0.25,
@@ -639,6 +948,7 @@ export class Annotation extends Script {
      * @private
      */
     hideTooltip() {
+        Annotation.pauseInlineVideo();
         Annotation.activeAnnotation = null;
         Annotation.tooltipDom.style.opacity = '0';
 
@@ -663,6 +973,7 @@ export class Annotation extends Script {
             Annotation.tooltipDom.style.visibility = 'hidden';
             Annotation.tooltipDom.style.opacity = '0';
         }
+        Annotation.closeMediaPreviews();
     }
 
     /**

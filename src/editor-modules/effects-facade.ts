@@ -9,8 +9,12 @@ import {
 } from './protocol-adapters/asset-effects-protocol-adapter';
 import {
     applyGsplatRevealParamsPatch,
+    applyGsplatRevealEffectAdd,
+    applyGsplatRevealEffectDelete,
     applyGsplatPersistentParamsPatch,
     isPersistentProtocolEffectId,
+    applyGsplatPersistentEffectAddForId,
+    applyGsplatPersistentEffectDeleteForId,
     isEffectProtocolEnvelope,
     paramsPatchHasRevealKeys,
     paramsPatchHasPersistentKeys,
@@ -18,15 +22,9 @@ import {
 } from './protocol-adapters/effects-protocol-adapter';
 import {
     ASSET_GSPLAT_EFFECT_ID,
-    PERSISTENT_CAMERA_EFFECT_TYPES,
-    PERSISTENT_STYLIZATION_EFFECT_TYPES,
-    SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID,
-    SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID,
     resolveAssetEffectType
 } from '../vfx/effects-runtime/effect-types';
 import {
-    clearPersistentSubTrack,
-    patchPersistentSubTrackSettingsFromParams,
     patchAssetRuntimeMirror,
     patchAssetInstanceFromParams,
     readRevealParams,
@@ -39,13 +37,8 @@ import type {
     ModuleContext,
     ModuleFacade,
     ModuleLifecycleReason,
-    PersistentEffectType,
     SelectionSource
 } from '../types';
-
-const EFFECT_ADD_STYLIZATION_TYPES = new Set(
-    [...PERSISTENT_STYLIZATION_EFFECT_TYPES].filter(type => type !== 'perlin-wave')
-);
 
 /**
  * 与 `message-bridge` 中 `dispatchEffects` 同路径：经 `CommandRegistry` → `EffectsFacade.handleCommand`。
@@ -106,7 +99,7 @@ class EffectsFacade implements ModuleFacade {
                         current?.type ??
                         (typeof runtimeType === 'string' ? runtimeType : null);
                     if (current) {
-                        patchAssetInstanceFromParams(global.settings, targetId, { enabled: false });
+                        patchAssetInstanceFromParams(global.settings, targetId, { enable: false });
                     }
                     syncEffectsRuntimeStateFromSettings(global.state, global.settings);
                     patchAssetRuntimeMirror(global.state, targetId, { status: 'inactive' });
@@ -134,47 +127,16 @@ class EffectsFacade implements ModuleFacade {
                 applyAssetEffectStart(global, normalizeAssetEffectEnvelope({
                     effectId,
                     targetId,
-                    params: { ...params, type: effectType, enabled: true, autoStart: true }
+                    params: { ...params, type: effectType, enable: true, autoStart: true }
                 }));
                 break;
             }
-            if (!isPersistentProtocolEffectId(effectId)) break;
-            if (effectType !== '') {
-                if (
-                    effectId === SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID &&
-                    !PERSISTENT_CAMERA_EFFECT_TYPES.has(effectType)
-                ) {
-                    break;
-                }
-                if (
-                    effectId === SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID &&
-                    !EFFECT_ADD_STYLIZATION_TYPES.has(effectType)
-                ) {
-                    break;
-                }
-            }
-            if (effectType === '') {
-                if (
-                    effectId === SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID ||
-                    effectId === SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID
-                ) {
-                    clearPersistentSubTrack(global.settings, effectId);
-                }
-                syncEffectsRuntimeStateFromSettings(global.state, global.settings);
-                global.events.fire('persistentGsplatEffectRemountRequested', false);
+            if (effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID) {
+                applyGsplatRevealEffectAdd(global, effectType);
                 break;
             }
-            const persistentEffectId = effectId as
-                | typeof SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID
-                | typeof SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID;
-            clearPersistentSubTrack(global.settings, persistentEffectId);
-            patchPersistentSubTrackSettingsFromParams(global.settings, persistentEffectId, {
-                type: effectType as PersistentEffectType,
-                autoStart: true,
-                effectParams: params
-            });
-            syncEffectsRuntimeStateFromSettings(global.state, global.settings);
-            global.events.fire('persistentGsplatEffectRemountRequested', false);
+            if (!isPersistentProtocolEffectId(effectId)) break;
+            applyGsplatPersistentEffectAddForId(global, effectId, effectType === '' ? 'none' : effectType);
             break;
         }
         case 'EFFECT_DELETE': {
@@ -191,13 +153,13 @@ class EffectsFacade implements ModuleFacade {
                 });
                 break;
             }
-            if (
-                effectId === SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID ||
-                effectId === SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID
-            ) {
-                clearPersistentSubTrack(global.settings, effectId);
-                syncEffectsRuntimeStateFromSettings(global.state, global.settings);
-                global.events.fire('persistentGsplatEffectRemountRequested', false);
+            if (effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID) {
+                applyGsplatRevealEffectDelete(global);
+                break;
+            }
+            if (isPersistentProtocolEffectId(effectId)) {
+                const effectType = (raw as { effectType?: unknown }).effectType;
+                applyGsplatPersistentEffectDeleteForId(global, effectId, typeof effectType === 'string' ? effectType : 'none');
             }
             break;
         }
@@ -217,7 +179,7 @@ class EffectsFacade implements ModuleFacade {
                 applyGsplatRevealParamsPatch(global, pr);
             } else if (isPersistentProtocolEffectId(raw.effectId)) {
                 if (!paramsPatchHasPersistentKeys(pr)) break;
-                applyGsplatPersistentParamsPatch(global, pr);
+                applyGsplatPersistentParamsPatch(global, pr, raw.effectId);
             } else {
                 break;
             }
@@ -241,9 +203,11 @@ class EffectsFacade implements ModuleFacade {
             const raw = command.payload;
             if (!isEffectProtocolEnvelope(raw)) break;
             if (!isPersistentProtocolEffectId(raw.effectId)) break;
-            const value = (raw as { value?: unknown }).value;
-            if (typeof value !== 'boolean') break;
-            applyGsplatPersistentParamsPatch(global, { enabled: value });
+            const params = (raw as { params?: unknown }).params;
+            if (typeof params !== 'object' || params === null) break;
+            const pr = params as Record<string, unknown>;
+            if (!paramsPatchHasPersistentKeys(pr)) break;
+            applyGsplatPersistentParamsPatch(global, pr, raw.effectId);
             break;
         }
         case 'EFFECT_REPLAY': {

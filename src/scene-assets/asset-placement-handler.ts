@@ -1,20 +1,68 @@
 import type { AppBase } from 'playcanvas';
 import * as pc from 'playcanvas';
-import { Vec3, Quat, StandardMaterial, CULLFACE_NONE, Color, BLEND_NONE } from 'playcanvas';
-import type { Global } from './types';
-import type { AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from './types';
-import { getSelectedSceneEntity } from './state-selectors';
-import { Entity } from 'playcanvas';
+import {
+    Entity,
+    Vec3,
+    Quat,
+    Color,
+    StandardMaterial,
+    CULLFACE_NONE,
+    BLEND_NONE,
+    Texture,
+    PIXELFORMAT_RGBA8,
+    FILTER_LINEAR,
+    ADDRESS_CLAMP_TO_EDGE,
+    MeshInstance
+} from 'playcanvas';
+import type { SceneAsset } from '../schemas/v2-custom';
+import type { Global, AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from '../types';
+import {
+    getSelectedSceneEntity,
+    isAssetScenePickEventOnlyMode,
+    isSceneAssetPickableInViewerMode
+} from '../state-selectors';
 import {
     DEFAULT_ASSET_LOAD_TIMEOUT_MS,
     hydrateAssetLibraryItem,
     loadSceneAssetLibraryItem,
     withTimeout
-} from './loaders/asset-loader';
-import { pickWorldFromClientXY } from './picker';
-import type { InputArbiter } from './input-arbiter';
-import { getDefaultWobbleEffectParams } from './vfx/effects-runtime/asset/wobble-effect-params';
-import { ASSET_EFFECT_TYPE_VALUES } from './vfx/effects-runtime/effect-types';
+} from '../loaders/asset-loader';
+import { hitSceneGizmoAtClient } from '../gizmo-hit-test';
+import type { InputArbiter } from '../input-arbiter';
+import { getDefaultWobbleEffectParams } from '../vfx/effects-runtime/asset/wobble-effect-params';
+import { ASSET_EFFECT_TYPE_VALUES } from '../vfx/effects-runtime/effect-types';
+import {
+    clampVideoHorizontalCurvature,
+    createCurvedBillboardMesh,
+    rebuildVideoRenderMesh
+} from './media/curved-billboard-mesh';
+import { defaultTriggerDistanceMForAssetType } from './media/media-hotspot-params';
+import {
+    getPlacedMediaRuntime,
+    setPlacedMediaRuntime,
+    type PlacedMediaRuntime,
+    type PlacedVideoRuntime
+} from './media/media-runtime';
+import { setPlacementCursorActive } from '../placement-cursor';
+import {
+    acquirePlacedVideoForPlacement,
+    cancelVideoPlacementPreload,
+    startVideoPlacementPreload,
+    type VideoPlacementPreloadHandle
+} from './media/video-placement-preload';
+import {
+    createPlacedVideoTextureFromVideo,
+    initPlacedVideoTexture,
+    PLACED_VIDEO_INITIAL_LOAD_TIMEOUT_MS,
+    PLACED_VIDEO_PLACEMENT_TIMEOUT_MS,
+    unmountPlacedVideoFromDom
+} from './media/video-texture';
+import { AUDIO_CALLOUT_WORLD_H, findAudioCalloutSelectHitFromClient } from './media/audio-callout';
+import { getSceneAssetPickLayer } from './scene-asset-pick-layer';
+import { configurePlacedGaussianPickLayer, pickScenePlacedEntryAtScreen } from './scene-asset-selection-pick';
+import { removeSceneAssetFromSettings } from '../settings-serialize/settings-serialize';
+import { suspendShadowPipelineForGsplatLoad, syncGsplatShadowCastingFromSettings } from '../vfx/shadow';
+import type { ExperienceSettings } from '../settings';
 
 const PLACED_ASSETS_NAME = 'placedAssets';
 const ASSET_LOAD_TIMEOUT_MS = DEFAULT_ASSET_LOAD_TIMEOUT_MS;
@@ -25,7 +73,7 @@ export type AssetPlacementHandlerDeps = {
 };
 
 type SceneAssetsRestoreOptions = {
-    reason?: 'startup' | 'edit-enter' | 'edit-discard' | 'history-restore';
+    reason?: 'startup' | 'edit-enter' | 'edit-discard' | 'history-restore' | 'settings-reset';
     deferUntilRevealComplete?: boolean;
     clearBeforeRestore?: boolean;
 };
@@ -51,6 +99,13 @@ function getPlacedAssetsParent(app: AppBase): Entity {
 
 /** 相机前方距离，用于兜底放置位置 */
 const CAMERA_FRONT_DISTANCE = 5;
+
+/** image / video 平面默认立屏（PlayCanvas plane 在 XZ）；仅实例化时写入，放置时只改 yaw（与 mesh 一致） */
+const PLANE_CARD_DEFAULT_EULER = { x: -90, y: 0, z: 180 };
+
+function applyDefaultPlaneCardOrientation(entity: Entity): void {
+    entity.setLocalEulerAngles(PLANE_CARD_DEFAULT_EULER.x, PLANE_CARD_DEFAULT_EULER.y, PLANE_CARD_DEFAULT_EULER.z);
+}
 
 function getSceneAssetsRestoreController(global: Global): SceneAssetsRestoreController {
     const anyGlobal = global as Global & { __sceneAssetsRestoreController?: SceneAssetsRestoreController };
@@ -108,20 +163,14 @@ function computeYawDegToFaceCameraHorizontal(entityPos: Vec3, camPos: Vec3): num
 }
 
 /**
- * 放置后只调整 yaw，使水平面上指向相机；保留原有 pitch/roll。
- * 图片：维持原立屏姿态 pitch=-90、roll=180，仅改 Y。
- * 高斯：unified 需 Z=180，但与航向若写进同一组 intrinsic XYZ 欧拉会耦合成「左右镜像」体感；
- * 改用四元数先 Rz(180) 再绕世界 Y 转航向（mul2(yaw, fix)）。
+ * 放置后只调整水平航向 yaw，使实体在 XZ 平面上朝向相机；保留既有 pitch/roll（与 mesh 一致）。
+ * image/video 的 pitch/roll 已在实例化时由 `applyDefaultPlaneCardOrientation` 写好，此处仅改 Y。
+ * 高斯：unified 需额外 Z=180，用 mul2(yaw, Rz180) 与航向解耦。
  */
 function applyPlacedEntityYawToFaceCamera(entity: Entity, global: Global, assetType: AssetLibraryType) {
     const camPos = global.camera.getPosition();
     const pos = entity.getPosition();
     const yawDeg = computeYawDegToFaceCameraHorizontal(pos, camPos);
-
-    if (assetType === 'image') {
-        entity.setLocalEulerAngles(-90, yawDeg, 180);
-        return;
-    }
 
     if (assetType === 'gaussian') {
         const qFix = new Quat().setFromEulerAngles(0, 0, 180);
@@ -181,11 +230,12 @@ async function instantiateImage(app: AppBase, item: AssetLibraryItem, position: 
                 type: 'plane',
                 material: mat,
                 castShadows: false,
-                receiveShadows: true
+                receiveShadows: false
             });
             entity.setPosition(position);
             const s = 2;
             entity.setLocalScale(s, s, 1);
+            applyDefaultPlaneCardOrientation(entity);
             resolve(entity);
         });
     });
@@ -344,13 +394,164 @@ async function instantiateGaussian(app: AppBase, item: AssetLibraryItem, positio
     const asset = item.asset;
     if (!asset) throw new Error('gaussian asset not ready');
     const entity = new Entity(item.name || 'gsplat');
-    entity.addComponent('gsplat', { unified: true, asset, castShadows: true });
+    entity.addComponent('gsplat', { unified: true, asset, castShadows: false });
     const material = entity.gsplat!.unified ? app.scene.gsplat.material : entity.gsplat!.material;
     // 尽量与主场景 gsplat 的配置保持一致，开启 AA 并设置 alphaClip
     material.setDefine('GSPLAT_AA', true);
     material.setParameter('alphaClip', 1 / 255);
     entity.setPosition(position);
+    configurePlacedGaussianPickLayer(app, entity);
     return entity;
+}
+
+function resumeShadowAfterStableFrames(global: Global, resume: () => void): void {
+    let stableFrames = 0;
+    const wait = () => {
+        if (!global.state.readyToRender) {
+            global.app.once('frameend', wait);
+            (global.app as { renderNextFrame?: boolean }).renderNextFrame = true;
+            return;
+        }
+        stableFrames += 1;
+        if (stableFrames < 2) {
+            global.app.once('frameend', wait);
+            (global.app as { renderNextFrame?: boolean }).renderNextFrame = true;
+            return;
+        }
+        resume();
+    };
+    global.app.once('frameend', wait);
+    (global.app as { renderNextFrame?: boolean }).renderNextFrame = true;
+}
+
+async function instantiateVideo(
+    app: AppBase,
+    item: AssetLibraryItem,
+    position: Vec3,
+    loadMode: 'placement' | 'restore' = 'restore',
+    horizontalCurvature: number = 0
+): Promise<Entity> {
+    const url = item.url || item.filename;
+    if (!url) {
+        throw new Error('video asset has no url');
+    }
+    let video: HTMLVideoElement;
+    let texture;
+    if (loadMode === 'placement') {
+        video = await acquirePlacedVideoForPlacement(url, PLACED_VIDEO_PLACEMENT_TIMEOUT_MS);
+        texture = createPlacedVideoTextureFromVideo(app, video, `placed-video-${item.id}`);
+    } else {
+        video = document.createElement('video');
+        texture = await initPlacedVideoTexture(
+            app,
+            video,
+            url,
+            `placed-video-${item.id}`,
+            PLACED_VIDEO_INITIAL_LOAD_TIMEOUT_MS
+        );
+    }
+
+    const w = Math.max(2, video.videoWidth || 1280);
+    const h = Math.max(2, video.videoHeight || 720);
+    const aspect = w / h;
+
+    const mat = new StandardMaterial();
+    // 与图片资产一致：近似 unlit 卡片 + alpha 通道走 cutout，避免与 gsplat 混合排序问题。
+    mat.useLighting = false;
+    mat.diffuse.set(0, 0, 0);
+    mat.emissiveMap = texture;
+    mat.emissive.set(1, 1, 1);
+    mat.opacityMap = texture;
+    mat.opacityMapChannel = 'a';
+    mat.blendType = BLEND_NONE;
+    mat.alphaTest = 0.5;
+    mat.cull = CULLFACE_NONE;
+    mat.update();
+
+    const curvature = clampVideoHorizontalCurvature(horizontalCurvature);
+    const mesh = createCurvedBillboardMesh(app.graphicsDevice, curvature);
+    const meshInstance = new MeshInstance(mesh, mat);
+    meshInstance.cull = false;
+
+    const entity = new Entity(item.name || 'video');
+    entity.addComponent('render', {
+        meshInstances: [meshInstance],
+        castShadows: false,
+        receiveShadows: false
+    });
+    entity.setPosition(position);
+    const base = 2;
+    entity.setLocalScale(base * aspect, base, 1);
+    applyDefaultPlaneCardOrientation(entity);
+
+    const runtime: PlacedMediaRuntime = {
+        kind: 'video',
+        videoEl: video,
+        texture,
+        isLive: false,
+        horizontalCurvature: curvature
+    };
+    setPlacedMediaRuntime(entity, runtime);
+    // 纹理已 setSource(video) 并停在首帧；热区内 play + texture.upload() 轮询。
+
+    entity.on('destroy', () => {
+        unmountPlacedVideoFromDom(video);
+        try {
+            texture.destroy();
+        } catch {
+            // ignore
+        }
+    });
+
+    return entity;
+}
+
+async function instantiateAudio(app: AppBase, item: AssetLibraryItem, position: Vec3): Promise<Entity> {
+    const url = item.url || item.filename;
+    if (!url) {
+        throw new Error('audio asset has no url');
+    }
+    const audio = document.createElement('audio');
+    audio.preload = 'auto';
+    audio.loop = true;
+    audio.src = url;
+
+    const root = new Entity(item.name || 'audio');
+    root.setPosition(position);
+
+    // 音频 callout 在 HotspotBase/Overlay；场景 Picker 仅扫 World 层，需不可见拾取体才能选中与挂 Gizmo。
+    const pickMat = new StandardMaterial();
+    pickMat.useLighting = false;
+    pickMat.diffuse = Color.BLACK;
+    pickMat.opacity = 0.001;
+    pickMat.alphaTest = 0;
+    pickMat.depthWrite = false;
+    pickMat.blendType = BLEND_NONE;
+    pickMat.cull = CULLFACE_NONE;
+    pickMat.update();
+    const pickRadius = AUDIO_CALLOUT_WORLD_H * 0.45;
+    const pickLayer = getSceneAssetPickLayer(app);
+    root.addComponent('render', {
+        type: 'sphere',
+        material: pickMat,
+        layers: [pickLayer.id],
+        castShadows: false,
+        receiveShadows: false
+    });
+    root.setLocalScale(pickRadius, pickRadius, pickRadius);
+
+    setPlacedMediaRuntime(root, { kind: 'audio', audioEl: audio });
+    root.on('destroy', () => {
+        try {
+            audio.pause();
+            audio.removeAttribute('src');
+            audio.load();
+        } catch {
+            // ignore
+        }
+    });
+
+    return root;
 }
 
 export function computeEntityWorldCenter(entity: Entity): Vec3 | null {
@@ -400,12 +601,45 @@ export function computeEntityWorldCenter(entity: Entity): Vec3 | null {
     return worldCenter;
 }
 
-export async function placeAsset(global: Global, item: AssetLibraryItem, worldPos: Vec3, alignCenterToCameraHeight: boolean = false): Promise<ScenePlacedItem | null> {
+/**
+ * 更新已放置视频资产的横向曲度（绕竖直轴 / 屏幕宽度方向）。
+ * @returns 是否成功找到并更新 video 实例
+ */
+export function applyVideoHorizontalCurvature(
+    global: Global,
+    sceneAssetId: string,
+    curvature: number,
+    deps?: Pick<AssetPlacementHandlerDeps, 'pushEditHistory'>
+): boolean {
+    const entry = global.state.scenePlacedEntities?.find(
+        (it) => it?.id === sceneAssetId && it.assetType === 'video'
+    );
+    if (!entry?.entity) return false;
+
+    const runtime = getPlacedMediaRuntime(entry.entity);
+    if (!runtime || runtime.kind !== 'video') return false;
+
+    const clamped = clampVideoHorizontalCurvature(curvature);
+    rebuildVideoRenderMesh(entry.entity, clamped);
+    runtime.horizontalCurvature = clamped;
+    entry.horizontalCurvature = clamped;
+    deps?.pushEditHistory?.(global, 'video curvature');
+    return true;
+}
+
+export async function placeAsset(
+    global: Global,
+    item: AssetLibraryItem,
+    worldPos: Vec3,
+    alignCenterToCameraHeight: boolean = false,
+    opts?: { videoLoadMode?: 'placement' | 'restore'; horizontalCurvature?: number }
+): Promise<ScenePlacedItem | null> {
     const { app, state, events } = global;
     if (!state.scenePlacedEntities) state.scenePlacedEntities = [];
 
     const parent = getPlacedAssetsParent(app);
     let entity: Entity;
+    let resumeShadowAfterGaussianLoad: (() => void) | null = null;
 
     try {
         if (item.type === 'image') {
@@ -413,6 +647,7 @@ export async function placeAsset(global: Global, item: AssetLibraryItem, worldPo
         } else if (item.type === 'mesh') {
             entity = await instantiateMesh(app, item, worldPos);
         } else if (item.type === 'gaussian') {
+            resumeShadowAfterGaussianLoad = suspendShadowPipelineForGsplatLoad(global);
             if (!item.asset?.loaded) {
                 const waitAssetLoaded = new Promise<void>((resolve, reject) => {
                     const onLoad = () => {
@@ -429,10 +664,21 @@ export async function placeAsset(global: Global, item: AssetLibraryItem, worldPo
                 await withTimeout(waitAssetLoaded, ASSET_LOAD_TIMEOUT_MS, 'gaussian asset load');
             }
             entity = await instantiateGaussian(app, item, worldPos);
+        } else if (item.type === 'video') {
+            entity = await instantiateVideo(
+                app,
+                item,
+                worldPos,
+                opts?.videoLoadMode ?? 'restore',
+                opts?.horizontalCurvature ?? 0
+            );
+        } else if (item.type === 'audio') {
+            entity = await instantiateAudio(app, item, worldPos);
         } else {
             return null;
         }
     } catch (err) {
+        resumeShadowAfterGaussianLoad?.();
         console.warn('[AssetPlacement] instantiate failed:', err);
         events.fire('assetPlacement:error', { item, error: err });
         return null;
@@ -444,7 +690,9 @@ export async function placeAsset(global: Global, item: AssetLibraryItem, worldPo
         configurePlacedMeshMaterials(entity);
     }
 
-    applyPlacedEntityYawToFaceCamera(entity, global, item.type);
+    if (item.type !== 'audio') {
+        applyPlacedEntityYawToFaceCamera(entity, global, item.type);
+    }
 
     if (alignCenterToCameraHeight) {
         const center = computeEntityWorldCenter(entity);
@@ -458,6 +706,8 @@ export async function placeAsset(global: Global, item: AssetLibraryItem, worldPo
             }
         }
     }
+    const videoRuntime =
+        item.type === 'video' ? (getPlacedMediaRuntime(entity) as PlacedVideoRuntime | undefined) : undefined;
     const entry: ScenePlacedItem = {
         id: nextSceneEntityId(),
         name: item.name || entity.name || '资产',
@@ -467,10 +717,20 @@ export async function placeAsset(global: Global, item: AssetLibraryItem, worldPo
         assetId: item.id,
         filename: item.filename,
         url: item.url,
-        thumbnailUrl: item.thumbnailUrl
+        thumbnailUrl: item.thumbnailUrl,
+        horizontalCurvature: videoRuntime?.horizontalCurvature,
+        triggerDistanceM: defaultTriggerDistanceMForAssetType(item.type)
     };
     state.scenePlacedEntities.push(entry);
+
+    if (item.type === 'gaussian' || item.type === 'mesh') {
+        syncGsplatShadowCastingFromSettings(global);
+    }
+
     events.fire('sceneAssets:added', entry);
+    if (resumeShadowAfterGaussianLoad) {
+        resumeShadowAfterStableFrames(global, resumeShadowAfterGaussianLoad);
+    }
     return entry;
 }
 
@@ -492,90 +752,192 @@ async function hydrateProtocolPlaceItem(global: Global, item: AssetLibraryItem):
     }
 }
 
+function sceneAssetSourceFingerprint(sa: Pick<SceneAsset, 'source'>): string {
+    const s = sa.source ?? {};
+    return `${s.assetId ?? ''}|${s.url ?? ''}|${s.filename ?? ''}`;
+}
+
+function placedItemSourceFingerprint(entry: ScenePlacedItem): string {
+    return `${entry.assetId ?? ''}|${entry.url ?? ''}|${entry.filename ?? ''}`;
+}
+
+function canReuseScenePlacedEntry(entry: ScenePlacedItem, sa: SceneAsset): boolean {
+    return entry.assetType === sa.type
+        && placedItemSourceFingerprint(entry) === sceneAssetSourceFingerprint(sa);
+}
+
+/** 将 settings 中记录的变换、可见性、缩略图等应用到已存在的放置实体（不重新加载资产）。 */
+function applySceneAssetTransformToEntry(global: Global, entry: ScenePlacedItem, sa: SceneAsset): void {
+    const rotArr = (sa.transform?.rotation ?? [0, 0, 0]) as number[];
+    const rotQuatArr = sa.transform?.rotationQuat as number[] | undefined;
+    const scaleArr = (sa.transform?.scale ?? [1, 1, 1]) as number[];
+    const mirrorArr = sa.transform?.mirror as number[] | undefined;
+
+    if (sa.name) {
+        entry.name = sa.name;
+    }
+    if (typeof sa.thumbnailUrl === 'string' && sa.thumbnailUrl.length > 0) {
+        entry.thumbnailUrl = sa.thumbnailUrl;
+    }
+
+    const hasValidQuat =
+        Array.isArray(rotQuatArr)
+        && rotQuatArr.length >= 4
+        && Number.isFinite(rotQuatArr[0])
+        && Number.isFinite(rotQuatArr[1])
+        && Number.isFinite(rotQuatArr[2])
+        && Number.isFinite(rotQuatArr[3]);
+    if (hasValidQuat) {
+        entry.entity.setLocalRotation(
+            rotQuatArr[0],
+            rotQuatArr[1],
+            rotQuatArr[2],
+            rotQuatArr[3]
+        );
+    } else {
+        entry.entity.setEulerAngles(rotArr[0] ?? 0, rotArr[1] ?? 0, rotArr[2] ?? 0);
+    }
+    const resolveMirroredScale = (value: number, mirror: number | undefined): number => {
+        const numeric = Number.isFinite(value) ? value : 1;
+        if (mirror === -1 || mirror === 1) {
+            if (numeric === 0) return 0;
+            return Math.abs(numeric) * mirror;
+        }
+        return numeric;
+    };
+    entry.entity.setLocalScale(
+        resolveMirroredScale(scaleArr[0] ?? 1, mirrorArr?.[0]),
+        resolveMirroredScale(scaleArr[1] ?? 1, mirrorArr?.[1]),
+        resolveMirroredScale(scaleArr[2] ?? 1, mirrorArr?.[2])
+    );
+
+    const visible = sa.visible !== false;
+    entry.visible = visible;
+    entry.entity.enabled = visible;
+
+    if (sa.type === 'video') {
+        const curvature =
+            typeof sa.transform?.horizontalCurvature === 'number'
+                ? sa.transform.horizontalCurvature
+                : 0;
+        applyVideoHorizontalCurvature(global, entry.id, curvature);
+    }
+
+    if (sa.type === 'video' || sa.type === 'audio') {
+        const dist =
+            typeof sa.triggerDistanceM === 'number' && Number.isFinite(sa.triggerDistanceM) && sa.triggerDistanceM > 0
+                ? sa.triggerDistanceM
+                : defaultTriggerDistanceMForAssetType(sa.type);
+        if (dist !== undefined) {
+            entry.triggerDistanceM = dist;
+            sa.triggerDistanceM = dist;
+        }
+    }
+}
+
+export { applySceneAssetTriggerDistanceM } from '../settings-serialize/settings-serialize-helper';
+
+async function loadAndPlaceSceneAssetFromSettings(global: Global, sa: SceneAsset): Promise<void> {
+    const posArr = (sa.transform?.position ?? [0, 0, 0]) as number[];
+
+    let item: AssetLibraryItem | null = null;
+    try {
+        item = await loadSceneAssetLibraryItem(global, sa, nextSceneEntityId, ASSET_LOAD_TIMEOUT_MS);
+    } catch (err) {
+        console.warn('[SceneAssets] restore asset failed:', sa?.type, err);
+        return;
+    }
+    if (!item) return;
+
+    const pos = new Vec3(posArr[0] ?? 0, posArr[1] ?? 0, posArr[2] ?? 0);
+    const savedCurvature =
+        sa.type === 'video' && typeof sa.transform?.horizontalCurvature === 'number'
+            ? sa.transform.horizontalCurvature
+            : 0;
+    const entry = await placeAsset(global, item, pos, false, {
+        ...(sa.type === 'video' ? { horizontalCurvature: savedCurvature } : {})
+    });
+    if (!entry) return;
+
+    if (sa.id) {
+        entry.id = sa.id;
+    }
+    applySceneAssetTransformToEntry(global, entry, sa);
+    startRestoredAssetDefaultEffectIfConfigured(global, entry);
+}
+
+/**
+ * View → Edit：按 settings 真源就地同步已放置实体，避免 clear+全量 reload 导致大资产闪灭。
+ * 显隐/变换以 settings.sceneAssets 为准，不沿用 view 下仅改 runtime 的状态。
+ */
+export async function syncScenePlacedEntitiesFromSettings(global: Global): Promise<void> {
+    const settings: any = global.settings as any;
+    const sceneAssets: SceneAsset[] = Array.isArray(settings?.sceneAssets) ? settings.sceneAssets : [];
+    const { state, events } = global;
+    if (!state.scenePlacedEntities) state.scenePlacedEntities = [];
+
+    const settingsById = new Map<string, SceneAsset>();
+    for (const sa of sceneAssets) {
+        if (sa?.id) settingsById.set(sa.id, sa);
+    }
+
+    const matchedSettingIds = new Set<string>();
+    const toRemove: ScenePlacedItem[] = [];
+
+    for (const entry of [...state.scenePlacedEntities]) {
+        const sa = settingsById.get(entry.id);
+        if (!sa || !canReuseScenePlacedEntry(entry, sa)) {
+            entry.entity.destroy();
+            toRemove.push(entry);
+            continue;
+        }
+        matchedSettingIds.add(sa.id);
+        const posArr = (sa.transform?.position ?? [0, 0, 0]) as number[];
+        entry.entity.setLocalPosition(posArr[0] ?? 0, posArr[1] ?? 0, posArr[2] ?? 0);
+        applySceneAssetTransformToEntry(global, entry, sa);
+    }
+
+    for (const entry of toRemove) {
+        const idx = state.scenePlacedEntities!.indexOf(entry);
+        if (idx >= 0) state.scenePlacedEntities!.splice(idx, 1);
+        events.fire('sceneAssets:removed', entry);
+    }
+
+    if (
+        state.selectedSceneEntityId
+        && !state.scenePlacedEntities!.some((e) => e.id === state.selectedSceneEntityId)
+    ) {
+        state.selectedSceneEntityId = null;
+        events.fire('sceneAsset:selected');
+    }
+
+    for (const sa of sceneAssets) {
+        if (!sa?.id || matchedSettingIds.has(sa.id)) continue;
+        await loadAndPlaceSceneAssetFromSettings(global, sa);
+    }
+}
+
 /**
  * 从 settings.sceneAssets 还原场景中的资产实体，并写入 state.scenePlacedEntities。
  * 支持 image / mesh / gaussian，使用 source.url / source.filename 重新加载资产。
  */
 export async function restoreSceneAssetsFromSettings(global: Global): Promise<void> {
     const settings: any = global.settings as any;
-    const sceneAssets: any[] | undefined = settings.sceneAssets;
+    const sceneAssets: SceneAsset[] | undefined = settings.sceneAssets;
     if (!Array.isArray(sceneAssets) || sceneAssets.length === 0) return;
 
-    const { app, state } = global;
+    const { state } = global;
     if (!state.scenePlacedEntities) state.scenePlacedEntities = [];
 
     for (const sa of sceneAssets) {
-        const posArr = (sa.transform?.position ?? [0, 0, 0]) as number[];
-        const rotArr = (sa.transform?.rotation ?? [0, 0, 0]) as number[];
-        const rotQuatArr = sa.transform?.rotationQuat as number[] | undefined;
-        const scaleArr = (sa.transform?.scale ?? [1, 1, 1]) as number[];
-        const mirrorArr = sa.transform?.mirror as number[] | undefined;
-
-        let item: AssetLibraryItem | null = null;
-        try {
-            item = await loadSceneAssetLibraryItem(global, sa, nextSceneEntityId, ASSET_LOAD_TIMEOUT_MS);
-        } catch (err) {
-            console.warn('[SceneAssets] restore asset failed:', sa?.type, err);
-            continue;
-        }
-        if (!item) {
-            continue;
-        }
-
-        const pos = new Vec3(posArr[0] ?? 0, posArr[1] ?? 0, posArr[2] ?? 0);
-        const entry = await placeAsset(global, item, pos, false);
-        if (!entry) continue;
-
-        if (sa.id) {
-            entry.id = sa.id;
-        }
-        if (typeof sa.thumbnailUrl === 'string' && sa.thumbnailUrl.length > 0) {
-            entry.thumbnailUrl = sa.thumbnailUrl;
-        }
-
-        // 应用保存时记录的旋转、缩放与可见性
-        const hasValidQuat =
-            Array.isArray(rotQuatArr)
-            && rotQuatArr.length >= 4
-            && Number.isFinite(rotQuatArr[0])
-            && Number.isFinite(rotQuatArr[1])
-            && Number.isFinite(rotQuatArr[2])
-            && Number.isFinite(rotQuatArr[3]);
-        if (hasValidQuat) {
-            entry.entity.setLocalRotation(
-                rotQuatArr[0],
-                rotQuatArr[1],
-                rotQuatArr[2],
-                rotQuatArr[3]
-            );
-        } else {
-            // 兼容旧数据：无 rotationQuat 时回退欧拉角
-            entry.entity.setEulerAngles(rotArr[0] ?? 0, rotArr[1] ?? 0, rotArr[2] ?? 0);
-        }
-        const resolveMirroredScale = (value: number, mirror: number | undefined): number => {
-            const numeric = Number.isFinite(value) ? value : 1;
-            if (mirror === -1 || mirror === 1) {
-                if (numeric === 0) return 0;
-                return Math.abs(numeric) * mirror;
-            }
-            return numeric;
-        };
-        entry.entity.setLocalScale(
-            resolveMirroredScale(scaleArr[0] ?? 1, mirrorArr?.[0]),
-            resolveMirroredScale(scaleArr[1] ?? 1, mirrorArr?.[1]),
-            resolveMirroredScale(scaleArr[2] ?? 1, mirrorArr?.[2])
-        );
-        const visible = sa.visible !== false;
-        entry.visible = visible;
-        entry.entity.enabled = visible;
-
-        startRestoredAssetDefaultEffectIfConfigured(global, entry);
+        await loadAndPlaceSceneAssetFromSettings(global, sa);
     }
 }
 
 /**
  * 统一调度 sceneAssets → scenePlacedEntities 的恢复链路：
  * - startup 可选择 defer 到 revealComplete；
+ * - edit-enter 默认就地 sync（不 clear），避免大资产闪灭；discard/history 仍全量 clear+restore；
  * - 后续 edit/discard/history restore 会提升 version，使旧的 startup defer 自动失效；
  * - 所有实际恢复都串行执行，避免与其他 restore 链并发交错。
  */
@@ -584,15 +946,21 @@ export async function requestSceneAssetsRestore(global: Global, options: SceneAs
     const version = controller.version + 1;
     controller.version = version;
 
+    const clearBeforeRestore =
+        options.clearBeforeRestore ?? (options.reason !== 'edit-enter');
+
     const invoke = async (): Promise<void> => {
         const previousTask = controller.activePromise;
         const task = (async (): Promise<void> => {
             await previousTask.catch((): void => undefined);
             if (controller.version !== version) return;
-            if (options.clearBeforeRestore !== false) {
+            if (clearBeforeRestore) {
                 clearScenePlacedEntities(global);
+                await restoreSceneAssetsFromSettings(global);
+            } else {
+                await syncScenePlacedEntitiesFromSettings(global);
             }
-            await restoreSceneAssetsFromSettings(global);
+            syncGsplatShadowCastingFromSettings(global);
         })();
         controller.activePromise = task;
         await task;
@@ -623,6 +991,22 @@ export function clearScenePlacedEntities(global: Global): void {
     global.events.fire('sceneAssets:cleared');
 }
 
+function applySceneAssetSelectedFromScenePick(
+    global: Global,
+    entryId: string,
+    options: { focusOnChange: boolean }
+): void {
+    const { state, events } = global;
+    const prevSelectedId = state.selectedSceneEntityId;
+    state.selectedSceneEntityId = entryId;
+    events.fire('sceneAsset:selected', { source: 'scene' });
+    if (options.focusOnChange && prevSelectedId !== entryId) {
+        requestAnimationFrame(() => {
+            events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
+        });
+    }
+}
+
 export function initAssetPlacementHandler(
     global: Global,
     canvas: HTMLCanvasElement,
@@ -636,6 +1020,8 @@ export function initAssetPlacementHandler(
     let sceneAssetPicker: any = null;
     let pendingPlacement: { value: AssetLibraryItem; sceneEntityId?: string } | null = null;
     let pendingPlacementInFlight = false;
+    let videoPreloadHandle: VideoPlacementPreloadHandle | null = null;
+    let videoPreloadReady = true;
     let detachPointerClickClaimHandler: (() => void) | null = null;
 
     const isValidPlacementWorldPos = (pos: Vec3): boolean => {
@@ -656,21 +1042,46 @@ export function initAssetPlacementHandler(
         return true;
     };
 
+    const syncVideoPlacementCursor = () => {
+        if (!pendingPlacement) return;
+        if (pendingPlacement.value.type !== 'video') {
+            setPlacementCursorActive(global, true, { loading: false });
+            return;
+        }
+        setPlacementCursorActive(global, true, {
+            loading: pendingPlacementInFlight || !videoPreloadReady
+        });
+    };
+
     const clearPendingPlacement = () => {
+        cancelVideoPlacementPreload();
+        videoPreloadHandle = null;
+        videoPreloadReady = true;
         pendingPlacement = null;
         pendingPlacementInFlight = false;
+        setPlacementCursorActive(global, false);
     };
 
     const handleAssetPointerClickClaim = (clientX: number, clientY: number, worldPos: Vec3 | null): boolean => {
-        if (!state.editMode || state.editLeftModule !== 'asset') return false;
+        const pickEventOnly = isAssetScenePickEventOnlyMode(state);
+        const editAsset = !pickEventOnly && state.editMode && state.editLeftModule === 'asset';
+        if (!pickEventOnly && !editAsset) return false;
+        if (state.suppressAssetPointerClick) {
+            state.suppressAssetPointerClick = false;
+            return false;
+        }
+        if (state.gizmoPointerActive || hitSceneGizmoAtClient(global, clientX, clientY)) {
+            return false;
+        }
         const rect = canvas.getBoundingClientRect();
         const offsetX = clientX - rect.left;
         const offsetY = clientY - rect.top;
         if (offsetX < 0 || offsetY < 0 || offsetX > rect.width || offsetY > rect.height) return false;
 
-        if (pendingPlacement) {
+        if (editAsset && pendingPlacement) {
             if (pendingPlacementInFlight) return true;
             pendingPlacementInFlight = true;
+            syncVideoPlacementCursor();
             void (async () => {
                 try {
                     if (!worldPos) {
@@ -693,7 +1104,9 @@ export function initAssetPlacementHandler(
                         console.warn('[AssetPlacement] hydrateProtocolPlaceItem failed');
                         return;
                     }
-                    const entry = await placeAsset(global, hydrated, worldPos, false);
+                    const entry = await placeAsset(global, hydrated, worldPos, false, {
+                        videoLoadMode: hydrated.type === 'video' ? 'placement' : 'restore'
+                    });
                     if (!entry) {
                         console.warn('[AssetPlacement] placeAsset returned null');
                         return;
@@ -708,23 +1121,34 @@ export function initAssetPlacementHandler(
                         worldPos: [worldPos.x, worldPos.y, worldPos.z],
                         source: 'scene'
                     });
-                    events.fire('sceneAsset:selected', { source: 'scene' });
-                    requestAnimationFrame(() => {
-                        events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
-                    });
+                    applySceneAssetSelectedFromScenePick(global, entry.id, { focusOnChange: true });
                     deps.pushEditHistory?.(global, 'place asset');
                     clearPendingPlacement();
                 } catch (error) {
                     console.error('[AssetPlacement] placement flow error', error);
                 } finally {
                     pendingPlacementInFlight = false;
+                    syncVideoPlacementCursor();
                 }
             })();
             return true;
         }
 
         const list = state.scenePlacedEntities ?? [];
-        if (list.length === 0) return true;
+        if (list.length === 0) return editAsset;
+
+        const pickableList = pickEventOnly
+            ? list.filter((entry) => isSceneAssetPickableInViewerMode(entry.assetType))
+            : list;
+        if (pickEventOnly && pickableList.length === 0) return false;
+
+        if (editAsset) {
+            const audioSelect = findAudioCalloutSelectHitFromClient(global, clientX, clientY);
+            if (audioSelect) {
+                applySceneAssetSelectedFromScenePick(global, audioSelect.id, { focusOnChange: true });
+                return true;
+            }
+        }
 
         const pickerScale = 0.5;
         const pickW = Math.max(1, Math.floor(width() * pickerScale));
@@ -732,39 +1156,26 @@ export function initAssetPlacementHandler(
         const pickX = Math.floor((offsetX / rect.width) * pickW);
         const pickY = Math.floor((offsetY / rect.height) * pickH);
 
-        if ((app.scene as any).gsplat) {
-            (app.scene as any).gsplat.enableIds = true;
-        }
-        // depth=false：实体选中只需 ID 缓冲；深度拾取由标注 Picker 用 pc.Picker(..., true) + getWorldPointAsync 单独处理。
         if (!sceneAssetPicker) {
             sceneAssetPicker = new (pc as any).Picker(app, pickW, pickH, false);
         }
         sceneAssetPicker.resize(pickW, pickH);
-        const worldLayer = app.scene.layers.getLayerByName('World');
-        sceneAssetPicker.prepare(camera.camera, app.scene, worldLayer ? [worldLayer] : undefined);
 
-        sceneAssetPicker.getSelectionAsync(pickX, pickY, 1, 1).then((selection: any[]) => {
-            if (selection.length === 0) return;
-            const picked = selection[0];
-            // Unified 模式下拾取 gsplat 返回 GSplatComponent（有 .entity）；拾取 mesh / plane 返回 MeshInstance（有 .node）
-            const entity = picked.entity ?? picked.node ?? null;
-            if (!entity) return;
-            // 对于 mesh，MeshInstance.node 可能是挂在 ScenePlacedItem.entity 下的子节点，这里同时兼容「自身」与「子层级命中」
-            const entry = list.find((item) => {
-                if (item.entity === entity) return true;
-                const anyEntity = entity as any;
-                return typeof anyEntity.isDescendantOf === 'function' && anyEntity.isDescendantOf(item.entity);
-            });
+        void pickScenePlacedEntryAtScreen(
+            global,
+            app,
+            camera,
+            sceneAssetPicker,
+            pickX,
+            pickY,
+            clientX,
+            clientY
+        ).then((entry) => {
             if (!entry) return;
-            const prevSelectedId = state.selectedSceneEntityId;
-            state.selectedSceneEntityId = entry.id;
-            events.fire('sceneAsset:selected', { source: 'scene' });
-            // 仅当场景点击导致“选中对象变化”时，才触发聚焦。
-            if (prevSelectedId === entry.id) return;
-            // 统一走资产 frame 链路（camera-manager 内会按选中资产 bbox 做 framing）。
-            events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
+            if (pickEventOnly && !isSceneAssetPickableInViewerMode(entry.assetType)) return;
+            applySceneAssetSelectedFromScenePick(global, entry.id, { focusOnChange: editAsset });
         }).catch(() => {});
-        return true;
+        return editAsset;
     };
 
     const onCopy = (payload?: { copyId?: string }) => {
@@ -784,6 +1195,9 @@ export function initAssetPlacementHandler(
         if (entry.assetType === 'mesh') {
             configurePlacedMeshMaterials(clone);
         }
+        if (entry.assetType === 'gaussian') {
+            configurePlacedGaussianPickLayer(app, clone);
+        }
         const copiedId = (typeof payload?.copyId === 'string' && payload.copyId.trim().length > 0)
             ? payload.copyId
             : nextSceneEntityId();
@@ -798,9 +1212,18 @@ export function initAssetPlacementHandler(
             url: entry.url,
             thumbnailUrl: entry.thumbnailUrl
         };
+        const resumeShadowAfterGaussianClone = entry.assetType === 'gaussian'
+            ? suspendShadowPipelineForGsplatLoad(global)
+            : null;
         state.scenePlacedEntities!.push(newEntry);
         state.selectedSceneEntityId = newEntry.id;
+        if (entry.assetType === 'gaussian' || entry.assetType === 'mesh') {
+            syncGsplatShadowCastingFromSettings(global);
+        }
         events.fire('sceneAssets:added', newEntry);
+        if (resumeShadowAfterGaussianClone) {
+            resumeShadowAfterStableFrames(global, resumeShadowAfterGaussianClone);
+        }
         events.fire('sceneAsset:selected');
         // 复制成功后聚焦到新副本，避免仍停留在原资产视角。
         requestAnimationFrame(() => {
@@ -833,15 +1256,57 @@ export function initAssetPlacementHandler(
         });
     }
     const onPlaceStart = (payload: { value: AssetLibraryItem; sceneEntityId?: string }) => {
+        cancelVideoPlacementPreload();
+        videoPreloadHandle = null;
+        videoPreloadReady = true;
         pendingPlacement = payload;
         pendingPlacementInFlight = false;
+
+        const item = payload.value;
+        if (item.type === 'video') {
+            const url = item.url || item.filename;
+            if (!url) {
+                setPlacementCursorActive(global, true, { loading: false });
+                return;
+            }
+            videoPreloadReady = false;
+            setPlacementCursorActive(global, true, { loading: true });
+            videoPreloadHandle = startVideoPlacementPreload(url);
+            void videoPreloadHandle.ready
+                .then(() => {
+                    videoPreloadReady = true;
+                    if (pendingPlacement?.value?.id === item.id) {
+                        syncVideoPlacementCursor();
+                    }
+                })
+                .catch(() => {
+                    videoPreloadReady = true;
+                    if (pendingPlacement?.value?.id === item.id) {
+                        syncVideoPlacementCursor();
+                    }
+                });
+            return;
+        }
+
+        setPlacementCursorActive(global, true, { loading: false });
+    };
+
+    const onSceneAssetRemoved = (entry: ScenePlacedItem) => {
+        removeSceneAssetFromSettings(global, entry.id);
+    };
+
+    const onVideoCurvature = (payload: { id?: string; value?: number }) => {
+        if (typeof payload?.id !== 'string' || typeof payload?.value !== 'number') return;
+        applyVideoHorizontalCurvature(global, payload.id, payload.value, deps);
     };
 
     events.on('assetEdit:copy', onCopy);
     events.on('assetEdit:delete', onDelete);
+    events.on('assetEdit:videoCurvature', onVideoCurvature);
     events.on('assetPlacement:start', onPlaceStart);
     events.on('assetFacade:exit', clearPendingPlacement);
     events.on('assetFacade:editModeExit', clearPendingPlacement);
+    events.on('sceneAssets:removed', onSceneAssetRemoved);
 
     return () => {
         detachPointerClickClaimHandler?.();
@@ -852,8 +1317,10 @@ export function initAssetPlacementHandler(
         }
         events.off('assetEdit:copy', onCopy);
         events.off('assetEdit:delete', onDelete);
+        events.off('assetEdit:videoCurvature', onVideoCurvature);
         events.off('assetPlacement:start', onPlaceStart);
         events.off('assetFacade:exit', clearPendingPlacement);
         events.off('assetFacade:editModeExit', clearPendingPlacement);
+        events.off('sceneAssets:removed', onSceneAssetRemoved);
     };
 }

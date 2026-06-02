@@ -1,5 +1,6 @@
 import type { Global } from '../../types';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../../schemas/v2-custom';
+import { captureDefaultViewAndStageThumbnail } from '../../render/project-thumbnail';
 import { getRevealTotalDuration } from '../../settings-serialize/effects-sync';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
@@ -58,6 +59,7 @@ const VIDEO_EXPORT_ROW_HTML = `
     <button id="vfxVideoExportButton" class="settingsButton" type="button">高兼容导出 (MP4，较慢)</button>
     <button id="vfxVideoExportFastButton" class="settingsButton" type="button">极速导出 (MP4，实时转码)</button>
     <button id="testCaptureFrameButton" class="settingsButton" type="button">测试捕获单帧</button>
+    <button id="projectDefaultViewCaptureButton" class="settingsButton" type="button">设为默认视角并截图 (1024×576)</button>
   </div>
 </div>
 `.trim();
@@ -91,6 +93,7 @@ export function initVideoExportUI(global: Global): () => void {
     const vfxVideoExportButton = container.querySelector('#vfxVideoExportButton') as HTMLButtonElement | null;
     const vfxVideoExportFastButton = container.querySelector('#vfxVideoExportFastButton') as HTMLButtonElement | null;
     const testCaptureFrameButton = container.querySelector('#testCaptureFrameButton') as HTMLButtonElement | null;
+    const projectDefaultViewCaptureButton = container.querySelector('#projectDefaultViewCaptureButton') as HTMLButtonElement | null;
     const videoResolution = container.querySelector('#videoResolution') as HTMLSelectElement | null;
     const customResolutionRow = container.querySelector('#customResolutionRow');
     const customWidth = container.querySelector('#customWidth') as HTMLInputElement | null;
@@ -201,6 +204,32 @@ export function initVideoExportUI(global: Global): () => void {
     const onExportClick = () => startExport(false);
     const onExportFastClick = () => startExport(true);
 
+    const onProjectDefaultViewCaptureClick = async () => {
+        if (!projectDefaultViewCaptureButton) return;
+        if (editUiTransport === 'message-bridge') {
+            sendEditProtocolMessage({ type: 'CAMERA_DEFAULT_VIEW_CAPTURE' });
+            return;
+        }
+
+        projectDefaultViewCaptureButton.disabled = true;
+        const prevText = projectDefaultViewCaptureButton.textContent;
+        projectDefaultViewCaptureButton.textContent = '处理中…';
+        try {
+            const result = await captureDefaultViewAndStageThumbnail(global);
+            if (result.ok === false) {
+                alert(`设为默认视角失败：${result.message}`);
+            } else {
+                alert('已写入 cameras[0].initial 并暂存缩略图；请点击「保存配置」一并上传/下载。');
+            }
+        } catch (err) {
+            console.error('Default view capture failed:', err);
+            alert(`设为默认视角失败：${err}`);
+        } finally {
+            projectDefaultViewCaptureButton.disabled = false;
+            if (prevText) projectDefaultViewCaptureButton.textContent = prevText;
+        }
+    };
+
     const onTestCaptureClick = async () => {
         try {
             const resolution = getVideoResolution();
@@ -297,6 +326,7 @@ export function initVideoExportUI(global: Global): () => void {
     vfxVideoExportButton?.addEventListener('click', onExportClick);
     vfxVideoExportFastButton?.addEventListener('click', onExportFastClick);
     testCaptureFrameButton?.addEventListener('click', onTestCaptureClick);
+    projectDefaultViewCaptureButton?.addEventListener('click', onProjectDefaultViewCaptureClick);
 
     updateCustomResolutionVisibility();
 
@@ -308,6 +338,7 @@ export function initVideoExportUI(global: Global): () => void {
         vfxVideoExportButton?.removeEventListener('click', onExportClick);
         vfxVideoExportFastButton?.removeEventListener('click', onExportFastClick);
         testCaptureFrameButton?.removeEventListener('click', onTestCaptureClick);
+        projectDefaultViewCaptureButton?.removeEventListener('click', onProjectDefaultViewCaptureClick);
 
         container.replaceChildren();
         overlayRoot.remove();

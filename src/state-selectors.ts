@@ -29,7 +29,22 @@ export function getSelectedSceneAssetType(
     if (!Array.isArray(sceneAssetsFromSettings)) return undefined;
     const row = sceneAssetsFromSettings.find((s) => s?.id === id);
     const t = row?.type;
-    return t === 'image' || t === 'mesh' || t === 'gaussian' ? t : undefined;
+    return t === 'image' || t === 'mesh' || t === 'gaussian' || t === 'video' || t === 'audio' ? t : undefined;
+}
+
+/** Viewer 浏览或编辑预览（与 media 热区 `isMediaConsumptionMode` 判定一致） */
+export function isViewerOrPreviewMode(state: State): boolean {
+    return !state.editMode || state.previewMode === true;
+}
+
+/** Viewer / 编辑预览：场景单击仅上报拾取事件，不走放置、Gizmo、相机聚焦等编辑侧效 */
+export function isAssetScenePickEventOnlyMode(state: State): boolean {
+    return isViewerOrPreviewMode(state);
+}
+
+/** Viewer / 编辑预览下允许场景拾取上报的资产类型（暂不含 image / video / audio） */
+export function isSceneAssetPickableInViewerMode(assetType: AssetLibraryType | undefined): boolean {
+    return assetType === 'mesh' || assetType === 'gaussian';
 }
 
 export function isAssetDebugVisualEnabled(state: State): boolean {

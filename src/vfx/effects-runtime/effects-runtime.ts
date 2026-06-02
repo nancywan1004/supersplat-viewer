@@ -22,7 +22,7 @@ import { EffectRegistry } from './effect-registry';
 import { GsplatEffectComposer } from './gsplat-effect-composer';
 import type { GsplatContribution } from './gsplat-contribution';
 import type { ComposedGsplatModifyResult } from './composer-diagnostics';
-import { PERSISTENT_EFFECT_TYPES, REVEAL_EFFECT_TYPES } from './effect-types';
+import { GSPLAT_MAX_SCENE_CONTRIBUTORS, PERSISTENT_EFFECT_TYPES, REVEAL_EFFECT_TYPES } from './effect-types';
 import { syncAssetEffectRegistryFactories } from './asset/asset-effect-registry-factory';
 import { syncPersistentGsplatRegistryFactories } from './persistent/persistent-gsplat-registry-factory';
 
@@ -83,7 +83,9 @@ export class EffectsRuntime {
     constructor(global: Global) {
         this._global = global;
         this.registry = new EffectRegistry(global);
-        this.composer = new GsplatEffectComposer(global);
+        this.composer = new GsplatEffectComposer(global, {
+            maxSceneContributors: GSPLAT_MAX_SCENE_CONTRIBUTORS
+        });
         this.syncAssetEffectRegistryFromSettings();
     }
 

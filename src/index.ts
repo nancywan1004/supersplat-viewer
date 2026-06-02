@@ -12,15 +12,11 @@ import {
     type AppBase,
     GSplatResource,
     revision as engineRevision,
-    version as engineVersion,
-    Vec3
+    version as engineVersion
 } from 'playcanvas';
 
-import { applySkyboxSphere, removeSkyboxSphere, applySkyboxTexture, type SkyboxOptions } from './loaders/skybox-loader';
-
 import { App } from './app';
-import { MeshCollision, loadVoxelCollision } from './collision';
-import type { Collision } from './collision';
+import { applySkyboxTexture, clearSkyboxDisplay } from './loaders/skybox-loader';
 import { observe } from './core/observe';
 import type { ExperienceSettings } from './schemas/v2';
 import { importSettings } from './settings';
@@ -36,14 +32,24 @@ import { loadGsplatAsset } from './loaders/gsplat-asset-loader';
 import { getAssetLoader } from './loaders/asset-loader';
 import { version as appVersion } from '../package.json';
 import { initPostMessageBridge } from './message-bridge';
+import { ensureViewSettings } from './view-settings';
 import { initVideoExport } from './render/video-export';
-import { ensureRevealEffect } from './settings-serialize/settings-serialize-helper';
+import {
+    ensureRevealEffect,
+    resolveInitialSkyboxUrl,
+    setSkyboxUrlInSettings
+} from './settings-serialize/settings-serialize-helper';
 import {
     createDefaultEffectsRuntimeState,
     normalizeEffectsOnImport,
     syncEffectsRuntimeStateFromSettings,
     hasRevealInSettings
 } from './settings-serialize/effects-sync';
+import {
+    applySceneAssetCollisionFromSettings,
+    createDefaultSceneAssetCollisionRuntimeState
+} from './scene-assets/collision/scene-asset-collision';
+import { getCameraCollisionManager } from './collision/camera-collision-manager';
 
 import { loadGsplatMorphSequence } from './vfx/gsplat-morph';
 
@@ -83,7 +89,8 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
             entity.setLocalEulerAngles(0, 0, 180);
             entity.addComponent('gsplat', {
                 unified: true,
-                asset
+                asset,
+                castShadows: false
             });
             const material = app.scene.gsplat.material;
             material.setDefine('GSPLAT_AA', aa);
@@ -129,7 +136,8 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
                 entity.setLocalEulerAngles(0, 0, 180);
                 entity.addComponent('gsplat', {
                     unified: true,
-                    asset
+                    asset,
+                    castShadows: false
                 });
                 // don't support AA in unified mode yet
                 if (aa && !entity.gsplat.unified) {
@@ -322,6 +330,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         assetEffectsMorphKeyframeIds: [] as string[],
         
         cameraControlsEnabled: true,
+        gizmoPointerActive: false,
+        suppressAssetPointerClick: false,
 
         // 标注相关状态
         selectedAnnotationId: null,
@@ -333,6 +343,9 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
 
         // 导出 VFX 视频时的锁，防止实时更新干扰离线渲染
         isExportingVfxVideo: false,
+
+        sceneAssetCollisionRuntimeState: createDefaultSceneAssetCollisionRuntimeState(),
+
         gamingControls: localStorage.getItem('gamingControls') === 'true',
         // 必须在 observe 初始 keys 内：Proxy 禁止新增顶层属性（见 core/observe.ts）
         effectsRuntimeState: createDefaultEffectsRuntimeState()
@@ -352,6 +365,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     state.hasRevealEffect = hasRevealInSettings(processedSettings);
     syncEffectsRuntimeStateFromSettings(state, processedSettings);
 
+    const initialSkyboxUrl = resolveInitialSkyboxUrl(processedSettings, config.skyboxUrl);
+
     // 保留原始配置副本，供进入 Edit 模式时恢复使用（View 模式的临时修改不污染此副本）
     const originalSettings = JSON.parse(JSON.stringify(processedSettings)) as ExperienceSettings;
 
@@ -363,6 +378,10 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         events,
         camera
     };
+
+    ensureViewSettings(global);
+    applySceneAssetCollisionFromSettings(global);
+    getCameraCollisionManager(global).configure();
 
     // 将原始配置挂载到 global 供后续恢复使用
     (global as any).__originalSettings = originalSettings;
@@ -411,63 +430,34 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         )
     );
 
-    const skyboxOptions: SkyboxOptions = {
-        center: new Vec3(0, 0, 0),
-        radius: 5000,
-        rotation: new Vec3(0, 0, 0)
-    };
-
-    // Load skybox
-    const skyboxLoad = config.skyboxUrl && applySkyboxTexture(app, config.skyboxUrl);
-    //const skyboxLoad = config.skyboxUrl ? applySkyboxSphere(app, config.skyboxUrl, skyboxOptions).then(() => {}) : Promise.resolve();
+    // Load skybox from settings (URL param bootstraps into settings when absent)
+    const skyboxLoad = initialSkyboxUrl ? applySkyboxTexture(app, initialSkyboxUrl) : undefined;
 
     if (skyboxLoad) {
         skyboxLoad.then(() => {
-            events.fire('skyboxSelectionSynced', config.skyboxUrl ?? '');
+            events.fire('skyboxSelectionSynced', initialSkyboxUrl ?? '');
         }).catch((err) => {
             console.warn('[SuperSplat] 初始化天空盒失败：', err);
         });
     }
 
-    events.on('skyboxSwitch', async (url?: string | null) => {
-        if (!url) {
-            // 移除所有天空盒实体
-            removeSkyboxSphere(app);
-            app.scene.envAtlas = null;
-            app.renderNextFrame = true;
+    events.on('skyboxSet', async (url?: string | null) => {
+        setSkyboxUrlInSettings(global.settings, url ?? null);
+
+        const trimmed = typeof url === 'string' ? url.trim() : '';
+        if (!trimmed) {
+            clearSkyboxDisplay(app);
             events.fire('skyboxSelectionSynced', '');
             return;
         }
 
         try {
-            // 切换天空盒时，先移除旧的 sphere 实体（如果有不同 URL 的）
-            // 注意：applySkyboxSphere 内部会处理相同 URL 的复用，所以这里可以不移除
-            // 但如果需要确保只有一个天空盒，可以在这里移除所有旧的
-            removeSkyboxSphere(app); // 可选：确保只有一个天空盒
-            await applySkyboxTexture(app, url);
-            //await applySkyboxSphere(app, url, skyboxOptions);
-            events.fire('skyboxSelectionSynced', url);
+            await applySkyboxTexture(app, trimmed);
+            events.fire('skyboxSelectionSynced', trimmed);
         } catch (err) {
-            console.warn('[SuperSplat] 切换天空盒失败：', err);
+            console.warn('[SuperSplat] 设置天空盒失败：', err);
         }
     });
-
-    // Load collision data (type determined by file extension)
-    let collisionLoad: Promise<Collision> | undefined;
-    if (config.collisionUrl) {
-        const ext = new URL(config.collisionUrl, location.href).pathname.split('.').pop()?.toLowerCase();
-        if (ext === 'glb') {
-            collisionLoad = MeshCollision.fromGlb(app, config.collisionUrl).catch((err: Error): null => {
-                console.warn('Failed to load mesh collision:', err);
-                return null;
-            });
-        } else {
-            collisionLoad = loadVoxelCollision(config.collisionUrl).catch((err: Error): null => {
-                console.warn('Failed to load voxel data:', err);
-                return null;
-            });
-        }
-    }
 
     // Load and play sound
     if (global.settings.soundUrl) {
@@ -484,7 +474,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     }
 
     // Viewer 构造内会 initCommandRegistry 并注册各 facade；postMessage 监听须在此之后挂载，否则编辑类协议无法经 registry 单路径执行。
-    const viewer = new Viewer(global, gsplatLoad, skyboxLoad, collisionLoad);
+    const viewer = new Viewer(global, gsplatLoad, skyboxLoad);
 
     initPostMessageBridge(global);
 

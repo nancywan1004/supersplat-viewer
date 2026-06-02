@@ -3,7 +3,10 @@
  * 负责右侧工具栏的显示、标注编辑表单和标注列表
  */
 
+import { normalizeAnnotationMediaFields } from '../../annotation-toolbar/media-fields';
 import type { AnnotationFormData, AnnotationData } from '../../annotation-toolbar/types';
+
+type AnnotationMediaType = 'none' | 'image' | 'video';
 
 export class AnnotationToolbarUI {
     private container: HTMLElement | null = null;
@@ -17,6 +20,10 @@ export class AnnotationToolbarUI {
     private textInput: HTMLTextAreaElement | null = null;
     private imageInput: HTMLInputElement | null = null;
     private imagePreview: HTMLImageElement | null = null;
+    private imageMediaGroup: HTMLElement | null = null;
+    private videoMediaGroup: HTMLElement | null = null;
+    private videoUrlInput: HTMLInputElement | null = null;
+    private mediaTypeRadios: { none: HTMLInputElement; image: HTMLInputElement; video: HTMLInputElement } | null = null;
     private showTitleCheckbox: HTMLInputElement | null = null;
     private titleCharCount: HTMLElement | null = null;
     private textCharCount: HTMLElement | null = null;
@@ -144,31 +151,64 @@ export class AnnotationToolbarUI {
 
         form.appendChild(textGroup);
 
-        // 图片上传
-        const imageGroup = document.createElement('div');
-        imageGroup.className = 'annotation-form-group';
-        
-        const imageLabel = document.createElement('label');
-        imageLabel.textContent = '图片';
-        imageLabel.className = 'annotation-form-label';
-        imageGroup.appendChild(imageLabel);
+        const mediaGroup = document.createElement('div');
+        mediaGroup.className = 'annotation-form-group';
 
+        const mediaLabel = document.createElement('label');
+        mediaLabel.textContent = '媒体';
+        mediaLabel.className = 'annotation-form-label';
+        mediaGroup.appendChild(mediaLabel);
+
+        const mediaTypeRow = document.createElement('div');
+        mediaTypeRow.className = 'annotation-media-type-row';
+
+        const mkMediaRadio = (value: AnnotationMediaType, label: string) => {
+            const wrap = document.createElement('label');
+            wrap.className = 'annotation-media-type-option';
+            const input = document.createElement('input');
+            input.type = 'radio';
+            input.name = 'annotationMediaType';
+            input.value = value;
+            if (value === 'none') input.checked = true;
+            wrap.appendChild(input);
+            wrap.appendChild(document.createTextNode(label));
+            mediaTypeRow.appendChild(wrap);
+            return input;
+        };
+
+        this.mediaTypeRadios = {
+            none: mkMediaRadio('none', '无'),
+            image: mkMediaRadio('image', '图片'),
+            video: mkMediaRadio('video', '视频')
+        };
+        mediaGroup.appendChild(mediaTypeRow);
+
+        this.imageMediaGroup = document.createElement('div');
+        this.imageMediaGroup.className = 'annotation-media-panel hidden';
         this.imageInput = document.createElement('input');
         this.imageInput.type = 'file';
         this.imageInput.className = 'annotation-form-file-input';
         this.imageInput.accept = 'image/*';
-        imageGroup.appendChild(this.imageInput);
-
+        this.imageMediaGroup.appendChild(this.imageInput);
         this.imagePreview = document.createElement('img');
         this.imagePreview.className = 'annotation-image-preview hidden';
-        imageGroup.appendChild(this.imagePreview);
+        this.imageMediaGroup.appendChild(this.imagePreview);
+        mediaGroup.appendChild(this.imageMediaGroup);
 
-        form.appendChild(imageGroup);
+        this.videoMediaGroup = document.createElement('div');
+        this.videoMediaGroup.className = 'annotation-media-panel hidden';
+        this.videoUrlInput = document.createElement('input');
+        this.videoUrlInput.type = 'url';
+        this.videoUrlInput.className = 'annotation-form-input';
+        this.videoUrlInput.placeholder = '视频 URL（https://...）';
+        this.videoMediaGroup.appendChild(this.videoUrlInput);
+        mediaGroup.appendChild(this.videoMediaGroup);
 
-        // "收起时显示标题"复选框
+        form.appendChild(mediaGroup);
+
         const checkboxGroup = document.createElement('div');
         checkboxGroup.className = 'annotation-form-group annotation-checkbox-group';
-        
+
         this.showTitleCheckbox = document.createElement('input');
         this.showTitleCheckbox.type = 'checkbox';
         this.showTitleCheckbox.id = 'annotationShowTitle';
@@ -183,7 +223,6 @@ export class AnnotationToolbarUI {
 
         form.appendChild(checkboxGroup);
 
-        // 按钮组
         const buttonGroup = document.createElement('div');
         buttonGroup.className = 'annotation-form-buttons';
 
@@ -197,7 +236,6 @@ export class AnnotationToolbarUI {
         this.confirmButton.textContent = '更新';
         buttonGroup.appendChild(this.confirmButton);
 
-        // 「去放置 / 确定并放置」按钮：仅在新建标注时可见
         this.placeButton = document.createElement('button');
         this.placeButton.className = 'annotation-form-btn annotation-place-btn';
         this.placeButton.textContent = '去放置';
@@ -226,6 +264,42 @@ export class AnnotationToolbarUI {
         list.appendChild(listContainer);
 
         return list;
+    }
+
+    private getSelectedMediaType(): AnnotationMediaType {
+        if (this.mediaTypeRadios?.video.checked) {
+            return 'video';
+        }
+        if (this.mediaTypeRadios?.image.checked) {
+            return 'image';
+        }
+        return 'none';
+    }
+
+    private updateMediaPanelsVisibility(): void {
+        const type = this.getSelectedMediaType();
+        this.imageMediaGroup?.classList.toggle('hidden', type !== 'image');
+        this.videoMediaGroup?.classList.toggle('hidden', type !== 'video');
+        if (type !== 'image') {
+            if (this.imagePreview) {
+                this.imagePreview.src = '';
+                this.imagePreview.classList.add('hidden');
+            }
+            if (this.imageInput) {
+                this.imageInput.value = '';
+            }
+        }
+        if (type !== 'video' && this.videoUrlInput) {
+            this.videoUrlInput.value = '';
+        }
+    }
+
+    private setMediaType(type: AnnotationMediaType): void {
+        if (!this.mediaTypeRadios) {
+            return;
+        }
+        this.mediaTypeRadios[type].checked = true;
+        this.updateMediaPanelsVisibility();
     }
 
     /**
@@ -268,13 +342,23 @@ export class AnnotationToolbarUI {
             this.notifyInputChange();
         });
 
-        // 图片上传
         this.imageInput?.addEventListener('change', (e) => {
             const target = e.target as HTMLInputElement;
             const file = target.files?.[0];
             if (file) {
                 this.handleImageUpload(file);
             }
+        });
+
+        Object.values(this.mediaTypeRadios ?? {}).forEach((radio) => {
+            radio.addEventListener('change', () => {
+                this.updateMediaPanelsVisibility();
+                this.notifyInputChange();
+            });
+        });
+
+        this.videoUrlInput?.addEventListener('input', () => {
+            this.notifyInputChange();
         });
 
         // 复选框变化
@@ -304,6 +388,7 @@ export class AnnotationToolbarUI {
         const reader = new FileReader();
         reader.onload = (e) => {
             const dataUrl = e.target?.result as string;
+            this.setMediaType('image');
             if (this.imagePreview) {
                 this.imagePreview.src = dataUrl;
                 this.imagePreview.classList.remove('hidden');
@@ -351,12 +436,30 @@ export class AnnotationToolbarUI {
      * 获取表单数据（公开供外部读取当前表单内容）
      */
     getFormData(): AnnotationFormData {
-        return {
+        const base = {
             title: this.titleInput?.value || '',
             text: this.textInput?.value || '',
-            imageUrl: this.imagePreview?.src || undefined,
             showTitleWhenCollapsed: this.showTitleCheckbox?.checked || false
         };
+        const mediaType = this.getSelectedMediaType();
+        if (mediaType === 'image') {
+            return {
+                ...base,
+                ...normalizeAnnotationMediaFields({
+                    imageUrl: this.imagePreview?.src || undefined
+                })
+            };
+        }
+        if (mediaType === 'video') {
+            const url = this.videoUrlInput?.value.trim() ?? '';
+            return {
+                ...base,
+                ...normalizeAnnotationMediaFields({
+                    videoUrl: url || undefined
+                })
+            };
+        }
+        return { ...base, ...normalizeAnnotationMediaFields({}) };
     }
 
     /**
@@ -386,25 +489,30 @@ export class AnnotationToolbarUI {
             if (this.titleInput) this.titleInput.value = annotation.title || '';
             if (this.textInput) this.textInput.value = annotation.text || '';
             if (this.showTitleCheckbox) this.showTitleCheckbox.checked = annotation.showTitleWhenCollapsed || false;
-            if (annotation.imageUrl && this.imagePreview) {
-                this.imagePreview.src = annotation.imageUrl;
-                this.imagePreview.classList.remove('hidden');
-            } else if (this.imagePreview) {
-                this.imagePreview.src = '';
-                this.imagePreview.classList.add('hidden');
+            if (annotation.videoUrl) {
+                this.setMediaType('video');
+                if (this.videoUrlInput) this.videoUrlInput.value = annotation.videoUrl;
+            } else if (annotation.imageUrl) {
+                this.setMediaType('image');
+                if (this.imagePreview) {
+                    this.imagePreview.src = annotation.imageUrl;
+                    this.imagePreview.classList.remove('hidden');
+                }
+            } else {
+                this.setMediaType('none');
             }
-            // 清空文件选择，避免沿用上次上传的文件
             if (this.imageInput) this.imageInput.value = '';
         } else {
-            // 清空表单
             if (this.titleInput) this.titleInput.value = '';
             if (this.textInput) this.textInput.value = '';
             if (this.showTitleCheckbox) this.showTitleCheckbox.checked = false;
+            this.setMediaType('none');
             if (this.imagePreview) {
                 this.imagePreview.classList.add('hidden');
                 this.imagePreview.src = '';
             }
             if (this.imageInput) this.imageInput.value = '';
+            if (this.videoUrlInput) this.videoUrlInput.value = '';
         }
         this.updateCharCount();
 

@@ -21,10 +21,29 @@ type PointerClickDispatchResult = {
     claimedBy: string | null;
 };
 
+type PointerDownClaimContext = {
+    global: Global;
+    pointerEvent: PointerEvent;
+    clientX: number;
+    clientY: number;
+};
+
+type PointerDownHandler = {
+    id: string;
+    priority: number;
+    handle: (ctx: PointerDownClaimContext) => boolean;
+};
+
+type PointerDownDispatchResult = {
+    claimed: boolean;
+    claimedBy: string | null;
+};
+
 class InputArbiter {
     // 所有点击消费者按优先级统一收敛在这里，
     // 避免各模块各自监听 DOM 造成同一次点击被多处并发消费。
     private pointerClickHandlers: PointerClickHandler[] = [];
+    private pointerDownHandlers: PointerDownHandler[] = [];
 
     registerPointerClickHandler(handler: PointerClickHandler): () => void {
         this.pointerClickHandlers.push(handler);
@@ -44,6 +63,27 @@ class InputArbiter {
         return { claimed: false, claimedBy: null };
     }
 
+    registerPointerDownHandler(handler: PointerDownHandler): () => void {
+        this.pointerDownHandlers.push(handler);
+        this.pointerDownHandlers.sort((a, b) => b.priority - a.priority);
+        return () => this.unregisterPointerDownHandler(handler.id);
+    }
+
+    dispatchPointerDown(ctx: PointerDownClaimContext): PointerDownDispatchResult {
+        for (const handler of this.pointerDownHandlers) {
+            if (!handler.handle(ctx)) continue;
+            return { claimed: true, claimedBy: handler.id };
+        }
+        return { claimed: false, claimedBy: null };
+    }
+
+    private unregisterPointerDownHandler(id: string): void {
+        const index = this.pointerDownHandlers.findIndex((handler) => handler.id === id);
+        if (index >= 0) {
+            this.pointerDownHandlers.splice(index, 1);
+        }
+    }
+
     private unregisterPointerClickHandler(id: string): void {
         const index = this.pointerClickHandlers.findIndex((handler) => handler.id === id);
         if (index >= 0) {
@@ -61,6 +101,9 @@ const initInputArbiter = (global: Global): InputArbiter => {
 export type {
     PointerClickClaimContext,
     PointerClickHandler,
-    PointerClickDispatchResult
+    PointerClickDispatchResult,
+    PointerDownClaimContext,
+    PointerDownHandler,
+    PointerDownDispatchResult
 };
 export { InputArbiter, initInputArbiter };

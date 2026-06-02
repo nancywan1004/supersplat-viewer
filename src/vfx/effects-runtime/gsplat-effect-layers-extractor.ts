@@ -85,3 +85,5 @@ export function extractGlslWgslModifyBlocks(glslFull: string, wgslFull: string):
 
 /** persistent perlin 在 GsplatEffectComposer 中的 id（与 effect id 对齐） */
 export const PERLIN_WAVE_COMPOSER_ID = 'perlin-wave';
+
+export const OVERALL_WAVE_COMPOSER_ID = 'overall-wave';

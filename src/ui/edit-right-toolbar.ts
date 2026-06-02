@@ -2,6 +2,7 @@ import type { Global } from '../types';
 import type { EditLeftModule } from '../types';
 import { getAssetPlacementSettingsHTML, bindAssetPlacementSettings } from './components/asset-placement-settings-ui';
 import { getSceneAssetListHTML, bindSceneAssetList } from './components/scene-asset-list-ui';
+import { getCameraSettingsHTML, bindCameraSettings } from './components/camera-settings-ui';
 
 const RIGHT_PANEL_IDS: EditLeftModule[] = [
     'gs',
@@ -49,7 +50,7 @@ const EDIT_RIGHT_TOOLBAR_HTML = `
     </div>
 </div>
 <div id="rightPanelCamera" class="edit-right-panel hidden" data-module="camera">
-    <div class="edit-right-panel-placeholder">敬请期待</div>
+    ${getCameraSettingsHTML()}
 </div>
 <div id="rightPanelEffects" class="edit-right-panel hidden" data-module="effects">
     <div class="settingsRow submenuHeader" id="sceneVfxSubmenuHeader" role="button" tabindex="0">
@@ -94,7 +95,8 @@ const SUBPANEL_PAIRS_BY_MODULE: Partial<Record<EditLeftModule, [string, string][
         ['renderSubmenuHeader', 'renderSubpanel']
     ],
     asset: [['assetPlacementHeader', 'assetPlacementSubpanel']],
-    annotation: [['annotationSettingsHeader', 'annotationSettingsSubpanel']]
+    annotation: [['annotationSettingsHeader', 'annotationSettingsSubpanel']],
+    camera: [['cameraSettingsHeader', 'cameraSettingsSubpanel']]
 };
 
 /**
@@ -192,7 +194,8 @@ export function initEditRightToolbarUI(global: Global): () => void {
         bindSubpanel('sceneVfxSubmenuHeader', 'sceneVfxSubpanel', 'sceneVfxSubmenuArrow'),
         bindSubpanel('renderSubmenuHeader', 'renderSubpanel', 'renderSubmenuArrow'),
         bindSubpanel('annotationSettingsHeader', 'annotationSettingsSubpanel', 'annotationSettingsArrow'),
-        bindSubpanel('assetPlacementHeader', 'assetPlacementSubpanel', 'assetPlacementArrow')
+        bindSubpanel('assetPlacementHeader', 'assetPlacementSubpanel', 'assetPlacementArrow'),
+        bindSubpanel('cameraSettingsHeader', 'cameraSettingsSubpanel', 'cameraSettingsArrow')
     ];
 
     // 资产放置模块：HTML 与 bind 均由 asset-placement-settings-ui 内部管理（含场景资产列表）
@@ -207,6 +210,12 @@ export function initEditRightToolbarUI(global: Global): () => void {
     if (assetEffectsPanel) {
         const listRoot = assetEffectsPanel.querySelector<HTMLElement>('[data-scene-asset-list-root]');
         unbindSubpanels.push(bindSceneAssetList(listRoot, global));
+    }
+
+    const cameraPanel = document.getElementById('rightPanelCamera');
+    if (cameraPanel) {
+        const cameraRoot = cameraPanel.querySelector<HTMLElement>('[data-camera-settings-root]');
+        unbindSubpanels.push(bindCameraSettings(cameraRoot, global));
     }
 
     return () => {
