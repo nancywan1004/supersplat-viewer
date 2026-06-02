@@ -1,6 +1,7 @@
 import type { Entity } from 'playcanvas';
 import type { ExperienceSettings } from '../../../schemas/v2';
-import { readPersistentRevealParams } from '../../../settings-serialize/effects-sync';
+import type { PersistentSceneEffectEntry } from '../../../schemas/v2-custom';
+import { readPersistentSceneEffects } from '../../../settings-serialize/effects-sync';
 import { destroyAllPersistentGsplatScriptsOnEntity, getMountedPersistentGsplatScript } from '../gsplat-effect-script-registry';
 import { PERSISTENT_EFFECT_TYPES } from '../effect-types';
 import { isPersistentVfx } from '../reveal/reveal-policy';
@@ -247,16 +248,15 @@ export function rebindPersistentGsplatTimelineFromSettings(
         bindPersistentTimelineScript(null);
         return;
     }
-    const persistentCfg = readPersistentRevealParams(settings);
-    const persistentScript = getMountedPersistentGsplatScript(
-        gsplatEntity,
-        persistentCfg?.type as string | undefined
-    ) as any;
-    if (persistentScript && persistentCfg?.type && isPersistentVfx(persistentCfg.type as any)) {
-        bindPersistentTimelineScript(persistentScript);
-    } else {
-        bindPersistentTimelineScript(null);
+    const enabled = readPersistentSceneEffects(settings);
+    let primary: any = null;
+    for (const entry of enabled) {
+        const script = getMountedPersistentGsplatScript(gsplatEntity, entry.type) as any;
+        if (script && !primary) {
+            primary = script;
+        }
     }
+    bindPersistentTimelineScript(primary);
 }
 
 /** `forceStopVfx` 末尾与 `EffectsRuntime` 快照对齐：当前 persistent 轨应对应的 effectType（无则 `'none'`）。 */
@@ -264,12 +264,16 @@ export function getPersistentGsplatEffectsRuntimeScriptType(
     gsplatEntity: Entity | null | undefined,
     settings: ExperienceSettings
 ): string {
-    const pCfg = readPersistentRevealParams(settings);
-    const persistentAlive = getMountedPersistentGsplatScript(gsplatEntity, pCfg?.type as string | undefined);
-    if (persistentAlive && pCfg?.type && isPersistentVfx(pCfg.type as any)) {
-        return pCfg.type as string;
+    const enabled = readPersistentSceneEffects(settings);
+    if (enabled.length === 0) {
+        return 'none';
     }
-    return 'none';
+    for (const entry of enabled) {
+        if (getMountedPersistentGsplatScript(gsplatEntity, entry.type)) {
+            return entry.type;
+        }
+    }
+    return enabled[0].type;
 }
 
 /** Viewer 注入：与 `RevealController` / `EffectsRuntime` 解耦，仅保留挂载所需回调。 */
@@ -286,25 +290,58 @@ export type PersistentGsplatRemountCallbacks = {
  *
  * @returns 是否成功创建并绑定脚本（`mount` 失败则为 `false`，调用方勿再假定已挂载）
  */
-export function remountPersistentGsplatOnEntity(
+/** 按 scene persistent 多选配置挂载全部 `enable` 为 true 的类型；时间轴绑定第一个成功挂载的脚本。 */
+export function remountPersistentSceneGsplatOnEntity(
     gsplatEntity: Entity,
-    persistentReveal: NonNullable<ReturnType<typeof readPersistentRevealParams>>,
+    entries: PersistentSceneEffectEntry[],
     callbacks: PersistentGsplatRemountCallbacks
 ): boolean {
     callbacks.prepareExternalPersistentScriptMount();
     destroyAllPersistentGsplatScriptsOnEntity(gsplatEntity);
-    const t = persistentReveal.type as string;
-    const script = mountPersistentGsplatByEffectType(
-        t,
-        gsplatEntity,
-        callbacks.applyGsplatShaderScriptCenter,
-        persistentReveal.autoStart ?? true,
-        persistentReveal.effectParams
-    );
-    if (!script) {
+    let primary: any = null;
+    const mountedTypes: string[] = [];
+    for (const entry of entries) {
+        if (!entry.enable) {
+            continue;
+        }
+        const script = mountPersistentGsplatByEffectType(
+            entry.type,
+            gsplatEntity,
+            callbacks.applyGsplatShaderScriptCenter,
+            entry.autoStart ?? true,
+            entry.effectParams
+        );
+        if (script) {
+            mountedTypes.push(entry.type);
+            if (!primary) {
+                primary = script;
+            }
+        }
+    }
+    if (!primary) {
         return false;
     }
-    callbacks.bindPersistentTimelineScript(script);
-    callbacks.notifyRevealScriptApplied(t);
+    callbacks.bindPersistentTimelineScript(primary);
+    callbacks.notifyRevealScriptApplied(mountedTypes.join('+') || 'none');
     return true;
+}
+
+/** @deprecated 使用 {@link remountPersistentSceneGsplatOnEntity} */
+export function remountPersistentGsplatOnEntity(
+    gsplatEntity: Entity,
+    persistentReveal: { type: string; autoStart?: boolean; effectParams?: Record<string, unknown> },
+    callbacks: PersistentGsplatRemountCallbacks
+): boolean {
+    return remountPersistentSceneGsplatOnEntity(
+        gsplatEntity,
+        [
+            {
+                type: persistentReveal.type,
+                enable: true,
+                autoStart: persistentReveal.autoStart ?? true,
+                effectParams: persistentReveal.effectParams
+            }
+        ],
+        callbacks
+    );
 }

@@ -7,7 +7,8 @@ import {
     isOneShotRevealPlayingExclusiveGsplat,
     perlinWaveUsesRegistryComposerPath
 } from '../effects-pipeline-policy';
-import { shaderGLSL, shaderWGSL } from './gsplat-perlin-wave-shaders';
+import { perlinWaveShaderGlsl, perlinWaveShaderWgsl } from './gsplat-perlin-wave-shaders';
+import { GSPLAT_WAVE_COMMON_GLSL, GSPLAT_WAVE_COMMON_WGSL } from './gsplat-wave-shader-common';
 
 /**
  * Perlin Wave reveal effect for gaussian splats.
@@ -85,11 +86,11 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
     scaleBlend = 0;
 
     getShaderGLSL() {
-        return shaderGLSL;
+        return `${GSPLAT_WAVE_COMMON_GLSL}${perlinWaveShaderGlsl}`;
     }
 
     getShaderWGSL() {
-        return shaderWGSL;
+        return `${GSPLAT_WAVE_COMMON_WGSL}${perlinWaveShaderWgsl}`;
     }
 
     private usesPerlinComposerPath(): boolean {
@@ -180,7 +181,7 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
             });
             return;
         }
-        const shaderBlocks = extractGlslWgslModifyBlocks(shaderGLSL, shaderWGSL);
+        const shaderBlocks = extractGlslWgslModifyBlocks(perlinWaveShaderGlsl, perlinWaveShaderWgsl);
         rt.applySceneGsplatContribution(
             {
                 id: PERLIN_WAVE_COMPOSER_ID,

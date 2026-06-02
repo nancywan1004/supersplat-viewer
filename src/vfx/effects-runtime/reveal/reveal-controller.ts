@@ -7,9 +7,10 @@ import {
     clearPersistentRevealTrack,
     getPersistentEffectPaused,
     patchRevealSettingsFromParams,
-    readPersistentRevealParams,
+    readPersistentSceneEffects,
     readRevealParams,
     hasRevealInSettings,
+    hasEnabledPersistentSceneEffects,
     patchRevealRuntimeMirror,
     patchPersistentRuntimeMirror,
     syncEffectsRuntimeStateFromSettings
@@ -17,12 +18,15 @@ import {
 import { DEFAULT_VFX_TOTAL_DURATION } from '../../../schemas/v2-custom';
 import { LegacyRevealEffect as RevealConfig } from '../../../settings';
 import { Global, type RevealEffectType } from '../../../types';
+import { PERSISTENT_EFFECT_TYPE_VALUES } from '../effect-types';
 import type { ExperienceSettings } from '../../../schemas/v2';
 import type { EffectsRuntime } from '..';
 import { nightModeUsesComposerPath } from '../../lighting/night-mode';
 import {
     destroyAllPersistentGsplatScriptsOnEntity,
-    destroyAllRevealGsplatScriptsOnEntity
+    destroyAllRevealGsplatScriptsOnEntity,
+    forEachMountedPersistentGsplatScript,
+    getMountedPersistentGsplatScript
 } from '../gsplat-effect-script-registry';
 import {
     getPersistentGsplatEffectsRuntimeScriptType,
@@ -152,6 +156,7 @@ export class RevealController {
         const revealParams = readRevealParams(settings as ExperienceSettings);
         this.config = {
             type: (revealParams?.type as RevealConfig['type']) ?? 'none',
+            enable: revealParams?.enable !== false,
             autoStart: revealParams?.autoStart ?? true,
             totalDuration: revealParams?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION,
             effectParams:
@@ -187,14 +192,14 @@ export class RevealController {
         });
 
         events.on('persistentRevealConfigChanged', (pack: { type?: string; effectParams?: Record<string, unknown> }) => {
-            if (!this._persistentGsplat.isPersistentTimelineBound() || !this.currentScript) {
-                return;
-            }
             const t = pack?.type;
             if (!t || !isPersistentVfx(t as any)) {
                 return;
             }
-            applyPersistentEffectParamsToScript(this.currentScript, t, pack.effectParams ?? undefined);
+            const script = getMountedPersistentGsplatScript(this.gsplatEntity, t) as any;
+            if (script) {
+                applyPersistentEffectParamsToScript(script, t, pack.effectParams ?? undefined);
+            }
         });
 
         // 协议 / UI：强制结束「一次性 reveal」播放；persistent **实体脚本**不由此处创建/销毁，仅可能重绑指针（见 `teardownOneShotRevealGsplatScripts`）。
@@ -254,7 +259,11 @@ export class RevealController {
         // 创建初始效果（如果类型不是 none）：
         // 主路径：Viewer 在 `readyToRender=true` 之前调用 {@link ensureInitialEffectCreatedBeforeFirstDisplay}，
         // 避免首帧已上屏却无 VFX 的一帧偏色/蓝光闪。此处仍注册 firstFrame 作为材质晚就绪时的兜底。
-        if (this.config.type !== 'none' && !isPersistentVfx(this.config.type as any)) {
+        if (
+            this.config.type !== 'none' &&
+            this.config.enable !== false &&
+            !isPersistentVfx(this.config.type as any)
+        ) {
             const createInitial = () => {
                 if (this.currentScript) return;
                 this.createEffect(this.config.type as string);
@@ -298,7 +307,12 @@ export class RevealController {
      * 若脚本已存在则 no-op；`firstFrame` 上的兜底仍会尝试创建。
      */
     ensureInitialEffectCreatedBeforeFirstDisplay(): void {
-        if (this.config.type === 'none' || this.currentScript || isPersistentVfx(this.config.type as any)) {
+        if (
+            this.config.type === 'none' ||
+            this.config.enable === false ||
+            this.currentScript ||
+            isPersistentVfx(this.config.type as any)
+        ) {
             return;
         }
         this.createEffect(this.config.type as string);
@@ -1264,8 +1278,10 @@ export class RevealController {
 
         patchRevealSettingsFromParams(this.global.settings as ExperienceSettings, newConfig as Partial<RevealConfig>);
         const rp = readRevealParams(this.global.settings as ExperienceSettings);
+        const prevEnable = this.config.enable !== false;
         if (rp) {
             this.config.type = (rp.type as RevealConfig['type']) ?? 'none';
+            this.config.enable = rp.enable !== false;
             this.config.autoStart = rp.autoStart ?? true;
             this.config.totalDuration = rp.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
             this.config.effectParams =
@@ -1277,26 +1293,37 @@ export class RevealController {
 
         console.log('Updated reveal config:', this.config);
 
-        // 如果类型改变，重新创建效果并重置动画
+        const enableNow = this.config.enable !== false;
+        if (!enableNow || this.config.type === 'none') {
+            const hasReveal = hasRevealInSettings(this.global.settings as ExperienceSettings);
+            this.global.state.hasRevealEffect = hasReveal;
+            this.global.events.fire('hasRevealEffect:changed', hasReveal);
+            this.createEffect('none');
+            this.restoreNightModeIfNeeded('revealDisabledOrNone');
+            if (newConfig.type !== undefined) {
+                this.global.events.fire('revealType:changed', this.config.type);
+            }
+            return;
+        }
+
+        if (newConfig.enable === true && !prevEnable) {
+            this.global.state.hasRevealEffect = hasRevealInSettings(this.global.settings as ExperienceSettings);
+            this.global.events.fire('hasRevealEffect:changed', this.global.state.hasRevealEffect);
+            return;
+        }
+
         if (newConfig.type && newConfig.type !== oldType) {
             const nextType = newConfig.type as RevealConfig['type'];
             const hasReveal = hasRevealInSettings(this.global.settings as ExperienceSettings);
             this.global.state.hasRevealEffect = hasReveal;
             this.global.events.fire('hasRevealEffect:changed', hasReveal);
-            // 当切回 none 时，视为退出特效，恢复进入特效前的 nightFade
             if (nextType === 'none') {
                 this.createEffect(nextType);
                 this.restoreNightModeIfNeeded('typeChangedToNone');
-            } else {
-                // 切换类型统一走 revealRestart 节奏：Bloom 锁定、延迟层门控与导出/首访语义保持一致
-                this.global.events.fire('revealRestart', false);
             }
-            // 触发事件以更新 UI（统一使用 revealType:changed）
             this.global.events.fire('revealType:changed', nextType);
-            // 重置播放动画
             this.global.events.fire('inputEvent', 'resetAnim');
 
-            // 切到 none 时走 `createEffect` 而非 `restart`，需在此显式补挂 persistent；非 none 的补挂由 `restart`→`schedulePersistent…` 统一处理。
             if (
                 shouldRequestPersistentGsplatRemount(
                     'revealTrackExplicitlyNone',
@@ -1306,16 +1333,10 @@ export class RevealController {
             ) {
                 this.global.events.fire('persistentGsplatEffectRemountRequested', false);
             }
+            return;
         }
-        // totalDuration 改变时：统一按“一次性 reveal（非 none 且非 persistent）”判定是否重建，避免硬编码类型白名单
-        else if (newConfig.totalDuration !== undefined && 
-                 newConfig.totalDuration !== oldTotalDuration &&
-                 isRevealTimedVfxType(this.config.type)) {
-            this.createEffect(this.config.type);
-            console.log('Recreated effect due to totalDuration change');
-        }
-        // 更新现有script的配置
-        else if (this.currentScript) {
+
+        if (this.currentScript) {
             this.updateCurrentScriptConfig(newConfig as Partial<RevealConfig>);
         }
     }
@@ -1366,10 +1387,25 @@ export class RevealController {
         this.syncRevealParticipation(script, requestedRadius);
     }
 
-    /**
-     * 双轨 persistent 已启用且当前 `config.type` 为一次性 reveal 时，`createEffect`/`restart` 会拆掉 persistent；
-     * 在本轮 reveal 的 `revealComplete` 之后再 remount（与协议层 `applyGsplatPersistentParamsPatch` 语义一致）。
-     */
+    /** 一次性开场重播前卸 persistent（composer + 实体脚本）；播完由 {@link schedulePersistentGsplatRemountAfterRevealCompleteIfWanted} 挂回。 */
+    private suspendPersistentSceneForOneShotReveal(): void {
+        const settings = this.global.settings as ExperienceSettings;
+        if (!hasEnabledPersistentSceneEffects(settings) || !this.gsplatEntity) {
+            return;
+        }
+        destroyAllPersistentGsplatScriptsOnEntity(this.gsplatEntity);
+        this._persistentGsplat.finishPersistentGsplatExternalUnmount();
+        this.bindPersistentTimelineScript(null);
+
+        const rt = (this.global.app as any).effectsRuntime as EffectsRuntime | undefined;
+        if (rt?.composer) {
+            for (const id of PERSISTENT_EFFECT_TYPE_VALUES) {
+                rt.composer.removeContribution(id);
+            }
+            rt.composer.compose();
+        }
+    }
+
     private schedulePersistentGsplatRemountAfterRevealCompleteIfWanted(): void {
         const rt = this.config.type as string;
         if (
@@ -1387,7 +1423,7 @@ export class RevealController {
     }
 
     restart(restartAnimTrack: boolean = false) {
-        if (!this.config || this.config.type === 'none') {
+        if (!this.config || this.config.type === 'none' || this.config.enable === false) {
             console.log('No reveal effect active, cannot restart');
             return;
         }
@@ -1408,6 +1444,13 @@ export class RevealController {
         }
 
         console.log('Restarting reveal effect:', this.config.type, restartAnimTrack ? '(with animTrack)' : '(without animTrack)');
+
+        this.suspendPersistentSceneForOneShotReveal();
+
+        patchRevealRuntimeMirror(this.global.state, {
+            activeType: this.config.type as RevealEffectType,
+            status: 'playing'
+        });
 
         // 先禁用当前效果（如果存在），确保清理状态
         if (this.currentScript) {
@@ -1522,20 +1565,26 @@ export class RevealController {
      * 仅 **persistent** 可持续特效：切换脚本 `isPaused` 与 `persistent.status`（`playing` ↔ `paused`）。
      */
     togglePersistentPlayPause() {
-        if (!this.currentScript || !isPersistentVfx(this.config.type as any)) {
+        if (readPersistentSceneEffects(this.global.settings as ExperienceSettings).length === 0) {
             return;
         }
         this.setPersistentPlayPause(!getPersistentEffectPaused(this.global.state));
     }
 
     /**
-     * 仅 **persistent**：`persistent.status` 与脚本 `isPaused` 对齐，并 `effectPlayPause:changed`（供 persistent UI）。
+     * 仅 **persistent**：`persistent.status` 与全部已挂载脚本 `isPaused` 对齐，并 `effectPlayPause:changed`（供 persistent UI）。
      */
     setPersistentPlayPause(paused: boolean) {
-        if (!this.currentScript || !isPersistentVfx(this.config.type as any)) {
+        const enabled = readPersistentSceneEffects(this.global.settings as ExperienceSettings);
+        if (enabled.length === 0) {
             return;
         }
-        this.currentScript.isPaused = paused;
+        forEachMountedPersistentGsplatScript(this.gsplatEntity, enabled.map(e => e.type), (_t, script) => {
+            (script as { isPaused?: boolean }).isPaused = paused;
+        });
+        if (this.currentScript && this._persistentGsplat.isPersistentTimelineBound()) {
+            (this.currentScript as { isPaused?: boolean }).isPaused = paused;
+        }
         patchPersistentRuntimeMirror(this.global.state, { status: paused ? 'paused' : 'playing' });
         this.global.events.fire('effectPlayPause:changed', paused);
     }

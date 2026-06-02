@@ -1,10 +1,5 @@
-export const shaderGLSL = /* glsl */`
-uniform float uTime;
-uniform vec3 uCenter;
-uniform float uIntensity;
-uniform float uWaveAmplitude;
-uniform float uWaveFrequency;
-uniform float uWaveSpeed;
+/** composer layered 专用（不含 wave-common；合成时由 {@link GsplatEffectComposer} prepend） */
+export const perlinWaveShaderGlsl = /* glsl */`
 uniform float uScaleBlend;
 uniform float uEndRadius;
 
@@ -14,13 +9,6 @@ mat2 rot(float a) {
     float c = cos(a);
     return mat2(c, -s, s, c);
 }
-
-         // Pseudo-random hash function
-          vec3 hash2(vec3 p) {
-            p = fract(p * 0.3183099 + 0.1);
-            p *= 17.0;
-            return fract(vec3(p.x * p.y * p.z, p.x + p.y * p.z, p.x * p.y + p.z));
-          }
 
           // 3D Perlin-style noise function
           vec3 noise2(vec3 p) {
@@ -83,13 +71,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
 }
 `;
 
-export const shaderWGSL = /* wgsl */`
-uniform uTime: f32;
-uniform uCenter: vec3f;
-uniform uIntensity: f32;
-uniform uWaveAmplitude: f32;
-uniform uWaveFrequency: f32;
-uniform uWaveSpeed: f32;
+export const perlinWaveShaderWgsl = /* wgsl */`
 uniform uScaleBlend: f32;
 
 // Helper functions
@@ -100,17 +82,6 @@ fn rot(a: f32) -> mat2x2f {
         vec2f(c, -s),
         vec2f(s, c)
     );
-}
-
-// Pseudo-random hash function
-fn hash2(p: vec3f) -> vec3f {
-    var p2 = fract(p * 0.3183099 + 0.1);
-    p2 *= 17.0;
-    return fract(vec3f(
-        p2.x * p2.y * p2.z,
-        p2.x + p2.y * p2.z,
-        p2.x * p2.y + p2.z
-    ));
 }
 
 // 3D Perlin-style noise function

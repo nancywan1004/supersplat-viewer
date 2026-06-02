@@ -41,7 +41,10 @@ import { shouldDeferPersistentMount } from './settings-serialize/effects-sync';
 import type { Global } from './types';
 import { nightDeferredByReveal, revealBlocksAnim } from './vfx/effects-runtime/reveal/reveal-policy';
 import { RevealController } from './vfx/effects-runtime/reveal/reveal-controller';
-import { runPersistentGsplatEntityLifecycle } from './vfx/effects-runtime/persistent/persistent-gsplat-lifecycle';
+import {
+    applyPersistentSceneEffectEnableChange,
+    runPersistentGsplatEntityLifecycle
+} from './vfx/effects-runtime/persistent/persistent-gsplat-lifecycle';
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
 import { getSkyboxRadius } from './loaders/skybox-loader';
 import { readSkyboxUrlFromSettings } from './settings-serialize/settings-serialize-helper';
@@ -712,6 +715,18 @@ class Viewer {
                     this.syncPersistentRevealGsplat(gsplatEntity, restartAnim === true);
                 });
             });
+            global.events.on(
+                'persistentGsplatEffectEnableChanged',
+                (payload: { effectType?: string; enable?: boolean }) => {
+                    const effectType = payload?.effectType;
+                    if (typeof effectType !== 'string') {
+                        return;
+                    }
+                    global.app.once('frameend', () => {
+                        this.applyPersistentSceneEffectEnable(gsplatEntity, effectType, payload.enable === true);
+                    });
+                }
+            );
             const es = global.settings as ExperienceSettings;
             if (shouldDeferPersistentMount(es)) {
                 events.once('revealComplete', () => {
@@ -1293,6 +1308,20 @@ z: ${cameraInfo.target.z.toFixed(6)}
             gsplatEntity,
             revealController: this.revealController,
             restartAnimTrack
+        });
+    }
+
+    private applyPersistentSceneEffectEnable(
+        gsplatEntity: Entity,
+        effectType: string,
+        enable: boolean
+    ): void {
+        applyPersistentSceneEffectEnableChange({
+            global: this.global,
+            gsplatEntity,
+            revealController: this.revealController,
+            effectType,
+            enable
         });
     }
 }

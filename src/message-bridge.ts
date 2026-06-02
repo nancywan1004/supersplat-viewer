@@ -123,7 +123,9 @@ type InboundPayload =
     | { type: 'SHADOW_INTENSITY_UPDATE'; value?: number }
     | { type: 'SHADOW_DIRECTION_SET'; value?: number }
     | { type: 'EFFECT_PARAMS_PATCH'; module?: 'effects'; effectId: string; params: Record<string, unknown> }
-    | { type: 'EFFECT_TOGGLE'; module?: 'effects'; effectId: string; value: boolean }
+    | { type: 'EFFECT_TOGGLE'; module?: 'effects'; effectId: string; params: Record<string, unknown> }
+    | { type: 'EFFECT_ADD'; module?: 'effects'; effectId: string; effectType: string; targetId?:string }
+    | { type: 'EFFECT_DELETE'; module?: 'effects'; effectId: string; effectType?: string; targetId?:string }
     | { type: 'EFFECT_REPLAY'; module?: 'effects'; effectId: string; restartAnim?: boolean }
     | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean; projectName?: string }
     | { type: 'VIDEO_EXPORT_CANCEL' }
@@ -714,13 +716,61 @@ const initPostMessageBridge = (global: Global) => {
                     console.warn('[MessageBridge] EFFECT_TOGGLE ignored: unsupported effectId', p.effectId);
                     break;
                 }
-                if (typeof (p as { value?: unknown }).value !== 'boolean') {
-                    console.warn('[MessageBridge] EFFECT_TOGGLE ignored: value must be boolean');
+                const toggleParams = (p as { params?: unknown }).params;
+                if (typeof toggleParams !== 'object' || toggleParams === null) {
+                    console.warn('[MessageBridge] EFFECT_TOGGLE ignored: params must be object');
                     break;
                 }
-                dispatchEffects(global, 'EFFECT_TOGGLE', {
+                const tpr = { ...(toggleParams as Record<string, unknown>) };
+                if (!paramsPatchHasPersistentKeys(tpr)) {
+                    console.warn(
+                        '[MessageBridge] EFFECT_TOGGLE ignored: params must be single nested persistent type block'
+                    );
+                    break;
+                }
+                dispatchEffects(global, 'EFFECT_PARAMS_PATCH', {
                     effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
-                    value: (p as { value: boolean }).value
+                    params: tpr
+                });
+                break;
+            }
+            case 'EFFECT_ADD': {
+                if (p.module !== undefined && p.module !== MESSAGE_BRIDGE_MODULE.effects) {
+                    console.warn('[MessageBridge] EFFECT_ADD ignored: module must be "effects" when present');
+                    break;
+                }
+                if (p.effectId !== SCENE_GSPLAT_REVEAL_EFFECT_ID && p.effectId !== SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
+                    console.warn('[MessageBridge] EFFECT_ADD ignored: unsupported effectId', p.effectId);
+                    break;
+                }
+                const addType = (p as { effectType?: unknown }).effectType;
+                if (typeof addType !== 'string') {
+                    console.warn('[MessageBridge] EFFECT_ADD ignored: effectType must be string');
+                    break;
+                }
+                dispatchEffects(global, 'EFFECT_ADD', {
+                    effectId: p.effectId as string,
+                    effectType: addType
+                });
+                break;
+            }
+            case 'EFFECT_DELETE': {
+                if (p.module !== undefined && p.module !== MESSAGE_BRIDGE_MODULE.effects) {
+                    console.warn('[MessageBridge] EFFECT_DELETE ignored: module must be "effects" when present');
+                    break;
+                }
+                if (p.effectId !== SCENE_GSPLAT_REVEAL_EFFECT_ID && p.effectId !== SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
+                    console.warn('[MessageBridge] EFFECT_DELETE ignored: unsupported effectId', p.effectId);
+                    break;
+                }
+                const delType = (p as { effectType?: unknown }).effectType;
+                if (p.effectId === SCENE_GSPLAT_PERSISTENT_EFFECT_ID && typeof delType !== 'string') {
+                    console.warn('[MessageBridge] EFFECT_DELETE ignored: effectType required for persistent scene');
+                    break;
+                }
+                dispatchEffects(global, 'EFFECT_DELETE', {
+                    effectId: p.effectId as string,
+                    ...(typeof delType === 'string' ? { effectType: delType } : {})
                 });
                 break;
             }

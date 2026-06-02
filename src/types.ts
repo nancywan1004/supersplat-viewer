@@ -31,10 +31,10 @@ export type EffectsRuntimeState = {
         status: RevealEffectRuntimeStatus;
     };
     persistent: {
-        /** scene persistent 固定 effectId（当前写死为 `scene.gsplat-reveal`） */
+        /** scene persistent 固定 effectId（`scene.gsplat-persistent-scene`） */
         activeEffectId: string;
-        /** 当前运行中的 persistent 类型（无则为 `undefined`） */
-        activeType?: PersistentEffectType;
+        /** 当前运行中的 persistent 类型列表（多选；无则为 `undefined`） */
+        activeTypes?: PersistentEffectType[];
         /** 可持续轨状态真源；`inactive` 表示未激活 */
         status: PersistentEffectRuntimeStatus;
     };

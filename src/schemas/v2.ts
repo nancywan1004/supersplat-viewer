@@ -308,10 +308,10 @@ const validateV2 = (data: unknown): ExperienceSettings => {
             throw new Error('settings.effects.reveal.paramsById must be an object');
         }
         const pers = assertObject(ef.persistent, 'settings.effects.persistent');
-        assertString(pers.activeEffectId, 'settings.effects.persistent.activeEffectId');
-        assertBoolean(pers.enabled, 'settings.effects.persistent.enabled');
-        if (typeof pers.paramsById !== 'object' || pers.paramsById === null) {
-            throw new Error('settings.effects.persistent.paramsById must be an object');
+        const scene = assertObject(pers.scene, 'settings.effects.persistent.scene');
+        assertString(scene.activeEffectId, 'settings.effects.persistent.scene.activeEffectId');
+        if (typeof scene.paramsById !== 'object' || scene.paramsById === null) {
+            throw new Error('settings.effects.persistent.scene.paramsById must be an object');
         }
         const asset = assertObject(ef.asset, 'settings.effects.asset');
         if (typeof asset.defaultParamsById !== 'object' || asset.defaultParamsById === null) {

@@ -6,6 +6,11 @@ import {
     type ComposedGsplatModifyResult,
     type ComposerDiagnostic
 } from './composer-diagnostics';
+import { OVERALL_WAVE_COMPOSER_ID, PERLIN_WAVE_COMPOSER_ID } from './gsplat-effect-layers-extractor';
+import { GSPLAT_WAVE_COMMON_GLSL, GSPLAT_WAVE_COMMON_WGSL } from './persistent/gsplat-wave-shader-common';
+
+/** layered 合成时共享 uniform/hash2，由 composer prepend 一次 */
+const WAVE_LAYERED_COMPOSER_IDS = new Set<string>([PERLIN_WAVE_COMPOSER_ID, OVERALL_WAVE_COMPOSER_ID]);
 
 const NOOP_GLSL = /* glsl */ `
 void modifySplatCenter(inout vec3 center) {
@@ -72,6 +77,10 @@ function buildGlsl(active: GsplatContribution[]): string {
     const rot: string[] = [];
     const col: string[] = [];
 
+    if (active.some((c) => WAVE_LAYERED_COMPOSER_IDS.has(c.id))) {
+        headers.push(`// --- shared: wave-common ---\n${GSPLAT_WAVE_COMMON_GLSL.trim()}`);
+    }
+
     for (const c of active) {
         const g = c.shaderBlocks.glsl;
         if (g.header?.trim()) headers.push(`// --- header: ${c.id} ---\n${g.header.trim()}`);
@@ -111,6 +120,10 @@ function buildWgsl(active: GsplatContribution[]): string {
     const pos: string[] = [];
     const rot: string[] = [];
     const col: string[] = [];
+
+    if (active.some((c) => WAVE_LAYERED_COMPOSER_IDS.has(c.id))) {
+        headers.push(`// --- shared: wave-common ---\n${GSPLAT_WAVE_COMMON_WGSL.trim()}`);
+    }
 
     for (const c of active) {
         const g = c.shaderBlocks.wgsl;
@@ -206,6 +219,9 @@ export class GsplatEffectComposer {
     private lastComposition: ComposedGsplatModifyResult | null = null;
 
     private lastSignature = '';
+
+    /** 避免 cap/冲突诊断在每帧 compose 时重复刷控制台 */
+    private lastLoggedDiagnosticKey = '';
 
     /** signature 变化次数（供调试/性能） */
     recomposeCount = 0;
@@ -404,8 +420,15 @@ export class GsplatEffectComposer {
         };
         this.lastComposition = result;
 
-        if (diagnostics.some((d) => d.code !== ComposerDiagnosticCode.OK)) {
-            console.warn('[GsplatEffectComposer]', diagnostics);
+        const nonOk = diagnostics.filter((d) => d.code !== ComposerDiagnosticCode.OK);
+        if (nonOk.length === 0) {
+            this.lastLoggedDiagnosticKey = '';
+        } else {
+            const warnKey = nonOk.map((d) => `${d.code}:${d.contributionId ?? ''}:${d.message ?? ''}`).join('|');
+            if (warnKey !== this.lastLoggedDiagnosticKey) {
+                this.lastLoggedDiagnosticKey = warnKey;
+                console.warn('[GsplatEffectComposer]', diagnostics);
+            }
         }
 
         return result;

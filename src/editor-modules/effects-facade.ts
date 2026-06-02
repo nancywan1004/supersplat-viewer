@@ -1,6 +1,10 @@
 import {
     applyGsplatRevealParamsPatch,
+    applyGsplatRevealEffectAdd,
+    applyGsplatRevealEffectDelete,
     applyGsplatPersistentParamsPatch,
+    applyGsplatPersistentEffectAdd,
+    applyGsplatPersistentEffectDelete,
     isEffectProtocolEnvelope,
     paramsPatchHasRevealKeys,
     paramsPatchHasPersistentKeys,
@@ -70,9 +74,11 @@ class EffectsFacade implements ModuleFacade {
             const raw = command.payload;
             if (!isEffectProtocolEnvelope(raw)) break;
             if (raw.effectId !== SCENE_GSPLAT_PERSISTENT_EFFECT_ID) break;
-            const value = (raw as { value?: unknown }).value;
-            if (typeof value !== 'boolean') break;
-            applyGsplatPersistentParamsPatch(global, { enabled: value });
+            const params = (raw as { params?: unknown }).params;
+            if (typeof params !== 'object' || params === null) break;
+            const pr = params as Record<string, unknown>;
+            if (!paramsPatchHasPersistentKeys(pr)) break;
+            applyGsplatPersistentParamsPatch(global, pr);
             break;
         }
         case 'EFFECT_REPLAY': {
@@ -84,6 +90,30 @@ class EffectsFacade implements ModuleFacade {
             if (revealType === 'none' || isPersistentVfx(revealType)) break;
             const restartAnim = (raw as { restartAnim?: boolean }).restartAnim !== false;
             events.fire('revealRestart', restartAnim);
+            break;
+        }
+        case 'EFFECT_ADD': {
+            const raw = command.payload;
+            if (!isEffectProtocolEnvelope(raw)) break;
+            const effectType = (raw as { effectType?: unknown }).effectType;
+            if (typeof effectType !== 'string') break;
+            if (raw.effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID) {
+                applyGsplatRevealEffectAdd(global, effectType);
+            } else if (raw.effectId === SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
+                applyGsplatPersistentEffectAdd(global, effectType);
+            }
+            break;
+        }
+        case 'EFFECT_DELETE': {
+            const raw = command.payload;
+            if (!isEffectProtocolEnvelope(raw)) break;
+            if (raw.effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID) {
+                applyGsplatRevealEffectDelete(global);
+            } else if (raw.effectId === SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
+                const effectType = (raw as { effectType?: unknown }).effectType;
+                if (typeof effectType !== 'string') break;
+                applyGsplatPersistentEffectDelete(global, effectType);
+            }
             break;
         }
         default:

@@ -1,22 +1,11 @@
-export const shaderGLSL = /* glsl */`
-uniform float uTime;
-uniform vec3 uCenter;
+/** composer layered 专用（不含 wave-common） */
+export const overallWaveShaderGlsl = /* glsl */`
 uniform float uNoiseType;
-uniform float uIntensity;
-uniform float uWaveAmplitude;
-uniform float uWaveFrequency;
-uniform float uWaveSpeed;
 uniform vec3 uWaveDirection;
 uniform vec3 uCrestTint;
 uniform vec3 uTroughTint;
 
 const float TAU = 6.28318530718;
-
-vec3 hash2(vec3 p) {
-    p = fract(p * 0.3183099 + 0.1);
-    p *= 17.0;
-    return fract(vec3(p.x * p.y * p.z, p.x + p.y * p.z, p.x * p.y + p.z));
-}
 
 vec3 noise3(vec3 p) {
     vec3 i = floor(p);
@@ -138,27 +127,11 @@ void modifySplatColor(vec3 center, inout vec4 color) {
 }
 `;
 
-export const shaderWGSL = /* wgsl */`
-uniform uTime: f32;
-uniform uCenter: vec3f;
+export const overallWaveShaderWgsl = /* wgsl */`
 uniform uNoiseType: f32;
-uniform uIntensity: f32;
-uniform uWaveAmplitude: f32;
-uniform uWaveFrequency: f32;
-uniform uWaveSpeed: f32;
 uniform uWaveDirection: vec3f;
 uniform uCrestTint: vec3f;
 uniform uTroughTint: vec3f;
-
-fn hash2(p: vec3f) -> vec3f {
-    var p2 = fract(p * 0.3183099 + 0.1);
-    p2 *= 17.0;
-    return fract(vec3f(
-        p2.x * p2.y * p2.z,
-        p2.x + p2.y * p2.z,
-        p2.x * p2.y + p2.z
-    ));
-}
 
 fn noise3(p: vec3f) -> vec3f {
     let i = floor(p);
