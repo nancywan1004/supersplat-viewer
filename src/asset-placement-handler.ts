@@ -13,9 +13,12 @@ import {
 } from './loaders/asset-loader';
 import { pickWorldFromClientXY } from './picker';
 import type { InputArbiter } from './input-arbiter';
+import { getDefaultWobbleEffectParams } from './vfx/effects-runtime/asset/wobble-effect-params';
+import { ASSET_EFFECT_TYPE_VALUES } from './vfx/effects-runtime/effect-types';
 
 const PLACED_ASSETS_NAME = 'placedAssets';
 const ASSET_LOAD_TIMEOUT_MS = DEFAULT_ASSET_LOAD_TIMEOUT_MS;
+const GSPLAT_WOBBLE_TYPE = ASSET_EFFECT_TYPE_VALUES[1];
 
 export type AssetPlacementHandlerDeps = {
     pushEditHistory?: (global: Global, label?: string) => void;
@@ -58,6 +61,29 @@ function getSceneAssetsRestoreController(global: Global): SceneAssetsRestoreCont
         };
     }
     return anyGlobal.__sceneAssetsRestoreController;
+}
+
+function startRestoredAssetDefaultEffectIfConfigured(global: Global, entry: ScenePlacedItem): void {
+    if (entry.assetType !== 'gaussian' || !entry.entity.gsplat) {
+        return;
+    }
+
+    const settings = global.settings as any;
+    const instance = settings.effects?.asset?.instancesByTargetId?.[entry.id];
+    if (!instance || typeof instance !== 'object' || Array.isArray(instance)) {
+        return;
+    }
+
+    global.events.fire('assetEffect:start', {
+        targetId: entry.id,
+        type: GSPLAT_WOBBLE_TYPE,
+        params: {
+            effectParams: getDefaultWobbleEffectParams('deepMeditation')
+        },
+        entities: {
+            primary: entry.entity
+        }
+    });
 }
 
 /**
@@ -542,6 +568,8 @@ export async function restoreSceneAssetsFromSettings(global: Global): Promise<vo
         const visible = sa.visible !== false;
         entry.visible = visible;
         entry.entity.enabled = visible;
+
+        startRestoredAssetDefaultEffectIfConfigured(global, entry);
     }
 }
 
