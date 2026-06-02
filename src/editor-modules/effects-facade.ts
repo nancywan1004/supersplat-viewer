@@ -1,9 +1,11 @@
 import {
+    applyAssetEffectDelete,
     applyAssetEffectParamsPatch,
     applyAssetEffectStart,
     readAssetEffectInstanceForTarget,
     applyAssetEffectStop,
-    isAssetEffectProtocolEnvelope
+    isAssetEffectProtocolEnvelope,
+    normalizeAssetEffectEnvelope
 } from './protocol-adapters/asset-effects-protocol-adapter';
 import {
     applyGsplatRevealParamsPatch,
@@ -22,7 +24,6 @@ import {
     SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID,
     resolveAssetEffectType
 } from '../vfx/effects-runtime/effect-types';
-import { normalizeAssetEffectEnvelope } from './protocol-adapters/asset-effects-protocol-adapter';
 import {
     clearPersistentSubTrack,
     patchAssetRuntimeMirror,
@@ -156,6 +157,30 @@ class EffectsFacade implements ModuleFacade {
                 effectParams: params
             });
             global.events.fire('persistentGsplatEffectRemountRequested', false);
+            break;
+        }
+        case 'EFFECT_DELETE': {
+            const raw = command.payload;
+            if (!raw || typeof raw !== 'object') break;
+            const effectId = (raw as { effectId?: unknown }).effectId;
+            if (typeof effectId !== 'string') break;
+            if (effectId === ASSET_GSPLAT_EFFECT_ID) {
+                const targetId = (raw as { targetId?: unknown }).targetId;
+                if (typeof targetId !== 'string' || targetId.length === 0) break;
+                applyAssetEffectDelete(global, {
+                    effectId,
+                    targetId
+                });
+                break;
+            }
+            if (
+                effectId === SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID ||
+                effectId === SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID
+            ) {
+                clearPersistentSubTrack(global.settings, effectId);
+                syncEffectsRuntimeStateFromSettings(global.state, global.settings);
+                global.events.fire('persistentGsplatEffectRemountRequested', false);
+            }
             break;
         }
         case 'EFFECT_PARAMS_PATCH': {

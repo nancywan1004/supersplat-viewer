@@ -5,6 +5,8 @@
 
 import type { ExperienceSettings } from '../../schemas/v2';
 import {
+    deleteAssetInstanceFromSettings,
+    deleteAssetRuntimeMirror,
     findAssetMorphOwnerTargetId,
     patchAssetInstanceFromParams,
     patchAssetRuntimeMirror,
@@ -34,6 +36,12 @@ export type AssetEffectProtocolEnvelope = {
     effectId: string;
     targetId: string;
     params?: Record<string, unknown>;
+};
+
+export type AssetEffectDeleteProtocolEnvelope = {
+    module?: EffectsProtocolModule;
+    effectId: string;
+    targetId: string;
 };
 
 export function isAssetEffectProtocolEnvelope(
@@ -263,6 +271,46 @@ export function applyAssetEffectParamsPatch(global: Global, envelope: AssetEffec
         type: merged.type,
         params: merged
     });
+    return true;
+}
+
+/**
+ * `EFFECT_DELETE`：删除 asset 轨配置与运行态缓存，并停掉场景中正在播放的实例。
+ */
+export function applyAssetEffectDelete(global: Global, envelope: AssetEffectDeleteProtocolEnvelope): boolean {
+    if (!isAssetGsplatPackageId(envelope.effectId) && resolveAssetEffectType(envelope.effectId, undefined) === null) {
+        return false;
+    }
+    if (envelope.targetId.length === 0) {
+        return false;
+    }
+
+    const settings = global.settings as ExperienceSettings;
+    const runtimeInstances = global.state.effectsRuntimeState?.asset?.instances ?? {};
+    const targetIds = new Set<string>();
+    const ownerTargetId =
+        findAssetMorphOwnerTargetId(settings, envelope.targetId) ?? envelope.targetId;
+    targetIds.add(ownerTargetId);
+
+    if (targetIds.size === 0) {
+        return true;
+    }
+
+    for (const targetId of targetIds) {
+        const current = readAssetInstanceParams(settings, targetId);
+        const runtimeType = runtimeInstances[targetId]?.activeType;
+        const type = current?.type ?? runtimeType;
+
+        deleteAssetInstanceFromSettings(settings, targetId);
+        if (type) {
+            global.events.fire('assetEffect:stop', { targetId, type });
+        }
+        deleteAssetRuntimeMirror(global.state, targetId);
+        if (type) {
+            global.events.fire('assetEffect:configChanged', { targetId, type });
+        }
+    }
+
     return true;
 }
 

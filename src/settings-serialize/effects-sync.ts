@@ -384,6 +384,17 @@ export function patchAssetInstanceFromParams(
     return next;
 }
 
+/** 删除 `settings.effects.asset.instancesByTargetId[targetId]` 并返回删除前配置 */
+export function deleteAssetInstanceFromSettings(
+    settings: ExperienceSettings,
+    targetId: string
+): EffectsAssetInstance | null {
+    const e = ensureEffectsSettings(settings);
+    const current = readAssetInstanceParams(settings, targetId);
+    delete e.asset.instancesByTargetId![targetId];
+    return current;
+}
+
 /** 更新 `state.effectsRuntimeState.asset.instances[targetId]` */
 export function patchAssetRuntimeMirror(
     state: State,
@@ -402,6 +413,14 @@ export function patchAssetRuntimeMirror(
         activeType: patch.activeType ?? prev?.activeType ?? defaultAssetEffectType(),
         status: patch.status ?? prev?.status ?? 'inactive'
     };
+}
+
+/** 删除 `state.effectsRuntimeState.asset.instances[targetId]` 运行态缓存 */
+export function deleteAssetRuntimeMirror(state: State, targetId: string): void {
+    if (!state.effectsRuntimeState) {
+        return;
+    }
+    delete state.effectsRuntimeState.asset.instances[targetId];
 }
 
 /** 从 settings 实例表同步 asset 运行态（不触发播放） */

@@ -122,6 +122,7 @@ type InboundPayload =
     | { type: 'EFFECT_START'; module?: 'effects'; effectId: string; targetId: string; params?: Record<string, unknown> }
     | { type: 'EFFECT_STOP'; module?: 'effects'; effectId: string; targetId: string }
     | { type: 'EFFECT_ADD'; module?: 'effects'; effectId: string; effectType: string; targetId?: string; params?: Record<string, unknown> }
+    | { type: 'EFFECT_DELETE'; module?: 'effects'; effectId: string; effectType?: string; targetId?: string }
     | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean; projectName?: string }
     | { type: 'VIDEO_EXPORT_CANCEL' };
 
@@ -826,6 +827,43 @@ const initPostMessageBridge = (global: Global) => {
                     break;
                 }
                 console.warn('[MessageBridge] EFFECT_ADD ignored: unsupported effectId', effectId);
+                break;
+            }
+            case 'EFFECT_DELETE': {
+                if (p.module !== undefined && p.module !== MESSAGE_BRIDGE_MODULE.effects) {
+                    console.warn('[MessageBridge] EFFECT_DELETE ignored: module must be "effects" when present');
+                    break;
+                }
+                const effectId = (p as { effectId?: unknown }).effectId;
+                const effectType = (p as { effectType?: unknown }).effectType;
+                const targetId = (p as { targetId?: unknown }).targetId;
+                if (typeof effectId !== 'string') {
+                    console.warn('[MessageBridge] EFFECT_DELETE ignored: effectId must be string');
+                    break;
+                }
+                if (effectType !== undefined && typeof effectType !== 'string') {
+                    console.warn('[MessageBridge] EFFECT_DELETE ignored: effectType must be string when present');
+                    break;
+                }
+                if (
+                    effectId === SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID ||
+                    effectId === SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID
+                ) {
+                    dispatchEffects(global, 'EFFECT_DELETE', { effectId });
+                    break;
+                }
+                if (effectId === ASSET_GSPLAT_EFFECT_ID) {
+                    if (typeof targetId !== 'string' || targetId.length === 0) {
+                        console.warn('[MessageBridge] EFFECT_DELETE ignored: targetId required for asset.gsplat-effects');
+                        break;
+                    }
+                    dispatchEffects(global, 'EFFECT_DELETE', {
+                        effectId,
+                        targetId
+                    });
+                    break;
+                }
+                console.warn('[MessageBridge] EFFECT_DELETE ignored: unsupported effectId', effectId);
                 break;
             }
             case 'EFFECT_TOGGLE': {
