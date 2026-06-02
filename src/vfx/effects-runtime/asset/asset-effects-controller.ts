@@ -26,6 +26,7 @@ import {
     resolveMorphKeyframeUrlsFromEffectParams,
     resolveWobbleEntityFromEffectParams
 } from './asset-effect-entity';
+import { mergeWobbleEffectParams } from './wobble-effect-params';
 
 type ActiveAssetEffect = {
     type: AssetEffectType;
@@ -38,40 +39,41 @@ const GSPLAT_MORPH_TYPE = ASSET_EFFECT_TYPE_VALUES[0];
 const GSPLAT_WOBBLE_TYPE = ASSET_EFFECT_TYPE_VALUES[1];
 
 export function buildWobbleOptions(ep: Record<string, unknown>): GsplatWobbleOptions {
+    const merged = mergeWobbleEffectParams(ep);
     const opts: GsplatWobbleOptions = {};
-    if (typeof ep.continuousRender === 'boolean') opts.continuousRender = ep.continuousRender;
-    if (typeof ep.amplitude === 'number') {
-        opts.amplitude = ep.amplitude;
-    } else if (typeof ep.electronicYawAmplitude === 'number') {
+    if (typeof merged.continuousRender === 'boolean') opts.continuousRender = merged.continuousRender;
+    if (typeof merged.amplitude === 'number') {
+        opts.amplitude = merged.amplitude;
+    } else if (typeof merged.electronicYawAmplitude === 'number') {
         // backward compatible: old 1.0 ~= new amplitude 0.3
-        opts.amplitude = Math.max(0, ep.electronicYawAmplitude) * 0.3;
+        opts.amplitude = Math.max(0, merged.electronicYawAmplitude) * 0.3;
     }
-    if (ep.wobbleAxis === 'x' || ep.wobbleAxis === 'z') opts.wobbleAxis = ep.wobbleAxis;
-    if (ep.motionMode === 'wobble' || ep.motionMode === 'electronic' || ep.motionMode === 'deepMeditation') {
-        opts.motionMode = ep.motionMode;
+    if (merged.wobbleAxis === 'x' || merged.wobbleAxis === 'z') opts.wobbleAxis = merged.wobbleAxis;
+    if (merged.motionMode === 'wobble' || merged.motionMode === 'electronic' || merged.motionMode === 'deepMeditation') {
+        opts.motionMode = merged.motionMode;
     }
-    if (typeof ep.frequency === 'number') opts.frequency = ep.frequency;
-    if (typeof ep.heightScale === 'number') opts.heightScale = ep.heightScale;
-    if (typeof ep.bounceAmplitude === 'number') opts.bounceAmplitude = ep.bounceAmplitude;
-    if (typeof ep.bounceFrequency === 'number') opts.bounceFrequency = ep.bounceFrequency;
-    if (typeof ep.springOscillation === 'number') opts.springOscillation = ep.springOscillation;
-    if (typeof ep.springDamping === 'number') opts.springDamping = ep.springDamping;
-    if (typeof ep.springBlend === 'number') opts.springBlend = ep.springBlend;
-    if (typeof ep.cycleDuration === 'number') opts.cycleDuration = ep.cycleDuration;
-    if (typeof ep.bounceDuration === 'number') opts.bounceDuration = ep.bounceDuration;
-    if (typeof ep.bounceCount === 'number') opts.bounceCount = ep.bounceCount;
-    if (typeof ep.colorMix === 'number') opts.colorMix = ep.colorMix;
-    if (typeof ep.colorBandStart === 'number') opts.colorBandStart = ep.colorBandStart;
-    if (typeof ep.colorBandEnd === 'number') opts.colorBandEnd = ep.colorBandEnd;
-    if (Array.isArray(ep.goldColor) && ep.goldColor.length === 3) {
-        opts.goldColor = ep.goldColor as [number, number, number];
+    if (typeof merged.frequency === 'number') opts.frequency = merged.frequency;
+    if (typeof merged.heightScale === 'number') opts.heightScale = merged.heightScale;
+    if (typeof merged.bounceAmplitude === 'number') opts.bounceAmplitude = merged.bounceAmplitude;
+    if (typeof merged.bounceFrequency === 'number') opts.bounceFrequency = merged.bounceFrequency;
+    if (typeof merged.springOscillation === 'number') opts.springOscillation = merged.springOscillation;
+    if (typeof merged.springDamping === 'number') opts.springDamping = merged.springDamping;
+    if (typeof merged.springBlend === 'number') opts.springBlend = merged.springBlend;
+    if (typeof merged.cycleDuration === 'number') opts.cycleDuration = merged.cycleDuration;
+    if (typeof merged.bounceDuration === 'number') opts.bounceDuration = merged.bounceDuration;
+    if (typeof merged.bounceCount === 'number') opts.bounceCount = merged.bounceCount;
+    if (typeof merged.colorMix === 'number') opts.colorMix = merged.colorMix;
+    if (typeof merged.colorBandStart === 'number') opts.colorBandStart = merged.colorBandStart;
+    if (typeof merged.colorBandEnd === 'number') opts.colorBandEnd = merged.colorBandEnd;
+    if (Array.isArray(merged.goldColor) && merged.goldColor.length === 3) {
+        opts.goldColor = merged.goldColor as [number, number, number];
     }
-    if (typeof ep.haloWidth === 'number') opts.haloWidth = ep.haloWidth;
-    if (typeof ep.haloSpeed === 'number') opts.haloSpeed = ep.haloSpeed;
-    if (typeof ep.haloOpacity === 'number') opts.haloOpacity = ep.haloOpacity;
-    if (typeof ep.bounceStretch === 'number') opts.bounceStretch = ep.bounceStretch;
-    if (typeof ep.wobbleAnchorLift === 'number') opts.wobbleAnchorLift = ep.wobbleAnchorLift;
-    if (typeof ep.anchorLift === 'number') opts.anchorLift = ep.anchorLift;
+    if (typeof merged.haloWidth === 'number') opts.haloWidth = merged.haloWidth;
+    if (typeof merged.haloSpeed === 'number') opts.haloSpeed = merged.haloSpeed;
+    if (typeof merged.haloOpacity === 'number') opts.haloOpacity = merged.haloOpacity;
+    if (typeof merged.bounceStretch === 'number') opts.bounceStretch = merged.bounceStretch;
+    if (typeof merged.wobbleAnchorLift === 'number') opts.wobbleAnchorLift = merged.wobbleAnchorLift;
+    if (typeof merged.anchorLift === 'number') opts.anchorLift = merged.anchorLift;
     return opts;
 }
 

@@ -148,6 +148,11 @@ const REVEAL_PANEL_HTML = (() => {
         <input type="range" id="weatherElongate" class="settingsInput" min="1" max="30" step="0.1" value="1">
         <span id="weatherElongateValue" class="settingsValue">1.0</span>
       </div>
+      <div class="settingsRow hidden" id="weatherAngleRow">
+        <label for="weatherAngle" title="雨丝倾斜角度（天气盒绕局部 X 轴旋转，单位：度）">Angle:</label>
+        <input type="range" id="weatherAngle" class="settingsInput" min="-75" max="75" step="1" value="0">
+        <span id="weatherAngleValue" class="settingsValue">0</span>
+      </div>
       <div class="settingsRow">
         <label for="weatherFogDensity">Fog Density:</label>
         <input type="range" id="weatherFogDensity" class="settingsInput" min="0" max="0.05" step="0.0005" value="0.03">
@@ -341,6 +346,9 @@ export function initRevealUI(global: Global): () => void {
     const weatherMaxSize = container.querySelector('#weatherMaxSize') as HTMLInputElement | null;
     const weatherElongate = container.querySelector('#weatherElongate') as HTMLInputElement | null;
     const weatherElongateValue = container.querySelector('#weatherElongateValue') as HTMLElement | null;
+    const weatherAngleRow = container.querySelector('#weatherAngleRow') as HTMLElement | null;
+    const weatherAngle = container.querySelector('#weatherAngle') as HTMLInputElement | null;
+    const weatherAngleValue = container.querySelector('#weatherAngleValue') as HTMLElement | null;
     const weatherFogDensity = container.querySelector('#weatherFogDensity') as HTMLInputElement | null;
     const weatherFogDensityValue = container.querySelector('#weatherFogDensityValue') as HTMLElement | null;
     const weatherExposure = container.querySelector('#weatherExposure') as HTMLInputElement | null;
@@ -462,6 +470,7 @@ export function initRevealUI(global: Global): () => void {
                 particleMinSize: 0.003,
                 particleMaxSize: 0.003,
                 elongate: 20,
+                angle: 0,
                 fogDensity: 0.010,
                 exposure: 0.5,
                 useFog: true,
@@ -635,6 +644,8 @@ export function initRevealUI(global: Global): () => void {
         writeNumberInput(weatherMinSize, params.particleMinSize, isRain ? 0.003 : 0.006);
         writeNumberInput(weatherMaxSize, params.particleMaxSize, isRain ? 0.003 : 0.012);
         writeSlider(weatherElongate, weatherElongateValue, params.elongate, isRain ? 20 : 1, 1);
+        weatherAngleRow?.classList.toggle('hidden', !isRain);
+        writeSlider(weatherAngle, weatherAngleValue, params.angle, 0, 0);
         writeSlider(weatherFogDensity, weatherFogDensityValue, params.fogDensity, 0.010, 4);
         writeSlider(weatherExposure, weatherExposureValue, params.exposure, 0.5, 2);
         if (weatherBgColor) {
@@ -728,6 +739,7 @@ export function initRevealUI(global: Global): () => void {
             particleMinSize: readNumberInput(weatherMinSize, isRain ? 0.003 : 0.006),
             particleMaxSize: readNumberInput(weatherMaxSize, isRain ? 0.003 : 0.012),
             elongate: readNumberInput(weatherElongate, isRain ? 20 : 1),
+            ...(isRain ? { angle: readNumberInput(weatherAngle, 0) } : {}),
             fogDensity: readNumberInput(weatherFogDensity, 0.010),
             exposure: readNumberInput(weatherExposure, 0.5),
             useFog: weatherUseFog?.checked ?? true,
@@ -744,6 +756,7 @@ export function initRevealUI(global: Global): () => void {
         syncSliderValue(weatherFarOpacity, weatherFarOpacityValue, 2);
         syncSliderValue(weatherDrift, weatherDriftValue, 2);
         syncSliderValue(weatherElongate, weatherElongateValue, 1);
+        syncSliderValue(weatherAngle, weatherAngleValue, 0);
         syncSliderValue(weatherFogDensity, weatherFogDensityValue, 4);
         syncSliderValue(weatherExposure, weatherExposureValue, 2);
         onWeatherParamsChange();
@@ -1018,6 +1031,7 @@ export function initRevealUI(global: Global): () => void {
     weatherMinSize?.addEventListener('change', onWeatherParamsChange);
     weatherMaxSize?.addEventListener('change', onWeatherParamsChange);
     weatherElongate?.addEventListener('input', onWeatherSliderInput);
+    weatherAngle?.addEventListener('input', onWeatherSliderInput);
     weatherFogDensity?.addEventListener('input', onWeatherSliderInput);
     weatherExposure?.addEventListener('input', onWeatherSliderInput);
     weatherUseFog?.addEventListener('change', onWeatherParamsChange);
@@ -1079,6 +1093,7 @@ export function initRevealUI(global: Global): () => void {
         weatherMinSize?.removeEventListener('change', onWeatherParamsChange);
         weatherMaxSize?.removeEventListener('change', onWeatherParamsChange);
         weatherElongate?.removeEventListener('input', onWeatherSliderInput);
+        weatherAngle?.removeEventListener('input', onWeatherSliderInput);
         weatherFogDensity?.removeEventListener('input', onWeatherSliderInput);
         weatherExposure?.removeEventListener('input', onWeatherSliderInput);
         weatherUseFog?.removeEventListener('change', onWeatherParamsChange);

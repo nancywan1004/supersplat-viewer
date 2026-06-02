@@ -14,6 +14,10 @@ import {
 import { dispatchEffectsModuleCommand } from '../../editor-modules/effects-facade';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 import { getSelectedScenePlacedItem } from '../../state-selectors';
+import {
+    getDefaultWobbleEffectParams,
+    mergeWobbleEffectParams
+} from '../../vfx/effects-runtime/asset/wobble-effect-params';
 
 const MORPH_TYPE = ASSET_EFFECT_TYPE_VALUES[0];
 const WOBBLE_TYPE = ASSET_EFFECT_TYPE_VALUES[1];
@@ -145,21 +149,21 @@ export const ASSET_EFFECTS_PANEL_HTML = `
   </div>
   <div id="assetWobbleParams" class="assetEffectParamsBlock hidden">
     <p class="effectsTrackHint" style="font-size:11px;opacity:0.75;margin:0 0 6px">仅支持已放置的 <strong>Gaussian</strong> 资产；拖动滑条实时预览（需已播放）。</p>
-    <div class="settingsRow">
+    <div class="settingsRow" id="assetWobbleAmplitudeRow">
       <label for="assetWobbleAmplitude" id="assetWobbleAmplitudeLabel" class="postEffectLabel" title="统一幅度（默认 0.7）。扭动映射更柔和；摇头晃脑/瞌睡虫自动映射。">动作幅度:</label>
       <div class="postEffectSliderWrap">
         <input type="range" id="assetWobbleAmplitude" class="postEffectSlider" min="0" max="2" step="0.05" value="0.7">
         <span id="assetWobbleAmplitudeVal" class="postEffectSliderValue">0.70</span>
       </div>
     </div>
-    <div class="settingsRow">
+    <div class="settingsRow" id="assetWobbleAxisRow">
       <label for="assetWobbleAxis" class="postEffectLabel">变形轴:</label>
       <select id="assetWobbleAxis" class="settingsSelect">
         <option value="x">X轴</option>
         <option value="z">Z轴</option>
       </select>
     </div>
-    <div class="settingsRow">
+    <div class="settingsRow" id="assetWobbleMotionModeRow">
       <label for="assetWobbleMotionMode" class="postEffectLabel">动作模式:</label>
       <select id="assetWobbleMotionMode" class="settingsSelect">
         <option value="wobble">扭动</option>
@@ -167,35 +171,35 @@ export const ASSET_EFFECTS_PANEL_HTML = `
         <option value="deepMeditation">瞌睡虫</option>
       </select>
     </div>
-    <div class="settingsRow">
+    <div class="settingsRow" id="assetWobbleFrequencyRow">
       <label for="assetWobbleFrequency" class="postEffectLabel">扭动频率:</label>
       <div class="postEffectSliderWrap">
         <input type="range" id="assetWobbleFrequency" class="postEffectSlider" min="0" max="30" step="0.5" value="5">
         <span id="assetWobbleFrequencyVal" class="postEffectSliderValue">5.0</span>
       </div>
     </div>
-    <div class="settingsRow">
+    <div class="settingsRow" id="assetWobbleAnchorLiftPctRow">
       <label for="assetWobbleAnchorLiftPct" class="postEffectLabel" title="扭动时从视觉底部向上、该比例高度内不横向扭动（高斯 Y 大=靠下）">底部固定高度:</label>
       <div class="postEffectSliderWrap">
         <input type="range" id="assetWobbleAnchorLiftPct" class="postEffectSlider" min="0" max="50" step="1" value="15">
         <span id="assetWobbleAnchorLiftPctVal" class="postEffectSliderValue">15%</span>
       </div>
     </div>
-    <div class="settingsRow">
+    <div class="settingsRow" id="assetWobbleBounceAmplitudeRow">
       <label for="assetWobbleBounceAmplitude" class="postEffectLabel" title="世界单位峰值高度，与物体大小无关">跳动高度:</label>
       <div class="postEffectSliderWrap">
         <input type="range" id="assetWobbleBounceAmplitude" class="postEffectSlider" min="0" max="3" step="0.05" value="0.6">
         <span id="assetWobbleBounceAmplitudeVal" class="postEffectSliderValue">0.60</span>
       </div>
     </div>
-    <div class="settingsRow">
+    <div class="settingsRow" id="assetWobbleBounceStretchRow">
       <label for="assetWobbleBounceStretch" class="postEffectLabel">Y轴拉伸:</label>
       <div class="postEffectSliderWrap">
         <input type="range" id="assetWobbleBounceStretch" class="postEffectSlider" min="0" max="1.5" step="0.05" value="0.75">
         <span id="assetWobbleBounceStretchVal" class="postEffectSliderValue">0.75</span>
       </div>
     </div>
-    <div class="settingsRow">
+    <div class="settingsRow" id="assetWobbleHaloEnabledRow">
       <label for="assetWobbleHaloEnabled">光圈:</label>
       <input type="checkbox" id="assetWobbleHaloEnabled" class="settingsCheckbox" checked>
       <span style="font-size:11px;opacity:0.75">开启辉光（关闭后仅保留跳动/扭动与拉伸）</span>
@@ -233,7 +237,7 @@ export const ASSET_EFFECTS_PANEL_HTML = `
 </fieldset>
 `.trim();
 
-const DEFAULT_WOBBLE_HALO_RGB: [number, number, number] = [1, 0.85, 0];
+const DEFAULT_WOBBLE_HALO_RGB = getDefaultWobbleEffectParams('wobble').goldColor as [number, number, number];
 const DEFAULT_MORPH_SEGMENT_DURATION = 10;
 const DEFAULT_MORPH_FLIGHT_WINDOW = 0.12;
 const DEFAULT_MORPH_FLIGHT_STAGGER = 1;
@@ -560,46 +564,58 @@ function fillDomFromEffectParams(
         }
         return;
     }
+    const merged = mergeWobbleEffectParams(ep);
     if (wobbleAxis) {
-        wobbleAxis.value = ep?.wobbleAxis === 'z' ? 'z' : 'x';
+        wobbleAxis.value = merged.wobbleAxis === 'z' ? 'z' : 'x';
     }
     if (wobbleMotionMode) {
         wobbleMotionMode.value =
-            ep?.motionMode === 'electronic' || ep?.motionMode === 'deepMeditation' ? ep.motionMode : 'wobble';
+            merged.motionMode === 'electronic' || merged.motionMode === 'deepMeditation'
+                ? (merged.motionMode as string)
+                : 'wobble';
     }
     if (wobbleAmp) {
-        const amp = typeof ep?.amplitude === 'number' ? ep.amplitude : 0.7;
-        wobbleAmp.value = String(amp);
+        wobbleAmp.value = String(typeof merged.amplitude === 'number' ? merged.amplitude : 0.7);
     }
-    if (wobbleFreq && typeof ep?.frequency === 'number') wobbleFreq.value = String(ep.frequency);
-    if (wobbleBounce && typeof ep?.bounceAmplitude === 'number') wobbleBounce.value = String(ep.bounceAmplitude);
-    if (wobbleStretch && typeof ep?.bounceStretch === 'number') {
-        wobbleStretch.value = String(ep.bounceStretch);
+    if (wobbleFreq) {
+        wobbleFreq.value = String(typeof merged.frequency === 'number' ? merged.frequency : 5);
+    }
+    if (wobbleBounce) {
+        wobbleBounce.value = String(typeof merged.bounceAmplitude === 'number' ? merged.bounceAmplitude : 0.6);
+    }
+    if (wobbleStretch) {
+        wobbleStretch.value = String(typeof merged.bounceStretch === 'number' ? merged.bounceStretch : 0.75);
     }
     if (wobbleAnchorLiftPct) {
         const lift =
-            typeof ep?.wobbleAnchorLift === 'number'
-                ? ep.wobbleAnchorLift
-                : typeof ep?.anchorLift === 'number'
-                  ? ep.anchorLift
+            typeof merged.wobbleAnchorLift === 'number'
+                ? merged.wobbleAnchorLift
+                : typeof merged.anchorLift === 'number'
+                  ? merged.anchorLift
                   : 0.15;
         wobbleAnchorLiftPct.value = String(Math.round(Math.min(1, Math.max(0, lift)) * 100));
     }
     if (wobbleHaloEnabled) {
-        const mix = ep?.colorMix;
+        const mix = merged.colorMix;
         wobbleHaloEnabled.checked = typeof mix !== 'number' || mix > 0;
     }
     if (wobbleHaloColor) {
-        const gold = ep?.goldColor;
+        const gold = merged.goldColor;
         if (Array.isArray(gold) && gold.length === 3 && gold.every((n) => typeof n === 'number')) {
             wobbleHaloColor.value = rgb01ToHex(gold as [number, number, number]);
         } else {
             wobbleHaloColor.value = rgb01ToHex(DEFAULT_WOBBLE_HALO_RGB);
         }
     }
-    if (wobbleHaloWidth) wobbleHaloWidth.value = String(typeof ep?.haloWidth === 'number' ? ep.haloWidth : 0.1);
-    if (wobbleHaloSpeed) wobbleHaloSpeed.value = String(typeof ep?.haloSpeed === 'number' ? ep.haloSpeed : 1);
-    if (wobbleHaloOpacity) wobbleHaloOpacity.value = String(typeof ep?.haloOpacity === 'number' ? ep.haloOpacity : 1);
+    if (wobbleHaloWidth) {
+        wobbleHaloWidth.value = String(typeof merged.haloWidth === 'number' ? merged.haloWidth : 0.1);
+    }
+    if (wobbleHaloSpeed) {
+        wobbleHaloSpeed.value = String(typeof merged.haloSpeed === 'number' ? merged.haloSpeed : 1);
+    }
+    if (wobbleHaloOpacity) {
+        wobbleHaloOpacity.value = String(typeof merged.haloOpacity === 'number' ? merged.haloOpacity : 1);
+    }
 }
 
 const MORPH_ENTITY_HINT =
@@ -691,22 +707,55 @@ export function initAssetEffectsUI(global: Global): () => void {
     const wobbleHaloOpacityVal = fieldset.querySelector('#assetWobbleHaloOpacityVal') as HTMLElement | null;
     const wobbleHaloWidthRow = fieldset.querySelector('#assetWobbleHaloWidthRow') as HTMLElement | null;
     const wobbleHaloSpeedRow = fieldset.querySelector('#assetWobbleHaloSpeedRow') as HTMLElement | null;
+    const wobbleAmplitudeRow = fieldset.querySelector('#assetWobbleAmplitudeRow') as HTMLElement | null;
+    const wobbleHaloEnabledRow = fieldset.querySelector('#assetWobbleHaloEnabledRow') as HTMLElement | null;
+    const wobbleAxisRow = fieldset.querySelector('#assetWobbleAxisRow') as HTMLElement | null;
+    const wobbleFrequencyRow = fieldset.querySelector('#assetWobbleFrequencyRow') as HTMLElement | null;
+    const wobbleAnchorLiftPctRow = fieldset.querySelector('#assetWobbleAnchorLiftPctRow') as HTMLElement | null;
+    const wobbleBounceAmplitudeRow = fieldset.querySelector('#assetWobbleBounceAmplitudeRow') as HTMLElement | null;
+    const wobbleBounceStretchRow = fieldset.querySelector('#assetWobbleBounceStretchRow') as HTMLElement | null;
+    type WobbleMotionModeUi = 'wobble' | 'electronic' | 'deepMeditation';
 
-    const WOBBLE_AMPLITUDE_HINT: Record<string, string> = {
+    const WOBBLE_AMPLITUDE_HINT: Record<WobbleMotionModeUi, string> = {
         wobble: '扭动：幅度 × 1/3（同一滑条值下更柔和）',
         electronic: '摇头晃脑：幅度 ÷ 0.3 映射左右摆头与轻微前俯',
         deepMeditation: '瞌睡虫：幅度 ÷ 0.4 映射呼吸形变'
     };
 
+    const resolveWobbleMotionModeUi = (): WobbleMotionModeUi => {
+        const raw = wobbleMotionMode?.value;
+        if (raw === 'electronic' || raw === 'deepMeditation') {
+            return raw;
+        }
+        return 'wobble';
+    };
+
+    const setWobbleParamRowVisible = (row: HTMLElement | null, visible: boolean) => {
+        row?.classList.toggle('hidden', !visible);
+    };
+
     const syncWobbleModeUi = () => {
-        const mode = wobbleMotionMode?.value ?? 'wobble';
-        const hint = WOBBLE_AMPLITUDE_HINT[mode] ?? WOBBLE_AMPLITUDE_HINT.wobble;
+        const mode = resolveWobbleMotionModeUi();
+        const hint = WOBBLE_AMPLITUDE_HINT[mode];
         if (wobbleAmplitudeLabel) {
             wobbleAmplitudeLabel.title = hint;
         }
         if (wobbleAmp) {
             wobbleAmp.title = hint;
         }
+        const isWobble = mode === 'wobble';
+        const isElectronic = mode === 'electronic';
+        const isDeepMeditation = mode === 'deepMeditation';
+        setWobbleParamRowVisible(wobbleAmplitudeRow, true);
+        setWobbleParamRowVisible(wobbleHaloEnabledRow, true);
+        setWobbleParamRowVisible(wobbleHaloColorRow, true);
+        setWobbleParamRowVisible(wobbleHaloWidthRow, true);
+        setWobbleParamRowVisible(wobbleHaloSpeedRow, true);
+        setWobbleParamRowVisible(wobbleAxisRow, isWobble || isDeepMeditation);
+        setWobbleParamRowVisible(wobbleFrequencyRow, isWobble || isElectronic);
+        setWobbleParamRowVisible(wobbleAnchorLiftPctRow, isWobble || isElectronic);
+        setWobbleParamRowVisible(wobbleBounceAmplitudeRow, isWobble);
+        setWobbleParamRowVisible(wobbleBounceStretchRow, isWobble);
     };
 
     const syncWobbleHaloUi = () => {
@@ -859,6 +908,8 @@ export function initAssetEffectsUI(global: Global): () => void {
             events.fire('assetEffect:morphKeyframesChanged', {
                 ids: global.state.assetEffectsMorphKeyframeIds ?? []
             });
+        } else if (t === WOBBLE_TYPE) {
+            syncWobbleModeUi();
         }
     };
 
@@ -1360,6 +1411,37 @@ export function initAssetEffectsUI(global: Global): () => void {
     }
     wobbleAxis?.addEventListener('change', onParamsBlur);
     wobbleMotionMode?.addEventListener('change', () => {
+        if (wobbleMotionMode?.value === 'deepMeditation') {
+            fillDomFromEffectParams(
+                global,
+                WOBBLE_TYPE,
+                getDefaultWobbleEffectParams('deepMeditation'),
+                morphUrls,
+                morphSeg,
+                morphLoop,
+                morphFlightWindow,
+                morphFlightStagger,
+                morphFlightEase,
+                morphFlightPosEase,
+                morphChannelParticleScale,
+                morphChannelStrength,
+                morphHourglassPerturb,
+                wobbleAmp,
+                wobbleAxis,
+                wobbleMotionMode,
+                wobbleFreq,
+                wobbleBounce,
+                wobbleStretch,
+                wobbleAnchorLiftPct,
+                wobbleHaloEnabled,
+                wobbleHaloColor,
+                wobbleHaloWidth,
+                wobbleHaloSpeed,
+                wobbleHaloOpacity
+            );
+            syncWobbleSliderLabels();
+            syncWobbleHaloUi();
+        }
         syncWobbleModeUi();
         onParamsBlur();
     });

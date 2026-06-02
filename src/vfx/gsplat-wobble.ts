@@ -169,12 +169,23 @@ void modifySplatCenter(inout vec3 center) {
             vec3 refPos = (localC - uWobbleLocalCenter) / halfExt;
             refPos.y = mix(-1.0, -3.0, height01);
             vec3 refBase = refPos;
-            refPos.yz = wobbleRot2(wobbleSmoothstepAny(-1.0, -3.0, refPos.y) * 0.15 * -b) * refPos.yz;
-            refPos.z += 0.3;
-            refPos.y += 1.2;
-            refPos *= 1.0 + exp(-3.0 * length(refPos)) * b;
-            refPos.z -= 0.3;
-            refPos.y -= 1.2;
+            float breathe = wobbleSmoothstepAny(-1.0, -3.0, refPos.y) * 0.15 * -b;
+            mat2 rot = wobbleRot2(breathe);
+            if (uWobbleAxis < 0.5) {
+                refPos.xy = rot * refPos.xy;
+                refPos.x += 0.3;
+                refPos.y += 1.2;
+                refPos *= 1.0 + exp(-3.0 * length(refPos)) * b;
+                refPos.x -= 0.3;
+                refPos.y -= 1.2;
+            } else {
+                refPos.yz = rot * refPos.yz;
+                refPos.z += 0.3;
+                refPos.y += 1.2;
+                refPos *= 1.0 + exp(-3.0 * length(refPos)) * b;
+                refPos.z -= 0.3;
+                refPos.y -= 1.2;
+            }
             localC += (refPos - refBase) * halfExt;
         }
 
@@ -350,14 +361,26 @@ fn modifySplatCenter(center: ptr<function, vec3f>) {
             var refPos = (localC - uniform.uWobbleLocalCenter) / halfExt;
             refPos.y = mix(-1.0, -3.0, height01);
             let refBase = refPos;
-            let yz = wobbleRot2(refPos.yz, wobbleSmoothstepAny(-1.0, -3.0, refPos.y) * 0.15 * -b);
-            refPos.y = yz.x;
-            refPos.z = yz.y;
-            refPos.z += 0.3;
-            refPos.y += 1.2;
-            refPos *= 1.0 + exp(-3.0 * length(refPos)) * b;
-            refPos.z -= 0.3;
-            refPos.y -= 1.2;
+            let breathe = wobbleSmoothstepAny(-1.0, -3.0, refPos.y) * 0.15 * -b;
+            if (uniform.uWobbleAxis < 0.5) {
+                let xy = wobbleRot2(refPos.xy, breathe);
+                refPos.x = xy.x;
+                refPos.y = xy.y;
+                refPos.x += 0.3;
+                refPos.y += 1.2;
+                refPos *= 1.0 + exp(-3.0 * length(refPos)) * b;
+                refPos.x -= 0.3;
+                refPos.y -= 1.2;
+            } else {
+                let yz = wobbleRot2(refPos.yz, breathe);
+                refPos.y = yz.x;
+                refPos.z = yz.y;
+                refPos.z += 0.3;
+                refPos.y += 1.2;
+                refPos *= 1.0 + exp(-3.0 * length(refPos)) * b;
+                refPos.z -= 0.3;
+                refPos.y -= 1.2;
+            }
             localC += (refPos - refBase) * halfExt;
         }
 
