@@ -1,5 +1,6 @@
 import { EventHandler } from 'playcanvas';
 
+import { shouldUseTouchJoystickMove } from '../input/touch-joystick-ui';
 import { Tooltip } from '../tooltip';
 import { Global } from '../types';
 import { isLodMetaFile } from '../loaders/lod-loader';
@@ -63,7 +64,7 @@ const initJoystick = (
     // Joystick touch state
     let joystickPointerId: number | null = null;
     let joystickValueX = 0; // -1 to 1, negative = left, positive = right
-    let joystickValueY = 0; // -1 to 1, negative = forward, positive = backward
+    let joystickValueY = 0; // -1 to 1, negative = up/forward on the UI, positive = down/backward
 
     // Joystick mode: '1d' for vertical only, '2d' for full directional
     let joystickMode: '1d' | '2d' = '2d';
@@ -71,29 +72,34 @@ const initJoystick = (
     // Double-tap detection for mode toggle
     let lastTapTime = 0;
 
-    // Update joystick visibility based on camera mode and input mode
+    // Joystick: touch + landscape only (portrait uses two-finger fly)
     const updateJoystickVisibility = () => {
-        if ((state.cameraMode === 'fly' || state.cameraMode === 'walk') && state.inputMode === 'touch' && state.gamingControls) {
+        if (shouldUseTouchJoystickMove(state)) {
             dom.joystickBase.classList.remove('hidden');
             dom.joystickBase.classList.toggle('mode-2d', joystickMode === '2d');
             dom.joystickBase.style.left = `${joystickFixedX}px`;
             dom.joystickBase.style.top = `${joystickFixedY()}px`;
-            // Center the stick
             dom.joystick.style.top = `${stickCenterY}px`;
             if (joystickMode === '2d') {
                 dom.joystick.style.left = `${stickCenterX}px`;
             } else {
-                dom.joystick.style.left = '8px'; // Reset to 1D centered position
+                dom.joystick.style.left = '8px';
             }
         } else {
             dom.joystickBase.classList.add('hidden');
+            events.fire('joystickInput', { x: 0, y: 0 });
         }
+        events.fire('touchJoystickUi', {
+            active: shouldUseTouchJoystickMove(state)
+        });
     };
 
     events.on('cameraMode:changed', updateJoystickVisibility);
     events.on('inputMode:changed', updateJoystickVisibility);
     events.on('gamingControls:changed', updateJoystickVisibility);
     window.addEventListener('resize', updateJoystickVisibility);
+    window.matchMedia('(orientation: landscape)').addEventListener('change', updateJoystickVisibility);
+    updateJoystickVisibility();
 
     // Handle joystick touch input directly on the joystick element
     const updateJoystickStick = (clientX: number, clientY: number) => {
@@ -414,7 +420,7 @@ const initUI = (global: Global) => {
 
     // toggle fullscreen when user switches between landscape portrait
     // orientation
-    screen?.orientation?.addEventListener('change', (event) => {
+    screen?.orientation?.addEventListener('change', () => {
         if (['landscape-primary', 'landscape-secondary'].includes(screen.orientation.type)) {
             requestFullscreen();
         } else {
