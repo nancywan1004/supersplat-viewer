@@ -30,3 +30,158 @@
     width: 80px;
     min-width: 80px;
 }
+
+.effectParamsPanel {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    max-height: 280px;
+    overflow-y: auto;
+
+    /* 窄行内数字输入：略小字号与内边距，避免截断 */
+    .settingsInput,
+    .effectParamAxisInput {
+        font-size: 11px;
+        padding: 2px 4px;
+        line-height: 1.25;
+    }
+}
+
+.effectParamRow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 28px;
+    flex-wrap: nowrap;
+}
+
+.effectParamLabel {
+    flex: 0 0 42%;
+    font-size: 12px;
+    line-height: 1.3;
+    color: $clr-text-dark;
+}
+
+.effectParamControl {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.effectParamRange {
+    flex: 1;
+    min-width: 0;
+    accent-color: $clr-accent;
+}
+
+.effectParamValue {
+    flex: 0 0 44px;
+    font-size: 11px;
+    text-align: right;
+    color: rgba(255, 255, 255, 0.65);
+}
+
+.effectParamNumber {
+    width: 72px;
+    min-width: 72px;
+}
+
+.effectParamRowCheck {
+    cursor: pointer;
+    gap: 8px;
+
+    .checkMark {
+        flex: 0 0 16px;
+        width: 16px;
+        height: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        line-height: 1;
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        border-radius: 3px;
+        color: transparent;
+        user-select: none;
+
+        &.active {
+            color: $clr-accent;
+            border-color: $clr-accent;
+            background-color: rgba($clr-accent, 0.15);
+        }
+    }
+
+    &:hover .checkMark {
+        border-color: rgba(255, 255, 255, 0.55);
+    }
+}
+
+.effectParamCheckLabel {
+    flex: 1;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.effectParamVecWrap {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+}
+
+.effectParamAxis {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 3px;
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.effectParamAxisLabel {
+    flex: 0 0 auto;
+    font-size: 10px;
+    opacity: 0.75;
+    width: 11px;
+    text-align: center;
+}
+
+.effectParamAxisInput {
+    flex: 1 1 0;
+    width: 100%;
+    min-width: 0;
+    max-width: 80px;
+}
+
+/* vec3 / 颜色：标签与 X/Y/Z（或 R/G/B）同一行，避免换行遮挡 */
+.effectParamRowVec,
+.effectParamRowColor {
+    flex-wrap: nowrap;
+
+    > .effectParamLabel {
+        flex: 0 0 28%;
+        max-width: 36%;
+        min-width: 0;
+        margin-bottom: 0;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        line-height: 1.25;
+    }
+}
+
+/* 覆盖父级 .settingsRow > label 的 min-width:80px，否则 vec 行被挤换行 */
+#settingsPanel .effectParamRowVec.settingsRow > label.effectParamLabel,
+#settingsPanel .effectParamRowColor.settingsRow > label.effectParamLabel,
+#revealPanel .effectParamRowVec.settingsRow > label.effectParamLabel,
+#revealPanel .effectParamRowColor.settingsRow > label.effectParamLabel {
+    min-width: 0;
+}

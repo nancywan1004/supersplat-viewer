@@ -1,9 +1,10 @@
 import type { ExperienceSettings } from '../../../settings';
 import { readPersistentRevealParams } from '../../../settings-serialize/effects-sync';
 import type { EffectRegistry } from '../effect-registry';
-import { extractGlslWgslModifyBlocks, PERLIN_WAVE_COMPOSER_ID } from '../gsplat-effect-layers-extractor';
-import { PERLIN_WAVE_REGISTRY_EFFECT_ID } from '../effect-types';
-import { shaderGLSL, shaderWGSL } from './gsplat-perlin-wave-shaders';
+import { extractGlslWgslModifyBlocks, OVERALL_WAVE_COMPOSER_ID, PERLIN_WAVE_COMPOSER_ID } from '../gsplat-effect-layers-extractor';
+import { OVERALL_WAVE_REGISTRY_EFFECT_ID, PERLIN_WAVE_REGISTRY_EFFECT_ID } from '../effect-types';
+import { shaderGLSL as overallShaderGLSL, shaderWGSL as overallShaderWGSL } from './gsplat-overall-wave-shaders';
+import { shaderGLSL as perlinShaderGLSL, shaderWGSL as perlinShaderWGSL } from './gsplat-perlin-wave-shaders';
 
 /** key 与 `readPersistentRevealParams` 的 `type` 一致；无配置时不注册任何项 */
 const PERSISTENT_GSPLAT_REGISTRY_FACTORIES: Record<string, (registry: EffectRegistry) => void> = {
@@ -11,10 +12,27 @@ const PERSISTENT_GSPLAT_REGISTRY_FACTORIES: Record<string, (registry: EffectRegi
         registry.register({
             id: PERLIN_WAVE_REGISTRY_EFFECT_ID,
             createSceneGsplatContribution: (ctx) => {
-                const shaderBlocks = extractGlslWgslModifyBlocks(shaderGLSL, shaderWGSL);
+                const shaderBlocks = extractGlslWgslModifyBlocks(perlinShaderGLSL, perlinShaderWGSL);
                 return {
                     id: PERLIN_WAVE_COMPOSER_ID,
                     priority: 20,
+                    scope: 'scene',
+                    enabled: true,
+                    version: ctx.revision ?? 0,
+                    shaderBlocks,
+                    capabilities: { allowConcurrentWithPersistent: true }
+                };
+            }
+        });
+    },
+    [OVERALL_WAVE_REGISTRY_EFFECT_ID]: (registry) => {
+        registry.register({
+            id: OVERALL_WAVE_REGISTRY_EFFECT_ID,
+            createSceneGsplatContribution: (ctx) => {
+                const shaderBlocks = extractGlslWgslModifyBlocks(overallShaderGLSL, overallShaderWGSL);
+                return {
+                    id: OVERALL_WAVE_COMPOSER_ID,
+                    priority: 21,
                     scope: 'scene',
                     enabled: true,
                     version: ctx.revision ?? 0,
