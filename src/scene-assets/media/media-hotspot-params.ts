@@ -4,14 +4,14 @@ import {
 } from '../../settings-serialize/settings-serialize-configs';
 import type { ExperienceSettings } from '../../schemas/v2';
 import type { SceneAsset } from '../../schemas/v2-custom';
+import { isViewerOrPreviewMode } from '../../state-selectors';
 import type { Global, ScenePlacedItem } from '../../types';
 
 export { DEFAULT_VIDEO_TRIGGER_DISTANCE_M, DEFAULT_AUDIO_TRIGGER_DISTANCE_M };
 
 /** Viewer 或编辑预览：热区门开启、消费态交互规则生效 */
 export function isMediaConsumptionMode(global: Global): boolean {
-    const { state } = global;
-    return !state.editMode || state.previewMode === true;
+    return isViewerOrPreviewMode(global.state);
 }
 
 export function isHotspotGateOpen(global: Global): boolean {

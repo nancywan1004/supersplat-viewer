@@ -16,7 +16,11 @@ import {
 } from 'playcanvas';
 import type { SceneAsset } from '../schemas/v2-custom';
 import type { Global, AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from '../types';
-import { getSelectedSceneEntity } from '../state-selectors';
+import {
+    getSelectedSceneEntity,
+    isAssetScenePickEventOnlyMode,
+    isSceneAssetPickableInViewerMode
+} from '../state-selectors';
 import {
     DEFAULT_ASSET_LOAD_TIMEOUT_MS,
     hydrateAssetLibraryItem,
@@ -960,6 +964,22 @@ export function clearScenePlacedEntities(global: Global): void {
     global.events.fire('sceneAssets:cleared');
 }
 
+function applySceneAssetSelectedFromScenePick(
+    global: Global,
+    entryId: string,
+    options: { focusOnChange: boolean }
+): void {
+    const { state, events } = global;
+    const prevSelectedId = state.selectedSceneEntityId;
+    state.selectedSceneEntityId = entryId;
+    events.fire('sceneAsset:selected', { source: 'scene' });
+    if (options.focusOnChange && prevSelectedId !== entryId) {
+        requestAnimationFrame(() => {
+            events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
+        });
+    }
+}
+
 export function initAssetPlacementHandler(
     global: Global,
     canvas: HTMLCanvasElement,
@@ -1016,7 +1036,9 @@ export function initAssetPlacementHandler(
     };
 
     const handleAssetPointerClickClaim = (clientX: number, clientY: number, worldPos: Vec3 | null): boolean => {
-        if (!state.editMode || state.editLeftModule !== 'asset') return false;
+        const pickEventOnly = isAssetScenePickEventOnlyMode(state);
+        const editAsset = !pickEventOnly && state.editMode && state.editLeftModule === 'asset';
+        if (!pickEventOnly && !editAsset) return false;
         if (state.suppressAssetPointerClick) {
             state.suppressAssetPointerClick = false;
             return false;
@@ -1029,7 +1051,7 @@ export function initAssetPlacementHandler(
         const offsetY = clientY - rect.top;
         if (offsetX < 0 || offsetY < 0 || offsetX > rect.width || offsetY > rect.height) return false;
 
-        if (pendingPlacement) {
+        if (editAsset && pendingPlacement) {
             if (pendingPlacementInFlight) return true;
             pendingPlacementInFlight = true;
             syncVideoPlacementCursor();
@@ -1072,10 +1094,7 @@ export function initAssetPlacementHandler(
                         worldPos: [worldPos.x, worldPos.y, worldPos.z],
                         source: 'scene'
                     });
-                    events.fire('sceneAsset:selected', { source: 'scene' });
-                    requestAnimationFrame(() => {
-                        events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
-                    });
+                    applySceneAssetSelectedFromScenePick(global, entry.id, { focusOnChange: true });
                     deps.pushEditHistory?.(global, 'place asset');
                     clearPendingPlacement();
                 } catch (error) {
@@ -1089,17 +1108,19 @@ export function initAssetPlacementHandler(
         }
 
         const list = state.scenePlacedEntities ?? [];
-        if (list.length === 0) return true;
+        if (list.length === 0) return editAsset;
 
-        const audioSelect = findAudioCalloutSelectHitFromClient(global, clientX, clientY);
-        if (audioSelect) {
-            const prevSelectedId = state.selectedSceneEntityId;
-            state.selectedSceneEntityId = audioSelect.id;
-            events.fire('sceneAsset:selected', { source: 'scene' });
-            if (prevSelectedId !== audioSelect.id) {
-                events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
+        const pickableList = pickEventOnly
+            ? list.filter((entry) => isSceneAssetPickableInViewerMode(entry.assetType))
+            : list;
+        if (pickEventOnly && pickableList.length === 0) return false;
+
+        if (editAsset) {
+            const audioSelect = findAudioCalloutSelectHitFromClient(global, clientX, clientY);
+            if (audioSelect) {
+                applySceneAssetSelectedFromScenePick(global, audioSelect.id, { focusOnChange: true });
+                return true;
             }
-            return true;
         }
 
         const pickerScale = 0.5;
@@ -1124,13 +1145,10 @@ export function initAssetPlacementHandler(
             clientY
         ).then((entry) => {
             if (!entry) return;
-            const prevSelectedId = state.selectedSceneEntityId;
-            state.selectedSceneEntityId = entry.id;
-            events.fire('sceneAsset:selected', { source: 'scene' });
-            if (prevSelectedId === entry.id) return;
-            events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });
+            if (pickEventOnly && !isSceneAssetPickableInViewerMode(entry.assetType)) return;
+            applySceneAssetSelectedFromScenePick(global, entry.id, { focusOnChange: editAsset });
         }).catch(() => {});
-        return true;
+        return editAsset;
     };
 
     const onCopy = (payload?: { copyId?: string }) => {
