@@ -1,9 +1,5 @@
 import type { ExperienceSettings } from '../schemas/v2';
-import {
-    fetchLatestProjectFiles,
-    fetchOriginalProjectFiles,
-    type OriginalProjectFileEntry
-} from '../universe/service';
+import { setUniverseAuthContext } from '../universe/service';
 import { generateCollisionMesh } from '../universe/collision-mesh-service';
 import type { Global } from '../types';
 
@@ -20,8 +16,6 @@ export type CollisionUrlResult =
     | { ok: true; url: string }
     | { ok: false; message: string };
 
-const COLLISION_MESH_FILE = /\.collision\.glb$/i;
-
 const trimUrl = (value: unknown): string | undefined => {
     if (typeof value !== 'string') {
         return undefined;
@@ -30,6 +24,7 @@ const trimUrl = (value: unknown): string | undefined => {
     return trimmed || undefined;
 };
 
+/** 已有碰撞资源：settings.collision.url 或 URL 参数 `?collision=` / `?voxel=`。 */
 export function resolveCollisionUrl(global: Global): CollisionUrlResolved | undefined {
     const fromSettings = trimUrl((global.settings as ExperienceSettings).collision?.url);
     if (fromSettings) {
@@ -44,6 +39,12 @@ export function resolveCollisionUrl(global: Global): CollisionUrlResolved | unde
     return undefined;
 }
 
+/** 高斯 modelUrl，供 `POST /conversion/voxel-collision` 使用。 */
+export function resolveModelUrlForVoxelCollision(global: Global): string | undefined {
+    return trimUrl(global.config.contentUrl);
+}
+
+/** 无现成 collision URL 时，是否具备 Universe 生成条件（projectId + token + contentUrl）。 */
 export function canGenerateCollision(global: Global): boolean {
     if (resolveCollisionUrl(global)) {
         return false;
@@ -52,7 +53,10 @@ export function canGenerateCollision(global: Global): boolean {
     if (projectId == null || projectId === '') {
         return false;
     }
-    return !!trimUrl(global.config.token);
+    if (!trimUrl(global.config.token)) {
+        return false;
+    }
+    return !!resolveModelUrlForVoxelCollision(global);
 }
 
 export function setCollisionUrl(global: Global, url: string): void {
@@ -68,6 +72,10 @@ export function setCollisionUrl(global: Global, url: string): void {
 
 const inflightEnsure = new Map<string, Promise<CollisionUrlResult>>();
 
+/**
+ * 确保 `settings.collision.url` 可用：已有 settings / URL 参数则直接返回；
+ * 否则用 `contentUrl` 调 Universe `voxel-collision` 生成 GLB（不拉项目文件列表）。
+ */
 export async function ensureCollisionUrl(global: Global): Promise<CollisionUrlResult> {
     const existing = resolveCollisionUrl(global);
     if (existing) {
@@ -75,10 +83,14 @@ export async function ensureCollisionUrl(global: Global): Promise<CollisionUrlRe
     }
 
     if (!canGenerateCollision(global)) {
-        return { ok: false, message: '缺少 projectId、token 或已配置碰撞 URL' };
+        return {
+            ok: false,
+            message: '缺少 collision URL，且无法生成（需 projectId、token、contentUrl）'
+        };
     }
 
-    const key = `${global.config.projectId ?? ''}:${global.config.token ?? ''}`;
+    const modelUrl = resolveModelUrlForVoxelCollision(global)!;
+    const key = `${global.config.projectId ?? ''}:${global.config.token ?? ''}:${modelUrl}`;
     const inflight = inflightEnsure.get(key);
     if (inflight) {
         return inflight;
@@ -88,32 +100,9 @@ export async function ensureCollisionUrl(global: Global): Promise<CollisionUrlRe
         try {
             const projectId = global.config.projectId!;
             const token = global.config.token!;
+            setUniverseAuthContext({ token });
 
-            const listFiles = async (): Promise<OriginalProjectFileEntry[]> => {
-                try {
-                    return await fetchLatestProjectFiles(projectId);
-                } catch (err) {
-                    console.warn('[SceneCollision] latest project files failed, fallback to original:', err);
-                    return fetchOriginalProjectFiles(projectId);
-                }
-            };
-
-            const files = await listFiles();
-            const fromProject = files.find((file) => {
-                if (typeof file.fileName !== 'string' || typeof file.fileUrl !== 'string') {
-                    return false;
-                }
-                const base = file.fileName.replace(/\\/g, '/').split('/').pop() ?? '';
-                const isMesh = COLLISION_MESH_FILE.test(base) || /collision.*\.glb$/i.test(base);
-                return isMesh && !!file.fileUrl.trim();
-            })?.fileUrl.trim();
-
-            if (fromProject) {
-                setCollisionUrl(global, fromProject);
-                return { ok: true, url: fromProject };
-            }
-
-            const generated = await generateCollisionMesh(projectId, token);
+            const generated = await generateCollisionMesh(projectId, token, modelUrl);
             if (generated.ok === false) {
                 return { ok: false, message: generated.message };
             }

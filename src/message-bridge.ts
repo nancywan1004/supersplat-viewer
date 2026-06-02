@@ -54,19 +54,16 @@ import type { SceneCollisionSettingsPatch } from './schemas/v2-custom';
 import {
     applyCollisionPatchFromHost,
     applyCollisionSetFromHost,
-    buildCollisionSystemReadyPayload,
     buildSceneMeshLoadFailedPayload,
     buildSceneMeshLoadFinishedPayload,
     resolveSceneMeshLoadOutboundModules
 } from './editor-modules/protocol-adapters/collision-protocol-adapter';
-import {
-    applyShadowSetFromHost,
-    buildShadowSystemReadyPayload
-} from './editor-modules/protocol-adapters/environment-protocol-adapter';
+import { applyShadowSetFromHost } from './editor-modules/protocol-adapters/environment-protocol-adapter';
 import {
     COLLISION_SYSTEM_READY,
     type CollisionLoadPayload
 } from './collision/camera-collision-manager';
+import { resolveCollisionUrl } from './collision/scene-collision-source';
 import { SHADOW_SYSTEM_READY, isShadowOutputEnabled } from './vfx/shadow';
 
 /** 父级 → Viewer 的 postMessage payload 类型（按文档事件表） */
@@ -933,7 +930,11 @@ const initPostMessageBridge = (global: Global) => {
         if (suppressCollisionOutbound) {
             return;
         }
-        postToParent('COLLISION_SYSTEM_READY', buildCollisionSystemReadyPayload(global));
+        const collisionUrl = resolveCollisionUrl(global)?.url;
+        postToParent('COLLISION_SYSTEM_READY', {
+            module: MESSAGE_BRIDGE_MODULE.camera,
+            ...(collisionUrl ? { collisionUrl } : {})
+        });
     });
 
     events.on(SHADOW_SYSTEM_READY, () => {
@@ -943,7 +944,7 @@ const initPostMessageBridge = (global: Global) => {
         if (!isShadowOutputEnabled(global)) {
             return;
         }
-        postToParent('SHADOW_SYSTEM_READY', buildShadowSystemReadyPayload());
+        postToParent('SHADOW_SYSTEM_READY', { module: MESSAGE_BRIDGE_MODULE.environment });
     });
 
     events.on('editHistory:stateChanged', (data: { canUndo: boolean; canRedo: boolean }) => {

@@ -18,7 +18,6 @@ import {
     type LightWithId
 } from '../../settings-serialize/settings-serialize-helper';
 import { applyViewBloomLocalLightsEnabled, applyViewTorchActive } from '../../view-settings';
-import { MESSAGE_BRIDGE_MODULE } from '../modules-types';
 import type { Global } from '../../types';
 import type { TorchLightSettings } from '../../schemas/v2-custom';
 
@@ -640,15 +639,6 @@ export function applyBloomLocalLightRegionDelete(global: Global, regionId: strin
     }
     global.events.fire('postEffect:changed');
     global.events.fire('bloomLocalLightRegion:listChanged');
-}
-
-/** 出站即表示阴影已开启且接影实际参与渲染；开关与 `outputActive` 由事件语义隐含。 */
-export type ShadowSystemReadyPayload = {
-    module: typeof MESSAGE_BRIDGE_MODULE.environment;
-};
-
-export function buildShadowSystemReadyPayload(): ShadowSystemReadyPayload {
-    return { module: MESSAGE_BRIDGE_MODULE.environment };
 }
 
 /** SHADOW_SET：写 `shadow.enabled`（GLB 型 `collision` URL 为接影前置条件）。 */

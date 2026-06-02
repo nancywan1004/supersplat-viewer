@@ -1,36 +1,33 @@
 import {
     buildUniverseApiUrl,
-    fetchUniverseJsonGet,
     fetchUniverseJsonPost,
     setUniverseAuthContext
 } from './service';
 
-const GENERATE_COLLISION_MESH = '/app/api/v1/saas/project/collision-mesh/generate';
-const GET_COLLISION_MESH_STATUS = '/app/api/v1/saas/project/collision-mesh/status';
+/** 网关：`POST {apiHost}/conversion/voxel-collision` */
+const VOXEL_COLLISION_PATH = '/conversion/voxel-collision';
 
-type CollisionMeshApiResponse = {
+type VoxelCollisionApiResponse = {
     code: number;
-    data?: { fileUrl?: string; status?: string; taskId?: string };
-    message: string;
+    message?: string;
+    data?: { url?: string };
 };
 
 export type CollisionMeshResult =
     | { ok: true; fileUrl: string }
     | { ok: false; message: string };
 
-const POLL_MS = 2000;
-const TIMEOUT_MS = 120_000;
 const OK_CODES = new Set([1, 200]);
-const READY = new Set(['ready', 'success', 'completed', 'done']);
-const FAILED = new Set(['failed', 'error', 'cancelled']);
 
-const sleep = (ms: number) => new Promise<void>((r) => { setTimeout(r, ms); });
-
-/** 请求 Universe 将项目高斯转为碰撞 GLB，异步则轮询至就绪或超时。 */
+/**
+ * 请求 Universe 将高斯模型转为碰撞 GLB（同步返回下载地址）。
+ *
+ * @see 网关 `POST /conversion/voxel-collision`，body `{ projectId, modelUrl }`，成功 `code === 1`，`data.url` 为 GLB 地址。
+ */
 export const generateCollisionMesh = async (
     projectId: number | string,
     token: string,
-    options?: { pollIntervalMs?: number; timeoutMs?: number }
+    modelUrl: string
 ): Promise<CollisionMeshResult> => {
     if (!token) {
         return { ok: false, message: '缺少 token' };
@@ -46,45 +43,60 @@ export const generateCollisionMesh = async (
         return { ok: false, message: 'projectId 必须是数字' };
     }
 
+    const trimmedModelUrl = modelUrl.trim();
+    if (!trimmedModelUrl) {
+        return { ok: false, message: '缺少 modelUrl' };
+    }
+
     setUniverseAuthContext({ token });
 
-    const pollMs = options?.pollIntervalMs ?? POLL_MS;
-    const timeoutMs = options?.timeoutMs ?? TIMEOUT_MS;
+    const started = performance.now();
+    const elapsedMs = () => Math.round(performance.now() - started);
 
-    const parse = (response: CollisionMeshApiResponse) => {
-        const data = response.data;
-        const fileUrl = typeof data?.fileUrl === 'string' ? data.fileUrl.trim() : undefined;
-        const status = (data?.status ?? '').toLowerCase();
-        const message = typeof response.message === 'string' ? response.message.trim() : '';
-        const ok = OK_CODES.has(response.code);
-        const ready = !!fileUrl || READY.has(status);
-        const failed = FAILED.has(status);
-        return { ok, fileUrl, status, message, ready, failed };
-    };
-
-    const postUrl = buildUniverseApiUrl(GENERATE_COLLISION_MESH);
-    let current = parse(await fetchUniverseJsonPost<CollisionMeshApiResponse>(postUrl, { projectId: numericId }));
-
-    if (!current.ok && !current.fileUrl) {
-        return { ok: false, message: current.message || '触发碰撞网格生成失败' };
-    }
-    if (current.fileUrl && current.ready) {
-        return { ok: true, fileUrl: current.fileUrl };
+    const postUrl = buildUniverseApiUrl(VOXEL_COLLISION_PATH);
+    let response: VoxelCollisionApiResponse;
+    try {
+        response = await fetchUniverseJsonPost<VoxelCollisionApiResponse>(postUrl, {
+            projectId: numericId,
+            modelUrl: trimmedModelUrl
+        });
+    } catch (error) {
+        console.warn('[VoxelCollision] generate failed', {
+            projectId: numericId,
+            elapsedMs: elapsedMs(),
+            error
+        });
+        throw error;
     }
 
-    const deadline = Date.now() + timeoutMs;
-    const statusUrl = `${buildUniverseApiUrl(GET_COLLISION_MESH_STATUS)}?projectId=${encodeURIComponent(id)}`;
-    while (Date.now() < deadline) {
-        await sleep(pollMs);
-        current = parse(await fetchUniverseJsonGet<CollisionMeshApiResponse>(statusUrl));
-
-        if (current.failed) {
-            return { ok: false, message: current.message || '碰撞网格生成失败' };
-        }
-        if (current.ok && current.fileUrl && current.ready) {
-            return { ok: true, fileUrl: current.fileUrl };
-        }
+    if (!OK_CODES.has(response.code)) {
+        const message =
+            typeof response.message === 'string' && response.message.trim()
+                ? response.message.trim()
+                : '体素碰撞生成失败';
+        console.warn('[VoxelCollision] generate failed', {
+            projectId: numericId,
+            elapsedMs: elapsedMs(),
+            code: response.code,
+            message
+        });
+        return { ok: false, message };
     }
 
-    return { ok: false, message: '碰撞网格生成超时，请稍后重试' };
+    const fileUrl = typeof response.data?.url === 'string' ? response.data.url.trim() : '';
+    if (!fileUrl) {
+        console.warn('[VoxelCollision] generate failed', {
+            projectId: numericId,
+            elapsedMs: elapsedMs(),
+            message: '体素碰撞接口未返回 GLB 下载地址'
+        });
+        return { ok: false, message: '体素碰撞接口未返回 GLB 下载地址' };
+    }
+
+    console.log('[VoxelCollision] generate finished', {
+        projectId: numericId,
+        elapsedMs: elapsedMs(),
+        fileUrl
+    });
+    return { ok: true, fileUrl };
 };

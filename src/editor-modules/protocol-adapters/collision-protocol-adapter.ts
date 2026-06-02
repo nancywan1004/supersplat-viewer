@@ -56,12 +56,6 @@ export function resolveSceneMeshLoadOutboundModules(
     return modules;
 }
 
-/** 出站即表示碰撞已开启且资源就绪；`enabled` / `active` 由事件语义隐含，不再重复携带。 */
-export type CollisionSystemReadyPayload = {
-    module: 'camera';
-    collisionUrl?: string;
-};
-
 const collisionLoadErrorMessage = (error: unknown): string | undefined => {
     if (error === undefined) {
         return undefined;
@@ -94,14 +88,6 @@ export function buildSceneMeshLoadFailedPayload(
         module,
         ...(collisionUrl ? { collisionUrl } : {}),
         ...(message ? { message } : {})
-    };
-}
-
-export function buildCollisionSystemReadyPayload(global: Global): CollisionSystemReadyPayload {
-    const collisionUrl = resolveCollisionUrl(global)?.url;
-    return {
-        module: 'camera',
-        ...(collisionUrl ? { collisionUrl } : {})
     };
 }
 
