@@ -819,8 +819,7 @@ export function initAssetEffectsUI(global: Global): () => void {
         const addPayload = {
             effectId: ASSET_GSPLAT_EFFECT_ID,
             effectType: type,
-            targetId,
-            params: effectParams ?? {}
+            targetId
         };
         const deletePayload = {
             effectId: ASSET_GSPLAT_EFFECT_ID,
@@ -1309,55 +1308,7 @@ export function initAssetEffectsUI(global: Global): () => void {
             }
         }
         if (typeSelect.value === MORPH_TYPE) {
-            const ep = readEffectParamsFromDom(
-                global,
-                MORPH_TYPE,
-                morphUrls,
-                morphSeg,
-                morphLoop,
-                morphFlightWindow,
-                morphFlightStagger,
-                morphFlightEase,
-                morphFlightPosEase,
-                morphChannelParticleScale,
-                morphChannelStrength,
-                morphHourglassPerturb,
-                wobbleAmp,
-                wobbleAxis,
-                wobbleMotionMode,
-                wobbleFreq,
-                wobbleBounce,
-                wobbleStretch,
-                wobbleAnchorLiftPct,
-                wobbleHaloEnabled,
-                wobbleHaloColor,
-                wobbleHaloWidth,
-                wobbleHaloSpeed,
-                wobbleHaloOpacity
-            );
-            const ids = ep.keyframeEntityIds ?? ep.keyframeTargetIds;
-            const urls = ep.keyframeUrls;
-            const hasSceneKeyframes =
-                Array.isArray(ids) && ids.length >= 2 && ids.every((id) => typeof id === 'string');
-            const hasManualUrls = Array.isArray(urls) && urls.length >= 2;
-            if (!hasSceneKeyframes && !hasManualUrls) {
-                window.alert('GS变形需要至少 2 个关键帧：在上方场景资产列表点击 Gaussian，或使用高级 URL');
-                return;
-            }
-            if (hasSceneKeyframes) {
-                for (const id of ids as string[]) {
-                    if (!resolvePlacedGaussianSourceUrl(global, id)) {
-                        window.alert(`关键帧「${getScenePlacedItemByTargetId(global, id)?.name ?? id}」无法解析 GS 源 URL`);
-                        return;
-                    }
-                }
-            }
-        }
-        routeAssetCommand(
-            'EFFECT_ADD',
-            targetId,
-            typeSelect.value,
-            readEffectParamsFromDom(
+            const effectParams = readEffectParamsFromDom(
                 global,
                 typeSelect.value,
                 morphUrls,
@@ -1382,8 +1333,28 @@ export function initAssetEffectsUI(global: Global): () => void {
                 wobbleHaloWidth,
                 wobbleHaloSpeed,
                 wobbleHaloOpacity
-            )
-        );
+            );
+            const ep = effectParams;
+            const ids = ep.keyframeEntityIds ?? ep.keyframeTargetIds;
+            const urls = ep.keyframeUrls;
+            const hasSceneKeyframes =
+                Array.isArray(ids) && ids.length >= 2 && ids.every((id) => typeof id === 'string');
+            const hasManualUrls = Array.isArray(urls) && urls.length >= 2;
+            if (!hasSceneKeyframes && !hasManualUrls) {
+                window.alert('GS变形需要至少 2 个关键帧：在上方场景资产列表点击 Gaussian，或使用高级 URL');
+                return;
+            }
+            if (hasSceneKeyframes) {
+                for (const id of ids as string[]) {
+                    if (!resolvePlacedGaussianSourceUrl(global, id)) {
+                        window.alert(`关键帧「${getScenePlacedItemByTargetId(global, id)?.name ?? id}」无法解析 GS 源 URL`);
+                        return;
+                    }
+                }
+            }
+            routeAssetCommand('EFFECT_PARAMS_PATCH', targetId, typeSelect.value, effectParams);
+        }
+        routeAssetCommand('EFFECT_ADD', targetId, typeSelect.value);
         refreshStatus();
     };
 

@@ -54,7 +54,7 @@ const WEATHER_PRESETS: Record<Exclude<GsplatFallingWeatherMode, 'none'>, GsplatF
     snow: {
         speed: 2.0,
         drift: 0.4,
-        opacity: 0.8,
+        opacity: 0.85,
         globalOpacity: 1.0,
         farOpacity: 0.4,
         color: [1, 1, 1],
@@ -71,15 +71,15 @@ const WEATHER_PRESETS: Record<Exclude<GsplatFallingWeatherMode, 'none'>, GsplatF
         fogStart: 0,
         fogEnd: 0,
         fogColor: [1, 1, 1],
-        exposure: 0.8,
+        exposure: 0.5,
         useFog: true,
         cameraClearColor: [0.8, 0.8, 0.8],
         useCameraClearColor: true
     },
     rain: {
         speed: 10,
-        drift: 0,
-        opacity: 0.57,
+        drift: 0.02,
+        opacity: 0.65,
         globalOpacity: 1.0,
         farOpacity: 0.4,
         color: [0.812, 0.812, 0.812],

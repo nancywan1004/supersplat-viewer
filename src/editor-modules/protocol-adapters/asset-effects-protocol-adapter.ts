@@ -261,8 +261,13 @@ export function applyAssetEffectParamsPatch(global: Global, envelope: AssetEffec
         }
     }
 
-    const merged = patchAssetInstanceFromParams(global.settings as ExperienceSettings, envelope.targetId, patch);
-    const storageTargetId = resolveAssetInstanceStorageTargetId(envelope.targetId, merged);
+    const settings = global.settings as ExperienceSettings;
+    const patchTargetId =
+        effectType === 'gsplat-morph' && patch.enabled === false
+            ? (findAssetMorphOwnerTargetId(settings, envelope.targetId) ?? envelope.targetId)
+            : envelope.targetId;
+    const merged = patchAssetInstanceFromParams(settings, patchTargetId, patch);
+    const storageTargetId = resolveAssetInstanceStorageTargetId(patchTargetId, merged);
     syncEffectsRuntimeStateFromSettings(global.state, global.settings);
     syncAssetInstancesRuntimeFromSettings(global.state, global.settings);
 

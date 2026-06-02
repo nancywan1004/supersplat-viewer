@@ -847,8 +847,7 @@ export function initRevealUI(global: Global): () => void {
         } else {
             routeEffectsCommand('EFFECT_ADD', {
                 effectId: persistentEffectIdForBucket(persistentEffectBucketForType(type)),
-                effectType: type,
-                params: getDefaultPersistentEffectParams(type)
+                effectType: type
             });
         }
         pushEditHistorySafe();
