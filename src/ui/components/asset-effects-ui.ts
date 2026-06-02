@@ -799,6 +799,18 @@ export function initAssetEffectsUI(global: Global): () => void {
         type: string,
         effectParams?: Record<string, unknown>
     ) => {
+        const stopMessage = {
+            type: 'EFFECT_PARAMS_PATCH',
+            module: 'effects',
+            effectId: ASSET_GSPLAT_EFFECT_ID,
+            targetId,
+            params: { [type]: { enable: false } }
+        };
+        const stopPayload = {
+            effectId: ASSET_GSPLAT_EFFECT_ID,
+            targetId,
+            params: { type, enabled: false }
+        };
         const envelope = {
             effectId: ASSET_GSPLAT_EFFECT_ID,
             targetId,
@@ -819,22 +831,27 @@ export function initAssetEffectsUI(global: Global): () => void {
             ? { type: cmd, module: 'effects', ...addPayload }
             : cmd === 'EFFECT_DELETE'
                 ? { type: cmd, module: 'effects', ...deletePayload }
-                : { type: cmd, module: 'effects', ...envelope };
+                : cmd === 'EFFECT_STOP'
+                    ? stopMessage
+                    : { type: cmd, module: 'effects', ...envelope };
         const payload = cmd === 'EFFECT_ADD'
             ? addPayload
             : cmd === 'EFFECT_DELETE'
                 ? deletePayload
-                : envelope;
+                : cmd === 'EFFECT_STOP'
+                    ? stopPayload
+                    : envelope;
+        const dispatchType = cmd === 'EFFECT_STOP' ? 'EFFECT_PARAMS_PATCH' : cmd;
         if (getEditUiTransport(global) === 'message-bridge') {
             sendEditProtocolMessage(message);
         } else if (
             !dispatchEffectsModuleCommand(global, {
-                type: cmd,
+                type: dispatchType,
                 payload,
                 source: 'host'
             })
         ) {
-            console.warn('[asset-effects-ui] command dispatch failed', cmd);
+            console.warn('[asset-effects-ui] command dispatch failed', dispatchType);
         }
     };
 

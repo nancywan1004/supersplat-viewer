@@ -682,7 +682,6 @@ const initPostMessageBridge = (global: Global) => {
                         dispatchEffects(global, 'EFFECT_START', env);
                     } else if (normalized.isNewShape && normalized.enable === false) {
                         dispatchEffects(global, 'EFFECT_PARAMS_PATCH', env);
-                        dispatchEffects(global, 'EFFECT_STOP', env);
                     } else {
                         dispatchEffects(global, 'EFFECT_PARAMS_PATCH', env);
                     }

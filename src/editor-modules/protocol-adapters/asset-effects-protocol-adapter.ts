@@ -271,6 +271,12 @@ export function applyAssetEffectParamsPatch(global: Global, envelope: AssetEffec
         type: merged.type,
         params: merged
     });
+    if (merged.enabled === false) {
+        global.events.fire('assetEffect:stop', {
+            targetId: storageTargetId,
+            type: merged.type
+        });
+    }
     return true;
 }
 
