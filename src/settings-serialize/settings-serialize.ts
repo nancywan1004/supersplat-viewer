@@ -7,6 +7,7 @@ import {
     normalizeEffectsOnImport,
     syncEffectsRuntimeStateFromSettings
 } from './effects-sync';
+import { filterAssetEffectParams } from '../vfx/effects-runtime/asset/asset-effect-params';
 
 const defaultPostEffectShadow = () => ({
     enabled: DEFAULT_SHADOW.enabled,
@@ -62,6 +63,30 @@ function stripBloomSessionFieldsForPersistence(root: Record<string, unknown>): v
             (r) => r && typeof r === 'object' && typeof (r as { id?: string }).id === 'string'
                 && !(r as { id: string }).id.startsWith('draft-')
         );
+    }
+}
+
+function stripAssetEffectFieldsForPersistence(root: Record<string, unknown>): void {
+    const effects = root.effects as Record<string, unknown> | undefined;
+    const asset = effects?.asset as Record<string, unknown> | undefined;
+    if (!asset || typeof asset !== 'object') return;
+
+    delete asset.defaultParamsById;
+
+    const instances = asset.instancesByTargetId as Record<string, unknown> | undefined;
+    if (!instances || typeof instances !== 'object') return;
+    for (const inst of Object.values(instances)) {
+        if (!inst || typeof inst !== 'object' || Array.isArray(inst)) continue;
+        const record = inst as Record<string, unknown>;
+        const type = typeof record.type === 'string' ? record.type : typeof record.effectId === 'string' ? record.effectId : '';
+        if (record.effectParams && typeof record.effectParams === 'object' && !Array.isArray(record.effectParams)) {
+            const params = filterAssetEffectParams(type, record.effectParams as Record<string, unknown>);
+            if (Object.keys(params).length > 0) {
+                record.effectParams = params;
+            } else {
+                delete record.effectParams;
+            }
+        }
     }
 }
 
@@ -179,6 +204,7 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
 
     if (out.version === 2) {
         flushRevealIntoEffectsForExport(out as ExperienceSettings);
+        stripAssetEffectFieldsForPersistence(out);
         delete (out as Record<string, unknown>).revealEffect;
     }
 

@@ -5,9 +5,11 @@
 
 import type { ExperienceSettings } from '../../schemas/v2';
 import {
+    findAssetMorphOwnerTargetId,
     patchAssetInstanceFromParams,
     patchAssetRuntimeMirror,
     readAssetInstanceParams,
+    resolveAssetInstanceStorageTargetId,
     syncAssetInstancesRuntimeFromSettings,
     syncEffectsRuntimeStateFromSettings
 } from '../../settings-serialize/effects-sync';
@@ -145,17 +147,18 @@ export function applyAssetEffectStart(global: Global, envelope: AssetEffectProto
 
     const patch = mergeStartParams(effectType, envelope.params);
     const merged = patchAssetInstanceFromParams(global.settings as ExperienceSettings, envelope.targetId, patch);
+    const storageTargetId = resolveAssetInstanceStorageTargetId(envelope.targetId, merged);
     const ep = (merged.effectParams ?? {}) as Record<string, unknown>;
     const runtimeEntities = buildRuntimeEntitiesFromEffectParams(
         global,
         merged.type,
-        envelope.targetId,
+        storageTargetId,
         ep
     );
     const entityErr = validateAssetEffectStartEntities(
         global,
         merged.type,
-        envelope.targetId,
+        storageTargetId,
         ep,
         runtimeEntities
     );
@@ -168,13 +171,13 @@ export function applyAssetEffectStart(global: Global, envelope: AssetEffectProto
     }
 
     syncEffectsRuntimeStateFromSettings(global.state, global.settings);
-    patchAssetRuntimeMirror(global.state, envelope.targetId, {
+    patchAssetRuntimeMirror(global.state, storageTargetId, {
         activeType: merged.type as AssetEffectType,
         status: 'playing'
     });
 
     global.events.fire('assetEffect:start', {
-        targetId: envelope.targetId,
+        targetId: storageTargetId,
         type: merged.type,
         params: merged,
         entities: runtimeEntities
@@ -194,12 +197,16 @@ export function applyAssetEffectStop(global: Global, envelope: AssetEffectProtoc
         return false;
     }
 
-    patchAssetInstanceFromParams(global.settings as ExperienceSettings, envelope.targetId, { enabled: false });
+    const storageTargetId =
+        effectType === 'gsplat-morph'
+            ? (findAssetMorphOwnerTargetId(global.settings as ExperienceSettings, envelope.targetId) ?? envelope.targetId)
+            : envelope.targetId;
+    patchAssetInstanceFromParams(global.settings as ExperienceSettings, storageTargetId, { enabled: false });
     syncEffectsRuntimeStateFromSettings(global.state, global.settings);
-    patchAssetRuntimeMirror(global.state, envelope.targetId, { status: 'inactive' });
+    patchAssetRuntimeMirror(global.state, storageTargetId, { status: 'inactive' });
 
     global.events.fire('assetEffect:stop', {
-        targetId: envelope.targetId,
+        targetId: storageTargetId,
         type: effectType
     });
     return true;
@@ -247,11 +254,12 @@ export function applyAssetEffectParamsPatch(global: Global, envelope: AssetEffec
     }
 
     const merged = patchAssetInstanceFromParams(global.settings as ExperienceSettings, envelope.targetId, patch);
+    const storageTargetId = resolveAssetInstanceStorageTargetId(envelope.targetId, merged);
     syncEffectsRuntimeStateFromSettings(global.state, global.settings);
     syncAssetInstancesRuntimeFromSettings(global.state, global.settings);
 
     global.events.fire('assetEffect:configChanged', {
-        targetId: envelope.targetId,
+        targetId: storageTargetId,
         type: merged.type,
         params: merged
     });

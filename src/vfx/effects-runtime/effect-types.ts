@@ -19,6 +19,10 @@ export type EffectRuntimeStatus = RevealEffectRuntimeStatus | PersistentEffectRu
 export const SCENE_GSPLAT_REVEAL_EFFECT_ID = 'scene.gsplat-reveal' as const;
 /** 协议与 `settings.effects.persistent` 共用的场景级 GSplat persistent 包 id */
 export const SCENE_GSPLAT_PERSISTENT_EFFECT_ID = 'scene.gsplat-persistent' as const;
+/** 协议与 `settings.effects.persistent.camera` 共用的镜头级 persistent 包 id */
+export const SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID = 'scene.gsplat-persistent-camera' as const;
+/** 协议与 `settings.effects.persistent.stylization` 共用的风格化 persistent 包 id */
+export const SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID = 'scene.gsplat-persistent-stylization' as const;
 
 /** 一次性 reveal 类型清单（不含 persistent；不含 none）；`src/types.ts` 中 `RevealEffectType` 与此同源 re-export */
 export const REVEAL_EFFECT_TYPE_VALUES = [
@@ -57,6 +61,32 @@ export const PERSISTENT_EFFECT_TYPE_VALUES = [
  * `reveal-policy` 的 `PERSISTENT_VFX`、`effects-runtime` 内置 persistent 轨、`mountPersistentGsplatByEffectType` 均与此同一 `Set` 引用对齐。
  */
 export const PERSISTENT_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSISTENT_EFFECT_TYPE_VALUES);
+
+export const PERSISTENT_CAMERA_EFFECT_TYPE_VALUES = [
+    'falling-petals',
+    'falling-rain',
+    'falling-snow'
+] as const;
+
+export const PERSISTENT_STYLIZATION_EFFECT_TYPE_VALUES = [
+    'perlin-wave',
+    'nostalgic-comic',
+    'yiyun-dianran',
+    'palette-pixel'
+] as const;
+
+export const PERSISTENT_CAMERA_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSISTENT_CAMERA_EFFECT_TYPE_VALUES);
+export const PERSISTENT_STYLIZATION_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSISTENT_STYLIZATION_EFFECT_TYPE_VALUES);
+
+export type PersistentEffectBucket = 'camera' | 'stylization';
+
+export function persistentEffectBucketForType(effectType: string | undefined): PersistentEffectBucket {
+    return effectType && PERSISTENT_CAMERA_EFFECT_TYPES.has(effectType) ? 'camera' : 'stylization';
+}
+
+export function persistentEffectIdForBucket(bucket: PersistentEffectBucket): string {
+    return bucket === 'camera' ? SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID : SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID;
+}
 
 // --- 物体轨 asset（与 reveal / persistent 同形：固定包 id + 包内 `type`）---
 

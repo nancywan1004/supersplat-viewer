@@ -7,11 +7,11 @@ import {
 import {
     applyGsplatRevealParamsPatch,
     applyGsplatPersistentParamsPatch,
+    isPersistentProtocolEffectId,
     isEffectProtocolEnvelope,
     paramsPatchHasRevealKeys,
     paramsPatchHasPersistentKeys,
-    SCENE_GSPLAT_REVEAL_EFFECT_ID,
-    SCENE_GSPLAT_PERSISTENT_EFFECT_ID
+    SCENE_GSPLAT_REVEAL_EFFECT_ID
 } from './protocol-adapters/effects-protocol-adapter';
 import { resolveAssetEffectType } from '../vfx/effects-runtime/effect-types';
 import { normalizeAssetEffectEnvelope } from './protocol-adapters/asset-effects-protocol-adapter';
@@ -78,7 +78,7 @@ class EffectsFacade implements ModuleFacade {
             if (raw.effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID) {
                 if (!paramsPatchHasRevealKeys(pr)) break;
                 applyGsplatRevealParamsPatch(global, pr);
-            } else if (raw.effectId === SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
+            } else if (isPersistentProtocolEffectId(raw.effectId)) {
                 if (!paramsPatchHasPersistentKeys(pr)) break;
                 applyGsplatPersistentParamsPatch(global, pr);
             } else {
@@ -103,7 +103,7 @@ class EffectsFacade implements ModuleFacade {
         case 'EFFECT_TOGGLE': {
             const raw = command.payload;
             if (!isEffectProtocolEnvelope(raw)) break;
-            if (raw.effectId !== SCENE_GSPLAT_PERSISTENT_EFFECT_ID) break;
+            if (!isPersistentProtocolEffectId(raw.effectId)) break;
             const value = (raw as { value?: unknown }).value;
             if (typeof value !== 'boolean') break;
             applyGsplatPersistentParamsPatch(global, { enabled: value });
@@ -140,8 +140,8 @@ class AssetEffectsFacade implements ModuleFacade {
         ctx.events.fire('assetEffectsFacade:enter');
     }
 
-    onExit(ctx: ModuleContext, reason?: ModuleLifecycleReason): void {
-        this._sceneEffects.onExit(ctx, reason);
+    onExit(ctx: ModuleContext, _reason?: ModuleLifecycleReason): void {
+        this._sceneEffects.onExit(ctx);
         ctx.events.fire('assetEffectsFacade:exit');
     }
 

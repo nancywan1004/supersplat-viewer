@@ -6,63 +6,9 @@
 import { ASSET_EFFECT_TYPE_VALUES } from '../effect-types';
 
 const GSPLAT_MORPH = new Set([
+    'isLoop',
     'segmentDuration',
-    'segmentHoldDuration',
-    'loop',
-    'autoPlay',
-    'continuousAppRender',
-    'morphPresentMaxHz',
-    'morphAnimateSphericalHarmonics',
-    'preferGpuMorph',
-    'recenterModels',
-    'normalizeScales',
-    'targetScale',
-    'sortCentersMaxHz',
-    'fastQuaternionNlerp',
-    'buildGreedyInBackground',
-    'correspondenceStrategy',
-    'greedySpatialWeight',
-    'greedyColorWeight',
-    'greedyGridCellSize',
-    'greedySearchRadiusCells',
-    'greedyMaxCandidatesPerPoint',
-    'progressivePairFlightWindow',
-    'progressivePairFlightStagger',
-    'progressivePairFlightEase',
-    'progressivePairFlightPosEase',
-    'progressivePairAsymmetricDissolve',
-    'morphHourglassChannel',
-    'morphHourglassStrength',
-    'morphHourglassEndRadiusFrac',
-    'morphHourglassWaistRatio',
-    'morphHourglassParticleScaleFrac',
-    'morphHourglassPerturbAmp',
-    'morphHourglassSparkIntensity',
-    'morphHourglassSparkTwist',
-    'morphHourglassSparkDrift',
-    'morphHourglassConform',
-    'morphHourglassTintMix',
-    'morphPointCloudEffect',
-    'morphPointCloudPointSize',
-    'morphPointCloudMinScreenPx',
-    'morphPointCloudScreenFloorMaxScale',
-    'morphPointCloudStrength',
-    'morphPointCloudTint',
-    'morphPointCloudGlowStrength',
-    'morphPointCloudOpacity',
-    'morphPointCloudDensity',
-    'morphPointCloudScatterDistance',
-    'morphPointCloudEdgeDuration',
-    'morphPointCloudHoldDuration',
-    'morphPointCloudRevealDuration',
-    'hideSourceEntities',
-    'keyframeUrls',
-    /** @deprecated 使用 keyframeEntityIds；保留兼容 bridge / 旧配置 */
-    'keyframeTargetIds',
-    'keyframeEntityIds',
-    /** 静物活化 / 配置绑定的场景 Entity id（bridge 必传；internal 由列表选择写入） */
-    'entityId',
-    'entityName'
+    'keyframeEntityIds'
 ]);
 
 /** 与 `GsplatWobbleOptions` 对齐（`gsplat-wobble.ts`） */
@@ -95,14 +41,6 @@ const GSPLAT_WOBBLE = new Set([
     'entityName'
 ]);
 
-const PROGRESSIVE_PAIR_FLIGHT_EASE_VALUES = new Set([
-    'linear',
-    'smoothstep',
-    'easeIn',
-    'easeOut',
-    'easeInOut'
-]);
-
 const BY_TYPE: Record<string, ReadonlySet<string>> = {
     [ASSET_EFFECT_TYPE_VALUES[0]]: GSPLAT_MORPH,
     [ASSET_EFFECT_TYPE_VALUES[1]]: GSPLAT_WOBBLE
@@ -125,28 +63,26 @@ export function filterAssetEffectParams(
     }
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(incoming)) {
-        if (!allow.has(k)) {
+        const storageKey =
+            effectType === 'gsplat-morph' && k === 'loop' ? 'isLoop' :
+                effectType === 'gsplat-morph' && k === 'keyframeTargetIds' ? 'keyframeEntityIds' :
+                    k;
+        if (!allow.has(storageKey)) {
             continue;
         }
-        if (k === 'keyframeUrls' || k === 'keyframeTargetIds' || k === 'keyframeEntityIds') {
+        if (storageKey === 'keyframeEntityIds') {
             if (Array.isArray(v) && v.every((u) => typeof u === 'string' && u.length > 0)) {
-                out[k] = v;
+                out[storageKey] = v;
             }
             continue;
         }
-        if (k === 'entityId') {
+        if (storageKey === 'entityId') {
             if (typeof v === 'string' && v.length > 0) {
-                out[k] = v;
+                out[storageKey] = v;
             }
             continue;
         }
-        if (k === 'progressivePairFlightEase' || k === 'progressivePairFlightPosEase') {
-            if (typeof v === 'string' && PROGRESSIVE_PAIR_FLIGHT_EASE_VALUES.has(v)) {
-                out[k] = v;
-            }
-            continue;
-        }
-        if (k === 'goldColor' || k === 'morphPointCloudTint') {
+        if (storageKey === 'goldColor') {
             if (
                 Array.isArray(v) &&
                 v.length === 3 &&
@@ -157,11 +93,11 @@ export function filterAssetEffectParams(
             continue;
         }
         if (typeof v === 'number' && Number.isFinite(v)) {
-            out[k] = v;
+            out[storageKey] = v;
         } else if (typeof v === 'boolean') {
-            out[k] = v;
+            out[storageKey] = v;
         } else if (typeof v === 'string') {
-            out[k] = v;
+            out[storageKey] = v;
         }
     }
     return out;

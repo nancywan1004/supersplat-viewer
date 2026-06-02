@@ -13,16 +13,27 @@ import {
     patchPersistentSettingsFromParams,
     patchRevealRuntimeMirror,
     patchRevealSettingsFromParams,
+    readPersistentSettingsPack,
     readRevealParams,
+    setPersistentSettingsEnabled,
     syncEffectsRuntimeStateFromSettings
 } from '../../settings-serialize/effects-sync';
 import { PERSISTENT_EFFECT_TYPE_VALUES } from '../../types';
 import type { Global, PersistentEffectType } from '../../types';
-import { SCENE_GSPLAT_PERSISTENT_EFFECT_ID } from '../../vfx/effects-runtime/effects-runtime';
+import {
+    SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID
+} from '../../vfx/effects-runtime/effects-runtime';
 import { isPersistentVfx } from '../../vfx/effects-runtime/reveal/reveal-policy';
 import { EFFECTS_PROTOCOL_MODULE, type EffectsProtocolModule } from '../modules-types';
 
-export { SCENE_GSPLAT_REVEAL_EFFECT_ID, SCENE_GSPLAT_PERSISTENT_EFFECT_ID } from '../../vfx/effects-runtime/effects-runtime';
+export {
+    SCENE_GSPLAT_REVEAL_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID
+} from '../../vfx/effects-runtime/effects-runtime';
 
 export type EffectProtocolParamsPatchPayload = {
     module?: EffectsProtocolModule;
@@ -49,6 +60,14 @@ export function isEffectProtocolEnvelope(
     if (typeof o.effectId !== 'string') return false;
     if (o.module === undefined) return true;
     return o.module === EFFECTS_PROTOCOL_MODULE;
+}
+
+export function isPersistentProtocolEffectId(effectId: string): boolean {
+    return (
+        effectId === SCENE_GSPLAT_PERSISTENT_EFFECT_ID ||
+        effectId === SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID ||
+        effectId === SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID
+    );
 }
 
 const PATCH_KEYS = ['type', 'totalDuration', 'autoStart'] as const;
@@ -185,7 +204,6 @@ export function applyGsplatPersistentParamsPatch(global: Global, params: Record<
 
     const settings = global.settings;
     const effects = ensureEffectsSettings(settings);
-    const id = SCENE_GSPLAT_PERSISTENT_EFFECT_ID;
 
     // 与文档一致：`type` 为 none（含 `NONE` / 空白）即关闭可持续轨，清空 scene 包，避免 paramsById 残留脏 type
     if (hasTypePatch && nextPersistentType === 'none') {
@@ -214,13 +232,13 @@ export function applyGsplatPersistentParamsPatch(global: Global, params: Record<
     }
 
     if (hasEnabledPatch) {
-        effects.persistent.enabled = params.enabled as boolean;
+        setPersistentSettingsEnabled(settings as ExperienceSettings, params.enabled as boolean);
     } else if (hasTypePatch && nextPersistentType !== null && nextPersistentType !== 'none') {
-        effects.persistent.enabled = true;
+        setPersistentSettingsEnabled(settings as ExperienceSettings, true);
     }
     syncEffectsRuntimeStateFromSettings(global.state, settings);
 
-    const nextPack = (effects.persistent.paramsById[id] as Record<string, unknown> | undefined) ?? {};
+    const nextPack = readPersistentSettingsPack(settings as ExperienceSettings) ?? {};
     const effectivePersistentType = normalizePersistentType(nextPack.type);
     const hasEffectivePersistentType = effectivePersistentType !== null && effectivePersistentType !== 'none';
     const currentRevealType = readRevealParams(settings)?.type ?? 'none';

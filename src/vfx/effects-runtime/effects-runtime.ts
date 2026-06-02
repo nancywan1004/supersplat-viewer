@@ -31,7 +31,9 @@ import { syncPersistentGsplatRegistryFactories } from './persistent/persistent-g
 export {
     ASSET_EFFECT_TYPES,
     ASSET_GSPLAT_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID,
     SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID,
     SCENE_GSPLAT_REVEAL_EFFECT_ID
 } from './effect-types';
 

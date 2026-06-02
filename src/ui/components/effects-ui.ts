@@ -7,7 +7,8 @@ import {
     getRevealTotalDuration,
     readRevealParams,
     getRevealStatus,
-    getRevealActiveType
+    getRevealActiveType,
+    readPersistentSettingsPack
 } from '../../settings-serialize/effects-sync';
 import { isPersistentVfx } from '../../vfx/effects-runtime/reveal/reveal-policy';
 import {
@@ -417,21 +418,8 @@ export function initRevealUI(global: Global): () => void {
     };
 
     const readPersistentPack = (): Record<string, unknown> | undefined => {
-        const effects = global.settings.effects;
-        const paramsById = effects?.persistent?.paramsById;
-        if (!paramsById || typeof paramsById !== 'object') return undefined;
-        const byFixedId = paramsById[SCENE_GSPLAT_PERSISTENT_EFFECT_ID] as Record<string, unknown> | undefined;
-        if (byFixedId && typeof byFixedId.type === 'string' && isPersistentType(byFixedId.type)) {
-            return byFixedId;
-        }
-        // 兼容旧数据：若 key 非固定 id，也尝试从首个合法 persistent pack 推断默认值。
-        for (const value of Object.values(paramsById)) {
-            const pack = value as Record<string, unknown> | undefined;
-            if (pack && typeof pack.type === 'string' && isPersistentType(pack.type)) {
-                return pack;
-            }
-        }
-        return undefined;
+        const pack = readPersistentSettingsPack(global.settings);
+        return pack && typeof pack.type === 'string' && isPersistentType(pack.type) ? pack : undefined;
     };
 
     const getPersistentSelection = (): string => {
@@ -440,8 +428,12 @@ export function initRevealUI(global: Global): () => void {
     };
 
     const getPersistentEnabled = (): boolean => {
+        const pack = readPersistentPack();
         const pType = getPersistentSelection();
         if (pType === 'none') {
+            return false;
+        }
+        if (pack?.enabled === false) {
             return false;
         }
         // settings.effects.persistent.enabled 未写入时默认 true

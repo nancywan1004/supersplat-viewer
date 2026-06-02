@@ -315,6 +315,12 @@ function getSelectedTargetId(global: Global): string | null {
     return typeof id === 'string' && id.length > 0 ? id : null;
 }
 
+function getMorphOwnerTargetId(global: Global): string | null {
+    const ids = global.state.assetEffectsMorphKeyframeIds ?? [];
+    const first = ids[0];
+    return typeof first === 'string' && first.length > 0 ? first : getSelectedTargetId(global);
+}
+
 function parseManualMorphUrls(morphUrls: HTMLTextAreaElement | null): string[] {
     const raw = morphUrls?.value ?? '';
     return raw
@@ -361,7 +367,7 @@ function readEffectParamsFromDom(
             ep.segmentDuration = seg;
         }
         if (morphLoop) {
-            ep.loop = morphLoop.checked;
+            ep.isLoop = morphLoop.checked;
         }
         if (morphFlightWindow) {
             const v = Number(morphFlightWindow.value);
@@ -513,7 +519,10 @@ function fillDomFromEffectParams(
             morphSeg.value = String(DEFAULT_MORPH_SEGMENT_DURATION);
         }
         if (morphLoop) {
-            morphLoop.checked = typeof ep?.loop === 'boolean' ? ep.loop : true;
+            morphLoop.checked =
+                typeof ep?.isLoop === 'boolean' ? ep.isLoop :
+                    typeof ep?.loop === 'boolean' ? ep.loop :
+                        true;
         }
         if (morphFlightWindow) {
             morphFlightWindow.value = String(
@@ -856,7 +865,7 @@ export function initAssetEffectsUI(global: Global): () => void {
         renderMorphKeyframeList();
         events.fire('assetEffect:morphKeyframesChanged', { ids: global.state.assetEffectsMorphKeyframeIds });
         if (patchSettings) {
-            const configId = getSelectedTargetId(global);
+            const configId = getMorphOwnerTargetId(global);
             if (configId && typeSelect?.value === MORPH_TYPE) {
                 routeAssetCommand(
                     'EFFECT_PARAMS_PATCH',
@@ -1031,7 +1040,7 @@ export function initAssetEffectsUI(global: Global): () => void {
     };
 
     const patchEffectParams = (commitHistory: boolean) => {
-        const targetId = getSelectedTargetId(global);
+        const targetId = typeSelect?.value === MORPH_TYPE ? getMorphOwnerTargetId(global) : getSelectedTargetId(global);
         if (!targetId || !typeSelect) {
             return;
         }
@@ -1208,7 +1217,7 @@ export function initAssetEffectsUI(global: Global): () => void {
 
     const onMorphKeyframesChanged = () => {
         renderMorphKeyframeList();
-        const configId = getSelectedTargetId(global);
+        const configId = getMorphOwnerTargetId(global);
         if (!configId || typeSelect?.value !== MORPH_TYPE) {
             return;
         }
@@ -1246,13 +1255,14 @@ export function initAssetEffectsUI(global: Global): () => void {
     };
 
     const onStart = () => {
-        const targetId = getSelectedTargetId(global);
+        const selectedTargetId = getSelectedTargetId(global);
+        const targetId = typeSelect?.value === MORPH_TYPE ? getMorphOwnerTargetId(global) : selectedTargetId;
         if (!targetId || !typeSelect) {
             window.alert('请先在上方场景资产列表中选中一个资产');
             return;
         }
         if (typeSelect.value === WOBBLE_TYPE) {
-            const item = getScenePlacedItemByTargetId(global, targetId);
+            const item = getScenePlacedItemByTargetId(global, selectedTargetId ?? targetId);
             if (!item || item.assetType !== 'gaussian' || !item.entity?.gsplat) {
                 window.alert('静物活化需要已放置的 Gaussian（gsplat）资产');
                 return;
@@ -1338,7 +1348,7 @@ export function initAssetEffectsUI(global: Global): () => void {
     };
 
     const onStop = () => {
-        const targetId = getSelectedTargetId(global);
+        const targetId = typeSelect?.value === MORPH_TYPE ? getMorphOwnerTargetId(global) : getSelectedTargetId(global);
         if (!targetId || !typeSelect) {
             return;
         }

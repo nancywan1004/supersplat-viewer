@@ -27,7 +27,7 @@ import { ASSET_GSPLAT_EFFECT_ID, resolveAssetEffectType } from './vfx/effects-ru
 import {
     paramsPatchHasPersistentKeys,
     paramsPatchHasRevealKeys,
-    SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+    isPersistentProtocolEffectId,
     SCENE_GSPLAT_REVEAL_EFFECT_ID
 } from './editor-modules/protocol-adapters/effects-protocol-adapter';
 import { getAssetLoader } from './loaders/asset-loader';
@@ -588,7 +588,7 @@ const initPostMessageBridge = (global: Global) => {
                     dispatchEffects(global, 'EFFECT_PARAMS_PATCH', env);
                     break;
                 }
-                if (p.effectId !== SCENE_GSPLAT_REVEAL_EFFECT_ID && p.effectId !== SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
+                if (p.effectId !== SCENE_GSPLAT_REVEAL_EFFECT_ID && !isPersistentProtocolEffectId(p.effectId as string)) {
                     console.warn('[MessageBridge] EFFECT_PARAMS_PATCH ignored: unsupported effectId', p.effectId);
                     break;
                 }
@@ -672,7 +672,7 @@ const initPostMessageBridge = (global: Global) => {
                     console.warn('[MessageBridge] EFFECT_TOGGLE ignored: module must be "effects" when present');
                     break;
                 }
-                if (p.effectId !== SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
+                if (!isPersistentProtocolEffectId(p.effectId as string)) {
                     console.warn('[MessageBridge] EFFECT_TOGGLE ignored: unsupported effectId', p.effectId);
                     break;
                 }
@@ -681,7 +681,7 @@ const initPostMessageBridge = (global: Global) => {
                     break;
                 }
                 dispatchEffects(global, 'EFFECT_TOGGLE', {
-                    effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+                    effectId: p.effectId,
                     value: (p as { value: boolean }).value
                 });
                 break;

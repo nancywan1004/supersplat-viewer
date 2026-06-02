@@ -12,18 +12,120 @@ import type { EffectsRuntimeState, PersistentEffectType, RevealEffectType, State
 import {
     ASSET_EFFECT_TYPES,
     ASSET_GSPLAT_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID,
     SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID,
     SCENE_GSPLAT_REVEAL_EFFECT_ID,
     defaultAssetEffectType,
+    persistentEffectBucketForType,
+    persistentEffectIdForBucket,
     type AssetEffectType
 } from '../vfx/effects-runtime/effect-types';
 import type { EffectsAssetInstance } from '../schemas/v2-custom';
 import { hasRevealEffectFromSettings, isPersistentVfx } from '../vfx/effects-runtime/reveal/reveal-policy';
+import { filterAssetEffectParams } from '../vfx/effects-runtime/asset/asset-effect-params';
 import { DEFAULT_EFFECTS } from './settings-serialize-configs';
 import { ensureRevealEffect } from './settings-serialize-helper';
 
 function cloneDefaultEffects(): NonNullable<ExperienceSettings['effects']> {
     return JSON.parse(JSON.stringify(DEFAULT_EFFECTS)) as NonNullable<ExperienceSettings['effects']>;
+}
+
+type PersistentSubTrackName = 'camera' | 'stylization';
+
+const PERSISTENT_SUBTRACK_IDS: Record<PersistentSubTrackName, string> = {
+    camera: SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID,
+    stylization: SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID
+};
+
+function ensurePersistentSubTrack(
+    persistent: NonNullable<ExperienceSettings['effects']>['persistent'],
+    name: PersistentSubTrackName
+): NonNullable<NonNullable<ExperienceSettings['effects']>['persistent'][PersistentSubTrackName]> {
+    const id = PERSISTENT_SUBTRACK_IDS[name];
+    if (!persistent[name] || typeof persistent[name] !== 'object') {
+        persistent[name] = { activeEffectId: id, paramsById: {} };
+    }
+    const track = persistent[name]!;
+    track.activeEffectId = id;
+    if (!track.paramsById || typeof track.paramsById !== 'object') {
+        track.paramsById = {};
+    }
+    return track;
+}
+
+function normalizePersistentPackShape(pack: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+    if (!pack) {
+        return undefined;
+    }
+    if (typeof pack.type === 'string' && isPersistentVfx(pack.type)) {
+        return pack;
+    }
+    for (const [effectType, rawParams] of Object.entries(pack)) {
+        if (!isPersistentVfx(effectType) || !rawParams || typeof rawParams !== 'object' || Array.isArray(rawParams)) {
+            continue;
+        }
+        const params = { ...(rawParams as Record<string, unknown>) };
+        const enabled = typeof params.enabled === 'boolean' ? params.enabled : true;
+        const autoStart = typeof params.autoStart === 'boolean' ? params.autoStart : true;
+        delete params.enabled;
+        delete params.autoStart;
+        return {
+            type: effectType,
+            enabled,
+            autoStart,
+            ...(Object.keys(params).length > 0 ? { effectParams: params } : {})
+        };
+    }
+    return undefined;
+}
+
+function firstPersistentPackInMap(map: Record<string, Record<string, unknown>> | undefined): Record<string, unknown> | undefined {
+    if (!map || typeof map !== 'object') {
+        return undefined;
+    }
+    for (const value of Object.values(map)) {
+        const pack = normalizePersistentPackShape(value as Record<string, unknown> | undefined);
+        if (pack) {
+            return pack;
+        }
+    }
+    return undefined;
+}
+
+function getPersistentPackForSubTrack(
+    persistent: NonNullable<ExperienceSettings['effects']>['persistent'],
+    name: PersistentSubTrackName
+): Record<string, unknown> | undefined {
+    const track = ensurePersistentSubTrack(persistent, name);
+    const id = PERSISTENT_SUBTRACK_IDS[name];
+    const byFixedId = normalizePersistentPackShape(track.paramsById[id] as Record<string, unknown> | undefined);
+    if (byFixedId) {
+        return byFixedId;
+    }
+    return firstPersistentPackInMap(track.paramsById);
+}
+
+function getLegacyPersistentPack(
+    persistent: NonNullable<ExperienceSettings['effects']>['persistent']
+): Record<string, unknown> | undefined {
+    const id = SCENE_GSPLAT_PERSISTENT_EFFECT_ID;
+    const byFixedId = normalizePersistentPackShape(persistent.paramsById[id] as Record<string, unknown> | undefined);
+    if (byFixedId) {
+        return byFixedId;
+    }
+    return firstPersistentPackInMap(persistent.paramsById);
+}
+
+export function readPersistentSettingsPack(settings: ExperienceSettings): Record<string, unknown> | undefined {
+    const e = ensureEffectsSettings(settings);
+    const pe = e.persistent;
+    const packs = [
+        getPersistentPackForSubTrack(pe, 'camera'),
+        getPersistentPackForSubTrack(pe, 'stylization'),
+        getLegacyPersistentPack(pe)
+    ];
+    return packs.find(pack => parsePersistentPack(pack) !== null) ?? packs.find(pack => pack !== undefined);
 }
 
 /** 保证 `settings.effects` 三轨对象存在且字段形状合法 */
@@ -46,21 +148,34 @@ export function ensureEffectsSettings(settings: ExperienceSettings): NonNullable
     if (!e.persistent.paramsById || typeof e.persistent.paramsById !== 'object') {
         e.persistent.paramsById = {};
     }
+    const cameraTrack = ensurePersistentSubTrack(e.persistent, 'camera');
+    const stylizationTrack = ensurePersistentSubTrack(e.persistent, 'stylization');
+    const legacyPack = getLegacyPersistentPack(e.persistent);
+    if (legacyPack && typeof legacyPack.type === 'string') {
+        const bucket = persistentEffectBucketForType(legacyPack.type);
+        const track = bucket === 'camera' ? cameraTrack : stylizationTrack;
+        const id = persistentEffectIdForBucket(bucket);
+        if (!getPersistentPackForSubTrack(e.persistent, bucket)) {
+            const parsedLegacy = parsePersistentPack(legacyPack);
+            if (parsedLegacy) {
+                track.paramsById[id] = persistentToParamRecord(parsedLegacy, legacyPack.enabled !== false);
+            }
+        }
+    }
     // `enabled` 缺省时：若 scene 包已写可持续类型，默认视为开（与 editUI `enabled ?? true` 一致）；否则为关。
     // 须在 paramsById 归一化之后推断，否则导入仅写 `paramsById` 的 JSON 会在 mirror 时被误判为关并清空 persistent。
     if (typeof e.persistent.enabled !== 'boolean') {
-        const pid = SCENE_GSPLAT_PERSISTENT_EFFECT_ID;
-        const p = e.persistent.paramsById[pid] as Record<string, unknown> | undefined;
-        const t = p && typeof p.type === 'string' ? p.type : undefined;
-        e.persistent.enabled = !!(t && isPersistentVfx(t));
+        const p =
+            getPersistentPackForSubTrack(e.persistent, 'camera') ??
+            getPersistentPackForSubTrack(e.persistent, 'stylization') ??
+            getLegacyPersistentPack(e.persistent);
+        const parsed = parsePersistentPack(p);
+        e.persistent.enabled = !!(parsed?.type && isPersistentVfx(parsed.type));
     }
     if (!e.asset || typeof e.asset !== 'object') {
-        e.asset = { activeEffectId: ASSET_GSPLAT_EFFECT_ID, defaultParamsById: {}, instancesByTargetId: {} };
+        e.asset = { activeEffectId: ASSET_GSPLAT_EFFECT_ID, instancesByTargetId: {} };
     }
     e.asset.activeEffectId = ASSET_GSPLAT_EFFECT_ID;
-    if (!e.asset.defaultParamsById || typeof e.asset.defaultParamsById !== 'object') {
-        e.asset.defaultParamsById = {};
-    }
     if (!e.asset.instancesByTargetId || typeof e.asset.instancesByTargetId !== 'object') {
         e.asset.instancesByTargetId = {};
     }
@@ -73,6 +188,66 @@ function parseAssetInstanceType(raw: Record<string, unknown>): AssetEffectType |
         return t as AssetEffectType;
     }
     return null;
+}
+
+function readMorphKeyframeIdsFromParams(params: Record<string, unknown> | undefined): string[] | null {
+    const ids = params?.keyframeEntityIds ?? params?.keyframeTargetIds;
+    if (!Array.isArray(ids) || ids.length < 2 || !ids.every((id) => typeof id === 'string' && id.length > 0)) {
+        return null;
+    }
+    return ids as string[];
+}
+
+export function resolveAssetInstanceStorageTargetId(
+    targetId: string,
+    instance: Pick<EffectsAssetInstance, 'type' | 'effectParams'> | null | undefined
+): string {
+    if (instance?.type !== 'gsplat-morph') {
+        return targetId;
+    }
+    const ids = readMorphKeyframeIdsFromParams(instance.effectParams as Record<string, unknown> | undefined);
+    return ids?.[0] ?? targetId;
+}
+
+export function findAssetMorphOwnerTargetId(settings: ExperienceSettings, targetId: string): string | null {
+    const map = ensureEffectsSettings(settings).asset.instancesByTargetId ?? {};
+    for (const [ownerId, inst] of Object.entries(map)) {
+        if (inst.type !== 'gsplat-morph') {
+            continue;
+        }
+        const ids = readMorphKeyframeIdsFromParams(inst.effectParams as Record<string, unknown> | undefined);
+        if (ids?.includes(targetId)) {
+            return ownerId;
+        }
+    }
+    return null;
+}
+
+function sameMorphKeyframeSet(a: string[], b: string[]): boolean {
+    if (a.length !== b.length) {
+        return false;
+    }
+    const set = new Set(a);
+    if (set.size !== a.length) {
+        return false;
+    }
+    return b.every((id) => set.has(id));
+}
+
+function pruneDuplicateMorphAssetInstances(
+    map: Record<string, EffectsAssetInstance>,
+    ownerTargetId: string,
+    ownerKeyframeIds: string[]
+): void {
+    for (const [targetId, inst] of Object.entries(map)) {
+        if (targetId === ownerTargetId || inst.type !== 'gsplat-morph') {
+            continue;
+        }
+        const ids = readMorphKeyframeIdsFromParams(inst.effectParams as Record<string, unknown> | undefined);
+        if (ids && sameMorphKeyframeSet(ids, ownerKeyframeIds)) {
+            delete map[targetId];
+        }
+    }
 }
 
 function parseAssetDefaultPack(pack: Record<string, unknown> | undefined): EffectsAssetInstance | null {
@@ -102,7 +277,7 @@ function parseAssetDefaultPack(pack: Record<string, unknown> | undefined): Effec
 /** 读取物体轨包默认参（`defaultParamsById[asset.gsplat-effects]`） */
 export function readAssetDefaultParams(settings: ExperienceSettings): EffectsAssetInstance | null {
     const e = ensureEffectsSettings(settings);
-    const pack = e.asset.defaultParamsById[ASSET_GSPLAT_EFFECT_ID] as Record<string, unknown> | undefined;
+    const pack = e.asset.defaultParamsById?.[ASSET_GSPLAT_EFFECT_ID] as Record<string, unknown> | undefined;
     return parseAssetDefaultPack(pack);
 }
 
@@ -181,7 +356,7 @@ export function patchAssetInstanceFromParams(
         if (patch.effectParams === null) {
             nextEffectParams = {};
         } else if (typeof patch.effectParams === 'object' && !Array.isArray(patch.effectParams)) {
-            const incoming = patch.effectParams as Record<string, unknown>;
+            const incoming = filterAssetEffectParams(nextType, patch.effectParams as Record<string, unknown>);
             if (typeIsChanging) {
                 nextEffectParams = { ...incoming };
             } else {
@@ -189,6 +364,7 @@ export function patchAssetInstanceFromParams(
             }
         }
     }
+    nextEffectParams = filterAssetEffectParams(nextType, nextEffectParams);
 
     const next: EffectsAssetInstance = {
         type: nextType,
@@ -196,7 +372,15 @@ export function patchAssetInstanceFromParams(
         autoStart: typeof patch.autoStart === 'boolean' ? patch.autoStart : (current?.autoStart ?? false),
         ...(Object.keys(nextEffectParams).length > 0 ? { effectParams: nextEffectParams } : {})
     };
-    map[targetId] = next;
+    const morphKeyframeIds = nextType === 'gsplat-morph' ? readMorphKeyframeIdsFromParams(nextEffectParams) : null;
+    const ownerTargetId = morphKeyframeIds?.[0] ?? targetId;
+    if (ownerTargetId !== targetId) {
+        delete map[targetId];
+    }
+    map[ownerTargetId] = next;
+    if (morphKeyframeIds) {
+        pruneDuplicateMorphAssetInstances(map, ownerTargetId, morphKeyframeIds);
+    }
     return next;
 }
 
@@ -259,19 +443,23 @@ function revealToParamRecord(rev: LegacyRevealEffect): Record<string, unknown> {
     return out;
 }
 
-/** persistent 轨 `paramsById`：仅 `type` / `autoStart` / `effectParams`，**不含** `totalDuration`（与一次性 reveal 包形区分）。 */
-function persistentToParamRecord(rev: LegacyRevealEffect): Record<string, unknown> {
-    const out: Record<string, unknown> = {
-        type: rev.type,
-        autoStart: rev.autoStart ?? true
-    };
+/** persistent 子槽存盘包：固定包 id 下按 effect type 分组，参数扁平写入具体 effect 节点。 */
+function persistentToParamRecord(rev: LegacyRevealEffect, enabled = true): Record<string, unknown> {
+    const type = rev.type;
+    if (!type || !isPersistentVfx(type)) {
+        return {};
+    }
+    const params: Record<string, unknown> = { enabled };
+    if (rev.autoStart === false) {
+        params.autoStart = false;
+    }
     if (rev.effectParams && typeof rev.effectParams === 'object' && !Array.isArray(rev.effectParams)) {
         const ep = { ...rev.effectParams };
         if (Object.keys(ep).length > 0) {
-            out.effectParams = ep;
+            Object.assign(params, ep);
         }
     }
-    return out;
+    return { [type]: params };
 }
 
 function parseRevealPack(pack: Record<string, unknown> | undefined): LegacyRevealEffect | null {
@@ -292,22 +480,50 @@ function parseRevealPack(pack: Record<string, unknown> | undefined): LegacyRevea
     return base;
 }
 
-/** 解析 persistent 轨存盘包；忽略 `totalDuration`（旧 JSON 残留键不读入）。 */
+/** 解析 persistent 轨存盘包；兼容新 nested 包与旧 `{ type, effectParams }` 包，忽略 `totalDuration`。 */
 function parsePersistentPack(pack: Record<string, unknown> | undefined): LegacyRevealEffect | null {
-    if (!pack || typeof pack.type !== 'string') {
+    const normalized = normalizePersistentPackShape(pack);
+    if (!normalized || typeof normalized.type !== 'string') {
+        return null;
+    }
+    if (normalized.enabled === false) {
         return null;
     }
     const base: LegacyRevealEffect = {
-        type: pack.type as LegacyRevealEffect['type'],
-        autoStart: typeof pack.autoStart === 'boolean' ? pack.autoStart : true
+        type: normalized.type as LegacyRevealEffect['type'],
+        autoStart: typeof normalized.autoStart === 'boolean' ? normalized.autoStart : true
     };
-    if (pack.effectParams && typeof pack.effectParams === 'object' && !Array.isArray(pack.effectParams)) {
-        const ep = { ...(pack.effectParams as Record<string, unknown>) };
+    if (normalized.effectParams && typeof normalized.effectParams === 'object' && !Array.isArray(normalized.effectParams)) {
+        const ep = { ...(normalized.effectParams as Record<string, unknown>) };
         if (Object.keys(ep).length > 0) {
             base.effectParams = ep;
         }
     }
     return base;
+}
+
+export function setPersistentSettingsEnabled(settings: ExperienceSettings, enabled: boolean): void {
+    const e = ensureEffectsSettings(settings);
+    e.persistent.enabled = enabled;
+    const current = readPersistentSettingsPack(settings);
+    if (!current || typeof current.type !== 'string' || !isPersistentVfx(current.type)) {
+        return;
+    }
+    const bucket = persistentEffectBucketForType(current.type);
+    const id = persistentEffectIdForBucket(bucket);
+    const currentParams =
+        current.effectParams && typeof current.effectParams === 'object' && !Array.isArray(current.effectParams)
+            ? { ...(current.effectParams as Record<string, unknown>) }
+            : {};
+    ensurePersistentSubTrack(e.persistent, bucket).paramsById[id] = persistentToParamRecord(
+        {
+            type: current.type as LegacyRevealEffect['type'],
+            autoStart: typeof current.autoStart === 'boolean' ? current.autoStart : true,
+            ...(Object.keys(currentParams).length > 0 ? { effectParams: currentParams } : {})
+        },
+        enabled
+    );
+    e.persistent.paramsById[SCENE_GSPLAT_PERSISTENT_EFFECT_ID] = {};
 }
 
 /** scene reveal 参数：优先读 `settings.effects.reveal`，其次读 legacy `revealEffect`。 */
@@ -331,11 +547,11 @@ export function getRevealTotalDuration(settings: ExperienceSettings): number {
 /** `effects.persistent` 视为开（`enabled !== false`）且含合法可持续 `type` */
 function persistentRevealInEffects(settings: ExperienceSettings): boolean {
     ensureEffectsSettings(settings);
-    const id = SCENE_GSPLAT_PERSISTENT_EFFECT_ID;
     const pe = settings.effects!.persistent;
     if (pe.enabled === false) return false;
-    const pack = pe.paramsById[id] as Record<string, unknown> | undefined;
-    return !!(pack && typeof pack.type === 'string' && isPersistentVfx(pack.type));
+    const pack = readPersistentSettingsPack(settings);
+    const parsed = parsePersistentPack(pack);
+    return !!(parsed?.type && isPersistentVfx(parsed.type));
 }
 
 /** `revealEffect` 或 persistent 轨任一表示存在 scene reveal 配置 */
@@ -346,10 +562,9 @@ export function hasRevealInSettings(settings: ExperienceSettings): boolean {
 /** 可持续 scene GSplat 参数：优先读 `effects.persistent`，再回退 legacy 单轨 `revealEffect`。 */
 export function readPersistentRevealParams(settings: ExperienceSettings): LegacyRevealEffect | null {
     ensureEffectsSettings(settings);
-    const id = SCENE_GSPLAT_PERSISTENT_EFFECT_ID;
     const pe = settings.effects!.persistent;
     if (pe.enabled !== false) {
-        const pack = pe.paramsById[id] as Record<string, unknown> | undefined;
+        const pack = readPersistentSettingsPack(settings);
         const parsed = parsePersistentPack(pack);
         if (parsed && typeof parsed.type === 'string' && isPersistentVfx(parsed.type)) {
             return parsed;
@@ -457,8 +672,7 @@ export function patchPersistentSettingsFromParams(
     patch: Partial<LegacyRevealEffect>
 ): LegacyRevealEffect {
     const e = ensureEffectsSettings(settings);
-    const id = SCENE_GSPLAT_PERSISTENT_EFFECT_ID;
-    const rawPack = e.persistent.paramsById[id] as Record<string, unknown> | undefined;
+    const rawPack = readPersistentSettingsPack(settings);
     const parsedCurrent = parsePersistentPack(rawPack);
     const current: LegacyRevealEffect =
         parsedCurrent ??
@@ -499,7 +713,15 @@ export function patchPersistentSettingsFromParams(
         autoStart: typeof patch.autoStart === 'boolean' ? patch.autoStart : (current.autoStart ?? true),
         ...(Object.keys(nextEffectParams).length > 0 ? { effectParams: nextEffectParams } : {})
     };
-    e.persistent.paramsById[id] = { ...persistentToParamRecord(next) };
+    const oldBucket = persistentEffectBucketForType(oldType);
+    const nextBucket = persistentEffectBucketForType(nextType as string);
+    const nextId = persistentEffectIdForBucket(nextBucket);
+    if (oldBucket !== nextBucket) {
+        const oldId = persistentEffectIdForBucket(oldBucket);
+        ensurePersistentSubTrack(e.persistent, oldBucket).paramsById[oldId] = {};
+    }
+    ensurePersistentSubTrack(e.persistent, nextBucket).paramsById[nextId] = { ...persistentToParamRecord(next) };
+    e.persistent.paramsById[SCENE_GSPLAT_PERSISTENT_EFFECT_ID] = {};
     return next;
 }
 
@@ -518,6 +740,8 @@ export function clearPersistentRevealTrack(settings: ExperienceSettings): void {
     const id = SCENE_GSPLAT_PERSISTENT_EFFECT_ID;
     e.persistent.enabled = false;
     e.persistent.paramsById[id] = {};
+    e.persistent.camera!.paramsById[SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID] = {};
+    e.persistent.stylization!.paramsById[SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID] = {};
 }
 
 /**
@@ -528,7 +752,10 @@ export function flushRevealIntoEffectsForExport(settings: ExperienceSettings): v
     if (settings.revealEffect != null) {
         mirrorEffectsSettingsFromReveal(settings);
     }
-    ensureEffectsSettings(settings);
+    const effects = ensureEffectsSettings(settings);
+    delete effects.persistent.activeEffectId;
+    delete effects.persistent.enabled;
+    delete effects.persistent.paramsById;
 }
 
 /**
@@ -554,18 +781,18 @@ export function mirrorEffectsSettingsFromReveal(settings: ExperienceSettings): v
     }
 
     if (isPersistentVfx(t)) {
+        const bucket = persistentEffectBucketForType(t);
+        const id = persistentEffectIdForBucket(bucket);
         e.persistent.enabled = true;
-        e.persistent.paramsById[persistentId] = { ...persistentToParamRecord(rev) };
+        ensurePersistentSubTrack(e.persistent, bucket).paramsById[id] = { ...persistentToParamRecord(rev) };
+        e.persistent.paramsById[persistentId] = {};
         syncLegacyRevealEffectShadow(settings);
         return;
     }
 
     const pe = e.persistent;
-    const existingPersistentPack = pe.paramsById[persistentId] as Record<string, unknown> | undefined;
-    const existingPersistentType =
-        existingPersistentPack && typeof existingPersistentPack.type === 'string'
-            ? (existingPersistentPack.type as string)
-            : undefined;
+    const existingPersistentPack = readPersistentSettingsPack(settings);
+    const existingPersistentType = parsePersistentPack(existingPersistentPack)?.type as string | undefined;
     const preservePersistentWithReveal =
         pe.enabled !== false &&
         existingPersistentType !== undefined &&
@@ -579,6 +806,8 @@ export function mirrorEffectsSettingsFromReveal(settings: ExperienceSettings): v
 
     pe.enabled = false;
     pe.paramsById[persistentId] = {};
+    pe.camera!.paramsById[SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID] = {};
+    pe.stylization!.paramsById[SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID] = {};
     syncLegacyRevealEffectShadow(settings);
 }
 

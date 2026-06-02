@@ -95,7 +95,10 @@ export function buildMorphOptions(ep: Record<string, unknown>): GsplatMorphOptio
     const opts: GsplatMorphOptions = {
         segmentDuration: typeof ep.segmentDuration === 'number' ? ep.segmentDuration : 10,
         segmentHoldDuration: typeof ep.segmentHoldDuration === 'number' ? ep.segmentHoldDuration : undefined,
-        loop: typeof ep.loop === 'boolean' ? ep.loop : undefined,
+        loop:
+            typeof ep.isLoop === 'boolean' ? ep.isLoop :
+                typeof ep.loop === 'boolean' ? ep.loop :
+                    undefined,
         autoPlay: typeof ep.autoPlay === 'boolean' ? ep.autoPlay : true,
         // 大 splat 下默认做插值节流，避免每帧全量 CPU 插值/上传导致卡顿
         morphPresentMaxHz: typeof ep.morphPresentMaxHz === 'number' ? ep.morphPresentMaxHz : 24,

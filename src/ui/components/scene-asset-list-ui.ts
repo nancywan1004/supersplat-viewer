@@ -26,7 +26,7 @@ export function getSceneAssetListHTML(): string {
 }
 
 function isMorphKeyframePickMode(state: Global['state']): boolean {
-    return state.editLeftModule === 'assetEffects' && state.assetEffectUiSubtype === GSPLAT_MORPH_TYPE;
+    return state.assetEffectUiSubtype === GSPLAT_MORPH_TYPE;
 }
 
 function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
@@ -109,11 +109,6 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
         });
         li.addEventListener('click', (e) => {
             if ((e.target as HTMLElement).closest('.scene-asset-delete') || (e.target as HTMLElement).closest('.scene-asset-visibility')) return;
-            if (editUiTransport === 'message-bridge') {
-                sendEditProtocolMessage({ type: 'ASSET_SELECT', id: entry.id });
-                return;
-            }
-            state.selectedSceneEntityId = entry.id;
             if (morphPick && isPlacedGaussianItem(entry)) {
                 const ids = [...(state.assetEffectsMorphKeyframeIds ?? [])];
                 const idx = ids.indexOf(entry.id);
@@ -124,7 +119,14 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
                 }
                 state.assetEffectsMorphKeyframeIds = ids;
                 events.fire('assetEffect:morphKeyframesChanged', { ids });
+                renderSceneAssetList(listEl, global);
+                return;
             }
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'ASSET_SELECT', id: entry.id });
+                return;
+            }
+            state.selectedSceneEntityId = entry.id;
             events.fire('sceneAsset:selected', { source: 'host' });
             if (state.editLeftModule === 'asset') {
                 events.fire('inputEvent', 'frame', { focusTarget: 'asset' as const });

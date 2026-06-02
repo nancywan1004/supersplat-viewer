@@ -3,7 +3,9 @@ import type { EffectsSettings } from '../schemas/v2-custom';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../schemas/v2-custom';
 import {
     ASSET_GSPLAT_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID,
     SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID,
     SCENE_GSPLAT_REVEAL_EFFECT_ID
 } from '../vfx/effects-runtime/effect-types';
 
@@ -48,6 +50,12 @@ export const DEFAULT_REVEAL_EFFECT = {
 /** `settings.effects` 缺省骨架（reveal / persistent / asset）；持久化 enabled 仅 persistent 使用 */
 export const DEFAULT_EFFECTS: EffectsSettings = {
     reveal: { activeEffectId: SCENE_GSPLAT_REVEAL_EFFECT_ID, paramsById: {} },
-    persistent: { activeEffectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID, enabled: false, paramsById: {} },
-    asset: { activeEffectId: ASSET_GSPLAT_EFFECT_ID, defaultParamsById: {}, instancesByTargetId: {} }
+    persistent: {
+        activeEffectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+        enabled: false,
+        paramsById: {},
+        camera: { activeEffectId: SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID, paramsById: {} },
+        stylization: { activeEffectId: SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID, paramsById: {} }
+    },
+    asset: { activeEffectId: ASSET_GSPLAT_EFFECT_ID, instancesByTargetId: {} }
 };

@@ -301,14 +301,30 @@ const validateV2 = (data: unknown): ExperienceSettings => {
             throw new Error('settings.effects.reveal.paramsById must be an object');
         }
         const pers = assertObject(ef.persistent, 'settings.effects.persistent');
-        assertString(pers.activeEffectId, 'settings.effects.persistent.activeEffectId');
-        assertBoolean(pers.enabled, 'settings.effects.persistent.enabled');
-        if (typeof pers.paramsById !== 'object' || pers.paramsById === null) {
+        if (pers.activeEffectId !== undefined) {
+            assertString(pers.activeEffectId, 'settings.effects.persistent.activeEffectId');
+        }
+        if (pers.enabled !== undefined) {
+            assertBoolean(pers.enabled, 'settings.effects.persistent.enabled');
+        }
+        if (pers.paramsById !== undefined && (typeof pers.paramsById !== 'object' || pers.paramsById === null)) {
             throw new Error('settings.effects.persistent.paramsById must be an object');
+        }
+        for (const subTrackName of ['camera', 'stylization'] as const) {
+            if (pers[subTrackName] !== undefined) {
+                const subTrack = assertObject(pers[subTrackName], `settings.effects.persistent.${subTrackName}`);
+                assertString(subTrack.activeEffectId, `settings.effects.persistent.${subTrackName}.activeEffectId`);
+                if (typeof subTrack.paramsById !== 'object' || subTrack.paramsById === null) {
+                    throw new Error(`settings.effects.persistent.${subTrackName}.paramsById must be an object`);
+                }
+            }
         }
         const asset = assertObject(ef.asset, 'settings.effects.asset');
         assertString(asset.activeEffectId, 'settings.effects.asset.activeEffectId');
-        if (typeof asset.defaultParamsById !== 'object' || asset.defaultParamsById === null) {
+        if (
+            asset.defaultParamsById !== undefined &&
+            (typeof asset.defaultParamsById !== 'object' || asset.defaultParamsById === null)
+        ) {
             throw new Error('settings.effects.asset.defaultParamsById must be an object');
         }
         if (asset.instancesByTargetId !== undefined) {
