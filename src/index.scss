@@ -820,20 +820,22 @@ button {
     }
 }
 
-#joystickBase {
+#joystickBase, #joystickLookBase {
     position: absolute;
-    width: 56px;
-    height: 100px;
-    transform: translate(-50%, -50%);
-    border-radius: 28px;
+    width: 112px;
+    height: 112px;
+    transform: translateX(-50%);
+    border-radius: 56px;
     touch-action: none;
     pointer-events: auto;
-    opacity: 0.5;
-    transition: opacity 0.3s ease, transform 0.2s ease;
+    opacity: 0.78;
+    transition: opacity 0.2s ease, transform 0.2s ease;
 
-    background: linear-gradient(180deg, #0004 0%, #0000 30%, #0000 70%, #0004 100%);
-    background-color: #0003;
-    border: 2px solid #fff3;
+    background: radial-gradient(circle at center, rgba(255, 255, 255, 0.11) 0%, rgba(255, 255, 255, 0.055) 62%, rgba(255, 255, 255, 0.025) 100%);
+    border: 1.5px solid rgba(255, 255, 255, 0.22);
+    box-shadow: inset 0 0 36px rgba(255, 255, 255, 0.08), 0 12px 30px rgba(0, 0, 0, 0.18);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
 
     transition: width 0.2s ease, height 0.2s ease, border-radius 0.2s ease;
 
@@ -843,34 +845,46 @@ button {
 
     &.active {
         opacity: 1;
-        transform: scale(1.05);
+        transform: translateX(-50%) scale(1.03);
     }
 
-    > #joystick {
+    > #joystick, > #joystickLook {
         position: absolute;
-        left: 8px;  // (56 - 40) / 2 = 8px to center horizontally
-        width: 40px;
-        height: 40px;
+        left: 34px;
+        top: 34px;
+        width: 44px;
+        height: 44px;
         border-radius: 50%;
         touch-action: none;
-        transition: background-color 0.2s ease;
+        transition: background-color 0.2s ease, left 0.08s ease, top 0.08s ease;
 
-        background-color: #fff8;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        background: radial-gradient(circle at center, rgba(255, 255, 255, 0.95) 0%, rgba(230, 240, 255, 0.9) 100%);
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28), inset 0 0 0 1px rgba(255, 255, 255, 0.55);
 
-        transition: left 0.1s ease;
+        &::after {
+            content: '';
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            background: #5b8dff;
+            box-shadow: 0 0 8px rgba(91, 141, 255, 0.45);
+        }
+
     }
 
     // 2D mode: square joystick with full directional movement
     &.mode-2d {
-        width: 100px;
-        height: 100px;
-        border-radius: 50px;
-        background: radial-gradient(circle, #0000 40%, #0004 100%);
-        background-color: #0003;
+        width: 112px;
+        height: 112px;
+        border-radius: 56px;
+        background: radial-gradient(circle at center, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 60%, rgba(255, 255, 255, 0.01) 100%);
 
-        > #joystick {
-            left: 30px;  // (100 - 40) / 2 = 30px to center horizontally
+        > #joystick, > #joystickLook {
+            left: 34px;
         }
     }
 }

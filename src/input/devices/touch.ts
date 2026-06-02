@@ -58,6 +58,9 @@ class TouchDevice implements InputDevice {
     /** UI joystick value [x, y], -1..1. */
     private _joystick: [number, number] = [0, 0];
 
+    /** UI look joystick value [x, y], -1..1. */
+    private _joystickLook: [number, number] = [0, 0];
+
     /** Smoothed forward/back velocity from pinch gesture (-1..1), walk + joystick fly. */
     private _pinchVelocity = 0;
 
@@ -77,6 +80,11 @@ class TouchDevice implements InputDevice {
     private _onJoystickInput = (value: { x: number; y: number }) => {
         this._joystick[0] = value.x;
         this._joystick[1] = value.y;
+    };
+
+    private _onJoystickLookInput = (value: { x: number; y: number }) => {
+        this._joystickLook[0] = value.x;
+        this._joystickLook[1] = value.y;
     };
 
     private _onTouchJoystickUi = (payload: TouchJoystickUiPayload) => {
@@ -106,6 +114,7 @@ class TouchDevice implements InputDevice {
         this._mobileFlyInput = new MobileFlyInput(canvas);
         this._mobileFlyInput.setLookEnabled(true);
         global.events.on('joystickInput', this._onJoystickInput);
+        global.events.on('joystickLookInput', this._onJoystickLookInput);
         global.events.on('touchJoystickUi', this._onTouchJoystickUi);
         global.events.on('cameraMode:changed', this._onCameraModeChanged);
     }
@@ -113,6 +122,7 @@ class TouchDevice implements InputDevice {
     detach(): void {
         if (this._global) {
             this._global.events.off('joystickInput', this._onJoystickInput);
+            this._global.events.off('joystickLookInput', this._onJoystickLookInput);
             this._global.events.off('touchJoystickUi', this._onTouchJoystickUi);
             this._global.events.off('cameraMode:changed', this._onCameraModeChanged);
             this._global = null;
@@ -134,15 +144,27 @@ class TouchDevice implements InputDevice {
 
     update(ctx: UpdateContext, frame: CameraInputFrame): void {
         const { touch, pinch, count } = this._source.read();
-        const { isFly, isWalk, isFirstPerson, isOrbit, gamingControls, dt, distance, cameraComponent } = ctx;
+        const { mode, isFly, isWalk, isFirstPerson, isOrbit, gamingControls, dt, distance, cameraComponent } = ctx;
         const global = this._global!;
         const useJoystickMove = shouldUseTouchJoystickMove(global.state);
         const useMobileFlyGestures = isFly;
+        const hasMoveJoystickInput = Math.abs(this._joystick[0]) > 1e-4 || Math.abs(this._joystick[1]) > 1e-4;
+        const hasLookJoystickInput = Math.abs(this._joystickLook[0]) > 1e-4 || Math.abs(this._joystickLook[1]) > 1e-4;
+
+        // If viewer starts in orbit, dragging either joystick should enter fly mode.
+        if (isOrbit && useJoystickMove && (hasMoveJoystickInput || hasLookJoystickInput)) {
+            global.events.fire('inputEvent', 'requestFirstPerson');
+        }
+        // Match scene-tap behavior: dragging joystick while anim is active exits
+        // animation mode and switches to first-person control.
+        if (mode === 'anim' && useJoystickMove && (hasMoveJoystickInput || hasLookJoystickInput)) {
+            global.events.fire('inputEvent', 'requestFirstPerson');
+        }
 
         // running touch count
         this._touchCount += count[0];
 
-        if (isFly && useJoystickMove && (this._joystick[0] !== 0 || this._joystick[1] !== 0)) {
+        if (isFly && useJoystickMove && hasMoveJoystickInput) {
             global.events.fire('navigateCancel');
         }
 
@@ -204,7 +226,9 @@ class TouchDevice implements InputDevice {
         const orbit = isOrbit ? 1 : 0;
         const fly = isFirstPerson ? 1 : 0;
         const double = this._touchCount > 1 ? 1 : 0;
-        const orbitPinchIn = -pinch[0];
+        // In landscape joystick mode, MultiTouch pinch sign is opposite to the
+        // expected orbit zoom direction; keep portrait behavior unchanged.
+        const orbitPinchIn = useJoystickMove ? pinch[0] : -pinch[0];
         const orbitFactor = isFirstPerson ? cameraComponent.fov / 120 : 1;
         const dragInvert = isFirstPerson ? -1 : 1;
 
@@ -275,6 +299,13 @@ class TouchDevice implements InputDevice {
                 ));
             }
             v.z += mfi.rollInput * fly * MOBILE_FLY_ROLL_SENSITIVITY;
+            if (useJoystickMove) {
+                const lookJoystickGain = 1.6;
+                flyRotate.set(this._joystickLook[0], this._joystickLook[1], 0);
+                v.add(flyRotate.mulScalar(
+                    fly * this.orbitSpeed * orbitFactor * dt * lookJoystickGain
+                ));
+            }
         } else {
             flyRotate.set(touch[0] * dragInvert, touch[1] * dragInvert, 0);
             v.add(flyRotate.mulScalar(

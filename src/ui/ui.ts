@@ -48,62 +48,94 @@ import { getRevealActiveType } from '../settings-serialize/effects-sync';
 const initJoystick = (
     dom: Record<string, HTMLElement>,
     events: EventHandler,
-    state: { cameraMode: string; inputMode: string; gamingControls: boolean }
+    state: { cameraMode: string; inputMode: string; gamingControls: boolean; hasRevealEffect?: boolean }
 ) => {
-    // Joystick dimensions (matches SCSS: base height=100, stick size=40)
-    const joystickHeight = 100;
-    const stickSize = 40;
+    if (!dom.joystickBase || !dom.joystick || !dom.joystickLookBase || !dom.joystickLook) {
+        console.warn('[Joystick] missing joystick dom nodes, skip init');
+        return;
+    }
+
+    // Joystick dimensions (matches SCSS)
+    const joystickHeight = 112;
+    const stickSize = 44;
     const stickCenterY = (joystickHeight - stickSize) / 2; // 30px - top position when centered
     const stickCenterX = (joystickHeight - stickSize) / 2; // 30px - left position when centered (for 2D mode)
     const maxStickTravel = stickCenterY; // can travel 30px up or down from center
 
-    // Fixed joystick position (bottom-left corner with safe area)
-    const joystickFixedX = 70;
-    const joystickFixedY = () => window.innerHeight - 140;
+    // Fixed positions (bottom corners with safe area)
+    const joystickLeft = 84;
+    const lookJoystickLeft = () => window.innerWidth - 84;
+    const joystickBottom = 'calc(env(safe-area-inset-bottom, 0px) + 48px)';
 
     // Joystick touch state
     let joystickPointerId: number | null = null;
     let joystickValueX = 0; // -1 to 1, negative = left, positive = right
     let joystickValueY = 0; // -1 to 1, negative = up/forward on the UI, positive = down/backward
+    let joystickLookPointerId: number | null = null;
+    let joystickLookValueX = 0; // -1 to 1, negative = look left, positive = look right
+    let joystickLookValueY = 0; // -1 to 1, negative = look up, positive = look down
 
-    // Joystick mode: '1d' for vertical only, '2d' for full directional
-    let joystickMode: '1d' | '2d' = '2d';
+    const getElementCenter = (element: HTMLElement) => {
+        const rect = element.getBoundingClientRect();
+        return {
+            x: rect.left + rect.width * 0.5,
+            y: rect.top + rect.height * 0.5
+        };
+    };
 
-    // Double-tap detection for mode toggle
-    let lastTapTime = 0;
+    // Gate joystick visibility until reveal phase completes.
+    let revealReady = !state.hasRevealEffect;
 
     // Joystick: touch + landscape only (portrait uses two-finger fly)
     const updateJoystickVisibility = () => {
-        if (shouldUseTouchJoystickMove(state)) {
+        const joystickEnabled = revealReady && shouldUseTouchJoystickMove(state);
+        if (joystickEnabled) {
             dom.joystickBase.classList.remove('hidden');
-            dom.joystickBase.classList.toggle('mode-2d', joystickMode === '2d');
-            dom.joystickBase.style.left = `${joystickFixedX}px`;
-            dom.joystickBase.style.top = `${joystickFixedY()}px`;
+            dom.joystickLookBase.classList.remove('hidden');
+            dom.joystickBase.classList.add('mode-2d');
+            dom.joystickLookBase.classList.add('mode-2d');
+            dom.joystickBase.style.left = `${joystickLeft}px`;
+            dom.joystickBase.style.right = '';
+            dom.joystickBase.style.top = '';
+            dom.joystickBase.style.bottom = joystickBottom;
+            dom.joystickLookBase.style.left = `${lookJoystickLeft()}px`;
+            dom.joystickLookBase.style.right = '';
+            dom.joystickLookBase.style.top = '';
+            dom.joystickLookBase.style.bottom = joystickBottom;
             dom.joystick.style.top = `${stickCenterY}px`;
-            if (joystickMode === '2d') {
-                dom.joystick.style.left = `${stickCenterX}px`;
-            } else {
-                dom.joystick.style.left = '8px';
-            }
+            dom.joystickLook.style.top = `${stickCenterY}px`;
+            dom.joystick.style.left = `${stickCenterX}px`;
+            dom.joystickLook.style.left = `${stickCenterX}px`;
         } else {
             dom.joystickBase.classList.add('hidden');
+            dom.joystickLookBase.classList.add('hidden');
             events.fire('joystickInput', { x: 0, y: 0 });
+            events.fire('joystickLookInput', { x: 0, y: 0 });
         }
         events.fire('touchJoystickUi', {
-            active: shouldUseTouchJoystickMove(state)
+            active: joystickEnabled
         });
     };
 
     events.on('cameraMode:changed', updateJoystickVisibility);
     events.on('inputMode:changed', updateJoystickVisibility);
     events.on('gamingControls:changed', updateJoystickVisibility);
+    events.on('hasRevealEffect:changed', (value: boolean) => {
+        revealReady = !value;
+        updateJoystickVisibility();
+    });
+    events.once('revealComplete', () => {
+        revealReady = true;
+        updateJoystickVisibility();
+    });
     window.addEventListener('resize', updateJoystickVisibility);
     window.matchMedia('(orientation: landscape)').addEventListener('change', updateJoystickVisibility);
     updateJoystickVisibility();
 
     // Handle joystick touch input directly on the joystick element
     const updateJoystickStick = (clientX: number, clientY: number) => {
-        const baseY = joystickFixedY();
+        const center = getElementCenter(dom.joystickBase);
+        const baseY = center.y;
         // Calculate Y offset from joystick center (positive = down/backward)
         const offsetY = clientY - baseY;
         // Clamp to max travel and normalize to -1 to 1
@@ -113,34 +145,35 @@ const initJoystick = (
         // Update stick visual Y position
         dom.joystick.style.top = `${stickCenterY + clampedOffsetY}px`;
 
-        // Handle X axis in 2D mode
-        if (joystickMode === '2d') {
-            const baseX = joystickFixedX;
-            const offsetX = clientX - baseX;
-            const clampedOffsetX = Math.max(-maxStickTravel, Math.min(maxStickTravel, offsetX));
-            joystickValueX = clampedOffsetX / maxStickTravel;
+        const baseX = center.x;
+        const offsetX = clientX - baseX;
+        const clampedOffsetX = Math.max(-maxStickTravel, Math.min(maxStickTravel, offsetX));
+        joystickValueX = clampedOffsetX / maxStickTravel;
 
-            // Update stick visual X position
-            dom.joystick.style.left = `${stickCenterX + clampedOffsetX}px`;
-        } else {
-            joystickValueX = 0;
-        }
+        // Update stick visual X position
+        dom.joystick.style.left = `${stickCenterX + clampedOffsetX}px`;
 
         // Fire input event for the input controller
         events.fire('joystickInput', { x: joystickValueX, y: joystickValueY });
     };
 
-    dom.joystickBase.addEventListener('pointerdown', (event: PointerEvent) => {
-        // Double-tap detection for mode toggle
-        const now = Date.now();
-        if (now - lastTapTime < 300) {
-            joystickMode = joystickMode === '1d' ? '2d' : '1d';
-            updateJoystickVisibility();
-            lastTapTime = 0;
-        } else {
-            lastTapTime = now;
-        }
+    const updateLookJoystickStick = (clientX: number, clientY: number) => {
+        const center = getElementCenter(dom.joystickLookBase);
+        const baseX = center.x;
+        const baseY = center.y;
+        const offsetX = clientX - baseX;
+        const offsetY = clientY - baseY;
+        const clampedOffsetX = Math.max(-maxStickTravel, Math.min(maxStickTravel, offsetX));
+        const clampedOffsetY = Math.max(-maxStickTravel, Math.min(maxStickTravel, offsetY));
+        joystickLookValueX = clampedOffsetX / maxStickTravel;
+        joystickLookValueY = clampedOffsetY / maxStickTravel;
 
+        dom.joystickLook.style.left = `${stickCenterX + clampedOffsetX}px`;
+        dom.joystickLook.style.top = `${stickCenterY + clampedOffsetY}px`;
+        events.fire('joystickLookInput', { x: joystickLookValueX, y: joystickLookValueY });
+    };
+
+    dom.joystickBase.addEventListener('pointerdown', (event: PointerEvent) => {
         if (joystickPointerId !== null) return; // Already tracking a touch
 
         joystickPointerId = event.pointerId;
@@ -167,9 +200,7 @@ const initJoystick = (
 
         // Reset stick to center
         dom.joystick.style.top = `${stickCenterY}px`;
-        if (joystickMode === '2d') {
-            dom.joystick.style.left = `${stickCenterX}px`;
-        }
+        dom.joystick.style.left = `${stickCenterX}px`;
 
         // Fire input event with zero values
         events.fire('joystickInput', { x: 0, y: 0 });
@@ -179,6 +210,38 @@ const initJoystick = (
 
     dom.joystickBase.addEventListener('pointerup', endJoystickTouch);
     dom.joystickBase.addEventListener('pointercancel', endJoystickTouch);
+
+    dom.joystickLookBase.addEventListener('pointerdown', (event: PointerEvent) => {
+        if (joystickLookPointerId !== null) return;
+
+        joystickLookPointerId = event.pointerId;
+        dom.joystickLookBase.setPointerCapture(event.pointerId);
+        updateLookJoystickStick(event.clientX, event.clientY);
+        event.preventDefault();
+        event.stopPropagation();
+    });
+
+    dom.joystickLookBase.addEventListener('pointermove', (event: PointerEvent) => {
+        if (event.pointerId !== joystickLookPointerId) return;
+
+        updateLookJoystickStick(event.clientX, event.clientY);
+        event.preventDefault();
+    });
+
+    const endLookJoystickTouch = (event: PointerEvent) => {
+        if (event.pointerId !== joystickLookPointerId) return;
+
+        joystickLookPointerId = null;
+        joystickLookValueX = 0;
+        joystickLookValueY = 0;
+        dom.joystickLook.style.left = `${stickCenterX}px`;
+        dom.joystickLook.style.top = `${stickCenterY}px`;
+        events.fire('joystickLookInput', { x: 0, y: 0 });
+        dom.joystickLookBase.releasePointerCapture(event.pointerId);
+    };
+
+    dom.joystickLookBase.addEventListener('pointerup', endLookJoystickTouch);
+    dom.joystickLookBase.addEventListener('pointercancel', endLookJoystickTouch);
 };
 
 // Initialize the annotation navigator for stepping between annotations
@@ -298,6 +361,7 @@ const initUI = (global: Global) => {
         'getCameraInfo',
         'loadingText', 'loadingBar', 'loadingIcon',
         'joystickBase', 'joystick',
+        'joystickLookBase', 'joystickLook',
         'showCollision',
         'tooltip',
         'annotationNav', 'annotationPrev', 'annotationNext', 'annotationInfo', 'annotationNavTitle',
