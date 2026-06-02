@@ -1,10 +1,10 @@
 import type { Entity } from 'playcanvas';
 import type { ExperienceSettings } from '../../../schemas/v2';
 import type { Global } from '../../../types';
-import { readPersistentRevealParams } from '../../../settings-serialize/effects-sync';
+import { readActivePersistentRevealParams } from '../../../settings-serialize/effects-sync';
 import { destroyAllPersistentGsplatScriptsOnEntity } from '../gsplat-effect-script-registry';
 import type { RevealController } from '../reveal/reveal-controller';
-import { remountPersistentGsplatOnEntity } from './persistent-effect';
+import { remountPersistentGsplatEffectsOnEntity } from './persistent-effect';
 
 /**
  * Viewer 侧 **可持续 GSplat 实体生命周期** 单入口（M20）：registry 同步、读 settings、destroy/remount、animTrack。
@@ -18,8 +18,8 @@ export function runPersistentGsplatEntityLifecycle(input: {
 }): void {
     const { global, gsplatEntity, revealController: rc, restartAnimTrack } = input;
     (global.app as any).effectsRuntime?.syncPersistentGsplatRegistryFromSettings?.();
-    const persistentReveal = readPersistentRevealParams(global.settings as ExperienceSettings);
-    if (!persistentReveal?.type) {
+    const persistentReveals = readActivePersistentRevealParams(global.settings as ExperienceSettings);
+    if (persistentReveals.length === 0) {
         destroyAllPersistentGsplatScriptsOnEntity(gsplatEntity);
         if (rc) {
             rc.finishPersistentGsplatExternalUnmount();
@@ -31,7 +31,7 @@ export function runPersistentGsplatEntityLifecycle(input: {
     if (!rc || !gsplatEntity?.script) {
         return;
     }
-    const mounted = remountPersistentGsplatOnEntity(gsplatEntity, persistentReveal, {
+    const mounted = remountPersistentGsplatEffectsOnEntity(gsplatEntity, persistentReveals, {
         prepareExternalPersistentScriptMount: () => rc.prepareExternalPersistentScriptMount(),
         applyGsplatShaderScriptCenter: (s) => rc.applyGsplatShaderScriptCenter(s),
         bindPersistentTimelineScript: (s) => rc.bindPersistentTimelineScript(s),

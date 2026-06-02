@@ -1,6 +1,6 @@
 import type { Entity } from 'playcanvas';
 import type { ExperienceSettings } from '../../../schemas/v2';
-import { readPersistentRevealParams } from '../../../settings-serialize/effects-sync';
+import { readActivePersistentRevealParams, readPersistentRevealParams } from '../../../settings-serialize/effects-sync';
 import { destroyAllPersistentGsplatScriptsOnEntity, getMountedPersistentGsplatScript } from '../gsplat-effect-script-registry';
 import { PERSISTENT_EFFECT_TYPES } from '../effect-types';
 import { isPersistentVfx } from '../reveal/reveal-policy';
@@ -310,4 +310,41 @@ export function remountPersistentGsplatOnEntity(
     callbacks.bindPersistentTimelineScript(script);
     callbacks.notifyRevealScriptApplied(t);
     return true;
+}
+
+/**
+ * 按当前 active persistent 子轨批量挂载脚本；不同 effect-id 的子轨允许共存。
+ * @returns 是否至少成功创建并绑定了一个 persistent 脚本
+ */
+export function remountPersistentGsplatEffectsOnEntity(
+    gsplatEntity: Entity,
+    persistentReveals: ReturnType<typeof readActivePersistentRevealParams>,
+    callbacks: PersistentGsplatRemountCallbacks
+): boolean {
+    callbacks.prepareExternalPersistentScriptMount();
+    destroyAllPersistentGsplatScriptsOnEntity(gsplatEntity);
+
+    let mounted = false;
+    let lastScript: any | null = null;
+    let lastType = 'none';
+    for (const persistentReveal of persistentReveals) {
+        const t = persistentReveal.type as string;
+        const script = mountPersistentGsplatByEffectType(
+            t,
+            gsplatEntity,
+            callbacks.applyGsplatShaderScriptCenter,
+            persistentReveal.autoStart ?? true,
+            persistentReveal.effectParams
+        );
+        if (!script) {
+            continue;
+        }
+        mounted = true;
+        lastScript = script;
+        lastType = t;
+    }
+
+    callbacks.bindPersistentTimelineScript(lastScript);
+    callbacks.notifyRevealScriptApplied(lastType);
+    return mounted;
 }

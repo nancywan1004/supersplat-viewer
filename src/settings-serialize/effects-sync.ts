@@ -120,12 +120,55 @@ function getLegacyPersistentPack(
 export function readPersistentSettingsPack(settings: ExperienceSettings): Record<string, unknown> | undefined {
     const e = ensureEffectsSettings(settings);
     const pe = e.persistent;
+    if (pe.activeEffectId === SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID) {
+        return getPersistentPackForSubTrack(pe, 'camera') ??
+            getPersistentPackForSubTrack(pe, 'stylization') ??
+            getLegacyPersistentPack(pe);
+    }
+    if (pe.activeEffectId === SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID) {
+        return getPersistentPackForSubTrack(pe, 'stylization') ??
+            getPersistentPackForSubTrack(pe, 'camera') ??
+            getLegacyPersistentPack(pe);
+    }
+    const cameraPack = getPersistentPackForSubTrack(pe, 'camera');
+    const stylizationPack = getPersistentPackForSubTrack(pe, 'stylization');
+    const legacyPack = getLegacyPersistentPack(pe);
+    const packs =
+        pe.activeEffectId === SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID ?
+            [stylizationPack, legacyPack, cameraPack] :
+            pe.activeEffectId === SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID ?
+                [cameraPack, legacyPack, stylizationPack] :
+                [cameraPack, stylizationPack, legacyPack];
+    return packs.find(pack => parsePersistentPack(pack) !== null) ?? packs.find(pack => pack !== undefined);
+}
+
+/**
+ * 读取所有已启用的 persistent 子轨，按 camera → stylization → legacy 顺序返回。
+ * @param settings
+ * @returns
+ */
+export function readActivePersistentRevealParams(settings: ExperienceSettings): LegacyRevealEffect[] {
+    ensureEffectsSettings(settings);
+    const pe = settings.effects!.persistent;
+    if (pe.enabled === false) {
+        return [];
+    }
     const packs = [
         getPersistentPackForSubTrack(pe, 'camera'),
         getPersistentPackForSubTrack(pe, 'stylization'),
         getLegacyPersistentPack(pe)
     ];
-    return packs.find(pack => parsePersistentPack(pack) !== null) ?? packs.find(pack => pack !== undefined);
+    const out: LegacyRevealEffect[] = [];
+    const seen = new Set<string>();
+    for (const pack of packs) {
+        const parsed = parsePersistentPack(pack);
+        if (!parsed?.type || !isPersistentVfx(parsed.type) || seen.has(parsed.type as string)) {
+            continue;
+        }
+        seen.add(parsed.type as string);
+        out.push(parsed);
+    }
+    return out;
 }
 
 /** 保证 `settings.effects` 三轨对象存在且字段形状合法 */
@@ -144,7 +187,13 @@ export function ensureEffectsSettings(settings: ExperienceSettings): NonNullable
     if (!e.persistent || typeof e.persistent !== 'object') {
         e.persistent = { activeEffectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID, enabled: false, paramsById: {} };
     }
-    e.persistent.activeEffectId = SCENE_GSPLAT_PERSISTENT_EFFECT_ID;
+    if (
+        e.persistent.activeEffectId !== SCENE_GSPLAT_PERSISTENT_EFFECT_ID &&
+        e.persistent.activeEffectId !== SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID &&
+        e.persistent.activeEffectId !== SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID
+    ) {
+        e.persistent.activeEffectId = SCENE_GSPLAT_PERSISTENT_EFFECT_ID;
+    }
     if (!e.persistent.paramsById || typeof e.persistent.paramsById !== 'object') {
         e.persistent.paramsById = {};
     }
@@ -740,6 +789,70 @@ export function patchPersistentSettingsFromParams(
         ensurePersistentSubTrack(e.persistent, oldBucket).paramsById[oldId] = {};
     }
     ensurePersistentSubTrack(e.persistent, nextBucket).paramsById[nextId] = { ...persistentToParamRecord(next) };
+    e.persistent.paramsById[SCENE_GSPLAT_PERSISTENT_EFFECT_ID] = {};
+    return next;
+}
+
+/**
+ * 写入指定 persistent 子轨（camera / stylization），不读取或清理另一个子轨。
+ * 用于 `EFFECT_ADD` 的同 effect-id 替换语义：同子轨先清旧配置，跨子轨互不影响。
+ * @param settings
+ * @param effectId
+ * @param patch
+ * @returns
+ */
+export function patchPersistentSubTrackSettingsFromParams(
+    settings: ExperienceSettings,
+    effectId: typeof SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID | typeof SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID,
+    patch: Partial<LegacyRevealEffect>
+): LegacyRevealEffect {
+    const e = ensureEffectsSettings(settings);
+    const name: PersistentSubTrackName =
+        effectId === SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID ? 'camera' : 'stylization';
+    const track = ensurePersistentSubTrack(e.persistent, name);
+    const parsedCurrent = parsePersistentPack(getPersistentPackForSubTrack(e.persistent, name));
+    const current: LegacyRevealEffect =
+        parsedCurrent ??
+        ({
+            type: 'none',
+            autoStart: true
+        } as LegacyRevealEffect);
+
+    const oldType = (current.type ?? 'none') as string;
+    const nextType = (typeof patch.type === 'string' ? patch.type : oldType) as LegacyRevealEffect['type'];
+    const typeIsChanging = typeof patch.type === 'string' && patch.type !== oldType;
+
+    let nextEffectParams: Record<string, unknown> =
+        current.effectParams && typeof current.effectParams === 'object' && !Array.isArray(current.effectParams) ?
+            { ...(current.effectParams as Record<string, unknown>) } :
+            {};
+
+    if (typeIsChanging && patch.effectParams === undefined) {
+        nextEffectParams = {};
+    }
+    if (patch.effectParams !== undefined) {
+        if (patch.effectParams === null) {
+            nextEffectParams = {};
+        } else if (typeof patch.effectParams === 'object' && !Array.isArray(patch.effectParams)) {
+            const incoming = patch.effectParams as Record<string, unknown>;
+            if (Object.keys(incoming).length === 0) {
+                nextEffectParams = {};
+            } else if (typeIsChanging && typeof patch.type === 'string') {
+                nextEffectParams = { ...incoming };
+            } else {
+                nextEffectParams = { ...nextEffectParams, ...incoming };
+            }
+        }
+    }
+
+    const next: LegacyRevealEffect = {
+        type: nextType,
+        autoStart: typeof patch.autoStart === 'boolean' ? patch.autoStart : (current.autoStart ?? true),
+        ...(Object.keys(nextEffectParams).length > 0 ? { effectParams: nextEffectParams } : {})
+    };
+    track.paramsById[effectId] = { ...persistentToParamRecord(next, true) };
+    e.persistent.enabled = true;
+    e.persistent.activeEffectId = effectId;
     e.persistent.paramsById[SCENE_GSPLAT_PERSISTENT_EFFECT_ID] = {};
     return next;
 }

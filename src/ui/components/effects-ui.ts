@@ -2,7 +2,8 @@ import type { Global, PersistentEffectType, RevealEffectType } from '../../types
 import { PERSISTENT_EFFECT_TYPE_VALUES, REVEAL_EFFECT_TYPE_VALUES } from '../../types';
 import { pushEditHistory } from '../../edit-history';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../../schemas/v2-custom';
-import { SCENE_GSPLAT_PERSISTENT_EFFECT_ID, SCENE_GSPLAT_REVEAL_EFFECT_ID } from '../../vfx/effects-runtime/effects-runtime';
+import { SCENE_GSPLAT_REVEAL_EFFECT_ID } from '../../vfx/effects-runtime/effects-runtime';
+import { persistentEffectIdForBucket, persistentEffectBucketForType } from '../../vfx/effects-runtime/effect-types';
 import {
     getRevealTotalDuration,
     readRevealParams,
@@ -405,7 +406,7 @@ export function initRevealUI(global: Global): () => void {
 
     /** M18：internal 与 message-bridge 共用 `EffectsFacade.handleCommand`（bridge 仅多一层 postMessage）。 */
     const routeEffectsCommand = (
-        type: 'EFFECT_PARAMS_PATCH' | 'EFFECT_TOGGLE' | 'EFFECT_REPLAY',
+        type: 'EFFECT_ADD' | 'EFFECT_PARAMS_PATCH' | 'EFFECT_DELETE' | 'EFFECT_TOGGLE' | 'EFFECT_REPLAY',
         envelope: Record<string, unknown>
     ) => {
         if (getEditUiTransport(global) === 'message-bridge') {
@@ -415,6 +416,14 @@ export function initRevealUI(global: Global): () => void {
         ) {
             console.warn('[effects-ui] effects command dispatch failed', type);
         }
+    };
+
+    const refreshControlsAfterEffectsCommand = () => {
+        if (getEditUiTransport(global) === 'message-bridge') {
+            window.setTimeout(() => updateRevealControls(), 0);
+            return;
+        }
+        updateRevealControls();
     };
 
     const readPersistentPack = (): Record<string, unknown> | undefined => {
@@ -524,9 +533,14 @@ export function initRevealUI(global: Global): () => void {
         return effectParams && typeof effectParams === 'object' ? effectParams as Record<string, unknown> : {};
     };
 
+    const getPersistentProtocolEffectId = (): string => {
+        const type = getPersistentSelection();
+        return persistentEffectIdForBucket(persistentEffectBucketForType(type));
+    };
+
     const patchPersistentEffectParams = (effectParams: Record<string, unknown>) => {
         routeEffectsCommand('EFFECT_PARAMS_PATCH', {
-            effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+            effectId: getPersistentProtocolEffectId(),
             params: { effectParams }
         });
         pushEditHistorySafe();
@@ -822,27 +836,33 @@ export function initRevealUI(global: Global): () => void {
 
     const onPersistentTypeChange = (event: Event) => {
         const target = (event.target as HTMLSelectElement);
+        const oldType = getPersistentSelection();
         const type = target.value;
-        routeEffectsCommand('EFFECT_PARAMS_PATCH', {
-            effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
-            params: {
-                type: type === 'none' ? 'none' : type,
-                enabled: type !== 'none',
-                effectParams: getDefaultPersistentEffectParams(type)
-            }
-        });
+        if (type === 'none') {
+            const deleteType = isPersistentType(oldType) ? oldType : 'perlin-wave';
+            routeEffectsCommand('EFFECT_DELETE', {
+                effectId: persistentEffectIdForBucket(persistentEffectBucketForType(deleteType)),
+                effectType: deleteType
+            });
+        } else {
+            routeEffectsCommand('EFFECT_ADD', {
+                effectId: persistentEffectIdForBucket(persistentEffectBucketForType(type)),
+                effectType: type,
+                params: getDefaultPersistentEffectParams(type)
+            });
+        }
         pushEditHistorySafe();
-        updateRevealControls();
+        refreshControlsAfterEffectsCommand();
     };
 
     const onPersistentEnabledChange = (event: Event) => {
         const enabled = (event.target as HTMLInputElement).checked;
         routeEffectsCommand('EFFECT_TOGGLE', {
-            effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+            effectId: getPersistentProtocolEffectId(),
             value: enabled
         });
         pushEditHistorySafe();
-        updateRevealControls();
+        refreshControlsAfterEffectsCommand();
     };
 
     const onTotalDurationChange = (event: Event) => {

@@ -230,6 +230,7 @@ export const ASSET_EFFECTS_PANEL_HTML = `
   <div class="settingsRow" style="gap:8px;margin-top:8px">
     <button id="assetEffectStart" class="settingsButton" type="button">播放物体特效</button>
     <button id="assetEffectStop" class="settingsButton" type="button">停止</button>
+    <button id="assetEffectDelete" class="settingsButton" type="button">删除配置</button>
   </div>
   <div class="settingsRow">
     <span id="assetEffectStatus" style="font-size:11px;opacity:0.85">状态: —</span>
@@ -786,13 +787,14 @@ export function initAssetEffectsUI(global: Global): () => void {
     const btnMorphClear = fieldset.querySelector('#assetMorphClearKeyframes');
     const btnStart = fieldset.querySelector('#assetEffectStart');
     const btnStop = fieldset.querySelector('#assetEffectStop');
+    const btnDelete = fieldset.querySelector('#assetEffectDelete');
     const statusEl = fieldset.querySelector('#assetEffectStatus');
     const morphCorrespondenceStatusByTarget = new Map<string, string>();
 
     const { events } = global;
 
     const routeAssetCommand = (
-        cmd: 'EFFECT_START' | 'EFFECT_STOP' | 'EFFECT_PARAMS_PATCH',
+        cmd: 'EFFECT_ADD' | 'EFFECT_START' | 'EFFECT_STOP' | 'EFFECT_PARAMS_PATCH' | 'EFFECT_DELETE',
         targetId: string,
         type: string,
         effectParams?: Record<string, unknown>
@@ -802,12 +804,33 @@ export function initAssetEffectsUI(global: Global): () => void {
             targetId,
             params: { type, effectParams }
         };
+        const addPayload = {
+            effectId: ASSET_GSPLAT_EFFECT_ID,
+            effectType: type,
+            targetId,
+            params: effectParams ?? {}
+        };
+        const deletePayload = {
+            effectId: ASSET_GSPLAT_EFFECT_ID,
+            effectType: type,
+            targetId
+        };
+        const message = cmd === 'EFFECT_ADD'
+            ? { type: cmd, module: 'effects', ...addPayload }
+            : cmd === 'EFFECT_DELETE'
+                ? { type: cmd, module: 'effects', ...deletePayload }
+                : { type: cmd, module: 'effects', ...envelope };
+        const payload = cmd === 'EFFECT_ADD'
+            ? addPayload
+            : cmd === 'EFFECT_DELETE'
+                ? deletePayload
+                : envelope;
         if (getEditUiTransport(global) === 'message-bridge') {
-            sendEditProtocolMessage({ type: cmd, module: 'effects', ...envelope });
+            sendEditProtocolMessage(message);
         } else if (
             !dispatchEffectsModuleCommand(global, {
                 type: cmd,
-                payload: envelope,
+                payload,
                 source: 'host'
             })
         ) {
@@ -1314,7 +1337,7 @@ export function initAssetEffectsUI(global: Global): () => void {
             }
         }
         routeAssetCommand(
-            'EFFECT_START',
+            'EFFECT_ADD',
             targetId,
             typeSelect.value,
             readEffectParamsFromDom(
@@ -1353,6 +1376,16 @@ export function initAssetEffectsUI(global: Global): () => void {
             return;
         }
         routeAssetCommand('EFFECT_STOP', targetId, typeSelect.value);
+        refreshStatus();
+    };
+
+    const onDelete = () => {
+        const targetId = typeSelect?.value === MORPH_TYPE ? getMorphOwnerTargetId(global) : getSelectedTargetId(global);
+        if (!targetId || !typeSelect) {
+            return;
+        }
+        routeAssetCommand('EFFECT_DELETE', targetId, typeSelect.value);
+        pushHistorySafe();
         refreshStatus();
     };
 
@@ -1511,6 +1544,7 @@ export function initAssetEffectsUI(global: Global): () => void {
     wobbleHaloColor?.addEventListener('change', onParamsBlur);
     btnStart?.addEventListener('click', onStart);
     btnStop?.addEventListener('click', onStop);
+    btnDelete?.addEventListener('click', onDelete);
 
     const onSelectionChanged = () => {
         refreshTargetLabel();
@@ -1555,6 +1589,7 @@ export function initAssetEffectsUI(global: Global): () => void {
         wobbleHaloColor?.removeEventListener('change', onParamsBlur);
         btnStart?.removeEventListener('click', onStart);
         btnStop?.removeEventListener('click', onStop);
+        btnDelete?.removeEventListener('click', onDelete);
         events.off('sceneAsset:selected', onSelectionChanged);
         events.off('assetEffect:started', refreshStatus);
         events.off('assetEffect:stopped', onAssetEffectStopped);

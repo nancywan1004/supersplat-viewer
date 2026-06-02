@@ -26,6 +26,7 @@ import {
 } from '../vfx/effects-runtime/effect-types';
 import {
     clearPersistentSubTrack,
+    patchPersistentSubTrackSettingsFromParams,
     patchAssetRuntimeMirror,
     patchAssetInstanceFromParams,
     readRevealParams,
@@ -38,6 +39,7 @@ import type {
     ModuleContext,
     ModuleFacade,
     ModuleLifecycleReason,
+    PersistentEffectType,
     SelectionSource
 } from '../types';
 
@@ -117,6 +119,18 @@ class EffectsFacade implements ModuleFacade {
                     }
                     break;
                 }
+                const current = readAssetEffectInstanceForTarget(global, targetId);
+                const runtimeType = global.state.effectsRuntimeState?.asset?.instances?.[targetId]?.activeType;
+                const stopType =
+                    current?.type ??
+                    (typeof runtimeType === 'string' ? runtimeType : null);
+                if (stopType) {
+                    applyAssetEffectStop(global, normalizeAssetEffectEnvelope({
+                        effectId: ASSET_GSPLAT_EFFECT_ID,
+                        targetId,
+                        params: { type: stopType }
+                    }));
+                }
                 applyAssetEffectStart(global, normalizeAssetEffectEnvelope({
                     effectId,
                     targetId,
@@ -150,12 +164,16 @@ class EffectsFacade implements ModuleFacade {
                 global.events.fire('persistentGsplatEffectRemountRequested', false);
                 break;
             }
-            applyGsplatPersistentParamsPatch(global, {
-                type: effectType,
-                enabled: true,
+            const persistentEffectId = effectId as
+                | typeof SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID
+                | typeof SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID;
+            clearPersistentSubTrack(global.settings, persistentEffectId);
+            patchPersistentSubTrackSettingsFromParams(global.settings, persistentEffectId, {
+                type: effectType as PersistentEffectType,
                 autoStart: true,
                 effectParams: params
             });
+            syncEffectsRuntimeStateFromSettings(global.state, global.settings);
             global.events.fire('persistentGsplatEffectRemountRequested', false);
             break;
         }
