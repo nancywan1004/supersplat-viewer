@@ -27,6 +27,8 @@ import type { TorchLightSettings } from '../../schemas/v2-custom';
  */
 const TORCH_ENTITY_NAME = 'torchLight';
 const TORCH_PICK_THROTTLE_MS = 33;
+/** pickSurface 超时未返回时强制解除 pickInFlight，避免后续拾取永久阻塞 */
+const TORCH_PICK_IN_FLIGHT_TIMEOUT_MS = 400;
 const CAMERA_CHANGE_EPSILON = 1e-5;
 /** 拾取兜底距离（世界单位）：未命中时光源沿相机 forward 放在此距离处 */
 const TORCH_FALLBACK_DISTANCE = 5;
@@ -560,20 +562,20 @@ export function initTorchLight(global: Global): TorchControllerHandle {
             applyPickedDistance(resolved.distance, at, resolved.fromMesh);
         };
 
+        if (meshDistSnapshot !== null) {
+            applyResolvedPick({
+                distance: meshDistSnapshot,
+                fromMesh: true,
+                rangeBoost: meshBoostSnapshot
+            }, now);
+        }
+
         if (!picker?.pickSurface) {
-            if (meshDistSnapshot !== null) {
-                applyResolvedPick({
-                    distance: meshDistSnapshot,
-                    fromMesh: true,
-                    rangeBoost: meshBoostSnapshot
-                }, now);
-            } else {
+            if (!meshPick) {
                 runtime.meshRangeBoost = 0;
             }
-            if (meshPick) {
-                runtime.pickDirty = false;
-                runtime.lastPickTime = now;
-            }
+            runtime.pickDirty = false;
+            runtime.lastPickTime = now;
             return;
         }
 
@@ -608,10 +610,19 @@ export function initTorchLight(global: Global): TorchControllerHandle {
                 runtime.hasWorldPos = false;
             }
         }).finally(() => {
-            if (!runtime.destroyed && generation === runtime.pickGeneration) {
+            if (runtime.destroyed) return;
+            if (generation === runtime.pickGeneration) {
                 runtime.pickInFlight = false;
             }
         });
+    };
+
+    const recoverStuckPickInFlight = (now: number) => {
+        if (!runtime.pickInFlight) return;
+        if (now - runtime.lastPickTime <= TORCH_PICK_IN_FLIGHT_TIMEOUT_MS) return;
+        runtime.pickInFlight = false;
+        runtime.pickGeneration++;
+        runtime.pickDirty = true;
     };
 
     const onPointerMove = (event: PointerEvent) => {
@@ -646,6 +657,8 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         }
 
         markPickDirtyIfCameraChanged();
+        const pickNow = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        recoverStuckPickInFlight(pickNow);
         scheduleWorldPick();
 
         const cfg = ensureTorchLight(settings) as TorchLightSettings;
@@ -800,12 +813,15 @@ export function getTorchLightScreenUv(global: Global): { u: number; v: number } 
     return { u: runtime.screenU, v: runtime.screenV };
 }
 
-/** 读取手电筒当前缓存的深度拾取世界坐标；未命中时返回 null。 */
+/** 读取手电筒当前世界坐标（每帧 onUpdate 写入；含拾取深度与兜底落点）。未开启时返回 null。 */
 export function getTorchLightWorldPosition(global: Global): Vec3 | null {
+    if (!isTorchEntityEnabled(global)) return null;
     const handle = (global as unknown as { __torchLight?: TorchControllerHandle }).__torchLight;
     const runtime = handle ? (handle as unknown as { __runtime?: TorchRuntimeState }).__runtime : undefined;
-    if (!runtime?.hasWorldPos) return null;
-    return runtime.worldPos;
+    if (!runtime) return null;
+    const p = runtime.worldPos;
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) return null;
+    return p;
 }
 
 /** 读取手电筒当前有效照射半径（settings.range + 大 mesh 动态加成）。 */
