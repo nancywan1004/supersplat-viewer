@@ -196,6 +196,7 @@ export class AssetEffectsController {
         global.events.on('assetEffect:start', this._onStart);
         global.events.on('assetEffect:stop', this._onStop);
         global.events.on('assetEffect:configChanged', this._onConfigChanged);
+        global.events.on('vfxExit', this._onVfxExit);
     }
 
     dispose() {
@@ -206,6 +207,7 @@ export class AssetEffectsController {
         this._global.events.off('assetEffect:start', this._onStart);
         this._global.events.off('assetEffect:stop', this._onStop);
         this._global.events.off('assetEffect:configChanged', this._onConfigChanged);
+        this._global.events.off('vfxExit', this._onVfxExit);
         for (const targetId of [...this._active.keys()]) {
             this._teardownTarget(targetId);
         }
@@ -284,6 +286,17 @@ export class AssetEffectsController {
             targetId: payload.targetId,
             type
         });
+    };
+
+    private readonly _onVfxExit = () => {
+        for (const [targetId, entry] of [...this._active.entries()]) {
+            this._teardownTarget(targetId);
+            patchAssetRuntimeMirror(this._global.state, targetId, { status: 'inactive' });
+            this._global.events.fire('assetEffect:stopped', {
+                targetId,
+                type: entry.type
+            });
+        }
     };
 
     private async _handleStart(
