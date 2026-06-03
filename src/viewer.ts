@@ -330,6 +330,9 @@ class Viewer {
 
     navCursor: NavCursor | null = null;
 
+    /** 开场 reveal 播放期间，风格化 persistent 的相机后处理与 clearColor 跟随实体脚本一起延后生效。 */
+    private deferPersistentStylizationCameraEffects = false;
+
     origChunks: {
         glsl: {
             gsplatOutputVS: string,
@@ -410,8 +413,17 @@ class Viewer {
         // disable auto render, we'll render only when camera changes
         app.autoRender = false;
 
+        this.deferPersistentStylizationCameraEffects = shouldDeferPersistentMount(settings);
+
         // configure the camera
         this.configureCamera(settings);
+
+        events.on('revealRestart', () => {
+            this.setPersistentStylizationCameraEffectsDeferred(shouldDeferPersistentMount(global.settings));
+        });
+        events.on('revealComplete', () => {
+            this.setPersistentStylizationCameraEffectsDeferred(false);
+        });
 
         // reconfigure camera when entering/exiting XR
         app.xr.on('start', () => this.configureCamera(settings));
@@ -1248,6 +1260,10 @@ z: ${cameraInfo.target.z.toFixed(6)}
         const { app, config, camera } = global;
         const postEffectSettings = settings.postEffectSettings;
         const { background } = settings;
+        const applyPersistentStylizationCameraEffects = !this.deferPersistentStylizationCameraEffects;
+        const nostalgicComicActive = applyPersistentStylizationCameraEffects && isNostalgicComicPersistentActive(settings);
+        const yiyunDianranPostEffectActive = applyPersistentStylizationCameraEffects && isYiyunDianranPostEffectActive(settings);
+        const palettePixelActive = applyPersistentStylizationCameraEffects && isPalettePixelPersistentActive(settings);
 
         // hpr override takes precedence over settings.highPrecisionRendering
         const highPrecisionRendering = config.hpr ?? settings.highPrecisionRendering;
@@ -1274,7 +1290,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
         const enableCameraFrame = !app.xr.active && (
             computeRequiresCameraFrame ||
             postFxRequested ||
-            isPalettePixelPersistentActive(settings)
+            palettePixelActive
         );
 
         if (enableCameraFrame) {
@@ -1289,7 +1305,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 ? [PIXELFORMAT_RGBA16F, PIXELFORMAT_RGBA32F]
                 : [];
             cameraFrame.rendering.sceneDepthMap =
-                computeRequiresCameraFrame || isYiyunDianranPostEffectActive(settings);
+                computeRequiresCameraFrame || yiyunDianranPostEffectActive;
             cameraFrame.enabled = true;
             const effectivePostFxSettings = postFxRequested ? postEffectSettings : noPostEffects;
             applyPostEffectSettings(cameraFrame, effectivePostFxSettings);
@@ -1335,10 +1351,10 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 return this === app.graphicsDevice.backBuffer ? true : origIsColorBufferSrgb.call(this, index);
             };
 
-            if (isNostalgicComicPersistentActive(settings)) {
+            if (nostalgicComicActive) {
                 camera.camera.clearColorBuffer = true;
                 camera.camera.clearColor = new Color(1, 1, 1, 0);
-            } else if (isYiyunDianranPostEffectActive(settings)) {
+            } else if (yiyunDianranPostEffectActive) {
                 camera.camera.clearColorBuffer = true;
                 camera.camera.clearColor = YIYUN_DIANRAN_PAPER_CLEAR.clone();
             } else {
@@ -1366,10 +1382,10 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
             if (!app.xr.active) {
                 camera.camera.toneMapping = tonemapTable[settings.tonemapping];
-                if (isNostalgicComicPersistentActive(settings)) {
+                if (nostalgicComicActive) {
                     camera.camera.clearColorBuffer = true;
                     camera.camera.clearColor = new Color(1, 1, 1, 0);
-                } else if (isYiyunDianranPostEffectActive(settings)) {
+                } else if (yiyunDianranPostEffectActive) {
                     camera.camera.clearColorBuffer = true;
                     camera.camera.clearColor = YIYUN_DIANRAN_PAPER_CLEAR.clone();
                 } else {
@@ -1380,6 +1396,15 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
         // Mesh overlay 依赖当前 gamma 路径；CameraFrame 开关变化时需要同步。
         this.meshOverlay?.setCameraFrameEnabled(!!this.cameraFrame);
+    }
+
+    private setPersistentStylizationCameraEffectsDeferred(deferred: boolean): void {
+        if (this.deferPersistentStylizationCameraEffects === deferred) {
+            return;
+        }
+        this.deferPersistentStylizationCameraEffects = deferred;
+        this.configureCamera(this.global.settings);
+        this.global.app.renderNextFrame = true;
     }
 
     /** 接影 GLB 懒加载完成后更新 shadow mount 并尝试挂载阴影管线 */

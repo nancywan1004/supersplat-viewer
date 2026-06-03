@@ -12,4 +12,5 @@ public/*
 !public/assets/
 !public/assets/skyboxes/
 !public/assets/skyboxes/**
+!public/textures/
 .cursor
