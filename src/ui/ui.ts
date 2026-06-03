@@ -1393,6 +1393,9 @@ const initUI = (global: Global) => {
 
     // Show controls once loaded
     events.on('loaded:changed', () => {
+        if (config.noBottomUI) {
+            return;
+        }
         dom.controlsWrap.classList.remove('hidden');
         showUI();
     });

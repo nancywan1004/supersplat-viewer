@@ -6,6 +6,16 @@
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
         <base href="">
+        <!-- 首屏关键样式：不依赖 index.css 加载，避免 iframe 嵌入时 UI 闪现 -->
+        <style id="sse-critical-ui">
+            .hidden { display: none !important; }
+            .hide-edit-ui #editModeStrip,
+            .hide-edit-ui #editLeftSidebarMount,
+            .hide-edit-ui #rightToolBar,
+            .hide-edit-ui #editBottomToolbarMount {
+                display: none !important;
+            }
+        </style>
         <link rel="stylesheet" href="./index.css">
         <!-- Import map：PlayCanvas 引擎走本地 vendor（dist 构建会同步复制 vendor） -->
         <script type="importmap">
@@ -600,6 +610,9 @@
             <!-- Touch Joystick -->
             <div id="joystickBase" class="hidden">
                 <div id="joystick"></div>
+            </div>
+            <div id="joystickLookBase" class="hidden">
+                <div id="joystickLook"></div>
             </div>
 
             <!-- Annotation Navigator -->
