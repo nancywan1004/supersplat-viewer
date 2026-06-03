@@ -4,7 +4,6 @@ import { Vec3 } from 'playcanvas';
 import type { CameraManager } from '../../../camera-manager';
 import { isRevealTimedVfxType, isPersistentVfx } from './reveal-policy';
 import {
-    clearPersistentRevealTrack,
     getPersistentEffectPaused,
     patchRevealSettingsFromParams,
     readActivePersistentEffects,
@@ -156,7 +155,7 @@ export class RevealController {
         const revealParams = readRevealParams(settings as ExperienceSettings);
         this.config = {
             type: (revealParams?.type as RevealConfig['type']) ?? 'none',
-            enable: revealParams?.enable !== false,
+            enabled: revealParams?.enabled !== false,
             autoStart: revealParams?.autoStart ?? true,
             totalDuration: revealParams?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION,
             effectParams:
@@ -267,7 +266,7 @@ export class RevealController {
         // 避免首帧已上屏却无 VFX 的一帧偏色/蓝光闪。此处仍注册 firstFrame 作为材质晚就绪时的兜底。
         if (
             this.config.type !== 'none' &&
-            this.config.enable !== false &&
+            this.config.enabled !== false &&
             !isPersistentVfx(this.config.type as any)
         ) {
             const createInitial = () => {
@@ -315,7 +314,7 @@ export class RevealController {
     ensureInitialEffectCreatedBeforeFirstDisplay(): void {
         if (
             this.config.type === 'none' ||
-            this.config.enable === false ||
+            this.config.enabled === false ||
             this.currentScript ||
             isPersistentVfx(this.config.type as any)
         ) {
@@ -1276,18 +1275,12 @@ export class RevealController {
         const oldType = this.config.type;
         const oldTotalDuration = this.config.totalDuration;
 
-        if (newConfig.type !== undefined && newConfig.type !== oldType) {
-            if (isPersistentVfx(oldType as any) && !isPersistentVfx(newConfig.type as any)) {
-                clearPersistentRevealTrack(this.global.settings as ExperienceSettings);
-            }
-        }
-
         patchRevealSettingsFromParams(this.global.settings as ExperienceSettings, newConfig as Partial<RevealConfig>);
         const rp = readRevealParams(this.global.settings as ExperienceSettings);
-        const prevEnable = this.config.enable !== false;
+        const prevEnabled = this.config.enabled !== false;
         if (rp) {
             this.config.type = (rp.type as RevealConfig['type']) ?? 'none';
-            this.config.enable = rp.enable !== false;
+            this.config.enabled = rp.enabled !== false;
             this.config.autoStart = rp.autoStart ?? true;
             this.config.totalDuration = rp.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
             this.config.effectParams =
@@ -1299,8 +1292,8 @@ export class RevealController {
 
         console.log('Updated reveal config:', this.config);
 
-        const enableNow = this.config.enable !== false;
-        if (!enableNow || this.config.type === 'none') {
+        const enabledNow = this.config.enabled !== false;
+        if (!enabledNow || this.config.type === 'none') {
             const hasReveal = hasRevealInSettings(this.global.settings as ExperienceSettings);
             this.global.state.hasRevealEffect = hasReveal;
             this.global.events.fire('hasRevealEffect:changed', hasReveal);
@@ -1312,7 +1305,7 @@ export class RevealController {
             return;
         }
 
-        if (newConfig.enable === true && !prevEnable) {
+        if (newConfig.enabled === true && !prevEnabled) {
             this.global.state.hasRevealEffect = hasRevealInSettings(this.global.settings as ExperienceSettings);
             this.global.events.fire('hasRevealEffect:changed', this.global.state.hasRevealEffect);
             return;
@@ -1429,7 +1422,7 @@ export class RevealController {
     }
 
     restart(restartAnimTrack: boolean = false) {
-        if (!this.config || this.config.type === 'none' || this.config.enable === false) {
+        if (!this.config || this.config.type === 'none' || this.config.enabled === false) {
             console.log('No reveal effect active, cannot restart');
             return;
         }

@@ -3,7 +3,7 @@ import { Color, Vec3 } from 'playcanvas';
 /**
  * 可持续 **persistent scene** 轨的 **`settings.effects.persistent.scene` → 各 `type` 块内专参** 白名单与写入逻辑。
  *
- * - 协议（postMessage）：`effectId === scene.gsplat-persistent-scene` 时 `params` 为 `{ [type]: { enable?, …专参 } }`（与 reveal 嵌套一致）。
+ * - 协议（postMessage）：`effectId === scene.gsplat-persistent-scene` 时 `params` 为 `{ [type]: { enabled?, …专参 } }`（与 reveal 嵌套一致）。
  * - 仅当 `key` 落在当前 `type` 对应集合内时才写入脚本；其余键静默忽略。
  * - **数值**：有限 `number`，且脚本上须已存在该属性名。
  * - **`center` / `extents`**：`[x, y, z]` 写入 `Vec3`。

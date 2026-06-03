@@ -104,7 +104,7 @@ export function filterAssetEffectParams(
 }
 
 export function paramsPatchHasAssetKeys(params: Record<string, unknown>): boolean {
-    if (typeof params.enable === 'boolean') {
+    if (typeof params.enabled === 'boolean') {
         return true;
     }
     if (typeof params.autoStart === 'boolean') {

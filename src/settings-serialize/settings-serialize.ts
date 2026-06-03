@@ -315,7 +315,7 @@ export function applySettingsSnapshot(global: Global, snapshot: ExperienceSettin
     }
     syncEffectsRuntimeStateFromSettings(global.state, global.settings as ExperienceSettings);
     const es = global.settings as ExperienceSettings;
-    global.events.fire('revealConfigChanged', readRevealParams(es) ?? { type: 'none', enable: false });
+    global.events.fire('revealConfigChanged', readRevealParams(es) ?? { type: 'none', enabled: false });
     global.events.fire('persistentGsplatEffectRemountRequested', false);
     applySceneAssetCollisionFromSettings(global);
     syncSceneAssetCollisionRuntime(global);

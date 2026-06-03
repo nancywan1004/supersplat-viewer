@@ -1,7 +1,7 @@
 /**
  * **一次性 reveal 轨** 与 **persistent GSplat 轨** 的编排约定（读侧真源：`settings.effects`）。
  *
- * - **独立**：两轨各自 `type` / `enable`；`RevealController` 只直接驱动一次性脚本；persistent 由 `viewer` 挂载。
+ * - **独立**：两轨各自 `type` / `enabled`；`RevealController` 只直接驱动一次性脚本；persistent 由 `viewer` 挂载。
  * - **串联**：仅当配置里仍需要 persistent，且当前不会在「本轮一次性 reveal 播完前」误抢 shader 时，才在
  *   `revealComplete` 之后发 `persistentGsplatEffectRemountRequested`（与协议层语义对齐）。
  *

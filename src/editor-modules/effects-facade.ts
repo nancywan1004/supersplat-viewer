@@ -99,7 +99,7 @@ class EffectsFacade implements ModuleFacade {
                         current?.type ??
                         (typeof runtimeType === 'string' ? runtimeType : null);
                     if (current) {
-                        patchAssetInstanceFromParams(global.settings, targetId, { enable: false });
+                        patchAssetInstanceFromParams(global.settings, targetId, { enabled: false });
                     }
                     syncEffectsRuntimeStateFromSettings(global.state, global.settings);
                     patchAssetRuntimeMirror(global.state, targetId, { status: 'inactive' });
@@ -127,7 +127,7 @@ class EffectsFacade implements ModuleFacade {
                 applyAssetEffectStart(global, normalizeAssetEffectEnvelope({
                     effectId,
                     targetId,
-                    params: { ...params, type: effectType, enable: true, autoStart: true }
+                    params: { ...params, type: effectType, enabled: true, autoStart: true }
                 }));
                 break;
             }

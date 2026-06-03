@@ -428,7 +428,7 @@ export type PersistentGsplatRemountCallbacks = {
  *
  * @returns 是否成功创建并绑定脚本（`mount` 失败则为 `false`，调用方勿再假定已挂载）
  */
-/** 按 scene persistent 多选配置挂载全部 `enable` 为 true 的类型；时间轴绑定第一个成功挂载的脚本。 */
+/** 按 scene persistent 多选配置挂载全部 `enabled` 为 true 的类型；时间轴绑定第一个成功挂载的脚本。 */
 export function remountPersistentSceneGsplatOnEntity(
     gsplatEntity: Entity,
     entries: PersistentSceneEffectEntry[],
@@ -439,7 +439,7 @@ export function remountPersistentSceneGsplatOnEntity(
     let primary: any = null;
     const mountedTypes: string[] = [];
     for (const entry of entries) {
-        if (!entry.enable) {
+        if (!entry.enabled) {
             continue;
         }
         const script = mountPersistentGsplatByEffectType(
@@ -475,7 +475,7 @@ export function remountPersistentGsplatOnEntity(
         [
             {
                 type: persistentReveal.type,
-                enable: true,
+                enabled: true,
                 autoStart: persistentReveal.autoStart ?? true,
                 effectParams: persistentReveal.effectParams
             }
