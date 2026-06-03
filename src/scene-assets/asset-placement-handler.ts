@@ -31,9 +31,9 @@ import { hitSceneGizmoAtClient } from '../gizmo-hit-test';
 import type { InputArbiter } from '../input-arbiter';
 import {
     findAssetMorphOwnerTargetId,
-    readAssetInstanceParams,
-    resolveAssetInstanceStorageTargetId
+    readAssetInstanceParams
 } from '../settings-serialize/effects-sync';
+import { readMorphKeyframeEntityIds } from '../vfx/effects-runtime/asset/asset-effect-entity';
 import { getDefaultWobbleEffectParams } from '../vfx/effects-runtime/asset/wobble-effect-params';
 import { ASSET_EFFECT_TYPE_VALUES } from '../vfx/effects-runtime/effect-types';
 import {
@@ -125,7 +125,7 @@ function getSceneAssetsRestoreController(global: Global): SceneAssetsRestoreCont
 
 /**
  * 场景资产还原后的 idle 预览（瞌睡 wobble / `deepMeditation`）：
- * - 存盘 `gsplat-morph`：仅 morph 配置槽 target（owner，非全部关键帧）挂 idle，不播 morph 时间轴；
+ * - 存盘 `gsplat-morph`：morph 涉及的每个关键帧 GS 都挂 idle，不播 morph 时间轴；
  * - 存盘 `gsplat-wobble`（含扭动/电子等非瞌睡模式）：启动后同样先播 idle，用户显式「开始」再走存盘参数。
  * 不改写 settings，仅 `assetEffect:start` 运行态。
  */
@@ -141,13 +141,11 @@ function startRestoredAssetDefaultEffectIfConfigured(global: Global, entry: Scen
         return;
     }
 
-    const idleTargetId =
+    const shouldStartIdle =
         inst.type === 'gsplat-morph'
-            ? resolveAssetInstanceStorageTargetId(storageTargetId, inst)
-            : inst.type === GSPLAT_WOBBLE_TYPE
-              ? storageTargetId
-              : null;
-    if (!idleTargetId || entry.id !== idleTargetId) {
+            ? (readMorphKeyframeEntityIds(inst.effectParams ?? {}) ?? []).includes(entry.id)
+            : inst.type === GSPLAT_WOBBLE_TYPE && entry.id === storageTargetId;
+    if (!shouldStartIdle) {
         return;
     }
 
