@@ -16,6 +16,7 @@ import {
     syncEffectsRuntimeStateFromSettings
 } from './effects-sync';
 import { filterAssetEffectParams } from '../vfx/effects-runtime/asset/asset-effect-params';
+import { clearViewEffectsSession } from '../view-settings';
 
 const defaultPostEffectShadow = () => ({
     darken: DEFAULT_SHADOW.darken,
@@ -306,6 +307,7 @@ export function getComparableSettingsStringFromSnapshot(snapshot: ExperienceSett
  * 将 global.settings 恢复为快照内容（原地替换属性），用于「不保存并退出」时回退。
  */
 export function applySettingsSnapshot(global: Global, snapshot: ExperienceSettings): void {
+    clearViewEffectsSession(global);
     const hadRevealOrEffects = snapshot.revealEffect != null || snapshot.effects != null;
     const gs = global.settings as Record<string, unknown>;
     for (const k of Object.keys(gs)) delete gs[k];
