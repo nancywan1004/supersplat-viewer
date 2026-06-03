@@ -848,9 +848,10 @@ function parseRevealPack(pack: Record<string, unknown> | undefined): LegacyRevea
 
     // 旧扁平格式：`type` / `autoStart` / `totalDuration` / `effectParams`
     if (typeof pack.type === 'string') {
+        const isNoneFlat = pack.type === 'none';
         const base: LegacyRevealEffect = {
             type: pack.type as LegacyRevealEffect['type'],
-            enable: readEffectEnableFromBlock(pack),
+            enable: isNoneFlat ? false : readEffectEnableFromBlock(pack),
             autoStart: typeof pack.autoStart === 'boolean' ? pack.autoStart : true,
             totalDuration:
                 typeof pack.totalDuration === 'number' ? pack.totalDuration : DEFAULT_VFX_TOTAL_DURATION
@@ -1282,10 +1283,10 @@ export function syncEffectsRuntimeStateFromSettings(state: State, settings: Expe
     const revealTypeChanged = prevActiveType !== revealType;
     reveal.activeEffectId = SCENE_GSPLAT_REVEAL_EFFECT_ID;
     reveal.activeType = revealType;
-    if (prevRevealStatus === 'playing' && !revealTypeChanged) {
-        reveal.status = 'playing';
-    } else if (revealType === 'none') {
+    if (revealType === 'none') {
         reveal.status = 'inactive';
+    } else if (prevRevealStatus === 'playing' && !revealTypeChanged) {
+        reveal.status = 'playing';
     } else if (prevRevealStatus === 'completed' && !revealTypeChanged) {
         reveal.status = 'completed';
     } else {

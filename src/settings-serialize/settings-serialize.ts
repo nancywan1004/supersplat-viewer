@@ -12,6 +12,7 @@ import { serializeSceneMediaHotspotForPersistence } from './settings-serialize-h
 import {
     flushRevealIntoEffectsForExport,
     normalizeEffectsOnImport,
+    readRevealParams,
     syncEffectsRuntimeStateFromSettings
 } from './effects-sync';
 import { filterAssetEffectParams } from '../vfx/effects-runtime/asset/asset-effect-params';
@@ -313,6 +314,9 @@ export function applySettingsSnapshot(global: Global, snapshot: ExperienceSettin
         normalizeEffectsOnImport(global.settings as ExperienceSettings);
     }
     syncEffectsRuntimeStateFromSettings(global.state, global.settings as ExperienceSettings);
+    const es = global.settings as ExperienceSettings;
+    global.events.fire('revealConfigChanged', readRevealParams(es) ?? { type: 'none', enable: false });
+    global.events.fire('persistentGsplatEffectRemountRequested', false);
     applySceneAssetCollisionFromSettings(global);
     syncSceneAssetCollisionRuntime(global);
     global.events.fire('cameraCollision:changed');

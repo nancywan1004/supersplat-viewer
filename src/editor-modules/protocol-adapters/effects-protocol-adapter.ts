@@ -169,6 +169,8 @@ export function applyGsplatRevealEffectAdd(global: Global, effectType: string): 
     if (t !== 'none') {
         global.events.fire('revealType:changed', t);
         requestRevealSceneReplayIfActive(global, merged);
+    } else if (hasEnabledPersistentEffects(settings)) {
+        requestPersistentGsplatRemount(global);
     }
 }
 
@@ -188,6 +190,9 @@ export function applyGsplatRevealEffectDelete(global: Global): void {
     syncRevealSceneActiveState(global, merged);
     global.events.fire('revealConfigChanged', merged);
     global.events.fire('revealType:changed', 'none');
+    if (hasEnabledPersistentEffects(settings)) {
+        requestPersistentGsplatRemount(global);
+    }
 }
 
 const PERSISTENT_TYPE_SET = new Set<string>(PERSISTENT_EFFECT_TYPE_VALUES as readonly string[]);
@@ -368,7 +373,8 @@ export function applyGsplatPersistentParamsPatch(
 
 /**
  * `EFFECT_ADD`（scene.gsplat-persistent-scene）：
- * - 已存在同 `effectType` 块（含 `enable: false`）→ 不处理；
+ * - 已存在同 `effectType` 且 `enable: true` → 仍 remount（settings 已一致时兜底挂脚本）；
+ * - 已存在且 `enable: false` → 置 `enable: true` 并 remount；
  * - 新类型 → 追加块（`enable: true`），与其它已选类型并存写入 settings；
  * - `effectType === 'none'` → 清空 persistent 包并停播。
  */
@@ -383,6 +389,7 @@ export function applyGsplatPersistentEffectAddForId(global: Global, effectId: st
     const settings = global.settings as ExperienceSettings;
     const trackName = persistentTrackNameForEffectId(effectId) ?? persistentTrackNameForType(t === 'none' ? 'perlin-wave' : t);
     const hadEnabled = hasEnabledPersistentEffects(settings);
+    const replaceTrack = trackName !== 'scene';
 
     if (t === 'none') {
         clearPersistentTrackEffects(settings, trackName);
@@ -398,11 +405,18 @@ export function applyGsplatPersistentEffectAddForId(global: Global, effectId: st
         return;
     }
 
-    if (getPersistentTrackEffect(settings, trackName, t)) {
+    const existing = getPersistentTrackEffect(settings, trackName, t);
+    if (existing) {
+        if (!existing.enable) {
+            patchPersistentTrackEffect(settings, trackName, t, { enable: true }, { replaceTrack });
+            syncEffectsRuntimeStateFromSettings(global.state, settings);
+        }
+        notifyPersistentSceneEffectsUiSync(global);
+        requestPersistentGsplatRemount(global);
         return;
     }
 
-    patchPersistentTrackEffect(settings, trackName, t, { enable: true }, { replaceTrack: trackName !== 'scene' });
+    patchPersistentTrackEffect(settings, trackName, t, { enable: true }, { replaceTrack });
     syncEffectsRuntimeStateFromSettings(global.state, settings);
     notifyPersistentSceneEffectsUiSync(global);
 
