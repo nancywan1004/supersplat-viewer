@@ -116,7 +116,7 @@ export function buildMorphOptions(ep: Record<string, unknown>): GsplatMorphOptio
         progressivePairFlightWindow:
             typeof ep.progressivePairFlightWindow === 'number' ? ep.progressivePairFlightWindow : 0.12,
         progressivePairFlightStagger:
-            typeof ep.progressivePairFlightStagger === 'number' ? ep.progressivePairFlightStagger : 1,
+            typeof ep.progressivePairFlightStagger === 'number' ? ep.progressivePairFlightStagger : 0,
         progressivePairFlightEase: resolveProgressivePairFlightEaseParam(ep.progressivePairFlightEase),
         progressivePairFlightPosEase: resolveProgressivePairFlightEaseParam(ep.progressivePairFlightPosEase),
         correspondenceStrategy:

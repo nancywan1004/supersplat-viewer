@@ -95,8 +95,8 @@ export const ASSET_EFFECTS_PANEL_HTML = `
       <div class="settingsRow">
         <label for="assetMorphFlightStagger" class="postEffectLabel" title="配对索引相位权重；越大越按配对顺序依次飞，越小越按空间位置（A 侧先散、B 侧先生）">配对错峰:</label>
         <div class="postEffectSliderWrap">
-          <input type="range" id="assetMorphFlightStagger" class="postEffectSlider" min="0" max="1" step="0.01" value="1">
-          <span id="assetMorphFlightStaggerVal" class="postEffectSliderValue">1.00</span>
+          <input type="range" id="assetMorphFlightStagger" class="postEffectSlider" min="0" max="1" step="0.01" value="0">
+          <span id="assetMorphFlightStaggerVal" class="postEffectSliderValue">0.00</span>
         </div>
       </div>
       <div class="settingsRow">
@@ -241,7 +241,7 @@ export const ASSET_EFFECTS_PANEL_HTML = `
 const DEFAULT_WOBBLE_HALO_RGB = getDefaultWobbleEffectParams('wobble').goldColor as [number, number, number];
 const DEFAULT_MORPH_SEGMENT_DURATION = 10;
 const DEFAULT_MORPH_FLIGHT_WINDOW = 0.12;
-const DEFAULT_MORPH_FLIGHT_STAGGER = 1;
+const DEFAULT_MORPH_FLIGHT_STAGGER = 0;
 const DEFAULT_MORPH_FLIGHT_EASE = 'smoothstep';
 const DEFAULT_MORPH_HOURGLASS_PARTICLE_SCALE_FRAC = 0.006;
 const MORPH_FLIGHT_EASE_VALUES = ['linear', 'smoothstep', 'easeIn', 'easeOut', 'easeInOut'] as const;
