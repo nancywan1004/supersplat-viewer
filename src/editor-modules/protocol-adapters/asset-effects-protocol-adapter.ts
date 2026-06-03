@@ -271,15 +271,16 @@ export function applyAssetEffectParamsPatch(global: Global, envelope: AssetEffec
     syncEffectsRuntimeStateFromSettings(global.state, global.settings);
     syncAssetInstancesRuntimeFromSettings(global.state, global.settings);
 
-    global.events.fire('assetEffect:configChanged', {
-        targetId: storageTargetId,
-        type: merged.type,
-        params: merged
-    });
     if (merged.enable === false) {
         global.events.fire('assetEffect:stop', {
             targetId: storageTargetId,
             type: merged.type
+        });
+    } else {
+        global.events.fire('assetEffect:configChanged', {
+            targetId: storageTargetId,
+            type: merged.type,
+            params: merged
         });
     }
     return true;

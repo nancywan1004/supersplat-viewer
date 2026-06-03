@@ -556,6 +556,19 @@ export class YiyunDianranController {
         this.app.renderNextFrame = true;
     }
 
+    setPostEffectEnabled(enabled: boolean, getCameraFrame?: () => CameraFrame | null | undefined): void {
+        this.settings = {
+            ...this.settings,
+            postEffectEnabled: enabled
+        };
+        if (enabled) {
+            this.mountPostProcessing(getCameraFrame);
+        } else {
+            this.unmountPostProcessing();
+        }
+        this.app.renderNextFrame = true;
+    }
+
     private mountPostProcessing(getCameraFrame?: () => CameraFrame | null | undefined): void {
         const cameraFrame = getCameraFrame?.();
         if (cameraFrame?.enabled && this.cameraFrameBridge.mount(cameraFrame)) {

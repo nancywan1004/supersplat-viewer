@@ -325,16 +325,6 @@ export function applyGsplatPersistentParamsPatch(
     patchPersistentTrackFromProtocolParams(settings, trackName, nested);
     syncEffectsRuntimeStateFromSettings(global.state, settings);
 
-    const enabledNow = readActivePersistentEffects(settings);
-
-    if (enabledNow.length === 0) {
-        notifyPersistentSceneEffectsUiSync(global);
-        if (hadEnabled) {
-            finalizePersistentGsplatTrackOff(global);
-        }
-        return;
-    }
-
     const singlePatch = patchTypes.length === 1 ? patches[patchTypes[0]] : undefined;
     const singlePatchKeys = singlePatch ? Object.keys(singlePatch) : [];
 
@@ -342,14 +332,24 @@ export function applyGsplatPersistentParamsPatch(
     if (onlyEffectParams) {
         const t = patchTypes[0];
         const entry = getPersistentTrackEffect(settings, trackName, t);
-        // 已启用：热更新脚本参数；未启用：仅写入 settings，不 remount
+        // 已启用：热更新脚本参数；未启用：仅写入 settings，不 remount/teardown
         if (entry?.enable) {
             global.events.fire('persistentRevealConfigChanged', {
                 type: t,
-                effectParams: entry.effectParams
+                effectParams: singlePatch?.effectParams ?? entry.effectParams
             });
         }
         notifyPersistentSceneEffectsUiSync(global);
+        return;
+    }
+
+    const enabledNow = readActivePersistentEffects(settings);
+
+    if (enabledNow.length === 0) {
+        notifyPersistentSceneEffectsUiSync(global);
+        if (hadEnabled) {
+            finalizePersistentGsplatTrackOff(global);
+        }
         return;
     }
 

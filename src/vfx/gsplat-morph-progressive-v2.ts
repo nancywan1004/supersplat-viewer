@@ -3474,11 +3474,15 @@ export class GsplatMorphController {
 
     destroy() {
         this._destroyed = true;
+        this._playing = false;
+        this._morphPushedThisFrame = false;
         this.disarmAppAutoRenderOverride();
         this.app.off('frameupdate', this._onFrameUpdate);
         this.app.off('framerender', this._onAfterFrameRender);
         this.app.scene.off('gsplat:sorted', this._onGsplatSorted);
         this.restoreSourceEntities(true);
+        this.entity.enabled = false;
+        this.app.renderNextFrame = true;
         this.entity.destroy();
 
         this.asset.unload();

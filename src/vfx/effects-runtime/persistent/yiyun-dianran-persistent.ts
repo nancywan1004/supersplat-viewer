@@ -77,6 +77,18 @@ export class GsplatPersistentYiyunDianran extends Script {
         });
     }
 
+    applyPostEffectConfig() {
+        if (!this._controller) {
+            this.applyConfig();
+            return;
+        }
+        const getCameraFrame = () => (this.app as { getCameraFrame?: () => unknown }).getCameraFrame?.() ?? null;
+        this._controller.setPostEffectEnabled(
+            this.enabled && this.postEffectEnabled,
+            getCameraFrame as () => import('playcanvas').CameraFrame | null
+        );
+    }
+
     setEffectTime(time: number) {
         this.effectTime = Math.max(0, time);
         this._controller?.setEffectTime(this.effectTime);

@@ -198,8 +198,13 @@ export class RevealController {
             }
             const script = getMountedPersistentGsplatScript(this.gsplatEntity, t) as any;
             if (script) {
+                const keys = pack.effectParams ? Object.keys(pack.effectParams) : [];
                 applyPersistentEffectParamsToScript(script, t, pack.effectParams ?? undefined);
-                script.applyConfig?.();
+                if (t === 'yiyun-dianran' && keys.length === 1 && keys[0] === 'postEffectEnabled') {
+                    script.applyPostEffectConfig?.();
+                } else {
+                    script.applyConfig?.();
+                }
             }
         });
 
