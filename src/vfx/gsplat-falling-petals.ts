@@ -44,7 +44,7 @@ export interface GsplatFallingPetalsOptions {
     atlasRows?: number;
 }
 
-const DEFAULT_ATLAS_URL = '/textures/petal-atlas.png';
+const DEFAULT_ATLAS_URL = '/assets/textures/petal-atlas.png';
 const PETAL_COUNT_PER_DENSITY = 6000;
 
 const PETAL_PRESET = {

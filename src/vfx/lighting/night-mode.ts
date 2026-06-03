@@ -4,6 +4,7 @@ import { extractGlslWgslModifyBlocks } from '../effects-runtime/gsplat-effect-la
 import { collectPointLights, collectSpotLights } from '../../light';
 import { ensureTorchLight } from '../../settings-serialize/settings-serialize-helper';
 import { getTorchLightEffectiveRange, getTorchLightWorldPosition, isTorchEntityEnabled } from './torch-light';
+import { readViewTorchActive } from '../../view-settings';
 import type { EffectsRuntime } from '../effects-runtime';
 import type { GsplatContribution } from '../effects-runtime/gsplat-contribution';
 
@@ -1001,6 +1002,9 @@ class NightMode extends GsplatShaderEffect {
     /** composer 路径：上次 apply 时的材质数量（unified 动态增材质时触发再 apply） */
     private _lastNightComposerMaterialCount = 0;
 
+    /** 手电筒开关：延后到 update 再挂 shader，避免与 torch-light onUpdate 时序竞态 */
+    private _onTorchActiveChanged: (() => void) | null = null;
+
     /** shader 变体（如 BloomBrush 开关）递增，驱动 compositionSignature 变化 */
     private _nightComposerShaderRev = 0;
 
@@ -1117,6 +1121,25 @@ class NightMode extends GsplatShaderEffect {
                 });
             }
         });
+
+        const global = (this.app as any).__global;
+        if (global?.events) {
+            this._onTorchActiveChanged = () => {
+                if (this.suspendedByVfx) return;
+                // 等同帧内 torch-light onUpdate 之后再刷新 shader / uniform
+                this.app.once('update', () => {
+                    if (this.suspendedByVfx) return;
+                    const needShader = this.nightShaderWanted();
+                    if (needShader && this.materialsApplied.size === 0 && this.splat?.gsplat) {
+                        this.applyShaders();
+                    }
+                    this.updateEffect(this.effectTime, 0);
+                    this.tryApplyNightComposerToMaterials(true);
+                    this.app.renderNextFrame = true;
+                });
+            };
+            global.events.on('torchActive:changed', this._onTorchActiveChanged);
+        }
     }
 
     private getEffectsRuntime(): EffectsRuntime | null {
@@ -1128,7 +1151,9 @@ class NightMode extends GsplatShaderEffect {
         const global = (this.app as any).__global;
         const pointLights = global ? collectPointLights(global) : [];
         const spotLights = global ? collectSpotLights(global) : [];
-        const hasTorchLight = global ? isTorchEntityEnabled(global) : false;
+        const hasTorchLight = global
+            ? (readViewTorchActive(global) || isTorchEntityEnabled(global))
+            : false;
         const hasDynamicLocalLights = pointLights.length > 0 || spotLights.length > 0 || hasTorchLight;
         return Math.abs(this.nightFade) > 1e-6
             || hasDynamicLocalLights
@@ -1166,14 +1191,14 @@ class NightMode extends GsplatShaderEffect {
         rt.composer.compose();
     }
 
-    private tryApplyNightComposerToMaterials(): void {
+    private tryApplyNightComposerToMaterials(force = false): void {
         if (!nightModeUsesComposerPath() || this.materialsApplied.size === 0) return;
         const rt = this.getEffectsRuntime();
         if (!rt) return;
         const last = rt.composer.getLastComposition();
         if (!last) return;
         const countChanged = this.materialsApplied.size !== this._lastNightComposerMaterialCount;
-        if (last.signatureChanged || countChanged) {
+        if (force || last.signatureChanged || countChanged) {
             rt.composer.applyComposedToMaterials(this.materialsApplied, last);
             this._lastNightComposerMaterialCount = this.materialsApplied.size;
         }
@@ -1560,7 +1585,8 @@ class NightMode extends GsplatShaderEffect {
             this.setUniform('uModelMatrix', modelMatrix);
             const torchWorldPos = global ? getTorchLightWorldPosition(global) : null;
             const torchCfg = global ? ensureTorchLight(global.settings as any) : null;
-            const torchActive = !!(global && torchCfg && torchWorldPos && isTorchEntityEnabled(global));
+            const torchActive = !!(global && torchCfg && torchWorldPos &&
+                (readViewTorchActive(global) || isTorchEntityEnabled(global)));
             if (torchActive && torchCfg && torchWorldPos) {
                 const [tr, tg, tb] = localLightLinearRgb(torchCfg.color[0], torchCfg.color[1], torchCfg.color[2], torchCfg.intensity ?? 1, scale);
                 this.setUniform('uTorchWorldPos', [torchWorldPos.x, torchWorldPos.y, torchWorldPos.z]);
@@ -1712,6 +1738,11 @@ class NightMode extends GsplatShaderEffect {
     }
 
     destroy() {
+        const global = (this.app as any).__global;
+        if (global?.events && this._onTorchActiveChanged) {
+            global.events.off('torchActive:changed', this._onTorchActiveChanged);
+            this._onTorchActiveChanged = null;
+        }
         if (nightModeUsesComposerPath()) {
             const rt = this.getEffectsRuntime();
             rt?.composer.removeContribution(NIGHT_COMPOSER_ID);
