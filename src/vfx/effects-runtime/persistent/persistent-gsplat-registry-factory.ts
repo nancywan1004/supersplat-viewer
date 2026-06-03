@@ -3,8 +3,8 @@ import { readActivePersistentEffects } from '../../../settings-serialize/effects
 import type { EffectRegistry } from '../effect-registry';
 import { extractGlslWgslModifyBlocks, OVERALL_WAVE_COMPOSER_ID, PERLIN_WAVE_COMPOSER_ID } from '../gsplat-effect-layers-extractor';
 import { OVERALL_WAVE_REGISTRY_EFFECT_ID, PERLIN_WAVE_REGISTRY_EFFECT_ID } from '../effect-types';
-import { overallWaveShaderGlsl, overallWaveShaderWgsl } from './gsplat-overall-wave-shaders';
-import { perlinWaveShaderGlsl, perlinWaveShaderWgsl } from './gsplat-perlin-wave-shaders';
+import { overallWaveShaderGlsl, overallWaveShaderWgsl } from './scene/gsplat-overall-wave-shaders';
+import { perlinWaveShaderGlsl, perlinWaveShaderWgsl } from './scene/gsplat-perlin-wave-shaders';
 
 /** key 与 `settings.effects.persistent.scene` 条目的 `type` 一致 */
 const PERSISTENT_GSPLAT_REGISTRY_FACTORIES: Record<string, (registry: EffectRegistry) => void> = {

@@ -3,7 +3,7 @@ import { Entity, Script, type CameraComponent } from 'playcanvas';
 import {
     DEFAULT_YIYUN_DIANRAN_SETTINGS,
     YiyunDianranController
-} from '../../stylisation/yiyun-dianran-stylisation';
+} from './yiyun-dianran-stylisation';
 
 function findCameraEntity(root: Entity): Entity | null {
     return root.findComponent('camera')?.entity ?? null;

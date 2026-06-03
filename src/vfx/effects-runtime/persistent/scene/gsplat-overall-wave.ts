@@ -1,16 +1,16 @@
 import { Color, Vec3, type Material } from 'playcanvas';
-import { GsplatShaderEffect } from '../gsplat-shader-effect';
-import { extractGlslWgslModifyBlocks, OVERALL_WAVE_COMPOSER_ID } from '../gsplat-effect-layers-extractor';
-import { nightModeUsesComposerPath } from '../../lighting/night-mode';
-import { OVERALL_WAVE_REGISTRY_EFFECT_ID } from '../effect-types';
+import { GsplatShaderEffect } from '../../gsplat-shader-effect';
+import { extractGlslWgslModifyBlocks, OVERALL_WAVE_COMPOSER_ID } from '../../gsplat-effect-layers-extractor';
+import { nightModeUsesComposerPath } from '../../../lighting/night-mode';
+import { OVERALL_WAVE_REGISTRY_EFFECT_ID } from '../../effect-types';
 import {
     isOneShotRevealPlayingExclusiveGsplat,
     perlinWaveUsesRegistryComposerPath
-} from '../effects-pipeline-policy';
+} from '../../effects-pipeline-policy';
 import { overallWaveShaderGlsl, overallWaveShaderWgsl } from './gsplat-overall-wave-shaders';
 import { OVERALL_WAVE_UNIFORM_NAMES as OU } from './gsplat-overall-wave-shaders';
 
-/** 初始属性默认值 */
+/** 初始属性默认�?*/
 export const OVERALL_WAVE_DEFAULTS = {
     noiseType: 0,
     waveAmplitude: 0.35,
@@ -30,15 +30,15 @@ export function clampOverallWaveNoiseType(v: number): number {
 }
 
 /**
- * 整体波动：全场景有机噪波位移 + 波峰/波谷明暗着色。
- * 夜间模式走 {@link GsplatEffectComposer}；`perlinRegistry=0` 时回退脚本内联 contribution（与 perlin-wave 一致）。
+ * 整体波动：全场景有机噪波位移 + 波峰/波谷明暗着色�?
+ * 夜间模式�?{@link GsplatEffectComposer}；`perlinRegistry=0` 时回退脚本内联 contribution（与 perlin-wave 一致）�?
  */
 class GsplatPersistentOverallWave extends GsplatShaderEffect {
     static scriptName = 'gsplatPersistentOverallWave';
 
-    /** shader 变更时递增，触发 composer 重编译 */
+    /** shader 变更时递增，触�?composer 重编�?*/
     private _composerRev = 6;
-    /** 一次性 reveal 独占 `gsplatModifyVS` 时，已从合成器摘掉本 contribution */
+    /** 一次�?reveal 独占 `gsplatModifyVS` 时，已从合成器摘掉本 contribution */
     private _composerSuppressed = false;
 
     _centerArray = [...OVERALL_WAVE_DEFAULTS.center];

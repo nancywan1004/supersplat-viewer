@@ -23,10 +23,10 @@ import type { EffectsRuntime } from '..';
 import { nightModeUsesComposerPath } from '../../lighting/night-mode';
 import {
     destroyAllPersistentGsplatScriptsOnEntity,
-    destroyAllRevealGsplatScriptsOnEntity,
     forEachMountedPersistentGsplatScript,
     getMountedPersistentGsplatScript
 } from '../gsplat-effect-script-registry';
+import { destroyAllRevealGsplatScriptsOnEntity } from '../gsplat-effect-script-registry';
 import {
     getPersistentGsplatEffectsRuntimeScriptType,
     rebindPersistentGsplatTimelineFromSettings
@@ -35,7 +35,7 @@ import { shouldRequestPersistentGsplatRemount } from './effects-orchestrator';
 import { applyPersistentEffectParamsToScript } from '../persistent/persistent-effect-params';
 import { applyRevealEffectParamsToScript } from './reveal-effect-params';
 import type { RevealParticipationSyncContext } from '../gsplat-shader-effect';
-import { RevealPersistentGsplatController } from './reveal-persistent-controller';
+import { RevealPersistentGsplatController } from '../persistent/reveal-persistent-controller';
 import { GsplatRevealGrowthWave } from './gsplat-growth-wave';
 import { GsplatIntegrate } from './gsplat-integrate';
 import { GsplatRevealPiecesRecover } from './gsplat-pieces-recover';

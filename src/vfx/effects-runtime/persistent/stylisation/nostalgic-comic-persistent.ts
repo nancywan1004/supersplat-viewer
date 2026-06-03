@@ -3,7 +3,7 @@ import { Entity, Script, type CameraComponent } from 'playcanvas';
 import {
     DEFAULT_NOSTALGIC_COMIC_SETTINGS,
     NostalgicComicController
-} from '../../stylisation/nostalgic-comic';
+} from './nostalgic-comic';
 
 function findCameraEntity(root: Entity): Entity | null {
     return root.findComponent('camera')?.entity ?? null;

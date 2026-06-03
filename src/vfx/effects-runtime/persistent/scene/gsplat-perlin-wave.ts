@@ -1,12 +1,12 @@
 import { Vec3, type Material } from 'playcanvas';
-import { GsplatShaderEffect } from '../gsplat-shader-effect';
-import { extractGlslWgslModifyBlocks, PERLIN_WAVE_COMPOSER_ID } from '../gsplat-effect-layers-extractor';
-import { nightModeUsesComposerPath } from '../../lighting/night-mode';
-import { PERLIN_WAVE_REGISTRY_EFFECT_ID } from '../effect-types';
+import { GsplatShaderEffect } from '../../gsplat-shader-effect';
+import { extractGlslWgslModifyBlocks, PERLIN_WAVE_COMPOSER_ID } from '../../gsplat-effect-layers-extractor';
+import { nightModeUsesComposerPath } from '../../../lighting/night-mode';
+import { PERLIN_WAVE_REGISTRY_EFFECT_ID } from '../../effect-types';
 import {
     isOneShotRevealPlayingExclusiveGsplat,
     perlinWaveUsesRegistryComposerPath
-} from '../effects-pipeline-policy';
+} from '../../effects-pipeline-policy';
 import { perlinWaveShaderGlsl, perlinWaveShaderWgsl } from './gsplat-perlin-wave-shaders';
 import { PERLIN_WAVE_UNIFORM_NAMES as PU } from './gsplat-perlin-wave-shaders';
 
@@ -21,17 +21,17 @@ import { PERLIN_WAVE_UNIFORM_NAMES as PU } from './gsplat-perlin-wave-shaders';
  * perlinWaveScript.center.set(0, 0, 0);
  * perlinWaveScript.intensity = 0.5;
  * perlinWaveScript.waveAmplitude = 0.1;
- * perlinWaveScript.wavelength = 2.0;  // 波长（世界单位），优先于 waveFrequency；0 则用 waveFrequency
+ * perlinWaveScript.wavelength = 2.0;  // 波长（世界单位），优先于 waveFrequency�? 则用 waveFrequency
  * perlinWaveScript.waveSpeed = 1.0;
  * perlinWaveScript.scaleBlend = 1.0;
  */
 class GsplatRevealPerlinWave extends GsplatShaderEffect {
     static scriptName = 'gsplatRevealPerlinWave';
 
-    /** 仅当 shader 源码变更时需递增以触发 composer 重编译 */
+    /** 仅当 shader 源码变更时需递增以触�?composer 重编�?*/
     private _perlinComposerRev = 2;
 
-    /** 一次性开场 reveal 独占整段 `gsplatModifyVS` 时，已主动从合成器摘掉波纹 contribution */
+    /** 一次性开�?reveal 独占整段 `gsplatModifyVS` 时，已主动从合成器摘掉波�?contribution */
     private _perlinComposerSuppressed = false;
 
     // Reusable arrays for uniform updates
@@ -65,7 +65,7 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
     waveFrequency = 1.0;
 
     /**
-     * 波长（世界单位）。当 > 0 时优先使用：uWaveFrequency = 1.0 / wavelength，调大波长 = 波更疏、周期更长
+     * 波长（世界单位）。当 > 0 时优先使用：uWaveFrequency = 1.0 / wavelength，调大波�?= 波更疏、周期更�?
      * @attribute
      * @range [0, 100]
      */
@@ -105,7 +105,7 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
         return (this.app as any).__global?.state;
     }
 
-    /** 开场一次性 reveal 正在播：整段 `gsplatModifyVS` 由 reveal 脚本独占，波纹不参与合成器 */
+    /** 开场一次�?reveal 正在播：整段 `gsplatModifyVS` �?reveal 脚本独占，波纹不参与合成�?*/
     private shouldSuppressPerlinComposerForOneShotReveal(): boolean {
         return isOneShotRevealPlayingExclusiveGsplat(this.getAppState());
     }

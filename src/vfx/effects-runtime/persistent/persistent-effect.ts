@@ -5,20 +5,21 @@ import { readActivePersistentEffects } from '../../../settings-serialize/effects
 import { destroyAllPersistentGsplatScriptsOnEntity, getMountedPersistentGsplatScript } from '../gsplat-effect-script-registry';
 import { PERSISTENT_EFFECT_TYPES } from '../effect-types';
 import { isPersistentVfx } from '../reveal/reveal-policy';
-import { GsplatPersistentFallingPetals, GsplatPersistentFallingWeather } from './falling-weather-persistent';
-import { GsplatPersistentNostalgicComic } from './nostalgic-comic-persistent';
-import { GsplatPersistentPalettePixel } from './palette-pixel-persistent';
-import { GsplatPersistentYiyunDianran } from './yiyun-dianran-persistent';
-import { GsplatRevealPerlinWave } from './gsplat-perlin-wave';
-import { GsplatPersistentOverallWave } from './gsplat-overall-wave';
-import { GsplatPersistentButterflyParticle } from './gsplat-butterfly-particle';
-import { GsplatPersistentSparkleTwinkle } from './gsplat-sparkle-twinkle';
+import { GsplatPersistentFallingPetals, GsplatPersistentFallingWeather } from './camera/falling-weather-persistent';
+import { GsplatPersistentNostalgicComic } from './stylisation/nostalgic-comic-persistent';
+import { GsplatPersistentPalettePixel } from './stylisation/palette-pixel-persistent';
+import { GsplatPersistentYiyunDianran } from './stylisation/yiyun-dianran-persistent';
+import { GsplatRevealPerlinWave } from './scene/gsplat-perlin-wave';
+import { GsplatPersistentOverallWave } from './scene/gsplat-overall-wave';
+import { GsplatPersistentButterflyParticle } from './scene/gsplat-butterfly-particle';
+import { GsplatPersistentSparkleTwinkle } from './scene/gsplat-sparkle-twinkle';
 import { applyPersistentEffectParamsToScript } from './persistent-effect-params';
 
 /**
  * **可持续（persistent）GSplat 特效**：脚本创建、默认参数与导出/阈值辅助。
  *
- * 后续新增 persistent 类型时：先在 **`effect-types.ts`** 扩展 **`PERSISTENT_EFFECT_TYPE_VALUES`**，再在 **`gsplat-effect-script-registry.ts`** 的 `GSPLAT_PERSISTENT_SCRIPT_NAME_BY_TYPE` 登记 `scriptName`；一次性 reveal 同理扩展 **`REVEAL_EFFECT_TYPE_VALUES`** 与 **`GSPLAT_REVEAL_SCRIPT_NAME_BY_TYPE`**。在本文件 `mountPersistentGsplatByEffectType` 增加分支；专参白名单见 **`persistent-effect-params.ts`**。Viewer 侧 remount 入口见 **`persistent-gsplat-lifecycle.ts`** 的 **`runPersistentGsplatEntityLifecycle`**。
+ * 新增 persistent：扩展 `effect-types` / `gsplat-effect-script-registry` / 本文件 `mountPersistentGsplatByEffectType`；
+ * 专参见 `persistent-effect-params.ts`；Viewer remount 见 `persistent-gsplat-lifecycle.ts`。
  */
 
 /**

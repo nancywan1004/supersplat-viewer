@@ -20,7 +20,7 @@ import {
     type GraphicsDevice
 } from 'playcanvas';
 import { fragmentShaderGLSL, shaderGLSL } from './gsplat-sparkle-twinkle-shaders';
-import type { Global } from '../../../types';
+import type { Global } from '../../../../types';
 
 const SPARKLE_LAYER_NAME = 'SparkleAfterGsplat';
 const OVERLAY_ROOT_NAME = 'sparkleTwinkleOverlay';
@@ -55,7 +55,7 @@ type GsplatBboxSource = {
 
 type CameraLayers = { layers: number[] };
 
-/** 脚本初始属性默认值（与 settings `effectParams` 未指定时一致） */
+/** 脚本初始属性默认值（�?settings `effectParams` 未指定时一致） */
 export const SPARKLE_TWINKLE_DEFAULTS = {
     center: [0, 0, 0] as [number, number, number],
     pointSize: 0.02,
@@ -369,7 +369,7 @@ function createSparkleMaterial(): ShaderMaterial {
 }
 
 /**
- * 亮光细闪：在 gsplat 上采样光点位置，用独立 billboard 层叠加闪烁高光（不经 gsplat shader composer）。
+ * 亮光细闪：在 gsplat 上采样光点位置，用独�?billboard 层叠加闪烁高光（不经 gsplat shader composer）�?
  */
 class GsplatPersistentSparkleTwinkle extends Script {
     static scriptName = 'gsplatPersistentSparkleTwinkle';
@@ -445,7 +445,7 @@ class GsplatPersistentSparkleTwinkle extends Script {
         this.destroyOverlay(true);
     }
 
-    /** 布局参数变更后重建 billboard 网格（如 density / center / pointSize） */
+    /** 布局参数变更后重�?billboard 网格（如 density / center / pointSize�?*/
     requestRebuild() {
         this.lastLayoutKey = '';
         this.pendingMount = true;

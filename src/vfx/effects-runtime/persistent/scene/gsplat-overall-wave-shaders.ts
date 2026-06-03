@@ -1,4 +1,4 @@
-/** ä¸ GLSL/WGSL åŠ {@link GsplatPersistentOverallWave} çš„ setUniform ä¸€è‡´ */
+/** ä¸?GLSL/WGSL å?{@link GsplatPersistentOverallWave} çš?setUniform ä¸€è‡?*/
 export const OVERALL_WAVE_UNIFORM_NAMES = {
     time: 'uOverallTime',
     center: 'uOverallCenter',
