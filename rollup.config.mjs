@@ -366,6 +366,8 @@ const buildDist = {
         { src: 'settings.json', dest: 'dist' },
         // 标注热点 SVG 等图标资源，供 dist 产物直接访问 assets/icons/*
         { src: 'public/assets/icons/**/*', dest: 'dist/assets/icons' },
+        // 花瓣等纹理图集，供 dist 产物直接访问 assets/textures/*
+        { src: 'public/assets/textures/**/*', dest: 'dist/assets/textures' },
         {
           src: `public/vendor/${PLAYCANVAS_VENDOR_FILE}`,
           dest: 'dist/vendor'
