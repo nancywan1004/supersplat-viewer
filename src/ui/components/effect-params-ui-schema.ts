@@ -307,7 +307,14 @@ const OVERALL_WAVE_PARAM_UI: Partial<
 };
 
 function overallWaveShowsWaveDirection(noiseType: unknown): boolean {
-    return typeof noiseType === 'number' && clampOverallWaveNoiseType(noiseType) === 1;
+    let n: number | null = null;
+    if (typeof noiseType === 'number' && Number.isFinite(noiseType)) {
+        n = noiseType;
+    } else if (typeof noiseType === 'string' && noiseType !== '') {
+        const parsed = parseInt(noiseType, 10);
+        if (Number.isFinite(parsed)) n = parsed;
+    }
+    return n !== null && clampOverallWaveNoiseType(n) === 1;
 }
 
 function applyOverallWaveParamUiSpec(spec: EffectParamUiSpec): void {

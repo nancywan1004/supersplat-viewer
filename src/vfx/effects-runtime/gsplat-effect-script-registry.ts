@@ -60,6 +60,25 @@ export function destroyAllRevealGsplatScriptsOnEntity(entity: Entity | null | un
     }
 }
 
+/** 仅销毁指定 persistent 类型的脚本（不碰其它 persistent / reveal）。 */
+export function destroyPersistentGsplatScriptOnEntity(
+    entity: Entity | null | undefined,
+    effectType: string
+): void {
+    if (!entity?.script) {
+        return;
+    }
+    const name = gsplatScriptNameForPersistentEffectType(effectType);
+    if (!name) {
+        return;
+    }
+    try {
+        entity.script.destroy(name);
+    } catch (e) {
+        console.warn('[gsplat-effect-script-registry] destroy persistent script failed:', name, e);
+    }
+}
+
 /** 仅销毁 persistent 在实体上注册的脚本（不碰 reveal）。 */
 export function destroyAllPersistentGsplatScriptsOnEntity(entity: Entity | null | undefined): void {
     if (!entity?.script) {
@@ -87,4 +106,22 @@ export function getMountedPersistentGsplatScript(
         return null;
     }
     return entity.script.get(sn) ?? null;
+}
+
+/** 遍历已挂载的 persistent 脚本（`types` 缺省时扫描全部已知 scriptName） */
+export function forEachMountedPersistentGsplatScript(
+    entity: Entity | null | undefined,
+    types: Iterable<string> | undefined,
+    fn: (effectType: string, script: unknown) => void
+): void {
+    if (!entity?.script) {
+        return;
+    }
+    const iter = types ?? PERSISTENT_EFFECT_TYPE_VALUES;
+    for (const effectType of iter) {
+        const script = getMountedPersistentGsplatScript(entity, effectType);
+        if (script) {
+            fn(effectType, script);
+        }
+    }
 }

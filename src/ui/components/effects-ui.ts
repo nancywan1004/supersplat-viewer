@@ -3,8 +3,12 @@ import { PERSISTENT_EFFECT_TYPE_VALUES, REVEAL_EFFECT_TYPE_VALUES } from '../../
 import { pushEditHistory } from '../../edit-history';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../../schemas/v2-custom';
 import { SCENE_GSPLAT_PERSISTENT_EFFECT_ID, SCENE_GSPLAT_REVEAL_EFFECT_ID } from '../../vfx/effects-runtime/effects-runtime';
+import type { LegacyRevealEffect } from '../../schemas/v2';
 import {
+    buildPersistentProtocolParams,
+    buildRevealProtocolParams,
     getRevealTotalDuration,
+    readPersistentSceneEffects,
     readRevealParams,
     getRevealStatus,
     getRevealActiveType
@@ -52,6 +56,11 @@ const REVEAL_PANEL_HTML = (() => {
       <option value="sketch">Sketch</option>
     </select>
   </div>
+  <div id="revealEnableRow" class="settingsRow hidden">
+    <label style="display:inline-flex;align-items:center;gap:6px">
+      <input type="checkbox" id="revealEnable" class="settingsCheckbox" checked> 启用
+    </label>
+  </div>
   <div id="totalDurationRow" class="settingsRow hidden">
     <label for="totalDuration">Reveal 时长 (s):</label>
     <input type="number" id="totalDuration" class="settingsInput" min="1" max="60" step="0.5" value="${defaultDuration}" title="仅控制 Timed VFX 效果的快慢/时长，与导出视频长度无关">
@@ -66,22 +75,14 @@ const REVEAL_PANEL_HTML = (() => {
   </fieldset>
   <fieldset class="effectsTrackFieldset" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:10px 12px;margin-bottom:10px">
     <legend style="padding:0 6px;font-size:13px;font-weight:600">Scene（GSplat）— Persistent</legend>
-    <p class="effectsTrackHint" style="font-size:11px;opacity:0.8;margin:0 0 8px;line-height:1.35">可持续特效配置；与 <code>settings.effects.persistent</code> 对应。</p>
-    <div class="settingsRow">
-      <label for="persistentEnabled">Persistent Enabled:</label>
-      <input type="checkbox" id="persistentEnabled" class="settingsCheckbox" checked>
+    <p class="effectsTrackHint" style="font-size:11px;opacity:0.8;margin:0 0 8px;line-height:1.35">可持续特效（可多选）；与 <code>settings.effects.persistent.scene</code> 对应。</p>
+    <div id="persistentTypeMultiselect" class="settingsRow" style="flex-wrap:wrap;gap:8px 12px">
+      <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="perlin-wave" data-persistent-enable class="settingsCheckbox"> Perlin Wave</label>
+      <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="sparkle-twinkle" data-persistent-enable class="settingsCheckbox"> 亮光细闪</label>
+      <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="overall-wave" data-persistent-enable class="settingsCheckbox"> 整体波动</label>
+      <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="butterfly-particle" data-persistent-enable class="settingsCheckbox"> 琉光飞蝶</label>
     </div>
-    <div class="settingsRow">
-      <label for="persistentType">Persistent:</label>
-      <select id="persistentType" class="settingsSelect">
-        <option value="none">None</option>
-        <option value="perlin-wave">Perlin Wave</option>
-        <option value="sparkle-twinkle">亮光细闪</option>
-        <option value="overall-wave">整体波动</option>
-        <option value="butterfly-particle">琉光飞蝶</option>
-      </select>
-    </div>
-    <div id="persistentEffectParamsPanel" class="effectParamsPanel hidden"></div>
+    <div id="persistentEffectParamsPanels" class="effectParamsPanel hidden"></div>
   </fieldset>
   <fieldset class="effectsTrackFieldset effectsTrackAsset" style="border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px 12px;margin-bottom:10px;opacity:0.85">
     <legend style="padding:0 6px;font-size:13px;font-weight:600">Asset 特效</legend>
@@ -132,8 +133,9 @@ export function initRevealUI(global: Global): () => void {
         effectsDebugTimer = setInterval(tick, 800);
     }
     const revealType = container.querySelector('#revealType') as HTMLSelectElement | null;
-    const persistentType = container.querySelector('#persistentType') as HTMLSelectElement | null;
-    const persistentEnabled = container.querySelector('#persistentEnabled') as HTMLInputElement | null;
+    const revealEnableRow = container.querySelector('#revealEnableRow') as HTMLElement | null;
+    const revealEnable = container.querySelector('#revealEnable') as HTMLInputElement | null;
+    const persistentMultiselect = container.querySelector('#persistentTypeMultiselect');
     const revealRestart = container.querySelector('#revealRestart');
     const totalDurationRow = container.querySelector('#totalDurationRow') as HTMLElement | null;
     const totalDuration = container.querySelector('#totalDuration') as HTMLInputElement | null;
@@ -143,13 +145,18 @@ export function initRevealUI(global: Global): () => void {
     const restartAnimTrackCheck = container.querySelector('#restartAnimTrackCheck');
     const restartAnimTrackOption = container.querySelector('#restartAnimTrackOption');
     const revealEffectParamsPanelEl = container.querySelector('#revealEffectParamsPanel') as HTMLElement | null;
-    const persistentEffectParamsPanelEl = container.querySelector('#persistentEffectParamsPanel') as HTMLElement | null;
+    const persistentEffectParamsPanelsEl = container.querySelector('#persistentEffectParamsPanels') as HTMLElement | null;
 
     let revealParamsPanel: EffectParamsPanelHandle | null = null;
-    let persistentParamsPanel: EffectParamsPanelHandle | null = null;
+    const persistentParamsPanels = new Map<string, EffectParamsPanelHandle>();
+    /** 各 persistent 面板当前 spec 键签名；`noiseType` 等条件字段变化时需重建控件 */
+    const persistentPanelSpecSigs = new Map<string, string>();
     let revealParamsPanelType = '';
-    let persistentParamsPanelType = '';
-    let persistentParamsSpecsSig = '';
+
+    const persistentPanelSpecSignature = (type: string, params: Record<string, unknown>): string =>
+        getPersistentParamSpecs(type, params)
+            .map(s => s.key)
+            .join('|');
 
     // 默认开启：导出时通常需要重启相机 animTrack（与 message-bridge 的默认 syncAnimTrack=true 对齐）
     let restartAnimTrackEnabled = true;
@@ -169,9 +176,13 @@ export function initRevealUI(global: Global): () => void {
         }
     };
 
-    /** M18：internal 与 message-bridge 共用 `EffectsFacade.handleCommand`（bridge 仅多一层 postMessage）。 */
     const routeEffectsCommand = (
-        type: 'EFFECT_PARAMS_PATCH' | 'EFFECT_TOGGLE' | 'EFFECT_REPLAY',
+        type:
+            | 'EFFECT_PARAMS_PATCH'
+            | 'EFFECT_TOGGLE'
+            | 'EFFECT_REPLAY'
+            | 'EFFECT_ADD'
+            | 'EFFECT_DELETE',
         envelope: Record<string, unknown>
     ) => {
         if (getEditUiTransport(global) === 'message-bridge') {
@@ -183,46 +194,26 @@ export function initRevealUI(global: Global): () => void {
         }
     };
 
-    const readPersistentPack = (): Record<string, unknown> | undefined => {
-        const effects = global.settings.effects;
-        const paramsById = effects?.persistent?.paramsById;
-        if (!paramsById || typeof paramsById !== 'object') return undefined;
-        const byFixedId = paramsById[SCENE_GSPLAT_PERSISTENT_EFFECT_ID] as Record<string, unknown> | undefined;
-        if (byFixedId && typeof byFixedId.type === 'string' && isPersistentType(byFixedId.type)) {
-            return byFixedId;
-        }
-        for (const value of Object.values(paramsById)) {
-            const pack = value as Record<string, unknown> | undefined;
-            if (pack && typeof pack.type === 'string' && isPersistentType(pack.type)) {
-                return pack;
-            }
-        }
-        return undefined;
-    };
+    const currentRevealType = (): string => (readRevealParams(global.settings)?.type ?? 'none') as string;
 
-    const getPersistentSelection = (): string => {
-        const pack = readPersistentPack();
-        return pack && typeof pack.type === 'string' ? pack.type : 'none';
-    };
+    const revealProtocolParams = (patch: Partial<LegacyRevealEffect>): Record<string, unknown> =>
+        buildRevealProtocolParams(patch, currentRevealType());
 
-    const getPersistentEnabled = (): boolean => {
-        const pType = getPersistentSelection();
-        if (pType === 'none') {
-            return false;
-        }
-        return global.settings.effects?.persistent?.enabled ?? true;
-    };
-
-    const readRevealEffectParams = (): Record<string, unknown> => {
-        const ep = readRevealParams(global.settings)?.effectParams;
+    const readPersistentEffectParamsForType = (type: string): Record<string, unknown> => {
+        const entry = readPersistentSceneEffects(global.settings, { includeDisabled: true }).find(e => e.type === type);
+        const ep = entry?.effectParams;
         if (ep && typeof ep === 'object' && !Array.isArray(ep)) {
             return { ...(ep as Record<string, unknown>) };
         }
         return {};
     };
 
-    const readPersistentEffectParams = (): Record<string, unknown> => {
-        const ep = readPersistentPack()?.effectParams;
+    const persistentProtocolParams = (
+        patchByType: Record<string, { enable?: boolean; autoStart?: boolean; effectParams?: Record<string, unknown> }>
+    ): Record<string, unknown> => buildPersistentProtocolParams(patchByType);
+
+    const readRevealEffectParams = (): Record<string, unknown> => {
+        const ep = readRevealParams(global.settings)?.effectParams;
         if (ep && typeof ep === 'object' && !Array.isArray(ep)) {
             return { ...(ep as Record<string, unknown>) };
         }
@@ -233,27 +224,23 @@ export function initRevealUI(global: Global): () => void {
         if (Object.keys(partial).length === 0) return;
         routeEffectsCommand('EFFECT_PARAMS_PATCH', {
             effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
-            params: { effectParams: partial }
+            params: revealProtocolParams({ effectParams: partial })
         });
         pushEditHistorySafe();
     };
 
-    const patchPersistentEffectParams = (partial: Record<string, unknown>) => {
-        if (Object.keys(partial).length === 0) return;
-        const mergedParams = { ...readPersistentEffectParams(), ...partial };
+    const patchPersistentEffectParamsForType = (type: string, partial: Record<string, unknown>) => {
+        if (Object.keys(partial).length === 0 || !isPersistentType(type)) return;
         routeEffectsCommand('EFFECT_PARAMS_PATCH', {
             effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
-            params: { effectParams: partial }
+            params: persistentProtocolParams({ [type]: { effectParams: partial } })
         });
         pushEditHistorySafe();
-        if (getPersistentSelection() === 'overall-wave' && Object.prototype.hasOwnProperty.call(partial, 'noiseType')) {
-            ensurePersistentParamsPanel(getPersistentSelection(), getPersistentEnabled(), mergedParams);
+        if (type === 'overall-wave' && Object.prototype.hasOwnProperty.call(partial, 'noiseType')) {
+            syncPersistentParamsPanels();
         }
-        if (
-            getPersistentSelection() === 'butterfly-particle' &&
-            Object.prototype.hasOwnProperty.call(partial, 'colorCycleEnabled')
-        ) {
-            ensurePersistentParamsPanel(getPersistentSelection(), getPersistentEnabled(), mergedParams);
+        if (type === 'butterfly-particle' && Object.prototype.hasOwnProperty.call(partial, 'colorCycleEnabled')) {
+            syncPersistentParamsPanels();
         }
     };
 
@@ -279,75 +266,184 @@ export function initRevealUI(global: Global): () => void {
         revealParamsPanel?.setVisible(true);
     };
 
-    const ensurePersistentParamsPanel = (
-        effectType: string,
-        enabled: boolean,
-        effectValues?: Record<string, unknown>
-    ) => {
-        if (!persistentEffectParamsPanelEl) return;
-        if (!enabled || effectType === 'none' || !isPersistentType(effectType)) {
-            persistentParamsPanel?.destroy();
-            persistentParamsPanel = null;
-            persistentParamsPanelType = '';
-            persistentParamsSpecsSig = '';
-            persistentEffectParamsPanelEl.classList.add('hidden');
+    const patchPersistentEnableForType = (type: string, enable: boolean) => {
+        if (!isPersistentType(type)) return;
+        routeEffectsCommand('EFFECT_PARAMS_PATCH', {
+            effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+            params: persistentProtocolParams({ [type]: { enable } })
+        });
+        pushEditHistorySafe();
+        updateRevealControls();
+    };
+
+    const syncPersistentParamsPanels = () => {
+        if (!persistentEffectParamsPanelsEl) return;
+        const all = readPersistentSceneEffects(global.settings, { includeDisabled: true });
+        const configuredSet = new Set(all.map(e => e.type));
+
+        for (const [type, panel] of persistentParamsPanels) {
+            if (!configuredSet.has(type)) {
+                panel.destroy();
+                persistentParamsPanels.delete(type);
+                persistentPanelSpecSigs.delete(type);
+            }
+        }
+
+        if (all.length === 0) {
+            persistentEffectParamsPanelsEl.replaceChildren();
+            persistentEffectParamsPanelsEl.classList.add('hidden');
             return;
         }
-        const values = effectValues ?? readPersistentEffectParams();
-        const specs = getPersistentParamSpecs(effectType, values);
-        const specsSig = specs.map((s) => s.key).join(',');
-        if (persistentParamsPanelType !== effectType || persistentParamsSpecsSig !== specsSig) {
-            persistentParamsPanel?.destroy();
-            persistentParamsPanel = mountEffectParamsPanel({
-                container: persistentEffectParamsPanelEl,
-                specs,
-                onPatch: patchPersistentEffectParams
-            });
-            persistentParamsPanelType = effectType;
-            persistentParamsSpecsSig = specsSig;
+
+        persistentEffectParamsPanelsEl.classList.remove('hidden');
+        for (const entry of all) {
+            const type = entry.type;
+            const params = readPersistentEffectParamsForType(type);
+            const specSig = persistentPanelSpecSignature(type, params);
+            let section = persistentEffectParamsPanelsEl.querySelector(
+                `[data-persistent-params-type="${type}"]`
+            ) as HTMLElement | null;
+            if (section && persistentPanelSpecSigs.get(type) !== specSig) {
+                persistentParamsPanels.get(type)?.destroy();
+                persistentParamsPanels.delete(type);
+                persistentPanelSpecSigs.delete(type);
+                section.remove();
+                section = null;
+            }
+            if (!section) {
+                section = document.createElement('div');
+                section.dataset.persistentParamsType = type;
+                section.style.marginBottom = '10px';
+                const title = document.createElement('div');
+                title.style.cssText =
+                    'font-size:12px;font-weight:600;margin-bottom:6px;opacity:0.9;display:flex;align-items:center;gap:8px';
+                const enableInput = document.createElement('input');
+                enableInput.type = 'checkbox';
+                enableInput.className = 'settingsCheckbox';
+                enableInput.dataset.persistentParamsEnable = type;
+                enableInput.checked = entry.enable;
+                const titleText = document.createElement('span');
+                titleText.textContent = type;
+                title.appendChild(enableInput);
+                title.appendChild(titleText);
+                const enableLabel = document.createElement('span');
+                enableLabel.style.cssText = 'font-size:11px;font-weight:400;opacity:0.75';
+                enableLabel.textContent = '启用';
+                title.appendChild(enableLabel);
+                section.appendChild(title);
+                const inner = document.createElement('div');
+                inner.className = 'effectParamsPanelInner';
+                section.appendChild(inner);
+                const panel = mountEffectParamsPanel({
+                    container: inner,
+                    specs: getPersistentParamSpecs(type, params),
+                    onPatch: (partial) => patchPersistentEffectParamsForType(type, partial)
+                });
+                persistentParamsPanels.set(type, panel);
+                persistentPanelSpecSigs.set(type, specSig);
+                panel.syncFromValues(params);
+                persistentEffectParamsPanelsEl.appendChild(section);
+            } else {
+                const enableInput = section.querySelector<HTMLInputElement>(
+                    `input[data-persistent-params-enable="${type}"]`
+                );
+                if (enableInput) {
+                    enableInput.checked = entry.enable;
+                }
+                const panel = persistentParamsPanels.get(type);
+                panel?.syncFromValues(params);
+            }
         }
-        persistentParamsPanel?.syncFromValues(values);
-        persistentParamsPanel?.setVisible(true);
+
+        for (const child of Array.from(persistentEffectParamsPanelsEl.children)) {
+            const t = (child as HTMLElement).dataset.persistentParamsType;
+            if (t && !configuredSet.has(t)) {
+                persistentParamsPanels.get(t)?.destroy();
+                persistentParamsPanels.delete(t);
+                persistentPanelSpecSigs.delete(t);
+                child.remove();
+            }
+        }
     };
 
     const syncEffectParamsPanels = () => {
         const revealTrackType = (readRevealParams(global.settings)?.type ?? 'none') as string;
         ensureRevealParamsPanel(revealTrackType);
-        ensurePersistentParamsPanel(getPersistentSelection(), getPersistentEnabled());
+        syncPersistentParamsPanels();
+    };
+
+    const syncRevealEnableCheckbox = () => {
+        if (!revealEnable) return;
+        const revealTrackType = (readRevealParams(global.settings)?.type ?? 'none') as string;
+        const show = revealTrackType !== 'none' && isRevealType(revealTrackType);
+        if (revealEnableRow) {
+            revealEnableRow.classList.toggle('hidden', !show);
+        }
+        if (show) {
+            const rp = readRevealParams(global.settings);
+            revealEnable.checked = rp?.enable !== false;
+        }
+    };
+
+    const syncPersistentTypeCheckboxes = () => {
+        if (!persistentMultiselect) return;
+        const all = readPersistentSceneEffects(global.settings, { includeDisabled: true });
+        const activeSet = new Set(all.filter(e => e.enable).map(e => e.type));
+        const configuredSet = new Set(all.map(e => e.type));
+        persistentMultiselect.querySelectorAll<HTMLInputElement>('input[data-persistent-type]').forEach((input) => {
+            const t = input.dataset.persistentType ?? '';
+            input.checked = activeSet.has(t);
+            input.indeterminate = configuredSet.has(t) && !activeSet.has(t);
+        });
+    };
+
+    const onRevealEnableChange = (event: Event) => {
+        const target = event.target as HTMLInputElement;
+        routeEffectsCommand('EFFECT_PARAMS_PATCH', {
+            effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
+            params: revealProtocolParams({ enable: target.checked })
+        });
+        pushEditHistorySafe();
     };
 
     const onRevealTypeChange = (event: Event) => {
         const target = (event.target as HTMLSelectElement);
         const type = target.value as RevealType;
-        routeEffectsCommand('EFFECT_PARAMS_PATCH', {
+        routeEffectsCommand('EFFECT_ADD', {
             effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
-            params: { type }
+            effectType: type
         });
         pushEditHistorySafe();
     };
 
-    const onPersistentTypeChange = (event: Event) => {
-        const target = (event.target as HTMLSelectElement);
-        const type = target.value;
-        routeEffectsCommand('EFFECT_PARAMS_PATCH', {
-            effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
-            params: {
-                type: type === 'none' ? 'none' : type,
-                enabled: type !== 'none'
-            }
-        });
+    const onPersistentTypeCheckboxChange = (event: Event) => {
+        const target = event.target as HTMLInputElement;
+        const type = target.dataset.persistentType ?? '';
+        if (!isPersistentType(type)) return;
+        if (target.checked) {
+            routeEffectsCommand('EFFECT_ADD', {
+                effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+                effectType: type
+            });
+        } else {
+            const configured = readPersistentSceneEffects(global.settings, { includeDisabled: true }).some(
+                e => e.type === type
+            );
+            if (!configured) return;
+            routeEffectsCommand('EFFECT_DELETE', {
+                effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+                effectType: type
+            });
+        }
         pushEditHistorySafe();
         updateRevealControls();
     };
 
-    const onPersistentEnabledChange = (event: Event) => {
-        const enabled = (event.target as HTMLInputElement).checked;
-        routeEffectsCommand('EFFECT_TOGGLE', {
-            effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
-            value: enabled
-        });
-        pushEditHistorySafe();
-        updateRevealControls();
+    const onPersistentParamsEnableChange = (event: Event) => {
+        const target = event.target as HTMLInputElement;
+        const type = target.dataset.persistentParamsEnable ?? '';
+        if (!isPersistentType(type)) return;
+        patchPersistentEnableForType(type, target.checked);
     };
 
     const onTotalDurationChange = (event: Event) => {
@@ -356,7 +452,7 @@ export function initRevealUI(global: Global): () => void {
         if (!isNaN(totalDurationVal) && totalDurationVal > 0) {
             routeEffectsCommand('EFFECT_PARAMS_PATCH', {
                 effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
-                params: { totalDuration: totalDurationVal }
+                params: revealProtocolParams({ totalDuration: totalDurationVal })
             });
             if (effectTimeline) {
                 effectTimeline.max = (totalDurationVal * 10).toString();
@@ -436,22 +532,19 @@ export function initRevealUI(global: Global): () => void {
             if (!isRevealType(revealTrackType) && revealType.value !== 'none') {
                 revealType.value = 'none';
             }
-            if (persistentType) {
-                const pType = getPersistentSelection();
-                if (persistentType.value !== pType) {
-                    persistentType.value = pType;
-                }
-            }
-            if (persistentEnabled) {
-                persistentEnabled.checked = getPersistentEnabled();
-                // 一次性 reveal 正在播放时禁用 toggle。不得用 persistent 轨 `status===playing` 豁免：
-                // reveal 重启会拆掉 persistent 脚本，但 state 里 persistent 仍常为 playing，会误判成「可点 toggle」。
+            syncRevealEnableCheckbox();
+            syncPersistentTypeCheckboxes();
+            if (persistentMultiselect) {
                 const oneShotRevealPlaying =
                     getRevealStatus(global.state) === 'playing' &&
                     revealTrackType !== 'none' &&
                     !isPersistentVfx(revealTrackType);
-                persistentEnabled.disabled = oneShotRevealPlaying;
-                persistentEnabled.title = oneShotRevealPlaying
+                persistentMultiselect.querySelectorAll<HTMLInputElement>('input[data-persistent-type]').forEach(
+                    (input) => {
+                        input.disabled = oneShotRevealPlaying;
+                    }
+                );
+                persistentMultiselect.title = oneShotRevealPlaying
                     ? 'reveal 播放中不可切换，待 revealComplete 后可操作'
                     : '';
             }
@@ -500,16 +593,26 @@ export function initRevealUI(global: Global): () => void {
         if (revealType && newConfig.type && isRevealType(newConfig.type)) {
             revealType.value = newConfig.type;
         }
+        if (revealEnable && typeof newConfig?.enable === 'boolean') {
+            revealEnable.checked = newConfig.enable;
+        }
         updateRevealControls();
         if (newConfig?.effectParams && revealParamsPanel) {
             revealParamsPanel.syncFromValues(readRevealEffectParams());
         }
     };
 
+    const syncPersistentEffectsUiFromSettings = () => {
+        syncPersistentTypeCheckboxes();
+        syncPersistentParamsPanels();
+    };
+
+    const onPersistentSceneEffectsChanged = () => {
+        syncPersistentEffectsUiFromSettings();
+    };
+
     const onPersistentRevealConfigChanged = () => {
-        if (persistentParamsPanel) {
-            persistentParamsPanel.syncFromValues(readPersistentEffectParams());
-        }
+        syncPersistentEffectsUiFromSettings();
     };
 
     if (restartAnimTrackCheck && restartAnimTrackOption) {
@@ -517,8 +620,9 @@ export function initRevealUI(global: Global): () => void {
         restartAnimTrackCheck.addEventListener('click', toggleRestartAnimTrack);
     }
     revealType?.addEventListener('change', onRevealTypeChange);
-    persistentType?.addEventListener('change', onPersistentTypeChange);
-    persistentEnabled?.addEventListener('change', onPersistentEnabledChange);
+    revealEnable?.addEventListener('change', onRevealEnableChange);
+    persistentMultiselect?.addEventListener('change', onPersistentTypeCheckboxChange);
+    persistentEffectParamsPanelsEl?.addEventListener('change', onPersistentParamsEnableChange);
     totalDuration?.addEventListener('change', onTotalDurationChange);
     revealRestart?.addEventListener('click', onRevealRestartClick);
     effectTimeline?.addEventListener('pointerdown', onEffectTimelinePointerDown);
@@ -530,11 +634,12 @@ export function initRevealUI(global: Global): () => void {
     events.on('hasRevealEffect:changed', onHasRevealEffectChanged);
     events.on('revealType:changed', onRevealTypeChanged);
     events.on('revealConfigChanged', onRevealConfigChangedForControls);
+    events.on('persistentSceneEffectsChanged', onPersistentSceneEffectsChanged);
     events.on('persistentRevealConfigChanged', onPersistentRevealConfigChanged);
     events.on('revealComplete', scheduleRevealControlsRefresh);
     events.on('revealRestart', scheduleRevealControlsRefresh);
 
-    for (const panelEl of [revealEffectParamsPanelEl, persistentEffectParamsPanelEl]) {
+    for (const panelEl of [revealEffectParamsPanelEl, persistentEffectParamsPanelsEl]) {
         panelEl?.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
     }
 
@@ -546,8 +651,9 @@ export function initRevealUI(global: Global): () => void {
             restartAnimTrackCheck.removeEventListener('click', toggleRestartAnimTrack);
         }
         revealType?.removeEventListener('change', onRevealTypeChange);
-        persistentType?.removeEventListener('change', onPersistentTypeChange);
-        persistentEnabled?.removeEventListener('change', onPersistentEnabledChange);
+        revealEnable?.removeEventListener('change', onRevealEnableChange);
+        persistentMultiselect?.removeEventListener('change', onPersistentTypeCheckboxChange);
+        persistentEffectParamsPanelsEl?.removeEventListener('change', onPersistentParamsEnableChange);
         totalDuration?.removeEventListener('change', onTotalDurationChange);
         revealRestart?.removeEventListener('click', onRevealRestartClick);
         effectTimeline?.removeEventListener('pointerdown', onEffectTimelinePointerDown);
@@ -559,12 +665,16 @@ export function initRevealUI(global: Global): () => void {
         events.off('hasRevealEffect:changed', onHasRevealEffectChanged);
         events.off('revealType:changed', onRevealTypeChanged);
         events.off('revealConfigChanged', onRevealConfigChangedForControls);
+        events.off('persistentSceneEffectsChanged', onPersistentSceneEffectsChanged);
         events.off('persistentRevealConfigChanged', onPersistentRevealConfigChanged);
         events.off('revealComplete', scheduleRevealControlsRefresh);
         events.off('revealRestart', scheduleRevealControlsRefresh);
 
         revealParamsPanel?.destroy();
-        persistentParamsPanel?.destroy();
+        for (const panel of persistentParamsPanels.values()) {
+            panel.destroy();
+        }
+        persistentParamsPanels.clear();
 
         if (effectsDebugTimer !== undefined) clearInterval(effectsDebugTimer);
         effectsDebugEl?.remove();

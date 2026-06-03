@@ -7,7 +7,8 @@ import {
     isOneShotRevealPlayingExclusiveGsplat,
     perlinWaveUsesRegistryComposerPath
 } from '../effects-pipeline-policy';
-import { shaderGLSL, shaderWGSL } from './gsplat-overall-wave-shaders';
+import { overallWaveShaderGlsl, overallWaveShaderWgsl } from './gsplat-overall-wave-shaders';
+import { GSPLAT_WAVE_COMMON_GLSL, GSPLAT_WAVE_COMMON_WGSL } from './gsplat-wave-shader-common';
 
 /** 初始属性默认值 */
 export const OVERALL_WAVE_DEFAULTS = {
@@ -56,11 +57,11 @@ class GsplatPersistentOverallWave extends GsplatShaderEffect {
     troughTint = new Color(...OVERALL_WAVE_DEFAULTS.troughTint);
 
     getShaderGLSL() {
-        return shaderGLSL;
+        return `${GSPLAT_WAVE_COMMON_GLSL}${overallWaveShaderGlsl}`;
     }
 
     getShaderWGSL() {
-        return shaderWGSL;
+        return `${GSPLAT_WAVE_COMMON_WGSL}${overallWaveShaderWgsl}`;
     }
 
     private usesComposerPath(): boolean {
@@ -142,7 +143,7 @@ class GsplatPersistentOverallWave extends GsplatShaderEffect {
             });
             return;
         }
-        const shaderBlocks = extractGlslWgslModifyBlocks(shaderGLSL, shaderWGSL);
+        const shaderBlocks = extractGlslWgslModifyBlocks(overallWaveShaderGlsl, overallWaveShaderWgsl);
         rt.applySceneGsplatContribution(
             {
                 id: OVERALL_WAVE_COMPOSER_ID,

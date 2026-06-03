@@ -70,6 +70,8 @@ export const DEFAULT_REVEAL_EFFECT = {
 /** `settings.effects` 缺省骨架（reveal / persistent / asset）；持久化 enabled 仅 persistent 使用 */
 export const DEFAULT_EFFECTS: EffectsSettings = {
     reveal: { activeEffectId: SCENE_GSPLAT_REVEAL_EFFECT_ID, paramsById: {} },
-    persistent: { activeEffectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID, enabled: false, paramsById: {} },
+    persistent: {
+        scene: { activeEffectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID, paramsById: {} }
+    },
     asset: { defaultParamsById: {} }
 };

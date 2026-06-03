@@ -17,8 +17,8 @@ export type EffectRuntimeStatus = RevealEffectRuntimeStatus | PersistentEffectRu
 
 /** 协议与 `settings.effects.reveal` 共用的场景级 GSplat reveal 包 id */
 export const SCENE_GSPLAT_REVEAL_EFFECT_ID = 'scene.gsplat-reveal' as const;
-/** 协议与 `settings.effects.persistent` 共用的场景级 GSplat persistent 包 id */
-export const SCENE_GSPLAT_PERSISTENT_EFFECT_ID = 'scene.gsplat-persistent' as const;
+/** 协议与 `settings.effects.persistent.scene` 共用的场景级 GSplat persistent 包 id */
+export const SCENE_GSPLAT_PERSISTENT_EFFECT_ID = 'scene.gsplat-persistent-scene' as const;
 
 /** 一次性 reveal 类型清单（不含 persistent；不含 none）；`src/types.ts` 中 `RevealEffectType` 与此同源 re-export */
 export const REVEAL_EFFECT_TYPE_VALUES = [
@@ -60,3 +60,9 @@ export const PERSISTENT_EFFECT_TYPE_VALUES = [
  * `reveal-policy` 的 `PERSISTENT_VFX`、`effects-runtime` 内置 persistent 轨、`mountPersistentGsplatByEffectType` 均与此同一 `Set` 引用对齐。
  */
 export const PERSISTENT_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSISTENT_EFFECT_TYPE_VALUES);
+
+/**
+ * 场景级 gsplat 合成槽上限：夜景（1）+ 全部可持续 persistent 可多选 layered 并存。
+ * 供 {@link GsplatEffectComposer} / {@link EffectsRuntime} 默认 `maxSceneContributors`。
+ */
+export const GSPLAT_MAX_SCENE_CONTRIBUTORS = 1 + PERSISTENT_EFFECT_TYPE_VALUES.length;

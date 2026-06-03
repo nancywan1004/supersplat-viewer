@@ -6,10 +6,12 @@ export const DEFAULT_VFX_TOTAL_DURATION = 10;
  */
 type LegacyRevealEffect = {
     type?: 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch' | 'none',
+    /** 为 `false` 时保留 `type` 与专参于 settings，但不在场景中挂载/播放 */
+    enable?: boolean,
     autoStart?: boolean,
     totalDuration?: number, // 总时长（秒）：**仅一次性 reveal 轨**（Timed VFX 等）；**persistent 轨 `paramsById` 不持久化此字段**。默认见 DEFAULT_VFX_TOTAL_DURATION
     /**
-     * 按当前 `type` 生效的脚本级参数（扁平 key→值）；协议 `EFFECT_PARAMS_PATCH.params.effectParams`。
+     * 按当前 `type` 生效的脚本级参数（扁平 key→值）；协议见 `EFFECT_PARAMS_PATCH.params.[type]`。
      * **reveal 轨**：白名单见 `reveal-effect-params.ts`；**persistent 轨**（如 `perlin-wave`）：白名单见 `persistent-effect-params.ts`。
      */
     effectParams?: Record<string, unknown>
@@ -275,15 +277,14 @@ type SceneAsset = {
     }
 }
 
-/** 三轨特效持久化：reveal / persistent / asset；`enabled` 仅允许出现在 persistent */
+/** 三轨特效持久化：reveal / persistent / asset；`enable` 出现在 reveal / persistent 类型块 */
 type EffectsRevealTrack = {
     activeEffectId: string;
     paramsById: Record<string, Record<string, unknown>>;
 };
 
-type EffectsPersistentTrack = {
+type EffectsPersistentSceneTrack = {
     activeEffectId: string;
-    enabled: boolean;
     paramsById: Record<string, Record<string, unknown>>;
 };
 
@@ -293,8 +294,45 @@ type EffectsAssetTrack = {
 
 type EffectsSettings = {
     reveal: EffectsRevealTrack;
-    persistent: EffectsPersistentTrack;
+    persistent: {
+        scene: EffectsPersistentSceneTrack;
+    };
     asset: EffectsAssetTrack;
 };
 
-export type { LegacyRevealEffect, LodSettings, LodPreset, LodPlatform, TransformFrame, PointLightConfig, DirectionalLightConfig, SpotLightConfig, TorchLightSettings, LightingSettings, SceneAsset, SceneMediaHotspotVideoSettings, SceneMediaHotspotAudioSettings, SceneMediaHotspotSettings, SceneMediaHotspotPatch, SceneCollisionSettings, SceneCollisionSettingsPatch, SceneAssetCollisionAxisScale, SceneAssetCollisionScale, LocalLightRegion, WorldSpaceBloomRegionJSON, EffectsSettings, EffectsRevealTrack, EffectsPersistentTrack, EffectsAssetTrack };
+/** scene persistent 单类型配置（`paramsById[id]` 内 `{ [type]: { enable, …专参 } }` 的一项） */
+type PersistentSceneEffectEntry = {
+    type: string;
+    enable: boolean;
+    autoStart: boolean;
+    effectParams?: Record<string, unknown>;
+};
+
+export type {
+    LegacyRevealEffect,
+    LodSettings,
+    LodPreset,
+    LodPlatform,
+    TransformFrame,
+    PointLightConfig,
+    DirectionalLightConfig,
+    SpotLightConfig,
+    TorchLightSettings,
+    LightingSettings,
+    SceneAsset,
+    SceneMediaHotspotSettings,
+    SceneMediaHotspotPatch,
+    LocalLightRegion,
+    WorldSpaceBloomRegionJSON,
+    EffectsSettings,
+    EffectsRevealTrack,
+    EffectsPersistentSceneTrack,
+    EffectsAssetTrack,
+    PersistentSceneEffectEntry,
+    SceneMediaHotspotVideoSettings,
+    SceneMediaHotspotAudioSettings, 
+    SceneCollisionSettings, 
+    SceneCollisionSettingsPatch,
+    SceneAssetCollisionAxisScale, 
+    SceneAssetCollisionScale,
+};
