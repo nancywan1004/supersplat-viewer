@@ -829,13 +829,13 @@ class Viewer {
             });
             global.events.on(
                 'persistentGsplatEffectEnableChanged',
-                (payload: { effectType?: string; enable?: boolean }) => {
+                (payload: { effectType?: string; enabled?: boolean }) => {
                     const effectType = payload?.effectType;
                     if (typeof effectType !== 'string') {
                         return;
                     }
                     global.app.once('frameend', () => {
-                        this.applyPersistentSceneEffectEnable(gsplatEntity, effectType, payload.enable === true);
+                        this.applyPersistentSceneEffectEnable(gsplatEntity, effectType, payload.enabled === true);
                     });
                 }
             );
@@ -1518,14 +1518,14 @@ z: ${cameraInfo.target.z.toFixed(6)}
     private applyPersistentSceneEffectEnable(
         gsplatEntity: Entity,
         effectType: string,
-        enable: boolean
+        enabled: boolean
     ): void {
         applyPersistentSceneEffectEnableChange({
             global: this.global,
             gsplatEntity,
             revealController: this.revealController,
             effectType,
-            enable
+            enabled
         });
     }
 }

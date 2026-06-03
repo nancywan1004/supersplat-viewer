@@ -7,7 +7,7 @@ export const DEFAULT_VFX_TOTAL_DURATION = 10;
 type LegacyRevealEffect = {
     type?: 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'falling-petals' | 'falling-rain' | 'falling-snow' | 'nostalgic-comic' | 'yiyun-dianran' | 'palette-pixel' | 'sparkle-twinkle' | 'overall-wave' | 'butterfly-particle' | 'integrate' | 'growth-wave' | 'sketch' | 'none',
     /** 为 `false` 时保留 `type` 与专参于 settings，但不在场景中挂载/播放 */
-    enable?: boolean,
+    enabled?: boolean,
     autoStart?: boolean,
     totalDuration?: number, // 总时长（秒）：**仅一次性 reveal 轨**（Timed VFX 等）；**persistent 轨 `paramsById` 不持久化此字段**。默认见 DEFAULT_VFX_TOTAL_DURATION
     /**
@@ -277,7 +277,7 @@ type SceneAsset = {
     }
 }
 
-/** 三轨特效持久化：reveal / persistent / asset；`enable` 出现在 reveal / persistent 类型块 */
+/** 三轨特效持久化：reveal / persistent / asset；`enabled` 出现在 reveal / persistent 类型块 */
 type EffectsRevealTrack = {
     activeEffectId: string;
     paramsById: Record<string, Record<string, unknown>>;
@@ -291,7 +291,7 @@ type EffectsPersistentSubTrack = {
 /** 单物体实例配置（与 scene 包内字段同形：`type` / `autoStart` / `effectParams`） */
 type EffectsAssetInstance = {
     type: string;
-    enable?: boolean;
+    enabled?: boolean;
     autoStart?: boolean;
     effectParams?: Record<string, unknown>;
 };
@@ -311,10 +311,10 @@ type EffectsSettings = {
     asset: EffectsAssetTrack;
 };
 
-/** persistent 单类型配置（`paramsById[id]` 内 `{ [type]: { enable, …专参 } }` 的一项） */
+/** persistent 单类型配置（`paramsById[id]` 内 `{ [type]: { enabled, …专参 } }` 的一项） */
 type PersistentSceneEffectEntry = {
     type: string;
-    enable: boolean;
+    enabled: boolean;
     autoStart: boolean;
     effectParams?: Record<string, unknown>;
 };

@@ -248,7 +248,7 @@ export function initRevealUI(global: Global): () => void {
     };
 
     const persistentProtocolParams = (
-        patchByType: Record<string, { enable?: boolean; autoStart?: boolean; effectParams?: Record<string, unknown> }>
+        patchByType: Record<string, { enabled?: boolean; autoStart?: boolean; effectParams?: Record<string, unknown> }>
     ): Record<string, unknown> => buildPersistentProtocolParams(patchByType);
 
     const readRevealEffectParams = (): Record<string, unknown> => {
@@ -305,11 +305,11 @@ export function initRevealUI(global: Global): () => void {
         revealParamsPanel?.setVisible(true);
     };
 
-    const patchPersistentEnableForType = (type: string, enable: boolean) => {
+    const patchPersistentEnableForType = (type: string, enabled: boolean) => {
         if (!isPersistentType(type)) return;
         routeEffectsCommand('EFFECT_PARAMS_PATCH', {
             effectId: persistentEffectIdForType(type),
-            params: persistentProtocolParams({ [type]: { enable } })
+            params: persistentProtocolParams({ [type]: { enabled } })
         });
         pushEditHistorySafe();
         updateRevealControls();
@@ -362,7 +362,7 @@ export function initRevealUI(global: Global): () => void {
                 enableInput.type = 'checkbox';
                 enableInput.className = 'settingsCheckbox';
                 enableInput.dataset.persistentParamsEnable = type;
-                enableInput.checked = entry.enable;
+                enableInput.checked = entry.enabled;
                 const titleText = document.createElement('span');
                 titleText.textContent = type;
                 title.appendChild(enableInput);
@@ -389,7 +389,7 @@ export function initRevealUI(global: Global): () => void {
                     `input[data-persistent-params-enable="${type}"]`
                 );
                 if (enableInput) {
-                    enableInput.checked = entry.enable;
+                    enableInput.checked = entry.enabled;
                 }
                 const panel = persistentParamsPanels.get(type);
                 panel?.syncFromValues(params);
@@ -422,7 +422,7 @@ export function initRevealUI(global: Global): () => void {
         }
         if (show) {
             const rp = readRevealParams(global.settings);
-            revealEnable.checked = rp?.enable !== false;
+            revealEnable.checked = rp?.enabled !== false;
         }
     };
 
@@ -430,12 +430,11 @@ export function initRevealUI(global: Global): () => void {
         const all = (['scene', 'camera', 'stylization'] as PersistentTrackName[]).flatMap(track =>
             readPersistentTrackEffects(global.settings, track, { includeDisabled: true })
         );
-        const activeSet = new Set(all.filter(e => e.enable).map(e => e.type));
         const configuredSet = new Set(all.map(e => e.type));
         container.querySelectorAll<HTMLInputElement>('input[data-persistent-type]').forEach((input) => {
             const t = input.dataset.persistentType ?? '';
-            input.checked = activeSet.has(t);
-            input.indeterminate = configuredSet.has(t) && !activeSet.has(t);
+            input.checked = configuredSet.has(t);
+            input.indeterminate = false;
         });
     };
 
@@ -443,7 +442,7 @@ export function initRevealUI(global: Global): () => void {
         const target = event.target as HTMLInputElement;
         routeEffectsCommand('EFFECT_PARAMS_PATCH', {
             effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
-            params: revealProtocolParams({ enable: target.checked })
+            params: revealProtocolParams({ enabled: target.checked })
         });
         pushEditHistorySafe();
     };
@@ -468,12 +467,6 @@ export function initRevealUI(global: Global): () => void {
                 effectType: type
             });
         } else {
-            const configured = readPersistentTrackEffects(
-                global.settings,
-                persistentTrackNameForType(type),
-                { includeDisabled: true }
-            ).some(e => e.type === type);
-            if (!configured) return;
             routeEffectsCommand('EFFECT_DELETE', {
                 effectId: persistentEffectIdForType(type),
                 effectType: type
@@ -637,8 +630,8 @@ export function initRevealUI(global: Global): () => void {
         if (revealType && newConfig.type && isRevealType(newConfig.type)) {
             revealType.value = newConfig.type;
         }
-        if (revealEnable && typeof newConfig?.enable === 'boolean') {
-            revealEnable.checked = newConfig.enable;
+        if (revealEnable && typeof newConfig?.enabled === 'boolean') {
+            revealEnable.checked = newConfig.enabled;
         }
         updateRevealControls();
         if (newConfig?.effectParams && revealParamsPanel) {

@@ -804,12 +804,12 @@ export function initAssetEffectsUI(global: Global): () => void {
             module: 'effects',
             effectId: ASSET_GSPLAT_EFFECT_ID,
             targetId,
-            params: { [type]: { enable: false } }
+            params: { [type]: { enabled: false } }
         };
         const stopPayload = {
             effectId: ASSET_GSPLAT_EFFECT_ID,
             targetId,
-            params: { type, enable: false }
+            params: { type, enabled: false }
         };
         const envelope = {
             effectId: ASSET_GSPLAT_EFFECT_ID,

@@ -81,16 +81,16 @@ function notifyPersistentGsplatRuntimeType(
 }
 
 /**
- * 仅切换某一 persistent 类型的场景挂载（`EFFECT_PARAMS_PATCH` 仅含 `enable` 时使用，避免全量 remount）。
+ * 仅切换某一 persistent 类型的场景挂载（`EFFECT_PARAMS_PATCH` 仅含 `enabled` 时使用，避免全量 remount）。
  */
 export function applyPersistentSceneEffectEnableChange(input: {
     global: Global;
     gsplatEntity: Entity;
     revealController: RevealController | null | undefined;
     effectType: string;
-    enable: boolean;
+    enabled: boolean;
 }): void {
-    const { global, gsplatEntity, revealController: rc, effectType, enable } = input;
+    const { global, gsplatEntity, revealController: rc, effectType, enabled } = input;
     const settings = global.settings as ExperienceSettings;
     const entry = getPersistentTrackEffect(settings, persistentTrackNameForType(effectType), effectType);
     if (!entry) {
@@ -99,7 +99,7 @@ export function applyPersistentSceneEffectEnableChange(input: {
 
     (global.app as any).effectsRuntime?.syncPersistentGsplatRegistryFromSettings?.();
 
-    if (!enable) {
+    if (!enabled) {
         destroyPersistentGsplatScriptOnEntity(gsplatEntity, effectType);
         const stillEnabled = readActivePersistentEffects(settings);
         if (stillEnabled.length === 0) {

@@ -1,9 +1,9 @@
 /**
  * 场景 GSplat reveal / persistent 协议映射：`EFFECT_PARAMS_PATCH` / `EFFECT_TOGGLE` / `EFFECT_ADD` / `EFFECT_DELETE`。
- * reveal：**切换 type 仅 `EFFECT_ADD`**；`EFFECT_PARAMS_PATCH` 的 `params` 嵌套键须为当前 type，只改参数 / `enable` / `autoStart` / `totalDuration`；
- * persistent scene（postMessage）：`params` 为 `{ [type]: { enable?, autoStart?, …专参 } }`（与 reveal / 存盘一致）；
+ * reveal：**切换 type 仅 `EFFECT_ADD`**；`EFFECT_PARAMS_PATCH` 的 `params` 嵌套键须为当前 type，只改参数 / `enabled` / `autoStart` / `totalDuration`；
+ * persistent scene（postMessage）：`params` 为 `{ [type]: { enabled?, autoStart?, …专参 } }`（与 reveal / 存盘一致）；
  *   每条消息仅一个 type 键。由 `effectId` 区分 reveal / persistent 轨。
- * persistent：**增删类型** `EFFECT_ADD` / `EFFECT_DELETE`（`effectType`）；**改参 / enable** `EFFECT_PARAMS_PATCH` 或 `EFFECT_TOGGLE`。`module` 可选。
+ * persistent：**增删类型** `EFFECT_ADD` / `EFFECT_DELETE`（`effectType`）；**改参 / enabled** `EFFECT_PARAMS_PATCH` 或 `EFFECT_TOGGLE`。`module` 可选。
  */
 
 import type { ExperienceSettings } from '../../schemas/v2';
@@ -13,7 +13,6 @@ import {
     getRevealStatus,
     getPersistentTrackEffect,
     hasEnabledPersistentEffects,
-    clearPersistentRevealTrack,
     clearPersistentTrackEffects,
     clearRevealScenePack,
     coercePersistentProtocolParamsInbound,
@@ -104,8 +103,8 @@ export function paramsPatchHasPersistentKeys(params: Record<string, unknown>): b
 }
 
 /**
- * EFFECT_PARAMS_PATCH（scene reveal）：仅改当前类型的参数 / `enable` / `autoStart` / `totalDuration`（不可改 type）。
- * 写 `settings.effects.reveal` 后在 `revealConfigChanged` 之后触发 `revealRestart`（`enable: false` 除外）。
+ * EFFECT_PARAMS_PATCH（scene reveal）：仅改当前类型的参数 / `enabled` / `autoStart` / `totalDuration`（不可改 type）。
+ * 写 `settings.effects.reveal` 后在 `revealConfigChanged` 之后触发 `revealRestart`（`enabled: false` 除外）。
  * @param global
  * @param params
  */
@@ -121,7 +120,7 @@ export function applyGsplatRevealParamsPatch(global: Global, params: Record<stri
     syncEffectsRuntimeStateFromSettings(global.state, settings);
     syncRevealSceneActiveState(global, merged);
     global.events.fire('revealConfigChanged', merged);
-    const disabling = typeof patch.enable === 'boolean' && patch.enable === false;
+    const disabling = typeof patch.enabled === 'boolean' && patch.enabled === false;
     if (!disabling) {
         requestRevealSceneReplayIfActive(global, merged);
     }
@@ -135,7 +134,7 @@ function requestRevealSceneReplayIfActive(global: Global, merged: LegacyRevealEf
     global.events.fire('revealRestart', false);
 }
 
-/** 按 settings 中 reveal 的 `enable` / `type` 同步 `hasRevealEffect`；未启用时停播（具体重播由 `revealConfigChanged` / `EFFECT_ADD` 触发）。 */
+/** 按 settings 中 reveal 的 `enabled` / `type` 同步 `hasRevealEffect`；未启用时停播（具体重播由 `revealConfigChanged` / `EFFECT_ADD` 触发）。 */
 function syncRevealSceneActiveState(global: Global, merged: LegacyRevealEffect): void {
     const active = isRevealEffectActiveInScene(merged);
     const prev = global.state.hasRevealEffect;
@@ -150,25 +149,22 @@ function syncRevealSceneActiveState(global: Global, merged: LegacyRevealEffect):
 
 /**
  * `EFFECT_ADD`（scene.gsplat-reveal）：整包替换为新 `effectType`（丢弃旧类型及参数）；
- * `none` 写入 `{ none: {} }`；新特效默认 `enable: true` 并触发场景应用。
+ * `none` 写入 `{ none: {} }`；新特效默认 `enabled: true` 并触发场景应用。
  */
 export function applyGsplatRevealEffectAdd(global: Global, effectType: string): void {
     const t = normalizeRevealEffectType(effectType);
     if (t === null) return;
 
     const settings = global.settings as ExperienceSettings;
-    const oldType = (readRevealParams(settings)?.type ?? 'none') as string;
-    if (typeof t === 'string' && isPersistentVfx(oldType as any) && !isPersistentVfx(t as any)) {
-        clearPersistentRevealTrack(settings);
-    }
-
-    const merged = replaceRevealSceneEffect(settings, t, { enable: t !== 'none' });
+    const merged = replaceRevealSceneEffect(settings, t, { enabled: t !== 'none' });
     syncEffectsRuntimeStateFromSettings(global.state, settings);
     syncRevealSceneActiveState(global, merged);
     global.events.fire('revealConfigChanged', merged);
     if (t !== 'none') {
         global.events.fire('revealType:changed', t);
         requestRevealSceneReplayIfActive(global, merged);
+    } else if (hasEnabledPersistentEffects(settings)) {
+        requestPersistentGsplatRemount(global);
     }
 }
 
@@ -180,7 +176,7 @@ export function applyGsplatRevealEffectDelete(global: Global): void {
     clearRevealScenePack(settings);
     const merged: LegacyRevealEffect = {
         type: 'none',
-        enable: false,
+        enabled: false,
         autoStart: true,
         totalDuration: DEFAULT_VFX_TOTAL_DURATION
     };
@@ -188,6 +184,9 @@ export function applyGsplatRevealEffectDelete(global: Global): void {
     syncRevealSceneActiveState(global, merged);
     global.events.fire('revealConfigChanged', merged);
     global.events.fire('revealType:changed', 'none');
+    if (hasEnabledPersistentEffects(settings)) {
+        requestPersistentGsplatRemount(global);
+    }
 }
 
 const PERSISTENT_TYPE_SET = new Set<string>(PERSISTENT_EFFECT_TYPE_VALUES as readonly string[]);
@@ -231,14 +230,14 @@ export function finalizePersistentGsplatTrackOff(global: Global): void {
  * 假定调用前已 `syncEffectsRuntimeStateFromSettings`：仅停播判定 + remount 事件。
  * @param global
  */
-/** 单类型 `enable` 变更：仅挂载/卸载该类型脚本（与全量 remount 区分）。 */
+/** 单类型 `enabled` 变更：仅挂载/卸载该类型脚本（与全量 remount 区分）。 */
 function requestPersistentSceneEffectEnableChange(
     global: Global,
     effectType: string,
-    enable: boolean
+    enabled: boolean
 ): void {
     const dispatch = () => {
-        global.events.fire('persistentGsplatEffectEnableChanged', { effectType, enable });
+        global.events.fire('persistentGsplatEffectEnableChanged', { effectType, enabled });
     };
     const settings = global.settings as ExperienceSettings;
     const currentRevealType = readRevealParams(settings)?.type ?? 'none';
@@ -333,7 +332,7 @@ export function applyGsplatPersistentParamsPatch(
         const t = patchTypes[0];
         const entry = getPersistentTrackEffect(settings, trackName, t);
         // 已启用：热更新脚本参数；未启用：仅写入 settings，不 remount/teardown
-        if (entry?.enable) {
+        if (entry?.enabled) {
             global.events.fire('persistentRevealConfigChanged', {
                 type: t,
                 effectParams: singlePatch?.effectParams ?? entry.effectParams
@@ -353,12 +352,12 @@ export function applyGsplatPersistentParamsPatch(
         return;
     }
 
-    const onlyEnable = singlePatchKeys.length === 1 && singlePatchKeys[0] === 'enable';
-    if (onlyEnable) {
+    const onlyEnabled = singlePatchKeys.length === 1 && singlePatchKeys[0] === 'enabled';
+    if (onlyEnabled) {
         const t = patchTypes[0];
-        const enableVal = patches[t]?.enable === true;
+        const enabledVal = patches[t]?.enabled === true;
         notifyPersistentSceneEffectsUiSync(global);
-        requestPersistentSceneEffectEnableChange(global, t, enableVal);
+        requestPersistentSceneEffectEnableChange(global, t, enabledVal);
         return;
     }
 
@@ -368,8 +367,9 @@ export function applyGsplatPersistentParamsPatch(
 
 /**
  * `EFFECT_ADD`（scene.gsplat-persistent-scene）：
- * - 已存在同 `effectType` 块（含 `enable: false`）→ 不处理；
- * - 新类型 → 追加块（`enable: true`），与其它已选类型并存写入 settings；
+ * - 已存在同 `effectType` 且 `enabled: true` → 仍 remount（settings 已一致时兜底挂脚本）；
+ * - 已存在且 `enabled: false` → 置 `enabled: true` 并 remount；
+ * - 新类型 → 追加块（`enabled: true`），与其它已选类型并存写入 settings；
  * - `effectType === 'none'` → 清空 persistent 包并停播。
  */
 export function applyGsplatPersistentEffectAdd(global: Global, effectType: string): void {
@@ -383,6 +383,7 @@ export function applyGsplatPersistentEffectAddForId(global: Global, effectId: st
     const settings = global.settings as ExperienceSettings;
     const trackName = persistentTrackNameForEffectId(effectId) ?? persistentTrackNameForType(t === 'none' ? 'perlin-wave' : t);
     const hadEnabled = hasEnabledPersistentEffects(settings);
+    const replaceTrack = trackName !== 'scene';
 
     if (t === 'none') {
         clearPersistentTrackEffects(settings, trackName);
@@ -398,11 +399,18 @@ export function applyGsplatPersistentEffectAddForId(global: Global, effectId: st
         return;
     }
 
-    if (getPersistentTrackEffect(settings, trackName, t)) {
+    const existing = getPersistentTrackEffect(settings, trackName, t);
+    if (existing) {
+        if (!existing.enabled) {
+            patchPersistentTrackEffect(settings, trackName, t, { enabled: true }, { replaceTrack });
+            syncEffectsRuntimeStateFromSettings(global.state, settings);
+        }
+        notifyPersistentSceneEffectsUiSync(global);
+        requestPersistentGsplatRemount(global);
         return;
     }
 
-    patchPersistentTrackEffect(settings, trackName, t, { enable: true }, { replaceTrack: trackName !== 'scene' });
+    patchPersistentTrackEffect(settings, trackName, t, { enabled: true }, { replaceTrack });
     syncEffectsRuntimeStateFromSettings(global.state, settings);
     notifyPersistentSceneEffectsUiSync(global);
 

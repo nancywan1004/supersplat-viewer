@@ -8,7 +8,7 @@ import {
     perlinWaveUsesRegistryComposerPath
 } from '../effects-pipeline-policy';
 import { perlinWaveShaderGlsl, perlinWaveShaderWgsl } from './gsplat-perlin-wave-shaders';
-import { GSPLAT_WAVE_COMMON_GLSL, GSPLAT_WAVE_COMMON_WGSL } from './gsplat-wave-shader-common';
+import { PERLIN_WAVE_UNIFORM_NAMES as PU } from './gsplat-perlin-wave-shaders';
 
 /**
  * Perlin Wave reveal effect for gaussian splats.
@@ -29,7 +29,7 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
     static scriptName = 'gsplatRevealPerlinWave';
 
     /** 仅当 shader 源码变更时需递增以触发 composer 重编译 */
-    private _perlinComposerRev = 0;
+    private _perlinComposerRev = 2;
 
     /** 一次性开场 reveal 独占整段 `gsplatModifyVS` 时，已主动从合成器摘掉波纹 contribution */
     private _perlinComposerSuppressed = false;
@@ -86,11 +86,11 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
     scaleBlend = 0;
 
     getShaderGLSL() {
-        return `${GSPLAT_WAVE_COMMON_GLSL}${perlinWaveShaderGlsl}`;
+        return perlinWaveShaderGlsl;
     }
 
     getShaderWGSL() {
-        return `${GSPLAT_WAVE_COMMON_WGSL}${perlinWaveShaderWgsl}`;
+        return perlinWaveShaderWgsl;
     }
 
     private usesPerlinComposerPath(): boolean {
@@ -198,20 +198,20 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
 
     updateEffect(effectTime: number, dt: number) {
         // Update uniforms
-        this.setUniform('uTime', effectTime);
+        this.setUniform(PU.time, effectTime);
 
         this._centerArray[0] = this.center.x;
         this._centerArray[1] = this.center.y;
         this._centerArray[2] = this.center.z;
-        this.setUniform('uCenter', this._centerArray);
+        this.setUniform(PU.center, this._centerArray);
 
-        this.setUniform('uIntensity', this.intensity);
-        this.setUniform('uWaveAmplitude', this.waveAmplitude);
+        this.setUniform(PU.intensity, this.intensity);
+        this.setUniform(PU.waveAmplitude, this.waveAmplitude);
         const w = Number(this.wavelength) || 0;
         const effectiveFrequency = w > 0 ? 1.0 / w : this.waveFrequency;
-        this.setUniform('uWaveFrequency', effectiveFrequency);
-        this.setUniform('uWaveSpeed', this.waveSpeed);
-        this.setUniform('uScaleBlend', this.scaleBlend);
+        this.setUniform(PU.waveFrequency, effectiveFrequency);
+        this.setUniform(PU.waveSpeed, this.waveSpeed);
+        this.setUniform(PU.scaleBlend, this.scaleBlend);
 
         if (this.usesPerlinComposerPath() && this.materialsApplied.size > 0) {
             if (this.shouldSuppressPerlinComposerForOneShotReveal()) {

@@ -235,18 +235,18 @@ const dispatchEffects = (g: Global, cmdType: string, payload?: unknown) => {
 
 type NormalizedEffectParamsPatch = {
     params: Record<string, unknown>;
-    enable?: boolean;
+    enabled?: boolean;
     isNewShape: boolean;
 };
 
-const EFFECT_PARAMS_LEGACY_KEYS = new Set(['type', 'effectId', 'enable', 'autoStart', 'effectParams']);
+const EFFECT_PARAMS_LEGACY_KEYS = new Set(['type', 'effectId', 'enabled', 'autoStart', 'effectParams']);
 const MESSAGE_BRIDGE_STYLIZATION_EFFECT_TYPES = new Set(
     [...PERSISTENT_STYLIZATION_EFFECT_TYPES].filter(type => type !== 'perlin-wave')
 );
 
 /**
  * New host protocol:
- * params: { "<effect-type>": { enable?: boolean, ...effectParams } }
+ * params: { "<effect-type>": { enabled?: boolean, ...effectParams } }
  * Internal adapters still consume { type, enabled, effectParams }, so normalize at the bridge boundary.
  * @param effectId - Protocol effect package id.
  * @param params - Incoming `EFFECT_PARAMS_PATCH.params`.
@@ -292,14 +292,14 @@ function normalizeEffectParamsPatch(
     const raw = rawPatch as Record<string, unknown>;
     const effectParams: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(raw)) {
-        if (key !== 'enable') {
+        if (key !== 'enabled') {
             effectParams[key] = value;
         }
     }
 
     const normalized: Record<string, unknown> = { type: effectType };
-    if (typeof raw.enable === 'boolean') {
-        normalized.enable = raw.enable;
+    if (typeof raw.enabled === 'boolean') {
+        normalized.enabled = raw.enabled;
     }
     if (Object.keys(effectParams).length > 0) {
         normalized.effectParams = effectParams;
@@ -307,7 +307,7 @@ function normalizeEffectParamsPatch(
 
     return {
         params: normalized,
-        enable: typeof raw.enable === 'boolean' ? raw.enable : undefined,
+        enabled: typeof raw.enabled === 'boolean' ? raw.enabled : undefined,
         isNewShape: true
     };
 }
@@ -841,9 +841,9 @@ const initPostMessageBridge = (global: Global) => {
                         targetId,
                         params: pr
                     });
-                    if (normalized.isNewShape && normalized.enable === true) {
+                    if (normalized.isNewShape && normalized.enabled === true) {
                         dispatchEffects(global, 'EFFECT_START', env);
-                    } else if (normalized.isNewShape && normalized.enable === false) {
+                    } else if (normalized.isNewShape && normalized.enabled === false) {
                         dispatchEffects(global, 'EFFECT_PARAMS_PATCH', env);
                     } else {
                         dispatchEffects(global, 'EFFECT_PARAMS_PATCH', env);

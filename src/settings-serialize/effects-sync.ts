@@ -32,15 +32,15 @@ function cloneDefaultEffects(): NonNullable<ExperienceSettings['effects']> {
     return JSON.parse(JSON.stringify(DEFAULT_EFFECTS)) as NonNullable<ExperienceSettings['effects']>;
 }
 
-function readEffectEnableFromBlock(block: Record<string, unknown>): boolean {
-    return typeof block.enable === 'boolean' ? block.enable : true;
+function readEffectEnabledFromBlock(block: Record<string, unknown>): boolean {
+    return typeof block.enabled === 'boolean' ? block.enabled : true;
 }
 
-function writeEffectEnableToBlock(block: Record<string, unknown>, enable: boolean): void {
-    block.enable = enable;
+function writeEffectEnabledToBlock(block: Record<string, unknown>, enabled: boolean): void {
+    block.enabled = enabled;
 }
 
-const PERSISTENT_TYPE_BLOCK_META_KEYS = new Set(['enable', 'autoStart', 'effectParams']);
+const PERSISTENT_TYPE_BLOCK_META_KEYS = new Set(['enabled', 'autoStart', 'effectParams']);
 
 export type PersistentTrackName = 'scene' | 'camera' | 'stylization';
 
@@ -125,7 +125,7 @@ function entryFromPersistentTypeBlock(type: string, block: Record<string, unknow
     }
     return {
         type,
-        enable: readEffectEnableFromBlock(block),
+        enabled: readEffectEnabledFromBlock(block),
         autoStart: typeof block.autoStart === 'boolean' ? block.autoStart : true,
         ...(Object.keys(ep).length > 0 ? { effectParams: ep } : {})
     };
@@ -160,7 +160,7 @@ export function persistentScenePackFromEntries(entries: PersistentSceneEffectEnt
     const pack: Record<string, unknown> = {};
     for (const entry of entries) {
         const block: Record<string, unknown> = {
-            enable: entry.enable,
+            enabled: entry.enabled,
             autoStart: entry.autoStart
         };
         if (entry.effectParams && typeof entry.effectParams === 'object' && !Array.isArray(entry.effectParams)) {
@@ -171,7 +171,7 @@ export function persistentScenePackFromEntries(entries: PersistentSceneEffectEnt
     return pack;
 }
 
-/** 读取 scene persistent 配置；默认仅返回 `enable !== false` 的项。 */
+/** 读取 scene persistent 配置；默认仅返回 `enabled !== false` 的项。 */
 export function readPersistentSceneEffects(
     settings: ExperienceSettings,
     opts?: { includeDisabled?: boolean }
@@ -190,7 +190,7 @@ export function readPersistentTrackEffects(
     if (opts?.includeDisabled) {
         return all;
     }
-    return all.filter(e => e.enable);
+    return all.filter(e => e.enabled);
 }
 
 export function readPersistentCameraEffects(
@@ -223,6 +223,15 @@ export function hasEnabledPersistentEffects(settings: ExperienceSettings): boole
     return readActivePersistentEffects(settings).length > 0;
 }
 
+/** persistent 任一轨是否存在类型块（含 `enabled: false`）。 */
+export function hasConfiguredPersistentEffects(settings: ExperienceSettings): boolean {
+    return (
+        readPersistentTrackEffects(settings, 'scene', { includeDisabled: true }).length > 0 ||
+        readPersistentTrackEffects(settings, 'camera', { includeDisabled: true }).length > 0 ||
+        readPersistentTrackEffects(settings, 'stylization', { includeDisabled: true }).length > 0
+    );
+}
+
 export function getPersistentSceneEffect(
     settings: ExperienceSettings,
     type: string
@@ -238,7 +247,7 @@ export function getPersistentTrackEffect(
     return readPersistentTrackEffects(settings, trackName, { includeDisabled: true }).find(e => e.type === type) ?? null;
 }
 
-/** 是否已在 persistent scene 包中存在该类型块（含 `enable: false`） */
+/** 是否已在 persistent scene 包中存在该类型块（含 `enabled: false`） */
 export function hasPersistentSceneEffectBlock(settings: ExperienceSettings, type: string): boolean {
     return getPersistentSceneEffect(settings, type) !== null;
 }
@@ -278,7 +287,7 @@ export function removePersistentTrackEffect(
 export function patchPersistentSceneEffect(
     settings: ExperienceSettings,
     type: string,
-    patch: Partial<Pick<PersistentSceneEffectEntry, 'enable' | 'autoStart' | 'effectParams'>>
+    patch: Partial<Pick<PersistentSceneEffectEntry, 'enabled' | 'autoStart' | 'effectParams'>>
 ): PersistentSceneEffectEntry[] {
     return patchPersistentTrackEffect(settings, 'scene', type, patch);
 }
@@ -287,7 +296,7 @@ export function patchPersistentTrackEffect(
     settings: ExperienceSettings,
     trackName: PersistentTrackName,
     type: string,
-    patch: Partial<Pick<PersistentSceneEffectEntry, 'enable' | 'autoStart' | 'effectParams'>>,
+    patch: Partial<Pick<PersistentSceneEffectEntry, 'enabled' | 'autoStart' | 'effectParams'>>,
     opts?: { replaceTrack?: boolean }
 ): PersistentSceneEffectEntry[] {
     if ((!persistentTypeAllowedOnTrack(type, trackName) && type !== 'none')) {
@@ -298,10 +307,10 @@ export function patchPersistentTrackEffect(
     const current = getPersistentTrackEffect(settings, trackName, type);
     const block = (pack[type] as Record<string, unknown> | undefined) ?? {};
     const nextBlock: Record<string, unknown> = { ...block };
-    if (typeof patch.enable === 'boolean') {
-        writeEffectEnableToBlock(nextBlock, patch.enable);
+    if (typeof patch.enabled === 'boolean') {
+        writeEffectEnabledToBlock(nextBlock, patch.enabled);
     } else if (!current) {
-        writeEffectEnableToBlock(nextBlock, false);
+        writeEffectEnabledToBlock(nextBlock, false);
     }
     if (typeof patch.autoStart === 'boolean') {
         nextBlock.autoStart = patch.autoStart;
@@ -333,10 +342,10 @@ export function patchPersistentTrackEffect(
 }
 
 /**
- * `EFFECT_PARAMS_PATCH`（persistent scene）包形：与 reveal 相同，`{ [type]: { enable?, autoStart?, …专参 } }`（与存盘一致）。
+ * `EFFECT_PARAMS_PATCH`（persistent scene）包形：与 reveal 相同，`{ [type]: { enabled?, autoStart?, …专参 } }`（与存盘一致）。
  */
 export function buildPersistentProtocolParams(
-    patchByType: Record<string, Partial<Pick<PersistentSceneEffectEntry, 'enable' | 'autoStart' | 'effectParams'>>>
+    patchByType: Record<string, Partial<Pick<PersistentSceneEffectEntry, 'enabled' | 'autoStart' | 'effectParams'>>>
 ): Record<string, unknown> {
     const out: Record<string, unknown> = {};
     for (const [type, patch] of Object.entries(patchByType)) {
@@ -344,8 +353,8 @@ export function buildPersistentProtocolParams(
             continue;
         }
         const block: Record<string, unknown> = {};
-        if (typeof patch.enable === 'boolean') {
-            block.enable = patch.enable;
+        if (typeof patch.enabled === 'boolean') {
+            block.enabled = patch.enabled;
         }
         if (typeof patch.autoStart === 'boolean') {
             block.autoStart = patch.autoStart;
@@ -389,8 +398,8 @@ export function coercePersistentProtocolParamsInbound(
 
 export function parsePersistentProtocolParamsToPatch(
     params: Record<string, unknown>
-): Record<string, Partial<Pick<PersistentSceneEffectEntry, 'enable' | 'autoStart' | 'effectParams'>>> {
-    const out: Record<string, Partial<Pick<PersistentSceneEffectEntry, 'enable' | 'autoStart' | 'effectParams'>>> = {};
+): Record<string, Partial<Pick<PersistentSceneEffectEntry, 'enabled' | 'autoStart' | 'effectParams'>>> {
+    const out: Record<string, Partial<Pick<PersistentSceneEffectEntry, 'enabled' | 'autoStart' | 'effectParams'>>> = {};
     for (const key of Object.keys(params)) {
         if (!PERSISTENT_EFFECT_TYPES.has(key)) {
             continue;
@@ -400,9 +409,9 @@ export function parsePersistentProtocolParamsToPatch(
             continue;
         }
         const b = block as Record<string, unknown>;
-        const patch: Partial<Pick<PersistentSceneEffectEntry, 'enable' | 'autoStart' | 'effectParams'>> = {};
-        if (typeof b.enable === 'boolean') {
-            patch.enable = b.enable;
+        const patch: Partial<Pick<PersistentSceneEffectEntry, 'enabled' | 'autoStart' | 'effectParams'>> = {};
+        if (typeof b.enabled === 'boolean') {
+            patch.enabled = b.enabled;
         }
         if (typeof b.autoStart === 'boolean') {
             patch.autoStart = b.autoStart;
@@ -502,8 +511,8 @@ export function readAssetInstanceParams(
     const raw = inst as Record<string, unknown>;
     const resolvedType = parseAssetInstanceType(raw) ?? defaultAssetEffectType();
     const out: EffectsAssetInstance = { type: resolvedType };
-    if (typeof inst.enable === 'boolean') {
-        out.enable = inst.enable;
+    if (typeof inst.enabled === 'boolean') {
+        out.enabled = inst.enabled;
     }
     if (typeof inst.autoStart === 'boolean') {
         out.autoStart = inst.autoStart;
@@ -521,7 +530,7 @@ export function patchAssetInstanceFromParams(
         type?: string;
         /** @deprecated 导入兼容 */
         effectId?: string;
-        enable?: boolean;
+        enabled?: boolean;
         autoStart?: boolean;
         effectParams?: Record<string, unknown> | null;
     }
@@ -558,10 +567,10 @@ export function patchAssetInstanceFromParams(
 
     const next: EffectsAssetInstance = {
         type: nextType,
-        enable:
-            typeof patch.enable === 'boolean'
-                ? patch.enable
-                : current?.enable !== false,
+        enabled:
+            typeof patch.enabled === 'boolean'
+                ? patch.enabled
+                : current?.enabled !== false,
         autoStart: typeof patch.autoStart === 'boolean' ? patch.autoStart : (current?.autoStart ?? false),
         ...(Object.keys(nextEffectParams).length > 0 ? { effectParams: nextEffectParams } : {})
     };
@@ -644,19 +653,19 @@ export function syncAssetInstancesRuntimeFromSettings(state: State, settings: Ex
         }
     }
     for (const [targetId, inst] of Object.entries(map)) {
-        const enable = inst.enable !== false;
+        const enabled = inst.enabled !== false;
         const prev = runtime[targetId];
         const raw = inst as Record<string, unknown>;
         const activeType = parseAssetInstanceType(raw) ?? defaultAssetEffectType();
         runtime[targetId] = {
             activeType,
-            status: enable ? (prev?.status === 'playing' ? 'playing' : 'inactive') : 'inactive'
+            status: enabled ? (prev?.status === 'playing' ? 'playing' : 'inactive') : 'inactive'
         };
     }
 }
 
 /** reveal 存盘块内元字段；其余键归入 `effectParams`（读入时）。 */
-const REVEAL_TYPE_BLOCK_META_KEYS = new Set(['enable', 'autoStart', 'totalDuration', 'effectParams']);
+const REVEAL_TYPE_BLOCK_META_KEYS = new Set(['enabled', 'autoStart', 'totalDuration', 'effectParams']);
 
 /**
  * 从 `effects.reveal.paramsById[id]` 解析 reveal `type`。
@@ -716,8 +725,8 @@ export function buildRevealProtocolParams(
         return revealNoneParamRecord();
     }
     const block: Record<string, unknown> = {};
-    if (typeof patch.enable === 'boolean') {
-        block.enable = patch.enable;
+    if (typeof patch.enabled === 'boolean') {
+        block.enabled = patch.enabled;
     }
     if (typeof patch.autoStart === 'boolean') {
         block.autoStart = patch.autoStart;
@@ -777,8 +786,8 @@ export function parseRevealProtocolParamsToPatch(
     }
     const block = params[nestedType] as Record<string, unknown> | undefined;
     if (block && typeof block === 'object' && !Array.isArray(block)) {
-        if (typeof block.enable === 'boolean') {
-            patch.enable = block.enable;
+        if (typeof block.enabled === 'boolean') {
+            patch.enabled = block.enabled;
         }
         if (typeof block.autoStart === 'boolean') {
             patch.autoStart = block.autoStart;
@@ -808,14 +817,14 @@ function revealNoneParamRecord(): Record<string, unknown> {
     return { none: {} };
 }
 
-/** 一次性 reveal 存盘：`{ [type]: { enable?, autoStart?, totalDuration?, …专参 } }`；`none` 时为 `{ none: {} }`。 */
+/** 一次性 reveal 存盘：`{ [type]: { enabled?, autoStart?, totalDuration?, …专参 } }`；`none` 时为 `{ none: {} }`。 */
 function revealToParamRecord(rev: LegacyRevealEffect): Record<string, unknown> {
     const type = rev.type ?? 'none';
     if (type === 'none') {
         return revealNoneParamRecord();
     }
     const block: Record<string, unknown> = {
-        enable: rev.enable !== false
+        enabled: rev.enabled !== false
     };
     if (typeof rev.autoStart === 'boolean') {
         block.autoStart = rev.autoStart;
@@ -838,7 +847,7 @@ function parseRevealPack(pack: Record<string, unknown> | undefined): LegacyRevea
         if (pack && typeof pack === 'object' && !Array.isArray(pack) && Object.keys(pack).length === 0) {
             return {
                 type: 'none',
-                enable: false,
+                enabled: false,
                 autoStart: true,
                 totalDuration: DEFAULT_VFX_TOTAL_DURATION
             };
@@ -848,9 +857,10 @@ function parseRevealPack(pack: Record<string, unknown> | undefined): LegacyRevea
 
     // 旧扁平格式：`type` / `autoStart` / `totalDuration` / `effectParams`
     if (typeof pack.type === 'string') {
+        const isNoneFlat = pack.type === 'none';
         const base: LegacyRevealEffect = {
             type: pack.type as LegacyRevealEffect['type'],
-            enable: readEffectEnableFromBlock(pack),
+            enabled: isNoneFlat ? false : readEffectEnabledFromBlock(pack),
             autoStart: typeof pack.autoStart === 'boolean' ? pack.autoStart : true,
             totalDuration:
                 typeof pack.totalDuration === 'number' ? pack.totalDuration : DEFAULT_VFX_TOTAL_DURATION
@@ -872,7 +882,7 @@ function parseRevealPack(pack: Record<string, unknown> | undefined): LegacyRevea
     const isNone = typeStr === 'none';
     const base: LegacyRevealEffect = {
         type: typeStr as LegacyRevealEffect['type'],
-        enable: isNone ? false : readEffectEnableFromBlock(block),
+        enabled: isNone ? false : readEffectEnabledFromBlock(block),
         autoStart: typeof block.autoStart === 'boolean' ? block.autoStart : true,
         totalDuration:
             typeof block.totalDuration === 'number' ? block.totalDuration : DEFAULT_VFX_TOTAL_DURATION
@@ -931,10 +941,10 @@ export function syncLegacyRevealEffectShadow(settings: ExperienceSettings): void
     const rev = ensureRevealEffect(settings);
     rev.type = merged.type;
     delete (rev as Record<string, unknown>).radius;
-    if (typeof merged.enable === 'boolean') {
-        rev.enable = merged.enable;
+    if (typeof merged.enabled === 'boolean') {
+        rev.enabled = merged.enabled;
     } else {
-        delete (rev as Record<string, unknown>).enable;
+        delete (rev as Record<string, unknown>).enabled;
     }
     rev.autoStart = merged.autoStart;
     rev.totalDuration = merged.totalDuration;
@@ -981,12 +991,12 @@ export function patchRevealSettingsFromParams(
         }
     }
 
-    const nextEnable =
-        typeof patch.enable === 'boolean' ? patch.enable : current?.enable !== false;
+    const nextEnabled =
+        typeof patch.enabled === 'boolean' ? patch.enabled : current?.enabled !== false;
 
     const next: LegacyRevealEffect = {
         type: nextType,
-        enable: nextEnable,
+        enabled: nextEnabled,
         autoStart: typeof patch.autoStart === 'boolean' ? patch.autoStart : (current?.autoStart ?? true),
         totalDuration:
             typeof patch.totalDuration === 'number' &&
@@ -1024,7 +1034,7 @@ export function clearRevealScenePack(settings: ExperienceSettings): void {
     e.reveal.paramsById[SCENE_GSPLAT_REVEAL_EFFECT_ID] = { ...revealNoneParamRecord() };
     const rev = ensureRevealEffect(settings);
     rev.type = 'none';
-    rev.enable = false;
+    rev.enabled = false;
     delete (rev as Record<string, unknown>).effectParams;
     rev.autoStart = true;
     rev.totalDuration = DEFAULT_VFX_TOTAL_DURATION;
@@ -1037,14 +1047,14 @@ export function clearRevealScenePack(settings: ExperienceSettings): void {
 export function replaceRevealSceneEffect(
     settings: ExperienceSettings,
     type: LegacyRevealEffect['type'],
-    opts?: { enable?: boolean; autoStart?: boolean; totalDuration?: number; effectParams?: Record<string, unknown> }
+    opts?: { enabled?: boolean; autoStart?: boolean; totalDuration?: number; effectParams?: Record<string, unknown> }
 ): LegacyRevealEffect {
     if (type === 'none') {
         clearRevealScenePack(settings);
-        return { type: 'none', enable: false, autoStart: true, totalDuration: DEFAULT_VFX_TOTAL_DURATION };
+        return { type: 'none', enabled: false, autoStart: true, totalDuration: DEFAULT_VFX_TOTAL_DURATION };
     }
 
-    const enable = opts?.enable !== false;
+    const enabled = opts?.enabled !== false;
     const autoStart = opts?.autoStart ?? true;
     const totalDuration = opts?.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
     const effectParams =
@@ -1054,7 +1064,7 @@ export function replaceRevealSceneEffect(
 
     const next: LegacyRevealEffect = {
         type,
-        enable,
+        enabled,
         autoStart,
         totalDuration,
         ...(effectParams && Object.keys(effectParams).length > 0 ? { effectParams } : {})
@@ -1117,7 +1127,7 @@ export function flushRevealIntoEffectsForExport(settings: ExperienceSettings): v
 /**
  * 以 `settings.revealEffect` 为 **reveal** 真源写入 `effects.reveal`；`effects.persistent` 在以下情况保留/写入：
  * - 旧单轨：`revealEffect.type` 为 persistent → 仅写 persistent；
- * - 双轨：`revealEffect` 为 reveal 且 `effects.persistent` 已启用且 `paramsById` 为可持续类型 → **不清除** persistent，实现「播完 reveal 再挂 persistent」的存盘结构。
+ * - 双轨：`revealEffect` 为 reveal 且 `effects.persistent` 已有配置（含 `enabled: false`）→ **不清除** persistent，实现「播完 reveal 再挂 persistent」的存盘结构。
  */
 export function mirrorEffectsSettingsFromReveal(settings: ExperienceSettings): void {
     const rev = ensureRevealEffect(settings);
@@ -1143,7 +1153,7 @@ export function mirrorEffectsSettingsFromReveal(settings: ExperienceSettings): v
         const trackName = persistentTrackNameForType(t);
         const trackId = PERSISTENT_TRACK_IDS[trackName];
         const block: Record<string, unknown> = {
-            enable: true,
+            enabled: true,
             autoStart: typeof rev.autoStart === 'boolean' ? rev.autoStart : true
         };
         if (rev.effectParams && typeof rev.effectParams === 'object' && !Array.isArray(rev.effectParams)) {
@@ -1155,7 +1165,7 @@ export function mirrorEffectsSettingsFromReveal(settings: ExperienceSettings): v
     }
 
     const preservePersistentWithReveal =
-        hasEnabledPersistentEffects(settings) && !isPersistentVfx(t);
+        hasConfiguredPersistentEffects(settings) && !isPersistentVfx(t);
 
     if (preservePersistentWithReveal) {
         syncLegacyRevealEffectShadow(settings);
@@ -1282,10 +1292,10 @@ export function syncEffectsRuntimeStateFromSettings(state: State, settings: Expe
     const revealTypeChanged = prevActiveType !== revealType;
     reveal.activeEffectId = SCENE_GSPLAT_REVEAL_EFFECT_ID;
     reveal.activeType = revealType;
-    if (prevRevealStatus === 'playing' && !revealTypeChanged) {
-        reveal.status = 'playing';
-    } else if (revealType === 'none') {
+    if (revealType === 'none') {
         reveal.status = 'inactive';
+    } else if (prevRevealStatus === 'playing' && !revealTypeChanged) {
+        reveal.status = 'playing';
     } else if (prevRevealStatus === 'completed' && !revealTypeChanged) {
         reveal.status = 'completed';
     } else {
