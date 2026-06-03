@@ -214,7 +214,7 @@ export class AssetEffectViewToggleController {
             clientX,
             clientY
         });
-        
+
         this._toggleEntry(entry);
     }
 
@@ -222,7 +222,7 @@ export class AssetEffectViewToggleController {
         const settings = this._global.settings as ExperienceSettings;
         const targetId = findAssetMorphOwnerTargetId(settings, entry.id) ?? entry.id;
         const inst = readAssetInstanceParams(settings, targetId);
-        if (!inst || inst.enable === false || inst.autoStart !== true) {
+        if (!inst || inst.enabled === false || inst.autoStart !== true) {
             return;
         }
 

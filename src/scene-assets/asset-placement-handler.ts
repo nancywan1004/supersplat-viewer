@@ -137,7 +137,7 @@ function startRestoredAssetDefaultEffectIfConfigured(global: Global, entry: Scen
     const settings = global.settings as ExperienceSettings;
     const storageTargetId = findAssetMorphOwnerTargetId(settings, entry.id) ?? entry.id;
     const inst = readAssetInstanceParams(settings, storageTargetId);
-    if (!inst || inst.enable === false || inst.autoStart !== true) {
+    if (!inst || inst.enabled === false || inst.autoStart !== true) {
         return;
     }
 
