@@ -8,7 +8,7 @@ import {
     perlinWaveUsesRegistryComposerPath
 } from '../effects-pipeline-policy';
 import { overallWaveShaderGlsl, overallWaveShaderWgsl } from './gsplat-overall-wave-shaders';
-import { GSPLAT_WAVE_COMMON_GLSL, GSPLAT_WAVE_COMMON_WGSL } from './gsplat-wave-shader-common';
+import { OVERALL_WAVE_UNIFORM_NAMES as OU } from './gsplat-overall-wave-shaders';
 
 /** 初始属性默认值 */
 export const OVERALL_WAVE_DEFAULTS = {
@@ -37,7 +37,7 @@ class GsplatPersistentOverallWave extends GsplatShaderEffect {
     static scriptName = 'gsplatPersistentOverallWave';
 
     /** shader 变更时递增，触发 composer 重编译 */
-    private _composerRev = 4;
+    private _composerRev = 6;
     /** 一次性 reveal 独占 `gsplatModifyVS` 时，已从合成器摘掉本 contribution */
     private _composerSuppressed = false;
 
@@ -57,11 +57,11 @@ class GsplatPersistentOverallWave extends GsplatShaderEffect {
     troughTint = new Color(...OVERALL_WAVE_DEFAULTS.troughTint);
 
     getShaderGLSL() {
-        return `${GSPLAT_WAVE_COMMON_GLSL}${overallWaveShaderGlsl}`;
+        return overallWaveShaderGlsl;
     }
 
     getShaderWGSL() {
-        return `${GSPLAT_WAVE_COMMON_WGSL}${overallWaveShaderWgsl}`;
+        return overallWaveShaderWgsl;
     }
 
     private usesComposerPath(): boolean {
@@ -159,34 +159,34 @@ class GsplatPersistentOverallWave extends GsplatShaderEffect {
     }
 
     updateEffect(effectTime: number, _dt: number) {
-        this.setUniform('uTime', effectTime);
+        this.setUniform(OU.time, effectTime);
 
         this._centerArray[0] = this.center.x;
         this._centerArray[1] = this.center.y;
         this._centerArray[2] = this.center.z;
-        this.setUniform('uCenter', this._centerArray);
+        this.setUniform(OU.center, this._centerArray);
 
-        this.setUniform('uNoiseType', clampOverallWaveNoiseType(this.noiseType));
-        this.setUniform('uIntensity', this.intensity);
-        this.setUniform('uWaveAmplitude', this.waveAmplitude);
+        this.setUniform(OU.noiseType, clampOverallWaveNoiseType(this.noiseType));
+        this.setUniform(OU.intensity, this.intensity);
+        this.setUniform(OU.waveAmplitude, this.waveAmplitude);
         const w = Number(this.wavelength) || 0;
-        this.setUniform('uWaveFrequency', w > 0 ? 1.0 / w : 0.2);
-        this.setUniform('uWaveSpeed', this.waveSpeed);
+        this.setUniform(OU.waveFrequency, w > 0 ? 1.0 / w : 0.2);
+        this.setUniform(OU.waveSpeed, this.waveSpeed);
 
         this._crestTintArray[0] = this.crestTint.r;
         this._crestTintArray[1] = this.crestTint.g;
         this._crestTintArray[2] = this.crestTint.b;
-        this.setUniform('uCrestTint', this._crestTintArray);
+        this.setUniform(OU.crestTint, this._crestTintArray);
 
         this._troughTintArray[0] = this.troughTint.r;
         this._troughTintArray[1] = this.troughTint.g;
         this._troughTintArray[2] = this.troughTint.b;
-        this.setUniform('uTroughTint', this._troughTintArray);
+        this.setUniform(OU.troughTint, this._troughTintArray);
 
         this._waveDirArray[0] = this.waveDirection.x;
         this._waveDirArray[1] = this.waveDirection.y;
         this._waveDirArray[2] = this.waveDirection.z;
-        this.setUniform('uWaveDirection', this._waveDirArray);
+        this.setUniform(OU.waveDirection, this._waveDirArray);
 
         if (!this.usesComposerPath() || this.materialsApplied.size === 0) return;
         if (this.shouldSuppressComposerForOneShotReveal()) {
