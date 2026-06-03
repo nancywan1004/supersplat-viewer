@@ -237,10 +237,10 @@ export interface GsplatMorphOptions {
     /**
      * Scene entities used as visual keyframes. They are never transformed by
      * the morph runtime; when provided, the generated morph entity copies the
-     * first entity's world transform and temporarily hides these sources.
+     * first entity's world transform.
      */
     sourceEntities?: Entity[];
-    /** Hide sourceEntities while the morph controller is alive. Defaults to true. */
+    /** @deprecated Source visibility is controlled by the viewer restore flow. */
     hideSourceEntities?: boolean;
     /** Internal: precomputed by loadGsplatMorphSequence to keep setup responsive. */
     prebuiltInterpolator?: GaussianInterpolatorRuntime;
@@ -3172,8 +3172,6 @@ export class GsplatMorphController {
     /** `pushOutputToResource` 已执行，本帧 `framerender` 需再拉高 `renderNextFrame`（防 Viewer 清掉）。 */
     private _morphPushedThisFrame = false;
 
-    private readonly _hiddenSourceStates: { entity: Entity; enabled: boolean }[] = [];
-
     private _destroyed = false;
 
     constructor(app: AppBase, models: LoadedMorphModel[], options: GsplatMorphOptions = {}) {
@@ -3480,7 +3478,6 @@ export class GsplatMorphController {
         this.app.off('frameupdate', this._onFrameUpdate);
         this.app.off('framerender', this._onAfterFrameRender);
         this.app.scene.off('gsplat:sorted', this._onGsplatSorted);
-        this.restoreSourceEntities(true);
         this.entity.enabled = false;
         this.app.renderNextFrame = true;
         this.entity.destroy();
@@ -3497,37 +3494,10 @@ export class GsplatMorphController {
         });
     }
 
-    private hideSourceEntities() {
-        if (this._morphOptions.hideSourceEntities === false) {
-            return;
-        }
-        if (this._hiddenSourceStates.length > 0) {
-            return;
-        }
-        const seen = new Set<Entity>();
-        for (const entity of this._morphOptions.sourceEntities ?? []) {
-            if (!entity || seen.has(entity)) {
-                continue;
-            }
-            seen.add(entity);
-            this._hiddenSourceStates.push({ entity, enabled: entity.enabled });
-            entity.enabled = false;
-        }
-    }
-
-    private restoreSourceEntities(forceEnabled = false) {
-        for (const { entity, enabled } of this._hiddenSourceStates) {
-            entity.enabled = forceEnabled ? true : enabled;
-        }
-        this._hiddenSourceStates.length = 0;
-    }
-
     private syncPlaybackVisibility() {
         if (this._playing) {
             this.entity.enabled = true;
-            this.hideSourceEntities();
         } else {
-            this.restoreSourceEntities(true);
             this.entity.enabled = false;
         }
         this.app.renderNextFrame = true;
