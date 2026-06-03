@@ -29,19 +29,19 @@ const BUTTERFLY_LAYER_NAME = 'ButterflyAfterGsplat';
 const OVERLAY_ROOT_NAME = 'butterflyParticleOverlay';
 const SPARKLE_TRAIL_ROOT_NAME = 'butterflySparkleTrail';
 const GS_LIGHT_NAME = 'butterflyGsLight';
-/** 移动时沿路径洒落、闪烁下坠的魔法粒子�?*/
+/** 移动时沿路径洒落、闪烁下坠的魔法粒子数 */
 const SPARKLE_MAX = 1400;
 const SPARKLE_EMIT_DIST = 0.006;
-/** 静止 / idle 扇翅（移�?blend=0）�?*/
+/** 静止 / idle 扇翅（移动 blend=0） */
 const WING_FLAP_IDLE_SPEED = 1.5;
 const WING_FLAP_IDLE_AMP = 0.25;
-/** 持续移动满速扇翅（blend=1；WASD 恒速故�?blend 缓入而非瞬时拉满）�?*/
+/** 持续移动满速扇翅（blend=1；WASD 恒速故用 blend 缓入） */
 const WING_FLAP_MOVE_SPEED = 15;
 const WING_FLAP_MOVE_AMP = 1.05;
-/** 开始移动缓升至满速、停止后缓回 idle 的大致时长（秒，�?95% 到位）�?*/
+/** 开始移动缓升至满速、停止后缓回 idle 的大致时长（秒，约 95% 到位） */
 const WING_FLAP_BLEND_UP_SEC = 5;
 const WING_FLAP_BLEND_DOWN_SEC =1;
-/** exp 平滑：rate �?-ln(0.05) / T */
+/** exp 平滑：rate = -ln(0.05) / T */
 const WING_FLAP_BLEND_UP_RATE = 2.996 / WING_FLAP_BLEND_UP_SEC;
 const WING_FLAP_BLEND_DOWN_RATE = 2.996 / WING_FLAP_BLEND_DOWN_SEC;
 const WING_FLAP_MOVE_EPS = 1e-6;
@@ -51,53 +51,59 @@ const SPARKLE_PATH_STEPS_MAX = 5;
 const SPARKLE_LIFETIME = 0.88;
 const SPARKLE_GRAVITY = 0.52;
 const SPARKLE_DRIFT = 0.1;
-/** 躯干头尾弦长（与粒子模板 abdomen→head 一致），拖尾总长度对齐身长�?*/
+/** 躯干头尾弦长（与粒子模板 abdomen→head 一致） */
 const BUTTERFLY_BODY_CHORD = 0.57;
-/** 尾部洒落区：身后深度、翅展横向、头尾纵向（× meshScale）�?*/
+/** 尾部洒落区：身后深度、翅展横向、头尾纵向（× meshScale） */
 const SPARKLE_TAIL_BACK_MAX = BUTTERFLY_BODY_CHORD * 0.28;
 const SPARKLE_TAIL_LATERAL = 0.72;
 const SPARKLE_TAIL_VERT = 0.22;
-/** 沿身后深度收窄：1 = 完全线性收�?0 宽�?*/
+/** 沿身后深度收窄：1 = 完全线性收窄，0 = 不收窄 */
 const SPARKLE_TAIL_TAPER = 0.86;
 const SCENE_REF_RADIUS = 25;
 const BUTTERFLY_PARTICLE_COUNT = 5200;
 const BUTTERFLY_TEMPLATE_VERSION = 27;
-/** 前翅：大三角 + 波浪外缘；后翅：圆扇 + 波浪外缘（参考帝王蝶俯视）�?*/
+/** 前翅：大三角 + 波浪外缘；后翅：圆扇 + 波浪外缘 */
 const FORE_WING_SPAN = 0.62;
-/** 弦向（头↔尾）展宽�?*/
+/** 弦向（头↔尾）展宽 */
 const FORE_WING_CHORD = 1.5;
 const HIND_WING_SPAN = 0.5;
 const HIND_WING_CHORD = 1.5;
-/** 弦向：外缘相对铰链向�?尾延伸倍率�?*/
+/** 弦向：外缘相对铰链向头/尾延伸倍率 */
 const FORE_CHORD_HEAD_GAIN = 1.06;
 const FORE_CHORD_TAIL_GAIN = 0.22;
 const HIND_CHORD_HEAD_GAIN = 0.06;
 const HIND_CHORD_TAIL_GAIN = 1.08;
-/** 外缘波浪幅度�?*/
+/** 外缘波浪幅度 */
 const WING_EDGE_SCALLOP = 0.034;
 const WING_EDGE_SCALLOP_FREQ = 5.2;
-/** 靠近身体：小圆角；外缘：大圆角�?*/
+/** 靠近身体：小圆角；外缘：大圆角 */
 const WING_CORNER_ROUND_BODY = 0.04;
 const WING_CORNER_ROUND_OUTER = 0.12;
-/** �?后翅铰链靠近，缩小两翅之间的缝隙�?*/
+/** 前/后翅铰链靠近，缩小两翅之间的缝隙 */
 const FORE_HINGE_Y = 0.01;
 const HIND_HINGE_Y = 0.1;
-/** 粒子噪波位移：振幅与速度�?*/
+/** 粒子噪波位移：振幅与速度 */
 const PARTICLE_JITTER_AMP = 0.015;
 const PARTICLE_JITTER_SPEED = 5.4;
-/** 蝴蝶在相机视线前方的距离（米）�?*/
 const CAMERA_FOLLOW_DISTANCE = 3;
-/** 沿相机“向下”偏移（相对前方距离的比例），便于俯瞰蝴蝶�?*/
-const CAMERA_SCREEN_DOWN_RATIO = 0.5;
-/** 整体缩放倍率�?.2 = 在默认自适应尺寸上再缩至 20%，相对原 0.4 再小 50%）�?*/
-const BUTTERFLY_SIZE_SCALE = 0.2;
-/** 相对「正前方」头部左右偏转上限（仅绕世界 Y，不改变位置）�?*/
+/** 相对画面中心的纵向位置（NDC；0.724 ≈ 旧 ratio 0.3 @ FOV 45°） */
+const BUTTERFLY_SCREEN_Y_NDC = 0.724;
+const CAMERA_NEAR_CLIP_MARGIN = 0.05;
+const BUTTERFLY_REF_CAMERA_FOV = 45;
+const BUTTERFLY_MESH_REF_SCALE = 0.2;
+const BUTTERFLY_POINT_SIZE_MIN = 0.001;
+const BUTTERFLY_POINT_SIZE_MAX = 0.01;
+const BUTTERFLY_POINT_SIZE_DEFAULT = 0.004;
+/** 光点 shader 实际尺寸 = UI 取值 × 本系数（UI 区间与默认值不变） */
+const BUTTERFLY_POINT_SIZE_RENDER_SCALE = 0.5;
+const DEG_TO_RAD = Math.PI / 180;
+/** 相对「正前方」头部左右偏转上限（仅绕世界 Y） */
 const BUTTERFLY_HEAD_YAW_LIMIT_RAD = (40 * Math.PI) / 180;
-/** A/D 平移时头部转向速率（弧�?秒）�?*/
+/** A/D 平移时头部转向速率（弧度/秒） */
 const BUTTERFLY_AD_HEAD_YAW_SPEED = 2.4;
-/** 松开 A/D 或停止鼠标旋转后头部回正速率（exp 平滑，越大越快）�?*/
+/** 松开 A/D 或停止鼠标旋转后头部回正速率（exp 平滑） */
 const BUTTERFLY_HEAD_YAW_RETURN_RATE = 5;
-/** 左键拖拽旋转，右键平移（�?keyboard-mouse 一致）�?*/
+/** 左键拖拽旋转，右键平移（与 keyboard-mouse 一致） */
 const MOUSE_BUTTON_LEFT = 0;
 const MOUSE_BUTTON_RIGHT = 2;
 const KEY_CODE_A = 65;
@@ -157,7 +163,7 @@ type SparkleParticle = {
     age: number;
     phase: number;
     colorMix: number;
-    /** 生成时沿身后深度 0（贴近蝴蝶）�?1（拖尾末端）�?*/
+    /** 生成时沿身后深度：0 = 贴近蝴蝶，1 = 拖尾末端 */
     behindT: number;
 };
 
@@ -173,16 +179,16 @@ type ButterflyParticle = {
     colorMix: number;
 };
 
-/** 铰链贴胸节，四翅从窄铰链向外展开�?*/
+/** 铰链贴胸节，四翅从窄铰链向外展开 */
 const HINGE_FORE_X = 0.052;
 const HINGE_HIND_X = 0.048;
 const HINGE_FORE_Z = 0.01;
 const HINGE_HIND_Z = 0.006;
-/** 翅尖铰链转角�? = 与躯干平行，π/2 = 与躯干垂直（单侧 90° 行程）�?*/
+/** 翅尖铰链转角：0 = 与躯干平行，π/2 = 与躯干垂直（单侧 90° 行程） */
 const WING_FLAP_TIP_SPAN_RAD = Math.PI / 2;
-/** 沿翅面参与扇动的权重（翅根也随动，避免仅翅尖在转）�?*/
+/** 沿翅面参与扇动的权重（翅根也随动，避免仅翅尖在转） */
 const WING_FLAP_ROOT_WEIGHT = 0.32;
-/** 躯干/附肢轻微上下起伏（叠加多�?sin + 每粒�?phase，避免整齐同步）�?*/
+/** 躯干/附肢轻微上下起伏（叠加多频 sin + 每粒子 phase，避免整齐同步） */
 const BODY_BOB_AMP = 0.02;
 const BODY_BOB_SPEED = 3.1;
 let butterflyTemplateCache: { version: number; particles: ButterflyParticle[] } | null = null;
@@ -273,15 +279,25 @@ function readSceneBboxRadius(gsplat: GsplatBboxSource): number {
     return Number.isFinite(radius) && radius > 1e-6 ? radius : SCENE_REF_RADIUS;
 }
 
-function worldPointToOverlayLocal(gsplatEntity: Entity, world: Vec3, out: Vec3): void {
-    _invWorld.copy(gsplatEntity.getWorldTransform()).invert();
-    _invWorld.transformPoint(world, out);
-}
-
-function worldRotToOverlayLocal(gsplatEntity: Entity, worldRot: Quat, out: Quat): void {
-    _parentWorldRot.setFromMat4(gsplatEntity.getWorldTransform());
+function worldRotToCameraLocal(camera: Entity, worldRot: Quat, out: Quat): void {
+    _parentWorldRot.copy(camera.getRotation());
     _invParentWorldRot.copy(_parentWorldRot).invert();
     out.mul2(_invParentWorldRot, worldRot);
+}
+
+function resolveButterflyViewCompensation(cam: Entity | null, followDistance: number): number {
+    const fovDeg = cam?.camera?.fov ?? BUTTERFLY_REF_CAMERA_FOV;
+    const distComp = followDistance / Math.max(CAMERA_FOLLOW_DISTANCE, 1e-6);
+    const refTan = Math.tan(BUTTERFLY_REF_CAMERA_FOV * 0.5 * DEG_TO_RAD);
+    const curTan = Math.tan(fovDeg * 0.5 * DEG_TO_RAD);
+    const fovComp = curTan / Math.max(refTan, 1e-6);
+    return distComp * fovComp;
+}
+
+function resolveButterflyScreenDown(cam: Entity, followDistance: number): number {
+    const fovDeg = cam.camera?.fov ?? BUTTERFLY_REF_CAMERA_FOV;
+    const tanHalfFov = Math.tan(fovDeg * 0.5 * DEG_TO_RAD);
+    return followDistance * tanHalfFov * BUTTERFLY_SCREEN_Y_NDC;
 }
 
 function normalizeAngleRad(a: number): number {
@@ -295,7 +311,7 @@ function normalizeAngleRad(a: number): number {
     return x;
 }
 
-/** 更新水平相机视线；俯视时沿用 lastFlatFwd�?*/
+/** 更新水平相机视线；俯视时沿用 lastFlatFwd */
 function updateLastFlatCamFwd(camFwd: Vec3, lastFlatFwd: Vec3, outFlat: Vec3): void {
     outFlat.set(camFwd.x, 0, camFwd.z);
     const flatLen = outFlat.length();
@@ -307,7 +323,7 @@ function updateLastFlatCamFwd(camFwd: Vec3, lastFlatFwd: Vec3, outFlat: Vec3): v
     }
 }
 
-/** 仅绕世界 Y：头�?flatFwd（已归一化），Up 为世�?+Y，腹足朝下�?*/
+/** 仅绕世界 Y：头部沿 flatFwd（已归一化），Up 为世界 +Y */
 function computeButterflyWorldOrientFromFlatFwd(flatFwd: Vec3, out: Quat): void {
     _lookTarget.set(flatFwd.x, 0, flatFwd.z);
     _lookAt.setLookAt(Vec3.ZERO, _lookTarget, Vec3.UP);
@@ -346,7 +362,7 @@ function wingOuterScallop(along: number, depth: number): number {
 }
 
 /**
- * 前翅：u=0 外缘、u=1 翅根；v=0 前缘（头侧）、v=1 后缘（腹侧）�?
+ * 前翅：u=0 外缘、u=1 翅根；v=0 前缘（头侧）、v=1 后缘（腹侧）
  */
 function forewingSpanChord(
     side: number,
@@ -395,7 +411,7 @@ function forewingSpanChord(
 }
 
 /**
- * 后翅：s=0 翅根、s=1 外缘；t=0 前缘、t=1 后缘�?
+ * 后翅：s=0 翅根、s=1 外缘；t=0 前缘、t=1 后缘
  */
 function hindwingSpanChord(
     side: number,
@@ -725,7 +741,7 @@ function bodyBobOffset(effectTime: number, p: ButterflyParticle, ampMul: number)
     );
 }
 
-/** 多频 sin 叠加的噪波式位移，翅尖幅度更大，并随扇翅轻微跳动�?*/
+/** 多频 sin 叠加的噪波式位移，翅尖幅度更大，并随扇翅轻微跳动 */
 function particleJitterOffset(
     effectTime: number,
     flapPhase: number,
@@ -783,7 +799,7 @@ function applyWingFlap(
         if (p.part === 1 || p.part === 2) {
             const wingStrength = p.part === 1 ? 1 : 0.9;
             const spanWeight = WING_FLAP_ROOT_WEIGHT + (1 - WING_FLAP_ROOT_WEIGHT) * p.wingCoord;
-            /** 0 �?贴身平行�? �?垂直于躯干（翅尖�?90°）�?*/
+            /** 0 = 贴身平行，π/2 = 垂直于躯干（翅尖约 90°） */
             const envelope = 0.5 + 0.5 * Math.sin(flapPhase);
             const flapAngle =
                 WING_FLAP_TIP_SPAN_RAD * amp * wingStrength * spanWeight * envelope;
@@ -895,10 +911,10 @@ function buildButterflyBodyMesh(
     return mesh;
 }
 
-/** 脚本初始属性默认值（�?settings `effectParams` 未指定时一致） */
+/** 脚本初始属性默认值（与 settings `effectParams` 未指定时一致） */
 export const BUTTERFLY_PARTICLE_DEFAULTS = {
     center: [0, 0, 0] as [number, number, number],
-    pointSize: 0.004,
+    pointSize: BUTTERFLY_POINT_SIZE_DEFAULT,
     twinkleSpeed: 4.5,
     twinkleMin: 0,
     twinkleSharpness: 3,
@@ -916,7 +932,7 @@ export const BUTTERFLY_PARTICLE_DEFAULTS = {
 } as const;
 
 /**
- * 琉光飞蝶：相机前�?billboard 蝴蝶 + 移动拖尾光屑 + 可选点光源（不�?gsplat shader composer）�?
+ * 琉光飞蝶：相机前方 billboard 蝴蝶 + 移动拖尾光屑 + 可选点光源
  */
 class GsplatPersistentButterflyParticle extends Script {
     static scriptName = 'gsplatPersistentButterflyParticle';
@@ -955,20 +971,20 @@ class GsplatPersistentButterflyParticle extends Script {
     private phases = new Float32Array(0);
     private colorMix = new Float32Array(0);
     private flapPhase = 0;
-    /** 0 = idle 扇翅�? = 满速移动扇翅；按键开始缓升、停止缓降�?*/
+    /** 0 = idle 扇翅，1 = 满速移动扇翅；按键开始缓升、停止缓降 */
     private moveFlapBlend = 0;
     private currentWingFlapSpeed = WING_FLAP_IDLE_SPEED;
-    /** 1 = 翅尖完整 90° 行程（平行躯�?�?垂直躯干）�?*/
+    /** 1 = 翅尖完整 90° 行程（平行躯干 ↔ 垂直躯干） */
     private currentWingFlapAmplitude = WING_FLAP_IDLE_AMP;
     private worldPos = new Vec3();
-    /** 相机近乎垂直俯视时沿用上次的水平视线方向�?*/
+    /** 相机近乎垂直俯视时沿用上次的水平视线方向 */
     private readonly lastFlatCamFwd = new Vec3(0, 0, -1);
-    /** 「正前方」水平朝向（offset=0）；重置时与当前相机水平视线对齐�?*/
+    /** 「正前方」水平朝向（offset=0）；重置时与当前相机水平视线对齐 */
     private headForwardYawRef = 0;
     private headForwardYawRefActive = false;
-    /** A/D 驱动的左右偏角（弧度）�?*/
+    /** A/D 驱动的左右偏角（弧度） */
     private headYawOffset = 0;
-    /** 当前鼠标拖拽会话内累计偏角（自按下起总量 �?40°）�?*/
+    /** 当前鼠标拖拽会话内累计偏角（自按下起总量 ±40°） */
     private mouseDragYawOffset = 0;
     private mouseDragActive = false;
     private mouseDragStartCamYaw = 0;
@@ -979,6 +995,8 @@ class GsplatPersistentButterflyParticle extends Script {
     private sparkleParticles: SparkleParticle[] = [];
     private sparkleHasPrevFrame = false;
     private mounted = false;
+    private cachedFollowDist = CAMERA_FOLLOW_DISTANCE;
+    private cachedViewCompensation = 1;
     private cameraEntity: Entity | null = null;
     private cachedPointSize = -1;
     private readonly _cameraPos = new Vec3();
@@ -1076,24 +1094,50 @@ class GsplatPersistentButterflyParticle extends Script {
         if (!cam) {
             this.worldPos.copy(this.center);
             camFwdForYaw.set(0, 0, -1);
+            this.cachedFollowDist = CAMERA_FOLLOW_DISTANCE;
+            this.cachedViewCompensation = 1;
         } else {
             const wt = cam.getWorldTransform();
             wt.getTranslation(_camPos);
             camFwdForYaw.set(-wt.data[8], -wt.data[9], -wt.data[10]);
             _camUp.set(wt.data[4], wt.data[5], wt.data[6]);
-            _spawnFwd.copy(camFwdForYaw).mulScalar(CAMERA_FOLLOW_DISTANCE);
-            const screenDown = CAMERA_FOLLOW_DISTANCE * CAMERA_SCREEN_DOWN_RATIO;
-            this.worldPos.copy(_camPos).add(_spawnFwd).addScaled(_camUp, -screenDown);
+            this.updateFollowDistances(cam);
         }
 
         this.updateButterflyHeadYaw(camFwdForYaw, dt);
 
         if (this.overlayEntity) {
-            worldPointToOverlayLocal(this.entity, this.worldPos, _worldPos);
-            this.overlayEntity.setLocalPosition(_worldPos.x, _worldPos.y, _worldPos.z);
-            worldRotToOverlayLocal(this.entity, _butterflyWorldOrient, _orient);
-            this.overlayEntity.setLocalRotation(_orient);
+            this.syncOverlayTransform(cam);
         }
+    }
+
+    private updateFollowDistances(cam: Entity) {
+        const nominal = CAMERA_FOLLOW_DISTANCE;
+        let actual = nominal;
+        const near = cam.camera?.nearClip;
+        if (Number.isFinite(near) && near > 0) {
+            actual = Math.max(nominal, near + CAMERA_NEAR_CLIP_MARGIN);
+        }
+        this.cachedFollowDist = actual;
+        this.cachedViewCompensation = resolveButterflyViewCompensation(cam, actual);
+    }
+
+    private syncOverlayTransform(cam: Entity | null) {
+        const overlay = this.overlayEntity;
+        if (!overlay || !cam) {
+            return;
+        }
+
+        const dist = this.cachedFollowDist;
+        const screenDown = resolveButterflyScreenDown(cam, dist);
+        const meshScale = this.resolveButterflyMeshScale();
+
+        overlay.setLocalScale(meshScale, meshScale, meshScale);
+        overlay.setLocalPosition(0, -screenDown, -dist);
+        worldRotToCameraLocal(cam, _butterflyWorldOrient, _orient);
+        overlay.setLocalRotation(_orient);
+        _worldPos.set(0, -screenDown, -dist);
+        cam.getWorldTransform().transformPoint(_worldPos, this.worldPos);
     }
 
     private updateButterflyHeadYaw(camFwd: Vec3, dt: number) {
@@ -1495,20 +1539,18 @@ class GsplatPersistentButterflyParticle extends Script {
         return this.cameraEntity;
     }
 
+    private resolveClampedPointSize(): number {
+        return Math.max(BUTTERFLY_POINT_SIZE_MIN, Math.min(BUTTERFLY_POINT_SIZE_MAX, this.pointSize));
+    }
+
     private resolveEffectivePointSize(): number {
-        const radius = readSceneBboxRadius(this.entity.gsplat as GsplatBboxSource);
         return (
-            this.pointSize *
-            Math.max(0.6, Math.min(3.5, radius / SCENE_REF_RADIUS)) *
-            BUTTERFLY_SIZE_SCALE
+            this.resolveClampedPointSize() * BUTTERFLY_POINT_SIZE_RENDER_SCALE * this.cachedViewCompensation
         );
     }
 
     private resolveButterflyMeshScale(): number {
-        const radius = readSceneBboxRadius(this.entity.gsplat as GsplatBboxSource);
-        return (
-            Math.max(0.12, Math.min(2.5, (radius / SCENE_REF_RADIUS) * 0.4)) * BUTTERFLY_SIZE_SCALE
-        );
+        return BUTTERFLY_MESH_REF_SCALE * this.cachedViewCompensation;
     }
 
     private resolveGsLightRange(): number {
@@ -1640,7 +1682,12 @@ class GsplatPersistentButterflyParticle extends Script {
 
         this.mountGsLight(overlay);
 
-        this.entity.addChild(overlay);
+        const cam = this.resolveCameraEntity();
+        if (!cam) {
+            overlay.destroy();
+            return;
+        }
+        cam.addChild(overlay);
         this.overlayEntity = overlay;
         this.sparkleTrailEntity = sparkleTrail;
         this.butterflyMaterial = material;
@@ -1648,10 +1695,8 @@ class GsplatPersistentButterflyParticle extends Script {
         this.sparkleTrailMesh = null;
         this.mounted = true;
 
-        const scale = this.resolveButterflyMeshScale();
-        overlay.setLocalScale(scale, scale, scale);
-        worldPointToOverlayLocal(this.entity, this.worldPos, _worldPos);
-        overlay.setLocalPosition(_worldPos.x, _worldPos.y, _worldPos.z);
+        this.updateFollowDistances(cam);
+        this.syncOverlayTransform(cam);
 
         this.pushUniforms();
         app.renderNextFrame = true;
@@ -1668,6 +1713,8 @@ class GsplatPersistentButterflyParticle extends Script {
         this.sparkleHasPrevFrame = false;
         this.cachedPointSize = -1;
         this.cameraEntity = null;
+        this.cachedFollowDist = CAMERA_FOLLOW_DISTANCE;
+        this.cachedViewCompensation = 1;
         this.gsLightEntity = null;
         if (this.overlayEntity) {
             this.overlayEntity.destroy();
