@@ -83,6 +83,10 @@ import { initAnnotationFacade } from './editor-modules/annotation-facade';
 import { initEnvironmentFacade } from './editor-modules/environment-facade';
 import { initEffectsFacade } from './editor-modules/effects-facade';
 import { createAssetEffectsController, type AssetEffectsController } from './vfx/effects-runtime/asset/asset-effects-controller';
+import {
+    createAssetEffectViewToggleController,
+    type AssetEffectViewToggleController
+} from './vfx/effects-runtime/asset/asset-effect-view-toggle-controller';
 import { createEffectsRuntime, type EffectsRuntime } from './vfx/effects-runtime';
 import { initCommandRegistry } from './editor-modules/command-registry';
 import { DEFAULT_DEFERRED_EDITING_LAYERS } from './render/deferred-editing-visual-sync';
@@ -323,6 +327,8 @@ class Viewer {
     effectsRuntime: EffectsRuntime | null = null;
 
     assetEffectsController: AssetEffectsController | null = null;
+
+    assetEffectViewToggleController: AssetEffectViewToggleController | null = null;
 
     voxelOverlay: VoxelDebugOverlay | null = null;
 
@@ -791,6 +797,8 @@ class Viewer {
             this.revealController = new RevealController(global, revealBbox, gsplatEntity, this.cameraManager);
             this.assetEffectsController = createAssetEffectsController(global);
             (global as any).__assetEffectsController = this.assetEffectsController;
+            this.assetEffectViewToggleController = createAssetEffectViewToggleController(global);
+            (global as any).__assetEffectViewToggleController = this.assetEffectViewToggleController;
 
             const ensureShadowPipelineReady = () => {
                 if (!isShadowSystemEnabled(global) || !this.shadowPipelineMount) {
