@@ -1,19 +1,44 @@
 import {
+    applyAssetEffectDelete,
+    applyAssetEffectParamsPatch,
+    applyAssetEffectStart,
+    readAssetEffectInstanceForTarget,
+    applyAssetEffectStop,
+    isAssetEffectProtocolEnvelope,
+    normalizeAssetEffectEnvelope
+} from './protocol-adapters/asset-effects-protocol-adapter';
+import {
     applyGsplatRevealParamsPatch,
     applyGsplatRevealEffectAdd,
     applyGsplatRevealEffectDelete,
     applyGsplatPersistentParamsPatch,
-    applyGsplatPersistentEffectAdd,
-    applyGsplatPersistentEffectDelete,
+    isPersistentProtocolEffectId,
+    applyGsplatPersistentEffectAddForId,
+    applyGsplatPersistentEffectDeleteForId,
     isEffectProtocolEnvelope,
     paramsPatchHasRevealKeys,
     paramsPatchHasPersistentKeys,
-    SCENE_GSPLAT_REVEAL_EFFECT_ID,
-    SCENE_GSPLAT_PERSISTENT_EFFECT_ID
+    SCENE_GSPLAT_REVEAL_EFFECT_ID
 } from './protocol-adapters/effects-protocol-adapter';
-import { readRevealParams } from '../settings-serialize/effects-sync';
+import {
+    ASSET_GSPLAT_EFFECT_ID,
+    resolveAssetEffectType
+} from '../vfx/effects-runtime/effect-types';
+import {
+    patchAssetRuntimeMirror,
+    patchAssetInstanceFromParams,
+    readRevealParams,
+    syncEffectsRuntimeStateFromSettings
+} from '../settings-serialize/effects-sync';
 import { isPersistentVfx } from '../vfx/effects-runtime/reveal/reveal-policy';
-import type { Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
+import type {
+    Global,
+    ModuleCommand,
+    ModuleContext,
+    ModuleFacade,
+    ModuleLifecycleReason,
+    SelectionSource
+} from '../types';
 
 /**
  * 与 `message-bridge` 中 `dispatchEffects` 同路径：经 `CommandRegistry` → `EffectsFacade.handleCommand`。
@@ -53,8 +78,98 @@ class EffectsFacade implements ModuleFacade {
     handleCommand(ctx: ModuleContext, command: ModuleCommand): void {
         const { global, events } = ctx;
         switch (command.type) {
+        case 'EFFECT_ADD': {
+            const raw = command.payload;
+            if (!raw || typeof raw !== 'object') break;
+            const effectId = (raw as { effectId?: unknown }).effectId;
+            const effectType = (raw as { effectType?: unknown }).effectType;
+            const paramsRaw = (raw as { params?: unknown }).params;
+            const params =
+                paramsRaw && typeof paramsRaw === 'object' && !Array.isArray(paramsRaw) ?
+                    (paramsRaw as Record<string, unknown>) :
+                    {};
+            if (typeof effectId !== 'string' || typeof effectType !== 'string') break;
+            if (effectId === ASSET_GSPLAT_EFFECT_ID) {
+                const targetId = (raw as { targetId?: unknown }).targetId;
+                if (typeof targetId !== 'string') break;
+                if (effectType === '') {
+                    const current = readAssetEffectInstanceForTarget(global, targetId);
+                    const runtimeType = global.state.effectsRuntimeState?.asset?.instances?.[targetId]?.activeType;
+                    const stopType =
+                        current?.type ??
+                        (typeof runtimeType === 'string' ? runtimeType : null);
+                    if (current) {
+                        patchAssetInstanceFromParams(global.settings, targetId, { enable: false });
+                    }
+                    syncEffectsRuntimeStateFromSettings(global.state, global.settings);
+                    patchAssetRuntimeMirror(global.state, targetId, { status: 'inactive' });
+                    if (stopType) {
+                        applyAssetEffectStop(global, normalizeAssetEffectEnvelope({
+                            effectId: ASSET_GSPLAT_EFFECT_ID,
+                            targetId,
+                            params: { type: stopType }
+                        }));
+                    }
+                    break;
+                }
+                const current = readAssetEffectInstanceForTarget(global, targetId);
+                const runtimeType = global.state.effectsRuntimeState?.asset?.instances?.[targetId]?.activeType;
+                const stopType =
+                    current?.type ??
+                    (typeof runtimeType === 'string' ? runtimeType : null);
+                if (stopType) {
+                    applyAssetEffectStop(global, normalizeAssetEffectEnvelope({
+                        effectId: ASSET_GSPLAT_EFFECT_ID,
+                        targetId,
+                        params: { type: stopType }
+                    }));
+                }
+                applyAssetEffectStart(global, normalizeAssetEffectEnvelope({
+                    effectId,
+                    targetId,
+                    params: { ...params, type: effectType, enable: true, autoStart: true }
+                }));
+                break;
+            }
+            if (effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID) {
+                applyGsplatRevealEffectAdd(global, effectType);
+                break;
+            }
+            if (!isPersistentProtocolEffectId(effectId)) break;
+            applyGsplatPersistentEffectAddForId(global, effectId, effectType === '' ? 'none' : effectType);
+            break;
+        }
+        case 'EFFECT_DELETE': {
+            const raw = command.payload;
+            if (!raw || typeof raw !== 'object') break;
+            const effectId = (raw as { effectId?: unknown }).effectId;
+            if (typeof effectId !== 'string') break;
+            if (effectId === ASSET_GSPLAT_EFFECT_ID) {
+                const targetId = (raw as { targetId?: unknown }).targetId;
+                if (typeof targetId !== 'string' || targetId.length === 0) break;
+                applyAssetEffectDelete(global, {
+                    effectId,
+                    targetId
+                });
+                break;
+            }
+            if (effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID) {
+                applyGsplatRevealEffectDelete(global);
+                break;
+            }
+            if (isPersistentProtocolEffectId(effectId)) {
+                const effectType = (raw as { effectType?: unknown }).effectType;
+                applyGsplatPersistentEffectDeleteForId(global, effectId, typeof effectType === 'string' ? effectType : 'none');
+            }
+            break;
+        }
         case 'EFFECT_PARAMS_PATCH': {
             const raw = command.payload;
+            if (isAssetEffectProtocolEnvelope(raw)) {
+                if (!resolveAssetEffectType(raw.effectId, raw.params)) break;
+                applyAssetEffectParamsPatch(global, normalizeAssetEffectEnvelope(raw));
+                break;
+            }
             if (!isEffectProtocolEnvelope(raw)) break;
             const params = (raw as { params?: unknown }).params;
             if (typeof params !== 'object' || params === null) break;
@@ -62,23 +177,37 @@ class EffectsFacade implements ModuleFacade {
             if (raw.effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID) {
                 if (!paramsPatchHasRevealKeys(pr)) break;
                 applyGsplatRevealParamsPatch(global, pr);
-            } else if (raw.effectId === SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
+            } else if (isPersistentProtocolEffectId(raw.effectId)) {
                 if (!paramsPatchHasPersistentKeys(pr)) break;
-                applyGsplatPersistentParamsPatch(global, pr);
+                applyGsplatPersistentParamsPatch(global, pr, raw.effectId);
             } else {
                 break;
             }
             break;
         }
+        case 'EFFECT_START': {
+            const raw = command.payload;
+            if (!isAssetEffectProtocolEnvelope(raw)) break;
+            if (!resolveAssetEffectType(raw.effectId, raw.params)) break;
+            applyAssetEffectStart(global, normalizeAssetEffectEnvelope(raw));
+            break;
+        }
+        case 'EFFECT_STOP': {
+            const raw = command.payload;
+            if (!isAssetEffectProtocolEnvelope(raw)) break;
+            if (!resolveAssetEffectType(raw.effectId, raw.params)) break;
+            applyAssetEffectStop(global, normalizeAssetEffectEnvelope(raw));
+            break;
+        }
         case 'EFFECT_TOGGLE': {
             const raw = command.payload;
             if (!isEffectProtocolEnvelope(raw)) break;
-            if (raw.effectId !== SCENE_GSPLAT_PERSISTENT_EFFECT_ID) break;
+            if (!isPersistentProtocolEffectId(raw.effectId)) break;
             const params = (raw as { params?: unknown }).params;
             if (typeof params !== 'object' || params === null) break;
             const pr = params as Record<string, unknown>;
             if (!paramsPatchHasPersistentKeys(pr)) break;
-            applyGsplatPersistentParamsPatch(global, pr);
+            applyGsplatPersistentParamsPatch(global, pr, raw.effectId);
             break;
         }
         case 'EFFECT_REPLAY': {
@@ -92,30 +221,6 @@ class EffectsFacade implements ModuleFacade {
             events.fire('revealRestart', restartAnim);
             break;
         }
-        case 'EFFECT_ADD': {
-            const raw = command.payload;
-            if (!isEffectProtocolEnvelope(raw)) break;
-            const effectType = (raw as { effectType?: unknown }).effectType;
-            if (typeof effectType !== 'string') break;
-            if (raw.effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID) {
-                applyGsplatRevealEffectAdd(global, effectType);
-            } else if (raw.effectId === SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
-                applyGsplatPersistentEffectAdd(global, effectType);
-            }
-            break;
-        }
-        case 'EFFECT_DELETE': {
-            const raw = command.payload;
-            if (!isEffectProtocolEnvelope(raw)) break;
-            if (raw.effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID) {
-                applyGsplatRevealEffectDelete(global);
-            } else if (raw.effectId === SCENE_GSPLAT_PERSISTENT_EFFECT_ID) {
-                const effectType = (raw as { effectType?: unknown }).effectType;
-                if (typeof effectType !== 'string') break;
-                applyGsplatPersistentEffectDelete(global, effectType);
-            }
-            break;
-        }
         default:
             break;
         }
@@ -125,13 +230,49 @@ class EffectsFacade implements ModuleFacade {
     selectById(_ctx: ModuleContext, _id: string | null, _source: SelectionSource): void {}
 }
 
+/** 左侧「物体特效」模块门面：命令与场景特效共用 EffectsFacade，生命周期独立注册便于编排器切换。 */
+class AssetEffectsFacade implements ModuleFacade {
+    readonly module = 'assetEffects' as const;
+
+    constructor(private readonly _sceneEffects: EffectsFacade) {}
+
+    onEnter(ctx: ModuleContext): void {
+        this._sceneEffects.onEnter(ctx);
+        ctx.events.fire('assetEffectsFacade:enter');
+    }
+
+    onExit(ctx: ModuleContext, _reason?: ModuleLifecycleReason): void {
+        this._sceneEffects.onExit(ctx);
+        ctx.events.fire('assetEffectsFacade:exit');
+    }
+
+    onEditModeExit(ctx: ModuleContext): void {
+        this._sceneEffects.onEditModeExit(ctx);
+    }
+
+    onPreviewModeChanged(ctx: ModuleContext, previewMode: boolean): void {
+        this._sceneEffects.onPreviewModeChanged?.(ctx, previewMode);
+    }
+
+    handleCommand(ctx: ModuleContext, command: ModuleCommand): void {
+        this._sceneEffects.handleCommand(ctx, command);
+    }
+
+    selectById(ctx: ModuleContext, id: string | null, source: SelectionSource): void {
+        this._sceneEffects.selectById(ctx, id, source);
+    }
+}
+
 const initEffectsFacade = (global: Global): ModuleFacade => {
     const facade = new EffectsFacade();
+    const assetEffectsFacade = new AssetEffectsFacade(facade);
     const orchestrator = (global as any).__moduleOrchestrator as { registerFacade: (f: ModuleFacade) => void } | undefined;
     orchestrator?.registerFacade(facade);
+    orchestrator?.registerFacade(assetEffectsFacade);
     (global as any).__effectsFacade = facade;
+    (global as any).__assetEffectsFacade = assetEffectsFacade;
     (global as any).__commandRegistry?.register?.('effects', facade);
     return facade;
 };
 
-export { EffectsFacade, initEffectsFacade, dispatchEffectsModuleCommand };
+export { EffectsFacade, AssetEffectsFacade, initEffectsFacade, dispatchEffectsModuleCommand };

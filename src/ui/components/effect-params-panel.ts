@@ -165,6 +165,8 @@ const createAxisInputs = (
         input.type = 'number';
         input.className = 'settingsInput effectParamAxisInput';
         input.step = String(spec.step ?? 0.1);
+        if (spec.min !== undefined) input.min = String(spec.min);
+        if (spec.max !== undefined) input.max = String(spec.max);
 
         axisWrap.appendChild(axisLabel);
         axisWrap.appendChild(input);
@@ -249,6 +251,41 @@ const createEnumControl = (
     };
 };
 
+const createTextControl = (
+    spec: EffectParamUiSpec,
+    onChange: (key: string, value: string) => void
+): ControlEntry => {
+    const row = document.createElement('div');
+    row.className = 'effectParamRow settingsRow';
+
+    const label = document.createElement('label');
+    label.className = 'effectParamLabel';
+    label.textContent = spec.label;
+    label.title = spec.key;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'settingsInput effectParamText';
+
+    const emit = () => {
+        onChange(spec.key, input.value);
+    };
+
+    input.addEventListener('change', emit);
+    row.appendChild(label);
+    row.appendChild(input);
+
+    return {
+        spec,
+        row,
+        write: (value: unknown) => {
+            input.value = typeof value === 'string'
+                ? value
+                : (typeof spec.default === 'string' ? spec.default : '');
+        }
+    };
+};
+
 const createColorControl = (
     spec: EffectParamUiSpec,
     onChange: (key: string, value: [number, number, number]) => void
@@ -269,6 +306,8 @@ const createControl = (
         return createBooleanControl(spec, onChange);
     case 'enum':
         return createEnumControl(spec, onChange);
+    case 'text':
+        return createTextControl(spec, onChange);
     case 'color':
         return createColorControl(spec, onChange);
     case 'vec3':

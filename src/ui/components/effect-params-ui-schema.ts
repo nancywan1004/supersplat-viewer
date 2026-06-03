@@ -9,12 +9,24 @@ import {
 import { BUTTERFLY_PARTICLE_DEFAULTS } from '../../vfx/effects-runtime/persistent/gsplat-butterfly-particle';
 import { SPARKLE_TWINKLE_DEFAULTS } from '../../vfx/effects-runtime/persistent/gsplat-sparkle-twinkle';
 import {
+    GSPLAT_FALLING_PETALS_DEFAULT_ATLAS_URL,
+    GSPLAT_FALLING_PETALS_PRESET
+} from '../../vfx/gsplat-falling-petals';
+import { GSPLAT_FALLING_WEATHER_PRESETS } from '../../vfx/gsplat-falling-weather';
+import { DEFAULT_NOSTALGIC_COMIC_SETTINGS } from '../../vfx/stylisation/nostalgic-comic';
+import { DEFAULT_YIYUN_DIANRAN_SETTINGS } from '../../vfx/stylisation/yiyun-dianran-stylisation';
+import {
+    DEFAULT_PALETTE_PIXEL_SETTINGS,
+    PALETTE_PIXEL_PALETTE_NAMES,
+    PALETTE_PIXEL_SIZE_STEPS
+} from '../../vfx/stylisation/palette-pixel';
+import {
     getRevealEffectParamKeys,
     getRevealParamFieldKind,
     type RevealParamFieldKind
 } from '../../vfx/effects-runtime/reveal/reveal-effect-params';
 
-export type EffectParamKind = RevealParamFieldKind | 'vec3' | 'enum';
+export type EffectParamKind = RevealParamFieldKind | 'vec3' | 'enum' | 'text';
 
 export interface EffectParamEnumOption {
     value: number;
@@ -28,7 +40,7 @@ export interface EffectParamUiSpec {
     min?: number;
     max?: number;
     step?: number;
-    default?: number | boolean | [number, number, number] | [number, number];
+    default?: number | boolean | string | [number, number, number] | [number, number];
     options?: readonly EffectParamEnumOption[];
 }
 
@@ -186,7 +198,46 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     wavelength: '波纹间距',
     waveSpeed: '波动速度',
     scaleBlend: '尺度混合',
-    center: '效果中心'
+    center: '效果中心',
+    opacity: '透明度',
+    color: '颜色',
+    glowColor: '辉光颜色',
+    glowStrength: '辉光强度',
+    glowWidth: '辉光宽度',
+    extents: '覆盖范围',
+    density: '密度',
+    petalParticleCount: '花瓣数量',
+    petalTextureUrl: '花瓣贴图',
+    continuousRender: '持续渲染',
+    speed: '速度',
+    drift: '飘移',
+    globalOpacity: '整体透明度',
+    farOpacity: '远处透明度',
+    particleMinSize: '最小粒径',
+    particleMaxSize: '最大粒径',
+    elongate: '拉伸长度',
+    flutter: '摆动',
+    tumble: '翻滚',
+    angle: '角度',
+    fogDensity: '雾密度',
+    exposure: '曝光',
+    useFog: '使用雾效',
+    cameraClearColor: '相机底色',
+    useCameraClearColor: '使用相机底色',
+    restoreSceneAtmosphere: '恢复场景氛围',
+    levelCount: '色阶数量',
+    edgeThreshold: '描边阈值',
+    paperColor: '纸张颜色',
+    lightColor: '亮部颜色',
+    strokeColor: '线稿颜色',
+    postEffectEnabled: '后处理',
+    saturation: '饱和度',
+    glowIntensity: '发光强度',
+    pixelSize: '像素尺寸',
+    paletteIndex: '色盘',
+    levels: '色阶',
+    levelRange: '色阶范围',
+    ditherSpread: '抖动扩散'
 };
 
 /** 亮光细闪中文文案与控件范围（默认数值取自 {@link SPARKLE_TWINKLE_DEFAULTS}） */
@@ -331,6 +382,114 @@ function applyOverallWaveParamUiSpec(spec: EffectParamUiSpec): void {
     if (ui.step !== undefined) spec.step = ui.step;
 }
 
+type PersistentParamUiOverride = Partial<
+    Pick<EffectParamUiSpec, 'label' | 'kind' | 'min' | 'max' | 'step' | 'default' | 'options'>
+>;
+
+const PALETTE_PIXEL_SIZE_OPTIONS: readonly EffectParamEnumOption[] = PALETTE_PIXEL_SIZE_STEPS.map((value) => ({
+    value,
+    label: `${value}`
+}));
+
+const PALETTE_PIXEL_PALETTE_OPTIONS: readonly EffectParamEnumOption[] = Object.entries(PALETTE_PIXEL_PALETTE_NAMES)
+    .map(([value, label]) => ({ value: Number(value), label }));
+
+const FALLING_PETALS_PARAM_KEYS = ['density', 'extents'] as const;
+const FALLING_RAIN_PARAM_KEYS = [
+    'density',
+    'speed',
+    'opacity',
+    'drift',
+    'extents',
+    'particleMinSize',
+    'particleMaxSize',
+    'elongate',
+    'fogDensity',
+    'exposure',
+    'useFog',
+    'cameraClearColor',
+    'angle'
+] as const;
+const FALLING_SNOW_PARAM_KEYS = [
+    'density',
+    'speed',
+    'opacity',
+    'farOpacity',
+    'drift',
+    'extents',
+    'particleMinSize',
+    'particleMaxSize',
+    'elongate',
+    'fogDensity',
+    'exposure',
+    'useFog',
+    'angle'
+] as const;
+
+const FALLING_PETALS_DEFAULTS: Record<string, EffectParamUiSpec['default']> = {
+    ...GSPLAT_FALLING_PETALS_PRESET,
+    petalTextureUrl: GSPLAT_FALLING_PETALS_DEFAULT_ATLAS_URL,
+    continuousRender: true
+};
+
+const FALLING_PETALS_PARAM_UI: Record<string, PersistentParamUiOverride> = {
+    density: { min: 0.05, max: 2, step: 0.05 },
+    extents: { min: 1, max: 120, step: 1 }
+};
+
+const WEATHER_PARAM_UI: Record<string, PersistentParamUiOverride> = {
+    speed: { min: 0, max: 30, step: 0.1 },
+    drift: { min: 0, max: 2, step: 0.01 },
+    opacity: { min: 0, max: 1, step: 0.01 },
+    globalOpacity: { min: 0, max: 1, step: 0.01 },
+    farOpacity: { min: 0, max: 1, step: 0.01 },
+    color: { min: 0, max: 2, step: 0.01 },
+    particleMinSize: { min: 0.001, max: 0.1, step: 0.001 },
+    particleMaxSize: { min: 0.001, max: 0.1, step: 0.001 },
+    elongate: { min: 1, max: 30, step: 0.1 },
+    flutter: { min: 0, max: 2, step: 0.01 },
+    tumble: { min: 0, max: 2, step: 0.01 },
+    density: { min: 0.1, max: 4, step: 0.1 },
+    extents: { min: 1, max: 80, step: 1 },
+    angle: { min: -75, max: 75, step: 1 },
+    fogDensity: { min: 0, max: 0.05, step: 0.0005 },
+    exposure: { min: 0, max: 1.5, step: 0.01 },
+    cameraClearColor: { min: 0, max: 1, step: 0.01 },
+    continuousRender: { default: true },
+    restoreSceneAtmosphere: { default: true }
+};
+
+const NOSTALGIC_COMIC_PARAM_UI: Record<string, PersistentParamUiOverride> = {
+    levelCount: { min: 3, max: 7, step: 1, default: DEFAULT_NOSTALGIC_COMIC_SETTINGS.levelCount },
+    edgeThreshold: { min: 0.3, max: 3, step: 0.01, default: DEFAULT_NOSTALGIC_COMIC_SETTINGS.edgeThreshold },
+    paperColor: { min: 0, max: 1, step: 0.01, default: [...DEFAULT_NOSTALGIC_COMIC_SETTINGS.paperColor] },
+    lightColor: { min: 0, max: 1, step: 0.01, default: [...DEFAULT_NOSTALGIC_COMIC_SETTINGS.lightColor] },
+    strokeColor: { min: 0, max: 1, step: 0.01, default: [...DEFAULT_NOSTALGIC_COMIC_SETTINGS.strokeColor] }
+};
+
+const YIYUN_DIANRAN_PARAM_UI: Record<string, PersistentParamUiOverride> = {
+    postEffectEnabled: { default: DEFAULT_YIYUN_DIANRAN_SETTINGS.postEffectEnabled },
+    saturation: { min: 1, max: 1.6, step: 0.01, default: DEFAULT_YIYUN_DIANRAN_SETTINGS.saturation },
+    glowIntensity: { min: 0, max: 0.1, step: 0.001, default: DEFAULT_YIYUN_DIANRAN_SETTINGS.glowIntensity },
+    glowColor: { min: 0, max: 1, step: 0.01, default: [...DEFAULT_YIYUN_DIANRAN_SETTINGS.glowColor] }
+};
+
+const PALETTE_PIXEL_PARAM_UI: Record<string, PersistentParamUiOverride> = {
+    pixelSize: {
+        kind: 'enum',
+        options: PALETTE_PIXEL_SIZE_OPTIONS,
+        default: DEFAULT_PALETTE_PIXEL_SETTINGS.pixelSize
+    },
+    paletteIndex: {
+        kind: 'enum',
+        options: PALETTE_PIXEL_PALETTE_OPTIONS,
+        default: DEFAULT_PALETTE_PIXEL_SETTINGS.paletteIndex
+    },
+    levels: { min: 2, max: 20, step: 1, default: DEFAULT_PALETTE_PIXEL_SETTINGS.levels },
+    levelRange: { min: 0, max: 2, step: 0.01, default: DEFAULT_PALETTE_PIXEL_SETTINGS.levelRange },
+    ditherSpread: { min: 0, max: 0.08, step: 0.001, default: DEFAULT_PALETTE_PIXEL_SETTINGS.ditherSpread }
+};
+
 const buildPersistentSpec = (key: string): EffectParamUiSpec => {
     const kind = getPersistentParamFieldKind(key);
     const base: EffectParamUiSpec = { key, label: PERSISTENT_PARAM_LABELS[key] ?? labelForKey(key), kind };
@@ -350,11 +509,53 @@ const buildPersistentSpec = (key: string): EffectParamUiSpec => {
         base.default = [0, 0, 0];
         return base;
     }
+    if (kind === 'text') {
+        base.default = '';
+        return base;
+    }
     const range = REVEAL_NUMBER_RANGES[key];
     if (range) {
         return { ...base, ...range };
     }
     return { ...base, min: 0, max: 10, step: 0.01 };
+};
+
+function applyPersistentParamUiOverride(spec: EffectParamUiSpec, override: PersistentParamUiOverride | undefined): void {
+    if (!override) return;
+    if (override.label !== undefined) spec.label = override.label;
+    if (override.kind !== undefined) spec.kind = override.kind;
+    if (override.min !== undefined) spec.min = override.min;
+    if (override.max !== undefined) spec.max = override.max;
+    if (override.step !== undefined) spec.step = override.step;
+    if (override.default !== undefined) spec.default = Array.isArray(override.default)
+        ? ([...override.default] as [number, number, number] | [number, number])
+        : override.default;
+    if (override.options !== undefined) spec.options = override.options;
+}
+
+function persistentParamOverrideFor(effectType: string, key: string): PersistentParamUiOverride | undefined {
+    if (effectType === 'falling-petals') {
+        return { ...FALLING_PETALS_PARAM_UI[key], default: FALLING_PETALS_DEFAULTS[key] };
+    }
+    if (effectType === 'falling-rain' || effectType === 'falling-snow') {
+        const mode = effectType === 'falling-rain' ? 'rain' : 'snow';
+        const defaults: Record<string, EffectParamUiSpec['default']> = {
+            ...GSPLAT_FALLING_WEATHER_PRESETS[mode],
+            continuousRender: true,
+            restoreSceneAtmosphere: true
+        };
+        return { ...WEATHER_PARAM_UI[key], default: defaults[key] };
+    }
+    if (effectType === 'nostalgic-comic') return NOSTALGIC_COMIC_PARAM_UI[key];
+    if (effectType === 'yiyun-dianran') return YIYUN_DIANRAN_PARAM_UI[key];
+    if (effectType === 'palette-pixel') return PALETTE_PIXEL_PARAM_UI[key];
+    return undefined;
+}
+
+const buildPersistentSpecForType = (effectType: string, key: string): EffectParamUiSpec => {
+    const spec = buildPersistentSpec(key);
+    applyPersistentParamUiOverride(spec, persistentParamOverrideFor(effectType, key));
+    return spec;
 };
 
 const buildSparkleTwinkleParamSpec = (key: string): EffectParamUiSpec => {
@@ -408,5 +609,14 @@ export function getPersistentParamSpecs(
             .filter((key) => key !== 'waveDirection' || overallWaveShowsWaveDirection(effectValues?.noiseType))
             .map(buildOverallWaveParamSpec);
     }
-    return getPersistentEffectParamKeys(effectType).map(buildPersistentSpec);
+    if (effectType === 'falling-petals') {
+        return FALLING_PETALS_PARAM_KEYS.map((key) => buildPersistentSpecForType(effectType, key));
+    }
+    if (effectType === 'falling-rain') {
+        return FALLING_RAIN_PARAM_KEYS.map((key) => buildPersistentSpecForType(effectType, key));
+    }
+    if (effectType === 'falling-snow') {
+        return FALLING_SNOW_PARAM_KEYS.map((key) => buildPersistentSpecForType(effectType, key));
+    }
+    return getPersistentEffectParamKeys(effectType).map((key) => buildPersistentSpecForType(effectType, key));
 }

@@ -2,8 +2,9 @@ import type { Entity } from 'playcanvas';
 import type { ExperienceSettings } from '../../../schemas/v2';
 import type { Global } from '../../../types';
 import {
-    getPersistentSceneEffect,
-    readPersistentSceneEffects
+    getPersistentTrackEffect,
+    persistentTrackNameForType,
+    readActivePersistentEffects
 } from '../../../settings-serialize/effects-sync';
 import {
     destroyAllPersistentGsplatScriptsOnEntity,
@@ -29,7 +30,7 @@ export function runPersistentGsplatEntityLifecycle(input: {
 }): void {
     const { global, gsplatEntity, revealController: rc, restartAnimTrack } = input;
     (global.app as any).effectsRuntime?.syncPersistentGsplatRegistryFromSettings?.();
-    const persistentEntries = readPersistentSceneEffects(global.settings as ExperienceSettings);
+    const persistentEntries = readActivePersistentEffects(global.settings as ExperienceSettings);
     if (persistentEntries.length === 0) {
         destroyAllPersistentGsplatScriptsOnEntity(gsplatEntity);
         if (rc) {
@@ -61,7 +62,7 @@ function pickPrimaryMountedPersistentScript(
     gsplatEntity: Entity,
     settings: ExperienceSettings
 ): { effectType: string; script: any } | null {
-    for (const entry of readPersistentSceneEffects(settings)) {
+    for (const entry of readActivePersistentEffects(settings)) {
         const script = getMountedPersistentGsplatScript(gsplatEntity, entry.type) as any;
         if (script) {
             return { effectType: entry.type, script };
@@ -91,7 +92,7 @@ export function applyPersistentSceneEffectEnableChange(input: {
 }): void {
     const { global, gsplatEntity, revealController: rc, effectType, enable } = input;
     const settings = global.settings as ExperienceSettings;
-    const entry = getPersistentSceneEffect(settings, effectType);
+    const entry = getPersistentTrackEffect(settings, persistentTrackNameForType(effectType), effectType);
     if (!entry) {
         return;
     }
@@ -100,7 +101,7 @@ export function applyPersistentSceneEffectEnableChange(input: {
 
     if (!enable) {
         destroyPersistentGsplatScriptOnEntity(gsplatEntity, effectType);
-        const stillEnabled = readPersistentSceneEffects(settings);
+        const stillEnabled = readActivePersistentEffects(settings);
         if (stillEnabled.length === 0) {
             if (rc) {
                 rc.finishPersistentGsplatExternalUnmount();

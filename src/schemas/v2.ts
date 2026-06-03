@@ -314,14 +314,27 @@ const validateV2 = (data: unknown): ExperienceSettings => {
             throw new Error('settings.effects.reveal.paramsById must be an object');
         }
         const pers = assertObject(ef.persistent, 'settings.effects.persistent');
-        const scene = assertObject(pers.scene, 'settings.effects.persistent.scene');
-        assertString(scene.activeEffectId, 'settings.effects.persistent.scene.activeEffectId');
-        if (typeof scene.paramsById !== 'object' || scene.paramsById === null) {
-            throw new Error('settings.effects.persistent.scene.paramsById must be an object');
+        for (const subTrackName of ['scene', 'camera', 'stylization'] as const) {
+            const subTrack = assertObject(pers[subTrackName], `settings.effects.persistent.${subTrackName}`);
+            assertString(subTrack.activeEffectId, `settings.effects.persistent.${subTrackName}.activeEffectId`);
+            if (typeof subTrack.paramsById !== 'object' || subTrack.paramsById === null) {
+                throw new Error(`settings.effects.persistent.${subTrackName}.paramsById must be an object`);
+            }
         }
         const asset = assertObject(ef.asset, 'settings.effects.asset');
-        if (typeof asset.defaultParamsById !== 'object' || asset.defaultParamsById === null) {
-            throw new Error('settings.effects.asset.defaultParamsById must be an object');
+        assertString(asset.activeEffectId, 'settings.effects.asset.activeEffectId');
+        if (asset.instancesByTargetId !== undefined) {
+            if (typeof asset.instancesByTargetId !== 'object' || asset.instancesByTargetId === null) {
+                throw new Error('settings.effects.asset.instancesByTargetId must be an object');
+            }
+            for (const [tid, inst] of Object.entries(asset.instancesByTargetId as Record<string, unknown>)) {
+                const o = assertObject(inst, `settings.effects.asset.instancesByTargetId[${tid}]`);
+                const typeKey = typeof o.type === 'string' ? 'type' : typeof o.effectId === 'string' ? 'effectId' : null;
+                if (!typeKey) {
+                    throw new Error(`settings.effects.asset.instancesByTargetId[${tid}] must have type or effectId`);
+                }
+                assertString(o[typeKey], `settings.effects.asset.instancesByTargetId[${tid}].${typeKey}`);
+            }
         }
     }
 

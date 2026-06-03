@@ -1,10 +1,14 @@
 import type { Entity } from 'playcanvas';
 import type { ExperienceSettings } from '../../../schemas/v2';
 import type { PersistentSceneEffectEntry } from '../../../schemas/v2-custom';
-import { readPersistentSceneEffects } from '../../../settings-serialize/effects-sync';
+import { readActivePersistentEffects } from '../../../settings-serialize/effects-sync';
 import { destroyAllPersistentGsplatScriptsOnEntity, getMountedPersistentGsplatScript } from '../gsplat-effect-script-registry';
 import { PERSISTENT_EFFECT_TYPES } from '../effect-types';
 import { isPersistentVfx } from '../reveal/reveal-policy';
+import { GsplatPersistentFallingPetals, GsplatPersistentFallingWeather } from './falling-weather-persistent';
+import { GsplatPersistentNostalgicComic } from './nostalgic-comic-persistent';
+import { GsplatPersistentPalettePixel } from './palette-pixel-persistent';
+import { GsplatPersistentYiyunDianran } from './yiyun-dianran-persistent';
 import { GsplatRevealPerlinWave } from './gsplat-perlin-wave';
 import { GsplatPersistentOverallWave } from './gsplat-overall-wave';
 import { GsplatPersistentButterflyParticle } from './gsplat-butterfly-particle';
@@ -33,6 +37,18 @@ export function mountPersistentGsplatByEffectType(
     switch (effectType) {
         case 'perlin-wave':
             return createPerlinWaveRevealScript(gsplatEntity, updateScriptCenter, autoStart, effectParams);
+        case 'falling-petals':
+            return createFallingPetalsScript(gsplatEntity, autoStart, effectParams);
+        case 'falling-rain':
+            return createFallingWeatherScript('rain', gsplatEntity, autoStart, effectParams);
+        case 'falling-snow':
+            return createFallingWeatherScript('snow', gsplatEntity, autoStart, effectParams);
+        case 'nostalgic-comic':
+            return createNostalgicComicScript(gsplatEntity, autoStart, effectParams);
+        case 'yiyun-dianran':
+            return createYiyunDianranScript(gsplatEntity, autoStart, effectParams);
+        case 'palette-pixel':
+            return createPalettePixelScript(gsplatEntity, autoStart, effectParams);
         case 'sparkle-twinkle':
             return createSparkleTwinkleScript(gsplatEntity, updateScriptCenter, autoStart, effectParams);
         case 'overall-wave':
@@ -42,6 +58,128 @@ export function mountPersistentGsplatByEffectType(
         default:
             console.warn('[persistent-effect] persistent type in registry but no mount branch:', effectType);
             return null;
+    }
+}
+
+export function createYiyunDianranScript(
+    gsplatEntity: Entity,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn('Cannot create yiyun-dianran script - entity or script component not ready');
+        return null;
+    }
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentYiyunDianran) as any;
+        if (script) {
+            applyPersistentEffectParamsToScript(script, 'yiyun-dianran', effectParams ?? undefined);
+            script.enabled = autoStart;
+            script.applyConfig?.();
+        }
+        return script;
+    } catch (error) {
+        console.error('Failed to create yiyun-dianran persistent script:', error);
+        return null;
+    }
+}
+
+export function createPalettePixelScript(
+    gsplatEntity: Entity,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn('Cannot create palette-pixel script - entity or script component not ready');
+        return null;
+    }
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentPalettePixel) as any;
+        if (script) {
+            applyPersistentEffectParamsToScript(script, 'palette-pixel', effectParams ?? undefined);
+            script.enabled = autoStart;
+            script.applyConfig?.();
+        }
+        return script;
+    } catch (error) {
+        console.error('Failed to create palette-pixel persistent script:', error);
+        return null;
+    }
+}
+
+export function createNostalgicComicScript(
+    gsplatEntity: Entity,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn('Cannot create nostalgic-comic script - entity or script component not ready');
+        return null;
+    }
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentNostalgicComic) as any;
+        if (script) {
+            applyPersistentEffectParamsToScript(script, 'nostalgic-comic', effectParams ?? undefined);
+            script.enabled = autoStart;
+            script.applyConfig?.();
+        }
+        return script;
+    } catch (error) {
+        console.error('Failed to create nostalgic-comic persistent script:', error);
+        return null;
+    }
+}
+
+export function createFallingPetalsScript(
+    gsplatEntity: Entity,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn('Cannot create falling-petals script - entity or script component not ready');
+        return null;
+    }
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentFallingPetals) as any;
+        if (script) {
+            applyPersistentEffectParamsToScript(script, 'falling-petals', effectParams ?? undefined);
+            script.enabled = autoStart;
+            script.applyConfig?.();
+        }
+        return script;
+    } catch (error) {
+        console.error('Failed to create falling-petals persistent script:', error);
+        return null;
+    }
+}
+
+export function createFallingWeatherScript(
+    mode: 'rain' | 'snow',
+    gsplatEntity: Entity,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn(`Cannot create falling-${mode} script - entity or script component not ready`);
+        return null;
+    }
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentFallingWeather) as any;
+        if (script) {
+            script.setModeDefaults?.(mode);
+            applyPersistentEffectParamsToScript(script, `falling-${mode}`, effectParams ?? undefined);
+            script.enabled = autoStart;
+            script.applyConfig?.();
+        }
+        return script;
+    } catch (error) {
+        console.error(`Failed to create falling-${mode} persistent script:`, error);
+        return null;
     }
 }
 
@@ -248,7 +386,7 @@ export function rebindPersistentGsplatTimelineFromSettings(
         bindPersistentTimelineScript(null);
         return;
     }
-    const enabled = readPersistentSceneEffects(settings);
+    const enabled = readActivePersistentEffects(settings);
     let primary: any = null;
     for (const entry of enabled) {
         const script = getMountedPersistentGsplatScript(gsplatEntity, entry.type) as any;
@@ -264,7 +402,7 @@ export function getPersistentGsplatEffectsRuntimeScriptType(
     gsplatEntity: Entity | null | undefined,
     settings: ExperienceSettings
 ): string {
-    const enabled = readPersistentSceneEffects(settings);
+    const enabled = readActivePersistentEffects(settings);
     if (enabled.length === 0) {
         return 'none';
     }

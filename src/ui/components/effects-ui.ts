@@ -2,13 +2,20 @@ import type { Global, PersistentEffectType, RevealEffectType } from '../../types
 import { PERSISTENT_EFFECT_TYPE_VALUES, REVEAL_EFFECT_TYPE_VALUES } from '../../types';
 import { pushEditHistory } from '../../edit-history';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../../schemas/v2-custom';
-import { SCENE_GSPLAT_PERSISTENT_EFFECT_ID, SCENE_GSPLAT_REVEAL_EFFECT_ID } from '../../vfx/effects-runtime/effects-runtime';
+import {
+    SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID,
+    SCENE_GSPLAT_REVEAL_EFFECT_ID
+} from '../../vfx/effects-runtime/effects-runtime';
 import type { LegacyRevealEffect } from '../../schemas/v2';
 import {
     buildPersistentProtocolParams,
     buildRevealProtocolParams,
     getRevealTotalDuration,
-    readPersistentSceneEffects,
+    readPersistentTrackEffects,
+    persistentTrackNameForType,
+    type PersistentTrackName,
     readRevealParams,
     getRevealStatus,
     getRevealActiveType
@@ -24,6 +31,13 @@ const PERSISTENT_EFFECTS = PERSISTENT_EFFECT_TYPE_VALUES;
 
 const isRevealType = (type: string): boolean => (REVEAL_EFFECTS as readonly string[]).includes(type);
 const isPersistentType = (type: string): boolean => (PERSISTENT_EFFECTS as readonly string[]).includes(type);
+
+const persistentEffectIdForType = (type: string): string => {
+    const track = persistentTrackNameForType(type);
+    if (track === 'camera') return SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID;
+    if (track === 'stylization') return SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID;
+    return SCENE_GSPLAT_PERSISTENT_EFFECT_ID;
+};
 
 export type RevealType = RevealEffectType | PersistentEffectType;
 
@@ -76,12 +90,33 @@ const REVEAL_PANEL_HTML = (() => {
   <fieldset class="effectsTrackFieldset" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:10px 12px;margin-bottom:10px">
     <legend style="padding:0 6px;font-size:13px;font-weight:600">Scene（GSplat）— Persistent</legend>
     <p class="effectsTrackHint" style="font-size:11px;opacity:0.8;margin:0 0 8px;line-height:1.35">可持续特效（可多选）；与 <code>settings.effects.persistent.scene</code> 对应。</p>
-    <div id="persistentTypeMultiselect" class="settingsRow" style="flex-wrap:wrap;gap:8px 12px">
+    <div id="persistentTypeMultiselect" data-persistent-multiselect="scene" class="settingsRow" style="flex-wrap:wrap;gap:8px 12px">
       <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="perlin-wave" data-persistent-enable class="settingsCheckbox"> Perlin Wave</label>
       <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="sparkle-twinkle" data-persistent-enable class="settingsCheckbox"> 亮光细闪</label>
       <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="overall-wave" data-persistent-enable class="settingsCheckbox"> 整体波动</label>
       <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="butterfly-particle" data-persistent-enable class="settingsCheckbox"> 琉光飞蝶</label>
     </div>
+  </fieldset>
+  <fieldset class="effectsTrackFieldset" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:10px 12px;margin-bottom:10px">
+    <legend style="padding:0 6px;font-size:13px;font-weight:600">Camera — Persistent</legend>
+    <p class="effectsTrackHint" style="font-size:11px;opacity:0.8;margin:0 0 8px;line-height:1.35">镜头/天气类可持续特效；同轨新增会替换旧类型。</p>
+    <div data-persistent-multiselect="camera" class="settingsRow" style="flex-wrap:wrap;gap:8px 12px">
+      <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="falling-petals" data-persistent-enable class="settingsCheckbox"> Falling Petals</label>
+      <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="falling-rain" data-persistent-enable class="settingsCheckbox"> Falling Rain</label>
+      <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="falling-snow" data-persistent-enable class="settingsCheckbox"> Falling Snow</label>
+    </div>
+  </fieldset>
+  <fieldset class="effectsTrackFieldset" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:10px 12px;margin-bottom:10px">
+    <legend style="padding:0 6px;font-size:13px;font-weight:600">Stylization — Persistent</legend>
+    <p class="effectsTrackHint" style="font-size:11px;opacity:0.8;margin:0 0 8px;line-height:1.35">风格化可持续特效；同轨新增会替换旧类型。</p>
+    <div data-persistent-multiselect="stylization" class="settingsRow" style="flex-wrap:wrap;gap:8px 12px">
+      <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="nostalgic-comic" data-persistent-enable class="settingsCheckbox"> Nostalgic Comic</label>
+      <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="yiyun-dianran" data-persistent-enable class="settingsCheckbox"> 意韵点染</label>
+      <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="palette-pixel" data-persistent-enable class="settingsCheckbox"> 像素色板</label>
+    </div>
+  </fieldset>
+  <fieldset class="effectsTrackFieldset" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:10px 12px;margin-bottom:10px">
+    <legend style="padding:0 6px;font-size:13px;font-weight:600">Persistent Params</legend>
     <div id="persistentEffectParamsPanels" class="effectParamsPanel hidden"></div>
   </fieldset>
   <fieldset class="effectsTrackFieldset effectsTrackAsset" style="border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px 12px;margin-bottom:10px;opacity:0.85">
@@ -135,7 +170,7 @@ export function initRevealUI(global: Global): () => void {
     const revealType = container.querySelector('#revealType') as HTMLSelectElement | null;
     const revealEnableRow = container.querySelector('#revealEnableRow') as HTMLElement | null;
     const revealEnable = container.querySelector('#revealEnable') as HTMLInputElement | null;
-    const persistentMultiselect = container.querySelector('#persistentTypeMultiselect');
+    const persistentMultiselectRoots = Array.from(container.querySelectorAll<HTMLElement>('[data-persistent-multiselect]'));
     const revealRestart = container.querySelector('#revealRestart');
     const totalDurationRow = container.querySelector('#totalDurationRow') as HTMLElement | null;
     const totalDuration = container.querySelector('#totalDuration') as HTMLInputElement | null;
@@ -200,7 +235,11 @@ export function initRevealUI(global: Global): () => void {
         buildRevealProtocolParams(patch, currentRevealType());
 
     const readPersistentEffectParamsForType = (type: string): Record<string, unknown> => {
-        const entry = readPersistentSceneEffects(global.settings, { includeDisabled: true }).find(e => e.type === type);
+        const entry = readPersistentTrackEffects(
+            global.settings,
+            persistentTrackNameForType(type),
+            { includeDisabled: true }
+        ).find(e => e.type === type);
         const ep = entry?.effectParams;
         if (ep && typeof ep === 'object' && !Array.isArray(ep)) {
             return { ...(ep as Record<string, unknown>) };
@@ -232,7 +271,7 @@ export function initRevealUI(global: Global): () => void {
     const patchPersistentEffectParamsForType = (type: string, partial: Record<string, unknown>) => {
         if (Object.keys(partial).length === 0 || !isPersistentType(type)) return;
         routeEffectsCommand('EFFECT_PARAMS_PATCH', {
-            effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+            effectId: persistentEffectIdForType(type),
             params: persistentProtocolParams({ [type]: { effectParams: partial } })
         });
         pushEditHistorySafe();
@@ -269,7 +308,7 @@ export function initRevealUI(global: Global): () => void {
     const patchPersistentEnableForType = (type: string, enable: boolean) => {
         if (!isPersistentType(type)) return;
         routeEffectsCommand('EFFECT_PARAMS_PATCH', {
-            effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+            effectId: persistentEffectIdForType(type),
             params: persistentProtocolParams({ [type]: { enable } })
         });
         pushEditHistorySafe();
@@ -278,7 +317,9 @@ export function initRevealUI(global: Global): () => void {
 
     const syncPersistentParamsPanels = () => {
         if (!persistentEffectParamsPanelsEl) return;
-        const all = readPersistentSceneEffects(global.settings, { includeDisabled: true });
+        const all = (['scene', 'camera', 'stylization'] as PersistentTrackName[]).flatMap(track =>
+            readPersistentTrackEffects(global.settings, track, { includeDisabled: true })
+        );
         const configuredSet = new Set(all.map(e => e.type));
 
         for (const [type, panel] of persistentParamsPanels) {
@@ -386,11 +427,12 @@ export function initRevealUI(global: Global): () => void {
     };
 
     const syncPersistentTypeCheckboxes = () => {
-        if (!persistentMultiselect) return;
-        const all = readPersistentSceneEffects(global.settings, { includeDisabled: true });
+        const all = (['scene', 'camera', 'stylization'] as PersistentTrackName[]).flatMap(track =>
+            readPersistentTrackEffects(global.settings, track, { includeDisabled: true })
+        );
         const activeSet = new Set(all.filter(e => e.enable).map(e => e.type));
         const configuredSet = new Set(all.map(e => e.type));
-        persistentMultiselect.querySelectorAll<HTMLInputElement>('input[data-persistent-type]').forEach((input) => {
+        container.querySelectorAll<HTMLInputElement>('input[data-persistent-type]').forEach((input) => {
             const t = input.dataset.persistentType ?? '';
             input.checked = activeSet.has(t);
             input.indeterminate = configuredSet.has(t) && !activeSet.has(t);
@@ -422,16 +464,18 @@ export function initRevealUI(global: Global): () => void {
         if (!isPersistentType(type)) return;
         if (target.checked) {
             routeEffectsCommand('EFFECT_ADD', {
-                effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+                effectId: persistentEffectIdForType(type),
                 effectType: type
             });
         } else {
-            const configured = readPersistentSceneEffects(global.settings, { includeDisabled: true }).some(
-                e => e.type === type
-            );
+            const configured = readPersistentTrackEffects(
+                global.settings,
+                persistentTrackNameForType(type),
+                { includeDisabled: true }
+            ).some(e => e.type === type);
             if (!configured) return;
             routeEffectsCommand('EFFECT_DELETE', {
-                effectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+                effectId: persistentEffectIdForType(type),
                 effectType: type
             });
         }
@@ -534,19 +578,19 @@ export function initRevealUI(global: Global): () => void {
             }
             syncRevealEnableCheckbox();
             syncPersistentTypeCheckboxes();
-            if (persistentMultiselect) {
+            if (persistentMultiselectRoots.length > 0) {
                 const oneShotRevealPlaying =
                     getRevealStatus(global.state) === 'playing' &&
                     revealTrackType !== 'none' &&
                     !isPersistentVfx(revealTrackType);
-                persistentMultiselect.querySelectorAll<HTMLInputElement>('input[data-persistent-type]').forEach(
+                container.querySelectorAll<HTMLInputElement>('input[data-persistent-type]').forEach(
                     (input) => {
                         input.disabled = oneShotRevealPlaying;
                     }
                 );
-                persistentMultiselect.title = oneShotRevealPlaying
-                    ? 'reveal 播放中不可切换，待 revealComplete 后可操作'
-                    : '';
+                for (const root of persistentMultiselectRoots) {
+                    root.title = oneShotRevealPlaying ? 'reveal 播放中不可切换，待 revealComplete 后可操作' : '';
+                }
             }
             const showTotalDuration = revealTrackType !== 'none' && isRevealType(revealTrackType);
             if (totalDurationRow) {
@@ -621,7 +665,9 @@ export function initRevealUI(global: Global): () => void {
     }
     revealType?.addEventListener('change', onRevealTypeChange);
     revealEnable?.addEventListener('change', onRevealEnableChange);
-    persistentMultiselect?.addEventListener('change', onPersistentTypeCheckboxChange);
+    for (const root of persistentMultiselectRoots) {
+        root.addEventListener('change', onPersistentTypeCheckboxChange);
+    }
     persistentEffectParamsPanelsEl?.addEventListener('change', onPersistentParamsEnableChange);
     totalDuration?.addEventListener('change', onTotalDurationChange);
     revealRestart?.addEventListener('click', onRevealRestartClick);
@@ -652,7 +698,9 @@ export function initRevealUI(global: Global): () => void {
         }
         revealType?.removeEventListener('change', onRevealTypeChange);
         revealEnable?.removeEventListener('change', onRevealEnableChange);
-        persistentMultiselect?.removeEventListener('change', onPersistentTypeCheckboxChange);
+        for (const root of persistentMultiselectRoots) {
+            root.removeEventListener('change', onPersistentTypeCheckboxChange);
+        }
         persistentEffectParamsPanelsEl?.removeEventListener('change', onPersistentParamsEnableChange);
         totalDuration?.removeEventListener('change', onTotalDurationChange);
         revealRestart?.removeEventListener('click', onRevealRestartClick);

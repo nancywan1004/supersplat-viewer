@@ -1,5 +1,5 @@
 import type { ExperienceSettings } from '../../../settings';
-import { readPersistentSceneEffects } from '../../../settings-serialize/effects-sync';
+import { readActivePersistentEffects } from '../../../settings-serialize/effects-sync';
 import type { EffectRegistry } from '../effect-registry';
 import { extractGlslWgslModifyBlocks, OVERALL_WAVE_COMPOSER_ID, PERLIN_WAVE_COMPOSER_ID } from '../gsplat-effect-layers-extractor';
 import { OVERALL_WAVE_REGISTRY_EFFECT_ID, PERLIN_WAVE_REGISTRY_EFFECT_ID } from '../effect-types';
@@ -48,7 +48,7 @@ const PERSISTENT_GSPLAT_REGISTRY_FACTORIES: Record<string, (registry: EffectRegi
  * 按 settings 真源在 `EffectRegistry` 上按需注册 / 卸载 persistent 对应的 scene gsplat 工厂。
  */
 export function syncPersistentGsplatRegistryFactories(settings: ExperienceSettings, registry: EffectRegistry): void {
-    const enabledIds = new Set(readPersistentSceneEffects(settings).map(e => e.type));
+    const enabledIds = new Set(readActivePersistentEffects(settings).map(e => e.type));
 
     for (const factoryId of Object.keys(PERSISTENT_GSPLAT_REGISTRY_FACTORIES)) {
         if (!enabledIds.has(factoryId) && registry.has(factoryId)) {

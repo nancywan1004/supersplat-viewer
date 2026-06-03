@@ -6,6 +6,16 @@
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
         <base href="">
+        <!-- 首屏关键样式：不依赖 index.css 加载，避免 iframe 嵌入时 UI 闪现 -->
+        <style id="sse-critical-ui">
+            .hidden { display: none !important; }
+            .hide-edit-ui #editModeStrip,
+            .hide-edit-ui #editLeftSidebarMount,
+            .hide-edit-ui #rightToolBar,
+            .hide-edit-ui #editBottomToolbarMount {
+                display: none !important;
+            }
+        </style>
         <link rel="stylesheet" href="./index.css">
         <!-- Import map：PlayCanvas 引擎走本地 vendor（dist 构建会同步复制 vendor） -->
         <script type="importmap">
@@ -40,7 +50,7 @@
             const skyboxUrl = toProxy(url.searchParams.get('skybox'));
             const collisionUrl = url.searchParams.get('collision') ?? url.searchParams.get('voxel');
             const settingsUrl = url.searchParams.has('settings') ? url.searchParams.get('settings') : './settings.json';
-            const contentUrl = url.searchParams.has('content') ? url.searchParams.get('content') : './scene.compressed.ply';
+            const contentUrl = url.searchParams.has('content') ? url.searchParams.get('content') : './scene.sog';
             const settingsFetchUrl = toProxy(settingsUrl);
             const contentFetchUrl = toProxy(contentUrl);
             const projectId = url.searchParams.get('projectId') ?? undefined;
@@ -80,7 +90,7 @@
                 noreveal: url.searchParams.has('noreveal'),
                 noBottomUI: true,  // url.searchParams.has('noBottomUI')
                 allowEditMode: !url.searchParams.has('noEditMode'),
-                showEditUI: false,
+                showEditUI: true,
                 disableCameraBounds: false,
                 trackEditHistory: false, //url.searchParams.get('trackEditHistory') !== 'false',
                 editUiTransport: url.searchParams.get('editUiTransport') === 'message-bridge' ? 'message-bridge' : 'internal',
@@ -600,6 +610,9 @@
             <!-- Touch Joystick -->
             <div id="joystickBase" class="hidden">
                 <div id="joystick"></div>
+            </div>
+            <div id="joystickLookBase" class="hidden">
+                <div id="joystickLook"></div>
             </div>
 
             <!-- Annotation Navigator -->

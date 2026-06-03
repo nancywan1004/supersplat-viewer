@@ -9,7 +9,7 @@
  * 避免在 `RevealController` 内再堆散落的 persistent 读侧条件。
  */
 import type { ExperienceSettings } from '../../../schemas/v2';
-import { hasEnabledPersistentSceneEffects } from '../../../settings-serialize/effects-sync';
+import { hasEnabledPersistentEffects } from '../../../settings-serialize/effects-sync';
 import { isPersistentVfx } from './reveal-policy';
 
 export type PersistentGsplatRemountSchedulingReason =
@@ -26,7 +26,7 @@ export function shouldRequestPersistentGsplatRemount(
     revealTrackType: string,
     settings: ExperienceSettings
 ): boolean {
-    if (!hasEnabledPersistentSceneEffects(settings)) {
+    if (!hasEnabledPersistentEffects(settings)) {
         return false;
     }
     if (reason === 'revealTrackExplicitlyNone') {

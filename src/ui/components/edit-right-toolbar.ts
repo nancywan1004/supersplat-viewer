@@ -3,9 +3,17 @@ import type { EditLeftModule } from '../../types';
 import { getAssetPlacementSettingsHTML, bindAssetPlacementSettings } from './asset-placement-settings-ui';
 import { getSceneAssetListHTML, bindSceneAssetList } from './scene-asset-list-ui';
 
-const RIGHT_PANEL_IDS: EditLeftModule[] = ['gs', 'asset', 'annotation', 'environment', 'camera', 'effects'];
+const RIGHT_PANEL_IDS: EditLeftModule[] = [
+    'gs',
+    'asset',
+    'annotation',
+    'environment',
+    'camera',
+    'effects',
+    'assetEffects'
+];
 
-/** 右侧栏多面板 HTML：按左侧模块分面板，环境设置含 Lighting/PostEffect，场景特效含 VFX/Render（保存按钮在顶栏） */
+/** 右侧栏多面板 HTML：场景特效 / 物体特效为独立左栏模块 */
 const EDIT_RIGHT_TOOLBAR_HTML = `
 <div id="rightPanelGs" class="edit-right-panel hidden" data-module="gs">
     <div class="edit-right-panel-placeholder">敬请期待</div>
@@ -37,11 +45,11 @@ const EDIT_RIGHT_TOOLBAR_HTML = `
     <div class="edit-right-panel-placeholder">敬请期待</div>
 </div>
 <div id="rightPanelEffects" class="edit-right-panel hidden" data-module="effects">
-    <div class="settingsRow submenuHeader" id="vfxSubmenuHeader" role="button" tabindex="0">
-        <span class="submenuArrow" id="vfxSubmenuArrow">▶</span>
+    <div class="settingsRow submenuHeader" id="sceneVfxSubmenuHeader" role="button" tabindex="0">
+        <span class="submenuArrow" id="sceneVfxSubmenuArrow">▶</span>
         <span>VFX</span>
     </div>
-    <div id="vfxSubpanel" class="subpanel hidden">
+    <div id="sceneVfxSubpanel" class="subpanel hidden">
         <div id="revealPanelContainer"></div>
     </div>
     <div class="settingsRow submenuHeader" id="renderSubmenuHeader" role="button" tabindex="0">
@@ -52,6 +60,10 @@ const EDIT_RIGHT_TOOLBAR_HTML = `
         <div id="renderPanelContainer"></div>
     </div>
 </div>
+<div id="rightPanelAssetEffects" class="edit-right-panel hidden" data-module="assetEffects">
+    ${getSceneAssetListHTML()}
+    <div id="assetEffectsPanelContainer"></div>
+</div>
 `.trim();
 
 const PANEL_ID_BY_MODULE: Record<EditLeftModule, string> = {
@@ -60,12 +72,13 @@ const PANEL_ID_BY_MODULE: Record<EditLeftModule, string> = {
     annotation: 'rightPanelAnnotation',
     environment: 'rightPanelEnvironment',
     camera: 'rightPanelCamera',
-    effects: 'rightPanelEffects'
+    effects: 'rightPanelEffects',
+    assetEffects: 'rightPanelAssetEffects'
 };
 
 /**
  * 初始化右侧编辑工具栏 UI（保存按钮 + 多模块面板）。
- * 根据 state.editLeftModule 只显示对应面板；环境设置含 Lighting+PostEffect，场景特效含 VFX+Render。
+ * 根据 state.editLeftModule 只显示对应面板；场景特效与物体特效为独立模块。
  * 挂载到 #rightToolBarInner，清空后注入多面板结构，保证 #lightingPanelContainer 等 id 存在供子组件挂载。
  * @returns 清理函数
  */
@@ -140,7 +153,7 @@ export function initEditRightToolbarUI(global: Global): () => void {
     const unbindSubpanels = [
         bindSubpanel('lightingSubmenuHeader', 'lightingSubpanel', 'lightingSubmenuArrow'),
         bindSubpanel('postEffectSubmenuHeader', 'postEffectSubpanel', 'postEffectSubmenuArrow'),
-        bindSubpanel('vfxSubmenuHeader', 'vfxSubpanel', 'vfxSubmenuArrow'),
+        bindSubpanel('sceneVfxSubmenuHeader', 'sceneVfxSubpanel', 'sceneVfxSubmenuArrow'),
         bindSubpanel('renderSubmenuHeader', 'renderSubpanel', 'renderSubmenuArrow')
     ];
 
@@ -153,9 +166,15 @@ export function initEditRightToolbarUI(global: Global): () => void {
         unbindSubpanels.push(bindSceneAssetList(listRoot, global));
     }
 
+    const assetEffectsPanel = document.getElementById('rightPanelAssetEffects');
+    if (assetEffectsPanel) {
+        const listRoot = assetEffectsPanel.querySelector<HTMLElement>('[data-scene-asset-list-root]');
+        unbindSubpanels.push(bindSceneAssetList(listRoot, global));
+    }
+
     return () => {
         events.off('editLeftModule:changed', onEditLeftModuleChanged);
         unbindSubpanels.forEach((fn) => fn());
         container!.innerHTML = '';
     };
-}
+};

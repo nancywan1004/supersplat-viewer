@@ -7,10 +7,10 @@ import {
     clearPersistentRevealTrack,
     getPersistentEffectPaused,
     patchRevealSettingsFromParams,
-    readPersistentSceneEffects,
+    readActivePersistentEffects,
     readRevealParams,
     hasRevealInSettings,
-    hasEnabledPersistentSceneEffects,
+    hasEnabledPersistentEffects,
     patchRevealRuntimeMirror,
     patchPersistentRuntimeMirror,
     syncEffectsRuntimeStateFromSettings
@@ -198,7 +198,13 @@ export class RevealController {
             }
             const script = getMountedPersistentGsplatScript(this.gsplatEntity, t) as any;
             if (script) {
+                const keys = pack.effectParams ? Object.keys(pack.effectParams) : [];
                 applyPersistentEffectParamsToScript(script, t, pack.effectParams ?? undefined);
+                if (t === 'yiyun-dianran' && keys.length === 1 && keys[0] === 'postEffectEnabled') {
+                    script.applyPostEffectConfig?.();
+                } else {
+                    script.applyConfig?.();
+                }
             }
         });
 
@@ -1390,7 +1396,7 @@ export class RevealController {
     /** 一次性开场重播前卸 persistent（composer + 实体脚本）；播完由 {@link schedulePersistentGsplatRemountAfterRevealCompleteIfWanted} 挂回。 */
     private suspendPersistentSceneForOneShotReveal(): void {
         const settings = this.global.settings as ExperienceSettings;
-        if (!hasEnabledPersistentSceneEffects(settings) || !this.gsplatEntity) {
+        if (!hasEnabledPersistentEffects(settings) || !this.gsplatEntity) {
             return;
         }
         destroyAllPersistentGsplatScriptsOnEntity(this.gsplatEntity);
@@ -1565,7 +1571,7 @@ export class RevealController {
      * 仅 **persistent** 可持续特效：切换脚本 `isPaused` 与 `persistent.status`（`playing` ↔ `paused`）。
      */
     togglePersistentPlayPause() {
-        if (readPersistentSceneEffects(this.global.settings as ExperienceSettings).length === 0) {
+        if (readActivePersistentEffects(this.global.settings as ExperienceSettings).length === 0) {
             return;
         }
         this.setPersistentPlayPause(!getPersistentEffectPaused(this.global.state));
@@ -1575,7 +1581,7 @@ export class RevealController {
      * 仅 **persistent**：`persistent.status` 与全部已挂载脚本 `isPaused` 对齐，并 `effectPlayPause:changed`（供 persistent UI）。
      */
     setPersistentPlayPause(paused: boolean) {
-        const enabled = readPersistentSceneEffects(this.global.settings as ExperienceSettings);
+        const enabled = readActivePersistentEffects(this.global.settings as ExperienceSettings);
         if (enabled.length === 0) {
             return;
         }

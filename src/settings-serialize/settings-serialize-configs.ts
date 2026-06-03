@@ -1,7 +1,13 @@
 import type { BloomEditorSession } from '../schemas/v2';
 import type { EffectsSettings, TorchLightSettings } from '../schemas/v2-custom';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../schemas/v2-custom';
-import { SCENE_GSPLAT_PERSISTENT_EFFECT_ID, SCENE_GSPLAT_REVEAL_EFFECT_ID } from '../vfx/effects-runtime/effect-types';
+import {
+    ASSET_GSPLAT_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID,
+    SCENE_GSPLAT_REVEAL_EFFECT_ID
+} from '../vfx/effects-runtime/effect-types';
 
 /** nightMode 子树缺省（`ensureNightMode`） */
 export const DEFAULT_NIGHT_MODE = { fade: 0 } as const;
@@ -71,7 +77,9 @@ export const DEFAULT_REVEAL_EFFECT = {
 export const DEFAULT_EFFECTS: EffectsSettings = {
     reveal: { activeEffectId: SCENE_GSPLAT_REVEAL_EFFECT_ID, paramsById: {} },
     persistent: {
-        scene: { activeEffectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID, paramsById: {} }
+        scene: { activeEffectId: SCENE_GSPLAT_PERSISTENT_EFFECT_ID, paramsById: {} },
+        camera: { activeEffectId: SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID, paramsById: {} },
+        stylization: { activeEffectId: SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID, paramsById: {} }
     },
-    asset: { defaultParamsById: {} }
+    asset: { activeEffectId: ASSET_GSPLAT_EFFECT_ID, instancesByTargetId: {} }
 };

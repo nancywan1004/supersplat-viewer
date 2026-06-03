@@ -51,6 +51,9 @@ import {
 } from './scene-assets/collision/scene-asset-collision';
 import { getCameraCollisionManager } from './collision/camera-collision-manager';
 
+import { loadGsplatMorphSequence } from './vfx/gsplat-morph';
+
+
 export { loadGsplatAsset };
 
 const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progress: number) => void, lodLoader?: LodLoader) => {
@@ -321,6 +324,11 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         uploadedAssets: [],
         scenePlacedEntities: [],
         selectedSceneEntityId: null,
+        /** 物体特效面板子类型（internal 场景列表 morph 多选） */
+        assetEffectUiSubtype: null,
+        /** 当前配置槽 GS 变形关键帧 entity id 列表 */
+        assetEffectsMorphKeyframeIds: [] as string[],
+        
         cameraControlsEnabled: true,
         gizmoPointerActive: false,
         suppressAssetPointerClick: false,

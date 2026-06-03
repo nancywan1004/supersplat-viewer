@@ -19,6 +19,10 @@ export type EffectRuntimeStatus = RevealEffectRuntimeStatus | PersistentEffectRu
 export const SCENE_GSPLAT_REVEAL_EFFECT_ID = 'scene.gsplat-reveal' as const;
 /** 协议与 `settings.effects.persistent.scene` 共用的场景级 GSplat persistent 包 id */
 export const SCENE_GSPLAT_PERSISTENT_EFFECT_ID = 'scene.gsplat-persistent-scene' as const;
+/** 协议与 `settings.effects.persistent.camera` 共用的镜头级 persistent 包 id */
+export const SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID = 'scene.gsplat-persistent-camera' as const;
+/** 协议与 `settings.effects.persistent.stylization` 共用的风格化 persistent 包 id */
+export const SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID = 'scene.gsplat-persistent-stylization' as const;
 
 /** 一次性 reveal 类型清单（不含 persistent；不含 none）；`src/types.ts` 中 `RevealEffectType` 与此同源 re-export */
 export const REVEAL_EFFECT_TYPE_VALUES = [
@@ -50,6 +54,12 @@ export const BUTTERFLY_PARTICLE_REGISTRY_EFFECT_ID = 'butterfly-particle' as con
 /** 可持续 persistent 类型清单；`src/types.ts` 中 `PersistentEffectType` 与此同源 re-export */
 export const PERSISTENT_EFFECT_TYPE_VALUES = [
     'perlin-wave',
+    'falling-petals',
+    'falling-rain',
+    'falling-snow',
+    'nostalgic-comic',
+    'yiyun-dianran',
+    'palette-pixel',
     'sparkle-twinkle',
     'overall-wave',
     'butterfly-particle'
@@ -60,6 +70,95 @@ export const PERSISTENT_EFFECT_TYPE_VALUES = [
  * `reveal-policy` 的 `PERSISTENT_VFX`、`effects-runtime` 内置 persistent 轨、`mountPersistentGsplatByEffectType` 均与此同一 `Set` 引用对齐。
  */
 export const PERSISTENT_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSISTENT_EFFECT_TYPE_VALUES);
+
+export const PERSISTENT_SCENE_EFFECT_TYPE_VALUES = [
+    'perlin-wave',
+    'sparkle-twinkle',
+    'overall-wave',
+    'butterfly-particle'
+] as const;
+
+export const PERSISTENT_CAMERA_EFFECT_TYPE_VALUES = [
+    'falling-petals',
+    'falling-rain',
+    'falling-snow'
+] as const;
+
+export const PERSISTENT_STYLIZATION_EFFECT_TYPE_VALUES = [
+    'nostalgic-comic',
+    'yiyun-dianran',
+    'palette-pixel'
+] as const;
+
+export const PERSISTENT_SCENE_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSISTENT_SCENE_EFFECT_TYPE_VALUES);
+export const PERSISTENT_CAMERA_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSISTENT_CAMERA_EFFECT_TYPE_VALUES);
+export const PERSISTENT_STYLIZATION_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSISTENT_STYLIZATION_EFFECT_TYPE_VALUES);
+
+export type PersistentEffectBucket = 'scene' | 'camera' | 'stylization';
+
+export function persistentEffectBucketForType(effectType: string | undefined): PersistentEffectBucket {
+    if (effectType && PERSISTENT_CAMERA_EFFECT_TYPES.has(effectType)) return 'camera';
+    if (effectType && PERSISTENT_STYLIZATION_EFFECT_TYPES.has(effectType)) return 'stylization';
+    return 'scene';
+}
+
+export function persistentEffectIdForBucket(bucket: PersistentEffectBucket): string {
+    if (bucket === 'camera') return SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID;
+    if (bucket === 'stylization') return SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID;
+    return SCENE_GSPLAT_PERSISTENT_EFFECT_ID;
+}
+
+// --- 物体轨 asset（与 reveal / persistent 同形：固定包 id + 包内 `type`）---
+
+/** 协议与 `settings.effects.asset` 共用的物体轨 GSplat 包 id */
+export const ASSET_GSPLAT_EFFECT_ID = 'asset.gsplat-effects' as const;
+
+/**
+ * 物体特效 `type` 清单（GS变形 / 静物活化）；`src/types.ts` 中 `AssetEffectType` 与此同源 re-export。
+ * 存盘与协议样式字段为 **`type`**（`instancesByTargetId[targetId].type` 或 `params.type`），非包 id。
+ */
+export const ASSET_EFFECT_TYPE_VALUES = ['gsplat-morph', 'gsplat-wobble'] as const;
+
+export type AssetEffectType = (typeof ASSET_EFFECT_TYPE_VALUES)[number];
+
+/**
+ * 与 `AssetEffectsController` 分派一致的物体 `type` 集合。
+ */
+export const ASSET_EFFECT_TYPES: ReadonlySet<string> = new Set(ASSET_EFFECT_TYPE_VALUES);
+
+/** 协议 `effectId` 是否为物体轨固定包 id */
+export function isAssetGsplatPackageId(id: string): boolean {
+    return id === ASSET_GSPLAT_EFFECT_ID;
+}
+
+/**
+ * 从协议 `effectId` + `params.type` 解析物体特效样式（与 scene reveal 的 `params.type` 一致）。
+ * 兼容旧协议：`effectId` 可直接为 `gsplat-morph` 等 type。
+ * @param {string} effectId
+ * @param {Record<string, unknown>} [params]
+ * @returns {AssetEffectType | null}
+ */
+export function resolveAssetEffectType(
+    effectId: string,
+    params?: Record<string, unknown>
+): AssetEffectType | null {
+    if (ASSET_EFFECT_TYPES.has(effectId)) {
+        return effectId as AssetEffectType;
+    }
+    if (!isAssetGsplatPackageId(effectId)) {
+        return null;
+    }
+    const t = params?.type;
+    if (typeof t === 'string' && ASSET_EFFECT_TYPES.has(t)) {
+        return t as AssetEffectType;
+    }
+    return null;
+}
+
+/** 默认样式（清单首项，`gsplat-morph`） */
+export function defaultAssetEffectType(): AssetEffectType {
+    return ASSET_EFFECT_TYPE_VALUES[0];
+}
 
 /**
  * 场景级 gsplat 合成槽上限：夜景（1）+ 全部可持续 persistent 可多选 layered 并存。

@@ -11,20 +11,22 @@ import type { LegacyRevealEffect } from '../../schemas/v2-custom';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../../schemas/v2-custom';
 import {
     getRevealStatus,
-    getPersistentSceneEffect,
-    hasEnabledPersistentSceneEffects,
+    getPersistentTrackEffect,
+    hasEnabledPersistentEffects,
     clearPersistentRevealTrack,
-    clearPersistentSceneEffects,
+    clearPersistentTrackEffects,
     clearRevealScenePack,
     coercePersistentProtocolParamsInbound,
     parsePersistentProtocolParamsToPatch,
-    patchPersistentSceneEffect,
-    patchPersistentSceneFromProtocolParams,
+    patchPersistentTrackEffect,
+    patchPersistentTrackFromProtocolParams,
     patchRevealRuntimeMirror,
     persistentProtocolParamsHasPatchKeys,
-    hasPersistentSceneEffectBlock,
-    readPersistentSceneEffects,
-    removePersistentSceneEffect,
+    persistentTrackNameForEffectId,
+    persistentTrackNameForType,
+    readActivePersistentEffects,
+    readPersistentTrackEffects,
+    removePersistentTrackEffect,
     buildRevealProtocolParams,
     parseRevealProtocolParamsToPatch,
     patchRevealSettingsFromParams,
@@ -41,12 +43,21 @@ export {
 } from '../../settings-serialize/effects-sync';
 import { PERSISTENT_EFFECT_TYPE_VALUES } from '../../types';
 import type { Global, PersistentEffectType } from '../../types';
+import {
+    SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID
+} from '../../vfx/effects-runtime/effects-runtime';
 import { REVEAL_EFFECT_TYPES } from '../../vfx/effects-runtime/effect-types';
-import { SCENE_GSPLAT_PERSISTENT_EFFECT_ID } from '../../vfx/effects-runtime/effects-runtime';
 import { isPersistentVfx, isRevealEffectActiveInScene } from '../../vfx/effects-runtime/reveal/reveal-policy';
 import { EFFECTS_PROTOCOL_MODULE, type EffectsProtocolModule } from '../modules-types';
 
-export { SCENE_GSPLAT_REVEAL_EFFECT_ID, SCENE_GSPLAT_PERSISTENT_EFFECT_ID } from '../../vfx/effects-runtime/effects-runtime';
+export {
+    SCENE_GSPLAT_REVEAL_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID
+} from '../../vfx/effects-runtime/effects-runtime';
 
 export type EffectProtocolParamsPatchPayload = {
     module?: EffectsProtocolModule;
@@ -81,6 +92,9 @@ export function isEffectProtocolEnvelope(
     return o.module === EFFECTS_PROTOCOL_MODULE;
 }
 
+export function isPersistentProtocolEffectId(effectId: string): boolean {
+    return persistentTrackNameForEffectId(effectId) !== null;
+}
 export function paramsPatchHasRevealKeys(params: Record<string, unknown>): boolean {
     return revealProtocolParamsHasPatchKeys(params);
 }
@@ -283,11 +297,19 @@ function dispatchPersistentGsplatTeardownAfterSettingsSync(global: Global): void
  * @param global
  * @param params
  */
-export function applyGsplatPersistentParamsPatch(global: Global, params: Record<string, unknown>): void {
+export function applyGsplatPersistentParamsPatch(
+    global: Global,
+    params: Record<string, unknown>,
+    effectId: string = SCENE_GSPLAT_PERSISTENT_EFFECT_ID
+): void {
     if (!paramsPatchHasPersistentKeys(params)) return;
 
     const nested = coercePersistentProtocolParamsInbound(params);
     if (!nested) {
+        return;
+    }
+    const trackName = persistentTrackNameForEffectId(effectId);
+    if (!trackName) {
         return;
     }
 
@@ -299,19 +321,9 @@ export function applyGsplatPersistentParamsPatch(global: Global, params: Record<
         return;
     }
 
-    const hadEnabled = hasEnabledPersistentSceneEffects(settings);
-    patchPersistentSceneFromProtocolParams(settings, nested);
+    const hadEnabled = hasEnabledPersistentEffects(settings);
+    patchPersistentTrackFromProtocolParams(settings, trackName, nested);
     syncEffectsRuntimeStateFromSettings(global.state, settings);
-
-    const enabledNow = readPersistentSceneEffects(settings);
-
-    if (enabledNow.length === 0) {
-        notifyPersistentSceneEffectsUiSync(global);
-        if (hadEnabled) {
-            finalizePersistentGsplatTrackOff(global);
-        }
-        return;
-    }
 
     const singlePatch = patchTypes.length === 1 ? patches[patchTypes[0]] : undefined;
     const singlePatchKeys = singlePatch ? Object.keys(singlePatch) : [];
@@ -319,15 +331,25 @@ export function applyGsplatPersistentParamsPatch(global: Global, params: Record<
     const onlyEffectParams = singlePatchKeys.length > 0 && singlePatchKeys.every(k => k === 'effectParams');
     if (onlyEffectParams) {
         const t = patchTypes[0];
-        const entry = getPersistentSceneEffect(settings, t);
-        // 已启用：热更新脚本参数；未启用：仅写入 settings，不 remount
+        const entry = getPersistentTrackEffect(settings, trackName, t);
+        // 已启用：热更新脚本参数；未启用：仅写入 settings，不 remount/teardown
         if (entry?.enable) {
             global.events.fire('persistentRevealConfigChanged', {
                 type: t,
-                effectParams: entry.effectParams
+                effectParams: singlePatch?.effectParams ?? entry.effectParams
             });
         }
         notifyPersistentSceneEffectsUiSync(global);
+        return;
+    }
+
+    const enabledNow = readActivePersistentEffects(settings);
+
+    if (enabledNow.length === 0) {
+        notifyPersistentSceneEffectsUiSync(global);
+        if (hadEnabled) {
+            finalizePersistentGsplatTrackOff(global);
+        }
         return;
     }
 
@@ -351,14 +373,19 @@ export function applyGsplatPersistentParamsPatch(global: Global, params: Record<
  * - `effectType === 'none'` → 清空 persistent 包并停播。
  */
 export function applyGsplatPersistentEffectAdd(global: Global, effectType: string): void {
+    return applyGsplatPersistentEffectAddForId(global, SCENE_GSPLAT_PERSISTENT_EFFECT_ID, effectType);
+}
+
+export function applyGsplatPersistentEffectAddForId(global: Global, effectId: string, effectType: string): void {
     const t = normalizePersistentType(effectType);
     if (t === null) return;
 
     const settings = global.settings as ExperienceSettings;
-    const hadEnabled = hasEnabledPersistentSceneEffects(settings);
+    const trackName = persistentTrackNameForEffectId(effectId) ?? persistentTrackNameForType(t === 'none' ? 'perlin-wave' : t);
+    const hadEnabled = hasEnabledPersistentEffects(settings);
 
     if (t === 'none') {
-        clearPersistentSceneEffects(settings);
+        clearPersistentTrackEffects(settings, trackName);
         syncEffectsRuntimeStateFromSettings(global.state, settings);
         notifyPersistentSceneEffectsUiSync(global);
         if (hadEnabled) {
@@ -367,15 +394,19 @@ export function applyGsplatPersistentEffectAdd(global: Global, effectType: strin
         return;
     }
 
-    if (hasPersistentSceneEffectBlock(settings, t)) {
+    if (persistentTrackNameForType(t) !== trackName) {
         return;
     }
 
-    patchPersistentSceneEffect(settings, t, { enable: true });
+    if (getPersistentTrackEffect(settings, trackName, t)) {
+        return;
+    }
+
+    patchPersistentTrackEffect(settings, trackName, t, { enable: true }, { replaceTrack: trackName !== 'scene' });
     syncEffectsRuntimeStateFromSettings(global.state, settings);
     notifyPersistentSceneEffectsUiSync(global);
 
-    if (readPersistentSceneEffects(settings).length === 0) {
+    if (readActivePersistentEffects(settings).length === 0) {
         return;
     }
     requestPersistentGsplatRemount(global);
@@ -385,18 +416,23 @@ export function applyGsplatPersistentEffectAdd(global: Global, effectType: strin
  * `EFFECT_DELETE`（scene.gsplat-persistent-scene）：从 settings 队列移除该类型及其参数块。
  */
 export function applyGsplatPersistentEffectDelete(global: Global, effectType: string): void {
+    return applyGsplatPersistentEffectDeleteForId(global, SCENE_GSPLAT_PERSISTENT_EFFECT_ID, effectType);
+}
+
+export function applyGsplatPersistentEffectDeleteForId(global: Global, effectId: string, effectType: string): void {
     const t = normalizePersistentType(effectType);
     if (t === null || t === 'none') return;
 
     const settings = global.settings as ExperienceSettings;
-    const hadBlock = getPersistentSceneEffect(settings, t) != null;
+    const trackName = persistentTrackNameForEffectId(effectId) ?? persistentTrackNameForType(t);
+    const hadBlock = getPersistentTrackEffect(settings, trackName, t) != null;
     if (!hadBlock) return;
 
-    const hadEnabled = hasEnabledPersistentSceneEffects(settings);
-    removePersistentSceneEffect(settings, t);
+    const hadEnabled = hasEnabledPersistentEffects(settings);
+    removePersistentTrackEffect(settings, trackName, t);
     syncEffectsRuntimeStateFromSettings(global.state, settings);
 
-    const enabledNow = readPersistentSceneEffects(settings);
+    const enabledNow = readActivePersistentEffects(settings);
     notifyPersistentSceneEffectsUiSync(global);
     if (enabledNow.length === 0) {
         if (hadEnabled) {

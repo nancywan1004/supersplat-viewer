@@ -1,6 +1,10 @@
 import type { Global, ScenePlacedItem } from '../../types';
 import { pushEditHistory } from '../../edit-history';
+import { ASSET_EFFECT_TYPE_VALUES } from '../../vfx/effects-runtime/effect-types';
+import { isPlacedGaussianItem } from '../../vfx/effects-runtime/asset/asset-scene-target';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
+
+const GSPLAT_MORPH_TYPE = ASSET_EFFECT_TYPE_VALUES[0];
 
 const EYE_SVG =
     '<svg class="icon-eye" viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>';
@@ -20,17 +24,27 @@ export function getSceneAssetListHTML(): string {
     return SCENE_ASSET_LIST_HTML;
 }
 
+function isMorphKeyframePickMode(state: Global['state']): boolean {
+    return state.assetEffectUiSubtype === GSPLAT_MORPH_TYPE;
+}
+
 function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
     const { state, events } = global;
     const editUiTransport = getEditUiTransport(global);
     const list = state.scenePlacedEntities ?? [];
     const selectedId = state.selectedSceneEntityId ?? null;
+    const morphKeyframeIds = state.assetEffectsMorphKeyframeIds ?? [];
+    const morphPick = isMorphKeyframePickMode(state);
     listEl.innerHTML = '';
 
     list.forEach((entry: ScenePlacedItem) => {
         const isSelected = selectedId !== null && entry.id === selectedId;
+        const inMorphKeyframes = morphPick && morphKeyframeIds.includes(entry.id);
         const li = document.createElement('li');
-        li.className = 'scene-asset-item' + (isSelected ? ' selected' : '');
+        li.className =
+            'scene-asset-item' +
+            (isSelected ? ' selected' : '') +
+            (inMorphKeyframes ? ' morph-keyframe' : '');
         li.dataset.entityId = entry.id;
         const nameSpan = document.createElement('span');
         nameSpan.className = 'scene-asset-name';
@@ -99,6 +113,19 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
             ) {
                 return;
             }
+            if (morphPick && isPlacedGaussianItem(entry)) {
+                const ids = [...(state.assetEffectsMorphKeyframeIds ?? [])];
+                const idx = ids.indexOf(entry.id);
+                if (idx >= 0) {
+                    ids.splice(idx, 1);
+                } else {
+                    ids.push(entry.id);
+                }
+                state.assetEffectsMorphKeyframeIds = ids;
+                events.fire('assetEffect:morphKeyframesChanged', { ids });
+                renderSceneAssetList(listEl, global);
+                return;
+            }
             if (editUiTransport === 'message-bridge') {
                 sendEditProtocolMessage({ type: 'ASSET_SELECT', id: entry.id });
                 return;
@@ -139,6 +166,7 @@ export function bindSceneAssetList(root: HTMLElement | null, global: Global): ()
     events.on('sceneAssets:cleared', onSceneListChange);
     events.on('sceneAsset:selected', onSceneListChange);
     events.on('editLeftModule:changed', onSceneListChange);
+    events.on('assetEffect:morphKeyframesChanged', onSceneListChange);
 
     return () => {
         events.off('sceneAssets:added', onSceneListChange);
@@ -146,5 +174,6 @@ export function bindSceneAssetList(root: HTMLElement | null, global: Global): ()
         events.off('sceneAssets:cleared', onSceneListChange);
         events.off('sceneAsset:selected', onSceneListChange);
         events.off('editLeftModule:changed', onSceneListChange);
+        events.off('assetEffect:morphKeyframesChanged', onSceneListChange);
     };
 }

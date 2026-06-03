@@ -8,7 +8,8 @@ const MODULES: { id: EditLeftModule; label: string }[] = [
     { id: 'annotation', label: '场景标注' },
     { id: 'environment', label: '环境设置' },
     { id: 'camera', label: '相机设置' },
-    { id: 'effects', label: '场景特效' }
+    { id: 'effects', label: '场景特效' },
+    { id: 'assetEffects', label: '物体特效' }
 ];
 
 // 左侧工具栏整体隶属于「编辑工具箱」之下，可折叠（collapse 时只显示标题栏，展开时显示工具列表）
@@ -29,7 +30,7 @@ ${MODULES.map(
 `.trim();
 
 /**
- * 初始化左侧编辑工具箱 UI（模块列表：GS模型编辑、资产放置、场景标注、环境设置、相机设置、场景特效）。
+ * 初始化左侧编辑工具箱 UI（模块列表：GS模型编辑、资产放置、场景标注、环境设置、相机设置、场景特效、物体特效）。
  * 挂载到 #editLeftSidebarMount；若无该容器则在 #ui 下创建根节点并插入。
  * 点击某项时设置 state.editLeftModule 并触发 editLeftModule:changed。
  * @returns 清理函数

@@ -5,7 +5,7 @@ export const DEFAULT_VFX_TOTAL_DURATION = 10;
  * @deprecated legacy 单轨 reveal 字段（仅导入兼容读取，不再作为持久化写入真源）
  */
 type LegacyRevealEffect = {
-    type?: 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'integrate' | 'growth-wave' | 'sketch' | 'none',
+    type?: 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'falling-petals' | 'falling-rain' | 'falling-snow' | 'nostalgic-comic' | 'yiyun-dianran' | 'palette-pixel' | 'sparkle-twinkle' | 'overall-wave' | 'butterfly-particle' | 'integrate' | 'growth-wave' | 'sketch' | 'none',
     /** 为 `false` 时保留 `type` 与专参于 settings，但不在场景中挂载/播放 */
     enable?: boolean,
     autoStart?: boolean,
@@ -283,24 +283,35 @@ type EffectsRevealTrack = {
     paramsById: Record<string, Record<string, unknown>>;
 };
 
-type EffectsPersistentSceneTrack = {
+type EffectsPersistentSubTrack = {
     activeEffectId: string;
     paramsById: Record<string, Record<string, unknown>>;
 };
 
+/** 单物体实例配置（与 scene 包内字段同形：`type` / `autoStart` / `effectParams`） */
+type EffectsAssetInstance = {
+    type: string;
+    enable?: boolean;
+    autoStart?: boolean;
+    effectParams?: Record<string, unknown>;
+};
+
 type EffectsAssetTrack = {
-    defaultParamsById: Record<string, Record<string, unknown>>;
+    activeEffectId: string;
+    instancesByTargetId?: Record<string, EffectsAssetInstance>;
 };
 
 type EffectsSettings = {
     reveal: EffectsRevealTrack;
     persistent: {
-        scene: EffectsPersistentSceneTrack;
+        scene: EffectsPersistentSubTrack;
+        camera: EffectsPersistentSubTrack;
+        stylization: EffectsPersistentSubTrack;
     };
     asset: EffectsAssetTrack;
 };
 
-/** scene persistent 单类型配置（`paramsById[id]` 内 `{ [type]: { enable, …专参 } }` 的一项） */
+/** persistent 单类型配置（`paramsById[id]` 内 `{ [type]: { enable, …专参 } }` 的一项） */
 type PersistentSceneEffectEntry = {
     type: string;
     enable: boolean;
@@ -326,8 +337,9 @@ export type {
     WorldSpaceBloomRegionJSON,
     EffectsSettings,
     EffectsRevealTrack,
-    EffectsPersistentSceneTrack,
+    EffectsPersistentSubTrack,
     EffectsAssetTrack,
+    EffectsAssetInstance,
     PersistentSceneEffectEntry,
     SceneMediaHotspotVideoSettings,
     SceneMediaHotspotAudioSettings, 

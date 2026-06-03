@@ -232,9 +232,8 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         onLibraryChange = () => renderAssetPreviewGrid(gridEl, global, typeSelect);
         events.on('assetLibrary:added', onLibraryChange);
         events.on('assetLibrary:removed', onLibraryChange);
-
-        // 如果当前还没有任何上传资产，初始化一个本地示例资产（仅登记 URL，按需加载）
-        if (state.uploadedAssets.length === 0) {
+        // Demo assets are optional; only load the local sample when explicitly requested.
+        if (state.uploadedAssets.length === 0 && new URLSearchParams(window.location.search).get('loadDemoAsset') === '1') {
             const gaussianDemoItem: AssetLibraryItem = {
                 id: nextAssetId(),
                 type: 'gaussian',

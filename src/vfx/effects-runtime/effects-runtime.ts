@@ -23,11 +23,19 @@ import { GsplatEffectComposer } from './gsplat-effect-composer';
 import type { GsplatContribution } from './gsplat-contribution';
 import type { ComposedGsplatModifyResult } from './composer-diagnostics';
 import { GSPLAT_MAX_SCENE_CONTRIBUTORS, PERSISTENT_EFFECT_TYPES, REVEAL_EFFECT_TYPES } from './effect-types';
+import { syncAssetEffectRegistryFactories } from './asset/asset-effect-registry-factory';
 import { syncPersistentGsplatRegistryFactories } from './persistent/persistent-gsplat-registry-factory';
 
 // --- 场景 GSplat reveal：协议 id、持久型集合、内置 reveal/persistent 轨判定 ---
 
-export { SCENE_GSPLAT_PERSISTENT_EFFECT_ID, SCENE_GSPLAT_REVEAL_EFFECT_ID } from './effect-types';
+export {
+    ASSET_EFFECT_TYPES,
+    ASSET_GSPLAT_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
+    SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID,
+    SCENE_GSPLAT_REVEAL_EFFECT_ID
+} from './effect-types';
 
 /** 与 `settings.effects.reveal` / `persistent` 两轨对齐的槽位名（非通用 `EffectLifecycle`） */
 export type RevealRuntimeTrackKind = 'reveal' | 'persistent';
@@ -78,6 +86,7 @@ export class EffectsRuntime {
         this.composer = new GsplatEffectComposer(global, {
             maxSceneContributors: GSPLAT_MAX_SCENE_CONTRIBUTORS
         });
+        this.syncAssetEffectRegistryFromSettings();
     }
 
     /**
@@ -86,6 +95,11 @@ export class EffectsRuntime {
      */
     syncPersistentGsplatRegistryFromSettings(): void {
         syncPersistentGsplatRegistryFactories(this._global.settings as ExperienceSettings, this.registry);
+    }
+
+    /** 按 `settings.effects.asset` 同步物体特效 Registry 条目。 */
+    syncAssetEffectRegistryFromSettings(): void {
+        syncAssetEffectRegistryFactories(this._global.settings as ExperienceSettings, this.registry);
     }
 
     /**

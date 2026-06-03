@@ -43,7 +43,7 @@ import { MeshDebugOverlay } from './mesh-debug-overlay';
 import { NavCursor } from './nav-cursor';
 import { Picker } from './picker';
 import type { ExperienceSettings, PostEffectSettings } from './settings';
-import { shouldDeferPersistentMount } from './settings-serialize/effects-sync';
+import { readPersistentTrackEffects, shouldDeferPersistentMount } from './settings-serialize/effects-sync';
 import type { Global } from './types';
 import { nightDeferredByReveal, revealBlocksAnim } from './vfx/effects-runtime/reveal/reveal-policy';
 import { RevealController } from './vfx/effects-runtime/reveal/reveal-controller';
@@ -82,6 +82,7 @@ import { initAssetFacade } from './editor-modules/asset-facade';
 import { initAnnotationFacade } from './editor-modules/annotation-facade';
 import { initEnvironmentFacade } from './editor-modules/environment-facade';
 import { initEffectsFacade } from './editor-modules/effects-facade';
+import { createAssetEffectsController, type AssetEffectsController } from './vfx/effects-runtime/asset/asset-effects-controller';
 import { createEffectsRuntime, type EffectsRuntime } from './vfx/effects-runtime';
 import { initCommandRegistry } from './editor-modules/command-registry';
 import { DEFAULT_DEFERRED_EDITING_LAYERS } from './render/deferred-editing-visual-sync';
@@ -118,13 +119,39 @@ const noPostEffects: PostEffectSettings = {
 };
 
 const gammaChunkGlsl = `
+#include "decodePS"
+#include "fogPS"
+
+#if FOG != NONE && !defined(GSPLAT_NO_FOG)
+    #define GSPLAT_FOG
+#endif
+
 vec3 prepareOutputFromGamma(vec3 gammaColor, float depth) {
+    #ifdef GSPLAT_FOG
+        vec3 linear = decodeGamma(gammaColor);
+        linear = addFog(linear, depth);
+        return pow(linear + 0.0000001, vec3(1.0 / 2.2));
+    #endif
+
     return gammaColor;
 }
 `;
 
 const gammaChunkWgsl = `
+#include "decodePS"
+#include "fogPS"
+
+#if FOG != NONE && !defined(GSPLAT_NO_FOG)
+    #define GSPLAT_FOG
+#endif
+
 fn prepareOutputFromGamma(gammaColor: vec3f, depth: f32) -> vec3f {
+    #ifdef GSPLAT_FOG
+        var linear = decodeGamma3(gammaColor);
+        linear = addFog(linear, depth);
+        return pow(linear + vec3f(0.0000001), vec3f(1.0 / 2.2));
+    #endif
+
     return gammaColor;
 }
 `;
@@ -204,6 +231,32 @@ const anyPostEffectEnabled = (
         shadowOn;
 };
 
+const isNostalgicComicPersistentActive = (settings: ExperienceSettings): boolean => {
+    return readPersistentTrackEffects(settings, 'stylization').some(e => e.type === 'nostalgic-comic');
+};
+
+const isYiyunDianranPersistentActive = (settings: ExperienceSettings): boolean => {
+    return readPersistentTrackEffects(settings, 'stylization').some(e => e.type === 'yiyun-dianran');
+};
+
+const isYiyunDianranPostEffectActive = (settings: ExperienceSettings): boolean => {
+    if (!isYiyunDianranPersistentActive(settings)) {
+        return false;
+    }
+    const params = readPersistentTrackEffects(settings, 'stylization', { includeDisabled: true })
+        .find(e => e.type === 'yiyun-dianran')?.effectParams;
+    if (params && typeof params === 'object' && typeof params.postEffectEnabled === 'boolean') {
+        return params.postEffectEnabled;
+    }
+    return true;
+};
+
+const isPalettePixelPersistentActive = (settings: ExperienceSettings): boolean => {
+    return readPersistentTrackEffects(settings, 'stylization').some(e => e.type === 'palette-pixel');
+};
+
+const YIYUN_DIANRAN_PAPER_CLEAR = new Color(0.98, 0.94, 0.85, 1);
+
 const vec = new Vec3();
 
 // store the original isColorBufferSrgb so the override in updatePostEffects is idempotent
@@ -268,6 +321,8 @@ class Viewer {
 
     /** 特效运行时（reveal / persistent / asset）；M1 仅占位，不改变现有 VFX 行为 */
     effectsRuntime: EffectsRuntime | null = null;
+
+    assetEffectsController: AssetEffectsController | null = null;
 
     voxelOverlay: VoxelDebugOverlay | null = null;
 
@@ -343,8 +398,11 @@ class Viewer {
             }
         };
 
+        const getCameraFrame = () => this.cameraFrame;
+        (app as { getCameraFrame?: () => CameraFrame | null }).getCameraFrame = getCameraFrame;
+
         this.bloomController = new BloomController(global, {
-            getCameraFrame: () => this.cameraFrame,
+            getCameraFrame,
             getAppCanvas: () => (app.graphicsDevice?.canvas as HTMLCanvasElement) ?? document.querySelector('canvas'),
             getNightModeScript: () => this.nightModeScript
         });
@@ -719,6 +777,9 @@ class Viewer {
                 revealBbox.copy(sceneBound);            // fallback
             }
             this.revealController = new RevealController(global, revealBbox, gsplatEntity, this.cameraManager);
+            this.assetEffectsController = createAssetEffectsController(global);
+            (global as any).__assetEffectsController = this.assetEffectsController;
+
             const ensureShadowPipelineReady = () => {
                 if (!isShadowSystemEnabled(global) || !this.shadowPipelineMount) {
                     return;
@@ -739,6 +800,7 @@ class Viewer {
                 ensureShadowPipelineReady();
             });
             global.events.on('persistentGsplatEffectRemountRequested', (restartAnim?: boolean) => {
+                this.configureCamera(global.settings);
                 // revealComplete 当帧内 reveal 脚本可能仍在执行 removeShaders；
                 // remount persistent 若同帧进行，可能被旧脚本收尾覆盖。统一延后一帧。
                 global.app.once('frameend', () => {
@@ -1206,8 +1268,14 @@ z: ${cameraInfo.target.z.toFixed(6)}
         const computeRequiresCameraFrame = rendererMode === 'compute';
         const postFxRequested = !config.nofx &&
             !!postEffectSettings &&
-            (anyPostEffectEnabled(postEffectSettings, config, settings as ExperienceSettings) || highPrecisionRendering || bloomPipelineWanted);
-        const enableCameraFrame = !app.xr.active && (computeRequiresCameraFrame || postFxRequested);
+            (anyPostEffectEnabled(postEffectSettings, config, settings as ExperienceSettings) ||
+                highPrecisionRendering ||
+                bloomPipelineWanted);
+        const enableCameraFrame = !app.xr.active && (
+            computeRequiresCameraFrame ||
+            postFxRequested ||
+            isPalettePixelPersistentActive(settings)
+        );
 
         if (enableCameraFrame) {
             if (!this.cameraFrame) {
@@ -1220,7 +1288,8 @@ z: ${cameraInfo.target.z.toFixed(6)}
             cameraFrame.rendering.renderFormats = (highPrecisionRendering || bloomPipelineWanted)
                 ? [PIXELFORMAT_RGBA16F, PIXELFORMAT_RGBA32F]
                 : [];
-            cameraFrame.rendering.sceneDepthMap = computeRequiresCameraFrame;
+            cameraFrame.rendering.sceneDepthMap =
+                computeRequiresCameraFrame || isYiyunDianranPostEffectActive(settings);
             cameraFrame.enabled = true;
             const effectivePostFxSettings = postFxRequested ? postEffectSettings : noPostEffects;
             applyPostEffectSettings(cameraFrame, effectivePostFxSettings);
@@ -1266,7 +1335,15 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 return this === app.graphicsDevice.backBuffer ? true : origIsColorBufferSrgb.call(this, index);
             };
 
-            camera.camera.clearColor = new Color(background.color);
+            if (isNostalgicComicPersistentActive(settings)) {
+                camera.camera.clearColorBuffer = true;
+                camera.camera.clearColor = new Color(1, 1, 1, 0);
+            } else if (isYiyunDianranPostEffectActive(settings)) {
+                camera.camera.clearColorBuffer = true;
+                camera.camera.clearColor = YIYUN_DIANRAN_PAPER_CLEAR.clone();
+            } else {
+                camera.camera.clearColor = new Color(background.color);
+            }
         } else {
             if (this.cameraFrame) {
                 this.bloomController?.onCameraFrameDestroyed();
@@ -1289,7 +1366,15 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
             if (!app.xr.active) {
                 camera.camera.toneMapping = tonemapTable[settings.tonemapping];
-                camera.camera.clearColor = new Color(background.color);
+                if (isNostalgicComicPersistentActive(settings)) {
+                    camera.camera.clearColorBuffer = true;
+                    camera.camera.clearColor = new Color(1, 1, 1, 0);
+                } else if (isYiyunDianranPostEffectActive(settings)) {
+                    camera.camera.clearColorBuffer = true;
+                    camera.camera.clearColor = YIYUN_DIANRAN_PAPER_CLEAR.clone();
+                } else {
+                    camera.camera.clearColor = new Color(background.color);
+                }
             }
         }
 
