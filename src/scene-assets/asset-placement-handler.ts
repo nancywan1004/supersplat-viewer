@@ -29,6 +29,11 @@ import {
 } from '../loaders/asset-loader';
 import { hitSceneGizmoAtClient } from '../gizmo-hit-test';
 import type { InputArbiter } from '../input-arbiter';
+import {
+    findAssetMorphOwnerTargetId,
+    readAssetInstanceParams,
+    resolveAssetInstanceStorageTargetId
+} from '../settings-serialize/effects-sync';
 import { getDefaultWobbleEffectParams } from '../vfx/effects-runtime/asset/wobble-effect-params';
 import { ASSET_EFFECT_TYPE_VALUES } from '../vfx/effects-runtime/effect-types';
 import {
@@ -118,14 +123,31 @@ function getSceneAssetsRestoreController(global: Global): SceneAssetsRestoreCont
     return anyGlobal.__sceneAssetsRestoreController;
 }
 
+/**
+ * 场景资产还原后的 idle 预览（瞌睡 wobble / `deepMeditation`）：
+ * - 存盘 `gsplat-morph`：仅 morph 配置槽 target（owner，非全部关键帧）挂 idle，不播 morph 时间轴；
+ * - 存盘 `gsplat-wobble`（含扭动/电子等非瞌睡模式）：启动后同样先播 idle，用户显式「开始」再走存盘参数。
+ * 不改写 settings，仅 `assetEffect:start` 运行态。
+ */
 function startRestoredAssetDefaultEffectIfConfigured(global: Global, entry: ScenePlacedItem): void {
     if (entry.assetType !== 'gaussian' || !entry.entity.gsplat) {
         return;
     }
 
-    const settings = global.settings as any;
-    const instance = settings.effects?.asset?.instancesByTargetId?.[entry.id];
-    if (!instance || typeof instance !== 'object' || Array.isArray(instance)) {
+    const settings = global.settings as ExperienceSettings;
+    const storageTargetId = findAssetMorphOwnerTargetId(settings, entry.id) ?? entry.id;
+    const inst = readAssetInstanceParams(settings, storageTargetId);
+    if (!inst || inst.enable === false || inst.autoStart !== true) {
+        return;
+    }
+
+    const idleTargetId =
+        inst.type === 'gsplat-morph'
+            ? resolveAssetInstanceStorageTargetId(storageTargetId, inst)
+            : inst.type === GSPLAT_WOBBLE_TYPE
+              ? storageTargetId
+              : null;
+    if (!idleTargetId || entry.id !== idleTargetId) {
         return;
     }
 

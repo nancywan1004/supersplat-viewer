@@ -1256,41 +1256,6 @@ export function initAssetEffectsUI(global: Global): () => void {
 
     const onMorphKeyframesChanged = () => {
         renderMorphKeyframeList();
-        const configId = getMorphOwnerTargetId(global);
-        if (!configId || typeSelect?.value !== MORPH_TYPE) {
-            return;
-        }
-        routeAssetCommand(
-            'EFFECT_PARAMS_PATCH',
-            configId,
-            MORPH_TYPE,
-            readEffectParamsFromDom(
-                global,
-                MORPH_TYPE,
-                morphUrls,
-                morphSeg,
-                morphLoop,
-                morphFlightWindow,
-                morphFlightStagger,
-                morphFlightEase,
-                morphFlightPosEase,
-                morphChannelParticleScale,
-                morphChannelStrength,
-                morphHourglassPerturb,
-                wobbleAmp,
-                wobbleAxis,
-                wobbleMotionMode,
-                wobbleFreq,
-                wobbleBounce,
-                wobbleStretch,
-                wobbleAnchorLiftPct,
-                wobbleHaloEnabled,
-                wobbleHaloColor,
-                wobbleHaloWidth,
-                wobbleHaloSpeed,
-                wobbleHaloOpacity
-            )
-        );
     };
 
     const onStart = () => {
