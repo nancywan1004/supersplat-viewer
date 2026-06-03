@@ -15,6 +15,7 @@ import {
     syncAssetInstancesRuntimeFromSettings,
     syncEffectsRuntimeStateFromSettings
 } from '../../settings-serialize/effects-sync';
+import { getEffectsReadSource, getEffectsWriteTarget } from '../../view-settings';
 import type { Global } from '../../types';
 import { filterAssetEffectParams, paramsPatchHasAssetKeys } from '../../vfx/effects-runtime/asset/asset-effect-params';
 import {
@@ -154,7 +155,8 @@ export function applyAssetEffectStart(global: Global, envelope: AssetEffectProto
     }
 
     const patch = mergeStartParams(effectType, envelope.params);
-    const merged = patchAssetInstanceFromParams(global.settings as ExperienceSettings, envelope.targetId, patch);
+    const settings = getEffectsWriteTarget(global);
+    const merged = patchAssetInstanceFromParams(settings, envelope.targetId, patch);
     const storageTargetId = resolveAssetInstanceStorageTargetId(envelope.targetId, merged);
     const ep = (merged.effectParams ?? {}) as Record<string, unknown>;
     const runtimeEntities = buildRuntimeEntitiesFromEffectParams(
@@ -178,7 +180,7 @@ export function applyAssetEffectStart(global: Global, envelope: AssetEffectProto
         return false;
     }
 
-    syncEffectsRuntimeStateFromSettings(global.state, global.settings);
+    syncEffectsRuntimeStateFromSettings(global.state, settings);
     patchAssetRuntimeMirror(global.state, storageTargetId, {
         activeType: merged.type as AssetEffectType,
         status: 'playing'
@@ -205,12 +207,13 @@ export function applyAssetEffectStop(global: Global, envelope: AssetEffectProtoc
         return false;
     }
 
+    const settings = getEffectsWriteTarget(global);
     const storageTargetId =
         effectType === 'gsplat-morph'
-            ? (findAssetMorphOwnerTargetId(global.settings as ExperienceSettings, envelope.targetId) ?? envelope.targetId)
+            ? (findAssetMorphOwnerTargetId(settings, envelope.targetId) ?? envelope.targetId)
             : envelope.targetId;
-    patchAssetInstanceFromParams(global.settings as ExperienceSettings, storageTargetId, { enabled: false });
-    syncEffectsRuntimeStateFromSettings(global.state, global.settings);
+    patchAssetInstanceFromParams(settings, storageTargetId, { enabled: false });
+    syncEffectsRuntimeStateFromSettings(global.state, settings);
     patchAssetRuntimeMirror(global.state, storageTargetId, { status: 'inactive' });
 
     global.events.fire('assetEffect:stop', {
@@ -261,15 +264,15 @@ export function applyAssetEffectParamsPatch(global: Global, envelope: AssetEffec
         }
     }
 
-    const settings = global.settings as ExperienceSettings;
+    const settings = getEffectsWriteTarget(global);
     const patchTargetId =
         effectType === 'gsplat-morph' && patch.enabled === false
             ? (findAssetMorphOwnerTargetId(settings, envelope.targetId) ?? envelope.targetId)
             : envelope.targetId;
     const merged = patchAssetInstanceFromParams(settings, patchTargetId, patch);
     const storageTargetId = resolveAssetInstanceStorageTargetId(patchTargetId, merged);
-    syncEffectsRuntimeStateFromSettings(global.state, global.settings);
-    syncAssetInstancesRuntimeFromSettings(global.state, global.settings);
+    syncEffectsRuntimeStateFromSettings(global.state, settings);
+    syncAssetInstancesRuntimeFromSettings(global.state, settings);
 
     if (merged.enabled === false) {
         global.events.fire('assetEffect:stop', {
@@ -297,7 +300,7 @@ export function applyAssetEffectDelete(global: Global, envelope: AssetEffectDele
         return false;
     }
 
-    const settings = global.settings as ExperienceSettings;
+    const settings = getEffectsWriteTarget(global);
     const runtimeInstances = global.state.effectsRuntimeState?.asset?.instances ?? {};
     const targetIds = new Set<string>();
     const ownerTargetId =
@@ -327,7 +330,7 @@ export function applyAssetEffectDelete(global: Global, envelope: AssetEffectDele
 }
 
 export function readAssetEffectInstanceForTarget(global: Global, targetId: string) {
-    return readAssetInstanceParams(global.settings as ExperienceSettings, targetId);
+    return readAssetInstanceParams(getEffectsReadSource(global), targetId);
 }
 
 /** 协议层归一化 envelope：`effectId` 统一为包 id（兼容旧 type 直传） */

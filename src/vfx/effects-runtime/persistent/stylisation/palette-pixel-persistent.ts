@@ -3,7 +3,7 @@ import { Entity, Script, type CameraComponent } from 'playcanvas';
 import {
     DEFAULT_PALETTE_PIXEL_SETTINGS,
     PalettePixelController
-} from '../../stylisation/palette-pixel';
+} from './palette-pixel';
 
 function findCameraEntity(root: Entity): Entity | null {
     return root.findComponent('camera')?.entity ?? null;

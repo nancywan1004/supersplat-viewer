@@ -5,21 +5,21 @@ import {
 import {
     OVERALL_WAVE_DEFAULTS,
     clampOverallWaveNoiseType
-} from '../../vfx/effects-runtime/persistent/gsplat-overall-wave';
-import { BUTTERFLY_PARTICLE_DEFAULTS } from '../../vfx/effects-runtime/persistent/gsplat-butterfly-particle';
-import { SPARKLE_TWINKLE_DEFAULTS } from '../../vfx/effects-runtime/persistent/gsplat-sparkle-twinkle';
+} from '../../vfx/effects-runtime/persistent/scene/gsplat-overall-wave';
+import { BUTTERFLY_PARTICLE_DEFAULTS } from '../../vfx/effects-runtime/persistent/scene/gsplat-butterfly-particle';
+import { SPARKLE_TWINKLE_DEFAULTS } from '../../vfx/effects-runtime/persistent/scene/gsplat-sparkle-twinkle';
 import {
     GSPLAT_FALLING_PETALS_DEFAULT_ATLAS_URL,
     GSPLAT_FALLING_PETALS_PRESET
 } from '../../vfx/gsplat-falling-petals';
 import { GSPLAT_FALLING_WEATHER_PRESETS } from '../../vfx/gsplat-falling-weather';
-import { DEFAULT_NOSTALGIC_COMIC_SETTINGS } from '../../vfx/stylisation/nostalgic-comic';
-import { DEFAULT_YIYUN_DIANRAN_SETTINGS } from '../../vfx/stylisation/yiyun-dianran-stylisation';
+import { DEFAULT_NOSTALGIC_COMIC_SETTINGS } from '../../vfx/effects-runtime/persistent/stylisation/nostalgic-comic';
+import { DEFAULT_YIYUN_DIANRAN_SETTINGS } from '../../vfx/effects-runtime/persistent/stylisation/yiyun-dianran-stylisation';
 import {
     DEFAULT_PALETTE_PIXEL_SETTINGS,
     PALETTE_PIXEL_PALETTE_NAMES,
     PALETTE_PIXEL_SIZE_STEPS
-} from '../../vfx/stylisation/palette-pixel';
+} from '../../vfx/effects-runtime/persistent/stylisation/palette-pixel';
 import {
     getRevealEffectParamKeys,
     getRevealParamFieldKind,

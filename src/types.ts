@@ -304,6 +304,8 @@ export type ViewSettings = {
     torch?: {
         active: boolean;
     };
+    /** 观看态 `EFFECT_*` 临时写入，不入库；进入编辑时清除。 */
+    effectsSession?: ExperienceSettings;
 };
 
 type Global = {

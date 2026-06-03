@@ -30,6 +30,7 @@ import {
     readRevealParams,
     syncEffectsRuntimeStateFromSettings
 } from '../settings-serialize/effects-sync';
+import { getEffectsReadSource, getEffectsWriteTarget } from '../view-settings';
 import { isPersistentVfx } from '../vfx/effects-runtime/reveal/reveal-policy';
 import type {
     Global,
@@ -99,9 +100,10 @@ class EffectsFacade implements ModuleFacade {
                         current?.type ??
                         (typeof runtimeType === 'string' ? runtimeType : null);
                     if (current) {
-                        patchAssetInstanceFromParams(global.settings, targetId, { enabled: false });
+                        const settings = getEffectsWriteTarget(global);
+                        patchAssetInstanceFromParams(settings, targetId, { enabled: false });
                     }
-                    syncEffectsRuntimeStateFromSettings(global.state, global.settings);
+                    syncEffectsRuntimeStateFromSettings(global.state, getEffectsReadSource(global));
                     patchAssetRuntimeMirror(global.state, targetId, { status: 'inactive' });
                     if (stopType) {
                         applyAssetEffectStop(global, normalizeAssetEffectEnvelope({
@@ -214,7 +216,7 @@ class EffectsFacade implements ModuleFacade {
             const raw = command.payload;
             if (!isEffectProtocolEnvelope(raw)) break;
             if (raw.effectId !== SCENE_GSPLAT_REVEAL_EFFECT_ID) break;
-            const revealType = (readRevealParams(global.settings)?.type ?? 'none') as string;
+            const revealType = (readRevealParams(getEffectsReadSource(global))?.type ?? 'none') as string;
             // EFFECT_REPLAY 仅对一次性 reveal 生效；persistent-only 场景应忽略。
             if (revealType === 'none' || isPersistentVfx(revealType)) break;
             const restartAnim = (raw as { restartAnim?: boolean }).restartAnim !== false;

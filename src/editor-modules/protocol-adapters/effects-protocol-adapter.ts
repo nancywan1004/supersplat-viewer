@@ -34,6 +34,7 @@ import {
     revealProtocolParamsHasPatchKeys,
     syncEffectsRuntimeStateFromSettings
 } from '../../settings-serialize/effects-sync';
+import { getEffectsReadSource, getEffectsWriteTarget } from '../../view-settings';
 
 export {
     buildRevealProtocolParams,
@@ -110,7 +111,7 @@ export function paramsPatchHasPersistentKeys(params: Record<string, unknown>): b
  */
 export function applyGsplatRevealParamsPatch(global: Global, params: Record<string, unknown>): void {
     if (!paramsPatchHasRevealKeys(params)) return;
-    const settings = global.settings;
+    const settings = getEffectsWriteTarget(global);
     const current = readRevealParams(settings);
     const currentType = (current?.type ?? 'none') as string;
     const patch = parseRevealProtocolParamsToPatch(params, { lockToCurrentType: currentType });
@@ -155,7 +156,7 @@ export function applyGsplatRevealEffectAdd(global: Global, effectType: string): 
     const t = normalizeRevealEffectType(effectType);
     if (t === null) return;
 
-    const settings = global.settings as ExperienceSettings;
+    const settings = getEffectsWriteTarget(global);
     const merged = replaceRevealSceneEffect(settings, t, { enabled: t !== 'none' });
     syncEffectsRuntimeStateFromSettings(global.state, settings);
     syncRevealSceneActiveState(global, merged);
@@ -172,7 +173,7 @@ export function applyGsplatRevealEffectAdd(global: Global, effectType: string): 
  * `EFFECT_DELETE`（scene.gsplat-reveal）：存盘为 `{ none: {} }`（`effectType` 可传但忽略）。
  */
 export function applyGsplatRevealEffectDelete(global: Global): void {
-    const settings = global.settings as ExperienceSettings;
+    const settings = getEffectsWriteTarget(global);
     clearRevealScenePack(settings);
     const merged: LegacyRevealEffect = {
         type: 'none',
@@ -219,17 +220,12 @@ export function normalizePersistentType(raw: unknown): PersistentEffectType | 'n
  * persistent 已在 settings 中处于「关」语义之后调用（M15 单内核）：
  * 先同步 `effectsRuntimeState`，再按需 `applyGsplatRevealStopPlayback`（一次性 reveal 独占播放时不误停），
  * 最后 `persistentGsplatEffectRemountRequested(false)` 驱动 viewer 拆实体脚本。
- * @param global
  */
 export function finalizePersistentGsplatTrackOff(global: Global): void {
-    syncEffectsRuntimeStateFromSettings(global.state, global.settings);
+    syncEffectsRuntimeStateFromSettings(global.state, getEffectsReadSource(global));
     dispatchPersistentGsplatTeardownAfterSettingsSync(global);
 }
 
-/**
- * 假定调用前已 `syncEffectsRuntimeStateFromSettings`：仅停播判定 + remount 事件。
- * @param global
- */
 /** 单类型 `enabled` 变更：仅挂载/卸载该类型脚本（与全量 remount 区分）。 */
 function requestPersistentSceneEffectEnableChange(
     global: Global,
@@ -239,7 +235,7 @@ function requestPersistentSceneEffectEnableChange(
     const dispatch = () => {
         global.events.fire('persistentGsplatEffectEnableChanged', { effectType, enabled });
     };
-    const settings = global.settings as ExperienceSettings;
+    const settings = getEffectsReadSource(global);
     const currentRevealType = readRevealParams(settings)?.type ?? 'none';
     if (currentRevealType === 'none') {
         dispatch();
@@ -258,7 +254,7 @@ function notifyPersistentSceneEffectsUiSync(global: Global): void {
 }
 
 function requestPersistentGsplatRemount(global: Global): void {
-    const settings = global.settings as ExperienceSettings;
+    const settings = getEffectsReadSource(global);
     const currentRevealType = readRevealParams(settings)?.type ?? 'none';
     if (currentRevealType === 'none') {
         global.events.fire('persistentGsplatEffectRemountRequested', false);
@@ -274,7 +270,7 @@ function requestPersistentGsplatRemount(global: Global): void {
 }
 
 function dispatchPersistentGsplatTeardownAfterSettingsSync(global: Global): void {
-    const settings = global.settings as ExperienceSettings;
+    const settings = getEffectsReadSource(global);
     const revealType = (readRevealParams(settings)?.type ?? 'none') as string;
     const persistentPlaying = global.state.effectsRuntimeState?.persistent?.status === 'playing';
     const oneShotRevealPlaying =
@@ -312,7 +308,7 @@ export function applyGsplatPersistentParamsPatch(
         return;
     }
 
-    const settings = global.settings as ExperienceSettings;
+    const settings = getEffectsWriteTarget(global);
     const patches = parsePersistentProtocolParamsToPatch(nested);
     const patchTypes = Object.keys(patches);
 
@@ -380,7 +376,7 @@ export function applyGsplatPersistentEffectAddForId(global: Global, effectId: st
     const t = normalizePersistentType(effectType);
     if (t === null) return;
 
-    const settings = global.settings as ExperienceSettings;
+    const settings = getEffectsWriteTarget(global);
     const trackName = persistentTrackNameForEffectId(effectId) ?? persistentTrackNameForType(t === 'none' ? 'perlin-wave' : t);
     const hadEnabled = hasEnabledPersistentEffects(settings);
     const replaceTrack = trackName !== 'scene';
@@ -431,7 +427,7 @@ export function applyGsplatPersistentEffectDeleteForId(global: Global, effectId:
     const t = normalizePersistentType(effectType);
     if (t === null || t === 'none') return;
 
-    const settings = global.settings as ExperienceSettings;
+    const settings = getEffectsWriteTarget(global);
     const trackName = persistentTrackNameForEffectId(effectId) ?? persistentTrackNameForType(t);
     const hadBlock = getPersistentTrackEffect(settings, trackName, t) != null;
     if (!hadBlock) return;
@@ -457,6 +453,6 @@ export function applyGsplatPersistentEffectDeleteForId(global: Global, effectId:
  */
 export function applyGsplatRevealStopPlayback(global: Global): void {
     patchRevealRuntimeMirror(global.state, { status: 'completed' });
-    syncEffectsRuntimeStateFromSettings(global.state, global.settings);
+    syncEffectsRuntimeStateFromSettings(global.state, getEffectsReadSource(global));
     global.events.fire('vfxExit');
 }

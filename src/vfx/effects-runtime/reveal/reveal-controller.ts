@@ -5,7 +5,6 @@ import type { CameraManager } from '../../../camera-manager';
 import { isRevealTimedVfxType, isPersistentVfx } from './reveal-policy';
 import {
     getPersistentEffectPaused,
-    patchRevealSettingsFromParams,
     readActivePersistentEffects,
     readRevealParams,
     hasRevealInSettings,
@@ -14,6 +13,7 @@ import {
     patchPersistentRuntimeMirror,
     syncEffectsRuntimeStateFromSettings
 } from '../../../settings-serialize/effects-sync';
+import { getEffectsReadSource } from '../../../view-settings';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../../../schemas/v2-custom';
 import { LegacyRevealEffect as RevealConfig } from '../../../settings';
 import { Global, type RevealEffectType } from '../../../types';
@@ -23,10 +23,10 @@ import type { EffectsRuntime } from '..';
 import { nightModeUsesComposerPath } from '../../lighting/night-mode';
 import {
     destroyAllPersistentGsplatScriptsOnEntity,
-    destroyAllRevealGsplatScriptsOnEntity,
     forEachMountedPersistentGsplatScript,
     getMountedPersistentGsplatScript
 } from '../gsplat-effect-script-registry';
+import { destroyAllRevealGsplatScriptsOnEntity } from '../gsplat-effect-script-registry';
 import {
     getPersistentGsplatEffectsRuntimeScriptType,
     rebindPersistentGsplatTimelineFromSettings
@@ -35,7 +35,7 @@ import { shouldRequestPersistentGsplatRemount } from './effects-orchestrator';
 import { applyPersistentEffectParamsToScript } from '../persistent/persistent-effect-params';
 import { applyRevealEffectParamsToScript } from './reveal-effect-params';
 import type { RevealParticipationSyncContext } from '../gsplat-shader-effect';
-import { RevealPersistentGsplatController } from './reveal-persistent-controller';
+import { RevealPersistentGsplatController } from '../persistent/reveal-persistent-controller';
 import { GsplatRevealGrowthWave } from './gsplat-growth-wave';
 import { GsplatIntegrate } from './gsplat-integrate';
 import { GsplatRevealPiecesRecover } from './gsplat-pieces-recover';
@@ -1273,10 +1273,8 @@ export class RevealController {
 
     updateConfig(newConfig: Partial<RevealConfig>) {
         const oldType = this.config.type;
-        const oldTotalDuration = this.config.totalDuration;
-
-        patchRevealSettingsFromParams(this.global.settings as ExperienceSettings, newConfig as Partial<RevealConfig>);
-        const rp = readRevealParams(this.global.settings as ExperienceSettings);
+        const effectsSettings = getEffectsReadSource(this.global);
+        const rp = readRevealParams(effectsSettings);
         const prevEnabled = this.config.enabled !== false;
         if (rp) {
             this.config.type = (rp.type as RevealConfig['type']) ?? 'none';
@@ -1288,13 +1286,11 @@ export class RevealController {
                     ? { ...(rp.effectParams as Record<string, unknown>) }
                     : undefined;
         }
-        syncEffectsRuntimeStateFromSettings(this.global.state, this.global.settings);
-
-        console.log('Updated reveal config:', this.config);
+        syncEffectsRuntimeStateFromSettings(this.global.state, effectsSettings);
 
         const enabledNow = this.config.enabled !== false;
         if (!enabledNow || this.config.type === 'none') {
-            const hasReveal = hasRevealInSettings(this.global.settings as ExperienceSettings);
+            const hasReveal = hasRevealInSettings(effectsSettings);
             this.global.state.hasRevealEffect = hasReveal;
             this.global.events.fire('hasRevealEffect:changed', hasReveal);
             this.createEffect('none');
@@ -1306,14 +1302,14 @@ export class RevealController {
         }
 
         if (newConfig.enabled === true && !prevEnabled) {
-            this.global.state.hasRevealEffect = hasRevealInSettings(this.global.settings as ExperienceSettings);
+            this.global.state.hasRevealEffect = hasRevealInSettings(effectsSettings);
             this.global.events.fire('hasRevealEffect:changed', this.global.state.hasRevealEffect);
             return;
         }
 
         if (newConfig.type && newConfig.type !== oldType) {
             const nextType = newConfig.type as RevealConfig['type'];
-            const hasReveal = hasRevealInSettings(this.global.settings as ExperienceSettings);
+            const hasReveal = hasRevealInSettings(effectsSettings);
             this.global.state.hasRevealEffect = hasReveal;
             this.global.events.fire('hasRevealEffect:changed', hasReveal);
             if (nextType === 'none') {
@@ -1327,7 +1323,7 @@ export class RevealController {
                 shouldRequestPersistentGsplatRemount(
                     'revealTrackExplicitlyNone',
                     nextType,
-                    this.global.settings as ExperienceSettings
+                    effectsSettings
                 )
             ) {
                 this.global.events.fire('persistentGsplatEffectRemountRequested', false);

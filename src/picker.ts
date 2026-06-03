@@ -225,18 +225,45 @@ const NORMAL_SAMPLE_DIRECTIONS = [
 
 /** pick 深度累加有效 alpha 下限（暗部叶/高斯在 1e-6~1e-5 下易被整像素丢弃） */
 const PICK_SURFACE_MIN_ALPHA = 2e-5;
-/** 邻域最近深度搜索半径（像素）；中心无效时仍可从邻域命中前景 splat */
-const PICK_NEAREST_RADIUS_PX = 3;
+/** 中心像素有效时，只在小圆形邻域内找明显更近的前景，避免边缘处吃到旁边物体。 */
+const PICK_NEAREST_INNER_RADIUS_PX = 2;
+/** 中心像素无效时，放大搜索范围作为兜底。 */
+const PICK_NEAREST_FALLBACK_RADIUS_PX = 5;
+/** 邻域候选必须比中心深度明显更近才替代中心，过滤半透明噪声与边缘误抢。 */
+const PICK_NEAREST_FRONT_DELTA_M = 0.12;
+const PICK_NEAREST_FRONT_DELTA_RATIO = 0.015;
+/** 近处候选必须在邻域内形成稳定小簇，避免单个前景尾部像素抢走后景墙面。 */
+const PICK_NEAREST_MIN_SUPPORT = 3;
+const PICK_NEAREST_MIN_SUPPORT_RATIO = 0.32;
+const PICK_NEAREST_CLUSTER_TOLERANCE_M = 0.25;
+const PICK_NEAREST_CLUSTER_TOLERANCE_RATIO = 0.035;
 
 type PickSurface = {
-    /** 光标中心像素的 alpha 加权深度（与历史行为一致） */
+    /** 推荐给通用调用方的表面点；优先中心深度，中心无效/低可信时才由稳定邻域接管。 */
     position: Vec3;
+    /** 光标中心像素的 alpha 加权深度（中心无效时为空）。 */
+    centerPosition?: Vec3;
     /**
      * 光标邻域内**最近**有效表面（相机距离最小）。
      * 半透明/很暗的高斯在中心像素 alpha 低时，加权深度易落到后方；手电筒等跟手拾取应优先用此字段。
      */
     nearestPosition?: Vec3;
+    /** 与 position 相同的显式推荐点，便于调用方不再猜 position / nearestPosition 的语义。 */
+    preferredPosition?: Vec3;
+    /** 中心像素累积 alpha；compute 路径中心有效时记为 1，无中心命中记为 0。 */
+    centerAlpha?: number;
+    /** 邻域最近候选附近的支持样本数。 */
+    nearestSupport?: number;
+    /** 本次邻域参与评估的有效样本数。 */
+    sampleCount?: number;
+    /** 推荐点来源。 */
+    source?: 'center' | 'nearest';
     normal: Vec3;
+};
+
+type RasterSurfaceSample = {
+    position: Vec3;
+    alpha: number;
 };
 
 type PickCameraSnapshot = {
@@ -407,6 +434,37 @@ const setCameraFacingNormal = (cameraPosition: Vec3, position: Vec3, normal: Vec
     return normal;
 };
 
+const distanceSqTo = (a: Vec3, b: Vec3): number => {
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    const dz = a.z - b.z;
+    return dx * dx + dy * dy + dz * dz;
+};
+
+const resolveSurfaceNearestPosition = (
+    center: Vec3 | null,
+    nearest: Vec3 | null,
+    cameraPosition: Vec3,
+    nearestSupport: number,
+    totalSamples: number
+): Vec3 | null => {
+    if (!center) return nearest;
+    if (!nearest) return center;
+    const centerDistSq = distanceSqTo(center, cameraPosition);
+    const nearestDistSq = distanceSqTo(nearest, cameraPosition);
+    if (nearestDistSq >= centerDistSq) return center;
+
+    const centerDist = Math.sqrt(centerDistSq);
+    const nearestDist = Math.sqrt(nearestDistSq);
+    const minDelta = Math.max(PICK_NEAREST_FRONT_DELTA_M, centerDist * PICK_NEAREST_FRONT_DELTA_RATIO);
+    const minSupport = Math.max(
+        PICK_NEAREST_MIN_SUPPORT,
+        Math.ceil(totalSamples * PICK_NEAREST_MIN_SUPPORT_RATIO)
+    );
+    if (nearestSupport < minSupport) return center;
+    return centerDist - nearestDist > minDelta ? nearest : center;
+};
+
 type PlaneFit = {
     cx: number; cy: number; cz: number;
     vx: number; vy: number; vz: number;
@@ -554,9 +612,19 @@ class Picker {
         let pickQueue = Promise.resolve();
         let rasterCacheValid = false;
         let engineCacheValid = false;
-        let cacheWidth = 0;
-        let cacheHeight = 0;
-        const cacheCamera: PickCameraSnapshot = createPickCameraSnapshot();
+        let rasterCacheWidth = 0;
+        let rasterCacheHeight = 0;
+        let engineCacheWidth = 0;
+        let engineCacheHeight = 0;
+        let rasterCacheRenderVersion = -1;
+        let engineCacheRenderVersion = -1;
+        let sceneRenderVersion = 0;
+        const rasterCacheCamera: PickCameraSnapshot = createPickCameraSnapshot();
+        const engineCacheCamera: PickCameraSnapshot = createPickCameraSnapshot();
+        const onFrameEnd = () => {
+            sceneRenderVersion++;
+        };
+        app.on('frameend', onFrameEnd);
 
         const initRasterAccum = (width: number, height: number) => {
             accumBuffer = new Texture(graphicsDevice, {
@@ -599,16 +667,18 @@ class Picker {
             }) as Promise<T>;
         };
 
-        const updateCache = (width: number, height: number) => {
-            captureCameraSnapshot(camera, cacheCamera);
-            cacheWidth = width;
-            cacheHeight = height;
-        };
-
-        const snapshotMatches = (width: number, height: number) => {
+        const snapshotMatches = (
+            cacheCamera: PickCameraSnapshot,
+            cacheWidth: number,
+            cacheHeight: number,
+            cacheRenderVersion: number,
+            width: number,
+            height: number
+        ) => {
             const cam = camera.camera;
             return cacheWidth === width &&
                 cacheHeight === height &&
+                cacheRenderVersion === sceneRenderVersion &&
                 cacheCamera.viewMatrix.equals(cam.viewMatrix) &&
                 cacheCamera.projectionMatrix.equals(cam.projectionMatrix) &&
                 cacheCamera.nearClip === cam.nearClip &&
@@ -631,14 +701,14 @@ class Picker {
             }
         };
 
-        const getCacheCameraSnapshot = (): PickCameraSnapshot => {
+        const cloneCameraSnapshot = (source: PickCameraSnapshot): PickCameraSnapshot => {
             const snapshot = createPickCameraSnapshot();
-            snapshot.position.copy(cacheCamera.position);
-            snapshot.viewMatrix.copy(cacheCamera.viewMatrix);
-            snapshot.projectionMatrix.copy(cacheCamera.projectionMatrix);
-            snapshot.nearClip = cacheCamera.nearClip;
-            snapshot.farClip = cacheCamera.farClip;
-            snapshot.projection = cacheCamera.projection;
+            snapshot.position.copy(source.position);
+            snapshot.viewMatrix.copy(source.viewMatrix);
+            snapshot.projectionMatrix.copy(source.projectionMatrix);
+            snapshot.nearClip = source.nearClip;
+            snapshot.farClip = source.farClip;
+            snapshot.projection = source.projection;
             return snapshot;
         };
 
@@ -650,7 +720,7 @@ class Picker {
             viewportWidth: number,
             viewportHeight: number,
             pickCamera: PickCameraSnapshot
-        ) => {
+        ): Promise<(x: number, y: number) => RasterSurfaceSample | null> => {
             const texY = graphicsDevice.isWebGL2 ? accumTarget.height - blockY - blockHeight : blockY;
 
             const pixels = await accumBuffer.read(blockX, texY, blockWidth, blockHeight, {
@@ -676,18 +746,13 @@ class Picker {
                 }
 
                 const normalizedDepth = r / alpha;
-                return getWorldPoint(pickCamera, x, y, viewportWidth, viewportHeight, normalizedDepth);
+                const position = getWorldPoint(pickCamera, x, y, viewportWidth, viewportHeight, normalizedDepth);
+                return position ? { position, alpha } : null;
             };
         };
 
-        const markCacheRendered = (width: number, height: number) => {
-            captureCameraSnapshot(camera, cacheCamera);
-            cacheWidth = width;
-            cacheHeight = height;
-        };
-
         const ensureEngineDepthRendered = (width: number, height: number, worldLayer: Layer) => {
-            if (engineCacheValid && snapshotMatches(width, height)) {
+            if (engineCacheValid && snapshotMatches(engineCacheCamera, engineCacheWidth, engineCacheHeight, engineCacheRenderVersion, width, height)) {
                 return;
             }
             withShadowMaskPickScope(() => {
@@ -695,12 +760,15 @@ class Picker {
                 enginePicker.resize(width, height);
                 enginePicker.prepare(camera.camera, app.scene, [worldLayer]);
             });
-            markCacheRendered(width, height);
+            captureCameraSnapshot(camera, engineCacheCamera);
+            engineCacheWidth = width;
+            engineCacheHeight = height;
+            engineCacheRenderVersion = sceneRenderVersion;
             engineCacheValid = true;
         };
 
         const ensureRasterAccumRendered = (width: number, height: number, worldLayer: Layer) => {
-            if (rasterCacheValid && snapshotMatches(width, height)) {
+            if (rasterCacheValid && snapshotMatches(rasterCacheCamera, rasterCacheWidth, rasterCacheHeight, rasterCacheRenderVersion, width, height)) {
                 return;
             }
 
@@ -712,7 +780,7 @@ class Picker {
                     try {
                         if (!accumPass) {
                             initRasterAccum(width, height);
-                        } else if (cacheWidth !== width || cacheHeight !== height) {
+                        } else if (rasterCacheWidth !== width || rasterCacheHeight !== height) {
                             accumTarget.resize(width, height);
                         }
 
@@ -734,7 +802,10 @@ class Picker {
                 app.scene.gsplat.enableIds = prevEnableIds;
             }
 
-            markCacheRendered(width, height);
+            captureCameraSnapshot(camera, rasterCacheCamera);
+            rasterCacheWidth = width;
+            rasterCacheHeight = height;
+            rasterCacheRenderVersion = sceneRenderVersion;
             rasterCacheValid = true;
         };
 
@@ -769,8 +840,7 @@ class Picker {
                 screenX,
                 screenY,
                 isComputeRenderer,
-                worldLayer,
-                pickCamera: getCacheCameraSnapshot()
+                worldLayer
             };
         };
 
@@ -798,7 +868,7 @@ class Picker {
                 texture: accumBuffer,
                 width,
                 height,
-                camera: getCacheCameraSnapshot()
+                camera: cloneCameraSnapshot(rasterCacheCamera)
             };
         };
 
@@ -825,43 +895,68 @@ class Picker {
                 return null;
             }
             const { width, height, screenX, screenY, isComputeRenderer, worldLayer } = sample;
-            ensureEngineDepthRendered(width, height, worldLayer);
-            const pickCamera = getCacheCameraSnapshot();
 
             if (isComputeRenderer) {
+                ensureEngineDepthRendered(width, height, worldLayer);
+                const pickCamera = cloneCameraSnapshot(engineCacheCamera);
                 const normalizedDepth = await enginePicker!.getPointDepthAsync(screenX, screenY);
-                const position = normalizedDepth !== null ?
+                const centerPosition = normalizedDepth !== null ?
                     getWorldPoint(pickCamera, screenX, screenY, width, height, normalizedDepth) :
                     null;
-                if (!position) {
-                    return null;
-                }
-                let nearestPosition: Vec3 | null = position;
-                let nearestDistSq = Infinity;
+                let nearestPosition: Vec3 | null = centerPosition;
+                let nearestDist = centerPosition ? Math.sqrt(distanceSqTo(centerPosition, pickCamera.position)) : Infinity;
+                const sampleDistances: number[] = [];
                 const camPos = pickCamera.position;
-                const nearestR = PICK_NEAREST_RADIUS_PX;
+                const nearestR = centerPosition ? PICK_NEAREST_INNER_RADIUS_PX : PICK_NEAREST_FALLBACK_RADIUS_PX;
                 for (let py = screenY - nearestR; py <= screenY + nearestR; py++) {
                     for (let px = screenX - nearestR; px <= screenX + nearestR; px++) {
+                        if (px < 0 || px >= width || py < 0 || py >= height) continue;
+                        const ox = px - screenX;
+                        const oy = py - screenY;
+                        if (ox * ox + oy * oy > nearestR * nearestR) continue;
                         const pt = await enginePicker!.getWorldPointAsync(px, py);
                         if (!pt) continue;
-                        const dx = pt.x - camPos.x;
-                        const dy = pt.y - camPos.y;
-                        const dz = pt.z - camPos.z;
-                        const distSq = dx * dx + dy * dy + dz * dz;
-                        if (distSq < nearestDistSq) {
-                            nearestDistSq = distSq;
+                        const dist = Math.sqrt(distanceSqTo(pt, camPos));
+                        sampleDistances.push(dist);
+                        if (dist < nearestDist) {
+                            nearestDist = dist;
                             nearestPosition = pt;
                         }
                     }
                 }
+                const clusterTolerance = Math.max(
+                    PICK_NEAREST_CLUSTER_TOLERANCE_M,
+                    nearestDist * PICK_NEAREST_CLUSTER_TOLERANCE_RATIO
+                );
+                const nearestSupport = Number.isFinite(nearestDist)
+                    ? sampleDistances.filter(dist => dist <= nearestDist + clusterTolerance).length
+                    : 0;
+                const preferredPosition = resolveSurfaceNearestPosition(
+                    centerPosition,
+                    nearestPosition,
+                    camPos,
+                    nearestSupport,
+                    sampleDistances.length
+                );
+                if (!preferredPosition) {
+                    return null;
+                }
+                const source: PickSurface['source'] = preferredPosition === centerPosition ? 'center' : 'nearest';
                 return {
-                    position,
-                    nearestPosition: nearestPosition ?? position,
+                    position: preferredPosition,
+                    centerPosition: centerPosition ?? undefined,
+                    nearestPosition: nearestPosition ?? preferredPosition,
+                    preferredPosition,
+                    centerAlpha: centerPosition ? 1 : 0,
+                    nearestSupport,
+                    sampleCount: sampleDistances.length,
+                    source,
                     normal: new Vec3(0, 1, 0)
                 };
             }
 
             ensureRasterAccumRendered(width, height, worldLayer);
+            const pickCamera = cloneCameraSnapshot(rasterCacheCamera);
 
             // Single block read serves both depth (center pixel) and normal
             // samples. Sized to the maximum possible ring pixel-radius so the
@@ -880,27 +975,46 @@ class Picker {
                 pickCamera
             );
 
-            let nearestPosition: Vec3 | null = null;
-            let nearestDistSq = Infinity;
+            const centerSample = rasterBlock(screenX, screenY);
+            const centerPosition = centerSample?.position ?? null;
+            const centerAlpha = centerSample?.alpha ?? 0;
+            let nearestPosition: Vec3 | null = centerPosition;
+            let nearestDist = centerPosition ? Math.sqrt(distanceSqTo(centerPosition, pickCamera.position)) : Infinity;
+            const sampleDistances: number[] = [];
             const camPos = pickCamera.position;
-            const nearestR = PICK_NEAREST_RADIUS_PX;
+            const nearestR = centerPosition ? PICK_NEAREST_INNER_RADIUS_PX : PICK_NEAREST_FALLBACK_RADIUS_PX;
             for (let py = screenY - nearestR; py <= screenY + nearestR; py++) {
                 for (let px = screenX - nearestR; px <= screenX + nearestR; px++) {
+                    if (px < 0 || px >= width || py < 0 || py >= height) continue;
+                    const ox = px - screenX;
+                    const oy = py - screenY;
+                    if (ox * ox + oy * oy > nearestR * nearestR) continue;
                     const pt = rasterBlock(px, py);
                     if (!pt) continue;
-                    const dx = pt.x - camPos.x;
-                    const dy = pt.y - camPos.y;
-                    const dz = pt.z - camPos.z;
-                    const distSq = dx * dx + dy * dy + dz * dz;
-                    if (distSq < nearestDistSq) {
-                        nearestDistSq = distSq;
-                        nearestPosition = pt;
+                    const dist = Math.sqrt(distanceSqTo(pt.position, camPos));
+                    sampleDistances.push(dist);
+                    if (dist < nearestDist) {
+                        nearestDist = dist;
+                        nearestPosition = pt.position;
                     }
                 }
             }
+            const clusterTolerance = Math.max(
+                PICK_NEAREST_CLUSTER_TOLERANCE_M,
+                nearestDist * PICK_NEAREST_CLUSTER_TOLERANCE_RATIO
+            );
+            const nearestSupport = Number.isFinite(nearestDist)
+                ? sampleDistances.filter(dist => dist <= nearestDist + clusterTolerance).length
+                : 0;
+            const preferredPosition = resolveSurfaceNearestPosition(
+                centerPosition,
+                nearestPosition,
+                camPos,
+                nearestSupport,
+                sampleDistances.length
+            );
 
-            const position = rasterBlock(screenX, screenY) ?? nearestPosition;
-            if (!position) {
+            if (!preferredPosition) {
                 return null;
             }
 
@@ -908,7 +1022,7 @@ class Picker {
                 if (px < 0 || px >= width || py < 0 || py >= height) {
                     return null;
                 }
-                return rasterBlock(px, py);
+                return rasterBlock(px, py)?.position ?? null;
             };
 
             // Pixel radius corresponding to a fixed world radius at the
@@ -916,7 +1030,7 @@ class Picker {
             // enough pixels and very-close picks stay inside the block read.
             const pixelRadius = Math.max(NORMAL_SAMPLE_MIN_PX,
                 Math.min(NORMAL_SAMPLE_MAX_PX,
-                    worldRadiusToPixelRadius(pickCamera, position, height, NORMAL_SAMPLE_WORLD_RADIUS)));
+                    worldRadiusToPixelRadius(pickCamera, preferredPosition, height, NORMAL_SAMPLE_WORLD_RADIUS)));
             const ringPixelRadii = NORMAL_RING_FRACTIONS.map(f => Math.max(1, Math.round(f * pixelRadius)));
             const sampleRings = ringPixelRadii.map((radius) => {
                 return NORMAL_SAMPLE_DIRECTIONS.map(([dx, dy]) => {
@@ -924,7 +1038,7 @@ class Picker {
                 });
             });
 
-            const anchorPos = nearestPosition ?? position;
+            const anchorPos = preferredPosition;
             const toCamera = setCameraFacingNormal(pickCamera.position, anchorPos, new Vec3());
 
             // Collect every valid 3D sample: the picked position plus all ring
@@ -943,9 +1057,16 @@ class Picker {
                 normal.copy(toCamera);
             }
 
+            const source: PickSurface['source'] = preferredPosition === centerPosition ? 'center' : 'nearest';
             return {
-                position,
-                nearestPosition: nearestPosition ?? position,
+                position: preferredPosition,
+                centerPosition: centerPosition ?? undefined,
+                nearestPosition: nearestPosition ?? preferredPosition,
+                preferredPosition,
+                centerAlpha,
+                nearestSupport,
+                sampleCount: sampleDistances.length,
+                source,
                 normal
             };
         };
@@ -957,6 +1078,7 @@ class Picker {
         this.prepareDepthMap = prepareDepthMap;
 
         this.release = () => {
+            app.off('frameend', onFrameEnd);
             unregisterPickerShaderPatches(app);
             enginePicker?.destroy();
             accumPass?.destroy();

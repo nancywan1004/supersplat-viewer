@@ -1,4 +1,5 @@
 import type { Global, ViewSettings } from './types';
+import type { ExperienceSettings } from './schemas/v2';
 
 /** 观看态 Bloom 用户灯总闸默认开启 */
 export const DEFAULT_VIEW_BLOOM_LOCAL_LIGHTS_ENABLED = true;
@@ -101,4 +102,31 @@ export function applyViewTorchActive(global: Global, active: boolean): boolean {
 
 export function readViewTorchActive(global: Global): boolean {
     return ensureViewSettings(global).torch?.active === true;
+}
+
+/** 进入编辑 / 恢复快照时丢弃观看态特效 session */
+export function clearViewEffectsSession(global: Global): void {
+    delete global.viewSettings?.effectsSession;
+}
+
+/** 编辑写 `global.settings`；观看写 `viewSettings.effectsSession` */
+export function getEffectsWriteTarget(global: Global): ExperienceSettings {
+    if (global.state.editMode) {
+        clearViewEffectsSession(global);
+        return global.settings as ExperienceSettings;
+    }
+    const vs = ensureViewSettings(global);
+    if (!vs.effectsSession) {
+        vs.effectsSession = JSON.parse(JSON.stringify(global.settings)) as ExperienceSettings;
+    }
+    return vs.effectsSession;
+}
+
+/** 有 session 时读 session，否则读 settings */
+export function getEffectsReadSource(global: Global): ExperienceSettings {
+    const session = global.viewSettings?.effectsSession;
+    if (!global.state.editMode && session) {
+        return session;
+    }
+    return global.settings as ExperienceSettings;
 }
