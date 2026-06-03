@@ -9,7 +9,7 @@ import {
 } from 'playcanvas';
 import * as pc from 'playcanvas';
 
-import type { AssetSource } from '../loaders/asset-source';
+import type { AssetSource } from '../../../loaders/asset-source';
 
 type MorphSource = string | AssetSource;
 

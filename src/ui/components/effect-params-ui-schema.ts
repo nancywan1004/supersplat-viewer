@@ -11,8 +11,8 @@ import { SPARKLE_TWINKLE_DEFAULTS } from '../../vfx/effects-runtime/persistent/s
 import {
     GSPLAT_FALLING_PETALS_DEFAULT_ATLAS_URL,
     GSPLAT_FALLING_PETALS_PRESET
-} from '../../vfx/gsplat-falling-petals';
-import { GSPLAT_FALLING_WEATHER_PRESETS } from '../../vfx/gsplat-falling-weather';
+} from '../../vfx/effects-runtime/persistent/camera/gsplat-falling-petals';
+import { GSPLAT_FALLING_WEATHER_PRESETS } from '../../vfx/effects-runtime/persistent/camera/gsplat-falling-weather';
 import { DEFAULT_NOSTALGIC_COMIC_SETTINGS } from '../../vfx/effects-runtime/persistent/stylisation/nostalgic-comic';
 import { DEFAULT_YIYUN_DIANRAN_SETTINGS } from '../../vfx/effects-runtime/persistent/stylisation/yiyun-dianran-stylisation';
 import {

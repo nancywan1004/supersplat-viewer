@@ -12,13 +12,13 @@ import {
     loadGsplatMorphSequence,
     type GsplatMorphOptions,
     type ProgressivePairFlightEase
-} from '../../gsplat-morph-progressive-v2';
+} from './gsplat-morph-progressive-v2';
 import {
     createGsplatWobbleEffect,
     GsplatWobbleEffect,
     removeGsplatWobbleEffect,
     type GsplatWobbleOptions
-} from '../../gsplat-wobble';
+} from './gsplat-wobble';
 import { ASSET_EFFECT_TYPE_VALUES, type AssetEffectType } from '../effect-types';
 import type { AssetEffectStartEntities } from './asset-effect-entity';
 import {

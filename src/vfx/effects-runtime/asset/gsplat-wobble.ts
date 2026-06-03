@@ -1,6 +1,6 @@
 import { BoundingBox, Mat4, Vec3, type Entity } from 'playcanvas';
 
-import { GsplatShaderEffect } from './effects-runtime/gsplat-shader-effect';
+import { GsplatShaderEffect } from '../gsplat-shader-effect';
 
 /** GLSL/WGSL 列主序 mat4（与 night-mode 一致） */
 function mat4ToShaderArray(m: Mat4): number[] {
