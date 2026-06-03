@@ -8,6 +8,7 @@ import {
     FOG_NONE,
     GSplatContainer,
     GSplatFormat,
+    Layer,
     PIXELFORMAT_RGBA8,
     Script,
     Vec3,
@@ -102,6 +103,77 @@ const WEATHER_PRESETS: Record<Exclude<GsplatFallingWeatherMode, 'none'>, GsplatF
         useCameraClearColor: true
     }
 };
+
+/** 雨雪 gsplat 专用层，与场景 World 材质隔离 */
+const WEATHER_GSPLAT_LAYER_NAME = 'GsplatCameraWeather';
+
+let weatherGsplatLayerId: number | null = null;
+
+type WeatherCameraLayers = { layers: number[] };
+
+type WeatherApp = AppBase & {
+    __global?: { camera?: { camera?: WeatherCameraLayers } };
+    viewer?: { cameraFrame?: { enabled?: boolean; update: () => void } };
+};
+
+function getOrCreateWeatherGsplatLayer(app: AppBase): number {
+    if (weatherGsplatLayerId != null) {
+        return weatherGsplatLayerId;
+    }
+
+    const layers = app.scene.layers;
+    let layer = layers.getLayerByName(WEATHER_GSPLAT_LAYER_NAME);
+    if (!layer) {
+        const world = layers.getLayerByName('World');
+        layer = new Layer({ name: WEATHER_GSPLAT_LAYER_NAME });
+        if (world) {
+            layers.insert(layer, layers.getTransparentIndex(world) + 1);
+        } else {
+            layers.push(layer);
+        }
+    }
+    weatherGsplatLayerId = layer.id;
+    return weatherGsplatLayerId;
+}
+
+/** 确保相机渲染雨雪层；layer 有变更时触发 CameraFrame 重建 */
+function syncWeatherGsplatRenderLayer(app: AppBase): number {
+    const layerId = getOrCreateWeatherGsplatLayer(app);
+    let patched = false;
+
+    const addLayer = (cam: WeatherCameraLayers) => {
+        if (cam.layers.indexOf(layerId) >= 0) {
+            return;
+        }
+        cam.layers = [...cam.layers, layerId];
+        patched = true;
+    };
+
+    const appEx = app as WeatherApp;
+    const mainCam = appEx.__global?.camera?.camera;
+    if (mainCam) {
+        addLayer(mainCam);
+    } else {
+        const found = app.root.findComponent('camera') as { camera?: WeatherCameraLayers } | null;
+        if (found?.camera) {
+            addLayer(found.camera);
+        }
+    }
+
+    for (const { camera } of app.scene.layers.cameras) {
+        addLayer(camera);
+    }
+
+    if (patched) {
+        const cf = appEx.viewer?.cameraFrame;
+        if (cf?.enabled) {
+            cf.update();
+            app.renderNextFrame = true;
+        }
+    }
+
+    return layerId;
+}
 
 export class GsplatFallingWeather extends Script {
     static scriptName = 'gsplatFallingWeather';
@@ -464,6 +536,8 @@ export class GsplatFallingWeather extends Script {
             return;
         }
 
+        syncWeatherGsplatRenderLayer(this.app);
+
         this._time += dt;
 
         const cs = this.cellSize;
@@ -574,15 +648,17 @@ export class GsplatFallingWeather extends Script {
         this._container.aabb = new BoundingBox(Vec3.ZERO, new Vec3(halfX * cs, halfY * cs, halfZ * cs));
         this._container.update(maxSplats, true);
 
+        const weatherLayerId = syncWeatherGsplatRenderLayer(this.app);
+
         if (!this.entity.gsplat) {
             this.entity.addComponent('gsplat', {
                 resource: this._container,
-                // Keep weather on its own material. The main scene reveal effects patch unified
-                // gsplat materials globally, which can briefly turn rain into white point splats.
-                unified: true
+                unified: true,
+                layers: [weatherLayerId]
             });
         } else {
             this.entity.gsplat.resource = this._container;
+            this.entity.gsplat.layers = [weatherLayerId];
         }
     }
 
