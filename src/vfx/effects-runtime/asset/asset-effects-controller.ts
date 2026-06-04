@@ -12,13 +12,13 @@ import {
     loadGsplatMorphSequence,
     type GsplatMorphOptions,
     type ProgressivePairFlightEase
-} from '../../gsplat-morph-progressive-v2';
+} from './gsplat-morph-progressive-v2';
 import {
     createGsplatWobbleEffect,
     GsplatWobbleEffect,
     removeGsplatWobbleEffect,
     type GsplatWobbleOptions
-} from '../../gsplat-wobble';
+} from './gsplat-wobble';
 import { ASSET_EFFECT_TYPE_VALUES, type AssetEffectType } from '../effect-types';
 import type { AssetEffectStartEntities } from './asset-effect-entity';
 import {
@@ -116,7 +116,7 @@ export function buildMorphOptions(ep: Record<string, unknown>): GsplatMorphOptio
         progressivePairFlightWindow:
             typeof ep.progressivePairFlightWindow === 'number' ? ep.progressivePairFlightWindow : 0.12,
         progressivePairFlightStagger:
-            typeof ep.progressivePairFlightStagger === 'number' ? ep.progressivePairFlightStagger : 1,
+            typeof ep.progressivePairFlightStagger === 'number' ? ep.progressivePairFlightStagger : 0,
         progressivePairFlightEase: resolveProgressivePairFlightEaseParam(ep.progressivePairFlightEase),
         progressivePairFlightPosEase: resolveProgressivePairFlightEaseParam(ep.progressivePairFlightPosEase),
         correspondenceStrategy:

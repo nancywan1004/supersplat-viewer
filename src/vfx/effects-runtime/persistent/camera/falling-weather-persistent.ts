@@ -5,14 +5,14 @@ import {
     destroyGsplatFallingPetals,
     GSPLAT_FALLING_PETALS_PRESET,
     type GsplatFallingPetals
-} from '../../../gsplat-falling-petals';
+} from './gsplat-falling-petals';
 import {
     createGsplatFallingWeather,
     destroyGsplatFallingWeather,
     GSPLAT_FALLING_WEATHER_PRESETS,
     type GsplatFallingWeather,
     type GsplatFallingWeatherMode
-} from '../../../gsplat-falling-weather';
+} from './gsplat-falling-weather';
 
 function findCameraEntity(root: Entity): Entity | null {
     return root.findComponent('camera')?.entity ?? null;

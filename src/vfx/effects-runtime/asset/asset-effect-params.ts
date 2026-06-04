@@ -8,7 +8,9 @@ import { ASSET_EFFECT_TYPE_VALUES } from '../effect-types';
 const GSPLAT_MORPH = new Set([
     'isLoop',
     'segmentDuration',
-    'keyframeEntityIds'
+    'keyframeEntityIds',
+    /** 配对错峰（0–1），见 `GsplatMorphOptions.progressivePairFlightStagger` */
+    'progressivePairFlightStagger'
 ]);
 
 /** 与 `GsplatWobbleOptions` 对齐（`gsplat-wobble.ts`） */

@@ -52,8 +52,6 @@ import {
 } from './scene-assets/collision/scene-asset-collision';
 import { getCameraCollisionManager } from './collision/camera-collision-manager';
 
-import { loadGsplatMorphSequence } from './vfx/gsplat-morph';
-
 
 export { loadGsplatAsset };
 

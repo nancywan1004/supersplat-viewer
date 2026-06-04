@@ -9,7 +9,7 @@ import {
 } from 'playcanvas';
 import * as pc from 'playcanvas';
 
-import type { AssetSource } from '../loaders/asset-source';
+import type { AssetSource } from '../../../loaders/asset-source';
 
 type MorphSource = string | AssetSource;
 
@@ -148,7 +148,7 @@ export interface GsplatMorphOptions {
      */
     progressivePairFlightWindow?: number;
     /**
-     * 配对索引错峰权重（0–1）。与 sA/sB 空间相位混合，拉大「先飞 / 后飞」时间差并保持通道连续。默认 1。
+     * 配对索引错峰权重（0–1）。与 sA/sB 空间相位混合，拉大「先飞 / 后飞」时间差并保持通道连续。默认 0。
      */
     progressivePairFlightStagger?: number;
     /**
@@ -296,7 +296,7 @@ const DEFAULT_GREEDY_MAX_CANDIDATES = 96;
 const DEFAULT_GREEDY_GLOBAL_FALLBACK_SAMPLES = 2048;
 const DEFAULT_MORPH_BUILD_YIELD_MS = 2;
 const DEFAULT_PROGRESSIVE_PAIR_FLIGHT_WINDOW = 0.12;
-const DEFAULT_PROGRESSIVE_PAIR_FLIGHT_STAGGER = 1;
+const DEFAULT_PROGRESSIVE_PAIR_FLIGHT_STAGGER = 0;
 const DEFAULT_MORPH_HOURGLASS_STRENGTH = 1.0;
 const DEFAULT_MORPH_HOURGLASS_WAIST_RADIAL_MIN = 0.14;
 const DEFAULT_MORPH_HOURGLASS_WAIST_PINCH = 2.6;
