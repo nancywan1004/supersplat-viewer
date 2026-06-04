@@ -87,7 +87,7 @@ type InboundPayload =
     | { type: 'CAMERA_RESET' }
     | { type: 'CAMERA_PITCH_RANGE_SET'; value?: [number, number] }
     | { type: 'SKYBOX_SET'; value?: string }
-    | { type: 'SKYBOX_ADD'; value?: string; url?: string }
+    | { type: 'SKYBOX_ADD'; value?: string }
     | { type: 'ANIMATION_RESET' }
     | { type: 'ANIMATION_PLAY_PAUSE' }
     | { type: 'EDIT_MODE_SET'; value?: boolean }
@@ -381,11 +381,8 @@ const initPostMessageBridge = (global: Global) => {
                 }
                 break;
             case 'SKYBOX_ADD':
-                {
-                    const url = typeof p.value === 'string' ? p.value : typeof p.url === 'string' ? p.url : undefined;
-                    if (typeof url === 'string') {
-                        events.fire('skyboxAdd', url);
-                    }
+                if (typeof p.value === 'string') {
+                    events.fire('skyboxAdd', p.value);
                 }
                 break;
             case 'ANIMATION_RESET':
