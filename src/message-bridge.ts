@@ -52,6 +52,7 @@ import { getSelectedSceneAssetType } from './state-selectors';
 import type { AssetLibraryItem, EditLeftModule, Global } from './types';
 import { paramsPatchHasAssetKeys } from './vfx/effects-runtime/asset/asset-effect-params';
 import {
+    ASSET_EFFECT_TYPE_VALUES,
     ASSET_EFFECT_TYPES,
     ASSET_GSPLAT_EFFECT_ID,
     PERSISTENT_CAMERA_EFFECT_TYPES,
@@ -1327,18 +1328,25 @@ const initPostMessageBridge = (global: Global) => {
         postToParent('SCENE_ANNOTATION_SELECTED', { module: MESSAGE_BRIDGE_MODULE.annotation, id });
     });
 
+    events.on('assetEffect:started', (data?: { targetId?: string; type?: string }) => {
+        if (data?.type !== ASSET_EFFECT_TYPE_VALUES[0] || typeof data.targetId !== 'string') {
+            return;
+        }
+        postToParent('ASSET_EFFECT_MORPH_START', { targetId: data.targetId });
+    });
+
     events.on('assetEffect:morphStopAll:done', (_payload: {
         morphTargetIds?: string[];
         restoredTargetIds?: string[];
         skippedTargetIds?: string[];
     }) => {
         // TODO: 放置流程接入后再向父页面上报 ASSET_EFFECT_MORPH_STOP_ALL_DONE
-        // postToParent('ASSET_EFFECT_MORPH_STOP_ALL_DONE', {
-        //     module: MESSAGE_BRIDGE_MODULE.effects,
-        //     morphTargetIds: payload?.morphTargetIds ?? [],
-        //     restoredTargetIds: payload?.restoredTargetIds ?? [],
-        //     skippedTargetIds: payload?.skippedTargetIds ?? []
-        // });
+        postToParent('ASSET_EFFECT_MORPH_STOP_ALL_DONE', {
+            module: MESSAGE_BRIDGE_MODULE.effects,
+            // morphTargetIds: _payload?.morphTargetIds ?? [],
+            // restoredTargetIds: _payload?.restoredTargetIds ?? [],
+            // skippedTargetIds: _payload?.skippedTargetIds ?? []
+        });
     });
 
     // 统一上报“进入标注编辑”并附带初始化数据（不区分选中来源）
