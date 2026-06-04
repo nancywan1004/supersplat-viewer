@@ -3,7 +3,7 @@ import { GsplatShaderEffect } from '../effects-runtime/gsplat-shader-effect';
 import { extractGlslWgslModifyBlocks } from '../effects-runtime/gsplat-effect-layers-extractor';
 import { collectPointLights, collectSpotLights } from '../../light';
 import { ensureTorchLight } from '../../settings-serialize/settings-serialize-helper';
-import { getTorchLightEffectiveRange, getTorchLightWorldPosition, isTorchEntityEnabled } from './torch-light';
+import { getTorchBeamParams, getTorchLightRay, getTorchLightWorldPosition, isTorchEntityEnabled } from './torch-light';
 import { readViewTorchActive } from '../../view-settings';
 import type { EffectsRuntime } from '../effects-runtime';
 import type { GsplatContribution } from '../effects-runtime/gsplat-contribution';
@@ -89,8 +89,13 @@ uniform vec3 uSpotDirections[10];
 uniform vec3 uSpotColors[10];
 uniform vec4 uSpotParams[10];  // x=innerConeRad, y=outerConeRad, z=range, w=enabled
 uniform vec3 uTorchWorldPos;
+uniform vec3 uTorchOrigin;
+uniform vec3 uTorchDirection;
 uniform vec3 uTorchColor;
-uniform vec4 uTorchParams; // x=range, y=enabled, z=hasWorldPos
+uniform vec4 uTorchParams; // x=beamEnd, y=enabled, z=hotspotDepth, w=sceneDepthOcclusionEnabled
+uniform vec4 uTorchSpot; // x=spotRadius, y=fillWeight, z=hasHotspot, w=hotspotWeight*meshBlend
+uniform mat4 uTorchViewProj;
+uniform sampler2D uSceneDepthMap;
 uniform float uNightFade;
 uniform float uBrightFactor;
 uniform vec3 uNightAmbient;
@@ -110,14 +115,53 @@ uniform float uCommittedTintVolumeActive; // 1 = 使用纹理，0 = 使用 unifo
 
 vec3 l2g(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(1.0 / 2.2)); }
 vec3 g2l(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(2.2)); }
+bool isTorchBlockedBySceneDepth(vec3 wpos) {
+    if (uTorchParams.w < 0.5) return false;
+    vec4 clip = uTorchViewProj * vec4(wpos, 1.0);
+    if (clip.w <= 1e-5) return true;
+    vec3 ndc = clip.xyz / clip.w;
+    vec2 uv = ndc.xy * 0.5 + 0.5;
+    if (uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0) return true;
+    float splatDepth = clamp(ndc.z * 0.5 + 0.5, 0.0, 1.0);
+    float sceneDepth = texture2D(uSceneDepthMap, uv).r;
+    if (sceneDepth >= 0.9999 || sceneDepth < 0.0001) return false;
+    float bias = 0.0025;
+    return sceneDepth < splatDepth - bias;
+}
+
 void addDepthTorchContribution(vec3 wpos, inout vec3 sum, inout vec3 torchLift) {
-    if (uTorchParams.y < 0.5 || uTorchParams.z < 0.5) return;
-    float range = max(uTorchParams.x, 1e-3);
-    float dist = length(uTorchWorldPos - wpos);
-    if (dist >= range || dist <= 0.001) return;
-    float norm = clamp(dist / range, 0.0, 1.0);
-    float att = pow(1.0 - norm, 2.5);
-    vec3 torch = uTorchColor * att;
+    if (uTorchParams.y < 0.5) return;
+    float beamEnd = max(uTorchParams.x, 1e-3);
+    float hotspotDepth = uTorchParams.z;
+    float spotRadius = max(uTorchSpot.x, 0.5);
+    float fillWeight = uTorchSpot.y;
+    float hasHotspot = uTorchSpot.z;
+    float hotspotWeight = uTorchSpot.w;
+
+    vec3 rayDir = normalize(uTorchDirection);
+    vec3 toPoint = wpos - uTorchOrigin;
+    float t = dot(toPoint, rayDir);
+    if (t <= 0.001 || t > beamEnd) return;
+    if (isTorchBlockedBySceneDepth(wpos)) return;
+
+    vec3 closest = uTorchOrigin + rayDir * t;
+    float radial = length(wpos - closest);
+    float kFill = clamp(t / beamEnd, 0.0, 1.0);
+    float nearRadius = max(0.18, spotRadius * 0.5);
+    float farRadius = max(0.75, spotRadius * 2.0);
+    float radius = mix(nearRadius, farRadius, kFill);
+    if (radial >= radius) return;
+
+    float radialAtt = pow(1.0 - clamp(radial / max(radius, 1e-3), 0.0, 1.0), 2.0);
+    float fillAtt = pow(1.0 - kFill, 1.1) * radialAtt * fillWeight;
+
+    float spotAtt = 0.0;
+    if (hasHotspot > 0.5 && hotspotDepth > 0.001) {
+        float dk = abs(t - hotspotDepth) / spotRadius;
+        spotAtt = exp(-dk * dk * 2.0) * radialAtt * hotspotWeight;
+    }
+
+    vec3 torch = uTorchColor * (fillAtt + spotAtt);
     sum += torch;
     torchLift += torch;
 }
@@ -278,8 +322,13 @@ uniform vec3 uSpotDirections[10];
 uniform vec3 uSpotColors[10];
 uniform vec4 uSpotParams[10];
 uniform vec3 uTorchWorldPos;
+uniform vec3 uTorchOrigin;
+uniform vec3 uTorchDirection;
 uniform vec3 uTorchColor;
 uniform vec4 uTorchParams;
+uniform vec4 uTorchSpot;
+uniform mat4 uTorchViewProj;
+uniform sampler2D uSceneDepthMap;
 uniform float uNightFade;
 uniform float uBrightFactor;
 uniform vec3 uNightAmbient;
@@ -304,14 +353,53 @@ uniform float uCommittedTintVolumeActive;
 
 vec3 l2g(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(1.0 / 2.2)); }
 vec3 g2l(vec3 c) { return pow(max(c, vec3(1e-6)), vec3(2.2)); }
+bool isTorchBlockedBySceneDepth(vec3 wpos) {
+    if (uTorchParams.w < 0.5) return false;
+    vec4 clip = uTorchViewProj * vec4(wpos, 1.0);
+    if (clip.w <= 1e-5) return true;
+    vec3 ndc = clip.xyz / clip.w;
+    vec2 uv = ndc.xy * 0.5 + 0.5;
+    if (uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0) return true;
+    float splatDepth = clamp(ndc.z * 0.5 + 0.5, 0.0, 1.0);
+    float sceneDepth = texture2D(uSceneDepthMap, uv).r;
+    if (sceneDepth >= 0.9999 || sceneDepth < 0.0001) return false;
+    float bias = 0.0025;
+    return sceneDepth < splatDepth - bias;
+}
+
 void addDepthTorchContribution(vec3 wpos, inout vec3 sum, inout vec3 torchLift) {
-    if (uTorchParams.y < 0.5 || uTorchParams.z < 0.5) return;
-    float range = max(uTorchParams.x, 1e-3);
-    float dist = length(uTorchWorldPos - wpos);
-    if (dist >= range || dist <= 0.001) return;
-    float norm = clamp(dist / range, 0.0, 1.0);
-    float att = pow(1.0 - norm, 2.5);
-    vec3 torch = uTorchColor * att;
+    if (uTorchParams.y < 0.5) return;
+    float beamEnd = max(uTorchParams.x, 1e-3);
+    float hotspotDepth = uTorchParams.z;
+    float spotRadius = max(uTorchSpot.x, 0.5);
+    float fillWeight = uTorchSpot.y;
+    float hasHotspot = uTorchSpot.z;
+    float hotspotWeight = uTorchSpot.w;
+
+    vec3 rayDir = normalize(uTorchDirection);
+    vec3 toPoint = wpos - uTorchOrigin;
+    float t = dot(toPoint, rayDir);
+    if (t <= 0.001 || t > beamEnd) return;
+    if (isTorchBlockedBySceneDepth(wpos)) return;
+
+    vec3 closest = uTorchOrigin + rayDir * t;
+    float radial = length(wpos - closest);
+    float kFill = clamp(t / beamEnd, 0.0, 1.0);
+    float nearRadius = max(0.18, spotRadius * 0.5);
+    float farRadius = max(0.75, spotRadius * 2.0);
+    float radius = mix(nearRadius, farRadius, kFill);
+    if (radial >= radius) return;
+
+    float radialAtt = pow(1.0 - clamp(radial / max(radius, 1e-3), 0.0, 1.0), 2.0);
+    float fillAtt = pow(1.0 - kFill, 1.1) * radialAtt * fillWeight;
+
+    float spotAtt = 0.0;
+    if (hasHotspot > 0.5 && hotspotDepth > 0.001) {
+        float dk = abs(t - hotspotDepth) / spotRadius;
+        spotAtt = exp(-dk * dk * 2.0) * radialAtt * hotspotWeight;
+    }
+
+    vec3 torch = uTorchColor * (fillAtt + spotAtt);
     sum += torch;
     torchLift += torch;
 }
@@ -480,8 +568,14 @@ uniform uSpotDirections: array<vec3f, 10>;
 uniform uSpotColors: array<vec3f, 10>;
 uniform uSpotParams: array<vec4f, 10>;
 uniform uTorchWorldPos: vec3f;
+uniform uTorchOrigin: vec3f;
+uniform uTorchDirection: vec3f;
 uniform uTorchColor: vec3f;
 uniform uTorchParams: vec4f;
+uniform uTorchSpot: vec4f;
+uniform uTorchViewProj: mat4x4f;
+var uSceneDepthMap: texture_2d<f32>;
+var uSceneDepthMapSampler: sampler;
 uniform uNightFade: f32;
 uniform uBrightFactor: f32;
 uniform uNightAmbient: vec3f;
@@ -503,14 +597,53 @@ uniform uCommittedTintVolumeActive: f32;
 
 fn l2g(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(1.0 / 2.2)); }
 fn g2l(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(2.2)); }
+fn isTorchBlockedBySceneDepth(wpos: vec3f) -> bool {
+    if (uniform.uTorchParams.w < 0.5) { return false; }
+    let clip = uniform.uTorchViewProj * vec4f(wpos, 1.0);
+    if (clip.w <= 1e-5) { return true; }
+    let ndc = clip.xyz / clip.w;
+    let uv = ndc.xy * 0.5 + vec2f(0.5);
+    if (uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0) { return true; }
+    let splatDepth = clamp(ndc.z * 0.5 + 0.5, 0.0, 1.0);
+    let sceneDepth = textureSampleLevel(uSceneDepthMap, uSceneDepthMapSampler, uv, 0.0).r;
+    if (sceneDepth >= 0.9999 || sceneDepth < 0.0001) { return false; }
+    let bias = 0.0025;
+    return sceneDepth < splatDepth - bias;
+}
+
 fn addDepthTorchContribution(wpos: vec3f, sum: ptr<function, vec3f>, torchLift: ptr<function, vec3f>) {
-    if (uniform.uTorchParams.y < 0.5 || uniform.uTorchParams.z < 0.5) { return; }
-    let range = max(uniform.uTorchParams.x, 1e-3);
-    let dist = length(uniform.uTorchWorldPos - wpos);
-    if (dist >= range || dist <= 0.001) { return; }
-    let norm = clamp(dist / range, 0.0, 1.0);
-    let att = pow(1.0 - norm, 2.5);
-    let torch = uniform.uTorchColor * att;
+    if (uniform.uTorchParams.y < 0.5) { return; }
+    let beamEnd = max(uniform.uTorchParams.x, 1e-3);
+    let hotspotDepth = uniform.uTorchParams.z;
+    let spotRadius = max(uniform.uTorchSpot.x, 0.5);
+    let fillWeight = uniform.uTorchSpot.y;
+    let hasHotspot = uniform.uTorchSpot.z;
+    let hotspotWeight = uniform.uTorchSpot.w;
+
+    let rayDir = normalize(uniform.uTorchDirection);
+    let toPoint = wpos - uniform.uTorchOrigin;
+    let t = dot(toPoint, rayDir);
+    if (t <= 0.001 || t > beamEnd) { return; }
+    if (isTorchBlockedBySceneDepth(wpos)) { return; }
+
+    let closest = uniform.uTorchOrigin + rayDir * t;
+    let radial = length(wpos - closest);
+    let kFill = clamp(t / beamEnd, 0.0, 1.0);
+    let nearRadius = max(0.18, spotRadius * 0.5);
+    let farRadius = max(0.75, spotRadius * 2.0);
+    let radius = mix(nearRadius, farRadius, kFill);
+    if (radial >= radius) { return; }
+
+    let radialAtt = pow(1.0 - clamp(radial / max(radius, 1e-3), 0.0, 1.0), 2.0);
+    let fillAtt = pow(1.0 - kFill, 1.1) * radialAtt * fillWeight;
+
+    var spotAtt = 0.0;
+    if (hasHotspot > 0.5 && hotspotDepth > 0.001) {
+        let dk = abs(t - hotspotDepth) / spotRadius;
+        spotAtt = exp(-dk * dk * 2.0) * radialAtt * hotspotWeight;
+    }
+
+    let torch = uniform.uTorchColor * (fillAtt + spotAtt);
     (*sum) = (*sum) + torch;
     (*torchLift) = (*torchLift) + torch;
 }
@@ -668,8 +801,14 @@ uniform uSpotDirections: array<vec3f, 10>;
 uniform uSpotColors: array<vec3f, 10>;
 uniform uSpotParams: array<vec4f, 10>;
 uniform uTorchWorldPos: vec3f;
+uniform uTorchOrigin: vec3f;
+uniform uTorchDirection: vec3f;
 uniform uTorchColor: vec3f;
 uniform uTorchParams: vec4f;
+uniform uTorchSpot: vec4f;
+uniform uTorchViewProj: mat4x4f;
+var uSceneDepthMap: texture_2d<f32>;
+var uSceneDepthMapSampler: sampler;
 uniform uNightFade: f32;
 uniform uBrightFactor: f32;
 uniform uNightAmbient: vec3f;
@@ -697,14 +836,53 @@ uniform uCommittedTintVolumeActive: f32;
 
 fn l2g(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(1.0 / 2.2)); }
 fn g2l(c: vec3f) -> vec3f { return pow(max(c, vec3f(1e-6)), vec3f(2.2)); }
+fn isTorchBlockedBySceneDepth(wpos: vec3f) -> bool {
+    if (uniform.uTorchParams.w < 0.5) { return false; }
+    let clip = uniform.uTorchViewProj * vec4f(wpos, 1.0);
+    if (clip.w <= 1e-5) { return true; }
+    let ndc = clip.xyz / clip.w;
+    let uv = ndc.xy * 0.5 + vec2f(0.5);
+    if (uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0) { return true; }
+    let splatDepth = clamp(ndc.z * 0.5 + 0.5, 0.0, 1.0);
+    let sceneDepth = textureSampleLevel(uSceneDepthMap, uSceneDepthMapSampler, uv, 0.0).r;
+    if (sceneDepth >= 0.9999 || sceneDepth < 0.0001) { return false; }
+    let bias = 0.0025;
+    return sceneDepth < splatDepth - bias;
+}
+
 fn addDepthTorchContribution(wpos: vec3f, sum: ptr<function, vec3f>, torchLift: ptr<function, vec3f>) {
-    if (uniform.uTorchParams.y < 0.5 || uniform.uTorchParams.z < 0.5) { return; }
-    let range = max(uniform.uTorchParams.x, 1e-3);
-    let dist = length(uniform.uTorchWorldPos - wpos);
-    if (dist >= range || dist <= 0.001) { return; }
-    let norm = clamp(dist / range, 0.0, 1.0);
-    let att = pow(1.0 - norm, 2.5);
-    let torch = uniform.uTorchColor * att;
+    if (uniform.uTorchParams.y < 0.5) { return; }
+    let beamEnd = max(uniform.uTorchParams.x, 1e-3);
+    let hotspotDepth = uniform.uTorchParams.z;
+    let spotRadius = max(uniform.uTorchSpot.x, 0.5);
+    let fillWeight = uniform.uTorchSpot.y;
+    let hasHotspot = uniform.uTorchSpot.z;
+    let hotspotWeight = uniform.uTorchSpot.w;
+
+    let rayDir = normalize(uniform.uTorchDirection);
+    let toPoint = wpos - uniform.uTorchOrigin;
+    let t = dot(toPoint, rayDir);
+    if (t <= 0.001 || t > beamEnd) { return; }
+    if (isTorchBlockedBySceneDepth(wpos)) { return; }
+
+    let closest = uniform.uTorchOrigin + rayDir * t;
+    let radial = length(wpos - closest);
+    let kFill = clamp(t / beamEnd, 0.0, 1.0);
+    let nearRadius = max(0.18, spotRadius * 0.5);
+    let farRadius = max(0.75, spotRadius * 2.0);
+    let radius = mix(nearRadius, farRadius, kFill);
+    if (radial >= radius) { return; }
+
+    let radialAtt = pow(1.0 - clamp(radial / max(radius, 1e-3), 0.0, 1.0), 2.0);
+    let fillAtt = pow(1.0 - kFill, 1.1) * radialAtt * fillWeight;
+
+    var spotAtt = 0.0;
+    if (hasHotspot > 0.5 && hotspotDepth > 0.001) {
+        let dk = abs(t - hotspotDepth) / spotRadius;
+        spotAtt = exp(-dk * dk * 2.0) * radialAtt * hotspotWeight;
+    }
+
+    let torch = uniform.uTorchColor * (fillAtt + spotAtt);
     (*sum) = (*sum) + torch;
     (*torchLift) = (*torchLift) + torch;
 }
@@ -934,6 +1112,7 @@ class NightMode extends GsplatShaderEffect {
     /** 笔刷区域局部亮度 -1～1，0 不变；由 setBloomBrushParams 传入 */
     bloomBrushLocalBrightness: number = 0;
     private _bloomBrushModelViewProj: Mat4 = new Mat4();
+    private _torchViewProj: Mat4 = new Mat4();
 
     /** 已提交亮度：3D 体积烘焙纹理 + AABB + 乘数，由 BloomController 通过 setCommittedBrightnessVolume 传入 */
     private committedVolumeTexture: Texture | null = null;
@@ -1370,6 +1549,23 @@ class NightMode extends GsplatShaderEffect {
         }
     }
 
+    /** 引擎 prepass / CameraFrame 写入的 scene depth；未绑定时勿开启遮挡（采样为 0 会挡掉全部 splat）。 */
+    private resolveTorchSceneDepthTexture(): Texture | null {
+        try {
+            const scoped = this.app.graphicsDevice.scope.resolve('uSceneDepthMap');
+            const tex = scoped?.value as Texture | null | undefined;
+            if (tex && (tex as Texture).width > 0 && (tex as Texture).height > 0) {
+                return tex;
+            }
+        } catch { /* ignore */ }
+        return null;
+    }
+
+    private bindTorchSceneDepthUniform(sceneDepthTex: Texture | null) {
+        const fb = this.ensureSamplerFallbackTexture();
+        this.setUniform('uSceneDepthMap', sceneDepthTex ?? fb);
+    }
+
     private ensureSamplerFallbackTexture(): Texture {
         if (this._samplerFallback) {
             return this._samplerFallback;
@@ -1583,19 +1779,49 @@ class NightMode extends GsplatShaderEffect {
                 this.nightAmbient.b
             ]);
             this.setUniform('uModelMatrix', modelMatrix);
-            const torchWorldPos = global ? getTorchLightWorldPosition(global) : null;
+            const camComp = this.camera?.camera;
+            if (camComp?.requestSceneDepthMap) {
+                camComp.requestSceneDepthMap(true);
+            }
             const torchCfg = global ? ensureTorchLight(global.settings as any) : null;
-            const torchActive = !!(global && torchCfg && torchWorldPos &&
+            const torchRay = global ? getTorchLightRay(global) : null;
+            const torchBeam = global ? getTorchBeamParams(global) : null;
+            const torchWorldPos = global ? getTorchLightWorldPosition(global) : null;
+            const torchActive = !!(global && torchCfg && torchRay &&
                 (readViewTorchActive(global) || isTorchEntityEnabled(global)));
-            if (torchActive && torchCfg && torchWorldPos) {
+            if (torchActive && torchCfg && torchRay && torchBeam && global) {
                 const [tr, tg, tb] = localLightLinearRgb(torchCfg.color[0], torchCfg.color[1], torchCfg.color[2], torchCfg.intensity ?? 1, scale);
-                this.setUniform('uTorchWorldPos', [torchWorldPos.x, torchWorldPos.y, torchWorldPos.z]);
+                const origin = torchRay.origin;
+                const direction = torchRay.direction;
+                const anchor = torchWorldPos ?? origin;
+                const sceneDepthTex = this.resolveTorchSceneDepthTexture();
+                const torchDepthOcclusion = sceneDepthTex ? 1 : 0;
+                this.bindTorchSceneDepthUniform(sceneDepthTex);
+                this.setUniform('uTorchWorldPos', [anchor.x, anchor.y, anchor.z]);
+                this.setUniform('uTorchOrigin', [origin.x, origin.y, origin.z]);
+                this.setUniform('uTorchDirection', [direction.x, direction.y, direction.z]);
                 this.setUniform('uTorchColor', [tr, tg, tb]);
-                this.setUniform('uTorchParams', [Math.max(0, getTorchLightEffectiveRange(global)), 1, 1, 0]);
+                const hotspotDepth = torchBeam.hasHotspot ? torchBeam.hotspotDepth : 0;
+                const hotspotWeight = torchBeam.hotspotWeight * torchBeam.meshHotspotBlend;
+                this.setUniform('uTorchParams', [torchBeam.beamEnd, 1, hotspotDepth, torchDepthOcclusion]);
+                this.setUniform('uTorchSpot', [
+                    torchBeam.spotRadius,
+                    torchBeam.fillWeight,
+                    torchBeam.hasHotspot ? 1 : 0,
+                    hotspotWeight
+                ]);
+                if (camComp) {
+                    this._torchViewProj.mul2(camComp.projectionMatrix, camComp.viewMatrix);
+                    this.setUniform('uTorchViewProj', this._torchViewProj.data);
+                }
             } else {
+                this.bindTorchSceneDepthUniform(null);
                 this.setUniform('uTorchWorldPos', [0, 0, 0]);
+                this.setUniform('uTorchOrigin', [0, 0, 0]);
+                this.setUniform('uTorchDirection', [0, 0, -1]);
                 this.setUniform('uTorchColor', [0, 0, 0]);
                 this.setUniform('uTorchParams', [0, 0, 0, 0]);
+                this.setUniform('uTorchSpot', [0, 0, 0, 0]);
             }
             // 无论 fade 正负，统一传入平行光与相机位置，保证所有光源都参与计算
             const camPos = this.camera?.getPosition();

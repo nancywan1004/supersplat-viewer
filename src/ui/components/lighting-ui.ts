@@ -49,7 +49,7 @@ const LIGHTING_PANEL_HTML = `
     </div>
   </div>
   <div class="settingsRow">
-    <label for="torchRangeSlider" class="lightingLabel" title="PointLight 的有效照射半径（世界单位）；光源贴在拾取得到的表面位置">Range:</label>
+    <label for="torchRangeSlider" class="lightingLabel" title="聚光/光斑半径（世界单位）；沿视线照亮距离随场景 farClip 自动延伸">光斑半径:</label>
     <div class="lightingSliderWrap">
       <input type="range" id="torchRangeSlider" min="0" max="20" step="0.1" value="5.5" class="lightingSlider">
       <span id="torchRangeValue" class="lightingSliderValue">5.5</span>
