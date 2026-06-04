@@ -3,12 +3,14 @@ import type { EditLeftModule } from '../types';
 import { getAssetPlacementSettingsHTML, bindAssetPlacementSettings } from './components/asset-placement-settings-ui';
 import { getSceneAssetListHTML, bindSceneAssetList } from './components/scene-asset-list-ui';
 import { getCameraSettingsHTML, bindCameraSettings } from './components/camera-settings-ui';
+import { getSkyboxSettingsHTML, bindSkyboxSettings } from './components/skybox-settings-ui';
 
 const RIGHT_PANEL_IDS: EditLeftModule[] = [
     'gs',
     'asset',
     'annotation',
     'environment',
+    'skybox',
     'camera',
     'effects',
     'assetEffects'
@@ -49,6 +51,9 @@ const EDIT_RIGHT_TOOLBAR_HTML = `
         <div id="postEffectPanelContainer"></div>
     </div>
 </div>
+<div id="rightPanelSkybox" class="edit-right-panel hidden" data-module="skybox">
+    ${getSkyboxSettingsHTML()}
+</div>
 <div id="rightPanelCamera" class="edit-right-panel hidden" data-module="camera">
     ${getCameraSettingsHTML()}
 </div>
@@ -79,6 +84,7 @@ const PANEL_ID_BY_MODULE: Record<EditLeftModule, string> = {
     asset: 'rightPanelAsset',
     annotation: 'rightPanelAnnotation',
     environment: 'rightPanelEnvironment',
+    skybox: 'rightPanelSkybox',
     camera: 'rightPanelCamera',
     effects: 'rightPanelEffects',
     assetEffects: 'rightPanelAssetEffects'
@@ -96,7 +102,8 @@ const SUBPANEL_PAIRS_BY_MODULE: Partial<Record<EditLeftModule, [string, string][
     ],
     asset: [['assetPlacementHeader', 'assetPlacementSubpanel']],
     annotation: [['annotationSettingsHeader', 'annotationSettingsSubpanel']],
-    camera: [['cameraSettingsHeader', 'cameraSettingsSubpanel']]
+    camera: [['cameraSettingsHeader', 'cameraSettingsSubpanel']],
+    skybox: [['skyboxSettingsHeader', 'skyboxSettingsSubpanel']]
 };
 
 /**
@@ -195,7 +202,8 @@ export function initEditRightToolbarUI(global: Global): () => void {
         bindSubpanel('renderSubmenuHeader', 'renderSubpanel', 'renderSubmenuArrow'),
         bindSubpanel('annotationSettingsHeader', 'annotationSettingsSubpanel', 'annotationSettingsArrow'),
         bindSubpanel('assetPlacementHeader', 'assetPlacementSubpanel', 'assetPlacementArrow'),
-        bindSubpanel('cameraSettingsHeader', 'cameraSettingsSubpanel', 'cameraSettingsArrow')
+        bindSubpanel('cameraSettingsHeader', 'cameraSettingsSubpanel', 'cameraSettingsArrow'),
+        bindSubpanel('skyboxSettingsHeader', 'skyboxSettingsSubpanel', 'skyboxSettingsArrow')
     ];
 
     // 资产放置模块：HTML 与 bind 均由 asset-placement-settings-ui 内部管理（含场景资产列表）
@@ -216,6 +224,12 @@ export function initEditRightToolbarUI(global: Global): () => void {
     if (cameraPanel) {
         const cameraRoot = cameraPanel.querySelector<HTMLElement>('[data-camera-settings-root]');
         unbindSubpanels.push(bindCameraSettings(cameraRoot, global));
+    }
+
+    const skyboxPanel = document.getElementById('rightPanelSkybox');
+    if (skyboxPanel) {
+        const skyboxRoot = skyboxPanel.querySelector<HTMLElement>('[data-skybox-settings-root]');
+        unbindSubpanels.push(bindSkyboxSettings(skyboxRoot, global));
     }
 
     return () => {

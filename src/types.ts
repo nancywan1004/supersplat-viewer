@@ -113,7 +113,7 @@ type CameraMode = 'orbit' | 'anim' | 'fly' | 'walk';
 type InputMode = 'desktop' | 'touch';
 
 /** 编辑模式左侧工具箱当前选中的模块 */
-type EditLeftModule = 'gs' | 'asset' | 'annotation' | 'environment' | 'camera' | 'effects' | 'assetEffects';
+type EditLeftModule = 'gs' | 'asset' | 'annotation' | 'environment' | 'skybox' | 'camera' | 'effects' | 'assetEffects';
 
 /** 资产变换模式（移动/旋转/缩放） */
 type AssetTransformMode = 'move' | 'rotate' | 'scale';

@@ -11,10 +11,6 @@ import {
     getComparableSettingsStringFromSnapshot,
     applySettingsSnapshot
 } from '../settings-serialize/settings-serialize';
-import {
-    readSkyboxCurrentUrlFromSettings,
-    readSkyboxUploadUrlsFromSettings
-} from '../settings-serialize/settings-serialize-helper';
 import { downloadExperienceSettingsLocally } from '../render/project-thumbnail';
 import { resetSceneSettings } from '../settings-reset';
 import { requestSceneAssetsRestore } from '../scene-assets/asset-placement-handler';
@@ -356,7 +352,6 @@ const initUI = (global: Global) => {
         'walkHint',
         'cameraPathCheck', 'cameraPathOption',
         'cameraBoundsCheck', 'cameraBoundsOption',
-        'skyboxRow', 'skyboxSelect',
         'vfxSubmenuHeader', 'vfxSubpanel', 'vfxSubmenuArrow',
         'lightingSubmenuHeader', 'lightingSubpanel', 'lightingSubmenuArrow',
         'postEffectSubmenuHeader', 'postEffectSubpanel', 'postEffectSubmenuArrow',
@@ -539,117 +534,6 @@ const initUI = (global: Global) => {
     };
     events.on('gamingControls:changed', updateGamingControls);
     updateGamingControls();
-
-    // Skybox selector
-    const skyboxRow = dom.skyboxRow;
-    const skyboxSelect = dom.skyboxSelect as HTMLSelectElement;
-
-    const deriveSkyboxLabel = (value: string) => {
-        try {
-            const decoded = decodeURIComponent(value);
-            const filename = decoded.split('/').pop() || decoded;
-            const withoutExt = filename.replace(/\.[^.]+$/, '');
-            return withoutExt || decoded;
-        } catch (err) {
-            return value;
-        }
-    };
-
-    const ensureOption = (value: string, label: string) => {
-        const option = document.createElement('option');
-        option.value = value;
-        option.textContent = label;
-        return option;
-    };
-
-    const populateSkyboxes = async () => {
-        if (!skyboxSelect || !skyboxRow) {
-            return;
-        }
-
-        try {
-            skyboxRow.classList.add('hidden');
-
-            const response = await fetch('/assets/skyboxes/index.json', {
-                cache: 'force-cache'
-            });
-
-            if (!response.ok) {
-                throw new Error(`Failed to load skybox list: ${response.status}`);
-            }
-
-            type SkyboxManifestEntry = string | { label?: string; name?: string; file?: string; url?: string };
-
-            const manifest = await response.json() as SkyboxManifestEntry[];
-            const normalized = manifest
-                .map((entry) => {
-                    if (typeof entry === 'string') {
-                        return {
-                            label: deriveSkyboxLabel(entry),
-                            value: `/assets/skyboxes/${entry}`
-                        };
-                    }
-
-                    const file = entry.file ?? '';
-                    const rawValue = entry.url ?? (file ? `/assets/skyboxes/${file}` : '');
-                    if (!rawValue) {
-                        return null;
-                    }
-
-                    return {
-                        label: entry.label ?? entry.name ?? deriveSkyboxLabel(file || rawValue),
-                        value: rawValue
-                    };
-                })
-                .filter((item): item is { label: string; value: string } => !!item?.value);
-
-            const uploadSkyboxUrls = readSkyboxUploadUrlsFromSettings(global.settings);
-            const current = readSkyboxCurrentUrlFromSettings(global.settings) ?? config.skyboxUrl ?? '';
-
-            skyboxSelect.innerHTML = '';
-
-            skyboxSelect.appendChild(ensureOption('', 'No Skybox'));
-
-            normalized.forEach(({ label, value }) => {
-                skyboxSelect.appendChild(ensureOption(value, label));
-            });
-
-            uploadSkyboxUrls.forEach(value => {
-                if (!normalized.some(item => item.value === value)) {
-                    skyboxSelect.appendChild(ensureOption(value, deriveSkyboxLabel(value)));
-                }
-            });
-
-            if (current && !normalized.some(({ value }) => value === current)) {
-                if (!uploadSkyboxUrls.includes(current)) {
-                    skyboxSelect.appendChild(ensureOption(current, deriveSkyboxLabel(current)));
-                }
-            }
-
-            skyboxSelect.value = current || '';
-            skyboxRow.classList.remove('hidden');
-        } catch (err) {
-            console.warn('[SuperSplat] 无法加载天空盒列表：', err);
-            skyboxRow?.classList.add('hidden');
-        }
-    };
-
-    if (skyboxSelect) {
-        skyboxSelect.addEventListener('change', (event) => {
-            const value = (event.target as HTMLSelectElement).value;
-            events.fire('skyboxSet', value || null);
-        });
-
-        events.on('skyboxSelectionSynced', (value?: string | null) => {
-            skyboxSelect.value = value ?? '';
-        });
-
-        events.on('skyboxListChanged', () => {
-            populateSkyboxes();
-        });
-
-        populateSkyboxes();
-    }
 
     // AR/VR
     const arChanged = () => dom.arMode.classList[state.hasAR ? 'remove' : 'add']('hidden');

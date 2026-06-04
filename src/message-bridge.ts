@@ -567,6 +567,7 @@ const initPostMessageBridge = (global: Global) => {
                         'asset',
                         'annotation',
                         'environment',
+                        'skybox',
                         'camera',
                         'effects',
                         'assetEffects'

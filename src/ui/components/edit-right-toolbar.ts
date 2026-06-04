@@ -8,6 +8,7 @@ const RIGHT_PANEL_IDS: EditLeftModule[] = [
     'asset',
     'annotation',
     'environment',
+    'skybox',
     'camera',
     'effects',
     'assetEffects'
@@ -71,6 +72,7 @@ const PANEL_ID_BY_MODULE: Record<EditLeftModule, string> = {
     asset: 'rightPanelAsset',
     annotation: 'rightPanelAnnotation',
     environment: 'rightPanelEnvironment',
+    skybox: 'rightPanelSkybox',
     camera: 'rightPanelCamera',
     effects: 'rightPanelEffects',
     assetEffects: 'rightPanelAssetEffects'
