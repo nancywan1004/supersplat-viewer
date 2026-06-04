@@ -39,6 +39,7 @@ class InputController {
 
     private _annotationInputFocused = false;
     private _minPanDistance = 1;
+    private _lastDesktopTap = { time: 0, x: 0, y: 0 };
 
     private _onFocusIn = (event: FocusEvent) => {
         const target = event.target as HTMLElement | null;
@@ -61,6 +62,21 @@ class InputController {
     };
 
     private _onPointerDownArbiter = (event: PointerEvent) => {
+        if (event.isPrimary && event.pointerType !== 'touch' && event.button === 0) {
+            const now = Date.now();
+            const delay = Math.max(0, now - this._lastDesktopTap.time);
+            if (delay < 300 &&
+                Math.abs(event.clientX - this._lastDesktopTap.x) < 8 &&
+                Math.abs(event.clientY - this._lastDesktopTap.y) < 8) {
+                this._global.events.fire('inputEvent', 'dblclick', event);
+                this._lastDesktopTap.time = 0;
+            } else {
+                this._lastDesktopTap.time = now;
+                this._lastDesktopTap.x = event.clientX;
+                this._lastDesktopTap.y = event.clientY;
+            }
+        }
+
         const arbiter = (this._global as Global & { __inputArbiter?: InputArbiter }).__inputArbiter;
         const result = arbiter?.dispatchPointerDown({
             global: this._global,

@@ -53,8 +53,6 @@ class NavInteraction {
 
     private _targetPickRequest = 0;
 
-    private _lastTap = { time: 0, x: 0, y: 0 };
-
     private _lastMobileTap = { time: 0, offsetX: 0, offsetY: 0 };
 
     private _touchTapTracking: {
@@ -137,17 +135,20 @@ class NavInteraction {
         return null;
     }
 
-    private async _focusPickedPosition(offsetX: number, offsetY: number) {
+    private async _pickFocusPosition(offsetX: number, offsetY: number): Promise<Vec3 | null> {
         const global = this._global;
-        if (!global || global.state.cameraMode !== 'orbit') return;
+        const canvas = this._canvas;
+        if (!global || !canvas) return null;
 
-        const request = ++this._targetPickRequest;
         const target = await this._pickSceneTarget(offsetX, offsetY);
-        if (target && request === this._targetPickRequest && this._global?.state.cameraMode === 'orbit') {
-            const { events } = this._global;
-            events.fire('orbitTarget:set', target.position, target.normal);
-            events.fire('pick', target.position);
+        if (target) {
+            return target.position;
         }
+
+        return this._picker.pick(
+            offsetX / canvas.clientWidth,
+            offsetY / canvas.clientHeight
+        );
     }
 
     private async _handleDoubleTapAt(offsetX: number, offsetY: number) {
@@ -158,17 +159,16 @@ class NavInteraction {
         // dblclick focuses orbit at the picked target from any navigation mode.
         // CameraManager owns the actual orbit transition via the `pick` event.
         const request = ++this._targetPickRequest;
-        const target = await this._pickSceneTarget(offsetX, offsetY);
-        if (!target || request !== this._targetPickRequest) return;
+        const position = await this._pickFocusPosition(offsetX, offsetY);
+        if (!position || request !== this._targetPickRequest) return;
 
         // `pick` switches to orbit and cancels active first-person nav.
-        events.fire('pick', target.position);
+        events.fire('pick', position);
     }
 
     private _onPointerDown = (event: PointerEvent) => {
         const global = this._global;
         if (!global) return;
-        const { events } = global;
 
         // record offsets for click/tap target picking
         this._lastPointerOffsetX = event.offsetX;
@@ -181,23 +181,7 @@ class NavInteraction {
             this._updateCursor();
         }
 
-        if (event.pointerType !== 'touch') {
-            // Manual double-click detection for platforms that do not emit
-            // reliable native dblclick events on the canvas.
-            const now = Date.now();
-            const delay = Math.max(0, now - this._lastTap.time);
-            if (delay < 300 &&
-                Math.abs(event.clientX - this._lastTap.x) < 8 &&
-                Math.abs(event.clientY - this._lastTap.y) < 8) {
-                this._suppressClick = true;
-                events.fire('inputEvent', 'dblclick', event);
-                this._lastTap.time = 0;
-            } else {
-                this._lastTap.time = now;
-                this._lastTap.x = event.clientX;
-                this._lastTap.y = event.clientY;
-            }
-        } else if (event.isPrimary) {
+        if (event.pointerType === 'touch' && event.isPrimary) {
             this._touchTapTracking = {
                 pointerId: event.pointerId,
                 startClientX: event.clientX,
@@ -302,6 +286,7 @@ class NavInteraction {
         if (!global || !canvas) return;
         if (eventName !== 'dblclick') return;
         if (!(event instanceof MouseEvent)) return;
+        this._suppressClick = true;
         await this._handleDoubleTapAt(event.offsetX, event.offsetY);
     };
 
