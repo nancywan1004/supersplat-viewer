@@ -1672,7 +1672,7 @@ class NightMode extends GsplatShaderEffect {
         // - 有 skybox：随 nightFade 调整，避免环境反射过曝。
         // - 无 skybox：强制 0，避免纯色 envAtlas 在背景通道显白。
         const globalAny = (this.app as any).__global;
-        const rawSkyboxUrl = globalAny?.settings?.background?.skyboxUrl;
+        const rawSkyboxUrl = globalAny?.settings?.background?.skybox?.currentUrl;
         const hasSkybox = typeof rawSkyboxUrl === 'string' && rawSkyboxUrl.trim().length > 0;
         const targetSkyboxIntensity = hasSkybox
             ? Math.max(0.23, Math.min(2.0, 1.1 + 1.0 * this.nightFade))

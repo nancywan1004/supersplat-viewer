@@ -1,6 +1,6 @@
 /**
  * 场景 settings 重置：优先云端初始 transform.json，否则保留当前相机路径。
- * 不修改天空盒（`background` 含 `skyboxUrl` 原样保留）。
+ * 不修改天空盒（`background` 含 `skybox` 原样保留）。
  */
 import { requestSceneAssetsRestore } from './scene-assets/asset-placement-handler';
 import {

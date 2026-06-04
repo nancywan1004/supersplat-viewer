@@ -70,7 +70,10 @@ export type ExperienceSettings = {
     soundUrl?: string;
     background: {
         color: [number, number, number];
-        skyboxUrl?: string;
+        skybox?: {
+            currentUrl?: string;
+            uploadUrls?: string[];
+        };
     };
     postEffectSettings: PostEffectSettings;
     animTracks: AnimTrack[];

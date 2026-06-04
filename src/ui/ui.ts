@@ -11,7 +11,10 @@ import {
     getComparableSettingsStringFromSnapshot,
     applySettingsSnapshot
 } from '../settings-serialize/settings-serialize';
-import { readSkyboxUrlFromSettings } from '../settings-serialize/settings-serialize-helper';
+import {
+    readSkyboxCurrentUrlFromSettings,
+    readSkyboxUploadUrlsFromSettings
+} from '../settings-serialize/settings-serialize-helper';
 import { downloadExperienceSettingsLocally } from '../render/project-thumbnail';
 import { resetSceneSettings } from '../settings-reset';
 import { requestSceneAssetsRestore } from '../scene-assets/asset-placement-handler';
@@ -600,7 +603,8 @@ const initUI = (global: Global) => {
                 })
                 .filter((item): item is { label: string; value: string } => !!item?.value);
 
-            const current = readSkyboxUrlFromSettings(global.settings) ?? config.skyboxUrl ?? '';
+            const uploadSkyboxUrls = readSkyboxUploadUrlsFromSettings(global.settings);
+            const current = readSkyboxCurrentUrlFromSettings(global.settings) ?? config.skyboxUrl ?? '';
 
             skyboxSelect.innerHTML = '';
 
@@ -610,8 +614,16 @@ const initUI = (global: Global) => {
                 skyboxSelect.appendChild(ensureOption(value, label));
             });
 
+            uploadSkyboxUrls.forEach(value => {
+                if (!normalized.some(item => item.value === value)) {
+                    skyboxSelect.appendChild(ensureOption(value, deriveSkyboxLabel(value)));
+                }
+            });
+
             if (current && !normalized.some(({ value }) => value === current)) {
-                skyboxSelect.appendChild(ensureOption(current, deriveSkyboxLabel(current)));
+                if (!uploadSkyboxUrls.includes(current)) {
+                    skyboxSelect.appendChild(ensureOption(current, deriveSkyboxLabel(current)));
+                }
             }
 
             skyboxSelect.value = current || '';
@@ -630,6 +642,10 @@ const initUI = (global: Global) => {
 
         events.on('skyboxSelectionSynced', (value?: string | null) => {
             skyboxSelect.value = value ?? '';
+        });
+
+        events.on('skyboxListChanged', () => {
+            populateSkyboxes();
         });
 
         populateSkyboxes();

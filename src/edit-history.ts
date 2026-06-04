@@ -4,7 +4,7 @@ import { serializeExperienceSettings, applySettingsSnapshot } from './settings-s
 import { requestSceneAssetsRestore } from './scene-assets/asset-placement-handler';
 import type { AnnotationManager } from './annotation-toolbar/annotation-manager';
 import { updatePointLightsFromSettings } from './light';
-import { readSkyboxUrlFromSettings } from './settings-serialize/settings-serialize-helper';
+import { readSkyboxCurrentUrlFromSettings } from './settings-serialize/settings-serialize-helper';
 
 export type EditSnapshot = ExperienceSettings;
 
@@ -121,9 +121,9 @@ export function restorePostEffectsFromSettings(global: Global): void {
     global.events.fire('bloomLocalLightRegion:listChanged');
 }
 
-/** 按当前 settings.background.skyboxUrl 重新应用天空盒（含清除） */
+/** 按当前 settings.background.skybox.currentUrl 重新应用天空盒（含清除） */
 export function restoreSkyboxFromSettings(global: Global): void {
-    const url = readSkyboxUrlFromSettings(global.settings as ExperienceSettings);
+    const url = readSkyboxCurrentUrlFromSettings(global.settings as ExperienceSettings);
     global.events.fire('skyboxSet', url ?? null);
 }
 

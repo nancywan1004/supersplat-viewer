@@ -35,9 +35,10 @@ import { initPostMessageBridge } from './message-bridge';
 import { ensureViewSettings } from './view-settings';
 import { initVideoExport } from './render/video-export';
 import {
+    addSkyboxUploadUrlToSettings,
     ensureRevealEffect,
     resolveInitialSkyboxUrl,
-    setSkyboxUrlInSettings
+    setSkyboxCurrentUrlInSettings
 } from './settings-serialize/settings-serialize-helper';
 import {
     createDefaultEffectsRuntimeState,
@@ -441,9 +442,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         });
     }
 
-    events.on('skyboxSet', async (url?: string | null) => {
-        setSkyboxUrlInSettings(global.settings, url ?? null);
-
+    const applyCurrentSkybox = async (url?: string | null) => {
         const trimmed = typeof url === 'string' ? url.trim() : '';
         if (!trimmed) {
             clearSkyboxDisplay(app);
@@ -457,6 +456,22 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         } catch (err) {
             console.warn('[SuperSplat] 设置天空盒失败：', err);
         }
+    };
+
+    events.on('skyboxSet', async (url?: string | null) => {
+        setSkyboxCurrentUrlInSettings(global.settings, url ?? null);
+        await applyCurrentSkybox(url);
+    });
+
+    events.on('skyboxAdd', async (url?: string | null) => {
+        const trimmed = addSkyboxUploadUrlToSettings(global.settings, url ?? null);
+        if (!trimmed) {
+            console.warn('[SuperSplat] SKYBOX_ADD 缺少有效的 URL');
+            return;
+        }
+        setSkyboxCurrentUrlInSettings(global.settings, trimmed);
+        events.fire('skyboxListChanged');
+        await applyCurrentSkybox(trimmed);
     });
 
     // Load and play sound

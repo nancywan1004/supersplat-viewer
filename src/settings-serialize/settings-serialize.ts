@@ -8,7 +8,10 @@ import {
     persistCollisionToSettings,
     syncSceneAssetCollisionRuntime
 } from '../scene-assets/collision/scene-asset-collision';
-import { serializeSceneMediaHotspotForPersistence } from './settings-serialize-helper';
+import {
+    normalizeSkyboxForPersistence,
+    serializeSceneMediaHotspotForPersistence
+} from './settings-serialize-helper';
 import {
     flushRevealIntoEffectsForExport,
     normalizeEffectsOnImport,
@@ -118,9 +121,7 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
     if (!Array.isArray(bg.color) || bg.color.length !== 3) {
         bg.color = [0, 0, 0];
     }
-    if (typeof bg.skyboxUrl === 'string' && !bg.skyboxUrl.trim()) {
-        delete bg.skyboxUrl;
-    }
+    normalizeSkyboxForPersistence(out as ExperienceSettings);
     if (!out.postEffectSettings || typeof out.postEffectSettings !== 'object') {
         out.postEffectSettings = defaultPostEffectSettings();
     } else {
@@ -312,6 +313,7 @@ export function applySettingsSnapshot(global: Global, snapshot: ExperienceSettin
     const gs = global.settings as Record<string, unknown>;
     for (const k of Object.keys(gs)) delete gs[k];
     Object.assign(gs, snapshot);
+    normalizeSkyboxForPersistence(global.settings as ExperienceSettings);
     if ((snapshot as { version?: number }).version === 2 && hadRevealOrEffects) {
         normalizeEffectsOnImport(global.settings as ExperienceSettings);
     }

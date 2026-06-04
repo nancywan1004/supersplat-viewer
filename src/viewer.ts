@@ -53,7 +53,7 @@ import {
 } from './vfx/effects-runtime/persistent/persistent-gsplat-lifecycle';
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
 import { getSkyboxRadius } from './loaders/skybox-loader';
-import { readSkyboxUrlFromSettings } from './settings-serialize/settings-serialize-helper';
+import { readSkyboxCurrentUrlFromSettings } from './settings-serialize/settings-serialize-helper';
 import { isLodMetaFile } from './loaders/lod-loader';
 import { BloomController } from './vfx/bloom';
 import { NightMode } from './vfx/lighting/night-mode';
@@ -571,7 +571,7 @@ class Viewer {
             let far = Math.max(dist + boundRadius + clipPadding, 1e-2);
             
             // 获取天空盒的实际半径，如果存在天空盒，确保 farClip 足够大以包含它
-            const skyboxRadius = getSkyboxRadius(app, readSkyboxUrlFromSettings(settings));
+            const skyboxRadius = getSkyboxRadius(app, readSkyboxCurrentUrlFromSettings(settings));
             if (skyboxRadius > 0) {
                 // 使用固定的天空盒半径，计算相机到天空盒边缘的最大距离
                 // 假设天空盒中心在原点 (0, 0, 0)，计算相机到原点的距离 + 半径
