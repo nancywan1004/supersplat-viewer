@@ -415,6 +415,7 @@ const initPostMessageBridge = (global: Global) => {
                 }
                 state.editMode = !!p.value;
                 applyMorphKeyframeVisibilityPolicy(global);
+                events.fire('editMode:changed', state.editMode);
                 if (value) {
                     const initialSnapshot = serializeExperienceSettings(global);
                     setBaseline(initialSnapshot);
@@ -442,6 +443,7 @@ const initPostMessageBridge = (global: Global) => {
                 }
                 state.editMode = false;
                 applyMorphKeyframeVisibilityPolicy(global);
+                events.fire('editMode:changed', false);
                 break;
             }
             case 'EDIT_UNDO': {

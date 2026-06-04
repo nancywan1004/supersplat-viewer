@@ -164,6 +164,16 @@ function startRestoredAssetDefaultEffectIfConfigured(global: Global, entry: Scen
     });
 }
 
+/** Edit → View：重新启动 autoStart 物体的 idle 瞌睡 wobble（进编辑时 vfxExit 会拆掉特效）。 */
+export function restartViewerIdleAssetEffects(global: Global): void {
+    if (global.state.editMode === true) {
+        return;
+    }
+    for (const entry of global.state.scenePlacedEntities ?? []) {
+        startRestoredAssetDefaultEffectIfConfigured(global, entry);
+    }
+}
+
 /**
  * Viewer 资产恢复完成后的 morph 源物体展示策略：
  * 只保留 morph owner，可见性只改运行态，不回写 settings.sceneAssets。

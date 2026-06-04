@@ -28,6 +28,7 @@ import {
     resolveWobbleEntityFromEffectParams
 } from './asset-effect-entity';
 import { getDefaultWobbleEffectParams, mergeWobbleEffectParams } from './wobble-effect-params';
+import { restartViewerIdleAssetEffects } from '../../../scene-assets/asset-placement-handler';
 
 type ActiveAssetEffect = {
     type: AssetEffectType;
@@ -211,6 +212,7 @@ export class AssetEffectsController {
         global.events.on('assetEffect:configChanged', this._onConfigChanged);
         global.events.on('assetEffect:morphStopAll', this._onMorphStopAll);
         global.events.on('vfxExit', this._onVfxExit);
+        global.events.on('editMode:changed', this._onEditModeChanged);
     }
 
     dispose() {
@@ -223,6 +225,7 @@ export class AssetEffectsController {
         this._global.events.off('assetEffect:configChanged', this._onConfigChanged);
         this._global.events.off('assetEffect:morphStopAll', this._onMorphStopAll);
         this._global.events.off('vfxExit', this._onVfxExit);
+        this._global.events.off('editMode:changed', this._onEditModeChanged);
         for (const targetId of [...this._active.keys()]) {
             this._teardownTarget(targetId);
         }
@@ -311,6 +314,12 @@ export class AssetEffectsController {
                 targetId,
                 type: entry.type
             });
+        }
+    };
+
+    private readonly _onEditModeChanged = (inEdit: boolean) => {
+        if (!inEdit && !this._disposed) {
+            restartViewerIdleAssetEffects(this._global);
         }
     };
 
