@@ -327,7 +327,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         assetEffectUiSubtype: null,
         /** 当前配置槽 GS 变形关键帧 entity id 列表 */
         assetEffectsMorphKeyframeIds: [] as string[],
-        
+        /** MORPH_ASSET_ADD_START / FINISH：asset 模块下仅拾取 Gaussian */
+        morphAssetAddActive: false,
         cameraControlsEnabled: true,
         gizmoPointerActive: false,
         suppressAssetPointerClick: false,

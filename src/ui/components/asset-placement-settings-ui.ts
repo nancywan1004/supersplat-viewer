@@ -193,6 +193,16 @@ export function getAssetPlacementSettingsHTML(): string {
                 <span id="videoCurvatureVal" class="settingsValueLabel"></span>
             </div>
         </div>
+        <div class="asset-morph-pick-panel settingsRow" style="flex-direction:column;align-items:stretch;gap:6px;margin-top:8px">
+            <div class="settingsRow submenuHeader" style="margin:0;">变形关键帧拾取</div>
+            <p class="effectsTrackHint" id="assetMorphAddPickHint" style="font-size:10px;opacity:0.65;margin:0;line-height:1.35">
+                协议 <code>MORPH_ASSET_ADD_START</code> / <code>FINISH</code>；拾取中仅可选 Gaussian，上报 <code>SCENE_ASSET_SELECTED</code>
+            </p>
+            <div class="settingsRow" style="gap:6px;flex-wrap:wrap;margin:0">
+                <button type="button" id="assetMorphAddStart" class="settingsButton" style="font-size:11px">开始场景拾取</button>
+                <button type="button" id="assetMorphAddFinish" class="settingsButton" style="font-size:11px">结束场景拾取</button>
+            </div>
+        </div>
         ${getSceneAssetListHTML()}
     </div>
 </div>
@@ -469,6 +479,41 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
     events.on('sceneAssets:added', onSceneAssetSelectedForCurvature);
     events.on('sceneAssets:removed', onSceneAssetSelectedForCurvature);
 
+    const morphAddPickHint = root.querySelector<HTMLElement>('#assetMorphAddPickHint');
+    const btnMorphAddStart = root.querySelector<HTMLButtonElement>('#assetMorphAddStart');
+    const btnMorphAddFinish = root.querySelector<HTMLButtonElement>('#assetMorphAddFinish');
+
+    const syncMorphAddPickHint = () => {
+        if (!morphAddPickHint) return;
+        const active = state.morphAssetAddActive === true;
+        morphAddPickHint.style.opacity = active ? '0.95' : '0.65';
+        morphAddPickHint.textContent = active
+            ? '拾取中：点击场景 Gaussian → SCENE_ASSET_SELECTED（module: asset）'
+            : '协议 MORPH_ASSET_ADD_START / FINISH；拾取中仅可选 Gaussian，上报 SCENE_ASSET_SELECTED';
+    };
+
+    const routeMorphAssetAddCommand = (cmd: 'MORPH_ASSET_ADD_START' | 'MORPH_ASSET_ADD_FINISH') => {
+        if (editUiTransport === 'message-bridge') {
+            sendEditProtocolMessage({ type: cmd });
+        } else {
+            const registry = (global as { __commandRegistry?: { dispatch: (input: {
+                module: 'asset';
+                command: { type: string; source: 'host' };
+            }) => boolean } }).__commandRegistry;
+            registry?.dispatch({ module: 'asset', command: { type: cmd, source: 'host' } });
+        }
+        syncMorphAddPickHint();
+    };
+
+    const onMorphAddStart = () => routeMorphAssetAddCommand('MORPH_ASSET_ADD_START');
+    const onMorphAddFinish = () => routeMorphAssetAddCommand('MORPH_ASSET_ADD_FINISH');
+
+    btnMorphAddStart?.addEventListener('click', onMorphAddStart);
+    btnMorphAddFinish?.addEventListener('click', onMorphAddFinish);
+    events.on('morphAssetAddActive:changed', syncMorphAddPickHint);
+    events.on('assetFacade:exit', syncMorphAddPickHint);
+    syncMorphAddPickHint();
+
     return () => {
         unbindList();
         if (gridEl && onLibraryChange) {
@@ -492,5 +537,9 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
         events.off('sceneAsset:selected', onSceneAssetSelectedForCurvature);
         events.off('sceneAssets:added', onSceneAssetSelectedForCurvature);
         events.off('sceneAssets:removed', onSceneAssetSelectedForCurvature);
+        btnMorphAddStart?.removeEventListener('click', onMorphAddStart);
+        btnMorphAddFinish?.removeEventListener('click', onMorphAddFinish);
+        events.off('morphAssetAddActive:changed', syncMorphAddPickHint);
+        events.off('assetFacade:exit', syncMorphAddPickHint);
     };
 }

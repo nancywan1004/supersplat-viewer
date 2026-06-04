@@ -42,11 +42,11 @@ export function isAssetScenePickEventOnlyMode(state: State): boolean {
     return isViewerOrPreviewMode(state);
 }
 
-/** 物体特效模块下由 `MORPH_ASSET_ADD_START` 开启的 Gaussian 拾取模式 */
+/** 资产模块下由 `MORPH_ASSET_ADD_START` 开启的 Gaussian 拾取模式（与常规资产选中并存于 asset 域） */
 export function isMorphAssetAddPickMode(state: State): boolean {
     return !!(
         state.editMode
-        && state.editLeftModule === 'assetEffects'
+        && state.editLeftModule === 'asset'
         && state.morphAssetAddActive
     );
 }

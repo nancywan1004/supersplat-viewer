@@ -173,6 +173,11 @@ class AssetFacade implements ModuleFacade {
             break;
         }
         case 'MORPH_ASSET_ADD_START':
+            this.placeRequestVersion++;
+            if (this.currentDownloadAbort) {
+                this.currentDownloadAbort();
+                this.currentDownloadAbort = null;
+            }
             ctx.state.morphAssetAddActive = true;
             setPlacementCursorActive(ctx.global, true, { loading: false });
             break;
