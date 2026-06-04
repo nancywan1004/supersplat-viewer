@@ -158,6 +158,7 @@ type InboundPayload =
     | { type: 'EFFECT_REPLAY'; module?: 'effects'; effectId: string; restartAnim?: boolean }
     | { type: 'EFFECT_START'; module?: 'effects'; effectId: string; targetId: string; params?: Record<string, unknown> }
     | { type: 'EFFECT_STOP'; module?: 'effects'; effectId: string; targetId: string }
+    | { type: 'ASSET_EFFECT_MORPH_STOP_ALL'; module?: 'effects' }
     | { type: 'EFFECT_ADD'; module?: 'effects'; effectId: string; effectType: string; targetId?: string; params?: Record<string, unknown> }
     | { type: 'EFFECT_DELETE'; module?: 'effects'; effectId: string; effectType?: string; targetId?: string }
     | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean; projectName?: string }
@@ -938,6 +939,14 @@ const initPostMessageBridge = (global: Global) => {
                 );
                 break;
             }
+            case 'ASSET_EFFECT_MORPH_STOP_ALL': {
+                if (p.module !== undefined && p.module !== MESSAGE_BRIDGE_MODULE.effects) {
+                    console.warn('[MessageBridge] ASSET_EFFECT_MORPH_STOP_ALL ignored: module must be "effects" when present');
+                    break;
+                }
+                dispatchEffects(global, 'ASSET_EFFECT_MORPH_STOP_ALL');
+                break;
+            }
             case 'EFFECT_ADD': {
                 if (p.module !== undefined && p.module !== MESSAGE_BRIDGE_MODULE.effects) {
                     console.warn('[MessageBridge] EFFECT_ADD ignored: module must be "effects" when present');
@@ -1316,6 +1325,20 @@ const initPostMessageBridge = (global: Global) => {
         if (source !== 'scene') return;
         const id = data.id;
         postToParent('SCENE_ANNOTATION_SELECTED', { module: MESSAGE_BRIDGE_MODULE.annotation, id });
+    });
+
+    events.on('assetEffect:morphStopAll:done', (_payload: {
+        morphTargetIds?: string[];
+        restoredTargetIds?: string[];
+        skippedTargetIds?: string[];
+    }) => {
+        // TODO: 放置流程接入后再向父页面上报 ASSET_EFFECT_MORPH_STOP_ALL_DONE
+        // postToParent('ASSET_EFFECT_MORPH_STOP_ALL_DONE', {
+        //     module: MESSAGE_BRIDGE_MODULE.effects,
+        //     morphTargetIds: payload?.morphTargetIds ?? [],
+        //     restoredTargetIds: payload?.restoredTargetIds ?? [],
+        //     skippedTargetIds: payload?.skippedTargetIds ?? []
+        // });
     });
 
     // 统一上报“进入标注编辑”并附带初始化数据（不区分选中来源）

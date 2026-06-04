@@ -22,6 +22,7 @@ import {
 import { ASSET_EFFECT_TYPE_VALUES, type AssetEffectType } from '../effect-types';
 import type { AssetEffectStartEntities } from './asset-effect-entity';
 import {
+    resolveAssetEffectGsplatEntity,
     resolveMorphKeyframeEntitiesFromEffectParams,
     resolveMorphKeyframeUrlsFromEffectParams,
     resolveWobbleEntityFromEffectParams
@@ -31,12 +32,24 @@ import { getDefaultWobbleEffectParams, mergeWobbleEffectParams } from './wobble-
 type ActiveAssetEffect = {
     type: AssetEffectType;
     morph?: GsplatMorphController;
+    morphKeyframeTargetIds?: string[];
     wobbleEntity?: Entity;
     wobbleScript?: GsplatWobbleEffect;
 };
 
 const GSPLAT_MORPH_TYPE = ASSET_EFFECT_TYPE_VALUES[0];
 const GSPLAT_WOBBLE_TYPE = ASSET_EFFECT_TYPE_VALUES[1];
+
+function readMorphKeyframeTargetIds(ep: Record<string, unknown> | undefined): string[] | null {
+    const raw = ep?.keyframeEntityIds ?? ep?.keyframeTargetIds ?? ep?.keyframeIds;
+    if (!Array.isArray(raw) || raw.length < 2) {
+        return null;
+    }
+    if (!raw.every(id => typeof id === 'string' && id.length > 0)) {
+        return null;
+    }
+    return raw as string[];
+}
 
 export function buildWobbleOptions(ep: Record<string, unknown>): GsplatWobbleOptions {
     const merged = mergeWobbleEffectParams(ep);
@@ -196,6 +209,7 @@ export class AssetEffectsController {
         global.events.on('assetEffect:start', this._onStart);
         global.events.on('assetEffect:stop', this._onStop);
         global.events.on('assetEffect:configChanged', this._onConfigChanged);
+        global.events.on('assetEffect:morphStopAll', this._onMorphStopAll);
         global.events.on('vfxExit', this._onVfxExit);
     }
 
@@ -207,6 +221,7 @@ export class AssetEffectsController {
         this._global.events.off('assetEffect:start', this._onStart);
         this._global.events.off('assetEffect:stop', this._onStop);
         this._global.events.off('assetEffect:configChanged', this._onConfigChanged);
+        this._global.events.off('assetEffect:morphStopAll', this._onMorphStopAll);
         this._global.events.off('vfxExit', this._onVfxExit);
         for (const targetId of [...this._active.keys()]) {
             this._teardownTarget(targetId);
@@ -299,6 +314,67 @@ export class AssetEffectsController {
         }
     };
 
+    private readonly _onMorphStopAll = () => {
+        if (this._disposed) {
+            return;
+        }
+
+        const morphEntries = [...this._active.entries()].filter(
+            ([, entry]) => entry.type === GSPLAT_MORPH_TYPE
+        );
+        const morphTargetIds: string[] = [];
+        const restoredTargetIds: string[] = [];
+        const skippedTargetIds: string[] = [];
+        const restoreTargets = new Set<string>();
+        const settings = this._global.settings as ExperienceSettings;
+
+        for (const [targetId, entry] of morphEntries) {
+            morphTargetIds.push(targetId);
+            const inst = readAssetInstanceParams(settings, targetId);
+            const keyframeIds =
+                entry.morphKeyframeTargetIds ??
+                readMorphKeyframeTargetIds(inst?.effectParams);
+            if (!keyframeIds) {
+                skippedTargetIds.push(targetId);
+                continue;
+            }
+            for (const keyframeId of keyframeIds) {
+                restoreTargets.add(keyframeId);
+            }
+        }
+
+        for (const [targetId] of morphEntries) {
+            this._teardownTarget(targetId);
+            patchAssetRuntimeMirror(this._global.state, targetId, { status: 'inactive' });
+            this._global.events.fire('assetEffect:stopped', {
+                targetId,
+                type: GSPLAT_MORPH_TYPE
+            });
+        }
+
+        const defaultWobbleParams = getDefaultWobbleEffectParams('deepMeditation');
+        for (const targetId of restoreTargets) {
+            const primary = resolveAssetEffectGsplatEntity(this._global, targetId);
+            if (!primary) {
+                skippedTargetIds.push(targetId);
+                continue;
+            }
+            this._teardownTarget(targetId);
+            this._startWobble(targetId, defaultWobbleParams, { primary });
+            if (this._active.get(targetId)?.type === GSPLAT_WOBBLE_TYPE) {
+                restoredTargetIds.push(targetId);
+            } else {
+                skippedTargetIds.push(targetId);
+            }
+        }
+
+        this._global.events.fire('assetEffect:morphStopAll:done', {
+            morphTargetIds,
+            restoredTargetIds,
+            skippedTargetIds
+        });
+    };
+
     private async _handleStart(
         targetId: string,
         type: string,
@@ -329,6 +405,7 @@ export class AssetEffectsController {
             readAssetInstanceParams(this._global.settings as ExperienceSettings, targetId) ??
             { type: GSPLAT_MORPH_TYPE, effectParams };
         const ep = { ...(inst.effectParams ?? {}), ...(effectParams ?? {}) };
+        const morphKeyframeTargetIds = readMorphKeyframeTargetIds(ep) ?? undefined;
         const urls = resolveMorphKeyframeUrlsFromEffectParams(
             this._global,
             ep,
@@ -353,7 +430,7 @@ export class AssetEffectsController {
             ...buildMorphOptions(ep),
             sourceEntities: sourceEntities ?? undefined,
             entityName: typeof ep.entityName === 'string' ? ep.entityName : `morph-${targetId}`,
-            onCorrespondenceStatus: status => {
+            onCorrespondenceStatus: (status) => {
                 this._global.events.fire('assetEffect:morphCorrespondenceStatus', {
                     targetId,
                     type: GSPLAT_MORPH_TYPE,
@@ -375,7 +452,11 @@ export class AssetEffectsController {
                 return;
             }
             morph.play();
-            this._active.set(targetId, { type: GSPLAT_MORPH_TYPE, morph });
+            this._active.set(targetId, {
+                type: GSPLAT_MORPH_TYPE,
+                morph,
+                morphKeyframeTargetIds
+            });
             patchAssetRuntimeMirror(this._global.state, targetId, {
                 activeType: GSPLAT_MORPH_TYPE,
                 status: 'playing'
