@@ -227,6 +227,8 @@ export interface GsplatMorphOptions {
     morphPointCloudRevealDuration?: number;
     /** Runtime-only: reports whether morph is using the fast preview route or upgraded greedy route. */
     onCorrespondenceStatus?: (status: CorrespondenceRuntimeStatus) => void;
+    /** Runtime-only: called once when non-loop playback naturally reaches the end. */
+    onPlaybackComplete?: () => void;
     /**
      * 启动后用 resample 先播 morph，再在后台构建 greedy 并热替换插值器。
      * 默认 false：greedy 与变形播放无关，且大点云下会长时间占满主线程。
@@ -3172,6 +3174,8 @@ export class GsplatMorphController {
     /** `pushOutputToResource` 已执行，本帧 `framerender` 需再拉高 `renderNextFrame`（防 Viewer 清掉）。 */
     private _morphPushedThisFrame = false;
 
+    private _playbackCompleteNotified = false;
+
     private _destroyed = false;
 
     constructor(app: AppBase, models: LoadedMorphModel[], options: GsplatMorphOptions = {}) {
@@ -3326,6 +3330,7 @@ export class GsplatMorphController {
 
     set loop(value: boolean) {
         this._loop = value;
+        this._playbackCompleteNotified = false;
     }
 
     get playing() {
@@ -3382,6 +3387,11 @@ export class GsplatMorphController {
     }
 
     play() {
+        if (!this._loop && this._time >= this.totalDuration) {
+            this._time = 0;
+            this._lastPairIndexForSh = -1;
+        }
+        this._playbackCompleteNotified = false;
         this._playing = true;
         this.syncPlaybackVisibility();
         this.syncMorphDrivenAppRender();
@@ -3400,6 +3410,7 @@ export class GsplatMorphController {
         this._playing = false;
         this._time = 0;
         this._lastPairIndexForSh = -1;
+        this._playbackCompleteNotified = false;
         this.syncPlaybackVisibility();
         this.syncMorphDrivenAppRender();
         return this;
@@ -3408,6 +3419,7 @@ export class GsplatMorphController {
     seek(timeSeconds: number) {
         this._time = Math.max(0, timeSeconds);
         this._lastPairIndexForSh = -1;
+        this._playbackCompleteNotified = false;
         this.applyCurrentFrame(true);
         return this;
     }
@@ -3479,6 +3491,7 @@ export class GsplatMorphController {
         this.app.off('framerender', this._onAfterFrameRender);
         this.app.scene.off('gsplat:sorted', this._onGsplatSorted);
         this.entity.enabled = false;
+        this.restoreMorphTargetEntity();
         this.app.renderNextFrame = true;
         this.entity.destroy();
 
@@ -3497,10 +3510,26 @@ export class GsplatMorphController {
     private syncPlaybackVisibility() {
         if (this._playing) {
             this.entity.enabled = true;
+            this.hideMorphTargetEntity();
         } else {
             this.entity.enabled = false;
+            this.restoreMorphTargetEntity();
         }
         this.app.renderNextFrame = true;
+    }
+
+    private hideMorphTargetEntity() {
+        const target = this._morphOptions.sourceEntities?.[0];
+        if (target) {
+            target.enabled = false;
+        }
+    }
+
+    private restoreMorphTargetEntity() {
+        const target = this._morphOptions.sourceEntities?.[0];
+        if (target) {
+            target.enabled = true;
+        }
     }
 
     update(dt: number) {
@@ -3523,7 +3552,16 @@ export class GsplatMorphController {
             this._playing = false;
             this.syncPlaybackVisibility();
             this.syncMorphDrivenAppRender();
+            this.notifyPlaybackComplete();
         }
+    }
+
+    private notifyPlaybackComplete() {
+        if (this._playbackCompleteNotified) {
+            return;
+        }
+        this._playbackCompleteNotified = true;
+        this._morphOptions.onPlaybackComplete?.();
     }
     // 立刻根据当前 _time 算一帧并推到 GPU。
     /** `forceMorphPresent`：绕过 `morphPresentMaxHz` 节流（seek/stop/段末等）。 */

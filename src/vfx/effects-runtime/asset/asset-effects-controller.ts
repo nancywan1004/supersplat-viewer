@@ -26,7 +26,7 @@ import {
     resolveMorphKeyframeUrlsFromEffectParams,
     resolveWobbleEntityFromEffectParams
 } from './asset-effect-entity';
-import { mergeWobbleEffectParams } from './wobble-effect-params';
+import { getDefaultWobbleEffectParams, mergeWobbleEffectParams } from './wobble-effect-params';
 
 type ActiveAssetEffect = {
     type: AssetEffectType;
@@ -348,6 +348,7 @@ export class AssetEffectsController {
             return;
         }
 
+        let morph: GsplatMorphController | null = null;
         const morphOpts: GsplatMorphOptions = {
             ...buildMorphOptions(ep),
             sourceEntities: sourceEntities ?? undefined,
@@ -358,11 +359,17 @@ export class AssetEffectsController {
                     type: GSPLAT_MORPH_TYPE,
                     ...status
                 });
+            },
+            onPlaybackComplete: () => {
+                if (!morph) {
+                    return;
+                }
+                this._onMorphPlaybackComplete(targetId, morph, sourceEntities?.[0]);
             }
         };
 
         try {
-            const morph = await loadGsplatMorphSequence(this._app, urls, morphOpts);
+            morph = await loadGsplatMorphSequence(this._app, urls, morphOpts);
             if (this._disposed) {
                 morph.destroy();
                 return;
@@ -381,6 +388,37 @@ export class AssetEffectsController {
             this._setError('MORPH_START_FAILED', message, GSPLAT_MORPH_TYPE, targetId);
             patchAssetRuntimeMirror(this._global.state, targetId, { status: 'inactive' });
         }
+    }
+
+    private _onMorphPlaybackComplete(targetId: string, morph: GsplatMorphController, primary?: Entity): void {
+        queueMicrotask(() => {
+            if (this._disposed) {
+                return;
+            }
+            const entry = this._active.get(targetId);
+            if (!entry || entry.type !== GSPLAT_MORPH_TYPE || entry.morph !== morph) {
+                return;
+            }
+
+            this._teardownTarget(targetId);
+            patchAssetRuntimeMirror(this._global.state, targetId, { status: 'inactive' });
+            this._global.events.fire('assetEffect:stopped', {
+                targetId,
+                type: GSPLAT_MORPH_TYPE
+            });
+
+            const effectParams = getDefaultWobbleEffectParams('deepMeditation');
+            this._global.events.fire('assetEffect:start', {
+                targetId,
+                type: GSPLAT_WOBBLE_TYPE,
+                params: { effectParams },
+                ...(primary ? { entities: { primary } } : {})
+            });
+            patchAssetRuntimeMirror(this._global.state, targetId, {
+                activeType: GSPLAT_WOBBLE_TYPE,
+                status: 'playing'
+            });
+        });
     }
 
     private _startWobble(

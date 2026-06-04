@@ -170,10 +170,6 @@ function startRestoredAssetDefaultEffectIfConfigured(global: Global, entry: Scen
  * @param global - Viewer global context.
  */
 function hideRestoredMorphSourceEntitiesInViewer(global: Global): void {
-    if (global.state.editMode === true) {
-        return;
-    }
-
     const settings = global.settings as ExperienceSettings;
     const instances = ensureEffectsSettings(settings).asset.instancesByTargetId ?? {};
     const placed = global.state.scenePlacedEntities ?? [];
@@ -201,9 +197,55 @@ function hideRestoredMorphSourceEntitiesInViewer(global: Global): void {
             if (!entry) {
                 continue;
             }
-            entry.visible = false;
             entry.entity.enabled = false;
         }
+    }
+}
+
+/**
+ * Edit 模式需要看到 morph 的所有关键帧实体，方便选择和调整。
+ * 同时修复旧 viewer 运行态隐藏曾污染到 `entry.visible=false` 的场景。
+ */
+function showRestoredMorphKeyframeEntitiesInEditMode(global: Global): void {
+    const settings = global.settings as ExperienceSettings;
+    const instances = ensureEffectsSettings(settings).asset.instancesByTargetId ?? {};
+    const placed = global.state.scenePlacedEntities ?? [];
+    const placedById = new Map<string, ScenePlacedItem>();
+    for (const entry of placed) {
+        if (entry?.id) {
+            placedById.set(entry.id, entry);
+        }
+    }
+
+    for (const ownerTargetId of Object.keys(instances)) {
+        const inst = readAssetInstanceParams(settings, ownerTargetId);
+        if (inst?.type !== 'gsplat-morph') {
+            continue;
+        }
+        const keyframeIds = readMorphKeyframeEntityIds(inst.effectParams ?? {});
+        if (!keyframeIds) {
+            continue;
+        }
+        for (const keyframeId of keyframeIds) {
+            const entry = placedById.get(keyframeId);
+            if (!entry) {
+                continue;
+            }
+            entry.visible = true;
+            entry.entity.enabled = true;
+        }
+    }
+}
+
+/**
+ * 按当前 Viewer/Edit 模式统一应用 morph 关键帧显隐（仅运行态，不写 settings）。
+ * restore 收尾与 `editMode` 切换后都应调用，避免 edit-enter 时 restore 早于 `editMode=true` 导致关键帧仍被隐藏。
+ */
+export function applyMorphKeyframeVisibilityPolicy(global: Global): void {
+    if (global.state.editMode === true) {
+        showRestoredMorphKeyframeEntitiesInEditMode(global);
+    } else {
+        hideRestoredMorphSourceEntitiesInViewer(global);
     }
 }
 
@@ -1026,7 +1068,7 @@ export async function requestSceneAssetsRestore(global: Global, options: SceneAs
             } else {
                 await syncScenePlacedEntitiesFromSettings(global);
             }
-            hideRestoredMorphSourceEntitiesInViewer(global);
+            applyMorphKeyframeVisibilityPolicy(global);
             syncGsplatShadowCastingFromSettings(global);
         })();
         controller.activePromise = task;

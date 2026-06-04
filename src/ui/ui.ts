@@ -14,7 +14,10 @@ import {
 import { readSkyboxUrlFromSettings } from '../settings-serialize/settings-serialize-helper';
 import { downloadExperienceSettingsLocally } from '../render/project-thumbnail';
 import { resetSceneSettings } from '../settings-reset';
-import { requestSceneAssetsRestore } from '../scene-assets/asset-placement-handler';
+import {
+    applyMorphKeyframeVisibilityPolicy,
+    requestSceneAssetsRestore
+} from '../scene-assets/asset-placement-handler';
 import {
     initEditHistory,
     canUndo,
@@ -739,6 +742,8 @@ const initUI = (global: Global) => {
                     restoreSkyboxFromSettings(global);
                 }
 
+                applyMorphKeyframeVisibilityPolicy(global);
+
                 const initialSnapshot = serializeExperienceSettings(global);
                 initEditHistory(global, initialSnapshot);
                 editModeEnteredSettingsData = JSON.parse(JSON.stringify(initialSnapshot)) as ExperienceSettings;
@@ -759,6 +764,7 @@ const initUI = (global: Global) => {
                     return;
                 }
                 state.editMode = true;
+                events.fire('editMode:changed', true);
             });
         }
         if (dom.exitEditBtn) {
@@ -858,20 +864,28 @@ const initUI = (global: Global) => {
                     restoreSkyboxFromSettings(global);
                     }
                     state.editMode = false;
+                    applyMorphKeyframeVisibilityPolicy(global);
+                    events.fire('editMode:changed', false);
                     return;
                 }
                 if (current === editModeEnteredSettingsSnapshot) {
                     state.editMode = false;
+                    applyMorphKeyframeVisibilityPolicy(global);
+                    events.fire('editMode:changed', false);
                     return;
                 }
                 showExitEditConfirmModal({
                     onSave: () => {
                         downloadExperienceSettingsLocally(global);
                         state.editMode = false;
+                        applyMorphKeyframeVisibilityPolicy(global);
+                        events.fire('editMode:changed', false);
                     },
                     onDiscard: async () => {
                         if (!editModeEnteredSettingsData) {
                             state.editMode = false;
+                            applyMorphKeyframeVisibilityPolicy(global);
+                            events.fire('editMode:changed', false);
                             return;
                         }
                         applySettingsSnapshot(global, editModeEnteredSettingsData);
@@ -883,6 +897,8 @@ const initUI = (global: Global) => {
                         restorePostEffectsFromSettings(global);
                     restoreSkyboxFromSettings(global);
                         state.editMode = false;
+                        applyMorphKeyframeVisibilityPolicy(global);
+                        events.fire('editMode:changed', false);
                     }
                 });
             });

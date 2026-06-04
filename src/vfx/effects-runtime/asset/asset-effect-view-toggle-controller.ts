@@ -229,7 +229,7 @@ export class AssetEffectViewToggleController {
         const effectParams = inst.effectParams ?? {};
         if (inst.type === GSPLAT_MORPH_TYPE) {
             const keyframes = readMorphKeyframeEntityIds(effectParams);
-            if (!keyframes?.includes(entry.id)) {
+            if (!keyframes || (entry.id !== targetId && !keyframes.includes(entry.id))) {
                 return;
             }
             if (this._toggleModeByTargetId.get(targetId) === 'user') {

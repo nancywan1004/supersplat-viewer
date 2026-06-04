@@ -6,6 +6,7 @@
 
 import type { AnnotationData } from './annotation-toolbar/types';
 import {
+    applyMorphKeyframeVisibilityPolicy,
     applySceneAssetTriggerDistanceM,
     requestSceneAssetsRestore
 } from './scene-assets/asset-placement-handler';
@@ -411,6 +412,7 @@ const initPostMessageBridge = (global: Global) => {
                     }
                 }
                 state.editMode = !!p.value;
+                applyMorphKeyframeVisibilityPolicy(global);
                 if (value) {
                     const initialSnapshot = serializeExperienceSettings(global);
                     setBaseline(initialSnapshot);
@@ -437,6 +439,7 @@ const initPostMessageBridge = (global: Global) => {
                     restoreSkyboxFromSettings(global);
                 }
                 state.editMode = false;
+                applyMorphKeyframeVisibilityPolicy(global);
                 break;
             }
             case 'EDIT_UNDO': {
