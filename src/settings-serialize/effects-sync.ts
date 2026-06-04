@@ -477,7 +477,7 @@ function parseAssetInstanceType(raw: Record<string, unknown> | undefined): Asset
 }
 
 function readMorphKeyframeIdsFromParams(params: Record<string, unknown>): string[] | null {
-    const raw = params.keyframeEntityIds ?? params.keyframeIds;
+    const raw = params.keyframeEntityIds ?? params.keyframeTargetIds ?? params.keyframeIds;
     if (!Array.isArray(raw)) return null;
     const ids = raw.filter((v): v is string => typeof v === 'string' && v.length > 0);
     return ids.length > 0 ? ids : null;

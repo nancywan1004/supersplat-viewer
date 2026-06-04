@@ -29,12 +29,12 @@ export type AssetEffectStartEntities = {
 };
 
 /**
- * 从 effectParams 读取 morph 关键帧 entity id 列表（兼容旧字段 `keyframeTargetIds`）。
+ * 从 effectParams 读取 morph 关键帧 entity id 列表（兼容旧字段 `keyframeTargetIds` / `keyframeIds`）。
  * @param {Record<string, unknown>} ep
  * @returns {string[] | null}
  */
 export function readMorphKeyframeEntityIds(ep: Record<string, unknown>): string[] | null {
-    const raw = ep.keyframeEntityIds ?? ep.keyframeTargetIds;
+    const raw = ep.keyframeEntityIds ?? ep.keyframeTargetIds ?? ep.keyframeIds;
     if (!Array.isArray(raw) || raw.length < 2) {
         return null;
     }

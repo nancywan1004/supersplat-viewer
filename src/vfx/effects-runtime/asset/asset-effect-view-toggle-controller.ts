@@ -229,14 +229,14 @@ export class AssetEffectViewToggleController {
         const effectParams = inst.effectParams ?? {};
         if (inst.type === GSPLAT_MORPH_TYPE) {
             const keyframes = readMorphKeyframeEntityIds(effectParams);
-            if (!keyframes?.includes(entry.id)) {
+            if (!keyframes || (entry.id !== targetId && !keyframes.includes(entry.id))) {
                 return;
             }
             if (this._toggleModeByTargetId.get(targetId) === 'user') {
-                this._startIdleForTargets(keyframes);
+                this._startIdle(targetId);
                 return;
             }
-            this._stopIdleForTargets(keyframes);
+            this._stopIdle(targetId);
             this._startUserEffect(targetId, inst.type as AssetEffectType, effectParams);
             return;
         } else if (targetId !== entry.id) {
@@ -250,22 +250,14 @@ export class AssetEffectViewToggleController {
         this._startUserEffect(targetId, inst.type as AssetEffectType, effectParams);
     }
 
-    private _startIdleForTargets(targetIds: readonly string[]): void {
-        for (const targetId of new Set(targetIds)) {
-            this._startIdle(targetId);
+    private _stopIdle(targetId: string): void {
+        if (this._toggleModeByTargetId.get(targetId) !== 'idle') {
+            return;
         }
-    }
-
-    private _stopIdleForTargets(targetIds: readonly string[]): void {
-        for (const targetId of new Set(targetIds)) {
-            if (this._toggleModeByTargetId.get(targetId) !== 'idle') {
-                continue;
-            }
-            this._global.events.fire('assetEffect:stop', {
-                targetId,
-                type: GSPLAT_WOBBLE_TYPE
-            });
-        }
+        this._global.events.fire('assetEffect:stop', {
+            targetId,
+            type: GSPLAT_WOBBLE_TYPE
+        });
     }
 
     private _startIdle(targetId: string): void {

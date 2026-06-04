@@ -201,6 +201,10 @@ class EffectsFacade implements ModuleFacade {
             applyAssetEffectStop(global, normalizeAssetEffectEnvelope(raw));
             break;
         }
+        case 'ASSET_EFFECT_MORPH_STOP_ALL': {
+            events.fire('assetEffect:morphStopAll');
+            break;
+        }
         case 'EFFECT_TOGGLE': {
             const raw = command.payload;
             if (!isEffectProtocolEnvelope(raw)) break;

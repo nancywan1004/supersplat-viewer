@@ -13,7 +13,10 @@ import {
 } from '../settings-serialize/settings-serialize';
 import { downloadExperienceSettingsLocally } from '../render/project-thumbnail';
 import { resetSceneSettings } from '../settings-reset';
-import { requestSceneAssetsRestore } from '../scene-assets/asset-placement-handler';
+import {
+    applyMorphKeyframeVisibilityPolicy,
+    requestSceneAssetsRestore
+} from '../scene-assets/asset-placement-handler';
 import {
     initEditHistory,
     canUndo,
@@ -42,6 +45,7 @@ import { getEditUiTransport, sendEditProtocolMessage } from './edit-ui-transport
 import { applyEnvironmentPreviewVisualPolicy } from '../editor-modules/environment-facade';
 import { applyLightToggleAll, applyLightToggle } from '../editor-modules/protocol-adapters/environment-protocol-adapter';
 import { applyViewMediaMuteSet, applyViewTorchActive, readViewTorchActive } from '../view-settings';
+import { dispatchEffectsModuleCommand } from '../editor-modules/effects-facade';
 import { getRevealActiveType } from '../settings-serialize/effects-sync';
 
 // Initialize the touch joystick for fly mode camera control
@@ -369,7 +373,7 @@ const initUI = (global: Global) => {
         'viewDebugToggleAssets', 'viewDebugLightsAllOn', 'viewDebugLightsAllOff',
         'viewDebugRegionSelect', 'viewDebugToggleRegionLight',
         'viewDebugMediaMute', 'viewDebugMediaUnmute',
-        'viewDebugTorchToggle'
+        'viewDebugTorchToggle', 'viewDebugMorphStopAll'
     ].reduce((acc: Record<string, HTMLElement>, id) => {
         acc[id] = document.getElementById(id);
         return acc;
@@ -639,6 +643,8 @@ const initUI = (global: Global) => {
                     restoreSkyboxFromSettings(global);
                 }
 
+                applyMorphKeyframeVisibilityPolicy(global);
+
                 const initialSnapshot = serializeExperienceSettings(global);
                 initEditHistory(global, initialSnapshot);
                 editModeEnteredSettingsData = JSON.parse(JSON.stringify(initialSnapshot)) as ExperienceSettings;
@@ -659,6 +665,7 @@ const initUI = (global: Global) => {
                     return;
                 }
                 state.editMode = true;
+                events.fire('editMode:changed', true);
             });
         }
         if (dom.exitEditBtn) {
@@ -758,20 +765,28 @@ const initUI = (global: Global) => {
                     restoreSkyboxFromSettings(global);
                     }
                     state.editMode = false;
+                    applyMorphKeyframeVisibilityPolicy(global);
+                    events.fire('editMode:changed', false);
                     return;
                 }
                 if (current === editModeEnteredSettingsSnapshot) {
                     state.editMode = false;
+                    applyMorphKeyframeVisibilityPolicy(global);
+                    events.fire('editMode:changed', false);
                     return;
                 }
                 showExitEditConfirmModal({
                     onSave: () => {
                         downloadExperienceSettingsLocally(global);
                         state.editMode = false;
+                        applyMorphKeyframeVisibilityPolicy(global);
+                        events.fire('editMode:changed', false);
                     },
                     onDiscard: async () => {
                         if (!editModeEnteredSettingsData) {
                             state.editMode = false;
+                            applyMorphKeyframeVisibilityPolicy(global);
+                            events.fire('editMode:changed', false);
                             return;
                         }
                         applySettingsSnapshot(global, editModeEnteredSettingsData);
@@ -783,6 +798,8 @@ const initUI = (global: Global) => {
                         restorePostEffectsFromSettings(global);
                     restoreSkyboxFromSettings(global);
                         state.editMode = false;
+                        applyMorphKeyframeVisibilityPolicy(global);
+                        events.fire('editMode:changed', false);
                     }
                 });
             });
@@ -1096,6 +1113,21 @@ const initUI = (global: Global) => {
                 sendEditProtocolMessage({ type: 'VIEW_MEDIA_MUTE_SET', value: false });
             } else {
                 applyViewMediaMuteSet(global, false);
+            }
+        });
+    }
+
+    if (dom.viewDebugMorphStopAll) {
+        dom.viewDebugMorphStopAll.addEventListener('click', () => {
+            if (editUiTransport === 'message-bridge') {
+                sendEditProtocolMessage({ type: 'ASSET_EFFECT_MORPH_STOP_ALL', module: 'effects' });
+            } else if (
+                !dispatchEffectsModuleCommand(global, {
+                    type: 'ASSET_EFFECT_MORPH_STOP_ALL',
+                    source: 'host'
+                })
+            ) {
+                console.warn('[ui] command dispatch failed', 'ASSET_EFFECT_MORPH_STOP_ALL');
             }
         });
     }

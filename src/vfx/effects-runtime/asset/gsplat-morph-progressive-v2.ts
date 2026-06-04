@@ -227,6 +227,8 @@ export interface GsplatMorphOptions {
     morphPointCloudRevealDuration?: number;
     /** Runtime-only: reports whether morph is using the fast preview route or upgraded greedy route. */
     onCorrespondenceStatus?: (status: CorrespondenceRuntimeStatus) => void;
+    /** Runtime-only: called once when non-loop playback naturally reaches the end. */
+    onPlaybackComplete?: () => void;
     /**
      * 启动后用 resample 先播 morph，再在后台构建 greedy 并热替换插值器。
      * 默认 false：greedy 与变形播放无关，且大点云下会长时间占满主线程。
@@ -237,10 +239,10 @@ export interface GsplatMorphOptions {
     /**
      * Scene entities used as visual keyframes. They are never transformed by
      * the morph runtime; when provided, the generated morph entity copies the
-     * first entity's world transform and temporarily hides these sources.
+     * first entity's world transform.
      */
     sourceEntities?: Entity[];
-    /** Hide sourceEntities while the morph controller is alive. Defaults to true. */
+    /** @deprecated Source visibility is controlled by the viewer restore flow. */
     hideSourceEntities?: boolean;
     /** Internal: precomputed by loadGsplatMorphSequence to keep setup responsive. */
     prebuiltInterpolator?: GaussianInterpolatorRuntime;
@@ -285,7 +287,7 @@ const applyProgressivePairFlightEase = (t: number, ease: ProgressivePairFlightEa
 const MAX_MORPH_MODELS = 4;
 const MAX_SH_REST_PROPS = 45;
 const DEFAULT_SEGMENT_DURATION = 10;
-const DEFAULT_SEGMENT_HOLD_DURATION = 1.0;
+const DEFAULT_SEGMENT_HOLD_DURATION = 0;
 const DEFAULT_FADE_LOG_MIN = -6.0;
 const DEFAULT_TARGET_SCALE = 10.0;
 const DEFAULT_SORT_CENTERS_MAX_HZ = 6;
@@ -3172,7 +3174,7 @@ export class GsplatMorphController {
     /** `pushOutputToResource` 已执行，本帧 `framerender` 需再拉高 `renderNextFrame`（防 Viewer 清掉）。 */
     private _morphPushedThisFrame = false;
 
-    private readonly _hiddenSourceStates: { entity: Entity; enabled: boolean }[] = [];
+    private _playbackCompleteNotified = false;
 
     private _destroyed = false;
 
@@ -3328,6 +3330,7 @@ export class GsplatMorphController {
 
     set loop(value: boolean) {
         this._loop = value;
+        this._playbackCompleteNotified = false;
     }
 
     get playing() {
@@ -3384,6 +3387,11 @@ export class GsplatMorphController {
     }
 
     play() {
+        if (!this._loop && this._time >= this.totalDuration) {
+            this._time = 0;
+            this._lastPairIndexForSh = -1;
+        }
+        this._playbackCompleteNotified = false;
         this._playing = true;
         this.syncPlaybackVisibility();
         this.syncMorphDrivenAppRender();
@@ -3402,6 +3410,7 @@ export class GsplatMorphController {
         this._playing = false;
         this._time = 0;
         this._lastPairIndexForSh = -1;
+        this._playbackCompleteNotified = false;
         this.syncPlaybackVisibility();
         this.syncMorphDrivenAppRender();
         return this;
@@ -3410,6 +3419,7 @@ export class GsplatMorphController {
     seek(timeSeconds: number) {
         this._time = Math.max(0, timeSeconds);
         this._lastPairIndexForSh = -1;
+        this._playbackCompleteNotified = false;
         this.applyCurrentFrame(true);
         return this;
     }
@@ -3480,8 +3490,8 @@ export class GsplatMorphController {
         this.app.off('frameupdate', this._onFrameUpdate);
         this.app.off('framerender', this._onAfterFrameRender);
         this.app.scene.off('gsplat:sorted', this._onGsplatSorted);
-        this.restoreSourceEntities(true);
         this.entity.enabled = false;
+        this.restoreMorphTargetEntity();
         this.app.renderNextFrame = true;
         this.entity.destroy();
 
@@ -3497,40 +3507,29 @@ export class GsplatMorphController {
         });
     }
 
-    private hideSourceEntities() {
-        if (this._morphOptions.hideSourceEntities === false) {
-            return;
-        }
-        if (this._hiddenSourceStates.length > 0) {
-            return;
-        }
-        const seen = new Set<Entity>();
-        for (const entity of this._morphOptions.sourceEntities ?? []) {
-            if (!entity || seen.has(entity)) {
-                continue;
-            }
-            seen.add(entity);
-            this._hiddenSourceStates.push({ entity, enabled: entity.enabled });
-            entity.enabled = false;
-        }
-    }
-
-    private restoreSourceEntities(forceEnabled = false) {
-        for (const { entity, enabled } of this._hiddenSourceStates) {
-            entity.enabled = forceEnabled ? true : enabled;
-        }
-        this._hiddenSourceStates.length = 0;
-    }
-
     private syncPlaybackVisibility() {
         if (this._playing) {
             this.entity.enabled = true;
-            this.hideSourceEntities();
+            this.hideMorphTargetEntity();
         } else {
-            this.restoreSourceEntities(true);
             this.entity.enabled = false;
+            this.restoreMorphTargetEntity();
         }
         this.app.renderNextFrame = true;
+    }
+
+    private hideMorphTargetEntity() {
+        const target = this._morphOptions.sourceEntities?.[0];
+        if (target) {
+            target.enabled = false;
+        }
+    }
+
+    private restoreMorphTargetEntity() {
+        const target = this._morphOptions.sourceEntities?.[0];
+        if (target) {
+            target.enabled = true;
+        }
     }
 
     update(dt: number) {
@@ -3553,7 +3552,16 @@ export class GsplatMorphController {
             this._playing = false;
             this.syncPlaybackVisibility();
             this.syncMorphDrivenAppRender();
+            this.notifyPlaybackComplete();
         }
+    }
+
+    private notifyPlaybackComplete() {
+        if (this._playbackCompleteNotified) {
+            return;
+        }
+        this._playbackCompleteNotified = true;
+        this._morphOptions.onPlaybackComplete?.();
     }
     // 立刻根据当前 _time 算一帧并推到 GPU。
     /** `forceMorphPresent`：绕过 `morphPresentMaxHz` 节流（seek/stop/段末等）。 */

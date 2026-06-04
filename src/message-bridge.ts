@@ -6,6 +6,7 @@
 
 import type { AnnotationData } from './annotation-toolbar/types';
 import {
+    applyMorphKeyframeVisibilityPolicy,
     applySceneAssetTriggerDistanceM,
     requestSceneAssetsRestore
 } from './scene-assets/asset-placement-handler';
@@ -51,6 +52,7 @@ import { getSelectedSceneAssetType } from './state-selectors';
 import type { AssetLibraryItem, EditLeftModule, Global } from './types';
 import { paramsPatchHasAssetKeys } from './vfx/effects-runtime/asset/asset-effect-params';
 import {
+    ASSET_EFFECT_TYPE_VALUES,
     ASSET_EFFECT_TYPES,
     ASSET_GSPLAT_EFFECT_ID,
     PERSISTENT_CAMERA_EFFECT_TYPES,
@@ -160,6 +162,7 @@ type InboundPayload =
     | { type: 'EFFECT_REPLAY'; module?: 'effects'; effectId: string; restartAnim?: boolean }
     | { type: 'EFFECT_START'; module?: 'effects'; effectId: string; targetId: string; params?: Record<string, unknown> }
     | { type: 'EFFECT_STOP'; module?: 'effects'; effectId: string; targetId: string }
+    | { type: 'ASSET_EFFECT_MORPH_STOP_ALL'; module?: 'effects' }
     | { type: 'EFFECT_ADD'; module?: 'effects'; effectId: string; effectType: string; targetId?: string; params?: Record<string, unknown> }
     | { type: 'EFFECT_DELETE'; module?: 'effects'; effectId: string; effectType?: string; targetId?: string }
     | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean; projectName?: string }
@@ -419,6 +422,8 @@ const initPostMessageBridge = (global: Global) => {
                     }
                 }
                 state.editMode = !!p.value;
+                applyMorphKeyframeVisibilityPolicy(global);
+                events.fire('editMode:changed', state.editMode);
                 if (value) {
                     const initialSnapshot = serializeExperienceSettings(global);
                     setBaseline(initialSnapshot);
@@ -445,6 +450,8 @@ const initPostMessageBridge = (global: Global) => {
                     restoreSkyboxFromSettings(global);
                 }
                 state.editMode = false;
+                applyMorphKeyframeVisibilityPolicy(global);
+                events.fire('editMode:changed', false);
                 break;
             }
             case 'EDIT_UNDO': {
@@ -950,6 +957,14 @@ const initPostMessageBridge = (global: Global) => {
                 );
                 break;
             }
+            case 'ASSET_EFFECT_MORPH_STOP_ALL': {
+                if (p.module !== undefined && p.module !== MESSAGE_BRIDGE_MODULE.effects) {
+                    console.warn('[MessageBridge] ASSET_EFFECT_MORPH_STOP_ALL ignored: module must be "effects" when present');
+                    break;
+                }
+                dispatchEffects(global, 'ASSET_EFFECT_MORPH_STOP_ALL');
+                break;
+            }
             case 'EFFECT_ADD': {
                 if (p.module !== undefined && p.module !== MESSAGE_BRIDGE_MODULE.effects) {
                     console.warn('[MessageBridge] EFFECT_ADD ignored: module must be "effects" when present');
@@ -1328,6 +1343,27 @@ const initPostMessageBridge = (global: Global) => {
         if (source !== 'scene') return;
         const id = data.id;
         postToParent('SCENE_ANNOTATION_SELECTED', { module: MESSAGE_BRIDGE_MODULE.annotation, id });
+    });
+
+    events.on('assetEffect:started', (data?: { targetId?: string; type?: string }) => {
+        if (data?.type !== ASSET_EFFECT_TYPE_VALUES[0] || typeof data.targetId !== 'string') {
+            return;
+        }
+        postToParent('ASSET_EFFECT_MORPH_START', { targetId: data.targetId });
+    });
+
+    events.on('assetEffect:morphStopAll:done', (_payload: {
+        morphTargetIds?: string[];
+        restoredTargetIds?: string[];
+        skippedTargetIds?: string[];
+    }) => {
+        // TODO: 放置流程接入后再向父页面上报 ASSET_EFFECT_MORPH_STOP_ALL_DONE
+        postToParent('ASSET_EFFECT_MORPH_STOP_ALL_DONE', {
+            module: MESSAGE_BRIDGE_MODULE.effects,
+            // morphTargetIds: _payload?.morphTargetIds ?? [],
+            // restoredTargetIds: _payload?.restoredTargetIds ?? [],
+            // skippedTargetIds: _payload?.skippedTargetIds ?? []
+        });
     });
 
     // 统一上报“进入标注编辑”并附带初始化数据（不区分选中来源）

@@ -31,6 +31,7 @@ import {
 import { hitSceneGizmoAtClient } from '../gizmo-hit-test';
 import type { InputArbiter } from '../input-arbiter';
 import {
+    ensureEffectsSettings,
     findAssetMorphOwnerTargetId,
     readAssetInstanceParams
 } from '../settings-serialize/effects-sync';
@@ -126,7 +127,7 @@ function getSceneAssetsRestoreController(global: Global): SceneAssetsRestoreCont
 
 /**
  * 场景资产还原后的 idle 预览（瞌睡 wobble / `deepMeditation`）：
- * - 存盘 `gsplat-morph`：morph 涉及的每个关键帧 GS 都挂 idle，不播 morph 时间轴；
+ * - 存盘 `gsplat-morph`：只给 morph owner 挂 idle，不播 morph 时间轴；
  * - 存盘 `gsplat-wobble`（含扭动/电子等非瞌睡模式）：启动后同样先播 idle，用户显式「开始」再走存盘参数。
  * 不改写 settings，仅 `assetEffect:start` 运行态。
  */
@@ -142,10 +143,12 @@ function startRestoredAssetDefaultEffectIfConfigured(global: Global, entry: Scen
         return;
     }
 
-    const shouldStartIdle =
-        inst.type === 'gsplat-morph'
-            ? (readMorphKeyframeEntityIds(inst.effectParams ?? {}) ?? []).includes(entry.id)
-            : inst.type === GSPLAT_WOBBLE_TYPE && entry.id === storageTargetId;
+    let shouldStartIdle = false;
+    if (inst.type === 'gsplat-morph') {
+        shouldStartIdle = entry.id === storageTargetId;
+    } else if (inst.type === GSPLAT_WOBBLE_TYPE) {
+        shouldStartIdle = entry.id === storageTargetId;
+    }
     if (!shouldStartIdle) {
         return;
     }
@@ -160,6 +163,101 @@ function startRestoredAssetDefaultEffectIfConfigured(global: Global, entry: Scen
             primary: entry.entity
         }
     });
+}
+
+/** Edit → View：重新启动 autoStart 物体的 idle 瞌睡 wobble（进编辑时 vfxExit 会拆掉特效）。 */
+export function restartViewerIdleAssetEffects(global: Global): void {
+    if (global.state.editMode === true) {
+        return;
+    }
+    for (const entry of global.state.scenePlacedEntities ?? []) {
+        startRestoredAssetDefaultEffectIfConfigured(global, entry);
+    }
+}
+
+/**
+ * Viewer 资产恢复完成后的 morph 源物体展示策略：
+ * 只保留 morph owner，可见性只改运行态，不回写 settings.sceneAssets。
+ * @param global - Viewer global context.
+ */
+function hideRestoredMorphSourceEntitiesInViewer(global: Global): void {
+    const settings = global.settings as ExperienceSettings;
+    const instances = ensureEffectsSettings(settings).asset.instancesByTargetId ?? {};
+    const placed = global.state.scenePlacedEntities ?? [];
+    const placedById = new Map<string, ScenePlacedItem>();
+    for (const entry of placed) {
+        if (entry?.id) {
+            placedById.set(entry.id, entry);
+        }
+    }
+
+    for (const ownerTargetId of Object.keys(instances)) {
+        const inst = readAssetInstanceParams(settings, ownerTargetId);
+        if (inst?.type !== 'gsplat-morph') {
+            continue;
+        }
+        const keyframeIds = readMorphKeyframeEntityIds(inst.effectParams ?? {});
+        if (!keyframeIds) {
+            continue;
+        }
+        for (const keyframeId of keyframeIds) {
+            if (keyframeId === ownerTargetId) {
+                continue;
+            }
+            const entry = placedById.get(keyframeId);
+            if (!entry) {
+                continue;
+            }
+            entry.entity.enabled = false;
+        }
+    }
+}
+
+/**
+ * Edit 模式需要看到 morph 的所有关键帧实体，方便选择和调整。
+ * 同时修复旧 viewer 运行态隐藏曾污染到 `entry.visible=false` 的场景。
+ */
+function showRestoredMorphKeyframeEntitiesInEditMode(global: Global): void {
+    const settings = global.settings as ExperienceSettings;
+    const instances = ensureEffectsSettings(settings).asset.instancesByTargetId ?? {};
+    const placed = global.state.scenePlacedEntities ?? [];
+    const placedById = new Map<string, ScenePlacedItem>();
+    for (const entry of placed) {
+        if (entry?.id) {
+            placedById.set(entry.id, entry);
+        }
+    }
+
+    for (const ownerTargetId of Object.keys(instances)) {
+        const inst = readAssetInstanceParams(settings, ownerTargetId);
+        if (inst?.type !== 'gsplat-morph') {
+            continue;
+        }
+        const keyframeIds = readMorphKeyframeEntityIds(inst.effectParams ?? {});
+        if (!keyframeIds) {
+            continue;
+        }
+        for (const keyframeId of keyframeIds) {
+            const entry = placedById.get(keyframeId);
+            if (!entry) {
+                continue;
+            }
+            entry.visible = true;
+            entry.entity.enabled = true;
+        }
+    }
+}
+
+/**
+ * 按当前 Viewer/Edit 模式统一应用 morph 关键帧显隐（仅运行态，不写 settings）。
+ * restore 收尾与 `editMode` 切换后都应调用，避免 edit-enter 时 restore 早于 `editMode=true` 导致关键帧仍被隐藏。
+ */
+export function applyMorphKeyframeVisibilityPolicy(global: Global): void {
+    if (global.state.editMode === true) {
+        showRestoredMorphKeyframeEntitiesInEditMode(global);
+    } else {
+        hideRestoredMorphSourceEntitiesInViewer(global);
+    }
 }
 
 /**
@@ -834,7 +932,8 @@ function applySceneAssetTransformToEntry(global: Global, entry: ScenePlacedItem,
 
     const visible = sa.visible !== false;
     entry.visible = visible;
-    entry.entity.enabled = visible;
+    const morphOwner = findAssetMorphOwnerTargetId(global.settings as ExperienceSettings, entry.id);
+    entry.entity.enabled = visible && (global.state.editMode === true || !morphOwner || morphOwner === entry.id);
 
     if (sa.type === 'video') {
         const curvature =
@@ -981,6 +1080,7 @@ export async function requestSceneAssetsRestore(global: Global, options: SceneAs
             } else {
                 await syncScenePlacedEntitiesFromSettings(global);
             }
+            applyMorphKeyframeVisibilityPolicy(global);
             syncGsplatShadowCastingFromSettings(global);
         })();
         controller.activePromise = task;
