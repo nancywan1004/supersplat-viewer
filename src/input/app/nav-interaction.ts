@@ -155,20 +155,14 @@ class NavInteraction {
         if (!global) return;
         const { events } = global;
 
-        // dblclick swaps the active mode and uses the picked target:
-        //   fly          → orbit, focus orbit at point
-        //   orbit / walk → fly (without click-to-fly target navigation)
+        // dblclick focuses orbit at the picked target from any navigation mode.
+        // CameraManager owns the actual orbit transition via the `pick` event.
         const request = ++this._targetPickRequest;
         const target = await this._pickSceneTarget(offsetX, offsetY);
         if (!target || request !== this._targetPickRequest) return;
 
-        const currentMode = this._global?.state.cameraMode;
-        if (currentMode === 'fly') {
-            // 'pick' switches mode to orbit, which cancels the active fly nav
-            // and would clobber any pre-set orbit target — set it after.
-            events.fire('pick', target.position);
-            events.fire('orbitTarget:set', target.position, target.normal);
-        }
+        // `pick` switches to orbit and cancels active first-person nav.
+        events.fire('pick', target.position);
     }
 
     private _onPointerDown = (event: PointerEvent) => {
@@ -311,7 +305,7 @@ class NavInteraction {
         await this._handleDoubleTapAt(event.offsetX, event.offsetY);
     };
 
-    private _onMobileTap = async () => {
+    private _onMobileTap = () => {
         const global = this._global;
         if (!global) return;
         const { state, events } = global;
