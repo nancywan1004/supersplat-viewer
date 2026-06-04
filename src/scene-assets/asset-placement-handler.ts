@@ -19,6 +19,7 @@ import type { Global, AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from
 import {
     getSelectedSceneEntity,
     isAssetScenePickEventOnlyMode,
+    isMorphAssetAddPickMode,
     isSceneAssetPickableInViewerMode
 } from '../state-selectors';
 import {
@@ -1084,8 +1085,9 @@ export function initAssetPlacementHandler(
 
     const handleAssetPointerClickClaim = (clientX: number, clientY: number, worldPos: Vec3 | null): boolean => {
         const pickEventOnly = isAssetScenePickEventOnlyMode(state);
+        const morphAssetAdd = isMorphAssetAddPickMode(state);
         const editAsset = !pickEventOnly && state.editMode && state.editLeftModule === 'asset';
-        if (!pickEventOnly && !editAsset) return false;
+        if (!pickEventOnly && !editAsset && !morphAssetAdd) return false;
         if (state.suppressAssetPointerClick) {
             state.suppressAssetPointerClick = false;
             return false;
@@ -1155,7 +1157,7 @@ export function initAssetPlacementHandler(
         }
 
         const list = state.scenePlacedEntities ?? [];
-        if (list.length === 0) return editAsset;
+        if (list.length === 0) return editAsset || morphAssetAdd;
 
         const pickableList = pickEventOnly
             ? list.filter((entry) => isSceneAssetPickableInViewerMode(entry.assetType))
@@ -1169,6 +1171,11 @@ export function initAssetPlacementHandler(
                 return true;
             }
         }
+
+        const gaussianList = morphAssetAdd
+            ? list.filter((entry) => entry.assetType === 'gaussian')
+            : list;
+        if (morphAssetAdd && gaussianList.length === 0) return true;
 
         const pickerScale = 0.5;
         const pickW = Math.max(1, Math.floor(width() * pickerScale));
@@ -1193,9 +1200,10 @@ export function initAssetPlacementHandler(
         ).then((entry) => {
             if (!entry) return;
             if (pickEventOnly && !isSceneAssetPickableInViewerMode(entry.assetType)) return;
+            if (morphAssetAdd && entry.assetType !== 'gaussian') return;
             applySceneAssetSelectedFromScenePick(global, entry.id, { focusOnChange: editAsset });
         }).catch(() => {});
-        return editAsset;
+        return editAsset || morphAssetAdd;
     };
 
     const onCopy = (payload?: { copyId?: string }) => {

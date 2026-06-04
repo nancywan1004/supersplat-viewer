@@ -245,6 +245,8 @@ type State = {
     assetEffectUiSubtype?: string | null;
     /** 当前配置槽的 GS 变形关键帧 scene entity id 序列（与 settings.effects.asset 同步） */
     assetEffectsMorphKeyframeIds?: string[];
+    /** 物体特效变形关键帧拾取模式（`MORPH_ASSET_ADD_START` / `MORPH_ASSET_ADD_FINISH`） */
+    morphAssetAddActive?: boolean;
     /** 相机输入是否启用（用于与 Gizmo 交互互斥） */
     cameraControlsEnabled?: boolean;
     /** 正在拖拽场景/光源 Gizmo（pointerdown 命中轴起至 pointerup） */

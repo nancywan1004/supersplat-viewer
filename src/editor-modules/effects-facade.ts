@@ -1,3 +1,4 @@
+import { setPlacementCursorActive } from '../placement-cursor';
 import {
     applyAssetEffectDelete,
     applyAssetEffectParamsPatch,
@@ -238,17 +239,24 @@ class AssetEffectsFacade implements ModuleFacade {
 
     constructor(private readonly _sceneEffects: EffectsFacade) {}
 
+    private clearMorphAssetAdd(ctx: ModuleContext): void {
+        ctx.state.morphAssetAddActive = false;
+        setPlacementCursorActive(ctx.global, false);
+    }
+
     onEnter(ctx: ModuleContext): void {
         this._sceneEffects.onEnter(ctx);
         ctx.events.fire('assetEffectsFacade:enter');
     }
 
     onExit(ctx: ModuleContext, _reason?: ModuleLifecycleReason): void {
+        this.clearMorphAssetAdd(ctx);
         this._sceneEffects.onExit(ctx);
         ctx.events.fire('assetEffectsFacade:exit');
     }
 
     onEditModeExit(ctx: ModuleContext): void {
+        this.clearMorphAssetAdd(ctx);
         this._sceneEffects.onEditModeExit(ctx);
     }
 

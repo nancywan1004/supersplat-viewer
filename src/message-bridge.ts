@@ -108,6 +108,8 @@ type InboundPayload =
     | { type: 'ASSET_SHOW_HIDE_SET'; id?: string; value?: boolean }
     | { type: 'ASSETS_SHOW_HIDE_SET'; value?: boolean }
     | { type: 'ASSET_PLACE'; value?: AssetLibraryItem }
+    | { type: 'MORPH_ASSET_ADD_START' }
+    | { type: 'MORPH_ASSET_ADD_FINISH' }
     | { type: 'ASSET_SELECT'; id?: string | null }
     | { type: 'ASSET_COPY'; id?: string; copyId?: string }
     | { type: 'ASSET_DELETE'; id?: string }
@@ -583,6 +585,12 @@ const initPostMessageBridge = (global: Global) => {
                     const placeValue = p.value as AssetLibraryItem;
                     dispatchAsset(global, 'ASSET_PLACE', { value: placeValue });
                 }
+                break;
+            case 'MORPH_ASSET_ADD_START':
+                dispatchAsset(global, 'MORPH_ASSET_ADD_START');
+                break;
+            case 'MORPH_ASSET_ADD_FINISH':
+                dispatchAsset(global, 'MORPH_ASSET_ADD_FINISH');
                 break;
             case 'ASSET_SHOW_HIDE_SET':
                 if (

@@ -42,6 +42,15 @@ export function isAssetScenePickEventOnlyMode(state: State): boolean {
     return isViewerOrPreviewMode(state);
 }
 
+/** 物体特效模块下由 `MORPH_ASSET_ADD_START` 开启的 Gaussian 拾取模式 */
+export function isMorphAssetAddPickMode(state: State): boolean {
+    return !!(
+        state.editMode
+        && state.editLeftModule === 'assetEffects'
+        && state.morphAssetAddActive
+    );
+}
+
 /** Viewer / 编辑预览下允许场景拾取上报的资产类型（暂不含 image / video / audio） */
 export function isSceneAssetPickableInViewerMode(assetType: AssetLibraryType | undefined): boolean {
     return assetType === 'mesh' || assetType === 'gaussian';
