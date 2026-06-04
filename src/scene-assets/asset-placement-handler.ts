@@ -921,7 +921,8 @@ function applySceneAssetTransformToEntry(global: Global, entry: ScenePlacedItem,
 
     const visible = sa.visible !== false;
     entry.visible = visible;
-    entry.entity.enabled = visible;
+    const morphOwner = findAssetMorphOwnerTargetId(global.settings as ExperienceSettings, entry.id);
+    entry.entity.enabled = visible && (global.state.editMode === true || !morphOwner || morphOwner === entry.id);
 
     if (sa.type === 'video') {
         const curvature =
