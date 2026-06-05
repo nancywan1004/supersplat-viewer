@@ -47,7 +47,7 @@ import { applyEnvironmentPreviewVisualPolicy } from '../editor-modules/environme
 import { applyLightToggleAll, applyLightToggle } from '../editor-modules/protocol-adapters/environment-protocol-adapter';
 import { applyViewMediaMuteSet, applyViewTorchActive, readViewTorchActive } from '../view-settings';
 import { dispatchEffectsModuleCommand } from '../editor-modules/effects-facade';
-import { getRevealActiveType } from '../settings-serialize/effects-sync';
+import { findAssetMorphOwnerTargetId, getRevealActiveType } from '../settings-serialize/effects-sync';
 
 // Initialize the touch joystick for fly mode camera control
 const initJoystick = (
@@ -1167,8 +1167,14 @@ const initUI = (global: Global) => {
                         command: { type: 'ASSETS_SHOW_HIDE_SET', payload: { value: nextVisible }, source: 'host' }
                     });
                 } else {
+                    events.fire('assetEffect:morphStopAll');
                     for (const item of items) {
                         if (!item?.entity || item.visible === nextVisible) continue;
+                        const morphOwner =
+                            item.assetType === 'gaussian' && typeof item.id === 'string'
+                                ? findAssetMorphOwnerTargetId(global.settings as ExperienceSettings, item.id)
+                                : null;
+                        if (nextVisible === true && morphOwner && morphOwner !== item.id) continue;
                         item.visible = nextVisible;
                         item.entity.enabled = nextVisible;
                     }

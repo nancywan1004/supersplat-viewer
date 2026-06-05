@@ -4,8 +4,18 @@ import { setPlacementCursorActive } from '../placement-cursor';
 import { applyViewAnnotationsVisible } from '../view-settings';
 import { loadGsplatAsset } from '../loaders/gsplat-asset-loader';
 import { getAssetLoader } from '../loaders/asset-loader';
+import { findAssetMorphOwnerTargetId } from '../settings-serialize/effects-sync';
+import type { ExperienceSettings } from '../schemas/v2';
 
 const ASSET_DOWNLOAD_TIMEOUT_MS = 15000;
+
+function isDeformedMorphGsplat(global: Global, item: { id?: string; assetType?: string } | null | undefined): boolean {
+    if (!item?.id || item.assetType !== 'gaussian') {
+        return false;
+    }
+    const morphOwner = findAssetMorphOwnerTargetId(global.settings as ExperienceSettings, item.id);
+    return !!morphOwner && morphOwner !== item.id;
+}
 
 class AssetFacade implements ModuleFacade {
     readonly module = 'asset' as const;
@@ -180,9 +190,11 @@ class AssetFacade implements ModuleFacade {
         case 'ASSETS_SHOW_HIDE_SET': {
             const visible = (command.payload as { value?: boolean } | undefined)?.value;
             if (typeof visible !== 'boolean' || !Array.isArray(state.scenePlacedEntities)) return;
+            events.fire('assetEffect:morphStopAll');
             let anyChanged = false;
             for (const item of state.scenePlacedEntities) {
                 if (!item?.entity || item.visible === visible) continue;
+                if (visible === true && isDeformedMorphGsplat(ctx.global, item)) continue;
                 item.visible = visible;
                 item.entity.enabled = visible;
                 anyChanged = true;
