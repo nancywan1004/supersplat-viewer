@@ -1,5 +1,6 @@
 import type { AppBase, GSplatComponent } from 'playcanvas';
 import { Global } from '../types';
+import type { ExperienceSettings } from '../schemas/v2';
 import { LodPreset, LodSettings, LodPlatform } from '../schemas/v2';
 
 /**
@@ -37,26 +38,42 @@ export function isLodMetaFile(url: string): boolean {
     return filename === 'lod-meta.json';
 }
 
+/** settings 含 lodSettings 且场景 URL 为 lod-meta.json 时才走自定义 LodLoader 管线 */
+export function isCustomLodEnabled(
+    settings: Pick<ExperienceSettings, 'lodSettings'> | undefined,
+    contentUrl: string | undefined
+): boolean {
+    return !!settings?.lodSettings && !!contentUrl && isLodMetaFile(contentUrl);
+}
+
+export function isGsplatMetaJsonFilename(filename: string | undefined): boolean {
+    const name = filename?.toLowerCase() ?? '';
+    return name === 'meta.json' || name === 'lod-meta.json';
+}
+
 /**
  * LOD Loader for managing LOD streaming in supersplat-viewer
  */
 export class LodLoader {
     private app: AppBase;
-    private config: LodSettings
+    private config: LodSettings;
+    private readonly enabled: boolean;
 
     constructor(global: Global) {
         this.app = global.app;
+        this.enabled = !!global.settings.lodSettings;
+        const lodSettings = global.settings.lodSettings;
         this.config = {
-            presets: global.settings.lodSettings?.presets ?? LOD_PRESETS,
-            lodUpdateDistance: global.settings.lodSettings?.lodUpdateDistance ?? 0.5,
-            lodUnderfillLimit: global.settings.lodSettings?.lodUnderfillLimit ?? 5,
-            cameraPosition: global.settings.lodSettings?.cameraPosition ?? [0, 0, 0],
-            eulerAngles: global.settings.lodSettings?.eulerAngles ?? [-90, 0, 0],
-            moveSpeed: global.settings.lodSettings?.moveSpeed ?? 4,
-            moveFastSpeed: global.settings.lodSettings?.moveFastSpeed ?? 15,
-            enableOrbit: global.settings.lodSettings?.enableOrbit ?? false,
-            enablePan: global.settings.lodSettings?.enablePan ?? false,
-            focusPoint: global.settings.lodSettings?.focusPoint ?? [0, 0, -1],
+            presets: lodSettings?.presets ?? LOD_PRESETS,
+            lodUpdateDistance: lodSettings?.lodUpdateDistance ?? 0.5,
+            lodUnderfillLimit: lodSettings?.lodUnderfillLimit ?? 5,
+            cameraPosition: lodSettings?.cameraPosition ?? [0, 0, 0],
+            eulerAngles: lodSettings?.eulerAngles ?? [-90, 0, 0],
+            moveSpeed: lodSettings?.moveSpeed ?? 4,
+            moveFastSpeed: lodSettings?.moveFastSpeed ?? 15,
+            enableOrbit: lodSettings?.enableOrbit ?? false,
+            enablePan: lodSettings?.enablePan ?? false,
+            focusPoint: lodSettings?.focusPoint ?? [0, 0, -1],
             lodUpdateAngle: 90,
             lodBehindPenalty: 5,
             radialSorting: true
@@ -67,13 +84,16 @@ export class LodLoader {
      * Check if LOD should be enabled for the given URL
      */
     shouldEnableLod(url: string): boolean {
-        return isLodMetaFile(url);
+        return this.enabled && isLodMetaFile(url);
     }
 
     /**
      * Initialize LOD settings on the app
      */
     initializeLodSettings(): void {
+        if (!this.enabled) {
+            return;
+        }
         const gsplatScene = (this.app.scene as any).gsplat;
         console.log('GSplat scene object:', gsplatScene);
         
@@ -157,6 +177,9 @@ export class LodLoader {
      * Apply LOD preset to a GSplat component
      */
     applyLodPreset(gsplatComponent: GSplatComponent): void {
+        if (!this.enabled) {
+            return;
+        }
         const platform = this.detectPlatform();
         const preset = this.config.presets[platform];
 

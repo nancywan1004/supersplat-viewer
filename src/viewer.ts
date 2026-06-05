@@ -54,7 +54,7 @@ import {
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
 import { getSkyboxRadius } from './loaders/skybox-loader';
 import { readSkyboxCurrentUrlFromSettings } from './settings-serialize/settings-serialize-helper';
-import { isLodMetaFile } from './loaders/lod-loader';
+import { isCustomLodEnabled } from './loaders/lod-loader';
 import { BloomController } from './vfx/bloom';
 import { NightMode } from './vfx/lighting/night-mode';
 import {
@@ -1063,7 +1063,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
                 // Check if custom LOD (lodLoader) is enabled
                 // If not, use default LOD settings (ranges below)
-                const isCustomLod = config.contentUrl ? isLodMetaFile(config.contentUrl) : false;
+                const isCustomLod = isCustomLodEnabled(settings, config.contentUrl);
 
                 // Default quality ranges (used when lodLoader is not enabled)
                 const ranges = {

@@ -25,7 +25,7 @@ import { initPoster, initUI } from './ui/ui';
 import { Viewer } from './viewer';
 import { initXr } from './xr';
 import { initLight } from './light';
-import { LodLoader } from './loaders/lod-loader';
+import { isCustomLodEnabled, isGsplatMetaJsonFilename, LodLoader } from './loaders/lod-loader';
 import { loadSplat } from './loaders/splat-loader';
 import type { AssetSource } from './loaders/asset-source';
 import { loadGsplatAsset } from './loaders/gsplat-asset-loader';
@@ -126,7 +126,7 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
     } else {
         // 对于其他格式，使用原始代码的方式
         // 注意：不要提前消费 contents，让 PlayCanvas 自己处理
-        const data = filename.toLowerCase() === 'meta.json' ? await (await contents).json() : undefined;
+        const data = isGsplatMetaJsonFilename(filename) ? await (await contents).json() : undefined;
         const asset = new Asset(filename, 'gsplat', { url: contentUrl, filename }, data);
 
         return new Promise<Entity>((resolve, reject) => {
@@ -389,8 +389,9 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     // 供 NightMode 等脚本读取点光源等（collectPointLights 需要 global）
     (app as any).__global = global;
 
-    const lodLoader = new LodLoader(global);
-    if (lodLoader.shouldEnableLod(config.contentUrl)) {
+    const customLod = isCustomLodEnabled(processedSettings, config.contentUrl);
+    const lodLoader = customLod ? new LodLoader(global) : undefined;
+    if (lodLoader) {
         lodLoader.initializeLodSettings();
     }
     initCanvas(global);

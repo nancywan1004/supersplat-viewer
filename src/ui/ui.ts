@@ -3,7 +3,7 @@ import { EventHandler } from 'playcanvas';
 import { shouldUseTouchJoystickMove } from '../input/touch-joystick-ui';
 import { Tooltip } from '../tooltip';
 import { Global } from '../types';
-import { isLodMetaFile } from '../loaders/lod-loader';
+import { isCustomLodEnabled } from '../loaders/lod-loader';
 import type { ExperienceSettings } from '../schemas/v2';
 import {
     serializeExperienceSettings,
@@ -331,7 +331,7 @@ const initPoster = (events: EventHandler) => {
 };
 
 const initUI = (global: Global) => {
-    const { config, events, state } = global;
+    const { config, events, state, settings } = global;
     const editUiTransport = getEditUiTransport(global);
 
     // Acquire Elements
@@ -381,7 +381,7 @@ const initUI = (global: Global) => {
     dom.previewModeBtn = document.getElementById('previewModeBtn');
 
     // Check if LOD mode is enabled
-    const isLodMode = config.contentUrl ? isLodMetaFile(config.contentUrl) : false;
+    const isLodMode = isCustomLodEnabled(settings, config.contentUrl);
     
     // In LOD mode, show progress bar but mark as 100% when animation starts
     // Progress is calculated based on threshold, reaching 100% when animation begins
