@@ -1,13 +1,9 @@
 import {
-    Picker as EnginePicker,
-    type AppBase,
-    type CameraComponent,
+    BoundingBox,
     type Entity,
-    type GSplatComponent,
-    type MeshInstance
+    Vec3
 } from 'playcanvas';
 
-import { pickScenePlacedEntryAtScreen } from '../../../scene-assets/scene-asset-selection-pick';
 import {
     findAssetMorphOwnerTargetId,
     patchAssetRuntimeMirror,
@@ -25,15 +21,10 @@ import type { InputArbiter, PointerClickClaimContext } from '../../../input-arbi
 import type { ExperienceSettings } from '../../../schemas/v2';
 import type { Global, ScenePlacedItem } from '../../../types';
 
-type IdPicker = {
-    resize: (w: number, h: number) => void;
-    prepare: (camera: CameraComponent, scene: AppBase['scene'], layers: unknown[]) => void;
-    getSelectionAsync: (x: number, y: number, w?: number, h?: number) => Promise<Array<MeshInstance | GSplatComponent>>;
-};
-
 type ToggleMode = 'idle' | 'user';
 
 const PICKER_SCALE = 0.5;
+const VIEW_TOGGLE_SCREEN_PADDING_PX = 8;
 const GSPLAT_MORPH_TYPE = ASSET_EFFECT_TYPE_VALUES[0];
 const GSPLAT_WOBBLE_TYPE = ASSET_EFFECT_TYPE_VALUES[1];
 
@@ -82,6 +73,92 @@ function entitiesForUserEffect(
     return undefined;
 }
 
+function gaussianWorldBounds(entry: ScenePlacedItem): BoundingBox | null {
+    if (entry.assetType !== 'gaussian' || !entry.entity.enabled) {
+        return null;
+    }
+    const gsplat = (entry.entity as Entity & { gsplat?: { customAabb?: BoundingBox | null; aabb?: BoundingBox } }).gsplat;
+    const gsAabb = gsplat?.customAabb ?? gsplat?.aabb;
+    if (!gsAabb) return null;
+
+    const bounds = new BoundingBox();
+    bounds.setFromTransformedAabb(gsAabb, entry.entity.getWorldTransform());
+    return bounds;
+}
+
+function pickGaussianByScreenBounds(global: Global, clientX: number, clientY: number): ScenePlacedItem | null {
+    const canvas = global.app.graphicsDevice.canvas as HTMLCanvasElement;
+    const rect = canvas.getBoundingClientRect();
+    const offsetX = clientX - rect.left;
+    const offsetY = clientY - rect.top;
+    if (offsetX < 0 || offsetY < 0 || offsetX > rect.width || offsetY > rect.height) {
+        return null;
+    }
+
+    const renderWidth = global.app.graphicsDevice.width;
+    const renderHeight = global.app.graphicsDevice.height;
+    const targetX = (offsetX / Math.max(1, rect.width)) * renderWidth;
+    const targetY = (offsetY / Math.max(1, rect.height)) * renderHeight;
+    const camera = global.camera.camera;
+    if (!camera) return null;
+
+    const screen = new Vec3();
+    let best: { entry: ScenePlacedItem; score: number } | null = null;
+
+    for (const entry of global.state.scenePlacedEntities ?? []) {
+        const bounds = gaussianWorldBounds(entry);
+        if (!bounds) continue;
+
+        const center = bounds.center;
+        const half = bounds.halfExtents;
+        let minX = Number.POSITIVE_INFINITY;
+        let minY = Number.POSITIVE_INFINITY;
+        let maxX = Number.NEGATIVE_INFINITY;
+        let maxY = Number.NEGATIVE_INFINITY;
+        let visibleCorners = 0;
+        let depthSum = 0;
+
+        for (const sx of [-1, 1]) {
+            for (const sy of [-1, 1]) {
+                for (const sz of [-1, 1]) {
+                    const corner = new Vec3(
+                        center.x + half.x * sx,
+                        center.y + half.y * sy,
+                        center.z + half.z * sz
+                    );
+                    camera.camera.worldToScreen(corner, renderWidth, renderHeight, screen);
+                    if (!Number.isFinite(screen.x) || !Number.isFinite(screen.y) || !Number.isFinite(screen.z)) continue;
+                    if (screen.z <= 0) continue;
+                    visibleCorners++;
+                    depthSum += screen.z;
+                    minX = Math.min(minX, screen.x);
+                    minY = Math.min(minY, screen.y);
+                    maxX = Math.max(maxX, screen.x);
+                    maxY = Math.max(maxY, screen.y);
+                }
+            }
+        }
+
+        if (visibleCorners === 0) continue;
+        minX -= VIEW_TOGGLE_SCREEN_PADDING_PX;
+        minY -= VIEW_TOGGLE_SCREEN_PADDING_PX;
+        maxX += VIEW_TOGGLE_SCREEN_PADDING_PX;
+        maxY += VIEW_TOGGLE_SCREEN_PADDING_PX;
+        if (targetX < minX || targetX > maxX || targetY < minY || targetY > maxY) continue;
+
+        const centerX = (minX + maxX) * 0.5;
+        const centerY = (minY + maxY) * 0.5;
+        const dx = targetX - centerX;
+        const dy = targetY - centerY;
+        const score = (depthSum / visibleCorners) + Math.sqrt(dx * dx + dy * dy) * 0.001;
+        if (!best || score < best.score) {
+            best = { entry, score };
+        }
+    }
+
+    return best?.entry ?? null;
+}
+
 function modeFromStartPayload(payload: {
     targetId?: string;
     type?: string;
@@ -106,8 +183,6 @@ export class AssetEffectViewToggleController {
     private readonly _global: Global;
 
     private readonly _toggleModeByTargetId = new Map<string, ToggleMode>();
-
-    private _picker: IdPicker | null = null;
 
     private _detachPointerClick: (() => void) | null = null;
 
@@ -148,13 +223,16 @@ export class AssetEffectViewToggleController {
         if (this._disposed || this._global.state.editMode === true || this._pickInFlight) {
             return false;
         }
+        if (this._toggleModeByTargetId.size === 0) {
+            return false;
+        }
         const pickPoint = getCanvasPickPoint(this._global, clientX, clientY);
         if (!pickPoint) {
             return false;
         }
 
         this._pickInFlight = true;
-        this._pickAndToggle(clientX, clientY, pickPoint)
+        this._pickAndToggle(clientX, clientY)
         .catch(err => console.warn('[AssetEffectViewToggle] click toggle failed', err))
         .finally(() => {
             this._pickInFlight = false;
@@ -187,21 +265,9 @@ export class AssetEffectViewToggleController {
 
     private async _pickAndToggle(
         clientX: number,
-        clientY: number,
-        pickPoint: { pickX: number; pickY: number; pickW: number; pickH: number }
+        clientY: number
     ): Promise<void> {
-        const { app, camera } = this._global;
-        const picker = this._ensurePicker(pickPoint.pickW, pickPoint.pickH);
-        const entry = await pickScenePlacedEntryAtScreen(
-            this._global,
-            app,
-            camera,
-            picker,
-            pickPoint.pickX,
-            pickPoint.pickY,
-            clientX,
-            clientY
-        );
+        const entry = pickGaussianByScreenBounds(this._global, clientX, clientY);
         if (this._disposed || !entry || entry.assetType !== 'gaussian') {
             return;
         }
@@ -296,14 +362,6 @@ export class AssetEffectViewToggleController {
         });
     }
 
-    private _ensurePicker(width: number, height: number): IdPicker {
-        if (!this._picker) {
-            this._picker = new EnginePicker(this._global.app, width, height, false) as unknown as IdPicker;
-        } else {
-            this._picker.resize(width, height);
-        }
-        return this._picker;
-    }
 }
 
 export function createAssetEffectViewToggleController(global: Global): AssetEffectViewToggleController {

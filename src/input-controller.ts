@@ -111,7 +111,9 @@ class InputController {
 
         const { events, state } = this._global;
         const cameraControlsEnabled = state.cameraControlsEnabled !== false;
-        const result = await pickWorldFromClientXY(this._global, event.clientX, event.clientY);
+        const result = state.editMode === true
+            ? await pickWorldFromClientXY(this._global, event.clientX, event.clientY)
+            : null;
 
         const inputArbiter = (this._global as Global & { __inputArbiter?: InputArbiter }).__inputArbiter;
         const dispatchResult = inputArbiter?.dispatchPointerClick({
