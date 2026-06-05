@@ -126,6 +126,78 @@ export function ensureSceneMediaHotspot(settings: ExperienceSettings): SceneMedi
     return root.sceneMediaHotspot as SceneMediaHotspotSettings;
 }
 
+function normalizeSkyboxUrlList(input: unknown): string[] {
+    if (!Array.isArray(input)) return [];
+    const seen = new Set<string>();
+    const result: string[] = [];
+    input.forEach((entry) => {
+        if (typeof entry !== 'string') return;
+        const trimmed = entry.trim();
+        if (!trimmed || seen.has(trimmed)) return;
+        seen.add(trimmed);
+        result.push(trimmed);
+    });
+    return result;
+}
+
+function ensureSkyboxRecord(bg: Record<string, unknown>): Record<string, unknown> {
+    if (!bg.skybox || typeof bg.skybox !== 'object') {
+        bg.skybox = {};
+    }
+    return bg.skybox as Record<string, unknown>;
+}
+
+/** 导入时将历史字段收敛到 `background.skybox.{ currentUrl, uploadUrls }` */
+function hoistLegacySkyboxFields(bg: Record<string, unknown>): void {
+    const skybox = ensureSkyboxRecord(bg);
+
+    const legacyCurrent =
+        (typeof bg.skyboxUrl === 'string' ? bg.skyboxUrl.trim() : '') ||
+        (typeof skybox.url === 'string' ? skybox.url.trim() : '') ||
+        (typeof skybox.currentUrl === 'string' ? skybox.currentUrl.trim() : '');
+    if (legacyCurrent) {
+        skybox.currentUrl = legacyCurrent;
+    }
+    delete bg.skyboxUrl;
+    delete skybox.url;
+
+    const legacyUploadUrls = normalizeSkyboxUrlList([
+        ...(Array.isArray(bg.skyboxUrls) ? bg.skyboxUrls : []),
+        ...(Array.isArray(skybox.urls) ? skybox.urls : []),
+        ...(Array.isArray(skybox.userUrls) ? skybox.userUrls : []),
+        ...(Array.isArray(skybox.uploadUrls) ? skybox.uploadUrls : [])
+    ]);
+    delete bg.skyboxUrls;
+    delete skybox.urls;
+    delete skybox.userUrls;
+    if (legacyUploadUrls.length > 0) {
+        skybox.uploadUrls = legacyUploadUrls;
+    } else {
+        delete skybox.uploadUrls;
+    }
+}
+
+function pruneEmptySkybox(bg: Record<string, unknown>): void {
+    const skybox = bg.skybox;
+    if (!skybox || typeof skybox !== 'object') return;
+    const rec = skybox as Record<string, unknown>;
+    const currentUrl = typeof rec.currentUrl === 'string' ? rec.currentUrl.trim() : '';
+    const uploadUrls = normalizeSkyboxUrlList(rec.uploadUrls);
+    if (currentUrl) {
+        rec.currentUrl = currentUrl;
+    } else {
+        delete rec.currentUrl;
+    }
+    if (uploadUrls.length > 0) {
+        rec.uploadUrls = uploadUrls;
+    } else {
+        delete rec.uploadUrls;
+    }
+    if (!rec.currentUrl && !rec.uploadUrls) {
+        delete bg.skybox;
+    }
+}
+
 export function ensureBackground(settings: ExperienceSettings): ExperienceSettings['background'] {
     const root = settings as Record<string, unknown>;
     if (!root.background || typeof root.background !== 'object') {
@@ -135,39 +207,84 @@ export function ensureBackground(settings: ExperienceSettings): ExperienceSettin
     if (!Array.isArray(bg.color) || bg.color.length !== 3) {
         bg.color = [0, 0, 0];
     }
+    hoistLegacySkyboxFields(bg);
+    pruneEmptySkybox(bg);
     return root.background as ExperienceSettings['background'];
 }
 
-/** 读取存盘天空盒 URL；空字符串视为未设置 */
-export function readSkyboxUrlFromSettings(settings: ExperienceSettings): string | undefined {
-    const bg = settings.background;
-    if (!bg || typeof bg !== 'object') return undefined;
-    const url = (bg as { skyboxUrl?: unknown }).skyboxUrl;
+/** 读取当前使用的天空盒 URL；空字符串视为未设置 */
+export function readSkyboxCurrentUrlFromSettings(settings: ExperienceSettings): string | undefined {
+    const bg = ensureBackground(settings);
+    const skybox = (bg as { skybox?: unknown }).skybox;
+    if (!skybox || typeof skybox !== 'object') return undefined;
+    const url = (skybox as { currentUrl?: unknown }).currentUrl;
     if (typeof url !== 'string') return undefined;
     const trimmed = url.trim();
     return trimmed || undefined;
 }
 
-/** 写入或清除 `settings.background.skyboxUrl` */
-export function setSkyboxUrlInSettings(settings: ExperienceSettings, url: string | null | undefined): void {
+/** 读取上传/外部传入的天空盒 URL 列表（SKYBOX_ADD 等）；去重并去掉空值 */
+export function readSkyboxUploadUrlsFromSettings(settings: ExperienceSettings): string[] {
+    const bg = ensureBackground(settings);
+    const skybox = (bg as { skybox?: unknown }).skybox;
+    if (!skybox || typeof skybox !== 'object') return [];
+    return normalizeSkyboxUrlList((skybox as { uploadUrls?: unknown }).uploadUrls);
+}
+
+/** 写入上传天空盒 URL 列表；空列表会删除 `skybox.uploadUrls` */
+export function setSkyboxUploadUrlsInSettings(settings: ExperienceSettings, urls: unknown): void {
     const bg = ensureBackground(settings) as Record<string, unknown>;
+    const skybox = ensureSkyboxRecord(bg);
+    const normalized = normalizeSkyboxUrlList(urls);
+    if (normalized.length > 0) {
+        skybox.uploadUrls = normalized;
+    } else {
+        delete skybox.uploadUrls;
+    }
+    pruneEmptySkybox(bg);
+}
+
+/** 登记上传天空盒 URL 并去重；返回规范化后的 URL，非法则返回 undefined */
+export function addSkyboxUploadUrlToSettings(settings: ExperienceSettings, url: string | null | undefined): string | undefined {
+    const trimmed = typeof url === 'string' ? url.trim() : '';
+    if (!trimmed) return undefined;
+    const urls = readSkyboxUploadUrlsFromSettings(settings);
+    if (!urls.includes(trimmed)) {
+        urls.push(trimmed);
+    }
+    setSkyboxUploadUrlsInSettings(settings, urls);
+    return trimmed;
+}
+
+/** 写入或清除 `settings.background.skybox.currentUrl` */
+export function setSkyboxCurrentUrlInSettings(settings: ExperienceSettings, url: string | null | undefined): void {
+    const bg = ensureBackground(settings) as Record<string, unknown>;
+    const skybox = ensureSkyboxRecord(bg);
     const trimmed = typeof url === 'string' ? url.trim() : '';
     if (trimmed) {
-        bg.skyboxUrl = trimmed;
+        skybox.currentUrl = trimmed;
     } else {
-        delete bg.skyboxUrl;
+        delete skybox.currentUrl;
     }
+    pruneEmptySkybox(bg);
+}
+
+/** 序列化前规范化 `background.skybox`（currentUrl + uploadUrls） */
+export function normalizeSkyboxForPersistence(settings: ExperienceSettings): void {
+    const bg = ensureBackground(settings) as Record<string, unknown>;
+    pruneEmptySkybox(bg);
 }
 
 /**
  * 启动时解析天空盒：优先 settings，其次 URL 参数；若仅有 URL 参数则回写 settings 便于存盘。
  */
 export function resolveInitialSkyboxUrl(settings: ExperienceSettings, configSkyboxUrl?: string): string | undefined {
-    const fromSettings = readSkyboxUrlFromSettings(settings);
+    const fromSettings = readSkyboxCurrentUrlFromSettings(settings);
     if (fromSettings) return fromSettings;
     const fromConfig = typeof configSkyboxUrl === 'string' ? configSkyboxUrl.trim() : '';
     if (fromConfig) {
-        setSkyboxUrlInSettings(settings, fromConfig);
+        addSkyboxUploadUrlToSettings(settings, fromConfig);
+        setSkyboxCurrentUrlInSettings(settings, fromConfig);
         return fromConfig;
     }
     return undefined;

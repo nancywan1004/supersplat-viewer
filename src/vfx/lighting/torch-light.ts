@@ -8,64 +8,39 @@ import type { ExperienceSettings } from '../../schemas/v2';
 import type { TorchLightSettings } from '../../schemas/v2-custom';
 
 /**
- * 手电筒（全局单例，运行时类型为 PlayCanvas **point light**）。
+ * 手电筒（全局单例）：gsplat 走 night-mode 相机锥光 Fill+Hotspot；mesh 走 PlayCanvas PointLight。
  *
- * **缓存拾取版**：鼠标/相机变化时节流拾取一次世界落点，shader 直接消费缓存坐标。
- *
- * - 实体名固定为 `torchLight`，挂在 `app.root` 下独立容器（不进 `pointLights`，
- *   规避 `updatePointLightsFromSettings` 的 destroy 误删）
- * - 参数（颜色 / 强度 / range）来自 `settings.lighting.torch`（持久化）
- * - 启停由 `viewSettings.torch.active` 控制（不入库）；编辑模式下切换左侧模块时自动关闭
- * - **位置（跟手关键）**：
- *   - 鼠标移动或相机矩阵变化后，最多约 30Hz 同步做一次 mesh AABB 射线求交（CPU），
- *     并触发一次 `Picker.pickSurface`（异步，优先中心像素深度，中心无效时才用邻域兜底）；
- *     mesh 用缩小 AABB；mesh/gsplat 同时命中取更近一侧；大 mesh 动态加大 range
- *   - 这样 mesh 在 picker 的深度纹理里不可见的问题被 mesh 求交补齐，光标停在 mesh 上时光源贴在 mesh 表面
- *   - shader 每个 splat 只做世界距离衰减，不再重复采 depthMap / 反投影
- * - **拾取兜底**：拾取未命中或还未首次返回时，光源回退到相机前方
- *   `TORCH_FALLBACK_DISTANCE` 米处；PointLight 的 `range` 直接使用 `cfg.range`。
+ * - Fill：`beamEnd = farClip × TORCH_BEAM_FAR_RATIO`，沿光标视线照亮前后景
+ * - Hotspot：mesh AABB 同步命中或 `picker.pick` 单点深度，聚光尺度 = `settings.lighting.torch.range`
+ * - 不使用 `pickSurface`；相机变化时清空热点深度，避免旧深度套到新视角
  */
 const TORCH_ENTITY_NAME = 'torchLight';
 const TORCH_PICK_THROTTLE_MS = 33;
-/** pickSurface 超时未返回时强制解除 pickInFlight，避免后续拾取永久阻塞 */
 const TORCH_PICK_IN_FLIGHT_TIMEOUT_MS = 400;
 const CAMERA_CHANGE_EPSILON = 1e-5;
-/** 拾取兜底距离（世界单位）：未命中时光源沿相机 forward 放在此距离处 */
-const TORCH_FALLBACK_DISTANCE = 5;
-/**
- * 沿视线向相机回拉光源，避免落在 mesh AABB 内/薄壳内部导致 PlayCanvas 点光打不到表面。
- * gsplat 走 night-mode 的 uTorchWorldPos，mesh 走引擎 PointLight，此处主要修复后者。
- */
+const TORCH_BEAM_FAR_RATIO = 0.85;
+const TORCH_BEAM_MIN_M = 8;
+const TORCH_HOTSPOT_SMOOTH_MS = 50;
+const TORCH_HOTSPOT_FALLBACK_BEAM_RATIO = 0.35;
+const TORCH_FILL_WEIGHT = 0.45;
+const TORCH_HOTSPOT_WEIGHT = 1.0;
+const TORCH_MESH_HOTSPOT_SHADER_BLEND = 0.85;
+const TORCH_GSPLAT_POINTLIGHT_INTENSITY_SCALE = 0.4;
+
 const TORCH_SURFACE_BIAS_M = 0.12;
-/** mesh AABB 命中时略加大回拉（AABB 比真实三角面更“鼓”） */
-const TORCH_MESH_SURFACE_BIAS_M = 0.22;
-/** 拾取用 AABB 相对渲染 AABB 的缩放（<1 收紧，减少「还没碰到模型就亮」） */
-const TORCH_MESH_AABB_SHRINK = 0.78;
-/** 命中缩小盒后，深度取 entry→exit 的该比例（避免贴在最外层鼓包面上） */
+const TORCH_MESH_SURFACE_BIAS_M = 0.18;
+/** 拾取略放宽，减少薄壳/斜视角下偶发 AABB miss */
+const TORCH_MESH_AABB_SHRINK = 0.85;
 const TORCH_MESH_AABB_DEPTH_ALONG = 0.2;
-/** 同一像素下多个 mesh 命中深度差在此内视为叠层，仍取最近深度（不向远推，避免打到后面） */
 const TORCH_MESH_OVERLAP_DEPTH_M = 0.22;
-/** 命中 mesh 的 AABB 最大边长超过该值时，按尺寸额外放大点光 range（大 mesh 局部更易照亮） */
-const TORCH_MESH_RANGE_BOOST_MIN_EXTENT_M = 2.5;
-const TORCH_MESH_RANGE_BOOST_FACTOR = 0.4;
-const TORCH_MESH_RANGE_BOOST_MAX_M = 12;
-/** 深度跳变锁定窗口：第一次跳变立即接受，随后短时间忽略反向大跳，避免深度边界来回闪烁 */
-const TORCH_DEPTH_JUMP_LOCK_MS = 75;
-/** 深度相对变化超过该比例视为“大跳变”（例如近/远表面切换），小变化仍立即跟随 */
-const TORCH_DEPTH_JUMP_RATIO = 1.35;
-/** 深度绝对变化小于该值（世界单位）时不视为大跳变，避免近距离小误差触发锁定 */
-const TORCH_DEPTH_JUMP_MIN_DELTA = 0.35;
-/** 大幅变远需要二次确认的最长等待时间；避免单帧漏到背景远深度造成闪烁 */
-const TORCH_FAR_DEPTH_CONFIRM_MS = 90;
-/** 二次确认时，两次远深度差异小于该比例才视为同一远表面 */
-const TORCH_FAR_DEPTH_CONFIRM_TOLERANCE = 0.15;
-/** mesh 与 gsplat 深度差小于此值视为叠层，保持上一帧来源避免每帧抢答闪烁 */
+const TORCH_MESH_SOFT_BOOST_MAX_M = 2.5;
+const TORCH_MESH_SOFT_BOOST_START_EXTENT_M = 3.0;
+const TORCH_MESH_SOFT_BOOST_FULL_EXTENT_M = 12.0;
+const TORCH_MESH_INTENSITY_MATCH = 0.62;
+const TORCH_MESH_INTENSITY_BOOST_COMPENSATE = 0.12;
 const TORCH_MESH_GSPLAT_HYSTERESIS_M = 0.2;
-/** 最近一次 canvas 场景坐标超过该时间后，不再作为首次开灯目标，避免 UI 按钮点击污染首轮 pick */
 const TORCH_POINTER_STALE_MS = 1200;
-/** 邻域候选支持点足够时，允许暗部/低 alpha 区域由 nearest 接管 */
-const TORCH_NEAREST_CONFIDENT_SUPPORT = 4;
-/** 求 mesh AABB 命中时跳过的辅助 entity tag（光源 gizmo、拾取手柄、手电筒自身 visual 等） */
+
 const TORCH_MESH_HELPER_TAGS = new Set<string>([
     'torchLight',
     'pointLight',
@@ -75,7 +50,6 @@ const TORCH_MESH_HELPER_TAGS = new Set<string>([
     'lightHandle',
     'pickHandle'
 ]);
-/** 同名 helper entity 名（自上而下遍历到此名时即视为 helper） */
 const TORCH_MESH_HELPER_NAMES = new Set<string>([
     'torchLight',
     'pointLights',
@@ -96,6 +70,17 @@ const _tmpAabbMin = new Vec3();
 const _tmpAabbMax = new Vec3();
 const _torchRay = new Ray();
 
+export type TorchBeamParams = {
+    beamEnd: number;
+    hotspotDepth: number;
+    hasHotspot: boolean;
+    hotspotFromMesh: boolean;
+    spotRadius: number;
+    fillWeight: number;
+    hotspotWeight: number;
+    meshHotspotBlend: number;
+};
+
 type TorchControllerHandle = {
     setActive(active: boolean): void;
     refreshParamsFromSettings(): void;
@@ -109,23 +94,15 @@ type TorchRuntimeState = {
     lastPointerTime: number;
     screenU: number | null;
     screenV: number | null;
-    /** 上次最终写入实体的世界位置（用作 shader uniform 缓存与回退） */
     worldPos: Vec3;
-    /** 是否拥有有效拾取距离（首次拾取成功后为 true） */
-    hasWorldPos: boolean;
-    /**
-     * **方向用当前光标、深度用上次拾取** 模型的核心：
-     * 上次成功拾取（mesh AABB 或 gsplat picker）得到的「沿相机视线的世界欧氏距离」。
-     * 每帧 onUpdate 用「当前光标视线方向 × lastDistance」实时合成 worldPos，
-     * 这样 picker 异步 stale（结果对应旧光标像素）不会把光源拉去旧位置，
-     * 而是被解读为「同一深度，跟当前光标视线滑动」—— 跨越深度边界时一次到位。
-     */
-    lastDistance: number;
-    /** 深度跳变锁定截止时间（ms）；只限制深度反复切换，不影响每帧光标方向 */
-    depthJumpLockUntil: number;
-    /** 待确认的远深度候选；用于过滤单帧漏到背景的 picker 远点 */
-    pendingFarDistance: number;
-    pendingFarUntil: number;
+    beamEnd: number;
+    hotspotDepth: number;
+    hasHotspotDepth: boolean;
+    hotspotFromMesh: boolean;
+    meshExtentM: number;
+    meshRangeBoost: number;
+    meshIntensityScale: number;
+    lastSmoothTime: number;
     pickDirty: boolean;
     pickInFlight: boolean;
     lastPickTime: number;
@@ -133,36 +110,40 @@ type TorchRuntimeState = {
     cameraSnapshotValid: boolean;
     cameraWorldSnapshot: Float32Array;
     cameraProjSnapshot: Float32Array;
-    /** 相机变化后、下一次拾取成功前，保持旧 worldPos，避免旧距离被套到新相机上 */
-    cameraPickPending: boolean;
     destroyed: boolean;
-    /** 最近一次有效深度是否来自 mesh AABB（用于加大表面回拉） */
-    lastPickFromMesh: boolean;
-    /** 大 mesh / 叠层拾取时附加到 cfg.range 的额外世界单位（同步 mesh 实体与 gsplat uniform） */
-    meshRangeBoost: number;
 };
 
-type TorchPickSurface = {
-    position?: Vec3;
-    centerPosition?: Vec3;
-    nearestPosition?: Vec3;
-    preferredPosition?: Vec3;
-    centerAlpha?: number;
-    nearestSupport?: number;
-    sampleCount?: number;
-    source?: 'center' | 'nearest';
+const smoothstep01 = (edge0: number, edge1: number, x: number): number => {
+    if (edge1 <= edge0) return x >= edge1 ? 1 : 0;
+    const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+    return t * t * (3 - 2 * t);
 };
 
-type TorchResolvedPick = {
-    distance: number;
-    fromMesh: boolean;
-    rangeBoost: number;
-    confidence: number;
+const lerpToward = (current: number, target: number, now: number, lastTime: number, smoothMs: number): number => {
+    if (!Number.isFinite(target)) return current;
+    if (lastTime <= 0 || smoothMs <= 0) return target;
+    const dt = Math.max(0, now - lastTime);
+    const alpha = Math.min(1, dt / smoothMs);
+    return current + (target - current) * alpha;
 };
 
-/**
- * 初始化全局手电筒；同一 Global 重复调用返回已存在的 handle。
- */
+const meshSoftRangeBoostFromExtent = (extentM: number): number => {
+    if (!Number.isFinite(extentM) || extentM <= 0) return 0;
+    const t = smoothstep01(
+        TORCH_MESH_SOFT_BOOST_START_EXTENT_M,
+        TORCH_MESH_SOFT_BOOST_FULL_EXTENT_M,
+        extentM
+    );
+    return t * TORCH_MESH_SOFT_BOOST_MAX_M;
+};
+
+const meshIntensityScaleFromBoost = (fromMesh: boolean, rangeBoost: number): number => {
+    if (!fromMesh) return 1;
+    let scale = TORCH_MESH_INTENSITY_MATCH;
+    scale /= 1 + TORCH_MESH_INTENSITY_BOOST_COMPENSATE * Math.max(0, rangeBoost);
+    return scale;
+};
+
 export function initTorchLight(global: Global): TorchControllerHandle {
     const anyGlobal = global as unknown as { __torchLight?: TorchControllerHandle };
     if (anyGlobal.__torchLight) return anyGlobal.__torchLight;
@@ -172,7 +153,6 @@ export function initTorchLight(global: Global): TorchControllerHandle {
     ensureTorchLight(settings);
     ensureViewSettings(global);
 
-    // 单例容器 + 子实体
     let container = app.root.findByName(TORCH_ENTITY_NAME) as Entity | null;
     if (!container) {
         container = new Entity(TORCH_ENTITY_NAME);
@@ -199,11 +179,14 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         screenU: null,
         screenV: null,
         worldPos: new Vec3(),
-        hasWorldPos: false,
-        lastDistance: 0,
-        depthJumpLockUntil: Number.NEGATIVE_INFINITY,
-        pendingFarDistance: 0,
-        pendingFarUntil: Number.NEGATIVE_INFINITY,
+        beamEnd: TORCH_BEAM_MIN_M,
+        hotspotDepth: 0,
+        hasHotspotDepth: false,
+        hotspotFromMesh: false,
+        meshExtentM: 0,
+        meshRangeBoost: 0,
+        meshIntensityScale: 1,
+        lastSmoothTime: 0,
         pickDirty: true,
         pickInFlight: false,
         lastPickTime: Number.NEGATIVE_INFINITY,
@@ -211,16 +194,9 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         cameraSnapshotValid: false,
         cameraWorldSnapshot: new Float32Array(16),
         cameraProjSnapshot: new Float32Array(16),
-        cameraPickPending: false,
-        destroyed: false,
-        lastPickFromMesh: false,
-        meshRangeBoost: 0
+        destroyed: false
     };
 
-    /**
-     * 把 settings.lighting.torch 的「颜色 / 强度」写到光组件上。
-     * `range` 由 `onUpdate` 每帧直接写入 `cfg.range`。
-     */
     const applyParamsToEntity = () => {
         const cfg = ensureTorchLight(settings) as TorchLightSettings;
         if (!entity?.light) return;
@@ -228,35 +204,17 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         entity.light.color.set(r, g, b);
         const lowLevel = (entity.light as unknown as { light?: { setColor?: (r: number, g: number, b: number) => void } }).light;
         lowLevel?.setColor?.(r, g, b);
-        entity.light.intensity = Math.max(0, Number.isFinite(cfg.intensity) ? cfg.intensity : 0);
     };
 
-    /** 由 viewSettings.torch.active + 导出锁决定实体是否启用 */
     const shouldBeEnabled = (): boolean => {
         const stateAny = global.state as unknown as { isExportingVfxVideo?: boolean };
         if (stateAny.isExportingVfxVideo) return false;
         return ensureViewSettings(global).torch?.active === true;
     };
 
-    /**
-     * 把 client(x,y) + 距离投影到世界空间（仅用于拾取兜底）。
-     * - 使用 `CameraComponent.screenToWorld`，默认采用 `canvas.clientWidth/Height`（CSS 像素）
-     * - `cameraz` 是沿相机 forward 的 view-space Z（不是欧氏距离）
-     */
-    const computeWorldOnRay = (clientX: number, clientY: number, distance: number): Vec3 | null => {
-        const cv = app.graphicsDevice.canvas as HTMLCanvasElement;
-        const rect = cv.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) return null;
-        const sx = clientX - rect.left;
-        const sy = clientY - rect.top;
-        runtime.screenU = Math.max(0, Math.min(1, sx / rect.width));
-        // Picker depth sampling follows GPU screen UV convention (origin at bottom-left).
-        runtime.screenV = Math.max(0, Math.min(1, 1 - sy / rect.height));
-        const camComp = (global.camera as unknown as { camera?: { screenToWorld?: (x: number, y: number, z: number, out: Vec3) => Vec3 } }).camera;
-        if (!camComp?.screenToWorld) return null;
-        camComp.screenToWorld(sx, sy, distance, _tmpWorld);
-        if (!Number.isFinite(_tmpWorld.x) || !Number.isFinite(_tmpWorld.y) || !Number.isFinite(_tmpWorld.z)) return null;
-        return _tmpWorld;
+    const refreshBeamEnd = () => {
+        const far = global.camera?.camera?.farClip ?? 1000;
+        runtime.beamEnd = Math.max(TORCH_BEAM_MIN_M, far * TORCH_BEAM_FAR_RATIO);
     };
 
     const updateScreenUv = (clientX: number | null, clientY: number | null): { x: number; y: number } | null => {
@@ -300,15 +258,10 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         copyMatrix(proj, runtime.cameraProjSnapshot);
         runtime.cameraSnapshotValid = true;
         runtime.pickDirty = true;
-        if (runtime.hasWorldPos) {
-            runtime.cameraPickPending = true;
-        }
+        runtime.hasHotspotDepth = false;
+        runtime.hotspotDepth = 0;
     };
 
-    /**
-     * 判断某 entity 及其祖先链是否属于辅助 helper（光源 gizmo / 拾取手柄 / 手电筒自身 visual 等），
-     * 是则在 mesh 射线求交中跳过，避免光源跳到 helper 小球上。
-     */
     const isTorchHelperEntity = (e: Entity): boolean => {
         let cur: Entity | null = e;
         while (cur) {
@@ -329,17 +282,6 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         return 2 * Math.max(h.x, h.y, h.z);
     };
 
-    const meshRangeBoostFromExtent = (extentM: number): number => {
-        if (!Number.isFinite(extentM) || extentM <= TORCH_MESH_RANGE_BOOST_MIN_EXTENT_M) return 0;
-        return Math.min(
-            TORCH_MESH_RANGE_BOOST_MAX_M,
-            (extentM - TORCH_MESH_RANGE_BOOST_MIN_EXTENT_M) * TORCH_MESH_RANGE_BOOST_FACTOR
-        );
-    };
-
-    /**
-     * 对缩小后的 world AABB 做 slab 求交，返回沿单位射线的深度 t（entry→exit 内插）。
-     */
     const rayShrunkAabbDistance = (
         origin: Vec3,
         dir: Vec3,
@@ -386,7 +328,6 @@ export function initTorchLight(global: Global): TorchControllerHandle {
     };
 
     const distanceFromCamera = (pos: Vec3, camPos: Vec3): number | null => {
-        if (!Number.isFinite(pos.x) || !Number.isFinite(pos.y) || !Number.isFinite(pos.z)) return null;
         const dx = pos.x - camPos.x;
         const dy = pos.y - camPos.y;
         const dz = pos.z - camPos.z;
@@ -394,76 +335,7 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         return Number.isFinite(dist) && dist > 0 ? dist : null;
     };
 
-    const resolveGsplatPickCandidate = (surface: TorchPickSurface | null | undefined, camPos: Vec3): TorchResolvedPick | null => {
-        if (!surface) return null;
-        const preferred = surface.preferredPosition ?? surface.position ?? surface.centerPosition ?? surface.nearestPosition;
-        if (!preferred) return null;
-
-        const distance = distanceFromCamera(preferred, camPos);
-        if (distance === null) return null;
-
-        const source = surface.source ?? (preferred === surface.nearestPosition && surface.centerPosition !== preferred ? 'nearest' : 'center');
-        const support = Math.max(0, surface.nearestSupport ?? 0);
-        const samples = Math.max(0, surface.sampleCount ?? 0);
-        const supportRatio = samples > 0 ? support / samples : 0;
-        const centerAlpha = Math.max(0, surface.centerAlpha ?? (surface.centerPosition ? 1 : 0));
-        let confidence = Math.min(1, 0.75 + centerAlpha * 0.25);
-        if (source === 'nearest') {
-            confidence = Math.min(
-                0.95,
-                0.55 + supportRatio * 0.5 + Math.min(support, TORCH_NEAREST_CONFIDENT_SUPPORT) * 0.05
-            );
-        }
-
-        if (source === 'nearest' && support < 2 && samples > 2) {
-            return null;
-        }
-
-        return {
-            distance,
-            fromMesh: false,
-            rangeBoost: 0,
-            confidence
-        };
-    };
-
-    /**
-     * mesh 与 gsplat 同时命中时：
-     * - gsplat 使用 picker 的 preferredPosition，暗部可由有支持点的 nearest 接管
-     * - 深度接近时沿用上一帧来源，避免 AABB / gsplat 在叠层处抢答闪烁
-     * - 深度差明显时取更近一侧，低置信 gsplat 不抢可靠 mesh
-     */
-    const resolveTorchPickCandidate = (
-        meshDist: number | null,
-        meshRangeBoost: number,
-        gsplat: TorchResolvedPick | null
-    ): TorchResolvedPick | null => {
-        if (meshDist === null && gsplat === null) return null;
-        if (meshDist === null) return gsplat;
-        const mesh: TorchResolvedPick = {
-            distance: meshDist,
-            fromMesh: true,
-            rangeBoost: meshRangeBoost,
-            confidence: 0.9
-        };
-        if (!gsplat) return mesh;
-
-        const gap = Math.abs(mesh.distance - gsplat.distance);
-        if (gap < TORCH_MESH_GSPLAT_HYSTERESIS_M && runtime.hasWorldPos) {
-            return runtime.lastPickFromMesh ? mesh : gsplat;
-        }
-        if (gsplat.confidence < 0.45 && mesh.distance <= gsplat.distance + TORCH_MESH_GSPLAT_HYSTERESIS_M) {
-            return mesh;
-        }
-        return gsplat.distance <= mesh.distance ? gsplat : mesh;
-    };
-
-    /**
-     * 在当前光标视线方向上对场景所有 mesh 的 world-space AABB 求交。
-     * - 使用缩小盒 + entry→exit 内插深度
-     * - 叠层在「最近」基础上略向远推，而非直接取最远
-     */
-    const computeMeshPickResult = (clientX: number, clientY: number): { distance: number; rangeBoost: number } | null => {
+    const computeMeshPickResult = (clientX: number, clientY: number): { distance: number; extentM: number } | null => {
         const cv = app.graphicsDevice.canvas as HTMLCanvasElement;
         const rect = cv.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) return null;
@@ -473,9 +345,7 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         if (!camComp?.screenToWorld) return null;
 
         const farPoint = camComp.screenToWorld(sx, sy, camComp.farClip ?? 1000, _tmpWorld);
-        if (!farPoint || !Number.isFinite(farPoint.x) || !Number.isFinite(farPoint.y) || !Number.isFinite(farPoint.z)) {
-            return null;
-        }
+        if (!farPoint || !Number.isFinite(farPoint.x)) return null;
 
         const origin = global.camera.getPosition();
         _tmpRayDir.set(farPoint.x - origin.x, farPoint.y - origin.y, farPoint.z - origin.z);
@@ -522,19 +392,9 @@ export function initTorchLight(global: Global): TorchControllerHandle {
             if (hits[k].dist - nearest > TORCH_MESH_OVERLAP_DEPTH_M) break;
             maxExtent = Math.max(maxExtent, hits[k].extent);
         }
-        return {
-            distance: nearest,
-            rangeBoost: meshRangeBoostFromExtent(maxExtent)
-        };
+        return { distance: nearest, extentM: maxExtent };
     };
 
-    /**
-     * 只对“深度”做跳变锁，不平滑也不延迟光标方向：
-     * - 首次 / 小变化：立即接受
-     * - 大跳变：第一次立即接受，并打开短锁
-     * - 锁定期间再次出现大跳变：忽略，避免深度边界处在近/远表面之间来回闪
-     */
-    /** 将世界落点沿视线略向相机回拉，使 PointLight 位于表面前方而非 AABB/壳体内 */
     const applySurfaceBiasTowardCamera = (worldPos: Vec3, fromMesh: boolean, rayDistance: number) => {
         const origin = global.camera.getPosition();
         _tmpRayDir.set(worldPos.x - origin.x, worldPos.y - origin.y, worldPos.z - origin.z);
@@ -551,89 +411,63 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         );
     };
 
-    const applyPickedDistance = (distance: number, now: number, fromMesh: boolean): boolean => {
-        if (!Number.isFinite(distance) || distance <= 0) return false;
-        if (!runtime.hasWorldPos || runtime.lastDistance <= 0) {
-            runtime.lastDistance = distance;
-            runtime.hasWorldPos = true;
-            runtime.lastPickFromMesh = fromMesh;
-            runtime.cameraPickPending = false;
-            runtime.pendingFarDistance = 0;
-            runtime.pendingFarUntil = Number.NEGATIVE_INFINITY;
-            return true;
+    const cancelInflightGsplatPick = () => {
+        runtime.pickGeneration++;
+        runtime.pickInFlight = false;
+    };
+
+    const commitHotspotTarget = (
+        distance: number,
+        fromMesh: boolean,
+        extentM: number,
+        now: number
+    ) => {
+        if (!Number.isFinite(distance) || distance <= 0) return;
+
+        // mesh 命中始终采纳；仅防止 gsplat 在叠层深度处抢答 mesh
+        if (!fromMesh && runtime.hotspotFromMesh && runtime.hasHotspotDepth &&
+            Math.abs(distance - runtime.hotspotDepth) < TORCH_MESH_GSPLAT_HYSTERESIS_M) {
+            return;
         }
 
-        const prev = runtime.lastDistance;
-        const delta = Math.abs(distance - prev);
-        const sourceFlip = fromMesh !== runtime.lastPickFromMesh;
-        if (sourceFlip && delta < TORCH_MESH_GSPLAT_HYSTERESIS_M) {
-            return false;
-        }
-        const minDist = Math.max(1e-6, Math.min(distance, prev));
-        const isLargeJump = delta >= TORCH_DEPTH_JUMP_MIN_DELTA &&
-            (Math.max(distance, prev) / minDist) >= TORCH_DEPTH_JUMP_RATIO;
+        const targetBoost = fromMesh ? meshSoftRangeBoostFromExtent(extentM) : 0;
+        const targetIntensity = meshIntensityScaleFromBoost(fromMesh, targetBoost);
 
-        // 单帧远深度最容易造成“闪到背景一下”。远跳先挂起，下一次仍然命中相近远深度再接受；
-        // 跳近不等待，避免光标移到前景物体时出现明显深度延迟。
-        if (isLargeJump && distance > prev) {
-            if (runtime.pendingFarDistance <= 0) {
-                runtime.pendingFarDistance = distance;
-                runtime.pendingFarUntil = now + TORCH_FAR_DEPTH_CONFIRM_MS;
-                return false;
-            }
+        const prevSmooth = runtime.lastSmoothTime > 0 ? runtime.lastSmoothTime : now;
+        runtime.hotspotDepth = lerpToward(runtime.hotspotDepth, distance, now, prevSmooth, TORCH_HOTSPOT_SMOOTH_MS);
+        runtime.meshRangeBoost = lerpToward(runtime.meshRangeBoost, targetBoost, now, prevSmooth, TORCH_HOTSPOT_SMOOTH_MS);
+        runtime.meshIntensityScale = lerpToward(runtime.meshIntensityScale, targetIntensity, now, prevSmooth, TORCH_HOTSPOT_SMOOTH_MS);
+        runtime.lastSmoothTime = now;
+        runtime.hasHotspotDepth = true;
+        runtime.hotspotFromMesh = fromMesh;
+        runtime.meshExtentM = fromMesh ? extentM : 0;
+    };
 
-            const farDelta = Math.abs(distance - runtime.pendingFarDistance);
-            const farTolerance = Math.max(
-                TORCH_DEPTH_JUMP_MIN_DELTA,
-                runtime.pendingFarDistance * TORCH_FAR_DEPTH_CONFIRM_TOLERANCE
-            );
-            if (farDelta > farTolerance && now < runtime.pendingFarUntil) {
-                runtime.pendingFarDistance = distance;
-                return false;
-            }
-            runtime.pendingFarDistance = 0;
-            runtime.pendingFarUntil = Number.NEGATIVE_INFINITY;
-        } else {
-            runtime.pendingFarDistance = 0;
-            runtime.pendingFarUntil = Number.NEGATIVE_INFINITY;
-        }
-
-        if (isLargeJump && now < runtime.depthJumpLockUntil) {
-            return false;
-        }
-
-        runtime.lastDistance = distance;
-        runtime.hasWorldPos = true;
-        runtime.lastPickFromMesh = fromMesh;
-        runtime.cameraPickPending = false;
-        if (isLargeJump) {
-            runtime.depthJumpLockUntil = now + TORCH_DEPTH_JUMP_LOCK_MS;
-        }
-        return true;
+    const clearHotspot = () => {
+        runtime.hasHotspotDepth = false;
+        runtime.hotspotDepth = 0;
+        runtime.hotspotFromMesh = false;
+        runtime.meshExtentM = 0;
+        runtime.meshRangeBoost = 0;
+        runtime.meshIntensityScale = 1;
     };
 
     const resetPickRuntime = () => {
-        runtime.hasWorldPos = false;
-        runtime.lastDistance = 0;
-        runtime.lastPickFromMesh = false;
-        runtime.meshRangeBoost = 0;
-        runtime.depthJumpLockUntil = Number.NEGATIVE_INFINITY;
-        runtime.pendingFarDistance = 0;
-        runtime.pendingFarUntil = Number.NEGATIVE_INFINITY;
+        clearHotspot();
         runtime.pickInFlight = false;
         runtime.pickGeneration++;
         runtime.pickDirty = true;
         runtime.lastPickTime = Number.NEGATIVE_INFINITY;
-        runtime.cameraPickPending = false;
+        runtime.lastSmoothTime = 0;
     };
 
-    const resolvePickClientXY = (allowStale = runtime.hasWorldPos): { clientX: number; clientY: number } | null => {
+    const resolvePickClientXY = (): { clientX: number; clientY: number } | null => {
         const cv = app.graphicsDevice.canvas as HTMLCanvasElement;
         const rect = cv.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) return null;
         if (runtime.lastClientX !== null && runtime.lastClientY !== null) {
             const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-            if (allowStale || now - runtime.lastPointerTime <= TORCH_POINTER_STALE_MS) {
+            if (now - runtime.lastPointerTime <= TORCH_POINTER_STALE_MS) {
                 return { clientX: runtime.lastClientX, clientY: runtime.lastClientY };
             }
         }
@@ -643,20 +477,25 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         };
     };
 
-    const commitResolvedPick = (
-        resolved: { distance: number; fromMesh: boolean; rangeBoost: number },
-        at: number
-    ) => {
-        runtime.meshRangeBoost = resolved.rangeBoost;
-        const accepted = applyPickedDistance(resolved.distance, at, resolved.fromMesh);
-        if (!accepted) {
-            runtime.pickDirty = true;
-        }
-    };
-
     let forceImmediatePick = false;
 
-    const scheduleWorldPick = () => {
+    /** 每帧同步 mesh AABB；命中则取消在途 gsplat pick，避免异步结果清空 mesh 热点。 */
+    const applySyncMeshHotspot = (clientX: number, clientY: number, now: number): boolean => {
+        const meshPick = computeMeshPickResult(clientX, clientY);
+        if (meshPick === null) return false;
+        cancelInflightGsplatPick();
+        commitHotspotTarget(meshPick.distance, true, meshPick.extentM, now);
+        runtime.pickDirty = false;
+        runtime.lastPickTime = now;
+        return true;
+    };
+
+    const tryClearHotspotIfNoMesh = (clientX: number, clientY: number) => {
+        if (computeMeshPickResult(clientX, clientY) !== null) return;
+        clearHotspot();
+    };
+
+    const scheduleGsplatDepthSample = () => {
         if (!global.state.readyToRender) return;
         if (!runtime.pickDirty || runtime.pickInFlight) return;
 
@@ -664,28 +503,14 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         if (!forceImmediatePick && now - runtime.lastPickTime < TORCH_PICK_THROTTLE_MS) return;
         forceImmediatePick = false;
 
-        const picker = global.picker;
-
         const pickClient = resolvePickClientXY();
         if (!pickClient) return;
         const point = updateScreenUv(pickClient.clientX, pickClient.clientY);
         if (!point) return;
 
-        // 同步 mesh AABB；与 gsplat pickSurface 在同一轮异步回调里合并提交，避免刷新后时序不同导致深度不一致
-        const meshPick = computeMeshPickResult(pickClient.clientX, pickClient.clientY);
-        const meshDistSnapshot = meshPick?.distance ?? null;
-        const meshBoostSnapshot = meshPick?.rangeBoost ?? 0;
-
-        if (!picker?.pickSurface) {
-            if (meshDistSnapshot !== null) {
-                commitResolvedPick({
-                    distance: meshDistSnapshot,
-                    fromMesh: true,
-                    rangeBoost: meshBoostSnapshot
-                }, now);
-            } else {
-                runtime.meshRangeBoost = 0;
-            }
+        const picker = global.picker;
+        if (!picker?.pick) {
+            tryClearHotspotIfNoMesh(pickClient.clientX, pickClient.clientY);
             runtime.pickDirty = false;
             runtime.lastPickTime = now;
             return;
@@ -695,44 +520,29 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         runtime.pickDirty = false;
         runtime.pickInFlight = true;
         runtime.lastPickTime = now;
-
         const camPosSnapshot = new Vec3().copy(global.camera.getPosition());
+        const clientX = pickClient.clientX;
+        const clientY = pickClient.clientY;
 
-        picker.pickSurface(point.x, point.y).then((surface) => {
+        picker.pick(point.x, point.y).then((worldPoint) => {
             if (runtime.destroyed || generation !== runtime.pickGeneration) return;
             const callbackNow = typeof performance !== 'undefined' ? performance.now() : Date.now();
-            const gsplatCandidate = resolveGsplatPickCandidate(surface as TorchPickSurface | null, camPosSnapshot);
-            let committed = false;
-            if (gsplatCandidate) {
-                const resolved = resolveTorchPickCandidate(meshDistSnapshot, meshBoostSnapshot, gsplatCandidate);
-                if (resolved) {
-                    commitResolvedPick(resolved, callbackNow);
-                    committed = true;
+            if (applySyncMeshHotspot(clientX, clientY, callbackNow)) {
+                return;
+            }
+            if (worldPoint) {
+                const dist = distanceFromCamera(worldPoint, camPosSnapshot);
+                if (dist !== null) {
+                    commitHotspotTarget(dist, false, 0, callbackNow);
+                    return;
                 }
-            } else if (meshDistSnapshot !== null) {
-                commitResolvedPick({
-                    distance: meshDistSnapshot,
-                    fromMesh: true,
-                    rangeBoost: meshBoostSnapshot
-                }, callbackNow);
-                committed = true;
             }
-            if (!committed) {
-                runtime.meshRangeBoost = 0;
-                runtime.pickDirty = true;
-            }
+            tryClearHotspotIfNoMesh(clientX, clientY);
+            runtime.pickDirty = true;
         }).catch(() => {
             if (runtime.destroyed || generation !== runtime.pickGeneration) return;
-            if (meshDistSnapshot !== null) {
-                commitResolvedPick({
-                    distance: meshDistSnapshot,
-                    fromMesh: true,
-                    rangeBoost: meshBoostSnapshot
-                }, typeof performance !== 'undefined' ? performance.now() : Date.now());
-            } else {
-                runtime.meshRangeBoost = 0;
-                runtime.pickDirty = true;
-            }
+            tryClearHotspotIfNoMesh(clientX, clientY);
+            runtime.pickDirty = true;
         }).finally(() => {
             if (runtime.destroyed) return;
             if (generation === runtime.pickGeneration) {
@@ -749,13 +559,38 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         runtime.pickDirty = true;
     };
 
+    const worldPosAlongRay = (rayDistance: number, fromMesh: boolean): boolean => {
+        const pickClient = resolvePickClientXY();
+        if (!pickClient) return false;
+        const cv = app.graphicsDevice.canvas as HTMLCanvasElement;
+        const rect = cv.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        const sx = pickClient.clientX - rect.left;
+        const sy = pickClient.clientY - rect.top;
+        const camComp = (global.camera as unknown as { camera?: { screenToWorld?: (x: number, y: number, z: number, out: Vec3) => Vec3; farClip: number } }).camera;
+        if (!camComp?.screenToWorld) return false;
+
+        const farPoint = camComp.screenToWorld(sx, sy, camComp.farClip ?? 1000, _tmpWorld);
+        const origin = global.camera.getPosition();
+        _tmpRayDir.set(farPoint.x - origin.x, farPoint.y - origin.y, farPoint.z - origin.z);
+        const rayLen = _tmpRayDir.length();
+        if (rayLen < 1e-6) return false;
+        const k = rayDistance / rayLen;
+        runtime.worldPos.set(
+            origin.x + _tmpRayDir.x * k,
+            origin.y + _tmpRayDir.y * k,
+            origin.z + _tmpRayDir.z * k
+        );
+        applySurfaceBiasTowardCamera(runtime.worldPos, fromMesh, rayDistance);
+        return true;
+    };
+
     const onPointerMove = (event: PointerEvent) => {
         runtime.lastClientX = event.clientX;
         runtime.lastClientY = event.clientY;
         runtime.lastPointerTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
         updateScreenUv(event.clientX, event.clientY);
         runtime.pickDirty = true;
-        runtime.cameraPickPending = false;
     };
 
     const clearPointerTarget = () => {
@@ -795,12 +630,6 @@ export function initTorchLight(global: Global): TorchControllerHandle {
     window.addEventListener('pointermove', onWindowPointerMove, { passive: true });
     window.addEventListener('pointerdown', onWindowPointerDown, { passive: true, capture: true });
 
-    /**
-     * 每帧：
-     *  1. 计算 enabled，切换 cursor 与 light.enabled
-     *  2. light.range 直接使用 cfg.range
-     *  3. 优先使用拾取得到的世界落点；未命中则回退到相机前方 TORCH_FALLBACK_DISTANCE 处
-     */
     let lastEnabledState = false;
     const onUpdate = () => {
         if (!entity?.light) return;
@@ -820,54 +649,36 @@ export function initTorchLight(global: Global): TorchControllerHandle {
             return;
         }
 
+        refreshBeamEnd();
         markPickDirtyIfCameraChanged();
         const pickNow = typeof performance !== 'undefined' ? performance.now() : Date.now();
         recoverStuckPickInFlight(pickNow);
-        scheduleWorldPick();
+
+        const pickClient = resolvePickClientXY();
+        const meshHeld = pickClient
+            ? applySyncMeshHotspot(pickClient.clientX, pickClient.clientY, pickNow)
+            : false;
+        if (!meshHeld) {
+            scheduleGsplatDepthSample();
+        }
 
         const cfg = ensureTorchLight(settings) as TorchLightSettings;
-        const userRange = Math.max(0, cfg.range ?? 12);
-        const rangeBoost = runtime.lastPickFromMesh ? runtime.meshRangeBoost : 0;
-        (entity.light as unknown as { range: number }).range = userRange + rangeBoost;
+        const spotRadius = Math.max(0, cfg.range ?? 12);
+        const baseIntensity = Math.max(0, Number.isFinite(cfg.intensity) ? cfg.intensity : 0);
 
-        let pos: Vec3 | null = null;
-        let preserveExistingWorldPos = false;
-        const pickClient = resolvePickClientXY();
-        if (runtime.hasWorldPos && runtime.cameraPickPending) {
-            pos = runtime.worldPos;
-            preserveExistingWorldPos = true;
-        } else if (runtime.hasWorldPos &&
-            runtime.lastDistance > 0 &&
-            pickClient) {
-            const cv = app.graphicsDevice.canvas as HTMLCanvasElement;
-            const rect = cv.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
-                const sx = pickClient.clientX - rect.left;
-                const sy = pickClient.clientY - rect.top;
-                const camComp = (global.camera as unknown as { camera?: { screenToWorld?: (x: number, y: number, z: number, out: Vec3) => Vec3; farClip: number } }).camera;
-                if (camComp?.screenToWorld) {
-                    const farPoint = camComp.screenToWorld(sx, sy, camComp.farClip ?? 1000, _tmpWorld);
-                    const origin = global.camera.getPosition();
-                    _tmpRayDir.set(farPoint.x - origin.x, farPoint.y - origin.y, farPoint.z - origin.z);
-                    const rayLen = _tmpRayDir.length();
-                    if (rayLen > 1e-6) {
-                        const k = runtime.lastDistance / rayLen;
-                        runtime.worldPos.set(
-                            origin.x + _tmpRayDir.x * k,
-                            origin.y + _tmpRayDir.y * k,
-                            origin.z + _tmpRayDir.z * k
-                        );
-                        pos = runtime.worldPos;
-                    }
-                }
-            }
-        }
-        if (!pos && pickClient) {
-            pos = computeWorldOnRay(pickClient.clientX, pickClient.clientY, TORCH_FALLBACK_DISTANCE);
+        if (runtime.hotspotFromMesh) {
+            (entity.light as unknown as { range: number }).range = spotRadius + runtime.meshRangeBoost;
+            entity.light.intensity = baseIntensity * runtime.meshIntensityScale;
+        } else {
+            (entity.light as unknown as { range: number }).range = spotRadius;
+            entity.light.intensity = baseIntensity * TORCH_GSPLAT_POINTLIGHT_INTENSITY_SCALE;
         }
 
-        // 兜底：画布尺寸异常
-        if (!pos) {
+        const anchorDepth = runtime.hasHotspotDepth ?
+            runtime.hotspotDepth :
+            runtime.beamEnd * TORCH_HOTSPOT_FALLBACK_BEAM_RATIO;
+
+        if (!worldPosAlongRay(anchorDepth, runtime.hotspotFromMesh)) {
             const cam = global.camera;
             const camPos = _tmpCamPos.copy(cam.getPosition());
             const fwd = (cam as unknown as { forward: Vec3 }).forward;
@@ -876,37 +687,29 @@ export function initTorchLight(global: Global): TorchControllerHandle {
             if (fl > 1e-6) {
                 _tmpForward.mulScalar(1 / fl);
                 _tmpFallbackPos.set(
-                    camPos.x + _tmpForward.x * TORCH_FALLBACK_DISTANCE,
-                    camPos.y + _tmpForward.y * TORCH_FALLBACK_DISTANCE,
-                    camPos.z + _tmpForward.z * TORCH_FALLBACK_DISTANCE
+                    camPos.x + _tmpForward.x * anchorDepth,
+                    camPos.y + _tmpForward.y * anchorDepth,
+                    camPos.z + _tmpForward.z * anchorDepth
                 );
-                pos = _tmpFallbackPos;
+                runtime.worldPos.copy(_tmpFallbackPos);
                 runtime.screenU = 0.5;
                 runtime.screenV = 0.5;
+            } else {
+                entity.light.enabled = false;
+                return;
             }
         }
-        if (!pos) {
-            entity.light.enabled = false;
-            return;
-        }
 
-        if (!preserveExistingWorldPos) {
-            runtime.worldPos.copy(pos);
-            const rayDist = runtime.lastDistance > 0 ? runtime.lastDistance : runtime.worldPos.distance(global.camera.getPosition());
-            applySurfaceBiasTowardCamera(runtime.worldPos, runtime.lastPickFromMesh, rayDist);
-        }
         entity.setPosition(runtime.worldPos.x, runtime.worldPos.y, runtime.worldPos.z);
         entity.light.enabled = true;
     };
     app.on('update', onUpdate);
 
-    /** 参数变更（settings.lighting.torch 被改时）即时刷新到实体 */
     const onTorchParamsChanged = () => {
         applyParamsToEntity();
     };
     events.on('torchParams:changed', onTorchParamsChanged);
 
-    /** 开关切换时立即拾取，并在同帧让 NightMode 能读到实体位置 */
     const onTorchActiveChanged = () => {
         if (!readViewTorchActive(global)) return;
         forceImmediatePick = true;
@@ -916,7 +719,6 @@ export function initTorchLight(global: Global): TorchControllerHandle {
     };
     events.on('torchActive:changed', onTorchActiveChanged);
 
-    /** 编辑模式下切换左侧模块（含取消选中 → null）时关闭手电筒，避免与模块内拾取/笔刷冲突 */
     let lastEditLeftModule: EditLeftModule | null = global.state.editLeftModule ?? null;
     const onEditLeftModuleChanged = (next: EditLeftModule | null) => {
         const normalized: EditLeftModule | null = next ?? null;
@@ -974,19 +776,16 @@ export function initTorchLight(global: Global): TorchControllerHandle {
     return handle;
 }
 
-/** 读取（懒）当前手电筒实体；未初始化时返回 null */
 export function getTorchLightEntity(global: Global): Entity | null {
     const handle = (global as unknown as { __torchLight?: TorchControllerHandle }).__torchLight;
     return handle?.entity ?? null;
 }
 
-/** 读取手电筒是否正在 enable */
 export function isTorchEntityEnabled(global: Global): boolean {
     const e = getTorchLightEntity(global);
     return !!(e && e.light && e.light.enabled);
 }
 
-/** 读取手电筒当前鼠标屏幕 UV（v 为 bottom-left 原点）。 */
 export function getTorchLightScreenUv(global: Global): { u: number; v: number } | null {
     const handle = (global as unknown as { __torchLight?: TorchControllerHandle }).__torchLight;
     const runtime = handle ? (handle as unknown as { __runtime?: TorchRuntimeState }).__runtime : undefined;
@@ -994,7 +793,32 @@ export function getTorchLightScreenUv(global: Global): { u: number; v: number } 
     return { u: runtime.screenU, v: runtime.screenV };
 }
 
-/** 读取手电筒当前世界坐标（onUpdate 每帧维护，含拾取前相机前方兜底）。 */
+export function getTorchLightRay(global: Global): { origin: Vec3; direction: Vec3 } | null {
+    if (!readViewTorchActive(global) && !isTorchEntityEnabled(global)) return null;
+    const handle = (global as unknown as { __torchLight?: TorchControllerHandle }).__torchLight;
+    const runtime = handle ? (handle as unknown as { __runtime?: TorchRuntimeState }).__runtime : undefined;
+    const camEntity = global.camera as Entity | undefined;
+    const camComp = (camEntity as unknown as { camera?: { screenToWorld?: (x: number, y: number, z: number, out: Vec3) => Vec3; farClip?: number } })?.camera;
+    if (!runtime || !camEntity || !camComp?.screenToWorld) return null;
+
+    const cv = global.app.graphicsDevice.canvas as HTMLCanvasElement;
+    const rect = cv.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+
+    const u = runtime.screenU === null ? 0.5 : runtime.screenU;
+    const v = runtime.screenV === null ? 0.5 : runtime.screenV;
+    const sx = Math.max(0, Math.min(1, u)) * rect.width;
+    const sy = (1 - Math.max(0, Math.min(1, v))) * rect.height;
+    const origin = camEntity.getPosition().clone();
+    const farPoint = camComp.screenToWorld(sx, sy, camComp.farClip ?? 1000, new Vec3());
+    if (!farPoint || !Number.isFinite(farPoint.x)) return null;
+    const direction = new Vec3(farPoint.x - origin.x, farPoint.y - origin.y, farPoint.z - origin.z);
+    const len = direction.length();
+    if (len < 1e-6) return null;
+    direction.mulScalar(1 / len);
+    return { origin, direction };
+}
+
 export function getTorchLightWorldPosition(global: Global): Vec3 | null {
     if (!readViewTorchActive(global) && !isTorchEntityEnabled(global)) return null;
     const handle = (global as unknown as { __torchLight?: TorchControllerHandle }).__torchLight;
@@ -1003,12 +827,31 @@ export function getTorchLightWorldPosition(global: Global): Vec3 | null {
     return runtime.worldPos;
 }
 
-/** 读取手电筒当前有效照射半径（settings.range + 大 mesh 动态加成）。 */
+/** @deprecated Gsplat 使用 beamEnd；此函数返回聚光半径 spotRadius（cfg.range）。 */
 export function getTorchLightEffectiveRange(global: Global): number {
     const cfg = ensureTorchLight(global.settings as ExperienceSettings) as TorchLightSettings;
-    const base = Math.max(0, cfg.range ?? 12);
+    return Math.max(0, cfg.range ?? 12);
+}
+
+export function getTorchBeamParams(global: Global): TorchBeamParams | null {
+    if (!readViewTorchActive(global) && !isTorchEntityEnabled(global)) return null;
     const handle = (global as unknown as { __torchLight?: TorchControllerHandle }).__torchLight;
     const runtime = handle ? (handle as unknown as { __runtime?: TorchRuntimeState }).__runtime : undefined;
-    const boost = runtime?.lastPickFromMesh ? runtime.meshRangeBoost : 0;
-    return base + boost;
+    if (!runtime) return null;
+
+    const cfg = ensureTorchLight(global.settings as ExperienceSettings) as TorchLightSettings;
+    const spotRadius = Math.max(0, cfg.range ?? 12);
+    const far = global.camera?.camera?.farClip ?? 1000;
+    const beamEnd = Math.max(TORCH_BEAM_MIN_M, far * TORCH_BEAM_FAR_RATIO);
+
+    return {
+        beamEnd: runtime.beamEnd > 0 ? runtime.beamEnd : beamEnd,
+        hotspotDepth: runtime.hasHotspotDepth ? runtime.hotspotDepth : 0,
+        hasHotspot: runtime.hasHotspotDepth,
+        hotspotFromMesh: runtime.hotspotFromMesh,
+        spotRadius,
+        fillWeight: TORCH_FILL_WEIGHT,
+        hotspotWeight: TORCH_HOTSPOT_WEIGHT,
+        meshHotspotBlend: runtime.hotspotFromMesh ? TORCH_MESH_HOTSPOT_SHADER_BLEND : 1
+    };
 }

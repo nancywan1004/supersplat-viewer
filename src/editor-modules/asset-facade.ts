@@ -117,6 +117,11 @@ class AssetFacade implements ModuleFacade {
         return null;
     }
 
+    private clearMorphAssetAdd(ctx: ModuleContext): void {
+        ctx.state.morphAssetAddActive = false;
+        setPlacementCursorActive(ctx.global, false);
+    }
+
     onEnter(ctx: ModuleContext): void {
         const { state, events } = ctx;
         // 进入 asset 模块默认不选中任何资产（保持 null）
@@ -140,6 +145,7 @@ class AssetFacade implements ModuleFacade {
         }
 
         setPlacementCursorActive(ctx.global, false);
+        this.clearMorphAssetAdd(ctx);
         if (state.selectedSceneEntityId) {
             state.selectedSceneEntityId = null;
             events.fire('sceneAsset:selected');
@@ -176,6 +182,18 @@ class AssetFacade implements ModuleFacade {
             void this.handleAssetPlace(ctx, command);
             break;
         }
+        case 'MORPH_ASSET_ADD_START':
+            this.placeRequestVersion++;
+            if (this.currentDownloadAbort) {
+                this.currentDownloadAbort();
+                this.currentDownloadAbort = null;
+            }
+            ctx.state.morphAssetAddActive = true;
+            setPlacementCursorActive(ctx.global, true, { loading: false });
+            break;
+        case 'MORPH_ASSET_ADD_FINISH':
+            this.clearMorphAssetAdd(ctx);
+            break;
         case 'ASSET_SHOW_HIDE_SET': {
             const pl = command.payload as { id?: string; value?: boolean } | undefined;
             if (!Array.isArray(state.scenePlacedEntities) || typeof pl?.id !== 'string' || typeof pl?.value !== 'boolean') {

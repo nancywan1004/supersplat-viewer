@@ -108,17 +108,17 @@ type SpotLightConfig = {
 
 /**
  * 全局「手电筒」配置（单例，**不进入** `lights[]`）：
- * - 运行时为跟随光标的 PointLight，位置由 `Picker.pickSurface` 拾取得到的世界落点决定
- * - 拾取未命中时回退到相机前方常量距离（见 controller 内 `TORCH_FALLBACK_DISTANCE`）
- * - 仅参数持久化，开关与运行态在 `ViewSettings.torch`（不入库）
- * - 全局最多一份，因此挂在 `LightingSettings.torch` 而非数组项
+ * - gsplat：`night-mode` 相机锥光 Fill（beamEnd≈farClip×0.85）+ Hotspot（光标深度聚光）
+ * - mesh：PlayCanvas PointLight 贴在热点，强度/range 与 gsplat 聚光尺度对齐
+ * - `range` 为聚光/光斑半径（世界单位）；照射距离由相机 farClip 推导，不入库
+ * - 开关在 `ViewSettings.torch`（不入库）
  */
 type TorchLightSettings = {
     /** sRGB [0,1] 三分量 */
     color: [number, number, number];
     /** 光强（与点光语义一致） */
     intensity: number;
-    /** PointLight 有效作用半径（世界单位，clamp 0–20）；光源贴在拾取表面 */
+    /** 聚光/光斑半径（世界单位，clamp 0–20）；非沿射线最远照亮距离 */
     range: number;
 };
 

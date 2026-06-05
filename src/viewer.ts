@@ -22,6 +22,10 @@ import {
     TONEMAP_ACES2,
     TONEMAP_NEUTRAL,
     Vec3,
+    GSPLAT_DEBUG_LOD,
+    GSPLAT_DEBUG_NONE,
+    GSPLAT_RENDERER_RASTER_CPU_SORT,
+    GSPLAT_RENDERER_RASTER_GPU_SORT,
     GSplatComponent,
     platform
 } from 'playcanvas';
@@ -53,8 +57,8 @@ import {
 } from './vfx/effects-runtime/persistent/persistent-gsplat-lifecycle';
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
 import { getSkyboxRadius } from './loaders/skybox-loader';
-import { readSkyboxUrlFromSettings } from './settings-serialize/settings-serialize-helper';
-import { isLodMetaFile } from './loaders/lod-loader';
+import { readSkyboxCurrentUrlFromSettings } from './settings-serialize/settings-serialize-helper';
+import { isCustomLodEnabled } from './loaders/lod-loader';
 import { BloomController } from './vfx/bloom';
 import { NightMode } from './vfx/lighting/night-mode';
 import {
@@ -168,6 +172,18 @@ const tonemapTable: Record<string, number> = {
     aces: TONEMAP_ACES,
     aces2: TONEMAP_ACES2,
     neutral: TONEMAP_NEUTRAL
+};
+
+/** main：raster 路径下按实际 deviceType 选择 gsplat 排序器（compute 路径不走此表） */
+const rendererTable: Record<'webgl' | 'webgpu', number> = {
+    webgl: GSPLAT_RENDERER_RASTER_CPU_SORT,
+    webgpu: GSPLAT_RENDERER_RASTER_GPU_SORT
+};
+
+type GSplatOctreeResourceLike = {
+    octree?: {
+        lodLevels: number;
+    } | null;
 };
 
 /** 仅处理非 Bloom 的后处理（Bloom 由 BloomController 统一配置） */
@@ -571,7 +587,7 @@ class Viewer {
             let far = Math.max(dist + boundRadius + clipPadding, 1e-2);
             
             // 获取天空盒的实际半径，如果存在天空盒，确保 farClip 足够大以包含它
-            const skyboxRadius = getSkyboxRadius(app, readSkyboxUrlFromSettings(settings));
+            const skyboxRadius = getSkyboxRadius(app, readSkyboxCurrentUrlFromSettings(settings));
             if (skyboxRadius > 0) {
                 // 使用固定的天空盒半径，计算相机到天空盒边缘的最大距离
                 // 假设天空盒中心在原点 (0, 0, 0)，计算相机到原点的距离 + 半径
@@ -1060,33 +1076,33 @@ z: ${cameraInfo.target.z.toFixed(6)}
             } else {
 
                 const { gsplat } = app.scene;
+                const { renderer: actualRenderer } = global;
 
-                // Check if custom LOD (lodLoader) is enabled
-                // If not, use default LOD settings (ranges below)
-                const isCustomLod = config.contentUrl ? isLodMetaFile(config.contentUrl) : false;
+                const isCustomLod = isCustomLodEnabled(settings, config.contentUrl);
 
-                // Default quality ranges (used when lodLoader is not enabled)
-                const ranges = {
-                    mobile: {
-                        low: 1,
-                        high: 2
-                    },
-                    desktop: {
-                        low: 2,
-                        high: 4
-                    }
+                const budgets = {
+                    mobile: { low: 1, high: 2 },
+                    desktop: { low: 2, high: 4 }
                 };
-                const quality = platform.mobile ? ranges.mobile : ranges.desktop;
-                const configAny = config as any;
-                const getBudget = () => {
-                    const budgetOverride = Number(configAny.budget);
-                    if (Number.isFinite(budgetOverride) && budgetOverride > 0) {
-                        return budgetOverride;
-                    }
-                    return state.performanceMode ? quality.low : quality.high;
+                const quality = platform.mobile ? budgets.mobile : budgets.desktop;
+
+                const applyPerfSettings = () => {
+                    const budget = () => {
+                        if (config.budget !== undefined && Number.isFinite(config.budget) && config.budget > 0) {
+                            return config.budget;
+                        }
+                        return state.performanceMode ? quality.low : quality.high;
+                    };
+
+                    gsplat.splatBudget = budget() * 1000000;
+                    gsplat.lodRangeMin = 0;
+                    gsplat.lodRangeMax = 1000;
+                    gsplat.colorUpdateAngle = state.performanceMode ? 4 : 2;
+                    gsplat.minContribution = 1;
+                    gsplat.alphaClip = 1 / 255;
+                    gsplat.antiAlias = config.aa;
                 };
 
-                // If using custom LOD (lodLoader), apply component-level parameters from preset stored in scene
                 if (isCustomLod) {
                     const gsplatScene = (app.scene as any).gsplat;
                     if (gsplatScene && gsplatScene.lodRangeMax !== undefined) {
@@ -1099,19 +1115,16 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         gsplat.lodRangeMin = 0;
                         gsplat.lodRangeMax = 5;
                     }
+                    gsplat.minContribution = 1;
+                    gsplat.alphaClip = 1 / 255;
+                    gsplat.antiAlias = config.aa;
+                } else if (config.fullload) {
+                    applyPerfSettings();
                 } else {
-                    if (configAny.fullload === true) {
-                        // 吸收 origin：全量模式下首帧前直接拉满预算与 LOD 范围（用于截图等场景）。
-                        results[0].gsplat.splatBudget = getBudget() * 1000000;
-                        gsplat.lodRangeMin = 0;
-                        gsplat.lodRangeMax = 1000;
-                    } else {
-                        // 保留本地：默认低预算快速首帧，同时吸收 origin 的低 LOD 优先策略。
-                        results[0].gsplat.splatBudget = quality.low * 1000000;
-                        const lodLevels = (results[0].gsplat.resource as any)?.octree?.lodLevels;
-                        if (lodLevels) {
-                            gsplat.lodRangeMax = gsplat.lodRangeMin = lodLevels - 1;
-                        }
+                    const resource = results[0].gsplat.resource as GSplatOctreeResourceLike | null;
+                    const lodLevels = resource?.octree?.lodLevels;
+                    if (lodLevels) {
+                        gsplat.lodRangeMax = gsplat.lodRangeMin = lodLevels - 1;
                     }
                 }
 
@@ -1183,28 +1196,24 @@ z: ${cameraInfo.target.z.toFixed(6)}
                                 state.animationPaused = false;
                             }
 
-                            // handle quality mode changes
                             const updateLod = () => {
-                                if (isCustomLod) {
-                                    const gsplatScene = (app.scene as any).gsplat;
-                                    if (gsplatScene && gsplatScene.lodRangeMin !== undefined) {
-                                        gsplat.lodRangeMin = gsplatScene.lodRangeMin;
-                                        gsplat.lodRangeMax = gsplatScene.lodRangeMax;
-                                        if (gsplatScene.splatBudget !== undefined) {
-                                            results[0].gsplat.splatBudget = gsplatScene.splatBudget * 1000000;
-                                        }
+                                const gsplatScene = (app.scene as any).gsplat;
+                                if (gsplatScene && gsplatScene.lodRangeMin !== undefined) {
+                                    gsplat.lodRangeMin = gsplatScene.lodRangeMin;
+                                    gsplat.lodRangeMax = gsplatScene.lodRangeMax;
+                                    if (gsplatScene.splatBudget !== undefined) {
+                                        results[0].gsplat.splatBudget = gsplatScene.splatBudget * 1000000;
                                     }
-                                } else {
-                                    results[0].gsplat.splatBudget = getBudget() * 1000000;
-                                    gsplat.lodRangeMin = 0;
-                                    gsplat.lodRangeMax = 1000;
                                 }
                             };
-                            events.on('performanceMode:changed', updateLod);
-                            updateLod();
+                            const onPerformanceModeChanged = isCustomLod ? updateLod : applyPerfSettings;
+                            events.on('performanceMode:changed', onPerformanceModeChanged);
+                            onPerformanceModeChanged();
 
-                            // debug colorize lods
-                            gsplat.colorizeLod = config.colorize;
+                            gsplat.debug = config.colorize ? GSPLAT_DEBUG_LOD : GSPLAT_DEBUG_NONE;
+                            if (config.renderer !== 'compute') {
+                                gsplat.renderer = rendererTable[actualRenderer];
+                            }
 
                             // 触发 firstFrame 事件
                             events.fire('firstFrame');

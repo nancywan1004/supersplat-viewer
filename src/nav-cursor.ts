@@ -651,6 +651,7 @@ class NavCursor {
 
     private updateTarget() {
         if (!this.active || !this.targetPos || !this.targetNormal) {
+            this.targetRing.hide();
             return;
         }
 

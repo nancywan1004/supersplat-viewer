@@ -89,6 +89,7 @@ type InboundPayload =
     | { type: 'CAMERA_RESET' }
     | { type: 'CAMERA_PITCH_RANGE_SET'; value?: [number, number] }
     | { type: 'SKYBOX_SET'; value?: string }
+    | { type: 'SKYBOX_ADD'; value?: string }
     | { type: 'ANIMATION_RESET' }
     | { type: 'ANIMATION_PLAY_PAUSE' }
     | { type: 'EDIT_MODE_SET'; value?: boolean }
@@ -109,6 +110,8 @@ type InboundPayload =
     | { type: 'ASSET_SHOW_HIDE_SET'; id?: string; value?: boolean }
     | { type: 'ASSETS_SHOW_HIDE_SET'; value?: boolean }
     | { type: 'ASSET_PLACE'; value?: AssetLibraryItem }
+    | { type: 'MORPH_ASSET_ADD_START' }
+    | { type: 'MORPH_ASSET_ADD_FINISH' }
     | { type: 'ASSET_SELECT'; id?: string | null }
     | { type: 'ASSET_COPY'; id?: string; copyId?: string }
     | { type: 'ASSET_DELETE'; id?: string }
@@ -380,6 +383,11 @@ const initPostMessageBridge = (global: Global) => {
                     events.fire('skyboxSet', p.value);
                 }
                 break;
+            case 'SKYBOX_ADD':
+                if (typeof p.value === 'string') {
+                    events.fire('skyboxAdd', p.value);
+                }
+                break;
             case 'ANIMATION_RESET':
                 events.fire('inputEvent', 'resetAnim');
                 break;
@@ -565,6 +573,7 @@ const initPostMessageBridge = (global: Global) => {
                         'asset',
                         'annotation',
                         'environment',
+                        'skybox',
                         'camera',
                         'effects',
                         'assetEffects'
@@ -580,6 +589,12 @@ const initPostMessageBridge = (global: Global) => {
                     const placeValue = p.value as AssetLibraryItem;
                     dispatchAsset(global, 'ASSET_PLACE', { value: placeValue });
                 }
+                break;
+            case 'MORPH_ASSET_ADD_START':
+                dispatchAsset(global, 'MORPH_ASSET_ADD_START');
+                break;
+            case 'MORPH_ASSET_ADD_FINISH':
+                dispatchAsset(global, 'MORPH_ASSET_ADD_FINISH');
                 break;
             case 'ASSET_SHOW_HIDE_SET':
                 if (

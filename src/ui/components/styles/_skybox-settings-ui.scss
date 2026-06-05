@@ -1,0 +1,31 @@
+.skybox-panel-section {
+    .skybox-settings-hint {
+        font-size: 12px;
+        opacity: 0.75;
+        line-height: 1.4;
+    }
+
+    .skybox-settings-select {
+        flex: 1;
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .skybox-settings-url-row {
+        flex-wrap: wrap;
+        gap: 6px;
+
+        label {
+            flex: 0 0 auto;
+        }
+    }
+
+    .skybox-settings-url-input {
+        flex: 1;
+        min-width: 120px;
+    }
+
+    .skybox-settings-add-btn {
+        width: 100%;
+    }
+}

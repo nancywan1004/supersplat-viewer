@@ -25,7 +25,7 @@ import { initPoster, initUI } from './ui/ui';
 import { Viewer } from './viewer';
 import { initXr } from './xr';
 import { initLight } from './light';
-import { LodLoader } from './loaders/lod-loader';
+import { isCustomLodEnabled, isGsplatMetaJsonFilename, LodLoader } from './loaders/lod-loader';
 import { loadSplat } from './loaders/splat-loader';
 import type { AssetSource } from './loaders/asset-source';
 import { loadGsplatAsset } from './loaders/gsplat-asset-loader';
@@ -35,9 +35,10 @@ import { initPostMessageBridge } from './message-bridge';
 import { ensureViewSettings } from './view-settings';
 import { initVideoExport } from './render/video-export';
 import {
+    addSkyboxUploadUrlToSettings,
     ensureRevealEffect,
     resolveInitialSkyboxUrl,
-    setSkyboxUrlInSettings
+    setSkyboxCurrentUrlInSettings
 } from './settings-serialize/settings-serialize-helper';
 import {
     createDefaultEffectsRuntimeState,
@@ -125,7 +126,7 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
     } else {
         // 对于其他格式，使用原始代码的方式
         // 注意：不要提前消费 contents，让 PlayCanvas 自己处理
-        const data = filename.toLowerCase() === 'meta.json' ? await (await contents).json() : undefined;
+        const data = isGsplatMetaJsonFilename(filename) ? await (await contents).json() : undefined;
         const asset = new Asset(filename, 'gsplat', { url: contentUrl, filename }, data);
 
         return new Promise<Entity>((resolve, reject) => {
@@ -186,7 +187,10 @@ const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
         powerPreference: 'high-performance'
     });
 
-    console.log(`Renderer: ${device.deviceType}, ${config.renderer === 'webgl' ? 'cpu-sort' : config.renderer}`);
+    // 引擎可能从 WebGPU 回退到 WebGL2；下游 gsplat renderer 选择需要真实 deviceType
+    const renderer: 'webgl' | 'webgpu' = device.deviceType === 'webgpu' ? 'webgpu' : 'webgl';
+
+    console.log(`Renderer: ${device.deviceType}, requested=${config.renderer}, actual=${renderer}`);
 
     // Set maxPixelRatio so the XR framebuffer scale factor is computed correctly.
     // Regular rendering bypasses maxPixelRatio via the custom initCanvas sizing.
@@ -219,7 +223,7 @@ const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
     // 提高基础 ambient，保障 mesh 在无主光时仍具备可读性
     app.scene.ambientLight.set(1.32, 1.36, 1.44);
 
-    return { app, camera };
+    return { app, camera, renderer };
 };
 
 // initialize canvas size and resizing
@@ -280,7 +284,7 @@ const initCanvas = (global: Global) => {
 };
 
 const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config) => {
-    const { app, camera } = await createApp(canvas, config);
+    const { app, camera, renderer } = await createApp(canvas, config);
 
     // create events
     const events = new EventHandler();
@@ -326,7 +330,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         assetEffectUiSubtype: null,
         /** 当前配置槽 GS 变形关键帧 entity id 列表 */
         assetEffectsMorphKeyframeIds: [] as string[],
-        
+        /** MORPH_ASSET_ADD_START / FINISH：asset 模块下仅拾取 Gaussian */
+        morphAssetAddActive: false,
         cameraControlsEnabled: true,
         gizmoPointerActive: false,
         suppressAssetPointerClick: false,
@@ -374,7 +379,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         config,
         state,
         events,
-        camera
+        camera,
+        renderer
     };
 
     ensureViewSettings(global);
@@ -387,8 +393,9 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     // 供 NightMode 等脚本读取点光源等（collectPointLights 需要 global）
     (app as any).__global = global;
 
-    const lodLoader = new LodLoader(global);
-    if (lodLoader.shouldEnableLod(config.contentUrl)) {
+    const customLod = isCustomLodEnabled(processedSettings, config.contentUrl);
+    const lodLoader = customLod ? new LodLoader(global) : undefined;
+    if (lodLoader) {
         lodLoader.initializeLodSettings();
     }
     initCanvas(global);
@@ -439,9 +446,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         });
     }
 
-    events.on('skyboxSet', async (url?: string | null) => {
-        setSkyboxUrlInSettings(global.settings, url ?? null);
-
+    const applyCurrentSkybox = async (url?: string | null) => {
         const trimmed = typeof url === 'string' ? url.trim() : '';
         if (!trimmed) {
             clearSkyboxDisplay(app);
@@ -455,6 +460,22 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         } catch (err) {
             console.warn('[SuperSplat] 设置天空盒失败：', err);
         }
+    };
+
+    events.on('skyboxSet', async (url?: string | null) => {
+        setSkyboxCurrentUrlInSettings(global.settings, url ?? null);
+        await applyCurrentSkybox(url);
+    });
+
+    events.on('skyboxAdd', async (url?: string | null) => {
+        const trimmed = addSkyboxUploadUrlToSettings(global.settings, url ?? null);
+        if (!trimmed) {
+            console.warn('[SuperSplat] SKYBOX_ADD 缺少有效的 URL');
+            return;
+        }
+        setSkyboxCurrentUrlInSettings(global.settings, trimmed);
+        events.fire('skyboxListChanged');
+        await applyCurrentSkybox(trimmed);
     });
 
     // Load and play sound

@@ -113,7 +113,7 @@ type CameraMode = 'orbit' | 'anim' | 'fly' | 'walk';
 type InputMode = 'desktop' | 'touch';
 
 /** 编辑模式左侧工具箱当前选中的模块 */
-type EditLeftModule = 'gs' | 'asset' | 'annotation' | 'environment' | 'camera' | 'effects' | 'assetEffects';
+type EditLeftModule = 'gs' | 'asset' | 'annotation' | 'environment' | 'skybox' | 'camera' | 'effects' | 'assetEffects';
 
 /** 资产变换模式（移动/旋转/缩放） */
 type AssetTransformMode = 'move' | 'rotate' | 'scale';
@@ -245,6 +245,8 @@ type State = {
     assetEffectUiSubtype?: string | null;
     /** 当前配置槽的 GS 变形关键帧 scene entity id 序列（与 settings.effects.asset 同步） */
     assetEffectsMorphKeyframeIds?: string[];
+    /** 资产模块变形关键帧拾取模式（`MORPH_ASSET_ADD_START` / `MORPH_ASSET_ADD_FINISH`） */
+    morphAssetAddActive?: boolean;
     /** 相机输入是否启用（用于与 Gizmo 交互互斥） */
     cameraControlsEnabled?: boolean;
     /** 正在拖拽场景/光源 Gizmo（pointerdown 命中轴起至 pointerup） */
@@ -315,6 +317,8 @@ type Global = {
     state: State;
     events: EventHandler;
     camera: Entity;
+    /** 引擎实际使用的渲染器（WebGPU 回退 WebGL 后反映真实 deviceType） */
+    renderer: 'webgl' | 'webgpu';
     /** 见 {@link ViewSettings} */
     viewSettings?: ViewSettings;
     /** Viewer 注入的共享深度拾取器；未注入时由 `pickWorldFromClientXY` 懒创建 */

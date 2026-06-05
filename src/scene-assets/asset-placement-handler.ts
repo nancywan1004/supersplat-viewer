@@ -19,6 +19,7 @@ import type { Global, AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from
 import {
     getSelectedSceneEntity,
     isAssetScenePickEventOnlyMode,
+    isMorphAssetAddPickMode,
     isSceneAssetPickableInViewerMode
 } from '../state-selectors';
 import {
@@ -1184,8 +1185,10 @@ export function initAssetPlacementHandler(
 
     const handleAssetPointerClickClaim = (clientX: number, clientY: number, worldPos: Vec3 | null): boolean => {
         const pickEventOnly = isAssetScenePickEventOnlyMode(state);
-        const editAsset = !pickEventOnly && state.editMode && state.editLeftModule === 'asset';
-        if (!pickEventOnly && !editAsset) return false;
+        const morphAssetAdd = isMorphAssetAddPickMode(state);
+        const inAssetModule = !pickEventOnly && state.editMode && state.editLeftModule === 'asset';
+        const editAsset = inAssetModule && !morphAssetAdd;
+        if (!pickEventOnly && !inAssetModule) return false;
         if (state.suppressAssetPointerClick) {
             state.suppressAssetPointerClick = false;
             return false;
@@ -1255,7 +1258,7 @@ export function initAssetPlacementHandler(
         }
 
         const list = state.scenePlacedEntities ?? [];
-        if (list.length === 0) return editAsset;
+        if (list.length === 0) return inAssetModule;
 
         const pickableList = pickEventOnly
             ? list.filter((entry) => isSceneAssetPickableInViewerMode(entry.assetType))
@@ -1269,6 +1272,11 @@ export function initAssetPlacementHandler(
                 return true;
             }
         }
+
+        const gaussianList = morphAssetAdd
+            ? list.filter((entry) => entry.assetType === 'gaussian')
+            : list;
+        if (morphAssetAdd && gaussianList.length === 0) return true;
 
         const pickerScale = 0.5;
         const pickW = Math.max(1, Math.floor(width() * pickerScale));
@@ -1293,9 +1301,10 @@ export function initAssetPlacementHandler(
         ).then((entry) => {
             if (!entry) return;
             if (pickEventOnly && !isSceneAssetPickableInViewerMode(entry.assetType)) return;
-            applySceneAssetSelectedFromScenePick(global, entry.id, { focusOnChange: editAsset });
+            if (morphAssetAdd && entry.assetType !== 'gaussian') return;
+            applySceneAssetSelectedFromScenePick(global, entry.id, { focusOnChange: inAssetModule });
         }).catch(() => {});
-        return editAsset;
+        return inAssetModule;
     };
 
     const onCopy = (payload?: { copyId?: string }) => {
@@ -1420,12 +1429,22 @@ export function initAssetPlacementHandler(
         applyVideoHorizontalCurvature(global, payload.id, payload.value, deps);
     };
 
+    const onMorphAssetAddActiveChanged = (active: boolean) => {
+        if (!active || !pendingPlacement) return;
+        cancelVideoPlacementPreload();
+        videoPreloadHandle = null;
+        videoPreloadReady = true;
+        pendingPlacement = null;
+        pendingPlacementInFlight = false;
+    };
+
     events.on('assetEdit:copy', onCopy);
     events.on('assetEdit:delete', onDelete);
     events.on('assetEdit:videoCurvature', onVideoCurvature);
     events.on('assetPlacement:start', onPlaceStart);
     events.on('assetFacade:exit', clearPendingPlacement);
     events.on('assetFacade:editModeExit', clearPendingPlacement);
+    events.on('morphAssetAddActive:changed', onMorphAssetAddActiveChanged);
     events.on('sceneAssets:removed', onSceneAssetRemoved);
 
     return () => {
@@ -1441,6 +1460,7 @@ export function initAssetPlacementHandler(
         events.off('assetPlacement:start', onPlaceStart);
         events.off('assetFacade:exit', clearPendingPlacement);
         events.off('assetFacade:editModeExit', clearPendingPlacement);
+        events.off('morphAssetAddActive:changed', onMorphAssetAddActiveChanged);
         events.off('sceneAssets:removed', onSceneAssetRemoved);
     };
 }

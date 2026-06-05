@@ -3,7 +3,7 @@ import { EventHandler } from 'playcanvas';
 import { shouldUseTouchJoystickMove } from '../input/touch-joystick-ui';
 import { Tooltip } from '../tooltip';
 import { Global } from '../types';
-import { isLodMetaFile } from '../loaders/lod-loader';
+import { isCustomLodEnabled } from '../loaders/lod-loader';
 import type { ExperienceSettings } from '../schemas/v2';
 import {
     serializeExperienceSettings,
@@ -11,7 +11,6 @@ import {
     getComparableSettingsStringFromSnapshot,
     applySettingsSnapshot
 } from '../settings-serialize/settings-serialize';
-import { readSkyboxUrlFromSettings } from '../settings-serialize/settings-serialize-helper';
 import { downloadExperienceSettingsLocally } from '../render/project-thumbnail';
 import { resetSceneSettings } from '../settings-reset';
 import {
@@ -332,7 +331,7 @@ const initPoster = (events: EventHandler) => {
 };
 
 const initUI = (global: Global) => {
-    const { config, events, state } = global;
+    const { config, events, state, settings } = global;
     const editUiTransport = getEditUiTransport(global);
 
     // Acquire Elements
@@ -357,7 +356,6 @@ const initUI = (global: Global) => {
         'walkHint',
         'cameraPathCheck', 'cameraPathOption',
         'cameraBoundsCheck', 'cameraBoundsOption',
-        'skyboxRow', 'skyboxSelect',
         'vfxSubmenuHeader', 'vfxSubpanel', 'vfxSubmenuArrow',
         'lightingSubmenuHeader', 'lightingSubpanel', 'lightingSubmenuArrow',
         'postEffectSubmenuHeader', 'postEffectSubpanel', 'postEffectSubmenuArrow',
@@ -383,7 +381,7 @@ const initUI = (global: Global) => {
     dom.previewModeBtn = document.getElementById('previewModeBtn');
 
     // Check if LOD mode is enabled
-    const isLodMode = config.contentUrl ? isLodMetaFile(config.contentUrl) : false;
+    const isLodMode = isCustomLodEnabled(settings, config.contentUrl);
     
     // In LOD mode, show progress bar but mark as 100% when animation starts
     // Progress is calculated based on threshold, reaching 100% when animation begins
@@ -540,104 +538,6 @@ const initUI = (global: Global) => {
     };
     events.on('gamingControls:changed', updateGamingControls);
     updateGamingControls();
-
-    // Skybox selector
-    const skyboxRow = dom.skyboxRow;
-    const skyboxSelect = dom.skyboxSelect as HTMLSelectElement;
-
-    const deriveSkyboxLabel = (value: string) => {
-        try {
-            const decoded = decodeURIComponent(value);
-            const filename = decoded.split('/').pop() || decoded;
-            const withoutExt = filename.replace(/\.[^.]+$/, '');
-            return withoutExt || decoded;
-        } catch (err) {
-            return value;
-        }
-    };
-
-    const ensureOption = (value: string, label: string) => {
-        const option = document.createElement('option');
-        option.value = value;
-        option.textContent = label;
-        return option;
-    };
-
-    const populateSkyboxes = async () => {
-        if (!skyboxSelect || !skyboxRow) {
-            return;
-        }
-
-        try {
-            skyboxRow.classList.add('hidden');
-
-            const response = await fetch('/assets/skyboxes/index.json', {
-                cache: 'force-cache'
-            });
-
-            if (!response.ok) {
-                throw new Error(`Failed to load skybox list: ${response.status}`);
-            }
-
-            type SkyboxManifestEntry = string | { label?: string; name?: string; file?: string; url?: string };
-
-            const manifest = await response.json() as SkyboxManifestEntry[];
-            const normalized = manifest
-                .map((entry) => {
-                    if (typeof entry === 'string') {
-                        return {
-                            label: deriveSkyboxLabel(entry),
-                            value: `/assets/skyboxes/${entry}`
-                        };
-                    }
-
-                    const file = entry.file ?? '';
-                    const rawValue = entry.url ?? (file ? `/assets/skyboxes/${file}` : '');
-                    if (!rawValue) {
-                        return null;
-                    }
-
-                    return {
-                        label: entry.label ?? entry.name ?? deriveSkyboxLabel(file || rawValue),
-                        value: rawValue
-                    };
-                })
-                .filter((item): item is { label: string; value: string } => !!item?.value);
-
-            const current = readSkyboxUrlFromSettings(global.settings) ?? config.skyboxUrl ?? '';
-
-            skyboxSelect.innerHTML = '';
-
-            skyboxSelect.appendChild(ensureOption('', 'No Skybox'));
-
-            normalized.forEach(({ label, value }) => {
-                skyboxSelect.appendChild(ensureOption(value, label));
-            });
-
-            if (current && !normalized.some(({ value }) => value === current)) {
-                skyboxSelect.appendChild(ensureOption(current, deriveSkyboxLabel(current)));
-            }
-
-            skyboxSelect.value = current || '';
-            skyboxRow.classList.remove('hidden');
-        } catch (err) {
-            console.warn('[SuperSplat] 无法加载天空盒列表：', err);
-            skyboxRow?.classList.add('hidden');
-        }
-    };
-
-    if (skyboxSelect) {
-        skyboxSelect.addEventListener('change', (event) => {
-            const value = (event.target as HTMLSelectElement).value;
-            events.fire('skyboxSet', value || null);
-        });
-
-        events.on('skyboxSelectionSynced', (value?: string | null) => {
-            skyboxSelect.value = value ?? '';
-        });
-
-        populateSkyboxes();
-    }
 
     // AR/VR
     const arChanged = () => dom.arMode.classList[state.hasAR ? 'remove' : 'add']('hidden');

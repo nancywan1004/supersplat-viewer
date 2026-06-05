@@ -128,6 +128,12 @@ type PostEffectSettings = {
     }
 };
 
+/** 天空盒存盘：`currentUrl` 当前使用；`uploadUrls` 为 SKYBOX_ADD 等上传/外部传入资源 */
+type BackgroundSkyboxSettings = {
+    currentUrl?: string,
+    uploadUrls?: string[]
+};
+
 type ExperienceSettings = {
     version: 2,
     tonemapping: 'none' | 'linear' | 'filmic' | 'hejl' | 'aces' | 'aces2' | 'neutral',
@@ -135,7 +141,7 @@ type ExperienceSettings = {
     soundUrl?: string,
     background: {
         color: [number, number, number],
-        skyboxUrl?: string
+        skybox?: BackgroundSkyboxSettings
     },
     postEffectSettings: PostEffectSettings,
     animTracks: AnimTrack[],
@@ -291,7 +297,15 @@ const validateV2 = (data: unknown): ExperienceSettings => {
 
     const bg = assertObject(obj.background, 'settings.background');
     assertTuple3(bg.color, 'settings.background.color');
-    if (bg.skyboxUrl !== undefined) assertString(bg.skyboxUrl, 'settings.background.skyboxUrl');
+    if (bg.skybox !== undefined) {
+        const skybox = assertObject(bg.skybox, 'settings.background.skybox');
+        if (skybox.currentUrl !== undefined) assertString(skybox.currentUrl, 'settings.background.skybox.currentUrl');
+        if (skybox.uploadUrls !== undefined) {
+            assertArray(skybox.uploadUrls, 'settings.background.skybox.uploadUrls').forEach((url: unknown, i: number) => {
+                assertString(url, `settings.background.skybox.uploadUrls[${i}]`);
+            });
+        }
+    }
 
     validatePostEffects(obj.postEffectSettings, 'settings.postEffectSettings');
 
@@ -381,6 +395,7 @@ const validateV2 = (data: unknown): ExperienceSettings => {
 
 export { validateV2 };
 export type {
+    BackgroundSkyboxSettings,
     AnimTrack,
     BloomEditorSession,
     Camera,
