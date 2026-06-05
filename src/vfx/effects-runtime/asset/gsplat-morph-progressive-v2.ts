@@ -3178,6 +3178,8 @@ export class GsplatMorphController {
 
     private _destroyed = false;
 
+    private readonly _hiddenSourceStates: Array<{ entity: Entity; enabled: boolean }> = [];
+
     constructor(app: AppBase, models: LoadedMorphModel[], options: GsplatMorphOptions = {}) {
         this._morphOptions = options;
         this.app = app;
@@ -3491,7 +3493,7 @@ export class GsplatMorphController {
         this.app.off('framerender', this._onAfterFrameRender);
         this.app.scene.off('gsplat:sorted', this._onGsplatSorted);
         this.entity.enabled = false;
-        this.restoreMorphTargetEntity();
+        this.restoreSourceEntities();
         this.app.renderNextFrame = true;
         this.entity.destroy();
 
@@ -3510,26 +3512,37 @@ export class GsplatMorphController {
     private syncPlaybackVisibility() {
         if (this._playing) {
             this.entity.enabled = true;
-            this.hideMorphTargetEntity();
+            this.hideSourceEntities();
         } else {
             this.entity.enabled = false;
-            this.restoreMorphTargetEntity();
+            this.restoreSourceEntities();
         }
         this.app.renderNextFrame = true;
     }
 
-    private hideMorphTargetEntity() {
-        const target = this._morphOptions.sourceEntities?.[0];
-        if (target) {
-            target.enabled = false;
+    private hideSourceEntities() {
+        if (this._morphOptions.hideSourceEntities === false) {
+            return;
+        }
+        if (this._hiddenSourceStates.length > 0) {
+            return;
+        }
+        const seen = new Set<Entity>();
+        for (const entity of this._morphOptions.sourceEntities ?? []) {
+            if (!entity || seen.has(entity)) {
+                continue;
+            }
+            seen.add(entity);
+            this._hiddenSourceStates.push({ entity, enabled: entity.enabled });
+            entity.enabled = false;
         }
     }
 
-    private restoreMorphTargetEntity() {
-        const target = this._morphOptions.sourceEntities?.[0];
-        if (target) {
-            target.enabled = true;
+    private restoreSourceEntities() {
+        for (const { entity, enabled } of this._hiddenSourceStates) {
+            entity.enabled = enabled;
         }
+        this._hiddenSourceStates.length = 0;
     }
 
     update(dt: number) {
