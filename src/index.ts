@@ -187,7 +187,10 @@ const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
         powerPreference: 'high-performance'
     });
 
-    console.log(`Renderer: ${device.deviceType}, ${config.renderer === 'webgl' ? 'cpu-sort' : config.renderer}`);
+    // 引擎可能从 WebGPU 回退到 WebGL2；下游 gsplat renderer 选择需要真实 deviceType
+    const renderer: 'webgl' | 'webgpu' = device.deviceType === 'webgpu' ? 'webgpu' : 'webgl';
+
+    console.log(`Renderer: ${device.deviceType}, requested=${config.renderer}, actual=${renderer}`);
 
     // Set maxPixelRatio so the XR framebuffer scale factor is computed correctly.
     // Regular rendering bypasses maxPixelRatio via the custom initCanvas sizing.
@@ -220,7 +223,7 @@ const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
     // 提高基础 ambient，保障 mesh 在无主光时仍具备可读性
     app.scene.ambientLight.set(1.32, 1.36, 1.44);
 
-    return { app, camera };
+    return { app, camera, renderer };
 };
 
 // initialize canvas size and resizing
@@ -281,7 +284,7 @@ const initCanvas = (global: Global) => {
 };
 
 const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config) => {
-    const { app, camera } = await createApp(canvas, config);
+    const { app, camera, renderer } = await createApp(canvas, config);
 
     // create events
     const events = new EventHandler();
@@ -376,7 +379,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         config,
         state,
         events,
-        camera
+        camera,
+        renderer
     };
 
     ensureViewSettings(global);

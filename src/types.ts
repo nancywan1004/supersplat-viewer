@@ -317,6 +317,8 @@ type Global = {
     state: State;
     events: EventHandler;
     camera: Entity;
+    /** 引擎实际使用的渲染器（WebGPU 回退 WebGL 后反映真实 deviceType） */
+    renderer: 'webgl' | 'webgpu';
     /** 见 {@link ViewSettings} */
     viewSettings?: ViewSettings;
     /** Viewer 注入的共享深度拾取器；未注入时由 `pickWorldFromClientXY` 懒创建 */
