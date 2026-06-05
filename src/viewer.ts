@@ -24,6 +24,7 @@ import {
     Vec3,
     GSPLAT_DEBUG_LOD,
     GSPLAT_DEBUG_NONE,
+    GSPLAT_RENDERER_COMPUTE,
     GSPLAT_RENDERER_RASTER_CPU_SORT,
     GSPLAT_RENDERER_RASTER_GPU_SORT,
     GSplatComponent,
@@ -1276,6 +1277,19 @@ z: ${cameraInfo.target.z.toFixed(6)}
                                 }
                             };
                             const onPerformanceModeChanged = isCustomLod ? updateLod : applyPerfSettings;
+                            if (config.renderer === 'compute') {
+                                gsplat.renderer = GSPLAT_RENDERER_COMPUTE;
+                                if ((app.scene.gsplat as any).currentRenderer !== GSPLAT_RENDERER_COMPUTE) {
+                                    console.warn('[GSplat] compute renderer requested but unavailable; falling back to engine renderer:', {
+                                        requested: config.renderer,
+                                        actualDevice: actualRenderer,
+                                        currentRenderer: (app.scene.gsplat as any).currentRenderer
+                                    });
+                                }
+                            } else {
+                                gsplat.renderer = rendererTable[actualRenderer];
+                            }
+
                             if (isCustomLod || config.fullload) {
                                 events.on('performanceMode:changed', onPerformanceModeChanged);
                                 onPerformanceModeChanged();
@@ -1284,9 +1298,6 @@ z: ${cameraInfo.target.z.toFixed(6)}
                             }
 
                             gsplat.debug = config.colorize ? GSPLAT_DEBUG_LOD : GSPLAT_DEBUG_NONE;
-                            if (config.renderer !== 'compute') {
-                                gsplat.renderer = rendererTable[actualRenderer];
-                            }
 
                             // 触发 firstFrame 事件
                             events.fire('firstFrame');

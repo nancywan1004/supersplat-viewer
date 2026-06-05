@@ -704,6 +704,7 @@ export function createOctreeRefinementController(
     let settleFramesRemaining = 0;
     let prevCriticalPending = -1;
     let prevPendingUnique = -1;
+    let finishRequested = false;
 
     const enterRefinementMode = () => {
         const loader = octree.assetLoader;
@@ -743,6 +744,32 @@ export function createOctreeRefinementController(
             savedLoaderConcurrency = null;
         }
         gsplatScene.dirty = true;
+    };
+
+    const stopRefinementController = () => {
+        if (!active) {
+            return;
+        }
+
+        active = false;
+        restoreRefinementMode();
+        const loader = octree.assetLoader;
+        if (loader) {
+            restoreSuspendedQueuedLoads(loader);
+            clearRefinementPriorityUrls(octree, loader);
+        }
+        if (updateHandler) {
+            app.off('update', updateHandler);
+            updateHandler = null;
+        }
+        if (frameReadyHandler) {
+            app.systems.gsplat.off('frame:ready', frameReadyHandler);
+            frameReadyHandler = null;
+        }
+        if (perfModeHandler) {
+            events.off('performanceMode:changed', perfModeHandler);
+            perfModeHandler = null;
+        }
     };
 
     const runPriorityPrefetch = () => {
@@ -833,16 +860,16 @@ export function createOctreeRefinementController(
         prevPendingUnique = pendingUniqueFiles;
 
         let syncedInstances = 0;
-        const downloadsComplete = pendingUniqueFiles === 0 || criticalPendingUnique === 0;
+        const foregroundDownloadsComplete = foregroundPendingUnique === 0;
         if (needsLodSwitch && (fileJustLanded || staleLoadedNodes > 0 || settleFramesRemaining > 0)) {
             syncedInstances = syncOctreePendingPlacements(
                 app,
                 octree,
                 gsplatEntity,
                 gsplatScene,
-                downloadsComplete
+                foregroundDownloadsComplete
             );
-        } else if (downloadsComplete && (staleLodNodes > 0 || settleFramesRemaining > 0)) {
+        } else if (foregroundDownloadsComplete && (staleLodNodes > 0 || settleFramesRemaining > 0)) {
             syncedInstances = syncOctreePendingPlacements(app, octree, gsplatEntity, gsplatScene, true);
         }
 
@@ -884,6 +911,16 @@ export function createOctreeRefinementController(
             markOctreeInstancesDirty(app, octree, gsplatEntity);
             app.renderNextFrame = true;
         }
+
+        if (
+            foregroundDownloadsComplete &&
+            criticalPendingUnique === 0 &&
+            priorityUrls.length === 0 &&
+            staleLoadedNodes === 0 &&
+            settleFramesRemaining === 0
+        ) {
+            finishRequested = true;
+        }
         return priorityUrls.length;
     };
 
@@ -892,6 +929,9 @@ export function createOctreeRefinementController(
             return;
         }
         runPriorityPrefetch();
+        if (finishRequested) {
+            stopRefinementController();
+        }
     };
 
     return {
@@ -900,6 +940,7 @@ export function createOctreeRefinementController(
                 return;
             }
             active = true;
+            finishRequested = false;
             enterRefinementMode();
 
             updateHandler = onUpdate;
@@ -919,28 +960,13 @@ export function createOctreeRefinementController(
             events.on('performanceMode:changed', perfModeHandler);
 
             runPriorityPrefetch();
+            if (finishRequested) {
+                stopRefinementController();
+            }
         },
 
         destroy() {
-            active = false;
-            restoreRefinementMode();
-            const loader = octree.assetLoader;
-            if (loader) {
-                restoreSuspendedQueuedLoads(loader);
-                clearRefinementPriorityUrls(octree, loader);
-            }
-            if (updateHandler) {
-                app.off('update', updateHandler);
-                updateHandler = null;
-            }
-            if (frameReadyHandler) {
-                app.systems.gsplat.off('frame:ready', frameReadyHandler);
-                frameReadyHandler = null;
-            }
-            if (perfModeHandler) {
-                events.off('performanceMode:changed', perfModeHandler);
-                perfModeHandler = null;
-            }
+            stopRefinementController();
         }
     };
 }
