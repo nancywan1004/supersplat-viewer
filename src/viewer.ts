@@ -59,6 +59,10 @@ import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visu
 import { getSkyboxRadius } from './loaders/skybox-loader';
 import { readSkyboxCurrentUrlFromSettings } from './settings-serialize/settings-serialize-helper';
 import { isCustomLodEnabled } from './loaders/lod-loader';
+import {
+    createOctreeRefinementController,
+    type OctreeRefinementController
+} from './loaders/octree-refinement-controller';
 import { BloomController } from './vfx/bloom';
 import { NightMode } from './vfx/lighting/night-mode';
 import {
@@ -305,6 +309,9 @@ class Viewer {
 
     /** Night Mode 脚本（用于 Night Mode + Bloom Brush 合成） */
     nightModeScript: InstanceType<typeof NightMode> | null = null;
+
+    /** 普通 octree streaming 首帧后的视锥/屏幕误差优先 refinement */
+    octreeRefinementController: OctreeRefinementController | null = null;
 
     /** 将 cameraManager 的相机姿态应用到实体（导出时 seek anim 后调用） */
     applyCameraFromManager: () => void = () => {};
@@ -1144,6 +1151,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 app.on('update', (dt: number) => {
                     idleTime += dt;
                     this.forceRenderNextFrame = idleTime < 4;
+                    tryUnlockStreamingOnCameraIdle(dt);
                 });
 
                 events.on('inputEvent', (type: string) => {
@@ -1164,9 +1172,72 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 let maxProgress = 0;
                 let progressUIHidden = false; // Track if progress UI has been hidden
                 const PROGRESS_THRESHOLD = 50; // Hide progress UI when progress reaches this threshold
-                const readyHandler = (camera: CameraComponent, layer: Layer, ready: boolean, loading: number) => {
+                const isStreamingOctree = !isCustomLod && !config.fullload;
+                const octreeResource = isStreamingOctree
+                    ? results[0].gsplat.resource as GSplatOctreeResourceLike | null
+                    : null;
+                let streamingLodUnlocked = false;
+                let streamingPerfHandlerRegistered = false;
+                let streamingBootstrapGateReached = false;
+                let streamCamIdleTime = 0;
+                const streamLastCamPos = new Vec3();
+                const streamLastCamFwd = new Vec3();
+                const STREAM_CAM_IDLE_UNLOCK_SEC = 0.15;
 
+                // 首屏粗层加载完成后仍可能长期 loading>0；LOD 解锁不能等 loading===0
+                const unlockStreamingLod = () => {
+                    if (!isStreamingOctree || streamingLodUnlocked) {
+                        return;
+                    }
+                    streamingLodUnlocked = true;
+                    applyPerfSettings();
+                    const maxLod = octreeResource?.octree?.lodLevels;
+                    if (maxLod) {
+                        gsplat.lodRangeMin = 0;
+                        gsplat.lodRangeMax = maxLod - 1;
+                    }
+                    // refinement 阶段由 controller 维持 budget=0，避免已下载细层被 balancer 降回粗层
+                    gsplat.splatBudget = 0;
+                    gsplat.dirty = true;
+                    app.renderNextFrame = true;
+
+                    if (!streamingPerfHandlerRegistered) {
+                        streamingPerfHandlerRegistered = true;
+                        events.on('performanceMode:changed', applyPerfSettings);
+                    }
+
+                    this.octreeRefinementController?.destroy();
+                    this.octreeRefinementController = createOctreeRefinementController(
+                        global,
+                        results[0],
+                        octreeResource
+                    );
+                    this.octreeRefinementController?.start();
+                };
+
+                const tryUnlockStreamingOnCameraIdle = (dt: number) => {
+                    if (!isStreamingOctree || streamingLodUnlocked || !streamingBootstrapGateReached) {
+                        return;
+                    }
+                    const camPos = camera.getPosition();
+                    const camFwd = camera.forward;
+                    const moved = streamLastCamPos.distance(camPos) > 0.03;
+                    const rotated = streamLastCamFwd.dot(camFwd) < (1 - 0.015);
+                    if (moved || rotated) {
+                        streamCamIdleTime = 0;
+                    } else {
+                        streamCamIdleTime += dt;
+                        if (streamCamIdleTime >= STREAM_CAM_IDLE_UNLOCK_SEC) {
+                            unlockStreamingLod();
+                        }
+                    }
+                    streamLastCamPos.copy(camPos);
+                    streamLastCamFwd.copy(camFwd);
+                };
+
+                const readyHandler = (camera: CameraComponent, layer: Layer, ready: boolean, loading: number) => {
                     if (ready && loading === 0) {
+                        streamingBootstrapGateReached = true;
                         // scene is done loading
                         eventHandler.off('frame:ready', readyHandler);
 
@@ -1207,8 +1278,12 @@ z: ${cameraInfo.target.z.toFixed(6)}
                                 }
                             };
                             const onPerformanceModeChanged = isCustomLod ? updateLod : applyPerfSettings;
-                            events.on('performanceMode:changed', onPerformanceModeChanged);
-                            onPerformanceModeChanged();
+                            if (isCustomLod || config.fullload) {
+                                events.on('performanceMode:changed', onPerformanceModeChanged);
+                                onPerformanceModeChanged();
+                            } else {
+                                unlockStreamingLod();
+                            }
 
                             gsplat.debug = config.colorize ? GSPLAT_DEBUG_LOD : GSPLAT_DEBUG_NONE;
                             if (config.renderer !== 'compute') {
@@ -1247,6 +1322,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         // When progress reaches threshold, hide progress UI and start animation if available
                         if (!progressUIHidden && progress >= PROGRESS_THRESHOLD) {
                             progressUIHidden = true;
+                            streamingBootstrapGateReached = true;
                             // Fire event to hide progress UI
                             events.fire('progressThresholdReached', progress);
                             
