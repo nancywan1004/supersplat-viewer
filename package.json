@@ -56,7 +56,7 @@
     "concurrently": "9.2.1",
     "eslint": "9.39.4",
     "globals": "17.5.0",
-    "playcanvas": "2.18.1",
+    "playcanvas": "2.19.2",
     "postcss": "8.5.12",
     "publint": "0.3.18",
     "rollup": "4.60.2",
@@ -70,7 +70,7 @@
     "typescript": "5.9.3"
   },
   "scripts": {
-    "vendor:playcanvas": "curl -fsSL -o public/vendor/playcanvas-2.18.1.js \"https://cdn.jsdelivr.net/npm/playcanvas@2.18.1/+esm\"",
+    "vendor:playcanvas": "curl -fsSL -o public/vendor/playcanvas-2.19.2.js \"https://cdn.jsdelivr.net/npm/playcanvas@2.19.2/+esm\"",
     "build": "rollup -c",
     "build:prod": "NODE_ENV=production rollup -c",
     "build:prod:obfuscate": "NODE_ENV=production OBFUSCATE=true rollup -c",
