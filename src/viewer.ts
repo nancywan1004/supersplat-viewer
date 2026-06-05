@@ -1196,8 +1196,6 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         gsplat.lodRangeMin = 0;
                         gsplat.lodRangeMax = maxLod - 1;
                     }
-                    // refinement 阶段由 controller 维持 budget=0，避免已下载细层被 balancer 降回粗层
-                    gsplat.splatBudget = 0;
                     gsplat.dirty = true;
                     app.renderNextFrame = true;
 
