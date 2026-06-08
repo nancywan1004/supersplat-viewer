@@ -113,6 +113,7 @@ const REVEAL_PANEL_HTML = (() => {
       <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="nostalgic-comic" data-persistent-enable class="settingsCheckbox"> Nostalgic Comic</label>
       <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="yiyun-dianran" data-persistent-enable class="settingsCheckbox"> 意韵点染</label>
       <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="palette-pixel" data-persistent-enable class="settingsCheckbox"> 像素色板</label>
+      <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="pointillism-stipple" data-persistent-enable class="settingsCheckbox"> 点彩笔触</label>
     </div>
   </fieldset>
   <fieldset class="effectsTrackFieldset" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:10px 12px;margin-bottom:10px">

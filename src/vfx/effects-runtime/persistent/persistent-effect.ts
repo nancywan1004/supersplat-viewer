@@ -8,6 +8,7 @@ import { isPersistentVfx } from '../reveal/reveal-policy';
 import { GsplatPersistentFallingPetals, GsplatPersistentFallingWeather } from './camera/falling-weather-persistent';
 import { GsplatPersistentNostalgicComic } from './stylisation/nostalgic-comic-persistent';
 import { GsplatPersistentPalettePixel } from './stylisation/palette-pixel-persistent';
+import { GsplatPersistentPointillismStipple } from './stylisation/pointillism-stipple-persistent';
 import { GsplatPersistentYiyunDianran } from './stylisation/yiyun-dianran-persistent';
 import { GsplatRevealPerlinWave } from './scene/gsplat-perlin-wave';
 import { GsplatPersistentOverallWave } from './scene/gsplat-overall-wave';
@@ -50,6 +51,8 @@ export function mountPersistentGsplatByEffectType(
             return createYiyunDianranScript(gsplatEntity, autoStart, effectParams);
         case 'palette-pixel':
             return createPalettePixelScript(gsplatEntity, autoStart, effectParams);
+        case 'pointillism-stipple':
+            return createPointillismStippleScript(gsplatEntity, autoStart, effectParams);
         case 'sparkle-twinkle':
             return createSparkleTwinkleScript(gsplatEntity, updateScriptCenter, autoStart, effectParams);
         case 'overall-wave':
@@ -106,6 +109,33 @@ export function createPalettePixelScript(
         return script;
     } catch (error) {
         console.error('Failed to create palette-pixel persistent script:', error);
+        return null;
+    }
+}
+
+export function createPointillismStippleScript(
+    gsplatEntity: Entity,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn('Cannot create pointillism-stipple script - entity or script component not ready');
+        return null;
+    }
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentPointillismStipple) as any;
+        if (script) {
+            applyPersistentEffectParamsToScript(script, 'pointillism-stipple', effectParams ?? undefined);
+            script.enabled = autoStart;
+            if (autoStart) {
+                script.applyShaders?.();
+                script.updateEffect?.(0, 0);
+            }
+        }
+        return script;
+    } catch (error) {
+        console.error('Failed to create pointillism-stipple persistent script:', error);
         return null;
     }
 }

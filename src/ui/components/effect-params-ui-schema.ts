@@ -20,6 +20,7 @@ import {
     PALETTE_PIXEL_PALETTE_NAMES,
     PALETTE_PIXEL_SIZE_STEPS
 } from '../../vfx/effects-runtime/persistent/stylisation/palette-pixel';
+import { POINTILLISM_DEFAULTS } from '../../vfx/effects-runtime/persistent/stylisation/pointillism-stipple-shaders';
 import {
     getRevealEffectParamKeys,
     getRevealParamFieldKind,
@@ -237,7 +238,20 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     paletteIndex: '色盘',
     levels: '色阶',
     levelRange: '色阶范围',
-    ditherSpread: '抖动扩散'
+    ditherSpread: '抖动扩散',
+    dotScale: '点涂尺寸',
+    strokeAspect: '笔触长宽比',
+    roundness: '圆润收敛',
+    strokeSoftness: '笔触软边',
+    paintThickness: '颜料厚度',
+    lumaLevels: '明度色阶',
+    contrastDotMix: '对比色点',
+    complementaryMix: '互补色混合',
+    warmCoolSplit: '冷暖分离',
+    paletteStrength: '色板强度',
+    sourceStructureBlend: '结构保留',
+    seed: '随机种子',
+    minVisibleAlpha: '最小可见透明度'
 };
 
 /** 亮光细闪中文文案与控件范围（默认数值取自 {@link SPARKLE_TWINKLE_DEFAULTS}） */
@@ -490,6 +504,36 @@ const PALETTE_PIXEL_PARAM_UI: Record<string, PersistentParamUiOverride> = {
     ditherSpread: { min: 0, max: 0.08, step: 0.001, default: DEFAULT_PALETTE_PIXEL_SETTINGS.ditherSpread }
 };
 
+const POINTILLISM_PALETTE_OPTIONS: readonly EffectParamEnumOption[] = [
+    { value: 0, label: '钴蓝金黄' },
+    { value: 1, label: '紫蓝橙光' },
+    { value: 2, label: '绿影黄光' },
+    { value: 3, label: '灰墙暖光' }
+];
+
+const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
+    dotScale: { min: 0.2, max: 2.5, step: 0.01, default: POINTILLISM_DEFAULTS.dotScale },
+    strokeAspect: { min: 1, max: 2.2, step: 0.01, default: POINTILLISM_DEFAULTS.strokeAspect },
+    roundness: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.roundness },
+    density: { min: 0, max: 2, step: 0.01, default: POINTILLISM_DEFAULTS.density },
+    strokeSoftness: { min: 0.025, max: 0.45, step: 0.005, default: POINTILLISM_DEFAULTS.strokeSoftness },
+    paintThickness: { min: 0, max: 3, step: 0.01, default: POINTILLISM_DEFAULTS.paintThickness },
+    saturation: { min: 0, max: 3, step: 0.01, default: POINTILLISM_DEFAULTS.saturation },
+    lumaLevels: { min: 2, max: 24, step: 1, default: POINTILLISM_DEFAULTS.lumaLevels },
+    contrastDotMix: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.contrastDotMix },
+    complementaryMix: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.complementaryMix },
+    warmCoolSplit: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.warmCoolSplit },
+    paletteStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.paletteStrength },
+    paletteIndex: {
+        kind: 'enum',
+        options: POINTILLISM_PALETTE_OPTIONS,
+        default: POINTILLISM_DEFAULTS.paletteIndex
+    },
+    sourceStructureBlend: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.sourceStructureBlend },
+    seed: { min: 0, max: 997, step: 1, default: POINTILLISM_DEFAULTS.seed },
+    minVisibleAlpha: { min: 0, max: 0.05, step: 0.001, default: POINTILLISM_DEFAULTS.minVisibleAlpha }
+};
+
 const buildPersistentSpec = (key: string): EffectParamUiSpec => {
     const kind = getPersistentParamFieldKind(key);
     const base: EffectParamUiSpec = { key, label: PERSISTENT_PARAM_LABELS[key] ?? labelForKey(key), kind };
@@ -549,6 +593,7 @@ function persistentParamOverrideFor(effectType: string, key: string): Persistent
     if (effectType === 'nostalgic-comic') return NOSTALGIC_COMIC_PARAM_UI[key];
     if (effectType === 'yiyun-dianran') return YIYUN_DIANRAN_PARAM_UI[key];
     if (effectType === 'palette-pixel') return PALETTE_PIXEL_PARAM_UI[key];
+    if (effectType === 'pointillism-stipple') return POINTILLISM_PARAM_UI[key];
     return undefined;
 }
 

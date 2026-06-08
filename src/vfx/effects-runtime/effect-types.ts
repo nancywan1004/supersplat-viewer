@@ -60,6 +60,7 @@ export const PERSISTENT_EFFECT_TYPE_VALUES = [
     'nostalgic-comic',
     'yiyun-dianran',
     'palette-pixel',
+    'pointillism-stipple',
     'sparkle-twinkle',
     'overall-wave',
     'butterfly-particle'
@@ -87,7 +88,8 @@ export const PERSISTENT_CAMERA_EFFECT_TYPE_VALUES = [
 export const PERSISTENT_STYLIZATION_EFFECT_TYPE_VALUES = [
     'nostalgic-comic',
     'yiyun-dianran',
-    'palette-pixel'
+    'palette-pixel',
+    'pointillism-stipple'
 ] as const;
 
 export const PERSISTENT_SCENE_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSISTENT_SCENE_EFFECT_TYPE_VALUES);

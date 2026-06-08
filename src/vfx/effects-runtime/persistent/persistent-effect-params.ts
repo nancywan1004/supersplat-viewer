@@ -86,6 +86,25 @@ const PALETTE_PIXEL = new Set([
     'ditherSpread'
 ]);
 
+const POINTILLISM_STIPPLE = new Set([
+    'dotScale',
+    'strokeAspect',
+    'roundness',
+    'density',
+    'strokeSoftness',
+    'paintThickness',
+    'saturation',
+    'lumaLevels',
+    'contrastDotMix',
+    'complementaryMix',
+    'warmCoolSplit',
+    'paletteStrength',
+    'paletteIndex',
+    'sourceStructureBlend',
+    'seed',
+    'minVisibleAlpha'
+]);
+
 const SPARKLE_TWINKLE = new Set([
     'pointSize',
     'sparkleDensity',
@@ -139,6 +158,7 @@ const BY_TYPE: Record<string, ReadonlySet<string>> = {
     'nostalgic-comic': NOSTALGIC_COMIC,
     'yiyun-dianran': YIYUN_DIANRAN,
     'palette-pixel': PALETTE_PIXEL,
+    'pointillism-stipple': POINTILLISM_STIPPLE,
     'sparkle-twinkle': SPARKLE_TWINKLE,
     'overall-wave': OVERALL_WAVE,
     'butterfly-particle': BUTTERFLY_PARTICLE
