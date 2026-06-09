@@ -23,10 +23,10 @@ const REFINEMENT_SPLAT_BUDGET = platform.mobile ? 3_000_000 : 8_000_000;
 const POST_DOWNLOAD_SETTLE_FRAMES = 30;
 // 每个 chunk 落地后短促推动上屏
 const PER_FILE_SETTLE_FRAMES = 12;
-// refinement 阶段优先保证视野中心变清晰，边缘 chunk 可延后
+// refinement 阶段按 score 排序的下载 gate 上限（始终单队列，不再等 critical 下完）
 const FOREGROUND_DOWNLOAD_LIMIT = platform.mobile ? 32 : 64;
-// 最先下载的核心文件数（严格两阶段：核心下完再下其余前景）
-const CRITICAL_DOWNLOAD_LIMIT = platform.mobile ? 6 : 16;
+// 仅用于 pin 保活：score Top N 已落地的中心 SOG 额外 incRefCount，不参与下载 gate 截断
+const CRITICAL_DOWNLOAD_LIMIT = platform.mobile ? 4 : 8;
 // refinement 期间启用 underfill（方案 A）：在 [optimal, optimal+limit] 内显示已加载的最细档
 const REFINEMENT_LOD_UNDERFILL_LIMIT = platform.mobile ? 2 : 3;
 
@@ -510,14 +510,6 @@ function countMissingUniqueFiles(octree: OctreeLike, files: PrioritizedFile[]): 
     return count;
 }
 
-/** 方案 B：下载时每次只向 optimal 靠近一档（中间 SOG 通常更小，更快落地 + 配合 underfill 阶梯上屏） */
-function selectStepDownloadLod(currentLod: number, optimalLod: number): number {
-    if (currentLod < 0 || currentLod <= optimalLod) {
-        return optimalLod;
-    }
-    return Math.max(optimalLod, currentLod - 1);
-}
-
 function buildPriorityFiles(
     app: AppBase,
     octree: OctreeLike,
@@ -655,14 +647,7 @@ function buildPriorityFiles(
             staleLodNodes++;
         }
 
-        const optimalFi = node.lods[optimalLod]?.fileIndex ?? -1;
-        if (optimalFi !== -1 && octree.getFileResource(optimalFi)) {
-            staleLoadedNodes++;
-            continue;
-        }
-
-        const downloadLod = selectStepDownloadLod(currentLod, optimalLod);
-        const fi = node.lods[downloadLod]?.fileIndex ?? -1;
+        const fi = node.lods[optimalLod]?.fileIndex ?? -1;
         if (fi !== -1 && octree.getFileResource(fi)) {
             staleLoadedNodes++;
         } else if (fi !== -1) {
@@ -862,8 +847,7 @@ export function createOctreeRefinementController(
 
         const criticalBatch = batch.slice(0, CRITICAL_DOWNLOAD_LIMIT);
         const foregroundBatch = batch.slice(0, FOREGROUND_DOWNLOAD_LIMIT);
-        const inCriticalPhase = criticalPendingUnique > 0;
-        const activeBatch = inCriticalPhase ? criticalBatch : foregroundBatch;
+        const activeBatch = foregroundBatch;
 
         const pendingFileIndices: number[] = [];
         const priorityUrls: string[] = [];
@@ -986,7 +970,7 @@ export function createOctreeRefinementController(
                 const inFlight = loader?._currentlyLoading?.size ?? 0;
                 console.log('[octree-refinement]', {
                     boostActive,
-                    downloadPhase: inCriticalPhase ? 'critical' : 'foreground',
+                    pinBatchSize: criticalBatch.length,
                     pinnedCritical: pinnedCritical.size,
                     pendingUniqueFiles,
                     criticalPendingUnique,
