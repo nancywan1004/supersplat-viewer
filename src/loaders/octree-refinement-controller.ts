@@ -73,6 +73,8 @@ type OctreeLike = {
     __refinementPriorityUrls?: Set<string>;
 };
 
+export type { OctreeLike };
+
 type OctreeInstanceLike = {
     octree: OctreeLike;
     nodeInfos: Array<{ currentLod: number; optimalLod: number }>;
@@ -599,6 +601,102 @@ function countMissingUniqueFiles(octree: OctreeLike, files: PrioritizedFile[]): 
         }
     }
     return count;
+}
+
+export const STREAMING_VIEWPORT_READY_RATIO = 0.8;
+
+export type StreamingViewportBootstrapStatus = {
+    visibleNodes: number;
+    unplacedVisibleNodes: number;
+    placedVisibleNodes: number;
+    /** 视锥内已上屏 node 占比 [0,1] */
+    placementRatio: number;
+    ready: boolean;
+};
+
+/** streaming 首屏：视锥内足够比例 node 已至少显示一档（粗层即可） */
+export function getStreamingViewportBootstrapStatus(
+    app: AppBase,
+    octree: OctreeLike,
+    gsplatEntity: Entity,
+    cameraEntity: Entity,
+    readyRatio = STREAMING_VIEWPORT_READY_RATIO
+): StreamingViewportBootstrapStatus {
+    const camera = cameraEntity.camera;
+    if (!camera || !octree.nodes.length) {
+        return {
+            visibleNodes: 0,
+            unplacedVisibleNodes: 0,
+            placedVisibleNodes: 0,
+            placementRatio: 1,
+            ready: true
+        };
+    }
+
+    const instances = findAllOctreeInstances(app, octree, gsplatEntity);
+    const nodeInfos = instances[0]?.nodeInfos;
+    if (!nodeInfos) {
+        return {
+            visibleNodes: 0,
+            unplacedVisibleNodes: 0,
+            placedVisibleNodes: 0,
+            placementRatio: 0,
+            ready: false
+        };
+    }
+
+    _viewProj.mul2(camera.projectionMatrix, camera.viewMatrix);
+    _frustum.setFromMat4(_viewProj);
+    const worldTransform = gsplatEntity.getWorldTransform();
+    const boundsFlat = octree.nodeBoundsMinMax;
+
+    let visibleNodes = 0;
+    let unplacedVisibleNodes = 0;
+
+    for (let nodeIndex = 0; nodeIndex < octree.nodes.length; nodeIndex++) {
+        const b = nodeIndex * 6;
+        _worldMin.set(boundsFlat[b], boundsFlat[b + 1], boundsFlat[b + 2]);
+        _worldMax.set(boundsFlat[b + 3], boundsFlat[b + 4], boundsFlat[b + 5]);
+        worldTransform.transformPoint(_worldMin, _worldMin);
+        worldTransform.transformPoint(_worldMax, _worldMax);
+
+        const minX = Math.min(_worldMin.x, _worldMax.x);
+        const minY = Math.min(_worldMin.y, _worldMax.y);
+        const minZ = Math.min(_worldMin.z, _worldMax.z);
+        const maxX = Math.max(_worldMin.x, _worldMax.x);
+        const maxY = Math.max(_worldMin.y, _worldMax.y);
+        const maxZ = Math.max(_worldMin.z, _worldMax.z);
+
+        if (!aabbIntersectsFrustum(_frustum, minX, minY, minZ, maxX, maxY, maxZ)) {
+            continue;
+        }
+
+        visibleNodes++;
+        const currentLod = nodeInfos[nodeIndex]?.currentLod ?? -1;
+        if (currentLod < 0) {
+            unplacedVisibleNodes++;
+        }
+    }
+
+    const placedVisibleNodes = visibleNodes - unplacedVisibleNodes;
+    const placementRatio = visibleNodes > 0 ? placedVisibleNodes / visibleNodes : 1;
+
+    return {
+        visibleNodes,
+        unplacedVisibleNodes,
+        placedVisibleNodes,
+        placementRatio,
+        ready: visibleNodes === 0 || placementRatio >= readyRatio
+    };
+}
+
+export function syncStreamingOctreePlacements(
+    app: AppBase,
+    octree: OctreeLike,
+    gsplatEntity: Entity
+): number {
+    const gsplatScene = app.scene.gsplat as GsplatSceneLike;
+    return syncOctreePendingPlacements(app, octree, gsplatEntity, gsplatScene, true);
 }
 
 function buildPriorityFiles(

@@ -62,6 +62,10 @@ import { readSkyboxCurrentUrlFromSettings } from './settings-serialize/settings-
 import { isCustomLodEnabled } from './loaders/lod-loader';
 import {
     createOctreeRefinementController,
+    getStreamingViewportBootstrapStatus,
+    syncStreamingOctreePlacements,
+    STREAMING_VIEWPORT_READY_RATIO,
+    type OctreeLike,
     type OctreeRefinementController
 } from './loaders/octree-refinement-controller';
 import { BloomController } from './vfx/bloom';
@@ -1153,6 +1157,9 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     idleTime += dt;
                     this.forceRenderNextFrame = idleTime < 4;
                     tryUnlockStreamingOnCameraIdle(dt);
+                    if (isStreamingOctree && streamingBootstrapGateReached) {
+                        tryStartStreamingAnimWhenViewportReady();
+                    }
                 });
 
                 events.on('inputEvent', (type: string) => {
@@ -1180,10 +1187,92 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 let streamingLodUnlocked = false;
                 let streamingPerfHandlerRegistered = false;
                 let streamingBootstrapGateReached = false;
+                let streamingViewportSyncCooldown = 0;
+                let streamingDisplayProgress = 0;
                 let streamCamIdleTime = 0;
                 const streamLastCamPos = new Vec3();
                 const streamLastCamFwd = new Vec3();
                 const STREAM_CAM_IDLE_UNLOCK_SEC = 0.15;
+
+                const updateStreamingLoadProgress = (fileProgress: number) => {
+                    if (!isStreamingOctree) {
+                        state.progress = fileProgress;
+                        return;
+                    }
+
+                    let displayProgress = fileProgress;
+                    if (streamingBootstrapGateReached) {
+                        const octree = octreeResource?.octree as OctreeLike | null | undefined;
+                        if (octree) {
+                            const viewport = getStreamingViewportBootstrapStatus(
+                                app,
+                                octree,
+                                results[0],
+                                camera
+                            );
+                            const viewportProgress =
+                                PROGRESS_THRESHOLD +
+                                Math.trunc(
+                                    Math.min(
+                                        1,
+                                        viewport.placementRatio / STREAMING_VIEWPORT_READY_RATIO
+                                    ) * (100 - PROGRESS_THRESHOLD)
+                                );
+                            displayProgress = Math.max(fileProgress, viewportProgress);
+                        }
+                    }
+
+                    if (state.animationStarted) {
+                        displayProgress = 100;
+                    }
+
+                    streamingDisplayProgress = Math.max(streamingDisplayProgress, displayProgress);
+                    state.progress = streamingDisplayProgress;
+                };
+
+                const tryStartStreamingAnimWhenViewportReady = () => {
+                    if (
+                        !isStreamingOctree ||
+                        state.animationStarted ||
+                        revealBlocksAnim(state) ||
+                        settings.startMode !== 'animTrack' ||
+                        !state.hasAnimation ||
+                        config.noanim
+                    ) {
+                        return;
+                    }
+                    const octree = octreeResource?.octree as OctreeLike | null | undefined;
+                    if (!octree) {
+                        return;
+                    }
+
+                    if (streamingViewportSyncCooldown <= 0) {
+                        syncStreamingOctreePlacements(app, octree, results[0]);
+                        streamingViewportSyncCooldown = 2;
+                    } else {
+                        streamingViewportSyncCooldown--;
+                    }
+
+                    const viewport = getStreamingViewportBootstrapStatus(app, octree, results[0], camera);
+                    updateStreamingLoadProgress(
+                        watermark > 0 ? Math.trunc(current / watermark * 100) : state.progress
+                    );
+
+                    if (!viewport.ready) {
+                        return;
+                    }
+
+                    state.animationStarted = true;
+                    state.animationPaused = false;
+                    state.progress = 100;
+                    events.fire('animationStarted');
+                    events.fire('progressThresholdReached', 100);
+                    console.log(
+                        'Streaming octree: viewport bootstrap ready',
+                        `${Math.round(viewport.placementRatio * 100)}% placed`,
+                        `(${viewport.placedVisibleNodes}/${viewport.visibleNodes} visible nodes), starting animation`
+                    );
+                };
 
                 // 首屏粗层加载完成后仍可能长期 loading>0；LOD 解锁不能等 loading===0
                 const unlockStreamingLod = () => {
@@ -1315,37 +1404,51 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     if (loading !== current) {
                         watermark = Math.max(watermark, loading);
                         current = watermark - loading;
-                        
+
                         let progress: number;
                         // In custom LOD mode, if animation has started, show 100% progress
                         if (isCustomLod && state.animationStarted) {
                             progress = 100;
                         } else {
                             progress = Math.trunc(current / watermark * 100);
-                            
+
                             // In custom LOD mode, ensure progress never decreases
                             if (isCustomLod) {
                                 maxProgress = Math.max(maxProgress, progress);
                                 progress = maxProgress;
                             }
                         }
-                        
-                        state.progress = progress;
-                        
-                        // When progress reaches threshold, hide progress UI and start animation if available
+
+                        if (isStreamingOctree) {
+                            updateStreamingLoadProgress(progress);
+                        } else {
+                            state.progress = progress;
+                        }
+
+                        // 50%：streaming 仅开门禁，进度条继续走到视锥上屏；非 streaming 可隐藏 UI 并播 anim
                         if (!progressUIHidden && progress >= PROGRESS_THRESHOLD) {
-                            progressUIHidden = true;
                             streamingBootstrapGateReached = true;
-                            // Fire event to hide progress UI
-                            events.fire('progressThresholdReached', progress);
-                            
-                            // Start animation if available（有 reveal 时由 revealComplete 回调启动，此处不启动）
-                            if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !state.animationStarted && !revealBlocksAnim(state)) {
-                                state.animationStarted = true;
-                                console.log(`Progress reached ${PROGRESS_THRESHOLD}%, starting animation`);
-                                state.animationPaused = false;
-                                events.fire('animationStarted');
+                            tryStartStreamingAnimWhenViewportReady();
+
+                            if (!isStreamingOctree) {
+                                progressUIHidden = true;
+                                events.fire('progressThresholdReached', progress);
+
+                                if (
+                                    settings.startMode === 'animTrack' &&
+                                    state.hasAnimation &&
+                                    !config.noanim &&
+                                    !state.animationStarted &&
+                                    !revealBlocksAnim(state)
+                                ) {
+                                    state.animationStarted = true;
+                                    console.log(`Progress reached ${PROGRESS_THRESHOLD}%, starting animation`);
+                                    state.animationPaused = false;
+                                    events.fire('animationStarted');
+                                }
                             }
+                        } else if (isStreamingOctree && streamingBootstrapGateReached) {
+                            tryStartStreamingAnimWhenViewportReady();
                         }
                     }
                 };
