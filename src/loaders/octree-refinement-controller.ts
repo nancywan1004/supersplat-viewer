@@ -14,12 +14,11 @@ import type { Global } from '../types';
 const REF_TAN_HALF_FOV = Math.tan(22.5 * math.DEG_TO_RAD);
 
 const DEFAULT_MAX_CONCURRENT = 2;
-const DEFAULT_LOD_UPDATE_DISTANCE = 1;
 
-const BOOST_MAX_CONCURRENT = platform.mobile ? 4 : 6;
+const BOOST_MAX_CONCURRENT = platform.mobile ? 4 : 8;
 const BOOST_LOD_UPDATE_DISTANCE = 0;
 // refinement 阶段放宽 budget 但不设 0（0=无上限，细层全上会撑爆 CPU sort 内存）
-const REFINEMENT_SPLAT_BUDGET = platform.mobile ? 3_000_000 : 6_000_000;
+const REFINEMENT_SPLAT_BUDGET = platform.mobile ? 3_000_000 : 8_000_000;
 // 下载完成后继续推动渲染/work-buffer 重建的帧数
 const POST_DOWNLOAD_SETTLE_FRAMES = 30;
 // 每个 chunk 落地后短促推动上屏
@@ -27,7 +26,9 @@ const PER_FILE_SETTLE_FRAMES = 12;
 // refinement 阶段优先保证视野中心变清晰，边缘 chunk 可延后
 const FOREGROUND_DOWNLOAD_LIMIT = platform.mobile ? 32 : 64;
 // 最先下载的核心文件数（严格两阶段：核心下完再下其余前景）
-const CRITICAL_DOWNLOAD_LIMIT = platform.mobile ? 6 : 12;
+const CRITICAL_DOWNLOAD_LIMIT = platform.mobile ? 6 : 16;
+// refinement 期间启用 underfill（方案 A）：在 [optimal, optimal+limit] 内显示已加载的最细档
+const REFINEMENT_LOD_UNDERFILL_LIMIT = platform.mobile ? 2 : 3;
 
 type OctreeLod = {
     fileIndex: number;
@@ -58,6 +59,7 @@ type OctreeLike = {
     files: Array<{ url: string }>;
     ensureFileResource: (fileIndex: number) => void;
     getFileResource: (fileIndex: number) => unknown;
+    incRefCount?: (fileIndex: number) => void;
     assetLoader?: OctreeAssetLoaderLike | null;
     __refinementEnsurePatched?: boolean;
     __originalEnsureFileResource?: (fileIndex: number) => void;
@@ -77,6 +79,7 @@ type GsplatSceneLike = {
     lodBehindPenalty: number;
     lodUpdateDistance: number;
     lodUpdateAngle: number;
+    lodUnderfillLimit: number;
     splatBudget: number;
     dirty: boolean;
 };
@@ -439,6 +442,7 @@ function scoreVisibleNode(
     nodeIndex: number,
     localDistance: number,
     optimalLod: number,
+    maxLod: number,
     cameraPos: Vec3,
     cameraFwd: Vec3
 ): number {
@@ -474,7 +478,11 @@ function scoreVisibleNode(
     const centerBias = toCenter > 0 ? 1.2 : 0.6;
 
     const screenSize = extent / worldDistance;
-    const lodUrgency = 1 + optimalLod * 0.5;
+    // 越需要细档（optimalLod 越小）优先级越高
+    let lodUrgency = 1 + (maxLod - optimalLod) * 0.5;
+    if (optimalLod === 0) {
+        lodUrgency *= 1.25;
+    }
     return screenSize * lodUrgency * centerBias / (1 + localDistance * 0.02);
 }
 
@@ -500,6 +508,14 @@ function countMissingUniqueFiles(octree: OctreeLike, files: PrioritizedFile[]): 
         }
     }
     return count;
+}
+
+/** 方案 B：下载时每次只向 optimal 靠近一档（中间 SOG 通常更小，更快落地 + 配合 underfill 阶梯上屏） */
+function selectStepDownloadLod(currentLod: number, optimalLod: number): number {
+    if (currentLod < 0 || currentLod <= optimalLod) {
+        return optimalLod;
+    }
+    return Math.max(optimalLod, currentLod - 1);
 }
 
 function buildPriorityFiles(
@@ -621,6 +637,7 @@ function buildPriorityFiles(
             nodeIndex,
             fovAdjustedDistance,
             optimalLod,
+            maxLod,
             worldCameraPos,
             worldCameraFwd
         );
@@ -637,7 +654,15 @@ function buildPriorityFiles(
         if (currentLod < 0 || currentLod > optimalLod) {
             staleLodNodes++;
         }
-        const fi = node.lods[optimalLod]?.fileIndex ?? -1;
+
+        const optimalFi = node.lods[optimalLod]?.fileIndex ?? -1;
+        if (optimalFi !== -1 && octree.getFileResource(optimalFi)) {
+            staleLoadedNodes++;
+            continue;
+        }
+
+        const downloadLod = selectStepDownloadLod(currentLod, optimalLod);
+        const fi = node.lods[downloadLod]?.fileIndex ?? -1;
         if (fi !== -1 && octree.getFileResource(fi)) {
             staleLoadedNodes++;
         } else if (fi !== -1) {
@@ -660,9 +685,28 @@ function buildPriorityFiles(
     };
 }
 
+function pinLoadedCriticalFiles(
+    octree: OctreeLike,
+    criticalBatch: PrioritizedFile[],
+    pinnedCritical: Set<number>
+): void {
+    if (!octree.incRefCount) {
+        return;
+    }
+    for (let i = 0; i < criticalBatch.length; i++) {
+        const fi = criticalBatch[i].fileIndex;
+        if (pinnedCritical.has(fi) || !octree.getFileResource(fi)) {
+            continue;
+        }
+        octree.incRefCount(fi);
+        pinnedCritical.add(fi);
+    }
+}
+
 export type OctreeRefinementController = {
     start: () => void;
     destroy: () => void;
+    notifyCameraMoved: () => void;
 };
 
 export function createOctreeRefinementController(
@@ -698,15 +742,18 @@ export function createOctreeRefinementController(
     let savedLoaderConcurrency: number | null = null;
     let savedSplatBudget: number | null = null;
     let savedLodUpdateDistance: number | null = null;
+    let savedLodUnderfillLimit: number | null = null;
     let hadPendingOptimal = false;
     let hadPendingForeground = false;
     let hadPendingCritical = false;
     let settleFramesRemaining = 0;
     let prevCriticalPending = -1;
     let prevPendingUnique = -1;
-    let finishRequested = false;
+    let boostActive = false;
+    let cameraMovedSinceSettle = false;
+    const pinnedCritical = new Set<number>();
 
-    const enterRefinementMode = () => {
+    const applyBoostSettings = () => {
         const loader = octree.assetLoader;
         if (loader) {
             if (savedLoaderConcurrency === null) {
@@ -724,10 +771,29 @@ export function createOctreeRefinementController(
             savedSplatBudget = gsplatScene.splatBudget;
         }
         gsplatScene.splatBudget = REFINEMENT_SPLAT_BUDGET;
+
+        if (savedLodUnderfillLimit === null) {
+            savedLodUnderfillLimit = gsplatScene.lodUnderfillLimit ?? 0;
+        }
+        // 5 档资产 optimal=0 时 limit 至少为 4 才能包含 bootstrap L4；取 max 保证生效
+        const maxLod = octree.lodLevels - 1;
+        gsplatScene.lodUnderfillLimit = Math.max(REFINEMENT_LOD_UNDERFILL_LIMIT, maxLod);
         gsplatScene.dirty = true;
     };
 
+    const enterRefinementMode = () => {
+        if (boostActive) {
+            return;
+        }
+        boostActive = true;
+        applyBoostSettings();
+    };
+
     const restoreRefinementMode = () => {
+        if (!boostActive) {
+            return;
+        }
+        boostActive = false;
         if (savedLodUpdateDistance !== null) {
             gsplatScene.lodUpdateDistance = savedLodUpdateDistance;
             savedLodUpdateDistance = null;
@@ -735,6 +801,10 @@ export function createOctreeRefinementController(
         if (savedSplatBudget !== null) {
             gsplatScene.splatBudget = savedSplatBudget;
             savedSplatBudget = null;
+        }
+        if (savedLodUnderfillLimit !== null) {
+            gsplatScene.lodUnderfillLimit = savedLodUnderfillLimit;
+            savedLodUnderfillLimit = null;
         }
         const loader = octree.assetLoader;
         if (loader && savedLoaderConcurrency !== null) {
@@ -855,9 +925,28 @@ export function createOctreeRefinementController(
             (prevCriticalPending > 0 && criticalPendingUnique < prevCriticalPending);
         if (fileJustLanded) {
             settleFramesRemaining = Math.max(settleFramesRemaining, PER_FILE_SETTLE_FRAMES);
+            pinLoadedCriticalFiles(octree, criticalBatch, pinnedCritical);
         }
         prevCriticalPending = criticalPendingUnique;
         prevPendingUnique = pendingUniqueFiles;
+
+        const needsBoost =
+            cameraMovedSinceSettle ||
+            criticalPendingUnique > 0 ||
+            staleLoadedNodes > 0 ||
+            (needsLodSwitch && pendingUniqueFiles > 0) ||
+            settleFramesRemaining > 0;
+
+        if (needsBoost) {
+            enterRefinementMode();
+            cameraMovedSinceSettle = false;
+        } else if (boostActive) {
+            restoreRefinementMode();
+            const loader = octree.assetLoader;
+            if (loader) {
+                clearRefinementPriorityUrls(octree, loader);
+            }
+        }
 
         let syncedInstances = 0;
         const foregroundDownloadsComplete = foregroundPendingUnique === 0;
@@ -873,6 +962,16 @@ export function createOctreeRefinementController(
             syncedInstances = syncOctreePendingPlacements(app, octree, gsplatEntity, gsplatScene, true);
         }
 
+        if (fileJustLanded && syncedInstances === 0 && (staleLoadedNodes > 0 || needsLodSwitch)) {
+            syncedInstances = syncOctreePendingPlacements(
+                app,
+                octree,
+                gsplatEntity,
+                gsplatScene,
+                foregroundDownloadsComplete
+            );
+        }
+
         const isSettling = settleFramesRemaining > 0;
         if (isSettling) {
             settleFramesRemaining--;
@@ -886,7 +985,9 @@ export function createOctreeRefinementController(
                 const queueLen = loader?._loadQueue?.length ?? 0;
                 const inFlight = loader?._currentlyLoading?.size ?? 0;
                 console.log('[octree-refinement]', {
+                    boostActive,
                     downloadPhase: inCriticalPhase ? 'critical' : 'foreground',
+                    pinnedCritical: pinnedCritical.size,
                     pendingUniqueFiles,
                     criticalPendingUnique,
                     foregroundPendingUnique,
@@ -901,6 +1002,7 @@ export function createOctreeRefinementController(
                     suspended,
                     maxConcurrent: loader?.maxConcurrentLoads,
                     splatBudget: gsplatScene.splatBudget,
+                    lodUnderfillLimit: gsplatScene.lodUnderfillLimit,
                     lodRange: [gsplatScene.lodRangeMin, gsplatScene.lodRangeMax]
                 });
             }
@@ -912,15 +1014,6 @@ export function createOctreeRefinementController(
             app.renderNextFrame = true;
         }
 
-        if (
-            foregroundDownloadsComplete &&
-            criticalPendingUnique === 0 &&
-            priorityUrls.length === 0 &&
-            staleLoadedNodes === 0 &&
-            settleFramesRemaining === 0
-        ) {
-            finishRequested = true;
-        }
         return priorityUrls.length;
     };
 
@@ -929,10 +1022,9 @@ export function createOctreeRefinementController(
             return;
         }
         runPriorityPrefetch();
-        if (finishRequested) {
-            stopRefinementController();
-        }
     };
+
+    let prevFrameLoading = -1;
 
     return {
         start() {
@@ -940,15 +1032,23 @@ export function createOctreeRefinementController(
                 return;
             }
             active = true;
-            finishRequested = false;
+            boostActive = false;
+            cameraMovedSinceSettle = false;
+            pinnedCritical.clear();
             enterRefinementMode();
 
             updateHandler = onUpdate;
             app.on('update', updateHandler);
 
             const eventHandler = app.systems.gsplat;
-            frameReadyHandler = () => {
-                if (settleFramesRemaining > 0) {
+            frameReadyHandler = (_camera: unknown, _layer: unknown, _ready: unknown, loading: unknown) => {
+                const loadingCount = typeof loading === 'number' ? loading : -1;
+                const loadingDropped = prevFrameLoading > 0 && loadingCount >= 0 && loadingCount < prevFrameLoading;
+                if (loadingCount >= 0) {
+                    prevFrameLoading = loadingCount;
+                }
+                if (loadingDropped || settleFramesRemaining > 0) {
+                    syncOctreePendingPlacements(app, octree, gsplatEntity, gsplatScene, false);
                     markOctreeInstancesDirty(app, octree, gsplatEntity);
                     gsplatScene.dirty = true;
                     app.renderNextFrame = true;
@@ -956,13 +1056,22 @@ export function createOctreeRefinementController(
             };
             eventHandler.on('frame:ready', frameReadyHandler);
 
-            perfModeHandler = () => enterRefinementMode();
+            perfModeHandler = () => {
+                if (boostActive) {
+                    applyBoostSettings();
+                }
+            };
             events.on('performanceMode:changed', perfModeHandler);
 
             runPriorityPrefetch();
-            if (finishRequested) {
-                stopRefinementController();
+        },
+
+        notifyCameraMoved() {
+            if (!active) {
+                return;
             }
+            cameraMovedSinceSettle = true;
+            settleFramesRemaining = 0;
         },
 
         destroy() {

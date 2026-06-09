@@ -1215,20 +1215,24 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 };
 
                 const tryUnlockStreamingOnCameraIdle = (dt: number) => {
-                    if (!isStreamingOctree || streamingLodUnlocked || !streamingBootstrapGateReached) {
+                    if (!isStreamingOctree || !streamingBootstrapGateReached) {
                         return;
                     }
                     const camPos = camera.getPosition();
                     const camFwd = camera.forward;
                     const moved = streamLastCamPos.distance(camPos) > 0.03;
                     const rotated = streamLastCamFwd.dot(camFwd) < (1 - 0.015);
-                    if (moved || rotated) {
-                        streamCamIdleTime = 0;
-                    } else {
-                        streamCamIdleTime += dt;
-                        if (streamCamIdleTime >= STREAM_CAM_IDLE_UNLOCK_SEC) {
-                            unlockStreamingLod();
+                    if (!streamingLodUnlocked) {
+                        if (moved || rotated) {
+                            streamCamIdleTime = 0;
+                        } else {
+                            streamCamIdleTime += dt;
+                            if (streamCamIdleTime >= STREAM_CAM_IDLE_UNLOCK_SEC) {
+                                unlockStreamingLod();
+                            }
                         }
+                    } else if (moved || rotated) {
+                        this.octreeRefinementController?.notifyCameraMoved();
                     }
                     streamLastCamPos.copy(camPos);
                     streamLastCamFwd.copy(camFwd);
