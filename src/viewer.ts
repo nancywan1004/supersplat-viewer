@@ -66,6 +66,7 @@ import {
     syncStreamingOctreePlacements,
     STREAMING_VIEWPORT_READY_RATIO,
     type OctreeLike,
+    type StreamingViewportBootstrapOptions,
     type OctreeRefinementController
 } from './loaders/octree-refinement-controller';
 import { BloomController } from './vfx/bloom';
@@ -1158,7 +1159,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     this.forceRenderNextFrame = idleTime < 4;
                     tryUnlockStreamingOnCameraIdle(dt);
                     if (isStreamingOctree && streamingBootstrapGateReached) {
-                        tryStartStreamingAnimWhenViewportReady();
+                        pollStreamingBootstrapComplete();
                     }
                 });
 
@@ -1194,6 +1195,10 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 const streamLastCamFwd = new Vec3();
                 const STREAM_CAM_IDLE_UNLOCK_SEC = 0.15;
 
+                const streamingViewportBootstrapOptions = (): StreamingViewportBootstrapOptions => ({
+                    excludeViewportEdgeNodes: true
+                });
+
                 const updateStreamingLoadProgress = (fileProgress: number) => {
                     if (!isStreamingOctree) {
                         state.progress = fileProgress;
@@ -1208,16 +1213,14 @@ z: ${cameraInfo.target.z.toFixed(6)}
                                 app,
                                 octree,
                                 results[0],
-                                camera
+                                camera,
+                                STREAMING_VIEWPORT_READY_RATIO,
+                                streamingViewportBootstrapOptions()
                             );
-                            const viewportProgress =
-                                PROGRESS_THRESHOLD +
-                                Math.trunc(
-                                    Math.min(
-                                        1,
-                                        viewport.placementRatio / STREAMING_VIEWPORT_READY_RATIO
-                                    ) * (100 - PROGRESS_THRESHOLD)
-                                );
+                            const viewportProgress = viewport.ready
+                                ? 100
+                                : PROGRESS_THRESHOLD +
+                                  Math.round(viewport.placementRatio * (100 - PROGRESS_THRESHOLD));
                             displayProgress = Math.max(fileProgress, viewportProgress);
                         }
                     }
@@ -1230,15 +1233,8 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     state.progress = streamingDisplayProgress;
                 };
 
-                const tryStartStreamingAnimWhenViewportReady = () => {
-                    if (
-                        !isStreamingOctree ||
-                        state.animationStarted ||
-                        revealBlocksAnim(state) ||
-                        settings.startMode !== 'animTrack' ||
-                        !state.hasAnimation ||
-                        config.noanim
-                    ) {
+                const pollStreamingBootstrapComplete = () => {
+                    if (!isStreamingOctree || !streamingBootstrapGateReached) {
                         return;
                     }
                     const octree = octreeResource?.octree as OctreeLike | null | undefined;
@@ -1253,12 +1249,35 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         streamingViewportSyncCooldown--;
                     }
 
-                    const viewport = getStreamingViewportBootstrapStatus(app, octree, results[0], camera);
+                    const viewport = getStreamingViewportBootstrapStatus(
+                        app,
+                        octree,
+                        results[0],
+                        camera,
+                        STREAMING_VIEWPORT_READY_RATIO,
+                        streamingViewportBootstrapOptions()
+                    );
                     updateStreamingLoadProgress(
-                        watermark > 0 ? Math.trunc(current / watermark * 100) : state.progress
+                        watermark > 0 ? Math.trunc((current / watermark) * 100) : state.progress
                     );
 
                     if (!viewport.ready) {
+                        return;
+                    }
+
+                    if (!progressUIHidden) {
+                        progressUIHidden = true;
+                        state.progress = 100;
+                        events.fire('progressThresholdReached', 100);
+                    }
+
+                    if (
+                        state.animationStarted ||
+                        revealBlocksAnim(state) ||
+                        settings.startMode !== 'animTrack' ||
+                        !state.hasAnimation ||
+                        config.noanim
+                    ) {
                         return;
                     }
 
@@ -1266,11 +1285,10 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     state.animationPaused = false;
                     state.progress = 100;
                     events.fire('animationStarted');
-                    events.fire('progressThresholdReached', 100);
                     console.log(
                         'Streaming octree: viewport bootstrap ready',
                         `${Math.round(viewport.placementRatio * 100)}% placed`,
-                        `(${viewport.placedVisibleNodes}/${viewport.visibleNodes} visible nodes), starting animation`
+                        `(${viewport.placedVisibleNodes}/${viewport.visibleNodes} core visible nodes), starting animation`
                     );
                 };
 
@@ -1428,7 +1446,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         // 50%：streaming 仅开门禁，进度条继续走到视锥上屏；非 streaming 可隐藏 UI 并播 anim
                         if (!progressUIHidden && progress >= PROGRESS_THRESHOLD) {
                             streamingBootstrapGateReached = true;
-                            tryStartStreamingAnimWhenViewportReady();
+                            pollStreamingBootstrapComplete();
 
                             if (!isStreamingOctree) {
                                 progressUIHidden = true;
@@ -1448,7 +1466,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                                 }
                             }
                         } else if (isStreamingOctree && streamingBootstrapGateReached) {
-                            tryStartStreamingAnimWhenViewportReady();
+                            pollStreamingBootstrapComplete();
                         }
                     }
                 };

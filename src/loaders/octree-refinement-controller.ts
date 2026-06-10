@@ -603,7 +603,12 @@ function countMissingUniqueFiles(octree: OctreeLike, files: PrioritizedFile[]): 
     return count;
 }
 
-export const STREAMING_VIEWPORT_READY_RATIO = 0.8;
+export const STREAMING_VIEWPORT_READY_RATIO = 1;
+
+export type StreamingViewportBootstrapOptions = {
+    /** 视口边缘仅擦到 AABB 的 node 不参与统计，避免 80% 来自边缘、中心仍有洞 */
+    excludeViewportEdgeNodes?: boolean;
+};
 
 export type StreamingViewportBootstrapStatus = {
     visibleNodes: number;
@@ -620,7 +625,8 @@ export function getStreamingViewportBootstrapStatus(
     octree: OctreeLike,
     gsplatEntity: Entity,
     cameraEntity: Entity,
-    readyRatio = STREAMING_VIEWPORT_READY_RATIO
+    readyRatio = STREAMING_VIEWPORT_READY_RATIO,
+    options?: StreamingViewportBootstrapOptions
 ): StreamingViewportBootstrapStatus {
     const camera = cameraEntity.camera;
     if (!camera || !octree.nodes.length) {
@@ -652,6 +658,7 @@ export function getStreamingViewportBootstrapStatus(
 
     let visibleNodes = 0;
     let unplacedVisibleNodes = 0;
+    const excludeEdge = options?.excludeViewportEdgeNodes !== false;
 
     for (let nodeIndex = 0; nodeIndex < octree.nodes.length; nodeIndex++) {
         const b = nodeIndex * 6;
@@ -671,6 +678,17 @@ export function getStreamingViewportBootstrapStatus(
             continue;
         }
 
+        if (excludeEdge) {
+            _worldCenter.set(
+                (minX + maxX) * 0.5,
+                (minY + maxY) * 0.5,
+                (minZ + maxZ) * 0.5
+            );
+            if (computeViewportEdgeFactor(_viewProj, _worldCenter) <= 0) {
+                continue;
+            }
+        }
+
         visibleNodes++;
         const currentLod = nodeInfos[nodeIndex]?.currentLod ?? -1;
         if (currentLod < 0) {
@@ -679,14 +697,17 @@ export function getStreamingViewportBootstrapStatus(
     }
 
     const placedVisibleNodes = visibleNodes - unplacedVisibleNodes;
-    const placementRatio = visibleNodes > 0 ? placedVisibleNodes / visibleNodes : 1;
+    const placementRatio = visibleNodes > 0 ? placedVisibleNodes / visibleNodes : 0;
 
     return {
         visibleNodes,
         unplacedVisibleNodes,
         placedVisibleNodes,
         placementRatio,
-        ready: visibleNodes === 0 || placementRatio >= readyRatio
+        ready:
+            visibleNodes > 0 &&
+            unplacedVisibleNodes === 0 &&
+            placementRatio >= readyRatio
     };
 }
 
