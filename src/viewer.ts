@@ -1101,15 +1101,29 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 };
                 const quality = platform.mobile ? budgets.mobile : budgets.desktop;
 
-                const applyPerfSettings = () => {
-                    const budget = () => {
-                        if (config.budget !== undefined && Number.isFinite(config.budget) && config.budget > 0) {
-                            return config.budget;
-                        }
-                        return state.performanceMode ? quality.low : quality.high;
-                    };
+                const resolveSplatBudgetMillions = (): number => {
+                    if (config.budget !== undefined && Number.isFinite(config.budget) && config.budget > 0) {
+                        return config.budget;
+                    }
+                    return state.performanceMode ? quality.low : quality.high;
+                };
 
-                    gsplat.splatBudget = budget() * 1000000;
+                const applyGsplatRenderer = (): void => {
+                    if (config.renderer === 'compute') {
+                        gsplat.renderer = GSPLAT_RENDERER_COMPUTE;
+                    } else if (config.renderer === 'gpu-sort') {
+                        gsplat.renderer = GSPLAT_RENDERER_RASTER_GPU_SORT;
+                    } else if (config.renderer === 'cpu-sort') {
+                        gsplat.renderer = GSPLAT_RENDERER_RASTER_CPU_SORT;
+                    } else if (actualRenderer === 'webgpu') {
+                        gsplat.renderer = rendererTable.webgpu;
+                    } else {
+                        gsplat.renderer = rendererTable.webgl;
+                    }
+                };
+
+                const applyPerfSettings = () => {
+                    gsplat.splatBudget = resolveSplatBudgetMillions() * 1000000;
                     gsplat.lodRangeMin = 0;
                     gsplat.lodRangeMax = 1000;
                     gsplat.colorUpdateAngle = state.performanceMode ? 4 : 2;
@@ -1142,6 +1156,10 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     if (lodLevels) {
                         gsplat.lodRangeMax = gsplat.lodRangeMin = lodLevels - 1;
                     }
+                    // streaming 首屏：尽早限 budget + 切 WebGPU 渲染器，避免默认 CPU sort + budget=0 在 Windows OOM
+                    gsplat.splatBudget = resolveSplatBudgetMillions() * 1_000_000;
+                    applyGsplatRenderer();
+                    gsplat.dirty = true;
                 }
 
                 // these two allow LOD behind camera to drop, saves lots of splats
@@ -1501,19 +1519,17 @@ z: ${cameraInfo.target.z.toFixed(6)}
                                 }
                             };
                             const onPerformanceModeChanged = isCustomLod ? updateLod : applyPerfSettings;
-                            if (config.renderer === 'compute') {
-                                gsplat.renderer = GSPLAT_RENDERER_COMPUTE;
-                                if ((app.scene.gsplat as any).currentRenderer !== GSPLAT_RENDERER_COMPUTE) {
-                                    console.warn('[GSplat] compute renderer requested but unavailable; falling back to engine renderer:', {
-                                        requested: config.renderer,
-                                        actualDevice: actualRenderer,
-                                        currentRenderer: (app.scene.gsplat as any).currentRenderer
-                                    });
-                                }
-                            } else {
-                                gsplat.renderer = rendererTable[actualRenderer];
+                            applyGsplatRenderer();
+                            if (
+                                config.renderer === 'compute' &&
+                                (app.scene.gsplat as { currentRenderer?: number }).currentRenderer !== GSPLAT_RENDERER_COMPUTE
+                            ) {
+                                console.warn('[GSplat] compute renderer requested but unavailable; falling back to engine renderer:', {
+                                    requested: config.renderer,
+                                    actualDevice: actualRenderer,
+                                    currentRenderer: (app.scene.gsplat as { currentRenderer?: number }).currentRenderer
+                                });
                             }
-
                             if (isCustomLod || config.fullload) {
                                 events.on('performanceMode:changed', onPerformanceModeChanged);
                                 onPerformanceModeChanged();

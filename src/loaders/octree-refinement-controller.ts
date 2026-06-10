@@ -20,8 +20,8 @@ const DEFAULT_MAX_CONCURRENT = 2;
 const BOOST_MAX_CONCURRENT = platform.mobile ? 4 : 8;
 // 非 0 可抑制视锥边缘 node 因微动触发的 LOD 来回切换（0 时每帧重算）
 const BOOST_LOD_UPDATE_DISTANCE = platform.mobile ? 0.12 : 0.18;
-// refinement 阶段放宽 budget 但不设 0（0=无上限，细层全上会撑爆 CPU sort 内存）
-const REFINEMENT_SPLAT_BUDGET = platform.mobile ? 3_000_000 : 8_000_000;
+// refinement 阶段 budget 与 perf 档位对齐，避免 Windows 上 CPU/GPU sort 缓冲 OOM
+const REFINEMENT_SPLAT_BUDGET = platform.mobile ? 2_000_000 : 4_000_000;
 // 下载完成后继续推动渲染/work-buffer 重建的帧数
 const POST_DOWNLOAD_SETTLE_FRAMES = 30;
 // 每个 chunk 落地后短促推动上屏
@@ -1297,7 +1297,10 @@ export function createOctreeRefinementController(
         if (savedSplatBudget === null) {
             savedSplatBudget = gsplatScene.splatBudget;
         }
-        gsplatScene.splatBudget = REFINEMENT_SPLAT_BUDGET;
+        const refinementBudget = savedSplatBudget > 0
+            ? Math.min(savedSplatBudget, REFINEMENT_SPLAT_BUDGET)
+            : REFINEMENT_SPLAT_BUDGET;
+        gsplatScene.splatBudget = refinementBudget;
 
         if (savedLodUnderfillLimit === null) {
             savedLodUnderfillLimit = gsplatScene.lodUnderfillLimit ?? 0;
