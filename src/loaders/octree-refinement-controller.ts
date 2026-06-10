@@ -305,8 +305,10 @@ function updateTrackedMissingFiles(
     files: PrioritizedFile[],
     octree: OctreeLike
 ): void {
+    const seenThisFrame = new Set<number>();
     for (let i = 0; i < files.length; i++) {
         const entry = files[i];
+        seenThisFrame.add(entry.fileIndex);
         if (octree.getFileResource(entry.fileIndex)) {
             continue;
         }
@@ -316,7 +318,7 @@ function updateTrackedMissingFiles(
         }
     }
     for (const fi of tracked.keys()) {
-        if (octree.getFileResource(fi)) {
+        if (octree.getFileResource(fi) || !seenThisFrame.has(fi)) {
             tracked.delete(fi);
         }
     }
@@ -558,8 +560,11 @@ function scoreVisibleNode(
     const worldDistance = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.001;
     const extent = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
 
-    const toCenter = _worldCenter.x * cameraFwd.x + _worldCenter.y * cameraFwd.y + _worldCenter.z * cameraFwd.z;
-    const centerBias = toCenter > 0 ? 1.2 : 0.6;
+    // 沿视线方向的 signed depth；此前误用 worldCenter·forward 会在场景远离原点时前后优先级颠倒
+    const depthAlongView = dx * cameraFwd.x + dy * cameraFwd.y + dz * cameraFwd.z;
+    const inFront = depthAlongView > 0;
+    const centerBias = inFront ? 1.2 : 0.35;
+    const depthBias = inFront ? 1 / (1 + depthAlongView * 0.02) : 0.2;
 
     const screenSize = extent / worldDistance;
     // 越需要细档（optimalLod 越小）优先级越高
@@ -567,7 +572,7 @@ function scoreVisibleNode(
     if (optimalLod === 0) {
         lodUrgency *= 1.25;
     }
-    return screenSize * lodUrgency * centerBias / (1 + localDistance * 0.02);
+    return screenSize * lodUrgency * centerBias * depthBias / (1 + localDistance * 0.02);
 }
 
 /** 1=屏幕中心，0=视口边缘外缘；用于抑制边缘 chunk 的 refinement 激进度 */
