@@ -33,10 +33,12 @@ const CRITICAL_DOWNLOAD_LIMIT = platform.mobile ? 4 : 8;
 const PIN_FILE_LIMIT = platform.mobile ? 6 : 12;
 // refinement 期间启用 underfill（方案 A）：在 [optimal, optimal+limit] 内显示已加载的最细档
 const REFINEMENT_LOD_UNDERFILL_LIMIT = platform.mobile ? 2 : 3;
-// 屏幕 NDC 边缘：内侧全权重，外侧跳过 refinement 下载，中间带放宽一档 optimal
-const VIEWPORT_EDGE_NDC_INNER = 0.62;
-const VIEWPORT_EDGE_NDC_OUTER = 0.9;
-const VIEWPORT_EDGE_RELAX_OPTIMAL = 0.35;
+// refinement foreground 窗口：中心 44% 全权重，超过 72% 视口半径先不主动下载细档。
+const VIEWPORT_EDGE_NDC_INNER = 0.44;
+const VIEWPORT_EDGE_NDC_OUTER = 0.72;
+const VIEWPORT_EDGE_RELAX_OPTIMAL = 0.45;
+/** edgeFactor 的指数：>1 时更强制「屏幕中心区域先下、再向外扩」 */
+const VIEWPORT_CENTER_SCORE_POWER = 5.0;
 /** 平移/旋转后保持 refinement burst 的帧数 */
 const CAMERA_MOVE_BURST_FRAMES = 18;
 /** 瞬间拉近（zoom）后更长的 burst，便于中心 chunk 优先变清晰 */
@@ -141,6 +143,12 @@ const _worldCenter = new Vec3();
 const _viewProj = new Mat4();
 const _frustum = new Frustum();
 const _clipPos = new Vec4();
+let _lastScoreMinX = 0;
+let _lastScoreMinY = 0;
+let _lastScoreMinZ = 0;
+let _lastScoreMaxX = 0;
+let _lastScoreMaxY = 0;
+let _lastScoreMaxZ = 0;
 
 function getRefinementDebugLevel(): number {
     try {
@@ -312,10 +320,7 @@ function updateTrackedMissingFiles(
         if (octree.getFileResource(entry.fileIndex)) {
             continue;
         }
-        const prev = tracked.get(entry.fileIndex);
-        if (prev === undefined || entry.score > prev) {
-            tracked.set(entry.fileIndex, entry.score);
-        }
+        tracked.set(entry.fileIndex, entry.score);
     }
     for (const fi of tracked.keys()) {
         if (octree.getFileResource(fi) || !seenThisFrame.has(fi)) {
@@ -544,6 +549,12 @@ function scoreVisibleNode(
     const maxX = Math.max(_worldMin.x, _worldMax.x);
     const maxY = Math.max(_worldMin.y, _worldMax.y);
     const maxZ = Math.max(_worldMin.z, _worldMax.z);
+    _lastScoreMinX = minX;
+    _lastScoreMinY = minY;
+    _lastScoreMinZ = minZ;
+    _lastScoreMaxX = maxX;
+    _lastScoreMaxY = maxY;
+    _lastScoreMaxZ = maxZ;
 
     if (!aabbIntersectsFrustum(frustum, minX, minY, minZ, maxX, maxY, maxZ)) {
         return 0;
@@ -554,25 +565,43 @@ function scoreVisibleNode(
         (minY + maxY) * 0.5,
         (minZ + maxZ) * 0.5
     );
-    const dx = _worldCenter.x - cameraPos.x;
-    const dy = _worldCenter.y - cameraPos.y;
-    const dz = _worldCenter.z - cameraPos.z;
-    const worldDistance = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.001;
     const extent = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
 
-    // 沿视线方向的 signed depth；此前误用 worldCenter·forward 会在场景远离原点时前后优先级颠倒
-    const depthAlongView = dx * cameraFwd.x + dy * cameraFwd.y + dz * cameraFwd.z;
-    const inFront = depthAlongView > 0;
-    const centerBias = inFront ? 1.2 : 0.35;
-    const depthBias = inFront ? 1 / (1 + depthAlongView * 0.02) : 0.2;
+    const centerDx = _worldCenter.x - cameraPos.x;
+    const centerDy = _worldCenter.y - cameraPos.y;
+    const centerDz = _worldCenter.z - cameraPos.z;
+    const centerDepth =
+        centerDx * cameraFwd.x +
+        centerDy * cameraFwd.y +
+        centerDz * cameraFwd.z;
+    const depthRadius =
+        (maxX - minX) * Math.abs(cameraFwd.x) * 0.5 +
+        (maxY - minY) * Math.abs(cameraFwd.y) * 0.5 +
+        (maxZ - minZ) * Math.abs(cameraFwd.z) * 0.5;
+    const farDepth = centerDepth + depthRadius;
+    if (farDepth <= 0) {
+        return 0;
+    }
+    const nearestDepth = Math.max(0.001, centerDepth - depthRadius);
+    const depthBias = 1 / (1 + nearestDepth * 0.055);
 
-    const screenSize = extent / worldDistance;
+    const screenSize = Math.sqrt(Math.max(extent / nearestDepth, 0));
     // 越需要细档（optimalLod 越小）优先级越高
     let lodUrgency = 1 + (maxLod - optimalLod) * 0.5;
     if (optimalLod === 0) {
         lodUrgency *= 1.25;
     }
-    return screenSize * lodUrgency * centerBias * depthBias / (1 + localDistance * 0.02);
+    return screenSize * lodUrgency * depthBias / (1 + localDistance * 0.02);
+}
+
+function edgeFactorFromNdcExtent(ndcExtent: number): number {
+    if (ndcExtent <= VIEWPORT_EDGE_NDC_INNER) {
+        return 1;
+    }
+    if (ndcExtent >= VIEWPORT_EDGE_NDC_OUTER) {
+        return 0;
+    }
+    return 1 - (ndcExtent - VIEWPORT_EDGE_NDC_INNER) / (VIEWPORT_EDGE_NDC_OUTER - VIEWPORT_EDGE_NDC_INNER);
 }
 
 /** 1=屏幕中心，0=视口边缘外缘；用于抑制边缘 chunk 的 refinement 激进度 */
@@ -583,14 +612,58 @@ function computeViewportEdgeFactor(viewProj: Mat4, worldCenter: Vec3): number {
         return 0;
     }
     const invW = 1 / _clipPos.w;
-    const ndcExtent = Math.max(Math.abs(_clipPos.x * invW), Math.abs(_clipPos.y * invW));
-    if (ndcExtent <= VIEWPORT_EDGE_NDC_INNER) {
-        return 1;
+    return edgeFactorFromNdcExtent(Math.max(Math.abs(_clipPos.x * invW), Math.abs(_clipPos.y * invW)));
+}
+
+/**
+ * 以 AABB 投影矩形到屏幕中心的最近距离打分，而不是只看 AABB 中心点。
+ * 近处前景块经常只有一部分覆盖屏幕中心；只用中心点会把它误判成边缘块。
+ */
+function computeViewportAabbEdgeFactor(
+    viewProj: Mat4,
+    minX: number,
+    minY: number,
+    minZ: number,
+    maxX: number,
+    maxY: number,
+    maxZ: number
+): number {
+    let projected = false;
+    let minNdcX = Infinity;
+    let minNdcY = Infinity;
+    let maxNdcX = -Infinity;
+    let maxNdcY = -Infinity;
+
+    for (let ix = 0; ix < 2; ix++) {
+        const x = ix === 0 ? minX : maxX;
+        for (let iy = 0; iy < 2; iy++) {
+            const y = iy === 0 ? minY : maxY;
+            for (let iz = 0; iz < 2; iz++) {
+                const z = iz === 0 ? minZ : maxZ;
+                _clipPos.set(x, y, z, 1);
+                viewProj.transformVec4(_clipPos, _clipPos);
+                if (_clipPos.w <= 0.001) {
+                    continue;
+                }
+                const invW = 1 / _clipPos.w;
+                const ndcX = _clipPos.x * invW;
+                const ndcY = _clipPos.y * invW;
+                minNdcX = Math.min(minNdcX, ndcX);
+                minNdcY = Math.min(minNdcY, ndcY);
+                maxNdcX = Math.max(maxNdcX, ndcX);
+                maxNdcY = Math.max(maxNdcY, ndcY);
+                projected = true;
+            }
+        }
     }
-    if (ndcExtent >= VIEWPORT_EDGE_NDC_OUTER) {
+
+    if (!projected) {
         return 0;
     }
-    return 1 - (ndcExtent - VIEWPORT_EDGE_NDC_INNER) / (VIEWPORT_EDGE_NDC_OUTER - VIEWPORT_EDGE_NDC_INNER);
+
+    const nearestNdcX = minNdcX > 0 ? minNdcX : (maxNdcX < 0 ? -maxNdcX : 0);
+    const nearestNdcY = minNdcY > 0 ? minNdcY : (maxNdcY < 0 ? -maxNdcY : 0);
+    return edgeFactorFromNdcExtent(Math.max(nearestNdcX, nearestNdcY));
 }
 
 /**
@@ -1104,7 +1177,15 @@ function buildPriorityFiles(
             continue;
         }
 
-        const edgeFactor = computeViewportEdgeFactor(_viewProj, _worldCenter);
+        const edgeFactor = computeViewportAabbEdgeFactor(
+            _viewProj,
+            _lastScoreMinX,
+            _lastScoreMinY,
+            _lastScoreMinZ,
+            _lastScoreMaxX,
+            _lastScoreMaxY,
+            _lastScoreMaxZ
+        );
         if (edgeFactor <= 0) {
             continue;
         }
@@ -1131,7 +1212,8 @@ function buildPriorityFiles(
         if (fi !== -1 && octree.getFileResource(fi)) {
             staleLoadedNodes++;
         } else if (fi !== -1) {
-            prioritized.push({ fileIndex: fi, score: score * edgeFactor * ladderBoost });
+            const edgeWeight = Math.pow(edgeFactor, VIEWPORT_CENTER_SCORE_POWER);
+            prioritized.push({ fileIndex: fi, score: score * edgeWeight * ladderBoost });
         }
     }
 
@@ -1730,6 +1812,7 @@ export function createOctreeRefinementController(
             hadPendingCritical = false;
             lastPriorityUrls = [];
             trackedMissingFiles.clear();
+            pinnedFiles.clear();
             staleSyncCooldown = 0;
             const loader = octree.assetLoader;
             if (loader) {
