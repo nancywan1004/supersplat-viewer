@@ -1193,6 +1193,16 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 let streamingBootstrapStallFrames = 0;
                 const streamLastCamPos = new Vec3();
                 const streamLastCamFwd = new Vec3();
+                let streamLastCamDist = this.cameraManager.camera.distance;
+                let streamLastCamFov = this.cameraManager.camera.fov;
+
+                events.on('octreeRefinement:activity', (activity: { active?: boolean }) => {
+                    if (activity?.active) {
+                        idleTime = 0;
+                        this.forceRenderNextFrame = true;
+                        app.renderNextFrame = true;
+                    }
+                });
 
                 const streamingViewportBootstrapOptions = (): StreamingViewportBootstrapOptions => ({
                     excludeViewportEdgeNodes: true
@@ -1361,15 +1371,24 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     if (!isStreamingOctree || !streamingBootstrapGateReached) {
                         return;
                     }
+                    const camState = this.cameraManager.camera;
                     const camPos = camera.getPosition();
                     const camFwd = camera.forward;
                     const moved = streamLastCamPos.distance(camPos) > 0.03;
                     const rotated = streamLastCamFwd.dot(camFwd) < (1 - 0.015);
-                    if (streamingLodUnlocked && (moved || rotated)) {
-                        this.octreeRefinementController?.notifyCameraMoved();
+                    const distDelta = Math.abs(camState.distance - streamLastCamDist);
+                    const fovDelta = Math.abs(camState.fov - streamLastCamFov);
+                    const zoomed = distDelta > Math.max(0.04, streamLastCamDist * 0.08) || fovDelta > 0.5;
+                    if (streamingLodUnlocked && (moved || rotated || zoomed)) {
+                        this.octreeRefinementController?.notifyCameraMoved({ zoom: zoomed });
+                        idleTime = 0;
+                        this.forceRenderNextFrame = true;
+                        app.renderNextFrame = true;
                     }
                     streamLastCamPos.copy(camPos);
                     streamLastCamFwd.copy(camFwd);
+                    streamLastCamDist = camState.distance;
+                    streamLastCamFov = camState.fov;
                 };
 
                 const readyHandler = (camera: CameraComponent, layer: Layer, ready: boolean, loading: number) => {
