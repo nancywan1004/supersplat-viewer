@@ -378,6 +378,39 @@ const unregisterPickerShaderPatches = (app: AppBase) => {
     pickerShaderPatchState.delete(device);
 };
 
+const ensureComputePickIdsReady = (app: AppBase, camera: Entity, worldLayer: Layer) => {
+    const gsplatScene = app.scene.gsplat;
+    if (gsplatScene.currentRenderer !== GSPLAT_RENDERER_COMPUTE) {
+        return;
+    }
+
+    if (!gsplatScene.enableIds) {
+        gsplatScene.enableIds = true;
+    }
+
+    const director = (app.renderer as unknown as {
+        gsplatDirector?: {
+            camerasMap?: Map<unknown, {
+                layersMap?: Map<unknown, {
+                    gsplatManager?: {
+                        handleFormatChange?: () => void;
+                        workBuffer?: { syncWithFormat?: () => void };
+                        update?: () => void;
+                    };
+                }>;
+            }>;
+        };
+    }).gsplatDirector;
+    const manager = director?.camerasMap?.get(camera.camera)?.layersMap?.get(worldLayer)?.gsplatManager;
+    if (!manager) {
+        return;
+    }
+
+    manager.handleFormatChange?.();
+    manager.workBuffer?.syncWithFormat?.();
+    manager.update?.();
+};
+
 const createPickCameraSnapshot = (): PickCameraSnapshot => ({
     position: new Vec3(),
     viewMatrix: new Mat4(),
@@ -758,6 +791,7 @@ class Picker {
             withShadowMaskPickScope(() => {
                 enginePicker ??= new EnginePicker(app, width, height, true);
                 enginePicker.resize(width, height);
+                ensureComputePickIdsReady(app, camera, worldLayer);
                 enginePicker.prepare(camera.camera, app.scene, [worldLayer]);
             });
             captureCameraSnapshot(camera, engineCacheCamera);
