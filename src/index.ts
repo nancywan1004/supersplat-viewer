@@ -333,6 +333,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         /** MORPH_ASSET_ADD_START / FINISH：asset 模块下仅拾取 Gaussian */
         morphAssetAddActive: false,
         cameraControlsEnabled: true,
+        loadingCameraControlsLocked: true,
         gizmoPointerActive: false,
         suppressAssetPointerClick: false,
 
@@ -382,6 +383,11 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         camera,
         renderer
     };
+
+    events.on('progressThresholdReached', () => {
+        state.loadingCameraControlsLocked = false;
+        events.fire('cameraControls:flushInputs');
+    });
 
     ensureViewSettings(global);
     applySceneAssetCollisionFromSettings(global);

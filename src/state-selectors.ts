@@ -67,3 +67,7 @@ export function isAnnotationDebugVisualEnabled(state: State): boolean {
 export function isEnvironmentDebugVisualEnabled(state: State): boolean {
     return !!(state.editMode && state.editLeftModule === 'environment' && state.previewMode !== true);
 }
+
+export function isCameraInteractionBlocked(state: State): boolean {
+    return state.cameraControlsEnabled === false || state.loadingCameraControlsLocked === true;
+}

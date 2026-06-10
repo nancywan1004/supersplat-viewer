@@ -249,6 +249,8 @@ type State = {
     morphAssetAddActive?: boolean;
     /** 相机输入是否启用（用于与 Gizmo 交互互斥） */
     cameraControlsEnabled?: boolean;
+    /** 首屏进度条完成前锁定相机输入；与 Gizmo/放置等 cameraControlsEnabled 互不覆盖 */
+    loadingCameraControlsLocked?: boolean;
     /** 正在拖拽场景/光源 Gizmo（pointerdown 命中轴起至 pointerup） */
     gizmoPointerActive?: boolean;
     /** 刚结束 Gizmo 手势：跳过一次资产模块 pointerup 场景选中，避免与 Gizmo 松手冲突 */

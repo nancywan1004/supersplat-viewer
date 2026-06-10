@@ -3,6 +3,7 @@ import { Vec3 } from 'playcanvas';
 import type { Collision } from '../../collision';
 import type { Picker } from '../../picker';
 import { isPlacementCursorActive } from '../../placement-cursor';
+import { isCameraInteractionBlocked } from '../../state-selectors';
 import type { Global } from '../../types';
 import { TAP_EPSILON } from '../shared';
 
@@ -74,6 +75,10 @@ class NavInteraction {
         if (!global || !canvas) return;
         if (isPlacementCursorActive()) return;
         const { state } = global;
+        if (isCameraInteractionBlocked(state)) {
+            canvas.style.cursor = '';
+            return;
+        }
         const canClickTarget = state.inputMode === 'desktop' &&
             state.cameraMode === 'walk' &&
             !state.gamingControls;
@@ -154,6 +159,7 @@ class NavInteraction {
     private async _handleDoubleTapAt(offsetX: number, offsetY: number) {
         const global = this._global;
         if (!global) return;
+        if (isCameraInteractionBlocked(global.state)) return;
         const { events } = global;
 
         // dblclick focuses orbit at the picked target from any navigation mode.
@@ -169,6 +175,13 @@ class NavInteraction {
     private _onPointerDown = (event: PointerEvent) => {
         const global = this._global;
         if (!global) return;
+        if (isCameraInteractionBlocked(global.state)) {
+            this._mouseClickTracking = false;
+            this._touchTapTracking = null;
+            this._lastMobileTap.time = 0;
+            this._updateCursor();
+            return;
+        }
 
         // record offsets for click/tap target picking
         this._lastPointerOffsetX = event.offsetX;
@@ -196,6 +209,7 @@ class NavInteraction {
     private _onPointerMove = (event: PointerEvent) => {
         const global = this._global;
         if (!global) return;
+        if (isCameraInteractionBlocked(global.state)) return;
         const { state, events } = global;
 
         if (this._mouseClickTracking && event.pointerType !== 'touch') {
@@ -221,6 +235,11 @@ class NavInteraction {
     private _onPointerUp = (event: PointerEvent) => {
         const global = this._global;
         if (!global) return;
+        if (isCameraInteractionBlocked(global.state)) {
+            this._mouseClickTracking = false;
+            this._touchTapTracking = null;
+            return;
+        }
         const { state, events } = global;
 
         if (this._mouseClickTracking && event.pointerType !== 'touch' && event.button === 0) {
@@ -286,6 +305,7 @@ class NavInteraction {
         if (!global || !canvas) return;
         if (eventName !== 'dblclick') return;
         if (!(event instanceof MouseEvent)) return;
+        if (isCameraInteractionBlocked(global.state)) return;
         this._suppressClick = true;
         await this._handleDoubleTapAt(event.offsetX, event.offsetY);
     };
@@ -293,6 +313,7 @@ class NavInteraction {
     private _onMobileTap = () => {
         const global = this._global;
         if (!global) return;
+        if (isCameraInteractionBlocked(global.state)) return;
         const { state, events } = global;
         if (this._suppressClick) {
             this._suppressClick = false;
