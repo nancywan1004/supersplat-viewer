@@ -1212,6 +1212,10 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 let streamingLodUnlocked = false;
                 let streamingPerfHandlerRegistered = false;
                 let streamingBootstrapGateReached = false;
+                let streamingSceneWarmupDone = false;
+                let streamingPendingCoarseDisplay = false;
+                let streamingCoarseDisplayed = false;
+                let streamingBootstrapDisplayFinalized = false;
                 let streamingViewportSyncCooldown = 0;
                 let streamingRefinementStableFrames = 0;
                 let streamingRefinementBaselinePending = 0;
@@ -1232,6 +1236,65 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 const streamingViewportBootstrapOptions = (): StreamingViewportBootstrapOptions => ({
                     excludeViewportEdgeNodes: true
                 });
+
+                const finalizeStreamingBootstrapDisplay = () => {
+                    if (streamingBootstrapDisplayFinalized) {
+                        return;
+                    }
+                    streamingBootstrapDisplayFinalized = true;
+                    if (!state.readyToRender) {
+                        state.readyToRender = true;
+                        ensureShadowPipelineReady();
+                    }
+                    events.fire('firstFrame');
+                    window.firstFrame?.();
+                };
+
+                const tryShowStreamingCoarseViewport = () => {
+                    if (streamingCoarseDisplayed) {
+                        return;
+                    }
+                    streamingCoarseDisplayed = true;
+                    if (streamingSceneWarmupDone) {
+                        if (!state.readyToRender) {
+                            state.readyToRender = true;
+                            ensureShadowPipelineReady();
+                        }
+                        return;
+                    }
+                    streamingPendingCoarseDisplay = true;
+                    runStreamingSceneWarmupOnce();
+                };
+
+                const runStreamingSceneWarmupOnce = () => {
+                    if (streamingSceneWarmupDone) {
+                        return;
+                    }
+                    streamingSceneWarmupDone = true;
+                    this.revealController?.ensureInitialEffectCreatedBeforeFirstDisplay?.();
+                    this.forceRenderNextFrame = true;
+                    app.renderNextFrame = true;
+                    app.once('frameend', () => {
+                        applyGsplatRenderer();
+                        if (
+                            config.renderer === 'compute' &&
+                            (app.scene.gsplat as { currentRenderer?: number }).currentRenderer !== GSPLAT_RENDERER_COMPUTE
+                        ) {
+                            console.warn('[GSplat] compute renderer requested but unavailable; falling back to engine renderer:', {
+                                requested: config.renderer,
+                                actualDevice: actualRenderer,
+                                currentRenderer: (app.scene.gsplat as { currentRenderer?: number }).currentRenderer
+                            });
+                        }
+                        gsplat.debug = config.colorize ? GSPLAT_DEBUG_LOD : GSPLAT_DEBUG_NONE;
+                        this.forceRenderNextFrame = false;
+                        if (streamingPendingCoarseDisplay && !state.readyToRender) {
+                            streamingPendingCoarseDisplay = false;
+                            state.readyToRender = true;
+                            ensureShadowPipelineReady();
+                        }
+                    });
+                };
 
                 const updateStreamingLoadProgress = (fileProgress: number) => {
                     if (!isStreamingOctree) {
@@ -1367,6 +1430,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         return;
                     }
 
+                    tryShowStreamingCoarseViewport();
                     unlockStreamingLod();
 
                     if (streamingViewportSyncCooldown <= 0) {
@@ -1397,8 +1461,13 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     }
 
                     if (!progressUIHidden) {
+                        if (!streamingLodUnlocked || state.progress < PROGRESS_COARSE_CAP) {
+                            streamingRefinementStableFrames = 0;
+                            return;
+                        }
                         progressUIHidden = true;
                         state.progress = 100;
+                        finalizeStreamingBootstrapDisplay();
                         events.fire('progressThresholdReached', 100);
                     }
 
@@ -1478,72 +1547,62 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
                 const readyHandler = (camera: CameraComponent, layer: Layer, ready: boolean, loading: number) => {
                     if (ready && loading === 0) {
-                        streamingBootstrapGateReached = true;
-                        // scene is done loading
-                        eventHandler.off('frame:ready', readyHandler);
+                        if (isStreamingOctree) {
+                            // streaming 首屏后 loading 会反复归零；不能在此开门禁/上屏/隐藏进度条
+                            runStreamingSceneWarmupOnce();
+                        } else {
+                            streamingBootstrapGateReached = true;
+                            eventHandler.off('frame:ready', readyHandler);
 
-                        // 关键：先创建 VFX 并预热一帧，再允许上屏显示
-                        // 避免首帧无 shader 的偏色/蓝光闪问题
-                        this.revealController?.ensureInitialEffectCreatedBeforeFirstDisplay?.();
+                            this.revealController?.ensureInitialEffectCreatedBeforeFirstDisplay?.();
+                            this.forceRenderNextFrame = true;
+                            app.renderNextFrame = true;
 
-                        // 强制渲染一帧（不显示），让 unified 模式创建材质并编译 shader
-                        this.forceRenderNextFrame = true;
-                        app.renderNextFrame = true;
+                            app.once('frameend', () => {
+                                if (state.readyToRender) return;
 
-                        // 在当前帧渲染完成后立即允许显示（比 requestAnimationFrame 更可靠）
-                        app.once('frameend', () => {
-                            if (state.readyToRender) return; // 已被其他路径设置则跳过
+                                state.readyToRender = true;
+                                ensureShadowPipelineReady();
+                                this.forceRenderNextFrame = false;
 
-                            state.readyToRender = true;
-                            ensureShadowPipelineReady();
-
-                            // 清除强制渲染标志，恢复按需渲染（场景已加载完成）
-                            this.forceRenderNextFrame = false;
-
-                            // In LOD mode, ensure animation is started (case it wasn't started earlier)
-                            // 有 reveal 时不在此处启动动画，等 revealComplete 后再启动
-                            if (isCustomLod && settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !revealBlocksAnim(state)) {
-                                console.log('LOD mode: all chunks loaded, ensuring animation is playing');
-                                state.animationStarted = true;
-                                state.animationPaused = false;
-                            }
-
-                            const updateLod = () => {
-                                const gsplatScene = (app.scene as any).gsplat;
-                                if (gsplatScene && gsplatScene.lodRangeMin !== undefined) {
-                                    gsplat.lodRangeMin = gsplatScene.lodRangeMin;
-                                    gsplat.lodRangeMax = gsplatScene.lodRangeMax;
-                                    if (gsplatScene.splatBudget !== undefined) {
-                                        results[0].gsplat.splatBudget = gsplatScene.splatBudget * 1000000;
-                                    }
+                                if (isCustomLod && settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !revealBlocksAnim(state)) {
+                                    console.log('LOD mode: all chunks loaded, ensuring animation is playing');
+                                    state.animationStarted = true;
+                                    state.animationPaused = false;
                                 }
-                            };
-                            const onPerformanceModeChanged = isCustomLod ? updateLod : applyPerfSettings;
-                            applyGsplatRenderer();
-                            if (
-                                config.renderer === 'compute' &&
-                                (app.scene.gsplat as { currentRenderer?: number }).currentRenderer !== GSPLAT_RENDERER_COMPUTE
-                            ) {
-                                console.warn('[GSplat] compute renderer requested but unavailable; falling back to engine renderer:', {
-                                    requested: config.renderer,
-                                    actualDevice: actualRenderer,
-                                    currentRenderer: (app.scene.gsplat as { currentRenderer?: number }).currentRenderer
-                                });
-                            }
-                            if (isCustomLod || config.fullload) {
-                                events.on('performanceMode:changed', onPerformanceModeChanged);
-                                onPerformanceModeChanged();
-                            }
-                            // streaming：等视锥粗层 bootstrap 完成后再 unlockStreamingLod（见 pollStreamingBootstrapComplete）
 
-                            gsplat.debug = config.colorize ? GSPLAT_DEBUG_LOD : GSPLAT_DEBUG_NONE;
+                                const updateLod = () => {
+                                    const gsplatScene = (app.scene as any).gsplat;
+                                    if (gsplatScene && gsplatScene.lodRangeMin !== undefined) {
+                                        gsplat.lodRangeMin = gsplatScene.lodRangeMin;
+                                        gsplat.lodRangeMax = gsplatScene.lodRangeMax;
+                                        if (gsplatScene.splatBudget !== undefined) {
+                                            results[0].gsplat.splatBudget = gsplatScene.splatBudget * 1000000;
+                                        }
+                                    }
+                                };
+                                const onPerformanceModeChanged = isCustomLod ? updateLod : applyPerfSettings;
+                                applyGsplatRenderer();
+                                if (
+                                    config.renderer === 'compute' &&
+                                    (app.scene.gsplat as { currentRenderer?: number }).currentRenderer !== GSPLAT_RENDERER_COMPUTE
+                                ) {
+                                    console.warn('[GSplat] compute renderer requested but unavailable; falling back to engine renderer:', {
+                                        requested: config.renderer,
+                                        actualDevice: actualRenderer,
+                                        currentRenderer: (app.scene.gsplat as { currentRenderer?: number }).currentRenderer
+                                    });
+                                }
+                                if (isCustomLod || config.fullload) {
+                                    events.on('performanceMode:changed', onPerformanceModeChanged);
+                                    onPerformanceModeChanged();
+                                }
 
-                            // 触发 firstFrame 事件
-                            events.fire('firstFrame');
-
-                            // emit first frame event on window
-                            window.firstFrame?.();
-                        });
+                                gsplat.debug = config.colorize ? GSPLAT_DEBUG_LOD : GSPLAT_DEBUG_NONE;
+                                events.fire('firstFrame');
+                                window.firstFrame?.();
+                            });
+                        }
                     }
 
                     // update loading status
