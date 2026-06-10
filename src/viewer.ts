@@ -62,10 +62,13 @@ import { readSkyboxCurrentUrlFromSettings } from './settings-serialize/settings-
 import { isCustomLodEnabled } from './loaders/lod-loader';
 import {
     createOctreeRefinementController,
+    computeStreamingRefinementProgressRatio,
     ensureStreamingBootstrapCoarseFiles,
     getStreamingViewportBootstrapStatus,
+    getStreamingViewportRefinementStatus,
     syncStreamingOctreePlacements,
     STREAMING_VIEWPORT_READY_RATIO,
+    STREAMING_VIEWPORT_REFINEMENT_READY_RATIO,
     type OctreeLike,
     type StreamingViewportBootstrapOptions,
     type OctreeRefinementController
@@ -1180,7 +1183,10 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 // For custom LOD mode, track the maximum progress to prevent regression
                 let maxProgress = 0;
                 let progressUIHidden = false; // Track if progress UI has been hidden
-                const PROGRESS_THRESHOLD = 50; // Hide progress UI when progress reaches this threshold
+                const PROGRESS_THRESHOLD = 50; // streaming 开门禁；100% 需视锥 refinement 清晰
+                const PROGRESS_COARSE_CAP = 82; // 粗层上屏阶段进度上限
+                const PROGRESS_REFINEMENT_CAP = 99; // refinement 阶段顶格（稳定就绪后才 100%）
+                const STREAMING_REFINEMENT_STABLE_FRAMES = 10;
                 const isStreamingOctree = !isCustomLod && !config.fullload;
                 const octreeResource = isStreamingOctree
                     ? results[0].gsplat.resource as GSplatOctreeResourceLike | null
@@ -1189,8 +1195,9 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 let streamingPerfHandlerRegistered = false;
                 let streamingBootstrapGateReached = false;
                 let streamingViewportSyncCooldown = 0;
-                let streamingDisplayProgress = 0;
-                let streamingBootstrapStallFrames = 0;
+                let streamingRefinementStableFrames = 0;
+                let streamingRefinementBaselinePending = 0;
+                let streamingRefinementPhaseStarted = false;
                 const streamLastCamPos = new Vec3();
                 const streamLastCamFwd = new Vec3();
                 let streamLastCamDist = this.cameraManager.camera.distance;
@@ -1214,42 +1221,91 @@ z: ${cameraInfo.target.z.toFixed(6)}
                         return;
                     }
 
-                    let displayProgress = fileProgress;
-                    let viewportReady = false;
-                    if (streamingBootstrapGateReached) {
-                        const octree = octreeResource?.octree as OctreeLike | null | undefined;
-                        if (octree) {
-                            const viewport = getStreamingViewportBootstrapStatus(
-                                app,
-                                octree,
-                                results[0],
-                                camera,
-                                STREAMING_VIEWPORT_READY_RATIO,
-                                streamingViewportBootstrapOptions()
+                    if (progressUIHidden || state.animationStarted) {
+                        state.progress = 100;
+                        return;
+                    }
+
+                    // 50% 前只反映文件下载，避免引擎 loading 计数提前把条顶满
+                    if (!streamingBootstrapGateReached) {
+                        state.progress = Math.min(fileProgress, PROGRESS_THRESHOLD);
+                        return;
+                    }
+
+                    const octree = octreeResource?.octree as OctreeLike | null | undefined;
+                    if (!octree) {
+                        state.progress = Math.min(Math.max(state.progress, fileProgress), PROGRESS_THRESHOLD);
+                        return;
+                    }
+
+                    const bootstrapOptions = streamingViewportBootstrapOptions();
+                    const viewport = getStreamingViewportBootstrapStatus(
+                        app,
+                        octree,
+                        results[0],
+                        camera,
+                        STREAMING_VIEWPORT_READY_RATIO,
+                        bootstrapOptions
+                    );
+
+                    // 50%–82%：粗层上屏（与文件计数解耦）
+                    if (!viewport.ready) {
+                        const coarseProgress =
+                            PROGRESS_THRESHOLD +
+                            Math.round(
+                                viewport.placementRatio * (PROGRESS_COARSE_CAP - PROGRESS_THRESHOLD)
                             );
-                            viewportReady = viewport.ready;
-                            const viewportProgress = viewport.ready
-                                ? 100
-                                : PROGRESS_THRESHOLD +
-                                  Math.round(viewport.placementRatio * (100 - PROGRESS_THRESHOLD));
-                            displayProgress = Math.max(fileProgress, viewportProgress);
-                            // 文件计数先到 100% 但视锥未齐时，不把进度条顶满，避免假完成
-                            if (!viewport.ready && displayProgress >= 100) {
-                                displayProgress = Math.max(
-                                    PROGRESS_THRESHOLD,
-                                    Math.min(99, viewportProgress)
-                                );
-                            }
+                        state.progress = Math.min(
+                            PROGRESS_COARSE_CAP,
+                            Math.max(state.progress, coarseProgress)
+                        );
+                        return;
+                    }
+
+                    if (!streamingLodUnlocked) {
+                        state.progress = PROGRESS_COARSE_CAP;
+                        return;
+                    }
+
+                    if (!streamingRefinementPhaseStarted) {
+                        streamingRefinementPhaseStarted = true;
+                        state.progress = PROGRESS_COARSE_CAP;
+                    }
+
+                    const refinement = getStreamingViewportRefinementStatus(
+                        app,
+                        octree,
+                        results[0],
+                        camera,
+                        STREAMING_VIEWPORT_REFINEMENT_READY_RATIO,
+                        bootstrapOptions
+                    );
+
+                    if (refinement.pendingNodes > streamingRefinementBaselinePending) {
+                        streamingRefinementBaselinePending = refinement.pendingNodes;
+                    }
+
+                    // 刚 unlock 时 controller 可能尚未报 pending；先停在 82%
+                    if (streamingRefinementBaselinePending <= 0) {
+                        if (refinement.ready) {
+                            state.progress = PROGRESS_REFINEMENT_CAP;
+                        } else {
+                            state.progress = PROGRESS_COARSE_CAP;
                         }
+                        return;
                     }
 
-                    if (state.animationStarted) {
-                        displayProgress = 100;
-                    }
-
-                    streamingDisplayProgress = Math.max(streamingDisplayProgress, displayProgress);
-                    state.progress = streamingDisplayProgress;
-                    return viewportReady;
+                    const doneRatio = computeStreamingRefinementProgressRatio(
+                        refinement.pendingNodes,
+                        streamingRefinementBaselinePending
+                    );
+                    const refinementProgress =
+                        PROGRESS_COARSE_CAP +
+                        Math.round(doneRatio * (PROGRESS_REFINEMENT_CAP - PROGRESS_COARSE_CAP));
+                    state.progress = Math.min(
+                        PROGRESS_REFINEMENT_CAP,
+                        Math.max(state.progress, refinementProgress)
+                    );
                 };
 
                 const pollStreamingBootstrapComplete = () => {
@@ -1289,27 +1345,38 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     );
 
                     if (!viewport.ready) {
-                        if (streamingDisplayProgress >= 99) {
-                            streamingBootstrapStallFrames++;
-                            if (streamingBootstrapStallFrames === 120) {
-                                console.warn(
-                                    '[streaming bootstrap] waiting for viewport coarse placement',
-                                    {
-                                        visibleNodes: viewport.visibleNodes,
-                                        unplacedVisibleNodes: viewport.unplacedVisibleNodes,
-                                        placementRatio: viewport.placementRatio,
-                                        lodRangeMin: gsplat.lodRangeMin,
-                                        lodRangeMax: gsplat.lodRangeMax,
-                                        streamingLodUnlocked
-                                    }
-                                );
-                            }
-                        }
+                        streamingRefinementStableFrames = 0;
                         return;
                     }
 
-                    streamingBootstrapStallFrames = 0;
                     unlockStreamingLod();
+
+                    if (streamingViewportSyncCooldown <= 0) {
+                        syncStreamingOctreePlacements(app, octree, results[0]);
+                        streamingViewportSyncCooldown = 2;
+                    }
+
+                    const refinement = getStreamingViewportRefinementStatus(
+                        app,
+                        octree,
+                        results[0],
+                        camera,
+                        STREAMING_VIEWPORT_REFINEMENT_READY_RATIO,
+                        streamingViewportBootstrapOptions()
+                    );
+                    updateStreamingLoadProgress(
+                        watermark > 0 ? Math.trunc((current / watermark) * 100) : state.progress
+                    );
+
+                    if (!refinement.ready) {
+                        streamingRefinementStableFrames = 0;
+                        return;
+                    }
+
+                    streamingRefinementStableFrames++;
+                    if (streamingRefinementStableFrames < STREAMING_REFINEMENT_STABLE_FRAMES) {
+                        return;
+                    }
 
                     if (!progressUIHidden) {
                         progressUIHidden = true;
@@ -1332,9 +1399,9 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     state.progress = 100;
                     events.fire('animationStarted');
                     console.log(
-                        'Streaming octree: viewport bootstrap ready',
-                        `${Math.round(viewport.placementRatio * 100)}% placed`,
-                        `(${viewport.placedVisibleNodes}/${viewport.visibleNodes} core visible nodes), starting animation`
+                        'Streaming octree: viewport refinement downloads ready',
+                        `foreground pending ${refinement.pendingNodes}`,
+                        `staleLod ${refinement.staleLodNodes}, starting animation`
                     );
                 };
 

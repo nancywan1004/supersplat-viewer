@@ -860,6 +860,108 @@ export function getStreamingViewportBootstrapStatus(
     };
 }
 
+export const STREAMING_VIEWPORT_REFINEMENT_READY_RATIO = 1;
+
+export type StreamingViewportRefinementStatus = {
+    visibleNodes: number;
+    refinedNodes: number;
+    /** 前景仍缺下载的 unique 文件数 */
+    pendingNodes: number;
+    staleLoadedNodes: number;
+    /** 前景下载完成度 [0,1]；需配合 unlock 时记录的 baselinePending 计算进度 */
+    refinementRatio: number;
+    pendingUniqueFiles: number;
+    staleLodNodes: number;
+    ready: boolean;
+};
+
+/** 由 unlock 时 foreground 总量与当前 pending 计算 refinement 阶段进度 [0,1] */
+export function computeStreamingRefinementProgressRatio(
+    pendingForeground: number,
+    baselinePending: number
+): number {
+    const baseline = Math.max(baselinePending, pendingForeground, 1);
+    if (pendingForeground <= 0) {
+        return 1;
+    }
+    return Math.max(0, Math.min(1, (baseline - pendingForeground) / baseline));
+}
+
+/**
+ * streaming 首屏 refinement：与控制器一致，前景无待下载 chunk 即视为可完成。
+ * 不要求追到 optimal（ladder 会长期 pending）；已下未上屏由 poll 内 sync 消化。
+ * 须在 unlockStreamingLod（lodRange 放开）之后调用才有意义。
+ */
+export function getStreamingViewportRefinementStatus(
+    app: AppBase,
+    octree: OctreeLike,
+    gsplatEntity: Entity,
+    cameraEntity: Entity,
+    readyRatio = STREAMING_VIEWPORT_REFINEMENT_READY_RATIO,
+    _options?: StreamingViewportBootstrapOptions
+): StreamingViewportRefinementStatus {
+    const camera = cameraEntity.camera;
+    if (!camera || !octree.nodes.length) {
+        return {
+            visibleNodes: 0,
+            refinedNodes: 0,
+            pendingNodes: 0,
+            staleLoadedNodes: 0,
+            refinementRatio: 1,
+            pendingUniqueFiles: 0,
+            staleLodNodes: 0,
+            ready: true
+        };
+    }
+
+    const instances = findAllOctreeInstances(app, octree, gsplatEntity);
+    if (!instances[0]?.nodeInfos) {
+        return {
+            visibleNodes: 0,
+            refinedNodes: 0,
+            pendingNodes: 0,
+            staleLoadedNodes: 0,
+            refinementRatio: 0,
+            pendingUniqueFiles: 0,
+            staleLodNodes: 0,
+            ready: false
+        };
+    }
+
+    const gsplatScene = app.scene.gsplat as GsplatSceneLike;
+    const gsplatComponent = gsplatEntity.gsplat as GSplatComponent | null;
+    const lodParams: LodPlacementParams = {
+        lodBaseDistance: gsplatComponent?.lodBaseDistance ?? 5,
+        lodMultiplier: gsplatComponent?.lodMultiplier ?? 3
+    };
+    const batch = buildPriorityFiles(
+        app,
+        octree,
+        gsplatEntity,
+        cameraEntity,
+        gsplatScene,
+        lodParams
+    );
+
+    const pendingForeground = batch.foregroundPendingUnique;
+    const pendingUnique = batch.pendingUniqueFiles;
+    const staleLoaded = batch.staleLoadedNodes;
+    const staleLod = batch.staleLodNodes;
+    const needsWork = pendingForeground + staleLod;
+
+    return {
+        visibleNodes: needsWork,
+        refinedNodes: needsWork === 0 ? 1 : 0,
+        pendingNodes: pendingForeground,
+        staleLoadedNodes: staleLoaded,
+        refinementRatio: pendingForeground <= 0 ? 1 : 0,
+        pendingUniqueFiles: pendingUnique,
+        staleLodNodes: staleLod,
+        ready:
+            pendingForeground === 0
+    };
+}
+
 export function syncStreamingOctreePlacements(
     app: AppBase,
     octree: OctreeLike,
