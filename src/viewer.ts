@@ -62,6 +62,7 @@ import { readSkyboxCurrentUrlFromSettings } from './settings-serialize/settings-
 import { isCustomLodEnabled } from './loaders/lod-loader';
 import {
     createOctreeRefinementController,
+    ensureStreamingBootstrapCoarseFiles,
     getStreamingViewportBootstrapStatus,
     syncStreamingOctreePlacements,
     STREAMING_VIEWPORT_READY_RATIO,
@@ -191,9 +192,7 @@ const rendererTable: Record<'webgl' | 'webgpu', number> = {
 };
 
 type GSplatOctreeResourceLike = {
-    octree?: {
-        lodLevels: number;
-    } | null;
+    octree?: OctreeLike | null;
 };
 
 /** 仅处理非 Bloom 的后处理（Bloom 由 BloomController 统一配置） */
@@ -1135,7 +1134,8 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     applyPerfSettings();
                 } else {
                     const resource = results[0].gsplat.resource as GSplatOctreeResourceLike | null;
-                    const lodLevels = resource?.octree?.lodLevels;
+                    const octree = resource?.octree;
+                    const lodLevels = octree?.lodLevels;
                     if (lodLevels) {
                         gsplat.lodRangeMax = gsplat.lodRangeMin = lodLevels - 1;
                     }
@@ -1190,10 +1190,9 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 let streamingBootstrapGateReached = false;
                 let streamingViewportSyncCooldown = 0;
                 let streamingDisplayProgress = 0;
-                let streamCamIdleTime = 0;
+                let streamingBootstrapStallFrames = 0;
                 const streamLastCamPos = new Vec3();
                 const streamLastCamFwd = new Vec3();
-                const STREAM_CAM_IDLE_UNLOCK_SEC = 0.15;
 
                 const streamingViewportBootstrapOptions = (): StreamingViewportBootstrapOptions => ({
                     excludeViewportEdgeNodes: true
@@ -1206,6 +1205,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     }
 
                     let displayProgress = fileProgress;
+                    let viewportReady = false;
                     if (streamingBootstrapGateReached) {
                         const octree = octreeResource?.octree as OctreeLike | null | undefined;
                         if (octree) {
@@ -1217,11 +1217,19 @@ z: ${cameraInfo.target.z.toFixed(6)}
                                 STREAMING_VIEWPORT_READY_RATIO,
                                 streamingViewportBootstrapOptions()
                             );
+                            viewportReady = viewport.ready;
                             const viewportProgress = viewport.ready
                                 ? 100
                                 : PROGRESS_THRESHOLD +
                                   Math.round(viewport.placementRatio * (100 - PROGRESS_THRESHOLD));
                             displayProgress = Math.max(fileProgress, viewportProgress);
+                            // 文件计数先到 100% 但视锥未齐时，不把进度条顶满，避免假完成
+                            if (!viewport.ready && displayProgress >= 100) {
+                                displayProgress = Math.max(
+                                    PROGRESS_THRESHOLD,
+                                    Math.min(99, viewportProgress)
+                                );
+                            }
                         }
                     }
 
@@ -1231,6 +1239,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
                     streamingDisplayProgress = Math.max(streamingDisplayProgress, displayProgress);
                     state.progress = streamingDisplayProgress;
+                    return viewportReady;
                 };
 
                 const pollStreamingBootstrapComplete = () => {
@@ -1241,6 +1250,14 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     if (!octree) {
                         return;
                     }
+
+                    ensureStreamingBootstrapCoarseFiles(
+                        app,
+                        octree,
+                        results[0],
+                        camera,
+                        streamingViewportBootstrapOptions()
+                    );
 
                     if (streamingViewportSyncCooldown <= 0) {
                         syncStreamingOctreePlacements(app, octree, results[0]);
@@ -1262,8 +1279,27 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     );
 
                     if (!viewport.ready) {
+                        if (streamingDisplayProgress >= 99) {
+                            streamingBootstrapStallFrames++;
+                            if (streamingBootstrapStallFrames === 120) {
+                                console.warn(
+                                    '[streaming bootstrap] waiting for viewport coarse placement',
+                                    {
+                                        visibleNodes: viewport.visibleNodes,
+                                        unplacedVisibleNodes: viewport.unplacedVisibleNodes,
+                                        placementRatio: viewport.placementRatio,
+                                        lodRangeMin: gsplat.lodRangeMin,
+                                        lodRangeMax: gsplat.lodRangeMax,
+                                        streamingLodUnlocked
+                                    }
+                                );
+                            }
+                        }
                         return;
                     }
+
+                    streamingBootstrapStallFrames = 0;
+                    unlockStreamingLod();
 
                     if (!progressUIHidden) {
                         progressUIHidden = true;
@@ -1329,16 +1365,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     const camFwd = camera.forward;
                     const moved = streamLastCamPos.distance(camPos) > 0.03;
                     const rotated = streamLastCamFwd.dot(camFwd) < (1 - 0.015);
-                    if (!streamingLodUnlocked) {
-                        if (moved || rotated) {
-                            streamCamIdleTime = 0;
-                        } else {
-                            streamCamIdleTime += dt;
-                            if (streamCamIdleTime >= STREAM_CAM_IDLE_UNLOCK_SEC) {
-                                unlockStreamingLod();
-                            }
-                        }
-                    } else if (moved || rotated) {
+                    if (streamingLodUnlocked && (moved || rotated)) {
                         this.octreeRefinementController?.notifyCameraMoved();
                     }
                     streamLastCamPos.copy(camPos);
@@ -1404,9 +1431,8 @@ z: ${cameraInfo.target.z.toFixed(6)}
                             if (isCustomLod || config.fullload) {
                                 events.on('performanceMode:changed', onPerformanceModeChanged);
                                 onPerformanceModeChanged();
-                            } else {
-                                unlockStreamingLod();
                             }
+                            // streaming：等视锥粗层 bootstrap 完成后再 unlockStreamingLod（见 pollStreamingBootstrapComplete）
 
                             gsplat.debug = config.colorize ? GSPLAT_DEBUG_LOD : GSPLAT_DEBUG_NONE;
 
