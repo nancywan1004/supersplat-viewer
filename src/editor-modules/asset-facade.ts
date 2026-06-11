@@ -2,7 +2,7 @@ import { applySceneAssetTriggerDistanceM } from '../scene-assets/asset-placement
 import type { AssetLibraryItem, Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 import { setPlacementCursorActive } from '../placement-cursor';
 import { applyViewAnnotationsVisible } from '../view-settings';
-import { loadGsplatAsset } from '../loaders/gsplat-asset-loader';
+import { loadGsplatAsset } from '../loaders/gsplat/sog/splat-loader';
 import { getAssetLoader } from '../loaders/asset-loader';
 import { findAssetMorphOwnerTargetId } from '../settings-serialize/effects-sync';
 import type { ExperienceSettings } from '../schemas/v2';

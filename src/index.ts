@@ -25,10 +25,10 @@ import { initPoster, initUI } from './ui/ui';
 import { Viewer } from './viewer';
 import { initXr } from './xr';
 import { initLight } from './light';
-import { isCustomLodEnabled, isGsplatMetaJsonFilename, LodLoader } from './loaders/lod-loader';
-import { loadSplat } from './loaders/splat-loader';
+import { isCustomLodEnabled, isGsplatMetaJsonFilename, LodLoader } from './loaders/gsplat/lod/custom-loader';
+import { loadSplat } from './loaders/gsplat/sog/splat-deserialize';
 import type { AssetSource } from './loaders/asset-source';
-import { loadGsplatAsset } from './loaders/gsplat-asset-loader';
+import { loadGsplatAsset } from './loaders/gsplat/sog/splat-loader';
 import { getAssetLoader } from './loaders/asset-loader';
 import { version as appVersion } from '../package.json';
 import { initPostMessageBridge } from './message-bridge';
@@ -333,6 +333,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         /** MORPH_ASSET_ADD_START / FINISH：asset 模块下仅拾取 Gaussian */
         morphAssetAddActive: false,
         cameraControlsEnabled: true,
+        loadingCameraControlsLocked: true,
         gizmoPointerActive: false,
         suppressAssetPointerClick: false,
 
@@ -382,6 +383,11 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         camera,
         renderer
     };
+
+    events.on('progressThresholdReached', () => {
+        state.loadingCameraControlsLocked = false;
+        events.fire('cameraControls:flushInputs');
+    });
 
     ensureViewSettings(global);
     applySceneAssetCollisionFromSettings(global);

@@ -14,6 +14,7 @@ import { pickWorldFromClientXY } from './picker';
 import type { UpdateContext } from './input/shared';
 import type { Picker } from './picker';
 import type { Global } from './types';
+import { isCameraInteractionBlocked } from './state-selectors';
 
 /**
  * Coordinator that wires together input devices (keyboard-mouse, touch,
@@ -110,7 +111,7 @@ class InputController {
         }
 
         const { events, state } = this._global;
-        const cameraControlsEnabled = state.cameraControlsEnabled !== false;
+        const cameraControlsEnabled = !isCameraInteractionBlocked(state);
         const result = state.editMode === true
             ? await pickWorldFromClientXY(this._global, event.clientX, event.clientY)
             : null;
@@ -184,10 +185,16 @@ class InputController {
 
         ['wheel', 'pointerdown', 'contextmenu', 'keydown'].forEach((eventName) => {
             canvas.addEventListener(eventName, (event) => {
+                if (isCameraInteractionBlocked(global.state)) {
+                    return;
+                }
                 events.fire('inputEvent', 'interrupt', event);
             });
         });
         canvas.addEventListener('pointermove', (event) => {
+            if (isCameraInteractionBlocked(global.state)) {
+                return;
+            }
             events.fire('inputEvent', 'interact', event);
         });
 
@@ -220,7 +227,7 @@ class InputController {
     update(dt: number, distance: number) {
         const { state } = this._global;
 
-        if (state.cameraControlsEnabled === false) {
+        if (isCameraInteractionBlocked(state)) {
             // 相机禁用时若整帧跳过各 device.update，则 PlayCanvas InputSource 的 read()
             // 不会被调用，鼠标/触控/手柄增量会在底层 InputDelta 中持续 append；
             // 解锁后首帧 read() 一次性吐出，表现为「松手 / pointer up 后相机跟着跳」。

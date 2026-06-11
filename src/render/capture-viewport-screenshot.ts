@@ -13,8 +13,33 @@ const JPEG_QUALITY = 0.92;
 
 const evenDim = (n: number) => (n % 2 === 0 ? n : Math.max(2, n - 1));
 
+/** 计算居中 cover 裁切区域，使源图裁切后宽高比与目标一致 */
+function centerCoverCrop(
+    srcW: number,
+    srcH: number,
+    targetW: number,
+    targetH: number
+): { x: number; y: number; w: number; h: number } {
+    const targetAspect = targetW / targetH;
+    const srcAspect = srcW / srcH;
+
+    let cropW = srcW;
+    let cropH = srcH;
+    if (srcAspect > targetAspect) {
+        cropW = srcH * targetAspect;
+    } else if (srcAspect < targetAspect) {
+        cropH = srcW / targetAspect;
+    }
+
+    cropW = Math.max(1, Math.floor(cropW));
+    cropH = Math.max(1, Math.floor(cropH));
+    const x = Math.floor((srcW - cropW) / 2);
+    const y = Math.floor((srcH - cropH) / 2);
+    return { x, y, w: cropW, h: cropH };
+}
+
 /**
- * 等待下一帧渲染完成后，从主 WebGL canvas 轻量截图为 JPEG（缩放至目标尺寸，黑边 letterbox）。
+ * 等待下一帧渲染完成后，从主 WebGL canvas 轻量截图为 JPEG（居中裁切 cover 至目标尺寸，无黑边）。
  */
 export async function captureViewportJpegBlob(
     app: AppBase,
@@ -45,17 +70,13 @@ export async function captureViewportJpegBlob(
         throw new Error('2d context unavailable');
     }
 
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, targetWidth, targetHeight);
-
-    const scale = Math.min(targetWidth / srcW, targetHeight / srcH);
-    const drawW = Math.max(1, Math.floor(srcW * scale));
-    const drawH = Math.max(1, Math.floor(srcH * scale));
-    const dx = Math.floor((targetWidth - drawW) / 2);
-    const dy = Math.floor((targetHeight - drawH) / 2);
+    const crop = centerCoverCrop(srcW, srcH, targetWidth, targetHeight);
+    const drawCover = (source: CanvasImageSource) => {
+        ctx.drawImage(source, crop.x, crop.y, crop.w, crop.h, 0, 0, targetWidth, targetHeight);
+    };
 
     try {
-        ctx.drawImage(canvas, 0, 0, srcW, srcH, dx, dy, drawW, drawH);
+        drawCover(canvas);
     } catch (drawError) {
         const dataUrl = canvas.toDataURL(JPEG_MIME, JPEG_QUALITY);
         const img = new Image();
@@ -64,7 +85,7 @@ export async function captureViewportJpegBlob(
             img.onerror = () => reject(drawError);
             img.src = dataUrl;
         });
-        ctx.drawImage(img, dx, dy, drawW, drawH);
+        drawCover(img);
     }
 
     const blob = await new Promise<Blob | null>((resolve) => {

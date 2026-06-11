@@ -1,8 +1,6 @@
 import {
     BoundingBox,
     CameraFrame,
-    type CameraComponent,
-    type Layer,
     Color,
     Entity,
     RenderTarget,
@@ -22,13 +20,7 @@ import {
     TONEMAP_ACES2,
     TONEMAP_NEUTRAL,
     Vec3,
-    GSPLAT_DEBUG_LOD,
-    GSPLAT_DEBUG_NONE,
-    GSPLAT_RENDERER_COMPUTE,
-    GSPLAT_RENDERER_RASTER_CPU_SORT,
-    GSPLAT_RENDERER_RASTER_GPU_SORT,
-    GSplatComponent,
-    platform
+    GSplatComponent
 } from 'playcanvas';
 
 import { Annotations } from './annotations';
@@ -59,11 +51,9 @@ import {
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
 import { getSkyboxRadius } from './loaders/skybox-loader';
 import { readSkyboxCurrentUrlFromSettings } from './settings-serialize/settings-serialize-helper';
-import { isCustomLodEnabled } from './loaders/lod-loader';
-import {
-    createOctreeRefinementController,
-    type OctreeRefinementController
-} from './loaders/octree-refinement-controller';
+import { bootstrapOctreeLod, type OctreeLodBootstrapHandle } from './loaders/gsplat/lod/octree/bootstrap';
+import { bootstrapSogUnified } from './loaders/gsplat/sog/bootstrap';
+import type { OctreeRefinementController } from './loaders/gsplat/lod/octree/refinement-controller';
 import { BloomController } from './vfx/bloom';
 import { NightMode } from './vfx/lighting/night-mode';
 import {
@@ -177,18 +167,6 @@ const tonemapTable: Record<string, number> = {
     aces: TONEMAP_ACES,
     aces2: TONEMAP_ACES2,
     neutral: TONEMAP_NEUTRAL
-};
-
-/** main：raster 路径下按实际 deviceType 选择 gsplat 排序器（compute 路径不走此表） */
-const rendererTable: Record<'webgl' | 'webgpu', number> = {
-    webgl: GSPLAT_RENDERER_RASTER_CPU_SORT,
-    webgpu: GSPLAT_RENDERER_RASTER_GPU_SORT
-};
-
-type GSplatOctreeResourceLike = {
-    octree?: {
-        lodLevels: number;
-    } | null;
 };
 
 /** 仅处理非 Bloom 的后处理（Bloom 由 BloomController 统一配置） */
@@ -313,6 +291,8 @@ class Viewer {
 
     /** 普通 octree streaming 首帧后的视锥/屏幕误差优先 refinement */
     octreeRefinementController: OctreeRefinementController | null = null;
+
+    private octreeLodBootstrap: OctreeLodBootstrapHandle | null = null;
 
     /** 将 cameraManager 的相机姿态应用到实体（导出时 seek anim 后调用） */
     applyCameraFromManager: () => void = () => {};
@@ -1042,311 +1022,36 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 this.cleanupVideoControlsInteraction = initVideoControlsInteraction(global, canvasEl);
             }
 
-            const { instance } = gsplat;
-            if (instance) {
-                // kick off gsplat sorting immediately now that camera is in position
-                instance.sort(camera);
+            const forceRenderBinding = {
+                get: () => this.forceRenderNextFrame,
+                set: (value: boolean) => {
+                    this.forceRenderNextFrame = value;
+                }
+            };
 
-                // listen for sorting updates to trigger first frame events
-                instance.sorter?.on('updated', () => {
-                    // request frame render when sorting changes
-                    app.renderNextFrame = true;
-
-                    if (!state.readyToRender) {
-                        // 关键：先创建 VFX 并预热一帧，再允许上屏显示
-                        // 避免首帧无 shader 的偏色/蓝光闪问题
-                        this.revealController?.ensureInitialEffectCreatedBeforeFirstDisplay?.();
-
-                        // 强制渲染一帧（不显示），让 unified 模式创建材质并编译 shader
-                        this.forceRenderNextFrame = true;
-                        app.renderNextFrame = true;
-
-                        // 在当前帧渲染完成后立即允许显示（比 requestAnimationFrame 更可靠）
-                        // 使用 frameend 事件确保 shader 已编译完成
-                        app.once('frameend', () => {
-                            if (state.readyToRender) return; // 已被其他路径设置则跳过
-
-                            // we're ready to render once the first sort has completed
-                            state.readyToRender = true;
-                            ensureShadowPipelineReady();
-
-                            // 清除强制渲染标志，恢复按需渲染
-                            this.forceRenderNextFrame = false;
-
-                            // 触发 firstFrame 事件
-                            events.fire('firstFrame');
-
-                            // emit first frame event on window
-                            window.firstFrame?.();
-                        });
-                    }
+            if (gsplat.instance) {
+                bootstrapSogUnified({
+                    global,
+                    gsplat,
+                    camera,
+                    forceRender: forceRenderBinding,
+                    ensureShadowPipelineReady,
+                    revealController: this.revealController
                 });
             } else {
-
-                const { gsplat } = app.scene;
-                const { renderer: actualRenderer } = global;
-
-                const isCustomLod = isCustomLodEnabled(settings, config.contentUrl);
-
-                const budgets = {
-                    mobile: { low: 1, high: 2 },
-                    desktop: { low: 2, high: 4 }
-                };
-                const quality = platform.mobile ? budgets.mobile : budgets.desktop;
-
-                const applyPerfSettings = () => {
-                    const budget = () => {
-                        if (config.budget !== undefined && Number.isFinite(config.budget) && config.budget > 0) {
-                            return config.budget;
-                        }
-                        return state.performanceMode ? quality.low : quality.high;
-                    };
-
-                    gsplat.splatBudget = budget() * 1000000;
-                    gsplat.lodRangeMin = 0;
-                    gsplat.lodRangeMax = 1000;
-                    gsplat.colorUpdateAngle = state.performanceMode ? 4 : 2;
-                    gsplat.minContribution = 1;
-                    gsplat.alphaClip = 1 / 255;
-                    gsplat.antiAlias = config.aa;
-                };
-
-                if (isCustomLod) {
-                    const gsplatScene = (app.scene as any).gsplat;
-                    if (gsplatScene && gsplatScene.lodRangeMax !== undefined) {
-                        if (gsplatScene.splatBudget !== undefined) {
-                            results[0].gsplat.splatBudget = gsplatScene.splatBudget * 1000000;
-                        }
-                        gsplat.lodRangeMin = 0;
-                        gsplat.lodRangeMax = gsplatScene.lodRangeMax;
-                    } else {
-                        gsplat.lodRangeMin = 0;
-                        gsplat.lodRangeMax = 5;
-                    }
-                    gsplat.minContribution = 1;
-                    gsplat.alphaClip = 1 / 255;
-                    gsplat.antiAlias = config.aa;
-                } else if (config.fullload) {
-                    applyPerfSettings();
-                } else {
-                    const resource = results[0].gsplat.resource as GSplatOctreeResourceLike | null;
-                    const lodLevels = resource?.octree?.lodLevels;
-                    if (lodLevels) {
-                        gsplat.lodRangeMax = gsplat.lodRangeMin = lodLevels - 1;
-                    }
-                }
-
-                // these two allow LOD behind camera to drop, saves lots of splats
-                gsplat.lodUpdateAngle = 90;
-                gsplat.lodBehindPenalty = 5;
-
-                // same performance, but rotating on slow devices does not give us unsorted splats on sides
-                gsplat.radialSorting = true;
-
-                const eventHandler = app.systems.gsplat;
-
-                // idle timer: force continuous rendering until 4s of inactivity
-                let idleTime = 0;
-                this.forceRenderNextFrame = true;
-
-                app.on('update', (dt: number) => {
-                    idleTime += dt;
-                    this.forceRenderNextFrame = idleTime < 4;
-                    tryUnlockStreamingOnCameraIdle(dt);
-                });
-
-                events.on('inputEvent', (type: string) => {
-                    if (type !== 'interact') {
-                        idleTime = 0;
+                this.octreeLodBootstrap = bootstrapOctreeLod({
+                    global,
+                    settings,
+                    gsplatEntity: results[0],
+                    camera,
+                    cameraManager: this.cameraManager,
+                    forceRender: forceRenderBinding,
+                    ensureShadowPipelineReady,
+                    revealController: this.revealController,
+                    onRefinementController: (controller) => {
+                        this.octreeRefinementController = controller;
                     }
                 });
-
-                eventHandler.on('frame:ready', (_camera: CameraComponent, _layer: Layer, ready: boolean, loading: number) => {
-                    if (loading > 0 || !ready) {
-                        idleTime = 0;
-                    }
-                });
-
-                let current = 0;
-                let watermark = 1;
-                // For custom LOD mode, track the maximum progress to prevent regression
-                let maxProgress = 0;
-                let progressUIHidden = false; // Track if progress UI has been hidden
-                const PROGRESS_THRESHOLD = 50; // Hide progress UI when progress reaches this threshold
-                const isStreamingOctree = !isCustomLod && !config.fullload;
-                const octreeResource = isStreamingOctree
-                    ? results[0].gsplat.resource as GSplatOctreeResourceLike | null
-                    : null;
-                let streamingLodUnlocked = false;
-                let streamingPerfHandlerRegistered = false;
-                let streamingBootstrapGateReached = false;
-                let streamCamIdleTime = 0;
-                const streamLastCamPos = new Vec3();
-                const streamLastCamFwd = new Vec3();
-                const STREAM_CAM_IDLE_UNLOCK_SEC = 0.15;
-
-                // 首屏粗层加载完成后仍可能长期 loading>0；LOD 解锁不能等 loading===0
-                const unlockStreamingLod = () => {
-                    if (!isStreamingOctree || streamingLodUnlocked) {
-                        return;
-                    }
-                    streamingLodUnlocked = true;
-                    applyPerfSettings();
-                    const maxLod = octreeResource?.octree?.lodLevels;
-                    if (maxLod) {
-                        gsplat.lodRangeMin = 0;
-                        gsplat.lodRangeMax = maxLod - 1;
-                    }
-                    gsplat.dirty = true;
-                    app.renderNextFrame = true;
-
-                    if (!streamingPerfHandlerRegistered) {
-                        streamingPerfHandlerRegistered = true;
-                        events.on('performanceMode:changed', applyPerfSettings);
-                    }
-
-                    this.octreeRefinementController?.destroy();
-                    this.octreeRefinementController = createOctreeRefinementController(
-                        global,
-                        results[0],
-                        octreeResource
-                    );
-                    this.octreeRefinementController?.start();
-                };
-
-                const tryUnlockStreamingOnCameraIdle = (dt: number) => {
-                    if (!isStreamingOctree || streamingLodUnlocked || !streamingBootstrapGateReached) {
-                        return;
-                    }
-                    const camPos = camera.getPosition();
-                    const camFwd = camera.forward;
-                    const moved = streamLastCamPos.distance(camPos) > 0.03;
-                    const rotated = streamLastCamFwd.dot(camFwd) < (1 - 0.015);
-                    if (moved || rotated) {
-                        streamCamIdleTime = 0;
-                    } else {
-                        streamCamIdleTime += dt;
-                        if (streamCamIdleTime >= STREAM_CAM_IDLE_UNLOCK_SEC) {
-                            unlockStreamingLod();
-                        }
-                    }
-                    streamLastCamPos.copy(camPos);
-                    streamLastCamFwd.copy(camFwd);
-                };
-
-                const readyHandler = (camera: CameraComponent, layer: Layer, ready: boolean, loading: number) => {
-                    if (ready && loading === 0) {
-                        streamingBootstrapGateReached = true;
-                        // scene is done loading
-                        eventHandler.off('frame:ready', readyHandler);
-
-                        // 关键：先创建 VFX 并预热一帧，再允许上屏显示
-                        // 避免首帧无 shader 的偏色/蓝光闪问题
-                        this.revealController?.ensureInitialEffectCreatedBeforeFirstDisplay?.();
-
-                        // 强制渲染一帧（不显示），让 unified 模式创建材质并编译 shader
-                        this.forceRenderNextFrame = true;
-                        app.renderNextFrame = true;
-
-                        // 在当前帧渲染完成后立即允许显示（比 requestAnimationFrame 更可靠）
-                        app.once('frameend', () => {
-                            if (state.readyToRender) return; // 已被其他路径设置则跳过
-
-                            state.readyToRender = true;
-                            ensureShadowPipelineReady();
-
-                            // 清除强制渲染标志，恢复按需渲染（场景已加载完成）
-                            this.forceRenderNextFrame = false;
-
-                            // In LOD mode, ensure animation is started (case it wasn't started earlier)
-                            // 有 reveal 时不在此处启动动画，等 revealComplete 后再启动
-                            if (isCustomLod && settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !revealBlocksAnim(state)) {
-                                console.log('LOD mode: all chunks loaded, ensuring animation is playing');
-                                state.animationStarted = true;
-                                state.animationPaused = false;
-                            }
-
-                            const updateLod = () => {
-                                const gsplatScene = (app.scene as any).gsplat;
-                                if (gsplatScene && gsplatScene.lodRangeMin !== undefined) {
-                                    gsplat.lodRangeMin = gsplatScene.lodRangeMin;
-                                    gsplat.lodRangeMax = gsplatScene.lodRangeMax;
-                                    if (gsplatScene.splatBudget !== undefined) {
-                                        results[0].gsplat.splatBudget = gsplatScene.splatBudget * 1000000;
-                                    }
-                                }
-                            };
-                            const onPerformanceModeChanged = isCustomLod ? updateLod : applyPerfSettings;
-                            if (config.renderer === 'compute') {
-                                gsplat.renderer = GSPLAT_RENDERER_COMPUTE;
-                                if ((app.scene.gsplat as any).currentRenderer !== GSPLAT_RENDERER_COMPUTE) {
-                                    console.warn('[GSplat] compute renderer requested but unavailable; falling back to engine renderer:', {
-                                        requested: config.renderer,
-                                        actualDevice: actualRenderer,
-                                        currentRenderer: (app.scene.gsplat as any).currentRenderer
-                                    });
-                                }
-                            } else {
-                                gsplat.renderer = rendererTable[actualRenderer];
-                            }
-
-                            if (isCustomLod || config.fullload) {
-                                events.on('performanceMode:changed', onPerformanceModeChanged);
-                                onPerformanceModeChanged();
-                            } else {
-                                unlockStreamingLod();
-                            }
-
-                            gsplat.debug = config.colorize ? GSPLAT_DEBUG_LOD : GSPLAT_DEBUG_NONE;
-
-                            // 触发 firstFrame 事件
-                            events.fire('firstFrame');
-
-                            // emit first frame event on window
-                            window.firstFrame?.();
-                        });
-                    }
-
-                    // update loading status
-                    if (loading !== current) {
-                        watermark = Math.max(watermark, loading);
-                        current = watermark - loading;
-                        
-                        let progress: number;
-                        // In custom LOD mode, if animation has started, show 100% progress
-                        if (isCustomLod && state.animationStarted) {
-                            progress = 100;
-                        } else {
-                            progress = Math.trunc(current / watermark * 100);
-                            
-                            // In custom LOD mode, ensure progress never decreases
-                            if (isCustomLod) {
-                                maxProgress = Math.max(maxProgress, progress);
-                                progress = maxProgress;
-                            }
-                        }
-                        
-                        state.progress = progress;
-                        
-                        // When progress reaches threshold, hide progress UI and start animation if available
-                        if (!progressUIHidden && progress >= PROGRESS_THRESHOLD) {
-                            progressUIHidden = true;
-                            streamingBootstrapGateReached = true;
-                            // Fire event to hide progress UI
-                            events.fire('progressThresholdReached', progress);
-                            
-                            // Start animation if available（有 reveal 时由 revealComplete 回调启动，此处不启动）
-                            if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !state.animationStarted && !revealBlocksAnim(state)) {
-                                state.animationStarted = true;
-                                console.log(`Progress reached ${PROGRESS_THRESHOLD}%, starting animation`);
-                                state.animationPaused = false;
-                                events.fire('animationStarted');
-                            }
-                        }
-                    }
-                };
-
-                eventHandler.on('frame:ready', readyHandler);
             }
             } catch (e) {
                 console.error('[Shadow] Error inside Promise.all .then() callback:', e);
