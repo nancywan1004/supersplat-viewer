@@ -22,6 +22,8 @@ const T = {
         boostConcurrent: platform.mobile ? 4 : 8,
         burstConcurrent: platform.mobile ? 8 : 12,
         emergencyConcurrent: platform.mobile ? 16 : 32,
+        /** stale in-flight 占满时允许额外开槽的绝对上限，保证 criticalLimit 个新槽 */
+        extremeConcurrent: platform.mobile ? 32 : 64,
         foregroundLimit: platform.mobile ? 32 : 64,
         criticalLimit: platform.mobile ? 4 : 8,
         pinLimit: platform.mobile ? 6 : 12,
@@ -73,8 +75,11 @@ type OctreeAssetLoaderLike = {
     maxConcurrentLoads: number;
     _loadQueue?: string[];
     _currentlyLoading?: Set<string>;
+    _urlToAsset?: Map<string, { loaded?: boolean; loading?: boolean; off: (event: string) => void }>;
+    _retryCount?: Map<string, number>;
     load: (url: string) => void;
     unload?: (url: string) => void;
+    getResource?: (url: string) => unknown;
     _processQueue?: () => void;
     __refinementLoadPatched?: boolean;
     __refinementSuspendedQueue?: string[];
@@ -94,6 +99,7 @@ type OctreeLike = {
     __refinementEnsurePatched?: boolean;
     __originalEnsureFileResource?: (fileIndex: number) => void;
     __refinementPriorityUrls?: Set<string>;
+    __refinementUrlToFileIndex?: Map<string, number>;
 };
 
 export type { OctreeLike };
@@ -118,6 +124,7 @@ export function isStreamableOctreeResource(
 type OctreeInstanceLike = {
     octree: OctreeLike;
     nodeInfos: Array<{ currentLod: number; optimalLod: number }>;
+    filePlacements?: Array<{ resource?: unknown } | null>;
     needsLodUpdate?: boolean;
     update?: () => boolean;
 };
@@ -317,8 +324,14 @@ function expandDownloadGateUrls(
     if (!loader) {
         return priorityUrls;
     }
+    const prioritySet = new Set(priorityUrls);
     const expanded = new Set(priorityUrls);
-    loader._currentlyLoading?.forEach(url => expanded.add(url));
+    // 仅保留 priority 自身的 in-flight，不把 stale 旧视角下载扩进 gate
+    loader._currentlyLoading?.forEach(url => {
+        if (prioritySet.has(url)) {
+            expanded.add(url);
+        }
+    });
     return [...expanded];
 }
 
@@ -375,6 +388,161 @@ function reconcileLoaderQueue(loader: OctreeAssetLoaderLike, priorityUrls: strin
     loader._processQueue?.();
 }
 
+function getOctreeUrlToFileIndex(octree: OctreeLike): Map<string, number> {
+    if (octree.__refinementUrlToFileIndex) {
+        return octree.__refinementUrlToFileIndex;
+    }
+    const map = new Map<string, number>();
+    for (let i = 0; i < octree.files.length; i++) {
+        const url = octree.files[i]?.url;
+        if (url) {
+            map.set(url, i);
+        }
+    }
+    octree.__refinementUrlToFileIndex = map;
+    return map;
+}
+
+function isFileBoundToOctreeInstance(
+    instances: OctreeInstanceLike[],
+    fileIndex: number
+): boolean {
+    for (let i = 0; i < instances.length; i++) {
+        const placement = instances[i].filePlacements?.[fileIndex];
+        if (placement?.resource) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** 从 loader 并发槽释放 URL（不 unload asset，避免 WebGPU 竞态） */
+function releaseInflightSlot(loader: OctreeAssetLoaderLike, url: string): boolean {
+    if (!loader._currentlyLoading?.has(url)) {
+        return false;
+    }
+    loader._currentlyLoading.delete(url);
+    const queue = loader._loadQueue;
+    if (queue) {
+        const queueIndex = queue.indexOf(url);
+        if (queueIndex !== -1) {
+            queue.splice(queueIndex, 1);
+        }
+    }
+    loader._retryCount?.delete(url);
+    loader._processQueue?.();
+    return true;
+}
+
+/**
+ * 软取消 in-flight：释放 loader 槽位，不调用 asset.unload()。
+ * 已 loaded 但回调被摘掉时也必须释放槽位，否则会形成僵尸 in-flight 永久堵死队列。
+ */
+function softCancelInflightLoad(
+    loader: OctreeAssetLoaderLike,
+    url: string,
+    octree: OctreeLike,
+    fileIndex: number
+): boolean {
+    if (!loader._currentlyLoading?.has(url)) {
+        return false;
+    }
+
+    // 已进 octree 但仍在 in-flight 集合里 — 孤儿槽位，直接释放
+    if (fileIndex >= 0 && octree.getFileResource(fileIndex)) {
+        return releaseInflightSlot(loader, url);
+    }
+
+    const asset = loader._urlToAsset?.get(url);
+    // load 已完成但 _onAssetLoadSuccess 未跑（此前 off('load')）— 必须释放槽位
+    if (asset?.loaded) {
+        return releaseInflightSlot(loader, url);
+    }
+
+    if (asset) {
+        asset.off('load');
+        asset.off('error');
+        if (!asset.loaded) {
+            asset.loading = false;
+        }
+    }
+
+    return releaseInflightSlot(loader, url);
+}
+
+/**
+ * 软取消非 priority 的 stale in-flight，腾出 loader 并发槽给当前 critical 下载。
+ * 不调用 unload（避免 WebGPU 竞态）；仅跳过已 loaded / 正在上屏 / pinned 的文件。
+ */
+function abortSafeStaleInflightLoads(
+    octree: OctreeLike,
+    loader: OctreeAssetLoaderLike,
+    priorityUrls: string[],
+    instances: OctreeInstanceLike[],
+    pinnedFiles?: Set<number>
+): number {
+    if (!loader._currentlyLoading?.size) {
+        return 0;
+    }
+
+    const prioritySet = new Set(priorityUrls);
+    const urlToFileIndex = getOctreeUrlToFileIndex(octree);
+    const staleUrls = [...loader._currentlyLoading].filter(url => !prioritySet.has(url));
+    let aborted = 0;
+
+    for (let i = 0; i < staleUrls.length; i++) {
+        const url = staleUrls[i];
+        const fileIndex = urlToFileIndex.get(url);
+
+        // 无法映射到 file 的孤儿 in-flight（旧视角 / 环境资源等）直接释放槽位
+        if (fileIndex === undefined) {
+            if (releaseInflightSlot(loader, url)) {
+                aborted++;
+            }
+            continue;
+        }
+        if (pinnedFiles?.has(fileIndex)) {
+            continue;
+        }
+        if (!loader._currentlyLoading.has(url)) {
+            continue;
+        }
+        if (isFileBoundToOctreeInstance(instances, fileIndex)) {
+            continue;
+        }
+        if (softCancelInflightLoad(loader, url, octree, fileIndex)) {
+            aborted++;
+        }
+    }
+
+    return aborted;
+}
+
+/** loader 已有 resource 但 octree.fileResources 未登记时，绕过 gate 接入 */
+function integratePendingLoaderResources(octree: OctreeLike, fileIndices: number[]): number {
+    const loader = octree.assetLoader;
+    if (!loader?.getResource) {
+        return 0;
+    }
+    const ensure = octree.__originalEnsureFileResource ?? octree.ensureFileResource.bind(octree);
+    let integrated = 0;
+    for (let i = 0; i < fileIndices.length; i++) {
+        const fi = fileIndices[i];
+        if (octree.getFileResource(fi)) {
+            continue;
+        }
+        const url = octree.files[fi]?.url;
+        if (!url || !loader.getResource(url)) {
+            continue;
+        }
+        ensure(fi);
+        if (octree.getFileResource(fi)) {
+            integrated++;
+        }
+    }
+    return integrated;
+}
+
 function countPriorityLoadState(loader: OctreeAssetLoaderLike | null | undefined, priorityUrls: string[]) {
     const prioritySet = new Set(priorityUrls);
     const priorityQueued = loader?._loadQueue?.filter(url => prioritySet.has(url)).length ?? 0;
@@ -399,17 +567,22 @@ function updateBoostConcurrencyForPriority(
         return { ...state, maxConcurrent: undefined };
     }
 
-    const inFlight = loader._currentlyLoading?.size ?? 0;
+    // 只要有 stale in-flight 占槽且 priority 排队未启动，就需要开槽
     const blockedByStaleInflight = state.priorityQueued > 0 && state.staleInFlight > 0;
     const target = blockedByStaleInflight ?
+        // 目标 = stale 数 + criticalLimit，确保始终有 criticalLimit 个空槽给新优先下载
+        // 用 extremeConcurrent 而非 emergencyConcurrent，避免 stale 太多时仍无空槽
         Math.min(
-            T.loader.emergencyConcurrent,
-            Math.max(T.loader.burstConcurrent, inFlight + Math.min(state.priorityQueued, T.loader.criticalLimit))
+            T.loader.extremeConcurrent,
+            Math.max(T.loader.burstConcurrent, state.staleInFlight + T.loader.criticalLimit)
         ) :
         T.loader.boostConcurrent;
 
     if (loader.maxConcurrentLoads !== target) {
         loader.maxConcurrentLoads = target;
+        loader._processQueue?.();
+    } else if (blockedByStaleInflight) {
+        // 上限未变但仍被堵：旧请求可能已完成腾槽，强制踢一次队列
         loader._processQueue?.();
     }
 
@@ -1649,7 +1822,38 @@ export function createOctreeRefinementController(
         }
 
         const loader = octree.assetLoader;
+        let safeAbortedInflight = 0;
+        let integratedLoaderResources = 0;
         if (priorityUrls.length > 0) {
+            if (loader) {
+                const preAbortState = countPriorityLoadState(loader, priorityUrls);
+                const priorityBlocked =
+                    preAbortState.priorityQueued > 0 &&
+                    preAbortState.priorityInFlight === 0 &&
+                    preAbortState.staleInFlight > 0;
+                const shouldAbortStaleInflight =
+                    preAbortState.staleInFlight > 0 &&
+                    (
+                        cameraJustMoved ||
+                        cameraBurstActive ||
+                        priorityBlocked
+                    );
+                if (shouldAbortStaleInflight) {
+                    const instances = findAllOctreeInstances(app, octree, gsplatEntity);
+                    safeAbortedInflight = abortSafeStaleInflightLoads(
+                        octree,
+                        loader,
+                        priorityUrls,
+                        instances,
+                        prefetch.pinned
+                    );
+                }
+                integratedLoaderResources = integratePendingLoaderResources(
+                    octree,
+                    pendingFileIndices
+                );
+            }
+
             const gateUrls = expandDownloadGateUrls(loader, priorityUrls);
             prefetch.lastUrls = gateUrls.slice();
             setRefinementPriorityUrls(octree, loader, gateUrls);
@@ -1817,6 +2021,9 @@ export function createOctreeRefinementController(
                         priorityLoad.priorityQueued > 0 &&
                         priorityLoad.priorityInFlight === 0 &&
                         priorityLoad.staleInFlight >= (loader?.maxConcurrentLoads ?? 0),
+                    safeAbortedInflight,
+                    integratedLoaderResources,
+                    extremeConcurrent: T.loader.extremeConcurrent,
                     staleLoadedNodes,
                     lodDisplayMismatch,
                     needsLodSwitch,
@@ -1966,6 +2173,11 @@ export function createOctreeRefinementController(
             const loader = octree.assetLoader;
             if (loader) {
                 clearRefinementPriorityUrls(octree, loader);
+                if (options?.zoom) {
+                    // zoom/双击时丢弃旧位置的 suspended 队列，避免旧视角 URL
+                    // 在新位置 burst 期间重新进队与当前 priority 争抢槽位
+                    loader.__refinementSuspendedQueue = [];
+                }
             }
             runPriorityPrefetch();
         },
