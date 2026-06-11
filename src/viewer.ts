@@ -48,6 +48,7 @@ import {
     applyPersistentSceneEffectEnableChange,
     runPersistentGsplatEntityLifecycle
 } from './vfx/effects-runtime/persistent/persistent-gsplat-lifecycle';
+import { POINTILLISM_DEFAULTS } from './vfx/effects-runtime/persistent/stylisation/pointillism-stipple-shaders';
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
 import { getSkyboxRadius } from './loaders/skybox-loader';
 import { readSkyboxCurrentUrlFromSettings } from './settings-serialize/settings-serialize-helper';
@@ -256,6 +257,22 @@ const isYiyunDianranPostEffectActive = (settings: ExperienceSettings): boolean =
 
 const isPalettePixelPersistentActive = (settings: ExperienceSettings): boolean => {
     return readPersistentTrackEffects(settings, 'stylization').some(e => e.type === 'palette-pixel');
+};
+
+const isPointillismStipplePostEffectActive = (settings: ExperienceSettings): boolean => {
+    const entry = readPersistentTrackEffects(settings, 'stylization', { includeDisabled: true })
+        .find(e => e.type === 'pointillism-stipple');
+    if (!entry?.enabled) {
+        return false;
+    }
+    const raw = entry.effectParams?.postEffectEnabled;
+    if (typeof raw === 'boolean') {
+        return raw;
+    }
+    if (raw === 1 || raw === '1' || raw === 'true') {
+        return true;
+    }
+    return POINTILLISM_DEFAULTS.postEffectEnabled;
 };
 
 const YIYUN_DIANRAN_PAPER_CLEAR = new Color(0.98, 0.94, 0.85, 1);
@@ -1071,6 +1088,8 @@ z: ${cameraInfo.target.z.toFixed(6)}
         const nostalgicComicActive = applyPersistentStylizationCameraEffects && isNostalgicComicPersistentActive(settings);
         const yiyunDianranPostEffectActive = applyPersistentStylizationCameraEffects && isYiyunDianranPostEffectActive(settings);
         const palettePixelActive = applyPersistentStylizationCameraEffects && isPalettePixelPersistentActive(settings);
+        const pointillismPostActive = applyPersistentStylizationCameraEffects
+            && isPointillismStipplePostEffectActive(settings);
 
         // hpr override takes precedence over settings.highPrecisionRendering
         const highPrecisionRendering = config.hpr ?? settings.highPrecisionRendering;
@@ -1097,7 +1116,8 @@ z: ${cameraInfo.target.z.toFixed(6)}
         const enableCameraFrame = !app.xr.active && (
             computeRequiresCameraFrame ||
             postFxRequested ||
-            palettePixelActive
+            palettePixelActive ||
+            pointillismPostActive
         );
 
         if (enableCameraFrame) {

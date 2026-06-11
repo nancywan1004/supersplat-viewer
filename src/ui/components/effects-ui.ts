@@ -25,6 +25,7 @@ import { dispatchEffectsModuleCommand } from '../../editor-modules/effects-facad
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 import { getPersistentParamSpecs, getRevealParamSpecs } from './effect-params-ui-schema';
 import { mountEffectParamsPanel, type EffectParamsPanelHandle } from './effect-params-panel';
+import { POINTILLISM_DEFAULTS } from '../../vfx/effects-runtime/persistent/stylisation/pointillism-stipple-shaders';
 
 const REVEAL_EFFECTS = REVEAL_EFFECT_TYPE_VALUES;
 const PERSISTENT_EFFECTS = PERSISTENT_EFFECT_TYPE_VALUES;
@@ -242,10 +243,13 @@ export function initRevealUI(global: Global): () => void {
             { includeDisabled: true }
         ).find(e => e.type === type);
         const ep = entry?.effectParams;
-        if (ep && typeof ep === 'object' && !Array.isArray(ep)) {
-            return { ...(ep as Record<string, unknown>) };
+        const raw = (ep && typeof ep === 'object' && !Array.isArray(ep))
+            ? { ...(ep as Record<string, unknown>) }
+            : {};
+        if (type === 'pointillism-stipple') {
+            return { ...POINTILLISM_DEFAULTS, ...raw };
         }
-        return {};
+        return raw;
     };
 
     const persistentProtocolParams = (

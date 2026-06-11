@@ -130,7 +130,7 @@ export function createPointillismStippleScript(
             script.enabled = autoStart;
             if (autoStart) {
                 script.applyShaders?.();
-                script.updateEffect?.(0, 0);
+                script.applyConfig?.();
             }
         }
         return script;

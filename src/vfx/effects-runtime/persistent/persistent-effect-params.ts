@@ -87,11 +87,22 @@ const PALETTE_PIXEL = new Set([
 ]);
 
 const POINTILLISM_STIPPLE = new Set([
+    'brushSize',
+    'brushDensity',
+    'brushAspect',
+    'brushHardness',
+    'colorVibration',
+    'darkPaintBoost',
+    'highlightSkip',
     'dotScale',
+    'dotSizeFactor',
     'strokeAspect',
     'roundness',
     'density',
     'strokeSoftness',
+    'strokeLength',
+    'strokeWidth',
+    'shapeJitter',
     'paintThickness',
     'saturation',
     'lumaLevels',
@@ -101,8 +112,19 @@ const POINTILLISM_STIPPLE = new Set([
     'paletteStrength',
     'paletteIndex',
     'sourceStructureBlend',
+    'highlightSparsity',
+    'darkDensityBoost',
     'seed',
-    'minVisibleAlpha'
+    'minVisibleAlpha',
+    'postEffectEnabled',
+    'stippleSize',
+    'levels',
+    'levelRange',
+    'ditherSpread',
+    'paperStrength',
+    'paperTint',
+    'edgeThreshold',
+    'edgeStrength'
 ]);
 
 const SPARKLE_TWINKLE = new Set([
@@ -179,6 +201,7 @@ const ARRAY_COLOR_KEYS = new Set([
     'glowColor',
     'cameraClearColor',
     'paperColor',
+    'paperTint',
     'lightColor',
     'strokeColor'
 ]);
@@ -262,10 +285,17 @@ function trySetString(script: any, key: string, v: unknown): boolean {
     return true;
 }
 
+function coerceBoolean(v: unknown): boolean | null {
+    if (typeof v === 'boolean') return v;
+    if (v === 1 || v === '1' || v === 'true') return true;
+    if (v === 0 || v === '0' || v === 'false') return false;
+    return null;
+}
+
 function trySetBoolean(script: any, key: string, v: unknown): boolean {
-    if (typeof v !== 'boolean') return false;
-    if (!(key in script)) return false;
-    script[key] = v;
+    const coerced = coerceBoolean(v);
+    if (coerced === null) return false;
+    script[key] = coerced;
     return true;
 }
 
@@ -311,6 +341,9 @@ export function applyPersistentEffectParamsToScript(
                 script.density = rawVal / 6000;
             }
             continue;
+        }
+        if (getPersistentParamFieldKind(rawKey) === 'boolean') {
+            if (trySetBoolean(script, rawKey, rawVal)) continue;
         }
         if (trySetNumber(script, rawKey, rawVal)) continue;
         if (trySetString(script, rawKey, rawVal)) continue;

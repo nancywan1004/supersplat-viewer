@@ -199,7 +199,11 @@ export class RevealController {
             if (script) {
                 const keys = pack.effectParams ? Object.keys(pack.effectParams) : [];
                 applyPersistentEffectParamsToScript(script, t, pack.effectParams ?? undefined);
-                if (t === 'yiyun-dianran' && keys.length === 1 && keys[0] === 'postEffectEnabled') {
+                if (
+                    (t === 'yiyun-dianran' || t === 'pointillism-stipple') &&
+                    keys.length === 1 &&
+                    keys[0] === 'postEffectEnabled'
+                ) {
                     script.applyPostEffectConfig?.();
                 } else {
                     script.applyConfig?.();

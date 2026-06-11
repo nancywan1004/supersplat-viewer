@@ -231,7 +231,7 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     paperColor: '纸张颜色',
     lightColor: '亮部颜色',
     strokeColor: '线稿颜色',
-    postEffectEnabled: '后处理',
+    postEffectEnabled: '轻量后处理',
     saturation: '饱和度',
     glowIntensity: '发光强度',
     pixelSize: '像素尺寸',
@@ -240,6 +240,13 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     levelRange: '色阶范围',
     ditherSpread: '抖动扩散',
     dotScale: '点涂尺寸',
+    brushSize: '笔触尺寸',
+    brushDensity: '笔触密度',
+    brushAspect: '笔触长宽',
+    brushHardness: '笔触硬边',
+    colorVibration: '彩色震动',
+    darkPaintBoost: '暗部厚度',
+    highlightSkip: '亮部留白',
     strokeAspect: '笔触长宽比',
     roundness: '圆润收敛',
     strokeSoftness: '笔触软边',
@@ -251,7 +258,17 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     paletteStrength: '色板强度',
     sourceStructureBlend: '结构保留',
     seed: '随机种子',
-    minVisibleAlpha: '最小可见透明度'
+    minVisibleAlpha: '最小可见透明度',
+    dotSizeFactor: '点尺寸系数',
+    strokeLength: '笔触长度',
+    strokeWidth: '笔触宽度',
+    shapeJitter: '形态抖动',
+    highlightSparsity: '亮部稀疏',
+    darkDensityBoost: '暗部加密',
+    stippleSize: '颗粒尺寸',
+    paperStrength: '纸张强度',
+    paperTint: '纸张色调',
+    edgeStrength: '描边强度'
 };
 
 /** 亮光细闪中文文案与控件范围（默认数值取自 {@link SPARKLE_TWINKLE_DEFAULTS}） */
@@ -505,19 +522,30 @@ const PALETTE_PIXEL_PARAM_UI: Record<string, PersistentParamUiOverride> = {
 };
 
 const POINTILLISM_PALETTE_OPTIONS: readonly EffectParamEnumOption[] = [
-    { value: 0, label: '钴蓝金黄' },
+    { value: 0, label: '暖橙厚涂' },
     { value: 1, label: '紫蓝橙光' },
-    { value: 2, label: '绿影黄光' },
-    { value: 3, label: '灰墙暖光' }
+    { value: 2, label: '翠绿金黄' },
+    { value: 3, label: '大地中性' }
 ];
 
 const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
-    dotScale: { min: 0.2, max: 2.5, step: 0.01, default: POINTILLISM_DEFAULTS.dotScale },
-    strokeAspect: { min: 1, max: 2.2, step: 0.01, default: POINTILLISM_DEFAULTS.strokeAspect },
+    brushSize: { min: 0.04, max: 0.72, step: 0.01, default: POINTILLISM_DEFAULTS.brushSize },
+    brushDensity: { min: 0.15, max: 2.4, step: 0.01, default: POINTILLISM_DEFAULTS.brushDensity },
+    brushAspect: { min: 0.85, max: 2.2, step: 0.01, default: POINTILLISM_DEFAULTS.brushAspect },
+    brushHardness: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.brushHardness },
+    colorVibration: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.colorVibration },
+    darkPaintBoost: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.darkPaintBoost },
+    highlightSkip: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.highlightSkip },
+    dotScale: { min: 0.05, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.dotScale },
+    dotSizeFactor: { min: 0.01, max: 0.72, step: 0.005, default: POINTILLISM_DEFAULTS.dotSizeFactor },
+    strokeAspect: { min: 0.85, max: 2.2, step: 0.01, default: POINTILLISM_DEFAULTS.strokeAspect },
     roundness: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.roundness },
     density: { min: 0, max: 2, step: 0.01, default: POINTILLISM_DEFAULTS.density },
-    strokeSoftness: { min: 0.025, max: 0.45, step: 0.005, default: POINTILLISM_DEFAULTS.strokeSoftness },
-    paintThickness: { min: 0, max: 3, step: 0.01, default: POINTILLISM_DEFAULTS.paintThickness },
+    strokeSoftness: { min: 0.08, max: 0.55, step: 0.005, default: POINTILLISM_DEFAULTS.strokeSoftness },
+    strokeLength: { min: 0.6, max: 1.2, step: 0.01, default: POINTILLISM_DEFAULTS.strokeLength },
+    strokeWidth: { min: 0.6, max: 1.0, step: 0.01, default: POINTILLISM_DEFAULTS.strokeWidth },
+    shapeJitter: { min: 0, max: 0.12, step: 0.005, default: POINTILLISM_DEFAULTS.shapeJitter },
+    paintThickness: { min: 0.5, max: 1.5, step: 0.01, default: POINTILLISM_DEFAULTS.paintThickness },
     saturation: { min: 0, max: 3, step: 0.01, default: POINTILLISM_DEFAULTS.saturation },
     lumaLevels: { min: 2, max: 24, step: 1, default: POINTILLISM_DEFAULTS.lumaLevels },
     contrastDotMix: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.contrastDotMix },
@@ -530,9 +558,41 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
         default: POINTILLISM_DEFAULTS.paletteIndex
     },
     sourceStructureBlend: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.sourceStructureBlend },
+    highlightSparsity: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.highlightSparsity },
+    darkDensityBoost: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.darkDensityBoost },
     seed: { min: 0, max: 997, step: 1, default: POINTILLISM_DEFAULTS.seed },
-    minVisibleAlpha: { min: 0, max: 0.05, step: 0.001, default: POINTILLISM_DEFAULTS.minVisibleAlpha }
+    minVisibleAlpha: { min: 0, max: 0.05, step: 0.001, default: POINTILLISM_DEFAULTS.minVisibleAlpha },
+    postEffectEnabled: { default: POINTILLISM_DEFAULTS.postEffectEnabled },
+    stippleSize: { min: 32, max: 160, step: 8, default: POINTILLISM_DEFAULTS.stippleSize },
+    levels: { min: 2, max: 20, step: 1, default: POINTILLISM_DEFAULTS.levels },
+    levelRange: { min: 0.5, max: 2, step: 0.01, default: POINTILLISM_DEFAULTS.levelRange },
+    ditherSpread: { min: 0, max: 0.2, step: 0.005, default: POINTILLISM_DEFAULTS.ditherSpread },
+    paperStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.paperStrength },
+    paperTint: { default: [...POINTILLISM_DEFAULTS.paperTint] },
+    edgeThreshold: { min: 0.02, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.edgeThreshold },
+    edgeStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.edgeStrength }
 };
+
+const POINTILLISM_VISIBLE_PARAM_KEYS = [
+    'postEffectEnabled',
+    'brushSize',
+    'brushDensity',
+    'brushAspect',
+    'brushHardness',
+    'colorVibration',
+    'complementaryMix',
+    'sourceStructureBlend',
+    'darkPaintBoost',
+    'highlightSkip',
+    'saturation',
+    'lumaLevels',
+    'paletteStrength',
+    'paletteIndex',
+    'seed',
+    'paperStrength',
+    'paperTint',
+    'edgeStrength'
+] as const;
 
 const buildPersistentSpec = (key: string): EffectParamUiSpec => {
     const kind = getPersistentParamFieldKind(key);
@@ -662,6 +722,9 @@ export function getPersistentParamSpecs(
     }
     if (effectType === 'falling-snow') {
         return FALLING_SNOW_PARAM_KEYS.map((key) => buildPersistentSpecForType(effectType, key));
+    }
+    if (effectType === 'pointillism-stipple') {
+        return POINTILLISM_VISIBLE_PARAM_KEYS.map((key) => buildPersistentSpecForType(effectType, key));
     }
     return getPersistentEffectParamKeys(effectType).map((key) => buildPersistentSpecForType(effectType, key));
 }
