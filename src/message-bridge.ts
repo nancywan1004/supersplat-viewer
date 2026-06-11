@@ -17,6 +17,8 @@ import {
     restoreAnnotationsFromSettings,
     restoreLightingFromSettings,
     restorePostEffectsFromSettings,
+    mergeSkyboxOnEditEnter,
+    applySkyboxOnEditEnter,
     restoreSkyboxFromSettings
 } from './edit-history';
 import type { CommandRegistry } from './editor-modules/command-registry';
@@ -45,7 +47,8 @@ import {
 } from './settings-serialize/settings-serialize';
 import {
     applySceneMediaHotspotBaselineFromView,
-    patchSceneMediaHotspot
+    patchSceneMediaHotspot,
+    readSkyboxCurrentUrlFromSettings
 } from './settings-serialize/settings-serialize-helper';
 import { applyViewMediaMuteSet } from './view-settings';
 import { getSelectedSceneAssetType } from './state-selectors';
@@ -413,12 +416,14 @@ const initPostMessageBridge = (global: Global) => {
                     // 立即设置基线（使用原始配置，确保用户快速退出也能正确恢复）
                         editModeBaselineData = JSON.parse(JSON.stringify(originalSettings)) as ExperienceSettings;
 
+                        const viewerSkyboxUrl = readSkyboxCurrentUrlFromSettings(global.settings as ExperienceSettings);
                         applySettingsSnapshot(global, JSON.parse(JSON.stringify(originalSettings)) as ExperienceSettings);
+                        mergeSkyboxOnEditEnter(global, originalSettings, viewerSkyboxUrl);
                         await requestSceneAssetsRestore(global, { reason: 'edit-enter' });
                         restoreAnnotationsFromSettings(global);
                         restoreLightingFromSettings(global);
                         restorePostEffectsFromSettings(global);
-                        restoreSkyboxFromSettings(global);
+                        applySkyboxOnEditEnter(global, originalSettings, viewerSkyboxUrl);
                     }
                 }
                 state.editMode = !!p.value;

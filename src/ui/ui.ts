@@ -11,6 +11,7 @@ import {
     getComparableSettingsStringFromSnapshot,
     applySettingsSnapshot
 } from '../settings-serialize/settings-serialize';
+import { readSkyboxCurrentUrlFromSettings } from '../settings-serialize/settings-serialize-helper';
 import { downloadExperienceSettingsLocally } from '../render/project-thumbnail';
 import { resetSceneSettings } from '../settings-reset';
 import {
@@ -26,6 +27,8 @@ import {
     restoreAnnotationsFromSettings,
     restoreLightingFromSettings,
     restorePostEffectsFromSettings,
+    mergeSkyboxOnEditEnter,
+    applySkyboxOnEditEnter,
     restoreSkyboxFromSettings
 } from '../edit-history';
 import { showExitEditConfirmModal } from './components/exit-edit-confirm-ui';
@@ -635,12 +638,14 @@ const initUI = (global: Global) => {
                     // 立即设置退出时用的基线（使用原始配置，确保用户快速退出也能正确恢复）
                     editModeEnteredSettingsData = JSON.parse(JSON.stringify(originalSettings)) as ExperienceSettings;
 
+                    const viewerSkyboxUrl = readSkyboxCurrentUrlFromSettings(global.settings as ExperienceSettings);
                     applySettingsSnapshot(global, JSON.parse(JSON.stringify(originalSettings)) as ExperienceSettings);
+                    mergeSkyboxOnEditEnter(global, originalSettings, viewerSkyboxUrl);
                     await requestSceneAssetsRestore(global, { reason: 'edit-enter' });
                     restoreAnnotationsFromSettings(global);
                     restoreLightingFromSettings(global);
                     restorePostEffectsFromSettings(global);
-                    restoreSkyboxFromSettings(global);
+                    applySkyboxOnEditEnter(global, originalSettings, viewerSkyboxUrl);
                 }
 
                 applyMorphKeyframeVisibilityPolicy(global);

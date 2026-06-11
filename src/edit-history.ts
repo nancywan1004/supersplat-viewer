@@ -4,7 +4,7 @@ import { serializeExperienceSettings, applySettingsSnapshot } from './settings-s
 import { requestSceneAssetsRestore } from './scene-assets/asset-placement-handler';
 import type { AnnotationManager } from './annotation-toolbar/annotation-manager';
 import { updatePointLightsFromSettings } from './light';
-import { readSkyboxCurrentUrlFromSettings } from './settings-serialize/settings-serialize-helper';
+import { readSkyboxCurrentUrlFromSettings, setSkyboxCurrentUrlInSettings } from './settings-serialize/settings-serialize-helper';
 
 export type EditSnapshot = ExperienceSettings;
 
@@ -125,6 +125,41 @@ export function restorePostEffectsFromSettings(global: Global): void {
 export function restoreSkyboxFromSettings(global: Global): void {
     const url = readSkyboxCurrentUrlFromSettings(global.settings as ExperienceSettings);
     global.events.fire('skyboxSet', url ?? null);
+}
+
+/**
+ * 进入编辑：真源无天空盒 URL 时，将 Viewer `SKYBOX_SET` 的 URL 写回 settings。
+ * 须在 `restoreLightingFromSettings` 之前调用。
+ */
+export function mergeSkyboxOnEditEnter(
+    global: Global,
+    originalSettings: ExperienceSettings,
+    viewerSkyboxUrl?: string
+): void {
+    if (readSkyboxCurrentUrlFromSettings(originalSettings)) return;
+    const viewerUrl = typeof viewerSkyboxUrl === 'string' ? viewerSkyboxUrl.trim() : '';
+    if (!viewerUrl) return;
+    setSkyboxCurrentUrlInSettings(global.settings as ExperienceSettings, viewerUrl);
+}
+
+/**
+ * 进入编辑：同步天空盒 GPU 与 UI（真源有 URL 则 reset，否则保留 Viewer 天空盒；均无则不动）。
+ */
+export function applySkyboxOnEditEnter(
+    global: Global,
+    originalSettings: ExperienceSettings,
+    viewerSkyboxUrl?: string
+): void {
+    if (readSkyboxCurrentUrlFromSettings(originalSettings)) {
+        restoreSkyboxFromSettings(global);
+        return;
+    }
+    const viewerUrl = typeof viewerSkyboxUrl === 'string' ? viewerSkyboxUrl.trim() : '';
+    if (viewerUrl) {
+        global.events.fire('skyboxSelectionSynced', viewerUrl);
+        return;
+    }
+    // 真源与 Viewer 均无天空盒：跳过 clear，避免 clearSkyboxDisplay 改写 envAtlas 导致 mesh IBL 突变
 }
 
 export async function restoreSnapshot(global: Global, snapshot: EditSnapshot): Promise<void> {

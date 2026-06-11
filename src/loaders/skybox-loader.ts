@@ -265,11 +265,14 @@ const loadSkyboxDirect = (app: AppBase, url: string): Promise<Asset> => {
     });
 };
 
-/** 清除 cubemap / sphere 天空盒显示，并恢复独立纯色 envAtlas */
+/** 清除 cubemap / sphere 天空盒显示；仅在实际卸载过天空盒时恢复纯色 envAtlas */
 const clearSkyboxDisplay = (app: AppBase) => {
     removeSkyboxSphere(app);
+    const hadSkybox = app.scene.skybox != null;
     app.scene.skybox = null;
-    app.scene.envAtlas = getOrCreateSolidEnvAtlas(app);
+    if (hadSkybox) {
+        app.scene.envAtlas = getOrCreateSolidEnvAtlas(app);
+    }
     app.renderNextFrame = true;
 };
 
