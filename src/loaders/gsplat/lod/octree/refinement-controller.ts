@@ -20,9 +20,13 @@ const T = {
     loader: {
         defaultConcurrent: 2,
         boostConcurrent: platform.mobile ? 4 : 8,
+        burstConcurrent: platform.mobile ? 8 : 12,
+        emergencyConcurrent: platform.mobile ? 16 : 32,
         foregroundLimit: platform.mobile ? 32 : 64,
         criticalLimit: platform.mobile ? 4 : 8,
-        pinLimit: platform.mobile ? 6 : 12
+        pinLimit: platform.mobile ? 6 : 12,
+        trackedMissFrames: platform.mobile ? 8 : 12,
+        trackedLimit: platform.mobile ? 96 : 192
     },
     settle: {
         postDownloadFrames: 30,
@@ -132,6 +136,11 @@ type GsplatSceneLike = {
 type PrioritizedFile = {
     fileIndex: number;
     score: number;
+};
+
+type TrackedMissingFile = {
+    score: number;
+    missedFrames: number;
 };
 
 type PrioritizedBatch = {
@@ -309,7 +318,7 @@ function expandDownloadGateUrls(
         return priorityUrls;
     }
     const expanded = new Set(priorityUrls);
-    loader._currentlyLoading?.forEach((url) => expanded.add(url));
+    loader._currentlyLoading?.forEach(url => expanded.add(url));
     return [...expanded];
 }
 
@@ -366,8 +375,49 @@ function reconcileLoaderQueue(loader: OctreeAssetLoaderLike, priorityUrls: strin
     loader._processQueue?.();
 }
 
+function countPriorityLoadState(loader: OctreeAssetLoaderLike | null | undefined, priorityUrls: string[]) {
+    const prioritySet = new Set(priorityUrls);
+    const priorityQueued = loader?._loadQueue?.filter(url => prioritySet.has(url)).length ?? 0;
+    let priorityInFlight = 0;
+    let staleInFlight = 0;
+    loader?._currentlyLoading?.forEach((url) => {
+        if (prioritySet.has(url)) {
+            priorityInFlight++;
+        } else {
+            staleInFlight++;
+        }
+    });
+    return { priorityQueued, priorityInFlight, staleInFlight };
+}
+
+function updateBoostConcurrencyForPriority(
+    loader: OctreeAssetLoaderLike | null | undefined,
+    priorityUrls: string[]
+): ReturnType<typeof countPriorityLoadState> & { maxConcurrent: number | undefined } {
+    const state = countPriorityLoadState(loader, priorityUrls);
+    if (!loader) {
+        return { ...state, maxConcurrent: undefined };
+    }
+
+    const inFlight = loader._currentlyLoading?.size ?? 0;
+    const blockedByStaleInflight = state.priorityQueued > 0 && state.staleInFlight > 0;
+    const target = blockedByStaleInflight ?
+        Math.min(
+            T.loader.emergencyConcurrent,
+            Math.max(T.loader.burstConcurrent, inFlight + Math.min(state.priorityQueued, T.loader.criticalLimit))
+        ) :
+        T.loader.boostConcurrent;
+
+    if (loader.maxConcurrentLoads !== target) {
+        loader.maxConcurrentLoads = target;
+        loader._processQueue?.();
+    }
+
+    return { ...countPriorityLoadState(loader, priorityUrls), maxConcurrent: loader.maxConcurrentLoads };
+}
+
 function updateTrackedMissingFiles(
-    tracked: Map<number, number>,
+    tracked: Map<number, TrackedMissingFile>,
     files: PrioritizedFile[],
     octree: OctreeLike
 ): void {
@@ -378,19 +428,33 @@ function updateTrackedMissingFiles(
         if (octree.getFileResource(entry.fileIndex)) {
             continue;
         }
-        tracked.set(entry.fileIndex, entry.score);
+        tracked.set(entry.fileIndex, { score: entry.score, missedFrames: 0 });
     }
-    for (const fi of tracked.keys()) {
-        if (octree.getFileResource(fi) || !seenThisFrame.has(fi)) {
+    for (const [fi, entry] of tracked) {
+        if (octree.getFileResource(fi)) {
             tracked.delete(fi);
+            continue;
+        }
+        if (!seenThisFrame.has(fi)) {
+            entry.missedFrames++;
+            if (entry.missedFrames > T.loader.trackedMissFrames) {
+                tracked.delete(fi);
+            }
+        }
+    }
+
+    if (tracked.size > T.loader.trackedLimit) {
+        const entries = [...tracked.entries()].sort((a, b) => b[1].score - a[1].score);
+        for (let i = T.loader.trackedLimit; i < entries.length; i++) {
+            tracked.delete(entries[i][0]);
         }
     }
 }
 
-function buildBatchFromTracked(tracked: Map<number, number>, limit: number): PrioritizedFile[] {
+function buildBatchFromTracked(tracked: Map<number, TrackedMissingFile>, limit: number): PrioritizedFile[] {
     const batch: PrioritizedFile[] = [];
-    for (const [fileIndex, score] of tracked) {
-        batch.push({ fileIndex, score });
+    for (const [fileIndex, entry] of tracked) {
+        batch.push({ fileIndex, score: entry.score });
     }
     batch.sort((a, b) => b.score - a.score);
     return batch.slice(0, limit);
@@ -1258,6 +1322,7 @@ function buildPriorityFiles(ctx: RefinementEvaluateContext): PrioritizedBatch {
 
 function retainCriticalDownloadFiles(
     octree: OctreeLike,
+    loader: OctreeAssetLoaderLike | null | undefined,
     criticalBatch: PrioritizedFile[],
     pinnedFiles: Set<number>,
     pinLimit = T.loader.pinLimit
@@ -1265,12 +1330,20 @@ function retainCriticalDownloadFiles(
     if (!octree.incRefCount) {
         return;
     }
+    const queue = loader?._loadQueue;
+    const inFlight = loader?._currentlyLoading;
     for (let i = 0; i < criticalBatch.length; i++) {
         if (pinnedFiles.size >= pinLimit) {
             break;
         }
         const fi = criticalBatch[i].fileIndex;
         if (pinnedFiles.has(fi)) {
+            continue;
+        }
+        const url = octree.files[fi]?.url;
+        const isLoaded = !!octree.getFileResource(fi);
+        const isQueuedOrLoading = !!url && (!!queue?.includes(url) || !!inFlight?.has(url));
+        if (!isLoaded && !isQueuedOrLoading) {
             continue;
         }
         octree.incRefCount(fi);
@@ -1356,7 +1429,7 @@ export function createOctreeRefinementController(
     let savedLodUpdateDistance: number | null = null;
     let savedLodUnderfillLimit: number | null = null;
     const prefetch = {
-        tracked: new Map<number, number>(),
+        tracked: new Map<number, TrackedMissingFile>(),
         pinned: new Set<number>(),
         lastUrls: [] as string[]
     };
@@ -1577,7 +1650,6 @@ export function createOctreeRefinementController(
 
         const loader = octree.assetLoader;
         if (priorityUrls.length > 0) {
-            retainCriticalDownloadFiles(octree, criticalBatch, prefetch.pinned);
             const gateUrls = expandDownloadGateUrls(loader, priorityUrls);
             prefetch.lastUrls = gateUrls.slice();
             setRefinementPriorityUrls(octree, loader, gateUrls);
@@ -1587,7 +1659,18 @@ export function createOctreeRefinementController(
             if (loader) {
                 reconcileLoaderQueue(loader, gateUrls);
             }
+            if (loader && savedLoaderConcurrency === null) {
+                savedLoaderConcurrency = loader.maxConcurrentLoads ?? T.loader.defaultConcurrent;
+            }
+            updateBoostConcurrencyForPriority(
+                loader,
+                priorityUrls
+            );
+            retainCriticalDownloadFiles(octree, loader, criticalBatch, prefetch.pinned);
         } else if (loader) {
+            if (boostActive && loader.maxConcurrentLoads !== T.loader.boostConcurrent) {
+                loader.maxConcurrentLoads = T.loader.boostConcurrent;
+            }
             // 仅在刚完成一轮下载的 settle 窗口内 hold 旧 gate，防 peripheral 涌入抖动。
             // 勿用 staleLodNodes 条件：挪机后 stale 长期存在会沿用旧视角 URL，卡死新中心 sync/下载。
             const holdGate =
@@ -1625,6 +1708,9 @@ export function createOctreeRefinementController(
         if (needsBoost) {
             enterRefinementMode();
             syncBurstLodUpdateDistance();
+            if (priorityUrls.length > 0) {
+                updateBoostConcurrencyForPriority(loader, priorityUrls);
+            }
             cameraMovedSinceSettle = false;
         } else if (boostActive) {
             restoreRefinementMode();
@@ -1652,6 +1738,15 @@ export function createOctreeRefinementController(
                 gsplatScene,
                 true
             );
+        } else if (needsLodSwitch && staleLoadedNodes >= T.loader.foregroundLimit) {
+            syncedInstances = syncOctreePendingPlacements(
+                app,
+                octree,
+                gsplatEntity,
+                gsplatScene,
+                true
+            );
+            staleSyncCooldown = T.burst.syncCooldown;
         } else if (needsLodSwitch && staleLoadedNodes > 0 && staleSyncCooldown <= 0) {
             syncedInstances = syncOctreePendingPlacements(
                 app,
@@ -1703,6 +1798,7 @@ export function createOctreeRefinementController(
                 const suspended = loader?.__refinementSuspendedQueue?.length ?? 0;
                 const queueLen = loader?._loadQueue?.length ?? 0;
                 const inFlight = loader?._currentlyLoading?.size ?? 0;
+                const priorityLoad = countPriorityLoadState(loader, priorityUrls);
                 const log: Record<string, unknown> = {
                     boostActive,
                     pinLimit: T.loader.pinLimit,
@@ -1714,6 +1810,13 @@ export function createOctreeRefinementController(
                     stableCriticalPending,
                     trackedMissing: prefetch.tracked.size,
                     activeDownloads: priorityUrls.length,
+                    priorityQueued: priorityLoad.priorityQueued,
+                    priorityInFlight: priorityLoad.priorityInFlight,
+                    staleInFlight: priorityLoad.staleInFlight,
+                    priorityBlocked:
+                        priorityLoad.priorityQueued > 0 &&
+                        priorityLoad.priorityInFlight === 0 &&
+                        priorityLoad.staleInFlight >= (loader?.maxConcurrentLoads ?? 0),
                     staleLoadedNodes,
                     lodDisplayMismatch,
                     needsLodSwitch,

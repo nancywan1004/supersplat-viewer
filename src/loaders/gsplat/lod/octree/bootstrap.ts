@@ -590,8 +590,35 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         app.renderNextFrame = true;
     };
 
+    const notifyStreamingCameraInteraction = (zoom = false) => {
+        if (!isStreamingOctree || !streamingLodUnlocked) {
+            return;
+        }
+        refinementController?.notifyCameraMoved({ zoom });
+        idleTime = 0;
+        forceRender.set(true);
+        app.renderNextFrame = true;
+    };
+
+    const onRefinementInputEvent = (type: string) => {
+        if (type === 'dblclick' || type === 'interrupt') {
+            notifyStreamingCameraInteraction(true);
+        }
+    };
+
+    const onRefinementPick = () => {
+        notifyStreamingCameraInteraction(true);
+    };
+
+    const onRefinementNavigateTo = () => {
+        notifyStreamingCameraInteraction(true);
+    };
+
     app.on('update', onUpdate);
     events.on('inputEvent', onInputEvent);
+    events.on('inputEvent', onRefinementInputEvent);
+    events.on('pick', onRefinementPick);
+    events.on('navigateTo', onRefinementNavigateTo);
     eventHandler.on('frame:ready', onFrameReady);
     eventHandler.on('frame:ready', readyHandler);
     events.on('octreeRefinement:activity', onRefinementActivity);
@@ -600,6 +627,9 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         destroy() {
             app.off('update', onUpdate);
             events.off('inputEvent', onInputEvent);
+            events.off('inputEvent', onRefinementInputEvent);
+            events.off('pick', onRefinementPick);
+            events.off('navigateTo', onRefinementNavigateTo);
             eventHandler.off('frame:ready', onFrameReady);
             eventHandler.off('frame:ready', readyHandler);
             events.off('octreeRefinement:activity', onRefinementActivity);
