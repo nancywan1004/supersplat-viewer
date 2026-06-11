@@ -3,7 +3,7 @@ import { EventHandler } from 'playcanvas';
 import { shouldUseTouchJoystickMove } from '../input/touch-joystick-ui';
 import { Tooltip } from '../tooltip';
 import { Global } from '../types';
-import { isCustomLodEnabled } from '../loaders/lod-loader';
+import { isCustomLodEnabled } from '../loaders/gsplat/lod/custom-loader';
 import type { ExperienceSettings } from '../schemas/v2';
 import {
     serializeExperienceSettings,

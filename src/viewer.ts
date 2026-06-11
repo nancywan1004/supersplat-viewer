@@ -1,8 +1,6 @@
 import {
     BoundingBox,
     CameraFrame,
-    type CameraComponent,
-    type Layer,
     Color,
     Entity,
     RenderTarget,
@@ -22,13 +20,7 @@ import {
     TONEMAP_ACES2,
     TONEMAP_NEUTRAL,
     Vec3,
-    GSPLAT_DEBUG_LOD,
-    GSPLAT_DEBUG_NONE,
-    GSPLAT_RENDERER_COMPUTE,
-    GSPLAT_RENDERER_RASTER_CPU_SORT,
-    GSPLAT_RENDERER_RASTER_GPU_SORT,
-    GSplatComponent,
-    platform
+    GSplatComponent
 } from 'playcanvas';
 
 import { Annotations } from './annotations';
@@ -59,20 +51,9 @@ import {
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
 import { getSkyboxRadius } from './loaders/skybox-loader';
 import { readSkyboxCurrentUrlFromSettings } from './settings-serialize/settings-serialize-helper';
-import { isCustomLodEnabled } from './loaders/lod-loader';
-import {
-    createOctreeRefinementController,
-    computeStreamingRefinementProgressRatio,
-    ensureStreamingBootstrapCoarseFiles,
-    getStreamingViewportBootstrapStatus,
-    getStreamingViewportRefinementStatus,
-    syncStreamingOctreePlacements,
-    STREAMING_VIEWPORT_READY_RATIO,
-    STREAMING_VIEWPORT_REFINEMENT_READY_RATIO,
-    type OctreeLike,
-    type StreamingViewportBootstrapOptions,
-    type OctreeRefinementController
-} from './loaders/octree-refinement-controller';
+import { bootstrapOctreeLod, type OctreeLodBootstrapHandle } from './loaders/gsplat/lod/octree/bootstrap';
+import { bootstrapSogUnified } from './loaders/gsplat/sog/bootstrap';
+import type { OctreeRefinementController } from './loaders/gsplat/lod/octree/refinement-controller';
 import { BloomController } from './vfx/bloom';
 import { NightMode } from './vfx/lighting/night-mode';
 import {
@@ -186,16 +167,6 @@ const tonemapTable: Record<string, number> = {
     aces: TONEMAP_ACES,
     aces2: TONEMAP_ACES2,
     neutral: TONEMAP_NEUTRAL
-};
-
-/** main：raster 路径下按实际 deviceType 选择 gsplat 排序器（compute 路径不走此表） */
-const rendererTable: Record<'webgl' | 'webgpu', number> = {
-    webgl: GSPLAT_RENDERER_RASTER_CPU_SORT,
-    webgpu: GSPLAT_RENDERER_RASTER_GPU_SORT
-};
-
-type GSplatOctreeResourceLike = {
-    octree?: OctreeLike | null;
 };
 
 /** 仅处理非 Bloom 的后处理（Bloom 由 BloomController 统一配置） */
@@ -320,6 +291,8 @@ class Viewer {
 
     /** 普通 octree streaming 首帧后的视锥/屏幕误差优先 refinement */
     octreeRefinementController: OctreeRefinementController | null = null;
+
+    private octreeLodBootstrap: OctreeLodBootstrapHandle | null = null;
 
     /** 将 cameraManager 的相机姿态应用到实体（导出时 seek anim 后调用） */
     applyCameraFromManager: () => void = () => {};
@@ -1049,616 +1022,36 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 this.cleanupVideoControlsInteraction = initVideoControlsInteraction(global, canvasEl);
             }
 
-            const { instance } = gsplat;
-            if (instance) {
-                // kick off gsplat sorting immediately now that camera is in position
-                instance.sort(camera);
+            const forceRenderBinding = {
+                get: () => this.forceRenderNextFrame,
+                set: (value: boolean) => {
+                    this.forceRenderNextFrame = value;
+                }
+            };
 
-                // listen for sorting updates to trigger first frame events
-                instance.sorter?.on('updated', () => {
-                    // request frame render when sorting changes
-                    app.renderNextFrame = true;
-
-                    if (!state.readyToRender) {
-                        // 关键：先创建 VFX 并预热一帧，再允许上屏显示
-                        // 避免首帧无 shader 的偏色/蓝光闪问题
-                        this.revealController?.ensureInitialEffectCreatedBeforeFirstDisplay?.();
-
-                        // 强制渲染一帧（不显示），让 unified 模式创建材质并编译 shader
-                        this.forceRenderNextFrame = true;
-                        app.renderNextFrame = true;
-
-                        // 在当前帧渲染完成后立即允许显示（比 requestAnimationFrame 更可靠）
-                        // 使用 frameend 事件确保 shader 已编译完成
-                        app.once('frameend', () => {
-                            if (state.readyToRender) return; // 已被其他路径设置则跳过
-
-                            // we're ready to render once the first sort has completed
-                            state.readyToRender = true;
-                            ensureShadowPipelineReady();
-
-                            // 清除强制渲染标志，恢复按需渲染
-                            this.forceRenderNextFrame = false;
-
-                            // 触发 firstFrame 事件
-                            events.fire('firstFrame');
-
-                            // emit first frame event on window
-                            window.firstFrame?.();
-                        });
-                    }
+            if (gsplat.instance) {
+                bootstrapSogUnified({
+                    global,
+                    gsplat,
+                    camera,
+                    forceRender: forceRenderBinding,
+                    ensureShadowPipelineReady,
+                    revealController: this.revealController
                 });
             } else {
-
-                const { gsplat } = app.scene;
-                const { renderer: actualRenderer } = global;
-
-                const isCustomLod = isCustomLodEnabled(settings, config.contentUrl);
-
-                const budgets = {
-                    mobile: { low: 1, high: 2 },
-                    desktop: { low: 2, high: 4 }
-                };
-                const quality = platform.mobile ? budgets.mobile : budgets.desktop;
-
-                const resolveSplatBudgetMillions = (): number => {
-                    if (config.budget !== undefined && Number.isFinite(config.budget) && config.budget > 0) {
-                        return config.budget;
-                    }
-                    return state.performanceMode ? quality.low : quality.high;
-                };
-
-                const applyGsplatRenderer = (): void => {
-                    if (config.renderer === 'compute') {
-                        gsplat.renderer = GSPLAT_RENDERER_COMPUTE;
-                    } else if (config.renderer === 'gpu-sort') {
-                        gsplat.renderer = GSPLAT_RENDERER_RASTER_GPU_SORT;
-                    } else if (config.renderer === 'cpu-sort') {
-                        gsplat.renderer = GSPLAT_RENDERER_RASTER_CPU_SORT;
-                    } else if (actualRenderer === 'webgpu') {
-                        gsplat.renderer = rendererTable.webgpu;
-                    } else {
-                        gsplat.renderer = rendererTable.webgl;
-                    }
-                };
-
-                const applyPerfSettings = () => {
-                    gsplat.splatBudget = resolveSplatBudgetMillions() * 1000000;
-                    gsplat.lodRangeMin = 0;
-                    gsplat.lodRangeMax = 1000;
-                    gsplat.colorUpdateAngle = state.performanceMode ? 4 : 2;
-                    gsplat.minContribution = 1;
-                    gsplat.alphaClip = 1 / 255;
-                    gsplat.antiAlias = config.aa;
-                };
-
-                if (isCustomLod) {
-                    const gsplatScene = (app.scene as any).gsplat;
-                    if (gsplatScene && gsplatScene.lodRangeMax !== undefined) {
-                        if (gsplatScene.splatBudget !== undefined) {
-                            results[0].gsplat.splatBudget = gsplatScene.splatBudget * 1000000;
-                        }
-                        gsplat.lodRangeMin = 0;
-                        gsplat.lodRangeMax = gsplatScene.lodRangeMax;
-                    } else {
-                        gsplat.lodRangeMin = 0;
-                        gsplat.lodRangeMax = 5;
-                    }
-                    gsplat.minContribution = 1;
-                    gsplat.alphaClip = 1 / 255;
-                    gsplat.antiAlias = config.aa;
-                } else if (config.fullload) {
-                    applyPerfSettings();
-                } else {
-                    const resource = results[0].gsplat.resource as GSplatOctreeResourceLike | null;
-                    const octree = resource?.octree;
-                    const lodLevels = octree?.lodLevels;
-                    if (lodLevels) {
-                        gsplat.lodRangeMax = gsplat.lodRangeMin = lodLevels - 1;
-                    }
-                    // streaming 首屏：尽早限 budget + 切 WebGPU 渲染器，避免默认 CPU sort + budget=0 在 Windows OOM
-                    gsplat.splatBudget = resolveSplatBudgetMillions() * 1_000_000;
-                    applyGsplatRenderer();
-                    gsplat.dirty = true;
-                }
-
-                // these two allow LOD behind camera to drop, saves lots of splats
-                gsplat.lodUpdateAngle = 90;
-                gsplat.lodBehindPenalty = 5;
-
-                // same performance, but rotating on slow devices does not give us unsorted splats on sides
-                gsplat.radialSorting = true;
-
-                const eventHandler = app.systems.gsplat;
-
-                // idle timer: force continuous rendering until 4s of inactivity
-                let idleTime = 0;
-                this.forceRenderNextFrame = true;
-
-                app.on('update', (dt: number) => {
-                    idleTime += dt;
-                    this.forceRenderNextFrame = idleTime < 4;
-                    tryUnlockStreamingOnCameraIdle(dt);
-                    if (isStreamingOctree && streamingBootstrapGateReached) {
-                        pollStreamingBootstrapComplete();
+                this.octreeLodBootstrap = bootstrapOctreeLod({
+                    global,
+                    settings,
+                    gsplatEntity: results[0],
+                    camera,
+                    cameraManager: this.cameraManager,
+                    forceRender: forceRenderBinding,
+                    ensureShadowPipelineReady,
+                    revealController: this.revealController,
+                    onRefinementController: (controller) => {
+                        this.octreeRefinementController = controller;
                     }
                 });
-
-                events.on('inputEvent', (type: string) => {
-                    if (type !== 'interact') {
-                        idleTime = 0;
-                    }
-                });
-
-                eventHandler.on('frame:ready', (_camera: CameraComponent, _layer: Layer, ready: boolean, loading: number) => {
-                    if (loading > 0 || !ready) {
-                        idleTime = 0;
-                    }
-                });
-
-                let current = 0;
-                let watermark = 1;
-                // For custom LOD mode, track the maximum progress to prevent regression
-                let maxProgress = 0;
-                let progressUIHidden = false; // Track if progress UI has been hidden
-                const PROGRESS_THRESHOLD = 50; // streaming 开门禁；100% 需视锥 refinement 清晰
-                const PROGRESS_COARSE_CAP = 82; // 粗层上屏阶段进度上限
-                const PROGRESS_REFINEMENT_CAP = 99; // refinement 阶段顶格（稳定就绪后才 100%）
-                const STREAMING_REFINEMENT_STABLE_FRAMES = 10;
-                const isStreamingOctree = !isCustomLod && !config.fullload;
-                const octreeResource = isStreamingOctree
-                    ? results[0].gsplat.resource as GSplatOctreeResourceLike | null
-                    : null;
-                let streamingLodUnlocked = false;
-                let streamingPerfHandlerRegistered = false;
-                let streamingBootstrapGateReached = false;
-                let streamingSceneWarmupDone = false;
-                let streamingPendingCoarseDisplay = false;
-                let streamingCoarseDisplayed = false;
-                let streamingBootstrapDisplayFinalized = false;
-                let streamingViewportSyncCooldown = 0;
-                let streamingRefinementStableFrames = 0;
-                let streamingRefinementBaselinePending = 0;
-                let streamingRefinementPhaseStarted = false;
-                const streamLastCamPos = new Vec3();
-                const streamLastCamFwd = new Vec3();
-                let streamLastCamDist = this.cameraManager.camera.distance;
-                let streamLastCamFov = this.cameraManager.camera.fov;
-
-                events.on('octreeRefinement:activity', (activity: { active?: boolean }) => {
-                    if (activity?.active) {
-                        idleTime = 0;
-                        this.forceRenderNextFrame = true;
-                        app.renderNextFrame = true;
-                    }
-                });
-
-                const streamingViewportBootstrapOptions = (): StreamingViewportBootstrapOptions => ({
-                    excludeViewportEdgeNodes: true
-                });
-
-                const finalizeStreamingBootstrapDisplay = () => {
-                    if (streamingBootstrapDisplayFinalized) {
-                        return;
-                    }
-                    streamingBootstrapDisplayFinalized = true;
-                    if (!state.readyToRender) {
-                        state.readyToRender = true;
-                        ensureShadowPipelineReady();
-                    }
-                    events.fire('firstFrame');
-                    window.firstFrame?.();
-                };
-
-                const tryShowStreamingCoarseViewport = () => {
-                    if (streamingCoarseDisplayed) {
-                        return;
-                    }
-                    streamingCoarseDisplayed = true;
-                    if (streamingSceneWarmupDone) {
-                        if (!state.readyToRender) {
-                            state.readyToRender = true;
-                            ensureShadowPipelineReady();
-                        }
-                        return;
-                    }
-                    streamingPendingCoarseDisplay = true;
-                    runStreamingSceneWarmupOnce();
-                };
-
-                const runStreamingSceneWarmupOnce = () => {
-                    if (streamingSceneWarmupDone) {
-                        return;
-                    }
-                    streamingSceneWarmupDone = true;
-                    this.revealController?.ensureInitialEffectCreatedBeforeFirstDisplay?.();
-                    this.forceRenderNextFrame = true;
-                    app.renderNextFrame = true;
-                    app.once('frameend', () => {
-                        applyGsplatRenderer();
-                        if (
-                            config.renderer === 'compute' &&
-                            (app.scene.gsplat as { currentRenderer?: number }).currentRenderer !== GSPLAT_RENDERER_COMPUTE
-                        ) {
-                            console.warn('[GSplat] compute renderer requested but unavailable; falling back to engine renderer:', {
-                                requested: config.renderer,
-                                actualDevice: actualRenderer,
-                                currentRenderer: (app.scene.gsplat as { currentRenderer?: number }).currentRenderer
-                            });
-                        }
-                        gsplat.debug = config.colorize ? GSPLAT_DEBUG_LOD : GSPLAT_DEBUG_NONE;
-                        this.forceRenderNextFrame = false;
-                        if (streamingPendingCoarseDisplay && !state.readyToRender) {
-                            streamingPendingCoarseDisplay = false;
-                            state.readyToRender = true;
-                            ensureShadowPipelineReady();
-                        }
-                    });
-                };
-
-                const updateStreamingLoadProgress = (fileProgress: number) => {
-                    if (!isStreamingOctree) {
-                        state.progress = fileProgress;
-                        return;
-                    }
-
-                    if (progressUIHidden || state.animationStarted) {
-                        state.progress = 100;
-                        return;
-                    }
-
-                    // 50% 前只反映文件下载，避免引擎 loading 计数提前把条顶满
-                    if (!streamingBootstrapGateReached) {
-                        state.progress = Math.min(fileProgress, PROGRESS_THRESHOLD);
-                        return;
-                    }
-
-                    const octree = octreeResource?.octree as OctreeLike | null | undefined;
-                    if (!octree) {
-                        state.progress = Math.min(Math.max(state.progress, fileProgress), PROGRESS_THRESHOLD);
-                        return;
-                    }
-
-                    const bootstrapOptions = streamingViewportBootstrapOptions();
-                    const viewport = getStreamingViewportBootstrapStatus(
-                        app,
-                        octree,
-                        results[0],
-                        camera,
-                        STREAMING_VIEWPORT_READY_RATIO,
-                        bootstrapOptions
-                    );
-
-                    // 50%–82%：粗层上屏（与文件计数解耦）
-                    if (!viewport.ready) {
-                        const coarseProgress =
-                            PROGRESS_THRESHOLD +
-                            Math.round(
-                                viewport.placementRatio * (PROGRESS_COARSE_CAP - PROGRESS_THRESHOLD)
-                            );
-                        state.progress = Math.min(
-                            PROGRESS_COARSE_CAP,
-                            Math.max(state.progress, coarseProgress)
-                        );
-                        return;
-                    }
-
-                    if (!streamingLodUnlocked) {
-                        state.progress = PROGRESS_COARSE_CAP;
-                        return;
-                    }
-
-                    if (!streamingRefinementPhaseStarted) {
-                        streamingRefinementPhaseStarted = true;
-                        state.progress = PROGRESS_COARSE_CAP;
-                    }
-
-                    const refinement = getStreamingViewportRefinementStatus(
-                        app,
-                        octree,
-                        results[0],
-                        camera,
-                        STREAMING_VIEWPORT_REFINEMENT_READY_RATIO,
-                        bootstrapOptions
-                    );
-
-                    if (refinement.pendingNodes > streamingRefinementBaselinePending) {
-                        streamingRefinementBaselinePending = refinement.pendingNodes;
-                    }
-
-                    // 刚 unlock 时 controller 可能尚未报 pending；先停在 82%
-                    if (streamingRefinementBaselinePending <= 0) {
-                        if (refinement.ready) {
-                            state.progress = PROGRESS_REFINEMENT_CAP;
-                        } else {
-                            state.progress = PROGRESS_COARSE_CAP;
-                        }
-                        return;
-                    }
-
-                    const doneRatio = computeStreamingRefinementProgressRatio(
-                        refinement.pendingNodes,
-                        streamingRefinementBaselinePending
-                    );
-                    const refinementProgress =
-                        PROGRESS_COARSE_CAP +
-                        Math.round(doneRatio * (PROGRESS_REFINEMENT_CAP - PROGRESS_COARSE_CAP));
-                    state.progress = Math.min(
-                        PROGRESS_REFINEMENT_CAP,
-                        Math.max(state.progress, refinementProgress)
-                    );
-                };
-
-                const pollStreamingBootstrapComplete = () => {
-                    if (!isStreamingOctree || !streamingBootstrapGateReached) {
-                        return;
-                    }
-                    const octree = octreeResource?.octree as OctreeLike | null | undefined;
-                    if (!octree) {
-                        return;
-                    }
-
-                    ensureStreamingBootstrapCoarseFiles(
-                        app,
-                        octree,
-                        results[0],
-                        camera,
-                        streamingViewportBootstrapOptions()
-                    );
-
-                    if (streamingViewportSyncCooldown <= 0) {
-                        syncStreamingOctreePlacements(app, octree, results[0]);
-                        streamingViewportSyncCooldown = 2;
-                    } else {
-                        streamingViewportSyncCooldown--;
-                    }
-
-                    const viewport = getStreamingViewportBootstrapStatus(
-                        app,
-                        octree,
-                        results[0],
-                        camera,
-                        STREAMING_VIEWPORT_READY_RATIO,
-                        streamingViewportBootstrapOptions()
-                    );
-                    updateStreamingLoadProgress(
-                        watermark > 0 ? Math.trunc((current / watermark) * 100) : state.progress
-                    );
-
-                    if (!viewport.ready) {
-                        streamingRefinementStableFrames = 0;
-                        return;
-                    }
-
-                    tryShowStreamingCoarseViewport();
-                    unlockStreamingLod();
-
-                    if (streamingViewportSyncCooldown <= 0) {
-                        syncStreamingOctreePlacements(app, octree, results[0]);
-                        streamingViewportSyncCooldown = 2;
-                    }
-
-                    const refinement = getStreamingViewportRefinementStatus(
-                        app,
-                        octree,
-                        results[0],
-                        camera,
-                        STREAMING_VIEWPORT_REFINEMENT_READY_RATIO,
-                        streamingViewportBootstrapOptions()
-                    );
-                    updateStreamingLoadProgress(
-                        watermark > 0 ? Math.trunc((current / watermark) * 100) : state.progress
-                    );
-
-                    if (!refinement.ready) {
-                        streamingRefinementStableFrames = 0;
-                        return;
-                    }
-
-                    streamingRefinementStableFrames++;
-                    if (streamingRefinementStableFrames < STREAMING_REFINEMENT_STABLE_FRAMES) {
-                        return;
-                    }
-
-                    if (!progressUIHidden) {
-                        if (!streamingLodUnlocked || state.progress < PROGRESS_COARSE_CAP) {
-                            streamingRefinementStableFrames = 0;
-                            return;
-                        }
-                        progressUIHidden = true;
-                        state.progress = 100;
-                        finalizeStreamingBootstrapDisplay();
-                        events.fire('progressThresholdReached', 100);
-                    }
-
-                    if (
-                        state.animationStarted ||
-                        revealBlocksAnim(state) ||
-                        settings.startMode !== 'animTrack' ||
-                        !state.hasAnimation ||
-                        config.noanim
-                    ) {
-                        return;
-                    }
-
-                    state.animationStarted = true;
-                    state.animationPaused = false;
-                    state.progress = 100;
-                    events.fire('animationStarted');
-                    console.log(
-                        'Streaming octree: viewport refinement downloads ready',
-                        `foreground pending ${refinement.pendingNodes}`,
-                        `staleLod ${refinement.staleLodNodes}, starting animation`
-                    );
-                };
-
-                // 首屏粗层加载完成后仍可能长期 loading>0；LOD 解锁不能等 loading===0
-                const unlockStreamingLod = () => {
-                    if (!isStreamingOctree || streamingLodUnlocked) {
-                        return;
-                    }
-                    streamingLodUnlocked = true;
-                    applyPerfSettings();
-                    const maxLod = octreeResource?.octree?.lodLevels;
-                    if (maxLod) {
-                        gsplat.lodRangeMin = 0;
-                        gsplat.lodRangeMax = maxLod - 1;
-                    }
-                    gsplat.dirty = true;
-                    app.renderNextFrame = true;
-
-                    if (!streamingPerfHandlerRegistered) {
-                        streamingPerfHandlerRegistered = true;
-                        events.on('performanceMode:changed', applyPerfSettings);
-                    }
-
-                    this.octreeRefinementController?.destroy();
-                    this.octreeRefinementController = createOctreeRefinementController(
-                        global,
-                        results[0],
-                        octreeResource
-                    );
-                    this.octreeRefinementController?.start();
-                };
-
-                const tryUnlockStreamingOnCameraIdle = (dt: number) => {
-                    if (!isStreamingOctree || !streamingBootstrapGateReached) {
-                        return;
-                    }
-                    const camState = this.cameraManager.camera;
-                    const camPos = camera.getPosition();
-                    const camFwd = camera.forward;
-                    const moved = streamLastCamPos.distance(camPos) > 0.03;
-                    const rotated = streamLastCamFwd.dot(camFwd) < (1 - 0.015);
-                    const distDelta = Math.abs(camState.distance - streamLastCamDist);
-                    const fovDelta = Math.abs(camState.fov - streamLastCamFov);
-                    const zoomed = distDelta > Math.max(0.04, streamLastCamDist * 0.08) || fovDelta > 0.5;
-                    if (streamingLodUnlocked && (moved || rotated || zoomed)) {
-                        this.octreeRefinementController?.notifyCameraMoved({ zoom: zoomed });
-                        idleTime = 0;
-                        this.forceRenderNextFrame = true;
-                        app.renderNextFrame = true;
-                    }
-                    streamLastCamPos.copy(camPos);
-                    streamLastCamFwd.copy(camFwd);
-                    streamLastCamDist = camState.distance;
-                    streamLastCamFov = camState.fov;
-                };
-
-                const readyHandler = (camera: CameraComponent, layer: Layer, ready: boolean, loading: number) => {
-                    if (ready && loading === 0) {
-                        if (isStreamingOctree) {
-                            // streaming 首屏后 loading 会反复归零；不能在此开门禁/上屏/隐藏进度条
-                            runStreamingSceneWarmupOnce();
-                        } else {
-                            streamingBootstrapGateReached = true;
-                            eventHandler.off('frame:ready', readyHandler);
-
-                            this.revealController?.ensureInitialEffectCreatedBeforeFirstDisplay?.();
-                            this.forceRenderNextFrame = true;
-                            app.renderNextFrame = true;
-
-                            app.once('frameend', () => {
-                                if (state.readyToRender) return;
-
-                                state.readyToRender = true;
-                                ensureShadowPipelineReady();
-                                this.forceRenderNextFrame = false;
-
-                                if (isCustomLod && settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim && !revealBlocksAnim(state)) {
-                                    console.log('LOD mode: all chunks loaded, ensuring animation is playing');
-                                    state.animationStarted = true;
-                                    state.animationPaused = false;
-                                }
-
-                                const updateLod = () => {
-                                    const gsplatScene = (app.scene as any).gsplat;
-                                    if (gsplatScene && gsplatScene.lodRangeMin !== undefined) {
-                                        gsplat.lodRangeMin = gsplatScene.lodRangeMin;
-                                        gsplat.lodRangeMax = gsplatScene.lodRangeMax;
-                                        if (gsplatScene.splatBudget !== undefined) {
-                                            results[0].gsplat.splatBudget = gsplatScene.splatBudget * 1000000;
-                                        }
-                                    }
-                                };
-                                const onPerformanceModeChanged = isCustomLod ? updateLod : applyPerfSettings;
-                                applyGsplatRenderer();
-                                if (
-                                    config.renderer === 'compute' &&
-                                    (app.scene.gsplat as { currentRenderer?: number }).currentRenderer !== GSPLAT_RENDERER_COMPUTE
-                                ) {
-                                    console.warn('[GSplat] compute renderer requested but unavailable; falling back to engine renderer:', {
-                                        requested: config.renderer,
-                                        actualDevice: actualRenderer,
-                                        currentRenderer: (app.scene.gsplat as { currentRenderer?: number }).currentRenderer
-                                    });
-                                }
-                                if (isCustomLod || config.fullload) {
-                                    events.on('performanceMode:changed', onPerformanceModeChanged);
-                                    onPerformanceModeChanged();
-                                }
-
-                                gsplat.debug = config.colorize ? GSPLAT_DEBUG_LOD : GSPLAT_DEBUG_NONE;
-                                events.fire('firstFrame');
-                                window.firstFrame?.();
-                            });
-                        }
-                    }
-
-                    // update loading status
-                    if (loading !== current) {
-                        watermark = Math.max(watermark, loading);
-                        current = watermark - loading;
-
-                        let progress: number;
-                        // In custom LOD mode, if animation has started, show 100% progress
-                        if (isCustomLod && state.animationStarted) {
-                            progress = 100;
-                        } else {
-                            progress = Math.trunc(current / watermark * 100);
-
-                            // In custom LOD mode, ensure progress never decreases
-                            if (isCustomLod) {
-                                maxProgress = Math.max(maxProgress, progress);
-                                progress = maxProgress;
-                            }
-                        }
-
-                        if (isStreamingOctree) {
-                            updateStreamingLoadProgress(progress);
-                        } else {
-                            state.progress = progress;
-                        }
-
-                        // 50%：streaming 仅开门禁，进度条继续走到视锥上屏；非 streaming 可隐藏 UI 并播 anim
-                        if (!progressUIHidden && progress >= PROGRESS_THRESHOLD) {
-                            streamingBootstrapGateReached = true;
-                            pollStreamingBootstrapComplete();
-
-                            if (!isStreamingOctree) {
-                                progressUIHidden = true;
-                                events.fire('progressThresholdReached', progress);
-
-                                if (
-                                    settings.startMode === 'animTrack' &&
-                                    state.hasAnimation &&
-                                    !config.noanim &&
-                                    !state.animationStarted &&
-                                    !revealBlocksAnim(state)
-                                ) {
-                                    state.animationStarted = true;
-                                    console.log(`Progress reached ${PROGRESS_THRESHOLD}%, starting animation`);
-                                    state.animationPaused = false;
-                                    events.fire('animationStarted');
-                                }
-                            }
-                        } else if (isStreamingOctree && streamingBootstrapGateReached) {
-                            pollStreamingBootstrapComplete();
-                        }
-                    }
-                };
-
-                eventHandler.on('frame:ready', readyHandler);
             }
             } catch (e) {
                 console.error('[Shadow] Error inside Promise.all .then() callback:', e);

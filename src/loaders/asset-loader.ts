@@ -1,6 +1,6 @@
 import type { AppBase, Asset } from 'playcanvas';
 import type { AssetLibraryItem, AssetLibraryType, Global } from '../types';
-import { loadGsplatAsset } from './gsplat-asset-loader';
+import { loadGsplatAsset } from './gsplat/sog/splat-loader';
 
 export const DEFAULT_ASSET_LOAD_TIMEOUT_MS = 15000;
 // 导出链路等待“资产全就绪”时的默认超时，避免无穷等待。

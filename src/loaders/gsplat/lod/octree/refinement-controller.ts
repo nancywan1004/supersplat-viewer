@@ -10,48 +10,52 @@ import {
     type GSplatComponent
 } from 'playcanvas';
 
-import type { Global } from '../types';
-import { getOctreeBootstrapLod, isOctreeBootstrapPlaceableNode } from './octree-lod-meta';
+import type { Global } from '../../../../types';
+import { getOctreeBootstrapLod, isOctreeBootstrapPlaceableNode } from './lod-meta';
 
 const REF_TAN_HALF_FOV = Math.tan(22.5 * math.DEG_TO_RAD);
 
-const DEFAULT_MAX_CONCURRENT = 2;
+/** refinement 调度可调参数（按 mobile/desktop 分支集中管理） */
+const T = {
+    loader: {
+        defaultConcurrent: 2,
+        boostConcurrent: platform.mobile ? 4 : 8,
+        foregroundLimit: platform.mobile ? 32 : 64,
+        criticalLimit: platform.mobile ? 4 : 8,
+        pinLimit: platform.mobile ? 6 : 12
+    },
+    settle: {
+        postDownloadFrames: 30,
+        perFileFrames: 12
+    },
+    lod: {
+        splatBudget: platform.mobile ? 2_000_000 : 4_000_000,
+        underfillLimit: platform.mobile ? 2 : 3,
+        boostUpdateDistance: platform.mobile ? 0.12 : 0.18,
+        burstUpdateDistance: 0
+    },
+    viewport: {
+        edgeNdcInner: 0.44,
+        edgeNdcOuter: 0.72,
+        edgeRelaxOptimal: 0.45,
+        centerScorePower: 5.0
+    },
+    burst: {
+        moveFrames: 18,
+        zoomFrames: 36,
+        unlockFrames: 48,
+        syncCooldown: 3,
+        staleSyncCooldown: 6,
+        staleSyncIdleFrames: 12
+    },
+    ladder: {
+        coarsestStepBoost: 2.75,
+        stepBoost: 1.6
+    }
+} as const;
 
-const BOOST_MAX_CONCURRENT = platform.mobile ? 4 : 8;
-// 非 0 可抑制视锥边缘 node 因微动触发的 LOD 来回切换（0 时每帧重算）
-const BOOST_LOD_UPDATE_DISTANCE = platform.mobile ? 0.12 : 0.18;
-// refinement 阶段 budget 与 perf 档位对齐，避免 Windows 上 CPU/GPU sort 缓冲 OOM
-const REFINEMENT_SPLAT_BUDGET = platform.mobile ? 2_000_000 : 4_000_000;
-// 下载完成后继续推动渲染/work-buffer 重建的帧数
-const POST_DOWNLOAD_SETTLE_FRAMES = 30;
-// 每个 chunk 落地后短促推动上屏
-const PER_FILE_SETTLE_FRAMES = 12;
-// refinement 阶段按 score 排序的下载 gate 上限（始终单队列，不再等 critical 下完）
-const FOREGROUND_DOWNLOAD_LIMIT = platform.mobile ? 32 : 64;
-// score Top N，用于 criticalPendingUnique 统计与 debug；pin 保活仅 Top PIN_FILE_LIMIT
-const CRITICAL_DOWNLOAD_LIMIT = platform.mobile ? 4 : 8;
-const PIN_FILE_LIMIT = platform.mobile ? 6 : 12;
-// refinement 期间启用 underfill（方案 A）：在 [optimal, optimal+limit] 内显示已加载的最细档
-const REFINEMENT_LOD_UNDERFILL_LIMIT = platform.mobile ? 2 : 3;
-// refinement foreground 窗口：中心 44% 全权重，超过 72% 视口半径先不主动下载细档。
-const VIEWPORT_EDGE_NDC_INNER = 0.44;
-const VIEWPORT_EDGE_NDC_OUTER = 0.72;
-const VIEWPORT_EDGE_RELAX_OPTIMAL = 0.45;
-/** edgeFactor 的指数：>1 时更强制「屏幕中心区域先下、再向外扩」 */
-const VIEWPORT_CENTER_SCORE_POWER = 5.0;
-/** 平移/旋转后保持 refinement burst 的帧数 */
-const CAMERA_MOVE_BURST_FRAMES = 18;
-/** 瞬间拉近（zoom）后更长的 burst，便于中心 chunk 优先变清晰 */
-const CAMERA_ZOOM_BURST_FRAMES = 36;
-/** burst 期间每帧重算 LOD（0），避免 lodUpdateDistance 节流导致「拉近无反应」 */
-const CAMERA_BURST_LOD_UPDATE_DISTANCE = 0;
-const CAMERA_BURST_SYNC_COOLDOWN = 3;
-/** bootstrap 解锁 refinement 后的初始 burst，优先推动 Lmax→Lmax-1 */
-const REFINEMENT_UNLOCK_BURST_FRAMES = 48;
-const REFINEMENT_STALE_SYNC_COOLDOWN = 6;
-/** 最糊→次糊单档升 LOD 的下载优先级倍率 */
-const COARSEST_STEP_SCORE_BOOST = 2.75;
-const LADDER_STEP_SCORE_BOOST = 1.6;
+export const STREAMING_VIEWPORT_READY_RATIO = 1;
+
 type OctreeLod = {
     fileIndex: number;
     count: number;
@@ -89,6 +93,23 @@ type OctreeLike = {
 };
 
 export type { OctreeLike };
+
+export type GSplatOctreeResourceLike = {
+    octree?: OctreeLike | null;
+};
+
+/** 多文件 octree 渐进加载；单文件 .sog 等无 octree 或仅 1 个物理文件时返回 false */
+export function isStreamableOctreeResource(
+    resource: GSplatOctreeResourceLike | null | undefined
+): boolean {
+    const octree = resource?.octree;
+    if (!octree?.nodes?.length) {
+        return false;
+    }
+    const fileCount = octree.files?.length ?? 0;
+    const lodLevels = octree.lodLevels ?? 0;
+    return fileCount > 1 && lodLevels > 1;
+}
 
 type OctreeInstanceLike = {
     octree: OctreeLike;
@@ -133,6 +154,43 @@ type LodPlacementParams = {
     lodBaseDistance: number;
     lodMultiplier: number;
 };
+
+export type OctreeStreamingScene = {
+    app: AppBase;
+    octree: OctreeLike;
+    gsplatEntity: Entity;
+    cameraEntity: Entity;
+};
+
+export type StreamingViewportOptions = {
+    /** 粗层/bootstrap 就绪比例，默认 1 */
+    readyRatio?: number;
+    /** 统计时排除仅擦到视锥边缘的 node，默认 true */
+    excludeViewportEdgeNodes?: boolean;
+};
+
+/** @deprecated 使用 {@link StreamingViewportOptions} */
+export type StreamingViewportBootstrapOptions = StreamingViewportOptions;
+
+type RefinementEvaluateContext = {
+    scene: OctreeStreamingScene;
+    gsplat: GsplatSceneLike;
+    lod: LodPlacementParams;
+};
+
+function lodParamsFromComponent(component: GSplatComponent | null): LodPlacementParams {
+    return {
+        lodBaseDistance: component?.lodBaseDistance ?? 5,
+        lodMultiplier: component?.lodMultiplier ?? 3
+    };
+}
+
+function resolveViewportOptions(options?: StreamingViewportOptions) {
+    return {
+        readyRatio: options?.readyRatio ?? STREAMING_VIEWPORT_READY_RATIO,
+        excludeViewportEdgeNodes: options?.excludeViewportEdgeNodes !== false
+    };
+}
 
 const _invWorldMat = new Mat4();
 const _localCameraPos = new Vec3();
@@ -595,13 +653,13 @@ function scoreVisibleNode(
 }
 
 function edgeFactorFromNdcExtent(ndcExtent: number): number {
-    if (ndcExtent <= VIEWPORT_EDGE_NDC_INNER) {
+    if (ndcExtent <= T.viewport.edgeNdcInner) {
         return 1;
     }
-    if (ndcExtent >= VIEWPORT_EDGE_NDC_OUTER) {
+    if (ndcExtent >= T.viewport.edgeNdcOuter) {
         return 0;
     }
-    return 1 - (ndcExtent - VIEWPORT_EDGE_NDC_INNER) / (VIEWPORT_EDGE_NDC_OUTER - VIEWPORT_EDGE_NDC_INNER);
+    return 1 - (ndcExtent - T.viewport.edgeNdcInner) / (T.viewport.edgeNdcOuter - T.viewport.edgeNdcInner);
 }
 
 /** 1=屏幕中心，0=视口边缘外缘；用于抑制边缘 chunk 的 refinement 激进度 */
@@ -675,7 +733,7 @@ function computeRefinementTargetLod(
     currentLod: number,
     edgeFactor: number
 ): number {
-    const relaxedTarget = edgeFactor < VIEWPORT_EDGE_RELAX_OPTIMAL
+    const relaxedTarget = edgeFactor < T.viewport.edgeRelaxOptimal
         ? Math.min(maxLod, optimalLod + 1)
         : optimalLod;
 
@@ -694,10 +752,10 @@ function computeLadderScoreBoost(
         return 1;
     }
     if (currentLod === maxLod && targetLod === maxLod - 1) {
-        return COARSEST_STEP_SCORE_BOOST;
+        return T.ladder.coarsestStepBoost;
     }
     if (targetLod === currentLod - 1) {
-        return LADDER_STEP_SCORE_BOOST;
+        return T.ladder.stepBoost;
     }
     return 1;
 }
@@ -725,13 +783,6 @@ function countMissingUniqueFiles(octree: OctreeLike, files: PrioritizedFile[]): 
     }
     return count;
 }
-
-export const STREAMING_VIEWPORT_READY_RATIO = 1;
-
-export type StreamingViewportBootstrapOptions = {
-    /** 视口边缘仅擦到 AABB 的 node 不参与统计，避免 80% 来自边缘、中心仍有洞 */
-    excludeViewportEdgeNodes?: boolean;
-};
 
 export type StreamingViewportBootstrapStatus = {
     visibleNodes: number;
@@ -801,12 +852,10 @@ function countStreamingViewportBootstrapNodes(
 
 /** bootstrap 期间主动拉取视锥核心 node 的粗档 SOG，避免 loading=0 后引擎改追细档 */
 export function ensureStreamingBootstrapCoarseFiles(
-    app: AppBase,
-    octree: OctreeLike,
-    gsplatEntity: Entity,
-    cameraEntity: Entity,
-    options?: StreamingViewportBootstrapOptions
+    scene: OctreeStreamingScene,
+    _options?: StreamingViewportOptions
 ): number {
+    const { app, octree, gsplatEntity, cameraEntity } = scene;
     const camera = cameraEntity.camera;
     if (!camera || !octree.nodes.length) {
         return 0;
@@ -823,7 +872,7 @@ export function ensureStreamingBootstrapCoarseFiles(
     const worldTransform = gsplatEntity.getWorldTransform();
     const boundsFlat = octree.nodeBoundsMinMax;
     const bootstrapLod = getOctreeBootstrapLod(octree);
-    const excludeEdge = options?.excludeViewportEdgeNodes !== false;
+    const excludeEdge = _options?.excludeViewportEdgeNodes !== false;
     let enqueued = 0;
 
     for (let nodeIndex = 0; nodeIndex < octree.nodes.length; nodeIndex++) {
@@ -864,13 +913,11 @@ export function ensureStreamingBootstrapCoarseFiles(
 
 /** streaming 首屏：视锥内足够比例 node 已至少显示一档（粗层即可） */
 export function getStreamingViewportBootstrapStatus(
-    app: AppBase,
-    octree: OctreeLike,
-    gsplatEntity: Entity,
-    cameraEntity: Entity,
-    readyRatio = STREAMING_VIEWPORT_READY_RATIO,
-    options?: StreamingViewportBootstrapOptions
+    scene: OctreeStreamingScene,
+    options?: StreamingViewportOptions
 ): StreamingViewportBootstrapStatus {
+    const { app, octree, gsplatEntity, cameraEntity } = scene;
+    const { readyRatio, excludeViewportEdgeNodes: excludeEdge } = resolveViewportOptions(options);
     const camera = cameraEntity.camera;
     if (!camera || !octree.nodes.length) {
         return {
@@ -898,7 +945,6 @@ export function getStreamingViewportBootstrapStatus(
     _frustum.setFromMat4(_viewProj);
     const worldTransform = gsplatEntity.getWorldTransform();
     const boundsFlat = octree.nodeBoundsMinMax;
-    const excludeEdge = options?.excludeViewportEdgeNodes !== false;
 
     let counts = countStreamingViewportBootstrapNodes(
         octree,
@@ -933,8 +979,6 @@ export function getStreamingViewportBootstrapStatus(
     };
 }
 
-export const STREAMING_VIEWPORT_REFINEMENT_READY_RATIO = 1;
-
 export type StreamingViewportRefinementStatus = {
     visibleNodes: number;
     refinedNodes: number;
@@ -961,18 +1005,14 @@ export function computeStreamingRefinementProgressRatio(
 }
 
 /**
- * streaming 首屏 refinement：与控制器一致，前景无待下载 chunk 即视为可完成。
- * 不要求追到 optimal（ladder 会长期 pending）；已下未上屏由 poll 内 sync 消化。
- * 须在 unlockStreamingLod（lodRange 放开）之后调用才有意义。
+ * streaming 首屏 refinement 快照（瞬时 foreground 评分，可能随帧振荡）。
+ * 进度条完成判定应优先用 OctreeRefinementController.getStreamingRefinementStatus（stable tracked pending）。
  */
 export function getStreamingViewportRefinementStatus(
-    app: AppBase,
-    octree: OctreeLike,
-    gsplatEntity: Entity,
-    cameraEntity: Entity,
-    readyRatio = STREAMING_VIEWPORT_REFINEMENT_READY_RATIO,
-    _options?: StreamingViewportBootstrapOptions
+    scene: OctreeStreamingScene,
+    _options?: StreamingViewportOptions
 ): StreamingViewportRefinementStatus {
+    const { app, octree, gsplatEntity, cameraEntity } = scene;
     const camera = cameraEntity.camera;
     if (!camera || !octree.nodes.length) {
         return {
@@ -1001,20 +1041,11 @@ export function getStreamingViewportRefinementStatus(
         };
     }
 
-    const gsplatScene = app.scene.gsplat as GsplatSceneLike;
-    const gsplatComponent = gsplatEntity.gsplat as GSplatComponent | null;
-    const lodParams: LodPlacementParams = {
-        lodBaseDistance: gsplatComponent?.lodBaseDistance ?? 5,
-        lodMultiplier: gsplatComponent?.lodMultiplier ?? 3
-    };
-    const batch = buildPriorityFiles(
-        app,
-        octree,
-        gsplatEntity,
-        cameraEntity,
-        gsplatScene,
-        lodParams
-    );
+    const batch = buildPriorityFiles({
+        scene,
+        gsplat: app.scene.gsplat as GsplatSceneLike,
+        lod: lodParamsFromComponent(gsplatEntity.gsplat as GSplatComponent | null)
+    });
 
     const pendingForeground = batch.foregroundPendingUnique;
     const pendingUnique = batch.pendingUniqueFiles;
@@ -1035,23 +1066,15 @@ export function getStreamingViewportRefinementStatus(
     };
 }
 
-export function syncStreamingOctreePlacements(
-    app: AppBase,
-    octree: OctreeLike,
-    gsplatEntity: Entity
-): number {
+export function syncStreamingOctreePlacements(scene: OctreeStreamingScene): number {
+    const { app, octree, gsplatEntity } = scene;
     const gsplatScene = app.scene.gsplat as GsplatSceneLike;
     return syncOctreePendingPlacements(app, octree, gsplatEntity, gsplatScene, true);
 }
 
-function buildPriorityFiles(
-    app: AppBase,
-    octree: OctreeLike,
-    gsplatEntity: Entity,
-    cameraEntity: Entity,
-    gsplat: GsplatSceneLike,
-    lodParams: LodPlacementParams
-): PrioritizedBatch {
+function buildPriorityFiles(ctx: RefinementEvaluateContext): PrioritizedBatch {
+    const { scene, gsplat, lod: lodParams } = ctx;
+    const { app, octree, gsplatEntity, cameraEntity } = scene;
     const maxLod = octree.lodLevels - 1;
     const camera = cameraEntity.camera;
     if (!camera || maxLod < 0) {
@@ -1212,15 +1235,15 @@ function buildPriorityFiles(
         if (fi !== -1 && octree.getFileResource(fi)) {
             staleLoadedNodes++;
         } else if (fi !== -1) {
-            const edgeWeight = Math.pow(edgeFactor, VIEWPORT_CENTER_SCORE_POWER);
+            const edgeWeight = Math.pow(edgeFactor, T.viewport.centerScorePower);
             prioritized.push({ fileIndex: fi, score: score * edgeWeight * ladderBoost });
         }
     }
 
     prioritized.sort((a, b) => b.score - a.score);
     const uniqueFiles = dedupeByFileIndex(prioritized);
-    const criticalFiles = uniqueFiles.slice(0, CRITICAL_DOWNLOAD_LIMIT);
-    const foregroundFiles = uniqueFiles.slice(0, FOREGROUND_DOWNLOAD_LIMIT);
+    const criticalFiles = uniqueFiles.slice(0, T.loader.criticalLimit);
+    const foregroundFiles = uniqueFiles.slice(0, T.loader.foregroundLimit);
     return {
         files: uniqueFiles,
         pendingUniqueFiles: countMissingUniqueFiles(octree, uniqueFiles),
@@ -1237,7 +1260,7 @@ function retainCriticalDownloadFiles(
     octree: OctreeLike,
     criticalBatch: PrioritizedFile[],
     pinnedFiles: Set<number>,
-    pinLimit = PIN_FILE_LIMIT
+    pinLimit = T.loader.pinLimit
 ): void {
     if (!octree.incRefCount) {
         return;
@@ -1259,7 +1282,7 @@ function pinLoadedForegroundFiles(
     octree: OctreeLike,
     foregroundBatch: PrioritizedFile[],
     pinnedFiles: Set<number>,
-    pinLimit = PIN_FILE_LIMIT
+    pinLimit = T.loader.pinLimit
 ): void {
     if (!octree.incRefCount) {
         return;
@@ -1294,6 +1317,8 @@ export type OctreeRefinementController = {
     destroy: () => void;
     notifyCameraMoved: (options?: OctreeRefinementNotifyOptions) => void;
     getActivity: () => OctreeRefinementActivity;
+    /** 与下载控制器一致的 stable foreground pending，供进度条完成判定 */
+    getStreamingRefinementStatus: () => StreamingViewportRefinementStatus;
 };
 
 export function createOctreeRefinementController(
@@ -1308,11 +1333,11 @@ export function createOctreeRefinementController(
 
     const { app, camera: cameraEntity, events } = global;
     const gsplatScene = app.scene.gsplat as GsplatSceneLike;
-    const gsplatComponent = gsplatEntity.gsplat as GSplatComponent | null;
-
-    const lodParams: LodPlacementParams = {
-        lodBaseDistance: gsplatComponent?.lodBaseDistance ?? 5,
-        lodMultiplier: gsplatComponent?.lodMultiplier ?? 3
+    const scene: OctreeStreamingScene = { app, octree, gsplatEntity, cameraEntity };
+    const evalCtx: RefinementEvaluateContext = {
+        scene,
+        gsplat: gsplatScene,
+        lod: lodParamsFromComponent(gsplatEntity.gsplat as GSplatComponent | null)
     };
 
     if (octree.assetLoader) {
@@ -1330,14 +1355,23 @@ export function createOctreeRefinementController(
     let savedSplatBudget: number | null = null;
     let savedLodUpdateDistance: number | null = null;
     let savedLodUnderfillLimit: number | null = null;
-    let hadPendingOptimal = false;
-    let hadPendingForeground = false;
-    let hadPendingCritical = false;
-    let settleFramesRemaining = 0;
-    let prevCriticalPending = -1;
-    let prevPendingUnique = -1;
-    let prevStableForegroundPending = -1;
-    let prevStaleLodNodes = -1;
+    const prefetch = {
+        tracked: new Map<number, number>(),
+        pinned: new Set<number>(),
+        lastUrls: [] as string[]
+    };
+    const settle = {
+        framesRemaining: 0,
+        hadOptimal: false,
+        hadForeground: false,
+        hadCritical: false
+    };
+    const prevPending = {
+        critical: -1,
+        unique: -1,
+        stableForeground: -1,
+        staleLodNodes: -1
+    };
     let staleSyncCooldown = 0;
     let boostActive = false;
     let cameraMovedSinceSettle = false;
@@ -1349,26 +1383,33 @@ export function createOctreeRefinementController(
         staleLoadedNodes: 0,
         burstFrames: 0
     };
-    const pinnedFiles = new Set<number>();
-    const trackedMissingFiles = new Map<number, number>();
-    let lastPriorityUrls: string[] = [];
+    let lastStreamingRefinementStatus: StreamingViewportRefinementStatus = {
+        visibleNodes: 0,
+        refinedNodes: 0,
+        pendingNodes: 0,
+        staleLoadedNodes: 0,
+        refinementRatio: 0,
+        pendingUniqueFiles: 0,
+        staleLodNodes: 0,
+        ready: false
+    };
 
     const syncBurstLodUpdateDistance = () => {
         if (!boostActive || savedLodUpdateDistance === null) {
             return;
         }
         gsplatScene.lodUpdateDistance = cameraBurstFrames > 0
-            ? CAMERA_BURST_LOD_UPDATE_DISTANCE
-            : BOOST_LOD_UPDATE_DISTANCE;
+            ? T.lod.burstUpdateDistance
+            : T.lod.boostUpdateDistance;
     };
 
     const applyBoostSettings = () => {
         const loader = octree.assetLoader;
         if (loader) {
             if (savedLoaderConcurrency === null) {
-                savedLoaderConcurrency = loader.maxConcurrentLoads ?? DEFAULT_MAX_CONCURRENT;
+                savedLoaderConcurrency = loader.maxConcurrentLoads ?? T.loader.defaultConcurrent;
             }
-            loader.maxConcurrentLoads = BOOST_MAX_CONCURRENT;
+            loader.maxConcurrentLoads = T.loader.boostConcurrent;
         }
 
         if (savedLodUpdateDistance === null) {
@@ -1380,8 +1421,8 @@ export function createOctreeRefinementController(
             savedSplatBudget = gsplatScene.splatBudget;
         }
         const refinementBudget = savedSplatBudget > 0
-            ? Math.min(savedSplatBudget, REFINEMENT_SPLAT_BUDGET)
-            : REFINEMENT_SPLAT_BUDGET;
+            ? Math.min(savedSplatBudget, T.lod.splatBudget)
+            : T.lod.splatBudget;
         gsplatScene.splatBudget = refinementBudget;
 
         if (savedLodUnderfillLimit === null) {
@@ -1389,7 +1430,7 @@ export function createOctreeRefinementController(
         }
         // 5 档资产 optimal=0 时 limit 至少为 4 才能包含 bootstrap L4；取 max 保证生效
         const maxLod = octree.lodLevels - 1;
-        gsplatScene.lodUnderfillLimit = Math.max(REFINEMENT_LOD_UNDERFILL_LIMIT, maxLod);
+        gsplatScene.lodUnderfillLimit = Math.max(T.lod.underfillLimit, maxLod);
         gsplatScene.dirty = true;
     };
 
@@ -1419,7 +1460,7 @@ export function createOctreeRefinementController(
             clearRefinementPriorityUrls(octree, loader);
             savedLoaderConcurrency = null;
         }
-        lastPriorityUrls = [];
+        prefetch.lastUrls = [];
         gsplatScene.dirty = true;
     };
 
@@ -1482,18 +1523,11 @@ export function createOctreeRefinementController(
             lodDisplayMismatch,
             needsLodSwitch,
             staleLodNodes
-        } = buildPriorityFiles(
-            app,
-            octree,
-            gsplatEntity,
-            cameraEntity,
-            gsplatScene,
-            lodParams
-        );
+        } = buildPriorityFiles(evalCtx);
 
-        updateTrackedMissingFiles(trackedMissingFiles, batch, octree);
-        const stableForeground = buildBatchFromTracked(trackedMissingFiles, FOREGROUND_DOWNLOAD_LIMIT);
-        const stableCritical = buildBatchFromTracked(trackedMissingFiles, CRITICAL_DOWNLOAD_LIMIT);
+        updateTrackedMissingFiles(prefetch.tracked, batch, octree);
+        const stableForeground = buildBatchFromTracked(prefetch.tracked, T.loader.foregroundLimit);
+        const stableCritical = buildBatchFromTracked(prefetch.tracked, T.loader.criticalLimit);
         const criticalBatch = stableCritical;
         const foregroundBatch = stableForeground;
         const activeBatch = foregroundBatch;
@@ -1515,37 +1549,37 @@ export function createOctreeRefinementController(
         }
 
         const fileJustLanded =
-            (prevPendingUnique > 0 && pendingUniqueFiles < prevPendingUnique) ||
-            (prevStableForegroundPending > 0 && stableForegroundPending < prevStableForegroundPending) ||
-            (prevCriticalPending > 0 && criticalPendingUnique < prevCriticalPending);
+            (prevPending.unique > 0 && pendingUniqueFiles < prevPending.unique) ||
+            (prevPending.stableForeground > 0 && stableForegroundPending < prevPending.stableForeground) ||
+            (prevPending.critical > 0 && criticalPendingUnique < prevPending.critical);
 
         // 完成/settle 以 stableForegroundPending 为准，避免外围 budget 振荡拉高 pendingUniqueFiles
         if (stableForegroundPending > 0) {
-            hadPendingOptimal = true;
-            hadPendingForeground = true;
-            settleFramesRemaining = 0;
-        } else if (hadPendingOptimal || hadPendingForeground) {
-            hadPendingOptimal = false;
-            hadPendingForeground = false;
-            settleFramesRemaining = Math.max(settleFramesRemaining, POST_DOWNLOAD_SETTLE_FRAMES);
+            settle.hadOptimal = true;
+            settle.hadForeground = true;
+            settle.framesRemaining = 0;
+        } else if (settle.hadOptimal || settle.hadForeground) {
+            settle.hadOptimal = false;
+            settle.hadForeground = false;
+            settle.framesRemaining = Math.max(settle.framesRemaining, T.settle.postDownloadFrames);
         }
 
         if (stableCriticalPending > 0) {
-            hadPendingCritical = true;
-        } else if (hadPendingCritical) {
-            hadPendingCritical = false;
-            settleFramesRemaining = Math.max(settleFramesRemaining, POST_DOWNLOAD_SETTLE_FRAMES);
+            settle.hadCritical = true;
+        } else if (settle.hadCritical) {
+            settle.hadCritical = false;
+            settle.framesRemaining = Math.max(settle.framesRemaining, T.settle.postDownloadFrames);
         }
 
         if (fileJustLanded) {
-            settleFramesRemaining = Math.max(settleFramesRemaining, PER_FILE_SETTLE_FRAMES);
+            settle.framesRemaining = Math.max(settle.framesRemaining, T.settle.perFileFrames);
         }
 
         const loader = octree.assetLoader;
         if (priorityUrls.length > 0) {
-            retainCriticalDownloadFiles(octree, criticalBatch, pinnedFiles);
+            retainCriticalDownloadFiles(octree, criticalBatch, prefetch.pinned);
             const gateUrls = expandDownloadGateUrls(loader, priorityUrls);
-            lastPriorityUrls = gateUrls.slice();
+            prefetch.lastUrls = gateUrls.slice();
             setRefinementPriorityUrls(octree, loader, gateUrls);
             for (let i = 0; i < pendingFileIndices.length; i++) {
                 prioritizeFileLoad(octree, pendingFileIndices[i]);
@@ -1558,26 +1592,26 @@ export function createOctreeRefinementController(
             // 勿用 staleLodNodes 条件：挪机后 stale 长期存在会沿用旧视角 URL，卡死新中心 sync/下载。
             const holdGate =
                 boostActive &&
-                settleFramesRemaining > 0 &&
+                settle.framesRemaining > 0 &&
                 stableForegroundPending === 0 &&
-                lastPriorityUrls.length > 0;
+                prefetch.lastUrls.length > 0;
             if (holdGate) {
-                setRefinementPriorityUrls(octree, loader, lastPriorityUrls);
+                setRefinementPriorityUrls(octree, loader, prefetch.lastUrls);
             } else if (boostActive) {
                 clearRefinementPriorityUrls(octree, loader);
-                lastPriorityUrls = [];
+                prefetch.lastUrls = [];
             } else {
                 clearRefinementPriorityUrls(octree, loader);
-                lastPriorityUrls = [];
+                prefetch.lastUrls = [];
             }
         }
 
         if (boostActive) {
-            pinLoadedForegroundFiles(octree, foregroundBatch, pinnedFiles);
+            pinLoadedForegroundFiles(octree, foregroundBatch, prefetch.pinned);
         }
-        prevCriticalPending = criticalPendingUnique;
-        prevPendingUnique = pendingUniqueFiles;
-        prevStableForegroundPending = stableForegroundPending;
+        prevPending.critical = criticalPendingUnique;
+        prevPending.unique = pendingUniqueFiles;
+        prevPending.stableForeground = stableForegroundPending;
 
         const needsBoost =
             cameraJustMoved ||
@@ -1586,7 +1620,7 @@ export function createOctreeRefinementController(
             staleLoadedNodes > 0 ||
             (needsLodSwitch && stableForegroundPending > 0) ||
             (needsLodSwitch && staleLodNodes > 0) ||
-            settleFramesRemaining > 0;
+            settle.framesRemaining > 0;
 
         if (needsBoost) {
             enterRefinementMode();
@@ -1609,7 +1643,7 @@ export function createOctreeRefinementController(
                 gsplatScene,
                 true
             );
-            staleSyncCooldown = cameraBurstActive ? CAMERA_BURST_SYNC_COOLDOWN : 12;
+            staleSyncCooldown = cameraBurstActive ? T.burst.syncCooldown : T.burst.staleSyncIdleFrames;
         } else if (needsLodSwitch && fileJustLanded) {
             syncedInstances = syncOctreePendingPlacements(
                 app,
@@ -1626,7 +1660,7 @@ export function createOctreeRefinementController(
                 gsplatScene,
                 false
             );
-            staleSyncCooldown = REFINEMENT_STALE_SYNC_COOLDOWN;
+            staleSyncCooldown = T.burst.staleSyncCooldown;
         } else if (stableForegroundPending === 0 && staleLodNodes > 0 && fileJustLanded) {
             syncedInstances = syncOctreePendingPlacements(
                 app,
@@ -1657,9 +1691,9 @@ export function createOctreeRefinementController(
             staleSyncCooldown--;
         }
 
-        const isSettling = settleFramesRemaining > 0;
+        const isSettling = settle.framesRemaining > 0;
         if (isSettling) {
-            settleFramesRemaining--;
+            settle.framesRemaining--;
         }
 
         if (isRefinementDebugEnabled()) {
@@ -1671,14 +1705,14 @@ export function createOctreeRefinementController(
                 const inFlight = loader?._currentlyLoading?.size ?? 0;
                 const log: Record<string, unknown> = {
                     boostActive,
-                    pinLimit: PIN_FILE_LIMIT,
-                    pinnedFiles: pinnedFiles.size,
+                    pinLimit: T.loader.pinLimit,
+                    pinnedFiles: prefetch.pinned.size,
                     pendingUniqueFiles,
                     criticalPendingUnique,
                     foregroundPendingUnique,
                     stableForegroundPending,
                     stableCriticalPending,
-                    trackedMissing: trackedMissingFiles.size,
+                    trackedMissing: prefetch.tracked.size,
                     activeDownloads: priorityUrls.length,
                     staleLoadedNodes,
                     lodDisplayMismatch,
@@ -1686,14 +1720,14 @@ export function createOctreeRefinementController(
                     staleLodNodes,
                     syncedInstances,
                     cameraBurstFrames,
-                    settlingFrames: settleFramesRemaining,
+                    settlingFrames: settle.framesRemaining,
                     staleSyncCooldown,
                     gateHeld:
                         boostActive &&
-                        settleFramesRemaining > 0 &&
+                        settle.framesRemaining > 0 &&
                         stableForegroundPending === 0 &&
-                        lastPriorityUrls.length > 0,
-                    lastGateUrls: lastPriorityUrls.length,
+                        prefetch.lastUrls.length > 0,
+                    lastGateUrls: prefetch.lastUrls.length,
                     queueLen,
                     inFlight,
                     suspended,
@@ -1704,16 +1738,16 @@ export function createOctreeRefinementController(
                 };
                 if (getRefinementDebugLevel() >= 2) {
                     log.jitterHint = {
-                        deltaStaleLod: staleLodNodes - prevStaleLodNodes,
+                        deltaStaleLod: staleLodNodes - prevPending.staleLodNodes,
                         deltaLodMismatch: lodDisplayMismatch,
                         likelyBudgetOscillation:
-                            lodDisplayMismatch > 20 && Math.abs(staleLodNodes - prevStaleLodNodes) > 5,
+                            lodDisplayMismatch > 20 && Math.abs(staleLodNodes - prevPending.staleLodNodes) > 5,
                         likelyDirtyLoop:
                             staleLoadedNodes > 0 && staleSyncCooldown > 0
                     };
                 }
                 console.log('[octree-refinement]', log);
-                prevStaleLodNodes = staleLodNodes;
+                prevPending.staleLodNodes = staleLodNodes;
             }
         }
 
@@ -1727,6 +1761,18 @@ export function createOctreeRefinementController(
             staleLoadedNodes,
             burstFrames: cameraBurstFrames
         });
+
+        const needsWork = stableForegroundPending + staleLodNodes;
+        lastStreamingRefinementStatus = {
+            visibleNodes: needsWork,
+            refinedNodes: needsWork === 0 ? 1 : 0,
+            pendingNodes: stableForegroundPending,
+            staleLoadedNodes,
+            refinementRatio: stableForegroundPending <= 0 ? 1 : 0,
+            pendingUniqueFiles: pendingUniqueFiles,
+            staleLodNodes,
+            ready: stableForegroundPending === 0
+        };
 
         if (cameraBurstFrames > 0) {
             cameraBurstFrames--;
@@ -1761,13 +1807,13 @@ export function createOctreeRefinementController(
             active = true;
             boostActive = false;
             cameraMovedSinceSettle = true;
-            cameraBurstFrames = REFINEMENT_UNLOCK_BURST_FRAMES;
+            cameraBurstFrames = T.burst.unlockFrames;
             prevActivityActive = false;
-            pinnedFiles.clear();
-            trackedMissingFiles.clear();
-            lastPriorityUrls = [];
-            prevStaleLodNodes = -1;
-            prevStableForegroundPending = -1;
+            prefetch.pinned.clear();
+            prefetch.tracked.clear();
+            prefetch.lastUrls = [];
+            prevPending.staleLodNodes = -1;
+            prevPending.stableForeground = -1;
             staleSyncCooldown = 0;
             enterRefinementMode();
 
@@ -1804,15 +1850,15 @@ export function createOctreeRefinementController(
                 return;
             }
             cameraMovedSinceSettle = true;
-            const burstFrames = options?.zoom ? CAMERA_ZOOM_BURST_FRAMES : CAMERA_MOVE_BURST_FRAMES;
+            const burstFrames = options?.zoom ? T.burst.zoomFrames : T.burst.moveFrames;
             cameraBurstFrames = Math.max(cameraBurstFrames, burstFrames);
-            settleFramesRemaining = 0;
-            hadPendingOptimal = false;
-            hadPendingForeground = false;
-            hadPendingCritical = false;
-            lastPriorityUrls = [];
-            trackedMissingFiles.clear();
-            pinnedFiles.clear();
+            settle.framesRemaining = 0;
+            settle.hadOptimal = false;
+            settle.hadForeground = false;
+            settle.hadCritical = false;
+            prefetch.lastUrls = [];
+            prefetch.tracked.clear();
+            prefetch.pinned.clear();
             staleSyncCooldown = 0;
             const loader = octree.assetLoader;
             if (loader) {
@@ -1823,6 +1869,10 @@ export function createOctreeRefinementController(
 
         getActivity() {
             return lastActivity;
+        },
+
+        getStreamingRefinementStatus() {
+            return lastStreamingRefinementStatus;
         },
 
         destroy() {

@@ -1,7 +1,7 @@
 import type { AppBase, GSplatComponent } from 'playcanvas';
-import { Global } from '../types';
-import type { ExperienceSettings } from '../schemas/v2';
-import { LodPreset, LodSettings, LodPlatform } from '../schemas/v2';
+import { Global } from '../../../types';
+import type { ExperienceSettings } from '../../../schemas/v2';
+import { LodPreset, LodSettings, LodPlatform } from '../../../schemas/v2';
 
 /**
  * LOD presets for different quality levels
