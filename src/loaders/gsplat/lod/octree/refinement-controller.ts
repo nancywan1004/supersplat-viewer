@@ -836,6 +836,90 @@ function findAllOctreeInstances(
     return found;
 }
 
+type OctreeGpuSyncJob = {
+    octree: OctreeLike;
+    gsplatEntity: Entity;
+};
+
+/** WebGPU：inst.update 会重建 work buffer / bind group，须在当帧 render 结束后执行 */
+const deferredOctreeGpuSyncJobs = new WeakMap<AppBase, OctreeGpuSyncJob[]>();
+const deferredOctreeGpuSyncApps = new WeakSet<AppBase>();
+
+function flushDeferredOctreeInstanceUpdates(app: AppBase): void {
+    const jobs = deferredOctreeGpuSyncJobs.get(app);
+    if (!jobs?.length) {
+        return;
+    }
+    const snapshot = jobs.splice(0, jobs.length);
+
+    const updated = new Set<OctreeInstanceLike>();
+    for (let i = 0; i < snapshot.length; i++) {
+        const { octree, gsplatEntity } = snapshot[i];
+        const instances = findAllOctreeInstances(app, octree, gsplatEntity);
+        for (let j = 0; j < instances.length; j++) {
+            const inst = instances[j];
+            if (updated.has(inst)) {
+                continue;
+            }
+            updated.add(inst);
+            try {
+                inst.update?.();
+            } catch (err) {
+                console.warn('[octree-refinement] deferred sync update failed', err);
+            }
+        }
+    }
+    app.renderNextFrame = true;
+}
+
+function scheduleDeferredOctreeInstanceUpdates(
+    app: AppBase,
+    octree: OctreeLike,
+    gsplatEntity: Entity
+): void {
+    let jobs = deferredOctreeGpuSyncJobs.get(app);
+    if (!jobs) {
+        jobs = [];
+        deferredOctreeGpuSyncJobs.set(app, jobs);
+    }
+    jobs.push({ octree, gsplatEntity });
+
+    if (!deferredOctreeGpuSyncApps.has(app)) {
+        deferredOctreeGpuSyncApps.add(app);
+        app.on('frameend', () => flushDeferredOctreeInstanceUpdates(app));
+    }
+}
+
+function cancelDeferredOctreeInstanceUpdates(app: AppBase, octree: OctreeLike): void {
+    const jobs = deferredOctreeGpuSyncJobs.get(app);
+    if (!jobs?.length) {
+        return;
+    }
+    deferredOctreeGpuSyncJobs.set(
+        app,
+        jobs.filter((job) => job.octree !== octree)
+    );
+}
+
+function runOctreeInstanceUpdates(
+    app: AppBase,
+    octree: OctreeLike,
+    gsplatEntity: Entity,
+    instances: OctreeInstanceLike[]
+): void {
+    if (app.graphicsDevice?.isWebGPU) {
+        scheduleDeferredOctreeInstanceUpdates(app, octree, gsplatEntity);
+        return;
+    }
+    for (let i = 0; i < instances.length; i++) {
+        try {
+            instances[i].update?.();
+        } catch (err) {
+            console.warn('[octree-refinement] sync update failed', err);
+        }
+    }
+}
+
 function syncOctreePendingPlacements(
     app: AppBase,
     octree: OctreeLike,
@@ -845,14 +929,9 @@ function syncOctreePendingPlacements(
 ) {
     const instances = findAllOctreeInstances(app, octree, gsplatEntity);
     for (let i = 0; i < instances.length; i++) {
-        const inst = instances[i];
-        try {
-            inst.update?.();
-        } catch (err) {
-            console.warn('[octree-refinement] sync update failed', err);
-        }
-        inst.needsLodUpdate = true;
+        instances[i].needsLodUpdate = true;
     }
+    runOctreeInstanceUpdates(app, octree, gsplatEntity, instances);
 
     if (markSceneDirty) {
         gsplatScene.dirty = true;
@@ -1775,6 +1854,7 @@ export function createOctreeRefinementController(
         }
 
         active = false;
+        cancelDeferredOctreeInstanceUpdates(app, octree);
         restoreRefinementMode();
         restoreSavedGsplatSceneSettings();
         const loader = octree.assetLoader;
