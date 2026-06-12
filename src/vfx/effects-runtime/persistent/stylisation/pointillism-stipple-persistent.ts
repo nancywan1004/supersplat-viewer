@@ -302,8 +302,12 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
     edgeStrength = POINTILLISM_DEFAULTS.edgeStrength;
 
     initialize() {
-        this.on('enable', () => this.applyConfig());
-        this.on('disable', () => this.applyConfig());
+        super.initialize();
+        this.on('enable', () => this.applyPostConfig());
+        this.on('disable', () => {
+            this._postController?.apply({ ...DEFAULT_POINTILLISM_POST_SETTINGS, enabled: false });
+            this.app.renderNextFrame = true;
+        });
     }
 
     /** UI / 协议热更新：同步 uniform 与后处理（对齐 palette-pixel / yiyun-dianran） */
@@ -487,18 +491,18 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
             ? this.highlightSkip
             : this.highlightSparsity;
 
-        this.setUniform(PU.brushSize, clamp(brushSize, 0.02, 0.72));
-        this.setUniform(PU.brushDensity, clamp(brushDensity, 0.15, 3.5));
+        this.setUniform(PU.brushSize, clamp(brushSize, 0.02, 0.48));
+        this.setUniform(PU.brushDensity, clamp(brushDensity, 0.15, 4.4));
         this.setUniform(PU.brushAspect, clamp(brushAspect, 0.85, 2.2));
         this.setUniform(PU.brushHardness, clamp(brushHardness, 0, 1));
         this.setUniform(PU.colorVibration, clamp(colorVibration, 0, 1));
         this.setUniform(PU.darkPaintBoost, clamp(darkPaintBoost, 0, 1));
         this.setUniform(PU.highlightSkip, clamp(highlightSkip, 0, 1));
         this.setUniform(PU.dotScale, clamp(this.dotScale, 0.05, 1));
-        this.setUniform(PU.dotSizeFactor, clamp(this.dotSizeFactor, 0.01, 0.72));
+        this.setUniform(PU.dotSizeFactor, clamp(this.dotSizeFactor, 0.01, 0.48));
         this.setUniform(PU.strokeAspect, clamp(this.strokeAspect, 0.85, 2.2));
         this.setUniform(PU.roundness, clamp(this.roundness, 0, 1));
-        this.setUniform(PU.density, clamp(this.density, 0.15, 3.5));
+        this.setUniform(PU.density, clamp(this.density, 0.15, 4.4));
         this.setUniform(PU.strokeSoftness, clamp(this.strokeSoftness, 0.08, 0.55));
         this.setUniform(PU.strokeLength, clamp(this.strokeLength, 0.58, 1.2));
         this.setUniform(PU.strokeWidth, clamp(this.strokeWidth, 0.42, 1.0));

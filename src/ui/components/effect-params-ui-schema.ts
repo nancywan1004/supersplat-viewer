@@ -235,7 +235,7 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     saturation: '饱和度',
     glowIntensity: '发光强度',
     pixelSize: '像素尺寸',
-    paletteIndex: '色盘',
+    paletteIndex: '色盘（调试）',
     levels: '色阶',
     levelRange: '色阶范围',
     ditherSpread: '抖动扩散',
@@ -529,18 +529,18 @@ const POINTILLISM_PALETTE_OPTIONS: readonly EffectParamEnumOption[] = [
 ];
 
 const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
-    brushSize: { min: 0.02, max: 0.72, step: 0.01, default: POINTILLISM_DEFAULTS.brushSize },
-    brushDensity: { min: 0.15, max: 3.5, step: 0.01, default: POINTILLISM_DEFAULTS.brushDensity },
+    brushSize: { min: 0.02, max: 0.48, step: 0.01, default: POINTILLISM_DEFAULTS.brushSize },
+    brushDensity: { min: 0.15, max: 4.4, step: 0.01, default: POINTILLISM_DEFAULTS.brushDensity },
     brushAspect: { min: 0.85, max: 2.2, step: 0.01, default: POINTILLISM_DEFAULTS.brushAspect },
     brushHardness: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.brushHardness },
     colorVibration: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.colorVibration },
     darkPaintBoost: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.darkPaintBoost },
     highlightSkip: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.highlightSkip },
     dotScale: { min: 0.05, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.dotScale },
-    dotSizeFactor: { min: 0.01, max: 0.72, step: 0.005, default: POINTILLISM_DEFAULTS.dotSizeFactor },
+    dotSizeFactor: { min: 0.01, max: 0.48, step: 0.005, default: POINTILLISM_DEFAULTS.dotSizeFactor },
     strokeAspect: { min: 0.85, max: 2.2, step: 0.01, default: POINTILLISM_DEFAULTS.strokeAspect },
     roundness: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.roundness },
-    density: { min: 0, max: 3.5, step: 0.01, default: POINTILLISM_DEFAULTS.density },
+    density: { min: 0, max: 4.4, step: 0.01, default: POINTILLISM_DEFAULTS.density },
     strokeSoftness: { min: 0.08, max: 0.55, step: 0.005, default: POINTILLISM_DEFAULTS.strokeSoftness },
     strokeLength: { min: 0.58, max: 1.2, step: 0.01, default: POINTILLISM_DEFAULTS.strokeLength },
     strokeWidth: { min: 0.42, max: 1.0, step: 0.01, default: POINTILLISM_DEFAULTS.strokeWidth },
@@ -585,7 +585,6 @@ const POINTILLISM_VISIBLE_PARAM_KEYS = [
     'darkPaintBoost',
     'highlightSkip',
     'saturation',
-    'paletteIndex',
     'paperStrength',
     'edgeStrength'
 ] as const;
