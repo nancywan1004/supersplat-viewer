@@ -17,6 +17,7 @@ export const POINTILLISM_UNIFORM_NAMES = {
     shapeJitter: 'uPointillismShapeJitter',
     paintThickness: 'uPointillismPaintThickness',
     paintOpacity: 'uPointillismPaintOpacity',
+    paintGrain: 'uPointillismPaintGrain',
     saturation: 'uPointillismSaturation',
     lumaLevels: 'uPointillismLumaLevels',
     contrastDotMix: 'uPointillismContrastDotMix',
@@ -51,6 +52,8 @@ export const POINTILLISM_PAINT_OPACITY_MIN = 0.08;
 export const POINTILLISM_PAINT_OPACITY_MAX = 1.0;
 export const POINTILLISM_GAP_SPACING_MIN = 0;
 export const POINTILLISM_GAP_SPACING_MAX = 1;
+export const POINTILLISM_PAINT_GRAIN_MIN = 0;
+export const POINTILLISM_PAINT_GRAIN_MAX = 1;
 
 /** 旧 stippleSize ↑ → 目标点半径 ↓（约 1–5 px）；仅用于读取 legacy 配置 */
 export const stippleSizeToTargetDotRadiusPx = (stippleSize: number): number => {
@@ -91,6 +94,7 @@ export const POINTILLISM_DEFAULTS = {
     shapeJitter: 0.0,
     paintThickness: 1.0,
     paintOpacity: 1.0,
+    paintGrain: 0.5,
     saturation: 1.32,
     lumaLevels: 8,
     contrastDotMix: 0.14,

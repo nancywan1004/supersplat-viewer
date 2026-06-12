@@ -28,6 +28,8 @@ import {
     POINTILLISM_DOT_RADIUS_PX_MIN,
     POINTILLISM_GAP_SPACING_MAX,
     POINTILLISM_GAP_SPACING_MIN,
+    POINTILLISM_PAINT_GRAIN_MAX,
+    POINTILLISM_PAINT_GRAIN_MIN,
     POINTILLISM_PAINT_OPACITY_MAX,
     POINTILLISM_PAINT_OPACITY_MIN,
     POINTILLISM_STIPPLE_SIZE_MAX,
@@ -268,6 +270,7 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     strokeSoftness: '笔触软边',
     paintThickness: '颜料厚度',
     paintOpacity: '颜料透明度',
+    paintGrain: '颜料肌理（↑涂抹不均感）',
     lumaLevels: '明度色阶',
     contrastDotMix: '对比色点数量',
     complementaryMix: '对比色强度',
@@ -596,6 +599,13 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
         default: POINTILLISM_DEFAULTS.paintOpacity,
         label: '颜料透明度'
     },
+    paintGrain: {
+        min: POINTILLISM_PAINT_GRAIN_MIN,
+        max: POINTILLISM_PAINT_GRAIN_MAX,
+        step: 0.01,
+        default: POINTILLISM_DEFAULTS.paintGrain,
+        label: '颜料肌理（↑涂抹不均感）'
+    },
     shapeJitter: { min: 0, max: 0.08, step: 0.005, default: POINTILLISM_DEFAULTS.shapeJitter },
     paintThickness: { min: 0.5, max: 1.5, step: 0.01, default: POINTILLISM_DEFAULTS.paintThickness },
     saturation: { min: 0, max: 3, step: 0.01, default: POINTILLISM_DEFAULTS.saturation, label: '色彩饱和' },
@@ -636,6 +646,7 @@ const POINTILLISM_VISIBLE_PARAM_KEYS = [
     'strokeLength',
     'strokeWidth',
     'paintOpacity',
+    'paintGrain',
     'saturation',
     'contrastDotMix',
     'complementaryMix',

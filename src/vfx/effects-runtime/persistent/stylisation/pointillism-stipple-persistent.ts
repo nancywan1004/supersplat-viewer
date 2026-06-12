@@ -15,6 +15,8 @@ import {
     POINTILLISM_DOT_RADIUS_PX_MAX,
     POINTILLISM_GAP_SPACING_MAX,
     POINTILLISM_GAP_SPACING_MIN,
+    POINTILLISM_PAINT_GRAIN_MAX,
+    POINTILLISM_PAINT_GRAIN_MIN,
     POINTILLISM_PAINT_OPACITY_MAX,
     POINTILLISM_PAINT_OPACITY_MIN,
     POINTILLISM_STROKE_LENGTH_MAX,
@@ -55,6 +57,7 @@ uniform float uPointillismStrokeWidth;
 uniform float uPointillismBrushAspect;
 uniform float uPointillismBrushHardness;
 uniform float uPointillismPaintOpacity;
+uniform float uPointillismPaintGrain;
 uniform float uPointillismSeed;
 
 const float POINTILLISM_STROKE_LEN_MIN = 0.15;
@@ -68,6 +71,25 @@ float pointillismStrokeT(float v, float lo, float hi) {
 
 float pointillismPsHash(vec2 p) {
     return fract(sin(dot(p, vec2(12.9898, 78.233)) + uPointillismSeed * 0.13) * 43758.5453);
+}
+
+float pointillismValueNoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = pointillismPsHash(i);
+    float b = pointillismPsHash(i + vec2(1.0, 0.0));
+    float c = pointillismPsHash(i + vec2(0.0, 1.0));
+    float d = pointillismPsHash(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+float pointillismFbm3(vec2 p) {
+    float v = 0.0;
+    v += 0.5 * pointillismValueNoise(p);
+    v += 0.25 * pointillismValueNoise(p * 2.1 + vec2(1.7, 9.2));
+    v += 0.125 * pointillismValueNoise(p * 4.2 + vec2(8.3, 2.8));
+    return v / 0.875;
 }
 
 vec2 pointillismShapeUV(vec2 uv) {
@@ -89,6 +111,29 @@ float pointillismRadialAlpha(float A) {
     float aa = max(fwidth(A) * 1.6, 0.004);
     return (1.0 - smoothstep(coreEnd - aa, 1.0 + aa * 0.5, A)) * clamp(uPointillismPaintOpacity, 0.0, 1.0);
 }
+
+// 笔触内颜料肌理（gsplatPS UV）；边缘 fade 保硬边
+vec4 pointillismPigmentDaub(vec2 shapeUV, float A) {
+    float grain = clamp(uPointillismPaintGrain, 0.0, 1.0);
+    if (grain < 0.001) {
+        return vec4(1.0);
+    }
+
+    vec2 strokeSeed = gaussianColor.rg * 13.7 + gaussianColor.ba * 9.3 + uPointillismSeed * 0.07;
+    vec2 p = shapeUV * mix(3.2, 8.0, grain) + strokeSeed;
+    float coarse = pointillismFbm3(p);
+    float fine = pointillismValueNoise(p * 11.0 + vec2(strokeSeed.y, strokeSeed.x));
+    float streak = pointillismValueNoise(vec2(shapeUV.x * 1.55 + strokeSeed.x, shapeUV.y * 6.4 + strokeSeed.y));
+    float pigment = coarse * 0.46 + fine * 0.34 + streak * 0.20;
+
+    float edgeFade = 1.0 - smoothstep(mix(0.48, 0.80, grain), 0.96, A);
+    float g = (pigment - 0.5) * grain * edgeFade * 1.18;
+    float luma = 1.0 + g * 0.54;
+    float alpha = 1.0 + g * 0.66;
+    float warm = g * 0.11;
+    vec3 rgb = vec3(luma + warm, luma, luma - warm * 0.58);
+    return vec4(rgb, alpha);
+}
 `;
 
 const WGSL_INSERT = /* wgsl */`
@@ -98,6 +143,7 @@ uniform uPointillismStrokeWidth: f32;
 uniform uPointillismBrushAspect: f32;
 uniform uPointillismBrushHardness: f32;
 uniform uPointillismPaintOpacity: f32;
+uniform uPointillismPaintGrain: f32;
 uniform uPointillismSeed: f32;
 
 const POINTILLISM_STROKE_LEN_MIN: f32 = 0.15;
@@ -111,6 +157,25 @@ fn pointillismStrokeT(v: f32, lo: f32, hi: f32) -> f32 {
 
 fn pointillismPsHash(p: vec2f) -> f32 {
     return fract(sin(dot(p, vec2f(12.9898, 78.233)) + uniform.uPointillismSeed * 0.13) * 43758.5453);
+}
+
+fn pointillismValueNoise(p: vec2f) -> f32 {
+    let i = floor(p);
+    var f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    let a = pointillismPsHash(i);
+    let b = pointillismPsHash(i + vec2f(1.0, 0.0));
+    let c = pointillismPsHash(i + vec2f(0.0, 1.0));
+    let d = pointillismPsHash(i + vec2f(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+fn pointillismFbm3(p: vec2f) -> f32 {
+    var v: f32 = 0.0;
+    v += 0.5 * pointillismValueNoise(p);
+    v += 0.25 * pointillismValueNoise(p * 2.1 + vec2f(1.7, 9.2));
+    v += 0.125 * pointillismValueNoise(p * 4.2 + vec2f(8.3, 2.8));
+    return v / 0.875;
 }
 
 fn pointillismShapeUV(uv: vec2f) -> vec2f {
@@ -133,6 +198,27 @@ fn pointillismRadialAlpha(A: half) -> half {
     let radial = 1.0 - smoothstep(coreEnd - aa, 1.0 + aa * 0.5, f32(A));
     return half(radial * clamp(uniform.uPointillismPaintOpacity, 0.0, 1.0));
 }
+
+fn pointillismPigmentDaub(shapeUV: vec2f, A: f32) -> vec4f {
+    let grain = clamp(uniform.uPointillismPaintGrain, 0.0, 1.0);
+    if (grain < 0.001) {
+        return vec4f(1.0);
+    }
+
+    let strokeSeed = vec2f(gaussianColor.r, gaussianColor.g) * 13.7 + vec2f(gaussianColor.b, gaussianColor.a) * 9.3 + uniform.uPointillismSeed * 0.07;
+    let p = shapeUV * mix(3.2, 8.0, grain) + strokeSeed;
+    let coarse = pointillismFbm3(p);
+    let fine = pointillismValueNoise(p * 11.0 + vec2f(strokeSeed.y, strokeSeed.x));
+    let streak = pointillismValueNoise(vec2f(shapeUV.x * 1.55 + strokeSeed.x, shapeUV.y * 6.4 + strokeSeed.y));
+    let pigment = coarse * 0.46 + fine * 0.34 + streak * 0.20;
+
+    let edgeFade = 1.0 - smoothstep(mix(0.48, 0.80, grain), 0.96, A);
+    let g = (pigment - 0.5) * grain * edgeFade * 1.18;
+    let luma = 1.0 + g * 0.54;
+    let alpha = 1.0 + g * 0.66;
+    let warm = g * 0.11;
+    return vec4f(luma + warm, luma, luma - warm * 0.58, alpha);
+}
 `;
 
 function patchGsplatPsGlsl(chunk: string): string {
@@ -142,7 +228,7 @@ function patchGsplatPsGlsl(chunk: string): string {
         `varying mediump vec4 gaussianColor;\n${GLSL_INSERT}`,
         'glsl insert shape'
     );
-    return patchReplace(
+    const withShape = patchReplace(
         withDecls,
         `	mediump float A = dot(gaussianUV, gaussianUV);
 	if (A > 1.0) {
@@ -154,8 +240,15 @@ function patchGsplatPsGlsl(chunk: string): string {
 	if (A > 1.0) {
 		discard;
 	}
-	mediump float alpha = pointillismRadialAlpha(A);`,
+	vec4 daub = pointillismPigmentDaub(shapeUV, A);
+	mediump float alpha = pointillismRadialAlpha(A) * daub.a;`,
         'glsl elliptical A'
+    );
+    return patchReplace(
+        withShape,
+        `		gl_FragColor = vec4(gaussianColor.xyz * alpha, alpha);`,
+        `		gl_FragColor = vec4(gaussianColor.xyz * daub.rgb * alpha, alpha);`,
+        'glsl pigment daub color'
     );
 }
 
@@ -166,7 +259,7 @@ function patchGsplatPsWgsl(chunk: string): string {
         `varying gaussianColor: half4;\n${WGSL_INSERT}`,
         'wgsl insert shape'
     );
-    return patchReplace(
+    const withShape = patchReplace(
         withDecls,
         `	let A: half = dot(gaussianUV, gaussianUV);
 	if (A > half(1.0)) {
@@ -180,8 +273,15 @@ function patchGsplatPsWgsl(chunk: string): string {
 		discard;
 		return output;
 	}
-	var alpha: half = pointillismRadialAlpha(A);`,
+	let daub = pointillismPigmentDaub(shapeUV, f32(A));
+	var alpha: half = pointillismRadialAlpha(A) * half(daub.a);`,
         'wgsl elliptical A'
+    );
+    return patchReplace(
+        withShape,
+        `		output.color = vec4f(vec3f(gaussianColor.xyz * alpha), f32(alpha));`,
+        `		output.color = vec4f(vec3f(gaussianColor.xyz * daub.rgb * alpha), f32(alpha));`,
+        'wgsl pigment daub color'
     );
 }
 
@@ -237,6 +337,8 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
     paintThickness = POINTILLISM_DEFAULTS.paintThickness;
 
     paintOpacity = POINTILLISM_DEFAULTS.paintOpacity;
+
+    paintGrain = POINTILLISM_DEFAULTS.paintGrain;
 
     saturation = POINTILLISM_DEFAULTS.saturation;
 
@@ -555,6 +657,14 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         this.setUniform(PU.shapeJitter, clamp(this.shapeJitter, 0, 0.08));
         this.setUniform(PU.paintThickness, clamp(this.paintThickness, 0.5, 1.5));
         this.setUniform(PU.paintOpacity, clamp(this.paintOpacity, POINTILLISM_PAINT_OPACITY_MIN, POINTILLISM_PAINT_OPACITY_MAX));
+        this.setUniform(
+            PU.paintGrain,
+            clamp(
+                Number.isFinite(this.paintGrain) ? this.paintGrain : POINTILLISM_DEFAULTS.paintGrain,
+                POINTILLISM_PAINT_GRAIN_MIN,
+                POINTILLISM_PAINT_GRAIN_MAX
+            )
+        );
         this.setUniform(PU.saturation, clamp(this.saturation, 0, 3));
         this.setUniform(PU.lumaLevels, clamp(Math.floor(this.lumaLevels), 2, 24));
         this.setUniform(PU.contrastDotMix, clamp(this.contrastDotMix, 0, 0.4));
