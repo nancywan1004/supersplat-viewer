@@ -20,7 +20,15 @@ import {
     PALETTE_PIXEL_PALETTE_NAMES,
     PALETTE_PIXEL_SIZE_STEPS
 } from '../../vfx/effects-runtime/persistent/stylisation/palette-pixel';
-import { POINTILLISM_DEFAULTS } from '../../vfx/effects-runtime/persistent/stylisation/pointillism-stipple-shaders';
+import {
+    POINTILLISM_DEFAULTS,
+    POINTILLISM_BRUSH_SIZE_MAX,
+    POINTILLISM_BRUSH_SIZE_MIN,
+    POINTILLISM_DOT_RADIUS_PX_MAX,
+    POINTILLISM_DOT_RADIUS_PX_MIN,
+    POINTILLISM_STIPPLE_SIZE_MAX,
+    POINTILLISM_STIPPLE_SIZE_MIN
+} from '../../vfx/effects-runtime/persistent/stylisation/pointillism-stipple-shaders';
 import {
     getRevealEffectParamKeys,
     getRevealParamFieldKind,
@@ -241,7 +249,7 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     ditherSpread: '抖动扩散',
     dotScale: '整体颗粒尺度',
     brushSize: '单点笔触大小',
-    brushDensity: '点涂密度',
+    brushDensity: '点涂密度（↑重叠覆盖）',
     brushAspect: '短块比例',
     brushHardness: '块状硬边',
     colorVibration: '综合色彩变化',
@@ -254,9 +262,9 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     lumaLevels: '明度色阶',
     contrastDotMix: '对比色点数量',
     complementaryMix: '对比色强度',
-    warmCoolSplit: '冷暖分离',
+    warmCoolSplit: '蓝橙明暗',
     paletteStrength: '色板强度',
-    sourceStructureBlend: '结构文字保留',
+    sourceStructureBlend: '原结构保留（↑颗粒 ↓平整）',
     seed: '随机分布',
     minVisibleAlpha: '最小可见透明度',
     dotSizeFactor: '点尺寸系数',
@@ -265,7 +273,8 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     shapeJitter: '形态抖动',
     highlightSparsity: '亮部稀疏',
     darkDensityBoost: '暗部加密',
-    stippleSize: '整体颗粒尺度',
+    stippleSize: '整体颗粒尺度（legacy）',
+    dotRadiusPx: '点径（px）',
     paperStrength: '纸张强度',
     paperTint: '纸张色调',
     edgeStrength: '描边强度'
@@ -529,8 +538,15 @@ const POINTILLISM_PALETTE_OPTIONS: readonly EffectParamEnumOption[] = [
 ];
 
 const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
-    brushSize: { min: 0.5, max: 1.5, step: 0.01, default: POINTILLISM_DEFAULTS.brushSize, label: '点径微调' },
-    brushDensity: { min: 0.15, max: 4.4, step: 0.01, default: POINTILLISM_DEFAULTS.brushDensity, label: '点涂密度' },
+    brushSize: { min: POINTILLISM_BRUSH_SIZE_MIN, max: POINTILLISM_BRUSH_SIZE_MAX, step: 0.01, default: POINTILLISM_DEFAULTS.brushSize, label: '点径微调（legacy）' },
+    dotRadiusPx: {
+        min: POINTILLISM_DOT_RADIUS_PX_MIN,
+        max: POINTILLISM_DOT_RADIUS_PX_MAX,
+        step: 0.05,
+        default: POINTILLISM_DEFAULTS.dotRadiusPx,
+        label: '点径（px）'
+    },
+    brushDensity: { min: 0.15, max: 4.4, step: 0.01, default: POINTILLISM_DEFAULTS.brushDensity, label: '点涂密度（↑重叠覆盖）' },
     brushAspect: { min: 0.5, max: 1.2, step: 0.01, default: POINTILLISM_DEFAULTS.brushAspect },
     brushHardness: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.brushHardness, label: '笔触硬度' },
     colorVibration: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.colorVibration },
@@ -548,43 +564,46 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
     paintThickness: { min: 0.5, max: 1.5, step: 0.01, default: POINTILLISM_DEFAULTS.paintThickness },
     saturation: { min: 0, max: 3, step: 0.01, default: POINTILLISM_DEFAULTS.saturation, label: '色彩饱和' },
     lumaLevels: { min: 2, max: 24, step: 1, default: POINTILLISM_DEFAULTS.lumaLevels },
-    contrastDotMix: { min: 0, max: 0.2, step: 0.01, default: POINTILLISM_DEFAULTS.contrastDotMix },
-    complementaryMix: { min: 0, max: 0.2, step: 0.01, default: POINTILLISM_DEFAULTS.complementaryMix },
-    warmCoolSplit: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.warmCoolSplit },
+    contrastDotMix: { min: 0, max: 0.4, step: 0.01, default: POINTILLISM_DEFAULTS.contrastDotMix, label: '对比色点数量' },
+    complementaryMix: { min: 0, max: 0.4, step: 0.01, default: POINTILLISM_DEFAULTS.complementaryMix, label: '对比色强度' },
+    warmCoolSplit: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.warmCoolSplit, label: '蓝橙明暗' },
     paletteStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.paletteStrength },
     paletteIndex: {
         kind: 'enum',
         options: POINTILLISM_PALETTE_OPTIONS,
         default: POINTILLISM_DEFAULTS.paletteIndex
     },
-    sourceStructureBlend: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.sourceStructureBlend, label: '保留源结构' },
+    sourceStructureBlend: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.sourceStructureBlend, label: '原结构保留' },
     highlightSparsity: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.highlightSparsity },
     darkDensityBoost: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.darkDensityBoost },
     seed: { min: 0, max: 997, step: 1, default: POINTILLISM_DEFAULTS.seed },
     minVisibleAlpha: { min: 0, max: 0.25, step: 0.01, default: POINTILLISM_DEFAULTS.minVisibleAlpha },
     postEffectEnabled: { default: POINTILLISM_DEFAULTS.postEffectEnabled },
-    stippleSize: { min: 32, max: 160, step: 8, default: POINTILLISM_DEFAULTS.stippleSize, label: '目标点径' },
+    stippleSize: { min: POINTILLISM_STIPPLE_SIZE_MIN, max: POINTILLISM_STIPPLE_SIZE_MAX, step: 8, default: POINTILLISM_DEFAULTS.stippleSize, label: '目标点径（legacy）' },
     levels: { min: 2, max: 20, step: 1, default: POINTILLISM_DEFAULTS.levels },
     levelRange: { min: 0.5, max: 2, step: 0.01, default: POINTILLISM_DEFAULTS.levelRange, label: '对比度' },
     ditherSpread: { min: 0, max: 0.2, step: 0.005, default: POINTILLISM_DEFAULTS.ditherSpread },
     paperStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.paperStrength, label: '纸张质感' },
     paperTint: { default: [...POINTILLISM_DEFAULTS.paperTint] },
-    edgeThreshold: { min: 0.02, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.edgeThreshold },
+    edgeThreshold: { min: 0.02, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.edgeThreshold, label: '边缘灵敏度' },
     edgeStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.edgeStrength, label: '边缘保真' }
 };
 
 const POINTILLISM_VISIBLE_PARAM_KEYS = [
     'postEffectEnabled',
-    'stippleSize',
+    'dotRadiusPx',
     'levelRange',
     'sourceStructureBlend',
     'brushDensity',
     'brushHardness',
     'strokeLength',
     'strokeWidth',
-    'brushSize',
     'saturation',
+    'contrastDotMix',
+    'complementaryMix',
+    'warmCoolSplit',
     'paperStrength',
+    'edgeThreshold',
     'edgeStrength'
 ] as const;
 

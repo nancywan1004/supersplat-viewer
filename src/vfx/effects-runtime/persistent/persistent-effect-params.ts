@@ -117,6 +117,7 @@ const POINTILLISM_STIPPLE = new Set([
     'seed',
     'minVisibleAlpha',
     'postEffectEnabled',
+    'dotRadiusPx',
     'stippleSize',
     'levels',
     'levelRange',

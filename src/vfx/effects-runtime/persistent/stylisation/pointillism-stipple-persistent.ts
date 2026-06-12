@@ -11,10 +11,11 @@ import {
 
 import {
     POINTILLISM_DEFAULTS,
+    POINTILLISM_DOT_RADIUS_PX_MAX,
     POINTILLISM_UNIFORM_NAMES as PU,
     pointillismModifyGlsl,
     pointillismModifyWgsl,
-    stippleSizeToTargetDotRadiusPx
+    resolvePointillismDotRadiusPx
 } from './pointillism-stipple-shaders';
 import {
     coercePointillismBool,
@@ -79,6 +80,9 @@ float pointillismDotMask(vec2 uv) {
 }
 
 float pointillismPaintAlpha(float baseAlpha, vec2 uv) {
+    if (baseAlpha < uPointillismMinVisibleAlpha) {
+        return 0.0;
+    }
     float mask = pointillismDotMask(uv);
     float edgeShape = smoothstep(0.08, 0.62, mask);
     // 中心满不透明，仅边缘轻塑形 — 不在 splat 内部 discard 留孔
@@ -128,6 +132,9 @@ fn pointillismDotMask(uv: half2) -> half {
 }
 
 fn pointillismPaintAlpha(baseAlpha: half, uv: half2) -> half {
+    if (f32(baseAlpha) < uniform.uPointillismMinVisibleAlpha) {
+        return half(0.0);
+    }
     let mask = pointillismDotMask(uv);
     let edgeShape = smoothstep(0.08, 0.62, f32(mask));
     let shaped = f32(baseAlpha) * mix(1.0, edgeShape, 0.22);
@@ -262,6 +269,8 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
 
     minVisibleAlpha = POINTILLISM_DEFAULTS.minVisibleAlpha;
 
+    dotRadiusPx = Number.NaN;
+
     postEffectEnabled = POINTILLISM_DEFAULTS.postEffectEnabled;
 
     stippleSize = POINTILLISM_DEFAULTS.stippleSize;
@@ -376,6 +385,8 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
     applyShaderToMaterial(material: Material) {
         this.patchFragmentShader(material);
         super.applyShaderToMaterial(material);
+        // LOD / unified 模式晚到的材质须立即写入 uniform，否则首帧 dotRadiusSlope=0 导致发糊或尺寸异常
+        this.updateEffect(this.effectTime, 0);
     }
 
     applyShaders() {
@@ -491,15 +502,15 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         const canvasHeight = Math.max(canvas?.clientHeight ?? 720, 1);
         const fovRad = ((camera?.fov ?? 45) * Math.PI) / 180;
         const tanHalfFov = Math.tan(fovRad * 0.5);
-        const targetPx = stippleSizeToTargetDotRadiusPx(this.stippleSize);
-        const maxPx = Math.min(5.0, targetPx + 1.5);
+        const targetPx = resolvePointillismDotRadiusPx(this.dotRadiusPx, this.stippleSize, brushSize);
+        const maxPx = Math.min(POINTILLISM_DOT_RADIUS_PX_MAX, targetPx + 1.5);
         const dotRadiusSlope = (targetPx * 2 * tanHalfFov) / canvasHeight;
         const maxDotRadiusSlope = (maxPx * 2 * tanHalfFov) / canvasHeight;
 
         this.setUniform(PU.viewPos, this._viewPos);
         this.setUniform(PU.dotRadiusSlope, dotRadiusSlope);
         this.setUniform(PU.maxDotRadiusSlope, maxDotRadiusSlope);
-        this.setUniform(PU.brushSize, clamp(brushSize, 0.5, 1.5));
+        this.setUniform(PU.brushSize, 1.0);
         this.setUniform(PU.brushDensity, clamp(brushDensity, 0.15, 4.4));
         this.setUniform(PU.brushAspect, clamp(brushAspect, 0.5, 1.2));
         this.setUniform(PU.brushHardness, clamp(brushHardness, 0, 1));
@@ -518,8 +529,8 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         this.setUniform(PU.paintThickness, clamp(this.paintThickness, 0.5, 1.5));
         this.setUniform(PU.saturation, clamp(this.saturation, 0, 3));
         this.setUniform(PU.lumaLevels, clamp(Math.floor(this.lumaLevels), 2, 24));
-        this.setUniform(PU.contrastDotMix, clamp(this.contrastDotMix, 0, 0.2));
-        this.setUniform(PU.complementaryMix, clamp(this.complementaryMix, 0, 0.2));
+        this.setUniform(PU.contrastDotMix, clamp(this.contrastDotMix, 0, 0.4));
+        this.setUniform(PU.complementaryMix, clamp(this.complementaryMix, 0, 0.4));
         this.setUniform(PU.warmCoolSplit, clamp(this.warmCoolSplit, 0, 1));
         this.setUniform(PU.paletteStrength, clamp(this.paletteStrength, 0, 1));
         this.setUniform(PU.paletteIndex, clamp(Math.floor(this.paletteIndex), 0, 3));

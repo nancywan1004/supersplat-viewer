@@ -12,10 +12,10 @@ import {
     type GraphicsDevice
 } from 'playcanvas';
 
-import { POINTILLISM_DEFAULTS } from './pointillism-stipple-shaders';
+import { POINTILLISM_DEFAULTS, POINTILLISM_STIPPLE_SIZE_MAX, POINTILLISM_STIPPLE_SIZE_MIN } from './pointillism-stipple-shaders';
 
-/** stippleSize ↑ → 目标屏幕点半径 ↓（约 2–5 px，由 modify 层 dotRadiusSlope 驱动） */
-export const POINTILLISM_STIPPLE_SIZE_STEPS = [32, 48, 64, 72, 96, 128, 160] as const;
+/** stippleSize ↑ → 目标屏幕点半径 ↓（约 1–5 px，由 modify 层 dotRadiusSlope 驱动） */
+export const POINTILLISM_STIPPLE_SIZE_STEPS = [32, 48, 64, 72, 96, 128, 160, 192, 224] as const;
 
 type Rgb = [number, number, number];
 
@@ -113,8 +113,8 @@ export function normalizePointillismPostSettings(raw: unknown): PointillismPostS
         ),
         stippleSize: snapStippleSize(clamp(
             finiteOr(obj.stippleSize, DEFAULT_POINTILLISM_POST_SETTINGS.stippleSize),
-            32,
-            160
+            POINTILLISM_STIPPLE_SIZE_MIN,
+            POINTILLISM_STIPPLE_SIZE_MAX
         )),
         paletteIndex: clamp(Math.floor(finiteOr(obj.paletteIndex, DEFAULT_POINTILLISM_POST_SETTINGS.paletteIndex)), 0, 3),
         paletteStrength: clamp(finiteOr(obj.paletteStrength, DEFAULT_POINTILLISM_POST_SETTINGS.paletteStrength), 0, 1),
@@ -181,27 +181,77 @@ class PointillismPostEffect extends PostEffect {
             }
 
             vec3 applyContrast(vec3 color, float levelRange) {
+                float t = clamp((levelRange - 0.5) / 1.5, 0.0, 1.0);
+                float contrast = mix(0.58, 1.72, t);
                 float luma = getLuminance(color);
-                if (levelRange < 1.0) {
-                    return mix(vec3(0.5), color, levelRange);
-                }
-                return mix(vec3(luma), color, min(levelRange, 1.35));
+                return clamp(mix(vec3(luma), color, contrast), 0.0, 1.0);
+            }
+
+            float lumaAt(vec2 uv) {
+                return getLuminance(texture2D(uColorBuffer, uv).rgb);
+            }
+
+            float lumaBlur3(vec2 uv) {
+                vec2 px = 1.0 / uResolution;
+                return (
+                    lumaAt(uv) * 0.25 +
+                    lumaAt(uv + vec2(px.x, 0.0)) * 0.1875 +
+                    lumaAt(uv + vec2(-px.x, 0.0)) * 0.1875 +
+                    lumaAt(uv + vec2(0.0, px.y)) * 0.1875 +
+                    lumaAt(uv + vec2(0.0, -px.y)) * 0.1875
+                );
+            }
+
+            float sobelGradRaw(vec2 uv) {
+                vec2 px = 1.0 / uResolution;
+                float tl = lumaAt(uv + vec2(-px.x, px.y));
+                float t  = lumaAt(uv + vec2(0.0, px.y));
+                float tr = lumaAt(uv + vec2(px.x, px.y));
+                float l  = lumaAt(uv + vec2(-px.x, 0.0));
+                float r  = lumaAt(uv + vec2(px.x, 0.0));
+                float bl = lumaAt(uv + vec2(-px.x, -px.y));
+                float b  = lumaAt(uv + vec2(0.0, -px.y));
+                float br = lumaAt(uv + vec2(px.x, -px.y));
+                float gx = -tl - 2.0 * l - bl + tr + 2.0 * r + br;
+                float gy = -tl - 2.0 * t - tr + bl + 2.0 * b + br;
+                return length(vec2(gx, gy));
+            }
+
+            float sobelGradBlur(vec2 uv) {
+                vec2 px = 1.0 / uResolution;
+                float tl = lumaBlur3(uv + vec2(-px.x, px.y));
+                float t  = lumaBlur3(uv + vec2(0.0, px.y));
+                float tr = lumaBlur3(uv + vec2(px.x, px.y));
+                float l  = lumaBlur3(uv + vec2(-px.x, 0.0));
+                float r  = lumaBlur3(uv + vec2(px.x, 0.0));
+                float bl = lumaBlur3(uv + vec2(-px.x, -px.y));
+                float b  = lumaBlur3(uv + vec2(0.0, -px.y));
+                float br = lumaBlur3(uv + vec2(px.x, -px.y));
+                float gx = -tl - 2.0 * l - bl + tr + 2.0 * r + br;
+                float gy = -tl - 2.0 * t - tr + bl + 2.0 * b + br;
+                return length(vec2(gx, gy));
             }
 
             float edgeFactor(vec2 uv) {
-                vec2 px = 1.0 / uResolution;
-                vec3 c = texture2D(uColorBuffer, uv).rgb;
-                vec3 r = texture2D(uColorBuffer, uv + vec2(px.x, 0.0)).rgb;
-                vec3 d = texture2D(uColorBuffer, uv + vec2(-px.x, 0.0)).rgb;
-                vec3 u = texture2D(uColorBuffer, uv + vec2(0.0, px.y)).rgb;
-                vec3 v = texture2D(uColorBuffer, uv + vec2(0.0, -px.y)).rgb;
-                float edge = length(c - r) + length(c - d) + length(c - u) + length(c - v);
-                return smoothstep(uEdgeThreshold, uEdgeThreshold * 2.2, edge * 0.5);
+                float grad = max(sobelGradBlur(uv), sobelGradRaw(uv) * 0.38);
+                float thresh = mix(0.008, 0.22, clamp(uEdgeThreshold, 0.02, 1.0));
+                return smoothstep(thresh, thresh * 2.4, grad);
             }
 
-            vec3 flatOpticalMix(vec2 uv, vec3 centerColor) {
+            vec3 boxBlur5(vec2 uv) {
                 vec2 px = 1.0 / uResolution;
-                float radius = mix(1.0, 2.0, 1.0 - clamp(uSourceStructureBlend, 0.0, 1.0));
+                return (
+                    texture2D(uColorBuffer, uv).rgb * 0.36 +
+                    texture2D(uColorBuffer, uv + vec2(px.x, 0.0)).rgb * 0.16 +
+                    texture2D(uColorBuffer, uv + vec2(-px.x, 0.0)).rgb * 0.16 +
+                    texture2D(uColorBuffer, uv + vec2(0.0, px.y)).rgb * 0.16 +
+                    texture2D(uColorBuffer, uv + vec2(0.0, -px.y)).rgb * 0.16
+                );
+            }
+
+            vec3 flatOpticalMix(vec2 uv, vec3 centerColor, float flatMix) {
+                vec2 px = 1.0 / uResolution;
+                float radius = mix(0.9, 3.0, flatMix);
                 float centerL = getLuminance(centerColor);
                 vec3 acc = vec3(0.0);
                 float wsum = 0.0;
@@ -220,27 +270,51 @@ class PointillismPostEffect extends PostEffect {
                     }
                 }
                 vec3 mixed = acc / max(wsum, 0.001);
-                float mixAmt = mix(0.16, 0.06, clamp(uSourceStructureBlend, 0.0, 1.0));
+                float mixAmt = mix(0.03, 0.42, flatMix);
                 return mix(centerColor, mixed, mixAmt);
+            }
+
+            vec3 suppressSpeckles(vec2 uv, vec3 center, float edgeAmt) {
+                vec3 blur = boxBlur5(uv);
+                float lDiff = abs(getLuminance(center) - getLuminance(blur));
+                float rgbDiff = length(center - blur);
+                float spike = smoothstep(0.07, 0.24, lDiff) * smoothstep(0.10, 0.32, rgbDiff);
+                spike *= (1.0 - edgeAmt);
+                return mix(center, blur, spike * 0.68);
             }
 
             void main() {
                 vec2 uv = vUv0;
                 vec3 sceneColor = texture2D(uColorBuffer, uv).rgb;
+                vec3 blur = boxBlur5(uv);
 
                 float edge = edgeFactor(uv);
+                float edgeW = clamp(uEdgeStrength, 0.0, 1.0);
+                float edgeAmt = clamp(edge * (0.42 + edgeW * 1.18), 0.0, 1.0);
+                sceneColor = suppressSpeckles(uv, sceneColor, edgeAmt);
                 float structure = clamp(uSourceStructureBlend, 0.0, 1.0);
-                vec3 processed = flatOpticalMix(uv, sceneColor);
-                float detailKeep = clamp(structure * 0.55 + edge * uEdgeStrength * 0.85, 0.0, 0.92);
-                vec3 color = mix(processed, sceneColor, detailKeep);
 
-                float postSat = 1.0 + max(0.0, uSaturation - 1.0) * 0.18;
+                float baseFlat = mix(0.10, 0.52, 1.0 - structure);
+                float grain = clamp(length(sceneColor - blur) * 4.2, 0.0, 1.0);
+                float cohesion = mix(0.18, 0.62, grain) * (1.0 - edgeAmt);
+                float flatMix = max(baseFlat * (1.0 - edgeAmt), cohesion);
+                vec3 processed = flatOpticalMix(uv, sceneColor, flatMix);
+
+                float flatKeep = structure * mix(1.0, 0.48, grain);
+                float keep = clamp(max(flatKeep, edgeAmt * (0.72 + edgeW * 0.38)), 0.0, 1.0);
+                vec3 color = mix(processed, sceneColor, keep);
+
+                float postSat = 1.0 + max(0.0, uSaturation - 1.0) * 0.28;
                 color = saturateColor(color, postSat);
                 color = applyContrast(color, uLevelRange);
                 color = mix(color, color * uPaperTint, uPaperStrength * 0.10);
 
-                vec3 edgeBoost = saturateColor(color, 1.04);
-                color = mix(color, edgeBoost, edge * uEdgeStrength * 0.12);
+                vec3 highPass = sceneColor - blur;
+                vec3 sharpen = clamp(sceneColor + highPass * mix(1.55, 2.55, edgeW), 0.0, 1.0);
+                color = mix(color, sharpen, edgeAmt * mix(0.82, 0.98, edgeW));
+
+                vec3 edgePop = saturateColor(color, 1.0 + edgeW * 0.16);
+                color = mix(color, edgePop, edgeAmt * edgeW * 0.42);
 
                 gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
             }
