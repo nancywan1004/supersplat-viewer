@@ -343,7 +343,8 @@ function reconcileLoaderQueue(loader: OctreeAssetLoaderLike, priorityUrls: strin
     const prioritySet = new Set(priorityUrls);
     const order = new Map(priorityUrls.map((url, index) => [url, index]));
 
-    const isActive = (url: string) => prioritySet.has(url) || inFlight.has(url);
+    // 仅以当前 priority 为准；stale in-flight 不再视为 active，避免队列继续服务旧视角
+    const isActive = (url: string) => prioritySet.has(url);
 
     const nextSuspended: string[] = [];
     const addSuspended = (url: string) => {
@@ -470,9 +471,39 @@ function softCancelInflightLoad(
     return releaseInflightSlot(loader, url);
 }
 
+/** 将 _loadQueue 中非 priority 的 URL 移入 suspended，避免排队区与当前 priority 不同步 */
+function purgeNonPriorityQueuedLoads(
+    loader: OctreeAssetLoaderLike,
+    priorityUrls: string[]
+): number {
+    const prioritySet = new Set(priorityUrls);
+    const queue = loader._loadQueue ?? [];
+    const suspended = loader.__refinementSuspendedQueue ?? [];
+    let purged = 0;
+
+    for (let i = queue.length - 1; i >= 0; i--) {
+        const url = queue[i];
+        if (prioritySet.has(url)) {
+            continue;
+        }
+        queue.splice(i, 1);
+        if (!suspended.includes(url)) {
+            suspended.push(url);
+        }
+        purged++;
+    }
+
+    loader._loadQueue = queue;
+    loader.__refinementSuspendedQueue = suspended;
+    if (purged > 0) {
+        loader._processQueue?.();
+    }
+    return purged;
+}
+
 /**
  * 软取消非 priority 的 stale in-flight，腾出 loader 并发槽给当前 critical 下载。
- * 不调用 unload（避免 WebGPU 竞态）；仅跳过已 loaded / 正在上屏 / pinned 的文件。
+ * 不调用 unload（避免 WebGPU 竞态）；仅跳过正在上屏 / pinned 的文件。
  */
 function abortSafeStaleInflightLoads(
     octree: OctreeLike,
@@ -487,8 +518,24 @@ function abortSafeStaleInflightLoads(
 
     const prioritySet = new Set(priorityUrls);
     const urlToFileIndex = getOctreeUrlToFileIndex(octree);
-    const staleUrls = [...loader._currentlyLoading].filter(url => !prioritySet.has(url));
     let aborted = 0;
+
+    // priority 僵尸槽：已 loaded / 已进 octree 但仍占 in-flight
+    for (const url of [...loader._currentlyLoading]) {
+        if (!prioritySet.has(url)) {
+            continue;
+        }
+        const fileIndex = urlToFileIndex.get(url);
+        const asset = loader._urlToAsset?.get(url);
+        const integrated = fileIndex !== undefined && octree.getFileResource(fileIndex);
+        if (integrated || asset?.loaded) {
+            if (releaseInflightSlot(loader, url)) {
+                aborted++;
+            }
+        }
+    }
+
+    const staleUrls = [...loader._currentlyLoading].filter(url => !prioritySet.has(url));
 
     for (let i = 0; i < staleUrls.length; i++) {
         const url = staleUrls[i];
@@ -1831,14 +1878,9 @@ export function createOctreeRefinementController(
                     preAbortState.priorityQueued > 0 &&
                     preAbortState.priorityInFlight === 0 &&
                     preAbortState.staleInFlight > 0;
-                const shouldAbortStaleInflight =
-                    preAbortState.staleInFlight > 0 &&
-                    (
-                        cameraJustMoved ||
-                        cameraBurstActive ||
-                        priorityBlocked
-                    );
-                if (shouldAbortStaleInflight) {
+
+                // 与 priority 同步：每帧释放非 priority 占槽（不依赖 burst 窗口）
+                if (preAbortState.staleInFlight > 0) {
                     const instances = findAllOctreeInstances(app, octree, gsplatEntity);
                     safeAbortedInflight = abortSafeStaleInflightLoads(
                         octree,
@@ -1847,6 +1889,9 @@ export function createOctreeRefinementController(
                         instances,
                         prefetch.pinned
                     );
+                }
+                if (priorityBlocked) {
+                    safeAbortedInflight += purgeNonPriorityQueuedLoads(loader, priorityUrls);
                 }
                 integratedLoaderResources = integratePendingLoaderResources(
                     octree,
