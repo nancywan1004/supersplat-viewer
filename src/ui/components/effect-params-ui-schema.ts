@@ -26,8 +26,14 @@ import {
     POINTILLISM_BRUSH_SIZE_MIN,
     POINTILLISM_DOT_RADIUS_PX_MAX,
     POINTILLISM_DOT_RADIUS_PX_MIN,
+    POINTILLISM_PAINT_OPACITY_MAX,
+    POINTILLISM_PAINT_OPACITY_MIN,
     POINTILLISM_STIPPLE_SIZE_MAX,
-    POINTILLISM_STIPPLE_SIZE_MIN
+    POINTILLISM_STIPPLE_SIZE_MIN,
+    POINTILLISM_STROKE_LENGTH_MAX,
+    POINTILLISM_STROKE_LENGTH_MIN,
+    POINTILLISM_STROKE_WIDTH_MAX,
+    POINTILLISM_STROKE_WIDTH_MIN
 } from '../../vfx/effects-runtime/persistent/stylisation/pointillism-stipple-shaders';
 import {
     getRevealEffectParamKeys,
@@ -259,6 +265,7 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     roundness: '圆润收敛',
     strokeSoftness: '笔触软边',
     paintThickness: '颜料厚度',
+    paintOpacity: '颜料透明度',
     lumaLevels: '明度色阶',
     contrastDotMix: '对比色点数量',
     complementaryMix: '对比色强度',
@@ -558,8 +565,27 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
     roundness: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.roundness },
     density: { min: 0.15, max: 4.4, step: 0.01, default: POINTILLISM_DEFAULTS.density },
     strokeSoftness: { min: 0.08, max: 0.55, step: 0.005, default: POINTILLISM_DEFAULTS.strokeSoftness },
-    strokeLength: { min: 0.4, max: 1.2, step: 0.01, default: POINTILLISM_DEFAULTS.strokeLength, label: '笔触长度' },
-    strokeWidth: { min: 0.35, max: 1.0, step: 0.01, default: POINTILLISM_DEFAULTS.strokeWidth, label: '笔触宽度' },
+    strokeLength: {
+        min: POINTILLISM_STROKE_LENGTH_MIN,
+        max: POINTILLISM_STROKE_LENGTH_MAX,
+        step: 0.01,
+        default: POINTILLISM_DEFAULTS.strokeLength,
+        label: '笔触长度'
+    },
+    strokeWidth: {
+        min: POINTILLISM_STROKE_WIDTH_MIN,
+        max: POINTILLISM_STROKE_WIDTH_MAX,
+        step: 0.01,
+        default: POINTILLISM_DEFAULTS.strokeWidth,
+        label: '笔触宽度'
+    },
+    paintOpacity: {
+        min: POINTILLISM_PAINT_OPACITY_MIN,
+        max: POINTILLISM_PAINT_OPACITY_MAX,
+        step: 0.01,
+        default: POINTILLISM_DEFAULTS.paintOpacity,
+        label: '颜料透明度'
+    },
     shapeJitter: { min: 0, max: 0.08, step: 0.005, default: POINTILLISM_DEFAULTS.shapeJitter },
     paintThickness: { min: 0.5, max: 1.5, step: 0.01, default: POINTILLISM_DEFAULTS.paintThickness },
     saturation: { min: 0, max: 3, step: 0.01, default: POINTILLISM_DEFAULTS.saturation, label: '色彩饱和' },
@@ -598,6 +624,7 @@ const POINTILLISM_VISIBLE_PARAM_KEYS = [
     'brushHardness',
     'strokeLength',
     'strokeWidth',
+    'paintOpacity',
     'saturation',
     'contrastDotMix',
     'complementaryMix',

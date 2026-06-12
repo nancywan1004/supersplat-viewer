@@ -16,6 +16,7 @@ export const POINTILLISM_UNIFORM_NAMES = {
     strokeWidth: 'uPointillismStrokeWidth',
     shapeJitter: 'uPointillismShapeJitter',
     paintThickness: 'uPointillismPaintThickness',
+    paintOpacity: 'uPointillismPaintOpacity',
     saturation: 'uPointillismSaturation',
     lumaLevels: 'uPointillismLumaLevels',
     contrastDotMix: 'uPointillismContrastDotMix',
@@ -39,6 +40,12 @@ export const POINTILLISM_BRUSH_SIZE_MIN = 0.25;
 export const POINTILLISM_BRUSH_SIZE_MAX = 1.5;
 export const POINTILLISM_DOT_RADIUS_PX_MIN = 0.25;
 export const POINTILLISM_DOT_RADIUS_PX_MAX = 7.5;
+export const POINTILLISM_STROKE_LENGTH_MIN = 0.15;
+export const POINTILLISM_STROKE_LENGTH_MAX = 2.5;
+export const POINTILLISM_STROKE_WIDTH_MIN = 0.15;
+export const POINTILLISM_STROKE_WIDTH_MAX = 1.85;
+export const POINTILLISM_PAINT_OPACITY_MIN = 0.08;
+export const POINTILLISM_PAINT_OPACITY_MAX = 1.0;
 
 /** 旧 stippleSize ↑ → 目标点半径 ↓（约 1–5 px）；仅用于读取 legacy 配置 */
 export const stippleSizeToTargetDotRadiusPx = (stippleSize: number): number => {
@@ -78,6 +85,7 @@ export const POINTILLISM_DEFAULTS = {
     strokeWidth: 0.46,
     shapeJitter: 0.0,
     paintThickness: 1.0,
+    paintOpacity: 1.0,
     saturation: 1.32,
     lumaLevels: 8,
     contrastDotMix: 0.14,
@@ -215,20 +223,22 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
     dotSize *= sizePick * max(0.001, uPointillismDotScale);
     dotSize *= mix(0.94, 1.08, densityT);
 
-    float hardCap = viewDist * uPointillismMaxDotRadiusSlope * 1.05;
+    float hardCap = viewDist * uPointillismMaxDotRadiusSlope * 1.02;
     dotSize = min(dotSize, hardCap);
-    if (originalSize > hardCap * 1.4) {
-        dotSize = min(dotSize, hardCap * 0.82);
-    }
 
-    // 超大 outlier splat（常见 bokeh 飞点）直接收束
-    if (originalSize > hardCap * 2.4 && originalSize > dotSize * 3.2) {
-        gsplatMakeSpherical(scale, 0.0001);
+    // 与 dotSize 比（屏幕投影比 = originalSize/dotSize，与视距无关）；勿用 hardCap，拉近时 hardCap 变小会误杀
+    float sizeRatio = originalSize / max(dotSize, 0.000001);
+    if (sizeRatio > 1.12) {
+        dotSize = min(dotSize, dotSize * 0.72);
+    }
+    if (sizeRatio > 3.5) {
+        gsplatMakeSpherical(scale, dotSize);
         return;
     }
 
-    float footprint = mix(0.16, 0.36, densityT);
-    gsplatMakeSpherical(scale, min(dotSize, originalSize * footprint));
+    // 屏幕像素点径：worldSize = viewDist × slope → 缩放/FOV 下保持约恒定 px
+    float targetSize = min(dotSize, hardCap);
+    gsplatMakeSpherical(scale, targetSize);
 }
 
 void modifySplatColor(vec3 center, inout vec4 color) {
@@ -276,6 +286,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     float structure = clamp(uPointillismSourceStructureBlend, 0.0, 1.0);
     styled = clamp(mix(styled, src, structure * 0.35), 0.0, 1.0);
     color.rgb = pointClampPigment(styled);
+    // 可见性已由 srcAlpha 过滤；绘制强度只由 gsplatPS 的 paintOpacity 控制
     color.a = 1.0;
 }
 `;
@@ -392,19 +403,20 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
     dotSize *= sizePick * max(0.001, uniform.uPointillismDotScale);
     dotSize *= mix(0.94, 1.08, densityT);
 
-    let hardCap = viewDist * uniform.uPointillismMaxDotRadiusSlope * 1.05;
+    let hardCap = viewDist * uniform.uPointillismMaxDotRadiusSlope * 1.02;
     dotSize = min(dotSize, hardCap);
-    if (originalSize > hardCap * 1.4) {
-        dotSize = min(dotSize, hardCap * 0.82);
-    }
 
-    if (originalSize > hardCap * 2.4 && originalSize > dotSize * 3.2) {
-        gsplatMakeSpherical(scale, 0.0001);
+    let sizeRatio = originalSize / max(dotSize, 0.000001);
+    if (sizeRatio > 1.12) {
+        dotSize = min(dotSize, dotSize * 0.72);
+    }
+    if (sizeRatio > 3.5) {
+        gsplatMakeSpherical(scale, dotSize);
         return;
     }
 
-    let footprint = mix(0.16, 0.36, densityT);
-    gsplatMakeSpherical(scale, min(dotSize, originalSize * footprint));
+    let targetSize = min(dotSize, hardCap);
+    gsplatMakeSpherical(scale, targetSize);
 }
 
 fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {

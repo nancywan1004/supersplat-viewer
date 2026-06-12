@@ -104,6 +104,7 @@ const POINTILLISM_STIPPLE = new Set([
     'strokeWidth',
     'shapeJitter',
     'paintThickness',
+    'paintOpacity',
     'saturation',
     'lumaLevels',
     'contrastDotMix',
