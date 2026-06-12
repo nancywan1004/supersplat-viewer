@@ -31,7 +31,10 @@ export const POINTILLISM_UNIFORM_NAMES = {
     minVisibleAlpha: 'uPointillismMinVisibleAlpha',
     viewPos: 'uPointillismViewPos',
     dotRadiusSlope: 'uPointillismDotRadiusSlope',
-    maxDotRadiusSlope: 'uPointillismMaxDotRadiusSlope'
+    maxDotRadiusSlope: 'uPointillismMaxDotRadiusSlope',
+    refViewDist: 'uPointillismRefViewDist',
+    bucketSlope: 'uPointillismBucketSlope',
+    gapSpacing: 'uPointillismGapSpacing'
 } as const;
 
 export const POINTILLISM_STIPPLE_SIZE_MIN = 32;
@@ -46,6 +49,8 @@ export const POINTILLISM_STROKE_WIDTH_MIN = 0.15;
 export const POINTILLISM_STROKE_WIDTH_MAX = 1.85;
 export const POINTILLISM_PAINT_OPACITY_MIN = 0.08;
 export const POINTILLISM_PAINT_OPACITY_MAX = 1.0;
+export const POINTILLISM_GAP_SPACING_MIN = 0;
+export const POINTILLISM_GAP_SPACING_MAX = 1;
 
 /** 旧 stippleSize ↑ → 目标点半径 ↓（约 1–5 px）；仅用于读取 legacy 配置 */
 export const stippleSizeToTargetDotRadiusPx = (stippleSize: number): number => {
@@ -99,6 +104,7 @@ export const POINTILLISM_DEFAULTS = {
     seed: 17,
     minVisibleAlpha: 0.08,
     dotRadiusPx: 1.0,
+    gapSpacing: 0.4,
     postEffectEnabled: true,
     stippleSize: 96,
     levels: 8,
@@ -139,6 +145,9 @@ uniform float uPointillismShapeJitter;
 uniform vec3 uPointillismViewPos;
 uniform float uPointillismDotRadiusSlope;
 uniform float uPointillismMaxDotRadiusSlope;
+uniform float uPointillismRefViewDist;
+uniform float uPointillismBucketSlope;
+uniform float uPointillismGapSpacing;
 uniform float uPointillismMinVisibleAlpha;
 
 float pointLuma(vec3 c) {
@@ -211,37 +220,56 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
     float originalSize = gsplatGetSizeFromScale(scale);
     float density = clamp(uPointillismBrushDensity, 0.15, 4.4);
     float densityT = clamp((density - 0.15) / 4.25, 0.0, 1.0);
+    float gap = clamp(uPointillismGapSpacing, 0.0, 1.0);
+    float densityBoost = mix(0.92, 1.08, densityT);
+    float overlap = mix(1.36, 0.62, gap) * densityBoost;
 
     float viewDist = max(length(originalCenter - uPointillismViewPos), 0.001);
-    float minWorld = viewDist * uPointillismDotRadiusSlope;
-    float maxWorld = viewDist * uPointillismMaxDotRadiusSlope;
-    float dotSize = clamp(minWorld, minWorld, maxWorld);
+    float screenDot = viewDist * uPointillismDotRadiusSlope;
+    float screenCap = viewDist * uPointillismMaxDotRadiusSlope;
+
+    // 间距驱动：gapSpacing ↑ → overlap ↓ → 点间缝隙更大（视距自适应）
+    float dotSize = originalSize * overlap * max(0.001, uPointillismDotScale);
+    dotSize = min(dotSize, screenCap);
+    dotSize = max(dotSize, screenDot * mix(0.46, 0.14, gap));
 
     float cellScale = mix(14.0, 36.0, densityT);
     vec3 sizeCell = floor(originalCenter * cellScale);
-    float sizePick = mix(0.94, 1.06, pointHash13(sizeCell + vec3(uPointillismSeed * 0.05)));
-    dotSize *= sizePick * max(0.001, uPointillismDotScale);
-    dotSize *= mix(0.94, 1.08, densityT);
+    float sizePick = mix(0.96, 1.04, pointHash13(sizeCell + vec3(uPointillismSeed * 0.05)));
+    dotSize *= sizePick;
+    dotSize *= mix(0.96, 1.06, densityT);
+    dotSize = min(dotSize, screenCap * 1.02);
 
-    float hardCap = viewDist * uPointillismMaxDotRadiusSlope * 1.02;
-    dotSize = min(dotSize, hardCap);
-
-    // 与 dotSize 比（屏幕投影比 = originalSize/dotSize，与视距无关）；勿用 hardCap，拉近时 hardCap 变小会误杀
     float sizeRatio = originalSize / max(dotSize, 0.000001);
-    if (sizeRatio > 1.12) {
-        dotSize = min(dotSize, dotSize * 0.72);
-    }
     if (sizeRatio > 3.5) {
         gsplatMakeSpherical(scale, dotSize);
         return;
     }
 
-    // 屏幕像素点径：worldSize = viewDist × slope → 缩放/FOV 下保持约恒定 px
-    float targetSize = min(dotSize, hardCap);
-    gsplatMakeSpherical(scale, targetSize);
+    gsplatMakeSpherical(scale, dotSize);
 }
 
 void modifySplatColor(vec3 center, inout vec4 color) {
+    float density = clamp(uPointillismBrushDensity, 0.15, 4.4);
+    float densityT = clamp((density - 0.15) / 4.25, 0.0, 1.0);
+    float gap = clamp(uPointillismGapSpacing, 0.0, 1.0);
+    float viewDist = max(length(center - uPointillismViewPos), 0.001);
+    float distRatio = viewDist / max(uPointillismRefViewDist, 0.01);
+
+    float bucketWorld = max(viewDist * uPointillismBucketSlope, 0.00001);
+    vec3 bucketId = floor(center / bucketWorld);
+    float bucketHash = pointHash13(bucketId + vec3(uPointillismSeed * 0.07));
+    float overdraw = max(distRatio * distRatio * 0.55, 0.12);
+    float keepChance = clamp(
+        pow(overdraw, -0.82) * mix(1.0, 0.68, densityT) * mix(1.0, 0.72, gap),
+        0.12,
+        1.0
+    );
+    if (bucketHash > keepChance) {
+        color.a = 0.0;
+        return;
+    }
+
     float srcAlpha = color.a;
     float minAlpha = clamp(uPointillismMinVisibleAlpha, 0.0, 0.25);
     vec3 src = clamp(color.rgb, 0.0, 1.0);
@@ -320,6 +348,9 @@ uniform uPointillismShapeJitter: f32;
 uniform uPointillismViewPos: vec3f;
 uniform uPointillismDotRadiusSlope: f32;
 uniform uPointillismMaxDotRadiusSlope: f32;
+uniform uPointillismRefViewDist: f32;
+uniform uPointillismBucketSlope: f32;
+uniform uPointillismGapSpacing: f32;
 uniform uPointillismMinVisibleAlpha: f32;
 
 fn pointLuma(c: vec3f) -> f32 {
@@ -391,35 +422,55 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
     let originalSize = gsplatGetSizeFromScale(*scale);
     let density = clamp(uniform.uPointillismBrushDensity, 0.15, 4.4);
     let densityT = clamp((density - 0.15) / 4.25, 0.0, 1.0);
+    let gap = clamp(uniform.uPointillismGapSpacing, 0.0, 1.0);
+    let densityBoost = mix(0.92, 1.08, densityT);
+    let overlap = mix(1.36, 0.62, gap) * densityBoost;
 
     let viewDist = max(length(originalCenter - uniform.uPointillismViewPos), 0.001);
-    let minWorld = viewDist * uniform.uPointillismDotRadiusSlope;
-    let maxWorld = viewDist * uniform.uPointillismMaxDotRadiusSlope;
-    var dotSize = clamp(minWorld, minWorld, maxWorld);
+    let screenDot = viewDist * uniform.uPointillismDotRadiusSlope;
+    let screenCap = viewDist * uniform.uPointillismMaxDotRadiusSlope;
+
+    var dotSize = originalSize * overlap * max(0.001, uniform.uPointillismDotScale);
+    dotSize = min(dotSize, screenCap);
+    dotSize = max(dotSize, screenDot * mix(0.46, 0.14, gap));
 
     let cellScale = mix(14.0, 36.0, densityT);
     let sizeCell = floor(originalCenter * cellScale);
-    let sizePick = mix(0.94, 1.06, pointHash13(sizeCell + vec3f(uniform.uPointillismSeed * 0.05)));
-    dotSize *= sizePick * max(0.001, uniform.uPointillismDotScale);
-    dotSize *= mix(0.94, 1.08, densityT);
-
-    let hardCap = viewDist * uniform.uPointillismMaxDotRadiusSlope * 1.02;
-    dotSize = min(dotSize, hardCap);
+    let sizePick = mix(0.96, 1.04, pointHash13(sizeCell + vec3f(uniform.uPointillismSeed * 0.05)));
+    dotSize *= sizePick;
+    dotSize *= mix(0.96, 1.06, densityT);
+    dotSize = min(dotSize, screenCap * 1.02);
 
     let sizeRatio = originalSize / max(dotSize, 0.000001);
-    if (sizeRatio > 1.12) {
-        dotSize = min(dotSize, dotSize * 0.72);
-    }
     if (sizeRatio > 3.5) {
         gsplatMakeSpherical(scale, dotSize);
         return;
     }
 
-    let targetSize = min(dotSize, hardCap);
-    gsplatMakeSpherical(scale, targetSize);
+    gsplatMakeSpherical(scale, dotSize);
 }
 
 fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
+    let density = clamp(uniform.uPointillismBrushDensity, 0.15, 4.4);
+    let densityT = clamp((density - 0.15) / 4.25, 0.0, 1.0);
+    let gap = clamp(uniform.uPointillismGapSpacing, 0.0, 1.0);
+    let viewDist = max(length(center - uniform.uPointillismViewPos), 0.001);
+    let distRatio = viewDist / max(uniform.uPointillismRefViewDist, 0.01);
+
+    let bucketWorld = max(viewDist * uniform.uPointillismBucketSlope, 0.00001);
+    let bucketId = floor(center / bucketWorld);
+    let bucketHash = pointHash13(bucketId + vec3f(uniform.uPointillismSeed * 0.07));
+    let overdraw = max(distRatio * distRatio * 0.55, 0.12);
+    let keepChance = clamp(
+        pow(overdraw, -0.82) * mix(1.0, 0.68, densityT) * mix(1.0, 0.72, gap),
+        0.12,
+        1.0
+    );
+    if (bucketHash > keepChance) {
+        (*color).a = 0.0;
+        return;
+    }
+
     let srcAlpha = (*color).a;
     let minAlpha = clamp(uniform.uPointillismMinVisibleAlpha, 0.0, 0.25);
     let src = clamp((*color).rgb, vec3f(0.0), vec3f(1.0));

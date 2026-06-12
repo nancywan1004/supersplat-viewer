@@ -4,6 +4,7 @@ import {
     SHADERLANGUAGE_GLSL,
     SHADERLANGUAGE_WGSL,
     ShaderChunks,
+    Vec3,
     type CameraComponent,
     type CameraFrame,
     type GraphicsDevice
@@ -12,6 +13,8 @@ import {
 import {
     POINTILLISM_DEFAULTS,
     POINTILLISM_DOT_RADIUS_PX_MAX,
+    POINTILLISM_GAP_SPACING_MAX,
+    POINTILLISM_GAP_SPACING_MIN,
     POINTILLISM_PAINT_OPACITY_MAX,
     POINTILLISM_PAINT_OPACITY_MIN,
     POINTILLISM_STROKE_LENGTH_MAX,
@@ -261,6 +264,8 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
 
     dotRadiusPx = Number.NaN;
 
+    gapSpacing = POINTILLISM_DEFAULTS.gapSpacing;
+
     postEffectEnabled = POINTILLISM_DEFAULTS.postEffectEnabled;
 
     stippleSize = POINTILLISM_DEFAULTS.stippleSize;
@@ -455,6 +460,27 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
     }
 
     private readonly _viewPos = new Float32Array(3);
+    private readonly _viewPosScratch = new Vec3();
+    private _refViewDistCache = 0;
+
+    private resolveRefViewDist(camWorld: Vec3 | undefined): number {
+        if (this._refViewDistCache > 0) {
+            return this._refViewDistCache;
+        }
+        const gsplat = this.entity.gsplat as {
+            customAabb?: { halfExtents: Vec3 };
+            resource?: { aabb?: { halfExtents: Vec3 } };
+        } | undefined;
+        const he = gsplat?.customAabb?.halfExtents ?? gsplat?.resource?.aabb?.halfExtents;
+        if (he) {
+            this._refViewDistCache = Math.max(he.x, he.y, he.z) * 3.0;
+        } else if (camWorld) {
+            this._refViewDistCache = Math.max(this.entity.getPosition().distance(camWorld), 1.0);
+        } else {
+            this._refViewDistCache = 10.0;
+        }
+        return this._refViewDistCache;
+    }
 
     updateEffect(_effectTime: number, _dt: number) {
         const brushSize = Number.isFinite(this.brushSize)
@@ -481,11 +507,18 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
 
         const cameraEntity = findCameraEntity(this.app.root);
         const camera = cameraEntity?.camera;
-        const pos = cameraEntity?.getPosition();
-        if (pos) {
-            this._viewPos[0] = pos.x;
-            this._viewPos[1] = pos.y;
-            this._viewPos[2] = pos.z;
+        const camWorld = cameraEntity?.getPosition();
+        const unified = !!(this.entity.gsplat as { unified?: boolean } | undefined)?.unified;
+        if (camWorld) {
+            if (unified) {
+                this._viewPosScratch.copy(camWorld);
+            } else {
+                // modify 非 unified 路径为 model space（与 Reveal 约定一致）
+                this._viewPosScratch.set(-camWorld.x, -camWorld.y, camWorld.z);
+            }
+            this._viewPos[0] = this._viewPosScratch.x;
+            this._viewPos[1] = this._viewPosScratch.y;
+            this._viewPos[2] = this._viewPosScratch.z;
         }
 
         const canvas = this.app.graphicsDevice.canvas as HTMLCanvasElement | undefined;
@@ -496,10 +529,14 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         const maxPx = Math.min(POINTILLISM_DOT_RADIUS_PX_MAX, targetPx * 1.25);
         const dotRadiusSlope = (targetPx * 2 * tanHalfFov) / canvasHeight;
         const maxDotRadiusSlope = (maxPx * 2 * tanHalfFov) / canvasHeight;
+        const refViewDist = this.resolveRefViewDist(camWorld);
+        const bucketSlope = dotRadiusSlope * 1.75;
 
         this.setUniform(PU.viewPos, this._viewPos);
         this.setUniform(PU.dotRadiusSlope, dotRadiusSlope);
         this.setUniform(PU.maxDotRadiusSlope, maxDotRadiusSlope);
+        this.setUniform(PU.refViewDist, refViewDist);
+        this.setUniform(PU.bucketSlope, bucketSlope);
         this.setUniform(PU.brushSize, 1.0);
         this.setUniform(PU.brushDensity, clamp(brushDensity, 0.15, 4.4));
         this.setUniform(PU.brushAspect, clamp(brushAspect, 0.5, 1.2));
@@ -530,6 +567,14 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         this.setUniform(PU.darkDensityBoost, clamp(this.darkDensityBoost, 0, 1));
         this.setUniform(PU.seed, Number.isFinite(this.seed) ? this.seed : POINTILLISM_DEFAULTS.seed);
         this.setUniform(PU.minVisibleAlpha, clamp(this.minVisibleAlpha, 0, 0.25));
+        this.setUniform(
+            PU.gapSpacing,
+            clamp(
+                Number.isFinite(this.gapSpacing) ? this.gapSpacing : POINTILLISM_DEFAULTS.gapSpacing,
+                POINTILLISM_GAP_SPACING_MIN,
+                POINTILLISM_GAP_SPACING_MAX
+            )
+        );
     }
 
     destroy() {

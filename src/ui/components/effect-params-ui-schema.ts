@@ -26,6 +26,8 @@ import {
     POINTILLISM_BRUSH_SIZE_MIN,
     POINTILLISM_DOT_RADIUS_PX_MAX,
     POINTILLISM_DOT_RADIUS_PX_MIN,
+    POINTILLISM_GAP_SPACING_MAX,
+    POINTILLISM_GAP_SPACING_MIN,
     POINTILLISM_PAINT_OPACITY_MAX,
     POINTILLISM_PAINT_OPACITY_MIN,
     POINTILLISM_STIPPLE_SIZE_MAX,
@@ -282,6 +284,7 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     darkDensityBoost: '暗部加密',
     stippleSize: '整体颗粒尺度（legacy）',
     dotRadiusPx: '点径（px）',
+    gapSpacing: '点间缝隙（↑更疏）',
     paperStrength: '纸张强度',
     paperTint: '纸张色调',
     edgeStrength: '描边强度'
@@ -553,6 +556,13 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
         default: POINTILLISM_DEFAULTS.dotRadiusPx,
         label: '点径（px）'
     },
+    gapSpacing: {
+        min: POINTILLISM_GAP_SPACING_MIN,
+        max: POINTILLISM_GAP_SPACING_MAX,
+        step: 0.01,
+        default: POINTILLISM_DEFAULTS.gapSpacing,
+        label: '点间缝隙（↑更疏）'
+    },
     brushDensity: { min: 0.15, max: 4.4, step: 0.01, default: POINTILLISM_DEFAULTS.brushDensity, label: '点涂密度（↑重叠覆盖）' },
     brushAspect: { min: 0.5, max: 1.2, step: 0.01, default: POINTILLISM_DEFAULTS.brushAspect },
     brushHardness: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.brushHardness, label: '笔触硬度' },
@@ -618,6 +628,7 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
 const POINTILLISM_VISIBLE_PARAM_KEYS = [
     'postEffectEnabled',
     'dotRadiusPx',
+    'gapSpacing',
     'levelRange',
     'sourceStructureBlend',
     'brushDensity',
