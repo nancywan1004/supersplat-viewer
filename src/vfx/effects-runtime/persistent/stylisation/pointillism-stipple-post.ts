@@ -14,7 +14,7 @@ import {
 
 import { POINTILLISM_DEFAULTS } from './pointillism-stipple-shaders';
 
-/** 后处理颗粒尺度：值越大，屏幕网格越密 */
+/** stippleSize ↑ → 目标屏幕点半径 ↓（约 2–5 px，由 modify 层 dotRadiusSlope 驱动） */
 export const POINTILLISM_STIPPLE_SIZE_STEPS = [32, 48, 64, 72, 96, 128, 160] as const;
 
 type Rgb = [number, number, number];
@@ -165,6 +165,7 @@ class PointillismPostEffect extends PostEffect {
             uniform vec2 uResolution;
             uniform float uSaturation;
             uniform float uLevelRange;
+            uniform float uSourceStructureBlend;
             uniform float uPaperStrength;
             uniform vec3 uPaperTint;
             uniform float uEdgeThreshold;
@@ -184,31 +185,62 @@ class PointillismPostEffect extends PostEffect {
                 if (levelRange < 1.0) {
                     return mix(vec3(0.5), color, levelRange);
                 }
-                return mix(vec3(luma), color, levelRange);
+                return mix(vec3(luma), color, min(levelRange, 1.35));
             }
 
             float edgeFactor(vec2 uv) {
                 vec2 px = 1.0 / uResolution;
                 vec3 c = texture2D(uColorBuffer, uv).rgb;
                 vec3 r = texture2D(uColorBuffer, uv + vec2(px.x, 0.0)).rgb;
+                vec3 d = texture2D(uColorBuffer, uv + vec2(-px.x, 0.0)).rgb;
                 vec3 u = texture2D(uColorBuffer, uv + vec2(0.0, px.y)).rgb;
-                float edge = length(c - r) + length(c - u);
-                return smoothstep(uEdgeThreshold, uEdgeThreshold * 2.5, edge);
+                vec3 v = texture2D(uColorBuffer, uv + vec2(0.0, -px.y)).rgb;
+                float edge = length(c - r) + length(c - d) + length(c - u) + length(c - v);
+                return smoothstep(uEdgeThreshold, uEdgeThreshold * 2.2, edge * 0.5);
+            }
+
+            vec3 flatOpticalMix(vec2 uv, vec3 centerColor) {
+                vec2 px = 1.0 / uResolution;
+                float radius = mix(1.0, 2.0, 1.0 - clamp(uSourceStructureBlend, 0.0, 1.0));
+                float centerL = getLuminance(centerColor);
+                vec3 acc = vec3(0.0);
+                float wsum = 0.0;
+                for (int dy = -2; dy <= 2; dy++) {
+                    for (int dx = -2; dx <= 2; dx++) {
+                        float adx = abs(float(dx));
+                        float ady = abs(float(dy));
+                        if (adx + ady > 2.0) continue;
+                        vec2 off = vec2(float(dx), float(dy)) * px * radius;
+                        vec3 s = texture2D(uColorBuffer, uv + off).rgb;
+                        float lSim = 1.0 - clamp(abs(getLuminance(s) - centerL) * 2.5, 0.0, 1.0);
+                        float rgbSim = 1.0 - clamp(length(s - centerColor) * 1.8, 0.0, 1.0);
+                        float sim = lSim * rgbSim;
+                        acc += s * sim;
+                        wsum += sim;
+                    }
+                }
+                vec3 mixed = acc / max(wsum, 0.001);
+                float mixAmt = mix(0.16, 0.06, clamp(uSourceStructureBlend, 0.0, 1.0));
+                return mix(centerColor, mixed, mixAmt);
             }
 
             void main() {
                 vec2 uv = vUv0;
                 vec3 sceneColor = texture2D(uColorBuffer, uv).rgb;
 
-                float postSat = 1.0 + max(0.0, uSaturation - 1.0) * 0.28;
-                vec3 color = saturateColor(sceneColor, postSat);
-                color = applyContrast(color, uLevelRange);
-
-                color = mix(color, color * uPaperTint, uPaperStrength * 0.16);
-
                 float edge = edgeFactor(uv);
-                vec3 edgeColor = color * vec3(0.72, 0.76, 0.84);
-                color = mix(color, edgeColor, edge * uEdgeStrength * 0.34);
+                float structure = clamp(uSourceStructureBlend, 0.0, 1.0);
+                vec3 processed = flatOpticalMix(uv, sceneColor);
+                float detailKeep = clamp(structure * 0.55 + edge * uEdgeStrength * 0.85, 0.0, 0.92);
+                vec3 color = mix(processed, sceneColor, detailKeep);
+
+                float postSat = 1.0 + max(0.0, uSaturation - 1.0) * 0.18;
+                color = saturateColor(color, postSat);
+                color = applyContrast(color, uLevelRange);
+                color = mix(color, color * uPaperTint, uPaperStrength * 0.10);
+
+                vec3 edgeBoost = saturateColor(color, 1.04);
+                color = mix(color, edgeBoost, edge * uEdgeStrength * 0.12);
 
                 gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
             }
@@ -242,6 +274,7 @@ class PointillismPostEffect extends PostEffect {
         scope.resolve('uResolution').setValue(this.uResolution);
         scope.resolve('uSaturation').setValue(s.saturation);
         scope.resolve('uLevelRange').setValue(s.levelRange);
+        scope.resolve('uSourceStructureBlend').setValue(s.sourceStructureBlend);
         scope.resolve('uPaperStrength').setValue(s.paperStrength);
         scope.resolve('uPaperTint').setValue(this.uPaperTint);
         scope.resolve('uEdgeThreshold').setValue(s.edgeThreshold);
