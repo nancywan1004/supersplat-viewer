@@ -1,8 +1,6 @@
 import {
     ADDRESS_CLAMP_TO_EDGE,
     FILTER_LINEAR,
-    FILTER_NEAREST,
-    PIXELFORMAT_R8_G8_B8_A8,
     PostEffect,
     RenderTarget,
     SEMANTIC_POSITION,
@@ -16,7 +14,7 @@ import {
 
 import { POINTILLISM_DEFAULTS } from './pointillism-stipple-shaders';
 
-/** 后处理颗粒尺度：值越小，屏幕 dither 块越大（非像素网格采样） */
+/** 后处理颗粒尺度：值越大，屏幕网格越密 */
 export const POINTILLISM_STIPPLE_SIZE_STEPS = [32, 48, 64, 72, 96, 128, 160] as const;
 
 type Rgb = [number, number, number];
@@ -25,11 +23,18 @@ export type PointillismPostSettings = {
     enabled: boolean;
     postEffectEnabled: boolean;
     stippleSize: number;
+    /** 协议保留，不参与后处理着色 */
     paletteIndex: number;
     paletteStrength: number;
     levels: number;
     levelRange: number;
     ditherSpread: number;
+    warmCoolSplit: number;
+    sourceStructureBlend: number;
+    saturation: number;
+    complementaryMix: number;
+    contrastDotMix: number;
+    seed: number;
     paperStrength: number;
     paperTint: [number, number, number];
     edgeThreshold: number;
@@ -43,13 +48,6 @@ export const POINTILLISM_PALETTE_NAMES: Record<number, string> = {
     3: '大地中性'
 };
 
-const POINTILLISM_PALETTES_HEX: ReadonlyArray<ReadonlyArray<string>> = [
-    ['#2E1408', '#D14724', '#3A1A0E', '#E86A2A', '#5C2E18', '#F08C32', '#F5B048', '#8A4E1C', '#F8C85A', '#7A6E38', '#FBE078', '#9A8A3A', '#A8A090', '#E8D068', '#C8C0B0', '#F5E898', '#E8E0D0', '#FAF0C0', '#F8F4E8', '#FFFFFF'],
-    ['#17091A', '#5A1E78', '#2A1230', '#8A2E9A', '#3A1848', '#B24088', '#D85848', '#4A2860', '#E87838', '#5A3870', '#F0A030', '#6A4880', '#9090A0', '#F0C848', '#B0B0B8', '#F8E060', '#D8D8E0', '#FAF0A0', '#F4F4F8', '#FFFFFF'],
-    ['#081810', '#1A6038', '#0C2818', '#2A8848', '#143820', '#48A858', '#78C838', '#285830', '#98D828', '#486838', '#E8C828', '#687848', '#90A090', '#F0D848', '#B8C0B0', '#F8E858', '#E0E8D8', '#FAF0A0', '#F6FAF0', '#FFFFFF'],
-    ['#282420', '#504840', '#383430', '#686058', '#484038', '#807870', '#A89888', '#605850', '#C0B0A0', '#787068', '#E0D0B8', '#908878', '#B0A8A0', '#F0E0C8', '#C8C0B8', '#F8F0E0', '#E8E4DC', '#FAF6EE', '#FCFAF4', '#FFFFFF']
-] as const;
-
 export const DEFAULT_POINTILLISM_POST_SETTINGS: PointillismPostSettings = {
     enabled: false,
     postEffectEnabled: POINTILLISM_DEFAULTS.postEffectEnabled,
@@ -59,13 +57,18 @@ export const DEFAULT_POINTILLISM_POST_SETTINGS: PointillismPostSettings = {
     levels: POINTILLISM_DEFAULTS.levels,
     levelRange: POINTILLISM_DEFAULTS.levelRange,
     ditherSpread: POINTILLISM_DEFAULTS.ditherSpread,
+    warmCoolSplit: POINTILLISM_DEFAULTS.warmCoolSplit,
+    sourceStructureBlend: POINTILLISM_DEFAULTS.sourceStructureBlend,
+    saturation: POINTILLISM_DEFAULTS.saturation,
+    complementaryMix: POINTILLISM_DEFAULTS.complementaryMix,
+    contrastDotMix: POINTILLISM_DEFAULTS.contrastDotMix,
+    seed: POINTILLISM_DEFAULTS.seed,
     paperStrength: POINTILLISM_DEFAULTS.paperStrength,
     paperTint: [...POINTILLISM_DEFAULTS.paperTint],
     edgeThreshold: POINTILLISM_DEFAULTS.edgeThreshold,
     edgeStrength: POINTILLISM_DEFAULTS.edgeStrength
 };
 
-const PALETTE_STEPS = 20;
 const clamp = (v: number, min: number, max: number): number => Math.max(min, Math.min(max, v));
 const finiteOr = (v: unknown, fallback: number): number =>
     (typeof v === 'number' && Number.isFinite(v)) ? v : fallback;
@@ -118,6 +121,16 @@ export function normalizePointillismPostSettings(raw: unknown): PointillismPostS
         levels: clamp(Math.floor(finiteOr(obj.levels, DEFAULT_POINTILLISM_POST_SETTINGS.levels)), 2, 20),
         levelRange: clamp(finiteOr(obj.levelRange, DEFAULT_POINTILLISM_POST_SETTINGS.levelRange), 0.5, 2),
         ditherSpread: clamp(finiteOr(obj.ditherSpread, DEFAULT_POINTILLISM_POST_SETTINGS.ditherSpread), 0, 0.2),
+        warmCoolSplit: clamp(finiteOr(obj.warmCoolSplit, DEFAULT_POINTILLISM_POST_SETTINGS.warmCoolSplit), 0, 1),
+        sourceStructureBlend: clamp(
+            finiteOr(obj.sourceStructureBlend, DEFAULT_POINTILLISM_POST_SETTINGS.sourceStructureBlend),
+            0,
+            1
+        ),
+        saturation: clamp(finiteOr(obj.saturation, DEFAULT_POINTILLISM_POST_SETTINGS.saturation), 0, 3),
+        complementaryMix: clamp(finiteOr(obj.complementaryMix, DEFAULT_POINTILLISM_POST_SETTINGS.complementaryMix), 0, 1),
+        contrastDotMix: clamp(finiteOr(obj.contrastDotMix, DEFAULT_POINTILLISM_POST_SETTINGS.contrastDotMix), 0, 1),
+        seed: clamp(finiteOr(obj.seed, DEFAULT_POINTILLISM_POST_SETTINGS.seed), 0, 997),
         paperStrength: clamp(finiteOr(obj.paperStrength, DEFAULT_POINTILLISM_POST_SETTINGS.paperStrength), 0, 1),
         paperTint: normalizeColor(obj.paperTint, DEFAULT_POINTILLISM_POST_SETTINGS.paperTint),
         edgeThreshold: clamp(finiteOr(obj.edgeThreshold, DEFAULT_POINTILLISM_POST_SETTINGS.edgeThreshold), 0.02, 1),
@@ -125,49 +138,8 @@ export function normalizePointillismPostSettings(raw: unknown): PointillismPostS
     };
 }
 
-const hexToRgb = (hex: string): Rgb => {
-    const text = hex.startsWith('#') ? hex.slice(1) : hex;
-    return [
-        parseInt(text.slice(0, 2), 16) / 255,
-        parseInt(text.slice(2, 4), 16) / 255,
-        parseInt(text.slice(4, 6), 16) / 255
-    ];
-};
-
-const buildPaletteTexture = (device: GraphicsDevice): Texture => {
-    const width = PALETTE_STEPS;
-    const height = 4;
-    const paletteData = new Uint8Array(width * height * 4);
-
-    for (let row = 0; row < height; row++) {
-        for (let col = 0; col < width; col++) {
-            const [r, g, b] = hexToRgb(POINTILLISM_PALETTES_HEX[row][col]);
-            const idx = (row * width + col) * 4;
-            paletteData[idx + 0] = Math.round(r * 255);
-            paletteData[idx + 1] = Math.round(g * 255);
-            paletteData[idx + 2] = Math.round(b * 255);
-            paletteData[idx + 3] = 255;
-        }
-    }
-
-    const tex = new Texture(device, {
-        width,
-        height,
-        format: PIXELFORMAT_R8_G8_B8_A8,
-        minFilter: FILTER_NEAREST,
-        magFilter: FILTER_NEAREST,
-        addressU: ADDRESS_CLAMP_TO_EDGE,
-        addressV: ADDRESS_CLAMP_TO_EDGE
-    });
-    const pixels = tex.lock();
-    pixels.set(paletteData);
-    tex.unlock();
-    return tex;
-};
-
 class PointillismPostEffect extends PostEffect {
     private readonly shader: Shader;
-    private readonly paletteTex: Texture;
     private settings: PointillismPostSettings = DEFAULT_POINTILLISM_POST_SETTINGS;
 
     readonly uPaperTint = new Float32Array(3);
@@ -175,7 +147,6 @@ class PointillismPostEffect extends PostEffect {
 
     constructor(device: GraphicsDevice, precision: string) {
         super(device);
-        this.paletteTex = buildPaletteTexture(device);
 
         const vshader = `
             attribute vec2 aPosition;
@@ -191,46 +162,29 @@ class PointillismPostEffect extends PostEffect {
 
             varying vec2 vUv0;
             uniform sampler2D uColorBuffer;
-            uniform sampler2D uPaletteTex;
             uniform vec2 uResolution;
-            uniform float uStippleSize;
-            uniform float uPaletteRow;
-            uniform float uPaletteStrength;
-            uniform float uDitherSpread;
-            uniform float uLevels;
+            uniform float uSaturation;
             uniform float uLevelRange;
             uniform float uPaperStrength;
             uniform vec3 uPaperTint;
             uniform float uEdgeThreshold;
             uniform float uEdgeStrength;
 
-            const float PALETTE_STEPS = ${PALETTE_STEPS}.0;
-
             float getLuminance(vec3 color) {
                 return dot(color, vec3(0.299, 0.587, 0.114));
             }
 
-            vec3 sampleFinish(vec2 uv) {
-                vec3 originalColor = texture2D(uColorBuffer, uv).rgb;
-                float luma = max(getLuminance(originalColor), 0.001);
-                float qL = clamp(luma * 0.96 + 0.025, 0.0, 1.0);
-                if (uLevelRange < 1.0) {
-                    qL = mix(0.5, qL, uLevelRange);
-                } else if (uLevelRange > 1.0) {
-                    qL = clamp((qL - 0.5) * uLevelRange + 0.5, 0.0, 1.0);
+            vec3 saturateColor(vec3 color, float amount) {
+                float luma = getLuminance(color);
+                return mix(vec3(luma), color, max(0.0, amount));
+            }
+
+            vec3 applyContrast(vec3 color, float levelRange) {
+                float luma = getLuminance(color);
+                if (levelRange < 1.0) {
+                    return mix(vec3(0.5), color, levelRange);
                 }
-
-                vec3 chroma = originalColor / luma;
-                vec3 quantized = clamp(chroma * qL, 0.0, 1.0);
-
-                float finalIdx = clamp(qL * (PALETTE_STEPS - 1.0), 0.0, PALETTE_STEPS - 1.0);
-                float vTex = (uPaletteRow + 0.5) / 4.0;
-                float uTex = (floor(finalIdx + 0.5) + 0.5) / PALETTE_STEPS;
-                vec3 paletteColor = texture2D(uPaletteTex, vec2(uTex, vTex)).rgb;
-                vec3 styled = mix(quantized, mix(paletteColor, quantized, 0.35), clamp(uPaletteStrength, 0.0, 1.0));
-
-                styled = mix(styled, vec3(1.0), 0.02 + qL * 0.04);
-                return mix(originalColor, styled, 0.18);
+                return mix(vec3(luma), color, levelRange);
             }
 
             float edgeFactor(vec2 uv) {
@@ -244,14 +198,19 @@ class PointillismPostEffect extends PostEffect {
 
             void main() {
                 vec2 uv = vUv0;
-                vec3 color = sampleFinish(uv);
-                color = mix(color, color * uPaperTint, uPaperStrength * 0.35);
+                vec3 sceneColor = texture2D(uColorBuffer, uv).rgb;
+
+                float postSat = 1.0 + max(0.0, uSaturation - 1.0) * 0.28;
+                vec3 color = saturateColor(sceneColor, postSat);
+                color = applyContrast(color, uLevelRange);
+
+                color = mix(color, color * uPaperTint, uPaperStrength * 0.16);
 
                 float edge = edgeFactor(uv);
-                vec3 edgeColor = color * vec3(0.82, 0.86, 0.94);
-                color = mix(color, edgeColor, edge * uEdgeStrength);
+                vec3 edgeColor = color * vec3(0.72, 0.76, 0.84);
+                color = mix(color, edgeColor, edge * uEdgeStrength * 0.34);
 
-                gl_FragColor = vec4(color, 1.0);
+                gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
             }
         `;
 
@@ -269,10 +228,6 @@ class PointillismPostEffect extends PostEffect {
         this.uPaperTint[2] = this.settings.paperTint[2];
     }
 
-    destroy(): void {
-        this.paletteTex.destroy();
-    }
-
     render(inputTarget: { colorBuffer?: Texture }, outputTarget: RenderTarget, rect: unknown): void {
         const colorBuffer = inputTarget?.colorBuffer;
         if (!colorBuffer) return;
@@ -284,13 +239,8 @@ class PointillismPostEffect extends PostEffect {
         this.uResolution[1] = colorBuffer.height;
 
         scope.resolve('uColorBuffer').setValue(colorBuffer);
-        scope.resolve('uPaletteTex').setValue(this.paletteTex);
         scope.resolve('uResolution').setValue(this.uResolution);
-        scope.resolve('uStippleSize').setValue(s.stippleSize);
-        scope.resolve('uPaletteRow').setValue(s.paletteIndex);
-        scope.resolve('uPaletteStrength').setValue(s.paletteStrength);
-        scope.resolve('uDitherSpread').setValue(s.ditherSpread);
-        scope.resolve('uLevels').setValue(s.levels);
+        scope.resolve('uSaturation').setValue(s.saturation);
         scope.resolve('uLevelRange').setValue(s.levelRange);
         scope.resolve('uPaperStrength').setValue(s.paperStrength);
         scope.resolve('uPaperTint').setValue(this.uPaperTint);
@@ -474,6 +424,5 @@ export class PointillismPostController {
 
     destroy(): void {
         this.apply({ ...DEFAULT_POINTILLISM_POST_SETTINGS, enabled: false });
-        this.effect.destroy();
     }
 }

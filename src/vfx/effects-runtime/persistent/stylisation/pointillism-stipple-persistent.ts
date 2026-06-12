@@ -39,109 +39,45 @@ const patchReplace = (src: string, find: string, repl: string, label: string): s
 
 const GLSL_INSERT = /* glsl */`
 
-uniform float uPointillismStrokeSoftness;
-uniform float uPointillismStrokeLength;
-uniform float uPointillismStrokeWidth;
-uniform float uPointillismShapeJitter;
-uniform float uPointillismStrokeAspect;
-uniform float uPointillismBrushAspect;
 uniform float uPointillismBrushHardness;
 uniform float uPointillismPaintThickness;
-uniform float uPointillismSeed;
 uniform float uPointillismMinVisibleAlpha;
 
-float pointillismStrokeAngle(float splatId, vec4 color) {
-    float seed = splatId;
-    #ifdef DITHER_NONE
-        seed = dot(color.rgb, vec3(12.9898, 78.233, 45.164)) * 997.0;
-    #endif
-    return seed * 2.399963 + uPointillismSeed * 0.01;
-}
-
-float pointillismDaubMask(vec2 uv, float splatId, vec4 color) {
-    float angle = pointillismStrokeAngle(splatId, color);
-    float c = cos(angle);
-    float s = sin(angle);
-    vec2 ruv = vec2(c * uv.x - s * uv.y, s * uv.x + c * uv.y);
-
-    float aspect = clamp(uPointillismBrushAspect, 0.85, 2.2);
-    float strokeLen = clamp(uPointillismStrokeLength, 0.58, 1.18) * mix(1.0, aspect, 0.38);
-    float strokeWid = clamp(uPointillismStrokeWidth, 0.42, 1.0) / mix(1.0, sqrt(aspect), 0.34);
-
+float pointillismDotMask(vec2 uv) {
     float hardness = clamp(uPointillismBrushHardness, 0.0, 1.0);
-    float jitter = clamp(uPointillismShapeJitter, 0.0, 0.22);
-    float wobble = sin(atan(ruv.y, ruv.x) * 6.0 + splatId * 0.73) * jitter;
-    vec2 suv = ruv / vec2(max(strokeLen + wobble, 0.56), max(strokeWid - wobble * 0.28, 0.36));
-    float ellipse = dot(suv, suv);
-    float block = max(abs(suv.x), abs(suv.y) * mix(1.18, 1.42, jitter));
-    float stamp = pow(abs(suv.x), 4.0) + pow(abs(suv.y) * mix(1.05, 1.32, jitter), 4.0);
-    float shape = mix(mix(ellipse, block * block, 0.72), stamp, 0.22 + hardness * 0.28);
-
-    float edgeWidth = mix(0.42, 0.012, hardness);
-    float mask = 1.0 - smoothstep(1.0 - edgeWidth, 1.0 + edgeWidth, shape);
-    float chip = step(0.10 + jitter * 0.06, fract(sin(dot(floor(suv * 7.0), vec2(41.17, 17.31)) + splatId) * 43758.5453));
-    return clamp(mask * mix(0.78, 1.0, chip), 0.0, 1.0);
+    float d = dot(uv, uv);
+    float rInner = mix(0.80, 0.90, hardness);
+    float rOuter = mix(1.04, 1.0, hardness);
+    return 1.0 - smoothstep(rInner, rOuter, d);
 }
 
-float pointillismPaintAlpha(float baseAlpha, vec2 uv, float splatId, vec4 color) {
-    float mask = pointillismDaubMask(uv, splatId, color);
+float pointillismPaintAlpha(float baseAlpha, vec2 uv) {
+    float mask = pointillismDotMask(uv);
     float thickness = clamp(uPointillismPaintThickness, 0.5, 1.5);
-    float bodyAlpha = baseAlpha * mix(0.88, 1.18, clamp(thickness - 0.5, 0.0, 1.0));
+    float bodyAlpha = baseAlpha * mix(0.92, 1.08, clamp(thickness - 0.5, 0.0, 1.0));
     return clamp(bodyAlpha * mask, 0.0, 1.0);
 }
 `;
 
 const WGSL_INSERT = /* wgsl */`
 
-uniform uPointillismStrokeSoftness: f32;
-uniform uPointillismStrokeLength: f32;
-uniform uPointillismStrokeWidth: f32;
-uniform uPointillismShapeJitter: f32;
-uniform uPointillismStrokeAspect: f32;
-uniform uPointillismBrushAspect: f32;
 uniform uPointillismBrushHardness: f32;
 uniform uPointillismPaintThickness: f32;
-uniform uPointillismSeed: f32;
 uniform uPointillismMinVisibleAlpha: f32;
 
-fn pointillismStrokeAngle(splatId: f32, color: half4) -> f32 {
-    var seed = splatId;
-    #ifdef DITHER_NONE
-        seed = dot(vec3f(color.rgb), vec3f(12.9898, 78.233, 45.164)) * 997.0;
-    #endif
-    return seed * 2.399963 + uniform.uPointillismSeed * 0.01;
-}
-
-fn pointillismDaubMask(uv: half2, splatId: f32, color: half4) -> half {
+fn pointillismDotMask(uv: half2) -> half {
     let uvf = vec2f(uv);
-    let angle = pointillismStrokeAngle(splatId, color);
-    let c = cos(angle);
-    let s = sin(angle);
-    let ruv = vec2f(c * uvf.x - s * uvf.y, s * uvf.x + c * uvf.y);
-
-    let aspect = clamp(uniform.uPointillismBrushAspect, 0.85, 2.2);
-    let strokeLen = clamp(uniform.uPointillismStrokeLength, 0.58, 1.18) * mix(1.0, aspect, 0.38);
-    let strokeWid = clamp(uniform.uPointillismStrokeWidth, 0.42, 1.0) / mix(1.0, sqrt(aspect), 0.34);
-
     let hardness = clamp(uniform.uPointillismBrushHardness, 0.0, 1.0);
-    let jitter = clamp(uniform.uPointillismShapeJitter, 0.0, 0.22);
-    let wobble = sin(atan2(ruv.y, ruv.x) * 6.0 + splatId * 0.73) * jitter;
-    let suv = ruv / vec2f(max(strokeLen + wobble, 0.56), max(strokeWid - wobble * 0.28, 0.36));
-    let ellipse = dot(suv, suv);
-    let block = max(abs(suv.x), abs(suv.y) * mix(1.18, 1.42, jitter));
-    let stamp = pow(abs(suv.x), 4.0) + pow(abs(suv.y) * mix(1.05, 1.32, jitter), 4.0);
-    let shape = mix(mix(ellipse, block * block, 0.72), stamp, 0.22 + hardness * 0.28);
-
-    let edgeWidth = mix(0.42, 0.012, hardness);
-    let mask = 1.0 - smoothstep(1.0 - edgeWidth, 1.0 + edgeWidth, shape);
-    let chip = step(0.10 + jitter * 0.06, fract(sin(dot(floor(suv * 7.0), vec2f(41.17, 17.31)) + splatId) * 43758.5453));
-    return half(clamp(mask * mix(0.78, 1.0, chip), 0.0, 1.0));
+    let d = dot(uvf, uvf);
+    let rInner = mix(0.80, 0.90, hardness);
+    let rOuter = mix(1.04, 1.0, hardness);
+    return half(1.0 - smoothstep(rInner, rOuter, d));
 }
 
-fn pointillismPaintAlpha(baseAlpha: half, uv: half2, splatId: f32, color: half4) -> half {
-    let mask = pointillismDaubMask(uv, splatId, color);
+fn pointillismPaintAlpha(baseAlpha: half, uv: half2) -> half {
+    let mask = pointillismDotMask(uv);
     let thickness = clamp(uniform.uPointillismPaintThickness, 0.5, 1.5);
-    let bodyAlpha = f32(baseAlpha) * mix(0.88, 1.18, clamp(thickness - 0.5, 0.0, 1.0));
+    let bodyAlpha = f32(baseAlpha) * mix(0.92, 1.08, clamp(thickness - 0.5, 0.0, 1.0));
     return half(clamp(bodyAlpha * f32(mask), 0.0, 1.0));
 }
 `;
@@ -162,12 +98,7 @@ function patchGsplatPsGlsl(chunk: string): string {
 			opacityDither(alpha, id * 0.013);
 		#endif
 		gl_FragColor = vec4(gaussianColor.xyz * alpha, alpha);`,
-        `		#ifndef DITHER_NONE
-			float pointillismSplatId = id;
-		#else
-			float pointillismSplatId = dot(gaussianColor.rgb, vec3(12.9898, 78.233, 45.164)) * 997.0;
-		#endif
-		float paintAlpha = pointillismPaintAlpha(gaussianColor.a, gaussianUV, pointillismSplatId, gaussianColor);
+        `		float paintAlpha = pointillismPaintAlpha(gaussianColor.a, gaussianUV);
 		if (paintAlpha < max(uPointillismMinVisibleAlpha, alphaClipForward)) {
 			discard;
 		}
@@ -193,12 +124,7 @@ function patchGsplatPsWgsl(chunk: string): string {
 			opacityDither(f32(alpha), id * 0.013);
 		#endif
 		output.color = vec4f(vec3f(gaussianColor.xyz * alpha), f32(alpha));`,
-        `		#ifndef DITHER_NONE
-			let pointillismSplatId = id;
-		#else
-			let pointillismSplatId = dot(vec3f(gaussianColor.rgb), vec3f(12.9898, 78.233, 45.164)) * 997.0;
-		#endif
-		let paintAlpha: half = pointillismPaintAlpha(gaussianColor.a, gaussianUV, pointillismSplatId, gaussianColor);
+        `		let paintAlpha: half = pointillismPaintAlpha(gaussianColor.a, gaussianUV);
 		if (paintAlpha < half(max(uniform.uPointillismMinVisibleAlpha, uniform.alphaClipForward))) {
 			discard;
 			return output;
@@ -381,6 +307,12 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
             levels: this.levels,
             levelRange: this.levelRange,
             ditherSpread: this.ditherSpread,
+            warmCoolSplit: this.warmCoolSplit,
+            sourceStructureBlend: this.sourceStructureBlend,
+            saturation: this.saturation,
+            complementaryMix: this.complementaryMix,
+            contrastDotMix: this.contrastDotMix,
+            seed: this.seed,
             paperStrength: this.paperStrength,
             paperTint: [...this.paperTint],
             edgeThreshold: this.edgeThreshold,
@@ -491,15 +423,19 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
             ? this.highlightSkip
             : this.highlightSparsity;
 
-        this.setUniform(PU.brushSize, clamp(brushSize, 0.02, 0.48));
+        this.setUniform(PU.brushSize, clamp(brushSize, 0.02, 0.32));
         this.setUniform(PU.brushDensity, clamp(brushDensity, 0.15, 4.4));
         this.setUniform(PU.brushAspect, clamp(brushAspect, 0.85, 2.2));
         this.setUniform(PU.brushHardness, clamp(brushHardness, 0, 1));
         this.setUniform(PU.colorVibration, clamp(colorVibration, 0, 1));
         this.setUniform(PU.darkPaintBoost, clamp(darkPaintBoost, 0, 1));
         this.setUniform(PU.highlightSkip, clamp(highlightSkip, 0, 1));
-        this.setUniform(PU.dotScale, clamp(this.dotScale, 0.05, 1));
-        this.setUniform(PU.dotSizeFactor, clamp(this.dotSizeFactor, 0.01, 0.48));
+        this.setUniform(PU.dotScale, clamp(
+            this.dotScale * clamp(this.stippleSize / POINTILLISM_DEFAULTS.stippleSize, 0.35, 2.2),
+            0.04,
+            1.8
+        ));
+        this.setUniform(PU.dotSizeFactor, clamp(this.dotSizeFactor, 0.01, 0.32));
         this.setUniform(PU.strokeAspect, clamp(this.strokeAspect, 0.85, 2.2));
         this.setUniform(PU.roundness, clamp(this.roundness, 0, 1));
         this.setUniform(PU.density, clamp(this.density, 0.15, 4.4));

@@ -237,10 +237,10 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     pixelSize: '像素尺寸',
     paletteIndex: '色盘（调试）',
     levels: '色阶',
-    levelRange: '色阶范围',
+    levelRange: '明暗对比',
     ditherSpread: '抖动扩散',
-    dotScale: '点涂尺寸',
-    brushSize: '点涂尺寸',
+    dotScale: '整体颗粒尺度',
+    brushSize: '单点笔触大小',
     brushDensity: '点涂密度',
     brushAspect: '短块比例',
     brushHardness: '块状硬边',
@@ -265,7 +265,7 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     shapeJitter: '形态抖动',
     highlightSparsity: '亮部稀疏',
     darkDensityBoost: '暗部加密',
-    stippleSize: '颗粒尺寸',
+    stippleSize: '整体颗粒尺度',
     paperStrength: '纸张强度',
     paperTint: '纸张色调',
     edgeStrength: '描边强度'
@@ -529,7 +529,7 @@ const POINTILLISM_PALETTE_OPTIONS: readonly EffectParamEnumOption[] = [
 ];
 
 const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
-    brushSize: { min: 0.02, max: 0.48, step: 0.01, default: POINTILLISM_DEFAULTS.brushSize },
+    brushSize: { min: 0.02, max: 0.32, step: 0.01, default: POINTILLISM_DEFAULTS.brushSize },
     brushDensity: { min: 0.15, max: 4.4, step: 0.01, default: POINTILLISM_DEFAULTS.brushDensity },
     brushAspect: { min: 0.85, max: 2.2, step: 0.01, default: POINTILLISM_DEFAULTS.brushAspect },
     brushHardness: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.brushHardness },
@@ -537,7 +537,7 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
     darkPaintBoost: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.darkPaintBoost },
     highlightSkip: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.highlightSkip },
     dotScale: { min: 0.05, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.dotScale },
-    dotSizeFactor: { min: 0.01, max: 0.48, step: 0.005, default: POINTILLISM_DEFAULTS.dotSizeFactor },
+    dotSizeFactor: { min: 0.01, max: 0.32, step: 0.005, default: POINTILLISM_DEFAULTS.dotSizeFactor },
     strokeAspect: { min: 0.85, max: 2.2, step: 0.01, default: POINTILLISM_DEFAULTS.strokeAspect },
     roundness: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.roundness },
     density: { min: 0, max: 4.4, step: 0.01, default: POINTILLISM_DEFAULTS.density },
@@ -575,16 +575,18 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
 
 const POINTILLISM_VISIBLE_PARAM_KEYS = [
     'postEffectEnabled',
+    'stippleSize',
+    'levelRange',
+    'sourceStructureBlend',
     'brushSize',
     'brushDensity',
-    'brushAspect',
     'brushHardness',
+    'shapeJitter',
+    'saturation',
+    'lumaLevels',
     'contrastDotMix',
     'complementaryMix',
-    'sourceStructureBlend',
-    'darkPaintBoost',
-    'highlightSkip',
-    'saturation',
+    'colorVibration',
     'paperStrength',
     'edgeStrength'
 ] as const;

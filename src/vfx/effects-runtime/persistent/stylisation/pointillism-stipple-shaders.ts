@@ -31,44 +31,44 @@ export const POINTILLISM_UNIFORM_NAMES = {
 } as const;
 
 export const POINTILLISM_DEFAULTS = {
-    brushSize: 0.22,
-    brushDensity: 2.85,
-    brushAspect: 1.28,
-    brushHardness: 0.9,
-    colorVibration: 0.24,
-    darkPaintBoost: 0.12,
-    highlightSkip: 0.04,
+    brushSize: 0.16,
+    brushDensity: 3.4,
+    brushAspect: 1.0,
+    brushHardness: 0.92,
+    colorVibration: 0.0,
+    darkPaintBoost: 0.0,
+    highlightSkip: 0.0,
     dotScale: 1.0,
-    dotSizeFactor: 0.22,
-    strokeAspect: 1.28,
-    roundness: 0.5,
-    density: 2.85,
-    strokeSoftness: 0.12,
-    strokeLength: 0.78,
-    strokeWidth: 0.54,
-    shapeJitter: 0.07,
-    paintThickness: 1.28,
-    saturation: 1.22,
-    lumaLevels: 16,
-    contrastDotMix: 0.32,
-    complementaryMix: 0.18,
-    warmCoolSplit: 0.68,
+    dotSizeFactor: 0.18,
+    strokeAspect: 1.0,
+    roundness: 1.0,
+    density: 3.4,
+    strokeSoftness: 0.08,
+    strokeLength: 0.74,
+    strokeWidth: 0.56,
+    shapeJitter: 0.06,
+    paintThickness: 1.0,
+    saturation: 1.42,
+    lumaLevels: 6,
+    contrastDotMix: 0.14,
+    complementaryMix: 0.20,
+    warmCoolSplit: 0.0,
     paletteStrength: 0.0,
-    paletteIndex: 2,
-    sourceStructureBlend: 0.5,
-    highlightSparsity: 0.04,
-    darkDensityBoost: 0.12,
+    paletteIndex: 0,
+    sourceStructureBlend: 0.45,
+    highlightSparsity: 0.0,
+    darkDensityBoost: 0.0,
     seed: 17,
     minVisibleAlpha: 1 / 255,
     postEffectEnabled: true,
-    stippleSize: 96,
-    levels: 11,
-    levelRange: 0.92,
-    ditherSpread: 0.045,
-    paperStrength: 0.2,
+    stippleSize: 72,
+    levels: 8,
+    levelRange: 1.18,
+    ditherSpread: 0.0,
+    paperStrength: 0.12,
     paperTint: [1.0, 0.97, 0.91] as [number, number, number],
-    edgeThreshold: 0.18,
-    edgeStrength: 0.14
+    edgeThreshold: 0.14,
+    edgeStrength: 0.22
 } as const;
 
 export const pointillismModifyGlsl = /* glsl */`
@@ -96,6 +96,11 @@ uniform float uPointillismHighlightSparsity;
 uniform float uPointillismDarkDensityBoost;
 uniform float uPointillismPaintThickness;
 uniform float uPointillismSeed;
+uniform float uPointillismShapeJitter;
+
+float pointLuma(vec3 c) {
+    return dot(c, vec3(0.299, 0.587, 0.114));
+}
 
 float pointHash13(vec3 p) {
     p = fract(p * 0.1031 + vec3(uPointillismSeed * 0.017, uPointillismSeed * 0.031, uPointillismSeed * 0.047));
@@ -111,20 +116,9 @@ vec3 pointHash33(vec3 p) {
     );
 }
 
-float pointLuma(vec3 c) {
-    return dot(c, vec3(0.299, 0.587, 0.114));
-}
-
 vec3 pointSaturate(vec3 c, float amount) {
     float l = pointLuma(c);
     return mix(vec3(l), c, amount);
-}
-
-vec3 pointHueNudge(vec3 c, float warmCool, float pick) {
-    vec3 warm = c * vec3(1.18, 1.06, 0.86) + vec3(0.04, 0.015, 0.0);
-    vec3 cool = c * vec3(0.84, 0.94, 1.18) + vec3(0.0, 0.01, 0.04);
-    float t = smoothstep(0.28, 0.72, pick);
-    return mix(c, mix(cool, warm, t), warmCool);
 }
 
 vec3 pointComplement(vec3 c) {
@@ -134,40 +128,18 @@ vec3 pointComplement(vec3 c) {
     return clamp(vec3(mx + mn) - c + vec3(l * 0.12), 0.0, 1.0);
 }
 
-vec3 pointOrangeBlueSplit(vec3 c, float luma, float amount) {
-    vec3 shadowBlue = vec3(0.56, 0.68, 0.88);
-    vec3 lightOrange = vec3(1.0, 0.78, 0.48);
-    vec3 tint = mix(shadowBlue, lightOrange, smoothstep(0.30, 0.78, luma));
-    return mix(c, c * tint + tint * 0.08, amount);
+vec3 pointHueVibrate(vec3 c, float pick, float amount) {
+    vec3 warm = c * vec3(1.14, 1.05, 0.88) + vec3(0.015, 0.008, 0.0);
+    vec3 cool = c * vec3(0.88, 0.95, 1.14) + vec3(0.0, 0.006, 0.015);
+    vec3 shifted = mix(cool, warm, smoothstep(0.2, 0.8, pick));
+    return mix(c, shifted, amount);
 }
 
-vec3 pointPalette(float luma, float idx) {
-    float row = floor(idx + 0.5);
-    vec3 darkCol;
-    vec3 midCol;
-    vec3 lightCol;
-
-    if (row < 0.5) {
-        darkCol = vec3(0.18, 0.08, 0.06);
-        midCol = vec3(0.82, 0.28, 0.14);
-        lightCol = vec3(1.00, 0.78, 0.32);
-    } else if (row < 1.5) {
-        darkCol = vec3(0.09, 0.07, 0.22);
-        midCol = vec3(0.70, 0.24, 0.78);
-        lightCol = vec3(1.00, 0.66, 0.32);
-    } else if (row < 2.5) {
-        darkCol = vec3(0.03, 0.16, 0.10);
-        midCol = vec3(0.10, 0.60, 0.24);
-        lightCol = vec3(0.98, 0.86, 0.22);
-    } else {
-        darkCol = vec3(0.16, 0.14, 0.12);
-        midCol = vec3(0.56, 0.50, 0.42);
-        lightCol = vec3(0.96, 0.89, 0.70);
-    }
-
-    return luma < 0.5
-        ? mix(darkCol, midCol, smoothstep(0.0, 0.5, luma))
-        : mix(midCol, lightCol, smoothstep(0.5, 1.0, luma));
+vec3 pointSoftQuantize(vec3 c, float levels, float rnd) {
+    float l = max(pointLuma(c), 0.001);
+    float steps = max(2.0, floor(levels + 0.5));
+    float qL = floor(clamp(l, 0.0, 1.0) * (steps - 1.0) + rnd * 0.22) / max(1.0, steps - 1.0);
+    return c * (qL / l);
 }
 
 void modifySplatCenter(inout vec3 center) {
@@ -176,61 +148,45 @@ void modifySplatCenter(inout vec3 center) {
 void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
     vec3 rnd = pointHash33(originalCenter * 1.37);
     float originalSize = gsplatGetSizeFromScale(scale);
-    float lumaProxy = clamp(rnd.z * 0.35 + rnd.x * 0.65, 0.0, 1.0);
-    float darkMass = smoothstep(0.78, 0.18, lumaProxy) * clamp(uPointillismDarkPaintBoost, 0.0, 1.0);
-    float lightSkip = smoothstep(0.48, 0.92, lumaProxy) * clamp(uPointillismHighlightSkip, 0.0, 1.0);
-    float brushSize = clamp(uPointillismBrushSize, 0.02, 0.48);
+    float brushSize = clamp(uPointillismBrushSize, 0.02, 0.32);
     float density = clamp(uPointillismBrushDensity, 0.15, 4.4);
-    float autoDensity = clamp(density * mix(1.45, 0.82, smoothstep(0.08, 0.48, brushSize)), 0.15, 4.8);
-    float sizeJitter = mix(0.94, 1.04, rnd.y);
-    float lightShrink = mix(1.0, 0.82, lightSkip);
-    float densityCoverage = mix(1.0, 1.1, smoothstep(0.8, 4.8, autoDensity));
+    float autoDensity = clamp(density * mix(1.2, 0.88, smoothstep(0.08, 0.48, brushSize)), 0.15, 4.8);
+    float grainScale = max(0.001, uPointillismDotScale);
+    float sizeJitter = mix(0.68, 1.28, rnd.y);
+    float shapeJitter = clamp(uPointillismShapeJitter, 0.0, 0.22);
+    sizeJitter = mix(1.0, sizeJitter, 0.55 + shapeJitter * 1.8);
     float dotSize = originalSize
-        * max(0.001, uPointillismDotScale)
+        * grainScale
         * brushSize
-        * densityCoverage
-        * mix(1.0, 1.08, darkMass)
-        * lightShrink
-        * sizeJitter;
-    gsplatMakeSpherical(scale, min(dotSize, originalSize * 0.24));
+        * sizeJitter
+        * mix(1.0, 1.06, smoothstep(0.8, 4.8, autoDensity));
+    gsplatMakeSpherical(scale, min(dotSize, originalSize * 0.36));
 }
 
 void modifySplatColor(vec3 center, inout vec4 color) {
     vec3 rnd = pointHash33(center * 1.91);
     vec3 src = clamp(color.rgb, 0.0, 1.0);
-    float l = max(pointLuma(src), 0.001);
-    float levels = max(2.0, floor(uPointillismLumaLevels + 0.5));
-    float liftedL = clamp(0.30 + l * 0.58, 0.18, 0.9);
-    float qL = floor(liftedL * (levels - 1.0) + rnd.x * 0.04) / max(1.0, levels - 1.0);
-    qL = clamp(qL, 0.24, 0.88);
-    qL = max(qL, mix(0.26, 0.16, clamp(uPointillismDarkDensityBoost, 0.0, 1.0)));
-
-    // 源色驱动：量化亮度、保留色相
-    float colorVibration = clamp(uPointillismColorVibration, 0.0, 1.0);
-    vec3 chroma = pointSaturate(src, max(0.0, uPointillismSaturation) + colorVibration * 0.12);
-    vec3 quantized = chroma * (qL / l);
-
-    float warmPick = smoothstep(0.38, 0.68, l);
-    quantized = pointHueNudge(quantized, clamp(uPointillismWarmCoolSplit, 0.0, 1.0) * (0.22 + colorVibration * 0.18), warmPick);
-    quantized = pointOrangeBlueSplit(quantized, qL, clamp(uPointillismWarmCoolSplit, 0.0, 1.0) * 0.22);
-
-    vec3 pal = pointPalette(qL, uPointillismPaletteIndex);
-    vec3 styled = mix(quantized, mix(pal, quantized, 0.6), clamp(uPointillismPaletteStrength, 0.0, 1.0));
-
-    float contrastGate = step(rnd.z, clamp(uPointillismContrastDotMix + colorVibration * 0.12, 0.0, 1.0));
-    styled = mix(styled, pointComplement(styled), contrastGate * clamp(uPointillismComplementaryMix + colorVibration * 0.1, 0.0, 1.0));
-
+    float vibr = clamp(uPointillismColorVibration, 0.0, 1.0);
+    vec3 chroma = pointSaturate(src, max(0.0, uPointillismSaturation) + vibr * 0.22);
     float structure = clamp(uPointillismSourceStructureBlend, 0.0, 1.0);
-    styled = mix(styled, vec3(1.0), 0.05 + qL * 0.045);
-    color.rgb = clamp(mix(styled, chroma, structure), 0.0, 1.0);
-    float darkMass = smoothstep(0.72, 0.12, l) * clamp(uPointillismDarkPaintBoost, 0.0, 1.0);
-    float lightSkip = smoothstep(0.52, 0.92, l) * clamp(uPointillismHighlightSkip, 0.0, 1.0);
-    float brushSize = clamp(uPointillismBrushSize, 0.02, 0.48);
-    float autoDensity = clamp(uPointillismBrushDensity * mix(1.45, 0.82, smoothstep(0.08, 0.48, brushSize)), 0.15, 4.8);
-    float densityAlpha = mix(1.02, 1.36, smoothstep(0.8, 4.8, autoDensity));
-    float darkOutlier = step(rnd.x, smoothstep(0.24, 0.03, l) * 0.52);
-    float midFill = 1.0 + smoothstep(0.2, 0.74, qL) * (1.0 - smoothstep(0.76, 0.96, qL)) * 0.28;
-    color.a = clamp(color.a * densityAlpha * midFill * mix(1.0, 0.22, darkOutlier) * (1.0 + darkMass * 0.2) * mix(1.0, 0.82, step(rnd.y, lightSkip)), 0.0, 1.0);
+    vec3 styled = clamp(mix(chroma, src, structure * 0.32), 0.0, 1.0);
+
+    float quantMix = mix(0.12, 0.38, vibr) * (1.0 - structure * 0.45);
+    styled = mix(styled, pointSoftQuantize(styled, uPointillismLumaLevels, rnd.x), quantMix);
+
+    float dotChance = clamp(uPointillismContrastDotMix + vibr * 0.22, 0.0, 1.0);
+    float compMix = clamp(uPointillismComplementaryMix + vibr * 0.16, 0.0, 1.0);
+    float contrastGate = step(rnd.z, dotChance);
+    styled = mix(styled, pointComplement(styled), contrastGate * compMix);
+
+    float hueGate = step(rnd.y, 0.42 + vibr * 0.28);
+    styled = pointHueVibrate(styled, rnd.x, hueGate * (0.08 + vibr * 0.22));
+
+    color.rgb = styled;
+
+    float brushSize = clamp(uPointillismBrushSize, 0.02, 0.32);
+    float autoDensity = clamp(uPointillismBrushDensity * mix(1.2, 0.88, smoothstep(0.08, 0.48, brushSize)), 0.15, 4.8);
+    color.a = clamp(color.a * mix(1.06, 1.28, smoothstep(0.8, 4.8, autoDensity)), 0.0, 1.0);
 }
 `;
 
@@ -259,6 +215,11 @@ uniform uPointillismHighlightSparsity: f32;
 uniform uPointillismDarkDensityBoost: f32;
 uniform uPointillismPaintThickness: f32;
 uniform uPointillismSeed: f32;
+uniform uPointillismShapeJitter: f32;
+
+fn pointLuma(c: vec3f) -> f32 {
+    return dot(c, vec3f(0.299, 0.587, 0.114));
+}
 
 fn pointHash13(pIn: vec3f) -> f32 {
     var p = fract(pIn * 0.1031 + vec3f(uniform.uPointillismSeed * 0.017, uniform.uPointillismSeed * 0.031, uniform.uPointillismSeed * 0.047));
@@ -274,20 +235,9 @@ fn pointHash33(p: vec3f) -> vec3f {
     );
 }
 
-fn pointLuma(c: vec3f) -> f32 {
-    return dot(c, vec3f(0.299, 0.587, 0.114));
-}
-
 fn pointSaturate(c: vec3f, amount: f32) -> vec3f {
     let l = pointLuma(c);
     return mix(vec3f(l), c, amount);
-}
-
-fn pointHueNudge(c: vec3f, warmCool: f32, pick: f32) -> vec3f {
-    let warm = c * vec3f(1.18, 1.06, 0.86) + vec3f(0.04, 0.015, 0.0);
-    let cool = c * vec3f(0.84, 0.94, 1.18) + vec3f(0.0, 0.01, 0.04);
-    let t = smoothstep(0.28, 0.72, pick);
-    return mix(c, mix(cool, warm, t), warmCool);
 }
 
 fn pointComplement(c: vec3f) -> vec3f {
@@ -297,41 +247,18 @@ fn pointComplement(c: vec3f) -> vec3f {
     return clamp(vec3f(mx + mn) - c + vec3f(l * 0.12), vec3f(0.0), vec3f(1.0));
 }
 
-fn pointOrangeBlueSplit(c: vec3f, luma: f32, amount: f32) -> vec3f {
-    let shadowBlue = vec3f(0.56, 0.68, 0.88);
-    let lightOrange = vec3f(1.0, 0.78, 0.48);
-    let tint = mix(shadowBlue, lightOrange, smoothstep(0.30, 0.78, luma));
-    return mix(c, c * tint + tint * 0.08, amount);
+fn pointHueVibrate(c: vec3f, pick: f32, amount: f32) -> vec3f {
+    let warm = c * vec3f(1.14, 1.05, 0.88) + vec3f(0.015, 0.008, 0.0);
+    let cool = c * vec3f(0.88, 0.95, 1.14) + vec3f(0.0, 0.006, 0.015);
+    let shifted = mix(cool, warm, smoothstep(0.2, 0.8, pick));
+    return mix(c, shifted, amount);
 }
 
-fn pointPalette(luma: f32, idx: f32) -> vec3f {
-    let row = floor(idx + 0.5);
-    var darkCol: vec3f;
-    var midCol: vec3f;
-    var lightCol: vec3f;
-
-    if (row < 0.5) {
-        darkCol = vec3f(0.18, 0.08, 0.06);
-        midCol = vec3f(0.82, 0.28, 0.14);
-        lightCol = vec3f(1.00, 0.78, 0.32);
-    } else if (row < 1.5) {
-        darkCol = vec3f(0.09, 0.07, 0.22);
-        midCol = vec3f(0.70, 0.24, 0.78);
-        lightCol = vec3f(1.00, 0.66, 0.32);
-    } else if (row < 2.5) {
-        darkCol = vec3f(0.03, 0.16, 0.10);
-        midCol = vec3f(0.10, 0.60, 0.24);
-        lightCol = vec3f(0.98, 0.86, 0.22);
-    } else {
-        darkCol = vec3f(0.16, 0.14, 0.12);
-        midCol = vec3f(0.56, 0.50, 0.42);
-        lightCol = vec3f(0.96, 0.89, 0.70);
-    }
-
-    if (luma < 0.5) {
-        return mix(darkCol, midCol, smoothstep(0.0, 0.5, luma));
-    }
-    return mix(midCol, lightCol, smoothstep(0.5, 1.0, luma));
+fn pointSoftQuantize(c: vec3f, levels: f32, rnd: f32) -> vec3f {
+    let l = max(pointLuma(c), 0.001);
+    let steps = max(2.0, floor(levels + 0.5));
+    let qL = floor(clamp(l, 0.0, 1.0) * (steps - 1.0) + rnd * 0.22) / max(1.0, steps - 1.0);
+    return c * (qL / l);
 }
 
 fn modifySplatCenter(center: ptr<function, vec3f>) {
@@ -340,59 +267,44 @@ fn modifySplatCenter(center: ptr<function, vec3f>) {
 fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
     let rnd = pointHash33(originalCenter * 1.37);
     let originalSize = gsplatGetSizeFromScale(*scale);
-    let lumaProxy = clamp(rnd.z * 0.35 + rnd.x * 0.65, 0.0, 1.0);
-    let darkMass = smoothstep(0.78, 0.18, lumaProxy) * clamp(uniform.uPointillismDarkPaintBoost, 0.0, 1.0);
-    let lightSkip = smoothstep(0.48, 0.92, lumaProxy) * clamp(uniform.uPointillismHighlightSkip, 0.0, 1.0);
-    let brushSize = clamp(uniform.uPointillismBrushSize, 0.02, 0.48);
+    let brushSize = clamp(uniform.uPointillismBrushSize, 0.02, 0.32);
     let density = clamp(uniform.uPointillismBrushDensity, 0.15, 4.4);
-    let autoDensity = clamp(density * mix(1.45, 0.82, smoothstep(0.08, 0.48, brushSize)), 0.15, 4.8);
-    let sizeJitter = mix(0.94, 1.04, rnd.y);
-    let lightShrink = mix(1.0, 0.82, lightSkip);
-    let densityCoverage = mix(1.0, 1.1, smoothstep(0.8, 4.8, autoDensity));
+    let autoDensity = clamp(density * mix(1.2, 0.88, smoothstep(0.08, 0.48, brushSize)), 0.15, 4.8);
+    let grainScale = max(0.001, uniform.uPointillismDotScale);
+    var sizeJitter = mix(0.68, 1.28, rnd.y);
+    let shapeJitter = clamp(uniform.uPointillismShapeJitter, 0.0, 0.22);
+    sizeJitter = mix(1.0, sizeJitter, 0.55 + shapeJitter * 1.8);
     let dotSize = originalSize
-        * max(0.001, uniform.uPointillismDotScale)
+        * grainScale
         * brushSize
-        * densityCoverage
-        * mix(1.0, 1.08, darkMass)
-        * lightShrink
-        * sizeJitter;
-    gsplatMakeSpherical(scale, min(dotSize, originalSize * 0.24));
+        * sizeJitter
+        * mix(1.0, 1.06, smoothstep(0.8, 4.8, autoDensity));
+    gsplatMakeSpherical(scale, min(dotSize, originalSize * 0.36));
 }
 
 fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     let rnd = pointHash33(center * 1.91);
     let src = clamp((*color).rgb, vec3f(0.0), vec3f(1.0));
-    let l = max(pointLuma(src), 0.001);
-    let levels = max(2.0, floor(uniform.uPointillismLumaLevels + 0.5));
-    let liftedL = clamp(0.30 + l * 0.58, 0.18, 0.9);
-    var qL = floor(liftedL * (levels - 1.0) + rnd.x * 0.04) / max(1.0, levels - 1.0);
-    qL = clamp(qL, 0.24, 0.88);
-    qL = max(qL, mix(0.26, 0.16, clamp(uniform.uPointillismDarkDensityBoost, 0.0, 1.0)));
-
-    let colorVibration = clamp(uniform.uPointillismColorVibration, 0.0, 1.0);
-    var chroma = pointSaturate(src, max(0.0, uniform.uPointillismSaturation) + colorVibration * 0.12);
-    var quantized = chroma * (qL / l);
-
-    let warmPick = smoothstep(0.38, 0.68, l);
-    quantized = pointHueNudge(quantized, clamp(uniform.uPointillismWarmCoolSplit, 0.0, 1.0) * (0.22 + colorVibration * 0.18), warmPick);
-    quantized = pointOrangeBlueSplit(quantized, qL, clamp(uniform.uPointillismWarmCoolSplit, 0.0, 1.0) * 0.22);
-
-    let pal = pointPalette(qL, uniform.uPointillismPaletteIndex);
-    var styled = mix(quantized, mix(pal, quantized, 0.6), clamp(uniform.uPointillismPaletteStrength, 0.0, 1.0));
-
-    let contrastGate = step(rnd.z, clamp(uniform.uPointillismContrastDotMix + colorVibration * 0.12, 0.0, 1.0));
-    styled = mix(styled, pointComplement(styled), contrastGate * clamp(uniform.uPointillismComplementaryMix + colorVibration * 0.1, 0.0, 1.0));
-
+    let vibr = clamp(uniform.uPointillismColorVibration, 0.0, 1.0);
+    let chroma = pointSaturate(src, max(0.0, uniform.uPointillismSaturation) + vibr * 0.22);
     let structure = clamp(uniform.uPointillismSourceStructureBlend, 0.0, 1.0);
-    styled = mix(styled, vec3f(1.0), 0.05 + qL * 0.045);
-    (*color).rgb = clamp(mix(styled, chroma, structure), vec3f(0.0), vec3f(1.0));
-    let darkMass = smoothstep(0.72, 0.12, l) * clamp(uniform.uPointillismDarkPaintBoost, 0.0, 1.0);
-    let lightSkip = smoothstep(0.52, 0.92, l) * clamp(uniform.uPointillismHighlightSkip, 0.0, 1.0);
-    let brushSize = clamp(uniform.uPointillismBrushSize, 0.02, 0.48);
-    let autoDensity = clamp(uniform.uPointillismBrushDensity * mix(1.45, 0.82, smoothstep(0.08, 0.48, brushSize)), 0.15, 4.8);
-    let densityAlpha = mix(1.02, 1.36, smoothstep(0.8, 4.8, autoDensity));
-    let darkOutlier = step(rnd.x, smoothstep(0.24, 0.03, l) * 0.52);
-    let midFill = 1.0 + smoothstep(0.2, 0.74, qL) * (1.0 - smoothstep(0.76, 0.96, qL)) * 0.28;
-    (*color).a = clamp((*color).a * densityAlpha * midFill * mix(1.0, 0.22, darkOutlier) * (1.0 + darkMass * 0.2) * mix(1.0, 0.82, step(rnd.y, lightSkip)), 0.0, 1.0);
+    var styled = clamp(mix(chroma, src, structure * 0.32), vec3f(0.0), vec3f(1.0));
+
+    let quantMix = mix(0.12, 0.38, vibr) * (1.0 - structure * 0.45);
+    styled = mix(styled, pointSoftQuantize(styled, uniform.uPointillismLumaLevels, rnd.x), quantMix);
+
+    let dotChance = clamp(uniform.uPointillismContrastDotMix + vibr * 0.22, 0.0, 1.0);
+    let compMix = clamp(uniform.uPointillismComplementaryMix + vibr * 0.16, 0.0, 1.0);
+    let contrastGate = step(rnd.z, dotChance);
+    styled = mix(styled, pointComplement(styled), contrastGate * compMix);
+
+    let hueGate = step(rnd.y, 0.42 + vibr * 0.28);
+    styled = pointHueVibrate(styled, rnd.x, hueGate * (0.08 + vibr * 0.22));
+
+    (*color).rgb = styled;
+
+    let brushSize = clamp(uniform.uPointillismBrushSize, 0.02, 0.32);
+    let autoDensity = clamp(uniform.uPointillismBrushDensity * mix(1.2, 0.88, smoothstep(0.08, 0.48, brushSize)), 0.15, 4.8);
+    (*color).a = clamp((*color).a * mix(1.06, 1.28, smoothstep(0.8, 4.8, autoDensity)), 0.0, 1.0);
 }
 `;
