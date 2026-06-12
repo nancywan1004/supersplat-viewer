@@ -65,21 +65,22 @@ float pointillismDaubMask(vec2 uv, float splatId, vec4 color) {
     vec2 ruv = vec2(c * uv.x - s * uv.y, s * uv.x + c * uv.y);
 
     float aspect = clamp(uPointillismBrushAspect, 0.85, 2.2);
-    float strokeLen = clamp(uPointillismStrokeLength, 0.65, 1.18) * mix(1.0, aspect, 0.55);
-    float strokeWid = clamp(uPointillismStrokeWidth, 0.48, 1.0) / mix(1.0, sqrt(aspect), 0.42);
-
-    float jitter = clamp(uPointillismShapeJitter, 0.0, 0.18);
-    float wobble = sin(atan(ruv.y, ruv.x) * 6.0 + splatId * 0.73) * jitter;
-    vec2 suv = ruv / vec2(max(strokeLen + wobble, 0.68), max(strokeWid - wobble * 0.28, 0.42));
-    float ellipse = dot(suv, suv);
-    float block = max(abs(suv.x), abs(suv.y) * mix(1.18, 1.42, jitter));
-    float shape = mix(ellipse, block * block, 0.62);
+    float strokeLen = clamp(uPointillismStrokeLength, 0.58, 1.18) * mix(1.0, aspect, 0.38);
+    float strokeWid = clamp(uPointillismStrokeWidth, 0.42, 1.0) / mix(1.0, sqrt(aspect), 0.34);
 
     float hardness = clamp(uPointillismBrushHardness, 0.0, 1.0);
-    float edgeWidth = mix(0.22, 0.035, hardness);
+    float jitter = clamp(uPointillismShapeJitter, 0.0, 0.22);
+    float wobble = sin(atan(ruv.y, ruv.x) * 6.0 + splatId * 0.73) * jitter;
+    vec2 suv = ruv / vec2(max(strokeLen + wobble, 0.56), max(strokeWid - wobble * 0.28, 0.36));
+    float ellipse = dot(suv, suv);
+    float block = max(abs(suv.x), abs(suv.y) * mix(1.18, 1.42, jitter));
+    float stamp = pow(abs(suv.x), 4.0) + pow(abs(suv.y) * mix(1.05, 1.32, jitter), 4.0);
+    float shape = mix(mix(ellipse, block * block, 0.72), stamp, 0.22 + hardness * 0.28);
+
+    float edgeWidth = mix(0.42, 0.012, hardness);
     float mask = 1.0 - smoothstep(1.0 - edgeWidth, 1.0 + edgeWidth, shape);
-    float chip = step(0.075 + jitter * 0.1, fract(sin(dot(floor(suv * 6.0), vec2(41.17, 17.31)) + splatId) * 43758.5453));
-    return clamp(mask * mix(0.70, 1.0, chip), 0.0, 1.0);
+    float chip = step(0.10 + jitter * 0.06, fract(sin(dot(floor(suv * 7.0), vec2(41.17, 17.31)) + splatId) * 43758.5453));
+    return clamp(mask * mix(0.78, 1.0, chip), 0.0, 1.0);
 }
 
 float pointillismPaintAlpha(float baseAlpha, vec2 uv, float splatId, vec4 color) {
@@ -119,21 +120,22 @@ fn pointillismDaubMask(uv: half2, splatId: f32, color: half4) -> half {
     let ruv = vec2f(c * uvf.x - s * uvf.y, s * uvf.x + c * uvf.y);
 
     let aspect = clamp(uniform.uPointillismBrushAspect, 0.85, 2.2);
-    let strokeLen = clamp(uniform.uPointillismStrokeLength, 0.65, 1.18) * mix(1.0, aspect, 0.55);
-    let strokeWid = clamp(uniform.uPointillismStrokeWidth, 0.48, 1.0) / mix(1.0, sqrt(aspect), 0.42);
-
-    let jitter = clamp(uniform.uPointillismShapeJitter, 0.0, 0.18);
-    let wobble = sin(atan2(ruv.y, ruv.x) * 6.0 + splatId * 0.73) * jitter;
-    let suv = ruv / vec2f(max(strokeLen + wobble, 0.68), max(strokeWid - wobble * 0.28, 0.42));
-    let ellipse = dot(suv, suv);
-    let block = max(abs(suv.x), abs(suv.y) * mix(1.18, 1.42, jitter));
-    let shape = mix(ellipse, block * block, 0.62);
+    let strokeLen = clamp(uniform.uPointillismStrokeLength, 0.58, 1.18) * mix(1.0, aspect, 0.38);
+    let strokeWid = clamp(uniform.uPointillismStrokeWidth, 0.42, 1.0) / mix(1.0, sqrt(aspect), 0.34);
 
     let hardness = clamp(uniform.uPointillismBrushHardness, 0.0, 1.0);
-    let edgeWidth = mix(0.22, 0.035, hardness);
+    let jitter = clamp(uniform.uPointillismShapeJitter, 0.0, 0.22);
+    let wobble = sin(atan2(ruv.y, ruv.x) * 6.0 + splatId * 0.73) * jitter;
+    let suv = ruv / vec2f(max(strokeLen + wobble, 0.56), max(strokeWid - wobble * 0.28, 0.36));
+    let ellipse = dot(suv, suv);
+    let block = max(abs(suv.x), abs(suv.y) * mix(1.18, 1.42, jitter));
+    let stamp = pow(abs(suv.x), 4.0) + pow(abs(suv.y) * mix(1.05, 1.32, jitter), 4.0);
+    let shape = mix(mix(ellipse, block * block, 0.72), stamp, 0.22 + hardness * 0.28);
+
+    let edgeWidth = mix(0.42, 0.012, hardness);
     let mask = 1.0 - smoothstep(1.0 - edgeWidth, 1.0 + edgeWidth, shape);
-    let chip = step(0.075 + jitter * 0.1, fract(sin(dot(floor(suv * 6.0), vec2f(41.17, 17.31)) + splatId) * 43758.5453));
-    return half(clamp(mask * mix(0.70, 1.0, chip), 0.0, 1.0));
+    let chip = step(0.10 + jitter * 0.06, fract(sin(dot(floor(suv * 7.0), vec2f(41.17, 17.31)) + splatId) * 43758.5453));
+    return half(clamp(mask * mix(0.78, 1.0, chip), 0.0, 1.0));
 }
 
 fn pointillismPaintAlpha(baseAlpha: half, uv: half2, splatId: f32, color: half4) -> half {
@@ -485,8 +487,8 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
             ? this.highlightSkip
             : this.highlightSparsity;
 
-        this.setUniform(PU.brushSize, clamp(brushSize, 0.04, 0.72));
-        this.setUniform(PU.brushDensity, clamp(brushDensity, 0.15, 2.4));
+        this.setUniform(PU.brushSize, clamp(brushSize, 0.02, 0.72));
+        this.setUniform(PU.brushDensity, clamp(brushDensity, 0.15, 3.5));
         this.setUniform(PU.brushAspect, clamp(brushAspect, 0.85, 2.2));
         this.setUniform(PU.brushHardness, clamp(brushHardness, 0, 1));
         this.setUniform(PU.colorVibration, clamp(colorVibration, 0, 1));
@@ -496,11 +498,11 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         this.setUniform(PU.dotSizeFactor, clamp(this.dotSizeFactor, 0.01, 0.72));
         this.setUniform(PU.strokeAspect, clamp(this.strokeAspect, 0.85, 2.2));
         this.setUniform(PU.roundness, clamp(this.roundness, 0, 1));
-        this.setUniform(PU.density, clamp(this.density, 0.15, 2.4));
+        this.setUniform(PU.density, clamp(this.density, 0.15, 3.5));
         this.setUniform(PU.strokeSoftness, clamp(this.strokeSoftness, 0.08, 0.55));
-        this.setUniform(PU.strokeLength, clamp(this.strokeLength, 0.6, 1.2));
-        this.setUniform(PU.strokeWidth, clamp(this.strokeWidth, 0.6, 1.0));
-        this.setUniform(PU.shapeJitter, clamp(this.shapeJitter, 0, 0.12));
+        this.setUniform(PU.strokeLength, clamp(this.strokeLength, 0.58, 1.2));
+        this.setUniform(PU.strokeWidth, clamp(this.strokeWidth, 0.42, 1.0));
+        this.setUniform(PU.shapeJitter, clamp(this.shapeJitter, 0, 0.22));
         this.setUniform(PU.paintThickness, clamp(this.paintThickness, 0.5, 1.5));
         this.setUniform(PU.saturation, clamp(this.saturation, 0, 3));
         this.setUniform(PU.lumaLevels, clamp(Math.floor(this.lumaLevels), 2, 24));
