@@ -10,7 +10,7 @@ import type { Global } from '../../../types';
  */
 export type RevealPersistentGsplatCallbacks = {
     global: Global;
-    /** 对应原 `prepareExternalPersistentScriptMount`：inVfx、nightFade 快照、legacy 路径 `nightMode:exit` */
+    /** 对应原 `prepareExternalPersistentScriptMount`：inVfx、nightFade 快照；占用 gsplat 材质 shader 的 persistent 则 `nightMode:exit` */
     beforePersistentScriptMount: () => void;
     /** `bindPersistentTimelineScript(null)` 之后：恢复 Night、退出 inVfx（不含 `notifyRevealScriptApplied`） */
     afterPersistentScriptUnmount: () => void;

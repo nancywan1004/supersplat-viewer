@@ -7,6 +7,8 @@ import { getTorchBeamParams, getTorchLightRay, getTorchLightWorldPosition, isTor
 import { readViewTorchActive } from '../../view-settings';
 import type { EffectsRuntime } from '../effects-runtime';
 import type { GsplatContribution } from '../effects-runtime/gsplat-contribution';
+import { hasEnabledPersistentGsplatMaterialShaderEffect } from '../effects-runtime/effects-pipeline-policy';
+import type { ExperienceSettings } from '../../schemas/v2';
 
 /**
  * 单盏点/聚光：线性色单通道峰值上限。intensity 极大时按峰值等比缩小，保色相，避免 shader 里 sum 立刻顶满仍是一片死白 + ANGLE 数值风险。
@@ -1240,12 +1242,12 @@ class NightMode extends GsplatShaderEffect {
                     nightFade: this.nightFade
                 });
             }
-            // 进入互斥阶段：完全挂起 NightMode 对 gsplatModifyVS 的写入
-            this.suspendedByVfx = true;
             this.nightFade = 0;
             this.manualFadeControl = true;
-            // 关键：必须真正从材质上移除 night shader，避免与 reveal/VFX 的 gsplatModifyVS 冲突
-            this.removeShaders();
+            // 须在 suspendedByVfx 置位前写材质：composer 路径下 applyComposed 去掉 night 层
+            this.removeShaders({ applyComposerToMaterials: true });
+            // 进入互斥阶段：完全挂起 NightMode 对 gsplatModifyVS 的写入
+            this.suspendedByVfx = true;
             // 同时清掉局部亮灯/笔刷的 shader 需求，避免 updateEffect 重新 apply
             this.bloomBrushActive = false;
             this.bloomBrushMask = null;
@@ -1277,6 +1279,14 @@ class NightMode extends GsplatShaderEffect {
                     suspendedByVfx: this.suspendedByVfx,
                     materialsApplied: this.materialsApplied.size
                 });
+            }
+            const settings = (this.app as any).__global?.settings as ExperienceSettings | undefined;
+            if (settings && hasEnabledPersistentGsplatMaterialShaderEffect(settings)) {
+                if (isExportNightDebugEnabled()) {
+                    console.log('[ExportNightDebug][NightMode] nightMode:forceReapply skipped (gsplat material shader persistent active)');
+                }
+                this.app.fire('nightMode:exit');
+                return;
             }
             const clampedValue = Math.max(-1, Math.min(1, value));
             this.manualFadeControl = true;
@@ -1350,7 +1360,7 @@ class NightMode extends GsplatShaderEffect {
             rt.composer.removeContribution(NIGHT_COMPOSER_ID);
             rt.composer.compose();
             const lastRm = rt.composer.getLastComposition();
-            if (lastRm && this.materialsApplied.size > 0) {
+            if (lastRm && this.materialsApplied.size > 0 && !this.suspendedByVfx) {
                 rt.composer.applyComposedToMaterials(this.materialsApplied, lastRm);
             }
             return;
@@ -1371,7 +1381,7 @@ class NightMode extends GsplatShaderEffect {
     }
 
     private tryApplyNightComposerToMaterials(force = false): void {
-        if (!nightModeUsesComposerPath() || this.materialsApplied.size === 0) return;
+        if (this.suspendedByVfx || !nightModeUsesComposerPath() || this.materialsApplied.size === 0) return;
         const rt = this.getEffectsRuntime();
         if (!rt) return;
         const last = rt.composer.getLastComposition();
@@ -1394,14 +1404,15 @@ class NightMode extends GsplatShaderEffect {
         super.applyShaderToMaterial(material);
     }
 
-    removeShaders() {
+    removeShaders(opts?: { applyComposerToMaterials?: boolean }) {
         if (nightModeUsesComposerPath()) {
             const rt = this.getEffectsRuntime();
             const mats = new Set(this.materialsApplied);
             rt?.composer.removeContribution(NIGHT_COMPOSER_ID);
             rt?.composer.compose();
+            const applyToMaterials = opts?.applyComposerToMaterials ?? !this.suspendedByVfx;
             const last = rt?.composer.getLastComposition();
-            if (last && mats.size > 0) {
+            if (applyToMaterials && last && mats.size > 0) {
                 rt!.composer.applyComposedToMaterials(mats, last);
             }
             this.materialsApplied.clear();
@@ -1412,6 +1423,9 @@ class NightMode extends GsplatShaderEffect {
     }
 
     applyShaders() {
+        if (this.suspendedByVfx) {
+            return;
+        }
         if (!this.splat?.gsplat) {
             console.warn('NightMode: splat entity not available');
             return;
@@ -1459,7 +1473,7 @@ class NightMode extends GsplatShaderEffect {
     }
 
     updateUnifiedMaterials() {
-        if (!this.splat?.gsplat) return;
+        if (this.suspendedByVfx || !this.splat?.gsplat) return;
 
         // @ts-ignore - gsplat system exists at runtime
         const gsplatSystem = this.app.systems.gsplat;
@@ -1648,7 +1662,7 @@ class NightMode extends GsplatShaderEffect {
             this.shadersNeedApplication = false;
         }
 
-        if (this.splat?.gsplat?.unified && this.needsRetry) {
+        if (this.splat?.gsplat?.unified && this.needsRetry && !this.suspendedByVfx) {
             this.updateUnifiedMaterials();
         }
 
@@ -1673,6 +1687,7 @@ class NightMode extends GsplatShaderEffect {
                 this.removeShaders();
                 this.app.renderNextFrame = true;
             }
+            this.applySceneLightingFromNightFade();
             return;
         }
         const global = (this.app as any).__global;
@@ -1877,15 +1892,16 @@ class NightMode extends GsplatShaderEffect {
             this.setCommittedUniforms();
         }
 
-        if (nightModeUsesComposerPath()) {
+        if (nightModeUsesComposerPath() && !this.suspendedByVfx) {
             this.syncNightComposerContribution();
             this.tryApplyNightComposerToMaterials();
         }
 
-        // ── 调亮/调暗联动（TS 侧）──
-        // 主光：基准强度来自 settings，再乘 (1 + nightFade)。调亮时主光变强，调暗时变弱。
-        // Bloom：统一由 settings 控制（configureCamera → applyToCameraFrame），调亮/调暗都使用同一套强度，不在此处改写。
-        // 天空球与 fade 同向（调亮更亮、调暗更暗）。
+        this.applySceneLightingFromNightFade();
+    }
+
+    /** 主光 / 天空盒 / nightFade 事件（不触碰 gsplatModifyVS） */
+    private applySceneLightingFromNightFade(): void {
         if (this.light?.light) {
             const global = (this.app as any).__global;
             const dirCfg = global?.settings?.lighting?.lights?.find((l: any) => l.type === 'directional');
@@ -1932,10 +1948,40 @@ class NightMode extends GsplatShaderEffect {
     }
 
     /**
+     * 点彩等占用 gsplatModifyVS 时：仅同步 nightFade 与主光/天空盒，不写 gsplat shader。
+     */
+    applyLightingFromSettings(config: { enabled?: boolean; fade?: number }) {
+        if (!config) return;
+        this.manualFadeControl = true;
+        if (config.enabled === false) {
+            this.nightFade = 0;
+        } else {
+            let fade: number;
+            if (typeof config.fade === 'number' && Number.isFinite(config.fade)) {
+                fade = Math.max(-1, Math.min(1, config.fade));
+            } else {
+                fade = config.enabled ? -0.95 : 0;
+            }
+            this.nightFade = fade;
+        }
+        const settings = (this.app as any).__global?.settings as ExperienceSettings | undefined;
+        if (settings && hasEnabledPersistentGsplatMaterialShaderEffect(settings) && !this.suspendedByVfx) {
+            this.app.fire('nightMode:exit');
+        }
+        this.applySceneLightingFromNightFade();
+        this.fireNightFadeChanged('applyFromSettings');
+    }
+
+    /**
      * Apply brightness from settings (e.g. after load). Accepts { fade?: number } or legacy { enabled: boolean; fade?: number }.
      */
     applyFromSettings(config: { enabled?: boolean; fade?: number }) {
         if (!config) return;
+        const settings = (this.app as any).__global?.settings as ExperienceSettings | undefined;
+        if (settings && hasEnabledPersistentGsplatMaterialShaderEffect(settings)) {
+            this.applyLightingFromSettings(config);
+            return;
+        }
         this.manualFadeControl = true;
         // Legacy: enabled === false means "no effect"
         if (config.enabled === false) {

@@ -15,6 +15,7 @@ import {
 import {
     flushRevealIntoEffectsForExport,
     normalizeEffectsOnImport,
+    normalizePersistentEffectsForPersistence,
     readRevealParams,
     syncEffectsRuntimeStateFromSettings
 } from './effects-sync';
@@ -203,6 +204,7 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
     stripBloomSessionFieldsForPersistence(out);
 
     if (out.version === 2) {
+        normalizePersistentEffectsForPersistence(out as ExperienceSettings);
         flushRevealIntoEffectsForExport(out as ExperienceSettings);
         stripAssetEffectFieldsForPersistence(out);
         delete (out as Record<string, unknown>).revealEffect;

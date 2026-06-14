@@ -39,6 +39,8 @@ export type PointillismPostSettings = {
     paperTint: [number, number, number];
     edgeThreshold: number;
     edgeStrength: number;
+    denoiseStrength: number;
+    gapFill: number;
 };
 
 export const POINTILLISM_PALETTE_NAMES: Record<number, string> = {
@@ -66,7 +68,9 @@ export const DEFAULT_POINTILLISM_POST_SETTINGS: PointillismPostSettings = {
     paperStrength: POINTILLISM_DEFAULTS.paperStrength,
     paperTint: [...POINTILLISM_DEFAULTS.paperTint],
     edgeThreshold: resolvePointillismEdgeThreshold(POINTILLISM_DEFAULTS.edgeStrength),
-    edgeStrength: POINTILLISM_DEFAULTS.edgeStrength
+    edgeStrength: POINTILLISM_DEFAULTS.edgeStrength,
+    denoiseStrength: POINTILLISM_DEFAULTS.denoiseStrength,
+    gapFill: POINTILLISM_DEFAULTS.gapFill
 };
 
 const clamp = (v: number, min: number, max: number): number => Math.max(min, Math.min(max, v));
@@ -146,7 +150,13 @@ export function normalizePointillismPostSettings(raw: unknown): PointillismPostS
             )),
             0.02,
             1
-        )
+        ),
+        denoiseStrength: clamp(
+            finiteOr(obj.denoiseStrength, DEFAULT_POINTILLISM_POST_SETTINGS.denoiseStrength),
+            0,
+            1
+        ),
+        gapFill: clamp(finiteOr(obj.gapFill, DEFAULT_POINTILLISM_POST_SETTINGS.gapFill), 0, 1)
     };
 }
 
@@ -182,7 +192,8 @@ class PointillismPostEffect extends PostEffect {
             uniform vec3 uPaperTint;
             uniform float uEdgeThreshold;
             uniform float uEdgeStrength;
-            uniform float uContrastDotMix;
+            uniform float uDenoiseStrength;
+            uniform float uGapFill;
 
             float getLuminance(vec3 color) {
                 return dot(color, vec3(0.299, 0.587, 0.114));
@@ -292,10 +303,78 @@ class PointillismPostEffect extends PostEffect {
 
             vec3 suppressSpeckles(vec2 uv, vec3 center) {
                 vec3 blur = boxBlur5(uv);
+                float d = clamp(uDenoiseStrength, 0.0, 1.0);
+                float lLo = mix(0.07, 0.045, d);
+                float lHi = mix(0.24, 0.16, d);
+                float rgbLo = mix(0.10, 0.06, d);
+                float rgbHi = mix(0.32, 0.22, d);
+                float maxMix = mix(0.68, 0.90, d);
                 float lDiff = abs(getLuminance(center) - getLuminance(blur));
                 float rgbDiff = length(center - blur);
-                float spike = smoothstep(0.07, 0.24, lDiff) * smoothstep(0.10, 0.32, rgbDiff);
-                return mix(center, blur, spike * 0.68);
+                float spike = smoothstep(lLo, lHi, lDiff) * smoothstep(rgbLo, rgbHi, rgbDiff);
+                return mix(center, blur, spike * maxMix);
+            }
+
+            vec3 boxBlurWide(vec2 uv, float radiusPx) {
+                vec2 px = 1.0 / uResolution * radiusPx;
+                vec3 acc = vec3(0.0);
+                acc += texture2D(uColorBuffer, uv).rgb * 0.22;
+                acc += texture2D(uColorBuffer, uv + vec2(px.x, 0.0)).rgb * 0.11;
+                acc += texture2D(uColorBuffer, uv + vec2(-px.x, 0.0)).rgb * 0.11;
+                acc += texture2D(uColorBuffer, uv + vec2(0.0, px.y)).rgb * 0.11;
+                acc += texture2D(uColorBuffer, uv + vec2(0.0, -px.y)).rgb * 0.11;
+                acc += texture2D(uColorBuffer, uv + vec2(px.x, px.y)).rgb * 0.085;
+                acc += texture2D(uColorBuffer, uv + vec2(-px.x, px.y)).rgb * 0.085;
+                acc += texture2D(uColorBuffer, uv + vec2(px.x, -px.y)).rgb * 0.085;
+                acc += texture2D(uColorBuffer, uv + vec2(-px.x, -px.y)).rgb * 0.085;
+                return acc;
+            }
+
+            float paintWeight(vec3 s, float refL) {
+                float sL = getLuminance(s);
+                return smoothstep(0.025, 0.14, sL - refL + 0.05)
+                    + smoothstep(0.015, 0.08, length(s - vec3(sL))) * 0.35;
+            }
+
+            vec3 fillSparseHoles(vec2 uv, vec3 rawCenter, vec3 center) {
+                float fillT = clamp(uGapFill, 0.0, 1.0);
+                if (fillT < 0.001) {
+                    return center;
+                }
+
+                vec2 px = 1.0 / uResolution;
+                float centerL = getLuminance(rawCenter);
+                float wideR = mix(2.8, 8.5, fillT);
+                vec3 widePaint = boxBlurWide(uv, wideR);
+                float wideL = getLuminance(widePaint);
+
+                float voidByLuma = smoothstep(0.012, 0.10, wideL - centerL);
+                float voidByRgb = smoothstep(0.035, 0.20, length(widePaint - rawCenter));
+                float hole = max(voidByLuma, voidByRgb * 0.88);
+
+                float radius = mix(2.0, 7.0, fillT);
+                vec3 acc = vec3(0.0);
+                float psum = 0.0;
+                for (int dy = -3; dy <= 3; dy++) {
+                    for (int dx = -3; dx <= 3; dx++) {
+                        if (dx == 0 && dy == 0) {
+                            continue;
+                        }
+                        float adx = abs(float(dx));
+                        float ady = abs(float(dy));
+                        if (adx + ady > 3.0) {
+                            continue;
+                        }
+                        vec2 off = vec2(float(dx), float(dy)) * px * radius;
+                        vec3 s = texture2D(uColorBuffer, uv + off).rgb;
+                        float w = paintWeight(s, centerL);
+                        acc += s * w;
+                        psum += w;
+                    }
+                }
+                vec3 fillColor = (psum > 0.002) ? (acc / psum) : widePaint;
+                float mixAmt = hole * fillT * mix(0.75, 0.96, fillT);
+                return mix(center, fillColor, mixAmt);
             }
 
             void main() {
@@ -304,37 +383,33 @@ class PointillismPostEffect extends PostEffect {
                 vec3 sceneColor = rawScene;
                 vec3 blur = boxBlur5(uv);
 
-                float edgeW = clamp(uEdgeStrength, 0.0, 1.0);
-                float edge = edgeFactor(uv);
-                // edgeW=0 → 不做轮廓特殊处理（更平整）；edgeW=1 → 强结构边才介入
-                float edgeAmt = clamp(edge * mix(0.0, 1.45, edgeW), 0.0, 1.0);
                 sceneColor = suppressSpeckles(uv, sceneColor);
-                float structure = clamp(uSourceStructureBlend, 0.0, 1.0);
+                sceneColor = fillSparseHoles(uv, rawScene, sceneColor);
 
+                float structure = clamp(uSourceStructureBlend, 0.0, 1.0);
                 float baseFlat = mix(0.10, 0.52, 1.0 - structure);
                 float grain = clamp(length(sceneColor - blur) * 4.2, 0.0, 1.0);
                 float cohesion = mix(0.18, 0.62, grain);
-                float contrastT = clamp(uContrastDotMix / 0.55, 0.0, 1.0);
-                float flatMix = mix(baseFlat, max(baseFlat * (1.0 - edgeAmt * 0.92), cohesion * (1.0 - edgeAmt)), edgeW);
-                flatMix *= mix(1.0, 0.55, contrastT);
+                float flatMix = max(baseFlat, cohesion * (1.0 - structure * 0.35));
                 vec3 processed = flatOpticalMix(uv, sceneColor, flatMix);
 
-                float flatKeep = structure * mix(1.0, 0.48, grain);
-                float edgePreserve = edgeAmt * edgeW;
-                float keep = clamp(max(flatKeep * (1.0 - edgePreserve * 0.95), edgePreserve * 0.92), 0.0, 1.0);
-                vec3 color = mix(processed, sceneColor, keep);
+                float keepStructure = structure * mix(1.0, 0.48, grain);
+                vec3 color = mix(processed, sceneColor, keepStructure);
 
                 float postSat = 1.0 + max(0.0, uSaturation - 1.0) * 0.28;
                 color = saturateColor(color, postSat);
                 color = applyContrast(color, uLevelRange);
                 color = mix(color, color * uPaperTint, uPaperStrength * 0.42);
 
+                float edgeW = clamp(uEdgeStrength, 0.0, 1.0);
+                float edge = edgeFactor(uv);
+                float edgeAmt = clamp(edge * mix(0.0, 1.45, edgeW), 0.0, 1.0);
                 vec3 highPass = sceneColor - blur;
                 vec3 sharpen = clamp(sceneColor + highPass * mix(1.2, 3.8, edgeW), 0.0, 1.0);
-                color = mix(color, sharpen, edgePreserve * 0.85);
+                color = mix(color, sharpen, edgeAmt * 0.85);
 
                 vec3 edgePop = saturateColor(color, 1.0 + edgeW * 0.18);
-                color = mix(color, edgePop, edgePreserve * 0.38);
+                color = mix(color, edgePop, edgeAmt * 0.38);
 
                 gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
             }
@@ -373,7 +448,8 @@ class PointillismPostEffect extends PostEffect {
         scope.resolve('uPaperTint').setValue(this.uPaperTint);
         scope.resolve('uEdgeThreshold').setValue(s.edgeThreshold);
         scope.resolve('uEdgeStrength').setValue(s.edgeStrength);
-        scope.resolve('uContrastDotMix').setValue(s.contrastDotMix);
+        scope.resolve('uDenoiseStrength').setValue(s.denoiseStrength);
+        scope.resolve('uGapFill').setValue(s.gapFill);
 
         this.drawQuad(outputTarget, this.shader, rect as any);
     }

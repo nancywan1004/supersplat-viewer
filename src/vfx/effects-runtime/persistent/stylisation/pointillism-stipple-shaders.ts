@@ -33,7 +33,9 @@ export const POINTILLISM_UNIFORM_NAMES = {
     maxDotRadiusSlope: 'uPointillismMaxDotRadiusSlope',
     refViewDist: 'uPointillismRefViewDist',
     bucketSlope: 'uPointillismBucketSlope',
-    gapSpacing: 'uPointillismGapSpacing'
+    gapSpacing: 'uPointillismGapSpacing',
+    denoiseStrength: 'uPointillismDenoiseStrength',
+    gapFill: 'uPointillismGapFill'
 } as const;
 
 export const POINTILLISM_STIPPLE_SIZE_MIN = 32;
@@ -104,6 +106,8 @@ export const POINTILLISM_DEFAULTS = {
     minVisibleAlpha: 0.08,
     dotRadiusPx: 0.6,
     gapSpacing: 0.4,
+    denoiseStrength: 0.52,
+    gapFill: 0,
     postEffectEnabled: true,
     stippleSize: 96,
     levels: 8,
@@ -125,6 +129,12 @@ export const POINTILLISM_CONTRAST_DOT_MIX_MAX = 0.55;
 export const resolvePointillismEdgeThreshold = (edgeStrength: number): number => {
     const t = Math.max(0, Math.min(1, edgeStrength));
     return 0.035 + t * 0.12;
+};
+
+/** denoiseStrength 推导 modify 层最小可见 alpha（避免与 UI 双旋钮冲突） */
+export const resolvePointillismMinVisibleAlpha = (denoiseStrength: number): number => {
+    const t = Math.max(0, Math.min(1, denoiseStrength));
+    return 0.05 + t * 0.08;
 };
 
 export const pointillismModifyGlsl = /* glsl */`
@@ -157,6 +167,8 @@ uniform float uPointillismMaxDotRadiusSlope;
 uniform float uPointillismRefViewDist;
 uniform float uPointillismBucketSlope;
 uniform float uPointillismGapSpacing;
+uniform float uPointillismDenoiseStrength;
+uniform float uPointillismGapFill;
 uniform float uPointillismMinVisibleAlpha;
 
 float pointLuma(vec3 c) {
@@ -300,18 +312,19 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
 }
 
 void modifySplatColor(vec3 center, inout vec4 color) {
-    float gap = clamp(uPointillismGapSpacing, 0.0, 1.0);
-    float densityT = 1.0 - gap;
     float viewDist = max(length(center - uPointillismViewPos), 0.001);
     float distRatio = viewDist / max(uPointillismRefViewDist, 0.01);
 
     float bucketWorld = max(viewDist * uPointillismBucketSlope, 0.00001);
     vec3 bucketId = floor(center / bucketWorld);
     float bucketHash = pointHash13(bucketId + vec3(uPointillismSeed * 0.07));
+    float fillT = clamp(uPointillismGapFill, 0.0, 1.0);
+    float keepMin = mix(0.28, 0.92, fillT);
+    float thinExp = mix(-0.82, -0.38, fillT);
     float overdraw = max(distRatio * distRatio * 0.55, 0.12);
     float keepChance = clamp(
-        pow(overdraw, -0.82) * mix(1.0, 0.68, densityT) * mix(1.0, 0.72, gap),
-        0.28,
+        pow(overdraw, thinExp),
+        keepMin,
         1.0
     );
     if (bucketHash > keepChance) {
@@ -319,6 +332,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         return;
     }
 
+    float denoiseT = clamp(uPointillismDenoiseStrength, 0.0, 1.0);
     float srcAlpha = color.a;
     float minAlpha = clamp(uPointillismMinVisibleAlpha, 0.0, 0.25);
     vec3 src = clamp(color.rgb, 0.0, 1.0);
@@ -328,16 +342,16 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         color.a = 0.0;
         return;
     }
-    if (l < 0.018) {
+    if (l < mix(0.022, 0.012, denoiseT)) {
         color.a = 0.0;
         return;
     }
     // 弱贡献高亮/暗漂浮点（天空与 outlier 常见）
-    if (srcAlpha < 0.14 && l > 0.80) {
+    if (srcAlpha < mix(0.12, 0.17, denoiseT) && l > mix(0.82, 0.76, denoiseT)) {
         color.a = 0.0;
         return;
     }
-    if (srcAlpha < 0.11 && l < 0.055) {
+    if (srcAlpha < mix(0.09, 0.14, denoiseT) && l < mix(0.048, 0.065, denoiseT)) {
         color.a = 0.0;
         return;
     }
@@ -398,6 +412,8 @@ uniform uPointillismMaxDotRadiusSlope: f32;
 uniform uPointillismRefViewDist: f32;
 uniform uPointillismBucketSlope: f32;
 uniform uPointillismGapSpacing: f32;
+uniform uPointillismDenoiseStrength: f32;
+uniform uPointillismGapFill: f32;
 uniform uPointillismMinVisibleAlpha: f32;
 
 fn pointLuma(c: vec3f) -> f32 {
@@ -539,18 +555,19 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
 }
 
 fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
-    let gap = clamp(uniform.uPointillismGapSpacing, 0.0, 1.0);
-    let densityT = 1.0 - gap;
     let viewDist = max(length(center - uniform.uPointillismViewPos), 0.001);
     let distRatio = viewDist / max(uniform.uPointillismRefViewDist, 0.01);
 
     let bucketWorld = max(viewDist * uniform.uPointillismBucketSlope, 0.00001);
     let bucketId = floor(center / bucketWorld);
     let bucketHash = pointHash13(bucketId + vec3f(uniform.uPointillismSeed * 0.07));
+    let fillT = clamp(uniform.uPointillismGapFill, 0.0, 1.0);
+    let keepMin = mix(0.28, 0.92, fillT);
+    let thinExp = mix(-0.82, -0.38, fillT);
     let overdraw = max(distRatio * distRatio * 0.55, 0.12);
     let keepChance = clamp(
-        pow(overdraw, -0.82) * mix(1.0, 0.68, densityT) * mix(1.0, 0.72, gap),
-        0.28,
+        pow(overdraw, thinExp),
+        keepMin,
         1.0
     );
     if (bucketHash > keepChance) {
@@ -558,6 +575,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         return;
     }
 
+    let denoiseT = clamp(uniform.uPointillismDenoiseStrength, 0.0, 1.0);
     let srcAlpha = (*color).a;
     let minAlpha = clamp(uniform.uPointillismMinVisibleAlpha, 0.0, 0.25);
     let src = clamp((*color).rgb, vec3f(0.0), vec3f(1.0));
@@ -567,15 +585,15 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         (*color).a = 0.0;
         return;
     }
-    if (l < 0.018) {
+    if (l < mix(0.022, 0.012, denoiseT)) {
         (*color).a = 0.0;
         return;
     }
-    if (srcAlpha < 0.14 && l > 0.80) {
+    if (srcAlpha < mix(0.12, 0.17, denoiseT) && l > mix(0.82, 0.76, denoiseT)) {
         (*color).a = 0.0;
         return;
     }
-    if (srcAlpha < 0.11 && l < 0.055) {
+    if (srcAlpha < mix(0.09, 0.14, denoiseT) && l < mix(0.048, 0.065, denoiseT)) {
         (*color).a = 0.0;
         return;
     }

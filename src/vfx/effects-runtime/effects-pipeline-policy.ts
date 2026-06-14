@@ -1,6 +1,15 @@
+import type { ExperienceSettings } from '../../schemas/v2';
 import type { State } from '../../types';
-import { getRevealActiveType, getRevealStatus } from '../../settings-serialize/effects-sync';
+import { getRevealActiveType, getRevealStatus, readActivePersistentEffects } from '../../settings-serialize/effects-sync';
+import { persistentEffectUsesGsplatMaterialShader } from './effect-types';
 import { isPersistentVfx } from './reveal/reveal-policy';
+
+/** settings 中是否有 enabled 且占用 gsplat 材质 shader chunk 的 persistent 特效 */
+export function hasEnabledPersistentGsplatMaterialShaderEffect(settings: ExperienceSettings): boolean {
+    return readActivePersistentEffects(settings).some(
+        (entry) => entry.enabled && persistentEffectUsesGsplatMaterialShader(entry.type)
+    );
+}
 
 /**
  * 产品约定（与重构 plan / 宿主语义对齐）：

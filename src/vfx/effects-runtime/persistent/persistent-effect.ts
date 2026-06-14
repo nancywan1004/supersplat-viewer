@@ -448,6 +448,7 @@ export function getPersistentGsplatEffectsRuntimeScriptType(
 /** Viewer 注入：与 `RevealController` / `EffectsRuntime` 解耦，仅保留挂载所需回调。 */
 export type PersistentGsplatRemountCallbacks = {
     prepareExternalPersistentScriptMount: () => void;
+    syncNightModeAfterPersistentChange?: () => void;
     applyGsplatShaderScriptCenter: (script: any) => void;
     bindPersistentTimelineScript: (script: any | null) => void;
     notifyRevealScriptApplied: (effectType: string) => void;
@@ -488,10 +489,12 @@ export function remountPersistentSceneGsplatOnEntity(
         }
     }
     if (!primary) {
+        callbacks.syncNightModeAfterPersistentChange?.();
         return false;
     }
     callbacks.bindPersistentTimelineScript(primary);
     callbacks.notifyRevealScriptApplied(mountedTypes.join('+') || 'none');
+    callbacks.syncNightModeAfterPersistentChange?.();
     return true;
 }
 

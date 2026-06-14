@@ -45,6 +45,7 @@ export function runPersistentGsplatEntityLifecycle(input: {
     }
     const mounted = remountPersistentSceneGsplatOnEntity(gsplatEntity, persistentEntries, {
         prepareExternalPersistentScriptMount: () => rc.prepareExternalPersistentScriptMount(),
+        syncNightModeAfterPersistentChange: () => rc.syncNightModeAfterPersistentGsplatChange(),
         applyGsplatShaderScriptCenter: (s) => rc.applyGsplatShaderScriptCenter(s),
         bindPersistentTimelineScript: (s) => rc.bindPersistentTimelineScript(s),
         notifyRevealScriptApplied: (effectType) =>
@@ -115,6 +116,7 @@ export function applyPersistentSceneEffectEnableChange(input: {
             rc.bindPersistentTimelineScript(primary?.script ?? null);
         }
         notifyPersistentGsplatRuntimeType(global, gsplatEntity, settings);
+        rc?.syncNightModeAfterPersistentGsplatChange();
         return;
     }
 
@@ -143,4 +145,5 @@ export function applyPersistentSceneEffectEnableChange(input: {
         rc.bindPersistentTimelineScript(script);
     }
     notifyPersistentGsplatRuntimeType(global, gsplatEntity, settings);
+    rc.syncNightModeAfterPersistentGsplatChange();
 }

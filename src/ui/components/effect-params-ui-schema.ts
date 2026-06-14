@@ -288,6 +288,8 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     stippleSize: '整体颗粒尺度（legacy）',
     dotRadiusPx: '点径（px）',
     gapSpacing: '点间缝隙（↑更疏 ↓更密）',
+    denoiseStrength: '噪点抑制',
+    gapFill: '覆盖补全（↑填洞 ↓保留缝隙）',
     paperStrength: '纸张强度',
     paperTint: '纸张色调',
     edgeStrength: '描边强度'
@@ -566,6 +568,20 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
         default: POINTILLISM_DEFAULTS.gapSpacing,
         label: '点间缝隙（↑更疏 ↓更密）'
     },
+    denoiseStrength: {
+        min: 0,
+        max: 1,
+        step: 0.01,
+        default: POINTILLISM_DEFAULTS.denoiseStrength,
+        label: '噪点抑制'
+    },
+    gapFill: {
+        min: 0,
+        max: 1,
+        step: 0.01,
+        default: POINTILLISM_DEFAULTS.gapFill,
+        label: '覆盖补全（↑填洞 ↓保留缝隙）'
+    },
     brushAspect: { min: 0.5, max: 1.2, step: 0.01, default: POINTILLISM_DEFAULTS.brushAspect },
     brushHardness: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.brushHardness, label: '笔触硬度' },
     colorVibration: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.colorVibration },
@@ -628,13 +644,15 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
     ditherSpread: { min: 0, max: 0.2, step: 0.005, default: POINTILLISM_DEFAULTS.ditherSpread },
     paperStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.paperStrength, label: '纸张质感' },
     paperTint: { default: [...POINTILLISM_DEFAULTS.paperTint] },
-    edgeStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.edgeStrength, label: '边缘保真（0平整 1轮廓锐）' }
+    edgeStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.edgeStrength, label: '边缘锐化（0关 1强）' }
 };
 
 const POINTILLISM_VISIBLE_PARAM_KEYS = [
     'postEffectEnabled',
     'dotRadiusPx',
     'gapSpacing',
+    'denoiseStrength',
+    'gapFill',
     'levelRange',
     'sourceStructureBlend',
     'brushHardness',

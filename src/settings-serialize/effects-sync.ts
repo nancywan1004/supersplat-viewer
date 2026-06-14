@@ -27,6 +27,7 @@ import { hasRevealEffectFromSettings, isPersistentVfx, isRevealEffectActiveInSce
 import { filterAssetEffectParams } from '../vfx/effects-runtime/asset/asset-effect-params';
 import { DEFAULT_EFFECTS } from './settings-serialize-configs';
 import { ensureRevealEffect } from './settings-serialize-helper';
+import { normalizePointillismStippleEffectParams } from '../vfx/effects-runtime/persistent/persistent-effect-params';
 
 function cloneDefaultEffects(): NonNullable<ExperienceSettings['effects']> {
     return JSON.parse(JSON.stringify(DEFAULT_EFFECTS)) as NonNullable<ExperienceSettings['effects']>;
@@ -302,8 +303,24 @@ export function patchPersistentTrackEffect(
     if ((!persistentTypeAllowedOnTrack(type, trackName) && type !== 'none')) {
         return readPersistentTrackEffects(settings, trackName, { includeDisabled: true });
     }
-    const currentPack = opts?.replaceTrack && type !== 'none' ? {} : readPersistentTrackPack(settings, trackName);
-    const pack = { ...currentPack };
+    const pack = { ...readPersistentTrackPack(settings, trackName) };
+
+    // camera / stylization 同轨互斥：启用新类型时仅停用其它块，保留其 effectParams
+    if (opts?.replaceTrack && type !== 'none' && patch.enabled === true) {
+        for (const key of Object.keys(pack)) {
+            if (key === type || !persistentTypeAllowedOnTrack(key, trackName)) {
+                continue;
+            }
+            const otherBlock = pack[key];
+            if (otherBlock === null || typeof otherBlock !== 'object' || Array.isArray(otherBlock)) {
+                continue;
+            }
+            const ob = { ...(otherBlock as Record<string, unknown>) };
+            writeEffectEnabledToBlock(ob, false);
+            pack[key] = ob;
+        }
+    }
+
     const current = getPersistentTrackEffect(settings, trackName, type);
     const block = (pack[type] as Record<string, unknown> | undefined) ?? {};
     const nextBlock: Record<string, unknown> = { ...block };
@@ -325,6 +342,9 @@ export function patchPersistentTrackEffect(
         } else {
             nextEp = { ...nextEp, ...patch.effectParams };
         }
+    }
+    if (type === 'pointillism-stipple' && Object.keys(nextEp).length > 0) {
+        nextEp = normalizePointillismStippleEffectParams(nextEp, false);
     }
     for (const k of Object.keys(nextBlock)) {
         if (!PERSISTENT_TYPE_BLOCK_META_KEYS.has(k)) {
@@ -426,7 +446,9 @@ export function parsePersistentProtocolParamsToPatch(
             }
             ep[k] = v;
         }
-        if (Object.keys(ep).length > 0) {
+        if (key === 'pointillism-stipple' && Object.keys(ep).length > 0) {
+            patch.effectParams = normalizePointillismStippleEffectParams(ep, false);
+        } else if (Object.keys(ep).length > 0) {
             patch.effectParams = ep;
         }
         out[key] = patch;
@@ -1180,6 +1202,41 @@ function applyRevealParams(settings: ExperienceSettings): void {
     syncLegacyRevealEffectShadow(settings);
 }
 
+/** 导入/导出前：归一化 persistent 包内点彩专参（完整白名单 + 默认值） */
+export function normalizePersistentEffectsForPersistence(settings: ExperienceSettings): void {
+    ensureEffectsSettings(settings);
+    const tracks: PersistentTrackName[] = ['scene', 'camera', 'stylization'];
+    for (const trackName of tracks) {
+        const pack = readPersistentTrackPack(settings, trackName);
+        let changed = false;
+        const nextPack: Record<string, unknown> = { ...pack };
+        for (const [type, block] of Object.entries(pack)) {
+            if (type !== 'pointillism-stipple') {
+                continue;
+            }
+            if (block === null || typeof block !== 'object' || Array.isArray(block)) {
+                continue;
+            }
+            const b = block as Record<string, unknown>;
+            const entry = entryFromPersistentTypeBlock(type, b);
+            const normalized = normalizePointillismStippleEffectParams(entry.effectParams ?? {}, true);
+            const nextBlock: Record<string, unknown> = {};
+            if (typeof b.enabled === 'boolean') {
+                nextBlock.enabled = b.enabled;
+            }
+            if (typeof b.autoStart === 'boolean') {
+                nextBlock.autoStart = b.autoStart;
+            }
+            Object.assign(nextBlock, normalized);
+            nextPack[type] = nextBlock;
+            changed = true;
+        }
+        if (changed) {
+            writePersistentTrackPack(settings, trackName, nextPack);
+        }
+    }
+}
+
 /**
  * 导入/恢复快照后：在 `revealEffect` 与 `effects` 之间做一次归一化。
  * - 若 reveal 包与 revealEffect 的 `type` 冲突，以 **effects.reveal** 为准（新真源）。
@@ -1202,6 +1259,7 @@ export function normalizeEffectsOnImport(settings: ExperienceSettings): void {
     }
     mirrorEffectsSettingsFromReveal(settings);
     normalizeRevealStoragePack(settings);
+    normalizePersistentEffectsForPersistence(settings);
 }
 
 /**

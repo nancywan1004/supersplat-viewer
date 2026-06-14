@@ -17,10 +17,10 @@ import { getEffectsReadSource } from '../../../view-settings';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../../../schemas/v2-custom';
 import { LegacyRevealEffect as RevealConfig } from '../../../settings';
 import { Global, type RevealEffectType } from '../../../types';
-import { PERSISTENT_EFFECT_TYPE_VALUES } from '../effect-types';
+import { PERSISTENT_EFFECT_TYPE_VALUES, persistentEffectUsesGsplatMaterialShader } from '../effect-types';
+import { hasEnabledPersistentGsplatMaterialShaderEffect } from '../effects-pipeline-policy';
 import type { ExperienceSettings } from '../../../schemas/v2';
 import type { EffectsRuntime } from '..';
-import { nightModeUsesComposerPath } from '../../lighting/night-mode';
 import {
     destroyAllPersistentGsplatScriptsOnEntity,
     forEachMountedPersistentGsplatScript,
@@ -291,7 +291,7 @@ export class RevealController {
                 if (this.originalNightFade === null) {
                     this.originalNightFade = getNightFadeFromSettings(this.global.settings);
                 }
-                if (!nightModeUsesComposerPath()) {
+                if (hasEnabledPersistentGsplatMaterialShaderEffect(this.global.settings as ExperienceSettings)) {
                     this.global.app.fire('nightMode:exit');
                 }
             },
@@ -1011,7 +1011,12 @@ export class RevealController {
                 // revealComplete 当帧里，reveal 脚本仍可能继续执行 enabled=false -> removeShaders。
                 // 若立即 forceReapply，可能被同帧 removeShaders 覆盖，出现一帧黑闪（compute 路径更明显）。
                 // 统一延后一帧到 frameend 再恢复 NightMode，保证 removeShaders 先结束。
-                if (!this.pendingDeferredNightRestore && this.inVfx && this.originalNightFade !== null) {
+                if (
+                    !this.pendingDeferredNightRestore
+                    && this.inVfx
+                    && this.originalNightFade !== null
+                    && !hasEnabledPersistentGsplatMaterialShaderEffect(this.global.settings as ExperienceSettings)
+                ) {
                     this.pendingDeferredNightRestore = true;
                     this.global.app.once('frameend', () => {
                         this.pendingDeferredNightRestore = false;
@@ -1074,6 +1079,17 @@ export class RevealController {
             });
             return;
         }
+        const settings = this.global.settings as ExperienceSettings;
+        if (hasEnabledPersistentGsplatMaterialShaderEffect(settings)) {
+            debugExportNight('restoreNightModeIfNeeded skipped (gsplat material shader persistent active)', {
+                reason,
+                type: this.config.type,
+                inVfx: this.inVfx
+            });
+            this.global.app.fire('nightMode:exit');
+            this.requestPersistentGsplatMaterialShaderReapply(settings);
+            return;
+        }
         const fade = this.originalNightFade;
         this.originalNightFade = null;
         this.inVfx = false;
@@ -1096,6 +1112,41 @@ export class RevealController {
         // 但 NightMode 的 materialsApplied 不知情，nightFade:set 只会 updateEffect 不会重新 apply shader。
         // 必须用 nightMode:forceReapply 先清 materialsApplied 再重新 apply，才能真正恢复 NightMode shader。
         this.global.app.fire('nightMode:forceReapply', fade);
+    }
+
+    /**
+     * persistent remount / 单类型 enable-disable 后：占用 gsplat 材质 shader 的特效仍 enabled 则挂起 night；
+     * 否则按 mount 前快照恢复 night-mode。
+     */
+    syncNightModeAfterPersistentGsplatChange(): void {
+        const settings = this.global.settings as ExperienceSettings;
+        if (hasEnabledPersistentGsplatMaterialShaderEffect(settings)) {
+            if (this.originalNightFade === null) {
+                this.originalNightFade = getNightFadeFromSettings(settings);
+            }
+            // `prepareExternalPersistentScriptMount` 已 fire `nightMode:exit`；此处再 exit 会在点彩挂载后
+            // 触发 composer applyComposedToMaterials，覆盖直连 gsplatModifyVS → 大黑片。
+            this.requestPersistentGsplatMaterialShaderReapply(settings);
+            return;
+        }
+        this.restoreNightModeIfNeeded('persistentGsplatSync');
+    }
+
+    /** composer 误写材质后，让已挂载的点彩/忆韵等 re-apply 直连 chunk。 */
+    private requestPersistentGsplatMaterialShaderReapply(settings: ExperienceSettings): void {
+        if (!this.gsplatEntity) {
+            return;
+        }
+        for (const entry of readActivePersistentEffects(settings)) {
+            if (!entry.enabled || !persistentEffectUsesGsplatMaterialShader(entry.type)) {
+                continue;
+            }
+            const script = getMountedPersistentGsplatScript(this.gsplatEntity, entry.type) as {
+                applyConfig?: () => void;
+                applyShaders?: () => void;
+            } | null;
+            script?.applyConfig?.() ?? script?.applyShaders?.();
+        }
     }
 
     /** 强制停止「一次性 reveal」播放，但不改 this.config.type。persistent 实体由 viewer remount；此处仅 teardown 一次性脚本并按 settings 重绑 persistent 指针（若有）。 */
@@ -1716,8 +1767,8 @@ export class RevealController {
     }
 
     /**
-     * Viewer 在挂载 persistent GSplat 脚本前调用：标记 inVfx、快照 nightFade；在 **legacy** gsplat 路径下仍会 `nightMode:exit` 与 reveal 一致互斥。
-     * 默认 **composer** 路径下不再发 `nightMode:exit`，以便 Night 与 persistent 同槽合成且全局光照滑条仍生效。
+     * Viewer 在挂载 persistent GSplat 脚本前调用：标记 inVfx、快照 nightFade；若即将挂载占用 gsplat 材质 shader 的 persistent 则 `nightMode:exit`。
+     * scene 轨 perlin/overall-wave 与 night composer 合成不变；纯后处理 stylization 不触发 exit。
      * 不得写 `effectsRuntimeState.reveal.status = 'playing'`：一次性 reveal 已结束时该位应保持 `completed`，
      * 否则 `syncEffectsRuntimeStateFromSettings` 会粘住 `playing`，导致关闭 persistent 时误判「reveal 仍在播」而跳过 `vfxExit`。
      */

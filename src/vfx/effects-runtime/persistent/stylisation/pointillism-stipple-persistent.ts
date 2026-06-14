@@ -29,6 +29,7 @@ import {
     resolvePointillismComplementaryMix,
     resolvePointillismDotRadiusPx,
     resolvePointillismEdgeThreshold,
+    resolvePointillismMinVisibleAlpha,
     POINTILLISM_CONTRAST_DOT_MIX_MAX
 } from './pointillism-stipple-shaders';
 import {
@@ -36,12 +37,7 @@ import {
     DEFAULT_POINTILLISM_POST_SETTINGS,
     PointillismPostController
 } from './pointillism-stipple-post';
-import {
-    extractGlslWgslModifyBlocks,
-    POINTILLISM_STIPPLE_COMPOSER_ID
-} from '../../gsplat-effect-layers-extractor';
 import { isOneShotRevealPlayingExclusiveGsplat } from '../../effects-pipeline-policy';
-import { nightModeUsesComposerPath } from '../../../lighting/night-mode';
 import { GsplatShaderEffect } from '../../gsplat-shader-effect';
 
 type SavedPsChunks = {
@@ -309,13 +305,6 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
 
     private _postController: PointillismPostController | null = null;
 
-    /** shader 结构变更时递增，触发 composer 重编 */
-    private _pointillismComposerRev = 5;
-
-    private _pointillismComposerSuppressed = false;
-
-    private _lastPointillismComposerMaterialCount = 0;
-
     private _camera: CameraComponent | null = null;
 
     brushSize = Number.NaN;
@@ -378,6 +367,10 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
 
     gapSpacing = POINTILLISM_DEFAULTS.gapSpacing;
 
+    denoiseStrength = POINTILLISM_DEFAULTS.denoiseStrength;
+
+    gapFill = POINTILLISM_DEFAULTS.gapFill;
+
     postEffectEnabled = POINTILLISM_DEFAULTS.postEffectEnabled;
 
     stippleSize = POINTILLISM_DEFAULTS.stippleSize;
@@ -418,89 +411,13 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         });
     }
 
-    private usesPointillismComposerPath(): boolean {
-        return nightModeUsesComposerPath() && !!(this.app as { effectsRuntime?: { composer?: unknown } }).effectsRuntime?.composer;
-    }
-
-    private getEffectsRuntime(): {
-        applySceneGsplatContribution: (c: unknown, m: Set<Material>) => unknown;
-        removeSceneGsplatContribution: (id: string, m: Set<Material>) => unknown;
-        composer: {
-            removeContribution: (id: string) => void;
-            compose: () => unknown;
-            getLastComposition: () => { signatureChanged?: boolean; activeContributionIds?: string[] } | null;
-            applyComposedToMaterials: (m: Set<Material>, r?: unknown) => void;
-        };
-    } | null {
-        return (this.app as { effectsRuntime?: unknown }).effectsRuntime as ReturnType<
-            GsplatPersistentPointillismStipple['getEffectsRuntime']
-        > ?? null;
-    }
-
     private getAppState() {
         return (this.app as { __global?: { state?: import('../../../../types').State } }).__global?.state;
     }
 
-    /** 一次性 reveal 独占 gsplatModifyVS 时，点彩不参与 composer 合成 */
-    private shouldSuppressPointillismComposerForOneShotReveal(): boolean {
+    /** 一次性 reveal 独占 gsplatModifyVS 时，点彩仅保留 gsplatPS patch，不写 modify */
+    private shouldSuppressPointillismModifyForOneShotReveal(): boolean {
         return isOneShotRevealPlayingExclusiveGsplat(this.getAppState());
-    }
-
-    private suppressPointillismComposerContribution(): void {
-        const rt = this.getEffectsRuntime();
-        if (!rt?.removeSceneGsplatContribution || this.materialsApplied.size === 0) {
-            return;
-        }
-        if (this._pointillismComposerSuppressed) {
-            return;
-        }
-        rt.removeSceneGsplatContribution(POINTILLISM_STIPPLE_COMPOSER_ID, new Set(this.materialsApplied));
-        this._pointillismComposerSuppressed = true;
-        this._lastPointillismComposerMaterialCount = 0;
-    }
-
-    private syncPointillismComposerContribution(): void {
-        const rt = this.getEffectsRuntime();
-        if (!rt?.composer || this.materialsApplied.size === 0) {
-            return;
-        }
-        if (this.shouldSuppressPointillismComposerForOneShotReveal()) {
-            this.suppressPointillismComposerContribution();
-            return;
-        }
-        const shaderBlocks = extractGlslWgslModifyBlocks(pointillismModifyGlsl, pointillismModifyWgsl);
-        rt.applySceneGsplatContribution(
-            {
-                id: POINTILLISM_STIPPLE_COMPOSER_ID,
-                priority: 50,
-                scope: 'scene',
-                enabled: true,
-                version: this._pointillismComposerRev,
-                shaderBlocks,
-                capabilities: { allowConcurrentWithPersistent: true }
-            },
-            this.materialsApplied
-        );
-        this._lastPointillismComposerMaterialCount = this.materialsApplied.size;
-    }
-
-    private tryApplyPointillismComposerToMaterials(force = false): void {
-        if (!this.usesPointillismComposerPath() || this.materialsApplied.size === 0) {
-            return;
-        }
-        const rt = this.getEffectsRuntime();
-        if (!rt) {
-            return;
-        }
-        const last = rt.composer.getLastComposition();
-        if (!last) {
-            return;
-        }
-        const countChanged = this.materialsApplied.size !== this._lastPointillismComposerMaterialCount;
-        if (force || last.signatureChanged || countChanged) {
-            rt.composer.applyComposedToMaterials(this.materialsApplied, last);
-            this._lastPointillismComposerMaterialCount = this.materialsApplied.size;
-        }
     }
 
     private _postMountWanted: boolean | undefined;
@@ -594,40 +511,37 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
             paperStrength: this.paperStrength,
             paperTint: [...this.paperTint],
             edgeThreshold: resolvePointillismEdgeThreshold(edgeStrength),
-            edgeStrength
+            edgeStrength,
+            denoiseStrength: clamp(
+                Number.isFinite(this.denoiseStrength)
+                    ? this.denoiseStrength
+                    : POINTILLISM_DEFAULTS.denoiseStrength,
+                0,
+                1
+            ),
+            gapFill: clamp(
+                Number.isFinite(this.gapFill) ? this.gapFill : POINTILLISM_DEFAULTS.gapFill,
+                0,
+                1
+            )
         };
     }
 
     applyShaderToMaterial(material: Material) {
         this.patchFragmentShader(material);
-        if (this.usesPointillismComposerPath()) {
-            this.pushPointillismUniforms();
-            return;
+        if (!this.shouldSuppressPointillismModifyForOneShotReveal()) {
+            super.applyShaderToMaterial(material);
         }
-        super.applyShaderToMaterial(material);
         this.pushPointillismUniforms();
     }
 
     applyShaders() {
-        if (!this.usesPointillismComposerPath()) {
-            super.applyShaders();
-            this.pushPointillismUniforms();
-            this.applyPostConfig(true);
-            return;
+        super.applyShaders();
+        if (!this.shouldSuppressPointillismModifyForOneShotReveal()) {
+            for (const material of this.materialsApplied) {
+                this.ensureModifyShader(material);
+            }
         }
-        if (this.entity.gsplat?.unified) {
-            this.applyToUnifiedMaterials();
-        } else {
-            this.applyToComponentMaterial();
-        }
-        if (this.shouldSuppressPointillismComposerForOneShotReveal()) {
-            this.suppressPointillismComposerContribution();
-            this.pushPointillismUniforms();
-            this.applyPostConfig(true);
-            return;
-        }
-        this._pointillismComposerSuppressed = false;
-        this.syncPointillismComposerContribution();
         this.pushPointillismUniforms();
         this.applyPostConfig(true);
     }
@@ -669,7 +583,7 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         return out;
     }
 
-    /** LOD / CameraFrame 换材质后：刷新材质集合并补 gsplatPS；modify 经 composer 合成 */
+    /** LOD / CameraFrame 换材质后：刷新材质集合并补 gsplatPS / gsplatModifyVS */
     private syncMaterialsAndShaders(): boolean {
         if (!this.enabled || !this.initialized) {
             return false;
@@ -705,14 +619,12 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
             }
         }
 
-        if (this.usesPointillismComposerPath() && this.materialsApplied.size > 0) {
-            if (this.shouldSuppressPointillismComposerForOneShotReveal()) {
-                this.suppressPointillismComposerContribution();
-            } else {
-                this._pointillismComposerSuppressed = false;
-                this.syncPointillismComposerContribution();
+        if (!this.shouldSuppressPointillismModifyForOneShotReveal()) {
+            for (const material of this.materialsApplied) {
+                if (this.ensureModifyShader(material)) {
+                    repaired = true;
+                }
             }
-            repaired = true;
         }
 
         return repaired;
@@ -733,7 +645,7 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         return true;
     }
 
-    private ensureLegacyModifyShader(material: Material): boolean {
+    private ensureModifyShader(material: Material): boolean {
         const device = this.app.graphicsDevice as GraphicsDevice;
         const lang = device?.isWebGPU ? SHADERLANGUAGE_WGSL : SHADERLANGUAGE_GLSL;
         const expectedModify = lang === SHADERLANGUAGE_WGSL ? this.getShaderWGSL() : this.getShaderGLSL();
@@ -758,24 +670,7 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
             }
         }
 
-        if (this.usesPointillismComposerPath()) {
-            const rt = this.getEffectsRuntime();
-            if (mats.size > 0 && rt?.removeSceneGsplatContribution) {
-                rt.removeSceneGsplatContribution(POINTILLISM_STIPPLE_COMPOSER_ID, mats);
-            } else if (mats.size > 0 && rt) {
-                rt.composer.removeContribution(POINTILLISM_STIPPLE_COMPOSER_ID);
-                rt.composer.compose();
-                const last = rt.composer.getLastComposition();
-                if (last) {
-                    rt.composer.applyComposedToMaterials(mats, last);
-                }
-            }
-            this.materialsApplied.clear();
-            this._pointillismComposerSuppressed = false;
-            this._lastPointillismComposerMaterialCount = 0;
-        } else {
-            super.removeShaders();
-        }
+        super.removeShaders();
 
         this._postMountWanted = undefined;
         this._postController?.apply({ ...DEFAULT_POINTILLISM_POST_SETTINGS, enabled: false });
@@ -953,7 +848,26 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         this.setUniform(PU.highlightSparsity, clamp(this.highlightSparsity, 0, 1));
         this.setUniform(PU.darkDensityBoost, clamp(this.darkDensityBoost, 0, 1));
         this.setUniform(PU.seed, Number.isFinite(this.seed) ? this.seed : POINTILLISM_DEFAULTS.seed);
-        this.setUniform(PU.minVisibleAlpha, clamp(this.minVisibleAlpha, 0, 0.25));
+        const denoiseT = clamp(
+            Number.isFinite(this.denoiseStrength)
+                ? this.denoiseStrength
+                : POINTILLISM_DEFAULTS.denoiseStrength,
+            0,
+            1
+        );
+        this.setUniform(PU.denoiseStrength, denoiseT);
+        this.setUniform(
+            PU.minVisibleAlpha,
+            resolvePointillismMinVisibleAlpha(denoiseT)
+        );
+        this.setUniform(
+            PU.gapFill,
+            clamp(
+                Number.isFinite(this.gapFill) ? this.gapFill : POINTILLISM_DEFAULTS.gapFill,
+                0,
+                1
+            )
+        );
         this.setUniform(
             PU.gapSpacing,
             clamp(
@@ -963,18 +877,9 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
             )
         );
 
-        if (this.usesPointillismComposerPath() && this.materialsApplied.size > 0) {
-            if (this.shouldSuppressPointillismComposerForOneShotReveal()) {
-                this.suppressPointillismComposerContribution();
-            } else if (this._pointillismComposerSuppressed) {
-                this._pointillismComposerSuppressed = false;
-                this.syncPointillismComposerContribution();
-            } else {
-                this.tryApplyPointillismComposerToMaterials(false);
-            }
-        } else if (!this.usesPointillismComposerPath()) {
+        if (!this.shouldSuppressPointillismModifyForOneShotReveal()) {
             for (const material of this.materialsApplied) {
-                this.ensureLegacyModifyShader(material);
+                this.ensureModifyShader(material);
             }
         }
     }

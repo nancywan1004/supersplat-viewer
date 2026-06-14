@@ -331,7 +331,7 @@ export function applyGsplatPersistentParamsPatch(
         if (entry?.enabled) {
             global.events.fire('persistentRevealConfigChanged', {
                 type: t,
-                effectParams: singlePatch?.effectParams ?? entry.effectParams
+                effectParams: entry.effectParams ?? singlePatch?.effectParams
             });
         }
         notifyPersistentSceneEffectsUiSync(global);

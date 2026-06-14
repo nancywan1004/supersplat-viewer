@@ -88,6 +88,7 @@ import {
     type AssetEffectViewToggleController
 } from './vfx/effects-runtime/asset/asset-effect-view-toggle-controller';
 import { createEffectsRuntime, type EffectsRuntime } from './vfx/effects-runtime';
+import { hasEnabledPersistentGsplatMaterialShaderEffect } from './vfx/effects-runtime/effects-pipeline-policy';
 import { initCommandRegistry } from './editor-modules/command-registry';
 import { DEFAULT_DEFERRED_EDITING_LAYERS } from './render/deferred-editing-visual-sync';
 import { initInputArbiter } from './input-arbiter';
@@ -786,7 +787,11 @@ class Viewer {
                 if (!nightDeferredByReveal(state)) {
                     events.once('firstFrame', () => {
                         if (this.nightModeScript) {
-                            this.nightModeScript.applyFromSettings({ fade: nightFade, enabled: nightCfg?.enabled });
+                            this.applyNightModeFromSettingsAfterLoad(
+                                settings as ExperienceSettings,
+                                nightCfg,
+                                nightFade
+                            );
                         }
                     });
                 }
@@ -915,7 +920,11 @@ class Viewer {
                         const fade = typeof nightCfgAfterReveal.fade === 'number' && Number.isFinite(nightCfgAfterReveal.fade)
                             ? Math.max(-1, Math.min(1, nightCfgAfterReveal.fade))
                             : (nightCfgAfterReveal.enabled ? -0.95 : 0);
-                        this.nightModeScript.applyFromSettings({ enabled: nightCfgAfterReveal.enabled, fade });
+                        this.applyNightModeFromSettingsAfterLoad(
+                            settings as ExperienceSettings,
+                            nightCfgAfterReveal,
+                            fade
+                        );
                     }
                 };
                 if (revealBlocksAnim(state)) {
@@ -1346,6 +1355,24 @@ z: ${cameraInfo.target.z.toFixed(6)}
             effectType,
             enabled
         });
+    }
+
+    /**
+     * 加载 / reveal 结束后写回 nightMode：点彩等占用 gsplatModifyVS 时只调主光/天空盒，不写 gsplat shader。
+     */
+    private applyNightModeFromSettingsAfterLoad(
+        settings: ExperienceSettings,
+        nightCfg: { enabled?: boolean; fade?: number } | undefined,
+        fade: number
+    ): void {
+        if (!this.nightModeScript) {
+            return;
+        }
+        if (hasEnabledPersistentGsplatMaterialShaderEffect(settings)) {
+            this.nightModeScript.applyLightingFromSettings({ enabled: nightCfg?.enabled, fade });
+            return;
+        }
+        this.nightModeScript.applyFromSettings({ enabled: nightCfg?.enabled, fade });
     }
 }
 

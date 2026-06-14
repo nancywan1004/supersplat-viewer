@@ -1,5 +1,24 @@
 import { Color, Vec3 } from 'playcanvas';
 
+import {
+    POINTILLISM_CONTRAST_DOT_MIX_MAX,
+    POINTILLISM_DEFAULTS,
+    POINTILLISM_DOT_RADIUS_PX_MAX,
+    POINTILLISM_DOT_RADIUS_PX_MIN,
+    POINTILLISM_GAP_SPACING_MAX,
+    POINTILLISM_GAP_SPACING_MIN,
+    POINTILLISM_PAINT_GRAIN_MAX,
+    POINTILLISM_PAINT_GRAIN_MIN,
+    POINTILLISM_PAINT_OPACITY_MAX,
+    POINTILLISM_PAINT_OPACITY_MIN,
+    POINTILLISM_STIPPLE_SIZE_MAX,
+    POINTILLISM_STIPPLE_SIZE_MIN,
+    POINTILLISM_STROKE_LENGTH_MAX,
+    POINTILLISM_STROKE_LENGTH_MIN,
+    POINTILLISM_STROKE_WIDTH_MAX,
+    POINTILLISM_STROKE_WIDTH_MIN
+} from './stylisation/pointillism-stipple-shaders';
+
 /**
  * 可持续 **persistent scene** 轨的 **`settings.effects.persistent.scene` → 各 `type` 块内专参** 白名单与写入逻辑。
  *
@@ -118,6 +137,8 @@ const POINTILLISM_STIPPLE = new Set([
     'postEffectEnabled',
     'dotRadiusPx',
     'gapSpacing',
+    'denoiseStrength',
+    'gapFill',
     'stippleSize',
     'levels',
     'levelRange',
@@ -192,6 +213,142 @@ export type PersistentParamFieldKind = 'number' | 'vec3' | 'color' | 'boolean' |
 export function getPersistentEffectParamKeys(effectType: string): readonly string[] {
     const set = BY_TYPE[effectType];
     return set ? Array.from(set) : [];
+}
+
+const clampNum = (v: unknown, min: number, max: number, fallback: number): number => {
+    if (typeof v !== 'number' || !Number.isFinite(v)) {
+        return fallback;
+    }
+    return Math.max(min, Math.min(max, v));
+};
+
+const readColorTriple = (v: unknown, fallback: [number, number, number]): [number, number, number] => {
+    if (!Array.isArray(v) || v.length < 3) {
+        return [...fallback];
+    }
+    return [
+        clampNum(v[0], 0, 1, fallback[0]),
+        clampNum(v[1], 0, 1, fallback[1]),
+        clampNum(v[2], 0, 1, fallback[2])
+    ];
+};
+
+/** 白名单过滤 persistent 专参（不含 enabled / autoStart） */
+export function filterPersistentEffectParams(
+    effectType: string,
+    raw: Record<string, unknown> | undefined | null
+): Record<string, unknown> {
+    if (!raw || typeof raw !== 'object') {
+        return {};
+    }
+    const allowed = BY_TYPE[effectType];
+    if (!allowed) {
+        return {};
+    }
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(raw)) {
+        if (value !== undefined && allowed.has(key)) {
+            out[key] = value;
+        }
+    }
+    return out;
+}
+
+/** 点彩专参：白名单 + 类型/范围归一化；`mergeDefaults` 时补齐全部可存盘字段 */
+export function normalizePointillismStippleEffectParams(
+    raw: Record<string, unknown> | undefined | null,
+    mergeDefaults = true
+): Record<string, unknown> {
+    const filtered = filterPersistentEffectParams('pointillism-stipple', raw);
+    const d = POINTILLISM_DEFAULTS;
+    const out: Record<string, unknown> = mergeDefaults ? { ...d } : {};
+
+    const setNum = (key: keyof typeof POINTILLISM_DEFAULTS, min: number, max: number) => {
+        if (!(key in filtered)) {
+            return;
+        }
+        out[key] = clampNum(filtered[key as string], min, max, d[key] as number);
+    };
+
+    setNum('brushSize', 0.25, 1.5);
+    setNum('brushAspect', 0.5, 1.2);
+    setNum('brushHardness', 0, 1);
+    setNum('colorVibration', 0, 1);
+    setNum('darkPaintBoost', 0, 1);
+    setNum('highlightSkip', 0, 1);
+    setNum('dotScale', 0.85, 1.15);
+    setNum('dotSizeFactor', 0.01, 0.32);
+    setNum('strokeAspect', 0.85, 2.2);
+    setNum('roundness', 0, 1);
+    setNum('strokeSoftness', 0.08, 0.55);
+    setNum('strokeLength', POINTILLISM_STROKE_LENGTH_MIN, POINTILLISM_STROKE_LENGTH_MAX);
+    setNum('strokeWidth', POINTILLISM_STROKE_WIDTH_MIN, POINTILLISM_STROKE_WIDTH_MAX);
+    setNum('shapeJitter', 0, 0.08);
+    setNum('paintThickness', 0.5, 1.5);
+    setNum('paintOpacity', POINTILLISM_PAINT_OPACITY_MIN, POINTILLISM_PAINT_OPACITY_MAX);
+    setNum('paintGrain', POINTILLISM_PAINT_GRAIN_MIN, POINTILLISM_PAINT_GRAIN_MAX);
+    setNum('saturation', 0, 3);
+    setNum('contrastDotMix', 0, POINTILLISM_CONTRAST_DOT_MIX_MAX);
+    setNum('warmCoolSplit', 0, 1);
+    setNum('paletteStrength', 0, 1);
+    if ('paletteIndex' in filtered) {
+        out.paletteIndex = Math.floor(clampNum(filtered.paletteIndex, 0, 3, d.paletteIndex));
+    }
+    setNum('sourceStructureBlend', 0, 1);
+    setNum('highlightSparsity', 0, 1);
+    setNum('darkDensityBoost', 0, 1);
+    if ('seed' in filtered) {
+        out.seed = Math.floor(clampNum(filtered.seed, 0, 997, d.seed));
+    }
+    setNum('minVisibleAlpha', 0, 0.25);
+    setNum('dotRadiusPx', POINTILLISM_DOT_RADIUS_PX_MIN, POINTILLISM_DOT_RADIUS_PX_MAX);
+    setNum('gapSpacing', POINTILLISM_GAP_SPACING_MIN, POINTILLISM_GAP_SPACING_MAX);
+    setNum('denoiseStrength', 0, 1);
+    setNum('gapFill', 0, 1);
+    setNum('stippleSize', POINTILLISM_STIPPLE_SIZE_MIN, POINTILLISM_STIPPLE_SIZE_MAX);
+    if ('levels' in filtered) {
+        out.levels = Math.floor(clampNum(filtered.levels, 2, 20, d.levels));
+    }
+    if ('lumaLevels' in filtered) {
+        out.lumaLevels = Math.floor(clampNum(filtered.lumaLevels, 2, 24, d.lumaLevels));
+    }
+    setNum('levelRange', 0.5, 2);
+    setNum('ditherSpread', 0, 0.2);
+    setNum('paperStrength', 0, 1);
+    setNum('edgeStrength', 0, 1);
+
+    if ('postEffectEnabled' in filtered) {
+        const coerced = coerceBoolean(filtered.postEffectEnabled);
+        if (coerced !== null) {
+            out.postEffectEnabled = coerced;
+        }
+    }
+    if ('paperTint' in filtered) {
+        out.paperTint = readColorTriple(filtered.paperTint, [...d.paperTint]);
+    } else if (mergeDefaults) {
+        out.paperTint = [...d.paperTint];
+    }
+
+    if (!mergeDefaults) {
+        for (const key of Object.keys(out)) {
+            if (!(key in filtered) && key !== 'paperTint') {
+                delete out[key];
+            }
+        }
+    }
+
+    return out;
+}
+
+/** 脚本挂载 / 存盘：按类型归一化专参 */
+export function normalizePersistentEffectParamsForScript(
+    effectType: string,
+    raw: Record<string, unknown> | undefined | null
+): Record<string, unknown> {
+    if (effectType === 'pointillism-stipple') {
+        return normalizePointillismStippleEffectParams(raw, true);
+    }
+    return filterPersistentEffectParams(effectType, raw);
 }
 
 const SPARKLE_COLOR_KEYS = new Set(['lightTint1', 'lightTint2', 'lightTint3']);
@@ -311,11 +468,14 @@ export function applyPersistentEffectParamsToScript(
     effectType: string,
     effectParams: Record<string, unknown> | undefined | null
 ): void {
-    if (!script || !effectParams || typeof effectParams !== 'object') return;
+    if (!script) return;
     const allowed = BY_TYPE[effectType];
     if (!allowed) return;
 
-    for (const [rawKey, rawVal] of Object.entries(effectParams)) {
+    const params = normalizePersistentEffectParamsForScript(effectType, effectParams);
+    if (Object.keys(params).length === 0) return;
+
+    for (const [rawKey, rawVal] of Object.entries(params)) {
         if (rawVal === undefined) continue;
         if (!allowed.has(rawKey)) continue;
         if (rawKey === 'center' || rawKey === 'extents') {

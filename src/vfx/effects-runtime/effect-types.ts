@@ -96,6 +96,23 @@ export const PERSISTENT_SCENE_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSIS
 export const PERSISTENT_CAMERA_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSISTENT_CAMERA_EFFECT_TYPE_VALUES);
 export const PERSISTENT_STYLIZATION_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSISTENT_STYLIZATION_EFFECT_TYPE_VALUES);
 
+/**
+ * 会写 gsplat 材质 `gsplatModifyVS` 和/或 `gsplatPS` 的 persistent type。
+ * 与 night-mode 互斥（直连 chunk，不经 composer 与 night 叠层）；新增 persistent 时若改上述 chunk 须登记。
+ */
+export const PERSISTENT_GSPLAT_MATERIAL_SHADER_EFFECT_TYPE_VALUES = [
+    'pointillism-stipple',
+    'yiyun-dianran'
+] as const;
+
+export const PERSISTENT_GSPLAT_MATERIAL_SHADER_EFFECT_TYPES: ReadonlySet<string> = new Set(
+    PERSISTENT_GSPLAT_MATERIAL_SHADER_EFFECT_TYPE_VALUES
+);
+
+export function persistentEffectUsesGsplatMaterialShader(type: string): boolean {
+    return PERSISTENT_GSPLAT_MATERIAL_SHADER_EFFECT_TYPES.has(type);
+}
+
 export type PersistentEffectBucket = 'scene' | 'camera' | 'stylization';
 
 export function persistentEffectBucketForType(effectType: string | undefined): PersistentEffectBucket {
