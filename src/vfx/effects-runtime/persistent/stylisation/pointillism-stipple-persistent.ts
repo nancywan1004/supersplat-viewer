@@ -33,6 +33,12 @@ import {
     DEFAULT_POINTILLISM_POST_SETTINGS,
     PointillismPostController
 } from './pointillism-stipple-post';
+import {
+    extractGlslWgslModifyBlocks,
+    POINTILLISM_STIPPLE_COMPOSER_ID
+} from '../../gsplat-effect-layers-extractor';
+import { isOneShotRevealPlayingExclusiveGsplat } from '../../effects-pipeline-policy';
+import { nightModeUsesComposerPath } from '../../../lighting/night-mode';
 import { GsplatShaderEffect } from '../../gsplat-shader-effect';
 
 type SavedPsChunks = {
@@ -300,11 +306,16 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
 
     private _postController: PointillismPostController | null = null;
 
+    /** shader 结构变更时递增，触发 composer 重编 */
+    private _pointillismComposerRev = 3;
+
+    private _pointillismComposerSuppressed = false;
+
+    private _lastPointillismComposerMaterialCount = 0;
+
     private _camera: CameraComponent | null = null;
 
     brushSize = Number.NaN;
-
-    brushDensity = Number.NaN;
 
     brushAspect = Number.NaN;
 
@@ -323,8 +334,6 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
     strokeAspect = POINTILLISM_DEFAULTS.strokeAspect;
 
     roundness = POINTILLISM_DEFAULTS.roundness;
-
-    density = POINTILLISM_DEFAULTS.density;
 
     strokeSoftness = POINTILLISM_DEFAULTS.strokeSoftness;
 
@@ -364,7 +373,7 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
 
     minVisibleAlpha = POINTILLISM_DEFAULTS.minVisibleAlpha;
 
-    dotRadiusPx = Number.NaN;
+    dotRadiusPx = POINTILLISM_DEFAULTS.dotRadiusPx;
 
     gapSpacing = POINTILLISM_DEFAULTS.gapSpacing;
 
@@ -388,23 +397,126 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
 
     initialize() {
         super.initialize();
-        this.on('enable', () => this.applyPostConfig());
+        this.on('enable', () => this.applyPostConfig(true));
         this.on('disable', () => {
             this._postController?.apply({ ...DEFAULT_POINTILLISM_POST_SETTINGS, enabled: false });
             this.app.renderNextFrame = true;
         });
+
+        const global = (this.app as { __global?: { events?: { on: Function; off: Function } } }).__global;
+        const onCameraPipelineChanged = () => {
+            if (!this.enabled) {
+                return;
+            }
+            this.app.once('frameend', () => {
+                this.syncMaterialsAndShaders();
+                this.updateEffect(this.effectTime, 0);
+            });
+        };
+        global?.events?.on('postEffect:changed', onCameraPipelineChanged);
+        this.on('destroy', () => {
+            global?.events?.off('postEffect:changed', onCameraPipelineChanged);
+        });
     }
+
+    private usesPointillismComposerPath(): boolean {
+        return nightModeUsesComposerPath() && !!(this.app as { effectsRuntime?: { composer?: unknown } }).effectsRuntime?.composer;
+    }
+
+    private getEffectsRuntime(): {
+        applySceneGsplatContribution: (c: unknown, m: Set<Material>) => unknown;
+        removeSceneGsplatContribution: (id: string, m: Set<Material>) => unknown;
+        composer: {
+            removeContribution: (id: string) => void;
+            compose: () => unknown;
+            getLastComposition: () => { signatureChanged?: boolean; activeContributionIds?: string[] } | null;
+            applyComposedToMaterials: (m: Set<Material>, r?: unknown) => void;
+        };
+    } | null {
+        return (this.app as { effectsRuntime?: unknown }).effectsRuntime as ReturnType<
+            GsplatPersistentPointillismStipple['getEffectsRuntime']
+        > ?? null;
+    }
+
+    private getAppState() {
+        return (this.app as { __global?: { state?: import('../../../../types').State } }).__global?.state;
+    }
+
+    /** 一次性 reveal 独占 gsplatModifyVS 时，点彩不参与 composer 合成 */
+    private shouldSuppressPointillismComposerForOneShotReveal(): boolean {
+        return isOneShotRevealPlayingExclusiveGsplat(this.getAppState());
+    }
+
+    private suppressPointillismComposerContribution(): void {
+        const rt = this.getEffectsRuntime();
+        if (!rt?.removeSceneGsplatContribution || this.materialsApplied.size === 0) {
+            return;
+        }
+        if (this._pointillismComposerSuppressed) {
+            return;
+        }
+        rt.removeSceneGsplatContribution(POINTILLISM_STIPPLE_COMPOSER_ID, new Set(this.materialsApplied));
+        this._pointillismComposerSuppressed = true;
+        this._lastPointillismComposerMaterialCount = 0;
+    }
+
+    private syncPointillismComposerContribution(): void {
+        const rt = this.getEffectsRuntime();
+        if (!rt?.composer || this.materialsApplied.size === 0) {
+            return;
+        }
+        if (this.shouldSuppressPointillismComposerForOneShotReveal()) {
+            this.suppressPointillismComposerContribution();
+            return;
+        }
+        const shaderBlocks = extractGlslWgslModifyBlocks(pointillismModifyGlsl, pointillismModifyWgsl);
+        rt.applySceneGsplatContribution(
+            {
+                id: POINTILLISM_STIPPLE_COMPOSER_ID,
+                priority: 50,
+                scope: 'scene',
+                enabled: true,
+                version: this._pointillismComposerRev,
+                shaderBlocks,
+                capabilities: { allowConcurrentWithPersistent: true }
+            },
+            this.materialsApplied
+        );
+        this._lastPointillismComposerMaterialCount = this.materialsApplied.size;
+    }
+
+    private tryApplyPointillismComposerToMaterials(force = false): void {
+        if (!this.usesPointillismComposerPath() || this.materialsApplied.size === 0) {
+            return;
+        }
+        const rt = this.getEffectsRuntime();
+        if (!rt) {
+            return;
+        }
+        const last = rt.composer.getLastComposition();
+        if (!last) {
+            return;
+        }
+        const countChanged = this.materialsApplied.size !== this._lastPointillismComposerMaterialCount;
+        if (force || last.signatureChanged || countChanged) {
+            rt.composer.applyComposedToMaterials(this.materialsApplied, last);
+            this._lastPointillismComposerMaterialCount = this.materialsApplied.size;
+        }
+    }
+
+    private _postMountWanted: boolean | undefined;
 
     /** UI / 协议热更新：同步 uniform 与后处理（对齐 palette-pixel / yiyun-dianran） */
     applyConfig() {
+        this.syncMaterialsAndShaders();
         this.updateEffect(this.effectTime, 0);
-        this.applyPostConfig();
+        this.applyPostConfig(false);
         this.app.renderNextFrame = true;
     }
 
     /** 仅刷新后处理挂载（对齐 yiyun-dianran.applyPostEffectConfig） */
     applyPostEffectConfig() {
-        this.applyPostConfig();
+        this.applyPostConfig(true);
         this.app.renderNextFrame = true;
     }
 
@@ -420,14 +532,15 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         return (this.app as { getCameraFrame?: () => CameraFrame | null | undefined }).getCameraFrame?.() ?? null;
     };
 
-    applyPostConfig() {
+    applyPostConfig(forceCameraReconfigure = false) {
         const cameraEntity = findCameraEntity(this.app.root);
         const camera = cameraEntity?.camera ?? null;
         if (!camera) {
             return;
         }
 
-        if (!this._postController || this._camera !== camera) {
+        const cameraRecreated = !this._postController || this._camera !== camera;
+        if (cameraRecreated) {
             this._postController?.apply({ ...DEFAULT_POINTILLISM_POST_SETTINGS, enabled: false });
             this._postController = new PointillismPostController(this.app, camera);
             this._camera = camera;
@@ -437,10 +550,15 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
             this.postEffectEnabled,
             POINTILLISM_DEFAULTS.postEffectEnabled
         );
+        const mountChanged = forceCameraReconfigure
+            || cameraRecreated
+            || this._postMountWanted !== wantPost;
+        this._postMountWanted = wantPost;
+
         const global = (this.app as { __global?: { events?: { fire: (name: string) => void } } }).__global;
 
-        // 与 palette-pixel 一致：后处理依赖 CameraFrame，须先触发 configureCamera
-        if (wantPost) {
+        // 仅在挂载状态变化时通知 CameraFrame；避免调点径等参数时反复 configureCamera 导致材质脱节
+        if (mountChanged && wantPost) {
             global?.events?.fire('postEffect:changed');
         }
 
@@ -448,7 +566,7 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
             getCameraFrame: this.resolveCameraFrame
         });
 
-        if (!wantPost) {
+        if (mountChanged && !wantPost) {
             global?.events?.fire('postEffect:changed');
         }
     }
@@ -481,15 +599,151 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
 
     applyShaderToMaterial(material: Material) {
         this.patchFragmentShader(material);
+        if (this.usesPointillismComposerPath()) {
+            this.pushPointillismUniforms();
+            return;
+        }
         super.applyShaderToMaterial(material);
-        // LOD / unified 模式晚到的材质须立即写入 uniform，否则首帧 dotRadiusSlope=0 导致发糊或尺寸异常
-        this.updateEffect(this.effectTime, 0);
+        this.pushPointillismUniforms();
     }
 
     applyShaders() {
-        super.applyShaders();
-        this.updateEffect(this.effectTime, 0);
-        this.applyPostConfig();
+        if (!this.usesPointillismComposerPath()) {
+            super.applyShaders();
+            this.pushPointillismUniforms();
+            this.applyPostConfig(true);
+            return;
+        }
+        if (this.entity.gsplat?.unified) {
+            this.applyToUnifiedMaterials();
+        } else {
+            this.applyToComponentMaterial();
+        }
+        if (this.shouldSuppressPointillismComposerForOneShotReveal()) {
+            this.suppressPointillismComposerContribution();
+            this.pushPointillismUniforms();
+            this.applyPostConfig(true);
+            return;
+        }
+        this._pointillismComposerSuppressed = false;
+        this.syncPointillismComposerContribution();
+        this.pushPointillismUniforms();
+        this.applyPostConfig(true);
+    }
+
+    private collectActiveUnifiedMaterials(): Set<Material> {
+        const out = new Set<Material>();
+        // @ts-ignore runtime gsplat system
+        const gsplatSystem = this.app.systems.gsplat;
+        const scene = this.app.scene;
+        const composition = scene.layers;
+        const componentLayers = this.entity.gsplat?.layers;
+        if (!gsplatSystem || !componentLayers) {
+            return out;
+        }
+
+        let targetCameras;
+        if (this.camera?.camera) {
+            const inner = this.camera.camera.camera;
+            targetCameras = inner ? [inner] : composition.cameras.map((c) => c.camera);
+        } else {
+            targetCameras = composition.cameras.map((cameraComponent) => cameraComponent.camera);
+        }
+
+        for (const camera of targetCameras) {
+            for (const layerId of componentLayers) {
+                if (camera.layers.indexOf(layerId) < 0) {
+                    continue;
+                }
+                const layer = composition.getLayerById(layerId);
+                if (!layer) {
+                    continue;
+                }
+                const material = gsplatSystem.getGSplatMaterial(camera, layer);
+                if (material) {
+                    out.add(material);
+                }
+            }
+        }
+        return out;
+    }
+
+    /** LOD / CameraFrame 换材质后：刷新材质集合并补 gsplatPS；modify 经 composer 合成 */
+    private syncMaterialsAndShaders(): boolean {
+        if (!this.enabled || !this.initialized) {
+            return false;
+        }
+
+        let repaired = false;
+
+        if (this.entity.gsplat?.unified) {
+            const active = this.collectActiveUnifiedMaterials();
+            for (const material of [...this.materialsApplied]) {
+                if (!active.has(material)) {
+                    this.restoreFragmentShader(material);
+                    this.materialsApplied.delete(material);
+                }
+            }
+            for (const material of active) {
+                if (!this.materialsApplied.has(material)) {
+                    this.applyShaderToMaterial(material);
+                    this.materialsApplied.add(material);
+                    repaired = true;
+                } else if (this.ensureFragmentShaderPatch(material)) {
+                    repaired = true;
+                }
+            }
+            if (active.size > 0) {
+                this.needsRetry = false;
+            }
+        } else {
+            for (const material of [...this.materialsApplied]) {
+                if (this.ensureFragmentShaderPatch(material)) {
+                    repaired = true;
+                }
+            }
+        }
+
+        if (this.usesPointillismComposerPath() && this.materialsApplied.size > 0) {
+            if (this.shouldSuppressPointillismComposerForOneShotReveal()) {
+                this.suppressPointillismComposerContribution();
+            } else {
+                this._pointillismComposerSuppressed = false;
+                this.syncPointillismComposerContribution();
+            }
+            repaired = true;
+        }
+
+        return repaired;
+    }
+
+    private ensureFragmentShaderPatch(material: Material): boolean {
+        const device = this.app.graphicsDevice as GraphicsDevice;
+        const lang = device?.isWebGPU ? SHADERLANGUAGE_WGSL : SHADERLANGUAGE_GLSL;
+        const psChunk = material.getShaderChunks(lang).get('gsplatPS');
+        const psOk = typeof psChunk === 'string' && psChunk.includes('pointillismShapeUV');
+        if (psOk) {
+            return false;
+        }
+        if (this._savedPsChunks.has(material)) {
+            this._savedPsChunks.delete(material);
+        }
+        this.patchFragmentShader(material);
+        return true;
+    }
+
+    private ensureLegacyModifyShader(material: Material): boolean {
+        const device = this.app.graphicsDevice as GraphicsDevice;
+        const lang = device?.isWebGPU ? SHADERLANGUAGE_WGSL : SHADERLANGUAGE_GLSL;
+        const expectedModify = lang === SHADERLANGUAGE_WGSL ? this.getShaderWGSL() : this.getShaderGLSL();
+        const modifyChunk = material.getShaderChunks(lang).get('gsplatModifyVS');
+        const modifyOk = typeof modifyChunk === 'string' && modifyChunk.includes('modifySplatRotationScale');
+        if (modifyOk) {
+            return false;
+        }
+        material.getShaderChunks(lang).set('gsplatModifyVS', expectedModify);
+        material.update();
+        return true;
     }
 
     removeShaders() {
@@ -502,7 +756,27 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
                 this.restoreFragmentShader(material);
             }
         }
-        super.removeShaders();
+
+        if (this.usesPointillismComposerPath()) {
+            const rt = this.getEffectsRuntime();
+            if (mats.size > 0 && rt?.removeSceneGsplatContribution) {
+                rt.removeSceneGsplatContribution(POINTILLISM_STIPPLE_COMPOSER_ID, mats);
+            } else if (mats.size > 0 && rt) {
+                rt.composer.removeContribution(POINTILLISM_STIPPLE_COMPOSER_ID);
+                rt.composer.compose();
+                const last = rt.composer.getLastComposition();
+                if (last) {
+                    rt.composer.applyComposedToMaterials(mats, last);
+                }
+            }
+            this.materialsApplied.clear();
+            this._pointillismComposerSuppressed = false;
+            this._lastPointillismComposerMaterialCount = 0;
+        } else {
+            super.removeShaders();
+        }
+
+        this._postMountWanted = undefined;
         this._postController?.apply({ ...DEFAULT_POINTILLISM_POST_SETTINGS, enabled: false });
     }
 
@@ -585,12 +859,13 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
     }
 
     updateEffect(_effectTime: number, _dt: number) {
+        this.pushPointillismUniforms();
+    }
+
+    private pushPointillismUniforms() {
         const brushSize = Number.isFinite(this.brushSize)
             ? this.brushSize
             : POINTILLISM_DEFAULTS.brushSize;
-        const brushDensity = Number.isFinite(this.brushDensity)
-            ? this.brushDensity
-            : this.density;
         const brushAspect = Number.isFinite(this.brushAspect)
             ? this.brushAspect
             : this.strokeAspect;
@@ -640,7 +915,6 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         this.setUniform(PU.refViewDist, refViewDist);
         this.setUniform(PU.bucketSlope, bucketSlope);
         this.setUniform(PU.brushSize, 1.0);
-        this.setUniform(PU.brushDensity, clamp(brushDensity, 0.15, 4.4));
         this.setUniform(PU.brushAspect, clamp(brushAspect, 0.5, 1.2));
         this.setUniform(PU.brushHardness, clamp(brushHardness, 0, 1));
         this.setUniform(PU.colorVibration, clamp(colorVibration, 0, 1));
@@ -650,7 +924,6 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         this.setUniform(PU.dotSizeFactor, clamp(this.dotSizeFactor, 0.01, 0.32));
         this.setUniform(PU.strokeAspect, clamp(this.strokeAspect, 0.85, 2.2));
         this.setUniform(PU.roundness, clamp(this.roundness, 0, 1));
-        this.setUniform(PU.density, clamp(this.density, 0.15, 4.4));
         this.setUniform(PU.strokeSoftness, clamp(this.strokeSoftness, 0.08, 0.55));
         this.setUniform(PU.strokeLength, clamp(this.strokeLength, POINTILLISM_STROKE_LENGTH_MIN, POINTILLISM_STROKE_LENGTH_MAX));
         this.setUniform(PU.strokeWidth, clamp(this.strokeWidth, POINTILLISM_STROKE_WIDTH_MIN, POINTILLISM_STROKE_WIDTH_MAX));
@@ -685,6 +958,21 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
                 POINTILLISM_GAP_SPACING_MAX
             )
         );
+
+        if (this.usesPointillismComposerPath() && this.materialsApplied.size > 0) {
+            if (this.shouldSuppressPointillismComposerForOneShotReveal()) {
+                this.suppressPointillismComposerContribution();
+            } else if (this._pointillismComposerSuppressed) {
+                this._pointillismComposerSuppressed = false;
+                this.syncPointillismComposerContribution();
+            } else {
+                this.tryApplyPointillismComposerToMaterials(false);
+            }
+        } else if (!this.usesPointillismComposerPath()) {
+            for (const material of this.materialsApplied) {
+                this.ensureLegacyModifyShader(material);
+            }
+        }
     }
 
     destroy() {

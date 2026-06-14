@@ -259,7 +259,6 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     ditherSpread: '抖动扩散',
     dotScale: '整体颗粒尺度',
     brushSize: '单点笔触大小',
-    brushDensity: '点涂密度（↑重叠覆盖）',
     brushAspect: '短块比例',
     brushHardness: '块状硬边',
     colorVibration: '综合色彩变化',
@@ -287,7 +286,7 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     darkDensityBoost: '暗部加密',
     stippleSize: '整体颗粒尺度（legacy）',
     dotRadiusPx: '点径（px）',
-    gapSpacing: '点间缝隙（↑更疏）',
+    gapSpacing: '点间缝隙（↑更疏 ↓更密）',
     paperStrength: '纸张强度',
     paperTint: '纸张色调',
     edgeStrength: '描边强度'
@@ -564,9 +563,8 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
         max: POINTILLISM_GAP_SPACING_MAX,
         step: 0.01,
         default: POINTILLISM_DEFAULTS.gapSpacing,
-        label: '点间缝隙（↑更疏）'
+        label: '点间缝隙（↑更疏 ↓更密）'
     },
-    brushDensity: { min: 0.15, max: 4.4, step: 0.01, default: POINTILLISM_DEFAULTS.brushDensity, label: '点涂密度（↑重叠覆盖）' },
     brushAspect: { min: 0.5, max: 1.2, step: 0.01, default: POINTILLISM_DEFAULTS.brushAspect },
     brushHardness: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.brushHardness, label: '笔触硬度' },
     colorVibration: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.colorVibration },
@@ -576,7 +574,6 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
     dotSizeFactor: { min: 0.01, max: 0.32, step: 0.005, default: POINTILLISM_DEFAULTS.dotSizeFactor },
     strokeAspect: { min: 0.85, max: 2.2, step: 0.01, default: POINTILLISM_DEFAULTS.strokeAspect },
     roundness: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.roundness },
-    density: { min: 0.15, max: 4.4, step: 0.01, default: POINTILLISM_DEFAULTS.density },
     strokeSoftness: { min: 0.08, max: 0.55, step: 0.005, default: POINTILLISM_DEFAULTS.strokeSoftness },
     strokeLength: {
         min: POINTILLISM_STROKE_LENGTH_MIN,
@@ -641,7 +638,6 @@ const POINTILLISM_VISIBLE_PARAM_KEYS = [
     'gapSpacing',
     'levelRange',
     'sourceStructureBlend',
-    'brushDensity',
     'brushHardness',
     'strokeLength',
     'strokeWidth',

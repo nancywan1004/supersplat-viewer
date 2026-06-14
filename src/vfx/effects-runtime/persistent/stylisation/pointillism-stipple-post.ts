@@ -285,7 +285,8 @@ class PointillismPostEffect extends PostEffect {
 
             void main() {
                 vec2 uv = vUv0;
-                vec3 sceneColor = texture2D(uColorBuffer, uv).rgb;
+                vec3 rawScene = texture2D(uColorBuffer, uv).rgb;
+                vec3 sceneColor = rawScene;
                 vec3 blur = boxBlur5(uv);
 
                 float edge = edgeFactor(uv);

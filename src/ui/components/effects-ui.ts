@@ -435,10 +435,10 @@ export function initRevealUI(global: Global): () => void {
         const all = (['scene', 'camera', 'stylization'] as PersistentTrackName[]).flatMap(track =>
             readPersistentTrackEffects(global.settings, track, { includeDisabled: true })
         );
-        const configuredSet = new Set(all.map(e => e.type));
         container.querySelectorAll<HTMLInputElement>('input[data-persistent-type]').forEach((input) => {
             const t = input.dataset.persistentType ?? '';
-            input.checked = configuredSet.has(t);
+            const entry = all.find(e => e.type === t);
+            input.checked = entry?.enabled !== false;
             input.indeterminate = false;
         });
     };
@@ -472,9 +472,10 @@ export function initRevealUI(global: Global): () => void {
                 effectType: type
             });
         } else {
-            routeEffectsCommand('EFFECT_DELETE', {
+            // 仅停用，保留 effectParams，避免再次勾选时参数回到默认值
+            routeEffectsCommand('EFFECT_PARAMS_PATCH', {
                 effectId: persistentEffectIdForType(type),
-                effectType: type
+                params: persistentProtocolParams({ [type]: { enabled: false } })
             });
         }
         pushEditHistorySafe();

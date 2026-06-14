@@ -1,6 +1,5 @@
 export const POINTILLISM_UNIFORM_NAMES = {
     brushSize: 'uPointillismBrushSize',
-    brushDensity: 'uPointillismBrushDensity',
     brushAspect: 'uPointillismBrushAspect',
     brushHardness: 'uPointillismBrushHardness',
     colorVibration: 'uPointillismColorVibration',
@@ -10,7 +9,6 @@ export const POINTILLISM_UNIFORM_NAMES = {
     dotSizeFactor: 'uPointillismDotSizeFactor',
     strokeAspect: 'uPointillismStrokeAspect',
     roundness: 'uPointillismRoundness',
-    density: 'uPointillismDensity',
     strokeSoftness: 'uPointillismStrokeSoftness',
     strokeLength: 'uPointillismStrokeLength',
     strokeWidth: 'uPointillismStrokeWidth',
@@ -77,7 +75,6 @@ export const resolvePointillismDotRadiusPx = (
 
 export const POINTILLISM_DEFAULTS = {
     brushSize: 1.0,
-    brushDensity: 3.6,
     brushAspect: 0.62,
     brushHardness: 0.88,
     colorVibration: 0.0,
@@ -87,7 +84,6 @@ export const POINTILLISM_DEFAULTS = {
     dotSizeFactor: 0.18,
     strokeAspect: 1.0,
     roundness: 1.0,
-    density: 3.6,
     strokeSoftness: 0.08,
     strokeLength: 0.62,
     strokeWidth: 0.46,
@@ -107,7 +103,7 @@ export const POINTILLISM_DEFAULTS = {
     darkDensityBoost: 0.0,
     seed: 17,
     minVisibleAlpha: 0.08,
-    dotRadiusPx: 1.0,
+    dotRadiusPx: 0.6,
     gapSpacing: 0.4,
     postEffectEnabled: true,
     stippleSize: 96,
@@ -122,7 +118,6 @@ export const POINTILLISM_DEFAULTS = {
 
 export const pointillismModifyGlsl = /* glsl */`
 uniform float uPointillismBrushSize;
-uniform float uPointillismBrushDensity;
 uniform float uPointillismBrushAspect;
 uniform float uPointillismBrushHardness;
 uniform float uPointillismColorVibration;
@@ -132,7 +127,6 @@ uniform float uPointillismDotScale;
 uniform float uPointillismDotSizeFactor;
 uniform float uPointillismStrokeAspect;
 uniform float uPointillismRoundness;
-uniform float uPointillismDensity;
 uniform float uPointillismSaturation;
 uniform float uPointillismLumaLevels;
 uniform float uPointillismContrastDotMix;
@@ -222,9 +216,8 @@ void modifySplatCenter(inout vec3 center) {
 
 void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
     float originalSize = gsplatGetSizeFromScale(scale);
-    float density = clamp(uPointillismBrushDensity, 0.15, 4.4);
-    float densityT = clamp((density - 0.15) / 4.25, 0.0, 1.0);
     float gap = clamp(uPointillismGapSpacing, 0.0, 1.0);
+    float densityT = 1.0 - gap;
     float densityBoost = mix(0.92, 1.08, densityT);
     float overlap = mix(1.36, 0.62, gap) * densityBoost;
 
@@ -242,7 +235,6 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
     float sizePick = mix(0.96, 1.04, pointHash13(sizeCell + vec3(uPointillismSeed * 0.05)));
     dotSize *= sizePick;
     dotSize *= mix(0.96, 1.06, densityT);
-    dotSize = min(dotSize, screenCap * 1.02);
 
     float sizeRatio = originalSize / max(dotSize, 0.000001);
     if (sizeRatio > 3.5) {
@@ -254,9 +246,8 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
 }
 
 void modifySplatColor(vec3 center, inout vec4 color) {
-    float density = clamp(uPointillismBrushDensity, 0.15, 4.4);
-    float densityT = clamp((density - 0.15) / 4.25, 0.0, 1.0);
     float gap = clamp(uPointillismGapSpacing, 0.0, 1.0);
+    float densityT = 1.0 - gap;
     float viewDist = max(length(center - uPointillismViewPos), 0.001);
     float distRatio = viewDist / max(uPointillismRefViewDist, 0.01);
 
@@ -266,7 +257,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     float overdraw = max(distRatio * distRatio * 0.55, 0.12);
     float keepChance = clamp(
         pow(overdraw, -0.82) * mix(1.0, 0.68, densityT) * mix(1.0, 0.72, gap),
-        0.12,
+        0.28,
         1.0
     );
     if (bucketHash > keepChance) {
@@ -325,7 +316,6 @@ void modifySplatColor(vec3 center, inout vec4 color) {
 
 export const pointillismModifyWgsl = /* wgsl */`
 uniform uPointillismBrushSize: f32;
-uniform uPointillismBrushDensity: f32;
 uniform uPointillismBrushAspect: f32;
 uniform uPointillismBrushHardness: f32;
 uniform uPointillismColorVibration: f32;
@@ -335,7 +325,6 @@ uniform uPointillismDotScale: f32;
 uniform uPointillismDotSizeFactor: f32;
 uniform uPointillismStrokeAspect: f32;
 uniform uPointillismRoundness: f32;
-uniform uPointillismDensity: f32;
 uniform uPointillismSaturation: f32;
 uniform uPointillismLumaLevels: f32;
 uniform uPointillismContrastDotMix: f32;
@@ -424,9 +413,8 @@ fn modifySplatCenter(center: ptr<function, vec3f>) {
 
 fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
     let originalSize = gsplatGetSizeFromScale(*scale);
-    let density = clamp(uniform.uPointillismBrushDensity, 0.15, 4.4);
-    let densityT = clamp((density - 0.15) / 4.25, 0.0, 1.0);
     let gap = clamp(uniform.uPointillismGapSpacing, 0.0, 1.0);
+    let densityT = 1.0 - gap;
     let densityBoost = mix(0.92, 1.08, densityT);
     let overlap = mix(1.36, 0.62, gap) * densityBoost;
 
@@ -443,7 +431,6 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
     let sizePick = mix(0.96, 1.04, pointHash13(sizeCell + vec3f(uniform.uPointillismSeed * 0.05)));
     dotSize *= sizePick;
     dotSize *= mix(0.96, 1.06, densityT);
-    dotSize = min(dotSize, screenCap * 1.02);
 
     let sizeRatio = originalSize / max(dotSize, 0.000001);
     if (sizeRatio > 3.5) {
@@ -455,9 +442,8 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
 }
 
 fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
-    let density = clamp(uniform.uPointillismBrushDensity, 0.15, 4.4);
-    let densityT = clamp((density - 0.15) / 4.25, 0.0, 1.0);
     let gap = clamp(uniform.uPointillismGapSpacing, 0.0, 1.0);
+    let densityT = 1.0 - gap;
     let viewDist = max(length(center - uniform.uPointillismViewPos), 0.001);
     let distRatio = viewDist / max(uniform.uPointillismRefViewDist, 0.01);
 
@@ -467,7 +453,7 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     let overdraw = max(distRatio * distRatio * 0.55, 0.12);
     let keepChance = clamp(
         pow(overdraw, -0.82) * mix(1.0, 0.68, densityT) * mix(1.0, 0.72, gap),
-        0.12,
+        0.28,
         1.0
     );
     if (bucketHash > keepChance) {

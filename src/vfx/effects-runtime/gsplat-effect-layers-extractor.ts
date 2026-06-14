@@ -87,3 +87,5 @@ export function extractGlslWgslModifyBlocks(glslFull: string, wgslFull: string):
 export const PERLIN_WAVE_COMPOSER_ID = 'perlin-wave';
 
 export const OVERALL_WAVE_COMPOSER_ID = 'overall-wave';
+
+export const POINTILLISM_STIPPLE_COMPOSER_ID = 'pointillism-stipple';

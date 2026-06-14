@@ -88,7 +88,6 @@ const PALETTE_PIXEL = new Set([
 
 const POINTILLISM_STIPPLE = new Set([
     'brushSize',
-    'brushDensity',
     'brushAspect',
     'brushHardness',
     'colorVibration',
@@ -98,7 +97,6 @@ const POINTILLISM_STIPPLE = new Set([
     'dotSizeFactor',
     'strokeAspect',
     'roundness',
-    'density',
     'strokeSoftness',
     'strokeLength',
     'strokeWidth',
