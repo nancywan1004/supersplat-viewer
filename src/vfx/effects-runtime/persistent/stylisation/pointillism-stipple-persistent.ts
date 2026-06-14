@@ -26,7 +26,10 @@ import {
     POINTILLISM_UNIFORM_NAMES as PU,
     pointillismModifyGlsl,
     pointillismModifyWgsl,
-    resolvePointillismDotRadiusPx
+    resolvePointillismComplementaryMix,
+    resolvePointillismDotRadiusPx,
+    resolvePointillismEdgeThreshold,
+    POINTILLISM_CONTRAST_DOT_MIX_MAX
 } from './pointillism-stipple-shaders';
 import {
     coercePointillismBool,
@@ -307,7 +310,7 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
     private _postController: PointillismPostController | null = null;
 
     /** shader 结构变更时递增，触发 composer 重编 */
-    private _pointillismComposerRev = 3;
+    private _pointillismComposerRev = 5;
 
     private _pointillismComposerSuppressed = false;
 
@@ -355,8 +358,6 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
 
     contrastDotMix = POINTILLISM_DEFAULTS.contrastDotMix;
 
-    complementaryMix = POINTILLISM_DEFAULTS.complementaryMix;
-
     warmCoolSplit = POINTILLISM_DEFAULTS.warmCoolSplit;
 
     paletteStrength = POINTILLISM_DEFAULTS.paletteStrength;
@@ -390,8 +391,6 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
     paperStrength = POINTILLISM_DEFAULTS.paperStrength;
 
     paperTint: [number, number, number] = [...POINTILLISM_DEFAULTS.paperTint];
-
-    edgeThreshold = POINTILLISM_DEFAULTS.edgeThreshold;
 
     edgeStrength = POINTILLISM_DEFAULTS.edgeStrength;
 
@@ -572,6 +571,8 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
     }
 
     private buildPostSettings() {
+        const contrastDotMix = clamp(this.contrastDotMix, 0, POINTILLISM_CONTRAST_DOT_MIX_MAX);
+        const edgeStrength = clamp(this.edgeStrength, 0, 1);
         return {
             enabled: this.enabled,
             postEffectEnabled: coercePointillismBool(
@@ -587,13 +588,13 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
             warmCoolSplit: this.warmCoolSplit,
             sourceStructureBlend: this.sourceStructureBlend,
             saturation: this.saturation,
-            complementaryMix: this.complementaryMix,
-            contrastDotMix: this.contrastDotMix,
+            complementaryMix: resolvePointillismComplementaryMix(contrastDotMix),
+            contrastDotMix,
             seed: this.seed,
             paperStrength: this.paperStrength,
             paperTint: [...this.paperTint],
-            edgeThreshold: this.edgeThreshold,
-            edgeStrength: this.edgeStrength
+            edgeThreshold: resolvePointillismEdgeThreshold(edgeStrength),
+            edgeStrength
         };
     }
 
@@ -940,8 +941,11 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         );
         this.setUniform(PU.saturation, clamp(this.saturation, 0, 3));
         this.setUniform(PU.lumaLevels, clamp(Math.floor(this.lumaLevels), 2, 24));
-        this.setUniform(PU.contrastDotMix, clamp(this.contrastDotMix, 0, 0.4));
-        this.setUniform(PU.complementaryMix, clamp(this.complementaryMix, 0, 0.4));
+        this.setUniform(PU.contrastDotMix, clamp(this.contrastDotMix, 0, POINTILLISM_CONTRAST_DOT_MIX_MAX));
+        this.setUniform(
+            PU.complementaryMix,
+            resolvePointillismComplementaryMix(clamp(this.contrastDotMix, 0, POINTILLISM_CONTRAST_DOT_MIX_MAX))
+        );
         this.setUniform(PU.warmCoolSplit, clamp(this.warmCoolSplit, 0, 1));
         this.setUniform(PU.paletteStrength, clamp(this.paletteStrength, 0, 1));
         this.setUniform(PU.paletteIndex, clamp(Math.floor(this.paletteIndex), 0, 3));

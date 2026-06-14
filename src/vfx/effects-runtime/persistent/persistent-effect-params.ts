@@ -107,7 +107,6 @@ const POINTILLISM_STIPPLE = new Set([
     'saturation',
     'lumaLevels',
     'contrastDotMix',
-    'complementaryMix',
     'warmCoolSplit',
     'paletteStrength',
     'paletteIndex',
@@ -125,7 +124,6 @@ const POINTILLISM_STIPPLE = new Set([
     'ditherSpread',
     'paperStrength',
     'paperTint',
-    'edgeThreshold',
     'edgeStrength'
 ]);
 

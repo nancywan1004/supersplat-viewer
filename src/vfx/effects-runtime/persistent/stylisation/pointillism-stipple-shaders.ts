@@ -93,8 +93,7 @@ export const POINTILLISM_DEFAULTS = {
     paintGrain: 0.5,
     saturation: 1.32,
     lumaLevels: 8,
-    contrastDotMix: 0.14,
-    complementaryMix: 0.20,
+    contrastDotMix: 0.22,
     warmCoolSplit: 0.58,
     paletteStrength: 0.0,
     paletteIndex: 0,
@@ -110,11 +109,23 @@ export const POINTILLISM_DEFAULTS = {
     levels: 8,
     levelRange: 1.14,
     ditherSpread: 0.0,
-    paperStrength: 0.08,
+    paperStrength: 0.18,
     paperTint: [1.0, 0.97, 0.91] as [number, number, number],
-    edgeThreshold: 0.04,
     edgeStrength: 0.72
 } as const;
+
+/** @deprecated modify 层已不再使用；保留供 post 配置归一化 */
+export const resolvePointillismComplementaryMix = (contrastDotMix: number): number =>
+    Math.min(0.5, Math.max(0, contrastDotMix) * 1.35);
+
+/** UI 0–0.55 → 并列对比色点占比上限 ~58% */
+export const POINTILLISM_CONTRAST_DOT_MIX_MAX = 0.55;
+
+/** 边缘检测阈值：↑保真 → ↑阈值，只保留强结构轮廓（避免把点颗粒误判为边） */
+export const resolvePointillismEdgeThreshold = (edgeStrength: number): number => {
+    const t = Math.max(0, Math.min(1, edgeStrength));
+    return 0.035 + t * 0.12;
+};
 
 export const pointillismModifyGlsl = /* glsl */`
 uniform float uPointillismBrushSize;
@@ -184,11 +195,54 @@ vec3 pointHueNudge(vec3 c, float warmCool, float pick) {
     return mix(c, mix(cool, warm, t), warmCool);
 }
 
-vec3 pointComplement(vec3 c) {
-    float mx = max(max(c.r, c.g), c.b);
-    float mn = min(min(c.r, c.g), c.b);
+vec3 pointRgb2Hsv(vec3 c) {
+    float mx = max(c.r, max(c.g, c.b));
+    float mn = min(c.r, min(c.g, c.b));
+    float d = mx - mn;
+    float h = 0.0;
+    if (d > 1e-5) {
+        if (mx == c.r) {
+            h = mod((c.g - c.b) / d, 6.0);
+        } else if (mx == c.g) {
+            h = (c.b - c.r) / d + 2.0;
+        } else {
+            h = (c.r - c.g) / d + 4.0;
+        }
+        h /= 6.0;
+    }
+    float s = mx <= 1e-5 ? 0.0 : d / mx;
+    return vec3(h, s, mx);
+}
+
+vec3 pointHsv2Rgb(vec3 hsv) {
+    float h = fract(hsv.x) * 6.0;
+    float s = clamp(hsv.y, 0.0, 1.0);
+    float v = clamp(hsv.z, 0.0, 1.0);
+    float i = floor(h);
+    float f = h - i;
+    float p = v * (1.0 - s);
+    float q = v * (1.0 - s * f);
+    float t = v * (1.0 - s * (1.0 - f));
+    if (i < 1.0) return vec3(v, t, p);
+    if (i < 2.0) return vec3(q, v, p);
+    if (i < 3.0) return vec3(p, v, t);
+    if (i < 4.0) return vec3(p, q, v);
+    if (i < 5.0) return vec3(t, p, v);
+    return vec3(v, p, q);
+}
+
+// 色环对位互补色点：整颗笔触用饱和互补颜料，不做 RGB 反相混色
+vec3 pointComplementDot(vec3 localChroma) {
+    vec3 hsv = pointRgb2Hsv(clamp(localChroma, 0.0, 1.0));
+    hsv.x = fract(hsv.x + 0.5);
+    hsv.y = clamp(max(hsv.y, 0.42), 0.42, 1.0);
+    hsv.z = clamp(hsv.z * 1.08, 0.12, 0.96);
+    return pointHsv2Rgb(hsv);
+}
+
+vec3 pointClampComplementDot(vec3 c) {
     float l = pointLuma(c);
-    return clamp(vec3(mx + mn) - c + vec3(l * 0.12), 0.0, 1.0);
+    return clamp(c, vec3(max(0.05, l * 0.52)), vec3(0.99, 0.98, 0.94));
 }
 
 vec3 pointLocalChromaLift(vec3 c) {
@@ -300,15 +354,15 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         warmPick
     );
 
-    vec3 styled = chroma;
-    float contrastChance = clamp(uPointillismContrastDotMix + colorVib * 0.28, 0.0, 1.0);
-    float contrastMix = clamp(uPointillismComplementaryMix + colorVib * 0.22, 0.0, 1.0);
+    float dotMix = clamp(uPointillismContrastDotMix, 0.0, 0.55);
+    float contrastChance = clamp(dotMix / 0.55 * 0.58, 0.0, 0.58);
     float contrastGate = step(rnd.z, contrastChance);
-    styled = mix(styled, pointComplement(styled), contrastGate * contrastMix);
 
     float structure = clamp(uPointillismSourceStructureBlend, 0.0, 1.0);
-    styled = clamp(mix(styled, src, structure * 0.35), 0.0, 1.0);
-    color.rgb = pointClampPigment(styled);
+    vec3 baseDot = clamp(mix(chroma, src, structure * 0.35), 0.0, 1.0);
+    vec3 complementDot = pointClampComplementDot(pointComplementDot(chroma));
+    vec3 styled = mix(baseDot, complementDot, contrastGate);
+    color.rgb = contrastGate > 0.5 ? styled : pointClampPigment(styled);
     // 可见性已由 srcAlpha 过滤；绘制强度只由 gsplatPS 的 paintOpacity 控制
     color.a = 1.0;
 }
@@ -382,11 +436,54 @@ fn pointHueNudge(c: vec3f, warmCool: f32, pick: f32) -> vec3f {
     return mix(c, mix(cool, warm, t), warmCool);
 }
 
-fn pointComplement(c: vec3f) -> vec3f {
-    let mx = max(max(c.r, c.g), c.b);
-    let mn = min(min(c.r, c.g), c.b);
+fn pointRgb2Hsv(c: vec3f) -> vec3f {
+    let mx = max(c.r, max(c.g, c.b));
+    let mn = min(c.r, min(c.g, c.b));
+    let d = mx - mn;
+    var h = 0.0;
+    if (d > 1e-5) {
+        if (mx == c.r) {
+            h = (c.g - c.b) / d;
+            h = h - floor(h / 6.0) * 6.0;
+        } else if (mx == c.g) {
+            h = (c.b - c.r) / d + 2.0;
+        } else {
+            h = (c.r - c.g) / d + 4.0;
+        }
+        h = h / 6.0;
+    }
+    let s = select(0.0, d / mx, mx > 1e-5);
+    return vec3f(h, s, mx);
+}
+
+fn pointHsv2Rgb(hsv: vec3f) -> vec3f {
+    let h = fract(hsv.x) * 6.0;
+    let s = clamp(hsv.y, 0.0, 1.0);
+    let v = clamp(hsv.z, 0.0, 1.0);
+    let i = floor(h);
+    let f = h - i;
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - s * f);
+    let t = v * (1.0 - s * (1.0 - f));
+    if (i < 1.0) { return vec3f(v, t, p); }
+    if (i < 2.0) { return vec3f(q, v, p); }
+    if (i < 3.0) { return vec3f(p, v, t); }
+    if (i < 4.0) { return vec3f(p, q, v); }
+    if (i < 5.0) { return vec3f(t, p, v); }
+    return vec3f(v, p, q);
+}
+
+fn pointComplementDot(localChroma: vec3f) -> vec3f {
+    var hsv = pointRgb2Hsv(clamp(localChroma, vec3f(0.0), vec3f(1.0)));
+    hsv.x = fract(hsv.x + 0.5);
+    hsv.y = clamp(max(hsv.y, 0.42), 0.42, 1.0);
+    hsv.z = clamp(hsv.z * 1.08, 0.12, 0.96);
+    return pointHsv2Rgb(hsv);
+}
+
+fn pointClampComplementDot(c: vec3f) -> vec3f {
     let l = pointLuma(c);
-    return clamp(vec3f(mx + mn) - c + vec3f(l * 0.12), vec3f(0.0), vec3f(1.0));
+    return clamp(c, vec3f(max(0.05, l * 0.52)), vec3f(0.99, 0.98, 0.94));
 }
 
 fn pointLocalChromaLift(c: vec3f) -> vec3f {
@@ -495,15 +592,19 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         warmPick
     );
 
-    var styled = chroma;
-    let contrastChance = clamp(uniform.uPointillismContrastDotMix + colorVib * 0.28, 0.0, 1.0);
-    let contrastMix = clamp(uniform.uPointillismComplementaryMix + colorVib * 0.22, 0.0, 1.0);
+    let dotMix = clamp(uniform.uPointillismContrastDotMix, 0.0, 0.55);
+    let contrastChance = clamp(dotMix / 0.55 * 0.58, 0.0, 0.58);
     let contrastGate = step(rnd.z, contrastChance);
-    styled = mix(styled, pointComplement(styled), contrastGate * contrastMix);
 
     let structure = clamp(uniform.uPointillismSourceStructureBlend, 0.0, 1.0);
-    styled = clamp(mix(styled, src, structure * 0.35), vec3f(0.0), vec3f(1.0));
-    (*color).rgb = pointClampPigment(styled);
+    let baseDot = clamp(mix(chroma, src, structure * 0.35), vec3f(0.0), vec3f(1.0));
+    let complementDot = pointClampComplementDot(pointComplementDot(chroma));
+    let styled = mix(baseDot, complementDot, contrastGate);
+    if (contrastGate > 0.5) {
+        (*color).rgb = styled;
+    } else {
+        (*color).rgb = pointClampPigment(styled);
+    }
     (*color).a = 1.0;
 }
 `;

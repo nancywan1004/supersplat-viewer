@@ -438,7 +438,8 @@ export function initRevealUI(global: Global): () => void {
         container.querySelectorAll<HTMLInputElement>('input[data-persistent-type]').forEach((input) => {
             const t = input.dataset.persistentType ?? '';
             const entry = all.find(e => e.type === t);
-            input.checked = entry?.enabled !== false;
+            // 无配置块时必须未勾选；仅有 entry 且 enabled !== false 时才勾选
+            input.checked = entry != null && entry.enabled !== false;
             input.indeterminate = false;
         });
     };

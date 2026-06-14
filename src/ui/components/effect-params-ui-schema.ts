@@ -22,6 +22,7 @@ import {
 } from '../../vfx/effects-runtime/persistent/stylisation/palette-pixel';
 import {
     POINTILLISM_DEFAULTS,
+    POINTILLISM_CONTRAST_DOT_MIX_MAX,
     POINTILLISM_BRUSH_SIZE_MAX,
     POINTILLISM_BRUSH_SIZE_MIN,
     POINTILLISM_DOT_RADIUS_PX_MAX,
@@ -271,7 +272,7 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     paintOpacity: '颜料透明度',
     paintGrain: '颜料肌理（↑涂抹不均感）',
     lumaLevels: '明度色阶',
-    contrastDotMix: '对比色点数量',
+    contrastDotMix: '对比色点（↑并列互补色笔触）',
     complementaryMix: '对比色强度',
     warmCoolSplit: '蓝橙明暗',
     paletteStrength: '色板强度',
@@ -607,8 +608,7 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
     paintThickness: { min: 0.5, max: 1.5, step: 0.01, default: POINTILLISM_DEFAULTS.paintThickness },
     saturation: { min: 0, max: 3, step: 0.01, default: POINTILLISM_DEFAULTS.saturation, label: '色彩饱和' },
     lumaLevels: { min: 2, max: 24, step: 1, default: POINTILLISM_DEFAULTS.lumaLevels },
-    contrastDotMix: { min: 0, max: 0.4, step: 0.01, default: POINTILLISM_DEFAULTS.contrastDotMix, label: '对比色点数量' },
-    complementaryMix: { min: 0, max: 0.4, step: 0.01, default: POINTILLISM_DEFAULTS.complementaryMix, label: '对比色强度' },
+    contrastDotMix: { min: 0, max: POINTILLISM_CONTRAST_DOT_MIX_MAX, step: 0.01, default: POINTILLISM_DEFAULTS.contrastDotMix, label: '对比色点（↑并列互补色笔触）' },
     warmCoolSplit: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.warmCoolSplit, label: '蓝橙明暗' },
     paletteStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.paletteStrength },
     paletteIndex: {
@@ -628,8 +628,7 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
     ditherSpread: { min: 0, max: 0.2, step: 0.005, default: POINTILLISM_DEFAULTS.ditherSpread },
     paperStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.paperStrength, label: '纸张质感' },
     paperTint: { default: [...POINTILLISM_DEFAULTS.paperTint] },
-    edgeThreshold: { min: 0.02, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.edgeThreshold, label: '边缘灵敏度' },
-    edgeStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.edgeStrength, label: '边缘保真' }
+    edgeStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.edgeStrength, label: '边缘保真（0平整 1轮廓锐）' }
 };
 
 const POINTILLISM_VISIBLE_PARAM_KEYS = [
@@ -645,10 +644,8 @@ const POINTILLISM_VISIBLE_PARAM_KEYS = [
     'paintGrain',
     'saturation',
     'contrastDotMix',
-    'complementaryMix',
     'warmCoolSplit',
     'paperStrength',
-    'edgeThreshold',
     'edgeStrength'
 ] as const;
 
