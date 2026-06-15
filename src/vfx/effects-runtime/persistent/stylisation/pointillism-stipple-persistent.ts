@@ -523,17 +523,7 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
                 Number.isFinite(this.gapFill) ? this.gapFill : POINTILLISM_DEFAULTS.gapFill,
                 0,
                 1
-            ),
-            dotRadiusPx: this.dotRadiusPx,
-            gapSpacing: this.gapSpacing,
-            brushHardness: clamp(
-                Number.isFinite(this.brushHardness)
-                    ? this.brushHardness
-                    : POINTILLISM_DEFAULTS.brushHardness,
-                0,
-                1
-            ),
-            brushSize: Number.isFinite(this.brushSize) ? this.brushSize : POINTILLISM_DEFAULTS.brushSize
+            )
         };
     }
 

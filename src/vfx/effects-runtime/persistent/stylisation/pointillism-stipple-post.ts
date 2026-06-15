@@ -12,7 +12,7 @@ import {
     type GraphicsDevice
 } from 'playcanvas';
 
-import { POINTILLISM_DEFAULTS, POINTILLISM_STIPPLE_SIZE_MAX, POINTILLISM_STIPPLE_SIZE_MIN, resolvePointillismComplementaryMix, resolvePointillismDotRadiusPx, resolvePointillismEdgeThreshold } from './pointillism-stipple-shaders';
+import { POINTILLISM_DEFAULTS, POINTILLISM_STIPPLE_SIZE_MAX, POINTILLISM_STIPPLE_SIZE_MIN, resolvePointillismComplementaryMix, resolvePointillismEdgeThreshold } from './pointillism-stipple-shaders';
 
 /** stippleSize ↑ → 目标屏幕点半径 ↓（约 1–5 px，由 modify 层 dotRadiusSlope 驱动） */
 export const POINTILLISM_STIPPLE_SIZE_STEPS = [32, 48, 64, 72, 96, 128, 160, 192, 224] as const;
@@ -41,10 +41,6 @@ export type PointillismPostSettings = {
     edgeStrength: number;
     denoiseStrength: number;
     gapFill: number;
-    dotRadiusPx: number;
-    gapSpacing: number;
-    brushHardness: number;
-    brushSize: number;
 };
 
 export const POINTILLISM_PALETTE_NAMES: Record<number, string> = {
@@ -74,11 +70,7 @@ export const DEFAULT_POINTILLISM_POST_SETTINGS: PointillismPostSettings = {
     edgeThreshold: resolvePointillismEdgeThreshold(POINTILLISM_DEFAULTS.edgeStrength),
     edgeStrength: POINTILLISM_DEFAULTS.edgeStrength,
     denoiseStrength: POINTILLISM_DEFAULTS.denoiseStrength,
-    gapFill: POINTILLISM_DEFAULTS.gapFill,
-    dotRadiusPx: POINTILLISM_DEFAULTS.dotRadiusPx,
-    gapSpacing: POINTILLISM_DEFAULTS.gapSpacing,
-    brushHardness: POINTILLISM_DEFAULTS.brushHardness,
-    brushSize: POINTILLISM_DEFAULTS.brushSize
+    gapFill: POINTILLISM_DEFAULTS.gapFill
 };
 
 const clamp = (v: number, min: number, max: number): number => Math.max(min, Math.min(max, v));
@@ -164,19 +156,7 @@ export function normalizePointillismPostSettings(raw: unknown): PointillismPostS
             0,
             1
         ),
-        gapFill: clamp(finiteOr(obj.gapFill, DEFAULT_POINTILLISM_POST_SETTINGS.gapFill), 0, 1),
-        dotRadiusPx: resolvePointillismDotRadiusPx(
-            finiteOr(obj.dotRadiusPx, DEFAULT_POINTILLISM_POST_SETTINGS.dotRadiusPx),
-            snapStippleSize(clamp(
-                finiteOr(obj.stippleSize, DEFAULT_POINTILLISM_POST_SETTINGS.stippleSize),
-                POINTILLISM_STIPPLE_SIZE_MIN,
-                POINTILLISM_STIPPLE_SIZE_MAX
-            )),
-            finiteOr(obj.brushSize, DEFAULT_POINTILLISM_POST_SETTINGS.brushSize)
-        ),
-        gapSpacing: clamp(finiteOr(obj.gapSpacing, DEFAULT_POINTILLISM_POST_SETTINGS.gapSpacing), 0, 1),
-        brushHardness: clamp(finiteOr(obj.brushHardness, DEFAULT_POINTILLISM_POST_SETTINGS.brushHardness), 0, 1),
-        brushSize: clamp(finiteOr(obj.brushSize, DEFAULT_POINTILLISM_POST_SETTINGS.brushSize), 0.5, 2)
+        gapFill: clamp(finiteOr(obj.gapFill, DEFAULT_POINTILLISM_POST_SETTINGS.gapFill), 0, 1)
     };
 }
 
@@ -184,6 +164,7 @@ class PointillismPostEffect extends PostEffect {
     private readonly shader: Shader;
     private settings: PointillismPostSettings = DEFAULT_POINTILLISM_POST_SETTINGS;
 
+    readonly uPaperTint = new Float32Array(3);
     readonly uResolution = new Float32Array(2);
 
     constructor(device: GraphicsDevice, precision: string) {
@@ -208,17 +189,11 @@ class PointillismPostEffect extends PostEffect {
             uniform float uLevelRange;
             uniform float uSourceStructureBlend;
             uniform float uPaperStrength;
+            uniform vec3 uPaperTint;
             uniform float uEdgeThreshold;
             uniform float uEdgeStrength;
             uniform float uDenoiseStrength;
             uniform float uGapFill;
-            uniform float uStippleSize;
-            uniform float uSeed;
-            uniform float uContrastDotMix;
-            uniform float uDotRadiusPx;
-            uniform float uGapSpacing;
-            uniform float uBrushHardness;
-            uniform sampler2D uSceneDepthMap;
 
             float getLuminance(vec3 color) {
                 return dot(color, vec3(0.299, 0.587, 0.114));
@@ -372,161 +347,6 @@ class PointillismPostEffect extends PostEffect {
                 return acc;
             }
 
-            vec3 liftBleedColor(vec3 c, vec3 floorColor) {
-                float l = getLuminance(c);
-                float floorL = max(getLuminance(floorColor) * 0.88, 0.04);
-                if (l >= floorL) {
-                    return c;
-                }
-                float t = l / max(floorL, 0.001);
-                return mix(floorColor, c, t);
-            }
-
-            float stippleHash(vec2 p) {
-                return fract(sin(dot(p, vec2(127.1, 311.7) + uSeed * 0.017)) * 43758.5453);
-            }
-
-            float backdropDepthMask(vec2 uv) {
-                float d = texture2D(uSceneDepthMap, uv).r;
-                return step(0.9995, d);
-            }
-
-            // 天空渐变也视为背景：低局部细节 + 与远场接近（不依赖 fieldUniform）
-            float backdropColorMask(vec2 uv, vec3 rawScene, vec3 blur5, float dotGrain) {
-                vec3 farField = boxBlurWide(uv, 34.0);
-                float localDetail = length(rawScene - blur5);
-                float skyLike = 1.0 - smoothstep(0.022, 0.13, localDetail);
-                float farMatch = 1.0 - smoothstep(0.035, 0.20, length(rawScene - farField));
-                float paintFree = 1.0 - smoothstep(0.10, 0.32, dotGrain);
-                return clamp(skyLike * farMatch * paintFree, 0.0, 1.0);
-            }
-
-            vec3 sampleSkyFieldColor(vec2 cellUv, float radiusPx) {
-                vec2 px = radiusPx / uResolution;
-                vec3 acc = vec3(0.0);
-                float wsum = 0.0;
-                for (int i = 0; i < 9; i++) {
-                    float fi = float(i) + 1.0;
-                    float ang = fi * 2.39996323;
-                    float rad = sqrt(fi / 9.0);
-                    vec2 off = vec2(cos(ang), sin(ang)) * rad * px;
-                    float w = 1.0 - rad * 0.32;
-                    acc += texture2D(uColorBuffer, cellUv + off).rgb * w;
-                    wsum += w;
-                }
-                return acc / max(wsum, 0.001);
-            }
-
-            vec3 tintSkyDot(vec3 base, vec2 cellId) {
-                float vibe = clamp(uContrastDotMix, 0.0, 0.55);
-                if (vibe < 0.001) {
-                    return base;
-                }
-                float tier = stippleHash(cellId + vec2(3.7, 11.3));
-                if (tier > vibe * 0.62) {
-                    return base;
-                }
-                float warm = stippleHash(cellId + vec2(19.0, 5.0));
-                vec3 warmTint = base * vec3(1.10, 1.03, 0.88);
-                vec3 coolTint = base * vec3(0.90, 0.96, 1.12);
-                return mix(base, mix(coolTint, warmTint, warm), vibe * 0.42);
-            }
-
-            vec3 sampleNearbyPaint(vec2 uv, float radiusPx) {
-                vec2 invRes = 1.0 / uResolution;
-                vec3 acc = vec3(0.0);
-                float wsum = 0.0;
-                float golden = 2.39996323;
-                for (int i = 0; i < 12; i++) {
-                    float fi = float(i) + 1.0;
-                    float r = sqrt(fi / 12.0);
-                    float theta = fi * golden;
-                    vec2 off = vec2(cos(theta), sin(theta)) * r * radiusPx * invRes;
-                    vec3 s = texture2D(uColorBuffer, uv + off).rgb;
-                    float sL = getLuminance(s);
-                    float chroma = length(s - vec3(sL));
-                    float w = smoothstep(0.012, 0.09, chroma) + smoothstep(0.04, 0.22, sL) * 0.35;
-                    acc += s * w;
-                    wsum += w;
-                }
-                return (wsum > 0.002) ? acc / wsum : vec3(0.0);
-            }
-
-            float backdropMask(vec2 uv, vec3 rawScene, vec3 blur5, float dotGrain) {
-                float depthBg = backdropDepthMask(uv);
-                float colorBg = backdropColorMask(uv, rawScene, blur5, dotGrain);
-                return clamp(max(depthBg, colorBg), 0.0, 1.0);
-            }
-
-            vec3 skyboxPointillism(vec2 uv, vec3 fieldColor) {
-                float gap = clamp(uGapSpacing, 0.0, 1.0);
-                float hard = clamp(uBrushHardness, 0.0, 1.0);
-                float dotPx = max(uDotRadiusPx * mix(2.0, 3.2, 1.0 - gap), 2.8);
-
-                vec2 fragCoord = uv * uResolution;
-                vec2 cellId = floor(fragCoord / dotPx);
-                vec2 cellCenter = (cellId + 0.5) * dotPx;
-                vec2 cellUv = cellCenter / uResolution;
-
-                float angle = stippleHash(cellId + vec2(7.0, 13.0)) * 6.2831853;
-                vec2 rot = vec2(cos(angle), sin(angle));
-
-                vec3 sampled = sampleSkyFieldColor(cellUv, dotPx * 0.62);
-                vec3 dotColor = mix(sampled, fieldColor, 0.38);
-                dotColor = saturateColor(dotColor, max(1.0, uSaturation * 0.95));
-                dotColor = applyContrast(dotColor, uLevelRange);
-                dotColor = tintSkyDot(dotColor, cellId);
-
-                float jitter = (stippleHash(cellId) - 0.5) * 0.06;
-                float dotR = mix(0.50, 0.58, 1.0 - gap) + jitter;
-                vec2 local = rot * ((fragCoord - cellCenter) / dotPx);
-                float ell = length(local * vec2(1.08, 0.92));
-                float aa = max(1.2 / dotPx, 1.8 / min(uResolution.x, uResolution.y));
-                float coreEnd = mix(0.52, 0.82, hard);
-                float dotMask = (1.0 - smoothstep(coreEnd - aa, 1.0 + aa * 0.5, ell / dotR));
-
-                vec3 gapColor = mix(fieldColor, dotColor, 0.42);
-                return mix(gapColor, dotColor, dotMask);
-            }
-
-            // 背景：2D 点彩（对齐 3D 点径）+ paperStrength 控制环境/邻域晕染
-            vec3 applyBackdropPost(vec2 uv, vec3 color, vec3 rawScene, vec3 blur5, float dotGrain, float bgMask) {
-                float keepPaint = smoothstep(0.07, 0.26, dotGrain);
-                if (keepPaint > 0.992 || bgMask < 0.001) {
-                    return color;
-                }
-
-                vec3 farField = boxBlurWide(uv, 34.0);
-                vec3 skyBase = farField;
-                float washT = clamp(uPaperStrength, 0.0, 1.0);
-
-                vec3 fieldColor = skyBase;
-                vec3 bleedFar = liftBleedColor(boxBlurWide(uv, mix(14.0, 40.0, washT)), skyBase);
-                vec3 bleedNear = liftBleedColor(boxBlurWide(uv, mix(6.0, 18.0, washT)), skyBase);
-
-                float contentNear = smoothstep(0.018, 0.095, length(bleedFar - bleedNear));
-                float transBand = (1.0 - keepPaint) * (1.0 - bgMask) * contentNear;
-
-                vec3 deepSky = mix(skyBase, bleedFar, mix(0.08, 0.42, washT));
-                vec3 transWash = mix(deepSky, bleedNear, mix(0.35, 0.72, washT));
-                transWash = mix(transWash, bleedFar, transBand * mix(0.12, 0.38, washT));
-                fieldColor = mix(transWash, deepSky, bgMask);
-
-                vec3 nearbyPaint = sampleNearbyPaint(uv, mix(8.0, 52.0, washT));
-                if (length(nearbyPaint) > 0.001) {
-                    float fringe = max(transBand, (1.0 - bgMask) * 0.55) * washT;
-                    fieldColor = mix(fieldColor, liftBleedColor(nearbyPaint, skyBase), fringe * 0.78);
-                }
-
-                vec3 stippled = skyboxPointillism(uv, fieldColor);
-
-                float blendAmt = clamp(max(bgMask, transBand * mix(0.35, 0.75, washT)), 0.0, 1.0);
-                blendAmt *= (1.0 - keepPaint);
-
-                vec3 base = mix(color, rawScene, bgMask * 0.92);
-                return mix(base, stippled, blendAmt);
-            }
-
             float paintWeight(vec3 s, float refL) {
                 float sL = getLuminance(s);
                 return smoothstep(0.025, 0.14, sL - refL + 0.05)
@@ -577,14 +397,11 @@ class PointillismPostEffect extends PostEffect {
             void main() {
                 vec2 uv = vUv0;
                 vec3 rawScene = texture2D(uColorBuffer, uv).rgb;
-                vec3 blur = boxBlur5(uv);
-                float grainEarly = clamp(length(rawScene - blur) * 4.2, 0.0, 1.0);
-                float bgMask = backdropMask(uv, rawScene, blur, grainEarly);
-                float contentMask = 1.0 - bgMask;
-
                 vec3 sceneColor = rawScene;
-                sceneColor = mix(suppressSpeckles(uv, sceneColor), rawScene, bgMask);
-                sceneColor = mix(fillSparseHoles(uv, rawScene, sceneColor), rawScene, bgMask);
+                vec3 blur = boxBlur5(uv);
+
+                sceneColor = suppressSpeckles(uv, sceneColor);
+                sceneColor = fillSparseHoles(uv, rawScene, sceneColor);
 
                 float structure = clamp(uSourceStructureBlend, 0.0, 1.0);
                 float flatDesire = 1.0 - structure;
@@ -593,7 +410,7 @@ class PointillismPostEffect extends PostEffect {
 
                 float grain = clamp(length(sceneColor - blur) * 4.2, 0.0, 1.0);
                 float dotMask = smoothstep(0.20, 0.52, grain);
-                float flattenMask = interiorMask * (1.0 - dotMask * structure * 0.62) * contentMask;
+                float flattenMask = interiorMask * (1.0 - dotMask * structure * 0.62);
 
                 float flatMix = mix(0.06, 0.58, flatDesire) * flattenMask;
                 vec3 flattened = flatOpticalMix(uv, sceneColor, flatMix);
@@ -604,20 +421,19 @@ class PointillismPostEffect extends PostEffect {
                 vec3 color = mix(flattened, sceneColor, keepStructure);
 
                 float postSat = 1.0 + max(0.0, uSaturation - 1.0) * 0.28;
-                color = mix(saturateColor(color, postSat), rawScene, bgMask * 0.85);
-                color = mix(applyContrast(color, uLevelRange), rawScene, bgMask * 0.75);
+                color = saturateColor(color, postSat);
+                color = applyContrast(color, uLevelRange);
+                color = mix(color, color * uPaperTint, uPaperStrength * 0.42);
 
                 float edgeW = clamp(uEdgeStrength, 0.0, 1.0);
                 float edge = edgeFactor(uv);
-                float edgeAmt = clamp(edge * mix(0.0, 1.45, edgeW), 0.0, 1.0) * structEdge * contentMask;
+                float edgeAmt = clamp(edge * mix(0.0, 1.45, edgeW), 0.0, 1.0) * structEdge;
                 vec3 highPass = sceneColor - blur;
                 vec3 sharpen = clamp(sceneColor + highPass * mix(1.2, 3.8, edgeW), 0.0, 1.0);
                 color = mix(color, sharpen, edgeAmt * 0.85);
 
                 vec3 edgePop = saturateColor(color, 1.0 + edgeW * 0.18);
                 color = mix(color, edgePop, edgeAmt * 0.38);
-
-                color = applyBackdropPost(uv, color, rawScene, blur, grainEarly, bgMask);
 
                 gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
             }
@@ -632,6 +448,9 @@ class PointillismPostEffect extends PostEffect {
 
     setSettings(raw: unknown): void {
         this.settings = normalizePointillismPostSettings(raw);
+        this.uPaperTint[0] = this.settings.paperTint[0];
+        this.uPaperTint[1] = this.settings.paperTint[1];
+        this.uPaperTint[2] = this.settings.paperTint[2];
     }
 
     render(inputTarget: { colorBuffer?: Texture }, outputTarget: RenderTarget, rect: unknown): void {
@@ -650,21 +469,11 @@ class PointillismPostEffect extends PostEffect {
         scope.resolve('uLevelRange').setValue(s.levelRange);
         scope.resolve('uSourceStructureBlend').setValue(s.sourceStructureBlend);
         scope.resolve('uPaperStrength').setValue(s.paperStrength);
+        scope.resolve('uPaperTint').setValue(this.uPaperTint);
         scope.resolve('uEdgeThreshold').setValue(s.edgeThreshold);
         scope.resolve('uEdgeStrength').setValue(s.edgeStrength);
         scope.resolve('uDenoiseStrength').setValue(s.denoiseStrength);
         scope.resolve('uGapFill').setValue(s.gapFill);
-        scope.resolve('uStippleSize').setValue(s.stippleSize);
-        scope.resolve('uSeed').setValue(s.seed);
-        scope.resolve('uContrastDotMix').setValue(s.contrastDotMix);
-        scope.resolve('uDotRadiusPx').setValue(s.dotRadiusPx);
-        scope.resolve('uGapSpacing').setValue(s.gapSpacing);
-        scope.resolve('uBrushHardness').setValue(s.brushHardness);
-
-        const depthMap = scope.resolve('uSceneDepthMap').value as Texture | null | undefined;
-        if (depthMap) {
-            scope.resolve('uSceneDepthMap').setValue(depthMap);
-        }
 
         this.drawQuad(outputTarget, this.shader, rect as any);
     }
@@ -807,8 +616,6 @@ export class PointillismPostController {
             return;
         }
 
-        this.camera.requestSceneDepthMap(true);
-
         const cameraFrame = options?.getCameraFrame?.();
         if (cameraFrame?.enabled && this.cameraFrameBridge.mount(cameraFrame)) {
             this.unmountLegacy();
@@ -825,7 +632,6 @@ export class PointillismPostController {
             console.warn('[pointillism-stipple] camera postEffects unavailable');
             return;
         }
-        this.camera.requestSceneDepthMap(true);
         if (!this.legacyMounted) {
             this.camera.postEffects.addEffect(this.effect);
             this.legacyMounted = true;
