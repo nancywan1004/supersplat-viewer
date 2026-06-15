@@ -62,6 +62,7 @@ import {
     applyPlacedVideoBillboardScale,
     createPlacedVideoTextureFromVideo,
     initPlacedVideoTexture,
+    invalidatePlacedVideoTextureUpload,
     PLACED_VIDEO_INITIAL_LOAD_TIMEOUT_MS,
     PLACED_VIDEO_PLACEMENT_TIMEOUT_MS,
     unmountPlacedVideoFromDom
@@ -612,6 +613,7 @@ async function instantiateVideo(
     // 纹理已 setSource(video) 并停在首帧；热区内 play + texture.upload() 轮询。
 
     entity.on('destroy', () => {
+        invalidatePlacedVideoTextureUpload(runtime);
         unmountPlacedVideoFromDom(video);
         const destroyGpu = () => {
             try {
@@ -1015,25 +1017,20 @@ export async function syncScenePlacedEntitiesFromSettings(global: Global): Promi
     }
 
     const matchedSettingIds = new Set<string>();
-    const toRemove: ScenePlacedItem[] = [];
 
     for (const entry of [...state.scenePlacedEntities]) {
         const sa = settingsById.get(entry.id);
         if (!sa || !canReuseScenePlacedEntry(entry, sa)) {
             events.fire('sceneAssets:removed', entry);
-            entry.entity.destroy();
-            toRemove.push(entry);
+            const idx = state.scenePlacedEntities!.indexOf(entry);
+            if (idx >= 0) state.scenePlacedEntities!.splice(idx, 1);
+            entry.entity?.destroy();
             continue;
         }
         matchedSettingIds.add(sa.id);
         const posArr = (sa.transform?.position ?? [0, 0, 0]) as number[];
         entry.entity.setLocalPosition(posArr[0] ?? 0, posArr[1] ?? 0, posArr[2] ?? 0);
         applySceneAssetTransformToEntry(global, entry, sa);
-    }
-
-    for (const entry of toRemove) {
-        const idx = state.scenePlacedEntities!.indexOf(entry);
-        if (idx >= 0) state.scenePlacedEntities!.splice(idx, 1);
     }
 
     if (
@@ -1117,14 +1114,14 @@ export async function requestSceneAssetsRestore(global: Global, options: SceneAs
  * 清空当前场景中已放置的资产：销毁实体并从 state.scenePlacedEntities 移除，并派发 sceneAssets:cleared。
  */
 export function clearScenePlacedEntities(global: Global): void {
-    const list = global.state.scenePlacedEntities ?? [];
-    // 须在销毁 entity 前清理 callout 等 render 资源（见 audio-callout destroyAudioCallout3d 注释）。
-    global.events.fire('sceneAssets:cleared');
-    for (const entry of list) {
-        entry.entity.destroy();
-    }
+    const list = [...(global.state.scenePlacedEntities ?? [])];
+    // 先从 state 摘除，避免 destroy 与 app.update 播控 tick 同帧交错访问已销毁纹理。
     global.state.scenePlacedEntities = [];
     global.state.selectedSceneEntityId = null;
+    global.events.fire('sceneAssets:cleared');
+    for (const entry of list) {
+        entry.entity?.destroy();
+    }
 }
 
 function applySceneAssetSelectedFromScenePick(
@@ -1505,8 +1502,8 @@ export function initAssetPlacementHandler(
         if (idx < 0) return;
         const entry = list[idx];
         events.fire('sceneAssets:removed', entry);
-        entry.entity.destroy();
         list.splice(idx, 1);
+        entry.entity?.destroy();
         state.selectedSceneEntityId = null;
         events.fire('sceneAsset:selected');
         deps.pushEditHistory?.(global, 'delete asset');

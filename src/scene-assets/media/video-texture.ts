@@ -73,12 +73,14 @@ function createVideoTexture(device: GraphicsDevice, name: string): Texture {
 }
 
 export function resizeVideoTextureFromMetadata(texture: Texture, video: HTMLVideoElement): void {
+    if (!texture?.device) return;
     const w = Math.max(2, video.videoWidth || 4);
     const h = Math.max(2, video.videoHeight || 4);
     texture.resize(w, h);
 }
 
 function resizeVideoTextureFromCanvas(texture: Texture, canvas: HTMLCanvasElement): void {
+    if (!texture?.device) return;
     const w = Math.max(2, canvas.width || 4);
     const h = Math.max(2, canvas.height || 4);
     texture.resize(w, h);
@@ -116,7 +118,12 @@ export function safeUploadPlacedVideoTexture(m: PlacedVideoRuntime): void {
 
 /** 在 prerender（draw 之前）统一 flush，避免 update 与 render 同帧争用纹理 impl */
 export function requestPlacedVideoTextureUpload(m: PlacedVideoRuntime): void {
+    if (!m.texture?.device) return;
     pendingTextureUploads.add(m);
+}
+
+export function invalidatePlacedVideoTextureUpload(m: PlacedVideoRuntime): void {
+    pendingTextureUploads.delete(m);
 }
 
 export function initPlacedVideoTextureUploadFlush(app: AppBase): () => void {
@@ -142,6 +149,7 @@ export function initPlacedVideoTextureUploadFlush(app: AppBase): () => void {
  */
 export function syncPlacedVideoTextureBinding(m: PlacedVideoRuntime): void {
     const tex = m.texture;
+    if (!tex?.device) return;
     const want: 'video' | 'composite' = m.controlsOverlayActive ? 'composite' : 'video';
 
     if (want === 'composite') {
@@ -314,9 +322,7 @@ export function pausePlacedVideoTexture(m: PlacedVideoRuntime): void {
         // ignore
     }
     m.videoEl.muted = true;
-    if (!m.controlsOverlayActive) {
-        requestPlacedVideoTextureUpload(m);
-    }
+    requestPlacedVideoTextureUpload(m);
 }
 
 function getVideoPlaneMaterial(entity: Entity): StandardMaterial | null {
@@ -326,6 +332,7 @@ function getVideoPlaneMaterial(entity: Entity): StandardMaterial | null {
 }
 
 export function playPlacedVideoTexture(entity: Entity, m: PlacedVideoRuntime): void {
+    if (!m.texture?.device) return;
     const mat = getVideoPlaneMaterial(entity);
     if (mat) {
         mat.emissiveMap = m.texture;
