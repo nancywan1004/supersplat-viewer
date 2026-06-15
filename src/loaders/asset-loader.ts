@@ -230,6 +230,34 @@ export async function hydrateAssetLibraryItem(
     }
 }
 
+/**
+ * 从 `sceneAssets[].source` 解析可加载 URL。
+ * 优先 `url` / `filename`；缺失时回退 `uploadedAssets`（编辑会话内资产库 id）。
+ */
+export function resolveSceneAssetSourceUrl(
+    global: Global,
+    src: SceneAssetRecord['source'] | undefined
+): string | null {
+    const s = src ?? {};
+    const direct =
+        typeof s.url === 'string' && s.url.trim().length > 0
+            ? s.url.trim()
+            : typeof s.filename === 'string' && s.filename.trim().length > 0
+                ? s.filename.trim()
+                : null;
+    if (direct) return direct;
+
+    const assetId = typeof s.assetId === 'string' ? s.assetId.trim() : '';
+    if (!assetId) return null;
+
+    const lib = global.state.uploadedAssets?.find((a) => a.id === assetId);
+    const fromLib = lib?.url || lib?.filename;
+    if (typeof fromLib === 'string' && fromLib.trim().length > 0) {
+        return fromLib.trim();
+    }
+    return null;
+}
+
 export async function loadSceneAssetLibraryItem(
     global: Global,
     sceneAsset: SceneAssetRecord,
@@ -241,8 +269,14 @@ export async function loadSceneAssetLibraryItem(
     if (!type) return null;
 
     const src = sceneAsset.source ?? {};
-    const url = src.url ?? src.filename;
-    if (!url) return null;
+    const url = resolveSceneAssetSourceUrl(global, src);
+    if (!url) {
+        console.warn('[SceneAssets] restore skipped: missing source url', {
+            type,
+            assetId: src.assetId
+        });
+        return null;
+    }
 
     const filename = src.filename ?? url;
     const base: AssetLibraryItem = {

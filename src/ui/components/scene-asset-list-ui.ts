@@ -92,6 +92,7 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
                 sendEditProtocolMessage({ type: 'ASSET_DELETE', id: entry.id });
                 return;
             }
+            events.fire('sceneAssets:removed', entry);
             entry.entity.destroy();
             const arr = state.scenePlacedEntities!;
             const idx = arr.findIndex((s) => s.id === entry.id);
@@ -101,7 +102,6 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
                     state.selectedSceneEntityId = null;
                     events.fire('sceneAsset:selected', { source: 'host' });
                 }
-                events.fire('sceneAssets:removed', entry);
                 renderSceneAssetList(listEl, global);
                 pushEditHistory(global, 'delete asset');
             }

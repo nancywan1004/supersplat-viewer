@@ -8,11 +8,10 @@ import { type CameraComponent, type Entity, Mat4, Vec3 } from 'playcanvas';
 import { hitSceneGizmoAtClient } from '../../gizmo-hit-test';
 import { isPlacementCursorActive } from '../../placement-cursor';
 import type { Global, ScenePlacedItem } from '../../types';
-import { readViewMediaMuted } from '../../view-settings';
 import { intersectRayLocalVideoMesh } from './curved-billboard-mesh';
 import { ensureScenePlacedMediaRuntime, getPlacedMediaRuntime, type PlacedVideoRuntime } from './media-runtime';
 import { isMediaConsumptionMode } from './media-hotspot-params';
-import { userPauseSceneMedia, userPlaySceneMedia } from './scene-media-playback';
+import { isSceneMediaSoundSuppressed, userPauseSceneMedia, userPlaySceneMedia } from './scene-media-playback';
 import {
     initPlacedVideoTextureUploadFlush,
     requestPlacedVideoTextureUpload,
@@ -797,14 +796,14 @@ function findVideoHitAtClient(
 }
 
 function toggleVideoPlay(global: Global, entry: ScenePlacedItem, m: PlacedVideoRuntime): void {
-    if (readViewMediaMuted(global)) {
-        vcLog('toggle:blocked', { entryId: entry.id, reason: 'viewMediaMuted' });
-        return;
-    }
-
     touchChromeHover(entry.id);
     const video = m.videoEl;
-    if (video.paused) {
+    const playing = m.isLive && !video.paused && !video.ended;
+    if (!playing) {
+        if (isSceneMediaSoundSuppressed(global)) {
+            vcLog('toggle:blocked', { entryId: entry.id, reason: 'sceneMediaSoundSuppressed' });
+            return;
+        }
         userPlaySceneMedia(global, entry);
         vcLog('toggle:play', { entryId: entry.id });
     } else {

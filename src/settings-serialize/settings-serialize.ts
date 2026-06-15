@@ -19,6 +19,7 @@ import {
     syncEffectsRuntimeStateFromSettings
 } from './effects-sync';
 import { filterAssetEffectParams } from '../vfx/effects-runtime/asset/asset-effect-params';
+import { resolveSceneAssetSourceUrl } from '../loaders/asset-loader';
 import { clearViewEffectsSession } from '../view-settings';
 
 const defaultPostEffectShadow = () => ({
@@ -259,6 +260,23 @@ export function serializeScenePlacedItem(entry: ScenePlacedItem): SceneAsset {
     return out;
 }
 
+/** 存盘前补齐 video/audio 的 `source.url`，避免 Viewer 冷启动仅依赖 `uploadedAssets` 无法恢复。 */
+function enrichSceneAssetSourceForPersistence(global: Global, sa: SceneAsset): SceneAsset {
+    if (sa.type !== 'video' && sa.type !== 'audio') return sa;
+    const resolved = resolveSceneAssetSourceUrl(global, sa.source);
+    if (!resolved) return sa;
+    const src = sa.source ?? {};
+    if (src.url === resolved) return sa;
+    return {
+        ...sa,
+        source: {
+            ...src,
+            url: resolved,
+            filename: src.filename ?? resolved
+        }
+    };
+}
+
 /**
  * 持久化 sceneAssets：以运行态为准，并保留 settings 中尚未恢复进场景的条目
  *（例如 video 因 CORS/超时未 place 成功时，避免保存把 JSON 里的配置抹掉）。
@@ -271,7 +289,7 @@ export function buildSceneAssetsForPersistence(global: Global): SceneAsset[] {
     const preserved = (settings.sceneAssets ?? []).filter(
         (sa): sa is SceneAsset => typeof sa?.id === 'string' && sa.id.length > 0 && !runtimeIds.has(sa.id)
     );
-    return [...runtimeSerialized, ...preserved];
+    return [...runtimeSerialized, ...preserved].map((sa) => enrichSceneAssetSourceForPersistence(global, sa));
 }
 
 /** 用户从场景删除资产时，同步剔除 settings.sceneAssets，避免下次保存被 merge 复活 */

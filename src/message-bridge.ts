@@ -10,6 +10,7 @@ import {
     applySceneAssetTriggerDistanceM,
     requestSceneAssetsRestore
 } from './scene-assets/asset-placement-handler';
+import { pauseAllSceneMedia } from './scene-assets/media/scene-media-playback';
 import {
     initEditHistory,
     canUndo,
@@ -401,6 +402,8 @@ const initPostMessageBridge = (global: Global) => {
                 const value = p.value === true;
                 if (value && config.allowEditMode === false) break;
                 if (value) {
+                    // 须在 await restore 之前停播：此阶段 editMode 仍为 false，热区评估会继续出声。
+                    pauseAllSceneMedia(global);
                     editModeBaselineString = null;
                     // 进入编辑停播一次性 reveal，persistent 保留；退出编辑后再恢复 reveal 播放节奏。
                     const hasVfxToResume = getRevealActiveType(state) !== 'none';
@@ -490,6 +493,8 @@ const initPostMessageBridge = (global: Global) => {
             case 'VIEW_MEDIA_MUTE_SET':
                 if (typeof p.value === 'boolean') {
                     applyViewMediaMuteSet(global, p.value);
+                } else {
+                    console.warn('[MessageBridge] VIEW_MEDIA_MUTE_SET ignored: value must be boolean', p);
                 }
                 break;
             case 'TORCH_TOGGLE':

@@ -8,7 +8,6 @@ import * as pc from 'playcanvas';
 import { ensureSceneMediaHotspot } from '../../settings-serialize/settings-serialize-helper';
 import type { ExperienceSettings } from '../../schemas/v2';
 import type { Global, ScenePlacedItem } from '../../types';
-import { readViewMediaMuted } from '../../view-settings';
 import {
     ensureScenePlacedMediaRuntime,
     getPlacedMediaRuntime,
@@ -26,12 +25,14 @@ import {
     evaluateMediaHotspotAnchor
 } from './media-view-depth';
 import {
+    applySceneMediaViewMuteSuppress,
+    applySceneMediaViewMuteRelease,
     clearAllSceneMediaPlaybackFlags,
     clearManualHeldSceneMediaEntryIdIf,
     ensureSceneVideoFramePlaying,
     getActiveSceneMediaEntryId,
     getManualHeldSceneMediaEntryId,
-    isAnnotationFullscreenVideoActive,
+    isSceneMediaSoundSuppressed,
     pauseAllSceneMedia,
     pauseSceneMediaEntry,
     playSceneMediaEntry,
@@ -267,9 +268,8 @@ function applyHotspotPlayback(
         evalState.lastAudioSoundId = desiredAudioSound;
     }
 
-    // sceneSuppress：场景音视频应被「压制」（视频静音保帧、音频暂停）的统一开关。
-    // 来源：View 全局静音 `viewMediaMuted`，或标注大屏正在播放（独占声音）。
-    const sceneSuppress = readViewMediaMuted(global) || isAnnotationFullscreenVideoActive();
+    // sceneSuppress：`viewSettings.mediaMuted`（Viewer/编辑共用会话态）或标注大屏独占声音。
+    const sceneSuppress = isSceneMediaSoundSuppressed(global);
     const globalVideoAutoplay = readGlobalVideoHotspotAutoplayEnabledFromSettings(hotspotParams.settings);
     const list = global.state.scenePlacedEntities ?? [];
 
@@ -298,8 +298,12 @@ function applyHotspotPlayback(
         }
 
         const wantSound = entry.id === desiredVideoSound && !sceneSuppress;
-        ensureSceneVideoFramePlaying(global, entry, { muted: !wantSound });
-        if (wantSound) videoSoundOwner = entry.id;
+        if (wantSound) {
+            playSceneMediaEntry(global, entry);
+            videoSoundOwner = entry.id;
+        } else {
+            ensureSceneVideoFramePlaying(global, entry, { muted: true });
+        }
     }
 
     let audioSoundOwner: string | null = null;
@@ -454,6 +458,9 @@ export function initMediaHotspotController(global: Global): () => void {
             evalState.userUnlocked = true;
         }
         resetAllSceneMediaToInitial(global);
+        if (isSceneMediaSoundSuppressed(global)) {
+            applySceneMediaViewMuteSuppress(global);
+        }
         forceHotspotEval();
     };
 
@@ -478,12 +485,24 @@ export function initMediaHotspotController(global: Global): () => void {
             evalState.userUnlocked = false;
         }
         resetAllSceneMediaToInitial(global);
+        if (isSceneMediaSoundSuppressed(global)) {
+            applySceneMediaViewMuteSuppress(global);
+        }
         if (evalState.pageHidden) return;
         forceHotspotEval();
     };
 
     const onViewMediaMutedChanged = () => {
-        forceHotspotEval();
+        evalState.lastEvalMs = 0;
+        if (isSceneMediaSoundSuppressed(global)) {
+            applySceneMediaViewMuteSuppress(global);
+        } else if (isHotspotGateOpen(global)) {
+            // Viewer / 编辑预览：热区评估统一仲裁唯一声轨，避免与 release 叠加双播。
+            forceHotspotEval();
+        } else {
+            applySceneMediaViewMuteRelease(global);
+        }
+        if (evalState.pageHidden) return;
     };
 
     const onOverlayUserPlayback = () => {

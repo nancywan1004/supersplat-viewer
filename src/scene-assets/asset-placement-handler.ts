@@ -59,6 +59,7 @@ import {
     type VideoPlacementPreloadHandle
 } from './media/video-placement-preload';
 import {
+    applyPlacedVideoBillboardScale,
     createPlacedVideoTextureFromVideo,
     initPlacedVideoTexture,
     PLACED_VIDEO_INITIAL_LOAD_TIMEOUT_MS,
@@ -572,10 +573,6 @@ async function instantiateVideo(
         );
     }
 
-    const w = Math.max(2, video.videoWidth || 1280);
-    const h = Math.max(2, video.videoHeight || 720);
-    const aspect = w / h;
-
     const mat = new StandardMaterial();
     // 与图片资产一致：近似 unlit 卡片 + alpha 通道走 cutout，避免与 gsplat 混合排序问题。
     mat.useLighting = false;
@@ -601,8 +598,7 @@ async function instantiateVideo(
         receiveShadows: false
     });
     entity.setPosition(position);
-    const base = 2;
-    entity.setLocalScale(base * aspect, base, 1);
+    applyPlacedVideoBillboardScale(entity, video);
     applyDefaultPlaneCardOrientation(entity);
 
     const runtime: PlacedMediaRuntime = {
@@ -617,11 +613,21 @@ async function instantiateVideo(
 
     entity.on('destroy', () => {
         unmountPlacedVideoFromDom(video);
-        try {
-            texture.destroy();
-        } catch {
-            // ignore
-        }
+        const destroyGpu = () => {
+            try {
+                mat.destroy();
+            } catch {
+                // ignore
+            }
+            try {
+                texture.destroy();
+            } catch {
+                // ignore
+            }
+        };
+        app.once('frameend', () => {
+            app.once('frameend', destroyGpu);
+        });
     });
 
     return entity;
@@ -966,10 +972,15 @@ async function loadAndPlaceSceneAssetFromSettings(global: Global, sa: SceneAsset
     try {
         item = await loadSceneAssetLibraryItem(global, sa, nextSceneEntityId, ASSET_LOAD_TIMEOUT_MS);
     } catch (err) {
-        console.warn('[SceneAssets] restore asset failed:', sa?.type, err);
+        console.warn('[SceneAssets] restore asset failed:', sa?.type, sa?.id, err);
         return;
     }
-    if (!item) return;
+    if (!item) {
+        if (sa.type === 'video' || sa.type === 'audio') {
+            console.warn('[SceneAssets] restore media skipped:', sa.type, sa.id, sa.source);
+        }
+        return;
+    }
 
     const pos = new Vec3(posArr[0] ?? 0, posArr[1] ?? 0, posArr[2] ?? 0);
     const savedCurvature =
@@ -1009,6 +1020,7 @@ export async function syncScenePlacedEntitiesFromSettings(global: Global): Promi
     for (const entry of [...state.scenePlacedEntities]) {
         const sa = settingsById.get(entry.id);
         if (!sa || !canReuseScenePlacedEntry(entry, sa)) {
+            events.fire('sceneAssets:removed', entry);
             entry.entity.destroy();
             toRemove.push(entry);
             continue;
@@ -1022,7 +1034,6 @@ export async function syncScenePlacedEntitiesFromSettings(global: Global): Promi
     for (const entry of toRemove) {
         const idx = state.scenePlacedEntities!.indexOf(entry);
         if (idx >= 0) state.scenePlacedEntities!.splice(idx, 1);
-        events.fire('sceneAssets:removed', entry);
     }
 
     if (
@@ -1084,6 +1095,7 @@ export async function requestSceneAssetsRestore(global: Global, options: SceneAs
             }
             applyMorphKeyframeVisibilityPolicy(global);
             syncGsplatShadowCastingFromSettings(global);
+            global.events.fire('sceneAssets:restoreComplete', { reason: options.reason ?? 'unknown' });
         })();
         controller.activePromise = task;
         await task;
@@ -1106,12 +1118,13 @@ export async function requestSceneAssetsRestore(global: Global, options: SceneAs
  */
 export function clearScenePlacedEntities(global: Global): void {
     const list = global.state.scenePlacedEntities ?? [];
+    // 须在销毁 entity 前清理 callout 等 render 资源（见 audio-callout destroyAudioCallout3d 注释）。
+    global.events.fire('sceneAssets:cleared');
     for (const entry of list) {
         entry.entity.destroy();
     }
     global.state.scenePlacedEntities = [];
     global.state.selectedSceneEntityId = null;
-    global.events.fire('sceneAssets:cleared');
 }
 
 function applySceneAssetSelectedFromScenePick(
@@ -1354,7 +1367,6 @@ export function initAssetPlacementHandler(
                     if (typeof payload.sceneEntityId === 'string' && payload.sceneEntityId.trim().length > 0) {
                         entry.id = payload.sceneEntityId;
                     }
-                    state.selectedSceneEntityId = entry.id;
                     events.fire('sceneAsset:placed', { id: entry.id, source: 'scene' });
                     console.debug('[AssetPlacement] placed', {
                         id: entry.id,
@@ -1492,10 +1504,10 @@ export function initAssetPlacementHandler(
         const idx = list.findIndex((e) => e.entity === current);
         if (idx < 0) return;
         const entry = list[idx];
+        events.fire('sceneAssets:removed', entry);
         entry.entity.destroy();
         list.splice(idx, 1);
         state.selectedSceneEntityId = null;
-        events.fire('sceneAssets:removed', entry);
         events.fire('sceneAsset:selected');
         deps.pushEditHistory?.(global, 'delete asset');
     };

@@ -294,9 +294,9 @@ export type ViewSettings = {
      */
     annotationsVisible?: boolean;
     /**
-     * 场景 video/audio 热区全局静音（View 模式专属，不入库）
-     * - `VIEW_MEDIA_MUTE_SET` 写入
-     * - `true` 时热区播控强制无声（视频 muted、音频 pause）
+     * 场景 video/audio 全局静音（会话态，不入库）
+     * - `VIEW_MEDIA_MUTE_SET` 写入；Viewer 与编辑模式共用、编辑继承 Viewer 会话值
+     * - `true` 时场景 media 强制无声（视频 muted 保帧、音频 pause）
      * - 默认 `false`
      */
     mediaMuted?: boolean;

@@ -1112,6 +1112,7 @@ const initUI = (global: Global) => {
         dom.viewDebugMediaMute.addEventListener('click', () => {
             if (editUiTransport === 'message-bridge') {
                 sendEditProtocolMessage({ type: 'VIEW_MEDIA_MUTE_SET', value: true });
+                applyViewMediaMuteSet(global, true);
             } else {
                 applyViewMediaMuteSet(global, true);
             }
@@ -1122,6 +1123,7 @@ const initUI = (global: Global) => {
         dom.viewDebugMediaUnmute.addEventListener('click', () => {
             if (editUiTransport === 'message-bridge') {
                 sendEditProtocolMessage({ type: 'VIEW_MEDIA_MUTE_SET', value: false });
+                applyViewMediaMuteSet(global, false);
             } else {
                 applyViewMediaMuteSet(global, false);
             }

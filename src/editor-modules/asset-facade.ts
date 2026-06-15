@@ -1,4 +1,5 @@
 import { applySceneAssetTriggerDistanceM } from '../scene-assets/asset-placement-handler';
+import { pauseAllSceneMedia } from '../scene-assets/media/scene-media-playback';
 import type { AssetLibraryItem, Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 import { setPlacementCursorActive } from '../placement-cursor';
 import { applyViewAnnotationsVisible } from '../view-settings';
@@ -146,6 +147,7 @@ class AssetFacade implements ModuleFacade {
 
         setPlacementCursorActive(ctx.global, false);
         this.clearMorphAssetAdd(ctx);
+        pauseAllSceneMedia(ctx.global);
         if (state.selectedSceneEntityId) {
             state.selectedSceneEntityId = null;
             events.fire('sceneAsset:selected');

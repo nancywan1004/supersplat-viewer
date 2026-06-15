@@ -23,7 +23,7 @@ export function createDefaultViewSettings(): ViewSettings {
 }
 
 /**
- * 确保 `global.viewSettings` 存在并完成缺省字段补齐（不入库，仅 Viewer 会话态）。
+ * 确保 `global.viewSettings` 存在并完成缺省字段补齐（不入库；Viewer 进入编辑时继承同一会话对象）。
  */
 export function ensureViewSettings(global: Global): ViewSettings {
     if (!global.viewSettings) {
@@ -61,7 +61,8 @@ export function applyViewAnnotationsVisible(global: Global, visible: boolean): v
 }
 
 /**
- * `VIEW_MEDIA_MUTE_SET`：场景 video/audio 热区全局静音（仅 viewSettings）。
+ * `VIEW_MEDIA_MUTE_SET`：场景 video/audio 全局静音（`viewSettings.mediaMuted`，不入库）。
+ * Viewer 与编辑模式共用同一会话值；进入编辑继承，编辑内可调，退出 View 仍保留。
  * @returns 是否发生变更
  */
 export function applyViewMediaMuteSet(global: Global, muted: boolean): boolean {

@@ -19,6 +19,11 @@ export const PLACED_VIDEO_INITIAL_LOAD_TIMEOUT_MS = 45000;
 /** 编辑放置模式：首帧预热与点击放置（远程大文件通常仍受网络限制） */
 export const PLACED_VIDEO_PLACEMENT_TIMEOUT_MS = 20000;
 
+/** 竖直立屏视频平面默认高度（世界单位）；宽度 = height × (videoWidth / videoHeight) */
+export const PLACED_VIDEO_DEFAULT_HEIGHT = 2;
+
+const PLACED_VIDEO_FALLBACK_ASPECT = 16 / 9;
+
 const pendingTextureUploads = new Set<PlacedVideoRuntime>();
 let textureUploadFlushRegistered = false;
 
@@ -175,11 +180,37 @@ export function bindVideoTextureFirstFrame(texture: Texture, video: HTMLVideoEle
     }
 }
 
+export function readPlacedVideoAspectRatio(video: HTMLVideoElement): number {
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    if (w >= 2 && h >= 2) {
+        return w / h;
+    }
+    return PLACED_VIDEO_FALLBACK_ASPECT;
+}
+
+/** 按视频 intrinsic 宽高比设置立屏 billboard 的 localScale（与 `instantiateVideo` 一致） */
+export function applyPlacedVideoBillboardScale(
+    entity: Entity,
+    video: HTMLVideoElement,
+    height: number = PLACED_VIDEO_DEFAULT_HEIGHT
+): void {
+    const aspect = readPlacedVideoAspectRatio(video);
+    if (video.videoWidth < 2 || video.videoHeight < 2) {
+        console.warn('[PlacedVideo] missing dimensions, using 16:9 fallback scale');
+    }
+    entity.setLocalScale(height * aspect, height, 1);
+}
+
 function tryCommitFirstFrame(
     video: HTMLVideoElement,
-    reason: 'loadeddata' | 'progress' | 'timeout-partial'
+    reason: 'loadeddata' | 'loadedmetadata' | 'progress' | 'timeout-partial'
 ): boolean {
     if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+        return false;
+    }
+    // 首帧与 intrinsic 尺寸须同时就绪，否则 instantiate 会误用 16:9 默认比例
+    if (video.videoWidth < 2 || video.videoHeight < 2) {
         return false;
     }
     if (reason === 'timeout-partial') {
@@ -209,7 +240,7 @@ export function awaitPlacedVideoFirstFrame(
             fn();
         };
 
-        const commit = (reason: 'loadeddata' | 'progress' | 'timeout-partial') => {
+        const commit = (reason: 'loadeddata' | 'loadedmetadata' | 'progress' | 'timeout-partial') => {
             if (!tryCommitFirstFrame(video, reason)) {
                 return false;
             }
@@ -229,7 +260,7 @@ export function awaitPlacedVideoFirstFrame(
         };
 
         video.addEventListener('loadedmetadata', () => {
-            // 仅用于尽早获知尺寸；首帧仍以 HAVE_CURRENT_DATA 为准
+            commit('loadedmetadata');
         }, { once: true });
 
         video.addEventListener('loadeddata', () => {
