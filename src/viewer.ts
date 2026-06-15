@@ -1141,7 +1141,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 ? [PIXELFORMAT_RGBA16F, PIXELFORMAT_RGBA32F]
                 : [];
             cameraFrame.rendering.sceneDepthMap =
-                computeRequiresCameraFrame || yiyunDianranPostEffectActive;
+                computeRequiresCameraFrame || yiyunDianranPostEffectActive || pointillismPostActive;
             cameraFrame.enabled = true;
             const effectivePostFxSettings = postFxRequested ? postEffectSettings : noPostEffects;
             applyPostEffectSettings(cameraFrame, effectivePostFxSettings);

@@ -25,7 +25,9 @@ import {
     evaluateAudioHotspotAnchor,
     evaluateMediaHotspotAnchor
 } from './media-view-depth';
+import { revealBlocksAnim } from '../../vfx/effects-runtime/reveal/reveal-policy';
 import {
+    applySceneMediaViewMuteSuppress,
     clearAllSceneMediaPlaybackFlags,
     clearManualHeldSceneMediaEntryIdIf,
     ensureSceneVideoFramePlaying,
@@ -415,7 +417,7 @@ export function initMediaHotspotController(global: Global): () => void {
         if (!isEditModeWithoutPreview(global)) {
             runMediaHotspotEvaluation(global, evalState);
         }
-        if (uploadToggle) {
+        if (uploadToggle && isPlacedAssetsRootEnabled(global)) {
             tickPlacedVideoTextureUploads(collectLiveVideos(), uploadToggle);
         }
     };
@@ -483,11 +485,33 @@ export function initMediaHotspotController(global: Global): () => void {
     };
 
     const onViewMediaMutedChanged = () => {
+        // 热区门关闭（编辑非预览）时评估循环不会跑 sceneSuppress，须在此立即压制。
+        if (readViewMediaMuted(global) || isAnnotationFullscreenVideoActive()) {
+            applySceneMediaViewMuteSuppress(global);
+        }
         forceHotspotEval();
     };
 
     const onOverlayUserPlayback = () => {
         evalState.userUnlocked = true;
+    };
+
+    const onSceneAssetsRestoreComplete = () => {
+        forceHotspotEval();
+    };
+
+    const onRevealRestart = () => {
+        // 阻塞型 reveal 重播会 lock placedAssets；须立即 pause，不能等热区评估节流。
+        if (!revealBlocksAnim(global.state)) return;
+        evalState.lastVideoSoundId = null;
+        evalState.lastAudioSoundId = null;
+        evalState.lastEvalMs = 0;
+        pauseAllSceneMedia(global);
+    };
+
+    const onRevealComplete = () => {
+        if (evalState.pageHidden) return;
+        forceHotspotEval();
     };
 
     events.on('sceneMediaHotspot:changed', onHotspotChanged);
@@ -498,6 +522,9 @@ export function initMediaHotspotController(global: Global): () => void {
     events.on('mediaHotspot:userActivate', onUserActivate);
     events.on('mediaOverlay:userPlayback', onOverlayUserPlayback);
     events.on('editMode:changed', onEditModeChanged);
+    events.on('sceneAssets:restoreComplete', onSceneAssetsRestoreComplete);
+    events.on('revealRestart', onRevealRestart);
+    events.on('revealComplete', onRevealComplete);
 
     app.on('update', onUpdate);
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -519,6 +546,9 @@ export function initMediaHotspotController(global: Global): () => void {
         events.off('mediaHotspot:userActivate', onUserActivate);
         events.off('mediaOverlay:userPlayback', onOverlayUserPlayback);
         events.off('editMode:changed', onEditModeChanged);
+        events.off('sceneAssets:restoreComplete', onSceneAssetsRestoreComplete);
+        events.off('revealRestart', onRevealRestart);
+        events.off('revealComplete', onRevealComplete);
         clearAllSceneMediaPlaybackFlags(global);
         pauseAllSceneMedia(global);
     };

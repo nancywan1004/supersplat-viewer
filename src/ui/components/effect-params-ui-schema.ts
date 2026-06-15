@@ -290,7 +290,7 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     gapSpacing: '点间缝隙（↑更疏 ↓更密）',
     denoiseStrength: '噪点抑制',
     gapFill: '覆盖补全（↑填洞 ↓保留缝隙）',
-    paperStrength: '纸张强度',
+    paperStrength: '背景晕染强度',
     paperTint: '纸张色调',
     edgeStrength: '描边强度'
 };
@@ -642,7 +642,7 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
     levels: { min: 2, max: 20, step: 1, default: POINTILLISM_DEFAULTS.levels },
     levelRange: { min: 0.5, max: 2, step: 0.01, default: POINTILLISM_DEFAULTS.levelRange, label: '对比度' },
     ditherSpread: { min: 0, max: 0.2, step: 0.005, default: POINTILLISM_DEFAULTS.ditherSpread },
-    paperStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.paperStrength, label: '纸张质感' },
+    paperStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.paperStrength, label: '背景晕染（天空环境 + 轮廓邻域色）' },
     paperTint: { default: [...POINTILLISM_DEFAULTS.paperTint] },
     edgeStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.edgeStrength, label: '边缘锐化（0关 1强）' }
 };
@@ -663,8 +663,7 @@ const POINTILLISM_VISIBLE_PARAM_KEYS = [
     'saturation',
     'contrastDotMix',
     'warmCoolSplit',
-    'paperStrength',
-    'edgeStrength'
+    'paperStrength'
 ] as const;
 
 const buildPersistentSpec = (key: string): EffectParamUiSpec => {
