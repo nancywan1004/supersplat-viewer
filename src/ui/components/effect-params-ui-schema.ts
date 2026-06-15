@@ -272,7 +272,7 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     paintOpacity: '颜料透明度',
     paintGrain: '颜料肌理（↑涂抹不均感）',
     lumaLevels: '明度色阶',
-    contrastDotMix: '对比色点（↑并列互补色笔触）',
+    contrastDotMix: '色彩振动（↑对比邻域点，非硬互补）',
     complementaryMix: '对比色强度',
     warmCoolSplit: '蓝橙明暗',
     paletteStrength: '色板强度',
@@ -624,7 +624,7 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
     paintThickness: { min: 0.5, max: 1.5, step: 0.01, default: POINTILLISM_DEFAULTS.paintThickness },
     saturation: { min: 0, max: 3, step: 0.01, default: POINTILLISM_DEFAULTS.saturation, label: '色彩饱和' },
     lumaLevels: { min: 2, max: 24, step: 1, default: POINTILLISM_DEFAULTS.lumaLevels },
-    contrastDotMix: { min: 0, max: POINTILLISM_CONTRAST_DOT_MIX_MAX, step: 0.01, default: POINTILLISM_DEFAULTS.contrastDotMix, label: '对比色点（↑并列互补色笔触）' },
+    contrastDotMix: { min: 0, max: POINTILLISM_CONTRAST_DOT_MIX_MAX, step: 0.01, default: POINTILLISM_DEFAULTS.contrastDotMix, label: '色彩振动（↑对比邻域，混入原色）' },
     warmCoolSplit: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.warmCoolSplit, label: '蓝橙明暗' },
     paletteStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.paletteStrength },
     paletteIndex: {

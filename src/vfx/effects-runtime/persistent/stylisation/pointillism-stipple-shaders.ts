@@ -122,7 +122,7 @@ export const POINTILLISM_DEFAULTS = {
 export const resolvePointillismComplementaryMix = (contrastDotMix: number): number =>
     Math.min(0.5, Math.max(0, contrastDotMix) * 1.35);
 
-/** UI 0–0.55 → 并列对比色点占比上限 ~58% */
+/** UI 0–0.55 → 对比色振动强度（满档约 70% 原色 / 20% 邻域 / 10% 强对比） */
 export const POINTILLISM_CONTRAST_DOT_MIX_MAX = 0.55;
 
 /** 边缘检测阈值：↑保真 → ↑阈值，只保留强结构轮廓（避免把点颗粒误判为边） */
@@ -243,13 +243,26 @@ vec3 pointHsv2Rgb(vec3 hsv) {
     return vec3(v, p, q);
 }
 
-// 色环对位互补色点：整颗笔触用饱和互补颜料，不做 RGB 反相混色
-vec3 pointComplementDot(vec3 localChroma) {
-    vec3 hsv = pointRgb2Hsv(clamp(localChroma, 0.0, 1.0));
-    hsv.x = fract(hsv.x + 0.5);
-    hsv.y = clamp(max(hsv.y, 0.42), 0.42, 1.0);
-    hsv.z = clamp(hsv.z * 1.08, 0.12, 0.96);
+// 对比色邻域振动：H≈+180°±δ，S/V 微扰，再 lerp 回 base（非色环硬对位）
+vec3 pointBaseFamilyDot(vec3 base, vec3 rnd) {
+    vec3 hsv = pointRgb2Hsv(clamp(base, 0.0, 1.0));
+    hsv.x = fract(hsv.x + (rnd.x - 0.5) * 0.06);
+    hsv.y = clamp(hsv.y * mix(0.90, 1.10, rnd.y), 0.0, 1.0);
+    hsv.z = clamp(hsv.z * mix(0.92, 1.08, rnd.z), 0.12, 0.98);
     return pointHsv2Rgb(hsv);
+}
+
+vec3 pointContrastFamilyDot(vec3 base, vec3 rnd, float strongFlag) {
+    vec3 hsv = pointRgb2Hsv(clamp(base, 0.0, 1.0));
+    float hueDelta = mix(0.055, 0.028, strongFlag);
+    hsv.x = fract(hsv.x + 0.5 + (rnd.x - 0.5) * 2.0 * hueDelta);
+    hsv.y = clamp(hsv.y * mix(0.80, 1.0, rnd.y), 0.35, 1.0);
+    hsv.z = clamp(hsv.z * mix(0.80, 1.0, rnd.z), 0.12, 0.96);
+    vec3 contrast = pointHsv2Rgb(hsv);
+    float mixLo = mix(0.20, 0.10, strongFlag);
+    float mixHi = mix(0.50, 0.25, strongFlag);
+    float t = mix(mixLo, mixHi, rnd.y);
+    return mix(contrast, base, t);
 }
 
 vec3 pointClampComplementDot(vec3 c) {
@@ -386,14 +399,22 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     );
 
     float dotMix = clamp(uPointillismContrastDotMix, 0.0, 0.55);
-    float contrastChance = clamp(dotMix / 0.55 * 0.58, 0.0, 0.58);
-    float contrastGate = step(rnd.z, contrastChance);
+    float vib = clamp(dotMix / 0.55, 0.0, 1.0);
+    float strongRate = vib * 0.10;
+    float softRate = vib * 0.20;
+    float tierR = rnd.z;
 
     float structure = clamp(uPointillismSourceStructureBlend, 0.0, 1.0);
     vec3 baseDot = clamp(mix(chroma, src, structure * 0.35), 0.0, 1.0);
-    vec3 complementDot = pointClampComplementDot(pointComplementDot(chroma));
-    vec3 styled = mix(baseDot, complementDot, contrastGate);
-    color.rgb = contrastGate > 0.5 ? styled : pointClampPigment(styled);
+    vec3 styled;
+    if (tierR < strongRate) {
+        styled = pointClampComplementDot(pointContrastFamilyDot(baseDot, rnd, 1.0));
+    } else if (tierR < strongRate + softRate) {
+        styled = pointClampComplementDot(pointContrastFamilyDot(baseDot, rnd, 0.0));
+    } else {
+        styled = pointClampPigment(pointBaseFamilyDot(baseDot, rnd));
+    }
+    color.rgb = styled;
     // 可见性已由 srcAlpha 过滤；绘制强度只由 gsplatPS 的 paintOpacity 控制
     color.a = 1.0;
 }
@@ -506,12 +527,25 @@ fn pointHsv2Rgb(hsv: vec3f) -> vec3f {
     return vec3f(v, p, q);
 }
 
-fn pointComplementDot(localChroma: vec3f) -> vec3f {
-    var hsv = pointRgb2Hsv(clamp(localChroma, vec3f(0.0), vec3f(1.0)));
-    hsv.x = fract(hsv.x + 0.5);
-    hsv.y = clamp(max(hsv.y, 0.42), 0.42, 1.0);
-    hsv.z = clamp(hsv.z * 1.08, 0.12, 0.96);
+fn pointBaseFamilyDot(base: vec3f, rnd: vec3f) -> vec3f {
+    var hsv = pointRgb2Hsv(clamp(base, vec3f(0.0), vec3f(1.0)));
+    hsv.x = fract(hsv.x + (rnd.x - 0.5) * 0.06);
+    hsv.y = clamp(hsv.y * mix(0.90, 1.10, rnd.y), 0.0, 1.0);
+    hsv.z = clamp(hsv.z * mix(0.92, 1.08, rnd.z), 0.12, 0.98);
     return pointHsv2Rgb(hsv);
+}
+
+fn pointContrastFamilyDot(base: vec3f, rnd: vec3f, strongFlag: f32) -> vec3f {
+    var hsv = pointRgb2Hsv(clamp(base, vec3f(0.0), vec3f(1.0)));
+    let hueDelta = mix(0.055, 0.028, strongFlag);
+    hsv.x = fract(hsv.x + 0.5 + (rnd.x - 0.5) * 2.0 * hueDelta);
+    hsv.y = clamp(hsv.y * mix(0.80, 1.0, rnd.y), 0.35, 1.0);
+    hsv.z = clamp(hsv.z * mix(0.80, 1.0, rnd.z), 0.12, 0.96);
+    let contrast = pointHsv2Rgb(hsv);
+    let mixLo = mix(0.20, 0.10, strongFlag);
+    let mixHi = mix(0.50, 0.25, strongFlag);
+    let t = mix(mixLo, mixHi, rnd.y);
+    return mix(contrast, base, t);
 }
 
 fn pointClampComplementDot(c: vec3f) -> vec3f {
@@ -644,18 +678,22 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     );
 
     let dotMix = clamp(uniform.uPointillismContrastDotMix, 0.0, 0.55);
-    let contrastChance = clamp(dotMix / 0.55 * 0.58, 0.0, 0.58);
-    let contrastGate = step(rnd.z, contrastChance);
+    let vib = clamp(dotMix / 0.55, 0.0, 1.0);
+    let strongRate = vib * 0.10;
+    let softRate = vib * 0.20;
+    let tierR = rnd.z;
 
     let structure = clamp(uniform.uPointillismSourceStructureBlend, 0.0, 1.0);
     let baseDot = clamp(mix(chroma, src, structure * 0.35), vec3f(0.0), vec3f(1.0));
-    let complementDot = pointClampComplementDot(pointComplementDot(chroma));
-    let styled = mix(baseDot, complementDot, contrastGate);
-    if (contrastGate > 0.5) {
-        (*color).rgb = styled;
+    var styled: vec3f;
+    if (tierR < strongRate) {
+        styled = pointClampComplementDot(pointContrastFamilyDot(baseDot, rnd, 1.0));
+    } else if (tierR < strongRate + softRate) {
+        styled = pointClampComplementDot(pointContrastFamilyDot(baseDot, rnd, 0.0));
     } else {
-        (*color).rgb = pointClampPigment(styled);
+        styled = pointClampPigment(pointBaseFamilyDot(baseDot, rnd));
     }
+    (*color).rgb = styled;
     (*color).a = 1.0;
 }
 `;
