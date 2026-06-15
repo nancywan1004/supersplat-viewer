@@ -276,7 +276,7 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     complementaryMix: '对比色强度',
     warmCoolSplit: '蓝橙明暗',
     paletteStrength: '色板强度',
-    sourceStructureBlend: '原结构保留（↑颗粒 ↓平整）',
+    sourceStructureBlend: '原结构保留（↑点涂 ↓edge-aware平整）',
     seed: '随机分布',
     minVisibleAlpha: '最小可见透明度',
     dotSizeFactor: '点尺寸系数',
@@ -632,7 +632,7 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
         options: POINTILLISM_PALETTE_OPTIONS,
         default: POINTILLISM_DEFAULTS.paletteIndex
     },
-    sourceStructureBlend: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.sourceStructureBlend, label: '原结构保留' },
+    sourceStructureBlend: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.sourceStructureBlend, label: '原结构保留（↑点涂 ↓edge-aware平整）' },
     highlightSparsity: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.highlightSparsity },
     darkDensityBoost: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.darkDensityBoost },
     seed: { min: 0, max: 997, step: 1, default: POINTILLISM_DEFAULTS.seed },

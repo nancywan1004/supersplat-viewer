@@ -283,18 +283,32 @@ void modifySplatCenter(inout vec3 center) {
 void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
     float originalSize = gsplatGetSizeFromScale(scale);
     float gap = clamp(uPointillismGapSpacing, 0.0, 1.0);
-    float densityT = 1.0 - gap;
-    float densityBoost = mix(0.92, 1.08, densityT);
-    float overlap = mix(1.36, 0.62, gap) * densityBoost;
+    float flatDesire = 1.0 - clamp(uPointillismSourceStructureBlend, 0.0, 1.0);
+    float fillT = clamp(uPointillismGapFill, 0.0, 1.0);
 
     float viewDist = max(length(originalCenter - uPointillismViewPos), 0.001);
     float screenDot = viewDist * uPointillismDotRadiusSlope;
     float screenCap = viewDist * uPointillismMaxDotRadiusSlope;
 
+    float prelimDensityT = 1.0 - gap;
+    float prelimOverlap = mix(1.36, 0.62, gap) * mix(0.92, 1.08, prelimDensityT);
+    float prelimDotSize = originalSize * prelimOverlap * max(0.001, uPointillismDotScale);
+    prelimDotSize = min(prelimDotSize, screenCap);
+    prelimDotSize = max(prelimDotSize, screenDot * mix(0.46, 0.14, gap));
+    float sizeRatio = originalSize / max(prelimDotSize, 0.000001);
+    float interiorAnchor = smoothstep(1.0, 2.5, sizeRatio);
+
+    // 平坦区 anchor splat：随 (1 - 原结构保留) 与 gapFill 提高覆盖
+    float coverBoost = max(fillT, flatDesire * interiorAnchor * 0.75);
+    float coverageGap = gap * (1.0 - coverBoost);
+    float densityT = 1.0 - coverageGap;
+    float densityBoost = mix(0.92, 1.08, densityT);
+    float overlap = mix(1.36, 0.62, coverageGap) * densityBoost;
+
     // 间距驱动：gapSpacing ↑ → overlap ↓ → 点间缝隙更大（视距自适应）
     float dotSize = originalSize * overlap * max(0.001, uPointillismDotScale);
     dotSize = min(dotSize, screenCap);
-    dotSize = max(dotSize, screenDot * mix(0.46, 0.14, gap));
+    dotSize = max(dotSize, screenDot * mix(0.46, 0.14, coverageGap));
 
     float cellScale = mix(14.0, 36.0, densityT);
     vec3 sizeCell = floor(originalCenter * cellScale);
@@ -302,7 +316,7 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
     dotSize *= sizePick;
     dotSize *= mix(0.96, 1.06, densityT);
 
-    float sizeRatio = originalSize / max(dotSize, 0.000001);
+    sizeRatio = originalSize / max(dotSize, 0.000001);
     if (sizeRatio > 3.5) {
         gsplatMakeSpherical(scale, dotSize);
         return;
@@ -319,6 +333,7 @@ void modifySplatColor(vec3 center, inout vec4 color) {
     vec3 bucketId = floor(center / bucketWorld);
     float bucketHash = pointHash13(bucketId + vec3(uPointillismSeed * 0.07));
     float fillT = clamp(uPointillismGapFill, 0.0, 1.0);
+    float flatDesire = 1.0 - clamp(uPointillismSourceStructureBlend, 0.0, 1.0);
     float keepMin = mix(0.28, 0.92, fillT);
     float thinExp = mix(-0.82, -0.38, fillT);
     float overdraw = max(distRatio * distRatio * 0.55, 0.12);
@@ -327,6 +342,8 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         keepMin,
         1.0
     );
+    float interiorKeep = max(fillT, flatDesire * smoothstep(0.10, 0.30, color.a) * 0.72);
+    keepChance = mix(keepChance, 1.0, interiorKeep);
     if (bucketHash > keepChance) {
         color.a = 0.0;
         return;
@@ -527,17 +544,30 @@ fn modifySplatCenter(center: ptr<function, vec3f>) {
 fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
     let originalSize = gsplatGetSizeFromScale(*scale);
     let gap = clamp(uniform.uPointillismGapSpacing, 0.0, 1.0);
-    let densityT = 1.0 - gap;
-    let densityBoost = mix(0.92, 1.08, densityT);
-    let overlap = mix(1.36, 0.62, gap) * densityBoost;
+    let flatDesire = 1.0 - clamp(uniform.uPointillismSourceStructureBlend, 0.0, 1.0);
+    let fillT = clamp(uniform.uPointillismGapFill, 0.0, 1.0);
 
     let viewDist = max(length(originalCenter - uniform.uPointillismViewPos), 0.001);
     let screenDot = viewDist * uniform.uPointillismDotRadiusSlope;
     let screenCap = viewDist * uniform.uPointillismMaxDotRadiusSlope;
 
+    let prelimDensityT = 1.0 - gap;
+    let prelimOverlap = mix(1.36, 0.62, gap) * mix(0.92, 1.08, prelimDensityT);
+    var prelimDotSize = originalSize * prelimOverlap * max(0.001, uniform.uPointillismDotScale);
+    prelimDotSize = min(prelimDotSize, screenCap);
+    prelimDotSize = max(prelimDotSize, screenDot * mix(0.46, 0.14, gap));
+    var sizeRatio = originalSize / max(prelimDotSize, 0.000001);
+    let interiorAnchor = smoothstep(1.0, 2.5, sizeRatio);
+
+    let coverBoost = max(fillT, flatDesire * interiorAnchor * 0.75);
+    let coverageGap = gap * (1.0 - coverBoost);
+    let densityT = 1.0 - coverageGap;
+    let densityBoost = mix(0.92, 1.08, densityT);
+    let overlap = mix(1.36, 0.62, coverageGap) * densityBoost;
+
     var dotSize = originalSize * overlap * max(0.001, uniform.uPointillismDotScale);
     dotSize = min(dotSize, screenCap);
-    dotSize = max(dotSize, screenDot * mix(0.46, 0.14, gap));
+    dotSize = max(dotSize, screenDot * mix(0.46, 0.14, coverageGap));
 
     let cellScale = mix(14.0, 36.0, densityT);
     let sizeCell = floor(originalCenter * cellScale);
@@ -545,7 +575,7 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
     dotSize *= sizePick;
     dotSize *= mix(0.96, 1.06, densityT);
 
-    let sizeRatio = originalSize / max(dotSize, 0.000001);
+    sizeRatio = originalSize / max(dotSize, 0.000001);
     if (sizeRatio > 3.5) {
         gsplatMakeSpherical(scale, dotSize);
         return;
@@ -562,14 +592,17 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     let bucketId = floor(center / bucketWorld);
     let bucketHash = pointHash13(bucketId + vec3f(uniform.uPointillismSeed * 0.07));
     let fillT = clamp(uniform.uPointillismGapFill, 0.0, 1.0);
+    let flatDesire = 1.0 - clamp(uniform.uPointillismSourceStructureBlend, 0.0, 1.0);
     let keepMin = mix(0.28, 0.92, fillT);
     let thinExp = mix(-0.82, -0.38, fillT);
     let overdraw = max(distRatio * distRatio * 0.55, 0.12);
-    let keepChance = clamp(
+    var keepChance = clamp(
         pow(overdraw, thinExp),
         keepMin,
         1.0
     );
+    let interiorKeep = max(fillT, flatDesire * smoothstep(0.10, 0.30, (*color).a) * 0.72);
+    keepChance = mix(keepChance, 1.0, interiorKeep);
     if (bucketHash > keepChance) {
         (*color).a = 0.0;
         return;

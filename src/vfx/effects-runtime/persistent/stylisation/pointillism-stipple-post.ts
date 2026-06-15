@@ -297,8 +297,25 @@ class PointillismPostEffect extends PostEffect {
                     }
                 }
                 vec3 mixed = acc / max(wsum, 0.001);
-                float mixAmt = mix(0.03, 0.42, flatMix);
+                float mixAmt = min(mix(0.04, 0.38, flatMix), 0.35);
                 return mix(centerColor, mixed, mixAmt);
+            }
+
+            // 结构边缘（blur sobel，阈值偏高，避免点颗粒误判）
+            float structureEdgeMask(vec2 uv) {
+                float grad = sobelGradBlur(uv);
+                return smoothstep(0.014, 0.048, grad);
+            }
+
+            vec3 quantizeInteriorLuma(vec3 color, float amount) {
+                float t = clamp(amount, 0.0, 1.0);
+                if (t < 0.001) {
+                    return color;
+                }
+                float l = getLuminance(color);
+                float steps = mix(18.0, 7.0, t);
+                float q = floor(l * steps + 0.5) / steps;
+                return clamp(color * (q / max(l, 0.001)), 0.0, 1.0);
             }
 
             vec3 suppressSpeckles(vec2 uv, vec3 center) {
@@ -387,14 +404,21 @@ class PointillismPostEffect extends PostEffect {
                 sceneColor = fillSparseHoles(uv, rawScene, sceneColor);
 
                 float structure = clamp(uSourceStructureBlend, 0.0, 1.0);
-                float baseFlat = mix(0.10, 0.52, 1.0 - structure);
-                float grain = clamp(length(sceneColor - blur) * 4.2, 0.0, 1.0);
-                float cohesion = mix(0.18, 0.62, grain);
-                float flatMix = max(baseFlat, cohesion * (1.0 - structure * 0.35));
-                vec3 processed = flatOpticalMix(uv, sceneColor, flatMix);
+                float flatDesire = 1.0 - structure;
+                float structEdge = structureEdgeMask(uv);
+                float interiorMask = (1.0 - structEdge) * (1.0 - structEdge);
 
-                float keepStructure = structure * mix(1.0, 0.48, grain);
-                vec3 color = mix(processed, sceneColor, keepStructure);
+                float grain = clamp(length(sceneColor - blur) * 4.2, 0.0, 1.0);
+                float dotMask = smoothstep(0.20, 0.52, grain);
+                float flattenMask = interiorMask * (1.0 - dotMask * structure * 0.62);
+
+                float flatMix = mix(0.06, 0.58, flatDesire) * flattenMask;
+                vec3 flattened = flatOpticalMix(uv, sceneColor, flatMix);
+                float quantAmt = flatDesire * flattenMask * 0.52;
+                flattened = mix(flattened, quantizeInteriorLuma(flattened, quantAmt), quantAmt);
+
+                float keepStructure = max(structEdge, structure * mix(0.28, 1.0, dotMask));
+                vec3 color = mix(flattened, sceneColor, keepStructure);
 
                 float postSat = 1.0 + max(0.0, uSaturation - 1.0) * 0.28;
                 color = saturateColor(color, postSat);
@@ -403,7 +427,7 @@ class PointillismPostEffect extends PostEffect {
 
                 float edgeW = clamp(uEdgeStrength, 0.0, 1.0);
                 float edge = edgeFactor(uv);
-                float edgeAmt = clamp(edge * mix(0.0, 1.45, edgeW), 0.0, 1.0);
+                float edgeAmt = clamp(edge * mix(0.0, 1.45, edgeW), 0.0, 1.0) * structEdge;
                 vec3 highPass = sceneColor - blur;
                 vec3 sharpen = clamp(sceneColor + highPass * mix(1.2, 3.8, edgeW), 0.0, 1.0);
                 color = mix(color, sharpen, edgeAmt * 0.85);
