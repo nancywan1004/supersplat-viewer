@@ -8,7 +8,6 @@ import * as pc from 'playcanvas';
 import { ensureSceneMediaHotspot } from '../../settings-serialize/settings-serialize-helper';
 import type { ExperienceSettings } from '../../schemas/v2';
 import type { Global, ScenePlacedItem } from '../../types';
-import { readViewMediaMuted } from '../../view-settings';
 import {
     ensureScenePlacedMediaRuntime,
     getPlacedMediaRuntime,
@@ -25,15 +24,15 @@ import {
     evaluateAudioHotspotAnchor,
     evaluateMediaHotspotAnchor
 } from './media-view-depth';
-import { revealBlocksAnim } from '../../vfx/effects-runtime/reveal/reveal-policy';
 import {
     applySceneMediaViewMuteSuppress,
+    applySceneMediaViewMuteRelease,
     clearAllSceneMediaPlaybackFlags,
     clearManualHeldSceneMediaEntryIdIf,
     ensureSceneVideoFramePlaying,
     getActiveSceneMediaEntryId,
     getManualHeldSceneMediaEntryId,
-    isAnnotationFullscreenVideoActive,
+    isSceneMediaSoundSuppressed,
     pauseAllSceneMedia,
     pauseSceneMediaEntry,
     playSceneMediaEntry,
@@ -269,9 +268,8 @@ function applyHotspotPlayback(
         evalState.lastAudioSoundId = desiredAudioSound;
     }
 
-    // sceneSuppress：场景音视频应被「压制」（视频静音保帧、音频暂停）的统一开关。
-    // 来源：View 全局静音 `viewMediaMuted`，或标注大屏正在播放（独占声音）。
-    const sceneSuppress = readViewMediaMuted(global) || isAnnotationFullscreenVideoActive();
+    // sceneSuppress：`viewSettings.mediaMuted`（Viewer/编辑共用会话态）或标注大屏独占声音。
+    const sceneSuppress = isSceneMediaSoundSuppressed(global);
     const globalVideoAutoplay = readGlobalVideoHotspotAutoplayEnabledFromSettings(hotspotParams.settings);
     const list = global.state.scenePlacedEntities ?? [];
 
@@ -300,8 +298,12 @@ function applyHotspotPlayback(
         }
 
         const wantSound = entry.id === desiredVideoSound && !sceneSuppress;
-        ensureSceneVideoFramePlaying(global, entry, { muted: !wantSound });
-        if (wantSound) videoSoundOwner = entry.id;
+        if (wantSound) {
+            playSceneMediaEntry(global, entry);
+            videoSoundOwner = entry.id;
+        } else {
+            ensureSceneVideoFramePlaying(global, entry, { muted: true });
+        }
     }
 
     let audioSoundOwner: string | null = null;
@@ -417,7 +419,7 @@ export function initMediaHotspotController(global: Global): () => void {
         if (!isEditModeWithoutPreview(global)) {
             runMediaHotspotEvaluation(global, evalState);
         }
-        if (uploadToggle && isPlacedAssetsRootEnabled(global)) {
+        if (uploadToggle) {
             tickPlacedVideoTextureUploads(collectLiveVideos(), uploadToggle);
         }
     };
@@ -456,6 +458,9 @@ export function initMediaHotspotController(global: Global): () => void {
             evalState.userUnlocked = true;
         }
         resetAllSceneMediaToInitial(global);
+        if (isSceneMediaSoundSuppressed(global)) {
+            applySceneMediaViewMuteSuppress(global);
+        }
         forceHotspotEval();
     };
 
@@ -480,38 +485,28 @@ export function initMediaHotspotController(global: Global): () => void {
             evalState.userUnlocked = false;
         }
         resetAllSceneMediaToInitial(global);
+        if (isSceneMediaSoundSuppressed(global)) {
+            applySceneMediaViewMuteSuppress(global);
+        }
         if (evalState.pageHidden) return;
         forceHotspotEval();
     };
 
     const onViewMediaMutedChanged = () => {
-        // 热区门关闭（编辑非预览）时评估循环不会跑 sceneSuppress，须在此立即压制。
-        if (readViewMediaMuted(global) || isAnnotationFullscreenVideoActive()) {
+        evalState.lastEvalMs = 0;
+        if (isSceneMediaSoundSuppressed(global)) {
             applySceneMediaViewMuteSuppress(global);
+        } else if (isHotspotGateOpen(global)) {
+            // Viewer / 编辑预览：热区评估统一仲裁唯一声轨，避免与 release 叠加双播。
+            forceHotspotEval();
+        } else {
+            applySceneMediaViewMuteRelease(global);
         }
-        forceHotspotEval();
+        if (evalState.pageHidden) return;
     };
 
     const onOverlayUserPlayback = () => {
         evalState.userUnlocked = true;
-    };
-
-    const onSceneAssetsRestoreComplete = () => {
-        forceHotspotEval();
-    };
-
-    const onRevealRestart = () => {
-        // 阻塞型 reveal 重播会 lock placedAssets；须立即 pause，不能等热区评估节流。
-        if (!revealBlocksAnim(global.state)) return;
-        evalState.lastVideoSoundId = null;
-        evalState.lastAudioSoundId = null;
-        evalState.lastEvalMs = 0;
-        pauseAllSceneMedia(global);
-    };
-
-    const onRevealComplete = () => {
-        if (evalState.pageHidden) return;
-        forceHotspotEval();
     };
 
     events.on('sceneMediaHotspot:changed', onHotspotChanged);
@@ -522,9 +517,6 @@ export function initMediaHotspotController(global: Global): () => void {
     events.on('mediaHotspot:userActivate', onUserActivate);
     events.on('mediaOverlay:userPlayback', onOverlayUserPlayback);
     events.on('editMode:changed', onEditModeChanged);
-    events.on('sceneAssets:restoreComplete', onSceneAssetsRestoreComplete);
-    events.on('revealRestart', onRevealRestart);
-    events.on('revealComplete', onRevealComplete);
 
     app.on('update', onUpdate);
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -546,9 +538,6 @@ export function initMediaHotspotController(global: Global): () => void {
         events.off('mediaHotspot:userActivate', onUserActivate);
         events.off('mediaOverlay:userPlayback', onOverlayUserPlayback);
         events.off('editMode:changed', onEditModeChanged);
-        events.off('sceneAssets:restoreComplete', onSceneAssetsRestoreComplete);
-        events.off('revealRestart', onRevealRestart);
-        events.off('revealComplete', onRevealComplete);
         clearAllSceneMediaPlaybackFlags(global);
         pauseAllSceneMedia(global);
     };

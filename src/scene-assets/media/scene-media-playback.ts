@@ -28,6 +28,7 @@
  */
 
 import type { Global, ScenePlacedItem } from '../../types';
+import { readViewMediaMuted } from '../../view-settings';
 import {
     ensureScenePlacedMediaRuntime,
     getPlacedMediaRuntime,
@@ -77,6 +78,11 @@ let annotationFullscreenVideoActive = false;
 
 export function isAnnotationFullscreenVideoActive(): boolean {
     return annotationFullscreenVideoActive;
+}
+
+/** `viewSettings.mediaMuted` 或标注大屏独占声音时，场景 media 不得出声。 */
+export function isSceneMediaSoundSuppressed(global: Global): boolean {
+    return readViewMediaMuted(global) || isAnnotationFullscreenVideoActive();
 }
 
 /**
@@ -222,6 +228,13 @@ export function playSceneMediaEntry(
     const m = getPlacedMediaRuntime(entity);
     if (!m || (m.kind !== 'video' && m.kind !== 'audio')) return false;
 
+    if (isSceneMediaSoundSuppressed(global)) {
+        if (m.kind === 'video') {
+            return ensureSceneVideoFramePlaying(global, entry, { muted: true });
+        }
+        return false;
+    }
+
     activeSceneMediaEntryId = entry.id;
 
     if (m.kind === 'video') {
@@ -266,6 +279,48 @@ export function pauseAllSceneMedia(global: Global): void {
     for (const entry of global.state.scenePlacedEntities ?? []) {
         pauseSceneMediaEntryInternal(global, entry, false);
     }
+}
+
+/**
+ * `viewSettings.mediaMuted` / 标注大屏：立即压制场景音视频（Viewer 与编辑模式共用，不依赖热区门）。
+ * - video：推帧 + muted（画面不停）
+ * - audio：pause
+ */
+export function applySceneMediaViewMuteSuppress(global: Global): void {
+    for (const entry of global.state.scenePlacedEntities ?? []) {
+        const entity = entry.entity;
+        if (!entity) continue;
+        const m = getPlacedMediaRuntime(entity);
+        if (!m) continue;
+        if (m.kind === 'video') {
+            if (m.isLive) {
+                m.videoEl.muted = true;
+            }
+        } else if (m.kind === 'audio') {
+            pauseSceneMediaEntryInternal(global, entry, false);
+        }
+    }
+    // 保留 activeSceneMediaEntryId / manualHeld，取消静音时只恢复这一条出声槽。
+}
+
+/**
+ * 取消全局静音后，仅恢复唯一出声槽（manualHeld 优先，否则 activeSceneMediaEntryId）。
+ * 编辑非预览热区门关闭时由本函数负责；Viewer 侧由热区评估统一仲裁。
+ */
+export function applySceneMediaViewMuteRelease(global: Global): void {
+    if (isSceneMediaSoundSuppressed(global)) return;
+
+    const pickId = getManualHeldSceneMediaEntryId() ?? getActiveSceneMediaEntryId();
+    if (!pickId) return;
+
+    const entry = global.state.scenePlacedEntities?.find((e) => e.id === pickId);
+    if (!entry?.entity || entry.mediaRuntime?.userPaused === true) return;
+
+    const m = getPlacedMediaRuntime(entry.entity);
+    if (!m || (m.kind !== 'video' && m.kind !== 'audio')) return;
+    if (m.kind === 'video' && (!m.isLive || m.videoEl.paused)) return;
+
+    playSceneMediaEntry(global, entry);
 }
 
 /**
@@ -316,6 +371,7 @@ export function clearAllSceneMediaPlaybackFlags(global: Global): void {
  * 并通知热区控制器立即重算（绕过冷却）。
  */
 export function userPlaySceneMedia(global: Global, entry: ScenePlacedItem): void {
+    if (isSceneMediaSoundSuppressed(global)) return;
     ensureScenePlacedMediaRuntime(entry).userPaused = false;
     manualHeldSceneMediaEntryId = entry.id;
     playSceneMediaEntry(global, entry);

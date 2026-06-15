@@ -29,11 +29,10 @@ import {
 
 import { hitSceneGizmoAtClient } from '../../gizmo-hit-test';
 import type { Global, ScenePlacedItem } from '../../types';
-import { readViewMediaMuted } from '../../view-settings';
-import { ensureHotspotDepthLayers, type HotspotDepthLayers } from '../hotspot-depth-layers';
+import { ensureHotspotDepthLayers, syncHotspotLayersAfterGsplat, type HotspotDepthLayers } from '../hotspot-depth-layers';
 import { getSceneAssetPickLayer } from '../scene-asset-pick-layer';
 import { isMediaConsumptionMode, readShowAudioCalloutInViewerFromSettings } from './media-hotspot-params';
-import { userPauseSceneMedia, userPlaySceneMedia } from './scene-media-playback';
+import { isSceneMediaSoundSuppressed, userPauseSceneMedia, userPlaySceneMedia } from './scene-media-playback';
 import {
     ensureScenePlacedMediaRuntime,
     getPlacedMediaRuntime,
@@ -143,6 +142,7 @@ type AudioCallout3d = {
 let sharedMesh: Mesh | null = null;
 let layers: HotspotDepthLayers | null = null;
 let cameraEntity: Entity | null = null;
+let calloutApp: AppBase | null = null;
 const calloutsByEntryId = new Map<string, AudioCallout3d>();
 
 let interactionCanvas: HTMLCanvasElement | null = null;
@@ -151,6 +151,12 @@ let audioPlayIconCanvas: HTMLCanvasElement | null = null;
 let audioPauseIconCanvas: HTMLCanvasElement | null = null;
 let audioIconsLoadPromise: Promise<void> | null = null;
 let measureCanvasCtx: CanvasRenderingContext2D | null = null;
+
+/** 每帧 premultiply 会 getImageData，须声明 willReadFrequently 避免浏览器警告与慢路径。 */
+const CALLOUT_CANVAS_2D_OPTIONS: CanvasRenderingContext2DSettings = {
+    alpha: true,
+    willReadFrequently: true
+};
 
 function getMeasureCanvasCtx(): CanvasRenderingContext2D | null {
     if (!measureCanvasCtx) {
@@ -196,7 +202,7 @@ async function loadIconRasterCanvas(url: string): Promise<HTMLCanvasElement | nu
         const canvas = document.createElement('canvas');
         canvas.width = PLAY_ICON_W;
         canvas.height = PLAY_ICON_H;
-        const ctx = canvas.getContext('2d', { alpha: true });
+        const ctx = canvas.getContext('2d', CALLOUT_CANVAS_2D_OPTIONS);
         if (!ctx) return null;
         ctx.clearRect(0, 0, PLAY_ICON_W, PLAY_ICON_H);
         ctx.drawImage(img, 0, 0, PLAY_ICON_W, PLAY_ICON_H);
@@ -470,7 +476,7 @@ function drawAudioCallout(
 }
 
 function isAudioVisuallyPlaying(global: Global, m: PlacedAudioRuntime): boolean {
-    if (readViewMediaMuted(global)) return false;
+    if (isSceneMediaSoundSuppressed(global)) return false;
     return !m.audioEl.paused && m.audioEl.volume > 0;
 }
 
@@ -561,7 +567,7 @@ function createAudioCallout3d(global: Global, entry: ScenePlacedItem, m: PlacedA
     const canvas = document.createElement('canvas');
     canvas.width = AUDIO_CALLOUT_TEX_W;
     canvas.height = AUDIO_CALLOUT_TEX_H;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', CALLOUT_CANVAS_2D_OPTIONS);
     if (!ctx) return null;
 
     const texture = new Texture(app.graphicsDevice, {
@@ -619,30 +625,52 @@ function createAudioCallout3d(global: Global, entry: ScenePlacedItem, m: PlacedA
 }
 
 function destroyAudioCallout3d(callout: AudioCallout3d): void {
-    // 销毁顺序：Entity 先于 material / texture。
-    // 原因：Entity.destroy() 会同步移除 render component 与其 MeshInstance 在 layer 上的引用；
-    // 若先 destroy material/texture，再 destroy entity，本帧已被 cull 建入的可见 MeshInstance
-    // 在下一次 renderForward 取 `material.impl` 时会得到 undefined，触发
-    // `Cannot read properties of undefined (reading 'impl')`。
-    // 同时先 disable 一帧，保证下次 cull 不会再收纳本 instance。
+    // 销毁顺序：先 disable → frameend 再 destroy Entity → 下一 frameend destroy material/texture。
+    // rAF 与 PlayCanvas render 不同步；同帧 cull 仍持有 MeshInstance 时 destroy material
+    // 会在 renderForward 触发 `Cannot read properties of undefined (reading 'impl')`。
+    const { materials, texture, calloutRoot } = callout;
     try {
-        callout.calloutRoot.enabled = false;
-        callout.calloutRoot.destroy();
+        calloutRoot.enabled = false;
     } catch {
         // ignore
     }
-    callout.materials.forEach((mat) => {
+
+    const destroyGpuResources = () => {
+        for (const mat of materials) {
+            try {
+                mat.destroy();
+            } catch {
+                // ignore
+            }
+        }
         try {
-            mat.destroy();
+            texture.destroy();
         } catch {
             // ignore
         }
-    });
+    };
+
+    const app = calloutApp;
+    if (app?.once) {
+        app.once('frameend', () => {
+            try {
+                if (calloutRoot.parent) {
+                    calloutRoot.destroy();
+                }
+            } catch {
+                // ignore
+            }
+            app.once('frameend', destroyGpuResources);
+        });
+        return;
+    }
+
     try {
-        callout.texture.destroy();
+        calloutRoot.destroy();
     } catch {
         // ignore
     }
+    queueMicrotask(destroyGpuResources);
 }
 
 /** 已放置音频：拾取球只在 SceneAssetPick 层（不参与相机渲染，避免叠在视频前出现黑块）。 */
@@ -677,7 +705,12 @@ function ensureAudioPickMesh(entity: Entity, app: AppBase): void {
 }
 
 export function registerAudioCallout3d(global: Global, entry: ScenePlacedItem): void {
-    if (calloutsByEntryId.has(entry.id)) return;
+    const existing = calloutsByEntryId.get(entry.id);
+    if (existing) {
+        const parent = existing.calloutRoot.parent;
+        if (parent === entry.entity) return;
+        unregisterAudioCallout3d(entry.id);
+    }
     const entity = entry.entity;
     if (!entity) return;
     const m = getPlacedMediaRuntime(entity);
@@ -692,8 +725,8 @@ export function registerAudioCallout3d(global: Global, entry: ScenePlacedItem): 
 export function unregisterAudioCallout3d(entryId: string): void {
     const callout = calloutsByEntryId.get(entryId);
     if (!callout) return;
-    destroyAudioCallout3d(callout);
     calloutsByEntryId.delete(entryId);
+    destroyAudioCallout3d(callout);
 }
 
 export function syncAudioCallout3dRegistry(global: Global): void {
@@ -726,6 +759,7 @@ export function prerenderAudioCallouts(global: Global): void {
 
 function initAudioCalloutSystem(global: Global): () => void {
     const { app, events } = global;
+    calloutApp = app;
     cameraEntity = global.camera;
     layers = ensureHotspotDepthLayers(app, cameraEntity);
     ensureSharedMesh(app);
@@ -733,6 +767,21 @@ function initAudioCalloutSystem(global: Global): () => void {
 
     const onPrerender = () => prerenderAudioCallouts(global);
     const onRegistry = () => syncAudioCallout3dRegistry(global);
+    const onRemoved = (entry: ScenePlacedItem) => {
+        if (entry?.id) unregisterAudioCallout3d(entry.id);
+    };
+    const onCleared = () => {
+        for (const id of [...calloutsByEntryId.keys()]) {
+            unregisterAudioCallout3d(id);
+        }
+    };
+    const onRestoreComplete = () => {
+        if (cameraEntity) {
+            layers = ensureHotspotDepthLayers(app, cameraEntity);
+            syncHotspotLayersAfterGsplat(app);
+        }
+        syncAudioCallout3dRegistry(global);
+    };
     const onState = () => {
         for (const entry of global.state.scenePlacedEntities ?? []) {
             const callout = calloutsByEntryId.get(entry.id);
@@ -744,6 +793,9 @@ function initAudioCalloutSystem(global: Global): () => void {
 
     app.on('prerender', onPrerender);
     events.on('sceneAssets:added', onRegistry);
+    events.on('sceneAssets:removed', onRemoved);
+    events.on('sceneAssets:cleared', onCleared);
+    events.on('sceneAssets:restoreComplete', onRestoreComplete);
     events.on('viewMediaMuted:changed', onState);
     events.on('mediaOverlay:playbackChanged', onState);
     syncAudioCallout3dRegistry(global);
@@ -751,6 +803,9 @@ function initAudioCalloutSystem(global: Global): () => void {
     return () => {
         app.off('prerender', onPrerender);
         events.off('sceneAssets:added', onRegistry);
+        events.off('sceneAssets:removed', onRemoved);
+        events.off('sceneAssets:cleared', onCleared);
+        events.off('sceneAssets:restoreComplete', onRestoreComplete);
         events.off('viewMediaMuted:changed', onState);
         events.off('mediaOverlay:playbackChanged', onState);
         for (const id of [...calloutsByEntryId.keys()]) {
@@ -758,6 +813,7 @@ function initAudioCalloutSystem(global: Global): () => void {
         }
         layers = null;
         cameraEntity = null;
+        calloutApp = null;
     };
 }
 
@@ -826,10 +882,10 @@ function pickCalloutUvViaRayPlane(
 }
 
 function toggleAudioPlayback(global: Global, entry: ScenePlacedItem, m: PlacedAudioRuntime): void {
-    if (readViewMediaMuted(global)) return;
-
     const a = m.audioEl;
-    if (a.paused || a.volume === 0) {
+    const playing = !a.paused && a.volume > 0;
+    if (!playing) {
+        if (isSceneMediaSoundSuppressed(global)) return;
         userPlaySceneMedia(global, entry);
     } else {
         userPauseSceneMedia(global, entry);

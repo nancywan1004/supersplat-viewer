@@ -232,6 +232,8 @@ type State = {
     editMode: boolean;                         // true = 编辑模式（显示 rightToolBar），false = 观看模式
     /** 编辑预览模式：true 时隐藏编辑调试组件（操作轴、光源线框） */
     previewMode?: boolean;
+    /** 视口截图进行中：临时隐藏编辑调试组件，避免缩略图携带线框/操作轴 */
+    suppressDebugVisualsForCapture?: boolean;
     /** 左侧工具箱当前模块；null 表示不选中任何模块 */
     editLeftModule?: EditLeftModule | null;
     assetTransformMode?: AssetTransformMode;   // 资产变换模式，默认 'move'
@@ -294,9 +296,9 @@ export type ViewSettings = {
      */
     annotationsVisible?: boolean;
     /**
-     * 场景 video/audio 热区全局静音（View 模式专属，不入库）
-     * - `VIEW_MEDIA_MUTE_SET` 写入
-     * - `true` 时热区播控强制无声（视频 muted、音频 pause）
+     * 场景 video/audio 全局静音（会话态，不入库）
+     * - `VIEW_MEDIA_MUTE_SET` 写入；Viewer 与编辑模式共用、编辑继承 Viewer 会话值
+     * - `true` 时场景 media 强制无声（视频 muted 保帧、音频 pause）
      * - 默认 `false`
      */
     mediaMuted?: boolean;

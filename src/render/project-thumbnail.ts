@@ -13,6 +13,7 @@ import {
     uploadProjectThumbnail,
     type ProjectThumbnailUploadResult
 } from '../universe/service';
+import { runWithDebugVisualsSuppressed } from '../debug-visual-policy';
 import { captureViewportJpegBlob, VIEWPORT_SCREENSHOT_DEFAULT } from './capture-viewport-screenshot';
 
 export type ProjectThumbnailActionResult =
@@ -104,7 +105,9 @@ export async function captureDefaultViewAndStageThumbnail(global: Global): Promi
     global.events.fire('camera:syncPrimaryInitial');
 
     try {
-        pendingProjectThumbnailJpeg = await captureViewportJpegBlob(global.app, VIEWPORT_SCREENSHOT_DEFAULT);
+        pendingProjectThumbnailJpeg = await runWithDebugVisualsSuppressed(global, () =>
+            captureViewportJpegBlob(global.app, VIEWPORT_SCREENSHOT_DEFAULT)
+        );
         return { ok: true };
     } catch (error) {
         pendingProjectThumbnailJpeg = null;

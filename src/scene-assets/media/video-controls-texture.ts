@@ -8,11 +8,10 @@ import { type CameraComponent, type Entity, Mat4, Vec3 } from 'playcanvas';
 import { hitSceneGizmoAtClient } from '../../gizmo-hit-test';
 import { isPlacementCursorActive } from '../../placement-cursor';
 import type { Global, ScenePlacedItem } from '../../types';
-import { readViewMediaMuted } from '../../view-settings';
 import { intersectRayLocalVideoMesh } from './curved-billboard-mesh';
 import { ensureScenePlacedMediaRuntime, getPlacedMediaRuntime, type PlacedVideoRuntime } from './media-runtime';
 import { isMediaConsumptionMode } from './media-hotspot-params';
-import { userPauseSceneMedia, userPlaySceneMedia } from './scene-media-playback';
+import { isSceneMediaSoundSuppressed, userPauseSceneMedia, userPlaySceneMedia } from './scene-media-playback';
 import {
     initPlacedVideoTextureUploadFlush,
     requestPlacedVideoTextureUpload,
@@ -125,8 +124,14 @@ function clientToCanvas(metrics: CanvasMetrics, clientX: number, clientY: number
     };
 }
 
+function isPlacedVideoEntityAlive(entry: ScenePlacedItem): boolean {
+    const entity = entry.entity;
+    // PlayCanvas destroy 后 parent 置空；仍在 scene 图中的实体 parent 非 null。
+    return !!entity?.parent;
+}
+
 function isVideoControlsEligible(entry: ScenePlacedItem, global?: Global): boolean {
-    if (!entry.entity?.enabled || entry.visible === false || entry.assetType !== 'video') {
+    if (!isPlacedVideoEntityAlive(entry) || !entry.entity!.enabled || entry.visible === false || entry.assetType !== 'video') {
         return false;
     }
     if (global && isMediaConsumptionMode(global)) {
@@ -266,7 +271,8 @@ function drawControlsOverlay(
     h: number,
     video: HTMLVideoElement,
     layout: VideoControlsLayout,
-    hoverAction: VideoControlHit | null
+    hoverAction: VideoControlHit | null,
+    showPlayIcon: boolean
 ): void {
     const grad = ctx.createLinearGradient(0, layout.chromeTop, 0, h);
     grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
@@ -320,7 +326,7 @@ function drawControlsOverlay(
         );
         ctx.fill();
     }
-    drawPlayIcon(ctx, layout.playLeft, layout.playTop, layout.playSize, video.paused);
+    drawPlayIcon(ctx, layout.playLeft, layout.playTop, layout.playSize, showPlayIcon);
 }
 
 function drawVideoComposite(m: PlacedVideoRuntime, entryId: string, paintChrome: boolean): void {
@@ -337,7 +343,9 @@ function drawVideoComposite(m: PlacedVideoRuntime, entryId: string, paintChrome:
     }
     if (paintChrome) {
         const hoverAction = chromeStateByEntryId.get(entryId)?.hoverAction ?? null;
-        drawControlsOverlay(ctx, w, h, video, computeVideoControlsLayout(w, h), hoverAction);
+        // 以 runtime.isLive 为准，避免 pause() 与 video.paused 同帧不同步导致图标卡在「暂停」态。
+        const showPlayIcon = !isVideoActivelyPlaying(m);
+        drawControlsOverlay(ctx, w, h, video, computeVideoControlsLayout(w, h), hoverAction, showPlayIcon);
     }
 }
 
@@ -353,6 +361,7 @@ export function syncVideoTextureWithControls(
     entry: ScenePlacedItem,
     m: PlacedVideoRuntime
 ): void {
+    if (!isPlacedVideoEntityAlive(entry) || !m.texture?.device) return;
     if (!isVideoControlsEligible(entry, global)) {
         if (m.controlsOverlayActive) {
             m.controlsOverlayActive = false;
@@ -797,14 +806,14 @@ function findVideoHitAtClient(
 }
 
 function toggleVideoPlay(global: Global, entry: ScenePlacedItem, m: PlacedVideoRuntime): void {
-    if (readViewMediaMuted(global)) {
-        vcLog('toggle:blocked', { entryId: entry.id, reason: 'viewMediaMuted' });
-        return;
-    }
-
     touchChromeHover(entry.id);
     const video = m.videoEl;
-    if (video.paused) {
+    const playing = m.isLive && !video.paused && !video.ended;
+    if (!playing) {
+        if (isSceneMediaSoundSuppressed(global)) {
+            vcLog('toggle:blocked', { entryId: entry.id, reason: 'sceneMediaSoundSuppressed' });
+            return;
+        }
         userPlaySceneMedia(global, entry);
         vcLog('toggle:play', { entryId: entry.id });
     } else {
@@ -921,17 +930,16 @@ export function tryClaimVideoControlsPointerDown(global: Global, e: PointerEvent
     });
 
     touchChromeHover(hit.entry.id);
-    syncVideoTextureWithControls(global, hit.entry, hit.m);
 
     if (hit.action === 'play') {
         toggleVideoPlay(global, hit.entry, hit.m);
-        return true;
+    } else {
+        syncVideoTextureWithControls(global, hit.entry, hit.m);
+        dragSeekEntryId = hit.entry.id;
+        seekFromTextureX(hit.px, hit.layout, hit.m.videoEl);
+        vcLog('pointerdown:seek', { entryId: hit.entry.id, px: hit.px, currentTime: hit.m.videoEl.currentTime });
+        syncVideoTextureWithControls(global, hit.entry, hit.m);
     }
-
-    dragSeekEntryId = hit.entry.id;
-    seekFromTextureX(hit.px, hit.layout, hit.m.videoEl);
-    vcLog('pointerdown:seek', { entryId: hit.entry.id, px: hit.px, currentTime: hit.m.videoEl.currentTime });
-    syncVideoTextureWithControls(global, hit.entry, hit.m);
     return true;
 }
 
@@ -1060,17 +1068,21 @@ export function initVideoControlsTexture(global: Global): () => void {
 
     const onUpdate = () => tickVideoControlsTextures(global);
     const onPlaybackChanged = (payload: { id?: string; kind?: string; playing?: boolean }) => {
-        if (payload?.kind === 'video' && payload.playing && payload.id) {
-            const entry = global.state.scenePlacedEntities?.find((e) => e.id === payload.id);
-            if (entry) {
-                ensureScenePlacedMediaRuntime(entry).manualLatch = true;
-                touchChromeHover(entry.id);
-            }
+        if (payload?.kind !== 'video' || !payload.id) return;
+        const entry = global.state.scenePlacedEntities?.find((e) => e.id === payload.id);
+        if (!entry?.entity) return;
+        const m = getPlacedMediaRuntime(entry.entity);
+        if (m?.kind !== 'video') return;
+        if (payload.playing) {
+            ensureScenePlacedMediaRuntime(entry).manualLatch = true;
+            touchChromeHover(entry.id);
         }
+        syncVideoTextureWithControls(global, entry, m);
     };
 
     app.on('update', onUpdate);
     events.on('mediaOverlay:playbackChanged', onPlaybackChanged);
+    events.on('viewMediaMuted:changed', onUpdate);
     events.on('sceneAssets:added', onUpdate);
     events.on('sceneAssets:removed', onUpdate);
 
@@ -1078,6 +1090,7 @@ export function initVideoControlsTexture(global: Global): () => void {
         cleanupTextureUploadFlush();
         app.off('update', onUpdate);
         events.off('mediaOverlay:playbackChanged', onPlaybackChanged);
+        events.off('viewMediaMuted:changed', onUpdate);
         events.off('sceneAssets:added', onUpdate);
         events.off('sceneAssets:removed', onUpdate);
         chromeStateByEntryId.clear();

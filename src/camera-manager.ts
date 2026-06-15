@@ -691,22 +691,32 @@ class CameraManager {
         };
 
         // handle input events
-        events.on('inputEvent', (eventName) => {
+        events.on('inputEvent', (eventName, payload?: { focusTarget?: FocusTarget } | KeyboardEvent) => {
             switch (eventName) {
                 case 'frame':
                     // F 键 / UI「Frame」：优先聚焦当前编辑模块下的选中项，否则整场景 framing
                     {
-                        const focusTarget = (event as { focusTarget?: FocusTarget } | undefined)?.focusTarget;
+                        const focusTarget =
+                            payload && typeof payload === 'object' && 'focusTarget' in payload
+                                ? payload.focusTarget
+                                : undefined;
+                        const keyboardEvent = payload instanceof KeyboardEvent ? payload : undefined;
                         const shouldUseAssetFraming =
                             focusTarget === 'asset' ||
                             (!focusTarget && state.editMode && state.editLeftModule === 'asset');
                         if (shouldUseAssetFraming && orbitFocusSelectedAssetWithFraming()) {
-                            (event as KeyboardEvent | undefined)?.preventDefault?.();
+                            keyboardEvent?.preventDefault?.();
                             break;
                         }
                     }
-                    if (fillEditFocus(global, tmpFocus, (event as { focusTarget?: FocusTarget } | undefined)?.focusTarget)) {
-                        (event as KeyboardEvent | undefined)?.preventDefault?.();
+                    if (fillEditFocus(
+                        global,
+                        tmpFocus,
+                        payload && typeof payload === 'object' && 'focusTarget' in payload
+                            ? payload.focusTarget
+                            : undefined
+                    )) {
+                        (payload instanceof KeyboardEvent ? payload : undefined)?.preventDefault?.();
                         orbitFocus(tmpFocus);
                         break;
                     }
