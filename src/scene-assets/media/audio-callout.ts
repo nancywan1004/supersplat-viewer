@@ -152,6 +152,12 @@ let audioPauseIconCanvas: HTMLCanvasElement | null = null;
 let audioIconsLoadPromise: Promise<void> | null = null;
 let measureCanvasCtx: CanvasRenderingContext2D | null = null;
 
+/** 每帧 premultiply 会 getImageData，须声明 willReadFrequently 避免浏览器警告与慢路径。 */
+const CALLOUT_CANVAS_2D_OPTIONS: CanvasRenderingContext2DSettings = {
+    alpha: true,
+    willReadFrequently: true
+};
+
 function getMeasureCanvasCtx(): CanvasRenderingContext2D | null {
     if (!measureCanvasCtx) {
         measureCanvasCtx = document.createElement('canvas').getContext('2d');
@@ -196,7 +202,7 @@ async function loadIconRasterCanvas(url: string): Promise<HTMLCanvasElement | nu
         const canvas = document.createElement('canvas');
         canvas.width = PLAY_ICON_W;
         canvas.height = PLAY_ICON_H;
-        const ctx = canvas.getContext('2d', { alpha: true });
+        const ctx = canvas.getContext('2d', CALLOUT_CANVAS_2D_OPTIONS);
         if (!ctx) return null;
         ctx.clearRect(0, 0, PLAY_ICON_W, PLAY_ICON_H);
         ctx.drawImage(img, 0, 0, PLAY_ICON_W, PLAY_ICON_H);
@@ -561,7 +567,7 @@ function createAudioCallout3d(global: Global, entry: ScenePlacedItem, m: PlacedA
     const canvas = document.createElement('canvas');
     canvas.width = AUDIO_CALLOUT_TEX_W;
     canvas.height = AUDIO_CALLOUT_TEX_H;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', CALLOUT_CANVAS_2D_OPTIONS);
     if (!ctx) return null;
 
     const texture = new Texture(app.graphicsDevice, {
