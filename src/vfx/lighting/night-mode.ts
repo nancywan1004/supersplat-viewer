@@ -1206,6 +1206,15 @@ class NightMode extends GsplatShaderEffect {
             const clampedValue = Math.max(-1, Math.min(1, value));
             this.manualFadeControl = true;
             this.nightFade = clampedValue;
+            // 点彩/忆韵等已关但 restore 未 fire forceReapply 时，suspendedByVfx 可能仍为 true
+            const settings = (this.app as any).__global?.settings as ExperienceSettings | undefined;
+            if (
+                this.suspendedByVfx &&
+                settings &&
+                !hasEnabledPersistentGsplatMaterialShaderEffect(settings)
+            ) {
+                this.suspendedByVfx = false;
+            }
             // VFX 期间仅记录与广播，不往材质写 shader（避免覆盖 VFX）
             if (!this.suspendedByVfx) {
                 if (Math.abs(this.nightFade) > 1e-6 && this.materialsApplied.size === 0 && this.splat?.gsplat) {
@@ -1981,6 +1990,9 @@ class NightMode extends GsplatShaderEffect {
         if (settings && hasEnabledPersistentGsplatMaterialShaderEffect(settings)) {
             this.applyLightingFromSettings(config);
             return;
+        }
+        if (this.suspendedByVfx) {
+            this.suspendedByVfx = false;
         }
         this.manualFadeControl = true;
         // Legacy: enabled === false means "no effect"

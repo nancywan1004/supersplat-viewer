@@ -1070,15 +1070,6 @@ export class RevealController {
      * 同步写回 settings.nightMode.fade，并通过事件驱动 NightMode Shader 更新。
      */
     private restoreNightModeIfNeeded(reason: string) {
-        if (this.originalNightFade === null) {
-            debugExportNight('restoreNightModeIfNeeded skipped (originalNightFade null)', {
-                reason,
-                type: this.config.type,
-                inVfx: this.inVfx,
-                isExporting: !!(this.global.state as any).isExportingVfxVideo
-            });
-            return;
-        }
         const settings = this.global.settings as ExperienceSettings;
         if (hasEnabledPersistentGsplatMaterialShaderEffect(settings)) {
             debugExportNight('restoreNightModeIfNeeded skipped (gsplat material shader persistent active)', {
@@ -1090,7 +1081,8 @@ export class RevealController {
             this.requestPersistentGsplatMaterialShaderReapply(settings);
             return;
         }
-        const fade = this.originalNightFade;
+        // 点彩等 mount 可能未走 prepareExternalPersistentScriptMount；无快照时回退 settings.nightMode.fade
+        const fade = this.originalNightFade ?? getNightFadeFromSettings(settings);
         this.originalNightFade = null;
         this.inVfx = false;
         patchRevealRuntimeMirror(this.global.state, { status: this.config.type === 'none' ? 'inactive' : 'completed' });
