@@ -56,16 +56,20 @@ export function isSceneAssetPickableInViewerMode(assetType: AssetLibraryType | u
     return assetType === 'mesh' || assetType === 'gaussian';
 }
 
+function isEditDebugVisualSuppressed(state: State): boolean {
+    return state.previewMode === true || state.suppressDebugVisualsForCapture === true;
+}
+
 export function isAssetDebugVisualEnabled(state: State): boolean {
-    return !!(state.editMode && state.editLeftModule === 'asset' && state.previewMode !== true);
+    return !!(state.editMode && state.editLeftModule === 'asset' && !isEditDebugVisualSuppressed(state));
 }
 
 export function isAnnotationDebugVisualEnabled(state: State): boolean {
-    return !!(state.editMode && state.editLeftModule === 'annotation' && state.previewMode !== true);
+    return !!(state.editMode && state.editLeftModule === 'annotation' && !isEditDebugVisualSuppressed(state));
 }
 
 export function isEnvironmentDebugVisualEnabled(state: State): boolean {
-    return !!(state.editMode && state.editLeftModule === 'environment' && state.previewMode !== true);
+    return !!(state.editMode && state.editLeftModule === 'environment' && !isEditDebugVisualSuppressed(state));
 }
 
 export function isCameraInteractionBlocked(state: State): boolean {

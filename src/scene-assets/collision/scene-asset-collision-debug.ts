@@ -12,6 +12,7 @@ import {
 } from 'playcanvas';
 
 import type { Global } from '../../types';
+import { isAssetDebugVisualEnabled } from '../../state-selectors';
 import { getSceneAssetCollisionRuntime, readSceneAssetCollisionRuntimeState } from './scene-asset-collision';
 
 const DEBUG_BOX_COLOR = new Color(0.2, 0.95, 0.45);
@@ -103,12 +104,13 @@ export class SceneAssetCollisionDebugVisual {
     }
 
     isVisible(): boolean {
-        return readSceneAssetCollisionRuntimeState(this.global).debugVisual;
+        return readSceneAssetCollisionRuntimeState(this.global).debugVisual
+            && isAssetDebugVisualEnabled(this.global.state);
     }
 
     sync(): void {
         const { app } = this.global;
-        const wantVisible = readSceneAssetCollisionRuntimeState(this.global).debugVisual;
+        const wantVisible = this.isVisible();
         const runtime = getSceneAssetCollisionRuntime(this.global);
         const boxes = runtime.getDebugBoundingBoxes();
 
@@ -218,6 +220,7 @@ export function initSceneAssetCollisionDebug(global: Global): () => void {
     events.on('sceneAsset:collisionDirty', sync);
     events.on('editMode:changed', sync);
     events.on('previewMode:changed', sync);
+    events.on('debugVisualPolicy:changed', sync);
 
     app.on('update', onUpdate);
     sync();
@@ -233,6 +236,7 @@ export function initSceneAssetCollisionDebug(global: Global): () => void {
         events.off('sceneAsset:collisionDirty', sync);
         events.off('editMode:changed', sync);
         events.off('previewMode:changed', sync);
+        events.off('debugVisualPolicy:changed', sync);
         app.off('update', onUpdate);
         visual.destroy();
         const g = global as Global & { [DEBUG_KEY]?: SceneAssetCollisionDebugVisual };

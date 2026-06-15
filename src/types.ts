@@ -232,6 +232,8 @@ type State = {
     editMode: boolean;                         // true = 编辑模式（显示 rightToolBar），false = 观看模式
     /** 编辑预览模式：true 时隐藏编辑调试组件（操作轴、光源线框） */
     previewMode?: boolean;
+    /** 视口截图进行中：临时隐藏编辑调试组件，避免缩略图携带线框/操作轴 */
+    suppressDebugVisualsForCapture?: boolean;
     /** 左侧工具箱当前模块；null 表示不选中任何模块 */
     editLeftModule?: EditLeftModule | null;
     assetTransformMode?: AssetTransformMode;   // 资产变换模式，默认 'move'

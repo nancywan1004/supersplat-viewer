@@ -668,6 +668,7 @@ export function initGizmoHandler(global: Global): () => void {
         syncGizmoToSelection();
     };
     const onPreviewModeChanged = () => syncGizmoToSelection();
+    const onDebugVisualPolicyChanged = () => syncGizmoToSelection();
 
     /** 退出编辑模式时隐藏 Gizmo；进入编辑模式且当前为资产模块时若无选中则默认选首 entity（与切换进资产模块行为一致） */
     const onEditModeChanged = (inEdit: boolean) => {
@@ -687,6 +688,7 @@ export function initGizmoHandler(global: Global): () => void {
     events.on('lightTransformMode:changed', onLightModeChanged as any);
     events.on('sceneLight:selected', onSceneLightSelected as any);
     events.on('previewMode:changed', onPreviewModeChanged as any);
+    events.on('debugVisualPolicy:changed', onDebugVisualPolicyChanged as any);
     if (state.editMode) {
         onEditModeChanged(true);
     } else if (handler) {
@@ -710,6 +712,7 @@ export function initGizmoHandler(global: Global): () => void {
         events.off('lightTransformMode:changed', onLightModeChanged as any);
         events.off('sceneLight:selected', onSceneLightSelected as any);
         events.off('previewMode:changed', onPreviewModeChanged as any);
+        events.off('debugVisualPolicy:changed', onDebugVisualPolicyChanged as any);
         app.off('update', onUpdate);
         handler?.destroy();
         setSceneGizmoHitTest(null);

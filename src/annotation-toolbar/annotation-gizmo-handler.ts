@@ -163,10 +163,12 @@ export function initAnnotationGizmoHandler(global: Global): () => void {
             handler.detach();
         }
     };
+    const onDebugVisualPolicyChanged = onPreviewContextChanged;
 
     events.on('gizmo:attach', onGizmoAttach);
     events.on('gizmo:detach', onGizmoDetach);
     events.on('previewMode:changed', onPreviewContextChanged);
+    events.on('debugVisualPolicy:changed', onDebugVisualPolicyChanged);
     events.on('editLeftModule:changed', onPreviewContextChanged);
     events.on('editMode:changed', onPreviewContextChanged);
 
@@ -175,6 +177,7 @@ export function initAnnotationGizmoHandler(global: Global): () => void {
         events.off('gizmo:attach', onGizmoAttach);
         events.off('gizmo:detach', onGizmoDetach);
         events.off('previewMode:changed', onPreviewContextChanged);
+        events.off('debugVisualPolicy:changed', onDebugVisualPolicyChanged);
         events.off('editLeftModule:changed', onPreviewContextChanged);
         events.off('editMode:changed', onPreviewContextChanged);
         handler?.destroy();

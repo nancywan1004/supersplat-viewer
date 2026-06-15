@@ -64,13 +64,19 @@ class ModuleOrchestrator {
             this.facades.forEach((facade) => facade.onPreviewModeChanged?.(ctx, previewMode));
         };
 
+        const onDebugVisualPolicyChanged = () => {
+            this.syncPreviewPolicies(this.buildContext());
+        };
+
         events.on('editLeftModule:changed', onEditLeftModuleChanged);
         events.on('editMode:changed', onEditModeChanged);
         events.on('previewMode:changed', onPreviewModeChanged);
+        events.on('debugVisualPolicy:changed', onDebugVisualPolicyChanged);
 
         this.offHandlers.push(() => events.off('editLeftModule:changed', onEditLeftModuleChanged));
         this.offHandlers.push(() => events.off('editMode:changed', onEditModeChanged));
         this.offHandlers.push(() => events.off('previewMode:changed', onPreviewModeChanged));
+        this.offHandlers.push(() => events.off('debugVisualPolicy:changed', onDebugVisualPolicyChanged));
     }
 
     dispose() {

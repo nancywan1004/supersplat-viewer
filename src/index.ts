@@ -321,6 +321,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         showCameraBoundingBox: false,
         editMode: false,
         previewMode: false,
+        suppressDebugVisualsForCapture: false,
         editLeftModule: null,
         assetTransformMode: 'move',
         uploadedAssets: [],
