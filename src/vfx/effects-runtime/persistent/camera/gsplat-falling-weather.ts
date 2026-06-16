@@ -116,6 +116,61 @@ type WeatherApp = AppBase & {
     viewer?: { cameraFrame?: { enabled?: boolean; update: () => void } };
 };
 
+/** 阴影 / exclude 等离屏 pass 相机，不得渲染雨雪层 */
+const WEATHER_LAYER_EXCLUDED_CAMERA_NAMES = new Set([
+    'shadowMaskCamera',
+    'placedMeshExcludeCamera'
+]);
+
+function shouldAttachWeatherLayerToCamera(cameraEntity: Entity | null | undefined): boolean {
+    if (!cameraEntity?.camera) {
+        return false;
+    }
+    if (WEATHER_LAYER_EXCLUDED_CAMERA_NAMES.has(cameraEntity.name)) {
+        return false;
+    }
+    // 带离屏 RT 的相机一律排除（阴影 mask、exclude mask 等）
+    if (cameraEntity.camera.renderTarget) {
+        return false;
+    }
+    return true;
+}
+
+function setWeatherLayerOnCamera(cam: WeatherCameraLayers, layerId: number, attach: boolean): boolean {
+    const idx = cam.layers.indexOf(layerId);
+    if (attach) {
+        if (idx >= 0) {
+            return false;
+        }
+        cam.layers = [...cam.layers, layerId];
+        return true;
+    }
+    if (idx < 0) {
+        return false;
+    }
+    cam.layers = cam.layers.filter((id) => id !== layerId);
+    return true;
+}
+
+function stripWeatherLayerFromUtilityCameras(app: AppBase, layerId: number): boolean {
+    let patched = false;
+    for (const name of WEATHER_LAYER_EXCLUDED_CAMERA_NAMES) {
+        const entity = app.root.findByName(name) as Entity | null;
+        if (entity?.camera && setWeatherLayerOnCamera(entity.camera, layerId, false)) {
+            patched = true;
+        }
+    }
+    for (const camComp of app.scene.layers.cameras) {
+        const entity = camComp.entity as Entity;
+        if (!shouldAttachWeatherLayerToCamera(entity)) {
+            if (setWeatherLayerOnCamera(camComp, layerId, false)) {
+                patched = true;
+            }
+        }
+    }
+    return patched;
+}
+
 function getOrCreateWeatherGsplatLayer(app: AppBase): number {
     if (weatherGsplatLayerId != null) {
         return weatherGsplatLayerId;
@@ -136,32 +191,23 @@ function getOrCreateWeatherGsplatLayer(app: AppBase): number {
     return weatherGsplatLayerId;
 }
 
-/** 确保相机渲染雨雪层；layer 有变更时触发 CameraFrame 重建 */
+/** 确保相机渲染雨雪层；仅主视角相机，并清理阴影等离屏相机上的误挂层 */
 function syncWeatherGsplatRenderLayer(app: AppBase): number {
     const layerId = getOrCreateWeatherGsplatLayer(app);
-    let patched = false;
-
-    const addLayer = (cam: WeatherCameraLayers) => {
-        if (cam.layers.indexOf(layerId) >= 0) {
-            return;
-        }
-        cam.layers = [...cam.layers, layerId];
-        patched = true;
-    };
+    let patched = stripWeatherLayerFromUtilityCameras(app, layerId);
 
     const appEx = app as WeatherApp;
-    const mainCam = appEx.__global?.camera?.camera;
-    if (mainCam) {
-        addLayer(mainCam);
-    } else {
-        const found = app.root.findComponent('camera') as { camera?: WeatherCameraLayers } | null;
-        if (found?.camera) {
-            addLayer(found.camera);
+    const mainCamEntity = appEx.__global?.camera as Entity | undefined;
+    const mainCam = mainCamEntity?.camera ?? appEx.__global?.camera?.camera;
+    if (mainCam && setWeatherLayerOnCamera(mainCam, layerId, true)) {
+        patched = true;
+    } else if (!mainCam) {
+        const found = app.root.findComponent('camera') as { entity?: Entity; camera?: WeatherCameraLayers } | null;
+        if (found?.camera && shouldAttachWeatherLayerToCamera(found.entity ?? null)) {
+            if (setWeatherLayerOnCamera(found.camera, layerId, true)) {
+                patched = true;
+            }
         }
-    }
-
-    for (const { camera } of app.scene.layers.cameras) {
-        addLayer(camera);
     }
 
     if (patched) {
@@ -587,6 +633,8 @@ export class GsplatFallingWeather extends Script {
         gs.setParameter('uElongate', this.elongate);
         gs.setParameter('uFlutter', this.flutter);
         gs.setParameter('uTumble', this.tumble);
+
+        this.app.renderNextFrame = true;
     };
 
     destroy() {
@@ -654,10 +702,12 @@ export class GsplatFallingWeather extends Script {
             this.entity.addComponent('gsplat', {
                 resource: this._container,
                 unified: true,
+                castShadows: false,
                 layers: [weatherLayerId]
             });
         } else {
             this.entity.gsplat.resource = this._container;
+            this.entity.gsplat.castShadows = false;
             this.entity.gsplat.layers = [weatherLayerId];
         }
     }

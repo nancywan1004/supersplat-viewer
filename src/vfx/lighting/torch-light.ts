@@ -722,18 +722,26 @@ export function initTorchLight(global: Global): TorchControllerHandle {
     let lastEditLeftModule: EditLeftModule | null = global.state.editLeftModule ?? null;
     const onEditLeftModuleChanged = (next: EditLeftModule | null) => {
         const normalized: EditLeftModule | null = next ?? null;
+        const leftEnvironment = lastEditLeftModule === 'environment' && normalized !== 'environment';
+        lastEditLeftModule = normalized;
         if (!global.state.editMode) {
-            lastEditLeftModule = normalized;
             return;
         }
-        if (normalized === lastEditLeftModule) return;
-        lastEditLeftModule = normalized;
-        if (readViewTorchActive(global)) {
+        if (leftEnvironment && readViewTorchActive(global)) {
             applyViewTorchActive(global, false);
             onUpdate();
         }
     };
     events.on('editLeftModule:changed', onEditLeftModuleChanged);
+
+    const onEditModeChanged = (editMode: boolean) => {
+        if (editMode) return;
+        if (readViewTorchActive(global)) {
+            applyViewTorchActive(global, false);
+            onUpdate();
+        }
+    };
+    events.on('editMode:changed', onEditModeChanged);
 
     const handle: TorchControllerHandle = {
         get entity() {
@@ -761,6 +769,7 @@ export function initTorchLight(global: Global): TorchControllerHandle {
             events.off('torchParams:changed', onTorchParamsChanged);
             events.off('torchActive:changed', onTorchActiveChanged);
             events.off('editLeftModule:changed', onEditLeftModuleChanged);
+            events.off('editMode:changed', onEditModeChanged);
             setTorchCursorActive(global, false);
             try {
                 if (container) (container as Entity).destroy();

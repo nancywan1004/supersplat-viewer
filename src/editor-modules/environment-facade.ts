@@ -33,6 +33,7 @@ import type { Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSourc
 import type { InputArbiter } from '../input-arbiter';
 import { isEnvironmentDebugVisualEnabled } from '../state-selectors';
 import { setPlacementCursorActive } from '../placement-cursor';
+import { applyViewTorchActive, readViewTorchActive } from '../view-settings';
 
 type Payload = Record<string, unknown>;
 
@@ -121,6 +122,9 @@ class EnvironmentFacade implements ModuleFacade {
         ctx.state.lightTransformMode = 'move';
         ctx.events.fire('sceneLight:selected', { id: null, source: 'host' as SelectionSource });
         ctx.events.fire('lightTransformMode:changed', 'move');
+        if (readViewTorchActive(ctx.global)) {
+            applyViewTorchActive(ctx.global, false);
+        }
         this.syncPreviewVisualPolicy(ctx);
         ctx.events.fire('environmentFacade:exit');
     }
