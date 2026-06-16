@@ -255,6 +255,7 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
         onEnabledChange = () => {
             const enabled = enabledInput.checked;
             void applyCollisionSetFromHost(global, enabled).finally(() => {
+                enabledInput.checked = collisionEnabled(global);
                 if (scalePanel) {
                     scalePanel.classList.toggle('hidden', !enabledInput.checked);
                 }

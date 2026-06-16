@@ -15,6 +15,7 @@ import {
 } from '../scene-assets/collision/scene-asset-collision-state';
 import { isShadowSystemEnabled } from '../vfx/shadow/shadow-policy';
 import type { SceneMeshLoadIntent } from './scene-mesh-load-intent';
+import type { ExperienceSettings } from '../schemas/v2';
 import type { Global } from '../types';
 
 /** Viewer 内部事件；出站协议名为 `COLLISION_SYSTEM_READY`（见 message-bridge）。 */
@@ -106,6 +107,9 @@ export class CameraCollisionManager {
 
     setEnabled(enabled: boolean): void {
         patchSceneAssetCollisionRuntimeState(this.global, { enabled: !!enabled });
+        const settings = this.global.settings as ExperienceSettings;
+        if (!settings.collision) settings.collision = {};
+        settings.collision.enabled = !!enabled;
         this.global.events.fire(SCENE_ASSET_COLLISION_APPLY_RUNTIME_STATE);
         this.global.events.fire('cameraCollision:changed');
         this.global.events.fire('sceneAssetCollision:changed');

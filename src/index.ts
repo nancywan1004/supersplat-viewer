@@ -48,7 +48,8 @@ import {
 } from './settings-serialize/effects-sync';
 import {
     applySceneAssetCollisionFromSettings,
-    createDefaultSceneAssetCollisionRuntimeState
+    createDefaultSceneAssetCollisionRuntimeState,
+    syncSceneAssetCollisionRuntime
 } from './scene-assets/collision/scene-asset-collision';
 import { getCameraCollisionManager } from './collision/camera-collision-manager';
 
@@ -392,6 +393,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
 
     ensureViewSettings(global);
     applySceneAssetCollisionFromSettings(global);
+    syncSceneAssetCollisionRuntime(global);
     getCameraCollisionManager(global).configure();
 
     // 将原始配置挂载到 global 供后续恢复使用

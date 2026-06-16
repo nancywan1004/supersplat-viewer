@@ -21,7 +21,7 @@ import {
     normalizeAxisScale,
     normalizeSceneAssetCollisionRuntimeState,
     normalizeSceneAssetCollisionScale,
-    patchSceneAssetCollisionRuntimeState,
+    patchSceneAssetCollisionRuntimeState as patchSceneAssetCollisionRuntimeStateCore,
     readSceneAssetCollisionRuntimeState,
     SCENE_ASSET_COLLISION_APPLY_RUNTIME_STATE,
     writeSceneAssetCollisionRuntimeState,
@@ -36,10 +36,18 @@ export {
     normalizeAxisScale,
     normalizeSceneAssetCollisionRuntimeState,
     normalizeSceneAssetCollisionScale,
-    patchSceneAssetCollisionRuntimeState,
     readSceneAssetCollisionRuntimeState,
     writeSceneAssetCollisionRuntimeState
 } from './scene-asset-collision-state';
+
+export function patchSceneAssetCollisionRuntimeState(
+    global: Global,
+    patch: Partial<SceneAssetCollisionRuntimeState> & { scale?: SceneAssetCollisionScaleInput }
+): SceneAssetCollisionRuntimeState {
+    const result = patchSceneAssetCollisionRuntimeStateCore(global, patch);
+    persistCollisionToSettings(global);
+    return result;
+}
 
 export type {
     SceneAssetCollisionAxisScale,
