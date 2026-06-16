@@ -5,10 +5,9 @@ import { setPlacementCursorActive } from '../placement-cursor';
 import { applyViewAnnotationsVisible } from '../view-settings';
 import { loadGsplatAsset } from '../loaders/gsplat/sog/splat-loader';
 import { getAssetLoader } from '../loaders/asset-loader';
+import { loadContainerAsset } from '../loaders/gltf/container-loader';
 import { findAssetMorphOwnerTargetId } from '../settings-serialize/effects-sync';
 import type { ExperienceSettings } from '../schemas/v2';
-
-const ASSET_DOWNLOAD_TIMEOUT_MS = 15000;
 
 function isDeformedMorphGsplat(global: Global, item: { id?: string; assetType?: string } | null | undefined): boolean {
     if (!item?.id || item.assetType !== 'gaussian') {
@@ -60,37 +59,7 @@ class AssetFacade implements ModuleFacade {
             }
 
             if (item.type === 'mesh') {
-                const meshLoadPromise = new Promise<any>((resolve, reject) => {
-                    let settled = false;
-                    const timer = window.setTimeout(() => {
-                        if (settled) return;
-                        settled = true;
-                        this.currentDownloadAbort = null;
-                        reject(new Error(`[AssetFacade] mesh download timeout (${ASSET_DOWNLOAD_TIMEOUT_MS}ms): ${url}`));
-                    }, ASSET_DOWNLOAD_TIMEOUT_MS);
-                    const onLoad = (err: Error | null, loadedAsset: any) => {
-                        if (settled) return;
-                        settled = true;
-                        window.clearTimeout(timer);
-                        this.currentDownloadAbort = null;
-                        if (err || !loadedAsset) {
-                            reject(err ?? new Error('container asset missing'));
-                            return;
-                        }
-                        resolve(loadedAsset);
-                    };
-
-                    // 注册取消回调，用于中断下载
-                    this.currentDownloadAbort = () => {
-                        if (settled) return;
-                        settled = true;
-                        window.clearTimeout(timer);
-                        this.currentDownloadAbort = null;
-                        reject(new Error('download cancelled'));
-                    };
-
-                    (app.assets as any).loadFromUrl(url, 'container', onLoad);
-                });
+                const meshLoadPromise = loadContainerAsset(app, url);
                 const asset = await assetLoader.trackPromise('placement', 'facade:mesh', meshLoadPromise);
                 return { ...item, asset, filename: item.filename ?? url, url };
             }

@@ -16,7 +16,7 @@ import {
 } from 'playcanvas';
 
 import { App } from './app';
-import { applySkyboxTexture, clearSkyboxDisplay } from './loaders/skybox-loader';
+import { applySkyboxTexture, clearSkyboxDisplay } from './loaders/skybox/skybox-loader';
 import { observe } from './core/observe';
 import type { ExperienceSettings } from './schemas/v2';
 import { importSettings } from './settings';
@@ -27,7 +27,7 @@ import { initXr } from './xr';
 import { initLight } from './light';
 import { isCustomLodEnabled, isGsplatMetaJsonFilename, LodLoader } from './loaders/gsplat/lod/custom-loader';
 import { loadSplat } from './loaders/gsplat/sog/splat-deserialize';
-import type { AssetSource } from './loaders/asset-source';
+import type { AssetSource } from './loaders/shared/asset-source';
 import { loadGsplatAsset } from './loaders/gsplat/sog/splat-loader';
 import { getAssetLoader } from './loaders/asset-loader';
 import { version as appVersion } from '../package.json';
@@ -52,6 +52,7 @@ import {
     syncSceneAssetCollisionRuntime
 } from './scene-assets/collision/scene-asset-collision';
 import { getCameraCollisionManager } from './collision/camera-collision-manager';
+import { initializeGltfRuntime } from './loaders/gltf/gltf-transcoder';
 
 
 export { loadGsplatAsset };
@@ -176,6 +177,8 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
 };
 
 const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
+    initializeGltfRuntime();
+
     const useWebGPU = config.renderer !== 'webgl';
 
     // Create the graphics device

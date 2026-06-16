@@ -149,6 +149,8 @@ const applySkyboxTexture = async (app: AppBase, url: string) => {
     app.scene.skybox = skyboxCubemap;
     // IBL 仍固定为纯色 envAtlas，便于与背景解耦控制反光基调。
     app.scene.envAtlas = getOrCreateSolidEnvAtlas(app);
+    const global = (app as { __global?: { events?: { fire: (name: string) => void } } }).__global;
+    global?.events?.fire('skyboxTexture:applied');
     app.renderNextFrame = true;
 };
 

@@ -1,4 +1,4 @@
-import { ReadSource } from '../serialize/read-source';
+import { ReadSource } from '../../serialize/read-source';
 
 interface AssetSource {
     filename?: string;

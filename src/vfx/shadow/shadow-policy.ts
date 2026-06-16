@@ -1,5 +1,5 @@
 import { canGenerateCollision, resolveCollisionUrl } from '../../collision/scene-collision-source';
-import { sceneMeshUrl } from '../../loaders/scene-mesh-loader';
+import { sceneMeshUrl } from '../../loaders/gltf/scene-mesh-loader';
 import type { Global } from '../../types';
 
 type ShadowEnableInputs = Pick<Global, 'config' | 'settings'>;

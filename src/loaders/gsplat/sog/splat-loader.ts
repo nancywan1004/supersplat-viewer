@@ -1,7 +1,7 @@
 import type { AppBase, Asset } from 'playcanvas';
 import { Asset as AssetCtor, GSplatResource } from 'playcanvas';
 import { loadSplat } from './splat-deserialize';
-import type { AssetSource } from '../../asset-source';
+import type { AssetSource } from '../../shared/asset-source';
 
 /**
  * 加载 gsplat Asset（.splat / .ply / .sog 等）

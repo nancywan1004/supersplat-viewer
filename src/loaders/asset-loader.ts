@@ -1,6 +1,7 @@
 import type { AppBase, Asset } from 'playcanvas';
 import type { AssetLibraryItem, AssetLibraryType, Global } from '../types';
 import { loadGsplatAsset } from './gsplat/sog/splat-loader';
+import { loadContainerAsset } from './gltf/container-loader';
 
 export const DEFAULT_ASSET_LOAD_TIMEOUT_MS = 15000;
 // 导出链路等待“资产全就绪”时的默认超时，避免无穷等待。
@@ -165,25 +166,7 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: st
 }
 
 async function loadMeshAsset(app: AppBase, url: string, timeoutMs: number): Promise<Asset> {
-    const meshAssetLoad = new Promise<Asset>((resolve, reject) => {
-        let settled = false;
-        const timer = window.setTimeout(() => {
-            if (settled) return;
-            settled = true;
-            reject(new Error(`[AssetLoader] mesh load timeout (${timeoutMs}ms): ${url}`));
-        }, timeoutMs);
-
-        (app.assets as any).loadFromUrl(url, 'container', (err: Error | null, loadedAsset: Asset | null) => {
-            if (settled) return;
-            settled = true;
-            window.clearTimeout(timer);
-            if (err || !loadedAsset) {
-                reject(err ?? new Error('container asset missing'));
-                return;
-            }
-            resolve(loadedAsset);
-        });
-    });
+    const meshAssetLoad = loadContainerAsset(app, url);
 
     // 外层再包一层保险超时，防止底层回调漏回导致悬挂。
     return withTimeout(meshAssetLoad, timeoutMs + 1000, 'mesh hydrate');

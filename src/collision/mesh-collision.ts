@@ -1,9 +1,10 @@
 import {
-    Asset,
     INDEXFORMAT_UINT32,
     SEMANTIC_POSITION
 } from 'playcanvas';
 import type { AppBase } from 'playcanvas';
+
+import { loadContainerAsset } from '../loaders/gltf/container-loader';
 
 import { PENETRATION_EPSILON, resolveIterative } from './collision';
 import type { Collision, PushOut, RayHit } from './collision';
@@ -808,32 +809,11 @@ class MeshCollision implements Collision {
      * @returns A promise resolving to a MeshCollision.
      */
     static fromGlb(app: AppBase, url: string): Promise<MeshCollision> {
-        return new Promise((resolve, reject) => {
-            const asset = new Asset(url, 'container', { url });
-
-            const cleanup = () => {
-                app.assets.remove(asset);
-                asset.unload();
-            };
-
-            asset.on('load', () => {
-                try {
-                    const renders = (asset.resource as { renders?: unknown[] }).renders ?? [];
-                    resolve(MeshCollision.fromContainerRenders(renders));
-                } catch (err) {
-                    reject(err instanceof Error ? err : new Error(String(err)));
-                } finally {
-                    cleanup();
-                }
-            });
-
-            asset.on('error', (err: string) => {
-                cleanup();
-                reject(new Error(err));
-            });
-
-            app.assets.add(asset);
-            app.assets.load(asset);
+        return loadContainerAsset(app, url).then((asset) => {
+            const renders = (asset.resource as { renders?: unknown[] }).renders ?? [];
+            app.assets.remove(asset);
+            asset.unload();
+            return MeshCollision.fromContainerRenders(renders);
         });
     }
 }

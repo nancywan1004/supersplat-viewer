@@ -1,6 +1,6 @@
 import { GSplatData } from 'playcanvas';
 
-import { AssetSource, createReadSource } from '../../asset-source';
+import { AssetSource, createReadSource } from '../../shared/asset-source';
 
 // ideally this function would stream data directly into GSplatData buffers.
 // unfortunately the .splat file format has no header specifying total number

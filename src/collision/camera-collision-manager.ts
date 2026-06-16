@@ -2,7 +2,7 @@ import type { Entity } from 'playcanvas';
 
 import type { Collision } from './collision';
 import { loadVoxelCollision } from './voxel-collision';
-import { isSceneMeshGlbUrl, loadSceneMesh, sceneMeshUrl } from '../loaders/scene-mesh-loader';
+import { isSceneMeshGlbUrl, loadSceneMesh, sceneMeshUrl } from '../loaders/gltf/scene-mesh-loader';
 import {
     canGenerateCollision,
     ensureCollisionUrl,

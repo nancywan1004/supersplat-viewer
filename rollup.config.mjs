@@ -371,6 +371,10 @@ const buildDist = {
         {
           src: `public/vendor/${PLAYCANVAS_VENDOR_FILE}`,
           dest: 'dist/vendor'
+        },
+        {
+          src: 'public/vendor/basis/**/*',
+          dest: 'dist/vendor/basis'
         }
       ]
     }),
