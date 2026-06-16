@@ -441,6 +441,9 @@ class Viewer {
     /** 阴影管线挂载参数（GLB 懒加载完成后热更新 meshEntity） */
     private shadowPipelineMount: ShadowPipelineMount | null = null;
 
+    /** 避免同帧多次 schedule；接影 mesh 挂载延后到 frameend，规避与 configureCamera 等同帧 draw 竞态 */
+    private shadowPipelineFrameScheduled = false;
+
     /** 音视频热区播控卸载 */
     cleanupMediaHotspotController: (() => void) | null = null;
     cleanupSceneAudioCallout: (() => void) | null = null;
@@ -947,10 +950,7 @@ class Viewer {
                     void collisionMgr.ensureSceneMeshLoaded();
                     return;
                 }
-                scheduleShadowPipeline(global, this.shadowPipelineMount);
-                if (state.readyToRender) {
-                    notifyViewportReadyForShadow(global);
-                }
+                this.scheduleShadowPipelineNextFrame();
             };
             ensureShadowPipelineReady();
             events.on('postEffect:changed', () => {
@@ -1354,6 +1354,34 @@ z: ${cameraInfo.target.z.toFixed(6)}
         this.global.app.renderNextFrame = true;
     }
 
+    /**
+     * 接影 GLB / 阴影管线挂载延后到下一帧 frameend，避免与进编辑、postEffect:changed 等同帧 forward draw 竞态（impl undefined）。
+     */
+    private scheduleShadowPipelineNextFrame(): void {
+        const { global } = this;
+        const { app } = global;
+        if (!this.shadowPipelineMount || !isShadowSystemEnabled(global)) {
+            return;
+        }
+        if (this.shadowPipelineFrameScheduled) {
+            return;
+        }
+        this.shadowPipelineFrameScheduled = true;
+        app.renderNextFrame = true;
+        app.once('frameend', () => {
+            this.shadowPipelineFrameScheduled = false;
+            const mount = this.shadowPipelineMount;
+            if (!mount || !isShadowSystemEnabled(global)) {
+                return;
+            }
+            scheduleShadowPipeline(global, mount);
+            if (global.state.readyToRender) {
+                notifyViewportReadyForShadow(global);
+            }
+            app.renderNextFrame = true;
+        });
+    }
+
     /** 接影 GLB 懒加载完成后更新 shadow mount 并尝试挂载阴影管线 */
     private applyShadowMeshEntity(meshEntity: Entity | null): void {
         if (!meshEntity || !this.shadowPipelineMount) {
@@ -1364,10 +1392,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
         if (!isShadowSystemEnabled(global)) {
             return;
         }
-        scheduleShadowPipeline(global, this.shadowPipelineMount);
-        if (global.state.readyToRender) {
-            notifyViewportReadyForShadow(global);
-        }
+        this.scheduleShadowPipelineNextFrame();
     }
 
     /** urlParam 碰撞懒加载完成后挂载 debug 线框（与门控无关，仅可视化） */
@@ -1392,14 +1417,21 @@ z: ${cameraInfo.target.z.toFixed(6)}
             if (this.meshOverlay) {
                 return;
             }
-            this.meshOverlay = new MeshDebugOverlay(app, collision, camera, !!this.cameraFrame);
-            state.hasCollisionOverlay = true;
-            events.on('collisionOverlayEnabled:changed', (value: boolean) => {
+            const cameraFrameEnabled = !!this.cameraFrame;
+            app.once('frameend', () => {
                 if (this.meshOverlay) {
-                    this.meshOverlay.enabled = value;
-                    app.renderNextFrame = true;
+                    return;
                 }
+                this.meshOverlay = new MeshDebugOverlay(app, collision, camera, cameraFrameEnabled);
+                state.hasCollisionOverlay = true;
+                events.on('collisionOverlayEnabled:changed', (value: boolean) => {
+                    if (this.meshOverlay) {
+                        this.meshOverlay.enabled = value;
+                        app.renderNextFrame = true;
+                    }
+                });
             });
+            app.renderNextFrame = true;
         }
     }
 

@@ -157,7 +157,10 @@ function initShadowCatcher(
             if (script) {
                 script.scale.set(sizeX, 1, sizeZ);
                 script.debugVisual = debugVisual;
-                script.setupMaterial(shadowMat);
+                // 外部 GLB 已挂载时跳过重复材质替换，避免 postEffect:changed / 进编辑等同帧 draw 读到未就绪的 shader impl
+                if (!script.isExternalMesh) {
+                    script.setupMaterial(shadowMat);
+                }
             }
             if (active) {
                 entity.enabled = true;

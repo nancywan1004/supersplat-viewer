@@ -304,6 +304,7 @@ class MeshDebugOverlay {
         encodeFlatColors(this.triangles, cameraFrameEnabled, this.flatColors);
         this.mesh.setColors32(this.flatColors);
         this.mesh.update(PRIMITIVE_TRIANGLES);
+        this.mesh.generateWireframe();
     }
 
     destroy(): void {
