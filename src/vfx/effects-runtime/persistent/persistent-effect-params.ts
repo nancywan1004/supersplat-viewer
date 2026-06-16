@@ -143,6 +143,7 @@ const POINTILLISM_STIPPLE = new Set([
     'levels',
     'levelRange',
     'ditherSpread',
+    'skyboxPointillismStrength',
     'paperStrength',
     'paperTint',
     'edgeStrength'
@@ -314,6 +315,7 @@ export function normalizePointillismStippleEffectParams(
     }
     setNum('levelRange', 0.5, 2);
     setNum('ditherSpread', 0, 0.2);
+    setNum('skyboxPointillismStrength', 0, 1);
     setNum('paperStrength', 0, 1);
     setNum('edgeStrength', 0, 1);
 

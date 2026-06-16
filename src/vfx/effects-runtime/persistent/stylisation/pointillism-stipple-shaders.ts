@@ -113,6 +113,7 @@ export const POINTILLISM_DEFAULTS = {
     levels: 8,
     levelRange: 1.14,
     ditherSpread: 0.0,
+    skyboxPointillismStrength: 0.0,
     paperStrength: 0.18,
     paperTint: [1.0, 0.97, 0.91] as [number, number, number],
     edgeStrength: 0.72

@@ -381,6 +381,8 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
 
     ditherSpread = POINTILLISM_DEFAULTS.ditherSpread;
 
+    skyboxPointillismStrength = POINTILLISM_DEFAULTS.skyboxPointillismStrength;
+
     paperStrength = POINTILLISM_DEFAULTS.paperStrength;
 
     paperTint: [number, number, number] = [...POINTILLISM_DEFAULTS.paperTint];
@@ -507,7 +509,24 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
             saturation: this.saturation,
             complementaryMix: resolvePointillismComplementaryMix(contrastDotMix),
             contrastDotMix,
+            dotRadiusPx: clamp(
+                Number.isFinite(this.dotRadiusPx) ? this.dotRadiusPx : POINTILLISM_DEFAULTS.dotRadiusPx,
+                0.25,
+                POINTILLISM_DOT_RADIUS_PX_MAX
+            ),
+            gapSpacing: clamp(
+                Number.isFinite(this.gapSpacing) ? this.gapSpacing : POINTILLISM_DEFAULTS.gapSpacing,
+                POINTILLISM_GAP_SPACING_MIN,
+                POINTILLISM_GAP_SPACING_MAX
+            ),
             seed: this.seed,
+            skyboxPointillismStrength: clamp(
+                Number.isFinite(this.skyboxPointillismStrength)
+                    ? this.skyboxPointillismStrength
+                    : POINTILLISM_DEFAULTS.skyboxPointillismStrength,
+                0,
+                1
+            ),
             paperStrength: this.paperStrength,
             paperTint: [...this.paperTint],
             edgeThreshold: resolvePointillismEdgeThreshold(edgeStrength),
