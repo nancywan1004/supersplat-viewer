@@ -37,13 +37,14 @@ export type PointillismPostSettings = {
     dotRadiusPx: number;
     gapSpacing: number;
     seed: number;
-    skyboxPointillismStrength: number;
     paperStrength: number;
     paperTint: [number, number, number];
     edgeThreshold: number;
     edgeStrength: number;
     denoiseStrength: number;
     gapFill: number;
+    /** >0 时 post 仅透传天空像素，不在全屏叠加点彩 */
+    skyboxPointillismStrength: number;
 };
 
 export const POINTILLISM_PALETTE_NAMES: Record<number, string> = {
@@ -70,13 +71,13 @@ export const DEFAULT_POINTILLISM_POST_SETTINGS: PointillismPostSettings = {
     dotRadiusPx: POINTILLISM_DEFAULTS.dotRadiusPx,
     gapSpacing: POINTILLISM_DEFAULTS.gapSpacing,
     seed: POINTILLISM_DEFAULTS.seed,
-    skyboxPointillismStrength: POINTILLISM_DEFAULTS.skyboxPointillismStrength,
     paperStrength: POINTILLISM_DEFAULTS.paperStrength,
     paperTint: [...POINTILLISM_DEFAULTS.paperTint],
     edgeThreshold: resolvePointillismEdgeThreshold(POINTILLISM_DEFAULTS.edgeStrength),
     edgeStrength: POINTILLISM_DEFAULTS.edgeStrength,
     denoiseStrength: POINTILLISM_DEFAULTS.denoiseStrength,
-    gapFill: POINTILLISM_DEFAULTS.gapFill
+    gapFill: POINTILLISM_DEFAULTS.gapFill,
+    skyboxPointillismStrength: POINTILLISM_DEFAULTS.skyboxPointillismStrength
 };
 
 const clamp = (v: number, min: number, max: number): number => Math.max(min, Math.min(max, v));
@@ -149,11 +150,6 @@ export function normalizePointillismPostSettings(raw: unknown): PointillismPostS
             1
         ),
         seed: clamp(finiteOr(obj.seed, DEFAULT_POINTILLISM_POST_SETTINGS.seed), 0, 997),
-        skyboxPointillismStrength: clamp(
-            finiteOr(obj.skyboxPointillismStrength, DEFAULT_POINTILLISM_POST_SETTINGS.skyboxPointillismStrength),
-            0,
-            1
-        ),
         paperStrength: clamp(finiteOr(obj.paperStrength, DEFAULT_POINTILLISM_POST_SETTINGS.paperStrength), 0, 1),
         paperTint: normalizeColor(obj.paperTint, DEFAULT_POINTILLISM_POST_SETTINGS.paperTint),
         edgeStrength: clamp(finiteOr(obj.edgeStrength, DEFAULT_POINTILLISM_POST_SETTINGS.edgeStrength), 0, 1),
@@ -169,7 +165,12 @@ export function normalizePointillismPostSettings(raw: unknown): PointillismPostS
             0,
             1
         ),
-        gapFill: clamp(finiteOr(obj.gapFill, DEFAULT_POINTILLISM_POST_SETTINGS.gapFill), 0, 1)
+        gapFill: clamp(finiteOr(obj.gapFill, DEFAULT_POINTILLISM_POST_SETTINGS.gapFill), 0, 1),
+        skyboxPointillismStrength: clamp(
+            finiteOr(obj.skyboxPointillismStrength, DEFAULT_POINTILLISM_POST_SETTINGS.skyboxPointillismStrength),
+            0,
+            1
+        )
     };
 }
 
@@ -205,13 +206,13 @@ class PointillismPostEffect extends PostEffect {
             uniform float uDotRadiusPx;
             uniform float uGapSpacing;
             uniform float uSourceStructureBlend;
-            uniform float uSkyboxPointillismStrength;
             uniform float uPaperStrength;
             uniform vec3 uPaperTint;
             uniform float uEdgeThreshold;
             uniform float uEdgeStrength;
             uniform float uDenoiseStrength;
             uniform float uGapFill;
+            uniform float uSkyboxPointillismStrength;
 
             float getLuminance(vec3 color) {
                 return dot(color, vec3(0.299, 0.587, 0.114));
@@ -365,116 +366,30 @@ class PointillismPostEffect extends PostEffect {
                 return acc;
             }
 
-            float bgHash21(vec2 p) {
-                p = fract(p * vec2(123.34, 456.21));
-                p += dot(p, p + 45.32);
-                return fract(p.x * p.y);
-            }
-
-            vec2 bgHash22(vec2 p) {
-                return vec2(bgHash21(p), bgHash21(p + vec2(37.13, 17.71)));
-            }
-
-            float skyboxBackgroundMask(vec2 uv, vec3 rawColor, vec3 localBlur, float structEdge) {
-                float luma = getLuminance(rawColor);
-                float chroma = length(rawColor - vec3(luma));
-                float detail = sobelGradBlur(uv) * 1.25 + length(rawColor - localBlur) * 0.92;
-                float smoothArea = 1.0 - smoothstep(0.026, 0.18, detail);
-
-                float blueBias = smoothstep(0.02, 0.24, rawColor.b - max(rawColor.r * 0.94, rawColor.g * 0.78));
-                float cyanBias = smoothstep(0.02, 0.22, rawColor.g - rawColor.r * 0.78)
-                    * smoothstep(-0.02, 0.16, rawColor.b - rawColor.r * 0.82);
-                float cloudBias = smoothstep(0.58, 0.93, luma)
-                    * (1.0 - smoothstep(0.20, 0.42, chroma))
-                    * smoothstep(-0.05, 0.12, rawColor.b - rawColor.r);
-                float upperWeight = smoothstep(0.08, 0.55, uv.y);
-                float skyLike = max(max(blueBias, cyanBias * 0.82), cloudBias * upperWeight);
-
-                return clamp(smoothArea * skyLike * mix(0.38, 1.0, upperWeight) * (1.0 - structEdge * 0.72), 0.0, 1.0);
-            }
-
-            float skyDaubMask(vec2 fragPx, float spacing, float radiusPx, vec2 salt, float aspectScale) {
-                vec2 warped = fragPx + vec2(
-                    bgHash21(floor(fragPx / 96.0) + salt) - 0.5,
-                    bgHash21(floor(fragPx / 96.0) + salt + 17.0) - 0.5
-                ) * radiusPx * 0.72;
-                vec2 cell = floor((warped + salt) / spacing);
-                vec2 local = fract((warped + salt) / spacing) * spacing - spacing * 0.5;
-                vec2 jitter = (bgHash22(cell + salt * 0.07) - 0.5) * min(spacing * 0.22, radiusPx * 0.68);
-                float angle = bgHash21(cell + salt * 0.13) * 6.2831853;
-                float c = cos(angle);
-                float s = sin(angle);
-                vec2 p = local - jitter;
-                vec2 q = vec2(c * p.x - s * p.y, s * p.x + c * p.y);
-                float rx = radiusPx * mix(1.02, 1.28, bgHash21(cell + 5.7)) * aspectScale;
-                float ry = radiusPx * mix(0.76, 0.98, bgHash21(cell + 9.1)) / max(aspectScale, 0.001);
-                float d = pow(abs(q.x) / max(rx, 0.001), 2.8) + pow(abs(q.y) / max(ry, 0.001), 2.8);
-                float broken = mix(0.86, 1.08, bgHash21(cell + 23.4));
-                return 1.0 - smoothstep(0.82 * broken, 1.08 * broken, d);
-            }
-
-            vec3 skyboxStyledColor(vec3 base, vec2 cell, float luma, float t) {
-                float rnd = bgHash21(cell + vec2(3.1, 8.7));
-                vec3 color = applyContrast(saturateColor(base, uSaturation), uLevelRange);
-
-                vec3 warm = vec3(1.0, 0.67, 0.22);
-                vec3 cool = vec3(0.12, 0.46, 1.0);
-                float splitT = clamp(uWarmCoolSplit, 0.0, 1.0);
-                float lightSide = smoothstep(0.38, 0.90, luma);
-                vec3 split = mix(cool, warm, lightSide);
-                color = mix(color, split, splitT * mix(0.08, 0.30, rnd) * t);
-
-                float contrastMix = clamp(uContrastDotMix, 0.0, 0.55);
-                vec3 accent = (rnd < 0.5) ? vec3(0.98, 0.46, 0.12) : vec3(0.08, 0.35, 1.0);
-                color = mix(color, accent, contrastMix * mix(0.16, 0.52, bgHash21(cell + 41.0)) * t);
-                color *= mix(0.66, 1.34, bgHash21(cell + 13.0));
-                return clamp(color, 0.0, 1.0);
-            }
-
-            vec3 skyboxCellColor(vec2 cell, float spacing, vec2 salt) {
-                vec2 jitter = (bgHash22(cell + salt * 0.07) - 0.5) * min(spacing * 0.18, spacing * 0.22);
-                vec2 centerPx = (cell + 0.5) * spacing - salt + jitter;
-                vec2 centerUv = clamp(centerPx / uResolution, vec2(0.001), vec2(0.999));
-                return mix(texture2D(uColorBuffer, centerUv).rgb, boxBlurWide(centerUv, 2.4), 0.08);
-            }
-
-            vec3 skyboxPointillize(vec2 uv, vec3 rawColor) {
-                float t = clamp(uSkyboxPointillismStrength, 0.0, 1.0);
-                vec2 fragPx = gl_FragCoord.xy;
-                float radiusPx = clamp(2.4 + uDotRadiusPx * 8.6, 4.0, 42.0);
-                float spacing = radiusPx * mix(2.36, 2.04, t) + mix(3.2, 11.5, clamp(uGapSpacing, 0.0, 1.0));
-
-                vec2 cell1 = floor(fragPx / spacing);
-                vec2 cell2 = floor((fragPx + vec2(0.43, 0.37) * spacing) / (spacing * 0.92));
-                vec2 cell3 = floor((fragPx + vec2(0.22, 0.71) * spacing) / (spacing * 1.28));
-                vec2 salt1 = vec2(0.0, 0.0);
-                vec2 salt2 = vec2(19.0, 31.0);
-                vec2 salt3 = vec2(47.0, 11.0);
-                float m1 = skyDaubMask(fragPx, spacing, radiusPx, salt1, 1.04);
-                float m2 = skyDaubMask(fragPx, spacing * 0.96, radiusPx * 0.64, salt2, 0.92);
-                float m3 = skyDaubMask(fragPx, spacing * 1.34, radiusPx * 0.46, salt3, 1.12);
-                float layer = clamp(max(max(m1, m2 * mix(0.12, 0.34, t)), m3 * 0.18), 0.0, 1.0);
-
-                vec3 base1 = skyboxCellColor(cell1, spacing, salt1);
-                vec3 base2 = skyboxCellColor(cell2, spacing * 0.92, salt2);
-                vec3 base3 = skyboxCellColor(cell3, spacing * 1.28, salt3);
-                vec3 color1 = skyboxStyledColor(base1, cell1, getLuminance(base1), t);
-                vec3 color2 = skyboxStyledColor(base2, cell2 + vec2(23.0, 7.0), getLuminance(base2), t);
-                vec3 color3 = skyboxStyledColor(base3, cell3 + vec2(5.0, 29.0), getLuminance(base3), t);
-                vec3 daubColor = mix(color1, color2, smoothstep(0.12, 0.72, m2));
-                daubColor = mix(daubColor, color3, smoothstep(0.18, 0.78, m3) * 0.55);
-
-                vec3 softBase = mix(boxBlurWide(uv, 12.0), boxBlurWide(uv, 28.0), 0.46);
-                vec3 gapColor = mix(softBase, applyContrast(saturateColor(softBase, uSaturation * 0.62), uLevelRange), 0.12);
-                gapColor = mix(gapColor, vec3(0.98, 0.96, 0.90), mix(0.24, 0.52, t));
-                gapColor *= mix(0.92, 1.06, bgHash21(floor(fragPx / 72.0) + 3.7));
-                return clamp(mix(gapColor, daubColor, layer), 0.0, 1.0);
-            }
-
             float paintWeight(vec3 s, float refL) {
                 float sL = getLuminance(s);
                 return smoothstep(0.025, 0.14, sL - refL + 0.05)
                     + smoothstep(0.015, 0.08, length(s - vec3(sL))) * 0.35;
+            }
+
+            // 天空已在 skyboxPS 完成点彩；点彩天空 grain 高，不能用 grain/smoothArea 阻断透传
+            float skyContentProtectMask(vec2 uv, vec3 raw, vec3 localBlur, float structEdge, float grain) {
+                float skyBand = smoothstep(0.05, 0.22, uv.y);
+                float skyLike = smoothstep(0.02, 0.18, raw.b - max(raw.r, raw.g * 0.88));
+                float ptSky = smoothstep(0.01, 0.12, uSkyboxPointillismStrength) * skyBand;
+                float horizonLine = smoothstep(0.08, 0.24, uv.y);
+                float fgBlock = (1.0 - horizonLine) * structEdge * 0.92;
+                float skyScore = max(max(skyBand, skyLike * 0.82), ptSky);
+                return clamp(skyScore * (1.0 - fgBlock), 0.0, 1.0);
+            }
+
+            // 天际线带：减弱天空透传、与前景 post 色彩交叉融合
+            float skyHorizonFusionMask(vec2 uv, float structEdge, float grain) {
+                float bandTop = smoothstep(0.58, 0.40, uv.y);
+                float bandBot = smoothstep(0.16, 0.30, uv.y);
+                float band = bandTop * bandBot;
+                float edge = clamp(structEdge * 0.95 + grain * 0.28, 0.0, 1.0);
+                return band * edge;
             }
 
             vec3 fillSparseHoles(vec2 uv, vec3 rawCenter, vec3 center) {
@@ -523,16 +438,23 @@ class PointillismPostEffect extends PostEffect {
                 vec3 rawScene = texture2D(uColorBuffer, uv).rgb;
                 vec3 sceneColor = rawScene;
                 vec3 blur = boxBlur5(uv);
+                float grain = clamp(length(rawScene - blur) * 4.2, 0.0, 1.0);
+                float structEdge = structureEdgeMask(uv);
+                float skyStrength = clamp(uSkyboxPointillismStrength, 0.0, 1.0);
+                float skyProtect = (skyStrength > 0.001)
+                    ? skyContentProtectMask(uv, rawScene, blur, structEdge, grain) * skyStrength
+                    : 0.0;
+                float skyPostSkip = skyStrength * smoothstep(0.04, 0.16, uv.y);
 
-                sceneColor = suppressSpeckles(uv, sceneColor);
-                sceneColor = fillSparseHoles(uv, rawScene, sceneColor);
+                if (skyProtect < 0.98 && skyPostSkip < 0.85) {
+                    sceneColor = suppressSpeckles(uv, sceneColor);
+                    sceneColor = fillSparseHoles(uv, rawScene, sceneColor);
+                }
 
                 float structure = clamp(uSourceStructureBlend, 0.0, 1.0);
                 float flatDesire = 1.0 - structure;
-                float structEdge = structureEdgeMask(uv);
                 float interiorMask = (1.0 - structEdge) * (1.0 - structEdge);
 
-                float grain = clamp(length(sceneColor - blur) * 4.2, 0.0, 1.0);
                 float dotMask = smoothstep(0.20, 0.52, grain);
                 float flattenMask = interiorMask * (1.0 - dotMask * structure * 0.62);
 
@@ -558,6 +480,11 @@ class PointillismPostEffect extends PostEffect {
 
                 vec3 edgePop = saturateColor(color, 1.0 + edgeW * 0.18);
                 color = mix(color, edgePop, edgeAmt * 0.38);
+
+                float horizonFusion = skyHorizonFusionMask(uv, structEdge, grain) * skyStrength;
+                float skyProtectAdj = skyProtect * (1.0 - horizonFusion * 0.78);
+                color = mix(color, rawScene, skyProtectAdj);
+                color = mix(color, mix(sceneColor, rawScene, 0.38), horizonFusion * 0.55);
 
                 gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
             }
@@ -596,13 +523,13 @@ class PointillismPostEffect extends PostEffect {
         scope.resolve('uDotRadiusPx').setValue(s.dotRadiusPx);
         scope.resolve('uGapSpacing').setValue(s.gapSpacing);
         scope.resolve('uSourceStructureBlend').setValue(s.sourceStructureBlend);
-        scope.resolve('uSkyboxPointillismStrength').setValue(s.skyboxPointillismStrength);
         scope.resolve('uPaperStrength').setValue(s.paperStrength);
         scope.resolve('uPaperTint').setValue(this.uPaperTint);
         scope.resolve('uEdgeThreshold').setValue(s.edgeThreshold);
         scope.resolve('uEdgeStrength').setValue(s.edgeStrength);
         scope.resolve('uDenoiseStrength').setValue(s.denoiseStrength);
         scope.resolve('uGapFill').setValue(s.gapFill);
+        scope.resolve('uSkyboxPointillismStrength').setValue(s.skyboxPointillismStrength);
 
         this.drawQuad(outputTarget, this.shader, rect as any);
     }

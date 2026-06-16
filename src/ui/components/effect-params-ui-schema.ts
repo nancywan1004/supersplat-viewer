@@ -38,7 +38,9 @@ import {
     POINTILLISM_STROKE_LENGTH_MAX,
     POINTILLISM_STROKE_LENGTH_MIN,
     POINTILLISM_STROKE_WIDTH_MAX,
-    POINTILLISM_STROKE_WIDTH_MIN
+    POINTILLISM_STROKE_WIDTH_MIN,
+    POINTILLISM_SKY_DOT_VISUAL_MATCH_MIN,
+    POINTILLISM_SKY_DOT_VISUAL_MATCH_MAX
 } from '../../vfx/effects-runtime/persistent/stylisation/pointillism-stipple-shaders';
 import {
     getRevealEffectParamKeys,
@@ -286,11 +288,12 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     highlightSparsity: '亮部稀疏',
     darkDensityBoost: '暗部加密',
     stippleSize: '整体颗粒尺度（legacy）',
-    dotRadiusPx: '点径（px）',
+    dotRadiusPx: '点径（典型 px，驱动高斯与天空）',
     gapSpacing: '点间缝隙（↑更疏 ↓更密）',
     denoiseStrength: '噪点抑制',
     gapFill: '覆盖补全（↑填洞 ↓保留缝隙）',
     skyboxPointillismStrength: '背景点彩强度',
+    skyDotVisualMatch: '天空点径比例（相对典型点径）',
     paperStrength: '纸张强度',
     paperTint: '纸张色调',
     edgeStrength: '描边强度'
@@ -560,7 +563,7 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
         max: POINTILLISM_DOT_RADIUS_PX_MAX,
         step: 0.05,
         default: POINTILLISM_DEFAULTS.dotRadiusPx,
-        label: '点径（px）'
+        label: '点径（典型 px，驱动高斯与天空）'
     },
     gapSpacing: {
         min: POINTILLISM_GAP_SPACING_MIN,
@@ -650,6 +653,13 @@ const POINTILLISM_PARAM_UI: Record<string, PersistentParamUiOverride> = {
         default: POINTILLISM_DEFAULTS.skyboxPointillismStrength,
         label: '背景点彩强度'
     },
+    skyDotVisualMatch: {
+        min: POINTILLISM_SKY_DOT_VISUAL_MATCH_MIN,
+        max: POINTILLISM_SKY_DOT_VISUAL_MATCH_MAX,
+        step: 0.1,
+        default: POINTILLISM_DEFAULTS.skyDotVisualMatch,
+        label: '天空点径比例（相对典型点径）'
+    },
     paperStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.paperStrength, label: '纸张质感' },
     paperTint: { default: [...POINTILLISM_DEFAULTS.paperTint] },
     edgeStrength: { min: 0, max: 1, step: 0.01, default: POINTILLISM_DEFAULTS.edgeStrength, label: '边缘锐化（0关 1强）' }
@@ -672,6 +682,7 @@ const POINTILLISM_VISIBLE_PARAM_KEYS = [
     'contrastDotMix',
     'warmCoolSplit',
     'skyboxPointillismStrength',
+    'skyDotVisualMatch',
     'edgeStrength'
 ] as const;
 

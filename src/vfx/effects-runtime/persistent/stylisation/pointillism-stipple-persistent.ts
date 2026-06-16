@@ -28,15 +28,20 @@ import {
     pointillismModifyWgsl,
     resolvePointillismComplementaryMix,
     resolvePointillismDotRadiusPx,
+    resolvePointillismDotRadiusSlopes,
     resolvePointillismEdgeThreshold,
     resolvePointillismMinVisibleAlpha,
-    POINTILLISM_CONTRAST_DOT_MIX_MAX
+    POINTILLISM_CONTRAST_DOT_MIX_MAX,
+    POINTILLISM_SKY_DOT_VISUAL_MATCH_MIN,
+    POINTILLISM_SKY_DOT_VISUAL_MATCH_MAX
 } from './pointillism-stipple-shaders';
 import {
     coercePointillismBool,
     DEFAULT_POINTILLISM_POST_SETTINGS,
     PointillismPostController
 } from './pointillism-stipple-post';
+import { applySkyboxPointillismUniforms } from './skybox-pointillism-runtime';
+import { computeSkyboxPointillismMetrics } from './skybox-pointillism-shaders';
 import { isOneShotRevealPlayingExclusiveGsplat } from '../../effects-pipeline-policy';
 import { GsplatShaderEffect } from '../../gsplat-shader-effect';
 
@@ -383,6 +388,8 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
 
     skyboxPointillismStrength = POINTILLISM_DEFAULTS.skyboxPointillismStrength;
 
+    skyDotVisualMatch = POINTILLISM_DEFAULTS.skyDotVisualMatch;
+
     paperStrength = POINTILLISM_DEFAULTS.paperStrength;
 
     paperTint: [number, number, number] = [...POINTILLISM_DEFAULTS.paperTint];
@@ -394,6 +401,8 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         this.on('enable', () => this.applyPostConfig(true));
         this.on('disable', () => {
             this._postController?.apply({ ...DEFAULT_POINTILLISM_POST_SETTINGS, enabled: false });
+            this.pushSkyboxPointillismUniforms();
+            (this.app as { __global?: { events?: { fire: (name: string) => void } } }).__global?.events?.fire('postEffect:changed');
             this.app.renderNextFrame = true;
         });
 
@@ -407,9 +416,25 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
                 this.updateEffect(this.effectTime, 0);
             });
         };
+        const onSkyboxShaderPatched = () => {
+            if (this.enabled) {
+                this.pushSkyboxPointillismUniforms();
+            }
+        };
         global?.events?.on('postEffect:changed', onCameraPipelineChanged);
+        global?.events?.on('skyboxShader:patched', onSkyboxShaderPatched);
+        const onSkyboxTextureApplied = () => {
+            if (!this.enabled) {
+                return;
+            }
+            this.pushSkyboxPointillismUniforms();
+            this.app.renderNextFrame = true;
+        };
+        global?.events?.on('skyboxTexture:applied', onSkyboxTextureApplied);
         this.on('destroy', () => {
             global?.events?.off('postEffect:changed', onCameraPipelineChanged);
+            global?.events?.off('skyboxShader:patched', onSkyboxShaderPatched);
+            global?.events?.off('skyboxTexture:applied', onSkyboxTextureApplied);
         });
     }
 
@@ -520,13 +545,6 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
                 POINTILLISM_GAP_SPACING_MAX
             ),
             seed: this.seed,
-            skyboxPointillismStrength: clamp(
-                Number.isFinite(this.skyboxPointillismStrength)
-                    ? this.skyboxPointillismStrength
-                    : POINTILLISM_DEFAULTS.skyboxPointillismStrength,
-                0,
-                1
-            ),
             paperStrength: this.paperStrength,
             paperTint: [...this.paperTint],
             edgeThreshold: resolvePointillismEdgeThreshold(edgeStrength),
@@ -542,7 +560,16 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
                 Number.isFinite(this.gapFill) ? this.gapFill : POINTILLISM_DEFAULTS.gapFill,
                 0,
                 1
-            )
+            ),
+            skyboxPointillismStrength: this.enabled
+                ? clamp(
+                    Number.isFinite(this.skyboxPointillismStrength)
+                        ? this.skyboxPointillismStrength
+                        : POINTILLISM_DEFAULTS.skyboxPointillismStrength,
+                    0,
+                    1
+                )
+                : 0
         };
     }
 
@@ -693,6 +720,8 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
 
         this._postMountWanted = undefined;
         this._postController?.apply({ ...DEFAULT_POINTILLISM_POST_SETTINGS, enabled: false });
+        this.pushSkyboxPointillismUniforms();
+        (this.app as { __global?: { events?: { fire: (name: string) => void } } }).__global?.events?.fire('postEffect:changed');
     }
 
     private patchFragmentShader(material: Material): void {
@@ -777,7 +806,103 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         this.pushPointillismUniforms();
     }
 
+    private pushSkyboxPointillismUniforms() {
+        const contrastDotMix = clamp(this.contrastDotMix, 0, POINTILLISM_CONTRAST_DOT_MIX_MAX);
+        const colorVibration = clamp(
+            Number.isFinite(this.colorVibration) ? this.colorVibration : this.contrastDotMix,
+            0,
+            1
+        );
+        const strength = this.enabled
+            ? clamp(
+                Number.isFinite(this.skyboxPointillismStrength)
+                    ? this.skyboxPointillismStrength
+                    : POINTILLISM_DEFAULTS.skyboxPointillismStrength,
+                0,
+                1
+            )
+            : 0;
+
+        const brushSize = Number.isFinite(this.brushSize)
+            ? this.brushSize
+            : POINTILLISM_DEFAULTS.brushSize;
+        const brushAspect = Number.isFinite(this.brushAspect)
+            ? this.brushAspect
+            : this.strokeAspect;
+        const brushHardness = Number.isFinite(this.brushHardness)
+            ? this.brushHardness
+            : 1 - this.strokeSoftness;
+
+        const cameraEntity = findCameraEntity(this.app.root);
+        const camera = cameraEntity?.camera;
+        const canvas = this.app.graphicsDevice.canvas as HTMLCanvasElement | undefined;
+        const canvasHeight = Math.max(canvas?.clientHeight ?? 720, 1);
+        const fovRad = ((camera?.fov ?? 45) * Math.PI) / 180;
+        const typicalPx = resolvePointillismDotRadiusPx(this.dotRadiusPx, this.stippleSize, brushSize);
+        const slopes = resolvePointillismDotRadiusSlopes(typicalPx, canvasHeight, fovRad);
+        const dotRadiusPx = clamp(
+            Number.isFinite(this.dotRadiusPx) ? this.dotRadiusPx : POINTILLISM_DEFAULTS.dotRadiusPx,
+            0.25,
+            POINTILLISM_DOT_RADIUS_PX_MAX
+        );
+        const gapSpacing = clamp(
+            Number.isFinite(this.gapSpacing) ? this.gapSpacing : POINTILLISM_DEFAULTS.gapSpacing,
+            POINTILLISM_GAP_SPACING_MIN,
+            POINTILLISM_GAP_SPACING_MAX
+        );
+        const dotScale = clamp(this.dotScale, 0.85, 1.15);
+        const skyDotVisualMatch = clamp(
+            Number.isFinite(this.skyDotVisualMatch)
+                ? this.skyDotVisualMatch
+                : POINTILLISM_DEFAULTS.skyDotVisualMatch,
+            POINTILLISM_SKY_DOT_VISUAL_MATCH_MIN,
+            POINTILLISM_SKY_DOT_VISUAL_MATCH_MAX
+        );
+        const skyMetrics = computeSkyboxPointillismMetrics(
+            slopes.typical,
+            gapSpacing,
+            dotScale,
+            skyDotVisualMatch
+        );
+
+        applySkyboxPointillismUniforms(this.app, {
+            strength,
+            angularSpacing: skyMetrics.angularSpacing,
+            rxCellScale: skyMetrics.rxCellScale,
+            dotRadiusSlope: slopes.min,
+            dotRadiusPx,
+            dotScale,
+            gapSpacing,
+            saturation: clamp(this.saturation, 0, 3),
+            levelRange: clamp(this.levelRange, 0.5, 2),
+            warmCoolSplit: clamp(this.warmCoolSplit, 0, 1),
+            colorVibration,
+            contrastDotMix,
+            seed: Number.isFinite(this.seed) ? this.seed : POINTILLISM_DEFAULTS.seed,
+            strokeLength: clamp(
+                this.strokeLength,
+                POINTILLISM_STROKE_LENGTH_MIN,
+                POINTILLISM_STROKE_LENGTH_MAX
+            ),
+            strokeWidth: clamp(
+                this.strokeWidth,
+                POINTILLISM_STROKE_WIDTH_MIN,
+                POINTILLISM_STROKE_WIDTH_MAX
+            ),
+            brushAspect: clamp(brushAspect, 0.5, 1.2),
+            brushHardness: clamp(brushHardness, 0, 1),
+            paintGrain: clamp(
+                Number.isFinite(this.paintGrain) ? this.paintGrain : POINTILLISM_DEFAULTS.paintGrain,
+                0,
+                1
+            ),
+            paperStrength: clamp(this.paperStrength, 0, 1),
+            paperTint: [...this.paperTint] as [number, number, number]
+        });
+    }
+
     private pushPointillismUniforms() {
+        this.pushSkyboxPointillismUniforms();
         const brushSize = Number.isFinite(this.brushSize)
             ? this.brushSize
             : POINTILLISM_DEFAULTS.brushSize;
@@ -816,17 +941,15 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         const canvas = this.app.graphicsDevice.canvas as HTMLCanvasElement | undefined;
         const canvasHeight = Math.max(canvas?.clientHeight ?? 720, 1);
         const fovRad = ((camera?.fov ?? 45) * Math.PI) / 180;
-        const tanHalfFov = Math.tan(fovRad * 0.5);
-        const targetPx = resolvePointillismDotRadiusPx(this.dotRadiusPx, this.stippleSize, brushSize);
-        const maxPx = Math.min(POINTILLISM_DOT_RADIUS_PX_MAX, targetPx * 1.25);
-        const dotRadiusSlope = (targetPx * 2 * tanHalfFov) / canvasHeight;
-        const maxDotRadiusSlope = (maxPx * 2 * tanHalfFov) / canvasHeight;
+        const typicalPx = resolvePointillismDotRadiusPx(this.dotRadiusPx, this.stippleSize, brushSize);
+        const slopes = resolvePointillismDotRadiusSlopes(typicalPx, canvasHeight, fovRad);
         const refViewDist = this.resolveRefViewDist(camWorld);
-        const bucketSlope = dotRadiusSlope * 1.75;
+        const bucketSlope = slopes.typical * 1.75;
 
         this.setUniform(PU.viewPos, this._viewPos);
-        this.setUniform(PU.dotRadiusSlope, dotRadiusSlope);
-        this.setUniform(PU.maxDotRadiusSlope, maxDotRadiusSlope);
+        this.setUniform(PU.dotRadiusSlope, slopes.min);
+        this.setUniform(PU.typicalDotRadiusSlope, slopes.typical);
+        this.setUniform(PU.maxDotRadiusSlope, slopes.max);
         this.setUniform(PU.refViewDist, refViewDist);
         this.setUniform(PU.bucketSlope, bucketSlope);
         this.setUniform(PU.brushSize, 1.0);

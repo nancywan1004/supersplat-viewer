@@ -16,7 +16,9 @@ import {
     POINTILLISM_STROKE_LENGTH_MAX,
     POINTILLISM_STROKE_LENGTH_MIN,
     POINTILLISM_STROKE_WIDTH_MAX,
-    POINTILLISM_STROKE_WIDTH_MIN
+    POINTILLISM_STROKE_WIDTH_MIN,
+    POINTILLISM_SKY_DOT_VISUAL_MATCH_MIN,
+    POINTILLISM_SKY_DOT_VISUAL_MATCH_MAX
 } from './stylisation/pointillism-stipple-shaders';
 
 /**
@@ -144,6 +146,7 @@ const POINTILLISM_STIPPLE = new Set([
     'levelRange',
     'ditherSpread',
     'skyboxPointillismStrength',
+    'skyDotVisualMatch',
     'paperStrength',
     'paperTint',
     'edgeStrength'
@@ -316,6 +319,7 @@ export function normalizePointillismStippleEffectParams(
     setNum('levelRange', 0.5, 2);
     setNum('ditherSpread', 0, 0.2);
     setNum('skyboxPointillismStrength', 0, 1);
+    setNum('skyDotVisualMatch', POINTILLISM_SKY_DOT_VISUAL_MATCH_MIN, POINTILLISM_SKY_DOT_VISUAL_MATCH_MAX);
     setNum('paperStrength', 0, 1);
     setNum('edgeStrength', 0, 1);
 

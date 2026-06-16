@@ -30,6 +30,7 @@ export const POINTILLISM_UNIFORM_NAMES = {
     minVisibleAlpha: 'uPointillismMinVisibleAlpha',
     viewPos: 'uPointillismViewPos',
     dotRadiusSlope: 'uPointillismDotRadiusSlope',
+    typicalDotRadiusSlope: 'uPointillismTypicalDotRadiusSlope',
     maxDotRadiusSlope: 'uPointillismMaxDotRadiusSlope',
     refViewDist: 'uPointillismRefViewDist',
     bucketSlope: 'uPointillismBucketSlope',
@@ -44,6 +45,12 @@ export const POINTILLISM_BRUSH_SIZE_MIN = 0.25;
 export const POINTILLISM_BRUSH_SIZE_MAX = 1.5;
 export const POINTILLISM_DOT_RADIUS_PX_MIN = 0.25;
 export const POINTILLISM_DOT_RADIUS_PX_MAX = 7.5;
+/** UI 点径 = 典型投影半径；min floor = typical × 此比例 */
+export const POINTILLISM_TYPICAL_TO_MIN_FLOOR = 0.32;
+export const POINTILLISM_TYPICAL_TO_MAX_CAP = 1.25;
+/** 天空点径相对高斯典型点径的补偿（球面 UV 与 splat 投影语义不同，默认 1.7） */
+export const POINTILLISM_SKY_DOT_VISUAL_MATCH_MIN = 1;
+export const POINTILLISM_SKY_DOT_VISUAL_MATCH_MAX = 8;
 export const POINTILLISM_STROKE_LENGTH_MIN = 0.15;
 export const POINTILLISM_STROKE_LENGTH_MAX = 2.5;
 export const POINTILLISM_STROKE_WIDTH_MIN = 0.15;
@@ -61,7 +68,31 @@ export const stippleSizeToTargetDotRadiusPx = (stippleSize: number): number => {
     return 5.0 - t * 4.0;
 };
 
-/** 合并 legacy stippleSize × brushSize，或直接读取 dotRadiusPx */
+/** 合并 legacy stippleSize × brushSize，或直接读取 dotRadiusPx（典型点径） */
+export const resolvePointillismTypicalDotRadiusPx = (
+    dotRadiusPx: number,
+    stippleSize: number,
+    brushSize: number
+): number => resolvePointillismDotRadiusPx(dotRadiusPx, stippleSize, brushSize);
+
+export const resolvePointillismDotRadiusSlopes = (
+    typicalPx: number,
+    canvasHeight: number,
+    fovRad: number
+): { typical: number; min: number; max: number } => {
+    const pxToSlope = (px: number) => (px * 2 * Math.tan(fovRad * 0.5)) / Math.max(canvasHeight, 1);
+    const typical = Math.max(
+        POINTILLISM_DOT_RADIUS_PX_MIN,
+        Math.min(POINTILLISM_DOT_RADIUS_PX_MAX, typicalPx)
+    );
+    return {
+        typical: pxToSlope(typical),
+        min: pxToSlope(typical * POINTILLISM_TYPICAL_TO_MIN_FLOOR),
+        max: pxToSlope(Math.min(POINTILLISM_DOT_RADIUS_PX_MAX, typical * POINTILLISM_TYPICAL_TO_MAX_CAP))
+    };
+};
+
+/** @deprecated 使用 resolvePointillismTypicalDotRadiusPx */
 export const resolvePointillismDotRadiusPx = (
     dotRadiusPx: number,
     stippleSize: number,
@@ -92,7 +123,7 @@ export const POINTILLISM_DEFAULTS = {
     shapeJitter: 0.0,
     paintThickness: 1.0,
     paintOpacity: 1.0,
-    paintGrain: 0.5,
+    paintGrain: 1.0,
     saturation: 1.32,
     lumaLevels: 8,
     contrastDotMix: 0.22,
@@ -104,16 +135,17 @@ export const POINTILLISM_DEFAULTS = {
     darkDensityBoost: 0.0,
     seed: 17,
     minVisibleAlpha: 0.08,
-    dotRadiusPx: 0.6,
+    dotRadiusPx: 0.75,
     gapSpacing: 0.4,
     denoiseStrength: 0.52,
     gapFill: 0,
     postEffectEnabled: true,
     stippleSize: 96,
     levels: 8,
-    levelRange: 1.14,
+    levelRange: 1.0,
     ditherSpread: 0.0,
-    skyboxPointillismStrength: 0.0,
+    skyboxPointillismStrength: 1.0,
+    skyDotVisualMatch: 1.7,
     paperStrength: 0.18,
     paperTint: [1.0, 0.97, 0.91] as [number, number, number],
     edgeStrength: 0.72
@@ -164,6 +196,7 @@ uniform float uPointillismSeed;
 uniform float uPointillismShapeJitter;
 uniform vec3 uPointillismViewPos;
 uniform float uPointillismDotRadiusSlope;
+uniform float uPointillismTypicalDotRadiusSlope;
 uniform float uPointillismMaxDotRadiusSlope;
 uniform float uPointillismRefViewDist;
 uniform float uPointillismBucketSlope;
@@ -301,14 +334,15 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
     float fillT = clamp(uPointillismGapFill, 0.0, 1.0);
 
     float viewDist = max(length(originalCenter - uPointillismViewPos), 0.001);
-    float screenDot = viewDist * uPointillismDotRadiusSlope;
+    float screenMin = viewDist * uPointillismDotRadiusSlope;
+    float screenTypical = viewDist * uPointillismTypicalDotRadiusSlope;
     float screenCap = viewDist * uPointillismMaxDotRadiusSlope;
 
     float prelimDensityT = 1.0 - gap;
     float prelimOverlap = mix(1.36, 0.62, gap) * mix(0.92, 1.08, prelimDensityT);
     float prelimDotSize = originalSize * prelimOverlap * max(0.001, uPointillismDotScale);
     prelimDotSize = min(prelimDotSize, screenCap);
-    prelimDotSize = max(prelimDotSize, screenDot * mix(0.46, 0.14, gap));
+    prelimDotSize = max(prelimDotSize, screenMin * mix(0.46, 0.14, gap));
     float sizeRatio = originalSize / max(prelimDotSize, 0.000001);
     float interiorAnchor = smoothstep(1.0, 2.5, sizeRatio);
 
@@ -321,8 +355,12 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
 
     // 间距驱动：gapSpacing ↑ → overlap ↓ → 点间缝隙更大（视距自适应）
     float dotSize = originalSize * overlap * max(0.001, uPointillismDotScale);
+    float typicalTarget = screenTypical * overlap * max(0.001, uPointillismDotScale);
+    float sizeRel = originalSize / max(screenTypical, 0.001);
+    float blendTypical = (1.0 - smoothstep(0.42, 1.65, sizeRel)) * 0.88;
+    dotSize = mix(dotSize, typicalTarget, blendTypical);
     dotSize = min(dotSize, screenCap);
-    dotSize = max(dotSize, screenDot * mix(0.46, 0.14, coverageGap));
+    dotSize = max(dotSize, screenMin * mix(0.46, 0.14, coverageGap));
 
     float cellScale = mix(14.0, 36.0, densityT);
     vec3 sizeCell = floor(originalCenter * cellScale);
@@ -447,6 +485,7 @@ uniform uPointillismSeed: f32;
 uniform uPointillismShapeJitter: f32;
 uniform uPointillismViewPos: vec3f;
 uniform uPointillismDotRadiusSlope: f32;
+uniform uPointillismTypicalDotRadiusSlope: f32;
 uniform uPointillismMaxDotRadiusSlope: f32;
 uniform uPointillismRefViewDist: f32;
 uniform uPointillismBucketSlope: f32;
@@ -583,14 +622,15 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
     let fillT = clamp(uniform.uPointillismGapFill, 0.0, 1.0);
 
     let viewDist = max(length(originalCenter - uniform.uPointillismViewPos), 0.001);
-    let screenDot = viewDist * uniform.uPointillismDotRadiusSlope;
+    let screenMin = viewDist * uniform.uPointillismDotRadiusSlope;
+    let screenTypical = viewDist * uniform.uPointillismTypicalDotRadiusSlope;
     let screenCap = viewDist * uniform.uPointillismMaxDotRadiusSlope;
 
     let prelimDensityT = 1.0 - gap;
     let prelimOverlap = mix(1.36, 0.62, gap) * mix(0.92, 1.08, prelimDensityT);
     var prelimDotSize = originalSize * prelimOverlap * max(0.001, uniform.uPointillismDotScale);
     prelimDotSize = min(prelimDotSize, screenCap);
-    prelimDotSize = max(prelimDotSize, screenDot * mix(0.46, 0.14, gap));
+    prelimDotSize = max(prelimDotSize, screenMin * mix(0.46, 0.14, gap));
     var sizeRatio = originalSize / max(prelimDotSize, 0.000001);
     let interiorAnchor = smoothstep(1.0, 2.5, sizeRatio);
 
@@ -601,8 +641,12 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
     let overlap = mix(1.36, 0.62, coverageGap) * densityBoost;
 
     var dotSize = originalSize * overlap * max(0.001, uniform.uPointillismDotScale);
+    let typicalTarget = screenTypical * overlap * max(0.001, uniform.uPointillismDotScale);
+    let sizeRel = originalSize / max(screenTypical, 0.001);
+    let blendTypical = (1.0 - smoothstep(0.42, 1.65, sizeRel)) * 0.88;
+    dotSize = mix(dotSize, typicalTarget, blendTypical);
     dotSize = min(dotSize, screenCap);
-    dotSize = max(dotSize, screenDot * mix(0.46, 0.14, coverageGap));
+    dotSize = max(dotSize, screenMin * mix(0.46, 0.14, coverageGap));
 
     let cellScale = mix(14.0, 36.0, densityT);
     let sizeCell = floor(originalCenter * cellScale);
