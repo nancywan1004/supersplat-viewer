@@ -431,6 +431,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     initUI(global);
 
     // Load model
+    const gsplatContentFilename = new URL(config.contentUrl, location.href).pathname.split('/').pop();
     const gsplatLoad = getAssetLoader(global).trackPromise(
         'mainScene',
         'mainScene:gsplat',
@@ -438,7 +439,12 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         app,
         config,
         (progress: number) => {
-            state.progress = progress;
+            // lod-meta 仅表示 meta 下载；streaming 总进度 0–50% 由 octree bootstrap 接管
+            if (isGsplatMetaJsonFilename(gsplatContentFilename)) {
+                state.progress = Math.max(state.progress, Math.min(progress, 50));
+            } else {
+                state.progress = progress;
+            }
         },
         lodLoader
         )

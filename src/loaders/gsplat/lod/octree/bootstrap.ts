@@ -116,7 +116,9 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
 
     const PROGRESS_THRESHOLD = 50;
     const PROGRESS_COARSE_CAP = 82;
-    const PROGRESS_REFINEMENT_CAP = 99;
+    const PROGRESS_REFINEMENT_CAP = 100;
+    /** 视口细档完成比例达到该值即可收起进度条（refinement 后台仍继续） */
+    const STREAMING_REFINEMENT_UI_COMPLETE_RATIO = 0.8;
     const STREAMING_REFINEMENT_STABLE_FRAMES = 10;
     const STREAMING_REFINEMENT_PENDING_SPIKE_FRAMES = 3;
     const STREAMING_REFINEMENT_STALL_MS = 5000;
@@ -134,6 +136,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
     let streamingRefinementCapReachedAt = 0;
     let streamingRefinementBaselinePending = 0;
     let streamingRefinementPhaseStarted = false;
+    let streamingPreGateKickCooldown = 0;
 
     const streamLastCamPos = new Vec3();
     const streamLastCamFwd = new Vec3();
@@ -175,6 +178,21 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         return getStreamingViewportRefinementStatus(scene, streamingViewportOptions());
     };
 
+    const getStreamingRefinementDoneRatio = (
+        refinement: ReturnType<typeof resolveStreamingRefinementStatus>
+    ): number => {
+        if (refinement.ready) {
+            return 1;
+        }
+        if (streamingRefinementBaselinePending <= 0) {
+            return refinement.refinementRatio ?? 0;
+        }
+        return computeStreamingRefinementProgressRatio(
+            refinement.pendingNodes,
+            streamingRefinementBaselinePending
+        );
+    };
+
     const finalizeStreamingBootstrapDisplay = () => {
         if (streamingBootstrapDisplayFinalized) {
             return;
@@ -193,6 +211,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
             return;
         }
         streamingSceneWarmupDone = true;
+        kickStreamingBootstrapDownloads();
         revealController?.ensureInitialEffectCreatedBeforeFirstDisplay?.();
         forceRender.set(true);
         app.renderNextFrame = true;
@@ -200,13 +219,64 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
             bindGsplatRenderer(gsplat, global);
             warnOnComputeRendererFallback(global);
             gsplat.debug = config.colorize ? GSPLAT_DEBUG_LOD : GSPLAT_DEBUG_NONE;
-            forceRender.set(false);
+            forceRender.set(!streamingBootstrapDisplayFinalized);
             if (streamingPendingCoarseDisplay && !state.readyToRender) {
                 streamingPendingCoarseDisplay = false;
                 state.readyToRender = true;
                 ensureShadowPipelineReady();
             }
         });
+    };
+
+    const kickStreamingBootstrapDownloads = (): number => {
+        const scene = streamingScene();
+        if (!scene) {
+            return 0;
+        }
+        const enqueued = ensureStreamingBootstrapCoarseFiles(scene, streamingViewportOptions());
+        syncStreamingOctreePlacements(scene);
+        app.renderNextFrame = true;
+        return enqueued;
+    };
+
+    const syncLoadingWatermark = (loading: number) => {
+        if (loading <= 0) {
+            return;
+        }
+        watermark = Math.max(watermark, loading);
+        current = watermark - loading;
+    };
+
+    const computeFileLoadProgress = (): number =>
+        watermark > 0 ? Math.trunc((current / watermark) * 100) : 0;
+
+    const tryOpenStreamingBootstrapGate = () => {
+        if (!isStreamingOctree || streamingBootstrapGateReached || progressUIHidden) {
+            return;
+        }
+
+        const fileProgress = computeFileLoadProgress();
+        const mergedPreGate = Math.max(
+            state.progress,
+            Math.min(fileProgress, PROGRESS_THRESHOLD)
+        );
+
+        if (fileProgress >= PROGRESS_THRESHOLD || mergedPreGate >= PROGRESS_THRESHOLD) {
+            streamingBootstrapGateReached = true;
+            pollStreamingBootstrapComplete();
+            return;
+        }
+
+        // 会话缓存 / loading 计数为 0：粗层已可放置时直接开门禁
+        const scene = streamingScene();
+        if (!scene) {
+            return;
+        }
+        const viewport = getStreamingViewportBootstrapStatus(scene, streamingViewportOptions());
+        if (viewport.visibleNodes > 0 && viewport.ready) {
+            streamingBootstrapGateReached = true;
+            pollStreamingBootstrapComplete();
+        }
     };
 
     const tryShowStreamingCoarseViewport = () => {
@@ -237,7 +307,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         }
 
         if (!streamingBootstrapGateReached) {
-            state.progress = Math.min(fileProgress, PROGRESS_THRESHOLD);
+            state.progress = Math.max(state.progress, Math.min(fileProgress, PROGRESS_THRESHOLD));
             return;
         }
 
@@ -274,17 +344,22 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         }
 
         if (streamingRefinementBaselinePending <= 0) {
-            state.progress = refinement.ready ? PROGRESS_REFINEMENT_CAP : PROGRESS_COARSE_CAP;
+            const doneRatio = getStreamingRefinementDoneRatio(refinement);
+            state.progress =
+                doneRatio >= STREAMING_REFINEMENT_UI_COMPLETE_RATIO
+                    ? PROGRESS_REFINEMENT_CAP
+                    : PROGRESS_COARSE_CAP;
             return;
         }
 
-        const doneRatio = computeStreamingRefinementProgressRatio(
-            refinement.pendingNodes,
-            streamingRefinementBaselinePending
+        const doneRatio = getStreamingRefinementDoneRatio(refinement);
+        const refinementDisplayRatio = Math.min(
+            1,
+            doneRatio / STREAMING_REFINEMENT_UI_COMPLETE_RATIO
         );
         const refinementProgress =
             PROGRESS_COARSE_CAP +
-            Math.round(doneRatio * (PROGRESS_REFINEMENT_CAP - PROGRESS_COARSE_CAP));
+            Math.round(refinementDisplayRatio * (PROGRESS_REFINEMENT_CAP - PROGRESS_COARSE_CAP));
         state.progress = Math.min(
             PROGRESS_REFINEMENT_CAP,
             Math.max(state.progress, refinementProgress)
@@ -360,7 +435,9 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
             watermark > 0 ? Math.trunc((current / watermark) * 100) : state.progress
         );
 
-        if (!refinement.ready) {
+        const refinementDoneRatio = getStreamingRefinementDoneRatio(refinement);
+
+        if (refinementDoneRatio < STREAMING_REFINEMENT_UI_COMPLETE_RATIO) {
             streamingRefinementPendingSpikeFrames++;
             if (streamingRefinementPendingSpikeFrames >= STREAMING_REFINEMENT_PENDING_SPIKE_FRAMES) {
                 streamingRefinementStableFrames = 0;
@@ -370,7 +447,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         }
         streamingRefinementPendingSpikeFrames = 0;
 
-        if (state.progress >= PROGRESS_REFINEMENT_CAP && !streamingRefinementCapReachedAt) {
+        if (!streamingRefinementCapReachedAt) {
             streamingRefinementCapReachedAt = performance.now();
         }
 
@@ -386,7 +463,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         }
 
         if (!progressUIHidden) {
-            if (!streamingLodUnlocked || state.progress < PROGRESS_COARSE_CAP) {
+            if (!streamingLodUnlocked) {
                 streamingRefinementStableFrames = 0;
                 streamingRefinementCapReachedAt = 0;
                 return;
@@ -443,9 +520,14 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
     };
 
     const readyHandler = (_camera: CameraComponent, _layer: Layer, ready: boolean, loading: number) => {
+        if (isStreamingOctree) {
+            syncLoadingWatermark(loading);
+        }
+
         if (ready && loading === 0) {
             if (isStreamingOctree) {
                 runStreamingSceneWarmupOnce();
+                tryOpenStreamingBootstrapGate();
             } else {
                 eventHandler.off('frame:ready', readyHandler);
 
@@ -535,8 +617,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
 
             if (!progressUIHidden && progress >= PROGRESS_THRESHOLD) {
                 if (isStreamingOctree) {
-                    streamingBootstrapGateReached = true;
-                    pollStreamingBootstrapComplete();
+                    tryOpenStreamingBootstrapGate();
                 } else if (isCustomLod) {
                     progressUIHidden = true;
                     events.fire('progressThresholdReached', progress);
@@ -562,7 +643,19 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
 
     const onUpdate = (_dt: number) => {
         idleTime += _dt;
-        forceRender.set(idleTime < 4);
+        if (isStreamingOctree && !streamingBootstrapGateReached) {
+            if (streamingPreGateKickCooldown <= 0) {
+                kickStreamingBootstrapDownloads();
+                streamingPreGateKickCooldown = 2;
+            } else {
+                streamingPreGateKickCooldown--;
+            }
+            updateStreamingLoadProgress(computeFileLoadProgress());
+            tryOpenStreamingBootstrapGate();
+        }
+        const streamingBootstrapActive =
+            isStreamingOctree && !streamingBootstrapDisplayFinalized;
+        forceRender.set(streamingBootstrapActive || idleTime < 4);
         tryUnlockStreamingOnCameraIdle();
         if (isStreamingOctree && streamingBootstrapGateReached) {
             pollStreamingBootstrapComplete();
@@ -622,6 +715,22 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
     eventHandler.on('frame:ready', onFrameReady);
     eventHandler.on('frame:ready', readyHandler);
     events.on('octreeRefinement:activity', onRefinementActivity);
+
+    if (isStreamingOctree) {
+        // lod-meta 下载阶段可能已把 progress 推高；保留并尝试直接开门禁
+        state.progress = Math.min(state.progress, PROGRESS_THRESHOLD);
+        if (state.progress >= PROGRESS_THRESHOLD) {
+            streamingBootstrapGateReached = true;
+        }
+        kickStreamingBootstrapDownloads();
+        app.once('frameend', () => {
+            kickStreamingBootstrapDownloads();
+            tryOpenStreamingBootstrapGate();
+            if (streamingBootstrapGateReached) {
+                pollStreamingBootstrapComplete();
+            }
+        });
+    }
 
     return {
         destroy() {

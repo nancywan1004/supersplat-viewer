@@ -1226,9 +1226,6 @@ export function ensureStreamingBootstrapCoarseFiles(
 
     const instances = findAllOctreeInstances(app, octree, gsplatEntity);
     const nodeInfos = instances[0]?.nodeInfos;
-    if (!nodeInfos) {
-        return 0;
-    }
 
     _viewProj.mul2(camera.projectionMatrix, camera.viewMatrix);
     _frustum.setFromMat4(_viewProj);
@@ -1243,7 +1240,7 @@ export function ensureStreamingBootstrapCoarseFiles(
         if (!isOctreeBootstrapPlaceableNode(node, bootstrapLod)) {
             continue;
         }
-        if ((nodeInfos[nodeIndex]?.currentLod ?? -1) >= 0) {
+        if (nodeInfos && (nodeInfos[nodeIndex]?.currentLod ?? -1) >= 0) {
             continue;
         }
 
