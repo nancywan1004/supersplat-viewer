@@ -104,6 +104,117 @@ const patchChunk = (source: string, search: string, replacement: string, name: s
     return source.replace(search, replacement);
 };
 
+const skyboxPointillismGlsl = /* glsl */`
+uniform float uSkyboxPointillismStrength;
+uniform float uPointillismDotRadiusPx;
+uniform float uPointillismGapSpacing;
+uniform float uPointillismSaturation;
+uniform float uPointillismLevelRange;
+uniform float uPointillismWarmCoolSplit;
+uniform float uPointillismContrastDotMix;
+uniform float uPointillismSeed;
+
+float skyPointHash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7)) + uPointillismSeed * 0.071) * 43758.5453123);
+}
+
+vec2 skyPointHash2(vec2 p) {
+    return fract(sin(vec2(dot(p, vec2(269.5, 183.3)), dot(p, vec2(419.2, 371.9))) + uPointillismSeed * 0.053) * 43758.5453);
+}
+
+float skyPointLuma(vec3 c) {
+    return dot(c, vec3(0.2126, 0.7152, 0.0722));
+}
+
+vec3 skyPointSaturate(vec3 c, float s) {
+    float l = skyPointLuma(c);
+    return mix(vec3(l), c, s);
+}
+
+vec3 skyPointContrast(vec3 c, float amount) {
+    return clamp((c - 0.5) * amount + 0.5, 0.0, 1.0);
+}
+
+vec2 skyPointUv(vec3 dir) {
+    vec3 d = normalize(dir);
+    return vec2(atan(d.z, d.x) * 0.159154943 + 0.5, asin(clamp(d.y, -1.0, 1.0)) * 0.318309886 + 0.5);
+}
+
+vec3 skyPointSample(vec3 dir) {
+    vec3 d = normalize(dir);
+    #ifdef SKY_CUBEMAP
+        return {SKYBOX_DECODE_FNC}(textureCube(texture_cubeMap, d));
+    #else
+        return {SKYBOX_DECODE_FNC}(texture2D(texture_envAtlas, skyPointUv(d)));
+    #endif
+}
+
+vec3 applySkyboxPointillism(vec3 linear, vec3 dir) {
+    float strength = clamp(uSkyboxPointillismStrength, 0.0, 1.0);
+    if (strength < 0.001) {
+        return linear;
+    }
+
+    vec3 d = normalize(dir);
+    float radius = mix(0.0048, 0.021, clamp(uPointillismDotRadiusPx / 7.5, 0.0, 1.0));
+    float spacing = radius * mix(2.75, 1.95, 1.0 - clamp(uPointillismGapSpacing, 0.0, 1.0));
+    vec2 uv = skyPointUv(d);
+    vec2 cell = floor(uv / spacing);
+    vec2 local = fract(uv / spacing) - 0.5;
+    vec2 jitter = (skyPointHash2(cell) - 0.5) * 0.42;
+
+    vec3 up = abs(d.y) > 0.92 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+    vec3 tx = normalize(cross(up, d));
+    vec3 ty = normalize(cross(d, tx));
+    float probe = max(radius * 2.5, 0.01);
+    float lx = skyPointLuma(skyPointSample(d + tx * probe)) - skyPointLuma(skyPointSample(d - tx * probe));
+    float ly = skyPointLuma(skyPointSample(d + ty * probe)) - skyPointLuma(skyPointSample(d - ty * probe));
+    float angle = atan(ly, lx) + 1.5707963 + (skyPointHash(cell + 9.7) - 0.5) * 0.85;
+    if (abs(lx) + abs(ly) < 0.015) {
+        angle = skyPointHash(cell + 3.1) * 6.2831853;
+    }
+
+    vec2 q = local - jitter;
+    float ca = cos(angle);
+    float sa = sin(angle);
+    q = vec2(ca * q.x - sa * q.y, sa * q.x + ca * q.y);
+    q.x /= mix(0.46, 0.60, skyPointHash(cell + 1.3));
+    q.y /= mix(0.30, 0.42, skyPointHash(cell + 2.9));
+    float daub = pow(abs(q.x), 2.25) + pow(abs(q.y), 2.25);
+    float mask = 1.0 - smoothstep(0.52, 0.72, daub);
+
+    vec3 blur = (linear
+        + skyPointSample(d + tx * probe)
+        + skyPointSample(d - tx * probe)
+        + skyPointSample(d + ty * probe)
+        + skyPointSample(d - ty * probe)) * 0.2;
+    vec3 styled = skyPointContrast(skyPointSaturate(blur, clamp(uPointillismSaturation, 0.0, 3.0)), clamp(uPointillismLevelRange, 0.5, 2.0));
+    float luma = skyPointLuma(styled);
+    vec3 cool = vec3(0.10, 0.34, 0.82);
+    vec3 warm = vec3(1.0, 0.62, 0.16);
+    vec3 split = mix(cool, warm, smoothstep(0.30, 0.76, luma + (uPointillismWarmCoolSplit - 0.5) * 0.35));
+    float splitAmt = clamp(uPointillismContrastDotMix, 0.0, 1.0) * mix(0.20, 0.65, skyPointHash(cell + 6.4));
+    styled = mix(styled, split, splitAmt);
+
+    vec3 paperGap = mix(blur, vec3(skyPointLuma(blur)) * vec3(0.92, 0.95, 1.02), 0.26);
+    vec3 dotted = mix(paperGap, styled, mask);
+    return mix(linear, dotted, strength);
+}
+`;
+
+const patchSkyboxPointillismGlsl = (source: string): string => {
+    if (source.includes('applySkyboxPointillism')) {
+        return source;
+    }
+    const withInsert = patchChunk(source, 'void main(void) {', `${skyboxPointillismGlsl}\n\tvoid main(void) {`, 'glsl skyboxPS pointillism insert');
+    return patchChunk(
+        withInsert,
+        'if (any(greaterThanEqual(linear, vec3(64.0)))) {',
+        'linear = applySkyboxPointillism(linear, dir);\n\t\t\tif (any(greaterThanEqual(linear, vec3(64.0)))) {',
+        'glsl skyboxPS pointillism apply'
+    );
+};
+
 // compute 渲染器在 ?nofx 时也需要 CameraFrame 做 tile composite，因此提供一份全关闭后处理配置。
 const noPostEffects: PostEffectSettings = {
     sharpness: { enabled: false, amount: 0 },

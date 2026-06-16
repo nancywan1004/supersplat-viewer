@@ -559,13 +559,6 @@ class PointillismPostEffect extends PostEffect {
                 vec3 edgePop = saturateColor(color, 1.0 + edgeW * 0.18);
                 color = mix(color, edgePop, edgeAmt * 0.38);
 
-                float skyboxStrength = clamp(uSkyboxPointillismStrength, 0.0, 1.0);
-                if (skyboxStrength > 0.001) {
-                    float bgMask = skyboxBackgroundMask(uv, rawScene, blur, structEdge);
-                    vec3 bgPoint = skyboxPointillize(uv, rawScene);
-                    color = mix(color, bgPoint, bgMask * mix(0.25, 1.0, skyboxStrength));
-                }
-
                 gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
             }
         `;
