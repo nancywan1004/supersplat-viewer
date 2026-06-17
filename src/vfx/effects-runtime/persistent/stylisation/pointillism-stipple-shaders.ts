@@ -48,7 +48,7 @@ export const POINTILLISM_DOT_RADIUS_PX_MAX = 7.5;
 /** UI 点径 = 典型投影半径；min floor = typical × 此比例 */
 export const POINTILLISM_TYPICAL_TO_MIN_FLOOR = 0.32;
 export const POINTILLISM_TYPICAL_TO_MAX_CAP = 1.25;
-/** 天空点径相对高斯典型点径的补偿（球面 UV 与 splat 投影语义不同，默认 1.7） */
+/** 天空点径相对高斯典型点径的补偿（球面 UV 与 splat 投影语义不同，默认 3.3） */
 export const POINTILLISM_SKY_DOT_VISUAL_MATCH_MIN = 1;
 export const POINTILLISM_SKY_DOT_VISUAL_MATCH_MAX = 8;
 export const POINTILLISM_STROKE_LENGTH_MIN = 0.15;
@@ -145,7 +145,7 @@ export const POINTILLISM_DEFAULTS = {
     levelRange: 1.0,
     ditherSpread: 0.0,
     skyboxPointillismStrength: 1.0,
-    skyDotVisualMatch: 1.7,
+    skyDotVisualMatch: 3.3,
     paperStrength: 0.18,
     paperTint: [1.0, 0.97, 0.91] as [number, number, number],
     edgeStrength: 0.72

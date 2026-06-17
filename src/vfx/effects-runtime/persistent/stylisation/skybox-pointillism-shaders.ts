@@ -34,7 +34,7 @@ const SKY_STROKE_LEN_MAX = 2.5;
 const SKY_STROKE_WID_MIN = 0.15;
 const SKY_STROKE_WID_MAX = 1.85;
 
-/** 预计算天空笔触间距与 cell 占比（典型点径 × 天空补偿比例） */
+/** 预计算天空笔触间距与 cell 占比；grid 密度与 overlap 对齐高斯 modifySplatRotationScale（≈1.36） */
 export const computeSkyboxPointillismMetrics = (
     typicalDotRadiusSlope: number,
     gapSpacing: number,
@@ -48,9 +48,9 @@ export const computeSkyboxPointillismMetrics = (
     const scale = Math.max(0.85, Math.min(1.15, dotScale));
     const visualMatch = Math.max(1, skyDotVisualMatch);
     const brushAngular = Math.max(typicalDotRadiusSlope, 1e-6) * overlap * scale * visualMatch;
-    const spacingRatio = 1.95 + 0.75 * gap;
+    const spacingRatio = 1.22 + 0.48 * gap;
     const angularSpacing = brushAngular * spacingRatio;
-    const rxCellScale = Math.max(0.42, Math.min(0.60, 1.20 / spacingRatio));
+    const rxCellScale = Math.max(0.54, Math.min(0.80, 1.42 / spacingRatio));
     return { angularSpacing, rxCellScale };
 };
 
@@ -153,6 +153,67 @@ vec2 skyPointGridPosFromDir(vec3 dir, float angularSpacing) {
     return vec2(p.x * SKY_GRID_HORIZ, p.y * SKY_GRID_VERT) / angularSpacing;
 }
 
+// oct 网格索引保留；cell 中心反解为 3D 方向，mask 用球面角距离（方案 C）
+vec2 skyGridToOct(vec2 gridPos, float angularSpacing) {
+    const float SKY_GRID_HORIZ = 1.42;
+    const float SKY_GRID_VERT = 0.78;
+    return vec2(
+        gridPos.x * angularSpacing / SKY_GRID_HORIZ,
+        gridPos.y * angularSpacing / SKY_GRID_VERT
+    );
+}
+
+vec3 skyOctDecode(vec2 p) {
+    float sumAbs = abs(p.x) + abs(p.y);
+    vec3 n;
+    if (sumAbs <= 1.0) {
+        n = vec3(p.x, 1.0 - sumAbs, p.y);
+    } else {
+        vec2 s = sign(p + vec2(1e-6));
+        n.x = s.x * (1.0 - abs(p.y));
+        n.z = s.y * (1.0 - abs(p.x));
+        n.y = -(1.0 - abs(n.x) - abs(n.z));
+    }
+    return normalize(n);
+}
+
+vec3 skyCellDirFromGrid(vec2 centerGrid, float angularSpacing) {
+    return skyOctDecode(skyGridToOct(centerGrid, angularSpacing));
+}
+
+float skyCellAngularRadius(float cellRx, float angularSpacing) {
+    const float SKY_GRID_HORIZ = 1.42;
+    const float SKY_GRID_VERT = 0.78;
+    const float SKY_DOT_ANGULAR_SCALE = 1.16;
+    float angPerGrid = angularSpacing * 0.5 * (1.0 / SKY_GRID_HORIZ + 1.0 / SKY_GRID_VERT);
+    return cellRx * angPerGrid * SKY_DOT_ANGULAR_SCALE;
+}
+
+vec3 skyCellTangentBasis(vec3 cellDir) {
+    vec3 up = abs(cellDir.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    return normalize(cross(up, cellDir));
+}
+
+void skyCellTangentCoords(vec3 d, vec3 cellDir, out float u, out float v, out float cosA) {
+    cosA = dot(d, cellDir);
+    vec3 delta = d - cellDir * cosA;
+    vec3 tangent = skyCellTangentBasis(cellDir);
+    vec3 bitangent = cross(cellDir, tangent);
+    u = dot(delta, tangent);
+    v = dot(delta, bitangent);
+}
+
+// 中心亮、边缘渐隐的圆形笔触；coreEnd 与高斯一致，aa 下限保证天空远景也有可见软边
+float skyAngularRadialMask(float cosA, float angularR) {
+    float angR = max(angularR, 1e-6);
+    float ang = acos(clamp(cosA, -1.0, 1.0));
+    float A = (ang / angR) * (ang / angR);
+    float hard = clamp(uPointillismBrushHardness, 0.0, 1.0);
+    float coreEnd = mix(0.52, 0.82, hard);
+    float aa = max(fwidth(A) * 1.72, 0.014);
+    return 1.0 - smoothstep(coreEnd - aa, 1.0 + aa * 0.5, A);
+}
+
 float skyPointIrregularity() {
     return mix(0.68, 1.0, clamp(uPointillismGapSpacing, 0.0, 1.0));
 }
@@ -172,7 +233,8 @@ vec2 skyPointSmoothMacroWarp(vec2 gridPos, vec2 salt, float irregularity) {
 }
 
 vec2 skyStaggeredCellCenter(vec2 cell) {
-    return cell + 0.5;
+    float brickX = step(1.0, mod(cell.y, 2.0)) * 0.5;
+    return cell + vec2(0.5 + brickX, 0.5);
 }
 
 vec2 skyCellCenterJitter(vec2 hashCell, vec2 salt, float irr) {
@@ -184,18 +246,18 @@ vec2 skyPointBaseCell(vec2 gridPos) {
     return floor(gridPos);
 }
 
-// 与高斯 pointillismShapeUV 同轴约定；天空侧更强圆化，避免背景点偏长
+// 与高斯同轴；天空侧强圆化（无屏幕导数，仅压扁笔触轴）
 vec2 skyPointillismShapeUVSky(vec2 q, float cellRx) {
     float invR = 1.0 / max(cellRx, 0.001);
     vec2 uv = q * invR;
-    float lenT = skyPointStrokeT(uPointillismStrokeLength, ${SKY_STROKE_LEN_MIN}, ${SKY_STROKE_LEN_MAX}) * 0.12;
+    float lenT = skyPointStrokeT(uPointillismStrokeLength, ${SKY_STROKE_LEN_MIN}, ${SKY_STROKE_LEN_MAX}) * 0.08;
     float widT = skyPointStrokeT(uPointillismStrokeWidth, ${SKY_STROKE_WID_MIN}, ${SKY_STROKE_WID_MAX});
     float lenAxis = 1.0 + mix(0.02, 0.82, lenT);
     float widAxis = mix(1.16, 0.52, widT);
     widAxis *= mix(0.90, 1.10, clamp(uPointillismBrushAspect, 0.5, 1.2));
-    lenAxis = mix(lenAxis, 1.0, 0.90);
-    widAxis = mix(widAxis, 1.0, 0.90);
-    const float SKY_STROKE_ASPECT_CAP = 1.06;
+    lenAxis = mix(lenAxis, 1.0, 0.94);
+    widAxis = mix(widAxis, 1.0, 0.94);
+    const float SKY_STROKE_ASPECT_CAP = 1.04;
     lenAxis = max(lenAxis, widAxis / SKY_STROKE_ASPECT_CAP);
     widAxis = max(widAxis, lenAxis / SKY_STROKE_ASPECT_CAP);
     return vec2(uv.x / lenAxis, uv.y * widAxis);
@@ -230,8 +292,8 @@ vec4 skyPointPigmentDaub(vec2 shapeUV, float A, vec2 hashCell) {
     vec2 p = shapeUV * mix(3.2, 8.0, grain) + strokeSeed;
     float coarse = skyPointFbm3(p);
     float fine = skyPointValueNoise(p * 11.0 + vec2(strokeSeed.y, strokeSeed.x));
-    float streak = skyPointValueNoise(vec2(shapeUV.x * 1.85 + strokeSeed.x, shapeUV.y * 2.4 + strokeSeed.y));
-    float pigment = coarse * 0.50 + fine * 0.38 + streak * 0.10;
+    float streak = skyPointValueNoise(shapeUV * 2.0 + vec2(strokeSeed.x, strokeSeed.y));
+    float pigment = coarse * 0.50 + fine * 0.38 + streak * 0.06;
     float edgeFade = 1.0 - smoothstep(mix(0.48, 0.80, grain), 0.96, A);
     float g = (pigment - 0.5) * grain * edgeFade * 1.18;
     float luma = 1.0 + g * 0.54;
@@ -240,18 +302,27 @@ vec4 skyPointPigmentDaub(vec2 shapeUV, float A, vec2 hashCell) {
     return vec4(luma + warm, luma, luma - warm * 0.58, alpha);
 }
 
-vec2 skyPointStrokeShapeAt(vec2 gridPos, vec2 cell, vec2 salt, float rxCellScale, float irr, out float AOut) {
+vec2 skyPointStrokeShapeAt(vec3 d, vec2 gridPos, vec2 cell, vec2 salt, float rxCellScale, float irr, float angularSpacing, out float AOut) {
     vec2 center = skyStaggeredCellCenter(cell) + skyCellCenterJitter(cell, salt, irr);
-    vec2 local = gridPos - center;
-    float sizeVar = mix(0.76, 1.24, skyPointHash(cell + 51.0));
+    vec3 cellDir = skyCellDirFromGrid(center, angularSpacing);
+    float sizeVar = mix(0.82, 1.18, skyPointHash(cell + 51.0));
     float cellRx = rxCellScale * sizeVar;
+    float angularR = skyCellAngularRadius(cellRx, angularSpacing);
+
+    float cosA;
+    float tu;
+    float tv;
+    skyCellTangentCoords(d, cellDir, tu, tv, cosA);
+
     float angle = skyPointHash(cell + 103.0) * 6.2831853 + uPointillismSeed * 0.13;
-    angle += (skyPointHash(cell + 127.0) - 0.5) * mix(0.22, 0.36, irr);
+    angle += (skyPointHash(cell + 127.0) - 0.5) * mix(0.14, 0.24, irr);
     float c = cos(angle);
     float s = sin(angle);
-    vec2 q = vec2(c * local.x - s * local.y, s * local.x + c * local.y);
+    vec2 q = vec2(c * tu - s * tv, s * tu + c * tv) / angularR * cellRx;
     vec2 shapeUV = skyPointillismShapeUVSky(q, cellRx);
-    AOut = dot(shapeUV, shapeUV);
+
+    float ang = acos(clamp(cosA, -1.0, 1.0));
+    AOut = (ang / angularR) * (ang / angularR);
     return shapeUV;
 }
 
@@ -264,48 +335,50 @@ float skyPointillismRadialMask(vec2 shapeUV) {
 }
 
 float skyPointillismLayerClean(float layer) {
-    return smoothstep(0.05, 0.12, layer) * layer;
+    layer = clamp(layer, 0.0, 1.0);
+    return mix(layer, 1.0 - pow(1.0 - layer, 2.4), 0.92);
 }
 
-float skyDaubMaskAtCell(vec2 gridPos, vec2 cell, vec2 hashCell, vec2 salt, float rxCellScale, float irr) {
+float skyDaubMaskAtCell(vec3 d, vec2 gridPos, vec2 cell, vec2 hashCell, vec2 salt, float rxCellScale, float irr, float angularSpacing) {
     vec2 center = skyStaggeredCellCenter(cell) + skyCellCenterJitter(hashCell, salt, irr);
-    vec2 local = gridPos - center;
-
-    float sizeVar = mix(0.76, 1.24, skyPointHash(hashCell + 51.0));
+    vec3 cellDir = skyCellDirFromGrid(center, angularSpacing);
+    float sizeVar = mix(0.82, 1.18, skyPointHash(hashCell + 51.0));
     float cellRx = rxCellScale * sizeVar;
+    float angularR = skyCellAngularRadius(cellRx, angularSpacing);
 
-    float angle = skyPointHash(hashCell + 103.0) * 6.2831853 + uPointillismSeed * 0.13;
-    angle += (skyPointHash(hashCell + 127.0) - 0.5) * mix(0.22, 0.36, irr);
-    float c = cos(angle);
-    float s = sin(angle);
-    vec2 q = vec2(c * local.x - s * local.y, s * local.x + c * local.y);
-    vec2 shapeUV = skyPointillismShapeUVSky(q, cellRx);
-    return skyPointillismRadialMask(shapeUV);
+    float cosA;
+    float tu;
+    float tv;
+    skyCellTangentCoords(d, cellDir, tu, tv, cosA);
+    return skyAngularRadialMask(cosA, angularR);
 }
 
-float skyEvaluatePointillismLayer(vec2 gridPosIn, vec2 salt, float rxCellScale, out vec2 dominantCell) {
+float skyEvaluatePointillismLayer(vec3 d, vec2 gridPosIn, vec2 salt, float rxCellScale, float angularSpacing, out vec2 dominantCell) {
     float irr = skyPointIrregularity();
     vec2 gridPos = skyPointSmoothMacroWarp(gridPosIn, salt, irr);
     vec2 baseCell = skyPointBaseCell(gridPos);
 
-    float layer = 0.0;
+    float hardMax = 0.0;
+    float softAcc = 0.0;
     dominantCell = baseCell;
-    for (int oy = -1; oy <= 1; oy++) {
-        for (int ox = -1; ox <= 1; ox++) {
+    for (int oy = -2; oy <= 2; oy++) {
+        for (int ox = -2; ox <= 2; ox++) {
             vec2 cell = baseCell + vec2(float(ox), float(oy));
-            float m = skyDaubMaskAtCell(gridPos, cell, cell, salt, rxCellScale, irr);
-            if (m > layer) {
-                layer = m;
+            float m = skyDaubMaskAtCell(d, gridPos, cell, cell, salt, rxCellScale, irr, angularSpacing);
+            softAcc += m * m;
+            if (m > hardMax) {
+                hardMax = m;
                 dominantCell = cell;
             }
         }
     }
-    return layer;
+    float softLayer = 1.0 - exp(-softAcc * 1.02);
+    return mix(softLayer, hardMax, 0.04);
 }
 
-float skySphereDaubMaskCore(vec2 gridPosIn, vec2 salt, float rxCellScale) {
+float skySphereDaubMaskCore(vec3 d, vec2 gridPosIn, vec2 salt, float rxCellScale, float angularSpacing) {
     vec2 dominantCell;
-    return skyEvaluatePointillismLayer(gridPosIn, salt, rxCellScale, dominantCell);
+    return skyEvaluatePointillismLayer(d, gridPosIn, salt, rxCellScale, angularSpacing, dominantCell);
 }
 
 vec3 skyPointHueNudge(vec3 c, float warmCool, float pick) {
@@ -450,13 +523,12 @@ vec3 applySkyboxPointillism(vec3 linear, vec3 dir) {
     vec3 d = normalize(dir);
     float t = strength;
     float angularSpacing = max(uSkyboxAngularSpacing, 1e-6);
-    float rxCellScale = clamp(uSkyboxRxCellScale, 0.34, 0.62);
+    float rxCellScale = clamp(uSkyboxRxCellScale, 0.50, 0.80);
 
     vec2 salt1 = vec2(0.0, 0.0);
     vec2 gridPos = skyPointGridPosFromDir(d, angularSpacing);
     vec2 dominantCell;
-    float layer = skyEvaluatePointillismLayer(gridPos, salt1, rxCellScale, dominantCell);
-    layer = skyPointillismLayerClean(layer);
+    float layer = skyEvaluatePointillismLayer(d, gridPos, salt1, rxCellScale, angularSpacing, dominantCell);
 
     vec3 base1 = skyPointSample(d);
     vec3 daubColor = skyPointStyleNorm(base1, dominantCell, skyPointLuma(base1));
@@ -464,16 +536,28 @@ vec3 applySkyboxPointillism(vec3 linear, vec3 dir) {
     float irr = skyPointIrregularity();
     vec2 gridPosW = skyPointSmoothMacroWarp(gridPos, salt1, irr);
     float shapeA;
-    vec2 shapeUV = skyPointStrokeShapeAt(gridPosW, dominantCell, salt1, rxCellScale, irr, shapeA);
+    vec2 shapeUV = skyPointStrokeShapeAt(d, gridPosW, dominantCell, salt1, rxCellScale, irr, angularSpacing, shapeA);
     vec4 pigment = skyPointPigmentDaub(shapeUV, shapeA, dominantCell);
     daubColor *= pigment.rgb;
-    layer *= pigment.a;
+    float grainT = clamp(uPointillismPaintGrain, 0.0, 1.0) * 0.38;
+    layer *= mix(1.0, pigment.a, grainT);
+    layer = skyPointillismLayerClean(layer);
 
     float gapL = skyPointLuma(linear);
-    vec3 gapColor = mix(vec3(gapL) * vec3(0.91, 0.94, 1.0), vec3(0.98, 0.96, 0.90), mix(0.24, 0.52, t));
-    gapColor = mix(gapColor, gapColor * uPointillismPaperTint, clamp(uPointillismPaperStrength, 0.0, 1.0) * 0.35);
+    vec3 paperBase = mix(
+        vec3(gapL) * vec3(0.93, 0.96, 1.0),
+        vec3(0.98, 0.96, 0.90),
+        mix(0.24, 0.52, t)
+    ) * uPointillismPaperTint;
+    const float SKY_GAP_STYLE = 0.44;
+    const float SKY_GAP_PAPER = 0.20;
+    float gapThin = 1.0 - layer;
+    vec3 gapSky = mix(linear, daubColor, SKY_GAP_STYLE * (0.55 + 0.45 * gapThin));
+    float gapPaper = clamp(uPointillismPaperStrength, 0.0, 1.0) * gapThin * SKY_GAP_PAPER;
+    vec3 gapColor = mix(gapSky, paperBase, gapPaper);
 
-    vec3 result = clamp(mix(gapColor, daubColor, layer), 0.0, 1.0);
+    float cover = max(layer, 0.07);
+    vec3 result = clamp(mix(gapColor, daubColor, cover), 0.0, 1.0);
     return mix(linear, result, strength);
 }
 `;
@@ -583,6 +667,64 @@ fn skyPointGridPosFromDir(dir: vec3f, angularSpacing: f32) -> vec2f {
     return vec2f(p.x * SKY_GRID_HORIZ, p.y * SKY_GRID_VERT) / angularSpacing;
 }
 
+fn skyGridToOct(gridPos: vec2f, angularSpacing: f32) -> vec2f {
+    let SKY_GRID_HORIZ: f32 = 1.42;
+    let SKY_GRID_VERT: f32 = 0.78;
+    return vec2f(
+        gridPos.x * angularSpacing / SKY_GRID_HORIZ,
+        gridPos.y * angularSpacing / SKY_GRID_VERT
+    );
+}
+
+fn skyOctDecode(p: vec2f) -> vec3f {
+    let sumAbs = abs(p.x) + abs(p.y);
+    var n: vec3f;
+    if (sumAbs <= 1.0) {
+        n = vec3f(p.x, 1.0 - sumAbs, p.y);
+    } else {
+        let s = sign(p + vec2f(1e-6));
+        n.x = s.x * (1.0 - abs(p.y));
+        n.z = s.y * (1.0 - abs(p.x));
+        n.y = -(1.0 - abs(n.x) - abs(n.z));
+    }
+    return normalize(n);
+}
+
+fn skyCellDirFromGrid(centerGrid: vec2f, angularSpacing: f32) -> vec3f {
+    return skyOctDecode(skyGridToOct(centerGrid, angularSpacing));
+}
+
+fn skyCellAngularRadius(cellRx: f32, angularSpacing: f32) -> f32 {
+    let SKY_GRID_HORIZ: f32 = 1.42;
+    let SKY_GRID_VERT: f32 = 0.78;
+    let SKY_DOT_ANGULAR_SCALE: f32 = 1.16;
+    let angPerGrid = angularSpacing * 0.5 * (1.0 / SKY_GRID_HORIZ + 1.0 / SKY_GRID_VERT);
+    return cellRx * angPerGrid * SKY_DOT_ANGULAR_SCALE;
+}
+
+fn skyCellTangentBasis(cellDir: vec3f) -> vec3f {
+    let up = select(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), abs(cellDir.y) < 0.9);
+    return normalize(cross(up, cellDir));
+}
+
+fn skyCellTangentCoords(d: vec3f, cellDir: vec3f) -> vec4f {
+    let cosA = dot(d, cellDir);
+    let delta = d - cellDir * cosA;
+    let tangent = skyCellTangentBasis(cellDir);
+    let bitangent = cross(cellDir, tangent);
+    return vec4f(dot(delta, tangent), dot(delta, bitangent), cosA, 0.0);
+}
+
+fn skyAngularRadialMask(cosA: f32, angularR: f32) -> f32 {
+    let angR = max(angularR, 1e-6);
+    let ang = acos(clamp(cosA, -1.0, 1.0));
+    let A = (ang / angR) * (ang / angR);
+    let hard = clamp(uniform.uPointillismBrushHardness, 0.0, 1.0);
+    let coreEnd = mix(0.52, 0.82, hard);
+    let aa = max(fwidth(A) * 1.72, 0.014);
+    return 1.0 - smoothstep(coreEnd - aa, 1.0 + aa * 0.5, A);
+}
+
 fn skyPointIrregularity() -> f32 {
     return mix(0.68, 1.0, clamp(uniform.uPointillismGapSpacing, 0.0, 1.0));
 }
@@ -602,7 +744,8 @@ fn skyPointSmoothMacroWarp(gridPosIn: vec2f, salt: vec2f, irregularity: f32) -> 
 }
 
 fn skyStaggeredCellCenter(cell: vec2f) -> vec2f {
-    return cell + vec2f(0.5);
+    let brickX = step(1.0, fract(cell.y * 0.5) * 2.0) * 0.5;
+    return cell + vec2f(0.5 + brickX, 0.5);
 }
 
 fn skyCellCenterJitter(hashCell: vec2f, salt: vec2f, irr: f32) -> vec2f {
@@ -617,14 +760,14 @@ fn skyPointBaseCell(gridPos: vec2f) -> vec2f {
 fn skyPointillismShapeUVSky(q: vec2f, cellRx: f32) -> vec2f {
     let invR = 1.0 / max(cellRx, 0.001);
     let uv = q * invR;
-    var lenT = skyPointStrokeT(uniform.uPointillismStrokeLength, SKY_STROKE_LEN_MIN, SKY_STROKE_LEN_MAX) * 0.12;
+    var lenT = skyPointStrokeT(uniform.uPointillismStrokeLength, SKY_STROKE_LEN_MIN, SKY_STROKE_LEN_MAX) * 0.08;
     var widT = skyPointStrokeT(uniform.uPointillismStrokeWidth, SKY_STROKE_WID_MIN, SKY_STROKE_WID_MAX);
     var lenAxis = 1.0 + mix(0.02, 0.82, lenT);
     var widAxis = mix(1.16, 0.52, widT);
     widAxis *= mix(0.90, 1.10, clamp(uniform.uPointillismBrushAspect, 0.5, 1.2));
-    lenAxis = mix(lenAxis, 1.0, 0.90);
-    widAxis = mix(widAxis, 1.0, 0.90);
-    let SKY_STROKE_ASPECT_CAP = 1.06;
+    lenAxis = mix(lenAxis, 1.0, 0.94);
+    widAxis = mix(widAxis, 1.0, 0.94);
+    let SKY_STROKE_ASPECT_CAP = 1.04;
     lenAxis = max(lenAxis, widAxis / SKY_STROKE_ASPECT_CAP);
     widAxis = max(widAxis, lenAxis / SKY_STROKE_ASPECT_CAP);
     return vec2f(uv.x / lenAxis, uv.y * widAxis);
@@ -659,8 +802,8 @@ fn skyPointPigmentDaub(shapeUV: vec2f, A: f32, hashCell: vec2f) -> vec4f {
     let p = shapeUV * mix(3.2, 8.0, grain) + strokeSeed;
     let coarse = skyPointFbm3(p);
     let fine = skyPointValueNoise(p * 11.0 + vec2f(strokeSeed.y, strokeSeed.x));
-    let streak = skyPointValueNoise(vec2f(shapeUV.x * 1.85 + strokeSeed.x, shapeUV.y * 2.4 + strokeSeed.y));
-    let pigment = coarse * 0.50 + fine * 0.38 + streak * 0.10;
+    let streak = skyPointValueNoise(shapeUV * 2.0 + vec2f(strokeSeed.x, strokeSeed.y));
+    let pigment = coarse * 0.50 + fine * 0.38 + streak * 0.06;
     let edgeFade = 1.0 - smoothstep(mix(0.48, 0.80, grain), 0.96, A);
     let g = (pigment - 0.5) * grain * edgeFade * 1.18;
     let luma = 1.0 + g * 0.54;
@@ -669,18 +812,27 @@ fn skyPointPigmentDaub(shapeUV: vec2f, A: f32, hashCell: vec2f) -> vec4f {
     return vec4f(luma + warm, luma, luma - warm * 0.58, alpha);
 }
 
-fn skyPointStrokeShapeAt(gridPos: vec2f, cell: vec2f, salt: vec2f, rxCellScale: f32, irr: f32) -> vec3f {
+fn skyPointStrokeShapeAt(d: vec3f, gridPos: vec2f, cell: vec2f, salt: vec2f, rxCellScale: f32, irr: f32, angularSpacing: f32) -> vec3f {
     let center = skyStaggeredCellCenter(cell) + skyCellCenterJitter(cell, salt, irr);
-    let local = gridPos - center;
-    let sizeVar = mix(0.76, 1.24, skyPointHash(cell + 51.0));
+    let cellDir = skyCellDirFromGrid(center, angularSpacing);
+    let sizeVar = mix(0.82, 1.18, skyPointHash(cell + 51.0));
     let cellRx = rxCellScale * sizeVar;
+    let angularR = skyCellAngularRadius(cellRx, angularSpacing);
+
+    let tc = skyCellTangentCoords(d, cellDir);
+    let tu = tc.x;
+    let tv = tc.y;
+    let cosA = tc.z;
+
     var angle = skyPointHash(cell + 103.0) * 6.2831853 + uniform.uPointillismSeed * 0.13;
-    angle += (skyPointHash(cell + 127.0) - 0.5) * mix(0.22, 0.36, irr);
+    angle += (skyPointHash(cell + 127.0) - 0.5) * mix(0.14, 0.24, irr);
     let c = cos(angle);
     let s = sin(angle);
-    let q = vec2f(c * local.x - s * local.y, s * local.x + c * local.y);
+    let q = vec2f(c * tu - s * tv, s * tu + c * tv) / angularR * cellRx;
     let shapeUV = skyPointillismShapeUVSky(q, cellRx);
-    let A = dot(shapeUV, shapeUV);
+
+    let ang = acos(clamp(cosA, -1.0, 1.0));
+    let A = (ang / angularR) * (ang / angularR);
     return vec3f(shapeUV.x, shapeUV.y, A);
 }
 
@@ -693,43 +845,42 @@ fn skyPointillismRadialMask(shapeUV: vec2f) -> f32 {
 }
 
 fn skyPointillismLayerClean(layer: f32) -> f32 {
-    return smoothstep(0.05, 0.12, layer) * layer;
+    let l = clamp(layer, 0.0, 1.0);
+    return mix(l, 1.0 - pow(1.0 - l, 2.4), 0.92);
 }
 
-fn skyDaubMaskAtCell(gridPos: vec2f, cell: vec2f, hashCell: vec2f, salt: vec2f, rxCellScale: f32, irr: f32) -> f32 {
+fn skyDaubMaskAtCell(d: vec3f, gridPos: vec2f, cell: vec2f, hashCell: vec2f, salt: vec2f, rxCellScale: f32, irr: f32, angularSpacing: f32) -> f32 {
     let center = skyStaggeredCellCenter(cell) + skyCellCenterJitter(hashCell, salt, irr);
-    let local = gridPos - center;
-
-    let sizeVar = mix(0.76, 1.24, skyPointHash(hashCell + 51.0));
+    let cellDir = skyCellDirFromGrid(center, angularSpacing);
+    let sizeVar = mix(0.82, 1.18, skyPointHash(hashCell + 51.0));
     let cellRx = rxCellScale * sizeVar;
+    let angularR = skyCellAngularRadius(cellRx, angularSpacing);
 
-    var angle = skyPointHash(hashCell + 103.0) * 6.2831853 + uniform.uPointillismSeed * 0.13;
-    angle += (skyPointHash(hashCell + 127.0) - 0.5) * mix(0.22, 0.36, irr);
-    let c = cos(angle);
-    let s = sin(angle);
-    let q = vec2f(c * local.x - s * local.y, s * local.x + c * local.y);
-    let shapeUV = skyPointillismShapeUVSky(q, cellRx);
-    return skyPointillismRadialMask(shapeUV);
+    let tc = skyCellTangentCoords(d, cellDir);
+    return skyAngularRadialMask(tc.z, angularR);
 }
 
-fn skyEvaluatePointillismLayer(gridPosIn: vec2f, salt: vec2f, rxCellScale: f32) -> vec3f {
+fn skyEvaluatePointillismLayer(d: vec3f, gridPosIn: vec2f, salt: vec2f, rxCellScale: f32, angularSpacing: f32) -> vec3f {
     let irr = skyPointIrregularity();
     let gridPos = skyPointSmoothMacroWarp(gridPosIn, salt, irr);
     let baseCell = skyPointBaseCell(gridPos);
 
-    var layer = 0.0;
+    var hardMax = 0.0;
+    var softAcc = 0.0;
     var dominantCell = baseCell;
-    for (var oy = -1; oy <= 1; oy++) {
-        for (var ox = -1; ox <= 1; ox++) {
+    for (var oy = -2; oy <= 2; oy++) {
+        for (var ox = -2; ox <= 2; ox++) {
             let cell = baseCell + vec2f(f32(ox), f32(oy));
-            let m = skyDaubMaskAtCell(gridPos, cell, cell, salt, rxCellScale, irr);
-            if (m > layer) {
-                layer = m;
+            let m = skyDaubMaskAtCell(d, gridPos, cell, cell, salt, rxCellScale, irr, angularSpacing);
+            softAcc += m * m;
+            if (m > hardMax) {
+                hardMax = m;
                 dominantCell = cell;
             }
         }
     }
-    return vec3f(layer, dominantCell.x, dominantCell.y);
+    let softLayer = 1.0 - exp(-softAcc * 1.02);
+    return vec3f(mix(softLayer, hardMax, 0.04), dominantCell.x, dominantCell.y);
 }
 
 fn skyPointApplyContrast(color: vec3f, levelRange: f32) -> vec3f {
@@ -873,13 +1024,13 @@ fn applySkyboxPointillism(linear: vec3f, dir: vec3f) -> vec3f {
     let d = normalize(dir);
     let t = strength;
     let angularSpacing = max(uniform.uSkyboxAngularSpacing, 1e-6);
-    let rxCellScale = clamp(uniform.uSkyboxRxCellScale, 0.34, 0.62);
+    let rxCellScale = clamp(uniform.uSkyboxRxCellScale, 0.50, 0.80);
 
     let salt1 = vec2f(0.0, 0.0);
     let gridPos = skyPointGridPosFromDir(d, angularSpacing);
 
-    var evalPrimary = skyEvaluatePointillismLayer(gridPos, salt1, rxCellScale);
-    var layer = skyPointillismLayerClean(evalPrimary.x);
+    var evalPrimary = skyEvaluatePointillismLayer(d, gridPos, salt1, rxCellScale, angularSpacing);
+    var layer = evalPrimary.x;
     let dominantCell = evalPrimary.yz;
 
     let base1 = skyPointSample(d);
@@ -887,22 +1038,34 @@ fn applySkyboxPointillism(linear: vec3f, dir: vec3f) -> vec3f {
 
     let irr = skyPointIrregularity();
     let gridPosW = skyPointSmoothMacroWarp(gridPos, salt1, irr);
-    let strokeShape = skyPointStrokeShapeAt(gridPosW, dominantCell, salt1, rxCellScale, irr);
+    let strokeShape = skyPointStrokeShapeAt(d, gridPosW, dominantCell, salt1, rxCellScale, irr, angularSpacing);
     let pigment = skyPointPigmentDaub(strokeShape.xy, strokeShape.z, dominantCell);
     daubColor *= pigment.rgb;
-    layer *= pigment.a;
+    let grainT = clamp(uniform.uPointillismPaintGrain, 0.0, 1.0) * 0.38;
+    layer *= mix(1.0, pigment.a, grainT);
+    layer = skyPointillismLayerClean(layer);
 
     let gapL = skyPointLuma(linear);
-    var gapColor = mix(vec3f(gapL) * vec3f(0.91, 0.94, 1.0), vec3f(0.98, 0.96, 0.90), mix(0.24, 0.52, t));
-    gapColor = mix(gapColor, gapColor * uniform.uPointillismPaperTint, clamp(uniform.uPointillismPaperStrength, 0.0, 1.0) * 0.35);
+    let paperBase = mix(
+        vec3f(gapL) * vec3f(0.93, 0.96, 1.0),
+        vec3f(0.98, 0.96, 0.90),
+        mix(0.24, 0.52, t)
+    ) * uniform.uPointillismPaperTint;
+    let SKY_GAP_STYLE = 0.44;
+    let SKY_GAP_PAPER = 0.20;
+    let gapThin = 1.0 - layer;
+    let gapSky = mix(linear, daubColor, SKY_GAP_STYLE * (0.55 + 0.45 * gapThin));
+    let gapPaper = clamp(uniform.uPointillismPaperStrength, 0.0, 1.0) * gapThin * SKY_GAP_PAPER;
+    let gapColor = mix(gapSky, paperBase, gapPaper);
 
-    let result = clamp(mix(gapColor, daubColor, layer), vec3f(0.0), vec3f(1.0));
+    let cover = max(layer, 0.07);
+    let result = clamp(mix(gapColor, daubColor, cover), vec3f(0.0), vec3f(1.0));
     return mix(linear, result, strength);
 }
 `;
 
 export const patchSkyboxPointillismGlsl = (source: string): string => {
-    if (source.includes('skyPointOctEncode') && source.includes('SKY_STROKE_ASPECT_CAP = 1.06')) {
+    if (source.includes('SKY_GAP_STYLE = 0.44') && source.includes('max(layer, 0.07)')) {
         return source;
     }
     const withInsert = patchChunk(
@@ -920,7 +1083,7 @@ export const patchSkyboxPointillismGlsl = (source: string): string => {
 };
 
 export const patchSkyboxPointillismWgsl = (source: string): string => {
-    if (source.includes('skyPointOctEncode') && source.includes('SKY_STROKE_ASPECT_CAP = 1.06')) {
+    if (source.includes('SKY_GAP_STYLE = 0.44') && source.includes('max(layer, 0.07)')) {
         return source;
     }
     const withInsert = patchChunk(
