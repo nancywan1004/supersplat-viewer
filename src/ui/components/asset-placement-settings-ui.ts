@@ -414,7 +414,7 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
             return;
         }
         if (editUiTransport === 'message-bridge') {
-            sendEditProtocolMessage({ type: 'ASSET_MEDIA_HOTSPOT_BASELINE_SET', id });
+            sendEditProtocolMessage({ type: 'ASSET_MEDIA_HOTSPOT_SET_BASELINE', id });
             return;
         }
         const result = applySceneMediaHotspotBaselineFromView(global, { sceneEntityId: id });
