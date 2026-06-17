@@ -1223,6 +1223,9 @@ class NightMode extends GsplatShaderEffect {
                 if (this.materialsApplied.size > 0) {
                     this.updateEffect(this.effectTime, 0);
                 }
+            } else if (settings && hasEnabledPersistentGsplatMaterialShaderEffect(settings)) {
+                // 点彩挂起 gsplat shader 期间：仍用 fade 调主光/天空盒，mesh 亮度不受影响
+                this.applySceneLightingFromNightFade();
             }
             this.fireNightFadeChanged('set');
         });
@@ -1242,7 +1245,7 @@ class NightMode extends GsplatShaderEffect {
         this.on('disable', () => {
         });
 
-        // 监听 reveal 等互斥效果接管 gsplatModifyVS 的信号：重置亮度为 0 并清空 shader 应用
+        // 监听 reveal 等互斥效果接管 gsplatModifyVS 的信号：清空 gsplat shader；点彩/忆韵时保留 settings fade 驱动场景光
         this.app.on('nightMode:exit', () => {
             if (isExportNightDebugEnabled()) {
                 console.log('[ExportNightDebug][NightMode] nightMode:exit', {
@@ -1251,7 +1254,17 @@ class NightMode extends GsplatShaderEffect {
                     nightFade: this.nightFade
                 });
             }
-            this.nightFade = 0;
+            const settings = (this.app as any).__global?.settings as ExperienceSettings | undefined;
+            if (settings && hasEnabledPersistentGsplatMaterialShaderEffect(settings)) {
+                const nightCfg = settings.nightMode;
+                if (typeof nightCfg?.fade === 'number' && Number.isFinite(nightCfg.fade)) {
+                    this.nightFade = Math.max(-1, Math.min(1, nightCfg.fade));
+                } else {
+                    this.nightFade = nightCfg?.enabled ? -0.95 : 0;
+                }
+            } else {
+                this.nightFade = 0;
+            }
             this.manualFadeControl = true;
             // 须在 suspendedByVfx 置位前写材质：composer 路径下 applyComposed 去掉 night 层
             this.removeShaders({ applyComposerToMaterials: true });
@@ -1264,6 +1277,7 @@ class NightMode extends GsplatShaderEffect {
             this.committedBrightness = 0;
             this.committedVolumeEncodedBrightness = false;
             this.committedTintVolumeTexture = null;
+            this.applySceneLightingFromNightFade();
             this.fireNightFadeChanged('exit');
         });
 
