@@ -696,7 +696,9 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         const lang = device?.isWebGPU ? SHADERLANGUAGE_WGSL : SHADERLANGUAGE_GLSL;
         const expectedModify = lang === SHADERLANGUAGE_WGSL ? this.getShaderWGSL() : this.getShaderGLSL();
         const modifyChunk = material.getShaderChunks(lang).get('gsplatModifyVS');
-        const modifyOk = typeof modifyChunk === 'string' && modifyChunk.includes('modifySplatRotationScale');
+        const modifyOk = typeof modifyChunk === 'string'
+            && modifyChunk.includes('modifySplatRotationScale')
+            && modifyChunk.includes('modifySplatColor');
         if (modifyOk) {
             return false;
         }
@@ -804,6 +806,22 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
 
     updateEffect(_effectTime: number, _dt: number) {
         this.pushPointillismUniforms();
+        this.syncPostSettingsOnly();
+    }
+
+    /** 每帧轻量同步 post uniform（不重挂载 CameraFrame） */
+    private syncPostSettingsOnly(): void {
+        if (!this._postController) {
+            return;
+        }
+        const wantPost = this.enabled && coercePointillismBool(
+            this.postEffectEnabled,
+            POINTILLISM_DEFAULTS.postEffectEnabled
+        );
+        if (!wantPost) {
+            return;
+        }
+        this._postController.syncSettings(this.buildPostSettings());
     }
 
     private pushSkyboxPointillismUniforms() {

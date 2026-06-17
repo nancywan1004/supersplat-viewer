@@ -451,6 +451,10 @@ class PointillismPostEffect extends PostEffect {
                     sceneColor = fillSparseHoles(uv, rawScene, sceneColor);
                 }
 
+                // 对比度在平整化之前施加：flatten/quantize 会压缩明度域，后置对比度高斯几乎无感。
+                // rawScene 保持未调对比，供下方 sky protect 回混（天空对比度走 skyboxPS）。
+                sceneColor = applyContrast(sceneColor, uLevelRange);
+
                 float structure = clamp(uSourceStructureBlend, 0.0, 1.0);
                 float flatDesire = 1.0 - structure;
                 float interiorMask = (1.0 - structEdge) * (1.0 - structEdge);
@@ -468,7 +472,6 @@ class PointillismPostEffect extends PostEffect {
 
                 float postSat = 1.0 + max(0.0, uSaturation - 1.0) * 0.28;
                 color = saturateColor(color, postSat);
-                color = applyContrast(color, uLevelRange);
                 color = mix(color, color * uPaperTint, uPaperStrength * 0.42);
 
                 float edgeW = clamp(uEdgeStrength, 0.0, 1.0);
@@ -681,6 +684,17 @@ export class PointillismPostController {
         }
 
         this.app.renderNextFrame = true;
+    }
+
+    /** 热更新参数：仅刷新 uniform，不重挂载 */
+    syncSettings(rawSettings: unknown): void {
+        const next = normalizePointillismPostSettings(rawSettings);
+        if (!next.enabled || !next.postEffectEnabled) {
+            return;
+        }
+        this.settings = next;
+        this.effect.setSettings(this.settings);
+        this.cameraFrameBridge.setSettings(this.settings);
     }
 
     private mountLegacy(): void {
