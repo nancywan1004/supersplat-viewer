@@ -384,7 +384,7 @@ class Viewer {
         }
     };
 
-    constructor(global: Global, gsplatLoad: Promise<Entity>, skyboxLoad: Promise<void> | undefined) {
+    constructor(global: Global, gsplatLoad: Promise<Entity>) {
         this.global = global;
 
         const { app, settings, config, events, state, camera } = global;
@@ -689,9 +689,9 @@ class Viewer {
         });
 
         // wait for the model to load（接影 GLB 与 collision 共用 mesh，由 CameraCollisionManager 懒加载）
-        Promise.all([gsplatLoad, skyboxLoad ?? Promise.resolve()]).then((results) => {
+        // 天空盒在 index 中独立加载，失败不阻塞场景初始化。
+        gsplatLoad.then((gsplatEntity) => {
             try {
-            const gsplatEntity = results[0] as Entity;
             const gsplat = gsplatEntity.gsplat as GSplatComponent;
 
             // get scene bounding box
@@ -1076,7 +1076,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 this.octreeLodBootstrap = bootstrapOctreeLod({
                     global,
                     settings,
-                    gsplatEntity: results[0],
+                    gsplatEntity,
                     camera,
                     cameraManager: this.cameraManager,
                     forceRender: forceRenderBinding,
