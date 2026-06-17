@@ -460,7 +460,9 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         skyboxLoad.then(() => {
             events.fire('skyboxSelectionSynced', initialSkyboxUrl ?? '');
         }).catch((err) => {
-            console.warn('[SuperSplat] 初始化天空盒失败：', err);
+            console.warn('[SuperSplat] 初始化天空盒失败，场景将继续加载：', err);
+            clearSkyboxDisplay(app);
+            events.fire('skyboxSelectionSynced', '');
         });
     }
 
@@ -477,6 +479,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
             events.fire('skyboxSelectionSynced', trimmed);
         } catch (err) {
             console.warn('[SuperSplat] 设置天空盒失败：', err);
+            clearSkyboxDisplay(app);
+            events.fire('skyboxSelectionSynced', '');
         }
     };
 
@@ -511,7 +515,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     }
 
     // Viewer 构造内会 initCommandRegistry 并注册各 facade；postMessage 监听须在此之后挂载，否则编辑类协议无法经 registry 单路径执行。
-    const viewer = new Viewer(global, gsplatLoad, skyboxLoad);
+    const viewer = new Viewer(global, gsplatLoad);
 
     initPostMessageBridge(global);
 
