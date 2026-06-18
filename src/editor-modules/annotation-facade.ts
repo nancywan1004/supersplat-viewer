@@ -2,6 +2,7 @@ import { normalizeAnnotationMediaFields } from '../annotation-toolbar/media-fiel
 import type { AnnotationData } from '../annotation-toolbar/types';
 import type { Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 import { setPlacementCursorActive } from '../placement-cursor';
+import { applyAnnotationShowHideSet, applyAllAnnotationsVisibilityFromSettings } from '../annotation-toolbar/annotation-visibility';
 
 type AnnotationManagerApi = {
     startPlacementWithId?: (id: string) => void;
@@ -141,6 +142,12 @@ class AnnotationFacade implements ModuleFacade {
             }
             break;
         }
+        case 'ANNOTATION_SHOW_HIDE_SET': {
+            const pl = command.payload as { id?: string; value?: boolean } | undefined;
+            if (typeof pl?.id !== 'string' || typeof pl?.value !== 'boolean') break;
+            applyAnnotationShowHideSet(ctx.global, pl.id, pl.value);
+            break;
+        }
         default:
             break;
         }
@@ -163,13 +170,16 @@ const initAnnotationFacade = (global: Global): ModuleFacade => {
     (global as any).__annotationFacade = facade;
     (global as any).__commandRegistry?.register?.('annotation', facade);
 
-    // TODO: 临时方案 - 监听资产全局显隐变化，同步控制标注显隐（仅在 View 模式生效，不继承到编辑模式）
-    // 后续可能根据设计重构，将资产显隐与标注显隐解耦
-    const handleAssetsVisibilityChanged = ({ visible }: { visible: boolean }) => {
-        const annotationManager = (global as any).annotationManager as { setAllAnnotationsVisible?: (v: boolean) => void } | undefined;
-        annotationManager?.setAllAnnotationsVisible?.(visible);
-    };
-    global.events.on('assets:allVisibilityChanged', handleAssetsVisibilityChanged);
+    global.events.on('editMode:changed', (inEdit: boolean) => {
+        if (!inEdit) {
+            applyAllAnnotationsVisibilityFromSettings(global);
+        }
+    });
+
+    global.events.on('assets:allVisibilityChanged', () => {
+        if (global.state.editMode) return;
+        applyAllAnnotationsVisibilityFromSettings(global);
+    });
 
     return facade;
 };

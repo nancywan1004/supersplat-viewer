@@ -7,10 +7,12 @@
 
 import { Annotation } from '../../annotation';
 import { AnnotationManager } from '../../annotation-toolbar/annotation-manager';
+import { applyAnnotationShowHideSet } from '../../annotation-toolbar/annotation-visibility';
 import { AnnotationToolbarUI } from './annotation-toolbar-ui';
 import type { Global } from '../../types';
 import type { AnnotationData } from '../../annotation-toolbar/types';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
+import { pushEditHistory } from '../../edit-history';
 
 /**
  * 初始化场景标注面板 UI
@@ -157,6 +159,14 @@ export function initAnnotationUI(global: Global): () => void {
             annotationManager.deleteAnnotation(id);
         }
     });
+    annotationUI.onVisibilityToggle((id, visible) => {
+        if (editUiTransport === 'message-bridge') {
+            sendEditProtocolMessage({ type: 'ANNOTATION_SHOW_HIDE_SET', id, value: visible });
+        } else if (applyAnnotationShowHideSet(global, id, visible)) {
+            pushEditHistory(global, 'toggle annotation visibility');
+        }
+        updateList();
+    });
     annotationUI.onInputChange((data) => {
         if (editUiTransport === 'message-bridge') {
             // 父级托管/协议模式：输入时通过协议实时下发，驱动场景内标注预览更新
@@ -221,6 +231,7 @@ export function initAnnotationUI(global: Global): () => void {
 
     events.on('annotation:created', updateList);
     events.on('annotation:deleted', updateList);
+    events.on('annotationVisibility:changed', updateList);
     events.on('annotation:selected', onAnnotationSelected);
     // annotation:selectFromHotspot 的兜底监听已下沉到 AnnotationManager，
     // 这里不再在 UI 层注册，避免 UI 未挂载时无法触发选中回传。
@@ -241,7 +252,11 @@ export function initAnnotationUI(global: Global): () => void {
     events.on('annotationEdit:show', onAnnotationEditShow);
 
     const onControlsHiddenChanged = (hidden: boolean) => {
-        annotationManager.setAllAnnotationsVisible(!hidden);
+        if (hidden) {
+            annotationManager.setAllAnnotationsVisible(false);
+        } else {
+            annotationManager.applyVisibilityFromSettings();
+        }
     };
     events.on('controlsHidden:changed', onControlsHiddenChanged);
     onControlsHiddenChanged(state.controlsHidden ?? false);
@@ -301,6 +316,7 @@ export function initAnnotationUI(global: Global): () => void {
     return () => {
         events.off('annotation:created', updateList);
         events.off('annotation:deleted', updateList);
+        events.off('annotationVisibility:changed', updateList);
         events.off('annotation:selected', onAnnotationSelected);
         events.off('annotation:deselected', onAnnotationDeselected);
         events.off('annotation:place', onAnnotationPlaceWithHint);

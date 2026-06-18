@@ -315,6 +315,35 @@
     white-space: nowrap;
 }
 
+.annotation-list-item-visibility {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: $clr-text-dark;
+    cursor: pointer;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    &:hover {
+        color: $clr-text;
+        background: rgba(255, 255, 255, 0.08);
+    }
+
+    &:focus-visible {
+        outline: 2px solid $clr-accent;
+        outline-offset: 2px;
+    }
+
+    &.hidden {
+        display: none !important;
+    }
+}
+
 .annotation-list-item-edit {
     padding: 4px 10px;
     font-size: 12px;

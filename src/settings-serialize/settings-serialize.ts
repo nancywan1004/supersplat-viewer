@@ -22,6 +22,7 @@ import {
 import { filterAssetEffectParams } from '../vfx/effects-runtime/asset/asset-effect-params';
 import { resolveSceneAssetSourceUrl } from '../loaders/asset-loader';
 import { clearViewEffectsSession } from '../view-settings';
+import { applyAllAnnotationsVisibilityFromSettings } from '../annotation-toolbar/annotation-visibility';
 
 const defaultPostEffectShadow = () => ({
     darken: DEFAULT_SHADOW.darken,
@@ -338,6 +339,7 @@ export function applySettingsSnapshot(global: Global, snapshot: ExperienceSettin
         normalizeEffectsOnImport(global.settings as ExperienceSettings);
     }
     syncEffectsRuntimeStateFromSettings(global.state, global.settings as ExperienceSettings);
+    applyAllAnnotationsVisibilityFromSettings(global);
     const es = global.settings as ExperienceSettings;
     global.events.fire('revealConfigChanged', readRevealParams(es) ?? { type: 'none', enabled: false });
     global.events.fire('persistentGsplatEffectRemountRequested', false);

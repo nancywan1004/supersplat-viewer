@@ -33,6 +33,7 @@ export interface AnnotationData extends Annotation {
     videoUrl?: string;
     showTitleWhenCollapsed: boolean;
     collapsed: boolean;
+    visible?: boolean;
 }
 
 /**

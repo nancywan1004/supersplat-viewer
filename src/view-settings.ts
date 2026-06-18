@@ -55,9 +55,16 @@ export function applyViewBloomLocalLightsEnabled(global: Global, enabled: boolea
     ensureViewSettings(global).bloom.localLightsEnabled = enabled;
 }
 
-/** `ASSETS_SHOW_HIDE_SET` → 观看态标注显隐意图 */
-export function applyViewAnnotationsVisible(global: Global, visible: boolean): void {
-    ensureViewSettings(global).annotationsVisible = visible;
+/**
+ * `ASSETS_SHOW_HIDE_SET` → 观看态标注全局 overlay（不入库，不写 `settings.annotations[].visible`）。
+ * @returns 是否发生变更
+ */
+export function applyViewAnnotationsVisible(global: Global, visible: boolean): boolean {
+    const vs = ensureViewSettings(global);
+    const next = !!visible;
+    if (vs.annotationsVisible === next) return false;
+    vs.annotationsVisible = next;
+    return true;
 }
 
 /**

@@ -121,6 +121,7 @@ type InboundPayload =
     | { type: 'ASSET_DELETE'; id?: string }
     | { type: 'ASSET_TRANSFORM_MODE'; value?: 'move' | 'rotate' | 'scale' }
     | { type: 'ASSET_VIDEO_CURVATURE_SET'; id?: string; value?: number }
+    | { type: 'ANNOTATION_SHOW_HIDE_SET'; id?: string; value?: boolean }
     | { type: 'ANNOTATION_PLACEMENT_START'; id?: string }
     | { type: 'ANNOTATION_PLACEMENT_CANCEL' }
     | { type: 'ANNOTATION_CONFIRM'; id?: string; value?: Partial<AnnotationData> }
@@ -663,6 +664,11 @@ const initPostMessageBridge = (global: Global) => {
             case 'ASSET_VIDEO_CURVATURE_SET':
                 if (typeof p.id === 'string' && typeof p.value === 'number') {
                     dispatchAsset(global, 'ASSET_VIDEO_CURVATURE_SET', { id: p.id, value: p.value });
+                }
+                break;
+            case 'ANNOTATION_SHOW_HIDE_SET':
+                if (typeof p.id === 'string' && typeof p.value === 'boolean') {
+                    dispatchAnnotation(global, 'ANNOTATION_SHOW_HIDE_SET', { id: p.id, value: p.value });
                 }
                 break;
             case 'ANNOTATION_PLACEMENT_START':

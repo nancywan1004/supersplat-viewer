@@ -70,6 +70,8 @@ type Annotation = {
     videoUrl?: string,
     showTitleWhenCollapsed: boolean,
     collapsed: boolean,
+    /** 单条标注显隐，缺省 true */
+    visible?: boolean,
     extras?: any,
     camera: Camera;
 };
@@ -234,6 +236,7 @@ const validateAnnotation = (data: unknown, path: string): Annotation => {
     if (obj.videoUrl !== undefined) assertString(obj.videoUrl, `${path}.videoUrl`);
     assertBoolean(obj.showTitleWhenCollapsed, `${path}.showTitleWhenCollapsed`);
     assertBoolean(obj.collapsed, `${path}.collapsed`);
+    if (obj.visible !== undefined) assertBoolean(obj.visible, `${path}.visible`);
     validateCamera(obj.camera, `${path}.camera`);
     return data as Annotation;
 };

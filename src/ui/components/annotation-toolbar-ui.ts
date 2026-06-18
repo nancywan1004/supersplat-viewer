@@ -8,6 +8,11 @@ import type { AnnotationFormData, AnnotationData } from '../../annotation-toolba
 
 type AnnotationMediaType = 'none' | 'image' | 'video';
 
+const EYE_SVG =
+    '<svg class="icon-eye" viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>';
+const EYE_OFF_SVG =
+    '<svg class="icon-eye-off" viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z"/></svg>';
+
 export class AnnotationToolbarUI {
     private container: HTMLElement | null = null;
     private editForm: HTMLElement | null = null;
@@ -37,6 +42,7 @@ export class AnnotationToolbarUI {
     private deleteButtonCallback: ((id: string) => void) | null = null;
     private annotationSelectCallback: ((id: string) => void) | null = null;
     private annotationEditCallback: ((id: string, isUpdate: boolean) => void) | null = null;
+    private visibilityToggleCallback: ((id: string, visible: boolean) => void) | null = null;
     private inputChangeCallback: ((data: Partial<AnnotationFormData>) => void) | null = null;
 
     /** 当前是否为编辑已有标注模式（非占位标注） */
@@ -607,6 +613,29 @@ export class AnnotationToolbarUI {
 
             item.appendChild(itemContent);
 
+            const isVisible = annotation.visible !== false;
+            const eyeBtn = document.createElement('button');
+            eyeBtn.type = 'button';
+            eyeBtn.className = 'annotation-list-item-visibility' + (isVisible ? '' : ' hidden');
+            eyeBtn.innerHTML = EYE_SVG;
+            eyeBtn.title = '隐藏标注';
+            eyeBtn.setAttribute('aria-label', '隐藏标注');
+            const eyeOffBtn = document.createElement('button');
+            eyeOffBtn.type = 'button';
+            eyeOffBtn.className = 'annotation-list-item-visibility' + (isVisible ? ' hidden' : '');
+            eyeOffBtn.innerHTML = EYE_OFF_SVG;
+            eyeOffBtn.title = '显示标注';
+            eyeOffBtn.setAttribute('aria-label', '显示标注');
+
+            const toggleVisibility = (e: Event) => {
+                e.stopPropagation();
+                this.visibilityToggleCallback?.(annotation.id, !isVisible);
+            };
+            eyeBtn.addEventListener('click', toggleVisibility);
+            eyeOffBtn.addEventListener('click', toggleVisibility);
+            item.appendChild(eyeBtn);
+            item.appendChild(eyeOffBtn);
+
             // 编辑/更新按钮（编辑中时显示「更新」）
             const editBtn = document.createElement('button');
             editBtn.className = 'annotation-list-item-edit';
@@ -701,6 +730,11 @@ export class AnnotationToolbarUI {
      */
     onAnnotationEditOrUpdate(callback: (id: string, isUpdate: boolean) => void): void {
         this.annotationEditCallback = callback;
+    }
+
+    /** 列表项显隐切换 */
+    onVisibilityToggle(callback: (id: string, visible: boolean) => void): void {
+        this.visibilityToggleCallback = callback;
     }
 
     /**

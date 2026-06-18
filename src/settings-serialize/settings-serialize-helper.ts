@@ -627,6 +627,7 @@ export function normalizeImportedAnnotation(ann: unknown): Annotation | null {
         ...media,
         showTitleWhenCollapsed: Boolean(a.showTitleWhenCollapsed),
         collapsed: Boolean(a.collapsed),
+        visible: typeof a.visible === 'boolean' ? a.visible : true,
         extras: a.extras && typeof a.extras === 'object' ? a.extras : {},
         camera
     };

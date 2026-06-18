@@ -2,12 +2,12 @@ import { applySceneAssetTriggerDistanceM } from '../scene-assets/asset-placement
 import { pauseAllSceneMedia } from '../scene-assets/media/scene-media-playback';
 import type { AssetLibraryItem, Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 import { setPlacementCursorActive } from '../placement-cursor';
-import { applyViewAnnotationsVisible } from '../view-settings';
 import { loadGsplatAsset } from '../loaders/gsplat/sog/splat-loader';
 import { getAssetLoader } from '../loaders/asset-loader';
 import { loadContainerAsset } from '../loaders/gltf/container-loader';
 import { findAssetMorphOwnerTargetId } from '../settings-serialize/effects-sync';
 import type { ExperienceSettings } from '../schemas/v2';
+import { applyViewAnnotationsVisible, readViewAnnotationsVisible } from '../view-settings';
 
 function isDeformedMorphGsplat(global: Global, item: { id?: string; assetType?: string } | null | undefined): boolean {
     if (!item?.id || item.assetType !== 'gaussian') {
@@ -179,22 +179,22 @@ class AssetFacade implements ModuleFacade {
         case 'ASSETS_SHOW_HIDE_SET': {
             const visible = (command.payload as { value?: boolean } | undefined)?.value;
             if (typeof visible !== 'boolean' || !Array.isArray(state.scenePlacedEntities)) return;
+            const next = !!visible;
+            const overlaySame = readViewAnnotationsVisible(ctx.global) === next;
             events.fire('assetEffect:morphStopAll');
-            let anyChanged = false;
+            let anyAssetChanged = false;
             for (const item of state.scenePlacedEntities) {
-                if (!item?.entity || item.visible === visible) continue;
-                if (visible === true && isDeformedMorphGsplat(ctx.global, item)) continue;
-                item.visible = visible;
-                item.entity.enabled = visible;
-                anyChanged = true;
+                if (!item?.entity || item.visible === next) continue;
+                if (next === true && isDeformedMorphGsplat(ctx.global, item)) continue;
+                item.visible = next;
+                item.entity.enabled = next;
+                anyAssetChanged = true;
             }
-            // 记录用户显隐意图到 viewSettings（View 模式专属）
-            // revealComplete 等恢复 deferred layers 时会参考此状态
-            applyViewAnnotationsVisible(ctx.global, visible);
-            // TODO: 临时方案 - ASSETS_SHOW_HIDE_SET 同时控制所有标注显隐（仅在 View 模式生效）
-            // 通过事件驱动方式通知 annotation 模块，后续可能根据设计重构解耦
-            ctx.events.fire('assets:allVisibilityChanged', { visible });
-            if (!anyChanged) return;
+            const overlayChanged = applyViewAnnotationsVisible(ctx.global, next);
+            if (overlayChanged && !state.editMode) {
+                ctx.events.fire('assets:allVisibilityChanged', { visible: next });
+            }
+            if (overlaySame && !anyAssetChanged) return;
             break;
         }
         case 'ASSET_COPY': {

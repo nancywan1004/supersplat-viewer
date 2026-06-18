@@ -339,6 +339,7 @@ export class AnnotationEntity extends Annotation {
             imageUrl: this.data.imageUrl,
             videoUrl: this.data.videoUrl,
             showTitleWhenCollapsed: this.data.showTitleWhenCollapsed,
+            visible: this.data.visible !== false,
             // collapsed 字段仅为兼容旧数据，始终视为默认收起
             collapsed: false,
             extras: this.data.extras,
@@ -374,6 +375,7 @@ export class AnnotationEntity extends Annotation {
 
         // 设置位置
         entity.setPosition(data.position[0], data.position[1], data.position[2]);
+        entity.enabled = data.visible !== false;
 
         // 添加到场景
         global.app.root.addChild(entity);

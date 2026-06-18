@@ -82,6 +82,7 @@ import { initAnnotationSystem } from './annotation-toolbar/init-annotation-syste
 import { initModuleOrchestrator, type ModuleOrchestrator } from './editor-modules/module-orchestrator';
 import { initAssetFacade } from './editor-modules/asset-facade';
 import { initAnnotationFacade } from './editor-modules/annotation-facade';
+import { applyAllAnnotationsVisibilityFromSettings } from './annotation-toolbar/annotation-visibility';
 import { initEnvironmentFacade } from './editor-modules/environment-facade';
 import { initEffectsFacade } from './editor-modules/effects-facade';
 import { createAssetEffectsController, type AssetEffectsController } from './vfx/effects-runtime/asset/asset-effects-controller';
@@ -718,6 +719,7 @@ class Viewer {
                 // showEditUI=false 时也使用可交互标注系统（AnnotationManager + AnnotationEntity），避免走只读 Annotations
                 // showEditUI=true 时 annotation-ui 会先创建 annotationManager，这里 initAnnotationSystem 会自动跳过
                 initAnnotationSystem(global);
+                applyAllAnnotationsVisibilityFromSettings(global);
                 // 兜底：若没有 annotationManager，才创建只读 Annotations
                 if (!(global as any).annotationManager) {
                     this.annotations = new Annotations(global, this.cameraFrame != null);
