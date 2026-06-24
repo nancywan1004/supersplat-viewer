@@ -207,7 +207,8 @@ export function applyPlacedVideoBillboardScale(
     if (video.videoWidth < 2 || video.videoHeight < 2) {
         console.warn('[PlacedVideo] missing dimensions, using 16:9 fallback scale');
     }
-    entity.setLocalScale(height * aspect, height, 1);
+    // PlaneGeometry 在 XZ 平面（法线 +Y）：面宽沿 local X、面高沿 local Z，Y 为厚度。
+    entity.setLocalScale(height * aspect, 1, height);
 }
 
 function tryCommitFirstFrame(

@@ -946,6 +946,18 @@ function applySceneAssetTransformToEntry(global: Global, entry: ScenePlacedItem,
     entry.entity.enabled = visible && (global.state.editMode === true || !morphOwner || morphOwner === entry.id);
 
     if (sa.type === 'video') {
+        const m = getPlacedMediaRuntime(entry.entity);
+        if (m?.kind === 'video') {
+            const s = entry.entity.getLocalScale();
+            const preservedHeight = Math.max(Math.abs(s.z), Math.abs(s.y), 1e-3);
+            applyPlacedVideoBillboardScale(entry.entity, m.videoEl, preservedHeight);
+            const reconciled = entry.entity.getLocalScale();
+            entry.entity.setLocalScale(
+                resolveMirroredScale(reconciled.x, mirrorArr?.[0]),
+                resolveMirroredScale(reconciled.y, mirrorArr?.[1]),
+                resolveMirroredScale(reconciled.z, mirrorArr?.[2])
+            );
+        }
         const curvature =
             typeof sa.transform?.horizontalCurvature === 'number'
                 ? sa.transform.horizontalCurvature
