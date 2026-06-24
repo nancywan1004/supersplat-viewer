@@ -63,6 +63,7 @@ export const PERSISTENT_EFFECT_TYPE_VALUES = [
     'pointillism-stipple',
     'pen-sketch',
     'watercolor',
+    'charcoal-sketch',
     'sparkle-twinkle',
     'overall-wave',
     'butterfly-particle'
@@ -93,7 +94,8 @@ export const PERSISTENT_STYLIZATION_EFFECT_TYPE_VALUES = [
     'palette-pixel',
     'pointillism-stipple',
     'pen-sketch',
-    'watercolor'
+    'watercolor',
+    'charcoal-sketch'
 ] as const;
 
 export const PERSISTENT_SCENE_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSISTENT_SCENE_EFFECT_TYPE_VALUES);

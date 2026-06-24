@@ -8,6 +8,7 @@ import { isPersistentVfx } from '../reveal/reveal-policy';
 import { GsplatPersistentFallingPetals, GsplatPersistentFallingWeather } from './camera/falling-weather-persistent';
 import { GsplatPersistentNostalgicComic } from './stylisation/nostalgic-comic-persistent';
 import { GsplatPersistentPalettePixel } from './stylisation/palette-pixel-persistent';
+import { GsplatPersistentCharcoalSketch } from './stylisation/charcoal-sketch-persistent';
 import { GsplatPersistentWatercolor } from './stylisation/watercolor-persistent';
 import { GsplatPersistentPenSketch } from './stylisation/pen-sketch-persistent';
 import { GsplatPersistentPointillismStipple } from './stylisation/pointillism-stipple-persistent';
@@ -59,6 +60,8 @@ export function mountPersistentGsplatByEffectType(
             return createPenSketchScript(gsplatEntity, autoStart, effectParams);
         case 'watercolor':
             return createWatercolorScript(gsplatEntity, autoStart, effectParams);
+        case 'charcoal-sketch':
+            return createCharcoalSketchScript(gsplatEntity, autoStart, effectParams);
         case 'sparkle-twinkle':
             return createSparkleTwinkleScript(gsplatEntity, updateScriptCenter, autoStart, effectParams);
         case 'overall-wave':
@@ -166,6 +169,30 @@ export function createWatercolorScript(
         return script;
     } catch (error) {
         console.error('Failed to create watercolor persistent script:', error);
+        return null;
+    }
+}
+
+export function createCharcoalSketchScript(
+    gsplatEntity: Entity,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn('Cannot create charcoal-sketch script - entity or script component not ready');
+        return null;
+    }
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentCharcoalSketch) as any;
+        if (script) {
+            applyPersistentEffectParamsToScript(script, 'charcoal-sketch', effectParams ?? undefined);
+            script.enabled = autoStart;
+            script.applyConfig?.();
+        }
+        return script;
+    } catch (error) {
+        console.error('Failed to create charcoal-sketch persistent script:', error);
         return null;
     }
 }

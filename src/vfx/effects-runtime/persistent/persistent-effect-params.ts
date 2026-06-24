@@ -105,6 +105,16 @@ const WATERCOLOR = new Set([
     'saturation'
 ]);
 
+const CHARCOAL_SKETCH = new Set([
+    'outline',
+    'hatching',
+    'contrast',
+    'stroke',
+    'smudge',
+    'focus',
+    'paper'
+]);
+
 const NOSTALGIC_COMIC = new Set([
     'levelCount',
     'edgeThreshold',
@@ -229,6 +239,7 @@ const BY_TYPE: Record<string, ReadonlySet<string>> = {
     'pointillism-stipple': POINTILLISM_STIPPLE,
     'pen-sketch': PEN_SKETCH,
     'watercolor': WATERCOLOR,
+    'charcoal-sketch': CHARCOAL_SKETCH,
     'sparkle-twinkle': SPARKLE_TWINKLE,
     'overall-wave': OVERALL_WAVE,
     'butterfly-particle': BUTTERFLY_PARTICLE

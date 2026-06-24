@@ -3,6 +3,7 @@ import { PERSISTENT_EFFECT_TYPE_VALUES, REVEAL_EFFECT_TYPE_VALUES } from './effe
 import { GsplatPersistentFallingPetals, GsplatPersistentFallingWeather } from './persistent/camera/falling-weather-persistent';
 import { GsplatPersistentNostalgicComic } from './persistent/stylisation/nostalgic-comic-persistent';
 import { GsplatPersistentPalettePixel } from './persistent/stylisation/palette-pixel-persistent';
+import { GsplatPersistentCharcoalSketch } from './persistent/stylisation/charcoal-sketch-persistent';
 import { GsplatPersistentWatercolor } from './persistent/stylisation/watercolor-persistent';
 import { GsplatPersistentPenSketch } from './persistent/stylisation/pen-sketch-persistent';
 import { GsplatPersistentPointillismStipple } from './persistent/stylisation/pointillism-stipple-persistent';
@@ -43,6 +44,7 @@ export const GSPLAT_PERSISTENT_SCRIPT_NAME_BY_TYPE = {
     'pointillism-stipple': GsplatPersistentPointillismStipple.scriptName,
     'pen-sketch': GsplatPersistentPenSketch.scriptName,
     'watercolor': GsplatPersistentWatercolor.scriptName,
+    'charcoal-sketch': GsplatPersistentCharcoalSketch.scriptName,
     'sparkle-twinkle': GsplatPersistentSparkleTwinkle.scriptName,
     'overall-wave': GsplatPersistentOverallWave.scriptName,
     'butterfly-particle': GsplatPersistentButterflyParticle.scriptName

@@ -13,6 +13,7 @@ import {
     GSPLAT_FALLING_PETALS_PRESET
 } from '../../vfx/effects-runtime/persistent/camera/gsplat-falling-petals';
 import { GSPLAT_FALLING_WEATHER_PRESETS } from '../../vfx/effects-runtime/persistent/camera/gsplat-falling-weather';
+import { DEFAULT_CHARCOAL_SKETCH_SETTINGS } from '../../vfx/effects-runtime/persistent/stylisation/charcoal-sketch';
 import { DEFAULT_PEN_SKETCH_SETTINGS } from '../../vfx/effects-runtime/persistent/stylisation/pen-sketch';
 import { DEFAULT_WATERCOLOR_SETTINGS } from '../../vfx/effects-runtime/persistent/stylisation/watercolor';
 import { DEFAULT_NOSTALGIC_COMIC_SETTINGS } from '../../vfx/effects-runtime/persistent/stylisation/nostalgic-comic';
@@ -547,6 +548,16 @@ const WATERCOLOR_PARAM_UI: Record<string, PersistentParamUiOverride> = {
     saturation: { min: 0, max: 2, step: 0.01, default: DEFAULT_WATERCOLOR_SETTINGS.saturation, label: '饱和度' }
 };
 
+const CHARCOAL_SKETCH_PARAM_UI: Record<string, PersistentParamUiOverride> = {
+    outline: { min: 0.4, max: 2.0, step: 0.01, default: DEFAULT_CHARCOAL_SKETCH_SETTINGS.outline, label: '轮廓' },
+    hatching: { min: 0, max: 1.5, step: 0.01, default: DEFAULT_CHARCOAL_SKETCH_SETTINGS.hatching, label: '碳粉浓度' },
+    contrast: { min: 0.5, max: 1.8, step: 0.01, default: DEFAULT_CHARCOAL_SKETCH_SETTINGS.contrast, label: '明暗提取' },
+    stroke: { min: 0.5, max: 1.8, step: 0.01, default: DEFAULT_CHARCOAL_SKETCH_SETTINGS.stroke, label: '笔触' },
+    smudge: { min: 0, max: 1, step: 0.01, default: DEFAULT_CHARCOAL_SKETCH_SETTINGS.smudge, label: '涂抹' },
+    focus: { min: 0.3, max: 1.5, step: 0.01, default: DEFAULT_CHARCOAL_SKETCH_SETTINGS.focus, label: '中心精度' },
+    paper: { min: 0, max: 1, step: 0.01, default: DEFAULT_CHARCOAL_SKETCH_SETTINGS.paper, label: '纸纹' }
+};
+
 const NOSTALGIC_COMIC_PARAM_UI: Record<string, PersistentParamUiOverride> = {
     levelCount: { min: 3, max: 7, step: 1, default: DEFAULT_NOSTALGIC_COMIC_SETTINGS.levelCount },
     edgeThreshold: { min: 0.3, max: 3, step: 0.01, default: DEFAULT_NOSTALGIC_COMIC_SETTINGS.edgeThreshold },
@@ -773,6 +784,7 @@ function persistentParamOverrideFor(effectType: string, key: string): Persistent
     }
     if (effectType === 'pen-sketch') return PEN_SKETCH_PARAM_UI[key];
     if (effectType === 'watercolor') return WATERCOLOR_PARAM_UI[key];
+    if (effectType === 'charcoal-sketch') return CHARCOAL_SKETCH_PARAM_UI[key];
     if (effectType === 'nostalgic-comic') return NOSTALGIC_COMIC_PARAM_UI[key];
     if (effectType === 'yiyun-dianran') return YIYUN_DIANRAN_PARAM_UI[key];
     if (effectType === 'palette-pixel') return PALETTE_PIXEL_PARAM_UI[key];
