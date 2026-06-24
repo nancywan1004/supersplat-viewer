@@ -1,0 +1,71 @@
+# 顶级 EditorConfig 文件
+# https://editorconfig.org
+root = true
+
+###############################
+# 全局默认（跨平台统一）
+###############################
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+###############################
+# 编码设置
+###############################
+
+[*.{ts,tsx,js,mjs,cjs}]
+charset = utf-8
+
+[*.json]
+charset = utf-8
+
+[*.{html,htm}]
+charset = utf-8
+
+[*.{css,scss,sass}]
+charset = utf-8
+
+[*.{md,markdown}]
+charset = utf-8
+
+[*.{yml,yaml}]
+charset = utf-8
+
+[*.svg]
+charset = utf-8
+
+[*.txt]
+charset = utf-8
+
+[*.sh]
+charset = utf-8
+
+###############################
+# 缩进和空格规则
+###############################
+
+[*.{ts,tsx,js,mjs,cjs}]
+indent_style = space
+indent_size = 4
+
+[*.json]
+indent_style = space
+indent_size = 2
+
+[*.{html,htm}]
+indent_style = space
+indent_size = 4
+
+[*.{css,scss,sass}]
+indent_style = space
+indent_size = 4
+
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false

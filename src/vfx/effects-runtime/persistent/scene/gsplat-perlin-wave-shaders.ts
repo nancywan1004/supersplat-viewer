@@ -1,4 +1,4 @@
-/** ä¸?GLSL/WGSL å?{@link GsplatRevealPerlinWave} çš?setUniform ä¸€è‡?*/
+/** ä¸ GLSL/WGSL åŠ {@link GsplatRevealPerlinWave} çš„ setUniform ä¸€è‡´ */
 export const PERLIN_WAVE_UNIFORM_NAMES = {
     time: 'uPerlinTime',
     center: 'uPerlinCenter',

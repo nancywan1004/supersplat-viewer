@@ -1,4 +1,4 @@
-﻿import { Color, Vec3, type Material } from 'playcanvas';
+import { Color, Vec3, type Material } from 'playcanvas';
 import { GsplatShaderEffect } from '../../gsplat-shader-effect';
 import { extractGlslWgslModifyBlocks, OVERALL_WAVE_COMPOSER_ID } from '../../gsplat-effect-layers-extractor';
 import { nightModeUsesComposerPath } from '../../../lighting/night-mode';
@@ -22,7 +22,7 @@ export const OVERALL_WAVE_DEFAULTS = {
     noiseType: 0,
     waveAmplitude: 0.35,
     wavelength: 5,
-    waveSpeed: 1,
+    waveSpeed: 1, 
     intensity: 0.5,
     crestTint: [1.12, 1.08, 1.02] as [number, number, number],
     troughTint: [0.72, 0.76, 0.82] as [number, number, number],
