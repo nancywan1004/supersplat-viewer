@@ -42,7 +42,8 @@ import { ASSET_EFFECT_TYPE_VALUES } from '../vfx/effects-runtime/effect-types';
 import {
     clampVideoHorizontalCurvature,
     createCurvedBillboardMesh,
-    rebuildVideoRenderMesh
+    rebuildVideoRenderMesh,
+    videoHorizontalCurvatureMatches
 } from './media/curved-billboard-mesh';
 import { defaultTriggerDistanceMForAssetType } from './media/media-hotspot-params';
 import {
@@ -749,6 +750,11 @@ export function applyVideoHorizontalCurvature(
     if (!runtime || runtime.kind !== 'video') return false;
 
     const clamped = clampVideoHorizontalCurvature(curvature);
+    if (videoHorizontalCurvatureMatches(runtime.horizontalCurvature ?? 0, clamped)) {
+        runtime.horizontalCurvature = clamped;
+        entry.horizontalCurvature = clamped;
+        return true;
+    }
     rebuildVideoRenderMesh(entry.entity, clamped);
     runtime.horizontalCurvature = clamped;
     entry.horizontalCurvature = clamped;
@@ -895,6 +901,37 @@ function canReuseScenePlacedEntry(entry: ScenePlacedItem, sa: SceneAsset): boole
         && placedItemSourceFingerprint(entry) === sceneAssetSourceFingerprint(sa);
 }
 
+/**
+ * 延后销毁放置实体，避免与 renderForward 同帧 destroy mesh/material 触发 impl undefined。
+ */
+function destroyScenePlacedEntryEntity(entry: ScenePlacedItem, app: AppBase): void {
+    const entity = entry.entity;
+    if (!entity) return;
+
+    if (entry.assetType === 'video') {
+        const m = getPlacedMediaRuntime(entity);
+        if (m?.kind === 'video') {
+            m.controlsOverlayActive = false;
+            invalidatePlacedVideoTextureUpload(m);
+        }
+    }
+
+    const render = (entity as unknown as { render?: { enabled?: boolean } }).render;
+    if (render) {
+        render.enabled = false;
+    }
+
+    app.once('frameend', () => {
+        try {
+            if (entity.parent) {
+                entity.destroy();
+            }
+        } catch {
+            // ignore
+        }
+    });
+}
+
 /** 将 settings 中记录的变换、可见性、缩略图等应用到已存在的放置实体（不重新加载资产）。 */
 function applySceneAssetTransformToEntry(global: Global, entry: ScenePlacedItem, sa: SceneAsset): void {
     const rotArr = (sa.transform?.rotation ?? [0, 0, 0]) as number[];
@@ -1036,7 +1073,7 @@ export async function syncScenePlacedEntitiesFromSettings(global: Global): Promi
             events.fire('sceneAssets:removed', entry);
             const idx = state.scenePlacedEntities!.indexOf(entry);
             if (idx >= 0) state.scenePlacedEntities!.splice(idx, 1);
-            entry.entity?.destroy();
+            destroyScenePlacedEntryEntity(entry, global.app);
             continue;
         }
         matchedSettingIds.add(sa.id);
@@ -1096,15 +1133,29 @@ export async function requestSceneAssetsRestore(global: Global, options: SceneAs
         const task = (async (): Promise<void> => {
             await previousTask.catch((): void => undefined);
             if (controller.version !== version) return;
-            if (clearBeforeRestore) {
-                clearScenePlacedEntities(global);
-                await restoreSceneAssetsFromSettings(global);
+
+            const runRestore = async (): Promise<void> => {
+                if (clearBeforeRestore) {
+                    clearScenePlacedEntities(global);
+                    await restoreSceneAssetsFromSettings(global);
+                } else {
+                    await syncScenePlacedEntitiesFromSettings(global);
+                }
+                applyMorphKeyframeVisibilityPolicy(global);
+                syncGsplatShadowCastingFromSettings(global);
+                global.events.fire('sceneAssets:restoreComplete', { reason: options.reason ?? 'unknown' });
+            };
+
+            // edit-enter：与 editMode 媒体重置、applySettingsSnapshot 错开一帧，避免 forward draw 竞态。
+            if (options.reason === 'edit-enter') {
+                await new Promise<void>((resolve) => {
+                    global.app.once('frameend', () => {
+                        void runRestore().then(resolve);
+                    });
+                });
             } else {
-                await syncScenePlacedEntitiesFromSettings(global);
+                await runRestore();
             }
-            applyMorphKeyframeVisibilityPolicy(global);
-            syncGsplatShadowCastingFromSettings(global);
-            global.events.fire('sceneAssets:restoreComplete', { reason: options.reason ?? 'unknown' });
         })();
         controller.activePromise = task;
         await task;

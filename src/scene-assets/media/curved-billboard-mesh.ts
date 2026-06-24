@@ -26,6 +26,10 @@ export function clampVideoHorizontalCurvature(value: number): number {
     return Math.max(0, Math.min(VIDEO_HORIZONTAL_CURVATURE_MAX, value));
 }
 
+export function videoHorizontalCurvatureMatches(a: number, b: number): boolean {
+    return Math.abs(clampVideoHorizontalCurvature(a) - clampVideoHorizontalCurvature(b)) <= CURVATURE_EPS;
+}
+
 /**
  * 自定义 PlaneGeometry 与内置 `render.type:'plane'` 绕序相反；翻转局部 X 后贴图左右与 image 一致。
  */
@@ -258,28 +262,46 @@ export function videoArcLocalToTexturePixels(
 }
 
 export function rebuildVideoRenderMesh(entity: Entity, curvature: number): void {
-    const render = (entity as unknown as { render?: { meshInstances?: MeshInstance[] } }).render;
+    const render = (entity as unknown as { render?: { enabled?: boolean; meshInstances?: MeshInstance[] } }).render;
     const mi = render?.meshInstances?.[0];
     if (!mi?.mesh) return;
 
     const device = mi.mesh.device ?? (entity as unknown as { app?: { graphicsDevice?: GraphicsDevice } }).app?.graphicsDevice;
     if (!device) return;
 
-    const oldMesh = mi.mesh;
-    mi.mesh = createCurvedBillboardMesh(device, curvature);
-    if (oldMesh && oldMesh !== mi.mesh) {
-        const app = (entity as unknown as { app?: { once?: (n: string, fn: () => void) => void } }).app;
-        const destroyOld = () => {
-            try {
-                oldMesh.destroy();
-            } catch {
-                // ignore
-            }
-        };
+    const app = (entity as unknown as { app?: { once?: (n: string, fn: () => void) => void } }).app;
+    const schedule = (fn: () => void) => {
         if (app?.once) {
-            app.once('frameend', destroyOld);
+            app.once('frameend', fn);
         } else {
-            queueMicrotask(destroyOld);
+            queueMicrotask(fn);
         }
+    };
+
+    const renderWasEnabled = render?.enabled !== false;
+    if (render) {
+        render.enabled = false;
     }
+
+    // 延后换 mesh，避免与 edit-enter 媒体重置 / forward draw 同帧竞态（material.impl undefined）。
+    schedule(() => {
+        if (!entity.parent) return;
+        const miLive = render?.meshInstances?.[0];
+        if (!miLive?.mesh) return;
+
+        const oldMesh = miLive.mesh;
+        miLive.mesh = createCurvedBillboardMesh(device, curvature);
+        if (render && renderWasEnabled) {
+            render.enabled = true;
+        }
+        if (oldMesh && oldMesh !== miLive.mesh) {
+            schedule(() => {
+                try {
+                    oldMesh.destroy();
+                } catch {
+                    // ignore
+                }
+            });
+        }
+    });
 }
