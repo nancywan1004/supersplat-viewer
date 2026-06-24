@@ -8,6 +8,7 @@ import { isPersistentVfx } from '../reveal/reveal-policy';
 import { GsplatPersistentFallingPetals, GsplatPersistentFallingWeather } from './camera/falling-weather-persistent';
 import { GsplatPersistentNostalgicComic } from './stylisation/nostalgic-comic-persistent';
 import { GsplatPersistentPalettePixel } from './stylisation/palette-pixel-persistent';
+import { GsplatPersistentPenSketch } from './stylisation/pen-sketch-persistent';
 import { GsplatPersistentPointillismStipple } from './stylisation/pointillism-stipple-persistent';
 import { GsplatPersistentYiyunDianran } from './stylisation/yiyun-dianran-persistent';
 import { GsplatRevealPerlinWave } from './scene/gsplat-perlin-wave';
@@ -53,6 +54,8 @@ export function mountPersistentGsplatByEffectType(
             return createPalettePixelScript(gsplatEntity, autoStart, effectParams);
         case 'pointillism-stipple':
             return createPointillismStippleScript(gsplatEntity, autoStart, effectParams);
+        case 'pen-sketch':
+            return createPenSketchScript(gsplatEntity, autoStart, effectParams);
         case 'sparkle-twinkle':
             return createSparkleTwinkleScript(gsplatEntity, updateScriptCenter, autoStart, effectParams);
         case 'overall-wave':
@@ -136,6 +139,30 @@ export function createPointillismStippleScript(
         return script;
     } catch (error) {
         console.error('Failed to create pointillism-stipple persistent script:', error);
+        return null;
+    }
+}
+
+export function createPenSketchScript(
+    gsplatEntity: Entity,
+    autoStart: boolean,
+    effectParams?: Record<string, unknown> | null
+): any | null {
+    if (!gsplatEntity.script) {
+        console.warn('Cannot create pen-sketch script - entity or script component not ready');
+        return null;
+    }
+
+    try {
+        const script = gsplatEntity.script.create(GsplatPersistentPenSketch) as any;
+        if (script) {
+            applyPersistentEffectParamsToScript(script, 'pen-sketch', effectParams ?? undefined);
+            script.enabled = autoStart;
+            script.applyConfig?.();
+        }
+        return script;
+    } catch (error) {
+        console.error('Failed to create pen-sketch persistent script:', error);
         return null;
     }
 }

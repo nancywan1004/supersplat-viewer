@@ -13,6 +13,7 @@ import {
     GSPLAT_FALLING_PETALS_PRESET
 } from '../../vfx/effects-runtime/persistent/camera/gsplat-falling-petals';
 import { GSPLAT_FALLING_WEATHER_PRESETS } from '../../vfx/effects-runtime/persistent/camera/gsplat-falling-weather';
+import { DEFAULT_PEN_SKETCH_SETTINGS } from '../../vfx/effects-runtime/persistent/stylisation/pen-sketch';
 import { DEFAULT_NOSTALGIC_COMIC_SETTINGS } from '../../vfx/effects-runtime/persistent/stylisation/nostalgic-comic';
 import { DEFAULT_YIYUN_DIANRAN_SETTINGS } from '../../vfx/effects-runtime/persistent/stylisation/yiyun-dianran-stylisation';
 import {
@@ -296,7 +297,13 @@ const PERSISTENT_PARAM_LABELS: Record<string, string> = {
     skyDotVisualMatch: '天空点径比例（相对典型点径）',
     paperStrength: '纸张强度',
     paperTint: '纸张色调',
-    edgeStrength: '描边强度'
+    edgeStrength: '描边强度',
+    outlineWidth: '勾线粗细',
+    hatching: '笔触浓度',
+    toneStrength: '明暗提取',
+    stroke: '笔触密度',
+    focus: '中心精度',
+    inkHue: '墨色'
 };
 
 /** 亮光细闪中文文案与控件范围（默认数值取自 {@link SPARKLE_TWINKLE_DEFAULTS}） */
@@ -516,6 +523,17 @@ const WEATHER_PARAM_UI: Record<string, PersistentParamUiOverride> = {
     cameraClearColor: { min: 0, max: 1, step: 0.01 },
     continuousRender: { default: true },
     restoreSceneAtmosphere: { default: true }
+};
+
+const PEN_SKETCH_PARAM_UI: Record<string, PersistentParamUiOverride> = {
+    outlineWidth: { min: 0, max: 2.5, step: 0.01, default: DEFAULT_PEN_SKETCH_SETTINGS.outlineWidth, label: '勾线粗细' },
+    edgeStrength: { min: 0.05, max: 1.8, step: 0.01, default: DEFAULT_PEN_SKETCH_SETTINGS.edgeStrength, label: '边缘提取' },
+    toneStrength: { min: 2, max: 8, step: 0.01, default: DEFAULT_PEN_SKETCH_SETTINGS.toneStrength, label: '明暗提取' },
+    stroke: { min: 0.5, max: 1.8, step: 0.01, default: DEFAULT_PEN_SKETCH_SETTINGS.stroke, label: '笔触密度' },
+    hatching: { min: 0, max: 1.5, step: 0.01, default: DEFAULT_PEN_SKETCH_SETTINGS.hatching, label: '笔触浓度' },
+    contrast: { min: 0.5, max: 1.8, step: 0.01, default: DEFAULT_PEN_SKETCH_SETTINGS.contrast, label: '整体灰度' },
+    focus: { min: 0.3, max: 1.5, step: 0.01, default: DEFAULT_PEN_SKETCH_SETTINGS.focus, label: '中心精度' },
+    inkHue: { min: -1, max: 1, step: 0.01, default: DEFAULT_PEN_SKETCH_SETTINGS.inkHue, label: '墨色' }
 };
 
 const NOSTALGIC_COMIC_PARAM_UI: Record<string, PersistentParamUiOverride> = {
@@ -742,6 +760,7 @@ function persistentParamOverrideFor(effectType: string, key: string): Persistent
         };
         return { ...WEATHER_PARAM_UI[key], default: defaults[key] };
     }
+    if (effectType === 'pen-sketch') return PEN_SKETCH_PARAM_UI[key];
     if (effectType === 'nostalgic-comic') return NOSTALGIC_COMIC_PARAM_UI[key];
     if (effectType === 'yiyun-dianran') return YIYUN_DIANRAN_PARAM_UI[key];
     if (effectType === 'palette-pixel') return PALETTE_PIXEL_PARAM_UI[key];

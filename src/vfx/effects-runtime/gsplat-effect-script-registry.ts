@@ -3,6 +3,7 @@ import { PERSISTENT_EFFECT_TYPE_VALUES, REVEAL_EFFECT_TYPE_VALUES } from './effe
 import { GsplatPersistentFallingPetals, GsplatPersistentFallingWeather } from './persistent/camera/falling-weather-persistent';
 import { GsplatPersistentNostalgicComic } from './persistent/stylisation/nostalgic-comic-persistent';
 import { GsplatPersistentPalettePixel } from './persistent/stylisation/palette-pixel-persistent';
+import { GsplatPersistentPenSketch } from './persistent/stylisation/pen-sketch-persistent';
 import { GsplatPersistentPointillismStipple } from './persistent/stylisation/pointillism-stipple-persistent';
 import { GsplatPersistentYiyunDianran } from './persistent/stylisation/yiyun-dianran-persistent';
 import { GsplatRevealPerlinWave } from './persistent/scene/gsplat-perlin-wave';
@@ -39,6 +40,7 @@ export const GSPLAT_PERSISTENT_SCRIPT_NAME_BY_TYPE = {
     'yiyun-dianran': GsplatPersistentYiyunDianran.scriptName,
     'palette-pixel': GsplatPersistentPalettePixel.scriptName,
     'pointillism-stipple': GsplatPersistentPointillismStipple.scriptName,
+    'pen-sketch': GsplatPersistentPenSketch.scriptName,
     'sparkle-twinkle': GsplatPersistentSparkleTwinkle.scriptName,
     'overall-wave': GsplatPersistentOverallWave.scriptName,
     'butterfly-particle': GsplatPersistentButterflyParticle.scriptName

@@ -5,7 +5,7 @@ export const DEFAULT_VFX_TOTAL_DURATION = 10;
  * @deprecated legacy 单轨 reveal 字段（仅导入兼容读取，不再作为持久化写入真源）
  */
 type LegacyRevealEffect = {
-    type?: 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'falling-petals' | 'falling-rain' | 'falling-snow' | 'nostalgic-comic' | 'yiyun-dianran' | 'palette-pixel' | 'pointillism-stipple' | 'sparkle-twinkle' | 'overall-wave' | 'butterfly-particle' | 'integrate' | 'growth-wave' | 'sketch' | 'none',
+    type?: 'radial' | 'rain' | 'rain-v2' | 'smooth' | 'pieces-recover' | 'perlin-wave' | 'falling-petals' | 'falling-rain' | 'falling-snow' | 'nostalgic-comic' | 'yiyun-dianran' | 'palette-pixel' | 'pointillism-stipple' | 'pen-sketch' | 'sparkle-twinkle' | 'overall-wave' | 'butterfly-particle' | 'integrate' | 'growth-wave' | 'sketch' | 'none',
     /** 为 `false` 时保留 `type` 与专参于 settings，但不在场景中挂载/播放 */
     enabled?: boolean,
     autoStart?: boolean,

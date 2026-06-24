@@ -84,6 +84,17 @@ const FALLING_WEATHER = new Set([
     'restoreSceneAtmosphere'
 ]);
 
+const PEN_SKETCH = new Set([
+    'outlineWidth',
+    'edgeStrength',
+    'hatching',
+    'contrast',
+    'toneStrength',
+    'stroke',
+    'focus',
+    'inkHue'
+]);
+
 const NOSTALGIC_COMIC = new Set([
     'levelCount',
     'edgeThreshold',
@@ -206,6 +217,7 @@ const BY_TYPE: Record<string, ReadonlySet<string>> = {
     'yiyun-dianran': YIYUN_DIANRAN,
     'palette-pixel': PALETTE_PIXEL,
     'pointillism-stipple': POINTILLISM_STIPPLE,
+    'pen-sketch': PEN_SKETCH,
     'sparkle-twinkle': SPARKLE_TWINKLE,
     'overall-wave': OVERALL_WAVE,
     'butterfly-particle': BUTTERFLY_PARTICLE

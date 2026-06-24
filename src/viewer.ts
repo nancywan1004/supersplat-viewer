@@ -261,6 +261,10 @@ const isYiyunDianranPostEffectActive = (settings: ExperienceSettings): boolean =
     return true;
 };
 
+const isPenSketchPersistentActive = (settings: ExperienceSettings): boolean => {
+    return readPersistentTrackEffects(settings, 'stylization').some(e => e.type === 'pen-sketch');
+};
+
 const isPalettePixelPersistentActive = (settings: ExperienceSettings): boolean => {
     return readPersistentTrackEffects(settings, 'stylization').some(e => e.type === 'palette-pixel');
 };
@@ -1132,6 +1136,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
         const { background } = settings;
         const applyPersistentStylizationCameraEffects = !this.deferPersistentStylizationCameraEffects;
         const nostalgicComicActive = applyPersistentStylizationCameraEffects && isNostalgicComicPersistentActive(settings);
+        const penSketchActive = applyPersistentStylizationCameraEffects && isPenSketchPersistentActive(settings);
         const yiyunDianranPostEffectActive = applyPersistentStylizationCameraEffects && isYiyunDianranPostEffectActive(settings);
         const palettePixelActive = applyPersistentStylizationCameraEffects && isPalettePixelPersistentActive(settings);
         const pointillismPostActive = applyPersistentStylizationCameraEffects
@@ -1212,7 +1217,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 return this === app.graphicsDevice.backBuffer ? true : origIsColorBufferSrgb.call(this, index);
             };
 
-            if (nostalgicComicActive) {
+            if (nostalgicComicActive || penSketchActive) {
                 camera.camera.clearColorBuffer = true;
                 camera.camera.clearColor = new Color(1, 1, 1, 0);
             } else if (yiyunDianranPostEffectActive) {
@@ -1242,7 +1247,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
             if (!app.xr.active) {
                 camera.camera.toneMapping = tonemapTable[settings.tonemapping];
-                if (nostalgicComicActive) {
+                if (nostalgicComicActive || penSketchActive) {
                     camera.camera.clearColorBuffer = true;
                     camera.camera.clearColor = new Color(1, 1, 1, 0);
                 } else if (yiyunDianranPostEffectActive) {
