@@ -783,7 +783,7 @@ export type ParseRevealProtocolParamsOptions = {
 
 /**
  * 将 `EFFECT_PARAMS_PATCH.params`（嵌套包形）转为 `patchRevealSettingsFromParams` 的增量。
- * scene reveal 协议须传 `lockToCurrentType`，且**不会**写入 `patch.type`（改类型请用 `EFFECT_ADD`）。
+ * scene reveal 协议须传 `lockToCurrentType`，且**不会**写入 `patch.type`（改类型请用 `EFFECT_DELETE` + `EFFECT_ADD`）。
  */
 export function parseRevealProtocolParamsToPatch(
     params: Record<string, unknown>,
@@ -797,7 +797,7 @@ export function parseRevealProtocolParamsToPatch(
     const lock = options?.lockToCurrentType;
     if (lock !== undefined && nestedType !== lock) {
         console.warn(
-            `[effects] reveal EFFECT_PARAMS_PATCH: nested key "${nestedType}" must match current type "${lock}"; use EFFECT_ADD to change type`
+            `[effects] reveal EFFECT_PARAMS_PATCH: nested key "${nestedType}" must match current type "${lock}"; use EFFECT_DELETE + EFFECT_ADD to change type`
         );
         return null;
     }
@@ -1050,7 +1050,7 @@ export function normalizeRevealStoragePack(settings: ExperienceSettings): void {
     syncLegacyRevealEffectShadow(settings);
 }
 
-/** 将 scene reveal 设为 `none` 存盘：`paramsById[id] === { none: {} }`（`EFFECT_DELETE` / `effectType: none`） */
+/** 将 scene reveal 设为 `none` 存盘：`paramsById[id] === { none: {} }`（`EFFECT_DELETE`，`effectType` 为被卸下的旧类型） */
 export function clearRevealScenePack(settings: ExperienceSettings): void {
     const e = ensureEffectsSettings(settings);
     e.reveal.paramsById[SCENE_GSPLAT_REVEAL_EFFECT_ID] = { ...revealNoneParamRecord() };
@@ -1064,7 +1064,7 @@ export function clearRevealScenePack(settings: ExperienceSettings): void {
 }
 
 /**
- * `EFFECT_ADD`（reveal）：整包替换为单一 `type` 块，丢弃旧类型及其参数；`none` 则写入 `{ none: {} }`。
+ * `EFFECT_ADD`（reveal）：写入单一 `type` 块（调用方须先 `EFFECT_DELETE` 清掉旧类型）；`none` 请走 `EFFECT_DELETE`。
  */
 export function replaceRevealSceneEffect(
     settings: ExperienceSettings,

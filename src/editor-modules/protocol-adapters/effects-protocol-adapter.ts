@@ -1,9 +1,10 @@
 /**
  * 场景 GSplat reveal / persistent 协议映射：`EFFECT_PARAMS_PATCH` / `EFFECT_TOGGLE` / `EFFECT_ADD` / `EFFECT_DELETE`。
- * reveal：**切换 type 仅 `EFFECT_ADD`**；`EFFECT_PARAMS_PATCH` 的 `params` 嵌套键须为当前 type，只改参数 / `enabled` / `autoStart` / `totalDuration`；
+ * reveal 切换 type：**先 `EFFECT_DELETE`（`effectType` 为当前要卸下的类型）再 `EFFECT_ADD`**；当前为 `none` 时仅 `EFFECT_ADD`；切到 `none` 时仅 `EFFECT_DELETE`（`effectType` 为旧类型）。
+ * `EFFECT_PARAMS_PATCH` 的 `params` 嵌套键须为当前 type，只改参数 / `enabled` / `autoStart` / `totalDuration`；
  * persistent scene（postMessage）：`params` 为 `{ [type]: { enabled?, autoStart?, …专参 } }`（与 reveal / 存盘一致）；
  *   每条消息仅一个 type 键。由 `effectId` 区分 reveal / persistent 轨。
- * persistent：**增删类型** `EFFECT_ADD` / `EFFECT_DELETE`（`effectType`）；**改参 / enabled** `EFFECT_PARAMS_PATCH` 或 `EFFECT_TOGGLE`。`module` 可选。
+ * persistent：**增删类型** 多选面板 `EFFECT_ADD` / `EFFECT_DELETE`（`effectType`）；**启停** 参数面板 `EFFECT_PARAMS_PATCH` `{ [type]: { enabled } }`；改专参 `EFFECT_PARAMS_PATCH` 或 `EFFECT_TOGGLE`。`module` 可选。
  */
 
 import type { ExperienceSettings } from '../../schemas/v2';
@@ -46,7 +47,8 @@ import type { Global, PersistentEffectType } from '../../types';
 import {
     SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID,
     SCENE_GSPLAT_PERSISTENT_EFFECT_ID,
-    SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID
+    SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID,
+    SCENE_GSPLAT_REVEAL_EFFECT_ID
 } from '../../vfx/effects-runtime/effects-runtime';
 import { REVEAL_EFFECT_TYPES } from '../../vfx/effects-runtime/effect-types';
 import { isPersistentVfx, isRevealEffectActiveInScene } from '../../vfx/effects-runtime/reveal/reveal-policy';
@@ -135,7 +137,7 @@ function requestRevealSceneReplayIfActive(global: Global, merged: LegacyRevealEf
     global.events.fire('revealRestart', false);
 }
 
-/** 按 settings 中 reveal 的 `enabled` / `type` 同步 `hasRevealEffect`；未启用时停播（具体重播由 `revealConfigChanged` / `EFFECT_ADD` 触发）。 */
+/** 按 settings 中 reveal 的 `enabled` / `type` 同步 `hasRevealEffect`；未启用时停播（`EFFECT_PARAMS_PATCH` 禁用路径）。 */
 function syncRevealSceneActiveState(global: Global, merged: LegacyRevealEffect): void {
     const active = isRevealEffectActiveInScene(merged);
     const prev = global.state.hasRevealEffect;
@@ -148,32 +150,111 @@ function syncRevealSceneActiveState(global: Global, merged: LegacyRevealEffect):
     }
 }
 
-/**
- * `EFFECT_ADD`（scene.gsplat-reveal）：整包替换为新 `effectType`（丢弃旧类型及参数）；
- * `none` 写入 `{ none: {} }`；新特效默认 `enabled: true` 并触发场景应用。
- */
-export function applyGsplatRevealEffectAdd(global: Global, effectType: string): void {
-    const t = normalizeRevealEffectType(effectType);
-    if (t === null) return;
-
-    const settings = getEffectsWriteTarget(global);
-    const merged = replaceRevealSceneEffect(settings, t, { enabled: t !== 'none' });
-    syncEffectsRuntimeStateFromSettings(global.state, settings);
-    syncRevealSceneActiveState(global, merged);
-    global.events.fire('revealConfigChanged', merged);
-    if (t !== 'none') {
-        global.events.fire('revealType:changed', t);
-        requestRevealSceneReplayIfActive(global, merged);
-    } else if (hasEnabledPersistentEffects(settings)) {
-        requestPersistentGsplatRemount(global);
+function syncRevealSceneHasRevealFlag(global: Global, merged: LegacyRevealEffect): void {
+    const active = isRevealEffectActiveInScene(merged);
+    const prev = global.state.hasRevealEffect;
+    global.state.hasRevealEffect = active;
+    if (prev !== active) {
+        global.events.fire('hasRevealEffect:changed', active);
     }
 }
 
+let cancelRevealDeleteTerminalFinalize: (() => void) | null = null;
+
+/** DELETE 后若下一轮宏任务前未 ADD，再 remount persistent / terminalCleanup（兼容连续两条 postMessage）。 */
+function scheduleRevealDeleteTerminalFinalize(global: Global, finalize: () => void): void {
+    cancelRevealDeleteTerminalFinalize?.();
+    cancelRevealDeleteTerminalFinalize = finalize;
+    setTimeout(() => {
+        if (!cancelRevealDeleteTerminalFinalize) {
+            return;
+        }
+        const fn = cancelRevealDeleteTerminalFinalize;
+        cancelRevealDeleteTerminalFinalize = null;
+        fn();
+    }, 0);
+}
+
+function cancelScheduledRevealDeleteTerminalFinalize(): void {
+    cancelRevealDeleteTerminalFinalize = null;
+}
+
+export type RevealSceneEffectCommand =
+    | { type: 'EFFECT_DELETE'; payload: { effectId: string; effectType: string } }
+    | { type: 'EFFECT_ADD'; payload: { effectId: string; effectType: string } };
+
 /**
- * `EFFECT_DELETE`（scene.gsplat-reveal）：存盘为 `{ none: {} }`（`effectType` 可传但忽略）。
+ * 按外部协议生成 scene reveal 类型切换命令序列（当前为 none 仅 ADD；切到 none 仅 DELETE；否则 DELETE → ADD）。
  */
-export function applyGsplatRevealEffectDelete(global: Global): void {
+export function buildRevealTypeSwitchCommands(
+    currentType: string,
+    nextType: string,
+    effectId: string = SCENE_GSPLAT_REVEAL_EFFECT_ID
+): RevealSceneEffectCommand[] {
+    if (nextType === currentType) {
+        return [];
+    }
+    if (nextType === 'none') {
+        if (currentType === 'none') {
+            return [];
+        }
+        return [{ type: 'EFFECT_DELETE', payload: { effectId, effectType: currentType } }];
+    }
+    if (currentType === 'none') {
+        return [{ type: 'EFFECT_ADD', payload: { effectId, effectType: nextType } }];
+    }
+    return [
+        { type: 'EFFECT_DELETE', payload: { effectId, effectType: currentType } },
+        { type: 'EFFECT_ADD', payload: { effectId, effectType: nextType } }
+    ];
+}
+
+/**
+ * `EFFECT_ADD`（scene.gsplat-reveal）：写入新 `effectType` 并挂载脚本；`none` 非法（请用 `EFFECT_DELETE`）。
+ */
+export function applyGsplatRevealEffectAdd(global: Global, effectType: string): void {
+    const t = normalizeRevealEffectType(effectType);
+    if (t === null || t === 'none') {
+        console.warn('[effects] reveal EFFECT_ADD ignored: effectType must be a non-none reveal type; use EFFECT_DELETE to clear');
+        return;
+    }
+
+    cancelScheduledRevealDeleteTerminalFinalize();
+
     const settings = getEffectsWriteTarget(global);
+    const merged = replaceRevealSceneEffect(settings, t, { enabled: true });
+    syncEffectsRuntimeStateFromSettings(global.state, settings);
+    syncRevealSceneHasRevealFlag(global, merged);
+    global.events.fire('revealConfigChanged', merged);
+    global.events.fire('revealType:changed', t);
+    global.events.fire('inputEvent', 'resetAnim');
+    global.events.fire('revealSceneEffect:add');
+}
+
+/**
+ * `EFFECT_DELETE`（scene.gsplat-reveal）：`effectType` 为要卸下的当前 reveal 类型；存盘为 `{ none: {} }` 并拆除运行时脚本。
+ * 若同轮次内紧跟 `EFFECT_ADD`（类型切换），ADD 会取消延迟收尾；仅切到 `none` 时在宏任务末 remount persistent。
+ */
+export function applyGsplatRevealEffectDelete(global: Global, effectType: string): void {
+    const t = normalizeRevealEffectType(effectType);
+    if (t === null || t === 'none') {
+        console.warn('[effects] reveal EFFECT_DELETE ignored: effectType must be the non-none reveal type being removed');
+        return;
+    }
+
+    const settings = getEffectsWriteTarget(global);
+    const current = (readRevealParams(settings)?.type ?? 'none') as string;
+    if (current === 'none') {
+        console.warn('[effects] reveal EFFECT_DELETE ignored: no reveal effect to delete');
+        return;
+    }
+    if (current !== t) {
+        console.warn(
+            `[effects] reveal EFFECT_DELETE ignored: effectType "${t}" does not match current "${current}"`
+        );
+        return;
+    }
+
     clearRevealScenePack(settings);
     const merged: LegacyRevealEffect = {
         type: 'none',
@@ -182,12 +263,20 @@ export function applyGsplatRevealEffectDelete(global: Global): void {
         totalDuration: DEFAULT_VFX_TOTAL_DURATION
     };
     syncEffectsRuntimeStateFromSettings(global.state, settings);
-    syncRevealSceneActiveState(global, merged);
+    syncRevealSceneHasRevealFlag(global, merged);
     global.events.fire('revealConfigChanged', merged);
     global.events.fire('revealType:changed', 'none');
-    if (hasEnabledPersistentEffects(settings)) {
-        requestPersistentGsplatRemount(global);
-    }
+    global.events.fire('revealSceneEffect:delete', { effectType: t });
+    scheduleRevealDeleteTerminalFinalize(global, () => {
+        const currentType = readRevealParams(getEffectsReadSource(global))?.type ?? 'none';
+        if (currentType !== 'none') {
+            return;
+        }
+        global.events.fire('revealSceneEffect:terminalCleanup');
+        if (hasEnabledPersistentEffects(getEffectsReadSource(global))) {
+            requestPersistentGsplatRemount(global);
+        }
+    });
 }
 
 const PERSISTENT_TYPE_SET = new Set<string>(PERSISTENT_EFFECT_TYPE_VALUES as readonly string[]);

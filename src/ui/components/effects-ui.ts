@@ -22,6 +22,7 @@ import {
 } from '../../settings-serialize/effects-sync';
 import { isPersistentVfx } from '../../vfx/effects-runtime/reveal/reveal-policy';
 import { dispatchEffectsModuleCommand } from '../../editor-modules/effects-facade';
+import { buildRevealTypeSwitchCommands } from '../../editor-modules/protocol-adapters/effects-protocol-adapter';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 import { getPersistentParamSpecs, getRevealParamSpecs } from './effect-params-ui-schema';
 import { mountEffectParamsPanel, type EffectParamsPanelHandle } from './effect-params-panel';
@@ -367,7 +368,7 @@ export function initRevealUI(global: Global): () => void {
                 enableInput.type = 'checkbox';
                 enableInput.className = 'settingsCheckbox';
                 enableInput.dataset.persistentParamsEnable = type;
-                enableInput.checked = entry.enabled;
+                enableInput.checked = entry.enabled !== false;
                 const titleText = document.createElement('span');
                 titleText.textContent = type;
                 title.appendChild(enableInput);
@@ -394,7 +395,7 @@ export function initRevealUI(global: Global): () => void {
                     `input[data-persistent-params-enable="${type}"]`
                 );
                 if (enableInput) {
-                    enableInput.checked = entry.enabled;
+                    enableInput.checked = entry.enabled !== false;
                 }
                 const panel = persistentParamsPanels.get(type);
                 panel?.syncFromValues(params);
@@ -438,8 +439,8 @@ export function initRevealUI(global: Global): () => void {
         container.querySelectorAll<HTMLInputElement>('input[data-persistent-type]').forEach((input) => {
             const t = input.dataset.persistentType ?? '';
             const entry = all.find(e => e.type === t);
-            // 无配置块时必须未勾选；仅有 entry 且 enabled !== false 时才勾选
-            input.checked = entry != null && entry.enabled !== false;
+            // 多选面板：有配置块即勾选（与 enabled 无关；启停见参数面板）
+            input.checked = entry != null;
             input.indeterminate = false;
         });
     };
@@ -456,10 +457,10 @@ export function initRevealUI(global: Global): () => void {
     const onRevealTypeChange = (event: Event) => {
         const target = (event.target as HTMLSelectElement);
         const type = target.value as RevealType;
-        routeEffectsCommand('EFFECT_ADD', {
-            effectId: SCENE_GSPLAT_REVEAL_EFFECT_ID,
-            effectType: type
-        });
+        const commands = buildRevealTypeSwitchCommands(currentRevealType(), type, SCENE_GSPLAT_REVEAL_EFFECT_ID);
+        for (const command of commands) {
+            routeEffectsCommand(command.type, command.payload);
+        }
         pushEditHistorySafe();
     };
 
@@ -473,10 +474,9 @@ export function initRevealUI(global: Global): () => void {
                 effectType: type
             });
         } else {
-            // 仅停用，保留 effectParams，避免再次勾选时参数回到默认值
-            routeEffectsCommand('EFFECT_PARAMS_PATCH', {
+            routeEffectsCommand('EFFECT_DELETE', {
                 effectId: persistentEffectIdForType(type),
-                params: persistentProtocolParams({ [type]: { enabled: false } })
+                effectType: type
             });
         }
         pushEditHistorySafe();

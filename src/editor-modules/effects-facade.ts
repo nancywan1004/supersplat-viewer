@@ -134,6 +134,10 @@ class EffectsFacade implements ModuleFacade {
                 break;
             }
             if (effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID) {
+                if (effectType === 'none' || effectType.trim() === '') {
+                    console.warn('[EffectsFacade] reveal EFFECT_ADD ignored: use EFFECT_DELETE to clear reveal');
+                    break;
+                }
                 applyGsplatRevealEffectAdd(global, effectType);
                 break;
             }
@@ -156,7 +160,12 @@ class EffectsFacade implements ModuleFacade {
                 break;
             }
             if (effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID) {
-                applyGsplatRevealEffectDelete(global);
+                const effectType = (raw as { effectType?: unknown }).effectType;
+                if (typeof effectType !== 'string') {
+                    console.warn('[EffectsFacade] reveal EFFECT_DELETE ignored: effectType must be string');
+                    break;
+                }
+                applyGsplatRevealEffectDelete(global, effectType);
                 break;
             }
             if (isPersistentProtocolEffectId(effectId)) {

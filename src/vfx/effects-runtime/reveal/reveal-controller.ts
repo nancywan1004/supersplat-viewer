@@ -184,10 +184,22 @@ export class RevealController {
             events.fire('hasRevealEffect:changed', state.hasRevealEffect);
         }
 
-        // 统一监听配置变化（包括类型切换和启用状态）
+        // 统一监听配置变化（参数 / enabled；类型切换由 revealSceneEffect:add|delete 驱动脚本生命周期）
         events.on('revealConfigChanged', (newConfig: Partial<RevealConfig>) => {
             console.log('Reveal config changed:', newConfig);
             this.updateConfig(newConfig);
+        });
+
+        events.on('revealSceneEffect:delete', () => {
+            this.teardownRevealSceneEffectForSwitch();
+        });
+
+        events.on('revealSceneEffect:terminalCleanup', () => {
+            this.finalizeRevealSceneEffectDelete();
+        });
+
+        events.on('revealSceneEffect:add', () => {
+            this.mountRevealSceneEffect();
         });
 
         events.on('persistentRevealConfigChanged', (pack: { type?: string; effectParams?: Record<string, unknown> }) => {
@@ -275,7 +287,7 @@ export class RevealController {
         ) {
             const createInitial = () => {
                 if (this.currentScript) return;
-                this.createEffect(this.config.type as string);
+                this.mountRevealSceneEffect();
             };
             if (state.loaded) {
                 createInitial();
@@ -324,7 +336,7 @@ export class RevealController {
         ) {
             return;
         }
-        this.createEffect(this.config.type as string);
+        this.mountRevealSceneEffect();
     }
 
     /**
@@ -907,7 +919,61 @@ export class RevealController {
     }
 
     /**
-     * 创建指定类型的reveal效果 - 类似原始实现中的createEffect函数
+     * 挂载当前 config.type 对应的一次性 reveal 脚本（不拆除已有脚本；类型切换须先 `revealSceneEffect:delete`）。
+     */
+    private mountRevealSceneEffect() {
+        const effectName = this.config.type as string;
+        if (!effectName || effectName === 'none' || this.config.enabled === false) {
+            return;
+        }
+        if (isPersistentVfx(effectName as any)) {
+            console.warn('[RevealController] mountRevealSceneEffect ignores persistent types:', effectName);
+            return;
+        }
+
+        this.suspendPersistentSceneForOneShotReveal();
+
+        patchRevealRuntimeMirror(this.global.state, {
+            activeType: effectName as RevealEffectType,
+            status: 'playing'
+        });
+
+        this.exportRevealCompleted = false;
+        this.mountRevealSceneEffectByName(effectName);
+        this.schedulePersistentGsplatRemountAfterRevealCompleteIfWanted();
+    }
+
+    /**
+     * 切换中间步 / ADD 前：卸一次性 reveal 与 persistent，不发 revealComplete。
+     */
+    private teardownRevealSceneEffectForSwitch() {
+        if (!this.gsplatEntity) {
+            return;
+        }
+        this.teardownOneShotRevealGsplatScripts('replaceOneShot');
+        this.suspendPersistentSceneForOneShotReveal();
+        this.currentScript = null;
+        this.isTiming = false;
+        this.effectStartTime = null;
+        this.effectEndTime = null;
+        this.inVfx = false;
+        patchRevealRuntimeMirror(this.global.state, { status: 'inactive' });
+        this.syncEffectsRuntimeRevealScriptType(
+            getPersistentGsplatEffectsRuntimeScriptType(this.gsplatEntity, this.global.settings as ExperienceSettings)
+        );
+    }
+
+    /** 最终 DELETE（切到 none）：恢复 nightMode 并通知 revealComplete。 */
+    private finalizeRevealSceneEffectDelete() {
+        if (!this.gsplatEntity) {
+            return;
+        }
+        this.restoreNightModeIfNeeded('revealSceneEffectDelete');
+        this.global.events.fire('revealComplete');
+    }
+
+    /**
+     * 重播 / 内部替换：先拆再挂（外部协议切换类型应走 delete → add 两步，不经过此处）。
      */
     private createEffect(effectName: string) {
         if (!this.gsplatEntity || !this.config) {
@@ -920,37 +986,35 @@ export class RevealController {
             return;
         }
 
-        console.log('Creating effect:', effectName, 'for entity:', this.gsplatEntity.name);
-        console.log('GSplat entity details:', {
-            hasGsplat: !!this.gsplatEntity.gsplat,
-            hasScript: !!this.gsplatEntity.script,
-            gsplatMaterial: this.gsplatEntity.gsplat?.material,
-            gsplatUnified: (this.gsplatEntity.gsplat as any)?.unified
-        });
+        if (effectName === 'none') {
+            this.teardownRevealSceneEffectForSwitch();
+            this.finalizeRevealSceneEffectDelete();
+            return;
+        }
 
-        // 确保实体有script组件
+        this.teardownOneShotRevealGsplatScripts('replaceOneShot');
+        this.mountRevealSceneEffectByName(effectName);
+    }
+
+    private mountRevealSceneEffectByName(effectName: string) {
+        if (!this.gsplatEntity || !this.config) {
+            console.log('Cannot mount effect - entity not ready or config not set');
+            return;
+        }
+
+        console.log('Mounting reveal effect:', effectName, 'for entity:', this.gsplatEntity.name);
+
         if (!this.gsplatEntity.script) {
             this.gsplatEntity.addComponent('script');
             console.log('Added script component to gsplat entity');
         }
 
-        // Reveal 即将接管 gsplatModifyVS，通知 NightMode 退出（互斥关系）
-        // 仅在目标类型非 none 时才接管；none 代表「退出特效」，应恢复/保留 NightMode 当前状态。
-        if (effectName !== 'none') {
-            this.inVfx = true;
-            // 首次进入 VFX 时记录恢复用 nightFade：须以 settings 为准。
-            // RevealController 构造早于 firstFrame 上的 NightMode.applyFromSettings，currentNightFade 可能仍为 0，
-            // 若仅用 currentNightFade，restoreNightModeIfNeeded 会把 settings.nightMode.fade 错误写回 0（存盘即丢亮度）。
-            if (this.originalNightFade === null) {
-                this.originalNightFade = getNightFadeFromSettings(this.global.settings);
-            }
-            this.global.app.fire('nightMode:exit');
+        this.inVfx = true;
+        if (this.originalNightFade === null) {
+            this.originalNightFade = getNightFadeFromSettings(this.global.settings);
         }
+        this.global.app.fire('nightMode:exit');
 
-        // 销毁现有的一次性 reveal 脚本（persistent 不碰；currentScript 由后续 create 重写）
-        this.teardownOneShotRevealGsplatScripts('replaceOneShot');
-
-        // 根据类型创建对应的script
         let script = null;
         switch (effectName) {
             case 'radial':
@@ -1319,10 +1383,8 @@ export class RevealController {
     }
 
     updateConfig(newConfig: Partial<RevealConfig>) {
-        const oldType = this.config.type;
         const effectsSettings = getEffectsReadSource(this.global);
         const rp = readRevealParams(effectsSettings);
-        const prevEnabled = this.config.enabled !== false;
         if (rp) {
             this.config.type = (rp.type as RevealConfig['type']) ?? 'none';
             this.config.enabled = rp.enabled !== false;
@@ -1335,50 +1397,13 @@ export class RevealController {
         }
         syncEffectsRuntimeStateFromSettings(this.global.state, effectsSettings);
 
-        const enabledNow = this.config.enabled !== false;
-        if (!enabledNow || this.config.type === 'none') {
-            const hasReveal = hasRevealInSettings(effectsSettings);
+        const hasReveal = hasRevealInSettings(effectsSettings);
+        if (this.global.state.hasRevealEffect !== hasReveal) {
             this.global.state.hasRevealEffect = hasReveal;
             this.global.events.fire('hasRevealEffect:changed', hasReveal);
-            this.createEffect('none');
-            this.restoreNightModeIfNeeded('revealDisabledOrNone');
-            if (newConfig.type !== undefined) {
-                this.global.events.fire('revealType:changed', this.config.type);
-            }
-            return;
         }
 
-        if (newConfig.enabled === true && !prevEnabled) {
-            this.global.state.hasRevealEffect = hasRevealInSettings(effectsSettings);
-            this.global.events.fire('hasRevealEffect:changed', this.global.state.hasRevealEffect);
-            return;
-        }
-
-        if (newConfig.type && newConfig.type !== oldType) {
-            const nextType = newConfig.type as RevealConfig['type'];
-            const hasReveal = hasRevealInSettings(effectsSettings);
-            this.global.state.hasRevealEffect = hasReveal;
-            this.global.events.fire('hasRevealEffect:changed', hasReveal);
-            if (nextType === 'none') {
-                this.createEffect(nextType);
-                this.restoreNightModeIfNeeded('typeChangedToNone');
-            }
-            this.global.events.fire('revealType:changed', nextType);
-            this.global.events.fire('inputEvent', 'resetAnim');
-
-            if (
-                shouldRequestPersistentGsplatRemount(
-                    'revealTrackExplicitlyNone',
-                    nextType,
-                    effectsSettings
-                )
-            ) {
-                this.global.events.fire('persistentGsplatEffectRemountRequested', false);
-            }
-            return;
-        }
-
-        if (this.currentScript) {
+        if (this.currentScript && this.config.enabled !== false && this.config.type !== 'none') {
             this.updateCurrentScriptConfig(newConfig as Partial<RevealConfig>);
         }
     }

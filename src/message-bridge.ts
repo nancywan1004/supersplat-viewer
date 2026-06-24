@@ -999,6 +999,10 @@ const initPostMessageBridge = (global: Global) => {
                     break;
                 }
                 if (effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID) {
+                    if (effectType === 'none' || effectType.trim() === '') {
+                        console.warn('[MessageBridge] reveal EFFECT_ADD ignored: use EFFECT_DELETE to clear reveal');
+                        break;
+                    }
                     dispatchEffects(global, 'EFFECT_ADD', { effectId, effectType });
                     break;
                 }
@@ -1073,7 +1077,11 @@ const initPostMessageBridge = (global: Global) => {
                     break;
                 }
                 if (effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID) {
-                    dispatchEffects(global, 'EFFECT_DELETE', { effectId });
+                    if (typeof effectType !== 'string' || effectType.trim() === '') {
+                        console.warn('[MessageBridge] reveal EFFECT_DELETE ignored: effectType must be string');
+                        break;
+                    }
+                    dispatchEffects(global, 'EFFECT_DELETE', { effectId, effectType });
                     break;
                 }
                 if (effectId === ASSET_GSPLAT_EFFECT_ID) {
