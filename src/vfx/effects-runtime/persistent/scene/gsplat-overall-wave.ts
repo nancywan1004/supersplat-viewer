@@ -1,4 +1,4 @@
-import { Color, Vec3, type Material } from 'playcanvas';
+﻿import { Color, Vec3, type Material } from 'playcanvas';
 import { GsplatShaderEffect } from '../../gsplat-shader-effect';
 import { extractGlslWgslModifyBlocks, OVERALL_WAVE_COMPOSER_ID } from '../../gsplat-effect-layers-extractor';
 import { nightModeUsesComposerPath } from '../../../lighting/night-mode';
@@ -7,10 +7,17 @@ import {
     isOneShotRevealPlayingExclusiveGsplat,
     perlinWaveUsesRegistryComposerPath
 } from '../../effects-pipeline-policy';
+import {
+    removeUnifiedWorkBufferShaders,
+    setUniformViaUnifiedWorkBuffer,
+    skipUnifiedMaterialListener,
+    tryApplyUnifiedWorkBufferShaders,
+    updateViaUnifiedWorkBuffer
+} from '../../gsplat-unified-work-buffer';
 import { overallWaveShaderGlsl, overallWaveShaderWgsl } from './gsplat-overall-wave-shaders';
 import { OVERALL_WAVE_UNIFORM_NAMES as OU } from './gsplat-overall-wave-shaders';
 
-/** 初始属性默认�?*/
+/** 初始属性默认值 */
 export const OVERALL_WAVE_DEFAULTS = {
     noiseType: 0,
     waveAmplitude: 0.35,
@@ -30,16 +37,15 @@ export function clampOverallWaveNoiseType(v: number): number {
 }
 
 /**
- * 整体波动：全场景有机噪波位移 + 波峰/波谷明暗着色�?
- * 夜间模式�?{@link GsplatEffectComposer}；`perlinRegistry=0` 时回退脚本内联 contribution（与 perlin-wave 一致）�?
+ * 整体波动：全场景有机噪波位移 + 波峰/波谷明暗着色。
+ * 夜间模式走 {@link GsplatEffectComposer}；`perlinRegistry=0` 时回退脚本内联 contribution（与 perlin-wave 一致）。
  */
 class GsplatPersistentOverallWave extends GsplatShaderEffect {
     static scriptName = 'gsplatPersistentOverallWave';
 
-    /** shader 变更时递增，触�?composer 重编�?*/
     private _composerRev = 6;
-    /** 一次�?reveal 独占 `gsplatModifyVS` 时，已从合成器摘掉本 contribution */
     private _composerSuppressed = false;
+    _unifiedWorkBuffer = false;
 
     _centerArray = [...OVERALL_WAVE_DEFAULTS.center];
     _waveDirArray = [...OVERALL_WAVE_DEFAULTS.waveDirection];
@@ -76,12 +82,22 @@ class GsplatPersistentOverallWave extends GsplatShaderEffect {
         return isOneShotRevealPlayingExclusiveGsplat((this.app as any).__global?.state);
     }
 
+    setupUnifiedEventListener() {
+        if (skipUnifiedMaterialListener(this.entity)) {
+            return;
+        }
+        super.setupUnifiedEventListener();
+    }
+
     applyShaderToMaterial(material: Material) {
         if (this.usesComposerPath()) return;
         super.applyShaderToMaterial(material);
     }
 
     applyShaders() {
+        if (tryApplyUnifiedWorkBufferShaders(this, OVERALL_WAVE_COMPOSER_ID, 21)) {
+            return;
+        }
         if (!this.usesComposerPath()) {
             super.applyShaders();
             return;
@@ -100,6 +116,9 @@ class GsplatPersistentOverallWave extends GsplatShaderEffect {
     }
 
     removeShaders() {
+        if (removeUnifiedWorkBufferShaders(this, OVERALL_WAVE_COMPOSER_ID)) {
+            return;
+        }
         if (!this.usesComposerPath()) {
             super.removeShaders();
             return;
@@ -195,6 +214,17 @@ class GsplatPersistentOverallWave extends GsplatShaderEffect {
             this._composerSuppressed = false;
             this.syncComposerContribution();
         }
+    }
+
+    setUniform(name: string, value: unknown) {
+        if (setUniformViaUnifiedWorkBuffer(this, name, value)) {
+            return;
+        }
+        super.setUniform(name, value);
+    }
+
+    update(dt: number) {
+        updateViaUnifiedWorkBuffer(this, dt, (d) => super.update(d));
     }
 }
 

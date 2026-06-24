@@ -7,6 +7,13 @@ import {
     isOneShotRevealPlayingExclusiveGsplat,
     perlinWaveUsesRegistryComposerPath
 } from '../../effects-pipeline-policy';
+import {
+    removeUnifiedWorkBufferShaders,
+    setUniformViaUnifiedWorkBuffer,
+    skipUnifiedMaterialListener,
+    tryApplyUnifiedWorkBufferShaders,
+    updateViaUnifiedWorkBuffer
+} from '../../gsplat-unified-work-buffer';
 import { perlinWaveShaderGlsl, perlinWaveShaderWgsl } from './gsplat-perlin-wave-shaders';
 import { PERLIN_WAVE_UNIFORM_NAMES as PU } from './gsplat-perlin-wave-shaders';
 
@@ -21,18 +28,20 @@ import { PERLIN_WAVE_UNIFORM_NAMES as PU } from './gsplat-perlin-wave-shaders';
  * perlinWaveScript.center.set(0, 0, 0);
  * perlinWaveScript.intensity = 0.5;
  * perlinWaveScript.waveAmplitude = 0.1;
- * perlinWaveScript.wavelength = 2.0;  // 波长（世界单位），优先于 waveFrequency�? 则用 waveFrequency
+ * perlinWaveScript.wavelength = 2.0;  // 波长（世界单位），优先于 waveFrequency；否则用 waveFrequency
  * perlinWaveScript.waveSpeed = 1.0;
  * perlinWaveScript.scaleBlend = 1.0;
  */
 class GsplatRevealPerlinWave extends GsplatShaderEffect {
     static scriptName = 'gsplatRevealPerlinWave';
 
-    /** 仅当 shader 源码变更时需递增以触�?composer 重编�?*/
+    /** 仅当 shader 源码变更时需递增以触发 composer 重编译 */
     private _perlinComposerRev = 2;
 
-    /** 一次性开�?reveal 独占整段 `gsplatModifyVS` 时，已主动从合成器摘掉波�?contribution */
+    /** 一次性开场 reveal 独占整段 `gsplatModifyVS` 时，已从合成器摘掉波纹 contribution */
     private _perlinComposerSuppressed = false;
+
+    _unifiedWorkBuffer = false;
 
     // Reusable arrays for uniform updates
     _centerArray = [0, 0, 0];
@@ -65,7 +74,7 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
     waveFrequency = 1.0;
 
     /**
-     * 波长（世界单位）。当 > 0 时优先使用：uWaveFrequency = 1.0 / wavelength，调大波�?= 波更疏、周期更�?
+     * 波长（世界单位）。当 > 0 时优先使用：uWaveFrequency = 1.0 / wavelength，调大波长 = 波更疏、周期更长
      * @attribute
      * @range [0, 100]
      */
@@ -105,9 +114,16 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
         return (this.app as any).__global?.state;
     }
 
-    /** 开场一次�?reveal 正在播：整段 `gsplatModifyVS` �?reveal 脚本独占，波纹不参与合成�?*/
+    /** 开场一次性 reveal 正在播：整段 `gsplatModifyVS` 由 reveal 脚本独占，波纹不参与合成 */
     private shouldSuppressPerlinComposerForOneShotReveal(): boolean {
         return isOneShotRevealPlayingExclusiveGsplat(this.getAppState());
+    }
+
+    setupUnifiedEventListener() {
+        if (skipUnifiedMaterialListener(this.entity)) {
+            return;
+        }
+        super.setupUnifiedEventListener();
     }
 
     applyShaderToMaterial(material: Material) {
@@ -118,6 +134,9 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
     }
 
     applyShaders() {
+        if (tryApplyUnifiedWorkBufferShaders(this, PERLIN_WAVE_COMPOSER_ID, 20)) {
+            return;
+        }
         if (!this.usesPerlinComposerPath()) {
             super.applyShaders();
             return;
@@ -136,6 +155,9 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
     }
 
     removeShaders() {
+        if (removeUnifiedWorkBufferShaders(this, PERLIN_WAVE_COMPOSER_ID)) {
+            return;
+        }
         if (!this.usesPerlinComposerPath()) {
             super.removeShaders();
             return;
@@ -196,8 +218,7 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
         );
     }
 
-    updateEffect(effectTime: number, dt: number) {
-        // Update uniforms
+    updateEffect(effectTime: number, _dt: number) {
         this.setUniform(PU.time, effectTime);
 
         this._centerArray[0] = this.center.x;
@@ -221,6 +242,17 @@ class GsplatRevealPerlinWave extends GsplatShaderEffect {
                 this.syncPerlinComposerContribution();
             }
         }
+    }
+
+    setUniform(name: string, value: unknown) {
+        if (setUniformViaUnifiedWorkBuffer(this, name, value)) {
+            return;
+        }
+        super.setUniform(name, value);
+    }
+
+    update(dt: number) {
+        updateViaUnifiedWorkBuffer(this, dt, (d) => super.update(d));
     }
 }
 
