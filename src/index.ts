@@ -26,6 +26,7 @@ import { Viewer } from './viewer';
 import { initXr } from './xr';
 import { initLight } from './light';
 import { isCustomLodEnabled, isGsplatMetaJsonFilename, LodLoader } from './loaders/gsplat/lod/custom-loader';
+import { bindGsplatRenderer, type GsplatSceneRuntime } from './loaders/gsplat/lod/scene-bindings';
 import { loadSplat } from './loaders/gsplat/sog/splat-deserialize';
 import type { AssetSource } from './loaders/shared/asset-source';
 import { loadGsplatAsset } from './loaders/gsplat/sog/splat-loader';
@@ -388,6 +389,11 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         camera,
         renderer
     };
+
+    // Bind the gsplat renderer before any gsplat component is loaded. LOD paths
+    // refresh this later, but ordinary SOG scenes also need ?webgpu / ?gpu-sort
+    // to select the engine's WebGPU renderer instead of staying on CPU sort.
+    bindGsplatRenderer(app.scene.gsplat as unknown as GsplatSceneRuntime, global);
 
     events.on('progressThresholdReached', () => {
         state.loadingCameraControlsLocked = false;
