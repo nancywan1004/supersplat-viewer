@@ -27,6 +27,7 @@ import {
     DEFAULT_ASSET_LOAD_TIMEOUT_MS,
     hydrateAssetLibraryItem,
     loadSceneAssetLibraryItem,
+    resolveSceneAssetSourceUrl,
     withTimeout
 } from '../loaders/asset-loader';
 import { hitSceneGizmoAtClient } from '../gizmo-hit-test';
@@ -887,18 +888,50 @@ async function hydrateProtocolPlaceItem(global: Global, item: AssetLibraryItem):
     }
 }
 
-function sceneAssetSourceFingerprint(sa: Pick<SceneAsset, 'source'>): string {
-    const s = sa.source ?? {};
-    return `${s.assetId ?? ''}|${s.url ?? ''}|${s.filename ?? ''}`;
+function normalizeSceneAssetId(id: string | undefined): string {
+    return typeof id === 'string' ? id.trim() : '';
 }
 
-function placedItemSourceFingerprint(entry: ScenePlacedItem): string {
-    return `${entry.assetId ?? ''}|${entry.url ?? ''}|${entry.filename ?? ''}`;
+function legacySceneSourceFingerprint(parts: {
+    assetId?: string;
+    url?: string;
+    filename?: string;
+}): string {
+    return `${parts.assetId ?? ''}|${parts.url ?? ''}|${parts.filename ?? ''}`;
 }
 
-function canReuseScenePlacedEntry(entry: ScenePlacedItem, sa: SceneAsset): boolean {
-    return entry.assetType === sa.type
-        && placedItemSourceFingerprint(entry) === sceneAssetSourceFingerprint(sa);
+/**
+ * 判断运行态放置体能否就地复用（不 destroy + reload）。
+ * 优先用 resolveSceneAssetSourceUrl 语义等价，避免存盘 enrich URL 后与 entry 裸字段不一致误杀。
+ */
+function canReuseScenePlacedEntry(global: Global, entry: ScenePlacedItem, sa: SceneAsset): boolean {
+    if (entry.assetType !== sa.type) return false;
+
+    const entryResolved = resolveSceneAssetSourceUrl(global, {
+        assetId: entry.assetId,
+        url: entry.url,
+        filename: entry.filename
+    });
+    const settingsResolved = resolveSceneAssetSourceUrl(global, sa.source);
+    if (entryResolved && settingsResolved) {
+        return entryResolved === settingsResolved;
+    }
+
+    const entryAssetId = normalizeSceneAssetId(entry.assetId);
+    const settingsAssetId = normalizeSceneAssetId(sa.source?.assetId);
+    if (entryAssetId && settingsAssetId) {
+        return entryAssetId === settingsAssetId;
+    }
+
+    return legacySceneSourceFingerprint({
+        assetId: entry.assetId,
+        url: entry.url,
+        filename: entry.filename
+    }) === legacySceneSourceFingerprint({
+        assetId: sa.source?.assetId,
+        url: sa.source?.url,
+        filename: sa.source?.filename
+    });
 }
 
 /**
@@ -1069,7 +1102,7 @@ export async function syncScenePlacedEntitiesFromSettings(global: Global): Promi
 
     for (const entry of [...state.scenePlacedEntities]) {
         const sa = settingsById.get(entry.id);
-        if (!sa || !canReuseScenePlacedEntry(entry, sa)) {
+        if (!sa || !canReuseScenePlacedEntry(global, entry, sa)) {
             events.fire('sceneAssets:removed', entry);
             const idx = state.scenePlacedEntities!.indexOf(entry);
             if (idx >= 0) state.scenePlacedEntities!.splice(idx, 1);
