@@ -184,9 +184,8 @@ export class RevealController {
             events.fire('hasRevealEffect:changed', state.hasRevealEffect);
         }
 
-        // 统一监听配置变化（参数 / enabled；类型切换由 revealSceneEffect:add|delete 驱动脚本生命周期）
+        // 参数 / enabled；类型切换由 revealSceneEffect:add|delete 驱动
         events.on('revealConfigChanged', (newConfig: Partial<RevealConfig>) => {
-            console.log('Reveal config changed:', newConfig);
             this.updateConfig(newConfig);
         });
 
@@ -918,16 +917,12 @@ export class RevealController {
         }
     }
 
-    /**
-     * 挂载当前 config.type 对应的一次性 reveal 脚本（不拆除已有脚本；类型切换须先 `revealSceneEffect:delete`）。
-     */
     private mountRevealSceneEffect() {
         const effectName = this.config.type as string;
         if (!effectName || effectName === 'none' || this.config.enabled === false) {
             return;
         }
         if (isPersistentVfx(effectName as any)) {
-            console.warn('[RevealController] mountRevealSceneEffect ignores persistent types:', effectName);
             return;
         }
 
@@ -943,9 +938,6 @@ export class RevealController {
         this.schedulePersistentGsplatRemountAfterRevealCompleteIfWanted();
     }
 
-    /**
-     * 切换中间步 / ADD 前：卸一次性 reveal 与 persistent，不发 revealComplete。
-     */
     private teardownRevealSceneEffectForSwitch() {
         if (!this.gsplatEntity) {
             return;
@@ -963,7 +955,6 @@ export class RevealController {
         );
     }
 
-    /** 最终 DELETE（切到 none）：恢复 nightMode 并通知 revealComplete。 */
     private finalizeRevealSceneEffectDelete() {
         if (!this.gsplatEntity) {
             return;
@@ -972,17 +963,12 @@ export class RevealController {
         this.global.events.fire('revealComplete');
     }
 
-    /**
-     * 重播 / 内部替换：先拆再挂（外部协议切换类型应走 delete → add 两步，不经过此处）。
-     */
     private createEffect(effectName: string) {
         if (!this.gsplatEntity || !this.config) {
-            console.log('Cannot create effect - entity not ready or config not set');
             return;
         }
 
         if (isPersistentVfx(effectName as any)) {
-            console.warn('[RevealController] createEffect ignores persistent types:', effectName);
             return;
         }
 
@@ -998,15 +984,11 @@ export class RevealController {
 
     private mountRevealSceneEffectByName(effectName: string) {
         if (!this.gsplatEntity || !this.config) {
-            console.log('Cannot mount effect - entity not ready or config not set');
             return;
         }
 
-        console.log('Mounting reveal effect:', effectName, 'for entity:', this.gsplatEntity.name);
-
         if (!this.gsplatEntity.script) {
             this.gsplatEntity.addComponent('script');
-            console.log('Added script component to gsplat entity');
         }
 
         this.inVfx = true;

@@ -22,7 +22,7 @@ import {
 } from '../../settings-serialize/effects-sync';
 import { isPersistentVfx } from '../../vfx/effects-runtime/reveal/reveal-policy';
 import { dispatchEffectsModuleCommand } from '../../editor-modules/effects-facade';
-import { buildRevealTypeSwitchCommands } from '../../editor-modules/protocol-adapters/effects-protocol-adapter';
+import { buildEffectTypeSwitchCommands } from '../../editor-modules/protocol-adapters/effects-protocol-adapter';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 import { getPersistentParamSpecs, getRevealParamSpecs } from './effect-params-ui-schema';
 import { mountEffectParamsPanel, type EffectParamsPanelHandle } from './effect-params-panel';
@@ -33,6 +33,14 @@ const PERSISTENT_EFFECTS = PERSISTENT_EFFECT_TYPE_VALUES;
 
 const isRevealType = (type: string): boolean => (REVEAL_EFFECTS as readonly string[]).includes(type);
 const isPersistentType = (type: string): boolean => (PERSISTENT_EFFECTS as readonly string[]).includes(type);
+
+const isSingleSelectPersistentTrack = (track: PersistentTrackName): boolean =>
+    track === 'camera' || track === 'stylization';
+
+const currentPersistentTypeOnTrack = (global: Global, track: PersistentTrackName): string => {
+    const entries = readPersistentTrackEffects(global.settings, track, { includeDisabled: true });
+    return entries[0]?.type ?? 'none';
+};
 
 const persistentEffectIdForType = (type: string): string => {
     const track = persistentTrackNameForType(type);
@@ -101,7 +109,7 @@ const REVEAL_PANEL_HTML = (() => {
   </fieldset>
   <fieldset class="effectsTrackFieldset" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:10px 12px;margin-bottom:10px">
     <legend style="padding:0 6px;font-size:13px;font-weight:600">Camera — Persistent</legend>
-    <p class="effectsTrackHint" style="font-size:11px;opacity:0.8;margin:0 0 8px;line-height:1.35">镜头/天气类可持续特效；同轨新增会替换旧类型。</p>
+    <p class="effectsTrackHint" style="font-size:11px;opacity:0.8;margin:0 0 8px;line-height:1.35">镜头/天气类可持续特效（单选）；切换时先 DELETE 旧类型再 ADD 新类型。</p>
     <div data-persistent-multiselect="camera" class="settingsRow" style="flex-wrap:wrap;gap:8px 12px">
       <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="falling-petals" data-persistent-enable class="settingsCheckbox"> Falling Petals</label>
       <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="falling-rain" data-persistent-enable class="settingsCheckbox"> Falling Rain</label>
@@ -110,7 +118,7 @@ const REVEAL_PANEL_HTML = (() => {
   </fieldset>
   <fieldset class="effectsTrackFieldset" style="border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:10px 12px;margin-bottom:10px">
     <legend style="padding:0 6px;font-size:13px;font-weight:600">Stylization — Persistent</legend>
-    <p class="effectsTrackHint" style="font-size:11px;opacity:0.8;margin:0 0 8px;line-height:1.35">风格化可持续特效；同轨新增会替换旧类型。</p>
+    <p class="effectsTrackHint" style="font-size:11px;opacity:0.8;margin:0 0 8px;line-height:1.35">风格化可持续特效（单选）；切换时先 DELETE 旧类型再 ADD 新类型。</p>
     <div data-persistent-multiselect="stylization" class="settingsRow" style="flex-wrap:wrap;gap:8px 12px">
       <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="nostalgic-comic" data-persistent-enable class="settingsCheckbox"> Nostalgic Comic</label>
       <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" data-persistent-type="yiyun-dianran" data-persistent-enable class="settingsCheckbox"> 意韵点染</label>
@@ -439,7 +447,7 @@ export function initRevealUI(global: Global): () => void {
         container.querySelectorAll<HTMLInputElement>('input[data-persistent-type]').forEach((input) => {
             const t = input.dataset.persistentType ?? '';
             const entry = all.find(e => e.type === t);
-            // 多选面板：有配置块即勾选（与 enabled 无关；启停见参数面板）
+            // 有配置块即勾选；启停见参数面板
             input.checked = entry != null;
             input.indeterminate = false;
         });
@@ -454,13 +462,16 @@ export function initRevealUI(global: Global): () => void {
         pushEditHistorySafe();
     };
 
+    const routeTypeSwitchCommands = (currentType: string, nextType: string, effectId: string) => {
+        for (const command of buildEffectTypeSwitchCommands(currentType, nextType, effectId)) {
+            routeEffectsCommand(command.type, command.payload);
+        }
+    };
+
     const onRevealTypeChange = (event: Event) => {
         const target = (event.target as HTMLSelectElement);
         const type = target.value as RevealType;
-        const commands = buildRevealTypeSwitchCommands(currentRevealType(), type, SCENE_GSPLAT_REVEAL_EFFECT_ID);
-        for (const command of commands) {
-            routeEffectsCommand(command.type, command.payload);
-        }
+        routeTypeSwitchCommands(currentRevealType(), type, SCENE_GSPLAT_REVEAL_EFFECT_ID);
         pushEditHistorySafe();
     };
 
@@ -468,16 +479,25 @@ export function initRevealUI(global: Global): () => void {
         const target = event.target as HTMLInputElement;
         const type = target.dataset.persistentType ?? '';
         if (!isPersistentType(type)) return;
-        if (target.checked) {
-            routeEffectsCommand('EFFECT_ADD', {
-                effectId: persistentEffectIdForType(type),
-                effectType: type
-            });
+        const track = persistentTrackNameForType(type);
+        const effectId = persistentEffectIdForType(type);
+
+        if (!isSingleSelectPersistentTrack(track)) {
+            routeEffectsCommand(target.checked ? 'EFFECT_ADD' : 'EFFECT_DELETE', { effectId, effectType: type });
+        } else if (target.checked) {
+            const currentType = currentPersistentTypeOnTrack(global, track);
+            if (currentType === type) return;
+            routeTypeSwitchCommands(currentType, type, effectId);
+            target.closest('[data-persistent-multiselect]')
+                ?.querySelectorAll<HTMLInputElement>('input[data-persistent-type]')
+                .forEach((input) => {
+                    if (input.dataset.persistentType !== type) input.checked = false;
+                });
+        } else if (currentPersistentTypeOnTrack(global, track) === type) {
+            routeEffectsCommand('EFFECT_DELETE', { effectId, effectType: type });
         } else {
-            routeEffectsCommand('EFFECT_DELETE', {
-                effectId: persistentEffectIdForType(type),
-                effectType: type
-            });
+            target.checked = false;
+            return;
         }
         pushEditHistorySafe();
         updateRevealControls();

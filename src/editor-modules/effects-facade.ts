@@ -170,7 +170,11 @@ class EffectsFacade implements ModuleFacade {
             }
             if (isPersistentProtocolEffectId(effectId)) {
                 const effectType = (raw as { effectType?: unknown }).effectType;
-                applyGsplatPersistentEffectDeleteForId(global, effectId, typeof effectType === 'string' ? effectType : 'none');
+                if (typeof effectType !== 'string' || effectType.trim() === '') {
+                    console.warn('[EffectsFacade] persistent EFFECT_DELETE ignored: effectType must be string');
+                    break;
+                }
+                applyGsplatPersistentEffectDeleteForId(global, effectId, effectType);
             }
             break;
         }

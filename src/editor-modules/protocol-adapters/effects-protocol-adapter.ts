@@ -1,10 +1,6 @@
 /**
- * 场景 GSplat reveal / persistent 协议映射：`EFFECT_PARAMS_PATCH` / `EFFECT_TOGGLE` / `EFFECT_ADD` / `EFFECT_DELETE`。
- * reveal 切换 type：**先 `EFFECT_DELETE`（`effectType` 为当前要卸下的类型）再 `EFFECT_ADD`**；当前为 `none` 时仅 `EFFECT_ADD`；切到 `none` 时仅 `EFFECT_DELETE`（`effectType` 为旧类型）。
- * `EFFECT_PARAMS_PATCH` 的 `params` 嵌套键须为当前 type，只改参数 / `enabled` / `autoStart` / `totalDuration`；
- * persistent scene（postMessage）：`params` 为 `{ [type]: { enabled?, autoStart?, …专参 } }`（与 reveal / 存盘一致）；
- *   每条消息仅一个 type 键。由 `effectId` 区分 reveal / persistent 轨。
- * persistent：**增删类型** 多选面板 `EFFECT_ADD` / `EFFECT_DELETE`（`effectType`）；**启停** 参数面板 `EFFECT_PARAMS_PATCH` `{ [type]: { enabled } }`；改专参 `EFFECT_PARAMS_PATCH` 或 `EFFECT_TOGGLE`。`module` 可选。
+ * 场景 GSplat reveal / persistent 协议：`EFFECT_ADD` / `EFFECT_DELETE` / `EFFECT_PARAMS_PATCH` / `EFFECT_TOGGLE`。
+ * reveal 与 camera / stylization：切换类型先 DELETE（旧 effectType）再 ADD；scene persistent 多选；启停走 PATCH `enabled`。
  */
 
 import type { ExperienceSettings } from '../../schemas/v2';
@@ -25,7 +21,6 @@ import {
     persistentTrackNameForEffectId,
     persistentTrackNameForType,
     readActivePersistentEffects,
-    readPersistentTrackEffects,
     removePersistentTrackEffect,
     buildRevealProtocolParams,
     parseRevealProtocolParamsToPatch,
@@ -33,7 +28,8 @@ import {
     readRevealParams,
     replaceRevealSceneEffect,
     revealProtocolParamsHasPatchKeys,
-    syncEffectsRuntimeStateFromSettings
+    syncEffectsRuntimeStateFromSettings,
+    type PersistentTrackName
 } from '../../settings-serialize/effects-sync';
 import { getEffectsReadSource, getEffectsWriteTarget } from '../../view-settings';
 
@@ -137,32 +133,27 @@ function requestRevealSceneReplayIfActive(global: Global, merged: LegacyRevealEf
     global.events.fire('revealRestart', false);
 }
 
-/** 按 settings 中 reveal 的 `enabled` / `type` 同步 `hasRevealEffect`；未启用时停播（`EFFECT_PARAMS_PATCH` 禁用路径）。 */
-function syncRevealSceneActiveState(global: Global, merged: LegacyRevealEffect): void {
+function syncRevealSceneFlag(global: Global, merged: LegacyRevealEffect, opts?: { stopIfInactive?: boolean }): void {
     const active = isRevealEffectActiveInScene(merged);
     const prev = global.state.hasRevealEffect;
     global.state.hasRevealEffect = active;
     if (prev !== active) {
         global.events.fire('hasRevealEffect:changed', active);
     }
-    if (!active) {
+    if (!active && opts?.stopIfInactive) {
         applyGsplatRevealStopPlayback(global);
     }
 }
 
-function syncRevealSceneHasRevealFlag(global: Global, merged: LegacyRevealEffect): void {
-    const active = isRevealEffectActiveInScene(merged);
-    const prev = global.state.hasRevealEffect;
-    global.state.hasRevealEffect = active;
-    if (prev !== active) {
-        global.events.fire('hasRevealEffect:changed', active);
-    }
-}
+const syncRevealSceneActiveState = (global: Global, merged: LegacyRevealEffect) =>
+    syncRevealSceneFlag(global, merged, { stopIfInactive: true });
+
+const syncRevealSceneHasRevealFlag = (global: Global, merged: LegacyRevealEffect) =>
+    syncRevealSceneFlag(global, merged);
 
 let cancelRevealDeleteTerminalFinalize: (() => void) | null = null;
 
-/** DELETE 后若下一轮宏任务前未 ADD，再 remount persistent / terminalCleanup（兼容连续两条 postMessage）。 */
-function scheduleRevealDeleteTerminalFinalize(global: Global, finalize: () => void): void {
+function scheduleRevealDeleteTerminalFinalize(_global: Global, finalize: () => void): void {
     cancelRevealDeleteTerminalFinalize?.();
     cancelRevealDeleteTerminalFinalize = finalize;
     setTimeout(() => {
@@ -179,18 +170,16 @@ function cancelScheduledRevealDeleteTerminalFinalize(): void {
     cancelRevealDeleteTerminalFinalize = null;
 }
 
-export type RevealSceneEffectCommand =
+export type EffectTypeSwitchCommand =
     | { type: 'EFFECT_DELETE'; payload: { effectId: string; effectType: string } }
     | { type: 'EFFECT_ADD'; payload: { effectId: string; effectType: string } };
 
-/**
- * 按外部协议生成 scene reveal 类型切换命令序列（当前为 none 仅 ADD；切到 none 仅 DELETE；否则 DELETE → ADD）。
- */
-export function buildRevealTypeSwitchCommands(
+/** none→ADD；→none 仅 DELETE；否则 DELETE(旧)→ADD(新)。reveal / camera / stylization 共用。 */
+export function buildEffectTypeSwitchCommands(
     currentType: string,
     nextType: string,
     effectId: string = SCENE_GSPLAT_REVEAL_EFFECT_ID
-): RevealSceneEffectCommand[] {
+): EffectTypeSwitchCommand[] {
     if (nextType === currentType) {
         return [];
     }
@@ -207,6 +196,28 @@ export function buildRevealTypeSwitchCommands(
         { type: 'EFFECT_DELETE', payload: { effectId, effectType: currentType } },
         { type: 'EFFECT_ADD', payload: { effectId, effectType: nextType } }
     ];
+}
+
+/** @deprecated 使用 {@link buildEffectTypeSwitchCommands} */
+export const buildRevealTypeSwitchCommands = buildEffectTypeSwitchCommands;
+
+function isSingleSelectPersistentTrack(trackName: PersistentTrackName): boolean {
+    return trackName === 'camera' || trackName === 'stylization';
+}
+
+function notifyPersistentRuntime(
+    global: Global,
+    trackName: PersistentTrackName,
+    kind: 'add' | 'delete',
+    effectType: string
+): void {
+    if (isSingleSelectPersistentTrack(trackName)) {
+        global.events.fire(`persistentTrackEffect:${kind}`, { effectType });
+        return;
+    }
+    if (kind === 'add') {
+        requestPersistentGsplatRemount(global);
+    }
 }
 
 /**
@@ -232,8 +243,7 @@ export function applyGsplatRevealEffectAdd(global: Global, effectType: string): 
 }
 
 /**
- * `EFFECT_DELETE`（scene.gsplat-reveal）：`effectType` 为要卸下的当前 reveal 类型；存盘为 `{ none: {} }` 并拆除运行时脚本。
- * 若同轮次内紧跟 `EFFECT_ADD`（类型切换），ADD 会取消延迟收尾；仅切到 `none` 时在宏任务末 remount persistent。
+ * `EFFECT_DELETE`（scene.gsplat-reveal）：校验 effectType 后清 settings；ADD 同轮次会取消延迟收尾。
  */
 export function applyGsplatRevealEffectDelete(global: Global, effectType: string): void {
     const t = normalizeRevealEffectType(effectType);
@@ -266,7 +276,7 @@ export function applyGsplatRevealEffectDelete(global: Global, effectType: string
     syncRevealSceneHasRevealFlag(global, merged);
     global.events.fire('revealConfigChanged', merged);
     global.events.fire('revealType:changed', 'none');
-    global.events.fire('revealSceneEffect:delete', { effectType: t });
+    global.events.fire('revealSceneEffect:delete');
     scheduleRevealDeleteTerminalFinalize(global, () => {
         const currentType = readRevealParams(getEffectsReadSource(global))?.type ?? 'none';
         if (currentType !== 'none') {
@@ -468,7 +478,6 @@ export function applyGsplatPersistentEffectAddForId(global: Global, effectId: st
     const settings = getEffectsWriteTarget(global);
     const trackName = persistentTrackNameForEffectId(effectId) ?? persistentTrackNameForType(t === 'none' ? 'perlin-wave' : t);
     const hadEnabled = hasEnabledPersistentEffects(settings);
-    const replaceTrack = trackName !== 'scene';
 
     if (t === 'none') {
         clearPersistentTrackEffects(settings, trackName);
@@ -487,22 +496,21 @@ export function applyGsplatPersistentEffectAddForId(global: Global, effectId: st
     const existing = getPersistentTrackEffect(settings, trackName, t);
     if (existing) {
         if (!existing.enabled) {
-            patchPersistentTrackEffect(settings, trackName, t, { enabled: true }, { replaceTrack });
+            patchPersistentTrackEffect(settings, trackName, t, { enabled: true }, { replaceTrack: false });
             syncEffectsRuntimeStateFromSettings(global.state, settings);
         }
         notifyPersistentSceneEffectsUiSync(global);
-        requestPersistentGsplatRemount(global);
+        notifyPersistentRuntime(global, trackName, 'add', t);
         return;
     }
 
-    patchPersistentTrackEffect(settings, trackName, t, { enabled: true }, { replaceTrack });
+    patchPersistentTrackEffect(settings, trackName, t, { enabled: true }, { replaceTrack: false });
     syncEffectsRuntimeStateFromSettings(global.state, settings);
     notifyPersistentSceneEffectsUiSync(global);
 
-    if (readActivePersistentEffects(settings).length === 0) {
-        return;
+    if (readActivePersistentEffects(settings).length > 0) {
+        notifyPersistentRuntime(global, trackName, 'add', t);
     }
-    requestPersistentGsplatRemount(global);
 }
 
 /**
@@ -522,6 +530,9 @@ export function applyGsplatPersistentEffectDeleteForId(global: Global, effectId:
     if (!hadBlock) return;
 
     const hadEnabled = hasEnabledPersistentEffects(settings);
+    if (isSingleSelectPersistentTrack(trackName)) {
+        notifyPersistentRuntime(global, trackName, 'delete', t);
+    }
     removePersistentTrackEffect(settings, trackName, t);
     syncEffectsRuntimeStateFromSettings(global.state, settings);
 
@@ -533,7 +544,9 @@ export function applyGsplatPersistentEffectDeleteForId(global: Global, effectId:
         }
         return;
     }
-    requestPersistentGsplatRemount(global);
+    if (!isSingleSelectPersistentTrack(trackName)) {
+        requestPersistentGsplatRemount(global);
+    }
 }
 
 /**

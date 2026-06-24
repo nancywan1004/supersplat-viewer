@@ -82,43 +82,52 @@ function notifyPersistentGsplatRuntimeType(
 }
 
 /**
- * 仅切换某一 persistent 类型的场景挂载（`EFFECT_PARAMS_PATCH` 仅含 `enabled` 时使用，避免全量 remount）。
+ * 单类型 persistent 运行时拆/挂（camera / stylization 轨 EFFECT_DELETE / ADD）。
  */
-export function applyPersistentSceneEffectEnableChange(input: {
+export function destroyPersistentSceneEffectByType(input: {
     global: Global;
     gsplatEntity: Entity;
     revealController: RevealController | null | undefined;
     effectType: string;
-    enabled: boolean;
 }): void {
-    const { global, gsplatEntity, revealController: rc, effectType, enabled } = input;
+    const { global, gsplatEntity, revealController: rc, effectType } = input;
+    const settings = global.settings as ExperienceSettings;
+
+    (global.app as any).effectsRuntime?.syncPersistentGsplatRegistryFromSettings?.();
+    destroyPersistentGsplatScriptOnEntity(gsplatEntity, effectType);
+
+    const stillEnabled = readActivePersistentEffects(settings);
+    if (stillEnabled.length === 0) {
+        if (rc) {
+            rc.finishPersistentGsplatExternalUnmount();
+        } else {
+            (global.app as any).effectsRuntime?.notifyRevealScriptApplied('none');
+        }
+        return;
+    }
+    if (rc) {
+        const primary = pickPrimaryMountedPersistentScript(gsplatEntity, settings);
+        rc.bindPersistentTimelineScript(primary?.script ?? null);
+    }
+    notifyPersistentGsplatRuntimeType(global, gsplatEntity, settings);
+    rc?.syncNightModeAfterPersistentGsplatChange();
+}
+
+/** 单类型 persistent 运行时挂载（camera / stylization 轨 EFFECT_ADD）。 */
+export function mountPersistentSceneEffectByType(input: {
+    global: Global;
+    gsplatEntity: Entity;
+    revealController: RevealController | null | undefined;
+    effectType: string;
+}): void {
+    const { global, gsplatEntity, revealController: rc, effectType } = input;
     const settings = global.settings as ExperienceSettings;
     const entry = getPersistentTrackEffect(settings, persistentTrackNameForType(effectType), effectType);
-    if (!entry) {
+    if (!entry || entry.enabled === false) {
         return;
     }
 
     (global.app as any).effectsRuntime?.syncPersistentGsplatRegistryFromSettings?.();
-
-    if (!enabled) {
-        destroyPersistentGsplatScriptOnEntity(gsplatEntity, effectType);
-        const stillEnabled = readActivePersistentEffects(settings);
-        if (stillEnabled.length === 0) {
-            if (rc) {
-                rc.finishPersistentGsplatExternalUnmount();
-            } else {
-                (global.app as any).effectsRuntime?.notifyRevealScriptApplied('none');
-            }
-            return;
-        }
-        if (rc) {
-            const primary = pickPrimaryMountedPersistentScript(gsplatEntity, settings);
-            rc.bindPersistentTimelineScript(primary?.script ?? null);
-        }
-        notifyPersistentGsplatRuntimeType(global, gsplatEntity, settings);
-        rc?.syncNightModeAfterPersistentGsplatChange();
-        return;
-    }
 
     if (getMountedPersistentGsplatScript(gsplatEntity, effectType)) {
         notifyPersistentGsplatRuntimeType(global, gsplatEntity, settings);
@@ -146,4 +155,31 @@ export function applyPersistentSceneEffectEnableChange(input: {
     }
     notifyPersistentGsplatRuntimeType(global, gsplatEntity, settings);
     rc.syncNightModeAfterPersistentGsplatChange();
+}
+
+/**
+ * 仅切换某一 persistent 类型的场景挂载（`EFFECT_PARAMS_PATCH` 仅含 `enabled` 时使用，避免全量 remount）。
+ */
+export function applyPersistentSceneEffectEnableChange(input: {
+    global: Global;
+    gsplatEntity: Entity;
+    revealController: RevealController | null | undefined;
+    effectType: string;
+    enabled: boolean;
+}): void {
+    const { global, gsplatEntity, revealController: rc, effectType, enabled } = input;
+    const settings = global.settings as ExperienceSettings;
+    const entry = getPersistentTrackEffect(settings, persistentTrackNameForType(effectType), effectType);
+    if (!entry) {
+        return;
+    }
+
+    (global.app as any).effectsRuntime?.syncPersistentGsplatRegistryFromSettings?.();
+
+    if (!enabled) {
+        destroyPersistentSceneEffectByType({ global, gsplatEntity, revealController: rc, effectType });
+        return;
+    }
+
+    mountPersistentSceneEffectByType({ global, gsplatEntity, revealController: rc, effectType });
 }

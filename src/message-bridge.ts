@@ -1070,10 +1070,11 @@ const initPostMessageBridge = (global: Global) => {
                     effectId === SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID ||
                     effectId === SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID
                 ) {
-                    dispatchEffects(global, 'EFFECT_DELETE', {
-                        effectId,
-                        ...(typeof effectType === 'string' ? { effectType } : {})
-                    });
+                    if (typeof effectType !== 'string' || effectType.trim() === '') {
+                        console.warn('[MessageBridge] persistent EFFECT_DELETE ignored: effectType must be string');
+                        break;
+                    }
+                    dispatchEffects(global, 'EFFECT_DELETE', { effectId, effectType });
                     break;
                 }
                 if (effectId === SCENE_GSPLAT_REVEAL_EFFECT_ID) {

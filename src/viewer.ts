@@ -46,6 +46,8 @@ import { nightDeferredByReveal, revealBlocksAnim } from './vfx/effects-runtime/r
 import { RevealController } from './vfx/effects-runtime/reveal/reveal-controller';
 import {
     applyPersistentSceneEffectEnableChange,
+    destroyPersistentSceneEffectByType,
+    mountPersistentSceneEffectByType,
     runPersistentGsplatEntityLifecycle
 } from './vfx/effects-runtime/persistent/persistent-gsplat-lifecycle';
 import { POINTILLISM_DEFAULTS } from './vfx/effects-runtime/persistent/stylisation/pointillism-stipple-shaders';
@@ -875,6 +877,31 @@ class Viewer {
                     });
                 }
             );
+            const onPersistentTrackEffect = (effectType: string, add: boolean) => {
+                global.app.once('frameend', () => {
+                    const input = {
+                        global,
+                        gsplatEntity,
+                        revealController: this.revealController,
+                        effectType
+                    };
+                    if (add) {
+                        mountPersistentSceneEffectByType(input);
+                    } else {
+                        destroyPersistentSceneEffectByType(input);
+                    }
+                });
+            };
+            global.events.on('persistentTrackEffect:delete', (payload: { effectType?: string }) => {
+                if (typeof payload?.effectType === 'string') {
+                    onPersistentTrackEffect(payload.effectType, false);
+                }
+            });
+            global.events.on('persistentTrackEffect:add', (payload: { effectType?: string }) => {
+                if (typeof payload?.effectType === 'string') {
+                    onPersistentTrackEffect(payload.effectType, true);
+                }
+            });
             const es = global.settings as ExperienceSettings;
             if (shouldDeferPersistentMount(es)) {
                 events.once('revealComplete', () => {
