@@ -95,6 +95,16 @@ const PEN_SKETCH = new Set([
     'inkHue'
 ]);
 
+const WATERCOLOR = new Set([
+    'bleed',
+    'wash',
+    'blur',
+    'paper',
+    'paperColor',
+    'clarity',
+    'saturation'
+]);
+
 const NOSTALGIC_COMIC = new Set([
     'levelCount',
     'edgeThreshold',
@@ -218,6 +228,7 @@ const BY_TYPE: Record<string, ReadonlySet<string>> = {
     'palette-pixel': PALETTE_PIXEL,
     'pointillism-stipple': POINTILLISM_STIPPLE,
     'pen-sketch': PEN_SKETCH,
+    'watercolor': WATERCOLOR,
     'sparkle-twinkle': SPARKLE_TWINKLE,
     'overall-wave': OVERALL_WAVE,
     'butterfly-particle': BUTTERFLY_PARTICLE

@@ -14,6 +14,7 @@ import {
 } from '../../vfx/effects-runtime/persistent/camera/gsplat-falling-petals';
 import { GSPLAT_FALLING_WEATHER_PRESETS } from '../../vfx/effects-runtime/persistent/camera/gsplat-falling-weather';
 import { DEFAULT_PEN_SKETCH_SETTINGS } from '../../vfx/effects-runtime/persistent/stylisation/pen-sketch';
+import { DEFAULT_WATERCOLOR_SETTINGS } from '../../vfx/effects-runtime/persistent/stylisation/watercolor';
 import { DEFAULT_NOSTALGIC_COMIC_SETTINGS } from '../../vfx/effects-runtime/persistent/stylisation/nostalgic-comic';
 import { DEFAULT_YIYUN_DIANRAN_SETTINGS } from '../../vfx/effects-runtime/persistent/stylisation/yiyun-dianran-stylisation';
 import {
@@ -536,6 +537,16 @@ const PEN_SKETCH_PARAM_UI: Record<string, PersistentParamUiOverride> = {
     inkHue: { min: -1, max: 1, step: 0.01, default: DEFAULT_PEN_SKETCH_SETTINGS.inkHue, label: '墨色' }
 };
 
+const WATERCOLOR_PARAM_UI: Record<string, PersistentParamUiOverride> = {
+    bleed: { min: 0, max: 0.5, step: 0.01, default: DEFAULT_WATERCOLOR_SETTINGS.bleed, label: '湿边晕染' },
+    wash: { min: 0, max: 1, step: 0.01, default: DEFAULT_WATERCOLOR_SETTINGS.wash, label: '水洗强度' },
+    blur: { min: 0, max: 1, step: 0.01, default: DEFAULT_WATERCOLOR_SETTINGS.blur, label: '扩散模糊' },
+    paper: { min: 0, max: 1, step: 0.01, default: DEFAULT_WATERCOLOR_SETTINGS.paper, label: '纸纹强度' },
+    paperColor: { min: 0, max: 1, step: 0.01, default: [...DEFAULT_WATERCOLOR_SETTINGS.paperColor], label: '纸张颜色' },
+    clarity: { min: 0, max: 2, step: 0.01, default: DEFAULT_WATERCOLOR_SETTINGS.clarity, label: '清晰度' },
+    saturation: { min: 0, max: 2, step: 0.01, default: DEFAULT_WATERCOLOR_SETTINGS.saturation, label: '饱和度' }
+};
+
 const NOSTALGIC_COMIC_PARAM_UI: Record<string, PersistentParamUiOverride> = {
     levelCount: { min: 3, max: 7, step: 1, default: DEFAULT_NOSTALGIC_COMIC_SETTINGS.levelCount },
     edgeThreshold: { min: 0.3, max: 3, step: 0.01, default: DEFAULT_NOSTALGIC_COMIC_SETTINGS.edgeThreshold },
@@ -761,6 +772,7 @@ function persistentParamOverrideFor(effectType: string, key: string): Persistent
         return { ...WEATHER_PARAM_UI[key], default: defaults[key] };
     }
     if (effectType === 'pen-sketch') return PEN_SKETCH_PARAM_UI[key];
+    if (effectType === 'watercolor') return WATERCOLOR_PARAM_UI[key];
     if (effectType === 'nostalgic-comic') return NOSTALGIC_COMIC_PARAM_UI[key];
     if (effectType === 'yiyun-dianran') return YIYUN_DIANRAN_PARAM_UI[key];
     if (effectType === 'palette-pixel') return PALETTE_PIXEL_PARAM_UI[key];
