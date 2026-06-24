@@ -18,6 +18,12 @@ import {
     remountPersistentSceneGsplatOnEntity
 } from './persistent-effect';
 
+function ensureGsplatEntityScript(gsplatEntity: Entity): void {
+    if (!gsplatEntity.script) {
+        gsplatEntity.addComponent('script');
+    }
+}
+
 /**
  * Viewer 侧 **可持续 GSplat 实体生命周期** 单入口（M20）：registry 同步、读 settings、destroy/remount、animTrack。
  * 与 {@link RevealController} 仅通过其 **persistent 桥接 API** 交互，避免在 `viewer.ts` 堆叠业务细节。
@@ -40,9 +46,10 @@ export function runPersistentGsplatEntityLifecycle(input: {
         }
         return;
     }
-    if (!rc || !gsplatEntity?.script) {
+    if (!rc || !gsplatEntity) {
         return;
     }
+    ensureGsplatEntityScript(gsplatEntity);
     const mounted = remountPersistentSceneGsplatOnEntity(gsplatEntity, persistentEntries, {
         prepareExternalPersistentScriptMount: () => rc.prepareExternalPersistentScriptMount(),
         syncNightModeAfterPersistentChange: () => rc.syncNightModeAfterPersistentGsplatChange(),
@@ -133,9 +140,10 @@ export function mountPersistentSceneEffectByType(input: {
         notifyPersistentGsplatRuntimeType(global, gsplatEntity, settings);
         return;
     }
-    if (!rc || !gsplatEntity?.script) {
+    if (!rc || !gsplatEntity) {
         return;
     }
+    ensureGsplatEntityScript(gsplatEntity);
 
     const primaryBefore = pickPrimaryMountedPersistentScript(gsplatEntity, settings);
 
