@@ -52,11 +52,16 @@ import {
 } from './vfx/effects-runtime/persistent/persistent-gsplat-lifecycle';
 import { POINTILLISM_DEFAULTS } from './vfx/effects-runtime/persistent/stylisation/pointillism-stipple-shaders';
 import { charcoalPaperClearColor } from './vfx/effects-runtime/persistent/stylisation/charcoal-sketch';
-import { isCharcoalSketchRuntimeActive, readCharcoalSketchEffectParams } from './vfx/effects-runtime/persistent/stylisation/charcoal-sketch-runtime';
 import { penPaperClearColor } from './vfx/effects-runtime/persistent/stylisation/pen-sketch';
-import { isPenSketchRuntimeActive, readPenSketchEffectParams } from './vfx/effects-runtime/persistent/stylisation/pen-sketch-runtime';
+import {
+    isCharcoalSketchRuntimeActive,
+    isPenSketchRuntimeActive,
+    isWatercolorRuntimeActive,
+    readCharcoalSketchEffectParams,
+    readPenSketchEffectParams,
+    readWatercolorEffectParams
+} from './vfx/effects-runtime/persistent/stylisation/stylisation-paper-runtime';
 import { watercolorPaperClearColor } from './vfx/effects-runtime/persistent/stylisation/watercolor';
-import { isWatercolorRuntimeActive, readWatercolorEffectParams } from './vfx/effects-runtime/persistent/stylisation/watercolor-runtime';
 import { buildSkyboxPsChunk } from './vfx/effects-runtime/persistent/stylisation/skybox-pointillism-shaders';
 import { refreshSkyboxMaterialShader } from './vfx/effects-runtime/persistent/stylisation/skybox-pointillism-runtime';
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';

@@ -17,15 +17,8 @@ import {
     CHARCOAL_SKETCH_MAIN_FRAGMENT_GLSL,
     CHARCOAL_SKETCH_VERTEX_GLSL
 } from './charcoal-sketch-shaders';
-
-/** 设为 true 可输出挂载/清屏/reveal 生命周期日志（默认关闭）。 */
-const CHARCOAL_SKETCH_DEBUG = false;
-
-const debugLog = (...args: unknown[]): void => {
-    if (CHARCOAL_SKETCH_DEBUG) {
-        console.log('[charcoal-sketch]', ...args);
-    }
-};
+import { StylisationPaperPostController } from './stylisation-paper-controller';
+import { finiteOr, normalizeRgbColor, paperClearColorFromRgb } from './stylisation-paper-utils';
 
 export type CharcoalSketchSettings = {
     enabled: boolean;
@@ -57,33 +50,9 @@ export const DEFAULT_CHARCOAL_SKETCH_SETTINGS: CharcoalSketchSettings = {
 };
 
 const clamp = (v: number, min: number, max: number): number => Math.min(max, Math.max(min, v));
-const finiteOr = (v: unknown, fallback: number): number =>
-    (typeof v === 'number' && Number.isFinite(v)) ? v : fallback;
-const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
-
-const colorsRoughlyEqual = (a: Color, b: Color): boolean =>
-    Math.abs(a.r - b.r) < 1e-4 &&
-    Math.abs(a.g - b.g) < 1e-4 &&
-    Math.abs(a.b - b.b) < 1e-4 &&
-    Math.abs(a.a - b.a) < 1e-4;
-
-const normalizeColor = (
-    v: unknown,
-    fallback: [number, number, number]
-): [number, number, number] => {
-    if (!Array.isArray(v) || v.length < 3) {
-        return [...fallback];
-    }
-    return [
-        clamp01(finiteOr(v[0], fallback[0])),
-        clamp01(finiteOr(v[1], fallback[1])),
-        clamp01(finiteOr(v[2], fallback[2]))
-    ];
-};
 
 export function charcoalPaperClearColor(raw: unknown): Color {
-    const [r, g, b] = normalizeCharcoalSketchSettings(raw).paperColor;
-    return new Color(r, g, b, 1);
+    return paperClearColorFromRgb(normalizeCharcoalSketchSettings(raw).paperColor);
 }
 
 export function normalizeCharcoalSketchSettings(raw: unknown): CharcoalSketchSettings {
@@ -97,7 +66,7 @@ export function normalizeCharcoalSketchSettings(raw: unknown): CharcoalSketchSet
         smudge: clamp(finiteOr(obj.smudge, DEFAULT_CHARCOAL_SKETCH_SETTINGS.smudge), 0, 1),
         focus: clamp(finiteOr(obj.focus, DEFAULT_CHARCOAL_SKETCH_SETTINGS.focus), 0.3, 1.5),
         paper: clamp(finiteOr(obj.paper, DEFAULT_CHARCOAL_SKETCH_SETTINGS.paper), 0, 1),
-        paperColor: normalizeColor(obj.paperColor, DEFAULT_CHARCOAL_SKETCH_SETTINGS.paperColor)
+        paperColor: normalizeRgbColor(obj.paperColor, DEFAULT_CHARCOAL_SKETCH_SETTINGS.paperColor)
     };
 }
 
@@ -129,7 +98,6 @@ class CharcoalSketchPostEffect extends PostEffect {
     }
 
     destroy(): void {
-        // 单 pass，无额外 RT
     }
 
     render(inputTarget: { colorBuffer: Texture }, outputTarget: RenderTarget | null, rect: unknown): void {
@@ -187,7 +155,6 @@ class CharcoalSketchCameraFrameBridge {
         }
 
         this.active = true;
-        debugLog('CameraFrame bridge mounted');
         return true;
     }
 
@@ -199,7 +166,6 @@ class CharcoalSketchCameraFrameBridge {
         this.active = false;
         this.unhook();
         this.destroyOutputTarget();
-        debugLog('CameraFrame bridge unmounted');
     }
 
     isMounted(): boolean {
@@ -262,182 +228,42 @@ class CharcoalSketchCameraFrameBridge {
     }
 }
 
-/**
- * 木炭画后处理控制器。
- *
- * 生命周期要点：
- * - `apply`：挂载 CameraFrame bridge 或 legacy postEffects，并设置纸色清屏；
- * - `suspendForReveal`：阻塞型 reveal 期间卸后处理，清屏交给 viewer；
- * - `unmountAll`：禁用/销毁时卸后处理并尽量恢复清屏色；
- * - `scheduleDeferredSync`：处理 CameraFrame 与 configureCamera 的首帧竞态。
- */
 export class CharcoalSketchController {
-    private readonly app: AppBase;
-    private readonly camera: CameraComponent;
     private readonly effect: CharcoalSketchPostEffect;
-    private readonly cameraFrameBridge: CharcoalSketchCameraFrameBridge;
-    private legacyMounted = false;
-    private originalClearColor: Color | null = null;
-    private revealSuspended = false;
-    private deferredSyncGeneration = 0;
-    private lastApplySettings: unknown = null;
-    private lastApplyOptions: CharcoalSketchApplyOptions | undefined;
+    private readonly core: StylisationPaperPostController<CharcoalSketchSettings>;
 
     constructor(app: AppBase, camera: CameraComponent) {
-        this.app = app;
-        this.camera = camera;
         this.effect = new CharcoalSketchPostEffect(app.graphicsDevice);
-        this.cameraFrameBridge = new CharcoalSketchCameraFrameBridge(this.effect);
+        const bridge = new CharcoalSketchCameraFrameBridge(this.effect);
+        this.core = new StylisationPaperPostController({
+            app,
+            camera,
+            logTag: 'charcoal-sketch',
+            bridge,
+            postEffect: this.effect,
+            normalizeSettings: normalizeCharcoalSketchSettings,
+            paperClearColor: charcoalPaperClearColor,
+            applyEffectSettings: (settings) => {
+                this.effect.setSettings(settings);
+                bridge.setSettings(settings);
+            }
+        });
     }
 
     apply(rawSettings: unknown, options?: CharcoalSketchApplyOptions): void {
-        const settings = normalizeCharcoalSketchSettings(rawSettings);
-        this.lastApplySettings = rawSettings;
-        this.lastApplyOptions = options;
-        this.effect.setSettings(settings);
-        this.cameraFrameBridge.setSettings(settings);
-
-        if (!settings.enabled) {
-            this.revealSuspended = false;
-            this.unmountAll();
-            return;
-        }
-
-        if (this.revealSuspended) {
-            debugLog('apply skipped: reveal suspended');
-            return;
-        }
-
-        this.mountActivePostEffect(options);
-        this.applyPaperClearColor(settings);
-        this.app.renderNextFrame = true;
-        this.scheduleDeferredSync();
+        this.core.apply(rawSettings, options);
     }
 
-    /** 阻塞型 reveal 播放期间暂停后处理；清屏由 viewer.configureCamera(deferred) 恢复。 */
     suspendForReveal(): void {
-        if (this.revealSuspended) {
-            return;
-        }
-        this.revealSuspended = true;
-        this.cancelDeferredSync();
-        this.cameraFrameBridge.unmount();
-        this.unmountLegacy();
-        this.discardClearColorOverride();
-        this.app.renderNextFrame = true;
-        debugLog('suspended for reveal');
+        this.core.suspendForReveal();
     }
 
     resumeFromReveal(): void {
-        this.revealSuspended = false;
-        debugLog('resumed after reveal');
+        this.core.resumeFromReveal();
     }
 
     destroy(): void {
-        this.unmountAll();
+        this.core.destroy();
         this.effect.destroy();
-    }
-
-    // --- 后处理挂载 ---
-
-    private mountActivePostEffect(options?: CharcoalSketchApplyOptions): void {
-        const cameraFrame = options?.getCameraFrame?.();
-        if (cameraFrame?.enabled && this.cameraFrameBridge.mount(cameraFrame)) {
-            this.unmountLegacy();
-            return;
-        }
-        this.cameraFrameBridge.unmount();
-        this.mountLegacy();
-    }
-
-    private mountLegacy(): void {
-        if (!this.camera.postEffects) {
-            console.warn('[charcoal-sketch] camera postEffects unavailable');
-            return;
-        }
-        if (!this.legacyMounted) {
-            this.camera.postEffects.addEffect(this.effect);
-            this.legacyMounted = true;
-            debugLog('legacy postEffects mounted');
-        }
-    }
-
-    private unmountLegacy(): void {
-        if (!this.camera.postEffects || !this.legacyMounted) {
-            return;
-        }
-        this.camera.postEffects.removeEffect(this.effect);
-        this.legacyMounted = false;
-        debugLog('legacy postEffects unmounted');
-    }
-
-    private unmountAll(): void {
-        this.cancelDeferredSync();
-        this.cameraFrameBridge.unmount();
-        this.unmountLegacy();
-        this.restoreClearColor();
-        this.app.renderNextFrame = true;
-    }
-
-    // --- 纸色清屏（与 viewer.configureCamera 协同） ---
-
-    private applyPaperClearColor(settings?: CharcoalSketchSettings): void {
-        if (this.revealSuspended) {
-            return;
-        }
-        const resolved = settings ?? normalizeCharcoalSketchSettings(this.lastApplySettings);
-        if (!resolved.enabled) {
-            return;
-        }
-        const paper = charcoalPaperClearColor(resolved);
-        // configureCamera 可能已先写入纸色，避免把纸色误存为「原始清屏色」。
-        if (!this.originalClearColor && !colorsRoughlyEqual(this.camera.clearColor, paper)) {
-            this.originalClearColor = this.camera.clearColor.clone();
-        }
-        this.camera.clearColorBuffer = true;
-        this.camera.clearColor = paper;
-    }
-
-    private discardClearColorOverride(): void {
-        this.originalClearColor = null;
-    }
-
-    private restoreClearColor(): void {
-        if (!this.originalClearColor) {
-            return;
-        }
-        this.camera.clearColor = this.originalClearColor.clone();
-        this.originalClearColor = null;
-    }
-
-    // --- CameraFrame 首帧竞态 ---
-
-    private cancelDeferredSync(): void {
-        this.deferredSyncGeneration++;
-    }
-
-    /** CameraFrame 就绪与 configureCamera 清屏竞态：首帧 frameend 重挂 bridge 并恢复纸色。 */
-    private scheduleDeferredSync(): void {
-        if (this.revealSuspended) {
-            return;
-        }
-        const generation = ++this.deferredSyncGeneration;
-        this.app.once('frameend', () => {
-            if (generation !== this.deferredSyncGeneration) {
-                return;
-            }
-            const settings = normalizeCharcoalSketchSettings(this.lastApplySettings);
-            if (!settings.enabled || this.revealSuspended) {
-                return;
-            }
-            const cameraFrame = this.lastApplyOptions?.getCameraFrame?.();
-            if (cameraFrame?.enabled && !this.cameraFrameBridge.isMounted()) {
-                if (this.cameraFrameBridge.mount(cameraFrame)) {
-                    this.unmountLegacy();
-                }
-            }
-            this.applyPaperClearColor(settings);
-            this.app.renderNextFrame = true;
-        });
     }
 }

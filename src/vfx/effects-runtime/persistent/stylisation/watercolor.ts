@@ -18,6 +18,8 @@ import {
     WATERCOLOR_MAIN_FRAGMENT_GLSL,
     WATERCOLOR_VERTEX_GLSL
 } from './watercolor-shaders';
+import { StylisationPaperPostController } from './stylisation-paper-controller';
+import { finiteOr, normalizeRgbColor, paperClearColorFromRgb } from './stylisation-paper-utils';
 
 export type WatercolorSettings = {
     enabled: boolean;
@@ -51,34 +53,9 @@ const WET_TARGET_COUNT = 3;
 const WET_DIFFUSION_PASSES = 5;
 
 const clamp = (v: number, min: number, max: number): number => Math.min(max, Math.max(min, v));
-const finiteOr = (v: unknown, fallback: number): number =>
-    (typeof v === 'number' && Number.isFinite(v)) ? v : fallback;
-
-const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
-
-const normalizeColor = (
-    v: unknown,
-    fallback: [number, number, number]
-): [number, number, number] => {
-    if (!Array.isArray(v) || v.length < 3) {
-        return [...fallback];
-    }
-    return [
-        clamp01(finiteOr(v[0], fallback[0])),
-        clamp01(finiteOr(v[1], fallback[1])),
-        clamp01(finiteOr(v[2], fallback[2]))
-    ];
-};
-
-const colorsRoughlyEqual = (a: Color, b: Color): boolean =>
-    Math.abs(a.r - b.r) < 1e-4 &&
-    Math.abs(a.g - b.g) < 1e-4 &&
-    Math.abs(a.b - b.b) < 1e-4 &&
-    Math.abs(a.a - b.a) < 1e-4;
 
 export function watercolorPaperClearColor(raw: unknown): Color {
-    const [r, g, b] = normalizeWatercolorSettings(raw).paperColor;
-    return new Color(r, g, b, 1);
+    return paperClearColorFromRgb(normalizeWatercolorSettings(raw).paperColor);
 }
 
 export function normalizeWatercolorSettings(raw: unknown): WatercolorSettings {
@@ -89,7 +66,7 @@ export function normalizeWatercolorSettings(raw: unknown): WatercolorSettings {
         wash: clamp(finiteOr(obj.wash, DEFAULT_WATERCOLOR_SETTINGS.wash), 0, 1),
         blur: clamp(finiteOr(obj.blur, DEFAULT_WATERCOLOR_SETTINGS.blur), 0, 1),
         paper: clamp(finiteOr(obj.paper, DEFAULT_WATERCOLOR_SETTINGS.paper), 0, 1),
-        paperColor: normalizeColor(obj.paperColor, DEFAULT_WATERCOLOR_SETTINGS.paperColor),
+        paperColor: normalizeRgbColor(obj.paperColor, DEFAULT_WATERCOLOR_SETTINGS.paperColor),
         clarity: clamp(finiteOr(obj.clarity, DEFAULT_WATERCOLOR_SETTINGS.clarity), 0, 2),
         saturation: clamp(finiteOr(obj.saturation, DEFAULT_WATERCOLOR_SETTINGS.saturation), 0, 2)
     };
@@ -335,165 +312,47 @@ class WatercolorCameraFrameBridge {
 }
 
 export class WatercolorController {
-    private readonly app: AppBase;
-    private readonly camera: CameraComponent;
     private readonly effect: WatercolorPostEffect;
-    private readonly cameraFrameBridge: WatercolorCameraFrameBridge;
-    private legacyMounted = false;
-    private originalClearColor: Color | null = null;
-    private revealSuspended = false;
-    private deferredSyncGeneration = 0;
-    private lastApplySettings: unknown = null;
-    private lastApplyOptions: WatercolorApplyOptions | undefined;
+    private readonly bridge: WatercolorCameraFrameBridge;
+    private readonly core: StylisationPaperPostController<WatercolorSettings>;
 
     constructor(app: AppBase, camera: CameraComponent) {
-        this.app = app;
-        this.camera = camera;
         this.effect = new WatercolorPostEffect(app.graphicsDevice);
-        this.cameraFrameBridge = new WatercolorCameraFrameBridge(this.effect);
+        this.bridge = new WatercolorCameraFrameBridge(this.effect);
+        this.core = new StylisationPaperPostController({
+            app,
+            camera,
+            logTag: 'watercolor',
+            bridge: this.bridge,
+            postEffect: this.effect,
+            normalizeSettings: normalizeWatercolorSettings,
+            paperClearColor: watercolorPaperClearColor,
+            applyEffectSettings: (settings) => {
+                this.effect.setSettings(settings);
+                this.bridge.setSettings(settings);
+            }
+        });
     }
 
     apply(rawSettings: unknown, options?: WatercolorApplyOptions): void {
-        const settings = normalizeWatercolorSettings(rawSettings);
-        this.lastApplySettings = rawSettings;
-        this.lastApplyOptions = options;
-        this.effect.setSettings(settings);
-        this.cameraFrameBridge.setSettings(settings);
-
-        if (!settings.enabled) {
-            this.revealSuspended = false;
-            this.unmountAll();
-            return;
-        }
-
-        if (this.revealSuspended) {
-            return;
-        }
-
-        this.mountActivePostEffect(options);
-        this.applyPaperClearColor(settings);
-        this.app.renderNextFrame = true;
-        this.scheduleDeferredSync();
+        this.core.apply(rawSettings, options);
     }
 
-    /** 阻塞型 reveal 播放期间暂停后处理；清屏由 viewer.configureCamera(deferred) 恢复。 */
     suspendForReveal(): void {
-        if (this.revealSuspended) {
-            return;
-        }
-        this.revealSuspended = true;
-        this.cancelDeferredSync();
-        this.cameraFrameBridge.unmount();
-        this.unmountLegacy();
-        this.discardClearColorOverride();
-        this.app.renderNextFrame = true;
+        this.core.suspendForReveal();
     }
 
     resumeFromReveal(): void {
-        this.revealSuspended = false;
+        this.core.resumeFromReveal();
     }
 
     setTime(time: number): void {
         this.effect.setTime(time);
-        this.cameraFrameBridge.setTime(time);
+        this.bridge.setTime(time);
     }
 
     destroy(): void {
-        this.unmountAll();
+        this.core.destroy();
         this.effect.destroy();
-    }
-
-    private mountActivePostEffect(options?: WatercolorApplyOptions): void {
-        const cameraFrame = options?.getCameraFrame?.();
-        if (cameraFrame?.enabled && this.cameraFrameBridge.mount(cameraFrame)) {
-            this.unmountLegacy();
-            return;
-        }
-        this.cameraFrameBridge.unmount();
-        this.mountLegacy();
-    }
-
-    private mountLegacy(): void {
-        if (!this.camera.postEffects) {
-            console.warn('[watercolor] camera postEffects unavailable');
-            return;
-        }
-        if (!this.legacyMounted) {
-            this.camera.postEffects.addEffect(this.effect);
-            this.legacyMounted = true;
-        }
-    }
-
-    private unmountLegacy(): void {
-        if (!this.camera.postEffects || !this.legacyMounted) {
-            return;
-        }
-        this.camera.postEffects.removeEffect(this.effect);
-        this.legacyMounted = false;
-    }
-
-    private unmountAll(): void {
-        this.cancelDeferredSync();
-        this.cameraFrameBridge.unmount();
-        this.unmountLegacy();
-        this.restoreClearColor();
-        this.app.renderNextFrame = true;
-    }
-
-    private cancelDeferredSync(): void {
-        this.deferredSyncGeneration++;
-    }
-
-    private applyPaperClearColor(settings?: WatercolorSettings): void {
-        if (this.revealSuspended) {
-            return;
-        }
-        const resolved = settings ?? normalizeWatercolorSettings(this.lastApplySettings);
-        if (!resolved.enabled) {
-            return;
-        }
-        const paper = watercolorPaperClearColor(resolved);
-        if (!this.originalClearColor && !colorsRoughlyEqual(this.camera.clearColor, paper)) {
-            this.originalClearColor = this.camera.clearColor.clone();
-        }
-        this.camera.clearColorBuffer = true;
-        this.camera.clearColor = paper;
-    }
-
-    private discardClearColorOverride(): void {
-        this.originalClearColor = null;
-    }
-
-    private restoreClearColor(): void {
-        if (!this.originalClearColor) {
-            return;
-        }
-        this.camera.clearColor = this.originalClearColor.clone();
-        this.originalClearColor = null;
-    }
-
-    /** CameraFrame 就绪与 configureCamera 清屏竞态：首帧 frameend 重挂 bridge 并恢复纸色。 */
-    private scheduleDeferredSync(): void {
-        if (this.revealSuspended) {
-            return;
-        }
-        const generation = ++this.deferredSyncGeneration;
-        this.app.once('frameend', () => {
-            if (generation !== this.deferredSyncGeneration) {
-                return;
-            }
-            const settings = normalizeWatercolorSettings(this.lastApplySettings);
-            if (!settings.enabled || this.revealSuspended) {
-                return;
-            }
-            const cameraFrame = this.lastApplyOptions?.getCameraFrame?.();
-            if (cameraFrame?.enabled && !this.cameraFrameBridge.isMounted()) {
-                if (this.cameraFrameBridge.mount(cameraFrame)) {
-                    this.unmountLegacy();
-                }
-            }
-            this.applyPaperClearColor(settings);
-            this.app.renderNextFrame = true;
-        });
     }
 }
