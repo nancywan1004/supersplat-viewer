@@ -555,7 +555,8 @@ const CHARCOAL_SKETCH_PARAM_UI: Record<string, PersistentParamUiOverride> = {
     stroke: { min: 0.5, max: 1.8, step: 0.01, default: DEFAULT_CHARCOAL_SKETCH_SETTINGS.stroke, label: '笔触' },
     smudge: { min: 0, max: 1, step: 0.01, default: DEFAULT_CHARCOAL_SKETCH_SETTINGS.smudge, label: '涂抹' },
     focus: { min: 0.3, max: 1.5, step: 0.01, default: DEFAULT_CHARCOAL_SKETCH_SETTINGS.focus, label: '中心精度' },
-    paper: { min: 0, max: 1, step: 0.01, default: DEFAULT_CHARCOAL_SKETCH_SETTINGS.paper, label: '纸纹' }
+    paper: { min: 0, max: 1, step: 0.01, default: DEFAULT_CHARCOAL_SKETCH_SETTINGS.paper, label: '纸纹' },
+    paperColor: { min: 0, max: 1, step: 0.01, default: [...DEFAULT_CHARCOAL_SKETCH_SETTINGS.paperColor], label: '纸张颜色' }
 };
 
 const NOSTALGIC_COMIC_PARAM_UI: Record<string, PersistentParamUiOverride> = {

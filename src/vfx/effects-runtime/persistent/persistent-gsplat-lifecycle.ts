@@ -103,6 +103,10 @@ export function destroyPersistentSceneEffectByType(input: {
     (global.app as any).effectsRuntime?.syncPersistentGsplatRegistryFromSettings?.();
     destroyPersistentGsplatScriptOnEntity(gsplatEntity, effectType);
 
+    if (persistentTrackNameForType(effectType) === 'stylization') {
+        global.events?.fire('postEffect:changed');
+    }
+
     const stillEnabled = readActivePersistentEffects(settings);
     if (stillEnabled.length === 0) {
         if (rc) {
@@ -137,6 +141,10 @@ export function mountPersistentSceneEffectByType(input: {
     (global.app as any).effectsRuntime?.syncPersistentGsplatRegistryFromSettings?.();
 
     if (getMountedPersistentGsplatScript(gsplatEntity, effectType)) {
+        const existingScript = getMountedPersistentGsplatScript(gsplatEntity, effectType) as {
+            applyConfig?: () => void;
+        } | null;
+        existingScript?.applyConfig?.();
         notifyPersistentGsplatRuntimeType(global, gsplatEntity, settings);
         return;
     }

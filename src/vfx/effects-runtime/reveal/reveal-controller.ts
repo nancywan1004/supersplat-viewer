@@ -322,6 +322,10 @@ export class RevealController {
         });
     }
 
+    getGsplatEntity(): Entity | null {
+        return this.gsplatEntity;
+    }
+
     /**
      * 在首次允许画布绘制（`state.readyToRender=true`）之前创建开场 VFX，避免出现无 shader 的一帧。
      * 若脚本已存在则 no-op；`firstFrame` 上的兜底仍会尝试创建。
@@ -1445,6 +1449,8 @@ export class RevealController {
         destroyAllPersistentGsplatScriptsOnEntity(this.gsplatEntity);
         this._persistentGsplat.finishPersistentGsplatExternalUnmount();
         this.bindPersistentTimelineScript(null);
+        // 批量销毁不走 lifecycle.destroyPersistentSceneEffectByType，需显式刷新相机清屏/后处理。
+        this.global.events?.fire('postEffect:changed');
 
         const rt = (this.global.app as any).effectsRuntime as EffectsRuntime | undefined;
         if (rt?.composer) {

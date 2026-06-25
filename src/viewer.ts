@@ -51,6 +51,8 @@ import {
     runPersistentGsplatEntityLifecycle
 } from './vfx/effects-runtime/persistent/persistent-gsplat-lifecycle';
 import { POINTILLISM_DEFAULTS } from './vfx/effects-runtime/persistent/stylisation/pointillism-stipple-shaders';
+import { charcoalPaperClearColor } from './vfx/effects-runtime/persistent/stylisation/charcoal-sketch';
+import { isCharcoalSketchRuntimeActive, readCharcoalSketchEffectParams } from './vfx/effects-runtime/persistent/stylisation/charcoal-sketch-runtime';
 import { buildSkyboxPsChunk } from './vfx/effects-runtime/persistent/stylisation/skybox-pointillism-shaders';
 import { refreshSkyboxMaterialShader } from './vfx/effects-runtime/persistent/stylisation/skybox-pointillism-runtime';
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
@@ -1139,6 +1141,8 @@ z: ${cameraInfo.target.z.toFixed(6)}
         const penSketchActive = applyPersistentStylizationCameraEffects && isPenSketchPersistentActive(settings);
         const yiyunDianranPostEffectActive = applyPersistentStylizationCameraEffects && isYiyunDianranPostEffectActive(settings);
         const palettePixelActive = applyPersistentStylizationCameraEffects && isPalettePixelPersistentActive(settings);
+        const charcoalSketchActive = applyPersistentStylizationCameraEffects
+            && isCharcoalSketchRuntimeActive(settings, this.revealController?.getGsplatEntity());
         const pointillismPostActive = applyPersistentStylizationCameraEffects
             && isPointillismStipplePostEffectActive(settings);
         // 天空点彩仅在 skyboxPS；post 只做透传保护，避免平整化抹掉笔触
@@ -1171,7 +1175,8 @@ z: ${cameraInfo.target.z.toFixed(6)}
             computeRequiresCameraFrame ||
             postFxRequested ||
             palettePixelActive ||
-            pointillismPostActive
+            pointillismPostActive ||
+            charcoalSketchActive
         );
 
         if (enableCameraFrame) {
@@ -1220,6 +1225,9 @@ z: ${cameraInfo.target.z.toFixed(6)}
             if (nostalgicComicActive || penSketchActive) {
                 camera.camera.clearColorBuffer = true;
                 camera.camera.clearColor = new Color(1, 1, 1, 0);
+            } else if (charcoalSketchActive) {
+                camera.camera.clearColorBuffer = true;
+                camera.camera.clearColor = charcoalPaperClearColor(readCharcoalSketchEffectParams(settings));
             } else if (yiyunDianranPostEffectActive) {
                 camera.camera.clearColorBuffer = true;
                 camera.camera.clearColor = YIYUN_DIANRAN_PAPER_CLEAR.clone();
@@ -1250,6 +1258,9 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 if (nostalgicComicActive || penSketchActive) {
                     camera.camera.clearColorBuffer = true;
                     camera.camera.clearColor = new Color(1, 1, 1, 0);
+                } else if (charcoalSketchActive) {
+                    camera.camera.clearColorBuffer = true;
+                    camera.camera.clearColor = charcoalPaperClearColor(readCharcoalSketchEffectParams(settings));
                 } else if (yiyunDianranPostEffectActive) {
                     camera.camera.clearColorBuffer = true;
                     camera.camera.clearColor = YIYUN_DIANRAN_PAPER_CLEAR.clone();

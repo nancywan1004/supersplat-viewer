@@ -112,7 +112,8 @@ const CHARCOAL_SKETCH = new Set([
     'stroke',
     'smudge',
     'focus',
-    'paper'
+    'paper',
+    'paperColor'
 ]);
 
 const NOSTALGIC_COMIC = new Set([

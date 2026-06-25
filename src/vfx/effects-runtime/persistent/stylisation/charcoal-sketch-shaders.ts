@@ -20,6 +20,7 @@ export const CHARCOAL_SKETCH_MAIN_FRAGMENT_GLSL = `
     uniform float uSmudge;
     uniform float uFocus;
     uniform float uPaper;
+    uniform vec3 uPaperColor;
     varying vec2 vUv0;
 
     float hash12(vec2 p) {
@@ -130,7 +131,8 @@ export const CHARCOAL_SKETCH_MAIN_FRAGMENT_GLSL = `
         ink *= 0.92 + (noise(pixel * vec2(0.31, 0.47)) * 0.65 + hash12(pixel) * 0.35) * 0.10;
 
         float paperMix = pow(uPaper, 1.18);
-        vec3 paper = mix(vec3(0.972, 0.961, 0.925), vec3(0.69, 0.535, 0.335), paperMix);
+        vec3 paperDark = uPaperColor * vec3(0.714, 0.557, 0.362);
+        vec3 paper = mix(uPaperColor, paperDark, paperMix);
         float fiber = noise(pixel * vec2(0.032, 0.26)) - 0.5;
         float rough = noise(pixel * vec2(0.115, 0.19)) - 0.5;
         float fleck = step(0.91, hash12(floor(pixel * 0.42))) - step(hash12(floor(pixel * 0.42)), 0.055);
