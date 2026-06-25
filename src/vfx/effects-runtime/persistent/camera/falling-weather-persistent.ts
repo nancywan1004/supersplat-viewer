@@ -3,6 +3,7 @@ import { Entity, FOG_EXP, FOG_EXP2, FOG_LINEAR, Script, Vec3 } from 'playcanvas'
 import {
     createGsplatFallingPetals,
     destroyGsplatFallingPetals,
+    GSPLAT_FALLING_PETALS_DEFAULT_ATLAS_URL,
     GSPLAT_FALLING_PETALS_PRESET,
     type GsplatFallingPetals
 } from './gsplat-falling-petals';
@@ -46,7 +47,7 @@ export class GsplatPersistentFallingPetals extends Script {
     /** @deprecated Use density. Kept for old persistent configs. */
     petalParticleCount = GSPLAT_FALLING_PETALS_PRESET.petalParticleCount;
 
-    petalTextureUrl = '/textures/petal-atlas.png';
+    petalTextureUrl = GSPLAT_FALLING_PETALS_DEFAULT_ATLAS_URL;
 
     private _petals: GsplatFallingPetals | null = null;
 

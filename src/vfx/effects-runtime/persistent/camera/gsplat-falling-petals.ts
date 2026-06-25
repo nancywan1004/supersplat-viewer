@@ -47,6 +47,23 @@ export interface GsplatFallingPetalsOptions {
 const DEFAULT_ATLAS_URL = '/assets/textures/petal-atlas.png';
 const PETAL_COUNT_PER_DENSITY = 6000;
 
+/** 统一花瓣 atlas 路径（修正历史错误 `/textures/petal-atlas.png` 等）。 */
+export function resolvePetalTextureUrl(url?: string | null): string {
+    const raw = typeof url === 'string' && url.trim().length > 0 ? url.trim() : DEFAULT_ATLAS_URL;
+    if (
+        raw === '/textures/petal-atlas.png' ||
+        raw === '/textures/petal-atlas.png-texture' ||
+        raw === '/assets/petal-atlas.png'
+    ) {
+        return DEFAULT_ATLAS_URL;
+    }
+    const legacyFlat = raw.match(/^\/assets\/(petal[^/]*)\.png$/i);
+    if (legacyFlat) {
+        return `/assets/textures/${legacyFlat[1]}.png`;
+    }
+    return raw;
+}
+
 const PETAL_PRESET = {
     opacity: 0.92,
     color: [1, 1, 1] as [number, number, number],
@@ -145,6 +162,8 @@ export class GsplatFallingPetals extends Script {
 
     private _petalTextureAsset: Asset | null = null;
 
+    private _textureLoadUrl: string | null = null;
+
     density = PETAL_PRESET.density;
 
     private _savedAppAutoRender: boolean | undefined;
@@ -178,7 +197,9 @@ export class GsplatFallingPetals extends Script {
         if (options.followEntity !== undefined) this.followEntity = options.followEntity;
         if (options.continuousRender !== undefined) this.continuousRender = options.continuousRender;
         if (options.petalTexture !== undefined) this.setPetalTexture(options.petalTexture);
-        if (options.petalTextureUrl) this.loadPetalTexture(options.petalTextureUrl);
+        if (options.petalTextureUrl) {
+            this.loadPetalTexture(options.petalTextureUrl);
+        }
         const nextDensity = options.density ?? (
             options.petalParticleCount !== undefined ? options.petalParticleCount / PETAL_COUNT_PER_DENSITY : undefined
         );
@@ -216,7 +237,7 @@ export class GsplatFallingPetals extends Script {
         }
         if (options.enabled !== undefined) this.enabled = options.enabled;
 
-        if (this.enabled) {
+        if (this.enabled && this._petalTexture) {
             this.ensurePetalSystem(rebuild);
             this.updateCustomAabb();
         }
@@ -226,10 +247,11 @@ export class GsplatFallingPetals extends Script {
     }
 
     show(options: GsplatFallingPetalsOptions = {}) {
+        const petalTextureUrl = resolvePetalTextureUrl(options.petalTextureUrl);
         this.setOptions({
             ...PETAL_PRESET,
-            petalTextureUrl: DEFAULT_ATLAS_URL,
             ...options,
+            petalTextureUrl,
             enabled: options.enabled ?? true
         });
     }
@@ -246,19 +268,40 @@ export class GsplatFallingPetals extends Script {
     }
 
     loadPetalTexture(url: string) {
-        const normalizedUrl = url.replace(/^\/assets\/(petal[^/]*)\.png$/i, '/textures/$1.png');
+        const normalizedUrl = resolvePetalTextureUrl(url);
+        if (this._petalTexture && this._textureLoadUrl === normalizedUrl) {
+            return;
+        }
+        if (this._textureLoadUrl === normalizedUrl && this._petalTextureAsset && !this._petalTexture) {
+            return;
+        }
+
         if (this._petalTextureAsset) {
             this.app.assets.remove(this._petalTextureAsset);
             this._petalTextureAsset = null;
         }
 
-        const asset = new Asset('gsplat-petal-atlas-texture', 'texture', { url: normalizedUrl });
+        this._textureLoadUrl = normalizedUrl;
+        const asset = new Asset(`gsplat-petal-atlas-${normalizedUrl}`, 'texture', { url: normalizedUrl });
         this._petalTextureAsset = asset;
         asset.once('load', () => {
+            if (this._textureLoadUrl !== normalizedUrl) {
+                return;
+            }
             this.setPetalTexture(asset.resource as Texture);
+            if (this.enabled) {
+                this.ensurePetalSystem();
+                this.updateCustomAabb();
+                this.syncRenderer();
+                this.syncContinuousRender();
+            }
         });
         asset.once('error', (err) => {
+            if (this._textureLoadUrl !== normalizedUrl) {
+                return;
+            }
             console.warn('[GsplatFallingPetals] failed to load petal texture:', normalizedUrl, err);
+            this._textureLoadUrl = null;
         });
         this.app.assets.add(asset);
         this.app.assets.load(asset);
