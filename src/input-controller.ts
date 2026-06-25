@@ -10,9 +10,9 @@ import { GamepadDevice } from './input/devices/gamepad';
 import { KeyboardMouseDevice } from './input/devices/keyboard-mouse';
 import { TouchDevice } from './input/devices/touch';
 import { TrackpadDevice } from './input/devices/trackpad';
-import { pickWorldFromClientXY } from './picker';
+import { pickWorldFromClientXY } from './picker/index';
 import type { UpdateContext } from './input/shared';
-import type { Picker } from './picker';
+import type { Picker } from './picker/index';
 import type { Global } from './types';
 import { isCameraInteractionBlocked } from './state-selectors';
 

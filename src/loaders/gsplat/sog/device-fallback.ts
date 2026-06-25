@@ -1,0 +1,39 @@
+import type { Config } from '../../../types';
+
+/** 主场景 content 指向单文件 .sog（unified instance 路径，非 octree lod-meta）。 */
+export const isSogUnifiedContentUrl = (contentUrl: string | undefined): boolean => {
+    if (!contentUrl) {
+        return false;
+    }
+    try {
+        const pathname = new URL(contentUrl, typeof location !== 'undefined' ? location.href : 'http://localhost/').pathname;
+        const filename = pathname.split('/').pop() ?? '';
+        return filename.toLowerCase().split('?')[0].endsWith('.sog');
+    } catch {
+        return contentUrl.toLowerCase().split('?')[0].endsWith('.sog');
+    }
+};
+
+const isWindowsHost = (): boolean => {
+    if (typeof navigator === 'undefined') {
+        return false;
+    }
+    const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
+    const uaPlatform = nav.userAgentData?.platform ?? nav.platform ?? nav.userAgent ?? '';
+    const isIPad = nav.maxTouchPoints > 1 && /Mac/i.test(nav.platform || '');
+    return !isIPad && /Win/i.test(uaPlatform);
+};
+
+/**
+ * Windows + WebGPU + SOG unified：D3D12 splat depth readback 易 TDR，启动时直接用 WebGL2。
+ * LOD/octree（lod-meta 等）不在此列，仍可走 WebGPU。
+ */
+export const shouldForceWebGlForSogUnified = (config: Config): boolean => {
+    if (config.renderer === 'webgl') {
+        return false;
+    }
+    if (!isSogUnifiedContentUrl(config.contentUrl)) {
+        return false;
+    }
+    return isWindowsHost();
+};

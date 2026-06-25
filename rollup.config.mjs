@@ -28,6 +28,11 @@ const shouldGenerateSourcemap = process.env.SOURCEMAP === 'true' || process.env.
 // 判断是否启用强混淆（通过环境变量 OBFUSCATE=true 启用）
 const shouldObfuscate = process.env.OBFUSCATE === 'true';
 
+// dist 压缩是否移除 console（默认 production 打包移除；KEEP_CONSOLE=true 保留）
+const shouldDropConsole =
+    process.env.KEEP_CONSOLE !== 'true' &&
+    (process.env.NODE_ENV === 'production' || process.env.DROP_CONSOLE === 'true');
+
 // 创建 obfuscator 插件配置（安全模式，避免破坏代码功能）
 // 注意：需要先安装 rollup-plugin-obfuscator
 // 运行: npm install --save-dev rollup-plugin-obfuscator
@@ -380,10 +385,10 @@ const buildDist = {
     }),
     terser({
       compress: {
-        drop_console: true, // 删除 console
-        drop_debugger: true,
-        pure_funcs: [], // 可以添加 ['console.log'] 来移除特定函数调用
-        passes: 2, // 多次压缩以获得更好的效果
+        drop_console: shouldDropConsole,
+        drop_debugger: shouldDropConsole,
+        pure_funcs: [],
+        passes: 2,
       },
       mangle: {
         properties: false, // 不混淆属性名，避免破坏代码功能

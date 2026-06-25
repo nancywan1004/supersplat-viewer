@@ -413,6 +413,12 @@ export function initMediaHotspotController(global: Global): () => void {
             pauseAllSceneMedia(global);
             return;
         }
+        // reveal 播放 / 特效切换会禁用 placedAssets 根节点；编辑非预览也会跳过热区评估，
+        // 因此须在此统一 pause，避免画面隐藏后声音仍继续。
+        if (!isPlacedAssetsRootEnabled(global)) {
+            pauseAllSceneMedia(global);
+            return;
+        }
         uploadToggle = !uploadToggle;
         // 编辑非预览模式下不再做热区评估也不强制 pause；
         // 这样用户在编辑模式手动播放的视频可持续推帧而不被打断。
@@ -422,6 +428,10 @@ export function initMediaHotspotController(global: Global): () => void {
         if (uploadToggle) {
             tickPlacedVideoTextureUploads(collectLiveVideos(), uploadToggle);
         }
+    };
+
+    const onRevealRestart = () => {
+        pauseAllSceneMedia(global);
     };
 
     const forceHotspotEval = () => {
@@ -517,6 +527,7 @@ export function initMediaHotspotController(global: Global): () => void {
     events.on('mediaHotspot:userActivate', onUserActivate);
     events.on('mediaOverlay:userPlayback', onOverlayUserPlayback);
     events.on('editMode:changed', onEditModeChanged);
+    events.on('revealRestart', onRevealRestart);
 
     app.on('update', onUpdate);
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -538,6 +549,7 @@ export function initMediaHotspotController(global: Global): () => void {
         events.off('mediaHotspot:userActivate', onUserActivate);
         events.off('mediaOverlay:userPlayback', onOverlayUserPlayback);
         events.off('editMode:changed', onEditModeChanged);
+        events.off('revealRestart', onRevealRestart);
         clearAllSceneMediaPlaybackFlags(global);
         pauseAllSceneMedia(global);
     };

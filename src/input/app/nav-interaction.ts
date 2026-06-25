@@ -1,7 +1,7 @@
 import { Vec3 } from 'playcanvas';
 
 import type { Collision } from '../../collision';
-import type { Picker } from '../../picker';
+import { type Picker } from '../../picker/index';
 import { isPlacementCursorActive } from '../../placement-cursor';
 import { isCameraInteractionBlocked } from '../../state-selectors';
 import type { Global } from '../../types';
@@ -140,20 +140,29 @@ class NavInteraction {
         return null;
     }
 
-    private async _pickFocusPosition(offsetX: number, offsetY: number): Promise<Vec3 | null> {
+    private async _pickFocusPosition(
+        offsetX: number,
+        offsetY: number
+    ): Promise<Vec3 | null> {
         const global = this._global;
         const canvas = this._canvas;
         if (!global || !canvas) return null;
+
+        const collisionTarget = this._pickCollision(offsetX, offsetY);
+        if (collisionTarget) {
+            return collisionTarget.position;
+        }
 
         const target = await this._pickSceneTarget(offsetX, offsetY);
         if (target) {
             return target.position;
         }
 
-        return this._picker.pick(
+        const depthPick = await this._picker.pick(
             offsetX / canvas.clientWidth,
             offsetY / canvas.clientHeight
         );
+        return depthPick;
     }
 
     private async _handleDoubleTapAt(offsetX: number, offsetY: number) {
@@ -165,11 +174,10 @@ class NavInteraction {
         // dblclick focuses orbit at the picked target from any navigation mode.
         // CameraManager owns the actual orbit transition via the `pick` event.
         const request = ++this._targetPickRequest;
-        const position = await this._pickFocusPosition(offsetX, offsetY);
-        if (!position || request !== this._targetPickRequest) return;
+        const pickResult = await this._pickFocusPosition(offsetX, offsetY);
+        if (!pickResult || request !== this._targetPickRequest) return;
 
-        // `pick` switches to orbit and cancels active first-person nav.
-        events.fire('pick', position);
+        events.fire('pick', pickResult);
     }
 
     private _onPointerDown = (event: PointerEvent) => {

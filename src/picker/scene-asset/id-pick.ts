@@ -1,9 +1,13 @@
+/**
+ * 编辑态已放置资产 GPU ID 拾取（picker 路径 2，id-pick）。
+ * 高斯走 SceneAssetPick 层，mesh 走 World 层；失败时 splat depth + AABB 兜底。
+ */
 import type { AppBase, CameraComponent, Entity, GSplatComponent, MeshInstance } from 'playcanvas';
 import { Vec3 } from 'playcanvas';
 
-import { pickWorldFromClientXY } from '../picker';
-import type { Global, ScenePlacedItem } from '../types';
-import { getSceneAssetPickLayer } from './scene-asset-pick-layer';
+import { pickWorldFromClientXY } from '../splat/depth-picker';
+import type { Global, ScenePlacedItem } from '../../types';
+import { getSceneAssetPickLayer } from './pick-layer';
 
 const ID_PICK_AREA_PX = 5;
 const GAUSSIAN_WORLD_PICK_PADDING = 1.15;

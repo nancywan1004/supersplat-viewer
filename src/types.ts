@@ -1,6 +1,6 @@
 import type { Entity, EventHandler, AppBase, Asset } from 'playcanvas';
 
-import type { Picker } from './picker';
+import type { Picker } from './picker/index';
 import type { ExperienceSettings, SceneCollisionSettings } from './settings';
 import {
     type AssetEffectRuntimeStatus,

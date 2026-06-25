@@ -32,7 +32,7 @@ import {
     Vec4,
     BlendState
 } from 'playcanvas';
-import type { Global } from './types';
+import type { Global } from '../../types';
 
 // Override global picking to pack alpha-weighted splat depth instead of meshInstance id.
 const pickDepthGlsl = /* glsl */ `
@@ -378,6 +378,14 @@ const unregisterPickerShaderPatches = (app: AppBase) => {
     pickerShaderPatchState.delete(device);
 };
 
+const isRecoverablePickReadbackError = (error: unknown): boolean => {
+    const err = error as { name?: unknown; message?: unknown } | null | undefined;
+    const name = typeof err?.name === 'string' ? err.name : '';
+    const message = typeof err?.message === 'string' ? err.message : String(error);
+    return name === 'AbortError' ||
+        /mapAsync|device\s+lost|external Instance|context lost|valid external/i.test(message);
+};
+
 const ensureComputePickIdsReady = (app: AppBase, camera: Entity, worldLayer: Layer) => {
     const gsplatScene = app.scene.gsplat;
     if (gsplatScene.currentRenderer !== GSPLAT_RENDERER_COMPUTE) {
@@ -654,10 +662,37 @@ class Picker {
         let sceneRenderVersion = 0;
         const rasterCacheCamera: PickCameraSnapshot = createPickCameraSnapshot();
         const engineCacheCamera: PickCameraSnapshot = createPickCameraSnapshot();
+        let webgpuDeviceLost = false;
+        let lastRecoverablePickWarn = 0;
+
+        const resetEnginePicker = () => {
+            engineCacheValid = false;
+            try {
+                enginePicker?.destroy();
+            } catch {
+                // Device loss can invalidate the native buffers backing the picker.
+            }
+            enginePicker = undefined;
+        };
+
+        const onDeviceLost = () => {
+            webgpuDeviceLost = true;
+            resetEnginePicker();
+            rasterCacheValid = false;
+        };
+
+        const onDeviceRestored = () => {
+            webgpuDeviceLost = false;
+            engineCacheValid = false;
+            rasterCacheValid = false;
+        };
+
         const onFrameEnd = () => {
             sceneRenderVersion++;
         };
         app.on('frameend', onFrameEnd);
+        graphicsDevice.on('devicelost', onDeviceLost);
+        graphicsDevice.on('devicerestored', onDeviceRestored);
 
         const initRasterAccum = (width: number, height: number) => {
             accumBuffer = new Texture(graphicsDevice, {
@@ -913,6 +948,34 @@ class Picker {
             return result;
         };
 
+        const handleRecoverablePickError = (error: unknown) => {
+            if (!isRecoverablePickReadbackError(error)) {
+                throw error;
+            }
+
+            resetEnginePicker();
+            rasterCacheValid = false;
+
+            const now = Date.now();
+            if (now - lastRecoverablePickWarn > 2000) {
+                lastRecoverablePickWarn = now;
+                console.warn('[Picker] WebGPU pick readback failed; treating this pick as a miss.', error);
+            }
+        };
+
+        const recoverPickMiss = async <T>(operation: () => Promise<T | null>): Promise<T | null> => {
+            if (webgpuDeviceLost) {
+                return null;
+            }
+
+            try {
+                return await operation();
+            } catch (error) {
+                handleRecoverablePickError(error);
+                return null;
+            }
+        };
+
         const pick = async (x: number, y: number) => {
             const sample = prepareSample(x, y);
             if (!sample) {
@@ -1105,14 +1168,20 @@ class Picker {
             };
         };
 
-        this.pick = (x: number, y: number) => serializePick(() => pick(x, y));
+        this.pick = (x: number, y: number) => {
+            return recoverPickMiss(() => serializePick(() => pick(x, y)));
+        };
 
-        this.pickSurface = (x: number, y: number) => serializePick(() => pickSurface(x, y));
+        this.pickSurface = (x: number, y: number) => {
+            return recoverPickMiss(() => serializePick(() => pickSurface(x, y)));
+        };
 
         this.prepareDepthMap = prepareDepthMap;
 
         this.release = () => {
             app.off('frameend', onFrameEnd);
+            graphicsDevice.off('devicelost', onDeviceLost);
+            graphicsDevice.off('devicerestored', onDeviceRestored);
             unregisterPickerShaderPatches(app);
             enginePicker?.destroy();
             accumPass?.destroy();
@@ -1140,8 +1209,14 @@ async function pickWorldFromClientXY(global: Global, clientX: number, clientY: n
     const rh = rect.height;
     if (rw <= 0 || rh <= 0) return null;
 
-    const nx = (clientX - rect.left) / rw;
-    const ny = (clientY - rect.top) / rh;
+    const offsetX = clientX - rect.left;
+    const offsetY = clientY - rect.top;
+    if (offsetX < 0 || offsetY < 0 || offsetX > rw || offsetY > rh) {
+        return null;
+    }
+
+    const nx = offsetX / rw;
+    const ny = offsetY / rh;
 
     return getSharedPicker(global).pick(nx, ny);
 }

@@ -75,6 +75,7 @@
     "vendor:basis": "mkdir -p public/vendor/basis && BASE=https://raw.githubusercontent.com/playcanvas/engine/v2.19.2/examples/assets/wasm/basis && curl -fsSL -o public/vendor/basis/basis.js \"$BASE/basis.js\" && curl -fsSL -o public/vendor/basis/basis.wasm.js \"$BASE/basis.wasm.js\" && curl -fsSL -o public/vendor/basis/basis.wasm.wasm \"$BASE/basis.wasm.wasm\"",
     "build": "rollup -c",
     "build:prod": "NODE_ENV=production rollup -c",
+    "build:prod:log": "NODE_ENV=production KEEP_CONSOLE=true rollup -c",
     "build:prod:obfuscate": "NODE_ENV=production OBFUSCATE=true rollup -c",
     "build:prod:with-types": "NODE_ENV=production GENERATE_TYPES=true rollup -c",
     "build:dev": "NODE_ENV=development rollup -c",

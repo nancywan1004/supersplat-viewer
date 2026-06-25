@@ -9,7 +9,12 @@ import {
 } from 'playcanvas';
 
 import type { Collision } from './collision';
-import { captureCameraSnapshot, getWorldPoint, type PickCameraSnapshot, type Picker } from './picker';
+import {
+    captureCameraSnapshot,
+    getWorldPoint,
+    type PickCameraSnapshot,
+    type Picker
+} from './picker/index';
 import type { State } from './types';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
