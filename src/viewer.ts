@@ -38,7 +38,7 @@ import { nearlyEquals } from './core/math';
 import { InputController } from './input-controller';
 import { MeshDebugOverlay } from './mesh-debug-overlay';
 import { NavCursor } from './nav-cursor';
-import { Picker } from './picker';
+import { Picker } from './picker/index';
 import type { ExperienceSettings, PostEffectSettings } from './settings';
 import { readPersistentTrackEffects, shouldDeferPersistentMount } from './settings-serialize/effects-sync';
 import type { Global } from './types';

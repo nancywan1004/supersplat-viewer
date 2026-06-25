@@ -1,7 +1,6 @@
 import type { AppBase } from 'playcanvas';
 import * as pc from 'playcanvas';
 import {
-    BoundingBox,
     Entity,
     Vec3,
     Quat,
@@ -70,8 +69,13 @@ import {
     unmountPlacedVideoFromDom
 } from './media/video-texture';
 import { AUDIO_CALLOUT_WORLD_H, findAudioCalloutSelectHitFromClient } from './media/audio-callout';
-import { getSceneAssetPickLayer } from './scene-asset-pick-layer';
-import { configurePlacedGaussianPickLayer, pickScenePlacedEntryAtScreen } from './scene-asset-selection-pick';
+import {
+    clientToPickScreenCoords,
+    configurePlacedGaussianPickLayer,
+    getSceneAssetPickLayer,
+    pickPlacedEntryAtScreenBounds,
+    pickScenePlacedEntryAtScreen
+} from '../picker/index';
 import { removeSceneAssetFromSettings } from '../settings-serialize/settings-serialize';
 import { suspendShadowPipelineForGsplatLoad, syncGsplatShadowCastingFromSettings } from '../vfx/shadow';
 import type { ExperienceSettings } from '../settings';
@@ -79,7 +83,7 @@ import type { ExperienceSettings } from '../settings';
 const PLACED_ASSETS_NAME = 'placedAssets';
 const ASSET_LOAD_TIMEOUT_MS = DEFAULT_ASSET_LOAD_TIMEOUT_MS;
 const GSPLAT_WOBBLE_TYPE = ASSET_EFFECT_TYPE_VALUES[1];
-const VIEWER_PICK_SCREEN_PADDING_PX = 8;
+const SCENE_ASSET_PICKER_SCALE = 0.5;
 
 export type AssetPlacementHandlerDeps = {
     pushEditHistory?: (global: Global, label?: string) => void;
@@ -1236,121 +1240,6 @@ function applySceneAssetSelectedFromScenePick(
     }
 }
 
-function computeScenePlacedEntryWorldBounds(entry: ScenePlacedItem): BoundingBox | null {
-    const entity = entry.entity;
-    const meshInstances: Array<{ aabb?: BoundingBox }> = [];
-
-    const collectMeshInstances = (node: Entity) => {
-        const renderComp = (node as Entity & { render?: { meshInstances?: Array<{ aabb?: BoundingBox }> } }).render;
-        const instances = renderComp?.meshInstances;
-        if (instances?.length) {
-            for (const mi of instances) meshInstances.push(mi);
-        }
-        for (const child of node.children as Entity[]) {
-            collectMeshInstances(child);
-        }
-    };
-    collectMeshInstances(entity);
-
-    let bounds: BoundingBox | null = null;
-    for (const mi of meshInstances) {
-        if (!mi.aabb) continue;
-        if (!bounds) {
-            bounds = mi.aabb.clone();
-        } else {
-            bounds.add(mi.aabb);
-        }
-    }
-    if (bounds) return bounds;
-
-    const gsplat = (entity as Entity & { gsplat?: { customAabb?: BoundingBox | null; aabb?: BoundingBox } }).gsplat;
-    const gsAabb = gsplat?.customAabb ?? gsplat?.aabb;
-    if (!gsAabb) return null;
-
-    bounds = new BoundingBox();
-    bounds.setFromTransformedAabb(gsAabb, entity.getWorldTransform());
-    return bounds;
-}
-
-function pickScenePlacedEntryByScreenBounds(
-    global: Global,
-    list: ScenePlacedItem[],
-    clientX: number,
-    clientY: number
-): ScenePlacedItem | null {
-    const canvas = global.app.graphicsDevice.canvas as HTMLCanvasElement;
-    const rect = canvas.getBoundingClientRect();
-    const offsetX = clientX - rect.left;
-    const offsetY = clientY - rect.top;
-    if (offsetX < 0 || offsetY < 0 || offsetX > rect.width || offsetY > rect.height) {
-        return null;
-    }
-
-    const renderWidth = global.app.graphicsDevice.width;
-    const renderHeight = global.app.graphicsDevice.height;
-    const targetX = (offsetX / Math.max(1, rect.width)) * renderWidth;
-    const targetY = (offsetY / Math.max(1, rect.height)) * renderHeight;
-    const cameraComponent = global.camera.camera;
-    if (!cameraComponent) return null;
-
-    const screen = new Vec3();
-    let best: { entry: ScenePlacedItem; score: number } | null = null;
-
-    for (const entry of list) {
-        if (!entry.entity.enabled) continue;
-        const bounds = computeScenePlacedEntryWorldBounds(entry);
-        if (!bounds) continue;
-
-        const center = bounds.center;
-        const half = bounds.halfExtents;
-        let minX = Number.POSITIVE_INFINITY;
-        let minY = Number.POSITIVE_INFINITY;
-        let maxX = Number.NEGATIVE_INFINITY;
-        let maxY = Number.NEGATIVE_INFINITY;
-        let visibleCorners = 0;
-        let depthSum = 0;
-
-        for (const sx of [-1, 1]) {
-            for (const sy of [-1, 1]) {
-                for (const sz of [-1, 1]) {
-                    const corner = new Vec3(
-                        center.x + half.x * sx,
-                        center.y + half.y * sy,
-                        center.z + half.z * sz
-                    );
-                    cameraComponent.camera.worldToScreen(corner, renderWidth, renderHeight, screen);
-                    if (!Number.isFinite(screen.x) || !Number.isFinite(screen.y) || !Number.isFinite(screen.z)) continue;
-                    if (screen.z <= 0) continue;
-                    visibleCorners++;
-                    depthSum += screen.z;
-                    minX = Math.min(minX, screen.x);
-                    minY = Math.min(minY, screen.y);
-                    maxX = Math.max(maxX, screen.x);
-                    maxY = Math.max(maxY, screen.y);
-                }
-            }
-        }
-
-        if (visibleCorners === 0) continue;
-        minX -= VIEWER_PICK_SCREEN_PADDING_PX;
-        minY -= VIEWER_PICK_SCREEN_PADDING_PX;
-        maxX += VIEWER_PICK_SCREEN_PADDING_PX;
-        maxY += VIEWER_PICK_SCREEN_PADDING_PX;
-        if (targetX < minX || targetX > maxX || targetY < minY || targetY > maxY) continue;
-
-        const centerX = (minX + maxX) * 0.5;
-        const centerY = (minY + maxY) * 0.5;
-        const dx = targetX - centerX;
-        const dy = targetY - centerY;
-        const score = (depthSum / visibleCorners) + Math.sqrt(dx * dx + dy * dy) * 0.001;
-        if (!best || score < best.score) {
-            best = { entry, score };
-        }
-    }
-
-    return best?.entry ?? null;
-}
-
 export function initAssetPlacementHandler(
     global: Global,
     canvas: HTMLCanvasElement,
@@ -1358,8 +1247,6 @@ export function initAssetPlacementHandler(
     deps: AssetPlacementHandlerDeps = {}
 ): () => void {
     const { app, state, events, camera } = global;
-    const width = () => app.graphicsDevice.width;
-    const height = () => app.graphicsDevice.height;
 
     let sceneAssetPicker: any = null;
     let pendingPlacement: { value: AssetLibraryItem; sceneEntityId?: string } | null = null;
@@ -1487,7 +1374,7 @@ export function initAssetPlacementHandler(
             : list;
         if (pickEventOnly && pickableList.length === 0) return false;
         if (pickEventOnly) {
-            const entry = pickScenePlacedEntryByScreenBounds(global, pickableList, clientX, clientY);
+            const entry = pickPlacedEntryAtScreenBounds(global, pickableList, clientX, clientY);
             if (entry) {
                 applySceneAssetSelectedFromScenePick(global, entry.id, { focusOnChange: false });
             }
@@ -1507,11 +1394,9 @@ export function initAssetPlacementHandler(
             : list;
         if (morphAssetAdd && gaussianList.length === 0) return true;
 
-        const pickerScale = 0.5;
-        const pickW = Math.max(1, Math.floor(width() * pickerScale));
-        const pickH = Math.max(1, Math.floor(height() * pickerScale));
-        const pickX = Math.floor((offsetX / rect.width) * pickW);
-        const pickY = Math.floor((offsetY / rect.height) * pickH);
+        const pickCoords = clientToPickScreenCoords(global, clientX, clientY, SCENE_ASSET_PICKER_SCALE);
+        if (!pickCoords) return inAssetModule;
+        const { pickX, pickY, pickW, pickH } = pickCoords;
 
         if (!sceneAssetPicker) {
             sceneAssetPicker = new (pc as any).Picker(app, pickW, pickH, false);

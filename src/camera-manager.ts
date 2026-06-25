@@ -871,30 +871,7 @@ class CameraManager {
 
         // handle user picking in the scene（双击/双指点）
         events.on('pick', (position: Vec3) => {
-            // Show visual marker at picked position
-            // if (this.pickMarker) {
-            //     this.pickMarker.setPosition(position);
-            //     this.pickMarker.enabled = true;
-
-            //     // Hide marker after 3 seconds
-            //     setTimeout(() => {
-            //         if (this.pickMarker) {
-            //             this.pickMarker.enabled = false;
-            //         }
-            //     }, 3000);
-            // }
-
-            // 双击拾取点：与 F 键选中聚焦同一条 orbit 对准逻辑
             orbitFocus(position);
-
-            // Fly mode version (commented out for now, as requested)
-            // if (currentMode === 'fly') {
-            //     const targetPose = new Pose();
-            //     targetPose.position.copy(tmpCamera.position);
-            //     targetPose.angles.copy(tmpCamera.angles);
-            //     targetPose.distance = tmpCamera.distance;
-            //     controllers.fly.goto(targetPose);
-            // }
         });
 
         const inputArbiter = (global as any).__inputArbiter as InputArbiter | undefined;

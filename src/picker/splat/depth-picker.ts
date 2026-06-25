@@ -32,7 +32,7 @@ import {
     Vec4,
     BlendState
 } from 'playcanvas';
-import type { Global } from './types';
+import type { Global } from '../../types';
 
 // Override global picking to pack alpha-weighted splat depth instead of meshInstance id.
 const pickDepthGlsl = /* glsl */ `
@@ -1168,9 +1168,13 @@ class Picker {
             };
         };
 
-        this.pick = (x: number, y: number) => recoverPickMiss(() => serializePick(() => pick(x, y)));
+        this.pick = (x: number, y: number) => {
+            return recoverPickMiss(() => serializePick(() => pick(x, y)));
+        };
 
-        this.pickSurface = (x: number, y: number) => recoverPickMiss(() => serializePick(() => pickSurface(x, y)));
+        this.pickSurface = (x: number, y: number) => {
+            return recoverPickMiss(() => serializePick(() => pickSurface(x, y)));
+        };
 
         this.prepareDepthMap = prepareDepthMap;
 
@@ -1205,8 +1209,14 @@ async function pickWorldFromClientXY(global: Global, clientX: number, clientY: n
     const rh = rect.height;
     if (rw <= 0 || rh <= 0) return null;
 
-    const nx = (clientX - rect.left) / rw;
-    const ny = (clientY - rect.top) / rh;
+    const offsetX = clientX - rect.left;
+    const offsetY = clientY - rect.top;
+    if (offsetX < 0 || offsetY < 0 || offsetX > rw || offsetY > rh) {
+        return null;
+    }
+
+    const nx = offsetX / rw;
+    const ny = offsetY / rh;
 
     return getSharedPicker(global).pick(nx, ny);
 }

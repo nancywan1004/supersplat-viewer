@@ -1,7 +1,7 @@
 import type { Vec3 } from 'playcanvas';
 import type { Global } from '../../types';
 import type { ExperienceSettings } from '../../schemas/v2';
-import { pickWorldFromClientXY } from '../../picker';
+import { pickWorldFromClientXY } from '../../picker/index';
 import { updatePointLightsFromSettings } from '../../light';
 import { ensureBloom, ensureBloomEditorSession } from '../../settings-serialize/settings-serialize-helper';
 import { allocateNextUserLightId, applyLightAdd } from '../../editor-modules/protocol-adapters/environment-protocol-adapter';

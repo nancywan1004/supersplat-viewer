@@ -30,7 +30,7 @@ import {
 import { hitSceneGizmoAtClient } from '../../gizmo-hit-test';
 import type { Global, ScenePlacedItem } from '../../types';
 import { ensureHotspotDepthLayers, syncHotspotLayersAfterGsplat, type HotspotDepthLayers } from '../hotspot-depth-layers';
-import { getSceneAssetPickLayer } from '../scene-asset-pick-layer';
+import { getSceneAssetPickLayer } from '../../picker/index';
 import { isMediaConsumptionMode, readShowAudioCalloutInViewerFromSettings } from './media-hotspot-params';
 import { isSceneMediaSoundSuppressed, userPauseSceneMedia, userPlaySceneMedia } from './scene-media-playback';
 import {

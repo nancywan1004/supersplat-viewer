@@ -29,6 +29,7 @@ import { isCustomLodEnabled, isGsplatMetaJsonFilename, LodLoader } from './loade
 import { bindGsplatRenderer, type GsplatSceneRuntime } from './loaders/gsplat/lod/scene-bindings';
 import { loadSplat } from './loaders/gsplat/sog/splat-deserialize';
 import type { AssetSource } from './loaders/shared/asset-source';
+import { shouldForceWebGlForSogUnified } from './loaders/gsplat/sog/device-fallback';
 import { loadGsplatAsset } from './loaders/gsplat/sog/splat-loader';
 import { getAssetLoader } from './loaders/asset-loader';
 import { version as appVersion } from '../package.json';
@@ -181,20 +182,25 @@ const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
     initializeGltfRuntime();
 
     const useWebGPU = config.renderer !== 'webgl';
+    const forceWebGlForSogUnified = shouldForceWebGlForSogUnified(config);
 
     // Create the graphics device
+    // WebGPU 不可用时回退 WebGL2，避免 requestAdapter 返回 null 时引擎崩溃
     const device = await createGraphicsDevice(canvas, {
-        deviceTypes: useWebGPU ? ['webgpu'] : [],
+        deviceTypes: forceWebGlForSogUnified ? ['webgl2'] : (useWebGPU ? ['webgpu', 'webgl2'] : ['webgl2']),
         antialias: false,
         depth: true,
         stencil: false,
-        xrCompatible: !useWebGPU,
+        xrCompatible: !useWebGPU && !forceWebGlForSogUnified,
         powerPreference: 'high-performance'
     });
 
     // 引擎可能从 WebGPU 回退到 WebGL2；下游 gsplat renderer 选择需要真实 deviceType
     const renderer: 'webgl' | 'webgpu' = device.deviceType === 'webgpu' ? 'webgpu' : 'webgl';
 
+    if (forceWebGlForSogUnified) {
+        console.log('[SuperSplat] Windows + WebGPU + SOG unified → WebGL2 (avoid D3D12 splat depth readback TDR)');
+    }
     console.log(`Renderer: ${device.deviceType}, requested=${config.renderer}, actual=${renderer}`);
 
     // Set maxPixelRatio so the XR framebuffer scale factor is computed correctly.
@@ -228,7 +234,7 @@ const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
     // 提高基础 ambient，保障 mesh 在无主光时仍具备可读性
     app.scene.ambientLight.set(1.32, 1.36, 1.44);
 
-    return { app, camera, renderer };
+    return { app, camera, renderer, forceWebGlForSogUnified };
 };
 
 // initialize canvas size and resizing
@@ -289,7 +295,8 @@ const initCanvas = (global: Global) => {
 };
 
 const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config) => {
-    const { app, camera, renderer } = await createApp(canvas, config);
+    const { app, camera, renderer, forceWebGlForSogUnified } = await createApp(canvas, config);
+    const gsplatConfig: Config = forceWebGlForSogUnified ? { ...config, renderer: 'webgl' } : config;
 
     // create events
     const events = new EventHandler();
@@ -383,7 +390,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     const global: Global = {
         app,
         settings: processedSettings,
-        config,
+        config: gsplatConfig,
         state,
         events,
         camera,
@@ -432,7 +439,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     initLight(global);
 
     // Initialize XR support
-    if (config.renderer === 'webgl') {
+    if (renderer === 'webgl') {
         initXr(global);
     }
 
