@@ -222,8 +222,8 @@ export const ASSET_EFFECTS_PANEL_HTML = `
     <div class="settingsRow" id="assetWobbleHaloSpeedRow">
       <label for="assetWobbleHaloSpeed" class="postEffectLabel">光圈速度:</label>
       <div class="postEffectSliderWrap">
-        <input type="range" id="assetWobbleHaloSpeed" class="postEffectSlider" min="0" max="4" step="0.05" value="1">
-        <span id="assetWobbleHaloSpeedVal" class="postEffectSliderValue">1.00</span>
+        <input type="range" id="assetWobbleHaloSpeed" class="postEffectSlider" min="0" max="20" step="1" value="5">
+        <span id="assetWobbleHaloSpeedVal" class="postEffectSliderValue">5</span>
       </div>
     </div>
   </div>
@@ -453,8 +453,8 @@ function readEffectParamsFromDom(
             ep.wobbleAnchorLift = Math.min(1, Math.max(0, pct / 100));
         }
     }
-    const haloOn = wobbleHaloEnabled?.checked !== false;
-    ep.colorMix = haloOn ? 1 : 0;
+    const haloOn = wobbleHaloEnabled?.checked === true;
+    ep.colorMix = haloOn;
     if (haloOn && wobbleHaloColor) {
         const rgb = hexToRgb01(wobbleHaloColor.value);
         if (rgb) {
@@ -467,7 +467,7 @@ function readEffectParamsFromDom(
     }
     if (wobbleHaloSpeed) {
         const v = Number(wobbleHaloSpeed.value);
-        if (!Number.isNaN(v)) ep.haloSpeed = v;
+        if (!Number.isNaN(v)) ep.haloSpeed = Math.min(20, Math.max(0, v));
     }
     if (wobbleHaloOpacity) {
         const v = Number(wobbleHaloOpacity.value);
@@ -606,8 +606,7 @@ function fillDomFromEffectParams(
         wobbleAnchorLiftPct.value = String(Math.round(Math.min(1, Math.max(0, lift)) * 100));
     }
     if (wobbleHaloEnabled) {
-        const mix = merged.colorMix;
-        wobbleHaloEnabled.checked = typeof mix !== 'number' || mix > 0;
+        wobbleHaloEnabled.checked = merged.colorMix === true;
     }
     if (wobbleHaloColor) {
         const gold = merged.goldColor;
@@ -621,7 +620,8 @@ function fillDomFromEffectParams(
         wobbleHaloWidth.value = String(typeof merged.haloWidth === 'number' ? merged.haloWidth : 0.1);
     }
     if (wobbleHaloSpeed) {
-        wobbleHaloSpeed.value = String(typeof merged.haloSpeed === 'number' ? merged.haloSpeed : 1);
+        const speed = typeof merged.haloSpeed === 'number' ? merged.haloSpeed : 5;
+        wobbleHaloSpeed.value = String(Math.min(20, Math.max(0, speed)));
     }
     if (wobbleHaloOpacity) {
         wobbleHaloOpacity.value = String(typeof merged.haloOpacity === 'number' ? merged.haloOpacity : 1);
@@ -1177,7 +1177,7 @@ export function initAssetEffectsUI(global: Global): () => void {
             wobbleHaloWidthVal.textContent = formatSliderValue(Number(wobbleHaloWidth.value), 2);
         }
         if (wobbleHaloSpeed && wobbleHaloSpeedVal) {
-            wobbleHaloSpeedVal.textContent = formatSliderValue(Number(wobbleHaloSpeed.value), 2);
+            wobbleHaloSpeedVal.textContent = formatSliderValue(Number(wobbleHaloSpeed.value), 0);
         }
         if (wobbleHaloOpacity && wobbleHaloOpacityVal) {
             wobbleHaloOpacityVal.textContent = formatSliderValue(Number(wobbleHaloOpacity.value), 2);
@@ -1476,7 +1476,7 @@ export function initAssetEffectsUI(global: Global): () => void {
         unbindWobbleSliders.push(bindSliderLive(wobbleHaloWidth, wobbleHaloWidthVal, 2, onWobbleParamsLive, onParamsBlur));
     }
     if (wobbleHaloSpeed) {
-        unbindWobbleSliders.push(bindSliderLive(wobbleHaloSpeed, wobbleHaloSpeedVal, 2, onWobbleParamsLive, onParamsBlur));
+        unbindWobbleSliders.push(bindSliderLive(wobbleHaloSpeed, wobbleHaloSpeedVal, 0, onWobbleParamsLive, onParamsBlur));
     }
     if (wobbleHaloOpacity) {
         unbindWobbleSliders.push(bindSliderLive(wobbleHaloOpacity, wobbleHaloOpacityVal, 2, onWobbleParamsLive, onParamsBlur));

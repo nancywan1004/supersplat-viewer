@@ -94,6 +94,12 @@ export function filterAssetEffectParams(
             }
             continue;
         }
+        if (effectType === ASSET_EFFECT_TYPE_VALUES[1] && storageKey === 'colorMix') {
+            if (typeof v === 'boolean') {
+                out[storageKey] = v;
+            }
+            continue;
+        }
         if (typeof v === 'number' && Number.isFinite(v)) {
             out[storageKey] = v;
         } else if (typeof v === 'boolean') {

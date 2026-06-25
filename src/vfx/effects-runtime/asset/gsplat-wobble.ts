@@ -37,7 +37,7 @@ export interface GsplatWobbleOptions {
     bounceDuration?: number;
     /** 每个周期连跳次数，默认 3 */
     bounceCount?: number;
-    colorMix?: number;
+    colorMix?: boolean;
     colorBandStart?: number;
     colorBandEnd?: number;
     goldColor?: [number, number, number];
@@ -220,7 +220,7 @@ float wobbleRelHeight(vec3 center) {
 
 void modifySplatColor(vec3 center, inout vec4 clr) {
     float relH = wobbleRelHeight(center);
-    float sineValue = abs(sin(uWobbleLocalTime * uWobbleFrequency * uWobbleHaloSpeed + relH));
+    float sineValue = abs(sin(uWobbleLocalTime * uWobbleHaloSpeed + relH));
     float activity = uWobbleStrength;
     float bandStart = max(0.0, 1.0 - uWobbleHaloWidth);
     float blend = smoothstep(bandStart, 1.0, sineValue) * uWobbleColorMix * uWobbleHaloOpacity * activity;
@@ -412,7 +412,7 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
 
 fn modifySplatColor(center: vec3f, clr: ptr<function, vec4f>) {
     let relH = wobbleRelHeight(center);
-    let sineValue = abs(sin(uniform.uWobbleLocalTime * uniform.uWobbleFrequency * uniform.uWobbleHaloSpeed + relH));
+    let sineValue = abs(sin(uniform.uWobbleLocalTime * uniform.uWobbleHaloSpeed + relH));
     let activity = uniform.uWobbleStrength;
     let bandStart = max(0.0, 1.0 - uniform.uWobbleHaloWidth);
     let blend = smoothstep(bandStart, 1.0, sineValue) *
@@ -454,7 +454,7 @@ export class GsplatWobbleEffect extends GsplatShaderEffect {
 
     springBlend = 1.0;
 
-    colorMix = 1.0;
+    colorMix = true;
 
     colorBandStart = 0.9;
 
@@ -464,7 +464,7 @@ export class GsplatWobbleEffect extends GsplatShaderEffect {
 
     haloWidth = 0.1;
 
-    haloSpeed = 1.0;
+    haloSpeed = 5.0;
 
     haloOpacity = 1.0;
 
@@ -616,12 +616,16 @@ export class GsplatWobbleEffect extends GsplatShaderEffect {
         if (options.springOscillation !== undefined) this.springOscillation = options.springOscillation;
         if (options.springDamping !== undefined) this.springDamping = options.springDamping;
         if (options.springBlend !== undefined) this.springBlend = options.springBlend;
-        if (options.colorMix !== undefined) this.colorMix = options.colorMix;
+        if (typeof options.colorMix === 'boolean') {
+            this.colorMix = options.colorMix;
+        }
         if (options.colorBandStart !== undefined) this.colorBandStart = options.colorBandStart;
         if (options.colorBandEnd !== undefined) this.colorBandEnd = options.colorBandEnd;
         if (options.goldColor) this.goldColor = [...options.goldColor];
         if (options.haloWidth !== undefined) this.haloWidth = Math.max(0.001, options.haloWidth);
-        if (options.haloSpeed !== undefined) this.haloSpeed = Math.max(0, options.haloSpeed);
+        if (options.haloSpeed !== undefined) {
+            this.haloSpeed = Math.min(20, Math.max(0, options.haloSpeed));
+        }
         if (options.haloOpacity !== undefined) this.haloOpacity = Math.max(0, Math.min(1, options.haloOpacity));
         if (options.bounceStretch !== undefined) this.bounceStretch = Math.max(0, options.bounceStretch);
         if (options.wobbleAnchorLift !== undefined) {
@@ -654,7 +658,7 @@ export class GsplatWobbleEffect extends GsplatShaderEffect {
         this.setUniform('uWobbleBounceShape', cycle.bounceShape);
         this.setUniform('uWobbleStrength', cycle.wobbleStrength);
         this.setUniform('uWobbleLocalTime', cycle.wobbleLocalTime);
-        this.setUniform('uWobbleColorMix', this.colorMix);
+        this.setUniform('uWobbleColorMix', this.colorMix ? 1 : 0);
         this.setUniform('uWobbleColorBandStart', this.colorBandStart);
         this.setUniform('uWobbleColorBandEnd', this.colorBandEnd);
         this.setUniform('uWobbleGoldColor', this.goldColor);

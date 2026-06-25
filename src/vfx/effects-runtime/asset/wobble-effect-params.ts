@@ -11,10 +11,10 @@ export const DEFAULT_WOBBLE_EFFECT_PARAMS: Readonly<Record<string, unknown>> = {
     bounceAmplitude: 0.6,
     bounceStretch: 0.75,
     wobbleAnchorLift: 0.15,
-    colorMix: 1,
+    colorMix: true,
     goldColor: [1, 0.85, 0],
     haloWidth: 0.1,
-    haloSpeed: 1,
+    haloSpeed: 5,
     haloOpacity: 1,
     continuousRender: true
 };
@@ -24,11 +24,11 @@ export const DEFAULT_DEEP_MEDITATION_WOBBLE_PARAMS: Readonly<Record<string, unkn
     motionMode: 'deepMeditation',
     amplitude: 0.05,
     wobbleAxis: 'x',
-    colorMix: 1,
+    colorMix: true,
     goldColor: [148 / 255, 228 / 255, 230 / 255],
     haloOpacity: 0.17,
     haloWidth: 0.14,
-    haloSpeed: 0.25
+    haloSpeed: 1
 };
 
 export function getDefaultWobbleEffectParams(motionMode?: string): Record<string, unknown> {

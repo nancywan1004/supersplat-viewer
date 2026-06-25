@@ -76,14 +76,16 @@ export function buildWobbleOptions(ep: Record<string, unknown>): GsplatWobbleOpt
     if (typeof merged.cycleDuration === 'number') opts.cycleDuration = merged.cycleDuration;
     if (typeof merged.bounceDuration === 'number') opts.bounceDuration = merged.bounceDuration;
     if (typeof merged.bounceCount === 'number') opts.bounceCount = merged.bounceCount;
-    if (typeof merged.colorMix === 'number') opts.colorMix = merged.colorMix;
+    if (typeof merged.colorMix === 'boolean') opts.colorMix = merged.colorMix;
     if (typeof merged.colorBandStart === 'number') opts.colorBandStart = merged.colorBandStart;
     if (typeof merged.colorBandEnd === 'number') opts.colorBandEnd = merged.colorBandEnd;
     if (Array.isArray(merged.goldColor) && merged.goldColor.length === 3) {
         opts.goldColor = merged.goldColor as [number, number, number];
     }
     if (typeof merged.haloWidth === 'number') opts.haloWidth = merged.haloWidth;
-    if (typeof merged.haloSpeed === 'number') opts.haloSpeed = merged.haloSpeed;
+    if (typeof merged.haloSpeed === 'number') {
+        opts.haloSpeed = Math.min(20, Math.max(0, merged.haloSpeed));
+    }
     if (typeof merged.haloOpacity === 'number') opts.haloOpacity = merged.haloOpacity;
     if (typeof merged.bounceStretch === 'number') opts.bounceStretch = merged.bounceStretch;
     if (typeof merged.wobbleAnchorLift === 'number') opts.wobbleAnchorLift = merged.wobbleAnchorLift;
