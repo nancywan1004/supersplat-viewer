@@ -1,12 +1,29 @@
-import { Entity, Script, type CameraComponent } from 'playcanvas';
+import { Entity, Script, type AppBase, type CameraComponent, type CameraFrame } from 'playcanvas';
 
+import type { ExperienceSettings } from '../../../../settings';
+import { shouldDeferPersistentMount } from '../../../../settings-serialize/effects-sync';
+import type { Global } from '../../../../types';
 import {
     DEFAULT_WATERCOLOR_SETTINGS,
-    WatercolorController
+    WatercolorController,
+    type WatercolorSettings
 } from './watercolor';
 
 function findCameraEntity(root: Entity): Entity | null {
     return root.findComponent('camera')?.entity ?? null;
+}
+
+function readScriptGlobal(app: AppBase): Global | undefined {
+    return (app as { __global?: Global }).__global;
+}
+
+function readCameraFrame(app: AppBase): CameraFrame | null {
+    return (app as { getCameraFrame?: () => CameraFrame | null }).getCameraFrame?.() ?? null;
+}
+
+function notifyCameraPipelineChanged(app: AppBase): void {
+    readScriptGlobal(app)?.events?.fire('postEffect:changed');
+    app.renderNextFrame = true;
 }
 
 export class GsplatPersistentWatercolor extends Script {
@@ -34,14 +51,52 @@ export class GsplatPersistentWatercolor extends Script {
 
     private _camera: CameraComponent | null = null;
 
+    private readonly _onPostEffectChanged = () => {
+        if (!this.enabled || this._isRevealDeferred()) {
+            return;
+        }
+        this.applyConfig();
+    };
+
+    private readonly _onRevealRestart = () => {
+        if (this._isRevealDeferred()) {
+            this._controller?.suspendForReveal();
+            return;
+        }
+        this._controller?.resumeFromReveal();
+        this.app.once('frameend', () => {
+            if (this.enabled) {
+                this.applyConfig();
+            }
+        });
+    };
+
+    private readonly _onRevealComplete = () => {
+        this._controller?.resumeFromReveal();
+        if (this.enabled) {
+            this.applyConfig();
+        }
+    };
+
     initialize() {
         this.on('enable', () => this.applyConfig());
         this.on('disable', () => this.applyConfig());
+
+        const global = readScriptGlobal(this.app);
+        global?.events?.on('postEffect:changed', this._onPostEffectChanged);
+        global?.events?.on('revealRestart', this._onRevealRestart);
+        global?.events?.on('revealComplete', this._onRevealComplete);
+        this.app.on('nightFade:changedDetailed', this._onPostEffectChanged);
+
+        this.app.once('frameend', () => {
+            if (this.enabled && !this._isRevealDeferred()) {
+                this.applyConfig();
+            }
+        });
     }
 
     applyConfig() {
-        const cameraEntity = findCameraEntity(this.app.root);
-        const camera = cameraEntity?.camera ?? null;
+        const camera = findCameraEntity(this.app.root)?.camera ?? null;
         if (!camera) {
             console.warn('[watercolor] camera not found');
             return;
@@ -57,20 +112,14 @@ export class GsplatPersistentWatercolor extends Script {
             this._camera = camera;
         }
 
-        const getCameraFrame = () => (this.app as { getCameraFrame?: () => unknown }).getCameraFrame?.() ?? null;
-
-        this._controller.apply({
-            enabled: this.enabled,
-            bleed: this.bleed,
-            wash: this.wash,
-            blur: this.blur,
-            paper: this.paper,
-            paperColor: [...this.paperColor],
-            clarity: this.clarity,
-            saturation: this.saturation
-        }, { getCameraFrame: getCameraFrame as () => import('playcanvas').CameraFrame | null });
-
+        this._controller.apply(this._buildSettings(), {
+            getCameraFrame: () => readCameraFrame(this.app)
+        });
         this._controller.setTime(this.effectTime);
+
+        if (!this.enabled) {
+            notifyCameraPipelineChanged(this.app);
+        }
     }
 
     update(dt: number) {
@@ -87,8 +136,32 @@ export class GsplatPersistentWatercolor extends Script {
     }
 
     destroy() {
+        const global = readScriptGlobal(this.app);
+        global?.events?.off('postEffect:changed', this._onPostEffectChanged);
+        global?.events?.off('revealRestart', this._onRevealRestart);
+        global?.events?.off('revealComplete', this._onRevealComplete);
+        this.app.off('nightFade:changedDetailed', this._onPostEffectChanged);
+
         this._controller?.destroy();
         this._controller = null;
         this._camera = null;
+    }
+
+    private _buildSettings(): WatercolorSettings {
+        return {
+            enabled: this.enabled,
+            bleed: this.bleed,
+            wash: this.wash,
+            blur: this.blur,
+            paper: this.paper,
+            paperColor: [...this.paperColor],
+            clarity: this.clarity,
+            saturation: this.saturation
+        };
+    }
+
+    private _isRevealDeferred(): boolean {
+        const settings = readScriptGlobal(this.app)?.settings as ExperienceSettings | undefined;
+        return settings ? shouldDeferPersistentMount(settings) : false;
     }
 }

@@ -70,6 +70,12 @@ const normalizeColor = (
     ];
 };
 
+const colorsRoughlyEqual = (a: Color, b: Color): boolean =>
+    Math.abs(a.r - b.r) < 1e-4 &&
+    Math.abs(a.g - b.g) < 1e-4 &&
+    Math.abs(a.b - b.b) < 1e-4 &&
+    Math.abs(a.a - b.a) < 1e-4;
+
 export function watercolorPaperClearColor(raw: unknown): Color {
     const [r, g, b] = normalizeWatercolorSettings(raw).paperColor;
     return new Color(r, g, b, 1);
@@ -264,6 +270,10 @@ class WatercolorCameraFrameBridge {
         this.destroyOutputTarget();
     }
 
+    isMounted(): boolean {
+        return this.active;
+    }
+
     private unhook(): void {
         const renderPassCamera = this.hookedRenderPassCamera as { frameUpdate?: () => void } | null;
         if (renderPassCamera && this.originalFrameUpdate) {
@@ -331,6 +341,10 @@ export class WatercolorController {
     private readonly cameraFrameBridge: WatercolorCameraFrameBridge;
     private legacyMounted = false;
     private originalClearColor: Color | null = null;
+    private revealSuspended = false;
+    private deferredSyncGeneration = 0;
+    private lastApplySettings: unknown = null;
+    private lastApplyOptions: WatercolorApplyOptions | undefined;
 
     constructor(app: AppBase, camera: CameraComponent) {
         this.app = app;
@@ -341,29 +355,62 @@ export class WatercolorController {
 
     apply(rawSettings: unknown, options?: WatercolorApplyOptions): void {
         const settings = normalizeWatercolorSettings(rawSettings);
+        this.lastApplySettings = rawSettings;
+        this.lastApplyOptions = options;
         this.effect.setSettings(settings);
         this.cameraFrameBridge.setSettings(settings);
 
         if (!settings.enabled) {
+            this.revealSuspended = false;
             this.unmountAll();
             return;
         }
 
-        const cameraFrame = options?.getCameraFrame?.();
-        if (cameraFrame?.enabled && this.cameraFrameBridge.mount(cameraFrame)) {
-            this.unmountLegacy();
-        } else {
-            this.cameraFrameBridge.unmount();
-            this.mountLegacy();
+        if (this.revealSuspended) {
+            return;
         }
 
+        this.mountActivePostEffect(options);
         this.applyPaperClearColor(settings);
         this.app.renderNextFrame = true;
+        this.scheduleDeferredSync();
+    }
+
+    /** 阻塞型 reveal 播放期间暂停后处理；清屏由 viewer.configureCamera(deferred) 恢复。 */
+    suspendForReveal(): void {
+        if (this.revealSuspended) {
+            return;
+        }
+        this.revealSuspended = true;
+        this.cancelDeferredSync();
+        this.cameraFrameBridge.unmount();
+        this.unmountLegacy();
+        this.discardClearColorOverride();
+        this.app.renderNextFrame = true;
+    }
+
+    resumeFromReveal(): void {
+        this.revealSuspended = false;
     }
 
     setTime(time: number): void {
         this.effect.setTime(time);
         this.cameraFrameBridge.setTime(time);
+    }
+
+    destroy(): void {
+        this.unmountAll();
+        this.effect.destroy();
+    }
+
+    private mountActivePostEffect(options?: WatercolorApplyOptions): void {
+        const cameraFrame = options?.getCameraFrame?.();
+        if (cameraFrame?.enabled && this.cameraFrameBridge.mount(cameraFrame)) {
+            this.unmountLegacy();
+            return;
+        }
+        this.cameraFrameBridge.unmount();
+        this.mountLegacy();
     }
 
     private mountLegacy(): void {
@@ -386,18 +433,35 @@ export class WatercolorController {
     }
 
     private unmountAll(): void {
+        this.cancelDeferredSync();
         this.cameraFrameBridge.unmount();
         this.unmountLegacy();
         this.restoreClearColor();
         this.app.renderNextFrame = true;
     }
 
-    private applyPaperClearColor(settings: WatercolorSettings): void {
-        if (!this.originalClearColor) {
+    private cancelDeferredSync(): void {
+        this.deferredSyncGeneration++;
+    }
+
+    private applyPaperClearColor(settings?: WatercolorSettings): void {
+        if (this.revealSuspended) {
+            return;
+        }
+        const resolved = settings ?? normalizeWatercolorSettings(this.lastApplySettings);
+        if (!resolved.enabled) {
+            return;
+        }
+        const paper = watercolorPaperClearColor(resolved);
+        if (!this.originalClearColor && !colorsRoughlyEqual(this.camera.clearColor, paper)) {
             this.originalClearColor = this.camera.clearColor.clone();
         }
         this.camera.clearColorBuffer = true;
-        this.camera.clearColor = watercolorPaperClearColor(settings);
+        this.camera.clearColor = paper;
+    }
+
+    private discardClearColorOverride(): void {
+        this.originalClearColor = null;
     }
 
     private restoreClearColor(): void {
@@ -408,8 +472,28 @@ export class WatercolorController {
         this.originalClearColor = null;
     }
 
-    destroy(): void {
-        this.unmountAll();
-        this.effect.destroy();
+    /** CameraFrame 就绪与 configureCamera 清屏竞态：首帧 frameend 重挂 bridge 并恢复纸色。 */
+    private scheduleDeferredSync(): void {
+        if (this.revealSuspended) {
+            return;
+        }
+        const generation = ++this.deferredSyncGeneration;
+        this.app.once('frameend', () => {
+            if (generation !== this.deferredSyncGeneration) {
+                return;
+            }
+            const settings = normalizeWatercolorSettings(this.lastApplySettings);
+            if (!settings.enabled || this.revealSuspended) {
+                return;
+            }
+            const cameraFrame = this.lastApplyOptions?.getCameraFrame?.();
+            if (cameraFrame?.enabled && !this.cameraFrameBridge.isMounted()) {
+                if (this.cameraFrameBridge.mount(cameraFrame)) {
+                    this.unmountLegacy();
+                }
+            }
+            this.applyPaperClearColor(settings);
+            this.app.renderNextFrame = true;
+        });
     }
 }
