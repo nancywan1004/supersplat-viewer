@@ -111,6 +111,7 @@ export const PEN_SKETCH_MAIN_FRAGMENT_GLSL = `
     uniform float uFocus;
     uniform float uInkHue;
     uniform float uViewScale;
+    uniform vec3 uPaperColor;
     varying vec2 vUv0;
 
     float hash12(vec2 p) {
@@ -261,7 +262,7 @@ export const PEN_SKETCH_MAIN_FRAGMENT_GLSL = `
         hatching = 1.0 - pow(1.0 - clamp(hatching, 0.0, 1.0), mix(1.0, 1.55, darkEmphasis));
         float ink = clamp(max(contour, hatching), 0.0, 1.0);
 
-        vec3 paper = vec3(0.972, 0.961, 0.925);
+        vec3 paper = uPaperColor;
         float inkLuminance = clamp(0.038 - (uContrast - 1.15) * 0.52, 0.008, 0.55);
         vec3 blackInk = vec3(inkLuminance, inkLuminance * 0.94, inkLuminance * 0.84);
         vec3 blueInk = vec3(inkLuminance * 0.72, min(inkLuminance * 1.65, 0.74), min(inkLuminance * 2.85, 0.82));

@@ -92,7 +92,8 @@ const PEN_SKETCH = new Set([
     'toneStrength',
     'stroke',
     'focus',
-    'inkHue'
+    'inkHue',
+    'paperColor'
 ]);
 
 const WATERCOLOR = new Set([

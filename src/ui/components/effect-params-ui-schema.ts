@@ -535,7 +535,8 @@ const PEN_SKETCH_PARAM_UI: Record<string, PersistentParamUiOverride> = {
     hatching: { min: 0, max: 1.5, step: 0.01, default: DEFAULT_PEN_SKETCH_SETTINGS.hatching, label: '笔触浓度' },
     contrast: { min: 0.5, max: 1.8, step: 0.01, default: DEFAULT_PEN_SKETCH_SETTINGS.contrast, label: '整体灰度' },
     focus: { min: 0.3, max: 1.5, step: 0.01, default: DEFAULT_PEN_SKETCH_SETTINGS.focus, label: '中心精度' },
-    inkHue: { min: -1, max: 1, step: 0.01, default: DEFAULT_PEN_SKETCH_SETTINGS.inkHue, label: '墨色' }
+    inkHue: { min: -1, max: 1, step: 0.01, default: DEFAULT_PEN_SKETCH_SETTINGS.inkHue, label: '墨色' },
+    paperColor: { min: 0, max: 1, step: 0.01, default: [...DEFAULT_PEN_SKETCH_SETTINGS.paperColor], label: '纸张颜色' }
 };
 
 const WATERCOLOR_PARAM_UI: Record<string, PersistentParamUiOverride> = {

@@ -31,6 +31,7 @@ export type PenSketchSettings = {
     stroke: number;
     focus: number;
     inkHue: number;
+    paperColor: [number, number, number];
 };
 
 export type PenSketchApplyOptions = {
@@ -47,7 +48,8 @@ export const DEFAULT_PEN_SKETCH_SETTINGS: PenSketchSettings = {
     toneStrength: 3.82,
     stroke: 1.55,
     focus: 1.1,
-    inkHue: 0
+    inkHue: 0,
+    paperColor: [0.972, 0.961, 0.925]
 };
 
 const ANALYSIS_SCALE = 0.25;
@@ -56,6 +58,32 @@ const ANALYSIS_TARGET_COUNT = 5;
 const clamp = (v: number, min: number, max: number): number => Math.min(max, Math.max(min, v));
 const finiteOr = (v: unknown, fallback: number): number =>
     (typeof v === 'number' && Number.isFinite(v)) ? v : fallback;
+const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
+
+const colorsRoughlyEqual = (a: Color, b: Color): boolean =>
+    Math.abs(a.r - b.r) < 1e-4 &&
+    Math.abs(a.g - b.g) < 1e-4 &&
+    Math.abs(a.b - b.b) < 1e-4 &&
+    Math.abs(a.a - b.a) < 1e-4;
+
+const normalizeColor = (
+    v: unknown,
+    fallback: [number, number, number]
+): [number, number, number] => {
+    if (!Array.isArray(v) || v.length < 3) {
+        return [...fallback];
+    }
+    return [
+        clamp01(finiteOr(v[0], fallback[0])),
+        clamp01(finiteOr(v[1], fallback[1])),
+        clamp01(finiteOr(v[2], fallback[2]))
+    ];
+};
+
+export function penPaperClearColor(raw: unknown): Color {
+    const [r, g, b] = normalizePenSketchSettings(raw).paperColor;
+    return new Color(r, g, b, 1);
+}
 
 export function normalizePenSketchSettings(raw: unknown): PenSketchSettings {
     const obj = (raw && typeof raw === 'object') ? raw as Record<string, unknown> : {};
@@ -68,7 +96,8 @@ export function normalizePenSketchSettings(raw: unknown): PenSketchSettings {
         toneStrength: clamp(finiteOr(obj.toneStrength, DEFAULT_PEN_SKETCH_SETTINGS.toneStrength), 2, 8),
         stroke: clamp(finiteOr(obj.stroke, DEFAULT_PEN_SKETCH_SETTINGS.stroke), 0.5, 1.8),
         focus: clamp(finiteOr(obj.focus, DEFAULT_PEN_SKETCH_SETTINGS.focus), 0.3, 1.5),
-        inkHue: clamp(finiteOr(obj.inkHue, DEFAULT_PEN_SKETCH_SETTINGS.inkHue), -1, 1)
+        inkHue: clamp(finiteOr(obj.inkHue, DEFAULT_PEN_SKETCH_SETTINGS.inkHue), -1, 1),
+        paperColor: normalizeColor(obj.paperColor, DEFAULT_PEN_SKETCH_SETTINGS.paperColor)
     };
 }
 
@@ -198,6 +227,7 @@ class PenSketchPostEffect extends PostEffect {
         scope.resolve('uFocus').setValue(this.settings.focus);
         scope.resolve('uInkHue').setValue(this.settings.inkHue);
         scope.resolve('uViewScale').setValue(this.viewScale);
+        scope.resolve('uPaperColor').setValue(this.settings.paperColor);
 
         this.drawQuad(outputTarget, this.mainShader, rect as any);
     }
@@ -324,6 +354,10 @@ export class PenSketchController {
     private readonly cameraFrameBridge: PenSketchCameraFrameBridge;
     private legacyMounted = false;
     private originalClearColor: Color | null = null;
+    private revealSuspended = false;
+    private deferredSyncGeneration = 0;
+    private lastApplySettings: unknown = null;
+    private lastApplyOptions: PenSketchApplyOptions | undefined;
 
     constructor(app: AppBase, camera: CameraComponent) {
         this.app = app;
@@ -334,29 +368,62 @@ export class PenSketchController {
 
     apply(rawSettings: unknown, options?: PenSketchApplyOptions): void {
         const settings = normalizePenSketchSettings(rawSettings);
+        this.lastApplySettings = rawSettings;
+        this.lastApplyOptions = options;
         this.effect.setSettings(settings);
         this.cameraFrameBridge.setSettings(settings);
 
         if (!settings.enabled) {
+            this.revealSuspended = false;
             this.unmountAll();
             return;
         }
 
-        const cameraFrame = options?.getCameraFrame?.();
-        if (cameraFrame?.enabled && this.cameraFrameBridge.mount(cameraFrame)) {
-            this.unmountLegacy();
-        } else {
-            this.cameraFrameBridge.unmount();
-            this.mountLegacy();
+        if (this.revealSuspended) {
+            return;
         }
 
-        this.applyTransparentClearColor();
+        this.mountActivePostEffect(options);
+        this.applyPaperClearColor(settings);
         this.app.renderNextFrame = true;
+        this.scheduleDeferredSync();
+    }
+
+    /** 阻塞型 reveal 播放期间暂停后处理；清屏由 viewer.configureCamera(deferred) 恢复。 */
+    suspendForReveal(): void {
+        if (this.revealSuspended) {
+            return;
+        }
+        this.revealSuspended = true;
+        this.cancelDeferredSync();
+        this.cameraFrameBridge.unmount();
+        this.unmountLegacy();
+        this.discardClearColorOverride();
+        this.app.renderNextFrame = true;
+    }
+
+    resumeFromReveal(): void {
+        this.revealSuspended = false;
     }
 
     setViewScale(viewScale: number): void {
         this.effect.setViewScale(viewScale);
         this.cameraFrameBridge.setViewScale(viewScale);
+    }
+
+    destroy(): void {
+        this.unmountAll();
+        this.effect.destroy();
+    }
+
+    private mountActivePostEffect(options?: PenSketchApplyOptions): void {
+        const cameraFrame = options?.getCameraFrame?.();
+        if (cameraFrame?.enabled && this.cameraFrameBridge.mount(cameraFrame)) {
+            this.unmountLegacy();
+            return;
+        }
+        this.cameraFrameBridge.unmount();
+        this.mountLegacy();
     }
 
     private mountLegacy(): void {
@@ -379,18 +446,35 @@ export class PenSketchController {
     }
 
     private unmountAll(): void {
+        this.cancelDeferredSync();
         this.cameraFrameBridge.unmount();
         this.unmountLegacy();
         this.restoreClearColor();
         this.app.renderNextFrame = true;
     }
 
-    private applyTransparentClearColor(): void {
-        if (!this.originalClearColor) {
+    private cancelDeferredSync(): void {
+        this.deferredSyncGeneration++;
+    }
+
+    private applyPaperClearColor(settings?: PenSketchSettings): void {
+        if (this.revealSuspended) {
+            return;
+        }
+        const resolved = settings ?? normalizePenSketchSettings(this.lastApplySettings);
+        if (!resolved.enabled) {
+            return;
+        }
+        const paper = penPaperClearColor(resolved);
+        if (!this.originalClearColor && !colorsRoughlyEqual(this.camera.clearColor, paper)) {
             this.originalClearColor = this.camera.clearColor.clone();
         }
         this.camera.clearColorBuffer = true;
-        this.camera.clearColor = new Color(1, 1, 1, 0);
+        this.camera.clearColor = paper;
+    }
+
+    private discardClearColorOverride(): void {
+        this.originalClearColor = null;
     }
 
     private restoreClearColor(): void {
@@ -401,8 +485,28 @@ export class PenSketchController {
         this.originalClearColor = null;
     }
 
-    destroy(): void {
-        this.unmountAll();
-        this.effect.destroy();
+    /** CameraFrame 就绪与 configureCamera 清屏竞态：首帧 frameend 重挂 bridge 并恢复纸色。 */
+    private scheduleDeferredSync(): void {
+        if (this.revealSuspended) {
+            return;
+        }
+        const generation = ++this.deferredSyncGeneration;
+        this.app.once('frameend', () => {
+            if (generation !== this.deferredSyncGeneration) {
+                return;
+            }
+            const settings = normalizePenSketchSettings(this.lastApplySettings);
+            if (!settings.enabled || this.revealSuspended) {
+                return;
+            }
+            const cameraFrame = this.lastApplyOptions?.getCameraFrame?.();
+            if (cameraFrame?.enabled && !this.cameraFrameBridge.isMounted()) {
+                if (this.cameraFrameBridge.mount(cameraFrame)) {
+                    this.unmountLegacy();
+                }
+            }
+            this.applyPaperClearColor(settings);
+            this.app.renderNextFrame = true;
+        });
     }
 }

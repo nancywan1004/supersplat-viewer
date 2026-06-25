@@ -1,12 +1,29 @@
-import { Entity, Script, Vec3, type CameraComponent } from 'playcanvas';
+import { Entity, Script, Vec3, type AppBase, type CameraComponent, type CameraFrame } from 'playcanvas';
 
+import type { ExperienceSettings } from '../../../../settings';
+import { shouldDeferPersistentMount } from '../../../../settings-serialize/effects-sync';
+import type { Global } from '../../../../types';
 import {
     DEFAULT_PEN_SKETCH_SETTINGS,
-    PenSketchController
+    PenSketchController,
+    type PenSketchSettings
 } from './pen-sketch';
 
 function findCameraEntity(root: Entity): Entity | null {
     return root.findComponent('camera')?.entity ?? null;
+}
+
+function readScriptGlobal(app: AppBase): Global | undefined {
+    return (app as { __global?: Global }).__global;
+}
+
+function readCameraFrame(app: AppBase): CameraFrame | null {
+    return (app as { getCameraFrame?: () => CameraFrame | null }).getCameraFrame?.() ?? null;
+}
+
+function notifyCameraPipelineChanged(app: AppBase): void {
+    readScriptGlobal(app)?.events?.fire('postEffect:changed');
+    app.renderNextFrame = true;
 }
 
 export class GsplatPersistentPenSketch extends Script {
@@ -32,6 +49,8 @@ export class GsplatPersistentPenSketch extends Script {
 
     inkHue = DEFAULT_PEN_SKETCH_SETTINGS.inkHue;
 
+    paperColor: [number, number, number] = [...DEFAULT_PEN_SKETCH_SETTINGS.paperColor];
+
     private _controller: PenSketchController | null = null;
 
     private _camera: CameraComponent | null = null;
@@ -42,14 +61,52 @@ export class GsplatPersistentPenSketch extends Script {
 
     private readonly _focusPos = new Vec3();
 
+    private readonly _onPostEffectChanged = () => {
+        if (!this.enabled || this._isRevealDeferred()) {
+            return;
+        }
+        this.applyConfig();
+    };
+
+    private readonly _onRevealRestart = () => {
+        if (this._isRevealDeferred()) {
+            this._controller?.suspendForReveal();
+            return;
+        }
+        this._controller?.resumeFromReveal();
+        this.app.once('frameend', () => {
+            if (this.enabled) {
+                this.applyConfig();
+            }
+        });
+    };
+
+    private readonly _onRevealComplete = () => {
+        this._controller?.resumeFromReveal();
+        if (this.enabled) {
+            this.applyConfig();
+        }
+    };
+
     initialize() {
         this.on('enable', () => this.applyConfig());
         this.on('disable', () => this.applyConfig());
+
+        const global = readScriptGlobal(this.app);
+        global?.events?.on('postEffect:changed', this._onPostEffectChanged);
+        global?.events?.on('revealRestart', this._onRevealRestart);
+        global?.events?.on('revealComplete', this._onRevealComplete);
+        this.app.on('nightFade:changedDetailed', this._onPostEffectChanged);
+
+        this.app.once('frameend', () => {
+            if (this.enabled && !this._isRevealDeferred()) {
+                this.applyConfig();
+            }
+        });
     }
 
     applyConfig() {
-        const cameraEntity = findCameraEntity(this.app.root);
-        const camera = cameraEntity?.camera ?? null;
+        const camera = findCameraEntity(this.app.root)?.camera ?? null;
         if (!camera) {
             console.warn('[pen-sketch] camera not found');
             return;
@@ -66,19 +123,13 @@ export class GsplatPersistentPenSketch extends Script {
             this._referenceViewDistance = 0;
         }
 
-        const getCameraFrame = () => (this.app as { getCameraFrame?: () => unknown }).getCameraFrame?.() ?? null;
+        this._controller.apply(this._buildSettings(), {
+            getCameraFrame: () => readCameraFrame(this.app)
+        });
 
-        this._controller.apply({
-            enabled: this.enabled,
-            outlineWidth: this.outlineWidth,
-            edgeStrength: this.edgeStrength,
-            hatching: this.hatching,
-            contrast: this.contrast,
-            toneStrength: this.toneStrength,
-            stroke: this.stroke,
-            focus: this.focus,
-            inkHue: this.inkHue
-        }, { getCameraFrame: getCameraFrame as () => import('playcanvas').CameraFrame | null });
+        if (!this.enabled) {
+            notifyCameraPipelineChanged(this.app);
+        }
     }
 
     update() {
@@ -108,8 +159,34 @@ export class GsplatPersistentPenSketch extends Script {
     }
 
     destroy() {
+        const global = readScriptGlobal(this.app);
+        global?.events?.off('postEffect:changed', this._onPostEffectChanged);
+        global?.events?.off('revealRestart', this._onRevealRestart);
+        global?.events?.off('revealComplete', this._onRevealComplete);
+        this.app.off('nightFade:changedDetailed', this._onPostEffectChanged);
+
         this._controller?.destroy();
         this._controller = null;
         this._camera = null;
+    }
+
+    private _buildSettings(): PenSketchSettings {
+        return {
+            enabled: this.enabled,
+            outlineWidth: this.outlineWidth,
+            edgeStrength: this.edgeStrength,
+            hatching: this.hatching,
+            contrast: this.contrast,
+            toneStrength: this.toneStrength,
+            stroke: this.stroke,
+            focus: this.focus,
+            inkHue: this.inkHue,
+            paperColor: [...this.paperColor]
+        };
+    }
+
+    private _isRevealDeferred(): boolean {
+        const settings = readScriptGlobal(this.app)?.settings as ExperienceSettings | undefined;
+        return settings ? shouldDeferPersistentMount(settings) : false;
     }
 }

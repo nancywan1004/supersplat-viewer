@@ -53,6 +53,8 @@ import {
 import { POINTILLISM_DEFAULTS } from './vfx/effects-runtime/persistent/stylisation/pointillism-stipple-shaders';
 import { charcoalPaperClearColor } from './vfx/effects-runtime/persistent/stylisation/charcoal-sketch';
 import { isCharcoalSketchRuntimeActive, readCharcoalSketchEffectParams } from './vfx/effects-runtime/persistent/stylisation/charcoal-sketch-runtime';
+import { penPaperClearColor } from './vfx/effects-runtime/persistent/stylisation/pen-sketch';
+import { isPenSketchRuntimeActive, readPenSketchEffectParams } from './vfx/effects-runtime/persistent/stylisation/pen-sketch-runtime';
 import { buildSkyboxPsChunk } from './vfx/effects-runtime/persistent/stylisation/skybox-pointillism-shaders';
 import { refreshSkyboxMaterialShader } from './vfx/effects-runtime/persistent/stylisation/skybox-pointillism-runtime';
 import { CameraPathVisualizer, type VisualizerOptions } from './camera-path-visualizer';
@@ -261,10 +263,6 @@ const isYiyunDianranPostEffectActive = (settings: ExperienceSettings): boolean =
         return params.postEffectEnabled;
     }
     return true;
-};
-
-const isPenSketchPersistentActive = (settings: ExperienceSettings): boolean => {
-    return readPersistentTrackEffects(settings, 'stylization').some(e => e.type === 'pen-sketch');
 };
 
 const isPalettePixelPersistentActive = (settings: ExperienceSettings): boolean => {
@@ -1138,7 +1136,8 @@ z: ${cameraInfo.target.z.toFixed(6)}
         const { background } = settings;
         const applyPersistentStylizationCameraEffects = !this.deferPersistentStylizationCameraEffects;
         const nostalgicComicActive = applyPersistentStylizationCameraEffects && isNostalgicComicPersistentActive(settings);
-        const penSketchActive = applyPersistentStylizationCameraEffects && isPenSketchPersistentActive(settings);
+        const penSketchActive = applyPersistentStylizationCameraEffects
+            && isPenSketchRuntimeActive(settings, this.revealController?.getGsplatEntity());
         const yiyunDianranPostEffectActive = applyPersistentStylizationCameraEffects && isYiyunDianranPostEffectActive(settings);
         const palettePixelActive = applyPersistentStylizationCameraEffects && isPalettePixelPersistentActive(settings);
         const charcoalSketchActive = applyPersistentStylizationCameraEffects
@@ -1222,9 +1221,12 @@ z: ${cameraInfo.target.z.toFixed(6)}
                 return this === app.graphicsDevice.backBuffer ? true : origIsColorBufferSrgb.call(this, index);
             };
 
-            if (nostalgicComicActive || penSketchActive) {
+            if (nostalgicComicActive) {
                 camera.camera.clearColorBuffer = true;
                 camera.camera.clearColor = new Color(1, 1, 1, 0);
+            } else if (penSketchActive) {
+                camera.camera.clearColorBuffer = true;
+                camera.camera.clearColor = penPaperClearColor(readPenSketchEffectParams(settings));
             } else if (charcoalSketchActive) {
                 camera.camera.clearColorBuffer = true;
                 camera.camera.clearColor = charcoalPaperClearColor(readCharcoalSketchEffectParams(settings));
@@ -1255,9 +1257,12 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
             if (!app.xr.active) {
                 camera.camera.toneMapping = tonemapTable[settings.tonemapping];
-                if (nostalgicComicActive || penSketchActive) {
+                if (nostalgicComicActive) {
                     camera.camera.clearColorBuffer = true;
                     camera.camera.clearColor = new Color(1, 1, 1, 0);
+                } else if (penSketchActive) {
+                    camera.camera.clearColorBuffer = true;
+                    camera.camera.clearColor = penPaperClearColor(readPenSketchEffectParams(settings));
                 } else if (charcoalSketchActive) {
                     camera.camera.clearColorBuffer = true;
                     camera.camera.clearColor = charcoalPaperClearColor(readCharcoalSketchEffectParams(settings));
