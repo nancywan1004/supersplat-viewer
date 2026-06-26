@@ -489,19 +489,23 @@ export const fetchOriginalTransform = async (
             return { ok: true, found: false };
         }
 
-        const fileResponse = await fetch(entry.fileUrl);
-        if (!fileResponse.ok) {
-            return {
-                ok: false,
-                message: `下载 transform.json 失败（HTTP ${fileResponse.status}）`
-            };
+        try {
+            const fileResponse = await fetch(entry.fileUrl);
+            if (!fileResponse.ok) {
+                console.warn(
+                    `[universe] transform.json 下载失败（HTTP ${fileResponse.status}），按未找到处理`
+                );
+                return { ok: true, found: false };
+            }
+            const transform = await fileResponse.json() as unknown;
+            return { ok: true, found: true, transform, fileUrl: entry.fileUrl };
+        } catch (downloadError) {
+            console.warn('[universe] transform.json 加载失败，按未找到处理:', downloadError);
+            return { ok: true, found: false };
         }
-        const transform = await fileResponse.json() as unknown;
-        return { ok: true, found: true, transform, fileUrl: entry.fileUrl };
     } catch (error) {
-        console.error('fetchOriginalTransform 失败:', error);
-        const message = error instanceof Error ? error.message : String(error);
-        return { ok: false, message };
+        console.warn('fetchOriginalTransform 失败，按未找到 transform.json 处理:', error);
+        return { ok: true, found: false };
     }
 };
 
