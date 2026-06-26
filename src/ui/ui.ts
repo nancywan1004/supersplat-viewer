@@ -809,17 +809,18 @@ const initUI = (global: Global) => {
                 });
             });
         }
-        const syncResetBaseline = () => {
-            const payload = serializeExperienceSettings(global);
-            editModeEnteredSettingsData = JSON.parse(JSON.stringify(payload)) as ExperienceSettings;
-            editModeEnteredSettingsSnapshot = getComparableSettingsStringFromSnapshot(payload);
-            if (config.trackEditHistory) {
-                initEditHistory(global, editModeEnteredSettingsData);
-                events.fire('editHistory:stateChanged', {
-                    canUndo: canUndo(global),
-                    canRedo: canRedo(global)
-                });
+        /** 重置后仅刷新 undo 栈；退出时的 needsSave 基线不变（重置不算已保存） */
+        const syncResetEditHistory = () => {
+            if (!config.trackEditHistory) {
+                return;
             }
+            const payload = serializeExperienceSettings(global);
+            const resetSnapshot = JSON.parse(JSON.stringify(payload)) as ExperienceSettings;
+            initEditHistory(global, resetSnapshot);
+            events.fire('editHistory:stateChanged', {
+                canUndo: canUndo(global),
+                canRedo: canRedo(global)
+            });
         };
 
         const runSettingsReset = async () => {
@@ -867,7 +868,7 @@ const initUI = (global: Global) => {
 
                     sendEditProtocolMessage({ type: 'SETTINGS_RESET' });
                     const applied = await waitForResetResult();
-                    syncResetBaseline();
+                    syncResetEditHistory();
                     const msg = applied.pathFrom === 'original'
                         ? '场景已重置（已应用云端初始相机路径）'
                         : '场景已重置（未找到 transform.json，已保留当前动画路径与默认视角）';
@@ -878,7 +879,7 @@ const initUI = (global: Global) => {
                         showEditToast(result.message || '重置失败', 'error');
                         return;
                     }
-                    syncResetBaseline();
+                    syncResetEditHistory();
                     const msg = result.pathFrom === 'original'
                         ? '场景已重置（已应用云端初始相机路径）'
                         : '场景已重置（未找到 transform.json，已保留当前动画路径与默认视角）';

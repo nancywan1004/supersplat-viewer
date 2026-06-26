@@ -559,10 +559,10 @@ const initPostMessageBridge = (global: Global) => {
                     break;
                 }
                 if (state.editMode) {
-                    const initialSnapshot = serializeExperienceSettings(global);
-                    setBaseline(initialSnapshot);
+                    const resetSnapshot = serializeExperienceSettings(global);
+                    // 重置会改 settings，但未保存；勿更新退出时的 needsSave 基线（仍对比进入编辑/上次保存）
                     if (config.trackEditHistory) {
-                        initEditHistory(global, initialSnapshot);
+                        initEditHistory(global, resetSnapshot);
                         postToParent('EDIT_HISTORY_STATE', { canUndo: canUndo(global), canRedo: canRedo(global) });
                     }
                 } else {
