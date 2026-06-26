@@ -169,13 +169,16 @@ export async function resetSceneSettings(global: Global): Promise<ResetResult> {
 
     if (projectId != null && projectId !== '' && token) {
         const fetchResult = await fetchOriginalTransform(projectId, token);
-        if (fetchResult.ok === false) {
-            return fetchResult;
-        }
-        if (fetchResult.found) {
+        if (fetchResult.ok && fetchResult.found) {
             pathFrom = 'original';
             snapshot = settingsFromTransform(fetchResult.transform, noReveal);
         } else {
+            if (fetchResult.ok === false) {
+                console.warn(
+                    '[settings-reset] transform.json 不可用，保留当前相机路径并继续重置:',
+                    fetchResult.message
+                );
+            }
             snapshot = settingsKeepCamera(global, noReveal);
         }
     } else {
