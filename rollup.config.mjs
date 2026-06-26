@@ -17,7 +17,7 @@ import dts from 'rollup-plugin-dts';
 import crypto from 'crypto';
 
 /** PlayCanvas ESM vendor（与 import map / src/index.html 中文件名一致） */
-const PLAYCANVAS_VENDOR_FILE = 'playcanvas-2.19.2.js';
+const PLAYCANVAS_VENDOR_FILE = 'playcanvas-2.20.0.js';
 
 // 判断是否需要生成完整 package
 const isPackageBuild = process.env.BUILD_PACKAGE === 'true';
