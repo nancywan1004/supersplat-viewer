@@ -113,7 +113,11 @@ import { VoxelDebugOverlay } from './voxel-debug-overlay';
 // String.replace wrapper that warns when the source substring is missing, so
 // shader chunk patches against the engine fail loudly instead of silently
 // producing the original chunk.
-const patchChunk = (source: string, search: string, replacement: string, name: string): string => {
+const patchChunk = (source: string | undefined, search: string, replacement: string, name: string): string => {
+    if (source == null) {
+        console.warn(`patchChunk: source missing for '${name}', patch skipped.`);
+        return '';
+    }
     if (!source.includes(search)) {
         console.warn(`patchChunk: substring not found in '${name}', shader chunk patch may be out of sync with the engine.`);
     }
@@ -393,8 +397,7 @@ class Viewer {
         },
         wgsl: {
             gsplatOutputVS: string,
-            skyboxPS: string,
-            gsplatTileCompositePS: string
+            skyboxPS: string
         }
     };
 
@@ -449,8 +452,7 @@ class Viewer {
             },
             wgsl: {
                 gsplatOutputVS: wgsl.get('gsplatOutputVS'),
-                skyboxPS: wgsl.get('skyboxPS'),
-                gsplatTileCompositePS: wgsl.get('gsplatTileCompositePS')
+                skyboxPS: wgsl.get('skyboxPS')
             }
         };
 
@@ -1215,17 +1217,6 @@ z: ${cameraInfo.target.z.toFixed(6)}
             // gammaCorrectOutput call which is a no-op under CameraFrame's GAMMA_NONE)
             this.syncSkyboxShaderChunks(app, pointillismSkyboxActive, true);
 
-            // force tile composite shader to write gamma-space colors (inline pow replaces the
-            // gammaCorrectOutput call which is a no-op under CameraFrame's GAMMA_NONE)
-            ShaderChunks.get(app.graphicsDevice, 'wgsl').set('gsplatTileCompositePS',
-                patchChunk(
-                    this.origChunks.wgsl.gsplatTileCompositePS,
-                    'gammaCorrectOutput(toneMap(linear.rgb))',
-                    'pow(toneMap(linear.rgb) + 0.0000001, vec3f(1.0 / 2.2))',
-                    'wgsl gsplatTileCompositePS gamma override'
-                )
-            );
-
             // ensure the final compose blit doesn't perform linear->gamma conversion.
             RenderTarget.prototype.isColorBufferSrgb = function (index) {
                 return this === app.graphicsDevice.backBuffer ? true : origIsColorBufferSrgb.call(this, index);
@@ -1263,7 +1254,6 @@ z: ${cameraInfo.target.z.toFixed(6)}
             ShaderChunks.get(app.graphicsDevice, 'glsl').set('gsplatOutputVS', this.origChunks.glsl.gsplatOutputVS);
             ShaderChunks.get(app.graphicsDevice, 'wgsl').set('gsplatOutputVS', this.origChunks.wgsl.gsplatOutputVS);
             this.syncSkyboxShaderChunks(app, pointillismSkyboxActive, false);
-            ShaderChunks.get(app.graphicsDevice, 'wgsl').set('gsplatTileCompositePS', this.origChunks.wgsl.gsplatTileCompositePS);
 
             // restore original isColorBufferSrgb behavior
             RenderTarget.prototype.isColorBufferSrgb = origIsColorBufferSrgb;

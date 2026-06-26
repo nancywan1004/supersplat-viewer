@@ -275,11 +275,16 @@ class PointillismPostEffect extends PostEffect {
                 return length(vec2(gx, gy));
             }
 
-            float edgeFactor(vec2 uv) {
-                float gradBlur = sobelGradBlur(uv);
-                float gradRaw = sobelGradRaw(uv);
+            float edgeFactorFromGrad(vec2 uv, float gradBlur, bool gradIsRaw) {
                 float edgeW = clamp(uEdgeStrength, 0.0, 1.0);
-                float grad = mix(gradBlur, max(gradBlur, gradRaw * 0.55), edgeW);
+                if (edgeW < 0.001) {
+                    return 0.0;
+                }
+                float grad = gradBlur;
+                if (!gradIsRaw && edgeW > 0.12) {
+                    float gradRaw = sobelGradRaw(uv);
+                    grad = mix(gradBlur, max(gradBlur, gradRaw * 0.55), edgeW);
+                }
                 float thresh = mix(0.008, 0.22, clamp(uEdgeThreshold, 0.02, 1.0));
                 return smoothstep(thresh, thresh * 2.4, grad);
             }
@@ -321,8 +326,7 @@ class PointillismPostEffect extends PostEffect {
             }
 
             // 结构边缘（blur sobel，阈值偏高，避免点颗粒误判）
-            float structureEdgeMask(vec2 uv) {
-                float grad = sobelGradBlur(uv);
+            float structureEdgeMaskFromGrad(float grad) {
                 return smoothstep(0.014, 0.048, grad);
             }
 
@@ -439,8 +443,20 @@ class PointillismPostEffect extends PostEffect {
                 vec3 sceneColor = rawScene;
                 vec3 blur = boxBlur5(uv);
                 float grain = clamp(length(rawScene - blur) * 4.2, 0.0, 1.0);
-                float structEdge = structureEdgeMask(uv);
+
+                float edgeW = clamp(uEdgeStrength, 0.0, 1.0);
+                float structure = clamp(uSourceStructureBlend, 0.0, 1.0);
+                float flatDesire = 1.0 - structure;
                 float skyStrength = clamp(uSkyboxPointillismStrength, 0.0, 1.0);
+                bool needStructureGrad = edgeW > 0.001 || flatDesire > 0.04 || skyStrength > 0.001;
+
+                float gradBlur = 0.0;
+                bool gradIsRaw = false;
+                if (needStructureGrad) {
+                    gradIsRaw = edgeW > 0.1;
+                    gradBlur = gradIsRaw ? sobelGradRaw(uv) : sobelGradBlur(uv);
+                }
+                float structEdge = needStructureGrad ? structureEdgeMaskFromGrad(gradBlur) : 0.0;
                 float skyProtect = (skyStrength > 0.001)
                     ? skyContentProtectMask(uv, rawScene, blur, structEdge, grain) * skyStrength
                     : 0.0;
@@ -455,15 +471,16 @@ class PointillismPostEffect extends PostEffect {
                 // rawScene 保持未调对比，供下方 sky protect 回混（天空对比度走 skyboxPS）。
                 sceneColor = applyContrast(sceneColor, uLevelRange);
 
-                float structure = clamp(uSourceStructureBlend, 0.0, 1.0);
-                float flatDesire = 1.0 - structure;
                 float interiorMask = (1.0 - structEdge) * (1.0 - structEdge);
 
                 float dotMask = smoothstep(0.20, 0.52, grain);
                 float flattenMask = interiorMask * (1.0 - dotMask * structure * 0.62);
 
                 float flatMix = mix(0.06, 0.58, flatDesire) * flattenMask;
-                vec3 flattened = flatOpticalMix(uv, sceneColor, flatMix);
+                vec3 flattened = sceneColor;
+                if (flatMix > 0.015) {
+                    flattened = flatOpticalMix(uv, sceneColor, flatMix);
+                }
                 float quantAmt = flatDesire * flattenMask * 0.52;
                 flattened = mix(flattened, quantizeInteriorLuma(flattened, quantAmt), quantAmt);
 
@@ -474,8 +491,7 @@ class PointillismPostEffect extends PostEffect {
                 color = saturateColor(color, postSat);
                 color = mix(color, color * uPaperTint, uPaperStrength * 0.42);
 
-                float edgeW = clamp(uEdgeStrength, 0.0, 1.0);
-                float edge = edgeFactor(uv);
+                float edge = edgeFactorFromGrad(uv, gradBlur, gradIsRaw);
                 float edgeAmt = clamp(edge * mix(0.0, 1.45, edgeW), 0.0, 1.0) * structEdge;
                 vec3 highPass = sceneColor - blur;
                 vec3 sharpen = clamp(sceneColor + highPass * mix(1.2, 3.8, edgeW), 0.0, 1.0);

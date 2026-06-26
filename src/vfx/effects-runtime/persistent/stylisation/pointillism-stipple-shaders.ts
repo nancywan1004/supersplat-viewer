@@ -224,12 +224,6 @@ vec3 pointHash33(vec3 p) {
     );
 }
 
-float pointOrderedGate(vec3 center, float chance) {
-    vec3 cell = floor(center * 20.0);
-    float h = pointHash13(cell + vec3(uPointillismSeed * 0.11));
-    return step(h, chance);
-}
-
 vec3 pointSaturate(vec3 c, float amount) {
     float l = pointLuma(c);
     return mix(vec3(l), c, amount);
@@ -339,67 +333,53 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
     float screenTypical = viewDist * uPointillismTypicalDotRadiusSlope;
     float screenCap = viewDist * uPointillismMaxDotRadiusSlope;
 
-    float prelimDensityT = 1.0 - gap;
-    float prelimOverlap = mix(1.36, 0.62, gap) * mix(0.92, 1.08, prelimDensityT);
-    float prelimDotSize = originalSize * prelimOverlap * max(0.001, uPointillismDotScale);
-    prelimDotSize = min(prelimDotSize, screenCap);
-    prelimDotSize = max(prelimDotSize, screenMin * mix(0.46, 0.14, gap));
-    float sizeRatio = originalSize / max(prelimDotSize, 0.000001);
-    float interiorAnchor = smoothstep(1.0, 2.5, sizeRatio);
+    float sizeRel = originalSize / max(screenTypical * max(0.001, uPointillismDotScale), 0.000001);
+    float interiorAnchor = smoothstep(1.0, 2.5, sizeRel);
 
-    // 平坦区 anchor splat：随 (1 - 原结构保留) 与 gapFill 提高覆盖
     float coverBoost = max(fillT, flatDesire * interiorAnchor * 0.75);
     float coverageGap = gap * (1.0 - coverBoost);
     float densityT = 1.0 - coverageGap;
-    float densityBoost = mix(0.92, 1.08, densityT);
-    float overlap = mix(1.36, 0.62, coverageGap) * densityBoost;
+    float overlap = mix(1.36, 0.62, coverageGap) * mix(0.92, 1.08, densityT);
 
-    // 间距驱动：gapSpacing ↑ → overlap ↓ → 点间缝隙更大（视距自适应）
     float dotSize = originalSize * overlap * max(0.001, uPointillismDotScale);
     float typicalTarget = screenTypical * overlap * max(0.001, uPointillismDotScale);
-    float sizeRel = originalSize / max(screenTypical, 0.001);
     float blendTypical = (1.0 - smoothstep(0.42, 1.65, sizeRel)) * 0.88;
     dotSize = mix(dotSize, typicalTarget, blendTypical);
     dotSize = min(dotSize, screenCap);
     dotSize = max(dotSize, screenMin * mix(0.46, 0.14, coverageGap));
 
-    float cellScale = mix(14.0, 36.0, densityT);
-    vec3 sizeCell = floor(originalCenter * cellScale);
-    float sizePick = mix(0.96, 1.04, pointHash13(sizeCell + vec3(uPointillismSeed * 0.05)));
-    dotSize *= sizePick;
+    vec3 sizeCell = floor(originalCenter * mix(14.0, 36.0, densityT));
+    dotSize *= mix(0.96, 1.04, pointHash13(sizeCell + vec3(uPointillismSeed * 0.05)));
     dotSize *= mix(0.96, 1.06, densityT);
-
-    sizeRatio = originalSize / max(dotSize, 0.000001);
-    if (sizeRatio > 3.5) {
-        gsplatMakeSpherical(scale, dotSize);
-        return;
-    }
 
     gsplatMakeSpherical(scale, dotSize);
 }
 
 void modifySplatColor(vec3 center, inout vec4 color) {
-    float viewDist = max(length(center - uPointillismViewPos), 0.001);
-    float distRatio = viewDist / max(uPointillismRefViewDist, 0.01);
-
-    float bucketWorld = max(viewDist * uPointillismBucketSlope, 0.00001);
-    vec3 bucketId = floor(center / bucketWorld);
-    float bucketHash = pointHash13(bucketId + vec3(uPointillismSeed * 0.07));
+    float gap = clamp(uPointillismGapSpacing, 0.0, 1.0);
     float fillT = clamp(uPointillismGapFill, 0.0, 1.0);
     float flatDesire = 1.0 - clamp(uPointillismSourceStructureBlend, 0.0, 1.0);
-    float keepMin = mix(0.28, 0.92, fillT);
-    float thinExp = mix(-0.82, -0.38, fillT);
-    float overdraw = max(distRatio * distRatio * 0.55, 0.12);
-    float keepChance = clamp(
-        pow(overdraw, thinExp),
-        keepMin,
-        1.0
-    );
-    float interiorKeep = max(fillT, flatDesire * smoothstep(0.10, 0.30, color.a) * 0.72);
-    keepChance = mix(keepChance, 1.0, interiorKeep);
-    if (bucketHash > keepChance) {
-        color.a = 0.0;
-        return;
+
+    if (gap > 0.01) {
+        float viewDist = max(length(center - uPointillismViewPos), 0.001);
+        float distRatio = viewDist / max(uPointillismRefViewDist, 0.01);
+        float bucketWorld = max(viewDist * uPointillismBucketSlope, 0.00001);
+        vec3 bucketId = floor(center / bucketWorld);
+        float bucketHash = pointHash13(bucketId + vec3(uPointillismSeed * 0.07));
+        float keepMin = mix(0.28, 0.92, fillT);
+        float thinExp = mix(-0.82, -0.38, fillT);
+        float overdraw = max(distRatio * distRatio * 0.55, 0.12);
+        float keepChance = clamp(
+            pow(overdraw, thinExp),
+            keepMin,
+            1.0
+        );
+        float interiorKeep = max(fillT, flatDesire * smoothstep(0.10, 0.30, color.a) * 0.72);
+        keepChance = mix(keepChance, 1.0, interiorKeep);
+        if (bucketHash > keepChance) {
+            color.a = 0.0;
+            return;
+        }
     }
 
     float denoiseT = clamp(uPointillismDenoiseStrength, 0.0, 1.0);
@@ -426,26 +406,39 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         return;
     }
 
-    vec3 rnd = pointHash33(center * 1.91);
+    float dotMix = clamp(uPointillismContrastDotMix, 0.0, 0.55);
     float colorVib = clamp(uPointillismColorVibration, 0.0, 1.0);
+    float warmCool = clamp(uPointillismWarmCoolSplit + colorVib * 0.12, 0.0, 1.0);
+    float structure = clamp(uPointillismSourceStructureBlend, 0.0, 1.0);
+    float satAmt = max(0.0, uPointillismSaturation) + colorVib * 0.35;
+
+    // 低振动：跳过 HSV/对比色 tier，仅饱和度 + 结构保留
+    if (dotMix < 0.02 && colorVib < 0.02 && warmCool < 0.02) {
+        vec3 chromaFast = pointSaturate(src, satAmt);
+        color.rgb = clamp(mix(chromaFast, src, structure * 0.35), 0.0, 1.0);
+        color.a = 1.0;
+        return;
+    }
+
+    vec3 rnd = pointHash33(center * 1.91);
     l = max(l, 0.001);
 
-    vec3 chroma = pointSaturate(src, max(0.0, uPointillismSaturation) + colorVib * 0.35);
+    vec3 chroma = pointSaturate(src, satAmt);
     float warmPick = smoothstep(0.38, 0.68, l);
-    chroma = pointHueNudge(
-        chroma,
-        clamp(uPointillismWarmCoolSplit + colorVib * 0.12, 0.0, 1.0),
-        warmPick
-    );
+    chroma = pointHueNudge(chroma, warmCool, warmPick);
+    vec3 baseDot = clamp(mix(chroma, src, structure * 0.35), 0.0, 1.0);
 
-    float dotMix = clamp(uPointillismContrastDotMix, 0.0, 0.55);
+    // 中低对比色：单次 base-family 振动，跳过双次 HSV 对比色 tier
+    if (dotMix < 0.28) {
+        color.rgb = pointClampPigment(pointBaseFamilyDot(baseDot, rnd));
+        color.a = 1.0;
+        return;
+    }
+
     float vib = clamp(dotMix / 0.55, 0.0, 1.0);
     float strongRate = vib * 0.10;
     float softRate = vib * 0.20;
     float tierR = rnd.z;
-
-    float structure = clamp(uPointillismSourceStructureBlend, 0.0, 1.0);
-    vec3 baseDot = clamp(mix(chroma, src, structure * 0.35), 0.0, 1.0);
     vec3 styled;
     if (tierR < strongRate) {
         styled = pointClampComplementDot(pointContrastFamilyDot(baseDot, rnd, 1.0));
@@ -511,12 +504,6 @@ fn pointHash33(p: vec3f) -> vec3f {
         pointHash13(p + vec3f(13.0, 7.0, 19.0)),
         pointHash13(p + vec3f(23.0, 29.0, 11.0))
     );
-}
-
-fn pointOrderedGate(center: vec3f, chance: f32) -> f32 {
-    let cell = floor(center * 20.0);
-    let h = pointHash13(cell + vec3f(uniform.uPointillismSeed * 0.11));
-    return step(h, chance);
 }
 
 fn pointSaturate(c: vec3f, amount: f32) -> vec3f {
@@ -627,65 +614,53 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
     let screenTypical = viewDist * uniform.uPointillismTypicalDotRadiusSlope;
     let screenCap = viewDist * uniform.uPointillismMaxDotRadiusSlope;
 
-    let prelimDensityT = 1.0 - gap;
-    let prelimOverlap = mix(1.36, 0.62, gap) * mix(0.92, 1.08, prelimDensityT);
-    var prelimDotSize = originalSize * prelimOverlap * max(0.001, uniform.uPointillismDotScale);
-    prelimDotSize = min(prelimDotSize, screenCap);
-    prelimDotSize = max(prelimDotSize, screenMin * mix(0.46, 0.14, gap));
-    var sizeRatio = originalSize / max(prelimDotSize, 0.000001);
-    let interiorAnchor = smoothstep(1.0, 2.5, sizeRatio);
+    let sizeRel = originalSize / max(screenTypical * max(0.001, uniform.uPointillismDotScale), 0.000001);
+    let interiorAnchor = smoothstep(1.0, 2.5, sizeRel);
 
     let coverBoost = max(fillT, flatDesire * interiorAnchor * 0.75);
     let coverageGap = gap * (1.0 - coverBoost);
     let densityT = 1.0 - coverageGap;
-    let densityBoost = mix(0.92, 1.08, densityT);
-    let overlap = mix(1.36, 0.62, coverageGap) * densityBoost;
+    let overlap = mix(1.36, 0.62, coverageGap) * mix(0.92, 1.08, densityT);
 
     var dotSize = originalSize * overlap * max(0.001, uniform.uPointillismDotScale);
     let typicalTarget = screenTypical * overlap * max(0.001, uniform.uPointillismDotScale);
-    let sizeRel = originalSize / max(screenTypical, 0.001);
     let blendTypical = (1.0 - smoothstep(0.42, 1.65, sizeRel)) * 0.88;
     dotSize = mix(dotSize, typicalTarget, blendTypical);
     dotSize = min(dotSize, screenCap);
     dotSize = max(dotSize, screenMin * mix(0.46, 0.14, coverageGap));
 
-    let cellScale = mix(14.0, 36.0, densityT);
-    let sizeCell = floor(originalCenter * cellScale);
-    let sizePick = mix(0.96, 1.04, pointHash13(sizeCell + vec3f(uniform.uPointillismSeed * 0.05)));
-    dotSize *= sizePick;
+    let sizeCell = floor(originalCenter * mix(14.0, 36.0, densityT));
+    dotSize *= mix(0.96, 1.04, pointHash13(sizeCell + vec3f(uniform.uPointillismSeed * 0.05)));
     dotSize *= mix(0.96, 1.06, densityT);
-
-    sizeRatio = originalSize / max(dotSize, 0.000001);
-    if (sizeRatio > 3.5) {
-        gsplatMakeSpherical(scale, dotSize);
-        return;
-    }
 
     gsplatMakeSpherical(scale, dotSize);
 }
 
 fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
-    let viewDist = max(length(center - uniform.uPointillismViewPos), 0.001);
-    let distRatio = viewDist / max(uniform.uPointillismRefViewDist, 0.01);
-
-    let bucketWorld = max(viewDist * uniform.uPointillismBucketSlope, 0.00001);
-    let bucketId = floor(center / bucketWorld);
-    let bucketHash = pointHash13(bucketId + vec3f(uniform.uPointillismSeed * 0.07));
+    let gap = clamp(uniform.uPointillismGapSpacing, 0.0, 1.0);
     let fillT = clamp(uniform.uPointillismGapFill, 0.0, 1.0);
     let flatDesire = 1.0 - clamp(uniform.uPointillismSourceStructureBlend, 0.0, 1.0);
-    let keepMin = mix(0.28, 0.92, fillT);
-    let thinExp = mix(-0.82, -0.38, fillT);
-    let overdraw = max(distRatio * distRatio * 0.55, 0.12);
-    var keepChance = clamp(
-        pow(overdraw, thinExp),
-        keepMin,
-        1.0
-    );
-    let interiorKeep = max(fillT, flatDesire * smoothstep(0.10, 0.30, (*color).a) * 0.72);
-    keepChance = mix(keepChance, 1.0, interiorKeep);
-    if (bucketHash > keepChance) {
-        (*color).a = 0.0;
-        return;
+
+    if (gap > 0.01) {
+        let viewDist = max(length(center - uniform.uPointillismViewPos), 0.001);
+        let distRatio = viewDist / max(uniform.uPointillismRefViewDist, 0.01);
+        let bucketWorld = max(viewDist * uniform.uPointillismBucketSlope, 0.00001);
+        let bucketId = floor(center / bucketWorld);
+        let bucketHash = pointHash13(bucketId + vec3f(uniform.uPointillismSeed * 0.07));
+        let keepMin = mix(0.28, 0.92, fillT);
+        let thinExp = mix(-0.82, -0.38, fillT);
+        let overdraw = max(distRatio * distRatio * 0.55, 0.12);
+        var keepChance = clamp(
+            pow(overdraw, thinExp),
+            keepMin,
+            1.0
+        );
+        let interiorKeep = max(fillT, flatDesire * smoothstep(0.10, 0.30, (*color).a) * 0.72);
+        keepChance = mix(keepChance, 1.0, interiorKeep);
+        if (bucketHash > keepChance) {
+            (*color).a = 0.0;
+            return;
+        }
     }
 
     let denoiseT = clamp(uniform.uPointillismDenoiseStrength, 0.0, 1.0);
@@ -711,26 +686,37 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         return;
     }
 
-    let rnd = pointHash33(center * 1.91);
+    let dotMix = clamp(uniform.uPointillismContrastDotMix, 0.0, 0.55);
     let colorVib = clamp(uniform.uPointillismColorVibration, 0.0, 1.0);
+    let warmCool = clamp(uniform.uPointillismWarmCoolSplit + colorVib * 0.12, 0.0, 1.0);
+    let structure = clamp(uniform.uPointillismSourceStructureBlend, 0.0, 1.0);
+    let satAmt = max(0.0, uniform.uPointillismSaturation) + colorVib * 0.35;
+
+    if (dotMix < 0.02 && colorVib < 0.02 && warmCool < 0.02) {
+        let chromaFast = pointSaturate(src, satAmt);
+        (*color).rgb = clamp(mix(chromaFast, src, structure * 0.35), vec3f(0.0), vec3f(1.0));
+        (*color).a = 1.0;
+        return;
+    }
+
+    let rnd = pointHash33(center * 1.91);
     l = max(l, 0.001);
 
-    var chroma = pointSaturate(src, max(0.0, uniform.uPointillismSaturation) + colorVib * 0.35);
+    var chroma = pointSaturate(src, satAmt);
     let warmPick = smoothstep(0.38, 0.68, l);
-    chroma = pointHueNudge(
-        chroma,
-        clamp(uniform.uPointillismWarmCoolSplit + colorVib * 0.12, 0.0, 1.0),
-        warmPick
-    );
+    chroma = pointHueNudge(chroma, warmCool, warmPick);
+    let baseDot = clamp(mix(chroma, src, structure * 0.35), vec3f(0.0), vec3f(1.0));
 
-    let dotMix = clamp(uniform.uPointillismContrastDotMix, 0.0, 0.55);
+    if (dotMix < 0.28) {
+        (*color).rgb = pointClampPigment(pointBaseFamilyDot(baseDot, rnd));
+        (*color).a = 1.0;
+        return;
+    }
+
     let vib = clamp(dotMix / 0.55, 0.0, 1.0);
     let strongRate = vib * 0.10;
     let softRate = vib * 0.20;
     let tierR = rnd.z;
-
-    let structure = clamp(uniform.uPointillismSourceStructureBlend, 0.0, 1.0);
-    let baseDot = clamp(mix(chroma, src, structure * 0.35), vec3f(0.0), vec3f(1.0));
     var styled: vec3f;
     if (tierR < strongRate) {
         styled = pointClampComplementDot(pointContrastFamilyDot(baseDot, rnd, 1.0));
@@ -741,5 +727,236 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     }
     (*color).rgb = styled;
     (*color).a = 1.0;
+}
+`;
+
+export const pointillismPsHelpersGlsl = /* glsl */`
+
+uniform float uPointillismStrokeLength;
+uniform float uPointillismStrokeWidth;
+uniform float uPointillismBrushAspect;
+uniform float uPointillismBrushHardness;
+uniform float uPointillismPaintOpacity;
+uniform float uPointillismPaintGrain;
+uniform float uPointillismSeed;
+
+const float POINTILLISM_STROKE_LEN_MIN = 0.15;
+const float POINTILLISM_STROKE_LEN_MAX = 2.5;
+const float POINTILLISM_STROKE_WID_MIN = 0.15;
+const float POINTILLISM_STROKE_WID_MAX = 1.85;
+
+float pointillismStrokeT(float v, float lo, float hi) {
+    return clamp((v - lo) / (hi - lo), 0.0, 1.0);
+}
+
+float pointillismPsHash(vec2 p) {
+    return fract(sin(dot(p, vec2(12.9898, 78.233)) + uPointillismSeed * 0.13) * 43758.5453);
+}
+
+float pointillismValueNoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = pointillismPsHash(i);
+    float b = pointillismPsHash(i + vec2(1.0, 0.0));
+    float c = pointillismPsHash(i + vec2(0.0, 1.0));
+    float d = pointillismPsHash(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+float pointillismFbm3(vec2 p) {
+    float v = 0.0;
+    v += 0.5 * pointillismValueNoise(p);
+    v += 0.25 * pointillismValueNoise(p * 2.1 + vec2(1.7, 9.2));
+    v += 0.125 * pointillismValueNoise(p * 4.2 + vec2(8.3, 2.8));
+    return v / 0.875;
+}
+
+float pointillismPigmentNoise(vec2 p, float grain) {
+    if (grain < 0.28) {
+        return pointillismValueNoise(p);
+    }
+    if (grain < 0.62) {
+        return pointillismValueNoise(p) * 0.58 + pointillismValueNoise(p * 2.1 + vec2(1.7, 9.2)) * 0.42;
+    }
+    // 高 grain：2 octave + 1 streak，替代 3-octave FBM + 独立 fine
+    return pointillismValueNoise(p) * 0.55 + pointillismValueNoise(p * 2.1 + vec2(1.7, 9.2)) * 0.45;
+}
+
+vec2 pointillismShapeUV(vec2 uv) {
+    float angle = pointillismPsHash(gaussianColor.rg + uPointillismSeed * 0.13) * 6.2831853;
+    float c = cos(angle);
+    float s = sin(angle);
+    vec2 rot = vec2(c * uv.x - s * uv.y, s * uv.x + c * uv.y);
+    float lenT = pointillismStrokeT(uPointillismStrokeLength, POINTILLISM_STROKE_LEN_MIN, POINTILLISM_STROKE_LEN_MAX);
+    float widT = pointillismStrokeT(uPointillismStrokeWidth, POINTILLISM_STROKE_WID_MIN, POINTILLISM_STROKE_WID_MAX);
+    float lenAxis = 1.0 + mix(0.02, 0.82, lenT);
+    float widAxis = mix(1.16, 0.52, widT);
+    widAxis *= mix(0.90, 1.10, clamp(uPointillismBrushAspect, 0.5, 1.2));
+    return vec2(rot.x / lenAxis, rot.y * widAxis);
+}
+
+float pointillismRadialAlpha(float A) {
+    float hard = clamp(uPointillismBrushHardness, 0.0, 1.0);
+    float coreEnd = mix(0.52, 0.82, hard);
+    float aa = max(fwidth(A) * 1.6, 0.004);
+    return (1.0 - smoothstep(coreEnd - aa, 1.0 + aa * 0.5, A)) * clamp(uPointillismPaintOpacity, 0.0, 1.0);
+}
+
+vec4 pointillismPigmentDaub(vec2 shapeUV, float A) {
+    float grain = clamp(uPointillismPaintGrain, 0.0, 1.0);
+    if (grain < 0.001) {
+        return vec4(1.0);
+    }
+
+    vec2 strokeSeed = gaussianColor.rg * 13.7 + gaussianColor.ba * 9.3 + uPointillismSeed * 0.07;
+    vec2 p = shapeUV * mix(3.2, 8.0, grain) + strokeSeed;
+    float coarse = pointillismPigmentNoise(p, grain);
+    float fine = coarse;
+    float streak = coarse;
+    if (grain > 0.35) {
+        fine = pointillismValueNoise(p * 11.0 + vec2(strokeSeed.y, strokeSeed.x));
+    }
+    if (grain > 0.55) {
+        streak = pointillismValueNoise(vec2(shapeUV.x * 1.55 + strokeSeed.x, shapeUV.y * 6.4 + strokeSeed.y));
+    }
+    float pigment = coarse * 0.46 + fine * 0.34 + streak * 0.20;
+
+    float edgeFade = 1.0 - smoothstep(mix(0.48, 0.80, grain), 0.96, A);
+    float g = (pigment - 0.5) * grain * edgeFade * 1.18;
+    float luma = 1.0 + g * 0.54;
+    float alpha = 1.0 + g * 0.66;
+    float warm = g * 0.11;
+    return vec4(luma + warm, luma, luma - warm * 0.58, alpha);
+}
+`;
+
+export const pointillismPsHelpersWgsl = /* wgsl */`
+
+uniform uPointillismStrokeLength: f32;
+uniform uPointillismStrokeWidth: f32;
+uniform uPointillismBrushAspect: f32;
+uniform uPointillismBrushHardness: f32;
+uniform uPointillismPaintOpacity: f32;
+uniform uPointillismPaintGrain: f32;
+uniform uPointillismSeed: f32;
+
+const POINTILLISM_STROKE_LEN_MIN: f32 = 0.15;
+const POINTILLISM_STROKE_LEN_MAX: f32 = 2.5;
+const POINTILLISM_STROKE_WID_MIN: f32 = 0.15;
+const POINTILLISM_STROKE_WID_MAX: f32 = 1.85;
+
+fn pointillismStrokeT(v: f32, lo: f32, hi: f32) -> f32 {
+    return clamp((v - lo) / (hi - lo), 0.0, 1.0);
+}
+
+fn pointillismPsHash(p: vec2f) -> f32 {
+    return fract(sin(dot(p, vec2f(12.9898, 78.233)) + uniform.uPointillismSeed * 0.13) * 43758.5453);
+}
+
+fn pointillismValueNoise(p: vec2f) -> f32 {
+    let i = floor(p);
+    var f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    let a = pointillismPsHash(i);
+    let b = pointillismPsHash(i + vec2f(1.0, 0.0));
+    let c = pointillismPsHash(i + vec2f(0.0, 1.0));
+    let d = pointillismPsHash(i + vec2f(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+fn pointillismFbm3(p: vec2f) -> f32 {
+    var v: f32 = 0.0;
+    v += 0.5 * pointillismValueNoise(p);
+    v += 0.25 * pointillismValueNoise(p * 2.1 + vec2f(1.7, 9.2));
+    v += 0.125 * pointillismValueNoise(p * 4.2 + vec2f(8.3, 2.8));
+    return v / 0.875;
+}
+
+fn pointillismPigmentNoise(p: vec2f, grain: f32) -> f32 {
+    if (grain < 0.28) {
+        return pointillismValueNoise(p);
+    }
+    if (grain < 0.62) {
+        return pointillismValueNoise(p) * 0.58 + pointillismValueNoise(p * 2.1 + vec2f(1.7, 9.2)) * 0.42;
+    }
+    return pointillismValueNoise(p) * 0.55 + pointillismValueNoise(p * 2.1 + vec2f(1.7, 9.2)) * 0.45;
+}
+
+fn pointillismShapeUV(uv: vec2f) -> vec2f {
+    let angle = pointillismPsHash(vec2f(gaussianColor.r, gaussianColor.g) + uniform.uPointillismSeed * 0.13) * 6.2831853;
+    let c = cos(angle);
+    let s = sin(angle);
+    let rot = vec2f(c * uv.x - s * uv.y, s * uv.x + c * uv.y);
+    let lenT = pointillismStrokeT(uniform.uPointillismStrokeLength, POINTILLISM_STROKE_LEN_MIN, POINTILLISM_STROKE_LEN_MAX);
+    let widT = pointillismStrokeT(uniform.uPointillismStrokeWidth, POINTILLISM_STROKE_WID_MIN, POINTILLISM_STROKE_WID_MAX);
+    let lenAxis = 1.0 + mix(0.02, 0.82, lenT);
+    var widAxis = mix(1.16, 0.52, widT);
+    widAxis *= mix(0.90, 1.10, clamp(uniform.uPointillismBrushAspect, 0.5, 1.2));
+    return vec2f(rot.x / lenAxis, rot.y * widAxis);
+}
+
+fn pointillismRadialAlpha(A: half) -> half {
+    let hard = clamp(uniform.uPointillismBrushHardness, 0.0, 1.0);
+    let coreEnd = mix(0.52, 0.82, hard);
+    let aa = max(fwidth(A) * 1.6, 0.004);
+    let radial = 1.0 - smoothstep(coreEnd - aa, 1.0 + aa * 0.5, f32(A));
+    return half(radial * clamp(uniform.uPointillismPaintOpacity, 0.0, 1.0));
+}
+
+fn pointillismPigmentDaub(shapeUV: vec2f, A: f32) -> vec4f {
+    let grain = clamp(uniform.uPointillismPaintGrain, 0.0, 1.0);
+    if (grain < 0.001) {
+        return vec4f(1.0);
+    }
+
+    let strokeSeed = vec2f(gaussianColor.r, gaussianColor.g) * 13.7 + vec2f(gaussianColor.b, gaussianColor.a) * 9.3 + uniform.uPointillismSeed * 0.07;
+    let p = shapeUV * mix(3.2, 8.0, grain) + strokeSeed;
+    let coarse = pointillismPigmentNoise(p, grain);
+    var fine = coarse;
+    var streak = coarse;
+    if (grain > 0.35) {
+        fine = pointillismValueNoise(p * 11.0 + vec2f(strokeSeed.y, strokeSeed.x));
+    }
+    if (grain > 0.55) {
+        streak = pointillismValueNoise(vec2f(shapeUV.x * 1.55 + strokeSeed.x, shapeUV.y * 6.4 + strokeSeed.y));
+    }
+    let pigment = coarse * 0.46 + fine * 0.34 + streak * 0.20;
+
+    let edgeFade = 1.0 - smoothstep(mix(0.48, 0.80, grain), 0.96, A);
+    let g = (pigment - 0.5) * grain * edgeFade * 1.18;
+    let luma = 1.0 + g * 0.54;
+    let alpha = 1.0 + g * 0.66;
+    let warm = g * 0.11;
+    return vec4f(luma + warm, luma, luma - warm * 0.58, alpha);
+}
+`;
+
+/** 官方 gsplatModifyPS hook（PlayCanvas ≥2.20，见 shader-rings 示例） */
+export const pointillismModifyPsGlsl = `${pointillismPsHelpersGlsl}
+void modifySplatColor(vec2 gaussianUV, inout vec4 color) {
+    vec2 shapeUV = pointillismShapeUV(gaussianUV);
+    float A = dot(shapeUV, shapeUV);
+    if (A > 1.0) {
+        color.a = 0.0;
+        return;
+    }
+    vec4 daub = pointillismPigmentDaub(shapeUV, A);
+    color.a = pointillismRadialAlpha(A) * daub.a;
+    color.rgb *= daub.rgb;
+}
+`;
+
+export const pointillismModifyPsWgsl = `${pointillismPsHelpersWgsl}
+fn modifySplatColor(gaussianUV: vec2f, color: ptr<function, vec4f>) {
+    let shapeUV = pointillismShapeUV(gaussianUV);
+    let A = dot(shapeUV, shapeUV);
+    if (A > 1.0) {
+        (*color).a = 0.0;
+        return;
+    }
+    let daub = pointillismPigmentDaub(shapeUV, A);
+    (*color).a = f32(pointillismRadialAlpha(half(A)) * half(daub.a));
+    (*color).rgb *= daub.rgb;
 }
 `;

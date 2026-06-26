@@ -3,7 +3,6 @@ import {
     Material,
     SHADERLANGUAGE_GLSL,
     SHADERLANGUAGE_WGSL,
-    ShaderChunks,
     Vec3,
     type CameraComponent,
     type CameraFrame,
@@ -26,6 +25,8 @@ import {
     POINTILLISM_UNIFORM_NAMES as PU,
     pointillismModifyGlsl,
     pointillismModifyWgsl,
+    pointillismModifyPsGlsl,
+    pointillismModifyPsWgsl,
     resolvePointillismComplementaryMix,
     resolvePointillismDotRadiusPx,
     resolvePointillismDotRadiusSlopes,
@@ -45,259 +46,11 @@ import { computeSkyboxPointillismMetrics } from './skybox-pointillism-shaders';
 import { isOneShotRevealPlayingExclusiveGsplat } from '../../effects-pipeline-policy';
 import { GsplatShaderEffect } from '../../gsplat-shader-effect';
 
-type SavedPsChunks = {
-    glsl?: string;
-    wgsl?: string;
+type SavedFragmentChunks = {
+    gsplatModifyPS: { glsl?: string; wgsl?: string };
 };
 
 const clamp = (v: number, min: number, max: number): number => Math.max(min, Math.min(max, v));
-
-const patchReplace = (src: string, find: string, repl: string, label: string): string => {
-    const out = src.replace(find, repl);
-    if (out === src) {
-        throw new Error(`[pointillism-stipple] gsplatPS patch failed: ${label}`);
-    }
-    return out;
-};
-
-const GLSL_INSERT = /* glsl */`
-
-uniform float uPointillismStrokeLength;
-uniform float uPointillismStrokeWidth;
-uniform float uPointillismBrushAspect;
-uniform float uPointillismBrushHardness;
-uniform float uPointillismPaintOpacity;
-uniform float uPointillismPaintGrain;
-uniform float uPointillismSeed;
-
-const float POINTILLISM_STROKE_LEN_MIN = 0.15;
-const float POINTILLISM_STROKE_LEN_MAX = 2.5;
-const float POINTILLISM_STROKE_WID_MIN = 0.15;
-const float POINTILLISM_STROKE_WID_MAX = 1.85;
-
-float pointillismStrokeT(float v, float lo, float hi) {
-    return clamp((v - lo) / (hi - lo), 0.0, 1.0);
-}
-
-float pointillismPsHash(vec2 p) {
-    return fract(sin(dot(p, vec2(12.9898, 78.233)) + uPointillismSeed * 0.13) * 43758.5453);
-}
-
-float pointillismValueNoise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    float a = pointillismPsHash(i);
-    float b = pointillismPsHash(i + vec2(1.0, 0.0));
-    float c = pointillismPsHash(i + vec2(0.0, 1.0));
-    float d = pointillismPsHash(i + vec2(1.0, 1.0));
-    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-}
-
-float pointillismFbm3(vec2 p) {
-    float v = 0.0;
-    v += 0.5 * pointillismValueNoise(p);
-    v += 0.25 * pointillismValueNoise(p * 2.1 + vec2(1.7, 9.2));
-    v += 0.125 * pointillismValueNoise(p * 4.2 + vec2(8.3, 2.8));
-    return v / 0.875;
-}
-
-vec2 pointillismShapeUV(vec2 uv) {
-    float angle = pointillismPsHash(gaussianColor.rg + uPointillismSeed * 0.13) * 6.2831853;
-    float c = cos(angle);
-    float s = sin(angle);
-    vec2 rot = vec2(c * uv.x - s * uv.y, s * uv.x + c * uv.y);
-    float lenT = pointillismStrokeT(uPointillismStrokeLength, POINTILLISM_STROKE_LEN_MIN, POINTILLISM_STROKE_LEN_MAX);
-    float widT = pointillismStrokeT(uPointillismStrokeWidth, POINTILLISM_STROKE_WID_MIN, POINTILLISM_STROKE_WID_MAX);
-    float lenAxis = 1.0 + mix(0.02, 0.82, lenT);
-    float widAxis = mix(1.16, 0.52, widT);
-    widAxis *= mix(0.90, 1.10, clamp(uPointillismBrushAspect, 0.5, 1.2));
-    return vec2(rot.x / lenAxis, rot.y * widAxis);
-}
-
-float pointillismRadialAlpha(float A) {
-    float hard = clamp(uPointillismBrushHardness, 0.0, 1.0);
-    float coreEnd = mix(0.52, 0.82, hard);
-    float aa = max(fwidth(A) * 1.6, 0.004);
-    return (1.0 - smoothstep(coreEnd - aa, 1.0 + aa * 0.5, A)) * clamp(uPointillismPaintOpacity, 0.0, 1.0);
-}
-
-// 笔触内颜料肌理（gsplatPS UV）；边缘 fade 保硬边
-vec4 pointillismPigmentDaub(vec2 shapeUV, float A) {
-    float grain = clamp(uPointillismPaintGrain, 0.0, 1.0);
-    if (grain < 0.001) {
-        return vec4(1.0);
-    }
-
-    vec2 strokeSeed = gaussianColor.rg * 13.7 + gaussianColor.ba * 9.3 + uPointillismSeed * 0.07;
-    vec2 p = shapeUV * mix(3.2, 8.0, grain) + strokeSeed;
-    float coarse = pointillismFbm3(p);
-    float fine = pointillismValueNoise(p * 11.0 + vec2(strokeSeed.y, strokeSeed.x));
-    float streak = pointillismValueNoise(vec2(shapeUV.x * 1.55 + strokeSeed.x, shapeUV.y * 6.4 + strokeSeed.y));
-    float pigment = coarse * 0.46 + fine * 0.34 + streak * 0.20;
-
-    float edgeFade = 1.0 - smoothstep(mix(0.48, 0.80, grain), 0.96, A);
-    float g = (pigment - 0.5) * grain * edgeFade * 1.18;
-    float luma = 1.0 + g * 0.54;
-    float alpha = 1.0 + g * 0.66;
-    float warm = g * 0.11;
-    vec3 rgb = vec3(luma + warm, luma, luma - warm * 0.58);
-    return vec4(rgb, alpha);
-}
-`;
-
-const WGSL_INSERT = /* wgsl */`
-
-uniform uPointillismStrokeLength: f32;
-uniform uPointillismStrokeWidth: f32;
-uniform uPointillismBrushAspect: f32;
-uniform uPointillismBrushHardness: f32;
-uniform uPointillismPaintOpacity: f32;
-uniform uPointillismPaintGrain: f32;
-uniform uPointillismSeed: f32;
-
-const POINTILLISM_STROKE_LEN_MIN: f32 = 0.15;
-const POINTILLISM_STROKE_LEN_MAX: f32 = 2.5;
-const POINTILLISM_STROKE_WID_MIN: f32 = 0.15;
-const POINTILLISM_STROKE_WID_MAX: f32 = 1.85;
-
-fn pointillismStrokeT(v: f32, lo: f32, hi: f32) -> f32 {
-    return clamp((v - lo) / (hi - lo), 0.0, 1.0);
-}
-
-fn pointillismPsHash(p: vec2f) -> f32 {
-    return fract(sin(dot(p, vec2f(12.9898, 78.233)) + uniform.uPointillismSeed * 0.13) * 43758.5453);
-}
-
-fn pointillismValueNoise(p: vec2f) -> f32 {
-    let i = floor(p);
-    var f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    let a = pointillismPsHash(i);
-    let b = pointillismPsHash(i + vec2f(1.0, 0.0));
-    let c = pointillismPsHash(i + vec2f(0.0, 1.0));
-    let d = pointillismPsHash(i + vec2f(1.0, 1.0));
-    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-}
-
-fn pointillismFbm3(p: vec2f) -> f32 {
-    var v: f32 = 0.0;
-    v += 0.5 * pointillismValueNoise(p);
-    v += 0.25 * pointillismValueNoise(p * 2.1 + vec2f(1.7, 9.2));
-    v += 0.125 * pointillismValueNoise(p * 4.2 + vec2f(8.3, 2.8));
-    return v / 0.875;
-}
-
-fn pointillismShapeUV(uv: vec2f) -> vec2f {
-    let angle = pointillismPsHash(vec2f(gaussianColor.r, gaussianColor.g) + uniform.uPointillismSeed * 0.13) * 6.2831853;
-    let c = cos(angle);
-    let s = sin(angle);
-    let rot = vec2f(c * uv.x - s * uv.y, s * uv.x + c * uv.y);
-    let lenT = pointillismStrokeT(uniform.uPointillismStrokeLength, POINTILLISM_STROKE_LEN_MIN, POINTILLISM_STROKE_LEN_MAX);
-    let widT = pointillismStrokeT(uniform.uPointillismStrokeWidth, POINTILLISM_STROKE_WID_MIN, POINTILLISM_STROKE_WID_MAX);
-    let lenAxis = 1.0 + mix(0.02, 0.82, lenT);
-    var widAxis = mix(1.16, 0.52, widT);
-    widAxis *= mix(0.90, 1.10, clamp(uniform.uPointillismBrushAspect, 0.5, 1.2));
-    return vec2f(rot.x / lenAxis, rot.y * widAxis);
-}
-
-fn pointillismRadialAlpha(A: half) -> half {
-    let hard = clamp(uniform.uPointillismBrushHardness, 0.0, 1.0);
-    let coreEnd = mix(0.52, 0.82, hard);
-    let aa = max(fwidth(A) * 1.6, 0.004);
-    let radial = 1.0 - smoothstep(coreEnd - aa, 1.0 + aa * 0.5, f32(A));
-    return half(radial * clamp(uniform.uPointillismPaintOpacity, 0.0, 1.0));
-}
-
-fn pointillismPigmentDaub(shapeUV: vec2f, A: f32) -> vec4f {
-    let grain = clamp(uniform.uPointillismPaintGrain, 0.0, 1.0);
-    if (grain < 0.001) {
-        return vec4f(1.0);
-    }
-
-    let strokeSeed = vec2f(gaussianColor.r, gaussianColor.g) * 13.7 + vec2f(gaussianColor.b, gaussianColor.a) * 9.3 + uniform.uPointillismSeed * 0.07;
-    let p = shapeUV * mix(3.2, 8.0, grain) + strokeSeed;
-    let coarse = pointillismFbm3(p);
-    let fine = pointillismValueNoise(p * 11.0 + vec2f(strokeSeed.y, strokeSeed.x));
-    let streak = pointillismValueNoise(vec2f(shapeUV.x * 1.55 + strokeSeed.x, shapeUV.y * 6.4 + strokeSeed.y));
-    let pigment = coarse * 0.46 + fine * 0.34 + streak * 0.20;
-
-    let edgeFade = 1.0 - smoothstep(mix(0.48, 0.80, grain), 0.96, A);
-    let g = (pigment - 0.5) * grain * edgeFade * 1.18;
-    let luma = 1.0 + g * 0.54;
-    let alpha = 1.0 + g * 0.66;
-    let warm = g * 0.11;
-    return vec4f(luma + warm, luma, luma - warm * 0.58, alpha);
-}
-`;
-
-function patchGsplatPsGlsl(chunk: string): string {
-    const withDecls = patchReplace(
-        chunk,
-        'varying mediump vec4 gaussianColor;\n',
-        `varying mediump vec4 gaussianColor;\n${GLSL_INSERT}`,
-        'glsl insert shape'
-    );
-    const withShape = patchReplace(
-        withDecls,
-        `	mediump float A = dot(gaussianUV, gaussianUV);
-	if (A > 1.0) {
-		discard;
-	}
-	mediump float alpha = normExp(A) * gaussianColor.a;`,
-        `	vec2 shapeUV = pointillismShapeUV(gaussianUV);
-	mediump float A = dot(shapeUV, shapeUV);
-	if (A > 1.0) {
-		discard;
-	}
-	vec4 daub = pointillismPigmentDaub(shapeUV, A);
-	mediump float alpha = pointillismRadialAlpha(A) * daub.a;`,
-        'glsl elliptical A'
-    );
-    return patchReplace(
-        withShape,
-        `		gl_FragColor = vec4(gaussianColor.xyz * alpha, alpha);`,
-        `		gl_FragColor = vec4(gaussianColor.xyz * daub.rgb * alpha, alpha);`,
-        'glsl pigment daub color'
-    );
-}
-
-function patchGsplatPsWgsl(chunk: string): string {
-    const withDecls = patchReplace(
-        chunk,
-        'varying gaussianColor: half4;\n',
-        `varying gaussianColor: half4;\n${WGSL_INSERT}`,
-        'wgsl insert shape'
-    );
-    const withShape = patchReplace(
-        withDecls,
-        `	let A: half = dot(gaussianUV, gaussianUV);
-	if (A > half(1.0)) {
-		discard;
-		return output;
-	}
-	var alpha: half = normExp(A) * gaussianColor.a;`,
-        `	let shapeUV = pointillismShapeUV(vec2f(gaussianUV));
-	let A: half = dot(shapeUV, shapeUV);
-	if (A > half(1.0)) {
-		discard;
-		return output;
-	}
-	let daub = pointillismPigmentDaub(shapeUV, f32(A));
-	var alpha: half = pointillismRadialAlpha(A) * half(daub.a);`,
-        'wgsl elliptical A'
-    );
-    return patchReplace(
-        withShape,
-        `		output.color = vec4f(vec3f(gaussianColor.xyz * alpha), f32(alpha));`,
-        `		output.color = vec4f(vec3f(gaussianColor.xyz * daub.rgb * alpha), f32(alpha));`,
-        'wgsl pigment daub color'
-    );
-}
-
-function resolveGsplatPsChunk(device: GraphicsDevice, lang: string): string | null {
-    return ShaderChunks.get(device, lang).get('gsplatPS') ?? null;
-}
 
 function findCameraEntity(root: Entity): Entity | null {
     return root.findComponent('camera')?.entity ?? null;
@@ -306,7 +59,7 @@ function findCameraEntity(root: Entity): Entity | null {
 class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
     static scriptName = 'gsplatPersistentPointillismStipple';
 
-    private readonly _savedPsChunks = new Map<Material, SavedPsChunks>();
+    private readonly _savedFragmentChunks = new Map<Material, SavedFragmentChunks>();
 
     private _postController: PointillismPostController | null = null;
 
@@ -451,6 +204,7 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
 
     /** UI / 协议热更新：同步 uniform 与后处理（对齐 palette-pixel / yiyun-dianran） */
     applyConfig() {
+        this._viewPosDirty = true;
         this.syncMaterialsAndShaders();
         this.updateEffect(this.effectTime, 0);
         this.applyPostConfig(false);
@@ -578,6 +332,8 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         if (!this.shouldSuppressPointillismModifyForOneShotReveal()) {
             super.applyShaderToMaterial(material);
         }
+        this.materialsApplied.add(material);
+        this.markUniformReplayNeeded();
         this.pushPointillismUniforms();
     }
 
@@ -588,6 +344,7 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
                 this.ensureModifyShader(material);
             }
         }
+        this.markUniformReplayNeeded();
         this.pushPointillismUniforms();
         this.applyPostConfig(true);
     }
@@ -676,16 +433,19 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         return repaired;
     }
 
-    private ensureFragmentShaderPatch(material: Material): boolean {
+    private fragmentPatchMarker(material: Material): boolean {
         const device = this.app.graphicsDevice as GraphicsDevice;
         const lang = device?.isWebGPU ? SHADERLANGUAGE_WGSL : SHADERLANGUAGE_GLSL;
-        const psChunk = material.getShaderChunks(lang).get('gsplatPS');
-        const psOk = typeof psChunk === 'string' && psChunk.includes('pointillismShapeUV');
-        if (psOk) {
+        const modifyPs = material.getShaderChunks(lang).get('gsplatModifyPS');
+        return typeof modifyPs === 'string' && modifyPs.includes('pointillismShapeUV');
+    }
+
+    private ensureFragmentShaderPatch(material: Material): boolean {
+        if (this.fragmentPatchMarker(material)) {
             return false;
         }
-        if (this._savedPsChunks.has(material)) {
-            this._savedPsChunks.delete(material);
+        if (this._savedFragmentChunks.has(material)) {
+            this._savedFragmentChunks.delete(material);
         }
         this.patchFragmentShader(material);
         return true;
@@ -712,13 +472,17 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         for (const material of mats) {
             this.restoreFragmentShader(material);
         }
-        for (const material of this._savedPsChunks.keys()) {
+        for (const material of this._savedFragmentChunks.keys()) {
             if (!mats.has(material)) {
                 this.restoreFragmentShader(material);
             }
         }
 
         super.removeShaders();
+
+        this._uniformScalars.clear();
+        this._uniformReplayNeeded = true;
+        this._viewPosUniformDirty = true;
 
         this._postMountWanted = undefined;
         this._postController?.apply({ ...DEFAULT_POINTILLISM_POST_SETTINGS, enabled: false });
@@ -727,63 +491,77 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
     }
 
     private patchFragmentShader(material: Material): void {
-        if (this._savedPsChunks.has(material)) return;
-
-        const device = this.app.graphicsDevice as GraphicsDevice;
-        const saved: SavedPsChunks = {};
-        const glslBase = resolveGsplatPsChunk(device, SHADERLANGUAGE_GLSL);
-        const wgslBase = resolveGsplatPsChunk(device, SHADERLANGUAGE_WGSL);
+        if (this._savedFragmentChunks.has(material)) return;
 
         try {
-            if (glslBase) {
-                saved.glsl = material.getShaderChunks(SHADERLANGUAGE_GLSL).get('gsplatPS') ?? undefined;
-                material.getShaderChunks(SHADERLANGUAGE_GLSL).set('gsplatPS', patchGsplatPsGlsl(glslBase));
-            }
-            if (wgslBase) {
-                saved.wgsl = material.getShaderChunks(SHADERLANGUAGE_WGSL).get('gsplatPS') ?? undefined;
-                material.getShaderChunks(SHADERLANGUAGE_WGSL).set('gsplatPS', patchGsplatPsWgsl(wgslBase));
-            }
+            const saved: SavedFragmentChunks = {
+                gsplatModifyPS: {
+                    glsl: material.getShaderChunks(SHADERLANGUAGE_GLSL).get('gsplatModifyPS') ?? undefined,
+                    wgsl: material.getShaderChunks(SHADERLANGUAGE_WGSL).get('gsplatModifyPS') ?? undefined
+                }
+            };
+            material.getShaderChunks(SHADERLANGUAGE_GLSL).set('gsplatModifyPS', pointillismModifyPsGlsl);
+            material.getShaderChunks(SHADERLANGUAGE_WGSL).set('gsplatModifyPS', pointillismModifyPsWgsl);
             material.clearVariants();
             material.update();
-            this._savedPsChunks.set(material, saved);
+            this._savedFragmentChunks.set(material, saved);
         } catch (e) {
-            console.warn('[pointillism-stipple] failed to patch gsplatPS:', e);
-            if (saved.glsl === undefined) {
-                material.getShaderChunks(SHADERLANGUAGE_GLSL).delete('gsplatPS');
-            } else {
-                material.getShaderChunks(SHADERLANGUAGE_GLSL).set('gsplatPS', saved.glsl);
-            }
-            if (saved.wgsl === undefined) {
-                material.getShaderChunks(SHADERLANGUAGE_WGSL).delete('gsplatPS');
-            } else {
-                material.getShaderChunks(SHADERLANGUAGE_WGSL).set('gsplatPS', saved.wgsl);
-            }
-            material.clearVariants();
-            material.update();
+            console.warn('[pointillism-stipple] failed to patch splat fragment shader:', e);
+            this.restoreFragmentShader(material);
         }
     }
 
     private restoreFragmentShader(material: Material): void {
-        const saved = this._savedPsChunks.get(material);
+        const saved = this._savedFragmentChunks.get(material);
         if (!saved) return;
-        if (saved.glsl === undefined) {
-            material.getShaderChunks(SHADERLANGUAGE_GLSL).delete('gsplatPS');
+
+        const modifyPs = saved.gsplatModifyPS;
+        if (modifyPs.glsl === undefined) {
+            material.getShaderChunks(SHADERLANGUAGE_GLSL).delete('gsplatModifyPS');
         } else {
-            material.getShaderChunks(SHADERLANGUAGE_GLSL).set('gsplatPS', saved.glsl);
+            material.getShaderChunks(SHADERLANGUAGE_GLSL).set('gsplatModifyPS', modifyPs.glsl);
         }
-        if (saved.wgsl === undefined) {
-            material.getShaderChunks(SHADERLANGUAGE_WGSL).delete('gsplatPS');
+        if (modifyPs.wgsl === undefined) {
+            material.getShaderChunks(SHADERLANGUAGE_WGSL).delete('gsplatModifyPS');
         } else {
-            material.getShaderChunks(SHADERLANGUAGE_WGSL).set('gsplatPS', saved.wgsl);
+            material.getShaderChunks(SHADERLANGUAGE_WGSL).set('gsplatModifyPS', modifyPs.wgsl);
         }
         material.clearVariants();
         material.update();
-        this._savedPsChunks.delete(material);
+        this._savedFragmentChunks.delete(material);
     }
 
     private readonly _viewPos = new Float32Array(3);
     private readonly _viewPosScratch = new Vec3();
+    private readonly _lastViewPosScratch = new Vec3();
+    private readonly _uniformScalars = new Map<string, number>();
+    private _uniformReplayNeeded = true;
+    private _viewPosUniformDirty = true;
     private _refViewDistCache = 0;
+    private _syncFrameCounter = 0;
+    private _viewPosDirty = true;
+
+    private markUniformReplayNeeded(): void {
+        this._uniformReplayNeeded = true;
+        this._viewPosUniformDirty = true;
+    }
+
+    private setUniformCached(name: string, value: number): void {
+        const prev = this._uniformScalars.get(name);
+        if (!this._uniformReplayNeeded && prev === value) {
+            return;
+        }
+        this._uniformScalars.set(name, value);
+        this.setUniform(name, value);
+    }
+
+    private setViewPosUniformIfDirty(): void {
+        if (!this._viewPosUniformDirty && !this._uniformReplayNeeded) {
+            return;
+        }
+        this._viewPosUniformDirty = false;
+        this.setUniform(PU.viewPos, this._viewPos);
+    }
 
     private resolveRefViewDist(camWorld: Vec3 | undefined): number {
         if (this._refViewDistCache > 0) {
@@ -805,6 +583,13 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
     }
 
     updateEffect(_effectTime: number, _dt: number) {
+        this._syncFrameCounter += 1;
+        if (this._syncFrameCounter >= 90) {
+            this._syncFrameCounter = 0;
+            if (this.syncMaterialsAndShaders()) {
+                this.app.renderNextFrame = true;
+            }
+        }
         this.pushPointillismUniforms();
         this.syncPostSettingsOnly();
     }
@@ -948,12 +733,16 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
             if (unified) {
                 this._viewPosScratch.copy(camWorld);
             } else {
-                // modify 非 unified 路径为 model space（与 Reveal 约定一致）
                 this._viewPosScratch.set(-camWorld.x, -camWorld.y, camWorld.z);
             }
-            this._viewPos[0] = this._viewPosScratch.x;
-            this._viewPos[1] = this._viewPosScratch.y;
-            this._viewPos[2] = this._viewPosScratch.z;
+            if (this._viewPosDirty || this._viewPosScratch.distance(this._lastViewPosScratch) > 0.01) {
+                this._lastViewPosScratch.copy(this._viewPosScratch);
+                this._viewPos[0] = this._viewPosScratch.x;
+                this._viewPos[1] = this._viewPosScratch.y;
+                this._viewPos[2] = this._viewPosScratch.z;
+                this._viewPosDirty = false;
+                this._viewPosUniformDirty = true;
+            }
         }
 
         const canvas = this.app.graphicsDevice.canvas as HTMLCanvasElement | undefined;
@@ -964,29 +753,29 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
         const refViewDist = this.resolveRefViewDist(camWorld);
         const bucketSlope = slopes.typical * 1.75;
 
-        this.setUniform(PU.viewPos, this._viewPos);
-        this.setUniform(PU.dotRadiusSlope, slopes.min);
-        this.setUniform(PU.typicalDotRadiusSlope, slopes.typical);
-        this.setUniform(PU.maxDotRadiusSlope, slopes.max);
-        this.setUniform(PU.refViewDist, refViewDist);
-        this.setUniform(PU.bucketSlope, bucketSlope);
-        this.setUniform(PU.brushSize, 1.0);
-        this.setUniform(PU.brushAspect, clamp(brushAspect, 0.5, 1.2));
-        this.setUniform(PU.brushHardness, clamp(brushHardness, 0, 1));
-        this.setUniform(PU.colorVibration, clamp(colorVibration, 0, 1));
-        this.setUniform(PU.darkPaintBoost, clamp(darkPaintBoost, 0, 1));
-        this.setUniform(PU.highlightSkip, clamp(highlightSkip, 0, 1));
-        this.setUniform(PU.dotScale, clamp(this.dotScale, 0.85, 1.15));
-        this.setUniform(PU.dotSizeFactor, clamp(this.dotSizeFactor, 0.01, 0.32));
-        this.setUniform(PU.strokeAspect, clamp(this.strokeAspect, 0.85, 2.2));
-        this.setUniform(PU.roundness, clamp(this.roundness, 0, 1));
-        this.setUniform(PU.strokeSoftness, clamp(this.strokeSoftness, 0.08, 0.55));
-        this.setUniform(PU.strokeLength, clamp(this.strokeLength, POINTILLISM_STROKE_LENGTH_MIN, POINTILLISM_STROKE_LENGTH_MAX));
-        this.setUniform(PU.strokeWidth, clamp(this.strokeWidth, POINTILLISM_STROKE_WIDTH_MIN, POINTILLISM_STROKE_WIDTH_MAX));
-        this.setUniform(PU.shapeJitter, clamp(this.shapeJitter, 0, 0.08));
-        this.setUniform(PU.paintThickness, clamp(this.paintThickness, 0.5, 1.5));
-        this.setUniform(PU.paintOpacity, clamp(this.paintOpacity, POINTILLISM_PAINT_OPACITY_MIN, POINTILLISM_PAINT_OPACITY_MAX));
-        this.setUniform(
+        this.setViewPosUniformIfDirty();
+        this.setUniformCached(PU.dotRadiusSlope, slopes.min);
+        this.setUniformCached(PU.typicalDotRadiusSlope, slopes.typical);
+        this.setUniformCached(PU.maxDotRadiusSlope, slopes.max);
+        this.setUniformCached(PU.refViewDist, refViewDist);
+        this.setUniformCached(PU.bucketSlope, bucketSlope);
+        this.setUniformCached(PU.brushSize, 1.0);
+        this.setUniformCached(PU.brushAspect, clamp(brushAspect, 0.5, 1.2));
+        this.setUniformCached(PU.brushHardness, clamp(brushHardness, 0, 1));
+        this.setUniformCached(PU.colorVibration, clamp(colorVibration, 0, 1));
+        this.setUniformCached(PU.darkPaintBoost, clamp(darkPaintBoost, 0, 1));
+        this.setUniformCached(PU.highlightSkip, clamp(highlightSkip, 0, 1));
+        this.setUniformCached(PU.dotScale, clamp(this.dotScale, 0.85, 1.15));
+        this.setUniformCached(PU.dotSizeFactor, clamp(this.dotSizeFactor, 0.01, 0.32));
+        this.setUniformCached(PU.strokeAspect, clamp(this.strokeAspect, 0.85, 2.2));
+        this.setUniformCached(PU.roundness, clamp(this.roundness, 0, 1));
+        this.setUniformCached(PU.strokeSoftness, clamp(this.strokeSoftness, 0.08, 0.55));
+        this.setUniformCached(PU.strokeLength, clamp(this.strokeLength, POINTILLISM_STROKE_LENGTH_MIN, POINTILLISM_STROKE_LENGTH_MAX));
+        this.setUniformCached(PU.strokeWidth, clamp(this.strokeWidth, POINTILLISM_STROKE_WIDTH_MIN, POINTILLISM_STROKE_WIDTH_MAX));
+        this.setUniformCached(PU.shapeJitter, clamp(this.shapeJitter, 0, 0.08));
+        this.setUniformCached(PU.paintThickness, clamp(this.paintThickness, 0.5, 1.5));
+        this.setUniformCached(PU.paintOpacity, clamp(this.paintOpacity, POINTILLISM_PAINT_OPACITY_MIN, POINTILLISM_PAINT_OPACITY_MAX));
+        this.setUniformCached(
             PU.paintGrain,
             clamp(
                 Number.isFinite(this.paintGrain) ? this.paintGrain : POINTILLISM_DEFAULTS.paintGrain,
@@ -994,20 +783,20 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
                 POINTILLISM_PAINT_GRAIN_MAX
             )
         );
-        this.setUniform(PU.saturation, clamp(this.saturation, 0, 3));
-        this.setUniform(PU.lumaLevels, clamp(Math.floor(this.lumaLevels), 2, 24));
-        this.setUniform(PU.contrastDotMix, clamp(this.contrastDotMix, 0, POINTILLISM_CONTRAST_DOT_MIX_MAX));
-        this.setUniform(
+        this.setUniformCached(PU.saturation, clamp(this.saturation, 0, 3));
+        this.setUniformCached(PU.lumaLevels, clamp(Math.floor(this.lumaLevels), 2, 24));
+        this.setUniformCached(PU.contrastDotMix, clamp(this.contrastDotMix, 0, POINTILLISM_CONTRAST_DOT_MIX_MAX));
+        this.setUniformCached(
             PU.complementaryMix,
             resolvePointillismComplementaryMix(clamp(this.contrastDotMix, 0, POINTILLISM_CONTRAST_DOT_MIX_MAX))
         );
-        this.setUniform(PU.warmCoolSplit, clamp(this.warmCoolSplit, 0, 1));
-        this.setUniform(PU.paletteStrength, clamp(this.paletteStrength, 0, 1));
-        this.setUniform(PU.paletteIndex, clamp(Math.floor(this.paletteIndex), 0, 3));
-        this.setUniform(PU.sourceStructureBlend, clamp(this.sourceStructureBlend, 0, 1));
-        this.setUniform(PU.highlightSparsity, clamp(this.highlightSparsity, 0, 1));
-        this.setUniform(PU.darkDensityBoost, clamp(this.darkDensityBoost, 0, 1));
-        this.setUniform(PU.seed, Number.isFinite(this.seed) ? this.seed : POINTILLISM_DEFAULTS.seed);
+        this.setUniformCached(PU.warmCoolSplit, clamp(this.warmCoolSplit, 0, 1));
+        this.setUniformCached(PU.paletteStrength, clamp(this.paletteStrength, 0, 1));
+        this.setUniformCached(PU.paletteIndex, clamp(Math.floor(this.paletteIndex), 0, 3));
+        this.setUniformCached(PU.sourceStructureBlend, clamp(this.sourceStructureBlend, 0, 1));
+        this.setUniformCached(PU.highlightSparsity, clamp(this.highlightSparsity, 0, 1));
+        this.setUniformCached(PU.darkDensityBoost, clamp(this.darkDensityBoost, 0, 1));
+        this.setUniformCached(PU.seed, Number.isFinite(this.seed) ? this.seed : POINTILLISM_DEFAULTS.seed);
         const denoiseT = clamp(
             Number.isFinite(this.denoiseStrength)
                 ? this.denoiseStrength
@@ -1015,12 +804,12 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
             0,
             1
         );
-        this.setUniform(PU.denoiseStrength, denoiseT);
-        this.setUniform(
+        this.setUniformCached(PU.denoiseStrength, denoiseT);
+        this.setUniformCached(
             PU.minVisibleAlpha,
             resolvePointillismMinVisibleAlpha(denoiseT)
         );
-        this.setUniform(
+        this.setUniformCached(
             PU.gapFill,
             clamp(
                 Number.isFinite(this.gapFill) ? this.gapFill : POINTILLISM_DEFAULTS.gapFill,
@@ -1028,7 +817,7 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
                 1
             )
         );
-        this.setUniform(
+        this.setUniformCached(
             PU.gapSpacing,
             clamp(
                 Number.isFinite(this.gapSpacing) ? this.gapSpacing : POINTILLISM_DEFAULTS.gapSpacing,
@@ -1037,10 +826,8 @@ class GsplatPersistentPointillismStipple extends GsplatShaderEffect {
             )
         );
 
-        if (!this.shouldSuppressPointillismModifyForOneShotReveal()) {
-            for (const material of this.materialsApplied) {
-                this.ensureModifyShader(material);
-            }
+        if (this.materialsApplied.size > 0) {
+            this._uniformReplayNeeded = false;
         }
     }
 
