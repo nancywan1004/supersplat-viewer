@@ -16,8 +16,6 @@ import type { Global } from '../../../types';
 export type GsplatSceneRuntime = {
     renderer?: number;
     splatBudget?: number;
-    lodRangeMin?: number;
-    lodRangeMax?: number;
     colorUpdateAngle?: number;
     minContribution?: number;
     alphaClip?: number;
@@ -70,12 +68,10 @@ export function bindGsplatRenderer(
     }
 }
 
-/** 写入 budget、LOD 范围与 performanceMode 相关渲染参数 */
+/** 写入 budget 与 performanceMode 相关渲染参数（lodRange 由 per-entity component 负责） */
 export function bindGsplatPerfSettings(gsplat: GsplatSceneRuntime, global: Global): void {
     const { config, state } = global;
     gsplat.splatBudget = getSplatBudgetMillions(global) * 1_000_000;
-    gsplat.lodRangeMin = 0;
-    gsplat.lodRangeMax = 1000;
     gsplat.colorUpdateAngle = state.performanceMode ? 4 : 2;
     gsplat.minContribution = 1;
     gsplat.alphaClip = 1 / 255;

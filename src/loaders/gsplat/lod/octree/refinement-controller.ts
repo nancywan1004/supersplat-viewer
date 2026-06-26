@@ -12,6 +12,11 @@ import {
 
 import type { Global } from '../../../../types';
 import { getOctreeBootstrapLod, isOctreeBootstrapPlaceableNode } from './lod-meta';
+import { resolveEntityLodRange } from './entity-lod-range';
+import { findAllOctreeInstances, type OctreeInstanceLike } from './octree-instance-access';
+import { computeStreamingRefinementProgressRatio } from './streaming-refinement-progress';
+
+export { computeStreamingRefinementProgressRatio };
 
 const REF_TAN_HALF_FOV = Math.tan(22.5 * math.DEG_TO_RAD);
 
@@ -121,17 +126,7 @@ export function isStreamableOctreeResource(
     return fileCount > 1 && lodLevels > 1;
 }
 
-type OctreeInstanceLike = {
-    octree: OctreeLike;
-    nodeInfos: Array<{ currentLod: number; optimalLod: number }>;
-    filePlacements?: Array<{ resource?: unknown } | null>;
-    needsLodUpdate?: boolean;
-    update?: () => boolean;
-};
-
 type GsplatSceneLike = {
-    lodRangeMin: number;
-    lodRangeMax: number;
     lodBehindPenalty: number;
     lodUpdateDistance: number;
     lodUpdateAngle: number;
@@ -785,57 +780,6 @@ function ensureLodMinDistThresholds(maxLod: number, d0: number, m: number): Floa
     return buf;
 }
 
-function findAllOctreeInstances(
-    app: AppBase,
-    octree: OctreeLike,
-    gsplatEntity?: Entity
-): OctreeInstanceLike[] {
-    const found: OctreeInstanceLike[] = [];
-    const seen = new Set<OctreeInstanceLike>();
-
-    const director = (app.renderer as unknown as { gsplatDirector?: {
-        camerasMap: Map<unknown, {
-            layersMap: Map<unknown, { gsplatManager?: { octreeInstances?: Map<unknown, OctreeInstanceLike> } | null }>;
-        }>;
-    } }).gsplatDirector;
-
-    const addInstance = (inst: OctreeInstanceLike | undefined | null) => {
-        if (!inst || inst.octree !== octree || seen.has(inst)) {
-            return;
-        }
-        seen.add(inst);
-        found.push(inst);
-    };
-
-    if (director) {
-        for (const cameraData of director.camerasMap.values()) {
-            for (const layerData of cameraData.layersMap.values()) {
-                const instances = layerData.gsplatManager?.octreeInstances;
-                if (!instances) {
-                    continue;
-                }
-                for (const inst of instances.values()) {
-                    addInstance(inst);
-                }
-            }
-        }
-    }
-
-    // 兜底：通过 entity placement 反查 instance（director 遍历未命中时）
-    if (!found.length && gsplatEntity && director) {
-        const placement = (gsplatEntity.gsplat as unknown as { _placement?: unknown } | null)?._placement;
-        if (placement) {
-            for (const cameraData of director.camerasMap.values()) {
-                for (const layerData of cameraData.layersMap.values()) {
-                    addInstance(layerData.gsplatManager?.octreeInstances?.get(placement));
-                }
-            }
-        }
-    }
-
-    return found;
-}
-
 type OctreeGpuSyncJob = {
     octree: OctreeLike;
     gsplatEntity: Entity;
@@ -1352,18 +1296,6 @@ export type StreamingViewportRefinementStatus = {
     ready: boolean;
 };
 
-/** 由 unlock 时 foreground 总量与当前 pending 计算 refinement 阶段进度 [0,1] */
-export function computeStreamingRefinementProgressRatio(
-    pendingForeground: number,
-    baselinePending: number
-): number {
-    const baseline = Math.max(baselinePending, pendingForeground, 1);
-    if (pendingForeground <= 0) {
-        return 1;
-    }
-    return Math.max(0, Math.min(1, (baseline - pendingForeground) / baseline));
-}
-
 /**
  * streaming 首屏 refinement 快照（瞬时 foreground 评分，可能随帧振荡）。
  * 进度条完成判定应优先用 OctreeRefinementController.getStreamingRefinementStatus（stable tracked pending）。
@@ -1471,8 +1403,7 @@ function buildPriorityFiles(ctx: RefinementEvaluateContext): PrioritizedBatch {
     _viewProj.mul2(camera.projectionMatrix, camera.viewMatrix);
     _frustum.setFromMat4(_viewProj);
 
-    const rangeMin = Math.max(0, Math.min(gsplat.lodRangeMin ?? 0, maxLod));
-    const rangeMax = Math.max(rangeMin, Math.min(gsplat.lodRangeMax ?? maxLod, maxLod));
+    const { rangeMin, rangeMax } = resolveEntityLodRange(gsplatEntity, maxLod);
     const { lodBaseDistance, lodMultiplier } = lodParams;
     const minDistBuf = maxLod >= 1
         ? ensureLodMinDistThresholds(maxLod, lodBaseDistance, lodMultiplier)
@@ -2166,7 +2097,10 @@ export function createOctreeRefinementController(
                     maxConcurrent: loader?.maxConcurrentLoads,
                     splatBudget: gsplatScene.splatBudget,
                     lodUnderfillLimit: gsplatScene.lodUnderfillLimit,
-                    lodRange: [gsplatScene.lodRangeMin, gsplatScene.lodRangeMax]
+                    lodRange: (() => {
+                        const comp = gsplatEntity.gsplat as GSplatComponent | null;
+                        return [comp?.lodRangeMin ?? 0, comp?.lodRangeMax ?? 0];
+                    })()
                 };
                 if (getRefinementDebugLevel() >= 2) {
                     log.jitterHint = {

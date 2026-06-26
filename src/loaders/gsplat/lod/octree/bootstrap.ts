@@ -21,8 +21,9 @@ import {
     warnOnComputeRendererFallback,
     type GsplatSceneRuntime
 } from '../scene-bindings';
+import { applyLodRangeToGsplatEntity } from './entity-lod-range';
+import { computeStreamingRefinementProgressRatio } from './streaming-refinement-progress';
 import {
-    computeStreamingRefinementProgressRatio,
     createOctreeRefinementController,
     ensureStreamingBootstrapCoarseFiles,
     getStreamingViewportBootstrapStatus,
@@ -374,8 +375,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         bindGsplatPerfSettings(gsplat, global);
         const maxLod = octreeResource?.octree?.lodLevels;
         if (maxLod) {
-            gsplat.lodRangeMin = 0;
-            gsplat.lodRangeMax = maxLod - 1;
+            applyLodRangeToGsplatEntity(gsplatEntity, 0, maxLod - 1);
         }
         gsplat.dirty = true;
         app.renderNextFrame = true;
@@ -557,18 +557,8 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
                     }
 
                     const updateLod = () => {
-                        const gsplatScene = app.scene.gsplat as {
-                            lodRangeMin?: number;
-                            lodRangeMax?: number;
-                            splatBudget?: number;
-                        };
-                        if (gsplatScene.lodRangeMin !== undefined) {
-                            gsplat.lodRangeMin = gsplatScene.lodRangeMin;
-                            gsplat.lodRangeMax = gsplatScene.lodRangeMax ?? gsplat.lodRangeMax;
-                            if (gsplatScene.splatBudget !== undefined) {
-                                gsplatEntity.gsplat!.splatBudget = gsplatScene.splatBudget * 1_000_000;
-                            }
-                        }
+                        gsplat.dirty = true;
+                        app.renderNextFrame = true;
                     };
                     const onPerformanceModeChanged = isCustomLod ? updateLod : () => {
                         bindGsplatPerfSettings(gsplat, global);
@@ -762,20 +752,6 @@ function configureInitialGsplatScene(
     const { isCustomLod, isStreamingOctree, isFullload } = loadMode;
 
     if (isCustomLod) {
-        const gsplatScene = global.app.scene.gsplat as {
-            lodRangeMax?: number;
-            splatBudget?: number;
-        };
-        if (gsplatScene.lodRangeMax !== undefined) {
-            if (gsplatScene.splatBudget !== undefined) {
-                gsplatEntity.gsplat!.splatBudget = gsplatScene.splatBudget * 1_000_000;
-            }
-            gsplat.lodRangeMin = 0;
-            gsplat.lodRangeMax = gsplatScene.lodRangeMax;
-        } else {
-            gsplat.lodRangeMin = 0;
-            gsplat.lodRangeMax = 5;
-        }
         gsplat.minContribution = 1;
         gsplat.alphaClip = 1 / 255;
         gsplat.antiAlias = config.aa;
@@ -790,7 +766,8 @@ function configureInitialGsplatScene(
     if (isStreamingOctree) {
         const lodLevels = octreeResource?.octree?.lodLevels;
         if (lodLevels) {
-            gsplat.lodRangeMax = gsplat.lodRangeMin = lodLevels - 1;
+            const coarseLod = lodLevels - 1;
+            applyLodRangeToGsplatEntity(gsplatEntity, coarseLod, coarseLod);
         }
         gsplat.splatBudget = getSplatBudgetMillions(global) * 1_000_000;
         bindGsplatRenderer(gsplat, global);

@@ -20,7 +20,8 @@ import {
     TONEMAP_ACES2,
     TONEMAP_NEUTRAL,
     Vec3,
-    GSplatComponent
+    GSplatComponent,
+    GSplatComponentSystem
 } from 'playcanvas';
 
 import { Annotations } from './annotations';
@@ -467,6 +468,10 @@ class Viewer {
 
         // disable auto render, we'll render only when camera changes
         app.autoRender = false;
+
+        app.systems.gsplat.on(GSplatComponentSystem.EVENT_FRAMEREQUEST, () => {
+            app.renderNextFrame = true;
+        });
 
         this.deferPersistentStylizationCameraEffects = shouldDeferPersistentMount(settings);
 
