@@ -17,28 +17,6 @@ type LegacyRevealEffect = {
     effectParams?: Record<string, unknown>
 }
 
-type LodPlatform = 'desktop-max' | 'desktop' | 'mobile-max' | 'mobile'
-
-type LodPreset = {
-    range: [number, number],
-    lodDistances: number[],
-    splatBudget?: number
-}
-
-type LodSettings = {
-    presets?: Record<LodPlatform, LodPreset>,
-    lodUpdateDistance?: number, // 0.5
-    lodUnderfillLimit?: number, // 5
-    cameraPosition?: number[], // [[10.3, 2, -10]
-    eulerAngles?: number[], // [-90, 0, 0]
-    moveSpeed?: number, // 4
-    moveFastSpeed?: number, // 15
-    enableOrbit?: boolean, // false
-    enablePan?: boolean, // false
-    focusPoint?: number[], // [12, 3, 0]
-    [key: string]: any;
-}
-
 type TransformFrame = {
     id: number,
     img_name: string,
@@ -321,9 +299,6 @@ type PersistentSceneEffectEntry = {
 
 export type {
     LegacyRevealEffect,
-    LodSettings,
-    LodPreset,
-    LodPlatform,
     TransformFrame,
     PointLightConfig,
     DirectionalLightConfig,

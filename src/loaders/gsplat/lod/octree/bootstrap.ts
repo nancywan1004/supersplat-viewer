@@ -13,7 +13,6 @@ import type { Global } from '../../../../types';
 import { revealBlocksAnim } from '../../../../vfx/effects-runtime/reveal/reveal-policy';
 import type { RevealController } from '../../../../vfx/effects-runtime/reveal/reveal-controller';
 import type { CameraManager } from '../../../../camera-manager';
-import { isCustomLodEnabled } from '../custom-loader';
 import {
     bindGsplatPerfSettings,
     bindGsplatRenderer,
@@ -39,7 +38,6 @@ import {
 import type { ForceRenderBinding } from '../../shared-types';
 
 export type OctreeLoadMode = {
-    isCustomLod: boolean;
     isStreamingOctree: boolean;
     isFullload: boolean;
 };
@@ -48,13 +46,10 @@ export function resolveOctreeLoadMode(
     global: Global,
     octreeResource: GSplatOctreeResourceLike | null
 ): OctreeLoadMode {
-    const { config, settings } = global;
-    const isCustomLod = isCustomLodEnabled(settings, config.contentUrl);
+    const { config } = global;
     return {
-        isCustomLod,
         isFullload: !!config.fullload,
         isStreamingOctree:
-            !isCustomLod &&
             !config.fullload &&
             isStreamableOctreeResource(octreeResource)
     };
@@ -77,7 +72,7 @@ export type OctreeLodBootstrapHandle = {
 };
 
 /**
- * PlayCanvas octree 引擎路径（无 unified instance）：custom LOD / fullload / streaming octree。
+ * PlayCanvas octree 引擎路径（无 unified instance）：fullload / streaming octree。
  * 与 {@link bootstrapSogUnified} 互不重叠。
  */
 export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLodBootstrapHandle {
@@ -97,7 +92,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
     const gsplat = app.scene.gsplat as unknown as GsplatSceneRuntime;
     const octreeResource = gsplatEntity.gsplat?.resource as GSplatOctreeResourceLike | null;
     const loadMode = resolveOctreeLoadMode(global, octreeResource);
-    const { isCustomLod, isStreamingOctree, isFullload } = loadMode;
+    const { isStreamingOctree, isFullload } = loadMode;
 
     configureInitialGsplatScene(gsplat, global, gsplatEntity, loadMode, octreeResource);
 
@@ -112,7 +107,6 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
     let refinementController: OctreeRefinementController | null = null;
     let current = 0;
     let watermark = 1;
-    let maxProgress = 0;
     let progressUIHidden = false;
 
     const PROGRESS_THRESHOLD = 50;
@@ -544,30 +538,14 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
                     ensureShadowPipelineReady();
                     forceRender.set(false);
 
-                    if (
-                        isCustomLod &&
-                        settings.startMode === 'animTrack' &&
-                        state.hasAnimation &&
-                        !config.noanim &&
-                        !revealBlocksAnim(state)
-                    ) {
-                        console.log('LOD mode: all chunks loaded, ensuring animation is playing');
-                        state.animationStarted = true;
-                        state.animationPaused = false;
-                    }
-
-                    const updateLod = () => {
-                        gsplat.dirty = true;
-                        app.renderNextFrame = true;
-                    };
-                    const onPerformanceModeChanged = isCustomLod ? updateLod : () => {
+                    const onPerformanceModeChanged = () => {
                         bindGsplatPerfSettings(gsplat, global);
                     };
 
                     bindGsplatRenderer(gsplat, global);
                     warnOnComputeRendererFallback(global);
 
-                    if (isCustomLod || isFullload) {
+                    if (isFullload) {
                         events.on('performanceMode:changed', onPerformanceModeChanged);
                         onPerformanceModeChanged();
                     }
@@ -588,16 +566,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
             watermark = Math.max(watermark, loading);
             current = watermark - loading;
 
-            let progress: number;
-            if (isCustomLod && state.animationStarted) {
-                progress = 100;
-            } else {
-                progress = Math.trunc(current / watermark * 100);
-                if (isCustomLod) {
-                    maxProgress = Math.max(maxProgress, progress);
-                    progress = maxProgress;
-                }
-            }
+            const progress = Math.trunc(current / watermark * 100);
 
             if (isStreamingOctree) {
                 updateStreamingLoadProgress(progress);
@@ -608,22 +577,9 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
             if (!progressUIHidden && progress >= PROGRESS_THRESHOLD) {
                 if (isStreamingOctree) {
                     tryOpenStreamingBootstrapGate();
-                } else if (isCustomLod) {
+                } else {
                     progressUIHidden = true;
                     events.fire('progressThresholdReached', progress);
-
-                    if (
-                        settings.startMode === 'animTrack' &&
-                        state.hasAnimation &&
-                        !config.noanim &&
-                        !state.animationStarted &&
-                        !revealBlocksAnim(state)
-                    ) {
-                        state.animationStarted = true;
-                        console.log(`Progress reached ${PROGRESS_THRESHOLD}%, starting animation`);
-                        state.animationPaused = false;
-                        events.fire('animationStarted');
-                    }
                 }
             } else if (isStreamingOctree && streamingBootstrapGateReached) {
                 pollStreamingBootstrapComplete();
@@ -748,15 +704,7 @@ function configureInitialGsplatScene(
     loadMode: OctreeLoadMode,
     octreeResource: GSplatOctreeResourceLike | null
 ): void {
-    const { config } = global;
-    const { isCustomLod, isStreamingOctree, isFullload } = loadMode;
-
-    if (isCustomLod) {
-        gsplat.minContribution = 1;
-        gsplat.alphaClip = 1 / 255;
-        gsplat.antiAlias = config.aa;
-        return;
-    }
+    const { isStreamingOctree, isFullload } = loadMode;
 
     if (isFullload) {
         bindGsplatPerfSettings(gsplat, global);

@@ -1,7 +1,4 @@
 import type {
-    LodSettings,
-    LodPreset,
-    LodPlatform,
     LegacyRevealEffect,
     TransformFrame,
     PointLightConfig,
@@ -157,7 +154,6 @@ type ExperienceSettings = {
     revealEffect?: LegacyRevealEffect,
     /** 三轨特效持久化；scene reveal 以 **`effects.reveal` 为真源**；`revealEffect` 仅旧数据导入读兼容 */
     effects?: EffectsSettings,
-    lodSettings?: LodSettings,
     lighting?: LightingSettings,
     nightMode?: {
         fade?: number;
@@ -406,9 +402,6 @@ export type {
     PostEffectSettings,
     LegacyRevealEffect,
     EffectsSettings,
-    LodSettings,
-    LodPreset,
-    LodPlatform,
     TransformFrame,
     ExperienceSettings,
     PointLightConfig,

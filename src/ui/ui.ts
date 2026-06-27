@@ -3,7 +3,6 @@ import { EventHandler } from 'playcanvas';
 import { shouldUseTouchJoystickMove } from '../input/touch-joystick-ui';
 import { Tooltip } from '../tooltip';
 import { Global } from '../types';
-import { isCustomLodEnabled } from '../loaders/gsplat/lod/custom-loader';
 import type { ExperienceSettings } from '../schemas/v2';
 import {
     serializeExperienceSettings,
@@ -383,12 +382,6 @@ const initUI = (global: Global) => {
     }, {});
     dom.previewModeBtn = document.getElementById('previewModeBtn');
 
-    // Check if LOD mode is enabled
-    const isLodMode = isCustomLodEnabled(settings, config.contentUrl);
-    
-    // In LOD mode, show progress bar but mark as 100% when animation starts
-    // Progress is calculated based on threshold, reaching 100% when animation begins
-    const hideProgressBarInLodMode = false;
     // Forward wheel events from UI overlays to the canvas so the camera zooms
     // instead of the page scrolling (e.g. annotation nav, tooltips, hotspots).
     // Preserve non-standard wheelDelta fields for input-mode classification.
@@ -408,13 +401,7 @@ const initUI = (global: Global) => {
     }, { passive: false });
 
     // Handle loading progress updates
-    if (isLodMode && hideProgressBarInLodMode) {
-        // Hide progress bar in LOD mode
-        const loadingWrap = document.getElementById('loadingWrap');
-        if (loadingWrap) {
-            loadingWrap.classList.add('hidden');
-        }
-    } else {
+    {
         const progressGradient = 'linear-gradient(90deg, #FFFFFF 0%, #73CCFF 41.83%, #2061FD 100%)';
         events.on('progress:changed', (progress) => {
             dom.loadingText.textContent = `${progress}%`;
@@ -429,13 +416,6 @@ const initUI = (global: Global) => {
                 dom.loadingBar.style.backgroundImage = progressGradient;
                 dom.loadingBar.style.backgroundSize = '100% 100%';
                 dom.loadingBar.style.backgroundRepeat = 'no-repeat';
-                // In LOD mode, hide loading UI when progress reaches 100%
-                if (isLodMode) {
-                    const loadingWrap = document.getElementById('loadingWrap');
-                    if (loadingWrap) {
-                        loadingWrap.classList.add('hidden');
-                    }
-                }
             }
         });
     }

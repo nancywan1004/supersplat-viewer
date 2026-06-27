@@ -25,7 +25,6 @@ import { initPoster, initUI } from './ui/ui';
 import { Viewer } from './viewer';
 import { initXr } from './xr';
 import { initLight } from './light';
-import { isCustomLodEnabled, isGsplatMetaJsonFilename, LodLoader } from './loaders/gsplat/lod/custom-loader';
 import { bindGsplatRenderer, type GsplatSceneRuntime } from './loaders/gsplat/lod/scene-bindings';
 import { loadSplat } from './loaders/gsplat/sog/splat-deserialize';
 import type { AssetSource } from './loaders/shared/asset-source';
@@ -59,10 +58,14 @@ import { initializeGltfRuntime } from './loaders/gltf/gltf-transcoder';
 
 export { loadGsplatAsset };
 
-const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progress: number) => void, lodLoader?: LodLoader) => {
+const isGsplatMetaJsonFilename = (filename: string | undefined): boolean => {
+    const name = filename?.toLowerCase() ?? '';
+    return name === 'meta.json' || name === 'lod-meta.json';
+};
+
+const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progress: number) => void) => {
     const { contents, contentUrl, aa } = config;
     const filename = new URL(contentUrl, location.href).pathname.split('/').pop();
-    const shouldEnableLod = lodLoader?.shouldEnableLod(contentUrl) ?? false;
     
     // 检查是否为 .splat 格式
     const isSplat = (filename || contentUrl || '').toLowerCase().endsWith('.splat');
@@ -99,13 +102,6 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
             material.setDefine('GSPLAT_AA', aa);
             material.setParameter('alphaClip', 1 / 255);
             app.root.addChild(entity);
-
-            if (shouldEnableLod && lodLoader) {
-                const gsplatComponent = entity.gsplat;
-                if (gsplatComponent) {
-                    lodLoader.applyLodPreset(gsplatComponent);
-                }
-            }
 
             progressCallback(100);
             return entity;
@@ -147,13 +143,6 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
                     entity.gsplat.material.setDefine('GSPLAT_AA', true);
                 }
                 app.root.addChild(entity);
-
-                if (shouldEnableLod && lodLoader) {
-                    const gsplatComponent = entity.gsplat;
-                    if (gsplatComponent) {
-                        lodLoader.applyLodPreset(gsplatComponent);
-                    }
-                }
 
                 resolve(entity);
             });
@@ -418,11 +407,6 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     // 供 NightMode 等脚本读取点光源等（collectPointLights 需要 global）
     (app as any).__global = global;
 
-    const customLod = isCustomLodEnabled(processedSettings, config.contentUrl);
-    const lodLoader = customLod ? new LodLoader(global) : undefined;
-    if (lodLoader) {
-        lodLoader.initializeLodSettings();
-    }
     initCanvas(global);
 
     // start the application
@@ -461,8 +445,7 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
             } else {
                 state.progress = progress;
             }
-        },
-        lodLoader
+        }
         )
     );
 
