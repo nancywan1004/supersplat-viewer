@@ -101,6 +101,11 @@
                 budget,
                 heatmap: url.searchParams.has('heatmap'),
                 fullload: url.searchParams.has('fullload'),
+                benchmark: url.searchParams.has('benchmark'),
+                benchmarkLabel: url.searchParams.get('benchmarkLabel') ?? undefined,
+                benchmarkNoInteraction: url.searchParams.has('benchmarkNoInteraction'),
+                benchmarkAnimTrack: url.searchParams.has('benchmarkAnimTrack'),
+                benchmarkHud: url.searchParams.has('benchmarkHud'),
                 projectId,
                 token
             };

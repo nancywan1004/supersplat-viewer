@@ -203,6 +203,14 @@ type Config = {
     budget?: number;                            // override splat budget in millions (overrides platform + performanceMode table)
     renderer: 'webgl' | 'cpu-sort' | 'gpu-sort' | 'compute';
     heatmap: boolean;                           // render heatmap debug overlay (WebGPU only)
+    benchmark?: boolean;                        // benchmark mode (forces noui/nofx/noreveal; noanim unless animTrack)
+    benchmarkLabel?: string;
+    /** 为 true 时跳过 benchmark 相机巡检 */
+    benchmarkNoInteraction?: boolean;
+    /** 沿 animTrack 关键帧评测（每点等视野中央变清晰） */
+    benchmarkAnimTrack?: boolean;
+    /** 右上角实时性能 HUD；与 ?benchmark 跑批解耦，避免污染 FPS */
+    benchmarkHud?: boolean;
 };
 
 // observable state that can change at runtime

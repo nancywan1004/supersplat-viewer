@@ -54,6 +54,8 @@ import {
 } from './scene-assets/collision/scene-asset-collision';
 import { getCameraCollisionManager } from './collision/camera-collision-manager';
 import { initializeGltfRuntime } from './loaders/gltf/gltf-transcoder';
+import { applyBenchmarkConfigFlags, createSceneProfileBenchmark } from './benchmark/benchmark';
+import { initBenchmarkHud, shouldShowBenchmarkHud } from './benchmark/benchmark-hud';
 
 
 export { loadGsplatAsset };
@@ -284,6 +286,17 @@ const initCanvas = (global: Global) => {
 };
 
 const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config) => {
+    if (config.benchmark && !config.benchmarkNoInteraction) {
+        const hasAnimTrack =
+            settingsJson?.startMode === 'animTrack' &&
+            Array.isArray(settingsJson?.animTracks) &&
+            settingsJson.animTracks.length > 0;
+        if (config.benchmarkAnimTrack || hasAnimTrack) {
+            config.benchmarkAnimTrack = true;
+        }
+    }
+    applyBenchmarkConfigFlags(config);
+
     const { app, camera, renderer, forceWebGlForSogUnified } = await createApp(canvas, config);
     const gsplatConfig: Config = forceWebGlForSogUnified ? { ...config, renderer: 'webgl' } : config;
 
@@ -406,6 +419,17 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
 
     // 供 NightMode 等脚本读取点光源等（collectPointLights 需要 global）
     (app as any).__global = global;
+
+    const benchmark = createSceneProfileBenchmark(global);
+    if (benchmark) {
+        benchmark.setCaseLabel(config.benchmarkLabel ?? 'default');
+        benchmark.start();
+        (global as any).__sceneProfileBenchmarkHarness = benchmark;
+    }
+
+    if (shouldShowBenchmarkHud(config)) {
+        initBenchmarkHud(global);
+    }
 
     initCanvas(global);
 
