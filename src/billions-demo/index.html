@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <title>PlayCanvas Billions Local Demo</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+        <style>
+            html,
+            body {
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                overflow: hidden;
+                background: #05070b;
+                color: #f6f7fb;
+                font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            }
+
+            #application-canvas {
+                display: block;
+                width: 100%;
+                height: 100%;
+            }
+
+            #billions-panel {
+                position: fixed;
+                left: 16px;
+                top: 16px;
+                z-index: 2;
+                width: min(360px, calc(100vw - 32px));
+                padding: 12px;
+                border: 1px solid rgba(255, 255, 255, 0.16);
+                border-radius: 8px;
+                background: rgba(8, 11, 18, 0.78);
+                box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+                backdrop-filter: blur(12px);
+            }
+
+            #billions-panel h1 {
+                margin: 0 0 10px;
+                font-size: 14px;
+                font-weight: 650;
+                letter-spacing: 0;
+            }
+
+            .billions-row {
+                display: grid;
+                grid-template-columns: 96px 1fr 46px;
+                gap: 8px;
+                align-items: center;
+                min-height: 28px;
+                font-size: 12px;
+                color: rgba(246, 247, 251, 0.84);
+            }
+
+            .billions-row input[type="range"] {
+                width: 100%;
+                accent-color: #3fb985;
+            }
+
+            .billions-value {
+                text-align: right;
+                font-variant-numeric: tabular-nums;
+                color: #ffffff;
+            }
+
+            #billions-stats {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 6px 10px;
+                margin-top: 10px;
+                font-size: 12px;
+                font-variant-numeric: tabular-nums;
+                color: rgba(246, 247, 251, 0.82);
+            }
+
+            #billions-status {
+                grid-column: 1 / -1;
+                color: rgba(246, 247, 251, 0.7);
+            }
+        </style>
+        <script type="importmap">
+        {
+            "imports": {
+                "playcanvas": "../vendor/playcanvas-2.20.0.js"
+            }
+        }
+        </script>
+    </head>
+    <body>
+        <canvas id="application-canvas"></canvas>
+        <section id="billions-panel" aria-label="Billions demo controls">
+            <h1>PlayCanvas Billions</h1>
+            <label class="billions-row">
+                <span>Instances</span>
+                <input id="billions-instances" type="range" min="1" max="100" step="1" value="12">
+                <span id="billions-instances-value" class="billions-value">12</span>
+            </label>
+            <label class="billions-row">
+                <span>LOD base</span>
+                <input id="billions-lod-base" type="range" min="10" max="200" step="1" value="40">
+                <span id="billions-lod-base-value" class="billions-value">40</span>
+            </label>
+            <label class="billions-row">
+                <span>LOD mult</span>
+                <input id="billions-lod-mult" type="range" min="1.2" max="3.5" step="0.05" value="1.8">
+                <span id="billions-lod-mult-value" class="billions-value">1.8</span>
+            </label>
+            <div id="billions-stats">
+                <span>Total: <b id="billions-total">...</b></span>
+                <span>Active: <b id="billions-active">...</b></span>
+                <span>Renderer: <b id="billions-renderer">...</b></span>
+                <span>LOD: <b id="billions-lod-state">...</b></span>
+                <span id="billions-status">Loading streamed asset...</span>
+            </div>
+        </section>
+        <script type="module" src="./index.js"></script>
+    </body>
+</html>

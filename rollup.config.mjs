@@ -200,6 +200,22 @@ function htmlPlugin() {
     };
 }
 
+function staticHtmlPlugin(inputFile, outputFile = 'index.html') {
+    return {
+        name: `static-html:${outputFile}`,
+        buildStart() {
+            this.addWatchFile(inputFile);
+        },
+        generateBundle() {
+            this.emitFile({
+                type: 'asset',
+                fileName: outputFile,
+                source: readFileSync(inputFile, 'utf-8')
+            });
+        }
+    };
+}
+
 const buildCss = {
     input: 'src/index.scss',
     output: {
@@ -244,6 +260,21 @@ const buildPublic = {
         typescript(),
         json(),
         htmlPlugin()
+    ]
+};
+
+const buildBillionsPublic = {
+    input: 'src/billions-demo/index.ts',
+    external: ['playcanvas'],
+    output: {
+        dir: 'public/billions',
+        format: 'esm',
+        sourcemap: true
+    },
+    plugins: [
+        resolve(),
+        typescript(),
+        staticHtmlPlugin('src/billions-demo/index.html')
     ]
 };
 
@@ -410,10 +441,10 @@ const buildDist = {
 
 // --- 导出 ---
 // 根据环境变量决定是否生成类型定义文件
-const buildConfigs = [buildCss, buildPublic, buildDist];
+const buildConfigs = [buildCss, buildPublic, buildBillionsPublic, buildDist];
 // 只有在非生产环境或明确要求时才生成类型定义
 if (process.env.NODE_ENV !== 'production' || process.env.GENERATE_TYPES === 'true') {
   buildConfigs.push(buildTypes);
 }
 
-export default buildConfigs;
+export default process.env.ONLY_BILLIONS === 'true' ? [buildBillionsPublic] : buildConfigs;
