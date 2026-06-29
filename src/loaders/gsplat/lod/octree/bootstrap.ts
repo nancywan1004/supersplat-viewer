@@ -239,7 +239,10 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
             return 0;
         }
         const enqueued = ensureStreamingBootstrapCoarseFiles(scene, streamingViewportOptions());
-        syncStreamingOctreePlacements(scene);
+        // native handoff 后不再 viewer 侧 sync，避免 WebGPU rebuildWorkBuffer 竞态
+        if (!isNativeLod || !streamingLodUnlocked) {
+            syncStreamingOctreePlacements(scene);
+        }
         app.renderNextFrame = true;
         return enqueued;
     };
@@ -420,6 +423,18 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         if (!isStreamingOctree || !streamingBootstrapGateReached) {
             return;
         }
+
+        // native unlock 后完全交给引擎 streaming；viewer 侧 sync 会触发 inst.update 与 render 重建 work buffer 竞态
+        if (isNativeLod && streamingLodUnlocked) {
+            if (!progressUIHidden) {
+                progressUIHidden = true;
+                state.progress = 100;
+                finalizeStreamingBootstrapDisplay();
+                events.fire('progressThresholdReached', 100);
+            }
+            return;
+        }
+
         const scene = streamingScene();
         if (!scene) {
             return;
