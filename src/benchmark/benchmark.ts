@@ -1,6 +1,7 @@
 import type { EventHandler } from 'playcanvas';
 
 import type { Global } from '../types';
+import { resolveLodRuntime } from '../loaders/gsplat/lod/scene-profile';
 import { BenchmarkMemoryTracker } from './benchmark-refinement';
 import {
     runBenchmarkAnimTrackPhase,
@@ -12,6 +13,7 @@ import {
 export type SceneProfileBenchmarkCaseResult = {
     label: string;
     budget?: number;
+    lodRuntime?: string;
     firstFrameMs: number | null;
     settleStartMs: number | null;
     fpsP50: number | null;
@@ -175,6 +177,7 @@ export class SceneProfileBenchmarkHarness {
         const result: SceneProfileBenchmarkCaseResult = {
             label: this.label,
             budget: this.global.config.budget,
+            lodRuntime: resolveLodRuntime(this.global),
             firstFrameMs: this.firstFrameMs,
             settleStartMs: this.settleStartMs ? this.settleStartMs - this.startMs : null,
             fpsP50: this.percentile(fpsValues, 0.5),

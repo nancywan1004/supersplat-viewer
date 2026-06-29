@@ -1,6 +1,8 @@
 import type { AppBase } from 'playcanvas';
 
 import type { OctreeRefinementController } from '../loaders/gsplat/lod/octree/refinement-controller';
+import type { NativeStreamingObserver } from '../loaders/gsplat/lod/octree/native-streaming-observer';
+import { isNativeLodRuntime } from '../loaders/gsplat/lod/scene-profile';
 import type { Global } from '../types';
 
 export const REFINEMENT_CLEAR_RATIO = 0.95;
@@ -43,7 +45,13 @@ export type RefinementSnapshot = {
 
 type ViewerLike = {
     octreeRefinementController?: OctreeRefinementController | null;
+    nativeStreamingObserver?: NativeStreamingObserver | null;
 };
+
+function getNativeStreamingObserver(global: Global): NativeStreamingObserver | null {
+    const viewer = (global.app as { viewer?: ViewerLike }).viewer;
+    return viewer?.nativeStreamingObserver ?? null;
+}
 
 export function readGsplatsM(app: AppBase): number | null {
     const frame = (app.stats as { frame?: { gsplats?: number } })?.frame;
@@ -111,6 +119,14 @@ export function getRefinementController(global: Global): OctreeRefinementControl
 
 /** 只读观测：不触发 refinement 调度 */
 export function readRefinementSnapshot(global: Global): RefinementSnapshot {
+    if (isNativeLodRuntime(global)) {
+        const observer = getNativeStreamingObserver(global);
+        if (observer) {
+            return observer.snapshot();
+        }
+        return { pendingNodes: 0, refinementRatio: 0, ready: false };
+    }
+
     const controller = getRefinementController(global);
     if (!controller) {
         return { pendingNodes: 0, refinementRatio: 1, ready: true };

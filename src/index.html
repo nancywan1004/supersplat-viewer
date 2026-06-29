@@ -74,6 +74,12 @@
             const budgetParam = url.searchParams.get('budget');
             const budget = budgetParam !== null ? Number(budgetParam) : undefined;
 
+            const lodRuntimeParam = url.searchParams.get('lodRuntime');
+            const lodRuntime =
+                lodRuntimeParam === 'native' ? 'native'
+                : lodRuntimeParam === 'refinement' ? 'refinement'
+                : undefined;
+
             const sseConfig = {
                 poster: posterUrl && createImage(posterUrl),
                 skyboxUrl,
@@ -99,6 +105,7 @@
                 webgpu: url.searchParams.has('webgpu'),
                 renderer,
                 budget,
+                lodRuntime,
                 heatmap: url.searchParams.has('heatmap'),
                 fullload: url.searchParams.has('fullload'),
                 benchmark: url.searchParams.has('benchmark'),

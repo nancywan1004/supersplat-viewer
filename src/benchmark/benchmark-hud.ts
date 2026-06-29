@@ -12,7 +12,8 @@ import {
 } from './benchmark-refinement';
 import type { OctreeRefinementController } from '../loaders/gsplat/lod/octree/refinement-controller';
 
-const HUD_ID = 'benchmark-hud';
+export const BENCHMARK_HUD_ID = 'benchmark-hud';
+const HUD_ID = BENCHMARK_HUD_ID;
 const FPS_WINDOW = 120;
 const POSE_DECIMALS = 2;
 /** 观测 HUD 刷新间隔；避免每帧重写 DOM 污染 FPS */
@@ -137,7 +138,7 @@ function formatSplatBudget(value: unknown): string {
     return value <= 0 ? '0 / uncapped' : `${(value / 1_000_000).toFixed(2)}M`;
 }
 
-function ensureStyles() {
+export function ensureBenchmarkHudStyles() {
     if (document.getElementById('benchmark-hud-style')) {
         return;
     }
@@ -202,7 +203,7 @@ function ensureStyles() {
 
 export function initBenchmarkHud(global: Global): () => void {
     const { app, config, state, events } = global;
-    ensureStyles();
+    ensureBenchmarkHudStyles();
 
     let root = document.getElementById(HUD_ID);
     if (!root) {

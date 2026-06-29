@@ -297,6 +297,14 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     }
     applyBenchmarkConfigFlags(config);
 
+    const processedSettings = importSettings(settingsJson);
+    if (!config.lodRuntime) {
+        const sceneProfile = (processedSettings as { sceneProfile?: { lodRuntime?: string } }).sceneProfile;
+        if (sceneProfile?.lodRuntime === 'native' || sceneProfile?.lodRuntime === 'refinement') {
+            config.lodRuntime = sceneProfile.lodRuntime;
+        }
+    }
+
     const { app, camera, renderer, forceWebGlForSogUnified } = await createApp(canvas, config);
     const gsplatConfig: Config = forceWebGlForSogUnified ? { ...config, renderer: 'webgl' } : config;
 
@@ -371,7 +379,6 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     });
 
     // 如果设置了 noreveal 参数，清除 reveal effect 配置
-    const processedSettings = importSettings(settingsJson);
     if (config.noreveal) {
         processedSettings.revealEffect = undefined;
         delete (processedSettings as Record<string, unknown>).effects;

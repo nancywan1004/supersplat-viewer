@@ -6,6 +6,7 @@ import {
 } from 'playcanvas';
 
 import type { Global } from '../../../types';
+import { resolveLodUpdateDistance } from './scene-profile';
 
 /**
  * 将 viewer Global（config / state / device）同步到 PlayCanvas `scene.gsplat` 运行时字段。
@@ -20,6 +21,7 @@ export type GsplatSceneRuntime = {
     minContribution?: number;
     alphaClip?: number;
     antiAlias?: boolean | number;
+    lodUpdateDistance?: number;
     lodUpdateAngle?: number;
     lodBehindPenalty?: number;
     radialSorting?: boolean;
@@ -66,6 +68,17 @@ export function bindGsplatRenderer(
     } else {
         gsplat.renderer = rendererByDevice.webgl;
     }
+}
+
+/**
+ * Octree streaming 全局 LOD 节流（对齐 PlayCanvas Billions 示例）。
+ * refinement burst 期间会临时覆盖 lodUpdateDistance。
+ */
+export function bindGsplatStreamingLodSettings(gsplat: GsplatSceneRuntime, global: Global): void {
+    gsplat.lodUpdateDistance = resolveLodUpdateDistance(global);
+    gsplat.lodUpdateAngle = 90;
+    gsplat.lodBehindPenalty = 5;
+    gsplat.radialSorting = true;
 }
 
 /** 写入 budget 与 performanceMode 相关渲染参数（lodRange 由 per-entity component 负责） */

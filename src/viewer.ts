@@ -71,6 +71,7 @@ import { readSkyboxCurrentUrlFromSettings } from './settings-serialize/settings-
 import { bootstrapOctreeLod, type OctreeLodBootstrapHandle } from './loaders/gsplat/lod/octree/bootstrap';
 import { bootstrapSogUnified } from './loaders/gsplat/sog/bootstrap';
 import type { OctreeRefinementController } from './loaders/gsplat/lod/octree/refinement-controller';
+import type { NativeStreamingObserver } from './loaders/gsplat/lod/octree/native-streaming-observer';
 import { BloomController } from './vfx/bloom';
 import { NightMode } from './vfx/lighting/night-mode';
 import {
@@ -336,6 +337,9 @@ class Viewer {
 
     /** 普通 octree streaming 首帧后的视锥/屏幕误差优先 refinement */
     octreeRefinementController: OctreeRefinementController | null = null;
+
+    /** lodRuntime=native 时引擎 EVENT_FRAMEREADY 观测（benchmark blur→clear） */
+    nativeStreamingObserver: NativeStreamingObserver | null = null;
 
     private octreeLodBootstrap: OctreeLodBootstrapHandle | null = null;
 
@@ -1131,6 +1135,9 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     revealController: this.revealController,
                     onRefinementController: (controller) => {
                         this.octreeRefinementController = controller;
+                    },
+                    onNativeStreamingObserver: (observer) => {
+                        this.nativeStreamingObserver = observer;
                     }
                 });
             }

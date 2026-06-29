@@ -16,11 +16,14 @@ import type { CameraManager } from '../../../../camera-manager';
 import {
     bindGsplatPerfSettings,
     bindGsplatRenderer,
+    bindGsplatStreamingLodSettings,
     getSplatBudgetMillions,
     warnOnComputeRendererFallback,
     type GsplatSceneRuntime
 } from '../scene-bindings';
+import { isNativeLodRuntime } from '../scene-profile';
 import { applyLodRangeToGsplatEntity } from './entity-lod-range';
+import { NativeStreamingObserver } from './native-streaming-observer';
 import { computeStreamingRefinementProgressRatio } from './streaming-refinement-progress';
 import {
     createOctreeRefinementController,
@@ -65,6 +68,7 @@ export type OctreeLodBootstrapOptions = {
     ensureShadowPipelineReady: () => void;
     revealController?: RevealController | null;
     onRefinementController: (controller: OctreeRefinementController | null) => void;
+    onNativeStreamingObserver?: (observer: NativeStreamingObserver | null) => void;
 };
 
 export type OctreeLodBootstrapHandle = {
@@ -85,10 +89,12 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         forceRender,
         ensureShadowPipelineReady,
         revealController,
-        onRefinementController
+        onRefinementController,
+        onNativeStreamingObserver
     } = options;
 
     const { app, config, events, state } = global;
+    const isNativeLod = isNativeLodRuntime(global);
     const gsplat = app.scene.gsplat as unknown as GsplatSceneRuntime;
     const octreeResource = gsplatEntity.gsplat?.resource as GSplatOctreeResourceLike | null;
     const loadMode = resolveOctreeLoadMode(global, octreeResource);
@@ -96,15 +102,19 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
 
     configureInitialGsplatScene(gsplat, global, gsplatEntity, loadMode, octreeResource);
 
-    gsplat.lodUpdateAngle = 90;
-    gsplat.lodBehindPenalty = 5;
-    gsplat.radialSorting = true;
+    bindGsplatStreamingLodSettings(gsplat, global);
 
     const eventHandler = app.systems.gsplat;
     let idleTime = 0;
     forceRender.set(true);
 
     let refinementController: OctreeRefinementController | null = null;
+    let nativeStreamingObserver: NativeStreamingObserver | null = null;
+    if (isStreamingOctree && isNativeLod) {
+        nativeStreamingObserver = new NativeStreamingObserver();
+        nativeStreamingObserver.attach(eventHandler);
+        onNativeStreamingObserver?.(nativeStreamingObserver);
+    }
     let current = 0;
     let watermark = 1;
     let progressUIHidden = false;
@@ -327,6 +337,11 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
             return;
         }
 
+        if (isNativeLod) {
+            state.progress = PROGRESS_REFINEMENT_CAP;
+            return;
+        }
+
         if (!streamingRefinementPhaseStarted) {
             streamingRefinementPhaseStarted = true;
             state.progress = PROGRESS_COARSE_CAP;
@@ -367,6 +382,9 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         }
         streamingLodUnlocked = true;
         bindGsplatPerfSettings(gsplat, global);
+        if (isNativeLod) {
+            gsplat.splatBudget = 0;
+        }
         const maxLod = octreeResource?.octree?.lodLevels;
         if (maxLod) {
             applyLodRangeToGsplatEntity(gsplatEntity, 0, maxLod - 1);
@@ -378,11 +396,21 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
             streamingPerfHandlerRegistered = true;
             perfModeHandler = () => {
                 bindGsplatPerfSettings(gsplat, global);
+                if (isNativeLod) {
+                    gsplat.splatBudget = 0;
+                }
             };
             events.on('performanceMode:changed', perfModeHandler);
         }
 
         refinementController?.destroy();
+        refinementController = null;
+
+        if (isNativeLod) {
+            onRefinementController(null);
+            return;
+        }
+
         refinementController = createOctreeRefinementController(global, gsplatEntity, octreeResource);
         refinementController?.start();
         onRefinementController(refinementController);
@@ -418,6 +446,16 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
 
         tryShowStreamingCoarseViewport();
         unlockStreamingLod();
+
+        if (isNativeLod) {
+            if (!progressUIHidden) {
+                progressUIHidden = true;
+                state.progress = 100;
+                finalizeStreamingBootstrapDisplay();
+                events.fire('progressThresholdReached', 100);
+            }
+            return;
+        }
 
         if (streamingViewportSyncCooldown <= 0) {
             syncStreamingOctreePlacements(scene);
@@ -693,6 +731,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
             }
             refinementController?.destroy();
             onRefinementController(null);
+            onNativeStreamingObserver?.(null);
         }
     };
 }

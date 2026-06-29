@@ -201,6 +201,8 @@ type Config = {
     /** 父级透传的 token（用于保存上传鉴权） */
     token?: string;
     budget?: number;                            // override splat budget in millions (overrides platform + performanceMode table)
+    /** refinement（默认）或 native 引擎 LOD；见 docs/SCENE_PROFILE.md */
+    lodRuntime?: 'refinement' | 'native';
     renderer: 'webgl' | 'cpu-sort' | 'gpu-sort' | 'compute';
     heatmap: boolean;                           // render heatmap debug overlay (WebGPU only)
     benchmark?: boolean;                        // benchmark mode (forces noui/nofx/noreveal; noanim unless animTrack)
