@@ -22,7 +22,6 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const suitePath = process.argv[2] ?? join(__dirname, '../public/benchmark-suites/scene-profiles.json');
-const baseUrl = (process.argv[3] ?? process.env.BENCHMARK_BASE_URL ?? 'http://localhost:3000/').replace(/\/?$/, '/');
 
 let playwright;
 try {
@@ -63,6 +62,7 @@ const fixed = suite.fixed ?? {};
 const defaultFlags = suite.defaults?.benchmarkFlags ?? ['noui', 'nofx', 'noreveal', 'noanim', 'benchmark'];
 const defaultRenderer = suite.defaults?.renderer;
 const fixedSettings = resolveSettingsPath(fixed.settings);
+const baseUrl = (process.argv[3] ?? process.env.BENCHMARK_BASE_URL ?? suite.baseUrl ?? 'http://localhost:3000/').replace(/\/?$/, '/');
 
 function applyRendererParam(params, renderer) {
     if (!renderer || renderer === 'auto' || renderer === 'webgl') {
@@ -225,6 +225,9 @@ function buildCaseUrl(c) {
     if (c.lodRuntime) {
         params.set('lodRuntime', c.lodRuntime);
     }
+    if (c.instances !== undefined) {
+        params.set('instances', String(c.instances));
+    }
 
     applyRendererParam(params, c.renderer ?? defaultRenderer);
 
@@ -371,6 +374,7 @@ if (warmStart) {
             const measured = await runBenchmarkCase(session.page, c, { phase: 'measure' });
             results.push({
                 ...measured,
+                instances: c.instances,
                 comparisonGroup: c.comparisonGroup,
                 bottleneckHint: inferBottleneckHint(measured)
             });

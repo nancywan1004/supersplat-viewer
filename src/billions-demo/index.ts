@@ -37,7 +37,12 @@ import {
     type Texture
 } from 'playcanvas';
 
+import { parseBillionsBenchmarkConfig } from './benchmark-config';
+import { createBillionsBenchmarkHarness } from './benchmark';
 import { CylinderController } from './cylinder-controller';
+import { initBillionsPerfHud, shouldShowBillionsPerfHud } from './perf-hud';
+
+const benchmarkConfig = parseBillionsBenchmarkConfig();
 
 const MAX_INSTANCES = 100;
 const DEFAULT_INSTANCES_DESKTOP = 12;
@@ -47,7 +52,7 @@ const DEFAULT_LOD_MULTIPLIER = platform.mobile ? 1.6 : 1.8;
 
 const config = {
     name: 'Poland-village',
-    url: 'https://unicity-dev2.bdnrc.org.cn/upload/scene/20260605/yunji/LOD/finland/lod-meta.json', // https://s3.eu-west-1.amazonaws.com/code.playcanvas.com/examples_data/example_poland_02/lod-meta.json
+    url: 'https://unicity-dev2.bdnrc.org.cn/upload/scene/20260605/yunji/LOD/poland-v2/lod-meta.json', // https://s3.eu-west-1.amazonaws.com/code.playcanvas.com/examples_data/example_poland_02/lod-meta.json
     lodUpdateDistance: 32,
     lodUnderfillLimit: 5,
     cameraPosition: [10.3, 2, -10] as const,
@@ -61,11 +66,16 @@ const layout = {
 };
 
 const state = {
-    instances: platform.mobile ? DEFAULT_INSTANCES_MOBILE : DEFAULT_INSTANCES_DESKTOP,
-    lodBaseDistance: DEFAULT_LOD_BASE_DISTANCE,
-    lodMultiplier: DEFAULT_LOD_MULTIPLIER,
+    instances: benchmarkConfig.instances
+        ?? (platform.mobile ? DEFAULT_INSTANCES_MOBILE : DEFAULT_INSTANCES_DESKTOP),
+    lodBaseDistance: benchmarkConfig.lodBaseDistance ?? DEFAULT_LOD_BASE_DISTANCE,
+    lodMultiplier: benchmarkConfig.lodMultiplier ?? DEFAULT_LOD_MULTIPLIER,
     colorizeLods: false
 };
+
+if (benchmarkConfig.noui) {
+    document.getElementById('billions-panel')!.style.display = 'none';
+}
 
 const canvas = document.getElementById('application-canvas') as HTMLCanvasElement | null;
 if (!canvas) {
@@ -277,22 +287,6 @@ const main = async () => {
     }
     ui.lodState.textContent = `${worstLod} only`;
 
-    const gsplatSystem = app.systems.gsplat as GSplatComponentSystem;
-    const onFrameReady = (_cam: unknown, _layer: unknown, ready: boolean, loadingCount: number) => {
-        if (ready && loadingCount === 0) {
-            gsplatSystem.off(GSplatComponentSystem.EVENT_FRAMEREADY, onFrameReady);
-            for (const gs of gsInstances) {
-                gs.lodRangeMin = 0;
-                gs.lodRangeMax = worstLod;
-            }
-            ui.lodState.textContent = `0-${worstLod}`;
-            ui.status.textContent = 'Ready. Hold left mouse and drag to look; WASD/QE move, Shift sprints.';
-        } else {
-            ui.status.textContent = `Streaming initial LODs (${loadingCount} pending)...`;
-        }
-    };
-    gsplatSystem.on(GSplatComponentSystem.EVENT_FRAMEREADY, onFrameReady);
-
     const tile0Center = instanceEntities[0].getWorldTransform().transformPoint(
         new Vec3((mn.x + mx.x) * 0.5, (mn.y + mx.y) * 0.5, (mn.z + mx.z) * 0.5),
         new Vec3()
@@ -309,16 +303,80 @@ const main = async () => {
     camera.setLocalPosition(tile0Center.x + camX, camY, tile0Center.z + camZ);
     app.root.addChild(camera);
 
-    const controller = new CylinderController(app, camera, {
-        radius: bendRadius,
-        axialStart: tile0Center.x,
-        startHeight: camY,
-        moveSpeed: config.moveSpeed,
-        moveFastSpeed: config.moveFastSpeed,
-        moveDamping: 0.997
+    const gsplatSystem = app.systems.gsplat as GSplatComponentSystem;
+    const tileBounds = {
+        localCenter: new Vec3(
+            (mn.x + mx.x) * 0.5,
+            (mn.y + mx.y) * 0.5,
+            (mn.z + mx.z) * 0.5
+        ),
+        halfExtents: new Vec3(
+            (mx.x - mn.x) * 0.5,
+            (mx.y - mn.y) * 0.5,
+            (mx.z - mn.z) * 0.5
+        )
+    };
+
+    const benchmarkHarness = createBillionsBenchmarkHarness({
+        app,
+        camera,
+        instanceEntities,
+        tileBounds,
+        gsplatSystem,
+        config: benchmarkConfig,
+        instances: state.instances
     });
-    app.on('update', (dt: number) => controller.update(dt));
-    app.on('destroy', () => controller.destroy());
+    let benchmarkStarted = false;
+    let initialStreamingReady = false;
+
+    const onFrameReady = (_cam: unknown, _layer: unknown, ready: boolean, loadingCount: number) => {
+        if (ready && loadingCount === 0) {
+            gsplatSystem.off(GSplatComponentSystem.EVENT_FRAMEREADY, onFrameReady);
+            initialStreamingReady = true;
+            for (const gs of gsInstances) {
+                gs.lodRangeMin = 0;
+                gs.lodRangeMax = worstLod;
+            }
+            ui.lodState.textContent = `0-${worstLod}`;
+            if (benchmarkHarness && !benchmarkStarted) {
+                benchmarkStarted = true;
+                ui.status.textContent = 'Benchmark running...';
+                void benchmarkHarness.onInitialStreamingReady();
+            } else {
+                ui.status.textContent = 'Ready. Hold left mouse and drag to look; WASD/QE move, Shift sprints.';
+            }
+        } else {
+            ui.status.textContent = `Streaming initial LODs (${loadingCount} pending)...`;
+        }
+    };
+    gsplatSystem.on(GSplatComponentSystem.EVENT_FRAMEREADY, onFrameReady);
+
+    if (shouldShowBillionsPerfHud(benchmarkConfig)) {
+        initBillionsPerfHud({
+            app,
+            camera,
+            gsplatSystem,
+            config: benchmarkConfig,
+            instances: state.instances,
+            numSplatsPerInstance,
+            streamingReady: () => initialStreamingReady
+        });
+    }
+
+    const controller = benchmarkConfig.benchmark
+        ? null
+        : new CylinderController(app, camera, {
+            radius: bendRadius,
+            axialStart: tile0Center.x,
+            startHeight: camY,
+            moveSpeed: config.moveSpeed,
+            moveFastSpeed: config.moveFastSpeed,
+            moveDamping: 0.997
+        });
+    if (controller) {
+        app.on('update', (dt: number) => controller.update(dt));
+        app.on('destroy', () => controller.destroy());
+    }
 
     ui.instances.addEventListener('input', () => {
         state.instances = Number(ui.instances.value);
