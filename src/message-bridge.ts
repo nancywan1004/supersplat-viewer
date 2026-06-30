@@ -880,7 +880,11 @@ const initPostMessageBridge = (global: Global) => {
                         params: pr
                     });
                     if (normalized.isNewShape && normalized.enabled === true) {
-                        dispatchEffects(global, 'EFFECT_START', env);
+                        if (p.effectId === ASSET_GSPLAT_EFFECT_ID) {
+                            dispatchEffects(global, 'EFFECT_PARAMS_PATCH', env);
+                        } else {
+                            dispatchEffects(global, 'EFFECT_START', env);
+                        }
                     } else if (normalized.isNewShape && normalized.enabled === false) {
                         dispatchEffects(global, 'EFFECT_PARAMS_PATCH', env);
                     } else {
