@@ -935,6 +935,8 @@ export const initVideoExport = (global: Global, options?: VideoExportInitOptions
             syncAnimTrack: settings.syncAnimTrack !== false,
             vfxDuration: getRevealTotalDuration(global.settings) ?? DEFAULT_VFX_TOTAL_DURATION,
             requestedTotalDuration: settings.totalDuration,
+            requestedDurationMode:
+                global.config.editUiTransport === 'message-bridge' ? 'floor' : 'cap',
             animDuration,
             animLoopMode,
             allAssetsReadyAt

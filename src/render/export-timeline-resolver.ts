@@ -8,8 +8,13 @@ type ResolveExportTimelineInput = {
     syncAnimTrack: boolean;
     /** VFX / reveal 时间轴总时长（秒）；无配置时由调用方用默认值（如 12） */
     vfxDuration: number;
-    /** UI 或协议传入的期望总时长（秒）；仅作为下限参与 `max`，不会单独缩短已算出的策略下限 */
+    /**
+     * UI 或协议传入的期望总时长（秒）。
+     * - `floor`（默认）：与策略下限取 `max`，可被 anim/VFX/资产就绪规则拉长（message-bridge）。
+     * - `cap`：与策略建议时长取 `min`，作为上限（internal 导出 UI）。
+     */
     requestedTotalDuration?: number;
+    requestedDurationMode?: 'floor' | 'cap';
     /** 相机 animTrack 单圈时长（秒）；未传或非正数时视为无 animTrack，走无动画尾长分支 */
     animDuration?: number;
     /** animTrack 超出单圈后的循环方式；用于 `animSeekAt` 映射 */
@@ -63,10 +68,51 @@ function mapAnimTimeByLoopMode(time: number, duration: number, loopMode: AnimLoo
     }
 }
 
+function resolveStrategyDuration(input: {
+    includeVfx: boolean;
+    syncAnimTrack: boolean;
+    vfxDuration: number;
+    animDuration: number | null;
+    allAssetsReadyAt: number;
+    extraAnimLoopsAfterAssetsReady: number;
+    noAnimTrackExtraDuration: number;
+}): number {
+    const {
+        includeVfx,
+        syncAnimTrack,
+        vfxDuration,
+        animDuration,
+        allAssetsReadyAt,
+        extraAnimLoopsAfterAssetsReady,
+        noAnimTrackExtraDuration
+    } = input;
+
+    if (syncAnimTrack && animDuration) {
+        let minForVfxCoverage = 0;
+        if (includeVfx) {
+            if (animDuration < vfxDuration) {
+                const loopsNeeded = Math.max(1, Math.ceil(vfxDuration / animDuration));
+                minForVfxCoverage = loopsNeeded * animDuration;
+            } else {
+                minForVfxCoverage = animDuration;
+            }
+        }
+        const postTailAnchor = includeVfx
+            ? Math.max(vfxDuration, allAssetsReadyAt)
+            : Math.max(0, allAssetsReadyAt);
+        const minPostTail = postTailAnchor + extraAnimLoopsAfterAssetsReady * animDuration;
+        return Math.max(minForVfxCoverage, minPostTail);
+    }
+
+    const vfxDoneAt = includeVfx ? vfxDuration : 0;
+    return Math.max(vfxDoneAt, allAssetsReadyAt) + noAnimTrackExtraDuration;
+}
+
 /**
  * 统一导出时间轴决策（单位：秒）：
  * - 有 animTrack 且 sync：先保证 anim 按 loop 铺满 VFX 时长；再保证在 max(VFX 结束, 资产就绪) 之后至少再播一整圈 anim。
  * - 无 animTrack：在 max(VFX 结束, 资产就绪) 后追加固定尾长 `noAnimTrackExtraDuration`。
+ * - `requestedDurationMode='cap'` 时以 `requestedTotalDuration` 为上限，不与策略时长取 max 拉长。
  */
 export function resolveExportTimelinePlan(input: ResolveExportTimelineInput): ExportTimelinePlan {
     const vfxDuration = isFinitePositive(input.vfxDuration)
@@ -89,30 +135,22 @@ export function resolveExportTimelinePlan(input: ResolveExportTimelineInput): Ex
         ? input.noAnimTrackExtraDuration
         : DEFAULT_NO_ANIM_EXTRA_DURATION;
 
-    let totalDuration = requestedDuration;
-    if (input.syncAnimTrack && animDuration) {
-        // 用 anim 循环铺满 VFX 时长（与历史行为一致）
-        let minForVfxCoverage = 0;
-        if (input.includeVfx) {
-            if (animDuration < vfxDuration) {
-                const loopsNeeded = Math.max(1, Math.ceil(vfxDuration / animDuration));
-                minForVfxCoverage = loopsNeeded * animDuration;
-            } else {
-                minForVfxCoverage = animDuration;
-            }
-        }
-        // 在「VFX 结束时刻」与「资产就绪时刻」二者靠后点之后，再追加至少一整圈 anim（避免 anim 时长刚好等于 VFX 时 total 卡在 12s 无法多播一圈）
-        const postTailAnchor = input.includeVfx
-            ? Math.max(vfxDuration, allAssetsReadyAt)
-            : Math.max(0, allAssetsReadyAt);
-        const minPostTail = postTailAnchor + extraAnimLoopsAfterAssetsReady * animDuration;
-        totalDuration = Math.max(totalDuration, minForVfxCoverage, minPostTail);
-    } else {
-        const vfxDoneAt = input.includeVfx ? vfxDuration : 0;
-        const minNoAnimDuration = Math.max(vfxDoneAt, allAssetsReadyAt) + noAnimTrackExtraDuration;
-        totalDuration = Math.max(totalDuration, minNoAnimDuration);
-    }
-    totalDuration = Math.max(DEFAULT_MIN_DURATION_SEC, totalDuration);
+    const strategyDuration = resolveStrategyDuration({
+        includeVfx: input.includeVfx,
+        syncAnimTrack: input.syncAnimTrack,
+        vfxDuration,
+        animDuration,
+        allAssetsReadyAt,
+        extraAnimLoopsAfterAssetsReady,
+        noAnimTrackExtraDuration
+    });
+    const durationMode = input.requestedDurationMode === 'cap' ? 'cap' : 'floor';
+    const totalDuration = Math.max(
+        DEFAULT_MIN_DURATION_SEC,
+        durationMode === 'cap'
+            ? Math.min(requestedDuration, strategyDuration)
+            : Math.max(requestedDuration, strategyDuration)
+    );
 
     return {
         totalDuration,
