@@ -7,11 +7,12 @@ import type { ExperienceSettings } from '../../schemas/v2';
 import {
     deleteAssetInstanceFromSettings,
     deleteAssetRuntimeMirror,
-    findAssetMorphOwnerTargetId,
     patchAssetInstanceFromParams,
     patchAssetRuntimeMirror,
     readAssetInstanceParams,
     resolveAssetInstanceStorageTargetId,
+    resolveAssetMorphRuntimeTargetId,
+    resolveAssetMorphSettingsKey,
     syncAssetInstancesRuntimeFromSettings,
     syncEffectsRuntimeStateFromSettings
 } from '../../settings-serialize/effects-sync';
@@ -157,7 +158,8 @@ export function applyAssetEffectStart(global: Global, envelope: AssetEffectProto
     const patch = mergeStartParams(effectType, envelope.params);
     const settings = getEffectsWriteTarget(global);
     const merged = patchAssetInstanceFromParams(settings, envelope.targetId, patch);
-    const storageTargetId = resolveAssetInstanceStorageTargetId(envelope.targetId, merged);
+    const settingsKey = resolveAssetMorphSettingsKey(settings, envelope.targetId);
+    const storageTargetId = resolveAssetInstanceStorageTargetId(settingsKey, merged);
     const ep = (merged.effectParams ?? {}) as Record<string, unknown>;
     const runtimeEntities = buildRuntimeEntitiesFromEffectParams(
         global,
@@ -208,16 +210,22 @@ export function applyAssetEffectStop(global: Global, envelope: AssetEffectProtoc
     }
 
     const settings = getEffectsWriteTarget(global);
-    const storageTargetId =
+    const settingsKey =
         effectType === 'gsplat-morph'
-            ? (findAssetMorphOwnerTargetId(settings, envelope.targetId) ?? envelope.targetId)
+            ? resolveAssetMorphSettingsKey(settings, envelope.targetId)
             : envelope.targetId;
-    patchAssetInstanceFromParams(settings, storageTargetId, { enabled: false });
+    const inst = readAssetInstanceParams(settings, settingsKey);
+    const runtimeTargetId =
+        effectType === 'gsplat-morph' && inst
+            ? resolveAssetInstanceStorageTargetId(settingsKey, inst)
+            : settingsKey;
+    patchAssetInstanceFromParams(settings, settingsKey, { enabled: false });
     syncEffectsRuntimeStateFromSettings(global.state, settings);
-    patchAssetRuntimeMirror(global.state, storageTargetId, { status: 'inactive' });
+    patchAssetRuntimeMirror(global.state, settingsKey, { status: 'inactive' });
+    patchAssetRuntimeMirror(global.state, runtimeTargetId, { status: 'inactive' });
 
     global.events.fire('assetEffect:stop', {
-        targetId: storageTargetId,
+        targetId: runtimeTargetId,
         type: effectType
     });
     return true;
@@ -265,18 +273,26 @@ export function applyAssetEffectParamsPatch(global: Global, envelope: AssetEffec
     }
 
     const settings = getEffectsWriteTarget(global);
+    const settingsKey =
+        effectType === 'gsplat-morph'
+            ? resolveAssetMorphSettingsKey(settings, envelope.targetId)
+            : envelope.targetId;
     const patchTargetId =
         effectType === 'gsplat-morph' && patch.enabled === false
-            ? (findAssetMorphOwnerTargetId(settings, envelope.targetId) ?? envelope.targetId)
+            ? settingsKey
             : envelope.targetId;
     const merged = patchAssetInstanceFromParams(settings, patchTargetId, patch);
-    const storageTargetId = resolveAssetInstanceStorageTargetId(patchTargetId, merged);
+    const resolvedSettingsKey = resolveAssetMorphSettingsKey(settings, envelope.targetId);
+    const storageTargetId = resolveAssetInstanceStorageTargetId(resolvedSettingsKey, merged);
     syncEffectsRuntimeStateFromSettings(global.state, settings);
     syncAssetInstancesRuntimeFromSettings(global.state, settings);
 
     if (merged.enabled === false) {
         global.events.fire('assetEffect:stop', {
-            targetId: storageTargetId,
+            targetId:
+                merged.type === 'gsplat-morph'
+                    ? resolveAssetMorphRuntimeTargetId(settings, envelope.targetId)
+                    : storageTargetId,
             type: merged.type
         });
     } else {
@@ -302,28 +318,21 @@ export function applyAssetEffectDelete(global: Global, envelope: AssetEffectDele
 
     const settings = getEffectsWriteTarget(global);
     const runtimeInstances = global.state.effectsRuntimeState?.asset?.instances ?? {};
-    const targetIds = new Set<string>();
-    const ownerTargetId =
-        findAssetMorphOwnerTargetId(settings, envelope.targetId) ?? envelope.targetId;
-    targetIds.add(ownerTargetId);
+    const settingsKey = resolveAssetMorphSettingsKey(settings, envelope.targetId);
+    const runtimeTargetId = resolveAssetMorphRuntimeTargetId(settings, envelope.targetId);
 
-    if (targetIds.size === 0) {
-        return true;
+    const current = readAssetInstanceParams(settings, settingsKey);
+    const runtimeType = runtimeInstances[runtimeTargetId]?.activeType ?? runtimeInstances[settingsKey]?.activeType;
+    const type = current?.type ?? runtimeType;
+
+    deleteAssetInstanceFromSettings(settings, settingsKey);
+    if (type) {
+        global.events.fire('assetEffect:stop', { targetId: runtimeTargetId, type });
     }
-
-    for (const targetId of targetIds) {
-        const current = readAssetInstanceParams(settings, targetId);
-        const runtimeType = runtimeInstances[targetId]?.activeType;
-        const type = current?.type ?? runtimeType;
-
-        deleteAssetInstanceFromSettings(settings, targetId);
-        if (type) {
-            global.events.fire('assetEffect:stop', { targetId, type });
-        }
-        deleteAssetRuntimeMirror(global.state, targetId);
-        if (type) {
-            global.events.fire('assetEffect:configChanged', { targetId, type });
-        }
+    deleteAssetRuntimeMirror(global.state, settingsKey);
+    deleteAssetRuntimeMirror(global.state, runtimeTargetId);
+    if (type) {
+        global.events.fire('assetEffect:configChanged', { targetId: settingsKey, type });
     }
 
     return true;

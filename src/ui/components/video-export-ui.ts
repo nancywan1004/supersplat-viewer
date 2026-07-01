@@ -24,7 +24,7 @@ const VIDEO_EXPORT_OVERLAY_HTML = `
 </div>
 `.trim();
 
-/** 导出配置：导出时长（秒），与 VFX 面板的「Timed VFX 时长」无关，仅决定视频长度 */
+/** 导出配置：internal 下为导出时长上限（秒），与 VFX 面板的「Timed VFX 时长」无关 */
 const DEFAULT_EXPORT_DURATION = 20;
 
 /** 视频导出行 HTML 模板（挂到 #renderPanelContainer） */
@@ -33,7 +33,7 @@ const VIDEO_EXPORT_ROW_HTML = `
   <div class="vfxExportInner">
     <div class="vfxExportRow">
       <label for="exportDurationInput">导出时长 (s):</label>
-      <input type="number" id="exportDurationInput" class="settingsInput" min="0.5" max="600" step="0.5" value="${DEFAULT_EXPORT_DURATION}" title="基于动画时间轴(animTrack)的导出长度，与 VFX 特效时长无关">
+      <input type="number" id="exportDurationInput" class="settingsInput" min="0.5" max="600" step="0.5" value="${DEFAULT_EXPORT_DURATION}" title="导出视频最长时长（秒）；internal 下为上限，不会被 anim/VFX 策略自动拉长；与 VFX 面板「Reveal 时长」无关">
     </div>
     <div class="vfxExportRow">
       <label for="videoResolution">分辨率:</label>

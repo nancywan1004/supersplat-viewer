@@ -9,6 +9,8 @@ const GSPLAT_MORPH = new Set([
     'isLoop',
     'segmentDuration',
     'keyframeEntityIds',
+    /** 协议 targetId 与存盘 owner（首个 keyframe）不一致时写入，供 DELETE/STOP 反查 */
+    'morphBindingTargetId',
     /** 配对错峰（0–1），见 `GsplatMorphOptions.progressivePairFlightStagger` */
     'progressivePairFlightStagger'
 ]);

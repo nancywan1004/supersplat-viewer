@@ -203,6 +203,8 @@ export class AssetEffectsController {
     private readonly _global: Global;
     private readonly _app: AppBase;
     private readonly _active = new Map<string, ActiveAssetEffect>();
+    /** 递增世代号，丢弃过期的异步 morph 加载结果（DELETE/重复 START 竞态）。 */
+    private readonly _startGeneration = new Map<string, number>();
     private _disposed = false;
 
     constructor(global: Global) {
@@ -291,6 +293,16 @@ export class AssetEffectsController {
         script?.setOptions(buildWobbleOptions(ep));
     };
 
+    private _bumpStartGeneration(targetId: string): number {
+        const next = (this._startGeneration.get(targetId) ?? 0) + 1;
+        this._startGeneration.set(targetId, next);
+        return next;
+    }
+
+    private _isStartGenerationCurrent(targetId: string, generation: number): boolean {
+        return this._startGeneration.get(targetId) === generation;
+    }
+
     private readonly _onStop = (payload: {
         targetId: string;
         type?: string;
@@ -299,6 +311,7 @@ export class AssetEffectsController {
         if (this._disposed || !payload?.targetId) {
             return;
         }
+        this._bumpStartGeneration(payload.targetId);
         const type = (payload.type ?? payload.effectId ?? GSPLAT_MORPH_TYPE) as AssetEffectType;
         this._teardownTarget(payload.targetId);
         patchAssetRuntimeMirror(this._global.state, payload.targetId, { status: 'inactive' });
@@ -392,10 +405,11 @@ export class AssetEffectsController {
         effectParams?: Record<string, unknown>,
         entities?: AssetEffectStartEntities
     ) {
+        const generation = this._bumpStartGeneration(targetId);
         this._teardownTarget(targetId);
 
         if (type === GSPLAT_MORPH_TYPE) {
-            await this._startMorph(targetId, effectParams, entities);
+            await this._startMorph(targetId, effectParams, entities, generation);
             return;
         }
         if (type === GSPLAT_WOBBLE_TYPE) {
@@ -410,7 +424,8 @@ export class AssetEffectsController {
     private async _startMorph(
         targetId: string,
         effectParams?: Record<string, unknown>,
-        entities?: AssetEffectStartEntities
+        entities?: AssetEffectStartEntities,
+        generation?: number
     ) {
         const inst =
             readAssetInstanceParams(this._global.settings as ExperienceSettings, targetId) ??
@@ -458,7 +473,10 @@ export class AssetEffectsController {
 
         try {
             morph = await loadGsplatMorphSequence(this._app, urls, morphOpts);
-            if (this._disposed) {
+            if (
+                this._disposed ||
+                (generation !== undefined && !this._isStartGenerationCurrent(targetId, generation))
+            ) {
                 morph.destroy();
                 return;
             }

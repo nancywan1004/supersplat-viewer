@@ -880,7 +880,17 @@ const initPostMessageBridge = (global: Global) => {
                         params: pr
                     });
                     if (normalized.isNewShape && normalized.enabled === true) {
-                        dispatchEffects(global, 'EFFECT_START', env);
+                        const assetEffectType = typeof pr.type === 'string' ? pr.type : null;
+                        if (
+                            p.effectId === ASSET_GSPLAT_EFFECT_ID &&
+                            assetEffectType === ASSET_EFFECT_TYPE_VALUES[0]
+                        ) {
+                            // gsplat-morph：PATCH 只写配置，避免与后续 EFFECT_ADD 双启动
+                            dispatchEffects(global, 'EFFECT_PARAMS_PATCH', env);
+                        } else {
+                            // gsplat-wobble 等：保留 PATCH + enabled:true → START 的父级语义
+                            dispatchEffects(global, 'EFFECT_START', env);
+                        }
                     } else if (normalized.isNewShape && normalized.enabled === false) {
                         dispatchEffects(global, 'EFFECT_PARAMS_PATCH', env);
                     } else {

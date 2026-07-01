@@ -599,6 +599,10 @@ export function patchAssetInstanceFromParams(
     const morphKeyframeIds = nextType === 'gsplat-morph' ? readMorphKeyframeIdsFromParams(nextEffectParams) : null;
     const ownerTargetId = morphKeyframeIds?.[0] ?? targetId;
     if (ownerTargetId !== targetId) {
+        next.effectParams = {
+            ...(next.effectParams ?? {}),
+            morphBindingTargetId: targetId
+        };
         delete map[targetId];
     }
     map[ownerTargetId] = next;
@@ -625,6 +629,54 @@ export function findAssetMorphOwnerTargetId(settings: ExperienceSettings, target
         }
     }
     return null;
+}
+
+/**
+ * 协议 `targetId`（如 scene 虚拟资产 id）与 morph 存盘 owner（首个 keyframe id）可能不同；
+ * 返回 `instancesByTargetId` 中的实际键。
+ */
+export function resolveAssetMorphSettingsKey(settings: ExperienceSettings, targetId: string): string {
+    if (readAssetInstanceParams(settings, targetId)) {
+        return targetId;
+    }
+    const keyframeOwner = findAssetMorphOwnerTargetId(settings, targetId);
+    if (keyframeOwner) {
+        return keyframeOwner;
+    }
+    const map = ensureEffectsSettings(settings).asset.instancesByTargetId ?? {};
+    for (const [ownerId, inst] of Object.entries(map)) {
+        if (inst?.type !== 'gsplat-morph' || !inst.effectParams) {
+            continue;
+        }
+        const binding = inst.effectParams.morphBindingTargetId;
+        if (typeof binding === 'string' && binding.length > 0 && binding === targetId) {
+            return ownerId;
+        }
+    }
+    const morphEntries = Object.entries(map).filter(([, inst]) => inst?.type === 'gsplat-morph');
+    const sceneAssets = settings.sceneAssets ?? [];
+    const isVirtualSceneTarget =
+        sceneAssets.some((asset) => asset?.id === targetId) &&
+        !morphEntries.some(([, inst]) =>
+            readMorphKeyframeIdsFromParams(inst?.effectParams ?? {})?.includes(targetId)
+        );
+    if (isVirtualSceneTarget && morphEntries.length === 1) {
+        return morphEntries[0]![0];
+    }
+    return targetId;
+}
+
+/** morph 运行态 `_active` 键：owner 存盘键 → 首个 keyframe entity id。 */
+export function resolveAssetMorphRuntimeTargetId(
+    settings: ExperienceSettings,
+    protocolTargetId: string
+): string {
+    const settingsKey = resolveAssetMorphSettingsKey(settings, protocolTargetId);
+    const inst = readAssetInstanceParams(settings, settingsKey);
+    if (!inst) {
+        return settingsKey;
+    }
+    return resolveAssetInstanceStorageTargetId(settingsKey, inst);
 }
 
 export function deleteAssetInstanceFromSettings(
