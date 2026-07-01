@@ -15,7 +15,7 @@ import {
     MeshInstance
 } from 'playcanvas';
 import type { SceneAsset } from '../schemas/v2-custom';
-import type { Global, AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from '../types';
+import type { EditLeftModule, Global, AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from '../types';
 import {
     getSelectedSceneEntity,
     isAssetScenePickEventOnlyMode,
@@ -1558,6 +1558,11 @@ export function initAssetPlacementHandler(
     events.on('assetPlacement:start', onPlaceStart);
     events.on('assetFacade:exit', clearPendingPlacement);
     events.on('assetFacade:editModeExit', clearPendingPlacement);
+    const onEditLeftModuleChanged = (mod: EditLeftModule | null) => {
+        if (mod === 'asset') return;
+        clearPendingPlacement();
+    };
+    events.on('editLeftModule:changed', onEditLeftModuleChanged);
     events.on('morphAssetAddActive:changed', onMorphAssetAddActiveChanged);
     events.on('sceneAssets:removed', onSceneAssetRemoved);
 
@@ -1574,6 +1579,7 @@ export function initAssetPlacementHandler(
         events.off('assetPlacement:start', onPlaceStart);
         events.off('assetFacade:exit', clearPendingPlacement);
         events.off('assetFacade:editModeExit', clearPendingPlacement);
+        events.off('editLeftModule:changed', onEditLeftModuleChanged);
         events.off('morphAssetAddActive:changed', onMorphAssetAddActiveChanged);
         events.off('sceneAssets:removed', onSceneAssetRemoved);
     };
