@@ -1218,7 +1218,16 @@ async function pickWorldFromClientXY(global: Global, clientX: number, clientY: n
     const nx = offsetX / rw;
     const ny = offsetY / rh;
 
-    return getSharedPicker(global).pick(nx, ny);
+    const picker = getSharedPicker(global);
+    const depthHit = await picker.pick(nx, ny);
+    if (depthHit) {
+        return depthHit;
+    }
+
+    // GS 透明度编辑 / 低 alpha 场景下引擎 DEPTH_PICK 常中心 miss；
+    // 与 nav 一致，回退 alpha 加权表面拾取（含邻域最近点）。
+    const surface = await picker.pickSurface(nx, ny);
+    return surface?.position ?? null;
 }
 
 export { Picker, getSharedPicker, getWorldPoint, captureCameraSnapshot, pickWorldFromClientXY };
