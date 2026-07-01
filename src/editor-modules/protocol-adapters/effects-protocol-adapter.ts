@@ -239,7 +239,7 @@ export function applyGsplatRevealEffectAdd(global: Global, effectType: string): 
     global.events.fire('revealConfigChanged', merged);
     global.events.fire('revealType:changed', t);
     global.events.fire('inputEvent', 'resetAnim');
-    global.events.fire('revealSceneEffect:add');
+    requestRevealSceneReplayIfActive(global, merged);
 }
 
 /**
