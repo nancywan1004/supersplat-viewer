@@ -14,6 +14,7 @@ import type { Global } from '../../../../types';
 import { getOctreeBootstrapLod, isOctreeBootstrapPlaceableNode } from './lod-meta';
 import { resolveEntityLodRange } from './entity-lod-range';
 import { findAllOctreeInstances, type OctreeInstanceLike } from './octree-instance-access';
+import { ensureOctreeLeafSpatialIndex } from './octree-spatial-index';
 import { computeStreamingRefinementProgressRatio } from './streaming-refinement-progress';
 
 export { computeStreamingRefinementProgressRatio };
@@ -105,6 +106,8 @@ type OctreeLike = {
     __originalEnsureFileResource?: (fileIndex: number) => void;
     __refinementPriorityUrls?: Set<string>;
     __refinementUrlToFileIndex?: Map<string, number>;
+    /** Phase1：由 nodeBoundsMinMax 构建的 leaf BVH（引擎会丢弃 meta.tree） */
+    __leafSpatialIndex?: import('./octree-spatial-index').OctreeLeafSpatialIndex | null;
 };
 
 export type { OctreeLike };
@@ -891,40 +894,19 @@ function markOctreeInstancesDirty(app: AppBase, octree: OctreeLike, gsplatEntity
     }
 }
 
-function scoreVisibleNode(
-    frustum: Frustum,
-    worldTransform: Mat4,
-    boundsFlat: Float32Array,
-    nodeIndex: number,
+function scoreWorldAabbVisibleNode(
+    minX: number,
+    minY: number,
+    minZ: number,
+    maxX: number,
+    maxY: number,
+    maxZ: number,
     localDistance: number,
     optimalLod: number,
     maxLod: number,
     cameraPos: Vec3,
     cameraFwd: Vec3
 ): number {
-    const b = nodeIndex * 6;
-    _worldMin.set(boundsFlat[b], boundsFlat[b + 1], boundsFlat[b + 2]);
-    _worldMax.set(boundsFlat[b + 3], boundsFlat[b + 4], boundsFlat[b + 5]);
-    worldTransform.transformPoint(_worldMin, _worldMin);
-    worldTransform.transformPoint(_worldMax, _worldMax);
-
-    const minX = Math.min(_worldMin.x, _worldMax.x);
-    const minY = Math.min(_worldMin.y, _worldMax.y);
-    const minZ = Math.min(_worldMin.z, _worldMax.z);
-    const maxX = Math.max(_worldMin.x, _worldMax.x);
-    const maxY = Math.max(_worldMin.y, _worldMax.y);
-    const maxZ = Math.max(_worldMin.z, _worldMax.z);
-    _lastScoreMinX = minX;
-    _lastScoreMinY = minY;
-    _lastScoreMinZ = minZ;
-    _lastScoreMaxX = maxX;
-    _lastScoreMaxY = maxY;
-    _lastScoreMaxZ = maxZ;
-
-    if (!aabbIntersectsFrustum(frustum, minX, minY, minZ, maxX, maxY, maxZ)) {
-        return 0;
-    }
-
     _worldCenter.set(
         (minX + maxX) * 0.5,
         (minY + maxY) * 0.5,
@@ -1067,7 +1049,7 @@ function computeLadderScoreBoost(
     return 1;
 }
 
-function dedupeByFileIndex(files: PrioritizedFile[]): PrioritizedFile[] {
+function dedupePrioritizedFiles(files: PrioritizedFile[]): PrioritizedFile[] {
     const best = new Map<number, PrioritizedFile>();
     for (let i = 0; i < files.length; i++) {
         const entry = files[i];
@@ -1076,9 +1058,93 @@ function dedupeByFileIndex(files: PrioritizedFile[]): PrioritizedFile[] {
             best.set(entry.fileIndex, entry);
         }
     }
-    const out = [...best.values()];
-    out.sort((a, b) => b.score - a.score);
-    return out;
+    return [...best.values()];
+}
+
+/** 取 score 最高的 topK；候选数大于 k 时用 size-k 最小堆，避免全量 sort */
+function selectTopKByScore(files: PrioritizedFile[], k: number): PrioritizedFile[] {
+    if (k <= 0 || files.length === 0) {
+        return [];
+    }
+    if (files.length <= k) {
+        const out = files.slice();
+        out.sort((a, b) => b.score - a.score);
+        return out;
+    }
+
+    const heap: PrioritizedFile[] = [];
+    const parent = (i: number) => (i - 1) >> 1;
+    const left = (i: number) => (i << 1) + 1;
+    const swap = (i: number, j: number) => {
+        const t = heap[i];
+        heap[i] = heap[j];
+        heap[j] = t;
+    };
+    const siftUp = (i: number) => {
+        while (i > 0) {
+            const p = parent(i);
+            if (heap[p].score <= heap[i].score) {
+                break;
+            }
+            swap(p, i);
+            i = p;
+        }
+    };
+    const siftDown = (i: number) => {
+        const n = heap.length;
+        while (true) {
+            let smallest = i;
+            const l = left(i);
+            const r = l + 1;
+            if (l < n && heap[l].score < heap[smallest].score) {
+                smallest = l;
+            }
+            if (r < n && heap[r].score < heap[smallest].score) {
+                smallest = r;
+            }
+            if (smallest === i) {
+                break;
+            }
+            swap(i, smallest);
+            i = smallest;
+        }
+    };
+
+    for (let i = 0; i < files.length; i++) {
+        const entry = files[i];
+        if (heap.length < k) {
+            heap.push(entry);
+            siftUp(heap.length - 1);
+        } else if (entry.score > heap[0].score) {
+            heap[0] = entry;
+            siftDown(0);
+        }
+    }
+    heap.sort((a, b) => b.score - a.score);
+    return heap;
+}
+
+/** 相机 idle 时仅刷新 tracked 缺文件，跳过全树扫描 */
+function buildPriorityFilesIncremental(
+    octree: OctreeLike,
+    tracked: Map<number, TrackedMissingFile>
+): PrioritizedBatch {
+    const ranked = buildBatchFromTracked(tracked, T.loader.trackedLimit);
+    const criticalFiles = ranked.slice(0, T.loader.criticalLimit);
+    const foregroundFiles = ranked.slice(0, T.loader.foregroundLimit);
+    const pendingUnique = countMissingUniqueFiles(octree, ranked);
+    const foregroundPending = countMissingUniqueFiles(octree, foregroundFiles);
+    const criticalPending = countMissingUniqueFiles(octree, criticalFiles);
+    return {
+        files: ranked,
+        pendingUniqueFiles: pendingUnique,
+        foregroundPendingUnique: foregroundPending,
+        criticalPendingUnique: criticalPending,
+        staleLoadedNodes: 0,
+        lodDisplayMismatch: 0,
+        needsLodSwitch: pendingUnique > 0,
+        staleLodNodes: 0
+    };
 }
 
 function countMissingUniqueFiles(octree: OctreeLike, files: PrioritizedFile[]): number {
@@ -1364,7 +1430,17 @@ export function syncStreamingOctreePlacements(scene: OctreeStreamingScene): numb
     return syncOctreePendingPlacements(app, octree, gsplatEntity, gsplatScene, true);
 }
 
-function buildPriorityFiles(ctx: RefinementEvaluateContext): PrioritizedBatch {
+type BuildPriorityFilesOptions = {
+    /**
+     * prefetch 路径：PQ 已收集足够前景 file 后提前停止（进度条判定勿开启）。
+     */
+    prefetchBudget?: boolean;
+};
+
+function buildPriorityFiles(
+    ctx: RefinementEvaluateContext,
+    options?: BuildPriorityFilesOptions
+): PrioritizedBatch {
     const { scene, gsplat, lod: lodParams } = ctx;
     const { app, octree, gsplatEntity, cameraEntity } = scene;
     const maxLod = octree.lodLevels - 1;
@@ -1423,9 +1499,34 @@ function buildPriorityFiles(ctx: RefinementEvaluateContext): PrioritizedBatch {
     let staleLoadedNodes = 0;
     let lodDisplayMismatch = 0;
     const boundsFlat = octree.nodeBoundsMinMax;
+    const prefetchCandidateFiles = new Set<number>();
+    const spatialIndex = ensureOctreeLeafSpatialIndex(octree);
 
-    for (let nodeIndex = 0; nodeIndex < octree.nodes.length; nodeIndex++) {
+    const processRefinementLeaf = (nodeIndex: number): boolean => {
         const b = nodeIndex * 6;
+        _worldMin.set(boundsFlat[b], boundsFlat[b + 1], boundsFlat[b + 2]);
+        _worldMax.set(boundsFlat[b + 3], boundsFlat[b + 4], boundsFlat[b + 5]);
+        worldTransform.transformPoint(_worldMin, _worldMin);
+        worldTransform.transformPoint(_worldMax, _worldMax);
+
+        const worldMinX = Math.min(_worldMin.x, _worldMax.x);
+        const worldMinY = Math.min(_worldMin.y, _worldMax.y);
+        const worldMinZ = Math.min(_worldMin.z, _worldMax.z);
+        const worldMaxX = Math.max(_worldMin.x, _worldMax.x);
+        const worldMaxY = Math.max(_worldMin.y, _worldMax.y);
+        const worldMaxZ = Math.max(_worldMin.z, _worldMax.z);
+
+        if (!aabbIntersectsFrustum(_frustum, worldMinX, worldMinY, worldMinZ, worldMaxX, worldMaxY, worldMaxZ)) {
+            return true;
+        }
+
+        _lastScoreMinX = worldMinX;
+        _lastScoreMinY = worldMinY;
+        _lastScoreMinZ = worldMinZ;
+        _lastScoreMaxX = worldMaxX;
+        _lastScoreMaxY = worldMaxY;
+        _lastScoreMaxZ = worldMaxZ;
+
         let qx = px;
         const minX = boundsFlat[b];
         const maxX = boundsFlat[b + 3];
@@ -1458,6 +1559,15 @@ function buildPriorityFiles(ctx: RefinementEvaluateContext): PrioritizedBatch {
         }
 
         const fovAdjustedDistance = penalizedDistance * fovScale;
+
+        const nodeInfo = nodeInfos?.[nodeIndex];
+        const currentLod = nodeInfo?.currentLod ?? -1;
+        const engineOptimalLod = nodeInfo?.optimalLod ?? -1;
+        if (currentLod >= 0 && engineOptimalLod >= 0 && currentLod !== engineOptimalLod) {
+            lodDisplayMismatch++;
+        }
+        const node = octree.nodes[nodeIndex];
+
         const optimalLod = computeOptimalLodIndex(
             fovAdjustedDistance,
             maxLod,
@@ -1468,19 +1578,13 @@ function buildPriorityFiles(ctx: RefinementEvaluateContext): PrioritizedBatch {
             minDistBuf
         );
 
-        const nodeInfo = nodeInfos?.[nodeIndex];
-        const currentLod = nodeInfo?.currentLod ?? -1;
-        const engineOptimalLod = nodeInfo?.optimalLod ?? -1;
-        if (currentLod >= 0 && engineOptimalLod >= 0 && currentLod !== engineOptimalLod) {
-            lodDisplayMismatch++;
-        }
-        const node = octree.nodes[nodeIndex];
-
-        const score = scoreVisibleNode(
-            _frustum,
-            worldTransform,
-            boundsFlat,
-            nodeIndex,
+        const score = scoreWorldAabbVisibleNode(
+            worldMinX,
+            worldMinY,
+            worldMinZ,
+            worldMaxX,
+            worldMaxY,
+            worldMaxZ,
             fovAdjustedDistance,
             optimalLod,
             maxLod,
@@ -1488,20 +1592,20 @@ function buildPriorityFiles(ctx: RefinementEvaluateContext): PrioritizedBatch {
             worldCameraFwd
         );
         if (score <= 0) {
-            continue;
+            return true;
         }
 
         const edgeFactor = computeViewportAabbEdgeFactor(
             _viewProj,
-            _lastScoreMinX,
-            _lastScoreMinY,
-            _lastScoreMinZ,
-            _lastScoreMaxX,
-            _lastScoreMaxY,
-            _lastScoreMaxZ
+            worldMinX,
+            worldMinY,
+            worldMinZ,
+            worldMaxX,
+            worldMaxY,
+            worldMaxZ
         );
         if (edgeFactor <= 0) {
-            continue;
+            return true;
         }
 
         const targetLod = computeRefinementTargetLod(
@@ -1511,9 +1615,8 @@ function buildPriorityFiles(ctx: RefinementEvaluateContext): PrioritizedBatch {
             edgeFactor
         );
 
-        // 文件已加载且 current 已不粗于 target
         if (currentLod >= 0 && currentLod <= targetLod) {
-            continue;
+            return true;
         }
 
         needsLodSwitch = true;
@@ -1528,16 +1631,31 @@ function buildPriorityFiles(ctx: RefinementEvaluateContext): PrioritizedBatch {
         } else if (fi !== -1) {
             const edgeWeight = Math.pow(edgeFactor, T.viewport.centerScorePower);
             prioritized.push({ fileIndex: fi, score: score * edgeWeight * ladderBoost });
+            prefetchCandidateFiles.add(fi);
+            if (options?.prefetchBudget && prefetchCandidateFiles.size >= T.loader.foregroundLimit) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    if (spatialIndex) {
+        spatialIndex.visitFrustumLeaves(_frustum, worldTransform, worldCameraPos, processRefinementLeaf);
+    } else {
+        for (let nodeIndex = 0; nodeIndex < octree.nodes.length; nodeIndex++) {
+            if (processRefinementLeaf(nodeIndex) === false) {
+                break;
+            }
         }
     }
 
-    prioritized.sort((a, b) => b.score - a.score);
-    const uniqueFiles = dedupeByFileIndex(prioritized);
-    const criticalFiles = uniqueFiles.slice(0, T.loader.criticalLimit);
-    const foregroundFiles = uniqueFiles.slice(0, T.loader.foregroundLimit);
+    const uniqueCandidates = dedupePrioritizedFiles(prioritized);
+    const ranked = selectTopKByScore(uniqueCandidates, T.loader.trackedLimit);
+    const criticalFiles = ranked.slice(0, T.loader.criticalLimit);
+    const foregroundFiles = ranked.slice(0, T.loader.foregroundLimit);
     return {
-        files: uniqueFiles,
-        pendingUniqueFiles: countMissingUniqueFiles(octree, uniqueFiles),
+        files: uniqueCandidates,
+        pendingUniqueFiles: countMissingUniqueFiles(octree, uniqueCandidates),
         foregroundPendingUnique: countMissingUniqueFiles(octree, foregroundFiles),
         criticalPendingUnique: countMissingUniqueFiles(octree, criticalFiles),
         staleLoadedNodes,
@@ -1644,6 +1762,7 @@ export function createOctreeRefinementController(
         patchAssetLoaderPriority(octree.assetLoader);
     }
     patchEnsureFileResourceGate(octree);
+    ensureOctreeLeafSpatialIndex(octree);
 
     let active = false;
     let updateHandler: ((dt: number) => void) | null = null;
@@ -1676,6 +1795,8 @@ export function createOctreeRefinementController(
     let boostActive = false;
     let cameraMovedSinceSettle = false;
     let cameraBurstFrames = 0;
+    let incrementalScanCooldown = 0;
+    const INCREMENTAL_SCAN_INTERVAL = 45;
     let prevActivityActive = false;
     let lastActivity: OctreeRefinementActivity = {
         active: false,
@@ -1815,8 +1936,23 @@ export function createOctreeRefinementController(
     const runPriorityPrefetch = () => {
         const cameraJustMoved = cameraMovedSinceSettle;
         const cameraBurstActive = cameraBurstFrames > 0;
+        const useIncrementalScan =
+            !cameraJustMoved &&
+            !cameraBurstActive &&
+            prefetch.tracked.size > 0 &&
+            incrementalScanCooldown < INCREMENTAL_SCAN_INTERVAL;
+
+        let batch: PrioritizedBatch;
+        if (useIncrementalScan) {
+            batch = buildPriorityFilesIncremental(octree, prefetch.tracked);
+            incrementalScanCooldown++;
+        } else {
+            batch = buildPriorityFiles(evalCtx, { prefetchBudget: true });
+            incrementalScanCooldown = 0;
+        }
+
         const {
-            files: batch,
+            files: batchFiles,
             pendingUniqueFiles,
             foregroundPendingUnique,
             criticalPendingUnique,
@@ -1824,9 +1960,9 @@ export function createOctreeRefinementController(
             lodDisplayMismatch,
             needsLodSwitch,
             staleLodNodes
-        } = buildPriorityFiles(evalCtx);
+        } = batch;
 
-        updateTrackedMissingFiles(prefetch.tracked, batch, octree);
+        updateTrackedMissingFiles(prefetch.tracked, batchFiles, octree);
         const stableForeground = buildBatchFromTracked(prefetch.tracked, T.loader.foregroundLimit);
         const stableCritical = buildBatchFromTracked(prefetch.tracked, T.loader.criticalLimit);
         const criticalBatch = stableCritical;
@@ -2173,6 +2309,7 @@ export function createOctreeRefinementController(
             active = true;
             boostActive = false;
             cameraMovedSinceSettle = true;
+            incrementalScanCooldown = INCREMENTAL_SCAN_INTERVAL;
             cameraBurstFrames = T.burst.unlockFrames;
             prevActivityActive = false;
             prefetch.pinned.clear();
@@ -2216,6 +2353,7 @@ export function createOctreeRefinementController(
                 return;
             }
             cameraMovedSinceSettle = true;
+            incrementalScanCooldown = 0;
             const burstFrames = options?.zoom ? T.burst.zoomFrames : T.burst.moveFrames;
             cameraBurstFrames = Math.max(cameraBurstFrames, burstFrames);
             settle.framesRemaining = 0;
