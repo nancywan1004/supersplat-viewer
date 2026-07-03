@@ -203,6 +203,10 @@ type Config = {
     budget?: number;                            // override splat budget in millions (overrides platform + performanceMode table)
     /** refinement（默认）或 native 引擎 LOD；见 docs/SCENE_PROFILE.md */
     lodRuntime?: 'refinement' | 'native';
+    /** refinement 路径调度激进程度；见 docs/SCENE_PROFILE.md */
+    refinementPolicy?: 'conservative' | 'aggressive';
+    /** 近距 ladder 跳 2 档；覆盖 refinementPolicy 默认 */
+    nearJumpLadder?: boolean;
     renderer: 'webgl' | 'cpu-sort' | 'gpu-sort' | 'compute';
     heatmap: boolean;                           // render heatmap debug overlay (WebGPU only)
     benchmark?: boolean;                        // benchmark mode (forces noui/nofx/noreveal; noanim unless animTrack)

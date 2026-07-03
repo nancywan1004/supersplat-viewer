@@ -80,6 +80,18 @@
                 : lodRuntimeParam === 'refinement' ? 'refinement'
                 : undefined;
 
+            const refinementPolicyParam = url.searchParams.get('refinementPolicy');
+            const refinementPolicy =
+                refinementPolicyParam === 'conservative' ? 'conservative'
+                : refinementPolicyParam === 'aggressive' ? 'aggressive'
+                : undefined;
+
+            const nearJumpLadderParam = url.searchParams.get('nearJumpLadder');
+            const nearJumpLadder =
+                nearJumpLadderParam === '1' || nearJumpLadderParam === 'true' ? true
+                : nearJumpLadderParam === '0' || nearJumpLadderParam === 'false' ? false
+                : undefined;
+
             const sseConfig = {
                 poster: posterUrl && createImage(posterUrl),
                 skyboxUrl,
@@ -106,6 +118,8 @@
                 renderer,
                 budget,
                 lodRuntime,
+                refinementPolicy,
+                nearJumpLadder,
                 heatmap: url.searchParams.has('heatmap'),
                 fullload: url.searchParams.has('fullload'),
                 benchmark: url.searchParams.has('benchmark'),

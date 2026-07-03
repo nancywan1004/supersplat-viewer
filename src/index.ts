@@ -304,6 +304,17 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
             config.lodRuntime = sceneProfile.lodRuntime;
         }
     }
+    if (!config.refinementPolicy) {
+        const sceneProfile = (processedSettings as {
+            sceneProfile?: { refinementPolicy?: string } | string;
+        }).sceneProfile;
+        const explicitPolicy = typeof sceneProfile === 'object' && sceneProfile !== null
+            ? sceneProfile.refinementPolicy
+            : undefined;
+        if (explicitPolicy === 'conservative' || explicitPolicy === 'aggressive') {
+            config.refinementPolicy = explicitPolicy;
+        }
+    }
 
     const { app, camera, renderer, forceWebGlForSogUnified } = await createApp(canvas, config);
     const gsplatConfig: Config = forceWebGlForSogUnified ? { ...config, renderer: 'webgl' } : config;

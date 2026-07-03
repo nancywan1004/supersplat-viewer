@@ -5,7 +5,6 @@ import {
     Vec3,
     Vec4,
     math,
-    platform,
     type AppBase,
     type GSplatComponent
 } from 'playcanvas';
@@ -15,56 +14,21 @@ import { getOctreeBootstrapLod, isOctreeBootstrapPlaceableNode } from './lod-met
 import { resolveEntityLodRange } from './entity-lod-range';
 import { findAllOctreeInstances, type OctreeInstanceLike } from './octree-instance-access';
 import { ensureOctreeLeafSpatialIndex } from './octree-spatial-index';
+import {
+    buildRefinementTunables,
+    resolveRefinementTunables,
+    type RefinementTunables
+} from './refinement-tunables';
 import { computeStreamingRefinementProgressRatio } from './streaming-refinement-progress';
 
 export { computeStreamingRefinementProgressRatio };
+export type { RefinementPolicy, RefinementTunables } from './refinement-tunables';
+export { resolveRefinementPolicy, resolveRefinementTunables } from './refinement-tunables';
 
 const REF_TAN_HALF_FOV = Math.tan(22.5 * math.DEG_TO_RAD);
 
-/** refinement 调度可调参数（按 mobile/desktop 分支集中管理） */
-const T = {
-    loader: {
-        defaultConcurrent: 2,
-        boostConcurrent: platform.mobile ? 4 : 8,
-        burstConcurrent: platform.mobile ? 8 : 12,
-        emergencyConcurrent: platform.mobile ? 16 : 32,
-        /** stale in-flight 占满时允许额外开槽的绝对上限，保证 criticalLimit 个新槽 */
-        extremeConcurrent: platform.mobile ? 32 : 64,
-        foregroundLimit: platform.mobile ? 32 : 64,
-        criticalLimit: platform.mobile ? 4 : 8,
-        pinLimit: platform.mobile ? 6 : 12,
-        trackedMissFrames: platform.mobile ? 8 : 12,
-        trackedLimit: platform.mobile ? 96 : 192
-    },
-    settle: {
-        postDownloadFrames: 30,
-        perFileFrames: 12
-    },
-    lod: {
-        splatBudget: platform.mobile ? 2_000_000 : 4_000_000,
-        underfillLimit: platform.mobile ? 2 : 3,
-        boostUpdateDistance: platform.mobile ? 0.12 : 0.18,
-        burstUpdateDistance: 0
-    },
-    viewport: {
-        edgeNdcInner: 0.44,
-        edgeNdcOuter: 0.72,
-        edgeRelaxOptimal: 0.45,
-        centerScorePower: 5.0
-    },
-    burst: {
-        moveFrames: 18,
-        zoomFrames: 36,
-        unlockFrames: 48,
-        syncCooldown: 3,
-        staleSyncCooldown: 6,
-        staleSyncIdleFrames: 12
-    },
-    ladder: {
-        coarsestStepBoost: 2.75,
-        stepBoost: 1.6
-    }
-} as const;
+/** 模块内调度参数；controller 启动时按 refinementPolicy 覆盖 */
+let T: RefinementTunables = buildRefinementTunables('aggressive');
 
 export const STREAMING_VIEWPORT_READY_RATIO = 1;
 
@@ -1027,7 +991,15 @@ function computeRefinementTargetLod(
         : optimalLod;
 
     if (currentLod >= 0 && currentLod > relaxedTarget) {
-        return currentLod - 1;
+        let step = 1;
+        if (
+            T.nearJumpLadder &&
+            edgeFactor >= T.viewport.nearJumpEdgeMin &&
+            currentLod - relaxedTarget >= 2
+        ) {
+            step = 2;
+        }
+        return Math.max(relaxedTarget, currentLod - step);
     }
     return relaxedTarget;
 }
@@ -1796,7 +1768,8 @@ export function createOctreeRefinementController(
     let cameraMovedSinceSettle = false;
     let cameraBurstFrames = 0;
     let incrementalScanCooldown = 0;
-    const INCREMENTAL_SCAN_INTERVAL = 45;
+    let savedTunables: RefinementTunables | null = null;
+    let INCREMENTAL_SCAN_INTERVAL = T.scan.incrementalInterval;
     let prevActivityActive = false;
     let lastActivity: OctreeRefinementActivity = {
         active: false,
@@ -1903,6 +1876,10 @@ export function createOctreeRefinementController(
         }
 
         active = false;
+        if (savedTunables) {
+            T = savedTunables;
+            savedTunables = null;
+        }
         cancelDeferredOctreeInstanceUpdates(app, octree);
         restoreRefinementMode();
         restoreSavedGsplatSceneSettings();
@@ -1947,7 +1924,7 @@ export function createOctreeRefinementController(
             batch = buildPriorityFilesIncremental(octree, prefetch.tracked);
             incrementalScanCooldown++;
         } else {
-            batch = buildPriorityFiles(evalCtx, { prefetchBudget: true });
+            batch = buildPriorityFiles(evalCtx, { prefetchBudget: T.scan.prefetchBudget });
             incrementalScanCooldown = 0;
         }
 
@@ -2307,6 +2284,9 @@ export function createOctreeRefinementController(
                 return;
             }
             active = true;
+            savedTunables = T;
+            T = resolveRefinementTunables(global);
+            INCREMENTAL_SCAN_INTERVAL = T.scan.incrementalInterval;
             boostActive = false;
             cameraMovedSinceSettle = true;
             incrementalScanCooldown = INCREMENTAL_SCAN_INTERVAL;

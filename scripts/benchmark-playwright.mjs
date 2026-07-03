@@ -225,6 +225,9 @@ function buildCaseUrl(c) {
     if (c.lodRuntime) {
         params.set('lodRuntime', c.lodRuntime);
     }
+    if (c.refinementPolicy) {
+        params.set('refinementPolicy', c.refinementPolicy);
+    }
     if (c.instances !== undefined) {
         params.set('instances', String(c.instances));
     }
