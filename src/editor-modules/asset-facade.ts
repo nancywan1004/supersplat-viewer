@@ -1,6 +1,6 @@
 import { applySceneAssetTriggerDistanceM } from '../scene-assets/asset-placement-handler';
 import { pauseAllSceneMedia } from '../scene-assets/media/scene-media-playback';
-import type { AssetLibraryItem, Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
+import type { AssetLibraryItem, EditLeftModule, Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 import { setPlacementCursorActive } from '../placement-cursor';
 import { loadGsplatAsset } from '../loaders/gsplat/sog/splat-loader';
 import { getAssetLoader } from '../loaders/asset-loader';
@@ -20,6 +20,7 @@ function isDeformedMorphGsplat(global: Global, item: { id?: string; assetType?: 
 class AssetFacade implements ModuleFacade {
     readonly module = 'asset' as const;
     private detachSceneAssetPlacedListener: (() => void) | null = null;
+    private detachEditModuleListener: (() => void) | null = null;
     // 当前下载的取消控制器（用于模块退出时中断下载）
     private currentDownloadAbort: (() => void) | null = null;
     // 资产放置请求版本号（last request wins）
@@ -92,6 +93,28 @@ class AssetFacade implements ModuleFacade {
         setPlacementCursorActive(ctx.global, false);
     }
 
+    /** 取消进行中的放置下载 / morph 拾取，并关闭放置光标（不触发完整 onExit 副作用）。 */
+    private cancelActivePlacementWork(global: Global): void {
+        this.placeRequestVersion++;
+        if (this.currentDownloadAbort) {
+            this.currentDownloadAbort();
+            this.currentDownloadAbort = null;
+        }
+        global.state.morphAssetAddActive = false;
+        setPlacementCursorActive(global, false);
+    }
+
+    bindEditModuleListener(global: Global): void {
+        const onEditLeftModuleChanged = (mod: EditLeftModule | null) => {
+            if (mod === 'asset') return;
+            this.cancelActivePlacementWork(global);
+        };
+        global.events.on('editLeftModule:changed', onEditLeftModuleChanged);
+        this.detachEditModuleListener = () => {
+            global.events.off('editLeftModule:changed', onEditLeftModuleChanged);
+        };
+    }
+
     onEnter(ctx: ModuleContext): void {
         const { state, events } = ctx;
         // 进入 asset 模块默认不选中任何资产（保持 null）
@@ -106,16 +129,7 @@ class AssetFacade implements ModuleFacade {
 
     onExit(ctx: ModuleContext): void {
         const { state, events } = ctx;
-        this.placeRequestVersion++;
-
-        // 退出模块时取消正在进行的下载
-        if (this.currentDownloadAbort) {
-            this.currentDownloadAbort();
-            this.currentDownloadAbort = null;
-        }
-
-        setPlacementCursorActive(ctx.global, false);
-        this.clearMorphAssetAdd(ctx);
+        this.cancelActivePlacementWork(ctx.global);
         pauseAllSceneMedia(ctx.global);
         if (state.selectedSceneEntityId) {
             state.selectedSceneEntityId = null;
@@ -134,6 +148,8 @@ class AssetFacade implements ModuleFacade {
     onPreviewModeChanged(_ctx: ModuleContext): void {}
 
     dispose(): void {
+        this.detachEditModuleListener?.();
+        this.detachEditModuleListener = null;
         this.detachSceneAssetPlacedListener?.();
         this.detachSceneAssetPlacedListener = null;
     }
@@ -312,6 +328,7 @@ class AssetFacade implements ModuleFacade {
 
 const initAssetFacade = (global: Global): ModuleFacade => {
     const facade = new AssetFacade();
+    facade.bindEditModuleListener(global);
     const onSceneAssetPlaced = () => {
         setPlacementCursorActive(global, false);
     };

@@ -1,7 +1,7 @@
 /**
  * 放置高斯 shadow-apply（B 管线）排除 mask。
  * 专用相机（priority 1）只渲染 PlacedMeshExclude 层到离屏 RT；
- * 放置高斯：gsplatPS 输出绿色（G=1，轮廓与 splat 一致）。
+ * 放置高斯：gsplatModifyPS 输出绿色（G=1，轮廓与 splat 一致）。
  * 放置 mesh / image / video 的 B 遮挡由 ShadowReceiverOccluder 深度预写处理，不再挂本层。
  * 主相机 layers 不含 PlacedMeshExclude。
  */

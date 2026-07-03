@@ -49,6 +49,11 @@ vec4 encodePickOutput(uint id) {
         uniform vec4 camera_params; // x: 1/far, y: far, z: near, w: isOrtho
     #endif
 
+    float gsplatPickAlphaWeight(float a) {
+        // GS 透明度编辑后单 splat alpha 很低，但多层叠加仍可见；pick 需抬高权重避免整像素 miss。
+        return max(a, 0.08);
+    }
+
     vec4 getPickOutput() {
         float normalizedDepth;
         if (camera_params.w > 0.5) {
@@ -58,7 +63,8 @@ vec4 encodePickOutput(uint id) {
             normalizedDepth = (linearDepth - camera_params.z) / (camera_params.y - camera_params.z);
         }
 
-        return vec4(gaussianColor.a * normalizedDepth, 0.0, 0.0, gaussianColor.a);
+        float pickA = gsplatPickAlphaWeight(gaussianColor.a);
+        return vec4(pickA * normalizedDepth, 0.0, 0.0, pickA);
     }
 #else
     #ifndef PICK_CUSTOM_ID
@@ -104,6 +110,10 @@ fn encodePickOutput(id: u32) -> vec4f {
         uniform camera_params: vec4f; // x: 1/far, y: far, z: near, w: isOrtho
     #endif
 
+    fn gsplatPickAlphaWeight(a: f32) -> f32 {
+        return max(a, 0.08);
+    }
+
     fn getPickOutput() -> vec4f {
         var normalizedDepth: f32;
         if (uniform.camera_params.w > 0.5) {
@@ -113,8 +123,8 @@ fn encodePickOutput(id: u32) -> vec4f {
             normalizedDepth = (linearDepth - uniform.camera_params.z) / (uniform.camera_params.y - uniform.camera_params.z);
         }
 
-        let a = f32(gaussianColor.a);
-        return vec4f(a * normalizedDepth, 0.0, 0.0, a);
+        let pickA = gsplatPickAlphaWeight(f32(gaussianColor.a));
+        return vec4f(pickA * normalizedDepth, 0.0, 0.0, pickA);
     }
 #else
     #ifndef PICK_CUSTOM_ID
@@ -224,11 +234,13 @@ const NORMAL_SAMPLE_DIRECTIONS = [
 ] as const;
 
 /** pick 深度累加有效 alpha 下限（暗部叶/高斯在 1e-6~1e-5 下易被整像素丢弃） */
-const PICK_SURFACE_MIN_ALPHA = 2e-5;
+const PICK_SURFACE_MIN_ALPHA = 1e-6;
 /** 中心像素有效时，只在小圆形邻域内找明显更近的前景，避免边缘处吃到旁边物体。 */
 const PICK_NEAREST_INNER_RADIUS_PX = 2;
 /** 中心像素无效时，放大搜索范围作为兜底。 */
-const PICK_NEAREST_FALLBACK_RADIUS_PX = 5;
+const PICK_NEAREST_FALLBACK_RADIUS_PX = 8;
+/** 常规邻域仍 miss 时的宽搜索（低透明度 GS / WebGL raster）。 */
+const PICK_NEAREST_WIDE_FALLBACK_RADIUS_PX = 16;
 /** 邻域候选必须比中心深度明显更近才替代中心，过滤半透明噪声与边缘误抢。 */
 const PICK_NEAREST_FRONT_DELTA_M = 0.12;
 const PICK_NEAREST_FRONT_DELTA_RATIO = 0.015;
@@ -769,6 +781,29 @@ class Picker {
             }
         };
 
+        const withGsplatPickRenderScope = (run: () => void) => {
+            const gsplatScene = app.scene.gsplat as {
+                alphaClip?: number;
+                minContribution?: number;
+            };
+            const prevAlphaClip = gsplatScene.alphaClip;
+            const prevMinContribution = gsplatScene.minContribution;
+            gsplatScene.alphaClip = 0;
+            if (typeof prevMinContribution === 'number') {
+                gsplatScene.minContribution = 0;
+            }
+            try {
+                run();
+            } finally {
+                if (prevAlphaClip !== undefined) {
+                    gsplatScene.alphaClip = prevAlphaClip;
+                }
+                if (prevMinContribution !== undefined) {
+                    gsplatScene.minContribution = prevMinContribution;
+                }
+            }
+        };
+
         const cloneCameraSnapshot = (source: PickCameraSnapshot): PickCameraSnapshot => {
             const snapshot = createPickCameraSnapshot();
             snapshot.position.copy(source.position);
@@ -824,10 +859,12 @@ class Picker {
                 return;
             }
             withShadowMaskPickScope(() => {
-                enginePicker ??= new EnginePicker(app, width, height, true);
-                enginePicker.resize(width, height);
-                ensureComputePickIdsReady(app, camera, worldLayer);
-                enginePicker.prepare(camera.camera, app.scene, [worldLayer]);
+                withGsplatPickRenderScope(() => {
+                    enginePicker ??= new EnginePicker(app, width, height, true);
+                    enginePicker.resize(width, height);
+                    ensureComputePickIdsReady(app, camera, worldLayer);
+                    enginePicker.prepare(camera.camera, app.scene, [worldLayer]);
+                });
             });
             captureCameraSnapshot(camera, engineCacheCamera);
             engineCacheWidth = width;
@@ -845,27 +882,29 @@ class Picker {
             app.scene.gsplat.enableIds = true;
             try {
                 withShadowMaskPickScope(() => {
-                    registerPickerShaderPatches(app);
-                    try {
-                        if (!accumPass) {
-                            initRasterAccum(width, height);
-                        } else if (rasterCacheWidth !== width || rasterCacheHeight !== height) {
-                            accumTarget.resize(width, height);
-                        }
+                    withGsplatPickRenderScope(() => {
+                        registerPickerShaderPatches(app);
+                        try {
+                            if (!accumPass) {
+                                initRasterAccum(width, height);
+                            } else if (rasterCacheWidth !== width || rasterCacheHeight !== height) {
+                                accumTarget.resize(width, height);
+                            }
 
-                        accumPass.init(accumTarget);
-                        accumPass.setClearColor(clearColor);
-                        accumPass.update(
-                            camera.camera,
-                            app.scene,
-                            [worldLayer],
-                            new Map<number, MeshInstance | GSplatComponent>(),
-                            false
-                        );
-                        accumPass.render();
-                    } finally {
-                        unregisterPickerShaderPatches(app);
-                    }
+                            accumPass.init(accumTarget);
+                            accumPass.setClearColor(clearColor);
+                            accumPass.update(
+                                camera.camera,
+                                app.scene,
+                                [worldLayer],
+                                new Map<number, MeshInstance | GSplatComponent>(),
+                                false
+                            );
+                            accumPass.render();
+                        } finally {
+                            unregisterPickerShaderPatches(app);
+                        }
+                    });
                 });
             } finally {
                 app.scene.gsplat.enableIds = prevEnableIds;
@@ -1103,13 +1142,50 @@ class Picker {
             const nearestSupport = Number.isFinite(nearestDist)
                 ? sampleDistances.filter(dist => dist <= nearestDist + clusterTolerance).length
                 : 0;
-            const preferredPosition = resolveSurfaceNearestPosition(
+            let preferredPosition = resolveSurfaceNearestPosition(
                 centerPosition,
                 nearestPosition,
                 camPos,
                 nearestSupport,
                 sampleDistances.length
             );
+
+            if (!preferredPosition) {
+                nearestPosition = null;
+                nearestDist = Infinity;
+                sampleDistances.length = 0;
+                const wideR = PICK_NEAREST_WIDE_FALLBACK_RADIUS_PX;
+                for (let py = screenY - wideR; py <= screenY + wideR; py++) {
+                    for (let px = screenX - wideR; px <= screenX + wideR; px++) {
+                        if (px < 0 || px >= width || py < 0 || py >= height) continue;
+                        const ox = px - screenX;
+                        const oy = py - screenY;
+                        if (ox * ox + oy * oy > wideR * wideR) continue;
+                        const pt = rasterBlock(px, py);
+                        if (!pt) continue;
+                        const dist = Math.sqrt(distanceSqTo(pt.position, camPos));
+                        sampleDistances.push(dist);
+                        if (dist < nearestDist) {
+                            nearestDist = dist;
+                            nearestPosition = pt.position;
+                        }
+                    }
+                }
+                const wideClusterTolerance = Math.max(
+                    PICK_NEAREST_CLUSTER_TOLERANCE_M,
+                    nearestDist * PICK_NEAREST_CLUSTER_TOLERANCE_RATIO
+                );
+                const wideNearestSupport = Number.isFinite(nearestDist)
+                    ? sampleDistances.filter(dist => dist <= nearestDist + wideClusterTolerance).length
+                    : 0;
+                preferredPosition = resolveSurfaceNearestPosition(
+                    centerPosition,
+                    nearestPosition,
+                    camPos,
+                    wideNearestSupport,
+                    sampleDistances.length
+                ) ?? nearestPosition;
+            }
 
             if (!preferredPosition) {
                 return null;
@@ -1218,7 +1294,28 @@ async function pickWorldFromClientXY(global: Global, clientX: number, clientY: n
     const nx = offsetX / rw;
     const ny = offsetY / rh;
 
-    return getSharedPicker(global).pick(nx, ny);
+    const picker = getSharedPicker(global);
+    const isComputeRenderer = global.app.scene.gsplat.currentRenderer === GSPLAT_RENDERER_COMPUTE;
+
+    // WebGL raster：alpha 累加路径比引擎 DEPTH_PICK 更稳（与 nav 一致，尤其低透明度 GS）。
+    if (!isComputeRenderer) {
+        const surface = await picker.pickSurface(nx, ny);
+        if (surface?.position) {
+            return surface.position;
+        }
+    }
+
+    const depthHit = await picker.pick(nx, ny);
+    if (depthHit) {
+        return depthHit;
+    }
+
+    if (isComputeRenderer) {
+        const surface = await picker.pickSurface(nx, ny);
+        return surface?.position ?? null;
+    }
+
+    return null;
 }
 
 export { Picker, getSharedPicker, getWorldPoint, captureCameraSnapshot, pickWorldFromClientXY };
