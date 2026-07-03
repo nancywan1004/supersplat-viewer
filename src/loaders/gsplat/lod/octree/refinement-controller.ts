@@ -16,6 +16,7 @@ import { findAllOctreeInstances, type OctreeInstanceLike } from './octree-instan
 import { ensureOctreeLeafSpatialIndex } from './octree-spatial-index';
 import {
     buildRefinementTunables,
+    resolveMaxLeafEvaluations,
     resolveRefinementTunables,
     type RefinementTunables
 } from './refinement-tunables';
@@ -23,7 +24,7 @@ import { computeStreamingRefinementProgressRatio } from './streaming-refinement-
 
 export { computeStreamingRefinementProgressRatio };
 export type { RefinementPolicy, RefinementTunables } from './refinement-tunables';
-export { resolveRefinementPolicy, resolveRefinementTunables } from './refinement-tunables';
+export { resolveRefinementPolicy, resolveRefinementTunables, resolveMaxLeafEvaluations } from './refinement-tunables';
 
 const REF_TAN_HALF_FOV = Math.tan(22.5 * math.DEG_TO_RAD);
 
@@ -126,7 +127,77 @@ type PrioritizedBatch = {
     lodDisplayMismatch: number;
     needsLodSwitch: boolean;
     staleLodNodes: number;
+    /** 本帧全量遍历实际评估的叶子数（incremental/skip 为 0） */
+    leavesEvaluated: number;
 };
+
+const EMPTY_PRIORITIZED_BATCH: PrioritizedBatch = {
+    files: [],
+    pendingUniqueFiles: 0,
+    foregroundPendingUnique: 0,
+    criticalPendingUnique: 0,
+    staleLoadedNodes: 0,
+    lodDisplayMismatch: 0,
+    needsLodSwitch: false,
+    staleLodNodes: 0,
+    leavesEvaluated: 0
+};
+
+type TraversalSnapshot = {
+    px: number;
+    py: number;
+    pz: number;
+    fx: number;
+    fy: number;
+    fz: number;
+    fov: number;
+    lodUpdateDistance: number;
+    lodRangeMin: number;
+    lodRangeMax: number;
+};
+
+type TraversalScanMode = 'full' | 'incremental' | 'skip';
+
+function quantizeTraversal(value: number, step = 0.02): number {
+    return Math.round(value / step) * step;
+}
+
+function captureTraversalSnapshot(
+    cameraEntity: Entity,
+    gsplatEntity: Entity,
+    gsplatScene: GsplatSceneLike,
+    maxLod: number
+): TraversalSnapshot {
+    const camera = cameraEntity.camera;
+    const pos = cameraEntity.getPosition();
+    const fwd = cameraEntity.forward;
+    const { rangeMin, rangeMax } = resolveEntityLodRange(gsplatEntity, maxLod);
+    return {
+        px: quantizeTraversal(pos.x),
+        py: quantizeTraversal(pos.y),
+        pz: quantizeTraversal(pos.z),
+        fx: quantizeTraversal(fwd.x, 0.001),
+        fy: quantizeTraversal(fwd.y, 0.001),
+        fz: quantizeTraversal(fwd.z, 0.001),
+        fov: quantizeTraversal(camera?.fov ?? 60, 0.5),
+        lodUpdateDistance: quantizeTraversal(gsplatScene.lodUpdateDistance ?? 32, 0.5),
+        lodRangeMin: rangeMin,
+        lodRangeMax: rangeMax
+    };
+}
+
+function traversalSnapshotsEqual(a: TraversalSnapshot, b: TraversalSnapshot): boolean {
+    return a.px === b.px &&
+        a.py === b.py &&
+        a.pz === b.pz &&
+        a.fx === b.fx &&
+        a.fy === b.fy &&
+        a.fz === b.fz &&
+        a.fov === b.fov &&
+        a.lodUpdateDistance === b.lodUpdateDistance &&
+        a.lodRangeMin === b.lodRangeMin &&
+        a.lodRangeMax === b.lodRangeMax;
+}
 
 type LodPlacementParams = {
     lodBaseDistance: number;
@@ -1115,7 +1186,8 @@ function buildPriorityFilesIncremental(
         staleLoadedNodes: 0,
         lodDisplayMismatch: 0,
         needsLodSwitch: pendingUnique > 0,
-        staleLodNodes: 0
+        staleLodNodes: 0,
+        leavesEvaluated: 0
     };
 }
 
@@ -1407,6 +1479,8 @@ type BuildPriorityFilesOptions = {
      * prefetch 路径：PQ 已收集足够前景 file 后提前停止（进度条判定勿开启）。
      */
     prefetchBudget?: boolean;
+    /** 单次全量遍历最多评估的叶子数；0 表示不限制 */
+    maxLeafEvaluations?: number;
 };
 
 function buildPriorityFiles(
@@ -1426,7 +1500,8 @@ function buildPriorityFiles(
             staleLoadedNodes: 0,
             lodDisplayMismatch: 0,
             needsLodSwitch: false,
-            staleLodNodes: 0
+            staleLodNodes: 0,
+            leavesEvaluated: 0
         };
     }
 
@@ -1473,6 +1548,8 @@ function buildPriorityFiles(
     const boundsFlat = octree.nodeBoundsMinMax;
     const prefetchCandidateFiles = new Set<number>();
     const spatialIndex = ensureOctreeLeafSpatialIndex(octree);
+    const maxLeafEvaluations = options?.maxLeafEvaluations ?? 0;
+    let leavesEvaluated = 0;
 
     const processRefinementLeaf = (nodeIndex: number): boolean => {
         const b = nodeIndex * 6;
@@ -1612,10 +1689,20 @@ function buildPriorityFiles(
     };
 
     if (spatialIndex) {
-        spatialIndex.visitFrustumLeaves(_frustum, worldTransform, worldCameraPos, processRefinementLeaf);
+        leavesEvaluated = spatialIndex.visitFrustumLeaves(
+            _frustum,
+            worldTransform,
+            worldCameraPos,
+            processRefinementLeaf,
+            { maxLeafEvaluations: maxLeafEvaluations > 0 ? maxLeafEvaluations : undefined }
+        );
     } else {
         for (let nodeIndex = 0; nodeIndex < octree.nodes.length; nodeIndex++) {
+            leavesEvaluated++;
             if (processRefinementLeaf(nodeIndex) === false) {
+                break;
+            }
+            if (maxLeafEvaluations > 0 && leavesEvaluated >= maxLeafEvaluations) {
                 break;
             }
         }
@@ -1633,7 +1720,8 @@ function buildPriorityFiles(
         staleLoadedNodes,
         lodDisplayMismatch,
         needsLodSwitch,
-        staleLodNodes
+        staleLodNodes,
+        leavesEvaluated
     };
 }
 
@@ -1702,6 +1790,14 @@ export type OctreeRefinementActivity = {
     burstFrames: number;
 };
 
+export type OctreeRefinementTraverseStats = {
+    leavesEvaluatedLast: number;
+    lastScanMode: 'full' | 'incremental' | 'skip';
+    fullScans: number;
+    incrementalScans: number;
+    dirtySkips: number;
+};
+
 export type OctreeRefinementController = {
     start: () => void;
     destroy: () => void;
@@ -1709,6 +1805,7 @@ export type OctreeRefinementController = {
     getActivity: () => OctreeRefinementActivity;
     /** 与下载控制器一致的 stable foreground pending，供进度条完成判定 */
     getStreamingRefinementStatus: () => StreamingViewportRefinementStatus;
+    getTraverseStats: () => OctreeRefinementTraverseStats;
 };
 
 export function createOctreeRefinementController(
@@ -1767,9 +1864,16 @@ export function createOctreeRefinementController(
     let boostActive = false;
     let cameraMovedSinceSettle = false;
     let cameraBurstFrames = 0;
-    let incrementalScanCooldown = 0;
+    let traversalSnapshot: TraversalSnapshot | null = null;
+    let traversalForceDirty = true;
+    let lastScanMode: TraversalScanMode = 'full';
+    let leavesEvaluatedLast = 0;
+    const traverseStats = {
+        fullScans: 0,
+        incrementalScans: 0,
+        dirtySkips: 0
+    };
     let savedTunables: RefinementTunables | null = null;
-    let INCREMENTAL_SCAN_INTERVAL = T.scan.incrementalInterval;
     let prevActivityActive = false;
     let lastActivity: OctreeRefinementActivity = {
         active: false,
@@ -1913,20 +2017,35 @@ export function createOctreeRefinementController(
     const runPriorityPrefetch = () => {
         const cameraJustMoved = cameraMovedSinceSettle;
         const cameraBurstActive = cameraBurstFrames > 0;
-        const useIncrementalScan =
-            !cameraJustMoved &&
-            !cameraBurstActive &&
-            prefetch.tracked.size > 0 &&
-            incrementalScanCooldown < INCREMENTAL_SCAN_INTERVAL;
+        const maxLod = octree.lodLevels - 1;
+        const currentSnapshot = captureTraversalSnapshot(cameraEntity, gsplatEntity, gsplatScene, maxLod);
+        const traversalDirty =
+            traversalForceDirty ||
+            !traversalSnapshot ||
+            !traversalSnapshotsEqual(traversalSnapshot, currentSnapshot);
 
         let batch: PrioritizedBatch;
-        if (useIncrementalScan) {
+        if (cameraJustMoved || cameraBurstActive || traversalDirty) {
+            lastScanMode = 'full';
+            const maxLeafEvaluations = resolveMaxLeafEvaluations(T, octree.nodes.length);
+            batch = buildPriorityFiles(evalCtx, {
+                prefetchBudget: T.scan.prefetchBudget,
+                maxLeafEvaluations
+            });
+            traversalSnapshot = currentSnapshot;
+            traversalForceDirty = false;
+            traverseStats.fullScans++;
+        } else if (prefetch.tracked.size > 0) {
+            lastScanMode = 'incremental';
             batch = buildPriorityFilesIncremental(octree, prefetch.tracked);
-            incrementalScanCooldown++;
+            traverseStats.incrementalScans++;
+            traverseStats.dirtySkips++;
         } else {
-            batch = buildPriorityFiles(evalCtx, { prefetchBudget: T.scan.prefetchBudget });
-            incrementalScanCooldown = 0;
+            lastScanMode = 'skip';
+            batch = EMPTY_PRIORITIZED_BATCH;
+            traverseStats.dirtySkips++;
         }
+        leavesEvaluatedLast = batch.leavesEvaluated;
 
         const {
             files: batchFiles,
@@ -1987,6 +2106,7 @@ export function createOctreeRefinementController(
 
         if (fileJustLanded) {
             settle.framesRemaining = Math.max(settle.framesRemaining, T.settle.perFileFrames);
+            traversalForceDirty = true;
         }
 
         const loader = octree.assetLoader;
@@ -2213,7 +2333,11 @@ export function createOctreeRefinementController(
                     lodRange: (() => {
                         const comp = gsplatEntity.gsplat as GSplatComponent | null;
                         return [comp?.lodRangeMin ?? 0, comp?.lodRangeMax ?? 0];
-                    })()
+                    })(),
+                    leavesEvaluated: leavesEvaluatedLast,
+                    scanMode: lastScanMode,
+                    traverseFullScans: traverseStats.fullScans,
+                    traverseDirtySkips: traverseStats.dirtySkips
                 };
                 if (getRefinementDebugLevel() >= 2) {
                     log.jitterHint = {
@@ -2286,10 +2410,15 @@ export function createOctreeRefinementController(
             active = true;
             savedTunables = T;
             T = resolveRefinementTunables(global);
-            INCREMENTAL_SCAN_INTERVAL = T.scan.incrementalInterval;
             boostActive = false;
             cameraMovedSinceSettle = true;
-            incrementalScanCooldown = INCREMENTAL_SCAN_INTERVAL;
+            traversalSnapshot = null;
+            traversalForceDirty = true;
+            lastScanMode = 'full';
+            leavesEvaluatedLast = 0;
+            traverseStats.fullScans = 0;
+            traverseStats.incrementalScans = 0;
+            traverseStats.dirtySkips = 0;
             cameraBurstFrames = T.burst.unlockFrames;
             prevActivityActive = false;
             prefetch.pinned.clear();
@@ -2333,7 +2462,8 @@ export function createOctreeRefinementController(
                 return;
             }
             cameraMovedSinceSettle = true;
-            incrementalScanCooldown = 0;
+            traversalForceDirty = true;
+            traversalSnapshot = null;
             const burstFrames = options?.zoom ? T.burst.zoomFrames : T.burst.moveFrames;
             cameraBurstFrames = Math.max(cameraBurstFrames, burstFrames);
             settle.framesRemaining = 0;
@@ -2362,6 +2492,16 @@ export function createOctreeRefinementController(
 
         getStreamingRefinementStatus() {
             return lastStreamingRefinementStatus;
+        },
+
+        getTraverseStats(): OctreeRefinementTraverseStats {
+            return {
+                leavesEvaluatedLast,
+                lastScanMode,
+                fullScans: traverseStats.fullScans,
+                incrementalScans: traverseStats.incrementalScans,
+                dirtySkips: traverseStats.dirtySkips
+            };
         },
 
         destroy() {

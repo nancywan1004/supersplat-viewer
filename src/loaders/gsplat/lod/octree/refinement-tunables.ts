@@ -52,6 +52,10 @@ export type RefinementTunables = {
     scan: {
         incrementalInterval: number;
         prefetchBudget: boolean;
+        /** 单次全量遍历最多评估的叶子数；0 表示不限制 */
+        maxLeafEvaluationsCap: number;
+        /** 相对 octree.nodes.length 的比例上限 */
+        maxLeafEvaluationsRatio: number;
     };
     nearJumpLadder: boolean;
 };
@@ -192,7 +196,9 @@ export function buildRefinementTunables(policy: RefinementPolicy): RefinementTun
             },
             scan: {
                 incrementalInterval: 60,
-                prefetchBudget: false
+                prefetchBudget: false,
+                maxLeafEvaluationsCap: mobile ? 512 : 768,
+                maxLeafEvaluationsRatio: 0.08
             },
             nearJumpLadder: false
         };
@@ -243,10 +249,22 @@ export function buildRefinementTunables(policy: RefinementPolicy): RefinementTun
         },
         scan: {
             incrementalInterval: 45,
-            prefetchBudget: true
+            prefetchBudget: true,
+            maxLeafEvaluationsCap: mobile ? 1536 : 2048,
+            maxLeafEvaluationsRatio: 0.15
         },
         nearJumpLadder: false
     };
+}
+
+/** 按叶子数与档位解析单次全量遍历评估上限；0 表示不限制 */
+export function resolveMaxLeafEvaluations(tunables: RefinementTunables, leafCount: number): number {
+    const cap = tunables.scan.maxLeafEvaluationsCap;
+    if (cap <= 0 || leafCount <= 0) {
+        return 0;
+    }
+    const ratioLimit = Math.floor(leafCount * tunables.scan.maxLeafEvaluationsRatio);
+    return Math.min(cap, Math.max(1, ratioLimit));
 }
 
 export function resolveRefinementTunables(global: Global): RefinementTunables {
