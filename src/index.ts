@@ -56,6 +56,11 @@ import { getCameraCollisionManager } from './collision/camera-collision-manager'
 import { initializeGltfRuntime } from './loaders/gltf/gltf-transcoder';
 import { applyBenchmarkConfigFlags, createSceneProfileBenchmark } from './benchmark/benchmark';
 import { initBenchmarkHud, shouldShowBenchmarkHud } from './benchmark/benchmark-hud';
+import {
+    initFrameProfiler,
+    shouldAutoStartFrameProfiler,
+    shouldInitFrameProfiler
+} from './benchmark/frame-profiler';
 
 
 export { loadGsplatAsset };
@@ -447,6 +452,10 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
 
     if (shouldShowBenchmarkHud(config)) {
         initBenchmarkHud(global);
+    }
+
+    if (shouldInitFrameProfiler(config)) {
+        initFrameProfiler(global, { autoStart: shouldAutoStartFrameProfiler(config) });
     }
 
     initCanvas(global);

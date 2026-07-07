@@ -1,6 +1,6 @@
 import type { AppBase } from 'playcanvas';
 
-import type { OctreeRefinementController } from '../loaders/gsplat/lod/octree/refinement-controller';
+import type { OctreeRefinementController, OctreeRefinementTickMetrics } from '../loaders/gsplat/lod/octree/refinement-controller';
 import type { NativeStreamingObserver } from '../loaders/gsplat/lod/octree/native-streaming-observer';
 import { isNativeLodRuntime } from '../loaders/gsplat/lod/scene-profile';
 import type { Global } from '../types';
@@ -115,6 +115,39 @@ export function percentile(values: number[], p: number): number | null {
 export function getRefinementController(global: Global): OctreeRefinementController | null {
     const viewer = (global.app as { viewer?: ViewerLike }).viewer;
     return viewer?.octreeRefinementController ?? null;
+}
+
+export function readRefinementTickMetrics(global: Global): OctreeRefinementTickMetrics | null {
+    return getRefinementController(global)?.getLastTickMetrics() ?? null;
+}
+
+function formatHudMs(value: number): string {
+    if (!Number.isFinite(value) || value <= 0) {
+        return '0';
+    }
+    return value < 10 ? value.toFixed(1) : value.toFixed(0);
+}
+
+/** benchmarkHud 调度指标区块 HTML */
+export function renderRefinementTickMetricsHtml(metrics: OctreeRefinementTickMetrics): string {
+    const row = (label: string, value: string) =>
+        `<div class="benchmark-hud-row"><span class="benchmark-hud-label">${label}</span><span class="benchmark-hud-value">${value}</span></div>`;
+    const { timingsMs } = metrics;
+    const lines: string[] = [
+        '<div class="benchmark-hud-section-title">Scheduler tick (≠ frame)</div>',
+        row('Scan mode', metrics.scanMode),
+        row(
+            'Tick ms',
+            `${formatHudMs(timingsMs.total)} (scan ${formatHudMs(timingsMs.scan)} · q ${formatHudMs(timingsMs.queue)} · sync ${formatHudMs(timingsMs.sync)})`
+        ),
+        row('Leaves', `${metrics.leavesEvaluated} · vis ${metrics.visibleLeaves} · scored ${metrics.scoredLeaves}`),
+        row('Cand refs', `${metrics.candidateFileRefs} · uniq ${metrics.candidateUniqueFiles}`),
+        row('Stale LOD', `${metrics.staleLodNodes} · loaded ${metrics.staleLoadedNodes} · mismatch ${metrics.lodDisplayMismatch}`),
+        row('Burst', `${metrics.cameraBurstFrames} fr${metrics.boostActive ? ' · boost' : ''}`),
+        row('Downloads', `${metrics.inFlight} fly · q${metrics.queueLen}${metrics.staleInFlight > 0 ? ` · stale ${metrics.staleInFlight}` : ''}`),
+        row('LOD est', `cur ${metrics.visibleSplatsCurrentM.toFixed(2)}M · tgt ${metrics.visibleSplatsTargetM.toFixed(2)}M`)
+    ];
+    return lines.join('');
 }
 
 /** 只读观测：不触发 refinement 调度 */

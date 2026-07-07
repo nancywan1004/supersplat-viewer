@@ -8,6 +8,8 @@ import {
     readJsHeapUsedMB,
     readVramTexMB,
     readRefinementSnapshot,
+    readRefinementTickMetrics,
+    renderRefinementTickMetricsHtml,
     type RefinementTickPayload
 } from './benchmark-refinement';
 import type { OctreeRefinementController } from '../loaders/gsplat/lod/octree/refinement-controller';
@@ -151,7 +153,7 @@ export function ensureBenchmarkHudStyles() {
     right: 12px;
     z-index: 100000;
     min-width: 240px;
-    max-width: 360px;
+    max-width: 400px;
     padding: 10px 12px;
     border-radius: 8px;
     background: rgba(8, 10, 14, 0.82);
@@ -221,6 +223,7 @@ export function initBenchmarkHud(global: Global): () => void {
         <div class="benchmark-hud-title">${title}</div>
         <div class="benchmark-hud-progress"><div class="benchmark-hud-progress-bar" id="benchmark-hud-progress-bar"></div></div>
         <div id="benchmark-hud-rows"></div>
+        <div id="benchmark-hud-refinement-section"></div>
         <div id="benchmark-hud-blur-section"></div>
         <div class="benchmark-hud-actions">
             <button type="button" class="benchmark-hud-copy-pose" id="benchmark-hud-copy-pose">复制相机位姿</button>
@@ -230,6 +233,7 @@ export function initBenchmarkHud(global: Global): () => void {
 
     const progressBar = root.querySelector('#benchmark-hud-progress-bar') as HTMLDivElement;
     const rowsEl = root.querySelector('#benchmark-hud-rows') as HTMLDivElement;
+    const refinementSectionEl = root.querySelector('#benchmark-hud-refinement-section') as HTMLDivElement;
     const blurSectionEl = root.querySelector('#benchmark-hud-blur-section') as HTMLDivElement;
     const copyPoseBtn = root.querySelector('#benchmark-hud-copy-pose') as HTMLButtonElement;
     const copyToastEl = root.querySelector('#benchmark-hud-copy-toast') as HTMLDivElement;
@@ -269,6 +273,7 @@ export function initBenchmarkHud(global: Global): () => void {
     let refineTick: RefinementTickPayload | null = null;
     const keyframeBlurHistory: KeyframeBlurRecord[] = [];
     let cachedRowsHtml = '';
+    let cachedRefinementHtml = '';
     let cachedBlurHtml = '';
 
     const setPhase = (next: string, keyframe?: string) => {
@@ -373,6 +378,7 @@ export function initBenchmarkHud(global: Global): () => void {
         const vramMb = readVramTexMB(app);
         const mem = readMemoryInfo();
         const refine = readRefinementLight(global);
+        const tickMetrics = readRefinementTickMetrics(global);
 
         const lines: string[] = [];
         lines.push(row('Progress', `${progress.toFixed(0)}%`));
@@ -412,6 +418,15 @@ export function initBenchmarkHud(global: Global): () => void {
             lines.push(row('Pending peak', String(refineTick.pendingPeakNodes)));
         }
 
+        const frameProfiler = (globalThis as { __frameProfiler?: { getState: () => { recording: boolean; sampleCount: number } } }).__frameProfiler;
+        if (frameProfiler) {
+            const fpState = frameProfiler.getState();
+            lines.push(row(
+                'FrameProfile',
+                fpState.recording ? `REC ${fpState.sampleCount}` : `idle ${fpState.sampleCount}`
+            ));
+        }
+
         if (config.benchmark && phase === 'anim' && state.animationDuration > 0) {
             lines.push(row('Anim', `${state.animationTime.toFixed(1)}s / ${state.animationDuration.toFixed(1)}s`));
         } else if (state.hasAnimation && state.animationDuration > 0) {
@@ -426,6 +441,12 @@ export function initBenchmarkHud(global: Global): () => void {
         if (rowsHtml !== cachedRowsHtml) {
             rowsEl.innerHTML = rowsHtml;
             cachedRowsHtml = rowsHtml;
+        }
+
+        const refinementHtml = tickMetrics ? renderRefinementTickMetricsHtml(tickMetrics) : '';
+        if (refinementHtml !== cachedRefinementHtml) {
+            refinementSectionEl.innerHTML = refinementHtml;
+            cachedRefinementHtml = refinementHtml;
         }
 
         const blurHtml = renderBlurSectionHtml();

@@ -217,6 +217,8 @@ type Config = {
     benchmarkAnimTrack?: boolean;
     /** 右上角实时性能 HUD；与 ?benchmark 跑批解耦，避免污染 FPS */
     benchmarkHud?: boolean;
+    /** 帧 profiling 录制器；1 或 auto 加载后自动开始录制 */
+    frameProfile?: boolean | 'auto';
 };
 
 // observable state that can change at runtime
