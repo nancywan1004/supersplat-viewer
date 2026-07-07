@@ -1,8 +1,13 @@
 import type { ExperienceSettings } from '../../../settings';
 import { readActivePersistentEffects } from '../../../settings-serialize/effects-sync';
 import type { EffectRegistry } from '../effect-registry';
-import { extractGlslWgslModifyBlocks, OVERALL_WAVE_COMPOSER_ID, PERLIN_WAVE_COMPOSER_ID } from '../gsplat-effect-layers-extractor';
-import { OVERALL_WAVE_REGISTRY_EFFECT_ID, PERLIN_WAVE_REGISTRY_EFFECT_ID } from '../effect-types';
+import { extractGlslWgslModifyBlocks, OVERALL_WAVE_COMPOSER_ID, PERLIN_WAVE_COMPOSER_ID, POINTILLISM_STIPPLE_COMPOSER_ID } from '../gsplat-effect-layers-extractor';
+import {
+    OVERALL_WAVE_REGISTRY_EFFECT_ID,
+    PERLIN_WAVE_REGISTRY_EFFECT_ID,
+    POINTILLISM_STIPPLE_REGISTRY_EFFECT_ID
+} from '../effect-types';
+import { pointillismModifyGlsl, pointillismModifyWgsl } from './stylisation/pointillism-stipple-shaders';
 import { overallWaveShaderGlsl, overallWaveShaderWgsl } from './scene/gsplat-overall-wave-shaders';
 import { perlinWaveShaderGlsl, perlinWaveShaderWgsl } from './scene/gsplat-perlin-wave-shaders';
 
@@ -33,6 +38,23 @@ const PERSISTENT_GSPLAT_REGISTRY_FACTORIES: Record<string, (registry: EffectRegi
                 return {
                     id: OVERALL_WAVE_COMPOSER_ID,
                     priority: 21,
+                    scope: 'scene',
+                    enabled: true,
+                    version: ctx.revision ?? 0,
+                    shaderBlocks,
+                    capabilities: { allowConcurrentWithPersistent: true }
+                };
+            }
+        });
+    },
+    [POINTILLISM_STIPPLE_REGISTRY_EFFECT_ID]: (registry) => {
+        registry.register({
+            id: POINTILLISM_STIPPLE_REGISTRY_EFFECT_ID,
+            createSceneGsplatContribution: (ctx) => {
+                const shaderBlocks = extractGlslWgslModifyBlocks(pointillismModifyGlsl, pointillismModifyWgsl);
+                return {
+                    id: POINTILLISM_STIPPLE_COMPOSER_ID,
+                    priority: 30,
                     scope: 'scene',
                     enabled: true,
                     version: ctx.revision ?? 0,
