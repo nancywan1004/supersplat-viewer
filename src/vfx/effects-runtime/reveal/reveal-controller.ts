@@ -1552,9 +1552,11 @@ export class RevealController {
      * - 不触发 effectTime:changed，避免驱动 UI slider / 播放控制
      */
     setEffectTimeForExport(time: number) {
-        if (!this.currentScript || typeof this.currentScript.setEffectTime !== 'function') {
-            return;
-        }
+        const settings = this.global.settings as ExperienceSettings;
+        const enabledPersistent = readActivePersistentEffects(settings);
+        const persistentExportUnbounded =
+            isPersistentVfx(this.config.type as any) || enabledPersistent.length > 0;
+
         const baseDuration = this.config.totalDuration ?? DEFAULT_VFX_TOTAL_DURATION;
         const completionT = Number(this.getPostRevealContentThresholdSec());
         const completionCeiling =
@@ -1562,9 +1564,38 @@ export class RevealController {
                 ? completionT
                 : baseDuration;
         const exportCeiling = Math.max(baseDuration, completionCeiling);
-        const exportTime = isPersistentVfx(this.config.type as any)
+        const exportTime = persistentExportUnbounded
             ? Math.max(0, time)
             : Math.max(0, Math.min(time, exportCeiling));
+
+        // 导出 scrub：所有已挂载 persistent 脚本都需同步 effectTime（如 perlin-wave 的 uTime），
+        // 不能仅更新 bindPersistentTimelineScript 绑定的 primary。
+        if (this.gsplatEntity && enabledPersistent.length > 0) {
+            for (const entry of enabledPersistent) {
+                const script = getMountedPersistentGsplatScript(this.gsplatEntity, entry.type) as {
+                    enabled?: boolean;
+                    isPaused?: boolean;
+                    setEffectTime?: (t: number) => void;
+                } | null;
+                if (!script?.setEffectTime) {
+                    continue;
+                }
+                if (!script.enabled) {
+                    script.enabled = true;
+                }
+                if (!script.isPaused) {
+                    script.isPaused = true;
+                }
+                script.setEffectTime(exportTime);
+            }
+        }
+
+        if (!this.currentScript || typeof this.currentScript.setEffectTime !== 'function') {
+            return;
+        }
+        if (this._persistentGsplat.isPersistentTimelineBound()) {
+            return;
+        }
 
         const completionReached = Number.isFinite(completionT) && completionT >= 0 && exportTime + 1e-4 >= completionT;
         if (!(this as any).__exportCompletionLogged && completionReached) {

@@ -42,3 +42,19 @@ export function perlinWaveUsesRegistryComposerPath(): boolean {
     }
     return true;
 }
+
+/** 回退：关闭点彩走注册表 + composer 路径，仍用脚本内联 `setContribution`（调试用）。 */
+export function pointillismUsesRegistryComposerPath(): boolean {
+    if ((globalThis as any).__POINTILLISM_REGISTRY__ === false) {
+        return false;
+    }
+    if (typeof window !== 'undefined') {
+        try {
+            const q = new URLSearchParams(window.location.search).get('pointillismRegistry');
+            if (q === '0' || q === 'false') return false;
+        } catch {
+            // ignore
+        }
+    }
+    return true;
+}

@@ -45,6 +45,9 @@ export const REVEAL_EFFECT_TYPES = new Set<string>([...REVEAL_EFFECT_TYPE_VALUES
 /** 与持久类型 `perlin-wave` 一致，供 `EffectRegistry` 注册与 `tryCreateSceneGsplatContribution` 查询 */
 export const PERLIN_WAVE_REGISTRY_EFFECT_ID = 'perlin-wave' as const;
 
+/** 与持久类型 `pointillism-stipple` 一致，供 `EffectRegistry` 注册 */
+export const POINTILLISM_STIPPLE_REGISTRY_EFFECT_ID = 'pointillism-stipple' as const;
+
 export const SPARKLE_TWINKLE_REGISTRY_EFFECT_ID = 'sparkle-twinkle' as const;
 
 export const OVERALL_WAVE_REGISTRY_EFFECT_ID = 'overall-wave' as const;
@@ -103,11 +106,10 @@ export const PERSISTENT_CAMERA_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSI
 export const PERSISTENT_STYLIZATION_EFFECT_TYPES: ReadonlySet<string> = new Set(PERSISTENT_STYLIZATION_EFFECT_TYPE_VALUES);
 
 /**
- * 会写 gsplat 材质 `gsplatModifyVS` 和/或 `gsplatPS` 的 persistent type。
- * 与 night-mode 互斥（直连 chunk，不经 composer 与 night 叠层）；新增 persistent 时若改上述 chunk 须登记。
+ * 仍**整段直连** gsplat 材质 `gsplatModifyVS` / `gsplatPS` 的 persistent type（不经 composer modify 合成）。
+ * 点彩 modify 已走 {@link GsplatEffectComposer}；此处仅登记仍直连 modify 的类型（如忆韵）。
  */
 export const PERSISTENT_GSPLAT_MATERIAL_SHADER_EFFECT_TYPE_VALUES = [
-    'pointillism-stipple',
     'yiyun-dianran'
 ] as const;
 
