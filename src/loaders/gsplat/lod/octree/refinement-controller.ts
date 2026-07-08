@@ -56,6 +56,8 @@ type OctreeAssetLoaderLike = {
     __refinementSuspendedQueue?: string[];
     __refinementGateActive?: boolean;
     __refinementPriorityUrls?: Set<string>;
+    /** 静止排空后阻断新下载入队，防止 gate 关闭后引擎立刻回填 queue */
+    __refinementIdleFreeze?: boolean;
 };
 
 type OctreeLike = {
@@ -71,6 +73,7 @@ type OctreeLike = {
     __originalEnsureFileResource?: (fileIndex: number) => void;
     __refinementPriorityUrls?: Set<string>;
     __refinementUrlToFileIndex?: Map<string, number>;
+    __refinementIdleFreeze?: boolean;
     /** Phase1：由 nodeBoundsMinMax 构建的 leaf BVH（引擎会丢弃 meta.tree） */
     __leafSpatialIndex?: import('./octree-spatial-index').OctreeLeafSpatialIndex | null;
 };
@@ -339,6 +342,9 @@ function patchEnsureFileResourceGate(octree: OctreeLike) {
     const original = octree.ensureFileResource.bind(octree);
     octree.__originalEnsureFileResource = original;
     octree.ensureFileResource = (fileIndex: number) => {
+        if (octree.__refinementIdleFreeze) {
+            return;
+        }
         const allowed = octree.__refinementPriorityUrls;
         if (allowed && allowed.size > 0) {
             const url = octree.files[fileIndex]?.url;
@@ -364,8 +370,32 @@ function clearRefinementPriorityUrls(octree: OctreeLike, loader: OctreeAssetLoad
     octree.__refinementPriorityUrls = undefined;
     if (loader) {
         loader.__refinementPriorityUrls = undefined;
-        loader.__refinementGateActive = false;
+        if (!loader.__refinementIdleFreeze) {
+            loader.__refinementGateActive = false;
+        }
     }
+}
+
+function setIdleDownloadFreeze(octree: OctreeLike, loader: OctreeAssetLoaderLike) {
+    octree.__refinementIdleFreeze = true;
+    loader.__refinementIdleFreeze = true;
+    loader.__refinementGateActive = true;
+    const empty = new Set<string>();
+    octree.__refinementPriorityUrls = empty;
+    loader.__refinementPriorityUrls = empty;
+}
+
+function clearIdleDownloadFreeze(octree: OctreeLike, loader: OctreeAssetLoaderLike | null | undefined) {
+    if (!octree.__refinementIdleFreeze && !loader?.__refinementIdleFreeze) {
+        return;
+    }
+    octree.__refinementIdleFreeze = false;
+    if (loader) {
+        loader.__refinementIdleFreeze = false;
+        loader.__refinementGateActive = false;
+        loader.__refinementPriorityUrls = undefined;
+    }
+    octree.__refinementPriorityUrls = undefined;
 }
 
 function patchAssetLoaderPriority(loader: OctreeAssetLoaderLike) {
@@ -377,6 +407,9 @@ function patchAssetLoaderPriority(loader: OctreeAssetLoaderLike) {
     }
     const originalLoad = loader.load.bind(loader);
     loader.load = (url: string) => {
+        if (loader.__refinementIdleFreeze) {
+            return;
+        }
         const gateActive = loader.__refinementGateActive;
         const prioritySet = loader.__refinementPriorityUrls;
         if (gateActive && prioritySet && prioritySet.size > 0 && !prioritySet.has(url)) {
@@ -588,6 +621,104 @@ function purgeNonPriorityQueuedLoads(
         loader._processQueue?.();
     }
     return purged;
+}
+
+type IdleQueueDrainResult = {
+    purgedSuspended: number;
+    purgedQueued: number;
+    abortedInflight: number;
+    releasedOrphanInflight: number;
+};
+
+function isIdleDrainKeepUrl(
+    octree: OctreeLike,
+    instances: OctreeInstanceLike[],
+    pinnedFiles: Set<number>,
+    url: string,
+    urlToFileIndex: Map<string, number>
+): boolean {
+    const fileIndex = urlToFileIndex.get(url);
+    if (fileIndex === undefined) {
+        return false;
+    }
+    if (pinnedFiles.has(fileIndex)) {
+        return true;
+    }
+    return isFileBoundToOctreeInstance(instances, fileIndex);
+}
+
+/**
+ * 静止 skip 窗口：清空无 keep 的 suspended / queue / in-flight，释放僵尸槽位。
+ * 不 asset.unload()；不取消仍绑 placement 的下载。
+ */
+function drainIdleDownloadQueues(
+    octree: OctreeLike,
+    loader: OctreeAssetLoaderLike,
+    instances: OctreeInstanceLike[],
+    pinnedFiles: Set<number>
+): IdleQueueDrainResult {
+    const urlToFileIndex = getOctreeUrlToFileIndex(octree);
+    let purgedSuspended = 0;
+    let purgedQueued = 0;
+    let abortedInflight = 0;
+    let releasedOrphanInflight = 0;
+
+    const shouldKeep = (url: string) =>
+        isIdleDrainKeepUrl(octree, instances, pinnedFiles, url, urlToFileIndex);
+
+    const suspended = loader.__refinementSuspendedQueue ?? [];
+    const keptSuspended: string[] = [];
+    for (let i = 0; i < suspended.length; i++) {
+        const url = suspended[i];
+        if (shouldKeep(url)) {
+            keptSuspended.push(url);
+        } else {
+            purgedSuspended++;
+        }
+    }
+    loader.__refinementSuspendedQueue = keptSuspended;
+
+    const queue = loader._loadQueue ?? [];
+    for (let i = queue.length - 1; i >= 0; i--) {
+        const url = queue[i];
+        if (shouldKeep(url)) {
+            continue;
+        }
+        queue.splice(i, 1);
+        purgedQueued++;
+    }
+    loader._loadQueue = queue;
+
+    if (loader._currentlyLoading?.size) {
+        const inflightUrls = [...loader._currentlyLoading];
+        for (let i = 0; i < inflightUrls.length; i++) {
+            const url = inflightUrls[i];
+            const fileIndex = urlToFileIndex.get(url) ?? -1;
+            const asset = loader._urlToAsset?.get(url);
+            const integrated = fileIndex >= 0 && !!octree.getFileResource(fileIndex);
+
+            // 已 integrate / asset.loaded 但仍占槽 — 僵尸 in-flight，优先释放
+            if (integrated || asset?.loaded) {
+                if (releaseInflightSlot(loader, url)) {
+                    releasedOrphanInflight++;
+                }
+                continue;
+            }
+
+            if (shouldKeep(url)) {
+                continue;
+            }
+            if (softCancelInflightLoad(loader, url, octree, fileIndex)) {
+                abortedInflight++;
+            }
+        }
+    }
+
+    if (purgedQueued > 0 || abortedInflight > 0 || releasedOrphanInflight > 0) {
+        loader._processQueue?.();
+    }
+
+    return { purgedSuspended, purgedQueued, abortedInflight, releasedOrphanInflight };
 }
 
 /**
@@ -1973,6 +2104,9 @@ export type OctreeRefinementTickMetrics = {
     inFlight: number;
     queueLen: number;
     staleInFlight: number;
+    suspended: number;
+    idleQueueDrained: number;
+    priorityDownloadsActive: boolean;
     visibleSplatsCurrentM: number;
     visibleSplatsTargetM: number;
     boostActive: boolean;
@@ -2056,6 +2190,8 @@ export function createOctreeRefinementController(
     let traversalSnapshot: TraversalSnapshot | null = null;
     let traversalForceDirty = true;
     let lastScanMode: TraversalScanMode = 'full';
+    let consecutiveIdleFrames = 0;
+    let idleQueueDrainedLastTick = 0;
     let leavesEvaluatedLast = 0;
     const traverseStats = {
         fullScans: 0,
@@ -2143,12 +2279,16 @@ export function createOctreeRefinementController(
         const loader = octree.assetLoader;
         if (loader && savedLoaderConcurrency !== null) {
             loader.maxConcurrentLoads = savedLoaderConcurrency;
-            // 丢弃 gate 期间拦截的后台 URL，避免 settle 结束时洪峰下载冲击 peripheral
-            loader.__refinementSuspendedQueue = [];
-            clearRefinementPriorityUrls(octree, loader);
+            if (!loader.__refinementIdleFreeze) {
+                // 丢弃 gate 期间拦截的后台 URL，避免 settle 结束时洪峰下载冲击 peripheral
+                loader.__refinementSuspendedQueue = [];
+                clearRefinementPriorityUrls(octree, loader);
+            }
             savedLoaderConcurrency = null;
         }
-        prefetch.lastUrls = [];
+        if (!octree.__refinementIdleFreeze) {
+            prefetch.lastUrls = [];
+        }
         gsplatScene.dirty = true;
     };
 
@@ -2179,6 +2319,7 @@ export function createOctreeRefinementController(
         restoreSavedGsplatSceneSettings();
         const loader = octree.assetLoader;
         if (loader) {
+            clearIdleDownloadFreeze(octree, loader);
             restoreSuspendedQueuedLoads(loader);
             clearRefinementPriorityUrls(octree, loader);
         }
@@ -2259,6 +2400,11 @@ export function createOctreeRefinementController(
             batch = EMPTY_PRIORITIZED_BATCH;
             traverseStats.dirtySkips++;
         }
+        if (!cameraJustMoved && !cameraBurstActive) {
+            consecutiveIdleFrames++;
+        } else {
+            consecutiveIdleFrames = 0;
+        }
         leavesEvaluatedLast = batch.leavesEvaluated;
 
         const {
@@ -2332,10 +2478,37 @@ export function createOctreeRefinementController(
         }
 
         const loader = octree.assetLoader;
+        const idleQuiescent =
+            T.loader.idleQueueDrainEnabled &&
+            !cameraBurstActive &&
+            !cameraJustMoved &&
+            consecutiveIdleFrames >= T.loader.idleQueueDrainSkipFrames &&
+            stableCriticalPending === 0;
+        const idleFrozen = idleQuiescent || !!loader?.__refinementIdleFreeze;
         let safeAbortedInflight = 0;
         let integratedLoaderResources = 0;
+
+        idleQueueDrainedLastTick = 0;
+        if (idleQuiescent && loader) {
+            const wasFrozen = !!loader.__refinementIdleFreeze;
+            if (!wasFrozen) {
+                prefetch.tracked.clear();
+            }
+            setIdleDownloadFreeze(octree, loader);
+            const instances = findAllOctreeInstances(app, octree, gsplatEntity);
+            const drainResult = drainIdleDownloadQueues(octree, loader, instances, prefetch.pinned);
+            idleQueueDrainedLastTick =
+                drainResult.purgedSuspended +
+                drainResult.purgedQueued +
+                drainResult.abortedInflight +
+                drainResult.releasedOrphanInflight;
+            prefetch.lastUrls = [];
+        } else if (loader) {
+            clearIdleDownloadFreeze(octree, loader);
+        }
+
         const queueStartMs = performance.now();
-        if (priorityUrls.length > 0) {
+        if (priorityUrls.length > 0 && !idleFrozen) {
             if (loader) {
                 const preAbortState = countPriorityLoadState(loader, priorityUrls);
                 const priorityBlocked =
@@ -2380,14 +2553,13 @@ export function createOctreeRefinementController(
                 priorityUrls
             );
             retainCriticalDownloadFiles(octree, loader, criticalBatch, prefetch.pinned);
-        } else if (loader) {
+        } else if (loader && !idleFrozen) {
             if (boostActive && loader.maxConcurrentLoads !== T.loader.boostConcurrent) {
                 loader.maxConcurrentLoads = T.loader.boostConcurrent;
             }
-            // 仅在刚完成一轮下载的 settle 窗口内 hold 旧 gate，防 peripheral 涌入抖动。
-            // 勿用 staleLodNodes 条件：挪机后 stale 长期存在会沿用旧视角 URL，卡死新中心 sync/下载。
             const holdGate =
                 boostActive &&
+                lastScanMode !== 'skip' &&
                 settle.framesRemaining > 0 &&
                 stableForegroundPending === 0 &&
                 prefetch.lastUrls.length > 0;
@@ -2414,10 +2586,10 @@ export function createOctreeRefinementController(
             cameraJustMoved ||
             cameraBurstActive ||
             stableCriticalPending > 0 ||
-            staleLoadedNodes > 0 ||
-            (needsLodSwitch && stableForegroundPending > 0) ||
-            (needsLodSwitch && staleLodNodes > 0) ||
-            settle.framesRemaining > 0;
+            (!idleFrozen && staleLoadedNodes > 0) ||
+            (!idleFrozen && needsLodSwitch && stableForegroundPending > 0) ||
+            (!idleFrozen && needsLodSwitch && staleLodNodes > 0) ||
+            (settle.framesRemaining > 0 && !idleFrozen);
 
         if (needsBoost) {
             enterRefinementMode();
@@ -2428,9 +2600,9 @@ export function createOctreeRefinementController(
             cameraMovedSinceSettle = false;
         } else if (boostActive) {
             restoreRefinementMode();
-            const loader = octree.assetLoader;
-            if (loader) {
-                clearRefinementPriorityUrls(octree, loader);
+            const postRestoreLoader = octree.assetLoader;
+            if (postRestoreLoader && !postRestoreLoader.__refinementIdleFreeze) {
+                clearRefinementPriorityUrls(octree, postRestoreLoader);
             }
         }
 
@@ -2628,6 +2800,7 @@ export function createOctreeRefinementController(
 
         const tickLoader = octree.assetLoader;
         const tickPriorityLoad = countPriorityLoadState(tickLoader, priorityUrls);
+        const priorityDownloadsActive = priorityUrls.length > 0;
         const tickTotalMs = performance.now() - tickStartMs;
         lastTickMetrics = {
             timingsMs: {
@@ -2649,7 +2822,10 @@ export function createOctreeRefinementController(
             cameraBurstFrames,
             inFlight: tickLoader?._currentlyLoading?.size ?? 0,
             queueLen: tickLoader?._loadQueue?.length ?? 0,
-            staleInFlight: tickPriorityLoad.staleInFlight,
+            staleInFlight: priorityDownloadsActive ? tickPriorityLoad.staleInFlight : 0,
+            suspended: tickLoader?.__refinementSuspendedQueue?.length ?? 0,
+            idleQueueDrained: idleQueueDrainedLastTick,
+            priorityDownloadsActive,
             visibleSplatsCurrentM: currentVisibleSplats / 1_000_000,
             visibleSplatsTargetM: targetVisibleSplats / 1_000_000,
             boostActive,
@@ -2728,12 +2904,18 @@ export function createOctreeRefinementController(
             traverseStats.dirtySkips = 0;
             cameraBurstFrames = T.burst.unlockFrames;
             prevActivityActive = false;
+            consecutiveIdleFrames = 0;
+            idleQueueDrainedLastTick = 0;
             prefetch.pinned.clear();
             prefetch.tracked.clear();
             prefetch.lastUrls = [];
             prevPending.staleLodNodes = -1;
             prevPending.stableForeground = -1;
             staleSyncCooldown = 0;
+            const startLoader = octree.assetLoader;
+            if (startLoader) {
+                clearIdleDownloadFreeze(octree, startLoader);
+            }
             enterRefinementMode();
 
             updateHandler = onUpdate;
@@ -2793,9 +2975,12 @@ export function createOctreeRefinementController(
             prefetch.lastUrls = [];
             prefetch.tracked.clear();
             prefetch.pinned.clear();
+            consecutiveIdleFrames = 0;
+            idleQueueDrainedLastTick = 0;
             staleSyncCooldown = 0;
             const loader = octree.assetLoader;
             if (loader) {
+                clearIdleDownloadFreeze(octree, loader);
                 clearRefinementPriorityUrls(octree, loader);
                 if (options?.zoom) {
                     // zoom/双击时丢弃旧位置的 suspended 队列，避免旧视角 URL

@@ -59,6 +59,12 @@ export function readGsplatsM(app: AppBase): number | null {
     return Number.isFinite(n) ? (n as number) / 1_000_000 : null;
 }
 
+/** PlayCanvas stats.drawCalls.total：本帧参与 gsplat compaction/绘制的 interval 数（≈ bake 并行度观测） */
+export function readDrawCalls(app: AppBase): number | null {
+    const n = (app.stats as { drawCalls?: { total?: number } })?.drawCalls?.total;
+    return Number.isFinite(n) ? (n as number) : null;
+}
+
 export function readJsHeapUsedMB(): number | null {
     const mem = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
     const n = mem?.usedJSHeapSize;
@@ -142,9 +148,15 @@ export function renderRefinementTickMetricsHtml(metrics: OctreeRefinementTickMet
         ),
         row('Leaves', `${metrics.leavesEvaluated} · vis ${metrics.visibleLeaves} · scored ${metrics.scoredLeaves}`),
         row('Cand refs', `${metrics.candidateFileRefs} · uniq ${metrics.candidateUniqueFiles}`),
-        row('Stale LOD', `${metrics.staleLodNodes} · loaded ${metrics.staleLoadedNodes} · mismatch ${metrics.lodDisplayMismatch}`),
+        row('Stale LOD', `${metrics.staleLodNodes}待升 · ${metrics.staleLoadedNodes}已下未上 · ${metrics.lodDisplayMismatch}引擎差`),
         row('Burst', `${metrics.cameraBurstFrames} fr${metrics.boostActive ? ' · boost' : ''}`),
-        row('Downloads', `${metrics.inFlight} fly · q${metrics.queueLen}${metrics.staleInFlight > 0 ? ` · stale ${metrics.staleInFlight}` : ''}`),
+        row(
+            'Downloads',
+            `${metrics.inFlight} fly · q${metrics.queueLen} · susp ${metrics.suspended}` +
+                (metrics.priorityDownloadsActive && metrics.staleInFlight > 0
+                    ? ` · stale ${metrics.staleInFlight}`
+                    : '')
+        ),
         row('LOD est', `cur ${metrics.visibleSplatsCurrentM.toFixed(2)}M · tgt ${metrics.visibleSplatsTargetM.toFixed(2)}M`)
     ];
     return lines.join('');

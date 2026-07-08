@@ -18,6 +18,9 @@ export type RefinementTunables = {
         pinLimit: number;
         trackedMissFrames: number;
         trackedLimit: number;
+        /** skip 连续 N 帧后排空 suspended/queue/无 keep 的 in-flight */
+        idleQueueDrainSkipFrames: number;
+        idleQueueDrainEnabled: boolean;
     };
     settle: {
         postDownloadFrames: number;
@@ -163,7 +166,9 @@ export function buildRefinementTunables(policy: RefinementPolicy): RefinementTun
                 criticalLimit: mobile ? 3 : 6,
                 pinLimit: mobile ? 4 : 8,
                 trackedMissFrames: mobile ? 10 : 14,
-                trackedLimit: mobile ? 64 : 128
+                trackedLimit: mobile ? 64 : 128,
+                idleQueueDrainSkipFrames: 30,
+                idleQueueDrainEnabled: true
             },
             settle: {
                 postDownloadFrames: 36,
@@ -216,7 +221,9 @@ export function buildRefinementTunables(policy: RefinementPolicy): RefinementTun
             criticalLimit: mobile ? 4 : 8,
             pinLimit: mobile ? 6 : 12,
             trackedMissFrames: mobile ? 8 : 12,
-            trackedLimit: mobile ? 96 : 192
+            trackedLimit: mobile ? 96 : 192,
+            idleQueueDrainSkipFrames: 30,
+            idleQueueDrainEnabled: true
         },
         settle: {
             postDownloadFrames: 30,

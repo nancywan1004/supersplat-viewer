@@ -4,6 +4,7 @@ import type { Global } from '../types';
 import { Camera } from '../cameras/camera';
 import {
     percentile,
+    readDrawCalls,
     readGsplatsM,
     readJsHeapUsedMB,
     readVramTexMB,
@@ -375,6 +376,7 @@ export function initBenchmarkHud(global: Global): () => void {
         const fpsP50 = percentile(fpsSamples, 0.5);
         const fpsP95 = percentile(fpsSamples, 0.95);
         const gsplatsM = readGsplatsM(app);
+        const drawCalls = readDrawCalls(app);
         const vramMb = readVramTexMB(app);
         const mem = readMemoryInfo();
         const refine = readRefinementLight(global);
@@ -401,6 +403,7 @@ export function initBenchmarkHud(global: Global): () => void {
 
         lines.push(row('GPU VRAM', vramMb !== null ? `${vramMb.toFixed(0)} MB` : '—'));
         lines.push(row('Gsplats', gsplatsM !== null ? `${gsplatsM.toFixed(2)}M` : '—'));
+        lines.push(row('DrawCalls', drawCalls !== null ? String(drawCalls) : '—'));
 
         const gsplat = app.scene.gsplat as { currentRenderer?: unknown; renderer?: unknown; splatBudget?: unknown };
         lines.push(row('Renderer', formatGsplatRenderer(gsplat.currentRenderer ?? gsplat.renderer)));
