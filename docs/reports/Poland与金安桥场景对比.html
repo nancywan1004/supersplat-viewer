@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Poland vs Jinan：换档 bake 与卡顿</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --elevated: #1a1d27;
+      --border: #2a2f3a;
+      --text: #e8eaed;
+      --muted: #9aa0a6;
+      --cpu: #5b9bd5;
+      --gpu: #6bbf59;
+      --accent: #8ab4f8;
+      --danger: #f28b82;
+      --success: #81c995;
+      --warning: #fdd663;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      font-size: 15px;
+    }
+    main { max-width: 920px; margin: 0 auto; padding: 32px 24px 64px; }
+    h1 { font-size: 1.75rem; margin: 0 0 8px; }
+    h2 { font-size: 1.25rem; margin: 32px 0 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+    h3 { font-size: 1rem; margin: 20px 0 8px; color: var(--muted); }
+    .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 24px; }
+    .card {
+      background: var(--elevated);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin: 16px 0;
+    }
+    .callout {
+      border-left: 3px solid var(--accent);
+      background: rgba(138, 180, 248, 0.08);
+      padding: 12px 16px;
+      margin: 16px 0;
+      border-radius: 0 6px 6px 0;
+    }
+    .callout.warn { border-color: var(--warning); background: rgba(253, 214, 99, 0.08); }
+    .callout strong { display: block; margin-bottom: 4px; }
+    .pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+    .pill {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      border: 1px solid var(--border);
+    }
+    .pill.cpu { background: rgba(91, 155, 213, 0.15); color: var(--cpu); }
+    .pill.gpu { background: rgba(107, 191, 89, 0.15); color: var(--gpu); }
+    .pill.bad { background: rgba(242, 139, 130, 0.15); color: var(--danger); }
+    .pill.good { background: rgba(129, 201, 149, 0.15); color: var(--success); }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }
+    @media (max-width: 600px) { .stats { grid-template-columns: 1fr; } }
+    .stat {
+      background: var(--elevated);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      text-align: center;
+    }
+    .stat .val { font-size: 1.5rem; font-weight: 700; }
+    .stat .val.danger { color: var(--danger); }
+    .stat .val.success { color: var(--success); }
+    .stat .lbl { font-size: 0.75rem; color: var(--muted); margin-top: 4px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+      margin: 12px 0;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 8px 10px;
+      text-align: left;
+    }
+    th { background: rgba(255,255,255,0.04); color: var(--muted); font-weight: 600; }
+    tr.danger td:nth-child(2), tr.danger td:nth-child(4) { color: var(--danger); }
+    tr.success td:nth-child(3) { color: var(--success); }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 700px) { .grid-2 { grid-template-columns: 1fr; } }
+    svg { display: block; width: 100%; max-width: 720px; margin: 12px auto; }
+    .badge-cpu { fill: rgba(91,155,213,0.25); }
+    .badge-gpu { fill: rgba(107,191,89,0.25); }
+    .box-cpu { fill: rgba(91,155,213,0.08); stroke: var(--border); }
+    .box-gpu { fill: rgba(107,191,89,0.08); stroke: var(--border); }
+    .box-elev { fill: var(--elevated); stroke: var(--border); }
+    .arrow { stroke: var(--border); stroke-width: 1.5; fill: none; marker-end: url(#arr); }
+    .note { font-size: 0.85rem; color: var(--muted); }
+    code { background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px; font-size: 0.85em; }
+    @media print {
+      body { background: #fff; color: #111; }
+      .card, .stat, th { background: #f5f5f5; }
+      :root { --border: #ccc; --muted: #555; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Poland vs Jinan：换档 bake 与卡顿</h1>
+  <p class="subtitle">
+    数据源：<code>refinement_poland_v3_buf.txt</code>（927 帧）·
+    <code>refinement_jinanqiao-v3-x10_v3_buf.txt</code> · budget=2.5 · 2026-07-08
+  </p>
+
+  <div class="pill-row">
+    <span class="pill cpu">蓝标 = CPU（主线程）</span>
+    <span class="pill gpu">绿标 = GPU</span>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">换档流水线 + CPU / GPU 分工</h3>
+    <svg viewBox="0 0 720 480" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 Z" fill="#2a2f3a"/>
+        </marker>
+      </defs>
+      <!-- sync -->
+      <rect class="box-elev" x="280" y="8" width="160" height="50" rx="6"/>
+      <rect class="badge-cpu" x="284" y="12" width="28" height="14" rx="3"/>
+      <text x="298" y="22" text-anchor="middle" fill="#5b9bd5" font-size="8" font-weight="700">CPU</text>
+      <text x="360" y="38" text-anchor="middle" fill="#e8eaed" font-size="12" font-weight="600">换 LOD</text>
+      <line class="arrow" x1="360" y1="58" x2="360" y2="78"/>
+
+      <text x="180" y="94" text-anchor="middle" fill="#8ab4f8" font-size="11" font-weight="600">① 后台 bake — gapMs 在这（CPU 为主）</text>
+
+      <!-- bake row -->
+      <rect class="box-cpu" x="20" y="102" width="120" height="50" rx="6"/>
+      <text x="80" y="132" text-anchor="middle" fill="#e8eaed" font-size="11">SOG 源</text>
+      <line class="arrow" x1="140" y1="127" x2="158" y2="127"/>
+      <rect class="box-cpu" x="158" y="102" width="120" height="50" rx="6"/>
+      <text x="218" y="132" text-anchor="middle" fill="#e8eaed" font-size="11">改叶切片</text>
+      <line class="arrow" x1="278" y1="127" x2="296" y2="127"/>
+      <rect class="box-cpu" x="296" y="102" width="120" height="50" rx="6"/>
+      <text x="356" y="132" text-anchor="middle" fill="#e8eaed" font-size="11">分配内存块</text>
+      <line class="arrow" x1="416" y1="127" x2="434" y2="127"/>
+      <rect class="box-cpu" x="434" y="102" width="120" height="50" rx="6"/>
+      <text x="494" y="132" text-anchor="middle" fill="#e8eaed" font-size="11">算槽位偏移</text>
+
+      <line class="arrow" x1="360" y1="152" x2="180" y2="178"/>
+      <rect class="box-cpu" x="40" y="178" width="280" height="54" rx="6"/>
+      <text x="180" y="202" text-anchor="middle" fill="#e8eaed" font-size="11">staging → writeBuffer</text>
+      <text x="180" y="218" text-anchor="middle" fill="#9aa0a6" font-size="9">CPU 填 staging，上传到 GPU</text>
+      <line class="arrow" x1="180" y1="232" x2="180" y2="252"/>
+      <rect class="box-gpu" x="40" y="252" width="280" height="54" rx="6"/>
+      <text x="180" y="284" text-anchor="middle" fill="#e8eaed" font-size="11">Work Buffer（GPU 显存）</text>
+      <rect class="box-cpu" x="40" y="318" width="280" height="44" rx="6"/>
+      <text x="180" y="345" text-anchor="middle" fill="#f28b82" font-size="11" font-weight="600">计数 uniqueBlocks ★</text>
+
+      <text x="540" y="94" text-anchor="middle" fill="#9aa0a6" font-size="11" font-weight="600">② 前台渲染 — gpu.totalMs（~16ms）</text>
+      <rect class="box-gpu" x="400" y="178" width="280" height="50" rx="6"/>
+      <text x="540" y="208" text-anchor="middle" fill="#e8eaed" font-size="11">剔除 → scatter → 排序</text>
+      <line class="arrow" x1="540" y1="228" x2="540" y2="248"/>
+      <rect class="box-gpu" x="400" y="248" width="280" height="50" rx="6"/>
+      <text x="540" y="278" text-anchor="middle" fill="#e8eaed" font-size="11">forward 画屏</text>
+      <line class="arrow" x1="540" y1="298" x2="540" y2="318"/>
+      <rect class="box-gpu" x="430" y="318" width="220" height="44" rx="6"/>
+      <text x="540" y="345" text-anchor="middle" fill="#9aa0a6" font-size="11">计数 drawCalls</text>
+
+      <line class="arrow" x1="320" y1="279" x2="400" y2="203"/>
+      <text x="348" y="268" fill="#9aa0a6" font-size="9">bake 完才渲染</text>
+
+      <rect class="box-elev" x="16" y="380" width="688" height="88" rx="6"/>
+      <text x="32" y="402" fill="#e8eaed" font-size="11" font-weight="600">Poland 慢帧 P50：frameMs 183 ≈ gapMs 119（CPU bake）+ renderMs 45 + gpu 16</text>
+      <text x="32" y="420" fill="#9aa0a6" font-size="10">卡顿 ≈ gapMs：uniqueBlocks 越大，assignSplatOffsets + staging + writeBuffer 越贵</text>
+      <text x="32" y="436" fill="#9aa0a6" font-size="10">drawCalls / gpu.totalMs 反映 GPU 渲染，Poland 慢帧仅 ~16ms — 不是主因</text>
+      <text x="32" y="452" fill="#9aa0a6" font-size="10">uniqueBlocks ≠ drawCalls：17 万块 bake vs ~24 drawCalls，差 ~7000×</text>
+    </svg>
+  </div>
+
+  <div class="callout">
+    <strong>一句话</strong>
+    bake = CPU 重活（gapMs）；渲染 = GPU 轻活（gpu ~16ms）。<code>uniqueBlocks</code> 衡量 CPU bake 规模，<code>drawCalls</code> 衡量 GPU 渲染批次——两码事。
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3 style="margin-top:0">各阶段 CPU / GPU</h3>
+      <table>
+        <thead><tr><th>阶段</th><th>端</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>换 LOD / sync</td><td>CPU</td><td>viewer refinement，~1ms</td></tr>
+          <tr><td>改 interval + MemBlock</td><td>CPU</td><td>触发 bake</td></tr>
+          <tr><td>assignSplatOffsets ★</td><td>CPU</td><td>gapMs 热点，按 splat 线性</td></tr>
+          <tr><td>staging + writeBuffer</td><td>CPU 发起</td><td>计入 gapMs，非 drawCall</td></tr>
+          <tr><td>Work Buffer</td><td>GPU 存</td><td>VRAM</td></tr>
+          <tr><td>Cull / Sort / forward</td><td>GPU</td><td>drawCalls 在这</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">指标落在哪</h3>
+      <table>
+        <thead><tr><th>指标</th><th>量什么</th><th>关系</th></tr></thead>
+        <tbody>
+          <tr><td><code>gapMs</code></td><td>CPU bake 残差</td><td style="color:var(--danger)">★ 卡顿主因</td></tr>
+          <tr><td><code>uniqueBlocks</code></td><td>本帧重写块数</td><td style="color:var(--danger)">与 gap 最相关</td></tr>
+          <tr><td><code>totalBlocks</code></td><td>工作区总块数</td><td>盘子大小</td></tr>
+          <tr><td><code>drawCalls</code></td><td>GPU 渲染批数</td><td>弱相关</td></tr>
+          <tr><td><code>gpu.totalMs</code></td><td>GPU 全 pass</td><td>Poland ~16ms</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <h2>概念对照</h2>
+  <table>
+    <thead><tr><th>口语</th><th>引擎名</th><th>含义</th><th>和卡顿</th></tr></thead>
+    <tbody>
+      <tr><td>叶切片</td><td>interval</td><td>叶节点在源 SOG 的切片指针</td><td>换档触发源</td></tr>
+      <tr><td>内存块</td><td>MemBlock / allocId</td><td>work buffer 里的一格</td><td>bake 计数单位</td></tr>
+      <tr><td>槽位</td><td>splat slot</td><td>1 个高斯点存储位（~40B）</td><td>数据量 ×40B</td></tr>
+      <tr><td>总块数</td><td>totalBlocks</td><td>allocationMap.size，随加载增长</td><td>Poland 8× Jinan</td></tr>
+      <tr><td>脏块数</td><td>uniqueBlocks</td><td>本帧 bake 重写块数</td><td style="color:var(--danger)">★ 主因</td></tr>
+      <tr><td>渲染批次</td><td>drawCalls</td><td>前台 GPU 绘制批数</td><td>不可当 bake 计数</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <strong>两个误区</strong>
+    uniqueBlocks ≠ drawCalls：Poland 上传帧 ~17 万 uniqueBlocks vs ~24 drawCalls。<br/>
+    syncedInstances=1 仍可能 drawCalls=26：sync 的是整棵 octree，不是 per-leaf。
+  </div>
+
+  <h2>uniqueBlocks 正面对比（上传帧 P50）</h2>
+  <div class="stats">
+    <div class="stat"><div class="val danger">165k</div><div class="lbl">Poland 脏块</div></div>
+    <div class="stat"><div class="val success">25k</div><div class="lbl">Jinan 脏块</div></div>
+    <div class="stat"><div class="val danger">6.6×</div><div class="lbl">Poland / Jinan</div></div>
+  </div>
+  <table>
+    <thead><tr><th>指标</th><th>Poland</th><th>Jinan</th><th>对比</th></tr></thead>
+    <tbody>
+      <tr class="danger"><td>uniqueBlocks</td><td>165,251</td><td>25,093</td><td>6.6×</td></tr>
+      <tr class="danger"><td>totalBlocks</td><td>211,295</td><td>25,093</td><td>8.4×</td></tr>
+      <tr class="success"><td>覆盖率 unique/total</td><td>78%</td><td>100%</td><td>Jinan 全烤也小</td></tr>
+      <tr class="success"><td>drawCalls</td><td>24</td><td>49</td><td>Jinan 更高仍稳</td></tr>
+      <tr class="danger"><td>gapMs</td><td>138.7 ms</td><td>14.1 ms</td><td>10×</td></tr>
+      <tr class="danger"><td>frameMs</td><td>216.6 ms</td><td>49.5 ms</td><td>4.4×</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Jinan drawCalls（49）比 Poland（24）更高，但 gap 只有 1/10——因为 totalBlocks 只有 25k。Poland 脏块 165k、盘子 211k，即使 drawCalls 更低也卡。</p>
+
+  <h2>上传帧全量对比（P50 / P90）</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>场景</th><th>上传帧</th><th>frameMs</th><th>gapMs</th><th>drawCalls</th>
+        <th>uniqueBlocks</th><th>totalBlocks</th><th>覆盖率</th><th>uploadMB</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="danger">
+        <td>Poland 96k</td><td>231</td><td>216.6 / 250.1</td><td>138.7 / 166.6</td><td>24 / 136</td>
+        <td>165k / 228k</td><td>211k</td><td>78%</td><td>26 / 67 MB</td>
+      </tr>
+      <tr class="success">
+        <td>Jinanqiao</td><td>773</td><td>49.5 / 66.2</td><td>14.1 / 31.4</td><td>49 / 71</td>
+        <td>25k / 33k</td><td>25k</td><td>100%</td><td>51 / 62 MB</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>uniqueBlocks 分桶 → 帧成本</h2>
+  <div class="grid-2">
+    <div class="card">
+      <span class="pill bad">Poland</span>
+      <table>
+        <thead><tr><th>桶</th><th>n</th><th>frame P50</th><th>gap P50</th><th>dc</th><th>MB</th></tr></thead>
+        <tbody>
+          <tr><td>&lt;20k</td><td>39</td><td>67.9</td><td>9.7</td><td>3</td><td>0.01</td></tr>
+          <tr><td>20–50k</td><td>8</td><td>266.7</td><td>146.4</td><td>3</td><td>2.0</td></tr>
+          <tr><td>100–150k</td><td>63</td><td>191.7</td><td>124.6</td><td>15</td><td>18.8</td></tr>
+          <tr style="color:var(--danger)"><td>≥150k</td><td>118</td><td>225.0</td><td>141.3</td><td>83</td><td>62.4</td></tr>
+        </tbody>
+      </table>
+      <p class="note">&lt;20k 可玩（~68ms）；≥150k 时 gap≥141ms。</p>
+    </div>
+    <div class="card">
+      <span class="pill good">Jinan</span>
+      <table>
+        <thead><tr><th>桶</th><th>n</th><th>frame P50</th><th>gap P50</th><th>dc</th><th>MB</th></tr></thead>
+        <tbody>
+          <tr><td>&lt;20k</td><td>44</td><td>50.0</td><td>35.9</td><td>74</td><td>0</td></tr>
+          <tr style="color:var(--success)"><td>20–50k</td><td>729</td><td>49.4</td><td>13.6</td><td>49</td><td>52.7</td></tr>
+          <tr><td>≥50k</td><td>0</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+        </tbody>
+      </table>
+      <p class="note">729/773 上传帧落在 20–50k，frame≈49ms。从未出现 ≥50k。</p>
+    </div>
+  </div>
+
+  <h2>控制方向</h2>
+  <table>
+    <thead><tr><th>手段</th><th>压什么</th><th>对标</th></tr></thead>
+    <tbody>
+      <tr><td>摊平换档</td><td>同帧 pending 合并</td><td>Poland uniqueBlocks P90 → &lt;50k</td></tr>
+      <tr><td>资产分块</td><td>totalBlocks 上限</td><td>Jinan 结构 ~25k</td></tr>
+      <tr><td>引擎 Top-K</td><td>每帧 apply 叶数</td><td>viewer 不够时硬限</td></tr>
+      <tr><td>压 drawCalls</td><td>—</td><td>不可行，仅观测</td></tr>
+    </tbody>
+  </table>
+
+  <div class="pill-row">
+    <span class="pill bad">Poland：211k 盘 × 78% 覆盖 → gap 139ms</span>
+    <span class="pill good">Jinan：25k 盘 × 100% 覆盖 → gap 14ms</span>
+  </div>
+
+  <h2>逐帧可视化</h2>
+  <p class="note">
+    完整逐帧折线与分档统计见：
+    <a href="poland-per-frame-drawcall-buffer.html">Poland 逐帧</a> ·
+    <a href="jinanqiao-per-frame-drawcall-buffer.html">Jinan 逐帧</a>。
+    浏览器打开后可用 <kbd>⌘P</kbd> / <kbd>Ctrl+P</kbd> 打印为 PDF。
+  </p>
+</main>
+</body>
+</html>
