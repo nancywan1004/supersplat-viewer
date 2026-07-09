@@ -6,6 +6,7 @@ import {
     persistentTrackNameForType,
     readActivePersistentEffects
 } from '../../../settings-serialize/effects-sync';
+import { getEffectsReadSource } from '../../../view-settings';
 import {
     destroyAllPersistentGsplatScriptsOnEntity,
     destroyPersistentGsplatScriptOnEntity,
@@ -35,8 +36,9 @@ export function runPersistentGsplatEntityLifecycle(input: {
     restartAnimTrack: boolean;
 }): void {
     const { global, gsplatEntity, revealController: rc, restartAnimTrack } = input;
+    const settings = getEffectsReadSource(global);
     (global.app as any).effectsRuntime?.syncPersistentGsplatRegistryFromSettings?.();
-    const persistentEntries = readActivePersistentEffects(global.settings as ExperienceSettings);
+    const persistentEntries = readActivePersistentEffects(settings);
     if (persistentEntries.length === 0) {
         destroyAllPersistentGsplatScriptsOnEntity(gsplatEntity);
         if (rc) {
@@ -98,7 +100,7 @@ export function destroyPersistentSceneEffectByType(input: {
     effectType: string;
 }): void {
     const { global, gsplatEntity, revealController: rc, effectType } = input;
-    const settings = global.settings as ExperienceSettings;
+    const settings = getEffectsReadSource(global);
 
     (global.app as any).effectsRuntime?.syncPersistentGsplatRegistryFromSettings?.();
     destroyPersistentGsplatScriptOnEntity(gsplatEntity, effectType);
@@ -132,7 +134,7 @@ export function mountPersistentSceneEffectByType(input: {
     effectType: string;
 }): void {
     const { global, gsplatEntity, revealController: rc, effectType } = input;
-    const settings = global.settings as ExperienceSettings;
+    const settings = getEffectsReadSource(global);
     const entry = getPersistentTrackEffect(settings, persistentTrackNameForType(effectType), effectType);
     if (!entry || entry.enabled === false) {
         return;
@@ -184,7 +186,7 @@ export function applyPersistentSceneEffectEnableChange(input: {
     enabled: boolean;
 }): void {
     const { global, gsplatEntity, revealController: rc, effectType, enabled } = input;
-    const settings = global.settings as ExperienceSettings;
+    const settings = getEffectsReadSource(global);
     const entry = getPersistentTrackEffect(settings, persistentTrackNameForType(effectType), effectType);
     if (!entry) {
         return;

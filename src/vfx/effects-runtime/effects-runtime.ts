@@ -18,6 +18,7 @@
 import type { Material } from 'playcanvas';
 import type { ExperienceSettings } from '../../settings';
 import type { Global } from '../../types';
+import { getEffectsReadSource } from '../../view-settings';
 import { EffectRegistry } from './effect-registry';
 import { GsplatEffectComposer } from './gsplat-effect-composer';
 import type { GsplatContribution } from './gsplat-contribution';
@@ -94,12 +95,12 @@ export class EffectsRuntime {
      * 应在挂载/卸载 persistent 脚本路径上调用（如 `viewer.syncPersistentRevealGsplat`）；波纹在 `applySceneGsplatFromRegistry` 前也会调用以防漏配。
      */
     syncPersistentGsplatRegistryFromSettings(): void {
-        syncPersistentGsplatRegistryFactories(this._global.settings as ExperienceSettings, this.registry);
+        syncPersistentGsplatRegistryFactories(getEffectsReadSource(this._global), this.registry);
     }
 
     /** 按 `settings.effects.asset` 同步物体特效 Registry 条目。 */
     syncAssetEffectRegistryFromSettings(): void {
-        syncAssetEffectRegistryFactories(this._global.settings as ExperienceSettings, this.registry);
+        syncAssetEffectRegistryFactories(getEffectsReadSource(this._global), this.registry);
     }
 
     /**
