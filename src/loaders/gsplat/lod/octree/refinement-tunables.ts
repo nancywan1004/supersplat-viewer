@@ -21,6 +21,8 @@ export type RefinementTunables = {
         /** skip 连续 N 帧后排空 suspended/queue/无 keep 的 in-flight */
         idleQueueDrainSkipFrames: number;
         idleQueueDrainEnabled: boolean;
+        /** skip/idle 时对无 keep 的已加载 file 调 decRefCount，允许引擎 cooldown 卸载 */
+        idleLoadedReclaimEnabled: boolean;
     };
     settle: {
         postDownloadFrames: number;
@@ -168,7 +170,8 @@ export function buildRefinementTunables(policy: RefinementPolicy): RefinementTun
                 trackedMissFrames: mobile ? 10 : 14,
                 trackedLimit: mobile ? 64 : 128,
                 idleQueueDrainSkipFrames: 30,
-                idleQueueDrainEnabled: true
+                idleQueueDrainEnabled: true,
+                idleLoadedReclaimEnabled: true
             },
             settle: {
                 postDownloadFrames: 36,
@@ -223,7 +226,8 @@ export function buildRefinementTunables(policy: RefinementPolicy): RefinementTun
             trackedMissFrames: mobile ? 8 : 12,
             trackedLimit: mobile ? 96 : 192,
             idleQueueDrainSkipFrames: 30,
-            idleQueueDrainEnabled: true
+            idleQueueDrainEnabled: true,
+            idleLoadedReclaimEnabled: true
         },
         settle: {
             postDownloadFrames: 30,
