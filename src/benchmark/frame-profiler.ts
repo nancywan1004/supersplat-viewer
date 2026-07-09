@@ -3,7 +3,19 @@ import { Quat, Vec3 } from 'playcanvas';
 
 import type { OctreeRefinementTickMetrics, RefinementFrameProfile } from '../loaders/gsplat/lod/octree/refinement-controller';
 import { readLastDeferredInstUpdateMs, readRefinementFrameProfile } from '../loaders/gsplat/lod/octree/refinement-controller';
-import { readGsplatsM, readJsHeapUsedMB, readRefinementTickMetrics, readVramTexMB } from './benchmark-refinement';
+import {
+    analyzeBufferUploadProfile,
+    logBufferUploadProfileTable,
+    type BufferUploadProfileReport
+} from './buffer-upload-profile-table';
+import {
+    readGsplatBufferUploadMetrics,
+    readGsplatsM,
+    readJsHeapUsedMB,
+    readRefinementTickMetrics,
+    readVramTexMB,
+    type GsplatBufferUploadMetrics
+} from './benchmark-refinement';
 import type { Global } from '../types';
 
 const DEFAULT_MAX_SAMPLES = 7200;
@@ -112,6 +124,11 @@ export type FrameProfileSample = {
     drawCalls: number;
     jsHeapMb: number | null;
     vramTexMb: number | null;
+    /**
+     * Work buffer 上传量（引擎 block 计数 + MB 估算）。
+     * `uploadedBlocks`/`totalBlocks` 为真实字段；`uploadMbEst` 按 40B/splat 估算。
+     */
+    bufferUpload: GsplatBufferUploadMetrics;
     refinement: FrameProfileRefinementSample;
     camera: FrameProfileCameraSample | null;
 };
@@ -134,6 +151,10 @@ export type FrameProfilerApi = {
     applyCameraDelta: (delta: FrameProfileCameraDelta) => boolean;
     copyJson: () => Promise<boolean>;
     downloadJson: (filename?: string) => void;
+    /** 生成 Work Buffer / 上传量 Markdown 统计表（对象 + markdown 字符串） */
+    summarizeBufferUpload: () => BufferUploadProfileReport;
+    /** 下载 §buffer-upload-table Markdown */
+    downloadBufferUploadTable: (filename?: string) => BufferUploadProfileReport;
 };
 
 function roundMs(value: number): number {
@@ -339,6 +360,7 @@ function buildSample(
     const accountedMs =
         cpu.updateMs + cpu.renderMs + statsSnapshot.gpu.totalMs + (tick?.timingsMs.total ?? 0) + deferredInstUpdateMs;
     const gapMs = roundMs(Math.max(0, frameMs - accountedMs));
+    const bufferUpload = readGsplatBufferUploadMetrics(app);
 
     return {
         index,
@@ -352,6 +374,7 @@ function buildSample(
         drawCalls: statsSnapshot.drawCalls?.total ?? 0,
         jsHeapMb: readJsHeapUsedMB(),
         vramTexMb: readVramTexMB(app),
+        bufferUpload,
         refinement: {
             tick,
             deferredInstUpdateMs,
@@ -473,6 +496,15 @@ export function initFrameProfiler(global: Global, options?: { maxSamples?: numbe
             const elapsed = startedAtMs !== null ? performance.now() - startedAtMs : 0;
             startedAtMs = null;
             console.info('[frame-profiler] stopped · %d samples · %.0f ms captured', samples.length, elapsed);
+            if (samples.length > 0) {
+                logBufferUploadProfileTable(
+                    analyzeBufferUploadProfile(samples, {
+                        sampleCount: samples.length,
+                        hasBufferUpload: samples.some((s) => s.bufferUpload),
+                        exportedAt: new Date().toISOString()
+                    })
+                );
+            }
             return samples.slice();
         },
         clear() {
@@ -533,6 +565,30 @@ export function initFrameProfiler(global: Global, options?: { maxSamples?: numbe
             anchor.download = filename;
             anchor.click();
             URL.revokeObjectURL(url);
+        },
+        summarizeBufferUpload() {
+            return analyzeBufferUploadProfile(samples, {
+                sampleCount: samples.length,
+                hasBufferUpload: samples.some((s) => s.bufferUpload),
+                exportedAt: new Date().toISOString()
+            });
+        },
+        downloadBufferUploadTable(filename?: string) {
+            const report = analyzeBufferUploadProfile(samples, {
+                sampleCount: samples.length,
+                hasBufferUpload: samples.some((s) => s.bufferUpload),
+                exportedAt: new Date().toISOString(),
+                scene: typeof location !== 'undefined' ? location.href : undefined
+            });
+            const name = filename ?? `buffer-upload-table-${Date.now()}.md`;
+            const blob = new Blob([report.markdown], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = name;
+            anchor.click();
+            URL.revokeObjectURL(url);
+            return report;
         }
     };
 
@@ -540,7 +596,7 @@ export function initFrameProfiler(global: Global, options?: { maxSamples?: numbe
     target.__frameProfiler = api;
 
     console.info(
-        '[frame-profiler] ready · __frameProfiler.start() / stop() / applyCameraDelta() / copyJson()'
+        '[frame-profiler] ready · start/stop · applyCameraDelta · copyJson · downloadBufferUploadTable()'
     );
 
     if (options?.autoStart) {

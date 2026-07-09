@@ -65,6 +65,336 @@ export function readDrawCalls(app: AppBase): number | null {
     return Number.isFinite(n) ? (n as number) : null;
 }
 
+/**
+ * Work buffer 默认格式（GSplatFormat.createDefaultFormat）：
+ * dataColor RGBA16F(8) + dataCenter RGBA32F(16) + dataScale RGBA16F(8) + dataRotation RGBA16F(8) = 40 B/splat。
+ * 用于把「上传 slot 数」换成估算 MB（非引擎原生字节计数）。
+ */
+export const WORK_BUFFER_BYTES_PER_SPLAT_DEFAULT = 40;
+
+export type GsplatBufferUploadMetrics = {
+    /**
+     * 引擎 `bufferCopyUploaded`：本帧各次 bake 累加的「上传块次数」。
+     * 同帧 rebuild 多次时可能 **> totalBlocks**（copyPct>100 的来源）。
+     */
+    uploadedBlocks: number;
+    /** 引擎 `bufferCopyTotal`：当时 allocationMap.size（唯一 alloc 块数） */
+    totalBlocks: number;
+    /** uploaded/total×100；可 >100（同帧多次 bake） */
+    copyPct: number;
+    /** min(uploaded,total)：去重后的块覆盖规模 */
+    uniqueUploadBlocksEst: number;
+    /** 同帧 bake 次数粗估 ≈ max(1, round(uploaded/total)) */
+    bakePassesEst: number;
+    /** 当前 allocationMap 全部 slot 数（active work buffer splat 容量） */
+    activeSplatSlots: number;
+    /**
+     * 本帧估计写入的 splat-slot 次数：
+     * slots ≈ activeSplatSlots × (uploaded/total)
+     * （uploaded>total 时表示多趟全量/近似全量，可 > activeSplatSlots）
+     */
+    uploadSplatSlotsEst: number;
+    /** uploadSplatSlotsEst × 40B，单位 MB */
+    uploadMbEst: number;
+    /** 估算口径 */
+    uploadEstMode: 'full_rebuild' | 'proportional' | 'none';
+    /**
+     * 本帧是否视作 fullRebuild / 近全表上传：
+     * - engine：worldState.fullRebuild 或 workBufferRebuildRequired
+     * - inferred：unique 覆盖 ≥95% total，或 uploaded>total
+     */
+    fullRebuild: boolean;
+    fullRebuildSource: 'engine' | 'inferred' | 'none';
+    /** BlockAllocator.capacity（splat slots）；可随 grow 上涨 */
+    allocatorCapacity: number;
+    /** BlockAllocator.usedSize */
+    allocatorUsed: number;
+    /** BlockAllocator.freeSize */
+    allocatorFree: number;
+    /** BlockAllocator.fragmentation∈[0,1] */
+    fragmentation: number;
+    /** work buffer 纹理边长 ≈ ceil(sqrt(capacity)) */
+    textureSize: number;
+    /** 设备 maxTextureSize；硬上限 capacity ≈ maxTextureSize² */
+    maxTextureSize: number;
+    /** 硬上限 slots = maxTextureSize²（纹理方形布局） */
+    hardCapSlots: number;
+    /** scene.gsplat.splatBudget；>0 时为软上限，亦决定初始 capacity≈budget×1.15 */
+    splatBudget: number;
+};
+
+type MemBlockLike = { size?: number };
+type AllocatorLike = {
+    capacity?: number;
+    usedSize?: number;
+    freeSize?: number;
+    fragmentation?: number;
+};
+type WorldStateLike = { fullRebuild?: boolean };
+type GsplatWorldLike = {
+    bufferCopyUploaded?: number;
+    bufferCopyTotal?: number;
+    _allocationMap?: Map<number, MemBlockLike>;
+    _allocator?: AllocatorLike;
+    _worldStates?: Map<number, WorldStateLike>;
+    _lastWorldStateVersion?: number;
+    _currentVersion?: number;
+    _workBufferRebuildRequired?: boolean;
+};
+type GsplatManagerLike = {
+    bufferCopyUploaded?: number;
+    bufferCopyTotal?: number;
+    world?: GsplatWorldLike;
+};
+type GsplatDirectorLike = {
+    camerasMap: Map<unknown, {
+        layersMap: Map<unknown, {
+            gsplatManager?: GsplatManagerLike | null;
+            gsplatManagerShadow?: GsplatManagerLike | null;
+        }>;
+    }>;
+};
+
+function getGsplatDirector(app: AppBase): GsplatDirectorLike | null {
+    return (app.renderer as unknown as { gsplatDirector?: GsplatDirectorLike }).gsplatDirector ?? null;
+}
+
+function sumAllocationSlots(map: Map<number, MemBlockLike> | undefined): number {
+    if (!map?.size) {
+        return 0;
+    }
+    let sum = 0;
+    for (const block of map.values()) {
+        const size = block?.size;
+        if (Number.isFinite(size) && (size as number) > 0) {
+            sum += size as number;
+        }
+    }
+    return sum;
+}
+
+function readWorldFullRebuild(world: GsplatWorldLike): boolean | null {
+    const states = world._worldStates;
+    if (!states?.size) {
+        return null;
+    }
+    const version = world._lastWorldStateVersion ?? world._currentVersion;
+    if (version !== undefined) {
+        const state = states.get(version);
+        if (state && typeof state.fullRebuild === 'boolean') {
+            return state.fullRebuild;
+        }
+    }
+    let any = false;
+    let saw = false;
+    for (const state of states.values()) {
+        if (typeof state.fullRebuild === 'boolean') {
+            saw = true;
+            any = any || state.fullRebuild;
+        }
+    }
+    return saw ? any : null;
+}
+
+function emptyBufferUploadMetrics(app?: AppBase): GsplatBufferUploadMetrics {
+    const maxTex =
+        (app?.graphicsDevice as { maxTextureSize?: number } | undefined)?.maxTextureSize ?? 0;
+    const splatBudget =
+        (app?.scene?.gsplat as { splatBudget?: number } | undefined)?.splatBudget ?? 0;
+    return {
+        uploadedBlocks: 0,
+        totalBlocks: 0,
+        copyPct: 0,
+        uniqueUploadBlocksEst: 0,
+        bakePassesEst: 0,
+        activeSplatSlots: 0,
+        uploadSplatSlotsEst: 0,
+        uploadMbEst: 0,
+        uploadEstMode: 'none',
+        fullRebuild: false,
+        fullRebuildSource: 'none',
+        allocatorCapacity: 0,
+        allocatorUsed: 0,
+        allocatorFree: 0,
+        fragmentation: 0,
+        textureSize: 0,
+        maxTextureSize: maxTex,
+        hardCapSlots: maxTex > 0 ? maxTex * maxTex : 0,
+        splatBudget: Number.isFinite(splatBudget) ? splatBudget : 0
+    };
+}
+
+/**
+ * 读取引擎真实的 work-buffer block 上传计数、allocator 容量与 fullRebuild 信号。
+ * 须在 manager.update / frameend 之后采样（与 frame-profiler 一致）。
+ */
+export function readGsplatBufferUploadMetrics(app: AppBase): GsplatBufferUploadMetrics {
+    const empty = emptyBufferUploadMetrics(app);
+    const director = getGsplatDirector(app);
+    if (!director) {
+        const pct = (app.stats as { frame?: { gsplatBufferCopy?: number } })?.frame?.gsplatBufferCopy;
+        if (Number.isFinite(pct)) {
+            return { ...empty, copyPct: Math.round((pct as number) * 10) / 10 };
+        }
+        return empty;
+    }
+
+    let uploadedBlocks = 0;
+    let totalBlocks = 0;
+    let activeSplatSlots = 0;
+    let allocatorCapacity = 0;
+    let allocatorUsed = 0;
+    let allocatorFree = 0;
+    let fragmentation = 0;
+    let engineFullRebuild: boolean | null = null;
+    const seenWorlds = new Set<GsplatWorldLike>();
+
+    for (const cameraData of director.camerasMap.values()) {
+        for (const layerData of cameraData.layersMap.values()) {
+            for (const manager of [layerData.gsplatManager, layerData.gsplatManagerShadow]) {
+                if (!manager) {
+                    continue;
+                }
+                const world = manager.world;
+                // 多 camera/layer 会挂同一 world：block 计数只累加一次，避免放大上百倍
+                if (world) {
+                    if (seenWorlds.has(world)) {
+                        continue;
+                    }
+                    seenWorlds.add(world);
+                    uploadedBlocks += world.bufferCopyUploaded ?? manager.bufferCopyUploaded ?? 0;
+                    totalBlocks += world.bufferCopyTotal ?? manager.bufferCopyTotal ?? 0;
+                    activeSplatSlots += sumAllocationSlots(world._allocationMap);
+                    const alloc = world._allocator;
+                    if (alloc) {
+                        allocatorCapacity += alloc.capacity ?? 0;
+                        allocatorUsed += alloc.usedSize ?? 0;
+                        allocatorFree += alloc.freeSize ?? 0;
+                        fragmentation = Math.max(fragmentation, alloc.fragmentation ?? 0);
+                    }
+                    const fr = readWorldFullRebuild(world);
+                    if (fr !== null) {
+                        engineFullRebuild = engineFullRebuild === null ? fr : engineFullRebuild || fr;
+                    }
+                    if (world._workBufferRebuildRequired) {
+                        engineFullRebuild = true;
+                    }
+                } else {
+                    uploadedBlocks += manager.bufferCopyUploaded ?? 0;
+                    totalBlocks += manager.bufferCopyTotal ?? 0;
+                }
+            }
+        }
+    }
+
+    const copyPct = totalBlocks > 0 ? (uploadedBlocks / totalBlocks) * 100 : 0;
+    const uniqueUploadBlocksEst =
+        totalBlocks > 0 ? Math.min(uploadedBlocks, totalBlocks) : uploadedBlocks;
+    const bakePassesEst =
+        totalBlocks > 0 && uploadedBlocks > 0
+            ? Math.max(1, Math.round(uploadedBlocks / totalBlocks))
+            : uploadedBlocks > 0
+                ? 1
+                : 0;
+    const coverage =
+        totalBlocks > 0 && uploadedBlocks > 0 ? uniqueUploadBlocksEst / totalBlocks : 0;
+    const nearlyAllBlocks = coverage >= 0.95 || uploadedBlocks > totalBlocks;
+
+    let uploadSplatSlotsEst = 0;
+    let uploadEstMode: GsplatBufferUploadMetrics['uploadEstMode'] = 'none';
+    if (uploadedBlocks > 0 && activeSplatSlots > 0 && totalBlocks > 0) {
+        // uploaded/total 可 >1：同帧多趟 bake，按「写出次数」估 slot 流量
+        uploadSplatSlotsEst = Math.round(activeSplatSlots * (uploadedBlocks / totalBlocks));
+        uploadEstMode = nearlyAllBlocks ? 'full_rebuild' : 'proportional';
+    } else if (uploadedBlocks > 0 && activeSplatSlots > 0) {
+        uploadSplatSlotsEst = activeSplatSlots;
+        uploadEstMode = 'full_rebuild';
+    }
+
+    let fullRebuild = false;
+    let fullRebuildSource: GsplatBufferUploadMetrics['fullRebuildSource'] = 'none';
+    if (engineFullRebuild === true) {
+        fullRebuild = true;
+        fullRebuildSource = 'engine';
+        if (uploadEstMode === 'none' && activeSplatSlots > 0) {
+            uploadEstMode = 'full_rebuild';
+            uploadSplatSlotsEst = activeSplatSlots;
+        }
+    } else if (nearlyAllBlocks && uploadedBlocks >= 1) {
+        fullRebuild = true;
+        fullRebuildSource = 'inferred';
+    } else if (engineFullRebuild === false) {
+        fullRebuild = false;
+        fullRebuildSource = 'engine';
+    }
+
+    const uploadMbEst =
+        Math.round(((uploadSplatSlotsEst * WORK_BUFFER_BYTES_PER_SPLAT_DEFAULT) / (1024 * 1024)) * 100) / 100;
+    const textureSize = allocatorCapacity > 0 ? Math.ceil(Math.sqrt(allocatorCapacity)) : 0;
+
+    return {
+        uploadedBlocks,
+        totalBlocks,
+        copyPct: Math.round(copyPct * 10) / 10,
+        uniqueUploadBlocksEst,
+        bakePassesEst,
+        activeSplatSlots,
+        uploadSplatSlotsEst,
+        uploadMbEst,
+        uploadEstMode,
+        fullRebuild,
+        fullRebuildSource,
+        allocatorCapacity,
+        allocatorUsed,
+        allocatorFree,
+        fragmentation: Math.round(fragmentation * 1000) / 1000,
+        textureSize,
+        maxTextureSize: empty.maxTextureSize,
+        hardCapSlots: empty.hardCapSlots,
+        splatBudget: empty.splatBudget
+    };
+}
+
+/** HUD / 会话累计：在刷新循环里喂每帧 metrics */
+export type BufferUploadSessionStats = {
+    frames: number;
+    uploadFrames: number;
+    fullRebuildFrames: number;
+    peakUploadMbEst: number;
+    lastUploadMbEst: number;
+    lastCopyPct: number;
+    lastFullRebuild: boolean;
+};
+
+export function createBufferUploadSessionStats(): BufferUploadSessionStats {
+    return {
+        frames: 0,
+        uploadFrames: 0,
+        fullRebuildFrames: 0,
+        peakUploadMbEst: 0,
+        lastUploadMbEst: 0,
+        lastCopyPct: 0,
+        lastFullRebuild: false
+    };
+}
+
+export function accumulateBufferUploadSession(
+    stats: BufferUploadSessionStats,
+    m: GsplatBufferUploadMetrics
+): void {
+    stats.frames += 1;
+    stats.lastCopyPct = m.copyPct;
+    stats.lastUploadMbEst = m.uploadMbEst;
+    stats.lastFullRebuild = m.fullRebuild;
+    if (m.uploadedBlocks > 0 || m.uploadMbEst > 0) {
+        stats.uploadFrames += 1;
+        stats.peakUploadMbEst = Math.max(stats.peakUploadMbEst, m.uploadMbEst);
+    }
+    if (m.fullRebuild) {
+        stats.fullRebuildFrames += 1;
+    }
+}
+
 export function readJsHeapUsedMB(): number | null {
     const mem = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
     const n = mem?.usedJSHeapSize;

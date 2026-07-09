@@ -3,8 +3,11 @@ import { Vec3 } from 'playcanvas';
 import type { Global } from '../types';
 import { Camera } from '../cameras/camera';
 import {
+    accumulateBufferUploadSession,
+    createBufferUploadSessionStats,
     percentile,
     readDrawCalls,
+    readGsplatBufferUploadMetrics,
     readGsplatsM,
     readJsHeapUsedMB,
     readVramTexMB,
@@ -269,6 +272,9 @@ export function initBenchmarkHud(global: Global): () => void {
     });
 
     const fpsSamples: number[] = [];
+    const bufferUploadSession = createBufferUploadSessionStats();
+    /** 最近一帧 bufferUpload（frameend 采样，避免 250ms HUD 漏计 fullRebuild） */
+    let lastBufferUpload = readGsplatBufferUploadMetrics(app);
     let phase = config.benchmark ? 'loading' : 'idle';
     let currentKeyframe = '—';
     let refineTick: RefinementTickPayload | null = null;
@@ -276,6 +282,12 @@ export function initBenchmarkHud(global: Global): () => void {
     let cachedRowsHtml = '';
     let cachedRefinementHtml = '';
     let cachedBlurHtml = '';
+
+    const onFrameEndBufferSample = () => {
+        lastBufferUpload = readGsplatBufferUploadMetrics(app);
+        accumulateBufferUploadSession(bufferUploadSession, lastBufferUpload);
+    };
+    app.on('frameend', onFrameEndBufferSample);
 
     const setPhase = (next: string, keyframe?: string) => {
         phase = next;
@@ -377,6 +389,7 @@ export function initBenchmarkHud(global: Global): () => void {
         const fpsP95 = percentile(fpsSamples, 0.95);
         const gsplatsM = readGsplatsM(app);
         const drawCalls = readDrawCalls(app);
+        const bufferUpload = lastBufferUpload;
         const vramMb = readVramTexMB(app);
         const mem = readMemoryInfo();
         const refine = readRefinementLight(global);
@@ -408,6 +421,34 @@ export function initBenchmarkHud(global: Global): () => void {
         const gsplat = app.scene.gsplat as { currentRenderer?: unknown; renderer?: unknown; splatBudget?: unknown };
         lines.push(row('Renderer', formatGsplatRenderer(gsplat.currentRenderer ?? gsplat.renderer)));
         lines.push(row('SplatBudget', formatSplatBudget(gsplat.splatBudget)));
+
+        const capM = bufferUpload.allocatorCapacity / 1e6;
+        const usedM = bufferUpload.allocatorUsed / 1e6;
+        const hardM = bufferUpload.hardCapSlots / 1e6;
+        const budgetM = bufferUpload.splatBudget > 0 ? bufferUpload.splatBudget / 1e6 : 0;
+        lines.push(row(
+            'WB Cap',
+            bufferUpload.allocatorCapacity > 0
+                ? `${usedM.toFixed(2)}/${capM.toFixed(2)}M · hard ${hardM > 0 ? hardM.toFixed(0) : '—'}M`
+                : '—'
+        ));
+        lines.push(row(
+            'WB Frag',
+            bufferUpload.allocatorCapacity > 0
+                ? `${(bufferUpload.fragmentation * 100).toFixed(0)}% · tex ${bufferUpload.textureSize}`
+                : '—'
+        ));
+        const uploadLabel = bufferUpload.uploadMbEst > 0
+            ? `${bufferUpload.uploadMbEst.toFixed(1)}MB · ${bufferUpload.uniqueUploadBlocksEst}/${bufferUpload.totalBlocks}blk` +
+              (bufferUpload.bakePassesEst > 1 ? ` · ×${bufferUpload.bakePassesEst}` : '')
+            : `0 · ${bufferUpload.copyPct.toFixed(0)}%`;
+        lines.push(row('WB Upload', `${uploadLabel}${bufferUpload.fullRebuild ? ' · FULL' : ''}`));
+        lines.push(row(
+            'FULL rebuild',
+            `${bufferUploadSession.fullRebuildFrames}/${bufferUploadSession.frames}` +
+            ` · peak ${bufferUploadSession.peakUploadMbEst.toFixed(1)}MB` +
+            (budgetM > 0 ? ` · bud ${budgetM.toFixed(1)}M` : '')
+        ));
 
         if (refine) {
             const activityHint = refine.activityActive ? ' · dl' : '';
@@ -464,6 +505,7 @@ export function initBenchmarkHud(global: Global): () => void {
 
     return () => {
         window.clearInterval(hudTimer);
+        app.off('frameend', onFrameEndBufferSample);
         if (copyToastTimer) {
             clearTimeout(copyToastTimer);
         }
