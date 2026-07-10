@@ -72,7 +72,6 @@ import { bootstrapOctreeLod, type OctreeLodBootstrapHandle } from './loaders/gsp
 import { bootstrapSogUnified } from './loaders/gsplat/sog/bootstrap';
 import type { OctreeRefinementController } from './loaders/gsplat/lod/octree/refinement-controller';
 import type { NativeStreamingObserver } from './loaders/gsplat/lod/octree/native-streaming-observer';
-import { setOctreeBenchmarkLod } from './benchmark/octree-benchmark-hooks';
 import { BloomController } from './vfx/bloom';
 import { NightMode } from './vfx/lighting/night-mode';
 import {
@@ -1134,9 +1133,8 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     forceRender: forceRenderBinding,
                     ensureShadowPipelineReady,
                     revealController: this.revealController,
-                    onRefinementController: (controller, octree) => {
+                    onRefinementController: (controller) => {
                         this.octreeRefinementController = controller;
-                        setOctreeBenchmarkLod(octree);
                     },
                     onNativeStreamingObserver: (observer) => {
                         this.nativeStreamingObserver = observer;

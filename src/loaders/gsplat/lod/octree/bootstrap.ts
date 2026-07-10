@@ -67,7 +67,7 @@ export type OctreeLodBootstrapOptions = {
     forceRender: ForceRenderBinding;
     ensureShadowPipelineReady: () => void;
     revealController?: RevealController | null;
-    onRefinementController: (controller: OctreeRefinementController | null, octree?: OctreeLike | null) => void;
+    onRefinementController: (controller: OctreeRefinementController | null) => void;
     onNativeStreamingObserver?: (observer: NativeStreamingObserver | null) => void;
 };
 
@@ -408,15 +408,15 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
 
         refinementController?.destroy();
         refinementController = null;
-        onRefinementController(null, null);
 
         if (isNativeLod) {
+            onRefinementController(null);
             return;
         }
 
         refinementController = createOctreeRefinementController(global, gsplatEntity, octreeResource);
         refinementController?.start();
-        onRefinementController(refinementController, octreeResource?.octree ?? null);
+        onRefinementController(refinementController);
     };
 
     const pollStreamingBootstrapComplete = () => {
@@ -745,7 +745,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
                 events.off('performanceMode:changed', perfModeHandler);
             }
             refinementController?.destroy();
-            onRefinementController(null, null);
+            onRefinementController(null);
             onNativeStreamingObserver?.(null);
         }
     };

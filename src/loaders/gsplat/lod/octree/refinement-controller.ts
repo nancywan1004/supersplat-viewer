@@ -68,8 +68,6 @@ type OctreeLike = {
     ensureFileResource: (fileIndex: number) => void;
     getFileResource: (fileIndex: number) => unknown;
     incRefCount?: (fileIndex: number) => void;
-    decRefCount?: (fileIndex: number, cooldownTicks?: number) => void;
-    unloadResource?: (fileIndex: number) => void;
     assetLoader?: OctreeAssetLoaderLike | null;
     __refinementEnsurePatched?: boolean;
     __originalEnsureFileResource?: (fileIndex: number) => void;
@@ -106,7 +104,6 @@ type GsplatSceneLike = {
     lodUnderfillLimit: number;
     splatBudget: number;
     dirty: boolean;
-    cooldownTicks?: number;
 };
 
 type PrioritizedFile = {
@@ -2012,246 +2009,57 @@ function buildPriorityFiles(
     };
 }
 
-/** 与引擎 `GSplatOctree` / `scene.gsplat.cooldownTicks` 默认一致 */
-const OCTREE_FILE_COOLDOWN_TICKS = 100;
-
-function decRefOctreeFile(
-    octree: OctreeLike,
-    fileIndex: number,
-    cooldownTicks = OCTREE_FILE_COOLDOWN_TICKS
-): void {
-    octree.decRefCount?.(fileIndex, cooldownTicks);
-}
-
-function releaseAllPinned(
-    octree: OctreeLike,
-    pinnedFiles: Set<number>,
-    decRefScheduledFiles?: Set<number>,
-    cooldownTicks = OCTREE_FILE_COOLDOWN_TICKS
-): number {
-    if (!pinnedFiles.size) {
-        return 0;
-    }
-    const decRef = octree.decRefCount;
-    if (!decRef) {
-        pinnedFiles.clear();
-        return 0;
-    }
-    let released = 0;
-    for (const fi of pinnedFiles) {
-        decRefOctreeFile(octree, fi, cooldownTicks);
-        decRefScheduledFiles?.add(fi);
-        released++;
-    }
-    pinnedFiles.clear();
-    return released;
-}
-
-function isFileUrlInLoaderPipeline(loader: OctreeAssetLoaderLike, url: string): boolean {
-    return (
-        !!loader._loadQueue?.includes(url) ||
-        !!loader._currentlyLoading?.has(url) ||
-        !!loader.__refinementSuspendedQueue?.includes(url)
-    );
-}
-
-function collectLoaderPipelineFileIndices(
-    octree: OctreeLike,
-    loader: OctreeAssetLoaderLike | null | undefined
-): number[] {
-    if (!loader) {
-        return [];
-    }
-    const urlToFi = octree.__refinementUrlToFileIndex ?? getOctreeUrlToFileIndex(octree);
-    const indices: number[] = [];
-    const seen = new Set<number>();
-    const addUrl = (url: string) => {
-        const fi = urlToFi.get(url);
-        if (fi === undefined || seen.has(fi)) {
-            return;
-        }
-        seen.add(fi);
-        indices.push(fi);
-    };
-    const inFlight = loader._currentlyLoading;
-    if (inFlight) {
-        for (const url of inFlight) {
-            addUrl(url);
-        }
-    }
-    const queue = loader._loadQueue;
-    if (queue) {
-        for (let i = 0; i < queue.length; i++) {
-            addUrl(queue[i]);
-        }
-    }
-    const suspended = loader.__refinementSuspendedQueue;
-    if (suspended) {
-        for (let i = 0; i < suspended.length; i++) {
-            addUrl(suspended[i]);
-        }
-    }
-    return indices;
-}
-
-function collectDesiredPinnedFiles(
+function retainCriticalDownloadFiles(
     octree: OctreeLike,
     loader: OctreeAssetLoaderLike | null | undefined,
     criticalBatch: PrioritizedFile[],
-    foregroundBatch: PrioritizedFile[],
-    pipelineFileIndices: number[],
-    boostActive: boolean,
-    pinLimit: number
-): Set<number> {
-    const desired = new Set<number>();
+    pinnedFiles: Set<number>,
+    pinLimit = T.loader.pinLimit
+): void {
+    if (!octree.incRefCount) {
+        return;
+    }
     const queue = loader?._loadQueue;
     const inFlight = loader?._currentlyLoading;
-
-    const tryAddPipelineFile = (fi: number, forcePipeline = false) => {
-        if (desired.size >= pinLimit || fi < 0) {
-            return;
+    for (let i = 0; i < criticalBatch.length; i++) {
+        if (pinnedFiles.size >= pinLimit) {
+            break;
         }
-        const url = octree.files[fi]?.url;
-        const isLoaded = !!octree.getFileResource(fi);
-        const isQueuedOrLoading =
-            forcePipeline ||
-            (!!url &&
-                (!!queue?.includes(url) ||
-                    !!inFlight?.has(url) ||
-                    (!!loader && isFileUrlInLoaderPipeline(loader, url))));
-        if (isLoaded || isQueuedOrLoading) {
-            desired.add(fi);
-        }
-    };
-
-    for (let i = 0; i < criticalBatch.length && desired.size < pinLimit; i++) {
-        tryAddPipelineFile(criticalBatch[i].fileIndex);
-    }
-
-    for (let i = 0; i < pipelineFileIndices.length && desired.size < pinLimit; i++) {
-        tryAddPipelineFile(pipelineFileIndices[i]);
-    }
-
-    const loaderPipeline = collectLoaderPipelineFileIndices(octree, loader);
-    for (let i = 0; i < loaderPipeline.length && desired.size < pinLimit; i++) {
-        tryAddPipelineFile(loaderPipeline[i], true);
-    }
-
-    if (boostActive) {
-        for (let i = 0; i < foregroundBatch.length && desired.size < pinLimit; i++) {
-            const fi = foregroundBatch[i].fileIndex;
-            if (octree.getFileResource(fi)) {
-                desired.add(fi);
-            }
-        }
-    }
-
-    return desired;
-}
-
-function syncPinnedFiles(
-    octree: OctreeLike,
-    pinnedFiles: Set<number>,
-    desired: Set<number>,
-    pinLimit = T.loader.pinLimit,
-    decRefScheduledFiles?: Set<number>,
-    cooldownTicks = OCTREE_FILE_COOLDOWN_TICKS
-): { released: number; added: number } {
-    let released = 0;
-    let added = 0;
-    const hasIncRef = typeof octree.incRefCount === 'function';
-    const hasDecRef = typeof octree.decRefCount === 'function';
-
-    if (hasDecRef) {
-        for (const fi of [...pinnedFiles]) {
-            if (!desired.has(fi)) {
-                decRefOctreeFile(octree, fi, cooldownTicks);
-                decRefScheduledFiles?.add(fi);
-                pinnedFiles.delete(fi);
-                released++;
-            }
-        }
-    } else if (!hasIncRef) {
-        pinnedFiles.clear();
-        return { released: 0, added: 0 };
-    }
-
-    if (hasIncRef) {
-        for (const fi of desired) {
-            if (pinnedFiles.has(fi)) {
-                continue;
-            }
-            if (pinnedFiles.size >= pinLimit) {
-                break;
-            }
-            octree.incRefCount!(fi);
-            decRefScheduledFiles?.delete(fi);
-            pinnedFiles.add(fi);
-            added++;
-        }
-    }
-
-    return { released, added };
-}
-
-/**
- * skip/idle：对已加载、无 instance 绑定、无 pin、不在下载管线中的 file
- * 建立一次临时 retain 后立即释放，让引擎 cooldown 走 C 类 unloadResource。
- *
- * @param octree - Octree resource owner.
- * @param loader - Asset loader carrying queued/in-flight URLs.
- * @param instances - Current octree render instances.
- * @param pinnedFiles - Files retained by refinement prefetch.
- * @param decRefScheduledFiles - Files already released by this controller and waiting for cooldown.
- * @param priorityUrls - URLs still considered foreground/critical.
- * @param cooldownTicks - Engine unload cooldown.
- * @returns Number of newly scheduled idle reclaims.
- */
-function reclaimIdleLoadedFiles(
-    octree: OctreeLike,
-    loader: OctreeAssetLoaderLike | null | undefined,
-    instances: OctreeInstanceLike[],
-    pinnedFiles: Set<number>,
-    decRefScheduledFiles: Set<number>,
-    priorityUrls: string[],
-    cooldownTicks = OCTREE_FILE_COOLDOWN_TICKS
-): number {
-    if (!T.loader.idleLoadedReclaimEnabled || !octree.incRefCount || !octree.decRefCount) {
-        return 0;
-    }
-
-    const prioritySet = new Set(priorityUrls);
-    let reclaimed = 0;
-    const fileCount = octree.files.length;
-    for (let fi = 0; fi < fileCount; fi++) {
-        if (!octree.getFileResource(fi)) {
-            decRefScheduledFiles.delete(fi);
-            continue;
-        }
-        if (decRefScheduledFiles.has(fi)) {
-            continue;
-        }
+        const fi = criticalBatch[i].fileIndex;
         if (pinnedFiles.has(fi)) {
             continue;
         }
-        if (isFileBoundToOctreeInstance(instances, fi)) {
+        const url = octree.files[fi]?.url;
+        const isLoaded = !!octree.getFileResource(fi);
+        const isQueuedOrLoading = !!url && (!!queue?.includes(url) || !!inFlight?.has(url));
+        if (!isLoaded && !isQueuedOrLoading) {
             continue;
         }
-        const url = octree.files[fi]?.url;
-        if (url) {
-            if (prioritySet.has(url)) {
-                continue;
-            }
-            if (loader && isFileUrlInLoaderPipeline(loader, url)) {
-                continue;
-            }
+        octree.incRefCount(fi);
+        pinnedFiles.add(fi);
+    }
+}
+
+function pinLoadedForegroundFiles(
+    octree: OctreeLike,
+    foregroundBatch: PrioritizedFile[],
+    pinnedFiles: Set<number>,
+    pinLimit = T.loader.pinLimit
+): void {
+    if (!octree.incRefCount) {
+        return;
+    }
+    for (let i = 0; i < foregroundBatch.length; i++) {
+        if (pinnedFiles.size >= pinLimit) {
+            break;
+        }
+        const fi = foregroundBatch[i].fileIndex;
+        if (pinnedFiles.has(fi) || !octree.getFileResource(fi)) {
+            continue;
         }
         octree.incRefCount(fi);
-        octree.decRefCount(fi, cooldownTicks);
-        decRefScheduledFiles.add(fi);
-        reclaimed++;
+        pinnedFiles.add(fi);
     }
-    return reclaimed;
 }
 
 export type OctreeRefinementNotifyOptions = {
@@ -2298,8 +2106,6 @@ export type OctreeRefinementTickMetrics = {
     staleInFlight: number;
     suspended: number;
     idleQueueDrained: number;
-    idleLoadedReclaimed: number;
-    pinnedReleased: number;
     priorityDownloadsActive: boolean;
     visibleSplatsCurrentM: number;
     visibleSplatsTargetM: number;
@@ -2336,7 +2142,6 @@ export function createOctreeRefinementController(
 
     const { app, camera: cameraEntity, events } = global;
     const gsplatScene = app.scene.gsplat as GsplatSceneLike;
-    const fileCooldownTicks = gsplatScene.cooldownTicks ?? OCTREE_FILE_COOLDOWN_TICKS;
     const scene: OctreeStreamingScene = { app, octree, gsplatEntity, cameraEntity };
     const evalCtx: RefinementEvaluateContext = {
         scene,
@@ -2364,7 +2169,6 @@ export function createOctreeRefinementController(
     const prefetch = {
         tracked: new Map<number, TrackedMissingFile>(),
         pinned: new Set<number>(),
-        decRefScheduled: new Set<number>(),
         lastUrls: [] as string[]
     };
     const settle = {
@@ -2388,7 +2192,6 @@ export function createOctreeRefinementController(
     let lastScanMode: TraversalScanMode = 'full';
     let consecutiveIdleFrames = 0;
     let idleQueueDrainedLastTick = 0;
-    let notifyPinnedReleasedPending = 0;
     let leavesEvaluatedLast = 0;
     const traverseStats = {
         fullScans: 0,
@@ -2507,7 +2310,6 @@ export function createOctreeRefinementController(
         }
 
         active = false;
-        releaseAllPinned(octree, prefetch.pinned, prefetch.decRefScheduled, fileCooldownTicks);
         if (savedTunables) {
             T = savedTunables;
             savedTunables = null;
@@ -2687,7 +2489,6 @@ export function createOctreeRefinementController(
         let integratedLoaderResources = 0;
 
         idleQueueDrainedLastTick = 0;
-        let idleLoadedReclaimedLastTick = 0;
         if (idleQuiescent && loader) {
             const wasFrozen = !!loader.__refinementIdleFreeze;
             if (!wasFrozen) {
@@ -2695,29 +2496,12 @@ export function createOctreeRefinementController(
             }
             setIdleDownloadFreeze(octree, loader);
             const instances = findAllOctreeInstances(app, octree, gsplatEntity);
-            syncPinnedFiles(
-                octree,
-                prefetch.pinned,
-                new Set(),
-                T.loader.pinLimit,
-                prefetch.decRefScheduled,
-                fileCooldownTicks
-            );
             const drainResult = drainIdleDownloadQueues(octree, loader, instances, prefetch.pinned);
             idleQueueDrainedLastTick =
                 drainResult.purgedSuspended +
                 drainResult.purgedQueued +
                 drainResult.abortedInflight +
                 drainResult.releasedOrphanInflight;
-            idleLoadedReclaimedLastTick = reclaimIdleLoadedFiles(
-                octree,
-                loader,
-                instances,
-                prefetch.pinned,
-                prefetch.decRefScheduled,
-                priorityUrls,
-                fileCooldownTicks
-            );
             prefetch.lastUrls = [];
         } else if (loader) {
             clearIdleDownloadFreeze(octree, loader);
@@ -2768,6 +2552,7 @@ export function createOctreeRefinementController(
                 loader,
                 priorityUrls
             );
+            retainCriticalDownloadFiles(octree, loader, criticalBatch, prefetch.pinned);
         } else if (loader && !idleFrozen) {
             if (boostActive && loader.maxConcurrentLoads !== T.loader.boostConcurrent) {
                 loader.maxConcurrentLoads = T.loader.boostConcurrent;
@@ -2790,28 +2575,9 @@ export function createOctreeRefinementController(
         }
         queueMs = performance.now() - queueStartMs;
 
-        const desiredPins = idleFrozen
-            ? new Set<number>()
-            : collectDesiredPinnedFiles(
-                octree,
-                loader,
-                criticalBatch,
-                foregroundBatch,
-                pendingFileIndices,
-                boostActive,
-                T.loader.pinLimit
-            );
-        const pinSync = syncPinnedFiles(
-            octree,
-            prefetch.pinned,
-            desiredPins,
-            T.loader.pinLimit,
-            prefetch.decRefScheduled,
-            fileCooldownTicks
-        );
-        const pinnedReleasedLastTick = pinSync.released + notifyPinnedReleasedPending;
-        notifyPinnedReleasedPending = 0;
-
+        if (boostActive) {
+            pinLoadedForegroundFiles(octree, foregroundBatch, prefetch.pinned);
+        }
         prevPending.critical = criticalPendingUnique;
         prevPending.unique = pendingUniqueFiles;
         prevPending.stableForeground = stableForegroundPending;
@@ -2960,8 +2726,6 @@ export function createOctreeRefinementController(
                     },
                     pinLimit: T.loader.pinLimit,
                     pinnedFiles: prefetch.pinned.size,
-                    pinnedReleased: pinnedReleasedLastTick,
-                    idleLoadedReclaimed: idleLoadedReclaimedLastTick,
                     pendingUniqueFiles,
                     criticalPendingUnique,
                     foregroundPendingUnique,
@@ -3061,8 +2825,6 @@ export function createOctreeRefinementController(
             staleInFlight: priorityDownloadsActive ? tickPriorityLoad.staleInFlight : 0,
             suspended: tickLoader?.__refinementSuspendedQueue?.length ?? 0,
             idleQueueDrained: idleQueueDrainedLastTick,
-            idleLoadedReclaimed: idleLoadedReclaimedLastTick,
-            pinnedReleased: pinnedReleasedLastTick,
             priorityDownloadsActive,
             visibleSplatsCurrentM: currentVisibleSplats / 1_000_000,
             visibleSplatsTargetM: targetVisibleSplats / 1_000_000,
@@ -3145,7 +2907,6 @@ export function createOctreeRefinementController(
             consecutiveIdleFrames = 0;
             idleQueueDrainedLastTick = 0;
             prefetch.pinned.clear();
-            prefetch.decRefScheduled.clear();
             prefetch.tracked.clear();
             prefetch.lastUrls = [];
             prevPending.staleLodNodes = -1;
@@ -3213,12 +2974,7 @@ export function createOctreeRefinementController(
             settle.hadCritical = false;
             prefetch.lastUrls = [];
             prefetch.tracked.clear();
-            notifyPinnedReleasedPending = releaseAllPinned(
-                octree,
-                prefetch.pinned,
-                prefetch.decRefScheduled,
-                fileCooldownTicks
-            );
+            prefetch.pinned.clear();
             consecutiveIdleFrames = 0;
             idleQueueDrainedLastTick = 0;
             staleSyncCooldown = 0;
