@@ -96,6 +96,16 @@ export type GsplatBufferUploadMetrics = {
     uploadSplatSlotsEst: number;
     /** uploadSplatSlotsEst × 40B，单位 MB */
     uploadMbEst: number;
+    /**
+     * 本帧估计写入 slot 数占 BlockAllocator.capacity 的比例（%）。
+     * HUD 主指标：比 fullRebuild 计数更直观（「烤了多少 / 池子多大」）。
+     */
+    bakeCapacityPct: number;
+    /**
+     * 本帧 dirty MemBlock 数占 allocationMap 块数的比例（%）。
+     * 仅 frameProfile 离线用；HUD 不展示（分母是活跃块数而非 buffer 容量，易误解）。
+     */
+    memBlockBakePct: number;
     /** 估算口径 */
     uploadEstMode: 'full_rebuild' | 'proportional' | 'none';
     /**
@@ -210,6 +220,8 @@ function emptyBufferUploadMetrics(app?: AppBase): GsplatBufferUploadMetrics {
         activeSplatSlots: 0,
         uploadSplatSlotsEst: 0,
         uploadMbEst: 0,
+        bakeCapacityPct: 0,
+        memBlockBakePct: 0,
         uploadEstMode: 'none',
         fullRebuild: false,
         fullRebuildSource: 'none',
@@ -330,6 +342,14 @@ export function readGsplatBufferUploadMetrics(app: AppBase): GsplatBufferUploadM
 
     const uploadMbEst =
         Math.round(((uploadSplatSlotsEst * WORK_BUFFER_BYTES_PER_SPLAT_DEFAULT) / (1024 * 1024)) * 100) / 100;
+    const bakeCapacityPct =
+        allocatorCapacity > 0 && uploadSplatSlotsEst > 0
+            ? Math.round((uploadSplatSlotsEst / allocatorCapacity) * 1000) / 10
+            : 0;
+    const memBlockBakePct =
+        totalBlocks > 0 && uniqueUploadBlocksEst > 0
+            ? Math.round((uniqueUploadBlocksEst / totalBlocks) * 1000) / 10
+            : 0;
     const textureSize = allocatorCapacity > 0 ? Math.ceil(Math.sqrt(allocatorCapacity)) : 0;
 
     return {
@@ -341,6 +361,8 @@ export function readGsplatBufferUploadMetrics(app: AppBase): GsplatBufferUploadM
         activeSplatSlots,
         uploadSplatSlotsEst,
         uploadMbEst,
+        bakeCapacityPct,
+        memBlockBakePct,
         uploadEstMode,
         fullRebuild,
         fullRebuildSource,
@@ -359,22 +381,22 @@ export function readGsplatBufferUploadMetrics(app: AppBase): GsplatBufferUploadM
 export type BufferUploadSessionStats = {
     frames: number;
     uploadFrames: number;
-    fullRebuildFrames: number;
     peakUploadMbEst: number;
+    peakBakeCapacityPct: number;
     lastUploadMbEst: number;
+    lastBakeCapacityPct: number;
     lastCopyPct: number;
-    lastFullRebuild: boolean;
 };
 
 export function createBufferUploadSessionStats(): BufferUploadSessionStats {
     return {
         frames: 0,
         uploadFrames: 0,
-        fullRebuildFrames: 0,
         peakUploadMbEst: 0,
+        peakBakeCapacityPct: 0,
         lastUploadMbEst: 0,
-        lastCopyPct: 0,
-        lastFullRebuild: false
+        lastBakeCapacityPct: 0,
+        lastCopyPct: 0
     };
 }
 
@@ -385,13 +407,11 @@ export function accumulateBufferUploadSession(
     stats.frames += 1;
     stats.lastCopyPct = m.copyPct;
     stats.lastUploadMbEst = m.uploadMbEst;
-    stats.lastFullRebuild = m.fullRebuild;
+    stats.lastBakeCapacityPct = m.bakeCapacityPct;
     if (m.uploadedBlocks > 0 || m.uploadMbEst > 0) {
         stats.uploadFrames += 1;
         stats.peakUploadMbEst = Math.max(stats.peakUploadMbEst, m.uploadMbEst);
-    }
-    if (m.fullRebuild) {
-        stats.fullRebuildFrames += 1;
+        stats.peakBakeCapacityPct = Math.max(stats.peakBakeCapacityPct, m.bakeCapacityPct);
     }
 }
 

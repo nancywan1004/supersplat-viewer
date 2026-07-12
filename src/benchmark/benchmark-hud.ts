@@ -438,16 +438,20 @@ export function initBenchmarkHud(global: Global): () => void {
                 ? `${(bufferUpload.fragmentation * 100).toFixed(0)}% · tex ${bufferUpload.textureSize}`
                 : '—'
         ));
+        const capPct = bufferUpload.bakeCapacityPct;
+        const uploadSlotsM = bufferUpload.uploadSplatSlotsEst / 1e6;
         const uploadLabel = bufferUpload.uploadMbEst > 0
-            ? `${bufferUpload.uploadMbEst.toFixed(1)}MB · ${bufferUpload.uniqueUploadBlocksEst}/${bufferUpload.totalBlocks}blk` +
-              (bufferUpload.bakePassesEst > 1 ? ` · ×${bufferUpload.bakePassesEst}` : '')
-            : `0 · ${bufferUpload.copyPct.toFixed(0)}%`;
-        lines.push(row('WB Upload', `${uploadLabel}${bufferUpload.fullRebuild ? ' · FULL' : ''}`));
+            ? `${bufferUpload.uploadMbEst.toFixed(1)}MB` +
+              (bufferUpload.bakePassesEst > 1 ? ` · ×${bufferUpload.bakePassesEst} pass` : '')
+            : '—';
+        lines.push(row('WB Upload', uploadLabel));
         lines.push(row(
-            'FULL rebuild',
-            `${bufferUploadSession.fullRebuildFrames}/${bufferUploadSession.frames}` +
-            ` · peak ${bufferUploadSession.peakUploadMbEst.toFixed(1)}MB` +
-            (budgetM > 0 ? ` · bud ${budgetM.toFixed(1)}M` : '')
+            'WB Bake %',
+            bufferUpload.allocatorCapacity > 0
+                ? `${capPct.toFixed(1)}% · ${uploadSlotsM.toFixed(2)}/${capM.toFixed(2)}M slots` +
+                  ` · peak ${bufferUploadSession.peakBakeCapacityPct.toFixed(1)}%` +
+                  (budgetM > 0 ? ` · bud ${budgetM.toFixed(1)}M` : '')
+                : '—'
         ));
 
         if (refine) {
