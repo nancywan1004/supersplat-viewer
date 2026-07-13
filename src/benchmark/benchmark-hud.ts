@@ -144,6 +144,14 @@ function formatSplatBudget(value: unknown): string {
     return value <= 0 ? '0 / uncapped' : `${(value / 1_000_000).toFixed(2)}M`;
 }
 
+function formatWbBlocks(uploadedBlocks: number, totalBlocks: number, copyPct: number): string {
+    if (totalBlocks <= 0 && uploadedBlocks <= 0) {
+        return '—';
+    }
+    const pctSuffix = totalBlocks > 0 || uploadedBlocks > 0 ? ` · ${copyPct.toFixed(0)}%` : '';
+    return `${uploadedBlocks}/${totalBlocks}${pctSuffix}`;
+}
+
 export function ensureBenchmarkHudStyles() {
     if (document.getElementById('benchmark-hud-style')) {
         return;
@@ -437,6 +445,10 @@ export function initBenchmarkHud(global: Global): () => void {
             bufferUpload.allocatorCapacity > 0
                 ? `${(bufferUpload.fragmentation * 100).toFixed(0)}% · tex ${bufferUpload.textureSize}`
                 : '—'
+        ));
+        lines.push(row(
+            'WB Blocks',
+            formatWbBlocks(bufferUpload.uploadedBlocks, bufferUpload.totalBlocks, bufferUpload.copyPct)
         ));
         const capPct = bufferUpload.bakeCapacityPct;
         const uploadSlotsM = bufferUpload.uploadSplatSlotsEst / 1e6;
