@@ -84,7 +84,9 @@
 
     <section id="entities">
       <h2>实体与字段</h2>
-      <div class="callout info"><strong>A/B/C 三层</strong><p>A=SOG Resource · B=NodeInfo+Placement · C=slot/work buffer。换档改 intervals，不改 Resource 内容。</p></div>
+      <details class="appendix" open><summary>展开 · A / B / C 三层</summary><div class="appendix-body"><table><thead><tr><th>层</th><th>核心对象</th><th>干什么用</th><th>换档时</th></tr></thead><tbody><tr><td>A · 资产层</td><td>SOG Resource（GPU 纹理）</td><td>每个 SOG 文件的「原材料库」：下载解码后的扁平 splat 数组 [0..numSplats)。在答两件事——① 源 splat 在 GPU 哪；② bake 从哪段采样（段范围由 B 层 intervals 指定，Resource 本身不被改写）</td><td>换档不改 Resource 内容；只改 B 层「读哪一段」</td></tr>
+<tr><td>B · 逻辑层</td><td>NodeInfo + GSplatPlacement</td><td>决定「哪片空间叶、用哪档 LOD、哪份 SOG 被哪些叶引用、各读源文件哪一段」。NodeInfo 管每叶的 allocId / currentLod；Placement 管每个 file 的 intervals Map。Viewer/引擎换档主要改这一层</td><td>applyLodChanges 改 intervals / currentLod → 触发 WorldState 新版本 + bake</td></tr>
+<tr><td>C · 物理层</td><td>_workBuffer + MemBlock（_allocationMap）</td><td>GPU 真正拿来 draw 的大 splat 数组，加上「货架台账」（每个 allocId 占 WB 哪段 slot、多大）。在答两件事——① 这叶最终写到 WB 哪；② 本帧哪些 slot 要重烤（needsUploadIds 过滤 partial bake）</td><td>Allocator 调整 offset/size；bake 把 A 层片段 copy 覆写到 dirty 块</td></tr></tbody></table></div></details>
       <details class="appendix" open><summary>展开 · 核心实体职责</summary><div class="appendix-body"><table><thead><tr><th>实体</th><th>数量级</th><th>层</th><th>核心职责</th></tr></thead><tbody><tr><td>SOG Resource</td><td>每 SOG 文件一个</td><td>A · 资产层</td><td>HTTP fetch 解码后的 GPU splat 纹理，扁平数组 [0..numSplats)。换档只改「读哪段」，不改 Resource 内容；GSplatPlacement.resource 持有其引用，bake 按 GSplatInfo.intervals[] 从中采样</td></tr>
 <tr><td>GSplatOctreeInstance</td><td>每个 Entity 一个</td><td>B · 场景运行时</td><td>每个可见 Entity 的 octree 入口：nodeInfos[]（每叶 LOD/allocId）+ filePlacements[]（按 fileIndex 索引的 Placement）。applyLodChanges 在此写 intervals；inst.update 驱动 GSplatWorld 构造 WorldState 并 bake</td></tr>
 <tr><td>GSplatPlacement</td><td>每份 SOG 文件一个</td><td>B · 文件→叶映射</td><td>一份 SOG 的可变运行时记录：resource→A 层；intervals Map&lt;nodeIndex,[start,end)&gt; 记录哪些叶正用此文件、各读源数组哪段。换档只改 Map；多叶可共享同一 placement（N 叶 → 1 placement）</td></tr>
