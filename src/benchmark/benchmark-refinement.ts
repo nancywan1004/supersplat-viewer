@@ -183,6 +183,12 @@ function sumAllocationSlots(map: Map<number, MemBlockLike> | undefined): number 
     return sum;
 }
 
+/** PlayCanvas 每帧 stats：`bufferCopyUploaded/total×100`，无 bake 时为 0（会清零）。 */
+function readFrameGsplatBufferCopyPct(app: AppBase): number | null {
+    const n = (app.stats as { frame?: { gsplatBufferCopy?: number } })?.frame?.gsplatBufferCopy;
+    return Number.isFinite(n) && (n as number) >= 0 ? (n as number) : null;
+}
+
 function readWorldFullRebuild(world: GsplatWorldLike): boolean | null {
     const states = world._worldStates;
     if (!states?.size) {
@@ -299,7 +305,21 @@ export function readGsplatBufferUploadMetrics(app: AppBase): GsplatBufferUploadM
         }
     }
 
-    const copyPct = totalBlocks > 0 ? (uploadedBlocks / totalBlocks) * 100 : 0;
+    // world.bufferCopy* 在部分引擎版本无 bake 帧不清零；以 stats.frame.gsplatBufferCopy 为本帧是否 upload
+    const frameCopyPct = readFrameGsplatBufferCopyPct(app);
+    const frameHadBufferUpload =
+        frameCopyPct !== null ? frameCopyPct > 0 : uploadedBlocks > 0;
+    if (!frameHadBufferUpload) {
+        uploadedBlocks = 0;
+    } else if (uploadedBlocks <= 0 && totalBlocks > 0 && frameCopyPct !== null && frameCopyPct > 0) {
+        uploadedBlocks = Math.max(1, Math.round((totalBlocks * frameCopyPct) / 100));
+    }
+
+    const copyPct = !frameHadBufferUpload
+        ? 0
+        : totalBlocks > 0 && uploadedBlocks > 0
+            ? (uploadedBlocks / totalBlocks) * 100
+            : frameCopyPct ?? 0;
     const uniqueUploadBlocksEst =
         totalBlocks > 0 ? Math.min(uploadedBlocks, totalBlocks) : uploadedBlocks;
     const bakePassesEst =
