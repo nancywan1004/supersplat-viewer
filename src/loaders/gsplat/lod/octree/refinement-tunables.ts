@@ -209,15 +209,15 @@ export function buildRefinementTunables(policy: RefinementPolicy): RefinementTun
         };
     }
 
-    // aggressive：与 refinementPolicy 引入前 controller 硬编码 T + P1 扫描策略一致
+    // aggressive：Poland 质量路径；Phase A 对齐 conservative 的 sync 节奏并收紧下载并发
     return {
         loader: {
             defaultConcurrent: 2,
-            boostConcurrent: mobile ? 4 : 8,
-            burstConcurrent: mobile ? 8 : 12,
+            boostConcurrent: mobile ? 4 : 6,
+            burstConcurrent: mobile ? 8 : 10,
             emergencyConcurrent: mobile ? 16 : 32,
             extremeConcurrent: mobile ? 32 : 64,
-            foregroundLimit: mobile ? 32 : 64,
+            foregroundLimit: 32,
             criticalLimit: mobile ? 4 : 8,
             pinLimit: mobile ? 6 : 12,
             trackedMissFrames: mobile ? 8 : 12,
@@ -246,8 +246,8 @@ export function buildRefinementTunables(policy: RefinementPolicy): RefinementTun
             moveFrames: 18,
             zoomFrames: 36,
             unlockFrames: 48,
-            syncCooldown: 3,
-            staleSyncCooldown: 6,
+            syncCooldown: 4,
+            staleSyncCooldown: 8,
             staleSyncIdleFrames: 12
         },
         ladder: {

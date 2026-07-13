@@ -2610,16 +2610,20 @@ export function createOctreeRefinementController(
         let syncTrigger: RefinementSyncTrigger | null = null;
         const syncStartMs = performance.now();
         if ((cameraJustMoved || cameraBurstActive) && needsLodSwitch) {
-            syncTrigger = 'burst_lod_switch';
-            syncedInstances = trackSyncOctreePendingPlacements(
-                app,
-                syncTrigger,
-                octree,
-                gsplatEntity,
-                gsplatScene,
-                true
-            );
-            staleSyncCooldown = cameraBurstActive ? T.burst.syncCooldown : T.burst.staleSyncIdleFrames;
+            // Phase A：burst 内常规 sync 固定节奏；center critical（fileJustLanded）可 bypass
+            const burstCriticalBypass = fileJustLanded;
+            if (staleSyncCooldown <= 0 || burstCriticalBypass) {
+                syncTrigger = 'burst_lod_switch';
+                syncedInstances = trackSyncOctreePendingPlacements(
+                    app,
+                    syncTrigger,
+                    octree,
+                    gsplatEntity,
+                    gsplatScene,
+                    true
+                );
+                staleSyncCooldown = cameraBurstActive ? T.burst.syncCooldown : T.burst.staleSyncIdleFrames;
+            }
         } else if (needsLodSwitch && fileJustLanded) {
             syncTrigger = 'file_landed_lod';
             syncedInstances = trackSyncOctreePendingPlacements(
