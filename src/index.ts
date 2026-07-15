@@ -443,19 +443,20 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     // 供 NightMode 等脚本读取点光源等（collectPointLights 需要 global）
     (app as any).__global = global;
 
+    if (shouldShowBenchmarkHud(config)) {
+        initBenchmarkHud(global);
+    }
+
+    // frame profiler 必须在 SceneProfileBenchmark.start 之前挂好（benchmark 自行 clear/start）
+    if (shouldInitFrameProfiler(config)) {
+        initFrameProfiler(global, { autoStart: shouldAutoStartFrameProfiler(config) });
+    }
+
     const benchmark = createSceneProfileBenchmark(global);
     if (benchmark) {
         benchmark.setCaseLabel(config.benchmarkLabel ?? 'default');
         benchmark.start();
         (global as any).__sceneProfileBenchmarkHarness = benchmark;
-    }
-
-    if (shouldShowBenchmarkHud(config)) {
-        initBenchmarkHud(global);
-    }
-
-    if (shouldInitFrameProfiler(config)) {
-        initFrameProfiler(global, { autoStart: shouldAutoStartFrameProfiler(config) });
     }
 
     initCanvas(global);

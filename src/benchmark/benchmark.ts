@@ -9,6 +9,10 @@ import {
     type BenchmarkAnimTrackReport,
     type BenchmarkAnimKeyframeResult
 } from './benchmark-anim-track';
+import {
+    summarizeBakeAcceptance,
+    type BakeAcceptanceReport
+} from './bake-acceptance';
 
 export type SceneProfileBenchmarkCaseResult = {
     label: string;
@@ -26,6 +30,8 @@ export type SceneProfileBenchmarkCaseResult = {
     rendererUsed: string;
     interactionWaypoints?: BenchmarkAnimKeyframeResult[];
     animTrackBenchmark?: BenchmarkAnimTrackReport;
+    /** Bake / WorldState 验收（frame-profiler 样本汇总） */
+    bakeAcceptance?: BakeAcceptanceReport | null;
     timestamp: string;
 };
 
@@ -70,6 +76,11 @@ export class SceneProfileBenchmarkHarness {
             return;
         }
         this.startMs = performance.now();
+        const fp = (globalThis as {
+            __frameProfiler?: { clear?: () => void; start?: () => void };
+        }).__frameProfiler;
+        fp?.clear?.();
+        fp?.start?.();
         this.bindEvents();
     }
 
@@ -174,6 +185,25 @@ export class SceneProfileBenchmarkHarness {
             vramTexPeakMb: null
         };
 
+        const fp = (globalThis as {
+            __frameProfiler?: {
+                stop?: () => unknown[];
+                getSamples?: () => unknown[];
+                summarizeBakeAcceptance?: () => BakeAcceptanceReport;
+            };
+        }).__frameProfiler;
+        let bakeAcceptance: BakeAcceptanceReport | null = null;
+        try {
+            if (fp?.summarizeBakeAcceptance) {
+                bakeAcceptance = fp.summarizeBakeAcceptance();
+            } else if (fp?.getSamples) {
+                bakeAcceptance = summarizeBakeAcceptance(fp.getSamples() as Parameters<typeof summarizeBakeAcceptance>[0]);
+            }
+            fp?.stop?.();
+        } catch (err) {
+            console.warn('[SceneProfileBenchmark] bakeAcceptance summarize failed', err);
+        }
+
         const result: SceneProfileBenchmarkCaseResult = {
             label: this.label,
             budget: this.global.config.budget,
@@ -190,6 +220,7 @@ export class SceneProfileBenchmarkHarness {
             rendererUsed: String(this.global.config.renderer),
             interactionWaypoints: animPlayback?.keyframes,
             animTrackBenchmark: animTrackExport,
+            bakeAcceptance,
             timestamp: new Date().toISOString()
         };
 

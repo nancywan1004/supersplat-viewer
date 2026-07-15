@@ -9,6 +9,11 @@ import {
     type BufferUploadProfileReport
 } from './buffer-upload-profile-table';
 import {
+    summarizeBakeAcceptance,
+    BAKE_ACCEPTANCE_SYNC_HORIZON_FRAMES,
+    type BakeAcceptanceReport
+} from './bake-acceptance';
+import {
     readGsplatBufferUploadMetrics,
     readGsplatsM,
     readJsHeapUsedMB,
@@ -155,6 +160,8 @@ export type FrameProfilerApi = {
     summarizeBufferUpload: () => BufferUploadProfileReport;
     /** 下载 §buffer-upload-table Markdown */
     downloadBufferUploadTable: (filename?: string) => BufferUploadProfileReport;
+    /** Bake / WorldState 验收汇总 */
+    summarizeBakeAcceptance: () => BakeAcceptanceReport;
 };
 
 function roundMs(value: number): number {
@@ -349,7 +356,8 @@ function buildSample(
     index: number,
     statsSnapshot: FrameStatsSnapshot,
     wallClock: FrameWallClockCapture,
-    camera: FrameProfileCameraSample | null
+    camera: FrameProfileCameraSample | null,
+    latch: { dirtySeen: boolean; workBufferRebuildSeen: boolean; includeCurrentLodSum: boolean }
 ): FrameProfileSample {
     const frame = statsSnapshot.frame;
     const tick = readRefinementTickMetrics(global);
@@ -360,7 +368,11 @@ function buildSample(
     const accountedMs =
         cpu.updateMs + cpu.renderMs + statsSnapshot.gpu.totalMs + (tick?.timingsMs.total ?? 0) + deferredInstUpdateMs;
     const gapMs = roundMs(Math.max(0, frameMs - accountedMs));
-    const bufferUpload = readGsplatBufferUploadMetrics(app);
+    const bufferUpload = readGsplatBufferUploadMetrics(app, {
+        dirtySeen: latch.dirtySeen,
+        workBufferRebuildSeen: latch.workBufferRebuildSeen,
+        includeCurrentLodSum: latch.includeCurrentLodSum
+    });
 
     return {
         index,
@@ -410,26 +422,75 @@ export function initFrameProfiler(global: Global, options?: { maxSamples?: numbe
     };
 
     let wallClock: Partial<FrameWallClockCapture> = {};
+    let dirtySeenThisFrame = false;
+    let workBufferRebuildSeenThisFrame = false;
+    /** sync 后继续采 currentLodSum 的剩余帧数（含本帧） */
+    let lodSumHorizonRemaining = 0;
+
+    const latchFrameSignals = () => {
+        const gsplat = app.scene?.gsplat as { dirty?: boolean } | undefined;
+        if (gsplat?.dirty) {
+            dirtySeenThisFrame = true;
+        }
+        const director = (app.renderer as { gsplatDirector?: {
+            camerasMap: Map<unknown, {
+                layersMap: Map<unknown, {
+                    gsplatManager?: { world?: { _workBufferRebuildRequired?: boolean } } | null;
+                    gsplatManagerShadow?: { world?: { _workBufferRebuildRequired?: boolean } } | null;
+                }>;
+            }>;
+        } }).gsplatDirector;
+        if (!director) {
+            return;
+        }
+        for (const cameraData of director.camerasMap.values()) {
+            for (const layerData of cameraData.layersMap.values()) {
+                for (const manager of [layerData.gsplatManager, layerData.gsplatManagerShadow]) {
+                    if (manager?.world?._workBufferRebuildRequired) {
+                        workBufferRebuildSeenThisFrame = true;
+                        return;
+                    }
+                }
+            }
+        }
+    };
 
     const onFrameUpdate = () => {
         wallClock = { frameupdateAt: performance.now() };
+        dirtySeenThisFrame = false;
+        workBufferRebuildSeenThisFrame = false;
+        latchFrameSignals();
     };
 
     const onFrameRender = () => {
         wallClock.framerenderAt = performance.now();
+        latchFrameSignals();
     };
 
     const onPostRender = () => {
         wallClock.postrenderAt = performance.now();
         wallClock.rendered = true;
+        latchFrameSignals();
     };
 
     const onFrameEnd = () => {
         if (!recording) {
             return;
         }
+        latchFrameSignals();
         const frameendAt = performance.now();
         const statsSnapshot = snapshotPlayCanvasStats(app);
+        const frameSyncProfile = readRefinementFrameProfile(app);
+        const syncThisFrame =
+            (frameSyncProfile.syncedInstances ?? 0) > 0 ||
+            (frameSyncProfile.syncTriggers?.length ?? 0) > 0;
+        if (syncThisFrame) {
+            lodSumHorizonRemaining = BAKE_ACCEPTANCE_SYNC_HORIZON_FRAMES + 1;
+        }
+        const includeCurrentLodSum = lodSumHorizonRemaining > 0;
+        if (lodSumHorizonRemaining > 0) {
+            lodSumHorizonRemaining--;
+        }
         const capture: FrameWallClockCapture = {
             frameupdateAt: wallClock.frameupdateAt ?? frameendAt,
             framerenderAt: wallClock.framerenderAt ?? frameendAt,
@@ -437,7 +498,14 @@ export function initFrameProfiler(global: Global, options?: { maxSamples?: numbe
             frameendAt,
             rendered: wallClock.rendered === true
         };
+        const latch = {
+            dirtySeen: dirtySeenThisFrame,
+            workBufferRebuildSeen: workBufferRebuildSeenThisFrame,
+            includeCurrentLodSum
+        };
         wallClock = {};
+        dirtySeenThisFrame = false;
+        workBufferRebuildSeenThisFrame = false;
 
         let cameraSample: FrameProfileCameraSample | null = null;
         const cam = readViewerCamera(global);
@@ -464,7 +532,7 @@ export function initFrameProfiler(global: Global, options?: { maxSamples?: numbe
             if (!recording) {
                 return;
             }
-            samples.push(buildSample(app, global, sampleIndex++, statsSnapshot, capture, cameraSample));
+            samples.push(buildSample(app, global, sampleIndex++, statsSnapshot, capture, cameraSample, latch));
             if (samples.length > maxSamples) {
                 samples.splice(0, samples.length - maxSamples);
             }
@@ -589,6 +657,9 @@ export function initFrameProfiler(global: Global, options?: { maxSamples?: numbe
             anchor.click();
             URL.revokeObjectURL(url);
             return report;
+        },
+        summarizeBakeAcceptance() {
+            return summarizeBakeAcceptance(samples);
         }
     };
 
@@ -614,10 +685,20 @@ export function initFrameProfiler(global: Global, options?: { maxSamples?: numbe
     };
 }
 
-export function shouldInitFrameProfiler(config: { frameProfile?: boolean | 'auto' }): boolean {
-    return config.frameProfile === true || config.frameProfile === 'auto';
+export function shouldInitFrameProfiler(config: {
+    frameProfile?: boolean | 'auto';
+    benchmark?: boolean;
+}): boolean {
+    return config.frameProfile === true || config.frameProfile === 'auto' || !!config.benchmark;
 }
 
-export function shouldAutoStartFrameProfiler(config: { frameProfile?: boolean | 'auto' }): boolean {
+export function shouldAutoStartFrameProfiler(config: {
+    frameProfile?: boolean | 'auto';
+    benchmark?: boolean;
+}): boolean {
+    // Scene Profile benchmark 自行 start/clear，避免加载阶段样本污染验收窗
+    if (config.benchmark) {
+        return config.frameProfile === true;
+    }
     return config.frameProfile === true || config.frameProfile === 'auto';
 }

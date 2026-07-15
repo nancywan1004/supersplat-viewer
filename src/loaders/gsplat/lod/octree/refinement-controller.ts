@@ -12,7 +12,11 @@ import {
 import type { Global } from '../../../../types';
 import { getOctreeBootstrapLod, isOctreeBootstrapPlaceableNode } from './lod-meta';
 import { resolveEntityLodRange } from './entity-lod-range';
-import { findAllOctreeInstances, type OctreeInstanceLike } from './octree-instance-access';
+import {
+    findAllOctreeInstances,
+    requestOctreePlacementUpdate,
+    type OctreeInstanceLike
+} from './octree-instance-access';
 import { ensureOctreeLeafSpatialIndex } from './octree-spatial-index';
 import {
     buildRefinementTunables,
@@ -68,6 +72,9 @@ type OctreeLike = {
     ensureFileResource: (fileIndex: number) => void;
     getFileResource: (fileIndex: number) => unknown;
     incRefCount?: (fileIndex: number) => void;
+    /** 与 incRefCount 配对；cooldownTicks 缺省时用 octree.cooldownTicks */
+    decRefCount?: (fileIndex: number, cooldownTicks?: number) => void;
+    cooldownTicks?: number;
     assetLoader?: OctreeAssetLoaderLike | null;
     __refinementEnsurePatched?: boolean;
     __originalEnsureFileResource?: (fileIndex: number) => void;
@@ -1010,42 +1017,25 @@ type OctreeGpuSyncJob = {
     gsplatEntity: Entity;
 };
 
-/** WebGPU：inst.update 会重建 work buffer / bind group，须在当帧 render 结束后执行 */
+/**
+ * 历史：WebGPU 曾在 frameend 推迟 inst.update。
+ * 现改走 world.requestOctreePlacementUpdate()，由 world.update 同拍轮询；保留队列清理供 destroy。
+ */
 const deferredOctreeGpuSyncJobs = new WeakMap<AppBase, OctreeGpuSyncJob[]>();
-const deferredOctreeGpuSyncApps = new WeakSet<AppBase>();
 const lastDeferredInstUpdateMsByApp = new WeakMap<AppBase, number>();
 
-function flushDeferredOctreeInstanceUpdates(app: AppBase): void {
+function cancelDeferredOctreeInstanceUpdates(app: AppBase, octree: OctreeLike): void {
     const jobs = deferredOctreeGpuSyncJobs.get(app);
     if (!jobs?.length) {
-        lastDeferredInstUpdateMsByApp.set(app, 0);
         return;
     }
-    const syncStartMs = performance.now();
-    const snapshot = jobs.splice(0, jobs.length);
-
-    const updated = new Set<OctreeInstanceLike>();
-    for (let i = 0; i < snapshot.length; i++) {
-        const { octree, gsplatEntity } = snapshot[i];
-        const instances = findAllOctreeInstances(app, octree, gsplatEntity);
-        for (let j = 0; j < instances.length; j++) {
-            const inst = instances[j];
-            if (updated.has(inst)) {
-                continue;
-            }
-            updated.add(inst);
-            try {
-                inst.update?.();
-            } catch (err) {
-                console.warn('[octree-refinement] deferred sync update failed', err);
-            }
-        }
-    }
-    lastDeferredInstUpdateMsByApp.set(app, performance.now() - syncStartMs);
-    app.renderNextFrame = true;
+    deferredOctreeGpuSyncJobs.set(
+        app,
+        jobs.filter((job) => job.octree !== octree)
+    );
 }
 
-/** frame-profiler：上一帧 frameend deferred inst.update 耗时（ms） */
+/** frame-profiler：上一帧 frameend deferred inst.update 耗时（ms）；新路径恒为 0 */
 export function readLastDeferredInstUpdateMs(app: AppBase): number {
     return lastDeferredInstUpdateMsByApp.get(app) ?? 0;
 }
@@ -1067,6 +1057,13 @@ export type RefinementFrameProfile = {
 };
 
 const frameProfileByApp = new WeakMap<AppBase, RefinementFrameProfile>();
+/**
+ * 同一渲染帧内每个 octree 只允许真正执行一次 sync。
+ * 必须在 bootstrap（controller start 前）也能按帧清空，不能依赖 refinement controller 的 frameupdate。
+ */
+const syncedOctreesThisFrameByApp = new WeakMap<AppBase, WeakSet<object>>();
+/** 已为该 app 绑定「按真实帧」清空 sync 去重集合 */
+const syncDedupFrameBoundApps = new WeakSet<AppBase>();
 
 function ensureFrameProfile(app: AppBase): RefinementFrameProfile {
     let profile = frameProfileByApp.get(app);
@@ -1086,13 +1083,48 @@ function recordFrameSync(app: AppBase, trigger: RefinementSyncTrigger, count: nu
     profile.syncTriggers.push(trigger);
 }
 
+function clearSyncedOctreesThisFrame(app: AppBase): void {
+    syncedOctreesThisFrameByApp.set(app, new WeakSet<object>());
+}
+
+/**
+ * 首次 sync 即绑定 frameupdate：bootstrap 阶段也能跨帧重新放行 sync。
+ * 与 controller 的 resetRefinementFrameProfile 可并存（同帧清空两次无害）。
+ */
+function ensureSyncDedupFrameBound(app: AppBase): void {
+    if (syncDedupFrameBoundApps.has(app)) {
+        return;
+    }
+    syncDedupFrameBoundApps.add(app);
+    app.on('frameupdate', () => {
+        clearSyncedOctreesThisFrame(app);
+    });
+}
+
 /** 每帧 frameupdate 重置；frameend 前累积 tick / frame:ready sync */
 export function resetRefinementFrameProfile(app: AppBase): void {
+    ensureSyncDedupFrameBound(app);
     frameProfileByApp.set(app, { syncedInstances: 0, syncTriggers: [], frameReadySync: false });
+    clearSyncedOctreesThisFrame(app);
 }
 
 export function readRefinementFrameProfile(app: AppBase): RefinementFrameProfile {
     return frameProfileByApp.get(app) ?? { syncedInstances: 0, syncTriggers: [], frameReadySync: false };
+}
+
+function hasSyncedOctreeThisFrame(app: AppBase, octree: OctreeLike): boolean {
+    ensureSyncDedupFrameBound(app);
+    return syncedOctreesThisFrameByApp.get(app)?.has(octree as object) === true;
+}
+
+function markSyncedOctreeThisFrame(app: AppBase, octree: OctreeLike): void {
+    ensureSyncDedupFrameBound(app);
+    let set = syncedOctreesThisFrameByApp.get(app);
+    if (!set) {
+        set = new WeakSet<object>();
+        syncedOctreesThisFrameByApp.set(app, set);
+    }
+    set.add(octree as object);
 }
 
 function trackSyncOctreePendingPlacements(
@@ -1101,59 +1133,12 @@ function trackSyncOctreePendingPlacements(
     octree: OctreeLike,
     gsplatEntity: Entity,
     gsplatScene: GsplatSceneLike,
-    markSceneDirty: boolean
+    _markSceneDirty = false
 ): number {
-    const count = syncOctreePendingPlacements(app, octree, gsplatEntity, gsplatScene, markSceneDirty);
+    // LOD sync：经 World.requestOctreePlacementUpdate → 增量 WorldState；不得 scene-wide dirty
+    const count = syncOctreePendingPlacements(app, octree, gsplatEntity, gsplatScene, false);
     recordFrameSync(app, trigger, count);
     return count;
-}
-
-function scheduleDeferredOctreeInstanceUpdates(
-    app: AppBase,
-    octree: OctreeLike,
-    gsplatEntity: Entity
-): void {
-    let jobs = deferredOctreeGpuSyncJobs.get(app);
-    if (!jobs) {
-        jobs = [];
-        deferredOctreeGpuSyncJobs.set(app, jobs);
-    }
-    jobs.push({ octree, gsplatEntity });
-
-    if (!deferredOctreeGpuSyncApps.has(app)) {
-        deferredOctreeGpuSyncApps.add(app);
-        app.on('frameend', () => flushDeferredOctreeInstanceUpdates(app));
-    }
-}
-
-function cancelDeferredOctreeInstanceUpdates(app: AppBase, octree: OctreeLike): void {
-    const jobs = deferredOctreeGpuSyncJobs.get(app);
-    if (!jobs?.length) {
-        return;
-    }
-    deferredOctreeGpuSyncJobs.set(
-        app,
-        jobs.filter((job) => job.octree !== octree)
-    );
-}
-
-function runOctreeInstanceUpdates(
-    app: AppBase,
-    octree: OctreeLike,
-    gsplatEntity: Entity,
-    instances: OctreeInstanceLike[]
-): void {
-    if (app.graphicsDevice?.isWebGPU) {
-        scheduleDeferredOctreeInstanceUpdates(app, octree, gsplatEntity);
-        return;
-    }
-    for (let i = 0; i < instances.length; i++) {
-        try {
-            instances[i].update?.();
-        } catch (err) {
-            console.warn('[octree-refinement] sync update failed', err);
-        }
-    }
 }
 
 function syncOctreePendingPlacements(
@@ -1163,24 +1148,25 @@ function syncOctreePendingPlacements(
     gsplatScene: GsplatSceneLike,
     markSceneDirty = false
 ) {
-    const instances = findAllOctreeInstances(app, octree, gsplatEntity);
-    for (let i = 0; i < instances.length; i++) {
-        instances[i].needsLodUpdate = true;
+    if (hasSyncedOctreeThisFrame(app, octree)) {
+        // 同帧已 sync：保留 render 请求即可，勿重复 placement update
+        app.renderNextFrame = true;
+        return 0;
     }
-    runOctreeInstanceUpdates(app, octree, gsplatEntity, instances);
+    markSyncedOctreeThisFrame(app, octree);
 
+    // 经 World API：下一拍立即轮询 instance → 仅 invalidate WorldState → 增量 bake
+    // 不再直接调用内部 inst.update()，避免吞掉 placement dirty / 状态所有权错位
+    const worldCount = requestOctreePlacementUpdate(app, octree);
+    const instanceCount = findAllOctreeInstances(app, octree, gsplatEntity).length;
+    const count = Math.max(worldCount, instanceCount);
+
+    // 仅真实结构变化才允许 markSceneDirty（默认 false；LOD sync 不得 scene-wide rebuild）
     if (markSceneDirty) {
         gsplatScene.dirty = true;
     }
     app.renderNextFrame = true;
-    return instances.length;
-}
-
-function markOctreeInstancesDirty(app: AppBase, octree: OctreeLike, gsplatEntity?: Entity) {
-    const instances = findAllOctreeInstances(app, octree, gsplatEntity);
-    for (let i = 0; i < instances.length; i++) {
-        instances[i].needsLodUpdate = true;
-    }
+    return count;
 }
 
 function scoreWorldAabbVisibleNode(
@@ -1731,7 +1717,8 @@ export function getStreamingViewportRefinementStatus(
 export function syncStreamingOctreePlacements(scene: OctreeStreamingScene): number {
     const { app, octree, gsplatEntity } = scene;
     const gsplatScene = app.scene.gsplat as GsplatSceneLike;
-    return syncOctreePendingPlacements(app, octree, gsplatEntity, gsplatScene, true);
+    // bootstrap / viewport sync：只推 LOD，不 scene-wide dirty
+    return syncOctreePendingPlacements(app, octree, gsplatEntity, gsplatScene, false);
 }
 
 type BuildPriorityFilesOptions = {
@@ -2062,6 +2049,29 @@ function pinLoadedForegroundFiles(
     }
 }
 
+/**
+ * 释放 controller 侧 pin 引用（与 retain/pin 的 incRefCount 成对）。
+ * placement 自身引用仍由引擎 filePlacements / activePlacements 持有，不会误卸正在上屏资源。
+ */
+function releasePinnedFiles(octree: OctreeLike, pinnedFiles: Set<number>): number {
+    if (!octree.decRefCount || pinnedFiles.size === 0) {
+        pinnedFiles.clear();
+        return 0;
+    }
+    const cooldown = octree.cooldownTicks ?? 100;
+    let released = 0;
+    for (const fi of pinnedFiles) {
+        try {
+            octree.decRefCount(fi, cooldown);
+            released++;
+        } catch (err) {
+            console.warn('[octree-refinement] pin decRefCount failed', fi, err);
+        }
+    }
+    pinnedFiles.clear();
+    return released;
+}
+
 export type OctreeRefinementNotifyOptions = {
     /** 主要为 orbit 距离/FOV 变化（瞬间拉近） */
     zoom?: boolean;
@@ -2112,6 +2122,8 @@ export type OctreeRefinementTickMetrics = {
     boostActive: boolean;
     syncedInstances: number;
     pinnedFiles: number;
+    /** 本 tick 配对释放的 controller pin 数 */
+    pinnedReleased: number;
     integratedLoaderResources: number;
     fileJustLanded: boolean;
     needsLodSwitch: boolean;
@@ -2255,6 +2267,7 @@ export function createOctreeRefinementController(
         // 5 档资产 optimal=0 时 limit 至少为 4 才能包含 bootstrap L4；取 max 保证生效
         const maxLod = octree.lodLevels - 1;
         gsplatScene.lodUnderfillLimit = Math.max(T.lod.underfillLimit, maxLod);
+        // 结构参数（budget / underfill）变化 → 允许 scene-wide dirty
         gsplatScene.dirty = true;
     };
 
@@ -2289,7 +2302,7 @@ export function createOctreeRefinementController(
         if (!octree.__refinementIdleFreeze) {
             prefetch.lastUrls = [];
         }
-        gsplatScene.dirty = true;
+        // budget/underfill 未在此恢复；勿 scene-wide dirty（仅并发 / lodUpdateDistance）
     };
 
     const restoreSavedGsplatSceneSettings = () => {
@@ -2301,6 +2314,7 @@ export function createOctreeRefinementController(
             gsplatScene.lodUnderfillLimit = savedLodUnderfillLimit;
             savedLodUnderfillLimit = null;
         }
+        // 恢复全局 LOD 结构参数 → scene-wide dirty
         gsplatScene.dirty = true;
     };
 
@@ -2315,6 +2329,7 @@ export function createOctreeRefinementController(
             savedTunables = null;
         }
         cancelDeferredOctreeInstanceUpdates(app, octree);
+        releasePinnedFiles(octree, prefetch.pinned);
         restoreRefinementMode();
         restoreSavedGsplatSceneSettings();
         const loader = octree.assetLoader;
@@ -2487,12 +2502,15 @@ export function createOctreeRefinementController(
         const idleFrozen = idleQuiescent || !!loader?.__refinementIdleFreeze;
         let safeAbortedInflight = 0;
         let integratedLoaderResources = 0;
+        let pinnedReleased = 0;
 
         idleQueueDrainedLastTick = 0;
         if (idleQuiescent && loader) {
             const wasFrozen = !!loader.__refinementIdleFreeze;
             if (!wasFrozen) {
                 prefetch.tracked.clear();
+                // idle eviction：释放 controller pin；placement 引用仍保上屏资源
+                pinnedReleased += releasePinnedFiles(octree, prefetch.pinned);
             }
             setIdleDownloadFreeze(octree, loader);
             const instances = findAllOctreeInstances(app, octree, gsplatEntity);
@@ -2686,11 +2704,7 @@ export function createOctreeRefinementController(
             syncMs = performance.now() - syncStartMs;
         }
 
-        if (syncedInstances > 0) {
-            markOctreeInstancesDirty(app, octree, gsplatEntity);
-            gsplatScene.dirty = true;
-            app.renderNextFrame = true;
-        }
+        // sync 经 World.requestOctreePlacementUpdate + renderNextFrame；勿再绑 gsplatScene.dirty
 
         if (staleSyncCooldown > 0) {
             staleSyncCooldown--;
@@ -2730,6 +2744,7 @@ export function createOctreeRefinementController(
                     },
                     pinLimit: T.loader.pinLimit,
                     pinnedFiles: prefetch.pinned.size,
+                    pinnedReleased,
                     pendingUniqueFiles,
                     criticalPendingUnique,
                     foregroundPendingUnique,
@@ -2835,6 +2850,7 @@ export function createOctreeRefinementController(
             boostActive,
             syncedInstances,
             pinnedFiles: prefetch.pinned.size,
+            pinnedReleased,
             integratedLoaderResources,
             fileJustLanded,
             needsLodSwitch,
@@ -2869,11 +2885,8 @@ export function createOctreeRefinementController(
             syncBurstLodUpdateDistance();
         }
 
-        if (fileJustLanded || activityActive) {
-            gsplatScene.dirty = true;
-            markOctreeInstancesDirty(app, octree, gsplatEntity);
-            app.renderNextFrame = true;
-        } else if (priorityUrls.length > 0) {
+        // activity / 下载中：只保活渲染节拍，不触发 scene-wide dirty / 重复 needsLodUpdate
+        if (fileJustLanded || activityActive || priorityUrls.length > 0) {
             app.renderNextFrame = true;
         }
 
@@ -2910,7 +2923,7 @@ export function createOctreeRefinementController(
             prevActivityActive = false;
             consecutiveIdleFrames = 0;
             idleQueueDrainedLastTick = 0;
-            prefetch.pinned.clear();
+            releasePinnedFiles(octree, prefetch.pinned);
             prefetch.tracked.clear();
             prefetch.lastUrls = [];
             prevPending.staleLodNodes = -1;
@@ -2942,12 +2955,11 @@ export function createOctreeRefinementController(
                         octree,
                         gsplatEntity,
                         gsplatScene,
-                        true
+                        false
                     );
                     if (count > 0) {
                         ensureFrameProfile(app).frameReadySync = true;
                     }
-                    markOctreeInstancesDirty(app, octree, gsplatEntity);
                     app.renderNextFrame = true;
                 }
             };
@@ -2978,7 +2990,7 @@ export function createOctreeRefinementController(
             settle.hadCritical = false;
             prefetch.lastUrls = [];
             prefetch.tracked.clear();
-            prefetch.pinned.clear();
+            releasePinnedFiles(octree, prefetch.pinned);
             consecutiveIdleFrames = 0;
             idleQueueDrainedLastTick = 0;
             staleSyncCooldown = 0;

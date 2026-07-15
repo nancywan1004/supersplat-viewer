@@ -69,7 +69,7 @@
   <nav class="toc">
     <strong>目录</strong>
     <ul><li><a href="#intro">概述</a></li><li><a href="#entities">实体与字段</a></li><li><a href="#sequence">时序图</a></li><li><a href="#walkthrough">换档示例</a></li><li><a href="#native">Native vs Refinement</a></li><li><a href="#metrics">Poland · Benchmark · bake</a></li><li><a href="#glossary">术语速查</a></li><li><a href="#appendix">附录 · 优化草案</a></li></ul>
-    <p class="diagram-note">源：gsplat-world-data-flow.canvas.tsx<br/>导出：2026-07-13</p>
+    <p class="diagram-note">源：gsplat-world-data-flow.canvas.tsx<br/>导出：2026-07-14</p>
   </nav>
   <main>
     <section id="intro">
@@ -80,6 +80,9 @@
         <span class="pill b">B = NodeInfo + Placement</span>
         <span class="pill c">C = slot / work buffer</span>
       </div>
+      <div class="callout info"><strong>怎么读（正文 8 张核心表）</strong><p><strong>必看</strong>：ER 图 → 时序图 → 换档纵向图 → Native 摊平/打包图。<strong>按需展开</strong>：核心实体职责 · 数据存哪 · Native 对照 · 误解对照 · Poland 诊断 · Benchmark · 全量触发 · 术语速查。</p></div>
+      <div class="callout info"><strong>GSplatWorld</strong><p>整场景共享：BlockAllocator、_allocationMap、_workBuffer、_worldStates。</p></div>
+      <div class="callout info"><strong>GSplatInfo</strong><p>Placement 烘焙快照：intervals[]（SOG 源）+ intervalOffsets[]（WB 目标）。needsUploadIds 在 WorldState 上。</p></div>
     </section>
 
     <section id="entities">
@@ -207,32 +210,40 @@
 
     <section id="native">
       <h2>Native vs Refinement</h2>
-      <div class="callout info"><strong>一句话</strong><p>bake 链相同。<strong>Native 每 tick 摊平</strong> vs <strong>Refinement burst 末打包</strong>。主因：无 burst sync + updateStreaming 逐 tick 消化 pending。</p></div>
-      <pre class="mermaid">flowchart LR
-        subgraph nativeSpread [Native · 多帧摊平]
-          nF[帧F dc≈2] --> nF1[帧F+1 dc≈2] --> nF2[帧F+2 dc≈3]
-        end
-        subgraph refineBurst [Refinement · burst 末打包]
-          rFetch[帧F..F+3 fetch] --> rPack[帧F+4 dc≈26 gap≈119ms]
-        end</pre>
-      <pre class="mermaid">flowchart TB
-        subgraph viewer [Refinement 打包]
-          v1[burst 18帧] --> v2[scan+fetch] --> v3[burst_lod_switch] --> v4[apply26叶]
-        end
-        subgraph nativeSched [Native 摊平]
-          n1[updateStreaming tick] --> n2[少量 apply] --> n3[bake dc≈2]
-        end
-        subgraph merge [汇合 · 同引擎 bake]
-          m1[WorldState] --> m2[writeBuffer] --> m3[GPU draw]
-        end
-        v4 --> m1
-        n3 --> m1</pre>
+      <div class="callout info"><strong>一句话</strong><p>bake 链相同。差在换档请求如何进入 applyLodChanges：<strong>Native 按 file 落地节拍摊平</strong> vs <strong>Refinement 高并发先囤、burst 末一次 sync 打包</strong>。</p></div>
+      <div class="callout warn"><strong>故事设定（下列对照共用）</strong><p>同一次相机移动：视锥里突然需要 <strong>10 个新 fine LOD 文件</strong>。Native 并发=2；Refinement burst 期并发≈6。只比 unlock 之后的稳态（两边首屏 bootstrap 已共用）。每帧公共骨架：输入 → update（调度）→ framerender（引擎 streaming）→ frame:ready → render / bake / GPU → frameend。</p></div>
+      <div class="callout info"><strong>needsLodSwitch 只在 Refinement</strong><p>Native unlock 后 Viewer 不算 needsLodSwitch。Refinement scan：<code>currentLod &gt; targetLod</code>（该升档）或 <code>currentLod &lt; 0</code>（未上屏）→ true；<code>currentLod ≤ targetLod</code> 直接 OK（<strong>不为降档</strong> sync）。apply 仍听 optimalLod。</p></div>
+      <details class="appendix" open><summary>展开 · 帧对照 · Native vs Refinement（F0→F5）</summary><div class="appendix-body"><table><thead><tr><th>帧</th><th>Native</th><th>Refinement</th></tr></thead><tbody><tr><td>F0 · 相机刚动</td><td>引擎 updateStreaming：评估 optimalLod，缺失 file 入队；同时只跑 2 路下载（如 #1,#2）。无 JS controller。loadingCount≈10。本帧通常几乎不 bake。</td><td>notifyCameraMoved → burst≈18。runPriorityPrefetch：scan 算 targetLod、建 priority；抬并发；ensure 一堆优先 URL。可能立刻 burst_lod_switch。pending=前景缺文件数；staleLoaded 可能仍为 0。</td></tr>
+<tr><td>F1</td><td>#1 落地 → 本 tick 只 apply 刚 ready 的少量叶 → bake 一点点（dc≈2）。空槽拉 #3。loadingCount 台阶下降。</td><td>下载继续（可 6 路）。file 落地常先堆到 staleLoaded，不一定立刻全 apply。pending↓，staleLoaded↑。</td></tr>
+<tr><td>F2–F3</td><td>继续「落地 1～2 个 → apply 一点 → 再拉下一批」。换档均匀洒在多帧。loadingCount 台阶式下降。</td><td>burst 窗口内反复 scan / 排队 / boost。file 快速囤齐；staleLoaded 堆高。偶尔 cooldown sync，或等 burst_lod_switch 打包。</td></tr>
+<tr><td>F4 · 关键分叉</td><td>继续落地并少量 apply。画面一格一格更清楚。帧时仍接近 16ms。</td><td>很多 file 已在本地 → 一次 burst_lod_switch sync → 同帧 apply 很多叶 → bake 尖刺（Poland 常见 dc≈20+，gapMs≈100ms+）。</td></tr>
+<tr><td>F5+</td><td>余下 file 继续 2 路消化；loadingCount→0 才算本视角清完。</td><td>pending=0 可能早已出现，但 stale 还需 sync 才「突然」跟上；随后 idle 降并发回 2，可冻结外围下载。</td></tr></tbody></table></div></details>
+      <details class="appendix" open><summary>展开 · 时间线（同一故事 · 下载 / pending / bake）</summary><div class="appendix-body"><table><thead><tr><th>路径</th><th>F0 → F5 摘要</th></tr></thead><tbody><tr><td>NATIVE</td><td>F0 [⬇#1 ⬇#2] queue 其余 · loading≈10 · bake≈0 → F1 [ok#1 ⬇#2 ⬇#3] apply 少 · bake 小 → …同节奏… → Fn loadingCount→0</td></tr>
+<tr><td>REFINEMENT</td><td>F0 [⬇#1..#6] scan+priority+burst · pending≈10 · stale=0 → F1–F3 囤齐 · stale↑ → F4 ★ burst_lod_switch 打包 apply · bake 爆炸 → F5 settle</td></tr></tbody></table></div></details>
+      <details class="appendix" open><summary>展开 · 单帧内部顺序</summary><div class="appendix-body"><table><thead><tr><th>步骤</th><th>Native</th><th>Refinement</th></tr></thead><tbody><tr><td>1 · 调度入口</td><td>无 JS scan；framerender → updateStreaming</td><td>update → runPriorityPrefetch（scan / priority / 动态并发 / sync 闸门）</td></tr>
+<tr><td>2 · 评估 + 下载</td><td>evaluate optimalLod；ensureFileResource（maxConcurrentLoads=2）</td><td>Viewer targetLod + priority gate；并发 2→6→最高 64</td></tr>
+<tr><td>3 · apply 节奏</td><td>本 tick 仅对「刚 ready」的叶 applyLodChanges</td><td>条件满足才 sync（burst_lod_switch / file_landed / stale_* …）→ needsLodUpdate</td></tr>
+<tr><td>4 · 信号</td><td>frame:ready(ready, loadingCount) · 观测用</td><td>frame:ready：loading 下降时可再 sync 一刀</td></tr>
+<tr><td>5 · bake / GPU</td><td>有 apply 才 bake；典型 dc≈2</td><td>WebGPU 上 inst.update 常 defer 到 frameend；sync 帧可 dc 20+</td></tr></tbody></table></div></details>
+      <details class="appendix" open><summary>展开 · 仪表怎么对上看</summary><div class="appendix-body"><table><thead><tr><th>你想盯的</th><th>Native</th><th>Refinement</th></tr></thead><tbody><tr><td>「还没下完」</td><td>loadingCount（引擎 pending 节点）</td><td>pending = foregroundPendingUnique（前景缺 file 数）</td></tr>
+<tr><td>「下完了还没上屏」</td><td>藏在引擎内部，无单独 HUD 数</td><td>staleLoadedNodes</td></tr>
+<tr><td>「这帧炸没炸」</td><td>drawCalls 偶发升高，常仍小</td><td>sync 帧 dc / gapMs / copyPct 尖刺</td></tr>
+<tr><td>loadingCount vs pending</td><td>Native HUD pending ≈ loadingCount</td><td>Refinement pending ≠ loadingCount（另一套计数）</td></tr></tbody></table></div></details>
+      <div class="callout info"><strong>记法</strong><p>Native = 下载→落地→立刻少量 apply→下一帧再下一点（流水、摊平）。Refinement = 多路先囤 → stale 堆着 → 某一帧 sync 打包 apply（快清意图，易出尖刺）。bake/GPU 同一引擎；差在请求进 apply 的形状。</p></div>
+      <details class="appendix" open><summary>展开 · pending 消化 · Native 摊平 vs Refinement 打包</summary><div class="appendix-body"><table><thead><tr><th>话题</th><th>Native</th><th>Refinement</th><th>Poland / 代码</th></tr></thead><tbody><tr><td>pending 是什么</td><td>loadingCount：optimalLod≠currentLod 且目标 SOG 还没落地</td><td>Viewer 侧 staleLoadedNodes / needsLodSwitch 等 + 引擎 pending</td><td>NativeStreamingObserver 只观测 loadingCount</td></tr>
+<tr><td>谁判定「该换档」</td><td>引擎 evaluateNodeLods：currentLod vs optimalLod（全场景）</td><td>Viewer scan：currentLod vs targetLod（视锥 + ladder）→ needsLodSwitch</td><td>Native **无** needsLodSwitch 变量</td></tr>
+<tr><td>needsLodSwitch</td><td>**无**（unlock 后 refinement controller 销毁）</td><td>视锥叶 currentLod&gt;targetLod 或未上屏 → true；不为降档触发</td><td>refinement-controller processRefinementLeaf</td></tr>
+<tr><td>何时 apply + bake</td><td>file 落地后的 updateStreaming tick；每 tick 只 apply「本帧刚 ready」的叶</td><td>sync → needsLodUpdate → frameend inst.update → applyLodChanges 循环全部 stale</td><td>Refinement：sync×1 可打包 26 叶同帧</td></tr>
+<tr><td>如何「每帧少量」</td><td>**无显式 N/帧限额**；主因是 loader 并发有限 → file 逐个落地 → apply 跟着落地节拍走</td><td>burst 高并发先囤齐 file → burst_lod_switch 一次 sync 全部 apply</td><td>Native 94% 帧 dc=2；Refinement 35% 慢档</td></tr>
+<tr><td>drawCalls=2 别误解</td><td>GPU draw **batch 数**；清晰稳态 copyPct=0 = 多帧根本没 bake</td><td>同左；慢帧 dc≈26 = 同帧 active interval 行数</td><td>≠「每帧只 apply 2 个 pending 叶」</td></tr>
+<tr><td>allowLodUpdate</td><td>CPU sort 过载时 skip evaluate；下帧补跑 · **保险阀**</td><td>无（Native 引擎闸门）</td><td>不是 Poland native dc≈2 的主解释</td></tr>
+<tr><td>Refinement 学 native</td><td>—</td><td>plan P0：maxSyncsPerFrame、非对称 sync（~2609）补回下载节拍节流</td><td>burst 打穿了 native 天然节流</td></tr></tbody></table></div></details>
       <div class="grid-2">
-        <details class="appendix" open><summary>展开 · Native vs Refinement 对照</summary><div class="appendix-body"><table><thead><tr><th>维度</th><th>Native</th><th>Refinement</th></tr></thead><tbody><tr><td>调度入口</td><td>GSplatWorld.updateStreaming()</td><td>runPriorityPrefetch() + 引擎 inst.update</td></tr>
+        <details class="appendix" open><summary>展开 · Native vs Refinement 维度对照</summary><div class="appendix-body"><table><thead><tr><th>维度</th><th>Native</th><th>Refinement</th></tr></thead><tbody><tr><td>调度入口</td><td>GSplatWorld.updateStreaming()</td><td>runPriorityPrefetch() + 引擎 inst.update</td></tr>
 <tr><td>Viewer scan</td><td>无</td><td>视锥内 buildPriorityFiles</td></tr>
 <tr><td>targetLod</td><td>无</td><td>有（边缘 + ladder）</td></tr>
 <tr><td>fetch 优先级</td><td>引擎 assetLoader</td><td>Viewer priorityUrls + gate</td></tr>
-<tr><td>下载并发</td><td>引擎默认</td><td>2→8→最高 64</td></tr>
+<tr><td>下载并发</td><td>引擎默认固定 2</td><td>2→6（boost）→最高 64（硬顶）</td></tr>
 <tr><td>idle 冻结</td><td>无</td><td>静止 30 帧 skip scan</td></tr>
 <tr><td>burst 18 帧</td><td>无</td><td>有 · burst_lod_switch</td></tr>
 <tr><td>viewer sync</td><td>unlock 后无</td><td>syncOctreePendingPlacements + 闸门</td></tr>
@@ -303,7 +314,10 @@ workBuffer.render(splatsToRender, camera, debugColors, changedAllocIds);</code><
 <tr><td>targetLod / optimalLod</td><td>Viewer 调度档 / 引擎理想档</td><td>fetch 听 target · apply 听 optimal</td></tr>
 <tr><td>gapMs</td><td>profiler 残差</td><td>慢帧主因 ≈ CPU bake</td></tr>
 <tr><td>inferred fullRebuild</td><td>benchmark 标签</td><td>copyPct≥95% · 非 engFULL</td></tr>
-<tr><td>runPriorityPrefetch</td><td>Refinement 调度 tick</td><td>scan+下载+sync · 不只重建队列</td></tr></tbody></table></div></details>
+<tr><td>runPriorityPrefetch</td><td>Refinement 调度 tick</td><td>scan+下载+sync · 不只重建队列</td></tr>
+<tr><td>needsLodSwitch</td><td>Refinement only · scan 产出</td><td>current&gt;targetLod 或未上屏 · 不为降档</td></tr>
+<tr><td>loadingCount / pending</td><td>Native EVENT_FRAMEREADY</td><td>待落地 file 的 node 数 · 0=当前视角无 pending</td></tr>
+<tr><td>drawCalls=2（稳态）</td><td>GPU draw batch 数</td><td>≠ 每帧 apply 叶数 · 稳态 copyPct=0 常无 bake</td></tr></tbody></table></div></details>
     </section>
 
     <section id="appendix">

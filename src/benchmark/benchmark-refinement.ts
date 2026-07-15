@@ -115,6 +115,19 @@ export type GsplatBufferUploadMetrics = {
      */
     fullRebuild: boolean;
     fullRebuildSource: 'engine' | 'inferred' | 'none';
+    /** 引擎最新 GSplatWorldState.fullRebuild（不含 inferred） */
+    worldStateFullRebuild: boolean;
+    /**
+     * 本帧曾见 scene.gsplat.dirty 且 workBufferRebuildRequired 被置位
+     * （B.1 回归：LOD sync 不应再走这条强制全量路径）
+     */
+    dirtyForcedWorkBufferRebuild: boolean;
+    /** GSplatWorld._lastWorldStateVersion */
+    worldStateVersion: number | null;
+    /** GSplatWorld._currentVersion（render-ready） */
+    currentVersion: number | null;
+    /** 所有 octree instance 的 Σ currentLod（sync 推进指纹） */
+    currentLodSum: number | null;
     /** BlockAllocator.capacity（splat slots）；可随 grow 上涨 */
     allocatorCapacity: number;
     /** BlockAllocator.usedSize */
@@ -150,6 +163,7 @@ type GsplatWorldLike = {
     _lastWorldStateVersion?: number;
     _currentVersion?: number;
     _workBufferRebuildRequired?: boolean;
+    _octreeInstances?: Map<unknown, unknown>;
 };
 type GsplatManagerLike = {
     bufferCopyUploaded?: number;
@@ -231,6 +245,11 @@ function emptyBufferUploadMetrics(app?: AppBase): GsplatBufferUploadMetrics {
         uploadEstMode: 'none',
         fullRebuild: false,
         fullRebuildSource: 'none',
+        worldStateFullRebuild: false,
+        dirtyForcedWorkBufferRebuild: false,
+        worldStateVersion: null,
+        currentVersion: null,
+        currentLodSum: null,
         allocatorCapacity: 0,
         allocatorUsed: 0,
         allocatorFree: 0,
@@ -242,11 +261,52 @@ function emptyBufferUploadMetrics(app?: AppBase): GsplatBufferUploadMetrics {
     };
 }
 
+export type ReadBufferUploadOptions = {
+    /** 本帧曾观测到 scene.gsplat.dirty === true */
+    dirtySeen?: boolean;
+    /** 本帧曾观测到 world._workBufferRebuildRequired === true */
+    workBufferRebuildSeen?: boolean;
+    /** 仅 sync 窗口内才扫 currentLod（Poland 96k 全帧扫会压帧） */
+    includeCurrentLodSum?: boolean;
+};
+
+function readCurrentLodSum(director: GsplatDirectorLike): number | null {
+    let sum = 0;
+    let saw = false;
+    for (const cameraData of director.camerasMap.values()) {
+        for (const layerData of cameraData.layersMap.values()) {
+            for (const manager of [layerData.gsplatManager, layerData.gsplatManagerShadow]) {
+                const instances = manager?.world?._octreeInstances;
+                if (!instances) {
+                    continue;
+                }
+                for (const inst of instances.values()) {
+                    const infos = (inst as { nodeInfos?: Array<{ currentLod?: number }> }).nodeInfos;
+                    if (!infos?.length) {
+                        continue;
+                    }
+                    saw = true;
+                    for (let i = 0; i < infos.length; i++) {
+                        const lod = infos[i]?.currentLod;
+                        if (typeof lod === 'number' && lod >= 0) {
+                            sum += lod;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return saw ? sum : null;
+}
+
 /**
  * 读取引擎真实的 work-buffer block 上传计数、allocator 容量与 fullRebuild 信号。
  * 须在 manager.update / frameend 之后采样（与 frame-profiler 一致）。
  */
-export function readGsplatBufferUploadMetrics(app: AppBase): GsplatBufferUploadMetrics {
+export function readGsplatBufferUploadMetrics(
+    app: AppBase,
+    options?: ReadBufferUploadOptions
+): GsplatBufferUploadMetrics {
     const empty = emptyBufferUploadMetrics(app);
     const director = getGsplatDirector(app);
     if (!director) {
@@ -265,6 +325,10 @@ export function readGsplatBufferUploadMetrics(app: AppBase): GsplatBufferUploadM
     let allocatorFree = 0;
     let fragmentation = 0;
     let engineFullRebuild: boolean | null = null;
+    let worldStateFullRebuild = false;
+    let workBufferRebuildRequired = false;
+    let worldStateVersion: number | null = null;
+    let currentVersion: number | null = null;
     const seenWorlds = new Set<GsplatWorldLike>();
 
     for (const cameraData of director.camerasMap.values()) {
@@ -293,9 +357,23 @@ export function readGsplatBufferUploadMetrics(app: AppBase): GsplatBufferUploadM
                     const fr = readWorldFullRebuild(world);
                     if (fr !== null) {
                         engineFullRebuild = engineFullRebuild === null ? fr : engineFullRebuild || fr;
+                        worldStateFullRebuild = worldStateFullRebuild || fr;
                     }
                     if (world._workBufferRebuildRequired) {
                         engineFullRebuild = true;
+                        workBufferRebuildRequired = true;
+                    }
+                    if (typeof world._lastWorldStateVersion === 'number') {
+                        worldStateVersion =
+                            worldStateVersion === null
+                                ? world._lastWorldStateVersion
+                                : Math.max(worldStateVersion, world._lastWorldStateVersion);
+                    }
+                    if (typeof world._currentVersion === 'number') {
+                        currentVersion =
+                            currentVersion === null
+                                ? world._currentVersion
+                                : Math.max(currentVersion, world._currentVersion);
                     }
                 } else {
                     uploadedBlocks += manager.bufferCopyUploaded ?? 0;
@@ -372,6 +450,11 @@ export function readGsplatBufferUploadMetrics(app: AppBase): GsplatBufferUploadM
             : 0;
     const textureSize = allocatorCapacity > 0 ? Math.ceil(Math.sqrt(allocatorCapacity)) : 0;
 
+    const dirtySeen = options?.dirtySeen === true;
+    const workBufferRebuildSeen =
+        options?.workBufferRebuildSeen === true || workBufferRebuildRequired;
+    const dirtyForcedWorkBufferRebuild = dirtySeen && workBufferRebuildSeen;
+
     return {
         uploadedBlocks,
         totalBlocks,
@@ -386,6 +469,11 @@ export function readGsplatBufferUploadMetrics(app: AppBase): GsplatBufferUploadM
         uploadEstMode,
         fullRebuild,
         fullRebuildSource,
+        worldStateFullRebuild,
+        dirtyForcedWorkBufferRebuild,
+        worldStateVersion,
+        currentVersion,
+        currentLodSum: options?.includeCurrentLodSum ? readCurrentLodSum(director) : null,
         allocatorCapacity,
         allocatorUsed,
         allocatorFree,
