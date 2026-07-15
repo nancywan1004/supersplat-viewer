@@ -44,11 +44,8 @@ export function resolveModelUrlForVoxelCollision(global: Global): string | undef
     return trimUrl(global.config.contentUrl);
 }
 
-/** 无现成 collision URL 时，是否具备 Universe 生成条件（projectId + token + contentUrl）。 */
-export function canGenerateCollision(global: Global): boolean {
-    if (resolveCollisionUrl(global)) {
-        return false;
-    }
+/** 是否具备 Universe 生成凭证（projectId + token + contentUrl），与是否已有 URL 无关。 */
+export function hasCollisionGenerateCredentials(global: Global): boolean {
     const projectId = global.config.projectId;
     if (projectId == null || projectId === '') {
         return false;
@@ -57,6 +54,14 @@ export function canGenerateCollision(global: Global): boolean {
         return false;
     }
     return !!resolveModelUrlForVoxelCollision(global);
+}
+
+/** 无现成 collision URL 时，是否具备 Universe 生成条件（projectId + token + contentUrl）。 */
+export function canGenerateCollision(global: Global): boolean {
+    if (resolveCollisionUrl(global)) {
+        return false;
+    }
+    return hasCollisionGenerateCredentials(global);
 }
 
 export function setCollisionUrl(global: Global, url: string): void {
@@ -72,25 +77,40 @@ export function setCollisionUrl(global: Global, url: string): void {
 
 const inflightEnsure = new Map<string, Promise<CollisionUrlResult>>();
 
+export type EnsureCollisionUrlOptions = {
+    /** 忽略已有 URL，强制走 Universe 重新生成（用于旧地址不可访问时）。 */
+    forceRegenerate?: boolean;
+};
+
 /**
  * 确保 `settings.collision.url` 可用：已有 settings / URL 参数则直接返回；
  * 否则用 `contentUrl` 调 Universe `voxel-collision` 生成 GLB（不拉项目文件列表）。
+ * `forceRegenerate` 时即使已有 URL 也会重新生成并写回。
  */
-export async function ensureCollisionUrl(global: Global): Promise<CollisionUrlResult> {
+export async function ensureCollisionUrl(
+    global: Global,
+    options?: EnsureCollisionUrlOptions
+): Promise<CollisionUrlResult> {
+    const forceRegenerate = options?.forceRegenerate === true;
     const existing = resolveCollisionUrl(global);
-    if (existing) {
+    if (existing && !forceRegenerate) {
         return { ok: true, url: existing.url };
     }
 
-    if (!canGenerateCollision(global)) {
+    if (!hasCollisionGenerateCredentials(global)) {
+        if (existing && !forceRegenerate) {
+            return { ok: true, url: existing.url };
+        }
         return {
             ok: false,
-            message: '缺少 collision URL，且无法生成（需 projectId、token、contentUrl）'
+            message: forceRegenerate
+                ? 'collision URL 不可用，且无法重新生成（需 projectId、token、contentUrl）'
+                : '缺少 collision URL，且无法生成（需 projectId、token、contentUrl）'
         };
     }
 
     const modelUrl = resolveModelUrlForVoxelCollision(global)!;
-    const key = `${global.config.projectId ?? ''}:${global.config.token ?? ''}:${modelUrl}`;
+    const key = `${forceRegenerate ? 'regen:' : ''}${global.config.projectId ?? ''}:${global.config.token ?? ''}:${modelUrl}`;
     const inflight = inflightEnsure.get(key);
     if (inflight) {
         return inflight;
