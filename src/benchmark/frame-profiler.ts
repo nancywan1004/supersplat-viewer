@@ -93,8 +93,37 @@ export type FrameProfileRefinementSample = {
     tick: OctreeRefinementTickMetrics | null;
     deferredInstUpdateMs: number;
     frame: RefinementFrameProfile;
-    /** frameMs 减去已采样 CPU/GPU/refinement 后的缺口（含 GC、未计时的 gsplat buffer copy 等） */
+    /** frameMs 减去已采样 CPU/GPU/refinement 后的缺口（含 GC、未计时引擎路径等）；≠ 纯 bake */
     gapMs: number;
+};
+
+/** 引擎 gap 归因（与 bufferUpload 同源 `_lastFrame*`）；供高 gap vs bakeCpu 判别 */
+export type FrameProfileGapAttribution = {
+    worldUpdateMs: number;
+    placementIntegrateMs: number;
+    bakeCpuMs: number;
+    writeBufferMs: number;
+    needsUploadBlocks: number;
+    needsUploadSlots: number;
+    fullRebuild: boolean;
+    /** bakeCpu + writeBuffer + worldUpdate + placement；便于与 gapMs 对照 */
+    engineAccountedMs: number;
+};
+
+export type FrameProfileLongTaskSample = {
+    count: number;
+    totalMs: number;
+    maxMs: number;
+};
+
+/**
+ * 本帧窗口内 Performance Resource Timing 合计（网络传输为主；非 SOG 解码主线程精确值）。
+ * decode 若在 worker/主线程且无单独标计，可能部分落在 gapMs / longtask。
+ */
+export type FrameProfileResourceTimingSample = {
+    count: number;
+    durationMs: number;
+    transferSize: number;
 };
 
 export type FrameProfileCameraSample = {
@@ -134,6 +163,12 @@ export type FrameProfileSample = {
      * `uploadedBlocks`/`totalBlocks` 为真实字段；`uploadMbEst` 按 40B/splat 估算。
      */
     bufferUpload: GsplatBufferUploadMetrics;
+    /** 引擎 bake/world 拆分，与 gapMs 并列判读 */
+    gapAttribution: FrameProfileGapAttribution;
+    /** Chromium longtask（主线程 >50ms）；可含 GC / 未拆分 JS */
+    longTask: FrameProfileLongTaskSample;
+    /** 本帧窗口 resource timing（下载等） */
+    resourceTiming: FrameProfileResourceTimingSample;
     refinement: FrameProfileRefinementSample;
     camera: FrameProfileCameraSample | null;
 };
@@ -287,7 +322,8 @@ function readGpuSample(stats: PlayCanvasAppStats): FrameProfileGpuSample {
 
 /** 生产版 PlayCanvas 未设置 renderStart/updateStart，stats.frame.renderTime/updateTime 不可信 */
 function isPlausibleDurationMs(value: number, frameMs: number): boolean {
-    return Number.isFinite(value) && value >= 0 && value <= Math.max(frameMs * 2, 500);
+    // updateTime===0 在 WebGPU 路径上常见但无意义；若当「合法」会把整段 update 灌进 gapMs
+    return Number.isFinite(value) && value > 0 && value <= Math.max(frameMs * 2, 500);
 }
 
 type FrameStatsSnapshot = {
@@ -350,6 +386,33 @@ function buildCpuSample(
     };
 }
 
+function buildGapAttribution(bufferUpload: GsplatBufferUploadMetrics): FrameProfileGapAttribution {
+    const worldUpdateMs = bufferUpload.worldUpdateMs ?? 0;
+    const placementIntegrateMs = bufferUpload.placementIntegrateMs ?? 0;
+    const bakeCpuMs = bufferUpload.bakeCpuMs ?? 0;
+    const writeBufferMs = bufferUpload.writeBufferMs ?? 0;
+    return {
+        worldUpdateMs,
+        placementIntegrateMs,
+        bakeCpuMs,
+        writeBufferMs,
+        needsUploadBlocks: bufferUpload.needsUploadBlocks ?? 0,
+        needsUploadSlots: bufferUpload.needsUploadSlots ?? 0,
+        fullRebuild: bufferUpload.engineFrameFullRebuild === true || bufferUpload.fullRebuild,
+        engineAccountedMs: roundMs(
+            worldUpdateMs + placementIntegrateMs + bakeCpuMs + writeBufferMs
+        )
+    };
+}
+
+function emptyLongTask(): FrameProfileLongTaskSample {
+    return { count: 0, totalMs: 0, maxMs: 0 };
+}
+
+function emptyResourceTiming(): FrameProfileResourceTimingSample {
+    return { count: 0, durationMs: 0, transferSize: 0 };
+}
+
 function buildSample(
     app: AppBase,
     global: Global,
@@ -357,7 +420,9 @@ function buildSample(
     statsSnapshot: FrameStatsSnapshot,
     wallClock: FrameWallClockCapture,
     camera: FrameProfileCameraSample | null,
-    latch: { dirtySeen: boolean; workBufferRebuildSeen: boolean; includeCurrentLodSum: boolean }
+    latch: { dirtySeen: boolean; workBufferRebuildSeen: boolean; includeCurrentLodSum: boolean },
+    longTask: FrameProfileLongTaskSample,
+    resourceTiming: FrameProfileResourceTimingSample
 ): FrameProfileSample {
     const frame = statsSnapshot.frame;
     const tick = readRefinementTickMetrics(global);
@@ -373,6 +438,7 @@ function buildSample(
         workBufferRebuildSeen: latch.workBufferRebuildSeen,
         includeCurrentLodSum: latch.includeCurrentLodSum
     });
+    const gapAttribution = buildGapAttribution(bufferUpload);
 
     return {
         index,
@@ -387,6 +453,9 @@ function buildSample(
         jsHeapMb: readJsHeapUsedMB(),
         vramTexMb: readVramTexMB(app),
         bufferUpload,
+        gapAttribution,
+        longTask,
+        resourceTiming,
         refinement: {
             tick,
             deferredInstUpdateMs,
@@ -426,6 +495,81 @@ export function initFrameProfiler(global: Global, options?: { maxSamples?: numbe
     let workBufferRebuildSeenThisFrame = false;
     /** sync 后继续采 currentLodSum 的剩余帧数（含本帧） */
     let lodSumHorizonRemaining = 0;
+
+    let pendingLongTaskMs: number[] = [];
+    let pendingResource: { count: number; durationMs: number; transferSize: number } = {
+        count: 0,
+        durationMs: 0,
+        transferSize: 0
+    };
+
+    const longTaskObserver =
+        typeof PerformanceObserver !== 'undefined'
+            ? (() => {
+                try {
+                    const obs = new PerformanceObserver((list) => {
+                        for (const entry of list.getEntries()) {
+                            pendingLongTaskMs.push(entry.duration);
+                        }
+                    });
+                    obs.observe({ type: 'longtask', buffered: false } as PerformanceObserverInit);
+                    return obs;
+                } catch {
+                    return null;
+                }
+            })()
+            : null;
+
+    const resourceObserver =
+        typeof PerformanceObserver !== 'undefined'
+            ? (() => {
+                try {
+                    const obs = new PerformanceObserver((list) => {
+                        for (const entry of list.getEntries()) {
+                            const r = entry as PerformanceResourceTiming;
+                            pendingResource.count += 1;
+                            pendingResource.durationMs += r.duration;
+                            pendingResource.transferSize += r.transferSize || 0;
+                        }
+                    });
+                    obs.observe({ type: 'resource', buffered: false } as PerformanceObserverInit);
+                    return obs;
+                } catch {
+                    return null;
+                }
+            })()
+            : null;
+
+    const takeLongTaskSample = (): FrameProfileLongTaskSample => {
+        if (pendingLongTaskMs.length === 0) {
+            return emptyLongTask();
+        }
+        let total = 0;
+        let max = 0;
+        for (const ms of pendingLongTaskMs) {
+            total += ms;
+            if (ms > max) {
+                max = ms;
+            }
+        }
+        const sample: FrameProfileLongTaskSample = {
+            count: pendingLongTaskMs.length,
+            totalMs: roundMs(total),
+            maxMs: roundMs(max)
+        };
+        pendingLongTaskMs = [];
+        return sample;
+    };
+
+    const takeResourceTimingSample = (): FrameProfileResourceTimingSample => {
+        const sample: FrameProfileResourceTimingSample = {
+            count: pendingResource.count,
+            durationMs: roundMs(pendingResource.durationMs),
+            transferSize: pendingResource.transferSize
+        };
+        pendingResource = { count: 0, durationMs: 0, transferSize: 0 };
+        return sample;
+    };
 
     const latchFrameSignals = () => {
         const gsplat = app.scene?.gsplat as { dirty?: boolean } | undefined;
@@ -475,6 +619,9 @@ export function initFrameProfiler(global: Global, options?: { maxSamples?: numbe
 
     const onFrameEnd = () => {
         if (!recording) {
+            // 未录制时丢弃，避免 PerformanceObserver 缓冲无限涨
+            pendingLongTaskMs = [];
+            pendingResource = { count: 0, durationMs: 0, transferSize: 0 };
             return;
         }
         latchFrameSignals();
@@ -532,7 +679,19 @@ export function initFrameProfiler(global: Global, options?: { maxSamples?: numbe
             if (!recording) {
                 return;
             }
-            samples.push(buildSample(app, global, sampleIndex++, statsSnapshot, capture, cameraSample, latch));
+            samples.push(
+                buildSample(
+                    app,
+                    global,
+                    sampleIndex++,
+                    statsSnapshot,
+                    capture,
+                    cameraSample,
+                    latch,
+                    takeLongTaskSample(),
+                    takeResourceTimingSample()
+                )
+            );
             if (samples.length > maxSamples) {
                 samples.splice(0, samples.length - maxSamples);
             }
@@ -579,6 +738,8 @@ export function initFrameProfiler(global: Global, options?: { maxSamples?: numbe
             samples.length = 0;
             sampleIndex = 0;
             prevCamera = null;
+            pendingLongTaskMs = [];
+            pendingResource = { count: 0, durationMs: 0, transferSize: 0 };
             console.info('[frame-profiler] cleared');
         },
         isRecording() {
@@ -675,6 +836,8 @@ export function initFrameProfiler(global: Global, options?: { maxSamples?: numbe
     }
 
     return () => {
+        longTaskObserver?.disconnect();
+        resourceObserver?.disconnect();
         app.off('frameupdate', onFrameUpdate);
         app.off('framerender', onFrameRender);
         app.off('postrender', onPostRender);

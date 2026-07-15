@@ -144,6 +144,22 @@ export type GsplatBufferUploadMetrics = {
     hardCapSlots: number;
     /** scene.gsplat.splatBudget；>0 时为软上限，亦决定初始 capacity≈budget×1.15 */
     splatBudget: number;
+    /**
+     * 引擎本帧计时（vendor `GSplatWorld._lastFrame*`）。
+     * 用于拆开 `gapMs` 残差：高 gap && 高 bakeCpu → 数据面 bake；高 gap && 低 bakeCpu → 另处。
+     */
+    worldUpdateMs: number;
+    placementIntegrateMs: number;
+    /** rebuild/apply 中剔除 writeBuffer 后的 CPU（含排序 staging、splat.update 等） */
+    bakeCpuMs: number;
+    /** `_workBuffer.render` / `renderColor` 墙钟（可能含 GPU 同步） */
+    writeBufferMs: number;
+    /** 引擎累加的本帧 needsUpload / fullRebuild 块次数 */
+    needsUploadBlocks: number;
+    /** 对应 allocationMap 的 slot 合计（fullRebuild 时为全表 slots） */
+    needsUploadSlots: number;
+    /** 本帧 rebuild 路径曾见 engine fullRebuild（`_lastFrameFullRebuild`） */
+    engineFrameFullRebuild: boolean;
 };
 
 type MemBlockLike = { size?: number };
@@ -164,6 +180,13 @@ type GsplatWorldLike = {
     _currentVersion?: number;
     _workBufferRebuildRequired?: boolean;
     _octreeInstances?: Map<unknown, unknown>;
+    _lastFrameWorldUpdateMs?: number;
+    _lastFramePlacementIntegrateMs?: number;
+    _lastFrameBakeCpuMs?: number;
+    _lastFrameWriteBufferMs?: number;
+    _lastFrameNeedsUploadBlocks?: number;
+    _lastFrameNeedsUploadSlots?: number;
+    _lastFrameFullRebuild?: boolean;
 };
 type GsplatManagerLike = {
     bufferCopyUploaded?: number;
@@ -257,8 +280,19 @@ function emptyBufferUploadMetrics(app?: AppBase): GsplatBufferUploadMetrics {
         textureSize: 0,
         maxTextureSize: maxTex,
         hardCapSlots: maxTex > 0 ? maxTex * maxTex : 0,
-        splatBudget: Number.isFinite(splatBudget) ? splatBudget : 0
+        splatBudget: Number.isFinite(splatBudget) ? splatBudget : 0,
+        worldUpdateMs: 0,
+        placementIntegrateMs: 0,
+        bakeCpuMs: 0,
+        writeBufferMs: 0,
+        needsUploadBlocks: 0,
+        needsUploadSlots: 0,
+        engineFrameFullRebuild: false
     };
+}
+
+function roundMs1(value: number): number {
+    return Math.round(value * 10) / 10;
 }
 
 export type ReadBufferUploadOptions = {
@@ -329,6 +363,13 @@ export function readGsplatBufferUploadMetrics(
     let workBufferRebuildRequired = false;
     let worldStateVersion: number | null = null;
     let currentVersion: number | null = null;
+    let worldUpdateMs = 0;
+    let placementIntegrateMs = 0;
+    let bakeCpuMs = 0;
+    let writeBufferMs = 0;
+    let needsUploadBlocks = 0;
+    let needsUploadSlots = 0;
+    let engineFrameFullRebuild = false;
     const seenWorlds = new Set<GsplatWorldLike>();
 
     for (const cameraData of director.camerasMap.values()) {
@@ -346,6 +387,14 @@ export function readGsplatBufferUploadMetrics(
                     seenWorlds.add(world);
                     uploadedBlocks += world.bufferCopyUploaded ?? manager.bufferCopyUploaded ?? 0;
                     totalBlocks += world.bufferCopyTotal ?? manager.bufferCopyTotal ?? 0;
+                    worldUpdateMs += world._lastFrameWorldUpdateMs ?? 0;
+                    placementIntegrateMs += world._lastFramePlacementIntegrateMs ?? 0;
+                    bakeCpuMs += world._lastFrameBakeCpuMs ?? 0;
+                    writeBufferMs += world._lastFrameWriteBufferMs ?? 0;
+                    needsUploadBlocks += world._lastFrameNeedsUploadBlocks ?? 0;
+                    needsUploadSlots += world._lastFrameNeedsUploadSlots ?? 0;
+                    engineFrameFullRebuild =
+                        engineFrameFullRebuild || world._lastFrameFullRebuild === true;
                     activeSplatSlots += sumAllocationSlots(world._allocationMap);
                     const alloc = world._allocator;
                     if (alloc) {
@@ -481,7 +530,14 @@ export function readGsplatBufferUploadMetrics(
         textureSize,
         maxTextureSize: empty.maxTextureSize,
         hardCapSlots: empty.hardCapSlots,
-        splatBudget: empty.splatBudget
+        splatBudget: empty.splatBudget,
+        worldUpdateMs: roundMs1(worldUpdateMs),
+        placementIntegrateMs: roundMs1(placementIntegrateMs),
+        bakeCpuMs: roundMs1(bakeCpuMs),
+        writeBufferMs: roundMs1(writeBufferMs),
+        needsUploadBlocks,
+        needsUploadSlots,
+        engineFrameFullRebuild
     };
 }
 

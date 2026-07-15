@@ -1940,11 +1940,12 @@ function buildPriorityFiles(
 
         const fi = node.lods[targetLod]?.fileIndex ?? -1;
         const ladderBoost = computeLadderScoreBoost(maxLod, currentLod, targetLod);
+        const edgeWeight = Math.pow(edgeFactor, T.viewport.centerScorePower);
+        const weightedScore = score * edgeWeight * ladderBoost;
         if (fi !== -1 && octree.getFileResource(fi)) {
             staleLoadedNodes++;
         } else if (fi !== -1) {
-            const edgeWeight = Math.pow(edgeFactor, T.viewport.centerScorePower);
-            prioritized.push({ fileIndex: fi, score: score * edgeWeight * ladderBoost });
+            prioritized.push({ fileIndex: fi, score: weightedScore });
             prefetchCandidateFiles.add(fi);
             if (options?.prefetchBudget && prefetchCandidateFiles.size >= T.loader.foregroundLimit) {
                 return false;
@@ -2445,10 +2446,17 @@ export function createOctreeRefinementController(
         const stableCritical = buildBatchFromTracked(prefetch.tracked, T.loader.criticalLimit);
         const criticalBatch = stableCritical;
         const foregroundBatch = stableForeground;
+        trackedMs = performance.now() - trackedStartMs;
+
+        const fileJustLanded =
+            (prevPending.unique > 0 && pendingUniqueFiles < prevPending.unique) ||
+            (prevPending.stableForeground > 0 &&
+                countMissingUniqueFiles(octree, stableForeground) < prevPending.stableForeground) ||
+            (prevPending.critical > 0 && criticalPendingUnique < prevPending.critical);
+
         const activeBatch = foregroundBatch;
         const stableForegroundPending = countMissingUniqueFiles(octree, stableForeground);
         const stableCriticalPending = countMissingUniqueFiles(octree, stableCritical);
-        trackedMs = performance.now() - trackedStartMs;
 
         const pendingFileIndices: number[] = [];
         const priorityUrls: string[] = [];
@@ -2463,11 +2471,6 @@ export function createOctreeRefinementController(
                 priorityUrls.push(url);
             }
         }
-
-        const fileJustLanded =
-            (prevPending.unique > 0 && pendingUniqueFiles < prevPending.unique) ||
-            (prevPending.stableForeground > 0 && stableForegroundPending < prevPending.stableForeground) ||
-            (prevPending.critical > 0 && criticalPendingUnique < prevPending.critical);
 
         // 完成/settle 以 stableForegroundPending 为准，避免外围 budget 振荡拉高 pendingUniqueFiles
         if (stableForegroundPending > 0) {
@@ -2628,9 +2631,8 @@ export function createOctreeRefinementController(
         let syncTrigger: RefinementSyncTrigger | null = null;
         const syncStartMs = performance.now();
         if ((cameraJustMoved || cameraBurstActive) && needsLodSwitch) {
-            // Phase A：burst 内常规 sync 固定节奏；center critical（fileJustLanded）可 bypass
-            const burstCriticalBypass = fileJustLanded;
-            if (staleSyncCooldown <= 0 || burstCriticalBypass) {
+            // Phase A：burst 内常规 sync 固定节奏；fileJustLanded 可 bypass cooldown
+            if (staleSyncCooldown <= 0 || fileJustLanded) {
                 syncTrigger = 'burst_lod_switch';
                 syncedInstances = trackSyncOctreePendingPlacements(
                     app,
@@ -2652,7 +2654,10 @@ export function createOctreeRefinementController(
                 gsplatScene,
                 true
             );
-        } else if (needsLodSwitch && staleLoadedNodes >= T.loader.foregroundLimit) {
+        } else if (
+            needsLodSwitch &&
+            staleLoadedNodes >= T.loader.foregroundLimit
+        ) {
             syncTrigger = 'stale_limit';
             syncedInstances = trackSyncOctreePendingPlacements(
                 app,
@@ -2663,7 +2668,11 @@ export function createOctreeRefinementController(
                 true
             );
             staleSyncCooldown = T.burst.syncCooldown;
-        } else if (needsLodSwitch && staleLoadedNodes > 0 && staleSyncCooldown <= 0) {
+        } else if (
+            needsLodSwitch &&
+            staleLoadedNodes > 0 &&
+            staleSyncCooldown <= 0
+        ) {
             syncTrigger = 'stale_cooldown';
             syncedInstances = trackSyncOctreePendingPlacements(
                 app,
@@ -2674,7 +2683,11 @@ export function createOctreeRefinementController(
                 false
             );
             staleSyncCooldown = T.burst.staleSyncCooldown;
-        } else if (stableForegroundPending === 0 && staleLodNodes > 0 && fileJustLanded) {
+        } else if (
+            stableForegroundPending === 0 &&
+            staleLodNodes > 0 &&
+            fileJustLanded
+        ) {
             syncTrigger = 'post_download';
             syncedInstances = trackSyncOctreePendingPlacements(
                 app,
@@ -2689,7 +2702,11 @@ export function createOctreeRefinementController(
             syncMs = performance.now() - syncStartMs;
         }
 
-        if (fileJustLanded && syncedInstances === 0 && (staleLoadedNodes > 0 || needsLodSwitch)) {
+        if (
+            fileJustLanded &&
+            syncedInstances === 0 &&
+            (staleLoadedNodes > 0 || needsLodSwitch)
+        ) {
             syncTrigger = 'file_landed_fallback';
             syncedInstances = trackSyncOctreePendingPlacements(
                 app,

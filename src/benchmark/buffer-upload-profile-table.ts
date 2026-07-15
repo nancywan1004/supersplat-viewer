@@ -203,7 +203,7 @@ function buildStorageLayersTable(): BufferUploadProfileReport['storageLayers'] {
             layer: 'Bake Staging',
             location: 'CPU 主线程临时数组（render 内）',
             role: '从 Resource 读 position/color 等再 writeBuffer',
-            countedIn: 'gapMs（未单独计时）'
+            countedIn: 'bufferUpload.bakeCpuMs / writeBufferMs（≠ gapMs 残差）'
         },
         {
             layer: 'Compaction / Sort 缓冲',

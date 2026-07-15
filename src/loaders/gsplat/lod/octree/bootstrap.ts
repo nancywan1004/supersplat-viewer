@@ -435,6 +435,27 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
             return;
         }
 
+        // 首屏已完成：禁止再每帧全树扫描（Poland 96k 上 isOctreeBootstrapPlaceableNode
+        // + ensureStreamingBootstrapCoarseFiles 可占 CPU profile >50%）。
+        // 仅保留 animTrack 开机逻辑。
+        if (progressUIHidden) {
+            if (
+                state.animationStarted ||
+                revealBlocksAnim(state) ||
+                settings.startMode !== 'animTrack' ||
+                !state.hasAnimation ||
+                config.noanim
+            ) {
+                return;
+            }
+            state.animationStarted = true;
+            state.animationPaused = false;
+            state.progress = 100;
+            events.fire('animationStarted');
+            console.log('Streaming octree: starting animation after bootstrap UI complete');
+            return;
+        }
+
         const scene = streamingScene();
         if (!scene) {
             return;

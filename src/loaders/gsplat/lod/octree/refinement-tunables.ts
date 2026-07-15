@@ -114,7 +114,7 @@ function readNearJumpLadderFlag(value: unknown): boolean | undefined {
     return undefined;
 }
 
-/** URL / config > settings.sceneProfile.refinementPolicy > lodMode 映射 > aggressive（与改前默认行为一致） */
+/** URL / config > settings.sceneProfile.refinementPolicy > lodMode 映射 > desktop（与改前默认行为一致） */
 export function resolveRefinementPolicy(global: Global): RefinementPolicy {
     const config = global.config as { refinementPolicy?: unknown };
     const fromConfig = readExplicitPolicy(config.refinementPolicy);

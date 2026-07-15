@@ -466,6 +466,23 @@ export function initBenchmarkHud(global: Global): () => void {
                 : '—'
         ));
 
+        const bakeCpu = bufferUpload.bakeCpuMs ?? 0;
+        const writeBuf = bufferUpload.writeBufferMs ?? 0;
+        const worldUpd = bufferUpload.worldUpdateMs ?? 0;
+        const placeMs = bufferUpload.placementIntegrateMs ?? 0;
+        const engineBudget = bakeCpu + writeBuf + worldUpd + placeMs;
+        if (engineBudget > 0.05 || (bufferUpload.needsUploadBlocks ?? 0) > 0) {
+            lines.push(row(
+                'Gap bake',
+                `cpu ${bakeCpu.toFixed(1)} · write ${writeBuf.toFixed(1)} · world ${worldUpd.toFixed(1)} · place ${placeMs.toFixed(1)}`
+            ));
+            lines.push(row(
+                'NeedsUp',
+                `${bufferUpload.needsUploadBlocks ?? 0} blk · ${((bufferUpload.needsUploadSlots ?? 0) / 1e6).toFixed(2)}M slots` +
+                    (bufferUpload.engineFrameFullRebuild ? ' · FULL' : '')
+            ));
+        }
+
         if (refine) {
             const activityHint = refine.activityActive ? ' · dl' : '';
             lines.push(row(
