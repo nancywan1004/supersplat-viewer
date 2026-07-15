@@ -66,11 +66,14 @@ export class CameraCollisionManager {
 
     private sceneMeshEntity: Entity | null = null;
 
+    /** GLB 加载时缓存的物理网体；与是否立刻 apply 解耦（shadow 先载、collision 后开可直接挂上）。 */
+    private meshCollisionCache: Collision | null = null;
+
     private loadState: CollisionLoadState = 'idle';
 
     private loadPromise: Promise<void> | null = null;
 
-    /** 当前或最近一次 in-flight scene mesh 加载所合并的 intent（出站用）。 */
+    /** 当前或最近一次 in-flight scene mesh 加载所合并的 intent（出站用 / 实际加载 plan）。 */
     private activeLoadIntent: SceneMeshLoadIntent | null = null;
 
     private consumers: CameraCollisionConsumers | null = null;
@@ -143,18 +146,33 @@ export class CameraCollisionManager {
         if (!this.shouldLoadSceneMesh(intent)) {
             return;
         }
+
+        // 等待他人 in-flight 完成后再按本 intent 检查；不把「只为 shadow 的加载」当成 collision 已就绪。
+        if (this.loadState === 'loading' && this.loadPromise) {
+            await this.loadPromise;
+        }
+
+        this.tryApplyCachedMeshCollision(intent);
         if (this.isSceneMeshReady(intent)) {
             return;
         }
+
+        // 等待期间可能又有并发加载启动
         if (this.loadState === 'loading' && this.loadPromise) {
-            return this.loadPromise;
+            await this.loadPromise;
+            this.tryApplyCachedMeshCollision(intent);
+            if (this.isSceneMeshReady(intent)) {
+                return;
+            }
         }
+
         if (this.loadState === 'failed') {
             this.loadState = 'idle';
         }
 
+        const loadIntent = this.activeLoadIntent ?? intent;
         let collisionUrl = this.getCollisionUrl();
-        if (!collisionUrl && this.shouldFetchCollisionFromUniverse()) {
+        if (!collisionUrl && this.shouldFetchCollisionFromUniverse(loadIntent)) {
             const result = await ensureCollisionUrl(this.global);
             this.syncHasCollision();
             if (result.ok === false) {
@@ -164,9 +182,34 @@ export class CameraCollisionManager {
             }
         }
 
-        const initialPlan = this.sceneMeshLoadPlan(collisionUrl, intent);
+        const initialPlan = this.sceneMeshLoadPlan(collisionUrl, loadIntent);
         if (!initialPlan.loadSceneMesh && !initialPlan.loadVoxelCollision) {
+            // 已有 entity，仅缺物理：尽量用缓存补齐
+            this.tryApplyCachedMeshCollision(intent);
             return;
+        }
+
+        // 只需物理 collision 且 GLB entity 已在（典型：shadow 先载完）— 不必重下 GLB
+        if (
+            initialPlan.applySceneMeshCollision &&
+            this.sceneMeshEntity &&
+            this.meshCollisionCache &&
+            !initialPlan.loadVoxelCollision
+        ) {
+            this.urlCollision = this.meshCollisionCache;
+            this.loadState = 'ready';
+            this.emitLoadState('ready');
+            this.emitCollisionSystemReadyIfApplicable();
+            this.syncConsumers();
+            return;
+        }
+
+        if (this.loadState === 'loading' && this.loadPromise) {
+            await this.loadPromise;
+            this.tryApplyCachedMeshCollision(intent);
+            if (this.isSceneMeshReady(intent)) {
+                return;
+            }
         }
 
         this.loadState = 'loading';
@@ -180,8 +223,18 @@ export class CameraCollisionManager {
                 let allowRegenerate = true;
 
                 while (true) {
-                    const plan = this.sceneMeshLoadPlan(url, intent);
+                    // 用合并后的 activeLoadIntent，避免 shadow 先跑时把后续 collision 需求丢掉
+                    const planIntent = this.activeLoadIntent ?? loadIntent;
+                    const plan = this.sceneMeshLoadPlan(url, planIntent);
                     if (!plan.loadSceneMesh && !plan.loadVoxelCollision) {
+                        this.tryApplyCachedMeshCollision(planIntent);
+                        if (this.isLoadSatisfied(planIntent)) {
+                            this.loadState = 'ready';
+                            this.emitLoadState('ready');
+                            this.emitCollisionSystemReadyIfApplicable();
+                            this.syncConsumers();
+                            return;
+                        }
                         this.loadState = 'failed';
                         this.emitLoadState('failed');
                         this.syncConsumers();
@@ -197,6 +250,7 @@ export class CameraCollisionManager {
                             const result = await loadSceneMesh(app, plan.sceneMeshUrl);
                             if (result) {
                                 this.sceneMeshEntity = result.sceneMeshEntity;
+                                this.meshCollisionCache = result.meshCollision;
                                 if (plan.applySceneMeshCollision) {
                                     this.urlCollision = result.meshCollision;
                                 }
@@ -207,6 +261,8 @@ export class CameraCollisionManager {
                             } else {
                                 sceneMeshOk = false;
                             }
+                        } else if (plan.applySceneMeshCollision && this.meshCollisionCache) {
+                            this.urlCollision = this.meshCollisionCache;
                         }
 
                         if (plan.loadVoxelCollision && url) {
@@ -225,6 +281,7 @@ export class CameraCollisionManager {
                     }
 
                     if (sceneMeshOk && voxelOk) {
+                        this.tryApplyCachedMeshCollision(planIntent);
                         this.loadState = 'ready';
                         this.emitLoadState('ready');
                         this.emitCollisionSystemReadyIfApplicable();
@@ -240,6 +297,7 @@ export class CameraCollisionManager {
                         );
                         this.sceneMeshEntity = null;
                         this.urlCollision = null;
+                        this.meshCollisionCache = null;
                         const regenerated = await ensureCollisionUrl(this.global, {
                             forceRegenerate: true
                         });
@@ -266,7 +324,21 @@ export class CameraCollisionManager {
             }
         })();
 
-        return this.loadPromise;
+        await this.loadPromise;
+        this.tryApplyCachedMeshCollision(intent);
+    }
+
+    /** mesh 实体已在、物理尚未挂上时，从 GLB 缓存补齐 collision。 */
+    private tryApplyCachedMeshCollision(intent?: SceneMeshLoadIntent): void {
+        const plan = this.sceneMeshLoadPlan(undefined, intent);
+        if (!plan.applySceneMeshCollision || this.urlCollision || !this.meshCollisionCache) {
+            return;
+        }
+        this.urlCollision = this.meshCollisionCache;
+        if (this.sceneMeshEntity && this.loadState === 'ready') {
+            this.emitCollisionSystemReadyIfApplicable();
+            this.syncConsumers();
+        }
     }
 
     private shouldFetchCollisionFromUniverse(intent?: SceneMeshLoadIntent): boolean {
