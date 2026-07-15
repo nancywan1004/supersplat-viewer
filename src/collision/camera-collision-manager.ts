@@ -6,6 +6,7 @@ import { isSceneMeshGlbUrl, loadSceneMesh, sceneMeshUrl } from '../loaders/gltf/
 import {
     canGenerateCollision,
     ensureCollisionUrl,
+    hasCollisionGenerateCredentials,
     resolveCollisionUrl,
     SCENE_COLLISION_CHANGED
 } from './scene-collision-source';
@@ -163,8 +164,8 @@ export class CameraCollisionManager {
             }
         }
 
-        const plan = this.sceneMeshLoadPlan(collisionUrl, intent);
-        if (!plan.loadSceneMesh && !plan.loadVoxelCollision) {
+        const initialPlan = this.sceneMeshLoadPlan(collisionUrl, intent);
+        if (!initialPlan.loadSceneMesh && !initialPlan.loadVoxelCollision) {
             return;
         }
 
@@ -174,45 +175,88 @@ export class CameraCollisionManager {
 
         const { app } = this.global;
         this.loadPromise = (async () => {
-            let sceneMeshOk = !plan.loadSceneMesh;
-            let voxelOk = !plan.loadVoxelCollision;
-
             try {
-                if (plan.loadSceneMesh && plan.sceneMeshUrl) {
-                    const result = await loadSceneMesh(app, plan.sceneMeshUrl);
-                    if (result) {
-                        this.sceneMeshEntity = result.sceneMeshEntity;
-                        if (plan.applySceneMeshCollision) {
-                            this.urlCollision = result.meshCollision;
-                        }
-                        this.global.events.fire('sceneMesh:ready', {
-                            sceneMeshEntity: result.sceneMeshEntity
-                        } satisfies SceneMeshReadyPayload);
-                        sceneMeshOk = true;
-                    } else {
-                        sceneMeshOk = false;
-                    }
-                }
+                let url = collisionUrl;
+                let allowRegenerate = true;
 
-                if (plan.loadVoxelCollision && collisionUrl) {
-                    const voxel = await loadVoxelCollision(collisionUrl);
-                    if (voxel) {
-                        this.urlCollision = voxel;
-                        voxelOk = true;
-                    } else {
+                while (true) {
+                    const plan = this.sceneMeshLoadPlan(url, intent);
+                    if (!plan.loadSceneMesh && !plan.loadVoxelCollision) {
+                        this.loadState = 'failed';
+                        this.emitLoadState('failed');
+                        this.syncConsumers();
+                        return;
+                    }
+
+                    let sceneMeshOk = !plan.loadSceneMesh;
+                    let voxelOk = !plan.loadVoxelCollision;
+                    let loadError: unknown;
+
+                    try {
+                        if (plan.loadSceneMesh && plan.sceneMeshUrl) {
+                            const result = await loadSceneMesh(app, plan.sceneMeshUrl);
+                            if (result) {
+                                this.sceneMeshEntity = result.sceneMeshEntity;
+                                if (plan.applySceneMeshCollision) {
+                                    this.urlCollision = result.meshCollision;
+                                }
+                                this.global.events.fire('sceneMesh:ready', {
+                                    sceneMeshEntity: result.sceneMeshEntity
+                                } satisfies SceneMeshReadyPayload);
+                                sceneMeshOk = true;
+                            } else {
+                                sceneMeshOk = false;
+                            }
+                        }
+
+                        if (plan.loadVoxelCollision && url) {
+                            const voxel = await loadVoxelCollision(url);
+                            if (voxel) {
+                                this.urlCollision = voxel;
+                                voxelOk = true;
+                            } else {
+                                voxelOk = false;
+                            }
+                        }
+                    } catch (err) {
+                        loadError = err;
+                        sceneMeshOk = false;
                         voxelOk = false;
                     }
-                }
 
-                if (sceneMeshOk && voxelOk) {
-                    this.loadState = 'ready';
-                    this.emitLoadState('ready');
-                    this.emitCollisionSystemReadyIfApplicable();
-                } else {
+                    if (sceneMeshOk && voxelOk) {
+                        this.loadState = 'ready';
+                        this.emitLoadState('ready');
+                        this.emitCollisionSystemReadyIfApplicable();
+                        this.syncConsumers();
+                        return;
+                    }
+
+                    if (allowRegenerate && hasCollisionGenerateCredentials(this.global)) {
+                        allowRegenerate = false;
+                        console.warn(
+                            '[CameraCollision] collision/shadow mesh URL 不可用，尝试重新生成',
+                            { url, error: loadError }
+                        );
+                        this.sceneMeshEntity = null;
+                        this.urlCollision = null;
+                        const regenerated = await ensureCollisionUrl(this.global, {
+                            forceRegenerate: true
+                        });
+                        this.syncHasCollision();
+                        if (regenerated.ok === false) {
+                            console.warn('[CameraCollision] regenerate failed:', regenerated.message);
+                        } else {
+                            url = regenerated.url;
+                            continue;
+                        }
+                    }
+
                     this.loadState = 'failed';
-                    this.emitLoadState('failed');
+                    this.emitLoadState('failed', loadError);
+                    this.syncConsumers();
+                    return;
                 }
-                this.syncConsumers();
             } catch (err) {
                 this.loadState = 'failed';
                 this.emitLoadState('failed', err);
