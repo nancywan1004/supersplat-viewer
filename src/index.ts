@@ -211,6 +211,13 @@ const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
         keyboard: new Keyboard(window)
     });
 
+    // WebGPU：页面从后台恢复时，WorkBuffer bake 可能在 GPU buffer 尚未有效时 createBindGroup。
+    // 安装防护，避免 BindGroup 失败级联成 RenderPass 未 end / Invalid.Submit 无效。
+    if (device.deviceType === 'webgpu') {
+        const { installWebgpuBindGroupGuard } = await import('./render/webgpu-bind-group-guard');
+        installWebgpuBindGroupGuard(app);
+    }
+
     // Create entity hierarchy
     const cameraRoot = new Entity('camera root');
     app.root.addChild(cameraRoot);
