@@ -91,7 +91,7 @@ export class CameraCollisionManager {
         this.syncHasCollision();
     }
 
-    /** settings / URL 参数解析出的 collision 资源（GLB 或 voxel 包） */
+    /** URL 参数 / settings 解析出的 collision 资源（GLB 或 voxel 包；参数优先） */
     getCollisionUrl(): string | undefined {
         return resolveCollisionUrl(this.global)?.url;
     }

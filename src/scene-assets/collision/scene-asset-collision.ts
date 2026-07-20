@@ -57,8 +57,8 @@ export type {
 };
 export type { SceneAssetCollisionRuntimeState } from '../../types';
 
-/** 相机与放置资产 AABB 碰撞时使用的球体半径（米） */
-export const SCENE_ASSET_CAMERA_COLLISION_RADIUS = 0.3;
+/** 相机与场景/放置资产碰撞时使用的球体半径（米）；Fly / Orbit 共用 */
+export const SCENE_ASSET_CAMERA_COLLISION_RADIUS = 0.45;
 
 export function syncSceneAssetCollisionRuntime(global: Global): void {
     const rs = readSceneAssetCollisionRuntimeState(global);

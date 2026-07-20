@@ -24,16 +24,16 @@ const trimUrl = (value: unknown): string | undefined => {
     return trimmed || undefined;
 };
 
-/** 已有碰撞资源：settings.collision.url 或 URL 参数 `?collision=` / `?voxel=`。 */
+/** 已有碰撞资源：URL 参数 `?collision=` / `?voxel=` 优先于 settings.collision.url。 */
 export function resolveCollisionUrl(global: Global): CollisionUrlResolved | undefined {
-    const fromSettings = trimUrl((global.settings as ExperienceSettings).collision?.url);
-    if (fromSettings) {
-        return { url: fromSettings, source: 'settings' };
-    }
-
     const fromConfig = trimUrl(global.config.collisionUrl);
     if (fromConfig) {
         return { url: fromConfig, source: 'config' };
+    }
+
+    const fromSettings = trimUrl((global.settings as ExperienceSettings).collision?.url);
+    if (fromSettings) {
+        return { url: fromSettings, source: 'settings' };
     }
 
     return undefined;
@@ -83,7 +83,7 @@ export type EnsureCollisionUrlOptions = {
 };
 
 /**
- * 确保 `settings.collision.url` 可用：已有 settings / URL 参数则直接返回；
+ * 确保 collision URL 可用：已有 URL 参数 / settings 则直接返回；
  * 否则用 `contentUrl` 调 Universe `voxel-collision` 生成 GLB（不拉项目文件列表）。
  * `forceRegenerate` 时即使已有 URL 也会重新生成并写回。
  */
