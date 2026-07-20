@@ -34,6 +34,7 @@ import {
     type CollisionLoadPayload,
     type SceneMeshReadyPayload
 } from './collision/camera-collision-manager';
+import { installCollisionOverlayConsole } from './collision/collision-overlay-console';
 import type { ShadowPipelineMount } from './vfx/shadow/shadow-system';
 import { nearlyEquals } from './core/math';
 import { InputController } from './input-controller';
@@ -410,6 +411,7 @@ class Viewer {
 
         const collisionMgr = getCameraCollisionManager(global);
         collisionMgr.configure();
+        installCollisionOverlayConsole(global);
         events.on('cameraCollision:load', (payload: CollisionLoadPayload) => {
             if (payload.state === 'ready') {
                 const sceneCollision = collisionMgr.getCollision();
@@ -1373,6 +1375,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
             }
             this.voxelOverlay = new VoxelDebugOverlay(app, collision, camera);
             this.voxelOverlay.mode = (config as { heatmap?: boolean }).heatmap ? 'heatmap' : 'overlay';
+            this.voxelOverlay.enabled = !!state.collisionOverlayEnabled;
             state.hasCollisionOverlay = true;
             events.on('collisionOverlayEnabled:changed', (value: boolean) => {
                 if (this.voxelOverlay) {
@@ -1390,6 +1393,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
                     return;
                 }
                 this.meshOverlay = new MeshDebugOverlay(app, collision, camera, cameraFrameEnabled);
+                this.meshOverlay.enabled = !!state.collisionOverlayEnabled;
                 state.hasCollisionOverlay = true;
                 events.on('collisionOverlayEnabled:changed', (value: boolean) => {
                     if (this.meshOverlay) {
