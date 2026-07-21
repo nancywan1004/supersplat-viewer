@@ -1,5 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<!--
+  hide-edit-ui 默认写在 <html> 上：与 showEditUI 默认 false 对齐。
+  不依赖 type=module（deferred）再加类，避免首帧 paint 时顶栏/调试按钮闪现。
+-->
+<html lang="en" class="hide-edit-ui">
     <head>
         <title>Universe</title>
         <link rel="icon" href="/assets/icons/favicon.ico">
@@ -146,10 +150,8 @@
                 settings: fetch(settingsFetchUrl).then(response => response.json())
             };
 
-            // showEditUI=false 时：在首屏渲染前给 <html> 加类，避免顶栏按钮闪现
-            if (sseConfig.showEditUI === false) {
-                document.documentElement.classList.add('hide-edit-ui');
-            }
+            // 与 <html> 默认 class 对齐：showEditUI=true 时移除，否则保持隐藏（幂等）
+            document.documentElement.classList.toggle('hide-edit-ui', sseConfig.showEditUI === false);
 
             // 如果noBottomUI开启，立即隐藏controlsWrap，避免初始化时显示
             if (sseConfig.noBottomUI) {

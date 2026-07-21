@@ -208,7 +208,7 @@ type SceneAssetCollisionScale = {
 
 /** 写入 settings.json 的碰撞配置：场景 mesh URL + 相机物理碰撞总开关 + 放置资产 AABB 缩放 */
 type SceneCollisionSettings = {
-    /** GLB 或 voxel 包 URL；Universe 生成后写入；优先于 URL 参数 `?collision=` */
+    /** GLB 或 voxel 包 URL；Universe 生成后写入；URL 参数 `?collision=` / `?voxel=` 优先于本字段 */
     url?: string;
     /** 总开关：场景 collision mesh + 放置资产 AABB */
     enabled?: boolean;

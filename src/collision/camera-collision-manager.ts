@@ -40,6 +40,10 @@ export type SceneMeshReadyPayload = {
     sceneMeshEntity: Entity;
 };
 
+export type SceneMeshRegenerateResult =
+    | { ok: true; url: string }
+    | { ok: false; message: string };
+
 /** 物理碰撞总开关（`settings.collision.enabled` → runtime state） */
 export function collisionEnabled(global: Global): boolean {
     return global.state.sceneAssetCollisionRuntimeState?.enabled === true;
@@ -66,11 +70,14 @@ export class CameraCollisionManager {
 
     private sceneMeshEntity: Entity | null = null;
 
+    /** GLB 加载时缓存的物理网体；与是否立刻 apply 解耦（shadow 先载、collision 后开可直接挂上）。 */
+    private meshCollisionCache: Collision | null = null;
+
     private loadState: CollisionLoadState = 'idle';
 
     private loadPromise: Promise<void> | null = null;
 
-    /** 当前或最近一次 in-flight scene mesh 加载所合并的 intent（出站用）。 */
+    /** 当前或最近一次 in-flight scene mesh 加载所合并的 intent（出站用 / 实际加载 plan）。 */
     private activeLoadIntent: SceneMeshLoadIntent | null = null;
 
     private consumers: CameraCollisionConsumers | null = null;
@@ -88,7 +95,7 @@ export class CameraCollisionManager {
         this.syncHasCollision();
     }
 
-    /** settings / URL 参数解析出的 collision 资源（GLB 或 voxel 包） */
+    /** URL 参数 / settings 解析出的 collision 资源（GLB 或 voxel 包；参数优先） */
     getCollisionUrl(): string | undefined {
         return resolveCollisionUrl(this.global)?.url;
     }
@@ -104,6 +111,68 @@ export class CameraCollisionManager {
 
     getSceneMeshEntity(): Entity | null {
         return this.sceneMeshEntity;
+    }
+
+    /**
+     * 控制台 / 调试：强制 Universe 重新 generate collision GLB，并替换当前已加载的
+     * scene mesh entity + 物理缓存（shadow 接影与 collision overlay 同源）。
+     */
+    async regenerateSceneMesh(): Promise<SceneMeshRegenerateResult> {
+        if (!hasCollisionGenerateCredentials(this.global)) {
+            return {
+                ok: false,
+                message: '无法重新生成：需要 projectId、token、contentUrl'
+            };
+        }
+
+        if (this.loadState === 'loading' && this.loadPromise) {
+            await this.loadPromise;
+        }
+
+        this.clearLoadedSceneMesh();
+        this.loadState = 'idle';
+        this.activeLoadIntent = null;
+
+        const regenerated = await ensureCollisionUrl(this.global, { forceRegenerate: true });
+        this.syncHasCollision();
+        if (regenerated.ok === false) {
+            this.loadState = 'failed';
+            this.emitLoadState('failed', regenerated.message);
+            return { ok: false, message: regenerated.message };
+        }
+
+        // ?collision= 优先于 settings；写回 config 才能让后续 resolve/getCollisionUrl 用到新地址
+        this.global.config.collisionUrl = regenerated.url;
+        this.syncHasCollision();
+
+        await this.ensureSceneMeshLoaded({ wantCollision: true, wantShadow: true });
+
+        // ensureSceneMeshLoaded 会改 loadState；同函数内对 this.loadState 的字面量收窄会误判，故用局部快照
+        const loadState = (this as CameraCollisionManager).getLoadState();
+        if (loadState !== 'ready' || !this.sceneMeshEntity) {
+            return {
+                ok: false,
+                message:
+                    loadState === 'failed'
+                        ? '重新生成成功但 scene mesh 加载失败'
+                        : '重新生成后 scene mesh 未就绪'
+            };
+        }
+
+        return { ok: true, url: regenerated.url };
+    }
+
+    /** 销毁并清空已加载的 scene mesh / 物理缓存（不改 collision URL）。 */
+    private clearLoadedSceneMesh(): void {
+        const oldEntity = this.sceneMeshEntity;
+        this.sceneMeshEntity = null;
+        this.meshCollisionCache = null;
+        this.urlCollision = null;
+        this.syncConsumers();
+        this.global.events.fire('sceneMesh:cleared');
+        if (oldEntity) {
+            oldEntity.destroy();
+        }
     }
 
     setEnabled(enabled: boolean): void {
@@ -143,18 +212,33 @@ export class CameraCollisionManager {
         if (!this.shouldLoadSceneMesh(intent)) {
             return;
         }
+
+        // 等待他人 in-flight 完成后再按本 intent 检查；不把「只为 shadow 的加载」当成 collision 已就绪。
+        if (this.loadState === 'loading' && this.loadPromise) {
+            await this.loadPromise;
+        }
+
+        this.tryApplyCachedMeshCollision(intent);
         if (this.isSceneMeshReady(intent)) {
             return;
         }
+
+        // 等待期间可能又有并发加载启动
         if (this.loadState === 'loading' && this.loadPromise) {
-            return this.loadPromise;
+            await this.loadPromise;
+            this.tryApplyCachedMeshCollision(intent);
+            if (this.isSceneMeshReady(intent)) {
+                return;
+            }
         }
+
         if (this.loadState === 'failed') {
             this.loadState = 'idle';
         }
 
+        const loadIntent = this.activeLoadIntent ?? intent;
         let collisionUrl = this.getCollisionUrl();
-        if (!collisionUrl && this.shouldFetchCollisionFromUniverse()) {
+        if (!collisionUrl && this.shouldFetchCollisionFromUniverse(loadIntent)) {
             const result = await ensureCollisionUrl(this.global);
             this.syncHasCollision();
             if (result.ok === false) {
@@ -164,9 +248,45 @@ export class CameraCollisionManager {
             }
         }
 
-        const initialPlan = this.sceneMeshLoadPlan(collisionUrl, intent);
+        const initialPlan = this.sceneMeshLoadPlan(collisionUrl, loadIntent);
         if (!initialPlan.loadSceneMesh && !initialPlan.loadVoxelCollision) {
+            // 已有 entity，仅缺物理：尽量用缓存补齐
+            this.tryApplyCachedMeshCollision(intent);
+            if (this.isLoadSatisfied(intent ?? loadIntent)) {
+                this.loadState = 'ready';
+                this.emitLoadState('ready');
+                this.emitCollisionSystemReadyIfApplicable();
+                this.syncConsumers();
+            } else if (this.shouldLoadSceneMesh(intent ?? loadIntent)) {
+                // 典型：需要 Universe 生成但 URL 仍空，或 shadow/collision intent 尚未落到资源
+                this.loadState = 'failed';
+                this.emitLoadState('failed');
+                this.syncConsumers();
+            }
             return;
+        }
+
+        // 只需物理 collision 且 GLB entity 已在（典型：shadow 先载完）— 不必重下 GLB
+        if (
+            initialPlan.applySceneMeshCollision &&
+            this.sceneMeshEntity &&
+            this.meshCollisionCache &&
+            !initialPlan.loadVoxelCollision
+        ) {
+            this.urlCollision = this.meshCollisionCache;
+            this.loadState = 'ready';
+            this.emitLoadState('ready');
+            this.emitCollisionSystemReadyIfApplicable();
+            this.syncConsumers();
+            return;
+        }
+
+        if (this.loadState === 'loading' && this.loadPromise) {
+            await this.loadPromise;
+            this.tryApplyCachedMeshCollision(intent);
+            if (this.isSceneMeshReady(intent)) {
+                return;
+            }
         }
 
         this.loadState = 'loading';
@@ -180,8 +300,18 @@ export class CameraCollisionManager {
                 let allowRegenerate = true;
 
                 while (true) {
-                    const plan = this.sceneMeshLoadPlan(url, intent);
+                    // 用合并后的 activeLoadIntent，避免 shadow 先跑时把后续 collision 需求丢掉
+                    const planIntent = this.activeLoadIntent ?? loadIntent;
+                    const plan = this.sceneMeshLoadPlan(url, planIntent);
                     if (!plan.loadSceneMesh && !plan.loadVoxelCollision) {
+                        this.tryApplyCachedMeshCollision(planIntent);
+                        if (this.isLoadSatisfied(planIntent)) {
+                            this.loadState = 'ready';
+                            this.emitLoadState('ready');
+                            this.emitCollisionSystemReadyIfApplicable();
+                            this.syncConsumers();
+                            return;
+                        }
                         this.loadState = 'failed';
                         this.emitLoadState('failed');
                         this.syncConsumers();
@@ -194,9 +324,16 @@ export class CameraCollisionManager {
 
                     try {
                         if (plan.loadSceneMesh && plan.sceneMeshUrl) {
+                            // 替换加载时先丢掉旧 entity，避免残留接影几何
+                            if (this.sceneMeshEntity) {
+                                const prev = this.sceneMeshEntity;
+                                this.sceneMeshEntity = null;
+                                prev.destroy();
+                            }
                             const result = await loadSceneMesh(app, plan.sceneMeshUrl);
                             if (result) {
                                 this.sceneMeshEntity = result.sceneMeshEntity;
+                                this.meshCollisionCache = result.meshCollision;
                                 if (plan.applySceneMeshCollision) {
                                     this.urlCollision = result.meshCollision;
                                 }
@@ -207,6 +344,8 @@ export class CameraCollisionManager {
                             } else {
                                 sceneMeshOk = false;
                             }
+                        } else if (plan.applySceneMeshCollision && this.meshCollisionCache) {
+                            this.urlCollision = this.meshCollisionCache;
                         }
 
                         if (plan.loadVoxelCollision && url) {
@@ -225,6 +364,7 @@ export class CameraCollisionManager {
                     }
 
                     if (sceneMeshOk && voxelOk) {
+                        this.tryApplyCachedMeshCollision(planIntent);
                         this.loadState = 'ready';
                         this.emitLoadState('ready');
                         this.emitCollisionSystemReadyIfApplicable();
@@ -238,8 +378,7 @@ export class CameraCollisionManager {
                             '[CameraCollision] collision/shadow mesh URL 不可用，尝试重新生成',
                             { url, error: loadError }
                         );
-                        this.sceneMeshEntity = null;
-                        this.urlCollision = null;
+                        this.clearLoadedSceneMesh();
                         const regenerated = await ensureCollisionUrl(this.global, {
                             forceRegenerate: true
                         });
@@ -247,6 +386,7 @@ export class CameraCollisionManager {
                         if (regenerated.ok === false) {
                             console.warn('[CameraCollision] regenerate failed:', regenerated.message);
                         } else {
+                            this.global.config.collisionUrl = regenerated.url;
                             url = regenerated.url;
                             continue;
                         }
@@ -266,7 +406,24 @@ export class CameraCollisionManager {
             }
         })();
 
-        return this.loadPromise;
+        await this.loadPromise;
+        this.tryApplyCachedMeshCollision(intent);
+    }
+
+    /** mesh 实体已在、物理尚未挂上时，从 GLB 缓存补齐 collision。 */
+    private tryApplyCachedMeshCollision(intent?: SceneMeshLoadIntent): void {
+        const plan = this.sceneMeshLoadPlan(undefined, intent);
+        if (!plan.applySceneMeshCollision || this.urlCollision || !this.meshCollisionCache) {
+            return;
+        }
+        this.urlCollision = this.meshCollisionCache;
+        if (this.sceneMeshEntity && this.loadState === 'ready') {
+            // shadow 先载完时只缓存了 mesh；此处首次挂上物理，必须再发 load ready，
+            // 否则 Viewer 不会 bind MeshDebugOverlay（toggleCollisionOverlay / v 键均无效）。
+            this.emitLoadState('ready');
+            this.emitCollisionSystemReadyIfApplicable();
+            this.syncConsumers();
+        }
     }
 
     private shouldFetchCollisionFromUniverse(intent?: SceneMeshLoadIntent): boolean {
@@ -280,6 +437,10 @@ export class CameraCollisionManager {
 
     emitCollisionSystemReadyIfApplicable(): void {
         if (!collisionEnabled(this.global)) {
+            return;
+        }
+        // 必须已有可查询 collision；禁止「无 URL / 空 plan」时空就绪误报
+        if (this.loadState !== 'ready' || !this.urlCollision) {
             return;
         }
         this.global.events.fire(COLLISION_SYSTEM_READY);
@@ -308,6 +469,18 @@ export class CameraCollisionManager {
     }
 
     private isLoadSatisfied(intent?: SceneMeshLoadIntent): boolean {
+        const wantCollision = intent?.wantCollision ?? collisionActive(this.global);
+        const wantShadow = intent?.wantShadow ?? isShadowSystemEnabled(this.global);
+
+        // 空 plan（无 URL）不能算满足：否则 shadow 默认开 + 尚未 generate 时会误标 ready，
+        // 随后 COLLISION_SET 会立刻 COLLISION_SYSTEM_READY 且跳过真实加载。
+        if (wantCollision && !this.urlCollision) {
+            return false;
+        }
+        if (wantShadow && !this.sceneMeshEntity) {
+            return false;
+        }
+
         const plan = this.sceneMeshLoadPlan(undefined, intent);
         if (plan.loadSceneMesh && !this.sceneMeshEntity) {
             return false;

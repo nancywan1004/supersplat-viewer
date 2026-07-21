@@ -82,10 +82,17 @@ import {
 import { applyShadowSetFromHost } from './editor-modules/protocol-adapters/environment-protocol-adapter';
 import {
     COLLISION_SYSTEM_READY,
+    collisionEnabled,
+    getCameraCollisionManager,
     type CollisionLoadPayload
 } from './collision/camera-collision-manager';
 import { resolveCollisionUrl } from './collision/scene-collision-source';
-import { SHADOW_SYSTEM_READY, isShadowOutputEnabled } from './vfx/shadow';
+import {
+    SHADOW_SYSTEM_READY,
+    hasShadowSceneMesh,
+    isShadowOutputEnabled,
+    isShadowSystemEnabled
+} from './vfx/shadow';
 
 /** 父级 → Viewer 的 postMessage payload 类型（按文档事件表） */
 type InboundPayload =
@@ -327,8 +334,43 @@ const initPostMessageBridge = (global: Global) => {
     const { state, events, config } = global;
     const g = global as any;
     let cameraModeChangeSource: SelectionSource = 'unknown';
-    /** 父级下发 COLLISION_* / SHADOW_SET 时置 true，屏蔽由此触发的 scene mesh / 系统就绪出站（防回环）。 */
+    /** 父级下发 COLLISION_* / SHADOW_SET 时置 true，屏蔽 apply 过程中的出站（防回环）。
+     * apply 成功结束后再补发一次 FINISHED / SYSTEM_READY（见 flush*AfterHostEnsure）。 */
     let suppressCollisionOutbound = false;
+
+    /** 宿主 SET/PATCH 整段 await 期间 suppress 会吞掉就绪事件；成功后补发一次。 */
+    const flushCollisionOutboundAfterHostEnsure = () => {
+        const mgr = getCameraCollisionManager(global);
+        if (!collisionEnabled(global) || mgr.getLoadState() !== 'ready' || !mgr.getCollision()) {
+            return;
+        }
+        postToParent(
+            'SCENE_MESH_LOAD_FINISHED',
+            buildSceneMeshLoadFinishedPayload(global, MESSAGE_BRIDGE_MODULE.camera)
+        );
+        const collisionUrl = resolveCollisionUrl(global)?.url;
+        postToParent('COLLISION_SYSTEM_READY', {
+            module: MESSAGE_BRIDGE_MODULE.camera,
+            ...(collisionUrl ? { collisionUrl } : {})
+        });
+    };
+
+    const flushShadowOutboundAfterHostEnsure = () => {
+        if (!isShadowSystemEnabled(global) || !hasShadowSceneMesh(global)) {
+            return;
+        }
+        const mgr = getCameraCollisionManager(global);
+        if (mgr.getLoadState() !== 'ready' || !mgr.getSceneMeshEntity()) {
+            return;
+        }
+        postToParent(
+            'SCENE_MESH_LOAD_FINISHED',
+            buildSceneMeshLoadFinishedPayload(global, MESSAGE_BRIDGE_MODULE.environment)
+        );
+        if (isShadowOutputEnabled(global)) {
+            postToParent('SHADOW_SYSTEM_READY', { module: MESSAGE_BRIDGE_MODULE.environment });
+        }
+    };
     // 用闭包变量记录本次导出是否被外部取消，避免向 global.state（可能是 Proxy）新增属性
     let videoExportCancelled = false;
 
@@ -755,9 +797,12 @@ const initPostMessageBridge = (global: Global) => {
                 }
                 suppressCollisionOutbound = true;
                 try {
-                    void applyShadowSetFromHost(global, shadowVal);
+                    await applyShadowSetFromHost(global, shadowVal);
                 } finally {
                     suppressCollisionOutbound = false;
+                }
+                if (shadowVal) {
+                    flushShadowOutboundAfterHostEnsure();
                 }
                 break;
             }
@@ -1248,9 +1293,12 @@ const initPostMessageBridge = (global: Global) => {
                 }
                 suppressCollisionOutbound = true;
                 try {
-                    void applyCollisionSetFromHost(global, p.value);
+                    await applyCollisionSetFromHost(global, p.value);
                 } finally {
                     suppressCollisionOutbound = false;
+                }
+                if (p.value) {
+                    flushCollisionOutboundAfterHostEnsure();
                 }
                 break;
             }
@@ -1262,9 +1310,13 @@ const initPostMessageBridge = (global: Global) => {
                 }
                 suppressCollisionOutbound = true;
                 try {
-                    void applyCollisionPatchFromHost(global, patch as SceneCollisionSettingsPatch);
+                    await applyCollisionPatchFromHost(global, patch as SceneCollisionSettingsPatch);
                 } finally {
                     suppressCollisionOutbound = false;
+                }
+                // 开启或换 URL 后若 collision 已启用且资源就绪，补发出站
+                if (collisionEnabled(global)) {
+                    flushCollisionOutboundAfterHostEnsure();
                 }
                 break;
             }

@@ -62,6 +62,13 @@ export const ensureSceneMeshForIntent = async (
 
     const mgr = getCameraCollisionManager(global);
     if (!mgr.needsSceneMeshLoad(intent)) {
+        // needs=false 可能是「空 plan 被误判满足」或「完全无能力加载」；按 intent 再验资源
+        if (intent.wantCollision && !mgr.getCollision()) {
+            return { ok: false, message: 'collision 资源未就绪' };
+        }
+        if (intent.wantShadow && !mgr.getSceneMeshEntity()) {
+            return { ok: false, message: 'scene mesh 未就绪' };
+        }
         return { ok: true };
     }
 
@@ -70,6 +77,12 @@ export const ensureSceneMeshForIntent = async (
         return { ok: false, message: 'scene mesh 加载失败' };
     }
     if (mgr.needsSceneMeshLoad(intent)) {
+        return { ok: false, message: 'scene mesh 未就绪' };
+    }
+    if (intent.wantCollision && !mgr.getCollision()) {
+        return { ok: false, message: 'collision 资源未就绪' };
+    }
+    if (intent.wantShadow && !mgr.getSceneMeshEntity()) {
         return { ok: false, message: 'scene mesh 未就绪' };
     }
     return { ok: true };
