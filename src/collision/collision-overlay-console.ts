@@ -1,4 +1,17 @@
+import {
+    BLEND_NORMAL,
+    Color,
+    Entity,
+    Mesh,
+    MeshInstance,
+    PRIMITIVE_LINES,
+    StandardMaterial,
+    Vec3
+} from 'playcanvas';
+
 import type { Global } from '../types';
+import { SCENE_ASSET_CAMERA_COLLISION_RADIUS } from '../scene-assets/collision/scene-asset-collision';
+import type { PushOut } from './collision';
 import { MeshCollision } from './mesh-collision';
 import { VoxelCollision } from './voxel-collision';
 import { getCameraCollisionManager } from './camera-collision-manager';
@@ -10,28 +23,39 @@ export type CollisionOverlayConsoleResult = {
     message: string;
 };
 
-type CollisionOverlayConsoleApi = {
-    /** 切换或强制设置场景 collision debug overlay（voxel / mesh） */
-    toggleCollisionOverlay: (force?: boolean) => Promise<CollisionOverlayConsoleResult>;
-    /** 只读状态 */
-    getCollisionOverlay: () => CollisionOverlayConsoleResult;
+export type CollisionProbeResult = {
+    kind: 'voxel' | 'mesh' | 'none';
+    url?: string;
+    radius: number;
+    camera: { x: number; y: number; z: number };
+    penetrating: boolean;
+    pushOut?: { x: number; y: number; z: number; length: number };
+    /** 沿相机朝前，球心首次触碰 collision 的距离（米）；null=前方无碰撞 */
+    forwardClearanceM: number | null;
+    mesh?: {
+        triangleCount: number;
+        aabb: { min: number[]; max: number[]; size: number[] };
+    };
+    notes: string[];
 };
 
 declare global {
     interface Window {
-        toggleCollisionOverlay?: CollisionOverlayConsoleApi['toggleCollisionOverlay'];
-        getCollisionOverlay?: CollisionOverlayConsoleApi['getCollisionOverlay'];
+        toggleCollisionOverlay?: (force?: boolean) => Promise<CollisionOverlayConsoleResult>;
+        getCollisionOverlay?: () => CollisionOverlayConsoleResult;
+        probeCollision?: () => Promise<CollisionProbeResult>;
+        toggleCollisionProbe?: (force?: boolean) => boolean;
     }
 }
 
-function detectOverlayKind(global: Global): 'voxel' | 'mesh' | 'none' {
+const probePush: PushOut = { x: 0, y: 0, z: 0 };
+const tmpForward = new Vec3();
+const tmpProbe = new Vec3();
+
+function detectKind(global: Global): 'voxel' | 'mesh' | 'none' {
     const collision = getCameraCollisionManager(global).getCollision();
-    if (collision instanceof VoxelCollision) {
-        return 'voxel';
-    }
-    if (collision instanceof MeshCollision) {
-        return 'mesh';
-    }
+    if (collision instanceof VoxelCollision) return 'voxel';
+    if (collision instanceof MeshCollision) return 'mesh';
     return global.state.hasCollisionOverlay ? 'mesh' : 'none';
 }
 
@@ -39,7 +63,7 @@ function snapshot(global: Global, message: string): CollisionOverlayConsoleResul
     return {
         enabled: !!global.state.collisionOverlayEnabled,
         ready: !!global.state.hasCollisionOverlay,
-        kind: detectOverlayKind(global),
+        kind: detectKind(global),
         message
     };
 }
@@ -59,25 +83,101 @@ function waitForOverlayReady(global: Global, timeoutMs = 60000): Promise<boolean
             resolve(ok);
         };
         const onChanged = (value: boolean) => {
-            if (value) {
-                finish(true);
-            }
+            if (value) finish(true);
         };
         const timer = window.setTimeout(() => finish(false), timeoutMs);
         events.on('hasCollisionOverlay:changed', onChanged);
-        if (global.state.hasCollisionOverlay) {
-            finish(true);
-        }
+        if (global.state.hasCollisionOverlay) finish(true);
     });
+}
+
+function meshAabb(collision: MeshCollision): {
+    triangleCount: number;
+    aabb: { min: number[]; max: number[]; size: number[] };
+} {
+    const tris = collision.triangles;
+    let minX = Infinity;
+    let minY = Infinity;
+    let minZ = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let maxZ = -Infinity;
+    for (let i = 0; i < tris.count; i++) {
+        minX = Math.min(minX, tris.v0x[i], tris.v1x[i], tris.v2x[i]);
+        minY = Math.min(minY, tris.v0y[i], tris.v1y[i], tris.v2y[i]);
+        minZ = Math.min(minZ, tris.v0z[i], tris.v1z[i], tris.v2z[i]);
+        maxX = Math.max(maxX, tris.v0x[i], tris.v1x[i], tris.v2x[i]);
+        maxY = Math.max(maxY, tris.v0y[i], tris.v1y[i], tris.v2y[i]);
+        maxZ = Math.max(maxZ, tris.v0z[i], tris.v1z[i], tris.v2z[i]);
+    }
+    return {
+        triangleCount: tris.count,
+        aabb: {
+            min: [minX, minY, minZ],
+            max: [maxX, maxY, maxZ],
+            size: [maxX - minX, maxY - minY, maxZ - minZ]
+        }
+    };
+}
+
+type GraphicsDeviceLike = ConstructorParameters<typeof Mesh>[0];
+
+function createWireSphereMesh(device: GraphicsDeviceLike, segments = 24): Mesh {
+    const rings = [
+        { axis: 'xy' as const },
+        { axis: 'xz' as const },
+        { axis: 'yz' as const }
+    ];
+    const positions: number[] = [];
+    const indices: number[] = [];
+    let base = 0;
+    for (const ring of rings) {
+        for (let i = 0; i < segments; i++) {
+            const a0 = (i / segments) * Math.PI * 2;
+            const a1 = ((i + 1) / segments) * Math.PI * 2;
+            const c0 = Math.cos(a0);
+            const s0 = Math.sin(a0);
+            const c1 = Math.cos(a1);
+            const s1 = Math.sin(a1);
+            if (ring.axis === 'xy') {
+                positions.push(c0, s0, 0, c1, s1, 0);
+            } else if (ring.axis === 'xz') {
+                positions.push(c0, 0, s0, c1, 0, s1);
+            } else {
+                positions.push(0, c0, s0, 0, c1, s1);
+            }
+            indices.push(base, base + 1);
+            base += 2;
+        }
+    }
+    const mesh = new Mesh(device as never);
+    mesh.setPositions(new Float32Array(positions));
+    mesh.setIndices(new Uint16Array(indices));
+    mesh.update(PRIMITIVE_LINES);
+    return mesh;
 }
 
 /**
  * 安装控制台 API：
- * - `toggleCollisionOverlay()` / `toggleCollisionOverlay(true|false)`
- * - `getCollisionOverlay()`
- * 有 collision mesh/voxel 时用现有 PlayCanvas 风格 overlay（VoxelDebugOverlay / MeshDebugOverlay）。
+ * - toggleCollisionOverlay / getCollisionOverlay
+ * - probeCollision：对照「看见的面」与球碰撞
+ * - toggleCollisionProbe：画出相机碰撞球（半径 = Fly/Orbit 实际半径）
  */
 export function installCollisionOverlayConsole(global: Global): void {
+    let probeEntity: Entity | null = null;
+    let probeUpdateHandler: (() => void) | null = null;
+
+    const destroyProbe = () => {
+        if (probeUpdateHandler) {
+            global.app.off('update', probeUpdateHandler);
+            probeUpdateHandler = null;
+        }
+        if (probeEntity) {
+            probeEntity.destroy();
+            probeEntity = null;
+        }
+    };
+
     const getCollisionOverlay = (): CollisionOverlayConsoleResult => {
         if (!global.state.hasCollision) {
             return snapshot(global, '无 collision URL / 不可生成，无可视化数据');
@@ -91,8 +191,8 @@ export function installCollisionOverlayConsole(global: Global): void {
         return snapshot(
             global,
             global.state.collisionOverlayEnabled
-                ? `已开启（${detectOverlayKind(global)}）`
-                : `已关闭（${detectOverlayKind(global)}，调用 toggleCollisionOverlay() 开启）`
+                ? `已开启（${detectKind(global)}）`
+                : `已关闭（${detectKind(global)}，调用 toggleCollisionOverlay() 开启）`
         );
     };
 
@@ -135,29 +235,228 @@ export function installCollisionOverlayConsole(global: Global): void {
 
         global.state.collisionOverlayEnabled = true;
         global.app.renderNextFrame = true;
-        const kind = detectOverlayKind(global);
+        const kind = detectKind(global);
         const result = snapshot(
             global,
             kind === 'voxel'
                 ? '已开启 voxel overlay（PlayCanvas 风格射线步进线框）'
                 : kind === 'mesh'
-                    ? '已开启 mesh overlay（三角面半透明 + 线框；当前 collision 为 GLB）'
+                    ? '已开启 mesh overlay（当前 collision 为 GLB，不是 sparse voxel 包）'
                     : '已开启 overlay'
         );
         console.info('[CollisionOverlay]', result.message, result);
         return result;
     };
 
+    const probeCollision = async (): Promise<CollisionProbeResult> => {
+        const mgr = getCameraCollisionManager(global);
+        try {
+            await mgr.ensureSceneMeshLoaded({ wantCollision: true });
+        } catch {
+            /* ignore */
+        }
+
+        const radius = SCENE_ASSET_CAMERA_COLLISION_RADIUS;
+        const collision = mgr.getCollision();
+        const cam = global.camera;
+        const pos = cam.getPosition();
+        const notes: string[] = [];
+        const kind = detectKind(global);
+
+        if (!collision) {
+            const empty: CollisionProbeResult = {
+                kind: 'none',
+                url: mgr.getCollisionUrl(),
+                radius,
+                camera: { x: pos.x, y: pos.y, z: pos.z },
+                penetrating: false,
+                forwardClearanceM: null,
+                notes: ['collision 未加载']
+            };
+            console.warn('[CollisionProbe]', empty);
+            return empty;
+        }
+
+        if (kind === 'mesh') {
+            notes.push(
+                '本场景 collision URL 是 .glb → MeshCollision + MeshDebugOverlay；不是 sparse voxel 可视化。'
+            );
+            notes.push(
+                'overlay 与 querySphere 共用同一份三角数据；若能「穿过看见的面」，通常是零厚度面 + 离散推开穿模，不是两套 mesh。'
+            );
+            notes.push(
+                `Fly/Orbit 球半径=${radius}m：球心应被挡在面外约 ${radius}m；若你贴着半透明面还能继续钻，才是穿模。`
+            );
+        } else if (kind === 'voxel') {
+            notes.push('当前为 VoxelCollision + VoxelDebugOverlay。');
+        }
+
+        const penetrating = !!collision.querySphere(pos.x, pos.y, pos.z, radius, probePush);
+        const pushOut = penetrating
+            ? {
+                x: probePush.x,
+                y: probePush.y,
+                z: probePush.z,
+                length: Math.hypot(probePush.x, probePush.y, probePush.z)
+            }
+            : undefined;
+
+        cam.getWorldTransform().getZ(tmpForward).mulScalar(-1);
+        let forwardClearanceM: number | null = null;
+        const step = Math.max(0.05, radius * 0.25);
+        const maxDist = 20;
+        for (let d = step; d <= maxDist; d += step) {
+            tmpProbe.set(
+                pos.x + tmpForward.x * d,
+                pos.y + tmpForward.y * d,
+                pos.z + tmpForward.z * d
+            );
+            if (collision.querySphere(tmpProbe.x, tmpProbe.y, tmpProbe.z, radius, probePush)) {
+                forwardClearanceM = d;
+                break;
+            }
+        }
+        if (forwardClearanceM == null) {
+            notes.push(`沿朝前 ${maxDist}m 内球心路径未碰到 collision（可能朝空处或有大洞）。`);
+        } else {
+            notes.push(
+                `沿朝前约 ${forwardClearanceM.toFixed(2)}m 处球开始碰到面；球心前方 clearance≈${forwardClearanceM.toFixed(2)}m（表面约再近 ${radius}m）。`
+            );
+        }
+
+        const result: CollisionProbeResult = {
+            kind,
+            url: mgr.getCollisionUrl(),
+            radius,
+            camera: { x: pos.x, y: pos.y, z: pos.z },
+            penetrating,
+            pushOut,
+            forwardClearanceM,
+            notes
+        };
+
+        if (collision instanceof MeshCollision) {
+            result.mesh = meshAabb(collision);
+            notes.push(
+                `mesh 三角数=${result.mesh.triangleCount}；若 GLB 有节点变换但未烘焙进顶点，collision/overlay 会相对 sog 整体偏位（此时两者仍彼此一致）。`
+            );
+
+            // 对照 instantiateRenderEntity 后的世界包围盒：若差很大，说明节点变换未进 collision 顶点
+            const sceneEnt = mgr.getSceneMeshEntity();
+            if (sceneEnt) {
+                const miList =
+                    (sceneEnt.render?.meshInstances as Array<{ aabb?: { center: { x: number; y: number; z: number }; halfExtents: { x: number; y: number; z: number } } }> | undefined) ??
+                    [];
+                let sMinX = Infinity;
+                let sMinY = Infinity;
+                let sMinZ = Infinity;
+                let sMaxX = -Infinity;
+                let sMaxY = -Infinity;
+                let sMaxZ = -Infinity;
+                let any = false;
+                const stack: Array<{ render?: { meshInstances?: typeof miList }; children?: unknown[] }> = [sceneEnt as never];
+                while (stack.length) {
+                    const e = stack.pop()!;
+                    const instances = e.render?.meshInstances;
+                    if (instances) {
+                        for (const mi of instances) {
+                            const a = mi.aabb;
+                            if (!a) continue;
+                            any = true;
+                            sMinX = Math.min(sMinX, a.center.x - a.halfExtents.x);
+                            sMinY = Math.min(sMinY, a.center.y - a.halfExtents.y);
+                            sMinZ = Math.min(sMinZ, a.center.z - a.halfExtents.z);
+                            sMaxX = Math.max(sMaxX, a.center.x + a.halfExtents.x);
+                            sMaxY = Math.max(sMaxY, a.center.y + a.halfExtents.y);
+                            sMaxZ = Math.max(sMaxZ, a.center.z + a.halfExtents.z);
+                        }
+                    }
+                    const kids = e.children;
+                    if (Array.isArray(kids)) {
+                        for (const c of kids) stack.push(c as never);
+                    }
+                }
+                if (any) {
+                    const c = result.mesh.aabb;
+                    const centerDelta = Math.hypot(
+                        (c.min[0] + c.max[0]) * 0.5 - (sMinX + sMaxX) * 0.5,
+                        (c.min[1] + c.max[1]) * 0.5 - (sMinY + sMaxY) * 0.5,
+                        (c.min[2] + c.max[2]) * 0.5 - (sMinZ + sMaxZ) * 0.5
+                    );
+                    notes.push(
+                        `sceneMeshEntity 世界 AABB center 与 collision AABB center 差 ${centerDelta.toFixed(3)}m` +
+                            (centerDelta > 0.5
+                                ? '（偏大：疑似 GLB 节点变换未烘焙进 MeshCollision）'
+                                : '（基本对齐）')
+                    );
+                }
+            }
+        }
+
+        console.info('[CollisionProbe]', result);
+        return result;
+    };
+
+    const toggleCollisionProbe = (force?: boolean): boolean => {
+        const want = typeof force === 'boolean' ? force : !probeEntity;
+        if (!want) {
+            destroyProbe();
+            global.app.renderNextFrame = true;
+            console.info('[CollisionProbe] 已关闭相机碰撞球可视化');
+            return false;
+        }
+
+        destroyProbe();
+        const radius = SCENE_ASSET_CAMERA_COLLISION_RADIUS;
+        const device = global.app.graphicsDevice;
+        const mesh = createWireSphereMesh(device);
+        const material = new StandardMaterial();
+        material.useLighting = false;
+        material.useSkybox = false;
+        material.diffuse = new Color(0, 1, 0.4);
+        material.emissive = new Color(0, 1, 0.4);
+        material.opacity = 0.9;
+        material.blendType = BLEND_NORMAL;
+        material.depthTest = true;
+        material.depthWrite = false;
+        material.update();
+
+        const mi = new MeshInstance(mesh, material);
+        const entity = new Entity('CollisionCameraProbe');
+        entity.addComponent('render', {
+            meshInstances: [mi]
+        });
+        entity.setLocalScale(radius, radius, radius);
+        global.app.root.addChild(entity);
+        probeEntity = entity;
+
+        probeUpdateHandler = () => {
+            if (!probeEntity) return;
+            const p = global.camera.getPosition();
+            probeEntity.setPosition(p.x, p.y, p.z);
+        };
+        global.app.on('update', probeUpdateHandler);
+        global.app.renderNextFrame = true;
+        console.info(
+            `[CollisionProbe] 已开启绿色线框球（半径 ${radius}m = Fly/Orbit 实际碰撞球）。对照半透明 collision 面：球应贴在面外侧，不应整球钻进面另一侧。`
+        );
+        return true;
+    };
+
     window.toggleCollisionOverlay = toggleCollisionOverlay;
     window.getCollisionOverlay = getCollisionOverlay;
+    window.probeCollision = probeCollision;
+    window.toggleCollisionProbe = toggleCollisionProbe;
 
     const sse = (window as Window & { sse?: Record<string, unknown> }).sse;
     if (sse && typeof sse === 'object') {
         sse.toggleCollisionOverlay = toggleCollisionOverlay;
         sse.getCollisionOverlay = getCollisionOverlay;
+        sse.probeCollision = probeCollision;
+        sse.toggleCollisionProbe = toggleCollisionProbe;
     }
 
     console.info(
-        '[CollisionOverlay] 控制台可用：toggleCollisionOverlay() / toggleCollisionOverlay(true|false) / getCollisionOverlay()'
+        '[CollisionOverlay] 控制台：toggleCollisionOverlay() / getCollisionOverlay() / probeCollision() / toggleCollisionProbe()'
     );
 }

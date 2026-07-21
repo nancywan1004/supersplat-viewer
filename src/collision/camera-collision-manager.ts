@@ -186,6 +186,17 @@ export class CameraCollisionManager {
         if (!initialPlan.loadSceneMesh && !initialPlan.loadVoxelCollision) {
             // 已有 entity，仅缺物理：尽量用缓存补齐
             this.tryApplyCachedMeshCollision(intent);
+            if (this.isLoadSatisfied(intent ?? loadIntent)) {
+                this.loadState = 'ready';
+                this.emitLoadState('ready');
+                this.emitCollisionSystemReadyIfApplicable();
+                this.syncConsumers();
+            } else if (this.shouldLoadSceneMesh(intent ?? loadIntent)) {
+                // 典型：需要 Universe 生成但 URL 仍空，或 shadow/collision intent 尚未落到资源
+                this.loadState = 'failed';
+                this.emitLoadState('failed');
+                this.syncConsumers();
+            }
             return;
         }
 
@@ -354,6 +365,10 @@ export class CameraCollisionManager {
         if (!collisionEnabled(this.global)) {
             return;
         }
+        // 必须已有可查询 collision；禁止「无 URL / 空 plan」时空就绪误报
+        if (this.loadState !== 'ready' || !this.urlCollision) {
+            return;
+        }
         this.global.events.fire(COLLISION_SYSTEM_READY);
     }
 
@@ -380,6 +395,18 @@ export class CameraCollisionManager {
     }
 
     private isLoadSatisfied(intent?: SceneMeshLoadIntent): boolean {
+        const wantCollision = intent?.wantCollision ?? collisionActive(this.global);
+        const wantShadow = intent?.wantShadow ?? isShadowSystemEnabled(this.global);
+
+        // 空 plan（无 URL）不能算满足：否则 shadow 默认开 + 尚未 generate 时会误标 ready，
+        // 随后 COLLISION_SET 会立刻 COLLISION_SYSTEM_READY 且跳过真实加载。
+        if (wantCollision && !this.urlCollision) {
+            return false;
+        }
+        if (wantShadow && !this.sceneMeshEntity) {
+            return false;
+        }
+
         const plan = this.sceneMeshLoadPlan(undefined, intent);
         if (plan.loadSceneMesh && !this.sceneMeshEntity) {
             return false;

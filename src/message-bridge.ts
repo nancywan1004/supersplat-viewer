@@ -755,7 +755,7 @@ const initPostMessageBridge = (global: Global) => {
                 }
                 suppressCollisionOutbound = true;
                 try {
-                    void applyShadowSetFromHost(global, shadowVal);
+                    await applyShadowSetFromHost(global, shadowVal);
                 } finally {
                     suppressCollisionOutbound = false;
                 }
@@ -1248,7 +1248,7 @@ const initPostMessageBridge = (global: Global) => {
                 }
                 suppressCollisionOutbound = true;
                 try {
-                    void applyCollisionSetFromHost(global, p.value);
+                    await applyCollisionSetFromHost(global, p.value);
                 } finally {
                     suppressCollisionOutbound = false;
                 }
@@ -1262,7 +1262,7 @@ const initPostMessageBridge = (global: Global) => {
                 }
                 suppressCollisionOutbound = true;
                 try {
-                    void applyCollisionPatchFromHost(global, patch as SceneCollisionSettingsPatch);
+                    await applyCollisionPatchFromHost(global, patch as SceneCollisionSettingsPatch);
                 } finally {
                     suppressCollisionOutbound = false;
                 }
