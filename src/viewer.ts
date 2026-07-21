@@ -423,6 +423,21 @@ class Viewer {
         events.on('sceneMesh:ready', (_payload: SceneMeshReadyPayload) => {
             this.applyShadowMeshEntity(collisionMgr.getSceneMeshEntity());
         });
+        events.on('sceneMesh:cleared', () => {
+            if (this.shadowPipelineMount) {
+                this.shadowPipelineMount.meshEntity = null;
+            }
+            this.destroySceneCollisionDebugOverlay();
+        });
+        events.on('collisionOverlayEnabled:changed', (value: boolean) => {
+            if (this.voxelOverlay) {
+                this.voxelOverlay.enabled = value;
+            }
+            if (this.meshOverlay) {
+                this.meshOverlay.enabled = value;
+            }
+            app.renderNextFrame = true;
+        });
 
         initInputArbiter(global);
 
@@ -1361,12 +1376,18 @@ z: ${cameraInfo.target.z.toFixed(6)}
         if (!isShadowSystemEnabled(global)) {
             return;
         }
+        // regenerate 可能与上一次 frameend 调度重叠；允许再排一次，确保新 mesh 进入 catcher
+        this.shadowPipelineFrameScheduled = false;
         this.scheduleShadowPipelineNextFrame();
     }
 
     /** urlParam 碰撞懒加载完成后挂载 debug 线框（与门控无关，仅可视化） */
     private bindSceneCollisionDebugOverlay(collision: Collision): void {
-        const { app, config, events, state, camera } = this.global;
+        const { app, config, state, camera } = this.global;
+        // regenerate 替换 mesh 时需重建 overlay
+        if (this.baseSceneCollision && this.baseSceneCollision !== collision) {
+            this.destroySceneCollisionDebugOverlay();
+        }
         this.baseSceneCollision = collision;
         const rendererMode = (config as { renderer?: string }).renderer;
         if (collision instanceof VoxelCollision && rendererMode !== 'webgl') {
@@ -1377,32 +1398,40 @@ z: ${cameraInfo.target.z.toFixed(6)}
             this.voxelOverlay.mode = (config as { heatmap?: boolean }).heatmap ? 'heatmap' : 'overlay';
             this.voxelOverlay.enabled = !!state.collisionOverlayEnabled;
             state.hasCollisionOverlay = true;
-            events.on('collisionOverlayEnabled:changed', (value: boolean) => {
-                if (this.voxelOverlay) {
-                    this.voxelOverlay.enabled = value;
-                    app.renderNextFrame = true;
-                }
-            });
         } else if (collision instanceof MeshCollision) {
             if (this.meshOverlay) {
                 return;
             }
             const cameraFrameEnabled = !!this.cameraFrame;
+            const overlayEnabled = !!state.collisionOverlayEnabled;
             app.once('frameend', () => {
                 if (this.meshOverlay) {
                     return;
                 }
+                if (this.baseSceneCollision !== collision) {
+                    return;
+                }
                 this.meshOverlay = new MeshDebugOverlay(app, collision, camera, cameraFrameEnabled);
-                this.meshOverlay.enabled = !!state.collisionOverlayEnabled;
+                this.meshOverlay.enabled = overlayEnabled;
                 state.hasCollisionOverlay = true;
-                events.on('collisionOverlayEnabled:changed', (value: boolean) => {
-                    if (this.meshOverlay) {
-                        this.meshOverlay.enabled = value;
-                        app.renderNextFrame = true;
-                    }
-                });
             });
             app.renderNextFrame = true;
+        }
+    }
+
+    private destroySceneCollisionDebugOverlay(): void {
+        const { state } = this.global;
+        if (this.meshOverlay) {
+            this.meshOverlay.destroy();
+            this.meshOverlay = null;
+        }
+        if (this.voxelOverlay) {
+            this.voxelOverlay.destroy();
+            this.voxelOverlay = null;
+        }
+        this.baseSceneCollision = null;
+        if (state.hasCollisionOverlay) {
+            state.hasCollisionOverlay = false;
         }
     }
 

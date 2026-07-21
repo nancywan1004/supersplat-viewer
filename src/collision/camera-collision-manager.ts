@@ -40,6 +40,10 @@ export type SceneMeshReadyPayload = {
     sceneMeshEntity: Entity;
 };
 
+export type SceneMeshRegenerateResult =
+    | { ok: true; url: string }
+    | { ok: false; message: string };
+
 /** 物理碰撞总开关（`settings.collision.enabled` → runtime state） */
 export function collisionEnabled(global: Global): boolean {
     return global.state.sceneAssetCollisionRuntimeState?.enabled === true;
@@ -107,6 +111,68 @@ export class CameraCollisionManager {
 
     getSceneMeshEntity(): Entity | null {
         return this.sceneMeshEntity;
+    }
+
+    /**
+     * 控制台 / 调试：强制 Universe 重新 generate collision GLB，并替换当前已加载的
+     * scene mesh entity + 物理缓存（shadow 接影与 collision overlay 同源）。
+     */
+    async regenerateSceneMesh(): Promise<SceneMeshRegenerateResult> {
+        if (!hasCollisionGenerateCredentials(this.global)) {
+            return {
+                ok: false,
+                message: '无法重新生成：需要 projectId、token、contentUrl'
+            };
+        }
+
+        if (this.loadState === 'loading' && this.loadPromise) {
+            await this.loadPromise;
+        }
+
+        this.clearLoadedSceneMesh();
+        this.loadState = 'idle';
+        this.activeLoadIntent = null;
+
+        const regenerated = await ensureCollisionUrl(this.global, { forceRegenerate: true });
+        this.syncHasCollision();
+        if (regenerated.ok === false) {
+            this.loadState = 'failed';
+            this.emitLoadState('failed', regenerated.message);
+            return { ok: false, message: regenerated.message };
+        }
+
+        // ?collision= 优先于 settings；写回 config 才能让后续 resolve/getCollisionUrl 用到新地址
+        this.global.config.collisionUrl = regenerated.url;
+        this.syncHasCollision();
+
+        await this.ensureSceneMeshLoaded({ wantCollision: true, wantShadow: true });
+
+        // ensureSceneMeshLoaded 会改 loadState；同函数内对 this.loadState 的字面量收窄会误判，故用局部快照
+        const loadState = (this as CameraCollisionManager).getLoadState();
+        if (loadState !== 'ready' || !this.sceneMeshEntity) {
+            return {
+                ok: false,
+                message:
+                    loadState === 'failed'
+                        ? '重新生成成功但 scene mesh 加载失败'
+                        : '重新生成后 scene mesh 未就绪'
+            };
+        }
+
+        return { ok: true, url: regenerated.url };
+    }
+
+    /** 销毁并清空已加载的 scene mesh / 物理缓存（不改 collision URL）。 */
+    private clearLoadedSceneMesh(): void {
+        const oldEntity = this.sceneMeshEntity;
+        this.sceneMeshEntity = null;
+        this.meshCollisionCache = null;
+        this.urlCollision = null;
+        this.syncConsumers();
+        this.global.events.fire('sceneMesh:cleared');
+        if (oldEntity) {
+            oldEntity.destroy();
+        }
     }
 
     setEnabled(enabled: boolean): void {
@@ -258,6 +324,12 @@ export class CameraCollisionManager {
 
                     try {
                         if (plan.loadSceneMesh && plan.sceneMeshUrl) {
+                            // 替换加载时先丢掉旧 entity，避免残留接影几何
+                            if (this.sceneMeshEntity) {
+                                const prev = this.sceneMeshEntity;
+                                this.sceneMeshEntity = null;
+                                prev.destroy();
+                            }
                             const result = await loadSceneMesh(app, plan.sceneMeshUrl);
                             if (result) {
                                 this.sceneMeshEntity = result.sceneMeshEntity;
@@ -306,9 +378,7 @@ export class CameraCollisionManager {
                             '[CameraCollision] collision/shadow mesh URL 不可用，尝试重新生成',
                             { url, error: loadError }
                         );
-                        this.sceneMeshEntity = null;
-                        this.urlCollision = null;
-                        this.meshCollisionCache = null;
+                        this.clearLoadedSceneMesh();
                         const regenerated = await ensureCollisionUrl(this.global, {
                             forceRegenerate: true
                         });
@@ -316,6 +386,7 @@ export class CameraCollisionManager {
                         if (regenerated.ok === false) {
                             console.warn('[CameraCollision] regenerate failed:', regenerated.message);
                         } else {
+                            this.global.config.collisionUrl = regenerated.url;
                             url = regenerated.url;
                             continue;
                         }

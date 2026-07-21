@@ -45,8 +45,13 @@ declare global {
         getCollisionOverlay?: () => CollisionOverlayConsoleResult;
         probeCollision?: () => Promise<CollisionProbeResult>;
         toggleCollisionProbe?: (force?: boolean) => boolean;
+        regenerateSceneMesh?: () => Promise<SceneMeshRegenerateConsoleResult>;
     }
 }
+
+export type SceneMeshRegenerateConsoleResult =
+    | { ok: true; url: string; message: string }
+    | { ok: false; message: string };
 
 const probePush: PushOut = { x: 0, y: 0, z: 0 };
 const tmpForward = new Vec3();
@@ -453,10 +458,33 @@ export function installCollisionOverlayConsole(global: Global): void {
         return true;
     };
 
+    const regenerateSceneMesh = async (): Promise<SceneMeshRegenerateConsoleResult> => {
+        const mgr = getCameraCollisionManager(global);
+        console.info('[SceneMesh] regenerateSceneMesh() 开始：强制 Universe generate 并替换当前 mesh…');
+        const result = await mgr.regenerateSceneMesh();
+        if (result.ok === false) {
+            console.warn('[SceneMesh] regenerate failed:', result.message);
+            return { ok: false, message: result.message };
+        }
+        // 若 overlay 开着，确保绑定到新 collision
+        const collision = mgr.getCollision();
+        if (collision && !global.state.hasCollisionOverlay) {
+            global.events.fire('cameraCollision:load', {
+                state: 'ready',
+                intent: { wantCollision: true, wantShadow: true }
+            });
+            global.app.renderNextFrame = true;
+        }
+        const message = `已重新生成并加载 scene mesh：${result.url}`;
+        console.info('[SceneMesh]', message);
+        return { ok: true, url: result.url, message };
+    };
+
     window.toggleCollisionOverlay = toggleCollisionOverlay;
     window.getCollisionOverlay = getCollisionOverlay;
     window.probeCollision = probeCollision;
     window.toggleCollisionProbe = toggleCollisionProbe;
+    window.regenerateSceneMesh = regenerateSceneMesh;
 
     const sse = (window as Window & { sse?: Record<string, unknown> }).sse;
     if (sse && typeof sse === 'object') {
@@ -464,9 +492,10 @@ export function installCollisionOverlayConsole(global: Global): void {
         sse.getCollisionOverlay = getCollisionOverlay;
         sse.probeCollision = probeCollision;
         sse.toggleCollisionProbe = toggleCollisionProbe;
+        sse.regenerateSceneMesh = regenerateSceneMesh;
     }
 
     console.info(
-        '[CollisionOverlay] 控制台：toggleCollisionOverlay() / getCollisionOverlay() / probeCollision() / toggleCollisionProbe()'
+        '[CollisionOverlay] 控制台：toggleCollisionOverlay() / getCollisionOverlay() / probeCollision() / toggleCollisionProbe() / regenerateSceneMesh()'
     );
 }
