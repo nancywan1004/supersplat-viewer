@@ -142,8 +142,14 @@ function initShadowCatcher(
 
     if (entity) {
         const script = entity.script?.get('shadowCatcher') as unknown as ShadowCatcher | undefined;
-        // 懒加载 GLB 就绪前可能已用默认平面挂载；收到 mesh 后拆掉平面 catcher 并重建
-        if (meshEntity && script && !script.isExternalMesh) {
+        // 懒加载 GLB 就绪前可能已用默认平面挂载；收到 mesh 后拆掉平面 catcher 并重建。
+        // regenerate 替换 GLB 时：旧 geometry 可能已 destroy，或 script.geometry !== 新 meshEntity，
+        // 也必须拆掉重建；否则会 early-return，新 mesh 从未挂上 → 阴影消失且不再触发 SHADOW_SYSTEM_READY 语义下的有效出影。
+        const needsMeshRebuild =
+            !!meshEntity &&
+            !!script &&
+            (!script.isExternalMesh || script.geometry !== meshEntity);
+        if (needsMeshRebuild) {
             entity.destroy();
             entity = null;
         } else {
