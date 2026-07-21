@@ -347,6 +347,9 @@ export class CameraCollisionManager {
         }
         this.urlCollision = this.meshCollisionCache;
         if (this.sceneMeshEntity && this.loadState === 'ready') {
+            // shadow 先载完时只缓存了 mesh；此处首次挂上物理，必须再发 load ready，
+            // 否则 Viewer 不会 bind MeshDebugOverlay（toggleCollisionOverlay / v 键均无效）。
+            this.emitLoadState('ready');
             this.emitCollisionSystemReadyIfApplicable();
             this.syncConsumers();
         }

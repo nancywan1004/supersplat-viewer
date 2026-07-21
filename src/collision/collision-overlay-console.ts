@@ -223,6 +223,16 @@ export function installCollisionOverlayConsole(global: Global): void {
             console.warn('[CollisionOverlay] ensureSceneMeshLoaded failed:', err);
         }
 
+        // shadow 先载、collision 后挂缓存时，可能已有 getCollision() 但从未发过 load ready → overlay 未创建
+        const collision = mgr.getCollision();
+        if (collision && !global.state.hasCollisionOverlay) {
+            global.events.fire('cameraCollision:load', {
+                state: 'ready',
+                intent: { wantCollision: true }
+            });
+            global.app.renderNextFrame = true;
+        }
+
         const ready = await waitForOverlayReady(global);
         if (!ready) {
             const result = snapshot(
