@@ -105,6 +105,21 @@
                 budget,
                 heatmap: url.searchParams.has('heatmap'),
                 fullload: url.searchParams.has('fullload'),
+                benchmark: url.searchParams.has('benchmark'),
+                benchmarkLabel: url.searchParams.get('benchmarkLabel') ?? undefined,
+                benchmarkNoInteraction: url.searchParams.has('benchmarkNoInteraction'),
+                benchmarkAnimTrack: url.searchParams.has('benchmarkAnimTrack'),
+                benchmarkHud: url.searchParams.has('benchmarkHud'),
+                frameProfile: (() => {
+                    const value = url.searchParams.get('frameProfile');
+                    if (value === '1' || value === 'true' || url.searchParams.has('frameProfile')) {
+                        return true;
+                    }
+                    if (value === 'auto') {
+                        return 'auto';
+                    }
+                    return undefined;
+                })(),
                 projectId,
                 token
             };

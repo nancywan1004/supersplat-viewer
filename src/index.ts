@@ -55,6 +55,13 @@ import {
 } from './scene-assets/collision/scene-asset-collision';
 import { getCameraCollisionManager } from './collision/camera-collision-manager';
 import { initializeGltfRuntime } from './loaders/gltf/gltf-transcoder';
+import { applyBenchmarkConfigFlags, createSceneProfileBenchmark } from './benchmark/benchmark';
+import { initBenchmarkHud, shouldShowBenchmarkHud } from './benchmark/benchmark-hud';
+import {
+    initFrameProfiler,
+    shouldAutoStartFrameProfiler,
+    shouldInitFrameProfiler
+} from './benchmark/frame-profiler';
 
 
 export { loadGsplatAsset };
@@ -295,6 +302,17 @@ const initCanvas = (global: Global) => {
 };
 
 const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config) => {
+    if (config.benchmark && !config.benchmarkNoInteraction) {
+        const hasAnimTrack =
+            settingsJson?.startMode === 'animTrack' &&
+            Array.isArray(settingsJson?.animTracks) &&
+            settingsJson.animTracks.length > 0;
+        if (config.benchmarkAnimTrack || hasAnimTrack) {
+            config.benchmarkAnimTrack = true;
+        }
+    }
+    applyBenchmarkConfigFlags(config);
+
     const { app, camera, renderer, forceWebGlForSogUnified } = await createApp(canvas, config);
     const gsplatConfig: Config = forceWebGlForSogUnified ? { ...config, renderer: 'webgl' } : config;
 
@@ -417,6 +435,22 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
 
     // 供 NightMode 等脚本读取点光源等（collectPointLights 需要 global）
     (app as any).__global = global;
+
+    if (shouldShowBenchmarkHud(config)) {
+        initBenchmarkHud(global);
+    }
+
+    // frame profiler 必须在 SceneProfileBenchmark.start 之前挂好（benchmark 自行 clear/start）
+    if (shouldInitFrameProfiler(config)) {
+        initFrameProfiler(global, { autoStart: shouldAutoStartFrameProfiler(config) });
+    }
+
+    const benchmark = createSceneProfileBenchmark(global);
+    if (benchmark) {
+        benchmark.setCaseLabel(config.benchmarkLabel ?? 'default');
+        benchmark.start();
+        (global as any).__sceneProfileBenchmarkHarness = benchmark;
+    }
 
     const customLod = isCustomLodEnabled(processedSettings, config.contentUrl);
     const lodLoader = customLod ? new LodLoader(global) : undefined;
