@@ -15,8 +15,10 @@ import type { RevealController } from '../../../../vfx/effects-runtime/reveal/re
 import type { CameraManager } from '../../../../camera-manager';
 import { isCustomLodEnabled } from '../custom-loader';
 import {
+    bindGsplatEntityLodSettings,
     bindGsplatPerfSettings,
     bindGsplatRenderer,
+    bindGsplatStreamingLodSettings,
     getSplatBudgetMillions,
     warnOnComputeRendererFallback,
     type GsplatSceneRuntime
@@ -101,9 +103,8 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
 
     configureInitialGsplatScene(gsplat, global, gsplatEntity, loadMode, octreeResource);
 
-    gsplat.lodUpdateAngle = 90;
-    gsplat.lodBehindPenalty = 5;
-    gsplat.radialSorting = true;
+    bindGsplatStreamingLodSettings(gsplat, global);
+    bindGsplatEntityLodSettings(gsplatEntity.gsplat, global);
 
     const eventHandler = app.systems.gsplat;
     let idleTime = 0;

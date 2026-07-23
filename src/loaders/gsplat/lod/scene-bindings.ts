@@ -6,6 +6,12 @@ import {
 } from 'playcanvas';
 
 import type { Global } from '../../../types';
+import {
+    resolveLodBaseDistance,
+    resolveLodBehindPenalty,
+    resolveLodMultiplier,
+    resolveLodUpdateDistance
+} from './scene-profile';
 
 /**
  * 将 viewer Global（config / state / device）同步到 PlayCanvas `scene.gsplat` 运行时字段。
@@ -20,11 +26,18 @@ export type GsplatSceneRuntime = {
     minContribution?: number;
     alphaClip?: number;
     antiAlias?: boolean | number;
+    lodUpdateDistance?: number;
     lodUpdateAngle?: number;
     lodBehindPenalty?: number;
     radialSorting?: boolean;
     dirty?: boolean;
     debug?: number;
+};
+
+/** PlayCanvas entity `gsplat` 组件上的米制切档参数 */
+export type GsplatEntityLodRuntime = {
+    lodBaseDistance?: number;
+    lodMultiplier?: number;
 };
 
 /** main 路径下 raster 模式：按实际 deviceType 选择 gsplat 排序器（compute 不走此表） */
@@ -66,6 +79,33 @@ export function bindGsplatRenderer(
     } else {
         gsplat.renderer = rendererByDevice.webgl;
     }
+}
+
+/**
+ * Octree streaming 全局 LOD 节流（对齐 PlayCanvas Billions 示例）。
+ * refinement burst 期间会临时覆盖 lodUpdateDistance。
+ * `lodBehindPenalty`：settings.sceneProfile > 默认 5。
+ */
+export function bindGsplatStreamingLodSettings(gsplat: GsplatSceneRuntime, global: Global): void {
+    gsplat.lodUpdateDistance = resolveLodUpdateDistance(global);
+    gsplat.lodUpdateAngle = 90;
+    gsplat.lodBehindPenalty = resolveLodBehindPenalty(global);
+    gsplat.radialSorting = true;
+}
+
+/**
+ * 将解析后的米制切档参数写入 entity `gsplat` 组件（refinement / native 共用）。
+ * 优先级：settings.sceneProfile > 默认 5 / 3。
+ */
+export function bindGsplatEntityLodSettings(
+    gsplatComponent: GsplatEntityLodRuntime | null | undefined,
+    global: Global
+): void {
+    if (!gsplatComponent) {
+        return;
+    }
+    gsplatComponent.lodBaseDistance = resolveLodBaseDistance(global);
+    gsplatComponent.lodMultiplier = resolveLodMultiplier(global);
 }
 
 /** 写入 budget 与 performanceMode 相关渲染参数（lodRange 由 per-entity component 负责） */

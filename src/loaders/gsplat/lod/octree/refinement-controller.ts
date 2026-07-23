@@ -11,9 +11,17 @@ import {
 } from 'playcanvas';
 
 import type { Global } from '../../../../types';
+import {
+    DEFAULT_LOD_BASE_DISTANCE,
+    DEFAULT_LOD_MULTIPLIER
+} from '../scene-profile';
 import { getOctreeBootstrapLod, isOctreeBootstrapPlaceableNode } from './lod-meta';
 import { resolveEntityLodRange } from './entity-lod-range';
-import { findAllOctreeInstances, type OctreeInstanceLike } from './octree-instance-access';
+import {
+    findAllOctreeInstances,
+    requestOctreePlacementUpdate,
+    type OctreeInstanceLike
+} from './octree-instance-access';
 import { computeStreamingRefinementProgressRatio } from './streaming-refinement-progress';
 
 export { computeStreamingRefinementProgressRatio };
@@ -161,7 +169,7 @@ type PrioritizedBatch = {
     staleLodNodes: number;
 };
 
-type LodPlacementParams = {
+export type LodPlacementParams = {
     lodBaseDistance: number;
     lodMultiplier: number;
 };
@@ -191,9 +199,16 @@ type RefinementEvaluateContext = {
 
 function lodParamsFromComponent(component: GSplatComponent | null): LodPlacementParams {
     return {
-        lodBaseDistance: component?.lodBaseDistance ?? 5,
-        lodMultiplier: component?.lodMultiplier ?? 3
+        lodBaseDistance: component?.lodBaseDistance ?? DEFAULT_LOD_BASE_DISTANCE,
+        lodMultiplier: component?.lodMultiplier ?? DEFAULT_LOD_MULTIPLIER
     };
+}
+
+/** 每次 full scan 重读组件，避免创建时冻结导致改 gsplat.lod* 无效 */
+function refreshEvalLodParams(ctx: RefinementEvaluateContext): LodPlacementParams {
+    const lod = lodParamsFromComponent(ctx.scene.gsplatEntity.gsplat as GSplatComponent | null);
+    ctx.lod = lod;
+    return lod;
 }
 
 function resolveViewportOptions(options?: StreamingViewportOptions) {
@@ -785,54 +800,11 @@ type OctreeGpuSyncJob = {
     gsplatEntity: Entity;
 };
 
-/** WebGPU：inst.update 会重建 work buffer / bind group，须在当帧 render 结束后执行 */
+/**
+ * 历史：WebGPU 曾在 frameend 推迟 inst.update。
+ * 现改走 world.requestOctreePlacementUpdate()，由 world.update 同拍轮询；保留队列清理供 destroy。
+ */
 const deferredOctreeGpuSyncJobs = new WeakMap<AppBase, OctreeGpuSyncJob[]>();
-const deferredOctreeGpuSyncApps = new WeakSet<AppBase>();
-
-function flushDeferredOctreeInstanceUpdates(app: AppBase): void {
-    const jobs = deferredOctreeGpuSyncJobs.get(app);
-    if (!jobs?.length) {
-        return;
-    }
-    const snapshot = jobs.splice(0, jobs.length);
-
-    const updated = new Set<OctreeInstanceLike>();
-    for (let i = 0; i < snapshot.length; i++) {
-        const { octree, gsplatEntity } = snapshot[i];
-        const instances = findAllOctreeInstances(app, octree, gsplatEntity);
-        for (let j = 0; j < instances.length; j++) {
-            const inst = instances[j];
-            if (updated.has(inst)) {
-                continue;
-            }
-            updated.add(inst);
-            try {
-                inst.update?.();
-            } catch (err) {
-                console.warn('[octree-refinement] deferred sync update failed', err);
-            }
-        }
-    }
-    app.renderNextFrame = true;
-}
-
-function scheduleDeferredOctreeInstanceUpdates(
-    app: AppBase,
-    octree: OctreeLike,
-    gsplatEntity: Entity
-): void {
-    let jobs = deferredOctreeGpuSyncJobs.get(app);
-    if (!jobs) {
-        jobs = [];
-        deferredOctreeGpuSyncJobs.set(app, jobs);
-    }
-    jobs.push({ octree, gsplatEntity });
-
-    if (!deferredOctreeGpuSyncApps.has(app)) {
-        deferredOctreeGpuSyncApps.add(app);
-        app.on('frameend', () => flushDeferredOctreeInstanceUpdates(app));
-    }
-}
 
 function cancelDeferredOctreeInstanceUpdates(app: AppBase, octree: OctreeLike): void {
     const jobs = deferredOctreeGpuSyncJobs.get(app);
@@ -845,23 +817,44 @@ function cancelDeferredOctreeInstanceUpdates(app: AppBase, octree: OctreeLike): 
     );
 }
 
-function runOctreeInstanceUpdates(
-    app: AppBase,
-    octree: OctreeLike,
-    gsplatEntity: Entity,
-    instances: OctreeInstanceLike[]
-): void {
-    if (app.graphicsDevice?.isWebGPU) {
-        scheduleDeferredOctreeInstanceUpdates(app, octree, gsplatEntity);
+/**
+ * 同一渲染帧内每个 octree 只允许真正执行一次 sync。
+ * 必须在 bootstrap（controller start 前）也能按帧清空，不能依赖 refinement controller 的 frameupdate。
+ */
+const syncedOctreesThisFrameByApp = new WeakMap<AppBase, WeakSet<object>>();
+/** 已为该 app 绑定「按真实帧」清空 sync 去重集合 */
+const syncDedupFrameBoundApps = new WeakSet<AppBase>();
+
+function clearSyncedOctreesThisFrame(app: AppBase): void {
+    syncedOctreesThisFrameByApp.set(app, new WeakSet<object>());
+}
+
+/**
+ * 首次 sync 即绑定 frameupdate：bootstrap 阶段也能跨帧重新放行 sync。
+ */
+function ensureSyncDedupFrameBound(app: AppBase): void {
+    if (syncDedupFrameBoundApps.has(app)) {
         return;
     }
-    for (let i = 0; i < instances.length; i++) {
-        try {
-            instances[i].update?.();
-        } catch (err) {
-            console.warn('[octree-refinement] sync update failed', err);
-        }
+    syncDedupFrameBoundApps.add(app);
+    app.on('frameupdate', () => {
+        clearSyncedOctreesThisFrame(app);
+    });
+}
+
+function hasSyncedOctreeThisFrame(app: AppBase, octree: OctreeLike): boolean {
+    ensureSyncDedupFrameBound(app);
+    return syncedOctreesThisFrameByApp.get(app)?.has(octree as object) === true;
+}
+
+function markSyncedOctreeThisFrame(app: AppBase, octree: OctreeLike): void {
+    ensureSyncDedupFrameBound(app);
+    let set = syncedOctreesThisFrameByApp.get(app);
+    if (!set) {
+        set = new WeakSet<object>();
+        syncedOctreesThisFrameByApp.set(app, set);
     }
+    set.add(octree as object);
 }
 
 function syncOctreePendingPlacements(
@@ -871,24 +864,25 @@ function syncOctreePendingPlacements(
     gsplatScene: GsplatSceneLike,
     markSceneDirty = false
 ) {
-    const instances = findAllOctreeInstances(app, octree, gsplatEntity);
-    for (let i = 0; i < instances.length; i++) {
-        instances[i].needsLodUpdate = true;
+    if (hasSyncedOctreeThisFrame(app, octree)) {
+        // 同帧已 sync：保留 render 请求即可，勿重复 placement update
+        app.renderNextFrame = true;
+        return 0;
     }
-    runOctreeInstanceUpdates(app, octree, gsplatEntity, instances);
+    markSyncedOctreeThisFrame(app, octree);
 
+    // 经 World API：下一拍立即轮询 instance → 仅 invalidate WorldState → 增量 bake
+    // 不再直接调用内部 inst.update()，避免吞掉 placement dirty / 状态所有权错位
+    const worldCount = requestOctreePlacementUpdate(app, octree);
+    const instanceCount = findAllOctreeInstances(app, octree, gsplatEntity).length;
+    const count = Math.max(worldCount, instanceCount);
+
+    // 仅真实结构变化才允许 markSceneDirty（默认 false；LOD sync 不得 scene-wide rebuild）
     if (markSceneDirty) {
         gsplatScene.dirty = true;
     }
     app.renderNextFrame = true;
-    return instances.length;
-}
-
-function markOctreeInstancesDirty(app: AppBase, octree: OctreeLike, gsplatEntity?: Entity) {
-    const instances = findAllOctreeInstances(app, octree, gsplatEntity);
-    for (let i = 0; i < instances.length; i++) {
-        instances[i].needsLodUpdate = true;
-    }
+    return count;
 }
 
 function scoreVisibleNode(
@@ -1361,11 +1355,13 @@ export function getStreamingViewportRefinementStatus(
 export function syncStreamingOctreePlacements(scene: OctreeStreamingScene): number {
     const { app, octree, gsplatEntity } = scene;
     const gsplatScene = app.scene.gsplat as GsplatSceneLike;
-    return syncOctreePendingPlacements(app, octree, gsplatEntity, gsplatScene, true);
+    // bootstrap / viewport sync：只推 LOD，不 scene-wide dirty
+    return syncOctreePendingPlacements(app, octree, gsplatEntity, gsplatScene, false);
 }
 
 function buildPriorityFiles(ctx: RefinementEvaluateContext): PrioritizedBatch {
-    const { scene, gsplat, lod: lodParams } = ctx;
+    const { scene, gsplat } = ctx;
+    const lodParams = refreshEvalLodParams(ctx);
     const { app, octree, gsplatEntity, cameraEntity } = scene;
     const maxLod = octree.lodLevels - 1;
     const camera = cameraEntity.camera;
@@ -1619,6 +1615,11 @@ export type OctreeRefinementController = {
     getActivity: () => OctreeRefinementActivity;
     /** 与下载控制器一致的 stable foreground pending，供进度条完成判定 */
     getStreamingRefinementStatus: () => StreamingViewportRefinementStatus;
+    /**
+     * 运行时覆写切档参数（写入 entity 组件；下次 full scan 生效）。
+     * 通常由 bindGsplatEntityLodSettings 在 bootstrap 写入；此处供调试 / 热更新。
+     */
+    setLodPlacementParams: (params: Partial<LodPlacementParams>) => void;
 };
 
 export function createOctreeRefinementController(
@@ -1731,6 +1732,7 @@ export function createOctreeRefinementController(
         // 5 档资产 optimal=0 时 limit 至少为 4 才能包含 bootstrap L4；取 max 保证生效
         const maxLod = octree.lodLevels - 1;
         gsplatScene.lodUnderfillLimit = Math.max(T.lod.underfillLimit, maxLod);
+        // 结构参数（budget / underfill）变化 → 允许 scene-wide dirty
         gsplatScene.dirty = true;
     };
 
@@ -1761,7 +1763,7 @@ export function createOctreeRefinementController(
             savedLoaderConcurrency = null;
         }
         prefetch.lastUrls = [];
-        gsplatScene.dirty = true;
+        // budget/underfill 未在此恢复；勿 scene-wide dirty（仅并发 / lodUpdateDistance）
     };
 
     const restoreSavedGsplatSceneSettings = () => {
@@ -1773,6 +1775,7 @@ export function createOctreeRefinementController(
             gsplatScene.lodUnderfillLimit = savedLodUnderfillLimit;
             savedLodUnderfillLimit = null;
         }
+        // 恢复全局 LOD 结构参数 → scene-wide dirty
         gsplatScene.dirty = true;
     };
 
@@ -1979,12 +1982,13 @@ export function createOctreeRefinementController(
 
         let syncedInstances = 0;
         if ((cameraJustMoved || cameraBurstActive) && needsLodSwitch) {
+            // LOD sync：经 World.requestOctreePlacementUpdate → 增量 WorldState；不得 scene-wide dirty
             syncedInstances = syncOctreePendingPlacements(
                 app,
                 octree,
                 gsplatEntity,
                 gsplatScene,
-                true
+                false
             );
             staleSyncCooldown = cameraBurstActive ? T.burst.syncCooldown : T.burst.staleSyncIdleFrames;
         } else if (needsLodSwitch && fileJustLanded) {
@@ -1993,7 +1997,7 @@ export function createOctreeRefinementController(
                 octree,
                 gsplatEntity,
                 gsplatScene,
-                true
+                false
             );
         } else if (needsLodSwitch && staleLoadedNodes >= T.loader.foregroundLimit) {
             syncedInstances = syncOctreePendingPlacements(
@@ -2001,7 +2005,7 @@ export function createOctreeRefinementController(
                 octree,
                 gsplatEntity,
                 gsplatScene,
-                true
+                false
             );
             staleSyncCooldown = T.burst.syncCooldown;
         } else if (needsLodSwitch && staleLoadedNodes > 0 && staleSyncCooldown <= 0) {
@@ -2019,7 +2023,7 @@ export function createOctreeRefinementController(
                 octree,
                 gsplatEntity,
                 gsplatScene,
-                true
+                false
             );
         }
 
@@ -2029,15 +2033,11 @@ export function createOctreeRefinementController(
                 octree,
                 gsplatEntity,
                 gsplatScene,
-                true
+                false
             );
         }
 
-        if (syncedInstances > 0) {
-            markOctreeInstancesDirty(app, octree, gsplatEntity);
-            gsplatScene.dirty = true;
-            app.renderNextFrame = true;
-        }
+        // sync 经 World.requestOctreePlacementUpdate + renderNextFrame；勿再绑 gsplatScene.dirty
 
         if (staleSyncCooldown > 0) {
             staleSyncCooldown--;
@@ -2145,11 +2145,8 @@ export function createOctreeRefinementController(
             syncBurstLodUpdateDistance();
         }
 
-        if (fileJustLanded || activityActive) {
-            gsplatScene.dirty = true;
-            markOctreeInstancesDirty(app, octree, gsplatEntity);
-            app.renderNextFrame = true;
-        } else if (priorityUrls.length > 0) {
+        // activity / 下载中：只保活渲染节拍，不触发 scene-wide dirty / 重复 needsLodUpdate
+        if (fileJustLanded || activityActive || priorityUrls.length > 0) {
             app.renderNextFrame = true;
         }
 
@@ -2194,8 +2191,8 @@ export function createOctreeRefinementController(
                     prevFrameLoading = loadingCount;
                 }
                 if (loadingDropped) {
-                    syncOctreePendingPlacements(app, octree, gsplatEntity, gsplatScene, true);
-                    markOctreeInstancesDirty(app, octree, gsplatEntity);
+                    // LOD sync：不得 scene-wide dirty
+                    syncOctreePendingPlacements(app, octree, gsplatEntity, gsplatScene, false);
                     app.renderNextFrame = true;
                 }
             };
@@ -2244,6 +2241,20 @@ export function createOctreeRefinementController(
 
         getStreamingRefinementStatus() {
             return lastStreamingRefinementStatus;
+        },
+
+        setLodPlacementParams(params: Partial<LodPlacementParams>) {
+            const comp = gsplatEntity.gsplat as GSplatComponent | null;
+            if (!comp) {
+                return;
+            }
+            if (params.lodBaseDistance !== undefined && Number.isFinite(params.lodBaseDistance) && params.lodBaseDistance > 0) {
+                comp.lodBaseDistance = params.lodBaseDistance;
+            }
+            if (params.lodMultiplier !== undefined && Number.isFinite(params.lodMultiplier) && params.lodMultiplier > 0) {
+                comp.lodMultiplier = params.lodMultiplier;
+            }
+            refreshEvalLodParams(evalCtx);
         },
 
         destroy() {
