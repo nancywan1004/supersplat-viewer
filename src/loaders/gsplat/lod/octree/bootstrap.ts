@@ -124,6 +124,11 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
     const STREAMING_REFINEMENT_STABLE_FRAMES = 10;
     const STREAMING_REFINEMENT_PENDING_SPIKE_FRAMES = 3;
     const STREAMING_REFINEMENT_STALL_MS = 5000;
+    /**
+     * unlock 后若始终未见 foreground pending：给 scan 建队留窗口，避免空队列 ready 秒收条；
+     * 超时仍无 pending 再允许完成（单文件/已齐档场景）。勿用 staleLod 硬门槛（Poland ladder 会卡死）。
+     */
+    const STREAMING_REFINEMENT_EMPTY_GRACE_MS = 750;
 
     let streamingLodUnlocked = false;
     let streamingPerfHandlerRegistered = false;
@@ -138,6 +143,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
     let streamingRefinementCapReachedAt = 0;
     let streamingRefinementBaselinePending = 0;
     let streamingRefinementPhaseStarted = false;
+    let streamingRefinementUnlockedAt = 0;
     let streamingPreGateKickCooldown = 0;
 
     const streamLastCamPos = new Vec3();
@@ -183,11 +189,21 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
     const getStreamingRefinementDoneRatio = (
         refinement: ReturnType<typeof resolveStreamingRefinementStatus>
     ): number => {
-        if (refinement.ready) {
-            return 1;
-        }
+        // 未见 pending 基线：不能把 ready/pending=0 当成完成（unlock 首帧空队列竞态）
         if (streamingRefinementBaselinePending <= 0) {
-            return refinement.refinementRatio ?? 0;
+            if (
+                streamingLodUnlocked &&
+                refinement.pendingNodes <= 0 &&
+                streamingRefinementUnlockedAt > 0 &&
+                performance.now() - streamingRefinementUnlockedAt >= STREAMING_REFINEMENT_EMPTY_GRACE_MS
+            ) {
+                return 1;
+            }
+            return 0;
+        }
+        // 完成只看前景下载（stable pending）；不用 staleLod（ladder 大场景会长期 >0 → 卡 100%）
+        if (refinement.ready || refinement.pendingNodes <= 0) {
+            return 1;
         }
         return computeStreamingRefinementProgressRatio(
             refinement.pendingNodes,
@@ -346,11 +362,12 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         }
 
         if (streamingRefinementBaselinePending <= 0) {
+            // grace 未过：停在粗档顶，避免 UI 先跳到 100% 再等 finalize
             const doneRatio = getStreamingRefinementDoneRatio(refinement);
             state.progress =
                 doneRatio >= STREAMING_REFINEMENT_UI_COMPLETE_RATIO
                     ? PROGRESS_REFINEMENT_CAP
-                    : PROGRESS_COARSE_CAP;
+                    : Math.max(state.progress, PROGRESS_COARSE_CAP);
             return;
         }
 
@@ -373,6 +390,11 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
             return;
         }
         streamingLodUnlocked = true;
+        streamingRefinementUnlockedAt = performance.now();
+        streamingRefinementBaselinePending = 0;
+        streamingRefinementStableFrames = 0;
+        streamingRefinementPendingSpikeFrames = 0;
+        streamingRefinementCapReachedAt = 0;
         bindGsplatPerfSettings(gsplat, global);
         const maxLod = octreeResource?.octree?.lodLevels;
         if (maxLod) {
@@ -399,6 +421,28 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         if (!isStreamingOctree || !streamingBootstrapGateReached) {
             return;
         }
+
+        // 首屏已完成：禁止再每帧全树扫描（Poland 等大场景上 isOctreeBootstrapPlaceableNode
+        // + ensureStreamingBootstrapCoarseFiles 可占 CPU profile >50%）。
+        // 仅保留 animTrack 开机逻辑。见 mega 1e0bc0e9。
+        if (progressUIHidden) {
+            if (
+                state.animationStarted ||
+                revealBlocksAnim(state) ||
+                settings.startMode !== 'animTrack' ||
+                !state.hasAnimation ||
+                config.noanim
+            ) {
+                return;
+            }
+            state.animationStarted = true;
+            state.animationPaused = false;
+            state.progress = 100;
+            events.fire('animationStarted');
+            console.log('Streaming octree: starting animation after bootstrap UI complete');
+            return;
+        }
+
         const scene = streamingScene();
         if (!scene) {
             return;
