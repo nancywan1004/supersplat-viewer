@@ -424,6 +424,19 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         state.loadingCameraControlsLocked = false;
         events.fire('cameraControls:flushInputs');
     });
+    // streaming：粗层 unlock / 动画起播时即可交互，勿等细档 pending→0（否则 anim 已播仍锁鼠标）
+    events.on('streamingLodUnlocked', () => {
+        state.loadingCameraControlsLocked = false;
+        events.fire('cameraControls:flushInputs');
+    });
+    events.on('animationStarted', () => {
+        state.loadingCameraControlsLocked = false;
+        events.fire('cameraControls:flushInputs');
+    });
+    events.on('firstFrame', () => {
+        state.loadingCameraControlsLocked = false;
+        events.fire('cameraControls:flushInputs');
+    });
 
     ensureViewSettings(global);
     applySceneAssetCollisionFromSettings(global);

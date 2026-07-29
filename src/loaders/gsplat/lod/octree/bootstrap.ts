@@ -118,7 +118,8 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
 
     const PROGRESS_THRESHOLD = 50;
     const PROGRESS_COARSE_CAP = 82;
-    const PROGRESS_REFINEMENT_CAP = 100;
+    /** 未 finalize 前 UI 最高到 99，避免 LOD 在 progress===100 时提前藏条却未解锁输入 */
+    const PROGRESS_REFINEMENT_CAP = 99;
     /** 视口细档完成比例达到该值即可收起进度条（refinement 后台仍继续） */
     const STREAMING_REFINEMENT_UI_COMPLETE_RATIO = 0.8;
     const STREAMING_REFINEMENT_STABLE_FRAMES = 10;
@@ -383,6 +384,14 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
             PROGRESS_REFINEMENT_CAP,
             Math.max(state.progress, refinementProgress)
         );
+        // 进度贴顶即开始 stall 计时，避免 poll 与 pending 抖动错开导致永远无 capReachedAt
+        if (
+            state.progress >= PROGRESS_REFINEMENT_CAP &&
+            streamingLodUnlocked &&
+            !streamingRefinementCapReachedAt
+        ) {
+            streamingRefinementCapReachedAt = performance.now();
+        }
     };
 
     const unlockStreamingLod = () => {
@@ -415,6 +424,9 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         refinementController = createOctreeRefinementController(global, gsplatEntity, octreeResource);
         refinementController?.start();
         onRefinementController(refinementController);
+
+        // 粗层视口已可看：立刻解锁相机输入。进度条仍可等细档 pending，二者解耦。
+        events.fire('streamingLodUnlocked');
     };
 
     const pollStreamingBootstrapComplete = () => {
@@ -486,25 +498,37 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
             streamingRefinementPendingSpikeFrames++;
             if (streamingRefinementPendingSpikeFrames >= STREAMING_REFINEMENT_PENDING_SPIKE_FRAMES) {
                 streamingRefinementStableFrames = 0;
-                streamingRefinementCapReachedAt = 0;
+                // 进度已贴顶后短暂 pending 回升：只清 stable，不清 stall 计时，避免永远到不了 progressThresholdReached
+                if (state.progress < PROGRESS_REFINEMENT_CAP) {
+                    streamingRefinementCapReachedAt = 0;
+                }
             }
-            return;
-        }
-        streamingRefinementPendingSpikeFrames = 0;
+            // 已贴顶且 stall：允许收条解锁（pending 抖动不应永久锁输入）
+            const allowFinalizeDespitePending =
+                streamingLodUnlocked &&
+                state.progress >= PROGRESS_REFINEMENT_CAP &&
+                streamingRefinementCapReachedAt > 0 &&
+                performance.now() - streamingRefinementCapReachedAt >= STREAMING_REFINEMENT_STALL_MS;
+            if (!allowFinalizeDespitePending) {
+                return;
+            }
+        } else {
+            streamingRefinementPendingSpikeFrames = 0;
 
-        if (!streamingRefinementCapReachedAt) {
-            streamingRefinementCapReachedAt = performance.now();
-        }
+            if (!streamingRefinementCapReachedAt) {
+                streamingRefinementCapReachedAt = performance.now();
+            }
 
-        streamingRefinementStableFrames++;
-        const refinementStalledAtCap =
-            streamingRefinementCapReachedAt > 0 &&
-            performance.now() - streamingRefinementCapReachedAt >= STREAMING_REFINEMENT_STALL_MS;
-        if (
-            streamingRefinementStableFrames < STREAMING_REFINEMENT_STABLE_FRAMES &&
-            !refinementStalledAtCap
-        ) {
-            return;
+            streamingRefinementStableFrames++;
+            const refinementStalledAtCap =
+                streamingRefinementCapReachedAt > 0 &&
+                performance.now() - streamingRefinementCapReachedAt >= STREAMING_REFINEMENT_STALL_MS;
+            if (
+                streamingRefinementStableFrames < STREAMING_REFINEMENT_STABLE_FRAMES &&
+                !refinementStalledAtCap
+            ) {
+                return;
+            }
         }
 
         if (!progressUIHidden) {

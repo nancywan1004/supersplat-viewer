@@ -429,13 +429,8 @@ const initUI = (global: Global) => {
                 dom.loadingBar.style.backgroundImage = progressGradient;
                 dom.loadingBar.style.backgroundSize = '100% 100%';
                 dom.loadingBar.style.backgroundRepeat = 'no-repeat';
-                // In LOD mode, hide loading UI when progress reaches 100%
-                if (isLodMode) {
-                    const loadingWrap = document.getElementById('loadingWrap');
-                    if (loadingWrap) {
-                        loadingWrap.classList.add('hidden');
-                    }
-                }
+                // 勿在 progress===100 时提前藏条：streaming 路径须等 progressThresholdReached
+                // 才能解开 loadingCameraControlsLocked；提前藏条会造成「条没了点不动」。
             }
         });
     }
