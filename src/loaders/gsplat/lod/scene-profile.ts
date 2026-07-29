@@ -18,6 +18,8 @@ type SceneProfileObject = {
     lodBaseDistance?: unknown;
     lodMultiplier?: unknown;
     lodBehindPenalty?: unknown;
+    /** false 时关闭 viewer 侧 lod 米制尺对齐；默认开启 */
+    lodScaleAlign?: unknown;
 };
 
 function readSceneProfile(settings: ExperienceSettings): SceneProfileObject | undefined {
@@ -75,6 +77,15 @@ export function resolveLodBehindPenalty(global: Global): number {
         return fromSettings;
     }
     return DEFAULT_LOD_BEHIND_PENALTY;
+}
+
+/**
+ * settings.sceneProfile.lodScaleAlign === false 时关闭；缺省 / 其它值均开启。
+ * 按场景 AABB / 叶尺度 / 密度缩小有效 lodBaseDistance（AUTO_SCALE 同构）。
+ */
+export function resolveLodScaleAlignEnabled(global: Global): boolean {
+    const flag = readSceneProfile(global.settings)?.lodScaleAlign;
+    return flag !== false;
 }
 
 function readSettingsLodRuntime(settings: ExperienceSettings): LodRuntime | undefined {

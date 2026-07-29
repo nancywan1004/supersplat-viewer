@@ -23,7 +23,12 @@ import {
     warnOnComputeRendererFallback,
     type GsplatSceneRuntime
 } from '../scene-bindings';
+import {
+    resolveLodBaseDistance,
+    resolveLodScaleAlignEnabled
+} from '../scene-profile';
 import { applyLodRangeToGsplatEntity } from './entity-lod-range';
+import { applyLodScaleAlignToComponent } from './lod-scale-align';
 import { computeStreamingRefinementProgressRatio } from './streaming-refinement-progress';
 import {
     createOctreeRefinementController,
@@ -105,6 +110,26 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
 
     bindGsplatStreamingLodSettings(gsplat, global);
     bindGsplatEntityLodSettings(gsplatEntity.gsplat, global);
+    // AUTO_SCALE 同构：按场景对角/叶尺度/密度缩小 effective lodBaseDistance，写回 entity 供引擎与 refinement 共用
+    const scaleAlign = applyLodScaleAlignToComponent(
+        gsplatEntity.gsplat,
+        octreeResource?.octree ?? null,
+        resolveLodBaseDistance(global),
+        { enabled: resolveLodScaleAlignEnabled(global) }
+    );
+    if (scaleAlign?.applied) {
+        console.log('[LOD] scale-align lodBaseDistance', {
+            configured: scaleAlign.configuredD0,
+            effective: scaleAlign.effectiveD0,
+            scale: Number(scaleAlign.scale.toFixed(3)),
+            sceneDiag: scaleAlign.metrics.sceneDiagonal,
+            medianLeaf: scaleAlign.metrics.medianLeafExtent,
+            densityRatio: Number(scaleAlign.metrics.densityRatio.toFixed(3)),
+            extentScale: Number(scaleAlign.metrics.extentScale.toFixed(3)),
+            leafScale: Number(scaleAlign.metrics.leafScale.toFixed(3)),
+            densityScale: Number(scaleAlign.metrics.densityScale.toFixed(3))
+        });
+    }
 
     const eventHandler = app.systems.gsplat;
     let idleTime = 0;
