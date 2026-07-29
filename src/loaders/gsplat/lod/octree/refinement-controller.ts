@@ -59,6 +59,22 @@ const T = {
         edgeRelaxOptimal: 0.45,
         centerScorePower: 5.0
     },
+    /**
+     * 投影密度自适应（AUTO_SCALE 同构：点/投影面积）。
+     * 只允许相对距离档变粗，减少不必要换挡；不得细过引擎 optimalLod。
+     */
+    density: {
+        /** 相对立体角面积上的目标点数（screenArea≈(extent/depth)^2） */
+        targetPointsPerScreenArea: 2048,
+        minScreenArea: 1e-6
+    },
+    ladder: {
+        coarsestStepBoost: 2.75,
+        stepBoost: 1.6,
+        /** stableForeground pending ≥ 此值视为积压，ladder 一次跳 backlogJumpSteps 档 */
+        backlogPending: 12,
+        backlogJumpSteps: 2
+    },
     burst: {
         moveFrames: 18,
         zoomFrames: 36,
@@ -66,10 +82,6 @@ const T = {
         syncCooldown: 3,
         staleSyncCooldown: 6,
         staleSyncIdleFrames: 12
-    },
-    ladder: {
-        coarsestStepBoost: 2.75,
-        stepBoost: 1.6
     }
 } as const;
 
@@ -1091,22 +1103,95 @@ function computeViewportAabbEdgeFactor(
 }
 
 /**
- * separate 资产逐档升 LOD：当前比 optimal 粗时，先拉 currentLod-1，避免一次追 L0 导致「最糊→次糊」长时间不动。
+ * separate 资产逐档升 LOD：当前比 optimal 粗时，先拉 currentLod-1；
+ * pending 积压时可一次跳 jumpSteps 档，减少阶数、加快收敛。
  */
 function computeRefinementTargetLod(
     optimalLod: number,
     maxLod: number,
     currentLod: number,
-    edgeFactor: number
+    edgeFactor: number,
+    jumpSteps = 1
 ): number {
     const relaxedTarget = edgeFactor < T.viewport.edgeRelaxOptimal
         ? Math.min(maxLod, optimalLod + 1)
         : optimalLod;
 
     if (currentLod >= 0 && currentLod > relaxedTarget) {
-        return currentLod - 1;
+        const steps = Math.max(1, jumpSteps | 0);
+        return Math.max(relaxedTarget, currentLod - steps);
     }
     return relaxedTarget;
+}
+
+/**
+ * 投影密度允许的最粗档：count(lod)/screenArea ≥ 目标则该档够密。
+ * 从粗到细找第一个满足的档（即满足密度的最粗档）；皆不满足则 0。
+ */
+function computeDensityAdaptedLod(
+    node: OctreeNode,
+    maxLod: number,
+    screenArea: number,
+    rangeMin: number,
+    rangeMax: number
+): number {
+    const area = Math.max(screenArea, T.density.minScreenArea);
+    const targetPoints = T.density.targetPointsPerScreenArea * area;
+    let densityLod = 0;
+    for (let lod = maxLod; lod >= 0; lod--) {
+        const count = node.lods[lod]?.count ?? 0;
+        if (count >= targetPoints) {
+            densityLod = lod;
+            break;
+        }
+    }
+    if (densityLod < rangeMin) densityLod = rangeMin;
+    if (densityLod > rangeMax) densityLod = rangeMax;
+    return densityLod;
+}
+
+/** AABB 相对相机的投影面积代理 (extent/nearestDepth)^2 */
+function estimateProjectedScreenArea(
+    minX: number,
+    minY: number,
+    minZ: number,
+    maxX: number,
+    maxY: number,
+    maxZ: number,
+    cameraPos: Vec3,
+    cameraFwd: Vec3
+): number {
+    const extent = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
+    const cx = (minX + maxX) * 0.5;
+    const cy = (minY + maxY) * 0.5;
+    const cz = (minZ + maxZ) * 0.5;
+    const centerDepth =
+        (cx - cameraPos.x) * cameraFwd.x +
+        (cy - cameraPos.y) * cameraFwd.y +
+        (cz - cameraPos.z) * cameraFwd.z;
+    const depthRadius =
+        (maxX - minX) * Math.abs(cameraFwd.x) * 0.5 +
+        (maxY - minY) * Math.abs(cameraFwd.y) * 0.5 +
+        (maxZ - minZ) * Math.abs(cameraFwd.z) * 0.5;
+    const nearestDepth = Math.max(0.001, centerDepth - depthRadius);
+    const ratio = extent / nearestDepth;
+    return ratio * ratio;
+}
+
+/**
+ * 下载目标：距离档 + 投影密度变粗 + 引擎预算钳制（不得比 engineOptimal 更细）。
+ * lod 越大越粗。
+ */
+function resolveDownloadOptimalLod(
+    rawOptimalLod: number,
+    densityLod: number,
+    engineOptimalLod: number
+): number {
+    let lod = Math.max(rawOptimalLod, densityLod);
+    if (engineOptimalLod >= 0) {
+        lod = Math.max(lod, engineOptimalLod);
+    }
+    return lod;
 }
 
 function computeLadderScoreBoost(
@@ -1424,7 +1509,12 @@ export function syncStreamingOctreePlacements(scene: OctreeStreamingScene): numb
     return syncOctreePendingPlacements(app, octree, gsplatEntity, gsplatScene, false);
 }
 
-function buildPriorityFiles(ctx: RefinementEvaluateContext): PrioritizedBatch {
+function buildPriorityFiles(
+    ctx: RefinementEvaluateContext,
+    options?: { pendingBacklog?: boolean }
+): PrioritizedBatch {
+    const pendingBacklog = options?.pendingBacklog === true;
+    const jumpSteps = pendingBacklog ? T.ladder.backlogJumpSteps : 1;
     const { scene, gsplat } = ctx;
     const lodParams = refreshEvalLodParams(ctx);
     const { app, octree, gsplatEntity, cameraEntity } = scene;
@@ -1519,7 +1609,7 @@ function buildPriorityFiles(ctx: RefinementEvaluateContext): PrioritizedBatch {
         }
 
         const fovAdjustedDistance = penalizedDistance * fovScale;
-        const optimalLod = computeOptimalLodIndex(
+        const rawOptimalLod = computeOptimalLodIndex(
             fovAdjustedDistance,
             maxLod,
             lodBaseDistance,
@@ -1543,7 +1633,7 @@ function buildPriorityFiles(ctx: RefinementEvaluateContext): PrioritizedBatch {
             boundsFlat,
             nodeIndex,
             fovAdjustedDistance,
-            optimalLod,
+            rawOptimalLod,
             maxLod,
             worldCameraPos,
             worldCameraFwd
@@ -1565,11 +1655,35 @@ function buildPriorityFiles(ctx: RefinementEvaluateContext): PrioritizedBatch {
             continue;
         }
 
+        const screenArea = estimateProjectedScreenArea(
+            _lastScoreMinX,
+            _lastScoreMinY,
+            _lastScoreMinZ,
+            _lastScoreMaxX,
+            _lastScoreMaxY,
+            _lastScoreMaxZ,
+            worldCameraPos,
+            worldCameraFwd
+        );
+        const densityLod = computeDensityAdaptedLod(
+            node,
+            maxLod,
+            screenArea,
+            rangeMin,
+            rangeMax
+        );
+        const downloadOptimalLod = resolveDownloadOptimalLod(
+            rawOptimalLod,
+            densityLod,
+            engineOptimalLod
+        );
+
         const targetLod = computeRefinementTargetLod(
-            optimalLod,
+            downloadOptimalLod,
             maxLod,
             currentLod,
-            edgeFactor
+            edgeFactor,
+            jumpSteps
         );
 
         // 文件已加载且 current 已不粗于 target
@@ -1949,6 +2063,8 @@ export function createOctreeRefinementController(
         const cameraJustMoved = cameraMovedSinceSettle;
         const cameraBurstActive = cameraBurstFrames > 0;
         const scanStartMs = performance.now();
+        const pendingBacklog =
+            prevPending.stableForeground >= T.ladder.backlogPending;
         const {
             files: batch,
             pendingUniqueFiles,
@@ -1958,7 +2074,7 @@ export function createOctreeRefinementController(
             lodDisplayMismatch,
             needsLodSwitch,
             staleLodNodes
-        } = buildPriorityFiles(evalCtx);
+        } = buildPriorityFiles(evalCtx, { pendingBacklog });
         scanMs = performance.now() - scanStartMs;
         traverseStats.leavesEvaluatedLast = batch.length;
         traverseStats.lastScanMode = 'full';
@@ -2214,6 +2330,8 @@ export function createOctreeRefinementController(
                 const priorityLoad = countPriorityLoadState(loader, priorityUrls);
                 const log: Record<string, unknown> = {
                     boostActive,
+                    pendingBacklog,
+                    ladderJumpSteps: pendingBacklog ? T.ladder.backlogJumpSteps : 1,
                     pinLimit: T.loader.pinLimit,
                     pinnedFiles: prefetch.pinned.size,
                     pendingUniqueFiles,
