@@ -11,7 +11,7 @@ import {
     getComparableSettingsStringFromSnapshot,
     applySettingsSnapshot,
     syncEditBaselineCollisionFromGlobal,
-    listTopLevelSettingsDiffKeys
+    logSettingsDiffDetails
 } from '../settings-serialize/settings-serialize';
 import { SCENE_COLLISION_CHANGED } from '../collision/scene-collision-source';
 import { readSkyboxCurrentUrlFromSettings } from '../settings-serialize/settings-serialize-helper';
@@ -795,9 +795,10 @@ const initUI = (global: Global) => {
                     return;
                 }
                 if (editModeEnteredSettingsData) {
-                    console.warn(
-                        '[UI] exit-edit needsSave diff keys:',
-                        listTopLevelSettingsDiffKeys(editModeEnteredSettingsData, currentSnapshot)
+                    logSettingsDiffDetails(
+                        '[UI] exit-edit needsSave',
+                        editModeEnteredSettingsData,
+                        currentSnapshot
                     );
                 }
                 showExitEditConfirmModal({

@@ -46,7 +46,7 @@ import {
     getComparableSettingsStringFromSnapshot,
     applySettingsSnapshot,
     syncEditBaselineCollisionFromGlobal,
-    listTopLevelSettingsDiffKeys
+    logSettingsDiffDetails
 } from './settings-serialize/settings-serialize';
 import {
     applySceneMediaHotspotBaselineFromView,
@@ -501,8 +501,7 @@ const initPostMessageBridge = (global: Global) => {
                 const currentComparable = getComparableSettingsStringFromSnapshot(currentSnapshot);
                 const needsSave = editModeBaselineString != null && currentComparable !== editModeBaselineString;
                 if (needsSave && editModeBaselineData) {
-                    const diffKeys = listTopLevelSettingsDiffKeys(editModeBaselineData, currentSnapshot);
-                    console.warn('[MessageBridge] EDIT_EXIT_NEEDS_SAVE diff keys:', diffKeys);
+                    logSettingsDiffDetails('[MessageBridge] EDIT_EXIT_NEEDS_SAVE', editModeBaselineData, currentSnapshot);
                 }
                 postToParent('EDIT_EXIT_NEEDS_SAVE', { value: needsSave });
                 break;

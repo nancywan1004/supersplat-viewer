@@ -322,7 +322,31 @@ export function getComparableSettingsString(global: Global): string {
 /** 对任意快照生成稳定可比较字符串，避免 key 顺序导致误判。 */
 export function getComparableSettingsStringFromSnapshot(snapshot: ExperienceSettings): string {
     const settings = JSON.parse(JSON.stringify(snapshot)) as ExperienceSettings;
+    normalizeNightModeForCompare(settings);
     return JSON.stringify(sortKeysForCompare(settings));
+}
+
+/**
+ * needsSave 比较用：缺省 `nightMode` / `{ fade: 0 }` 视为等价，避免 remount/vfxExit
+ * 事后 `ensure` 写出默认 nightMode 造成假脏。
+ */
+function normalizeNightModeForCompare(settings: ExperienceSettings): void {
+    const nm = settings.nightMode as { fade?: number; enabled?: boolean } | undefined;
+    if (!nm || typeof nm !== 'object') {
+        delete (settings as { nightMode?: unknown }).nightMode;
+        return;
+    }
+    let fade: number;
+    if (typeof nm.fade === 'number' && Number.isFinite(nm.fade)) {
+        fade = Math.max(-1, Math.min(1, nm.fade));
+    } else {
+        fade = nm.enabled ? -0.95 : 0;
+    }
+    if (Math.abs(fade) < 1e-6) {
+        delete (settings as { nightMode?: unknown }).nightMode;
+        return;
+    }
+    settings.nightMode = { fade };
 }
 
 /**
@@ -362,8 +386,13 @@ export function listTopLevelSettingsDiffKeys(
     baseline: ExperienceSettings,
     current: ExperienceSettings
 ): string[] {
-    const a = sortKeysForCompare(baseline) as Record<string, unknown>;
-    const b = sortKeysForCompare(current) as Record<string, unknown>;
+    const normalize = (src: ExperienceSettings): Record<string, unknown> => {
+        const s = JSON.parse(JSON.stringify(src)) as ExperienceSettings;
+        normalizeNightModeForCompare(s);
+        return sortKeysForCompare(s) as Record<string, unknown>;
+    };
+    const a = normalize(baseline);
+    const b = normalize(current);
     const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
     const diff: string[] = [];
     for (const key of keys) {
@@ -372,6 +401,24 @@ export function listTopLevelSettingsDiffKeys(
         }
     }
     return diff;
+}
+
+/** 打印 needsSave 时各 diff key 的基线/当前值，便于定位假脏。 */
+export function logSettingsDiffDetails(
+    label: string,
+    baseline: ExperienceSettings,
+    current: ExperienceSettings
+): void {
+    const keys = listTopLevelSettingsDiffKeys(baseline, current);
+    if (keys.length === 0) return;
+    const detail: Record<string, { baseline: unknown; current: unknown }> = {};
+    for (const key of keys) {
+        detail[key] = {
+            baseline: (baseline as Record<string, unknown>)[key] ?? null,
+            current: (current as Record<string, unknown>)[key] ?? null
+        };
+    }
+    console.warn(label, keys, detail);
 }
 
 /**
@@ -395,4 +442,6 @@ export function applySettingsSnapshot(global: Global, snapshot: ExperienceSettin
     applySceneAssetCollisionFromSettings(global);
     syncSceneAssetCollisionRuntime(global);
     global.events.fire('cameraCollision:changed');
+    // settings 已恢复为快照真源：丢弃 VFX 期间的 nightFade 运行时快照，避免事后写回造成假脏
+    global.events.fire('settingsSnapshotApplied');
 }
