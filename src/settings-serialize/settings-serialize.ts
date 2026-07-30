@@ -326,6 +326,55 @@ export function getComparableSettingsStringFromSnapshot(snapshot: ExperienceSett
 }
 
 /**
+ * 系统侧写入 `collision.url`（如进入编辑后 shadow/collision 异步 `ensureCollisionUrl`）时，
+ * 仅把基线快照中的 `collision.url` 同步为当前值，避免 `EDIT_EXIT_NEEDS_SAVE` 假脏；
+ * 不改动 `enabled` / `scale` 等，以免掩盖用户真实编辑。
+ */
+export function syncEditBaselineCollisionFromGlobal(
+    baselineData: ExperienceSettings,
+    global: Global
+): { data: ExperienceSettings; comparable: string } {
+    const current = serializeExperienceSettings(global);
+    const next = JSON.parse(JSON.stringify(baselineData)) as ExperienceSettings;
+    const currentUrl =
+        typeof current.collision?.url === 'string' ? current.collision.url.trim() : '';
+
+    if (currentUrl) {
+        if (!next.collision || typeof next.collision !== 'object') {
+            next.collision = {};
+        }
+        (next.collision as { url?: string }).url = currentUrl;
+    } else if (next.collision && typeof next.collision === 'object') {
+        delete (next.collision as { url?: string }).url;
+        if (Object.keys(next.collision).length === 0) {
+            delete (next as { collision?: unknown }).collision;
+        }
+    }
+
+    return {
+        data: next,
+        comparable: getComparableSettingsStringFromSnapshot(next)
+    };
+}
+
+/** 比较两份 settings 快照，返回顶层不一致的 key（用于 needsSave 排查）。 */
+export function listTopLevelSettingsDiffKeys(
+    baseline: ExperienceSettings,
+    current: ExperienceSettings
+): string[] {
+    const a = sortKeysForCompare(baseline) as Record<string, unknown>;
+    const b = sortKeysForCompare(current) as Record<string, unknown>;
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    const diff: string[] = [];
+    for (const key of keys) {
+        if (JSON.stringify(a[key]) !== JSON.stringify(b[key])) {
+            diff.push(key);
+        }
+    }
+    return diff;
+}
+
+/**
  * 将 global.settings 恢复为快照内容（原地替换属性），用于「不保存并退出」时回退。
  */
 export function applySettingsSnapshot(global: Global, snapshot: ExperienceSettings): void {

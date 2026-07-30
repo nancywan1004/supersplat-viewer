@@ -40,11 +40,13 @@ import { buildVideoExportFilename } from './render/video-export';
 import type { ExperienceSettings, SceneMediaHotspotPatch, TorchLightSettings } from './schemas/v2';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import { getRevealActiveType, getRevealTotalDuration } from './settings-serialize/effects-sync';
+import { SCENE_COLLISION_CHANGED } from './collision/scene-collision-source';
 import {
     serializeExperienceSettings,
-    getComparableSettingsString,
     getComparableSettingsStringFromSnapshot,
-    applySettingsSnapshot
+    applySettingsSnapshot,
+    syncEditBaselineCollisionFromGlobal,
+    listTopLevelSettingsDiffKeys
 } from './settings-serialize/settings-serialize';
 import {
     applySceneMediaHotspotBaselineFromView,
@@ -384,6 +386,15 @@ const initPostMessageBridge = (global: Global) => {
         editModeBaselineString = getComparableSettingsStringFromSnapshot(currentSnapshot);
     };
 
+    /** 进入编辑后系统异步写入 collision.url 时同步基线，避免未编辑却 needsSave */
+    const syncBaselineCollisionFromSystem = () => {
+        if (!state.editMode || !editModeBaselineData || editModeBaselineString == null) return;
+        const patched = syncEditBaselineCollisionFromGlobal(editModeBaselineData, global);
+        editModeBaselineData = patched.data;
+        editModeBaselineString = patched.comparable;
+    };
+    events.on(SCENE_COLLISION_CHANGED, syncBaselineCollisionFromSystem);
+
     const handleMessage = async (event: MessageEvent) => {
         const payload = event.data as InboundPayload;
         if (!payload?.type) return;
@@ -486,7 +497,13 @@ const initPostMessageBridge = (global: Global) => {
                 break;
             }
             case 'EDIT_MODE_EXIT_REQUEST': {
-                const needsSave = editModeBaselineString != null && getComparableSettingsString(global) !== editModeBaselineString;
+                const currentSnapshot = serializeExperienceSettings(global);
+                const currentComparable = getComparableSettingsStringFromSnapshot(currentSnapshot);
+                const needsSave = editModeBaselineString != null && currentComparable !== editModeBaselineString;
+                if (needsSave && editModeBaselineData) {
+                    const diffKeys = listTopLevelSettingsDiffKeys(editModeBaselineData, currentSnapshot);
+                    console.warn('[MessageBridge] EDIT_EXIT_NEEDS_SAVE diff keys:', diffKeys);
+                }
                 postToParent('EDIT_EXIT_NEEDS_SAVE', { value: needsSave });
                 break;
             }
