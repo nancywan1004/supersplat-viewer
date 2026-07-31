@@ -1,7 +1,8 @@
 /**
- * Viewer 侧调度米制尺对齐（R95 + LOD 金字塔）。
+ * Viewer 侧调度米制尺对齐（稳健半径 + LOD 金字塔）。
  *
- * 在典型远距（叶中心距离 P95）处，希望进入金字塔约「1/64 点数」或层数 2/3 的档；
+ * 在典型远距（叶中心距离第 95 百分位）处，希望进入「约剩最细档 1/64 点数」的档
+ *（decimate 0.5 时即约第 6 档）；若点数信号不足则回退层数约 2/3。
  * 反推 lodBaseDistance，写回 entity 供引擎与 refinement 共用。
  */
 
@@ -339,7 +340,8 @@ export function resolveOctreeMaxLod(octree: LodScaleAlignOctree): number {
 }
 
 /**
- * 远景目标档：点数「约 1/64」优先，否则层数 2/3。
+ * 远景目标档：点数「约 1/64」优先（decimate 0.5 时≈第 6 档，跨层数结果稳定）；
+ * 点数信号不足时回退层数约 2/3。
  */
 export function resolveTargetFarLod(
     maxLod: number,

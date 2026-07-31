@@ -32,7 +32,6 @@ function buildOutlierBounds(): { bounds: Float32Array; nodeCount: number } {
         const t = (i / 95) * Math.PI * 2;
         centers.push([50 * Math.cos(t), 0, 50 * Math.sin(t)]);
     }
-    // 5% 离群：拉长 AABB
     for (let i = 0; i < 5; i++) {
         centers.push([200 + i, 0, 0]);
     }
@@ -79,14 +78,12 @@ function testWuhanNumeric(): void {
     console.log('ok Wuhan numeric', { d0: r!.effectiveD0.toFixed(4), scale: r!.scale.toFixed(2) });
 }
 
-function testFlorenzPointRatioSlack(): void {
-    // 理想 ×0.5，L6 略高于严格 1/64
+function testFlorenzPointRatioPreferred(): void {
     const l0 = 32_000_000;
     const counts = [l0];
     for (let i = 1; i <= 10; i++) {
-        counts.push(Math.floor(l0 / (2 ** i)) + (i === 6 ? 10 : 0));
+        counts.push(Math.floor(l0 / (2 ** i)));
     }
-    // L6/L0 略 > 1/64
     counts[6] = Math.floor(l0 / 64) + 8;
     assert(counts[6] / l0 > 1 / 64, 'precondition: L6 slightly above 1/64');
     assert(counts[6] / l0 <= (1 / 64) * 1.05, 'precondition: within 5% slack');
@@ -94,7 +91,7 @@ function testFlorenzPointRatioSlack(): void {
     const resolved = resolveTargetFarLod(10, counts);
     assert(resolved.targetByLayers === 7, `layers=${resolved.targetByLayers}`);
     assert(resolved.targetByPoints === 6, `points=${resolved.targetByPoints}`);
-    assert(resolved.targetFarLod === 6, 'points must win over layers=7');
+    assert(resolved.targetFarLod === 6, 'points ~1/64 preferred over layers=7');
 
     const r = computeAdaptiveLodBaseDistance({
         robustRadiusR95: 66.367,
@@ -108,15 +105,14 @@ function testFlorenzPointRatioSlack(): void {
     assert(r!.targetFarLod === 6, `florenz target=${r!.targetFarLod}`);
     assert(r!.effectiveD0 > LOD_SCALE_MIN_D0_M + 1e-6, 'must not hit 0.15 floor');
     assertClose(r!.effectiveD0, 0.382, 0.02, 'Florenz effectiveD0');
-    console.log('ok Florenz slack→LOD6', { d0: r!.effectiveD0.toFixed(4), target: r!.targetFarLod });
+    console.log('ok Florenz points→LOD6', { d0: r!.effectiveD0.toFixed(4), target: r!.targetFarLod });
 }
 
 function testWuhanPointCountsSelectLod6(): void {
-    // 近似 Wuhan：L6 ≈ L0/64
     const l0 = 18_509_429;
     const counts = Array.from({ length: 10 }, (_, i) => Math.max(1, Math.round(l0 / (2 ** i))));
     const resolved = resolveTargetFarLod(9, counts);
-    assert(resolved.targetFarLod === 6, `Wuhan points target=${resolved.targetFarLod}`);
+    assert(resolved.targetFarLod === 6, `Wuhan target=${resolved.targetFarLod}`);
     console.log('ok Wuhan point counts → LOD6', resolved);
 }
 
@@ -124,7 +120,7 @@ function main(): void {
     testR95ResistsOutliers();
     testWuhanNumeric();
     testWuhanPointCountsSelectLod6();
-    testFlorenzPointRatioSlack();
+    testFlorenzPointRatioPreferred();
     console.log('all lod-scale-align tests passed');
 }
 
