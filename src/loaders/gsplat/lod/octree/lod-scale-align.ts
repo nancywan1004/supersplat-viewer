@@ -1,44 +1,73 @@
 /**
- * Viewer 侧调度米制尺对齐（AUTO_SCALE 同构）。
+ * Viewer 侧调度米制尺对齐（R95 + LOD 金字塔）。
  *
- * 预处理 AUTO_SCALE：几何 ×S → 固定 d0=5 相对场景更「短」→ 更早粗档。
- * Viewer 不改坐标：effectiveD0 = configuredD0 / S（只缩小、不放大），
- * 并写回 entity.gsplat.lodBaseDistance，与引擎/refinement 共用。
- *
- * 信号：场景对角、叶中位对角、密度 ratio（与 splat-transform densityScale 同构）。
+ * 在典型远距（叶中心距离 P95）处，希望进入金字塔约「1/64 点数」或层数 2/3 的档；
+ * 反推 lodBaseDistance，写回 entity 供引擎与 refinement 共用。
  */
 
 import { computeMedianLeafExtent } from './leaf-extent';
 
-/** Poland-new 量级：固定 d0=5 相对合理的参考对角 */
-export const LOD_SCALE_REF_SCENE_DIAGONAL_M = 4000;
-/** Poland-new 叶中位对角量级 */
+/** Poland-new 叶中位对角；仅诊断 leafScale 参考 */
 export const LOD_SCALE_REF_MEDIAN_LEAF_M = 35;
-/** 与 splat-transform DEFAULT_LOD_CHUNK_EXTENT 对齐 */
+/** 与 splat-transform DEFAULT_LOD_CHUNK_EXTENT 对齐（密度仅日志） */
 export const LOD_SCALE_CHUNK_EXTENT_M = 10;
-/** 与 splat-transform DEFAULT_TARGET_L0_POINTS 对齐 */
 export const LOD_SCALE_TARGET_L0_POINTS = 4096;
-/** 与 splat-transform DEFAULT_TARGET_DENSITY_RATIO 对齐 */
 export const LOD_SCALE_TARGET_DENSITY_RATIO = 0.5;
-/** 密度触发：ratio > target × trigger 才上调 scale */
-export const LOD_SCALE_DENSITY_TRIGGER_RATIO = 1;
-/** viewer 侧比 preprocess maxScale=32 更保守，避免与投影密度双重过粗 */
-export const LOD_SCALE_MAX = 6;
-/** effectiveD0 地板，避免贴脸也永远追不到细档 */
-export const LOD_SCALE_MIN_D0_M = 0.75;
-/** 二次应用时相对变化低于此比例则跳过（滞回） */
+/** effectiveD0 地板（米） */
+export const LOD_SCALE_MIN_D0_M = 0.15;
 export const LOD_SCALE_HYSTERESIS_RATIO = 0.08;
+/** 默认档距倍率（与 scene-profile DEFAULT_LOD_MULTIPLIER 一致） */
+export const LOD_SCALE_DEFAULT_MULTIPLIER = 3;
+/** 默认质量系数（balanced） */
+export const LOD_SCALE_DEFAULT_QUALITY_FACTOR = 1.4;
+/** 「约 1/64」点数比容差 */
+export const LOD_SCALE_POINT_RATIO_FAR = 1 / 64;
+export const LOD_SCALE_POINT_RATIO_SLACK = 1.05;
+/** meta lodDistanceScale soft 修正幅度（相对 raw×qf） */
+export const LOD_SCALE_SOFT_CORR_MIN = 0.75;
+export const LOD_SCALE_SOFT_CORR_MAX = 1.25;
+
+/** @deprecated 旧半边公式残留；主路径已改 R95+金字塔 */
+export const LOD_SCALE_TARGET_L2_HALF_FRACTION = 0.05;
+/** @deprecated 主路径不再用 MAX scale 钳制 */
+export const LOD_SCALE_MAX = 12;
+/** @deprecated 保留导出供旧日志/脚本 */
+export const LOD_SCALE_REF_SCENE_DIAGONAL_M = 4000;
+/** @deprecated */
+export const LOD_SCALE_DENSITY_TRIGGER_RATIO = 1;
 
 export type LodScaleAlignMetrics = {
     sceneDiagonal: number | null;
+    halfExtent: number | null;
+    longestExtent: number | null;
     medianLeafExtent: number | null;
     pointCountL0: number;
     footprintArea: number;
+    /** 诊断：密度比，不进最终 d0 */
     densityRatio: number;
+    robustRadiusR95: number | null;
+    maxLod: number;
+    targetFarLod: number;
+    targetByLayers: number;
+    targetByPoints: number | null;
+    qualityFactor: number;
+    rawD0: number | null;
+    metaLodDistanceScale: number | null;
+    /**
+     * @deprecated 诊断占位；最终 scale 见 result.scale = configuredD0/effectiveD0
+     */
+    halfScale: number;
+    /** @deprecated 同 halfScale */
     extentScale: number;
+    /** 诊断：旧叶 scale，不接管结果 */
     leafScale: number;
+    /** 诊断：旧密度 scale，不接管结果 */
     densityScale: number;
+    /** 诊断：configuredD0 / effectiveD0（measure 阶段填 1，resolve 后以 result.scale 为准） */
     combinedScale: number;
+    configuredL2: number;
+    /** 进入 targetFarLod 的阈值（effective 前 raw×qf 路径上的目标距离 ≈ R95） */
+    targetL2: number | null;
 };
 
 export type LodScaleAlignResult = {
@@ -53,17 +82,35 @@ export type LodScaleAlignResult = {
 export type LodScaleAlignOctree = {
     nodes: Array<{ lods: Array<{ count: number }> }>;
     nodeBoundsMinMax: Float32Array;
+    lodLevels?: number;
 };
 
 function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
 }
 
-/** 全体节点 AABB 空间对角线；无有效 bounds 时 null */
-export function computeSceneDiagonal(
+function percentileNearestRank(sortedAscending: number[], p: number): number {
+    const n = sortedAscending.length;
+    if (n === 0) {
+        return NaN;
+    }
+    const idx = Math.min(n - 1, Math.max(0, Math.round((p / 100) * (n - 1))));
+    return sortedAscending[idx];
+}
+
+function medianOf(sortedAscending: number[]): number {
+    const n = sortedAscending.length;
+    const mid = Math.floor(n / 2);
+    return n % 2 === 1
+        ? sortedAscending[mid]
+        : 0.5 * (sortedAscending[mid - 1] + sortedAscending[mid]);
+}
+
+/** 全体节点 AABB：对角、最长轴、半边（对比日志） */
+export function computeSceneExtentMetrics(
     nodeBoundsMinMax: Float32Array | null | undefined,
     nodeCount: number
-): number | null {
+): { diagonal: number; longestExtent: number; halfExtent: number } | null {
     if (!nodeBoundsMinMax || nodeCount <= 0 || nodeBoundsMinMax.length < nodeCount * 6) {
         return null;
     }
@@ -109,11 +156,27 @@ export function computeSceneDiagonal(
     const dx = maxX - minX;
     const dy = maxY - minY;
     const dz = maxZ - minZ;
-    const diag = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    return Number.isFinite(diag) && diag > 0 ? diag : null;
+    const diagonal = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    const longestExtent = Math.max(dx, dy, dz);
+    if (!Number.isFinite(diagonal) || diagonal <= 0 || !Number.isFinite(longestExtent) || longestExtent <= 0) {
+        return null;
+    }
+    return {
+        diagonal,
+        longestExtent,
+        halfExtent: longestExtent * 0.5
+    };
 }
 
-/** 两最大轴乘积作 footprint（与 splat-transform estimateFootprintArea 同构） */
+/** @deprecated 用 computeSceneExtentMetrics */
+export function computeSceneDiagonal(
+    nodeBoundsMinMax: Float32Array | null | undefined,
+    nodeCount: number
+): number | null {
+    return computeSceneExtentMetrics(nodeBoundsMinMax, nodeCount)?.diagonal ?? null;
+}
+
+/** 两最大轴乘积作 footprint（密度诊断） */
 export function computeSceneFootprintArea(
     nodeBoundsMinMax: Float32Array | null | undefined,
     nodeCount: number
@@ -169,6 +232,68 @@ export function computeSceneFootprintArea(
     return { extent, footprintArea };
 }
 
+/**
+ * 叶中心相对各轴中位数中心的距离 P95（稳健占用半径）。
+ * 运行时 `nodes` 已是叶集，直接遍历有效 bounds。
+ */
+export function computeLeafCenterDistanceP95(
+    nodeBoundsMinMax: Float32Array | null | undefined,
+    nodeCount: number
+): number | null {
+    if (!nodeBoundsMinMax || nodeCount <= 0 || nodeBoundsMinMax.length < nodeCount * 6) {
+        return null;
+    }
+
+    const cx: number[] = [];
+    const cy: number[] = [];
+    const cz: number[] = [];
+    for (let i = 0; i < nodeCount; i++) {
+        const b = i * 6;
+        const x0 = nodeBoundsMinMax[b];
+        const y0 = nodeBoundsMinMax[b + 1];
+        const z0 = nodeBoundsMinMax[b + 2];
+        const x1 = nodeBoundsMinMax[b + 3];
+        const y1 = nodeBoundsMinMax[b + 4];
+        const z1 = nodeBoundsMinMax[b + 5];
+        if (
+            !Number.isFinite(x0) || !Number.isFinite(y0) || !Number.isFinite(z0) ||
+            !Number.isFinite(x1) || !Number.isFinite(y1) || !Number.isFinite(z1)
+        ) {
+            continue;
+        }
+        if (x1 <= x0 || y1 <= y0 || z1 <= z0) {
+            continue;
+        }
+        cx.push(0.5 * (x0 + x1));
+        cy.push(0.5 * (y0 + y1));
+        cz.push(0.5 * (z0 + z1));
+    }
+
+    if (cx.length === 0) {
+        return null;
+    }
+
+    const mx = medianOf(cx.slice().sort((a, b) => a - b));
+    const my = medianOf(cy.slice().sort((a, b) => a - b));
+    const mz = medianOf(cz.slice().sort((a, b) => a - b));
+    const dists: number[] = [];
+    for (let i = 0; i < cx.length; i++) {
+        const dx = cx[i] - mx;
+        const dy = cy[i] - my;
+        const dz = cz[i] - mz;
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (Number.isFinite(d) && d >= 0) {
+            dists.push(d);
+        }
+    }
+    if (dists.length === 0) {
+        return null;
+    }
+    dists.sort((a, b) => a - b);
+    const r95 = percentileNearestRank(dists, 95);
+    return Number.isFinite(r95) && r95 > 0 ? r95 : null;
+}
+
 export function sumLod0PointCount(octree: LodScaleAlignOctree): number {
     let total = 0;
     for (let i = 0; i < octree.nodes.length; i++) {
@@ -180,70 +305,261 @@ export function sumLod0PointCount(octree: LodScaleAlignOctree): number {
     return total;
 }
 
-function densitySuggestedScale(
-    pointCount: number,
-    footprintArea: number,
-    options?: { maxScale?: number }
-): { densityRatio: number; densityScale: number } {
-    const maxScale = options?.maxScale ?? LOD_SCALE_MAX;
-    if (pointCount <= 0 || footprintArea <= 0) {
-        return { densityRatio: 0, densityScale: 1 };
+/** 各 LOD 全场景点数合计 */
+export function sumPointCountsByLod(octree: LodScaleAlignOctree, lodLevels: number): number[] {
+    const counts = new Array<number>(Math.max(0, lodLevels)).fill(0);
+    for (let i = 0; i < octree.nodes.length; i++) {
+        const lods = octree.nodes[i]?.lods;
+        if (!lods) {
+            continue;
+        }
+        const n = Math.min(lods.length, lodLevels);
+        for (let lod = 0; lod < n; lod++) {
+            const count = lods[lod]?.count ?? 0;
+            if (Number.isFinite(count) && count > 0) {
+                counts[lod] += count;
+            }
+        }
     }
-    const cell = LOD_SCALE_CHUNK_EXTENT_M * LOD_SCALE_CHUNK_EXTENT_M;
-    const pointsPerChunkCell = (pointCount / footprintArea) * cell;
-    const densityRatio = pointsPerChunkCell / LOD_SCALE_TARGET_L0_POINTS;
-    const denseThreshold = LOD_SCALE_TARGET_DENSITY_RATIO * LOD_SCALE_DENSITY_TRIGGER_RATIO;
-    if (densityRatio <= denseThreshold * (1 + 1e-9)) {
-        return { densityRatio, densityScale: 1 };
+    return counts;
+}
+
+export function resolveOctreeMaxLod(octree: LodScaleAlignOctree): number {
+    if (Number.isFinite(octree.lodLevels) && (octree.lodLevels as number) > 0) {
+        return Math.max(0, Math.floor(octree.lodLevels as number) - 1);
     }
-    const raw = Math.sqrt(densityRatio / LOD_SCALE_TARGET_DENSITY_RATIO);
-    return { densityRatio, densityScale: clamp(raw, 1, maxScale) };
+    let maxLen = 0;
+    for (let i = 0; i < octree.nodes.length; i++) {
+        const len = octree.nodes[i]?.lods?.length ?? 0;
+        if (len > maxLen) {
+            maxLen = len;
+        }
+    }
+    return Math.max(0, maxLen - 1);
 }
 
 /**
- * 由 octree 量纲估 AUTO_SCALE 同构 scale。
- * extent 用 sqrt 软化，避免小对角场景单独打满 maxScale。
+ * 远景目标档：点数「约 1/64」优先，否则层数 2/3。
  */
-export function measureLodScaleAlign(octree: LodScaleAlignOctree): LodScaleAlignMetrics {
+export function resolveTargetFarLod(
+    maxLod: number,
+    pointCountsByLod: number[] | null | undefined
+): { targetFarLod: number; targetByLayers: number; targetByPoints: number | null } {
+    const capped = Math.max(0, Math.floor(maxLod));
+    const targetByLayers = clamp(Math.round(capped * 2 / 3), Math.min(2, capped), capped);
+
+    let targetByPoints: number | null = null;
+    const l0 = pointCountsByLod?.[0] ?? 0;
+    if (l0 > 0 && pointCountsByLod && pointCountsByLod.length > 0) {
+        const thr = LOD_SCALE_POINT_RATIO_FAR * LOD_SCALE_POINT_RATIO_SLACK;
+        const hi = Math.min(capped, pointCountsByLod.length - 1);
+        for (let k = 2; k <= hi; k++) {
+            const c = pointCountsByLod[k] ?? 0;
+            if (c / l0 <= thr) {
+                targetByPoints = k;
+                break;
+            }
+        }
+    }
+
+    const targetFarLod = targetByPoints ?? targetByLayers;
+    return { targetFarLod, targetByLayers, targetByPoints };
+}
+
+function densityDiagnosticRatio(pointCount: number, footprintArea: number): number {
+    if (pointCount <= 0 || footprintArea <= 0) {
+        return 0;
+    }
+    const cell = LOD_SCALE_CHUNK_EXTENT_M * LOD_SCALE_CHUNK_EXTENT_M;
+    const pointsPerChunkCell = (pointCount / footprintArea) * cell;
+    return pointsPerChunkCell / LOD_SCALE_TARGET_L0_POINTS;
+}
+
+/**
+ * meta lodDistanceScale>1 → 有限乘子（最多相对 raw×qf ±25%），不与 density 叠加。
+ */
+export function applyMetaSoftFactor(rawWithQuality: number, metaScale: number | null | undefined): number {
+    if (metaScale === null || metaScale === undefined || !Number.isFinite(metaScale) || metaScale <= 1 + 1e-6) {
+        return rawWithQuality;
+    }
+    const soft = clamp(1 / metaScale, LOD_SCALE_SOFT_CORR_MIN, LOD_SCALE_SOFT_CORR_MAX);
+    return rawWithQuality * soft;
+}
+
+export type AdaptiveLodBaseInput = {
+    robustRadiusR95: number;
+    maxLod: number;
+    pointCountsByLod?: number[] | null;
+    configuredD0?: number;
+    lodMultiplier?: number;
+    qualityFactor?: number;
+    metaLodDistanceScale?: number | null;
+};
+
+export type AdaptiveLodBaseResult = {
+    rawD0: number;
+    effectiveD0: number;
+    scale: number;
+    targetFarLod: number;
+    targetByLayers: number;
+    targetByPoints: number | null;
+    qualityFactor: number;
+};
+
+/**
+ * R95 / m^(targetFarLod-1) × qualityFactor，可选 meta soft，钳到 [0.15, configuredD0]。
+ */
+export function computeAdaptiveLodBaseDistance(input: AdaptiveLodBaseInput): AdaptiveLodBaseResult | null {
+    const r95 = input.robustRadiusR95;
+    if (!Number.isFinite(r95) || r95 <= 0) {
+        return null;
+    }
+    const configuredD0 = input.configuredD0 && input.configuredD0 > 0 ? input.configuredD0 : 5;
+    const m = input.lodMultiplier && input.lodMultiplier > 1 ? input.lodMultiplier : LOD_SCALE_DEFAULT_MULTIPLIER;
+    const qualityFactor =
+        input.qualityFactor && input.qualityFactor > 0
+            ? input.qualityFactor
+            : LOD_SCALE_DEFAULT_QUALITY_FACTOR;
+
+    const { targetFarLod, targetByLayers, targetByPoints } = resolveTargetFarLod(
+        input.maxLod,
+        input.pointCountsByLod
+    );
+    const exp = Math.max(0, targetFarLod - 1);
+    const rawD0 = r95 / (m ** exp);
+    if (!Number.isFinite(rawD0) || rawD0 <= 0) {
+        return null;
+    }
+
+    const adaptive = applyMetaSoftFactor(rawD0 * qualityFactor, input.metaLodDistanceScale);
+    const effectiveD0 = clamp(adaptive, LOD_SCALE_MIN_D0_M, configuredD0);
+    const scale = effectiveD0 > 0 ? configuredD0 / effectiveD0 : 1;
+
+    return {
+        rawD0,
+        effectiveD0,
+        scale,
+        targetFarLod,
+        targetByLayers,
+        targetByPoints,
+        qualityFactor
+    };
+}
+
+/** @deprecated 旧半边主信号；主路径已改用 computeAdaptiveLodBaseDistance */
+export function computeHalfExtentScale(
+    halfExtent: number,
+    configuredD0: number,
+    lodMultiplier: number = LOD_SCALE_DEFAULT_MULTIPLIER
+): { halfScale: number; configuredL2: number; targetL2: number } {
+    const m = Number.isFinite(lodMultiplier) && lodMultiplier > 1 ? lodMultiplier : LOD_SCALE_DEFAULT_MULTIPLIER;
+    const configuredL2 = configuredD0 * m * m;
+    const targetL2 = Math.max(LOD_SCALE_MIN_D0_M * m * m, LOD_SCALE_TARGET_L2_HALF_FRACTION * halfExtent);
+    const halfScale = configuredL2 > targetL2
+        ? clamp(configuredL2 / targetL2, 1, LOD_SCALE_MAX)
+        : 1;
+    return { halfScale, configuredL2, targetL2 };
+}
+
+/**
+ * 由 octree 量纲估 R95+金字塔对齐指标与建议 effectiveD0。
+ */
+export function measureLodScaleAlign(
+    octree: LodScaleAlignOctree,
+    options?: {
+        configuredD0?: number;
+        lodMultiplier?: number;
+        qualityFactor?: number;
+        metaLodDistanceScale?: number | null;
+    }
+): LodScaleAlignMetrics & { suggestedEffectiveD0: number; suggestedScale: number } {
+    const configuredD0 = options?.configuredD0 && options.configuredD0 > 0 ? options.configuredD0 : 5;
+    const lodMultiplier = options?.lodMultiplier ?? LOD_SCALE_DEFAULT_MULTIPLIER;
+    const qualityFactor = options?.qualityFactor ?? LOD_SCALE_DEFAULT_QUALITY_FACTOR;
+    const metaLodDistanceScale = options?.metaLodDistanceScale ?? null;
     const nodeCount = octree.nodes.length;
-    const sceneDiagonal = computeSceneDiagonal(octree.nodeBoundsMinMax, nodeCount);
+    const extents = computeSceneExtentMetrics(octree.nodeBoundsMinMax, nodeCount);
     const medianLeafExtent = computeMedianLeafExtent(octree.nodeBoundsMinMax, nodeCount);
     const footprint = computeSceneFootprintArea(octree.nodeBoundsMinMax, nodeCount);
     const pointCountL0 = sumLod0PointCount(octree);
     const footprintArea = footprint?.footprintArea ?? 0;
+    const densityRatio = densityDiagnosticRatio(pointCountL0, footprintArea);
+    const maxLod = resolveOctreeMaxLod(octree);
+    const pointCountsByLod = sumPointCountsByLod(octree, maxLod + 1);
+    const r95 = computeLeafCenterDistanceP95(octree.nodeBoundsMinMax, nodeCount);
 
-    const extentScale = sceneDiagonal && sceneDiagonal > 0
-        ? clamp(Math.sqrt(LOD_SCALE_REF_SCENE_DIAGONAL_M / sceneDiagonal), 1, LOD_SCALE_MAX)
-        : 1;
+    const adaptive = r95
+        ? computeAdaptiveLodBaseDistance({
+            robustRadiusR95: r95,
+            maxLod,
+            pointCountsByLod,
+            configuredD0,
+            lodMultiplier,
+            qualityFactor,
+            metaLodDistanceScale
+        })
+        : null;
+
+    const configuredL2 = configuredD0 * lodMultiplier * lodMultiplier;
+    const targetFarLod = adaptive?.targetFarLod ?? clamp(Math.round(maxLod * 2 / 3), Math.min(2, maxLod), maxLod);
+    const targetL2 = adaptive ? adaptive.rawD0 * adaptive.qualityFactor * (lodMultiplier ** Math.max(0, targetFarLod - 1)) : null;
+
+    // 诊断用旧 leaf/density scale（不进最终 d0）
     const leafScale = medianLeafExtent && medianLeafExtent > 0
-        ? clamp(LOD_SCALE_REF_MEDIAN_LEAF_M / medianLeafExtent, 1, LOD_SCALE_MAX)
+        ? clamp(Math.sqrt(LOD_SCALE_REF_MEDIAN_LEAF_M / medianLeafExtent), 1, LOD_SCALE_MAX)
         : 1;
-    const { densityRatio, densityScale } = densitySuggestedScale(pointCountL0, footprintArea);
+    const densityScale = densityRatio > LOD_SCALE_TARGET_DENSITY_RATIO
+        ? clamp(Math.sqrt(densityRatio / LOD_SCALE_TARGET_DENSITY_RATIO), 1, Math.min(LOD_SCALE_MAX, 4))
+        : 1;
 
-    const combinedScale = clamp(Math.max(extentScale, leafScale, densityScale), 1, LOD_SCALE_MAX);
+    const suggestedEffectiveD0 = adaptive?.effectiveD0 ?? configuredD0;
+    const suggestedScale = adaptive?.scale ?? 1;
 
     return {
-        sceneDiagonal,
+        sceneDiagonal: extents?.diagonal ?? null,
+        halfExtent: extents?.halfExtent ?? null,
+        longestExtent: extents?.longestExtent ?? null,
         medianLeafExtent,
         pointCountL0,
         footprintArea,
         densityRatio,
-        extentScale,
+        robustRadiusR95: r95,
+        maxLod,
+        targetFarLod,
+        targetByLayers: adaptive?.targetByLayers ?? targetFarLod,
+        targetByPoints: adaptive?.targetByPoints ?? null,
+        qualityFactor: adaptive?.qualityFactor ?? qualityFactor,
+        rawD0: adaptive?.rawD0 ?? null,
+        metaLodDistanceScale,
+        halfScale: suggestedScale,
+        extentScale: suggestedScale,
         leafScale,
         densityScale,
-        combinedScale
+        combinedScale: suggestedScale,
+        configuredL2,
+        targetL2,
+        suggestedEffectiveD0,
+        suggestedScale
     };
 }
 
 export function resolveAlignedLodBaseDistance(
     configuredD0: number,
-    metrics: LodScaleAlignMetrics,
+    metrics: LodScaleAlignMetrics & { suggestedEffectiveD0?: number; suggestedScale?: number },
     previousEffectiveD0?: number | null
 ): LodScaleAlignResult {
     const base = Number.isFinite(configuredD0) && configuredD0 > 0 ? configuredD0 : 5;
-    const scale = metrics.combinedScale;
-    const rawEffective = base / scale;
-    const effectiveD0 = clamp(rawEffective, LOD_SCALE_MIN_D0_M, base);
+    const effectiveD0 = clamp(
+        metrics.suggestedEffectiveD0 ?? (metrics.rawD0 != null
+            ? clamp(metrics.rawD0 * metrics.qualityFactor, LOD_SCALE_MIN_D0_M, base)
+            : base),
+        LOD_SCALE_MIN_D0_M,
+        base
+    );
+    const scale = effectiveD0 > 0 ? base / effectiveD0 : 1;
+    metrics.combinedScale = scale;
+    metrics.halfScale = scale;
+    metrics.extentScale = scale;
 
     if (previousEffectiveD0 !== null && previousEffectiveD0 !== undefined && previousEffectiveD0 > 0) {
         const rel = Math.abs(effectiveD0 - previousEffectiveD0) / previousEffectiveD0;
@@ -286,10 +602,15 @@ type LodScaleDebugGlobal = typeof globalThis & {
 
 /** 将对齐结果写入 entity 组件；返回是否改写了 d0 */
 export function applyLodScaleAlignToComponent(
-    gsplatComponent: { lodBaseDistance?: number } | null | undefined,
+    gsplatComponent: { lodBaseDistance?: number; lodMultiplier?: number } | null | undefined,
     octree: LodScaleAlignOctree | null | undefined,
     configuredD0: number,
-    options?: { enabled?: boolean }
+    options?: {
+        enabled?: boolean;
+        lodMultiplier?: number;
+        qualityFactor?: number;
+        metaLodDistanceScale?: number | null;
+    }
 ): LodScaleAlignResult | null {
     if (options?.enabled === false) {
         return null;
@@ -298,11 +619,21 @@ export function applyLodScaleAlignToComponent(
         return null;
     }
 
-    const metrics = measureLodScaleAlign(octree);
+    const lodMultiplier =
+        options?.lodMultiplier ??
+        (Number.isFinite(gsplatComponent.lodMultiplier as number) && (gsplatComponent.lodMultiplier as number) > 0
+            ? (gsplatComponent.lodMultiplier as number)
+            : LOD_SCALE_DEFAULT_MULTIPLIER);
+
+    const metrics = measureLodScaleAlign(octree, {
+        configuredD0,
+        lodMultiplier,
+        qualityFactor: options?.qualityFactor,
+        metaLodDistanceScale: options?.metaLodDistanceScale
+    });
     const previous = Number.isFinite(gsplatComponent.lodBaseDistance as number)
         ? (gsplatComponent.lodBaseDistance as number)
         : null;
-    // 滞回相对「已生效 d0」；若当前仍是配置值则 previous 可作参考
     const result = resolveAlignedLodBaseDistance(configuredD0, metrics, previous === configuredD0 ? null : previous);
 
     if (result.applied) {

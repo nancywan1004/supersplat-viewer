@@ -13,6 +13,8 @@ import {
     readVramTexMB,
     readRefinementSnapshot,
     readRefinementTickMetrics,
+    readRuntimeLodPlacement,
+    formatRuntimeLodPlacement,
     renderRefinementTickMetricsHtml,
     type RefinementTickPayload
 } from './benchmark-refinement';
@@ -429,6 +431,15 @@ export function initBenchmarkHud(global: Global): () => void {
         const gsplat = app.scene.gsplat as { currentRenderer?: unknown; renderer?: unknown; splatBudget?: unknown };
         lines.push(row('Renderer', formatGsplatRenderer(gsplat.currentRenderer ?? gsplat.renderer)));
         lines.push(row('SplatBudget', formatSplatBudget(gsplat.splatBudget)));
+
+        const lodPlacement = readRuntimeLodPlacement(global);
+        if (
+            lodPlacement.lodBaseDistance !== null ||
+            lodPlacement.lodMultiplier !== null ||
+            lodPlacement.lodBehindPenalty !== null
+        ) {
+            lines.push(row('LOD d0/×/behind', formatRuntimeLodPlacement(lodPlacement)));
+        }
 
         const capM = bufferUpload.allocatorCapacity / 1e6;
         const usedM = bufferUpload.allocatorUsed / 1e6;

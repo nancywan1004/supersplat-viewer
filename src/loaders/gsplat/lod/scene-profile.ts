@@ -12,6 +12,15 @@ export const DEFAULT_LOD_MULTIPLIER = 3;
 /** 相机后方距离惩罚；与历史硬编码一致 */
 export const DEFAULT_LOD_BEHIND_PENALTY = 5;
 
+/** scale-align 质量偏置别名（与已删除的全局 lodMode 无关） */
+export type LodScaleQuality = 'performance' | 'balanced' | 'quality';
+
+export const LOD_SCALE_QUALITY_FACTORS: Record<LodScaleQuality, number> = {
+    performance: 1.0,
+    balanced: 1.4,
+    quality: 1.8
+};
+
 type SceneProfileObject = {
     lodRuntime?: unknown;
     lodUpdateDistance?: unknown;
@@ -20,6 +29,10 @@ type SceneProfileObject = {
     lodBehindPenalty?: unknown;
     /** false 时关闭 viewer 侧 lod 米制尺对齐；默认开启 */
     lodScaleAlign?: unknown;
+    /** 正数：直接指定 R95 自适应 qualityFactor；缺省 1.4 */
+    lodScaleQualityFactor?: unknown;
+    /** 'performance'|'balanced'|'quality' → 1.0/1.4/1.8；可被 lodScaleQualityFactor 覆盖 */
+    lodScaleQuality?: unknown;
 };
 
 function readSceneProfile(settings: ExperienceSettings): SceneProfileObject | undefined {
@@ -81,11 +94,27 @@ export function resolveLodBehindPenalty(global: Global): number {
 
 /**
  * settings.sceneProfile.lodScaleAlign === false 时关闭；缺省 / 其它值均开启。
- * 按场景 AABB / 叶尺度 / 密度缩小有效 lodBaseDistance（AUTO_SCALE 同构）。
+ * 开启时按叶中心 R95 + LOD 金字塔反推有效 lodBaseDistance。
  */
 export function resolveLodScaleAlignEnabled(global: Global): boolean {
     const flag = readSceneProfile(global.settings)?.lodScaleAlign;
     return flag !== false;
+}
+
+/**
+ * R95 自适应质量系数：lodScaleQualityFactor > lodScaleQuality 别名 > 默认 1.4。
+ */
+export function resolveLodScaleQualityFactor(global: Global): number {
+    const profile = readSceneProfile(global.settings);
+    const fromNumber = readPositiveNumber(profile?.lodScaleQualityFactor);
+    if (fromNumber !== undefined) {
+        return fromNumber;
+    }
+    const alias = profile?.lodScaleQuality;
+    if (alias === 'performance' || alias === 'balanced' || alias === 'quality') {
+        return LOD_SCALE_QUALITY_FACTORS[alias];
+    }
+    return LOD_SCALE_QUALITY_FACTORS.balanced;
 }
 
 function readSettingsLodRuntime(settings: ExperienceSettings): LodRuntime | undefined {

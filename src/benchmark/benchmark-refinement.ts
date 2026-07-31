@@ -633,6 +633,103 @@ export function readRefinementTickMetrics(global: Global): OctreeRefinementTickM
     return getRefinementController(global)?.getLastTickMetrics() ?? null;
 }
 
+export type RuntimeLodPlacementSnapshot = {
+    /** entity 上生效的 d0（含 scale-align / meta 缩放后） */
+    lodBaseDistance: number | null;
+    lodMultiplier: number | null;
+    lodBehindPenalty: number | null;
+    /** settings 配置 d0；scale-align 调试有值时带上 */
+    configuredD0: number | null;
+    /** scale-align 合成 scale；无对齐时 null */
+    alignScale: number | null;
+};
+
+type LodScaleAlignDebugLike = {
+    configuredD0?: number;
+    effectiveD0?: number;
+    scale?: number;
+};
+
+/**
+ * 读运行时选档米制：entity.gsplat.lodBaseDistance/Multiplier + scene.gsplat.lodBehindPenalty。
+ * 优先名为 `gsplat` 的 entity，否则取首个带 lodBaseDistance 的 gsplat 组件。
+ */
+export function readRuntimeLodPlacement(global: Global): RuntimeLodPlacementSnapshot {
+    const sceneGsplat = global.app.scene.gsplat as { lodBehindPenalty?: unknown } | undefined;
+    const behindRaw = sceneGsplat?.lodBehindPenalty;
+    const lodBehindPenalty =
+        typeof behindRaw === 'number' && Number.isFinite(behindRaw) ? behindRaw : null;
+
+    type GsplatLodComp = {
+        lodBaseDistance?: unknown;
+        lodMultiplier?: unknown;
+    };
+
+    const root = global.app.root as {
+        findByName?: (name: string) => { gsplat?: GsplatLodComp | null } | null;
+        findComponents?: (name: string) => GsplatLodComp[];
+    };
+
+    let comp: GsplatLodComp | null =
+        root.findByName?.('gsplat')?.gsplat ?? null;
+
+    if (!comp && typeof root.findComponents === 'function') {
+        const comps = root.findComponents('gsplat') ?? [];
+        for (let i = 0; i < comps.length; i++) {
+            const c = comps[i];
+            if (typeof c?.lodBaseDistance === 'number' && Number.isFinite(c.lodBaseDistance)) {
+                comp = c;
+                break;
+            }
+        }
+    }
+
+    const d0Raw = comp?.lodBaseDistance;
+    const multRaw = comp?.lodMultiplier;
+    const lodBaseDistance =
+        typeof d0Raw === 'number' && Number.isFinite(d0Raw) ? d0Raw : null;
+    const lodMultiplier =
+        typeof multRaw === 'number' && Number.isFinite(multRaw) ? multRaw : null;
+
+    const align = (globalThis as { __lodScaleAlignDebug?: LodScaleAlignDebugLike }).__lodScaleAlignDebug;
+    const configuredD0 =
+        typeof align?.configuredD0 === 'number' && Number.isFinite(align.configuredD0)
+            ? align.configuredD0
+            : null;
+    const alignScale =
+        typeof align?.scale === 'number' && Number.isFinite(align.scale) && align.scale > 1
+            ? align.scale
+            : null;
+
+    return {
+        lodBaseDistance,
+        lodMultiplier,
+        lodBehindPenalty,
+        configuredD0,
+        alignScale
+    };
+}
+
+/** HUD 短串：d0 / ×m / behind；若有对齐则附 cfg 与 scale */
+export function formatRuntimeLodPlacement(snapshot: RuntimeLodPlacementSnapshot): string {
+    const fmt = (v: number | null, digits = 2) =>
+        v === null ? '—' : (Number.isInteger(v) ? String(v) : v.toFixed(digits));
+    const d0 = snapshot.lodBaseDistance;
+    const d0Str =
+        d0 !== null && d0 < 10 ? d0.toFixed(2) : fmt(d0, 1);
+    let text = `${d0Str} / ${fmt(snapshot.lodMultiplier, 1)} / ${fmt(snapshot.lodBehindPenalty, 1)}`;
+    if (
+        snapshot.configuredD0 !== null &&
+        snapshot.lodBaseDistance !== null &&
+        Math.abs(snapshot.configuredD0 - snapshot.lodBaseDistance) > 1e-3
+    ) {
+        const scaleHint =
+            snapshot.alignScale !== null ? ` · ×${snapshot.alignScale.toFixed(2)}` : '';
+        text += ` (cfg ${fmt(snapshot.configuredD0, 1)}${scaleHint})`;
+    }
+    return text;
+}
+
 function formatHudMs(value: number): string {
     if (!Number.isFinite(value) || value <= 0) {
         return '0';

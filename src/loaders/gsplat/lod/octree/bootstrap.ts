@@ -25,9 +25,11 @@ import {
 } from '../scene-bindings';
 import {
     resolveLodBaseDistance,
-    resolveLodScaleAlignEnabled
+    resolveLodScaleAlignEnabled,
+    resolveLodScaleQualityFactor
 } from '../scene-profile';
 import { applyLodRangeToGsplatEntity } from './entity-lod-range';
+import { readMetaLodDistanceScale } from './lod-distance-scale';
 import { applyLodScaleAlignToComponent } from './lod-scale-align';
 import { computeStreamingRefinementProgressRatio } from './streaming-refinement-progress';
 import {
@@ -110,24 +112,40 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
 
     bindGsplatStreamingLodSettings(gsplat, global);
     bindGsplatEntityLodSettings(gsplatEntity.gsplat, global);
-    // AUTO_SCALE 同构：按场景对角/叶尺度/密度缩小 effective lodBaseDistance，写回 entity 供引擎与 refinement 共用
+    // R95 + 金字塔：反推 effective lodBaseDistance，写回 entity 供引擎与 refinement 共用
+    const octreeForAlign = octreeResource?.octree ?? null;
     const scaleAlign = applyLodScaleAlignToComponent(
         gsplatEntity.gsplat,
-        octreeResource?.octree ?? null,
+        octreeForAlign,
         resolveLodBaseDistance(global),
-        { enabled: resolveLodScaleAlignEnabled(global) }
+        {
+            enabled: resolveLodScaleAlignEnabled(global),
+            qualityFactor: resolveLodScaleQualityFactor(global),
+            metaLodDistanceScale: readMetaLodDistanceScale(
+                octreeResource as { data?: { lodDistanceScale?: unknown } } | null
+            )
+        }
     );
     if (scaleAlign?.applied) {
         console.log('[LOD] scale-align lodBaseDistance', {
             configured: scaleAlign.configuredD0,
-            effective: scaleAlign.effectiveD0,
+            effective: Number(scaleAlign.effectiveD0.toFixed(3)),
             scale: Number(scaleAlign.scale.toFixed(3)),
-            sceneDiag: scaleAlign.metrics.sceneDiagonal,
-            medianLeaf: scaleAlign.metrics.medianLeafExtent,
-            densityRatio: Number(scaleAlign.metrics.densityRatio.toFixed(3)),
-            extentScale: Number(scaleAlign.metrics.extentScale.toFixed(3)),
+            R95: scaleAlign.metrics.robustRadiusR95 != null
+                ? Number(scaleAlign.metrics.robustRadiusR95.toFixed(2))
+                : null,
+            maxLod: scaleAlign.metrics.maxLod,
+            targetFarLod: scaleAlign.metrics.targetFarLod,
+            rawD0: scaleAlign.metrics.rawD0 != null
+                ? Number(scaleAlign.metrics.rawD0.toFixed(4))
+                : null,
+            qualityFactor: Number(scaleAlign.metrics.qualityFactor.toFixed(3)),
+            halfExtent: scaleAlign.metrics.halfExtent != null
+                ? Number(scaleAlign.metrics.halfExtent.toFixed(1))
+                : null,
             leafScale: Number(scaleAlign.metrics.leafScale.toFixed(3)),
-            densityScale: Number(scaleAlign.metrics.densityScale.toFixed(3))
+            densityScale: Number(scaleAlign.metrics.densityScale.toFixed(3)),
+            densityRatio: Number(scaleAlign.metrics.densityRatio.toFixed(3))
         });
     }
 

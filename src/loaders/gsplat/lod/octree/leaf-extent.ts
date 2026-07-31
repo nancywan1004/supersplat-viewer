@@ -1,6 +1,10 @@
 /**
  * 叶节点 AABB 尺度（中位空间对角线）与相机触发门槛。
- * Phase 1：位移门槛按叶尺度自适应；选档距离仍由 lodBaseDistance 控制。
+ *
+ * moveThr 跟「调度空间单元（叶）」相关，与选档米尺 lodBaseDistance（R95+金字塔）正交：
+ * - 走完约 5% 叶对角再扫一次，语义仍合理；不跟 R95/d0 绑死。
+ * - 实测：Wuhan/Florenz/京东约 0.38–0.63m，Poland ~1.9m；下限 0.15 压微抖。
+ * - 若日后出现「d0 很紧但 moveThr 过大导致扫得太稀」，再考虑与 d0 取 min，本阶段不改。
  */
 
 /** 位移 = medianDiag × 该比例，再 clamp */
