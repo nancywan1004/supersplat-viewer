@@ -116,11 +116,30 @@ function testWuhanPointCountsSelectLod6(): void {
     console.log('ok Wuhan point counts → LOD6', resolved);
 }
 
+function testMegaSceneMayExceedConfiguredD0(): void {
+    // jinanqiao-v4-x10 量级：R95≈1680、目标档 6 → 公式 > 配置 5
+    const counts = Array.from({ length: 13 }, (_, i) => Math.max(1, Math.round(18_000_000 / (2 ** i))));
+    const r = computeAdaptiveLodBaseDistance({
+        robustRadiusR95: 1680.2,
+        maxLod: 12,
+        pointCountsByLod: counts,
+        configuredD0: 5,
+        lodMultiplier: 3,
+        qualityFactor: 1.4
+    });
+    assert(r != null, 'mega adaptive');
+    assert(r!.targetFarLod === 6, `target=${r!.targetFarLod}`);
+    assert(r!.effectiveD0 > 5, `should expand above configured 5, got ${r!.effectiveD0}`);
+    assertClose(r!.effectiveD0, 9.68, 0.05, 'jinanqiao-v4-like effectiveD0');
+    console.log('ok mega expand above 5', { d0: r!.effectiveD0.toFixed(3), scale: r!.scale.toFixed(3) });
+}
+
 function main(): void {
     testR95ResistsOutliers();
     testWuhanNumeric();
     testWuhanPointCountsSelectLod6();
     testFlorenzPointRatioPreferred();
+    testMegaSceneMayExceedConfiguredD0();
     console.log('all lod-scale-align tests passed');
 }
 

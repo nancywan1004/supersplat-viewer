@@ -409,7 +409,8 @@ export type AdaptiveLodBaseResult = {
 };
 
 /**
- * R95 / m^(targetFarLod-1) × qualityFactor，可选 meta soft，钳到 [0.15, configuredD0]。
+ * R95 / m^(targetFarLod-1) × qualityFactor，可选 meta soft；仅地板 0.15，
+ * 允许大于 configuredD0（大场景公式完整生效，不再封顶为 5）。
  */
 export function computeAdaptiveLodBaseDistance(input: AdaptiveLodBaseInput): AdaptiveLodBaseResult | null {
     const r95 = input.robustRadiusR95;
@@ -434,7 +435,7 @@ export function computeAdaptiveLodBaseDistance(input: AdaptiveLodBaseInput): Ada
     }
 
     const adaptive = applyMetaSoftFactor(rawD0 * qualityFactor, input.metaLodDistanceScale);
-    const effectiveD0 = clamp(adaptive, LOD_SCALE_MIN_D0_M, configuredD0);
+    const effectiveD0 = Math.max(LOD_SCALE_MIN_D0_M, adaptive);
     const scale = effectiveD0 > 0 ? configuredD0 / effectiveD0 : 1;
 
     return {
@@ -551,13 +552,12 @@ export function resolveAlignedLodBaseDistance(
     previousEffectiveD0?: number | null
 ): LodScaleAlignResult {
     const base = Number.isFinite(configuredD0) && configuredD0 > 0 ? configuredD0 : 5;
-    const effectiveD0 = clamp(
-        metrics.suggestedEffectiveD0 ?? (metrics.rawD0 != null
-            ? clamp(metrics.rawD0 * metrics.qualityFactor, LOD_SCALE_MIN_D0_M, base)
-            : base),
-        LOD_SCALE_MIN_D0_M,
-        base
-    );
+    const suggested =
+        metrics.suggestedEffectiveD0 ??
+        (metrics.rawD0 != null
+            ? Math.max(LOD_SCALE_MIN_D0_M, metrics.rawD0 * metrics.qualityFactor)
+            : base);
+    const effectiveD0 = Math.max(LOD_SCALE_MIN_D0_M, suggested);
     const scale = effectiveD0 > 0 ? base / effectiveD0 : 1;
     metrics.combinedScale = scale;
     metrics.halfScale = scale;
@@ -594,7 +594,7 @@ export function resolveAlignedLodBaseDistance(
         effectiveD0,
         scale,
         metrics,
-        reason: 'aligned'
+        reason: effectiveD0 > base ? 'aligned-expand' : 'aligned'
     };
 }
 
