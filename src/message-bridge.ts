@@ -115,6 +115,8 @@ type InboundPayload =
     | { type: 'ASSET_MEDIA_HOTSPOT_SET_BASELINE'; id: string }
     | { type: 'ASSET_MEDIA_HOTSPOT_RANGE_SET'; id?: string; value?: number }
     | { type: 'VIEW_MEDIA_MUTE_SET'; value?: boolean }
+    | { type: 'TORCH_ADD'; value?: Partial<TorchLightSettings> }
+    | { type: 'TORCH_DELETE' }
     | { type: 'TORCH_TOGGLE'; value?: boolean }
     | { type: 'TORCH_PARAMS_SET'; value?: Partial<TorchLightSettings> }
     | { type: 'SETTINGS_SAVE' }
@@ -555,6 +557,20 @@ const initPostMessageBridge = (global: Global) => {
                 } else {
                     console.warn('[MessageBridge] VIEW_MEDIA_MUTE_SET ignored: value must be boolean', p);
                 }
+                break;
+            case 'TORCH_ADD': {
+                const torchAddVal = (p as { value?: unknown }).value;
+                dispatchEnvironment(
+                    global,
+                    'TORCH_ADD',
+                    torchAddVal && typeof torchAddVal === 'object'
+                        ? p
+                        : { type: 'TORCH_ADD' }
+                );
+                break;
+            }
+            case 'TORCH_DELETE':
+                dispatchEnvironment(global, 'TORCH_DELETE', p);
                 break;
             case 'TORCH_TOGGLE':
                 if (typeof p.value === 'boolean') {

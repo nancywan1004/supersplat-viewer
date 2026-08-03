@@ -2,7 +2,7 @@ import { Script, Color, Entity, Vec3, Mat4, Texture, PIXELFORMAT_RGBA8, type Mat
 import { GsplatShaderEffect } from '../effects-runtime/gsplat-shader-effect';
 import { extractGlslWgslModifyBlocks } from '../effects-runtime/gsplat-effect-layers-extractor';
 import { collectPointLights, collectSpotLights } from '../../light';
-import { ensureTorchLight } from '../../settings-serialize/settings-serialize-helper';
+import { resolveTorchLight } from '../../settings-serialize/settings-serialize-helper';
 import { getTorchBeamParams, getTorchLightRay, getTorchLightWorldPosition, isTorchEntityEnabled } from './torch-light';
 import { readViewTorchActive } from '../../view-settings';
 import type { EffectsRuntime } from '../effects-runtime';
@@ -1821,7 +1821,7 @@ class NightMode extends GsplatShaderEffect {
             if (camComp?.requestSceneDepthMap) {
                 camComp.requestSceneDepthMap(true);
             }
-            const torchCfg = global ? ensureTorchLight(global.settings as any) : null;
+            const torchCfg = global ? resolveTorchLight(global.settings as any) : null;
             const torchRay = global ? getTorchLightRay(global) : null;
             const torchBeam = global ? getTorchBeamParams(global) : null;
             const torchWorldPos = global ? getTorchLightWorldPosition(global) : null;

@@ -4,7 +4,11 @@ import { serializeExperienceSettings, applySettingsSnapshot } from './settings-s
 import { requestSceneAssetsRestore } from './scene-assets/asset-placement-handler';
 import type { AnnotationManager } from './annotation-toolbar/annotation-manager';
 import { updatePointLightsFromSettings } from './light';
-import { readSkyboxCurrentUrlFromSettings, setSkyboxCurrentUrlInSettings } from './settings-serialize/settings-serialize-helper';
+import {
+    readTorchLight,
+    readSkyboxCurrentUrlFromSettings,
+    setSkyboxCurrentUrlInSettings
+} from './settings-serialize/settings-serialize-helper';
 
 export type EditSnapshot = ExperienceSettings;
 
@@ -86,6 +90,7 @@ export function restoreAnnotationsFromSettings(global: Global): void {
 /**
  * 根据当前 settings 恢复灯光 / 场景整体亮度的运行时状态：
  * - 点光 / 聚光灯：从 settings.lighting 重新推入运行时；
+ * - 手电筒：从 `settings.lighting.torch` 重放参数（`torchParams:changed`）；
  * - NightMode：按 nightMode.fade 重置整体亮度与天空盒；
  * - 触发 lighting:changed，驱动相关监听方重新应用配置。
  */
@@ -94,6 +99,15 @@ export function restoreLightingFromSettings(global: Global): void {
 
     try {
         updatePointLightsFromSettings(global);
+    } catch {
+        // ignore
+    }
+
+    try {
+        const torch = readTorchLight(settings);
+        if (torch) {
+            global.events.fire('torchParams:changed', { value: torch });
+        }
     } catch {
         // ignore
     }

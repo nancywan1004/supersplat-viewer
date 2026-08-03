@@ -111,7 +111,8 @@ type SpotLightConfig = {
  * - gsplat：`night-mode` 相机锥光 Fill（beamEnd≈farClip×0.85）+ Hotspot（光标深度聚光）
  * - mesh：PlayCanvas PointLight 贴在热点，强度/range 与 gsplat 聚光尺度对齐
  * - `range` 为聚光/光斑半径（世界单位）；照射距离由相机 farClip 推导，不入库
- * - 开关在 `ViewSettings.torch`（不入库）
+ * - **仅** `TORCH_ADD` 后写入 `settings.lighting.torch`；缺失表示未加入场景配置
+ * - 运行时开关在 `ViewSettings.torch.active`（`TORCH_TOGGLE`，不入库；初始恒为关）
  */
 type TorchLightSettings = {
     /** sRGB [0,1] 三分量 */
@@ -125,7 +126,7 @@ type TorchLightSettings = {
 type LightingSettings = {
     /** 点光源 + 平行光（最多一个） + 聚光灯 */
     lights: (PointLightConfig | DirectionalLightConfig | SpotLightConfig)[],
-    /** 全局手电筒（单例）；缺失时由 `ensureTorchLight` 补齐默认 */
+    /** 全局手电筒（单例）；仅 `TORCH_ADD` / 已保存 JSON 才存在 */
     torch?: TorchLightSettings
 };
 

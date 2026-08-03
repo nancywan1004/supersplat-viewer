@@ -25,6 +25,8 @@ import {
     applyShadowIntensityUpdate,
     applyShadowSet,
     applyShadowSetFromHost,
+    applyTorchAdd,
+    applyTorchDelete,
     applyTorchParamsSet,
     applyTorchToggle
 } from './protocol-adapters/environment-protocol-adapter';
@@ -299,6 +301,18 @@ class EnvironmentFacade implements ModuleFacade {
         case 'LIGHT_BRUSH_BLOOM_UPDATE':
             ctx.events.fire('messageBridge:lightBrush', { type: command.type, payload: pl });
             break;
+        case 'TORCH_ADD': {
+            const v = pl.value;
+            applyTorchAdd(
+                g,
+                v && typeof v === 'object' ? (v as Partial<TorchLightSettings>) : undefined
+            );
+            break;
+        }
+        case 'TORCH_DELETE': {
+            applyTorchDelete(g);
+            break;
+        }
         case 'TORCH_TOGGLE': {
             const v = pl.value;
             if (typeof v === 'boolean') applyTorchToggle(g, v);

@@ -10,6 +10,7 @@ import {
 } from '../scene-assets/collision/scene-asset-collision';
 import {
     normalizeSkyboxForPersistence,
+    normalizeTorchLightOnImport,
     serializeSceneMediaHotspotForPersistence
 } from './settings-serialize-helper';
 import {
@@ -202,6 +203,9 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
     }
 
     out.sceneMediaHotspot = serializeSceneMediaHotspotForPersistence(global.settings as ExperienceSettings);
+
+    // 仅当已 TORCH_ADD / JSON 已有 torch 时规范化；未 ADD 不写入
+    normalizeTorchLightOnImport(out as ExperienceSettings);
 
     stripBloomSessionFieldsForPersistence(out);
 

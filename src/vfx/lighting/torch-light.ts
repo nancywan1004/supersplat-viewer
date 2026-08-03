@@ -1,6 +1,6 @@
 import { Color, Entity, Ray, Vec3 } from 'playcanvas';
 
-import { ensureTorchLight } from '../../settings-serialize/settings-serialize-helper';
+import { resolveTorchLight } from '../../settings-serialize/settings-serialize-helper';
 import { applyViewTorchActive, ensureViewSettings, readViewTorchActive } from '../../view-settings';
 import { setTorchCursorActive } from '../../placement-cursor';
 import type { EditLeftModule, Global } from '../../types';
@@ -11,7 +11,9 @@ import type { TorchLightSettings } from '../../schemas/v2-custom';
  * 手电筒（全局单例）：gsplat 走 night-mode 相机锥光 Fill+Hotspot；mesh 走 PlayCanvas PointLight。
  *
  * - Fill：`beamEnd = farClip × TORCH_BEAM_FAR_RATIO`，沿光标视线照亮前后景
- * - Hotspot：mesh AABB 同步命中或 `picker.pick` 单点深度，聚光尺度 = `settings.lighting.torch.range`
+ * - Hotspot：mesh AABB 同步命中或 `picker.pick` 单点深度，聚光尺度 = `resolveTorchLight().range`
+ *   （已 `TORCH_ADD` 则读 settings，否则用默认；不隐式写入 settings）
+ * - 运行时开关：`viewSettings.torch.active`（`TORCH_TOGGLE`，初始关）
  * - 不使用 `pickSurface`；相机变化时清空热点深度，避免旧深度套到新视角
  */
 const TORCH_ENTITY_NAME = 'torchLight';
@@ -150,7 +152,6 @@ export function initTorchLight(global: Global): TorchControllerHandle {
 
     const { app, events } = global;
     const settings = global.settings as ExperienceSettings;
-    ensureTorchLight(settings);
     ensureViewSettings(global);
 
     let container = app.root.findByName(TORCH_ENTITY_NAME) as Entity | null;
@@ -198,7 +199,7 @@ export function initTorchLight(global: Global): TorchControllerHandle {
     };
 
     const applyParamsToEntity = () => {
-        const cfg = ensureTorchLight(settings) as TorchLightSettings;
+        const cfg = resolveTorchLight(settings) as TorchLightSettings;
         if (!entity?.light) return;
         const [r, g, b] = cfg.color;
         entity.light.color.set(r, g, b);
@@ -662,7 +663,7 @@ export function initTorchLight(global: Global): TorchControllerHandle {
             scheduleGsplatDepthSample();
         }
 
-        const cfg = ensureTorchLight(settings) as TorchLightSettings;
+        const cfg = resolveTorchLight(settings) as TorchLightSettings;
         const spotRadius = Math.max(0, cfg.range ?? 12);
         const baseIntensity = Math.max(0, Number.isFinite(cfg.intensity) ? cfg.intensity : 0);
 
@@ -709,6 +710,11 @@ export function initTorchLight(global: Global): TorchControllerHandle {
         applyParamsToEntity();
     };
     events.on('torchParams:changed', onTorchParamsChanged);
+
+    const onSettingsSnapshotApplied = () => {
+        applyParamsToEntity();
+    };
+    events.on('settingsSnapshotApplied', onSettingsSnapshotApplied);
 
     const onTorchActiveChanged = () => {
         if (!readViewTorchActive(global)) return;
@@ -767,6 +773,7 @@ export function initTorchLight(global: Global): TorchControllerHandle {
             } catch { /* ignore */ }
             app.off('update', onUpdate);
             events.off('torchParams:changed', onTorchParamsChanged);
+            events.off('settingsSnapshotApplied', onSettingsSnapshotApplied);
             events.off('torchActive:changed', onTorchActiveChanged);
             events.off('editLeftModule:changed', onEditLeftModuleChanged);
             events.off('editMode:changed', onEditModeChanged);
@@ -838,7 +845,7 @@ export function getTorchLightWorldPosition(global: Global): Vec3 | null {
 
 /** @deprecated Gsplat 使用 beamEnd；此函数返回聚光半径 spotRadius（cfg.range）。 */
 export function getTorchLightEffectiveRange(global: Global): number {
-    const cfg = ensureTorchLight(global.settings as ExperienceSettings) as TorchLightSettings;
+    const cfg = resolveTorchLight(global.settings as ExperienceSettings) as TorchLightSettings;
     return Math.max(0, cfg.range ?? 12);
 }
 
@@ -848,7 +855,7 @@ export function getTorchBeamParams(global: Global): TorchBeamParams | null {
     const runtime = handle ? (handle as unknown as { __runtime?: TorchRuntimeState }).__runtime : undefined;
     if (!runtime) return null;
 
-    const cfg = ensureTorchLight(global.settings as ExperienceSettings) as TorchLightSettings;
+    const cfg = resolveTorchLight(global.settings as ExperienceSettings) as TorchLightSettings;
     const spotRadius = Math.max(0, cfg.range ?? 12);
     const far = global.camera?.camera?.farClip ?? 1000;
     const beamEnd = Math.max(TORCH_BEAM_MIN_M, far * TORCH_BEAM_FAR_RATIO);

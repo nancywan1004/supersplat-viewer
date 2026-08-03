@@ -15,7 +15,7 @@ export const DEFAULT_NIGHT_MODE = { fade: 0 } as const;
 /** lighting 根节点缺省（仅 `lights` 空数组，`ensureLighting`） */
 export const DEFAULT_LIGHTING_ROOT: { lights: unknown[] } = { lights: [] };
 
-/** 全局手电筒缺省（`ensureTorchLight`）；运行时开关在 `viewSettings.torch.active`。 */
+/** 全局手电筒缺省（`TORCH_ADD` / `resolveTorchLight`）；运行时开关在 `viewSettings.torch.active`。 */
 export const DEFAULT_TORCH_LIGHT: TorchLightSettings = {
     color: [1, 0.95, 0.85],
     intensity: 7.0,

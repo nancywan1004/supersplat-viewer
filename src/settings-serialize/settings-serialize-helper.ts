@@ -458,51 +458,103 @@ export function ensureLighting(settings: ExperienceSettings): { lights: LightWit
 }
 
 /**
- * 确保 `settings.lighting.torch` 单例存在并补齐缺省字段（颜色/强度/range）。
- * - 与 `ensureLighting` 串联使用；运行时开关另存于 `viewSettings.torch.active`，不入库
- * - `range` 收敛到 [0, TORCH_RANGE_MAX]
+ * 是否已将手电筒加入场景配置（`settings.lighting.torch` 存在）。
+ * 仅 `TORCH_ADD` 或已保存 JSON 会为 true；运行时 `TORCH_TOGGLE` 不改变此状态。
  */
-export function ensureTorchLight(settings: ExperienceSettings): TorchLightSettings {
-    ensureLighting(settings);
-    const lighting = (settings as Record<string, unknown>).lighting as { torch?: TorchLightSettings };
-    if (!lighting.torch || typeof lighting.torch !== 'object') {
-        lighting.torch = { ...DEFAULT_TORCH_LIGHT };
+export function hasTorchLight(settings: ExperienceSettings): boolean {
+    const lighting = (settings as Record<string, unknown>).lighting as { torch?: unknown } | undefined;
+    return !!(lighting && typeof lighting === 'object' && lighting.torch && typeof lighting.torch === 'object');
+}
+
+/** 规范化已有 torch 对象字段（不写入 settings）。 */
+function normalizeTorchFields(raw: Record<string, unknown>): TorchLightSettings {
+    const color = normalizeTorchColor(raw.color, [...DEFAULT_TORCH_LIGHT.color] as [number, number, number]);
+    let intensity = DEFAULT_TORCH_LIGHT.intensity;
+    if (typeof raw.intensity === 'number' && Number.isFinite(raw.intensity)) {
+        intensity = Math.max(0, raw.intensity);
     }
-    const t = lighting.torch as Record<string, unknown>;
-    t.color = normalizeTorchColor(t.color, [...DEFAULT_TORCH_LIGHT.color] as [number, number, number]);
-    if (typeof t.intensity !== 'number' || !Number.isFinite(t.intensity)) {
-        t.intensity = DEFAULT_TORCH_LIGHT.intensity;
-    } else {
-        t.intensity = Math.max(0, t.intensity as number);
+    let range = DEFAULT_TORCH_LIGHT.range;
+    if (typeof raw.range === 'number' && Number.isFinite(raw.range)) {
+        range = Math.max(0, Math.min(TORCH_RANGE_MAX, raw.range));
     }
-    if (typeof t.range !== 'number' || !Number.isFinite(t.range)) {
-        t.range = DEFAULT_TORCH_LIGHT.range;
-    } else {
-        t.range = Math.max(0, Math.min(TORCH_RANGE_MAX, t.range as number));
-    }
-    return lighting.torch as TorchLightSettings;
+    return { color, intensity, range };
 }
 
 /**
- * `TORCH_PARAMS_SET` 入站合并：把 partial 写到 `settings.lighting.torch`，并做 clamp/归一。
- * 返回最终生效的完整 TorchLightSettings。
+ * 读取已入库的手电筒配置；未 `TORCH_ADD` 时返回 null（不补写 settings）。
  */
-export function patchTorchLight(settings: ExperienceSettings, partial: Partial<TorchLightSettings>): TorchLightSettings {
-    const cur = ensureTorchLight(settings);
-    if (!partial || typeof partial !== 'object') return cur;
-    const next = { ...cur } as Record<string, unknown>;
-    if (Array.isArray((partial as Record<string, unknown>).color)) {
-        next.color = (partial as Record<string, unknown>).color;
-    }
-    if ((partial as Record<string, unknown>).intensity !== undefined) {
-        next.intensity = (partial as Record<string, unknown>).intensity;
-    }
-    if ((partial as Record<string, unknown>).range !== undefined) {
-        next.range = (partial as Record<string, unknown>).range;
-    }
+export function readTorchLight(settings: ExperienceSettings): TorchLightSettings | null {
+    if (!hasTorchLight(settings)) return null;
+    const lighting = (settings as Record<string, unknown>).lighting as { torch: Record<string, unknown> };
+    const normalized = normalizeTorchFields(lighting.torch);
+    lighting.torch = normalized as unknown as Record<string, unknown>;
+    return normalized;
+}
+
+/**
+ * 运行时解析手电筒参数：已入库则用 settings，否则用默认值；**绝不**写入 settings。
+ */
+export function resolveTorchLight(settings: ExperienceSettings): TorchLightSettings {
+    return readTorchLight(settings) ?? { ...DEFAULT_TORCH_LIGHT, color: [...DEFAULT_TORCH_LIGHT.color] as [number, number, number] };
+}
+
+/**
+ * 导入时：仅当 JSON 已有 `lighting.torch` 时规范化字段；缺失则保持缺失（不自动 ADD）。
+ */
+export function normalizeTorchLightOnImport(settings: ExperienceSettings): TorchLightSettings | null {
+    return readTorchLight(settings);
+}
+
+/**
+ * `TORCH_ADD`：将手电筒写入 `settings.lighting.torch`（可带 partial 覆盖默认）。
+ * 已存在时合并 partial 并规范化。不改变 `viewSettings.torch.active`（保持关）。
+ */
+export function addTorchLight(
+    settings: ExperienceSettings,
+    partial?: Partial<TorchLightSettings> | null
+): TorchLightSettings {
+    ensureLighting(settings);
     const lighting = (settings as Record<string, unknown>).lighting as { torch?: TorchLightSettings };
-    lighting.torch = next as unknown as TorchLightSettings;
-    return ensureTorchLight(settings);
+    const base: Record<string, unknown> = lighting.torch && typeof lighting.torch === 'object'
+        ? { ...(lighting.torch as unknown as Record<string, unknown>) }
+        : { ...DEFAULT_TORCH_LIGHT, color: [...DEFAULT_TORCH_LIGHT.color] };
+    if (partial && typeof partial === 'object') {
+        if (Array.isArray((partial as Record<string, unknown>).color)) {
+            base.color = (partial as Record<string, unknown>).color;
+        }
+        if ((partial as Record<string, unknown>).intensity !== undefined) {
+            base.intensity = (partial as Record<string, unknown>).intensity;
+        }
+        if ((partial as Record<string, unknown>).range !== undefined) {
+            base.range = (partial as Record<string, unknown>).range;
+        }
+    }
+    const next = normalizeTorchFields(base);
+    lighting.torch = next;
+    return next;
+}
+
+/**
+ * `TORCH_DELETE`：从 `settings.lighting.torch` 移除；无 torch 时为 no-op。
+ * 返回是否实际删除。
+ */
+export function removeTorchLight(settings: ExperienceSettings): boolean {
+    const lighting = (settings as Record<string, unknown>).lighting as { torch?: unknown } | undefined;
+    if (!lighting || typeof lighting !== 'object' || lighting.torch == null) return false;
+    delete lighting.torch;
+    return true;
+}
+
+/**
+ * `TORCH_PARAMS_SET`：仅在已 `TORCH_ADD` 时合并 partial；未 ADD 返回 null（不隐式入库）。
+ */
+export function patchTorchLight(
+    settings: ExperienceSettings,
+    partial: Partial<TorchLightSettings>
+): TorchLightSettings | null {
+    if (!hasTorchLight(settings)) return null;
+    if (!partial || typeof partial !== 'object') return readTorchLight(settings);
+    return addTorchLight(settings, partial);
 }
 
 export function ensurePostEffectSettings(settings: ExperienceSettings): NonNullable<ExperienceSettings['postEffectSettings']> {

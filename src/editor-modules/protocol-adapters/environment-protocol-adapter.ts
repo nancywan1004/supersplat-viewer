@@ -14,7 +14,10 @@ import {
     ensureLighting,
     ensureNightMode,
     ensureShadow,
+    addTorchLight,
+    hasTorchLight,
     patchTorchLight,
+    removeTorchLight,
     type LightWithId
 } from '../../settings-serialize/settings-serialize-helper';
 import { applyViewBloomLocalLightsEnabled, applyViewTorchActive } from '../../view-settings';
@@ -699,28 +702,61 @@ export function applyShadowDirectionSet(global: Global, value: number): void {
 }
 
 /**
- * `TORCH_TOGGLE`：全局手电筒开关。
+ * `TORCH_ADD`：把手电筒写入 `settings.lighting.torch`（可带 partial）。
+ * - 仅此路径（及已保存 JSON）会让 torch 进入持久化 settings
+ * - 不改变 `viewSettings.torch.active`（初始/默认保持关闭；开闭用 `TORCH_TOGGLE`）
+ */
+export function applyTorchAdd(
+    global: Global,
+    partial?: Partial<TorchLightSettings> | null
+): TorchLightSettings {
+    const settings = global.settings as ExperienceSettings;
+    const next = addTorchLight(settings, partial);
+    global.events.fire('torch:added', { value: next });
+    global.events.fire('torchParams:changed', { value: next });
+    global.events.fire('lighting:changed');
+    return next;
+}
+
+/**
+ * `TORCH_DELETE`：移除 `settings.lighting.torch`；并关闭运行时开关。
+ * - 未 ADD 时返回 false
+ */
+export function applyTorchDelete(global: Global): boolean {
+    const settings = global.settings as ExperienceSettings;
+    if (!hasTorchLight(settings)) return false;
+    removeTorchLight(settings);
+    applyViewTorchActive(global, false);
+    global.events.fire('torch:deleted');
+    global.events.fire('torchParams:changed', { value: null });
+    global.events.fire('lighting:changed');
+    return true;
+}
+
+/**
+ * `TORCH_TOGGLE`：全局手电筒运行时开关。
  * - 只写 `viewSettings.torch.active`（不入库），由 `TorchLightController` 在 update 中读取
+ * - 与是否已 `TORCH_ADD` 解耦：未入库也可临时开关（用默认参数），但保存不会出现 torch
  * - 与 `LIGHT_TOGGLE_ALL` 解耦：关用户灯时手电筒仍可独立开启
- * - 协议入站不回传，避免循环
  */
 export function applyTorchToggle(global: Global, enabled: boolean): boolean {
     return applyViewTorchActive(global, enabled);
 }
 
 /**
- * `TORCH_PARAMS_SET`：合并部分参数到 `settings.lighting.torch`，clamp/归一后即时刷新实体。
- * - 派发 `torchParams:changed`，`TorchLightController` 监听并把新参数写到实体光源组件
- * - 返回合并后的完整 `TorchLightSettings`（仅供本地 UI 同步使用，不再有出站协议）
+ * `TORCH_PARAMS_SET`：仅在已 `TORCH_ADD` 时合并参数到 `settings.lighting.torch`。
+ * - 未 ADD 时返回 null（不隐式入库）
+ * - 派发 `torchParams:changed`，`TorchLightController` 监听并写到实体光源组件
  */
 export function applyTorchParamsSet(
     global: Global,
     partial: Partial<TorchLightSettings>
-): TorchLightSettings {
+): TorchLightSettings | null {
     const settings = global.settings as ExperienceSettings;
+    if (!hasTorchLight(settings)) return null;
     const next = patchTorchLight(settings, partial);
+    if (!next) return null;
     global.events.fire('torchParams:changed', { value: next });
-    // 同时发 lighting:changed 以触发任何监听 lighting 相关变化的辅助流程
     global.events.fire('lighting:changed');
     return next;
 }

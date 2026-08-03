@@ -314,9 +314,9 @@ export type ViewSettings = {
      */
     mediaMuted?: boolean;
     /**
-     * 全局手电筒会话态（不入库）
-     * - `active`：开关，由 `TORCH_TOGGLE` / View 顶栏 / Edit 面板写入
-     * - 参数（颜色/强度/range/锥角）持久化于 `settings.lighting.torch`
+     * 全局手电筒会话态（仅 `active`，不入库；初始恒为关）
+     * - `active`：由 `TORCH_TOGGLE` / View 顶栏 / Edit 面板写入
+     * - 参数入库：须先 `TORCH_ADD` 写入 `settings.lighting.torch`
      */
     torch?: {
         active: boolean;

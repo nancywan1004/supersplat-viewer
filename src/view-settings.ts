@@ -10,7 +10,7 @@ export const DEFAULT_VIEW_MEDIA_MUTED = false;
 /** 观看态标注默认可见 */
 export const DEFAULT_VIEW_ANNOTATIONS_VISIBLE = true;
 
-/** 全局手电筒默认关闭（仅会话态，不入库） */
+/** 全局手电筒默认关闭（仅会话态，不入库；TORCH_TOGGLE 控制，与 TORCH_ADD 解耦） */
 export const DEFAULT_VIEW_TORCH_ACTIVE = false;
 
 export function createDefaultViewSettings(): ViewSettings {
@@ -94,7 +94,8 @@ export function readViewBloomLocalLightsEnabled(global: Global): boolean {
 }
 
 /**
- * `TORCH_TOGGLE`：全局手电筒开关（仅 viewSettings，不入库）。
+ * `TORCH_TOGGLE`：全局手电筒运行时开关（仅 viewSettings，不入库；初始恒为关）。
+ * 入库需先 `TORCH_ADD` 写入 `settings.lighting.torch`。
  * 与 `applyViewMediaMuteSet` 保持相同返回与事件语义。
  * @returns 是否发生变更
  */
