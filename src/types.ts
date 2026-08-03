@@ -300,10 +300,16 @@ export type ViewSettings = {
         localLightsEnabled: boolean;
     };
     /**
-     * 标注全局 overlay（View 会话态，不入库）
-     * - `ASSETS_SHOW_HIDE_SET` 写入；与资产 toggle 同步藏/显全部标注
-     * - 不写 `settings.annotations[].visible`；最终可见 = overlay && 单条 visible
-     * - reveal / controlsHidden 解除后按 overlay + 单条 settings 恢复
+     * 场景内容大类显隐（**仅 View 会话**，不入库；`SCENE_CONTENT_*`）。
+     * - 只影响纯 Viewer 画面；**不**改编辑态（含预览）、不写 `settings`
+     * - 缺省各类为 `true`；标注 View overlay 读 `contentVisibility.annotations`
+     */
+    contentVisibility?: Partial<Record<
+        'assets' | 'annotations' | 'lights' | 'reveal' | 'persistent' | 'stylization',
+        boolean
+    >>;
+    /**
+     * @deprecated 已收敛到 `contentVisibility.annotations`；ensureViewSettings 会迁移旧值。
      */
     annotationsVisible?: boolean;
     /**

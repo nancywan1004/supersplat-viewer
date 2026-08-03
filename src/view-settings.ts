@@ -1,5 +1,9 @@
 import type { Global, ViewSettings } from './types';
 import type { ExperienceSettings } from './schemas/v2';
+import {
+    SCENE_CONTENT_CATEGORY_IDS,
+    type SceneContentCategoryId
+} from './scene-visibility/types';
 
 /** 观看态 Bloom 用户灯总闸默认开启 */
 export const DEFAULT_VIEW_BLOOM_LOCAL_LIGHTS_ENABLED = true;
@@ -7,17 +11,25 @@ export const DEFAULT_VIEW_BLOOM_LOCAL_LIGHTS_ENABLED = true;
 /** 观看态场景 video/audio 热区默认不静音 */
 export const DEFAULT_VIEW_MEDIA_MUTED = false;
 
-/** 观看态标注默认可见 */
+/** 观看态标注 / 各大类默认可见 */
 export const DEFAULT_VIEW_ANNOTATIONS_VISIBLE = true;
 
 /** 全局手电筒默认关闭（仅会话态，不入库；TORCH_TOGGLE 控制，与 TORCH_ADD 解耦） */
 export const DEFAULT_VIEW_TORCH_ACTIVE = false;
 
+function createDefaultContentVisibility(): NonNullable<ViewSettings['contentVisibility']> {
+    const out: NonNullable<ViewSettings['contentVisibility']> = {};
+    for (const id of SCENE_CONTENT_CATEGORY_IDS) {
+        out[id] = true;
+    }
+    return out;
+}
+
 export function createDefaultViewSettings(): ViewSettings {
     return {
         bloom: { localLightsEnabled: DEFAULT_VIEW_BLOOM_LOCAL_LIGHTS_ENABLED },
         mediaMuted: DEFAULT_VIEW_MEDIA_MUTED,
-        annotationsVisible: DEFAULT_VIEW_ANNOTATIONS_VISIBLE,
+        contentVisibility: createDefaultContentVisibility(),
         torch: { active: DEFAULT_VIEW_TORCH_ACTIVE }
     };
 }
@@ -39,8 +51,21 @@ export function ensureViewSettings(global: Global): ViewSettings {
     if (typeof vs.mediaMuted !== 'boolean') {
         vs.mediaMuted = DEFAULT_VIEW_MEDIA_MUTED;
     }
-    if (typeof vs.annotationsVisible !== 'boolean') {
-        vs.annotationsVisible = DEFAULT_VIEW_ANNOTATIONS_VISIBLE;
+    if (!vs.contentVisibility || typeof vs.contentVisibility !== 'object') {
+        vs.contentVisibility = createDefaultContentVisibility();
+    } else {
+        for (const id of SCENE_CONTENT_CATEGORY_IDS) {
+            if (typeof vs.contentVisibility[id] !== 'boolean') {
+                vs.contentVisibility[id] = true;
+            }
+        }
+    }
+    // 旧字段迁移：仅当 annotations 仍为默认 true 且 legacy 明确为 false 时写入
+    if (typeof vs.annotationsVisible === 'boolean') {
+        if (vs.annotationsVisible === false && vs.contentVisibility.annotations !== false) {
+            vs.contentVisibility.annotations = false;
+        }
+        delete vs.annotationsVisible;
     }
     if (!vs.torch || typeof vs.torch !== 'object') {
         vs.torch = { active: DEFAULT_VIEW_TORCH_ACTIVE };
@@ -55,16 +80,38 @@ export function applyViewBloomLocalLightsEnabled(global: Global, enabled: boolea
     ensureViewSettings(global).bloom.localLightsEnabled = enabled;
 }
 
+/** 读 View 会话大类显隐（`viewSettings.contentVisibility`，缺省 true） */
+export function readContentCategoryVisible(global: Global, category: SceneContentCategoryId): boolean {
+    const vs = ensureViewSettings(global);
+    return vs.contentVisibility?.[category] !== false;
+}
+
 /**
- * `ASSETS_SHOW_HIDE_SET` → 观看态标注全局 overlay（不入库，不写 `settings.annotations[].visible`）。
+ * 写 View 会话大类显隐（仅 viewSettings，不入库）。
+ * 画面套用由 `SceneContentVisibilityRegistry` 负责；编辑态（含预览）不套用。
+ * @returns 是否变更
+ */
+export function writeContentCategoryVisible(
+    global: Global,
+    category: SceneContentCategoryId,
+    visible: boolean
+): boolean {
+    const vs = ensureViewSettings(global);
+    if (!vs.contentVisibility) {
+        vs.contentVisibility = createDefaultContentVisibility();
+    }
+    const next = !!visible;
+    if (vs.contentVisibility[category] === next) return false;
+    vs.contentVisibility[category] = next;
+    return true;
+}
+
+/**
+ * 标注全局 overlay（收敛到 `contentVisibility.annotations`）。
  * @returns 是否发生变更
  */
 export function applyViewAnnotationsVisible(global: Global, visible: boolean): boolean {
-    const vs = ensureViewSettings(global);
-    const next = !!visible;
-    if (vs.annotationsVisible === next) return false;
-    vs.annotationsVisible = next;
-    return true;
+    return writeContentCategoryVisible(global, 'annotations', visible);
 }
 
 /**
@@ -86,7 +133,7 @@ export function readViewMediaMuted(global: Global): boolean {
 }
 
 export function readViewAnnotationsVisible(global: Global): boolean {
-    return ensureViewSettings(global).annotationsVisible !== false;
+    return readContentCategoryVisible(global, 'annotations');
 }
 
 export function readViewBloomLocalLightsEnabled(global: Global): boolean {

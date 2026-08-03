@@ -34,9 +34,8 @@ export function applyAnnotationShowHideSet(
     return true;
 }
 
-/** 按 settings 中各条 `visible` 恢复运行态（编辑模式跳过） */
+/** 按 settings 中各条 `visible` + 会话 overlay 恢复运行态（编辑态由 AnnotationManager 忽略 overlay） */
 export function applyAllAnnotationsVisibilityFromSettings(global: Global): void {
-    if (global.state.editMode) return;
     getAnnotationManager(global)?.applyVisibilityFromSettings();
 }
 

@@ -54,6 +54,10 @@ import {
     readSkyboxCurrentUrlFromSettings
 } from './settings-serialize/settings-serialize-helper';
 import { applyViewMediaMuteSet } from './view-settings';
+import {
+    getSceneContentVisibilityRegistry,
+    isSceneContentCategoryId
+} from './scene-visibility';
 import { getSelectedSceneAssetType } from './state-selectors';
 import type { AssetLibraryItem, EditLeftModule, Global } from './types';
 import { paramsPatchHasAssetKeys } from './vfx/effects-runtime/asset/asset-effect-params';
@@ -123,7 +127,8 @@ type InboundPayload =
     | { type: 'SETTINGS_RESET' }
     | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule | null }
     | { type: 'ASSET_SHOW_HIDE_SET'; id?: string; value?: boolean }
-    | { type: 'ASSETS_SHOW_HIDE_SET'; value?: boolean }
+    | { type: 'SCENE_CONTENT_CATEGORY_SET'; category?: string; value?: boolean }
+    | { type: 'SCENE_CONTENT_ALL_SET'; value?: boolean }
     | { type: 'ASSET_PLACE'; value?: AssetLibraryItem }
     | { type: 'MORPH_ASSET_ADD_START' }
     | { type: 'MORPH_ASSET_ADD_FINISH' }
@@ -690,9 +695,34 @@ const initPostMessageBridge = (global: Global) => {
                     dispatchAsset(global, 'ASSET_SHOW_HIDE_SET', { id: p.id, value: p.value });
                 }
                 break;
-            case 'ASSETS_SHOW_HIDE_SET':
-                if (typeof p.value === 'boolean' && Array.isArray(state.scenePlacedEntities)) {
-                    dispatchAsset(global, 'ASSETS_SHOW_HIDE_SET', { value: p.value });
+            case 'SCENE_CONTENT_CATEGORY_SET':
+                if (isSceneContentCategoryId(p.category) && typeof p.value === 'boolean') {
+                    const registry = getSceneContentVisibilityRegistry(global);
+                    if (registry?.setCategoryVisible(p.category, p.value)) {
+                        postToParent('SCENE_CONTENT_CATEGORY_CHANGED', {
+                            category: p.category,
+                            value: p.value
+                        });
+                    }
+                }
+                break;
+            case 'SCENE_CONTENT_ALL_SET':
+                // 入参 value 为唯一开关：全部大类统一设为该值（非逐类取反）
+                if (typeof p.value === 'boolean') {
+                    const registry = getSceneContentVisibilityRegistry(global);
+                    const categories = registry?.setAllCategoriesVisible(p.value) ?? [];
+                    if (categories.length > 0) {
+                        postToParent('SCENE_CONTENT_ALL_CHANGED', {
+                            value: p.value,
+                            categories
+                        });
+                        for (const category of categories) {
+                            postToParent('SCENE_CONTENT_CATEGORY_CHANGED', {
+                                category,
+                                value: p.value
+                            });
+                        }
+                    }
                 }
                 break;
             case 'ASSET_SELECT':

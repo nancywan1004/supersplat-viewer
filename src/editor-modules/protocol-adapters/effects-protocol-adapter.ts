@@ -341,7 +341,10 @@ function requestPersistentSceneEffectEnableChange(
         return;
     }
     if (getRevealStatus(global.state) === 'playing') {
-        global.events.once('revealComplete', dispatch);
+        global.events.once('revealComplete', (payload?: { skipPersistentRemount?: boolean }) => {
+            if (payload?.skipPersistentRemount) return;
+            dispatch();
+        });
     } else {
         dispatch();
     }
@@ -360,7 +363,8 @@ function requestPersistentGsplatRemount(global: Global): void {
         return;
     }
     if (getRevealStatus(global.state) === 'playing') {
-        global.events.once('revealComplete', () => {
+        global.events.once('revealComplete', (payload?: { skipPersistentRemount?: boolean }) => {
+            if (payload?.skipPersistentRemount) return;
             global.events.fire('persistentGsplatEffectRemountRequested', false);
         });
     } else {

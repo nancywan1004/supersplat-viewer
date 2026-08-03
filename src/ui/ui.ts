@@ -52,7 +52,7 @@ import { applyEnvironmentPreviewVisualPolicy } from '../editor-modules/environme
 import { applyLightToggleAll, applyLightToggle } from '../editor-modules/protocol-adapters/environment-protocol-adapter';
 import { applyViewMediaMuteSet, applyViewTorchActive, readViewTorchActive } from '../view-settings';
 import { dispatchEffectsModuleCommand } from '../editor-modules/effects-facade';
-import { findAssetMorphOwnerTargetId, getRevealActiveType } from '../settings-serialize/effects-sync';
+import { getRevealActiveType } from '../settings-serialize/effects-sync';
 
 // Initialize the touch joystick for fly mode camera control
 const initJoystick = (
@@ -376,7 +376,7 @@ const initUI = (global: Global) => {
         'annotationNav', 'annotationPrev', 'annotationNext', 'annotationInfo', 'annotationNavTitle',
         // 'supersplatBranding',
         // View 模式调试按钮（右上角编辑按钮旁）
-        'viewDebugToggleAssets', 'viewDebugLightsAllOn', 'viewDebugLightsAllOff',
+        'viewDebugToggleSceneContent', 'viewDebugLightsAllOn', 'viewDebugLightsAllOff',
         'viewDebugRegionSelect', 'viewDebugToggleRegionLight',
         'viewDebugMediaMute', 'viewDebugMediaUnmute',
         'viewDebugTorchToggle', 'viewDebugMorphStopAll'
@@ -1068,39 +1068,23 @@ const initUI = (global: Global) => {
     }
 
     // --- View 模式调试按钮：顶栏右上角，在非编辑模式下用于直接测试 Viewer 模式协议 ---
-    if (dom.viewDebugToggleAssets) {
-        dom.viewDebugToggleAssets.addEventListener('click', () => {
-            // 简单按当前第一资产的 enabled 状态反转所有资产显隐；无资产则直接切换显示/隐藏状态
-            const items = (global.state as any).scenePlacedEntities as any[] | undefined;
-            let nextVisible = true;
-            if (Array.isArray(items) && items.length > 0) {
-                const first = items.find((it) => it && it.entity);
-                if (first && typeof first.visible === 'boolean') {
-                    nextVisible = !first.visible;
+    if (dom.viewDebugToggleSceneContent) {
+        dom.viewDebugToggleSceneContent.addEventListener('click', () => {
+            const registry = (global as any).__sceneContentVisibility as
+                | {
+                    isAnyCategoryVisible: () => boolean;
+                    setAllCategoriesVisible: (v: boolean) => string[];
                 }
-            }
+                | undefined;
+            // 调试钮只负责算出要传的 value；真正统一开/关由 SCENE_CONTENT_ALL_SET.value 决定
+            const nextVisible = !(registry?.isAnyCategoryVisible?.() ?? true);
             if (editUiTransport === 'message-bridge') {
-                sendEditProtocolMessage({ type: 'ASSETS_SHOW_HIDE_SET', value: nextVisible });
-            } else if (Array.isArray(items)) {
-                const reg = (global as any).__commandRegistry;
-                if (typeof reg?.dispatch === 'function') {
-                    reg.dispatch({
-                        module: 'asset',
-                        command: { type: 'ASSETS_SHOW_HIDE_SET', payload: { value: nextVisible }, source: 'host' }
-                    });
-                } else {
-                    events.fire('assetEffect:morphStopAll');
-                    for (const item of items) {
-                        if (!item?.entity || item.visible === nextVisible) continue;
-                        const morphOwner =
-                            item.assetType === 'gaussian' && typeof item.id === 'string'
-                                ? findAssetMorphOwnerTargetId(global.settings as ExperienceSettings, item.id)
-                                : null;
-                        if (nextVisible === true && morphOwner && morphOwner !== item.id) continue;
-                        item.visible = nextVisible;
-                        item.entity.enabled = nextVisible;
-                    }
-                }
+                sendEditProtocolMessage({
+                    type: 'SCENE_CONTENT_ALL_SET',
+                    value: nextVisible
+                });
+            } else if (registry) {
+                registry.setAllCategoriesVisible(nextVisible);
             }
         });
     }

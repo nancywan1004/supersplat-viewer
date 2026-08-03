@@ -7,7 +7,7 @@
  * - VFX 导出：**一次性 reveal**（`RevealController.isTimedEffect()`，即非 `none` 且非 persistent）按 `frameTime` 与阈值门控编辑叠加层；**仅 persistent**（如 perlin-wave）或 `none` 时门控不启用。
  *
  * 架构要点：
- * - `DeferredEditingLayerSpec`：单一职责的可视层，可增删或单测 mock。
+ * - 门控统一走 `SceneContentVisibilityRegistry.applyRuntimeGate`（assets / annotations / lights）。
  * - 阈值与是否 Timed 由构造时传入的 `RevealExportTimingSource`（通常为 `RevealController`）提供，**不**挂在 `Global` 上。
  * - `VfxExportPostRevealSync`：导出循环内的状态机（显隐去重 + 最多一次 synthetic revealComplete）。
  */
@@ -15,6 +15,7 @@
 import type { Global } from '../types';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../schemas/v2-custom';
 import { getRevealTotalDuration } from '../settings-serialize/effects-sync';
+import { getSceneContentVisibilityRegistry } from '../scene-visibility';
 
 /** 与 `RevealController` 上用于导出门控的方法对齐（避免本模块依赖 Global 或整类循环引用时可只实现这两方法） */
 export type RevealExportTimingSource = {
@@ -31,49 +32,18 @@ export interface DeferredEditingLayerSpec {
     readonly applyVisibility: DeferredEditingLayerVisibilityFn;
 }
 
-/** 场景里与编辑工具对应的根实体名（与 asset-placement、光照等创建逻辑一致） */
-const ENTITY_NAMES = {
-    placedAssets: 'placedAssets',
-    pointLights: 'pointLights',
-    spotLights: 'spotLights'
-} as const;
-
-/** 按根节点名开关整棵子树是否参与更新/渲染（找不到则静默跳过） */
-function setRootEntityEnabled(global: Global, name: string, visible: boolean): void {
-    const entity = global.app.root.findByName(name) as { enabled?: boolean } | null;
-    if (entity && typeof entity.enabled === 'boolean') {
-        entity.enabled = visible;
-    }
-}
-
-/** 默认与 viewer 首访 defer（initAnnotations / initSceneAssets）所覆盖的范围一致 */
+/** 默认：单一层，委托场景内容显隐容器的 runtimeGate（assets/annotations/lights） */
 export const DEFAULT_DEFERRED_EDITING_LAYERS: readonly DeferredEditingLayerSpec[] = [
     {
-        id: 'scene.placedAssets',
-        applyVisibility: (g, v) => setRootEntityEnabled(g, ENTITY_NAMES.placedAssets, v)
-    },
-    {
-        id: 'annotations.all',
+        id: 'sceneContent.runtimeGate',
         applyVisibility: (g, v) => {
-            const am = (g as { annotationManager?: {
-                setAllAnnotationsVisible?: (x: boolean) => void;
-                applyVisibilityFromSettings?: () => void;
-            } }).annotationManager;
-            if (!am) return;
-            if (v) {
-                am.applyVisibilityFromSettings?.();
-            } else {
-                am.setAllAnnotationsVisible?.(false);
+            const registry = getSceneContentVisibilityRegistry(g);
+            if (!registry) {
+                console.warn('[deferred-editing-visual-sync] SceneContentVisibilityRegistry not initialized');
+                return;
             }
+            registry.applyRuntimeGate(v);
         }
-    },
-    {
-        id: 'lights.point',
-        applyVisibility: (g, v) => setRootEntityEnabled(g, ENTITY_NAMES.pointLights, v)
-    },
-    {
-        id: 'lights.spot',
-        applyVisibility: (g, v) => setRootEntityEnabled(g, ENTITY_NAMES.spotLights, v)
     }
 ];
 

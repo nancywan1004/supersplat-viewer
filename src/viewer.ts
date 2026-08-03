@@ -108,6 +108,7 @@ import {
 import { createEffectsRuntime, type EffectsRuntime } from './vfx/effects-runtime';
 import { hasEnabledPersistentGsplatMaterialShaderEffect } from './vfx/effects-runtime/effects-pipeline-policy';
 import { initCommandRegistry } from './editor-modules/command-registry';
+import { initSceneContentVisibility, getSceneContentVisibilityRegistry } from './scene-visibility';
 import { DEFAULT_DEFERRED_EDITING_LAYERS } from './render/deferred-editing-visual-sync';
 import { initInputArbiter } from './input-arbiter';
 import { VoxelDebugOverlay } from './voxel-debug-overlay';
@@ -449,6 +450,7 @@ class Viewer {
         initAnnotationFacade(global);
         initEnvironmentFacade(global);
         initEffectsFacade(global);
+        initSceneContentVisibility(global);
         this.effectsRuntime = createEffectsRuntime(global);
         (global as any).__effectsRuntime = this.effectsRuntime;
         (app as any).effectsRuntime = this.effectsRuntime;
@@ -939,7 +941,8 @@ class Viewer {
             });
             const es = global.settings as ExperienceSettings;
             if (shouldDeferPersistentMount(es)) {
-                events.once('revealComplete', () => {
+                events.once('revealComplete', (payload?: { skipPersistentRemount?: boolean }) => {
+                    if (payload?.skipPersistentRemount) return;
                     this.syncPersistentRevealGsplat(gsplatEntity, false);
                 });
             } else {
@@ -947,6 +950,11 @@ class Viewer {
             }
             let deferredEditingLayersLocked = false;
             const applyDeferredEditingLayersVisibility = (visible: boolean) => {
+                const registry = getSceneContentVisibilityRegistry(global);
+                if (registry) {
+                    registry.applyRuntimeGate(visible);
+                    return;
+                }
                 for (const layer of DEFAULT_DEFERRED_EDITING_LAYERS) {
                     try {
                         layer.applyVisibility(global, visible);

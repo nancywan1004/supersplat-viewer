@@ -2,7 +2,7 @@ import { normalizeAnnotationMediaFields } from '../annotation-toolbar/media-fiel
 import type { AnnotationData } from '../annotation-toolbar/types';
 import type { Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 import { setPlacementCursorActive } from '../placement-cursor';
-import { applyAnnotationShowHideSet, applyAllAnnotationsVisibilityFromSettings } from '../annotation-toolbar/annotation-visibility';
+import { applyAnnotationShowHideSet } from '../annotation-toolbar/annotation-visibility';
 
 type AnnotationManagerApi = {
     startPlacementWithId?: (id: string) => void;
@@ -170,16 +170,7 @@ const initAnnotationFacade = (global: Global): ModuleFacade => {
     (global as any).__annotationFacade = facade;
     (global as any).__commandRegistry?.register?.('annotation', facade);
 
-    global.events.on('editMode:changed', (inEdit: boolean) => {
-        if (!inEdit) {
-            applyAllAnnotationsVisibilityFromSettings(global);
-        }
-    });
-
-    global.events.on('assets:allVisibilityChanged', () => {
-        if (global.state.editMode) return;
-        applyAllAnnotationsVisibilityFromSettings(global);
-    });
+    // 标注显隐与 View contentVisibility 的套用/恢复由 SceneContentVisibilityRegistry 统一处理
 
     return facade;
 };

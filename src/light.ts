@@ -403,12 +403,15 @@ export type SpotLightInfo = {
 /**
  * 从场景中收集点光源信息（Light 组件 type === 'point'），上限 10 个。
  * 无额外点光源时返回空数组。
+ * 须尊重实体层级 `enabled`：父节点（如 scene content 关掉的 `pointLights`）禁用后不得再注入 gsplat night-mode。
  */
 const collectPointLights = (global: Global): PointLightInfo[] => {
     const { app } = global;
     const result: PointLightInfo[] = [];
     const visit = (e: Entity) => {
         if (result.length >= MAX_POINT_LIGHTS) return;
+        // 本地 enabled=false 时整棵子树跳过（父容器关闭时子灯 light.enabled 仍可能为 true）
+        if (!e.enabled) return;
         if (e.light && (e.light as any).type === 'point' && e.light.enabled && !e.tags.has('torchLight')) {
             const pos = e.getPosition();
             result.push({
@@ -437,10 +440,11 @@ const collectSpotLights = (global: Global): SpotLightInfo[] => {
     const { app } = global;
     const result: SpotLightInfo[] = [];
     const container = app.root.findByName('spotLights') as Entity | null;
-    if (!container) return result;
+    if (!container || !container.enabled) return result;
     const yAxis = new Vec3();
     for (let i = 0; i < container.children.length && result.length < MAX_SPOT_LIGHTS; i++) {
         const e = container.children[i] as Entity;
+        if (!e.enabled) continue;
         if (!e.name.startsWith('spotLight_') || e.name === 'spotLight_visual') continue;
         if (!e.light || (e.light as any).type !== 'spot' || !e.light.enabled) continue;
         const position = e.getPosition().clone();

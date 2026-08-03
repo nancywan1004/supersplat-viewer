@@ -1,21 +1,10 @@
 import { applySceneAssetTriggerDistanceM } from '../scene-assets/asset-placement-handler';
-import { pauseAllSceneMedia } from '../scene-assets/media/scene-media-playback';
+import { pauseAllSceneMedia, pauseSceneMediaEntry } from '../scene-assets/media/scene-media-playback';
 import type { AssetLibraryItem, EditLeftModule, Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 import { setPlacementCursorActive } from '../placement-cursor';
 import { loadGsplatAsset } from '../loaders/gsplat/sog/splat-loader';
 import { getAssetLoader } from '../loaders/asset-loader';
 import { loadContainerAsset } from '../loaders/gltf/container-loader';
-import { findAssetMorphOwnerTargetId } from '../settings-serialize/effects-sync';
-import type { ExperienceSettings } from '../schemas/v2';
-import { applyViewAnnotationsVisible, readViewAnnotationsVisible } from '../view-settings';
-
-function isDeformedMorphGsplat(global: Global, item: { id?: string; assetType?: string } | null | undefined): boolean {
-    if (!item?.id || item.assetType !== 'gaussian') {
-        return false;
-    }
-    const morphOwner = findAssetMorphOwnerTargetId(global.settings as ExperienceSettings, item.id);
-    return !!morphOwner && morphOwner !== item.id;
-}
 
 class AssetFacade implements ModuleFacade {
     readonly module = 'asset' as const;
@@ -190,27 +179,10 @@ class AssetFacade implements ModuleFacade {
             if (!entry?.entity || entry.visible === pl.value) return;
             entry.visible = pl.value;
             entry.entity.enabled = pl.value;
-            break;
-        }
-        case 'ASSETS_SHOW_HIDE_SET': {
-            const visible = (command.payload as { value?: boolean } | undefined)?.value;
-            if (typeof visible !== 'boolean' || !Array.isArray(state.scenePlacedEntities)) return;
-            const next = !!visible;
-            const overlaySame = readViewAnnotationsVisible(ctx.global) === next;
-            events.fire('assetEffect:morphStopAll');
-            let anyAssetChanged = false;
-            for (const item of state.scenePlacedEntities) {
-                if (!item?.entity || item.visible === next) continue;
-                if (next === true && isDeformedMorphGsplat(ctx.global, item)) continue;
-                item.visible = next;
-                item.entity.enabled = next;
-                anyAssetChanged = true;
+            // 编辑非预览热区不评估：隐藏时须同步 pause，否则 HTML 音视频会继续出声
+            if (!pl.value) {
+                pauseSceneMediaEntry(ctx.global, entry);
             }
-            const overlayChanged = applyViewAnnotationsVisible(ctx.global, next);
-            if (overlayChanged && !state.editMode) {
-                ctx.events.fire('assets:allVisibilityChanged', { visible: next });
-            }
-            if (overlaySame && !anyAssetChanged) return;
             break;
         }
         case 'ASSET_COPY': {

@@ -49,9 +49,14 @@ import { GsplatRevealSmooth } from './gsplat-reveal-smooth';
 
 /**
  * 一次性 reveal 在 gsplat 实体上的脚本 teardown 策略。
- * persistent 轨不在此 `create`；`stopOneShotRebindPersistentIfConfigured` 仅按 settings 将 **已挂载** 的 persistent 重新绑到时间轴。
+ * - `replaceOneShot`：`createEffect` 前清空 RC 时间轴
+ * - `stopOneShotRebindPersistentIfConfigured`：`vfxExit` 等，拆一次性后按 settings 重绑已挂载 persistent
+ * - `stopOneShotKeepPersistent`：会话显隐关开场——只拆一次性，不碰 persistent 挂载/时间轴
  */
-type OneShotRevealGsplatTeardown = 'replaceOneShot' | 'stopOneShotRebindPersistentIfConfigured';
+type OneShotRevealGsplatTeardown =
+    | 'replaceOneShot'
+    | 'stopOneShotRebindPersistentIfConfigured'
+    | 'stopOneShotKeepPersistent';
 
 /**
  * 场景 GSplat **一次性开场** reveal 主路径（Timed、Reveal 等会阻塞到 `revealComplete`）。
@@ -225,6 +230,11 @@ export class RevealController {
         // 协议 / UI：强制结束「一次性 reveal」播放；persistent **实体脚本**不由此处创建/销毁，仅可能重绑指针（见 `teardownOneShotRevealGsplatScripts`）。
         events.on('vfxExit', () => {
             this.forceStopVfx('EFFECT_DISABLE');
+        });
+
+        /** 场景内容容器：关开场会话显隐——拆一次性、不 remount persistent、仍解锁 deferred/bloom */
+        events.on('revealSessionHide', () => {
+            this.suppressOneShotForSessionHide();
         });
 
         // settings 已按快照恢复为真源：丢弃 View/VFX 期 nightFade 快照，避免事后写回造成假脏
@@ -1223,6 +1233,31 @@ export class RevealController {
     }
 
     /**
+     * 场景内容会话显隐：关闭开场。
+     * - 只拆一次性脚本，保留已挂载 persistent（不 remount）
+     * - `revealComplete` 带 `skipPersistentRemount`，避免误把可持续特效拉回
+     * - 仍解锁 deferred layers / bloom
+     */
+    private suppressOneShotForSessionHide(): void {
+        this.teardownOneShotRevealGsplatScripts('stopOneShotKeepPersistent');
+        this.isTiming = false;
+        this.effectStartTime = null;
+        this.effectEndTime = null;
+        this.restoreNightModeIfNeeded('SESSION_HIDE');
+        this.inVfx = false;
+        patchRevealRuntimeMirror(this.global.state, {
+            status: this.config.type === 'none' ? 'inactive' : 'completed'
+        });
+        this.global.events.fire('revealComplete', { skipPersistentRemount: true });
+        this.syncEffectsRuntimeRevealScriptType(
+            getPersistentGsplatEffectsRuntimeScriptType(
+                this.gsplatEntity,
+                getEffectsReadSource(this.global) as ExperienceSettings
+            )
+        );
+    }
+
+    /**
      * 设置计时功能
      */
     private setupTiming(script: any) {
@@ -1350,10 +1385,22 @@ export class RevealController {
     /**
      * 仅销毁 gsplat 上的一次性 reveal 脚本；persistent 实体脚本由 `viewer` / `persistent-effect` 管理。
      *
-     * @param mode `replaceOneShot`：`createEffect` 前清空 RC 时间轴；`stopOneShotRebindPersistentIfConfigured`：`vfxExit` 等，拆一次性后仅重绑已存在的 persistent。
+     * @param mode `replaceOneShot`：`createEffect` 前清空 RC 时间轴；`stopOneShotRebindPersistentIfConfigured`：`vfxExit` 等，拆一次性后仅重绑已存在的 persistent；`stopOneShotKeepPersistent`：会话关开场，不碰 persistent。
      */
     private teardownOneShotRevealGsplatScripts(mode: OneShotRevealGsplatTeardown) {
         if (!this.gsplatEntity?.script) {
+            return;
+        }
+
+        if (mode === 'stopOneShotKeepPersistent') {
+            console.log('Teardown one-shot reveal scripts (keep persistent mounts)');
+            destroyAllRevealGsplatScriptsOnEntity(this.gsplatEntity);
+            // 时间轴若仍指向已毁的一次性脚本，按当前 read source 重绑到已挂载 persistent（不 remount）
+            rebindPersistentGsplatTimelineFromSettings(
+                this.gsplatEntity,
+                getEffectsReadSource(this.global) as ExperienceSettings,
+                (s) => this.bindPersistentTimelineScript(s)
+            );
             return;
         }
 
@@ -1481,7 +1528,8 @@ export class RevealController {
         ) {
             return;
         }
-        this.global.events.once('revealComplete', () => {
+        this.global.events.once('revealComplete', (payload?: { skipPersistentRemount?: boolean }) => {
+            if (payload?.skipPersistentRemount) return;
             this.global.events.fire('persistentGsplatEffectRemountRequested', false);
         });
     }

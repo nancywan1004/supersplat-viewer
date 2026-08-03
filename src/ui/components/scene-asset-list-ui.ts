@@ -2,6 +2,7 @@ import type { Global, ScenePlacedItem } from '../../types';
 import { pushEditHistory } from '../../edit-history';
 import { ASSET_EFFECT_TYPE_VALUES } from '../../vfx/effects-runtime/effect-types';
 import { isPlacedGaussianItem } from '../../vfx/effects-runtime/asset/asset-scene-target';
+import { pauseSceneMediaEntry } from '../../scene-assets/media/scene-media-playback';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
 const GSPLAT_MORPH_TYPE = ASSET_EFFECT_TYPE_VALUES[0];
@@ -77,6 +78,10 @@ function renderSceneAssetList(listEl: HTMLElement, global: Global): void {
             }
             entry.visible = nextVisible;
             entry.entity.enabled = nextVisible;
+            // 编辑非预览热区不评估：隐藏时同步 pause，避免 HTML 音视频继续出声
+            if (!nextVisible) {
+                pauseSceneMediaEntry(global, entry);
+            }
             eyeBtn.classList.toggle('hidden', !entry.visible);
             eyeOffBtn.classList.toggle('hidden', entry.visible);
             eyeBtn.title = entry.visible ? '隐藏' : '显示';

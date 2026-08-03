@@ -373,10 +373,10 @@ export class AnnotationManager {
         return Array.from(this.annotations.values());
     }
 
-    /** 单条 settings 显隐 × 会话 overlay（`ASSETS_SHOW_HIDE_SET`）；编辑模式仅看单条 visible */
+    /** 单条 settings 显隐 × 会话 overlay（`contentVisibility.annotations`）；编辑模式仅看单条 visible */
     private computeEntityVisible(perItemVisible: boolean): boolean {
         if (this.global.state.editMode) return perItemVisible;
-        const overlay = this.global.viewSettings?.annotationsVisible !== false;
+        const overlay = this.global.viewSettings?.contentVisibility?.annotations !== false;
         return overlay && perItemVisible;
     }
 
