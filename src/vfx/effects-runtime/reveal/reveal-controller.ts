@@ -227,6 +227,11 @@ export class RevealController {
             this.forceStopVfx('EFFECT_DISABLE');
         });
 
+        // settings 已按快照恢复为真源：丢弃 View/VFX 期 nightFade 快照，避免事后写回造成假脏
+        events.on('settingsSnapshotApplied', () => {
+            this.originalNightFade = null;
+        });
+
         // 统一监听重启请求（所有效果类型）
         events.on('revealRestart', (restartAnimTrack?: boolean) => {
             console.log('Reveal restart requested via event', restartAnimTrack ? '(with animTrack)' : '(without animTrack)');
@@ -1117,7 +1122,8 @@ export class RevealController {
 
     /**
      * 在特效结束或类型切回 none 时恢复进入特效前记录的 nightFade。
-     * 同步写回 settings.nightMode.fade，并通过事件驱动 NightMode Shader 更新。
+     * 仅当快照 fade 与 settings 真源不一致时才写回 settings，避免 edit-enter remount/vfxExit
+     * 凭空 materialize `nightMode` 造成 EXIT_NEEDS_SAVE 假脏；运行时始终 forceReapply。
      */
     private restoreNightModeIfNeeded(reason: string) {
         const settings = this.global.settings as ExperienceSettings;
@@ -1137,11 +1143,14 @@ export class RevealController {
         this.inVfx = false;
         patchRevealRuntimeMirror(this.global.state, { status: this.config.type === 'none' ? 'inactive' : 'completed' });
 
-        const settingsAny = this.global.settings as any;
-        if (!settingsAny.nightMode) {
-            settingsAny.nightMode = {};
+        const currentFade = getNightFadeFromSettings(settings);
+        if (Math.abs(fade - currentFade) > 1e-6) {
+            const settingsAny = this.global.settings as any;
+            if (!settingsAny.nightMode || typeof settingsAny.nightMode !== 'object') {
+                settingsAny.nightMode = {};
+            }
+            settingsAny.nightMode.fade = fade;
         }
-        settingsAny.nightMode.fade = fade;
 
         console.log('[RevealController] Restoring nightFade to', fade, 'due to', reason);
         debugExportNight('restoreNightModeIfNeeded firing forceReapply', {

@@ -9,8 +9,11 @@ import {
     serializeExperienceSettings,
     getComparableSettingsString,
     getComparableSettingsStringFromSnapshot,
-    applySettingsSnapshot
+    applySettingsSnapshot,
+    syncEditBaselineCollisionFromGlobal,
+    logSettingsDiffDetails
 } from '../settings-serialize/settings-serialize';
+import { SCENE_COLLISION_CHANGED } from '../collision/scene-collision-source';
 import { readSkyboxCurrentUrlFromSettings } from '../settings-serialize/settings-serialize-helper';
 import { downloadExperienceSettingsLocally } from '../render/project-thumbnail';
 import { resetSceneSettings } from '../settings-reset';
@@ -560,6 +563,16 @@ const initUI = (global: Global) => {
     let editModeEnteredSettingsSnapshot: string | null = null;
     /** 进入编辑模式时的 settings 完整数据，用于「不保存并退出」时回退场景 */
     let editModeEnteredSettingsData: ExperienceSettings | null = null;
+    /** 进入编辑后系统异步写入 collision.url 时同步基线，避免未编辑却弹出保存确认 */
+    const syncEnteredBaselineCollisionFromSystem = () => {
+        if (!state.editMode || !editModeEnteredSettingsData || editModeEnteredSettingsSnapshot == null) {
+            return;
+        }
+        const patched = syncEditBaselineCollisionFromGlobal(editModeEnteredSettingsData, global);
+        editModeEnteredSettingsData = patched.data;
+        editModeEnteredSettingsSnapshot = patched.comparable;
+    };
+    events.on(SCENE_COLLISION_CHANGED, syncEnteredBaselineCollisionFromSystem);
     const resetSettingsBtn = dom.resetSettingsBtn as HTMLButtonElement | null;
     const updatePreviewModeButton = () => {
         if (!dom.previewModeBtn) return;
@@ -754,7 +767,8 @@ const initUI = (global: Global) => {
                     return;
                 }
 
-                const current = getComparableSettingsString(global);
+                const currentSnapshot = serializeExperienceSettings(global);
+                const current = getComparableSettingsStringFromSnapshot(currentSnapshot);
                 if (editModeEnteredSettingsSnapshot === null) {
                     if (editModeEnteredSettingsData) {
                         applySettingsSnapshot(global, editModeEnteredSettingsData);
@@ -774,6 +788,13 @@ const initUI = (global: Global) => {
                     applyMorphKeyframeVisibilityPolicy(global);
                     events.fire('editMode:changed', false);
                     return;
+                }
+                if (editModeEnteredSettingsData) {
+                    logSettingsDiffDetails(
+                        '[UI] exit-edit needsSave',
+                        editModeEnteredSettingsData,
+                        currentSnapshot
+                    );
                 }
                 showExitEditConfirmModal({
                     onSave: () => {
