@@ -71,6 +71,11 @@ export function resolveLodBaseDistance(global: Global): number {
     return DEFAULT_LOD_BASE_DISTANCE;
 }
 
+/** settings.sceneProfile 是否显式写了正数 lodBaseDistance（含写成默认值 5） */
+export function hasExplicitLodBaseDistance(global: Global): boolean {
+    return readPositiveNumber(readSceneProfile(global.settings)?.lodBaseDistance) !== undefined;
+}
+
 /** settings.sceneProfile.lodMultiplier > 默认 3 */
 export function resolveLodMultiplier(global: Global): number {
     const fromSettings = readPositiveNumber(readSceneProfile(global.settings)?.lodMultiplier);
@@ -93,12 +98,25 @@ export function resolveLodBehindPenalty(global: Global): number {
 }
 
 /**
- * settings.sceneProfile.lodScaleAlign === false 时关闭；缺省 / 其它值均开启。
- * 开启时按叶中心 R95 + LOD 金字塔反推有效 lodBaseDistance。
+ * 是否跑 viewer 侧 R95+金字塔 scale-align（可能改写 entity.lodBaseDistance）。
+ *
+ * - `lodScaleAlign: false` → 关
+ * - `lodScaleAlign: true` → 开（即使显式写了 lodBaseDistance，仍以配置值为上限做自适应）
+ * - 未写 lodScaleAlign，但显式写了 `lodBaseDistance` → 关（人工配置覆盖自动 align）
+ * - 两者都未写 → 开（用默认 d0=5 作配置上限）
  */
 export function resolveLodScaleAlignEnabled(global: Global): boolean {
     const flag = readSceneProfile(global.settings)?.lodScaleAlign;
-    return flag !== false;
+    if (flag === false) {
+        return false;
+    }
+    if (flag === true) {
+        return true;
+    }
+    if (hasExplicitLodBaseDistance(global)) {
+        return false;
+    }
+    return true;
 }
 
 /**
