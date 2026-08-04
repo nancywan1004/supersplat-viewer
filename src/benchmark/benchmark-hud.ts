@@ -15,6 +15,8 @@ import {
     readRefinementTickMetrics,
     readRuntimeLodPlacement,
     formatRuntimeLodPlacement,
+    readGsplatBudgetFill,
+    formatGsplatBudgetFill,
     renderRefinementTickMetricsHtml,
     type RefinementTickPayload
 } from './benchmark-refinement';
@@ -167,7 +169,7 @@ export function ensureBenchmarkHudStyles() {
     right: 12px;
     z-index: 100000;
     min-width: 240px;
-    max-width: 400px;
+    max-width: 460px;
     padding: 10px 12px;
     border-radius: 8px;
     background: rgba(8, 10, 14, 0.82);
@@ -431,6 +433,7 @@ export function initBenchmarkHud(global: Global): () => void {
         const gsplat = app.scene.gsplat as { currentRenderer?: unknown; renderer?: unknown; splatBudget?: unknown };
         lines.push(row('Renderer', formatGsplatRenderer(gsplat.currentRenderer ?? gsplat.renderer)));
         lines.push(row('SplatBudget', formatSplatBudget(gsplat.splatBudget)));
+        lines.push(row('Budget fill', formatGsplatBudgetFill(readGsplatBudgetFill(app))));
 
         const lodPlacement = readRuntimeLodPlacement(global);
         if (

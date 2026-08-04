@@ -71,9 +71,14 @@ const T = {
     ladder: {
         coarsestStepBoost: 2.75,
         stepBoost: 1.6,
-        /** stableForeground pending ≥ 此值视为积压，ladder 一次跳 backlogJumpSteps 档 */
+        /** stableForeground pending ≥ 此值：边缘升档用 edgeBacklogJumpSteps */
         backlogPending: 12,
-        backlogJumpSteps: 2
+        /** 视野中央：逐档连贯（edgeFactor ≥ edgeRelaxOptimal） */
+        centerJumpSteps: 1,
+        /** 视野边缘：正常跳档 */
+        edgeJumpSteps: 2,
+        /** 视野边缘且前景积压时跳档 */
+        edgeBacklogJumpSteps: 3
     },
     burst: {
         moveFrames: 18,
@@ -1103,8 +1108,8 @@ function computeViewportAabbEdgeFactor(
 }
 
 /**
- * separate 资产逐档升 LOD：当前比 optimal 粗时，先拉 currentLod-1；
- * pending 积压时可一次跳 jumpSteps 档，减少阶数、加快收敛。
+ * separate 资产逐档升 LOD：当前比 optimal 粗时按 jumpSteps 逼近目标。
+ * jumpSteps 由视野位置决定：中央连贯、边缘可跳多档。
  */
 function computeRefinementTargetLod(
     optimalLod: number,
@@ -1122,6 +1127,14 @@ function computeRefinementTargetLod(
         return Math.max(relaxedTarget, currentLod - steps);
     }
     return relaxedTarget;
+}
+
+/** 中央 jump=1 连贯；边缘 2，积压时边缘 3 */
+function resolveLadderJumpSteps(edgeFactor: number, pendingBacklog: boolean): number {
+    if (edgeFactor >= T.viewport.edgeRelaxOptimal) {
+        return T.ladder.centerJumpSteps;
+    }
+    return pendingBacklog ? T.ladder.edgeBacklogJumpSteps : T.ladder.edgeJumpSteps;
 }
 
 /**
@@ -1514,7 +1527,7 @@ function buildPriorityFiles(
     options?: { pendingBacklog?: boolean }
 ): PrioritizedBatch {
     const pendingBacklog = options?.pendingBacklog === true;
-    const jumpSteps = pendingBacklog ? T.ladder.backlogJumpSteps : 1;
+    // jumpSteps 按叶 edgeFactor 在循环内 resolveLadderJumpSteps
     const { scene, gsplat } = ctx;
     const lodParams = refreshEvalLodParams(ctx);
     const { app, octree, gsplatEntity, cameraEntity } = scene;
@@ -1678,6 +1691,7 @@ function buildPriorityFiles(
             engineOptimalLod
         );
 
+        const jumpSteps = resolveLadderJumpSteps(edgeFactor, pendingBacklog);
         const targetLod = computeRefinementTargetLod(
             downloadOptimalLod,
             maxLod,
@@ -1813,6 +1827,16 @@ export type OctreeRefinementTickMetrics = {
     staleLodNodes: number;
     staleLoadedNodes: number;
     lodDisplayMismatch: number;
+    /** 本拍 ladder 是否因前景积压启用边缘跳档加成 */
+    ladderBacklog: boolean;
+    /** 视野中央跳档数（连贯） */
+    ladderCenterJumpSteps: number;
+    /** 本拍边缘跳档数（积压时为 edgeBacklogJumpSteps） */
+    ladderEdgeJumpSteps: number;
+    /** 判定积压的 stableForeground 阈值 */
+    ladderBacklogThreshold: number;
+    /** 本拍结束时的 stable foreground pending（下一拍 backlog 判定依据） */
+    stableForegroundPending: number;
     cameraBurstFrames: number;
     inFlight: number;
     queueLen: number;
@@ -2331,7 +2355,11 @@ export function createOctreeRefinementController(
                 const log: Record<string, unknown> = {
                     boostActive,
                     pendingBacklog,
-                    ladderJumpSteps: pendingBacklog ? T.ladder.backlogJumpSteps : 1,
+                    ladderBacklog: pendingBacklog,
+                    ladderCenterJumpSteps: T.ladder.centerJumpSteps,
+                    ladderEdgeJumpSteps: pendingBacklog
+                        ? T.ladder.edgeBacklogJumpSteps
+                        : T.ladder.edgeJumpSteps,
                     pinLimit: T.loader.pinLimit,
                     pinnedFiles: prefetch.pinned.size,
                     pendingUniqueFiles,
@@ -2411,6 +2439,13 @@ export function createOctreeRefinementController(
             staleLodNodes,
             staleLoadedNodes,
             lodDisplayMismatch,
+            ladderBacklog: pendingBacklog,
+            ladderCenterJumpSteps: T.ladder.centerJumpSteps,
+            ladderEdgeJumpSteps: pendingBacklog
+                ? T.ladder.edgeBacklogJumpSteps
+                : T.ladder.edgeJumpSteps,
+            ladderBacklogThreshold: T.ladder.backlogPending,
+            stableForegroundPending,
             cameraBurstFrames,
             inFlight: tickLoader?._currentlyLoading?.size ?? 0,
             queueLen: tickLoader?._loadQueue?.length ?? 0,

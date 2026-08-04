@@ -172,6 +172,9 @@ type GsplatWorldLike = {
     _currentVersion?: number;
     _workBufferRebuildRequired?: boolean;
     _octreeInstances?: Map<unknown, unknown>;
+    _layerPlacements?: Array<{ resource?: { numSplats?: number } | null }>;
+    _workBuffer?: { textureSize?: number };
+    _budgetScale?: number;
     _lastFrameWorldUpdateMs?: number;
     _lastFramePlacementIntegrateMs?: number;
     _lastFrameBakeCpuMs?: number;
@@ -323,6 +326,203 @@ function readCurrentLodSum(director: GsplatDirectorLike): number | null {
         }
     }
     return saw ? sum : null;
+}
+
+export type GsplatBudgetFillSnapshot = {
+    /** scene.gsplat.splatBudget 名义上限 */
+    splatBudget: number;
+    /** 引擎 _enforceBudget 同构估算：budget − fixed − texture padding */
+    adjustedBudget: number | null;
+    /** Σ lods[optimalLod].count（balancer 后目标档点数） */
+    optimalSplats: number | null;
+    /** Σ lods[currentLod].count（实例当前选档点数；缺细档时会粗于 optimal） */
+    currentSplats: number | null;
+    /** 有 optimalLod≥0 的叶数 */
+    optimalNodes: number;
+    /** 有 currentLod≥0 的叶数 */
+    currentNodes: number;
+    /** 引擎 _budgetScale */
+    budgetScale: number | null;
+};
+
+function padSlots(numSplats: number, textureWidth: number): number {
+    if (!(textureWidth > 0) || !(numSplats > 0)) {
+        return 0;
+    }
+    return (textureWidth - (numSplats % textureWidth)) % textureWidth;
+}
+
+function sumLodCountAt(
+    nodes: Array<{ lods?: Array<{ count?: number }> }>,
+    nodeInfos: Array<{ optimalLod?: number; currentLod?: number }>,
+    which: 'optimal' | 'current'
+): { splats: number; nodes: number } {
+    let splats = 0;
+    let count = 0;
+    const n = Math.min(nodes.length, nodeInfos.length);
+    for (let i = 0; i < n; i++) {
+        const lodIndex = which === 'optimal' ? nodeInfos[i]?.optimalLod : nodeInfos[i]?.currentLod;
+        if (typeof lodIndex !== 'number' || lodIndex < 0) {
+            continue;
+        }
+        const c = nodes[i]?.lods?.[lodIndex]?.count;
+        if (typeof c === 'number' && Number.isFinite(c) && c > 0) {
+            splats += c;
+            count++;
+        }
+    }
+    return { splats, nodes: count };
+}
+
+/**
+ * 读取引擎预算填充诊断（名义 bud / adjusted / Σoptimal / Σcurrent）。
+ * adjusted 按 gsplat-world._enforceBudget 同构估算；须在 LOD/budget 更新后的帧采样。
+ */
+export function readGsplatBudgetFill(app: AppBase): GsplatBudgetFillSnapshot {
+    const splatBudget =
+        (app?.scene?.gsplat as { splatBudget?: number } | undefined)?.splatBudget ?? 0;
+    const empty: GsplatBudgetFillSnapshot = {
+        splatBudget: Number.isFinite(splatBudget) ? splatBudget : 0,
+        adjustedBudget: null,
+        optimalSplats: null,
+        currentSplats: null,
+        optimalNodes: 0,
+        currentNodes: 0,
+        budgetScale: null
+    };
+    const director = getGsplatDirector(app);
+    if (!director) {
+        return empty;
+    }
+
+    let optimalSplats = 0;
+    let currentSplats = 0;
+    let optimalNodes = 0;
+    let currentNodes = 0;
+    let sawLod = false;
+    let adjustedBudget: number | null = null;
+    let budgetScale: number | null = null;
+    const seenWorlds = new Set<GsplatWorldLike>();
+
+    for (const cameraData of director.camerasMap.values()) {
+        for (const layerData of cameraData.layersMap.values()) {
+            for (const manager of [layerData.gsplatManager, layerData.gsplatManagerShadow]) {
+                const world = manager?.world;
+                if (!world || seenWorlds.has(world)) {
+                    continue;
+                }
+                seenWorlds.add(world);
+
+                if (typeof world._budgetScale === 'number' && Number.isFinite(world._budgetScale)) {
+                    budgetScale = world._budgetScale;
+                }
+
+                const textureWidth =
+                    world._workBuffer?.textureSize ??
+                    (typeof world._allocator?.capacity === 'number' && world._allocator.capacity > 0
+                        ? Math.ceil(Math.sqrt(world._allocator.capacity))
+                        : 0);
+
+                if (empty.splatBudget > 0 && textureWidth > 0 && adjustedBudget === null) {
+                    let fixedSplats = 0;
+                    let paddingEstimate = 0;
+                    const layerPlacements = world._layerPlacements;
+                    if (layerPlacements?.length) {
+                        for (let i = 0; i < layerPlacements.length; i++) {
+                            const num = layerPlacements[i]?.resource?.numSplats ?? 0;
+                            if (num > 0) {
+                                fixedSplats += num;
+                                paddingEstimate += padSlots(num, textureWidth);
+                            }
+                        }
+                    }
+                    const instances = world._octreeInstances;
+                    if (instances) {
+                        for (const inst of instances.values()) {
+                            const active = (inst as {
+                                activePlacements?: Set<{ resource?: { numSplats?: number } | null }>;
+                            }).activePlacements;
+                            if (!active) {
+                                continue;
+                            }
+                            for (const placement of active) {
+                                const num = placement?.resource?.numSplats ?? 0;
+                                if (num > 0) {
+                                    paddingEstimate += padSlots(num, textureWidth);
+                                }
+                            }
+                        }
+                    }
+                    adjustedBudget = Math.max(1, empty.splatBudget - fixedSplats - paddingEstimate);
+                }
+
+                const instances = world._octreeInstances;
+                if (!instances) {
+                    continue;
+                }
+                for (const inst of instances.values()) {
+                    const typed = inst as {
+                        octree?: { nodes?: Array<{ lods?: Array<{ count?: number }> }> };
+                        nodeInfos?: Array<{ optimalLod?: number; currentLod?: number }>;
+                    };
+                    const nodes = typed.octree?.nodes;
+                    const infos = typed.nodeInfos;
+                    if (!nodes?.length || !infos?.length) {
+                        continue;
+                    }
+                    sawLod = true;
+                    const opt = sumLodCountAt(nodes, infos, 'optimal');
+                    const cur = sumLodCountAt(nodes, infos, 'current');
+                    optimalSplats += opt.splats;
+                    optimalNodes += opt.nodes;
+                    currentSplats += cur.splats;
+                    currentNodes += cur.nodes;
+                }
+            }
+        }
+    }
+
+    return {
+        splatBudget: empty.splatBudget,
+        adjustedBudget,
+        optimalSplats: sawLod ? optimalSplats : null,
+        currentSplats: sawLod ? currentSplats : null,
+        optimalNodes,
+        currentNodes,
+        budgetScale
+    };
+}
+
+export function formatGsplatBudgetFill(snapshot: GsplatBudgetFillSnapshot): string {
+    const fmtM = (v: number | null) =>
+        v === null || !Number.isFinite(v) ? '—' : `${(v / 1e6).toFixed(2)}M`;
+    const bud = snapshot.splatBudget > 0 ? fmtM(snapshot.splatBudget) : '0';
+    const parts = [
+        `cur ${fmtM(snapshot.currentSplats)}`,
+        `opt ${fmtM(snapshot.optimalSplats)}`,
+        `adj ${fmtM(snapshot.adjustedBudget)}`,
+        `(bud ${bud})`
+    ];
+    if (
+        snapshot.optimalSplats != null &&
+        snapshot.adjustedBudget != null &&
+        snapshot.adjustedBudget > 0
+    ) {
+        const pct = (100 * snapshot.optimalSplats) / snapshot.adjustedBudget;
+        parts.push(`opt/adj ${pct.toFixed(0)}%`);
+    }
+    if (
+        snapshot.currentSplats != null &&
+        snapshot.optimalSplats != null &&
+        snapshot.optimalSplats > 0
+    ) {
+        const pct = (100 * snapshot.currentSplats) / snapshot.optimalSplats;
+        parts.push(`cur/opt ${pct.toFixed(0)}%`);
+    }
+    if (snapshot.budgetScale != null && Math.abs(snapshot.budgetScale - 1) > 0.02) {
+        parts.push(`×${snapshot.budgetScale.toFixed(2)}`);
+    }
+    return parts.join(' · ');
 }
 
 /**
@@ -751,6 +951,13 @@ export function renderRefinementTickMetricsHtml(metrics: OctreeRefinementTickMet
         ),
         row('Cand refs', `${metrics.candidateFileRefs} · uniq ${metrics.candidateUniqueFiles}`),
         row('Stale LOD', `${metrics.staleLodNodes}待升 · ${metrics.staleLoadedNodes}已下未上 · ${metrics.lodDisplayMismatch}引擎差`),
+        row(
+            'Ladder',
+            `ctr×${metrics.ladderCenterJumpSteps} · edge×${metrics.ladderEdgeJumpSteps}` +
+                (metrics.ladderBacklog
+                    ? ` · backlog (fg ${metrics.stableForegroundPending}≥${metrics.ladderBacklogThreshold})`
+                    : ` · fg ${metrics.stableForegroundPending}`)
+        ),
         row('Burst', `${metrics.cameraBurstFrames} fr${metrics.boostActive ? ' · boost' : ''}`),
         row(
             'Downloads',
