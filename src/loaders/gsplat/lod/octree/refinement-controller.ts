@@ -74,9 +74,24 @@ const T = {
         moveFrames: 18,
         zoomFrames: 36,
         unlockFrames: 48,
-        syncCooldown: 3,
-        staleSyncCooldown: 6,
-        staleSyncIdleFrames: 12
+        /**
+         * 已下未上时的 drip 间隔（帧）。
+         * 节流 bake，但有 stale 就持续 sync，避免长时间画面无变化。
+         * 同帧赋值后会 -1，故 2 ≈ 隔一帧再 sync。
+         */
+        progressiveSyncInterval: 2
+    },
+    /**
+     * 引擎 GSplatAssetLoader 耗尽 maxRetries 后，asset.loaded 仍为 true → load() 永久早退，pending 卡死。
+     * 此处做外层 backoff 再试；超过 maxOuterAttempts 标永久失败，从 pending/收条剔除。
+     */
+    downloadFail: {
+        /** 覆盖引擎默认 maxRetries（含首次共 N+1 次） */
+        engineMaxRetries: 3,
+        /** 引擎耗尽后的外层再试轮数 */
+        maxOuterAttempts: 3,
+        /** 各外层轮次的等待 ms */
+        backoffMs: [2000, 5000, 12000] as const
     }
 } as const;
 
@@ -174,6 +189,7 @@ type OctreeNode = {
 
 type OctreeAssetLoaderLike = {
     maxConcurrentLoads: number;
+    maxRetries?: number;
     _loadQueue?: string[];
     _currentlyLoading?: Set<string>;
     _urlToAsset?: Map<string, { loaded?: boolean; loading?: boolean; off: (event: string) => void }>;
@@ -187,6 +203,134 @@ type OctreeAssetLoaderLike = {
     __refinementGateActive?: boolean;
     __refinementPriorityUrls?: Set<string>;
 };
+
+/** 单文件：引擎重试耗尽后的外层失败状态 */
+type DownloadFailEntry = {
+    outerAttempts: number;
+    nextRetryAtMs: number;
+    permanent: boolean;
+    phase: 'backoff' | 'retrying' | 'permanent';
+};
+
+type DownloadFailMap = Map<number, DownloadFailEntry>;
+
+function isExhaustedFailedAsset(loader: OctreeAssetLoaderLike, url: string): boolean {
+    const asset = loader._urlToAsset?.get(url);
+    if (!asset?.loaded) {
+        return false;
+    }
+    if (loader.getResource?.(url)) {
+        return false;
+    }
+    if (loader._currentlyLoading?.has(url)) {
+        return false;
+    }
+    return true;
+}
+
+function downloadFailBlocksPending(entry: DownloadFailEntry | undefined): boolean {
+    return !!entry && (entry.permanent || entry.phase === 'backoff');
+}
+
+function countDownloadFailStats(failures: DownloadFailMap): {
+    downloadFailed: number;
+    downloadBackoff: number;
+    downloadPermanent: number;
+} {
+    let downloadBackoff = 0;
+    let downloadPermanent = 0;
+    for (const entry of failures.values()) {
+        if (entry.permanent || entry.phase === 'permanent') {
+            downloadPermanent++;
+        } else if (entry.phase === 'backoff') {
+            downloadBackoff++;
+        }
+    }
+    return {
+        downloadFailed: downloadBackoff + downloadPermanent,
+        downloadBackoff,
+        downloadPermanent
+    };
+}
+
+/**
+ * 检测引擎重试耗尽；在 backoff 到期后 unload 清掉假 loaded，再允许外层重下。
+ * 返回本拍是否触发了至少一次外层重试。
+ */
+function reconcileDownloadFailures(
+    octree: OctreeLike,
+    loader: OctreeAssetLoaderLike | null | undefined,
+    fileIndices: number[],
+    failures: DownloadFailMap,
+    nowMs: number
+): boolean {
+    let retried = false;
+    const seen = new Set<number>();
+
+    for (let i = 0; i < fileIndices.length; i++) {
+        const fi = fileIndices[i];
+        if (seen.has(fi)) {
+            continue;
+        }
+        seen.add(fi);
+
+        if (octree.getFileResource(fi)) {
+            failures.delete(fi);
+            continue;
+        }
+
+        const url = octree.files[fi]?.url;
+        if (!url || !loader) {
+            continue;
+        }
+
+        const prev = failures.get(fi);
+
+        if (prev?.permanent || prev?.phase === 'permanent') {
+            continue;
+        }
+
+        if (prev?.phase === 'backoff') {
+            if (nowMs < prev.nextRetryAtMs) {
+                continue;
+            }
+            // 清假 loaded，否则 load() 永久早退
+            if (typeof loader.unload === 'function') {
+                loader.unload(url);
+            } else {
+                const asset = loader._urlToAsset?.get(url);
+                if (asset) {
+                    asset.loaded = false;
+                    asset.loading = false;
+                }
+                loader._currentlyLoading?.delete(url);
+                loader._retryCount?.delete(url);
+            }
+            prev.phase = 'retrying';
+            retried = true;
+            continue;
+        }
+
+        if (!isExhaustedFailedAsset(loader, url)) {
+            continue;
+        }
+
+        // 引擎耗尽：首次或 retrying 后又挂
+        const outerAttempts = (prev?.outerAttempts ?? 0) + 1;
+        const permanent = outerAttempts >= T.downloadFail.maxOuterAttempts;
+        const backoffIdx = Math.min(outerAttempts - 1, T.downloadFail.backoffMs.length - 1);
+        failures.set(fi, {
+            outerAttempts,
+            nextRetryAtMs: permanent
+                ? Number.POSITIVE_INFINITY
+                : nowMs + T.downloadFail.backoffMs[backoffIdx],
+            permanent,
+            phase: permanent ? 'permanent' : 'backoff'
+        });
+    }
+
+    return retried;
+}
 
 type OctreeLike = {
     nodes: OctreeNode[];
@@ -262,12 +406,32 @@ type PrioritizedBatch = {
     /** 引擎差归因：其余（含中央仍粗等） */
     lodMismatchOther: number;
     /**
-     * 中央区仍粗于引擎目标的 node 数（current > engineOptimal，或引擎目标尚未生成）。
-     * 首屏完成 / Refine 100% 必须此值为 0；边缘放宽不计入。
+     * 中央区仍粗于 / 等待引擎目标的 node 数（诊断 / HUD ctr↓）。
+     * 含 engineOptimal<0；不含「引擎要了某档但该叶无文件」。
+     * 首屏收条改看 clear/target 比例，不再要求本值归零。
      */
     centerEngineBehindNodes: number;
+    /** 其中：中央已上屏但引擎尚未写出 optimalLod */
+    centerBehindNoEngine: number;
+    /** 中央可统计叶（已上屏且引擎目标档有文件） */
+    centerTargetNodes: number;
+    /** 其中 currentLod ≤ engineOptimal（细档已下并上屏） */
+    centerClearNodes: number;
+    /** ctr↓ 样本（最多 3）：便于定位是哪一叶 */
+    centerBehindSamples: CenterBehindSample[];
     needsLodSwitch: boolean;
     staleLodNodes: number;
+};
+
+export type CenterBehindSample = {
+    nodeIndex: number;
+    currentLod: number;
+    engineOptimalLod: number;
+    edgeFactor: number;
+    targetLod: number;
+    fileIndex: number;
+    fileLoaded: boolean;
+    reason: 'no_engine' | 'coarser';
 };
 
 export type LodPlacementParams = {
@@ -1216,10 +1380,18 @@ function dedupeByFileIndex(files: PrioritizedFile[]): PrioritizedFile[] {
     return out;
 }
 
-function countMissingUniqueFiles(octree: OctreeLike, files: PrioritizedFile[]): number {
+function countMissingUniqueFiles(
+    octree: OctreeLike,
+    files: PrioritizedFile[],
+    options?: { ignoreFile?: (fileIndex: number) => boolean }
+): number {
     let count = 0;
     for (let i = 0; i < files.length; i++) {
-        if (!octree.getFileResource(files[i].fileIndex)) {
+        const fi = files[i].fileIndex;
+        if (options?.ignoreFile?.(fi)) {
+            continue;
+        }
+        if (!octree.getFileResource(fi)) {
             count++;
         }
     }
@@ -1424,12 +1596,17 @@ export type StreamingViewportRefinementStatus = {
     /** 前景仍缺下载的 unique 文件数 */
     pendingNodes: number;
     staleLoadedNodes: number;
-    /** 前景下载且中央已追上 engineOptimal 时为 1；否则未完成 */
+    /** 中央细档上屏比例 clear/target；无 target 时为 0 */
     refinementRatio: number;
     pendingUniqueFiles: number;
     staleLodNodes: number;
     /** 中央区仍粗于 / 等待引擎目标的 node 数 */
     centerEngineBehindNodes: number;
+    /** 中央可统计叶（已上屏且引擎目标档有文件） */
+    centerTargetNodes: number;
+    /** 其中 currentLod ≤ engineOptimal */
+    centerClearNodes: number;
+    /** 全清：pending=0 且 ctr↓=0（benchmark clear；首屏收条用 80% 比例） */
     ready: boolean;
 };
 
@@ -1453,6 +1630,8 @@ export function getStreamingViewportRefinementStatus(
             pendingUniqueFiles: 0,
             staleLodNodes: 0,
             centerEngineBehindNodes: 0,
+            centerTargetNodes: 0,
+            centerClearNodes: 0,
             ready: true
         };
     }
@@ -1468,6 +1647,8 @@ export function getStreamingViewportRefinementStatus(
             pendingUniqueFiles: 0,
             staleLodNodes: 0,
             centerEngineBehindNodes: 0,
+            centerTargetNodes: 0,
+            centerClearNodes: 0,
             ready: false
         };
     }
@@ -1483,18 +1664,24 @@ export function getStreamingViewportRefinementStatus(
     const staleLoaded = batch.staleLoadedNodes;
     const staleLod = batch.staleLodNodes;
     const centerBehind = batch.centerEngineBehindNodes;
+    const centerTarget = batch.centerTargetNodes;
+    const centerClear = batch.centerClearNodes;
     const ready = pendingForeground === 0 && centerBehind === 0;
     const needsWork = pendingForeground + staleLod + centerBehind;
+    const refinementRatio =
+        centerTarget > 0 ? Math.max(0, Math.min(1, centerClear / centerTarget)) : ready ? 1 : 0;
 
     return {
         visibleNodes: needsWork,
         refinedNodes: needsWork === 0 ? 1 : 0,
         pendingNodes: pendingForeground,
         staleLoadedNodes: staleLoaded,
-        refinementRatio: ready ? 1 : 0,
+        refinementRatio,
         pendingUniqueFiles: pendingUnique,
         staleLodNodes: staleLod,
         centerEngineBehindNodes: centerBehind,
+        centerTargetNodes: centerTarget,
+        centerClearNodes: centerClear,
         ready
     };
 }
@@ -1508,9 +1695,20 @@ export function syncStreamingOctreePlacements(scene: OctreeStreamingScene): numb
 
 function buildPriorityFiles(
     ctx: RefinementEvaluateContext,
-    options?: { pendingBacklog?: boolean }
+    options?: {
+        pendingBacklog?: boolean;
+        /** 下载失败/backoff：不计入 pending；永久失败时中央追档也不堵完成 */
+        downloadFailures?: DownloadFailMap;
+    }
 ): PrioritizedBatch {
     const pendingBacklog = options?.pendingBacklog === true;
+    const downloadFailures = options?.downloadFailures;
+    const isFailBlocked = (fi: number) =>
+        downloadFailBlocksPending(downloadFailures?.get(fi));
+    const isPermanentFail = (fi: number) => {
+        const e = downloadFailures?.get(fi);
+        return !!(e?.permanent || e?.phase === 'permanent');
+    };
     // jumpSteps 按叶 edgeFactor 在循环内 resolveLadderJumpSteps
     const { scene, gsplat } = ctx;
     // 热更新 lod 参数（align 写回 entity）；下载目标本身只跟 engineOptimal
@@ -1530,6 +1728,10 @@ function buildPriorityFiles(
         lodMismatchViewportEdge: 0,
         lodMismatchOther: 0,
         centerEngineBehindNodes: 0,
+        centerBehindNoEngine: 0,
+        centerTargetNodes: 0,
+        centerClearNodes: 0,
+        centerBehindSamples: [],
         needsLodSwitch: false,
         staleLodNodes: 0
     });
@@ -1576,6 +1778,10 @@ function buildPriorityFiles(
     let lodMismatchViewportEdge = 0;
     let lodMismatchOther = 0;
     let centerEngineBehindNodes = 0;
+    let centerBehindNoEngine = 0;
+    let centerTargetNodes = 0;
+    let centerClearNodes = 0;
+    const centerBehindSamples: CenterBehindSample[] = [];
     const boundsFlat = octree.nodeBoundsMinMax;
 
     for (let nodeIndex = 0; nodeIndex < octree.nodes.length; nodeIndex++) {
@@ -1667,9 +1873,56 @@ function buildPriorityFiles(
         }
 
         const isCenter = edgeFactor >= T.viewport.edgeRelaxOptimal;
-        // 中央完成门槛：须追上 engineOptimal；引擎目标未生成也算未追上（避免假 Refine 100%）
-        if (isCenter && currentLod >= 0 && (engineOptimalLod < 0 || currentLod > engineOptimalLod)) {
-            centerEngineBehindNodes++;
+        // 中央细档上屏统计 + ctr↓ 诊断
+        if (isCenter && currentLod >= 0) {
+            if (engineOptimalLod < 0) {
+                centerBehindNoEngine++;
+                centerEngineBehindNodes++;
+                if (centerBehindSamples.length < 3) {
+                    centerBehindSamples.push({
+                        nodeIndex,
+                        currentLod,
+                        engineOptimalLod,
+                        edgeFactor,
+                        targetLod: -1,
+                        fileIndex: -1,
+                        fileLoaded: false,
+                        reason: 'no_engine'
+                    });
+                }
+            } else {
+                const engineFi = node.lods[engineOptimalLod]?.fileIndex ?? -1;
+                if (engineFi < 0) {
+                    // 无档文件：不计入 target（无法追）
+                } else if (currentLod <= engineOptimalLod) {
+                    centerTargetNodes++;
+                    centerClearNodes++;
+                } else if (!isPermanentFail(engineFi)) {
+                    centerTargetNodes++;
+                    centerEngineBehindNodes++;
+                    if (centerBehindSamples.length < 3) {
+                        const jumpSteps = resolveLadderJumpSteps(edgeFactor, pendingBacklog);
+                        const targetLod = computeRefinementTargetLod(
+                            engineOptimalLod,
+                            maxLod,
+                            currentLod,
+                            edgeFactor,
+                            jumpSteps
+                        );
+                        const fi = node.lods[targetLod]?.fileIndex ?? -1;
+                        centerBehindSamples.push({
+                            nodeIndex,
+                            currentLod,
+                            engineOptimalLod,
+                            edgeFactor,
+                            targetLod,
+                            fileIndex: fi,
+                            fileLoaded: fi >= 0 && !!octree.getFileResource(fi),
+                            reason: 'coarser'
+                        });
+                    }
+                }
+            }
         }
 
         // 下载目标唯一来源：engineOptimal；未生成则本叶本帧不建队
@@ -1691,16 +1944,22 @@ function buildPriorityFiles(
             continue;
         }
 
+        const fi = node.lods[targetLod]?.fileIndex ?? -1;
+        // 无对应档文件 / 永久失败：无法升档，不计 stale、不建队
+        if (fi < 0 || isPermanentFail(fi)) {
+            continue;
+        }
+
         needsLodSwitch = true;
         if (currentLod < 0 || currentLod > targetLod) {
             staleLodNodes++;
         }
 
-        const fi = node.lods[targetLod]?.fileIndex ?? -1;
         const ladderBoost = computeLadderScoreBoost(maxLod, currentLod, targetLod);
-        if (fi !== -1 && octree.getFileResource(fi)) {
+        if (octree.getFileResource(fi)) {
             staleLoadedNodes++;
-        } else if (fi !== -1) {
+        } else {
+            // backoff 仍进候选，便于到期后外层重试；pending 计数侧 ignore
             const edgeWeight = Math.pow(edgeFactor, T.viewport.centerScorePower);
             prioritized.push({ fileIndex: fi, score: score * edgeWeight * ladderBoost });
         }
@@ -1710,11 +1969,18 @@ function buildPriorityFiles(
     const uniqueFiles = dedupeByFileIndex(prioritized);
     const criticalFiles = uniqueFiles.slice(0, T.loader.criticalLimit);
     const foregroundFiles = uniqueFiles.slice(0, T.loader.foregroundLimit);
+    const ignoreFailPending = (fileIndex: number) => isFailBlocked(fileIndex);
     return {
         files: uniqueFiles,
-        pendingUniqueFiles: countMissingUniqueFiles(octree, uniqueFiles),
-        foregroundPendingUnique: countMissingUniqueFiles(octree, foregroundFiles),
-        criticalPendingUnique: countMissingUniqueFiles(octree, criticalFiles),
+        pendingUniqueFiles: countMissingUniqueFiles(octree, uniqueFiles, {
+            ignoreFile: ignoreFailPending
+        }),
+        foregroundPendingUnique: countMissingUniqueFiles(octree, foregroundFiles, {
+            ignoreFile: ignoreFailPending
+        }),
+        criticalPendingUnique: countMissingUniqueFiles(octree, criticalFiles, {
+            ignoreFile: ignoreFailPending
+        }),
         staleLoadedNodes,
         lodDisplayMismatch,
         lodMismatchEdgeRelax,
@@ -1722,6 +1988,10 @@ function buildPriorityFiles(
         lodMismatchViewportEdge,
         lodMismatchOther,
         centerEngineBehindNodes,
+        centerBehindNoEngine,
+        centerTargetNodes,
+        centerClearNodes,
+        centerBehindSamples,
         needsLodSwitch,
         staleLodNodes
     };
@@ -1823,8 +2093,19 @@ export type OctreeRefinementTickMetrics = {
     lodMismatchFiner: number;
     lodMismatchViewportEdge: number;
     lodMismatchOther: number;
-    /** 中央区仍粗于 / 等待 engineOptimal 的 node 数 */
+    /** 中央区仍粗于 / 等待 engineOptimal 的 node 数（堵收条；含无引擎目标） */
     centerEngineBehindNodes: number;
+    /** 其中 engineOptimal 尚未写出的中央叶数（诊断） */
+    centerBehindNoEngine: number;
+    /** 中央可统计叶 / 已追上 engineOptimal */
+    centerTargetNodes: number;
+    centerClearNodes: number;
+    /** ctr↓ 样本 */
+    centerBehindSamples: CenterBehindSample[];
+    /** 引擎重试耗尽后的失败文件：backoff 中 + 永久 */
+    downloadFailed: number;
+    downloadBackoff: number;
+    downloadPermanent: number;
     /** 本拍 ladder 是否因前景积压启用边缘跳档加成 */
     ladderBacklog: boolean;
     /** 视野中央跳档数（连贯） */
@@ -1892,6 +2173,11 @@ export function createOctreeRefinementController(
 
     if (octree.assetLoader) {
         patchAssetLoaderPriority(octree.assetLoader);
+        if (typeof octree.assetLoader.maxRetries === 'number') {
+            octree.assetLoader.maxRetries = T.downloadFail.engineMaxRetries;
+        } else {
+            octree.assetLoader.maxRetries = T.downloadFail.engineMaxRetries;
+        }
     }
     patchEnsureFileResourceGate(octree);
 
@@ -1910,6 +2196,7 @@ export function createOctreeRefinementController(
         pinned: new Set<number>(),
         lastUrls: [] as string[]
     };
+    const downloadFailures: DownloadFailMap = new Map();
     const settle = {
         framesRemaining: 0,
         hadOptimal: false,
@@ -1942,6 +2229,8 @@ export function createOctreeRefinementController(
         pendingUniqueFiles: 0,
         staleLodNodes: 0,
         centerEngineBehindNodes: 0,
+        centerTargetNodes: 0,
+        centerClearNodes: 0,
         ready: false
     };
     let lastTickMetrics: OctreeRefinementTickMetrics | null = null;
@@ -2068,6 +2357,7 @@ export function createOctreeRefinementController(
             events.off('performanceMode:changed', perfModeHandler);
             perfModeHandler = null;
         }
+        downloadFailures.clear();
     };
 
     const emitRefinementActivity = (activity: OctreeRefinementActivity) => {
@@ -2090,9 +2380,9 @@ export function createOctreeRefinementController(
             prevPending.stableForeground >= T.ladder.backlogPending;
         const {
             files: batch,
-            pendingUniqueFiles,
-            foregroundPendingUnique,
-            criticalPendingUnique,
+            pendingUniqueFiles: pendingUniqueFilesRaw,
+            foregroundPendingUnique: foregroundPendingUniqueRaw,
+            criticalPendingUnique: criticalPendingUniqueRaw,
             staleLoadedNodes,
             lodDisplayMismatch,
             lodMismatchEdgeRelax,
@@ -2100,9 +2390,16 @@ export function createOctreeRefinementController(
             lodMismatchViewportEdge,
             lodMismatchOther,
             centerEngineBehindNodes,
+            centerBehindNoEngine,
+            centerTargetNodes,
+            centerClearNodes,
+            centerBehindSamples,
             needsLodSwitch,
             staleLodNodes
-        } = buildPriorityFiles(evalCtx, { pendingBacklog });
+        } = buildPriorityFiles(evalCtx, { pendingBacklog, downloadFailures });
+        let pendingUniqueFiles = pendingUniqueFilesRaw;
+        let foregroundPendingUnique = foregroundPendingUniqueRaw;
+        let criticalPendingUnique = criticalPendingUniqueRaw;
         scanMs = performance.now() - scanStartMs;
         traverseStats.leavesEvaluatedLast = batch.length;
         traverseStats.lastScanMode = 'full';
@@ -2111,19 +2408,59 @@ export function createOctreeRefinementController(
         const trackedStartMs = performance.now();
         updateTrackedMissingFiles(prefetch.tracked, batch, octree);
         trackedMs = performance.now() - trackedStartMs;
+        const ignoreFailPending = (fileIndex: number) =>
+            downloadFailBlocksPending(downloadFailures.get(fileIndex));
         const stableForeground = buildBatchFromTracked(prefetch.tracked, T.loader.foregroundLimit);
         const stableCritical = buildBatchFromTracked(prefetch.tracked, T.loader.criticalLimit);
         const criticalBatch = stableCritical;
         const foregroundBatch = stableForeground;
         const activeBatch = foregroundBatch;
-        const stableForegroundPending = countMissingUniqueFiles(octree, stableForeground);
-        const stableCriticalPending = countMissingUniqueFiles(octree, stableCritical);
+
+        const nowMs = performance.now();
+        const reconcileIndices: number[] = [];
+        for (let i = 0; i < activeBatch.length; i++) {
+            reconcileIndices.push(activeBatch[i].fileIndex);
+        }
+        for (let i = 0; i < batch.length; i++) {
+            reconcileIndices.push(batch[i].fileIndex);
+        }
+        for (const fi of downloadFailures.keys()) {
+            reconcileIndices.push(fi);
+        }
+        reconcileDownloadFailures(octree, octree.assetLoader, reconcileIndices, downloadFailures, nowMs);
+
+        const stableForegroundPending = countMissingUniqueFiles(octree, stableForeground, {
+            ignoreFile: ignoreFailPending
+        });
+        const stableCriticalPending = countMissingUniqueFiles(octree, stableCritical, {
+            ignoreFile: ignoreFailPending
+        });
+        // buildPriorityFiles 时尚未 reconcile 本拍新耗尽；用最新 failures 重算
+        pendingUniqueFiles = countMissingUniqueFiles(octree, batch, {
+            ignoreFile: ignoreFailPending
+        });
+        criticalPendingUnique = countMissingUniqueFiles(octree, criticalBatch, {
+            ignoreFile: ignoreFailPending
+        });
+        foregroundPendingUnique = countMissingUniqueFiles(octree, foregroundBatch, {
+            ignoreFile: ignoreFailPending
+        });
 
         const pendingFileIndices: number[] = [];
         const priorityUrls: string[] = [];
+
         for (let i = 0; i < activeBatch.length; i++) {
             const { fileIndex } = activeBatch[i];
             if (octree.getFileResource(fileIndex)) {
+                downloadFailures.delete(fileIndex);
+                continue;
+            }
+            const fail = downloadFailures.get(fileIndex);
+            if (fail?.permanent || fail?.phase === 'permanent') {
+                continue;
+            }
+            // backoff 未到期：不占下载槽；到期后 reconcile 已切到 retrying
+            if (fail?.phase === 'backoff' && nowMs < fail.nextRetryAtMs) {
                 continue;
             }
             pendingFileIndices.push(fileIndex);
@@ -2267,6 +2604,10 @@ export function createOctreeRefinementController(
         let syncTrigger: RefinementSyncTrigger | null = null;
         const syncStartMs = performance.now();
         let syncMs = 0;
+        const markProgressiveSyncCooldown = () => {
+            // 有剩余 stale 时短间隔继续 drip；无 stale 也无妨（下帧条件不满足）
+            staleSyncCooldown = T.burst.progressiveSyncInterval;
+        };
         if ((cameraJustMoved || cameraBurstActive) && needsLodSwitch) {
             syncTrigger = 'burst_lod_switch';
             syncedInstances = trackSyncOctreePendingPlacements(
@@ -2277,8 +2618,9 @@ export function createOctreeRefinementController(
                 gsplatScene,
                 false
             );
-            staleSyncCooldown = cameraBurstActive ? T.burst.syncCooldown : T.burst.staleSyncIdleFrames;
+            markProgressiveSyncCooldown();
         } else if (needsLodSwitch && fileJustLanded) {
+            // 新文件落地：立刻上屏（不受 cooldown 挡），再进入短 drip
             syncTrigger = 'file_landed_lod';
             syncedInstances = trackSyncOctreePendingPlacements(
                 app,
@@ -2288,6 +2630,7 @@ export function createOctreeRefinementController(
                 gsplatScene,
                 false
             );
+            markProgressiveSyncCooldown();
         } else if (needsLodSwitch && staleLoadedNodes >= T.loader.foregroundLimit) {
             syncTrigger = 'stale_limit';
             syncedInstances = trackSyncOctreePendingPlacements(
@@ -2298,7 +2641,7 @@ export function createOctreeRefinementController(
                 gsplatScene,
                 false
             );
-            staleSyncCooldown = T.burst.syncCooldown;
+            markProgressiveSyncCooldown();
         } else if (needsLodSwitch && staleLoadedNodes > 0 && staleSyncCooldown <= 0) {
             syncTrigger = 'stale_cooldown';
             syncedInstances = trackSyncOctreePendingPlacements(
@@ -2309,7 +2652,7 @@ export function createOctreeRefinementController(
                 gsplatScene,
                 false
             );
-            staleSyncCooldown = T.burst.staleSyncCooldown;
+            markProgressiveSyncCooldown();
         } else if (stableForegroundPending === 0 && staleLodNodes > 0 && fileJustLanded) {
             syncTrigger = 'post_download';
             syncedInstances = trackSyncOctreePendingPlacements(
@@ -2320,6 +2663,7 @@ export function createOctreeRefinementController(
                 gsplatScene,
                 false
             );
+            markProgressiveSyncCooldown();
         }
 
         if (fileJustLanded && syncedInstances === 0 && (staleLoadedNodes > 0 || needsLodSwitch)) {
@@ -2332,6 +2676,7 @@ export function createOctreeRefinementController(
                 gsplatScene,
                 false
             );
+            markProgressiveSyncCooldown();
         }
         if (syncedInstances > 0) {
             syncMs = performance.now() - syncStartMs;
@@ -2392,6 +2737,11 @@ export function createOctreeRefinementController(
                         other: lodMismatchOther
                     },
                     centerEngineBehindNodes,
+                    centerBehindNoEngine,
+                    centerTargetNodes,
+                    centerClearNodes,
+                    centerBehindSamples,
+                    downloadFail: countDownloadFailStats(downloadFailures),
                     needsLodSwitch,
                     staleLodNodes,
                     syncedInstances,
@@ -2433,6 +2783,7 @@ export function createOctreeRefinementController(
         const tickLoader = octree.assetLoader;
         const tickPriorityLoad = countPriorityLoadState(tickLoader, priorityUrls);
         const priorityDownloadsActive = priorityUrls.length > 0;
+        const failStats = countDownloadFailStats(downloadFailures);
         lastTickMetrics = {
             timingsMs: {
                 total: performance.now() - tickStartMs,
@@ -2455,6 +2806,13 @@ export function createOctreeRefinementController(
             lodMismatchViewportEdge,
             lodMismatchOther,
             centerEngineBehindNodes,
+            centerBehindNoEngine,
+            centerTargetNodes,
+            centerClearNodes,
+            centerBehindSamples,
+            downloadFailed: failStats.downloadFailed,
+            downloadBackoff: failStats.downloadBackoff,
+            downloadPermanent: failStats.downloadPermanent,
             ladderBacklog: pendingBacklog,
             ladderCenterJumpSteps: T.ladder.centerJumpSteps,
             ladderEdgeJumpSteps: pendingBacklog
@@ -2498,15 +2856,23 @@ export function createOctreeRefinementController(
             stableForegroundPending === 0 && centerEngineBehindNodes === 0;
         const needsWork =
             stableForegroundPending + staleLodNodes + centerEngineBehindNodes;
+        const refinementRatio =
+            centerTargetNodes > 0
+                ? Math.max(0, Math.min(1, centerClearNodes / centerTargetNodes))
+                : ready
+                    ? 1
+                    : 0;
         lastStreamingRefinementStatus = {
             visibleNodes: needsWork,
             refinedNodes: needsWork === 0 ? 1 : 0,
             pendingNodes: stableForegroundPending,
             staleLoadedNodes,
-            refinementRatio: ready ? 1 : 0,
+            refinementRatio,
             pendingUniqueFiles: pendingUniqueFiles,
             staleLodNodes,
             centerEngineBehindNodes,
+            centerTargetNodes,
+            centerClearNodes,
             ready
         };
 
@@ -2545,6 +2911,7 @@ export function createOctreeRefinementController(
             prefetch.pinned.clear();
             prefetch.tracked.clear();
             prefetch.lastUrls = [];
+            downloadFailures.clear();
             prevPending.staleLodNodes = -1;
             prevPending.stableForeground = -1;
             staleSyncCooldown = 0;

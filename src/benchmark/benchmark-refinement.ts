@@ -954,7 +954,24 @@ export function renderRefinementTickMetricsHtml(metrics: OctreeRefinementTickMet
             'Stale LOD',
             `${metrics.staleLodNodes}待升 · ${metrics.staleLoadedNodes}已下未上 · ${metrics.lodDisplayMismatch}引擎差` +
                 ` (放宽${metrics.lodMismatchEdgeRelax}/更细${metrics.lodMismatchFiner}` +
-                `/外缘${metrics.lodMismatchViewportEdge}/其它${metrics.lodMismatchOther}) · ctr↓${metrics.centerEngineBehindNodes}`
+                `/外缘${metrics.lodMismatchViewportEdge}/其它${metrics.lodMismatchOther})` +
+                ` · ctr↓${metrics.centerEngineBehindNodes}` +
+                (metrics.centerBehindNoEngine > 0 ? `(无引擎${metrics.centerBehindNoEngine})` : '') +
+                (metrics.centerTargetNodes > 0
+                    ? ` · 细档${metrics.centerClearNodes}/${metrics.centerTargetNodes}`
+                    : '') +
+                (metrics.centerBehindSamples?.length
+                    ? ` [${metrics.centerBehindSamples
+                        .map((s) =>
+                            s.reason === 'no_engine'
+                                ? `n${s.nodeIndex}:cur${s.currentLod}/eng-`
+                                : `n${s.nodeIndex}:cur${s.currentLod}→eng${s.engineOptimalLod}` +
+                                  (s.fileIndex >= 0
+                                      ? ` f${s.fileIndex}${s.fileLoaded ? '✓' : '✗'}`
+                                      : '')
+                        )
+                        .join(' · ')}]`
+                    : '')
         ),
         row(
             'Ladder',
@@ -969,6 +986,9 @@ export function renderRefinementTickMetricsHtml(metrics: OctreeRefinementTickMet
             `${metrics.inFlight} fly · q${metrics.queueLen} · susp ${metrics.suspended}` +
                 (metrics.priorityDownloadsActive && metrics.staleInFlight > 0
                     ? ` · stale ${metrics.staleInFlight}`
+                    : '') +
+                (metrics.downloadFailed > 0
+                    ? ` · fail ${metrics.downloadFailed}(backoff ${metrics.downloadBackoff}/perm ${metrics.downloadPermanent})`
                     : '')
         )
     ];

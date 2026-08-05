@@ -28,6 +28,7 @@ const FPS_WINDOW = 120;
 const POSE_DECIMALS = 2;
 /** 观测 HUD 刷新间隔；避免每帧重写 DOM 污染 FPS */
 const HUD_REFRESH_MS = 250;
+const COLLAPSED_STORAGE_KEY = 'benchmark-hud-collapsed';
 
 type ViewerLike = {
     octreeRefinementController?: OctreeRefinementController | null;
@@ -107,6 +108,8 @@ function readRefinementLight(global: Global): {
     ratio: number;
     ready: boolean;
     centerBehind: number;
+    centerClear: number;
+    centerTarget: number;
     activityActive: boolean;
 } | null {
     const controller = (global.app as { viewer?: ViewerLike }).viewer?.octreeRefinementController;
@@ -120,6 +123,8 @@ function readRefinementLight(global: Global): {
             ratio: snapshot.refinementRatio,
             ready: snapshot.ready,
             centerBehind: 0,
+            centerClear: 0,
+            centerTarget: 0,
             activityActive: false
         };
     }
@@ -129,6 +134,8 @@ function readRefinementLight(global: Global): {
         ratio: status.refinementRatio,
         ready: status.ready,
         centerBehind: status.centerEngineBehindNodes ?? 0,
+        centerClear: status.centerClearNodes ?? 0,
+        centerTarget: status.centerTargetNodes ?? 0,
         activityActive: controller.getActivity().active
     };
 }
@@ -160,11 +167,12 @@ function formatWbBlocks(uploadedBlocks: number, totalBlocks: number, copyPct: nu
 }
 
 export function ensureBenchmarkHudStyles() {
-    if (document.getElementById('benchmark-hud-style')) {
-        return;
+    let style = document.getElementById('benchmark-hud-style') as HTMLStyleElement | null;
+    if (!style) {
+        style = document.createElement('style');
+        style.id = 'benchmark-hud-style';
+        document.head.appendChild(style);
     }
-    const style = document.createElement('style');
-    style.id = 'benchmark-hud-style';
     style.textContent = `
 #${HUD_ID} {
     position: fixed;
@@ -183,7 +191,47 @@ export function ensureBenchmarkHudStyles() {
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
     backdrop-filter: blur(6px);
 }
-#${HUD_ID} .benchmark-hud-title { font-weight: 600; margin-bottom: 6px; color: #fff; }
+#${HUD_ID}.is-collapsed {
+    min-width: 0;
+    max-width: none;
+    padding: 6px 8px;
+}
+#${HUD_ID} .benchmark-hud-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+    pointer-events: auto;
+}
+#${HUD_ID}.is-collapsed .benchmark-hud-header { margin-bottom: 0; }
+#${HUD_ID} .benchmark-hud-title {
+    flex: 1;
+    min-width: 0;
+    font-weight: 600;
+    color: #fff;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#${HUD_ID} .benchmark-hud-collapse {
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #e8ecf1;
+    font: 11px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    cursor: pointer;
+}
+#${HUD_ID} .benchmark-hud-collapse:hover { background: rgba(255, 255, 255, 0.14); }
+#${HUD_ID} .benchmark-hud-collapse:focus-visible {
+    outline: 1px solid #22d3ee;
+    outline-offset: 1px;
+}
+#${HUD_ID}.is-collapsed .benchmark-hud-body { display: none; }
 #${HUD_ID} .benchmark-hud-row { display: flex; justify-content: space-between; gap: 12px; }
 #${HUD_ID} .benchmark-hud-label { color: rgba(255, 255, 255, 0.55); }
 #${HUD_ID} .benchmark-hud-value { text-align: right; color: #f3f6fa; }
@@ -219,7 +267,6 @@ export function ensureBenchmarkHudStyles() {
     margin-top: 4px; text-align: center; color: #86efac; font-size: 11px;
 }
 `;
-    document.head.appendChild(style);
 }
 
 export function initBenchmarkHud(global: Global): () => void {
@@ -238,24 +285,62 @@ export function initBenchmarkHud(global: Global): () => void {
         ? `Benchmark · ${config.benchmarkLabel ?? 'run'}`
         : 'Perf HUD';
 
+    const readCollapsed = (): boolean => {
+        try {
+            return sessionStorage.getItem(COLLAPSED_STORAGE_KEY) === '1';
+        } catch {
+            return false;
+        }
+    };
+    const writeCollapsed = (collapsed: boolean) => {
+        try {
+            sessionStorage.setItem(COLLAPSED_STORAGE_KEY, collapsed ? '1' : '0');
+        } catch {
+            /* ignore quota / private mode */
+        }
+    };
+
     root.innerHTML = `
-        <div class="benchmark-hud-title">${title}</div>
-        <div class="benchmark-hud-progress"><div class="benchmark-hud-progress-bar" id="benchmark-hud-progress-bar"></div></div>
-        <div id="benchmark-hud-rows"></div>
-        <div id="benchmark-hud-refinement-section"></div>
-        <div id="benchmark-hud-blur-section"></div>
-        <div class="benchmark-hud-actions">
-            <button type="button" class="benchmark-hud-copy-pose" id="benchmark-hud-copy-pose">复制相机位姿</button>
-            <div class="benchmark-hud-copy-toast" id="benchmark-hud-copy-toast" hidden></div>
+        <div class="benchmark-hud-header">
+            <div class="benchmark-hud-title" id="benchmark-hud-title">${title}</div>
+            <button type="button" class="benchmark-hud-collapse" id="benchmark-hud-collapse" aria-expanded="true" aria-controls="benchmark-hud-body" title="折叠">▾</button>
+        </div>
+        <div class="benchmark-hud-body" id="benchmark-hud-body">
+            <div class="benchmark-hud-progress"><div class="benchmark-hud-progress-bar" id="benchmark-hud-progress-bar"></div></div>
+            <div id="benchmark-hud-rows"></div>
+            <div id="benchmark-hud-refinement-section"></div>
+            <div id="benchmark-hud-blur-section"></div>
+            <div class="benchmark-hud-actions">
+                <button type="button" class="benchmark-hud-copy-pose" id="benchmark-hud-copy-pose">复制相机位姿</button>
+                <div class="benchmark-hud-copy-toast" id="benchmark-hud-copy-toast" hidden></div>
+            </div>
         </div>
     `;
 
+    const titleEl = root.querySelector('#benchmark-hud-title') as HTMLDivElement;
+    const collapseBtn = root.querySelector('#benchmark-hud-collapse') as HTMLButtonElement;
     const progressBar = root.querySelector('#benchmark-hud-progress-bar') as HTMLDivElement;
     const rowsEl = root.querySelector('#benchmark-hud-rows') as HTMLDivElement;
     const refinementSectionEl = root.querySelector('#benchmark-hud-refinement-section') as HTMLDivElement;
     const blurSectionEl = root.querySelector('#benchmark-hud-blur-section') as HTMLDivElement;
     const copyPoseBtn = root.querySelector('#benchmark-hud-copy-pose') as HTMLButtonElement;
     const copyToastEl = root.querySelector('#benchmark-hud-copy-toast') as HTMLDivElement;
+
+    const applyCollapsed = (collapsed: boolean) => {
+        root.classList.toggle('is-collapsed', collapsed);
+        collapseBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        collapseBtn.setAttribute('aria-label', collapsed ? '展开 Perf HUD' : '折叠 Perf HUD');
+        collapseBtn.title = collapsed ? '展开' : '折叠';
+        collapseBtn.textContent = collapsed ? '▸' : '▾';
+        titleEl.title = collapsed ? `${title}（点击 ▸ 展开）` : title;
+        writeCollapsed(collapsed);
+    };
+    applyCollapsed(readCollapsed());
+
+    const onCollapseClick = () => {
+        applyCollapsed(!root.classList.contains('is-collapsed'));
+    };
+    collapseBtn.addEventListener('click', onCollapseClick);
 
     let copyToastTimer: ReturnType<typeof setTimeout> | null = null;
     const showCopyToast = (message: string, ok: boolean) => {
@@ -503,9 +588,13 @@ export function initBenchmarkHud(global: Global): () => void {
         if (refine) {
             const activityHint = refine.activityActive ? ' · dl' : '';
             const behindHint = refine.centerBehind > 0 ? ` · ctr↓${refine.centerBehind}` : '';
+            const fineHint =
+                refine.centerTarget > 0
+                    ? ` · 细档${refine.centerClear}/${refine.centerTarget}`
+                    : '';
             lines.push(row(
                 'Refine',
-                `${(refine.ratio * 100).toFixed(0)}% · pending ${refine.pending}${behindHint}${activityHint}`
+                `${(refine.ratio * 100).toFixed(0)}% · pending ${refine.pending}${fineHint}${behindHint}${activityHint}`
             ));
         }
 
@@ -557,6 +646,7 @@ export function initBenchmarkHud(global: Global): () => void {
     return () => {
         window.clearInterval(hudTimer);
         app.off('frameend', onFrameEndBufferSample);
+        collapseBtn.removeEventListener('click', onCollapseClick);
         if (copyToastTimer) {
             clearTimeout(copyToastTimer);
         }
