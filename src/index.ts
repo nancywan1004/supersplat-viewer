@@ -420,20 +420,9 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     // to select the engine's WebGPU renderer instead of staying on CPU sort.
     bindGsplatRenderer(app.scene.gsplat as unknown as GsplatSceneRuntime, global);
 
+    // 加载期相机锁：仅进度条真正收起（progressThresholdReached）后解锁。
+    // 勿绑 streamingLodUnlocked / firstFrame——粗层上屏就会提前可拖，与进度条语义不一致。
     events.on('progressThresholdReached', () => {
-        state.loadingCameraControlsLocked = false;
-        events.fire('cameraControls:flushInputs');
-    });
-    // streaming：粗层 unlock / 动画起播时即可交互，勿等细档 pending→0（否则 anim 已播仍锁鼠标）
-    events.on('streamingLodUnlocked', () => {
-        state.loadingCameraControlsLocked = false;
-        events.fire('cameraControls:flushInputs');
-    });
-    events.on('animationStarted', () => {
-        state.loadingCameraControlsLocked = false;
-        events.fire('cameraControls:flushInputs');
-    });
-    events.on('firstFrame', () => {
         state.loadingCameraControlsLocked = false;
         events.fire('cameraControls:flushInputs');
     });

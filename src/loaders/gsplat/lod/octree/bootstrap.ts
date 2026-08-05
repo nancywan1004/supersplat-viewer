@@ -159,20 +159,33 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
     let maxProgress = 0;
     let progressUIHidden = false;
 
+    /*
+     * Streaming 首屏阶段契约（状态优先，不以固定 ms 当清晰度门槛）：
+     * A 0–50%   文件 watermark / 开门禁
+     * B 50–82%   粗档 lodRange，拉视锥粗 SOG；可 readyToRender，输入仍锁
+     * C 82–99%   unlockStreamingLod：放开 lodRange + 距离档 refinement；收条前不可交互
+     * D 收条后   progressThresholdReached 解锁输入
+     *
+     * 收条主路径：有效 tick + 下载收敛 + staleLod===0 + N 帧稳定。
+     * 真空完成：tick 后 pending=0 且 stale=0。
+     * 逃生阀：下载已收敛但 stale 卡住时，按「无进展帧数」escape（非清晰度门槛）。
+     */
     const PROGRESS_THRESHOLD = 50;
     const PROGRESS_COARSE_CAP = 82;
-    /** 未 finalize 前 UI 最高到 99，避免 LOD 在 progress===100 时提前藏条却未解锁输入 */
+    /** 未 finalize 前 UI 最高到 99，避免 progress===100 提前藏条却未发 progressThresholdReached */
     const PROGRESS_REFINEMENT_CAP = 99;
-    /** 视口细档完成比例达到该值即可收起进度条（refinement 后台仍继续） */
+    /** 视口细档下载完成比例达到该值才进入收条候选（仍须 staleLod===0） */
     const STREAMING_REFINEMENT_UI_COMPLETE_RATIO = 0.8;
+    /** 主路径条件连续成立的抗抖帧数（不是「等时间」） */
     const STREAMING_REFINEMENT_STABLE_FRAMES = 10;
     const STREAMING_REFINEMENT_PENDING_SPIKE_FRAMES = 3;
-    const STREAMING_REFINEMENT_STALL_MS = 5000;
     /**
-     * unlock 后若始终未见 foreground pending：给 scan 建队留窗口，避免空队列 ready 秒收条；
-     * 超时仍无 pending 再允许完成（单文件/已齐档场景）。勿用 staleLod 硬门槛（Poland ladder 会卡死）。
+     * 逃生阀：下载已收敛但 stale 长期无进展时的连续无进展帧数。
+     * 仅防 Poland 类卡死，不是清晰度门槛。约 60fps×6s。
      */
-    const STREAMING_REFINEMENT_EMPTY_GRACE_MS = 750;
+    const STREAMING_REFINEMENT_NO_PROGRESS_ESCAPE_FRAMES = 360;
+    /** 逃生阀加强：stale 从未下降时的更长无进展帧数（约 12s@60fps） */
+    const STREAMING_REFINEMENT_NO_PROGRESS_HARD_ESCAPE_FRAMES = 720;
 
     let streamingLodUnlocked = false;
     let streamingPerfHandlerRegistered = false;
@@ -184,10 +197,12 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
     let streamingViewportSyncCooldown = 0;
     let streamingRefinementStableFrames = 0;
     let streamingRefinementPendingSpikeFrames = 0;
-    let streamingRefinementCapReachedAt = 0;
     let streamingRefinementBaselinePending = 0;
     let streamingRefinementPhaseStarted = false;
-    let streamingRefinementUnlockedAt = 0;
+    let streamingRefinementPeakStale = 0;
+    let streamingRefinementNoProgressFrames = 0;
+    let streamingRefinementLastPending = -1;
+    let streamingRefinementLastStale = -1;
     let streamingPreGateKickCooldown = 0;
 
     const streamLastCamPos = new Vec3();
@@ -230,29 +245,118 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         return getStreamingViewportRefinementStatus(scene, streamingViewportOptions());
     };
 
+    const hasValidRefinementTick = (): boolean =>
+        refinementController?.getLastTickMetrics() != null;
+
+    /** 仅度量下载收敛；不含 750ms grace，不含 stale */
     const getStreamingRefinementDoneRatio = (
         refinement: ReturnType<typeof resolveStreamingRefinementStatus>
     ): number => {
-        // 未见 pending 基线：不能把 ready/pending=0 当成完成（unlock 首帧空队列竞态）
         if (streamingRefinementBaselinePending <= 0) {
-            if (
-                streamingLodUnlocked &&
-                refinement.pendingNodes <= 0 &&
-                streamingRefinementUnlockedAt > 0 &&
-                performance.now() - streamingRefinementUnlockedAt >= STREAMING_REFINEMENT_EMPTY_GRACE_MS
-            ) {
-                return 1;
-            }
             return 0;
         }
-        // 完成只看前景下载（stable pending）；不用 staleLod（ladder 大场景会长期 >0 → 卡 100%）
-        if (refinement.ready || refinement.pendingNodes <= 0) {
+        if (refinement.pendingNodes <= 0) {
             return 1;
         }
         return computeStreamingRefinementProgressRatio(
             refinement.pendingNodes,
             streamingRefinementBaselinePending
         );
+    };
+
+    const isVacuumBootstrapComplete = (
+        refinement: ReturnType<typeof resolveStreamingRefinementStatus>
+    ): boolean => {
+        if (!hasValidRefinementTick()) {
+            return false;
+        }
+        if (refinement.pendingNodes > 0 || refinement.staleLodNodes > 0) {
+            return false;
+        }
+        const tick = refinementController?.getLastTickMetrics();
+        // pending/stale 皆 0 时即真空完成；needsLodSwitch 抖动不阻收条
+        return tick != null;
+    };
+
+    const isDownloadConverged = (
+        refinement: ReturnType<typeof resolveStreamingRefinementStatus>
+    ): boolean => {
+        if (streamingRefinementBaselinePending > 0) {
+            return (
+                getStreamingRefinementDoneRatio(refinement) >= STREAMING_REFINEMENT_UI_COMPLETE_RATIO
+            );
+        }
+        // 无 baseline：有效 tick 且 pending===0 → 下载侧无活（含热缓存已齐，只等 stale 消掉）
+        return hasValidRefinementTick() && refinement.pendingNodes <= 0;
+    };
+
+    const isDisplayConverged = (
+        refinement: ReturnType<typeof resolveStreamingRefinementStatus>
+    ): boolean => refinement.staleLodNodes <= 0;
+
+    /** 主路径：有效 tick + 下载收敛 + staleLod===0 */
+    const isBootstrapMainPathReady = (
+        refinement: ReturnType<typeof resolveStreamingRefinementStatus>
+    ): boolean => {
+        if (!hasValidRefinementTick()) {
+            return false;
+        }
+        if (!isDownloadConverged(refinement)) {
+            return false;
+        }
+        return isDisplayConverged(refinement);
+    };
+
+    /**
+     * 逃生阀：下载已收敛但 stale 卡住。
+     * 优先要求 stale 相对峰值已下降；若从未下降则用更长无进展帧数。
+     */
+    const isBootstrapNoProgressEscapeReady = (
+        refinement: ReturnType<typeof resolveStreamingRefinementStatus>
+    ): boolean => {
+        if (!hasValidRefinementTick()) {
+            return false;
+        }
+        if (!isDownloadConverged(refinement)) {
+            return false;
+        }
+        if (refinement.staleLodNodes <= 0) {
+            return false;
+        }
+        if (streamingRefinementPeakStale <= 0) {
+            return false;
+        }
+        const staleImproved = refinement.staleLodNodes < streamingRefinementPeakStale;
+        if (staleImproved) {
+            return (
+                streamingRefinementNoProgressFrames >= STREAMING_REFINEMENT_NO_PROGRESS_ESCAPE_FRAMES
+            );
+        }
+        return (
+            streamingRefinementNoProgressFrames >= STREAMING_REFINEMENT_NO_PROGRESS_HARD_ESCAPE_FRAMES
+        );
+    };
+
+    const trackRefinementProgressForEscape = (
+        refinement: ReturnType<typeof resolveStreamingRefinementStatus>
+    ) => {
+        if (refinement.staleLodNodes > streamingRefinementPeakStale) {
+            streamingRefinementPeakStale = refinement.staleLodNodes;
+        }
+        const pending = refinement.pendingNodes;
+        const stale = refinement.staleLodNodes;
+        const improved =
+            (streamingRefinementLastPending >= 0 && pending < streamingRefinementLastPending) ||
+            (streamingRefinementLastStale >= 0 && stale < streamingRefinementLastStale);
+        if (improved) {
+            streamingRefinementNoProgressFrames = 0;
+        } else if (isDownloadConverged(refinement)) {
+            streamingRefinementNoProgressFrames++;
+        } else {
+            streamingRefinementNoProgressFrames = 0;
+        }
+        streamingRefinementLastPending = pending;
+        streamingRefinementLastStale = stale;
     };
 
     const finalizeStreamingBootstrapDisplay = () => {
@@ -406,12 +510,10 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         }
 
         if (streamingRefinementBaselinePending <= 0) {
-            // grace 未过：停在粗档顶，避免 UI 先跳到 100% 再等 finalize
-            const doneRatio = getStreamingRefinementDoneRatio(refinement);
-            state.progress =
-                doneRatio >= STREAMING_REFINEMENT_UI_COMPLETE_RATIO
-                    ? PROGRESS_REFINEMENT_CAP
-                    : Math.max(state.progress, PROGRESS_COARSE_CAP);
+            // 未见 baseline：真空完成可贴顶，否则停在粗档顶（禁止 750ms 空队列秒收条）
+            state.progress = isVacuumBootstrapComplete(refinement)
+                ? PROGRESS_REFINEMENT_CAP
+                : Math.max(state.progress, PROGRESS_COARSE_CAP);
             return;
         }
 
@@ -420,21 +522,20 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
             1,
             doneRatio / STREAMING_REFINEMENT_UI_COMPLETE_RATIO
         );
-        const refinementProgress =
+        let refinementProgress =
             PROGRESS_COARSE_CAP +
             Math.round(refinementDisplayRatio * (PROGRESS_REFINEMENT_CAP - PROGRESS_COARSE_CAP));
+        // pending 已收敛但 stale 未消：进度可到 99，但不收条（等显示换档）
+        if (
+            doneRatio >= STREAMING_REFINEMENT_UI_COMPLETE_RATIO &&
+            refinement.staleLodNodes > 0
+        ) {
+            refinementProgress = PROGRESS_REFINEMENT_CAP;
+        }
         state.progress = Math.min(
             PROGRESS_REFINEMENT_CAP,
             Math.max(state.progress, refinementProgress)
         );
-        // 进度贴顶即开始 stall 计时，避免 poll 与 pending 抖动错开导致永远无 capReachedAt
-        if (
-            state.progress >= PROGRESS_REFINEMENT_CAP &&
-            streamingLodUnlocked &&
-            !streamingRefinementCapReachedAt
-        ) {
-            streamingRefinementCapReachedAt = performance.now();
-        }
     };
 
     const unlockStreamingLod = () => {
@@ -442,11 +543,14 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
             return;
         }
         streamingLodUnlocked = true;
-        streamingRefinementUnlockedAt = performance.now();
         streamingRefinementBaselinePending = 0;
         streamingRefinementStableFrames = 0;
         streamingRefinementPendingSpikeFrames = 0;
-        streamingRefinementCapReachedAt = 0;
+        streamingRefinementPeakStale = 0;
+        streamingRefinementNoProgressFrames = 0;
+        streamingRefinementLastPending = -1;
+        streamingRefinementLastStale = -1;
+        // Phase C：放开 lodRange，开始 refinement（不等于可交互）
         bindGsplatPerfSettings(gsplat, global);
         const maxLod = octreeResource?.octree?.lodLevels;
         if (maxLod) {
@@ -468,7 +572,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         refinementController?.start();
         onRefinementController(refinementController);
 
-        // 粗层视口已可看：立刻解锁相机输入。进度条仍可等细档 pending，二者解耦。
+        // Phase C 开始：粗层齐、放开 lodRange。不等于可交互（锁仍等 progressThresholdReached）。
         events.fire('streamingLodUnlocked');
     };
 
@@ -531,59 +635,51 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         }
 
         const refinement = resolveStreamingRefinementStatus();
+        if (refinement.pendingNodes > streamingRefinementBaselinePending) {
+            streamingRefinementBaselinePending = refinement.pendingNodes;
+        }
+        trackRefinementProgressForEscape(refinement);
         updateStreamingLoadProgress(
             watermark > 0 ? Math.trunc((current / watermark) * 100) : state.progress
         );
 
-        const refinementDoneRatio = getStreamingRefinementDoneRatio(refinement);
+        const mainReady = isBootstrapMainPathReady(refinement);
+        const escapeReady = isBootstrapNoProgressEscapeReady(refinement);
 
-        if (refinementDoneRatio < STREAMING_REFINEMENT_UI_COMPLETE_RATIO) {
+        if (!mainReady && !escapeReady) {
             streamingRefinementPendingSpikeFrames++;
             if (streamingRefinementPendingSpikeFrames >= STREAMING_REFINEMENT_PENDING_SPIKE_FRAMES) {
                 streamingRefinementStableFrames = 0;
-                // 进度已贴顶后短暂 pending 回升：只清 stable，不清 stall 计时，避免永远到不了 progressThresholdReached
-                if (state.progress < PROGRESS_REFINEMENT_CAP) {
-                    streamingRefinementCapReachedAt = 0;
-                }
             }
-            // 已贴顶且 stall：允许收条解锁（pending 抖动不应永久锁输入）
-            const allowFinalizeDespitePending =
-                streamingLodUnlocked &&
-                state.progress >= PROGRESS_REFINEMENT_CAP &&
-                streamingRefinementCapReachedAt > 0 &&
-                performance.now() - streamingRefinementCapReachedAt >= STREAMING_REFINEMENT_STALL_MS;
-            if (!allowFinalizeDespitePending) {
-                return;
-            }
-        } else {
-            streamingRefinementPendingSpikeFrames = 0;
+            return;
+        }
 
-            if (!streamingRefinementCapReachedAt) {
-                streamingRefinementCapReachedAt = performance.now();
-            }
-
-            streamingRefinementStableFrames++;
-            const refinementStalledAtCap =
-                streamingRefinementCapReachedAt > 0 &&
-                performance.now() - streamingRefinementCapReachedAt >= STREAMING_REFINEMENT_STALL_MS;
-            if (
-                streamingRefinementStableFrames < STREAMING_REFINEMENT_STABLE_FRAMES &&
-                !refinementStalledAtCap
-            ) {
-                return;
-            }
+        streamingRefinementPendingSpikeFrames = 0;
+        streamingRefinementStableFrames++;
+        if (
+            !escapeReady &&
+            streamingRefinementStableFrames < STREAMING_REFINEMENT_STABLE_FRAMES
+        ) {
+            return;
         }
 
         if (!progressUIHidden) {
             if (!streamingLodUnlocked) {
                 streamingRefinementStableFrames = 0;
-                streamingRefinementCapReachedAt = 0;
                 return;
             }
             progressUIHidden = true;
             state.progress = 100;
+            // Phase D：收条 + 解锁输入（progressThresholdReached）
             finalizeStreamingBootstrapDisplay();
             events.fire('progressThresholdReached', 100);
+            if (escapeReady && !mainReady) {
+                console.warn(
+                    'Streaming octree: bootstrap finalize via no-progress escape',
+                    `pending ${refinement.pendingNodes}, staleLod ${refinement.staleLodNodes}`,
+                    `peakStale ${streamingRefinementPeakStale}, noProgressFrames ${streamingRefinementNoProgressFrames}`
+                );
+            }
         }
 
         if (
@@ -601,7 +697,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         state.progress = 100;
         events.fire('animationStarted');
         console.log(
-            'Streaming octree: viewport refinement downloads ready',
+            'Streaming octree: viewport refinement ready',
             `foreground pending ${refinement.pendingNodes}`,
             `staleLod ${refinement.staleLodNodes}, starting animation`
         );
