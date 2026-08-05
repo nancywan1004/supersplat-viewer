@@ -68,7 +68,7 @@ const T = {
         centerJumpSteps: 1,
         /** 视野边缘：正常跳档 */
         edgeJumpSteps: 2,
-        /** 视野边缘且前景积压时跳档 */
+        /** 视野边缘且前景积压时跳档；极大值≈直达目标档 */
         edgeBacklogJumpSteps: 3
     },
     burst: {
@@ -80,6 +80,87 @@ const T = {
         staleSyncIdleFrames: 12
     }
 } as const;
+
+/** URL `?ladder=center,edge,backlog` 覆盖；backlog=`target` 表示积压边缘直达目标档 */
+type LadderJumpOverride = {
+    centerJumpSteps: number;
+    edgeJumpSteps: number;
+    /** null = 直达目标（jumpSteps 用极大值） */
+    edgeBacklogJumpSteps: number | null;
+};
+
+let ladderJumpOverride: LadderJumpOverride | null = null;
+/** 上次解析的 `?ladder=` 原文；同页换 URL 时需重解析（warm start） */
+let ladderJumpOverrideRaw: string | null | undefined;
+
+function parseLadderJumpOverride(): LadderJumpOverride | null {
+    let raw: string | null = null;
+    try {
+        raw = new URLSearchParams(window.location.search).get('ladder');
+    } catch {
+        raw = null;
+    }
+    if (raw === ladderJumpOverrideRaw) {
+        return ladderJumpOverride;
+    }
+    ladderJumpOverrideRaw = raw;
+    if (!raw) {
+        ladderJumpOverride = null;
+        return null;
+    }
+    try {
+        const parts = raw.split(',').map((s) => s.trim());
+        if (parts.length < 3) {
+            console.warn('[octree-refinement] ladder URL 需 3 段：center,edge,backlog 例如 2,3,target');
+            ladderJumpOverride = null;
+            return null;
+        }
+        const center = Number(parts[0]);
+        const edge = Number(parts[1]);
+        const backlogRaw = parts[2].toLowerCase();
+        const backlogTarget = backlogRaw === 'target' || backlogRaw === 'max';
+        const backlog = backlogTarget ? null : Number(backlogRaw);
+        if (!Number.isFinite(center) || center < 1 || !Number.isFinite(edge) || edge < 1) {
+            console.warn('[octree-refinement] ladder center/edge 须为正整数', raw);
+            ladderJumpOverride = null;
+            return null;
+        }
+        if (!backlogTarget && (!Number.isFinite(backlog) || (backlog as number) < 1)) {
+            console.warn('[octree-refinement] ladder backlog 须为正整数或 target', raw);
+            ladderJumpOverride = null;
+            return null;
+        }
+        ladderJumpOverride = {
+            centerJumpSteps: Math.floor(center),
+            edgeJumpSteps: Math.floor(edge),
+            edgeBacklogJumpSteps: backlogTarget ? null : Math.floor(backlog as number)
+        };
+        console.info('[octree-refinement] ladder override', {
+            ...ladderJumpOverride,
+            edgeBacklogJumpSteps: backlogTarget ? 'target' : ladderJumpOverride.edgeBacklogJumpSteps
+        });
+        return ladderJumpOverride;
+    } catch {
+        ladderJumpOverride = null;
+        return null;
+    }
+}
+
+function resolveLadderCenterJumpSteps(): number {
+    return parseLadderJumpOverride()?.centerJumpSteps ?? T.ladder.centerJumpSteps;
+}
+
+function resolveLadderEdgeJumpSteps(pendingBacklog: boolean): number {
+    const ov = parseLadderJumpOverride();
+    if (!ov) {
+        return pendingBacklog ? T.ladder.edgeBacklogJumpSteps : T.ladder.edgeJumpSteps;
+    }
+    if (!pendingBacklog) {
+        return ov.edgeJumpSteps;
+    }
+    // null = 直达目标：用足够大的步数，由 computeRefinementTargetLod 的 max(relaxed, current-steps) 落到目标
+    return ov.edgeBacklogJumpSteps ?? 64;
+}
 
 export const STREAMING_VIEWPORT_READY_RATIO = 1;
 
@@ -171,7 +252,7 @@ type PrioritizedBatch = {
     criticalPendingUnique: number;
     /** 文件已下完但仍在显示粗层的 node 数 */
     staleLoadedNodes: number;
-    /** 引擎 currentLod 与 budget 后 optimalLod 不一致的 node 数（抖动诊断） */
+    /** 视锥内 currentLod ≠ engine optimalLod 的 node 数（抖动诊断；不含视锥外） */
     lodDisplayMismatch: number;
     needsLodSwitch: boolean;
     staleLodNodes: number;
@@ -1120,27 +1201,24 @@ function computeRefinementTargetLod(
     return relaxedTarget;
 }
 
-/** 中央 jump=1 连贯；边缘 2，积压时边缘 3 */
+/** 中央 jump；边缘 2/积压 3（或 URL ladder 覆盖） */
 function resolveLadderJumpSteps(edgeFactor: number, pendingBacklog: boolean): number {
     if (edgeFactor >= T.viewport.edgeRelaxOptimal) {
-        return T.ladder.centerJumpSteps;
+        return resolveLadderCenterJumpSteps();
     }
-    return pendingBacklog ? T.ladder.edgeBacklogJumpSteps : T.ladder.edgeJumpSteps;
+    return resolveLadderEdgeJumpSteps(pendingBacklog);
 }
 
 /**
- * 下载目标：距离档 + 引擎预算钳制（不得比 engineOptimal 更细）。
- * lod 越大越粗。投影密度变粗已关闭。
+ * 下载目标：以引擎 budget 平衡后的 optimalLod 为准；raw 仅在引擎目标尚未生成时兜底。
+ * lod 越大越粗。不可用 Math.max(raw, engine)：高预算时 engine 更细会被 raw 封顶。
+ * 不可用 Math.min：低预算时会继续请求超预算细档。
  */
 function resolveDownloadOptimalLod(
     rawOptimalLod: number,
     engineOptimalLod: number
 ): number {
-    let lod = rawOptimalLod;
-    if (engineOptimalLod >= 0) {
-        lod = Math.max(lod, engineOptimalLod);
-    }
-    return lod;
+    return engineOptimalLod >= 0 ? engineOptimalLod : rawOptimalLod;
 }
 
 function computeLadderScoreBoost(
@@ -1571,9 +1649,6 @@ function buildPriorityFiles(
         const nodeInfo = nodeInfos?.[nodeIndex];
         const currentLod = nodeInfo?.currentLod ?? -1;
         const engineOptimalLod = nodeInfo?.optimalLod ?? -1;
-        if (currentLod >= 0 && engineOptimalLod >= 0 && currentLod !== engineOptimalLod) {
-            lodDisplayMismatch++;
-        }
         const node = octree.nodes[nodeIndex];
 
         const score = scoreVisibleNode(
@@ -1589,6 +1664,11 @@ function buildPriorityFiles(
         );
         if (score <= 0) {
             continue;
+        }
+
+        // 仅视锥内（score>0）计入引擎差，避免视锥外节点把诊断数撑到数百
+        if (currentLod >= 0 && engineOptimalLod >= 0 && currentLod !== engineOptimalLod) {
+            lodDisplayMismatch++;
         }
 
         const edgeFactor = computeViewportAabbEdgeFactor(
