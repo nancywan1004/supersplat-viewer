@@ -106,6 +106,7 @@ function readRefinementLight(global: Global): {
     pending: number;
     ratio: number;
     ready: boolean;
+    centerBehind: number;
     activityActive: boolean;
 } | null {
     const controller = (global.app as { viewer?: ViewerLike }).viewer?.octreeRefinementController;
@@ -118,6 +119,7 @@ function readRefinementLight(global: Global): {
             pending: snapshot.pendingNodes,
             ratio: snapshot.refinementRatio,
             ready: snapshot.ready,
+            centerBehind: 0,
             activityActive: false
         };
     }
@@ -126,6 +128,7 @@ function readRefinementLight(global: Global): {
         pending: status.pendingNodes,
         ratio: status.refinementRatio,
         ready: status.ready,
+        centerBehind: status.centerEngineBehindNodes ?? 0,
         activityActive: controller.getActivity().active
     };
 }
@@ -499,9 +502,10 @@ export function initBenchmarkHud(global: Global): () => void {
 
         if (refine) {
             const activityHint = refine.activityActive ? ' · dl' : '';
+            const behindHint = refine.centerBehind > 0 ? ` · ctr↓${refine.centerBehind}` : '';
             lines.push(row(
                 'Refine',
-                `${(refine.ratio * 100).toFixed(0)}% · pending ${refine.pending}${activityHint}`
+                `${(refine.ratio * 100).toFixed(0)}% · pending ${refine.pending}${behindHint}${activityHint}`
             ));
         }
 

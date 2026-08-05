@@ -166,8 +166,8 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
      * C 82–99%   unlockStreamingLod：放开 lodRange + 距离档 refinement；收条前不可交互
      * D 收条后   progressThresholdReached 解锁输入
      *
-     * 收条主路径：有效 tick + 下载收敛 + staleLod===0 + N 帧稳定。
-     * 真空完成：tick 后 pending=0 且 stale=0。
+     * 收条主路径：有效 tick + 下载收敛 + 中央追上 engineOptimal + staleLod===0 + N 帧稳定。
+     * 真空完成：tick 后 pending=0 且 centerBehind=0 且 stale=0。
      * 逃生阀：下载已收敛但 stale 卡住时，按「无进展帧数」escape（非清晰度门槛）。
      */
     const PROGRESS_THRESHOLD = 50;
@@ -239,6 +239,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
                 refinementRatio: 0,
                 pendingUniqueFiles: 0,
                 staleLodNodes: 0,
+                centerEngineBehindNodes: 0,
                 ready: false
             };
         }
@@ -248,10 +249,23 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
     const hasValidRefinementTick = (): boolean =>
         refinementController?.getLastTickMetrics() != null;
 
-    /** 仅度量下载收敛；不含 750ms grace，不含 stale */
+    /** 仅度量下载收敛；不含 750ms grace，不含 stale；中央未追上 engine 不算完成 */
     const getStreamingRefinementDoneRatio = (
         refinement: ReturnType<typeof resolveStreamingRefinementStatus>
     ): number => {
+        if ((refinement.centerEngineBehindNodes ?? 0) > 0) {
+            // pending 已空但中央仍粗于引擎目标：禁止进度条假完成
+            const dl =
+                streamingRefinementBaselinePending <= 0
+                    ? 0
+                    : refinement.pendingNodes <= 0
+                        ? 1
+                        : computeStreamingRefinementProgressRatio(
+                            refinement.pendingNodes,
+                            streamingRefinementBaselinePending
+                        );
+            return Math.min(dl, STREAMING_REFINEMENT_UI_COMPLETE_RATIO - 0.01);
+        }
         if (streamingRefinementBaselinePending <= 0) {
             return 0;
         }
@@ -270,17 +284,24 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         if (!hasValidRefinementTick()) {
             return false;
         }
-        if (refinement.pendingNodes > 0 || refinement.staleLodNodes > 0) {
+        if (
+            refinement.pendingNodes > 0 ||
+            refinement.staleLodNodes > 0 ||
+            (refinement.centerEngineBehindNodes ?? 0) > 0
+        ) {
             return false;
         }
         const tick = refinementController?.getLastTickMetrics();
-        // pending/stale 皆 0 时即真空完成；needsLodSwitch 抖动不阻收条
+        // pending/stale/中央追档皆 0 时即真空完成；needsLodSwitch 抖动不阻收条
         return tick != null;
     };
 
     const isDownloadConverged = (
         refinement: ReturnType<typeof resolveStreamingRefinementStatus>
     ): boolean => {
+        if ((refinement.centerEngineBehindNodes ?? 0) > 0) {
+            return false;
+        }
         if (streamingRefinementBaselinePending > 0) {
             return (
                 getStreamingRefinementDoneRatio(refinement) >= STREAMING_REFINEMENT_UI_COMPLETE_RATIO

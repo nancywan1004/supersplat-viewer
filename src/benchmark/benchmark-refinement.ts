@@ -950,7 +950,12 @@ export function renderRefinementTickMetricsHtml(metrics: OctreeRefinementTickMet
             `${formatHudMs(timingsMs.total)} (scan ${formatHudMs(timingsMs.scan)} · q ${formatHudMs(timingsMs.queue)} · sync ${formatHudMs(timingsMs.sync)})`
         ),
         row('Cand refs', `${metrics.candidateFileRefs} · uniq ${metrics.candidateUniqueFiles}`),
-        row('Stale LOD', `${metrics.staleLodNodes}待升 · ${metrics.staleLoadedNodes}已下未上 · ${metrics.lodDisplayMismatch}引擎差`),
+        row(
+            'Stale LOD',
+            `${metrics.staleLodNodes}待升 · ${metrics.staleLoadedNodes}已下未上 · ${metrics.lodDisplayMismatch}引擎差` +
+                ` (放宽${metrics.lodMismatchEdgeRelax}/更细${metrics.lodMismatchFiner}` +
+                `/外缘${metrics.lodMismatchViewportEdge}/其它${metrics.lodMismatchOther}) · ctr↓${metrics.centerEngineBehindNodes}`
+        ),
         row(
             'Ladder',
             `ctr×${metrics.ladderCenterJumpSteps} · edge×${metrics.ladderEdgeJumpSteps}` +
