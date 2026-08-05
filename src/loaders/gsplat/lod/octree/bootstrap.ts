@@ -226,6 +226,8 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
                 centerEngineBehindNodes: 0,
                 centerTargetNodes: 0,
                 centerClearNodes: 0,
+                settlingFrames: 0,
+                tickSeq: 0,
                 ready: false
             };
         }
@@ -247,7 +249,10 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
                 refinement.centerTargetNodes ?? tick?.centerTargetNodes ?? 0,
             centerClearNodes:
                 refinement.centerClearNodes ?? tick?.centerClearNodes ?? 0,
-            centerBehindNoEngine: tick?.centerBehindNoEngine ?? 0
+            centerBehindNoEngine: tick?.centerBehindNoEngine ?? 0,
+            settlingFrames: refinement.settlingFrames ?? 0,
+            staleLoadedNodes: refinement.staleLoadedNodes ?? 0,
+            tickSeq: refinement.tickSeq ?? 0
         };
     };
 
@@ -505,7 +510,9 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         );
 
         if (!viewport.ready) {
-            refinementWorkload.stableFrames = 0;
+            refinementWorkload.postSettleQuietTicks = 0;
+            refinementWorkload.completedSettleCycles = 0;
+            refinementWorkload.wasPendingZero = false;
             return;
         }
 
@@ -535,7 +542,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
 
         if (!progressUIHidden) {
             if (!streamingLodUnlocked) {
-                refinementWorkload.stableFrames = 0;
+                refinementWorkload.postSettleQuietTicks = 0;
                 return;
             }
             progressUIHidden = true;
@@ -556,6 +563,8 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
                     'Streaming octree: bootstrap finalize',
                     `fine ${refinement.centerClearNodes}/${refinement.centerTargetNodes}`,
                     `pending ${refinement.pendingNodes}, ctr↓ ${refinement.centerEngineBehindNodes}`,
+                    `settleCycles ${refinementWorkload.completedSettleCycles}`,
+                    `quietTicks ${refinementWorkload.postSettleQuietTicks}`,
                     `peakBehindRatio ${refinementWorkload.peakBehindRatio.toFixed(2)}`,
                     `baselinePending ${refinementWorkload.baselinePending}`
                 );

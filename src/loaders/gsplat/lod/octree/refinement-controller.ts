@@ -55,18 +55,29 @@ const T = {
     viewport: {
         edgeNdcInner: 0.44,
         edgeNdcOuter: 0.72,
+        /**
+         * 中央 / 边缘分界（edgeFactor）。
+         * ≥ 此值：中央（收条统计 + 较快跳档）；< 此值：边缘（仍追 engineOptimal，仅降优先）。
+         * 不再用于「边缘放宽一档目标」。
+         */
         edgeRelaxOptimal: 0.45,
-        centerScorePower: 5.0
+        /** 下载分对 edgeFactor 的幂次：边缘权重大幅低于中央（降优先，不是不追） */
+        centerScorePower: 5.0,
+        /**
+         * 视锥外缘（AABB edgeFactor≤0）仍允许入队的最低权重。
+         * 过去直接 skip 会导致引擎已为这些叶留了细档预算却永不下载 → cur 顶不满 budget。
+         */
+        edgeOuterDownloadFloor: 0.08
     },
     ladder: {
         coarsestStepBoost: 2.75,
         stepBoost: 1.6,
         /** stableForeground pending ≥ 此值：边缘升档用 edgeBacklogJumpSteps */
         backlogPending: 12,
-        /** 视野中央：每轮最多跳档数（edgeFactor ≥ edgeRelaxOptimal）；默认 2 加快追 engineOptimal */
+        /** 视野中央：每轮最多跳档数（edgeFactor ≥ edgeRelaxOptimal） */
         centerJumpSteps: 2,
-        /** 视野边缘：正常跳档 */
-        edgeJumpSteps: 2,
+        /** 视野边缘：仍追 engineOptimal，但每轮跳档更慢（降优先） */
+        edgeJumpSteps: 1,
         /** 视野边缘且前景积压时跳档；极大值≈直达目标档 */
         edgeBacklogJumpSteps: 3
     },
@@ -397,7 +408,7 @@ type PrioritizedBatch = {
     staleLoadedNodes: number;
     /** 视锥内 currentLod ≠ engine optimalLod 的 node 数（抖动诊断；不含视锥外） */
     lodDisplayMismatch: number;
-    /** 引擎差归因：边缘放宽一档（current === engineOptimal+1） */
+    /** 引擎差归因：边缘区仍粗一档（诊断；目标已不再放宽，此项通常归入「其它」路径） */
     lodMismatchEdgeRelax: number;
     /** 引擎差归因：比引擎目标更细 */
     lodMismatchFiner: number;
@@ -1321,27 +1332,26 @@ function computeViewportAabbEdgeFactor(
 
 /**
  * separate 资产逐档升 LOD：当前比 optimal 粗时按 jumpSteps 逼近目标。
- * jumpSteps 由视野位置决定：中央默认×2、边缘×2、积压边缘×3（可 ?ladder= 覆盖）。
+ * 中央 / 边缘目标档相同（均为 engineOptimal）；差异只在 jumpSteps 与下载 score。
+ * jumpSteps：中央默认×2、边缘×1、积压边缘×3（可 ?ladder= 覆盖）。
  */
 function computeRefinementTargetLod(
     optimalLod: number,
     maxLod: number,
     currentLod: number,
-    edgeFactor: number,
+    _edgeFactor: number,
     jumpSteps = 1
 ): number {
-    const relaxedTarget = edgeFactor < T.viewport.edgeRelaxOptimal
-        ? Math.min(maxLod, optimalLod + 1)
-        : optimalLod;
+    const target = Math.max(0, Math.min(maxLod, optimalLod));
 
-    if (currentLod >= 0 && currentLod > relaxedTarget) {
+    if (currentLod >= 0 && currentLod > target) {
         const steps = Math.max(1, jumpSteps | 0);
-        return Math.max(relaxedTarget, currentLod - steps);
+        return Math.max(target, currentLod - steps);
     }
-    return relaxedTarget;
+    return target;
 }
 
-/** 中央 jump；边缘 2/积压 3（或 URL ladder 覆盖） */
+/** 中央 jump；边缘更慢 / 积压时加速（或 URL ladder 覆盖） */
 function resolveLadderJumpSteps(edgeFactor: number, pendingBacklog: boolean): number {
     if (edgeFactor >= T.viewport.edgeRelaxOptimal) {
         return resolveLadderCenterJumpSteps();
@@ -1606,7 +1616,11 @@ export type StreamingViewportRefinementStatus = {
     centerTargetNodes: number;
     /** 其中 currentLod ≤ engineOptimal */
     centerClearNodes: number;
-    /** 全清：pending=0 且 ctr↓=0（benchmark clear；首屏收条用 80% 比例） */
+    /** post-download settle 剩余帧；>0 时勿收条（否则 settle 结束会再涌一轮 pending） */
+    settlingFrames: number;
+    /** refinement 拍号（每 runPriorityPrefetch +1） */
+    tickSeq: number;
+    /** 全清：pending=0 且 ctr↓=0（benchmark clear） */
     ready: boolean;
 };
 
@@ -1632,6 +1646,8 @@ export function getStreamingViewportRefinementStatus(
             centerEngineBehindNodes: 0,
             centerTargetNodes: 0,
             centerClearNodes: 0,
+            settlingFrames: 0,
+            tickSeq: 0,
             ready: true
         };
     }
@@ -1649,6 +1665,8 @@ export function getStreamingViewportRefinementStatus(
             centerEngineBehindNodes: 0,
             centerTargetNodes: 0,
             centerClearNodes: 0,
+            settlingFrames: 0,
+            tickSeq: 0,
             ready: false
         };
     }
@@ -1682,6 +1700,8 @@ export function getStreamingViewportRefinementStatus(
         centerEngineBehindNodes: centerBehind,
         centerTargetNodes: centerTarget,
         centerClearNodes: centerClear,
+        settlingFrames: 0,
+        tickSeq: 0,
         ready
     };
 }
@@ -1857,21 +1877,14 @@ function buildPriorityFiles(
                 lodMismatchViewportEdge++;
             } else if (currentLod < engineOptimalLod) {
                 lodMismatchFiner++;
-            } else if (
-                edgeFactor < T.viewport.edgeRelaxOptimal &&
-                currentLod === Math.min(maxLod, engineOptimalLod + 1)
-            ) {
-                // 与 computeRefinementTargetLod 边缘放宽一档一致
-                lodMismatchEdgeRelax++;
             } else {
                 lodMismatchOther++;
             }
         }
 
-        if (edgeFactor <= 0) {
-            continue;
-        }
-
+        // 外缘 edgeFactor≤0：仍用地板权重入队（避免引擎细档预算空挂、cur 顶不满）
+        const edgeForQueue =
+            edgeFactor > 0 ? edgeFactor : T.viewport.edgeOuterDownloadFloor;
         const isCenter = edgeFactor >= T.viewport.edgeRelaxOptimal;
         // 中央细档上屏统计 + ctr↓ 诊断
         if (isCenter && currentLod >= 0) {
@@ -1901,12 +1914,12 @@ function buildPriorityFiles(
                     centerTargetNodes++;
                     centerEngineBehindNodes++;
                     if (centerBehindSamples.length < 3) {
-                        const jumpSteps = resolveLadderJumpSteps(edgeFactor, pendingBacklog);
+                        const jumpSteps = resolveLadderJumpSteps(edgeForQueue, pendingBacklog);
                         const targetLod = computeRefinementTargetLod(
                             engineOptimalLod,
                             maxLod,
                             currentLod,
-                            edgeFactor,
+                            edgeForQueue,
                             jumpSteps
                         );
                         const fi = node.lods[targetLod]?.fileIndex ?? -1;
@@ -1930,12 +1943,12 @@ function buildPriorityFiles(
             continue;
         }
 
-        const jumpSteps = resolveLadderJumpSteps(edgeFactor, pendingBacklog);
+        const jumpSteps = resolveLadderJumpSteps(edgeForQueue, pendingBacklog);
         const targetLod = computeRefinementTargetLod(
             engineOptimalLod,
             maxLod,
             currentLod,
-            edgeFactor,
+            edgeForQueue,
             jumpSteps
         );
 
@@ -1960,7 +1973,7 @@ function buildPriorityFiles(
             staleLoadedNodes++;
         } else {
             // backoff 仍进候选，便于到期后外层重试；pending 计数侧 ignore
-            const edgeWeight = Math.pow(edgeFactor, T.viewport.centerScorePower);
+            const edgeWeight = Math.pow(edgeForQueue, T.viewport.centerScorePower);
             prioritized.push({ fileIndex: fi, score: score * edgeWeight * ladderBoost });
         }
     }
@@ -2231,9 +2244,12 @@ export function createOctreeRefinementController(
         centerEngineBehindNodes: 0,
         centerTargetNodes: 0,
         centerClearNodes: 0,
+        settlingFrames: 0,
+        tickSeq: 0,
         ready: false
     };
     let lastTickMetrics: OctreeRefinementTickMetrics | null = null;
+    let tickSeq = 0;
     let frameProfileResetHandler: (() => void) | null = null;
     const traverseStats: OctreeRefinementTraverseStats = {
         leavesEvaluatedLast: 0,
@@ -2269,10 +2285,9 @@ export function createOctreeRefinementController(
         if (savedSplatBudget === null) {
             savedSplatBudget = gsplatScene.splatBudget;
         }
-        const refinementBudget = savedSplatBudget > 0
-            ? Math.min(savedSplatBudget, T.lod.splatBudget)
-            : T.lod.splatBudget;
-        gsplatScene.splatBudget = refinementBudget;
+        // 尊重 URL/config budget（含 >4M）；仅当场景未设 budget 时用 refinement 默认
+        gsplatScene.splatBudget =
+            savedSplatBudget > 0 ? savedSplatBudget : T.lod.splatBudget;
 
         if (savedLodUnderfillLimit === null) {
             savedLodUnderfillLimit = gsplatScene.lodUnderfillLimit ?? 0;
@@ -2376,6 +2391,7 @@ export function createOctreeRefinementController(
         const cameraJustMoved = cameraMovedSinceSettle;
         const cameraBurstActive = cameraBurstFrames > 0;
         const scanStartMs = performance.now();
+        tickSeq++;
         const pendingBacklog =
             prevPending.stableForeground >= T.ladder.backlogPending;
         const {
@@ -2873,6 +2889,8 @@ export function createOctreeRefinementController(
             centerEngineBehindNodes,
             centerTargetNodes,
             centerClearNodes,
+            settlingFrames: settle.framesRemaining,
+            tickSeq,
             ready
         };
 
