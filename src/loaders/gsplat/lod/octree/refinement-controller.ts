@@ -88,9 +88,9 @@ const T = {
         /**
          * 已下未上时的 drip 间隔（帧）。
          * 节流 bake，但有 stale 就持续 sync，避免长时间画面无变化。
-         * 同帧赋值后会 -1，故 2 ≈ 隔一帧再 sync。
+         * 同帧赋值后会 -1，故 1 ≈ 每帧 sync，2 ≈ 隔一帧再 sync。
          */
-        progressiveSyncInterval: 2
+        progressiveSyncInterval: 1
     },
     /**
      * 引擎 GSplatAssetLoader 耗尽 maxRetries 后，asset.loaded 仍为 true → load() 永久早退，pending 卡死。
