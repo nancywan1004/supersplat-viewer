@@ -224,23 +224,24 @@ export const BUILTIN_SCENE_CONTENT_VISIBILITY_ADAPTERS: readonly SceneContentVis
 ];
 
 /**
- * ALL_SET 遍历顺序（语义上顺序无关：reveal 会话关已 skip remount）。
- * 仍先关特效再关开场，便于观感上先停粒子再拆开场。
+ * ALL_SET 遍历顺序。
+ * **lights 必须最后**：否则 reveal/persistent 拆卸会 `forceReapply(settings.nightMode.fade)`，
+ * 盖掉光照会话「隐亮度 → nightFade=0」。
  */
 export const SCENE_CONTENT_ALL_SET_HIDE_ORDER: readonly SceneContentCategoryId[] = [
     'assets',
     'annotations',
-    'lights',
     'persistent',
     'stylization',
-    'reveal'
+    'reveal',
+    'lights'
 ];
 
 export const SCENE_CONTENT_ALL_SET_SHOW_ORDER: readonly SceneContentCategoryId[] = [
     'assets',
     'annotations',
-    'lights',
     'reveal',
     'persistent',
-    'stylization'
+    'stylization',
+    'lights'
 ];

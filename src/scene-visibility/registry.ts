@@ -10,6 +10,7 @@ import {
     SCENE_CONTENT_ALL_SET_HIDE_ORDER,
     SCENE_CONTENT_ALL_SET_SHOW_ORDER
 } from './adapters';
+import { applyLightingSessionAspects } from './lighting-session-visibility';
 import {
     SCENE_CONTENT_CATEGORY_IDS,
     SCENE_CONTENT_DEFER_CATEGORY_IDS,
@@ -93,6 +94,10 @@ export class SceneContentVisibilityRegistry {
         if (isContentVisibilityOverlayActive(this.global)) {
             for (const id of order) {
                 this.applyCategory(id);
+            }
+            // reveal/persistent 可能 forceReapply settings.fade；lights 已置末仍再套一次会话亮度，防异步 remount 覆盖
+            if (order.includes('lights')) {
+                applyLightingSessionAspects(this.global);
             }
         }
         const categories = [...order];

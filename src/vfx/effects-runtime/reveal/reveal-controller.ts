@@ -13,7 +13,7 @@ import {
     patchPersistentRuntimeMirror,
     syncEffectsRuntimeStateFromSettings
 } from '../../../settings-serialize/effects-sync';
-import { getEffectsReadSource } from '../../../view-settings';
+import { getEffectsReadSource, isLightingSessionAspectVisible } from '../../../view-settings';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../../../schemas/v2-custom';
 import { LegacyRevealEffect as RevealConfig } from '../../../settings';
 import { Global, type RevealEffectType } from '../../../types';
@@ -1148,7 +1148,7 @@ export class RevealController {
             return;
         }
         // 点彩等 mount 可能未走 prepareExternalPersistentScriptMount；无快照时回退 settings.nightMode.fade
-        const fade = this.originalNightFade ?? getNightFadeFromSettings(settings);
+        let fade = this.originalNightFade ?? getNightFadeFromSettings(settings);
         this.originalNightFade = null;
         this.inVfx = false;
         patchRevealRuntimeMirror(this.global.state, { status: this.config.type === 'none' ? 'inactive' : 'completed' });
@@ -1160,6 +1160,11 @@ export class RevealController {
                 settingsAny.nightMode = {};
             }
             settingsAny.nightMode.fade = fade;
+        }
+
+        // 观看态亮度会话隐：不把 settings/快照 fade 盖回画面（与 LIGHTING_BRIGHTNESS / contentVisibility.lights 一致）
+        if (!isLightingSessionAspectVisible(this.global, 'brightness')) {
+            fade = 0;
         }
 
         console.log('[RevealController] Restoring nightFade to', fade, 'due to', reason);

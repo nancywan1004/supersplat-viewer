@@ -1222,6 +1222,9 @@ class NightMode extends GsplatShaderEffect {
                 }
                 if (this.materialsApplied.size > 0) {
                     this.updateEffect(this.effectTime, 0);
+                } else {
+                    // fade→0 且尚无材质时也要同步主光/天空盒，否则画面仍停在旧 nightFade 光照
+                    this.applySceneLightingFromNightFade();
                 }
             } else if (settings && hasEnabledPersistentGsplatMaterialShaderEffect(settings)) {
                 // 点彩挂起 gsplat shader 期间：仍用 fade 调主光/天空盒，mesh 亮度不受影响
