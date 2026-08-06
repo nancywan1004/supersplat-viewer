@@ -13,6 +13,7 @@ import {
     restoreEffectsFromExperienceSettings,
     type PersistentSessionSnapshot
 } from './effects-session-visibility';
+import { syncLightingSubsFromLightsCategory } from './lighting-session-visibility';
 import type { SceneContentCategoryId, SceneContentVisibilityAdapter } from './types';
 
 const ENTITY_NAMES = {
@@ -94,12 +95,18 @@ function getAnnotationManager(global: Global): {
 
 /**
  * 进入编辑（含预览）：丢弃 View 会话对画面的叠加，恢复编辑真源（settings / 单条）。
- * 不改写 `viewSettings.contentVisibility`（退出到纯 Viewer 时再套用）。
+ * 不改写 `viewSettings.contentVisibility` / `lightingVisibility`（退出到纯 Viewer 时再套用）。
  */
 export function restoreEditSceneContentVisibility(global: Global): void {
     syncPlacedAssetEntitiesFromPerItemVisible(global);
     getAnnotationManager(global)?.applyVisibilityFromSettings?.();
     restoreEffectsFromExperienceSettings(global);
+    // 亮度会话可能把 nightFade 压到 0；进编辑按 settings 真源恢复
+    const nm = (global.settings as ExperienceSettings)?.nightMode as { fade?: number } | undefined;
+    const raw = typeof nm?.fade === 'number' ? nm.fade : 0;
+    const v = Math.max(-1, Math.min(1, raw));
+    (global.app as { fire: (name: string, value?: unknown) => void }).fire('nightFade:set', v);
+    global.events.fire('postEffect:changed');
 }
 
 const assetsAdapter: SceneContentVisibilityAdapter = {
@@ -148,9 +155,11 @@ const annotationsAdapter: SceneContentVisibilityAdapter = {
 const lightsAdapter: SceneContentVisibilityAdapter = {
     id: 'lights',
     applyCategoryIntent(global, intentVisible) {
+        // 子项 flag 在编辑态也可记账；画面套用由 sync 内 overlay 判断
+        const show = !!intentVisible;
+        syncLightingSubsFromLightsCategory(global, show);
         if (!isContentVisibilityOverlayActive(global)) return;
         const g = global as Global & { __sceneContentLightsBloomSnap?: boolean };
-        const show = !!intentVisible;
         if (!show) {
             if (typeof g.__sceneContentLightsBloomSnap !== 'boolean') {
                 g.__sceneContentLightsBloomSnap = readViewBloomLocalLightsEnabled(global);
@@ -169,6 +178,7 @@ const lightsAdapter: SceneContentVisibilityAdapter = {
         setRootEntityEnabled(global, ENTITY_NAMES.pointLights, rootOn);
         setRootEntityEnabled(global, ENTITY_NAMES.spotLights, rootOn);
         // 手电筒独立于 contentVisibility.lights（viewSettings.torch.active），不在此门控
+        // 亮度 / 全局辉光 / 阴影由 lightingVisibility 会话门控（见 lighting-session-visibility）
     }
 };
 

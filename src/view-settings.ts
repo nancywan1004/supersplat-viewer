@@ -17,6 +17,15 @@ export const DEFAULT_VIEW_ANNOTATIONS_VISIBLE = true;
 /** 全局手电筒默认关闭（仅会话态，不入库；TORCH_TOGGLE 控制，与 TORCH_ADD 解耦） */
 export const DEFAULT_VIEW_TORCH_ACTIVE = false;
 
+/** 观看态光照子项显隐默认开启 */
+export const DEFAULT_VIEW_LIGHTING_VISIBILITY = {
+    brightness: true,
+    bloom: true,
+    shadow: true
+} as const;
+
+export type LightingVisibilityKey = keyof typeof DEFAULT_VIEW_LIGHTING_VISIBILITY;
+
 function createDefaultContentVisibility(): NonNullable<ViewSettings['contentVisibility']> {
     const out: NonNullable<ViewSettings['contentVisibility']> = {};
     for (const id of SCENE_CONTENT_CATEGORY_IDS) {
@@ -25,11 +34,20 @@ function createDefaultContentVisibility(): NonNullable<ViewSettings['contentVisi
     return out;
 }
 
+function createDefaultLightingVisibility(): NonNullable<ViewSettings['lightingVisibility']> {
+    return {
+        brightness: DEFAULT_VIEW_LIGHTING_VISIBILITY.brightness,
+        bloom: DEFAULT_VIEW_LIGHTING_VISIBILITY.bloom,
+        shadow: DEFAULT_VIEW_LIGHTING_VISIBILITY.shadow
+    };
+}
+
 export function createDefaultViewSettings(): ViewSettings {
     return {
         bloom: { localLightsEnabled: DEFAULT_VIEW_BLOOM_LOCAL_LIGHTS_ENABLED },
         mediaMuted: DEFAULT_VIEW_MEDIA_MUTED,
         contentVisibility: createDefaultContentVisibility(),
+        lightingVisibility: createDefaultLightingVisibility(),
         torch: { active: DEFAULT_VIEW_TORCH_ACTIVE }
     };
 }
@@ -71,6 +89,15 @@ export function ensureViewSettings(global: Global): ViewSettings {
         vs.torch = { active: DEFAULT_VIEW_TORCH_ACTIVE };
     } else if (typeof vs.torch.active !== 'boolean') {
         vs.torch.active = DEFAULT_VIEW_TORCH_ACTIVE;
+    }
+    if (!vs.lightingVisibility || typeof vs.lightingVisibility !== 'object') {
+        vs.lightingVisibility = createDefaultLightingVisibility();
+    } else {
+        for (const key of Object.keys(DEFAULT_VIEW_LIGHTING_VISIBILITY) as LightingVisibilityKey[]) {
+            if (typeof vs.lightingVisibility[key] !== 'boolean') {
+                vs.lightingVisibility[key] = true;
+            }
+        }
     }
     return vs;
 }
@@ -138,6 +165,57 @@ export function readViewAnnotationsVisible(global: Global): boolean {
 
 export function readViewBloomLocalLightsEnabled(global: Global): boolean {
     return ensureViewSettings(global).bloom.localLightsEnabled !== false;
+}
+
+export function readLightingVisibility(global: Global, key: LightingVisibilityKey): boolean {
+    return ensureViewSettings(global).lightingVisibility?.[key] !== false;
+}
+
+/**
+ * 写光照子项会话显隐（仅 viewSettings，不入库）。
+ * @returns 是否变更
+ */
+export function writeLightingVisibility(
+    global: Global,
+    key: LightingVisibilityKey,
+    visible: boolean
+): boolean {
+    const vs = ensureViewSettings(global);
+    if (!vs.lightingVisibility) {
+        vs.lightingVisibility = createDefaultLightingVisibility();
+    }
+    const next = !!visible;
+    if (vs.lightingVisibility[key] === next) return false;
+    vs.lightingVisibility[key] = next;
+    return true;
+}
+
+/**
+ * 将 brightness/bloom/shadow 三个子 flag 写成同一值（`contentVisibility.lights` 总闸联动）。
+ * @returns 是否有任一子项变更
+ */
+export function writeAllLightingVisibility(global: Global, visible: boolean): boolean {
+    let changed = false;
+    for (const key of Object.keys(DEFAULT_VIEW_LIGHTING_VISIBILITY) as LightingVisibilityKey[]) {
+        if (writeLightingVisibility(global, key, visible)) {
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+/**
+ * 纯 Viewer 下某光照子项是否应对画面生效。
+ * 编辑态（含预览）恒 true（忽略会话门控）；lights 总闸关时三者均不可见。
+ */
+export function isLightingSessionAspectVisible(global: Global, key: LightingVisibilityKey): boolean {
+    if (global.state.editMode === true) {
+        return true;
+    }
+    if (!readContentCategoryVisible(global, 'lights')) {
+        return false;
+    }
+    return readLightingVisibility(global, key);
 }
 
 /**

@@ -28,6 +28,13 @@ export {
     applyStylizationSessionVisible,
     restoreEffectsFromExperienceSettings
 } from './effects-session-visibility';
+export {
+    applyLightingBrightnessSession,
+    applyLightingSessionAspects,
+    canToggleLightingShadowSession,
+    setLightingSessionAspectVisible,
+    syncLightingSubsFromLightsCategory
+} from './lighting-session-visibility';
 
 /** 注册六类内置 adapter，挂到 `global.__sceneContentVisibility` */
 export function initSceneContentVisibility(global: Global): SceneContentVisibilityRegistry {

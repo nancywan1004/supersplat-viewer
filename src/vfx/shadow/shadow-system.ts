@@ -17,6 +17,7 @@ import type { ExperienceSettings } from '../../schemas/v2';
 import type { Global } from '../../types';
 import { setDirectionalCastShadowsEnabled, updatePointLightsFromSettings, updateShadowDistance } from '../../light';
 import { readRevealParams } from '../../settings-serialize/effects-sync';
+import { isLightingSessionAspectVisible } from '../../view-settings';
 import { isRevealTimedVfxType, revealBlocksAnim } from '../effects-runtime/reveal/reveal-policy';
 import { syncPlacedMeshExcludeLayers } from './shadow-apply-exclude-mask';
 import { initShadowCatcher } from './shadow-catcher';
@@ -134,7 +135,9 @@ export const isShadowOutputEnabled = (global: Global): boolean =>
     isShadowSystemEnabled(global)
     && global.state.readyToRender === true
     && !isShadowPipelineSuspended(global)
-    && getRuntime(global).outputEnabled;
+    && getRuntime(global).outputEnabled
+    // 观看态会话门控：只压输出，不写 settings、不触发 sceneMesh generate
+    && isLightingSessionAspectVisible(global, 'shadow');
 
 const syncDirectionalShadowCasting = (global: Global) => {
     if (!isShadowSystemEnabled(global)) {

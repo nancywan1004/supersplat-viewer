@@ -75,7 +75,7 @@ import type { OctreeRefinementController } from './loaders/gsplat/lod/octree/ref
 import { BloomController } from './vfx/bloom';
 import { NightMode } from './vfx/lighting/night-mode';
 import {
-    hasShadowSceneMesh,
+    hasConfiguredShadowSceneMesh,
     isShadowSystemEnabled,
     notifyViewportReadyForShadow,
     scheduleShadowPipeline,
@@ -883,8 +883,8 @@ class Viewer {
                     return;
                 }
                 const collisionMgr = getCameraCollisionManager(global);
-                // 配置了 GLB collision 时先懒加载接影 mesh，避免用默认平面占位且后续不更新
-                if (hasShadowSceneMesh(global) && !this.shadowPipelineMount.meshEntity) {
+                // 仅当配置里已有 GLB sceneMesh 时懒加载；不在此走 Universe generate（generate 仅 SHADOW_SET 等显式开影）
+                if (hasConfiguredShadowSceneMesh(global) && !this.shadowPipelineMount.meshEntity) {
                     void collisionMgr.ensureSceneMeshLoaded();
                     return;
                 }

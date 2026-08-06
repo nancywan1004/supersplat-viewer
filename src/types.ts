@@ -309,6 +309,17 @@ export type ViewSettings = {
         boolean
     >>;
     /**
+     * 观看态光照子项会话显隐（**不入库**；`LIGHTING_*_SHOW_HIDE_SET`）。
+     * - 仅纯 Viewer 套用画面；编辑态（含预览）忽略门控、不写 `settings`
+     * - 受 `contentVisibility.lights` 总闸约束：lights 关时三者均强制不可见
+     * - 缺省均为 `true`
+     */
+    lightingVisibility?: {
+        brightness: boolean;
+        bloom: boolean;
+        shadow: boolean;
+    };
+    /**
      * @deprecated 已收敛到 `contentVisibility.annotations`；ensureViewSettings 会迁移旧值。
      */
     annotationsVisible?: boolean;

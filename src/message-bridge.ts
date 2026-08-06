@@ -53,10 +53,12 @@ import {
     patchSceneMediaHotspot,
     readSkyboxCurrentUrlFromSettings
 } from './settings-serialize/settings-serialize-helper';
-import { applyViewMediaMuteSet } from './view-settings';
+import { applyViewMediaMuteSet, type LightingVisibilityKey } from './view-settings';
 import {
+    canToggleLightingShadowSession,
     getSceneContentVisibilityRegistry,
-    isSceneContentCategoryId
+    isSceneContentCategoryId,
+    setLightingSessionAspectVisible
 } from './scene-visibility';
 import { getSelectedSceneAssetType } from './state-selectors';
 import type { AssetLibraryItem, EditLeftModule, Global } from './types';
@@ -129,6 +131,9 @@ type InboundPayload =
     | { type: 'ASSET_SHOW_HIDE_SET'; id?: string; value?: boolean }
     | { type: 'SCENE_CONTENT_CATEGORY_SET'; category?: string; value?: boolean }
     | { type: 'SCENE_CONTENT_ALL_SET'; value?: boolean }
+    | { type: 'LIGHTING_BRIGHTNESS_SHOW_HIDE_SET'; value?: boolean }
+    | { type: 'LIGHTING_BLOOM_SHOW_HIDE_SET'; value?: boolean }
+    | { type: 'LIGHTING_SHADOW_SHOW_HIDE_SET'; value?: boolean }
     | { type: 'ASSET_PLACE'; value?: AssetLibraryItem }
     | { type: 'MORPH_ASSET_ADD_START' }
     | { type: 'MORPH_ASSET_ADD_FINISH' }
@@ -197,6 +202,19 @@ const postToParent = (type: string, data?: Record<string, unknown>) => {
     window.parent.postMessage(message, '*');
     // 与父级实际收到的 body 一致（避免只看 `data` 时与 `{ type, ...data }` 合并结果不一致）
     console.log('[MessageBridge] postToParent', message);
+};
+
+const LIGHTING_SHOW_HIDE_CHANGED_BY_KEY: Record<LightingVisibilityKey, string> = {
+    brightness: 'LIGHTING_BRIGHTNESS_SHOW_HIDE_CHANGED',
+    bloom: 'LIGHTING_BLOOM_SHOW_HIDE_CHANGED',
+    shadow: 'LIGHTING_SHADOW_SHOW_HIDE_CHANGED'
+};
+
+/** lights 总闸或 ALL_SET 同步子项后，向父级回传实际变更的子项 CHANGED（无 sceneMesh 时不含 shadow） */
+const postLightingSessionSubsChanged = (keys: LightingVisibilityKey[], value: boolean) => {
+    for (const key of keys) {
+        postToParent(LIGHTING_SHOW_HIDE_CHANGED_BY_KEY[key], { value });
+    }
 };
 
 type SelectionSource = 'host' | 'scene' | 'unknown';
@@ -703,6 +721,13 @@ const initPostMessageBridge = (global: Global) => {
                             category: p.category,
                             value: p.value
                         });
+                        if (p.category === 'lights') {
+                            const keys: LightingVisibilityKey[] = ['brightness', 'bloom'];
+                            if (canToggleLightingShadowSession(global)) {
+                                keys.push('shadow');
+                            }
+                            postLightingSessionSubsChanged(keys, p.value);
+                        }
                     }
                 }
                 break;
@@ -722,9 +747,30 @@ const initPostMessageBridge = (global: Global) => {
                                 value: p.value
                             });
                         }
+                        if (categories.includes('lights')) {
+                            const keys: LightingVisibilityKey[] = ['brightness', 'bloom'];
+                            if (canToggleLightingShadowSession(global)) {
+                                keys.push('shadow');
+                            }
+                            postLightingSessionSubsChanged(keys, p.value);
+                        }
                     }
                 }
                 break;
+            case 'LIGHTING_BRIGHTNESS_SHOW_HIDE_SET':
+            case 'LIGHTING_BLOOM_SHOW_HIDE_SET':
+            case 'LIGHTING_SHADOW_SHOW_HIDE_SET': {
+                const v = (p as { value?: boolean }).value;
+                if (typeof v !== 'boolean') break;
+                const key: LightingVisibilityKey =
+                    type === 'LIGHTING_BRIGHTNESS_SHOW_HIDE_SET' ? 'brightness' :
+                        type === 'LIGHTING_BLOOM_SHOW_HIDE_SET' ? 'bloom' :
+                            'shadow';
+                if (setLightingSessionAspectVisible(global, key, v)) {
+                    postToParent(LIGHTING_SHOW_HIDE_CHANGED_BY_KEY[key], { value: v });
+                }
+                break;
+            }
             case 'ASSET_SELECT':
             {
                 const targetId = (p.id !== undefined ? p.id : null) as string | null;

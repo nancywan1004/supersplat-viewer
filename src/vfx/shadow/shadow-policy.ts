@@ -4,10 +4,18 @@ import type { Global } from '../../types';
 
 type ShadowEnableInputs = Pick<Global, 'config' | 'settings'>;
 
-/** 已配置 scene mesh GLB，或可经 Universe 生成后得到 GLB。 */
-export function hasShadowSceneMesh(global: ShadowEnableInputs): boolean {
+/**
+ * 配置中**已有** scene mesh GLB URL。
+ * 不含「可 Universe 生成」；观看态阴影会话显隐 / postEffect 懒挂载只认此项，避免误跑 generate。
+ */
+export function hasConfiguredShadowSceneMesh(global: ShadowEnableInputs): boolean {
     const resolved = resolveCollisionUrl(global as Global);
-    if (sceneMeshUrl(resolved?.url)) {
+    return !!sceneMeshUrl(resolved?.url);
+}
+
+/** 已配置 scene mesh GLB，或可经 Universe 生成后得到 GLB（供 `SHADOW_SET` 等显式开影路径）。 */
+export function hasShadowSceneMesh(global: ShadowEnableInputs): boolean {
+    if (hasConfiguredShadowSceneMesh(global)) {
         return true;
     }
     return canGenerateCollision(global as Global);

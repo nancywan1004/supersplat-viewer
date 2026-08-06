@@ -19,6 +19,7 @@ import type { LocalLightRegion, WorldSpaceBloomRegionJSON, ExperienceSettings } 
 import type { PostEffectSettings } from '../../settings';
 import { ensureBloomEditorSession } from '../../settings-serialize/settings-serialize-helper';
 import type { Global } from '../../types';
+import { isLightingSessionAspectVisible } from '../../view-settings';
 
 const MASK_SIZE = 512;
 /** 与 committed-brightness-volume 一致，用于判断是否为有效 64³ volume 纹理 */
@@ -572,7 +573,10 @@ export class BloomController {
         const blurLevel = bloomSettings.blurLevel ?? 10;
         // local 模式下，只有“确有局部贡献”时才开启 compose bloom，避免 0->非0 时整场亮度/对比突变。
         const hasLocalBloomContribution = editor.bloomBrush === true || this.getPointsForMask().length > 0;
+        // 观看态会话门控：`LIGHTING_BLOOM_SHOW_HIDE_SET` / contentVisibility.lights（不改 settings）
+        const sessionBloomVisible = isLightingSessionAspectVisible(this.global, 'bloom');
         const shouldEnableComposeBloom =
+            sessionBloomVisible &&
             !!bloomSettings.enabled &&
             blurLevel > 0 &&
             (bloomScope === 'global' || hasLocalBloomContribution);
@@ -584,8 +588,8 @@ export class BloomController {
             bloom.blurLevel = Math.max(1, Math.min(5, blurLevel));
             cameraFrame.debug = bloomDebug ? 'bloom' : null;
         } else {
-            // local 模式下保持 bloom pass 结构稳定，避免 intensity 0↔非0 首次切换导致整场亮度跳变。
-            const keepaliveActive = bloomScope === 'local';
+            // 会话隐辉光时不做 local keepalive，避免仍残留 compose 贡献
+            const keepaliveActive = sessionBloomVisible && bloomScope === 'local';
             bloom.intensity = keepaliveActive ? LOCAL_BLOOM_KEEPALIVE_INTENSITY : 0;
             bloom.blurLevel = Math.max(1, Math.min(5, blurLevel));
             cameraFrame.debug = null;
