@@ -464,6 +464,13 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     // start the application
     app.start();
 
+    // WebGPU：后台暂停 tick 的 update/bake；归来 settle 后强制 WorkBuffer 重建（不 hook bind group）
+    // 关闭：?webgpuVisPause=0
+    if (renderer === 'webgpu') {
+        const { installWebgpuVisibilitySession } = await import('./render/webgpu-visibility-session');
+        installWebgpuVisibilitySession(app);
+    }
+
     // Initialize the load-time poster
     if (config.poster) {
         initPoster(events);
