@@ -9,6 +9,7 @@ import {
     readDrawCalls,
     readGsplatBufferUploadMetrics,
     readGsplatsM,
+    readAssetGsplatsM,
     readJsHeapUsedMB,
     readVramTexMB,
     readRefinementSnapshot,
@@ -17,6 +18,9 @@ import {
     formatRuntimeLodPlacement,
     readGsplatBudgetFill,
     formatGsplatBudgetFill,
+    formatGsplatCenterFill,
+    formatGsplatEdgeFill,
+    formatGsplatOutOfViewFill,
     renderRefinementTickMetricsHtml,
     type RefinementTickPayload
 } from './benchmark-refinement';
@@ -375,6 +379,8 @@ export function initBenchmarkHud(global: Global): () => void {
     const bufferUploadSession = createBufferUploadSessionStats();
     /** 最近一帧 bufferUpload（frameend 采样，避免 250ms HUD 漏计 fullRebuild） */
     let lastBufferUpload = readGsplatBufferUploadMetrics(app);
+    /** frameend 采样的上屏 active（避免 tick 开头的 frame.gsplats 滞后/为 0） */
+    let lastGsplatsM = readGsplatsM(app);
     let phase = config.benchmark ? 'loading' : 'idle';
     let currentKeyframe = '—';
     let refineTick: RefinementTickPayload | null = null;
@@ -386,6 +392,10 @@ export function initBenchmarkHud(global: Global): () => void {
     const onFrameEndBufferSample = () => {
         lastBufferUpload = readGsplatBufferUploadMetrics(app);
         accumulateBufferUploadSession(bufferUploadSession, lastBufferUpload);
+        const g = readGsplatsM(app);
+        if (g !== null) {
+            lastGsplatsM = g;
+        }
     };
     app.on('frameend', onFrameEndBufferSample);
 
@@ -487,7 +497,8 @@ export function initBenchmarkHud(global: Global): () => void {
         const fpsNow = Number.isFinite(fps) ? fps.toFixed(0) : '—';
         const fpsP50 = percentile(fpsSamples, 0.5);
         const fpsP95 = percentile(fpsSamples, 0.95);
-        const gsplatsM = readGsplatsM(app);
+        const gsplatsM = lastGsplatsM ?? readGsplatsM(app);
+        const assetGsplatsM = readAssetGsplatsM(app);
         const drawCalls = readDrawCalls(app);
         const bufferUpload = lastBufferUpload;
         const vramMb = readVramTexMB(app);
@@ -515,13 +526,45 @@ export function initBenchmarkHud(global: Global): () => void {
         }
 
         lines.push(row('GPU VRAM', vramMb !== null ? `${vramMb.toFixed(0)} MB` : '—'));
-        lines.push(row('Gsplats', gsplatsM !== null ? `${gsplatsM.toFixed(2)}M` : '—'));
+        // 行名与引擎字段对齐，便于对照 console：app.stats.frame.gsplats
+        lines.push(row('frame.gsplats', gsplatsM !== null ? `${gsplatsM.toFixed(2)}M` : '—'));
+        // Asset：文件/chunk 总点数；仅当与上屏 active 不同时显示（便于对照，非 budget）
+        if (
+            assetGsplatsM !== null &&
+            gsplatsM !== null &&
+            Math.abs(assetGsplatsM - gsplatsM) > 0.005
+        ) {
+            lines.push(row('Asset', `${assetGsplatsM.toFixed(2)}M`));
+        }
         lines.push(row('DrawCalls', drawCalls !== null ? String(drawCalls) : '—'));
 
         const gsplat = app.scene.gsplat as { currentRenderer?: unknown; renderer?: unknown; splatBudget?: unknown };
         lines.push(row('Renderer', formatGsplatRenderer(gsplat.currentRenderer ?? gsplat.renderer)));
-        lines.push(row('SplatBudget', formatSplatBudget(gsplat.splatBudget)));
-        lines.push(row('Budget fill', formatGsplatBudgetFill(readGsplatBudgetFill(app))));
+
+        const budgetFill = readGsplatBudgetFill(app);
+        const hasLodBudget = budgetFill.optimalSplats != null || budgetFill.optimalNodes > 0;
+        const hasSplatBudget =
+            typeof gsplat.splatBudget === 'number' &&
+            Number.isFinite(gsplat.splatBudget) &&
+            gsplat.splatBudget > 0;
+        // budget / Budget fill 仅 LOD（或显式 splatBudget）有意义；非 LOD 只看上面的 Gsplats
+        if (hasLodBudget || hasSplatBudget) {
+            lines.push(row('SplatBudget', formatSplatBudget(gsplat.splatBudget)));
+            // 全树：与 PlayCanvas evaluateNodeLods / balancer 同口径
+            lines.push(row('Budget fill', formatGsplatBudgetFill(budgetFill)));
+            // 中央追齐 = 中央叶 cur≈各自 optimal（optimal 已含全局 budget）；≈100%·OK 即中央已追上
+            if (budgetFill.center) {
+                lines.push(row('Center fill', formatGsplatCenterFill(budgetFill)));
+            }
+            // 视锥内外围：应对齐、可滞后、不挡完成（真「外围追满」看这一行）
+            if (budgetFill.edgeInView) {
+                lines.push(row('Edge fill', formatGsplatEdgeFill(budgetFill)));
+            }
+            // 视锥外：引擎可写细 optimal，refinement 不入队 → 常拖低全树 cur/opt
+            if (budgetFill.outOfView && budgetFill.outOfView.optimalSplats > 0) {
+                lines.push(row('Out fill', formatGsplatOutOfViewFill(budgetFill)));
+            }
+        }
 
         const lodPlacement = readRuntimeLodPlacement(global);
         if (

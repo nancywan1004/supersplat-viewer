@@ -102,21 +102,11 @@ export function resolveLodBehindPenalty(global: Global): number {
  *
  * - `lodScaleAlign: false` → 关
  * - `lodScaleAlign: true` → 开（即使显式写了 lodBaseDistance，仍以配置值为上限做自适应）
- * - 未写 lodScaleAlign，但显式写了 `lodBaseDistance` → 关（人工配置覆盖自动 align）
- * - 两者都未写 → 开（用默认 d0=5 作配置上限）
+ * - 未写 → **默认关**（避免把 d0 拧到 0.2m 量级、budgetScale 爆炸、opt 虚高）
  */
 export function resolveLodScaleAlignEnabled(global: Global): boolean {
     const flag = readSceneProfile(global.settings)?.lodScaleAlign;
-    if (flag === false) {
-        return false;
-    }
-    if (flag === true) {
-        return true;
-    }
-    if (hasExplicitLodBaseDistance(global)) {
-        return false;
-    }
-    return true;
+    return flag === true;
 }
 
 /**

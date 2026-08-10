@@ -1,4 +1,5 @@
 import type { AppBase } from 'playcanvas';
+import { Frustum, Mat4, Vec3, Vec4 } from 'playcanvas';
 
 import type { OctreeRefinementController, OctreeRefinementTickMetrics } from '../loaders/gsplat/lod/octree/refinement-controller';
 import type { Global } from '../types';
@@ -45,10 +46,194 @@ type ViewerLike = {
     octreeRefinementController?: OctreeRefinementController | null;
 };
 
+/**
+ * 汇总 **上屏 active** 点数（interval / totalActiveSplats），不是 SOG 文件 numSplats。
+ * 用于 frame.gsplats 未写入时的兜底。
+ */
+export function sumWorldActiveSplats(app: AppBase): number | null {
+    const director = getGsplatDirector(app);
+    if (!director) {
+        return null;
+    }
+    let sum = 0;
+    let saw = false;
+    const seenWorlds = new Set<GsplatWorldLike>();
+    for (const cameraData of director.camerasMap.values()) {
+        for (const layerData of cameraData.layersMap.values()) {
+            for (const manager of [layerData.gsplatManager, layerData.gsplatManagerShadow]) {
+                const world = manager?.world;
+                if (!world || seenWorlds.has(world)) {
+                    continue;
+                }
+                seenWorlds.add(world);
+                const version = world._currentVersion ?? world._lastWorldStateVersion;
+                const state = version !== undefined ? world._worldStates?.get(version) : undefined;
+                const active = (state as { totalActiveSplats?: number } | undefined)?.totalActiveSplats;
+                if (typeof active === 'number' && Number.isFinite(active) && active >= 0) {
+                    sum += active;
+                    saw = true;
+                    continue;
+                }
+                // world state 尚未建好时：按 placement intervals 估算（勿用 resource.numSplats）
+                const layerPlacements = world._layerPlacements;
+                if (layerPlacements?.length) {
+                    for (let i = 0; i < layerPlacements.length; i++) {
+                        const p = layerPlacements[i] as {
+                            resource?: { numSplats?: number } | null;
+                            intervals?: Map<number, { x: number; y: number }>;
+                        };
+                        const n = countPlacementActiveSplats(p);
+                        if (n > 0) {
+                            sum += n;
+                            saw = true;
+                        }
+                    }
+                }
+                const instances = world._octreeInstances;
+                if (!instances) {
+                    continue;
+                }
+                for (const inst of instances.values()) {
+                    const activePlacements = (inst as {
+                        activePlacements?: Set<{
+                            resource?: { numSplats?: number } | null;
+                            intervals?: Map<number, { x: number; y: number }>;
+                        }>;
+                    }).activePlacements;
+                    if (!activePlacements) {
+                        continue;
+                    }
+                    for (const placement of activePlacements) {
+                        const n = countPlacementActiveSplats(placement);
+                        if (n > 0) {
+                            sum += n;
+                            saw = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return saw ? sum : null;
+}
+
+/** SOG/资源文件总点数（与是否截断 interval 无关） */
+export function sumAssetPlacementSplats(app: AppBase): number | null {
+    const director = getGsplatDirector(app);
+    if (!director) {
+        return null;
+    }
+    let sum = 0;
+    let saw = false;
+    const seenWorlds = new Set<GsplatWorldLike>();
+    const seenResources = new Set<unknown>();
+    for (const cameraData of director.camerasMap.values()) {
+        for (const layerData of cameraData.layersMap.values()) {
+            for (const manager of [layerData.gsplatManager, layerData.gsplatManagerShadow]) {
+                const world = manager?.world;
+                if (!world || seenWorlds.has(world)) {
+                    continue;
+                }
+                seenWorlds.add(world);
+                const addResource = (resource: { numSplats?: number } | null | undefined) => {
+                    if (!resource || seenResources.has(resource)) {
+                        return;
+                    }
+                    seenResources.add(resource);
+                    const num = resource.numSplats ?? 0;
+                    if (num > 0) {
+                        sum += num;
+                        saw = true;
+                    }
+                };
+                const layerPlacements = world._layerPlacements;
+                if (layerPlacements?.length) {
+                    for (let i = 0; i < layerPlacements.length; i++) {
+                        addResource(layerPlacements[i]?.resource);
+                    }
+                }
+                const instances = world._octreeInstances;
+                if (!instances) {
+                    continue;
+                }
+                for (const inst of instances.values()) {
+                    const activePlacements = (inst as {
+                        activePlacements?: Set<{ resource?: { numSplats?: number } | null }>;
+                    }).activePlacements;
+                    if (!activePlacements) {
+                        continue;
+                    }
+                    for (const placement of activePlacements) {
+                        addResource(placement?.resource);
+                    }
+                }
+            }
+        }
+    }
+    return saw ? sum : null;
+}
+
+function countPlacementActiveSplats(placement: {
+    resource?: { numSplats?: number } | null;
+    intervals?: Map<number, { x: number; y: number }>;
+} | null | undefined): number {
+    if (!placement) {
+        return 0;
+    }
+    const intervals = placement.intervals;
+    if (intervals && intervals.size > 0) {
+        let total = 0;
+        for (const interval of intervals.values()) {
+            if (!interval) {
+                continue;
+            }
+            total += interval.y - interval.x + 1;
+        }
+        return total > 0 ? total : 0;
+    }
+    // 无 interval = 整文件上屏
+    const num = placement.resource?.numSplats ?? 0;
+    return num > 0 ? num : 0;
+}
+
+/** @deprecated 易与 SOG 文件总点数混淆；请用 sumWorldActiveSplats */
+export function sumWorldPlacementSplats(app: AppBase): number | null {
+    return sumWorldActiveSplats(app);
+}
+
+/**
+ * 同屏 active splats（百万）。
+ *
+ * PlayCanvas 在 tick **开头**用上一帧的 `_gsplatCount` 写入 `stats.frame.gsplats`，
+ * 而 director 在 **render** 里才更新 `_gsplatCount`。viewer 又是 `autoRender=false`，
+ * 只看 `frame.gsplats` 常会读到 0 / 过期值。优先读 live `_gsplatCount` 与 world state。
+ */
 export function readGsplatsM(app: AppBase): number | null {
-    const frame = (app.stats as { frame?: { gsplats?: number } })?.frame;
-    const n = frame?.gsplats;
-    return Number.isFinite(n) ? (n as number) / 1_000_000 : null;
+    const live = (app.renderer as { _gsplatCount?: number } | undefined)?._gsplatCount;
+    if (Number.isFinite(live) && (live as number) > 0) {
+        return (live as number) / 1_000_000;
+    }
+
+    const fromActive = sumWorldActiveSplats(app);
+    if (fromActive != null && fromActive > 0) {
+        return fromActive / 1_000_000;
+    }
+
+    const frame = (app.stats as { frame?: { gsplats?: number } })?.frame?.gsplats;
+    if (Number.isFinite(frame) && (frame as number) > 0) {
+        return (frame as number) / 1_000_000;
+    }
+
+    if (Number.isFinite(live)) {
+        return (live as number) / 1_000_000;
+    }
+    return Number.isFinite(frame) ? (frame as number) / 1_000_000 : null;
+}
+
+/** 资产文件总点数（百万）；与 Gsplats（上屏 active）对照用，不涉及 budget */
+export function readAssetGsplatsM(app: AppBase): number | null {
+    const n = sumAssetPlacementSplats(app);
+    return n != null ? n / 1_000_000 : null;
 }
 
 /** PlayCanvas stats.drawCalls.total：本帧参与 gsplat compaction/绘制的 interval 数（≈ bake 并行度观测） */
@@ -161,7 +346,7 @@ type AllocatorLike = {
     freeSize?: number;
     fragmentation?: number;
 };
-type WorldStateLike = { fullRebuild?: boolean };
+type WorldStateLike = { fullRebuild?: boolean; totalActiveSplats?: number };
 type GsplatWorldLike = {
     bufferCopyUploaded?: number;
     bufferCopyTotal?: number;
@@ -328,14 +513,22 @@ function readCurrentLodSum(director: GsplatDirectorLike): number | null {
     return saw ? sum : null;
 }
 
+export type GsplatBudgetRegionFill = {
+    currentSplats: number;
+    optimalSplats: number;
+    nodes: number;
+};
+
 export type GsplatBudgetFillSnapshot = {
     /** scene.gsplat.splatBudget 名义上限 */
     splatBudget: number;
     /** 引擎 _enforceBudget 同构估算：budget − fixed − texture padding */
     adjustedBudget: number | null;
-    /** Σ lods[optimalLod].count（balancer 后目标档点数） */
+    /**
+     * 全树 Σ lods[optimalLod].count（与 PlayCanvas evaluateNodeLods / balancer 同范围）
+     */
     optimalSplats: number | null;
-    /** Σ lods[currentLod].count（实例当前选档点数；缺细档时会粗于 optimal） */
+    /** 全树 Σ lods[currentLod].count */
     currentSplats: number | null;
     /** 有 optimalLod≥0 的叶数 */
     optimalNodes: number;
@@ -343,13 +536,120 @@ export type GsplatBudgetFillSnapshot = {
     currentNodes: number;
     /** 引擎 _budgetScale */
     budgetScale: number | null;
+    /**
+     * 中央（edgeFactor≥0.45，与 refinement 同阈值）：证明视野中央已追上各自 optimal
+     * （optimal 已含全局 budget 分配结果）
+     */
+    center: GsplatBudgetRegionFill | null;
+    /**
+     * 视锥内外围（edgeFactor < 0.45）：也应追 engineOptimal，仅降优先 / 可滞后；不挡 Refine 完成
+     */
+    edgeInView: GsplatBudgetRegionFill | null;
+    /**
+     * 视锥外：引擎仍可写细档 optimal，但 refinement **不入队**；勿当作「外围没追满」
+     */
+    outOfView: GsplatBudgetRegionFill | null;
+    /**
+     * @deprecated 兼容旧读法 = edgeInView + outOfView；请优先看 edgeInView
+     */
+    edge: GsplatBudgetRegionFill | null;
 };
+
+/** 与 refinement-controller T.viewport.edgeRelaxOptimal 保持一致 */
+const BUDGET_FILL_CENTER_EDGE_FACTOR = 0.45;
+const BUDGET_FILL_EDGE_NDC_INNER = 0.44;
+const BUDGET_FILL_EDGE_NDC_OUTER = 0.72;
+
+const _bfViewProj = new Mat4();
+const _bfFrustum = new Frustum();
+const _bfWorldMin = new Vec3();
+const _bfWorldMax = new Vec3();
+const _bfClip = new Vec4();
 
 function padSlots(numSplats: number, textureWidth: number): number {
     if (!(textureWidth > 0) || !(numSplats > 0)) {
         return 0;
     }
     return (textureWidth - (numSplats % textureWidth)) % textureWidth;
+}
+
+function edgeFactorFromNdcExtent(ndcExtent: number): number {
+    if (ndcExtent <= BUDGET_FILL_EDGE_NDC_INNER) {
+        return 1;
+    }
+    if (ndcExtent >= BUDGET_FILL_EDGE_NDC_OUTER) {
+        return 0;
+    }
+    return 1 - (ndcExtent - BUDGET_FILL_EDGE_NDC_INNER) / (BUDGET_FILL_EDGE_NDC_OUTER - BUDGET_FILL_EDGE_NDC_INNER);
+}
+
+function computeViewportAabbEdgeFactor(
+    viewProj: Mat4,
+    minX: number,
+    minY: number,
+    minZ: number,
+    maxX: number,
+    maxY: number,
+    maxZ: number
+): number {
+    let projected = false;
+    let minNdcX = Infinity;
+    let minNdcY = Infinity;
+    let maxNdcX = -Infinity;
+    let maxNdcY = -Infinity;
+    for (let ix = 0; ix < 2; ix++) {
+        const x = ix === 0 ? minX : maxX;
+        for (let iy = 0; iy < 2; iy++) {
+            const y = iy === 0 ? minY : maxY;
+            for (let iz = 0; iz < 2; iz++) {
+                const z = iz === 0 ? minZ : maxZ;
+                _bfClip.set(x, y, z, 1);
+                viewProj.transformVec4(_bfClip, _bfClip);
+                if (_bfClip.w <= 0.001) {
+                    continue;
+                }
+                const invW = 1 / _bfClip.w;
+                const ndcX = _bfClip.x * invW;
+                const ndcY = _bfClip.y * invW;
+                minNdcX = Math.min(minNdcX, ndcX);
+                minNdcY = Math.min(minNdcY, ndcY);
+                maxNdcX = Math.max(maxNdcX, ndcX);
+                maxNdcY = Math.max(maxNdcY, ndcY);
+                projected = true;
+            }
+        }
+    }
+    if (!projected) {
+        return 0;
+    }
+    const nearestNdcX = minNdcX > 0 ? minNdcX : (maxNdcX < 0 ? -maxNdcX : 0);
+    const nearestNdcY = minNdcY > 0 ? minNdcY : (maxNdcY < 0 ? -maxNdcY : 0);
+    return edgeFactorFromNdcExtent(Math.max(nearestNdcX, nearestNdcY));
+}
+
+function aabbIntersectsFrustum(
+    frustum: Frustum,
+    minX: number,
+    minY: number,
+    minZ: number,
+    maxX: number,
+    maxY: number,
+    maxZ: number
+): boolean {
+    for (let p = 0; p < 6; p++) {
+        const plane = frustum.planes[p];
+        const nx = plane.normal.x;
+        const ny = plane.normal.y;
+        const nz = plane.normal.z;
+        const d = plane.distance;
+        const px = nx >= 0 ? maxX : minX;
+        const py = ny >= 0 ? maxY : minY;
+        const pz = nz >= 0 ? maxZ : minZ;
+        if (nx * px + ny * py + nz * pz + d <= 0) {
+            return false;
+        }
+    }
+    return true;
 }
 
 function sumLodCountAt(
@@ -374,9 +674,33 @@ function sumLodCountAt(
     return { splats, nodes: count };
 }
 
+function addLodCount(
+    region: GsplatBudgetRegionFill,
+    nodes: Array<{ lods?: Array<{ count?: number }> }>,
+    nodeInfos: Array<{ optimalLod?: number; currentLod?: number }>,
+    nodeIndex: number
+): void {
+    const optLod = nodeInfos[nodeIndex]?.optimalLod;
+    const curLod = nodeInfos[nodeIndex]?.currentLod;
+    if (typeof optLod === 'number' && optLod >= 0) {
+        const c = nodes[nodeIndex]?.lods?.[optLod]?.count;
+        if (typeof c === 'number' && Number.isFinite(c) && c > 0) {
+            region.optimalSplats += c;
+            region.nodes++;
+        }
+    }
+    if (typeof curLod === 'number' && curLod >= 0) {
+        const c = nodes[nodeIndex]?.lods?.[curLod]?.count;
+        if (typeof c === 'number' && Number.isFinite(c) && c > 0) {
+            region.currentSplats += c;
+        }
+    }
+}
+
 /**
  * 读取引擎预算填充诊断（名义 bud / adjusted / Σoptimal / Σcurrent）。
- * adjusted 按 gsplat-world._enforceBudget 同构估算；须在 LOD/budget 更新后的帧采样。
+ * **全树口径**与 PlayCanvas evaluateNodeLods 一致；另附中央 / 视锥内外围 / 视锥外分区。
+ * 外围应对齐（可滞后）；视锥外不入队，勿与「外围没追满」混谈。
  */
 export function readGsplatBudgetFill(app: AppBase): GsplatBudgetFillSnapshot {
     const splatBudget =
@@ -388,7 +712,11 @@ export function readGsplatBudgetFill(app: AppBase): GsplatBudgetFillSnapshot {
         currentSplats: null,
         optimalNodes: 0,
         currentNodes: 0,
-        budgetScale: null
+        budgetScale: null,
+        center: null,
+        edgeInView: null,
+        outOfView: null,
+        edge: null
     };
     const director = getGsplatDirector(app);
     if (!director) {
@@ -402,7 +730,24 @@ export function readGsplatBudgetFill(app: AppBase): GsplatBudgetFillSnapshot {
     let sawLod = false;
     let adjustedBudget: number | null = null;
     let budgetScale: number | null = null;
+    const center: GsplatBudgetRegionFill = { currentSplats: 0, optimalSplats: 0, nodes: 0 };
+    const edgeInView: GsplatBudgetRegionFill = { currentSplats: 0, optimalSplats: 0, nodes: 0 };
+    const outOfView: GsplatBudgetRegionFill = { currentSplats: 0, optimalSplats: 0, nodes: 0 };
+    let sawRegion = false;
     const seenWorlds = new Set<GsplatWorldLike>();
+
+    let viewProj: Mat4 | null = null;
+    let frustum: Frustum | null = null;
+    for (const cam of director.camerasMap.keys()) {
+        const camera = cam as { projectionMatrix?: Mat4; viewMatrix?: Mat4 };
+        if (camera?.projectionMatrix && camera?.viewMatrix) {
+            _bfViewProj.mul2(camera.projectionMatrix, camera.viewMatrix);
+            _bfFrustum.setFromMat4(_bfViewProj);
+            viewProj = _bfViewProj;
+            frustum = _bfFrustum;
+            break;
+        }
+    }
 
     for (const cameraData of director.camerasMap.values()) {
         for (const layerData of cameraData.layersMap.values()) {
@@ -462,8 +807,12 @@ export function readGsplatBudgetFill(app: AppBase): GsplatBudgetFillSnapshot {
                 }
                 for (const inst of instances.values()) {
                     const typed = inst as {
-                        octree?: { nodes?: Array<{ lods?: Array<{ count?: number }> }> };
+                        octree?: {
+                            nodes?: Array<{ lods?: Array<{ count?: number }> }>;
+                            nodeBoundsMinMax?: Float32Array;
+                        };
                         nodeInfos?: Array<{ optimalLod?: number; currentLod?: number }>;
+                        placement?: { node?: { getWorldTransform?: () => Mat4 } };
                     };
                     const nodes = typed.octree?.nodes;
                     const infos = typed.nodeInfos;
@@ -477,32 +826,101 @@ export function readGsplatBudgetFill(app: AppBase): GsplatBudgetFillSnapshot {
                     optimalNodes += opt.nodes;
                     currentSplats += cur.splats;
                     currentNodes += cur.nodes;
+
+                    const boundsFlat = typed.octree?.nodeBoundsMinMax;
+                    const worldTransform = typed.placement?.node?.getWorldTransform?.() ?? null;
+                    if (!boundsFlat || !worldTransform || !viewProj || !frustum) {
+                        continue;
+                    }
+                    const n = Math.min(nodes.length, infos.length, Math.floor(boundsFlat.length / 6));
+                    for (let i = 0; i < n; i++) {
+                        const b = i * 6;
+                        _bfWorldMin.set(boundsFlat[b], boundsFlat[b + 1], boundsFlat[b + 2]);
+                        _bfWorldMax.set(boundsFlat[b + 3], boundsFlat[b + 4], boundsFlat[b + 5]);
+                        worldTransform.transformPoint(_bfWorldMin, _bfWorldMin);
+                        worldTransform.transformPoint(_bfWorldMax, _bfWorldMax);
+                        const minX = Math.min(_bfWorldMin.x, _bfWorldMax.x);
+                        const minY = Math.min(_bfWorldMin.y, _bfWorldMax.y);
+                        const minZ = Math.min(_bfWorldMin.z, _bfWorldMax.z);
+                        const maxX = Math.max(_bfWorldMin.x, _bfWorldMax.x);
+                        const maxY = Math.max(_bfWorldMin.y, _bfWorldMax.y);
+                        const maxZ = Math.max(_bfWorldMin.z, _bfWorldMax.z);
+                        const inFrustum = aabbIntersectsFrustum(frustum, minX, minY, minZ, maxX, maxY, maxZ);
+                        const edgeFactor = inFrustum
+                            ? computeViewportAabbEdgeFactor(viewProj, minX, minY, minZ, maxX, maxY, maxZ)
+                            : 0;
+                        sawRegion = true;
+                        if (!inFrustum) {
+                            addLodCount(outOfView, nodes, infos, i);
+                        } else if (edgeFactor >= BUDGET_FILL_CENTER_EDGE_FACTOR) {
+                            addLodCount(center, nodes, infos, i);
+                        } else {
+                            addLodCount(edgeInView, nodes, infos, i);
+                        }
+                    }
                 }
             }
         }
     }
 
+    // 非 LOD：无 nodeInfos，用上屏 active
+    let resolvedCurrent = sawLod ? currentSplats : null;
+    if (!sawLod) {
+        const fromActive = sumWorldActiveSplats(app);
+        if (fromActive != null) {
+            resolvedCurrent = fromActive;
+        }
+    }
+
+    const edgeCombined: GsplatBudgetRegionFill | null = sawRegion
+        ? {
+            currentSplats: edgeInView.currentSplats + outOfView.currentSplats,
+            optimalSplats: edgeInView.optimalSplats + outOfView.optimalSplats,
+            nodes: edgeInView.nodes + outOfView.nodes
+        }
+        : null;
+
     return {
         splatBudget: empty.splatBudget,
         adjustedBudget,
         optimalSplats: sawLod ? optimalSplats : null,
-        currentSplats: sawLod ? currentSplats : null,
+        currentSplats: resolvedCurrent,
         optimalNodes,
         currentNodes,
-        budgetScale
+        budgetScale,
+        center: sawRegion ? center : null,
+        edgeInView: sawRegion ? edgeInView : null,
+        outOfView: sawRegion ? outOfView : null,
+        edge: edgeCombined
     };
+}
+
+function formatRegionCurOpt(region: GsplatBudgetRegionFill | null): string {
+    if (!region || region.optimalSplats <= 0) {
+        return '—';
+    }
+    const curM = (region.currentSplats / 1e6).toFixed(2);
+    const optM = (region.optimalSplats / 1e6).toFixed(2);
+    const pct = (100 * region.currentSplats) / region.optimalSplats;
+    return `cur ${curM}M · opt ${optM}M · cur/opt ${pct.toFixed(0)}% · n${region.nodes}`;
 }
 
 export function formatGsplatBudgetFill(snapshot: GsplatBudgetFillSnapshot): string {
     const fmtM = (v: number | null) =>
         v === null || !Number.isFinite(v) ? '—' : `${(v / 1e6).toFixed(2)}M`;
     const bud = snapshot.splatBudget > 0 ? fmtM(snapshot.splatBudget) : '0';
-    const parts = [
-        `cur ${fmtM(snapshot.currentSplats)}`,
-        `opt ${fmtM(snapshot.optimalSplats)}`,
-        `adj ${fmtM(snapshot.adjustedBudget)}`,
-        `(bud ${bud})`
-    ];
+    const hasLod = snapshot.optimalSplats != null || snapshot.optimalNodes > 0;
+    const parts: string[] = [];
+    if (hasLod) {
+        parts.push(
+            `cur ${fmtM(snapshot.currentSplats)}`,
+            `opt ${fmtM(snapshot.optimalSplats)}`,
+            `adj ${fmtM(snapshot.adjustedBudget)}`,
+            `(bud ${bud})`
+        );
+    } else {
+        parts.push(`cur ${fmtM(snapshot.currentSplats)}`, `(bud ${bud})`);
+    }
     if (
         snapshot.optimalSplats != null &&
         snapshot.adjustedBudget != null &&
@@ -510,6 +928,13 @@ export function formatGsplatBudgetFill(snapshot: GsplatBudgetFillSnapshot): stri
     ) {
         const pct = (100 * snapshot.optimalSplats) / snapshot.adjustedBudget;
         parts.push(`opt/adj ${pct.toFixed(0)}%`);
+    } else if (
+        !hasLod &&
+        snapshot.currentSplats != null &&
+        snapshot.splatBudget > 0
+    ) {
+        const pct = (100 * snapshot.currentSplats) / snapshot.splatBudget;
+        parts.push(`cur/bud ${pct.toFixed(0)}%`);
     }
     if (
         snapshot.currentSplats != null &&
@@ -523,6 +948,49 @@ export function formatGsplatBudgetFill(snapshot: GsplatBudgetFillSnapshot): stri
         parts.push(`×${snapshot.budgetScale.toFixed(2)}`);
     }
     return parts.join(' · ');
+}
+
+/** 中央追齐（含 budget 分配后的 optimal）；≈100% 即中央已追上 */
+export function formatGsplatCenterFill(snapshot: GsplatBudgetFillSnapshot): string {
+    const body = formatRegionCurOpt(snapshot.center);
+    if (body === '—') {
+        return '—';
+    }
+    const pct =
+        snapshot.center && snapshot.center.optimalSplats > 0
+            ? (100 * snapshot.center.currentSplats) / snapshot.center.optimalSplats
+            : 0;
+    const ok = pct >= 95 ? ' · OK' : '';
+    return `${body}${ok}`;
+}
+
+/**
+ * 视锥内外围：应对齐（可滞后、不挡完成）。
+ * ≥95% 标 OK；长期偏低才是真「外围不追满」。
+ */
+export function formatGsplatEdgeFill(snapshot: GsplatBudgetFillSnapshot): string {
+    const region = snapshot.edgeInView ?? snapshot.edge;
+    const body = formatRegionCurOpt(region);
+    if (body === '—') {
+        return '— · 可滞后';
+    }
+    const pct =
+        region && region.optimalSplats > 0
+            ? (100 * region.currentSplats) / region.optimalSplats
+            : 0;
+    const ok = pct >= 95 ? ' · OK' : ' · 可滞后';
+    return `${body}${ok}`;
+}
+
+/**
+ * 视锥外：引擎可写细 optimal，refinement 不入队 → cur 常低于 opt，属口径差而非滞后追档失败。
+ */
+export function formatGsplatOutOfViewFill(snapshot: GsplatBudgetFillSnapshot): string {
+    const body = formatRegionCurOpt(snapshot.outOfView);
+    if (body === '—') {
+        return '— · 不入队';
+    }
+    return `${body} · 不入队`;
 }
 
 /**

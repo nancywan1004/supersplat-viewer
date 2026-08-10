@@ -57,6 +57,7 @@ import { getCameraCollisionManager } from './collision/camera-collision-manager'
 import { initializeGltfRuntime } from './loaders/gltf/gltf-transcoder';
 import { applyBenchmarkConfigFlags, createSceneProfileBenchmark } from './benchmark/benchmark';
 import { initBenchmarkHud, shouldShowBenchmarkHud } from './benchmark/benchmark-hud';
+import { installFrameGsplatsSync } from './benchmark/sync-frame-gsplats';
 import {
     initFrameProfiler,
     shouldAutoStartFrameProfiler,
@@ -418,7 +419,10 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     // Bind the gsplat renderer before any gsplat component is loaded. LOD paths
     // refresh this later, but ordinary SOG scenes also need ?webgpu / ?gpu-sort
     // to select the engine's WebGPU renderer instead of staying on CPU sort.
+    // 非 LOD 不在此写 splatBudget（budget 只服务 LOD 选档；单文件 SOG 只观测 active 点数）。
     bindGsplatRenderer(app.scene.gsplat as unknown as GsplatSceneRuntime, global);
+    // render 后把 _gsplatCount 写回 stats.frame.gsplats（否则 autoRender=false 时该字段常为 0）
+    installFrameGsplatsSync(app);
 
     // 加载期相机锁：仅进度条真正收起（progressThresholdReached）后解锁。
     // 勿绑 streamingLodUnlocked / firstFrame——粗层上屏就会提前可拖，与进度条语义不一致。
