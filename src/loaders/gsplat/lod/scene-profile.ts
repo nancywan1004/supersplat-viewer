@@ -1,7 +1,15 @@
 import type { ExperienceSettings } from '../../../settings';
 import type { Global } from '../../../types';
+import {
+    DEFAULT_LOD_RENDER_SCALE,
+    DEFAULT_LOD_RENDER_SCALE_FOVEATION,
+    type LodRenderScaleFoveationParams,
+    type LodSelectMode
+} from './octree/lod-render-scale';
 
 export type LodRuntime = 'refinement' | 'native';
+
+export type { LodSelectMode, LodRenderScaleFoveationParams };
 
 /** PlayCanvas Billions 示例；引擎默认 1 对大场景路径动画 churn 过高 */
 export const DEFAULT_LOD_UPDATE_DISTANCE = 32;
@@ -33,6 +41,14 @@ type SceneProfileObject = {
     lodScaleQualityFactor?: unknown;
     /** 'performance'|'balanced'|'quality' → 1.0/1.4/1.8；可被 lodScaleQualityFactor 覆盖 */
     lodScaleQuality?: unknown;
+    /** 'distance'（默认）| 'renderScale'：屏幕尺寸选档，见 lodRenderScale机制说明.md */
+    lodSelectMode?: unknown;
+    /** 中央目标屏上直径（px）；仅 lodSelectMode=renderScale */
+    lodRenderScale?: unknown;
+    coneFov0?: unknown;
+    coneFov?: unknown;
+    coneFoveate?: unknown;
+    behindFoveate?: unknown;
 };
 
 function readSceneProfile(settings: ExperienceSettings): SceneProfileObject | undefined {
@@ -148,4 +164,59 @@ export function resolveLodRuntime(global: Global): LodRuntime {
 
 export function isNativeLodRuntime(global: Global): boolean {
     return resolveLodRuntime(global) === 'native';
+}
+
+/**
+ * 选档模式：URL/config `lodSelectMode` > settings.sceneProfile.lodSelectMode。
+ * 若 URL 只给了 `lodRenderScale`/`renderScale` 且未写 mode → 视为 `renderScale`。
+ * 默认 `distance`（米制 + budget）。
+ */
+export function resolveLodSelectMode(global: Global): LodSelectMode {
+    const fromConfig = (global.config as { lodSelectMode?: unknown }).lodSelectMode;
+    if (fromConfig === 'renderScale' || fromConfig === 'distance') {
+        return fromConfig;
+    }
+    if (readPositiveNumber((global.config as { lodRenderScale?: unknown }).lodRenderScale) !== undefined) {
+        return 'renderScale';
+    }
+    const mode = readSceneProfile(global.settings)?.lodSelectMode;
+    if (mode === 'renderScale' || mode === 'distance') {
+        return mode;
+    }
+    return 'distance';
+}
+
+/**
+ * 中央目标屏上直径（px）。
+ * URL/config `lodRenderScale`/`renderScale` > settings.sceneProfile.lodRenderScale > 缺省 1.0。
+ */
+export function resolveLodRenderScale(global: Global): number {
+    const fromConfig = readPositiveNumber((global.config as { lodRenderScale?: unknown }).lodRenderScale);
+    if (fromConfig !== undefined) {
+        return fromConfig;
+    }
+    const fromSettings = readPositiveNumber(readSceneProfile(global.settings)?.lodRenderScale);
+    if (fromSettings !== undefined) {
+        return fromSettings;
+    }
+    return DEFAULT_LOD_RENDER_SCALE;
+}
+
+function readUnitIntervalOrPositive(value: unknown, fallback: number): number {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+        return fallback;
+    }
+    return value;
+}
+
+/** foveation 锥参数；角度单位度 */
+export function resolveLodRenderScaleFoveation(global: Global): LodRenderScaleFoveationParams {
+    const profile = readSceneProfile(global.settings);
+    const d = DEFAULT_LOD_RENDER_SCALE_FOVEATION;
+    return {
+        coneFov0Deg: readUnitIntervalOrPositive(profile?.coneFov0, d.coneFov0Deg),
+        coneFovDeg: readUnitIntervalOrPositive(profile?.coneFov, d.coneFovDeg),
+        coneFoveate: readUnitIntervalOrPositive(profile?.coneFoveate, d.coneFoveate),
+        behindFoveate: readUnitIntervalOrPositive(profile?.behindFoveate, d.behindFoveate)
+    };
 }

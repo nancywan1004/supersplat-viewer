@@ -13,9 +13,27 @@ import {
 import type { Global } from '../../../../types';
 import {
     DEFAULT_LOD_BASE_DISTANCE,
-    DEFAULT_LOD_MULTIPLIER
+    DEFAULT_LOD_MULTIPLIER,
+    resolveLodRenderScale,
+    resolveLodRenderScaleFoveation,
+    resolveLodSelectMode
 } from '../scene-profile';
 import { getOctreeBootstrapLod, isOctreeBootstrapPlaceableNode } from './lod-meta';
+import {
+    buildLeafRepDiameterTable,
+    computeEffectiveRenderScale,
+    computeFilePriority,
+    computeFoveateFactor,
+    computePixelFactor,
+    computeScreenDiameter,
+    computeViewAngleDeg,
+    computeVisualUrgency,
+    mergeVisualBudgetLod,
+    resolveVerticalFovRad,
+    selectRenderScaleLodFromDiameters,
+    type LeafRepDiameterTable,
+    type LodRenderScaleFoveationParams
+} from './lod-render-scale';
 import {
     findAllOctreeInstances,
     requestOctreePlacementUpdate,
@@ -63,7 +81,7 @@ const T = {
         edgeNdcOuter: 0.72,
         /**
          * 中央 / 边缘分界（edgeFactor）。
-         * ≥ 此值：中央（收条统计 + 较快跳档）；< 此值：边缘（仍追 engineOptimal，仅降优先）。
+         * ≥ 此值：中央（收条统计 + 一次跳到目标档）；< 此值：边缘（仍追 optimal，ladder 降优先）。
          * 不再用于「边缘放宽一档目标」。
          */
         edgeRelaxOptimal: 0.45,
@@ -420,6 +438,8 @@ export type { OctreeLike };
 
 export type GSplatOctreeResourceLike = {
     octree?: OctreeLike | null;
+    /** lod-meta 原始 data（tree 已被引擎置 null；可含 leafRepScale） */
+    data?: unknown;
 };
 
 /** 多文件 octree 渐进加载；单文件 .sog 等无 octree 或仅 1 个物理文件时返回 false */
@@ -490,6 +510,10 @@ type PrioritizedBatch = {
     centerBehindSamples: CenterBehindSample[];
     needsLodSwitch: boolean;
     staleLodNodes: number;
+    /** renderScale 本拍写回钳制叶数 */
+    renderScaleClampedNodes: number;
+    /** 本拍入队文件的 visualUrgency 均值（仅 renderScale） */
+    avgVisualUrgency: number;
 };
 
 export type CenterBehindSample = {
@@ -525,6 +549,125 @@ export type StreamingViewportOptions = {
 /** @deprecated 使用 {@link StreamingViewportOptions} */
 export type StreamingViewportBootstrapOptions = StreamingViewportOptions;
 
+type RenderScaleLodSample = {
+    renderScaleLod: number;
+    engineOptimalLod: number;
+    targetLod: number;
+    effective: number;
+    distance: number;
+};
+
+type RenderScaleTickStats = {
+    n: number;
+    /** targetLod !== engineOptimalLod（合并后写回改变了引擎档） */
+    mergedChanged: number;
+    /** renderScaleLod > engineOptimalLod：视觉目标更粗，clamp 抬粗 */
+    visualCoarser: number;
+    /** engineOptimalLod > renderScaleLod：引擎/budget 更粗，视觉想更细但被挡住 */
+    engineCoarser: number;
+    /** 两者相等 */
+    equal: number;
+    /** 各档计数：index = lod */
+    histRenderScaleLod: number[];
+    histEngineOptimalLod: number[];
+    histTargetLod: number[];
+    meanRenderScaleLod: number;
+    meanEngineOptimalLod: number;
+    meanTargetLod: number;
+    meanDeltaTargetMinusEngine: number;
+};
+
+type RenderScaleEvalState = {
+    enabled: boolean;
+    baseRenderScale: number;
+    foveation: LodRenderScaleFoveationParams;
+    table: LeafRepDiameterTable;
+    scratchDiameters: Float32Array;
+    lastClampedNodes: number;
+    /**
+     * applyLodChanges 补丁在 merge 前写入的引擎档（-1=尚未采到）。
+     * scan 读 nodeInfo.optimalLod 可能已是上帧 target，采样/合并应优先用此缓冲。
+     */
+    lastEngineOptimalByLeaf: Int16Array;
+    /** 仅 buildPriorityFiles scan 期间为 true，避免 applyLodChanges 补丁污染样本 */
+    samplingEnabled: boolean;
+    /** 本拍 clamp 样本（视锥内叶）；scan 开头清空 */
+    lastTickSamples: RenderScaleLodSample[];
+    lastTickStats: RenderScaleTickStats | null;
+    /** 最近一次 full scan 的局部相机；供 applyLodChanges 补丁使用 */
+    cameraLocal: {
+        px: number;
+        py: number;
+        pz: number;
+        fwx: number;
+        fwy: number;
+        fwz: number;
+    } | null;
+    pixelFactor: number;
+};
+
+function emptyRenderScaleTickStats(lodLevels: number): RenderScaleTickStats {
+    const hist = () => new Array(Math.max(1, lodLevels)).fill(0);
+    return {
+        n: 0,
+        mergedChanged: 0,
+        visualCoarser: 0,
+        engineCoarser: 0,
+        equal: 0,
+        histRenderScaleLod: hist(),
+        histEngineOptimalLod: hist(),
+        histTargetLod: hist(),
+        meanRenderScaleLod: 0,
+        meanEngineOptimalLod: 0,
+        meanTargetLod: 0,
+        meanDeltaTargetMinusEngine: 0
+    };
+}
+
+function summarizeRenderScaleSamples(
+    samples: RenderScaleLodSample[],
+    lodLevels: number
+): RenderScaleTickStats {
+    const stats = emptyRenderScaleTickStats(lodLevels);
+    if (samples.length === 0) {
+        return stats;
+    }
+    let sumRs = 0;
+    let sumEng = 0;
+    let sumTgt = 0;
+    let sumDelta = 0;
+    for (const s of samples) {
+        stats.n++;
+        sumRs += s.renderScaleLod;
+        sumEng += s.engineOptimalLod;
+        sumTgt += s.targetLod;
+        sumDelta += s.targetLod - s.engineOptimalLod;
+        if (s.targetLod !== s.engineOptimalLod) {
+            stats.mergedChanged++;
+        }
+        if (s.renderScaleLod > s.engineOptimalLod) {
+            stats.visualCoarser++;
+        } else if (s.engineOptimalLod > s.renderScaleLod) {
+            stats.engineCoarser++;
+        } else {
+            stats.equal++;
+        }
+        const bump = (hist: number[], lod: number) => {
+            const i = Math.max(0, Math.min(hist.length - 1, lod | 0));
+            hist[i]++;
+        };
+        bump(stats.histRenderScaleLod, s.renderScaleLod);
+        bump(stats.histEngineOptimalLod, s.engineOptimalLod);
+        bump(stats.histTargetLod, s.targetLod);
+    }
+    const n = stats.n;
+    stats.meanRenderScaleLod = sumRs / n;
+    stats.meanEngineOptimalLod = sumEng / n;
+    stats.meanTargetLod = sumTgt / n;
+    stats.meanDeltaTargetMinusEngine = sumDelta / n;
+    return stats;
+}
+
 type RefinementEvaluateContext = {
     scene: OctreeStreamingScene;
     gsplat: GsplatSceneLike;
@@ -537,6 +680,8 @@ type RefinementEvaluateContext = {
     bootstrapCoarsenActive: boolean;
     /** 放粗档数；0 表示关闭 */
     bootstrapCoarsenSteps: number;
+    /** lodSelectMode=renderScale 时非 null；默认 distance 为 null */
+    renderScale: RenderScaleEvalState | null;
 };
 
 /**
@@ -570,6 +715,161 @@ function refreshEvalLodParams(ctx: RefinementEvaluateContext): LodPlacementParam
     const lod = lodParamsFromComponent(ctx.scene.gsplatEntity.gsplat as GSplatComponent | null);
     ctx.lod = lod;
     return lod;
+}
+
+function fillScratchRepDiameters(
+    table: LeafRepDiameterTable,
+    nodeIndex: number,
+    scratch: Float32Array
+): void {
+    const { lodLevels, diameters } = table;
+    const base = nodeIndex * lodLevels;
+    for (let lod = 0; lod < lodLevels; lod++) {
+        scratch[lod] = diameters[base + lod];
+    }
+}
+
+/**
+ * 用屏幕尺寸目标钳制引擎 optimalLod（只允许变粗）。
+ * 返回 merge 前后分项；写回 nodeInfo.optimalLod = targetLod。
+ * `engineOptimalOverride`：scan 时传入 applyLodChanges 保存的纯引擎档，避免读到已 merge 的写回值。
+ */
+function applyRenderScaleClampToNode(
+    nodeInfo: { optimalLod: number },
+    args: {
+        nodeIndex: number;
+        maxLod: number;
+        actualDistance: number;
+        leafCenterX: number;
+        leafCenterY: number;
+        leafCenterZ: number;
+        cameraPosX: number;
+        cameraPosY: number;
+        cameraPosZ: number;
+        cameraFwdX: number;
+        cameraFwdY: number;
+        cameraFwdZ: number;
+        pixelFactor: number;
+        state: RenderScaleEvalState;
+        engineOptimalOverride?: number;
+    }
+): {
+    targetLod: number;
+    renderScaleLod: number;
+    engineOptimalLod: number;
+    effective: number;
+} {
+    const rawEngine =
+        args.engineOptimalOverride !== undefined && args.engineOptimalOverride >= 0
+            ? args.engineOptimalOverride
+            : nodeInfo.optimalLod;
+    const budgetOptimalLod = Math.max(0, Math.min(args.maxLod, rawEngine));
+    const { state } = args;
+    fillScratchRepDiameters(state.table, args.nodeIndex, state.scratchDiameters);
+    const viewAngleDeg = computeViewAngleDeg(
+        args.leafCenterX,
+        args.leafCenterY,
+        args.leafCenterZ,
+        args.cameraPosX,
+        args.cameraPosY,
+        args.cameraPosZ,
+        args.cameraFwdX,
+        args.cameraFwdY,
+        args.cameraFwdZ
+    );
+    const foveate = computeFoveateFactor(viewAngleDeg, state.foveation);
+    const effective = computeEffectiveRenderScale(state.baseRenderScale, foveate);
+    const renderScaleLod = selectRenderScaleLodFromDiameters(
+        state.scratchDiameters.subarray(0, state.table.lodLevels),
+        args.pixelFactor,
+        args.actualDistance,
+        effective
+    );
+    const visualBudgetLod = mergeVisualBudgetLod(renderScaleLod, budgetOptimalLod);
+    if (visualBudgetLod !== nodeInfo.optimalLod) {
+        state.lastClampedNodes++;
+    }
+    nodeInfo.optimalLod = visualBudgetLod;
+    return {
+        targetLod: visualBudgetLod,
+        renderScaleLod,
+        engineOptimalLod: budgetOptimalLod,
+        effective
+    };
+}
+
+type OctreeInstanceApplyPatched = OctreeInstanceLike & {
+    applyLodChanges?: (maxLod: number, params: unknown) => void;
+    __renderScaleApplyPatched?: boolean;
+    __originalApplyLodChanges?: (maxLod: number, params: unknown) => void;
+};
+
+/** 在引擎 applyLodChanges 前钳制 optimalLod，使上屏与下载一致 */
+function ensureRenderScaleApplyPatch(
+    inst: OctreeInstanceLike | null,
+    getState: () => RenderScaleEvalState | null,
+    boundsFlat: Float32Array
+): void {
+    const patched = inst as OctreeInstanceApplyPatched | null;
+    if (!patched?.applyLodChanges || patched.__renderScaleApplyPatched) {
+        return;
+    }
+    patched.__originalApplyLodChanges = patched.applyLodChanges.bind(patched);
+    patched.applyLodChanges = (maxLod: number, params: unknown) => {
+        const state = getState();
+        const cam = state?.cameraLocal;
+        const pf = state?.pixelFactor ?? 0;
+        if (state?.enabled && cam && pf > 0 && patched.nodeInfos?.length) {
+            state.lastClampedNodes = 0;
+            for (let i = 0; i < patched.nodeInfos.length; i++) {
+                const info = patched.nodeInfos[i];
+                if (!info || info.optimalLod < 0) {
+                    continue;
+                }
+                // merge 前快照：此时 nodeInfo 仍是引擎刚写出的 budget/distance 档
+                if (i < state.lastEngineOptimalByLeaf.length) {
+                    state.lastEngineOptimalByLeaf[i] = info.optimalLod;
+                }
+                const b = i * 6;
+                const minX = boundsFlat[b];
+                const maxX = boundsFlat[b + 3];
+                const minY = boundsFlat[b + 1];
+                const maxY = boundsFlat[b + 4];
+                const minZ = boundsFlat[b + 2];
+                const maxZ = boundsFlat[b + 5];
+                let qx = cam.px;
+                if (qx < minX) qx = minX;
+                else if (qx > maxX) qx = maxX;
+                let qy = cam.py;
+                if (qy < minY) qy = minY;
+                else if (qy > maxY) qy = maxY;
+                let qz = cam.pz;
+                if (qz < minZ) qz = minZ;
+                else if (qz > maxZ) qz = maxZ;
+                const dx = qx - cam.px;
+                const dy = qy - cam.py;
+                const dz = qz - cam.pz;
+                applyRenderScaleClampToNode(info, {
+                    nodeIndex: i,
+                    maxLod,
+                    actualDistance: Math.sqrt(dx * dx + dy * dy + dz * dz),
+                    leafCenterX: (minX + maxX) * 0.5,
+                    leafCenterY: (minY + maxY) * 0.5,
+                    leafCenterZ: (minZ + maxZ) * 0.5,
+                    cameraPosX: cam.px,
+                    cameraPosY: cam.py,
+                    cameraPosZ: cam.pz,
+                    cameraFwdX: cam.fwx,
+                    cameraFwdY: cam.fwy,
+                    cameraFwdZ: cam.fwz,
+                    pixelFactor: pf,
+                    state
+                });
+            }
+        }
+        return patched.__originalApplyLodChanges?.(maxLod, params);
+    };
+    patched.__renderScaleApplyPatched = true;
 }
 
 function resolveViewportOptions(options?: StreamingViewportOptions) {
@@ -1417,8 +1717,8 @@ function computeViewportAabbEdgeFactor(
 
 /**
  * separate 资产逐档升 LOD：当前比 optimal 粗时按 jumpSteps 逼近目标。
- * BootstrapFast 时 optimal 为 visualTarget；否则为 engineOptimal。
- * 中央 / 边缘目标档相同；差异只在 jumpSteps 与下载 score。
+ * BootstrapFast 时 optimal 为 visualTarget；否则为 engineOptimal（renderScale 下已钳制）。
+ * distance：中央/边缘差异只在 jumpSteps 与下载 score；renderScale 中央可一次到位。
  */
 function computeRefinementTargetLod(
     optimalLod: number,
@@ -1767,7 +2067,8 @@ export function getStreamingViewportRefinementStatus(
         oofDowngradeEnabled: true,
         lodViewHoldEnabled: true,
         bootstrapCoarsenActive: false,
-        bootstrapCoarsenSteps: 0
+        bootstrapCoarsenSteps: 0,
+        renderScale: null
     });
 
     const pendingForeground = batch.foregroundPendingUnique;
@@ -1847,7 +2148,9 @@ function buildPriorityFiles(
         centerClearNodes: 0,
         centerBehindSamples: [],
         needsLodSwitch: false,
-        staleLodNodes: 0
+        staleLodNodes: 0,
+        renderScaleClampedNodes: 0,
+        avgVisualUrgency: 0
     });
     if (!camera || maxLod < 0) {
         return emptyBatch();
@@ -1887,6 +2190,29 @@ function buildPriorityFiles(
     const fwy = localCameraFwd.y;
     const fwz = localCameraFwd.z;
     const lodBehindPenalty = gsplat.lodBehindPenalty ?? 1;
+    const boundsFlat = octree.nodeBoundsMinMax;
+
+    const rsState = ctx.renderScale;
+    let pixelFactor = 0;
+    if (rsState?.enabled) {
+        rsState.lastClampedNodes = 0;
+        rsState.lastTickSamples.length = 0;
+        rsState.lastTickStats = null;
+        rsState.samplingEnabled = true;
+        const verticalFovRad = resolveVerticalFovRad(
+            camera.fov,
+            camera.aspectRatio,
+            !!camera.horizontalFov
+        );
+        const viewportHeight =
+            (app.graphicsDevice as { height?: number } | undefined)?.height ??
+            (app.graphicsDevice as { canvas?: HTMLCanvasElement } | undefined)?.canvas?.height ??
+            1080;
+        pixelFactor = computePixelFactor(viewportHeight, verticalFovRad);
+        rsState.pixelFactor = pixelFactor;
+        rsState.cameraLocal = { px, py, pz, fwx, fwy, fwz };
+        ensureRenderScaleApplyPatch(inst, () => ctx.renderScale, boundsFlat);
+    }
 
     const prioritized: PrioritizedFile[] = [];
     let needsLodSwitch = false;
@@ -1902,7 +2228,8 @@ function buildPriorityFiles(
     let centerTargetNodes = 0;
     let centerClearNodes = 0;
     const centerBehindSamples: CenterBehindSample[] = [];
-    const boundsFlat = octree.nodeBoundsMinMax;
+    let visualUrgencySum = 0;
+    let visualUrgencyCount = 0;
 
     for (let nodeIndex = 0; nodeIndex < octree.nodes.length; nodeIndex++) {
         const b = nodeIndex * 6;
@@ -1940,8 +2267,45 @@ function buildPriorityFiles(
         const fovAdjustedDistance = penalizedDistance * fovScale;
         const nodeInfo = nodeInfos?.[nodeIndex];
         const currentLod = nodeInfo?.currentLod ?? -1;
-        const engineOptimalLod = nodeInfo?.optimalLod ?? -1;
+        let engineOptimalLod = nodeInfo?.optimalLod ?? -1;
         const node = octree.nodes[nodeIndex];
+
+        // renderScale：视觉目标与预算取 max（更粗），写回 optimalLod
+        let rsClamp: {
+            targetLod: number;
+            renderScaleLod: number;
+            engineOptimalLod: number;
+            effective: number;
+        } | null = null;
+        if (
+            rsState?.enabled &&
+            nodeInfo &&
+            engineOptimalLod >= 0 &&
+            pixelFactor > 0
+        ) {
+            const engOverride =
+                nodeIndex < rsState.lastEngineOptimalByLeaf.length
+                    ? rsState.lastEngineOptimalByLeaf[nodeIndex]
+                    : -1;
+            rsClamp = applyRenderScaleClampToNode(nodeInfo, {
+                nodeIndex,
+                maxLod,
+                actualDistance,
+                leafCenterX: (minX + maxX) * 0.5,
+                leafCenterY: (minY + maxY) * 0.5,
+                leafCenterZ: (minZ + maxZ) * 0.5,
+                cameraPosX: px,
+                cameraPosY: py,
+                cameraPosZ: pz,
+                cameraFwdX: fwx,
+                cameraFwdY: fwy,
+                cameraFwdZ: fwz,
+                pixelFactor,
+                state: rsState,
+                engineOptimalOverride: engOverride
+            });
+            engineOptimalLod = rsClamp.targetLod;
+        }
 
         // 评分 urgency：有引擎目标则用之，否则按最粗档降低抢队（不再本地算 rawOptimal）
         const scoreLodHint = engineOptimalLod >= 0 ? engineOptimalLod : maxLod;
@@ -1958,6 +2322,17 @@ function buildPriorityFiles(
         );
         if (score <= 0) {
             continue;
+        }
+
+        // 仅视锥内叶计入 LOD 统计（engineOptimal = merge 前读到的档）
+        if (rsState?.samplingEnabled && rsClamp) {
+            rsState.lastTickSamples.push({
+                renderScaleLod: rsClamp.renderScaleLod,
+                engineOptimalLod: rsClamp.engineOptimalLod,
+                targetLod: rsClamp.targetLod,
+                effective: rsClamp.effective,
+                distance: actualDistance
+            });
         }
 
         const edgeFactor = computeViewportAabbEdgeFactor(
@@ -2019,7 +2394,10 @@ function buildPriorityFiles(
                     centerTargetNodes++;
                     centerEngineBehindNodes++;
                     if (centerBehindSamples.length < 3) {
-                        const jumpSteps = resolveLadderJumpSteps(edgeForQueue, pendingBacklog);
+                        const jumpSteps =
+                            currentLod > engineOptimalLod
+                                ? Math.max(1, currentLod - engineOptimalLod)
+                                : resolveLadderJumpSteps(edgeForQueue, pendingBacklog);
                         const targetLod = computeRefinementTargetLod(
                             effectiveOptimalLod,
                             maxLod,
@@ -2043,7 +2421,7 @@ function buildPriorityFiles(
             }
         }
 
-        // 下载目标：BootstrapFast 用 visualTarget，否则 engineOptimal；未生成则本叶本帧不建队
+        // 下载目标：BootstrapFast 用 visualTarget，否则 engineOptimal（renderScale 下已钳制）
         if (engineOptimalLod < 0) {
             continue;
         }
@@ -2053,7 +2431,18 @@ function buildPriorityFiles(
             maxLod,
             ctx
         );
-        const jumpSteps = resolveLadderJumpSteps(edgeForQueue, pendingBacklog);
+        // distance：沿用 ladder；renderScale 中央一次到位，边缘仍 ladder / backlog
+        let jumpSteps: number;
+        if (
+            ctx.renderScale?.enabled &&
+            isCenter &&
+            currentLod >= 0 &&
+            currentLod > effectiveOptimalLod
+        ) {
+            jumpSteps = Math.max(1, currentLod - effectiveOptimalLod);
+        } else {
+            jumpSteps = resolveLadderJumpSteps(edgeForQueue, pendingBacklog);
+        }
         const targetLod = computeRefinementTargetLod(
             effectiveOptimalLod,
             maxLod,
@@ -2081,11 +2470,62 @@ function buildPriorityFiles(
         const ladderBoost = computeLadderScoreBoost(maxLod, currentLod, targetLod);
         if (octree.getFileResource(fi)) {
             staleLoadedNodes++;
+        } else if (rsState?.enabled && pixelFactor > 0) {
+            fillScratchRepDiameters(rsState.table, nodeIndex, rsState.scratchDiameters);
+            const curLodForSize = currentLod >= 0 ? currentLod : maxLod;
+            const curDiamWorld = rsState.scratchDiameters[Math.min(curLodForSize, maxLod)] ?? 0;
+            const currentScreenDiameter = computeScreenDiameter(
+                curDiamWorld,
+                pixelFactor,
+                actualDistance
+            );
+            const viewAngleDeg = computeViewAngleDeg(
+                (minX + maxX) * 0.5,
+                (minY + maxY) * 0.5,
+                (minZ + maxZ) * 0.5,
+                px,
+                py,
+                pz,
+                fwx,
+                fwy,
+                fwz
+            );
+            const foveate = computeFoveateFactor(viewAngleDeg, rsState.foveation);
+            const effective = computeEffectiveRenderScale(rsState.baseRenderScale, foveate);
+            const extent = Math.max(
+                _lastScoreMaxX - _lastScoreMinX,
+                _lastScoreMaxY - _lastScoreMinY,
+                _lastScoreMaxZ - _lastScoreMinZ
+            );
+            const projectedArea =
+                (extent / Math.max(actualDistance, 0.001)) * (extent / Math.max(actualDistance, 0.001));
+            const urgency = computeVisualUrgency(
+                currentScreenDiameter,
+                effective,
+                projectedArea,
+                foveate
+            );
+            const costProxy = Math.max(1, node.lods[targetLod]?.count ?? 1);
+            const fileScore = computeFilePriority(urgency, costProxy) * ladderBoost;
+            visualUrgencySum += urgency;
+            visualUrgencyCount++;
+            prioritized.push({
+                fileIndex: fi,
+                score: fileScore > 0 ? fileScore : score * 1e-6 * ladderBoost
+            });
         } else {
             // backoff 仍进候选，便于到期后外层重试；pending 计数侧 ignore
             const edgeWeight = Math.pow(edgeForQueue, T.viewport.centerScorePower);
             prioritized.push({ fileIndex: fi, score: score * edgeWeight * ladderBoost });
         }
+    }
+
+    if (rsState?.enabled) {
+        rsState.samplingEnabled = false;
+        rsState.lastTickStats = summarizeRenderScaleSamples(
+            rsState.lastTickSamples,
+            rsState.table.lodLevels
+        );
     }
 
     prioritized.sort((a, b) => b.score - a.score);
@@ -2116,7 +2556,9 @@ function buildPriorityFiles(
         centerClearNodes,
         centerBehindSamples,
         needsLodSwitch,
-        staleLodNodes
+        staleLodNodes,
+        renderScaleClampedNodes: rsState?.lastClampedNodes ?? 0,
+        avgVisualUrgency: visualUrgencyCount > 0 ? visualUrgencySum / visualUrgencyCount : 0
     };
 }
 
@@ -2264,6 +2706,13 @@ export type OctreeRefinementTickMetrics = {
     oofPendingCoarse: number;
     /** bootFast=初始加载粗档收条；polish=追满 engineOptimal */
     refinePhase: OctreeRefinePhase;
+    /** renderScale 模式：本拍钳制叶数 / 入队 urgency 均值 / 表来源 */
+    renderScaleEnabled: boolean;
+    /** 中央目标屏上直径（px），即 settings `lodRenderScale` */
+    lodRenderScale: number;
+    renderScaleClampedNodes: number;
+    avgVisualUrgency: number;
+    renderScaleTableSource: 'meta' | 'aabb-fallback' | 'mixed' | 'off';
 };
 
 export type OctreeRefinementController = {
@@ -2316,6 +2765,41 @@ export function createOctreeRefinementController(
             `[octree-refinement] bootstrapCoarsen steps=${bootstrapCoarsenSteps} (off after finalize)`
         );
     }
+
+    const lodLevels = octree.lodLevels;
+    const leafCount = octree.nodes.length;
+    const resourceData = (resource as GSplatOctreeResourceLike | null)?.data;
+    const repTable = buildLeafRepDiameterTable({
+        leafCount,
+        lodLevels,
+        nodeBoundsMinMax: octree.nodeBoundsMinMax,
+        getSplatCount: (leaf, lod) => octree.nodes[leaf]?.lods[lod]?.count ?? 1,
+        metaData: resourceData
+    });
+    const selectMode = resolveLodSelectMode(global);
+    const renderScaleState: RenderScaleEvalState | null =
+        selectMode === 'renderScale'
+            ? {
+                enabled: true,
+                baseRenderScale: resolveLodRenderScale(global),
+                foveation: resolveLodRenderScaleFoveation(global),
+                table: repTable,
+                scratchDiameters: new Float32Array(Math.max(1, lodLevels)),
+                lastClampedNodes: 0,
+                lastEngineOptimalByLeaf: new Int16Array(leafCount).fill(-1),
+                samplingEnabled: false,
+                lastTickSamples: [],
+                lastTickStats: null,
+                cameraLocal: null,
+                pixelFactor: 0
+            }
+            : null;
+    if (renderScaleState) {
+        console.info(
+            `[octree-refinement] lodSelectMode=renderScale base=${renderScaleState.baseRenderScale} table=${repTable.source}`
+        );
+    }
+
     const evalCtx: RefinementEvaluateContext = {
         scene,
         gsplat: gsplatScene,
@@ -2323,7 +2807,8 @@ export function createOctreeRefinementController(
         oofDowngradeEnabled: global.config?.oofDowngrade !== false,
         lodViewHoldEnabled: global.config?.lodViewHold !== false,
         bootstrapCoarsenActive,
-        bootstrapCoarsenSteps
+        bootstrapCoarsenSteps,
+        renderScale: renderScaleState
     };
     configureLodStabilizers({
         oofDowngrade: evalCtx.oofDowngradeEnabled,
@@ -2332,6 +2817,31 @@ export function createOctreeRefinementController(
 
     const currentRefinePhase = (): OctreeRefinePhase =>
         bootstrapCoarsenActive && bootstrapCoarsenSteps > 0 ? 'bootFast' : 'polish';
+
+    if (renderScaleState) {
+        (globalThis as { __lodRenderScaleDebug?: unknown }).__lodRenderScaleDebug = {
+            enabled: true,
+            selectMode,
+            baseRenderScale: renderScaleState.baseRenderScale,
+            foveation: renderScaleState.foveation,
+            tableSource: repTable.source,
+            metaLeafCount: repTable.metaLeafCount,
+            leafCount,
+            lodLevels,
+            get lastClampedNodes() {
+                return renderScaleState.lastClampedNodes;
+            },
+            get pixelFactor() {
+                return renderScaleState.pixelFactor;
+            },
+            get lastTickStats() {
+                return renderScaleState.lastTickStats;
+            },
+            get lastTickSampleCount() {
+                return renderScaleState.lastTickSamples.length;
+            }
+        };
+    }
 
     if (octree.assetLoader) {
         patchAssetLoaderPriority(octree.assetLoader);
@@ -2564,7 +3074,9 @@ export function createOctreeRefinementController(
             centerClearNodes,
             centerBehindSamples,
             needsLodSwitch,
-            staleLodNodes
+            staleLodNodes,
+            renderScaleClampedNodes,
+            avgVisualUrgency
         } = buildPriorityFiles(evalCtx, { pendingBacklog, downloadFailures });
         let pendingUniqueFiles = pendingUniqueFilesRaw;
         let foregroundPendingUnique = foregroundPendingUniqueRaw;
@@ -3036,7 +3548,14 @@ export function createOctreeRefinementController(
             syncTrigger,
             oofDowngraded,
             oofPendingCoarse,
-            refinePhase: currentRefinePhase()
+            refinePhase: currentRefinePhase(),
+            renderScaleEnabled: !!renderScaleState?.enabled,
+            lodRenderScale: renderScaleState?.baseRenderScale ?? 0,
+            renderScaleClampedNodes,
+            avgVisualUrgency,
+            renderScaleTableSource: renderScaleState?.enabled
+                ? renderScaleState.table.source
+                : 'off'
         };
 
         const activityActive =

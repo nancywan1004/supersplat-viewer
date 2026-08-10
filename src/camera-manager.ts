@@ -866,6 +866,49 @@ class CameraManager {
             controllers.anim.animState.cursor.value = time;
         });
 
+        /**
+         * Perf HUD / 手动巡检：跳到指定位姿。
+         * - 有 animTrack 且给出 animTimeSec → scrub（LOD / 非 LOD 动画路径通用）
+         * - 否则 orbit.goto 硬切（无动画的非 LOD、仅 cameras[] 点位）
+         */
+        events.on(
+            'camera:gotoPose',
+            (payload: {
+                position: [number, number, number];
+                target: [number, number, number];
+                fov?: number;
+                animTimeSec?: number;
+            }) => {
+                if (!payload?.position || !payload?.target) {
+                    return;
+                }
+                state.animationPaused = true;
+                events.fire('orbitTarget:clear');
+
+                const useAnim =
+                    !!controllers.anim &&
+                    payload.animTimeSec !== undefined &&
+                    Number.isFinite(payload.animTimeSec);
+
+                if (useAnim) {
+                    state.cameraMode = 'anim';
+                    controllers.anim!.animState.cursor.value = payload.animTimeSec as number;
+                    return;
+                }
+
+                tmpCamera.fov =
+                    typeof payload.fov === 'number' && Number.isFinite(payload.fov)
+                        ? payload.fov
+                        : this.camera.fov;
+                tmpCamera.look(new Vec3(payload.position), new Vec3(payload.target));
+                if (state.cameraMode !== 'orbit') {
+                    state.cameraMode = 'orbit';
+                }
+                controllers.orbit.goto(tmpCamera);
+                startTransition();
+            }
+        );
+
         // handle user picking in the scene（双击/双指点）
         events.on('pick', (position: Vec3) => {
             orbitFocus(position);

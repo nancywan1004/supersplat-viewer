@@ -223,6 +223,16 @@ type Config = {
      * 默认 2；`0` 关闭。URL `?bootstrapCoarsenSteps=N` / `?bootstrapCoarsen=0`。
      */
     bootstrapCoarsenSteps?: number;
+    /**
+     * URL `?lodRenderScale=` / `?renderScale=`；覆盖 settings.sceneProfile.lodRenderScale。
+     * 正数：中央目标屏上直径（px）。仅 lodSelectMode=renderScale 时生效。
+     */
+    lodRenderScale?: number;
+    /**
+     * URL `?lodSelectMode=distance|renderScale`；覆盖 settings.sceneProfile.lodSelectMode。
+     * 默认 distance。若仅设置了 lodRenderScale 且未写本字段，运行时视为 renderScale。
+     */
+    lodSelectMode?: 'distance' | 'renderScale';
     renderer: 'webgl' | 'cpu-sort' | 'gpu-sort' | 'compute';
     heatmap: boolean;                           // render heatmap debug overlay (WebGPU only)
     /** Scene Profile 跑批（强制 noui/nofx/noreveal；无 animTrack 时 noanim） */

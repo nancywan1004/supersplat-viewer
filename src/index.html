@@ -117,6 +117,23 @@
                 return Math.min(8, Math.floor(n));
             })();
 
+            const lodRenderScaleRaw =
+                url.searchParams.get('lodRenderScale') ?? url.searchParams.get('renderScale');
+            const lodRenderScaleParsed =
+                lodRenderScaleRaw !== null ? Number(lodRenderScaleRaw) : undefined;
+            const lodRenderScale =
+                lodRenderScaleParsed !== undefined &&
+                Number.isFinite(lodRenderScaleParsed) &&
+                lodRenderScaleParsed > 0
+                    ? lodRenderScaleParsed
+                    : undefined;
+
+            const lodSelectModeRaw = url.searchParams.get('lodSelectMode');
+            const lodSelectMode =
+                lodSelectModeRaw === 'renderScale' || lodSelectModeRaw === 'distance'
+                    ? lodSelectModeRaw
+                    : undefined;
+
             const sseConfig = {
                 poster: posterUrl && createImage(posterUrl),
                 skyboxUrl,
@@ -145,6 +162,8 @@
                 refineTimeoutMs,
                 maxConcurrent,
                 bootstrapCoarsenSteps,
+                lodRenderScale,
+                lodSelectMode,
                 heatmap: url.searchParams.has('heatmap'),
                 fullload: url.searchParams.has('fullload'),
                 /** 视锥外加速降档；默认开。?oofDowngrade=0 关闭（对照用） */

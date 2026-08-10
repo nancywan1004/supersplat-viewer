@@ -1572,7 +1572,7 @@ export function renderRefinementTickMetricsHtml(metrics: OctreeRefinementTickMet
         ),
         row(
             'Ladder',
-            `ctr×${metrics.ladderCenterJumpSteps} · edge×${metrics.ladderEdgeJumpSteps}` +
+            `ctr→target · edge×${metrics.ladderEdgeJumpSteps}` +
                 (metrics.ladderBacklog
                     ? ` · backlog (fg ${metrics.stableForegroundPending}≥${metrics.ladderBacklogThreshold})`
                     : ` · fg ${metrics.stableForegroundPending}`)
@@ -1601,6 +1601,23 @@ export function renderRefinementTickMetricsHtml(metrics: OctreeRefinementTickMet
                     : '')
         )
     ];
+    if (metrics.renderScaleEnabled) {
+        const rs =
+            Number.isFinite(metrics.lodRenderScale) && metrics.lodRenderScale > 0
+                ? (metrics.lodRenderScale < 10
+                    ? metrics.lodRenderScale.toFixed(1)
+                    : String(Math.round(metrics.lodRenderScale)))
+                : '?';
+        lines.push(
+            row(
+                'RenderScale',
+                `rs ${rs}` +
+                    ` · clamp ${metrics.renderScaleClampedNodes}` +
+                    ` · urg ${Number.isFinite(metrics.avgVisualUrgency) ? metrics.avgVisualUrgency.toFixed(2) : '0'}` +
+                    ` · ${metrics.renderScaleTableSource}`
+            )
+        );
+    }
     return lines.join('');
 }
 

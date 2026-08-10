@@ -174,6 +174,155 @@ function formatWbBlocks(uploadedBlocks: number, totalBlocks: number, copyPct: nu
     return `${uploadedBlocks}/${totalBlocks}${pctSuffix}`;
 }
 
+type HudWaypoint = {
+    label: string;
+    position: [number, number, number];
+    target: [number, number, number];
+    fov: number;
+    /** 有 animTrack 时带上，便于 scrub；无动画点位为 undefined */
+    animTimeSec?: number;
+};
+
+/** 优先 animTracks[0] 关键帧；否则 settings.cameras[].initial（非 LOD / 无路径场景） */
+function readHudWaypoints(global: Global): HudWaypoint[] {
+    const track = global.settings?.animTracks?.[0];
+    const times = track?.keyframes?.times;
+    const values = track?.keyframes?.values;
+    if (Array.isArray(times) && times.length > 0 && values?.position && values?.target) {
+        const frameRate = track.frameRate || 30;
+        const defaultFov = global.settings?.cameras?.[0]?.initial?.fov ?? 60;
+        const out: HudWaypoint[] = [];
+        for (let i = 0; i < times.length; i++) {
+            const pi = i * 3;
+            const fov =
+                Array.isArray(values.fov) && typeof values.fov[i] === 'number'
+                    ? values.fov[i]
+                    : defaultFov;
+            out.push({
+                label: `kf-${i}`,
+                position: [
+                    values.position[pi],
+                    values.position[pi + 1],
+                    values.position[pi + 2]
+                ],
+                target: [values.target[pi], values.target[pi + 1], values.target[pi + 2]],
+                fov,
+                animTimeSec: times[i] / frameRate
+            });
+        }
+        return out;
+    }
+
+    const cameras = global.settings?.cameras;
+    if (!Array.isArray(cameras) || cameras.length === 0) {
+        return [];
+    }
+    const out: HudWaypoint[] = [];
+    for (let i = 0; i < cameras.length; i++) {
+        const initial = cameras[i]?.initial;
+        if (!initial?.position || !initial?.target) {
+            continue;
+        }
+        out.push({
+            label: cameras.length === 1 ? 'cam-0' : `cam-${i}`,
+            position: [
+                initial.position[0],
+                initial.position[1],
+                initial.position[2]
+            ],
+            target: [initial.target[0], initial.target[1], initial.target[2]],
+            fov: initial.fov ?? 60
+        });
+    }
+    return out;
+}
+
+function findWaypointIndex(
+    waypoints: HudWaypoint[],
+    state: Global['state'],
+    manualIndex: number | null
+): number {
+    if (waypoints.length === 0) {
+        return -1;
+    }
+    if (manualIndex !== null && manualIndex >= 0 && manualIndex < waypoints.length) {
+        return manualIndex;
+    }
+    const withTime = waypoints.filter((w) => w.animTimeSec !== undefined);
+    if (withTime.length === waypoints.length && state.hasAnimation) {
+        const t = state.animationTime ?? 0;
+        let best = 0;
+        let bestDist = Math.abs((waypoints[0].animTimeSec ?? 0) - t);
+        for (let i = 1; i < waypoints.length; i++) {
+            const d = Math.abs((waypoints[i].animTimeSec ?? 0) - t);
+            if (d < bestDist) {
+                best = i;
+                bestDist = d;
+            }
+        }
+        return best;
+    }
+    return 0;
+}
+
+/**
+ * 暂停并跳到下一机位（到末则回到 0）。
+ * animTrack / cameras[] 均可；LOD 与非 LOD 通用。
+ */
+function jumpToNextHudWaypoint(
+    global: Global,
+    manualIndex: number | null
+): {
+    ok: boolean;
+    index: number;
+    total: number;
+    label: string;
+    timeSec: number | null;
+    reason?: string;
+} {
+    const waypoints = readHudWaypoints(global);
+    if (waypoints.length === 0) {
+        return {
+            ok: false,
+            index: -1,
+            total: 0,
+            label: '—',
+            timeSec: null,
+            reason: '无 animTrack 关键帧 / cameras 点位'
+        };
+    }
+    if (waypoints.length === 1 && waypoints[0].animTimeSec === undefined) {
+        // 仅一个初始相机：仍跳一次（回到同点），方便统一交互
+    }
+
+    const curIdx = findWaypointIndex(waypoints, global.state, manualIndex);
+    const nextIdx = (Math.max(0, curIdx) + 1) % waypoints.length;
+    const wp = waypoints[nextIdx];
+
+    global.state.animationPaused = true;
+    global.events.fire('camera:gotoPose', {
+        position: wp.position,
+        target: wp.target,
+        fov: wp.fov,
+        animTimeSec: wp.animTimeSec
+    });
+    global.app.renderNextFrame = true;
+    const viewer = (global.app as { viewer?: ViewerLike }).viewer;
+    viewer?.octreeRefinementController?.notifyCameraMoved?.();
+    global.events.fire('sceneProfileBenchmark:phase', {
+        phase: 'manual-waypoint',
+        keyframe: wp.label
+    });
+
+    return {
+        ok: true,
+        index: nextIdx,
+        total: waypoints.length,
+        label: wp.label,
+        timeSec: wp.animTimeSec ?? null
+    };
+}
+
 export function ensureBenchmarkHudStyles() {
     let style = document.getElementById('benchmark-hud-style') as HTMLStyleElement | null;
     if (!style) {
@@ -263,16 +412,40 @@ export function ensureBenchmarkHudStyles() {
 #${HUD_ID} .benchmark-hud-kf-label { color: rgba(255, 255, 255, 0.5); }
 #${HUD_ID} .benchmark-hud-kf-value { text-align: right; color: #a5f3fc; }
 #${HUD_ID} .benchmark-hud-kf-value.live { color: #fde68a; }
-#${HUD_ID} .benchmark-hud-actions { margin-top: 8px; pointer-events: auto; }
-#${HUD_ID} .benchmark-hud-copy-pose {
-    width: 100%; padding: 5px 8px;
-    border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px;
-    background: rgba(255, 255, 255, 0.08); color: #e8ecf1; font: inherit; cursor: pointer;
+#${HUD_ID} .benchmark-hud-actions {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    pointer-events: auto;
 }
-#${HUD_ID} .benchmark-hud-copy-pose:hover { background: rgba(255, 255, 255, 0.14); }
-#${HUD_ID} .benchmark-hud-copy-pose:disabled { opacity: 0.45; cursor: not-allowed; }
+#${HUD_ID} .benchmark-hud-actions-row {
+    display: flex;
+    gap: 6px;
+}
+#${HUD_ID} .benchmark-hud-copy-pose,
+#${HUD_ID} .benchmark-hud-next-kf {
+    flex: 1;
+    width: 100%;
+    padding: 5px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #e8ecf1;
+    font: inherit;
+    cursor: pointer;
+}
+#${HUD_ID} .benchmark-hud-next-kf {
+    border-color: rgba(34, 211, 238, 0.35);
+    background: rgba(34, 211, 238, 0.12);
+}
+#${HUD_ID} .benchmark-hud-copy-pose:hover,
+#${HUD_ID} .benchmark-hud-next-kf:hover { background: rgba(255, 255, 255, 0.14); }
+#${HUD_ID} .benchmark-hud-next-kf:hover { background: rgba(34, 211, 238, 0.2); }
+#${HUD_ID} .benchmark-hud-copy-pose:disabled,
+#${HUD_ID} .benchmark-hud-next-kf:disabled { opacity: 0.45; cursor: not-allowed; }
 #${HUD_ID} .benchmark-hud-copy-toast {
-    margin-top: 4px; text-align: center; color: #86efac; font-size: 11px;
+    margin-top: 0; text-align: center; color: #86efac; font-size: 11px;
 }
 `;
 }
@@ -319,7 +492,10 @@ export function initBenchmarkHud(global: Global): () => void {
             <div id="benchmark-hud-refinement-section"></div>
             <div id="benchmark-hud-blur-section"></div>
             <div class="benchmark-hud-actions">
-                <button type="button" class="benchmark-hud-copy-pose" id="benchmark-hud-copy-pose">复制相机位姿</button>
+                <div class="benchmark-hud-actions-row">
+                    <button type="button" class="benchmark-hud-next-kf" id="benchmark-hud-next-kf" title="暂停并跳到 animTrack 下一关键帧（末帧后回到 kf-0）">下一机位</button>
+                    <button type="button" class="benchmark-hud-copy-pose" id="benchmark-hud-copy-pose">复制位姿</button>
+                </div>
                 <div class="benchmark-hud-copy-toast" id="benchmark-hud-copy-toast" hidden></div>
             </div>
         </div>
@@ -331,6 +507,7 @@ export function initBenchmarkHud(global: Global): () => void {
     const rowsEl = root.querySelector('#benchmark-hud-rows') as HTMLDivElement;
     const refinementSectionEl = root.querySelector('#benchmark-hud-refinement-section') as HTMLDivElement;
     const blurSectionEl = root.querySelector('#benchmark-hud-blur-section') as HTMLDivElement;
+    const nextKfBtn = root.querySelector('#benchmark-hud-next-kf') as HTMLButtonElement;
     const copyPoseBtn = root.querySelector('#benchmark-hud-copy-pose') as HTMLButtonElement;
     const copyToastEl = root.querySelector('#benchmark-hud-copy-toast') as HTMLDivElement;
 
@@ -389,11 +566,30 @@ export function initBenchmarkHud(global: Global): () => void {
     let lastGpuFrustumGsplatsM: number | null = null;
     let phase = config.benchmark ? 'loading' : 'idle';
     let currentKeyframe = '—';
+    /** 手动「下一机位」游标；无 anim 时靠它记住当前点 */
+    let manualWaypointIndex: number | null = null;
     let refineTick: RefinementTickPayload | null = null;
     const keyframeBlurHistory: KeyframeBlurRecord[] = [];
     let cachedRowsHtml = '';
     let cachedRefinementHtml = '';
     let cachedBlurHtml = '';
+
+    const updateNextKfButtonLabel = () => {
+        const waypoints = readHudWaypoints(global);
+        if (waypoints.length === 0) {
+            nextKfBtn.disabled = true;
+            nextKfBtn.textContent = '下一机位';
+            nextKfBtn.title = '无 animTrack 关键帧 / cameras 点位';
+            return;
+        }
+        nextKfBtn.disabled = false;
+        const cur = findWaypointIndex(waypoints, state, manualWaypointIndex);
+        const next = (Math.max(0, cur) + 1) % waypoints.length;
+        nextKfBtn.textContent = `下一机位 ${cur + 1}/${waypoints.length}→${next + 1}`;
+        nextKfBtn.title =
+            `暂停并跳到 ${waypoints[next].label}（当前 ${waypoints[Math.max(0, cur)].label}；末点后回到起点）`;
+    };
+    updateNextKfButtonLabel();
 
     const onFrameEndBufferSample = () => {
         lastBufferUpload = readGsplatBufferUploadMetrics(app);
@@ -521,9 +717,11 @@ export function initBenchmarkHud(global: Global): () => void {
 
         if (config.benchmark) {
             lines.push(row('Phase', phase));
-            if (phase === 'anim') {
+            if (phase === 'anim' || phase === 'manual-waypoint') {
                 lines.push(row('Keyframe', currentKeyframe));
             }
+        } else if (phase === 'manual-waypoint' || currentKeyframe !== '—') {
+            lines.push(row('Keyframe', currentKeyframe));
         }
 
         lines.push(row('FPS', `${fpsNow} (P50 ${fpsP50?.toFixed?.(0) ?? '—'})`));
@@ -699,7 +897,27 @@ export function initBenchmarkHud(global: Global): () => void {
             blurSectionEl.innerHTML = blurHtml;
             cachedBlurHtml = blurHtml;
         }
+
+        updateNextKfButtonLabel();
     };
+
+    nextKfBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const result = jumpToNextHudWaypoint(global, manualWaypointIndex);
+        if (!result.ok) {
+            showCopyToast(result.reason ?? '跳转失败', false);
+            updateNextKfButtonLabel();
+            return;
+        }
+        manualWaypointIndex = result.index;
+        currentKeyframe = result.label;
+        phase = 'manual-waypoint';
+        const timeHint =
+            result.timeSec !== null ? ` · ${result.timeSec.toFixed(2)}s` : '';
+        showCopyToast(`已到 ${result.label}${timeHint}`, true);
+        refreshHud();
+    });
 
     const hudTimer = window.setInterval(refreshHud, HUD_REFRESH_MS);
     refreshHud();
