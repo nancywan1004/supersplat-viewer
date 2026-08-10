@@ -21,6 +21,12 @@ import {
     requestOctreePlacementUpdate,
     type OctreeInstanceLike
 } from './octree-instance-access';
+import {
+    buildOofCameraMats,
+    configureLodStabilizers,
+    dripOutOfFrustumDowngrade,
+    ensureOutOfFrustumDowngradePatches
+} from './out-of-frustum-downgrade';
 import { computeStreamingRefinementProgressRatio } from './streaming-refinement-progress';
 
 export { computeStreamingRefinementProgressRatio };
@@ -471,6 +477,10 @@ type RefinementEvaluateContext = {
     scene: OctreeStreamingScene;
     gsplat: GsplatSceneLike;
     lod: LodPlacementParams;
+    /** false 时不安装/不执行视锥外降档（URL ?oofDowngrade=0） */
+    oofDowngradeEnabled: boolean;
+    /** 同视角防抖：视锥内只许变清不许变糊；默认 true。?lodViewHold=0 关 */
+    lodViewHoldEnabled: boolean;
 };
 
 function lodParamsFromComponent(component: GSplatComponent | null): LodPlacementParams {
@@ -1674,7 +1684,9 @@ export function getStreamingViewportRefinementStatus(
     const batch = buildPriorityFiles({
         scene,
         gsplat: app.scene.gsplat as GsplatSceneLike,
-        lod: lodParamsFromComponent(gsplatEntity.gsplat as GSplatComponent | null)
+        lod: lodParamsFromComponent(gsplatEntity.gsplat as GSplatComponent | null),
+        oofDowngradeEnabled: true,
+        lodViewHoldEnabled: true
     });
 
     const pendingForeground = batch.foregroundPendingUnique;
@@ -1762,6 +1774,12 @@ function buildPriorityFiles(
     const instances = findAllOctreeInstances(app, octree, gsplatEntity);
     const inst = instances[0] ?? null;
     const nodeInfos = inst?.nodeInfos;
+    if (ctx.oofDowngradeEnabled || ctx.lodViewHoldEnabled) {
+        // apply 前：同视角 hold +（可选）视锥外降档
+        for (let i = 0; i < instances.length; i++) {
+            ensureOutOfFrustumDowngradePatches(instances[i], () => buildOofCameraMats(cameraEntity, gsplatEntity));
+        }
+    }
 
     let tanHalfVFov = Math.tan(camera.fov * 0.5 * math.DEG_TO_RAD);
     if (camera.horizontalFov) {
@@ -2146,6 +2164,10 @@ export type OctreeRefinementTickMetrics = {
     fileJustLanded: boolean;
     needsLodSwitch: boolean;
     syncTrigger: RefinementSyncTrigger | null;
+    /** 本拍视锥外加速降档：成功钳到 bootstrap 的叶数 */
+    oofDowngraded: number;
+    /** 本拍视锥外粗档未就绪、已 ensure 的叶数 */
+    oofPendingCoarse: number;
 };
 
 export type OctreeRefinementController = {
@@ -2181,8 +2203,14 @@ export function createOctreeRefinementController(
     const evalCtx: RefinementEvaluateContext = {
         scene,
         gsplat: gsplatScene,
-        lod: lodParamsFromComponent(gsplatEntity.gsplat as GSplatComponent | null)
+        lod: lodParamsFromComponent(gsplatEntity.gsplat as GSplatComponent | null),
+        oofDowngradeEnabled: global.config?.oofDowngrade !== false,
+        lodViewHoldEnabled: global.config?.lodViewHold !== false
     };
+    configureLodStabilizers({
+        oofDowngrade: evalCtx.oofDowngradeEnabled,
+        lodViewHold: evalCtx.lodViewHoldEnabled
+    });
 
     if (octree.assetLoader) {
         patchAssetLoaderPriority(octree.assetLoader);
@@ -2800,6 +2828,31 @@ export function createOctreeRefinementController(
         const tickPriorityLoad = countPriorityLoadState(tickLoader, priorityUrls);
         const priorityDownloadsActive = priorityUrls.length > 0;
         const failStats = countDownloadFailStats(downloadFailures);
+
+        // 静止 idle：限流把视锥外细档钳到 bootstrap（相机移动时由 applyLodChanges patch 覆盖）
+        let oofDowngraded = 0;
+        let oofPendingCoarse = 0;
+        if (
+            evalCtx.oofDowngradeEnabled &&
+            !cameraBurstActive &&
+            !cameraJustMoved &&
+            stableForegroundPending === 0
+        ) {
+            const oof = dripOutOfFrustumDowngrade(
+                app,
+                octree,
+                gsplatEntity,
+                cameraEntity,
+                gsplatScene,
+                { maxNodes: 32 }
+            );
+            oofDowngraded = oof.clamped;
+            oofPendingCoarse = oof.pendingCoarse;
+            if (oofDowngraded > 0) {
+                app.renderNextFrame = true;
+            }
+        }
+
         lastTickMetrics = {
             timingsMs: {
                 total: performance.now() - tickStartMs,
@@ -2853,7 +2906,9 @@ export function createOctreeRefinementController(
             integratedLoaderResources,
             fileJustLanded,
             needsLodSwitch,
-            syncTrigger
+            syncTrigger,
+            oofDowngraded,
+            oofPendingCoarse
         };
 
         const activityActive =

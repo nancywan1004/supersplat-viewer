@@ -201,6 +201,13 @@ type Config = {
     /** 父级透传的 token（用于保存上传鉴权） */
     token?: string;
     budget?: number;                            // override splat budget in millions (overrides platform + performanceMode table)
+    /** 视锥外加速降档；默认 true。URL ?oofDowngrade=0 可关 */
+    oofDowngrade?: boolean;
+    /**
+     * 同视角 LOD 防抖：相机几乎不动时，视锥内只许变清、不许变糊。
+     * 默认 true。URL ?lodViewHold=0 可关。
+     */
+    lodViewHold?: boolean;
     renderer: 'webgl' | 'cpu-sort' | 'gpu-sort' | 'compute';
     heatmap: boolean;                           // render heatmap debug overlay (WebGPU only)
     /** Scene Profile 跑批（强制 noui/nofx/noreveal；无 animTrack 时 noanim） */

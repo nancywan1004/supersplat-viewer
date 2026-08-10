@@ -1448,6 +1448,15 @@ export function renderRefinementTickMetricsHtml(metrics: OctreeRefinementTickMet
                     ? ` · backlog (fg ${metrics.stableForegroundPending}≥${metrics.ladderBacklogThreshold})`
                     : ` · fg ${metrics.stableForegroundPending}`)
         ),
+        ...(metrics.oofDowngraded > 0 || metrics.oofPendingCoarse > 0
+            ? [
+                row(
+                    'OOF ↓',
+                    `↓${metrics.oofDowngraded}` +
+                        (metrics.oofPendingCoarse > 0 ? ` · coarse⏳${metrics.oofPendingCoarse}` : '')
+                )
+            ]
+            : []),
         row('Burst', `${metrics.cameraBurstFrames} fr${metrics.boostActive ? ' · boost' : ''}`),
         row(
             'Downloads',

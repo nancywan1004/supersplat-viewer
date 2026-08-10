@@ -109,6 +109,28 @@
                 budget,
                 heatmap: url.searchParams.has('heatmap'),
                 fullload: url.searchParams.has('fullload'),
+                /** 视锥外加速降档；默认开。?oofDowngrade=0 关闭（对照用） */
+                oofDowngrade: (() => {
+                    const v = url.searchParams.get('oofDowngrade');
+                    if (v === '0' || v === 'false' || v === 'off') {
+                        return false;
+                    }
+                    if (v === '1' || v === 'true' || v === 'on' || url.searchParams.has('oofDowngrade')) {
+                        return true;
+                    }
+                    return undefined;
+                })(),
+                /** 同视角防抖（视锥内不糊来回）；默认开。?lodViewHold=0 关闭 */
+                lodViewHold: (() => {
+                    const v = url.searchParams.get('lodViewHold');
+                    if (v === '0' || v === 'false' || v === 'off') {
+                        return false;
+                    }
+                    if (v === '1' || v === 'true' || v === 'on' || url.searchParams.has('lodViewHold')) {
+                        return true;
+                    }
+                    return undefined;
+                })(),
                 benchmark: url.searchParams.has('benchmark'),
                 benchmarkLabel: url.searchParams.get('benchmarkLabel') ?? undefined,
                 benchmarkNoInteraction: url.searchParams.has('benchmarkNoInteraction'),
