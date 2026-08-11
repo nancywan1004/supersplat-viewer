@@ -110,7 +110,42 @@ const T = {
         /** 各外层轮次的等待 ms */
         backoffMs: [2000, 5000, 12000] as const
     }
-} as const;
+};
+
+type LoaderConcurrencyTunables = {
+    defaultConcurrent: number;
+    boostConcurrent: number;
+    burstConcurrent: number;
+    emergencyConcurrent: number;
+    extremeConcurrent: number;
+    foregroundLimit: number;
+    criticalLimit: number;
+    pinLimit: number;
+    trackedMissFrames: number;
+    trackedLimit: number;
+};
+
+const LOADER_CONCURRENCY_DEFAULTS: LoaderConcurrencyTunables = { ...T.loader };
+
+/**
+ * URL/config `maxConcurrent`：把 boost 与动态开槽上限都锁到 N，便于网速对照。
+ * 未设置时恢复平台默认（desktop boost=8，堵槽时可升到 extreme）。
+ */
+function applyMaxConcurrentOverride(raw: number | undefined): number | null {
+    const loader = T.loader as LoaderConcurrencyTunables;
+    Object.assign(loader, LOADER_CONCURRENCY_DEFAULTS);
+    if (raw === undefined || !Number.isFinite(raw) || raw < 1) {
+        return null;
+    }
+    const n = Math.min(64, Math.max(1, Math.floor(raw)));
+    loader.boostConcurrent = n;
+    loader.burstConcurrent = n;
+    loader.emergencyConcurrent = n;
+    loader.extremeConcurrent = n;
+    // criticalLimit 用于 stale 开槽公式；锁并发时勿超过 N
+    loader.criticalLimit = Math.min(LOADER_CONCURRENCY_DEFAULTS.criticalLimit, n);
+    return n;
+}
 
 /** URL `?ladder=center,edge,backlog` 覆盖；backlog=`target` 表示积压边缘直达目标档 */
 type LadderJumpOverride = {
@@ -2150,6 +2185,8 @@ export type OctreeRefinementTickMetrics = {
     cameraBurstFrames: number;
     inFlight: number;
     queueLen: number;
+    /** loader.maxConcurrentLoads 当前上限（含 ?maxConcurrent= 锁定） */
+    maxConcurrent: number;
     staleInFlight: number;
     suspended: number;
     idleQueueDrained: number;
@@ -2200,6 +2237,10 @@ export function createOctreeRefinementController(
     const { app, camera: cameraEntity, events } = global;
     const gsplatScene = app.scene.gsplat as GsplatSceneLike;
     const scene: OctreeStreamingScene = { app, octree, gsplatEntity, cameraEntity };
+    const maxConcurrentOverride = applyMaxConcurrentOverride(global.config?.maxConcurrent);
+    if (maxConcurrentOverride != null) {
+        console.info(`[octree-refinement] maxConcurrent override=${maxConcurrentOverride}`);
+    }
     const evalCtx: RefinementEvaluateContext = {
         scene,
         gsplat: gsplatScene,
@@ -2214,6 +2255,9 @@ export function createOctreeRefinementController(
 
     if (octree.assetLoader) {
         patchAssetLoaderPriority(octree.assetLoader);
+        if (maxConcurrentOverride != null) {
+            octree.assetLoader.maxConcurrentLoads = maxConcurrentOverride;
+        }
         if (typeof octree.assetLoader.maxRetries === 'number') {
             octree.assetLoader.maxRetries = T.downloadFail.engineMaxRetries;
         } else {
@@ -2892,6 +2936,8 @@ export function createOctreeRefinementController(
             cameraBurstFrames,
             inFlight: tickLoader?._currentlyLoading?.size ?? 0,
             queueLen: tickLoader?._loadQueue?.length ?? 0,
+            maxConcurrent:
+                tickLoader?.maxConcurrentLoads ?? T.loader.boostConcurrent,
             staleInFlight: priorityDownloadsActive ? tickPriorityLoad.staleInFlight : 0,
             suspended: tickLoader?.__refinementSuspendedQueue?.length ?? 0,
             idleQueueDrained: 0,

@@ -201,6 +201,11 @@ type Config = {
     /** 父级透传的 token（用于保存上传鉴权） */
     token?: string;
     budget?: number;                            // override splat budget in millions (overrides platform + performanceMode table)
+    /**
+     * LOD 下载并发上限（loader.maxConcurrentLoads）。
+     * URL ?maxConcurrent=N 固定 boost/动态开槽，便于对照 1/2/4/8；未设则用平台默认（desktop boost 8）。
+     */
+    maxConcurrent?: number;
     /** 视锥外加速降档；默认 true。URL ?oofDowngrade=0 可关 */
     oofDowngrade?: boolean;
     /**

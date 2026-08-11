@@ -1576,6 +1576,9 @@ export function renderRefinementTickMetricsHtml(metrics: OctreeRefinementTickMet
         row(
             'Downloads',
             `${metrics.inFlight} fly · q${metrics.queueLen} · susp ${metrics.suspended}` +
+                (typeof metrics.maxConcurrent === 'number'
+                    ? ` · max ${metrics.maxConcurrent}`
+                    : '') +
                 (metrics.priorityDownloadsActive && metrics.staleInFlight > 0
                     ? ` · stale ${metrics.staleInFlight}`
                     : '') +

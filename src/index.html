@@ -81,6 +81,17 @@
 
             const budgetParam = url.searchParams.get('budget');
             const budget = budgetParam !== null ? Number(budgetParam) : undefined;
+            /** LOD 下载并发：?maxConcurrent=1|2|4|8…（亦接受 ?concurrent=） */
+            const maxConcurrentParam =
+                url.searchParams.get('maxConcurrent') ?? url.searchParams.get('concurrent');
+            const maxConcurrentParsed =
+                maxConcurrentParam !== null ? Number(maxConcurrentParam) : undefined;
+            const maxConcurrent =
+                maxConcurrentParsed !== undefined &&
+                Number.isFinite(maxConcurrentParsed) &&
+                maxConcurrentParsed >= 1
+                    ? Math.min(64, Math.floor(maxConcurrentParsed))
+                    : undefined;
 
             const sseConfig = {
                 poster: posterUrl && createImage(posterUrl),
@@ -107,6 +118,7 @@
                 webgpu: preferWebGpu,
                 renderer,
                 budget,
+                maxConcurrent,
                 heatmap: url.searchParams.has('heatmap'),
                 fullload: url.searchParams.has('fullload'),
                 /** 视锥外加速降档；默认开。?oofDowngrade=0 关闭（对照用） */
