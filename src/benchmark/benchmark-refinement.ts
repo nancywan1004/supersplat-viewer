@@ -230,6 +230,121 @@ export function readGsplatsM(app: AppBase): number | null {
     return Number.isFinite(frame) ? (frame as number) / 1_000_000 : null;
 }
 
+type StorageBufferLike = {
+    read: (
+        offset?: number,
+        size?: number,
+        data?: ArrayBufferView | null,
+        immediate?: boolean
+    ) => Promise<ArrayBufferView>;
+};
+
+type GpuWithCompaction = {
+    usesGpuSort?: boolean;
+    intervalCompaction?: { numSplatsBuffer?: StorageBufferLike | null } | null;
+    _material?: { getParameter?: (name: string) => { data?: unknown } | unknown } | null;
+};
+
+/** GPU 间接绘制用的可见点数（interval 视锥 cull + projector 后写入 numSplatsBuffer） */
+type GpuFrustumReadback = {
+    lastCount: number | null;
+    inFlight: boolean;
+    lastKickMs: number;
+    scratch: Uint32Array;
+};
+
+const GPU_FRUSTUM_READBACK_MIN_MS = 200;
+const _gpuFrustumByApp = new WeakMap<AppBase, GpuFrustumReadback>();
+
+function findGpuSortNumSplatsBuffer(app: AppBase): StorageBufferLike | null {
+    const director = getGsplatDirector(app);
+    if (!director?.camerasMap) {
+        return null;
+    }
+    for (const cam of director.camerasMap.values()) {
+        for (const layer of cam.layersMap.values()) {
+            const manager = layer.gsplatManager as
+                | (GsplatManagerLike & { renderer?: GpuWithCompaction | null })
+                | null
+                | undefined;
+            const buf = manager?.renderer?.intervalCompaction?.numSplatsBuffer;
+            if (buf && typeof buf.read === 'function') {
+                return buf;
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * 轮询 GPU 侧「视锥/投影后真正送去画」的 splat 数（百万）。
+ *
+ * 来源：GPU-sort 路径 `intervalCompaction.numSplatsBuffer[0]`
+ * （interval AABB 视锥 cull + projector 可见性后的间接绘制 count）。
+ *
+ * 须 `immediate: true`：PlayCanvas WebGPU 非 immediate read 只 setTimeout+map，
+ * **不 submit**，拷贝命令未落盘 → 几乎总是读到 0。HUD 已 200ms 节流，可接受偶发同步。
+ *
+ * 非 LOD 单 SOG：整包一个大 AABB 且在锥内时可能 ≈ frame.gsplats；贴脸时 projector 会再砍。
+ */
+export function pollGpuFrustumGsplatsM(app: AppBase): number | null {
+    let state = _gpuFrustumByApp.get(app);
+    if (!state) {
+        state = {
+            lastCount: null,
+            inFlight: false,
+            lastKickMs: 0,
+            scratch: new Uint32Array(1)
+        };
+        _gpuFrustumByApp.set(app, state);
+    }
+
+    const now = performance.now();
+    if (!state.inFlight && now - state.lastKickMs >= GPU_FRUSTUM_READBACK_MIN_MS) {
+        const buf = findGpuSortNumSplatsBuffer(app);
+        if (buf) {
+            state.inFlight = true;
+            state.lastKickMs = now;
+            // immediate:true → device.submit() 后再 map，否则 numSplatsBuffer 读数恒为 0
+            buf
+                .read(0, 4, state.scratch, true)
+                .then((view) => {
+                    let n: number;
+                    if (view instanceof Uint32Array) {
+                        n = view[0];
+                    } else if (view instanceof Uint8Array || view instanceof Int8Array) {
+                        n = new DataView(
+                            view.buffer,
+                            view.byteOffset,
+                            view.byteLength
+                        ).getUint32(0, true);
+                    } else {
+                        const u32 = new Uint32Array(
+                            (view as ArrayBufferView).buffer,
+                            (view as ArrayBufferView).byteOffset,
+                            Math.max(
+                                1,
+                                Math.floor((view as ArrayBufferView).byteLength / 4)
+                            )
+                        );
+                        n = u32[0];
+                    }
+                    if (Number.isFinite(n) && n >= 0) {
+                        state!.lastCount = n;
+                    }
+                })
+                .catch(() => {
+                    // readback 失败时保留旧值
+                })
+                .finally(() => {
+                    state!.inFlight = false;
+                });
+        }
+    }
+
+    return state.lastCount != null ? state.lastCount / 1_000_000 : null;
+}
+
 /** 资产文件总点数（百万）；与 Gsplats（上屏 active）对照用，不涉及 budget */
 export function readAssetGsplatsM(app: AppBase): number | null {
     const n = sumAssetPlacementSplats(app);

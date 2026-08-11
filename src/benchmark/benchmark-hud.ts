@@ -10,6 +10,7 @@ import {
     readGsplatBufferUploadMetrics,
     readGsplatsM,
     readAssetGsplatsM,
+    pollGpuFrustumGsplatsM,
     readJsHeapUsedMB,
     readVramTexMB,
     readRefinementSnapshot,
@@ -381,6 +382,8 @@ export function initBenchmarkHud(global: Global): () => void {
     let lastBufferUpload = readGsplatBufferUploadMetrics(app);
     /** frameend 采样的上屏 active（避免 tick 开头的 frame.gsplats 滞后/为 0） */
     let lastGsplatsM = readGsplatsM(app);
+    /** GPU-sort：视锥 cull + projector 后的绘制点数（异步 readback 缓存） */
+    let lastGpuFrustumGsplatsM: number | null = null;
     let phase = config.benchmark ? 'loading' : 'idle';
     let currentKeyframe = '—';
     let refineTick: RefinementTickPayload | null = null;
@@ -395,6 +398,10 @@ export function initBenchmarkHud(global: Global): () => void {
         const g = readGsplatsM(app);
         if (g !== null) {
             lastGsplatsM = g;
+        }
+        const gpuCull = pollGpuFrustumGsplatsM(app);
+        if (gpuCull !== null) {
+            lastGpuFrustumGsplatsM = gpuCull;
         }
     };
     app.on('frameend', onFrameEndBufferSample);
@@ -528,6 +535,13 @@ export function initBenchmarkHud(global: Global): () => void {
         lines.push(row('GPU VRAM', vramMb !== null ? `${vramMb.toFixed(0)} MB` : '—'));
         // 行名与引擎字段对齐，便于对照 console：app.stats.frame.gsplats
         lines.push(row('frame.gsplats', gsplatsM !== null ? `${gsplatsM.toFixed(2)}M` : '—'));
+        // GPU 视锥/投影后绘制数（GPU-sort）；非 LOD 对照「整包进 WB」的 frame.gsplats
+        if (lastGpuFrustumGsplatsM !== null) {
+            lines.push(row(
+                'GPU frustum',
+                `${lastGpuFrustumGsplatsM.toFixed(2)}M`
+            ));
+        }
         // Asset：文件/chunk 总点数；仅当与上屏 active 不同时显示（便于对照，非 budget）
         if (
             assetGsplatsM !== null &&
