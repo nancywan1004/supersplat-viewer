@@ -331,7 +331,8 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     const state = observe(events, {
         loaded: false,
         readyToRender: false,
-        performanceMode: storedPerformanceMode !== null ? storedPerformanceMode === 'true' : platform.mobile,
+        // 无本地偏好时默认开性能模式（桌面 2.5M / 移动 1M budget；半分辨率等）
+        performanceMode: storedPerformanceMode !== null ? storedPerformanceMode === 'true' : true,
         progress: 0,
         inputMode: platform.mobile ? 'touch' : 'desktop',
         cameraMode: 'orbit',
