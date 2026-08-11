@@ -46,9 +46,12 @@ export const RASTER_RENDERER_BY_DEVICE: Record<'webgl' | 'webgpu', number> = {
     webgpu: GSPLAT_RENDERER_RASTER_GPU_SORT
 };
 
+/** splat budget（百万）：未设 ?budget= 时按平台 + Performance Mode */
 const SPLAT_BUDGETS = {
+    /** 移动：质量 2M / 性能 1M */
     mobile: { low: 1, high: 2 },
-    desktop: { low: 2, high: 4 }
+    /** 桌面：质量 4M / 性能 2.5M（暂不提供 6M 默认档） */
+    desktop: { low: 2.5, high: 4 }
 } as const;
 
 /** 从 config.budget 或 performanceMode 解析 splat budget（单位：百万） */
