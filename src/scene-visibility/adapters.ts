@@ -1,6 +1,11 @@
 import { findAssetMorphOwnerTargetId } from '../settings-serialize/effects-sync';
 import { pauseAllSceneMedia } from '../scene-assets/media/scene-media-playback';
 import {
+    applySceneContentUserLightRoots,
+    snapshotUserPointSpotLightsEnabled,
+    type UserLightEnabledSnap
+} from '../light';
+import {
     applyViewBloomLocalLightsEnabled,
     readViewBloomLocalLightsEnabled
 } from '../view-settings';
@@ -21,6 +26,11 @@ const ENTITY_NAMES = {
     pointLights: 'pointLights',
     spotLights: 'spotLights'
 } as const;
+
+type LightsSessionGlobal = Global & {
+    __sceneContentLightsBloomSnap?: boolean;
+    __sceneContentUserLightsEnabledSnap?: UserLightEnabledSnap;
+};
 
 function setRootEntityEnabled(global: Global, name: string, visible: boolean): void {
     const entity = global.app.root.findByName(name) as { enabled?: boolean } | null;
@@ -157,26 +167,38 @@ const lightsAdapter: SceneContentVisibilityAdapter = {
     applyCategoryIntent(global, intentVisible) {
         // 子项 flag 在编辑态也可记账；画面套用由 sync 内 overlay 判断
         const show = !!intentVisible;
+        const g = global as LightsSessionGlobal;
+        if (!show && !g.__sceneContentUserLightsEnabledSnap) {
+            // 无 LIGHT_TOGGLE 预快照时才拍；已有快照勿用「已全 false」的 settings 覆盖
+            g.__sceneContentUserLightsEnabledSnap = snapshotUserPointSpotLightsEnabled(global);
+        }
         syncLightingSubsFromLightsCategory(global, show);
         if (!isContentVisibilityOverlayActive(global)) return;
-        const g = global as Global & { __sceneContentLightsBloomSnap?: boolean };
         if (!show) {
+            // 仅在仍为开时记下恢复目标；已是关则不要把 false 写成 snapshot（可能被其它协议先关）
             if (typeof g.__sceneContentLightsBloomSnap !== 'boolean') {
-                g.__sceneContentLightsBloomSnap = readViewBloomLocalLightsEnabled(global);
+                if (readViewBloomLocalLightsEnabled(global)) {
+                    g.__sceneContentLightsBloomSnap = true;
+                }
             }
             applyViewBloomLocalLightsEnabled(global, false);
             global.events.fire('postEffect:changed');
             return;
         }
-        const snap = g.__sceneContentLightsBloomSnap;
+        const bloomSnap = g.__sceneContentLightsBloomSnap;
         delete g.__sceneContentLightsBloomSnap;
-        applyViewBloomLocalLightsEnabled(global, snap !== false);
+        // 无 snapshot 时默认恢复为开（与「大类显示」语义一致）
+        applyViewBloomLocalLightsEnabled(global, bloomSnap !== false);
         global.events.fire('postEffect:changed');
     },
     applyRuntimeGate(global, gateOpen, intentVisible) {
         const rootOn = gateOpen && effectiveCategoryIntent(global, intentVisible);
-        setRootEntityEnabled(global, ENTITY_NAMES.pointLights, rootOn);
-        setRootEntityEnabled(global, ENTITY_NAMES.spotLights, rootOn);
+        const g = global as LightsSessionGlobal;
+        const enabledSnap = rootOn ? g.__sceneContentUserLightsEnabledSnap : undefined;
+        applySceneContentUserLightRoots(global, rootOn, enabledSnap);
+        if (rootOn) {
+            delete g.__sceneContentUserLightsEnabledSnap;
+        }
         // 手电筒独立于 contentVisibility.lights（viewSettings.torch.active），不在此门控
         // 亮度 / 全局辉光 / 阴影由 lightingVisibility 会话门控（见 lighting-session-visibility）
     }
@@ -195,6 +217,7 @@ const persistentAdapter: SceneContentVisibilityAdapter = {
     applyCategoryIntent(global, intentVisible) {
         if (!isContentVisibilityOverlayActive(global)) return;
         const g = global as Global & { __sceneContentPersistentSnapshot?: PersistentSessionSnapshot };
+        // hide 返回值可能是「保留的旧 snapshot」（已关后再 hide 时不为空数组覆盖）
         const snap = applyPersistentSessionVisible(global, intentVisible, g.__sceneContentPersistentSnapshot);
         if (!intentVisible) {
             g.__sceneContentPersistentSnapshot = snap;

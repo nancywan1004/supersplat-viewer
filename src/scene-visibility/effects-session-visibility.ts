@@ -104,6 +104,10 @@ export function readPersistentSessionSnapshot(global: Global): PersistentSession
     };
 }
 
+function isPersistentSnapshotEmpty(snap: PersistentSessionSnapshot | undefined): boolean {
+    return !snap || (snap.scene.length === 0 && snap.camera.length === 0);
+}
+
 /** 会话显隐 persistent.scene + persistent.camera */
 export function applyPersistentSessionVisible(
     global: Global,
@@ -111,14 +115,22 @@ export function applyPersistentSessionVisible(
     snapshot: PersistentSessionSnapshot | undefined
 ): PersistentSessionSnapshot {
     if (!visible) {
-        const snap = readPersistentSessionSnapshot(global);
-        writePersistentTypesEnabled(global, 'scene', snap.scene, false);
-        writePersistentTypesEnabled(global, 'camera', snap.camera, false);
+        const current = readPersistentSessionSnapshot(global);
+        // 已关闭后再 hide（如先 CATEGORY 关再 ALL_SET）：勿用空快照覆盖，勿重复 teardown/vfxExit
+        if (isPersistentSnapshotEmpty(current)) {
+            if (!isPersistentSnapshotEmpty(snapshot)) {
+                return snapshot as PersistentSessionSnapshot;
+            }
+            syncPersistentRuntimeAfterSessionWrite(global);
+            return snapshot ?? current;
+        }
+        writePersistentTypesEnabled(global, 'scene', current.scene, false);
+        writePersistentTypesEnabled(global, 'camera', current.camera, false);
         syncPersistentRuntimeAfterSessionWrite(global);
-        return snap;
+        return current;
     }
     const settings = getEffectsWriteTarget(global);
-    const snap = snapshot ?? readPersistentSessionSnapshot(global);
+    const snap = !isPersistentSnapshotEmpty(snapshot) ? (snapshot as PersistentSessionSnapshot) : readPersistentSessionSnapshot(global);
     const sceneTypes =
         snap.scene.length > 0 ?
             snap.scene :
@@ -130,7 +142,7 @@ export function applyPersistentSessionVisible(
     writePersistentTypesEnabled(global, 'scene', sceneTypes, true);
     writePersistentTypesEnabled(global, 'camera', cameraTypes, true);
     syncPersistentRuntimeAfterSessionWrite(global);
-    return snap;
+    return { scene: sceneTypes, camera: cameraTypes };
 }
 
 /** 会话显隐 persistent.stylization */
@@ -142,6 +154,14 @@ export function applyStylizationSessionVisible(
     if (!visible) {
         const settings = getEffectsReadSource(global);
         const types = readPersistentStylizationEffects(settings).map((e) => e.type);
+        // 已关闭后再 hide：保留既有 snapshot，避免 ALL_SET 二次 hide 掏空
+        if (types.length === 0) {
+            if (snapshot && snapshot.length > 0) {
+                return snapshot;
+            }
+            syncPersistentRuntimeAfterSessionWrite(global);
+            return snapshot ?? types;
+        }
         writePersistentTypesEnabled(global, 'stylization', types, false);
         syncPersistentRuntimeAfterSessionWrite(global);
         return types;

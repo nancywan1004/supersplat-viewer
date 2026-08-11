@@ -4,7 +4,11 @@
  */
 
 import { getPositionInFrontOfCamera } from '../../scene-assets/asset-placement-handler';
-import { spotApexToHalfDeg, updatePointLightsFromSettings } from '../../light';
+import {
+    ensureUserLightEnabledSnapBeforeViewerToggle,
+    spotApexToHalfDeg,
+    updatePointLightsFromSettings
+} from '../../light';
 import { ensureSceneMeshForIntent } from '../../collision/scene-mesh-load-orchestrator';
 import { syncGsplatShadowCastingFromSettings } from '../../vfx/shadow';
 import type { ExperienceSettings } from '../../schemas/v2';
@@ -467,6 +471,8 @@ export function applyLightToggle(global: Global, id: string, enabled: boolean): 
 
     const anyLight = light as any;
     if (anyLight.enabled === enabled) return;
+    // 观看态：在改 settings 前记下全量 enabled（父级关光源常先连发 TOGGLE false）
+    ensureUserLightEnabledSnapBeforeViewerToggle(global);
     anyLight.enabled = enabled;
     updatePointLightsFromSettings(global);
     global.events.fire('lighting:changed');

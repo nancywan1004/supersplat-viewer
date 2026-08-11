@@ -19,21 +19,25 @@ export function canToggleLightingShadowSession(global: Global): boolean {
     return hasConfiguredShadowSceneMesh(global);
 }
 
-function fireNightFade(global: Global, value: number): void {
+/**
+ * 会话亮度必须走 forceReapply，不能只用 nightFade:set：
+ * fade≈0 且 materialsApplied 为空时 set 不进 updateEffect，点/聚光无法重新注入 gsplat。
+ */
+function fireNightFadeForSession(global: Global, value: number): void {
     const v = Math.max(-1, Math.min(1, value));
-    (global.app as { fire: (name: string, value?: unknown) => void }).fire('nightFade:set', v);
+    (global.app as { fire: (name: string, value?: unknown) => void }).fire('nightMode:forceReapply', v);
 }
 
 /** 按会话门控套用全局亮度（隐 → 0；显 → settings.nightMode.fade）。不写 settings。 */
 export function applyLightingBrightnessSession(global: Global): void {
     if (!isViewerOverlayActive(global)) return;
     if (!isLightingSessionAspectVisible(global, 'brightness')) {
-        fireNightFade(global, 0);
+        fireNightFadeForSession(global, 0);
         return;
     }
     const nm = ensureNightMode(global.settings as ExperienceSettings);
     const raw = typeof nm.fade === 'number' ? nm.fade : 0;
-    fireNightFade(global, raw);
+    fireNightFadeForSession(global, raw);
 }
 
 /** 触发后处理刷新，使 bloom / shadow 会话门控在下一帧生效（不触发 sceneMesh generate）。 */

@@ -134,9 +134,20 @@ export class SceneContentVisibilityRegistry {
         if (!adapter) return;
         const intent = this.getCategoryVisible(category);
         try {
+            const hasGate = categoryParticipatesInRuntimeGate(category) && !!adapter.applyRuntimeGate;
+            // lights：先闸 pointLights/spotLights 根节点，再套会话亮度。
+            // 否则 show 时 collectPointLights 仍读到父节点 disabled，亮度刷新采不到灯。
+            if (category === 'lights' && hasGate) {
+                adapter.applyRuntimeGate!(this.global, this.runtimeGateOpen, intent);
+                adapter.applyCategoryIntent(this.global, intent);
+                if (isContentVisibilityOverlayActive(this.global)) {
+                    applyLightingSessionAspects(this.global);
+                }
+                return;
+            }
             adapter.applyCategoryIntent(this.global, intent);
-            if (categoryParticipatesInRuntimeGate(category) && adapter.applyRuntimeGate) {
-                adapter.applyRuntimeGate(this.global, this.runtimeGateOpen, intent);
+            if (hasGate) {
+                adapter.applyRuntimeGate!(this.global, this.runtimeGateOpen, intent);
             }
         } catch (err) {
             console.warn(`[SceneContentVisibility] category "${category}" apply failed`, err);

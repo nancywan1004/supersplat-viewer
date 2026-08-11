@@ -108,7 +108,12 @@ import {
 import { createEffectsRuntime, type EffectsRuntime } from './vfx/effects-runtime';
 import { hasEnabledPersistentGsplatMaterialShaderEffect } from './vfx/effects-runtime/effects-pipeline-policy';
 import { initCommandRegistry } from './editor-modules/command-registry';
-import { initSceneContentVisibility, getSceneContentVisibilityRegistry } from './scene-visibility';
+import {
+    initSceneContentVisibility,
+    getSceneContentVisibilityRegistry,
+    applyLightingSessionAspects
+} from './scene-visibility';
+import { applySceneContentUserLightRoots } from './light';
 import { DEFAULT_DEFERRED_EDITING_LAYERS } from './render/deferred-editing-visual-sync';
 import { initInputArbiter } from './input-arbiter';
 import { VoxelDebugOverlay } from './voxel-debug-overlay';
@@ -900,6 +905,13 @@ class Viewer {
                 // remount persistent 若同帧进行，可能被旧脚本收尾覆盖。统一延后一帧。
                 global.app.once('frameend', () => {
                     this.syncPersistentRevealGsplat(gsplatEntity, restartAnim === true);
+                    // remount 内 restoreNightMode/forceReapply 可能盖掉刚恢复的会话光照；延后重套
+                    applyLightingSessionAspects(global);
+                    // 再断言点光/聚光根与组件（不走 applyCategory，避免把 brightness 等子项强行全开）
+                    const registry = getSceneContentVisibilityRegistry(global);
+                    if (registry?.isRuntimeGateOpen() && registry.getCategoryVisible('lights')) {
+                        applySceneContentUserLightRoots(global, true);
+                    }
                 });
             });
             global.events.on(
