@@ -213,6 +213,11 @@ type Config = {
      * 默认 true。URL ?lodViewHold=0 可关。
      */
     lodViewHold?: boolean;
+    /**
+     * 初始加载 BootstrapFast：视锥内下载/收条目标相对 engineOptimal 放粗档数。
+     * 默认 2；`0` 关闭。URL `?bootstrapCoarsenSteps=N` / `?bootstrapCoarsen=0`。
+     */
+    bootstrapCoarsenSteps?: number;
     renderer: 'webgl' | 'cpu-sort' | 'gpu-sort' | 'compute';
     heatmap: boolean;                           // render heatmap debug overlay (WebGPU only)
     /** Scene Profile 跑批（强制 noui/nofx/noreveal；无 animTrack 时 noanim） */

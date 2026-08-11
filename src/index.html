@@ -92,6 +92,22 @@
                 maxConcurrentParsed >= 1
                     ? Math.min(64, Math.floor(maxConcurrentParsed))
                     : undefined;
+            /** 初始加载粗档收条：?bootstrapCoarsenSteps=N（0 关）；?bootstrapCoarsen=0 亦关 */
+            const bootstrapCoarsenSteps = (() => {
+                const off = url.searchParams.get('bootstrapCoarsen');
+                if (off === '0' || off === 'false' || off === 'off') {
+                    return 0;
+                }
+                const raw = url.searchParams.get('bootstrapCoarsenSteps');
+                if (raw === null) {
+                    return undefined;
+                }
+                const n = Number(raw);
+                if (!Number.isFinite(n) || n < 0) {
+                    return undefined;
+                }
+                return Math.min(8, Math.floor(n));
+            })();
 
             const sseConfig = {
                 poster: posterUrl && createImage(posterUrl),
@@ -119,6 +135,7 @@
                 renderer,
                 budget,
                 maxConcurrent,
+                bootstrapCoarsenSteps,
                 heatmap: url.searchParams.has('heatmap'),
                 fullload: url.searchParams.has('fullload'),
                 /** 视锥外加速降档；默认开。?oofDowngrade=0 关闭（对照用） */

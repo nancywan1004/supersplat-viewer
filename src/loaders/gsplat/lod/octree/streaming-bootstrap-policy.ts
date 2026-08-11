@@ -15,6 +15,8 @@
  *   5) 若 quiet 期间 pending 回流：作废已完成的 settle 周期，必须再走完 3)+4)
  *
  * 假完成防护：须先见过真实细化压力（粗档对齐虚高 clear 不算）。
+ * BootstrapFast 例外：有效目标（visualTarget）已 100% 追上且无 behind 时，视为压力已满足
+ * （否则 pending 常为 0、peakBehindRatio 永不抬升 → UI 卡在 coarseCap=82）。
  * 逃生：仅在 pending/settle/stale 已清但仍无法 fineReady 时，按无进展帧 escape（防 Poland）。
  */
 export const STREAMING_BOOTSTRAP = {
@@ -36,6 +38,11 @@ export const STREAMING_BOOTSTRAP = {
          * 只在 snap.tickSeq 前进时计数，避免 bootstrap 空转同一快照。
          */
         postSettleQuietTicks: 24,
+        /**
+         * 有效目标已齐（BootstrapFast 常见：pending=0、无 ctr↓）时的 quiet 门槛。
+         * 避免 clear 后还干等满 24 tick；也避免 UI 长时间钉在 refineCap。
+         */
+        postSettleQuietTicksFastPath: 8,
         /** 须完整完成的 settle 周期数（回流后清零重计） */
         requiredSettleCycles: 1,
         /** 逃生：无进展帧（约 6s@60）——且必须 pending/settle 已清 */
@@ -219,6 +226,21 @@ export function stepBootstrapCompletion(
     const pending = snap.pendingNodes ?? 0;
     const settling = snap.settlingFrames ?? 0;
     const staleLoaded = snap.staleLoadedNodes ?? 0;
+    const doneRatioEarly = computeFineOnScreenRatio(snap);
+    // BootstrapFast：visualTarget 已齐且无 behind → 从未出现 ctr↓，peakBehindRatio 会永远 < 0.2。
+    // 已追齐有效目标视为细化压力已满足，否则进度卡在 82%、pending=0 无法收条。
+    const atEffectiveClearTarget =
+        target > 0 &&
+        doneRatioEarly >= complete.fineOnScreenRatio &&
+        coarserBehind === 0 &&
+        behindNoEngine === 0;
+    if (atEffectiveClearTarget) {
+        state.peakBehindRatio = Math.max(
+            state.peakBehindRatio,
+            complete.minPeakBehindRatio
+        );
+    }
+
     const tickSeq = snap.tickSeq ?? -1;
     const isNewTick =
         hasValidTick && tickSeq >= 0 && tickSeq !== state.lastTickSeq;
@@ -245,7 +267,7 @@ export function stepBootstrapCompletion(
         state.postSettleQuietTicks = 0;
     }
 
-    const doneRatio = computeFineOnScreenRatio(snap);
+    const doneRatio = doneRatioEarly;
     const refinePressure = hasSeenRefinePressure(state);
     const downloadClear = isDownloadSideClear(snap);
     const fineOnScreenReady =
@@ -256,9 +278,12 @@ export function stepBootstrapCompletion(
         doneRatio >= complete.fineOnScreenRatio &&
         behindNoEngine === 0;
 
+    const quietNeed = atEffectiveClearTarget
+        ? complete.postSettleQuietTicksFastPath
+        : complete.postSettleQuietTicks;
     const settleCyclesReady =
         state.completedSettleCycles >= complete.requiredSettleCycles;
-    const quietReady = state.postSettleQuietTicks >= complete.postSettleQuietTicks;
+    const quietReady = state.postSettleQuietTicks >= quietNeed;
     const mainReady =
         fineOnScreenReady && downloadClear && settleCyclesReady && quietReady;
 
@@ -282,11 +307,12 @@ export function stepBootstrapCompletion(
             settling === 0 &&
             staleLoaded === 0 &&
             state.completedSettleCycles === 0 &&
-            state.baselinePending > 0
+            (state.baselinePending > 0 || atEffectiveClearTarget)
         ) {
             // 从未进入 settle 倒数：持续全清足够久 → 合成 1 个周期后再积 quiet
+            // atEffectiveClearTarget：BootstrapFast 下 pending 可能从未 >0，仍须能收条
             state.postSettleQuietTicks++;
-            if (state.postSettleQuietTicks >= complete.postSettleQuietTicks) {
+            if (state.postSettleQuietTicks >= quietNeed) {
                 state.completedSettleCycles = 1;
                 state.postSettleQuietTicks = 0;
             }
@@ -348,9 +374,66 @@ export function mapCoarsePlacementProgress(placementRatio: number): number {
     );
 }
 
-export function mapRefinementUiProgress(doneRatio: number): number {
+export type RefinementUiSettleHint = {
+    completedSettleCycles: number;
+    postSettleQuietTicks: number;
+    /** 有效目标已齐（BootstrapFast 快路径） */
+    atEffectiveClearTarget?: boolean;
+};
+
+/**
+ * Phase C UI：clear 进度只爬到约 91%；剩余靠 settle/quiet 爬到 99，避免「瞬间 99 干等」。
+ */
+export function mapRefinementUiProgress(
+    doneRatio: number,
+    settle?: RefinementUiSettleHint
+): number {
     const { coarseCap, refineCap } = STREAMING_BOOTSTRAP.progress;
-    const { fineOnScreenRatio } = STREAMING_BOOTSTRAP.complete;
-    const displayRatio = Math.min(1, doneRatio / fineOnScreenRatio);
-    return coarseCap + Math.round(displayRatio * (refineCap - coarseCap));
+    const {
+        fineOnScreenRatio,
+        requiredSettleCycles,
+        postSettleQuietTicks,
+        postSettleQuietTicksFastPath
+    } = STREAMING_BOOTSTRAP.complete;
+    const span = refineCap - coarseCap;
+    const displayRatio = Math.min(1, doneRatio / Math.max(1e-6, fineOnScreenRatio));
+    /** clear 单独贡献的上限（相对 span） */
+    const clearWeight = 0.55;
+    const clearProgress = coarseCap + Math.round(displayRatio * span * clearWeight);
+
+    if (!settle || displayRatio < 1) {
+        return Math.min(refineCap, clearProgress);
+    }
+
+    const quietNeed = settle.atEffectiveClearTarget
+        ? postSettleQuietTicksFastPath
+        : postSettleQuietTicks;
+    // 合成 settle：cycles=0 时 quiet 0→quietNeed 映射整段剩余进度；正式周期后再跟 quiet
+    if (settle.completedSettleCycles < requiredSettleCycles) {
+        const synth =
+            settle.completedSettleCycles === 0
+                ? Math.min(1, settle.postSettleQuietTicks / Math.max(1, quietNeed))
+                : settle.completedSettleCycles / Math.max(1, requiredSettleCycles);
+        const readiness = clearWeight + (1 - clearWeight) * synth * 0.5;
+        return coarseCap + Math.round(Math.min(1, readiness) * span);
+    }
+    const quietFrac = Math.min(1, settle.postSettleQuietTicks / Math.max(1, quietNeed));
+    const readiness = clearWeight + (1 - clearWeight) * (0.5 + 0.5 * quietFrac);
+    return coarseCap + Math.round(Math.min(1, readiness) * span);
+}
+
+/** 供 UI：当前是否「有效目标已齐」（与 step 内判定一致） */
+export function isAtEffectiveClearTarget(snap: BootstrapRefinementSnapshot): boolean {
+    const target = snap.centerTargetNodes ?? 0;
+    if (target <= 0) {
+        return false;
+    }
+    const behindNoEngine = snap.centerBehindNoEngine ?? 0;
+    const centerBehind = snap.centerEngineBehindNodes ?? 0;
+    const coarserBehind = Math.max(0, centerBehind - behindNoEngine);
+    return (
+        computeFineOnScreenRatio(snap) >= STREAMING_BOOTSTRAP.complete.fineOnScreenRatio &&
+        coarserBehind === 0 &&
+        behindNoEngine === 0
+    );
 }

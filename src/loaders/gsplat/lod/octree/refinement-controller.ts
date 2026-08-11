@@ -109,8 +109,25 @@ const T = {
         maxOuterAttempts: 3,
         /** 各外层轮次的等待 ms */
         backoffMs: [2000, 5000, 12000] as const
+    },
+    /**
+     * 初始加载 BootstrapFast：视锥内（中央+边缘）先追 visualTarget=engineOptimal+steps，
+     * finalize 后再追满 engineOptimal。URL `?bootstrapCoarsenSteps=N`（0 关）。
+     */
+    bootstrapCoarsen: {
+        defaultSteps: 2
     }
 };
+
+/** config/URL → 有效 coarsen 步数；未设用默认 2；0=关闭 */
+function resolveBootstrapCoarsenSteps(configSteps: number | undefined): number {
+    if (configSteps !== undefined && Number.isFinite(configSteps)) {
+        return Math.max(0, Math.min(8, Math.floor(configSteps)));
+    }
+    return T.bootstrapCoarsen.defaultSteps;
+}
+
+export type OctreeRefinePhase = 'bootFast' | 'polish';
 
 type LoaderConcurrencyTunables = {
     defaultConcurrent: number;
@@ -467,7 +484,7 @@ type PrioritizedBatch = {
     centerBehindNoEngine: number;
     /** 中央可统计叶（已上屏且引擎目标档有文件） */
     centerTargetNodes: number;
-    /** 其中 currentLod ≤ engineOptimal（细档已下并上屏） */
+    /** 其中 currentLod ≤ 当前有效目标（BootstrapFast=visualTarget；否则 engineOptimal） */
     centerClearNodes: number;
     /** ctr↓ 样本（最多 3）：便于定位是哪一叶 */
     centerBehindSamples: CenterBehindSample[];
@@ -516,7 +533,30 @@ type RefinementEvaluateContext = {
     oofDowngradeEnabled: boolean;
     /** 同视角防抖：视锥内只许变清不许变糊；默认 true。?lodViewHold=0 关 */
     lodViewHoldEnabled: boolean;
+    /** 初始加载 BootstrapFast：视锥内相对 engineOptimal 放粗 */
+    bootstrapCoarsenActive: boolean;
+    /** 放粗档数；0 表示关闭 */
+    bootstrapCoarsenSteps: number;
 };
+
+/**
+ * BootstrapFast：相对 engineOptimal 放粗（LOD 越大越粗）。
+ * polish / 关闭时原样返回 engineOptimal。
+ */
+function resolveEffectiveOptimalLod(
+    engineOptimalLod: number,
+    maxLod: number,
+    ctx: Pick<RefinementEvaluateContext, 'bootstrapCoarsenActive' | 'bootstrapCoarsenSteps'>
+): number {
+    if (
+        engineOptimalLod < 0 ||
+        !ctx.bootstrapCoarsenActive ||
+        !(ctx.bootstrapCoarsenSteps > 0)
+    ) {
+        return engineOptimalLod;
+    }
+    return Math.min(maxLod, engineOptimalLod + ctx.bootstrapCoarsenSteps);
+}
 
 function lodParamsFromComponent(component: GSplatComponent | null): LodPlacementParams {
     return {
@@ -1377,8 +1417,8 @@ function computeViewportAabbEdgeFactor(
 
 /**
  * separate 资产逐档升 LOD：当前比 optimal 粗时按 jumpSteps 逼近目标。
- * 中央 / 边缘目标档相同（均为 engineOptimal）；差异只在 jumpSteps 与下载 score。
- * jumpSteps：中央默认×2、边缘×1、积压边缘×3（可 ?ladder= 覆盖）。
+ * BootstrapFast 时 optimal 为 visualTarget；否则为 engineOptimal。
+ * 中央 / 边缘目标档相同；差异只在 jumpSteps 与下载 score。
  */
 function computeRefinementTargetLod(
     optimalLod: number,
@@ -1659,7 +1699,7 @@ export type StreamingViewportRefinementStatus = {
     centerEngineBehindNodes: number;
     /** 中央可统计叶（已上屏且引擎目标档有文件） */
     centerTargetNodes: number;
-    /** 其中 currentLod ≤ engineOptimal */
+    /** 其中 currentLod ≤ 当前有效目标（BootstrapFast=visualTarget） */
     centerClearNodes: number;
     /** post-download settle 剩余帧；>0 时勿收条（否则 settle 结束会再涌一轮 pending） */
     settlingFrames: number;
@@ -1667,6 +1707,8 @@ export type StreamingViewportRefinementStatus = {
     tickSeq: number;
     /** 全清：pending=0 且 ctr↓=0（benchmark clear） */
     ready: boolean;
+    /** bootFast=初始加载粗档收条；polish=追满 engineOptimal */
+    refinePhase: OctreeRefinePhase;
 };
 
 /**
@@ -1693,7 +1735,8 @@ export function getStreamingViewportRefinementStatus(
             centerClearNodes: 0,
             settlingFrames: 0,
             tickSeq: 0,
-            ready: true
+            ready: true,
+            refinePhase: 'polish'
         };
     }
 
@@ -1712,7 +1755,8 @@ export function getStreamingViewportRefinementStatus(
             centerClearNodes: 0,
             settlingFrames: 0,
             tickSeq: 0,
-            ready: false
+            ready: false,
+            refinePhase: 'polish'
         };
     }
 
@@ -1721,7 +1765,9 @@ export function getStreamingViewportRefinementStatus(
         gsplat: app.scene.gsplat as GsplatSceneLike,
         lod: lodParamsFromComponent(gsplatEntity.gsplat as GSplatComponent | null),
         oofDowngradeEnabled: true,
-        lodViewHoldEnabled: true
+        lodViewHoldEnabled: true,
+        bootstrapCoarsenActive: false,
+        bootstrapCoarsenSteps: 0
     });
 
     const pendingForeground = batch.foregroundPendingUnique;
@@ -1749,7 +1795,8 @@ export function getStreamingViewportRefinementStatus(
         centerClearNodes: centerClear,
         settlingFrames: 0,
         tickSeq: 0,
-        ready
+        ready,
+        refinePhase: 'polish'
     };
 }
 
@@ -1939,7 +1986,7 @@ function buildPriorityFiles(
         const edgeForQueue =
             edgeFactor > 0 ? edgeFactor : T.viewport.edgeOuterDownloadFloor;
         const isCenter = edgeFactor >= T.viewport.edgeRelaxOptimal;
-        // 中央细档上屏统计 + ctr↓ 诊断
+        // 中央细档上屏统计 + ctr↓ 诊断（相对当前有效目标：BootstrapFast=visualTarget）
         if (isCenter && currentLod >= 0) {
             if (engineOptimalLod < 0) {
                 centerBehindNoEngine++;
@@ -1957,19 +2004,24 @@ function buildPriorityFiles(
                     });
                 }
             } else {
-                const engineFi = node.lods[engineOptimalLod]?.fileIndex ?? -1;
-                if (engineFi < 0) {
+                const effectiveOptimalLod = resolveEffectiveOptimalLod(
+                    engineOptimalLod,
+                    maxLod,
+                    ctx
+                );
+                const clearFi = node.lods[effectiveOptimalLod]?.fileIndex ?? -1;
+                if (clearFi < 0) {
                     // 无档文件：不计入 target（无法追）
-                } else if (currentLod <= engineOptimalLod) {
+                } else if (currentLod <= effectiveOptimalLod) {
                     centerTargetNodes++;
                     centerClearNodes++;
-                } else if (!isPermanentFail(engineFi)) {
+                } else if (!isPermanentFail(clearFi)) {
                     centerTargetNodes++;
                     centerEngineBehindNodes++;
                     if (centerBehindSamples.length < 3) {
                         const jumpSteps = resolveLadderJumpSteps(edgeForQueue, pendingBacklog);
                         const targetLod = computeRefinementTargetLod(
-                            engineOptimalLod,
+                            effectiveOptimalLod,
                             maxLod,
                             currentLod,
                             edgeForQueue,
@@ -1991,14 +2043,19 @@ function buildPriorityFiles(
             }
         }
 
-        // 下载目标唯一来源：engineOptimal；未生成则本叶本帧不建队
+        // 下载目标：BootstrapFast 用 visualTarget，否则 engineOptimal；未生成则本叶本帧不建队
         if (engineOptimalLod < 0) {
             continue;
         }
 
+        const effectiveOptimalLod = resolveEffectiveOptimalLod(
+            engineOptimalLod,
+            maxLod,
+            ctx
+        );
         const jumpSteps = resolveLadderJumpSteps(edgeForQueue, pendingBacklog);
         const targetLod = computeRefinementTargetLod(
-            engineOptimalLod,
+            effectiveOptimalLod,
             maxLod,
             currentLod,
             edgeForQueue,
@@ -2205,6 +2262,8 @@ export type OctreeRefinementTickMetrics = {
     oofDowngraded: number;
     /** 本拍视锥外粗档未就绪、已 ensure 的叶数 */
     oofPendingCoarse: number;
+    /** bootFast=初始加载粗档收条；polish=追满 engineOptimal */
+    refinePhase: OctreeRefinePhase;
 };
 
 export type OctreeRefinementController = {
@@ -2222,6 +2281,13 @@ export type OctreeRefinementController = {
      * 通常由 bindGsplatEntityLodSettings 在 bootstrap 写入；此处供调试 / 热更新。
      */
     setLodPlacementParams: (params: Partial<LodPlacementParams>) => void;
+    /**
+     * 初始加载 BootstrapFast 开关。finalize 收条后应设 false，开始追满 engineOptimal。
+     * steps=0 时无操作。
+     */
+    setBootstrapCoarsenActive: (active: boolean) => void;
+    /** 当前是否处于 BootstrapFast */
+    getRefinePhase: () => OctreeRefinePhase;
 };
 
 export function createOctreeRefinementController(
@@ -2241,17 +2307,31 @@ export function createOctreeRefinementController(
     if (maxConcurrentOverride != null) {
         console.info(`[octree-refinement] maxConcurrent override=${maxConcurrentOverride}`);
     }
+    const bootstrapCoarsenSteps = resolveBootstrapCoarsenSteps(
+        global.config?.bootstrapCoarsenSteps
+    );
+    let bootstrapCoarsenActive = bootstrapCoarsenSteps > 0;
+    if (bootstrapCoarsenSteps > 0) {
+        console.info(
+            `[octree-refinement] bootstrapCoarsen steps=${bootstrapCoarsenSteps} (off after finalize)`
+        );
+    }
     const evalCtx: RefinementEvaluateContext = {
         scene,
         gsplat: gsplatScene,
         lod: lodParamsFromComponent(gsplatEntity.gsplat as GSplatComponent | null),
         oofDowngradeEnabled: global.config?.oofDowngrade !== false,
-        lodViewHoldEnabled: global.config?.lodViewHold !== false
+        lodViewHoldEnabled: global.config?.lodViewHold !== false,
+        bootstrapCoarsenActive,
+        bootstrapCoarsenSteps
     };
     configureLodStabilizers({
         oofDowngrade: evalCtx.oofDowngradeEnabled,
         lodViewHold: evalCtx.lodViewHoldEnabled
     });
+
+    const currentRefinePhase = (): OctreeRefinePhase =>
+        bootstrapCoarsenActive && bootstrapCoarsenSteps > 0 ? 'bootFast' : 'polish';
 
     if (octree.assetLoader) {
         patchAssetLoaderPriority(octree.assetLoader);
@@ -2318,7 +2398,8 @@ export function createOctreeRefinementController(
         centerClearNodes: 0,
         settlingFrames: 0,
         tickSeq: 0,
-        ready: false
+        ready: false,
+        refinePhase: currentRefinePhase()
     };
     let lastTickMetrics: OctreeRefinementTickMetrics | null = null;
     let tickSeq = 0;
@@ -2954,7 +3035,8 @@ export function createOctreeRefinementController(
             needsLodSwitch,
             syncTrigger,
             oofDowngraded,
-            oofPendingCoarse
+            oofPendingCoarse,
+            refinePhase: currentRefinePhase()
         };
 
         const activityActive =
@@ -2992,7 +3074,8 @@ export function createOctreeRefinementController(
             centerClearNodes,
             settlingFrames: settle.framesRemaining,
             tickSeq,
-            ready
+            ready,
+            refinePhase: currentRefinePhase()
         };
 
         if (cameraBurstFrames > 0) {
@@ -3137,6 +3220,27 @@ export function createOctreeRefinementController(
                 comp.lodMultiplier = params.lodMultiplier;
             }
             refreshEvalLodParams(evalCtx);
+        },
+
+        setBootstrapCoarsenActive(active: boolean) {
+            if (bootstrapCoarsenSteps <= 0) {
+                return;
+            }
+            const next = !!active;
+            if (bootstrapCoarsenActive === next) {
+                return;
+            }
+            bootstrapCoarsenActive = next;
+            evalCtx.bootstrapCoarsenActive = next;
+            console.info(
+                `[octree-refinement] bootstrapCoarsen ${next ? 'bootFast' : 'polish'} (steps=${bootstrapCoarsenSteps})`
+            );
+            cameraMovedSinceSettle = true;
+            runPriorityPrefetch();
+        },
+
+        getRefinePhase() {
+            return currentRefinePhase();
         },
 
         destroy() {

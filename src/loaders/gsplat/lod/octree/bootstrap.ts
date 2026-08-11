@@ -36,7 +36,7 @@ import {
     computeBootstrapDoneRatio,
     createBootstrapWorkloadState,
     hasSeenRefinePressure,
-    isBootstrapVacuumComplete,
+    isAtEffectiveClearTarget,
     mapCoarsePlacementProgress,
     mapRefinementUiProgress,
     resetBootstrapWorkloadState,
@@ -267,6 +267,8 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
             return;
         }
         streamingBootstrapDisplayFinalized = true;
+        // 收条后退出 BootstrapFast，后台追满 engineOptimal（不挡交互）
+        refinementController?.setBootstrapCoarsenActive(false);
         if (!state.readyToRender) {
             state.readyToRender = true;
             ensureShadowPipelineReady();
@@ -413,10 +415,9 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         const doneRatio = computeBootstrapDoneRatio(snap, refinementWorkload);
 
         // 粗档对齐期 clear/target 会虚高：未见真实细化压力前进度停在 coarseCap
+        // （勿在此处跳 refineCap=99，否则会「瞬间 99 干等 settle/quiet」）
         if (!hasSeenRefinePressure(refinementWorkload)) {
-            state.progress = isBootstrapVacuumComplete(snap, refinementWorkload, hasTick)
-                ? BOOT_PROGRESS.refineCap
-                : Math.max(state.progress, BOOT_PROGRESS.coarseCap);
+            state.progress = Math.max(state.progress, BOOT_PROGRESS.coarseCap);
             return;
         }
 
@@ -425,7 +426,11 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
             return;
         }
 
-        const refinementProgress = mapRefinementUiProgress(doneRatio);
+        const refinementProgress = mapRefinementUiProgress(doneRatio, {
+            completedSettleCycles: refinementWorkload.completedSettleCycles,
+            postSettleQuietTicks: refinementWorkload.postSettleQuietTicks,
+            atEffectiveClearTarget: isAtEffectiveClearTarget(snap)
+        });
         state.progress = Math.min(
             BOOT_PROGRESS.refineCap,
             Math.max(state.progress, refinementProgress)
@@ -526,14 +531,15 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
 
         const refinement = resolveStreamingRefinementStatus();
         noteBaselinePending(refinement.pendingNodes);
-        updateStreamingLoadProgress(
-            watermark > 0 ? Math.trunc((current / watermark) * 100) : state.progress
-        );
 
+        // 先推进 settle/quiet，再刷 UI：clear 齐后进度靠 quiet 从 ~91 爬到 99，避免先钉 99 再干等
         const step = stepBootstrapCompletion(
             refinementWorkload,
             toBootstrapSnap(refinement),
             { hasValidTick: hasValidRefinementTick() }
+        );
+        updateStreamingLoadProgress(
+            watermark > 0 ? Math.trunc((current / watermark) * 100) : state.progress
         );
 
         if (!step.shouldFinalize) {

@@ -116,6 +116,7 @@ function readRefinementLight(global: Global): {
     centerClear: number;
     centerTarget: number;
     activityActive: boolean;
+    refinePhase: string;
 } | null {
     const controller = (global.app as { viewer?: ViewerLike }).viewer?.octreeRefinementController;
     if (!controller) {
@@ -130,7 +131,8 @@ function readRefinementLight(global: Global): {
             centerBehind: 0,
             centerClear: 0,
             centerTarget: 0,
-            activityActive: false
+            activityActive: false,
+            refinePhase: snapshot.refinePhase ?? 'polish'
         };
     }
     const status = controller.getStreamingRefinementStatus();
@@ -141,7 +143,8 @@ function readRefinementLight(global: Global): {
         centerBehind: status.centerEngineBehindNodes ?? 0,
         centerClear: status.centerClearNodes ?? 0,
         centerTarget: status.centerTargetNodes ?? 0,
-        activityActive: controller.getActivity().active
+        activityActive: controller.getActivity().active,
+        refinePhase: status.refinePhase ?? controller.getRefinePhase?.() ?? 'polish'
     };
 }
 
@@ -651,7 +654,8 @@ export function initBenchmarkHud(global: Global): () => void {
                     : '';
             lines.push(row(
                 'Refine',
-                `${(refine.ratio * 100).toFixed(0)}% · pending ${refine.pending}${fineHint}${behindHint}${activityHint}`
+                `${(refine.ratio * 100).toFixed(0)}% · pending ${refine.pending}${fineHint}${behindHint}` +
+                    ` · phase=${refine.refinePhase}${activityHint}`
             ));
         }
 

@@ -40,6 +40,7 @@ export type RefinementSnapshot = {
     pendingNodes: number;
     refinementRatio: number;
     ready: boolean;
+    refinePhase?: string;
 };
 
 type ViewerLike = {
@@ -1543,6 +1544,7 @@ export function renderRefinementTickMetricsHtml(metrics: OctreeRefinementTickMet
                 (metrics.centerTargetNodes > 0
                     ? ` · 细档${metrics.centerClearNodes}/${metrics.centerTargetNodes}`
                     : '') +
+                (metrics.refinePhase ? ` · phase=${metrics.refinePhase}` : '') +
                 (metrics.centerBehindSamples?.length
                     ? ` [${metrics.centerBehindSamples
                         .map((s) =>
@@ -1600,7 +1602,8 @@ export function readRefinementSnapshot(global: Global): RefinementSnapshot {
     return {
         pendingNodes: status.pendingNodes,
         refinementRatio: status.refinementRatio,
-        ready: status.ready
+        ready: status.ready,
+        refinePhase: status.refinePhase
     };
 }
 
