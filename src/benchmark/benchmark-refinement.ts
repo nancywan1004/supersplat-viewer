@@ -9,7 +9,19 @@ export const REFINEMENT_CLEAR_RATIO = 0.95;
 export const BENCHMARK_OBSERVE_MS = 200;
 /** 连续清晰观测次数（× BENCHMARK_OBSERVE_MS）判定 blur→clear */
 export const REFINEMENT_STABLE_OBSERVATIONS = 4;
+/** 默认 45s；可用 URL/config `refineTimeoutMs` 覆盖（0=一直等到清完） */
 export const REFINEMENT_TIMEOUT_MS = 45_000;
+
+function resolveRefinementTimeoutMs(global: Global): number {
+    const raw = global.config?.refineTimeoutMs;
+    if (raw === undefined || raw === null || !Number.isFinite(raw)) {
+        return REFINEMENT_TIMEOUT_MS;
+    }
+    if (raw <= 0) {
+        return Number.POSITIVE_INFINITY;
+    }
+    return Math.max(1_000, Math.floor(raw));
+}
 
 export type RefinementWaitResult = {
     blurToClearMs: number | null;
@@ -1612,6 +1624,7 @@ export async function waitForRefinementClear(
     caseMemoryTracker?: BenchmarkMemoryTracker
 ): Promise<RefinementWaitResult> {
     const arrivalSnapshot = readRefinementSnapshot(global);
+    const timeoutMs = resolveRefinementTimeoutMs(global);
     const fpsSamples: number[] = [];
     let stableObservations = 0;
     let blurToClearMs: number | null = null;
@@ -1682,7 +1695,7 @@ export async function waitForRefinementClear(
                 emitTick(snapshot, null);
             }
 
-            if (blurToClearMs !== null || now - loopStartMs >= REFINEMENT_TIMEOUT_MS) {
+            if (blurToClearMs !== null || now - loopStartMs >= timeoutMs) {
                 window.clearInterval(observeTimer);
                 const refinePeaks = refineMemory.peaks();
                 resolve({

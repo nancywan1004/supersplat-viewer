@@ -81,6 +81,14 @@
 
             const budgetParam = url.searchParams.get('budget');
             const budget = budgetParam !== null ? Number(budgetParam) : undefined;
+            /** Benchmark 糊→清超时：?refineTimeoutMs=N（0=等到清完） */
+            const refineTimeoutParam = url.searchParams.get('refineTimeoutMs');
+            const refineTimeoutParsed =
+                refineTimeoutParam !== null ? Number(refineTimeoutParam) : undefined;
+            const refineTimeoutMs =
+                refineTimeoutParsed !== undefined && Number.isFinite(refineTimeoutParsed)
+                    ? Math.floor(refineTimeoutParsed)
+                    : undefined;
             /** LOD 下载并发：?maxConcurrent=1|2|4|8…（亦接受 ?concurrent=） */
             const maxConcurrentParam =
                 url.searchParams.get('maxConcurrent') ?? url.searchParams.get('concurrent');
@@ -134,6 +142,7 @@
                 webgpu: preferWebGpu,
                 renderer,
                 budget,
+                refineTimeoutMs,
                 maxConcurrent,
                 bootstrapCoarsenSteps,
                 heatmap: url.searchParams.has('heatmap'),

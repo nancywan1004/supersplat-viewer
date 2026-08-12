@@ -202,6 +202,11 @@ type Config = {
     token?: string;
     budget?: number;                            // override splat budget in millions (overrides platform + performanceMode table)
     /**
+     * Benchmark 糊→清等待上限（ms）。默认 45000。
+     * URL `?refineTimeoutMs=N`；`0` 表示一直等到 pending 清完。
+     */
+    refineTimeoutMs?: number;
+    /**
      * LOD 下载并发上限（loader.maxConcurrentLoads）。
      * URL ?maxConcurrent=N 固定 boost/动态开槽，便于对照 1/2/4/8；未设则用平台默认（desktop boost 8）。
      */
