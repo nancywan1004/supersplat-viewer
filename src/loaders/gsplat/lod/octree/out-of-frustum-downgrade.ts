@@ -79,8 +79,9 @@ type OctreeInstanceOofPatched = OctreeInstanceLike & {
     evaluateOptimalLods?: (...args: unknown[]) => number;
     __oofApplyPatched?: boolean;
     __oofEvalOptimalPatched?: boolean;
-    __originalApplyLodChanges?: (maxLod: number, params: unknown) => void;
-    __originalEvaluateOptimalLods?: (...args: unknown[]) => number;
+    /** OOF wrapper 下一层（闭包保存；勿与其它 patch 共用动态字段） */
+    __oofUnderlyingApplyLodChanges?: (maxLod: number, params: unknown) => void;
+    __oofUnderlyingEvaluateOptimalLods?: (...args: unknown[]) => number;
     __oofDripLimit?: number | null;
     __oofLastStats?: OofDowngradeStats;
     __oofInView?: Uint8Array;
@@ -115,6 +116,26 @@ let _idleDripTickCounter = 0;
 /** 模块级开关：由 refinement / URL 配置 */
 let _oofDowngradeEnabled = true;
 let _lodViewHoldEnabled = true;
+
+/**
+ * applyLodChanges 稳定器钩子（挂在 OOF wrapper 内，保证顺序）：
+ * 1) beforeHoldSnapshot → 2) hold + OOF → 3) afterHoldPreApply（renderScale）→ 4) engine
+ */
+export type LodApplyStabilizerHook = (inst: OctreeInstanceLike, maxLod: number) => void;
+let _beforeHoldSnapshotHook: LodApplyStabilizerHook | null = null;
+let _afterHoldPreApplyHook: LodApplyStabilizerHook | null = null;
+
+export function setLodApplyStabilizerHooks(hooks: {
+    beforeHoldSnapshot?: LodApplyStabilizerHook | null;
+    afterHoldPreApply?: LodApplyStabilizerHook | null;
+}): void {
+    if ('beforeHoldSnapshot' in hooks) {
+        _beforeHoldSnapshotHook = hooks.beforeHoldSnapshot ?? null;
+    }
+    if ('afterHoldPreApply' in hooks) {
+        _afterHoldPreApplyHook = hooks.afterHoldPreApply ?? null;
+    }
+}
 
 export function configureLodStabilizers(options: {
     oofDowngrade?: boolean;
@@ -624,9 +645,10 @@ export function ensureOutOfFrustumEvaluateOptimalPatch(
     if (!patched?.evaluateOptimalLods || patched.__oofEvalOptimalPatched) {
         return;
     }
-    patched.__originalEvaluateOptimalLods = patched.evaluateOptimalLods.bind(patched);
+    const previous = patched.evaluateOptimalLods.bind(patched);
+    patched.__oofUnderlyingEvaluateOptimalLods = previous;
     patched.evaluateOptimalLods = (...args: unknown[]) => {
-        const totalBefore = patched.__originalEvaluateOptimalLods?.(...args) ?? 0;
+        const totalBefore = previous(...args) ?? 0;
         if (!_oofDowngradeEnabled) {
             return totalBefore;
         }
@@ -653,9 +675,13 @@ export function ensureOutOfFrustumApplyPatch(
     if (!patched?.applyLodChanges || patched.__oofApplyPatched) {
         return;
     }
-    patched.__originalApplyLodChanges = patched.applyLodChanges.bind(patched);
+    // 闭包保存上一层；勿写共享 __originalApplyLodChanges（会与其它 patch 互相覆盖爆栈）
+    const previous = patched.applyLodChanges.bind(patched);
+    patched.__oofUnderlyingApplyLodChanges = previous;
     patched.__oofDripLimit = null;
     patched.applyLodChanges = (maxLod: number, params: unknown) => {
+        _beforeHoldSnapshotHook?.(patched, maxLod);
+
         const mats = getCamera();
         let budgetExcluded = 0;
         let clamped = 0;
@@ -679,7 +705,11 @@ export function ensureOutOfFrustumApplyPatch(
             }
         }
         patched.__oofLastStats = { clamped, pendingCoarse, budgetExcluded, held };
-        return patched.__originalApplyLodChanges?.(maxLod, params);
+
+        // hold/OOF 之后：renderScale 等视觉钳制（不被 hold 撤掉）
+        _afterHoldPreApplyHook?.(patched, maxLod);
+
+        return previous(maxLod, params);
     };
     patched.__oofApplyPatched = true;
 }
@@ -736,7 +766,8 @@ export function dripOutOfFrustumDowngrade(
     for (let i = 0; i < instances.length; i++) {
         const inst = instances[i] as OctreeInstanceOofPatched;
         ensureOutOfFrustumDowngradePatches(inst, getMats);
-        if (typeof inst.applyLodChanges !== 'function' || !inst.__originalApplyLodChanges) {
+        const underlying = inst.__oofUnderlyingApplyLodChanges;
+        if (typeof inst.applyLodChanges !== 'function' || !underlying) {
             continue;
         }
         const inView = ensureInViewCache(inst, mats);
@@ -755,7 +786,8 @@ export function dripOutOfFrustumDowngrade(
         }
         const host = inst.octree as OctreeHost;
         const maxLod = Math.max(0, (host?.lodLevels ?? 1) - 1);
-        inst.__originalApplyLodChanges(maxLod, gsplatParams);
+        // 跳过 OOF wrapper（已在上面手动 clamp），进入下一层（引擎或 renderScale 钩子后的底层）
+        underlying(maxLod, gsplatParams);
         clamped += pre.clamped;
         anyApply = true;
         inst.__oofLastStats = {
