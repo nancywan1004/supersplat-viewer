@@ -36,6 +36,7 @@ import {
 } from './lod-render-scale';
 import {
     findAllOctreeInstances,
+    requestOctreeLodUpdate,
     requestOctreePlacementUpdate,
     type OctreeInstanceLike
 } from './octree-instance-access';
@@ -1561,11 +1562,12 @@ function syncOctreePendingPlacements(
     }
     markSyncedOctreeThisFrame(app, octree);
 
-    // 经 World API：下一拍立即轮询 instance → 仅 invalidate WorldState → 增量 bake
-    // 不再直接调用内部 inst.update()，避免吞掉 placement dirty / 状态所有权错位
+    // 1) 强制下一拍 fullUpdate + applyLodChanges（否则预下载已落地也切不上屏）
+    // 2) placement 轮询：处理 pendingDecrements / 增量 bake
+    const lodCount = requestOctreeLodUpdate(app, octree);
     const worldCount = requestOctreePlacementUpdate(app, octree);
     const instanceCount = findAllOctreeInstances(app, octree, gsplatEntity).length;
-    const count = Math.max(worldCount, instanceCount);
+    const count = Math.max(lodCount, worldCount, instanceCount);
 
     // 仅真实结构变化才允许 markSceneDirty（默认 false；LOD sync 不得 scene-wide rebuild）
     if (markSceneDirty) {

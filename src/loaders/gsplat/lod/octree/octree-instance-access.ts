@@ -166,6 +166,9 @@ function requestOctreePlacementUpdateFallback(world: GsplatWorldLike): void {
 /**
  * 增量 WorldState invalidation 入口：请求 world 下一拍立即轮询 octree instance。
  * 语义：placement dirty → WorldState → needsUploadIds → 增量 bake；不强制 Work Buffer 全量 rebuild。
+ *
+ * 注意：这**不会**触发 `applyLodChanges`。refinement 预下载的 file 仅在 resource 缓存里时，
+ * 还需 {@link requestOctreeLodUpdate}，否则相机静止会出现「已下未上」卡死。
  */
 export function requestOctreePlacementUpdate(app: AppBase, octree: unknown): number {
     const worlds = findGsplatWorldsForOctree(app, octree);
@@ -175,6 +178,31 @@ export function requestOctreePlacementUpdate(app: AppBase, octree: unknown): num
             world.requestOctreePlacementUpdate();
         } else {
             requestOctreePlacementUpdateFallback(world);
+        }
+    }
+    return worlds.length;
+}
+
+/**
+ * 请求下一拍对指定 octree 跑 `updateLod` / `_enforceBudget` → `applyLodChanges`。
+ *
+ * PlayCanvas 只有在 `fullUpdate`（`_lodUpdateRequested`）里才会 `consumeNeedsLodUpdate`；
+ * 相机不动且无 dirty 时，仅 placement 轮询无法把已下载档切上屏。
+ */
+export function requestOctreeLodUpdate(app: AppBase, octree: unknown): number {
+    const worlds = findGsplatWorldsForOctree(app, octree);
+    for (let i = 0; i < worlds.length; i++) {
+        const world = worlds[i];
+        world._lodUpdateRequested = true;
+        world._framesTillFullUpdate = 0;
+        const instances = world._octreeInstances;
+        if (!instances) {
+            continue;
+        }
+        for (const inst of instances.values()) {
+            if (inst.octree === octree) {
+                inst.needsLodUpdate = true;
+            }
         }
     }
     return worlds.length;
