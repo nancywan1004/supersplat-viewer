@@ -35,7 +35,7 @@ export function writeLightingSubsFromLightsCategory(global: Global, visible: boo
 }
 
 /**
- * `contentVisibility.lights` 总闸：同步子 flag 后套用画面。
+ * 大类扫描：把 brightness/bloom/shadow 写成同一值后套用画面（之后子项仍可单独开）。
  * 无已配置 sceneMesh 时**跳过** shadow 子项（保持原值）。
  * @returns 实际参与同步的子项 key 列表（供出站 CHANGED）
  */
@@ -46,7 +46,7 @@ export function syncLightingSubsFromLightsCategory(global: Global, visible: bool
 }
 
 /**
- * 子接口：写单一子 flag；纯 Viewer 且 lights 总闸开时套用画面。
+ * 子接口：写单一子 flag 后套用画面（大类勾选不覆盖该 intent）。
  * 阴影在无已配置 sceneMesh 时恒 no-op（不改 flag、不刷新）。
  * @returns 是否发生 intent 变更
  */

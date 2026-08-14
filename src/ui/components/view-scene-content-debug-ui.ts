@@ -149,14 +149,13 @@ const makeCheck = (
 
 const yn = (on: boolean): string => (on ? '开' : '关');
 
-/** 画面是否亮：大类 × gate × 配置 enabled × 根节点/组件实际态 */
+/** 画面是否亮：gate × 配置 enabled × 会话 overlay（大类只提供缺省，不覆盖） */
 const lightOnScreen = (
     light: UserLightRow,
-    categoryOn: boolean,
     gateOn: boolean,
     snap: VisibilityDebugSnapshot | undefined
 ): boolean => {
-    if (!categoryOn || !gateOn || !light.enabled || !light.sessionVisible) {
+    if (!gateOn || !light.enabled || !light.sessionVisible) {
         return false;
     }
     const rootOn = light.type === 'spot' ? snap?.actual.spotRootEnabled : snap?.actual.pointRootEnabled;
@@ -323,7 +322,7 @@ export function initViewSceneContentDebugUI(global: Global): void {
             for (const light of lights) {
                 const onScreen = snap ?
                     snap.projection.lights[light.id] === true :
-                    lightOnScreen(light, lightsCategoryOn, gateOn, snap);
+                    lightOnScreen(light, gateOn, snap);
                 const row = makeCheck(
                     `sc-debug-light-${light.id}`,
                     `${light.id} (${light.type})  配置${yn(light.enabled)} · 会话${yn(light.sessionVisible)} · 画面${yn(onScreen)}`,

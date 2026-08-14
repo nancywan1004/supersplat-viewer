@@ -44,7 +44,7 @@ export type VisibilityDebugSnapshot = {
         shadowSceneMeshConfigured: boolean;
     };
     configuredLightEnabled: Record<string, boolean>;
-    /** 各配置灯的会话 overlay（缺省 true）。Phase 1 起从 `contentVisibility.lights.instances` 展开 */
+    /** 各配置灯的会话 overlay（相对大类展开：开时缺省 true，关时缺省 false） */
     sessionLightVisible: Record<string, boolean>;
     effective: {
         brightness: boolean;
@@ -70,11 +70,12 @@ type EntityLike = {
 
 function expandSessionLightVisible(
     configured: Record<string, boolean>,
-    overlay: Record<string, boolean>
+    overlay: Record<string, boolean>,
+    lightsVisible: boolean
 ): Record<string, boolean> {
     const out: Record<string, boolean> = {};
     for (const id of Object.keys(configured)) {
-        out[id] = overlay[id] !== false;
+        out[id] = lightsVisible ? overlay[id] !== false : overlay[id] === true;
     }
     return out;
 }
@@ -146,7 +147,11 @@ export function captureVisibilityDebugSnapshot(
             shadowSceneMeshConfigured: readShadowSceneMeshConfigured(global)
         },
         configuredLightEnabled,
-        sessionLightVisible: expandSessionLightVisible(configuredLightEnabled, input.sessionLightVisible),
+        sessionLightVisible: expandSessionLightVisible(
+            configuredLightEnabled,
+            input.sessionLightVisible,
+            input.lightsVisible
+        ),
         effective: {
             brightness: isLightingSessionAspectVisible(global, 'brightness'),
             bloom: isLightingSessionAspectVisible(global, 'bloom'),

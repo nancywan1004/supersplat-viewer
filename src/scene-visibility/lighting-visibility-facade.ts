@@ -5,6 +5,7 @@
 import type { Global } from '../types';
 import {
     applyViewBloomLocalLightsEnabled,
+    deleteSessionLightVisible,
     writeSessionLightVisible,
     writeSessionLightVisibleMany
 } from '../view-settings';
@@ -41,7 +42,7 @@ export function revertCascadedLightToggleOverlays(global: Global): boolean {
     let changed = false;
     for (const [id, at] of state.recentFalseAt) {
         if (now - at <= CASCADE_WINDOW_MS) {
-            if (writeSessionLightVisible(global, id, true)) {
+            if (deleteSessionLightVisible(global, id)) {
                 changed = true;
             }
         }

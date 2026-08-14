@@ -17,14 +17,14 @@ export type LightingVisibilityResolveInput = {
     shadow: boolean;
     shadowCapabilityAvailable: boolean;
     configuredLightEnabled: Record<string, boolean>;
-    /** 缺省 true；只应对关闭的 id 为 false */
+    /** 缺省跟大类：开时缺省 true，关时缺省 false；只存非默认 */
     sessionLightVisible: Record<string, boolean>;
     /** `viewSettings.bloom.localLightsEnabled`；TOGGLE_ALL 总闸，缺省 true */
     localLightsEnabled?: boolean;
 };
 
 export type LightingVisibilityProjection = {
-    /** 光源大类总闸有效值：Viewer 跟 `lights.visible`，Edit/Preview 恒 true */
+    /** 大类勾选（上次全局扫描结果）；不覆盖 brightness/bloom/shadow/单灯的独立 intent */
     lightsEffective: boolean;
     lightRootEffective: boolean;
     brightnessEffective: boolean;
@@ -34,18 +34,22 @@ export type LightingVisibilityProjection = {
     lights: Record<string, boolean>;
 };
 
-function sessionAllows(input: LightingVisibilityResolveInput, id: string): boolean {
+function sessionShows(input: LightingVisibilityResolveInput, id: string): boolean {
     if (input.editMode) {
         return true;
     }
-    return input.sessionLightVisible[id] !== false;
+    const overlay = input.sessionLightVisible[id];
+    if (input.lightsVisible) {
+        return overlay !== false;
+    }
+    return overlay === true;
 }
 
 function aspectEffective(input: LightingVisibilityResolveInput, intent: boolean): boolean {
     if (input.editMode) {
         return true;
     }
-    return input.lightsVisible && intent;
+    return !!intent;
 }
 
 /**
@@ -56,17 +60,24 @@ function aspectEffective(input: LightingVisibilityResolveInput, intent: boolean)
  */
 export function resolveLightingVisibility(input: LightingVisibilityResolveInput): LightingVisibilityProjection {
     const lightsEffective = input.editMode ? true : !!input.lightsVisible;
-    const lightRootEffective = lightsEffective && !!input.runtimeGateOpen;
     const masterOn = input.editMode || input.localLightsEnabled !== false;
     const brightnessEffective = aspectEffective(input, input.brightness) && masterOn;
     const bloomEffective = aspectEffective(input, input.bloom) && masterOn;
     const shadowEffective = aspectEffective(input, input.shadow) && !!input.shadowCapabilityAvailable;
     const lights: Record<string, boolean> = {};
+    let anyShown = false;
     for (const id of Object.keys(input.configuredLightEnabled)) {
-        lights[id] = lightRootEffective
+        const on = !!input.runtimeGateOpen
             && input.configuredLightEnabled[id] === true
-            && sessionAllows(input, id);
+            && sessionShows(input, id);
+        lights[id] = on;
+        if (on) {
+            anyShown = true;
+        }
     }
+    const lightRootEffective = input.editMode
+        ? !!input.runtimeGateOpen
+        : !!input.runtimeGateOpen && (input.lightsVisible || anyShown);
     return {
         lightsEffective,
         lightRootEffective,

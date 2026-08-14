@@ -320,9 +320,9 @@ type State = {
 
 /**
  * `contentVisibility.lights` 从属节点（仅会话，不入库）。
- * - `visible`：`SCENE_CONTENT_*` 大类
- * - `brightness/bloom/shadow`：`LIGHTING_*_SHOW_HIDE_SET`
- * - `instances`：会话态 `LIGHT_TOGGLE` overlay，只记非默认（关）
+ * - `visible`：`SCENE_CONTENT_*` 大类勾选（全局扫描目标，不覆盖子项 effective）
+ * - `brightness/bloom/shadow`：`LIGHTING_*_SHOW_HIDE_SET`（可在大类关后单独开）
+ * - `instances`：会话态 `LIGHT_TOGGLE` overlay。大类开时只记关（false）；大类关时只记开（true）
  */
 export type LightingContentVisibility = {
     visible: boolean;

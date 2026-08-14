@@ -74,8 +74,8 @@ export function interpretLightingContentVisibility(lights: unknown): LightingCon
     if (node.instances && typeof node.instances === 'object' && !Array.isArray(node.instances)) {
         const instances: Record<string, boolean> = {};
         for (const [id, value] of Object.entries(node.instances as Record<string, unknown>)) {
-            if (value === false) {
-                instances[id] = false;
+            if (value === true || value === false) {
+                instances[id] = value;
             }
         }
         if (Object.keys(instances).length > 0) {
@@ -83,6 +83,43 @@ export function interpretLightingContentVisibility(lights: unknown): LightingCon
         }
     }
     return out;
+}
+
+function categoryLightsVisible(node: LightingContentVisibility): boolean {
+    return node.visible !== false;
+}
+
+function sessionOverlayShows(node: LightingContentVisibility, lightId: string): boolean {
+    if (categoryLightsVisible(node)) {
+        return node.instances?.[lightId] !== false;
+    }
+    return node.instances?.[lightId] === true;
+}
+
+function deleteLightInstanceKey(node: LightingContentVisibility, lightId: string): boolean {
+    if (!node.instances || !(lightId in node.instances)) {
+        return false;
+    }
+    delete node.instances[lightId];
+    if (Object.keys(node.instances).length === 0) {
+        delete node.instances;
+    }
+    return true;
+}
+
+/** 大类开时 `true` 是缺省，清掉以免下次关大类被当成强制开 */
+function pruneDefaultLightInstanceKeys(node: LightingContentVisibility): void {
+    if (!node.instances || !categoryLightsVisible(node)) {
+        return;
+    }
+    for (const id of Object.keys(node.instances)) {
+        if (node.instances[id] === true) {
+            delete node.instances[id];
+        }
+    }
+    if (Object.keys(node.instances).length === 0) {
+        delete node.instances;
+    }
 }
 
 function createDefaultContentVisibility(): NonNullable<ViewSettings['contentVisibility']> {
@@ -186,7 +223,8 @@ export function readContentCategoryVisible(global: Global, category: SceneConten
 /**
  * 写 View 会话大类显隐（仅 viewSettings，不入库）。
  * 画面套用由 `SceneContentVisibilityRegistry` 负责；编辑态（含预览）不套用。
- * `lights` 只写从属节点的 `visible`，不改 brightness/bloom/shadow/instances。
+ * `lights` 只写从属节点的 `visible`，不改 brightness/bloom/shadow。
+ * 大类重新显示时清掉已成缺省的强制开（`instances[id]=true`），避免下次再关大类时误开灯。
  * @returns 是否变更
  */
 export function writeContentCategoryVisible(
@@ -205,6 +243,9 @@ export function writeContentCategoryVisible(
             return false;
         }
         node.visible = next;
+        if (next) {
+            pruneDefaultLightInstanceKeys(node);
+        }
         return true;
     }
     if (vs.contentVisibility[category] === next) {
@@ -271,7 +312,7 @@ export function writeLightingVisibility(
 }
 
 /**
- * 将 brightness/bloom/shadow 三个子 flag 写成同一值（`contentVisibility.lights` 总闸联动）。
+ * 将 brightness/bloom/shadow 三个子 flag 写成同一值（大类全局扫描，不作为之后的 override）。
  * @returns 是否有任一子项变更
  */
 export function writeAllLightingVisibility(global: Global, visible: boolean): boolean {
@@ -286,20 +327,18 @@ export function writeAllLightingVisibility(global: Global, visible: boolean): bo
 
 /**
  * 纯 Viewer 下某光照子项是否应对画面生效。
- * 编辑态（含预览）恒 true（忽略会话门控）；lights 总闸关时三者均不可见。
+ * 编辑态（含预览）恒 true；跟子项自身 intent，大类勾选不做 override。
  */
 export function isLightingSessionAspectVisible(global: Global, key: LightingVisibilityKey): boolean {
     if (global.state.editMode === true) {
         return true;
     }
-    if (!readContentCategoryVisible(global, 'lights')) {
-        return false;
-    }
     return readLightingVisibility(global, key);
 }
 
 /**
- * 会话态单灯 overlay（`contentVisibility.lights.instances`）。缺省 true；只记关闭。
+ * 会话态单灯 overlay（`contentVisibility.lights.instances`）。
+ * 大类开：缺省显示，只记关；大类关：缺省隐藏，只记开。
  * 不套用 editMode：Resolver 在编辑态忽略 overlay。
  *
  * @param {Global} global - Viewer 全局对象
@@ -307,11 +346,11 @@ export function isLightingSessionAspectVisible(global: Global, key: LightingVisi
  * @returns {boolean} 会话是否允许该灯可见
  */
 export function readSessionLightVisible(global: Global, lightId: string): boolean {
-    return ensureLightsContent(global).instances?.[lightId] !== false;
+    return sessionOverlayShows(ensureLightsContent(global), lightId);
 }
 
 /**
- * 写会话态单灯 overlay。`true` 删除键（回到缺省）；`false` 记入 instances。
+ * 写会话态单灯 overlay。相对大类只存非默认：开大类时 `true` 删键，关大类时 `false` 删键。
  *
  * @param {Global} global - Viewer 全局对象
  * @param {string} lightId - 用户点光/聚光 id
@@ -321,28 +360,35 @@ export function readSessionLightVisible(global: Global, lightId: string): boolea
 export function writeSessionLightVisible(global: Global, lightId: string, visible: boolean): boolean {
     const node = ensureLightsContent(global);
     const next = !!visible;
-    const prev = node.instances?.[lightId] !== false;
-    if (prev === next) {
+    if (sessionOverlayShows(node, lightId) === next) {
         return false;
     }
-    if (next) {
-        if (node.instances) {
-            delete node.instances[lightId];
-            if (Object.keys(node.instances).length === 0) {
-                delete node.instances;
-            }
-        }
+    const isDefault = categoryLightsVisible(node) ? next : !next;
+    if (isDefault) {
+        deleteLightInstanceKey(node, lightId);
     } else {
         if (!node.instances) {
             node.instances = {};
         }
-        node.instances[lightId] = false;
+        node.instances[lightId] = next;
     }
     return true;
 }
 
 /**
- * 批量写会话 overlay。`visible=true` 清除这些 id；`false` 记关。
+ * 删除某灯 overlay 键（回到当前大类缺省），不按可见值改写。
+ * 级联撤回用这个：大类已关时 `write(true)` 会变成强制开。
+ *
+ * @param {Global} global - Viewer 全局对象
+ * @param {string} lightId - 用户点光/聚光 id
+ * @returns {boolean} 是否删掉了键
+ */
+export function deleteSessionLightVisible(global: Global, lightId: string): boolean {
+    return deleteLightInstanceKey(ensureLightsContent(global), lightId);
+}
+
+/**
+ * 批量写会话 overlay。相对大类只存非默认。
  *
  * @param {Global} global - Viewer 全局对象
  * @param {string[]} lightIds - 用户灯 id
@@ -363,7 +409,7 @@ export function writeSessionLightVisibleMany(
     return changed;
 }
 
-/** 已存储的非默认 overlay（仅 false 键）。未写过则为 `{}`。 */
+/** 已存储的非默认 overlay。未写过则为 `{}`。 */
 export function readSessionLightVisibleOverlay(global: Global): Record<string, boolean> {
     const instances = ensureLightsContent(global).instances;
     return instances ? { ...instances } : {};

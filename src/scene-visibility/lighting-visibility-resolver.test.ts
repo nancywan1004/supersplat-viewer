@@ -44,16 +44,61 @@ function baseInput(overrides?: Partial<LightingVisibilityResolveInput>): Lightin
     };
 }
 
-function testViewerCategoryOff(): void {
+function testViewerCategoryOffDoesNotOverrideAspects(): void {
     const proj = resolveLightingVisibility(baseInput({ lightsVisible: false }));
     assertEq(proj.lightsEffective, false, 'category');
-    assertEq(proj.lightRootEffective, false, 'root');
-    assertEq(proj.brightnessEffective, false, 'brightness');
-    assertEq(proj.bloomEffective, false, 'bloom');
-    assertEq(proj.shadowEffective, false, 'shadow');
-    assertEq(proj.lights.a, false, 'light a');
+    assertEq(proj.lightRootEffective, false, '无强制开则根节点关');
+    assertEq(proj.brightnessEffective, true, '大类不覆盖亮度');
+    assertEq(proj.bloomEffective, true, '大类不覆盖辉光');
+    assertEq(proj.shadowEffective, true, '大类不覆盖阴影');
+    assertEq(proj.lights.a, false, 'light a 缺省跟大类关');
     assertEq(proj.lights.b, false, 'light b');
-    console.log('ok viewer category off');
+    console.log('ok viewer category off 不覆盖子项');
+}
+
+function testCategoryScanLeavesAspectsAtWrittenIntent(): void {
+    const proj = resolveLightingVisibility(baseInput({
+        lightsVisible: false,
+        brightness: false,
+        bloom: false,
+        shadow: false
+    }));
+    assertEq(proj.brightnessEffective, false, '扫描写入后亮度关');
+    assertEq(proj.bloomEffective, false, '扫描写入后辉光关');
+    assertEq(proj.shadowEffective, false, '扫描写入后阴影关');
+    console.log('ok category scan 后跟子项 intent');
+}
+
+function testCategoryOffIndependentAspects(): void {
+    const proj = resolveLightingVisibility(baseInput({
+        lightsVisible: false,
+        brightness: true,
+        bloom: true,
+        shadow: false
+    }));
+    assertEq(proj.lightsEffective, false, '大类勾选仍关');
+    assertEq(proj.brightnessEffective, true, '亮度可单独开');
+    assertEq(proj.bloomEffective, true, '辉光可单独开');
+    assertEq(proj.shadowEffective, false, '阴影仍关');
+    console.log('ok 大类关后子项可单独开');
+}
+
+function testCategoryOffForceOnLight(): void {
+    const proj = resolveLightingVisibility(baseInput({
+        lightsVisible: false,
+        brightness: false,
+        bloom: false,
+        shadow: false,
+        configuredLightEnabled: { a: true, b: true },
+        sessionLightVisible: { a: true }
+    }));
+    assertEq(proj.lightsEffective, false, '大类 intent 仍关');
+    assertEq(proj.lightRootEffective, true, '有强制开则根节点开');
+    assertEq(proj.lights.a, true, '强制开');
+    assertEq(proj.lights.b, false, '缺省跟大类关');
+    assertEq(proj.brightnessEffective, false, 'TOGGLE 不改亮度 intent');
+    assertEq(proj.bloomEffective, false, 'TOGGLE 不改辉光 intent');
+    console.log('ok category off + force-on overlay');
 }
 
 function testConfiguredAndSessionOverlay(): void {
@@ -190,11 +235,20 @@ function testWriteSessionOverlayHelpers(): void {
     assertEq(global.viewSettings?.contentVisibility?.lights?.instances?.a, false, 'stored false');
     assertEq(writeSessionLightVisible(global, 'a', true), true, 'write true');
     assertEq(global.viewSettings?.contentVisibility?.lights?.instances, undefined, '缺省删除键');
+
+    global.viewSettings!.contentVisibility!.lights!.visible = false;
+    assertEq(writeSessionLightVisible(global, 'a', true), true, '大类关时写 true');
+    assertEq(global.viewSettings?.contentVisibility?.lights?.instances?.a, true, '记强制开');
+    assertEq(writeSessionLightVisible(global, 'a', false), true, '写回缺省关');
+    assertEq(global.viewSettings?.contentVisibility?.lights?.instances, undefined, '大类关缺省删除键');
     console.log('ok session overlay helpers');
 }
 
 function main(): void {
-    testViewerCategoryOff();
+    testViewerCategoryOffDoesNotOverrideAspects();
+    testCategoryScanLeavesAspectsAtWrittenIntent();
+    testCategoryOffIndependentAspects();
+    testCategoryOffForceOnLight();
     testConfiguredAndSessionOverlay();
     testSessionToggleDoesNotNeedConfiguredChange();
     testEditIgnoresViewerIntent();

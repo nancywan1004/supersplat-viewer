@@ -131,6 +131,53 @@ function testCascadeRevert(): void {
     console.log('ok cascade revert');
 }
 
+function testToggleOnWhileCategoryHidden(): void {
+    const { global, pointRoot, lightA } = makeGlobal();
+    global.viewSettings!.contentVisibility!.lights!.visible = false;
+    reconcileLightingVisibility(global, { force: true });
+    assertEq(pointRoot.enabled, false, '先全关');
+    applyViewerLightToggle(global, 'a', true);
+    assertEq(global.viewSettings?.contentVisibility?.lights?.instances?.a, true, '记强制开');
+    assertEq(pointRoot.enabled, true, '根节点打开');
+    assertEq(lightA.enabled, true, '该灯显示');
+    assertEq(lightA.light?.enabled, true, 'component on');
+    assertEq(global.viewSettings!.contentVisibility!.lights!.visible, false, '不改大类 intent');
+    console.log('ok category hide 后再 TOGGLE 一盏');
+}
+
+function testCascadeRevertAfterCategoryOffDoesNotForceOn(): void {
+    const { global, pointRoot, lightA } = makeGlobal();
+    global.viewSettings!.contentVisibility!.lights!.visible = false;
+    applyViewerLightToggle(global, 'a', false);
+    const changed = revertCascadedLightToggleOverlays(global);
+    assertEq(changed, false, '大类关时 false 是缺省，无键可撤');
+    assertEq(global.viewSettings?.contentVisibility?.lights?.instances?.a, undefined, '不写成强制开');
+    reconcileLightingVisibility(global, { force: true });
+    assertEq(pointRoot.enabled, false, '根节点仍关');
+    assertEq(lightA.enabled, false, '灯仍关');
+    console.log('ok cascade revert 大类已关不强制开');
+}
+
+function testAspectOnWhileCategoryHidden(): void {
+    const { global } = makeGlobal();
+    const fires = (global as unknown as { __fires: string[] }).__fires;
+    global.viewSettings!.contentVisibility!.lights!.visible = false;
+    global.viewSettings!.contentVisibility!.lights!.brightness = true;
+    global.viewSettings!.contentVisibility!.lights!.bloom = true;
+    reconcileLightingVisibility(global, { force: true });
+    assertEq(global.viewSettings!.contentVisibility!.lights!.visible, false, '不改大类勾选');
+    assert(
+        fires.includes('nightMode:forceReapply'),
+        '大类关后亮度仍可单独套用'
+    );
+    assertEq(
+        fires.filter((f) => f === 'postEffect:changed').length,
+        1,
+        '辉光仍可单独套用'
+    );
+    console.log('ok 大类关后亮度/辉光可单独开');
+}
+
 function testCategoryHideDoesNotWriteSettingsOrLocalLights(): void {
     const { global, pointRoot } = makeGlobal();
     const before = JSON.stringify(global.settings);
@@ -199,6 +246,9 @@ function main(): void {
     testIdempotentSkip();
     testDispatchToggleDoesNotWriteSettings();
     testCascadeRevert();
+    testToggleOnWhileCategoryHidden();
+    testCascadeRevertAfterCategoryOffDoesNotForceOn();
+    testAspectOnWhileCategoryHidden();
     testCategoryHideDoesNotWriteSettingsOrLocalLights();
     testForceDoesNotRefirePostEffectWhenBloomUnchanged();
     testSkipBrightnessForceReapplyDuringOneShotReveal();

@@ -109,16 +109,17 @@ function testViewerIntentsAndConfigured(): void {
     console.log('ok viewer snapshot fields');
 }
 
-function testCategoryOffForcesEffectiveFalse(): void {
+function testCategoryOffDoesNotOverrideAspects(): void {
     const snap = captureVisibilityDebugSnapshot(makeGlobal({ lightsCategory: false }));
     assertEq(snap.intents.lightsCategory, false, 'category intent');
     assertEq(snap.intents.brightness, true, '子项 intent 仍可为 true');
-    assertEq(snap.effective.brightness, false, 'effective 被大类压住');
-    assertEq(snap.effective.bloom, false, 'bloom effective');
+    assertEq(snap.effective.brightness, true, '大类不覆盖亮度');
+    assertEq(snap.effective.bloom, true, '大类不覆盖辉光');
     assertEq(snap.projection.lightsEffective, false, 'projection category off');
-    assertEq(snap.projection.brightnessEffective, false, 'projection brightness');
+    assertEq(snap.sessionLightVisible['light-1'], false, '大类关时 overlay 缺省 false');
+    assertEq(snap.projection.brightnessEffective, true, 'projection brightness 跟子项');
     assertEq(snap.intents.torchActive, false, 'torch 不随 lights 大类');
-    console.log('ok category gate vs torch');
+    console.log('ok category 不覆盖子项 vs torch');
 }
 
 function testEditIgnoresSessionOverlay(): void {
@@ -155,7 +156,7 @@ function testSnapshotDoesNotMutate(): void {
 
 function main(): void {
     testViewerIntentsAndConfigured();
-    testCategoryOffForcesEffectiveFalse();
+    testCategoryOffDoesNotOverrideAspects();
     testEditIgnoresSessionOverlay();
     testShadowCapabilityFromGlb();
     testSnapshotDoesNotMutate();
