@@ -26,6 +26,7 @@ import { AnnotationEntity } from './annotation-entity';
 import type { AnnotationData, AnnotationFormData } from './types';
 import type { Global } from '../types';
 import { pushEditHistory } from '../edit-history';
+import { readSessionAnnotationVisible } from '../view-settings';
 
 /**
  * AnnotationManager 类
@@ -373,11 +374,10 @@ export class AnnotationManager {
         return Array.from(this.annotations.values());
     }
 
-    /** 单条 settings 显隐 × 会话 overlay（`contentVisibility.annotations`）；编辑模式仅看单条 visible */
-    private computeEntityVisible(perItemVisible: boolean): boolean {
+    /** 单条 settings 显隐 × 会话 overlay（相对大类，不做 override）；编辑模式仅看单条 visible */
+    private computeEntityVisible(id: string, perItemVisible: boolean): boolean {
         if (this.global.state.editMode) return perItemVisible;
-        const overlay = this.global.viewSettings?.contentVisibility?.annotations !== false;
-        return overlay && perItemVisible;
+        return perItemVisible && readSessionAnnotationVisible(this.global, id);
     }
 
     /**
@@ -387,7 +387,7 @@ export class AnnotationManager {
         const annotation = this.annotations.get(id);
         if (!annotation) return;
         annotation.data.visible = visible;
-        annotation.entity.enabled = this.computeEntityVisible(visible);
+        annotation.entity.enabled = this.computeEntityVisible(id, visible);
     }
 
     /**
@@ -400,8 +400,11 @@ export class AnnotationManager {
         this.annotations.forEach((annotation, id) => {
             const perItem = settingsMap.get(id) ?? true;
             annotation.data.visible = perItem;
-            annotation.entity.enabled = this.computeEntityVisible(perItem);
+            annotation.entity.enabled = this.computeEntityVisible(id, perItem);
         });
+        if (this.currentPlaceholder && this.global.state.editMode !== true) {
+            this.currentPlaceholder.entity.enabled = false;
+        }
     }
 
     /**

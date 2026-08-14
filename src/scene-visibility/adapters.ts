@@ -1,8 +1,8 @@
-import { findAssetMorphOwnerTargetId } from '../settings-serialize/effects-sync';
+import { applyAnnotationShowHideSet } from '../annotation-toolbar/annotation-visibility';
 import { pauseAllSceneMedia } from '../scene-assets/media/scene-media-playback';
 import { writeSessionLightVisible } from '../view-settings';
 import type { ExperienceSettings } from '../schemas/v2';
-import type { Global, ScenePlacedItem } from '../types';
+import type { Global } from '../types';
 import {
     applyPersistentSessionVisible,
     applyRevealSessionVisible,
@@ -10,26 +10,16 @@ import {
     restoreEffectsFromExperienceSettings,
     type PersistentSessionSnapshot
 } from './effects-session-visibility';
+import {
+    applyPlacedAssetEntities,
+    applyViewerAssetShowHide,
+    syncPlacedAssetsRoot
+} from './assets-visibility-facade';
 import { writeLightingSubsFromLightsCategory } from './lighting-session-visibility';
 import { requestLightingVisibilityReconcile } from './lighting-visibility-coordinator';
 import { revertCascadedLightToggleOverlays } from './lighting-visibility-facade';
 import type { SceneContentVisibilityAdapter } from './types';
 
-const ENTITY_NAMES = {
-    placedAssets: 'placedAssets'
-} as const;
-
-function setRootEntityEnabled(global: Global, name: string, visible: boolean): void {
-    const entity = global.app.root.findByName(name) as { enabled?: boolean } | null;
-    if (entity && typeof entity.enabled === 'boolean') {
-        entity.enabled = visible;
-    }
-}
-
-/**
- * 仅纯 Viewer（`!editMode`）套用 `viewSettings.contentVisibility`。
- * 编辑态（含预览）只记账到 viewSettings，不改编辑态 scene content。
- */
 export function isContentVisibilityOverlayActive(global: Global): boolean {
     return global.state.editMode !== true;
 }
@@ -37,45 +27,6 @@ export function isContentVisibilityOverlayActive(global: Global): boolean {
 /** overlay 未激活时 intent 视为 true（编辑态按 settings / 单条显隐） */
 function effectiveCategoryIntent(global: Global, intentVisible: boolean): boolean {
     return isContentVisibilityOverlayActive(global) ? !!intentVisible : true;
-}
-
-function isDeformedMorphGsplat(
-    global: Global,
-    item: { id?: string; assetType?: string } | null | undefined
-): boolean {
-    if (!item?.id || item.assetType !== 'gaussian') {
-        return false;
-    }
-    const morphOwner = findAssetMorphOwnerTargetId(global.settings as ExperienceSettings, item.id);
-    return !!morphOwner && morphOwner !== item.id;
-}
-
-/**
- * 按单条 `entry.visible` / settings 恢复 entity.enabled。
- * 不把会话大类开关写入 `entry.visible`。
- */
-function syncPlacedAssetEntitiesFromPerItemVisible(global: Global): void {
-    const items = global.state.scenePlacedEntities;
-    if (!Array.isArray(items)) return;
-
-    const settingsVisible = new Map<string, boolean>();
-    for (const sa of global.settings?.sceneAssets ?? []) {
-        if (typeof sa?.id === 'string') {
-            settingsVisible.set(sa.id, sa.visible !== false);
-        }
-    }
-
-    for (const item of items as ScenePlacedItem[]) {
-        if (!item?.entity) continue;
-        const fromSettings = settingsVisible.get(item.id);
-        if (fromSettings === true && item.visible === false) {
-            item.visible = true;
-        }
-        if (item.visible !== false && isDeformedMorphGsplat(global, item)) {
-            continue;
-        }
-        item.entity.enabled = item.visible !== false;
-    }
 }
 
 function getAnnotationManager(global: Global): {
@@ -95,7 +46,7 @@ function getAnnotationManager(global: Global): {
  * 不改写 `viewSettings.contentVisibility`（退出到纯 Viewer 时再套用）。
  */
 export function restoreEditSceneContentVisibility(global: Global): void {
-    syncPlacedAssetEntitiesFromPerItemVisible(global);
+    applyPlacedAssetEntities(global);
     getAnnotationManager(global)?.applyVisibilityFromSettings?.();
     restoreEffectsFromExperienceSettings(global);
     // 亮度会话可能把 nightFade 压到 0；进编辑按 settings 真源恢复
@@ -112,40 +63,38 @@ const assetsAdapter: SceneContentVisibilityAdapter = {
         const show = effectiveCategoryIntent(global, intentVisible);
         if (!show) {
             global.events.fire('assetEffect:morphStopAll');
-            pauseAllSceneMedia(global);
-            return;
         }
-        syncPlacedAssetEntitiesFromPerItemVisible(global);
+        applyPlacedAssetEntities(global);
+        if (!show) {
+            pauseAllSceneMedia(global);
+        }
     },
     applyRuntimeGate(global, gateOpen, intentVisible) {
         const show = effectiveCategoryIntent(global, intentVisible);
-        const rootOn = gateOpen && show;
-        setRootEntityEnabled(global, ENTITY_NAMES.placedAssets, rootOn);
-        if (!rootOn) {
-            pauseAllSceneMedia(global);
-        }
+        const anyShown = applyPlacedAssetEntities(global);
+        syncPlacedAssetsRoot(global, gateOpen, show, anyShown);
+    },
+    setInstanceVisible(global, instanceId, visible) {
+        applyViewerAssetShowHide(global, instanceId, visible);
     }
 };
 
 const annotationsAdapter: SceneContentVisibilityAdapter = {
     id: 'annotations',
-    applyCategoryIntent(global, intentVisible) {
-        const am = getAnnotationManager(global);
-        if (!am) return;
-        if (effectiveCategoryIntent(global, intentVisible)) {
-            am.applyVisibilityFromSettings?.();
-        } else {
-            am.setAllAnnotationsVisible?.(false);
-        }
+    applyCategoryIntent(global, _intentVisible) {
+        getAnnotationManager(global)?.applyVisibilityFromSettings?.();
     },
-    applyRuntimeGate(global, gateOpen, intentVisible) {
+    applyRuntimeGate(global, gateOpen, _intentVisible) {
         const am = getAnnotationManager(global);
         if (!am) return;
-        if (!gateOpen || !effectiveCategoryIntent(global, intentVisible)) {
+        if (!gateOpen) {
             am.setAllAnnotationsVisible?.(false);
             return;
         }
         am.applyVisibilityFromSettings?.();
+    },
+    setInstanceVisible(global, instanceId, visible) {
+        applyAnnotationShowHideSet(global, instanceId, visible);
     }
 };
 

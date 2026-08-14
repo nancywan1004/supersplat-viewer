@@ -374,6 +374,16 @@ export type ViewSettings = {
     torch?: {
         active: boolean;
     };
+    /**
+     * Viewer `ASSET_SHOW_HIDE_SET` 会话 overlay（不入库）。
+     * 资产大类开时只记关；大类关时只记开。编辑态忽略。
+     */
+    assetInstances?: Record<string, boolean>;
+    /**
+     * Viewer `ANNOTATION_SHOW_HIDE_SET` 会话 overlay（不入库）。
+     * 标注大类开时只记关；大类关时只记开。编辑态忽略。
+     */
+    annotationInstances?: Record<string, boolean>;
     /** 观看态 `EFFECT_*` 临时写入，不入库；进入编辑时清除。 */
     effectsSession?: ExperienceSettings;
 };

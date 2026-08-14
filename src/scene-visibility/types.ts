@@ -53,7 +53,7 @@ export type SceneContentVisibilityMap = Partial<Record<SceneContentCategoryId, b
  * 大类适配器（intent 来自 `viewSettings.contentVisibility`）。
  * - `applyCategoryIntent`：仅纯 Viewer 套用运行态；特效写 `effectsSession`，不写编辑 settings
  * - `applyRuntimeGate`：reveal/导出门控；编辑态忽略 contentVisibility intent
- * - `setInstanceVisible`：lights 会话 overlay（Viewer `LIGHT_TOGGLE`）
+ * - `setInstanceVisible`：lights / assets / annotations 会话 overlay
  */
 export interface SceneContentVisibilityAdapter {
     readonly id: SceneContentCategoryId;

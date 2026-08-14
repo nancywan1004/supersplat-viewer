@@ -122,6 +122,78 @@ function pruneDefaultLightInstanceKeys(node: LightingContentVisibility): void {
     }
 }
 
+function categoryAssetsVisible(vs: ViewSettings): boolean {
+    return vs.contentVisibility?.assets !== false;
+}
+
+function sessionAssetOverlayShows(vs: ViewSettings, assetId: string): boolean {
+    if (categoryAssetsVisible(vs)) {
+        return vs.assetInstances?.[assetId] !== false;
+    }
+    return vs.assetInstances?.[assetId] === true;
+}
+
+function deleteAssetInstanceKey(vs: ViewSettings, assetId: string): boolean {
+    if (!vs.assetInstances || !(assetId in vs.assetInstances)) {
+        return false;
+    }
+    delete vs.assetInstances[assetId];
+    if (Object.keys(vs.assetInstances).length === 0) {
+        delete vs.assetInstances;
+    }
+    return true;
+}
+
+function pruneDefaultAssetInstanceKeys(vs: ViewSettings): void {
+    if (!vs.assetInstances || !categoryAssetsVisible(vs)) {
+        return;
+    }
+    for (const id of Object.keys(vs.assetInstances)) {
+        if (vs.assetInstances[id] === true) {
+            delete vs.assetInstances[id];
+        }
+    }
+    if (Object.keys(vs.assetInstances).length === 0) {
+        delete vs.assetInstances;
+    }
+}
+
+function categoryAnnotationsVisible(vs: ViewSettings): boolean {
+    return vs.contentVisibility?.annotations !== false;
+}
+
+function sessionAnnotationOverlayShows(vs: ViewSettings, annotationId: string): boolean {
+    if (categoryAnnotationsVisible(vs)) {
+        return vs.annotationInstances?.[annotationId] !== false;
+    }
+    return vs.annotationInstances?.[annotationId] === true;
+}
+
+function deleteAnnotationInstanceKey(vs: ViewSettings, annotationId: string): boolean {
+    if (!vs.annotationInstances || !(annotationId in vs.annotationInstances)) {
+        return false;
+    }
+    delete vs.annotationInstances[annotationId];
+    if (Object.keys(vs.annotationInstances).length === 0) {
+        delete vs.annotationInstances;
+    }
+    return true;
+}
+
+function pruneDefaultAnnotationInstanceKeys(vs: ViewSettings): void {
+    if (!vs.annotationInstances || !categoryAnnotationsVisible(vs)) {
+        return;
+    }
+    for (const id of Object.keys(vs.annotationInstances)) {
+        if (vs.annotationInstances[id] === true) {
+            delete vs.annotationInstances[id];
+        }
+    }
+    if (Object.keys(vs.annotationInstances).length === 0) {
+        delete vs.annotationInstances;
+    }
+}
+
 function createDefaultContentVisibility(): NonNullable<ViewSettings['contentVisibility']> {
     return {
         assets: true,
@@ -252,6 +324,12 @@ export function writeContentCategoryVisible(
         return false;
     }
     vs.contentVisibility[category] = next;
+    if (category === 'assets' && next) {
+        pruneDefaultAssetInstanceKeys(vs);
+    }
+    if (category === 'annotations' && next) {
+        pruneDefaultAnnotationInstanceKeys(vs);
+    }
     return true;
 }
 
@@ -413,6 +491,66 @@ export function writeSessionLightVisibleMany(
 export function readSessionLightVisibleOverlay(global: Global): Record<string, boolean> {
     const instances = ensureLightsContent(global).instances;
     return instances ? { ...instances } : {};
+}
+
+/**
+ * 会话态单资产 overlay。大类开：缺省显示，只记关；大类关：缺省隐藏，只记开。
+ */
+export function readSessionAssetVisible(global: Global, assetId: string): boolean {
+    return sessionAssetOverlayShows(ensureViewSettings(global), assetId);
+}
+
+/**
+ * 写会话态单资产 overlay。相对大类只存非默认。
+ *
+ * @returns 是否变更
+ */
+export function writeSessionAssetVisible(global: Global, assetId: string, visible: boolean): boolean {
+    const vs = ensureViewSettings(global);
+    const next = !!visible;
+    if (sessionAssetOverlayShows(vs, assetId) === next) {
+        return false;
+    }
+    const isDefault = categoryAssetsVisible(vs) ? next : !next;
+    if (isDefault) {
+        deleteAssetInstanceKey(vs, assetId);
+    } else {
+        if (!vs.assetInstances) {
+            vs.assetInstances = {};
+        }
+        vs.assetInstances[assetId] = next;
+    }
+    return true;
+}
+
+/**
+ * 会话态单标注 overlay。大类开：缺省显示，只记关；大类关：缺省隐藏，只记开。
+ */
+export function readSessionAnnotationVisible(global: Global, annotationId: string): boolean {
+    return sessionAnnotationOverlayShows(ensureViewSettings(global), annotationId);
+}
+
+/**
+ * 写会话态单标注 overlay。相对大类只存非默认。
+ *
+ * @returns 是否变更
+ */
+export function writeSessionAnnotationVisible(global: Global, annotationId: string, visible: boolean): boolean {
+    const vs = ensureViewSettings(global);
+    const next = !!visible;
+    if (sessionAnnotationOverlayShows(vs, annotationId) === next) {
+        return false;
+    }
+    const isDefault = categoryAnnotationsVisible(vs) ? next : !next;
+    if (isDefault) {
+        deleteAnnotationInstanceKey(vs, annotationId);
+    } else {
+        if (!vs.annotationInstances) {
+            vs.annotationInstances = {};
+        }
+        vs.annotationInstances[annotationId] = next;
+    }
+    return true;
 }
 
 /**

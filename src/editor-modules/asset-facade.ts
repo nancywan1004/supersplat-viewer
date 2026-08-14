@@ -1,5 +1,6 @@
 import { applySceneAssetTriggerDistanceM } from '../scene-assets/asset-placement-handler';
 import { pauseAllSceneMedia, pauseSceneMediaEntry } from '../scene-assets/media/scene-media-playback';
+import { applyViewerAssetShowHide } from '../scene-visibility/assets-visibility-facade';
 import type { AssetLibraryItem, EditLeftModule, Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 import { setPlacementCursorActive } from '../placement-cursor';
 import { loadGsplatAsset } from '../loaders/gsplat/sog/splat-loader';
@@ -176,10 +177,17 @@ class AssetFacade implements ModuleFacade {
                 return;
             }
             const entry = state.scenePlacedEntities.find((it) => it?.id === pl.id);
-            if (!entry?.entity || entry.visible === pl.value) return;
-            entry.visible = pl.value;
-            entry.entity.enabled = pl.value;
-            // 编辑非预览热区不评估：隐藏时须同步 pause，否则 HTML 音视频会继续出声
+            if (!entry?.entity) return;
+            if (ctx.global.state?.editMode === true) {
+                if (entry.visible === pl.value) return;
+                entry.visible = pl.value;
+                entry.entity.enabled = pl.value;
+                if (!pl.value) {
+                    pauseSceneMediaEntry(ctx.global, entry);
+                }
+                return;
+            }
+            applyViewerAssetShowHide(ctx.global, pl.id, pl.value);
             if (!pl.value) {
                 pauseSceneMediaEntry(ctx.global, entry);
             }
