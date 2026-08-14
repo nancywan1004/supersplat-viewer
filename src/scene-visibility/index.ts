@@ -10,17 +10,26 @@ export type {
 export {
     SCENE_CONTENT_CATEGORY_IDS,
     SCENE_CONTENT_DEFER_CATEGORY_IDS,
+    SCENE_CONTENT_ALL_SET_HIDE_ORDER,
+    SCENE_CONTENT_ALL_SET_SHOW_ORDER,
     isSceneContentCategoryId
 } from './types';
 export { SceneContentVisibilityRegistry, getSceneContentVisibilityRegistry } from './registry';
 export {
+    captureVisibilityDebugSnapshot,
+    type VisibilityDebugSnapshot
+} from './visibility-debug-snapshot';
+export {
+    expectedOutboundForAllSet,
+    expectedOutboundForCategorySet,
+    expectedOutboundForLightingAspectSet,
+    EXPECTED_OUTBOUND_FOR_LIGHT_TOGGLE,
+    LIGHTING_SHOW_HIDE_CHANGED_BY_KEY
+} from './lighting-visibility-parent-contract';
+export {
     BUILTIN_SCENE_CONTENT_VISIBILITY_ADAPTERS,
     isContentVisibilityOverlayActive,
     restoreEditSceneContentVisibility
-} from './adapters';
-export {
-    SCENE_CONTENT_ALL_SET_HIDE_ORDER,
-    SCENE_CONTENT_ALL_SET_SHOW_ORDER
 } from './adapters';
 export {
     applyRevealSessionVisible,

@@ -43,13 +43,14 @@ import { initVideoExportUI } from './components/video-export-ui';
 import { initLightingUI } from './components/lighting-ui';
 import { initPostEffectUI } from './components/environment-ui';
 import { initAnnotationUI } from './components/annotation-ui';
+import { initViewSceneContentDebugUI } from './components/view-scene-content-debug-ui';
 import { initEditLeftToolbarUI } from './edit-left-toolbar';
 import { initEditRightToolbarUI } from './edit-right-toolbar';
 import { initEditBottomToolbarUI } from './edit-bottom-toolbar';
 import type { Annotation } from '../settings';
 import { getEditUiTransport, sendEditProtocolMessage } from './edit-ui-transport';
 import { applyEnvironmentPreviewVisualPolicy } from '../editor-modules/environment-facade';
-import { applyLightToggleAll, applyLightToggle } from '../editor-modules/protocol-adapters/environment-protocol-adapter';
+import { applyLightToggle } from '../editor-modules/protocol-adapters/environment-protocol-adapter';
 import { applyViewMediaMuteSet, applyViewTorchActive, readViewTorchActive } from '../view-settings';
 import { dispatchEffectsModuleCommand } from '../editor-modules/effects-facade';
 import { getRevealActiveType } from '../settings-serialize/effects-sync';
@@ -376,7 +377,7 @@ const initUI = (global: Global) => {
         'annotationNav', 'annotationPrev', 'annotationNext', 'annotationInfo', 'annotationNavTitle',
         // 'supersplatBranding',
         // View 模式调试按钮（右上角编辑按钮旁）
-        'viewDebugToggleSceneContent', 'viewDebugLightsAllOn', 'viewDebugLightsAllOff',
+        'viewSceneContentDebugBtn',
         'viewDebugRegionSelect', 'viewDebugToggleRegionLight',
         'viewDebugMediaMute', 'viewDebugMediaUnmute',
         'viewDebugTorchToggle', 'viewDebugMorphStopAll'
@@ -1067,47 +1068,8 @@ const initUI = (global: Global) => {
         updateEditModeUI();
     }
 
-    // --- View 模式调试按钮：顶栏右上角，在非编辑模式下用于直接测试 Viewer 模式协议 ---
-    if (dom.viewDebugToggleSceneContent) {
-        dom.viewDebugToggleSceneContent.addEventListener('click', () => {
-            const registry = (global as any).__sceneContentVisibility as
-                | {
-                    isAnyCategoryVisible: () => boolean;
-                    setAllCategoriesVisible: (v: boolean) => string[];
-                }
-                | undefined;
-            // 调试钮只负责算出要传的 value；真正统一开/关由 SCENE_CONTENT_ALL_SET.value 决定
-            const nextVisible = !(registry?.isAnyCategoryVisible?.() ?? true);
-            if (editUiTransport === 'message-bridge') {
-                sendEditProtocolMessage({
-                    type: 'SCENE_CONTENT_ALL_SET',
-                    value: nextVisible
-                });
-            } else if (registry) {
-                registry.setAllCategoriesVisible(nextVisible);
-            }
-        });
-    }
-
-    if (dom.viewDebugLightsAllOn) {
-        dom.viewDebugLightsAllOn.addEventListener('click', () => {
-            if (editUiTransport === 'message-bridge') {
-                sendEditProtocolMessage({ type: 'LIGHT_TOGGLE_ALL', value: true });
-            } else {
-                applyLightToggleAll(global, true);
-            }
-        });
-    }
-
-    if (dom.viewDebugLightsAllOff) {
-        dom.viewDebugLightsAllOff.addEventListener('click', () => {
-            if (editUiTransport === 'message-bridge') {
-                sendEditProtocolMessage({ type: 'LIGHT_TOGGLE_ALL', value: false });
-            } else {
-                applyLightToggleAll(global, false);
-            }
-        });
-    }
+    // --- View 模式 Scene Content 显隐调试面板 ---
+    initViewSceneContentDebugUI(global);
 
     if (dom.viewDebugMediaMute) {
         dom.viewDebugMediaMute.addEventListener('click', () => {

@@ -19,6 +19,7 @@ import {
     type SceneContentVisibilityAdapter,
     type SceneContentVisibilityMap
 } from './types';
+import { captureVisibilityDebugSnapshot, type VisibilityDebugSnapshot } from './visibility-debug-snapshot';
 
 /**
  * 场景内容显隐容器：
@@ -33,6 +34,8 @@ export class SceneContentVisibilityRegistry {
 
     /** true = 解锁（允许显示）；false = reveal/导出门控隐藏 defer 类 */
     private runtimeGateOpen = true;
+
+    private debugSnapshotRevision = 0;
 
     constructor(global: Global) {
         this.global = global;
@@ -61,6 +64,21 @@ export class SceneContentVisibilityRegistry {
 
     isRuntimeGateOpen(): boolean {
         return this.runtimeGateOpen;
+    }
+
+    /**
+     * 只读诊断快照。不写 settings / viewSettings，不发外部事件。
+     *
+     * @param {string} [reason] - 调用原因（仅诊断）
+     * @returns {VisibilityDebugSnapshot} 当前 intent / 配置 / 运行态
+     */
+    getDebugSnapshot(reason = 'manual'): VisibilityDebugSnapshot {
+        this.debugSnapshotRevision += 1;
+        return captureVisibilityDebugSnapshot(this.global, {
+            reason,
+            revision: this.debugSnapshotRevision,
+            runtimeGateOpen: this.runtimeGateOpen
+        });
     }
 
     /**

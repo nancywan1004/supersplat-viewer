@@ -77,7 +77,8 @@ button {
     #editModeStrip,
     #editLeftSidebarMount,
     #rightToolBar,
-    #editBottomToolbarMount {
+    #editBottomToolbarMount,
+    #viewSceneContentDebugPanel {
         display: none !important;
     }
 }
@@ -166,6 +167,7 @@ button {
 
 @import 'ui/components/styles/exit-edit-confirm-ui';
 @import 'ui/components/styles/edit-toast-ui';
+@import 'ui/components/styles/view-scene-content-debug-ui';
 
 /* 编辑模式工具栏（左/右/底） */
 @import 'ui/styles/edit-left-toolbar';

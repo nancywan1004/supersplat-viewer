@@ -1,0 +1,98 @@
+.sc-debug-panel {
+    position: fixed;
+    top: calc(var(--edit-top-bar-height, 48px) + 8px + env(safe-area-inset-top));
+    left: max(8px, env(safe-area-inset-left));
+    z-index: 110;
+    width: min(360px, calc(100vw - 16px));
+    max-height: calc(100vh - 72px);
+    overflow: auto;
+    padding: 10px 12px 12px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: $clr-text;
+    background: rgba(20, 20, 20, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.sc-debug-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.sc-debug-section {
+    margin: 10px 0 4px;
+    color: $clr-text-dark;
+    font-size: 11px;
+}
+
+.sc-debug-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.sc-debug-btn {
+    padding: 4px 8px;
+    font-size: 12px;
+    color: $clr-text;
+    background: $clr-bkg-light;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    cursor: pointer;
+    &:hover {
+        background: darken($clr-bkg-light, 5%);
+    }
+}
+
+.sc-debug-check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+    cursor: pointer;
+    input {
+        accent-color: $clr-accent;
+    }
+    &.is-screen-off {
+        opacity: 0.55;
+    }
+}
+
+.sc-debug-meta {
+    font-size: 10px;
+    color: $clr-text-dark;
+    margin: 0 0 2px;
+}
+
+.sc-debug-hint {
+    font-size: 10px;
+    color: $clr-text-darkest;
+    margin-bottom: 6px;
+}
+
+.sc-debug-empty {
+    color: $clr-text-darkest;
+    margin-bottom: 4px;
+}
+
+.sc-debug-snap {
+    margin: 0;
+    padding: 8px;
+    max-height: 220px;
+    overflow: auto;
+    font-size: 10px;
+    line-height: 1.35;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: $clr-text-dark;
+    background: $clr-bkg-darkest;
+    border-radius: 4px;
+}
+
+#viewSceneContentDebugBtn.active {
+    border-color: $clr-accent;
+}

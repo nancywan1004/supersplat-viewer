@@ -25,6 +25,29 @@ export const SCENE_CONTENT_DEFER_CATEGORY_IDS: readonly SceneContentCategoryId[]
     'lights'
 ] as const;
 
+/**
+ * ALL_SET 遍历顺序。
+ * **lights 必须最后**：否则 reveal/persistent 拆卸会 `forceReapply(settings.nightMode.fade)`，
+ * 盖掉光照会话「隐亮度 → nightFade=0」。
+ */
+export const SCENE_CONTENT_ALL_SET_HIDE_ORDER: readonly SceneContentCategoryId[] = [
+    'assets',
+    'annotations',
+    'persistent',
+    'stylization',
+    'reveal',
+    'lights'
+];
+
+export const SCENE_CONTENT_ALL_SET_SHOW_ORDER: readonly SceneContentCategoryId[] = [
+    'assets',
+    'annotations',
+    'reveal',
+    'persistent',
+    'stylization',
+    'lights'
+];
+
 export type SceneContentVisibilityMap = Partial<Record<SceneContentCategoryId, boolean>>;
 
 /**
