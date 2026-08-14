@@ -1,9 +1,6 @@
-import type { Global, ViewSettings } from './types';
+import type { Global, LightingContentVisibility, ViewSettings } from './types';
 import type { ExperienceSettings } from './schemas/v2';
-import {
-    SCENE_CONTENT_CATEGORY_IDS,
-    type SceneContentCategoryId
-} from './scene-visibility/types';
+import { type SceneContentCategoryId } from './scene-visibility/types';
 
 /** 观看态 Bloom 用户灯总闸默认开启 */
 export const DEFAULT_VIEW_BLOOM_LOCAL_LIGHTS_ENABLED = true;
@@ -26,20 +23,102 @@ export const DEFAULT_VIEW_LIGHTING_VISIBILITY = {
 
 export type LightingVisibilityKey = keyof typeof DEFAULT_VIEW_LIGHTING_VISIBILITY;
 
-function createDefaultContentVisibility(): NonNullable<ViewSettings['contentVisibility']> {
-    const out: NonNullable<ViewSettings['contentVisibility']> = {};
-    for (const id of SCENE_CONTENT_CATEGORY_IDS) {
-        out[id] = true;
-    }
-    return out;
-}
+const BOOLEAN_CONTENT_CATEGORY_IDS: readonly Exclude<SceneContentCategoryId, 'lights'>[] = [
+    'assets',
+    'annotations',
+    'reveal',
+    'persistent',
+    'stylization'
+];
 
-function createDefaultLightingVisibility(): NonNullable<ViewSettings['lightingVisibility']> {
+/** 默认 `contentVisibility.lights` 从属节点（无 instances） */
+export function createDefaultLightsContent(): LightingContentVisibility {
     return {
+        visible: true,
         brightness: DEFAULT_VIEW_LIGHTING_VISIBILITY.brightness,
         bloom: DEFAULT_VIEW_LIGHTING_VISIBILITY.bloom,
         shadow: DEFAULT_VIEW_LIGHTING_VISIBILITY.shadow
     };
+}
+
+/**
+ * 纯解读：boolean `lights` / 不完整节点 → 从属节点。不写 viewSettings。
+ *
+ * @param {unknown} lights - `contentVisibility.lights`
+ * @returns {LightingContentVisibility} 解读后的节点
+ */
+export function interpretLightingContentVisibility(lights: unknown): LightingContentVisibility {
+    const out = createDefaultLightsContent();
+
+    if (typeof lights === 'boolean') {
+        out.visible = lights;
+        return out;
+    }
+    if (!lights || typeof lights !== 'object' || Array.isArray(lights)) {
+        return out;
+    }
+
+    const node = lights as Record<string, unknown>;
+    if (typeof node.visible === 'boolean') {
+        out.visible = node.visible;
+    }
+    if (typeof node.brightness === 'boolean') {
+        out.brightness = node.brightness;
+    }
+    if (typeof node.bloom === 'boolean') {
+        out.bloom = node.bloom;
+    }
+    if (typeof node.shadow === 'boolean') {
+        out.shadow = node.shadow;
+    }
+    if (node.instances && typeof node.instances === 'object' && !Array.isArray(node.instances)) {
+        const instances: Record<string, boolean> = {};
+        for (const [id, value] of Object.entries(node.instances as Record<string, unknown>)) {
+            if (value === false) {
+                instances[id] = false;
+            }
+        }
+        if (Object.keys(instances).length > 0) {
+            out.instances = instances;
+        }
+    }
+    return out;
+}
+
+function createDefaultContentVisibility(): NonNullable<ViewSettings['contentVisibility']> {
+    return {
+        assets: true,
+        annotations: DEFAULT_VIEW_ANNOTATIONS_VISIBLE,
+        lights: createDefaultLightsContent(),
+        reveal: true,
+        persistent: true,
+        stylization: true
+    };
+}
+
+function isLightsContentNode(value: unknown): value is LightingContentVisibility {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return false;
+    }
+    const node = value as LightingContentVisibility;
+    return typeof node.visible === 'boolean'
+        && typeof node.brightness === 'boolean'
+        && typeof node.bloom === 'boolean'
+        && typeof node.shadow === 'boolean';
+}
+
+function ensureLightsContentNode(vs: ViewSettings): LightingContentVisibility {
+    if (!vs.contentVisibility || typeof vs.contentVisibility !== 'object') {
+        vs.contentVisibility = createDefaultContentVisibility();
+        return vs.contentVisibility.lights as LightingContentVisibility;
+    }
+    const current = vs.contentVisibility.lights;
+    if (isLightsContentNode(current)) {
+        return current;
+    }
+    const node = interpretLightingContentVisibility(current);
+    vs.contentVisibility.lights = node;
+    return node;
 }
 
 export function createDefaultViewSettings(): ViewSettings {
@@ -47,7 +126,6 @@ export function createDefaultViewSettings(): ViewSettings {
         bloom: { localLightsEnabled: DEFAULT_VIEW_BLOOM_LOCAL_LIGHTS_ENABLED },
         mediaMuted: DEFAULT_VIEW_MEDIA_MUTED,
         contentVisibility: createDefaultContentVisibility(),
-        lightingVisibility: createDefaultLightingVisibility(),
         torch: { active: DEFAULT_VIEW_TORCH_ACTIVE }
     };
 }
@@ -72,32 +150,17 @@ export function ensureViewSettings(global: Global): ViewSettings {
     if (!vs.contentVisibility || typeof vs.contentVisibility !== 'object') {
         vs.contentVisibility = createDefaultContentVisibility();
     } else {
-        for (const id of SCENE_CONTENT_CATEGORY_IDS) {
+        for (const id of BOOLEAN_CONTENT_CATEGORY_IDS) {
             if (typeof vs.contentVisibility[id] !== 'boolean') {
                 vs.contentVisibility[id] = true;
             }
         }
     }
-    // 旧字段迁移：仅当 annotations 仍为默认 true 且 legacy 明确为 false 时写入
-    if (typeof vs.annotationsVisible === 'boolean') {
-        if (vs.annotationsVisible === false && vs.contentVisibility.annotations !== false) {
-            vs.contentVisibility.annotations = false;
-        }
-        delete vs.annotationsVisible;
-    }
+    ensureLightsContentNode(vs);
     if (!vs.torch || typeof vs.torch !== 'object') {
         vs.torch = { active: DEFAULT_VIEW_TORCH_ACTIVE };
     } else if (typeof vs.torch.active !== 'boolean') {
         vs.torch.active = DEFAULT_VIEW_TORCH_ACTIVE;
-    }
-    if (!vs.lightingVisibility || typeof vs.lightingVisibility !== 'object') {
-        vs.lightingVisibility = createDefaultLightingVisibility();
-    } else {
-        for (const key of Object.keys(DEFAULT_VIEW_LIGHTING_VISIBILITY) as LightingVisibilityKey[]) {
-            if (typeof vs.lightingVisibility[key] !== 'boolean') {
-                vs.lightingVisibility[key] = true;
-            }
-        }
     }
     return vs;
 }
@@ -107,15 +170,23 @@ export function applyViewBloomLocalLightsEnabled(global: Global, enabled: boolea
     ensureViewSettings(global).bloom.localLightsEnabled = enabled;
 }
 
+function ensureLightsContent(global: Global): LightingContentVisibility {
+    return ensureLightsContentNode(ensureViewSettings(global));
+}
+
 /** 读 View 会话大类显隐（`viewSettings.contentVisibility`，缺省 true） */
 export function readContentCategoryVisible(global: Global, category: SceneContentCategoryId): boolean {
     const vs = ensureViewSettings(global);
+    if (category === 'lights') {
+        return ensureLightsContent(global).visible !== false;
+    }
     return vs.contentVisibility?.[category] !== false;
 }
 
 /**
  * 写 View 会话大类显隐（仅 viewSettings，不入库）。
  * 画面套用由 `SceneContentVisibilityRegistry` 负责；编辑态（含预览）不套用。
+ * `lights` 只写从属节点的 `visible`，不改 brightness/bloom/shadow/instances。
  * @returns 是否变更
  */
 export function writeContentCategoryVisible(
@@ -128,7 +199,17 @@ export function writeContentCategoryVisible(
         vs.contentVisibility = createDefaultContentVisibility();
     }
     const next = !!visible;
-    if (vs.contentVisibility[category] === next) return false;
+    if (category === 'lights') {
+        const node = ensureLightsContent(global);
+        if (node.visible === next) {
+            return false;
+        }
+        node.visible = next;
+        return true;
+    }
+    if (vs.contentVisibility[category] === next) {
+        return false;
+    }
     vs.contentVisibility[category] = next;
     return true;
 }
@@ -168,11 +249,11 @@ export function readViewBloomLocalLightsEnabled(global: Global): boolean {
 }
 
 export function readLightingVisibility(global: Global, key: LightingVisibilityKey): boolean {
-    return ensureViewSettings(global).lightingVisibility?.[key] !== false;
+    return ensureLightsContent(global)[key] !== false;
 }
 
 /**
- * 写光照子项会话显隐（仅 viewSettings，不入库）。
+ * 写光照子项会话显隐（仅 `contentVisibility.lights`，不入库）。
  * @returns 是否变更
  */
 export function writeLightingVisibility(
@@ -180,13 +261,12 @@ export function writeLightingVisibility(
     key: LightingVisibilityKey,
     visible: boolean
 ): boolean {
-    const vs = ensureViewSettings(global);
-    if (!vs.lightingVisibility) {
-        vs.lightingVisibility = createDefaultLightingVisibility();
-    }
+    const node = ensureLightsContent(global);
     const next = !!visible;
-    if (vs.lightingVisibility[key] === next) return false;
-    vs.lightingVisibility[key] = next;
+    if (node[key] === next) {
+        return false;
+    }
+    node[key] = next;
     return true;
 }
 
@@ -216,6 +296,77 @@ export function isLightingSessionAspectVisible(global: Global, key: LightingVisi
         return false;
     }
     return readLightingVisibility(global, key);
+}
+
+/**
+ * 会话态单灯 overlay（`contentVisibility.lights.instances`）。缺省 true；只记关闭。
+ * 不套用 editMode：Resolver 在编辑态忽略 overlay。
+ *
+ * @param {Global} global - Viewer 全局对象
+ * @param {string} lightId - 用户点光/聚光 id
+ * @returns {boolean} 会话是否允许该灯可见
+ */
+export function readSessionLightVisible(global: Global, lightId: string): boolean {
+    return ensureLightsContent(global).instances?.[lightId] !== false;
+}
+
+/**
+ * 写会话态单灯 overlay。`true` 删除键（回到缺省）；`false` 记入 instances。
+ *
+ * @param {Global} global - Viewer 全局对象
+ * @param {string} lightId - 用户点光/聚光 id
+ * @param {boolean} visible - 会话可见
+ * @returns {boolean} 是否变更
+ */
+export function writeSessionLightVisible(global: Global, lightId: string, visible: boolean): boolean {
+    const node = ensureLightsContent(global);
+    const next = !!visible;
+    const prev = node.instances?.[lightId] !== false;
+    if (prev === next) {
+        return false;
+    }
+    if (next) {
+        if (node.instances) {
+            delete node.instances[lightId];
+            if (Object.keys(node.instances).length === 0) {
+                delete node.instances;
+            }
+        }
+    } else {
+        if (!node.instances) {
+            node.instances = {};
+        }
+        node.instances[lightId] = false;
+    }
+    return true;
+}
+
+/**
+ * 批量写会话 overlay。`visible=true` 清除这些 id；`false` 记关。
+ *
+ * @param {Global} global - Viewer 全局对象
+ * @param {string[]} lightIds - 用户灯 id
+ * @param {boolean} visible - 会话可见
+ * @returns {boolean} 是否有任一变更
+ */
+export function writeSessionLightVisibleMany(
+    global: Global,
+    lightIds: string[],
+    visible: boolean
+): boolean {
+    let changed = false;
+    for (const id of lightIds) {
+        if (writeSessionLightVisible(global, id, visible)) {
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+/** 已存储的非默认 overlay（仅 false 键）。未写过则为 `{}`。 */
+export function readSessionLightVisibleOverlay(global: Global): Record<string, boolean> {
+    const instances = ensureLightsContent(global).instances;
+    return instances ? { ...instances } : {};
 }
 
 /**

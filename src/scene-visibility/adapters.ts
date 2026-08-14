@@ -1,14 +1,6 @@
 import { findAssetMorphOwnerTargetId } from '../settings-serialize/effects-sync';
 import { pauseAllSceneMedia } from '../scene-assets/media/scene-media-playback';
-import {
-    applySceneContentUserLightRoots,
-    snapshotUserPointSpotLightsEnabled,
-    type UserLightEnabledSnap
-} from '../light';
-import {
-    applyViewBloomLocalLightsEnabled,
-    readViewBloomLocalLightsEnabled
-} from '../view-settings';
+import { writeSessionLightVisible } from '../view-settings';
 import type { ExperienceSettings } from '../schemas/v2';
 import type { Global, ScenePlacedItem } from '../types';
 import {
@@ -18,19 +10,14 @@ import {
     restoreEffectsFromExperienceSettings,
     type PersistentSessionSnapshot
 } from './effects-session-visibility';
-import { syncLightingSubsFromLightsCategory } from './lighting-session-visibility';
+import { writeLightingSubsFromLightsCategory } from './lighting-session-visibility';
+import { requestLightingVisibilityReconcile } from './lighting-visibility-coordinator';
+import { revertCascadedLightToggleOverlays } from './lighting-visibility-facade';
 import type { SceneContentVisibilityAdapter } from './types';
 
 const ENTITY_NAMES = {
-    placedAssets: 'placedAssets',
-    pointLights: 'pointLights',
-    spotLights: 'spotLights'
+    placedAssets: 'placedAssets'
 } as const;
-
-type LightsSessionGlobal = Global & {
-    __sceneContentLightsBloomSnap?: boolean;
-    __sceneContentUserLightsEnabledSnap?: UserLightEnabledSnap;
-};
 
 function setRootEntityEnabled(global: Global, name: string, visible: boolean): void {
     const entity = global.app.root.findByName(name) as { enabled?: boolean } | null;
@@ -105,7 +92,7 @@ function getAnnotationManager(global: Global): {
 
 /**
  * 进入编辑（含预览）：丢弃 View 会话对画面的叠加，恢复编辑真源（settings / 单条）。
- * 不改写 `viewSettings.contentVisibility` / `lightingVisibility`（退出到纯 Viewer 时再套用）。
+ * 不改写 `viewSettings.contentVisibility`（退出到纯 Viewer 时再套用）。
  */
 export function restoreEditSceneContentVisibility(global: Global): void {
     syncPlacedAssetEntitiesFromPerItemVisible(global);
@@ -165,42 +152,19 @@ const annotationsAdapter: SceneContentVisibilityAdapter = {
 const lightsAdapter: SceneContentVisibilityAdapter = {
     id: 'lights',
     applyCategoryIntent(global, intentVisible) {
-        // 子项 flag 在编辑态也可记账；画面套用由 sync 内 overlay 判断
         const show = !!intentVisible;
-        const g = global as LightsSessionGlobal;
-        if (!show && !g.__sceneContentUserLightsEnabledSnap) {
-            // 无 LIGHT_TOGGLE 预快照时才拍；已有快照勿用「已全 false」的 settings 覆盖
-            g.__sceneContentUserLightsEnabledSnap = snapshotUserPointSpotLightsEnabled(global);
-        }
-        syncLightingSubsFromLightsCategory(global, show);
-        if (!isContentVisibilityOverlayActive(global)) return;
         if (!show) {
-            // 仅在仍为开时记下恢复目标；已是关则不要把 false 写成 snapshot（可能被其它协议先关）
-            if (typeof g.__sceneContentLightsBloomSnap !== 'boolean') {
-                if (readViewBloomLocalLightsEnabled(global)) {
-                    g.__sceneContentLightsBloomSnap = true;
-                }
-            }
-            applyViewBloomLocalLightsEnabled(global, false);
-            global.events.fire('postEffect:changed');
-            return;
+            revertCascadedLightToggleOverlays(global);
         }
-        const bloomSnap = g.__sceneContentLightsBloomSnap;
-        delete g.__sceneContentLightsBloomSnap;
-        // 无 snapshot 时默认恢复为开（与「大类显示」语义一致）
-        applyViewBloomLocalLightsEnabled(global, bloomSnap !== false);
-        global.events.fire('postEffect:changed');
+        writeLightingSubsFromLightsCategory(global, show);
+        requestLightingVisibilityReconcile(global, `lightsIntent:${show}`);
     },
-    applyRuntimeGate(global, gateOpen, intentVisible) {
-        const rootOn = gateOpen && effectiveCategoryIntent(global, intentVisible);
-        const g = global as LightsSessionGlobal;
-        const enabledSnap = rootOn ? g.__sceneContentUserLightsEnabledSnap : undefined;
-        applySceneContentUserLightRoots(global, rootOn, enabledSnap);
-        if (rootOn) {
-            delete g.__sceneContentUserLightsEnabledSnap;
-        }
-        // 手电筒独立于 contentVisibility.lights（viewSettings.torch.active），不在此门控
-        // 亮度 / 全局辉光 / 阴影由 lightingVisibility 会话门控（见 lighting-session-visibility）
+    applyRuntimeGate(global, _gateOpen, _intentVisible) {
+        requestLightingVisibilityReconcile(global, 'lightsGate');
+    },
+    setInstanceVisible(global, instanceId, visible) {
+        writeSessionLightVisible(global, instanceId, visible);
+        requestLightingVisibilityReconcile(global, `setInstanceVisible:${instanceId}:${visible}`);
     }
 };
 

@@ -12,6 +12,7 @@ import {
 import type { GraphicsDevice } from 'playcanvas';
 import type { Global } from './types';
 import { isShadowSystemEnabled } from './vfx/shadow/shadow-policy';
+import { invalidateLightingVisibility } from './scene-visibility/lighting-visibility-coordinator';
 import type { DirectionalLightConfig, SpotLightConfig } from './schemas/v2';
 
 const MAX_POINT_LIGHTS = 10;
@@ -832,94 +833,6 @@ const createPointLightsFromSettings = (global: Global): void => {
     });
 };
 
-/** 场景内容 `lights` 大类：用户点光/聚光 enabled 快照（按 settings id） */
-export type UserLightEnabledSnap = Array<{ id: string; enabled: boolean }>;
-
-function isUserPointOrSpotConfig(cfg: unknown): cfg is { id?: string; enabled?: boolean } {
-    return !!cfg && typeof cfg === 'object' && !isDirectionalLightConfig(cfg);
-}
-
-/** 拍摄当前用户点光/聚光在 settings 中的 enabled（供 SCENE_CONTENT lights 隐→显恢复） */
-const snapshotUserPointSpotLightsEnabled = (global: Global): UserLightEnabledSnap => {
-    const configs = global.settings?.lighting?.lights;
-    if (!Array.isArray(configs)) return [];
-    const out: UserLightEnabledSnap = [];
-    for (const cfg of configs) {
-        if (!isUserPointOrSpotConfig(cfg) || typeof cfg.id !== 'string') continue;
-        out.push({ id: cfg.id, enabled: cfg.enabled !== false });
-    }
-    return out;
-};
-
-type GlobalWithUserLightSnap = Global & { __sceneContentUserLightsEnabledSnap?: UserLightEnabledSnap };
-
-/**
- * 观看态下逐个 `LIGHT_TOGGLE` 改 settings 之前调用。
- * 父级关「光源」常先连发 LIGHT_TOGGLE(false)，若等 SCENE_CONTENT hide 再快照会得到全 false。
- * 首刀 toggle 前记下全量 enabled，作为后续 ALL/CATEGORY 再显的恢复目标。
- */
-const ensureUserLightEnabledSnapBeforeViewerToggle = (global: Global): void => {
-    if (global.state.editMode === true) return;
-    const g = global as GlobalWithUserLightSnap;
-    if (g.__sceneContentUserLightsEnabledSnap) return;
-    g.__sceneContentUserLightsEnabledSnap = snapshotUserPointSpotLightsEnabled(global);
-};
-
-/**
- * 场景内容 lights 根闸：开/关 `pointLights`/`spotLights` 容器。
- * 再开时须重同步子实体与 LightComponent——父节点 disable 后引擎可能把子 `enabled` / `light.enabled` 一并关掉，
- * 仅恢复父节点不足以让 collectPointLights / 聚光采集重新看到灯。
- */
-const applySceneContentUserLightRoots = (
-    global: Global,
-    rootOn: boolean,
-    enabledSnap?: UserLightEnabledSnap
-): void => {
-    const { app } = global;
-    const setContainer = (name: string, on: boolean) => {
-        const container = app.root.findByName(name) as Entity | null;
-        if (container) container.enabled = on;
-    };
-    setContainer('pointLights', rootOn);
-    setContainer('spotLights', rootOn);
-    if (!rootOn) return;
-
-    // 若有会话快照，先写回 settings（抵御 hide 期间逐个 LIGHT_TOGGLE(false) 把 enabled 写掉）
-    if (enabledSnap && enabledSnap.length > 0) {
-        const configs = global.settings?.lighting?.lights;
-        if (Array.isArray(configs)) {
-            const byId = new Map(enabledSnap.map((s) => [s.id, s.enabled]));
-            for (const cfg of configs) {
-                if (!isUserPointOrSpotConfig(cfg) || typeof cfg.id !== 'string') continue;
-                if (byId.has(cfg.id)) {
-                    (cfg as { enabled?: boolean }).enabled = byId.get(cfg.id);
-                }
-            }
-        }
-    }
-
-    updatePointLightsFromSettings(global);
-
-    // update 可能重建子节点；再拉一遍实体/组件，并确保容器仍为开
-    for (const name of ['pointLights', 'spotLights'] as const) {
-        const container = app.root.findByName(name) as Entity | null;
-        if (!container) continue;
-        container.enabled = true;
-        for (const node of container.children) {
-            const entity = node as Entity;
-            const isPoint = entity.name.startsWith('pointLight_') && entity.name !== 'pointLight_visual';
-            const isSpot = entity.name.startsWith('spotLight_') && entity.name !== 'spotLight_visual';
-            if (!isPoint && !isSpot) continue;
-            entity.enabled = true;
-            const cfg = (entity as { __lightConfig?: { enabled?: boolean } }).__lightConfig;
-            if (entity.light) {
-                entity.light.enabled = !cfg || cfg.enabled !== false;
-            }
-        }
-    }
-    (app as { renderNextFrame?: boolean }).renderNextFrame = true;
-};
-
 /**
  * 低层级：直接控制点光源、聚光灯可视化实体的显示/隐藏。
  * 不关心编辑模式/左侧模块，仅根据 visible 决定是否启用可视化渲染。
@@ -1068,6 +981,7 @@ const updatePointLightsFromSettings = (global: Global): void => {
         const c2 = app.root.findByName('spotLights') as Entity | null;
         if (c1) c1.destroy();
         if (c2) c2.destroy();
+        invalidateLightingVisibility(global, 'updatePointLightsFromSettings:empty');
         return;
     }
     const hasPoint = configs.some((c: any) => !isDirectionalLightConfig(c) && !isSpotLightConfig(c));
@@ -1084,6 +998,7 @@ const updatePointLightsFromSettings = (global: Global): void => {
     } else {
         createSpotLightsFromSettings(global);
     }
+    invalidateLightingVisibility(global, 'updatePointLightsFromSettings');
 };
 
 /**
@@ -1132,9 +1047,6 @@ export {
     collectSpotLights,
     spotApexToHalfDeg,
     updatePointLightsFromSettings,
-    snapshotUserPointSpotLightsEnabled,
-    ensureUserLightEnabledSnapBeforeViewerToggle,
-    applySceneContentUserLightRoots,
     setPointLightsVisualVisible,
     setLightsVisualVisible,
     selectNearestLightAtPosition,

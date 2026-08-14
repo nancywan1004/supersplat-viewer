@@ -26,9 +26,8 @@ export const SCENE_CONTENT_DEFER_CATEGORY_IDS: readonly SceneContentCategoryId[]
 ] as const;
 
 /**
- * ALL_SET 遍历顺序。
- * **lights 必须最后**：否则 reveal/persistent 拆卸会 `forceReapply(settings.nightMode.fade)`，
- * 盖掉光照会话「隐亮度 → nightFade=0」。
+ * ALL_SET 出站 / 遍历顺序（父级契约冻结）。
+ * 画面不再依赖 lights 最后 apply：ALL_SET 在 Coordinator batch 结束后一次 reconcile。
  */
 export const SCENE_CONTENT_ALL_SET_HIDE_ORDER: readonly SceneContentCategoryId[] = [
     'assets',
@@ -54,7 +53,7 @@ export type SceneContentVisibilityMap = Partial<Record<SceneContentCategoryId, b
  * 大类适配器（intent 来自 `viewSettings.contentVisibility`）。
  * - `applyCategoryIntent`：仅纯 Viewer 套用运行态；特效写 `effectsSession`，不写编辑 settings
  * - `applyRuntimeGate`：reveal/导出门控；编辑态忽略 contentVisibility intent
- * - `setInstanceVisible`：预留
+ * - `setInstanceVisible`：lights 会话 overlay（Viewer `LIGHT_TOGGLE`）
  */
 export interface SceneContentVisibilityAdapter {
     readonly id: SceneContentCategoryId;

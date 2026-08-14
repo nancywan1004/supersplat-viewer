@@ -5,7 +5,6 @@
 
 import { getPositionInFrontOfCamera } from '../../scene-assets/asset-placement-handler';
 import {
-    ensureUserLightEnabledSnapBeforeViewerToggle,
     spotApexToHalfDeg,
     updatePointLightsFromSettings
 } from '../../light';
@@ -414,7 +413,7 @@ export function disableLinkedLightsForAllLocalLightRegions(global: Global): bool
 }
 
 /**
- * LIGHT_TOGGLE_ALL：用户点光/聚光整闸 + 夜景 fade + Bloom 总闸同步。
+ * LIGHT_TOGGLE_ALL：用户点光/聚光整闸 + Bloom 总闸同步（编辑态写 settings）。
  * - `bloomScope=local`：沿用 `viewSettings.bloom.localLightsEnabled` 仅控制观看态局部亮灯可见性。
  * - `bloomScope=global`：同步 `settings.postEffectSettings.bloom.enabled`，支持整场辉光开关。
  */
@@ -440,19 +439,6 @@ export function applyLightToggleAll(global: Global, enabled: boolean): void {
     if (!enabled && disableLinkedLightsForAllLocalLightRegions(global)) {
         changed = true;
     }
-    const app = global.app as { fire: (name: string, value?: unknown) => void };
-    // Viewer 模式：全关时全局亮度仅运行时压到 0（不改 global.settings.nightMode.fade，配置真源仍在 settings）
-    // 全开时用 ensureNightMode(settings).fade 恢复，与 LIGHT_GLOBAL_SET 写入的 settings 一致，无需额外备份字段
-    if (!global.state.editMode) {
-        const nm = ensureNightMode(settings);
-        if (!enabled) {
-            app.fire('nightFade:set', 0);
-        } else {
-            const raw = typeof nm.fade === 'number' ? nm.fade : 0;
-            const v = Math.max(-1, Math.min(1, raw));
-            app.fire('nightFade:set', v);
-        }
-    }
 
     if (changed) {
         updatePointLightsFromSettings(global);
@@ -471,8 +457,6 @@ export function applyLightToggle(global: Global, id: string, enabled: boolean): 
 
     const anyLight = light as any;
     if (anyLight.enabled === enabled) return;
-    // 观看态：在改 settings 前记下全量 enabled（父级关光源常先连发 TOGGLE false）
-    ensureUserLightEnabledSnapBeforeViewerToggle(global);
     anyLight.enabled = enabled;
     updatePointLightsFromSettings(global);
     global.events.fire('lighting:changed');

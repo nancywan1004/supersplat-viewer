@@ -7,7 +7,7 @@ import { getTorchBeamParams, getTorchLightRay, getTorchLightWorldPosition, isTor
 import { readViewTorchActive } from '../../view-settings';
 import type { EffectsRuntime } from '../effects-runtime';
 import type { GsplatContribution } from '../effects-runtime/gsplat-contribution';
-import { hasEnabledPersistentGsplatMaterialShaderEffect } from '../effects-runtime/effects-pipeline-policy';
+import { hasEnabledPersistentGsplatMaterialShaderEffect, isOneShotRevealPlayingExclusiveGsplat } from '../effects-runtime/effects-pipeline-policy';
 import type { ExperienceSettings } from '../../schemas/v2';
 
 /**
@@ -1306,7 +1306,15 @@ class NightMode extends GsplatShaderEffect {
                     materialsApplied: this.materialsApplied.size
                 });
             }
-            const settings = (this.app as any).__global?.settings as ExperienceSettings | undefined;
+            const global = (this.app as any).__global;
+            // 开场 reveal 播放中：settings 里即使有点彩等 persistent，也不得 exit/removeShaders，否则 growth-wave 被拆掉
+            if (isOneShotRevealPlayingExclusiveGsplat(global?.state)) {
+                if (isExportNightDebugEnabled()) {
+                    console.log('[ExportNightDebug][NightMode] nightMode:forceReapply skipped (one-shot reveal playing)');
+                }
+                return;
+            }
+            const settings = global?.settings as ExperienceSettings | undefined;
             if (settings && hasEnabledPersistentGsplatMaterialShaderEffect(settings)) {
                 if (isExportNightDebugEnabled()) {
                     console.log('[ExportNightDebug][NightMode] nightMode:forceReapply skipped (gsplat material shader persistent active)');

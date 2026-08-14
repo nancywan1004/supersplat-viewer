@@ -319,6 +319,20 @@ type State = {
 };
 
 /**
+ * `contentVisibility.lights` 从属节点（仅会话，不入库）。
+ * - `visible`：`SCENE_CONTENT_*` 大类
+ * - `brightness/bloom/shadow`：`LIGHTING_*_SHOW_HIDE_SET`
+ * - `instances`：会话态 `LIGHT_TOGGLE` overlay，只记非默认（关）
+ */
+export type LightingContentVisibility = {
+    visible: boolean;
+    brightness: boolean;
+    bloom: boolean;
+    shadow: boolean;
+    instances?: Record<string, boolean>;
+};
+
+/**
  * 观看态/会话级「视图设置」：与 `global.settings`（`ExperienceSettings`）**并列**、**不入库**。
  * 读写与缺省补齐统一经 {@link ./view-settings.ts}（`ensureViewSettings` 及各 `applyView*`）。
  */
@@ -335,26 +349,16 @@ export type ViewSettings = {
      * 场景内容大类显隐（**仅 View 会话**，不入库；`SCENE_CONTENT_*`）。
      * - 只影响纯 Viewer 画面；**不**改编辑态（含预览）、不写 `settings`
      * - 缺省各类为 `true`；标注 View overlay 读 `contentVisibility.annotations`
+     * - `lights` 为从属节点（大类 + brightness/bloom/shadow + 会话实例 overlay）
      */
-    contentVisibility?: Partial<Record<
-        'assets' | 'annotations' | 'lights' | 'reveal' | 'persistent' | 'stylization',
-        boolean
-    >>;
-    /**
-     * 观看态光照子项会话显隐（**不入库**；`LIGHTING_*_SHOW_HIDE_SET`）。
-     * - 仅纯 Viewer 套用画面；编辑态（含预览）忽略门控、不写 `settings`
-     * - 受 `contentVisibility.lights` 总闸约束：lights 关时三者均强制不可见
-     * - 缺省均为 `true`
-     */
-    lightingVisibility?: {
-        brightness: boolean;
-        bloom: boolean;
-        shadow: boolean;
+    contentVisibility?: {
+        assets?: boolean;
+        annotations?: boolean;
+        lights?: LightingContentVisibility;
+        reveal?: boolean;
+        persistent?: boolean;
+        stylization?: boolean;
     };
-    /**
-     * @deprecated 已收敛到 `contentVisibility.annotations`；ensureViewSettings 会迁移旧值。
-     */
-    annotationsVisible?: boolean;
     /**
      * 场景 video/audio 全局静音（会话态，不入库）
      * - `VIEW_MEDIA_MUTE_SET` 写入；Viewer 与编辑模式共用、编辑继承 Viewer 会话值

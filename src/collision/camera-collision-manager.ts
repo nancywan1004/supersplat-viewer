@@ -16,6 +16,10 @@ import {
 } from '../scene-assets/collision/scene-asset-collision-state';
 import { isShadowSystemEnabled } from '../vfx/shadow/shadow-policy';
 import type { SceneMeshLoadIntent } from './scene-mesh-load-intent';
+import {
+    shouldFetchCollisionFromUniverse as shouldFetchCollisionFromUniversePolicy,
+    shouldLoadSceneMesh as shouldLoadSceneMeshPolicy
+} from './scene-mesh-load-policy';
 import type { ExperienceSettings } from '../schemas/v2';
 import type { Global } from '../types';
 
@@ -183,6 +187,9 @@ export class CameraCollisionManager {
         this.global.events.fire(SCENE_ASSET_COLLISION_APPLY_RUNTIME_STATE);
         this.global.events.fire('cameraCollision:changed');
         this.global.events.fire('sceneAssetCollision:changed');
+        if (enabled && this.loadState === 'failed') {
+            this.loadState = 'idle';
+        }
         this.scheduleSceneMeshLoad();
         if (enabled) {
             this.syncConsumers();
@@ -232,7 +239,13 @@ export class CameraCollisionManager {
             }
         }
 
+        // 自动调度（postEffect / start）不得把 failed 清回 idle 再 generate。
+        // 仅 SHADOW_SET / COLLISION_SET / regenerate 等显式 intent 才重试。
         if (this.loadState === 'failed') {
+            const explicitRetry = intent?.wantCollision === true || intent?.wantShadow === true;
+            if (!explicitRetry) {
+                return;
+            }
             this.loadState = 'idle';
         }
 
@@ -427,12 +440,7 @@ export class CameraCollisionManager {
     }
 
     private shouldFetchCollisionFromUniverse(intent?: SceneMeshLoadIntent): boolean {
-        if (!canGenerateCollision(this.global)) {
-            return false;
-        }
-        const wantCollision = intent?.wantCollision ?? collisionActive(this.global);
-        const wantShadow = intent?.wantShadow ?? isShadowSystemEnabled(this.global);
-        return wantCollision || wantShadow;
+        return shouldFetchCollisionFromUniversePolicy(canGenerateCollision(this.global), intent);
     }
 
     emitCollisionSystemReadyIfApplicable(): void {
@@ -457,7 +465,7 @@ export class CameraCollisionManager {
         const wantCollision = intent?.wantCollision ?? collisionActive(this.global);
         const wantShadow = intent?.wantShadow ?? isShadowSystemEnabled(this.global);
         const needCollision = !!url && wantCollision;
-        const needShadowSceneMesh = wantShadow && (!!meshUrl || canGenerateCollision(this.global));
+        const needShadowSceneMesh = wantShadow && !!meshUrl;
         const collisionIsSceneMeshGlb = !!url && isSceneMeshGlbUrl(url);
         const collisionIsVoxel = !!url && !collisionIsSceneMeshGlb;
 
@@ -499,13 +507,20 @@ export class CameraCollisionManager {
         const meshUrl = sceneMeshUrl(url);
         const wantCollision = intent?.wantCollision ?? collisionActive(this.global);
         const wantShadow = intent?.wantShadow ?? isShadowSystemEnabled(this.global);
-        const needCollision = !!url && wantCollision;
-        const needShadowSceneMesh = wantShadow && (!!meshUrl || canGenerateCollision(this.global));
-        const needUniverse = !url && this.shouldFetchCollisionFromUniverse(intent);
-        return needCollision || needShadowSceneMesh || needUniverse;
+        return shouldLoadSceneMeshPolicy({
+            hasUrl: !!url,
+            hasMeshUrl: !!meshUrl,
+            wantCollision,
+            wantShadow,
+            canGenerate: canGenerateCollision(this.global),
+            intent
+        });
     }
 
     private scheduleSceneMeshLoad(): void {
+        if (this.loadState === 'loading' || this.loadState === 'failed') {
+            return;
+        }
         if (!this.shouldLoadSceneMesh()) {
             return;
         }
@@ -580,7 +595,6 @@ export class CameraCollisionManager {
         events.on('editMode:changed', this.onContextOrToggleChanged);
         events.on('previewMode:changed', this.onContextOrToggleChanged);
         events.on('cameraCollision:changed', this.onContextOrToggleChanged);
-        events.on('postEffect:changed', this.onContextOrToggleChanged);
         events.on(SCENE_COLLISION_CHANGED, this.onSceneCollisionChanged);
         this.syncHasCollision();
         this.syncConsumers();
@@ -590,6 +604,9 @@ export class CameraCollisionManager {
 
     private readonly onSceneCollisionChanged = () => {
         this.syncHasCollision();
+        if (this.loadState === 'failed') {
+            this.loadState = 'idle';
+        }
         this.scheduleSceneMeshLoad();
     };
 
@@ -600,7 +617,6 @@ export class CameraCollisionManager {
         events.off('editMode:changed', this.onContextOrToggleChanged);
         events.off('previewMode:changed', this.onContextOrToggleChanged);
         events.off('cameraCollision:changed', this.onContextOrToggleChanged);
-        events.off('postEffect:changed', this.onContextOrToggleChanged);
         events.off(SCENE_COLLISION_CHANGED, this.onSceneCollisionChanged);
     }
 }

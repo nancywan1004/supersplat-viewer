@@ -83,7 +83,8 @@ export function expectedOutboundForCategorySet(opts: {
 
 /**
  * `SCENE_CONTENT_ALL_SET` 出站序列。
- * Registry 即使 intent 已是目标值仍返回完整 category 列表并 reapply；categories 顺序与 apply 顺序一致。
+ * Registry 即使 intent 已是目标值仍返回完整 category 列表并 reapply；
+ * `categories` 顺序与出站契约一致（冻结），不作为画面必须 lights 最后 apply 的约束。
  *
  * @param {object} opts - 入站
  * @param {boolean} opts.value - 全部大类目标显隐

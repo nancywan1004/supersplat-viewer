@@ -36,6 +36,7 @@ import type { InputArbiter } from '../input-arbiter';
 import { isEnvironmentDebugVisualEnabled } from '../state-selectors';
 import { setPlacementCursorActive } from '../placement-cursor';
 import { applyViewTorchActive, readViewTorchActive } from '../view-settings';
+import { applyViewerLightToggle, applyViewerLightToggleAll } from '../scene-visibility/lighting-visibility-facade';
 
 type Payload = Record<string, unknown>;
 
@@ -160,13 +161,25 @@ class EnvironmentFacade implements ModuleFacade {
         }
         case 'LIGHT_TOGGLE_ALL': {
             const v = pl.value;
-            if (typeof v === 'boolean') applyLightToggleAll(g, v);
+            if (typeof v === 'boolean') {
+                if (g.state?.editMode === true) {
+                    applyLightToggleAll(g, v);
+                } else {
+                    applyViewerLightToggleAll(g, v);
+                }
+            }
             break;
         }
         case 'LIGHT_TOGGLE': {
             const id = pl.id;
             const v = pl.value;
-            if (typeof id === 'string' && typeof v === 'boolean') applyLightToggle(g, id, v);
+            if (typeof id === 'string' && typeof v === 'boolean') {
+                if (g.state?.editMode === true) {
+                    applyLightToggle(g, id, v);
+                } else {
+                    applyViewerLightToggle(g, id, v);
+                }
+            }
             break;
         }
         case 'BLOOM_INTENSITY_UPDATE': {

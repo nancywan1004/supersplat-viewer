@@ -9,6 +9,13 @@ import {
     readViewBloomLocalLightsEnabled,
     readViewTorchActive
 } from '../view-settings';
+import {
+    collectLightingVisibilityResolveInput,
+    readConfiguredUserPointSpotEnabled,
+    readShadowSceneMeshConfigured,
+    resolveLightingVisibility,
+    type LightingVisibilityProjection
+} from './lighting-visibility-resolver';
 
 function readRuntimeGateOpen(global: Global, explicit?: boolean): boolean {
     if (typeof explicit === 'boolean') {
@@ -37,13 +44,14 @@ export type VisibilityDebugSnapshot = {
         shadowSceneMeshConfigured: boolean;
     };
     configuredLightEnabled: Record<string, boolean>;
-    /** Phase 0：会话实例 overlay 尚未独立；Viewer TOGGLE 仍写 settings，故与 configured 同形 */
-    sessionLightVisible: Record<string, boolean> | null;
+    /** 各配置灯的会话 overlay（缺省 true）。Phase 1 起从 `contentVisibility.lights.instances` 展开 */
+    sessionLightVisible: Record<string, boolean>;
     effective: {
         brightness: boolean;
         bloom: boolean;
         shadow: boolean;
     };
+    projection: LightingVisibilityProjection;
     actual: {
         pointRootEnabled: boolean | null;
         spotRootEnabled: boolean | null;
@@ -60,27 +68,15 @@ type EntityLike = {
     __lightConfig?: { id?: string; enabled?: boolean; type?: string };
 };
 
-function trimUrl(value: unknown): string {
-    return typeof value === 'string' ? value.trim() : '';
-}
-
-/**
- * 与 `hasConfiguredShadowSceneMesh` 同语义：已有 GLB collision URL。避免 snapshot 测试拉 Universe/OSS。
- *
- * @param {Global} global - Viewer 全局对象
- * @returns {boolean} 是否已配置 sceneMesh GLB
- */
-function shadowSceneMeshConfigured(global: Global): boolean {
-    const url = trimUrl(global.config?.collisionUrl) ||
-        trimUrl((global.settings as { collision?: { url?: string } } | undefined)?.collision?.url);
-    return url.toLowerCase().endsWith('.glb');
-}
-
-function isUserPointOrSpotConfig(cfg: { id?: string; type?: string } | null | undefined): boolean {
-    if (!cfg || typeof cfg.id !== 'string') {
-        return false;
+function expandSessionLightVisible(
+    configured: Record<string, boolean>,
+    overlay: Record<string, boolean>
+): Record<string, boolean> {
+    const out: Record<string, boolean> = {};
+    for (const id of Object.keys(configured)) {
+        out[id] = overlay[id] !== false;
     }
-    return cfg.type === 'point' || cfg.type === 'spot' || cfg.type === undefined;
+    return out;
 }
 
 function readRootEnabled(global: Global, name: string): boolean | null {
@@ -111,22 +107,6 @@ function collectLightComponentEnabled(container: EntityLike | null | undefined, 
     return out;
 }
 
-function readConfiguredLightEnabled(global: Global): Record<string, boolean> {
-    const out: Record<string, boolean> = {};
-    const configs = global.settings?.lighting?.lights;
-    if (!Array.isArray(configs)) {
-        return out;
-    }
-    for (const cfg of configs) {
-        const row = cfg as { id?: string; type?: string; enabled?: boolean };
-        if (!isUserPointOrSpotConfig(row) || typeof row.id !== 'string') {
-            continue;
-        }
-        out[row.id] = row.enabled !== false;
-    }
-    return out;
-}
-
 /**
  * 采集只读显隐诊断快照。不写 settings / viewSettings，不发外部事件。
  *
@@ -141,7 +121,11 @@ export function captureVisibilityDebugSnapshot(
     global: Global,
     opts?: { reason?: string; revision?: number; runtimeGateOpen?: boolean }
 ): VisibilityDebugSnapshot {
-    const configuredLightEnabled = readConfiguredLightEnabled(global);
+    const input = collectLightingVisibilityResolveInput(global, {
+        runtimeGateOpen: opts?.runtimeGateOpen
+    });
+    const projection = resolveLightingVisibility(input);
+    const configuredLightEnabled = readConfiguredUserPointSpotEnabled(global);
     const pointRoot = global.app?.root?.findByName?.('pointLights') as EntityLike | null | undefined;
     const spotRoot = global.app?.root?.findByName?.('spotLights') as EntityLike | null | undefined;
 
@@ -159,15 +143,16 @@ export function captureVisibilityDebugSnapshot(
             torchActive: readViewTorchActive(global)
         },
         capability: {
-            shadowSceneMeshConfigured: shadowSceneMeshConfigured(global)
+            shadowSceneMeshConfigured: readShadowSceneMeshConfigured(global)
         },
         configuredLightEnabled,
-        sessionLightVisible: null,
+        sessionLightVisible: expandSessionLightVisible(configuredLightEnabled, input.sessionLightVisible),
         effective: {
             brightness: isLightingSessionAspectVisible(global, 'brightness'),
             bloom: isLightingSessionAspectVisible(global, 'bloom'),
             shadow: isLightingSessionAspectVisible(global, 'shadow')
         },
+        projection,
         actual: {
             pointRootEnabled: readRootEnabled(global, 'pointLights'),
             spotRootEnabled: readRootEnabled(global, 'spotLights'),

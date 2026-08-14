@@ -16,6 +16,7 @@ import type { BoundingBox, Entity, GSplatComponent } from 'playcanvas';
 import type { ExperienceSettings } from '../../schemas/v2';
 import type { Global } from '../../types';
 import { setDirectionalCastShadowsEnabled, updatePointLightsFromSettings, updateShadowDistance } from '../../light';
+import { invalidateLightingVisibility } from '../../scene-visibility/lighting-visibility-coordinator';
 import { readRevealParams } from '../../settings-serialize/effects-sync';
 import { isLightingSessionAspectVisible } from '../../view-settings';
 import { isRevealTimedVfxType, revealBlocksAnim } from '../effects-runtime/reveal/reveal-policy';
@@ -158,6 +159,7 @@ const activateOutput = (global: Global) => {
     if (isShadowOutputEnabled(global)) {
         global.events.fire(SHADOW_SYSTEM_READY);
     }
+    invalidateLightingVisibility(global, 'shadowPipelineReady');
 };
 
 const deactivateOutput = (global: Global) => {

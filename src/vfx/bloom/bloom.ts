@@ -577,6 +577,7 @@ export class BloomController {
         const sessionBloomVisible = isLightingSessionAspectVisible(this.global, 'bloom');
         const shouldEnableComposeBloom =
             sessionBloomVisible &&
+            (this.global.state.editMode === true || viewBloomLocalLightsEnabled) &&
             !!bloomSettings.enabled &&
             blurLevel > 0 &&
             (bloomScope === 'global' || hasLocalBloomContribution);
@@ -589,7 +590,9 @@ export class BloomController {
             cameraFrame.debug = bloomDebug ? 'bloom' : null;
         } else {
             // 会话隐辉光时不做 local keepalive，避免仍残留 compose 贡献
-            const keepaliveActive = sessionBloomVisible && bloomScope === 'local';
+            const keepaliveActive = sessionBloomVisible &&
+                (this.global.state.editMode === true || viewBloomLocalLightsEnabled) &&
+                bloomScope === 'local';
             bloom.intensity = keepaliveActive ? LOCAL_BLOOM_KEEPALIVE_INTENSITY : 0;
             bloom.blurLevel = Math.max(1, Math.min(5, blurLevel));
             cameraFrame.debug = null;

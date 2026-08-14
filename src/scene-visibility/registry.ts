@@ -10,7 +10,11 @@ import {
     SCENE_CONTENT_ALL_SET_HIDE_ORDER,
     SCENE_CONTENT_ALL_SET_SHOW_ORDER
 } from './adapters';
-import { applyLightingSessionAspects } from './lighting-session-visibility';
+import {
+    ensureLightingVisibilityCoordinator,
+    requestLightingVisibilityReconcile
+} from './lighting-visibility-coordinator';
+import { reportLightingVisibilityShadow } from './lighting-visibility-resolver';
 import {
     SCENE_CONTENT_CATEGORY_IDS,
     SCENE_CONTENT_DEFER_CATEGORY_IDS,
@@ -93,6 +97,8 @@ export class SceneContentVisibilityRegistry {
         writeContentCategoryVisible(this.global, category, next);
         if (isContentVisibilityOverlayActive(this.global)) {
             this.applyCategory(category);
+        } else if (category === 'lights') {
+            requestLightingVisibilityReconcile(this.global, `setCategoryVisible:lights:${next}`);
         }
         this.global.events.fire('sceneContentVisibility:changed', { category, value: next });
         return true;
@@ -109,15 +115,17 @@ export class SceneContentVisibilityRegistry {
         for (const id of order) {
             writeContentCategoryVisible(this.global, id, next);
         }
+        const coord = ensureLightingVisibilityCoordinator(this.global);
+        coord.beginBatch();
         if (isContentVisibilityOverlayActive(this.global)) {
             for (const id of order) {
                 this.applyCategory(id);
             }
-            // reveal/persistent 可能 forceReapply settings.fade；lights 已置末仍再套一次会话亮度，防异步 remount 覆盖
-            if (order.includes('lights')) {
-                applyLightingSessionAspects(this.global);
-            }
         }
+        coord.endBatch();
+        reportLightingVisibilityShadow(this.global, `setAllCategoriesVisible:${next}`, {
+            runtimeGateOpen: this.runtimeGateOpen
+        });
         const categories = [...order];
         this.global.events.fire('sceneContentVisibility:allChanged', { value: next, categories });
         for (const category of categories) {
@@ -138,12 +146,18 @@ export class SceneContentVisibilityRegistry {
         const next = !!open;
         const changed = this.runtimeGateOpen !== next;
         this.runtimeGateOpen = next;
+        const coord = ensureLightingVisibilityCoordinator(this.global);
+        coord.beginBatch();
         for (const id of SCENE_CONTENT_DEFER_CATEGORY_IDS) {
             this.applyGateOnly(id);
         }
+        coord.endBatch();
         if (changed) {
             this.global.events.fire('sceneContentRuntimeGate:changed', { open: next });
         }
+        reportLightingVisibilityShadow(this.global, `applyRuntimeGate:${next}`, {
+            runtimeGateOpen: this.runtimeGateOpen
+        });
     }
 
     /** intent + gate 全量重放某一类（编辑态时 intent 在 adapter 内视为 true） */
@@ -151,24 +165,27 @@ export class SceneContentVisibilityRegistry {
         const adapter = this.adapters.get(category);
         if (!adapter) return;
         const intent = this.getCategoryVisible(category);
+        const hasGate = categoryParticipatesInRuntimeGate(category) && !!adapter.applyRuntimeGate;
+        const coord = hasGate ? ensureLightingVisibilityCoordinator(this.global) : undefined;
+        if (hasGate) {
+            coord!.beginBatch();
+        }
         try {
-            const hasGate = categoryParticipatesInRuntimeGate(category) && !!adapter.applyRuntimeGate;
-            // lights：先闸 pointLights/spotLights 根节点，再套会话亮度。
-            // 否则 show 时 collectPointLights 仍读到父节点 disabled，亮度刷新采不到灯。
-            if (category === 'lights' && hasGate) {
-                adapter.applyRuntimeGate!(this.global, this.runtimeGateOpen, intent);
-                adapter.applyCategoryIntent(this.global, intent);
-                if (isContentVisibilityOverlayActive(this.global)) {
-                    applyLightingSessionAspects(this.global);
-                }
-                return;
-            }
             adapter.applyCategoryIntent(this.global, intent);
             if (hasGate) {
                 adapter.applyRuntimeGate!(this.global, this.runtimeGateOpen, intent);
             }
+            if (category === 'lights') {
+                reportLightingVisibilityShadow(this.global, 'applyCategory:lights', {
+                    runtimeGateOpen: this.runtimeGateOpen
+                });
+            }
         } catch (err) {
             console.warn(`[SceneContentVisibility] category "${category}" apply failed`, err);
+        } finally {
+            if (hasGate) {
+                coord!.endBatch();
+            }
         }
     }
 
@@ -184,9 +201,23 @@ export class SceneContentVisibilityRegistry {
     }
 
     reapplyAll(): void {
+        const coord = ensureLightingVisibilityCoordinator(this.global);
+        coord.beginBatch();
         for (const id of this.adapters.keys()) {
             this.applyCategory(id);
         }
+        coord.endBatch();
+    }
+
+    /**
+     * 会话态逐灯显隐。Viewer 写 overlay；由 lightsAdapter.setInstanceVisible 执行。
+     *
+     * @param {string} instanceId - 灯 id
+     * @param {boolean} visible - 会话可见
+     * @returns {void}
+     */
+    setInstanceVisible(instanceId: string, visible: boolean): void {
+        this.adapters.get('lights')?.setInstanceVisible?.(this.global, instanceId, visible);
     }
 
     /**
@@ -200,10 +231,12 @@ export class SceneContentVisibilityRegistry {
             return;
         }
         restoreEditSceneContentVisibility(this.global);
-        // defer 根节点仅受 reveal/导出门控；忽略 contentVisibility
+        const coord = ensureLightingVisibilityCoordinator(this.global);
+        coord.beginBatch();
         for (const id of SCENE_CONTENT_DEFER_CATEGORY_IDS) {
             this.applyGateOnly(id);
         }
+        coord.endBatch();
     }
 }
 

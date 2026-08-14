@@ -110,10 +110,9 @@ import { hasEnabledPersistentGsplatMaterialShaderEffect } from './vfx/effects-ru
 import { initCommandRegistry } from './editor-modules/command-registry';
 import {
     initSceneContentVisibility,
-    getSceneContentVisibilityRegistry,
-    applyLightingSessionAspects
+    getSceneContentVisibilityRegistry
 } from './scene-visibility';
-import { applySceneContentUserLightRoots } from './light';
+import { invalidateLightingVisibility } from './scene-visibility/lighting-visibility-coordinator';
 import { DEFAULT_DEFERRED_EDITING_LAYERS } from './render/deferred-editing-visual-sync';
 import { initInputArbiter } from './input-arbiter';
 import { VoxelDebugOverlay } from './voxel-debug-overlay';
@@ -905,13 +904,7 @@ class Viewer {
                 // remount persistent 若同帧进行，可能被旧脚本收尾覆盖。统一延后一帧。
                 global.app.once('frameend', () => {
                     this.syncPersistentRevealGsplat(gsplatEntity, restartAnim === true);
-                    // remount 内 restoreNightMode/forceReapply 可能盖掉刚恢复的会话光照；延后重套
-                    applyLightingSessionAspects(global);
-                    // 再断言点光/聚光根与组件（不走 applyCategory，避免把 brightness 等子项强行全开）
-                    const registry = getSceneContentVisibilityRegistry(global);
-                    if (registry?.isRuntimeGateOpen() && registry.getCategoryVisible('lights')) {
-                        applySceneContentUserLightRoots(global, true);
-                    }
+                    invalidateLightingVisibility(global, 'persistentRemount');
                 });
             });
             global.events.on(
@@ -956,9 +949,11 @@ class Viewer {
                 events.once('revealComplete', (payload?: { skipPersistentRemount?: boolean }) => {
                     if (payload?.skipPersistentRemount) return;
                     this.syncPersistentRevealGsplat(gsplatEntity, false);
+                    invalidateLightingVisibility(global, 'persistentRemount:revealComplete');
                 });
             } else {
                 this.syncPersistentRevealGsplat(gsplatEntity, false);
+                invalidateLightingVisibility(global, 'persistentRemount:initial');
             }
             let deferredEditingLayersLocked = false;
             const applyDeferredEditingLayersVisibility = (visible: boolean) => {
@@ -1533,9 +1528,11 @@ z: ${cameraInfo.target.z.toFixed(6)}
         }
         if (hasEnabledPersistentGsplatMaterialShaderEffect(settings)) {
             this.nightModeScript.applyLightingFromSettings({ enabled: nightCfg?.enabled, fade });
+            invalidateLightingVisibility(this.global, 'nightModeAfterLoad:persistentShader');
             return;
         }
         this.nightModeScript.applyFromSettings({ enabled: nightCfg?.enabled, fade });
+        invalidateLightingVisibility(this.global, 'nightModeAfterLoad');
     }
 }
 

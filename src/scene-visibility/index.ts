@@ -1,6 +1,7 @@
 import type { Global } from '../types';
 import { BUILTIN_SCENE_CONTENT_VISIBILITY_ADAPTERS } from './adapters';
 import { SceneContentVisibilityRegistry } from './registry';
+import { ensureLightingVisibilityCoordinator } from './lighting-visibility-coordinator';
 
 export type {
     SceneContentCategoryId,
@@ -38,12 +39,13 @@ export {
     restoreEffectsFromExperienceSettings
 } from './effects-session-visibility';
 export {
-    applyLightingBrightnessSession,
-    applyLightingSessionAspects,
     canToggleLightingShadowSession,
     setLightingSessionAspectVisible,
-    syncLightingSubsFromLightsCategory
+    syncLightingSubsFromLightsCategory,
+    writeLightingSubsFromLightsCategory
 } from './lighting-session-visibility';
+export { applyViewerLightToggle, applyViewerLightToggleAll } from './lighting-visibility-facade';
+export { invalidateLightingVisibility } from './lighting-visibility-coordinator';
 
 /** 注册六类内置 adapter，挂到 `global.__sceneContentVisibility` */
 export function initSceneContentVisibility(global: Global): SceneContentVisibilityRegistry {
@@ -58,6 +60,7 @@ export function initSceneContentVisibility(global: Global): SceneContentVisibili
     }
     (global as { __sceneContentVisibility?: SceneContentVisibilityRegistry }).__sceneContentVisibility =
         registry;
+    ensureLightingVisibilityCoordinator(global);
 
     const onEditingContextChanged = () => {
         registry.syncAfterEditingContextChanged();

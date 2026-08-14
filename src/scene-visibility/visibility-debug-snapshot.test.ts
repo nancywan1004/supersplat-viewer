@@ -51,15 +51,11 @@ function makeGlobal(overrides?: {
         children: []
     };
     const vs = createDefaultViewSettings();
-    vs.contentVisibility = {
-        ...vs.contentVisibility,
-        lights: overrides?.lightsCategory !== false
-    };
-    vs.lightingVisibility = {
-        brightness: overrides?.brightness !== false,
-        bloom: true,
-        shadow: true
-    };
+    const lightsNode = vs.contentVisibility?.lights;
+    if (lightsNode) {
+        lightsNode.visible = overrides?.lightsCategory !== false;
+        lightsNode.brightness = overrides?.brightness !== false;
+    }
     vs.torch = { active: overrides?.torchActive === true };
 
     return {
@@ -99,8 +95,13 @@ function testViewerIntentsAndConfigured(): void {
     assertEq(snap.configuredLightEnabled['light-1'], true, 'configured on');
     assertEq(snap.configuredLightEnabled['light-2'], false, 'configured off');
     assert(!('sun' in snap.configuredLightEnabled), 'directional 不进用户灯表');
-    assertEq(snap.sessionLightVisible, null, 'Phase 0 尚无独立实例 overlay');
+    assertEq(snap.sessionLightVisible['light-1'], true, 'session overlay 缺省 true');
+    assertEq(snap.sessionLightVisible['light-2'], true, 'configured 关不等于 overlay 关');
     assertEq(snap.effective.brightness, true, 'effective brightness');
+    assertEq(snap.projection.lightsEffective, true, 'projection category');
+    assertEq(snap.projection.lights['light-1'], true, 'projection light-1');
+    assertEq(snap.projection.lights['light-2'], false, 'projection 服从 configured');
+    assertEq(snap.projection.shadowEffective, false, '无 mesh → shadowEffective false');
     assertEq(snap.actual.pointRootEnabled, true, 'point root');
     assertEq(snap.actual.spotRootEnabled, false, 'spot root');
     assertEq(snap.actual.lightComponents['light-1'], true, 'component');
@@ -114,6 +115,8 @@ function testCategoryOffForcesEffectiveFalse(): void {
     assertEq(snap.intents.brightness, true, '子项 intent 仍可为 true');
     assertEq(snap.effective.brightness, false, 'effective 被大类压住');
     assertEq(snap.effective.bloom, false, 'bloom effective');
+    assertEq(snap.projection.lightsEffective, false, 'projection category off');
+    assertEq(snap.projection.brightnessEffective, false, 'projection brightness');
     assertEq(snap.intents.torchActive, false, 'torch 不随 lights 大类');
     console.log('ok category gate vs torch');
 }
@@ -126,6 +129,8 @@ function testEditIgnoresSessionOverlay(): void {
     }));
     assertEq(snap.mode, 'edit', 'edit mode');
     assertEq(snap.effective.brightness, true, '编辑态忽略会话门控');
+    assertEq(snap.projection.brightnessEffective, true, 'projection edit brightness');
+    assertEq(snap.projection.lights['light-1'], true, 'edit 服从 configured');
     console.log('ok edit ignores overlay');
 }
 
@@ -134,6 +139,7 @@ function testShadowCapabilityFromGlb(): void {
         collisionUrl: 'https://cdn.example/scene.glb'
     }));
     assertEq(snap.capability.shadowSceneMeshConfigured, true, 'glb → shadow capability');
+    assertEq(snap.projection.shadowEffective, true, '有 mesh 且 intent 开');
     console.log('ok shadow capability');
 }
 

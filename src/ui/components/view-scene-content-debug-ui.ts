@@ -3,6 +3,7 @@
  * 走与父级相同的入站协议，便于对照回包契约与画面。
  */
 import { applyLightToggle, applyLightToggleAll } from '../../editor-modules/protocol-adapters/environment-protocol-adapter';
+import { applyViewerLightToggle, applyViewerLightToggleAll } from '../../scene-visibility/lighting-visibility-facade';
 import {
     canToggleLightingShadowSession,
     setLightingSessionAspectVisible
@@ -17,6 +18,7 @@ import type { Global } from '../../types';
 import {
     readContentCategoryVisible,
     readLightingVisibility,
+    readSessionLightVisible,
     type LightingVisibilityKey
 } from '../../view-settings';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
@@ -38,7 +40,7 @@ const LIGHTING_LABELS: Record<LightingVisibilityKey, string> = {
     shadow: '阴影'
 };
 
-type UserLightRow = { id: string; type: string; enabled: boolean };
+type UserLightRow = { id: string; type: string; enabled: boolean; sessionVisible: boolean };
 
 const isUserLight = (light: { id?: string; type?: string } | null | undefined): light is { id: string; type?: string } => {
     if (!light || typeof light.id !== 'string' || !light.id) {
@@ -61,7 +63,8 @@ const listUserLights = (global: Global): UserLightRow[] => {
         out.push({
             id: light.id,
             type: light.type === 'spot' ? 'spot' : 'point',
-            enabled: light.enabled !== false
+            enabled: light.enabled !== false,
+            sessionVisible: readSessionLightVisible(global, light.id)
         });
     }
     return out;
@@ -102,12 +105,20 @@ const sendOrApply = (global: Global, message: { type: string; [k: string]: unkno
             break;
         case 'LIGHT_TOGGLE':
             if (typeof message.id === 'string' && typeof message.value === 'boolean') {
-                applyLightToggle(global, message.id, message.value);
+                if (global.state?.editMode === true) {
+                    applyLightToggle(global, message.id, message.value);
+                } else {
+                    applyViewerLightToggle(global, message.id, message.value);
+                }
             }
             break;
         case 'LIGHT_TOGGLE_ALL':
             if (typeof message.value === 'boolean') {
-                applyLightToggleAll(global, message.value);
+                if (global.state?.editMode === true) {
+                    applyLightToggleAll(global, message.value);
+                } else {
+                    applyViewerLightToggleAll(global, message.value);
+                }
             }
             break;
         default:
@@ -145,7 +156,7 @@ const lightOnScreen = (
     gateOn: boolean,
     snap: VisibilityDebugSnapshot | undefined
 ): boolean => {
-    if (!categoryOn || !gateOn || !light.enabled) {
+    if (!categoryOn || !gateOn || !light.enabled || !light.sessionVisible) {
         return false;
     }
     const rootOn = light.type === 'spot' ? snap?.actual.spotRootEnabled : snap?.actual.pointRootEnabled;
@@ -310,11 +321,13 @@ export function initViewSceneContentDebugUI(global: Global): void {
             panel.appendChild(empty);
         } else {
             for (const light of lights) {
-                const onScreen = lightOnScreen(light, lightsCategoryOn, gateOn, snap);
+                const onScreen = snap ?
+                    snap.projection.lights[light.id] === true :
+                    lightOnScreen(light, lightsCategoryOn, gateOn, snap);
                 const row = makeCheck(
                     `sc-debug-light-${light.id}`,
-                    `${light.id} (${light.type})  配置${yn(light.enabled)} · 画面${yn(onScreen)}`,
-                    light.enabled,
+                    `${light.id} (${light.type})  配置${yn(light.enabled)} · 会话${yn(light.sessionVisible)} · 画面${yn(onScreen)}`,
+                    light.sessionVisible,
                     false,
                     onScreen ? '' : 'is-screen-off'
                 );
@@ -361,6 +374,7 @@ export function initViewSceneContentDebugUI(global: Global): void {
             configuredLightEnabled: snap.configuredLightEnabled,
             sessionLightVisible: snap.sessionLightVisible,
             effective: snap.effective,
+            projection: snap.projection,
             actual: snap.actual,
             capability: snap.capability
         }, null, 2) : 'registry 未初始化';

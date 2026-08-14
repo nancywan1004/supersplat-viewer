@@ -13,7 +13,8 @@ import {
     patchPersistentRuntimeMirror,
     syncEffectsRuntimeStateFromSettings
 } from '../../../settings-serialize/effects-sync';
-import { getEffectsReadSource, isLightingSessionAspectVisible } from '../../../view-settings';
+import { getEffectsReadSource } from '../../../view-settings';
+import { invalidateLightingVisibility } from '../../../scene-visibility/lighting-visibility-coordinator';
 import { DEFAULT_VFX_TOTAL_DURATION } from '../../../schemas/v2-custom';
 import { LegacyRevealEffect as RevealConfig } from '../../../settings';
 import { Global, type RevealEffectType } from '../../../types';
@@ -1162,22 +1163,15 @@ export class RevealController {
             settingsAny.nightMode.fade = fade;
         }
 
-        // 观看态亮度会话隐：不把 settings/快照 fade 盖回画面（与 LIGHTING_BRIGHTNESS / contentVisibility.lights 一致）
-        if (!isLightingSessionAspectVisible(this.global, 'brightness')) {
-            fade = 0;
-        }
-
+        // 观看态亮度 overlay 由 Reconciler 在 prerender invalidate 时套用（含 forceReapply）。
         console.log('[RevealController] Restoring nightFade to', fade, 'due to', reason);
-        debugExportNight('restoreNightModeIfNeeded firing forceReapply', {
+        debugExportNight('restoreNightModeIfNeeded invalidate lighting visibility', {
             reason,
             fade,
             type: this.config.type,
             isExporting: !!(this.global.state as any).isExportingVfxVideo
         });
-        // VFX disable 时 GsplatShaderEffect.removeShaders() 把材质上的 gsplatModifyVS 删了，
-        // 但 NightMode 的 materialsApplied 不知情，nightFade:set 只会 updateEffect 不会重新 apply shader。
-        // 必须用 nightMode:forceReapply 先清 materialsApplied 再重新 apply，才能真正恢复 NightMode shader。
-        this.global.app.fire('nightMode:forceReapply', fade);
+        invalidateLightingVisibility(this.global, `revealRestore:${reason}`);
     }
 
     /**
