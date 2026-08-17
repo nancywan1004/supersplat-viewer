@@ -42,9 +42,13 @@ import { MeshDebugOverlay } from './mesh-debug-overlay';
 import { NavCursor } from './nav-cursor';
 import { Picker } from './picker/index';
 import type { ExperienceSettings, PostEffectSettings } from './settings';
-import { readPersistentTrackEffects, shouldDeferPersistentMount } from './settings-serialize/effects-sync';
+import { readPersistentTrackEffects, readRevealParams, shouldDeferPersistentMount } from './settings-serialize/effects-sync';
 import type { Global } from './types';
-import { nightDeferredByReveal, revealBlocksAnim } from './vfx/effects-runtime/reveal/reveal-policy';
+import {
+    isRevealTimedVfxType,
+    nightDeferredByReveal,
+    revealBlocksAnim
+} from './vfx/effects-runtime/reveal/reveal-policy';
 import { RevealController } from './vfx/effects-runtime/reveal/reveal-controller';
 import {
     applyPersistentSceneEffectEnableChange,
@@ -696,6 +700,11 @@ class Viewer {
                 // apply to the camera entity
                 applyCamera(this.cameraManager.camera);
             }
+            // autoRender=false：anim 推进在 update，相机差分却在 framerender。
+            // 收条后 forceRender 掉、本帧不再画时，framerender 不触发，动画看起来卡死。
+            if (state.cameraMode === 'anim' && !state.animationPaused) {
+                app.renderNextFrame = true;
+            }
             // update reveal effect timing
             if (this.revealController) {
                 this.revealController.updateTiming(deltaTime);
@@ -710,7 +719,14 @@ class Viewer {
         // unpause the animation on first frame（仅「会结束的 reveal」暂停路径动画，等 revealComplete）
         events.on('firstFrame', () => {
             state.loaded = true;
-            if (revealBlocksAnim(state)) {
+            const revealHint = readRevealParams(settings as ExperienceSettings);
+            if (state.animationStarted) {
+                // 快网：ensureInitial / revealComplete 可能早于 firstFrame 已起播；勿再暂停。
+                if (!config.noanim) {
+                    state.animationPaused = false;
+                }
+                app.renderNextFrame = true;
+            } else if (revealBlocksAnim(state, revealHint)) {
                 state.animationPaused = true;
             } else {
                 state.animationPaused = !!config.noanim;
@@ -996,11 +1012,18 @@ class Viewer {
             });
             // 供 VFX 导出与 deferred-editing-visual-sync 使用，避免从 app.viewer 反射取 RevealController
             if (state.hasRevealEffect) {
-                const afterReveal = () => {
-                    if (settings.startMode === 'animTrack' && state.hasAnimation && !config.noanim) {
+                const revealHint = readRevealParams(settings as ExperienceSettings);
+                const afterReveal = (startAnimTrack = true) => {
+                    if (
+                        startAnimTrack &&
+                        settings.startMode === 'animTrack' &&
+                        state.hasAnimation &&
+                        !config.noanim
+                    ) {
                         state.animationStarted = true;
                         state.animationPaused = false;
                         events.fire('animationStarted');
+                        app.renderNextFrame = true;
                     }
                     const nightCfgAfterReveal = (settings as { nightMode?: { enabled?: boolean; fade?: number } }).nightMode;
                     if (nightCfgAfterReveal && this.nightModeScript) {
@@ -1014,17 +1037,19 @@ class Viewer {
                         );
                     }
                 };
-                if (revealBlocksAnim(state)) {
+                if (revealBlocksAnim(state, revealHint)) {
                     // 阻塞型 reveal 启动即冻结 animTrack，避免 firstFrame 之前被提前推进，
                     // 导致开场视角与 animTrack t=0 不一致。
                     state.animationPaused = true;
                     lockDeferredEditingLayersForReveal();
-                    events.once('revealComplete', afterReveal);
+                    events.once('revealComplete', () => afterReveal(true));
                     events.once('revealComplete', initAnnotations);
                     initSceneAssets(true);
                 } else {
-                    // persistent 等：与 revealComplete 语义对齐的即时管线
-                    afterReveal();
+                    // persistent：立即起播。autoStart:false 的 timed reveal 不在此处起播，
+                    // 避免进度条未收就 animationStarted 藏条；由 bootstrap 收条后起播。
+                    const revealType = revealHint?.type ?? 'none';
+                    afterReveal(!isRevealTimedVfxType(revealType));
                     initAnnotations();
                     initSceneAssets(false);
                 }

@@ -11,6 +11,7 @@ import {
 import type { ExperienceSettings } from '../../../../settings';
 import type { Global } from '../../../../types';
 import { revealBlocksAnim } from '../../../../vfx/effects-runtime/reveal/reveal-policy';
+import { readRevealParams } from '../../../../settings-serialize/effects-sync';
 import type { RevealController } from '../../../../vfx/effects-runtime/reveal/reveal-controller';
 import type { CameraManager } from '../../../../camera-manager';
 import { isCustomLodEnabled } from '../custom-loader';
@@ -164,6 +165,12 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
     const eventHandler = app.systems.gsplat;
     let idleTime = 0;
     forceRender.set(true);
+    const revealHint = readRevealParams(settings);
+    const keepRenderingAfterBootstrap = () => {
+        idleTime = 0;
+        forceRender.set(true);
+        app.renderNextFrame = true;
+    };
 
     let refinementController: OctreeRefinementController | null = null;
     let current = 0;
@@ -275,6 +282,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         }
         events.fire('firstFrame');
         window.firstFrame?.();
+        keepRenderingAfterBootstrap();
     };
 
     const runStreamingSceneWarmupOnce = () => {
@@ -480,7 +488,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         if (progressUIHidden) {
             if (
                 state.animationStarted ||
-                revealBlocksAnim(state) ||
+                revealBlocksAnim(state, revealHint) ||
                 settings.startMode !== 'animTrack' ||
                 !state.hasAnimation ||
                 config.noanim
@@ -491,6 +499,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
             state.animationPaused = false;
             state.progress = 100;
             events.fire('animationStarted');
+            keepRenderingAfterBootstrap();
             console.log('Streaming octree: starting animation after bootstrap UI complete');
             return;
         }
@@ -579,7 +588,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
 
         if (
             state.animationStarted ||
-            revealBlocksAnim(state) ||
+            revealBlocksAnim(state, revealHint) ||
             settings.startMode !== 'animTrack' ||
             !state.hasAnimation ||
             config.noanim
@@ -591,6 +600,7 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
         state.animationPaused = false;
         state.progress = 100;
         events.fire('animationStarted');
+        keepRenderingAfterBootstrap();
         console.log(
             'Streaming octree: viewport refinement ready',
             `foreground pending ${refinement.pendingNodes}`,
@@ -645,18 +655,22 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
 
                     state.readyToRender = true;
                     ensureShadowPipelineReady();
-                    forceRender.set(false);
+                    app.renderNextFrame = true;
 
                     if (
                         isCustomLod &&
                         settings.startMode === 'animTrack' &&
                         state.hasAnimation &&
                         !config.noanim &&
-                        !revealBlocksAnim(state)
+                        !revealBlocksAnim(state, revealHint)
                     ) {
                         console.log('LOD mode: all chunks loaded, ensuring animation is playing');
                         state.animationStarted = true;
                         state.animationPaused = false;
+                        events.fire('animationStarted');
+                        keepRenderingAfterBootstrap();
+                    } else {
+                        forceRender.set(false);
                     }
 
                     const updateLod = () => {
@@ -720,12 +734,13 @@ export function bootstrapOctreeLod(options: OctreeLodBootstrapOptions): OctreeLo
                         state.hasAnimation &&
                         !config.noanim &&
                         !state.animationStarted &&
-                        !revealBlocksAnim(state)
+                        !revealBlocksAnim(state, revealHint)
                     ) {
                         state.animationStarted = true;
                         console.log(`Progress reached ${BOOT_PROGRESS.gate}%, starting animation`);
                         state.animationPaused = false;
                         events.fire('animationStarted');
+                        keepRenderingAfterBootstrap();
                     }
                 }
             } else if (isStreamingOctree && streamingBootstrapGateReached) {
