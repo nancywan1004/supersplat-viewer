@@ -1,8 +1,12 @@
 import { EventHandler } from 'playcanvas';
 
-import { shouldUseTouchJoystickMove } from '../input/touch-joystick-ui';
+import {
+    createViewportSettleScheduler,
+    shouldUseTouchJoystickMove
+} from '../input/touch-joystick-ui';
+import { revealBlocksAnim } from '../vfx/effects-runtime/reveal/reveal-policy';
 import { Tooltip } from '../tooltip';
-import { Global } from '../types';
+import { Global, type State } from '../types';
 import { isCustomLodEnabled } from '../loaders/gsplat/lod/custom-loader';
 import type { ExperienceSettings } from '../schemas/v2';
 import {
@@ -53,13 +57,14 @@ import { applyEnvironmentPreviewVisualPolicy } from '../editor-modules/environme
 import { applyLightToggle } from '../editor-modules/protocol-adapters/environment-protocol-adapter';
 import { applyViewMediaMuteSet, applyViewTorchActive, readViewTorchActive } from '../view-settings';
 import { dispatchEffectsModuleCommand } from '../editor-modules/effects-facade';
-import { getRevealActiveType } from '../settings-serialize/effects-sync';
+import { getRevealActiveType, readRevealParams } from '../settings-serialize/effects-sync';
 
 // Initialize the touch joystick for fly mode camera control
 const initJoystick = (
     dom: Record<string, HTMLElement>,
     events: EventHandler,
-    state: { cameraMode: string; inputMode: string; gamingControls: boolean; hasRevealEffect?: boolean }
+    state: Pick<State, 'cameraMode' | 'inputMode' | 'gamingControls' | 'hasRevealEffect' | 'effectsRuntimeState'>,
+    settings: ExperienceSettings
 ) => {
     if (!dom.joystickBase || !dom.joystick || !dom.joystickLookBase || !dom.joystickLook) {
         console.warn('[Joystick] missing joystick dom nodes, skip init');
@@ -75,7 +80,10 @@ const initJoystick = (
 
     // Fixed positions (bottom corners with safe area)
     const joystickLeft = 84;
-    const lookJoystickLeft = () => window.innerWidth - 84;
+    const lookJoystickLeft = () => {
+        const width = Math.max(window.innerWidth, document.documentElement.clientWidth || 0);
+        return width - 84;
+    };
     const joystickBottom = 'calc(env(safe-area-inset-bottom, 0px) + 48px)';
 
     // Joystick touch state
@@ -94,8 +102,8 @@ const initJoystick = (
         };
     };
 
-    // Gate joystick visibility until reveal phase completes.
-    let revealReady = !state.hasRevealEffect;
+    // 仅在「会真正播放的一次性 reveal」期间藏摇杆；autoStart:false / completed / persistent 不挡。
+    let revealReady = !revealBlocksAnim(state, readRevealParams(settings));
 
     // Joystick: touch + landscape only (portrait uses two-finger fly)
     const updateJoystickVisibility = () => {
@@ -128,19 +136,33 @@ const initJoystick = (
         });
     };
 
+    const syncRevealReady = () => {
+        revealReady = !revealBlocksAnim(state, readRevealParams(settings));
+        updateJoystickVisibility();
+    };
+
+    // 旋转时事件早于宽高交换：等到视口连续两帧尺寸不变再判，不用写死延迟。
+    const joystickViewportSettle = createViewportSettleScheduler({
+        onUpdate: updateJoystickVisibility
+    });
+
     events.on('cameraMode:changed', updateJoystickVisibility);
     events.on('inputMode:changed', updateJoystickVisibility);
     events.on('gamingControls:changed', updateJoystickVisibility);
-    events.on('hasRevealEffect:changed', (value: boolean) => {
-        revealReady = !value;
-        updateJoystickVisibility();
+    events.on('hasRevealEffect:changed', () => {
+        queueMicrotask(syncRevealReady);
     });
-    events.once('revealComplete', () => {
-        revealReady = true;
-        updateJoystickVisibility();
+    events.on('revealComplete', () => {
+        queueMicrotask(syncRevealReady);
     });
-    window.addEventListener('resize', updateJoystickVisibility);
-    window.matchMedia('(orientation: landscape)').addEventListener('change', updateJoystickVisibility);
+    events.on('revealRestart', () => {
+        queueMicrotask(syncRevealReady);
+    });
+    window.addEventListener('resize', joystickViewportSettle.schedule);
+    window.addEventListener('orientationchange', joystickViewportSettle.schedule);
+    window.visualViewport?.addEventListener('resize', joystickViewportSettle.schedule);
+    window.matchMedia('(orientation: landscape)').addEventListener('change', joystickViewportSettle.schedule);
+    screen?.orientation?.addEventListener('change', joystickViewportSettle.schedule);
     updateJoystickVisibility();
 
     // Handle joystick touch input directly on the joystick element
@@ -1484,7 +1506,7 @@ const initUI = (global: Global) => {
     });
 
     // Initialize touch joystick (visibility managed by mode + gamingControls)
-    initJoystick(dom, events, state);
+    initJoystick(dom, events, state, settings);
 
     // Initialize annotation navigator
     initAnnotationNav(dom, events, state, global.settings.annotations);

@@ -825,6 +825,7 @@ button {
 
 #joystickBase, #joystickLookBase {
     position: absolute;
+    z-index: 40;
     width: 112px;
     height: 112px;
     transform: translateX(-50%);
