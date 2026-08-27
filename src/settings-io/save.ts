@@ -1,5 +1,5 @@
 // SETTINGS_SAVE.destination 只决定 settings.json 去向。
-// local：无相对路径文件下 settings.json，有则 zip（settings.json + assets/）。
+// local：无相对路径文件下 settings.json，有则 zip 为 settings.zip（settings.json + assets/）。
 // universe：不打 zip；有相对路径文件则先 OSS put 到 settings 同 timestamp 目录，再登记 settings.json。
 // 缩略图仅 universe 登记，不进版本目录。
 import { hasPendingProjectThumbnail, uploadPendingProjectThumbnailIfAny } from '../render/project-thumbnail';
@@ -7,7 +7,7 @@ import { serializeExperienceSettings } from '../settings-serialize/settings-seri
 import type { Global } from '../types';
 import { uploadProjectData, uploadProjectSidecarFiles } from '../universe/service';
 import {
-    PROJECT_ZIP_NAME,
+    SETTINGS_ZIP_NAME,
     SETTINGS_JSON_NAME,
     blobFromBytes,
     normalizePackPath,
@@ -58,7 +58,7 @@ async function downloadLocalProject(
 
     try {
         const zipped = await zipSettingsArchive(jsonString, files);
-        downloadBlobAsFile(blobFromBytes(zipped, 'application/zip'), PROJECT_ZIP_NAME);
+        downloadBlobAsFile(blobFromBytes(zipped, 'application/zip'), SETTINGS_ZIP_NAME);
         return { ok: true };
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

@@ -8,7 +8,6 @@ import { fetchLatestProjectFiles, setUniverseAuthContext } from '../universe/ser
 import {
     canonicalizeSlashPath,
     extensionFromMime,
-    isZipVirtualSettingsUrl,
     normalizePackPath
 } from './pack';
 
@@ -228,15 +227,14 @@ export function unwrapSettingsFetchUrl(url: string): string {
     }
 }
 
-/** settings.json / project.zip 的文件 URL 才能当相对路径基址；Viewer 页面本身不行。 */
+/** settings.json 的文件 URL 才能当相对路径基址；Viewer 页面本身不行。 */
 export function isUsableSettingsFileUrl(url: string | undefined | null): boolean {
     if (typeof url !== 'string' || !url.trim()) return false;
-    if (isZipVirtualSettingsUrl(url)) return false;
     try {
         const u = new URL(unwrapSettingsFetchUrl(url.trim()), location.href);
         const path = u.pathname.toLowerCase();
-        if (!path.endsWith('.json') && !path.endsWith('.zip')) return false;
-        if (u.origin === location.origin && (path === '/' || path === '/index.html' || path === '/settings.json')) {
+        if (!path.endsWith('.json')) return false;
+        if (u.origin === location.origin && (path === '/' || path === '/index.html')) {
             return false;
         }
         return true;
@@ -270,14 +268,12 @@ export function resolveUserUploadResourceUrl(
     const path = normalizeUserUploadRelativePath(trimmed);
     const fromTable = objectUrlForRelativePath(global, path);
     if (fromTable) return fromTable;
-    if (isZipVirtualSettingsUrl(global.config.settingsUrl)) return null;
     const href = resolveAgainstSettingsUrl(global.config.settingsUrl, path);
     return href ? toUserUploadFetchUrl(href) : null;
 }
 
 /** 缺基址时从 ?settings= 或项目版本列表补上 settings.json 的文件 URL。 */
 export async function ensureSettingsFileUrl(global: Global): Promise<void> {
-    if (isZipVirtualSettingsUrl(global.config.settingsUrl)) return;
     const needed = collectUserUploadRelativePaths(global.settings);
     if (needed.length === 0) return;
     const missing = needed.filter((p) => !global.userUploadFiles?.has(normalizeUserUploadRelativePath(p)));
@@ -413,7 +409,6 @@ export async function resolveAnnotationMediaInput(
 }
 
 async function fetchBlobFromSettingsBase(global: Global, path: string): Promise<Blob | null> {
-    if (isZipVirtualSettingsUrl(global.config.settingsUrl)) return null;
     const href = resolveAgainstSettingsUrl(global.config.settingsUrl, path);
     if (!href) return null;
     try {

@@ -203,7 +203,7 @@ type Config = {
     /** 父级透传的 token（用于保存上传鉴权） */
     token?: string;
     /**
-     * 当前 settings.json 的绝对 URL（json 为文件地址；zip 为包内虚拟根 https://supersplat-project.local/settings.json）。
+     * 当前 settings.json 的绝对 URL。
      * 用户上传相对路径（如 `assets/foo.glb`）相对此基址解析；不要用代理 URL。
      */
     settingsUrl?: string;
@@ -404,7 +404,7 @@ type Global = {
     camera: Entity;
     /** 引擎实际使用的渲染器（WebGPU 回退 WebGL 后反映真实 deviceType） */
     renderer: 'webgl' | 'webgpu';
-    /** 本会话用户上传相对路径 → 原始字节（不入库；加载 zip / 保存物化时写入） */
+    /** 本会话用户上传相对路径 → 原始字节（不入库；保存物化时写入） */
     userUploadFiles?: Map<string, Blob>;
     /** 见 {@link ViewSettings} */
     viewSettings?: ViewSettings;
