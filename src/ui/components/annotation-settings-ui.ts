@@ -1,7 +1,8 @@
-import { normalizeAnnotationMediaFields } from '../../annotation-toolbar/media-fields';
+import { flattenAnnotationMedia } from '../../annotation-toolbar/media-fields';
 import type { Global } from '../../types';
 import type { Annotation } from '../../settings';
 import { pushEditHistory } from '../../edit-history';
+import { resolveAnnotationMediaInput } from '../../settings-io/user-files';
 
 const ANNOTATION_SETTINGS_HTML = `
 <div class="asset-panel-section annotation-settings-section" data-annotation-settings-root>
@@ -36,6 +37,7 @@ const ANNOTATION_SETTINGS_HTML = `
                 </div>
                 <div class="annotation-media-panel hidden" id="annotationVideoPanel">
                     <input type="url" id="annotationVideoUrlInput" class="settingsInput" placeholder="视频 URL（https://...）" />
+                    <input type="file" id="annotationVideoFileInput" accept="video/*" class="settingsInput" />
                 </div>
             </div>
             <div class="settingsRow">
@@ -95,6 +97,7 @@ export function bindAnnotationSettings(root: HTMLElement | null, global: Global)
     const imagePanel = root.querySelector<HTMLElement>('#annotationImagePanel');
     const videoPanel = root.querySelector<HTMLElement>('#annotationVideoPanel');
     const videoUrlInput = root.querySelector<HTMLInputElement>('#annotationVideoUrlInput');
+    const videoFileInput = root.querySelector<HTMLInputElement>('#annotationVideoFileInput');
     const mediaTypeRadios = root.querySelectorAll<HTMLInputElement>('input[name="annotationMediaType"]');
     const confirmBtn = root.querySelector<HTMLButtonElement>('#annotationConfirmPlaceBtn');
     const cancelPlaceBtn = root.querySelector<HTMLButtonElement>('#annotationCancelPlaceBtn');
@@ -102,11 +105,20 @@ export function bindAnnotationSettings(root: HTMLElement | null, global: Global)
     const moveBtn = root.querySelector<HTMLButtonElement>('#annotationMoveBtn');
     const deleteBtn = root.querySelector<HTMLButtonElement>('#annotationDeleteBtn');
 
-    if (!header || !panel || !arrow || !newBtn || !placementHint || !form || !titleInput || !bodyInput || !imageUpload || !imageInput || !imagePanel || !videoPanel || !videoUrlInput || !confirmBtn || !cancelPlaceBtn || !selectedActions || !moveBtn || !deleteBtn) return () => {};
+    if (!header || !panel || !arrow || !newBtn || !placementHint || !form || !titleInput || !bodyInput || !imageUpload || !imageInput || !imagePanel || !videoPanel || !videoUrlInput || !videoFileInput || !confirmBtn || !cancelPlaceBtn || !selectedActions || !moveBtn || !deleteBtn) return () => {};
 
     let annotationPlacementActive = false;
     let pendingPlacementPosition: [number, number, number] | null = null;
-    let pendingImageDataUrl: string | null = null;
+    let pendingImageFile: File | null = null;
+    let pendingVideoFile: File | null = null;
+    let previewObjectUrl: string | null = null;
+
+    const revokePreview = () => {
+        if (previewObjectUrl) {
+            URL.revokeObjectURL(previewObjectUrl);
+            previewObjectUrl = null;
+        }
+    };
 
     const getSelectedMediaType = (): 'none' | 'image' | 'video' => {
         const checked = root.querySelector<HTMLInputElement>('input[name="annotationMediaType"]:checked');
@@ -122,12 +134,15 @@ export function bindAnnotationSettings(root: HTMLElement | null, global: Global)
         imagePanel.classList.toggle('hidden', type !== 'image');
         videoPanel.classList.toggle('hidden', type !== 'video');
         if (type !== 'image') {
-            pendingImageDataUrl = null;
+            pendingImageFile = null;
+            revokePreview();
             imageInput.value = '';
             imageUpload.querySelector('.annotation-image-preview')?.remove();
         }
         if (type !== 'video') {
+            pendingVideoFile = null;
             videoUrlInput.value = '';
+            videoFileInput.value = '';
         }
     };
 
@@ -174,7 +189,9 @@ export function bindAnnotationSettings(root: HTMLElement | null, global: Global)
     newBtn.addEventListener('click', () => {
         annotationPlacementActive = true;
         pendingPlacementPosition = null;
-        pendingImageDataUrl = null;
+        pendingImageFile = null;
+        pendingVideoFile = null;
+        revokePreview();
         if (titleInput) titleInput.value = '';
         if (bodyInput) bodyInput.value = '';
         if (imageInput) imageInput.value = '';
@@ -203,23 +220,31 @@ export function bindAnnotationSettings(root: HTMLElement | null, global: Global)
     imageInput.addEventListener('change', (e) => {
         const file = (e.target as HTMLInputElement).files?.[0];
         if (!file) return;
-        const reader = new FileReader();
-        reader.onload = () => {
-            const imageRadio = root.querySelector<HTMLInputElement>('input[name="annotationMediaType"][value="image"]');
-            if (imageRadio) imageRadio.checked = true;
-            updateMediaPanels();
-            pendingImageDataUrl = typeof reader.result === 'string' ? reader.result : null;
-            const existing = imageUpload.querySelector<HTMLImageElement>('.annotation-image-preview');
-            const img = existing ?? document.createElement('img');
-            img.className = 'annotation-image-preview';
-            if (pendingImageDataUrl) {
-                img.src = pendingImageDataUrl;
-                if (!existing) {
-                    imageUpload.appendChild(img);
-                }
-            }
-        };
-        reader.readAsDataURL(file);
+        const imageRadio = root.querySelector<HTMLInputElement>('input[name="annotationMediaType"][value="image"]');
+        if (imageRadio) imageRadio.checked = true;
+        updateMediaPanels();
+        pendingImageFile = file;
+        revokePreview();
+        previewObjectUrl = URL.createObjectURL(file);
+        const existing = imageUpload.querySelector<HTMLImageElement>('.annotation-image-preview');
+        const img = existing ?? document.createElement('img');
+        img.className = 'annotation-image-preview';
+        img.src = previewObjectUrl;
+        if (!existing) {
+            imageUpload.appendChild(img);
+        }
+    });
+
+    videoFileInput.addEventListener('change', () => {
+        const file = videoFileInput.files?.[0] ?? null;
+        pendingVideoFile = file;
+        if (file) videoUrlInput.value = '';
+    });
+    videoUrlInput.addEventListener('input', () => {
+        if (videoUrlInput.value.trim()) {
+            pendingVideoFile = null;
+            videoFileInput.value = '';
+        }
     });
 
     confirmBtn.addEventListener('click', () => {
@@ -230,50 +255,60 @@ export function bindAnnotationSettings(root: HTMLElement | null, global: Global)
         const showTitleWhenCollapsed = root.querySelector<HTMLInputElement>('input[name="annotationShowTitle"]:checked')?.value !== 'no';
 
         const mediaType = getSelectedMediaType();
-        const media = normalizeAnnotationMediaFields({
-            imageUrl: mediaType === 'image' ? (pendingImageDataUrl ?? undefined) : undefined,
-            videoUrl: mediaType === 'video' ? (videoUrlInput.value.trim() || undefined) : undefined
-        });
+        const annId = `annotation-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        const position = pendingPlacementPosition;
+        void (async () => {
+            const media = await resolveAnnotationMediaInput(global, {
+                image: mediaType === 'image' ? pendingImageFile ?? undefined : undefined,
+                video: mediaType === 'video'
+                    ? (pendingVideoFile ?? (videoUrlInput.value.trim() || undefined))
+                    : undefined
+            }, annId);
 
-        const ann: Annotation = {
-            id: `annotation-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-            position: pendingPlacementPosition,
-            title,
-            text: body,
-            ...media,
-            showTitleWhenCollapsed,
-            collapsed: true,
-            extras: {},
-            camera: getDefaultCamera()
-        };
+            const ann: Annotation = {
+                id: annId,
+                position,
+                title,
+                text: body,
+                ...flattenAnnotationMedia(media),
+                showTitleWhenCollapsed,
+                collapsed: true,
+                extras: {},
+                camera: getDefaultCamera()
+            };
 
-        // 先退出放置模式（销毁预览），再添加真实标注
-        annotationPlacementActive = false;
-        pendingPlacementPosition = null;
-        pendingImageDataUrl = null;
-        videoUrlInput.value = '';
-        events.fire('annotation:placementMode', { active: false });
+            annotationPlacementActive = false;
+            pendingPlacementPosition = null;
+            pendingImageFile = null;
+            pendingVideoFile = null;
+            revokePreview();
+            videoUrlInput.value = '';
+            videoFileInput.value = '';
+            events.fire('annotation:placementMode', { active: false });
 
-        global.settings.annotations = global.settings.annotations ?? [];
-        global.settings.annotations.push(ann);
+            global.settings.annotations = global.settings.annotations ?? [];
+            global.settings.annotations.push(ann);
 
-        const viewer = (global.app as any).viewer;
-        if (viewer?.annotations) {
-            viewer.annotations.addAnnotation(ann);
-        }
+            const viewer = (global.app as any).viewer;
+            if (viewer?.annotations) {
+                viewer.annotations.addAnnotation(ann);
+            }
 
-        pushEditHistory(global, 'add annotation');
-        events.fire('annotations:changed');
+            pushEditHistory(global, 'add annotation');
+            events.fire('annotations:changed');
 
-        state.cameraControlsEnabled = true;
-        events.fire('cameraControls:flushInputs');
-        updateUI();
+            state.cameraControlsEnabled = true;
+            events.fire('cameraControls:flushInputs');
+            updateUI();
+        })();
     });
 
     cancelPlaceBtn.addEventListener('click', () => {
         annotationPlacementActive = false;
         pendingPlacementPosition = null;
-        pendingImageDataUrl = null;
+        pendingImageFile = null;
+        pendingVideoFile = null;
+        revokePreview();
         events.fire('annotation:placementMode', { active: false });
         state.cameraControlsEnabled = true;
         events.fire('cameraControls:flushInputs');
@@ -321,7 +356,9 @@ export function bindAnnotationSettings(root: HTMLElement | null, global: Global)
         if (annotationPlacementActive && moduleId !== 'annotation') {
             annotationPlacementActive = false;
             pendingPlacementPosition = null;
-            pendingImageDataUrl = null;
+            pendingImageFile = null;
+        pendingVideoFile = null;
+        revokePreview();
             events.fire('annotation:placementMode', { active: false });
             state.cameraControlsEnabled = true;
         }

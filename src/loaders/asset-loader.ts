@@ -1,5 +1,8 @@
 import type { AppBase, Asset } from 'playcanvas';
+
 import type { AssetLibraryItem, AssetLibraryType, Global } from '../types';
+import { asUserFile, assetLibraryHref, prepareAssetLibraryItemForPlacement } from './asset-file';
+import { ingestAssetLibraryItemFile, resolveUserUploadResourceUrl } from '../settings-io/user-files';
 import { loadGsplatAsset } from './gsplat/sog/splat-loader';
 import { loadContainerAsset } from './gltf/container-loader';
 
@@ -165,8 +168,8 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: st
     });
 }
 
-async function loadMeshAsset(app: AppBase, url: string, timeoutMs: number): Promise<Asset> {
-    const meshAssetLoad = loadContainerAsset(app, url);
+async function loadMeshAsset(app: AppBase, url: string, timeoutMs: number, filename?: string): Promise<Asset> {
+    const meshAssetLoad = loadContainerAsset(app, url, filename);
 
     // 外层再包一层保险超时，防止底层回调漏回导致悬挂。
     return withTimeout(meshAssetLoad, timeoutMs + 1000, 'mesh hydrate');
@@ -177,7 +180,7 @@ async function loadTypedAsset(app: AppBase, type: AssetLibraryType, url: string,
         return loadGsplatAsset(app, { url, filename } as any);
     }
     if (type === 'mesh') {
-        return loadMeshAsset(app, url, timeoutMs);
+        return loadMeshAsset(app, url, timeoutMs, filename);
     }
     if (type === 'video' || type === 'audio') {
         return undefined;
@@ -190,31 +193,39 @@ export async function hydrateAssetLibraryItem(
     item: AssetLibraryItem,
     timeoutMs: number = DEFAULT_ASSET_LOAD_TIMEOUT_MS
 ): Promise<AssetLibraryItem | null> {
-    // image / video / audio 在放置时即时加载，不进入预加载/ready 聚合。
-    if (item.type === 'image' || item.type === 'video' || item.type === 'audio') return item;
-    if (item.asset) return item;
+    const prepared = await prepareAssetLibraryItemForPlacement(item);
+    if (!prepared) return null;
+    const ingested = ingestAssetLibraryItemFile(global, prepared);
 
-    const url = item.url || item.filename;
-    if (!url) return null;
+    // image / video / audio 在放置时即时加载，不进入预加载/ready 聚合。
+    if (ingested.type === 'image' || ingested.type === 'video' || ingested.type === 'audio') return ingested;
+    if (ingested.asset) return ingested;
+
+    const rawUrl = assetLibraryHref(ingested);
+    if (!rawUrl) return null;
 
     try {
         const { app } = global;
-        const filename = item.filename ?? url;
+        const filename = ingested.filename ?? rawUrl;
+        const loadUrl = resolveUserUploadResourceUrl(global, rawUrl);
+        if (!loadUrl) return ingested;
         const assetLoader = getAssetLoader(global);
         const asset = await assetLoader.trackPromise(
             'placement',
-            `hydrate:${item.type}`,
-            loadTypedAsset(app, item.type, url, filename, timeoutMs)
+            `hydrate:${ingested.type}`,
+            loadTypedAsset(app, ingested.type, loadUrl, filename, timeoutMs)
         );
-        if (!asset) return item;
-        return { ...item, asset, filename, url };
+        if (!asset) return ingested;
+        // 相对路径留在 item.src，供存盘；loadUrl 仅给 loader。blob URL 仅供加载。
+        return { ...ingested, asset, filename, src: ingested.src ?? rawUrl };
     } catch {
         return null;
     }
 }
 
 /**
- * 从 `sceneAssets[].source` 解析可加载 URL。
+ * 从 `sceneAssets[].source` 读取入库路径（相对路径保持原样，供存盘比对）。
+ * 真正 fetch 前须再走 `resolveUserUploadResourceUrl`。
  * 优先 `url` / `filename`；缺失时回退 `uploadedAssets`（编辑会话内资产库 id）。
  */
 export function resolveSceneAssetSourceUrl(
@@ -234,9 +245,11 @@ export function resolveSceneAssetSourceUrl(
     if (!assetId) return null;
 
     const lib = global.state.uploadedAssets?.find((a) => a.id === assetId);
-    const fromLib = lib?.url || lib?.filename;
-    if (typeof fromLib === 'string' && fromLib.trim().length > 0) {
-        return fromLib.trim();
+    if (typeof lib?.src === 'string' && lib.src.trim().length > 0) {
+        return lib.src.trim();
+    }
+    if (typeof lib?.filename === 'string' && lib.filename.trim().length > 0) {
+        return lib.filename.trim();
     }
     return null;
 }
@@ -262,24 +275,32 @@ export async function loadSceneAssetLibraryItem(
     }
 
     const filename = src.filename ?? url;
-    const base: AssetLibraryItem = {
+    const assetId = typeof src.assetId === 'string' ? src.assetId.trim() : '';
+    const lib = assetId ? global.state.uploadedAssets?.find((a) => a.id === assetId) : undefined;
+    let base: AssetLibraryItem = {
         id: src.assetId ?? nextSceneEntityId(),
         type,
         name: sceneAsset.name ?? src.filename ?? type,
         filename,
-        url,
+        src: asUserFile(lib?.src) ?? url,
         thumbnailUrl: sceneAsset.thumbnailUrl
     };
+    const prepared = await prepareAssetLibraryItemForPlacement(base);
+    if (!prepared) return null;
+    base = ingestAssetLibraryItemFile(global, prepared);
 
     // image / video / audio 恢复不做预下载，仅构造 item 交给放置阶段处理。
     if (type === 'image' || type === 'video' || type === 'audio') {
         return base;
     }
 
+    const loadHref = assetLibraryHref(base) || url;
+    const loadUrl = resolveUserUploadResourceUrl(global, loadHref);
+    if (!loadUrl) return null;
     const asset = await getAssetLoader(global).trackPromise(
         'sceneAssets',
         `sceneAssets:${type}`,
-        loadTypedAsset(app, type, url, filename, timeoutMs)
+        loadTypedAsset(app, type, loadUrl, base.filename ?? filename, timeoutMs)
     );
     if (!asset) return null;
     return { ...base, asset };

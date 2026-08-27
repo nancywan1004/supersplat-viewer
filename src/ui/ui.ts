@@ -19,7 +19,7 @@ import {
 } from '../settings-serialize/settings-serialize';
 import { SCENE_COLLISION_CHANGED } from '../collision/scene-collision-source';
 import { readSkyboxCurrentUrlFromSettings } from '../settings-serialize/settings-serialize-helper';
-import { downloadExperienceSettingsLocally } from '../render/project-thumbnail';
+import { saveExperienceProject, type SettingsSaveDestination } from '../settings-io/save';
 import { resetSceneSettings } from '../settings-reset';
 import {
     applyMorphKeyframeVisibilityPolicy,
@@ -58,6 +58,36 @@ import { applyLightToggle } from '../editor-modules/protocol-adapters/environmen
 import { applyViewMediaMuteSet, applyViewTorchActive, readViewTorchActive } from '../view-settings';
 import { dispatchEffectsModuleCommand } from '../editor-modules/effects-facade';
 import { getRevealActiveType, readRevealParams } from '../settings-serialize/effects-sync';
+
+/** zip / OSS 附件可能需拉文件，避免 3s 误失败 */
+const SETTINGS_SAVE_RESULT_TIMEOUT_MS = 60_000;
+
+function waitForSettingsSaveResult(timeoutMs = SETTINGS_SAVE_RESULT_TIMEOUT_MS): Promise<void> {
+    return new Promise((resolve, reject) => {
+        let to = 0;
+        const onMsg = (ev: MessageEvent) => {
+            const data = ev.data as { type?: string; message?: string; payload?: { message?: string } };
+            if (!data) return;
+            if (data.type !== 'SETTINGS_UPDATED' && data.type !== 'SETTINGS_SAVE_FAILED') return;
+            window.removeEventListener('message', onMsg);
+            clearTimeout(to);
+            if (data.type === 'SETTINGS_SAVE_FAILED') {
+                const failMsg =
+                    (typeof data.message === 'string' && data.message) ||
+                    data.payload?.message ||
+                    'SETTINGS_SAVE_FAILED';
+                reject(new Error(failMsg));
+                return;
+            }
+            resolve();
+        };
+        to = window.setTimeout(() => {
+            window.removeEventListener('message', onMsg);
+            reject(new Error('timeout waiting for SETTINGS_UPDATED / SETTINGS_SAVE_FAILED'));
+        }, timeoutMs);
+        window.addEventListener('message', onMsg);
+    });
+}
 
 // Initialize the touch joystick for fly mode camera control
 const initJoystick = (
@@ -368,7 +398,7 @@ const initUI = (global: Global) => {
     const dom = [
         'ui',
         'controlsWrap',
-        'editModeStrip', 'editModeBtn', 'exitEditBtn', 'resetSettingsBtn', 'saveSettingsBtn', 'undoEditBtn', 'redoEditBtn', 'rightToolBar',
+        'editModeStrip', 'editModeBtn', 'exitEditBtn', 'resetSettingsBtn', 'saveSettingsWrap', 'saveSettingsBtn', 'saveSettingsDropdown', 'undoEditBtn', 'redoEditBtn', 'rightToolBar',
         'arMode', 'vrMode',
         'enterFullscreen', 'exitFullscreen',
         'info', 'infoPanel', 'desktopTab', 'touchTab', 'desktopInfoPanel', 'touchInfoPanel',
@@ -633,8 +663,12 @@ const initUI = (global: Global) => {
         if (resetSettingsBtn) {
             resetSettingsBtn.classList.toggle('hidden', !inEdit);
         }
-        if (dom.saveSettingsBtn) {
-            dom.saveSettingsBtn.classList.toggle('hidden', !inEdit);
+        if (dom.saveSettingsWrap) {
+            dom.saveSettingsWrap.classList.toggle('hidden', !inEdit);
+        }
+        if (!inEdit) {
+            dom.saveSettingsDropdown?.classList.add('hidden');
+            dom.saveSettingsBtn?.setAttribute('aria-expanded', 'false');
         }
         const showUndoRedo = inEdit && config.trackEditHistory === true;
         if (dom.undoEditBtn) {
@@ -740,40 +774,8 @@ const initUI = (global: Global) => {
                             showExitEditConfirmModal({
                                 onSave: () => {
                                     // 保存：由 bridge 生成 SETTINGS_UPDATED，再退出编辑模式
-                                    sendEditProtocolMessage({ type: 'SETTINGS_SAVE' });
-                                    new Promise<any>((resolve, reject) => {
-                                        const onMsg = (ev: MessageEvent) => {
-                                            const data = ev.data as any;
-                                            if (!data) return;
-                                            if (data.type !== 'SETTINGS_UPDATED' && data.type !== 'SETTINGS_SAVE_FAILED') return;
-                                            window.removeEventListener('message', onMsg);
-                                            clearTimeout(to);
-                                            if (data.type === 'SETTINGS_SAVE_FAILED') {
-                                                const failMsg =
-                                                    (typeof data.message === 'string' && data.message) ||
-                                                    data?.payload?.message ||
-                                                    'SETTINGS_SAVE_FAILED';
-                                                reject(new Error(failMsg));
-                                                return;
-                                            }
-                                            resolve(data);
-                                        };
-                                        const to = window.setTimeout(() => {
-                                            window.removeEventListener('message', onMsg);
-                                            reject(new Error('timeout waiting for SETTINGS_UPDATED / SETTINGS_SAVE_FAILED'));
-                                        }, 3000);
-                                        window.addEventListener('message', onMsg);
-                                    })
-                                        // .then((m) => {
-                                        //     const jsonString = m?.payload?.payload;
-                                        //     if (typeof jsonString === 'string' && jsonString.length > 0) {
-                                        //         const a = document.createElement('a');
-                                        //         a.href = URL.createObjectURL(new Blob([jsonString], { type: 'application/json' }));
-                                        //         a.download = 'settings.json';
-                                        //         a.click();
-                                        //         URL.revokeObjectURL(a.href);
-                                        //     }
-                                        // })
+                                    sendEditProtocolMessage({ type: 'SETTINGS_SAVE', destination: 'local' });
+                                    waitForSettingsSaveResult()
                                         .finally(() => {
                                             sendEditProtocolMessage({ type: 'EDIT_MODE_SET', value: false });
                                         });
@@ -820,8 +822,12 @@ const initUI = (global: Global) => {
                     );
                 }
                 showExitEditConfirmModal({
-                    onSave: () => {
-                        downloadExperienceSettingsLocally(global);
+                    onSave: async () => {
+                        const result = await saveExperienceProject(global, 'local');
+                        if (result.ok === false) {
+                            showEditToast(result.message || '保存失败', 'error');
+                            return;
+                        }
                         state.editMode = false;
                         applyMorphKeyframeVisibilityPolicy(global);
                         events.fire('editMode:changed', false);
@@ -942,55 +948,57 @@ const initUI = (global: Global) => {
             });
         }
         if (dom.saveSettingsBtn) {
-            dom.saveSettingsBtn.addEventListener('click', () => {
+            const saveBtn = dom.saveSettingsBtn as HTMLButtonElement;
+            const saveDropdown = dom.saveSettingsDropdown;
+            const closeSaveMenu = () => {
+                saveDropdown?.classList.add('hidden');
+                saveBtn.setAttribute('aria-expanded', 'false');
+            };
+            const runSettingsSave = async (destination: SettingsSaveDestination) => {
+                closeSaveMenu();
+                const okMsg = destination === 'local' ? '已保存到本地' : '已上传到 Universe';
                 if (editUiTransport === 'message-bridge') {
-                    const waitForSaveResult = (timeoutMs = 3000) =>
-                        new Promise<any>((resolve, reject) => {
-                            const onMsg = (ev: MessageEvent) => {
-                                const data = ev.data as any;
-                                if (!data) return;
-                                if (data.type !== 'SETTINGS_UPDATED' && data.type !== 'SETTINGS_SAVE_FAILED') return;
-                                window.removeEventListener('message', onMsg);
-                                clearTimeout(to);
-                                if (data.type === 'SETTINGS_SAVE_FAILED') {
-                                    const failMsg =
-                                        (typeof data.message === 'string' && data.message) ||
-                                        data?.payload?.message ||
-                                        'SETTINGS_SAVE_FAILED';
-                                    reject(new Error(failMsg));
-                                    return;
-                                }
-                                resolve(data);
-                            };
-                            const to = window.setTimeout(() => {
-                                window.removeEventListener('message', onMsg);
-                                reject(new Error('timeout waiting for SETTINGS_UPDATED / SETTINGS_SAVE_FAILED'));
-                            }, timeoutMs);
-                            window.addEventListener('message', onMsg);
-                        });
-
-                    sendEditProtocolMessage({ type: 'SETTINGS_SAVE' });
-                    waitForSaveResult()
-                        // .then((m) => {
-                        //     const jsonString = m?.payload?.payload;
-                        //     if (typeof jsonString === 'string' && jsonString.length > 0) {
-                        //         const a = document.createElement('a');
-                        //         a.href = URL.createObjectURL(new Blob([jsonString], { type: 'application/json' }));
-                        //         a.download = 'settings.json';
-                        //         a.click();
-                        //         URL.revokeObjectURL(a.href);
-                        //     }
-                        // })
-                        .catch(() => {});
+                    sendEditProtocolMessage({ type: 'SETTINGS_SAVE', destination });
+                    try {
+                        await waitForSettingsSaveResult();
+                        showEditToast(okMsg, 'success');
+                    } catch (err) {
+                        const message = err instanceof Error ? err.message : String(err);
+                        showEditToast(message || '保存失败', 'error');
+                    }
                     return;
                 }
-                downloadExperienceSettingsLocally(global);
+                const result = await saveExperienceProject(global, destination);
+                if (result.ok === false) {
+                    showEditToast(result.message || '保存失败', 'error');
+                    return;
+                }
+                showEditToast(okMsg, 'success');
                 const payload = serializeExperienceSettings(global);
-                // 编辑模式下手动点击「保存配置」后，将当前配置视为最新快照：
+                // 编辑模式下手动保存后，将当前配置视为最新快照：
                 // - 下次比较是否有改动时，以本次保存后的配置为基准
                 // - 之后选择「不保存并退出」时，回退到最近一次保存的配置
                 editModeEnteredSettingsSnapshot = getComparableSettingsString(global);
                 editModeEnteredSettingsData = JSON.parse(JSON.stringify(payload)) as ExperienceSettings;
+            };
+
+            saveBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (!state.editMode) return;
+                const open = saveDropdown?.classList.toggle('hidden') === false;
+                saveBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            });
+            saveDropdown?.querySelectorAll<HTMLButtonElement>('[data-destination]').forEach((option) => {
+                option.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const destination = option.dataset.destination === 'local' ? 'local' : 'universe';
+                    void runSettingsSave(destination);
+                });
+            });
+            document.addEventListener('click', (e) => {
+                if (!dom.saveSettingsWrap?.contains(e.target as Node)) {
+                    closeSaveMenu();
+                }
             });
         }
         if (dom.previewModeBtn) {
@@ -1578,7 +1586,7 @@ const initUI = (global: Global) => {
         '重置场景：优先云端 transform.json 相机路径；无文件则保留当前 animTrack 与默认视角',
         'top'
     );
-    tooltip.register(dom.saveSettingsBtn, 'Save Settings', 'top');
+    tooltip.register(dom.saveSettingsBtn, '保存到本地，或上传到 Universe', 'top');
     tooltip.register(dom.undoEditBtn, 'Undo (Ctrl/Cmd+Z)', 'top');
     tooltip.register(dom.redoEditBtn, 'Redo (Ctrl/Cmd+Shift+Z)', 'top');
     tooltip.register(dom.previewModeBtn, '预览体验：隐藏操作轴与调试线框，并启用音视频热区自动播控', 'top');

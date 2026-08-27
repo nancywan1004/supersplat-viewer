@@ -1,5 +1,5 @@
-import { normalizeAnnotationMediaFields } from '../annotation-toolbar/media-fields';
 import type { AnnotationData } from '../annotation-toolbar/types';
+import { resolveAnnotationMediaInput } from '../settings-io/user-files';
 import type { Global, ModuleCommand, ModuleContext, ModuleFacade, SelectionSource } from '../types';
 import { setPlacementCursorActive } from '../placement-cursor';
 import { applyAnnotationShowHideSet } from '../annotation-toolbar/annotation-visibility';
@@ -20,21 +20,22 @@ type AnnotationManagerApi = {
     disableGizmoForSelected?: () => void;
 };
 
-function formDataFromPartial(value: Partial<AnnotationData> | undefined, allowEmpty: boolean) {
+async function formDataFromPartial(
+    global: Global,
+    value: Partial<AnnotationData> | undefined,
+    allowEmpty: boolean,
+    annotationId?: string
+) {
     if (!value) {
         return allowEmpty
             ? { title: '', text: '', showTitleWhenCollapsed: false }
             : null;
     }
-    const media = normalizeAnnotationMediaFields({
-        imageUrl: value.imageUrl === null ? '' : value.imageUrl,
-        videoUrl: value.videoUrl === null ? '' : value.videoUrl
-    });
+    const media = await resolveAnnotationMediaInput(global, value, annotationId);
     return {
         title: value.title ?? '',
         text: value.text ?? '',
-        imageUrl: media.imageUrl,
-        videoUrl: media.videoUrl,
+        ...media,
         showTitleWhenCollapsed: value.showTitleWhenCollapsed ?? false
     };
 }
@@ -92,15 +93,17 @@ class AnnotationFacade implements ModuleFacade {
             const pl = command.payload as { id?: string; value?: Partial<AnnotationData> } | undefined;
             const id = pl?.id;
             if (!id || !am) break;
-            const formData = formDataFromPartial(pl?.value, true);
-            if (!formData) break;
-            const placeholder = am.getPlaceholderAnnotation?.();
-            if (placeholder && placeholder.id === id) {
-                am.confirmAnnotation?.(formData);
-                setPlacementCursorActive(ctx.global, false);
-            } else {
-                am.updateAnnotation?.(id, formData);
-            }
+            void (async () => {
+                const formData = await formDataFromPartial(ctx.global, pl?.value, true, id);
+                if (!formData) return;
+                const placeholder = am.getPlaceholderAnnotation?.();
+                if (placeholder && placeholder.id === id) {
+                    am.confirmAnnotation?.(formData);
+                    setPlacementCursorActive(ctx.global, false);
+                } else {
+                    am.updateAnnotation?.(id, formData);
+                }
+            })();
             break;
         }
         case 'ANNOTATION_UPDATE': {
@@ -108,14 +111,16 @@ class AnnotationFacade implements ModuleFacade {
             const id = pl?.id;
             const value = pl?.value;
             if (!id || !value || !am) break;
-            const formData = formDataFromPartial(value, false);
-            if (!formData) break;
-            const placeholder = am.getPlaceholderAnnotation?.();
-            if (placeholder && placeholder.id === id) {
-                placeholder.updateContent?.(formData);
-            } else {
-                am.updateAnnotation?.(id, formData);
-            }
+            void (async () => {
+                const formData = await formDataFromPartial(ctx.global, value, false, id);
+                if (!formData) return;
+                const placeholder = am.getPlaceholderAnnotation?.();
+                if (placeholder && placeholder.id === id) {
+                    placeholder.updateContent?.(formData);
+                } else {
+                    am.updateAnnotation?.(id, formData);
+                }
+            })();
             break;
         }
         case 'ANNOTATION_DELETE': {

@@ -3,8 +3,9 @@
  * 负责右侧工具栏的显示、标注编辑表单和标注列表
  */
 
-import { normalizeAnnotationMediaFields } from '../../annotation-toolbar/media-fields';
 import type { AnnotationFormData, AnnotationData } from '../../annotation-toolbar/types';
+import { annotationMediaUrl } from '../../annotation-toolbar/media-fields';
+import { Annotation } from '../../annotation';
 
 type AnnotationMediaType = 'none' | 'image' | 'video';
 
@@ -28,6 +29,12 @@ export class AnnotationToolbarUI {
     private imageMediaGroup: HTMLElement | null = null;
     private videoMediaGroup: HTMLElement | null = null;
     private videoUrlInput: HTMLInputElement | null = null;
+    private videoFileInput: HTMLInputElement | null = null;
+    private pendingImageFile: File | null = null;
+    private pendingVideoFile: File | null = null;
+    private currentImageUrl: string | undefined;
+    private currentVideoUrl: string | undefined;
+    private previewObjectUrl: string | null = null;
     private mediaTypeRadios: { none: HTMLInputElement; image: HTMLInputElement; video: HTMLInputElement } | null = null;
     private showTitleCheckbox: HTMLInputElement | null = null;
     private titleCharCount: HTMLElement | null = null;
@@ -208,6 +215,11 @@ export class AnnotationToolbarUI {
         this.videoUrlInput.className = 'annotation-form-input';
         this.videoUrlInput.placeholder = '视频 URL（https://...）';
         this.videoMediaGroup.appendChild(this.videoUrlInput);
+        this.videoFileInput = document.createElement('input');
+        this.videoFileInput.type = 'file';
+        this.videoFileInput.className = 'annotation-form-file-input';
+        this.videoFileInput.accept = 'video/*';
+        this.videoMediaGroup.appendChild(this.videoFileInput);
         mediaGroup.appendChild(this.videoMediaGroup);
 
         form.appendChild(mediaGroup);
@@ -282,11 +294,20 @@ export class AnnotationToolbarUI {
         return 'none';
     }
 
+    private revokePreviewUrl(): void {
+        if (this.previewObjectUrl) {
+            URL.revokeObjectURL(this.previewObjectUrl);
+            this.previewObjectUrl = null;
+        }
+    }
+
     private updateMediaPanelsVisibility(): void {
         const type = this.getSelectedMediaType();
         this.imageMediaGroup?.classList.toggle('hidden', type !== 'image');
         this.videoMediaGroup?.classList.toggle('hidden', type !== 'video');
         if (type !== 'image') {
+            this.pendingImageFile = null;
+            this.revokePreviewUrl();
             if (this.imagePreview) {
                 this.imagePreview.src = '';
                 this.imagePreview.classList.add('hidden');
@@ -295,8 +316,10 @@ export class AnnotationToolbarUI {
                 this.imageInput.value = '';
             }
         }
-        if (type !== 'video' && this.videoUrlInput) {
-            this.videoUrlInput.value = '';
+        if (type !== 'video') {
+            this.pendingVideoFile = null;
+            if (this.videoUrlInput) this.videoUrlInput.value = '';
+            if (this.videoFileInput) this.videoFileInput.value = '';
         }
     }
 
@@ -364,6 +387,19 @@ export class AnnotationToolbarUI {
         });
 
         this.videoUrlInput?.addEventListener('input', () => {
+            if (this.videoUrlInput?.value.trim()) {
+                this.pendingVideoFile = null;
+                if (this.videoFileInput) this.videoFileInput.value = '';
+            }
+            this.notifyInputChange();
+        });
+
+        this.videoFileInput?.addEventListener('change', (e) => {
+            const file = (e.target as HTMLInputElement).files?.[0];
+            if (!file) return;
+            this.pendingVideoFile = file;
+            this.currentVideoUrl = undefined;
+            if (this.videoUrlInput) this.videoUrlInput.value = '';
             this.notifyInputChange();
         });
 
@@ -377,34 +413,25 @@ export class AnnotationToolbarUI {
      * 处理图片上传
      */
     private handleImageUpload(file: File): void {
-        // 验证文件类型
         if (!file.type.startsWith('image/')) {
             alert('请选择有效的图片文件');
             return;
         }
-
-        // 验证文件大小（限制为 5MB）
         const maxSize = 5 * 1024 * 1024;
         if (file.size > maxSize) {
             alert('图片文件大小不能超过 5MB');
             return;
         }
-
-        // 读取文件并转换为 Data URL
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const dataUrl = e.target?.result as string;
-            this.setMediaType('image');
-            if (this.imagePreview) {
-                this.imagePreview.src = dataUrl;
-                this.imagePreview.classList.remove('hidden');
-            }
-            this.notifyInputChange();
-        };
-        reader.onerror = () => {
-            alert('图片读取失败，请重试');
-        };
-        reader.readAsDataURL(file);
+        this.setMediaType('image');
+        this.pendingImageFile = file;
+        this.currentImageUrl = undefined;
+        this.revokePreviewUrl();
+        this.previewObjectUrl = URL.createObjectURL(file);
+        if (this.imagePreview) {
+            this.imagePreview.src = this.previewObjectUrl;
+            this.imagePreview.classList.remove('hidden');
+        }
+        this.notifyInputChange();
     }
 
     /**
@@ -451,21 +478,17 @@ export class AnnotationToolbarUI {
         if (mediaType === 'image') {
             return {
                 ...base,
-                ...normalizeAnnotationMediaFields({
-                    imageUrl: this.imagePreview?.src || undefined
-                })
+                image: this.pendingImageFile ?? this.currentImageUrl
             };
         }
         if (mediaType === 'video') {
-            const url = this.videoUrlInput?.value.trim() ?? '';
+            const url = this.videoUrlInput?.value.trim() || this.currentVideoUrl || '';
             return {
                 ...base,
-                ...normalizeAnnotationMediaFields({
-                    videoUrl: url || undefined
-                })
+                video: this.pendingVideoFile ?? (url || undefined)
             };
         }
-        return { ...base, ...normalizeAnnotationMediaFields({}) };
+        return { ...base };
     }
 
     /**
@@ -495,30 +518,48 @@ export class AnnotationToolbarUI {
             if (this.titleInput) this.titleInput.value = annotation.title || '';
             if (this.textInput) this.textInput.value = annotation.text || '';
             if (this.showTitleCheckbox) this.showTitleCheckbox.checked = annotation.showTitleWhenCollapsed || false;
-            if (annotation.videoUrl) {
+            const videoUrl = annotationMediaUrl(annotation.video);
+            const imageUrl = annotationMediaUrl(annotation.image);
+            if (videoUrl) {
                 this.setMediaType('video');
-                if (this.videoUrlInput) this.videoUrlInput.value = annotation.videoUrl;
-            } else if (annotation.imageUrl) {
+                this.pendingVideoFile = null;
+                this.currentVideoUrl = videoUrl;
+                this.currentImageUrl = undefined;
+                if (this.videoUrlInput) this.videoUrlInput.value = videoUrl;
+            } else if (imageUrl) {
                 this.setMediaType('image');
+                this.pendingImageFile = null;
+                this.currentImageUrl = imageUrl;
+                this.currentVideoUrl = undefined;
+                this.revokePreviewUrl();
                 if (this.imagePreview) {
-                    this.imagePreview.src = annotation.imageUrl;
+                    this.imagePreview.src = Annotation.resolveMediaUrl(imageUrl) || imageUrl;
                     this.imagePreview.classList.remove('hidden');
                 }
             } else {
                 this.setMediaType('none');
+                this.currentImageUrl = undefined;
+                this.currentVideoUrl = undefined;
             }
             if (this.imageInput) this.imageInput.value = '';
+            if (this.videoFileInput) this.videoFileInput.value = '';
         } else {
             if (this.titleInput) this.titleInput.value = '';
             if (this.textInput) this.textInput.value = '';
             if (this.showTitleCheckbox) this.showTitleCheckbox.checked = false;
             this.setMediaType('none');
+            this.pendingImageFile = null;
+            this.pendingVideoFile = null;
+            this.currentImageUrl = undefined;
+            this.currentVideoUrl = undefined;
+            this.revokePreviewUrl();
             if (this.imagePreview) {
                 this.imagePreview.classList.add('hidden');
                 this.imagePreview.src = '';
             }
             if (this.imageInput) this.imageInput.value = '';
             if (this.videoUrlInput) this.videoUrlInput.value = '';
+            if (this.videoFileInput) this.videoFileInput.value = '';
         }
         this.updateCharCount();
 

@@ -13,6 +13,7 @@ import type { Global } from '../../types';
 import type { AnnotationData } from '../../annotation-toolbar/types';
 import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 import { pushEditHistory } from '../../edit-history';
+import { resolveAnnotationMediaInput } from '../../settings-io/user-files';
 
 /**
  * 初始化场景标注面板 UI
@@ -62,31 +63,44 @@ export function initAnnotationUI(global: Global): () => void {
     annotationUI.onPlaceButtonClick(() => {
         const formData = annotationUI.getFormData();
         if (!formData.title || !formData.text) {
-            // 理论上 UI 已禁用按钮，这里仅防御
             return;
         }
 
-        // 阶段 1：去放置 → 下发等价于 ANNOTATION_PLACEMENT_START，进入放置模式
         if (!pendingCreateId) {
             pendingCreateId = annotationManager.generateNewAnnotationId();
             hasPlacedForCreate = false;
-            annotationManager.setPendingFormDataForPlacement(pendingCreateId, formData);
-            if (editUiTransport === 'message-bridge') {
-                sendEditProtocolMessage({ type: 'ANNOTATION_PLACEMENT_START', id: pendingCreateId });
-            } else {
-                annotationManager.startPlacementWithId(pendingCreateId);
-            }
-            // 提示在场景中点击放置位置
-            annotationUI.setPlacementHintVisible(true);
+            void (async () => {
+                const media = await resolveAnnotationMediaInput(global, formData, pendingCreateId ?? undefined);
+                annotationManager.setPendingFormDataForPlacement(pendingCreateId as string, {
+                    title: formData.title,
+                    text: formData.text,
+                    showTitleWhenCollapsed: formData.showTitleWhenCollapsed,
+                    ...media
+                });
+                if (editUiTransport === 'message-bridge') {
+                    sendEditProtocolMessage({ type: 'ANNOTATION_PLACEMENT_START', id: pendingCreateId as string });
+                } else {
+                    annotationManager.startPlacementWithId(pendingCreateId as string);
+                }
+                annotationUI.setPlacementHintVisible(true);
+            })();
             return;
         }
 
-        // 阶段 2：已完成放置（收到 ANNOTATION_PLACEMENT_UPDATE 等价事件），点击「确定并放置」-> ANNOTATION_CONFIRM
         if (hasPlacedForCreate) {
+            const id = pendingCreateId;
             if (editUiTransport === 'message-bridge') {
-                sendEditProtocolMessage({ type: 'ANNOTATION_CONFIRM', id: pendingCreateId, value: formData });
+                sendEditProtocolMessage({ type: 'ANNOTATION_CONFIRM', id, value: formData });
             } else {
-                annotationManager.confirmAnnotation(formData);
+                void (async () => {
+                    const media = await resolveAnnotationMediaInput(global, formData, id);
+                    annotationManager.confirmAnnotation({
+                        title: formData.title,
+                        text: formData.text,
+                        showTitleWhenCollapsed: formData.showTitleWhenCollapsed,
+                        ...media
+                    });
+                })();
             }
             pendingCreateId = null;
             hasPlacedForCreate = false;
@@ -113,8 +127,8 @@ export function initAnnotationUI(global: Global): () => void {
                     annotation.updateContent({
                         title: originalAnnotationDataForEdit.title,
                         text: originalAnnotationDataForEdit.text,
-                        imageUrl: originalAnnotationDataForEdit.imageUrl,
-                        videoUrl: originalAnnotationDataForEdit.videoUrl,
+                        image: originalAnnotationDataForEdit.image,
+                        video: originalAnnotationDataForEdit.video,
                         showTitleWhenCollapsed: originalAnnotationDataForEdit.showTitleWhenCollapsed
                     });
                     annotation.setCollapsed(originalAnnotationDataForEdit.collapsed);
@@ -136,7 +150,15 @@ export function initAnnotationUI(global: Global): () => void {
             if (editUiTransport === 'message-bridge') {
                 sendEditProtocolMessage({ type: 'ANNOTATION_CONFIRM', id, value: data });
             } else {
-                annotationManager.updateAnnotation(id, data);
+                void (async () => {
+                    const media = await resolveAnnotationMediaInput(global, data, id);
+                    annotationManager.updateAnnotation(id, {
+                        title: data.title,
+                        text: data.text,
+                        showTitleWhenCollapsed: data.showTitleWhenCollapsed,
+                        ...media
+                    });
+                })();
             }
             annotationUI.hideEditForm();
             annotationManager.deselectAnnotation();
@@ -277,8 +299,8 @@ export function initAnnotationUI(global: Global): () => void {
                     annotation.updateContent({
                         title: originalAnnotationDataForEdit.title,
                         text: originalAnnotationDataForEdit.text,
-                        imageUrl: originalAnnotationDataForEdit.imageUrl,
-                        videoUrl: originalAnnotationDataForEdit.videoUrl,
+                        image: originalAnnotationDataForEdit.image,
+                        video: originalAnnotationDataForEdit.video,
                         showTitleWhenCollapsed: originalAnnotationDataForEdit.showTitleWhenCollapsed
                     });
                     annotation.setCollapsed(originalAnnotationDataForEdit.collapsed);

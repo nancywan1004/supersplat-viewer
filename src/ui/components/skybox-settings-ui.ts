@@ -33,7 +33,7 @@ export function getSkyboxSettingsHTML(): string {
     </div>
     <div id="skyboxSettingsSubpanel" class="subpanel">
         <div class="settingsRow skybox-settings-hint">
-            从内置列表选择当前天空盒，或通过 URL 添加外部资源（写入 uploadUrls 并立即应用）。
+            从内置列表选择当前天空盒，或通过 URL / 本地文件添加（写入 uploadUrls 并立即应用）。
         </div>
         <div class="settingsRow">
             <label for="editSkyboxSelect">当前天空盒</label>
@@ -44,6 +44,10 @@ export function getSkyboxSettingsHTML(): string {
         <div class="settingsRow skybox-settings-url-row">
             <label for="editSkyboxUrlInput">天空盒 URL</label>
             <input type="url" id="editSkyboxUrlInput" class="skybox-settings-url-input" placeholder="https://..." autocomplete="off" />
+        </div>
+        <div class="settingsRow">
+            <label for="editSkyboxFileInput">本地文件</label>
+            <input type="file" id="editSkyboxFileInput" class="skybox-settings-file-input" accept=".hdr,.exr,.jpg,.jpeg,.png,.webp,image/*,.hdr" />
         </div>
         <div class="settingsRow">
             <button type="button" id="editSkyboxAddBtn" class="skybox-settings-add-btn">添加并应用</button>
@@ -61,6 +65,7 @@ export function bindSkyboxSettings(root: ParentNode | null, global: Global): () 
     const { events, config } = global;
     const select = root.querySelector<HTMLSelectElement>('#editSkyboxSelect');
     const urlInput = root.querySelector<HTMLInputElement>('#editSkyboxUrlInput');
+    const fileInput = root.querySelector<HTMLInputElement>('#editSkyboxFileInput');
     const addBtn = root.querySelector<HTMLButtonElement>('#editSkyboxAddBtn');
     if (!select) return () => {};
 
@@ -121,9 +126,16 @@ export function bindSkyboxSettings(root: ParentNode | null, global: Global): () 
     };
 
     const onAddClick = () => {
+        const file = fileInput?.files?.[0];
         const trimmed = urlInput?.value.trim() ?? '';
+        if (file) {
+            events.fire('skyboxAdd', file);
+            if (fileInput) fileInput.value = '';
+            if (urlInput) urlInput.value = '';
+            return;
+        }
         if (!trimmed) {
-            console.warn('[SuperSplat] 请输入有效的天空盒 URL');
+            console.warn('[SuperSplat] 请输入有效的天空盒 URL 或选择本地文件');
             urlInput?.focus();
             return;
         }

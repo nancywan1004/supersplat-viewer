@@ -2,10 +2,18 @@ import { Asset, type AppBase } from 'playcanvas';
 
 import { getGltfParserOptions } from './meshopt-gltf';
 
-const resolveContainerUrl = (url: string): string =>
-    typeof location !== 'undefined' && location?.href
-        ? new URL(url, location.href).href
-        : url;
+const resolveContainerUrl = (url: string): string => {
+    if (url.startsWith('blob:') || url.startsWith('data:')) return url;
+    try {
+        const parsed = new URL(url);
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+            return parsed.href;
+        }
+    } catch {
+        // relative — 必须先由 resolveUserUploadResourceUrl 相对 settings.json 解析，不能再对 Viewer 页面取基址
+    }
+    return url;
+};
 
 const containerAssetName = (url: string): string => {
     try {
@@ -17,12 +25,10 @@ const containerAssetName = (url: string): string => {
     }
 };
 
-/**
- * 加载 glTF / GLB container，并注入 KTX2 + meshopt 等解析扩展配置。
- */
-export function loadContainerAsset(app: AppBase, url: string): Promise<Asset> {
+// 加载 glTF / GLB container，并注入 KTX2 + meshopt 等解析扩展配置。
+export function loadContainerAsset(app: AppBase, url: string, filename?: string): Promise<Asset> {
     const resolvedUrl = resolveContainerUrl(url);
-    const name = containerAssetName(resolvedUrl);
+    const name = (filename && filename.trim()) || containerAssetName(resolvedUrl);
 
     return new Promise((resolve, reject) => {
         const asset = new Asset(name, 'container', { url: resolvedUrl, filename: name });

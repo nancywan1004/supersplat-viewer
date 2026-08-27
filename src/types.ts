@@ -66,8 +66,8 @@ export interface AssetLibraryItem {
     type: AssetLibraryType;
     name: string;
     filename?: string;
-    url?: string;
-    file?: File;
+    /** 远程地址或用户上传 File（入站后 ingest 成 `assets/<basename>`） */
+    src?: string | File;
     asset?: Asset;
     thumbnailUrl?: string;
 }
@@ -86,6 +86,8 @@ export interface ScenePlacedItem {
     filename?: string;
     /** 资产源 url（用于 serialize 到 settings.sceneAssets.source.url） */
     url?: string;
+    /** 用户上传原始字节（不入库；有则 settings 写相对路径 assets/<basename>） */
+    file?: File;
     /** 对应源资产库条目的缩略图 URL（serialize 到 settings.sceneAssets.thumbnailUrl） */
     thumbnailUrl?: string;
     /** 仅 video：横向曲度 [0,1]，0 为平面 */
@@ -200,6 +202,11 @@ type Config = {
     projectId?: string | number;
     /** 父级透传的 token（用于保存上传鉴权） */
     token?: string;
+    /**
+     * 当前 settings.json 的绝对 URL（json 为文件地址；zip 为包内虚拟根 https://supersplat-project.local/settings.json）。
+     * 用户上传相对路径（如 `assets/foo.glb`）相对此基址解析；不要用代理 URL。
+     */
+    settingsUrl?: string;
     budget?: number;                            // override splat budget in millions (overrides platform + performanceMode table)
     /**
      * Benchmark 糊→清等待上限（ms）。默认 45000。
@@ -397,6 +404,8 @@ type Global = {
     camera: Entity;
     /** 引擎实际使用的渲染器（WebGPU 回退 WebGL 后反映真实 deviceType） */
     renderer: 'webgl' | 'webgpu';
+    /** 本会话用户上传相对路径 → 原始字节（不入库；加载 zip / 保存物化时写入） */
+    userUploadFiles?: Map<string, Blob>;
     /** 见 {@link ViewSettings} */
     viewSettings?: ViewSettings;
     /** Viewer 注入的共享深度拾取器；未注入时由 `pickWorldFromClientXY` 懒创建 */

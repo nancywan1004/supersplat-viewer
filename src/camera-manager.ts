@@ -933,9 +933,12 @@ class CameraManager {
             state.cameraMode = 'orbit';
             }
 
-            // AnnotationEntity 的 camera 在 data 中；普通 Annotation 可能在 annotation.camera
-            const ann = annotation as { camera?: { initial?: any }; data?: { camera?: { initial?: any } } };
-            const camera = ann.camera ?? ann.data?.camera;
+            const ann = annotation as {
+                camera?: { initial?: any };
+                data?: { camera?: { initial?: any } };
+                settingsCamera?: { initial?: any };
+            };
+            const camera = ann.settingsCamera ?? ann.camera ?? ann.data?.camera;
             if (!camera?.initial) return;
 
             const { initial } = camera;

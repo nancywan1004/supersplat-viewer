@@ -56,6 +56,10 @@
             const settingsUrl = url.searchParams.has('settings') ? url.searchParams.get('settings') : './settings.json';
             const contentUrl = url.searchParams.has('content') ? url.searchParams.get('content') : './scene.sog';
             const settingsFetchUrl = toProxy(settingsUrl);
+            let settingsUrlAbs = settingsUrl;
+            try {
+                settingsUrlAbs = new URL(settingsUrl, location.href).href;
+            } catch (e) {}
             const contentFetchUrl = toProxy(contentUrl);
             const projectId = url.searchParams.get('projectId') ?? undefined;
             const token = url.searchParams.get('token') ?? undefined;
@@ -150,7 +154,7 @@
                 noreveal: url.searchParams.has('noreveal'),
                 noBottomUI: true,  // url.searchParams.has('noBottomUI')
                 allowEditMode: !url.searchParams.has('noEditMode'),
-                showEditUI: false,
+                showEditUI: true,
                 disableCameraBounds: false,
                 trackEditHistory: false, //url.searchParams.get('trackEditHistory') !== 'false',
                 editUiTransport: url.searchParams.get('editUiTransport') === 'message-bridge' ? 'message-bridge' : 'internal',
@@ -204,12 +208,13 @@
                     return undefined;
                 })(),
                 projectId,
-                token
+                token,
+                settingsUrl: settingsUrlAbs
             };
 
             window.sse = {
                 config: sseConfig,
-                settings: fetch(settingsFetchUrl).then(response => response.json())
+                settings: fetch(settingsFetchUrl)
             };
 
             // 与 <html> 默认 class 对齐：showEditUI=true 时移除，否则保持隐藏（幂等）
@@ -261,7 +266,16 @@
                 <button type="button" id="redoEditBtn" class="edit-mode-btn edit-mode-redo hidden" disabled>重做</button>
                 <button type="button" id="previewModeBtn" class="edit-mode-btn hidden">进入预览模式</button>
                 <button type="button" id="resetSettingsBtn" class="edit-mode-btn edit-mode-reset hidden">重置场景</button>
-                <button type="button" id="saveSettingsBtn" class="edit-mode-btn edit-mode-save hidden">保存</button>
+                <div id="saveSettingsWrap" class="edit-mode-save-wrap hidden">
+                    <button type="button" id="saveSettingsBtn" class="edit-mode-btn edit-mode-save" aria-haspopup="true" aria-expanded="false">
+                        保存
+                        <span class="edit-mode-save-caret" aria-hidden="true">▾</span>
+                    </button>
+                    <div id="saveSettingsDropdown" class="edit-mode-save-dropdown hidden" role="menu">
+                        <button type="button" class="edit-mode-save-option" data-destination="local" role="menuitem">保存到本地</button>
+                        <button type="button" class="edit-mode-save-option" data-destination="universe" role="menuitem">上传到 Universe</button>
+                    </div>
+                </div>
             </div>
             <!-- 编辑模式三个挂载点（仅 edit 模式显示），内容由对应组件注入 -->
             <div id="editLeftSidebarMount" class="edit-left-sidebar hidden"></div>
@@ -791,7 +805,7 @@
 
         <!-- Application Script -->
         <script type="module">
-            import { main } from './index.js';
+            import { main, loadSettingsFromResponse } from './index.js';
 
             const { config, settings } = window.sse;
             const { poster } = config;
@@ -809,8 +823,12 @@
 
             document.addEventListener('DOMContentLoaded', async () => {
                 const canvas = document.getElementById('application-canvas');
-                const settingsJson = await settings;
-                const viewer = await main(canvas, settingsJson, config);
+                const response = await settings;
+                const loaded = await loadSettingsFromResponse(response, config.settingsUrl);
+                if (loaded.settingsUrl) {
+                    config.settingsUrl = loaded.settingsUrl;
+                }
+                await main(canvas, loaded.settings, config, loaded.userUploadFiles);
             });
         </script>
     </body>

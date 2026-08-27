@@ -1,4 +1,5 @@
 import * as OSSBrowserModule from 'ali-oss/dist/aliyun-oss-sdk.js';
+import { normalizePackPath } from '../settings-io/pack';
 
 //#region 环境配置
 type DeployEnv = 'test' | 'prod';
@@ -347,7 +348,8 @@ const postProjectThumbnail = async (
 export const uploadProjectData = async (
     projectId: number | string,
     token: string,
-    settingsJson: string | object
+    settingsJson: string | object,
+    uploadTimestamp: number = Date.now()
 ): Promise<ProjectDataUploadResult> => {
     if (projectId == null || projectId === '') {
         const message = '缺少 projectId';
@@ -363,7 +365,48 @@ export const uploadProjectData = async (
     setUniverseAuthContext({ token });
     const jsonString = typeof settingsJson === 'string' ? settingsJson : JSON.stringify(settingsJson, null, 2);
     const settingsFile = new File([jsonString], SETTINGFILENAME, { type: 'application/json' });
-    return updateProjectData(projectId, settingsFile, Date.now());
+    return updateProjectData(projectId, settingsFile, uploadTimestamp);
+};
+
+/**
+ * 把用户上传文件 put 到 settings.json 同一版本目录，不走版本登记接口。
+ * `relativePath` 为相对该目录的路径（如 `assets/foo.glb`）。
+ */
+export const uploadProjectSidecarFiles = async (
+    projectId: number | string,
+    token: string,
+    files: Array<{ relativePath: string; blob: Blob }>,
+    uploadTimestamp: number
+): Promise<ProjectDataUploadResult> => {
+    if (projectId == null || projectId === '') {
+        return { ok: false, message: '缺少 projectId' };
+    }
+    if (!token) {
+        return { ok: false, message: '缺少 token' };
+    }
+    setUniverseAuthContext({ token });
+
+    try {
+        for (const { relativePath, blob } of files) {
+            const path = normalizePackPath(relativePath);
+            if (!path || path.toLowerCase() === SETTINGFILENAME) {
+                return { ok: false, message: `无法上传用户文件: ${relativePath}` };
+            }
+            if (!blob || blob.size <= 0) {
+                return { ok: false, message: `无法读取用户上传文件: ${path}` };
+            }
+            const basename = path.split('/').pop() ?? path;
+            const file = new File([blob], basename, {
+                type: blob.type || 'application/octet-stream'
+            });
+            await uploadFileToAliyun(file, 2, projectId, uploadTimestamp, path);
+        }
+        return { ok: true };
+    } catch (error) {
+        console.error('上传项目附属文件失败:', error);
+        const message = error instanceof Error ? error.message : String(error);
+        return { ok: false, message: message.startsWith('无法') ? message : `上传用户文件失败: ${message}` };
+    }
 };
 
 /**
@@ -631,6 +674,25 @@ const extractStsBaseDir = (objectKey: string): string => {
 };
 
 /**
+ * 项目版本目录下的 OSS 对象 key（相对 bucket）。
+ * - 有 projectId：`<baseDir><projectId>/<uploadTimestamp>/<relativePath>`
+ * - 无 projectId：`<baseDir><relativePath>`
+ */
+export const buildProjectVersionObjectKey = (
+    baseDir: string,
+    relativePath: string,
+    projectId?: number | string,
+    uploadTimestamp: number = Date.now()
+): string => {
+    const rel = normalizePackPath(relativePath) ?? relativePath.replace(/^\/+/, '');
+    const normalizedProjectId = String(projectId ?? '').trim();
+    if (!normalizedProjectId) {
+        return `${baseDir}${rel}`;
+    }
+    return `${baseDir}${normalizedProjectId}/${uploadTimestamp}/${rel}`;
+};
+
+/**
  * settings.json 的 OSS 对象 key（相对 bucket）。
  * - 有 projectId：`<baseDir><projectId>/<uploadTimestamp>/settings.json`
  * - 无 projectId：`<baseDir>settings.json`
@@ -640,29 +702,35 @@ export const buildSettingsUploadObjectKey = (
     projectId?: number | string,
     uploadTimestamp: number = Date.now()
 ): string => {
-    const normalizedProjectId = String(projectId ?? '').trim();
-    if (!normalizedProjectId) {
-        return `${baseDir}${SETTINGFILENAME}`;
-    }
-    return `${baseDir}${normalizedProjectId}/${uploadTimestamp}/${SETTINGFILENAME}`;
+    return buildProjectVersionObjectKey(baseDir, SETTINGFILENAME, projectId, uploadTimestamp);
 };
 
 /**
- * 非 settings 文件沿用 STS objectKey；settings 走 {@link buildSettingsUploadObjectKey}。
+ * 指定 relativeObjectPath 或文件名为 settings.json 时写入版本目录；
+ * 其余文件沿用 STS objectKey（缩略图等）。
  */
 const resolveUploadObjectKey = (
     objectKey: string,
     fileName: string,
     projectId?: number | string,
-    uploadTimestamp?: number
+    uploadTimestamp?: number,
+    relativeObjectPath?: string
 ): string => {
-    if (fileName.toLowerCase() !== SETTINGFILENAME) {
+    const timestamp = uploadTimestamp ?? Date.now();
+    const rel = relativeObjectPath?.trim()
+        || (fileName.toLowerCase() === SETTINGFILENAME ? SETTINGFILENAME : '');
+    if (!rel) {
         return objectKey;
     }
-    return buildSettingsUploadObjectKey(
+    const normalized = normalizePackPath(rel);
+    if (!normalized) {
+        throw new Error(`无法上传用户文件: ${relativeObjectPath || fileName}`);
+    }
+    return buildProjectVersionObjectKey(
         extractStsBaseDir(objectKey),
+        normalized,
         projectId,
-        uploadTimestamp ?? Date.now()
+        timestamp
     );
 };
 
@@ -670,10 +738,17 @@ const uploadSingleToOss = async (
     file: File,
     sts: Single_STSTOKEN_Response['data'],
     projectId?: number | string,
-    uploadTimestamp?: number
+    uploadTimestamp?: number,
+    relativeObjectPath?: string
 ) => {
     const client = createOssClient(sts);
-    const targetObjectKey = resolveUploadObjectKey(sts.objectKey, file.name, projectId, uploadTimestamp);
+    const targetObjectKey = resolveUploadObjectKey(
+        sts.objectKey,
+        file.name,
+        projectId,
+        uploadTimestamp,
+        relativeObjectPath
+    );
     const result = await client.put(targetObjectKey, file, {
         mime: file.type || 'application/octet-stream'
     });
@@ -686,17 +761,19 @@ const uploadSingleToOss = async (
 /**
  * 上传文件到阿里云 OSS。
  * 自动按文件大小选择：小文件走单文件上传，大文件走分片上传。
- * settings.json 在有 projectId 时使用 `<baseDir>/<projectId>/<uploadTimestamp>/settings.json`。
- * @param file 需要上传的文件
+ * settings.json / sidecar 在有 projectId 时写入 `<baseDir>/<projectId>/<uploadTimestamp>/...`。
+ * @param file 需要上传的文件（STS `fileName` 用 basename）
  * @param type 文件类型（1-物体，2-场景）
- * @param projectId 项目 ID（仅 settings.json 用于拼 OSS 路径）
- * @param uploadTimestamp settings 版本目录时间戳（毫秒）；未传时于解析路径时生成
+ * @param projectId 项目 ID（settings / sidecar 用于拼版本目录）
+ * @param uploadTimestamp 版本目录时间戳（毫秒）；未传时于解析路径时生成
+ * @param relativeObjectPath 相对版本目录的路径（如 `assets/foo.glb`）；缺省时仅 settings.json 进该目录
  */
 export const uploadFileToAliyun = async (
     file: File,
     type = 2,
     projectId?: number | string,
-    uploadTimestamp?: number
+    uploadTimestamp?: number,
+    relativeObjectPath?: string
 ): Promise<OssUploadResult> => {
     if (!file) {
         throw new Error('文件不能为空');
@@ -712,7 +789,13 @@ export const uploadFileToAliyun = async (
             fileName: file.name
         });
 
-        const uploadedObjectKey = await uploadSingleToOss(file, sts, projectId, uploadTimestamp);
+        const uploadedObjectKey = await uploadSingleToOss(
+            file,
+            sts,
+            projectId,
+            uploadTimestamp,
+            relativeObjectPath
+        );
         return {
             fileName: file.name,
             fileSize: file.size,
@@ -730,7 +813,13 @@ export const uploadFileToAliyun = async (
     });
 
     const client = createOssClient(multipartSts);
-    const targetObjectKey = resolveUploadObjectKey(multipartSts.objectKey, file.name, projectId, uploadTimestamp);
+    const targetObjectKey = resolveUploadObjectKey(
+        multipartSts.objectKey,
+        file.name,
+        projectId,
+        uploadTimestamp,
+        relativeObjectPath
+    );
     await client.multipartUpload(targetObjectKey, file, {
         partSize: multipartSts.chunkSize || CHUNKSIZE
     });

@@ -9,8 +9,9 @@
 
 import { Vec3, Entity } from 'playcanvas';
 import { Annotation } from '../annotation';
-import { normalizeAnnotationMediaFields } from './media-fields';
+import { annotationSlotsFromUrls, flattenAnnotationMedia } from './media-fields';
 import type { AnnotationData, AnnotationFormData } from './types';
+import type { Annotation as SettingsAnnotation, Camera } from '../schemas/v2';
 import type { Global } from '../types';
 
 /**
@@ -28,6 +29,11 @@ export class AnnotationEntity extends Annotation {
 
     /** 标注数据 */
     data: AnnotationData;
+
+    /** settings 附加字段，协议不带；存盘原样写回 */
+    settingsExtras?: SettingsAnnotation['extras'];
+    /** settings 观察机位，协议不带；点击热点飞镜头用 */
+    settingsCamera?: Camera;
 
     /** 是否处于锚定展开状态（点击热点切换），hover 不会修改该状态 */
     private anchored: boolean = false;
@@ -134,13 +140,13 @@ export class AnnotationEntity extends Annotation {
             this.data.text = data.text;
         }
 
-        if (data.imageUrl !== undefined || data.videoUrl !== undefined) {
-            const media = normalizeAnnotationMediaFields({
-                imageUrl: data.imageUrl !== undefined ? data.imageUrl : this.data.imageUrl,
-                videoUrl: data.videoUrl !== undefined ? data.videoUrl : this.data.videoUrl
-            });
-            this.data.imageUrl = media.imageUrl;
-            this.data.videoUrl = media.videoUrl;
+        if (data.image !== undefined || data.video !== undefined) {
+            const media = annotationSlotsFromUrls(flattenAnnotationMedia({
+                image: data.image !== undefined ? data.image : this.data.image,
+                video: data.video !== undefined ? data.video : this.data.video
+            }));
+            this.data.image = media.image;
+            this.data.video = media.video;
         }
 
         if (data.showTitleWhenCollapsed !== undefined) {
@@ -197,8 +203,9 @@ export class AnnotationEntity extends Annotation {
         Annotation.tooltipDom!.classList.toggle('pc-annotation--selected', this.selectedVisual);
         Annotation.titleDom!.textContent = this.title;
         Annotation.textDom!.textContent = this.text;
-        Annotation.syncTooltipMedia(this.data?.imageUrl, this.data?.videoUrl);
-        if (anchoredExpand && this.data?.videoUrl) {
+        const mediaUrls = flattenAnnotationMedia(this.data);
+        Annotation.syncTooltipMedia(mediaUrls.imageUrl, mediaUrls.videoUrl);
+        if (anchoredExpand && mediaUrls.videoUrl) {
             Annotation.playInlineVideo({ unmuted: true });
         } else if (_fromHover) {
             Annotation.pauseInlineVideo();
@@ -336,14 +343,11 @@ export class AnnotationEntity extends Annotation {
             position: [position.x, position.y, position.z],
             title: this.title,
             text: this.text,
-            imageUrl: this.data.imageUrl,
-            videoUrl: this.data.videoUrl,
+            ...annotationSlotsFromUrls(flattenAnnotationMedia(this.data)),
             showTitleWhenCollapsed: this.data.showTitleWhenCollapsed,
             visible: this.data.visible !== false,
             // collapsed 字段仅为兼容旧数据，始终视为默认收起
-            collapsed: false,
-            extras: this.data.extras,
-            camera: this.data.camera
+            collapsed: false
         };
     }
 

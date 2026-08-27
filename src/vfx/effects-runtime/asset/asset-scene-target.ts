@@ -24,8 +24,8 @@ export function resolvePlacedGaussianSourceUrl(global: Global, targetId: string)
     }
     if (placed!.assetId) {
         const lib = global.state.uploadedAssets?.find((a) => a.id === placed!.assetId);
-        if (typeof lib?.url === 'string' && lib.url.trim().length > 0) {
-            return lib.url.trim();
+        if (typeof lib?.src === 'string' && lib.src.trim().length > 0) {
+            return lib.src.trim();
         }
     }
     return null;

@@ -24,6 +24,7 @@ import { Vec3 } from 'playcanvas';
 import { PlacementMode } from './placement-mode';
 import { AnnotationEntity } from './annotation-entity';
 import type { AnnotationData, AnnotationFormData } from './types';
+import { annotationDataToSettings, settingsToAnnotationData } from './media-fields';
 import type { Global } from '../types';
 import { pushEditHistory } from '../edit-history';
 import { readSessionAnnotationVisible } from '../view-settings';
@@ -447,12 +448,12 @@ export class AnnotationManager {
             return;
         }
 
-        // 序列化所有标注
-        const annotationsData: AnnotationData[] = Array.from(this.annotations.values())
-            .map(annotation => annotation.serialize());
-
-        // 更新设置对象
-        this.global.settings.annotations = annotationsData;
+        this.global.settings.annotations = Array.from(this.annotations.values()).map((annotation) =>
+            annotationDataToSettings(annotation.serialize(), {
+                extras: annotation.settingsExtras,
+                camera: annotation.settingsCamera
+            })
+        );
     }
 
     /**
@@ -481,7 +482,9 @@ export class AnnotationManager {
         // 从设置中反序列化标注
         this.global.settings.annotations.forEach(data => {
             try {
-                const annotation = AnnotationEntity.deserialize(data, this.global);
+                const annotation = AnnotationEntity.deserialize(settingsToAnnotationData(data), this.global);
+                annotation.settingsExtras = data.extras;
+                annotation.settingsCamera = data.camera;
                 this.annotations.set(annotation.id, annotation);
             } catch (error) {
                 console.error(`Failed to load annotation ${data.id}:`, error);
@@ -518,19 +521,11 @@ export class AnnotationManager {
             position: [position.x, position.y, position.z],
             title: preset?.title ?? '请先确认放置位置',
             text: preset?.text ?? '',
-            imageUrl: preset?.imageUrl,
-            videoUrl: preset?.videoUrl,
+            image: preset?.image,
+            video: preset?.video,
             showTitleWhenCollapsed: preset?.showTitleWhenCollapsed ?? false,
             // collapsed 在新语义下仅用于兼容老数据，这里始终以默认收起为准
-            collapsed: true,
-            extras: {},
-            camera: {
-                initial: {
-                    position: [0, 0, 0],
-                    target: [0, 0, 0],
-                    fov: 60
-                }
-            }
+            collapsed: true
         };
 
         // 创建占位标注实体

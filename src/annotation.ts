@@ -21,6 +21,7 @@ import {
     BLENDMODE_SRC_ALPHA
 } from 'playcanvas';
 import { normalizeAnnotationMediaFields } from './annotation-toolbar/media-fields';
+import { resolveUserUploadResourceUrl } from './settings-io/user-files';
 import { ensureHotspotDepthLayers, syncHotspotLayersAfterGsplat } from './scene-assets/hotspot-depth-layers';
 import {
     getActiveSceneMediaEntryId,
@@ -536,8 +537,17 @@ export class Annotation extends Script {
     }
 
     /** Sync tooltip image/video (mutually exclusive). */
+    static resolveMediaUrl(url?: string): string | undefined {
+        if (typeof url !== 'string' || url.length === 0) return url;
+        const g = Annotation.globalRef;
+        if (!g) return url;
+        return resolveUserUploadResourceUrl(g, url) ?? undefined;
+    }
+
     static syncTooltipMedia(imageUrl?: string, videoUrl?: string): void {
         const media = normalizeAnnotationMediaFields({ imageUrl, videoUrl });
+        const resolvedImage = Annotation.resolveMediaUrl(media.imageUrl);
+        const resolvedVideo = Annotation.resolveMediaUrl(media.videoUrl);
 
         if (Annotation.imageDom) {
             Annotation.imageDom.style.display = 'none';
@@ -553,12 +563,12 @@ export class Annotation extends Script {
             Annotation.videoInlineEl.load();
         }
 
-        if (media.imageUrl && Annotation.imageDom) {
-            Annotation.imageDom.src = media.imageUrl;
+        if (resolvedImage && Annotation.imageDom) {
+            Annotation.imageDom.src = resolvedImage;
             Annotation.imageDom.style.display = 'block';
-        } else if (media.videoUrl && Annotation.videoInlineDom && Annotation.videoInlineEl) {
-            Annotation.videoInlineDom.dataset.videoUrl = media.videoUrl;
-            Annotation.videoInlineEl.src = media.videoUrl;
+        } else if (resolvedVideo && Annotation.videoInlineDom && Annotation.videoInlineEl) {
+            Annotation.videoInlineDom.dataset.videoUrl = resolvedVideo;
+            Annotation.videoInlineEl.src = resolvedVideo;
             Annotation.videoInlineDom.style.display = 'block';
             Annotation._syncInlineVideoPlayButton();
         }

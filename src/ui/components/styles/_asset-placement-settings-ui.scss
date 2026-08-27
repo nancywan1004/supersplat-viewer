@@ -37,6 +37,13 @@
             flex-shrink: 0;
         }
     }
+    .asset-media-file-row {
+        display: flex;
+        margin-bottom: 10px;
+        .settingsButton {
+            width: 100%;
+        }
+    }
     .asset-preview-grid {
         display: grid;
         grid-template-columns: repeat(2, 1fr);

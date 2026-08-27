@@ -3,7 +3,9 @@
  */
 
 import type { Vec3 } from 'playcanvas';
-import type { Annotation } from '../schemas/v2';
+import type { AnnotationMediaInput } from './media-fields';
+
+export type { AnnotationMediaInput };
 
 /**
  * 标注表单数据（用户输入的数据）
@@ -13,10 +15,10 @@ export interface AnnotationFormData {
     title: string;
     /** 正文（最大 50 字符） */
     text: string;
-    /** 可选图片 URL（与 videoUrl 互斥） */
-    imageUrl?: string;
-    /** 可选视频 URL（与 imageUrl 互斥） */
-    videoUrl?: string;
+    /** 图片：URL 字符串或 File（与 video 互斥） */
+    image?: AnnotationMediaInput;
+    /** 视频：URL 字符串或 File（与 image 互斥） */
+    video?: AnnotationMediaInput;
     /** 收起时是否显示标题 */
     showTitleWhenCollapsed: boolean;
 }
@@ -24,13 +26,13 @@ export interface AnnotationFormData {
 /**
  * 标注数据（完整的标注信息，包含位置）
  */
-export interface AnnotationData extends Annotation {
+export interface AnnotationData {
     id: string;
     position: [number, number, number];
     title: string;
     text: string;
-    imageUrl?: string;
-    videoUrl?: string;
+    image?: AnnotationMediaInput;
+    video?: AnnotationMediaInput;
     showTitleWhenCollapsed: boolean;
     collapsed: boolean;
     visible?: boolean;

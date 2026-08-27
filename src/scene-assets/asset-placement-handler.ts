@@ -16,6 +16,8 @@ import {
 } from 'playcanvas';
 import type { SceneAsset } from '../schemas/v2-custom';
 import type { EditLeftModule, Global, AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from '../types';
+import { asUserFile, assetLibraryHref } from '../loaders/asset-file';
+import { resolveUserUploadResourceUrl } from '../settings-io/user-files';
 import {
     getSelectedSceneEntity,
     isAssetScenePickEventOnlyMode,
@@ -313,9 +315,10 @@ function applyPlacedEntityYawToFaceCamera(entity: Entity, global: Global, assetT
     entity.setLocalEulerAngles(e.x, yawDeg, e.z);
 }
 
-async function instantiateImage(app: AppBase, item: AssetLibraryItem, position: Vec3): Promise<Entity> {
+async function instantiateImage(global: Global, item: AssetLibraryItem, position: Vec3): Promise<Entity> {
     return new Promise((resolve, reject) => {
-        const url = item.url || item.thumbnailUrl;
+        const raw = assetLibraryHref(item, typeof item.thumbnailUrl === 'string' ? item.thumbnailUrl : undefined);
+        const url = raw ? (resolveUserUploadResourceUrl(global, raw) ?? undefined) : undefined;
         if (!url) {
             reject(new Error('image asset has no url'));
             return;
@@ -326,7 +329,7 @@ async function instantiateImage(app: AppBase, item: AssetLibraryItem, position: 
             settled = true;
             reject(new Error(`[AssetPlacement] image load timeout (${ASSET_LOAD_TIMEOUT_MS}ms): ${url}`));
         }, ASSET_LOAD_TIMEOUT_MS);
-        (app.assets as any).loadFromUrl(url, 'texture', (err: Error | null, asset: any) => {
+        (global.app.assets as any).loadFromUrl(url, 'texture', (err: Error | null, asset: any) => {
             if (settled) return;
             settled = true;
             window.clearTimeout(timer);
@@ -554,18 +557,20 @@ function resumeShadowAfterStableFrames(global: Global, resume: () => void): void
 }
 
 async function instantiateVideo(
-    app: AppBase,
+    global: Global,
     item: AssetLibraryItem,
     position: Vec3,
     loadMode: 'placement' | 'restore' = 'restore',
     horizontalCurvature: number = 0
 ): Promise<Entity> {
-    const url = item.url || item.filename;
+    const raw = assetLibraryHref(item);
+    const url = raw ? (resolveUserUploadResourceUrl(global, raw) ?? undefined) : undefined;
     if (!url) {
         throw new Error('video asset has no url');
     }
     let video: HTMLVideoElement;
     let texture;
+    const app = global.app;
     if (loadMode === 'placement') {
         video = await acquirePlacedVideoForPlacement(url, PLACED_VIDEO_PLACEMENT_TIMEOUT_MS);
         texture = createPlacedVideoTextureFromVideo(app, video, `placed-video-${item.id}`);
@@ -641,8 +646,9 @@ async function instantiateVideo(
     return entity;
 }
 
-async function instantiateAudio(app: AppBase, item: AssetLibraryItem, position: Vec3): Promise<Entity> {
-    const url = item.url || item.filename;
+async function instantiateAudio(global: Global, item: AssetLibraryItem, position: Vec3): Promise<Entity> {
+    const raw = assetLibraryHref(item);
+    const url = raw ? (resolveUserUploadResourceUrl(global, raw) ?? undefined) : undefined;
     if (!url) {
         throw new Error('audio asset has no url');
     }
@@ -651,6 +657,7 @@ async function instantiateAudio(app: AppBase, item: AssetLibraryItem, position: 
     audio.loop = true;
     audio.src = url;
 
+    const app = global.app;
     const root = new Entity(item.name || 'audio');
     root.setPosition(position);
 
@@ -783,7 +790,7 @@ export async function placeAsset(
 
     try {
         if (item.type === 'image') {
-            entity = await instantiateImage(app, item, worldPos);
+            entity = await instantiateImage(global, item, worldPos);
         } else if (item.type === 'mesh') {
             entity = await instantiateMesh(app, item, worldPos);
         } else if (item.type === 'gaussian') {
@@ -806,14 +813,14 @@ export async function placeAsset(
             entity = await instantiateGaussian(app, item, worldPos);
         } else if (item.type === 'video') {
             entity = await instantiateVideo(
-                app,
+                global,
                 item,
                 worldPos,
                 opts?.videoLoadMode ?? 'restore',
                 opts?.horizontalCurvature ?? 0
             );
         } else if (item.type === 'audio') {
-            entity = await instantiateAudio(app, item, worldPos);
+            entity = await instantiateAudio(global, item, worldPos);
         } else {
             return null;
         }
@@ -856,7 +863,8 @@ export async function placeAsset(
         assetType: item.type,
         assetId: item.id,
         filename: item.filename,
-        url: item.url,
+        url: typeof item.src === 'string' ? item.src : undefined,
+        file: asUserFile(item.src) ?? undefined,
         thumbnailUrl: item.thumbnailUrl,
         horizontalCurvature: videoRuntime?.horizontalCurvature,
         triggerDistanceM: defaultTriggerDistanceMForAssetType(item.type)
@@ -879,15 +887,16 @@ export async function placeAsset(
  * 对于从 settings 恢复的链路，仍需处理 asset 缺失的情况。
  */
 async function hydrateProtocolPlaceItem(global: Global, item: AssetLibraryItem): Promise<AssetLibraryItem | null> {
-    const url = item.url || item.filename;
-    if (!url && item.type !== 'image') {
+    const href = assetLibraryHref(item);
+    if (!href && item.type !== 'image') {
         console.warn('[AssetPlacement] protocol place missing url for', item.type);
         return null;
     }
     try {
         return await hydrateAssetLibraryItem(global, item, ASSET_LOAD_TIMEOUT_MS);
     } catch (err) {
-        console.warn('[AssetPlacement] protocol asset hydrate failed:', item.type, url ?? '-', err);
+        const file = asUserFile(item.src);
+        console.warn('[AssetPlacement] protocol asset hydrate failed:', item.type, href || file?.name || '-', err);
         return null;
     }
 }
@@ -1453,6 +1462,7 @@ export function initAssetPlacementHandler(
             assetId: entry.assetId,
             filename: entry.filename,
             url: entry.url,
+            file: entry.file,
             thumbnailUrl: entry.thumbnailUrl
         };
         const resumeShadowAfterGaussianClone = entry.assetType === 'gaussian'
@@ -1507,7 +1517,8 @@ export function initAssetPlacementHandler(
 
         const item = payload.value;
         if (item.type === 'video') {
-            const url = item.url || item.filename;
+            const raw = assetLibraryHref(item);
+            const url = raw ? (resolveUserUploadResourceUrl(global, raw) ?? undefined) : undefined;
             if (!url) {
                 setPlacementCursorActive(global, true, { loading: false });
                 return;

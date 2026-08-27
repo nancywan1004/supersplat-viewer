@@ -33,6 +33,7 @@ import { shouldForceWebGlForSogUnified } from './loaders/gsplat/sog/device-fallb
 import { loadGsplatAsset } from './loaders/gsplat/sog/splat-loader';
 import { getAssetLoader } from './loaders/asset-loader';
 import { version as appVersion } from '../package.json';
+import { loadSettingsFromResponse, loadSettingsFromUrl } from './settings-io/load';
 import { initPostMessageBridge } from './message-bridge';
 import { ensureViewSettings } from './view-settings';
 import { initVideoExport } from './render/video-export';
@@ -42,6 +43,7 @@ import {
     resolveInitialSkyboxUrl,
     setSkyboxCurrentUrlInSettings
 } from './settings-serialize/settings-serialize-helper';
+import { ensureSettingsFileUrl, resolveInboundUserFileUrl, resolveUserUploadResourceUrl, splitInboundUrlOrFile } from './settings-io/user-files';
 import {
     createDefaultEffectsRuntimeState,
     normalizeEffectsOnImport,
@@ -302,7 +304,23 @@ const initCanvas = (global: Global) => {
     apply();
 };
 
-const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config) => {
+function ensureAbsoluteSettingsUrl(config: Config): void {
+    const raw = typeof config.settingsUrl === 'string' ? config.settingsUrl.trim() : '';
+    if (!raw) return;
+    try {
+        config.settingsUrl = new URL(raw, location.href).href;
+    } catch {
+        config.settingsUrl = raw;
+    }
+}
+
+const main = async (
+    canvas: HTMLCanvasElement,
+    settingsJson: any,
+    config: Config,
+    userUploadFiles?: Map<string, Blob>
+) => {
+    ensureAbsoluteSettingsUrl(config);
     if (config.benchmark && !config.benchmarkNoInteraction) {
         const hasAnimTrack =
             settingsJson?.startMode === 'animTrack' &&
@@ -414,8 +432,11 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         state,
         events,
         camera,
-        renderer
+        renderer,
+        userUploadFiles: userUploadFiles ?? new Map()
     };
+
+    await ensureSettingsFileUrl(global);
 
     // Bind the gsplat renderer before any gsplat component is loaded. LOD paths
     // refresh this later, but ordinary SOG scenes also need ?webgpu / ?gpu-sort
@@ -515,7 +536,10 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
     );
 
     // Load skybox from settings (URL param bootstraps into settings when absent)
-    const skyboxLoad = initialSkyboxUrl ? applySkyboxTexture(app, initialSkyboxUrl) : undefined;
+    const skyboxLoadUrl = initialSkyboxUrl
+        ? resolveUserUploadResourceUrl(global, initialSkyboxUrl)
+        : undefined;
+    const skyboxLoad = skyboxLoadUrl ? applySkyboxTexture(app, skyboxLoadUrl) : undefined;
 
     if (skyboxLoad) {
         skyboxLoad.then(() => {
@@ -536,7 +560,14 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         }
 
         try {
-            await applySkyboxTexture(app, trimmed);
+            const loadUrl = resolveUserUploadResourceUrl(global, trimmed);
+            if (!loadUrl) {
+                console.warn('[SuperSplat] 无法解析天空盒 URL:', trimmed);
+                clearSkyboxDisplay(app);
+                events.fire('skyboxSelectionSynced', '');
+                return;
+            }
+            await applySkyboxTexture(app, loadUrl);
             events.fire('skyboxSelectionSynced', trimmed);
         } catch (err) {
             console.warn('[SuperSplat] 设置天空盒失败：', err);
@@ -545,15 +576,31 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         }
     };
 
-    events.on('skyboxSet', async (url?: string | null) => {
-        setSkyboxCurrentUrlInSettings(global.settings, url ?? null);
-        await applyCurrentSkybox(url);
+    events.on('skyboxSet', async (value?: string | File | null) => {
+        const { url, file } = splitInboundUrlOrFile(value);
+        const resolved = await resolveInboundUserFileUrl(
+            global,
+            { url, file },
+            { fallbackName: 'skybox' }
+        );
+        if (file && resolved) {
+            addSkyboxUploadUrlToSettings(global.settings, resolved);
+            events.fire('skyboxListChanged');
+        }
+        setSkyboxCurrentUrlInSettings(global.settings, resolved ?? null);
+        await applyCurrentSkybox(resolved);
     });
 
-    events.on('skyboxAdd', async (url?: string | null) => {
-        const trimmed = addSkyboxUploadUrlToSettings(global.settings, url ?? null);
+    events.on('skyboxAdd', async (value?: string | File | null) => {
+        const { url, file } = splitInboundUrlOrFile(value);
+        const resolved = await resolveInboundUserFileUrl(
+            global,
+            { url, file },
+            { fallbackName: 'skybox' }
+        );
+        const trimmed = addSkyboxUploadUrlToSettings(global.settings, resolved ?? null);
         if (!trimmed) {
-            console.warn('[SuperSplat] SKYBOX_ADD 缺少有效的 URL');
+            console.warn('[SuperSplat] SKYBOX_ADD 缺少有效的 URL 或 File');
             return;
         }
         setSkyboxCurrentUrlInSettings(global.settings, trimmed);
@@ -563,16 +610,19 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
 
     // Load and play sound
     if (global.settings.soundUrl) {
-        const sound = new Audio(global.settings.soundUrl);
-        sound.crossOrigin = 'anonymous';
-        document.body.addEventListener('click', () => {
-            if (sound) {
-                sound.play();
-            }
-        }, {
-            capture: true,
-            once: true
-        });
+        const soundUrl = resolveUserUploadResourceUrl(global, global.settings.soundUrl);
+        if (soundUrl) {
+            const sound = new Audio(soundUrl);
+            sound.crossOrigin = 'anonymous';
+            document.body.addEventListener('click', () => {
+                if (sound) {
+                    sound.play();
+                }
+            }, {
+                capture: true,
+                once: true
+            });
+        }
     }
 
     // Viewer 构造内会 initCommandRegistry 并注册各 facade；postMessage 监听须在此之后挂载，否则编辑类协议无法经 registry 单路径执行。
@@ -593,4 +643,4 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
 
 console.log(`SuperSplat Viewer v${appVersion} | Engine v${engineVersion} (${engineRevision})`);
 
-export { main };
+export { main, loadSettingsFromResponse, loadSettingsFromUrl };

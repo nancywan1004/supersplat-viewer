@@ -14,6 +14,10 @@ import {
     serializeSceneMediaHotspotForPersistence
 } from './settings-serialize-helper';
 import {
+    createUserUploadPathContext,
+    persistScenePlacedItemSource
+} from '../settings-io/user-files';
+import {
     flushRevealIntoEffectsForExport,
     normalizeEffectsOnImport,
     normalizePersistentEffectsForPersistence,
@@ -22,6 +26,7 @@ import {
 } from './effects-sync';
 import { filterAssetEffectParams } from '../vfx/effects-runtime/asset/asset-effect-params';
 import { resolveSceneAssetSourceUrl } from '../loaders/asset-loader';
+import { isEphemeralAssetUrl } from '../loaders/asset-file';
 import { clearViewEffectsSession } from '../view-settings';
 import { applyAllAnnotationsVisibilityFromSettings } from '../annotation-toolbar/annotation-visibility';
 
@@ -271,7 +276,7 @@ export function serializeScenePlacedItem(entry: ScenePlacedItem): SceneAsset {
 function enrichSceneAssetSourceForPersistence(global: Global, sa: SceneAsset): SceneAsset {
     if (sa.type !== 'video' && sa.type !== 'audio') return sa;
     const resolved = resolveSceneAssetSourceUrl(global, sa.source);
-    if (!resolved) return sa;
+    if (!resolved || isEphemeralAssetUrl(resolved)) return sa;
     const src = sa.source ?? {};
     if (src.url === resolved) return sa;
     return {
@@ -290,7 +295,10 @@ function enrichSceneAssetSourceForPersistence(global: Global, sa: SceneAsset): S
  */
 export function buildSceneAssetsForPersistence(global: Global): SceneAsset[] {
     const sceneItems = (global.state.scenePlacedEntities ?? []) as ScenePlacedItem[];
-    const runtimeSerialized = sceneItems.map(serializeScenePlacedItem);
+    const pathCtx = createUserUploadPathContext();
+    const runtimeSerialized = sceneItems.map((entry) =>
+        persistScenePlacedItemSource(global, entry, serializeScenePlacedItem(entry), pathCtx)
+    );
     const runtimeIds = new Set(runtimeSerialized.map((s) => s.id));
     const settings = global.settings as ExperienceSettings;
     const preserved = (settings.sceneAssets ?? []).filter(

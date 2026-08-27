@@ -6,6 +6,8 @@ import { setPlacementCursorActive } from '../placement-cursor';
 import { loadGsplatAsset } from '../loaders/gsplat/sog/splat-loader';
 import { getAssetLoader } from '../loaders/asset-loader';
 import { loadContainerAsset } from '../loaders/gltf/container-loader';
+import { asUserFile, assetLibraryHref, prepareAssetLibraryItemForPlacement, upsertUploadedAsset } from '../loaders/asset-file';
+import { ingestAssetLibraryItemFile, resolveUserUploadResourceUrl } from '../settings-io/user-files';
 
 class AssetFacade implements ModuleFacade {
     readonly module = 'asset' as const;
@@ -25,15 +27,24 @@ class AssetFacade implements ModuleFacade {
         global: Global,
         item: AssetLibraryItem
     ): Promise<AssetLibraryItem | null> {
+        const prepared = await prepareAssetLibraryItemForPlacement(item);
+        if (!prepared) return null;
+        const ingested = ingestAssetLibraryItemFile(global, prepared);
+
         // image / video / audio 不需要预下载 PlayCanvas Asset
-        if (item.type === 'image' || item.type === 'video' || item.type === 'audio') return item;
+        if (ingested.type === 'image' || ingested.type === 'video' || ingested.type === 'audio') return ingested;
 
         // 已有 asset 直接返回
-        if (item.asset) return item;
+        if (ingested.asset) return ingested;
 
-        const url = item.url || item.filename;
+        const url = assetLibraryHref(ingested);
         if (!url) {
-            console.warn('[AssetFacade] protocol place missing url for', item.type);
+            console.warn('[AssetFacade] protocol place missing url for', ingested.type);
+            return null;
+        }
+        const loadUrl = resolveUserUploadResourceUrl(global, url);
+        if (!loadUrl) {
+            console.warn('[AssetFacade] protocol place missing resolved url for', ingested.type, url);
             return null;
         }
 
@@ -41,18 +52,18 @@ class AssetFacade implements ModuleFacade {
         const assetLoader = getAssetLoader(global);
 
         try {
-            if (item.type === 'gaussian') {
+            if (ingested.type === 'gaussian') {
                 const asset = await assetLoader.trackPromise('placement', 'facade:gaussian', loadGsplatAsset(app, {
-                    url,
-                    filename: item.filename ?? url
+                    url: loadUrl,
+                    filename: ingested.filename ?? url
                 } as any));
-                return { ...item, asset, filename: item.filename ?? url, url };
+                return { ...ingested, asset, filename: ingested.filename ?? url, src: ingested.src ?? url };
             }
 
-            if (item.type === 'mesh') {
-                const meshLoadPromise = loadContainerAsset(app, url);
+            if (ingested.type === 'mesh') {
+                const meshLoadPromise = loadContainerAsset(app, loadUrl, ingested.filename);
                 const asset = await assetLoader.trackPromise('placement', 'facade:mesh', meshLoadPromise);
-                return { ...item, asset, filename: item.filename ?? url, url };
+                return { ...ingested, asset, filename: ingested.filename ?? url, src: ingested.src ?? url };
             }
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
@@ -60,11 +71,11 @@ class AssetFacade implements ModuleFacade {
                 // 新放置请求或模块退出主动取消，不视为错误。
                 return null;
             }
-            console.warn('[AssetFacade] asset hydrate failed:', item.type, url, err);
+            console.warn('[AssetFacade] asset hydrate failed:', ingested.type, loadUrl, err);
             return null;
         }
 
-        return item;
+        return ingested;
     }
 
     private resolveSceneEntityId(
@@ -251,11 +262,28 @@ class AssetFacade implements ModuleFacade {
         if (!raw || typeof raw !== 'object') return;
 
         const incoming = raw as { id?: string } & Partial<AssetLibraryItem>;
-        let value: AssetLibraryItem | null = null;
+        let libraryItem: AssetLibraryItem | null = null;
         if (incoming.id && Array.isArray(state.uploadedAssets)) {
-            value = (state.uploadedAssets as AssetLibraryItem[]).find((it) => it.id === incoming.id) ?? null;
+            libraryItem = (state.uploadedAssets as AssetLibraryItem[]).find(it => it.id === incoming.id) ?? null;
         }
-        const finalValue = value ?? (raw as AssetLibraryItem);
+        let finalValue: AssetLibraryItem;
+        if (libraryItem) {
+            finalValue = {
+                ...libraryItem,
+                ...incoming,
+                id: incoming.id || libraryItem.id,
+                src: asUserFile(incoming.src) ?? incoming.src ?? libraryItem.src,
+                asset: libraryItem.asset ?? incoming.asset
+            };
+        } else {
+            finalValue = raw as AssetLibraryItem;
+        }
+        if (!finalValue.id || String(finalValue.id).trim().length === 0) {
+            finalValue = {
+                ...finalValue,
+                id: `asset-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+            };
+        }
 
         // 新请求到来时，主动取消上一个可取消下载（mesh）
         if (this.currentDownloadAbort) {
@@ -283,6 +311,8 @@ class AssetFacade implements ModuleFacade {
             console.warn('[AssetFacade] asset download failed, abort placement');
             return;
         }
+
+        upsertUploadedAsset(ctx.global, hydrated);
 
         // 视频首帧由 placement-handler 预热并接管光标；其余类型此处切回可点击十字
         if (hydrated.type !== 'video') {

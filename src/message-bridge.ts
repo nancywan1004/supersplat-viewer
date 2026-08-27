@@ -35,6 +35,7 @@ import {
     SCENE_GSPLAT_REVEAL_EFFECT_ID
 } from './editor-modules/protocol-adapters/effects-protocol-adapter';
 import { getAssetLoader } from './loaders/asset-loader';
+import { asUserFile } from './loaders/asset-file';
 import { resolveExportTimelinePlan } from './render/export-timeline-resolver';
 import { buildVideoExportFilename } from './render/video-export';
 import type { ExperienceSettings, SceneMediaHotspotPatch, TorchLightSettings } from './schemas/v2';
@@ -74,10 +75,12 @@ import {
     SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID,
     resolveAssetEffectType
 } from './vfx/effects-runtime/effect-types';
+import { captureDefaultViewAndStageThumbnail } from './render/project-thumbnail';
 import {
-    captureDefaultViewAndStageThumbnail,
-    persistExperienceSettingsToCloud
-} from './render/project-thumbnail';
+    resolveSettingsSaveDestination,
+    saveExperienceProject,
+    type SettingsSaveDestination
+} from './settings-io/save';
 import { resetSceneSettings } from './settings-reset';
 import type { SceneCollisionSettingsPatch } from './schemas/v2-custom';
 import {
@@ -107,8 +110,8 @@ type InboundPayload =
     | { type: 'CAMERA_MODE_SWITCH'; value?: 'orbit' | 'fly' }
     | { type: 'CAMERA_RESET' }
     | { type: 'CAMERA_PITCH_RANGE_SET'; value?: [number, number] }
-    | { type: 'SKYBOX_SET'; value?: string }
-    | { type: 'SKYBOX_ADD'; value?: string }
+    | { type: 'SKYBOX_SET'; value?: string | File }
+    | { type: 'SKYBOX_ADD'; value?: string | File }
     | { type: 'ANIMATION_RESET' }
     | { type: 'ANIMATION_PLAY_PAUSE' }
     | { type: 'EDIT_MODE_SET'; value?: boolean }
@@ -125,7 +128,7 @@ type InboundPayload =
     | { type: 'TORCH_DELETE' }
     | { type: 'TORCH_TOGGLE'; value?: boolean }
     | { type: 'TORCH_PARAMS_SET'; value?: Partial<TorchLightSettings> }
-    | { type: 'SETTINGS_SAVE' }
+    | { type: 'SETTINGS_SAVE'; destination?: SettingsSaveDestination }
     | { type: 'SETTINGS_RESET' }
     | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule | null }
     | { type: 'ASSET_SHOW_HIDE_SET'; id?: string; value?: boolean }
@@ -461,16 +464,20 @@ const initPostMessageBridge = (global: Global) => {
                 events.fire('camera:pitchRangeChanged', range);
                 break;
             }
-            case 'SKYBOX_SET':
-                if (typeof p.value === 'string') {
-                    events.fire('skyboxSet', p.value);
+            case 'SKYBOX_SET': {
+                const value = (p as { value?: unknown }).value;
+                if (typeof value === 'string' || asUserFile(value)) {
+                    events.fire('skyboxSet', value);
                 }
                 break;
-            case 'SKYBOX_ADD':
-                if (typeof p.value === 'string') {
-                    events.fire('skyboxAdd', p.value);
+            }
+            case 'SKYBOX_ADD': {
+                const value = (p as { value?: unknown }).value;
+                if (typeof value === 'string' || asUserFile(value)) {
+                    events.fire('skyboxAdd', value);
                 }
                 break;
+            }
             case 'ANIMATION_RESET':
                 events.fire('inputEvent', 'resetAnim');
                 break;
@@ -638,7 +645,8 @@ const initPostMessageBridge = (global: Global) => {
                 break;
             }
             case 'SETTINGS_SAVE': {
-                const saveResult = await persistExperienceSettingsToCloud(global);
+                const destination = resolveSettingsSaveDestination(p.destination);
+                const saveResult = await saveExperienceProject(global, destination);
                 if (saveResult.ok === false) {
                     console.error('[MessageBridge] SETTINGS_SAVE 失败', saveResult.message);
                     postToParent('SETTINGS_SAVE_FAILED', { message: saveResult.message });
@@ -694,6 +702,7 @@ const initPostMessageBridge = (global: Global) => {
                 break;
             case 'ASSET_PLACE':
                 if (p.value && typeof p.value === 'object') {
+                    // File 经 postMessage structured clone 进入 Viewer realm，原样交给 facade，勿丢掉。
                     const placeValue = p.value as AssetLibraryItem;
                     dispatchAsset(global, 'ASSET_PLACE', { value: placeValue });
                 }
@@ -833,6 +842,7 @@ const initPostMessageBridge = (global: Global) => {
             case 'ANNOTATION_CONFIRM': {
                 const id = p.id as string | undefined;
                 const value = p.value as Partial<AnnotationData> | undefined;
+                // File 经 structured clone 进入 Viewer，原样交给 facade。
                 if (!id) break;
                 dispatchAnnotation(global, 'ANNOTATION_CONFIRM', { id, value });
                 break;
@@ -1572,8 +1582,8 @@ const initPostMessageBridge = (global: Global) => {
             value: {
                 title: serialized.title ?? '',
                 text: serialized.text ?? '',
-                imageUrl: serialized.imageUrl,
-                videoUrl: serialized.videoUrl,
+                image: serialized.image,
+                video: serialized.video,
                 showTitleWhenCollapsed: serialized.showTitleWhenCollapsed ?? false
             }
         });
