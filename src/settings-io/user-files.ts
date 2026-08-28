@@ -454,6 +454,7 @@ function collectExistingRelativePaths(settings: ExperienceSettings, used: Set<st
         add(ann?.videoUrl);
     }
     add(settings.soundUrl);
+    add(settings.collision?.url);
 }
 
 /** 物化后 settings 中需要随包附带的相对路径（去重）。 */
@@ -629,6 +630,15 @@ export async function materializeUserUploadRelativeFiles(
         { fallbackName: 'sound.mp3' }
     );
     if (soundErr) return { ok: false, message: soundErr };
+
+    const collision = settings.collision as Record<string, unknown> | undefined;
+    if (collision && typeof collision === 'object') {
+        const collisionErr = await assignMaterialized(global, collision, 'url', ctx, {
+            id: 'scene-collision',
+            fallbackName: 'collision.glb'
+        });
+        if (collisionErr) return { ok: false, message: collisionErr };
+    }
 
     return { ok: true, settings };
 }

@@ -7,6 +7,7 @@ import {
     canGenerateCollision,
     ensureCollisionUrl,
     hasCollisionGenerateCredentials,
+    resolveCollisionFetchUrl,
     resolveCollisionUrl,
     SCENE_COLLISION_CHANGED
 } from './scene-collision-source';
@@ -125,7 +126,7 @@ export class CameraCollisionManager {
         if (!hasCollisionGenerateCredentials(this.global)) {
             return {
                 ok: false,
-                message: '无法重新生成：需要 projectId、token、contentUrl'
+                message: '无法重新生成：需要 token、contentUrl'
             };
         }
 
@@ -145,7 +146,7 @@ export class CameraCollisionManager {
             return { ok: false, message: regenerated.message };
         }
 
-        // ?collision= 优先于 settings；写回 config 才能让后续 resolve/getCollisionUrl 用到新地址
+        // ?collision= 优先于 settings；写回相对路径，后续加载走会话表而不是旧查询参数
         this.global.config.collisionUrl = regenerated.url;
         this.syncHasCollision();
 
@@ -343,7 +344,10 @@ export class CameraCollisionManager {
                                 this.sceneMeshEntity = null;
                                 prev.destroy();
                             }
-                            const result = await loadSceneMesh(app, plan.sceneMeshUrl);
+                            const meshFetchUrl =
+                                resolveCollisionFetchUrl(this.global, plan.sceneMeshUrl) ??
+                                plan.sceneMeshUrl;
+                            const result = await loadSceneMesh(app, meshFetchUrl);
                             if (result) {
                                 this.sceneMeshEntity = result.sceneMeshEntity;
                                 this.meshCollisionCache = result.meshCollision;
@@ -362,7 +366,8 @@ export class CameraCollisionManager {
                         }
 
                         if (plan.loadVoxelCollision && url) {
-                            const voxel = await loadVoxelCollision(url);
+                            const voxelUrl = resolveCollisionFetchUrl(this.global, url) ?? url;
+                            const voxel = await loadVoxelCollision(voxelUrl);
                             if (voxel) {
                                 this.urlCollision = voxel;
                                 voxelOk = true;

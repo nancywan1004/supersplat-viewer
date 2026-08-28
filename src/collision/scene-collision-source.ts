@@ -1,9 +1,20 @@
 import type { ExperienceSettings } from '../schemas/v2';
+import {
+    ingestUserUploadFile,
+    isUserUploadRelativePath,
+    normalizeUserUploadRelativePath,
+    rememberUserUploadFile,
+    resolveUserUploadResourceUrl
+} from '../settings-io/user-files';
 import { setUniverseAuthContext } from '../universe/service';
 import { generateCollisionMesh } from '../universe/collision-mesh-service';
 import type { Global } from '../types';
 
 export const SCENE_COLLISION_CHANGED = 'sceneCollision:changed';
+
+/** 会话表 / 相对路径稳定 id，便于重新生成时覆盖同一文件。 */
+const COLLISION_FILE_ID = 'scene-collision';
+const COLLISION_FILE_NAME = 'collision.glb';
 
 export type CollisionUrlSource = 'settings' | 'config';
 
@@ -39,24 +50,29 @@ export function resolveCollisionUrl(global: Global): CollisionUrlResolved | unde
     return undefined;
 }
 
+/**
+ * 加载用 URL：相对路径走会话表 / settings.json 基址；绝对 http(s) 原样（本地开发会套代理）。
+ */
+export function resolveCollisionFetchUrl(global: Global, stored?: string): string | undefined {
+    const raw = trimUrl(stored) ?? resolveCollisionUrl(global)?.url;
+    if (!raw) return undefined;
+    return resolveUserUploadResourceUrl(global, raw) ?? undefined;
+}
+
 /** 高斯 modelUrl，供 `POST /conversion/voxel-collision` 使用。 */
 export function resolveModelUrlForVoxelCollision(global: Global): string | undefined {
     return trimUrl(global.config.contentUrl);
 }
 
-/** 是否具备 Universe 生成凭证（projectId + token + contentUrl），与是否已有 URL 无关。 */
+/** 是否具备生成凭证（token + contentUrl）。`upload: false` 不需要 projectId。 */
 export function hasCollisionGenerateCredentials(global: Global): boolean {
-    const projectId = global.config.projectId;
-    if (projectId == null || projectId === '') {
-        return false;
-    }
     if (!trimUrl(global.config.token)) {
         return false;
     }
     return !!resolveModelUrlForVoxelCollision(global);
 }
 
-/** 无现成 collision URL 时，是否具备 Universe 生成条件（projectId + token + contentUrl）。 */
+/** 无现成 collision URL 时，是否具备 Universe 生成条件（token + contentUrl）。 */
 export function canGenerateCollision(global: Global): boolean {
     if (resolveCollisionUrl(global)) {
         return false;
@@ -75,6 +91,23 @@ export function setCollisionUrl(global: Global, url: string): void {
     global.events.fire(SCENE_COLLISION_CHANGED);
 }
 
+/** 把转换得到的 GLB 写入会话表，settings 写成相对路径；不在此时上传。 */
+function ingestGeneratedCollisionGlb(global: Global, blob: Blob): string {
+    const file = blob instanceof File && blob.name
+        ? blob
+        : new File([blob], COLLISION_FILE_NAME, { type: blob.type || 'model/gltf-binary' });
+    const existing = trimUrl((global.settings as ExperienceSettings).collision?.url);
+    if (existing && isUserUploadRelativePath(existing)) {
+        const path = normalizeUserUploadRelativePath(existing);
+        rememberUserUploadFile(global, path, file);
+        return path;
+    }
+    return ingestUserUploadFile(global, file, {
+        id: COLLISION_FILE_ID,
+        fallbackName: COLLISION_FILE_NAME
+    });
+}
+
 const inflightEnsure = new Map<string, Promise<CollisionUrlResult>>();
 
 export type EnsureCollisionUrlOptions = {
@@ -84,7 +117,8 @@ export type EnsureCollisionUrlOptions = {
 
 /**
  * 确保 collision URL 可用：已有 URL 参数 / settings 则直接返回；
- * 否则用 `contentUrl` 调 Universe `voxel-collision` 生成 GLB（不拉项目文件列表）。
+ * 否则用 `contentUrl` 调 Universe `voxel-collision` 拿到 GLB 二进制，写入会话表并把
+ * `settings.collision.url` 写成相对路径。真正上传 / 下载发生在 `SETTINGS_SAVE`。
  * `forceRegenerate` 时即使已有 URL 也会重新生成并写回。
  */
 export async function ensureCollisionUrl(
@@ -104,13 +138,14 @@ export async function ensureCollisionUrl(
         return {
             ok: false,
             message: forceRegenerate
-                ? 'collision URL 不可用，且无法重新生成（需 projectId、token、contentUrl）'
-                : '缺少 collision URL，且无法生成（需 projectId、token、contentUrl）'
+                ? 'collision URL 不可用，且无法重新生成（需 token、contentUrl）'
+                : '缺少 collision URL，且无法生成（需 token、contentUrl）'
         };
     }
 
     const modelUrl = resolveModelUrlForVoxelCollision(global)!;
-    const key = `${forceRegenerate ? 'regen:' : ''}${global.config.projectId ?? ''}:${global.config.token ?? ''}:${modelUrl}`;
+    const token = global.config.token!;
+    const key = `${forceRegenerate ? 'regen:' : ''}${token}:${modelUrl}`;
     const inflight = inflightEnsure.get(key);
     if (inflight) {
         return inflight;
@@ -118,17 +153,16 @@ export async function ensureCollisionUrl(
 
     const promise = (async (): Promise<CollisionUrlResult> => {
         try {
-            const projectId = global.config.projectId!;
-            const token = global.config.token!;
             setUniverseAuthContext({ token });
 
-            const generated = await generateCollisionMesh(projectId, token, modelUrl);
+            const generated = await generateCollisionMesh(modelUrl, token);
             if (generated.ok === false) {
                 return { ok: false, message: generated.message };
             }
 
-            setCollisionUrl(global, generated.fileUrl);
-            return { ok: true, url: generated.fileUrl };
+            const relativePath = ingestGeneratedCollisionGlb(global, generated.blob);
+            setCollisionUrl(global, relativePath);
+            return { ok: true, url: relativePath };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             console.error('[SceneCollision] ensureCollisionUrl failed:', error);
