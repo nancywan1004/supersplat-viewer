@@ -7,7 +7,7 @@ import {
     resolveUserUploadResourceUrl
 } from '../settings-io/user-files';
 import { setUniverseAuthContext } from '../universe/service';
-import { generateCollisionMesh } from '../universe/collision-mesh-service';
+import { generateCollisionMesh, DEFAULT_COLLISION_MESH_UPLOAD } from '../universe/collision-mesh-service';
 import type { Global } from '../types';
 
 export const SCENE_COLLISION_CHANGED = 'sceneCollision:changed';
@@ -64,15 +64,22 @@ export function resolveModelUrlForVoxelCollision(global: Global): string | undef
     return trimUrl(global.config.contentUrl);
 }
 
-/** 是否具备生成凭证（token + contentUrl）。`upload: false` 不需要 projectId。 */
+/** 是否具备生成凭证（projectId + token + contentUrl）。`upload: false` 时 projectId 仍用于网关鉴权。 */
 export function hasCollisionGenerateCredentials(global: Global): boolean {
     if (!trimUrl(global.config.token)) {
         return false;
     }
-    return !!resolveModelUrlForVoxelCollision(global);
+    if (!resolveModelUrlForVoxelCollision(global)) {
+        return false;
+    }
+    const projectId = global.config.projectId;
+    if (projectId == null || projectId === '') {
+        return false;
+    }
+    return Number.isFinite(Number(projectId));
 }
 
-/** 无现成 collision URL 时，是否具备 Universe 生成条件（token + contentUrl）。 */
+/** 无现成 collision URL 时，是否具备 Universe 生成条件。 */
 export function canGenerateCollision(global: Global): boolean {
     if (resolveCollisionUrl(global)) {
         return false;
@@ -117,8 +124,8 @@ export type EnsureCollisionUrlOptions = {
 
 /**
  * 确保 collision URL 可用：已有 URL 参数 / settings 则直接返回；
- * 否则用 `contentUrl` 调 Universe `voxel-collision` 拿到 GLB 二进制，写入会话表并把
- * `settings.collision.url` 写成相对路径。真正上传 / 下载发生在 `SETTINGS_SAVE`。
+ * 否则用 `contentUrl` 调 Universe `voxel-collision`。默认 `{ projectId, upload: false }`：
+ * 鉴权带项目 ID，文件不登记到项目。GLB 写入会话表；若仍返回 `data.url` 则写该地址。
  * `forceRegenerate` 时即使已有 URL 也会重新生成并写回。
  */
 export async function ensureCollisionUrl(
@@ -138,14 +145,15 @@ export async function ensureCollisionUrl(
         return {
             ok: false,
             message: forceRegenerate
-                ? 'collision URL 不可用，且无法重新生成（需 token、contentUrl）'
-                : '缺少 collision URL，且无法生成（需 token、contentUrl）'
+                ? 'collision URL 不可用，且无法重新生成（需 projectId、token、contentUrl）'
+                : '缺少 collision URL，且无法生成（需 projectId、token、contentUrl）'
         };
     }
 
     const modelUrl = resolveModelUrlForVoxelCollision(global)!;
     const token = global.config.token!;
-    const key = `${forceRegenerate ? 'regen:' : ''}${token}:${modelUrl}`;
+    const projectId = global.config.projectId;
+    const key = `${forceRegenerate ? 'regen:' : ''}${projectId ?? ''}:${token}:${modelUrl}`;
     const inflight = inflightEnsure.get(key);
     if (inflight) {
         return inflight;
@@ -155,14 +163,22 @@ export async function ensureCollisionUrl(
         try {
             setUniverseAuthContext({ token });
 
-            const generated = await generateCollisionMesh(modelUrl, token);
+            const generated = await generateCollisionMesh(modelUrl, token, {
+                upload: DEFAULT_COLLISION_MESH_UPLOAD,
+                projectId
+            });
             if (generated.ok === false) {
                 return { ok: false, message: generated.message };
             }
 
-            const relativePath = ingestGeneratedCollisionGlb(global, generated.blob);
-            setCollisionUrl(global, relativePath);
-            return { ok: true, url: relativePath };
+            if ('blob' in generated) {
+                const relativePath = ingestGeneratedCollisionGlb(global, generated.blob);
+                setCollisionUrl(global, relativePath);
+                return { ok: true, url: relativePath };
+            }
+
+            setCollisionUrl(global, generated.fileUrl);
+            return { ok: true, url: generated.fileUrl };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             console.error('[SceneCollision] ensureCollisionUrl failed:', error);

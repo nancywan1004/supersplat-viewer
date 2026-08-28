@@ -9,8 +9,20 @@ const VOXEL_COLLISION_PATH = '/conversion/voxel-collision';
 /** glTF binary magic `glTF` */
 const GLB_MAGIC = [0x67, 0x6c, 0x54, 0x46] as const;
 
+const OK_CODES = new Set([1, 200]);
+
+/** 默认不绑项目文件，只回 GLB；`projectId` 仍带上供网关鉴权。 */
+export const DEFAULT_COLLISION_MESH_UPLOAD = false;
+
+export type GenerateCollisionMeshOptions = {
+    /** 缺省 `false`：不登记项目文件。 */
+    upload?: boolean;
+    projectId?: number | string;
+};
+
 export type CollisionMeshResult =
     | { ok: true; blob: Blob }
+    | { ok: true; fileUrl: string }
     | { ok: false; message: string };
 
 const isGlbBuffer = (bytes: Uint8Array): boolean => {
@@ -38,14 +50,25 @@ const messageFromJsonBody = (text: string): string | undefined => {
     return undefined;
 };
 
+const parseJsonUrl = (text: string): string | undefined => {
+    try {
+        const json = JSON.parse(text) as { code?: unknown; data?: { url?: unknown } };
+        if (!OK_CODES.has(Number(json.code))) return undefined;
+        const url = typeof json.data?.url === 'string' ? json.data.url.trim() : '';
+        return url || undefined;
+    } catch {
+        return undefined;
+    }
+};
+
 /**
- * 请求 Universe 将高斯模型转为碰撞 GLB。`upload: false` 时只回二进制，不绑项目。
- *
- * @see 网关 `POST /conversion/voxel-collision`，body `{ modelUrl, upload: false }`。
+ * 请求 Universe 将高斯模型转为碰撞 GLB。
+ * 默认 `{ modelUrl, projectId, upload: false }`：鉴权带 projectId，文件不登记到项目。
  */
 export const generateCollisionMesh = async (
     modelUrl: string,
-    token: string
+    token: string,
+    options?: GenerateCollisionMeshOptions
 ): Promise<CollisionMeshResult> => {
     if (!token) {
         return { ok: false, message: '缺少 token' };
@@ -56,6 +79,16 @@ export const generateCollisionMesh = async (
         return { ok: false, message: '缺少 modelUrl' };
     }
 
+    const upload = options?.upload === true;
+    const id = String(options?.projectId ?? '').trim();
+    if (!id) {
+        return { ok: false, message: '缺少 projectId' };
+    }
+    const numericId = Number(id);
+    if (!Number.isFinite(numericId)) {
+        return { ok: false, message: 'projectId 必须是数字' };
+    }
+
     setUniverseAuthContext({ token });
 
     const started = performance.now();
@@ -64,8 +97,10 @@ export const generateCollisionMesh = async (
     const postUrl = buildUniverseApiUrl(VOXEL_COLLISION_PATH);
     const body = {
         modelUrl: trimmedModelUrl,
-        upload: false
+        projectId: numericId,
+        upload
     };
+
     let response: Response;
     try {
         response = await fetch(postUrl, {
@@ -114,13 +149,24 @@ export const generateCollisionMesh = async (
         const blob = new Blob([buffer], { type: 'model/gltf-binary' });
         console.log('[VoxelCollision] generate finished', {
             elapsedMs: elapsedMs(),
-            bytes: buffer.byteLength
+            bytes: buffer.byteLength,
+            upload
         });
         return { ok: true, blob };
     }
 
     const text = new TextDecoder().decode(bytes);
-    const message = messageFromJsonBody(text) || '体素碰撞接口未返回 GLB 二进制';
+    const fileUrl = parseJsonUrl(text);
+    if (fileUrl) {
+        console.log('[VoxelCollision] generate finished', {
+            elapsedMs: elapsedMs(),
+            fileUrl,
+            upload
+        });
+        return { ok: true, fileUrl };
+    }
+
+    const message = messageFromJsonBody(text) || '体素碰撞接口未返回 GLB 或下载地址';
     console.warn('[VoxelCollision] generate failed', {
         elapsedMs: elapsedMs(),
         message

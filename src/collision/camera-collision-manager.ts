@@ -126,7 +126,7 @@ export class CameraCollisionManager {
         if (!hasCollisionGenerateCredentials(this.global)) {
             return {
                 ok: false,
-                message: '无法重新生成：需要 token、contentUrl'
+                message: '无法重新生成：需要 projectId、token、contentUrl'
             };
         }
 
