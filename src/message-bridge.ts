@@ -38,6 +38,7 @@ import { getAssetLoader } from './loaders/asset-loader';
 import { resolveExportTimelinePlan } from './render/export-timeline-resolver';
 import { buildVideoExportFilename } from './render/video-export';
 import type { ExperienceSettings, SceneMediaHotspotPatch, TorchLightSettings } from './schemas/v2';
+import { parseMoveSpeedScale, writeMoveSpeedScale } from './input/move-speed-scale';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import { getRevealActiveType, getRevealTotalDuration } from './settings-serialize/effects-sync';
 import { SCENE_COLLISION_CHANGED } from './collision/scene-collision-source';
@@ -107,6 +108,7 @@ type InboundPayload =
     | { type: 'CAMERA_MODE_SWITCH'; value?: 'orbit' | 'fly' }
     | { type: 'CAMERA_RESET' }
     | { type: 'CAMERA_PITCH_RANGE_SET'; value?: [number, number] }
+    | { type: 'CAMERA_MOVE_SPEED_SCALE_SET'; value?: number }
     | { type: 'SKYBOX_SET'; value?: string }
     | { type: 'SKYBOX_ADD'; value?: string }
     | { type: 'ANIMATION_RESET' }
@@ -459,6 +461,18 @@ const initPostMessageBridge = (global: Global) => {
                     cameras[0].pitchRange = range;
                 }
                 events.fire('camera:pitchRangeChanged', range);
+                break;
+            }
+            case 'CAMERA_MOVE_SPEED_SCALE_SET': {
+                const raw = (p as { value?: unknown }).value;
+                const numeric = typeof raw === 'number' ? raw : Number(raw);
+                const scale = parseMoveSpeedScale(numeric);
+                if (scale == null) {
+                    console.warn('[MessageBridge] CAMERA_MOVE_SPEED_SCALE_SET ignored: value must be a positive number');
+                    break;
+                }
+                writeMoveSpeedScale(global.settings as ExperienceSettings, scale);
+                events.fire('camera:moveSpeedScaleChanged', scale);
                 break;
             }
             case 'SKYBOX_SET':

@@ -57,6 +57,7 @@
 
     .settingsRow {
         display: flex;
+        align-items: center;
         gap: 4px;
         width: 100%;
 
@@ -221,5 +222,28 @@
         padding: 12px 8px;
         color: $clr-text-dark;
         font-size: 13px;
+    }
+
+    .camera-settings-hint,
+    .camera-settings-subhint {
+        display: block;
+        padding: 4px 0 8px;
+        font-size: 12px;
+        line-height: 1.4;
+        color: $clr-text-dark;
+        cursor: default;
+    }
+
+    .settingsValueLabel {
+        min-width: 40px;
+        flex-shrink: 0;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        color: $clr-text;
+    }
+
+    .settingsRow > input[type='range'] {
+        flex: 1;
+        min-width: 0;
     }
 }

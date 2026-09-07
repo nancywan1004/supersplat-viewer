@@ -59,6 +59,11 @@ type CameraPose = {
 type Camera = {
     initial: CameraPose,
     pitchRange?: [number, number];
+    /**
+     * 相机移动步长系数，乘在场景尺寸自适应速度之上（默认 1）。
+     * 大场景小步移动可取 (0, 1]，例如 0.1～0.5。
+     */
+    moveSpeedScale?: number;
 };
 
 type Annotation = {
@@ -221,6 +226,12 @@ const validateCamera = (data: unknown, path: string): Camera => {
         const pitchRange = assertNumberArray(obj.pitchRange, `${path}.pitchRange`);
         if (pitchRange.length !== 2) {
             throw new Error(`${path}.pitchRange must have exactly 2 elements`);
+        }
+    }
+    if (obj.moveSpeedScale !== undefined) {
+        const scale = assertNumber(obj.moveSpeedScale, `${path}.moveSpeedScale`);
+        if (scale <= 0) {
+            throw new Error(`${path}.moveSpeedScale must be a positive number`);
         }
     }
     return data as Camera;
