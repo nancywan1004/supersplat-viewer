@@ -478,7 +478,8 @@ class CameraManager {
         // 之前的系数偏小，会导致 orbit 很早到达 maxZoom；切到 fly（通过位置平移）看起来还能继续"退远"。
         // 这里改为基于"可 frame 场景的距离"的倍数，默认更宽松，手感与 fly 更一致。
         const sceneSize = fusedBbox.halfExtents.length();
-        const frameDistance = sceneSize / Math.sin(camera0.fov / 180 * Math.PI * 0.5);
+        // cameras 可为空（hasStartPose=false）；无 initial 时用 defaultFov 算 orbit 最大距离
+        const frameDistance = sceneSize / Math.sin(defaultFov / 180 * Math.PI * 0.5);
         // 放宽 orbit 最大缩放距离，避免“初始在包围盒外”时一进入 orbit 就被过小上限强制拉近。
         const maxZoomMultiplier = 4.0;
         const maxZoom = frameDistance * maxZoomMultiplier;
@@ -495,7 +496,7 @@ class CameraManager {
             controllers.orbit.controller.pitchRange = pitchVec2;
             controllers.fly.pitchRange = pitchVec2;
         };
-        applyPitchRange(settings.cameras[0].pitchRange);
+        applyPitchRange(settings.cameras[0]?.pitchRange);
 
         events.on('camera:pitchRangeChanged', (range: [number, number]) => {
             applyPitchRange(range);
