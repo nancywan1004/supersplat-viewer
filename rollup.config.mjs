@@ -313,10 +313,22 @@ const distHashPlugin = () => {
         }
       }
 
-      // 更新 dist/index.html
-      const htmlPath = 'dist/index.html';
+        // 处理 fallback settings.json：内容哈希文件名，与 JS/CSS 一样避免 CDN/浏览器缓存旧默认配置
+        const distSettingsSrc = 'dist/settings.json';
+        let distSettingsFileName = '';
+        if (fs.existsSync(distSettingsSrc)) {
+          const settingsContent = fs.readFileSync(distSettingsSrc);
+          const hash = crypto.createHash('md5').update(settingsContent).digest('hex').slice(0, 8);
+          distSettingsFileName = `settings.${hash}.json`;
+          fs.writeFileSync(`dist/${distSettingsFileName}`, settingsContent);
+          fs.unlinkSync(distSettingsSrc);
+          console.log(`✅ 已生成 dist settings: ${distSettingsFileName}`);
+        }
+
+        // 更新 dist/index.html
+        const htmlPath = 'dist/index.html';
       
-      if (fs.existsSync(htmlPath)) {
+        if (fs.existsSync(htmlPath)) {
         let html = fs.readFileSync(htmlPath, 'utf-8');
         
         // 更新 JS 引用
@@ -330,7 +342,11 @@ const distHashPlugin = () => {
           html = html.replace(/href=['"]\.\/index\.css['"]/g, `href='./${distCssFileName}'`);
           console.log(`✅ 已更新 dist/index.html CSS 引用: ${distCssFileName}`);
         }
-        
+
+        if (distSettingsFileName) {
+          html = html.replace(/(['"])\.\/settings\.json\1/g, `$1./${distSettingsFileName}$1`);
+          console.log(`✅ 已更新 dist/index.html 默认 settings 引用: ${distSettingsFileName}`);
+        }
         fs.writeFileSync(htmlPath, html);
       }
     }

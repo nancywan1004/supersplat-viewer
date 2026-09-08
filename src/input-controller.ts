@@ -15,6 +15,12 @@ import type { UpdateContext } from './input/shared';
 import type { Picker } from './picker/index';
 import type { Global } from './types';
 import { isCameraInteractionBlocked } from './state-selectors';
+import {
+    computeAdaptiveMoveSpeed,
+    DEFAULT_MOVE_SPEED_SCALE,
+    parseMoveSpeedScale,
+    readMoveSpeedScale
+} from './input/move-speed-scale';
 
 /**
  * Coordinator that wires together input devices (keyboard-mouse, touch,
@@ -40,6 +46,8 @@ class InputController {
 
     private _annotationInputFocused = false;
     private _minPanDistance = 1;
+    private _sceneSize: number | null = null;
+    private _moveSpeedScale = 1;
     private _lastDesktopTap = { time: 0, x: 0, y: 0 };
 
     private _onFocusIn = (event: FocusEvent) => {
@@ -145,11 +153,27 @@ class InputController {
     }
 
     setMoveSpeedFromSceneSize(sceneSize: number) {
-        const speed = Math.max(1, sceneSize * 0.05);
-        this._keyboardMouse.moveSpeed = speed;
-        this._touch.moveSpeed = speed;
-        this._gamepad.moveSpeed = speed;
-        this._minPanDistance = Math.max(1, sceneSize * 0.1);
+        this._sceneSize = sceneSize;
+        this.applyMoveSpeed();
+    }
+
+    setMoveSpeedScale(scale: number) {
+        this._moveSpeedScale = parseMoveSpeedScale(scale) ?? DEFAULT_MOVE_SPEED_SCALE;
+        this.applyMoveSpeed();
+    }
+
+    private applyMoveSpeed() {
+        if (this._sceneSize == null) {
+            return;
+        }
+        const { moveSpeed, minPanDistance } = computeAdaptiveMoveSpeed(
+            this._sceneSize,
+            this._moveSpeedScale
+        );
+        this._keyboardMouse.moveSpeed = moveSpeed;
+        this._touch.moveSpeed = moveSpeed;
+        this._gamepad.moveSpeed = moveSpeed;
+        this._minPanDistance = minPanDistance;
     }
 
     setAnnotationInputFocused(focused: boolean): void {
@@ -162,6 +186,7 @@ class InputController {
     constructor(global: Global, picker: Picker) {
         this._global = global;
         this._navInteraction = new NavInteraction(picker);
+        this._moveSpeedScale = readMoveSpeedScale(global.settings);
 
         const { app, events } = global;
         const canvas = app.graphicsDevice.canvas as HTMLCanvasElement;
@@ -206,6 +231,13 @@ class InputController {
                 move: [0, 0, 0],
                 rotate: [0, 0, 0]
             });
+        });
+
+        events.on('camera:moveSpeedScaleChanged', (scale: number) => {
+            this.setMoveSpeedScale(scale);
+        });
+        events.on('settingsSnapshotApplied', () => {
+            this.setMoveSpeedScale(readMoveSpeedScale(this._global.settings));
         });
 
         document.addEventListener('focusin', this._onFocusIn);

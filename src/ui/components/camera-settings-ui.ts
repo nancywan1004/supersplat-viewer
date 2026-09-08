@@ -12,7 +12,18 @@ import {
     getCameraCollisionManager
 } from '../../collision/camera-collision-manager';
 import { applyCollisionSetFromHost } from '../../editor-modules/protocol-adapters/collision-protocol-adapter';
+import { pushEditHistory } from '../../edit-history';
+import {
+    MOVE_SPEED_SCALE_UI_MAX,
+    MOVE_SPEED_SCALE_UI_MIN,
+    MOVE_SPEED_SCALE_UI_STEP,
+    parseMoveSpeedScale,
+    readMoveSpeedScale,
+    writeMoveSpeedScale
+} from '../../input/move-speed-scale';
+import type { ExperienceSettings } from '../../schemas/v2';
 import type { Global } from '../../types';
+import { getEditUiTransport, sendEditProtocolMessage } from '../edit-ui-transport';
 
 export function syncSceneAssetCollisionFromState(global: Global): void {
     syncSceneAssetCollisionRuntime(global);
@@ -21,6 +32,20 @@ export function syncSceneAssetCollisionFromState(global: Global): void {
 export function getCameraSettingsHTML(): string {
     return `
 <div class="camera-panel-section" data-camera-settings-root>
+    <div class="settingsRow submenuHeader camera-settings-header expanded" id="cameraMoveSpeedHeader" role="button" tabindex="0">
+        <span class="submenuArrow" id="cameraMoveSpeedArrow">▶</span>
+        <span>移动步长</span>
+    </div>
+    <div id="cameraMoveSpeedSubpanel" class="subpanel">
+        <div class="settingsRow camera-settings-hint">
+            乘在场景尺寸自适应速度之上，默认 1。大场景小步可调到 0.1～0.5。
+        </div>
+        <div class="settingsRow">
+            <label for="cameraMoveSpeedScale">系数</label>
+            <input type="range" id="cameraMoveSpeedScale" min="${MOVE_SPEED_SCALE_UI_MIN}" max="${MOVE_SPEED_SCALE_UI_MAX}" step="${MOVE_SPEED_SCALE_UI_STEP}" />
+            <span id="cameraMoveSpeedScaleVal" class="settingsValueLabel"></span>
+        </div>
+    </div>
     <div class="settingsRow submenuHeader camera-settings-header expanded" id="cameraSettingsHeader" role="button" tabindex="0">
         <span class="submenuArrow" id="cameraSettingsArrow">▶</span>
         <span>物理碰撞</span>
@@ -99,7 +124,13 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
     if (!root) return () => {};
 
     const { events } = global;
+    const editUiTransport = getEditUiTransport(global);
     syncSceneAssetCollisionFromState(global);
+
+    const onPanelWheel = (event: WheelEvent) => {
+        event.stopPropagation();
+    };
+    root.addEventListener('wheel', onPanelWheel);
     const readRs = () => readSceneAssetCollisionRuntimeState(global);
     const collisionMgr = () => getCameraCollisionManager(global);
 
@@ -109,6 +140,8 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
     const hintEl = root.querySelector<HTMLElement>('#cameraCollisionHint');
     const scalePanel = root.querySelector<HTMLElement>('#sceneAssetCollisionScalePanel');
     const manualScalePanel = root.querySelector<HTMLElement>('#sceneAssetCollisionManualScalePanel');
+    const moveSpeedSlider = root.querySelector<HTMLInputElement>('#cameraMoveSpeedScale');
+    const moveSpeedValue = root.querySelector<HTMLElement>('#cameraMoveSpeedScaleVal');
 
     const gaussianBindings: AxisBinding[] = [
         { input: root.querySelector('#sceneAssetCollisionGaussianScaleX'), label: root.querySelector('#sceneAssetCollisionGaussianValX'), axis: 'x' },
@@ -268,6 +301,66 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
         }
     }
 
+    const formatMoveSpeedScale = (scale: number) => scale.toFixed(2);
+
+    const syncMoveSpeedScaleUi = (scale = readMoveSpeedScale(global.settings as ExperienceSettings)) => {
+        const sliderValue = Math.min(
+            MOVE_SPEED_SCALE_UI_MAX,
+            Math.max(MOVE_SPEED_SCALE_UI_MIN, scale)
+        );
+        if (moveSpeedSlider) {
+            moveSpeedSlider.value = String(sliderValue);
+        }
+        if (moveSpeedValue) {
+            moveSpeedValue.textContent = formatMoveSpeedScale(scale);
+        }
+    };
+
+    const applyMoveSpeedScale = (raw: number, commitHistory: boolean) => {
+        const scale = parseMoveSpeedScale(raw);
+        if (scale == null) {
+            return;
+        }
+        if (editUiTransport === 'message-bridge') {
+            sendEditProtocolMessage({ type: 'CAMERA_MOVE_SPEED_SCALE_SET', value: scale });
+            return;
+        }
+        writeMoveSpeedScale(global.settings as ExperienceSettings, scale);
+        events.fire('camera:moveSpeedScaleChanged', scale);
+        if (commitHistory) {
+            pushEditHistory(global, 'move speed scale');
+        }
+    };
+
+    const onMoveSpeedInput = () => {
+        if (!moveSpeedSlider) {
+            return;
+        }
+        const scale = Number(moveSpeedSlider.value);
+        if (moveSpeedValue) {
+            moveSpeedValue.textContent = formatMoveSpeedScale(scale);
+        }
+        applyMoveSpeedScale(scale, false);
+    };
+    const onMoveSpeedChange = () => {
+        if (!moveSpeedSlider) {
+            return;
+        }
+        applyMoveSpeedScale(Number(moveSpeedSlider.value), true);
+    };
+    const onMoveSpeedScaleChanged = (scale: number) => {
+        syncMoveSpeedScaleUi(parseMoveSpeedScale(scale) ?? readMoveSpeedScale(global.settings as ExperienceSettings));
+    };
+    const onSettingsSnapshotApplied = () => {
+        syncMoveSpeedScaleUi();
+    };
+
+    syncMoveSpeedScaleUi();
+    moveSpeedSlider?.addEventListener('input', onMoveSpeedInput);
+    moveSpeedSlider?.addEventListener('change', onMoveSpeedChange);
+    events.on('camera:moveSpeedScaleChanged', onMoveSpeedScaleChanged);
+    events.on('settingsSnapshotApplied', onSettingsSnapshotApplied);
+
     getSceneAssetCollisionDebugVisual(global).setVisible(readRs().debugVisual);
 
     syncScaleUi();
@@ -304,6 +397,11 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
         for (const { el, fn } of axisListeners) {
             el.removeEventListener('input', fn);
         }
+        moveSpeedSlider?.removeEventListener('input', onMoveSpeedInput);
+        moveSpeedSlider?.removeEventListener('change', onMoveSpeedChange);
+        events.off('camera:moveSpeedScaleChanged', onMoveSpeedScaleChanged);
+        events.off('settingsSnapshotApplied', onSettingsSnapshotApplied);
+        root.removeEventListener('wheel', onPanelWheel);
         events.off('editMode:changed', onModeChanged);
         events.off('previewMode:changed', onModeChanged);
         events.off('cameraCollision:changed', onModeChanged);

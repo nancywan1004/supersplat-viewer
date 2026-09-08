@@ -6,11 +6,22 @@ import {
     rememberUserUploadFile,
     resolveUserUploadResourceUrl
 } from '../settings-io/user-files';
+import {
+    DEFAULT_COLLISION_MESH_UPLOAD,
+    generateCollisionMesh,
+    type CollisionJobProgress
+} from '../universe/collision-mesh-service';
 import { setUniverseAuthContext } from '../universe/service';
-import { generateCollisionMesh, DEFAULT_COLLISION_MESH_UPLOAD } from '../universe/collision-mesh-service';
 import type { Global } from '../types';
+import type { SceneMeshLoadIntent } from './scene-mesh-load-intent';
 
 export const SCENE_COLLISION_CHANGED = 'sceneCollision:changed';
+/** Universe 转换任务排队/运行进度（出站 `SCENE_MESH_LOAD_PROGRESS`）。 */
+export const SCENE_MESH_GENERATE_PROGRESS = 'sceneMesh:generateProgress';
+
+export type SceneMeshGenerateProgressPayload = CollisionJobProgress & {
+    intent?: SceneMeshLoadIntent;
+};
 
 /** 会话表 / 相对路径稳定 id，便于重新生成时覆盖同一文件。 */
 const COLLISION_FILE_ID = 'scene-collision';
@@ -59,7 +70,7 @@ export function resolveCollisionFetchUrl(global: Global, stored?: string): strin
     return resolveUserUploadResourceUrl(global, raw) ?? undefined;
 }
 
-/** 高斯 modelUrl，供 `POST /conversion/voxel-collision` 使用。 */
+/** 高斯 modelUrl，供 `POST /conversion/voxel-collision/jobs` 使用。 */
 export function resolveModelUrlForVoxelCollision(global: Global): string | undefined {
     return trimUrl(global.config.contentUrl);
 }
@@ -120,12 +131,14 @@ const inflightEnsure = new Map<string, Promise<CollisionUrlResult>>();
 export type EnsureCollisionUrlOptions = {
     /** 忽略已有 URL，强制走 Universe 重新生成（用于旧地址不可访问时）。 */
     forceRegenerate?: boolean;
+    /** 出站 `SCENE_MESH_LOAD_PROGRESS` 的 module 分流。 */
+    intent?: SceneMeshLoadIntent;
 };
 
 /**
  * 确保 collision URL 可用：已有 URL 参数 / settings 则直接返回；
- * 否则用 `contentUrl` 调 Universe `voxel-collision`。默认 `{ projectId, upload: false }`：
- * 鉴权带项目 ID，文件不登记到项目。GLB 写入会话表；若仍返回 `data.url` 则写该地址。
+ * 否则用 `contentUrl` 调 Universe `voxel-collision/jobs` 并轮询。默认 `{ projectId, upload: false }`：
+ * 鉴权带项目 ID，文件不登记到项目。GLB 写入会话表；若下载失败则写返回的 `data.url`。
  * `forceRegenerate` 时即使已有 URL 也会重新生成并写回。
  */
 export async function ensureCollisionUrl(
@@ -165,7 +178,13 @@ export async function ensureCollisionUrl(
 
             const generated = await generateCollisionMesh(modelUrl, token, {
                 upload: DEFAULT_COLLISION_MESH_UPLOAD,
-                projectId
+                projectId,
+                onProgress: (progress) => {
+                    global.events.fire(SCENE_MESH_GENERATE_PROGRESS, {
+                        ...progress,
+                        intent: options?.intent
+                    } satisfies SceneMeshGenerateProgressPayload);
+                }
             });
             if (generated.ok === false) {
                 return { ok: false, message: generated.message };

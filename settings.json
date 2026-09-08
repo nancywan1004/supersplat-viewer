@@ -44,73 +44,44 @@
     }
   ],
   "annotations": [],
-  "animTracks": [
-          {
-          "name": "cameraAnim",
-          "duration": 6,
-          "frameRate": 30,
-          "target": "camera",
-          "loopMode": "repeat",
-          "interpolation": "spline",
-          "smoothness": 1,
-          "keyframes": {
-              "times": [
-                  0,
-                  30,
-                  70,
-                  95,
-                  115,
-                  179
-              ],
-              "values": {
-                  "position": [
-                      2.7897870540618896,
-                      -0.6553810238838196,
-                      4.449401378631592,
-                      1.4632099866867065,
-                      -0.7106122970581055,
-                      3.9821341037750244,
-                      2.034359931945801,
-                      -0.17592796683311462,
-                      0.8749051094055176,
-                      2.618095636367798,
-                      -0.05225180462002754,
-                      0.33009371161460876,
-                      2.714817523956299,
-                      -0.04373687133193016,
-                      0.3163577914237976,
-                      2.8026108741760254,
-                      -0.6482117772102356,
-                      4.409580230712891
-                  ],
-                  "target": [
-                      3.4606545809281775,
-                      -0.7488623960246767,
-                      0.19625880770526827,
-                      2.00772724058957,
-                      -0.7415051136422639,
-                      0.3598038807018624,
-                      2.118430877510508,
-                      -0.18213986913369218,
-                      0.3210915396486652,
-                      2.4305754767823005,
-                      -0.029251165607517907,
-                      0.32280579775548685,
-                      2.714471694826478,
-                      -0.04374445133133829,
-                      0.31621307757631284,
-                      3.4675272876904026,
-                      -0.7413243060255418,
-                      0.19588107754321407
-                  ]
-              }
-          }
-      }
-  ],
+  "animTracks": [],
   "startMode": "default",
-  "revealEffect": {
-    "type": "smooth",
-    "radius": 50,
-    "autoStart": true
+  "effects": {
+    "reveal": {
+      "activeEffectId": "scene.gsplat-reveal",
+      "paramsById": {
+        "scene.gsplat-reveal": {
+          "radial": {
+            "enabled": true,
+            "autoStart": true,
+            "totalDuration": 10
+          }
+        }
+      }
+    },
+    "persistent": {
+      "scene": {
+        "activeEffectId": "scene.gsplat-persistent-scene",
+        "paramsById": {
+          "scene.gsplat-persistent-scene": {}
+        }
+      },
+      "camera": {
+        "activeEffectId": "scene.gsplat-persistent-camera",
+        "paramsById": {
+          "scene.gsplat-persistent-camera": {}
+        }
+      },
+      "stylization": {
+        "activeEffectId": "scene.gsplat-persistent-stylization",
+        "paramsById": {
+          "scene.gsplat-persistent-stylization": {}
+        }
+      }
+    },
+    "asset": {
+      "activeEffectId": "asset.gsplat-effects",
+      "instancesByTargetId": {}
+    }
   }
 }

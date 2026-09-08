@@ -39,9 +39,15 @@ import { asUserFile } from './loaders/asset-file';
 import { resolveExportTimelinePlan } from './render/export-timeline-resolver';
 import { buildVideoExportFilename } from './render/video-export';
 import type { ExperienceSettings, SceneMediaHotspotPatch, TorchLightSettings } from './schemas/v2';
+import { parseMoveSpeedScale, writeMoveSpeedScale } from './input/move-speed-scale';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import { getRevealActiveType, getRevealTotalDuration } from './settings-serialize/effects-sync';
-import { SCENE_COLLISION_CHANGED } from './collision/scene-collision-source';
+import {
+    SCENE_COLLISION_CHANGED,
+    SCENE_MESH_GENERATE_PROGRESS,
+    resolveCollisionUrl,
+    type SceneMeshGenerateProgressPayload
+} from './collision/scene-collision-source';
 import {
     serializeExperienceSettings,
     getComparableSettingsStringFromSnapshot,
@@ -88,6 +94,7 @@ import {
     applyCollisionSetFromHost,
     buildSceneMeshLoadFailedPayload,
     buildSceneMeshLoadFinishedPayload,
+    buildSceneMeshLoadProgressPayload,
     resolveSceneMeshLoadOutboundModules
 } from './editor-modules/protocol-adapters/collision-protocol-adapter';
 import { applyShadowSetFromHost } from './editor-modules/protocol-adapters/environment-protocol-adapter';
@@ -97,7 +104,6 @@ import {
     getCameraCollisionManager,
     type CollisionLoadPayload
 } from './collision/camera-collision-manager';
-import { resolveCollisionUrl } from './collision/scene-collision-source';
 import {
     SHADOW_SYSTEM_READY,
     hasShadowSceneMesh,
@@ -110,6 +116,7 @@ type InboundPayload =
     | { type: 'CAMERA_MODE_SWITCH'; value?: 'orbit' | 'fly' }
     | { type: 'CAMERA_RESET' }
     | { type: 'CAMERA_PITCH_RANGE_SET'; value?: [number, number] }
+    | { type: 'CAMERA_MOVE_SPEED_SCALE_SET'; value?: number }
     | { type: 'SKYBOX_SET'; value?: string | File }
     | { type: 'SKYBOX_ADD'; value?: string | File }
     | { type: 'ANIMATION_RESET' }
@@ -462,6 +469,18 @@ const initPostMessageBridge = (global: Global) => {
                     cameras[0].pitchRange = range;
                 }
                 events.fire('camera:pitchRangeChanged', range);
+                break;
+            }
+            case 'CAMERA_MOVE_SPEED_SCALE_SET': {
+                const raw = (p as { value?: unknown }).value;
+                const numeric = typeof raw === 'number' ? raw : Number(raw);
+                const scale = parseMoveSpeedScale(numeric);
+                if (scale == null) {
+                    console.warn('[MessageBridge] CAMERA_MOVE_SPEED_SCALE_SET ignored: value must be a positive number');
+                    break;
+                }
+                writeMoveSpeedScale(global.settings as ExperienceSettings, scale);
+                events.fire('camera:moveSpeedScaleChanged', scale);
                 break;
             }
             case 'SKYBOX_SET': {
@@ -1462,6 +1481,14 @@ const initPostMessageBridge = (global: Global) => {
         const { canUndo, canRedo } = await import('./edit-history');
         if (config.trackEditHistory) {
             postToParent('EDIT_HISTORY_STATE', { canUndo: canUndo(global), canRedo: canRedo(global) });
+        }
+    });
+
+    events.on(SCENE_MESH_GENERATE_PROGRESS, (payload: SceneMeshGenerateProgressPayload) => {
+        // 进度条需要在宿主 SET 的 suppress 期间也能回传；FINISHED / READY 仍抑制防回环。
+        const modules = resolveSceneMeshLoadOutboundModules(global, payload.intent);
+        for (const module of modules) {
+            postToParent('SCENE_MESH_LOAD_PROGRESS', buildSceneMeshLoadProgressPayload(module, payload));
         }
     });
 

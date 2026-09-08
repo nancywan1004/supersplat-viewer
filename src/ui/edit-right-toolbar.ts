@@ -102,7 +102,10 @@ const SUBPANEL_PAIRS_BY_MODULE: Partial<Record<EditLeftModule, [string, string][
     ],
     asset: [['assetPlacementHeader', 'assetPlacementSubpanel']],
     annotation: [['annotationSettingsHeader', 'annotationSettingsSubpanel']],
-    camera: [['cameraSettingsHeader', 'cameraSettingsSubpanel']],
+    camera: [
+        ['cameraMoveSpeedHeader', 'cameraMoveSpeedSubpanel'],
+        ['cameraSettingsHeader', 'cameraSettingsSubpanel']
+    ],
     skybox: [['skyboxSettingsHeader', 'skyboxSettingsSubpanel']]
 };
 
@@ -202,6 +205,7 @@ export function initEditRightToolbarUI(global: Global): () => void {
         bindSubpanel('renderSubmenuHeader', 'renderSubpanel', 'renderSubmenuArrow'),
         bindSubpanel('annotationSettingsHeader', 'annotationSettingsSubpanel', 'annotationSettingsArrow'),
         bindSubpanel('assetPlacementHeader', 'assetPlacementSubpanel', 'assetPlacementArrow'),
+        bindSubpanel('cameraMoveSpeedHeader', 'cameraMoveSpeedSubpanel', 'cameraMoveSpeedArrow'),
         bindSubpanel('cameraSettingsHeader', 'cameraSettingsSubpanel', 'cameraSettingsArrow'),
         bindSubpanel('skyboxSettingsHeader', 'skyboxSettingsSubpanel', 'skyboxSettingsArrow')
     ];

@@ -3,7 +3,11 @@ import type { SceneMeshLoadIntent } from '../../collision/scene-mesh-load-intent
 import { ensureSceneMeshForIntent } from '../../collision/scene-mesh-load-orchestrator';
 import { isShadowSystemEnabled } from '../../vfx/shadow/shadow-policy';
 import { MESSAGE_BRIDGE_MODULE } from '../modules-types';
-import { resolveCollisionUrl, setCollisionUrl } from '../../collision/scene-collision-source';
+import {
+    resolveCollisionUrl,
+    setCollisionUrl,
+    type SceneMeshGenerateProgressPayload
+} from '../../collision/scene-collision-source';
 import {
     patchSceneAssetCollisionRuntimeState,
     readSceneAssetCollisionRuntimeState,
@@ -29,6 +33,20 @@ export type SceneMeshLoadFailedPayload = {
     module: SceneMeshLoadBridgeModule;
     collisionUrl?: string;
     message?: string;
+};
+
+export type SceneMeshLoadProgressPayload = {
+    module: SceneMeshLoadBridgeModule;
+    jobId: string;
+    status: 'queued' | 'running';
+    queuePosition: number;
+    queuedMs: number;
+    runningElapsedMs: number;
+    elapsedMs: number;
+    timeoutMs: number;
+    etaMs: number;
+    /** 0–100 估算，不是 GPU 真实百分比。 */
+    progress: number;
 };
 
 /** 按加载 intent 决定出站 `module`；双 intent 时返回两项，由 message-bridge 各发一条。 */
@@ -88,6 +106,24 @@ export function buildSceneMeshLoadFailedPayload(
         module,
         ...(collisionUrl ? { collisionUrl } : {}),
         ...(message ? { message } : {})
+    };
+}
+
+export function buildSceneMeshLoadProgressPayload(
+    module: SceneMeshLoadBridgeModule,
+    payload: SceneMeshGenerateProgressPayload
+): SceneMeshLoadProgressPayload {
+    return {
+        module,
+        jobId: payload.jobId,
+        status: payload.status,
+        queuePosition: payload.queuePosition,
+        queuedMs: payload.queuedMs,
+        runningElapsedMs: payload.runningElapsedMs,
+        elapsedMs: payload.elapsedMs,
+        timeoutMs: payload.timeoutMs,
+        etaMs: payload.etaMs,
+        progress: payload.progress
     };
 }
 

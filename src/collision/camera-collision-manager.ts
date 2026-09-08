@@ -138,7 +138,10 @@ export class CameraCollisionManager {
         this.loadState = 'idle';
         this.activeLoadIntent = null;
 
-        const regenerated = await ensureCollisionUrl(this.global, { forceRegenerate: true });
+        const regenerated = await ensureCollisionUrl(this.global, {
+            forceRegenerate: true,
+            intent: { wantCollision: true, wantShadow: true }
+        });
         this.syncHasCollision();
         if (regenerated.ok === false) {
             this.loadState = 'failed';
@@ -253,7 +256,7 @@ export class CameraCollisionManager {
         const loadIntent = this.activeLoadIntent ?? intent;
         let collisionUrl = this.getCollisionUrl();
         if (!collisionUrl && this.shouldFetchCollisionFromUniverse(loadIntent)) {
-            const result = await ensureCollisionUrl(this.global);
+            const result = await ensureCollisionUrl(this.global, { intent: loadIntent });
             this.syncHasCollision();
             if (result.ok === false) {
                 console.warn('[CameraCollision] collision URL:', result.message);
@@ -398,7 +401,8 @@ export class CameraCollisionManager {
                         );
                         this.clearLoadedSceneMesh();
                         const regenerated = await ensureCollisionUrl(this.global, {
-                            forceRegenerate: true
+                            forceRegenerate: true,
+                            intent: planIntent
                         });
                         this.syncHasCollision();
                         if (regenerated.ok === false) {
