@@ -41,7 +41,12 @@ import type { ExperienceSettings, SceneMediaHotspotPatch, TorchLightSettings } f
 import { parseMoveSpeedScale, writeMoveSpeedScale } from './input/move-speed-scale';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import { getRevealActiveType, getRevealTotalDuration } from './settings-serialize/effects-sync';
-import { SCENE_COLLISION_CHANGED } from './collision/scene-collision-source';
+import {
+    SCENE_COLLISION_CHANGED,
+    SCENE_MESH_GENERATE_PROGRESS,
+    resolveCollisionUrl,
+    type SceneMeshGenerateProgressPayload
+} from './collision/scene-collision-source';
 import {
     serializeExperienceSettings,
     getComparableSettingsStringFromSnapshot,
@@ -86,6 +91,7 @@ import {
     applyCollisionSetFromHost,
     buildSceneMeshLoadFailedPayload,
     buildSceneMeshLoadFinishedPayload,
+    buildSceneMeshLoadProgressPayload,
     resolveSceneMeshLoadOutboundModules
 } from './editor-modules/protocol-adapters/collision-protocol-adapter';
 import { applyShadowSetFromHost } from './editor-modules/protocol-adapters/environment-protocol-adapter';
@@ -95,7 +101,6 @@ import {
     getCameraCollisionManager,
     type CollisionLoadPayload
 } from './collision/camera-collision-manager';
-import { resolveCollisionUrl } from './collision/scene-collision-source';
 import {
     SHADOW_SYSTEM_READY,
     hasShadowSceneMesh,
@@ -1466,6 +1471,14 @@ const initPostMessageBridge = (global: Global) => {
         const { canUndo, canRedo } = await import('./edit-history');
         if (config.trackEditHistory) {
             postToParent('EDIT_HISTORY_STATE', { canUndo: canUndo(global), canRedo: canRedo(global) });
+        }
+    });
+
+    events.on(SCENE_MESH_GENERATE_PROGRESS, (payload: SceneMeshGenerateProgressPayload) => {
+        // 进度条需要在宿主 SET 的 suppress 期间也能回传；FINISHED / READY 仍抑制防回环。
+        const modules = resolveSceneMeshLoadOutboundModules(global, payload.intent);
+        for (const module of modules) {
+            postToParent('SCENE_MESH_LOAD_PROGRESS', buildSceneMeshLoadProgressPayload(module, payload));
         }
     });
 

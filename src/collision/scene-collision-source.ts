@@ -1,9 +1,17 @@
 import type { ExperienceSettings } from '../schemas/v2';
 import { setUniverseAuthContext } from '../universe/service';
 import { generateCollisionMesh } from '../universe/collision-mesh-service';
+import type { CollisionJobProgress } from '../universe/collision-mesh-service';
 import type { Global } from '../types';
+import type { SceneMeshLoadIntent } from './scene-mesh-load-intent';
 
 export const SCENE_COLLISION_CHANGED = 'sceneCollision:changed';
+/** Universe 转换任务排队/运行进度（出站 `SCENE_MESH_LOAD_PROGRESS`）。 */
+export const SCENE_MESH_GENERATE_PROGRESS = 'sceneMesh:generateProgress';
+
+export type SceneMeshGenerateProgressPayload = CollisionJobProgress & {
+    intent?: SceneMeshLoadIntent;
+};
 
 export type CollisionUrlSource = 'settings' | 'config';
 
@@ -80,6 +88,8 @@ const inflightEnsure = new Map<string, Promise<CollisionUrlResult>>();
 export type EnsureCollisionUrlOptions = {
     /** 忽略已有 URL，强制走 Universe 重新生成（用于旧地址不可访问时）。 */
     forceRegenerate?: boolean;
+    /** 出站 `SCENE_MESH_LOAD_PROGRESS` 的 module 分流。 */
+    intent?: SceneMeshLoadIntent;
 };
 
 /**
@@ -122,7 +132,14 @@ export async function ensureCollisionUrl(
             const token = global.config.token!;
             setUniverseAuthContext({ token });
 
-            const generated = await generateCollisionMesh(projectId, token, modelUrl);
+            const generated = await generateCollisionMesh(projectId, token, modelUrl, {
+                onProgress: (progress) => {
+                    global.events.fire(SCENE_MESH_GENERATE_PROGRESS, {
+                        ...progress,
+                        intent: options?.intent
+                    } satisfies SceneMeshGenerateProgressPayload);
+                }
+            });
             if (generated.ok === false) {
                 return { ok: false, message: generated.message };
             }

@@ -29,7 +29,7 @@ const ensureCollisionUrlIfNeeded = async (
     if (!canGenerateCollision(global)) {
         return { ok: false, message: '缺少 collision URL，且无法从项目生成' };
     }
-    const urlResult = await ensureCollisionUrl(global);
+    const urlResult = await ensureCollisionUrl(global, { intent });
     if (urlResult.ok === false) {
         return { ok: false, message: urlResult.message };
     }
