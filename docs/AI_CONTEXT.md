@@ -18,10 +18,10 @@
 - **天空盒 / 标注 File**：**`SKYBOX_SET`/`SKYBOX_ADD { value?: string | File }`**；**`ANNOTATION_CONFIRM`/`UPDATE` 的 `image?: string | File` / `video?: string | File`**。入站写入会话表并改成相对路径，随 zip / OSS sidecar 附带。
 - **碰撞 mesh GLB**：`POST /conversion/voxel-collision/jobs` 提交后轮询 `GET .../jobs/:jobId`，成功写 **`data.url`** 到 **`settings.collision.url`**（默认 upload true）。已有绝对 CDN URL 仍不打包。生成中出站 **`SCENE_MESH_LOAD_PROGRESS`**；转换超时从 **`running`** 起算，不含排队。
 - **相对路径物化**：`serializeExperienceSettings` 之后 **`materializeUserUploadRelativeFiles`** 扫描 sceneAssets / skybox / annotations / soundUrl / **collision.url**：`File`/`data:`/`blob:` → `assets/<unique>` 并写入 **`global.userUploadFiles`**（`相对路径→Blob`）；已是相对路径则保留并从会话表或 **`config.settingsUrl`** 取回字节（失败则整次保存失败）。绝对 URL 不改写。加载：相对路径优先会话表 object URL，否则 `new URL(rel, settingsUrl)`；**不把 `blob:` 写回 settings**。
-- **local zip**：无相对路径文件仍下载 **`settings.json`**；有则 **fflate** 打 **`settings.zip`**（根目录 `settings.json` + `assets/`）。缺字节或打包失败则 **`PROJECT_SAVE_FAILED`**，不下载残包。缩略图仍不进 zip。
+- **local zip**：无相对路径文件仍下载 **`settings.json`**；有则 **fflate** 打 **`project-{projectId}.zip`**（根目录 `settings.json` + `assets/`）。缺字节或打包失败则 **`PROJECT_SAVE_FAILED`**，不下载残包。缩略图仍不进 zip。
 - **universe sidecar**：**不打 zip**。无相对路径文件仍只登记 **`settings.json`**。有则共用一次 **`uploadTimestamp`**，先 OSS put 到 **`<baseDir>/<projectId>/<timestamp>/assets/...`**（不走版本接口「最多 2 文件 / type=model」），再上传并登记 **`settings.json`**（内容保持相对路径，与旁边 `assets/` 可互相解析）。缺字节或任一 put 失败则整次失败。缩略图仍单独登记，不进该版本目录。
-- **读取**：`?settings=` **只读 settings.json**（不读 zip）。相对路径相对该文件 URL；本地先解压 `settings.zip`，再指向解压后的 `settings.json`。
-- **目录**：解析/导出收口 **`src/settings-io/`** — `load.ts` 读 json，`save.ts` 写 json / settings.zip，`user-files.ts` 相对路径与会话表，`pack.ts` 本地下载 zip 与路径/MIME。`settings-serialize/` 仍只负责 ExperienceSettings 序列化。
+- **读取**：`?settings=` **只读 settings.json**（不读 zip）。相对路径相对该文件 URL；本地先解压 `project-*.zip`，再指向解压后的 `settings.json`。
+- **目录**：解析/导出收口 **`src/settings-io/`** — `load.ts` 读 json，`save.ts` 写 json / project zip，`user-files.ts` 相对路径与会话表，`pack.ts` 本地下载 zip 与路径/MIME。`settings-serialize/` 仍只负责 ExperienceSettings 序列化。
 
 **2026-06-16 补充（点彩 · 对比度 / 天空 / NightMode·mesh / 协议）**：
 - **对比度 `levelRange`（单管线）**：**高斯**仅 **post** `applyContrast(uLevelRange)`；**天空**仅 **skyboxPS** `skyPointApplyContrast`；**modify 无 per-splat 对比度**（禁止 post+modify 双开）。post 对比度须在 **flatten / luma 量化之前**施加，否则高斯平坦区滑条无感；**`syncPostSettingsOnly()`** 每帧同步 post uniform（不重挂 CameraFrame）。
