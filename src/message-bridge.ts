@@ -139,7 +139,7 @@ type InboundPayload =
     | { type: 'TORCH_DELETE' }
     | { type: 'TORCH_TOGGLE'; value?: boolean }
     | { type: 'TORCH_PARAMS_SET'; value?: Partial<TorchLightSettings> }
-    | { type: 'SETTINGS_SAVE'; destination?: SettingsSaveDestination; requestId?: string }
+    | { type: 'PROJECT_SAVE'; destination?: SettingsSaveDestination; requestId?: string }
     /** 导入项目文件夹（webkitdirectory 文件列表）；不支持 zip */
     | { type: 'PROJECT_IMPORT'; files?: File | File[]; requestId?: string }
     | { type: 'SETTINGS_RESET' }
@@ -673,15 +673,15 @@ const initPostMessageBridge = (global: Global) => {
                 applySceneAssetTriggerDistanceM(global, id, pl.value);
                 break;
             }
-            case 'SETTINGS_SAVE': {
+            case 'PROJECT_SAVE': {
                 const requestId = readInboundRequestId(p);
                 const destination = resolveSettingsSaveDestination(p.destination);
                 const saveResult = await saveExperienceProject(global, destination);
                 const requestFields = requestId ? { requestId } : {};
                 if (destination === 'host') {
                     if (saveResult.ok === false) {
-                        console.error('[MessageBridge] SETTINGS_SAVE host 失败', saveResult.message);
-                        postToParent('SETTINGS_SAVE_RESULT', {
+                        console.error('[MessageBridge] PROJECT_SAVE host 失败', saveResult.message);
+                        postToParent('PROJECT_SAVE_RESULT', {
                             ok: false,
                             message: saveResult.message,
                             ...requestFields
@@ -689,14 +689,14 @@ const initPostMessageBridge = (global: Global) => {
                         break;
                     }
                     if (!isHostSaveSuccess(saveResult)) {
-                        postToParent('SETTINGS_SAVE_RESULT', {
+                        postToParent('PROJECT_SAVE_RESULT', {
                             ok: false,
                             message: '保存产物生成失败',
                             ...requestFields
                         });
                         break;
                     }
-                    postToParent('SETTINGS_SAVE_RESULT', {
+                    postToParent('PROJECT_SAVE_RESULT', {
                         ok: true,
                         ...requestFields,
                         settings: saveResult.host.settings,
@@ -708,11 +708,11 @@ const initPostMessageBridge = (global: Global) => {
                     break;
                 }
                 if (saveResult.ok === false) {
-                    console.error('[MessageBridge] SETTINGS_SAVE 失败', saveResult.message);
-                    postToParent('SETTINGS_SAVE_FAILED', { message: saveResult.message, ...requestFields });
+                    console.error('[MessageBridge] PROJECT_SAVE 失败', saveResult.message);
+                    postToParent('PROJECT_SAVE_FAILED', { message: saveResult.message, ...requestFields });
                     break;
                 }
-                postToParent('SETTINGS_UPDATED', requestFields);
+                postToParent('PROJECT_SAVE_SUCCEEDED', requestFields);
                 setBaseline();
                 break;
             }

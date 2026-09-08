@@ -6,11 +6,11 @@
 
 *   进入编辑模式：发送 `EDIT_MODE_SET { value: true }`
     
-*   退出编辑模式：父级点击「退出」时先发送 `EDIT_MODE_EXIT_REQUEST`；Viewer 回传 `EDIT_EXIT_NEEDS_SAVE { needsSave }`。若 needsSave 为 true，父级弹出确认弹窗（退出并保存 / 退出不保存 / 取消），选「退出并保存」则先 `SETTINGS_SAVE`（SaaS 缺省 `destination: 'universe'`）收到 `SETTINGS_UPDATED` 后再 `EDIT_MODE_SET { value: false }`，选「退出不保存」则 `EDIT_MODE_EXIT_DISCARD`；若 needsSave 为 false，父级直接发送 `EDIT_MODE_SET { value: false }`
+*   退出编辑模式：父级点击「退出」时先发送 `EDIT_MODE_EXIT_REQUEST`；Viewer 回传 `EDIT_EXIT_NEEDS_SAVE { needsSave }`。若 needsSave 为 true，父级弹出确认弹窗（退出并保存 / 退出不保存 / 取消），选「退出并保存」则先 `PROJECT_SAVE`（SaaS 缺省 `destination: 'universe'`）收到 `PROJECT_SAVE_SUCCEEDED` 后再 `EDIT_MODE_SET { value: false }`，选「退出不保存」则 `EDIT_MODE_EXIT_DISCARD`；若 needsSave 为 false，父级直接发送 `EDIT_MODE_SET { value: false }`
     
 *   撤销/重做：发送 `EDIT_UNDO` / `EDIT_REDO`；撤销/重做按钮的可用状态由 Viewer 回传的 `EDIT_HISTORY_STATE { canUndo, canRedo }` 更新
     
-*   保存：发送 `SETTINGS_SAVE { destination?: 'host' | 'universe', requestId?: string }`，缺省 `universe`。postMessage 本地保存用 `host`：不上传、不触发下载，经 `SETTINGS_SAVE_RESULT` 把 settings 与资源 File 交回父级（父级自行打包下载或交给客户上传）。`universe` 仍由 Viewer 上传 OSS，成功 `SETTINGS_UPDATED`，失败 `SETTINGS_SAVE_FAILED`。
+*   保存：发送 `PROJECT_SAVE { destination?: 'host' | 'universe', requestId?: string }`，缺省 `universe`。postMessage 本地保存用 `host`：不上传、不触发下载，经 `PROJECT_SAVE_RESULT` 把 settings 与资源 File 交回父级（父级自行打包下载或交给客户上传）。`universe` 仍由 Viewer 上传 OSS，成功 `PROJECT_SAVE_SUCCEEDED`，失败 `PROJECT_SAVE_FAILED`。
     
 
 ## 资产相关（Asset）
@@ -103,11 +103,11 @@
 | 进入编辑模式 | EDIT\_MODE\_SET | {value: true} |  |
 | 请求退出编辑模式 | EDIT\_MODE\_EXIT\_REQUEST |  | 父级在用户点击「退出」时发送；Viewer 回传 `EDIT_EXIT_NEEDS_SAVE`，父级根据 `needsSave` 决定是否弹窗及后续发送 `EDIT_MODE_SET` 或 `EDIT_MODE_EXIT_DISCARD` |
 | 退出编辑模式无改动 | EDIT\_MODE\_SET | {value: false} | 当 Viewer 回传 `needsSave` 为 false 时父级直接发送；或用户选「退出并保存」完成保存流程后发送 |
-| 退出编辑模式并保存改动 | EDIT\_MODE\_SET | {value: false} | 先发送 `SETTINGS_SAVE`（上传用缺省 `universe`，本地保存发 `destination: 'host'`）。`universe` 等 `SETTINGS_UPDATED`；`host` 等 `SETTINGS_SAVE_RESULT` 后再 `EDIT_MODE_SET { value: false }` |
+| 退出编辑模式并保存改动 | EDIT\_MODE\_SET | {value: false} | 先发送 `PROJECT_SAVE`（上传用缺省 `universe`，本地保存发 `destination: 'host'`）。`universe` 等 `PROJECT_SAVE_SUCCEEDED`；`host` 等 `PROJECT_SAVE_RESULT` 后再 `EDIT_MODE_SET { value: false }` |
 | 退出编辑模式不保存改动 | EDIT\_MODE\_EXIT\_DISCARD | / | 用户选「退出不保存」时发送；Viewer 回滚到上次保存快照并退出 |
 | 撤销 | EDIT\_UNDO | / |  |
 | 重做 | EDIT\_REDO | / |  |
-| 保存 | SETTINGS\_SAVE | { destination?: 'host' \| 'universe', requestId?: string } | 缺省 `universe`。postMessage 本地保存发 `host`：不上传不下载，回 `SETTINGS_SAVE_RESULT`。`universe` 上传 OSS，成功 `SETTINGS_UPDATED`，失败 `SETTINGS_SAVE_FAILED { message, requestId? }` |
+| 保存 | PROJECT\_SAVE | { destination?: 'host' \| 'universe', requestId?: string } | 缺省 `universe`。postMessage 本地保存发 `host`：不上传不下载，回 `PROJECT_SAVE_RESULT`。`universe` 上传 OSS，成功 `PROJECT_SAVE_SUCCEEDED`，失败 `PROJECT_SAVE_FAILED { message, requestId? }` |
 | 导入项目文件夹 | PROJECT\_IMPORT | `{ files: File[], requestId?: string }` | `files` 为 `<input webkitdirectory>` 的文件列表（须带 `webkitRelativePath`）。不支持 zip。成功 `PROJECT_IMPORT_SUCCEEDED`，失败 `PROJECT_IMPORT_FAILED` |
 | 预览 - 编辑模式下显隐调试组件（操作轴、线框） | PREVIEW\_MODE\_SET | {value: boolean} | true为隐藏这些组件，false为显示这些组件 |
 
@@ -118,7 +118,7 @@
 | 显示/隐藏已放置资产 | ASSETS\_SHOW\_HIDE\_SET | {value: boolean} |  |
 | 所有光照开关 | LIGHT\_TOGGLE\_ALL | {value: boolean} |  |
 | 单个光照开关 | LIGHT\_TOGGLE | { id: string, value: boolean } | 编辑模式下同样可采取此方式显隐光源 |
-| 相机移动步长系数 | CAMERA\_MOVE\_SPEED\_SCALE\_SET | { value: number } | 乘在场景尺寸自适应速度（`max(1, sceneSize×0.05)`）之上；缺省 **1**；范围 **(0, 10]**（运行时夹到 \[0.001, 10\]）；大场景小步可取 **0.1～0.5**。写入 **`settings.cameras[0].moveSpeedScale`**，随 **`SETTINGS_SAVE`** 持久化。非法值 `console.warn` 后忽略。本地编辑 UI：右侧「相机设置 → 移动步长」滑条（0.05～2） |
+| 相机移动步长系数 | CAMERA\_MOVE\_SPEED\_SCALE\_SET | { value: number } | 乘在场景尺寸自适应速度（`max(1, sceneSize×0.05)`）之上；缺省 **1**；范围 **(0, 10]**（运行时夹到 \[0.001, 10\]）；大场景小步可取 **0.1～0.5**。写入 **`settings.cameras[0].moveSpeedScale`**，随 **`PROJECT_SAVE`** 持久化。非法值 `console.warn` 后忽略。本地编辑 UI：右侧「相机设置 → 移动步长」滑条（0.05～2） |
 
 ### 左侧工具栏
 
@@ -207,11 +207,11 @@
 | --- | --- | --- | --- |
 | 响应“请求退出” | EDIT\_EXIT\_NEEDS\_SAVE | {value: boolean} | 收到父级 `EDIT_MODE_EXIT_REQUEST` 后回传；`needsSave` 为 true 时父级弹出「退出并保存/退出不保存/取消」弹窗，为 false 时父级直接发送 `EDIT_MODE_SET { value: false }` |
 | 撤销/重做按钮状态 | EDIT\_HISTORY\_STATE | {canUndo: boolean, canRedo: boolean} | 编辑历史变化时（及进入编辑模式、加载完成时）上报，供父级更新撤销/重做按钮的可用状态 |
-| 配置已保存 | SETTINGS\_UPDATED | { requestId?: string } | 仅 `destination: 'universe'`（已上传 OSS）。`host` **不发**本事件 |
-| 保存失败 | SETTINGS\_SAVE\_FAILED | { message: string, requestId?: string } | 仅 `universe`。`host` 失败走 `SETTINGS_SAVE_RESULT { ok: false }` |
-| 交回保存产物 | SETTINGS\_SAVE\_RESULT | `{ ok: true, requestId?, settings, files: [{ path, file }], references: [{ path, field }], contentChanged }` 或 `{ ok: false, requestId?, message }` | postMessage 本地保存（`destination: 'host'`）。不自动下载、不上传。`files` **始终含主模型**（`content/...`）以及用户相对路径资源。`contentChanged` 仅表示 Viewer 是否改过启动主模型 URL |
+| 配置已保存 | PROJECT\_SAVE\_SUCCEEDED | { requestId?: string } | 仅 `destination: 'universe'`（已上传 OSS）。`host` **不发**本事件 |
+| 保存失败 | PROJECT\_SAVE\_FAILED | { message: string, requestId?: string } | 仅 `universe`。`host` 失败走 `PROJECT_SAVE_RESULT { ok: false }` |
+| 交回保存产物 | PROJECT\_SAVE\_RESULT | `{ ok: true, requestId?, settings, files: [{ path, file }], references: [{ path, field }], contentChanged }` 或 `{ ok: false, requestId?, message }` | postMessage 本地保存（`destination: 'host'`）。不自动下载、不上传。`files` **始终含主模型**（`content/...`）以及用户相对路径资源。`contentChanged` 仅表示 Viewer 是否改过启动主模型 URL |
 | 导入成功 | PROJECT\_IMPORT\_SUCCEEDED | `{ requestId? }` | 已缓存项目包，随后 iframe 刷新加载包内主场景（含 `content/`）。刷新后仍走 `VIEWER_READY` / `VIEWER_ASSETS_READY`。入站带 `requestId` 时回传 |
-| 导入失败 | PROJECT\_IMPORT\_FAILED | `{ message: string, requestId? }` | 缺文件、zip、无 settings.json、解析失败等。不再误发 `SETTINGS_UPDATED` |
+| 导入失败 | PROJECT\_IMPORT\_FAILED | `{ message: string, requestId? }` | 缺文件、zip、无 settings.json、解析失败等。不发保存成功事件 |
 | 主场景首帧 | VIEWER\_READY | { requestId?: string } | 主 splat 已出第一帧，可以展示 Viewer。此时场景内资产可能仍在加载。对应失败是 `VIEWER_LOAD_FAILED`。URL `?requestId=` 有值时回传 |
 | 配置或主场景加载失败 | VIEWER\_LOAD\_FAILED | `{ requestId?, stage: 'settings' \| 'content', message, status?, url? }` | `settings` = settings.json；`content` = 主模型。发生后不再发 `VIEWER_READY`。不含场景内资产（那是 `VIEWER_ASSETS_LOAD_FAILED`）。同一加载最多一次 |
 | 场景资产就绪，可开始编辑 | VIEWER\_ASSETS\_READY | { requestId?: string } | 启动期 settings 场景资产 restore 完成且当前无在途 gaussian/mesh 加载。每个加载会话只发一次。有开场 reveal 时会等到 reveal 结束再 restore。失败对子是 `VIEWER_ASSETS_LOAD_FAILED` |

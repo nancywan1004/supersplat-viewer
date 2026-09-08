@@ -61,9 +61,9 @@ import { getRevealActiveType, readRevealParams } from '../settings-serialize/eff
 import { revealBlocksAnim } from '../vfx/effects-runtime/reveal/reveal-policy';
 
 /** zip / OSS 附件可能需拉文件，避免 3s 误失败 */
-const SETTINGS_SAVE_RESULT_TIMEOUT_MS = 60_000;
+const PROJECT_SAVE_RESULT_TIMEOUT_MS = 60_000;
 
-function waitForSettingsSaveResult(timeoutMs = SETTINGS_SAVE_RESULT_TIMEOUT_MS): Promise<void> {
+function waitForProjectSaveResult(timeoutMs = PROJECT_SAVE_RESULT_TIMEOUT_MS): Promise<void> {
     return new Promise((resolve, reject) => {
         let to = 0;
         const onMsg = (ev: MessageEvent) => {
@@ -75,27 +75,27 @@ function waitForSettingsSaveResult(timeoutMs = SETTINGS_SAVE_RESULT_TIMEOUT_MS):
             };
             if (!data) return;
             if (
-                data.type !== 'SETTINGS_UPDATED' &&
-                data.type !== 'SETTINGS_SAVE_FAILED' &&
-                data.type !== 'SETTINGS_SAVE_RESULT'
+                data.type !== 'PROJECT_SAVE_SUCCEEDED' &&
+                data.type !== 'PROJECT_SAVE_FAILED' &&
+                data.type !== 'PROJECT_SAVE_RESULT'
             ) {
                 return;
             }
             window.removeEventListener('message', onMsg);
             clearTimeout(to);
-            if (data.type === 'SETTINGS_SAVE_FAILED') {
+            if (data.type === 'PROJECT_SAVE_FAILED') {
                 const failMsg =
                     (typeof data.message === 'string' && data.message) ||
                     data.payload?.message ||
-                    'SETTINGS_SAVE_FAILED';
+                    'PROJECT_SAVE_FAILED';
                 reject(new Error(failMsg));
                 return;
             }
-            if (data.type === 'SETTINGS_SAVE_RESULT' && data.ok === false) {
+            if (data.type === 'PROJECT_SAVE_RESULT' && data.ok === false) {
                 const failMsg =
                     (typeof data.message === 'string' && data.message) ||
                     data.payload?.message ||
-                    'SETTINGS_SAVE_RESULT';
+                    'PROJECT_SAVE_RESULT';
                 reject(new Error(failMsg));
                 return;
             }
@@ -103,7 +103,7 @@ function waitForSettingsSaveResult(timeoutMs = SETTINGS_SAVE_RESULT_TIMEOUT_MS):
         };
         to = window.setTimeout(() => {
             window.removeEventListener('message', onMsg);
-            reject(new Error('timeout waiting for SETTINGS_UPDATED / SETTINGS_SAVE_RESULT / SETTINGS_SAVE_FAILED'));
+            reject(new Error('timeout waiting for PROJECT_SAVE_SUCCEEDED / PROJECT_SAVE_RESULT / PROJECT_SAVE_FAILED'));
         }, timeoutMs);
         window.addEventListener('message', onMsg);
     });
@@ -792,9 +792,9 @@ const initUI = (global: Global) => {
 
                         showExitEditConfirmModal({
                             onSave: () => {
-                                // 保存：由 bridge 生成 SETTINGS_UPDATED，再退出编辑模式
-                                sendEditProtocolMessage({ type: 'SETTINGS_SAVE', destination: 'host' });
-                                waitForSettingsSaveResult()
+                                // 保存：由 bridge 生成 PROJECT_SAVE_RESULT，再退出编辑模式
+                                sendEditProtocolMessage({ type: 'PROJECT_SAVE', destination: 'host' });
+                                waitForProjectSaveResult()
                                 .finally(() => {
                                     sendEditProtocolMessage({ type: 'EDIT_MODE_SET', value: false });
                                 });
@@ -972,13 +972,13 @@ const initUI = (global: Global) => {
                 saveDropdown?.classList.add('hidden');
                 saveBtn.setAttribute('aria-expanded', 'false');
             };
-            const runSettingsSave = async (destination: SettingsSaveDestination) => {
+            const runProjectSave = async (destination: SettingsSaveDestination) => {
                 closeSaveMenu();
                 const okMsg = destination === 'universe' ? '已上传到 Universe' : '已保存到本地';
                 if (editUiTransport === 'message-bridge') {
-                    sendEditProtocolMessage({ type: 'SETTINGS_SAVE', destination });
+                    sendEditProtocolMessage({ type: 'PROJECT_SAVE', destination });
                     try {
-                        await waitForSettingsSaveResult();
+                        await waitForProjectSaveResult();
                         showEditToast(okMsg, 'success');
                     } catch (err) {
                         const message = err instanceof Error ? err.message : String(err);
@@ -1013,7 +1013,7 @@ const initUI = (global: Global) => {
                     const destination = isLocalSave ?
                         (editUiTransport === 'message-bridge' ? 'host' : 'local') :
                         'universe';
-                    void runSettingsSave(destination);
+                    void runProjectSave(destination);
                 });
             });
             const dirInput = document.getElementById('importProjectDirInput') as HTMLInputElement | null;

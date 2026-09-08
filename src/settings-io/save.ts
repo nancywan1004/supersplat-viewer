@@ -1,4 +1,4 @@
-// SETTINGS_SAVE.destination：
+// PROJECT_SAVE.destination：
 // postMessage 本地保存一律 host：不下载、不上传，把 settings + 资源 File 交回父级。
 // universe：不写 content、不上传主场景；只登记 settings.json（用户资产 sidecar 仍 put）。
 // local：仅 Viewer 内部 UI 直连调用，下载 settings.zip（不走 postMessage 协议）。

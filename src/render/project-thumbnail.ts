@@ -1,6 +1,6 @@
 /**
  * 项目默认视角与缩略图：将当前相机写入 `settings.cameras[0].initial`，暂存 JPEG。
- * 仅 `SETTINGS_SAVE` destination=universe 时由 `saveExperienceProject` 上传登记；
+ * 仅 `PROJECT_SAVE` destination=universe 时由 `saveExperienceProject` 上传登记；
  * local 不下载、不打进 zip。
  */
 import { Vec3 } from 'playcanvas';
