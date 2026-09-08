@@ -5,8 +5,9 @@
 **当前 Session 上下文**：本文档已纳入「父级托管编辑模式重构」「局部亮灯区域改造」「**阴影 B 管线放置资产接影（2026-06-01）**」「**scene mesh 出站协议 + Universe `voxel-collision`（2026-06-01）**」「放置资产 AABB 相机碰撞（2026-05-29）」「**场景拾取 Picker 双路径收敛（2026-05-29）**」「**天空盒 settings 结构 + 编辑左栏 skybox 模块（2026-06-04）**」「**Octree refinement 闪烁与 pending 不降（2026-06-09）**」「**View→Edit 天空盒保留 + 缩略图 cover 裁切 + 无天空盒 envAtlas 副作用修复（2026-06-11）**」「**点彩 NPR（pointillism-stipple）modify/post/skybox 管线（2026-06-12 / 2026-06-16）**」「**点彩 + NightMode 场景光解耦（2026-06-16）**」「**SETTINGS_SAVE destination + 统一 saveExperienceProject（2026-08-26）**」。
 
 **2026-08-26 补充（SETTINGS_SAVE destination）**：
-- **入站**：**`SETTINGS_SAVE { destination?: 'host' | 'universe', requestId?: string }`**，缺省 **`universe`**。postMessage **本地保存发 `host`**：不下载不上传，成功/失败都 **`SETTINGS_SAVE_RESULT`**（含 settings、File、`references`、`contentChanged`）。**`universe`** 成功 **`SETTINGS_UPDATED`**，失败 **`SETTINGS_SAVE_FAILED { message, requestId? }`**。
+- **入站**：**`SETTINGS_SAVE { destination?: 'host' | 'universe', requestId?: string }`**，缺省 **`universe`**。postMessage **本地保存发 `host`**：不下载不上传，成功/失败都 **`SETTINGS_SAVE_RESULT`**（含 settings、主模型 File、用户 File、`references`、`contentChanged`）。无论主模型是否改过都带回 `content/`。**`universe`** 成功 **`SETTINGS_UPDATED`**，失败 **`SETTINGS_SAVE_FAILED { message, requestId? }`**。
 - **去向**：postMessage `host` = 产物交回父级；`universe` = OSS 上传。Viewer 内部 UI 直连仍可用 **`local`** 下载 zip（不是给父级的协议值）。
+- **导入文件夹**：入站 **`PROJECT_IMPORT { files: File[], requestId? }`**（`webkitdirectory`，不支持 zip）。成功 **`PROJECT_IMPORT_SUCCEEDED { requestId? }`**（先出站再刷新，包内主场景优先于 URL `?content=`）；失败 **`PROJECT_IMPORT_FAILED { message, requestId? }`**。
 - **加载成败（两对）**：
   - **主场景**：成功 **`VIEWER_READY { requestId? }`**（首帧）；失败 **`VIEWER_LOAD_FAILED { requestId?, stage: 'settings'|'content', message, status?, url? }`**（不再发 READY）。
   - **场景内资产**：成功 **`VIEWER_ASSETS_READY { requestId? }`**（可开始编辑）；失败 **`VIEWER_ASSETS_LOAD_FAILED { requestId?, message, status?, url?, failedCount }`**（不再发 ASSETS_READY）。

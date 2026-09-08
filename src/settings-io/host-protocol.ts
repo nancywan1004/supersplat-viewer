@@ -22,10 +22,10 @@ export type HostContentConfig = {
 };
 
 /**
- * host 保存：仅当 Viewer 持有主模型字节（blob/data）或运行期替换了启动 URL 时才带回文件。
- * 仍是原来的 http(s) `?content=` / CDN 地址时，外层保留原输入即可。
+ * host 保存：主模型是否相对启动 URL 被 Viewer 改过（blob/data 或换了地址）。
+ * 仅作 `contentChanged` 标记；host 本地保存无论是否改过都会带回主模型文件。
  * @param config - 当前与启动时的主场景 URL
- * @returns 是否需要把主模型文件交回外层
+ * @returns 是否改过主模型
  */
 export function isMainSceneModifiedForHostSave(config: HostContentConfig): boolean {
     const current = typeof config.contentUrl === 'string' ? config.contentUrl.trim() : '';

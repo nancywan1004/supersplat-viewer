@@ -6,8 +6,8 @@
 import { isMainSceneModifiedForHostSave, type SettingsSaveDestination } from './host-protocol';
 import {
     SETTINGS_JSON_NAME,
-    SETTINGS_ZIP_NAME,
     blobFromBytes,
+    localSettingsZipFilename,
     normalizePackPath,
     zipSettingsArchive
 } from './pack';
@@ -93,7 +93,7 @@ async function downloadLocalProject(
 
     try {
         const zipped = await zipSettingsArchive(packedJson, files);
-        downloadBlobAsFile(blobFromBytes(zipped, 'application/zip'), SETTINGS_ZIP_NAME);
+        downloadBlobAsFile(blobFromBytes(zipped, 'application/zip'), localSettingsZipFilename(global.config.projectId));
         return { ok: true };
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -107,17 +107,14 @@ async function buildHostSavePayload(
     relativePaths: string[]
 ): Promise<SettingsSavePipelineResult> {
     const contentChanged = isMainSceneModifiedForHostSave(global.config);
-    let nextSettings = settings;
-    const files: HostSaveFile[] = [];
-
-    if (contentChanged) {
-        const packedScene = await packMainSceneContent(global);
-        if (packedScene.ok === false) {
-            return packedScene;
-        }
-        nextSettings = writePackedContentField(settings, packedScene.relativePath);
-        files.push({ path: packedScene.relativePath, file: toHostFile(packedScene.relativePath, packedScene.blob) });
+    const packedScene = await packMainSceneContent(global);
+    if (packedScene.ok === false) {
+        return packedScene;
     }
+    const nextSettings = writePackedContentField(settings, packedScene.relativePath);
+    const files: HostSaveFile[] = [
+        { path: packedScene.relativePath, file: toHostFile(packedScene.relativePath, packedScene.blob) }
+    ];
 
     for (const path of relativePaths) {
         if (files.some(entry => entry.path === path)) continue;

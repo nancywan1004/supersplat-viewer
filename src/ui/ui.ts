@@ -1019,14 +1019,12 @@ const initUI = (global: Global) => {
             const dirInput = document.getElementById('importProjectDirInput') as HTMLInputElement | null;
             const runProjectImport = async (list: FileList | null) => {
                 if (!list || list.length === 0) return;
-                const result = await importLocalProject(global, list);
+                const result = await importLocalProject(list);
                 if (result.ok === false) {
                     showEditToast(result.message || '导入失败', 'error');
                     return;
                 }
-                if (result.mode === 'settings-only') {
-                    showEditToast('已导入项目设置（主场景仍使用 ?content=）', 'success');
-                }
+                location.reload();
             };
             dirInput?.addEventListener('change', () => {
                 void runProjectImport(dirInput.files);

@@ -141,7 +141,7 @@ type InboundPayload =
     | { type: 'TORCH_PARAMS_SET'; value?: Partial<TorchLightSettings> }
     | { type: 'SETTINGS_SAVE'; destination?: SettingsSaveDestination; requestId?: string }
     /** 导入项目文件夹（webkitdirectory 文件列表）；不支持 zip */
-    | { type: 'PROJECT_IMPORT'; files?: File | File[] }
+    | { type: 'PROJECT_IMPORT'; files?: File | File[]; requestId?: string }
     | { type: 'SETTINGS_RESET' }
     | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule | null }
     | { type: 'ASSET_SHOW_HIDE_SET'; id?: string; value?: boolean }
@@ -717,6 +717,8 @@ const initPostMessageBridge = (global: Global) => {
                 break;
             }
             case 'PROJECT_IMPORT': {
+                const requestId = readInboundRequestId(p);
+                const requestFields = requestId ? { requestId } : {};
                 const raw = (p as { files?: unknown }).files;
                 const files = raw instanceof File ?
                     raw :
@@ -725,18 +727,23 @@ const initPostMessageBridge = (global: Global) => {
                         [];
                 const hasFiles = files instanceof File || files.length > 0;
                 if (!hasFiles) {
-                    console.warn('[MessageBridge] PROJECT_IMPORT ignored: files required');
+                    postToParent('PROJECT_IMPORT_FAILED', {
+                        message: '缺少项目文件',
+                        ...requestFields
+                    });
                     break;
                 }
-                const importResult = await importLocalProject(global, files);
+                const importResult = await importLocalProject(files);
                 if (importResult.ok === false) {
                     console.error('[MessageBridge] PROJECT_IMPORT 失败', importResult.message);
+                    postToParent('PROJECT_IMPORT_FAILED', {
+                        message: importResult.message,
+                        ...requestFields
+                    });
                     break;
                 }
-                if (importResult.mode === 'settings-only') {
-                    postToParent('SETTINGS_UPDATED');
-                    setBaseline();
-                }
+                postToParent('PROJECT_IMPORT_SUCCEEDED', requestFields);
+                location.reload();
                 break;
             }
             case 'SETTINGS_RESET': {

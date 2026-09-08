@@ -1,19 +1,8 @@
-import {
-    hasExplicitContentQueryParam,
-    parseProjectFileList,
-    type ParsedProjectPack
-} from './project-pack';
-import { requestSceneAssetsRestore } from '../scene-assets/asset-placement-handler';
-import type { ExperienceSettings } from '../schemas/v2';
-import { importSettings } from '../settings';
-import { applySettingsSnapshot } from '../settings-serialize/settings-serialize';
-import type { Global } from '../types';
+import { parseProjectFileList } from './project-pack';
 import { savePendingProjectPack } from './project-pack-store';
-import { rememberUserUploadFile } from './user-files';
 
 export type ProjectImportResult =
-    | { ok: true; mode: 'reload' }
-    | { ok: true; mode: 'settings-only' }
+    | { ok: true }
     | { ok: false; message: string };
 
 function isZipFile(file: File): boolean {
@@ -21,7 +10,7 @@ function isZipFile(file: File): boolean {
     return name.endsWith('.zip') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed';
 }
 
-export async function parseProjectImportInput(input: FileList | File[] | File): Promise<ParsedProjectPack> {
+export async function parseProjectImportInput(input: FileList | File[] | File) {
     const files = input instanceof File ? [input] : Array.from(input as ArrayLike<File>);
     if (files.length === 0) {
         throw new Error('项目文件夹为空');
@@ -35,38 +24,18 @@ export async function parseProjectImportInput(input: FileList | File[] | File): 
     return await parseProjectFileList(files);
 }
 
-export async function applyProjectPackSettingsOnly(global: Global, pack: ParsedProjectPack): Promise<void> {
-    for (const [path, blob] of pack.files) {
-        rememberUserUploadFile(global, path, blob);
-    }
-    const snapshot = importSettings(pack.settings);
-    applySettingsSnapshot(global, snapshot);
-    (global as { __originalSettings?: ExperienceSettings }).__originalSettings =
-        JSON.parse(JSON.stringify(global.settings)) as ExperienceSettings;
-    await requestSceneAssetsRestore(global, { reason: 'startup' });
-}
-
+/**
+ * 解析项目文件夹并写入刷新缓存。调用方在成功出站后再 `location.reload()`。
+ */
 export async function importLocalProject(
-    global: Global,
-    input: FileList | File[] | File,
-    search: string = location.search
+    input: FileList | File[] | File
 ): Promise<ProjectImportResult> {
-    let pack: ParsedProjectPack;
+    let pack;
     try {
         pack = await parseProjectImportInput(input);
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return { ok: false, message };
-    }
-
-    if (hasExplicitContentQueryParam(search)) {
-        try {
-            await applyProjectPackSettingsOnly(global, pack);
-            return { ok: true, mode: 'settings-only' };
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            return { ok: false, message };
-        }
     }
 
     try {
@@ -78,6 +47,5 @@ export async function importLocalProject(
         const message = error instanceof Error ? error.message : String(error);
         return { ok: false, message: `缓存项目包失败: ${message}` };
     }
-    location.reload();
-    return { ok: true, mode: 'reload' };
+    return { ok: true };
 }

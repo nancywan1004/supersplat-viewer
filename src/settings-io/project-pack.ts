@@ -1,5 +1,5 @@
 // 本地项目包：settings.json + content/<场景文件> + assets/。
-// 有 URL ?content= 时不读包内主场景；仅本地下载把当前主场景写入 content/。
+// 普通加载：URL ?content= 优先于包内主场景。导入刷新：pending 包内 content/ 优先。
 import { contentFilenameFromUrl } from '../loaders/gsplat/content-filename';
 import { isLodMetaFile } from '../loaders/gsplat/lod/custom-loader';
 import { ViewerLoadError } from './host-protocol';
@@ -74,9 +74,10 @@ export async function packMainSceneContent(global: Global): Promise<
 export function applyPackedSceneToConfig(
     config: Config,
     pack: { settings: unknown; files?: Map<string, Blob> },
-    search: string = location.search
+    search: string = location.search,
+    opts?: { preferPackedContent?: boolean }
 ): void {
-    if (hasExplicitContentQueryParam(search)) return;
+    if (hasExplicitContentQueryParam(search) && !opts?.preferPackedContent) return;
     const path = guessPackedContentPath(pack.files?.keys() ?? [], pack.settings);
     if (!path) return;
     if (!isPackedSceneFilename(path)) return;

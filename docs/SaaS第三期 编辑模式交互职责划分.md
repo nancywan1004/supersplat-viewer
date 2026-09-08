@@ -108,6 +108,7 @@
 | 撤销 | EDIT\_UNDO | / |  |
 | 重做 | EDIT\_REDO | / |  |
 | 保存 | SETTINGS\_SAVE | { destination?: 'host' \| 'universe', requestId?: string } | 缺省 `universe`。postMessage 本地保存发 `host`：不上传不下载，回 `SETTINGS_SAVE_RESULT`。`universe` 上传 OSS，成功 `SETTINGS_UPDATED`，失败 `SETTINGS_SAVE_FAILED { message, requestId? }` |
+| 导入项目文件夹 | PROJECT\_IMPORT | `{ files: File[], requestId?: string }` | `files` 为 `<input webkitdirectory>` 的文件列表（须带 `webkitRelativePath`）。不支持 zip。成功 `PROJECT_IMPORT_SUCCEEDED`，失败 `PROJECT_IMPORT_FAILED` |
 | 预览 - 编辑模式下显隐调试组件（操作轴、线框） | PREVIEW\_MODE\_SET | {value: boolean} | true为隐藏这些组件，false为显示这些组件 |
 
 #### Viewer模式
@@ -208,7 +209,9 @@
 | 撤销/重做按钮状态 | EDIT\_HISTORY\_STATE | {canUndo: boolean, canRedo: boolean} | 编辑历史变化时（及进入编辑模式、加载完成时）上报，供父级更新撤销/重做按钮的可用状态 |
 | 配置已保存 | SETTINGS\_UPDATED | { requestId?: string } | 仅 `destination: 'universe'`（已上传 OSS）。`host` **不发**本事件 |
 | 保存失败 | SETTINGS\_SAVE\_FAILED | { message: string, requestId?: string } | 仅 `universe`。`host` 失败走 `SETTINGS_SAVE_RESULT { ok: false }` |
-| 交回保存产物 | SETTINGS\_SAVE\_RESULT | `{ ok: true, requestId?, settings, files: [{ path, file }], references: [{ path, field }], contentChanged }` 或 `{ ok: false, requestId?, message }` | postMessage 本地保存（`destination: 'host'`）。不自动下载、不上传。父级用产物打包下载或交给客户上传。主模型未改时 `contentChanged: false`、不带回主模型；Viewer 改过才带回修改后的文件 |
+| 交回保存产物 | SETTINGS\_SAVE\_RESULT | `{ ok: true, requestId?, settings, files: [{ path, file }], references: [{ path, field }], contentChanged }` 或 `{ ok: false, requestId?, message }` | postMessage 本地保存（`destination: 'host'`）。不自动下载、不上传。`files` **始终含主模型**（`content/...`）以及用户相对路径资源。`contentChanged` 仅表示 Viewer 是否改过启动主模型 URL |
+| 导入成功 | PROJECT\_IMPORT\_SUCCEEDED | `{ requestId? }` | 已缓存项目包，随后 iframe 刷新加载包内主场景（含 `content/`）。刷新后仍走 `VIEWER_READY` / `VIEWER_ASSETS_READY`。入站带 `requestId` 时回传 |
+| 导入失败 | PROJECT\_IMPORT\_FAILED | `{ message: string, requestId? }` | 缺文件、zip、无 settings.json、解析失败等。不再误发 `SETTINGS_UPDATED` |
 | 主场景首帧 | VIEWER\_READY | { requestId?: string } | 主 splat 已出第一帧，可以展示 Viewer。此时场景内资产可能仍在加载。对应失败是 `VIEWER_LOAD_FAILED`。URL `?requestId=` 有值时回传 |
 | 配置或主场景加载失败 | VIEWER\_LOAD\_FAILED | `{ requestId?, stage: 'settings' \| 'content', message, status?, url? }` | `settings` = settings.json；`content` = 主模型。发生后不再发 `VIEWER_READY`。不含场景内资产（那是 `VIEWER_ASSETS_LOAD_FAILED`）。同一加载最多一次 |
 | 场景资产就绪，可开始编辑 | VIEWER\_ASSETS\_READY | { requestId?: string } | 启动期 settings 场景资产 restore 完成且当前无在途 gaussian/mesh 加载。每个加载会话只发一次。有开场 reveal 时会等到 reveal 结束再 restore。失败对子是 `VIEWER_ASSETS_LOAD_FAILED` |
