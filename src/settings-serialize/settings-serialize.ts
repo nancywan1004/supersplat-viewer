@@ -1,22 +1,3 @@
-import type { Global, ScenePlacedItem } from '../types';
-import type { ExperienceSettings } from '../schemas/v2';
-import type { SceneAsset } from '../schemas/v2-custom';
-import type { AnnotationManager } from '../annotation-toolbar/annotation-manager';
-import { DEFAULT_BLOOM, DEFAULT_SHADOW } from './settings-serialize-configs';
-import {
-    applySceneAssetCollisionFromSettings,
-    persistCollisionToSettings,
-    syncSceneAssetCollisionRuntime
-} from '../scene-assets/collision/scene-asset-collision';
-import {
-    normalizeSkyboxForPersistence,
-    normalizeTorchLightOnImport,
-    serializeSceneMediaHotspotForPersistence
-} from './settings-serialize-helper';
-import {
-    createUserUploadPathContext,
-    persistScenePlacedItemSource
-} from '../settings-io/user-files';
 import {
     flushRevealIntoEffectsForExport,
     normalizeEffectsOnImport,
@@ -24,11 +5,32 @@ import {
     readRevealParams,
     syncEffectsRuntimeStateFromSettings
 } from './effects-sync';
-import { filterAssetEffectParams } from '../vfx/effects-runtime/asset/asset-effect-params';
-import { resolveSceneAssetSourceUrl } from '../loaders/asset-loader';
-import { isEphemeralAssetUrl } from '../loaders/asset-file';
-import { clearViewEffectsSession } from '../view-settings';
+import { DEFAULT_BLOOM, DEFAULT_SHADOW } from './settings-serialize-configs';
+import {
+    normalizeSkyboxForPersistence,
+    normalizeTorchLightOnImport,
+    serializeSceneMediaHotspotForPersistence
+} from './settings-serialize-helper';
+import type { AnnotationManager } from '../annotation-toolbar/annotation-manager';
 import { applyAllAnnotationsVisibilityFromSettings } from '../annotation-toolbar/annotation-visibility';
+import { writeAnnotationMediaToSettingsRecord } from '../annotation-toolbar/media-fields';
+import { isEphemeralAssetUrl } from '../loaders/asset-file';
+import { resolveSceneAssetSourceUrl } from '../loaders/asset-loader';
+import {
+    applySceneAssetCollisionFromSettings,
+    persistCollisionToSettings,
+    syncSceneAssetCollisionRuntime
+} from '../scene-assets/collision/scene-asset-collision';
+import type { ExperienceSettings } from '../schemas/v2';
+import type { Global, ScenePlacedItem } from '../types';
+import type { SceneAsset } from '../schemas/v2-custom';
+import {
+    annotationEntityToSettings,
+    createUserUploadPathContext,
+    persistScenePlacedItemSource
+} from '../settings-io/user-files';
+import { filterAssetEffectParams } from '../vfx/effects-runtime/asset/asset-effect-params';
+import { clearViewEffectsSession } from '../view-settings';
 
 const defaultPostEffectShadow = () => ({
     darken: DEFAULT_SHADOW.darken,
@@ -67,7 +69,10 @@ const defaultPostEffectSettings = () => ({
     shadow: defaultPostEffectShadow()
 });
 
-/** 存盘/出站 payload：省略 bloomEditorSession；兼容旧扁平字段；过滤 draft-* 区域 */
+/**
+ * 存盘/出站 payload：省略 bloomEditorSession；兼容旧扁平字段；过滤 draft-* 区域
+ * @param root
+ */
 function stripBloomSessionFieldsForPersistence(root: Record<string, unknown>): void {
     const pes = root.postEffectSettings as Record<string, unknown> | undefined;
     if (!pes || typeof pes !== 'object') return;
@@ -80,8 +85,8 @@ function stripBloomSessionFieldsForPersistence(root: Record<string, unknown>): v
     delete bloom.localLightsEnabled;
     if (Array.isArray(bloom.localLightRegions)) {
         bloom.localLightRegions = (bloom.localLightRegions as any[]).filter(
-            (r) => r && typeof r === 'object' && typeof (r as { id?: string }).id === 'string'
-                && !(r as { id: string }).id.startsWith('draft-')
+            r => r && typeof r === 'object' && typeof (r as { id?: string }).id === 'string' &&
+                !(r as { id: string }).id.startsWith('draft-')
         );
     }
 }
@@ -113,6 +118,7 @@ function stripAssetEffectFieldsForPersistence(root: Record<string, unknown>): vo
 /**
  * 将当前 global.settings 序列化为符合 v2 的 ExperienceSettings，
  * 深拷贝并补齐必填字段与默认值，便于 JSON.stringify 后保存或 postMessage。
+ * @param global
  */
 export function serializeExperienceSettings(global: Global): ExperienceSettings {
     const src = global.settings as Record<string, unknown>;
@@ -165,9 +171,9 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
                         // 将有效亮度写回 committedBrightness，保证重新加载时 WorldSpaceBloomData 有一致的快照：
                         // 目前仅根据局部颜色亮度 localBrightness 计算，不再使用每区域 Bloom 强度 slider
                         const colorBrightness =
-                            typeof r.localBrightness === 'number'
-                                ? Math.max(-1, Math.min(1, r.localBrightness))
-                                : 0;
+                            typeof r.localBrightness === 'number' ?
+                                Math.max(-1, Math.min(1, r.localBrightness)) :
+                                0;
                         const effectiveBrightness = colorBrightness;
                         ws.committedBrightness = effectiveBrightness;
                     }
@@ -180,13 +186,19 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
     if (!Array.isArray(out.cameras)) out.cameras = [];
     if (out.startMode == null) out.startMode = 'default';
 
-    // 将 AnnotationManager 中的标注序列化到 settings.annotations
+    // 将 AnnotationManager 中的标注序列化到 settings.annotations（imageUrl/videoUrl）
     const annotationManager = (global as any).annotationManager as AnnotationManager | undefined;
     if (annotationManager) {
-        const annotationsData = annotationManager.getAllAnnotations().map((a) => a.serialize());
-        out.annotations = annotationsData;
+        out.annotations = annotationManager.getAllAnnotations().map(a => annotationEntityToSettings(global, a)
+        );
     } else if (!Array.isArray(out.annotations)) {
         out.annotations = [];
+    } else {
+        for (const ann of out.annotations) {
+            if (ann && typeof ann === 'object') {
+                writeAnnotationMediaToSettingsRecord(ann as Record<string, unknown>);
+            }
+        }
     }
 
     out.sceneAssets = buildSceneAssetsForPersistence(global);
@@ -224,7 +236,10 @@ export function serializeExperienceSettings(global: Global): ExperienceSettings 
     return out as ExperienceSettings;
 }
 
-/** 将运行态已放置实体序列化为 settings.sceneAssets 条目 */
+/**
+ * 将运行态已放置实体序列化为 settings.sceneAssets 条目
+ * @param entry
+ */
 export function serializeScenePlacedItem(entry: ScenePlacedItem): SceneAsset {
     const pos = entry.entity.getPosition();
     const rot = entry.entity.getEulerAngles();
@@ -242,9 +257,9 @@ export function serializeScenePlacedItem(entry: ScenePlacedItem): SceneAsset {
         mirror: [mirrorX, mirrorY, mirrorZ]
     };
     if (
-        entry.assetType === 'video'
-        && typeof entry.horizontalCurvature === 'number'
-        && entry.horizontalCurvature > 0
+        entry.assetType === 'video' &&
+        typeof entry.horizontalCurvature === 'number' &&
+        entry.horizontalCurvature > 0
     ) {
         transform.horizontalCurvature = entry.horizontalCurvature;
     }
@@ -272,7 +287,11 @@ export function serializeScenePlacedItem(entry: ScenePlacedItem): SceneAsset {
     return out;
 }
 
-/** 存盘前补齐 video/audio 的 `source.url`，避免 Viewer 冷启动仅依赖 `uploadedAssets` 无法恢复。 */
+/**
+ * 存盘前补齐 video/audio 的 `source.url`，避免 Viewer 冷启动仅依赖 `uploadedAssets` 无法恢复。
+ * @param global
+ * @param sa
+ */
 function enrichSceneAssetSourceForPersistence(global: Global, sa: SceneAsset): SceneAsset {
     if (sa.type !== 'video' && sa.type !== 'audio') return sa;
     const resolved = resolveSceneAssetSourceUrl(global, sa.source);
@@ -292,29 +311,36 @@ function enrichSceneAssetSourceForPersistence(global: Global, sa: SceneAsset): S
 /**
  * 持久化 sceneAssets：以运行态为准，并保留 settings 中尚未恢复进场景的条目
  *（例如 video 因 CORS/超时未 place 成功时，避免保存把 JSON 里的配置抹掉）。
+ * @param global
  */
 export function buildSceneAssetsForPersistence(global: Global): SceneAsset[] {
     const sceneItems = (global.state.scenePlacedEntities ?? []) as ScenePlacedItem[];
     const pathCtx = createUserUploadPathContext();
-    const runtimeSerialized = sceneItems.map((entry) =>
-        persistScenePlacedItemSource(global, entry, serializeScenePlacedItem(entry), pathCtx)
+    const runtimeSerialized = sceneItems.map(entry => persistScenePlacedItemSource(global, entry, serializeScenePlacedItem(entry), pathCtx)
     );
-    const runtimeIds = new Set(runtimeSerialized.map((s) => s.id));
+    const runtimeIds = new Set(runtimeSerialized.map(s => s.id));
     const settings = global.settings as ExperienceSettings;
     const preserved = (settings.sceneAssets ?? []).filter(
         (sa): sa is SceneAsset => typeof sa?.id === 'string' && sa.id.length > 0 && !runtimeIds.has(sa.id)
     );
-    return [...runtimeSerialized, ...preserved].map((sa) => enrichSceneAssetSourceForPersistence(global, sa));
+    return [...runtimeSerialized, ...preserved].map(sa => enrichSceneAssetSourceForPersistence(global, sa));
 }
 
-/** 用户从场景删除资产时，同步剔除 settings.sceneAssets，避免下次保存被 merge 复活 */
+/**
+ * 用户从场景删除资产时，同步剔除 settings.sceneAssets，避免下次保存被 merge 复活
+ * @param global
+ * @param id
+ */
 export function removeSceneAssetFromSettings(global: Global, id: string): void {
     const settings = global.settings as ExperienceSettings;
     if (!Array.isArray(settings.sceneAssets)) return;
-    settings.sceneAssets = settings.sceneAssets.filter((a) => a.id !== id);
+    settings.sceneAssets = settings.sceneAssets.filter(a => a.id !== id);
 }
 
-/** 递归按 key 排序对象，用于生成可比较的字符串（避免 key 顺序导致误判） */
+/**
+ * 递归按 key 排序对象，用于生成可比较的字符串（避免 key 顺序导致误判）
+ * @param obj
+ */
 function sortKeysForCompare(obj: unknown): unknown {
     if (obj === null || typeof obj !== 'object') return obj;
     if (Array.isArray(obj)) return obj.map(sortKeysForCompare);
@@ -325,13 +351,19 @@ function sortKeysForCompare(obj: unknown): unknown {
     return sorted;
 }
 
-/** 返回与序列化结果一致的可比较字符串，用于判断 settings 是否有改动 */
+/**
+ * 返回与序列化结果一致的可比较字符串，用于判断 settings 是否有改动
+ * @param global
+ */
 export function getComparableSettingsString(global: Global): string {
     const settings = serializeExperienceSettings(global);
     return getComparableSettingsStringFromSnapshot(settings);
 }
 
-/** 对任意快照生成稳定可比较字符串，避免 key 顺序导致误判。 */
+/**
+ * 对任意快照生成稳定可比较字符串，避免 key 顺序导致误判。
+ * @param snapshot
+ */
 export function getComparableSettingsStringFromSnapshot(snapshot: ExperienceSettings): string {
     const settings = JSON.parse(JSON.stringify(snapshot)) as ExperienceSettings;
     normalizeNightModeForCompare(settings);
@@ -341,6 +373,7 @@ export function getComparableSettingsStringFromSnapshot(snapshot: ExperienceSett
 /**
  * needsSave 比较用：缺省 `nightMode` / `{ fade: 0 }` 视为等价，避免 remount/vfxExit
  * 事后 `ensure` 写出默认 nightMode 造成假脏。
+ * @param settings
  */
 function normalizeNightModeForCompare(settings: ExperienceSettings): void {
     const nm = settings.nightMode as { fade?: number; enabled?: boolean } | undefined;
@@ -365,6 +398,8 @@ function normalizeNightModeForCompare(settings: ExperienceSettings): void {
  * 系统侧写入 `collision.url`（如进入编辑后 shadow/collision 异步 `ensureCollisionUrl`）时，
  * 仅把基线快照中的 `collision.url` 同步为当前值，避免 `EDIT_EXIT_NEEDS_SAVE` 假脏；
  * 不改动 `enabled` / `scale` 等，以免掩盖用户真实编辑。
+ * @param baselineData
+ * @param global
  */
 export function syncEditBaselineCollisionFromGlobal(
     baselineData: ExperienceSettings,
@@ -393,7 +428,11 @@ export function syncEditBaselineCollisionFromGlobal(
     };
 }
 
-/** 比较两份 settings 快照，返回顶层不一致的 key（用于 needsSave 排查）。 */
+/**
+ * 比较两份 settings 快照，返回顶层不一致的 key（用于 needsSave 排查）。
+ * @param baseline
+ * @param current
+ */
 export function listTopLevelSettingsDiffKeys(
     baseline: ExperienceSettings,
     current: ExperienceSettings
@@ -415,7 +454,12 @@ export function listTopLevelSettingsDiffKeys(
     return diff;
 }
 
-/** 打印 needsSave 时各 diff key 的基线/当前值，便于定位假脏。 */
+/**
+ * 打印 needsSave 时各 diff key 的基线/当前值，便于定位假脏。
+ * @param label
+ * @param baseline
+ * @param current
+ */
 export function logSettingsDiffDetails(
     label: string,
     baseline: ExperienceSettings,
@@ -435,6 +479,8 @@ export function logSettingsDiffDetails(
 
 /**
  * 将 global.settings 恢复为快照内容（原地替换属性），用于「不保存并退出」时回退。
+ * @param global
+ * @param snapshot
  */
 export function applySettingsSnapshot(global: Global, snapshot: ExperienceSettings): void {
     clearViewEffectsSession(global);

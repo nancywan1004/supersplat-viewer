@@ -1,17 +1,17 @@
 import type { Config } from '../../../types';
+import { contentFilenameFromUrl } from '../content-filename';
 
-/** 主场景 content 指向单文件 .sog（unified instance 路径，非 octree lod-meta）。 */
+/**
+ * 主场景 content 指向单文件 .sog（unified instance 路径，非 octree lod-meta）。
+ * @param contentUrl - 主场景 URL
+ * @returns 是否为 unified 单文件 .sog
+ */
 export const isSogUnifiedContentUrl = (contentUrl: string | undefined): boolean => {
     if (!contentUrl) {
         return false;
     }
-    try {
-        const pathname = new URL(contentUrl, typeof location !== 'undefined' ? location.href : 'http://localhost/').pathname;
-        const filename = pathname.split('/').pop() ?? '';
-        return filename.toLowerCase().split('?')[0].endsWith('.sog');
-    } catch {
-        return contentUrl.toLowerCase().split('?')[0].endsWith('.sog');
-    }
+    const filename = contentFilenameFromUrl(contentUrl).toLowerCase();
+    return filename.endsWith('.sog');
 };
 
 const isWindowsHost = (): boolean => {
@@ -27,6 +27,8 @@ const isWindowsHost = (): boolean => {
 /**
  * Windows + WebGPU + SOG unified：D3D12 splat depth readback 易 TDR，启动时直接用 WebGL2。
  * LOD/octree（lod-meta 等）不在此列，仍可走 WebGPU。
+ * @param config - Viewer 启动配置
+ * @returns 是否应强制 WebGL2
  */
 export const shouldForceWebGlForSogUnified = (config: Config): boolean => {
     if (config.renderer === 'webgl') {

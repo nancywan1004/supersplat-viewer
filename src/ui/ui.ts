@@ -1,30 +1,6 @@
 import { EventHandler } from 'playcanvas';
 
-import {
-    createViewportSettleScheduler,
-    shouldUseTouchJoystickMove
-} from '../input/touch-joystick-ui';
-import { revealBlocksAnim } from '../vfx/effects-runtime/reveal/reveal-policy';
-import { Tooltip } from '../tooltip';
-import { Global, type State } from '../types';
-import { isCustomLodEnabled } from '../loaders/gsplat/lod/custom-loader';
-import type { ExperienceSettings } from '../schemas/v2';
-import {
-    serializeExperienceSettings,
-    getComparableSettingsString,
-    getComparableSettingsStringFromSnapshot,
-    applySettingsSnapshot,
-    syncEditBaselineCollisionFromGlobal,
-    logSettingsDiffDetails
-} from '../settings-serialize/settings-serialize';
 import { SCENE_COLLISION_CHANGED } from '../collision/scene-collision-source';
-import { readSkyboxCurrentUrlFromSettings } from '../settings-serialize/settings-serialize-helper';
-import { saveExperienceProject, type SettingsSaveDestination } from '../settings-io/save';
-import { resetSceneSettings } from '../settings-reset';
-import {
-    applyMorphKeyframeVisibilityPolicy,
-    requestSceneAssetsRestore
-} from '../scene-assets/asset-placement-handler';
 import {
     initEditHistory,
     canUndo,
@@ -38,26 +14,51 @@ import {
     applySkyboxOnEditEnter,
     restoreSkyboxFromSettings
 } from '../edit-history';
-import { showExitEditConfirmModal } from './components/exit-edit-confirm-ui';
-import { showEditToast } from './components/edit-toast-ui';
-import { confirmSceneReset } from './components/settings-reset-confirm-ui';
-import { initRevealUI } from './components/effects-ui';
+import { dispatchEffectsModuleCommand } from '../editor-modules/effects-facade';
+import { applyEnvironmentPreviewVisualPolicy } from '../editor-modules/environment-facade';
+import { applyLightToggle } from '../editor-modules/protocol-adapters/environment-protocol-adapter';
+import {
+    createViewportSettleScheduler,
+    shouldUseTouchJoystickMove
+} from '../input/touch-joystick-ui';
+import { isCustomLodEnabled } from '../loaders/gsplat/lod/custom-loader';
+import type { ExperienceSettings } from '../schemas/v2';
+import { Tooltip } from '../tooltip';
+import { Global, type State } from '../types';
+import {
+    serializeExperienceSettings,
+    getComparableSettingsString,
+    getComparableSettingsStringFromSnapshot,
+    applySettingsSnapshot,
+    syncEditBaselineCollisionFromGlobal,
+    logSettingsDiffDetails
+} from '../settings-serialize/settings-serialize';
+import { readSkyboxCurrentUrlFromSettings } from '../settings-serialize/settings-serialize-helper';
+import { saveExperienceProject, type SettingsSaveDestination } from '../settings-io/save';
+import { importLocalProject } from '../settings-io/import-local-project';
+import { resetSceneSettings } from '../settings-reset';
+import {
+    applyMorphKeyframeVisibilityPolicy,
+    requestSceneAssetsRestore
+} from '../scene-assets/asset-placement-handler';
+import { applyViewMediaMuteSet, applyViewTorchActive, readViewTorchActive } from '../view-settings';
+import { initAnnotationUI } from './components/annotation-ui';
 import { initAssetEffectsUI } from './components/asset-effects-ui';
+import { showEditToast } from './components/edit-toast-ui';
+import { initRevealUI } from './components/effects-ui';
+import { showExitEditConfirmModal } from './components/exit-edit-confirm-ui';
+import { confirmSceneReset } from './components/settings-reset-confirm-ui';
 import { initVideoExportUI } from './components/video-export-ui';
 import { initLightingUI } from './components/lighting-ui';
 import { initPostEffectUI } from './components/environment-ui';
-import { initAnnotationUI } from './components/annotation-ui';
 import { initViewSceneContentDebugUI } from './components/view-scene-content-debug-ui';
+import { initEditBottomToolbarUI } from './edit-bottom-toolbar';
 import { initEditLeftToolbarUI } from './edit-left-toolbar';
 import { initEditRightToolbarUI } from './edit-right-toolbar';
-import { initEditBottomToolbarUI } from './edit-bottom-toolbar';
 import type { Annotation } from '../settings';
 import { getEditUiTransport, sendEditProtocolMessage } from './edit-ui-transport';
-import { applyEnvironmentPreviewVisualPolicy } from '../editor-modules/environment-facade';
-import { applyLightToggle } from '../editor-modules/protocol-adapters/environment-protocol-adapter';
-import { applyViewMediaMuteSet, applyViewTorchActive, readViewTorchActive } from '../view-settings';
-import { dispatchEffectsModuleCommand } from '../editor-modules/effects-facade';
 import { getRevealActiveType, readRevealParams } from '../settings-serialize/effects-sync';
+import { revealBlocksAnim } from '../vfx/effects-runtime/reveal/reveal-policy';
 
 /** zip / OSS 附件可能需拉文件，避免 3s 误失败 */
 const SETTINGS_SAVE_RESULT_TIMEOUT_MS = 60_000;
@@ -66,9 +67,20 @@ function waitForSettingsSaveResult(timeoutMs = SETTINGS_SAVE_RESULT_TIMEOUT_MS):
     return new Promise((resolve, reject) => {
         let to = 0;
         const onMsg = (ev: MessageEvent) => {
-            const data = ev.data as { type?: string; message?: string; payload?: { message?: string } };
+            const data = ev.data as {
+                type?: string;
+                ok?: boolean;
+                message?: string;
+                payload?: { message?: string; ok?: boolean }
+            };
             if (!data) return;
-            if (data.type !== 'SETTINGS_UPDATED' && data.type !== 'SETTINGS_SAVE_FAILED') return;
+            if (
+                data.type !== 'SETTINGS_UPDATED' &&
+                data.type !== 'SETTINGS_SAVE_FAILED' &&
+                data.type !== 'SETTINGS_SAVE_RESULT'
+            ) {
+                return;
+            }
             window.removeEventListener('message', onMsg);
             clearTimeout(to);
             if (data.type === 'SETTINGS_SAVE_FAILED') {
@@ -79,11 +91,19 @@ function waitForSettingsSaveResult(timeoutMs = SETTINGS_SAVE_RESULT_TIMEOUT_MS):
                 reject(new Error(failMsg));
                 return;
             }
+            if (data.type === 'SETTINGS_SAVE_RESULT' && data.ok === false) {
+                const failMsg =
+                    (typeof data.message === 'string' && data.message) ||
+                    data.payload?.message ||
+                    'SETTINGS_SAVE_RESULT';
+                reject(new Error(failMsg));
+                return;
+            }
             resolve();
         };
         to = window.setTimeout(() => {
             window.removeEventListener('message', onMsg);
-            reject(new Error('timeout waiting for SETTINGS_UPDATED / SETTINGS_SAVE_FAILED'));
+            reject(new Error('timeout waiting for SETTINGS_UPDATED / SETTINGS_SAVE_RESULT / SETTINGS_SAVE_FAILED'));
         }, timeoutMs);
         window.addEventListener('message', onMsg);
     });
@@ -441,7 +461,7 @@ const initUI = (global: Global) => {
 
     // Check if LOD mode is enabled
     const isLodMode = isCustomLodEnabled(settings, config.contentUrl);
-    
+
     // In LOD mode, show progress bar but mark as 100% when animation starts
     // Progress is calculated based on threshold, reaching 100% when animation begins
     const hideProgressBarInLodMode = false;
@@ -503,7 +523,7 @@ const initUI = (global: Global) => {
             loadingWrap.classList.add('hidden');
         }
     };
-    
+
     events.on('progressThresholdReached', hideLoadingUI);
     events.on('animationStarted', hideLoadingUI);
 
@@ -644,10 +664,10 @@ const initUI = (global: Global) => {
         }
         const bottomMount = document.getElementById('editBottomToolbarMount');
         if (bottomMount) {
-            const showBottomBar = inEdit
-                && (state.editLeftModule === 'asset'
-                    || state.editLeftModule === 'annotation'
-                    || state.editLeftModule === 'environment');
+            const showBottomBar = inEdit &&
+                (state.editLeftModule === 'asset' ||
+                    state.editLeftModule === 'annotation' ||
+                    state.editLeftModule === 'environment');
             bottomMount.classList.toggle('hidden', !showBottomBar);
         }
         // 顶栏：编辑时显示「退出」+「保存」，非编辑时显示「编辑」
@@ -742,52 +762,51 @@ const initUI = (global: Global) => {
             dom.exitEditBtn.addEventListener('click', async () => {
                 if (editUiTransport === 'message-bridge') {
                     // 两段式退出：先请求 Viewer 判断是否需要保存，再由确认弹窗决定后续命令
-                    const waitFor = (t: string, timeoutMs = 1500) =>
-                        new Promise<any>((resolve, reject) => {
-                            const onMsg = (ev: MessageEvent) => {
-                                const data = ev.data as any;
-                                if (!data || data.type !== t) return;
-                                window.removeEventListener('message', onMsg);
-                                clearTimeout(to);
-                                resolve(data);
-                            };
-                            const to = window.setTimeout(() => {
-                                window.removeEventListener('message', onMsg);
-                                reject(new Error(`timeout waiting for ${t}`));
-                            }, timeoutMs);
-                            window.addEventListener('message', onMsg);
-                        });
+                    const waitFor = (t: string, timeoutMs = 1500) => new Promise<any>((resolve, reject) => {
+                        const onMsg = (ev: MessageEvent) => {
+                            const data = ev.data as any;
+                            if (!data || data.type !== t) return;
+                            window.removeEventListener('message', onMsg);
+                            clearTimeout(to);
+                            resolve(data);
+                        };
+                        const to = window.setTimeout(() => {
+                            window.removeEventListener('message', onMsg);
+                            reject(new Error(`timeout waiting for ${t}`));
+                        }, timeoutMs);
+                        window.addEventListener('message', onMsg);
+                    });
 
                     // 1) 请求退出：由 bridge 基于 baseline 判断 needsSave
                     sendEditProtocolMessage({ type: 'EDIT_MODE_EXIT_REQUEST' });
 
                     // 2) 等待 needsSave 再弹窗
                     waitFor('EDIT_EXIT_NEEDS_SAVE')
-                        .then((msg) => {
-                            // bridge 使用顶层字段 { type, value }，与旧 payload.value 兼容
-                            const needsSave = !!(msg?.value ?? msg?.payload?.value);
-                            if (!needsSave) {
-                                sendEditProtocolMessage({ type: 'EDIT_MODE_SET', value: false });
-                                return;
-                            }
+                    .then((msg) => {
+                        // bridge 使用顶层字段 { type, value }，与旧 payload.value 兼容
+                        const needsSave = !!(msg?.value ?? msg?.payload?.value);
+                        if (!needsSave) {
+                            sendEditProtocolMessage({ type: 'EDIT_MODE_SET', value: false });
+                            return;
+                        }
 
-                            showExitEditConfirmModal({
-                                onSave: () => {
-                                    // 保存：由 bridge 生成 SETTINGS_UPDATED，再退出编辑模式
-                                    sendEditProtocolMessage({ type: 'SETTINGS_SAVE', destination: 'local' });
-                                    waitForSettingsSaveResult()
-                                        .finally(() => {
-                                            sendEditProtocolMessage({ type: 'EDIT_MODE_SET', value: false });
-                                        });
-                                },
-                                onDiscard: () => {
-                                    sendEditProtocolMessage({ type: 'EDIT_MODE_EXIT_DISCARD' });
-                                }
-                            });
-                        })
-                        .catch(() => {
-                            // 忽略：协议未返回时不做任何事，避免误退出
+                        showExitEditConfirmModal({
+                            onSave: () => {
+                                // 保存：由 bridge 生成 SETTINGS_UPDATED，再退出编辑模式
+                                sendEditProtocolMessage({ type: 'SETTINGS_SAVE', destination: 'host' });
+                                waitForSettingsSaveResult()
+                                .finally(() => {
+                                    sendEditProtocolMessage({ type: 'EDIT_MODE_SET', value: false });
+                                });
+                            },
+                            onDiscard: () => {
+                                sendEditProtocolMessage({ type: 'EDIT_MODE_EXIT_DISCARD' });
+                            }
                         });
+                    })
+                    .catch(() => {
+                        // 忽略：协议未返回时不做任何事，避免误退出
+                    });
 
                     return;
                 }
@@ -801,7 +820,7 @@ const initUI = (global: Global) => {
                         restoreAnnotationsFromSettings(global);
                         restoreLightingFromSettings(global);
                         restorePostEffectsFromSettings(global);
-                    restoreSkyboxFromSettings(global);
+                        restoreSkyboxFromSettings(global);
                     }
                     state.editMode = false;
                     applyMorphKeyframeVisibilityPolicy(global);
@@ -846,7 +865,7 @@ const initUI = (global: Global) => {
                         // 统一通过 helper 按当前 settings 重置 Lighting / NightMode / PostEffect
                         restoreLightingFromSettings(global);
                         restorePostEffectsFromSettings(global);
-                    restoreSkyboxFromSettings(global);
+                        restoreSkyboxFromSettings(global);
                         state.editMode = false;
                         applyMorphKeyframeVisibilityPolicy(global);
                         events.fire('editMode:changed', false);
@@ -877,46 +896,45 @@ const initUI = (global: Global) => {
 
             try {
                 if (editUiTransport === 'message-bridge') {
-                    const waitForResetResult = (timeoutMs = 30000) =>
-                        new Promise<{ pathFrom?: string }>((resolve, reject) => {
-                            const onMsg = (ev: MessageEvent) => {
-                                const data = ev.data as {
+                    const waitForResetResult = (timeoutMs = 30000) => new Promise<{ pathFrom?: string }>((resolve, reject) => {
+                        const onMsg = (ev: MessageEvent) => {
+                            const data = ev.data as {
                                     type?: string;
                                     message?: string;
                                     pathFrom?: string;
                                 };
-                                if (!data?.type) return;
-                                if (
-                                    data.type !== 'SETTINGS_RESET_APPLIED'
-                                    && data.type !== 'SETTINGS_RESET_FAILED'
-                                ) {
-                                    return;
-                                }
-                                window.removeEventListener('message', onMsg);
-                                clearTimeout(to);
-                                if (data.type === 'SETTINGS_RESET_FAILED') {
-                                    reject(new Error(
-                                        typeof data.message === 'string' && data.message
-                                            ? data.message
-                                            : 'SETTINGS_RESET_FAILED'
-                                    ));
-                                    return;
-                                }
-                                resolve({ pathFrom: data.pathFrom });
-                            };
-                            const to = window.setTimeout(() => {
-                                window.removeEventListener('message', onMsg);
-                                reject(new Error('timeout waiting for SETTINGS_RESET_APPLIED'));
-                            }, timeoutMs);
-                            window.addEventListener('message', onMsg);
-                        });
+                            if (!data?.type) return;
+                            if (
+                                data.type !== 'SETTINGS_RESET_APPLIED' &&
+                                    data.type !== 'SETTINGS_RESET_FAILED'
+                            ) {
+                                return;
+                            }
+                            window.removeEventListener('message', onMsg);
+                            clearTimeout(to);
+                            if (data.type === 'SETTINGS_RESET_FAILED') {
+                                reject(new Error(
+                                    typeof data.message === 'string' && data.message ?
+                                        data.message :
+                                        'SETTINGS_RESET_FAILED'
+                                ));
+                                return;
+                            }
+                            resolve({ pathFrom: data.pathFrom });
+                        };
+                        const to = window.setTimeout(() => {
+                            window.removeEventListener('message', onMsg);
+                            reject(new Error('timeout waiting for SETTINGS_RESET_APPLIED'));
+                        }, timeoutMs);
+                        window.addEventListener('message', onMsg);
+                    });
 
                     sendEditProtocolMessage({ type: 'SETTINGS_RESET' });
                     const applied = await waitForResetResult();
                     syncResetEditHistory();
-                    const msg = applied.pathFrom === 'original'
-                        ? '场景已重置（已应用云端初始相机路径）'
-                        : '场景已重置（未找到 transform.json，已保留当前动画路径与默认视角）';
+                    const msg = applied.pathFrom === 'original' ?
+                        '场景已重置（已应用云端初始相机路径）' :
+                        '场景已重置（未找到 transform.json，已保留当前动画路径与默认视角）';
                     showEditToast(msg, 'success');
                 } else {
                     const result = await resetSceneSettings(global);
@@ -925,9 +943,9 @@ const initUI = (global: Global) => {
                         return;
                     }
                     syncResetEditHistory();
-                    const msg = result.pathFrom === 'original'
-                        ? '场景已重置（已应用云端初始相机路径）'
-                        : '场景已重置（未找到 transform.json，已保留当前动画路径与默认视角）';
+                    const msg = result.pathFrom === 'original' ?
+                        '场景已重置（已应用云端初始相机路径）' :
+                        '场景已重置（未找到 transform.json，已保留当前动画路径与默认视角）';
                     showEditToast(msg, 'success');
                 }
             } catch (err) {
@@ -956,7 +974,7 @@ const initUI = (global: Global) => {
             };
             const runSettingsSave = async (destination: SettingsSaveDestination) => {
                 closeSaveMenu();
-                const okMsg = destination === 'local' ? '已保存到本地' : '已上传到 Universe';
+                const okMsg = destination === 'universe' ? '已上传到 Universe' : '已保存到本地';
                 if (editUiTransport === 'message-bridge') {
                     sendEditProtocolMessage({ type: 'SETTINGS_SAVE', destination });
                     try {
@@ -991,8 +1009,34 @@ const initUI = (global: Global) => {
             saveDropdown?.querySelectorAll<HTMLButtonElement>('[data-destination]').forEach((option) => {
                 option.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    const destination = option.dataset.destination === 'local' ? 'local' : 'universe';
+                    const isLocalSave = option.dataset.destination === 'local' || option.dataset.destination === 'host';
+                    const destination = isLocalSave ?
+                        (editUiTransport === 'message-bridge' ? 'host' : 'local') :
+                        'universe';
                     void runSettingsSave(destination);
+                });
+            });
+            const dirInput = document.getElementById('importProjectDirInput') as HTMLInputElement | null;
+            const runProjectImport = async (list: FileList | null) => {
+                if (!list || list.length === 0) return;
+                const result = await importLocalProject(global, list);
+                if (result.ok === false) {
+                    showEditToast(result.message || '导入失败', 'error');
+                    return;
+                }
+                if (result.mode === 'settings-only') {
+                    showEditToast('已导入项目设置（主场景仍使用 ?content=）', 'success');
+                }
+            };
+            dirInput?.addEventListener('change', () => {
+                void runProjectImport(dirInput.files);
+                dirInput.value = '';
+            });
+            saveDropdown?.querySelectorAll<HTMLButtonElement>('[data-import]').forEach((option) => {
+                option.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    closeSaveMenu();
+                    dirInput?.click();
                 });
             });
             document.addEventListener('click', (e) => {
@@ -1084,9 +1128,9 @@ const initUI = (global: Global) => {
         events.on('editLeftModule:changed', () => {
             const bottomMount = document.getElementById('editBottomToolbarMount');
             if (bottomMount && state.editMode) {
-                const showBottomBar = state.editLeftModule === 'asset'
-                    || state.editLeftModule === 'annotation'
-                    || state.editLeftModule === 'environment';
+                const showBottomBar = state.editLeftModule === 'asset' ||
+                    state.editLeftModule === 'annotation' ||
+                    state.editLeftModule === 'environment';
                 bottomMount.classList.toggle('hidden', !showBottomBar);
             }
             if (dom.rightToolBar) {
@@ -1201,7 +1245,7 @@ const initUI = (global: Global) => {
             if (!linkedLightId) return;
             const lighting = (global.settings as any)?.lighting;
             const lights = lighting?.lights as Array<{ id?: string; enabled?: boolean }> | undefined;
-            const light = Array.isArray(lights) ? lights.find((l) => l && l.id === linkedLightId) : undefined;
+            const light = Array.isArray(lights) ? lights.find(l => l && l.id === linkedLightId) : undefined;
             const nextEnabled = light ? !(light.enabled !== false) : true;
             if (editUiTransport === 'message-bridge') {
                 sendEditProtocolMessage({ type: 'LIGHT_TOGGLE', id: linkedLightId, value: nextEnabled });

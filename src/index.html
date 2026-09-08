@@ -53,8 +53,9 @@
             const posterUrl = toProxy(url.searchParams.get('poster'));
             const skyboxUrl = toProxy(url.searchParams.get('skybox'));
             const collisionUrl = url.searchParams.get('collision') ?? url.searchParams.get('voxel');
+            const contentFromQuery = url.searchParams.has('content');
             const settingsUrl = url.searchParams.has('settings') ? url.searchParams.get('settings') : './settings.json';
-            const contentUrl = url.searchParams.has('content') ? url.searchParams.get('content') : './scene.sog';
+            const contentUrl = contentFromQuery ? url.searchParams.get('content') : './scene.sog';
             const settingsFetchUrl = toProxy(settingsUrl);
             let settingsUrlAbs = settingsUrl;
             try {
@@ -63,6 +64,7 @@
             const contentFetchUrl = toProxy(contentUrl);
             const projectId = url.searchParams.get('projectId') ?? undefined;
             const token = url.searchParams.get('token') ?? undefined;
+            const loadRequestId = url.searchParams.get('requestId')?.trim() || undefined;
 
             // ?webgpu (or content=lod-meta.json) picks the best WebGPU renderer for
             // the platform: compute on macOS (where the raster gpu-sort path stalls)
@@ -143,7 +145,7 @@
                 skyboxUrl,
                 collisionUrl,
                 contentUrl,
-                contents: fetch(contentFetchUrl),
+                contents: contentFromQuery ? fetch(contentFetchUrl) : undefined,
                 noui: url.searchParams.has('noui'),
                 noanim: url.searchParams.has('noanim'),
                 noautorotate: url.searchParams.has('noautorotate'),
@@ -152,9 +154,9 @@
                 unified: url.searchParams.has('unified'),
                 aa: url.searchParams.has('aa'),
                 noreveal: url.searchParams.has('noreveal'),
-                noBottomUI: true,  // url.searchParams.has('noBottomUI')
+                noBottomUI: false,  // url.searchParams.has('noBottomUI')
                 allowEditMode: !url.searchParams.has('noEditMode'),
-                showEditUI: false,
+                showEditUI: true,
                 disableCameraBounds: false,
                 trackEditHistory: false, //url.searchParams.get('trackEditHistory') !== 'false',
                 editUiTransport: url.searchParams.get('editUiTransport') === 'message-bridge' ? 'message-bridge' : 'internal',
@@ -209,7 +211,8 @@
                 })(),
                 projectId,
                 token,
-                settingsUrl: settingsUrlAbs
+                settingsUrl: settingsUrlAbs,
+                loadRequestId
             };
 
             window.sse = {
@@ -274,8 +277,10 @@
                     <div id="saveSettingsDropdown" class="edit-mode-save-dropdown hidden" role="menu">
                         <button type="button" class="edit-mode-save-option" data-destination="local" role="menuitem">保存到本地</button>
                         <button type="button" class="edit-mode-save-option" data-destination="universe" role="menuitem">上传到 Universe</button>
+                        <button type="button" class="edit-mode-save-option" data-import="folder" role="menuitem">导入文件夹</button>
                     </div>
                 </div>
+                <input type="file" id="importProjectDirInput" class="hidden" tabindex="-1" webkitdirectory directory multiple />
             </div>
             <!-- 编辑模式三个挂载点（仅 edit 模式显示），内容由对应组件注入 -->
             <div id="editLeftSidebarMount" class="edit-left-sidebar hidden"></div>
@@ -805,7 +810,7 @@
 
         <!-- Application Script -->
         <script type="module">
-            import { main, loadSettingsFromResponse } from './index.js';
+            import { main, loadSettingsFromResponse, applyPackedSceneToConfig, takePendingProjectPack, postViewerLoadFailedFromError, toUserUploadFetchUrl } from './index.js';
 
             const { config, settings } = window.sse;
             const { poster } = config;
@@ -823,12 +828,38 @@
 
             document.addEventListener('DOMContentLoaded', async () => {
                 const canvas = document.getElementById('application-canvas');
-                const response = await settings;
-                const loaded = await loadSettingsFromResponse(response, config.settingsUrl);
-                if (loaded.settingsUrl) {
-                    config.settingsUrl = loaded.settingsUrl;
+                try {
+                    const pending = await takePendingProjectPack();
+                    let loaded;
+                    if (pending) {
+                        const userUploadFiles = new Map(pending.files.map((entry) => [entry.path, entry.blob]));
+                        loaded = {
+                            settings: pending.settings,
+                            settingsUrl: config.settingsUrl,
+                            userUploadFiles
+                        };
+                    } else {
+                        const response = await settings;
+                        loaded = await loadSettingsFromResponse(response, config.settingsUrl);
+                    }
+                    if (loaded.settingsUrl) {
+                        config.settingsUrl = loaded.settingsUrl;
+                    }
+                    applyPackedSceneToConfig(config, {
+                        settings: loaded.settings,
+                        files: loaded.userUploadFiles
+                    });
+                    if (!config.contents && config.contentUrl) {
+                        config.contents = fetch(toUserUploadFetchUrl(config.contentUrl));
+                    }
+                    await main(canvas, loaded.settings, config, loaded.userUploadFiles);
+                } catch (err) {
+                    console.error('[SuperSplat] 启动失败', err);
+                    postViewerLoadFailedFromError(err, 'settings', {
+                        url: config.settingsUrl || config.contentUrl,
+                        requestId: config.loadRequestId
+                    });
                 }
-                await main(canvas, loaded.settings, config, loaded.userUploadFiles);
             });
         </script>
     </body>

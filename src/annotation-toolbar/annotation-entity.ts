@@ -1,6 +1,6 @@
 /**
  * AnnotationEntity - 扩展的标注实体类
- * 
+ *
  * 扩展现有的 Annotation 类，添加编辑模式所需的功能：
  * - 内容更新（标题、正文、图片）
  * - 展开/收起状态控制
@@ -8,20 +8,24 @@
  */
 
 import { Vec3, Entity } from 'playcanvas';
+
 import { Annotation } from '../annotation';
 import { annotationSlotsFromUrls, flattenAnnotationMedia } from './media-fields';
 import type { AnnotationData, AnnotationFormData } from './types';
 import type { Annotation as SettingsAnnotation, Camera } from '../schemas/v2';
+import { persistAnnotationMedia } from '../settings-io/user-files';
 import type { Global } from '../types';
 
 /**
  * AnnotationEntity 类
- * 
+ *
  * 扩展 Annotation 脚本类，添加编辑模式功能
  */
 export class AnnotationEntity extends Annotation {
     static scriptName = 'annotationEntity';
+
     private static readonly HOTSPOT_DEFAULT_SVG = '/assets/icons/hotspot.svg';
+
     private static readonly HOTSPOT_HIGHLIGHT_SVG = '/assets/icons/hotspot-highlight.svg';
 
     /** 唯一标识符 */
@@ -32,6 +36,7 @@ export class AnnotationEntity extends Annotation {
 
     /** settings 附加字段，协议不带；存盘原样写回 */
     settingsExtras?: SettingsAnnotation['extras'];
+
     /** settings 观察机位，协议不带；点击热点飞镜头用 */
     settingsCamera?: Camera;
 
@@ -43,7 +48,9 @@ export class AnnotationEntity extends Annotation {
 
     /** 收起时显示的标题 DOM（当 showTitleWhenCollapsed 为 true 时） */
     private collapsedTitleSpan: HTMLSpanElement | null = null;
+
     private selectedVisual = false;
+
     private tooltipInputSuppressed = false;
 
     /**
@@ -102,7 +109,10 @@ export class AnnotationEntity extends Annotation {
         this._updateVisibility();
     }
 
-    /** 重写：同时定位收起时的标题 */
+    /**
+     * 重写：同时定位收起时的标题
+     * @param screenPos
+     */
     _updatePositions(screenPos: Vec3): void {
         super._updatePositions(screenPos);
         if (!this.collapsedTitleSpan) return;
@@ -126,7 +136,7 @@ export class AnnotationEntity extends Annotation {
 
     /**
      * 更新标注内容
-     * 
+     *
      * @param data - 部分表单数据（标题、正文、图片、收起时显示标题选项）
      */
     updateContent(data: Partial<AnnotationFormData>): void {
@@ -141,12 +151,16 @@ export class AnnotationEntity extends Annotation {
         }
 
         if (data.image !== undefined || data.video !== undefined) {
-            const media = annotationSlotsFromUrls(flattenAnnotationMedia({
+            const incoming = {
                 image: data.image !== undefined ? data.image : this.data.image,
                 video: data.video !== undefined ? data.video : this.data.video
-            }));
-            this.data.image = media.image;
-            this.data.video = media.video;
+            };
+            const media = this.global ?
+                persistAnnotationMedia(this.global, incoming, this.id) :
+                flattenAnnotationMedia(incoming);
+            const slots = annotationSlotsFromUrls(media);
+            this.data.image = slots.image;
+            this.data.video = slots.video;
         }
 
         if (data.showTitleWhenCollapsed !== undefined) {
@@ -173,6 +187,7 @@ export class AnnotationEntity extends Annotation {
      * 新语义：
      * - collapsed === true  → 视为收起：取消锚定并收起 tooltip，仅按照 showTitleWhenCollapsed 显示收起标题
      * - collapsed === false → 视为展开：锚定展开 tooltip，不因鼠标移开而收起
+     * @param collapsed
      */
     setCollapsed(collapsed: boolean): void {
         this.data.collapsed = collapsed;
@@ -243,9 +258,9 @@ export class AnnotationEntity extends Annotation {
                 hotspotDom.classList.toggle('pc-annotation-hotspot--selected', selected);
                 const img = hotspotDom.querySelector('.pc-annotation-hotspot__img') as HTMLImageElement | null;
                 if (img) {
-                    img.src = selected
-                        ? AnnotationEntity.HOTSPOT_HIGHLIGHT_SVG
-                        : (Annotation.hotspotSvgUrl || AnnotationEntity.HOTSPOT_DEFAULT_SVG);
+                    img.src = selected ?
+                        AnnotationEntity.HOTSPOT_HIGHLIGHT_SVG :
+                        (Annotation.hotspotSvgUrl || AnnotationEntity.HOTSPOT_DEFAULT_SVG);
                 }
             }
             if (this.collapsedTitleSpan) {
@@ -258,6 +273,7 @@ export class AnnotationEntity extends Annotation {
             // 保底：高亮异常不影响标注本体显示
         }
     }
+
     /** 当前 tooltip 是否可见（用于决定是否展示收起标题） */
     private isTooltipVisible(): boolean {
         return Annotation.activeAnnotation === this && Annotation.tooltipDom?.style.opacity === '1';
@@ -280,7 +296,7 @@ export class AnnotationEntity extends Annotation {
 
     /**
      * 获取标注位置
-     * 
+     *
      * @returns 当前 3D 位置
      */
     getPosition(): Vec3 {
@@ -332,18 +348,19 @@ export class AnnotationEntity extends Annotation {
 
     /**
      * 序列化标注数据
-     * 
+     *
      * @returns 序列化后的标注数据对象
      */
     serialize(): AnnotationData {
         const position = this.getPosition();
-        
+
         return {
             id: this.id,
             position: [position.x, position.y, position.z],
             title: this.title,
             text: this.text,
-            ...annotationSlotsFromUrls(flattenAnnotationMedia(this.data)),
+            image: this.data.image,
+            video: this.data.video,
             showTitleWhenCollapsed: this.data.showTitleWhenCollapsed,
             visible: this.data.visible !== false,
             // collapsed 字段仅为兼容旧数据，始终视为默认收起
@@ -353,7 +370,7 @@ export class AnnotationEntity extends Annotation {
 
     /**
      * 从数据反序列化创建标注实体
-     * 
+     *
      * @param data - 标注数据对象
      * @param global - Global 引用
      * @returns 创建的标注实体
@@ -389,7 +406,7 @@ export class AnnotationEntity extends Annotation {
 
     /**
      * 更新可见性（根据展开/收起状态）
-     * 
+     *
      * 根据当前的展开/收起状态和配置，更新标注的显示内容
      * @private
      */
@@ -401,4 +418,3 @@ export class AnnotationEntity extends Annotation {
         if (this.app) this.app.renderNextFrame = true;
     }
 }
-

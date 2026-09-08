@@ -1,15 +1,23 @@
 // 用户上传文件：存盘写成相对 settings.json 的路径；会话表 relativePath→Blob；加载时解析。
 // blob: / data: 不入库。绝对 http(s) URL 不改写、不打包。
-import { asUserFile, fetchFileFromUrl, isEphemeralAssetUrl, userUploadBasename } from '../loaders/asset-file';
-import type { ExperienceSettings } from '../schemas/v2';
-import type { SceneAsset } from '../schemas/v2-custom';
-import type { AssetLibraryItem, Global, ScenePlacedItem } from '../types';
-import { fetchLatestProjectFiles, setUniverseAuthContext } from '../universe/service';
 import {
     canonicalizeSlashPath,
     extensionFromMime,
     normalizePackPath
 } from './pack';
+import {
+    annotationDataToSettings,
+    annotationMediaFromUnknown,
+    annotationSlotsFromUrls,
+    writeAnnotationMediaToSettingsRecord,
+    type AnnotationMediaFields
+} from '../annotation-toolbar/media-fields';
+import type { AnnotationData } from '../annotation-toolbar/types';
+import { asUserFile, fetchFileFromUrl, isEphemeralAssetUrl, userUploadBasename } from '../loaders/asset-file';
+import type { Annotation as SettingsAnnotation, Camera, ExperienceSettings } from '../schemas/v2';
+import type { SceneAsset } from '../schemas/v2-custom';
+import type { AssetLibraryItem, Global, ScenePlacedItem } from '../types';
+import { fetchLatestProjectFiles, setUniverseAuthContext } from '../universe/service';
 
 export type UserUploadPathContext = {
     usedPaths: Set<string>;
@@ -35,17 +43,23 @@ function pathContextFor(global: Global): UserUploadPathContext {
     return ctx;
 }
 
-/** 无 scheme、非站点根路径：视为相对 settings.json 的用户文件路径。 */
+/**
+ * 无 scheme、非站点根路径：视为相对 settings.json 的用户文件路径。
+ * @param value
+ */
 export function isUserUploadRelativePath(value: string | undefined | null): value is string {
     if (typeof value !== 'string') return false;
     const s = value.trim();
     if (!s) return false;
     if (s.startsWith('/') || s.startsWith('\\')) return false;
-    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(s)) return false;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(s)) return false;
     return true;
 }
 
-/** 含目录的相对路径（如 `assets/foo.glb`）；纯 basename 不算打包路径。 */
+/**
+ * 含目录的相对路径（如 `assets/foo.glb`）；纯 basename 不算打包路径。
+ * @param value
+ */
 export function isPackedUserUploadPath(value: string | undefined | null): boolean {
     if (typeof value !== 'string' || !isUserUploadRelativePath(value)) return false;
     return canonicalizeSlashPath(value).includes('/');
@@ -189,7 +203,10 @@ function getLocalDevProxyBase(): string {
     return `http://localhost:${proxyPort}/api/proxy?url=`;
 }
 
-/** 拉用户文件字节：同源直连；本地跨域走 /api/proxy；unicity-cdn 生产走 /proxy/cdn。 */
+/**
+ * 拉用户文件字节：同源直连；本地跨域走 /api/proxy；unicity-cdn 生产走 /proxy/cdn。
+ * @param url
+ */
 export function toUserUploadFetchUrl(url: string): string {
     let abs: URL;
     try {
@@ -227,7 +244,10 @@ export function unwrapSettingsFetchUrl(url: string): string {
     }
 }
 
-/** settings.json 的文件 URL 才能当相对路径基址；Viewer 页面本身不行。 */
+/**
+ * settings.json 的文件 URL 才能当相对路径基址；Viewer 页面本身不行。
+ * @param url
+ */
 export function isUsableSettingsFileUrl(url: string | undefined | null): boolean {
     if (typeof url !== 'string' || !url.trim()) return false;
     try {
@@ -255,6 +275,8 @@ export function resolveAgainstSettingsUrl(settingsUrl: string | undefined, rel: 
 /**
  * 加载用 URL：相对路径优先会话表 object URL，否则相对 settings.json 所在目录。
  * 不把 blob: 写回 settings。相对路径解析失败返回 null（不要再相对 Viewer 页面去拼）。
+ * @param global
+ * @param value
  */
 export function resolveUserUploadResourceUrl(
     global: Global,
@@ -272,11 +294,14 @@ export function resolveUserUploadResourceUrl(
     return href ? toUserUploadFetchUrl(href) : null;
 }
 
-/** 缺基址时从 ?settings= 或项目版本列表补上 settings.json 的文件 URL。 */
+/**
+ * 缺基址时从 ?settings= 或项目版本列表补上 settings.json 的文件 URL。
+ * @param global
+ */
 export async function ensureSettingsFileUrl(global: Global): Promise<void> {
     const needed = collectUserUploadRelativePaths(global.settings);
     if (needed.length === 0) return;
-    const missing = needed.filter((p) => !global.userUploadFiles?.has(normalizeUserUploadRelativePath(p)));
+    const missing = needed.filter(p => !global.userUploadFiles?.has(normalizeUserUploadRelativePath(p)));
     if (missing.length === 0) return;
     if (isUsableSettingsFileUrl(global.config.settingsUrl)) return;
 
@@ -328,7 +353,14 @@ async function blobFromUrl(url: string): Promise<Blob | null> {
     }
 }
 
-/** 把用户 File 写入会话表，返回相对 settings.json 的路径（如 `assets/foo.hdr`）。 */
+/**
+ * 把用户 File 写入会话表，返回相对 settings.json 的路径（如 `assets/foo.hdr`）。
+ * @param global
+ * @param file
+ * @param opts
+ * @param opts.id
+ * @param opts.fallbackName
+ */
 export function ingestUserUploadFile(
     global: Global,
     file: File,
@@ -340,7 +372,11 @@ export function ingestUserUploadFile(
     return path;
 }
 
-/** AssetLibraryItem.src 为 File 时入库，并把 src 改成相对路径。 */
+/**
+ * AssetLibraryItem.src 为 File 时入库，并把 src 改成相对路径。
+ * @param global
+ * @param item
+ */
 export function ingestAssetLibraryItemFile(global: Global, item: AssetLibraryItem): AssetLibraryItem {
     const file = asUserFile(item.src);
     if (!file) return item;
@@ -351,7 +387,10 @@ export function ingestAssetLibraryItemFile(global: Global, item: AssetLibraryIte
     return { ...item, src };
 }
 
-/** 协议 `value`：File 或 URL 字符串（空串视为清除）。 */
+/**
+ * 协议 `value`：File 或 URL 字符串（空串视为清除）。
+ * @param value
+ */
 export function splitInboundUrlOrFile(value: unknown): { url?: string | null; file?: File } {
     const file = asUserFile(value);
     if (file) return { file };
@@ -362,6 +401,13 @@ export function splitInboundUrlOrFile(value: unknown): { url?: string | null; fi
 /**
  * 协议入站：有 File 则入库并返回相对路径；blob:/data: 尝试取回字节后再入库；
  * http(s) 或已是相对路径则原样返回。空则 undefined。
+ * @param global
+ * @param input
+ * @param input.file
+ * @param input.url
+ * @param opts
+ * @param opts.id
+ * @param opts.fallbackName
  */
 export async function resolveInboundUserFileUrl(
     global: Global,
@@ -408,6 +454,73 @@ export async function resolveAnnotationMediaInput(
     return {};
 }
 
+/**
+ * 标注图片/视频：File 入库会话表并改成相对路径；已是字符串则保留。
+ * @param global - Viewer 全局态
+ * @param data - 运行态 image/video 槽
+ * @param data.image - 图片 URL 或 File
+ * @param annotationId - 标注 id，用于相对路径去重
+ * @param data.video - 视频 URL 或 File
+ * @returns settings 用的 imageUrl/videoUrl
+ */
+export function persistAnnotationMedia(
+    global: Global,
+    data: { image?: unknown; video?: unknown },
+    annotationId?: string
+): AnnotationMediaFields {
+    const id = typeof annotationId === 'string' && annotationId.trim() ? annotationId.trim() : undefined;
+    const videoFile = asUserFile(data.video);
+    const imageFile = asUserFile(data.image);
+    let videoUrl: string | undefined;
+    let imageUrl: string | undefined;
+    if (videoFile) {
+        videoUrl = ingestUserUploadFile(global, videoFile, {
+            id,
+            fallbackName: `annotation-${id ?? 'video'}.mp4`
+        });
+    } else if (typeof data.video === 'string') {
+        videoUrl = data.video.trim() || undefined;
+    }
+    if (!videoUrl) {
+        if (imageFile) {
+            imageUrl = ingestUserUploadFile(global, imageFile, {
+                id,
+                fallbackName: `annotation-${id ?? 'image'}.png`
+            });
+        } else if (typeof data.image === 'string') {
+            imageUrl = data.image.trim() || undefined;
+        }
+    }
+    return annotationMediaFromUnknown({ imageUrl, videoUrl });
+}
+
+/**
+ * 把运行态标注写成 settings.annotations 条目（imageUrl/videoUrl + 会话表字节）。
+ * @param global - Viewer 全局态
+ * @param annotation - 运行态标注
+ * @param annotation.id - 标注 id
+ * @param annotation.serialize - 运行态序列化
+ * @param annotation.settingsExtras - settings extras
+ * @param annotation.settingsCamera - 观察机位
+ * @returns settings 标注
+ */
+export function annotationEntityToSettings(
+    global: Global,
+    annotation: {
+        id: string;
+        serialize: () => AnnotationData;
+        settingsExtras?: SettingsAnnotation['extras'];
+        settingsCamera?: Camera;
+    }
+): SettingsAnnotation {
+    const data = annotation.serialize();
+    const media = persistAnnotationMedia(global, data, annotation.id);
+    return annotationDataToSettings(
+        { ...data, ...annotationSlotsFromUrls(media) },
+        { extras: annotation.settingsExtras, camera: annotation.settingsCamera }
+    );
+}
+
 async function fetchBlobFromSettingsBase(global: Global, path: string): Promise<Blob | null> {
     const href = resolveAgainstSettingsUrl(global.config.settingsUrl, path);
     if (!href) return null;
@@ -432,8 +545,8 @@ function fileForSerializedSceneAsset(global: Global, sa: SceneAsset): File | nul
     const assetId = typeof sa.source?.assetId === 'string' ? sa.source.assetId.trim() : '';
     if (!assetId) return null;
     const lib = global.state.uploadedAssets?.find(a => a.id === assetId);
-    return asUserFile(lib?.src)
-        ?? fileFromSessionTable(global, typeof lib?.src === 'string' ? lib.src : sa.source?.url);
+    return asUserFile(lib?.src) ??
+        fileFromSessionTable(global, typeof lib?.src === 'string' ? lib.src : sa.source?.url);
 }
 
 function collectExistingRelativePaths(settings: ExperienceSettings, used: Set<string>): void {
@@ -450,18 +563,60 @@ function collectExistingRelativePaths(settings: ExperienceSettings, used: Set<st
     add(skybox?.currentUrl);
     for (const url of skybox?.uploadUrls ?? []) add(url);
     for (const ann of settings.annotations ?? []) {
-        add(ann?.imageUrl);
-        add(ann?.videoUrl);
+        const media = annotationMediaFromUnknown(ann);
+        add(media.imageUrl);
+        add(media.videoUrl);
     }
     add(settings.soundUrl);
     add(settings.collision?.url);
 }
 
-/** 物化后 settings 中需要随包附带的相对路径（去重）。 */
+/**
+ * 物化后 settings 中需要随包附带的相对路径（去重）。
+ * @param settings
+ */
 export function collectUserUploadRelativePaths(settings: ExperienceSettings): string[] {
     const used = new Set<string>();
     collectExistingRelativePaths(settings, used);
     return [...used];
+}
+
+export type SettingsResourceReference = {
+    path: string;
+    field: string;
+};
+
+/**
+ * settings 字段路径 ↔ 相对资源路径，供 host 保存把文件交回外层。
+ * @param settings - 物化后的 ExperienceSettings
+ * @returns 路径与字段对应关系（可重复 path）
+ */
+export function collectSettingsResourceReferences(settings: ExperienceSettings): SettingsResourceReference[] {
+    const refs: SettingsResourceReference[] = [];
+    const add = (field: string, value: string | undefined) => {
+        if (!isUserUploadRelativePath(value)) return;
+        refs.push({ path: normalizeUserUploadRelativePath(value), field });
+    };
+    (settings.sceneAssets ?? []).forEach((sa, i) => {
+        add(`sceneAssets[${i}].source.url`, sa?.source?.url);
+        if (isPackedUserUploadPath(sa?.source?.filename)) {
+            add(`sceneAssets[${i}].source.filename`, sa.source?.filename);
+        }
+        add(`sceneAssets[${i}].thumbnailUrl`, sa?.thumbnailUrl);
+    });
+    add('background.skybox.currentUrl', settings.background?.skybox?.currentUrl);
+    (settings.background?.skybox?.uploadUrls ?? []).forEach((url, i) => {
+        add(`background.skybox.uploadUrls[${i}]`, url);
+    });
+    (settings.annotations ?? []).forEach((ann, i) => {
+        const media = annotationMediaFromUnknown(ann);
+        add(`annotations[${i}].imageUrl`, media.imageUrl);
+        add(`annotations[${i}].videoUrl`, media.videoUrl);
+    });
+    add('soundUrl', settings.soundUrl);
+    add('collision.url', settings.collision?.url);
+    add('content', settings.content);
+    return refs;
 }
 
 function seedTableFromRuntimeFiles(
@@ -547,6 +702,8 @@ async function assignMaterialized(
 /**
  * 序列化之后：把用户上传改写成相对路径，并填满会话表 relativePath→Blob。
  * 已是相对路径的从会话表或 settingsUrl 基址取回字节；失败则整次保存失败。
+ * @param global
+ * @param settings
  */
 export async function materializeUserUploadRelativeFiles(
     global: Global,
@@ -609,6 +766,7 @@ export async function materializeUserUploadRelativeFiles(
     for (const ann of annotations) {
         if (!ann || typeof ann !== 'object') continue;
         const rec = ann as unknown as Record<string, unknown>;
+        writeAnnotationMediaToSettingsRecord(rec);
         const id = typeof ann.id === 'string' ? ann.id : undefined;
         const imgErr = await assignMaterialized(global, rec, 'imageUrl', ctx, {
             id,

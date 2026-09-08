@@ -146,6 +146,11 @@ type ExperienceSettings = {
     tonemapping: 'none' | 'linear' | 'filmic' | 'hejl' | 'aces' | 'aces2' | 'neutral',
     highPrecisionRendering: boolean,
     soundUrl?: string,
+    /**
+     * 本地项目包内的主场景相对路径（如 `content/flower.sog`）。
+     * 仅随 local zip 读写；有 URL `?content=` 时忽略此项。
+     */
+    content?: string,
     background: {
         color: [number, number, number],
         skybox?: BackgroundSkyboxSettings
@@ -308,6 +313,12 @@ const validateV2 = (data: unknown): ExperienceSettings => {
     assertEnum(obj.tonemapping, TONEMAPPING, 'settings.tonemapping');
     assertBoolean(obj.highPrecisionRendering, 'settings.highPrecisionRendering');
     if (obj.soundUrl !== undefined) assertString(obj.soundUrl, 'settings.soundUrl');
+    if (obj.content !== undefined) {
+        const content = assertString(obj.content, 'settings.content');
+        if (content.startsWith('/') || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(content)) {
+            throw new Error('settings.content must be a relative path (e.g. content/scene.sog)');
+        }
+    }
 
     const bg = assertObject(obj.background, 'settings.background');
     assertTuple3(bg.color, 'settings.background.color');

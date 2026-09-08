@@ -1,4 +1,5 @@
 // ?settings= 只读 settings.json。相对路径相对该文件所在目录解析。
+import { ViewerLoadError } from './host-protocol';
 import { isUsableSettingsFileUrl, unwrapSettingsFetchUrl } from './user-files';
 
 export type LoadedExperienceSettings = {
@@ -13,7 +14,7 @@ function parseJsonBytes(bytes: Uint8Array): unknown {
     try {
         return JSON.parse(text);
     } catch {
-        throw new Error('settings.json 不是有效的 JSON');
+        throw new ViewerLoadError('settings.json 不是有效的 JSON', { stage: 'settings' });
     }
 }
 
@@ -45,7 +46,11 @@ export async function loadSettingsFromResponse(
     sourceUrl?: string
 ): Promise<LoadedExperienceSettings> {
     if (!response.ok) {
-        throw new Error(`加载 settings 失败: HTTP ${response.status}`);
+        throw new ViewerLoadError(`加载 settings 失败: HTTP ${response.status}`, {
+            stage: 'settings',
+            status: response.status,
+            url: sourceUrl || response.url
+        });
     }
     const bytes = new Uint8Array(await response.arrayBuffer());
     return loadSettingsFromBytes(bytes, sourceUrl, response.url);

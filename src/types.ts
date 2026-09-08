@@ -163,6 +163,10 @@ type Config = {
     skyboxUrl?: string;
     contentUrl?: string;
     contents?: Promise<Response>;
+    /** 启动时实际用来加载主场景的 URL；host 保存据此判断主模型是否被 Viewer 替换 */
+    originalContentUrl?: string;
+    /** 外层本次加载请求 id（URL `?requestId=`），失败/就绪出站回传 */
+    loadRequestId?: string;
     /** 场景碰撞资源 URL（`?collision=` / `?voxel=`）；GLB 时同时用于阴影接影 */
     collisionUrl?: string;
 

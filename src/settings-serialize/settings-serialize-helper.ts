@@ -9,10 +9,9 @@ import {
     DEFAULT_TORCH_LIGHT,
     TORCH_RANGE_MAX
 } from './settings-serialize-configs';
-import { normalizeAnnotationMediaFields } from '../annotation-toolbar/media-fields';
+import { annotationMediaFromUnknown } from '../annotation-toolbar/media-fields';
 import { defaultTriggerDistanceMForAssetType } from '../scene-assets/media/media-hotspot-params';
 import { euclideanDistanceM, viewAxisDepthM } from '../scene-assets/media/media-view-depth';
-import type { Global } from '../types';
 import type {
     Annotation,
     Camera,
@@ -25,8 +24,13 @@ import type {
     SceneMediaHotspotPatch
 } from '../schemas/v2';
 import type { SceneAsset, TorchLightSettings } from '../schemas/v2-custom';
+import type { Global } from '../types';
 
-/** 把任意输入收敛为 sRGB [0,1] 三分量；非法分量退回 fallback。 */
+/**
+ * 把任意输入收敛为 sRGB [0,1] 三分量；非法分量退回 fallback。
+ * @param input
+ * @param fallback
+ */
 function normalizeTorchColor(input: unknown, fallback: [number, number, number]): [number, number, number] {
     if (!Array.isArray(input)) return fallback;
     const clamp01 = (v: unknown, fb: number) => {
@@ -51,7 +55,10 @@ export function readGlobalAudioHotspotAutoplayEnabled(settings: ExperienceSettin
     return sm.audio?.hotspotAutoplayEnabled !== false;
 }
 
-/** 浏览模式下是否显示音频 callout；缺省 true（仅显式 false 入库） */
+/**
+ * 浏览模式下是否显示音频 callout；缺省 true（仅显式 false 入库）
+ * @param settings
+ */
 export function readGlobalShowAudioCalloutInViewer(settings: ExperienceSettings): boolean {
     const sm = settings.sceneMediaHotspot;
     if (!sm || typeof sm !== 'object') return true;
@@ -66,7 +73,10 @@ export function readGlobalVideoConeHalfDeg(settings: ExperienceSettings): number
     return DEFAULT_SCENE_MEDIA_HOTSPOT.video.coneHalfDeg;
 }
 
-/** 存盘用：展开热区全局参数为完整字段（含默认值） */
+/**
+ * 存盘用：展开热区全局参数为完整字段（含默认值）
+ * @param settings
+ */
 export function serializeSceneMediaHotspotForPersistence(
     settings: ExperienceSettings
 ): SceneMediaHotspotSettings {
@@ -87,6 +97,8 @@ export function serializeSceneMediaHotspotForPersistence(
  * 嵌套子节点 `ensure`：必填字段缺失则补默认；可选 boolean 字段按「仅非默认值入库」清洗。
  * - `hotspotAutoplayEnabled`：默认 true，仅显式 false 入库；
  * - `audio.showCalloutInViewer`：默认 true，仅显式 false 入库。
+ * @param sm
+ * @param key
  */
 function ensureHotspotSubtree(
     sm: Record<string, unknown>,
@@ -147,7 +159,10 @@ function ensureSkyboxRecord(bg: Record<string, unknown>): Record<string, unknown
     return bg.skybox as Record<string, unknown>;
 }
 
-/** 导入时将历史字段收敛到 `background.skybox.{ currentUrl, uploadUrls }` */
+/**
+ * 导入时将历史字段收敛到 `background.skybox.{ currentUrl, uploadUrls }`
+ * @param bg
+ */
 function hoistLegacySkyboxFields(bg: Record<string, unknown>): void {
     const skybox = ensureSkyboxRecord(bg);
 
@@ -212,7 +227,10 @@ export function ensureBackground(settings: ExperienceSettings): ExperienceSettin
     return root.background as ExperienceSettings['background'];
 }
 
-/** 读取当前使用的天空盒 URL；空字符串视为未设置 */
+/**
+ * 读取当前使用的天空盒 URL；空字符串视为未设置
+ * @param settings
+ */
 export function readSkyboxCurrentUrlFromSettings(settings: ExperienceSettings): string | undefined {
     const bg = ensureBackground(settings);
     const skybox = (bg as { skybox?: unknown }).skybox;
@@ -223,7 +241,10 @@ export function readSkyboxCurrentUrlFromSettings(settings: ExperienceSettings): 
     return trimmed || undefined;
 }
 
-/** 读取上传/外部传入的天空盒 URL 列表（SKYBOX_ADD 等）；去重并去掉空值 */
+/**
+ * 读取上传/外部传入的天空盒 URL 列表（SKYBOX_ADD 等）；去重并去掉空值
+ * @param settings
+ */
 export function readSkyboxUploadUrlsFromSettings(settings: ExperienceSettings): string[] {
     const bg = ensureBackground(settings);
     const skybox = (bg as { skybox?: unknown }).skybox;
@@ -231,7 +252,11 @@ export function readSkyboxUploadUrlsFromSettings(settings: ExperienceSettings): 
     return normalizeSkyboxUrlList((skybox as { uploadUrls?: unknown }).uploadUrls);
 }
 
-/** 写入上传天空盒 URL 列表；空列表会删除 `skybox.uploadUrls` */
+/**
+ * 写入上传天空盒 URL 列表；空列表会删除 `skybox.uploadUrls`
+ * @param settings
+ * @param urls
+ */
 export function setSkyboxUploadUrlsInSettings(settings: ExperienceSettings, urls: unknown): void {
     const bg = ensureBackground(settings) as Record<string, unknown>;
     const skybox = ensureSkyboxRecord(bg);
@@ -244,7 +269,11 @@ export function setSkyboxUploadUrlsInSettings(settings: ExperienceSettings, urls
     pruneEmptySkybox(bg);
 }
 
-/** 登记上传天空盒 URL 并去重；返回规范化后的 URL，非法则返回 undefined */
+/**
+ * 登记上传天空盒 URL 并去重；返回规范化后的 URL，非法则返回 undefined
+ * @param settings
+ * @param url
+ */
 export function addSkyboxUploadUrlToSettings(settings: ExperienceSettings, url: string | null | undefined): string | undefined {
     const trimmed = typeof url === 'string' ? url.trim() : '';
     if (!trimmed) return undefined;
@@ -256,7 +285,11 @@ export function addSkyboxUploadUrlToSettings(settings: ExperienceSettings, url: 
     return trimmed;
 }
 
-/** 写入或清除 `settings.background.skybox.currentUrl` */
+/**
+ * 写入或清除 `settings.background.skybox.currentUrl`
+ * @param settings
+ * @param url
+ */
 export function setSkyboxCurrentUrlInSettings(settings: ExperienceSettings, url: string | null | undefined): void {
     const bg = ensureBackground(settings) as Record<string, unknown>;
     const skybox = ensureSkyboxRecord(bg);
@@ -269,7 +302,10 @@ export function setSkyboxCurrentUrlInSettings(settings: ExperienceSettings, url:
     pruneEmptySkybox(bg);
 }
 
-/** 序列化前规范化 `background.skybox`（currentUrl + uploadUrls） */
+/**
+ * 序列化前规范化 `background.skybox`（currentUrl + uploadUrls）
+ * @param settings
+ */
 export function normalizeSkyboxForPersistence(settings: ExperienceSettings): void {
     const bg = ensureBackground(settings) as Record<string, unknown>;
     pruneEmptySkybox(bg);
@@ -277,6 +313,8 @@ export function normalizeSkyboxForPersistence(settings: ExperienceSettings): voi
 
 /**
  * 启动时解析天空盒：优先 settings，其次 URL 参数；若仅有 URL 参数则回写 settings 便于存盘。
+ * @param settings
+ * @param configSkyboxUrl
  */
 export function resolveInitialSkyboxUrl(settings: ExperienceSettings, configSkyboxUrl?: string): string | undefined {
     const fromSettings = readSkyboxCurrentUrlFromSettings(settings);
@@ -290,7 +328,11 @@ export function resolveInitialSkyboxUrl(settings: ExperienceSettings, configSkyb
     return undefined;
 }
 
-/** 父级 `MEDIA_HOTSPOT_SET`：嵌套 patch，仅合并 video / audio 子节点的全局热区字段 */
+/**
+ * 父级 `MEDIA_HOTSPOT_SET`：嵌套 patch，仅合并 video / audio 子节点的全局热区字段
+ * @param settings
+ * @param patch
+ */
 export function patchSceneMediaHotspot(
     settings: ExperienceSettings,
     patch: SceneMediaHotspotPatch
@@ -338,10 +380,10 @@ function resolveSceneMediaAsset(
 ): { sa: SceneAsset; entry: NonNullable<typeof global.state.scenePlacedEntities>[number] } | null {
     const settings = global.settings as ExperienceSettings;
     if (!Array.isArray(settings.sceneAssets)) settings.sceneAssets = [];
-    const entry = global.state.scenePlacedEntities?.find((e) => e.id === sceneEntityId);
+    const entry = global.state.scenePlacedEntities?.find(e => e.id === sceneEntityId);
     if (!entry) return null;
 
-    let sa = settings.sceneAssets.find((a) => a.id === sceneEntityId);
+    let sa = settings.sceneAssets.find(a => a.id === sceneEntityId);
     const assetType = entry.assetType;
     if (!sa && (assetType === 'video' || assetType === 'audio')) {
         const pos = entry.entity.getPosition();
@@ -363,14 +405,14 @@ function resolveSceneMediaAsset(
                 scale: [scale.x, scale.y, scale.z]
             },
             triggerDistanceM:
-                typeof entry.triggerDistanceM === 'number' && entry.triggerDistanceM > 0
-                    ? entry.triggerDistanceM
-                    : distDefault
+                typeof entry.triggerDistanceM === 'number' && entry.triggerDistanceM > 0 ?
+                    entry.triggerDistanceM :
+                    distDefault
         };
         if (
-            assetType === 'video'
-            && typeof entry.horizontalCurvature === 'number'
-            && entry.horizontalCurvature > 0
+            assetType === 'video' &&
+            typeof entry.horizontalCurvature === 'number' &&
+            entry.horizontalCurvature > 0
         ) {
             sa.transform.horizontalCurvature = entry.horizontalCurvature;
         }
@@ -382,6 +424,8 @@ function resolveSceneMediaAsset(
 
 /**
  * 将当前相机到锚点的距离写入该资产的 `triggerDistanceM`：video = 视轴深度，audio = 欧氏距离。
+ * @param global
+ * @param opts
  */
 export function applySceneMediaHotspotBaselineFromView(
     global: Global,
@@ -401,9 +445,9 @@ export function applySceneMediaHotspotBaselineFromView(
     }
 
     const distanceM =
-        sa.type === 'video'
-            ? viewAxisDepthM(global.camera, anchor)
-            : euclideanDistanceM(global.camera.getPosition(), anchor);
+        sa.type === 'video' ?
+            viewAxisDepthM(global.camera, anchor) :
+            euclideanDistanceM(global.camera.getPosition(), anchor);
     if (!Number.isFinite(distanceM) || distanceM <= 0) {
         return { ok: false, reason: 'invalid_distance' };
     }
@@ -415,7 +459,12 @@ export function applySceneMediaHotspotBaselineFromView(
     return { ok: true, id: sa.id, assetType: sa.type, triggerDistanceM };
 }
 
-/** 写入单条 video/audio 的触发距离（settings + 运行态） */
+/**
+ * 写入单条 video/audio 的触发距离（settings + 运行态）
+ * @param global
+ * @param sceneAssetId
+ * @param valueM
+ */
 export function applySceneAssetTriggerDistanceM(
     global: Global,
     sceneAssetId: string,
@@ -460,13 +509,17 @@ export function ensureLighting(settings: ExperienceSettings): { lights: LightWit
 /**
  * 是否已将手电筒加入场景配置（`settings.lighting.torch` 存在）。
  * 仅 `TORCH_ADD` 或已保存 JSON 会为 true；运行时 `TORCH_TOGGLE` 不改变此状态。
+ * @param settings
  */
 export function hasTorchLight(settings: ExperienceSettings): boolean {
     const lighting = (settings as Record<string, unknown>).lighting as { torch?: unknown } | undefined;
     return !!(lighting && typeof lighting === 'object' && lighting.torch && typeof lighting.torch === 'object');
 }
 
-/** 规范化已有 torch 对象字段（不写入 settings）。 */
+/**
+ * 规范化已有 torch 对象字段（不写入 settings）。
+ * @param raw
+ */
 function normalizeTorchFields(raw: Record<string, unknown>): TorchLightSettings {
     const color = normalizeTorchColor(raw.color, [...DEFAULT_TORCH_LIGHT.color] as [number, number, number]);
     let intensity = DEFAULT_TORCH_LIGHT.intensity;
@@ -482,6 +535,7 @@ function normalizeTorchFields(raw: Record<string, unknown>): TorchLightSettings 
 
 /**
  * 读取已入库的手电筒配置；未 `TORCH_ADD` 时返回 null（不补写 settings）。
+ * @param settings
  */
 export function readTorchLight(settings: ExperienceSettings): TorchLightSettings | null {
     if (!hasTorchLight(settings)) return null;
@@ -493,6 +547,7 @@ export function readTorchLight(settings: ExperienceSettings): TorchLightSettings
 
 /**
  * 运行时解析手电筒参数：已入库则用 settings，否则用默认值；**绝不**写入 settings。
+ * @param settings
  */
 export function resolveTorchLight(settings: ExperienceSettings): TorchLightSettings {
     return readTorchLight(settings) ?? { ...DEFAULT_TORCH_LIGHT, color: [...DEFAULT_TORCH_LIGHT.color] as [number, number, number] };
@@ -500,6 +555,7 @@ export function resolveTorchLight(settings: ExperienceSettings): TorchLightSetti
 
 /**
  * 导入时：仅当 JSON 已有 `lighting.torch` 时规范化字段；缺失则保持缺失（不自动 ADD）。
+ * @param settings
  */
 export function normalizeTorchLightOnImport(settings: ExperienceSettings): TorchLightSettings | null {
     return readTorchLight(settings);
@@ -508,6 +564,8 @@ export function normalizeTorchLightOnImport(settings: ExperienceSettings): Torch
 /**
  * `TORCH_ADD`：将手电筒写入 `settings.lighting.torch`（可带 partial 覆盖默认）。
  * 已存在时合并 partial 并规范化。不改变 `viewSettings.torch.active`（保持关）。
+ * @param settings
+ * @param partial
  */
 export function addTorchLight(
     settings: ExperienceSettings,
@@ -515,9 +573,9 @@ export function addTorchLight(
 ): TorchLightSettings {
     ensureLighting(settings);
     const lighting = (settings as Record<string, unknown>).lighting as { torch?: TorchLightSettings };
-    const base: Record<string, unknown> = lighting.torch && typeof lighting.torch === 'object'
-        ? { ...(lighting.torch as unknown as Record<string, unknown>) }
-        : { ...DEFAULT_TORCH_LIGHT, color: [...DEFAULT_TORCH_LIGHT.color] };
+    const base: Record<string, unknown> = lighting.torch && typeof lighting.torch === 'object' ?
+        { ...(lighting.torch as unknown as Record<string, unknown>) } :
+        { ...DEFAULT_TORCH_LIGHT, color: [...DEFAULT_TORCH_LIGHT.color] };
     if (partial && typeof partial === 'object') {
         if (Array.isArray((partial as Record<string, unknown>).color)) {
             base.color = (partial as Record<string, unknown>).color;
@@ -537,6 +595,7 @@ export function addTorchLight(
 /**
  * `TORCH_DELETE`：从 `settings.lighting.torch` 移除；无 torch 时为 no-op。
  * 返回是否实际删除。
+ * @param settings
  */
 export function removeTorchLight(settings: ExperienceSettings): boolean {
     const lighting = (settings as Record<string, unknown>).lighting as { torch?: unknown } | undefined;
@@ -547,6 +606,8 @@ export function removeTorchLight(settings: ExperienceSettings): boolean {
 
 /**
  * `TORCH_PARAMS_SET`：仅在已 `TORCH_ADD` 时合并 partial；未 ADD 返回 null（不隐式入库）。
+ * @param settings
+ * @param partial
  */
 export function patchTorchLight(
     settings: ExperienceSettings,
@@ -604,6 +665,7 @@ export function ensureBloom(settings: ExperienceSettings): NonNullable<Experienc
 
 /**
  * 导入归一：在 `ensureBloom` 之后调用，从 bloom 上剥离已废弃、不参与读数的持久化字段（与导出 strip 对齐）。
+ * @param settings
  */
 export function normalizeBloomAfterImport(settings: ExperienceSettings): void {
     const pe = settings.postEffectSettings;
@@ -630,7 +692,10 @@ export function ensureShadow(settings: ExperienceSettings): NonNullable<Experien
     return (pe as Record<string, unknown>).shadow as NonNullable<ExperienceSettings['postEffectSettings']>['shadow'];
 }
 
-/** 若缺整条 `revealEffect` 则补默认对象；与 `settings.effects.reveal` 对齐由 `syncLegacyRevealEffectShadow`（effects-sync）在写 effects 后统一执行（M16）。 */
+/**
+ * 若缺整条 `revealEffect` 则补默认对象；与 `settings.effects.reveal` 对齐由 `syncLegacyRevealEffectShadow`（effects-sync）在写 effects 后统一执行（M16）。
+ * @param settings
+ */
 export function ensureRevealEffect(settings: ExperienceSettings): NonNullable<ExperienceSettings['revealEffect']> {
     if (!settings.revealEffect || typeof settings.revealEffect !== 'object') {
         (settings as Record<string, unknown>).revealEffect = { ...DEFAULT_REVEAL_EFFECT };
@@ -638,7 +703,10 @@ export function ensureRevealEffect(settings: ExperienceSettings): NonNullable<Ex
     return settings.revealEffect!;
 }
 
-/** 旧存盘把会话字段写在 bloom 上：导入时迁入 bloomEditorSession */
+/**
+ * 旧存盘把会话字段写在 bloom 上：导入时迁入 bloomEditorSession
+ * @param pes
+ */
 export function normalizeHoistBloomSessionFields(pes: Record<string, unknown> | null | undefined): void {
     if (!pes || typeof pes !== 'object') return;
     const b = pes.bloom as Record<string, unknown> | undefined;
@@ -656,21 +724,21 @@ export function normalizeHoistBloomSessionFields(pes: Record<string, unknown> | 
     move('draftLightRegionCenter');
 }
 
-/** 规范化单个标注数据，确保反序列化所需字段存在 */
+/**
+ * 规范化单个标注数据，确保反序列化所需字段存在
+ * @param ann
+ */
 export function normalizeImportedAnnotation(ann: unknown): Annotation | null {
     if (!ann || typeof ann !== 'object') return null;
     const a = ann as Record<string, unknown>;
     const id = typeof a.id === 'string' ? a.id : `annotation-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-    const pos = Array.isArray(a.position) && a.position.length >= 3
-        ? [Number(a.position[0]), Number(a.position[1]), Number(a.position[2])] as [number, number, number]
-        : [0, 0, 0] as [number, number, number];
-    const camera: Camera = a.camera && typeof a.camera === 'object' && (a.camera as any).initial
-        ? (a.camera as Camera)
-        : { initial: { position: [0, 0, 0], target: [0, 0, 0], fov: 60 } };
-    const media = normalizeAnnotationMediaFields({
-        imageUrl: typeof a.imageUrl === 'string' ? a.imageUrl : undefined,
-        videoUrl: typeof a.videoUrl === 'string' ? a.videoUrl : undefined
-    });
+    const pos = Array.isArray(a.position) && a.position.length >= 3 ?
+        [Number(a.position[0]), Number(a.position[1]), Number(a.position[2])] as [number, number, number] :
+        [0, 0, 0] as [number, number, number];
+    const camera: Camera = a.camera && typeof a.camera === 'object' && (a.camera as any).initial ?
+        (a.camera as Camera) :
+        { initial: { position: [0, 0, 0], target: [0, 0, 0], fov: 60 } };
+    const media = annotationMediaFromUnknown(a);
     return {
         id,
         position: pos,
@@ -702,9 +770,9 @@ export function normalizeBloomLocalLightRegions(settings: ExperienceSettings): v
                 r.worldSpace = { points: [], committed: [], committedBrightness: 0 };
             }
             if (typeof r.localBrightness !== 'number') {
-                r.localBrightness = typeof r.worldSpace.committedBrightness === 'number'
-                    ? r.worldSpace.committedBrightness
-                    : 1;
+                r.localBrightness = typeof r.worldSpace.committedBrightness === 'number' ?
+                    r.worldSpace.committedBrightness :
+                    1;
             }
             if (!Array.isArray(r.tintColor) || r.tintColor.length !== 3) r.tintColor = [1, 1, 1];
             if (typeof r.tintBlend !== 'number') r.tintBlend = 0;
@@ -723,8 +791,8 @@ export function normalizeBloomLocalLightRegions(settings: ExperienceSettings): v
     }
     const active = ses.activeLocalLightRegionId;
     if (typeof active === 'string') {
-        if (active.startsWith('draft-')
-            || !bloom.localLightRegions.some((r: any) => r && r.id === active)) {
+        if (active.startsWith('draft-') ||
+            !bloom.localLightRegions.some((r: any) => r && r.id === active)) {
             ses.activeLocalLightRegionId = bloom.localLightRegions.length > 0 ? bloom.localLightRegions[0].id : null;
         }
     }

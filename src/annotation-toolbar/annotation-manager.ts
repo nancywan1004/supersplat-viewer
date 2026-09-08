@@ -1,37 +1,39 @@
 /**
  * AnnotationManager - 标注管理器
- * 
+ *
  * 核心管理类，负责标注的生命周期管理和状态协调：
  * - 管理所有标注实例
  * - 协调标注创建、编辑、删除流程
  * - 与 Settings 和 EditHistory 同步
  * - 管理标注选择状态
- * 
+ *
  * 编辑历史集成 (需求 6.1, 6.2, 6.3, 6.4, 6.5, 8.6):
  * 本系统使用快照方式集成编辑历史，而非命令模式。每次标注操作后，
  * 通过 pushEditHistory() 保存整个设置状态的快照。撤销/重做时，
  * EditHistory 系统会调用 restoreAnnotationsFromSettings() 从快照恢复标注。
- * 
+ *
  * 支持的可撤销操作：
  * - 创建标注: confirmAnnotation() 后记录，撤销时删除标注
  * - 删除标注: deleteAnnotation() 后记录，撤销时恢复标注
  * - 移动标注: onAnnotationMoveComplete() 后记录，撤销时恢复原位置
- * 
+ *
  * 标注选择状态也会被 EditHistory 自动跟踪和恢复。
  */
 
 import { Vec3 } from 'playcanvas';
-import { PlacementMode } from './placement-mode';
+
 import { AnnotationEntity } from './annotation-entity';
+import { settingsToAnnotationData } from './media-fields';
+import { PlacementMode } from './placement-mode';
 import type { AnnotationData, AnnotationFormData } from './types';
-import { annotationDataToSettings, settingsToAnnotationData } from './media-fields';
-import type { Global } from '../types';
 import { pushEditHistory } from '../edit-history';
+import { annotationEntityToSettings } from '../settings-io/user-files';
+import type { Global } from '../types';
 import { readSessionAnnotationVisible } from '../view-settings';
 
 /**
  * AnnotationManager 类
- * 
+ *
  * 管理标注的完整生命周期
  */
 export class AnnotationManager {
@@ -61,7 +63,7 @@ export class AnnotationManager {
 
     /**
      * 构造函数
-     * 
+     *
      * @param global - Global 引用
      */
     constructor(global: Global) {
@@ -101,6 +103,7 @@ export class AnnotationManager {
 
     /**
      * 由父级协议 ANNOTATION_PLACEMENT_START 调用：使用指定 id 进入放置模式，场景点击时创建占位标注并上报 ANNOTATION_PLACEMENT_UPDATE。
+     * @param id
      */
     startPlacementWithId(id: string): void {
         if (this.placementMode.isActive()) {
@@ -112,6 +115,8 @@ export class AnnotationManager {
 
     /**
      * 在放置开始前预存表单数据，待首次点击放置时应用到占位标注上
+     * @param id
+     * @param data
      */
     setPendingFormDataForPlacement(id: string, data: AnnotationFormData): void {
         this.pendingFormData.set(id, data);
@@ -119,14 +124,14 @@ export class AnnotationManager {
 
     /**
      * 确认标注
-     * 
+     *
      * 确认并固化当前的占位标注
-     * 
+     *
      * @param data - 标注表单数据
      */
     confirmAnnotation(data: AnnotationFormData): void {
         const placeholder = this.currentPlaceholder;
-        
+
         if (!placeholder) {
             console.warn('No placeholder annotation to confirm');
             return;
@@ -190,7 +195,7 @@ export class AnnotationManager {
 
     /**
      * 取消标注创建
-     * 
+     *
      * 取消当前的标注创建流程，移除占位标注
      */
     cancelAnnotation(): void {
@@ -208,9 +213,9 @@ export class AnnotationManager {
 
     /**
      * 删除标注
-     * 
+     *
      * 从场景和标注列表中删除指定标注
-     * 
+     *
      * @param id - 标注 ID
      */
     deleteAnnotation(id: string): void {
@@ -259,6 +264,8 @@ export class AnnotationManager {
      *
      * @param id - 标注 ID
      * @param options - showGizmo: 是否同时显示 Transform Gizmo，默认 false（仅点击底部「移动」时显示 Gizmo）
+     * @param options.showGizmo
+     * @param options.source
      */
     selectAnnotation(id: string, options?: { showGizmo?: boolean; source?: 'host' | 'scene' | 'unknown' }): void {
         const annotation = this.annotations.get(id);
@@ -355,7 +362,7 @@ export class AnnotationManager {
 
     /**
      * 获取当前选中的标注
-     * 
+     *
      * @returns 当前选中的标注实体，如果没有则返回 null
      */
     getSelectedAnnotation(): AnnotationEntity | null {
@@ -368,14 +375,18 @@ export class AnnotationManager {
 
     /**
      * 获取所有标注
-     * 
+     *
      * @returns 所有标注实体的数组
      */
     getAllAnnotations(): AnnotationEntity[] {
         return Array.from(this.annotations.values());
     }
 
-    /** 单条 settings 显隐 × 会话 overlay（相对大类，不做 override）；编辑模式仅看单条 visible */
+    /**
+     * 单条 settings 显隐 × 会话 overlay（相对大类，不做 override）；编辑模式仅看单条 visible
+     * @param id
+     * @param perItemVisible
+     */
     private computeEntityVisible(id: string, perItemVisible: boolean): boolean {
         if (this.global.state.editMode) return perItemVisible;
         return perItemVisible && readSessionAnnotationVisible(this.global, id);
@@ -383,6 +394,8 @@ export class AnnotationManager {
 
     /**
      * 设置单条标注 settings 显隐并刷新运行态（含 overlay）
+     * @param id
+     * @param visible
      */
     setAnnotationVisible(id: string, visible: boolean): void {
         const annotation = this.annotations.get(id);
@@ -396,7 +409,7 @@ export class AnnotationManager {
      */
     applyVisibilityFromSettings(): void {
         const settingsMap = new Map(
-            (this.global.settings?.annotations ?? []).map((a) => [a.id, a.visible !== false])
+            (this.global.settings?.annotations ?? []).map(a => [a.id, a.visible !== false])
         );
         this.annotations.forEach((annotation, id) => {
             const perItem = settingsMap.get(id) ?? true;
@@ -410,11 +423,11 @@ export class AnnotationManager {
 
     /**
      * 设置所有标注的可见性（与 UI 可见性同步）
-     * 
+     *
      * 当 UI 隐藏时（如 controlsHidden）调用以隐藏所有标注；
      * 当 UI 显示时调用以显示所有标注。
      * 使用独立的 entity.enabled 控制，不与视锥剔除冲突（视锥剔除可在此基础上进一步过滤）。
-     * 
+     *
      * @param visible - true 显示，false 隐藏
      */
     setAllAnnotationsVisible(visible: boolean): void {
@@ -429,7 +442,7 @@ export class AnnotationManager {
 
     /**
      * 获取标注数据
-     * 
+     *
      * @param id - 标注 ID
      * @returns 标注数据，如果不存在则返回 null
      */
@@ -440,7 +453,7 @@ export class AnnotationManager {
 
     /**
      * 同步到设置
-     * 
+     *
      * 将当前所有标注数据同步到全局设置对象
      */
     syncToSettings(): void {
@@ -448,23 +461,19 @@ export class AnnotationManager {
             return;
         }
 
-        this.global.settings.annotations = Array.from(this.annotations.values()).map((annotation) =>
-            annotationDataToSettings(annotation.serialize(), {
-                extras: annotation.settingsExtras,
-                camera: annotation.settingsCamera
-            })
+        this.global.settings.annotations = Array.from(this.annotations.values()).map(annotation => annotationEntityToSettings(this.global, annotation)
         );
     }
 
     /**
      * 从设置加载
-     * 
+     *
      * 从全局设置对象中加载标注数据。
-     * 
+     *
      * 此方法在以下场景被调用：
      * 1. AnnotationManager 初始化时，加载已保存的标注
      * 2. EditHistory 撤销/重做时，通过 restoreAnnotationsFromSettings() 调用
-     * 
+     *
      * 该方法会清空所有现有标注并从设置中重新创建，确保标注状态
      * 与设置快照完全一致 (需求 6.4, 6.5)。
      */
@@ -474,13 +483,13 @@ export class AnnotationManager {
         }
 
         // 清空现有标注
-        this.annotations.forEach(annotation => {
+        this.annotations.forEach((annotation) => {
             annotation.entity.destroy();
         });
         this.annotations.clear();
 
         // 从设置中反序列化标注
-        this.global.settings.annotations.forEach(data => {
+        this.global.settings.annotations.forEach((data) => {
             try {
                 const annotation = AnnotationEntity.deserialize(settingsToAnnotationData(data), this.global);
                 annotation.settingsExtras = data.extras;
@@ -494,9 +503,9 @@ export class AnnotationManager {
 
     /**
      * 处理标注放置事件
-     * 
+     *
      * 当用户在场景中点击时，创建占位标注
-     * 
+     *
      * @param position - 3D 位置
      * @private
      */
@@ -543,9 +552,9 @@ export class AnnotationManager {
 
     /**
      * 处理标注更新事件（如展开/收起状态变化）
-     * 
+     *
      * 同步到设置以持久化状态
-     * 
+     *
      * @private
      */
     private onAnnotationUpdated(): void {
@@ -558,6 +567,9 @@ export class AnnotationManager {
      * - 占位标注：由 onAnnotationPlace 负责处理，不走此分支
      * - 已有标注：位置变化时仅同步到 settings，供撤销/重做与保存使用
      *
+     * @param data
+     * @param data.id
+     * @param data.position
      * @private
      */
     private onAnnotationMoved(data: { id: string; position: Vec3 }): void {
@@ -572,10 +584,12 @@ export class AnnotationManager {
 
     /**
      * 处理标注移动完成事件
-     * 
+     *
      * 当标注通过 Transform Gizmo 移动完成时，同步到设置并记录历史
-     * 
+     *
      * @param data - 事件数据，包含 entity 和 position
+     * @param data.entity
+     * @param data.position
      * @private
      */
     private onAnnotationMoveComplete(data: { entity: any; position: Vec3 }): void {
@@ -589,7 +603,7 @@ export class AnnotationManager {
 
     /**
      * 生成唯一的标注 ID
-     * 
+     *
      * @returns 唯一的标注 ID
      * @private
      */
@@ -600,7 +614,7 @@ export class AnnotationManager {
 
     /**
      * 销毁管理器
-     * 
+     *
      * 清理所有资源和事件监听器
      */
     destroy(): void {
@@ -613,7 +627,7 @@ export class AnnotationManager {
         }
 
         // 销毁所有标注
-        this.annotations.forEach(annotation => {
+        this.annotations.forEach((annotation) => {
             annotation.entity.destroy();
         });
         this.annotations.clear();

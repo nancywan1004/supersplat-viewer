@@ -6,11 +6,17 @@
 
 import type { AnnotationData } from './annotation-toolbar/types';
 import {
-    applyMorphKeyframeVisibilityPolicy,
-    applySceneAssetTriggerDistanceM,
-    requestSceneAssetsRestore
-} from './scene-assets/asset-placement-handler';
-import { pauseAllSceneMedia } from './scene-assets/media/scene-media-playback';
+    COLLISION_SYSTEM_READY,
+    collisionEnabled,
+    getCameraCollisionManager,
+    type CollisionLoadPayload
+} from './collision/camera-collision-manager';
+import {
+    SCENE_COLLISION_CHANGED,
+    SCENE_MESH_GENERATE_PROGRESS,
+    resolveCollisionUrl,
+    type SceneMeshGenerateProgressPayload
+} from './collision/scene-collision-source';
 import {
     initEditHistory,
     canUndo,
@@ -29,25 +35,49 @@ import {
     type AssetEffectProtocolEnvelope
 } from './editor-modules/protocol-adapters/asset-effects-protocol-adapter';
 import {
+    applyCollisionPatchFromHost,
+    applyCollisionSetFromHost,
+    buildSceneMeshLoadFailedPayload,
+    buildSceneMeshLoadFinishedPayload,
+    buildSceneMeshLoadProgressPayload,
+    resolveSceneMeshLoadOutboundModules
+} from './editor-modules/protocol-adapters/collision-protocol-adapter';
+import {
     paramsPatchHasPersistentKeys,
     paramsPatchHasRevealKeys,
     isPersistentProtocolEffectId,
     SCENE_GSPLAT_REVEAL_EFFECT_ID
 } from './editor-modules/protocol-adapters/effects-protocol-adapter';
-import { getAssetLoader } from './loaders/asset-loader';
 import { asUserFile } from './loaders/asset-file';
+import { getAssetLoader } from './loaders/asset-loader';
+import {
+    applyMorphKeyframeVisibilityPolicy,
+    applySceneAssetTriggerDistanceM,
+    requestSceneAssetsRestore
+} from './scene-assets/asset-placement-handler';
+import { pauseAllSceneMedia } from './scene-assets/media/scene-media-playback';
 import { resolveExportTimelinePlan } from './render/export-timeline-resolver';
 import { buildVideoExportFilename } from './render/video-export';
+import {
+    canToggleLightingShadowSession,
+    getSceneContentVisibilityRegistry,
+    isSceneContentCategoryId,
+    setLightingSessionAspectVisible
+} from './scene-visibility';
 import type { ExperienceSettings, SceneMediaHotspotPatch, TorchLightSettings } from './schemas/v2';
 import { parseMoveSpeedScale, writeMoveSpeedScale } from './input/move-speed-scale';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
-import { getRevealActiveType, getRevealTotalDuration } from './settings-serialize/effects-sync';
+import type { SceneCollisionSettingsPatch } from './schemas/v2-custom';
+import { readHostRequestId, readInboundRequestId } from './settings-io/host-protocol';
+import { importLocalProject } from './settings-io/import-local-project';
 import {
-    SCENE_COLLISION_CHANGED,
-    SCENE_MESH_GENERATE_PROGRESS,
-    resolveCollisionUrl,
-    type SceneMeshGenerateProgressPayload
-} from './collision/scene-collision-source';
+    isHostSaveSuccess,
+    resolveSettingsSaveDestination,
+    saveExperienceProject,
+    type SettingsSaveDestination
+} from './settings-io/save';
+import { resetSceneSettings } from './settings-reset';
+import { getRevealActiveType, getRevealTotalDuration } from './settings-serialize/effects-sync';
 import {
     serializeExperienceSettings,
     getComparableSettingsStringFromSnapshot,
@@ -60,16 +90,10 @@ import {
     patchSceneMediaHotspot,
     readSkyboxCurrentUrlFromSettings
 } from './settings-serialize/settings-serialize-helper';
-import { applyViewMediaMuteSet, type LightingVisibilityKey } from './view-settings';
-import {
-    canToggleLightingShadowSession,
-    getSceneContentVisibilityRegistry,
-    isSceneContentCategoryId,
-    setLightingSessionAspectVisible
-} from './scene-visibility';
 import { getSelectedSceneAssetType } from './state-selectors';
 import type { AssetLibraryItem, EditLeftModule, Global } from './types';
 import { paramsPatchHasAssetKeys } from './vfx/effects-runtime/asset/asset-effect-params';
+import { applyViewMediaMuteSet, type LightingVisibilityKey } from './view-settings';
 import {
     ASSET_EFFECT_TYPE_VALUES,
     ASSET_EFFECT_TYPES,
@@ -82,28 +106,7 @@ import {
     resolveAssetEffectType
 } from './vfx/effects-runtime/effect-types';
 import { captureDefaultViewAndStageThumbnail } from './render/project-thumbnail';
-import {
-    resolveSettingsSaveDestination,
-    saveExperienceProject,
-    type SettingsSaveDestination
-} from './settings-io/save';
-import { resetSceneSettings } from './settings-reset';
-import type { SceneCollisionSettingsPatch } from './schemas/v2-custom';
-import {
-    applyCollisionPatchFromHost,
-    applyCollisionSetFromHost,
-    buildSceneMeshLoadFailedPayload,
-    buildSceneMeshLoadFinishedPayload,
-    buildSceneMeshLoadProgressPayload,
-    resolveSceneMeshLoadOutboundModules
-} from './editor-modules/protocol-adapters/collision-protocol-adapter';
 import { applyShadowSetFromHost } from './editor-modules/protocol-adapters/environment-protocol-adapter';
-import {
-    COLLISION_SYSTEM_READY,
-    collisionEnabled,
-    getCameraCollisionManager,
-    type CollisionLoadPayload
-} from './collision/camera-collision-manager';
 import {
     SHADOW_SYSTEM_READY,
     hasShadowSceneMesh,
@@ -135,7 +138,9 @@ type InboundPayload =
     | { type: 'TORCH_DELETE' }
     | { type: 'TORCH_TOGGLE'; value?: boolean }
     | { type: 'TORCH_PARAMS_SET'; value?: Partial<TorchLightSettings> }
-    | { type: 'SETTINGS_SAVE'; destination?: SettingsSaveDestination }
+    | { type: 'SETTINGS_SAVE'; destination?: SettingsSaveDestination; requestId?: string }
+    /** 导入项目文件夹（webkitdirectory 文件列表）；不支持 zip */
+    | { type: 'PROJECT_IMPORT'; files?: File | File[] }
     | { type: 'SETTINGS_RESET' }
     | { type: 'EDIT_MODULE_SET'; value?: EditLeftModule | null }
     | { type: 'ASSET_SHOW_HIDE_SET'; id?: string; value?: boolean }
@@ -220,7 +225,11 @@ const LIGHTING_SHOW_HIDE_CHANGED_BY_KEY: Record<LightingVisibilityKey, string> =
     shadow: 'LIGHTING_SHADOW_SHOW_HIDE_CHANGED'
 };
 
-/** lights 总闸或 ALL_SET 同步子项后，向父级回传实际变更的子项 CHANGED（无 sceneMesh 时不含 shadow） */
+/**
+ * lights 总闸或 ALL_SET 同步子项后，向父级回传实际变更的子项 CHANGED（无 sceneMesh 时不含 shadow）
+ * @param keys
+ * @param value
+ */
 const postLightingSessionSubsChanged = (keys: LightingVisibilityKey[], value: boolean) => {
     for (const key of keys) {
         postToParent(LIGHTING_SHOW_HIDE_CHANGED_BY_KEY[key], { value });
@@ -371,8 +380,8 @@ const initPostMessageBridge = (global: Global) => {
     const { state, events, config } = global;
     const g = global as any;
     let cameraModeChangeSource: SelectionSource = 'unknown';
-    /** 父级下发 COLLISION_* / SHADOW_SET 时置 true，屏蔽 apply 过程中的出站（防回环）。
-     * apply 成功结束后再补发一次 FINISHED / SYSTEM_READY（见 flush*AfterHostEnsure）。 */
+    // 父级下发 COLLISION_* / SHADOW_SET 时置 true，屏蔽 apply 过程中的出站（防回环）。
+    // apply 成功结束后再补发一次 FINISHED / SYSTEM_READY（见 flush*AfterHostEnsure）。
     let suppressCollisionOutbound = false;
 
     /** 宿主 SET/PATCH 整段 await 期间 suppress 会吞掉就绪事件；成功后补发一次。 */
@@ -612,9 +621,9 @@ const initPostMessageBridge = (global: Global) => {
                 dispatchEnvironment(
                     global,
                     'TORCH_ADD',
-                    torchAddVal && typeof torchAddVal === 'object'
-                        ? p
-                        : { type: 'TORCH_ADD' }
+                    torchAddVal && typeof torchAddVal === 'object' ?
+                        p :
+                        { type: 'TORCH_ADD' }
                 );
                 break;
             }
@@ -664,15 +673,69 @@ const initPostMessageBridge = (global: Global) => {
                 break;
             }
             case 'SETTINGS_SAVE': {
+                const requestId = readInboundRequestId(p);
                 const destination = resolveSettingsSaveDestination(p.destination);
                 const saveResult = await saveExperienceProject(global, destination);
-                if (saveResult.ok === false) {
-                    console.error('[MessageBridge] SETTINGS_SAVE 失败', saveResult.message);
-                    postToParent('SETTINGS_SAVE_FAILED', { message: saveResult.message });
+                const requestFields = requestId ? { requestId } : {};
+                if (destination === 'host') {
+                    if (saveResult.ok === false) {
+                        console.error('[MessageBridge] SETTINGS_SAVE host 失败', saveResult.message);
+                        postToParent('SETTINGS_SAVE_RESULT', {
+                            ok: false,
+                            message: saveResult.message,
+                            ...requestFields
+                        });
+                        break;
+                    }
+                    if (!isHostSaveSuccess(saveResult)) {
+                        postToParent('SETTINGS_SAVE_RESULT', {
+                            ok: false,
+                            message: '保存产物生成失败',
+                            ...requestFields
+                        });
+                        break;
+                    }
+                    postToParent('SETTINGS_SAVE_RESULT', {
+                        ok: true,
+                        ...requestFields,
+                        settings: saveResult.host.settings,
+                        files: saveResult.host.files,
+                        references: saveResult.host.references,
+                        contentChanged: saveResult.host.contentChanged
+                    });
+                    setBaseline();
                     break;
                 }
-                postToParent('SETTINGS_UPDATED');
+                if (saveResult.ok === false) {
+                    console.error('[MessageBridge] SETTINGS_SAVE 失败', saveResult.message);
+                    postToParent('SETTINGS_SAVE_FAILED', { message: saveResult.message, ...requestFields });
+                    break;
+                }
+                postToParent('SETTINGS_UPDATED', requestFields);
                 setBaseline();
+                break;
+            }
+            case 'PROJECT_IMPORT': {
+                const raw = (p as { files?: unknown }).files;
+                const files = raw instanceof File ?
+                    raw :
+                    Array.isArray(raw) ?
+                        raw.filter((item): item is File => item instanceof File) :
+                        [];
+                const hasFiles = files instanceof File || files.length > 0;
+                if (!hasFiles) {
+                    console.warn('[MessageBridge] PROJECT_IMPORT ignored: files required');
+                    break;
+                }
+                const importResult = await importLocalProject(global, files);
+                if (importResult.ok === false) {
+                    console.error('[MessageBridge] PROJECT_IMPORT 失败', importResult.message);
+                    break;
+                }
+                if (importResult.mode === 'settings-only') {
+                    postToParent('SETTINGS_UPDATED');
+                    setBaseline();
+                }
                 break;
             }
             case 'SETTINGS_RESET': {
@@ -1477,7 +1540,9 @@ const initPostMessageBridge = (global: Global) => {
     });
 
     events.on('firstFrame', async () => {
-        postToParent('VIEWER_READY');
+        const requestId = (typeof config.loadRequestId === 'string' && config.loadRequestId.trim()) ||
+            readHostRequestId();
+        postToParent('VIEWER_READY', requestId ? { requestId } : undefined);
         const { canUndo, canRedo } = await import('./edit-history');
         if (config.trackEditHistory) {
             postToParent('EDIT_HISTORY_STATE', { canUndo: canUndo(global), canRedo: canRedo(global) });
@@ -1591,7 +1656,7 @@ const initPostMessageBridge = (global: Global) => {
     }) => {
         // TODO: 放置流程接入后再向父页面上报 ASSET_EFFECT_MORPH_STOP_ALL_DONE
         postToParent('ASSET_EFFECT_MORPH_STOP_ALL_DONE', {
-            module: MESSAGE_BRIDGE_MODULE.effects,
+            module: MESSAGE_BRIDGE_MODULE.effects
             // morphTargetIds: _payload?.morphTargetIds ?? [],
             // restoredTargetIds: _payload?.restoredTargetIds ?? [],
             // skippedTargetIds: _payload?.skippedTargetIds ?? []

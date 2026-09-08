@@ -16,24 +16,37 @@ import {
 } from 'playcanvas';
 
 import { App } from './app';
-import { applySkyboxTexture, clearSkyboxDisplay } from './loaders/skybox/skybox-loader';
 import { observe } from './core/observe';
+import { initLight } from './light';
+import { version as appVersion } from '../package.json';
+import { applyBenchmarkConfigFlags, createSceneProfileBenchmark } from './benchmark/benchmark';
+import { initBenchmarkHud, shouldShowBenchmarkHud } from './benchmark/benchmark-hud';
+import { installFrameGsplatsSync } from './benchmark/sync-frame-gsplats';
+import { getCameraCollisionManager } from './collision/camera-collision-manager';
+import { getAssetLoader } from './loaders/asset-loader';
+import { contentFilenameFromUrl } from './loaders/gsplat/content-filename';
+import { isCustomLodEnabled, isGsplatMetaJsonFilename, LodLoader } from './loaders/gsplat/lod/custom-loader';
+import { applySkyboxTexture, clearSkyboxDisplay } from './loaders/skybox/skybox-loader';
 import type { ExperienceSettings } from './schemas/v2';
 import { importSettings } from './settings';
+import {
+    postViewerLoadFailedFromError,
+    readHostRequestId,
+    toViewerLoadError,
+    ViewerLoadError
+} from './settings-io/host-protocol';
+import { loadSettingsFromResponse, loadSettingsFromUrl } from './settings-io/load';
 import type { Config, Global, State } from './types';
 import { initPoster, initUI } from './ui/ui';
 import { Viewer } from './viewer';
 import { initXr } from './xr';
-import { initLight } from './light';
-import { isCustomLodEnabled, isGsplatMetaJsonFilename, LodLoader } from './loaders/gsplat/lod/custom-loader';
 import { bindGsplatRenderer, type GsplatSceneRuntime } from './loaders/gsplat/lod/scene-bindings';
 import { loadSplat } from './loaders/gsplat/sog/splat-deserialize';
 import type { AssetSource } from './loaders/shared/asset-source';
 import { shouldForceWebGlForSogUnified } from './loaders/gsplat/sog/device-fallback';
 import { loadGsplatAsset } from './loaders/gsplat/sog/splat-loader';
-import { getAssetLoader } from './loaders/asset-loader';
-import { version as appVersion } from '../package.json';
-import { loadSettingsFromResponse, loadSettingsFromUrl } from './settings-io/load';
+import { applyPackedSceneToConfig } from './settings-io/project-pack';
+import { takePendingProjectPack } from './settings-io/project-pack-store';
 import { initPostMessageBridge } from './message-bridge';
 import { ensureViewSettings } from './view-settings';
 import { initVideoExport } from './render/video-export';
@@ -43,7 +56,7 @@ import {
     resolveInitialSkyboxUrl,
     setSkyboxCurrentUrlInSettings
 } from './settings-serialize/settings-serialize-helper';
-import { ensureSettingsFileUrl, resolveInboundUserFileUrl, resolveUserUploadResourceUrl, splitInboundUrlOrFile } from './settings-io/user-files';
+import { ensureSettingsFileUrl, resolveInboundUserFileUrl, resolveUserUploadResourceUrl, splitInboundUrlOrFile, toUserUploadFetchUrl } from './settings-io/user-files';
 import {
     createDefaultEffectsRuntimeState,
     normalizeEffectsOnImport,
@@ -55,11 +68,7 @@ import {
     createDefaultSceneAssetCollisionRuntimeState,
     syncSceneAssetCollisionRuntime
 } from './scene-assets/collision/scene-asset-collision';
-import { getCameraCollisionManager } from './collision/camera-collision-manager';
 import { initializeGltfRuntime } from './loaders/gltf/gltf-transcoder';
-import { applyBenchmarkConfigFlags, createSceneProfileBenchmark } from './benchmark/benchmark';
-import { initBenchmarkHud, shouldShowBenchmarkHud } from './benchmark/benchmark-hud';
-import { installFrameGsplatsSync } from './benchmark/sync-frame-gsplats';
 import {
     initFrameProfiler,
     shouldAutoStartFrameProfiler,
@@ -70,32 +79,47 @@ import {
 export { loadGsplatAsset };
 
 const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progress: number) => void, lodLoader?: LodLoader) => {
-    const { contents, contentUrl, aa } = config;
-    const filename = new URL(contentUrl, location.href).pathname.split('/').pop();
-    const shouldEnableLod = lodLoader?.shouldEnableLod(contentUrl) ?? false;
-    
+    const { contentUrl, aa } = config;
+    const filename = contentFilenameFromUrl(contentUrl ?? '');
+    const shouldEnableLod = lodLoader?.shouldEnableLod(contentUrl ?? '') ?? false;
+    const failContent = (err: unknown): never => {
+        throw toViewerLoadError(err, 'content', { url: contentUrl });
+    };
+    const contentsGuard = config.contents ?
+        config.contents.then((response) => {
+            if (!response.ok) {
+                throw new ViewerLoadError(`加载主场景失败: HTTP ${response.status}`, {
+                    stage: 'content',
+                    status: response.status,
+                    url: contentUrl
+                });
+            }
+            return response;
+        }) :
+        undefined;
+
     // 检查是否为 .splat 格式
     const isSplat = (filename || contentUrl || '').toLowerCase().endsWith('.splat');
-    
+
     if (isSplat) {
         // 对于 .splat 格式，需要先获取 contents
-        let assetSource: AssetSource = {
+        const assetSource: AssetSource = {
             url: contentUrl,
             filename: filename
         };
-        
-        if (contents) {
-            const response = await contents;
+
+        if (contentsGuard) {
+            const response = await contentsGuard.catch(failContent);
             const arrayBuffer = await response.arrayBuffer();
             const blob = new Blob([arrayBuffer]);
             assetSource.contents = new File([blob], filename || 'model', { type: 'application/octet-stream' });
         }
-        
+
         // 使用 loadGsplatAsset 加载
         progressCallback(10);
-        const asset = await loadGsplatAsset(app, assetSource);
+        const asset = await loadGsplatAsset(app, assetSource).catch(failContent);
         progressCallback(90);
-        
+
         // 创建实体的辅助函数
         const createEntity = () => {
             const entity = new Entity('gsplat');
@@ -120,72 +144,102 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
             progressCallback(100);
             return entity;
         };
-        
+
         // 如果 asset 已经加载完成，直接创建实体
         if (asset.loaded) {
             return createEntity();
         }
-        
+
         // 否则等待 load 事件
         return new Promise<Entity>((resolve, reject) => {
+            let settled = false;
+            const fail = (err: unknown) => {
+                if (settled) return;
+                settled = true;
+                reject(toViewerLoadError(err, 'content', { url: contentUrl }));
+            };
             asset.once('load', () => {
+                if (settled) return;
+                settled = true;
                 resolve(createEntity());
             });
 
             asset.on('error', (err) => {
                 console.log(err);
-                reject(err);
+                fail(err);
             });
-        });
-    } else {
-        // 对于其他格式，使用原始代码的方式
-        // 注意：不要提前消费 contents，让 PlayCanvas 自己处理
-        const data = isGsplatMetaJsonFilename(filename) ? await (await contents).json() : undefined;
-        const asset = new Asset(filename, 'gsplat', { url: contentUrl, filename }, data);
-
-        return new Promise<Entity>((resolve, reject) => {
-            asset.on('load', () => {
-                const entity = new Entity('gsplat');
-                entity.setLocalEulerAngles(0, 0, 180);
-                entity.addComponent('gsplat', {
-                    unified: true,
-                    asset,
-                    castShadows: false
-                });
-                // don't support AA in unified mode yet
-                if (aa && !entity.gsplat.unified) {
-                    entity.gsplat.material.setDefine('GSPLAT_AA', true);
-                }
-                app.root.addChild(entity);
-
-                if (shouldEnableLod && lodLoader) {
-                    const gsplatComponent = entity.gsplat;
-                    if (gsplatComponent) {
-                        lodLoader.applyLodPreset(gsplatComponent);
-                    }
-                }
-
-                resolve(entity);
-            });
-
-            let watermark = 0;
-            asset.on('progress', (received, length) => {
-                const progress = Math.min(1, received / length) * 100;
-                if (progress > watermark) {
-                    watermark = progress;
-                    progressCallback(Math.trunc(watermark));
-                }
-            });
-
-            asset.on('error', (err) => {
-                console.log(err);
-                reject(err);
-            });
-
-            app.assets.add(asset);
-            app.assets.load(asset);
         });
     }
+    // 对于其他格式，使用原始代码的方式
+    // 注意：不要提前消费 contents，让 PlayCanvas 自己处理
+    const data = isGsplatMetaJsonFilename(filename) ?
+        await (await (contentsGuard ?? Promise.reject(new ViewerLoadError('缺少 lod-meta.json', {
+            stage: 'content',
+            url: contentUrl
+        })))).json() :
+        undefined;
+    const asset = new Asset(filename, 'gsplat', { url: contentUrl, filename }, data);
+
+    return new Promise<Entity>((resolve, reject) => {
+        let settled = false;
+        const fail = (err: unknown) => {
+            if (settled) return;
+            settled = true;
+            reject(toViewerLoadError(err, 'content', { url: contentUrl }));
+        };
+        const succeed = (entity: Entity) => {
+            if (settled) return;
+            settled = true;
+            resolve(entity);
+        };
+
+        if (contentsGuard && !isGsplatMetaJsonFilename(filename)) {
+            contentsGuard.catch(fail);
+        }
+
+        asset.on('load', () => {
+            const entity = new Entity('gsplat');
+            entity.setLocalEulerAngles(0, 0, 180);
+            entity.addComponent('gsplat', {
+                unified: true,
+                asset,
+                castShadows: false
+            });
+            const gsplat = entity.gsplat;
+            // don't support AA in unified mode yet
+            if (aa && gsplat && !gsplat.unified) {
+                gsplat.material.setDefine('GSPLAT_AA', true);
+            }
+            app.root.addChild(entity);
+
+            if (shouldEnableLod && lodLoader) {
+                const gsplatComponent = entity.gsplat;
+                if (gsplatComponent) {
+                    lodLoader.applyLodPreset(gsplatComponent);
+                }
+            }
+
+            succeed(entity);
+        });
+
+        let watermark = 0;
+        asset.on('progress', (received, length) => {
+            const progress = Math.min(1, received / length) * 100;
+            if (progress > watermark) {
+                watermark = progress;
+                progressCallback(Math.trunc(watermark));
+            }
+        });
+
+        asset.on('error', (err) => {
+            console.log(err);
+            fail(err);
+        });
+
+        app.assets.add(asset);
+        app.assets.load(asset);
+    });
+
 };
 
 const createApp = async (canvas: HTMLCanvasElement, config: Config) => {
@@ -321,6 +375,12 @@ const main = async (
     userUploadFiles?: Map<string, Blob>
 ) => {
     ensureAbsoluteSettingsUrl(config);
+    if (!config.loadRequestId) {
+        config.loadRequestId = readHostRequestId();
+    }
+    if (config.originalContentUrl == null && typeof config.contentUrl === 'string') {
+        config.originalContentUrl = config.contentUrl;
+    }
     if (config.benchmark && !config.benchmarkNoInteraction) {
         const hasAnimTrack =
             settingsJson?.startMode === 'animTrack' &&
@@ -407,7 +467,12 @@ const main = async (
     });
 
     // 如果设置了 noreveal 参数，清除 reveal effect 配置
-    const processedSettings = importSettings(settingsJson);
+    let processedSettings: ExperienceSettings;
+    try {
+        processedSettings = importSettings(settingsJson);
+    } catch (err) {
+        throw toViewerLoadError(err, 'settings', { url: config.settingsUrl });
+    }
     if (config.noreveal) {
         processedSettings.revealEffect = undefined;
         delete (processedSettings as Record<string, unknown>).effects;
@@ -516,29 +581,35 @@ const main = async (
     initUI(global);
 
     // Load model
-    const gsplatContentFilename = new URL(config.contentUrl, location.href).pathname.split('/').pop();
+    const gsplatContentFilename = contentFilenameFromUrl(config.contentUrl ?? '');
     const gsplatLoad = getAssetLoader(global).trackPromise(
         'mainScene',
         'mainScene:gsplat',
         loadGsplat(
-        app,
-        config,
-        (progress: number) => {
+            app,
+            config,
+            (progress: number) => {
             // lod-meta 仅表示 meta 下载；streaming 总进度 0–50% 由 octree bootstrap 接管
-            if (isGsplatMetaJsonFilename(gsplatContentFilename)) {
-                state.progress = Math.max(state.progress, Math.min(progress, 50));
-            } else {
-                state.progress = progress;
-            }
-        },
-        lodLoader
+                if (isGsplatMetaJsonFilename(gsplatContentFilename)) {
+                    state.progress = Math.max(state.progress, Math.min(progress, 50));
+                } else {
+                    state.progress = progress;
+                }
+            },
+            lodLoader
         )
     );
+    gsplatLoad.catch((err) => {
+        postViewerLoadFailedFromError(err, 'content', {
+            url: config.contentUrl,
+            requestId: config.loadRequestId
+        });
+    });
 
     // Load skybox from settings (URL param bootstraps into settings when absent)
-    const skyboxLoadUrl = initialSkyboxUrl
-        ? resolveUserUploadResourceUrl(global, initialSkyboxUrl)
-        : undefined;
+    const skyboxLoadUrl = initialSkyboxUrl ?
+        resolveUserUploadResourceUrl(global, initialSkyboxUrl) :
+        undefined;
     const skyboxLoad = skyboxLoadUrl ? applySkyboxTexture(app, skyboxLoadUrl) : undefined;
 
     if (skyboxLoad) {
@@ -643,4 +714,12 @@ const main = async (
 
 console.log(`SuperSplat Viewer v${appVersion} | Engine v${engineVersion} (${engineRevision})`);
 
-export { main, loadSettingsFromResponse, loadSettingsFromUrl };
+export {
+    main,
+    loadSettingsFromResponse,
+    loadSettingsFromUrl,
+    applyPackedSceneToConfig,
+    takePendingProjectPack,
+    postViewerLoadFailedFromError,
+    toUserUploadFetchUrl
+};
