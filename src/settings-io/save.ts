@@ -1,13 +1,13 @@
 // PROJECT_SAVE.destination：
 // postMessage 本地保存一律 host：不下载、不上传，把 settings + 资源 File 交回父级。
 // universe：不写 content、不上传主场景；只登记 settings.json（用户资产 sidecar 仍 put）。
-// local：仅 Viewer 内部 UI 直连调用，下载 settings.zip（不走 postMessage 协议）。
+// local：仅 Viewer 内部 UI 直连调用，下载 project-{projectId}.zip（不走 postMessage 协议）。
 // 缩略图仅 universe 登记。
 import { isMainSceneModifiedForHostSave, type SettingsSaveDestination } from './host-protocol';
 import {
     SETTINGS_JSON_NAME,
     blobFromBytes,
-    localSettingsZipFilename,
+    localProjectZipFilename,
     normalizePackPath,
     zipSettingsArchive
 } from './pack';
@@ -93,7 +93,7 @@ async function downloadLocalProject(
 
     try {
         const zipped = await zipSettingsArchive(packedJson, files);
-        downloadBlobAsFile(blobFromBytes(zipped, 'application/zip'), localSettingsZipFilename(global.config.projectId));
+        downloadBlobAsFile(blobFromBytes(zipped, 'application/zip'), localProjectZipFilename(global.config.projectId));
         return { ok: true };
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

@@ -1,18 +1,18 @@
-// settings.json / settings.zip 共用：路径规范化、MIME、zip 编码。
+// settings.json / 项目 zip 共用：路径规范化、MIME、zip 编码。
 import { zipSync, strToU8, type Zippable } from 'fflate';
 
 export const SETTINGS_JSON_NAME = 'settings.json';
-export const SETTINGS_ZIP_NAME = 'settings.zip';
+export const PROJECT_ZIP_NAME = 'project.zip';
 
 /**
- * 本地下载 zip 文件名：`settings-{projectId}.zip`；无 projectId 时仍为 `settings.zip`。
+ * 本地下载 zip 文件名：`project-{projectId}.zip`；无 projectId 时为 `project.zip`。
  * @param projectId - Viewer config.projectId
  * @returns 可作 a.download 的文件名
  */
-export function localSettingsZipFilename(projectId?: string | number): string {
+export function localProjectZipFilename(projectId?: string | number): string {
     const raw = projectId == null ? '' : String(projectId).trim();
     const safe = raw.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '-');
-    return safe ? `settings-${safe}.zip` : SETTINGS_ZIP_NAME;
+    return safe ? `project-${safe}.zip` : PROJECT_ZIP_NAME;
 }
 
 export function canonicalizeSlashPath(raw: string): string {
