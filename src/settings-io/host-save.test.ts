@@ -1,6 +1,7 @@
 import {
     httpStatusFromUnknown,
     isMainSceneModifiedForHostSave,
+    outboundLoadRequestId,
     readHostRequestId,
     readInboundRequestId,
     resolveSettingsSaveDestination,
@@ -22,6 +23,7 @@ assert(readHostRequestId('?requestId=load-1') === 'load-1', 'url requestId');
 assert(readHostRequestId('?settings=/a.json') === undefined, 'no requestId');
 assert(readInboundRequestId({ requestId: 'save-2' }) === 'save-2', 'inbound requestId');
 assert(readInboundRequestId({ requestId: '  ' }) === undefined, 'blank requestId');
+assert(outboundLoadRequestId('load-cfg') === 'load-cfg', 'config requestId');
 
 const tagged = new ViewerLoadError('加载主场景失败: HTTP 404', { stage: 'content', status: 404, url: 'https://cdn/a.sog' });
 assert(tagged.stage === 'content', 'tagged stage');

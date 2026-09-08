@@ -7,7 +7,10 @@
 **2026-08-26 补充（SETTINGS_SAVE destination）**：
 - **入站**：**`SETTINGS_SAVE { destination?: 'host' | 'universe', requestId?: string }`**，缺省 **`universe`**。postMessage **本地保存发 `host`**：不下载不上传，成功/失败都 **`SETTINGS_SAVE_RESULT`**（含 settings、File、`references`、`contentChanged`）。**`universe`** 成功 **`SETTINGS_UPDATED`**，失败 **`SETTINGS_SAVE_FAILED { message, requestId? }`**。
 - **去向**：postMessage `host` = 产物交回父级；`universe` = OSS 上传。Viewer 内部 UI 直连仍可用 **`local`** 下载 zip（不是给父级的协议值）。
-- **加载失败**：出站 **`VIEWER_LOAD_FAILED { requestId?, stage: 'settings'|'content'|'resource', message, status?, url? }`**；成功 **`VIEWER_READY { requestId? }`**（`?requestId=`）。
+- **加载成败（两对）**：
+  - **主场景**：成功 **`VIEWER_READY { requestId? }`**（首帧）；失败 **`VIEWER_LOAD_FAILED { requestId?, stage: 'settings'|'content', message, status?, url? }`**（不再发 READY）。
+  - **场景内资产**：成功 **`VIEWER_ASSETS_READY { requestId? }`**（可开始编辑）；失败 **`VIEWER_ASSETS_LOAD_FAILED { requestId?, message, status?, url?, failedCount }`**（不再发 ASSETS_READY）。
+  - URL `?requestId=`。
 - **缩略图**：暂存 JPEG **仅 universe** 时 OSS + 登记；local **不下载**。
 - **超时**：internal UI 等待保存结果 **60s**（原 3s）。详 **[项目保存管线说明](项目保存管线说明.md)**、**`docs/工作记录.md`（2026-08-26）**、**`docs/SaaS第三期 编辑模式交互职责划分.md`**。
 - **ASSET_PLACE File**：入站 **`value.src?: string | File`**；File 写入会话表并改成 **`assets/<basename>`**（重名 **`assets/<assetId>-<basename>`**），用会话表 object URL 加载。运行态 **`ScenePlacedItem.file`** 仍可保留原始字节（内部）。仅 CDN **http(s)** 仍写绝对 URL。**`blob:` 不入库**。不认独立 **`value.url` / `value.file`**。复制拷贝同一 **`file`** 引用。

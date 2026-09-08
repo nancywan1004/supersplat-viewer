@@ -209,8 +209,10 @@
 | 配置已保存 | SETTINGS\_UPDATED | { requestId?: string } | 仅 `destination: 'universe'`（已上传 OSS）。`host` **不发**本事件 |
 | 保存失败 | SETTINGS\_SAVE\_FAILED | { message: string, requestId?: string } | 仅 `universe`。`host` 失败走 `SETTINGS_SAVE_RESULT { ok: false }` |
 | 交回保存产物 | SETTINGS\_SAVE\_RESULT | `{ ok: true, requestId?, settings, files: [{ path, file }], references: [{ path, field }], contentChanged }` 或 `{ ok: false, requestId?, message }` | postMessage 本地保存（`destination: 'host'`）。不自动下载、不上传。父级用产物打包下载或交给客户上传。主模型未改时 `contentChanged: false`、不带回主模型；Viewer 改过才带回修改后的文件 |
-| 加载完成 | VIEWER\_READY | { requestId?: string } | 首帧就绪。URL `?requestId=` 有值时回传 |
-| 加载失败 | VIEWER\_LOAD\_FAILED | `{ requestId?, stage: 'settings' \| 'content' \| 'resource', message, status?, url? }` | 模型加载、配置解析、必要资源读取失败时上报（含 HTTP 404）。同一加载最多发一次 |
+| 主场景首帧 | VIEWER\_READY | { requestId?: string } | 主 splat 已出第一帧，可以展示 Viewer。此时场景内资产可能仍在加载。对应失败是 `VIEWER_LOAD_FAILED`。URL `?requestId=` 有值时回传 |
+| 配置或主场景加载失败 | VIEWER\_LOAD\_FAILED | `{ requestId?, stage: 'settings' \| 'content', message, status?, url? }` | `settings` = settings.json；`content` = 主模型。发生后不再发 `VIEWER_READY`。不含场景内资产（那是 `VIEWER_ASSETS_LOAD_FAILED`）。同一加载最多一次 |
+| 场景资产就绪，可开始编辑 | VIEWER\_ASSETS\_READY | { requestId?: string } | 启动期 settings 场景资产 restore 完成且当前无在途 gaussian/mesh 加载。每个加载会话只发一次。有开场 reveal 时会等到 reveal 结束再 restore。失败对子是 `VIEWER_ASSETS_LOAD_FAILED` |
+| 场景资产加载失败 | VIEWER\_ASSETS\_LOAD\_FAILED | `{ requestId?, message, status?, url?, failedCount }` | 启动期场景内资产未能全部就绪（含 mesh/gaussian HTTP 失败、缺 URL、放置失败）。发生后不再发 `VIEWER_ASSETS_READY`。每个加载会话最多一次 |
 
 ### 资产相关
 

@@ -17,6 +17,7 @@ import {
 import type { SceneAsset } from '../schemas/v2-custom';
 import type { EditLeftModule, Global, AssetLibraryItem, AssetLibraryType, ScenePlacedItem } from '../types';
 import { asUserFile, assetLibraryHref } from '../loaders/asset-file';
+import { errorMessage, httpStatusFromUnknown } from '../settings-io/host-protocol';
 import { resolveUserUploadResourceUrl } from '../settings-io/user-files';
 import {
     getSelectedSceneEntity,
@@ -95,6 +96,17 @@ type SceneAssetsRestoreOptions = {
     reason?: 'startup' | 'edit-enter' | 'edit-discard' | 'history-restore' | 'settings-reset';
     deferUntilRevealComplete?: boolean;
     clearBeforeRestore?: boolean;
+};
+
+export type SceneAssetRestoreFailure = {
+    message: string;
+    status?: number;
+    url?: string;
+};
+
+export type SceneAssetsRestoreCompletePayload = {
+    reason: string;
+    failures: SceneAssetRestoreFailure[];
 };
 
 type SceneAssetsRestoreController = {
@@ -1062,21 +1074,29 @@ function applySceneAssetTransformToEntry(global: Global, entry: ScenePlacedItem,
 
 export { applySceneAssetTriggerDistanceM } from '../settings-serialize/settings-serialize-helper';
 
-async function loadAndPlaceSceneAssetFromSettings(global: Global, sa: SceneAsset): Promise<void> {
+async function loadAndPlaceSceneAssetFromSettings(global: Global, sa: SceneAsset): Promise<SceneAssetRestoreFailure | null> {
     const posArr = (sa.transform?.position ?? [0, 0, 0]) as number[];
+    const sourceUrl = resolveSceneAssetSourceUrl(global, sa.source) ?? undefined;
 
     let item: AssetLibraryItem | null = null;
     try {
         item = await loadSceneAssetLibraryItem(global, sa, nextSceneEntityId, ASSET_LOAD_TIMEOUT_MS);
     } catch (err) {
         console.warn('[SceneAssets] restore asset failed:', sa?.type, sa?.id, err);
-        return;
+        return {
+            message: errorMessage(err, `场景资产加载失败: ${sa.type ?? 'unknown'}`),
+            status: httpStatusFromUnknown(err),
+            url: sourceUrl
+        };
     }
     if (!item) {
         if (sa.type === 'video' || sa.type === 'audio') {
             console.warn('[SceneAssets] restore media skipped:', sa.type, sa.id, sa.source);
         }
-        return;
+        return {
+            message: `场景资产加载失败: ${sa.type ?? 'unknown'}`,
+            url: sourceUrl
+        };
     }
 
     const pos = new Vec3(posArr[0] ?? 0, posArr[1] ?? 0, posArr[2] ?? 0);
@@ -1087,24 +1107,31 @@ async function loadAndPlaceSceneAssetFromSettings(global: Global, sa: SceneAsset
     const entry = await placeAsset(global, item, pos, false, {
         ...(sa.type === 'video' ? { horizontalCurvature: savedCurvature } : {})
     });
-    if (!entry) return;
+    if (!entry) {
+        return {
+            message: `场景资产放置失败: ${sa.type ?? 'unknown'}`,
+            url: sourceUrl
+        };
+    }
 
     if (sa.id) {
         entry.id = sa.id;
     }
     applySceneAssetTransformToEntry(global, entry, sa);
     startRestoredAssetDefaultEffectIfConfigured(global, entry);
+    return null;
 }
 
 /**
  * View → Edit：按 settings 真源就地同步已放置实体，避免 clear+全量 reload 导致大资产闪灭。
  * 显隐/变换以 settings.sceneAssets 为准，不沿用 view 下仅改 runtime 的状态。
  */
-export async function syncScenePlacedEntitiesFromSettings(global: Global): Promise<void> {
+export async function syncScenePlacedEntitiesFromSettings(global: Global): Promise<SceneAssetRestoreFailure[]> {
     const settings: any = global.settings as any;
     const sceneAssets: SceneAsset[] = Array.isArray(settings?.sceneAssets) ? settings.sceneAssets : [];
     const { state, events } = global;
     if (!state.scenePlacedEntities) state.scenePlacedEntities = [];
+    const failures: SceneAssetRestoreFailure[] = [];
 
     const settingsById = new Map<string, SceneAsset>();
     for (const sa of sceneAssets) {
@@ -1138,25 +1165,30 @@ export async function syncScenePlacedEntitiesFromSettings(global: Global): Promi
 
     for (const sa of sceneAssets) {
         if (!sa?.id || matchedSettingIds.has(sa.id)) continue;
-        await loadAndPlaceSceneAssetFromSettings(global, sa);
+        const failure = await loadAndPlaceSceneAssetFromSettings(global, sa);
+        if (failure) failures.push(failure);
     }
+    return failures;
 }
 
 /**
  * 从 settings.sceneAssets 还原场景中的资产实体，并写入 state.scenePlacedEntities。
  * 支持 image / mesh / gaussian，使用 source.url / source.filename 重新加载资产。
  */
-export async function restoreSceneAssetsFromSettings(global: Global): Promise<void> {
+export async function restoreSceneAssetsFromSettings(global: Global): Promise<SceneAssetRestoreFailure[]> {
     const settings: any = global.settings as any;
     const sceneAssets: SceneAsset[] | undefined = settings.sceneAssets;
-    if (!Array.isArray(sceneAssets) || sceneAssets.length === 0) return;
+    if (!Array.isArray(sceneAssets) || sceneAssets.length === 0) return [];
 
     const { state } = global;
     if (!state.scenePlacedEntities) state.scenePlacedEntities = [];
 
+    const failures: SceneAssetRestoreFailure[] = [];
     for (const sa of sceneAssets) {
-        await loadAndPlaceSceneAssetFromSettings(global, sa);
+        const failure = await loadAndPlaceSceneAssetFromSettings(global, sa);
+        if (failure) failures.push(failure);
     }
+    return failures;
 }
 
 /**
@@ -1181,15 +1213,28 @@ export async function requestSceneAssetsRestore(global: Global, options: SceneAs
             if (controller.version !== version) return;
 
             const runRestore = async (): Promise<void> => {
-                if (clearBeforeRestore) {
-                    clearScenePlacedEntities(global);
-                    await restoreSceneAssetsFromSettings(global);
-                } else {
-                    await syncScenePlacedEntitiesFromSettings(global);
+                const failures: SceneAssetRestoreFailure[] = [];
+                try {
+                    if (clearBeforeRestore) {
+                        clearScenePlacedEntities(global);
+                        failures.push(...await restoreSceneAssetsFromSettings(global));
+                    } else {
+                        failures.push(...await syncScenePlacedEntitiesFromSettings(global));
+                    }
+                    applyMorphKeyframeVisibilityPolicy(global);
+                    syncGsplatShadowCastingFromSettings(global);
+                } catch (err) {
+                    failures.push({
+                        message: errorMessage(err, '场景资产恢复失败'),
+                        status: httpStatusFromUnknown(err)
+                    });
+                } finally {
+                    const payload: SceneAssetsRestoreCompletePayload = {
+                        reason: options.reason ?? 'unknown',
+                        failures
+                    };
+                    global.events.fire('sceneAssets:restoreComplete', payload);
                 }
-                applyMorphKeyframeVisibilityPolicy(global);
-                syncGsplatShadowCastingFromSettings(global);
-                global.events.fire('sceneAssets:restoreComplete', { reason: options.reason ?? 'unknown' });
             };
 
             // edit-enter：与 editMode 媒体重置、applySettingsSnapshot 错开一帧，避免 forward draw 竞态。

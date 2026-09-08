@@ -1,6 +1,7 @@
 // Viewer ↔ 外层 Controller 的加载/保存出站（不依赖 message-bridge，bootstrap 失败时也能发）。
 
-export type ViewerLoadStage = 'settings' | 'content' | 'resource';
+/** 挡住 `VIEWER_READY` 的失败阶段：配置或主场景。场景内资产失败走 `VIEWER_ASSETS_LOAD_FAILED`。 */
+export type ViewerLoadStage = 'settings' | 'content';
 
 export type SettingsSaveDestination = 'local' | 'universe' | 'host';
 
@@ -81,6 +82,16 @@ export function readInboundRequestId(payload: { requestId?: unknown } | null | u
 }
 
 /**
+ * 加载会话出站用的 requestId：优先 `config.loadRequestId`，否则 URL `?requestId=`。
+ * @param loadRequestId - Viewer config 上的加载 id
+ * @returns 非空 requestId
+ */
+export function outboundLoadRequestId(loadRequestId?: string): string | undefined {
+    const fromConfig = typeof loadRequestId === 'string' ? loadRequestId.trim() : '';
+    return fromConfig || readHostRequestId();
+}
+
+/**
  * 从 Error / 文案里解析 HTTP 状态码。
  * @param err - 原始错误
  * @returns 401/403/404 等，无法解析则为 undefined
@@ -149,9 +160,9 @@ export function postToHost(type: string, data?: Record<string, unknown>): void {
 }
 
 /**
- * 出站 VIEWER_LOAD_FAILED；同一 iframe 加载最多一次。
+ * 出站 VIEWER_LOAD_FAILED（配置或主场景，挡住 VIEWER_READY）。同一 iframe 加载最多一次。
  * @param opts - 出站字段
- * @param opts.stage - settings / content / resource
+ * @param opts.stage - settings / content
  * @param opts.message - 错误原因
  * @param opts.status - HTTP 状态码
  * @param opts.url - 失败资源 URL

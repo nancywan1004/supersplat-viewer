@@ -53,7 +53,8 @@ import { getAssetLoader } from './loaders/asset-loader';
 import {
     applyMorphKeyframeVisibilityPolicy,
     applySceneAssetTriggerDistanceM,
-    requestSceneAssetsRestore
+    requestSceneAssetsRestore,
+    type SceneAssetsRestoreCompletePayload
 } from './scene-assets/asset-placement-handler';
 import { pauseAllSceneMedia } from './scene-assets/media/scene-media-playback';
 import { resolveExportTimelinePlan } from './render/export-timeline-resolver';
@@ -68,7 +69,7 @@ import type { ExperienceSettings, SceneMediaHotspotPatch, TorchLightSettings } f
 import { parseMoveSpeedScale, writeMoveSpeedScale } from './input/move-speed-scale';
 import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
 import type { SceneCollisionSettingsPatch } from './schemas/v2-custom';
-import { readHostRequestId, readInboundRequestId } from './settings-io/host-protocol';
+import { outboundLoadRequestId, readInboundRequestId } from './settings-io/host-protocol';
 import { importLocalProject } from './settings-io/import-local-project';
 import {
     isHostSaveSuccess,
@@ -1539,10 +1540,46 @@ const initPostMessageBridge = (global: Global) => {
         }
     });
 
+    // VIEWER_READY = 主场景首帧；VIEWER_LOAD_FAILED = 配置/主场景失败。
+    // VIEWER_ASSETS_READY / VIEWER_ASSETS_LOAD_FAILED = 启动期场景内资产成败，每个加载会话只出站一次。
+    let firstFrameReady = false;
+    let startupAssetsRestoreComplete = false;
+    let startupAssetRestoreFailures: SceneAssetsRestoreCompletePayload['failures'] | null = null;
+    let viewerAssetsOutcomePosted = false;
+    const postViewerAssetsOutcomeIfSettled = () => {
+        if (viewerAssetsOutcomePosted) return;
+        if (!firstFrameReady || !startupAssetsRestoreComplete || startupAssetRestoreFailures === null) return;
+        const failures = startupAssetRestoreFailures;
+        if (failures.length === 0 && !getAssetLoader(global).getReadyState().allReady) return;
+        viewerAssetsOutcomePosted = true;
+        const requestId = outboundLoadRequestId(config.loadRequestId);
+        if (failures.length > 0) {
+            const first = failures[0];
+            postToParent('VIEWER_ASSETS_LOAD_FAILED', {
+                ...(requestId ? { requestId } : {}),
+                message: first.message,
+                ...(typeof first.status === 'number' ? { status: first.status } : {}),
+                ...(first.url ? { url: first.url } : {}),
+                failedCount: failures.length
+            });
+            return;
+        }
+        postToParent('VIEWER_ASSETS_READY', requestId ? { requestId } : undefined);
+    };
+    events.on('sceneAssets:restoreComplete', (payload?: SceneAssetsRestoreCompletePayload) => {
+        if (!startupAssetsRestoreComplete) {
+            startupAssetsRestoreComplete = true;
+            startupAssetRestoreFailures = Array.isArray(payload?.failures) ? payload.failures : [];
+        }
+        postViewerAssetsOutcomeIfSettled();
+    });
+    events.on('assets:allReady', postViewerAssetsOutcomeIfSettled);
+
     events.on('firstFrame', async () => {
-        const requestId = (typeof config.loadRequestId === 'string' && config.loadRequestId.trim()) ||
-            readHostRequestId();
+        const requestId = outboundLoadRequestId(config.loadRequestId);
         postToParent('VIEWER_READY', requestId ? { requestId } : undefined);
+        firstFrameReady = true;
+        postViewerAssetsOutcomeIfSettled();
         const { canUndo, canRedo } = await import('./edit-history');
         if (config.trackEditHistory) {
             postToParent('EDIT_HISTORY_STATE', { canUndo: canUndo(global), canRedo: canRedo(global) });
