@@ -399,6 +399,9 @@ const validateV2 = (data: unknown): ExperienceSettings => {
         if (collision.enabled !== undefined) {
             assertBoolean(collision.enabled, 'settings.collision.enabled');
         }
+        if (collision.cameraRadius !== undefined) {
+            assertNumber(collision.cameraRadius, 'settings.collision.cameraRadius');
+        }
         if (collision.scale !== undefined) {
             assertObject(collision.scale, 'settings.collision.scale');
         }

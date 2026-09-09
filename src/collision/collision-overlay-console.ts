@@ -10,7 +10,7 @@ import {
 } from 'playcanvas';
 
 import type { Global } from '../types';
-import { SCENE_ASSET_CAMERA_COLLISION_RADIUS } from '../scene-assets/collision/scene-asset-collision';
+import { readSceneAssetCollisionRuntimeState } from '../scene-assets/collision/scene-asset-collision';
 import type { PushOut } from './collision';
 import { MeshCollision } from './mesh-collision';
 import { VoxelCollision } from './voxel-collision';
@@ -271,7 +271,7 @@ export function installCollisionOverlayConsole(global: Global): void {
             /* ignore */
         }
 
-        const radius = SCENE_ASSET_CAMERA_COLLISION_RADIUS;
+        const radius = readSceneAssetCollisionRuntimeState(global).cameraRadius;
         const collision = mgr.getCollision();
         const cam = global.camera;
         const pos = cam.getPosition();
@@ -422,7 +422,7 @@ export function installCollisionOverlayConsole(global: Global): void {
         }
 
         destroyProbe();
-        const radius = SCENE_ASSET_CAMERA_COLLISION_RADIUS;
+        const radius = readSceneAssetCollisionRuntimeState(global).cameraRadius;
         const device = global.app.graphicsDevice;
         const mesh = createWireSphereMesh(device);
         const material = new StandardMaterial();

@@ -16,6 +16,7 @@ import {
     clampAutoFitFactor,
     clampAxisScale,
     createDefaultSceneAssetCollisionRuntimeState,
+    DEFAULT_CAMERA_COLLISION_RADIUS,
     DEFAULT_SCENE_ASSET_COLLISION_AXIS_SCALE,
     DEFAULT_SCENE_ASSET_COLLISION_SCALE,
     normalizeAxisScale,
@@ -33,6 +34,10 @@ export {
     createDefaultSceneAssetCollisionRuntimeState,
     DEFAULT_SCENE_ASSET_COLLISION_AXIS_SCALE,
     DEFAULT_SCENE_ASSET_COLLISION_SCALE,
+    DEFAULT_CAMERA_COLLISION_RADIUS,
+    CAMERA_COLLISION_RADIUS_MIN,
+    CAMERA_COLLISION_RADIUS_MAX,
+    clampCameraCollisionRadius,
     normalizeAxisScale,
     normalizeSceneAssetCollisionRuntimeState,
     normalizeSceneAssetCollisionScale,
@@ -57,8 +62,8 @@ export type {
 };
 export type { SceneAssetCollisionRuntimeState } from '../../types';
 
-/** 相机与场景/放置资产碰撞时使用的球体半径（米）；Fly / Orbit 共用 */
-export const SCENE_ASSET_CAMERA_COLLISION_RADIUS = 0.45;
+/** 相机与场景/放置资产碰撞时使用的球体半径默认（米）；Fly / Orbit 共用。可用 settings.collision.cameraRadius 覆盖。 */
+export const SCENE_ASSET_CAMERA_COLLISION_RADIUS = DEFAULT_CAMERA_COLLISION_RADIUS;
 
 export function syncSceneAssetCollisionRuntime(global: Global): void {
     const rs = readSceneAssetCollisionRuntimeState(global);
@@ -77,6 +82,7 @@ export function applySceneAssetCollisionFromSettings(global: Global): void {
     const current = readSceneAssetCollisionRuntimeState(global);
     writeSceneAssetCollisionRuntimeState(global, {
         enabled: typeof persisted.enabled === 'boolean' ? persisted.enabled : current.enabled,
+        cameraRadius: typeof persisted.cameraRadius === 'number' ? persisted.cameraRadius : current.cameraRadius,
         scale: normalizeSceneAssetCollisionScale(persisted.scale ?? current.scale),
         debugVisual: current.debugVisual
     });
@@ -90,6 +96,7 @@ export function persistCollisionToSettings(global: Global): void {
     settings.collision = {
         ...settings.collision,
         enabled: rs.enabled,
+        cameraRadius: rs.cameraRadius,
         scale: normalizeSceneAssetCollisionScale(rs.scale),
         ...(url ? { url } : {})
     };

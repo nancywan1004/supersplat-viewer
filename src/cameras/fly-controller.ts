@@ -28,8 +28,6 @@ const tmpTarget = new Vec3();
 const tmpTargetClamp = new Vec3();
 const tmpRemain = new Vec3();
 const tmpSweepMove = new Vec3();
-const CAMERA_RADIUS = SCENE_ASSET_CAMERA_COLLISION_RADIUS;
-
 // Damping helper function
 const damp = (damping: number, dt: number) => {
     return 1 - Math.pow(damping, dt * 60);
@@ -63,7 +61,9 @@ class FlyController implements CameraController {
     /** 场景 mesh 碰撞：扫掠移动，避免一帧穿过薄墙 */
     private _collision: Collision | null = null;
 
-    private readonly _sphereMover = new SphereMover(CAMERA_RADIUS);
+    private _collisionRadius = SCENE_ASSET_CAMERA_COLLISION_RADIUS;
+
+    private readonly _sphereMover = new SphereMover(SCENE_ASSET_CAMERA_COLLISION_RADIUS);
 
     /** sceneAsset AABB 碰撞（由 CameraManager 注入，阶段一） */
     private sceneAssetCollisionResolver: (() => Collision | null) | null = null;
@@ -106,9 +106,15 @@ class FlyController implements CameraController {
         this.sceneAssetCollisionResolver = resolver;
     }
 
+    /** Fly 场景 mesh / 放置资产共用的碰撞球半径（米） */
+    setCollisionRadius(radius: number): void {
+        this._collisionRadius = radius;
+        this._sphereMover.radius = radius;
+    }
+
     private _applySceneAssetSpherePush(x: number, y: number, z: number): boolean {
         const col = this.sceneAssetCollisionResolver?.();
-        return !!col?.querySphere(x, y, z, CAMERA_RADIUS, pushOut);
+        return !!col?.querySphere(x, y, z, this._collisionRadius, pushOut);
     }
 
     onEnter(camera: Camera): void {

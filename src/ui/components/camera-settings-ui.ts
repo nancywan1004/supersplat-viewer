@@ -1,4 +1,7 @@
 import {
+    CAMERA_COLLISION_RADIUS_MAX,
+    CAMERA_COLLISION_RADIUS_MIN,
+    clampCameraCollisionRadius,
     normalizeSceneAssetCollisionScale,
     patchSceneAssetCollisionRuntimeState,
     readSceneAssetCollisionRuntimeState,
@@ -57,6 +60,14 @@ export function getCameraSettingsHTML(): string {
         <div class="settingsRow">
             <label for="cameraCollisionEnabled">启用物理碰撞</label>
             <input type="checkbox" id="cameraCollisionEnabled" />
+        </div>
+        <div class="settingsRow">
+            <label for="cameraCollisionRadius">Fly 碰撞半径</label>
+            <input type="range" id="cameraCollisionRadius" min="${CAMERA_COLLISION_RADIUS_MIN}" max="${CAMERA_COLLISION_RADIUS_MAX}" step="0.01" />
+            <span id="cameraCollisionRadiusVal" class="settingsValueLabel"></span>
+        </div>
+        <div class="settingsRow camera-settings-subhint">
+            Fly 用球体挡墙。室内门廊建议 0.12～0.18m；过大（原 0.45m）会卡在椅缝。
         </div>
         <div class="settingsRow">
             <label for="sceneAssetCollisionDebugVisual">显示放置资产碰撞 AABB 线框</label>
@@ -135,6 +146,8 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
     const collisionMgr = () => getCameraCollisionManager(global);
 
     const enabledInput = root.querySelector<HTMLInputElement>('#cameraCollisionEnabled');
+    const radiusInput = root.querySelector<HTMLInputElement>('#cameraCollisionRadius');
+    const radiusValue = root.querySelector<HTMLElement>('#cameraCollisionRadiusVal');
     const debugVisualInput = root.querySelector<HTMLInputElement>('#sceneAssetCollisionDebugVisual');
     const autoFitInput = root.querySelector<HTMLInputElement>('#sceneAssetCollisionAutoFit');
     const hintEl = root.querySelector<HTMLElement>('#cameraCollisionHint');
@@ -301,6 +314,41 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
         }
     }
 
+    const formatRadius = (radius: number) => `${radius.toFixed(2)} m`;
+
+    const syncRadiusUi = (radius = readRs().cameraRadius) => {
+        const value = clampCameraCollisionRadius(radius);
+        if (radiusInput) {
+            radiusInput.value = String(value);
+        }
+        if (radiusValue) {
+            radiusValue.textContent = formatRadius(value);
+        }
+    };
+
+    const applyRadius = (raw: number, commitHistory: boolean) => {
+        const radius = clampCameraCollisionRadius(raw);
+        patchSceneAssetCollisionRuntimeState(global, { cameraRadius: radius });
+        events.fire('camera:collisionRadiusChanged', radius);
+        if (commitHistory) {
+            pushEditHistory(global, 'camera collision radius');
+        }
+        syncRadiusUi(radius);
+    };
+
+    const onRadiusInput = () => {
+        if (!radiusInput) return;
+        applyRadius(Number(radiusInput.value), false);
+    };
+    const onRadiusChange = () => {
+        if (!radiusInput) return;
+        applyRadius(Number(radiusInput.value), true);
+    };
+
+    syncRadiusUi();
+    radiusInput?.addEventListener('input', onRadiusInput);
+    radiusInput?.addEventListener('change', onRadiusChange);
+
     const formatMoveSpeedScale = (scale: number) => scale.toFixed(2);
 
     const syncMoveSpeedScaleUi = (scale = readMoveSpeedScale(global.settings as ExperienceSettings)) => {
@@ -353,6 +401,7 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
     };
     const onSettingsSnapshotApplied = () => {
         syncMoveSpeedScaleUi();
+        syncRadiusUi();
     };
 
     syncMoveSpeedScaleUi();
@@ -397,6 +446,8 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
         for (const { el, fn } of axisListeners) {
             el.removeEventListener('input', fn);
         }
+        radiusInput?.removeEventListener('input', onRadiusInput);
+        radiusInput?.removeEventListener('change', onRadiusChange);
         moveSpeedSlider?.removeEventListener('input', onMoveSpeedInput);
         moveSpeedSlider?.removeEventListener('change', onMoveSpeedChange);
         events.off('camera:moveSpeedScaleChanged', onMoveSpeedScaleChanged);

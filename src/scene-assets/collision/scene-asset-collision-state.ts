@@ -25,6 +25,18 @@ const AXIS_SCALE_MAX = 1.5;
 const AUTO_FIT_AXIS_MIN = 0.55;
 const AUTO_FIT_AXIS_MAX = 1;
 
+/** Fly / Orbit 碰撞球半径默认（米）。原 0.45 在室内门廊会卡住。 */
+export const DEFAULT_CAMERA_COLLISION_RADIUS = 0.15;
+export const CAMERA_COLLISION_RADIUS_MIN = 0.08;
+export const CAMERA_COLLISION_RADIUS_MAX = 0.5;
+
+export function clampCameraCollisionRadius(value: number): number {
+    if (!Number.isFinite(value) || value <= 0) {
+        return DEFAULT_CAMERA_COLLISION_RADIUS;
+    }
+    return Math.min(CAMERA_COLLISION_RADIUS_MAX, Math.max(CAMERA_COLLISION_RADIUS_MIN, value));
+}
+
 export function clampAxisScale(value: number): number {
     if (!Number.isFinite(value) || value <= 0) return 1;
     return Math.min(AXIS_SCALE_MAX, Math.max(AXIS_SCALE_MIN, value));
@@ -68,6 +80,7 @@ export function normalizeSceneAssetCollisionScale(
 export function createDefaultSceneAssetCollisionRuntimeState(): SceneAssetCollisionRuntimeState {
     return {
         enabled: false,
+        cameraRadius: DEFAULT_CAMERA_COLLISION_RADIUS,
         scale: normalizeSceneAssetCollisionScale(DEFAULT_SCENE_ASSET_COLLISION_SCALE),
         debugVisual: false
     };
@@ -80,6 +93,9 @@ export function normalizeSceneAssetCollisionRuntimeState(
     if (!value) return def;
     return {
         enabled: typeof value.enabled === 'boolean' ? value.enabled : def.enabled,
+        cameraRadius: clampCameraCollisionRadius(
+            typeof value.cameraRadius === 'number' ? value.cameraRadius : def.cameraRadius
+        ),
         scale: normalizeSceneAssetCollisionScale(value.scale ?? def.scale),
         debugVisual: typeof value.debugVisual === 'boolean' ? value.debugVisual : def.debugVisual
     };

@@ -235,6 +235,8 @@ type SceneCollisionSettings = {
     url?: string;
     /** 总开关：场景 collision mesh + 放置资产 AABB */
     enabled?: boolean;
+    /** Fly / Orbit 相机碰撞球半径（米）。未写时用 Viewer 默认。 */
+    cameraRadius?: number;
     /** 仅放置资产 AABB 使用的缩放参数 */
     scale?: SceneAssetCollisionScale;
 };
@@ -243,6 +245,7 @@ type SceneCollisionSettings = {
 type SceneCollisionSettingsPatch = {
     url?: string;
     enabled?: boolean;
+    cameraRadius?: number;
     scale?: {
         gaussian?: SceneAssetCollisionAxisScale | number;
         mesh?: SceneAssetCollisionAxisScale | number;

@@ -64,7 +64,7 @@ const sweepHit: SweepHit = {
 class SphereMover {
     collision: Collision | null = null;
 
-    readonly radius: number;
+    radius: number;
 
     private _lastClearPosition = new Vec3();
 

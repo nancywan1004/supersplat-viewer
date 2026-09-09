@@ -31,6 +31,8 @@ class OrbitController implements CameraController {
 
     private sceneAssetCollisionResolver: (() => Collision | null) | null = null;
 
+    private _collisionRadius = SCENE_ASSET_CAMERA_COLLISION_RADIUS;
+
     fov = 90;
 
     constructor() {
@@ -53,9 +55,13 @@ class OrbitController implements CameraController {
         this.sceneAssetCollisionResolver = resolver;
     }
 
+    setCollisionRadius(radius: number): void {
+        this._collisionRadius = radius;
+    }
+
     private _applySceneAssetSpherePush(x: number, y: number, z: number): boolean {
         const col = this.sceneAssetCollisionResolver?.();
-        return !!col?.querySphere(x, y, z, SCENE_ASSET_CAMERA_COLLISION_RADIUS, pushOut);
+        return !!col?.querySphere(x, y, z, this._collisionRadius, pushOut);
     }
 
     onEnter(camera: Camera): void {

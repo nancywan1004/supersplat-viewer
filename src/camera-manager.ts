@@ -23,7 +23,7 @@ import type { TargetSource } from './cameras/target-navigation';
 import { WalkController } from './cameras/walk-controller';
 import { WalkSource } from './cameras/walk-source';
 import type { Collision } from './collision';
-import { getSceneAssetCollisionRuntime } from './scene-assets/collision/scene-asset-collision';
+import { getSceneAssetCollisionRuntime, readSceneAssetCollisionRuntimeState } from './scene-assets/collision/scene-asset-collision';
 import { easeOut, smootherStep } from './core/math';
 import { Annotation } from './settings';
 import type { AnimTrack } from './settings';
@@ -407,6 +407,15 @@ class CameraManager {
         };
         this.animController = controllers.anim;
         this.controllersBundle = controllers;
+
+        const applyCameraCollisionRadius = () => {
+            const radius = readSceneAssetCollisionRuntimeState(global).cameraRadius;
+            controllers.fly.setCollisionRadius(radius);
+            controllers.orbit.setCollisionRadius(radius);
+        };
+        applyCameraCollisionRadius();
+        events.on('camera:collisionRadiusChanged', applyCameraCollisionRadius);
+        events.on('settingsSnapshotApplied', applyCameraCollisionRadius);
 
         // 约束边界（融合策略）：
         // - 若有动画路径：用 anim AABB 与 scene AABB 做 union（避免 anim→orbit / orbit→fly 切换时发生 clamp 跳变）
