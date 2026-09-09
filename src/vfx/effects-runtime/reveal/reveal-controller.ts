@@ -1076,17 +1076,16 @@ export class RevealController {
                 });
                 // revealComplete 当帧里，reveal 脚本仍可能继续执行 enabled=false -> removeShaders。
                 // 若立即 forceReapply，可能被同帧 removeShaders 覆盖，出现一帧黑闪（compute 路径更明显）。
-                // 统一延后一帧到 frameend 再恢复 NightMode，保证 removeShaders 先结束。
-                if (
-                    !this.pendingDeferredNightRestore
-                    && this.inVfx
-                    && this.originalNightFade !== null
-                    && !hasEnabledPersistentGsplatMaterialShaderEffect(this.global.settings as ExperienceSettings)
-                ) {
+                // 统一延后一帧到 frameend：拆一次性脚本（摘掉 material:created）再恢复 NightMode。
+                if (!this.pendingDeferredNightRestore) {
                     this.pendingDeferredNightRestore = true;
                     this.global.app.once('frameend', () => {
                         this.pendingDeferredNightRestore = false;
-                        this.restoreNightModeIfNeeded('revealScriptComplete:deferred');
+                        this.teardownOneShotRevealGsplatScripts('replaceOneShot');
+                        this.currentScript = null;
+                        if (!hasEnabledPersistentGsplatMaterialShaderEffect(this.global.settings as ExperienceSettings)) {
+                            this.restoreNightModeIfNeeded('revealScriptComplete:deferred');
+                        }
                     });
                 }
                 // 须在 revealComplete 之前写入 completed：否则 UI 等监听器仍读到 playing，且 frameend 后无二次刷新会卡住（如 persistent toggle 禁用不解除）。

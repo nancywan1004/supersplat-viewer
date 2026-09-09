@@ -1,5 +1,5 @@
 import { Script, Color, Entity, Vec3, Mat4, Texture, PIXELFORMAT_RGBA8, type Material } from 'playcanvas';
-import { GsplatShaderEffect } from '../effects-runtime/gsplat-shader-effect';
+import { deleteGsplatModifyChunk, GsplatShaderEffect } from '../effects-runtime/gsplat-shader-effect';
 import { extractGlslWgslModifyBlocks } from '../effects-runtime/gsplat-effect-layers-extractor';
 import { collectPointLights, collectSpotLights } from '../../light';
 import { resolveTorchLight } from '../../settings-serialize/settings-serialize-helper';
@@ -1186,6 +1186,12 @@ class NightMode extends GsplatShaderEffect {
     /** 手电筒开关：延后到 update 再挂 shader，避免与 torch-light onUpdate 时序竞态 */
     private _onTorchActiveChanged: (() => void) | null = null;
 
+    /**
+     * unified 在 camera move / 光照 hash 变化时会 `material:created`。
+     * reveal 残留的 `gsplatModifyVS` 会克隆进新材质；进编辑会 forceReapply 清掉。此处在创建当帧剥掉。
+     */
+    private _onGsplatMaterialCreated: ((material: Material) => void) | null = null;
+
     /** shader 变体（如 BloomBrush 开关）递增，驱动 compositionSignature 变化 */
     private _nightComposerShaderRev = 0;
 
@@ -1291,6 +1297,8 @@ class NightMode extends GsplatShaderEffect {
             }
         }
 
+        this.setupPostRevealMaterialGuard();
+
         this.app.on('nightFade:request', () => {
             this.fireNightFadeChanged('request');
         });
@@ -1367,6 +1375,49 @@ class NightMode extends GsplatShaderEffect {
 
     private getEffectsRuntime(): EffectsRuntime | null {
         return (this.app as any).effectsRuntime ?? null;
+    }
+
+    private setupPostRevealMaterialGuard(): void {
+        if (this._onGsplatMaterialCreated) {
+            return;
+        }
+        const gsplatSystem = (this.app.systems as { gsplat?: { on?: (ev: string, fn: (material: Material) => void) => void } }).gsplat;
+        if (!gsplatSystem?.on) {
+            return;
+        }
+        this._onGsplatMaterialCreated = (material: Material) => {
+            if (!material || this.suspendedByVfx || this.shouldPreserveExternalGsplatModify()) {
+                return;
+            }
+            if (this.nightShaderWanted()) {
+                if (!this.materialsApplied.has(material)) {
+                    this.materialsApplied.add(material);
+                }
+                this.tryApplyNightComposerToMaterials(true);
+                this.updateEffect(this.effectTime, 0);
+                this.app.renderNextFrame = true;
+                return;
+            }
+            const rt = this.getEffectsRuntime();
+            const last = rt?.composer.getLastComposition();
+            if (rt && last && last.activeContributionIds.length > 0) {
+                if (!this.materialsApplied.has(material)) {
+                    this.materialsApplied.add(material);
+                }
+                rt.composer.applyComposedToMaterials(new Set([material]), last);
+                this.app.renderNextFrame = true;
+                return;
+            }
+            deleteGsplatModifyChunk(material, !!this.app.graphicsDevice?.isWebGPU);
+            this.app.renderNextFrame = true;
+        };
+        gsplatSystem.on('material:created', this._onGsplatMaterialCreated);
+    }
+
+    /** 点彩等占用 gsplatModifyVS 时，NightMode 不得剥掉别人的 chunk。 */
+    private shouldPreserveExternalGsplatModify(): boolean {
+        const settings = (this.app as any).__global?.settings as ExperienceSettings | undefined;
+        return !!settings && hasEnabledPersistentGsplatMaterialShaderEffect(settings);
     }
 
     /** 与 updateEffect 中「是否挂载夜景 shader」判定一致，供 composer 同步使用 */
@@ -1451,6 +1502,9 @@ class NightMode extends GsplatShaderEffect {
             }
             this.materialsApplied.clear();
             this._lastNightComposerMaterialCount = 0;
+            if (!this.shouldPreserveExternalGsplatModify()) {
+                deleteGsplatModifyChunk(this.app.scene?.gsplat?.material, !!this.app.graphicsDevice?.isWebGPU);
+            }
             return;
         }
         super.removeShaders();
@@ -1534,8 +1588,15 @@ class NightMode extends GsplatShaderEffect {
                     if (layer) {
                         const material = gsplatSystem.getGSplatMaterial(camera as any, layer);
                         if (material && !this.materialsApplied.has(material)) {
-                            this.applyShaderToMaterial(material);
-                            this.materialsApplied.add(material);
+                            if (this.shouldPreserveExternalGsplatModify()) {
+                                return;
+                            }
+                            if (this.nightShaderWanted()) {
+                                this.applyShaderToMaterial(material);
+                                this.materialsApplied.add(material);
+                            } else {
+                                deleteGsplatModifyChunk(material, !!this.app.graphicsDevice?.isWebGPU);
+                            }
                         }
                     }
                 }
@@ -2051,6 +2112,11 @@ class NightMode extends GsplatShaderEffect {
         if (global?.events && this._onTorchActiveChanged) {
             global.events.off('torchActive:changed', this._onTorchActiveChanged);
             this._onTorchActiveChanged = null;
+        }
+        if (this._onGsplatMaterialCreated) {
+            const gsplatSystem = (this.app.systems as { gsplat?: { off?: (ev: string, fn: (material: Material) => void) => void } }).gsplat;
+            gsplatSystem?.off?.('material:created', this._onGsplatMaterialCreated);
+            this._onGsplatMaterialCreated = null;
         }
         if (nightModeUsesComposerPath()) {
             const rt = this.getEffectsRuntime();

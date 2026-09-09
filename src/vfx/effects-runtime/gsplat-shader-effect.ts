@@ -1,5 +1,17 @@
 import { Script, Entity, Material, Camera, Layer, Vec3, CameraComponent } from 'playcanvas';
 
+/** 从材质上摘掉 `gsplatModifyVS`，避免 unified 新建材质克隆残留 chunk。 */
+export function deleteGsplatModifyChunk(
+    material: Material | null | undefined,
+    isWebGPU: boolean
+): void {
+    if (!material?.getShaderChunks) {
+        return;
+    }
+    material.getShaderChunks(isWebGPU ? 'wgsl' : 'glsl').delete('gsplatModifyVS');
+    material.update();
+}
+
 /** 子类可选的参与半径字段（基类无此属性，运行时由 `hasOwnProperty` 判定）。 */
 interface GsplatParticipationRadiusHost {
     endRadius?: number;
@@ -150,6 +162,7 @@ class GsplatShaderEffect extends Script {
                 //console.log('GsplatShaderEffect initialized');
             }
 
+            this.setupUnifiedEventListener();
             // Apply shaders if initialized, otherwise flag for application
             if (this.initialized) {
                 this.applyShaders();
@@ -161,6 +174,8 @@ class GsplatShaderEffect extends Script {
         this.on('disable', () => {
             // Remove shaders when disabling
             this.removeShaders();
+            // 停用后必须摘掉 material:created：否则 camera move 新建 unified 材质仍可能带残留 chunk。
+            this.teardownUnifiedEventListener();
         });
 
         // Register event listener immediately for unified mode to catch materials created on first frame
@@ -195,19 +210,23 @@ class GsplatShaderEffect extends Script {
     }
 
     removeShaders() {
-        if (this.materialsApplied.size === 0) return;
-
         const device = this.app.graphicsDevice;
-        const shaderLanguage = device?.isWebGPU ? 'wgsl' : 'glsl';
-
-        // Remove custom shader chunk from all materials
+        const isWebGPU = !!device?.isWebGPU;
         this.materialsApplied.forEach((material) => {
-            material.getShaderChunks(shaderLanguage).delete('gsplatModifyVS');
-            material.update();
+            deleteGsplatModifyChunk(material, isWebGPU);
         });
-
-        // Clear the set and stop tracking
         this.materialsApplied.clear();
+        // unified 新建材质会克隆 scene.gsplat.material；模板上的残留 chunk 会在第一次动相机时爆出来。
+        deleteGsplatModifyChunk(this.app.scene?.gsplat?.material, isWebGPU);
+    }
+
+    teardownUnifiedEventListener() {
+        if (!this._materialCreatedHandler) {
+            return;
+        }
+        // @ts-ignore - gsplat system exists at runtime
+        this.app.systems.gsplat?.off('material:created', this._materialCreatedHandler);
+        this._materialCreatedHandler = null;
     }
 
     setupUnifiedEventListener() {
@@ -386,13 +405,7 @@ class GsplatShaderEffect extends Script {
     destroy() {
         // Remove shaders if they're still applied
         this.removeShaders();
-
-        // Clean up event listener
-        if (this._materialCreatedHandler) {
-            // @ts-ignore - gsplat system exists at runtime
-            this.app.systems.gsplat.off('material:created', this._materialCreatedHandler);
-            this._materialCreatedHandler = null;
-        }
+        this.teardownUnifiedEventListener();
     }
 
     /**

@@ -510,6 +510,9 @@ class Viewer {
         });
         events.on('revealComplete', () => {
             this.setPersistentStylizationCameraEffectsDeferred(false);
+            // 与进编辑 forceReapply→configureCamera 对齐：reveal 卸 shader 后重建 CameraFrame / gsplatOutputVS。
+            this.configureCamera(global.settings);
+            app.renderNextFrame = true;
         });
 
         // reconfigure camera when entering/exiting XR
