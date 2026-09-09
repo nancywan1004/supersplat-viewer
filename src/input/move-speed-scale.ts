@@ -62,3 +62,33 @@ export function computeAdaptiveMoveSpeed(sceneSize: number, scale: number): Adap
         minPanDistance: Math.max(MIN_FINAL, adaptiveMinPan * safeScale)
     };
 }
+
+export type PanProjectionDistanceInput = {
+    cameraDistance: number;
+    moveSpeed: number;
+    minPanDistance: number;
+    scale: number;
+    firstPerson: boolean;
+};
+
+/**
+ * 屏幕空间 pan 的投影深度。必须吃到与 WASD 相同的 `moveSpeedScale`：
+ * - 第一人称：不再沿用 orbit 遗留 distance，改用已含 scale 的 moveSpeed
+ * - Orbit：`max(cameraDistance, 未缩放下限) * scale`，远距时滑条也会生效
+ */
+export function computePanProjectionDistance(input: PanProjectionDistanceInput): number {
+    const moveSpeed = Number.isFinite(input.moveSpeed) && input.moveSpeed > 0
+        ? input.moveSpeed
+        : MIN_FINAL;
+    if (input.firstPerson) {
+        return Math.max(MIN_FINAL, moveSpeed);
+    }
+    const safeDistance = Number.isFinite(input.cameraDistance) && input.cameraDistance > 0
+        ? input.cameraDistance
+        : MIN_FINAL;
+    const minPan = Number.isFinite(input.minPanDistance) && input.minPanDistance > 0
+        ? input.minPanDistance
+        : MIN_FINAL;
+    const scale = parseMoveSpeedScale(input.scale) ?? DEFAULT_MOVE_SPEED_SCALE;
+    return Math.max(MIN_FINAL, Math.max(safeDistance * scale, minPan));
+}

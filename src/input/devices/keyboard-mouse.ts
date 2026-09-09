@@ -128,7 +128,7 @@ class KeyboardMouseDevice implements InputDevice {
             this._buttons[i] += button[i];
         }
 
-        const { isFly, isWalk, isFirstPerson, gamingControls, dt, distance, cameraComponent, mode, touchCount } = ctx;
+        const { isFly, isWalk, isFirstPerson, gamingControls, dt, distance, panDistance, cameraComponent, mode, touchCount } = ctx;
         const pan = this._buttons[2] || +(button[2] === -1) || +(touchCount > 1);
 
         // auto-move cancellation and requestFirstPerson events (driven by keyboard axes)
@@ -189,7 +189,7 @@ class KeyboardMouseDevice implements InputDevice {
             // a boolean trigger.
             v.y = this._jump > 0 ? 1 : 0;
         }
-        screenToWorld(cameraComponent, mouse[0], mouse[1], distance, panMove);
+        screenToWorld(cameraComponent, mouse[0], mouse[1], panDistance, panMove);
         v.add(panMove.mulScalar(pan));
         wheelMove.set(0, 0, -wheel[0]);
         v.add(wheelMove.mulScalar(this.wheelSpeed * DISPLACEMENT_SCALE));

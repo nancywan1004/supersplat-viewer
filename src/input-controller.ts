@@ -17,6 +17,7 @@ import type { Global } from './types';
 import { isCameraInteractionBlocked } from './state-selectors';
 import {
     computeAdaptiveMoveSpeed,
+    computePanProjectionDistance,
     DEFAULT_MOVE_SPEED_SCALE,
     parseMoveSpeedScale,
     readMoveSpeedScale
@@ -275,17 +276,24 @@ class InputController {
         }
 
         const cameraComponent = this._global.camera.camera!;
-        const safeDistance = Number.isFinite(distance) && distance > 0 ? distance : this._minPanDistance;
-        const effectiveDistance = Math.max(safeDistance, this._minPanDistance);
+        const rawDistance = Number.isFinite(distance) && distance > 0 ? distance : this._minPanDistance;
 
         const isOrbit = state.cameraMode === 'orbit';
         const isFly = state.cameraMode === 'fly';
         const isWalk = state.cameraMode === 'walk';
         const isFirstPerson = isFly || isWalk;
+        const panDistance = computePanProjectionDistance({
+            cameraDistance: rawDistance,
+            moveSpeed: this._keyboardMouse.moveSpeed,
+            minPanDistance: this._minPanDistance,
+            scale: this._moveSpeedScale,
+            firstPerson: isFirstPerson
+        });
 
         const ctx: UpdateContext = {
             dt,
-            distance: effectiveDistance,
+            distance: rawDistance,
+            panDistance,
             cameraComponent,
             mode: state.cameraMode,
             isOrbit,
