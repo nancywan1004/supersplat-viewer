@@ -11,6 +11,7 @@ import { SCENE_ASSET_CAMERA_COLLISION_RADIUS } from '../scene-assets/collision/s
 import type { CameraFrame, Camera, CameraController } from './camera';
 import type { SphereConstraint } from '../camera-constraints/sphere-constraint';
 import type { BoxConstraint } from '../camera-constraints/box-constraint';
+import { SphereMover } from './sphere-mover';
 
 const angles = new Vec3();
 const rotation = new Quat();
@@ -26,6 +27,7 @@ const tmpNormal = new Vec3();
 const tmpTarget = new Vec3();
 const tmpTargetClamp = new Vec3();
 const tmpRemain = new Vec3();
+const tmpSweepMove = new Vec3();
 const CAMERA_RADIUS = SCENE_ASSET_CAMERA_COLLISION_RADIUS;
 
 // Damping helper function
@@ -58,11 +60,23 @@ class FlyController implements CameraController {
 
     fov = 90;
 
-    /** Optional collision for sphere collision with sliding */
-    collision: Collision | null = null;
+    /** 场景 mesh 碰撞：扫掠移动，避免一帧穿过薄墙 */
+    private _collision: Collision | null = null;
+
+    private readonly _sphereMover = new SphereMover(CAMERA_RADIUS);
 
     /** sceneAsset AABB 碰撞（由 CameraManager 注入，阶段一） */
     private sceneAssetCollisionResolver: (() => Collision | null) | null = null;
+
+    get collision(): Collision | null {
+        return this._collision;
+    }
+
+    set collision(value: Collision | null) {
+        this._collision = value;
+        this._sphereMover.collision = value;
+        this._sphereMover.reset(this._pose.position);
+    }
 
     private _spawnPosition = new Vec3();
     private _spawnAngles = new Vec3();
@@ -116,6 +130,7 @@ class FlyController implements CameraController {
             this.constraint.clampToSoft(this._targetPose.position, this._targetPose.position);
             this._pose.position.copy(this._targetPose.position);
         }
+        this._sphereMover.reset(this._pose.position);
         this._storeSpawn();
     }
 
@@ -238,29 +253,7 @@ class FlyController implements CameraController {
             this._targetPose.position.copy(tmpPos);
         }
 
-        // 先修正 targetPose：让后续阻尼插值朝“可达安全点”收敛，避免下一帧继续往墙内插值。
-        if (this.collision) {
-            if (this.collision.querySphere(
-                this._targetPose.position.x,
-                this._targetPose.position.y,
-                this._targetPose.position.z,
-                CAMERA_RADIUS,
-                pushOut
-            )) {
-                this._targetPose.position.x += pushOut.x;
-                this._targetPose.position.y += pushOut.y;
-                this._targetPose.position.z += pushOut.z;
-            }
-        }
-        if (this._applySceneAssetSpherePush(
-            this._targetPose.position.x,
-            this._targetPose.position.y,
-            this._targetPose.position.z
-        )) {
-            this._targetPose.position.x += pushOut.x;
-            this._targetPose.position.y += pushOut.y;
-            this._targetPose.position.z += pushOut.z;
-        }
+        // 阻尼插值朝本帧目标走；mesh 碰撞在插值之后从上一帧安全点扫掠，避免直线 lerp 穿薄墙。
         
         // Apply damping using Pose.lerp
         this._pose.lerp(
@@ -292,29 +285,9 @@ class FlyController implements CameraController {
             this._pose.position.copy(camera.position);
         }
 
-        // 再修正当前 pose：处理本帧最终落点碰撞，并同步回写状态避免下一帧“弹回”。
-        if (this.collision) {
-            if (this.collision.querySphere(
-                camera.position.x,
-                camera.position.y,
-                camera.position.z,
-                CAMERA_RADIUS,
-                pushOut
-            )) {
-                camera.position.x += pushOut.x;
-                camera.position.y += pushOut.y;
-                camera.position.z += pushOut.z;
-                this._pose.position.copy(camera.position);
-                this._targetPose.position.copy(camera.position);
-            }
-        }
-        if (this._applySceneAssetSpherePush(camera.position.x, camera.position.y, camera.position.z)) {
-            camera.position.x += pushOut.x;
-            camera.position.y += pushOut.y;
-            camera.position.z += pushOut.z;
-            this._pose.position.copy(camera.position);
-            this._targetPose.position.copy(camera.position);
-        }
+        this._sweepCameraFrom(tmpPrevPos, camera.position);
+        this._pose.position.copy(camera.position);
+        this._targetPose.position.copy(camera.position);
 
         camera.angles.copy(this._pose.angles);
         camera.distance = this._pose.distance;
@@ -355,6 +328,7 @@ class FlyController implements CameraController {
             this._targetPose.copy(pose);
         }
         this._pose.copy(this._targetPose);
+        this._sphereMover.reset(this._pose.position);
     }
 
     resetToSpawn(camera: Camera): boolean {
@@ -368,7 +342,25 @@ class FlyController implements CameraController {
         camera.angles.copy(this._spawnAngles);
         camera.distance = this._spawnDistance;
         camera.fov = this.fov;
+        this._sphereMover.reset(this._pose.position);
         return true;
+    }
+
+    /**
+     * 从上一帧安全点扫掠到目标点；穿薄墙时停在表面或退回上次清空位置。
+     * @param from - 上一帧相机位置
+     * @param to - 本帧期望位置，成功后写回扫掠结果
+     */
+    private _sweepCameraFrom(from: Vec3, to: Vec3): void {
+        this._sphereMover.collision = this._collision;
+        tmpSweepMove.sub2(to, from);
+        to.copy(from);
+        this._sphereMover.move(to, tmpSweepMove);
+        if (this._applySceneAssetSpherePush(to.x, to.y, to.z)) {
+            to.x += pushOut.x;
+            to.y += pushOut.y;
+            to.z += pushOut.z;
+        }
     }
 
     private _storeSpawn() {

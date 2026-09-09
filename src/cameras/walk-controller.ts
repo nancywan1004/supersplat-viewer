@@ -258,10 +258,20 @@ class WalkController implements CameraController {
         this._velocity.x = math.lerp(this._velocity.x, 0, alpha);
         this._velocity.z = math.lerp(this._velocity.z, 0, alpha);
 
-        this._position.add(v.copy(this._velocity).mulScalar(dt));
-
-        // capsule collision: walls, ceiling, and fallback floor contact
-        this._checkCollision(this._position, d);
+        v.copy(this._velocity).mulScalar(dt);
+        const horiz = Math.hypot(v.x, v.z);
+        const parts = this.collision && horiz > this.capsuleRadius ?
+            Math.min(8, Math.ceil(horiz / this.capsuleRadius)) :
+            1;
+        const invParts = 1 / parts;
+        for (let i = 0; i < parts; i++) {
+            this._position.x += v.x * invParts;
+            this._position.y += v.y * invParts;
+            this._position.z += v.z * invParts;
+            if (this.collision) {
+                this._checkCollision(this._position, d);
+            }
+        }
     }
 
     onExit(_camera: Camera): void {

@@ -60,6 +60,7 @@ const sweepHit: SweepHit = {
     travel: 0
 };
 
+/** 球体沿位移扫掠并贴面滑动。Fly 用它挡薄墙：先碰到面再滑，穿模则退回上一安全点。 */
 class SphereMover {
     collision: Collision | null = null;
 
