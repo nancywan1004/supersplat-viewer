@@ -1,4 +1,4 @@
-import { contentFilenameFromUrl } from './content-filename';
+import { contentFilenameFromUrl } from '../content-filename';
 
 const assert = (cond: unknown, msg: string) => {
     if (!cond) throw new Error(msg);

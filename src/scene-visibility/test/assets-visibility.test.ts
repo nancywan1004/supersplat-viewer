@@ -1,11 +1,11 @@
 /**
  * 资产大类扫描 vs 单条 ASSET_SHOW_HIDE overlay 自检。
  *
- *   npx --yes tsx src/scene-visibility/assets-visibility.test.ts
+ *   npx --yes tsx src/scene-visibility/test/assets-visibility.test.ts
  */
-import type { Global } from '../types';
-import { createDefaultViewSettings, writeContentCategoryVisible } from '../view-settings';
-import { applyAssetsVisibility, applyViewerAssetShowHide } from './assets-visibility-facade';
+import type { Global } from '../../types';
+import { createDefaultViewSettings, writeContentCategoryVisible } from '../../view-settings';
+import { applyAssetsVisibility, applyViewerAssetShowHide } from '../assets-visibility-facade';
 
 function assertEq<T>(actual: T, expected: T, msg: string): void {
     if (actual !== expected) {

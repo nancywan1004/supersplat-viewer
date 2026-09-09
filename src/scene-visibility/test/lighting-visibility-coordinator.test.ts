@@ -1,15 +1,15 @@
 /**
  * Lighting Visibility Coordinator 自检。
  *
- *   npx --yes tsx src/scene-visibility/lighting-visibility-coordinator.test.ts
+ *   npx --yes tsx src/scene-visibility/test/lighting-visibility-coordinator.test.ts
  */
-import type { Global } from '../types';
-import { createDefaultViewSettings } from '../view-settings';
+import type { Global } from '../../types';
+import { createDefaultViewSettings } from '../../view-settings';
 import {
     ensureLightingVisibilityCoordinator,
     invalidateLightingVisibility
-} from './lighting-visibility-coordinator';
-import { reconcileLightingVisibility } from './lighting-visibility-reconciler';
+} from '../lighting-visibility-coordinator';
+import { reconcileLightingVisibility } from '../lighting-visibility-reconciler';
 
 function assert(cond: boolean, msg: string): void {
     if (!cond) {

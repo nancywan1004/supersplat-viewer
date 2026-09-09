@@ -1,7 +1,7 @@
 /**
  * 移动步长系数纯函数自检。
  *
- *   npx --yes tsx src/input/move-speed-scale.test.ts
+ *   npx --yes tsx src/input/test/move-speed-scale.test.ts
  */
 
 import {
@@ -10,7 +10,7 @@ import {
     parseMoveSpeedScale,
     readMoveSpeedScale,
     writeMoveSpeedScale
-} from './move-speed-scale';
+} from '../move-speed-scale';
 
 function assert(cond: boolean, msg: string): void {
     if (!cond) {

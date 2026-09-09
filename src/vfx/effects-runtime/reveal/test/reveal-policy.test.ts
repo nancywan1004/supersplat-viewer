@@ -1,11 +1,11 @@
 /**
  * revealBlocksAnim 自检（无测试框架；`npx tsx` 直接跑）。
  *
- *   npx --yes tsx src/vfx/effects-runtime/reveal/reveal-policy.test.ts
+ *   npx --yes tsx src/vfx/effects-runtime/reveal/test/reveal-policy.test.ts
  */
 
-import { revealBlocksAnim } from './reveal-policy';
-import type { State } from '../../../types';
+import { revealBlocksAnim } from '../reveal-policy';
+import type { State } from '../../../../types';
 
 function assert(cond: boolean, msg: string): void {
     if (!cond) {

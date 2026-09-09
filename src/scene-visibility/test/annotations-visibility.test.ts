@@ -1,15 +1,15 @@
 /**
  * 标注大类扫描 vs 单条 ANNOTATION_SHOW_HIDE overlay 自检。
  *
- *   npx --yes tsx src/scene-visibility/annotations-visibility.test.ts
+ *   npx --yes tsx src/scene-visibility/test/annotations-visibility.test.ts
  */
-import type { Global } from '../types';
+import type { Global } from '../../types';
 import {
     createDefaultViewSettings,
     readSessionAnnotationVisible,
     writeContentCategoryVisible,
     writeSessionAnnotationVisible
-} from '../view-settings';
+} from '../../view-settings';
 
 function assertEq<T>(actual: T, expected: T, msg: string): void {
     if (actual !== expected) {

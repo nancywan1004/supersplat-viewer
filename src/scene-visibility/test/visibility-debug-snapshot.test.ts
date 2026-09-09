@@ -1,11 +1,11 @@
 /**
  * VisibilityDebugSnapshot 只读自检（无测试框架；`npx tsx` 直接跑）。
  *
- *   npx --yes tsx src/scene-visibility/visibility-debug-snapshot.test.ts
+ *   npx --yes tsx src/scene-visibility/test/visibility-debug-snapshot.test.ts
  */
-import type { Global } from '../types';
-import { createDefaultViewSettings } from '../view-settings';
-import { captureVisibilityDebugSnapshot } from './visibility-debug-snapshot';
+import type { Global } from '../../types';
+import { createDefaultViewSettings } from '../../view-settings';
+import { captureVisibilityDebugSnapshot } from '../visibility-debug-snapshot';
 
 function assert(cond: boolean, msg: string): void {
     if (!cond) {

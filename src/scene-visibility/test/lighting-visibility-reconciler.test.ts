@@ -1,13 +1,13 @@
 /**
  * Lighting Visibility Reconciler / Facade 自检。
  *
- *   npx --yes tsx src/scene-visibility/lighting-visibility-reconciler.test.ts
+ *   npx --yes tsx src/scene-visibility/test/lighting-visibility-reconciler.test.ts
  */
-import type { Global } from '../types';
-import { createDefaultViewSettings, readViewBloomLocalLightsEnabled, writeSessionLightVisible } from '../view-settings';
-import { applyViewerLightToggle, revertCascadedLightToggleOverlays } from './lighting-visibility-facade';
-import { requestLightingVisibilityReconcile } from './lighting-visibility-coordinator';
-import { reconcileLightingVisibility } from './lighting-visibility-reconciler';
+import type { Global } from '../../types';
+import { createDefaultViewSettings, readViewBloomLocalLightsEnabled, writeSessionLightVisible } from '../../view-settings';
+import { applyViewerLightToggle, revertCascadedLightToggleOverlays } from '../lighting-visibility-facade';
+import { requestLightingVisibilityReconcile } from '../lighting-visibility-coordinator';
+import { reconcileLightingVisibility } from '../lighting-visibility-reconciler';
 
 function assert(cond: boolean, msg: string): void {
     if (!cond) {

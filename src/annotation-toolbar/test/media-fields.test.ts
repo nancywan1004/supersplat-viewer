@@ -2,7 +2,7 @@ import {
     annotationMediaFromUnknown,
     annotationDataToSettings,
     writeAnnotationMediaToSettingsRecord
-} from './media-fields';
+} from '../media-fields';
 
 const assert = (cond: unknown, msg: string) => {
     if (!cond) throw new Error(msg);

@@ -4,7 +4,7 @@
 
 ## 顶部菜单
 
-*   进入编辑模式：发送 `EDIT_MODE_SET { value: true }`
+*   进入编辑模式：等 `VIEWER_ASSETS_READY` 后发送 `EDIT_MODE_SET { value: true }`；等出站 `EDIT_MODE_READY` 后再下发光照/特效等编辑命令与 `PROJECT_SAVE`。`EDIT_MODE_SET` 会用启动 JSON 覆盖 View 态改动；不要在 `VIEWER_ASSETS_READY` 上直接改光照并保存。
     
 *   退出编辑模式：父级点击「退出」时先发送 `EDIT_MODE_EXIT_REQUEST`；Viewer 回传 `EDIT_EXIT_NEEDS_SAVE { needsSave }`。若 needsSave 为 true，父级弹出确认弹窗（退出并保存 / 退出不保存 / 取消），选「退出并保存」则先 `PROJECT_SAVE`（SaaS 缺省 `destination: 'universe'`）收到 `PROJECT_SAVE_SUCCEEDED` 后再 `EDIT_MODE_SET { value: false }`，选「退出不保存」则 `EDIT_MODE_EXIT_DISCARD`；若 needsSave 为 false，父级直接发送 `EDIT_MODE_SET { value: false }`
     
@@ -100,7 +100,7 @@
 
 | 功能 | 事件名（type） | payload | 补充说明 |
 | --- | --- | --- | --- |
-| 进入编辑模式 | EDIT\_MODE\_SET | {value: true} |  |
+| 进入编辑模式 | EDIT\_MODE\_SET | {value: true} | 先等 `VIEWER_ASSETS_READY`。Viewer 用 `__originalSettings` 恢复资产/标注/光照/后处理并设编辑基线后出站 `EDIT_MODE_READY`。入站已串行，紧跟在 SET 之后的命令会等 restore 完成再执行；仍建议等 `EDIT_MODE_READY` 再发编辑/保存。SET **之前**的 View 态改动会被丢掉 |
 | 请求退出编辑模式 | EDIT\_MODE\_EXIT\_REQUEST |  | 父级在用户点击「退出」时发送；Viewer 回传 `EDIT_EXIT_NEEDS_SAVE`，父级根据 `needsSave` 决定是否弹窗及后续发送 `EDIT_MODE_SET` 或 `EDIT_MODE_EXIT_DISCARD` |
 | 退出编辑模式无改动 | EDIT\_MODE\_SET | {value: false} | 当 Viewer 回传 `needsSave` 为 false 时父级直接发送；或用户选「退出并保存」完成保存流程后发送 |
 | 退出编辑模式并保存改动 | EDIT\_MODE\_SET | {value: false} | 先发送 `PROJECT_SAVE`（上传用缺省 `universe`，本地保存发 `destination: 'host'`）。`universe` 等 `PROJECT_SAVE_SUCCEEDED`；`host` 等 `PROJECT_SAVE_RESULT` 后再 `EDIT_MODE_SET { value: false }` |
@@ -210,11 +210,12 @@
 | 配置已保存 | PROJECT\_SAVE\_SUCCEEDED | { requestId?: string } | 仅 `destination: 'universe'`（已上传 OSS）。`host` **不发**本事件 |
 | 保存失败 | PROJECT\_SAVE\_FAILED | { message: string, requestId?: string } | 仅 `universe`。`host` 失败走 `PROJECT_SAVE_RESULT { ok: false }` |
 | 交回保存产物 | PROJECT\_SAVE\_RESULT | `{ ok: true, requestId?, settings, files: [{ path, file }], references: [{ path, field }], contentChanged }` 或 `{ ok: false, requestId?, message }` | postMessage 本地保存（`destination: 'host'`）。不自动下载、不上传。`files` **始终含主模型**（`content/...`）以及用户相对路径资源。`contentChanged` 仅表示 Viewer 是否改过启动主模型 URL |
-| 导入成功 | PROJECT\_IMPORT\_SUCCEEDED | `{ requestId? }` | 已缓存项目包，随后 iframe 刷新加载包内主场景（含 `content/`）。刷新后仍走 `VIEWER_READY` / `VIEWER_ASSETS_READY`。入站带 `requestId` 时回传 |
+| 导入成功 | PROJECT\_IMPORT\_SUCCEEDED | `{ requestId? }` | 已缓存项目包，随后 iframe 刷新加载包内主场景（含 `content/`）。刷新后仍走 `VIEWER_READY` / `VIEWER_ASSETS_READY`；编辑须再 `EDIT_MODE_SET` 并等 `EDIT_MODE_READY`。入站带 `requestId` 时回传 |
 | 导入失败 | PROJECT\_IMPORT\_FAILED | `{ message: string, requestId? }` | 缺文件、zip、无 settings.json、解析失败等。不发保存成功事件 |
 | 主场景首帧 | VIEWER\_READY | { requestId?: string } | 主 splat 已出第一帧，可以展示 Viewer。此时场景内资产可能仍在加载。对应失败是 `VIEWER_LOAD_FAILED`。URL `?requestId=` 有值时回传 |
 | 配置或主场景加载失败 | VIEWER\_LOAD\_FAILED | `{ requestId?, stage: 'settings' \| 'content', message, status?, url? }` | `settings` = settings.json；`content` = 主模型。发生后不再发 `VIEWER_READY`。不含场景内资产（那是 `VIEWER_ASSETS_LOAD_FAILED`）。同一加载最多一次 |
-| 场景资产就绪，可开始编辑 | VIEWER\_ASSETS\_READY | { requestId?: string } | 启动期 settings 场景资产 restore 完成且当前无在途 gaussian/mesh 加载。每个加载会话只发一次。有开场 reveal 时会等到 reveal 结束再 restore。失败对子是 `VIEWER_ASSETS_LOAD_FAILED` |
+| 场景资产就绪 | VIEWER\_ASSETS\_READY | { requestId?: string } | 启动期 settings 场景资产 restore 完成且当前无在途 gaussian/mesh 加载。每个加载会话只发一次。有开场 reveal 时会等到 reveal 结束再 restore。失败对子是 `VIEWER_ASSETS_LOAD_FAILED`。**不是**可编辑门槛，编辑须再发 `EDIT_MODE_SET` 并等 `EDIT_MODE_READY` |
+| 编辑模式已就绪 | EDIT\_MODE\_READY |  | `EDIT_MODE_SET { value: true }` 完成 snapshot / 资产 / 光照 / 后处理恢复、`editMode=true` 与编辑基线之后出站。此后 `LIGHT_*` / `EFFECT_*` 等写入 settings，`PROJECT_SAVE` 才会带上这些改动。不带 `module`。只表示「已进入可编辑」；退出编辑不发此事件 |
 | 场景资产加载失败 | VIEWER\_ASSETS\_LOAD\_FAILED | `{ requestId?, message, status?, url?, failedCount }` | 启动期场景内资产未能全部就绪（含 mesh/gaussian HTTP 失败、缺 URL、放置失败）。发生后不再发 `VIEWER_ASSETS_READY`。每个加载会话最多一次 |
 
 ### 资产相关

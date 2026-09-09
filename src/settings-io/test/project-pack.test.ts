@@ -6,7 +6,7 @@ import {
     packedContentRelativePath,
     parseProjectBlobs,
     parseProjectZipBytes
-} from './project-pack-parse';
+} from '../project-pack-parse';
 
 const assert = (cond: unknown, msg: string) => {
     if (!cond) throw new Error(msg);

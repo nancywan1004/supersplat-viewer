@@ -1,9 +1,9 @@
 /**
  * scene-mesh 加载门控：无 URL 时 canGenerate 不得当成「需要网格」。
  *
- *   npx --yes tsx src/collision/scene-mesh-load-policy.test.ts
+ *   npx --yes tsx src/collision/test/scene-mesh-load-policy.test.ts
  */
-import { shouldFetchCollisionFromUniverse, shouldLoadSceneMesh } from './scene-mesh-load-policy';
+import { shouldFetchCollisionFromUniverse, shouldLoadSceneMesh } from '../scene-mesh-load-policy';
 
 function assertEq<T>(actual: T, expected: T, msg: string): void {
     if (actual !== expected) {

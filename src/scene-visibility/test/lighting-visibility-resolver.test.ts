@@ -1,21 +1,21 @@
 /**
  * Lighting Visibility Resolver 自检（无测试框架；`npx tsx` 直接跑）。
  *
- *   npx --yes tsx src/scene-visibility/lighting-visibility-resolver.test.ts
+ *   npx --yes tsx src/scene-visibility/test/lighting-visibility-resolver.test.ts
  */
-import type { Global } from '../types';
+import type { Global } from '../../types';
 import {
     createDefaultViewSettings,
     ensureViewSettings,
     interpretLightingContentVisibility,
     writeSessionLightVisible
-} from '../view-settings';
+} from '../../view-settings';
 import {
     collectLightingVisibilityResolveInput,
     resolveLightingVisibility,
     resolveLightingVisibilityFromGlobal,
     type LightingVisibilityResolveInput
-} from './lighting-visibility-resolver';
+} from '../lighting-visibility-resolver';
 
 function assert(cond: boolean, msg: string): void {
     if (!cond) {

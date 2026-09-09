@@ -1,7 +1,7 @@
 /**
  * lod-scale-align 纯函数自检（无测试框架；`npx tsx` 直接跑）。
  *
- *   npx --yes tsx src/loaders/gsplat/lod/octree/lod-scale-align.test.ts
+ *   npx --yes tsx src/loaders/gsplat/lod/octree/test/lod-scale-align.test.ts
  */
 
 import {
@@ -11,7 +11,7 @@ import {
     resolveTargetFarLod,
     LOD_SCALE_DEFAULT_QUALITY_FACTOR,
     LOD_SCALE_MIN_D0_M
-} from './lod-scale-align';
+} from '../lod-scale-align';
 
 function assert(cond: boolean, msg: string): void {
     if (!cond) {

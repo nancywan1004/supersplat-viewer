@@ -2,21 +2,22 @@
  * 父级↔Viewer 统一 postMessage 协议桥接
  * 入站 `EFFECT_*`：`module` 可选；若传则须为 **`effects`**（与 {@link MESSAGE_BRIDGE_MODULE.effects} 一致）。`effectId` 与参数见 **docs/SaaS第四期编辑模式接口文档.md**。
  * 出站：与 **`editLeftModule`** 域相关的事件在 payload 中带 **`module`**（`asset` / `annotation` / `environment` / `camera` / `effects`），定义见 **`editor-modules/modules-types`** 中的 {@link MESSAGE_BRIDGE_MODULE}。
+ * `EDIT_MODE_READY` 在 `EDIT_MODE_SET(true)` 恢复完成后出站，不带 `module`。入站消息串行处理。
  */
 
-import type { AnnotationData } from './annotation-toolbar/types';
+import type { AnnotationData } from '../annotation-toolbar/types';
 import {
     COLLISION_SYSTEM_READY,
     collisionEnabled,
     getCameraCollisionManager,
     type CollisionLoadPayload
-} from './collision/camera-collision-manager';
+} from '../collision/camera-collision-manager';
 import {
     SCENE_COLLISION_CHANGED,
     SCENE_MESH_GENERATE_PROGRESS,
     resolveCollisionUrl,
     type SceneMeshGenerateProgressPayload
-} from './collision/scene-collision-source';
+} from '../collision/scene-collision-source';
 import {
     initEditHistory,
     canUndo,
@@ -27,13 +28,13 @@ import {
     mergeSkyboxOnEditEnter,
     applySkyboxOnEditEnter,
     restoreSkyboxFromSettings
-} from './edit-history';
-import type { CommandRegistry } from './editor-modules/command-registry';
-import { MESSAGE_BRIDGE_MODULE } from './editor-modules/modules-types';
+} from '../edit-history';
+import type { CommandRegistry } from '../editor-modules/command-registry';
+import { MESSAGE_BRIDGE_MODULE } from '../editor-modules/modules-types';
 import {
     normalizeAssetEffectEnvelope,
     type AssetEffectProtocolEnvelope
-} from './editor-modules/protocol-adapters/asset-effects-protocol-adapter';
+} from '../editor-modules/protocol-adapters/asset-effects-protocol-adapter';
 import {
     applyCollisionPatchFromHost,
     applyCollisionSetFromHost,
@@ -41,60 +42,61 @@ import {
     buildSceneMeshLoadFinishedPayload,
     buildSceneMeshLoadProgressPayload,
     resolveSceneMeshLoadOutboundModules
-} from './editor-modules/protocol-adapters/collision-protocol-adapter';
+} from '../editor-modules/protocol-adapters/collision-protocol-adapter';
 import {
     paramsPatchHasPersistentKeys,
     paramsPatchHasRevealKeys,
     isPersistentProtocolEffectId,
     SCENE_GSPLAT_REVEAL_EFFECT_ID
-} from './editor-modules/protocol-adapters/effects-protocol-adapter';
-import { asUserFile } from './loaders/asset-file';
-import { getAssetLoader } from './loaders/asset-loader';
+} from '../editor-modules/protocol-adapters/effects-protocol-adapter';
+import { asUserFile } from '../loaders/asset-file';
+import { getAssetLoader } from '../loaders/asset-loader';
+import { createSerialAsyncQueue } from './inbound-queue';
 import {
     applyMorphKeyframeVisibilityPolicy,
     applySceneAssetTriggerDistanceM,
     requestSceneAssetsRestore,
     type SceneAssetsRestoreCompletePayload
-} from './scene-assets/asset-placement-handler';
-import { pauseAllSceneMedia } from './scene-assets/media/scene-media-playback';
-import { resolveExportTimelinePlan } from './render/export-timeline-resolver';
-import { buildVideoExportFilename } from './render/video-export';
+} from '../scene-assets/asset-placement-handler';
+import { pauseAllSceneMedia } from '../scene-assets/media/scene-media-playback';
+import { resolveExportTimelinePlan } from '../render/export-timeline-resolver';
+import { buildVideoExportFilename } from '../render/video-export';
 import {
     canToggleLightingShadowSession,
     getSceneContentVisibilityRegistry,
     isSceneContentCategoryId,
     setLightingSessionAspectVisible
-} from './scene-visibility';
-import type { ExperienceSettings, SceneMediaHotspotPatch, TorchLightSettings } from './schemas/v2';
-import { parseMoveSpeedScale, writeMoveSpeedScale } from './input/move-speed-scale';
-import { DEFAULT_VFX_TOTAL_DURATION } from './schemas/v2-custom';
-import type { SceneCollisionSettingsPatch } from './schemas/v2-custom';
-import { outboundLoadRequestId, readInboundRequestId } from './settings-io/host-protocol';
-import { importLocalProject } from './settings-io/import-local-project';
+} from '../scene-visibility';
+import type { ExperienceSettings, SceneMediaHotspotPatch, TorchLightSettings } from '../schemas/v2';
+import { parseMoveSpeedScale, writeMoveSpeedScale } from '../input/move-speed-scale';
+import { DEFAULT_VFX_TOTAL_DURATION } from '../schemas/v2-custom';
+import type { SceneCollisionSettingsPatch } from '../schemas/v2-custom';
+import { outboundLoadRequestId, readInboundRequestId } from '../settings-io/host-protocol';
+import { importLocalProject } from '../settings-io/import-local-project';
 import {
     isHostSaveSuccess,
     resolveSettingsSaveDestination,
     saveExperienceProject,
     type SettingsSaveDestination
-} from './settings-io/save';
-import { resetSceneSettings } from './settings-reset';
-import { getRevealActiveType, getRevealTotalDuration } from './settings-serialize/effects-sync';
+} from '../settings-io/save';
+import { resetSceneSettings } from '../settings-reset';
+import { getRevealActiveType, getRevealTotalDuration } from '../settings-serialize/effects-sync';
 import {
     serializeExperienceSettings,
     getComparableSettingsStringFromSnapshot,
     applySettingsSnapshot,
     syncEditBaselineCollisionFromGlobal,
     logSettingsDiffDetails
-} from './settings-serialize/settings-serialize';
+} from '../settings-serialize/settings-serialize';
 import {
     applySceneMediaHotspotBaselineFromView,
     patchSceneMediaHotspot,
     readSkyboxCurrentUrlFromSettings
-} from './settings-serialize/settings-serialize-helper';
-import { getSelectedSceneAssetType } from './state-selectors';
-import type { AssetLibraryItem, EditLeftModule, Global } from './types';
-import { paramsPatchHasAssetKeys } from './vfx/effects-runtime/asset/asset-effect-params';
-import { applyViewMediaMuteSet, type LightingVisibilityKey } from './view-settings';
+} from '../settings-serialize/settings-serialize-helper';
+import { getSelectedSceneAssetType } from '../state-selectors';
+import type { AssetLibraryItem, EditLeftModule, Global } from '../types';
+import { paramsPatchHasAssetKeys } from '../vfx/effects-runtime/asset/asset-effect-params';
+import { applyViewMediaMuteSet, type LightingVisibilityKey } from '../view-settings';
 import {
     ASSET_EFFECT_TYPE_VALUES,
     ASSET_EFFECT_TYPES,
@@ -105,15 +107,15 @@ import {
     SCENE_GSPLAT_PERSISTENT_CAMERA_EFFECT_ID,
     SCENE_GSPLAT_PERSISTENT_STYLIZATION_EFFECT_ID,
     resolveAssetEffectType
-} from './vfx/effects-runtime/effect-types';
-import { captureDefaultViewAndStageThumbnail } from './render/project-thumbnail';
-import { applyShadowSetFromHost } from './editor-modules/protocol-adapters/environment-protocol-adapter';
+} from '../vfx/effects-runtime/effect-types';
+import { captureDefaultViewAndStageThumbnail } from '../render/project-thumbnail';
+import { applyShadowSetFromHost } from '../editor-modules/protocol-adapters/environment-protocol-adapter';
 import {
     SHADOW_SYSTEM_READY,
     hasShadowSceneMesh,
     isShadowOutputEnabled,
     isShadowSystemEnabled
-} from './vfx/shadow';
+} from '../vfx/shadow';
 
 /** 父级 → Viewer 的 postMessage payload 类型（按文档事件表） */
 type InboundPayload =
@@ -440,6 +442,10 @@ const initPostMessageBridge = (global: Global) => {
     };
     events.on(SCENE_COLLISION_CHANGED, syncBaselineCollisionFromSystem);
 
+    const inboundQueue = createSerialAsyncQueue((err) => {
+        console.error('[MessageBridge] inbound failed', err);
+    });
+
     const handleMessage = async (event: MessageEvent) => {
         const payload = event.data as InboundPayload;
         if (!payload?.type) return;
@@ -554,6 +560,8 @@ const initPostMessageBridge = (global: Global) => {
                     if (config.trackEditHistory) {
                         postToParent('EDIT_HISTORY_STATE', { canUndo: canUndo(global), canRedo: canRedo(global) });
                     }
+                    // restore / editMode / baseline 均已完成；之后的 LIGHT_* / EFFECT_* / PROJECT_SAVE 才写得进编辑真源。
+                    postToParent('EDIT_MODE_READY');
                 }
                 break;
             }
@@ -583,12 +591,12 @@ const initPostMessageBridge = (global: Global) => {
                 break;
             }
             case 'EDIT_UNDO': {
-                const { undo } = await import('./edit-history');
+                const { undo } = await import('../edit-history');
                 await undo(global);
                 break;
             }
             case 'EDIT_REDO': {
-                const { redo } = await import('./edit-history');
+                const { redo } = await import('../edit-history');
                 await redo(global);
                 break;
             }
@@ -1533,7 +1541,11 @@ const initPostMessageBridge = (global: Global) => {
         }
     };
 
-    window.addEventListener('message', handleMessage);
+    // 串行入站：EDIT_MODE_SET 会 await restore，若并行处理后续 LIGHT_* / PROJECT_SAVE，
+    // restoreLightingFromSettings 会用 __originalSettings 盖掉刚写入的编辑，保存看起来像没生效。
+    window.addEventListener('message', (event) => {
+        void inboundQueue.enqueue(() => handleMessage(event));
+    });
 
     // ---------- Viewer → 父级 上报 ----------
     events.on('cameraMode:changed', (value: string, _prev: string) => {
@@ -1549,6 +1561,7 @@ const initPostMessageBridge = (global: Global) => {
 
     // VIEWER_READY = 主场景首帧；VIEWER_LOAD_FAILED = 配置/主场景失败。
     // VIEWER_ASSETS_READY / VIEWER_ASSETS_LOAD_FAILED = 启动期场景内资产成败，每个加载会话只出站一次。
+    // 可开始改 settings 并保存：EDIT_MODE_SET(true) 完成后的 EDIT_MODE_READY，不是 ASSETS_READY。
     let firstFrameReady = false;
     let startupAssetsRestoreComplete = false;
     let startupAssetRestoreFailures: SceneAssetsRestoreCompletePayload['failures'] | null = null;
@@ -1587,7 +1600,7 @@ const initPostMessageBridge = (global: Global) => {
         postToParent('VIEWER_READY', requestId ? { requestId } : undefined);
         firstFrameReady = true;
         postViewerAssetsOutcomeIfSettled();
-        const { canUndo, canRedo } = await import('./edit-history');
+        const { canUndo, canRedo } = await import('../edit-history');
         if (config.trackEditHistory) {
             postToParent('EDIT_HISTORY_STATE', { canUndo: canUndo(global), canRedo: canRedo(global) });
         }

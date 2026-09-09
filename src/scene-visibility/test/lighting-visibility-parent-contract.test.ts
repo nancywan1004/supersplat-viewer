@@ -1,7 +1,7 @@
 /**
  * 父级光照显隐回包契约（无测试框架；`npx tsx` 直接跑）。
  *
- *   npx --yes tsx src/scene-visibility/lighting-visibility-parent-contract.test.ts
+ *   npx --yes tsx src/scene-visibility/test/lighting-visibility-parent-contract.test.ts
  *
  * 冻结的是父级可观察出站序列。Viewer TOGGLE 写 settings 等内部行为不在此锁定。
  */
@@ -11,12 +11,12 @@ import {
     expectedOutboundForCategorySet,
     expectedOutboundForLightingAspectSet,
     LIGHTING_SHOW_HIDE_CHANGED_BY_KEY
-} from './lighting-visibility-parent-contract';
+} from '../lighting-visibility-parent-contract';
 import {
     SCENE_CONTENT_ALL_SET_HIDE_ORDER,
     SCENE_CONTENT_ALL_SET_SHOW_ORDER,
     SCENE_CONTENT_CATEGORY_IDS
-} from './types';
+} from '../types';
 
 function assert(cond: boolean, msg: string): void {
     if (!cond) {

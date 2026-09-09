@@ -1,7 +1,7 @@
 /**
  * lod-render-scale 纯函数自检（无测试框架；`npx tsx` 直接跑）。
  *
- *   npx --yes tsx src/loaders/gsplat/lod/octree/lod-render-scale.test.ts
+ *   npx --yes tsx src/loaders/gsplat/lod/octree/test/lod-render-scale.test.ts
  */
 
 import {
@@ -22,7 +22,7 @@ import {
     resolveVerticalFovRad,
     selectRenderScaleLod,
     selectRenderScaleLodFromDiameters
-} from './lod-render-scale';
+} from '../lod-render-scale';
 
 function assert(cond: boolean, msg: string): void {
     if (!cond) {

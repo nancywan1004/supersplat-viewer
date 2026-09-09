@@ -1,14 +1,14 @@
 /**
  * 横屏摇杆判定自检（无测试框架；`npx tsx` 直接跑）。
  *
- *   npx --yes tsx src/input/touch-joystick-ui.test.ts
+ *   npx --yes tsx src/input/test/touch-joystick-ui.test.ts
  */
 
 import {
     createViewportSettleScheduler,
     isLandscapeOrientationFromMetrics,
     type ViewportSizeSample
-} from './touch-joystick-ui';
+} from '../touch-joystick-ui';
 
 function assert(cond: boolean, msg: string): void {
     if (!cond) {

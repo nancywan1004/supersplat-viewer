@@ -7,7 +7,7 @@ import {
     resolveSettingsSaveDestination,
     toViewerLoadError,
     ViewerLoadError
-} from './host-protocol';
+} from '../host-protocol';
 
 const assert = (cond: unknown, msg: string) => {
     if (!cond) throw new Error(msg);
