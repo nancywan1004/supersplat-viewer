@@ -60,6 +60,8 @@ export type CollisionMeshResult =
 
 export type GenerateCollisionMeshOptions = {
     onProgress?: (progress: CollisionJobProgress) => void;
+    /** 覆盖 Universe API 地址，仅供 internal 本地联调使用。 */
+    apiBaseUrl?: string;
 };
 
 const OK_CODES = new Set([1, 200]);
@@ -135,7 +137,11 @@ export const generateCollisionMesh = async (
     const started = performance.now();
     const elapsedMs = () => Math.round(performance.now() - started);
 
-    const submitUrl = buildUniverseApiUrl(VOXEL_COLLISION_JOBS_PATH);
+    const apiBaseUrl = options?.apiBaseUrl?.trim().replace(/\/+$/, '');
+    const buildApiUrl = (path: string) => {
+        return apiBaseUrl ? `${apiBaseUrl}${path}` : buildUniverseApiUrl(path);
+    };
+    const submitUrl = buildApiUrl(VOXEL_COLLISION_JOBS_PATH);
     let submit: VoxelCollisionSubmitResponse;
     try {
         submit = await fetchUniverseJsonPost<VoxelCollisionSubmitResponse>(submitUrl, {
@@ -185,7 +191,7 @@ export const generateCollisionMesh = async (
         elapsedMs: elapsedMs()
     });
 
-    const pollUrl = buildUniverseApiUrl(`${VOXEL_COLLISION_JOBS_PATH}/${jobId}`);
+    const pollUrl = buildApiUrl(`${VOXEL_COLLISION_JOBS_PATH}/${jobId}`);
     const queuedDeadline = Date.now() + MAX_QUEUED_POLL_MS;
     let runningDeadline: number | null = null;
 

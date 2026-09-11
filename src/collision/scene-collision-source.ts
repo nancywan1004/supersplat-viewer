@@ -9,6 +9,9 @@ export const SCENE_COLLISION_CHANGED = 'sceneCollision:changed';
 /** Universe 转换任务排队/运行进度（出站 `SCENE_MESH_LOAD_PROGRESS`）。 */
 export const SCENE_MESH_GENERATE_PROGRESS = 'sceneMesh:generateProgress';
 
+/** internal 编辑模式使用本机转换服务；message-bridge 及其它模式仍走云端。 */
+const INTERNAL_COLLISION_API_BASE_URL = 'http://localhost:4001';
+
 export type SceneMeshGenerateProgressPayload = CollisionJobProgress & {
     intent?: SceneMeshLoadIntent;
 };
@@ -133,6 +136,9 @@ export async function ensureCollisionUrl(
             setUniverseAuthContext({ token });
 
             const generated = await generateCollisionMesh(projectId, token, modelUrl, {
+                ...(global.config.editUiTransport !== 'message-bridge' ? {
+                    apiBaseUrl: INTERNAL_COLLISION_API_BASE_URL
+                } : {}),
                 onProgress: (progress) => {
                     global.events.fire(SCENE_MESH_GENERATE_PROGRESS, {
                         ...progress,
