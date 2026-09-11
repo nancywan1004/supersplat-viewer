@@ -6,6 +6,7 @@
 
 import {
     computeAdaptiveMoveSpeed,
+    computePanProjectionDistance,
     DEFAULT_MOVE_SPEED_SCALE,
     parseMoveSpeedScale,
     readMoveSpeedScale,
@@ -60,5 +61,32 @@ assertClose(smallScene.moveSpeed, 1, 1e-9, 'adaptive floors at 1');
 
 const smallScaled = computeAdaptiveMoveSpeed(10, 0.1);
 assertClose(smallScaled.moveSpeed, 0.1, 1e-9, 'scale applies after floor');
+
+const flyPan = computePanProjectionDistance({
+    cameraDistance: 80,
+    moveSpeed: scaled.moveSpeed,
+    minPanDistance: scaled.minPanDistance,
+    scale: 0.1,
+    firstPerson: true
+});
+assertClose(flyPan, scaled.moveSpeed, 1e-9, 'fly pan uses moveSpeed not leftover orbit distance');
+
+const orbitFar = computePanProjectionDistance({
+    cameraDistance: 500,
+    moveSpeed: scaled.moveSpeed,
+    minPanDistance: scaled.minPanDistance,
+    scale: 0.1,
+    firstPerson: false
+});
+assertClose(orbitFar, 50, 1e-9, 'orbit far pan multiplies cameraDistance by scale');
+
+const orbitNear = computePanProjectionDistance({
+    cameraDistance: 5,
+    moveSpeed: scaled.moveSpeed,
+    minPanDistance: scaled.minPanDistance,
+    scale: 0.1,
+    firstPerson: false
+});
+assertClose(orbitNear, scaled.minPanDistance, 1e-9, 'orbit near pan keeps scaled min floor');
 
 console.log('move-speed-scale.test.ts: ok');

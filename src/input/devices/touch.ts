@@ -144,7 +144,7 @@ class TouchDevice implements InputDevice {
 
     update(ctx: UpdateContext, frame: CameraInputFrame): void {
         const { touch, pinch, count } = this._source.read();
-        const { mode, isFly, isWalk, isFirstPerson, isOrbit, gamingControls, dt, distance, cameraComponent } = ctx;
+        const { mode, isFly, isWalk, isFirstPerson, isOrbit, gamingControls, dt, distance, panDistance, cameraComponent } = ctx;
         const global = this._global!;
         const useJoystickMove = shouldUseTouchJoystickMove(global.state);
         const useMobileFlyGestures = isFly;
@@ -236,7 +236,7 @@ class TouchDevice implements InputDevice {
 
         // move
         const v = tmpV.set(0, 0, 0);
-        screenToWorld(cameraComponent, touch[0], touch[1], distance, orbitMove);
+        screenToWorld(cameraComponent, touch[0], touch[1], panDistance, orbitMove);
         if (double && isOrbit) {
             v.add(flyTouchPan.copy(orbitMove));
         }

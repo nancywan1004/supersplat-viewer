@@ -126,7 +126,7 @@ class TrackpadDevice implements InputDevice {
     }
 
     update(ctx: UpdateContext, frame: CameraInputFrame): void {
-        const { isOrbit, isFirstPerson, distance, cameraComponent } = ctx;
+        const { isOrbit, isFirstPerson, distance, panDistance, cameraComponent } = ctx;
         const orbitFactor = isFirstPerson ? cameraComponent.fov / 120 : 1;
         const { deltas } = frame;
 
@@ -137,7 +137,7 @@ class TrackpadDevice implements InputDevice {
             deltas.rotate.append([v.x, v.y, 0]);
 
             // pan in world space (matches desktop pan path); reuse tmpV after rotate append
-            screenToWorld(cameraComponent, this._pan[0], this._pan[1], distance, tmpV);
+            screenToWorld(cameraComponent, this._pan[0], this._pan[1], panDistance, tmpV);
             tmpV.mulScalar(this.trackpadPanSensitivity);
             deltas.move.append([tmpV.x, tmpV.y, 0]);
 

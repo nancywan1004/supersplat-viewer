@@ -78,7 +78,10 @@ const flipZForOrbit = (mode: CameraMode, z: number) => (mode === 'orbit' ? -z : 
  */
 type UpdateContext = {
     dt: number;
+    /** 真实相机 orbit/focus 距离，供滚轮贴地切 fly 等判断。 */
     distance: number;
+    /** 屏幕空间 pan 投影深度，已含 moveSpeedScale。 */
+    panDistance: number;
     cameraComponent: CameraComponent;
     mode: CameraMode;
     isOrbit: boolean;
