@@ -62,6 +62,8 @@ export type GenerateCollisionMeshOptions = {
     onProgress?: (progress: CollisionJobProgress) => void;
     /** 覆盖 Universe API 地址，仅供 internal 本地联调使用。 */
     apiBaseUrl?: string;
+    /** 是否上传到 OSS；本地联调通常设为 false。 */
+    upload?: boolean;
 };
 
 const OK_CODES = new Set([1, 200]);
@@ -142,11 +144,13 @@ export const generateCollisionMesh = async (
         return apiBaseUrl ? `${apiBaseUrl}${path}` : buildUniverseApiUrl(path);
     };
     const submitUrl = buildApiUrl(VOXEL_COLLISION_JOBS_PATH);
+    const upload = options?.upload ?? true;
     let submit: VoxelCollisionSubmitResponse;
     try {
         submit = await fetchUniverseJsonPost<VoxelCollisionSubmitResponse>(submitUrl, {
             projectId: numericId,
-            modelUrl: trimmedModelUrl
+            modelUrl: trimmedModelUrl,
+            upload
         });
     } catch (error) {
         const status = httpStatusFromError(error);
@@ -283,7 +287,9 @@ export const generateCollisionMesh = async (
         }
 
         if (status === 'succeeded') {
-            const fileUrl = typeof poll.data?.data?.url === 'string' ? poll.data.data.url.trim() : '';
+            const fileUrl = upload
+                ? (typeof poll.data?.data?.url === 'string' ? poll.data.data.url.trim() : '')
+                : buildApiUrl(`${VOXEL_COLLISION_JOBS_PATH}/${jobId}/glb`);
             if (!fileUrl) {
                 return { ok: false, message: '体素碰撞接口未返回 GLB 下载地址' };
             }

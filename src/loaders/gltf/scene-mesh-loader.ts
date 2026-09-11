@@ -14,9 +14,13 @@ export function isSceneMeshGlbUrl(url: string): boolean {
             .split('.')
             .pop()
             ?.toLowerCase();
-        return ext === 'glb';
+        // The local collision service exposes GLB through a REST endpoint whose
+        // path ends in `/glb` rather than a `.glb` filename.
+        const pathname = new URL(url, typeof location !== 'undefined' ? location.href : undefined).pathname;
+        return ext === 'glb' || pathname.endsWith('/glb');
     } catch {
-        return url.toLowerCase().endsWith('.glb');
+        const normalized = url.toLowerCase();
+        return normalized.endsWith('.glb') || normalized.includes('/glb');
     }
 }
 

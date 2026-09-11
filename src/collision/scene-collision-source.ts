@@ -137,7 +137,8 @@ export async function ensureCollisionUrl(
 
             const generated = await generateCollisionMesh(projectId, token, modelUrl, {
                 ...(global.config.editUiTransport !== 'message-bridge' ? {
-                    apiBaseUrl: INTERNAL_COLLISION_API_BASE_URL
+                    apiBaseUrl: INTERNAL_COLLISION_API_BASE_URL,
+                    upload: false
                 } : {}),
                 onProgress: (progress) => {
                     global.events.fire(SCENE_MESH_GENERATE_PROGRESS, {
