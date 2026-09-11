@@ -582,7 +582,10 @@ const main = async (
 
     // Load model
     const gsplatContentFilename = contentFilenameFromUrl(config.contentUrl ?? '');
-    const gsplatLoad = getAssetLoader(global).trackPromise(
+    // 平台化空入口没有主场景，保持通信/命令桥接可用并等待 PROJECT_IMPORT。
+    // 不创建 rejected promise：Viewer 会在场景真正导入后刷新，避免把“尚未提供模型”
+    // 当成主场景加载失败，也避免请求平台路由下不存在的默认 ./scene.sog。
+    const gsplatLoad = config.contentUrl ? getAssetLoader(global).trackPromise(
         'mainScene',
         'mainScene:gsplat',
         loadGsplat(
@@ -598,13 +601,17 @@ const main = async (
             },
             lodLoader
         )
-    );
-    gsplatLoad.catch((err) => {
-        postViewerLoadFailedFromError(err, 'content', {
-            url: config.contentUrl,
-            requestId: config.loadRequestId
-        });
+    ) : new Promise<Entity>(() => {
+        // 空入口故意保持 pending；PROJECT_IMPORT 会刷新页面并创建真实加载会话。
     });
+    if (config.contentUrl) {
+        gsplatLoad.catch((err) => {
+            postViewerLoadFailedFromError(err, 'content', {
+                url: config.contentUrl,
+                requestId: config.loadRequestId
+            });
+        });
+    }
 
     // Load skybox from settings (URL param bootstraps into settings when absent)
     const skyboxLoadUrl = initialSkyboxUrl ?

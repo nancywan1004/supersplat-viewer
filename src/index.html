@@ -54,13 +54,18 @@
             const skyboxUrl = toProxy(url.searchParams.get('skybox'));
             const collisionUrl = url.searchParams.get('collision') ?? url.searchParams.get('voxel');
             const contentFromQuery = url.searchParams.has('content');
-            const settingsUrl = url.searchParams.has('settings') ? url.searchParams.get('settings') : './settings.json';
-            const contentUrl = contentFromQuery ? url.searchParams.get('content') : './scene.sog';
-            const settingsFetchUrl = toProxy(settingsUrl);
+            const settingsFromQuery = url.searchParams.has('settings');
+            // 没有 content 时是平台化 Viewer 的空入口：等待 PROJECT_IMPORT，
+            // 不要猜测 ./scene.sog（平台路由通常会把它返回成 index.html）。
+            const settingsUrl = settingsFromQuery ? url.searchParams.get('settings') : undefined;
+            const contentUrl = contentFromQuery ? url.searchParams.get('content') : undefined;
+            const settingsFetchUrl = settingsFromQuery ? toProxy(settingsUrl) : undefined;
             let settingsUrlAbs = settingsUrl;
-            try {
-                settingsUrlAbs = new URL(settingsUrl, location.href).href;
-            } catch (e) {}
+            if (settingsUrl) {
+                try {
+                    settingsUrlAbs = new URL(settingsUrl, location.href).href;
+                } catch (e) {}
+            }
             const contentFetchUrl = toProxy(contentUrl);
             const projectId = url.searchParams.get('projectId') ?? undefined;
             const token = url.searchParams.get('token') ?? undefined;
@@ -215,9 +220,19 @@
                 loadRequestId
             };
 
+            // 空入口仍需一份可被 importSettings 接受的基础配置，以便先创建
+            // Viewer/MessageBridge；真正项目导入后会通过 pending pack 刷新加载完整配置。
+            const emptySettings = new Response(JSON.stringify({
+                camera: {},
+                background: {},
+                animTracks: []
+            }), {
+                headers: { 'Content-Type': 'application/json' }
+            });
+
             window.sse = {
                 config: sseConfig,
-                settings: fetch(settingsFetchUrl)
+                settings: settingsFetchUrl ? fetch(settingsFetchUrl) : Promise.resolve(emptySettings)
             };
 
             // 与 <html> 默认 class 对齐：showEditUI=true 时移除，否则保持隐藏（幂等）
