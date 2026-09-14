@@ -1,4 +1,4 @@
-import { parseProjectFileList } from './project-pack';
+import { isPackedSceneFilename, packedContentRelativePath, parseProjectFileList } from './project-pack';
 import { savePendingProjectPack } from './project-pack-store';
 
 export type ProjectImportResult =
@@ -8,6 +8,27 @@ export type ProjectImportResult =
 function isZipFile(file: File): boolean {
     const name = file.name.toLowerCase();
     return name.endsWith('.zip') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed';
+}
+
+async function parseSingleContentFile(file: File) {
+    if (!isPackedSceneFilename(file.name)) return undefined;
+    const relativePath = packedContentRelativePath(file.name);
+    const defaultSettingsUrl = (window as Window & {
+        sse?: { defaultSettingsUrl?: string }
+    }).sse?.defaultSettingsUrl;
+    if (!defaultSettingsUrl) {
+        throw new Error('无法定位默认 settings 文件');
+    }
+    const response = await fetch(defaultSettingsUrl);
+    if (!response.ok) {
+        throw new Error(`加载默认 settings 失败，状态码: ${response.status}`);
+    }
+    const settings = await response.json() as Record<string, unknown>;
+    settings.content = relativePath;
+    return {
+        settings,
+        files: new Map([[relativePath, file as Blob]])
+    };
 }
 
 export async function parseProjectImportInput(input: FileList | File[] | File) {
@@ -20,6 +41,10 @@ export async function parseProjectImportInput(input: FileList | File[] | File) {
         !files[0].webkitRelativePath?.includes('/');
     if (onlyBareZip) {
         throw new Error('请导入项目文件夹，不支持 zip');
+    }
+    if (files.length === 1) {
+        const singleContentPack = await parseSingleContentFile(files[0]);
+        if (singleContentPack) return singleContentPack;
     }
     return await parseProjectFileList(files);
 }

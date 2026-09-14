@@ -1017,6 +1017,7 @@ const initUI = (global: Global) => {
                 });
             });
             const dirInput = document.getElementById('importProjectDirInput') as HTMLInputElement | null;
+            const contentInput = document.getElementById('importProjectContentInput') as HTMLInputElement | null;
             const runProjectImport = async (list: FileList | null) => {
                 if (!list || list.length === 0) return;
                 const result = await importLocalProject(list);
@@ -1030,11 +1031,19 @@ const initUI = (global: Global) => {
                 void runProjectImport(dirInput.files);
                 dirInput.value = '';
             });
+            contentInput?.addEventListener('change', () => {
+                void runProjectImport(contentInput.files);
+                contentInput.value = '';
+            });
             saveDropdown?.querySelectorAll<HTMLButtonElement>('[data-import]').forEach((option) => {
                 option.addEventListener('click', (e) => {
                     e.stopPropagation();
                     closeSaveMenu();
-                    dirInput?.click();
+                    if (option.dataset.import === 'content') {
+                        contentInput?.click();
+                    } else {
+                        dirInput?.click();
+                    }
                 });
             });
             document.addEventListener('click', (e) => {

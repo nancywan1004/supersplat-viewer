@@ -7,7 +7,8 @@
 **2026-08-26 补充（PROJECT_SAVE destination）**：
 - **入站**：**`PROJECT_SAVE { destination?: 'host' | 'universe', requestId?: string }`**，缺省 **`universe`**。postMessage **本地保存发 `host`**：不下载不上传，成功/失败都 **`PROJECT_SAVE_RESULT`**（含 settings、主模型 File、用户 File、`references`、`contentChanged`）。无论主模型是否改过都带回 `content/`。**`universe`** 成功 **`PROJECT_SAVE_SUCCEEDED`**，失败 **`PROJECT_SAVE_FAILED { message, requestId? }`**。
 - **去向**：postMessage `host` = 产物交回父级；`universe` = OSS 上传。Viewer 内部 UI 直连仍可用 **`local`** 下载 zip（不是给父级的协议值）。
-- **导入文件夹**：入站 **`PROJECT_IMPORT { files: File[], requestId? }`**（`webkitdirectory`，不支持 zip）。成功 **`PROJECT_IMPORT_SUCCEEDED { requestId? }`**（先出站再刷新，包内主场景优先于 URL `?content=`）；失败 **`PROJECT_IMPORT_FAILED { message, requestId? }`**。
+- **导入项目**：入站 **`PROJECT_IMPORT { files: File | File[], requestId? }`**。支持 `webkitdirectory` 项目文件夹，也支持单个 `.sog` / `.splat` / `.ply` content（后者自动使用默认 settings）；不支持 zip。成功 **`PROJECT_IMPORT_SUCCEEDED { requestId? }`**（先出站再刷新，包内主场景优先于 URL `?content=`）；失败 **`PROJECT_IMPORT_FAILED { message, requestId? }`**。
+- **空入口握手**：无 `content` 启动时出站 **`VIEWER_BOOTSTRAP_READY { requestId? }`**，表示 message bridge 已挂载、可以发送 `PROJECT_IMPORT`；此时不会发送 `VIEWER_READY`，后者仅表示真实主场景首帧。
 - **加载成败（两对）**：
   - **主场景**：成功 **`VIEWER_READY { requestId? }`**（首帧）；失败 **`VIEWER_LOAD_FAILED { requestId?, stage: 'settings'|'content', message, status?, url? }`**（不再发 READY）。
   - **场景内资产**：成功 **`VIEWER_ASSETS_READY { requestId? }`**（放置资产就绪，**不是**可编辑）；失败 **`VIEWER_ASSETS_LOAD_FAILED { requestId?, message, status?, url?, failedCount }`**（不再发 ASSETS_READY）。

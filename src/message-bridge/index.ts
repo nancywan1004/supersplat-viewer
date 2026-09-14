@@ -1757,6 +1757,13 @@ const initPostMessageBridge = (global: Global) => {
         videoExportCancelled = false;
         postToParent('VIDEO_EXPORT_STARTED', { module: MESSAGE_BRIDGE_MODULE.effects });
     });
+
+    // 空入口没有主场景，gsplatLoad 会保持 pending，因此不会触发 VIEWER_READY。
+    // 用独立握手通知父级：message bridge 已挂载，可以安全发送 PROJECT_IMPORT。
+    if (!config.contentUrl) {
+        const requestId = outboundLoadRequestId(config.loadRequestId);
+        postToParent('VIEWER_BOOTSTRAP_READY', requestId ? { requestId } : undefined);
+    }
 };
 
 export { initPostMessageBridge };

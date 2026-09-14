@@ -60,6 +60,7 @@
             const settingsUrl = settingsFromQuery ? url.searchParams.get('settings') : undefined;
             const contentUrl = contentFromQuery ? url.searchParams.get('content') : undefined;
             const settingsFetchUrl = settingsFromQuery ? toProxy(settingsUrl) : undefined;
+            const defaultSettingsUrl = new URL('./settings.json', location.href).href;
             let settingsUrlAbs = settingsUrl;
             if (settingsUrl) {
                 try {
@@ -232,7 +233,8 @@
 
             window.sse = {
                 config: sseConfig,
-                settings: settingsFetchUrl ? fetch(settingsFetchUrl) : Promise.resolve(emptySettings)
+                settings: settingsFetchUrl ? fetch(settingsFetchUrl) : Promise.resolve(emptySettings),
+                defaultSettingsUrl
             };
 
             // 与 <html> 默认 class 对齐：showEditUI=true 时移除，否则保持隐藏（幂等）
@@ -293,9 +295,11 @@
                         <button type="button" class="edit-mode-save-option" data-destination="local" role="menuitem">保存到本地</button>
                         <button type="button" class="edit-mode-save-option" data-destination="universe" role="menuitem">上传到 Universe</button>
                         <button type="button" class="edit-mode-save-option" data-import="folder" role="menuitem">导入文件夹</button>
+                        <button type="button" class="edit-mode-save-option" data-import="content" role="menuitem">导入单个 content</button>
                     </div>
                 </div>
                 <input type="file" id="importProjectDirInput" class="hidden" tabindex="-1" webkitdirectory directory multiple />
+                <input type="file" id="importProjectContentInput" class="hidden" tabindex="-1" accept=".sog,.splat,.ply" />
             </div>
             <!-- 编辑模式三个挂载点（仅 edit 模式显示），内容由对应组件注入 -->
             <div id="editLeftSidebarMount" class="edit-left-sidebar hidden"></div>

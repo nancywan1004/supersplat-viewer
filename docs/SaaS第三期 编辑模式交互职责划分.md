@@ -211,6 +211,7 @@
 | 保存失败 | PROJECT\_SAVE\_FAILED | { message: string, requestId?: string } | 仅 `universe`。`host` 失败走 `PROJECT_SAVE_RESULT { ok: false }` |
 | 交回保存产物 | PROJECT\_SAVE\_RESULT | `{ ok: true, requestId?, settings, files: [{ path, file }], references: [{ path, field }], contentChanged }` 或 `{ ok: false, requestId?, message }` | postMessage 本地保存（`destination: 'host'`）。不自动下载、不上传。`files` **始终含主模型**（`content/...`）以及用户相对路径资源。`contentChanged` 仅表示 Viewer 是否改过启动主模型 URL |
 | 导入成功 | PROJECT\_IMPORT\_SUCCEEDED | `{ requestId? }` | 已缓存项目包，随后 iframe 刷新加载包内主场景（含 `content/`）。刷新后仍走 `VIEWER_READY` / `VIEWER_ASSETS_READY`；编辑须再 `EDIT_MODE_SET` 并等 `EDIT_MODE_READY`。入站带 `requestId` 时回传 |
+| 空入口通信就绪 | VIEWER\_BOOTSTRAP\_READY | `{ requestId?: string }` | 无 `content` 启动时出站，表示 message bridge 已挂载、可以发送 `PROJECT_IMPORT`。此时不发送 `VIEWER_READY`；父级不要等待 `VIEWER_READY` 才发起首次导入 |
 | 导入失败 | PROJECT\_IMPORT\_FAILED | `{ message: string, requestId? }` | 缺文件、zip、无 settings.json、解析失败等。不发保存成功事件 |
 | 主场景首帧 | VIEWER\_READY | { requestId?: string } | 主 splat 已出第一帧，可以展示 Viewer。此时场景内资产可能仍在加载。对应失败是 `VIEWER_LOAD_FAILED`。URL `?requestId=` 有值时回传 |
 | 配置或主场景加载失败 | VIEWER\_LOAD\_FAILED | `{ requestId?, stage: 'settings' \| 'content', message, status?, url? }` | `settings` = settings.json；`content` = 主模型。发生后不再发 `VIEWER_READY`。不含场景内资产（那是 `VIEWER_ASSETS_LOAD_FAILED`）。同一加载最多一次 |
