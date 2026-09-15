@@ -25,8 +25,8 @@ const AXIS_SCALE_MAX = 1.5;
 const AUTO_FIT_AXIS_MIN = 0.55;
 const AUTO_FIT_AXIS_MAX = 1;
 
-/** Fly / Orbit 碰撞球半径默认（米）。原 0.45 在室内门廊会卡住。 */
-export const DEFAULT_CAMERA_COLLISION_RADIUS = 0.15;
+/** Fly / Orbit 碰撞球半径默认（米）。0.45 → 0.15 → 0.09：越小越不容易在室内门廊/椅缝被顶住。 */
+export const DEFAULT_CAMERA_COLLISION_RADIUS = 0.09;
 export const CAMERA_COLLISION_RADIUS_MIN = 0.08;
 export const CAMERA_COLLISION_RADIUS_MAX = 0.5;
 

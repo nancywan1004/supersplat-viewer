@@ -67,7 +67,7 @@ export function getCameraSettingsHTML(): string {
             <span id="cameraCollisionRadiusVal" class="settingsValueLabel"></span>
         </div>
         <div class="settingsRow camera-settings-subhint">
-            Fly 用球体挡墙。室内门廊建议 0.12～0.18m；过大（原 0.45m）会卡在椅缝。
+            Fly / Orbit 用球体挡墙。默认 0.09m，室内门廊可 0.08～0.15m；过大（原 0.45m）会卡在椅缝。
         </div>
         <div class="settingsRow">
             <label for="sceneAssetCollisionDebugVisual">显示放置资产碰撞 AABB 线框</label>
