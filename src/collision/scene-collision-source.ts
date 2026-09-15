@@ -9,8 +9,29 @@ export const SCENE_COLLISION_CHANGED = 'sceneCollision:changed';
 /** Universe 转换任务排队/运行进度（出站 `SCENE_MESH_LOAD_PROGRESS`）。 */
 export const SCENE_MESH_GENERATE_PROGRESS = 'sceneMesh:generateProgress';
 
-/** internal 编辑模式使用本机转换服务；message-bridge 及其它模式仍走云端。 */
+/** 仅「本机页面 + internal 驱动方式」使用本机转换服务；其余（含线上）一律走云端 Universe。 */
 const INTERNAL_COLLISION_API_BASE_URL = 'http://localhost:4001';
+
+// 页面是否由本机访问（dev server / 本地联调）。SSR 或取不到 location 时视为非本机。
+function isLocalHostPage(): boolean {
+    if (typeof window === 'undefined' || !window.location) {
+        return false;
+    }
+    const host = window.location.hostname.toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+}
+
+// 是否走本机 4001 转换服务：要求**同时**满足
+// 1. editUiTransport 为 internal（message-bridge 走云端；缺省按 internal 处理，与
+//    src/ui/edit-ui-transport.ts 的 getEditUiTransport 归一化一致）；
+// 2. 页面本身在本机。
+//
+// 只判 transport 是不够的：editUiTransport 的缺省值本就是 internal（见 src/index.html），
+// 线上不带 ?editUiTransport=message-bridge 时同样命中，会把线上请求打到 localhost:4001。
+function shouldUseLocalCollisionService(config: Global['config']): boolean {
+    const transport = config.editUiTransport ?? 'internal';
+    return transport !== 'message-bridge' && isLocalHostPage();
+}
 
 export type SceneMeshGenerateProgressPayload = CollisionJobProgress & {
     intent?: SceneMeshLoadIntent;
@@ -136,7 +157,7 @@ export async function ensureCollisionUrl(
             setUniverseAuthContext({ token });
 
             const generated = await generateCollisionMesh(projectId, token, modelUrl, {
-                ...(global.config.editUiTransport !== 'message-bridge' ? {
+                ...(shouldUseLocalCollisionService(global.config) ? {
                     apiBaseUrl: INTERNAL_COLLISION_API_BASE_URL,
                     upload: false
                 } : {}),
