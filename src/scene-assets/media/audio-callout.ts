@@ -28,7 +28,9 @@ import {
 } from 'playcanvas';
 
 import { hitSceneGizmoAtClient } from '../../gizmo-hit-test';
+import { readRevealParams } from '../../settings-serialize/effects-sync';
 import type { Global, ScenePlacedItem } from '../../types';
+import { revealBlocksAnim } from '../../vfx/effects-runtime/reveal/reveal-policy';
 import { ensureHotspotDepthLayers, syncHotspotLayersAfterGsplat, type HotspotDepthLayers } from '../hotspot-depth-layers';
 import { getSceneAssetPickLayer } from '../../picker/index';
 import { isMediaConsumptionMode, readShowAudioCalloutInViewerFromSettings } from './media-hotspot-params';
@@ -480,12 +482,39 @@ function isAudioVisuallyPlaying(global: Global, m: PlacedAudioRuntime): boolean 
     return !m.audioEl.paused && m.audioEl.volume > 0;
 }
 
+// 开场一次性 reveal 尚未播完时，callout 不参与画面。
+//
+// callout 在 HotspotBase/Overlay 层，不属于 placedAssets 显隐容器任何一类，原先只靠两条
+// 间接链路被挡住：initSceneAssets(true) 延迟恢复资产、以及 reveal 门控把 placedAssets 根节点
+// 关掉。任一链路失效（revealBlocksAnim 判定竞态、二次恢复等）就会漏出 callout，
+// 因此这里显式补一条与资产/标注同源的判定。
+//
+// 提示须传 readRevealParams：与 viewer.ts 决定「是否延迟初始化标注/资产」用的是同一个表达式
+// （revealBlocksAnim(state, revealHint)）。这样 autoStart:false（reveal 仅挂载、未起播）时
+// 不会连 callout 一起藏起来——否则等不到首播的场景会永久看不到 callout。
+function isOpeningRevealBlockingCallout(global: Global): boolean {
+    // ① 开场一次性 reveal 未播完（与 viewer 延迟初始化标注/资产同源判定）
+    if (revealBlocksAnim(global.state, readRevealParams(global.settings))) {
+        return true;
+    }
+    // ② 运行期：场景内容显隐容器的 runtime gate 关着 = assets/annotations/lights 正被
+    //    reveal / 导出门控隐藏，callout 必须同步隐藏（gate 是唯一真源，避免出现
+    //    「资产已藏、callout 还在」的旁路，例如 autoStart:false 经 revealRestart 补锁）。
+    //    取不到 registry 时按「开」处理（与 assets-visibility-facade 的读法一致）。
+    const registry = (global as {
+        __sceneContentVisibility?: { isRuntimeGateOpen?: () => boolean };
+    }).__sceneContentVisibility;
+    return registry?.isRuntimeGateOpen?.() === false;
+}
+
 function isAudioCalloutEligible(entry: ScenePlacedItem, global?: Global): boolean {
     if (global && isMediaConsumptionMode(global)) {
         // 浏览模式（Viewer / 编辑预览）：仅受 settings.audio.showCalloutInViewer 控制；
         // 不随热区进出动态隐藏 callout，避免引入「走近/远离自动显隐」的额外视觉行为。
         // （热区内才可点击播放由 tryClaimAudioCalloutPointerDown 单独把关。）
         if (!readShowAudioCalloutInViewerFromSettings(global.settings)) return false;
+        // 开场一次性 reveal 未播完前不出 callout（编辑态不套用，与内容显隐 overlay 一致）
+        if (isOpeningRevealBlockingCallout(global)) return false;
     }
     return !!(entry.entity?.enabled && entry.visible !== false && entry.assetType === 'audio');
 }
