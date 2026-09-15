@@ -41,7 +41,7 @@ export function getCameraSettingsHTML(): string {
     </div>
     <div id="cameraMoveSpeedSubpanel" class="subpanel">
         <div class="settingsRow camera-settings-hint">
-            乘在场景尺寸自适应速度之上，默认 1。大场景小步可调到 0.1～0.5。
+            乘在场景尺寸自适应速度之上，默认 1。范围 0.001～2（步长 0.005），大场景小步可调到 0.1～0.5。
         </div>
         <div class="settingsRow">
             <label for="cameraMoveSpeedScale">系数</label>
@@ -349,7 +349,27 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
     radiusInput?.addEventListener('input', onRadiusInput);
     radiusInput?.addEventListener('change', onRadiusChange);
 
-    const formatMoveSpeedScale = (scale: number) => scale.toFixed(2);
+    /** 低段（<0.01）保留 3 位小数，避免 0.001～0.005 显示成 0.00 */
+    const formatMoveSpeedScale = (scale: number) =>
+        (Math.abs(scale) < 0.01 ? scale.toFixed(3) : scale.toFixed(2));
+
+    /**
+     * 滑条取值对齐：< 0.005 落到下限 0.001，其余对齐到 0.005 的整数倍。
+     * 原生 range 的 step 从 min 起算（0.001 / 0.006 / 0.011…），这里统一成 0.001、0.005、0.010… 更好读。
+     * @param raw - 滑条原始值
+     * @returns 对齐后的系数；非法值返回 null
+     */
+    const snapMoveSpeedScale = (raw: number): number | null => {
+        const parsed = parseMoveSpeedScale(raw);
+        if (parsed == null) {
+            return null;
+        }
+        if (parsed < MOVE_SPEED_SCALE_UI_STEP) {
+            return MOVE_SPEED_SCALE_UI_MIN;
+        }
+        const snapped = Math.round(parsed / MOVE_SPEED_SCALE_UI_STEP) * MOVE_SPEED_SCALE_UI_STEP;
+        return Number(Math.min(MOVE_SPEED_SCALE_UI_MAX, Math.max(MOVE_SPEED_SCALE_UI_MIN, snapped)).toFixed(3));
+    };
 
     const syncMoveSpeedScaleUi = (scale = readMoveSpeedScale(global.settings as ExperienceSettings)) => {
         const sliderValue = Math.min(
@@ -365,7 +385,7 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
     };
 
     const applyMoveSpeedScale = (raw: number, commitHistory: boolean) => {
-        const scale = parseMoveSpeedScale(raw);
+        const scale = snapMoveSpeedScale(raw);
         if (scale == null) {
             return;
         }
@@ -384,7 +404,7 @@ export function bindCameraSettings(root: HTMLElement | null, global: Global): ()
         if (!moveSpeedSlider) {
             return;
         }
-        const scale = Number(moveSpeedSlider.value);
+        const scale = snapMoveSpeedScale(Number(moveSpeedSlider.value)) ?? MOVE_SPEED_SCALE_UI_MIN;
         if (moveSpeedValue) {
             moveSpeedValue.textContent = formatMoveSpeedScale(scale);
         }
