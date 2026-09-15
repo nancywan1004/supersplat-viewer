@@ -8,14 +8,18 @@ export const MIN_MOVE_SPEED_SCALE = 0.001;
 export const MAX_MOVE_SPEED_SCALE = 10;
 
 /** 本地滑条范围（协议仍允许 [0.001, 10]） */
-export const MOVE_SPEED_SCALE_UI_MIN = 0.05;
+export const MOVE_SPEED_SCALE_UI_MIN = 0.001;
 export const MOVE_SPEED_SCALE_UI_MAX = 2;
-export const MOVE_SPEED_SCALE_UI_STEP = 0.05;
+export const MOVE_SPEED_SCALE_UI_STEP = 0.005;
 
 const SCENE_MOVE_SPEED_FACTOR = 0.05;
 const SCENE_MIN_PAN_DISTANCE_FACTOR = 0.1;
 const MIN_ADAPTIVE = 1;
-const MIN_FINAL = 0.01;
+/**
+ * 最终速度/平移距离下限。必须 ≤ 最小系数（0.001）× 最小自适应速度（1），
+ * 否则 0.001～0.01 档位会被地板吃掉、滑条低段失效。
+ */
+const MIN_FINAL = 0.001;
 
 export type AdaptiveMoveSpeed = {
     moveSpeed: number;

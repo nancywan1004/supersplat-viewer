@@ -62,6 +62,11 @@ assertClose(smallScene.moveSpeed, 1, 1e-9, 'adaptive floors at 1');
 const smallScaled = computeAdaptiveMoveSpeed(10, 0.1);
 assertClose(smallScaled.moveSpeed, 0.1, 1e-9, 'scale applies after floor');
 
+// 最小系数 0.001 不能被最终速度下限吃掉（滑条下限 0.001 / 步长 0.005）
+const minScale = computeAdaptiveMoveSpeed(10, 0.001);
+assertClose(minScale.moveSpeed, 0.001, 1e-9, 'min scale 0.001 not floored away');
+assertClose(minScale.minPanDistance, 0.001, 1e-9, 'min scale 0.001 not floored away (pan)');
+
 const flyPan = computePanProjectionDistance({
     cameraDistance: 80,
     moveSpeed: scaled.moveSpeed,
