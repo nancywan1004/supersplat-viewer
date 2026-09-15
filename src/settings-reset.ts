@@ -150,7 +150,8 @@ async function applyReset(global: Global, snapshot: ExperienceSettings): Promise
         viewer?: { cameraManager?: { reloadAnimFromSettings?: () => void } };
     }).viewer?.cameraManager;
     cam?.reloadAnimFromSettings?.();
-    global.events.fire('camera:syncPrimaryInitial');
+    // 保留动画播放（reset 后按 animTrack 起播）；仅刷新 resetCamera 基准姿态
+    global.events.fire('camera:syncPrimaryInitial', { exitAnim: false });
 
     const activeReveal = getRevealActiveType(global.state);
     if (activeReveal !== 'none') {

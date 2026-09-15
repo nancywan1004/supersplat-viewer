@@ -35,6 +35,8 @@ import { getSelectedSceneEntity } from './state-selectors';
 import type { InputArbiter } from './input-arbiter';
 
 const tmpCamera = new Camera();
+/** `orbit.goto` 内部可能按相机边界 clamp 传入姿态，用副本避免改坏 `resetCamera` 基准 */
+const tmpResetCamera = new Camera();
 const tmpv = new Vec3();
 /** F 键 / inputEvent「frame」分支里，用于承接「选中项世界坐标」的临时 Vec3（避免每帧分配）。 */
 const tmpFocus = new Vec3();
@@ -323,6 +325,9 @@ class CameraManager {
         anim: AnimController | null;
     } | null = null;
 
+    /** 动画不接管相机时使用的交互模式（settings.initialCameraMode，默认 orbit） */
+    private initialInteractionMode: CameraMode = 'orbit';
+
     // visual marker for picked point
     private pickMarker: Entity | null = null;
 
@@ -538,10 +543,13 @@ class CameraManager {
         state.animationDuration = controllers.anim ? controllers.anim.animState.cursor.duration : 0;
 
         const initialInteractionMode: CameraMode = settings.initialCameraMode === 'fly' ? 'fly' : 'orbit';
+        this.initialInteractionMode = initialInteractionMode;
 
         // initialize camera mode and initial camera position
-        // 有动画时以 anim 起播；动画被中断后统一回 initialInteractionMode。
-        if (state.hasAnimation) {
+        // - 项目显式设过默认视角（CAMERA_DEFAULT_VIEW_CAPTURE）：停在 cameras[0].initial，不让动画自动接管
+        // - 否则有动画时以 anim 起播；动画被中断后统一回 initialInteractionMode。
+        const startAtDefaultView = settings.startAtDefaultView === true && camera0 != null;
+        if (state.hasAnimation && !startAtDefaultView) {
             state.cameraMode = 'anim';
         } else {
             state.cameraMode = initialInteractionMode;
@@ -745,7 +753,9 @@ class CameraManager {
                     } else {
                         events.fire('orbitTarget:clear');
                         state.cameraMode = 'orbit';
-                        controllers.orbit.goto(resetCamera);
+                        // 传副本：goto 在越界时会直接 clamp 入参姿态，避免改坏 resetCamera 基准
+                        tmpResetCamera.copy(resetCamera);
+                        controllers.orbit.goto(tmpResetCamera);
                         startTransition();
                     }
                     break;
@@ -803,7 +813,20 @@ class CameraManager {
             }
         });
 
-        events.on('camera:syncPrimaryInitial', () => {
+        /**
+         * `settings.cameras[0].initial` 被改写后（设为默认视角并截图 / 场景重置）同步运行态：
+         * - 刷新 `resetCamera`：重置视角的基准姿态
+         * - 把相机落到新默认视角，供紧接着的缩略图采集
+         *
+         * 注意：动画模式下 `AnimController.onEnter` 与每帧 `update` 都会把相机写成动画帧，
+         * 这里落的姿态会被动画立刻覆盖（表现为「默认视角被动画第一帧覆盖」、截图取到动画帧），
+         * 因此默认需要先退出动画。
+         *
+         * @param options.exitAnim 当前为动画模式时是否退出动画（默认 true）：
+         *        true  → 停掉动画并把相机切到新默认视角（设为默认视角并截图）
+         *        false → 保留动画播放，仅刷新 resetCamera 基准（场景重置后仍按 animTrack 起播）
+         */
+        events.on('camera:syncPrimaryInitial', (options?: { exitAnim?: boolean }) => {
             const initial = settings.cameras[0]?.initial;
             if (!initial) return;
             resetCamera = createCamera(
@@ -811,16 +834,35 @@ class CameraManager {
                 new Vec3(initial.target),
                 initial.fov
             );
+
+            if (state.cameraMode === 'anim' && options?.exitAnim === false) {
+                // 保留动画：姿态仍由动画控制器给出（与新 AnimController 的当前帧一致）
+                getController('anim').onEnter(this.camera);
+                target.copy(this.camera);
+                startTransition();
+                return;
+            }
+
+            if (state.cameraMode === 'anim') {
+                // 退出动画：走 state 赋值以复用 cameraMode:changed 的 onExit/onEnter/过渡
+                state.cameraMode = initialInteractionMode;
+            }
+
             this.camera.copy(resetCamera);
             target.copy(resetCamera);
             const mode = state.cameraMode;
             if (mode === 'walk') {
+                // walk/fly 每帧会把自身 fov 写回相机，须先同步新默认视角的 fov
+                controllers.walk.fov = resetCamera.fov;
                 controllers.walk.resetToSpawn(target);
             } else if (mode === 'fly') {
+                controllers.fly.fov = resetCamera.fov;
                 controllers.fly.resetToSpawn(target);
-            } else if (mode === 'orbit') {
+            } else {
                 events.fire('orbitTarget:clear');
-                controllers.orbit.goto(resetCamera);
+                // 传副本：goto 在越界时会直接 clamp 入参姿态
+                tmpResetCamera.copy(resetCamera);
+                controllers.orbit.goto(tmpResetCamera);
             }
             getController(mode).onEnter(this.camera);
             startTransition();
@@ -1007,6 +1049,16 @@ class CameraManager {
         this.state.animationDuration = next ? next.animState.cursor.duration : 0;
 
         if (next) {
+            // 项目显式设过默认视角：只重建动画能力，不自动接管相机（等宿主/用户起播，
+            // 随后 camera:syncPrimaryInitial 会把相机落到 cameras[0].initial）
+            if (this.settings.startAtDefaultView === true && this.settings.cameras[0]?.initial) {
+                this.state.animationTime = 0;
+                if (this.state.cameraMode === 'anim') {
+                    // 走 state 赋值以复用 cameraMode:changed 的 onExit/onEnter
+                    this.state.cameraMode = this.initialInteractionMode;
+                }
+                return;
+            }
             this.state.cameraMode = 'anim';
             this.state.animationPaused = false;
             next.onEnter(this.camera);

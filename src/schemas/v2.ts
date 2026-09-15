@@ -157,6 +157,13 @@ type ExperienceSettings = {
     startMode: 'default' | 'animTrack' | 'annotation',
     hasStartPose?: boolean,
     /**
+     * 宿主通过 `CAMERA_DEFAULT_VIEW_CAPTURE`（设为默认视角并截图）显式设定过默认视角：
+     * - 进入/重置场景时停在 `cameras[0].initial`，不让 `animTrack` 自动接管相机
+     * - 动画能力保留（宿主 `ANIMATION_PLAY_PAUSE` / UI 播放按钮仍可起播）
+     * 未置位（旧项目）时行为不变：`startMode === 'animTrack'` 仍自动起播动画。
+     */
+    startAtDefaultView?: boolean,
+    /**
      * @deprecated 仅导入旧 JSON 与内存读兼容；**编辑/协议写入口**为 `settings.effects.reveal`（`syncLegacyRevealEffectShadow` 对齐本字段）。
      */
     revealEffect?: LegacyRevealEffect,

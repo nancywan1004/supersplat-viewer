@@ -11,7 +11,46 @@ export type ViewportScreenshotSize = {
 const JPEG_MIME = 'image/jpeg';
 const JPEG_QUALITY = 0.92;
 
+/** 等待出帧的超时：renderer 停止出帧时不能静默挂起（调用方须能拿到失败原因） */
+const CAPTURE_FRAME_TIMEOUT_MS = 8000;
+
+/** Viewer 上的“强制出帧”开关（预热帧同款），截图期间置位以免请求被渲染门控吞掉 */
+type ForceRenderHost = {
+    viewer?: { forceRenderNextFrame?: boolean };
+};
+
 const evenDim = (n: number) => (n % 2 === 0 ? n : Math.max(2, n - 1));
+
+/**
+ * 等待一次 `frameend`（带超时）。
+ *
+ * 注意：Viewer 的 `framerender` 在 `!readyToRender` 且未强制出帧时会清掉 `renderNextFrame`
+ * （见 viewer.ts），此时 `frameend` 仍会来但画布没有重绘。调用方需自行保证强制出帧。
+ * @param app - 主 App（PlayCanvas AppBase）
+ * @param timeoutMs - 等待出帧的超时毫秒数
+ * @returns 出帧后 resolve；超时 reject（避免 renderer 停止出帧时静默挂起）
+ */
+function waitNextFrameEnd(app: AppBase, timeoutMs: number): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const settle = (): boolean => {
+            if (settled) return false;
+            settled = true;
+            return true;
+        };
+        const timer = setTimeout(() => {
+            if (!settle()) return;
+            app.off('frameend', onFrameEnd);
+            reject(new Error(`capture timeout: frameend not fired in ${timeoutMs}ms`));
+        }, timeoutMs);
+        function onFrameEnd() {
+            if (!settle()) return;
+            clearTimeout(timer);
+            resolve();
+        }
+        app.on('frameend', onFrameEnd);
+    });
+}
 
 /** 计算居中 cover 裁切区域，使源图裁切后宽高比与目标一致 */
 function centerCoverCrop(
@@ -48,8 +87,22 @@ export async function captureViewportJpegBlob(
     const targetWidth = evenDim(Math.max(2, Math.floor(size.width)));
     const targetHeight = evenDim(Math.max(2, Math.floor(size.height)));
 
-    app.renderNextFrame = true;
-    await new Promise<void>((resolve) => app.once('frameend', () => resolve()));
+    // 截图期间强制出帧：否则 Viewer 在 !readyToRender 时会清掉 renderNextFrame，
+    // 这里等到的可能是上一帧（黑图 / 旧帧），表现为「截图失败」但无任何报错。
+    const forceRenderHost = (app as unknown as ForceRenderHost).viewer;
+    const prevForceRender = forceRenderHost?.forceRenderNextFrame;
+    if (forceRenderHost) {
+        forceRenderHost.forceRenderNextFrame = true;
+    }
+
+    try {
+        app.renderNextFrame = true;
+        await waitNextFrameEnd(app, CAPTURE_FRAME_TIMEOUT_MS);
+    } finally {
+        if (forceRenderHost) {
+            forceRenderHost.forceRenderNextFrame = prevForceRender === true;
+        }
+    }
 
     const canvas = app.graphicsDevice.canvas as HTMLCanvasElement | undefined;
     if (!canvas) {

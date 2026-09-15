@@ -51,7 +51,15 @@ export function downloadBlobAsFile(blob: Blob, filename: string): void {
 
 function getViewerCameraManager(global: Global): { camera: { position: Vec3; fov: number; calcFocusPoint: (out: Vec3) => void } } | null {
     const viewer = (global.app as unknown as { viewer?: { cameraManager?: { camera: { position: Vec3; fov: number; calcFocusPoint: (out: Vec3) => void } } } }).viewer;
-    return viewer?.cameraManager ?? null;
+    if (!viewer) {
+        console.warn('[ProjectThumbnail] app.viewer 未挂载：无法读取相机姿态（Viewer 初始化未完成？）');
+        return null;
+    }
+    if (!viewer.cameraManager) {
+        console.warn('[ProjectThumbnail] viewer.cameraManager 未创建：场景尚未就绪，无法读取相机姿态');
+        return null;
+    }
+    return viewer.cameraManager;
 }
 
 function ensurePrimaryCameraSlot(settings: ExperienceSettings): void {
@@ -96,13 +104,35 @@ function writePrimaryCameraInitial(settings: ExperienceSettings, pose: CameraPos
  * 将当前相机姿态写入 `settings.cameras[0].initial`，同步运行时 reset 姿态，并暂存缩略图 JPEG。
  */
 export async function captureDefaultViewAndStageThumbnail(global: Global): Promise<ProjectThumbnailActionResult> {
+    // 相机由动画驱动时先停下动画（anim → 交互模式，位姿保持不动），再读「当前视角」，
+    // 否则动画会在后续帧把刚写入的默认视角覆盖回动画帧。
+    if (global.state.cameraMode === 'anim') {
+        console.log('[ProjectThumbnail] cameraMode=anim：先停止动画，再以当前视角作为默认视角');
+        global.events.fire('inputEvent', 'interrupt');
+    }
+
     const pose = readPrimaryCameraPoseFromManager(global);
     if (!pose) {
         return { ok: false, message: 'camera_unavailable' };
     }
 
+    // 便于排查「默认视角/截图被动画帧覆盖」「截图拿到旧帧」：记录采集时的姿态与渲染就绪态
+    console.log('[ProjectThumbnail] capture default view', {
+        position: pose.position,
+        target: pose.target,
+        fov: pose.fov,
+        cameraMode: global.state.cameraMode,
+        readyToRender: global.state.readyToRender
+    });
+    if (!global.state.readyToRender) {
+        console.warn('[ProjectThumbnail] readyToRender=false：场景首帧尚未就绪，截图可能为黑图/旧帧');
+    }
+
     writePrimaryCameraInitial(global.settings as ExperienceSettings, pose);
-    global.events.fire('camera:syncPrimaryInitial');
+    // 锁定进入/重置场景时的首屏视角：之后加载都停在 cameras[0].initial，不被 animTrack 自动接管
+    (global.settings as ExperienceSettings).startAtDefaultView = true;
+    // exitAnim: 动画正在驱动相机时必须退出动画，否则刚写入的姿态会被动画帧覆盖，截图取的也是动画帧
+    global.events.fire('camera:syncPrimaryInitial', { exitAnim: true });
 
     try {
         pendingProjectThumbnailJpeg = await runWithDebugVisualsSuppressed(global, () =>

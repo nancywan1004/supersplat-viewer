@@ -3,7 +3,10 @@
   "tonemapping": "none",
   "highPrecisionRendering": false,
   "background": {
-    "color": [0.1, 0.1, 0.15]
+    "color": [0.1, 0.1, 0.15],
+    "skybox": {
+      "currentUrl": "https://unicity-cdn.bdnrc.org.cn/static/imgs/universe-saas/sky_3.png"
+    }
   },
   "postEffectSettings": {
     "sharpness": {
