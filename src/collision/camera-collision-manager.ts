@@ -5,6 +5,7 @@ import { loadVoxelCollision } from './voxel-collision';
 import { isSceneMeshGlbUrl, loadSceneMesh, sceneMeshUrl } from '../loaders/gltf/scene-mesh-loader';
 import {
     canGenerateCollision,
+    describeCollisionGenerateBlocker,
     ensureCollisionUrl,
     hasCollisionGenerateCredentials,
     resolveCollisionFetchUrl,
@@ -124,9 +125,10 @@ export class CameraCollisionManager {
      */
     async regenerateSceneMesh(): Promise<SceneMeshRegenerateResult> {
         if (!hasCollisionGenerateCredentials(this.global)) {
+            const blocker = describeCollisionGenerateBlocker(this.global);
             return {
                 ok: false,
-                message: '无法重新生成：需要 projectId、token、contentUrl'
+                message: blocker ? `无法重新生成：${blocker}` : '无法重新生成：缺少主场景 content 地址'
             };
         }
 

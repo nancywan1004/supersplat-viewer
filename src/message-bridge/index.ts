@@ -198,7 +198,8 @@ type InboundPayload =
     | { type: 'BLOOM_THRESHOLD_UPDATE'; value?: number }
     | { type: 'BLOOM_BLUR_SET'; value?: number }
     | { type: 'BLOOM_IS_LOCAL_SET'; value?: boolean }
-    | { type: 'SHADOW_SET'; value?: boolean }
+    /** `token`：可选，供高斯转 mesh 等网关调用鉴权（缺省沿用当前 `config.token`） */
+    | { type: 'SHADOW_SET'; value?: boolean; token?: string }
     | { type: 'SHADOW_INTENSITY_UPDATE'; value?: number }
     | { type: 'SHADOW_DIRECTION_SET'; value?: number }
     | { type: 'EFFECT_PARAMS_PATCH'; module?: 'effects'; effectId: string; params?: Record<string, unknown>; targetId?: string }
@@ -212,8 +213,9 @@ type InboundPayload =
     | { type: 'VIDEO_EXPORT_START'; includeVfx?: boolean; projectName?: string }
     | { type: 'VIDEO_EXPORT_CANCEL' }
     | { type: 'CAMERA_DEFAULT_VIEW_CAPTURE' }
-    | { type: 'COLLISION_SET'; value?: boolean }
-    | { type: 'COLLISION_PATCH'; value?: SceneCollisionSettingsPatch };
+    /** `token`：可选，供高斯转 mesh 等网关调用鉴权（缺省沿用当前 `config.token`） */
+    | { type: 'COLLISION_SET'; value?: boolean; token?: string }
+    | { type: 'COLLISION_PATCH'; value?: SceneCollisionSettingsPatch; token?: string };
 
 const postToParent = (type: string, data?: Record<string, unknown>) => {
     const message = (data ? { type, ...data } : { type }) as Record<string, unknown>;
@@ -445,6 +447,15 @@ const initPostMessageBridge = (global: Global) => {
     const inboundQueue = createSerialAsyncQueue((err) => {
         console.error('[MessageBridge] inbound failed', err);
     });
+
+    // 入站事件可选携带 token：写入 global.config.token（与 `?token=` 同一落点），
+    // 后续高斯转 mesh 等网关调用沿用原有方式带 Authorization。未传 / 空串保留当前值。
+    const applyInboundToken = (token: unknown): void => {
+        if (typeof token !== 'string') return;
+        const trimmed = token.trim();
+        if (!trimmed) return;
+        global.config.token = trimmed;
+    };
 
     const handleMessage = async (event: MessageEvent) => {
         const payload = event.data as InboundPayload;
@@ -1007,6 +1018,7 @@ const initPostMessageBridge = (global: Global) => {
                 break;
             }
             case 'SHADOW_SET': {
+                applyInboundToken(p.token);
                 const shadowVal = (p as { value?: boolean }).value;
                 if (typeof shadowVal !== 'boolean') {
                     break;
@@ -1503,6 +1515,7 @@ const initPostMessageBridge = (global: Global) => {
                 break;
             }
             case 'COLLISION_SET': {
+                applyInboundToken(p.token);
                 if (typeof p.value !== 'boolean') {
                     console.warn('[MessageBridge] COLLISION_SET ignored: value must be boolean');
                     break;
@@ -1519,6 +1532,7 @@ const initPostMessageBridge = (global: Global) => {
                 break;
             }
             case 'COLLISION_PATCH': {
+                applyInboundToken(p.token);
                 const patch = (p as { value?: unknown }).value;
                 if (!patch || typeof patch !== 'object') {
                     console.warn('[MessageBridge] COLLISION_PATCH ignored: value must be object');

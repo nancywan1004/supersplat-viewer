@@ -1,5 +1,6 @@
 import {
     canGenerateCollision,
+    describeCollisionGenerateBlocker,
     ensureCollisionUrl,
     resolveCollisionUrl
 } from './scene-collision-source';
@@ -27,6 +28,10 @@ const ensureCollisionUrlIfNeeded = async (
         return { ok: true };
     }
     if (!canGenerateCollision(global)) {
+        const blocker = describeCollisionGenerateBlocker(global);
+        if (blocker) {
+            return { ok: false, message: `缺少 collision URL，且无法从项目生成（${blocker}）` };
+        }
         return { ok: false, message: '缺少 collision URL，且无法从项目生成' };
     }
     const urlResult = await ensureCollisionUrl(global, { intent });

@@ -35,13 +35,26 @@ type VoxelCollisionJobData = {
 type VoxelCollisionSubmitResponse = {
     code: number;
     message?: string;
+    /** 网关错误信封用 `msg`（如 `{code:401,msg:'认证失败!'}`），业务侧用 `message` */
+    msg?: string;
     data?: VoxelCollisionJobData;
 };
 
 type VoxelCollisionJobResponse = {
     code: number;
     message?: string;
+    msg?: string;
     data?: VoxelCollisionJobData;
+};
+
+// 取服务端/网关的错误文案：业务 `message` 优先，网关 `msg` 兜底。
+const errorTextOf = (payload: { message?: string; msg?: string } | undefined | null): string => {
+    const message = typeof payload?.message === 'string' ? payload.message.trim() : '';
+    if (message) {
+        return message;
+    }
+    const msg = typeof payload?.msg === 'string' ? payload.msg.trim() : '';
+    return msg;
 };
 
 export type CollisionJobProgress = {
@@ -61,10 +74,16 @@ export type CollisionJobProgress = {
 export const DEFAULT_COLLISION_MESH_UPLOAD = false;
 
 export type GenerateCollisionMeshOptions = {
-    /** 缺省 `false`：不登记项目文件。 */
+    /** 缺省 `false`：不登记项目文件，结果从 `GET .../jobs/:jobId/glb` 取。 */
     upload?: boolean;
+    /**
+     * `upload: true` 时必填且须为数字；`upload: false` 时可缺省
+     * （服务端不登记项目文件，也不需要它）。有值时仍随请求带上，供网关鉴权。
+     */
     projectId?: number | string;
     onProgress?: (progress: CollisionJobProgress) => void;
+    /** 覆盖接口根地址：仅供 localhost 本地联调指向本机转换服务（缺省走 Universe 网关）。 */
+    apiBaseUrl?: string;
 };
 
 export type CollisionMeshResult =
@@ -146,8 +165,9 @@ const downloadCollisionGlb = async (fileUrl: string): Promise<CollisionMeshResul
 /**
  * 请求 Universe 将高斯模型转为碰撞 GLB（提交异步任务并轮询）。
  *
- * 默认 `{ modelUrl, projectId, upload: false }`：鉴权带 projectId，文件不登记到项目。
- * `upload: false` 时下载返回的 GLB 交给调用方入库；`upload: true` 时直接返回 `data.url`。
+ * 默认 `{ modelUrl, upload: false }`：不登记项目文件，**不需要 token / projectId**。
+ * - `upload: false` → `GET .../jobs/:jobId/glb` 取二进制，交给调用方入库；传了 token / projectId 也会照带上供网关鉴权。
+ * - `upload: true` → 服务端上传 OSS 并登记到 projectId 名下，直接返回 `data.url`（此时 token、projectId 必填）。
  *
  * 客户端超时从任务进入 `running` 起算（对齐服务端 `VOXEL_JOB_TIMEOUT_MS`），不含排队。
  *
@@ -158,23 +178,28 @@ export const generateCollisionMesh = async (
     token: string,
     options?: GenerateCollisionMeshOptions
 ): Promise<CollisionMeshResult> => {
-    if (!token) {
-        return { ok: false, message: '缺少 token' };
-    }
-
     const trimmedModelUrl = modelUrl.trim();
     if (!trimmedModelUrl) {
         return { ok: false, message: '缺少 modelUrl' };
     }
 
     const upload = options?.upload === true;
-    const id = String(options?.projectId ?? '').trim();
-    if (!id) {
-        return { ok: false, message: '缺少 projectId' };
+    // Authorization 只在 upload: true（登记项目文件）时由服务端校验；
+    // upload: false 走任务级 GLB，不需要 token。
+    if (!token && upload) {
+        return { ok: false, message: '缺少 token' };
     }
-    const numericId = Number(id);
-    if (!Number.isFinite(numericId)) {
-        return { ok: false, message: 'projectId 必须是数字' };
+    // upload: false 时服务端不登记项目文件，projectId 非必需（见 service/README.md）。
+    // 仍把可用值带上：走网关时缺它会被鉴权拒掉（401）。
+    const id = String(options?.projectId ?? '').trim();
+    let numericId: number | undefined;
+    if (id) {
+        numericId = Number(id);
+        if (!Number.isFinite(numericId)) {
+            return { ok: false, message: 'projectId 必须是数字' };
+        }
+    } else if (upload) {
+        return { ok: false, message: '缺少 projectId' };
     }
 
     setUniverseAuthContext({ token });
@@ -182,11 +207,16 @@ export const generateCollisionMesh = async (
     const started = performance.now();
     const elapsedMs = () => Math.round(performance.now() - started);
 
-    const submitUrl = buildUniverseApiUrl(VOXEL_COLLISION_JOBS_PATH);
+    const apiBaseUrl = options?.apiBaseUrl?.trim().replace(/\/+$/, '');
+    const buildApiUrl = (path: string) => {
+        return apiBaseUrl ? `${apiBaseUrl}${path}` : buildUniverseApiUrl(path);
+    };
+
+    const submitUrl = buildApiUrl(VOXEL_COLLISION_JOBS_PATH);
     let submit: VoxelCollisionSubmitResponse;
     try {
         submit = await fetchUniverseJsonPost<VoxelCollisionSubmitResponse>(submitUrl, {
-            projectId: numericId,
+            ...(numericId !== undefined ? { projectId: numericId } : {}),
             modelUrl: trimmedModelUrl,
             upload
         });
@@ -208,14 +238,19 @@ export const generateCollisionMesh = async (
     }
 
     if (!OK_CODES.has(submit.code)) {
-        const message =
-            typeof submit.message === 'string' && submit.message.trim()
-                ? submit.message.trim()
-                : '体素碰撞任务提交失败';
+        const serverMessage = errorTextOf(submit);
+        const message = serverMessage || '体素碰撞任务提交失败';
+        // 带上 base/凭证上下文：body 里出现 401/403 时通常是网关鉴权层拒绝，
+        // 而不是转换服务本身（服务端 upload:false 不校验 Authorization）。
         console.warn('[VoxelCollision] generate failed', {
-            elapsedMs: elapsedMs(),
+            url: submitUrl,
+            upload,
+            hasToken: !!token,
+            projectId: numericId ?? null,
             code: submit.code,
-            message
+            serverMessage: serverMessage || undefined,
+            message,
+            elapsedMs: elapsedMs()
         });
         return { ok: false, message };
     }
@@ -231,7 +266,7 @@ export const generateCollisionMesh = async (
         elapsedMs: elapsedMs()
     });
 
-    const pollUrl = buildUniverseApiUrl(`${VOXEL_COLLISION_JOBS_PATH}/${jobId}`);
+    const pollUrl = buildApiUrl(`${VOXEL_COLLISION_JOBS_PATH}/${jobId}`);
     const queuedDeadline = Date.now() + MAX_QUEUED_POLL_MS;
     let runningDeadline: number | null = null;
 
@@ -271,11 +306,7 @@ export const generateCollisionMesh = async (
         }
 
         if (!OK_CODES.has(poll.code)) {
-            const message =
-                typeof poll.message === 'string' && poll.message.trim()
-                    ? poll.message.trim()
-                    : '查询体素碰撞任务失败';
-            return { ok: false, message };
+            return { ok: false, message: errorTextOf(poll) || '查询体素碰撞任务失败' };
         }
 
         const status = poll.data?.status;
@@ -311,7 +342,7 @@ export const generateCollisionMesh = async (
         if (status === 'failed') {
             const message =
                 (typeof poll.data?.error === 'string' && poll.data.error.trim())
-                || (typeof poll.message === 'string' && poll.message.trim())
+                || errorTextOf(poll)
                 || '体素碰撞生成失败';
             console.warn('[VoxelCollision] generate failed', {
                 projectId: numericId,
@@ -323,7 +354,14 @@ export const generateCollisionMesh = async (
         }
 
         if (status === 'succeeded') {
-            const fileUrl = typeof poll.data?.data?.url === 'string' ? poll.data.data.url.trim() : '';
+            // upload: true → 服务端已上传 OSS 并登记，用其 data.url；
+            // upload: false → 服务端不落库，GLB 由任务级端点直出。
+            let fileUrl = '';
+            if (upload) {
+                fileUrl = typeof poll.data?.data?.url === 'string' ? poll.data.data.url.trim() : '';
+            } else {
+                fileUrl = buildApiUrl(`${VOXEL_COLLISION_JOBS_PATH}/${jobId}/glb`);
+            }
             if (!fileUrl) {
                 return { ok: false, message: '体素碰撞接口未返回 GLB 下载地址' };
             }
