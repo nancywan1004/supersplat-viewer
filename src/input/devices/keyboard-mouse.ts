@@ -57,8 +57,16 @@ class KeyboardMouseDevice implements InputDevice {
 
     private _global: Global | null = null;
 
-    /** Running WASD/QE/arrow direction (sum of key states). */
+    /** Running WASD/arrow direction (sum of key states). */
     private _axis = new Vec3();
+
+    /** Q/E held state, mirrored from per-frame key deltas. */
+    private _qHeld = false;
+
+    private _eHeld = false;
+
+    /** Q/E roll rate as a multiplier of {@link orbitSpeed} (deg/s). */
+    rollSpeed: number = 3;
 
     /** Running button-held state per index: [LMB, MMB, RMB]. */
     private _buttons: [number, number, number] = [0, 0, 0];
@@ -114,15 +122,31 @@ class KeyboardMouseDevice implements InputDevice {
         const { key, button, mouse, wheel } = this._source.read();
         const { events } = this._global!;
 
-        // accumulate running input state
-        this._axis.add(tmpV1.set(
-            (key[keyCode.D] - key[keyCode.A]) + (key[keyCode.RIGHT] - key[keyCode.LEFT]),
-            (key[keyCode.E] - key[keyCode.Q]),
-            (key[keyCode.W] - key[keyCode.S]) + (key[keyCode.UP] - key[keyCode.DOWN])
-        ));
         this._jump += key[keyCode.SPACE];
         this._shift += key[keyCode.SHIFT];
         this._ctrl += key[keyCode.CTRL];
+
+        // Q/E held state. read() only reports per-key deltas (+1 press / -1 release),
+        // so mirror them into persistent flags.
+        if (key[keyCode.Q] !== 0) {
+            this._qHeld = key[keyCode.Q] > 0;
+        }
+        if (key[keyCode.E] !== 0) {
+            this._eHeld = key[keyCode.E] > 0;
+        }
+        // Shift + Q/E = vertical translation; plain Q/E = roll. Decided per frame
+        // from the held states so toggling Shift mid-press can't leave residual input.
+        const shiftHeld = this._shift > 0;
+        const qeHeld = (this._eHeld ? 1 : 0) - (this._qHeld ? 1 : 0);
+        const verticalHeld = shiftHeld ? qeHeld : 0;
+        const rollHeld = shiftHeld ? 0 : qeHeld;
+
+        // accumulate running input state (y is driven by Shift+Q/E, see below)
+        this._axis.add(tmpV1.set(
+            (key[keyCode.D] - key[keyCode.A]) + (key[keyCode.RIGHT] - key[keyCode.LEFT]),
+            0,
+            (key[keyCode.W] - key[keyCode.S]) + (key[keyCode.UP] - key[keyCode.DOWN])
+        ));
         const n = Math.min(button.length, this._buttons.length);
         for (let i = 0; i < n; i++) {
             this._buttons[i] += button[i];
@@ -135,7 +159,7 @@ class KeyboardMouseDevice implements InputDevice {
         if (isWalk && (this._axis.x !== 0 || this._axis.z !== 0)) {
             events.fire('navigateCancel');
         }
-        if (isFly && (this._axis.x !== 0 || this._axis.y !== 0 || this._axis.z !== 0)) {
+        if (isFly && (this._axis.x !== 0 || this._axis.z !== 0 || verticalHeld !== 0 || rollHeld !== 0)) {
             events.fire('navigateCancel');
         }
         if (isFly && wheel[0] !== 0) {
@@ -144,7 +168,7 @@ class KeyboardMouseDevice implements InputDevice {
         if (isFly && (gamingControls || pan) && (mouse[0] !== 0 || mouse[1] !== 0)) {
             events.fire('navigateCancel');
         }
-        if (!isFirstPerson && this._axis.length() > 0) {
+        if (!isFirstPerson && (this._axis.length() > 0 || verticalHeld !== 0 || rollHeld !== 0)) {
             events.fire('inputEvent', 'requestFirstPerson');
         }
         // When orbit zoom-in keeps receiving wheel intent but distance no longer
@@ -160,11 +184,9 @@ class KeyboardMouseDevice implements InputDevice {
         // move (WASD + mouse-drag pan + wheel)
         const v = tmpV1.set(0, 0, 0);
         keyMove.copy(this._axis);
-        if (isWalk) {
-            // In walk mode normalize only horizontal axes so jump doesn't
-            // reduce horizontal speed.
-            keyMove.y = 0;
-        }
+        // Walk moves on the horizontal plane only. Fly adds Shift+Q/E vertical
+        // translation as a local-space up/down basis offset.
+        keyMove.y = isWalk ? 0 : verticalHeld;
         keyMove.normalize();
         const shiftMul = isWalk ? 2 : 4;
         const ctrlMul = isWalk ? 0.5 : 0.25;
@@ -199,6 +221,10 @@ class KeyboardMouseDevice implements InputDevice {
         v.set(0, 0, 0);
         mouseRotate.set(mouse[0], mouse[1], 0);
         v.add(mouseRotate.mulScalar((1 - pan) * this.orbitSpeed * orbitFactor * this.mouseRotateSensitivity * DISPLACEMENT_SCALE));
+        // rotate[2] = roll (Q/E, no Shift)。仅 fly 模式生效：orbit 不支持 roll，walk 会忽略 z。
+        if (isFly && rollHeld !== 0) {
+            v.z += rollHeld * this.rollSpeed * this.orbitSpeed * orbitFactor * dt;
+        }
         deltas.rotate.append([v.x, v.y, v.z]);
     }
 }
