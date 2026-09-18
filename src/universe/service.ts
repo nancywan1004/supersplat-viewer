@@ -70,7 +70,8 @@ export const setUniverseAuthContext = (context: UniverseAuthContext) => {
     };
 };
 
-const getToken = () => {
+/** 当前 Universe 鉴权 token（`Authorization` 头的原值，含 `Bearer` 前缀，如有）。 */
+export const getToken = () => {
     return universeAuthContext.token ?? '';
 };
 

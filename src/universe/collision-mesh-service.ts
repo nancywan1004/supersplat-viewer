@@ -2,11 +2,12 @@ import {
     buildUniverseApiUrl,
     fetchUniverseJsonGet,
     fetchUniverseJsonPost,
+    getToken,
     setUniverseAuthContext
 } from './service';
 
 /** 网关前缀转发：`POST/GET {apiHost}/conversion/voxel-collision/jobs` */
-const VOXEL_COLLISION_JOBS_PATH = '/conversion/voxel-collision/jobs';
+export const VOXEL_COLLISION_JOBS_PATH = '/conversion/voxel-collision/jobs';
 
 const POLL_INTERVAL_MS = 2000;
 /** 进入 running 后，在服务端 timeoutMs 之上再留缓冲，以便收到 failed 而不是客户端先放弃。 */
@@ -70,7 +71,7 @@ export type CollisionJobProgress = {
     progress: number;
 };
 
-/** 默认不绑项目文件；`projectId` 仍带上供网关鉴权。成功后下载 GLB 入库会话表。 */
+/** 默认不绑项目文件，成功后下载 GLB 入库会话表。 */
 export const DEFAULT_COLLISION_MESH_UPLOAD = false;
 
 export type GenerateCollisionMeshOptions = {
@@ -78,7 +79,7 @@ export type GenerateCollisionMeshOptions = {
     upload?: boolean;
     /**
      * `upload: true` 时必填且须为数字；`upload: false` 时可缺省
-     * （服务端不登记项目文件，也不需要它）。有值时仍随请求带上，供网关鉴权。
+     * （服务端不登记项目文件，也不需要它；网关侧同样不校验）。有值就顺带带上。
      */
     projectId?: number | string;
     onProgress?: (progress: CollisionJobProgress) => void;
@@ -137,15 +138,51 @@ const progressFromJobData = (
     };
 };
 
+/**
+ * 非 GLB 响应的诊断摘要：`Content-Type` + body 开头。
+ *
+ * 网关鉴权失败时不一定回 HTTP 401，而是回 **HTTP 200 + JSON 信封**
+ * （如 `{code:401,msg:'认证失败!'}`）。只报「不是 GLB」会让排查绕远路，
+ * 这里把网关原文带进错误信息。
+ */
+const describeNonGlbResponse = (response: Response, bytes: Uint8Array): string => {
+    const contentType = response.headers.get('content-type')?.trim() || '未知';
+    let preview = '';
+    try {
+        preview = new TextDecoder().decode(bytes.slice(0, 200)).replace(/\s+/g, ' ').trim();
+    } catch {
+        // 非 UTF-8：只报 Content-Type
+    }
+    return preview ? `Content-Type=${contentType}，body 开头=${preview}` : `Content-Type=${contentType}`;
+};
+
+/**
+ * 下载 `upload: false` 的任务级 GLB。
+ *
+ * 该端点与提交 / 轮询同一个网关，**必须带 `Authorization`**：缺头时网关会回
+ * HTTP 200 + JSON 错误信封，`response.ok` 为真而 `isGlbBuffer` 判假，
+ * 最终退化成一句「不是 GLB」——本分支曾因此静默失败。
+ */
 const downloadCollisionGlb = async (fileUrl: string): Promise<CollisionMeshResult> => {
+    const token = getToken();
     let response: Response;
     try {
-        response = await fetch(fileUrl);
+        response = await fetch(fileUrl, {
+            method: 'GET',
+            headers: token ? { Authorization: token } : {}
+        });
     } catch (error) {
+        // fetch 抛错是网络层被拒（CORS 预检失败 / 断网），不是服务端返回了错误码：
+        // 带上 Authorization 会让请求从「简单请求」变成需要预检的请求。
         console.warn('[VoxelCollision] download glb failed', { fileUrl, error });
-        return { ok: false, message: '下载碰撞 GLB 失败' };
+        return { ok: false, message: '下载碰撞 GLB 失败（fetch 抛错，见控制台；常见为 CORS 预检未通过）' };
     }
     if (!response.ok) {
+        console.warn('[VoxelCollision] download glb failed', {
+            fileUrl,
+            status: response.status,
+            contentType: response.headers.get('content-type') ?? ''
+        });
         return { ok: false, message: `下载碰撞 GLB 失败，状态码: ${response.status}` };
     }
     let buffer: ArrayBuffer;
@@ -157,7 +194,9 @@ const downloadCollisionGlb = async (fileUrl: string): Promise<CollisionMeshResul
     }
     const bytes = new Uint8Array(buffer);
     if (!isGlbBuffer(bytes)) {
-        return { ok: false, message: '下载的碰撞文件不是 GLB' };
+        const detail = describeNonGlbResponse(response, bytes);
+        console.warn('[VoxelCollision] download glb not glb', { fileUrl, detail });
+        return { ok: false, message: `下载的碰撞文件不是 GLB（${detail}）` };
     }
     return { ok: true, blob: new Blob([buffer], { type: 'model/gltf-binary' }) };
 };
@@ -165,8 +204,8 @@ const downloadCollisionGlb = async (fileUrl: string): Promise<CollisionMeshResul
 /**
  * 请求 Universe 将高斯模型转为碰撞 GLB（提交异步任务并轮询）。
  *
- * 默认 `{ modelUrl, upload: false }`：不登记项目文件，**不需要 token / projectId**。
- * - `upload: false` → `GET .../jobs/:jobId/glb` 取二进制，交给调用方入库；传了 token / projectId 也会照带上供网关鉴权。
+ * 默认 `{ modelUrl, upload: false }`：不登记项目文件，**不需要 projectId**；走网关时 `Authorization` 仍必需。
+ * - `upload: false` → `GET .../jobs/:jobId/glb` 取二进制（同一网关，同样要带 `Authorization`），交给调用方入库。
  * - `upload: true` → 服务端上传 OSS 并登记到 projectId 名下，直接返回 `data.url`（此时 token、projectId 必填）。
  *
  * 客户端超时从任务进入 `running` 起算（对齐服务端 `VOXEL_JOB_TIMEOUT_MS`），不含排队。
@@ -184,13 +223,14 @@ export const generateCollisionMesh = async (
     }
 
     const upload = options?.upload === true;
-    // Authorization 只在 upload: true（登记项目文件）时由服务端校验；
-    // upload: false 走任务级 GLB，不需要 token。
+    // 服务端只在 upload: true（登记项目文件）时校验 Authorization；
+    // 但**网关侧对 /conversion 下每个请求都校验**（提交、轮询、取 GLB 三者都要），
+    // 与 upload 取值无关，所以 token 一律随请求带上。
     if (!token && upload) {
         return { ok: false, message: '缺少 token' };
     }
-    // upload: false 时服务端不登记项目文件，projectId 非必需（见 service/README.md）。
-    // 仍把可用值带上：走网关时缺它会被鉴权拒掉（401）。
+    // projectId 只为服务端登记用（upload: true 时必填）；upload: false 不需要，网关也不校验。
+    // 见 service/README.md。
     const id = String(options?.projectId ?? '').trim();
     let numericId: number | undefined;
     if (id) {
@@ -373,17 +413,13 @@ export const generateCollisionMesh = async (
                 upload
             });
             if (upload) {
+                // upload: true 时 fileUrl 是服务端登记好的 OSS 公网地址，可直接交给加载器。
                 return { ok: true, fileUrl };
             }
-            const downloaded = await downloadCollisionGlb(fileUrl);
-            if (downloaded.ok === false) {
-                console.warn('[VoxelCollision] glb ingest fallback to fileUrl', {
-                    fileUrl,
-                    message: downloaded.message
-                });
-                return { ok: true, fileUrl };
-            }
-            return downloaded;
+            // upload: false 时 fileUrl 就是这个 /glb 端点本身。下载失败再把它当成资源地址
+            // 交给后续加载，只会把「下载失败」变成解析层的怪异报错
+            // （如 `byte length of Uint32Array should be a multiple of 4`），故不再回退。
+            return downloadCollisionGlb(fileUrl);
         }
 
         return { ok: false, message: `未知任务状态: ${status ?? 'empty'}` };

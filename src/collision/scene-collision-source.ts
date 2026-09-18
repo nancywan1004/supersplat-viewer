@@ -10,6 +10,7 @@ import {
 import {
     DEFAULT_COLLISION_MESH_UPLOAD,
     generateCollisionMesh,
+    VOXEL_COLLISION_JOBS_PATH,
     type CollisionJobProgress
 } from '../universe/collision-mesh-service';
 import { setUniverseAuthContext } from '../universe/service';
@@ -42,6 +43,72 @@ function isLocalHostPage(): boolean {
 function shouldUseLocalCollisionService(config: Global['config']): boolean {
     const transport = config.editUiTransport ?? 'internal';
     return transport !== 'message-bridge' && isLocalHostPage();
+}
+
+/** 本地 dev 反代端口（`scripts/proxy-server.js` / `npm run proxy`）。 */
+const LOCAL_DEV_PROXY_PORT = 3001;
+
+/** 反代可用性探测结果（一次会话只探一次）。 */
+let collisionProxyProbe: Promise<boolean> | null = null;
+
+/**
+ * 探测某基址下是否挂着 `/conversion/**` 反向代理（线上 nginx / 本地 dev proxy）。
+ *
+ * 探针取一个不存在的 jobId：有反代时拿到的是网关或服务的 JSON 信封（`{` 开头），
+ * 没反代时会命中 SPA 的 `try_files ... /index.html` 而拿到 HTML —— 以此区分。
+ * 幂等 GET，不会创建转换任务；失败一律视为「没有反代」。
+ */
+function probeCollisionProxy(base: string): Promise<boolean> {
+    if (!collisionProxyProbe) {
+        collisionProxyProbe = fetch(`${base}${VOXEL_COLLISION_JOBS_PATH}/__probe__`)
+            .then(async (response) => (await response.text()).trimStart().startsWith('{'))
+            .catch(() => false);
+    }
+    return collisionProxyProbe;
+}
+
+/**
+ * 反代基址（无需 URL 参数，按环境自动判定）：
+ * - 本机页面 → 本地 dev proxy（`scripts/proxy-server.js`，端口与页面不同故跨域，
+ *   但它的 CORS 只发一个 `Access-Control-Allow-Origin`，不会触发重复头问题）；
+ * - 其余（线上 / 本地带 `?editUiTransport=message-bridge`）→ 页面自身域名
+ *   （nginx `location /conversion/`，同源，见 `scripts/nginx-full-example.conf`）。
+ * 非 http(s) 页面返回 undefined，直接回退平台域名。
+ */
+function resolveCollisionProxyBase(): string | undefined {
+    if (typeof window === 'undefined' || !window.location) {
+        return undefined;
+    }
+    const { protocol, hostname, origin } = window.location;
+    if (protocol !== 'http:' && protocol !== 'https:') {
+        return undefined;
+    }
+    return isLocalHostPage() ? `${protocol}//${hostname}:${LOCAL_DEV_PROXY_PORT}` : origin;
+}
+
+/**
+ * 碰撞接口的调用方式：基址 + 是否登记项目文件（`upload`）。
+ *
+ * 基址优先级：本机转换服务（不经网关）→ 探测到的反代 → 平台域名（历史行为，兜底）。
+ * 反代能让取 GLB 的请求变成同源/单值 CORS，绕开网关 `Access-Control-Allow-Origin`
+ * 重复值导致的 `TypeError: Failed to fetch`。
+ */
+async function resolveCollisionEndpoint(config: Global['config']): Promise<{
+    apiBaseUrl?: string;
+    upload: boolean;
+}> {
+    if (shouldUseLocalCollisionService(config)) {
+        // 本机转换服务：不登记项目文件，GLB 由任务级端点直出
+        return { apiBaseUrl: INTERNAL_COLLISION_API_BASE_URL, upload: false };
+    }
+
+    const proxyBase = resolveCollisionProxyBase();
+    if (proxyBase && await probeCollisionProxy(proxyBase)) {
+        console.info(`[CollisionProxy] 碰撞接口走反代 ${proxyBase}`);
+        return { apiBaseUrl: proxyBase, upload: DEFAULT_COLLISION_MESH_UPLOAD };
+    }
+
+    return { upload: DEFAULT_COLLISION_MESH_UPLOAD };
 }
 
 export type SceneMeshGenerateProgressPayload = CollisionJobProgress & {
@@ -158,10 +225,12 @@ export function describeCollisionGenerateBlocker(global: Global): string | undef
 /**
  * 是否具备生成条件：**只需 contentUrl**。
  *
- * token / projectId 只在「登记项目文件」（`upload: true`）时才需要：服务端
- * `parseConvertRequest` 只在 `upload` 为真时校验 projectId 与 Authorization，
- * `upload: false`（默认）走任务级 GLB（`GET .../jobs/:jobId/glb`）直出，两者都不校验。
- * 本机与云端按同一规则判定，不按 host 分叉；有值时仍随请求带上，兼容网关侧鉴权。
+ * 凭证要求分两层，别混：
+ * - **服务端**（`parseConvertRequest`）只在 `upload: true` 时校验 projectId 与 Authorization；
+ * - **网关**对 `/conversion` 下每个请求（提交 / 轮询 / 取 GLB）都要 `Authorization`，
+ *   与 `upload` 取值无关；`projectId` 则不需要（本机 4001 直连两者都不校验）。
+ *
+ * 所以这里只判 contentUrl，缺什么由 `describeCollisionGenerateBlocker` 说明。
  */
 export function hasCollisionGenerateCredentials(global: Global): boolean {
     return !!resolveModelUrlForVoxelCollision(global);
@@ -214,9 +283,9 @@ export type EnsureCollisionUrlOptions = {
 
 /**
  * 确保 collision URL 可用：已有 URL 参数 / settings 则直接返回；
- * 否则用 `contentUrl` 调 `voxel-collision/jobs` 并轮询。默认 `upload: false`：不登记项目文件，
- * projectId 非必需（有则带上供网关鉴权）。GLB 写入会话表；若下载失败则写返回的 `data.url`。
- * 本机（localhost + internal）时指向本机转换服务。
+ * 否则用 `contentUrl` 调 `voxel-collision/jobs` 并轮询，成功后 GLB 写会话表（返回相对路径）。
+ * 基址与 `upload` 由 {@link resolveCollisionEndpoint} 决定：本机（localhost + internal）指向
+ * 本机转换服务；其余自动探测 `/conversion/**` 反代，探不到则回退平台网关 + `upload: false`。
  * `forceRegenerate` 时即使已有 URL 也会重新生成并写回。
  */
 export async function ensureCollisionUrl(
@@ -253,11 +322,7 @@ export async function ensureCollisionUrl(
             setUniverseAuthContext({ token });
 
             const generated = await generateCollisionMesh(modelUrl, token, {
-                ...(shouldUseLocalCollisionService(global.config) ? {
-                    // 本机转换服务：不登记项目文件，GLB 由任务级端点直出
-                    apiBaseUrl: INTERNAL_COLLISION_API_BASE_URL,
-                    upload: false
-                } : { upload: DEFAULT_COLLISION_MESH_UPLOAD }),
+                ...(await resolveCollisionEndpoint(global.config)),
                 projectId,
                 onProgress: (progress) => {
                     global.events.fire(SCENE_MESH_GENERATE_PROGRESS, {
