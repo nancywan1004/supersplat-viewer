@@ -46,8 +46,19 @@ declare global {
         probeCollision?: () => Promise<CollisionProbeResult>;
         toggleCollisionProbe?: (force?: boolean) => boolean;
         regenerateSceneMesh?: () => Promise<SceneMeshRegenerateConsoleResult>;
+        /** 调试：手动载入 token / projectId（等价于 `?token=` / `?projectId=` 与入站事件同名字段） */
+        setViewerToken?: (token: string, projectId?: string | number) => ViewerAuthConsoleResult;
     }
 }
+
+export type ViewerAuthConsoleResult = {
+    /** 本次是否写入了 token（空串不会写入） */
+    tokenSet: boolean;
+    /** 掩码预览，不打印完整 token */
+    tokenPreview: string;
+    projectId: string | number | null;
+    message: string;
+};
 
 export type SceneMeshRegenerateConsoleResult =
     | { ok: true; url: string; message: string }
@@ -167,6 +178,8 @@ function createWireSphereMesh(device: GraphicsDeviceLike, segments = 24): Mesh {
  * - toggleCollisionOverlay / getCollisionOverlay
  * - probeCollision：对照「看见的面」与球碰撞
  * - toggleCollisionProbe：画出相机碰撞球（半径 = Fly/Orbit 实际半径）
+ * - regenerateSceneMesh：强制重新生成并替换 scene mesh
+ * - setViewerToken：调试用，手动载入 token / projectId（等价于 `?token=` / 入站 `token` 字段）
  */
 export function installCollisionOverlayConsole(global: Global): void {
     let probeEntity: Entity | null = null;
@@ -480,11 +493,56 @@ export function installCollisionOverlayConsole(global: Global): void {
         return { ok: true, url: result.url, message };
     };
 
+    // 调试：手动把 token / projectId 载入 viewer config，等价于 `?token=` / `?projectId=`
+    // 以及入站事件的同名字段。供宿主 postMessage 通道就绪前联调：
+    // setViewerToken('<token>') 之后再触发 COLLISION_SET / SHADOW_SET 就不会再 401。
+    // 不打印完整 token，只回显掩码预览。
+    const setViewerToken = (
+        token: string,
+        projectId?: string | number
+    ): ViewerAuthConsoleResult => {
+        const trimmed = typeof token === 'string' ? token.trim() : '';
+        let projectIdArg = '';
+        if (projectId !== undefined && projectId !== null) {
+            projectIdArg = String(projectId).trim();
+        }
+
+        if (!trimmed) {
+            const result: ViewerAuthConsoleResult = {
+                tokenSet: false,
+                tokenPreview: '',
+                projectId: global.config.projectId ?? null,
+                message: 'token 为空，未修改 config.token'
+            };
+            console.warn('[ViewerAuth]', result.message);
+            return result;
+        }
+
+        global.config.token = trimmed;
+        if (projectIdArg) {
+            global.config.projectId = projectIdArg;
+        }
+
+        let preview = `${trimmed.slice(0, 8)}…(len=${trimmed.length})`;
+        if (trimmed.length <= 10) {
+            preview = `${trimmed.slice(0, 4)}…(len=${trimmed.length})`;
+        }
+        const result: ViewerAuthConsoleResult = {
+            tokenSet: true,
+            tokenPreview: preview,
+            projectId: global.config.projectId ?? null,
+            message: 'token 已写入 config；此后高斯转 mesh / 保存等网关调用会带上 Authorization'
+        };
+        console.info('[ViewerAuth]', result.message, result);
+        return result;
+    };
+
     window.toggleCollisionOverlay = toggleCollisionOverlay;
     window.getCollisionOverlay = getCollisionOverlay;
     window.probeCollision = probeCollision;
     window.toggleCollisionProbe = toggleCollisionProbe;
     window.regenerateSceneMesh = regenerateSceneMesh;
+    window.setViewerToken = setViewerToken;
 
     const sse = (window as Window & { sse?: Record<string, unknown> }).sse;
     if (sse && typeof sse === 'object') {
@@ -493,9 +551,10 @@ export function installCollisionOverlayConsole(global: Global): void {
         sse.probeCollision = probeCollision;
         sse.toggleCollisionProbe = toggleCollisionProbe;
         sse.regenerateSceneMesh = regenerateSceneMesh;
+        sse.setViewerToken = setViewerToken;
     }
 
     console.info(
-        '[CollisionOverlay] 控制台：toggleCollisionOverlay() / getCollisionOverlay() / probeCollision() / toggleCollisionProbe() / regenerateSceneMesh()'
+        '[CollisionOverlay] 控制台：toggleCollisionOverlay() / getCollisionOverlay() / probeCollision() / toggleCollisionProbe() / regenerateSceneMesh() / setViewerToken(token, projectId?)'
     );
 }
