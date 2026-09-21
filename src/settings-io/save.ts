@@ -6,15 +6,18 @@
 import { isMainSceneModifiedForHostSave, type SettingsSaveDestination } from './host-protocol';
 import {
     SETTINGS_JSON_NAME,
-    blobFromBytes,
     localProjectZipFilename,
     normalizePackPath,
     zipSettingsArchive
 } from './pack';
 import {
+    SAVE_CANCELLED_MESSAGE,
+    formatByteSize,
     packMainSceneContent,
     stripPackedContentField,
-    writePackedContentField
+    writePackedContentField,
+    type ProjectSaveProgress,
+    type ProjectSaveProgressReporter
 } from './project-pack';
 import {
     collectSettingsResourceReferences,
@@ -30,6 +33,60 @@ import { uploadProjectData, uploadProjectSidecarFiles } from '../universe/servic
 
 export type { SettingsSaveDestination } from './host-protocol';
 export { resolveSettingsSaveDestination } from './host-protocol';
+export type {
+    ProjectSavePhase,
+    ProjectSaveProgress,
+    ProjectSaveProgressReporter
+} from './project-pack';
+/** 保存进度事件名：`global.events` 上派发，UI / message-bridge 订阅 */
+export const PROJECT_SAVE_PROGRESS_EVENT = 'projectSave:progress';
+/**
+ * 保存结束事件名（**仅同窗口内部 UI** 用）：message-bridge 处理完 `PROJECT_SAVE` 后派发。
+ * 对父级的结束回调仍是 `PROJECT_SAVE_RESULT` / `PROJECT_SAVE_SUCCEEDED` / `PROJECT_SAVE_FAILED`。
+ */
+export const PROJECT_SAVE_RESULT_EVENT = 'projectSave:result';
+
+/**
+ * 进度上报：节流打日志 + 派发 `projectSave:progress`（事件不节流，UI 进度条逐项跟）。
+ * @param global - Viewer 全局态
+ * @returns 上报函数
+ */
+function createSaveProgressReporter(global: Global): ProjectSaveProgressReporter {
+    let lastLogPhase = '';
+    let lastLogBucket = -1;
+    return (progress: ProjectSaveProgress) => {
+        const total = progress.total ?? 0;
+        const done = progress.done ?? 0;
+        // 有分母的（分块下载 / 打包）按 10% 节流；无分母的（单文件、上传）每条都打
+        const bucket = total > 0 ? Math.floor((done / total) * 10) : -1;
+        const shouldLog = total <= 0 ||
+            progress.phase !== lastLogPhase ||
+            bucket !== lastLogBucket ||
+            done >= total;
+        lastLogPhase = progress.phase;
+        lastLogBucket = bucket;
+        if (shouldLog) {
+            console.log(`[SuperSplat][projectSave] ${progress.message}`);
+        }
+        global.events.fire(PROJECT_SAVE_PROGRESS_EVENT, progress);
+    };
+}
+
+/**
+ * 让浏览器先画一帧再继续：打包 zip 是同步阻塞的，否则进度提示来不及显示。
+ * @returns 下一帧（隐藏标签页由定时器兜底）
+ */
+function nextFrame(): Promise<void> {
+    return new Promise<void>((resolve) => {
+        const timer = window.setTimeout(resolve, 50);
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(() => {
+                window.clearTimeout(timer);
+                resolve();
+            });
+        }
+    });
+}
 
 export type HostSaveFile = {
     path: string;
@@ -46,7 +103,15 @@ export type HostSavePayload = {
 export type SettingsSavePipelineResult =
     | { ok: true }
     | { ok: true; host: HostSavePayload }
-    | { ok: false; message: string };
+    | { ok: false; message: string; cancelled?: boolean };
+
+export type SettingsSaveOptions = {
+    /**
+     * 中途取消（分块下载 / 主场景下载 / 打包 zip / 上传都会尽快停），
+     * 结果返回 `{ ok: false, cancelled: true, message: '已取消保存' }`。
+     */
+    signal?: AbortSignal;
+};
 
 export function isHostSaveSuccess(
     result: SettingsSavePipelineResult
@@ -72,9 +137,11 @@ function toHostFile(path: string, blob: Blob): File {
 async function downloadLocalProject(
     global: Global,
     settings: ExperienceSettings,
-    relativePaths: string[]
+    relativePaths: string[],
+    report: ProjectSaveProgressReporter,
+    signal?: AbortSignal
 ): Promise<SettingsSavePipelineResult> {
-    const packedScene = await packMainSceneContent(global);
+    const packedScene = await packMainSceneContent(global, report, signal);
     if (packedScene.ok === false) {
         return packedScene;
     }
@@ -82,8 +149,11 @@ async function downloadLocalProject(
     const packedJson = JSON.stringify(withContent, null, 2);
 
     const files: Array<[string, Blob]> = [[packedScene.relativePath, packedScene.blob]];
+    for (const extra of packedScene.extraFiles) {
+        files.push([extra.path, extra.blob]);
+    }
     for (const path of relativePaths) {
-        if (path === packedScene.relativePath) continue;
+        if (files.some(([packedPath]) => packedPath === path)) continue;
         const blob = global.userUploadFiles?.get(path);
         if (!blob) {
             return { ok: false, message: `无法读取用户上传文件: ${path}` };
@@ -91,11 +161,38 @@ async function downloadLocalProject(
         files.push([path, blob]);
     }
 
+    const zipName = localProjectZipFilename(global.config.projectId);
+    const totalBytes = files.reduce((sum, [, blob]) => sum + blob.size, 0);
+    report({
+        phase: 'packing',
+        message: `正在打包 ${zipName}（${files.length} 个文件 · ${formatByteSize(totalBytes)}）…`,
+        bytes: totalBytes
+    });
+    // 先让首条「正在打包」画出来，再进同步压缩的分片循环
+    await nextFrame();
+
     try {
-        const zipped = await zipSettingsArchive(packedJson, files);
-        downloadBlobAsFile(blobFromBytes(zipped, 'application/zip'), localProjectZipFilename(global.config.projectId));
+        const zipped = await zipSettingsArchive(packedJson, files, {
+            onProgress: ({ done, total, bytes }) => report({
+                phase: 'packing',
+                message: `正在打包 ${zipName} ${done}/${total} · ${formatByteSize(bytes)}`,
+                done,
+                total,
+                bytes
+            }),
+            signal
+        });
+        downloadBlobAsFile(zipped, zipName);
+        report({
+            phase: 'packing',
+            message: `已生成 ${zipName}（${formatByteSize(zipped.size)}）`,
+            bytes: zipped.size
+        });
         return { ok: true };
     } catch (err) {
+        if (signal?.aborted) {
+            return { ok: false, cancelled: true, message: SAVE_CANCELLED_MESSAGE };
+        }
         const message = err instanceof Error ? err.message : String(err);
         return { ok: false, message: message.startsWith('无法') ? message : `打包 zip 失败: ${message}` };
     }
@@ -104,10 +201,12 @@ async function downloadLocalProject(
 async function buildHostSavePayload(
     global: Global,
     settings: ExperienceSettings,
-    relativePaths: string[]
+    relativePaths: string[],
+    report: ProjectSaveProgressReporter,
+    signal?: AbortSignal
 ): Promise<SettingsSavePipelineResult> {
     const contentChanged = isMainSceneModifiedForHostSave(global.config);
-    const packedScene = await packMainSceneContent(global);
+    const packedScene = await packMainSceneContent(global, report, signal);
     if (packedScene.ok === false) {
         return packedScene;
     }
@@ -115,6 +214,10 @@ async function buildHostSavePayload(
     const files: HostSaveFile[] = [
         { path: packedScene.relativePath, file: toHostFile(packedScene.relativePath, packedScene.blob) }
     ];
+    for (const extra of packedScene.extraFiles) {
+        if (files.some(entry => entry.path === extra.path)) continue;
+        files.push({ path: extra.path, file: toHostFile(extra.path, extra.blob) });
+    }
 
     for (const path of relativePaths) {
         if (files.some(entry => entry.path === path)) continue;
@@ -125,6 +228,12 @@ async function buildHostSavePayload(
         files.push({ path, file: toHostFile(path, blob) });
     }
 
+    const totalBytes = files.reduce((sum, entry) => sum + entry.file.size, 0);
+    report({
+        phase: 'packing',
+        message: `已准备 ${files.length} 个文件（${formatByteSize(totalBytes)}），交回外层打包`,
+        bytes: totalBytes
+    });
     return {
         ok: true,
         host: {
@@ -136,20 +245,38 @@ async function buildHostSavePayload(
     };
 }
 
+/**
+ * 保存项目统一入口。全过程通过 `global.events` 的 `projectSave:progress` 上报进度。
+ * @param global - Viewer 全局态
+ * @param destination - local 下载 zip / host 交回父级 / universe 上传
+ * @param options - `signal` 可中途取消
+ * @returns 结果（host 成功时带产物；取消时 `cancelled: true`）
+ */
 export async function saveExperienceProject(
     global: Global,
-    destination: SettingsSaveDestination = 'universe'
+    destination: SettingsSaveDestination = 'universe',
+    options?: SettingsSaveOptions
 ): Promise<SettingsSavePipelineResult> {
+    const signal = options?.signal;
+    const cancelled = (): SettingsSavePipelineResult => ({
+        ok: false,
+        cancelled: true,
+        message: SAVE_CANCELLED_MESSAGE
+    });
+    if (signal?.aborted) return cancelled();
+
+    const report = createSaveProgressReporter(global);
     const serialized = serializeExperienceSettings(global);
     const materialized = await materializeUserUploadRelativeFiles(global, serialized);
     if (!materialized.ok) return materialized;
     const relativePaths = collectUserUploadRelativePaths(materialized.settings);
+    if (signal?.aborted) return cancelled();
 
     if (destination === 'local') {
-        return downloadLocalProject(global, materialized.settings, relativePaths);
+        return downloadLocalProject(global, materialized.settings, relativePaths, report, signal);
     }
     if (destination === 'host') {
-        return buildHostSavePayload(global, materialized.settings, relativePaths);
+        return buildHostSavePayload(global, materialized.settings, relativePaths, report, signal);
     }
 
     const universeSettings = stripPackedContentField(materialized.settings);
@@ -162,6 +289,7 @@ export async function saveExperienceProject(
         if (projectId == null || projectId === '' || !token) {
             return { ok: false, message: '缺少 projectId 或 token，无法上传项目缩略图' };
         }
+        report({ phase: 'uploading', message: '正在上传项目缩略图…' });
         const thumbResult = await uploadPendingProjectThumbnailIfAny(global);
         if (thumbResult && thumbResult.ok === false) {
             return { ok: false, message: thumbResult.message };
@@ -182,6 +310,8 @@ export async function saveExperienceProject(
             }
             sidecarFiles.push({ relativePath: path, blob });
         }
+        if (signal?.aborted) return cancelled();
+        report({ phase: 'uploading', message: `正在上传 ${sidecarFiles.length} 个附件…` });
         const sidecarResult = await uploadProjectSidecarFiles(
             projectId ?? '',
             token ?? '',
@@ -193,6 +323,8 @@ export async function saveExperienceProject(
         }
     }
 
+    if (signal?.aborted) return cancelled();
+    report({ phase: 'uploading', message: '正在上传 settings.json…' });
     const uploadResult = await uploadProjectData(
         projectId ?? '',
         token ?? '',

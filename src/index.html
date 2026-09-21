@@ -299,7 +299,7 @@
                     </div>
                 </div>
                 <input type="file" id="importProjectDirInput" class="hidden" tabindex="-1" webkitdirectory directory multiple />
-                <input type="file" id="importProjectContentInput" class="hidden" tabindex="-1" accept=".sog,.splat,.ply" />
+                <input type="file" id="importProjectContentInput" class="hidden" tabindex="-1" accept=".sog,.splat,.ply,.json" />
             </div>
             <!-- 编辑模式三个挂载点（仅 edit 模式显示），内容由对应组件注入 -->
             <div id="editLeftSidebarMount" class="edit-left-sidebar hidden"></div>
@@ -864,7 +864,7 @@
                     if (loaded.settingsUrl) {
                         config.settingsUrl = loaded.settingsUrl;
                     }
-                    applyPackedSceneToConfig(config, {
+                    await applyPackedSceneToConfig(config, {
                         settings: loaded.settings,
                         files: loaded.userUploadFiles
                     }, location.search, { preferPackedContent: Boolean(pending) });

@@ -6,7 +6,11 @@ import { SETTINGS_JSON_NAME, normalizePackPath } from './pack';
 
 export const PACKED_CONTENT_DIR = 'content';
 
+/** LOD 场景入口文件名（分块按 filenames 相对本文件解析）。 */
+export const LOD_META_FILENAME = 'lod-meta.json';
+
 const SCENE_FILE_RE = /\.(?:sog|splat|ply)$/i;
+const EPHEMERAL_URL_RE = /^(?:blob|data):/i;
 
 export type ParsedProjectPack = {
     settings: unknown;
@@ -17,15 +21,69 @@ export function hasExplicitContentQueryParam(search: string): boolean {
     return new URLSearchParams(search).has('content');
 }
 
+/**
+ * 文件名是否为 LOD 入口 `lod-meta.json`。
+ * @param name - 文件名或包内路径
+ * @returns 是否 LOD meta
+ */
+export function isLodMetaFilename(name: string | undefined): boolean {
+    const base = (name ?? '').split('/').pop()?.toLowerCase() ?? '';
+    return base === LOD_META_FILENAME;
+}
+
+/**
+ * 单文件导入可识别的场景名（不含 lod-meta.json：单独一份 meta 没有分块）。
+ * @param name - 文件名
+ * @returns 是否单文件场景
+ */
 export function isPackedSceneFilename(name: string): boolean {
+    if (isLodMetaFilename(name)) return false;
     const base = (name.split('/').pop() ?? name).toLowerCase();
-    if (base === 'lod-meta.json') return false;
     return SCENE_FILE_RE.test(base);
+}
+
+/**
+ * 项目包 `content/` 下可作为主场景的文件：`.sog` / `.splat` / `.ply` 或 `lod-meta.json`。
+ * @param name - 包内路径
+ * @returns 是否可作为主场景
+ */
+export function isPackedContentFilename(name: string): boolean {
+    return isLodMetaFilename(name) || isPackedSceneFilename(name);
 }
 
 export function packedContentRelativePath(filename: string): string {
     const base = (filename.split('/').pop() || 'scene.sog').replace(/\\/g, '/');
     return `${PACKED_CONTENT_DIR}/${base}`;
+}
+
+/**
+ * lod-meta.json `filenames[]` 条目 → 包内路径 `content/<相对名>`。
+ * 仅接受相对文件名；绝对 URL / blob: / data: 返回 null（沿用原引用或另用登记表还原）。
+ * @param filename - meta 里的一项
+ * @returns 包内路径，或 null
+ */
+export function lodChunkPackRelativePath(filename: string): string | null {
+    if (typeof filename !== 'string' || !isRelativePackPath(filename)) return null;
+    const normalized = normalizePackPath(filename.trim());
+    if (!normalized) return null;
+    return `${PACKED_CONTENT_DIR}/${normalized}`;
+}
+
+/**
+ * 非相对 filenames（绝对 URL / blob: / data:）在包内可用的落盘 basename。
+ * @param url - filenames 里的一项
+ * @returns basename，或 null
+ */
+export function lodChunkBasenameFromUrl(url: string): string | null {
+    const trimmed = typeof url === 'string' ? url.trim() : '';
+    if (!trimmed) return null;
+    if (EPHEMERAL_URL_RE.test(trimmed)) return null;
+    try {
+        const base = decodeURIComponent(new URL(trimmed).pathname.split('/').pop() || '');
+        return normalizePackPath(base) || null;
+    } catch {
+        return null;
+    }
 }
 
 function isRelativePackPath(value: string): boolean {

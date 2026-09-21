@@ -1,7 +1,8 @@
 import type { AppBase, GSplatComponent } from 'playcanvas';
-import { Global } from '../../../types';
+import type { Global } from '../../../types';
 import type { ExperienceSettings } from '../../../schemas/v2';
-import { LodPreset, LodSettings, LodPlatform } from '../../../schemas/v2';
+import type { LodPreset, LodSettings, LodPlatform } from '../../../schemas/v2';
+import { contentFilenameFromUrl } from '../content-filename';
 
 /**
  * LOD presets for different quality levels
@@ -31,11 +32,10 @@ export const LOD_PRESETS: Record<string, LodPreset> = {
 
 /**
  * Check if a URL points to a LOD meta file
+ * （blob URL 用 `#lod-meta.json` 保留文件名，见项目包注入）
  */
 export function isLodMetaFile(url: string): boolean {
-    const urlWithoutParams = url.indexOf('?') >= 0 ? url.split('?')[0] : url;
-    const filename = urlWithoutParams.split('/').pop()?.toLowerCase() || '';
-    return filename === 'lod-meta.json';
+    return contentFilenameFromUrl(url).toLowerCase() === 'lod-meta.json';
 }
 
 /** settings 含 lodSettings 且场景 URL 为 lod-meta.json 时才走自定义 LodLoader 管线 */

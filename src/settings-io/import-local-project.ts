@@ -1,4 +1,4 @@
-import { isPackedSceneFilename, packedContentRelativePath, parseProjectFileList } from './project-pack';
+import { isPackedContentFilename, packedContentRelativePath, parseProjectFileList } from './project-pack';
 import { savePendingProjectPack } from './project-pack-store';
 
 export type ProjectImportResult =
@@ -10,8 +10,14 @@ function isZipFile(file: File): boolean {
     return name.endsWith('.zip') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed';
 }
 
+/**
+ * 单个文件导入：`.sog` / `.splat` / `.ply` / `lod-meta.json` → 默认 settings + 虚拟 `content/`。
+ * lod-meta 的分块不在包内时由 applyPackedSceneToConfig 按原 `?content=` 或绝对 URL 解析。
+ * @param file - 用户选择的单个文件
+ * @returns 项目包，或 undefined（不是可识别的主场景）
+ */
 async function parseSingleContentFile(file: File) {
-    if (!isPackedSceneFilename(file.name)) return undefined;
+    if (!isPackedContentFilename(file.name)) return undefined;
     const relativePath = packedContentRelativePath(file.name);
     const defaultSettingsUrl = (window as Window & {
         sse?: { defaultSettingsUrl?: string }
@@ -45,6 +51,10 @@ export async function parseProjectImportInput(input: FileList | File[] | File) {
     if (files.length === 1) {
         const singleContentPack = await parseSingleContentFile(files[0]);
         if (singleContentPack) return singleContentPack;
+        // 单文件选择器（非目录遍历）选了既非场景也非 lod-meta 的文件：直接报错，别让空 settings 进刷新
+        if (!files[0].webkitRelativePath?.includes('/')) {
+            throw new Error('请选择 .sog / .splat / .ply 或 lod-meta.json');
+        }
     }
     return await parseProjectFileList(files);
 }

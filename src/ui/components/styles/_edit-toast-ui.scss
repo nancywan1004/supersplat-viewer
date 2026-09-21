@@ -44,6 +44,58 @@
     &.edit-toast--info {
         border-color: rgba(255, 160, 80, 0.4);
     }
+
+    &.edit-toast--persistent {
+        min-width: 240px;
+    }
+}
+
+/* 常驻进度提示（保存 / 上传） */
+.edit-toast__row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.edit-toast__cancel {
+    flex: 0 0 auto;
+    padding: 2px 10px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: $clr-text;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    border-radius: 6px;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.16);
+    }
+
+    &:disabled {
+        opacity: 0.6;
+        cursor: default;
+    }
+}
+
+.edit-toast__bar {
+    display: none;
+    margin-top: 8px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.16);
+    overflow: hidden;
+}
+
+.edit-toast--has-bar .edit-toast__bar {
+    display: block;
+}
+
+.edit-toast__bar-fill {
+    width: 0;
+    height: 100%;
+    background: rgba(255, 160, 80, 0.95);
+    transition: width 0.18s linear;
 }
 
 .settings-reset-confirm-dialog .settings-reset-confirm-desc {

@@ -74,10 +74,14 @@ import type { SceneCollisionSettingsPatch } from '../schemas/v2-custom';
 import { outboundLoadRequestId, readInboundRequestId } from '../settings-io/host-protocol';
 import { importLocalProject } from '../settings-io/import-local-project';
 import {
+    PROJECT_SAVE_PROGRESS_EVENT,
+    PROJECT_SAVE_RESULT_EVENT,
     isHostSaveSuccess,
     resolveSettingsSaveDestination,
     saveExperienceProject,
-    type SettingsSaveDestination
+    type ProjectSaveProgress,
+    type SettingsSaveDestination,
+    type SettingsSavePipelineResult
 } from '../settings-io/save';
 import { resetSceneSettings } from '../settings-reset';
 import { getRevealActiveType, getRevealTotalDuration } from '../settings-serialize/effects-sync';
@@ -142,6 +146,8 @@ type InboundPayload =
     | { type: 'TORCH_TOGGLE'; value?: boolean }
     | { type: 'TORCH_PARAMS_SET'; value?: Partial<TorchLightSettings> }
     | { type: 'PROJECT_SAVE'; destination?: SettingsSaveDestination; requestId?: string }
+    /** 中止进行中的 `PROJECT_SAVE`（分块下载 / 打包 / 上传尽快停；结束仍走 PROJECT_SAVE_RESULT 等） */
+    | { type: 'PROJECT_SAVE_CANCEL'; requestId?: string }
     /** 导入项目文件夹（webkitdirectory 文件列表）；不支持 zip */
     | { type: 'PROJECT_IMPORT'; files?: File | File[]; requestId?: string }
     | { type: 'SETTINGS_RESET' }
@@ -223,6 +229,27 @@ const postToParent = (type: string, data?: Record<string, unknown>) => {
     // 与父级实际收到的 body 一致（避免只看 `data` 时与 `{ type, ...data }` 合并结果不一致）
     console.log('[MessageBridge] postToParent', message);
 };
+
+/**
+ * 把 `saveExperienceProject` 的进度转发出站（父级可据此显示进度条）。
+ * 结束仍由 `PROJECT_SAVE_RESULT` / `PROJECT_SAVE_SUCCEEDED` / `PROJECT_SAVE_FAILED` 表示。
+ * @param global - Viewer 全局态
+ * @param requestId - 本次保存请求 id（回传原值）
+ * @returns 取消订阅
+ */
+const relaySaveProgress = (global: Global, requestId?: string): () => void => {
+    const handler = (progress: ProjectSaveProgress) => {
+        postToParent('PROJECT_SAVE_PROGRESS', {
+            ...progress,
+            ...(requestId ? { requestId } : {})
+        });
+    };
+    global.events.on(PROJECT_SAVE_PROGRESS_EVENT, handler);
+    return () => global.events.off(PROJECT_SAVE_PROGRESS_EVENT, handler);
+};
+
+/** 进行中的 `PROJECT_SAVE`（`PROJECT_SAVE_CANCEL` 中止它；同窗口只允许一个） */
+const inFlightProjectSave: { controller: AbortController | null } = { controller: null };
 
 const LIGHTING_SHOW_HIDE_CHANGED_BY_KEY: Record<LightingVisibilityKey, string> = {
     brightness: 'LIGHTING_BRIGHTNESS_SHOW_HIDE_CHANGED',
@@ -695,7 +722,32 @@ const initPostMessageBridge = (global: Global) => {
             case 'PROJECT_SAVE': {
                 const requestId = readInboundRequestId(p);
                 const destination = resolveSettingsSaveDestination(p.destination);
-                const saveResult = await saveExperienceProject(global, destination);
+                const controller = new AbortController();
+                inFlightProjectSave.controller = controller;
+                const stopProgressRelay = relaySaveProgress(global, requestId);
+                let saveResult: SettingsSavePipelineResult;
+                try {
+                    saveResult = await saveExperienceProject(global, destination, { signal: controller.signal });
+                } finally {
+                    stopProgressRelay();
+                    if (inFlightProjectSave.controller === controller) {
+                        inFlightProjectSave.controller = null;
+                    }
+                }
+                const cancelled = saveResult.ok === false && saveResult.cancelled === true;
+                // 本窗口的内部编辑 UI 也在等结束信号；父级不会把 PROJECT_SAVE_RESULT 回传进来
+                const internalOk = saveResult.ok === true &&
+                    (destination !== 'host' || isHostSaveSuccess(saveResult));
+                global.events.fire(
+                    PROJECT_SAVE_RESULT_EVENT,
+                    internalOk ?
+                        { ok: true } :
+                        {
+                            ok: false,
+                            cancelled,
+                            message: saveResult.ok === false ? saveResult.message : '保存产物生成失败'
+                        }
+                );
                 const requestFields = requestId ? { requestId } : {};
                 if (destination === 'host') {
                     if (saveResult.ok === false) {
@@ -703,6 +755,7 @@ const initPostMessageBridge = (global: Global) => {
                         postToParent('PROJECT_SAVE_RESULT', {
                             ok: false,
                             message: saveResult.message,
+                            ...(cancelled ? { cancelled: true } : {}),
                             ...requestFields
                         });
                         break;
@@ -728,11 +781,25 @@ const initPostMessageBridge = (global: Global) => {
                 }
                 if (saveResult.ok === false) {
                     console.error('[MessageBridge] PROJECT_SAVE 失败', saveResult.message);
-                    postToParent('PROJECT_SAVE_FAILED', { message: saveResult.message, ...requestFields });
+                    postToParent('PROJECT_SAVE_FAILED', {
+                        message: saveResult.message,
+                        ...(cancelled ? { cancelled: true } : {}),
+                        ...requestFields
+                    });
                     break;
                 }
                 postToParent('PROJECT_SAVE_SUCCEEDED', requestFields);
                 setBaseline();
+                break;
+            }
+            case 'PROJECT_SAVE_CANCEL': {
+                // 结束（含取消结果）仍由 PROJECT_SAVE_RESULT / PROJECT_SAVE_FAILED 出站
+                if (inFlightProjectSave.controller) {
+                    console.log('[MessageBridge] PROJECT_SAVE_CANCEL 中止进行中的保存');
+                    inFlightProjectSave.controller.abort();
+                } else {
+                    console.warn('[MessageBridge] PROJECT_SAVE_CANCEL 无进行中的保存，忽略');
+                }
                 break;
             }
             case 'PROJECT_IMPORT': {

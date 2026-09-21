@@ -21,7 +21,7 @@ import {
     createViewportSettleScheduler,
     shouldUseTouchJoystickMove
 } from '../input/touch-joystick-ui';
-import { isCustomLodEnabled } from '../loaders/gsplat/lod/custom-loader';
+import { isCustomLodEnabled, isLodMetaFile } from '../loaders/gsplat/lod/custom-loader';
 import type { ExperienceSettings } from '../schemas/v2';
 import { Tooltip } from '../tooltip';
 import { Global, type State } from '../types';
@@ -34,7 +34,13 @@ import {
     logSettingsDiffDetails
 } from '../settings-serialize/settings-serialize';
 import { readSkyboxCurrentUrlFromSettings } from '../settings-serialize/settings-serialize-helper';
-import { saveExperienceProject, type SettingsSaveDestination } from '../settings-io/save';
+import {
+    PROJECT_SAVE_PROGRESS_EVENT,
+    PROJECT_SAVE_RESULT_EVENT,
+    saveExperienceProject,
+    type ProjectSaveProgress,
+    type SettingsSaveDestination
+} from '../settings-io/save';
 import { importLocalProject } from '../settings-io/import-local-project';
 import { resetSceneSettings } from '../settings-reset';
 import {
@@ -44,7 +50,7 @@ import {
 import { applyViewMediaMuteSet, applyViewTorchActive, readViewTorchActive } from '../view-settings';
 import { initAnnotationUI } from './components/annotation-ui';
 import { initAssetEffectsUI } from './components/asset-effects-ui';
-import { showEditToast } from './components/edit-toast-ui';
+import { showEditToast, showEditToastPersistent } from './components/edit-toast-ui';
 import { initRevealUI } from './components/effects-ui';
 import { showExitEditConfirmModal } from './components/exit-edit-confirm-ui';
 import { confirmSceneReset } from './components/settings-reset-confirm-ui';
@@ -60,17 +66,53 @@ import { getEditUiTransport, sendEditProtocolMessage } from './edit-ui-transport
 import { getRevealActiveType, readRevealParams } from '../settings-serialize/effects-sync';
 import { revealBlocksAnim } from '../vfx/effects-runtime/reveal/reveal-policy';
 
-/** zip / OSS 附件可能需拉文件，避免 3s 误失败 */
+/** zip / OSS 附件可能需拉文件，避免 3s 误失败；LOD 逐块拉取时另给更长时间（见 timeoutFor） */
 const PROJECT_SAVE_RESULT_TIMEOUT_MS = 60_000;
 
-function waitForProjectSaveResult(timeoutMs = PROJECT_SAVE_RESULT_TIMEOUT_MS): Promise<void> {
+/**
+ * 保存等待超时：LOD 主场景要逐块拉取分块，60s 不够（进度提示仍在走）。
+ * @param contentUrl - 当前主场景 URL
+ * @returns 超时毫秒
+ */
+function projectSaveTimeoutMs(contentUrl: string | undefined): number {
+    return isLodMetaFile(contentUrl ?? '') ? 30 * 60_000 : PROJECT_SAVE_RESULT_TIMEOUT_MS;
+}
+
+/**
+ * 等本次保存结束：同窗口内部事件优先（bridge 处理 PROJECT_SAVE 后派发），
+ * 兼收父级回传的 `PROJECT_SAVE_SUCCEEDED` / `PROJECT_SAVE_RESULT` / `PROJECT_SAVE_FAILED`。
+ * @param events - Viewer 事件总线
+ * @param timeoutMs - 超时
+ * @returns 结束载荷（`cancelled` 为取消）
+ */
+function waitForProjectSaveResult(
+    events: EventHandler,
+    timeoutMs = PROJECT_SAVE_RESULT_TIMEOUT_MS
+): Promise<{ ok: boolean; message?: string; cancelled?: boolean }> {
     return new Promise((resolve, reject) => {
         let to = 0;
+        // 两个监听器都要能调收尾，而收尾又要摘掉这两个监听器：用容器打破定义顺序
+        const finishRef: {
+            finish: (result?: { ok: boolean; message?: string; cancelled?: boolean }) => void;
+        } = { finish: () => undefined };
+        const fail = (message: string) => finishRef.finish({ ok: false, message });
+        const onInternalResult = (result: { ok?: boolean; message?: string; cancelled?: boolean }) => {
+            if (result?.ok === false) {
+                finishRef.finish({
+                    ok: false,
+                    cancelled: result.cancelled === true,
+                    message: result.message || '保存失败'
+                });
+                return;
+            }
+            finishRef.finish({ ok: true });
+        };
         const onMsg = (ev: MessageEvent) => {
             const data = ev.data as {
                 type?: string;
                 ok?: boolean;
                 message?: string;
+                cancelled?: boolean;
                 payload?: { message?: string; ok?: boolean }
             };
             if (!data) return;
@@ -81,31 +123,50 @@ function waitForProjectSaveResult(timeoutMs = PROJECT_SAVE_RESULT_TIMEOUT_MS): P
             ) {
                 return;
             }
-            window.removeEventListener('message', onMsg);
-            clearTimeout(to);
             if (data.type === 'PROJECT_SAVE_FAILED') {
-                const failMsg =
+                if (data.cancelled) {
+                    finishRef.finish({ ok: false, cancelled: true, message: '已取消保存' });
+                    return;
+                }
+                fail(
                     (typeof data.message === 'string' && data.message) ||
                     data.payload?.message ||
-                    'PROJECT_SAVE_FAILED';
-                reject(new Error(failMsg));
+                    'PROJECT_SAVE_FAILED'
+                );
                 return;
             }
             if (data.type === 'PROJECT_SAVE_RESULT' && data.ok === false) {
-                const failMsg =
+                if (data.cancelled) {
+                    finishRef.finish({ ok: false, cancelled: true, message: '已取消保存' });
+                    return;
+                }
+                fail(
                     (typeof data.message === 'string' && data.message) ||
                     data.payload?.message ||
-                    'PROJECT_SAVE_RESULT';
-                reject(new Error(failMsg));
+                    'PROJECT_SAVE_RESULT'
+                );
                 return;
             }
-            resolve();
+            finishRef.finish({ ok: true });
+        };
+        finishRef.finish = (result?: { ok: boolean; message?: string; cancelled?: boolean }) => {
+            window.removeEventListener('message', onMsg);
+            events.off(PROJECT_SAVE_RESULT_EVENT, onInternalResult);
+            clearTimeout(to);
+            if (result) {
+                resolve(result);
+                return;
+            }
+            reject(new Error('保存已结束'));
         };
         to = window.setTimeout(() => {
-            window.removeEventListener('message', onMsg);
-            reject(new Error('timeout waiting for PROJECT_SAVE_SUCCEEDED / PROJECT_SAVE_RESULT / PROJECT_SAVE_FAILED'));
+            finishRef.finish({
+                ok: false,
+                message: 'timeout waiting for PROJECT_SAVE_SUCCEEDED / PROJECT_SAVE_RESULT / PROJECT_SAVE_FAILED'
+            });
         }, timeoutMs);
         window.addEventListener('message', onMsg);
+        events.on(PROJECT_SAVE_RESULT_EVENT, onInternalResult);
     });
 }
 
@@ -412,6 +473,37 @@ const initPoster = (events: EventHandler) => {
 const initUI = (global: Global) => {
     const { config, events, state, settings } = global;
     const editUiTransport = getEditUiTransport(global);
+
+    /**
+     * 保存 / 上传期间显示常驻进度提示，订阅 `saveExperienceProject` 的 `projectSave:progress`。
+     * message-bridge 下保存也发生在本窗口（bridge 调同一个入口），所以两种 transport 都能收到。
+     * 提示上的「取消」中止直连保存（`signal`），message-bridge 下另发 `PROJECT_SAVE_CANCEL`。
+     * @param label - 起始文案
+     * @param run - 实际执行（直连路径用传入的 `signal`）
+     * @returns `run` 的返回值
+     */
+    const withSaveProgress = async <T>(label: string, run: (signal: AbortSignal) => Promise<T>): Promise<T> => {
+        const controller = new AbortController();
+        const handle = showEditToastPersistent(label, 'info', {
+            onCancel: () => {
+                controller.abort();
+                if (editUiTransport === 'message-bridge') {
+                    sendEditProtocolMessage({ type: 'PROJECT_SAVE_CANCEL' });
+                }
+            }
+        });
+        const onProgress = (progress: ProjectSaveProgress) => {
+            const total = progress.total ?? 0;
+            handle.update(progress.message, total > 0 ? (progress.done ?? 0) / total : undefined);
+        };
+        events.on(PROJECT_SAVE_PROGRESS_EVENT, onProgress);
+        try {
+            return await run(controller.signal);
+        } finally {
+            events.off(PROJECT_SAVE_PROGRESS_EVENT, onProgress);
+            handle.close();
+        }
+    };
 
     // Acquire Elements
     const docRoot = document.documentElement;
@@ -791,13 +883,20 @@ const initUI = (global: Global) => {
                         }
 
                         showExitEditConfirmModal({
-                            onSave: () => {
+                            onSave: async () => {
                                 // 保存：由 bridge 生成 PROJECT_SAVE_RESULT，再退出编辑模式
                                 sendEditProtocolMessage({ type: 'PROJECT_SAVE', destination: 'host' });
-                                waitForProjectSaveResult()
-                                .finally(() => {
-                                    sendEditProtocolMessage({ type: 'EDIT_MODE_SET', value: false });
-                                });
+                                try {
+                                    const result = await waitForProjectSaveResult(
+                                        events,
+                                        projectSaveTimeoutMs(config.contentUrl)
+                                    );
+                                    // 用户中途取消 → 留在编辑态，不退出
+                                    if (result.cancelled) return;
+                                } catch {
+                                    // 超时 / 异常按原行为继续退出
+                                }
+                                sendEditProtocolMessage({ type: 'EDIT_MODE_SET', value: false });
                             },
                             onDiscard: () => {
                                 sendEditProtocolMessage({ type: 'EDIT_MODE_EXIT_DISCARD' });
@@ -842,8 +941,15 @@ const initUI = (global: Global) => {
                 }
                 showExitEditConfirmModal({
                     onSave: async () => {
-                        const result = await saveExperienceProject(global, 'local');
+                        const result = await withSaveProgress(
+                            '正在保存…',
+                            signal => saveExperienceProject(global, 'local', { signal })
+                        );
                         if (result.ok === false) {
+                            if (result.cancelled) {
+                                showEditToast('已取消保存', 'info');
+                                return;
+                            }
                             showEditToast(result.message || '保存失败', 'error');
                             return;
                         }
@@ -975,19 +1081,35 @@ const initUI = (global: Global) => {
             const runProjectSave = async (destination: SettingsSaveDestination) => {
                 closeSaveMenu();
                 const okMsg = destination === 'universe' ? '已上传到 Universe' : '已保存到本地';
+                const label = destination === 'universe' ? '正在上传…' : '正在保存…';
                 if (editUiTransport === 'message-bridge') {
-                    sendEditProtocolMessage({ type: 'PROJECT_SAVE', destination });
-                    try {
-                        await waitForProjectSaveResult();
-                        showEditToast(okMsg, 'success');
-                    } catch (err) {
-                        const message = err instanceof Error ? err.message : String(err);
-                        showEditToast(message || '保存失败', 'error');
-                    }
+                    await withSaveProgress(label, async () => {
+                        sendEditProtocolMessage({ type: 'PROJECT_SAVE', destination });
+                        const result = await waitForProjectSaveResult(
+                            events,
+                            projectSaveTimeoutMs(config.contentUrl)
+                        );
+                        if (result.ok) {
+                            showEditToast(okMsg, 'success');
+                            return;
+                        }
+                        if (result.cancelled) {
+                            showEditToast('已取消保存', 'info');
+                            return;
+                        }
+                        showEditToast(result.message || '保存失败', 'error');
+                    });
                     return;
                 }
-                const result = await saveExperienceProject(global, destination);
+                const result = await withSaveProgress(
+                    label,
+                    signal => saveExperienceProject(global, destination, { signal })
+                );
                 if (result.ok === false) {
+                    if (result.cancelled) {
+                        showEditToast('已取消保存', 'info');
+                        return;
+                    }
                     showEditToast(result.message || '保存失败', 'error');
                     return;
                 }
