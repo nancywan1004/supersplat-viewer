@@ -1,5 +1,6 @@
 import { isPackedContentFilename, packedContentRelativePath, parseProjectFileList } from './project-pack';
 import { savePendingProjectPack } from './project-pack-store';
+import { toUserUploadFetchUrl } from './user-files';
 
 export type ProjectImportResult =
     | { ok: true }
@@ -11,7 +12,51 @@ function isZipFile(file: File): boolean {
 }
 
 /**
- * 单个文件导入：`.sog` / `.splat` / `.ply` / `lod-meta.json` → 默认 settings + 虚拟 `content/`。
+ * 拉一份 settings 当模板（单文件导入只带主场景，其余配置沿用当前项目）。
+ * @param url - settings.json URL
+ * @param contentPath - 写入 `settings.content` 的虚拟路径
+ * @returns settings，或 null（没配 / 拉不到）
+ */
+async function tryLoadSettingsTemplate(
+    url: string | undefined,
+    contentPath: string
+): Promise<Record<string, unknown> | null> {
+    const trimmed = typeof url === 'string' ? url.trim() : '';
+    if (!trimmed) return null;
+    try {
+        const response = await fetch(toUserUploadFetchUrl(trimmed));
+        if (!response.ok) return null;
+        const settings = await response.json() as Record<string, unknown>;
+        return { ...settings, content: contentPath };
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * 单文件导入的 settings 模板：优先 `?settings=`（保留项目相机 / 特效 / lodSettings / 标注），
+ * 其次 viewer 默认 `./settings.json`（dev 只 serve `public/`，该文件不存在是常态），
+ * 都拿不到就用最小配置 —— 不要因为缺默认 settings 让导入失败。
+ * @param contentPath - 写入 `settings.content` 的虚拟路径
+ * @returns settings
+ */
+async function loadSingleContentTemplate(contentPath: string): Promise<Record<string, unknown>> {
+    const sse = (window as Window & {
+        sse?: { config?: { settingsUrl?: string }; defaultSettingsUrl?: string }
+    }).sse;
+    const fromQuery = await tryLoadSettingsTemplate(sse?.config?.settingsUrl, contentPath);
+    if (fromQuery) return fromQuery;
+    const fromDefault = await tryLoadSettingsTemplate(sse?.defaultSettingsUrl, contentPath);
+    if (fromDefault) return fromDefault;
+    console.warn(
+        '[SuperSplat][projectImport] 单文件导入未取到 settings 模板（?settings= 与 ./settings.json 都不可用），改用最小配置'
+    );
+    // 与 index.html 空入口的 emptySettings 同形，importSettings 可接受
+    return { camera: {}, background: {}, animTracks: [], content: contentPath };
+}
+
+/**
+ * 单个文件导入：`.sog` / `.splat` / `.ply` / `lod-meta.json` → settings 模板 + 虚拟 `content/`。
  * lod-meta 的分块不在包内时由 applyPackedSceneToConfig 按原 `?content=` 或绝对 URL 解析。
  * @param file - 用户选择的单个文件
  * @returns 项目包，或 undefined（不是可识别的主场景）
@@ -19,18 +64,7 @@ function isZipFile(file: File): boolean {
 async function parseSingleContentFile(file: File) {
     if (!isPackedContentFilename(file.name)) return undefined;
     const relativePath = packedContentRelativePath(file.name);
-    const defaultSettingsUrl = (window as Window & {
-        sse?: { defaultSettingsUrl?: string }
-    }).sse?.defaultSettingsUrl;
-    if (!defaultSettingsUrl) {
-        throw new Error('无法定位默认 settings 文件');
-    }
-    const response = await fetch(defaultSettingsUrl);
-    if (!response.ok) {
-        throw new Error(`加载默认 settings 失败，状态码: ${response.status}`);
-    }
-    const settings = await response.json() as Record<string, unknown>;
-    settings.content = relativePath;
+    const settings = await loadSingleContentTemplate(relativePath);
     return {
         settings,
         files: new Map([[relativePath, file as Blob]])

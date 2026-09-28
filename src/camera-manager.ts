@@ -289,6 +289,52 @@ const computeAnimTracksBoundingBox = (animTracks: AnimTrack[] | undefined | null
     return new BoundingBox(center, half);
 };
 
+/** `[CameraBounds]` 一行日志用的盒子格式 */
+const formatBounds = (b: BoundingBox): string => {
+    const min = b.getMin();
+    const max = b.getMax();
+    return `min(${min.x.toFixed(3)}, ${min.y.toFixed(3)}, ${min.z.toFixed(3)}) max(${max.x.toFixed(3)}, ${max.y.toFixed(3)}, ${max.z.toFixed(3)})`;
+};
+
+/**
+ * 打印相机活动范围：基准盒 / 生效盒 / 各方向系数。
+ * 「`cameraBounds` 配了但没感觉」时先看这一行 —— 基准盒远大于实际游走范围、基准盒退化（gsplat `customAabb` 缺失）
+ * 都会在这里露出来；生效盒退化时额外 warn。
+ * @param base - 基准盒来源（有 animTracks → anim bbox，否则场景 bbox）
+ * @param baseBbox - 未收缩的基准盒
+ * @param constraint - 实际生效的盒约束（null = 已关闭）
+ * @param scale - 各方向系数与 fallback
+ */
+const logCameraBounds = (
+    base: 'animTracks' | 'scene',
+    baseBbox: BoundingBox,
+    constraint: BoxConstraint | null,
+    scale: {
+        fallback: number;
+        x?: number | [number, number];
+        y?: number | [number, number];
+        z?: number | [number, number];
+    }
+): void => {
+    if (!constraint) {
+        console.log('[CameraBounds] 未启用（settings.cameraBounds.enabled=false 或 config.disableCameraBounds）');
+        return;
+    }
+    const axisText = (v?: number | [number, number]) => (v == null ? `默认${scale.fallback}` : JSON.stringify(v));
+    console.log(
+        `[CameraBounds] 相机活动范围 —— 基准=${base}，系数 x=${axisText(scale.x)} y=${axisText(scale.y)} z=${axisText(scale.z)}\n` +
+        `  基准盒（紫框）${formatBounds(baseBbox)}\n` +
+        `  生效盒（橙框）${formatBounds(constraint.bbox)}`
+    );
+    const min = constraint.bbox.getMin();
+    const max = constraint.bbox.getMax();
+    if (max.x < min.x || max.y < min.y || max.z < min.z) {
+        console.warn(
+            '[CameraBounds] 生效盒退化（基准 bbox 可能是默认值，检查 gsplat customAabb / animTracks 是否有值），约束行为不可预期'
+        );
+    }
+};
+
 const createCamera = (position: Vec3, target: Vec3, fov: number) => {
     const result = new Camera();
     result.look(position, target);
@@ -346,6 +392,8 @@ class CameraManager {
     }
     private constraintVisualizer: Entity | null = null;
     private cameraBoundsVisualizer: Entity | null = null;
+    /** 实际生效的活动范围（各方向乘过 animScaleX/Y/Z 的盒）调试线框 */
+    private constraintBoxVisualizer: Entity | null = null;
     private debugBoundsLayerId: number | null = null;
     private cameraEntity: Entity;
     private readonly settings: Global['settings'];
@@ -427,6 +475,9 @@ class CameraManager {
             if (this.cameraBoundsVisualizer) {
                 this.cameraBoundsVisualizer.enabled = visible;
             }
+            if (this.constraintBoxVisualizer) {
+                this.constraintBoxVisualizer.enabled = visible;
+            }
         });
 
         // 约束策略：
@@ -439,29 +490,43 @@ class CameraManager {
         // 无动画时维持更"核心"的收缩范围；有动画时使用 animScaleX/Y/Z
         const targetScaleFactor = 1; // 非动画路径的固定缩放系数
 
+        // 各方向（左右 / 上下 / 前后）的收缩系数：未写时用所在路径的默认值
+        // - 有动画路径：默认 1.5（在 anim bbox 上放宽，避免 anim → orbit/fly 切换时撞边）
+        // - 无动画路径：默认 1（场景 bbox 原样），写 <1 即可收紧相机可移动范围
+        const defaultAnimScale = 1.5;
+        const boundsScaleFallback = usingAnimBbox ? defaultAnimScale : targetScaleFactor;
+
         if (baseBoundsEnabled) {
-            // 只有在有动画路径时，才使用 animScaleX/Y/Z 来分别设置各轴缩放
-            // 对于非动画路径，维持原来的 targetScaleFactor 逻辑
-            if (usingAnimBbox) {
-                // 支持数组格式分别设置左右、上下、负 Z/正 Z；未写的轴用 defaultAnimScale
-                const defaultAnimScale = 1.5;
-                const animScaleX = cameraBoundsCfg?.animScaleX ?? defaultAnimScale;
-                const animScaleY = cameraBoundsCfg?.animScaleY ?? defaultAnimScale;
-                const animScaleZ = cameraBoundsCfg?.animScaleZ ?? defaultAnimScale;
-                this.targetConstraint = BoxConstraint.fromBoundingBoxWithAsymmetricScales(
-                    fusedBbox,
-                    defaultAnimScale,
-                    animScaleX,
-                    animScaleY,
-                    animScaleZ
-                );
-            } else {
-                this.targetConstraint = BoxConstraint.fromBoundingBox(fusedBbox, targetScaleFactor);
-            }
+            // 支持数组格式分别设置左右、上下、负 Z/正 Z；未写的轴用 boundsScaleFallback
+            this.targetConstraint = BoxConstraint.fromBoundingBoxWithAsymmetricScales(
+                fusedBbox,
+                boundsScaleFallback,
+                cameraBoundsCfg?.animScaleX,
+                cameraBoundsCfg?.animScaleY,
+                cameraBoundsCfg?.animScaleZ
+            );
         } else {
             // 禁用约束
             this.targetConstraint = null;
         }
+
+        // 调试：把「实际生效的活动范围」也画出来（橙色）。上面紫色画的是**未收缩**的基准盒，
+        // 只看紫框容易误判「animScale 没生效」；两个框同由 Settings → Show Camera Bounding Box 控制。
+        if (this.targetConstraint) {
+            this.constraintBoxVisualizer = this.createBoundingBoxVisualizer(
+                app,
+                this.targetConstraint.bbox,
+                new Color(1, 0.55, 0, 1)
+            );
+            this.constraintBoxVisualizer.enabled = !!(state as any).showCameraBoundingBox;
+        }
+
+        logCameraBounds(usingAnimBbox ? 'animTracks' : 'scene', fusedBbox, this.targetConstraint, {
+            fallback: boundsScaleFallback,
+            x: cameraBoundsCfg?.animScaleX,
+            y: cameraBoundsCfg?.animScaleY,
+            z: cameraBoundsCfg?.animScaleZ
+        });
 
         this.constraint = SphereConstraint.fromBoundingBox(fusedBbox, targetScaleFactor);
         // 编辑态覆盖：进入编辑模式时临时关约束，退出回到 View 时恢复基础开关
