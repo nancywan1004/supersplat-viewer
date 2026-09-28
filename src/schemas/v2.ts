@@ -179,12 +179,11 @@ type ExperienceSettings = {
     /**
      * 可选：相机边界策略（不影响旧 settings.json）
      * - enabled: 是否启用相机移动限制（默认 true）
-     * - animScaleX: X 轴方向的缩放系数（可选，仅在有动画路径时生效）
-     *   可以是单个数值（左右相同）或数组 [left, right]（分别设置左右缩放，默认 1.5）
-     * - animScaleY: Y 轴方向的缩放系数（可选，仅在有动画路径时生效）
-     *   可以是单个数值（上下相同）或数组 [top, bottom]（分别设置上下缩放，默认 1.5）
-     * - animScaleZ: Z 轴方向的缩放系数（可选，仅在有动画路径时生效）
-     *   可以是单个数值（前后/两侧相同）或数组 [负 Z 侧, 正 Z 侧]（沿 min.z / max.z 分别缩放 halfExtents.z，默认与未写 X/Y 时一致为 1.5）
+     * - animScaleX / animScaleY / animScaleZ: 各方向（左右 / 上下 / 前后）的缩放系数。
+     *   单个数值表示两侧相同；数组表示 [负向, 正向]（`[left, right]` / `[top, bottom]` / `[负 Z 侧, 正 Z 侧]`，
+     *   即沿 min/max 分别缩放 halfExtents）。**有动画路径与无动画路径都生效**：
+     *   - 有动画路径：基准是 anim bbox，未写默认 1.5（放宽）
+     *   - 无动画路径：基准是场景 bbox，未写默认 1（原样），写 <1 即收紧相机可移动范围
      */
     cameraBounds?: {
         enabled?: boolean;
