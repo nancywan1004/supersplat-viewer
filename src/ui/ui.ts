@@ -378,6 +378,7 @@ const initUI = (global: Global) => {
         'settings', 'settingsPanel',
         'orbitCamera', 'flyCamera', 'fpsCamera',
         'performanceModeRow', 'performanceModeCheck', 'performanceModeOption',
+        'hqModeRow', 'hqModeCheck', 'hqModeOption',
         'gamingControlsDivider', 'gamingControlsRow', 'gamingControlsCheck', 'gamingControlsOption',
         'desktopClickToWalk', 'desktopGamingControls',
         'touchFlyClickToWalk', 'touchFlyGamingControls',
@@ -525,7 +526,7 @@ const initUI = (global: Global) => {
         dom.exitFullscreen.classList[value ? 'remove' : 'add']('hidden');
     });
 
-    // Performance mode toggle
+    // Performance mode toggle（LOD/流式性能模式，与画布分辨率解耦）
     dom.performanceModeRow.addEventListener('click', () => {
         state.performanceMode = !state.performanceMode;
     });
@@ -535,6 +536,18 @@ const initUI = (global: Global) => {
     };
     events.on('performanceMode:changed', updatePerformanceMode);
     updatePerformanceMode();
+
+    // High quality mode toggle（画布分辨率）
+    const updateHqMode = () => {
+        dom.hqModeCheck.classList.toggle('active', state.hqMode);
+    };
+    dom.hqModeRow.addEventListener('click', () => {
+        state.hqMode = !state.hqMode;
+        // 仅用户显式操作时持久化，避免 URL ?hqMode= 的临时覆盖被写进 localStorage
+        localStorage.setItem('hqMode', String(state.hqMode));
+    });
+    events.on('hqMode:changed', updateHqMode);
+    updateHqMode();
 
     // Gaming controls toggle (settings row visible on mobile only)
     dom.gamingControlsRow.addEventListener('click', () => {

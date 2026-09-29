@@ -219,6 +219,12 @@ type Config = {
      */
     lodViewHold?: boolean;
     /**
+     * 高清渲染模式（画布分辨率）。默认读 localStorage.hqMode，无值则 true（全分辨率）。
+     * URL `?hqMode=0|false|off` 关闭（半分辨率），`?hqMode=1|true|on` 或裸参数开启；
+     * 未设置时按 localStorage 偏好解析。仅影响画布分辨率，不影响 LOD budget/performanceMode。
+     */
+    hqMode?: boolean;
+    /**
      * 初始加载 BootstrapFast：视锥内下载/收条目标相对 engineOptimal 放粗档数。
      * 默认 2；`0` 关闭。URL `?bootstrapCoarsenSteps=N` / `?bootstrapCoarsen=0`。
      */
@@ -252,7 +258,10 @@ type Config = {
 type State = {
     loaded: boolean;                            // true once first frame is rendered
     readyToRender: boolean;                     // don't render till this is set
+    /** LOD/流式性能模式：splat budget、更新节流、refinement boost；不影响画布分辨率 */
     performanceMode: boolean;
+    /** 高清渲染模式：画布全分辨率（关闭则半分辨率）；默认开启，等价旧版 hqMode */
+    hqMode: boolean;
     progress: number;                           // content loading progress 0-100
     inputMode: InputMode;
     cameraMode: CameraMode;
