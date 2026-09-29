@@ -118,6 +118,7 @@ import {
 } from './scene-visibility';
 import { invalidateLightingVisibility } from './scene-visibility/lighting-visibility-coordinator';
 import { DEFAULT_DEFERRED_EDITING_LAYERS } from './render/deferred-editing-visual-sync';
+import { CameraFrameTonePatch } from './render/camera-frame-tone-patch';
 import { initInputArbiter } from './input-arbiter';
 import { VoxelDebugOverlay } from './voxel-debug-overlay';
 
@@ -435,6 +436,12 @@ class Viewer {
         }
     };
 
+    /** CF 色调顺序修正（D2）：只在 CameraFrame 挂载期间生效，退出精确恢复 */
+    private readonly cfTonePatch: CameraFrameTonePatch;
+
+    /** 当前生效的 CF 色调模式；变化时需要销毁重建 CameraFrame，否则复用旧编译的 shader */
+    private cfToneMode: boolean | null = null;
+
     constructor(global: Global, gsplatLoad: Promise<Entity>) {
         this.global = global;
 
@@ -506,6 +513,8 @@ class Viewer {
                 skyboxPS: wgsl.get('skyboxPS')
             }
         };
+
+        this.cfTonePatch = new CameraFrameTonePatch(graphicsDevice);
 
         const getCameraFrame = () => this.cameraFrame;
         (app as { getCameraFrame?: () => CameraFrame | null }).getCameraFrame = getCameraFrame;
@@ -1275,6 +1284,20 @@ z: ${cameraInfo.target.z.toFixed(6)}
         );
 
         if (enableCameraFrame) {
+            // CF 色调修正（D2）必须在创建 / 更新 CameraFrame 之前应用：
+            // chunk 变更不会自动重编已有 shader（同 skyboxPS 的既有约定），且模式切换时要销毁重建。
+            // 默认 fixed：只有显式传 'legacy' 才回退旧行为（缺省/未传也算 fixed）
+            const cfToneMode = config.cfTone !== 'legacy';
+            if (this.cfToneMode !== cfToneMode) {
+                this.cfToneMode = cfToneMode;
+                if (this.cameraFrame) {
+                    this.bloomController?.onCameraFrameDestroyed();
+                    this.cameraFrame.destroy();
+                    this.cameraFrame = null;
+                }
+            }
+            this.cfTonePatch.apply(cfToneMode);
+
             if (!this.cameraFrame) {
                 this.cameraFrame = new CameraFrame(app, camera.camera);
             }
@@ -1338,6 +1361,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
             ShaderChunks.get(app.graphicsDevice, 'glsl').set('gsplatOutputVS', this.origChunks.glsl.gsplatOutputVS);
             ShaderChunks.get(app.graphicsDevice, 'wgsl').set('gsplatOutputVS', this.origChunks.wgsl.gsplatOutputVS);
             this.syncSkyboxShaderChunks(app, pointillismSkyboxActive, false);
+            this.cfTonePatch.restore();
 
             // restore original isColorBufferSrgb behavior
             RenderTarget.prototype.isColorBufferSrgb = origIsColorBufferSrgb;

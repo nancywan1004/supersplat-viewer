@@ -156,6 +156,8 @@
                 editUiTransport: url.searchParams.get('editUiTransport') === 'message-bridge' ? 'message-bridge' : 'internal',
                 nofx: url.searchParams.has('nofx'),
                 hpr: url.searchParams.has('hpr') ? ['', '1', 'true', 'enable'].includes(url.searchParams.get('hpr')) : undefined,
+                // CF 色调顺序修正（D2）：默认开启；?cfTone=legacy 可即时回退旧行为
+                cfTone: url.searchParams.get('cfTone') === 'legacy' ? 'legacy' : 'fixed',
                 webgpu: preferWebGpu,
                 renderer,
                 budget,
