@@ -326,7 +326,8 @@ const initCanvas = (global: Global) => {
         // and resetting canvas dimensions can invalidate the XRWebGLLayer
         if (app.xr?.active) return;
 
-        const s = state.performanceMode ? 0.5 : 1.0;
+        // 画布分辨率只由 hqMode 决定，与 LOD 的 performanceMode 解耦
+        const s = state.hqMode ? 1.0 : 0.5;
         const w = Math.ceil(deviceSize.width * s);
         const h = Math.ceil(deviceSize.height * s);
         if (w !== canvas.width || h !== canvas.height) {
@@ -345,6 +346,10 @@ const initCanvas = (global: Global) => {
     resizeObserver.observe(canvas);
 
     events.on('performanceMode:changed', () => {
+        app.renderNextFrame = true;
+    });
+
+    events.on('hqMode:changed', () => {
         app.renderNextFrame = true;
     });
 
@@ -405,12 +410,15 @@ const main = async (
         localStorage.removeItem('retinaDisplay');
     }
     const storedPerformanceMode = localStorage.getItem('performanceMode');
+    const storedHqMode = localStorage.getItem('hqMode');
 
     const state = observe(events, {
         loaded: false,
         readyToRender: false,
-        // 无本地偏好时默认开性能模式（桌面 2.5M / 移动 1M budget；半分辨率等）
+        // LOD/流式性能模式（budget、更新节流、refinement boost）。默认保持开启，行为与改动前一致
         performanceMode: storedPerformanceMode !== null ? storedPerformanceMode === 'true' : true,
+        // 高清渲染（画布分辨率）。优先级：URL ?hqMode= > localStorage.hqMode > 默认开启
+        hqMode: config.hqMode ?? (storedHqMode !== null ? storedHqMode === 'true' : true),
         progress: 0,
         inputMode: platform.mobile ? 'touch' : 'desktop',
         cameraMode: 'orbit',

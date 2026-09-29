@@ -189,6 +189,17 @@
                     }
                     return undefined;
                 })(),
+                /** 高清渲染（画布分辨率）；默认读 localStorage，未存则开。?hqMode=0 关闭（半分辨率），?hqMode=1 / ?hqMode 开启 */
+                hqMode: (() => {
+                    const v = url.searchParams.get('hqMode') ?? url.searchParams.get('hq');
+                    if (v === '0' || v === 'false' || v === 'off') {
+                        return false;
+                    }
+                    if (v === '1' || v === 'true' || v === 'on' || url.searchParams.has('hqMode') || url.searchParams.has('hq')) {
+                        return true;
+                    }
+                    return undefined;
+                })(),
                 /** 同视角防抖（视锥内不糊来回）；默认开。?lodViewHold=0 关闭 */
                 lodViewHold: (() => {
                     const v = url.searchParams.get('lodViewHold');
@@ -451,6 +462,10 @@
                 <div id="performanceModeRow" class="settingsRow">
                     <div id="performanceModeOption">Performance Mode</div>
                     <div id="performanceModeCheck" class="toggleSwitch"><div class="toggleTrack"><div class="toggleThumb"></div></div></div>
+                </div>
+                <div id="hqModeRow" class="settingsRow">
+                    <div id="hqModeOption">High Quality Mode</div>
+                    <div id="hqModeCheck" class="toggleSwitch"><div class="toggleTrack"><div class="toggleThumb"></div></div></div>
                 </div>
                 <div id="gamingControlsDivider" class="divider"></div>
                 <div id="gamingControlsRow" class="settingsRow">
