@@ -176,6 +176,12 @@ type Config = {
     noautorotate: boolean;
     nofx: boolean;                              // disable post effects
     hpr?: boolean;                              // override highPrecisionRendering (undefined = use settings)
+    /**
+     * CF（CameraFrame）路径色调顺序修正：
+     * - `'fixed'`（**缺省值**）= ACES 前补 decodeGamma + 末尾真正 gamma 编码；
+     * - `'legacy'` = 旧行为（`ACES(gamma)`、末尾不编码）。
+     */
+    cfTone?: 'legacy' | 'fixed';
     ministats: boolean;
     colorize: boolean;                          // render with LOD colorization
     fullload: boolean;                          // load all streaming LOD data before first frame

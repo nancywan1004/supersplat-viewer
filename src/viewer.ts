@@ -119,6 +119,7 @@ import {
 } from './scene-visibility';
 import { invalidateLightingVisibility } from './scene-visibility/lighting-visibility-coordinator';
 import { DEFAULT_DEFERRED_EDITING_LAYERS } from './render/deferred-editing-visual-sync';
+import { CameraFrameTonePatch } from './render/camera-frame-tone-patch';
 import { initInputArbiter } from './input-arbiter';
 import { VoxelDebugOverlay } from './voxel-debug-overlay';
 
@@ -240,14 +241,37 @@ const applyPostEffectSettings = (cameraFrame: CameraFrame, settings: PostEffectS
     }
 };
 
+/**
+ * Bloom 是否需要挂 CameraFrame/HDR 管线（保活）。
+ *
+ * **只依赖 settings，不看编辑态**：一旦挂上 CameraFrame，`configureCamera` 就会 patch gsplat 改走
+ * gamma 空间输出、ACES 落到 compose —— 与 SuperSplat 的「材质里 decodeGamma → ACES → gamma 直出」
+ * 不是同一条链路。所以：
+ * - **存量参数**（bloom 关闭时遗留的 intensity/blurLevel，两者都有默认非零值）不得触发它，
+ *   否则几乎所有场景的色调都会跟 SuperSplat 不一样；
+ * - **编辑态与观看态必须走同一条链路**，否则同一份 settings 在两个模式里观感不同（莫名其妙的差异）。
+ *
+ * @param settings - postEffectSettings
+ * @returns 是否需要保持 Bloom 的 CameraFrame 管线
+ */
 const needsBloomPipeline = (settings: PostEffectSettings): boolean => {
-    const bloom = settings?.bloom as any;
+    const bloom = settings?.bloom;
     if (!bloom) return false;
-    // 对齐 global/local：只要 Bloom blur 配置有效，就保持 CameraFrame/Bloom 路径一致。
-    // 这样 intensity=0 时切 scope 不会因为管线启停差异导致 mesh 观感分叉。
+
+    const intensity = Number(bloom.intensity ?? 0);
     const blurLevel = Number(bloom.blurLevel ?? 0);
-    if (!(Number.isFinite(blurLevel) && blurLevel > 0)) return false;
-    return true;
+    const hasParams =
+        (Number.isFinite(intensity) && intensity > 0) || (Number.isFinite(blurLevel) && blurLevel > 0);
+    if (!hasParams) return false;
+
+    // 全局 Bloom 真的开着 → 需要管线
+    if (bloom.enabled === true) return true;
+
+    // 局部 Bloom：有亮灯区域，或正在用亮灯笔刷
+    if (bloom.bloomScope !== 'local') return false;
+    const hasRegions = Array.isArray(bloom.localLightRegions) && bloom.localLightRegions.length > 0;
+    const brushActive = settings.bloomEditorSession?.bloomBrush === true;
+    return hasRegions || brushActive;
 };
 
 const anyPostEffectEnabled = (
@@ -413,6 +437,12 @@ class Viewer {
         }
     };
 
+    /** CF 色调顺序修正（D2）：只在 CameraFrame 挂载期间生效，退出精确恢复 */
+    private readonly cfTonePatch: CameraFrameTonePatch;
+
+    /** 当前生效的 CF 色调模式；变化时需要销毁重建 CameraFrame，否则复用旧编译的 shader */
+    private cfToneMode: boolean | null = null;
+
     constructor(global: Global, gsplatLoad: Promise<Entity>) {
         this.global = global;
 
@@ -484,6 +514,8 @@ class Viewer {
                 skyboxPS: wgsl.get('skyboxPS')
             }
         };
+
+        this.cfTonePatch = new CameraFrameTonePatch(graphicsDevice);
 
         const getCameraFrame = () => this.cameraFrame;
         (app as { getCameraFrame?: () => CameraFrame | null }).getCameraFrame = getCameraFrame;
@@ -1229,17 +1261,13 @@ z: ${cameraInfo.target.z.toFixed(6)}
         // hpr override takes precedence over settings.highPrecisionRendering
         const highPrecisionRendering = config.hpr ?? settings.highPrecisionRendering;
 
-        // 无 postEffectSettings 或未启用任一后处理时跳过，避免报错
-        // Bloom 语义对齐：局部 Bloom 仅应改变 mask 区域，不应因 blur/enabled 开关导致整条渲染路径突变。
-        // 因此将 Bloom 管线是否预热与 Bloom 叠加是否生效解耦：
-        // - 管线预热（CameraFrame + HDR RT）：Bloom 强度 > 0 或 local 亮灯预览需求时保持开启，
-        //   避免 intensity=0 时实时笔刷预览被整条管线关掉。
+        // Bloom 管线（保活）与实际叠加分开判定：
+        // - 只有「真的会有 bloom 叠加」（`enabled`，或 `scope:'local'` 且有区域/笔刷）才挂
+        //   CameraFrame + HDR RT；**存量参数不算**（关闭时遗留的 intensity/blurLevel 不得改变色彩链路，
+        //   否则会切到 gamma 空间输出 + ACES 落 compose，跟 SuperSplat 的直出色调不一致）。
+        // - **不区分编辑态/观看态**：同一份 settings 必须走同一条链路，否则用户会看到莫名其妙的观感差异。
         // - 实际叠加：仍由 BloomController 中 enabled/blur/mask 控制。
-        const bloomPipelineWanted = !!postEffectSettings
-            && (
-                Number(postEffectSettings.bloom?.intensity ?? 0) > 0 ||
-                needsBloomPipeline(postEffectSettings)
-            );
+        const bloomPipelineWanted = !!postEffectSettings && needsBloomPipeline(postEffectSettings);
 
         const rendererMode = (config as any).renderer as string | undefined;
         const computeRequiresCameraFrame = rendererMode === 'compute';
@@ -1258,6 +1286,20 @@ z: ${cameraInfo.target.z.toFixed(6)}
         );
 
         if (enableCameraFrame) {
+            // CF 色调修正（D2）必须在创建 / 更新 CameraFrame 之前应用：
+            // chunk 变更不会自动重编已有 shader（同 skyboxPS 的既有约定），且模式切换时要销毁重建。
+            // 默认 fixed：只有显式传 'legacy' 才回退旧行为（缺省/未传也算 fixed）
+            const cfToneMode = config.cfTone !== 'legacy';
+            if (this.cfToneMode !== cfToneMode) {
+                this.cfToneMode = cfToneMode;
+                if (this.cameraFrame) {
+                    this.bloomController?.onCameraFrameDestroyed();
+                    this.cameraFrame.destroy();
+                    this.cameraFrame = null;
+                }
+            }
+            this.cfTonePatch.apply(cfToneMode);
+
             if (!this.cameraFrame) {
                 this.cameraFrame = new CameraFrame(app, camera.camera);
             }
@@ -1321,6 +1363,7 @@ z: ${cameraInfo.target.z.toFixed(6)}
             ShaderChunks.get(app.graphicsDevice, 'glsl').set('gsplatOutputVS', this.origChunks.glsl.gsplatOutputVS);
             ShaderChunks.get(app.graphicsDevice, 'wgsl').set('gsplatOutputVS', this.origChunks.wgsl.gsplatOutputVS);
             this.syncSkyboxShaderChunks(app, pointillismSkyboxActive, false);
+            this.cfTonePatch.restore();
 
             // restore original isColorBufferSrgb behavior
             RenderTarget.prototype.isColorBufferSrgb = origIsColorBufferSrgb;
