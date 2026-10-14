@@ -2,6 +2,7 @@
 // postMessage 本地保存一律 host：不下载、不上传，把 settings + 资源 File 交回父级。
 // universe：不写 content、不上传主场景；只登记 settings.json（用户资产 sidecar 仍 put）。
 // local：仅 Viewer 内部 UI 直连调用，下载 project-{projectId}.zip（不走 postMessage 协议）。
+// local-settings：仅 Viewer 内部 UI 直连调用，只下载 settings.json（不拉主场景、不打 zip、不上传）。
 // 缩略图仅 universe 登记。
 import { isMainSceneModifiedForHostSave, type SettingsSaveDestination } from './host-protocol';
 import {
@@ -14,6 +15,7 @@ import {
     SAVE_CANCELLED_MESSAGE,
     formatByteSize,
     packMainSceneContent,
+    resolvePackedContentRelativePath,
     stripPackedContentField,
     writePackedContentField,
     type ProjectSaveProgress,
@@ -198,6 +200,43 @@ async function downloadLocalProject(
     }
 }
 
+/**
+ * 「只保存 settings.json」的 payload：与本地 zip 内那份保持一致（写入包内主场景相对路径 `content/...`），
+ * 推导不出主场景（空入口 / 非可打包场景）时保留原 `content`，不因缺少主场景让导出失败。
+ * @param global - Viewer 全局态
+ * @param settings - 已物化用户上传相对路径的 settings
+ * @returns 待导出的 settings
+ */
+function withPackedContentForSettingsOnly(global: Global, settings: ExperienceSettings): ExperienceSettings {
+    const relativePath = resolvePackedContentRelativePath(global.config.contentUrl);
+    return relativePath ? writePackedContentField(settings, relativePath) : settings;
+}
+
+/**
+ * 只下载 settings.json：不拉主场景、不打 zip、不上传缩略图，只把当前 settings 落成单个 JSON 文件。
+ * 包内相对路径的用户资产（`assets/...`）不会一起下载，与 universe 分支语义一致（保留相对路径引用）。
+ * @param global - Viewer 全局态
+ * @param settings - 已物化用户上传相对路径的 settings
+ * @param report - 进度上报
+ * @returns 结果
+ */
+function downloadLocalSettingsFile(
+    global: Global,
+    settings: ExperienceSettings,
+    report: ProjectSaveProgressReporter
+): SettingsSavePipelineResult {
+    report({ phase: 'packing', message: `正在生成 ${SETTINGS_JSON_NAME}…` });
+    const payload = withPackedContentForSettingsOnly(global, settings);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    downloadBlobAsFile(blob, SETTINGS_JSON_NAME);
+    report({
+        phase: 'packing',
+        message: `已生成 ${SETTINGS_JSON_NAME}（${formatByteSize(blob.size)}）`,
+        bytes: blob.size
+    });
+    return { ok: true };
+}
+
 async function buildHostSavePayload(
     global: Global,
     settings: ExperienceSettings,
@@ -248,7 +287,7 @@ async function buildHostSavePayload(
 /**
  * 保存项目统一入口。全过程通过 `global.events` 的 `projectSave:progress` 上报进度。
  * @param global - Viewer 全局态
- * @param destination - local 下载 zip / host 交回父级 / universe 上传
+ * @param destination - local 下载 zip / local-settings 只下载 settings.json / host 交回父级 / universe 上传
  * @param options - `signal` 可中途取消
  * @returns 结果（host 成功时带产物；取消时 `cancelled: true`）
  */
@@ -274,6 +313,9 @@ export async function saveExperienceProject(
 
     if (destination === 'local') {
         return downloadLocalProject(global, materialized.settings, relativePaths, report, signal);
+    }
+    if (destination === 'local-settings') {
+        return downloadLocalSettingsFile(global, materialized.settings, report);
     }
     if (destination === 'host') {
         return buildHostSavePayload(global, materialized.settings, relativePaths, report, signal);

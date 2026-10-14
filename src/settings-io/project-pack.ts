@@ -112,6 +112,21 @@ export function formatByteSize(bytes: number): string {
 }
 
 /**
+ * 主场景在项目包内的相对路径（只按启动 `config.contentUrl` 推导，不下载任何字节）。
+ * 与打包时写入的路径一致，供「只保存 settings.json」写 `content` 字段用。
+ * @param contentUrl - `config.contentUrl`
+ * @returns `content/<场景文件>` / `content/lod-meta.json`；无法推导时为 null
+ */
+export function resolvePackedContentRelativePath(contentUrl: string | undefined): string | null {
+    const url = typeof contentUrl === 'string' ? contentUrl.trim() : '';
+    if (!url) return null;
+    if (isLodMetaFile(url)) return `${PACKED_CONTENT_DIR}/${LOD_META_FILENAME}`;
+    const filename = contentFilenameFromUrl(url);
+    if (!isPackedSceneFilename(filename)) return null;
+    return packedContentRelativePath(filename);
+}
+
+/**
  * 把当前主场景打成项目包内容。
  * `.sog` / `.splat` / `.ply` 单文件；`lod-meta.json` 会连同 filenames 列出的分块一起打包。
  * @param global - Viewer 全局态
@@ -134,11 +149,11 @@ export async function packMainSceneContent(
     if (isLodMetaFile(contentUrl)) {
         return await packLodMetaContent(contentUrl, onProgress, signal);
     }
-    const filename = contentFilenameFromUrl(contentUrl);
-    if (!isPackedSceneFilename(filename)) {
+    const relativePath = resolvePackedContentRelativePath(contentUrl);
+    if (!relativePath) {
         return { ok: false, message: '主场景不是可打包的 .sog / .splat / .ply / lod-meta.json' };
     }
-    const relativePath = packedContentRelativePath(filename);
+    const filename = contentFilenameFromUrl(contentUrl);
     onProgress?.({ phase: 'mainScene', message: `正在下载主场景 ${filename}…` });
     try {
         const response = await fetch(toUserUploadFetchUrl(contentUrl), { signal });

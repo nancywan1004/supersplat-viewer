@@ -3,11 +3,19 @@
 /** 挡住 `VIEWER_READY` 的失败阶段：配置或主场景。场景内资产失败走 `VIEWER_ASSETS_LOAD_FAILED`。 */
 export type ViewerLoadStage = 'settings' | 'content';
 
-export type SettingsSaveDestination = 'local' | 'universe' | 'host';
+/**
+ * 保存去向：
+ * - `local`：Viewer 内部 UI 直连下载 `project-{projectId}.zip`（settings + content + assets）
+ * - `local-settings`：同上但**只下载 settings.json**（不拉主场景、不打 zip、不上传）；仅内部 UI 直连
+ * - `host`：postMessage 本地保存，把 settings + 文件交回父级（不下载、不上传）
+ * - `universe`：上传 settings.json（+ 缩略图 / sidecar 资产），postMessage 缺省值
+ */
+export type SettingsSaveDestination = 'local' | 'local-settings' | 'universe' | 'host';
 
 /**
  * postMessage 协议：本地保存一律 `host`（交回父级，不下载不上传）。
- * Viewer 内部直连下载 zip 请直接调 `saveExperienceProject(..., 'local')`，不要走本函数。
+ * Viewer 内部直连下载 zip 请直接调 `saveExperienceProject(..., 'local')`，不要走本函数；
+ * `local-settings`（只下载 settings.json）也只允许内部 UI 直连，不接受父级传入。
  * @param value - 入站 destination
  * @returns 规范化后的保存去向
  */

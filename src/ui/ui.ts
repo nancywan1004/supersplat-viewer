@@ -1093,8 +1093,10 @@ const initUI = (global: Global) => {
             };
             const runProjectSave = async (destination: SettingsSaveDestination) => {
                 closeSaveMenu();
-                const okMsg = destination === 'universe' ? '已上传到 Universe' : '已保存到本地';
-                const label = destination === 'universe' ? '正在上传…' : '正在保存…';
+                const okMsg = destination === 'universe' ? '已上传到 Universe' :
+                    destination === 'local-settings' ? '已保存 settings.json' : '已保存到本地';
+                const label = destination === 'universe' ? '正在上传…' :
+                    destination === 'local-settings' ? '正在生成 settings.json…' : '正在保存…';
                 if (editUiTransport === 'message-bridge') {
                     await withSaveProgress(label, async () => {
                         sendEditProtocolMessage({ type: 'PROJECT_SAVE', destination });
@@ -1141,13 +1143,21 @@ const initUI = (global: Global) => {
                 const open = saveDropdown?.classList.toggle('hidden') === false;
                 saveBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
             });
+            // 「仅保存 settings.json」只支持内部直连下载：postMessage 本地保存一律交回父级组包，没有对应协议值
+            const settingsOnlyOption = saveDropdown?.querySelector<HTMLButtonElement>('[data-destination="settings"]');
+            if (settingsOnlyOption && editUiTransport === 'message-bridge') {
+                settingsOnlyOption.classList.add('hidden');
+            }
             saveDropdown?.querySelectorAll<HTMLButtonElement>('[data-destination]').forEach((option) => {
+                const raw = option.dataset.destination ?? '';
                 option.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    const isLocalSave = option.dataset.destination === 'local' || option.dataset.destination === 'host';
-                    const destination = isLocalSave ?
-                        (editUiTransport === 'message-bridge' ? 'host' : 'local') :
-                        'universe';
+                    let destination: SettingsSaveDestination = 'universe';
+                    if (raw === 'settings') {
+                        destination = 'local-settings';
+                    } else if (raw === 'local' || raw === 'host') {
+                        destination = editUiTransport === 'message-bridge' ? 'host' : 'local';
+                    }
                     void runProjectSave(destination);
                 });
             });
