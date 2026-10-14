@@ -693,6 +693,20 @@ button {
 
         background-color: rgba(white, 0.08);
     }
+
+    /* 相机信息实时读数：保留换行，长行折行，过高时滚动 */
+    .cameraInfoLive {
+        padding: 8px 4px 2px;
+        font-size: 12px;
+        line-height: 1.55;
+        font-variant-numeric: tabular-nums;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        max-height: 220px;
+        overflow-y: auto;
+
+        color: $clr-text-dark;
+    }
 }
 
 /* 右侧栏内 VFX/Lighting/postEffect/Render 组件样式（与 settingsPanel 内一致） */

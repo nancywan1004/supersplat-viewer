@@ -1,4 +1,5 @@
 import {
+    type AppBase,
     BoundingBox,
     BLEND_NORMAL,
     Color,
@@ -381,11 +382,23 @@ class CameraManager {
     private constraint: SphereConstraint | null = null;
     private targetConstraint: BoxConstraint | null = null;
 
+    /** BoxConstraint 使用的**基准盒**（未乘 animScaleX/Y/Z），供外部反推系数 */
+    private constraintBaseBounds: BoundingBox | null = null;
+
     /**
      * 获取 target constraint（用于 reveal 效果等）
      */
     getTargetConstraint(): BoxConstraint | null {
         return this.targetConstraint;
+    }
+
+    /**
+     * 获取约束用的基准盒（未乘 animScaleX/Y/Z）。
+     * 与 `BoxConstraint.solveAsymmetricScales` 搭配，可由目标盒反推 animScale。
+     * @returns 基准盒；约束未初始化时为 null
+     */
+    getConstraintBaseBounds(): BoundingBox | null {
+        return this.constraintBaseBounds;
     }
 
     /** 更新 urlParam 加载的 Collision 在 walk / fly 上的引用（与放置资产 AABB 推开独立） */
@@ -399,14 +412,18 @@ class CameraManager {
     private cameraBoundsVisualizer: Entity | null = null;
     /** 实际生效的活动范围（各方向乘过 animScaleX/Y/Z 的盒）调试线框 */
     private constraintBoxVisualizer: Entity | null = null;
+    /** 「记录相机位姿」累积出的包围盒调试线框（青绿色），由 setRecordedPoseBounds 维护 */
+    private recordedPoseBoundsVisualizer: Entity | null = null;
     private debugBoundsLayerId: number | null = null;
     private cameraEntity: Entity;
+    private readonly app: AppBase;
     private readonly settings: Global['settings'];
     private readonly state: Global['state'];
 
     constructor(global: Global, bbox: BoundingBox, collision: Collision | null = null) {
         const { events, settings, state, config, app, camera: cameraEntity } = global;
         this.cameraEntity = cameraEntity;
+        this.app = app;
         this.settings = settings;
         this.state = state;
 
@@ -468,6 +485,7 @@ class CameraManager {
         const usingAnimBbox = !!animCoreBbox;
         // TODO: 暂时不使用fusedBbox，而是直接使用animCoreBbox，后续根据情况来优化
         const fusedBbox = animCoreBbox ? animCoreBbox : bbox;
+        this.constraintBaseBounds = fusedBbox;
 
         // 可视化：相机 BoundingBox（AABB）
         // - 优先显示 animCoreBbox（紫色）
@@ -1235,6 +1253,24 @@ class CameraManager {
         if (this.constraintVisualizer) {
             this.constraintVisualizer.enabled = visible;
         }
+    }
+
+    /**
+     * 更新「记录相机位置」累积出的包围盒线框（传 null 清除）。
+     * 供 Viewer 侧记录相机位置时可视化，用肉眼估算核心区域范围。
+     * @param bounds - 目标包围盒；传 null 表示清除线框
+     */
+    setRecordedPoseBounds(bounds: BoundingBox | null): void {
+        this.recordedPoseBoundsVisualizer?.destroy();
+        this.recordedPoseBoundsVisualizer = null;
+        if (bounds) {
+            this.recordedPoseBoundsVisualizer = this.createBoundingBoxVisualizer(
+                this.app,
+                bounds,
+                new Color(0.2, 1, 0.6, 1)
+            );
+        }
+        this.app.renderNextFrame = true;
     }
 }
 

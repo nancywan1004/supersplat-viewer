@@ -1705,8 +1705,14 @@ const initUI = (global: Global) => {
         events.fire('inputEvent', 'frame', event);
     });
 
-    dom.getCameraInfo.addEventListener('click', () => {
+    dom.getCameraInfo.addEventListener('click', (event) => {
+        // 双击的第 2 次 click 不重复记录（清除由 dblclick 负责）
+        if (event.detail > 1) return;
         events.fire('getCameraInfo');
+    });
+
+    dom.getCameraInfo.addEventListener('dblclick', () => {
+        events.fire('clearCameraPose');
     });
 
     // Initialize touch joystick (visibility managed by mode + gamingControls)
@@ -1769,6 +1775,11 @@ const initUI = (global: Global) => {
     tooltip.register(dom.flyCamera, 'Fly Camera', 'top');
     tooltip.register(dom.fpsCamera, 'Walk Mode', 'top');
     tooltip.register(dom.reset, 'Reset Camera', 'bottom');
+    tooltip.register(
+        dom.getCameraInfo,
+        '单击：记录当前相机位置并反推 cameraBounds 的 animScaleX/Y/Z（读数实时显示在面板上）；双击：清除已记录位置',
+        'top'
+    );
     tooltip.register(dom.frame, 'Frame Scene', 'bottom');
     tooltip.register(dom.showCollision, 'Show Collision', 'top');
     tooltip.register(dom.settings, 'Settings', 'top');

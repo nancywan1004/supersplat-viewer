@@ -26,6 +26,7 @@ import {
 
 import { Annotations } from './annotations';
 import { CameraManager } from './camera-manager';
+import { BoxConstraint } from './camera-constraints/box-constraint';
 import { Camera } from './cameras/camera';
 import type { Collision } from './collision';
 import { MeshCollision, VoxelCollision } from './collision';
@@ -1112,29 +1113,177 @@ class Viewer {
                 });
             }
 
-            // Handle get camera info request
+            // ── 相机信息（复用「获取相机信息」）────────────────────────────
+            // 读数实时显示在设置面板（位置 / 目标 / FOV）：由下方 app.on('update') 每帧刷新。
+            // 单击该按钮 = 记录当前**相机位置**，累积位置的 AABB（青绿色线框），并**自动反推**
+            // 让 cameraBounds 的盒等于该范围所需的 animScaleX/Y/Z（打印 + 复制到剪贴板）。
+            // 注：cameraBounds 约束的是 camera.position，所以只累积位置，与注视点（target）无关。
+            // 双击该按钮 = 清除已记录的位置。
+
+            // 点集 → AABB（空集返回 null）
+            const aabbFromPoints = (points: Vec3[]): BoundingBox | null => {
+                if (points.length === 0) return null;
+                const lo = points[0].clone();
+                const hi = points[0].clone();
+                for (let i = 1; i < points.length; i++) {
+                    lo.min(points[i]);
+                    hi.max(points[i]);
+                }
+                const box = new BoundingBox();
+                box.setMinMax(lo, hi);
+                return box;
+            };
+
+            // 世界 AABB → 实体本地空间 AABB（8 角点变换后重取 min/max）
+            const worldAabbToLocal = (world: BoundingBox, entity: Entity): BoundingBox => {
+                const inv = entity.getWorldTransform().clone().invert();
+                const wMin = world.getMin().clone();
+                const wMax = world.getMax().clone();
+                const lo = new Vec3(Infinity, Infinity, Infinity);
+                const hi = new Vec3(-Infinity, -Infinity, -Infinity);
+                const p = new Vec3();
+                for (let i = 0; i < 8; i++) {
+                    p.set(i & 1 ? wMax.x : wMin.x, i & 2 ? wMax.y : wMin.y, i & 4 ? wMax.z : wMin.z);
+                    inv.transformPoint(p, p);
+                    lo.min(p);
+                    hi.max(p);
+                }
+                const box = new BoundingBox();
+                box.setMinMax(lo, hi);
+                return box;
+            };
+
+            const fmtVec = (v: Vec3) => `(${v.x.toFixed(3)}, ${v.y.toFixed(3)}, ${v.z.toFixed(3)})`;
+            const fmtBox = (box: BoundingBox | null): string => {
+                if (!box) return '(无)';
+                const lo = box.getMin().clone();
+                const hi = box.getMax().clone();
+                return `min=${fmtVec(lo)} max=${fmtVec(hi)} size=${fmtVec(new Vec3().sub2(hi, lo))} center=${fmtVec(box.center)}`;
+            };
+            const boxToJson = (box: BoundingBox | null) => {
+                if (!box) return null;
+                const lo = box.getMin().clone();
+                const hi = box.getMax().clone();
+                return {
+                    min: [lo.x, lo.y, lo.z],
+                    max: [hi.x, hi.y, hi.z],
+                    size: [hi.x - lo.x, hi.y - lo.y, hi.z - lo.z],
+                    center: [box.center.x, box.center.y, box.center.z]
+                };
+            };
+
+            type AnimScale = { scaleX: [number, number]; scaleY: [number, number]; scaleZ: [number, number] };
+            // 目标盒 → animScale（基准盒取自 CameraManager 里未乘 animScale 的那个盒）
+            const solveAnimScale = (box: BoundingBox): AnimScale | null => {
+                const base = this.cameraManager?.getConstraintBaseBounds();
+                if (!base) return null;
+                return BoxConstraint.solveAsymmetricScales(base, box);
+            };
+            const fmtScalePair = (v: [number, number]) => `[${v[0].toFixed(6)}, ${v[1].toFixed(6)}]`;
+            // 可直接粘进 settings.json 的片段
+            const buildCameraBoundsSnippet = (s: AnimScale): string => {
+                return [
+                    '"cameraBounds": {',
+                    '  "enabled": true,',
+                    `  "animScaleX": ${fmtScalePair(s.scaleX)},`,
+                    `  "animScaleY": ${fmtScalePair(s.scaleY)},`,
+                    `  "animScaleZ": ${fmtScalePair(s.scaleZ)}`,
+                    '}'
+                ].join('\n');
+            };
+
+            /** 剪贴板提示：原「获取相机信息」的 toast，抽成一处复用（避免重复造） */
+            let infoToast: HTMLDivElement | null = null;
+            const showToast = (text: string) => {
+                infoToast?.remove();
+                const message = document.createElement('div');
+                message.textContent = text;
+                message.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0, 0, 0, 0.8); color: white; padding: 20px 30px; border-radius: 8px; z-index: 10000; font-size: 16px; white-space: pre;';
+                document.body.appendChild(message);
+                infoToast = message;
+                setTimeout(() => {
+                    if (infoToast === message) {
+                        message.remove();
+                        infoToast = null;
+                    }
+                }, 2000);
+            };
+
+            // ── 累积状态（面板读数与调试线框共用）──
+            const recordedPositions: Vec3[] = [];
+            let recordedBox: BoundingBox | null = null;
+            let recordedBoxLocal: BoundingBox | null = null;
+            let recordedScale: AnimScale | null = null;
+
+            const cameraInfoLiveEl = document.getElementById('cameraInfoLive');
+
+            // 面板实时读数：位置/目标/FOV 每帧刷新；位置累积框与 animScale 随记录变化
+            const renderCameraInfoLive = () => {
+                if (!cameraInfoLiveEl || !this.cameraManager) return;
+                const cam = this.cameraManager.camera;
+                const focus = new Vec3();
+                cam.calcFocusPoint(focus);
+                const lines = [
+                    `位置  ${fmtVec(cam.position)}`,
+                    `目标  ${fmtVec(focus)}`,
+                    `FOV   ${cam.fov.toFixed(2)}°`,
+                    '',
+                    `已记录 ${recordedPositions.length} 个位置（单击记录 / 双击清除）`
+                ];
+                // 映射结果放前面，避免被下方滚动区裁掉
+                const scale = recordedScale;
+                if (scale) {
+                    lines.push(
+                        `→ animScaleX ${fmtScalePair(scale.scaleX)}`,
+                        `  animScaleY ${fmtScalePair(scale.scaleY)}`,
+                        `  animScaleZ ${fmtScalePair(scale.scaleZ)}`
+                    );
+                }
+                const box = recordedBox;
+                if (box) {
+                    lines.push(
+                        '',
+                        `位置框  min ${fmtVec(box.getMin().clone())}`,
+                        `        max ${fmtVec(box.getMax().clone())}`
+                    );
+                    // 单点 / 共线记录会让约束盒退化，直接写进 settings 会把相机卡死
+                    if (box.halfExtents.x < 1e-6 || box.halfExtents.y < 1e-6 || box.halfExtents.z < 1e-6) {
+                        lines.push('⚠ 位置框有轴退化为 0（记录点太少），此 animScale 会把相机卡死，请多记几个点');
+                    }
+                }
+                cameraInfoLiveEl.textContent = lines.join('\n');
+            };
+
+            // Handle get camera info request：单击 = 记录当前相机位置 + 输出相机信息 + 反推 animScale
             events.on('getCameraInfo', () => {
-                if (this.cameraManager) {
-                    const camera = this.cameraManager.camera;
-                    const target = new Vec3();
-                    camera.calcFocusPoint(target);
-                    
-                    const cameraInfo = {
-                        position: {
-                            x: camera.position.x,
-                            y: camera.position.y,
-                            z: camera.position.z
-                        },
-                        target: {
-                            x: target.x,
-                            y: target.y,
-                            z: target.z
-                        },
-                        fov: camera.fov
-                    };
-                    
-                    // 格式化输出
-                    const formattedInfo = `相机位置 (Position):
+                if (!this.cameraManager) return;
+                const camera = this.cameraManager.camera;
+                const target = new Vec3();
+                camera.calcFocusPoint(target);
+                recordedPositions.push(camera.position.clone());
+
+                const box = aabbFromPoints(recordedPositions);
+                recordedBox = box;
+                recordedBoxLocal = box ? worldAabbToLocal(box, gsplatEntity) : null;
+                recordedScale = box ? solveAnimScale(box) : null;
+                this.cameraManager.setRecordedPoseBounds(box);
+
+                const cameraInfo = {
+                    position: {
+                        x: camera.position.x,
+                        y: camera.position.y,
+                        z: camera.position.z
+                    },
+                    target: {
+                        x: target.x,
+                        y: target.y,
+                        z: target.z
+                    },
+                    fov: camera.fov
+                };
+
+                // 格式化输出
+                const formattedInfo = `相机位置 (Position):
 x: ${cameraInfo.position.x.toFixed(6)}
 y: ${cameraInfo.position.y.toFixed(6)}
 z: ${cameraInfo.position.z.toFixed(6)}
@@ -1146,29 +1295,63 @@ z: ${cameraInfo.target.z.toFixed(6)}
 
 视野角度 (FOV): ${cameraInfo.fov.toFixed(2)}°`;
 
-                    // 输出到控制台
-                    console.log('=== 相机信息 ===');
-                    console.log(formattedInfo);
-                    console.log('=== JSON格式 ===');
-                    console.log(JSON.stringify(cameraInfo, null, 2));
-                    
-                    // 复制到剪贴板
-                    const jsonString = JSON.stringify(cameraInfo, null, 2);
-                    navigator.clipboard.writeText(jsonString).then(() => {
-                        console.log('相机信息已复制到剪贴板');
-                        // 可以显示一个提示消息
-                        const message = document.createElement('div');
-                        message.textContent = '相机信息已复制到剪贴板！';
-                        message.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0, 0, 0, 0.8); color: white; padding: 20px 30px; border-radius: 8px; z-index: 10000; font-size: 16px;';
-                        document.body.appendChild(message);
-                        setTimeout(() => {
-                            document.body.removeChild(message);
-                        }, 2000);
-                    }).catch((err) => {
-                        console.error('复制到剪贴板失败:', err);
-                    });
+                const scale = recordedScale;
+                let animScaleFromPositionBox: Record<string, [number, number]> | null = null;
+                if (scale) {
+                    animScaleFromPositionBox = {
+                        animScaleX: scale.scaleX,
+                        animScaleY: scale.scaleY,
+                        animScaleZ: scale.scaleZ
+                    };
                 }
+                const payload = {
+                    count: recordedPositions.length,
+                    camera: cameraInfo,
+                    world: {
+                        positionBox: boxToJson(recordedBox),
+                        positionBoxLocal: boxToJson(recordedBoxLocal)
+                    },
+                    animScaleFromPositionBox
+                };
+
+                console.log('=== 相机信息 ===');
+                console.log(formattedInfo);
+                console.log(`=== 已记录 ${recordedPositions.length} 个相机位置 ===`);
+                console.log(`  位置累积框       ${fmtBox(recordedBox)}`);
+                console.log(`  位置累积框(本地) ${fmtBox(recordedBoxLocal)}`);
+                if (scale) {
+                    console.log(`=== 对应 cameraBounds ===\n${buildCameraBoundsSnippet(scale)}`);
+                }
+                console.log('=== JSON格式 ===');
+                console.log(JSON.stringify(payload, null, 2));
+
+                renderCameraInfoLive();
+
+                // 复制到剪贴板
+                const jsonString = JSON.stringify(payload, null, 2);
+                navigator.clipboard.writeText(jsonString).then(() => {
+                    console.log('相机信息已复制到剪贴板');
+                    showToast('相机信息已复制到剪贴板！');
+                }).catch((err) => {
+                    console.error('复制到剪贴板失败:', err);
+                });
             });
+
+            // 双击「获取相机信息」= 清除已记录的相机位置
+            events.on('clearCameraPose', () => {
+                recordedPositions.length = 0;
+                recordedBox = null;
+                recordedBoxLocal = null;
+                recordedScale = null;
+                this.cameraManager?.setRecordedPoseBounds(null);
+                renderCameraInfoLive();
+                console.log('已清除记录的相机位置');
+                showToast('已清除相机位置记录');
+            });
+
+            // 面板读数每帧刷新（autoRender=false 时 update 事件仍每帧触发）
+            app.on('update', renderCameraInfoLive);
+            renderCameraInfoLive();
 
             // 编辑模式：初始化资产放置与 Gizmo
             const canvasEl = app.graphicsDevice?.canvas as HTMLCanvasElement | undefined;

@@ -114,6 +114,36 @@ export class BoxConstraint {
         return new BoxConstraint(new BoundingBox(newCenter, newHalf));
     }
 
+    /**
+     * `fromBoundingBoxWithAsymmetricScales` 的反解：
+     * 给定基准盒 `base` 与目标盒 `target`，求让缩放后的盒等于 `target` 的各轴系数。
+     *
+     * 轴序与正向一致：`scaleX = [left, right]`、`scaleY = [top, bottom]`、`scaleZ = [negZ, posZ]`。
+     * 注意：结果对基准盒尺寸高度敏感（系数可能正负相近形成相消），写入 settings 后基准盒一变即失效。
+     * @param base - 基准盒（`BoxConstraint` 实际使用、未乘 animScale 的那个盒）
+     * @param target - 目标盒（希望缩放后的盒与之重合）
+     * @returns 各轴系数 `{ scaleX, scaleY, scaleZ }`
+     */
+    static solveAsymmetricScales(
+        base: BoundingBox,
+        target: BoundingBox
+    ): { scaleX: [number, number]; scaleY: [number, number]; scaleZ: [number, number] } {
+        const c = base.center;
+        const h = base.halfExtents;
+        const tMin = target.getMin().clone();
+        const tMax = target.getMax().clone();
+        // 基准盒退化（half=0）时给一个极小值，避免除零得到 Infinity/NaN
+        const safe = (v: number) => (Math.abs(v) < 1e-12 ? 1e-12 : v);
+        const hx = safe(h.x);
+        const hy = safe(h.y);
+        const hz = safe(h.z);
+        return {
+            scaleX: [(c.x - tMin.x) / hx, (tMax.x - c.x) / hx],
+            scaleY: [(tMax.y - c.y) / hy, (c.y - tMin.y) / hy],
+            scaleZ: [(c.z - tMin.z) / hz, (tMax.z - c.z) / hz]
+        };
+    }
+
     containsPoint(point: Vec3): boolean {
         // 使用带容差的 contains，避免贴边时抖动/误判
         const min = this.bbox.getMin();
