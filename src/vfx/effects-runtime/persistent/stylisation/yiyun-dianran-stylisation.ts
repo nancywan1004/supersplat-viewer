@@ -17,6 +17,8 @@ import {
     type Layer
 } from 'playcanvas';
 
+import { readScriptGlobal } from './stylisation-script-utils';
+
 export type YiyunDianranSettings = {
     enabled: boolean;
     /** 相机全屏后处理（纸张/景深/描边）；关闭时仅保留 GSplat 点着色 */
@@ -311,6 +313,17 @@ class YiyunDianranCameraFrameBridge {
         return true;
     }
 
+    // 是否仍挂在当前 CameraFrame 的 renderPassCamera 上（CameraFrame 重建后会变成 false）
+    isMounted(cameraFrame: CameraFrame): boolean {
+        const renderPassCamera = (cameraFrame as unknown as { renderPassCamera?: unknown }).renderPassCamera;
+        return this.active && !!renderPassCamera && this.hookedRenderPassCamera === renderPassCamera;
+    }
+
+    // 是否处于 CameraFrame 桥接状态（不关心是否已挂到最新的 renderPassCamera）
+    isActive(): boolean {
+        return this.active;
+    }
+
     setSaturation(saturation: number): void {
         this.effect.setSaturation(saturation);
     }
@@ -511,6 +524,8 @@ export class YiyunDianranController {
     private readonly glowColorArray = new Float32Array(3);
     private effectTime = 0;
     private originalClearColor: Color | null = null;
+    /** CameraFrame 可能晚于滤镜出现（典型：先开滤镜、后开阴影），需按帧校正挂载方式 */
+    private getCameraFrame: (() => CameraFrame | null | undefined) | undefined;
 
     constructor(app: AppBase, camera: CameraComponent) {
         this.app = app;
@@ -522,6 +537,7 @@ export class YiyunDianranController {
     apply(rawSettings: unknown, options: YiyunDianranApplyOptions): void {
         this.settings = normalizeYiyunDianranSettings(rawSettings);
         this.targetGsplat = options.gsplatEntity as GsplatLikeEntity;
+        this.getCameraFrame = options.getCameraFrame;
         this.effect.setSaturation(this.settings.saturation);
         this.cameraFrameBridge.setSaturation(this.settings.saturation);
 
@@ -547,6 +563,8 @@ export class YiyunDianranController {
         }
         this.effectTime += dt;
         this.syncGsplatUniforms();
+        // CameraFrame 可能在滤镜之后才被创建（如开启阴影），这里兜底校正挂载方式
+        this.syncCameraPipeline();
         this.app.renderNextFrame = true;
     }
 
@@ -561,8 +579,11 @@ export class YiyunDianranController {
             ...this.settings,
             postEffectEnabled: enabled
         };
+        if (getCameraFrame) {
+            this.getCameraFrame = getCameraFrame;
+        }
         if (enabled) {
-            this.mountPostProcessing(getCameraFrame);
+            this.mountPostProcessing();
         } else {
             this.unmountPostProcessing();
         }
@@ -570,14 +591,68 @@ export class YiyunDianranController {
     }
 
     private mountPostProcessing(getCameraFrame?: () => CameraFrame | null | undefined): void {
-        const cameraFrame = getCameraFrame?.();
+        if (getCameraFrame) {
+            this.getCameraFrame = getCameraFrame;
+        }
+        const cameraFrame = this.getCameraFrame?.();
         if (cameraFrame?.enabled && this.cameraFrameBridge.mount(cameraFrame)) {
-            this.unmountLegacy();
+            this.detachLegacyForCameraFrame();
         } else {
             this.cameraFrameBridge.unmount();
             this.mountLegacy();
         }
         this.applyCameraState();
+    }
+
+    /**
+     * CameraFrame 出现后：legacy `camera.postEffects` 在引擎里不会被触发（黑屏），
+     * 必须切到 compose 前处理，并让 CameraFrame 重建输出绑定（见 {@link requestCameraFrameRebind}）。
+     */
+    private detachLegacyForCameraFrame(): void {
+        this.unmountLegacy();
+    }
+
+    /**
+     * legacy 后处理的离屏 RT 在 `removeEffect` 时会被销毁，而 CameraFrame 的 compose/after pass
+     * 在创建时就把 `camera.renderTarget`（可能正是该离屏 RT）快照成输出目标 —— 不重建就会一直
+     * 往已销毁的 RT 上画，表现为黑屏且关开关都无法自愈。
+     */
+    private requestCameraFrameRebind(): void {
+        const global = readScriptGlobal(this.app);
+        if (!global?.events) {
+            return;
+        }
+        global.events.fire('cameraFrame:rebindRequested');
+        // 重建后的 CameraFrame 是全新对象，同步把 bridge hook 到新的 renderPassCamera
+        const cameraFrame = this.getCameraFrame?.();
+        if (cameraFrame?.enabled) {
+            this.cameraFrameBridge.mount(cameraFrame);
+        }
+        this.app.renderNextFrame = true;
+    }
+
+    /** 按当前是否存在 CameraFrame，在 bridge / legacy 两种挂载方式之间校正 */
+    private syncCameraPipeline(): void {
+        if (!this.settings.postEffectEnabled) {
+            return;
+        }
+        const cameraFrame = this.getCameraFrame?.();
+        if (cameraFrame?.enabled) {
+            if (this.cameraFrameBridge.isMounted(cameraFrame)) {
+                return;
+            }
+            // CameraFrame 重建后需要重新 hook 新的 renderPassCamera
+            if (this.cameraFrameBridge.mount(cameraFrame)) {
+                this.detachLegacyForCameraFrame();
+            }
+            return;
+        }
+        if (this.cameraFrameBridge.isActive()) {
+            this.cameraFrameBridge.unmount();
+        }
+        if (!this.legacyMounted) {
+            this.mountLegacy();
+        }
     }
 
     private unmountPostProcessing(): void {
@@ -589,6 +664,11 @@ export class YiyunDianranController {
     private mountLegacy(): void {
         if (!this.camera.postEffects) {
             console.warn('[yiyun-dianran] camera postEffects unavailable');
+            return;
+        }
+        // CameraFrame 存在时引擎只跑 framePasses，legacy 队列的 onPostprocessing 不会触发；
+        // 此时再挂 legacy 只会把画面渲染进离屏 RT 而不呈现（黑屏）。
+        if (this.getCameraFrame?.()?.enabled) {
             return;
         }
         this.camera.requestSceneDepthMap(true);
@@ -604,6 +684,10 @@ export class YiyunDianranController {
         }
         this.camera.postEffects.removeEffect(this.effect);
         this.legacyMounted = false;
+        // removeEffect 会销毁 legacy 的离屏 RT；若 CameraFrame 正把它当输出目标，必须重建绑定
+        if (this.getCameraFrame?.()?.enabled) {
+            this.requestCameraFrameRebind();
+        }
     }
 
     private unmountAll(): void {
