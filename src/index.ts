@@ -31,6 +31,7 @@ import { loadSplat } from './loaders/gsplat/sog/splat-deserialize';
 import type { AssetSource } from './loaders/shared/asset-source';
 import { shouldForceWebGlForSogUnified } from './loaders/gsplat/sog/device-fallback';
 import { loadGsplatAsset } from './loaders/gsplat/sog/splat-loader';
+import { loadSpzAsset, type SpzAsset } from './loaders/gsplat/spz/spz-loader';
 import { getAssetLoader } from './loaders/asset-loader';
 import { version as appVersion } from '../package.json';
 import { initPostMessageBridge } from './message-bridge';
@@ -67,32 +68,65 @@ import {
 
 export { loadGsplatAsset };
 
-const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progress: number) => void, lodLoader?: LodLoader) => {
+const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progress: number, detail?: string) => void, lodLoader?: LodLoader) => {
     const { contents, contentUrl, aa } = config;
     const filename = new URL(contentUrl, location.href).pathname.split('/').pop();
     const shouldEnableLod = lodLoader?.shouldEnableLod(contentUrl) ?? false;
     
-    // 检查是否为 .splat 格式
-    const isSplat = (filename || contentUrl || '').toLowerCase().endsWith('.splat');
-    
-    if (isSplat) {
-        // 对于 .splat 格式，需要先获取 contents
-        let assetSource: AssetSource = {
+    // .splat 与 .spz 需要自行解码（引擎的 GSplatHandler 不认识 spz，未知扩展名会回退到 PLY parser）
+    const lowerFilename = (filename || contentUrl || '').toLowerCase().split('?')[0];
+    const isSplat = lowerFilename.endsWith('.splat');
+    const isSpz = lowerFilename.endsWith('.spz');
+
+    if (isSplat || isSpz) {
+        // 先获取 contents（引擎流程不适用，需要完整字节流自己解码）
+        const assetSource: AssetSource = {
             url: contentUrl,
             filename: filename
         };
-        
+
+        // 响应头到达之前先给个非零进度，否则看起来像完全没动静
+        if (isSpz) {
+            progressCallback(5, '连接中…');
+        }
+
         if (contents) {
             const response = await contents;
-            const arrayBuffer = await response.arrayBuffer();
-            const blob = new Blob([arrayBuffer]);
-            assetSource.contents = new File([blob], filename || 'model', { type: 'application/octet-stream' });
+            if (isSpz) {
+                // 交给 spz loader 用 getReadStream() 边下边报进度。这里若先 arrayBuffer()
+                // 会把 body 读空，下载期间进度条将一直停在起点。
+                assetSource.contents = response;
+            } else {
+                const arrayBuffer = await response.arrayBuffer();
+                const blob = new Blob([arrayBuffer]);
+                assetSource.contents = new File([blob], filename || 'model', { type: 'application/octet-stream' });
+            }
         }
-        
-        // 使用 loadGsplatAsset 加载
-        progressCallback(10);
-        const asset = await loadGsplatAsset(app, assetSource);
-        progressCallback(90);
+
+        // 下载占绝大部分耗时，分给 10 → 69；解码 70 → 89；建实体时置 100。
+        const toMb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1);
+        const downloadStart = performance.now();
+        const onDownloadProgress = (received: number, total: number) => {
+            const ratio = total > 0 ? Math.min(1, received / total) : 0;
+            const progress = Math.min(69, Math.trunc(10 + ratio * 59));
+            const elapsed = Math.max(0.001, (performance.now() - downloadStart) / 1000);
+            const speed = received / (1024 * 1024) / elapsed;
+            progressCallback(progress, `下载中 ${toMb(received)} / ${toMb(total)} MB · ${speed.toFixed(1)} MB/s`);
+        };
+
+        const onDecodeProgress = (done: number, total: number) => {
+            const ratio = total > 0 ? Math.min(1, done / total) : 0;
+            progressCallback(Math.min(89, Math.trunc(70 + ratio * 19)), '解码中…');
+        };
+
+        progressCallback(10, isSpz ? '准备下载…' : '');
+        const asset = isSpz ?
+            await loadSpzAsset(app, assetSource, {
+                onProgress: onDecodeProgress,
+                onDownloadProgress
+            }) :
+            await loadGsplatAsset(app, assetSource);
+        progressCallback(90, isSpz ? '构建场景…' : '');
         
         // 创建实体的辅助函数
         const createEntity = () => {
@@ -104,7 +138,9 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
                 castShadows: false
             });
             const material = app.scene.gsplat.material;
-            material.setDefine('GSPLAT_AA', aa);
+            // SPZ 的 antialiased 标志（flags & 0x1）表示数据按 AA 训练，开 AA 才能还原原始外观
+            const spzAa = (asset as SpzAsset).spzInfo?.header.antialiased === true;
+            material.setDefine('GSPLAT_AA', aa || spzAa);
             material.setParameter('alphaClip', 1 / 255);
             app.root.addChild(entity);
 
@@ -115,7 +151,7 @@ const loadGsplat = async (app: AppBase, config: Config, progressCallback: (progr
                 }
             }
 
-            progressCallback(100);
+            progressCallback(100, '');
             return entity;
         };
         
@@ -510,13 +546,15 @@ const main = async (canvas: HTMLCanvasElement, settingsJson: any, config: Config
         loadGsplat(
         app,
         config,
-        (progress: number) => {
+        (progress: number, detail?: string) => {
             // lod-meta 仅表示 meta 下载；streaming 总进度 0–50% 由 octree bootstrap 接管
             if (isGsplatMetaJsonFilename(gsplatContentFilename)) {
                 state.progress = Math.max(state.progress, Math.min(progress, 50));
             } else {
                 state.progress = progress;
             }
+            // 次要说明行（下载字节数 / 速度 / 阶段），与百分比分开更新
+            events.fire('progressDetail', detail ?? '');
         },
         lodLoader
         )

@@ -177,7 +177,7 @@ class ShadowApplyRt extends Script {
     private _splatCounter = 0;
 
     /**
-     * 在指定世界坐标加载一个 gsplat（.sog/.ply/.splat 等）并添加到场景中。
+     * 在指定世界坐标加载一个 gsplat（.sog/.ply/.splat/.spz 等）并添加到场景中。
      * 复制主高斯的 layers 和 unified 模式，确保与已有高斯正确混合渲染。
      */
     spawnTestSplat(url: string, position: { x: number; y: number; z: number }) {

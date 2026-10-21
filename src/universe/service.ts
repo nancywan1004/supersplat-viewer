@@ -35,7 +35,7 @@ const UPLOADED_FILE_HOST = ENV_CONFIG.uploadedFileHost;
 export const buildUniverseApiUrl = (path: string): string => `${API_HOST}${path}`;
 //#endregion
 
-export const SPLATFILENAME='point_cloud.splat',SOGFILENAME='point_cloud.sog',SETTINGFILENAME='settings.json';
+export const SPLATFILENAME='point_cloud.splat',SOGFILENAME='point_cloud.sog',SPZFILENAME='point_cloud.spz',SETTINGFILENAME='settings.json';
 /** 项目缩略图本地/OSS 文件名：`{projectId}-thumbnail.jpg` */
 export const getProjectThumbnailFilename = (projectId: string | number): string => {
     const id = String(projectId).trim().replace(/[^a-zA-Z0-9._-]+/g, '_') || 'project';

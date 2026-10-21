@@ -148,7 +148,7 @@ export function getAssetPlacementSettingsHTML(): string {
             <select id="assetTypeSelect" class="settingsSelect" aria-label="资产类型">
                 <option value="image">image (JPG/PNG)</option>
                 <option value="mesh" selected>mesh (.glb)</option>
-                <option value="gaussian">gaussian (.sog/.splat/.ply)</option>
+                <option value="gaussian">gaussian (.sog/.splat/.spz/.ply)</option>
                 <option value="video">video (URL)</option>
                 <option value="audio">audio (URL)</option>
             </select>
@@ -264,7 +264,7 @@ export function bindAssetPlacementSettings(root: HTMLElement | null, global: Glo
                 : type === 'mesh'
                     ? 'https://.../xx.glb 或 /assets/xx.glb'
                     : type === 'gaussian'
-                        ? 'https://.../xx.sog 或 /assets/xx.sog'
+                        ? 'https://.../xx.sog / xx.spz 或 /assets/xx.sog'
                         : type === 'video'
                             ? 'https://.../xx.mp4 或 /assets/xx.mp4'
                             : 'https://.../xx.mp3 或 /assets/xx.mp3';

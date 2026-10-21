@@ -53,6 +53,7 @@
     "concurrently": "9.2.1",
     "eslint": "9.39.4",
     "express": "^4.18.2",
+    "fflate": "^0.8.2",
     "globals": "17.6.0",
     "http-proxy-middleware": "^2.0.6",
     "mediabunny": "^1.30.1",
@@ -69,7 +70,8 @@
     "rollup-plugin-string": "3.0.0",
     "sass": "1.100.0",
     "serve": "14.2.6",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "zstddec": "^0.3.4"
   },
   "scripts": {
     "vendor:playcanvas": "curl -fsSL -o public/vendor/playcanvas-2.20.0.js \"https://cdn.jsdelivr.net/npm/playcanvas@2.20.0/+esm\"",
