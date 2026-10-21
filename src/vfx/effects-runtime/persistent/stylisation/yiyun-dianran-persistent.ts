@@ -1,5 +1,6 @@
 import { Entity, Script, type CameraComponent } from 'playcanvas';
 
+import { isRevealDeferredForApp, readScriptGlobal } from './stylisation-script-utils';
 import {
     DEFAULT_YIYUN_DIANRAN_SETTINGS,
     YiyunDianranController
@@ -30,10 +31,22 @@ export class GsplatPersistentYiyunDianran extends Script {
 
     private _gsplatEntity: Entity | null = null;
 
+    /**
+     * 后处理管线变化（例如开阴影新建了 CameraFrame）时重新挂载：
+     * legacy `camera.postEffects` 在 CameraFrame 下不会被引擎触发，必须切到 compose 桥接。
+     */
+    private readonly _onPostEffectChanged = (): void => {
+        if (!this.enabled || isRevealDeferredForApp(this.app)) {
+            return;
+        }
+        this.applyConfig();
+    };
+
     initialize() {
         this._gsplatEntity = this.entity;
         this.on('enable', () => this.applyConfig());
         this.on('disable', () => this.applyConfig());
+        readScriptGlobal(this.app)?.events?.on('postEffect:changed', this._onPostEffectChanged);
     }
 
     update(dt: number) {
@@ -95,6 +108,7 @@ export class GsplatPersistentYiyunDianran extends Script {
     }
 
     destroy() {
+        readScriptGlobal(this.app)?.events?.off('postEffect:changed', this._onPostEffectChanged);
         this._controller?.apply({ ...DEFAULT_YIYUN_DIANRAN_SETTINGS, enabled: false }, {
             gsplatEntity: this._gsplatEntity ?? this.entity
         });

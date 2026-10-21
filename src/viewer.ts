@@ -555,6 +555,9 @@ class Viewer {
             this.configureCamera(global.settings);
             app.renderNextFrame = true;
         });
+        // 风格化 legacy 后处理在 CameraFrame 出现后切到 compose 前处理时，旧离屏 RT 会被销毁；
+        // CameraFrame 的输出目标需要重建才能重新绑定到真实相机目标，否则会持续黑屏。
+        events.on('cameraFrame:rebindRequested', () => this.rebindCameraFrame());
         app.on('nightFade:changedDetailed', () => {
             this.configureCamera(global.settings);
             app.renderNextFrame = true;
@@ -1234,6 +1237,23 @@ z: ${cameraInfo.target.z.toFixed(6)}
         });
     }
 
+    /**
+     * 重建 CameraFrame：compose/after pass 的输出目标在 `CameraFrame` 创建时对
+     * `cameraComponent.renderTarget` 做了快照。若之后 legacy 后处理的离屏 RT 被销毁
+     * （风格化从 legacy 切到 compose 前处理、或 `camera.postEffects.removeEffect`），
+     * 这些 pass 会继续往已销毁的 RT 上画 —— 黑屏且无法通过开关自愈。
+     */
+    rebindCameraFrame(): void {
+        if (!this.cameraFrame) {
+            return;
+        }
+        this.bloomController?.onCameraFrameDestroyed();
+        this.cameraFrame.destroy();
+        this.cameraFrame = null;
+        this.configureCamera(this.global.settings);
+        this.global.app.renderNextFrame = true;
+    }
+
     // configure camera based on application mode and post process settings
     configureCamera(settings: ExperienceSettings) {
         const { global } = this;
@@ -1279,6 +1299,9 @@ z: ${cameraInfo.target.z.toFixed(6)}
             postFxRequested ||
             palettePixelActive ||
             pointillismPostActive ||
+            // 意蕴点染同时支持 CameraFrame 桥接与 legacy postEffects；一旦 CameraFrame 因其它原因
+            // （如阴影）被创建，就必须保持它存在，避免 legacy → CameraFrame 的管线切换（黑屏）。
+            yiyunDianranPostEffectActive ||
             charcoalSketchActive ||
             watercolorActive
         );
