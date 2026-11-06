@@ -1,0 +1,130 @@
+{
+  "isOctreeBootstrapPlaceableNode": {
+    "selfMs": 46491,
+    "selfPct": 41.37,
+    "topParents": [
+      {
+        "parent": "(no-js-parent)",
+        "ms": 46491
+      }
+    ],
+    "topChains": [
+      {
+        "ms": 46491,
+        "chain": "(no-js-parent)"
+      }
+    ]
+  },
+  "countStreamingViewportBootstrapNodes": {
+    "selfMs": 9674.9,
+    "selfPct": 8.61,
+    "topParents": [
+      {
+        "parent": "(no-js-parent)",
+        "ms": 9674.9
+      }
+    ],
+    "topChains": [
+      {
+        "ms": 9674.9,
+        "chain": "(no-js-parent)"
+      }
+    ]
+  },
+  "ensureStreamingBootstrapCoarseFiles": {
+    "selfMs": 7250.5,
+    "selfPct": 6.45,
+    "topParents": [
+      {
+        "parent": "(no-js-parent)",
+        "ms": 7250.5
+      }
+    ],
+    "topChains": [
+      {
+        "ms": 7250.5,
+        "chain": "(no-js-parent)"
+      }
+    ]
+  },
+  "sumAllocationSlots": {
+    "selfMs": 5564.9,
+    "selfPct": 4.95,
+    "topParents": [
+      {
+        "parent": "(no-js-parent)",
+        "ms": 5564.9
+      }
+    ],
+    "topChains": [
+      {
+        "ms": 5564.9,
+        "chain": "(no-js-parent)"
+      }
+    ]
+  },
+  "readBakeGovernorPressure": {
+    "selfMs": 4717.8,
+    "selfPct": 4.2,
+    "topParents": [
+      {
+        "parent": "(no-js-parent)",
+        "ms": 4717.8
+      }
+    ],
+    "topChains": [
+      {
+        "ms": 4717.8,
+        "chain": "(no-js-parent)"
+      }
+    ]
+  },
+  "assignSplatOffsets": {
+    "selfMs": 5450.1,
+    "selfPct": 4.85,
+    "topParents": [
+      {
+        "parent": "(no-js-parent)",
+        "ms": 5450.1
+      }
+    ],
+    "topChains": [
+      {
+        "ms": 5450.1,
+        "chain": "(no-js-parent)"
+      }
+    ]
+  },
+  "runPriorityPrefetch": {
+    "selfMs": 812.1,
+    "selfPct": 0.72,
+    "topParents": [
+      {
+        "parent": "(no-js-parent)",
+        "ms": 812.1
+      }
+    ],
+    "topChains": [
+      {
+        "ms": 812.1,
+        "chain": "(no-js-parent)"
+      }
+    ]
+  },
+  "aabbIntersectsFrustum": {
+    "selfMs": 1364.5,
+    "selfPct": 1.21,
+    "topParents": [
+      {
+        "parent": "(no-js-parent)",
+        "ms": 1364.5
+      }
+    ],
+    "topChains": [
+      {
+        "ms": 1364.5,
+        "chain": "(no-js-parent)"
+      }
+    ]
+  }
+}

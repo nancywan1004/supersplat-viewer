@@ -1,0 +1,276 @@
+{
+  "mode": "cpu",
+  "sampleCount": 114102,
+  "totalMs": 29475.694,
+  "gcMs": 283.977,
+  "gcPct": 0.9634276974106191,
+  "modules": [
+    {
+      "module": "other",
+      "ms": 12219.523,
+      "hitCount": 46813,
+      "topFns": [
+        {
+          "fn": "(idle)",
+          "ms": 8478.149
+        },
+        {
+          "fn": "(program)",
+          "ms": 2601.649
+        },
+        {
+          "fn": "Blob",
+          "ms": 182.853
+        },
+        {
+          "fn": "getBoundingClientRect",
+          "ms": 88.971
+        },
+        {
+          "fn": "getCurrentTexture",
+          "ms": 87.563
+        }
+      ]
+    },
+    {
+      "module": "viewer-bundle",
+      "ms": 10726.883,
+      "hitCount": 41867,
+      "topFns": [
+        {
+          "fn": "countStreamingViewportBootstrapNodes",
+          "ms": 3836.162
+        },
+        {
+          "fn": "ensureStreamingBootstrapCoarseFiles",
+          "ms": 2815.08
+        },
+        {
+          "fn": "aabbIntersectsFrustum",
+          "ms": 926.462
+        },
+        {
+          "fn": "computeViewportEdgeFactor",
+          "ms": 821.148
+        },
+        {
+          "fn": "getStreamingViewportBootstrapStatus",
+          "ms": 556.309
+        }
+      ]
+    },
+    {
+      "module": "playcanvas",
+      "ms": 5198.862,
+      "hitCount": 20287,
+      "topFns": [
+        {
+          "fn": "set",
+          "ms": 1843.737
+        },
+        {
+          "fn": "transformPoint",
+          "ms": 920.209
+        },
+        {
+          "fn": "(anonymous)",
+          "ms": 141.259
+        },
+        {
+          "fn": "evaluateNodeLods",
+          "ms": 104.247
+        },
+        {
+          "fn": "transformVec4",
+          "ms": 103.103
+        }
+      ]
+    },
+    {
+      "module": "octree-lod",
+      "ms": 839.799,
+      "hitCount": 3270,
+      "topFns": [
+        {
+          "fn": "isOctreeBootstrapPlaceableNode",
+          "ms": 793.982
+        },
+        {
+          "fn": "octree.ensureFileResource",
+          "ms": 11.886
+        },
+        {
+          "fn": "findAllOctreeInstances",
+          "ms": 8.191
+        },
+        {
+          "fn": "findGsplatWorldsForOctree",
+          "ms": 5.111
+        },
+        {
+          "fn": "buildPriorityFiles",
+          "ms": 4.895
+        }
+      ]
+    },
+    {
+      "module": "gc",
+      "ms": 283.977,
+      "hitCount": 1048,
+      "topFns": [
+        {
+          "fn": "(garbage collector)",
+          "ms": 283.977
+        }
+      ]
+    },
+    {
+      "module": "gsplat-engine",
+      "ms": 157.398,
+      "hitCount": 623,
+      "topFns": [
+        {
+          "fn": "assignSplatOffsets",
+          "ms": 109.772
+        },
+        {
+          "fn": "readGsplatBufferUploadMetrics",
+          "ms": 12.775
+        },
+        {
+          "fn": "applyWorkBufferUpdates",
+          "ms": 12.123
+        },
+        {
+          "fn": "get gsplat",
+          "ms": 6.725
+        },
+        {
+          "fn": "get workBufferModifier",
+          "ms": 2.546
+        }
+      ]
+    },
+    {
+      "module": "refinement-controller",
+      "ms": 49.252,
+      "hitCount": 193,
+      "topFns": [
+        {
+          "fn": "runPriorityPrefetch",
+          "ms": 47.274
+        },
+        {
+          "fn": "syncOctreePendingPlacements",
+          "ms": 1.532
+        },
+        {
+          "fn": "trackSyncOctreePendingPlacements",
+          "ms": 0.446
+        }
+      ]
+    }
+  ],
+  "refinementSymbols": [
+    {
+      "fn": "isOctreeBootstrapPlaceableNode",
+      "url": "http://localhost:3000/index.js",
+      "line": 101652
+    },
+    {
+      "fn": "findAllOctreeInstances",
+      "url": "http://localhost:3000/index.js",
+      "line": 101676
+    },
+    {
+      "fn": "getOctreeBootstrapLod",
+      "url": "http://localhost:3000/index.js",
+      "line": 101648
+    },
+    {
+      "fn": "createOctreeRefinementController",
+      "url": "http://localhost:3000/index.js",
+      "line": 103713
+    },
+    {
+      "fn": "ensureOctreeLeafSpatialIndex",
+      "url": "http://localhost:3000/index.js",
+      "line": 102037
+    },
+    {
+      "fn": "runPriorityPrefetch",
+      "url": "http://localhost:3000/index.js",
+      "line": 103915
+    },
+    {
+      "fn": "buildPriorityFiles",
+      "url": "http://localhost:3000/index.js",
+      "line": 103450
+    },
+    {
+      "fn": "syncStreamingOctreePlacements",
+      "url": "http://localhost:3000/index.js",
+      "line": 103444
+    },
+    {
+      "fn": "syncOctreePendingPlacements",
+      "url": "http://localhost:3000/index.js",
+      "line": 103021
+    },
+    {
+      "fn": "requestOctreePlacementUpdate",
+      "url": "http://localhost:3000/index.js",
+      "line": 101767
+    },
+    {
+      "fn": "findGsplatWorldsForOctree",
+      "url": "http://localhost:3000/index.js",
+      "line": 101714
+    },
+    {
+      "fn": "worldOwnsOctree",
+      "url": "http://localhost:3000/index.js",
+      "line": 101663
+    },
+    {
+      "fn": "hasSyncedOctreeThisFrame",
+      "url": "http://localhost:3000/index.js",
+      "line": 103002
+    },
+    {
+      "fn": "markSyncedOctreeThisFrame",
+      "url": "http://localhost:3000/index.js",
+      "line": 103006
+    },
+    {
+      "fn": "trackSyncOctreePendingPlacements",
+      "url": "http://localhost:3000/index.js",
+      "line": 103015
+    },
+    {
+      "fn": "getOctreeUrlToFileIndex",
+      "url": "http://localhost:3000/index.js",
+      "line": 102539
+    },
+    {
+      "fn": "buildPriorityFilesIncremental",
+      "url": "http://localhost:3000/index.js",
+      "line": 103227
+    },
+    {
+      "fn": "isFileBoundToOctreeInstance",
+      "url": "http://localhost:3000/index.js",
+      "line": 102553
+    },
+    {
+      "fn": "clearSyncedOctreesThisFrame",
+      "url": "http://localhost:3000/index.js",
+      "line": 102977
+    },
+    {
+      "fn": "octree.ensureFileResource",
+      "url": "http://localhost:3000/index.js",
+      "line": 102386
+    }
+  ]
+}

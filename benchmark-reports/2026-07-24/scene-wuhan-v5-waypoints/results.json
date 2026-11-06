@@ -1,0 +1,258 @@
+{
+  "benchmarkAxis": "profile",
+  "suite": "public/benchmark-suites/scene-wuhan-v5-waypoints.json",
+  "baseUrl": "http://localhost:3000/",
+  "renderer": "webgpu",
+  "runConditions": {
+    "coldStart": true,
+    "browserSession": "fresh-chromium-per-case",
+    "chromiumHttpCache": "disabled-cdp-clearBrowserCache-zero-disk-cache",
+    "warmup": {
+      "enabled": false,
+      "discarded": false,
+      "skippedReason": "cold-start-default"
+    },
+    "notes": [
+      "Cold start (default): each case launches a new Chromium, blocks service workers, disables HTTP cache via CDP, clears browser cache, and uses --disk-cache-size=0.",
+      "Playwright uses an ephemeral profile (not your daily Chrome); no cookies/storage persist after browser.close().",
+      "OS page cache, DNS, and GPU shader/pipeline cache are NOT reset by this script — cross-run comparisons on one machine may still drift."
+    ]
+  },
+  "cases": [
+    {
+      "label": "wuhan-v5-user-waypoints",
+      "budget": 2.5,
+      "lodRuntime": "refinement",
+      "firstFrameMs": 3253,
+      "settleStartMs": 3253.0999999046326,
+      "fpsP50": 60,
+      "fpsP95": 60,
+      "gsplatsAvgM": 1.1987265,
+      "jsHeapAtFirstFrameMb": 92.82357501983643,
+      "vramTexAtFirstFrameMb": 109.99522686004639,
+      "jsHeapPeakMb": 162.64785766601562,
+      "vramTexPeakMb": 159.3279905319214,
+      "rendererUsed": "compute",
+      "interactionWaypoints": [
+        {
+          "label": "kf-0",
+          "keyframeIndex": 0,
+          "animTimeSec": 0,
+          "moveMs": 0,
+          "blurToClearMs": 5201.100000023842,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 11,
+          "pendingPeakNodes": 11,
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 60,
+          "fpsP95DuringRefine": 60,
+          "fpsMinDuringRefine": 59,
+          "gsplatsAtClearM": 0.919226,
+          "jsHeapAtClearMb": 119.21886730194092,
+          "vramTexAtClearMb": 134.61320781707764,
+          "jsHeapPeakDuringRefineMb": 146.4991340637207,
+          "vramTexPeakDuringRefineMb": 134.61320781707764,
+          "screenshotPath": "screenshots/wuhan-v5-user-waypoints/kf-0.jpg"
+        },
+        {
+          "label": "kf-1",
+          "keyframeIndex": 1,
+          "animTimeSec": 1,
+          "moveMs": 948.7000000476837,
+          "blurToClearMs": 0,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 0,
+          "pendingPeakNodes": 0,
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 60,
+          "fpsP95DuringRefine": 60,
+          "fpsMinDuringRefine": 60,
+          "gsplatsAtClearM": 0.919226,
+          "jsHeapAtClearMb": 98.95126342773438,
+          "vramTexAtClearMb": 134.61320781707764,
+          "jsHeapPeakDuringRefineMb": 120.91101455688477,
+          "vramTexPeakDuringRefineMb": 134.61320781707764,
+          "screenshotPath": "screenshots/wuhan-v5-user-waypoints/kf-1.jpg"
+        },
+        {
+          "label": "kf-2",
+          "keyframeIndex": 2,
+          "animTimeSec": 2,
+          "moveMs": 949.8999999761581,
+          "blurToClearMs": 2200,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 4,
+          "pendingPeakNodes": 5,
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 60,
+          "fpsP95DuringRefine": 60,
+          "fpsMinDuringRefine": 59,
+          "gsplatsAtClearM": 1.451265,
+          "jsHeapAtClearMb": 134.29828548431396,
+          "vramTexAtClearMb": 155.4865598678589,
+          "jsHeapPeakDuringRefineMb": 151.75806427001953,
+          "vramTexPeakDuringRefineMb": 155.4865598678589,
+          "screenshotPath": "screenshots/wuhan-v5-user-waypoints/kf-2.jpg"
+        },
+        {
+          "label": "kf-3",
+          "keyframeIndex": 3,
+          "animTimeSec": 3,
+          "moveMs": 948.6000000238419,
+          "blurToClearMs": 1000.4000000953674,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 1,
+          "pendingPeakNodes": 1,
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 60,
+          "fpsP95DuringRefine": 60,
+          "fpsMinDuringRefine": 59,
+          "gsplatsAtClearM": 1.505189,
+          "jsHeapAtClearMb": 139.26287841796875,
+          "vramTexAtClearMb": 159.3279905319214,
+          "jsHeapPeakDuringRefineMb": 162.64785766601562,
+          "vramTexPeakDuringRefineMb": 159.3279905319214,
+          "screenshotPath": "screenshots/wuhan-v5-user-waypoints/kf-3.jpg"
+        }
+      ],
+      "animTrackBenchmark": {
+        "keyframes": [
+          {
+            "label": "kf-0",
+            "keyframeIndex": 0,
+            "animTimeSec": 0,
+            "moveMs": 0,
+            "blurToClearMs": 5201.100000023842,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 11,
+            "pendingPeakNodes": 11,
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 60,
+            "fpsP95DuringRefine": 60,
+            "fpsMinDuringRefine": 59,
+            "gsplatsAtClearM": 0.919226,
+            "jsHeapAtClearMb": 119.21886730194092,
+            "vramTexAtClearMb": 134.61320781707764,
+            "jsHeapPeakDuringRefineMb": 146.4991340637207,
+            "vramTexPeakDuringRefineMb": 134.61320781707764,
+            "screenshotPath": "screenshots/wuhan-v5-user-waypoints/kf-0.jpg"
+          },
+          {
+            "label": "kf-1",
+            "keyframeIndex": 1,
+            "animTimeSec": 1,
+            "moveMs": 948.7000000476837,
+            "blurToClearMs": 0,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 0,
+            "pendingPeakNodes": 0,
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 60,
+            "fpsP95DuringRefine": 60,
+            "fpsMinDuringRefine": 60,
+            "gsplatsAtClearM": 0.919226,
+            "jsHeapAtClearMb": 98.95126342773438,
+            "vramTexAtClearMb": 134.61320781707764,
+            "jsHeapPeakDuringRefineMb": 120.91101455688477,
+            "vramTexPeakDuringRefineMb": 134.61320781707764,
+            "screenshotPath": "screenshots/wuhan-v5-user-waypoints/kf-1.jpg"
+          },
+          {
+            "label": "kf-2",
+            "keyframeIndex": 2,
+            "animTimeSec": 2,
+            "moveMs": 949.8999999761581,
+            "blurToClearMs": 2200,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 4,
+            "pendingPeakNodes": 5,
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 60,
+            "fpsP95DuringRefine": 60,
+            "fpsMinDuringRefine": 59,
+            "gsplatsAtClearM": 1.451265,
+            "jsHeapAtClearMb": 134.29828548431396,
+            "vramTexAtClearMb": 155.4865598678589,
+            "jsHeapPeakDuringRefineMb": 151.75806427001953,
+            "vramTexPeakDuringRefineMb": 155.4865598678589,
+            "screenshotPath": "screenshots/wuhan-v5-user-waypoints/kf-2.jpg"
+          },
+          {
+            "label": "kf-3",
+            "keyframeIndex": 3,
+            "animTimeSec": 3,
+            "moveMs": 948.6000000238419,
+            "blurToClearMs": 1000.4000000953674,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 1,
+            "pendingPeakNodes": 1,
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 60,
+            "fpsP95DuringRefine": 60,
+            "fpsMinDuringRefine": 59,
+            "gsplatsAtClearM": 1.505189,
+            "jsHeapAtClearMb": 139.26287841796875,
+            "vramTexAtClearMb": 159.3279905319214,
+            "jsHeapPeakDuringRefineMb": 162.64785766601562,
+            "vramTexPeakDuringRefineMb": 159.3279905319214,
+            "screenshotPath": "screenshots/wuhan-v5-user-waypoints/kf-3.jpg"
+          }
+        ],
+        "fpsP50DuringPlayback": 60,
+        "fpsP95DuringPlayback": 60,
+        "fpsMinDuringPlayback": 59,
+        "totalPlaybackMs": 2847.2000000476837
+      },
+      "bakeAcceptance": {
+        "sampleCount": 925,
+        "copyPctGe95": {
+          "frames": 1,
+          "ratio": 0.001
+        },
+        "uploadedOverTotal": {
+          "n": 55,
+          "p50": 0.0042509777248767215,
+          "p90": 0.06937595646998809,
+          "max": 1,
+          "avg": 0.05194351575806026
+        },
+        "uploadMbEst": {
+          "n": 56,
+          "p50": 0.18,
+          "p90": 2.88,
+          "max": 5.6,
+          "avg": 0.765
+        },
+        "bakePassesEst": {
+          "n": 56,
+          "p50": 1,
+          "p90": 1,
+          "max": 1,
+          "avg": 0.9821428571428571
+        },
+        "worldStateFullRebuild": {
+          "frames": 2,
+          "ratio": 0.002
+        },
+        "dirtyForcedWorkBufferRebuild": {
+          "frames": 1,
+          "ratio": 0.001
+        },
+        "syncAdvance": {
+          "horizonFrames": 5,
+          "syncFrames": 117,
+          "advancedWithinHorizon": 70,
+          "advanceRatio": 0.598,
+          "worldVersionAdvanced": 62,
+          "currentLodAdvanced": 57
+        },
+        "staleLoadedNodes": {
+          "framesWithStale": 862,
+          "maxConsecutiveFrames": 734
+        }
+      },
+      "timestamp": "2026-07-24T10:12:56.741Z",
+      "bottleneckHint": "asset-http"
+    }
+  ]
+}

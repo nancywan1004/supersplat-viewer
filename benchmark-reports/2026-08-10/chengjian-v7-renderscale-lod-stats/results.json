@@ -1,0 +1,1085 @@
+{
+  "title": "chengjian-v7 renderScaleLod vs engineOptimalLod vs targetLod",
+  "content": "https://unicity-dev2.bdnrc.org.cn/upload/scene/20260605/yunji/LOD/chengjian-school-v7/lod-meta.json",
+  "budget": 6,
+  "settings": "/assets/settings/settings-chengjian-distance-ab.json",
+  "note": "targetLod=max(renderScaleLod, engineOptimalLod). Samples: frustum-visible leaves (score>0) only; engineOptimalLod from applyLodChanges pre-merge snapshot (not writeback-contaminated).",
+  "cases": [
+    {
+      "rs": 1,
+      "waypoints": [
+        {
+          "label": "kf-0",
+          "sample": {
+            "baseRenderScale": 1,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 101,
+              "mergedChanged": 1,
+              "visualCoarser": 1,
+              "engineCoarser": 98,
+              "equal": 2,
+              "histRenderScaleLod": [
+                98,
+                2,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histEngineOptimalLod": [
+                0,
+                101,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                0,
+                100,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "meanRenderScaleLod": 0.039603960396039604,
+              "meanEngineOptimalLod": 1,
+              "meanTargetLod": 1.00990099009901,
+              "meanDeltaTargetMinusEngine": 0.009900990099009901
+            }
+          }
+        },
+        {
+          "label": "kf-1",
+          "sample": {
+            "baseRenderScale": 1,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 205,
+              "mergedChanged": 4,
+              "visualCoarser": 4,
+              "engineCoarser": 196,
+              "equal": 5,
+              "histRenderScaleLod": [
+                192,
+                5,
+                4,
+                3,
+                1,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histEngineOptimalLod": [
+                0,
+                78,
+                126,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                0,
+                78,
+                122,
+                4,
+                1,
+                0,
+                0,
+                0,
+                0
+              ],
+              "meanRenderScaleLod": 0.12682926829268293,
+              "meanEngineOptimalLod": 1.6243902439024391,
+              "meanTargetLod": 1.648780487804878,
+              "meanDeltaTargetMinusEngine": 0.024390243902439025
+            }
+          }
+        },
+        {
+          "label": "kf-2",
+          "sample": {
+            "baseRenderScale": 1,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 237,
+              "mergedChanged": 5,
+              "visualCoarser": 5,
+              "engineCoarser": 207,
+              "equal": 25,
+              "histRenderScaleLod": [
+                201,
+                20,
+                11,
+                4,
+                1,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histEngineOptimalLod": [
+                15,
+                91,
+                79,
+                52,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                15,
+                87,
+                81,
+                53,
+                1,
+                0,
+                0,
+                0,
+                0
+              ],
+              "meanRenderScaleLod": 0.24472573839662448,
+              "meanEngineOptimalLod": 1.7088607594936709,
+              "meanTargetLod": 1.738396624472574,
+              "meanDeltaTargetMinusEngine": 0.029535864978902954
+            }
+          }
+        },
+        {
+          "label": "kf-3",
+          "sample": {
+            "baseRenderScale": 1,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 113,
+              "mergedChanged": 0,
+              "visualCoarser": 0,
+              "engineCoarser": 109,
+              "equal": 4,
+              "histRenderScaleLod": [
+                113,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histEngineOptimalLod": [
+                4,
+                33,
+                25,
+                51,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                4,
+                33,
+                25,
+                51,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "meanRenderScaleLod": 0,
+              "meanEngineOptimalLod": 2.088495575221239,
+              "meanTargetLod": 2.088495575221239,
+              "meanDeltaTargetMinusEngine": 0
+            }
+          }
+        }
+      ],
+      "aggregate": {
+        "totalLeafSamples": 656,
+        "waypointsWithData": 4,
+        "visualCoarserPct": 1.5,
+        "engineCoarserPct": 93,
+        "equalPct": 5.5,
+        "meanRenderScaleLod": 0.10278974177133676,
+        "meanEngineOptimalLod": 1.605436644654337,
+        "meanTargetLod": 1.6213934193994253,
+        "meanDeltaTargetMinusEngine": 0.01595677474508797,
+        "histRenderScaleLod": [
+          604,
+          27,
+          16,
+          7,
+          2,
+          0,
+          0,
+          0,
+          0
+        ],
+        "histEngineOptimalLod": [
+          19,
+          303,
+          230,
+          104,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "histTargetLod": [
+          19,
+          298,
+          229,
+          108,
+          2,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "rs": 2,
+      "waypoints": [
+        {
+          "label": "kf-0",
+          "sample": {
+            "baseRenderScale": 2,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 101,
+              "mergedChanged": 18,
+              "visualCoarser": 18,
+              "engineCoarser": 62,
+              "equal": 21,
+              "histRenderScaleLod": [
+                60,
+                22,
+                9,
+                7,
+                3,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histEngineOptimalLod": [
+                0,
+                90,
+                11,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                0,
+                75,
+                16,
+                7,
+                3,
+                0,
+                0,
+                0,
+                0
+              ],
+              "meanRenderScaleLod": 0.7227722772277227,
+              "meanEngineOptimalLod": 1.108910891089109,
+              "meanTargetLod": 1.386138613861386,
+              "meanDeltaTargetMinusEngine": 0.27722772277227725
+            }
+          }
+        },
+        {
+          "label": "kf-1",
+          "sample": {
+            "baseRenderScale": 2,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 205,
+              "mergedChanged": 36,
+              "visualCoarser": 36,
+              "engineCoarser": 113,
+              "equal": 56,
+              "histRenderScaleLod": [
+                96,
+                32,
+                35,
+                23,
+                13,
+                6,
+                0,
+                0,
+                0
+              ],
+              "histEngineOptimalLod": [
+                18,
+                50,
+                107,
+                30,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                18,
+                43,
+                86,
+                39,
+                13,
+                6,
+                0,
+                0,
+                0
+              ],
+              "meanRenderScaleLod": 1.2341463414634146,
+              "meanEngineOptimalLod": 1.726829268292683,
+              "meanTargetLod": 2.0195121951219512,
+              "meanDeltaTargetMinusEngine": 0.2926829268292683
+            }
+          }
+        },
+        {
+          "label": "kf-2",
+          "sample": {
+            "baseRenderScale": 2,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 237,
+              "mergedChanged": 70,
+              "visualCoarser": 70,
+              "engineCoarser": 118,
+              "equal": 49,
+              "histRenderScaleLod": [
+                116,
+                20,
+                35,
+                41,
+                17,
+                8,
+                0,
+                0,
+                0
+              ],
+              "histEngineOptimalLod": [
+                15,
+                91,
+                79,
+                52,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                15,
+                70,
+                54,
+                73,
+                17,
+                8,
+                0,
+                0,
+                0
+              ],
+              "meanRenderScaleLod": 1.3544303797468353,
+              "meanEngineOptimalLod": 1.7088607594936709,
+              "meanTargetLod": 2.130801687763713,
+              "meanDeltaTargetMinusEngine": 0.4219409282700422
+            }
+          }
+        },
+        {
+          "label": "kf-3",
+          "sample": {
+            "baseRenderScale": 2,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 113,
+              "mergedChanged": 1,
+              "visualCoarser": 1,
+              "engineCoarser": 104,
+              "equal": 8,
+              "histRenderScaleLod": [
+                107,
+                5,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histEngineOptimalLod": [
+                4,
+                33,
+                25,
+                51,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                4,
+                32,
+                26,
+                51,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "meanRenderScaleLod": 0.061946902654867256,
+              "meanEngineOptimalLod": 2.088495575221239,
+              "meanTargetLod": 2.0973451327433628,
+              "meanDeltaTargetMinusEngine": 0.008849557522123894
+            }
+          }
+        }
+      ],
+      "aggregate": {
+        "totalLeafSamples": 656,
+        "waypointsWithData": 4,
+        "visualCoarserPct": 19.1,
+        "engineCoarserPct": 60.5,
+        "equalPct": 20.4,
+        "meanRenderScaleLod": 0.84332397527321,
+        "meanEngineOptimalLod": 1.6582741235241754,
+        "meanTargetLod": 1.9084494073726033,
+        "meanDeltaTargetMinusEngine": 0.2501752838484279,
+        "histRenderScaleLod": [
+          379,
+          79,
+          80,
+          71,
+          33,
+          14,
+          0,
+          0,
+          0
+        ],
+        "histEngineOptimalLod": [
+          37,
+          264,
+          222,
+          133,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "histTargetLod": [
+          37,
+          220,
+          182,
+          170,
+          33,
+          14,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "rs": 4,
+      "waypoints": [
+        {
+          "label": "kf-0",
+          "sample": {
+            "baseRenderScale": 4,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 101,
+              "mergedChanged": 67,
+              "visualCoarser": 67,
+              "engineCoarser": 29,
+              "equal": 5,
+              "histRenderScaleLod": [
+                28,
+                6,
+                11,
+                25,
+                19,
+                6,
+                6,
+                0,
+                0
+              ],
+              "histEngineOptimalLod": [
+                0,
+                90,
+                11,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                0,
+                32,
+                13,
+                25,
+                19,
+                6,
+                6,
+                0,
+                0
+              ],
+              "meanRenderScaleLod": 2.4257425742574257,
+              "meanEngineOptimalLod": 1.108910891089109,
+              "meanTargetLod": 2.722772277227723,
+              "meanDeltaTargetMinusEngine": 1.613861386138614
+            }
+          }
+        },
+        {
+          "label": "kf-1",
+          "sample": {
+            "baseRenderScale": 4,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 205,
+              "mergedChanged": 144,
+              "visualCoarser": 144,
+              "engineCoarser": 29,
+              "equal": 32,
+              "histRenderScaleLod": [
+                42,
+                10,
+                19,
+                26,
+                56,
+                36,
+                11,
+                5,
+                0
+              ],
+              "histEngineOptimalLod": [
+                18,
+                50,
+                116,
+                21,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                17,
+                22,
+                30,
+                28,
+                56,
+                36,
+                11,
+                5,
+                0
+              ],
+              "meanRenderScaleLod": 3.078048780487805,
+              "meanEngineOptimalLod": 1.6829268292682926,
+              "meanTargetLod": 3.273170731707317,
+              "meanDeltaTargetMinusEngine": 1.5902439024390245
+            }
+          }
+        },
+        {
+          "label": "kf-2",
+          "sample": {
+            "baseRenderScale": 4,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 237,
+              "mergedChanged": 163,
+              "visualCoarser": 163,
+              "engineCoarser": 45,
+              "equal": 29,
+              "histRenderScaleLod": [
+                51,
+                19,
+                18,
+                28,
+                34,
+                38,
+                37,
+                12,
+                0
+              ],
+              "histEngineOptimalLod": [
+                15,
+                91,
+                79,
+                52,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                15,
+                30,
+                22,
+                49,
+                34,
+                38,
+                37,
+                12,
+                0
+              ],
+              "meanRenderScaleLod": 3.2531645569620253,
+              "meanEngineOptimalLod": 1.7088607594936709,
+              "meanTargetLod": 3.5991561181434597,
+              "meanDeltaTargetMinusEngine": 1.890295358649789
+            }
+          }
+        },
+        {
+          "label": "kf-3",
+          "sample": {
+            "baseRenderScale": 4,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 113,
+              "mergedChanged": 29,
+              "visualCoarser": 29,
+              "engineCoarser": 70,
+              "equal": 14,
+              "histRenderScaleLod": [
+                62,
+                14,
+                26,
+                9,
+                2,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histEngineOptimalLod": [
+                4,
+                33,
+                26,
+                50,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                4,
+                8,
+                40,
+                59,
+                2,
+                0,
+                0,
+                0,
+                0
+              ],
+              "meanRenderScaleLod": 0.8938053097345132,
+              "meanEngineOptimalLod": 2.079646017699115,
+              "meanTargetLod": 2.415929203539823,
+              "meanDeltaTargetMinusEngine": 0.336283185840708
+            }
+          }
+        }
+      ],
+      "aggregate": {
+        "totalLeafSamples": 656,
+        "waypointsWithData": 4,
+        "visualCoarserPct": 61.4,
+        "engineCoarserPct": 26.4,
+        "equalPct": 12.2,
+        "meanRenderScaleLod": 2.4126903053604423,
+        "meanEngineOptimalLod": 1.645086124387547,
+        "meanTargetLod": 3.002757082654581,
+        "meanDeltaTargetMinusEngine": 1.3576709582670339,
+        "histRenderScaleLod": [
+          183,
+          49,
+          74,
+          88,
+          111,
+          80,
+          54,
+          17,
+          0
+        ],
+        "histEngineOptimalLod": [
+          37,
+          264,
+          232,
+          123,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "histTargetLod": [
+          36,
+          92,
+          105,
+          161,
+          111,
+          80,
+          54,
+          17,
+          0
+        ]
+      }
+    },
+    {
+      "rs": 8,
+      "waypoints": [
+        {
+          "label": "kf-0",
+          "sample": {
+            "baseRenderScale": 8,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 101,
+              "mergedChanged": 82,
+              "visualCoarser": 82,
+              "engineCoarser": 14,
+              "equal": 5,
+              "histRenderScaleLod": [
+                14,
+                5,
+                3,
+                9,
+                11,
+                24,
+                22,
+                8,
+                5
+              ],
+              "histEngineOptimalLod": [
+                0,
+                90,
+                11,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                0,
+                19,
+                3,
+                9,
+                11,
+                24,
+                22,
+                8,
+                5
+              ],
+              "meanRenderScaleLod": 4.257425742574258,
+              "meanEngineOptimalLod": 1.108910891089109,
+              "meanTargetLod": 4.396039603960396,
+              "meanDeltaTargetMinusEngine": 3.287128712871287
+            }
+          }
+        },
+        {
+          "label": "kf-1",
+          "sample": {
+            "baseRenderScale": 8,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 205,
+              "mergedChanged": 184,
+              "visualCoarser": 184,
+              "engineCoarser": 5,
+              "equal": 16,
+              "histRenderScaleLod": [
+                17,
+                7,
+                7,
+                13,
+                18,
+                22,
+                51,
+                51,
+                19
+              ],
+              "histEngineOptimalLod": [
+                19,
+                38,
+                145,
+                3,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                12,
+                7,
+                11,
+                14,
+                18,
+                22,
+                51,
+                51,
+                19
+              ],
+              "meanRenderScaleLod": 5.15609756097561,
+              "meanEngineOptimalLod": 1.6439024390243901,
+              "meanTargetLod": 5.209756097560976,
+              "meanDeltaTargetMinusEngine": 3.5658536585365854
+            }
+          }
+        },
+        {
+          "label": "kf-2",
+          "sample": {
+            "baseRenderScale": 8,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 237,
+              "mergedChanged": 205,
+              "visualCoarser": 205,
+              "engineCoarser": 14,
+              "equal": 18,
+              "histRenderScaleLod": [
+                18,
+                7,
+                13,
+                20,
+                17,
+                20,
+                42,
+                38,
+                62
+              ],
+              "histEngineOptimalLod": [
+                16,
+                90,
+                96,
+                35,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                14,
+                2,
+                9,
+                33,
+                17,
+                20,
+                42,
+                38,
+                62
+              ],
+              "meanRenderScaleLod": 5.379746835443038,
+              "meanEngineOptimalLod": 1.6329113924050633,
+              "meanTargetLod": 5.489451476793249,
+              "meanDeltaTargetMinusEngine": 3.8565400843881856
+            }
+          }
+        },
+        {
+          "label": "kf-3",
+          "sample": {
+            "baseRenderScale": 8,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 113,
+              "mergedChanged": 58,
+              "visualCoarser": 58,
+              "engineCoarser": 41,
+              "equal": 14,
+              "histRenderScaleLod": [
+                24,
+                10,
+                19,
+                17,
+                30,
+                9,
+                4,
+                0,
+                0
+              ],
+              "histEngineOptimalLod": [
+                5,
+                32,
+                30,
+                46,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                4,
+                2,
+                9,
+                55,
+                30,
+                9,
+                4,
+                0,
+                0
+              ],
+              "meanRenderScaleLod": 2.5486725663716814,
+              "meanEngineOptimalLod": 2.0353982300884956,
+              "meanTargetLod": 3.309734513274336,
+              "meanDeltaTargetMinusEngine": 1.2743362831858407
+            }
+          }
+        }
+      ],
+      "aggregate": {
+        "totalLeafSamples": 656,
+        "waypointsWithData": 4,
+        "visualCoarserPct": 80.6,
+        "engineCoarserPct": 11.3,
+        "equalPct": 8.1,
+        "meanRenderScaleLod": 4.335485676341147,
+        "meanEngineOptimalLod": 1.6052807381517644,
+        "meanTargetLod": 4.6012454228972395,
+        "meanDeltaTargetMinusEngine": 2.995964684745475,
+        "histRenderScaleLod": [
+          73,
+          29,
+          42,
+          59,
+          76,
+          75,
+          119,
+          97,
+          86
+        ],
+        "histEngineOptimalLod": [
+          40,
+          250,
+          282,
+          84,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "histTargetLod": [
+          30,
+          30,
+          32,
+          111,
+          76,
+          75,
+          119,
+          97,
+          86
+        ]
+      }
+    }
+  ]
+}

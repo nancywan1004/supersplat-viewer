@@ -1,0 +1,166 @@
+{
+  "benchmarkAxis": "profile",
+  "suite": "public/benchmark-suites/scene-downtown-like.json",
+  "baseUrl": "http://localhost:3000/",
+  "renderer": "webgpu",
+  "runConditions": {
+    "browserSession": "fresh-launch-per-script",
+    "browserHttpCache": "warm-after-discarded-warmup",
+    "warmup": {
+      "enabled": true,
+      "discarded": true,
+      "caseLabel": "downtown-like-current-profile",
+      "durationMs": 71248
+    },
+    "notes": [
+      "Each script invocation launches a new Chromium process (no persisted profile).",
+      "Warmup uses the first suite case, discards its metrics, then measured case(s) run in the same browser context.",
+      "OS page cache and GPU pipeline cache are not reset between script runs; compare runs on the same machine with care."
+    ]
+  },
+  "cases": [
+    {
+      "label": "downtown-like-current-profile",
+      "presetId": "desktop-mega-medium",
+      "budget": 8,
+      "firstFrameMs": 35284.299999952316,
+      "progressCompleteMs": 25724.100000023842,
+      "settleStartMs": 25724.200000047684,
+      "fpsP50": 76,
+      "fpsP95": 120,
+      "gsplatsAvgM": 3.5828112500000002,
+      "rendererUsed": "compute",
+      "interactionWaypoints": [
+        {
+          "label": "kf-0",
+          "keyframeIndex": 0,
+          "animTimeSec": 0,
+          "moveMs": 0,
+          "blurToClearMs": 9442.800000071526,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 25,
+          "pendingPeakNodes": 31,
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 77,
+          "fpsP95DuringRefine": 79,
+          "fpsMinDuringRefine": 76,
+          "gsplatsAtClearM": 3.268023
+        },
+        {
+          "label": "kf-1",
+          "keyframeIndex": 1,
+          "animTimeSec": 1,
+          "moveMs": 952.7999999523163,
+          "blurToClearMs": 3269.7999999523163,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 1,
+          "pendingPeakNodes": 1,
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 117,
+          "fpsP95DuringRefine": 120,
+          "fpsMinDuringRefine": 76,
+          "gsplatsAtClearM": 3.2907
+        },
+        {
+          "label": "kf-2",
+          "keyframeIndex": 2,
+          "animTimeSec": 2,
+          "moveMs": 969.5,
+          "blurToClearMs": 13526.700000047684,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 8,
+          "pendingPeakNodes": 8,
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 79,
+          "fpsP95DuringRefine": 84,
+          "fpsMinDuringRefine": 77,
+          "gsplatsAtClearM": 3.878381
+        },
+        {
+          "label": "kf-3",
+          "keyframeIndex": 3,
+          "animTimeSec": 3,
+          "moveMs": 959.5,
+          "blurToClearMs": 6681.200000047684,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 1,
+          "pendingPeakNodes": 1,
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 74,
+          "fpsP95DuringRefine": 75,
+          "fpsMinDuringRefine": 67,
+          "gsplatsAtClearM": 3.894141
+        }
+      ],
+      "animTrackBenchmark": {
+        "keyframes": [
+          {
+            "label": "kf-0",
+            "keyframeIndex": 0,
+            "animTimeSec": 0,
+            "moveMs": 0,
+            "blurToClearMs": 9442.800000071526,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 25,
+            "pendingPeakNodes": 31,
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 77,
+            "fpsP95DuringRefine": 79,
+            "fpsMinDuringRefine": 76,
+            "gsplatsAtClearM": 3.268023
+          },
+          {
+            "label": "kf-1",
+            "keyframeIndex": 1,
+            "animTimeSec": 1,
+            "moveMs": 952.7999999523163,
+            "blurToClearMs": 3269.7999999523163,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 1,
+            "pendingPeakNodes": 1,
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 117,
+            "fpsP95DuringRefine": 120,
+            "fpsMinDuringRefine": 76,
+            "gsplatsAtClearM": 3.2907
+          },
+          {
+            "label": "kf-2",
+            "keyframeIndex": 2,
+            "animTimeSec": 2,
+            "moveMs": 969.5,
+            "blurToClearMs": 13526.700000047684,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 8,
+            "pendingPeakNodes": 8,
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 79,
+            "fpsP95DuringRefine": 84,
+            "fpsMinDuringRefine": 77,
+            "gsplatsAtClearM": 3.878381
+          },
+          {
+            "label": "kf-3",
+            "keyframeIndex": 3,
+            "animTimeSec": 3,
+            "moveMs": 959.5,
+            "blurToClearMs": 6681.200000047684,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 1,
+            "pendingPeakNodes": 1,
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 74,
+            "fpsP95DuringRefine": 75,
+            "fpsMinDuringRefine": 67,
+            "gsplatsAtClearM": 3.894141
+          }
+        ],
+        "fpsP50DuringPlayback": 76,
+        "fpsP95DuringPlayback": 120,
+        "fpsMinDuringPlayback": 72,
+        "totalPlaybackMs": 2881.7999999523163
+      },
+      "timestamp": "2026-06-21T05:49:09.992Z"
+    }
+  ]
+}

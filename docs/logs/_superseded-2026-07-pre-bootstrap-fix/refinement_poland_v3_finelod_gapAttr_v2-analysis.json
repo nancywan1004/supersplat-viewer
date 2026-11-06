@@ -1,0 +1,675 @@
+{
+  "verdict": "B_non_bake：高 gap 多数 bake 不高 → 先查 longtask/其它，暂不升 B-engine",
+  "all": {
+    "label": "all",
+    "n": 711,
+    "frameMs": {
+      "n": 711,
+      "p50": 66.7,
+      "p90": 166.6,
+      "max": 866.7
+    },
+    "gapMs": {
+      "n": 711,
+      "p50": 0,
+      "p90": 59.8,
+      "max": 802.8
+    },
+    "updateMs": {
+      "n": 711,
+      "p50": 32.2,
+      "p90": 114.4,
+      "max": 218.3
+    },
+    "renderMs": {
+      "n": 711,
+      "p50": 25.6,
+      "p90": 40.1,
+      "max": 82.9
+    },
+    "bakeCpuMs": {
+      "n": 711,
+      "p50": 0,
+      "p90": 8,
+      "max": 23.8
+    },
+    "writeBufferMs": {
+      "n": 711,
+      "p50": 0,
+      "p90": 3,
+      "max": 17.8
+    },
+    "bakePlusWrite": {
+      "n": 711,
+      "p50": 0,
+      "p90": 10.9,
+      "max": 40.1
+    },
+    "worldUpdateMs": {
+      "n": 711,
+      "p50": 0,
+      "p90": 0,
+      "max": 0
+    },
+    "placementMs": {
+      "n": 711,
+      "p50": 0,
+      "p90": 0,
+      "max": 0
+    },
+    "engMs": {
+      "n": 711,
+      "p50": 0,
+      "p90": 10.9,
+      "max": 40.1
+    },
+    "longTaskMs": {
+      "n": 711,
+      "p50": 63,
+      "p90": 218,
+      "max": 444
+    },
+    "modeA": 0,
+    "modeB": 91,
+    "modeMid": 12,
+    "modeA_pct": 0,
+    "modeB_pct": 12.8,
+    "updateZeroN": 0,
+    "longGe50": 394
+  },
+  "highGap": {
+    "label": "gap≥40",
+    "n": 103,
+    "frameMs": {
+      "n": 103,
+      "p50": 166.8,
+      "p90": 234.2,
+      "max": 866.7
+    },
+    "gapMs": {
+      "n": 103,
+      "p50": 70,
+      "p90": 100.5,
+      "max": 802.8
+    },
+    "updateMs": {
+      "n": 103,
+      "p50": 35.5,
+      "p90": 109.1,
+      "max": 134.2
+    },
+    "renderMs": {
+      "n": 103,
+      "p50": 25.9,
+      "p90": 38.9,
+      "max": 82.9
+    },
+    "bakeCpuMs": {
+      "n": 103,
+      "p50": 0,
+      "p90": 7.9,
+      "max": 8.6
+    },
+    "writeBufferMs": {
+      "n": 103,
+      "p50": 0,
+      "p90": 2.1,
+      "max": 3.6
+    },
+    "bakePlusWrite": {
+      "n": 103,
+      "p50": 0,
+      "p90": 10,
+      "max": 11.3
+    },
+    "worldUpdateMs": {
+      "n": 103,
+      "p50": 0,
+      "p90": 0,
+      "max": 0
+    },
+    "placementMs": {
+      "n": 103,
+      "p50": 0,
+      "p90": 0,
+      "max": 0
+    },
+    "engMs": {
+      "n": 103,
+      "p50": 0,
+      "p90": 10,
+      "max": 11.3
+    },
+    "longTaskMs": {
+      "n": 103,
+      "p50": 178,
+      "p90": 361,
+      "max": 444
+    },
+    "modeA": 0,
+    "modeB": 91,
+    "modeMid": 12,
+    "modeA_pct": 0,
+    "modeB_pct": 88.3,
+    "updateZeroN": 0,
+    "longGe50": 61
+  },
+  "veryHigh": {
+    "label": "gap≥80",
+    "n": 28,
+    "frameMs": {
+      "n": 28,
+      "p50": 183.4,
+      "p90": 250,
+      "max": 866.7
+    },
+    "gapMs": {
+      "n": 28,
+      "p50": 96.2,
+      "p90": 139.2,
+      "max": 802.8
+    },
+    "updateMs": {
+      "n": 28,
+      "p50": 34.9,
+      "p90": 76.9,
+      "max": 111.7
+    },
+    "renderMs": {
+      "n": 28,
+      "p50": 25.3,
+      "p90": 36.1,
+      "max": 82.9
+    },
+    "bakeCpuMs": {
+      "n": 28,
+      "p50": 0,
+      "p90": 7.7,
+      "max": 7.9
+    },
+    "writeBufferMs": {
+      "n": 28,
+      "p50": 0,
+      "p90": 1.9,
+      "max": 3.1
+    },
+    "bakePlusWrite": {
+      "n": 28,
+      "p50": 0,
+      "p90": 9.3,
+      "max": 10.8
+    },
+    "worldUpdateMs": {
+      "n": 28,
+      "p50": 0,
+      "p90": 0,
+      "max": 0
+    },
+    "placementMs": {
+      "n": 28,
+      "p50": 0,
+      "p90": 0,
+      "max": 0
+    },
+    "engMs": {
+      "n": 28,
+      "p50": 0,
+      "p90": 9.3,
+      "max": 10.8
+    },
+    "longTaskMs": {
+      "n": 28,
+      "p50": 179,
+      "p90": 331,
+      "max": 421
+    },
+    "modeA": 0,
+    "modeB": 26,
+    "modeMid": 2,
+    "modeA_pct": 0,
+    "modeB_pct": 92.9,
+    "updateZeroN": 0,
+    "longGe50": 17
+  },
+  "slow": {
+    "label": "frame≥140",
+    "n": 106,
+    "frameMs": {
+      "n": 106,
+      "p50": 167.6,
+      "p90": 249.1,
+      "max": 866.7
+    },
+    "gapMs": {
+      "n": 106,
+      "p50": 69.3,
+      "p90": 100.5,
+      "max": 802.8
+    },
+    "updateMs": {
+      "n": 106,
+      "p50": 38.8,
+      "p90": 121.6,
+      "max": 172.7
+    },
+    "renderMs": {
+      "n": 106,
+      "p50": 28.3,
+      "p90": 41.5,
+      "max": 82.9
+    },
+    "bakeCpuMs": {
+      "n": 106,
+      "p50": 0.1,
+      "p90": 8,
+      "max": 11.5
+    },
+    "writeBufferMs": {
+      "n": 106,
+      "p50": 0,
+      "p90": 3,
+      "max": 5.3
+    },
+    "bakePlusWrite": {
+      "n": 106,
+      "p50": 0.1,
+      "p90": 10.8,
+      "max": 14.6
+    },
+    "worldUpdateMs": {
+      "n": 106,
+      "p50": 0,
+      "p90": 0,
+      "max": 0
+    },
+    "placementMs": {
+      "n": 106,
+      "p50": 0,
+      "p90": 0,
+      "max": 0
+    },
+    "engMs": {
+      "n": 106,
+      "p50": 0.1,
+      "p90": 10.8,
+      "max": 14.6
+    },
+    "longTaskMs": {
+      "n": 106,
+      "p50": 179,
+      "p90": 372,
+      "max": 444
+    },
+    "modeA": 0,
+    "modeB": 72,
+    "modeMid": 12,
+    "modeA_pct": 0,
+    "modeB_pct": 67.9,
+    "updateZeroN": 0,
+    "longGe50": 63
+  },
+  "topGap": [
+    {
+      "i": 0,
+      "frameMs": 866.7,
+      "gap": 802.8,
+      "update": 52.9,
+      "render": 0.6,
+      "gpu": 7.9,
+      "bakeCpu": 0,
+      "write": 0,
+      "bake": 0,
+      "world": 0,
+      "place": 0,
+      "eng": 0,
+      "long": 0,
+      "slots": 0,
+      "copy": 0,
+      "uploadMb": 0
+    },
+    {
+      "i": 286,
+      "frameMs": 250,
+      "gap": 155.8,
+      "update": 41,
+      "render": 25.5,
+      "gpu": 23.3,
+      "bakeCpu": 0,
+      "write": 0,
+      "bake": 0,
+      "world": 0,
+      "place": 0,
+      "eng": 0,
+      "long": 0,
+      "slots": 0,
+      "copy": 11.2,
+      "uploadMb": 6.96
+    },
+    {
+      "i": 686,
+      "frameMs": 234,
+      "gap": 143,
+      "update": 32.8,
+      "render": 24.6,
+      "gpu": 28.2,
+      "bakeCpu": 0,
+      "write": 0,
+      "bake": 0,
+      "world": 0,
+      "place": 0,
+      "eng": 0,
+      "long": 332,
+      "slots": 0,
+      "copy": 15.1,
+      "uploadMb": 14.24
+    },
+    {
+      "i": 596,
+      "frameMs": 233.3,
+      "gap": 139.2,
+      "update": 38.2,
+      "render": 24.6,
+      "gpu": 27.3,
+      "bakeCpu": 0,
+      "write": 0,
+      "bake": 0,
+      "world": 0,
+      "place": 0,
+      "eng": 0,
+      "long": 351,
+      "slots": 0,
+      "copy": 10.2,
+      "uploadMb": 8.6
+    },
+    {
+      "i": 586,
+      "frameMs": 215.7,
+      "gap": 128.4,
+      "update": 35.9,
+      "render": 28.3,
+      "gpu": 18.4,
+      "bakeCpu": 0.1,
+      "write": 0,
+      "bake": 0.1,
+      "world": 0,
+      "place": 0,
+      "eng": 0.1,
+      "long": 203,
+      "slots": 0,
+      "copy": 11.6,
+      "uploadMb": 10.01
+    },
+    {
+      "i": 696,
+      "frameMs": 199.6,
+      "gap": 123.4,
+      "update": 32.7,
+      "render": 24.4,
+      "gpu": 14.2,
+      "bakeCpu": 0,
+      "write": 0,
+      "bake": 0,
+      "world": 0,
+      "place": 0,
+      "eng": 0,
+      "long": 301,
+      "slots": 0,
+      "copy": 0.2,
+      "uploadMb": 0.15
+    },
+    {
+      "i": 516,
+      "frameMs": 200,
+      "gap": 117.8,
+      "update": 35.7,
+      "render": 27,
+      "gpu": 15.9,
+      "bakeCpu": 0,
+      "write": 0,
+      "bake": 0,
+      "world": 0,
+      "place": 0,
+      "eng": 0,
+      "long": 179,
+      "slots": 0,
+      "copy": 2.2,
+      "uploadMb": 1.66
+    },
+    {
+      "i": 677,
+      "frameMs": 201,
+      "gap": 110.9,
+      "update": 36.3,
+      "render": 24.1,
+      "gpu": 25,
+      "bakeCpu": 0.1,
+      "write": 0,
+      "bake": 0.1,
+      "world": 0,
+      "place": 0,
+      "eng": 0.1,
+      "long": 0,
+      "slots": 0,
+      "copy": 0,
+      "uploadMb": 0
+    },
+    {
+      "i": 646,
+      "frameMs": 183.3,
+      "gap": 110.3,
+      "update": 31.2,
+      "render": 24.3,
+      "gpu": 14.7,
+      "bakeCpu": 0,
+      "write": 0,
+      "bake": 0,
+      "world": 0,
+      "place": 0,
+      "eng": 0,
+      "long": 174,
+      "slots": 0,
+      "copy": 2.2,
+      "uploadMb": 2.05
+    },
+    {
+      "i": 606,
+      "frameMs": 183.4,
+      "gap": 108,
+      "update": 34.2,
+      "render": 24.5,
+      "gpu": 12.7,
+      "bakeCpu": 0,
+      "write": 0,
+      "bake": 0,
+      "world": 0,
+      "place": 0,
+      "eng": 0,
+      "long": 300,
+      "slots": 0,
+      "copy": 8.2,
+      "uploadMb": 6.86
+    },
+    {
+      "i": 486,
+      "frameMs": 183.4,
+      "gap": 103.2,
+      "update": 32.5,
+      "render": 29.6,
+      "gpu": 14.9,
+      "bakeCpu": 0.1,
+      "write": 0,
+      "bake": 0.1,
+      "world": 0,
+      "place": 0,
+      "eng": 0.1,
+      "long": 289,
+      "slots": 0,
+      "copy": 6.9,
+      "uploadMb": 5.02
+    },
+    {
+      "i": 626,
+      "frameMs": 183.4,
+      "gap": 100.5,
+      "update": 30.9,
+      "render": 23.7,
+      "gpu": 24.6,
+      "bakeCpu": 0,
+      "write": 0,
+      "bake": 0,
+      "world": 0,
+      "place": 0,
+      "eng": 0,
+      "long": 265,
+      "slots": 0,
+      "copy": 1.6,
+      "uploadMb": 1.36
+    }
+  ],
+  "topBake": [
+    {
+      "i": 511,
+      "frameMs": 67.5,
+      "gap": 0,
+      "update": 194.9,
+      "render": 71.9,
+      "gpu": 28.3,
+      "bakeCpu": 22.3,
+      "write": 17.8,
+      "bake": 40.1,
+      "world": 0,
+      "place": 0,
+      "eng": 40.1,
+      "long": 127,
+      "slots": 2185129,
+      "copy": 0,
+      "uploadMb": 0
+    },
+    {
+      "i": 332,
+      "frameMs": 50,
+      "gap": 0,
+      "update": 177.2,
+      "render": 64.1,
+      "gpu": 13.4,
+      "bakeCpu": 23.8,
+      "write": 10.3,
+      "bake": 34.1,
+      "world": 0,
+      "place": 0,
+      "eng": 34.1,
+      "long": 121,
+      "slots": 1796082,
+      "copy": 0,
+      "uploadMb": 0
+    },
+    {
+      "i": 657,
+      "frameMs": 66.6,
+      "gap": 0,
+      "update": 159,
+      "render": 65.4,
+      "gpu": 24.6,
+      "bakeCpu": 21.2,
+      "write": 11.8,
+      "bake": 33,
+      "world": 0,
+      "place": 0,
+      "eng": 33,
+      "long": 0,
+      "slots": 2456372,
+      "copy": 0,
+      "uploadMb": 0
+    },
+    {
+      "i": 389,
+      "frameMs": 66.7,
+      "gap": 0,
+      "update": 175.5,
+      "render": 63.1,
+      "gpu": 34.2,
+      "bakeCpu": 19.3,
+      "write": 9.7,
+      "bake": 29,
+      "world": 0,
+      "place": 0,
+      "eng": 29,
+      "long": 0,
+      "slots": 1860296,
+      "copy": 0,
+      "uploadMb": 0
+    },
+    {
+      "i": 193,
+      "frameMs": 50,
+      "gap": 0,
+      "update": 168.3,
+      "render": 54.2,
+      "gpu": 16.6,
+      "bakeCpu": 18.1,
+      "write": 8.6,
+      "bake": 26.700000000000003,
+      "world": 0,
+      "place": 0,
+      "eng": 26.7,
+      "long": 111,
+      "slots": 1559167,
+      "copy": 0,
+      "uploadMb": 0
+    },
+    {
+      "i": 276,
+      "frameMs": 66.6,
+      "gap": 0,
+      "update": 181.4,
+      "render": 55.2,
+      "gpu": 21.1,
+      "bakeCpu": 18.5,
+      "write": 8.1,
+      "bake": 26.6,
+      "world": 0,
+      "place": 0,
+      "eng": 26.6,
+      "long": 0,
+      "slots": 1603208,
+      "copy": 0,
+      "uploadMb": 0
+    },
+    {
+      "i": 68,
+      "frameMs": 116.7,
+      "gap": 0,
+      "update": 165.1,
+      "render": 54.9,
+      "gpu": 11.7,
+      "bakeCpu": 17,
+      "write": 6.9,
+      "bake": 23.9,
+      "world": 0,
+      "place": 0,
+      "eng": 23.9,
+      "long": 161,
+      "slots": 841731,
+      "copy": 104.2,
+      "uploadMb": 31.81
+    },
+    {
+      "i": 515,
+      "frameMs": 117.2,
+      "gap": 0,
+      "update": 127.2,
+      "render": 46.4,
+      "gpu": 29.6,
+      "bakeCpu": 8.2,
+      "write": 9.6,
+      "bake": 17.799999999999997,
+      "world": 0,
+      "place": 0,
+      "eng": 17.8,
+      "long": 121,
+      "slots": 89530,
+      "copy": 0,
+      "uploadMb": 0
+    }
+  ]
+}

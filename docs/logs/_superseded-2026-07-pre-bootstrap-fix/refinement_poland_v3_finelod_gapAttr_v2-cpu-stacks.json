@@ -1,0 +1,427 @@
+{
+  "meta": {
+    "profileMs": 112370.5,
+    "sampleCount": 434713,
+    "totalSampledMs": 112370.4,
+    "idleMs": 65.1,
+    "idlePct": 0.1,
+    "frameSamples": 711,
+    "highGapFrames": 103
+  },
+  "selfTimeByClass": [
+    {
+      "cls": "viewer",
+      "ms": 61464.6,
+      "pct": 54.7
+    },
+    {
+      "cls": "playcanvas",
+      "ms": 18884.2,
+      "pct": 16.8
+    },
+    {
+      "cls": "network-parse",
+      "ms": 17028.2,
+      "pct": 15.2
+    },
+    {
+      "cls": "gsplat-bake",
+      "ms": 5505.8,
+      "pct": 4.9
+    },
+    {
+      "cls": "(program)",
+      "ms": 3737,
+      "pct": 3.3
+    },
+    {
+      "cls": "other",
+      "ms": 1933.1,
+      "pct": 1.7
+    },
+    {
+      "cls": "gc",
+      "ms": 1735.2,
+      "pct": 1.5
+    },
+    {
+      "cls": "buffer-copy",
+      "ms": 1148.4,
+      "pct": 1
+    },
+    {
+      "cls": "refinement",
+      "ms": 813.7,
+      "pct": 0.7
+    },
+    {
+      "cls": "(idle)",
+      "ms": 65.1,
+      "pct": 0.1
+    },
+    {
+      "cls": "gsplat-sort-cull",
+      "ms": 35.1,
+      "pct": 0
+    },
+    {
+      "cls": "profiler",
+      "ms": 12.8,
+      "pct": 0
+    },
+    {
+      "cls": "raf-observer",
+      "ms": 4.8,
+      "pct": 0
+    },
+    {
+      "cls": "decode",
+      "ms": 2.3,
+      "pct": 0
+    }
+  ],
+  "topSelfFunctions": [
+    {
+      "ms": 46491,
+      "pct": 41.37,
+      "cls": "viewer",
+      "fn": "isOctreeBootstrapPlaceableNode",
+      "loc": "/index.js:101604"
+    },
+    {
+      "ms": 9674.9,
+      "pct": 8.61,
+      "cls": "network-parse",
+      "fn": "countStreamingViewportBootstrapNodes",
+      "loc": "/index.js:103479"
+    },
+    {
+      "ms": 7250.5,
+      "pct": 6.45,
+      "cls": "network-parse",
+      "fn": "ensureStreamingBootstrapCoarseFiles",
+      "loc": "/index.js:103519"
+    },
+    {
+      "ms": 5564.9,
+      "pct": 4.95,
+      "cls": "viewer",
+      "fn": "sumAllocationSlots",
+      "loc": "/index.js:129457"
+    },
+    {
+      "ms": 5450.1,
+      "pct": 4.85,
+      "cls": "gsplat-bake",
+      "fn": "assignSplatOffsets",
+      "loc": "/vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 4717.8,
+      "pct": 4.2,
+      "cls": "viewer",
+      "fn": "readBakeGovernorPressure",
+      "loc": "/index.js:102019"
+    },
+    {
+      "ms": 3971.5,
+      "pct": 3.53,
+      "cls": "playcanvas",
+      "fn": "_diffAlloc",
+      "loc": "/vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 3737,
+      "pct": 3.33,
+      "cls": "(program)",
+      "fn": "(program)",
+      "loc": ":0"
+    },
+    {
+      "ms": 2241.6,
+      "pct": 1.99,
+      "cls": "playcanvas",
+      "fn": "AY",
+      "loc": "/vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 1735.2,
+      "pct": 1.54,
+      "cls": "gc",
+      "fn": "(garbage collector)",
+      "loc": ":0"
+    },
+    {
+      "ms": 1453,
+      "pct": 1.29,
+      "cls": "playcanvas",
+      "fn": "transformPoint",
+      "loc": "/vendor/playcanvas-2.20.0.js:8"
+    },
+    {
+      "ms": 1364.5,
+      "pct": 1.21,
+      "cls": "viewer",
+      "fn": "aabbIntersectsFrustum",
+      "loc": "/index.js:103107"
+    },
+    {
+      "ms": 1136.3,
+      "pct": 1.01,
+      "cls": "buffer-copy",
+      "fn": "set",
+      "loc": "/vendor/playcanvas-2.20.0.js:8"
+    },
+    {
+      "ms": 1047.2,
+      "pct": 0.93,
+      "cls": "viewer",
+      "fn": "computeViewportEdgeFactor",
+      "loc": "/index.js:103293"
+    },
+    {
+      "ms": 995.8,
+      "pct": 0.89,
+      "cls": "playcanvas",
+      "fn": "applyAllocations",
+      "loc": "/vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 993.9,
+      "pct": 0.88,
+      "cls": "playcanvas",
+      "fn": "balance",
+      "loc": "/vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 977.6,
+      "pct": 0.87,
+      "cls": "other",
+      "fn": "writeBuffer",
+      "loc": ":0"
+    },
+    {
+      "ms": 880.4,
+      "pct": 0.78,
+      "cls": "playcanvas",
+      "fn": "evaluateNodeLods",
+      "loc": "/vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 812.1,
+      "pct": 0.72,
+      "cls": "refinement",
+      "fn": "runPriorityPrefetch",
+      "loc": "/index.js:104155"
+    },
+    {
+      "ms": 712,
+      "pct": 0.63,
+      "cls": "playcanvas",
+      "fn": "updateIntervals",
+      "loc": "/vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 600.3,
+      "pct": 0.53,
+      "cls": "playcanvas",
+      "fn": "_defragIncremental",
+      "loc": "/vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 599.2,
+      "pct": 0.53,
+      "cls": "playcanvas",
+      "fn": "computeAllocationDiff",
+      "loc": "/vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 591.9,
+      "pct": 0.53,
+      "cls": "playcanvas",
+      "fn": "selectDesiredLodIndex",
+      "loc": "/vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 572.4,
+      "pct": 0.51,
+      "cls": "playcanvas",
+      "fn": "writeBoundsSpheres",
+      "loc": "/vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 543.6,
+      "pct": 0.48,
+      "cls": "playcanvas",
+      "fn": "applyLodChanges",
+      "loc": "/vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 500.9,
+      "pct": 0.45,
+      "cls": "playcanvas",
+      "fn": "render",
+      "loc": "/vendor/playcanvas-2.20.0.js:1631"
+    },
+    {
+      "ms": 432.7,
+      "pct": 0.39,
+      "cls": "viewer",
+      "fn": "computeViewportAabbEdgeFactor",
+      "loc": "/index.js:103306"
+    },
+    {
+      "ms": 405.9,
+      "pct": 0.36,
+      "cls": "playcanvas",
+      "fn": "evaluateOptimalLods",
+      "loc": "/vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 365.7,
+      "pct": 0.33,
+      "cls": "viewer",
+      "fn": "getOctreeBootstrapLod",
+      "loc": "/index.js:101600"
+    },
+    {
+      "ms": 349.4,
+      "pct": 0.31,
+      "cls": "viewer",
+      "fn": "loader.load",
+      "loc": "/index.js:102663"
+    }
+  ],
+  "topStacks": [
+    {
+      "ms": 46491,
+      "pct": 41.37,
+      "stack": "isOctreeBootstrapPlaceableNode@/index.js:101604"
+    },
+    {
+      "ms": 9674.9,
+      "pct": 8.61,
+      "stack": "countStreamingViewportBootstrapNodes@/index.js:103479"
+    },
+    {
+      "ms": 7250.5,
+      "pct": 6.45,
+      "stack": "ensureStreamingBootstrapCoarseFiles@/index.js:103519"
+    },
+    {
+      "ms": 5564.9,
+      "pct": 4.95,
+      "stack": "sumAllocationSlots@/index.js:129457"
+    },
+    {
+      "ms": 5450.1,
+      "pct": 4.85,
+      "stack": "assignSplatOffsets@vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 4717.8,
+      "pct": 4.2,
+      "stack": "readBakeGovernorPressure@/index.js:102019"
+    },
+    {
+      "ms": 3971.5,
+      "pct": 3.53,
+      "stack": "_diffAlloc@vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 2241.6,
+      "pct": 1.99,
+      "stack": "AY@vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 1735.2,
+      "pct": 1.54,
+      "stack": "(garbage collector)"
+    },
+    {
+      "ms": 1453,
+      "pct": 1.29,
+      "stack": "transformPoint@vendor/playcanvas-2.20.0.js:8"
+    },
+    {
+      "ms": 1364.5,
+      "pct": 1.21,
+      "stack": "aabbIntersectsFrustum@/index.js:103107"
+    },
+    {
+      "ms": 1136.3,
+      "pct": 1.01,
+      "stack": "set@vendor/playcanvas-2.20.0.js:8"
+    },
+    {
+      "ms": 1047.2,
+      "pct": 0.93,
+      "stack": "computeViewportEdgeFactor@/index.js:103293"
+    },
+    {
+      "ms": 995.8,
+      "pct": 0.89,
+      "stack": "applyAllocations@vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 993.9,
+      "pct": 0.88,
+      "stack": "balance@vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 977.6,
+      "pct": 0.87,
+      "stack": "writeBuffer"
+    },
+    {
+      "ms": 880.4,
+      "pct": 0.78,
+      "stack": "evaluateNodeLods@vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 812.1,
+      "pct": 0.72,
+      "stack": "runPriorityPrefetch@/index.js:104155"
+    },
+    {
+      "ms": 712,
+      "pct": 0.63,
+      "stack": "updateIntervals@vendor/playcanvas-2.20.0.js:13313"
+    },
+    {
+      "ms": 600.3,
+      "pct": 0.53,
+      "stack": "_defragIncremental@vendor/playcanvas-2.20.0.js:13313"
+    }
+  ],
+  "topBusyWindows": [
+    {
+      "startMs": 0,
+      "endMs": 112370.4,
+      "busyMs": 112305.3,
+      "idleMs": 0,
+      "topStacks": [
+        {
+          "ms": 46491,
+          "stack": "isOctreeBootstrapPlaceableNode"
+        },
+        {
+          "ms": 9674.9,
+          "stack": "countStreamingViewportBootstrapNodes"
+        },
+        {
+          "ms": 7250.5,
+          "stack": "ensureStreamingBootstrapCoarseFiles"
+        },
+        {
+          "ms": 5564.9,
+          "stack": "sumAllocationSlots"
+        },
+        {
+          "ms": 5450.1,
+          "stack": "assignSplatOffsets"
+        }
+      ]
+    }
+  ]
+}

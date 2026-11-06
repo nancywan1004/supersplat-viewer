@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GSplat World Data Flow · Refinement 全链路</title>
+  <style>
+    :root {
+      --bg: #0f1117; --elevated: #1a1d27; --border: #2a2f3a;
+      --text: #e8eaed; --muted: #9aa0a6; --accent: #8ab4f8;
+      --warn: #fdd663; --danger: #f28b82; --success: #81c995;
+      --purple: #c58af9; --orange: #fa903e; --blue: #5b9bd5; --green: #6bbf59;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); line-height: 1.55; font-size: 15px; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .layout { display: grid; grid-template-columns: 220px 1fr; max-width: 1200px; margin: 0 auto; }
+    @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } nav.toc { display: none; } }
+    nav.toc { position: sticky; top: 0; height: 100vh; overflow-y: auto; padding: 24px 16px; border-right: 1px solid var(--border); font-size: 0.82rem; }
+    nav.toc ul { list-style: none; padding: 0; margin: 8px 0; }
+    nav.toc li { margin: 6px 0; }
+    main { padding: 32px 28px 80px; min-width: 0; }
+    h1 { font-size: 1.75rem; margin: 0 0 8px; }
+    h2 { font-size: 1.3rem; margin: 40px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    h3 { font-size: 1rem; margin: 0 0 12px; color: var(--muted); font-weight: 600; }
+    .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 20px; }
+    .note { font-size: 0.88rem; color: var(--muted); margin: 0 0 12px; }
+    .pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 20px; }
+    .pill { padding: 4px 12px; border-radius: 999px; font-size: 0.78rem; border: 1px solid var(--border); }
+    .pill.a { background: rgba(91,155,213,0.15); color: var(--blue); }
+    .pill.b { background: rgba(250,144,62,0.15); color: var(--orange); }
+    .pill.c { background: rgba(107,191,89,0.15); color: var(--green); }
+    .card { background: var(--elevated); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; margin: 16px 0; }
+    .callout { border-left: 3px solid var(--accent); background: rgba(138,180,248,0.08); padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0; }
+    .callout.warn { border-color: var(--warn); background: rgba(253,214,99,0.08); }
+    .callout.danger { border-color: var(--danger); background: rgba(242,139,130,0.08); }
+    .callout strong { display: block; margin-bottom: 6px; }
+    .callout p { margin: 0 0 8px; }
+    .callout p:last-child { margin-bottom: 0; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 760px) { .grid-2 { grid-template-columns: 1fr; } }
+    table { width: 100%; border-collapse: collapse; font-size: 0.84rem; margin: 8px 0; }
+    th, td { border: 1px solid var(--border); padding: 7px 9px; text-align: left; vertical-align: top; }
+    th { background: rgba(255,255,255,0.04); color: var(--muted); font-weight: 600; }
+    pre { background: #0a0c10; border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; overflow-x: auto; font-size: 0.8rem; line-height: 1.45; }
+    pre.mermaid { background: var(--elevated); border: none; padding: 16px; }
+    .diagram-note { font-size: 0.85rem; color: var(--muted); margin: 8px 0; }
+    .ba-grid { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: center; margin: 16px 0; }
+    @media (max-width: 700px) { .ba-grid { grid-template-columns: 1fr; } }
+    .ba-box { background: var(--elevated); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-size: 0.85rem; }
+    .ba-box h4 { margin: 0 0 8px; font-size: 0.9rem; }
+    .ba-arrow { text-align: center; color: var(--danger); font-weight: 700; }
+    details.appendix { background: var(--elevated); border: 1px solid var(--border); border-radius: 8px; margin: 16px 0; }
+    details.appendix summary { cursor: pointer; padding: 14px 18px; font-weight: 600; color: var(--muted); list-style: none; }
+    details.appendix summary::-webkit-details-marker { display: none; }
+    details.appendix summary::before { content: '▸ '; color: var(--accent); }
+    details.appendix[open] summary::before { content: '▾ '; }
+    .appendix-body { padding: 0 18px 18px; border-top: 1px solid var(--border); }
+    .seq-block { margin: 20px 0; }
+    .seq-block-runtime .mermaid { min-height: 520px; font-size: 15px; }
+    .seq-block-runtime .mermaid svg { max-width: 100%; height: auto; }
+    footer { margin-top: 48px; font-size: 0.82rem; color: var(--muted); }
+    @media print { body { background: #fff; color: #111; } .card, th { background: #f5f5f5; } nav.toc { display: none; } details.appendix { break-inside: avoid; } }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <nav class="toc">
+    <strong>目录</strong>
+    <ul><li><a href="#intro">概述</a></li><li><a href="#entities">实体与字段</a></li><li><a href="#sequence">时序图</a></li><li><a href="#walkthrough">换档示例</a></li><li><a href="#native">Native vs Refinement</a></li><li><a href="#metrics">Poland · Benchmark · bake</a></li><li><a href="#glossary">术语速查</a></li><li><a href="#appendix">附录 · 优化草案</a></li></ul>
+    <p class="diagram-note">源：gsplat-world-data-flow.canvas.tsx<br/>导出：2026-07-13</p>
+  </nav>
+  <main>
+    <section id="intro">
+      <h1>相机移动 → GPU 渲染：数据结构全链路</h1>
+      <p class="subtitle">GSplatWorld / GSplatInfo · A 资产层 · B 逻辑层 · C 物理层 · Refinement 模式</p>
+      <div class="pill-row">
+        <span class="pill a">A = SOG Resource</span>
+        <span class="pill b">B = NodeInfo + Placement</span>
+        <span class="pill c">C = slot / work buffer</span>
+      </div>
+      <div class="callout info"><strong>怎么读（正文 8 张核心表）</strong><p><strong>必看</strong>：ER 图 → 时序图 → 换档纵向图 → Native 摊平/打包图。<strong>按需展开</strong>：核心实体职责 · 数据存哪 · Native 对照 · 误解对照 · Poland 诊断 · Benchmark · 全量触发 · 术语速查。</p></div>
+      <div class="callout info"><strong>GSplatWorld</strong><p>整场景共享：BlockAllocator、_allocationMap、_workBuffer、_worldStates。</p></div>
+      <div class="callout info"><strong>GSplatInfo</strong><p>Placement 烘焙快照：intervals[]（SOG 源）+ intervalOffsets[]（WB 目标）。needsUploadIds 在 WorldState 上。</p></div>
+    </section>
+
+    <section id="entities">
+      <h2>实体与字段</h2>
+      <details class="appendix" open><summary>展开 · A / B / C 三层</summary><div class="appendix-body"><table><thead><tr><th>层</th><th>核心对象</th><th>干什么用</th><th>换档时</th></tr></thead><tbody><tr><td>A · 资产层</td><td>SOG Resource（GPU 纹理）</td><td>每个 SOG 文件的「原材料库」：下载解码后的扁平 splat 数组 [0..numSplats)。在答两件事——① 源 splat 在 GPU 哪；② bake 从哪段采样（段范围由 B 层 intervals 指定，Resource 本身不被改写）</td><td>换档不改 Resource 内容；只改 B 层「读哪一段」</td></tr>
+<tr><td>B · 逻辑层</td><td>NodeInfo + GSplatPlacement</td><td>决定「哪片空间叶、用哪档 LOD、哪份 SOG 被哪些叶引用、各读源文件哪一段」。NodeInfo 管每叶的 allocId / currentLod；Placement 管每个 file 的 intervals Map。Viewer/引擎换档主要改这一层</td><td>applyLodChanges 改 intervals / currentLod → 触发 WorldState 新版本 + bake</td></tr>
+<tr><td>C · 物理层</td><td>_workBuffer + MemBlock（_allocationMap）</td><td>GPU 真正拿来 draw 的大 splat 数组，加上「货架台账」（每个 allocId 占 WB 哪段 slot、多大）。在答两件事——① 这叶最终写到 WB 哪；② 本帧哪些 slot 要重烤（needsUploadIds 过滤 partial bake）</td><td>Allocator 调整 offset/size；bake 把 A 层片段 copy 覆写到 dirty 块</td></tr></tbody></table></div></details>
+      <details class="appendix" open><summary>展开 · 核心实体职责</summary><div class="appendix-body"><table><thead><tr><th>实体</th><th>数量级</th><th>层</th><th>核心职责</th></tr></thead><tbody><tr><td>SOG Resource</td><td>每 SOG 文件一个</td><td>A · 资产层</td><td>HTTP fetch 解码后的 GPU splat 纹理，扁平数组 [0..numSplats)。换档只改「读哪段」，不改 Resource 内容；GSplatPlacement.resource 持有其引用，bake 按 GSplatInfo.intervals[] 从中采样</td></tr>
+<tr><td>GSplatOctreeInstance</td><td>每个 Entity 一个</td><td>B · 场景运行时</td><td>每个可见 Entity 的 octree 入口：nodeInfos[]（每叶 LOD/allocId）+ filePlacements[]（按 fileIndex 索引的 Placement）。applyLodChanges 在此写 intervals；inst.update 驱动 GSplatWorld 构造 WorldState 并 bake</td></tr>
+<tr><td>GSplatPlacement</td><td>每份 SOG 文件一个</td><td>B · 文件→叶映射</td><td>一份 SOG 的可变运行时记录：resource→A 层；intervals Map&lt;nodeIndex,[start,end)&gt; 记录哪些叶正用此文件、各读源数组哪段。换档只改 Map；多叶可共享同一 placement（N 叶 → 1 placement）</td></tr>
+<tr><td>NodeInfo</td><td>每个空间叶一个</td><td>B · 叶级 LOD</td><td>每片 octree 空间叶：currentLod（屏上档）、optimalLod（理想档）、allocId（构造时一次分配，终身不变）。换档改 currentLod 与所用 file，不重新 get allocId</td></tr>
+<tr><td>GSplatWorld</td><td>整场景共享一个</td><td>B+C 枢纽</td><td>跨帧持久的世界管理器：BlockAllocator、_allocationMap、_workBuffer、_worldStates（Map&lt;version, State&gt;）。所有 Instance 共用同一 allocator 与 WB；placement 变时 _updateWorldState 生成新版本并触发 assign/bake</td></tr>
+<tr><td>GSplatWorldState</td><td>placement 变一版</td><td>C · 版本快照</td><td>某一版「本帧要上屏」的总清单（容器）。splats[] 即 GSplatInfo[]：每条对应一份 active GSplatPlacement（≈本帧用到的 SOG 文件数，不是 node 数、不是 splat 点数）。needsUpload[]⊆splats[] 为本帧要 bake 的子集；needsUploadIds（在 State 上）标 dirty 的 allocId；totalActiveSplats=Σ interval 长度→HUD gsplats</td></tr>
+<tr><td>GSplatInfo</td><td>splats[] 里每条 ≈ 一个 active file</td><td>B→C 桥 · 快照</td><td>WorldState.splats[] 的元素：从 GSplatPlacement 快照的只读本版合同（new GSplatInfo(placement)）。一条可含多 interval（同 SOG 多叶→1 条 Info，intervals[] 多段）。assign 后填 intervalOffsets[]（WB 目标）；bake 按 intervals+offsets+resource 把 A 层拷进 C 层 slot</td></tr>
+<tr><td>BlockAllocator + MemBlock</td><td>持久</td><td>C · 订座</td><td>在 work buffer 地址空间为 allocId 划连续 slot 段 {offset,size}。换档常只改 block 的 size/offset；grow/defrag 时才整池重排并可能触发 fullRebuild</td></tr>
+<tr><td>_allocationMap</td><td>持久 Map</td><td>C · 账本</td><td>allocId→MemBlock，跨 WorldState 版本存活。assign 写入/更新；rebuildWorkBuffer 用 needsUploadIds 过滤本帧要 overwrite 哪些 id；叶下屏或换档释放时 free + map.delete</td></tr></tbody></table></div></details>
+      <div class="callout info"><strong>怎么读 ER 图</strong><p>Instance 侧 → World 持久 → WorldState 快照。实线=长期持有；虚线=本帧快照。</p></div>
+      <pre class="mermaid">erDiagram
+        GSplatWorld ||--o{ GSplatOctreeInstance : registers
+        GSplatWorld ||--o{ GSplatWorldState : versions
+        GSplatWorld ||--o{ MemBlock : allocationMap
+        GSplatWorld ||--|| WorkBuffer : owns
+        GSplatOctreeInstance ||--o{ NodeInfo : nodeInfos
+        GSplatOctreeInstance ||--o{ GSplatPlacement : filePlacements
+        GSplatPlacement ||--o{ interval : intervals_Map
+        GSplatWorldState ||--o{ GSplatInfo : splats
+        NodeInfo ||--|| allocId : stable_id
+        GSplatInfo }o--|| GSplatPlacement : snapshots
+        interval }o--|| NodeInfo : nodeIndex
+        allocId ||--|| MemBlock : maps_to</pre>
+      <details class="appendix" open><summary>展开 · 核心字段速查</summary><div class="appendix-body"><table><thead><tr><th>字段/对象</th><th>层</th><th>干什么用</th><th>换档 / 本帧时</th></tr></thead><tbody><tr><td>GSplatWorld._allocationMap / _workBuffer</td><td>持久 · C 物理层</td><td>_allocationMap：「货架台账」——每个 allocId 在 WorkBuffer 里占哪段 slot、多大。_workBuffer：GPU 真正 draw 用的大 splat 数组，所有上屏数据最终都烤进这里</td><td>对象跨版本存活；换档只改台账里的 offset/size，再 partial bake 覆写对应 slot</td></tr>
+<tr><td>GSplatWorldState.splats[]</td><td>版本快照 · 每帧一版</td><td>本版「上屏清单」：哪些 SOG file 在屏、每 file 哪些叶 active、各读 SOG 哪段、写到 WB 哪段——全部拍成 GSplatInfo[]，供 bake 与渲染只读消费</td><td>placement 集合一变（增删 file、改 intervals）→ version++，生成新一版快照</td></tr>
+<tr><td>GSplatWorldState.needsUploadIds</td><td>版本快照 · 本帧 dirty 清单</td><td>增量 bake 的「待办」：本帧只需重烤哪些 allocId 对应的 WB 块；不在 Set 里的 slot 本帧可跳过 copy，省 CPU</td><td>assignSplatOffsets 构造 WorldState 时填充；字段在 WorldState 上，不在单条 GSplatInfo 里</td></tr>
+<tr><td>GSplatInfo.intervals[] / intervalOffsets[]</td><td>快照 · B→C 桥梁</td><td>intervals：每个 active 叶在 SOG 源文件里读 splat 的半开区间 [start,end)。intervalOffsets：读到的数据写到 _workBuffer 哪个 slot 起点。bake 只认这两列，从 Resource 采样再写入 WB</td><td>换档改 placement → 新 WorldState 重算两数组；bake 按新合同覆写</td></tr>
+<tr><td>NodeInfo.allocId / currentLod</td><td>B 层 · 八叉树每空间叶</td><td>allocId：该叶 WB 空间的永久身份证，加载时 GsplatAllocId.get() 发一次。currentLod：这叶当前实际上屏的 LOD 档（ladder 第几级；-1=下屏）</td><td>换档改 currentLod 和 placement.intervals，allocId 不变；下屏后 allocId 才可能被回收释放</td></tr>
+<tr><td>GSplatPlacement.intervals</td><td>B 层 · 每个 SOG file 一份</td><td>living 表：「这个 file 里哪些空间叶在上屏、各自用 SOG 里哪一段 splat」——Map&lt;nodeIndex, [start,end)&gt;，引擎 apply 的直接写入点</td><td>applyLodChanges 据 optimalLod 增删/改条目 → 触发 _updateWorldState → 新 splats[] 快照与 bake</td></tr></tbody></table></div></details>
+      <details class="appendix" open><summary>展开 · 数据存哪？</summary><div class="appendix-body"><table><thead><tr><th>字段</th><th>存在哪</th><th>何时写入</th><th>备注</th></tr></thead><tbody><tr><td>nodeInfo.allocId</td><td>GSplatOctreeInstance.nodeInfos[i]</td><td>场景加载时 GsplatAllocId.get()</td><td>持久 · 每空间叶一个 · ≠ nodeIndex</td></tr>
+<tr><td>placement.intervals</td><td>GSplatPlacement (filePlacements[fi])</td><td>applyLodChanges / incrementFileRef</td><td>Map&lt;nodeIndex, Vec2&gt; · B 层</td></tr>
+<tr><td>intervalAllocIds[]</td><td>GSplatInfo（快照）</td><td>updateIntervals 读 nodeInfos[node].allocId</td><td>与 intervals 平行 · 本版只读</td></tr>
+<tr><td>intervalOffsets[]</td><td>GSplatInfo（快照）</td><td>assignSplatOffsets → setLayout</td><td>WB slot 起点 · 来自 MemBlock.offset</td></tr>
+<tr><td>_allocationMap</td><td>GSplatWorld（持久）</td><td>applyAllocations → map.set(allocId, block)</td><td>Map&lt;allocId, MemBlock&gt;</td></tr>
+<tr><td>needsUploadIds</td><td>GSplatWorldState（版本快照）</td><td>assignSplatOffsets 构造时填充</td><td>Set&lt;allocId&gt; · partial bake 过滤器 · 不在 GSplatInfo</td></tr>
+<tr><td>splats[]</td><td>GSplatWorldState</td><td>_updateWorldState 构造</td><td>GSplatInfo[] · 本版 active placement</td></tr>
+<tr><td>_workBuffer</td><td>GSplatWorld（持久）</td><td>bake render 写入</td><td>GPU MRT 纹理 · VRAM</td></tr></tbody></table></div></details>
+      <div class="callout warn"><strong>allocId</strong><p>nodeIndex ≠ allocId。构造时 GsplatAllocId.get() 一次分配，换档只改 MemBlock offset/size。</p></div>
+    </section>
+
+    <section id="sequence">
+      <h2>时序图</h2>
+      <p class="diagram-note">橙色标注 = 数据写入位置（与 canvas 时序图一致）</p>
+      <div class="seq-block"><pre class="mermaid">sequenceDiagram
+    title 场景加载时序图
+    participant boot as Scene Boot
+    participant inst as OctreeInstance
+    participant world as GSplatWorld
+    boot->>world: 0a new GSplatWorld(device, budget)\n📝 world._allocator · world._allocationMap=new Map() · world._workBuffer
+    boot->>inst: 0b new GSplatOctreeInstance(octree, placement)\n📝 for i in nodes: nodeInfos[i]=new NodeInfo()
+    inst->>inst: 0c NodeInfo 构造 → allocId = GsplatAllocId.get()\n📝 inst.nodeInfos[i].allocId=101,102,…（持久·终身不变·全局递增）
+    boot->>world: 0d world.registerOctreeInstance(inst)\n📝 world._octreeInstances.set(entity, inst)</pre></div>
+      <div class="seq-block seq-block-runtime"><pre class="mermaid">sequenceDiagram
+    title 运行时换档时序图
+    participant cam as Camera
+    participant viewer as Viewer
+    participant inst as OctreeInstance
+    participant world as GSplatWorld
+    participant wstate as WorldState
+    participant gpu as GPU
+    cam->>viewer: 1 移动 / 缩放\n📝 viewer: traversalDirty, burstFrames
+    viewer->>viewer: 2 scan: targetLod + fileIndex\n📝 只读 inst.nodeInfos[i].currentLod
+    viewer->>viewer: 3 prioritizeFileLoad → HTTP\n📝 SOG 解码 → filePlacements[fi].resource (A层GPU)
+    viewer->>inst: 4 sync: needsLodUpdate=true → inst.update()\n📝 inst.needsLodUpdate
+    inst->>inst: 5 evaluateNodeLods\n📝 写 nodeInfos[i].optimalLod（每帧重算）
+    inst->>inst: 6 applyLodChanges → incrementFileRef\n📝 写 filePlacements[fi].intervals Map<node,Vec2> + nodeInfos[i].currentLod
+    inst->>world: 7 _updateWorldState() 检测 placement 变\n📝 world._lastWorldStateVersion++
+    world->>wstate: 8 new GSplatInfo(placement, nodeInfos)\n📝 wstate.splats[]: intervals[] + intervalAllocIds[]←nodeInfos[n].allocId
+    wstate->>wstate: 9 computeAllocationDiff + applyAllocations\n📝 读 splats[].intervalAllocIds + intervals 算 size
+    world->>world: 10 BlockAllocator.allocate(size)\n📝 写 world._allocationMap[101]=MemBlock{offset:95000,size:52000}（持久）
+    wstate->>wstate: 11 assignSplatOffsets\n📝 写 splats[].intervalOffsets[]；needsUploadIds.add(101)；needsUpload.push(splat)
+    world->>world: 12 _worldStates.set(version, wstate)\n📝 world._worldStates: Map<version, GSplatWorldState>
+    world->>gpu: 13 rebuildWorkBuffer → workBuffer.render\n📝 读 wstate.needsUpload + wstate.needsUploadIds；SOG→WB
+    gpu->>gpu: 14 compaction · sort · draw\n📝 读 world._workBuffer VRAM
+    gpu->>cam: 15 画面上屏\n📝 —</pre></div>
+      <div class="callout warn"><strong>三个容易混的对象</strong><p>GSplatWorld（持久）：_allocationMap、_workBuffer。GSplatWorldState（快照）：needsUpload、needsUploadIds、fullRebuild。GSplatInfo：intervals、intervalOffsets——但 needsUploadIds 不在 GSplatInfo。</p></div>
+    </section>
+
+    <section id="walkthrough">
+      <h2>换档示例</h2>
+      <div class="grid-2">
+        <pre class="mermaid">flowchart TD
+          subgraph pipeA [管线 A · 单叶 #42]
+            A1[scan N: fetch file12] --> A2[fetch N..N+3: file 落地]
+            A2 --> A3[sync N+4 ×1]
+            A3 --> A4[inst.update ×1]
+            A4 --> A5[apply: 仅 #42]
+            A5 --> A6[WorldState v8 · 1 GSplatInfo]
+            A6 --> A7[bake needsUploadIds=101]
+            A7 --> A8[GPU draw dc≈2]
+          end</pre>
+        <pre class="mermaid">flowchart TD
+          subgraph pipeB [管线 B · 26 叶 burst]
+            B1[scan N: ~30 叶 fetch] --> B2[fetch N..N+3: 多 file 落地]
+            B2 --> B3[sync N+4 ×1]
+            B3 --> B4[inst.update ×1]
+            B4 --> B5[apply: 26 叶 intervals]
+            B5 --> B6[WorldState v++ · 多条 GSplatInfo]
+            B6 --> B7[bake needsUploadIds≈26]
+            B7 --> B8[GPU draw dc≈26 gap≈119ms]
+          end</pre>
+      </div>
+      <div class="ba-grid">
+        <div class="ba-box"><h4>换档前 · LOD2 粗档</h4>
+          <p>currentLod=2 · allocId=101<br/>file5 intervals #42<br/>MemBlock {200000, 8192}</p></div>
+        <div class="ba-arrow">换档 →</div>
+        <div class="ba-box"><h4>换档后 · LOD0 细档</h4>
+          <p>currentLod=0 · allocId=101 不变<br/>file12 intervals #42<br/>MemBlock {95000, 52000}</p></div>
+      </div>
+      <div class="callout warn"><strong>三个关键结论</strong><p>① allocId 终身不变，变 MemBlock offset/size。② needsUploadIds 在 WorldState。③ fetch 与 apply+bake 跨帧分开。</p></div>
+      <div class="callout info"><strong>管线 A vs B</strong><p>sync/inst.update 各 1 次相同；差异在 needsUploadIds 规模：{101} vs ≈26 → gapMs≈119ms。</p></div>
+      <details class="appendix" open><summary>展开 · 常见误解 vs 实际</summary><div class="appendix-body"><table><thead><tr><th>误解</th><th>实际</th><th>Poland 佐证</th></tr></thead><tbody><tr><td>一叶一 sync</td><td>一次 sync 打整个 OctreeInstance</td><td>syncedInstances=1 但 drawCalls=26</td></tr>
+<tr><td>一叶一 inst.update</td><td>一次 sync → 一次 inst.update</td><td>26 叶在 applyLodChanges 内循环</td></tr>
+<tr><td>一叶一 WorldState</td><td>placement 变一次 → version++ 一次</td><td>一个 state 含所有 dirty 块</td></tr>
+<tr><td>一叶一 bake 调用</td><td>一次 rebuildWorkBuffer</td><td>内部烤 26 个 allocId 段</td></tr>
+<tr><td>scan 决定 apply 哪些叶</td><td>scan 只决定 fetch/sync；apply 看引擎 optimalLod</td><td>evaluate 全场景 pending</td></tr></tbody></table></div></details>
+    </section>
+
+    <section id="native">
+      <h2>Native vs Refinement</h2>
+      <div class="callout info"><strong>一句话</strong><p>bake 链相同。差在换档请求如何进入 applyLodChanges：<strong>Native 按 file 落地节拍摊平</strong> vs <strong>Refinement burst 末一次 sync 打包</strong>。</p></div>
+      <div class="callout warn"><strong>Native 摊平主因</strong><p>Native <strong>没有</strong>「每帧最多 apply N 个 pending」的显式开关。主因 ① loader 并发有限 → file 逐个落地 → 只有落地的叶本 tick 才 apply+bake；主因 ② 无 burst_lod_switch 打包 sync。allowLodUpdate 只是 sort 过载保险阀。</p></div>
+      <div class="callout info"><strong>needsLodSwitch 只在 Refinement</strong><p>Native unlock 后 Viewer 不算 needsLodSwitch。Refinement scan：<code>currentLod &gt; targetLod</code>（该升档）或 <code>currentLod &lt; 0</code>（未上屏）→ true；<code>currentLod ≤ targetLod</code> 直接 OK（<strong>不为降档</strong> sync）。apply 仍听 optimalLod。</p></div>
+      <pre class="mermaid">flowchart LR
+        subgraph nativeSpread [Native · 多帧摊平]
+          nF[帧F dc≈2] --> nF1[帧F+1 dc≈2] --> nF2[帧F+2 dc≈3]
+        end
+        subgraph refineBurst [Refinement · burst 末打包]
+          rFetch[帧F..F+3 fetch] --> rPack[帧F+4 dc≈26 gap≈119ms]
+        end</pre>
+      <pre class="mermaid">flowchart TB
+        subgraph nativePending [Native pending 消化]
+          np1[evaluate optimal≠current] --> np2{file ready?}
+          np2 -->|否| np3[ensureFileResource 排队 loadingCount++]
+          np2 -->|是| np4[本 tick apply+bake 少量叶]
+          np3 --> np5[下几帧 file 落地后再 apply]
+        end
+        subgraph refinePending [Refinement pending 消化]
+          rp1[burst fetch 高并发] --> rp2[staleLoaded 累积]
+          rp2 --> rp3[burst_lod_switch sync×1]
+          rp3 --> rp4[apply 全部 stale 同帧 bake dc≈26]
+        end</pre>
+      <pre class="mermaid">flowchart TB
+        subgraph viewer [Refinement 打包]
+          v1[burst 18帧] --> v2[scan+fetch] --> v3[burst_lod_switch] --> v4[apply26叶]
+        end
+        subgraph nativeSched [Native 摊平]
+          n1[updateStreaming tick] --> n2[file落地驱动 apply] --> n3[bake dc≈2]
+        end
+        subgraph merge [汇合 · 同引擎 bake]
+          m1[WorldState] --> m2[writeBuffer] --> m3[GPU draw]
+        end
+        v4 --> m1
+        n3 --> m1</pre>
+      <details class="appendix" open><summary>展开 · pending 消化 · Native 摊平 vs Refinement 打包</summary><div class="appendix-body"><table><thead><tr><th>话题</th><th>Native</th><th>Refinement</th><th>Poland / 代码</th></tr></thead><tbody><tr><td>pending 是什么</td><td>loadingCount：optimalLod≠currentLod 且目标 SOG 还没落地</td><td>Viewer 侧 staleLoadedNodes / needsLodSwitch 等 + 引擎 pending</td><td>NativeStreamingObserver 只观测 loadingCount</td></tr>
+<tr><td>谁判定「该换档」</td><td>引擎 evaluateNodeLods：currentLod vs optimalLod（全场景）</td><td>Viewer scan：currentLod vs targetLod（视锥 + ladder）→ needsLodSwitch</td><td>Native **无** needsLodSwitch 变量</td></tr>
+<tr><td>needsLodSwitch</td><td>**无**（unlock 后 refinement controller 销毁）</td><td>视锥叶 currentLod&gt;targetLod 或未上屏 → true；不为降档触发</td><td>refinement-controller processRefinementLeaf</td></tr>
+<tr><td>何时 apply + bake</td><td>file 落地后的 updateStreaming tick；每 tick 只 apply「本帧刚 ready」的叶</td><td>sync → needsLodUpdate → frameend inst.update → applyLodChanges 循环全部 stale</td><td>Refinement：sync×1 可打包 26 叶同帧</td></tr>
+<tr><td>如何「每帧少量」</td><td>**无显式 N/帧限额**；主因是 loader 并发有限 → file 逐个落地 → apply 跟着落地节拍走</td><td>burst 高并发先囤齐 file → burst_lod_switch 一次 sync 全部 apply</td><td>Native 94% 帧 dc=2；Refinement 35% 慢档</td></tr>
+<tr><td>drawCalls=2 别误解</td><td>GPU draw **batch 数**；清晰稳态 copyPct=0 = 多帧根本没 bake</td><td>同左；慢帧 dc≈26 = 同帧 active interval 行数</td><td>≠「每帧只 apply 2 个 pending 叶」</td></tr>
+<tr><td>allowLodUpdate</td><td>CPU sort 过载时 skip evaluate；下帧补跑 · **保险阀**</td><td>无（Native 引擎闸门）</td><td>不是 Poland native dc≈2 的主解释</td></tr>
+<tr><td>Refinement 学 native</td><td>—</td><td>plan P0：maxSyncsPerFrame、非对称 sync（~2609）补回下载节拍节流</td><td>burst 打穿了 native 天然节流</td></tr></tbody></table></div></details>
+      <div class="grid-2">
+        <details class="appendix" open><summary>展开 · Native vs Refinement 对照</summary><div class="appendix-body"><table><thead><tr><th>维度</th><th>Native</th><th>Refinement</th></tr></thead><tbody><tr><td>调度入口</td><td>GSplatWorld.updateStreaming()</td><td>runPriorityPrefetch() + 引擎 inst.update</td></tr>
+<tr><td>Viewer scan</td><td>无</td><td>视锥内 buildPriorityFiles</td></tr>
+<tr><td>targetLod</td><td>无</td><td>有（边缘 + ladder）</td></tr>
+<tr><td>fetch 优先级</td><td>引擎 assetLoader</td><td>Viewer priorityUrls + gate</td></tr>
+<tr><td>下载并发</td><td>引擎默认</td><td>2→8→最高 64</td></tr>
+<tr><td>idle 冻结</td><td>无</td><td>静止 30 帧 skip scan</td></tr>
+<tr><td>burst 18 帧</td><td>无</td><td>有 · burst_lod_switch</td></tr>
+<tr><td>viewer sync</td><td>unlock 后无</td><td>syncOctreePendingPlacements + 闸门</td></tr>
+<tr><td>inst.update 时机</td><td>updateStreaming 内</td><td>WebGPU frameend deferred</td></tr>
+<tr><td>evaluateNodeLods</td><td>每 tick · 全场景</td><td>sync 后 inst.update 内 · 全场景</td></tr>
+<tr><td>同帧换档</td><td>drawCalls≈2 摊平</td><td>drawCalls 可 26+ 打包</td></tr>
+<tr><td>work buffer bake</td><td>有</td><td>有（同引擎）</td></tr>
+<tr><td>splatBudget</td><td>unlock 后 =0</td><td>可设 2.5M 等</td></tr>
+<tr><td>Poland 96k fps P50</td><td>~49</td><td>~8</td></tr>
+<tr><td>清晰帧 ≥2M</td><td>~78%</td><td>0%</td></tr></tbody></table></div></details>
+        <details class="appendix" open><summary>展开 · Viewer vs 引擎分工</summary><div class="appendix-body"><table><thead><tr><th>概念</th><th>谁算/谁跑</th><th>用途</th><th>备注</th></tr></thead><tbody><tr><td>targetLod</td><td>Viewer scan</td><td>fetch / sync 听谁的</td><td>边缘可更粗 · ladder 逐档</td></tr>
+<tr><td>optimalLod</td><td>evaluateNodeLods</td><td>apply 上屏听谁的</td><td>全场景距离公式</td></tr>
+<tr><td>scan</td><td>Viewer · 视锥内</td><td>算 targetLod · 排队 fetch</td><td>~1ms · 不 apply/bake</td></tr>
+<tr><td>evaluateNodeLods</td><td>引擎 Pass1</td><td>写 optimalLod</td><td>全场景 node · 无视锥</td></tr>
+<tr><td>applyLodChanges</td><td>引擎 Pass2</td><td>改 placement.intervals</td><td>触发 WorldState + bake</td></tr>
+<tr><td>runPriorityPrefetch</td><td>Refinement 每 tick</td><td>scan→下载→sync 整轮调度</td><td>Native 改为 updateStreaming 摊平</td></tr></tbody></table></div></details>
+      </div>
+    </section>
+
+    <section id="metrics">
+      <h2>Poland · Benchmark · 全量 bake</h2>
+      <details class="appendix" open><summary>展开 · Poland 慢帧诊断 + 实测</summary><div class="appendix-body"><table><thead><tr><th>检查项</th><th>Poland 典型</th><th>结论</th><th>备注</th></tr></thead><tbody><tr><td>① tick&lt;5ms?</td><td>是 · ~1ms</td><td>排除 Viewer scan/sync</td><td>—</td></tr>
+<tr><td>② gpu&lt;25ms?</td><td>是 · ~16ms</td><td>排除 GPU draw</td><td>—</td></tr>
+<tr><td>③ gapMs&gt;80 · copy≥99%?</td><td>慢帧命中</td><td>CPU bake 主因</td><td>writeBuffer</td></tr>
+<tr><td>④ drawCalls&gt;10?</td><td>慢帧 ~26</td><td>同帧多 interval 打包</td><td>≠ syncedInstances</td></tr>
+<tr><td>fps P50</td><td>Native 49 / Refinement 8</td><td>burst 打包</td><td>同场景 Poland 96k</td></tr>
+<tr><td>gapMs 慢档</td><td>Refinement ~119ms</td><td>主因</td><td>增量路径 dirty 块多</td></tr>
+<tr><td>engFULL / infFULL</td><td>0 / ~20%</td><td>非 literal 全量</td><td>inferred = copyPct 高标签</td></tr></tbody></table></div></details>
+      <div class="callout info"><strong>inferred fullRebuild ≠ engFULL</strong><p>Poland engFULL=0、infFULL≈20%：增量路径 dirty 块太多。</p></div>
+      <details class="appendix" open><summary>展开 · Benchmark / HUD 核心指标</summary><div class="appendix-body"><table><thead><tr><th>指标</th><th>来源/含义</th><th>是什么</th><th>易混点</th></tr></thead><tbody><tr><td>frame.gsplats</td><td>totalActiveSplats</td><td>视锥前 active interval 总和</td><td>≠ 屏幕可见 · 看空处≠0</td></tr>
+<tr><td>totalBlocks</td><td>allocationMap.size</td><td>MemBlock 账本行数</td><td>≠ slot 数 · Poland 峰值 ~21 万</td></tr>
+<tr><td>uploadedBlocks / copyPct</td><td>本帧 dirty MemBlock</td><td>与 gapMs 强相关</td><td>Poland 慢帧 78–100%</td></tr>
+<tr><td>engFULL vs infFULL</td><td>literal 全量 vs 事后标签</td><td>Poland engFULL=0</td><td>infFULL≈增量近全表</td></tr>
+<tr><td>active vs needsUpload</td><td>上屏候选 vs 本帧 dirty</td><td>dirty⊆active</td><td>dirty 多 → gap 高</td></tr>
+<tr><td>drawCalls / syncedInstances</td><td>interval 批次 / sync 次数</td><td>dc=26 可 synced=1</td><td>换档形态探针</td></tr></tbody></table></div></details>
+      <pre class="mermaid">flowchart TD
+        A[rebuildWorkBuffer] --> B{forceFullRebuild?}
+        B -->|是| F[全量 bake]
+        B -->|否| C{worldState.fullRebuild?}
+        C -->|是| F
+        C -->|否| I[增量 bake needsUploadIds]
+        I --> P[Poland 慢帧多走这里]</pre>
+      <pre><code>// rebuildWorkBuffer 核心分支 (gsplat-world.js)
+const renderAll = forceFullRebuild || worldState.fullRebuild;
+const splatsToRender = renderAll ? worldState.splats : worldState.needsUpload;
+const changedAllocIds = renderAll ? null : worldState.needsUploadIds;
+uploadBlocks = renderAll ? allocationMap.size : needsUploadIds.size;
+workBuffer.render(splatsToRender, camera, debugColors, changedAllocIds);</code></pre>
+      <details class="appendix" open><summary>展开 · 触发全量 / 增量 bake</summary><div class="appendix-body"><table><thead><tr><th>类别</th><th>标志</th><th>触发原因</th><th>细节</th><th>代码路径</th></tr></thead><tbody><tr><td>A1</td><td>worldState.fullRebuild</td><td>placement 集合变化</td><td>_placementSetChanged：Entity 增删、octree instance 销毁、layerPlacements 变化</td><td>_updateWorldState 末尾强制 true（boundsBaseIndex 防 stale）</td></tr>
+<tr><td>A2</td><td>worldState.fullRebuild</td><td>Allocator 全量 defrag</td><td>updateAllocation 分配失败 → grow → defrag(0) 紧凑全部块</td><td>applyAllocations 返回 true → 所有 MemBlock offset 变 → 必须烤全部</td></tr>
+<tr><td>A3</td><td>worldState.fullRebuild</td><td>跳过中间版本传播</td><td>多帧连跳 version，中间某版 fullRebuild=true</td><td>cleanupOldWorldStates Pass1 合并到 activeState</td></tr>
+<tr><td>B1</td><td>forceFullRebuild</td><td>Work Buffer 格式重建</td><td>syncFormat：gsplat.format 对象换了 → 销毁并 new GSplatWorkBuffer</td><td>_workBufferRebuildRequired=true → bake(..., force=true)</td></tr>
+<tr><td>B2</td><td>forceFullRebuild</td><td>格式 extraStreams 变</td><td>syncFormat：extraStreamsVersion 变了 → syncWithFormat</td><td>同上，烤全部 splats</td></tr>
+<tr><td>B3</td><td>forceFullRebuild</td><td>Shader 参数变更</td><td>scene.gsplat.dirty（debug 色等）</td><td>update() 内设 _workBufferRebuildRequired</td></tr>
+<tr><td>B4</td><td>forceFullRebuild</td><td>外部 invalidate</td><td>world.invalidate({ workBuffer: true })</td><td>渲染模式切换等 manager 调用</td></tr>
+<tr><td>C</td><td>仍增量</td><td>普通换档</td><td>单叶 LOD 切换、size 变但 allocate 成功</td><td>仅 changed allocId ∈ needsUploadIds</td></tr>
+<tr><td>C</td><td>仍增量</td><td>增量 defrag</td><td>fragmentation&gt;0.3 时 defrag(maxMoves&gt;0)</td><td>仅 moved 块加入 changedAllocIds，非全量</td></tr>
+<tr><td>C</td><td>仍增量</td><td>SH 颜色阈值</td><td>相机移动超 colorUpdateAngle</td><td>applyWorkBufferUpdates 只烤 _changedColorAllocIds</td></tr>
+<tr><td>C</td><td>仍增量</td><td>Transform 变</td><td>splat.update() 检测 worldMatrix 变</td><td>单 splat 进 _updatedSplats</td></tr></tbody></table></div></details>
+    </section>
+
+    <section id="glossary">
+      <h2>术语速查</h2>
+      <details class="appendix" open><summary>展开 · 术语速查</summary><div class="appendix-body"><table><thead><tr><th>术语</th><th>是什么</th><th>备注</th></tr></thead><tbody><tr><td>slot / MemBlock</td><td>WB 最小单位 / 连续 slot 段</td><td>allocId 映射到 {offset,size}</td></tr>
+<tr><td>allocId</td><td>稳定块 id</td><td>nodeInfo.allocId · ≠ nodeIndex · 换档不变</td></tr>
+<tr><td>needsUploadIds</td><td>dirty 过滤器</td><td>WorldState 字段 · partial bake</td></tr>
+<tr><td>staleLoadedNodes</td><td>file 已下未上</td><td>Viewer 指标 · burst 末积压</td></tr>
+<tr><td>targetLod / optimalLod</td><td>Viewer 调度档 / 引擎理想档</td><td>fetch 听 target · apply 听 optimal</td></tr>
+<tr><td>gapMs</td><td>profiler 残差</td><td>慢帧主因 ≈ CPU bake</td></tr>
+<tr><td>inferred fullRebuild</td><td>benchmark 标签</td><td>copyPct≥95% · 非 engFULL</td></tr>
+<tr><td>runPriorityPrefetch</td><td>Refinement 调度 tick</td><td>scan+下载+sync · 不只重建队列</td></tr>
+<tr><td>needsLodSwitch</td><td>Refinement only · scan 产出</td><td>current&gt;targetLod 或未上屏 · 不为降档</td></tr>
+<tr><td>loadingCount / pending</td><td>Native EVENT_FRAMEREADY</td><td>待落地 file 的 node 数 · 0=当前视角无 pending</td></tr>
+<tr><td>drawCalls=2（稳态）</td><td>GPU draw batch 数</td><td>≠ 每帧 apply 叶数 · 稳态 copyPct=0 常无 bake</td></tr></tbody></table></div></details>
+    </section>
+
+    <section id="appendix">
+      <h2>附录 · 优化草案</h2>
+      <div class="callout info"><strong>未落地方案</strong><p>P0=拆帧 sync 学 native 摊平；P1/P2=内存回收。截流杠杆在 refinement-controller sync 分支（~2609）。</p></div>
+      <details class="appendix" open><summary>展开 · 优化 ROI 路线图</summary><div class="appendix-body"><table><thead><tr><th>优先级</th><th>策略</th><th>解决什么</th><th>杠杆</th><th>状态</th></tr></thead><tbody><tr><td>P0</td><td>拆帧 sync + 非对称 sync</td><td>gapMs≈119ms · dc≈26</td><td>refinement-controller ~2609</td><td>草案</td></tr>
+<tr><td>P0</td><td>非对称下载 · foregroundLimit</td><td>candidateFileRefs 峰值 1049</td><td>buildPriorityFiles</td><td>部分已有</td></tr>
+<tr><td>P1</td><td>保活 incRef/decRef 配对</td><td>Heap 只增不减</td><td>notifyCameraMoved</td><td>未落地</td></tr>
+<tr><td>P2</td><td>idle 安全卸 file</td><td>Heap 回落</td><td>idle 窗口</td><td>曾撤回 · bind 风险</td></tr>
+<tr><td>P3</td><td>引擎同 resource 轻路径</td><td>回访少 bake</td><td>applyLodChanges</td><td>PoC</td></tr></tbody></table></div></details>
+      <div class="callout info"><strong>sync 必须以 targetLod 为准</strong><p>fetch/sync 听 targetLod；apply 听 optimalLod。</p></div>
+    </section>
+
+    <footer>
+      <p>Canvas 源：<code>canvases/gsplat-world-data-flow.canvas.tsx</code></p>
+      <p>相关报告：
+        <a href="四层架构时序图.html">四层架构时序</a> ·
+        <a href="Poland与金安桥场景对比.html">Poland vs Jinan</a> ·
+        <a href="Poland逐帧workBuffer和DrawCall对比.html">Poland 逐帧</a> ·
+        <a href="金安桥逐帧workBuffer和DrawCall对比.html">金安桥 逐帧</a>
+      </p>
+      <p>重新生成全部 HTML：<code>node scripts/export-gsplat-data-flow-html.mjs && node scripts/export-camera-to-workbuffer-html.mjs && node scripts/export-poland-jinan-html.mjs && node scripts/build-per-frame-html.mjs</code></p>
+    </footer>
+  </main>
+</div>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    securityLevel: 'loose',
+    sequence: {
+      actorFontSize: 14,
+      messageFontSize: 13,
+      noteFontSize: 12,
+      actorMargin: 60,
+      boxMargin: 12,
+      messageMargin: 40
+    },
+    themeVariables: {
+      fontSize: '14px'
+    }
+  });
+</script>
+</body>
+</html>

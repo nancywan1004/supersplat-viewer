@@ -1,0 +1,704 @@
+{
+  "benchmarkAxis": "profile",
+  "suite": "public/benchmark-suites/scene-finland-native-2p-quality.json",
+  "baseUrl": "http://localhost:3000/",
+  "renderer": "webgpu",
+  "runConditions": {
+    "coldStart": true,
+    "browserSession": "fresh-chromium-per-case",
+    "chromiumHttpCache": "disabled-cdp-clearBrowserCache-zero-disk-cache",
+    "warmup": {
+      "enabled": false,
+      "discarded": false,
+      "skippedReason": "cold-start-default"
+    },
+    "notes": [
+      "Cold start (default): each case launches a new Chromium, blocks service workers, disables HTTP cache via CDP, clears browser cache, and uses --disk-cache-size=0.",
+      "Playwright uses an ephemeral profile (not your daily Chrome); no cookies/storage persist after browser.close().",
+      "OS page cache, DNS, and GPU shader/pipeline cache are NOT reset by this script — cross-run comparisons on one machine may still drift."
+    ]
+  },
+  "cases": [
+    {
+      "label": "finland-2p-quality-native",
+      "presetId": "desktop-mega-low",
+      "presetSource": "lodModeAuto",
+      "lodMode": "quality",
+      "lodRuntime": "native",
+      "nearJumpLadder": false,
+      "budget": 4,
+      "firstFrameMs": 19375.09999999404,
+      "settleStartMs": 19375.29999998212,
+      "fpsP50": 36,
+      "fpsP95": 49,
+      "gsplatsAvgM": 2.6077570000000003,
+      "jsHeapAtFirstFrameMb": 265.63382053375244,
+      "vramTexAtFirstFrameMb": 77.13996028900146,
+      "jsHeapPeakMb": 970.4161758422852,
+      "vramTexPeakMb": 224.00800228118896,
+      "rendererUsed": "compute",
+      "interactionWaypoints": [
+        {
+          "label": "kf-0",
+          "keyframeIndex": 0,
+          "animTimeSec": 0,
+          "moveMs": 0,
+          "blurToClearMs": 28000.59999999404,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 28,
+          "pendingPeakNodes": 28,
+          "pendingPeakByInstance": [
+            {
+              "entityIndex": 0,
+              "label": "#0 finland-tile-0",
+              "pendingChunks": 28,
+              "pendingChunksAllView": 28,
+              "visibleLodMismatch": 20262,
+              "ready": false
+            },
+            {
+              "entityIndex": 1,
+              "label": "#1 finland-tile-1",
+              "pendingChunks": 0,
+              "pendingChunksAllView": 0,
+              "visibleLodMismatch": 0,
+              "ready": true
+            }
+          ],
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 33,
+          "fpsP95DuringRefine": 36,
+          "fpsMinDuringRefine": 11,
+          "gsplatsAtClearM": 2.592154,
+          "jsHeapAtClearMb": 853.2782621383667,
+          "vramTexAtClearMb": 195.68305110931396,
+          "jsHeapPeakDuringRefineMb": 854.4193868637085,
+          "vramTexPeakDuringRefineMb": 195.68305110931396,
+          "screenshotPath": "screenshots/finland-2p-quality-native/kf-0.jpg"
+        },
+        {
+          "label": "kf-1",
+          "keyframeIndex": 1,
+          "animTimeSec": 1.5,
+          "moveMs": 1449.9000000059605,
+          "blurToClearMs": 10200.699999988079,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 4,
+          "pendingPeakNodes": 4,
+          "pendingPeakByInstance": [
+            {
+              "entityIndex": 0,
+              "label": "#0 finland-tile-0",
+              "pendingChunks": 4,
+              "pendingChunksAllView": 4,
+              "visibleLodMismatch": 142,
+              "ready": false
+            },
+            {
+              "entityIndex": 1,
+              "label": "#1 finland-tile-1",
+              "pendingChunks": 0,
+              "pendingChunksAllView": 0,
+              "visibleLodMismatch": 0,
+              "ready": true
+            }
+          ],
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 36,
+          "fpsP95DuringRefine": 39,
+          "fpsMinDuringRefine": 27,
+          "gsplatsAtClearM": 2.665517,
+          "jsHeapAtClearMb": 537.6312570571899,
+          "vramTexAtClearMb": 201.33624935150146,
+          "jsHeapPeakDuringRefineMb": 848.4837217330933,
+          "vramTexPeakDuringRefineMb": 208.51795101165771,
+          "screenshotPath": "screenshots/finland-2p-quality-native/kf-1.jpg"
+        },
+        {
+          "label": "kf-2",
+          "keyframeIndex": 2,
+          "animTimeSec": 3,
+          "moveMs": 1457.7999999821186,
+          "blurToClearMs": 11400.200000017881,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 4,
+          "pendingPeakNodes": 4,
+          "pendingPeakByInstance": [
+            {
+              "entityIndex": 0,
+              "label": "#0 finland-tile-0",
+              "pendingChunks": 4,
+              "pendingChunksAllView": 4,
+              "visibleLodMismatch": 353,
+              "ready": false
+            },
+            {
+              "entityIndex": 1,
+              "label": "#1 finland-tile-1",
+              "pendingChunks": 0,
+              "pendingChunksAllView": 0,
+              "visibleLodMismatch": 0,
+              "ready": true
+            }
+          ],
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 36,
+          "fpsP95DuringRefine": 38,
+          "fpsMinDuringRefine": 31,
+          "gsplatsAtClearM": 2.605502,
+          "jsHeapAtClearMb": 355.2564945220947,
+          "vramTexAtClearMb": 189.93341732025146,
+          "jsHeapPeakDuringRefineMb": 856.7157745361328,
+          "vramTexPeakDuringRefineMb": 210.37824153900146,
+          "screenshotPath": "screenshots/finland-2p-quality-native/kf-2.jpg"
+        },
+        {
+          "label": "kf-3",
+          "keyframeIndex": 3,
+          "animTimeSec": 4.5,
+          "moveMs": 1466.800000011921,
+          "blurToClearMs": 11963.199999988079,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 2,
+          "pendingPeakNodes": 3,
+          "pendingPeakByInstance": [
+            {
+              "entityIndex": 0,
+              "label": "#0 finland-tile-0",
+              "pendingChunks": 3,
+              "pendingChunksAllView": 3,
+              "visibleLodMismatch": 141,
+              "ready": false
+            },
+            {
+              "entityIndex": 1,
+              "label": "#1 finland-tile-1",
+              "pendingChunks": 0,
+              "pendingChunksAllView": 0,
+              "visibleLodMismatch": 0,
+              "ready": true
+            }
+          ],
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 29,
+          "fpsP95DuringRefine": 32,
+          "fpsMinDuringRefine": 27,
+          "gsplatsAtClearM": 2.44761,
+          "jsHeapAtClearMb": 748.4858055114746,
+          "vramTexAtClearMb": 182.69080257415771,
+          "jsHeapPeakDuringRefineMb": 864.9749708175659,
+          "vramTexPeakDuringRefineMb": 200.88391780853271,
+          "screenshotPath": "screenshots/finland-2p-quality-native/kf-3.jpg"
+        },
+        {
+          "label": "kf-4",
+          "keyframeIndex": 4,
+          "animTimeSec": 6,
+          "moveMs": 1449.9000000059605,
+          "blurToClearMs": 10201.199999988079,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 5,
+          "pendingPeakNodes": 5,
+          "pendingPeakByInstance": [
+            {
+              "entityIndex": 0,
+              "label": "#0 finland-tile-0",
+              "pendingChunks": 0,
+              "pendingChunksAllView": 0,
+              "visibleLodMismatch": 27,
+              "ready": true
+            },
+            {
+              "entityIndex": 1,
+              "label": "#1 finland-tile-1",
+              "pendingChunks": 5,
+              "pendingChunksAllView": 5,
+              "visibleLodMismatch": 155,
+              "ready": false
+            }
+          ],
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 30,
+          "fpsP95DuringRefine": 39,
+          "fpsMinDuringRefine": 25,
+          "gsplatsAtClearM": 2.356607,
+          "jsHeapAtClearMb": 507.0426273345947,
+          "vramTexAtClearMb": 186.64795589447021,
+          "jsHeapPeakDuringRefineMb": 873.2739973068237,
+          "vramTexPeakDuringRefineMb": 188.34400081634521,
+          "screenshotPath": "screenshots/finland-2p-quality-native/kf-4.jpg"
+        },
+        {
+          "label": "kf-5",
+          "keyframeIndex": 5,
+          "animTimeSec": 7.5,
+          "moveMs": 1511.0999999940395,
+          "blurToClearMs": 19401.5,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 5,
+          "pendingPeakNodes": 5,
+          "pendingPeakByInstance": [
+            {
+              "entityIndex": 0,
+              "label": "#0 finland-tile-0",
+              "pendingChunks": 0,
+              "pendingChunksAllView": 0,
+              "visibleLodMismatch": 8,
+              "ready": true
+            },
+            {
+              "entityIndex": 1,
+              "label": "#1 finland-tile-1",
+              "pendingChunks": 5,
+              "pendingChunksAllView": 5,
+              "visibleLodMismatch": 1019,
+              "ready": false
+            }
+          ],
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 29,
+          "fpsP95DuringRefine": 52,
+          "fpsMinDuringRefine": 25,
+          "gsplatsAtClearM": 2.644014,
+          "jsHeapAtClearMb": 400.80802822113037,
+          "vramTexAtClearMb": 205.11658382415771,
+          "jsHeapPeakDuringRefineMb": 948.4823608398438,
+          "vramTexPeakDuringRefineMb": 206.62097835540771,
+          "screenshotPath": "screenshots/finland-2p-quality-native/kf-5.jpg"
+        },
+        {
+          "label": "kf-6",
+          "keyframeIndex": 6,
+          "animTimeSec": 9,
+          "moveMs": 1466.199999988079,
+          "blurToClearMs": 19200.80000001192,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 6,
+          "pendingPeakNodes": 6,
+          "pendingPeakByInstance": [
+            {
+              "entityIndex": 0,
+              "label": "#0 finland-tile-0",
+              "pendingChunks": 0,
+              "pendingChunksAllView": 0,
+              "visibleLodMismatch": 1,
+              "ready": true
+            },
+            {
+              "entityIndex": 1,
+              "label": "#1 finland-tile-1",
+              "pendingChunks": 6,
+              "pendingChunksAllView": 6,
+              "visibleLodMismatch": 988,
+              "ready": false
+            }
+          ],
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 25,
+          "fpsP95DuringRefine": 37,
+          "fpsMinDuringRefine": 21,
+          "gsplatsAtClearM": 2.731374,
+          "jsHeapAtClearMb": 725.0630912780762,
+          "vramTexAtClearMb": 216.42218685150146,
+          "jsHeapPeakDuringRefineMb": 950.5086669921875,
+          "vramTexPeakDuringRefineMb": 216.42218685150146,
+          "screenshotPath": "screenshots/finland-2p-quality-native/kf-6.jpg"
+        },
+        {
+          "label": "kf-7",
+          "keyframeIndex": 7,
+          "animTimeSec": 10.5,
+          "moveMs": 1450,
+          "blurToClearMs": 12200.59999999404,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 4,
+          "pendingPeakNodes": 4,
+          "pendingPeakByInstance": [
+            {
+              "entityIndex": 0,
+              "label": "#0 finland-tile-0",
+              "pendingChunks": 0,
+              "pendingChunksAllView": 0,
+              "visibleLodMismatch": 0,
+              "ready": true
+            },
+            {
+              "entityIndex": 1,
+              "label": "#1 finland-tile-1",
+              "pendingChunks": 4,
+              "pendingChunksAllView": 4,
+              "visibleLodMismatch": 449,
+              "ready": false
+            }
+          ],
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 25,
+          "fpsP95DuringRefine": 47,
+          "fpsMinDuringRefine": 22,
+          "gsplatsAtClearM": 2.819278,
+          "jsHeapAtClearMb": 489.5527124404907,
+          "vramTexAtClearMb": 222.03418636322021,
+          "jsHeapPeakDuringRefineMb": 970.4161758422852,
+          "vramTexPeakDuringRefineMb": 224.00800228118896,
+          "screenshotPath": "screenshots/finland-2p-quality-native/kf-7.jpg"
+        }
+      ],
+      "animTrackBenchmark": {
+        "keyframes": [
+          {
+            "label": "kf-0",
+            "keyframeIndex": 0,
+            "animTimeSec": 0,
+            "moveMs": 0,
+            "blurToClearMs": 28000.59999999404,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 28,
+            "pendingPeakNodes": 28,
+            "pendingPeakByInstance": [
+              {
+                "entityIndex": 0,
+                "label": "#0 finland-tile-0",
+                "pendingChunks": 28,
+                "pendingChunksAllView": 28,
+                "visibleLodMismatch": 20262,
+                "ready": false
+              },
+              {
+                "entityIndex": 1,
+                "label": "#1 finland-tile-1",
+                "pendingChunks": 0,
+                "pendingChunksAllView": 0,
+                "visibleLodMismatch": 0,
+                "ready": true
+              }
+            ],
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 33,
+            "fpsP95DuringRefine": 36,
+            "fpsMinDuringRefine": 11,
+            "gsplatsAtClearM": 2.592154,
+            "jsHeapAtClearMb": 853.2782621383667,
+            "vramTexAtClearMb": 195.68305110931396,
+            "jsHeapPeakDuringRefineMb": 854.4193868637085,
+            "vramTexPeakDuringRefineMb": 195.68305110931396,
+            "screenshotPath": "screenshots/finland-2p-quality-native/kf-0.jpg"
+          },
+          {
+            "label": "kf-1",
+            "keyframeIndex": 1,
+            "animTimeSec": 1.5,
+            "moveMs": 1449.9000000059605,
+            "blurToClearMs": 10200.699999988079,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 4,
+            "pendingPeakNodes": 4,
+            "pendingPeakByInstance": [
+              {
+                "entityIndex": 0,
+                "label": "#0 finland-tile-0",
+                "pendingChunks": 4,
+                "pendingChunksAllView": 4,
+                "visibleLodMismatch": 142,
+                "ready": false
+              },
+              {
+                "entityIndex": 1,
+                "label": "#1 finland-tile-1",
+                "pendingChunks": 0,
+                "pendingChunksAllView": 0,
+                "visibleLodMismatch": 0,
+                "ready": true
+              }
+            ],
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 36,
+            "fpsP95DuringRefine": 39,
+            "fpsMinDuringRefine": 27,
+            "gsplatsAtClearM": 2.665517,
+            "jsHeapAtClearMb": 537.6312570571899,
+            "vramTexAtClearMb": 201.33624935150146,
+            "jsHeapPeakDuringRefineMb": 848.4837217330933,
+            "vramTexPeakDuringRefineMb": 208.51795101165771,
+            "screenshotPath": "screenshots/finland-2p-quality-native/kf-1.jpg"
+          },
+          {
+            "label": "kf-2",
+            "keyframeIndex": 2,
+            "animTimeSec": 3,
+            "moveMs": 1457.7999999821186,
+            "blurToClearMs": 11400.200000017881,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 4,
+            "pendingPeakNodes": 4,
+            "pendingPeakByInstance": [
+              {
+                "entityIndex": 0,
+                "label": "#0 finland-tile-0",
+                "pendingChunks": 4,
+                "pendingChunksAllView": 4,
+                "visibleLodMismatch": 353,
+                "ready": false
+              },
+              {
+                "entityIndex": 1,
+                "label": "#1 finland-tile-1",
+                "pendingChunks": 0,
+                "pendingChunksAllView": 0,
+                "visibleLodMismatch": 0,
+                "ready": true
+              }
+            ],
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 36,
+            "fpsP95DuringRefine": 38,
+            "fpsMinDuringRefine": 31,
+            "gsplatsAtClearM": 2.605502,
+            "jsHeapAtClearMb": 355.2564945220947,
+            "vramTexAtClearMb": 189.93341732025146,
+            "jsHeapPeakDuringRefineMb": 856.7157745361328,
+            "vramTexPeakDuringRefineMb": 210.37824153900146,
+            "screenshotPath": "screenshots/finland-2p-quality-native/kf-2.jpg"
+          },
+          {
+            "label": "kf-3",
+            "keyframeIndex": 3,
+            "animTimeSec": 4.5,
+            "moveMs": 1466.800000011921,
+            "blurToClearMs": 11963.199999988079,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 2,
+            "pendingPeakNodes": 3,
+            "pendingPeakByInstance": [
+              {
+                "entityIndex": 0,
+                "label": "#0 finland-tile-0",
+                "pendingChunks": 3,
+                "pendingChunksAllView": 3,
+                "visibleLodMismatch": 141,
+                "ready": false
+              },
+              {
+                "entityIndex": 1,
+                "label": "#1 finland-tile-1",
+                "pendingChunks": 0,
+                "pendingChunksAllView": 0,
+                "visibleLodMismatch": 0,
+                "ready": true
+              }
+            ],
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 29,
+            "fpsP95DuringRefine": 32,
+            "fpsMinDuringRefine": 27,
+            "gsplatsAtClearM": 2.44761,
+            "jsHeapAtClearMb": 748.4858055114746,
+            "vramTexAtClearMb": 182.69080257415771,
+            "jsHeapPeakDuringRefineMb": 864.9749708175659,
+            "vramTexPeakDuringRefineMb": 200.88391780853271,
+            "screenshotPath": "screenshots/finland-2p-quality-native/kf-3.jpg"
+          },
+          {
+            "label": "kf-4",
+            "keyframeIndex": 4,
+            "animTimeSec": 6,
+            "moveMs": 1449.9000000059605,
+            "blurToClearMs": 10201.199999988079,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 5,
+            "pendingPeakNodes": 5,
+            "pendingPeakByInstance": [
+              {
+                "entityIndex": 0,
+                "label": "#0 finland-tile-0",
+                "pendingChunks": 0,
+                "pendingChunksAllView": 0,
+                "visibleLodMismatch": 27,
+                "ready": true
+              },
+              {
+                "entityIndex": 1,
+                "label": "#1 finland-tile-1",
+                "pendingChunks": 5,
+                "pendingChunksAllView": 5,
+                "visibleLodMismatch": 155,
+                "ready": false
+              }
+            ],
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 30,
+            "fpsP95DuringRefine": 39,
+            "fpsMinDuringRefine": 25,
+            "gsplatsAtClearM": 2.356607,
+            "jsHeapAtClearMb": 507.0426273345947,
+            "vramTexAtClearMb": 186.64795589447021,
+            "jsHeapPeakDuringRefineMb": 873.2739973068237,
+            "vramTexPeakDuringRefineMb": 188.34400081634521,
+            "screenshotPath": "screenshots/finland-2p-quality-native/kf-4.jpg"
+          },
+          {
+            "label": "kf-5",
+            "keyframeIndex": 5,
+            "animTimeSec": 7.5,
+            "moveMs": 1511.0999999940395,
+            "blurToClearMs": 19401.5,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 5,
+            "pendingPeakNodes": 5,
+            "pendingPeakByInstance": [
+              {
+                "entityIndex": 0,
+                "label": "#0 finland-tile-0",
+                "pendingChunks": 0,
+                "pendingChunksAllView": 0,
+                "visibleLodMismatch": 8,
+                "ready": true
+              },
+              {
+                "entityIndex": 1,
+                "label": "#1 finland-tile-1",
+                "pendingChunks": 5,
+                "pendingChunksAllView": 5,
+                "visibleLodMismatch": 1019,
+                "ready": false
+              }
+            ],
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 29,
+            "fpsP95DuringRefine": 52,
+            "fpsMinDuringRefine": 25,
+            "gsplatsAtClearM": 2.644014,
+            "jsHeapAtClearMb": 400.80802822113037,
+            "vramTexAtClearMb": 205.11658382415771,
+            "jsHeapPeakDuringRefineMb": 948.4823608398438,
+            "vramTexPeakDuringRefineMb": 206.62097835540771,
+            "screenshotPath": "screenshots/finland-2p-quality-native/kf-5.jpg"
+          },
+          {
+            "label": "kf-6",
+            "keyframeIndex": 6,
+            "animTimeSec": 9,
+            "moveMs": 1466.199999988079,
+            "blurToClearMs": 19200.80000001192,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 6,
+            "pendingPeakNodes": 6,
+            "pendingPeakByInstance": [
+              {
+                "entityIndex": 0,
+                "label": "#0 finland-tile-0",
+                "pendingChunks": 0,
+                "pendingChunksAllView": 0,
+                "visibleLodMismatch": 1,
+                "ready": true
+              },
+              {
+                "entityIndex": 1,
+                "label": "#1 finland-tile-1",
+                "pendingChunks": 6,
+                "pendingChunksAllView": 6,
+                "visibleLodMismatch": 988,
+                "ready": false
+              }
+            ],
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 25,
+            "fpsP95DuringRefine": 37,
+            "fpsMinDuringRefine": 21,
+            "gsplatsAtClearM": 2.731374,
+            "jsHeapAtClearMb": 725.0630912780762,
+            "vramTexAtClearMb": 216.42218685150146,
+            "jsHeapPeakDuringRefineMb": 950.5086669921875,
+            "vramTexPeakDuringRefineMb": 216.42218685150146,
+            "screenshotPath": "screenshots/finland-2p-quality-native/kf-6.jpg"
+          },
+          {
+            "label": "kf-7",
+            "keyframeIndex": 7,
+            "animTimeSec": 10.5,
+            "moveMs": 1450,
+            "blurToClearMs": 12200.59999999404,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 4,
+            "pendingPeakNodes": 4,
+            "pendingPeakByInstance": [
+              {
+                "entityIndex": 0,
+                "label": "#0 finland-tile-0",
+                "pendingChunks": 0,
+                "pendingChunksAllView": 0,
+                "visibleLodMismatch": 0,
+                "ready": true
+              },
+              {
+                "entityIndex": 1,
+                "label": "#1 finland-tile-1",
+                "pendingChunks": 4,
+                "pendingChunksAllView": 4,
+                "visibleLodMismatch": 449,
+                "ready": false
+              }
+            ],
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 25,
+            "fpsP95DuringRefine": 47,
+            "fpsMinDuringRefine": 22,
+            "gsplatsAtClearM": 2.819278,
+            "jsHeapAtClearMb": 489.5527124404907,
+            "vramTexAtClearMb": 222.03418636322021,
+            "jsHeapPeakDuringRefineMb": 970.4161758422852,
+            "vramTexPeakDuringRefineMb": 224.00800228118896,
+            "screenshotPath": "screenshots/finland-2p-quality-native/kf-7.jpg"
+          }
+        ],
+        "fpsP50DuringPlayback": 36,
+        "fpsP95DuringPlayback": 49,
+        "fpsMinDuringPlayback": 24,
+        "totalPlaybackMs": 10251.699999988079
+      },
+      "streamingMetrics": {
+        "budget": {
+          "maxActiveRegions": 16,
+          "maxWarmRegions": 32
+        },
+        "regions": {
+          "total": 2,
+          "active": 2,
+          "warm": 0,
+          "cold": 0,
+          "relevant": 2
+        },
+        "resourceGroups": {
+          "total": 1,
+          "sharedInstanceCount": 1,
+          "groups": [
+            {
+              "resourceKey": "finland-vuores",
+              "instanceCount": 2,
+              "primaryIndex": 0,
+              "indices": [
+                0,
+                1
+              ]
+            }
+          ]
+        },
+        "streaming": {
+          "controllerCount": 0,
+          "priorityFiles": 0,
+          "priorityQueued": 0,
+          "priorityInFlight": 0,
+          "staleQueued": 0,
+          "staleInFlight": 0,
+          "suspendedQueued": 0,
+          "loaderInFlight": 0,
+          "poolResidentCount": 0,
+          "poolResidentBytesEstimate": 0,
+          "poolEvictions": 0
+        }
+      },
+      "timestamp": "2026-06-26T05:53:18.975Z",
+      "comparisonGroup": "finland-native-2p",
+      "bottleneckHint": "asset-http"
+    }
+  ]
+}

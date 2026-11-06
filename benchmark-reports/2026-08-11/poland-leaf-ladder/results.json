@@ -1,0 +1,340 @@
+{
+  "outDir": "/Users/leqiwan/Desktop/shuyuan_wlq/大场景渲染/supersplat-viewer/benchmark-reports/2026-08-11/poland-leaf-ladder",
+  "budget": "2.5",
+  "settings": "https://unicity-dev2.bdnrc.org.cn/upload/scene/20260605/yunji/LOD/settings-poland.json",
+  "results": [
+    {
+      "sceneId": "poland-96k-hard",
+      "label": "hard · extent=0 · ~4096 leaves",
+      "leaves": 4096,
+      "firstUsefulMs": 5413,
+      "caseMs": 99353,
+      "sampleCount": 5241,
+      "frameMs": {
+        "n": 5241,
+        "p50": 16.7,
+        "p90": 17.2,
+        "max": 17.8,
+        "avg": 16.666609425680868
+      },
+      "updateMs": {
+        "n": 5241,
+        "p50": 6.2,
+        "p90": 8.2,
+        "max": 16.4,
+        "avg": 6.227494752909735
+      },
+      "gpuMs": {
+        "n": 5241,
+        "p50": 17.3,
+        "p90": 20.2,
+        "max": 28.9,
+        "avg": 16.75514214844501
+      },
+      "gapMs": {
+        "n": 5241,
+        "p50": 0,
+        "p90": 0,
+        "max": 0.3,
+        "avg": 0.000057240984544934173
+      },
+      "totalBlocks": {
+        "n": 5241,
+        "p50": 4096,
+        "p90": 4096,
+        "max": 4096,
+        "avg": 4096
+      },
+      "gsplatsM": {
+        "n": 5241,
+        "p50": 2.19216,
+        "p90": 2.404989,
+        "max": 2.461589,
+        "avg": 1.9297126014119552
+      },
+      "blurToClearMs": {
+        "n": 4,
+        "p50": 11899.900000095367,
+        "p90": 21158.200000047684,
+        "max": 33832.90000009537,
+        "avg": 19240.600000023842
+      },
+      "pendingPeak": {
+        "n": 4,
+        "p50": 26,
+        "p90": 51,
+        "max": 56,
+        "avg": 38.25
+      },
+      "timeoutCount": 0,
+      "claritySteps": [
+        {
+          "label": "kf0",
+          "blurToClearMs": 33832.90000009537,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 37,
+          "pendingPeakNodes": 56,
+          "gsplatsAtClearM": 2.461589,
+          "fpsP50DuringRefine": 60,
+          "fpsMinDuringRefine": 59,
+          "waitMs": 39917
+        },
+        {
+          "label": "kf1",
+          "blurToClearMs": 21158.200000047684,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 0,
+          "pendingPeakNodes": 51,
+          "gsplatsAtClearM": 2.369431,
+          "fpsP50DuringRefine": 60,
+          "fpsMinDuringRefine": 59,
+          "waitMs": 21358.900000095367
+        },
+        {
+          "label": "kf2",
+          "blurToClearMs": 10071.399999856949,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 0,
+          "pendingPeakNodes": 20,
+          "gsplatsAtClearM": 2.417982,
+          "fpsP50DuringRefine": 60,
+          "fpsMinDuringRefine": 59,
+          "waitMs": 11479.5
+        },
+        {
+          "label": "kf3",
+          "blurToClearMs": 11899.900000095367,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 0,
+          "pendingPeakNodes": 26,
+          "gsplatsAtClearM": 2.435576,
+          "fpsP50DuringRefine": 60,
+          "fpsMinDuringRefine": 59,
+          "waitMs": 12507.799999952316
+        }
+      ]
+    },
+    {
+      "sceneId": "poland-96k-C-ext10-min8k",
+      "label": "C · extent=10 min8k · ~32752 leaves",
+      "leaves": 32752,
+      "firstUsefulMs": 15472,
+      "caseMs": 102255,
+      "sampleCount": 1184,
+      "frameMs": {
+        "n": 1184,
+        "p50": 66.7,
+        "p90": 99.9,
+        "max": 166.7,
+        "avg": 70.70633445945961
+      },
+      "updateMs": {
+        "n": 1184,
+        "p50": 49.8,
+        "p90": 63.9,
+        "max": 106.6,
+        "avg": 50.07086148648641
+      },
+      "gpuMs": {
+        "n": 1184,
+        "p50": 28.8,
+        "p90": 45.7,
+        "max": 56.2,
+        "avg": 30.043327702702697
+      },
+      "gapMs": {
+        "n": 1184,
+        "p50": 0,
+        "p90": 0,
+        "max": 62.4,
+        "avg": 0.0527027027027027
+      },
+      "totalBlocks": {
+        "n": 1184,
+        "p50": 32752,
+        "p90": 32752,
+        "max": 32752,
+        "avg": 32601.760135135137
+      },
+      "gsplatsM": {
+        "n": 1184,
+        "p50": 2.063965,
+        "p90": 2.328211,
+        "max": 2.3782,
+        "avg": 1.9349025168918987
+      },
+      "blurToClearMs": {
+        "n": 4,
+        "p50": 6503.099999904633,
+        "p90": 26060.599999904633,
+        "max": 33729.60000014305,
+        "avg": 18001.67500001192
+      },
+      "pendingPeak": {
+        "n": 4,
+        "p50": 25,
+        "p90": 56,
+        "max": 61,
+        "avg": 38
+      },
+      "timeoutCount": 0,
+      "claritySteps": [
+        {
+          "label": "kf0",
+          "blurToClearMs": 33729.60000014305,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 51,
+          "pendingPeakNodes": 56,
+          "gsplatsAtClearM": 2.322699,
+          "fpsP50DuringRefine": 11,
+          "fpsMinDuringRefine": 9,
+          "waitMs": 37391
+        },
+        {
+          "label": "kf1",
+          "blurToClearMs": 26060.599999904633,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 0,
+          "pendingPeakNodes": 61,
+          "gsplatsAtClearM": 2.338658,
+          "fpsP50DuringRefine": 16,
+          "fpsMinDuringRefine": 12,
+          "waitMs": 27469.799999952316
+        },
+        {
+          "label": "kf2",
+          "blurToClearMs": 5713.400000095367,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 2,
+          "pendingPeakNodes": 10,
+          "gsplatsAtClearM": 2.308761,
+          "fpsP50DuringRefine": 17,
+          "fpsMinDuringRefine": 15,
+          "waitMs": 8052.299999952316
+        },
+        {
+          "label": "kf3",
+          "blurToClearMs": 6503.099999904633,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 18,
+          "pendingPeakNodes": 25,
+          "gsplatsAtClearM": 2.3782,
+          "fpsP50DuringRefine": 12,
+          "fpsMinDuringRefine": 11,
+          "waitMs": 7184.400000095367
+        }
+      ]
+    },
+    {
+      "sceneId": "poland-96k-B-ext10-min16k",
+      "label": "B · extent=10 min16k · ~16384 leaves",
+      "leaves": 16384,
+      "firstUsefulMs": 10370,
+      "caseMs": 105010,
+      "sampleCount": 3060,
+      "frameMs": {
+        "n": 3060,
+        "p50": 25.7,
+        "p90": 41.7,
+        "max": 91.6,
+        "avg": 29.537679738562325
+      },
+      "updateMs": {
+        "n": 3060,
+        "p50": 21.5,
+        "p90": 29.9,
+        "max": 57.4,
+        "avg": 22.772875816993466
+      },
+      "gpuMs": {
+        "n": 3060,
+        "p50": 26.6,
+        "p90": 37.1,
+        "max": 58.9,
+        "avg": 26.684575163398723
+      },
+      "gapMs": {
+        "n": 3060,
+        "p50": 0,
+        "p90": 0,
+        "max": 6.1,
+        "avg": 0.0019934640522875817
+      },
+      "totalBlocks": {
+        "n": 3060,
+        "p50": 16384,
+        "p90": 16384,
+        "max": 16384,
+        "avg": 16375.18954248366
+      },
+      "gsplatsM": {
+        "n": 3060,
+        "p50": 2.190328,
+        "p90": 2.387791,
+        "max": 2.429428,
+        "avg": 1.9821803496731911
+      },
+      "blurToClearMs": {
+        "n": 4,
+        "p50": 10332.700000047684,
+        "p90": 27630,
+        "max": 33528,
+        "avg": 19501.000000059605
+      },
+      "pendingPeak": {
+        "n": 4,
+        "p50": 20,
+        "p90": 63,
+        "max": 64,
+        "avg": 40
+      },
+      "timeoutCount": 0,
+      "claritySteps": [
+        {
+          "label": "kf0",
+          "blurToClearMs": 33528,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 29,
+          "pendingPeakNodes": 63,
+          "gsplatsAtClearM": 2.397591,
+          "fpsP50DuringRefine": 25,
+          "fpsMinDuringRefine": 23,
+          "waitMs": 40456.90000009537
+        },
+        {
+          "label": "kf1",
+          "blurToClearMs": 27630,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 22,
+          "pendingPeakNodes": 64,
+          "gsplatsAtClearM": 2.366429,
+          "fpsP50DuringRefine": 35,
+          "fpsMinDuringRefine": 27,
+          "waitMs": 28574.89999985695
+        },
+        {
+          "label": "kf2",
+          "blurToClearMs": 6513.300000190735,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 12,
+          "pendingPeakNodes": 13,
+          "gsplatsAtClearM": 2.390763,
+          "fpsP50DuringRefine": 58,
+          "fpsMinDuringRefine": 47,
+          "waitMs": 7391.400000095367
+        },
+        {
+          "label": "kf3",
+          "blurToClearMs": 10332.700000047684,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 12,
+          "pendingPeakNodes": 20,
+          "gsplatsAtClearM": 2.429428,
+          "fpsP50DuringRefine": 40,
+          "fpsMinDuringRefine": 35,
+          "waitMs": 11260.800000190735
+        }
+      ]
+    }
+  ]
+}

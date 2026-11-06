@@ -1,0 +1,179 @@
+{
+  "benchmarkAxis": "profile",
+  "suite": "public/benchmark-suites/scene-nanguangchang-v6-0.5-engine-pc-2.20.0.json",
+  "baseUrl": "http://localhost:3000/",
+  "renderer": "webgpu",
+  "runConditions": {
+    "coldStart": false,
+    "browserSession": "shared-context-per-script",
+    "chromiumHttpCache": "enabled-shared-after-warmup",
+    "warmup": {
+      "enabled": true,
+      "discarded": true,
+      "caseLabel": "pc-2.20.0-baseline",
+      "durationMs": 73048
+    },
+    "notes": [
+      "Warm start: measured case(s) share one browser context; optional discarded warmup preloads HTTP cache.",
+      "Playwright uses an ephemeral profile (not your daily Chrome); no cookies/storage persist after browser.close().",
+      "OS page cache, DNS, and GPU shader/pipeline cache are NOT reset by this script — cross-run comparisons on one machine may still drift."
+    ]
+  },
+  "cases": [
+    {
+      "label": "pc-2.20.0-baseline",
+      "lodRuntime": "refinement",
+      "firstFrameMs": 54802.90000009537,
+      "settleStartMs": 54803,
+      "fpsP50": 57,
+      "fpsP95": 59,
+      "gsplatsAvgM": 3.484094,
+      "jsHeapAtFirstFrameMb": 304.2486410140991,
+      "vramTexAtFirstFrameMb": 311.00837230682373,
+      "jsHeapPeakMb": 322.14955043792725,
+      "vramTexPeakMb": 320.3491315841675,
+      "rendererUsed": "compute",
+      "interactionWaypoints": [
+        {
+          "label": "kf-0",
+          "keyframeIndex": 0,
+          "animTimeSec": 0,
+          "moveMs": 0,
+          "blurToClearMs": null,
+          "refineTimedOut": true,
+          "pendingNodesAtArrival": 2,
+          "pendingPeakNodes": 2,
+          "refinementRatioAtClear": null,
+          "fpsP50DuringRefine": 59,
+          "fpsP95DuringRefine": 60,
+          "fpsMinDuringRefine": 56,
+          "gsplatsAtClearM": null,
+          "jsHeapAtClearMb": null,
+          "vramTexAtClearMb": null,
+          "jsHeapPeakDuringRefineMb": 322.14955043792725,
+          "vramTexPeakDuringRefineMb": 311.00837230682373,
+          "screenshotPath": "screenshots/pc-2.20.0-baseline/kf-0.jpg"
+        },
+        {
+          "label": "kf-1",
+          "keyframeIndex": 1,
+          "animTimeSec": 1,
+          "moveMs": 967,
+          "blurToClearMs": 30200.599999904633,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 20,
+          "pendingPeakNodes": 20,
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 60,
+          "fpsP95DuringRefine": 60,
+          "fpsMinDuringRefine": 57,
+          "gsplatsAtClearM": 3.484094,
+          "jsHeapAtClearMb": 308.71178913116455,
+          "vramTexAtClearMb": 320.3491315841675,
+          "jsHeapPeakDuringRefineMb": 319.81118965148926,
+          "vramTexPeakDuringRefineMb": 320.3491315841675,
+          "screenshotPath": "screenshots/pc-2.20.0-baseline/kf-1.jpg"
+        }
+      ],
+      "animTrackBenchmark": {
+        "keyframes": [
+          {
+            "label": "kf-0",
+            "keyframeIndex": 0,
+            "animTimeSec": 0,
+            "moveMs": 0,
+            "blurToClearMs": null,
+            "refineTimedOut": true,
+            "pendingNodesAtArrival": 2,
+            "pendingPeakNodes": 2,
+            "refinementRatioAtClear": null,
+            "fpsP50DuringRefine": 59,
+            "fpsP95DuringRefine": 60,
+            "fpsMinDuringRefine": 56,
+            "gsplatsAtClearM": null,
+            "jsHeapAtClearMb": null,
+            "vramTexAtClearMb": null,
+            "jsHeapPeakDuringRefineMb": 322.14955043792725,
+            "vramTexPeakDuringRefineMb": 311.00837230682373,
+            "screenshotPath": "screenshots/pc-2.20.0-baseline/kf-0.jpg"
+          },
+          {
+            "label": "kf-1",
+            "keyframeIndex": 1,
+            "animTimeSec": 1,
+            "moveMs": 967,
+            "blurToClearMs": 30200.599999904633,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 20,
+            "pendingPeakNodes": 20,
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 60,
+            "fpsP95DuringRefine": 60,
+            "fpsMinDuringRefine": 57,
+            "gsplatsAtClearM": 3.484094,
+            "jsHeapAtClearMb": 308.71178913116455,
+            "vramTexAtClearMb": 320.3491315841675,
+            "jsHeapPeakDuringRefineMb": 319.81118965148926,
+            "vramTexPeakDuringRefineMb": 320.3491315841675,
+            "screenshotPath": "screenshots/pc-2.20.0-baseline/kf-1.jpg"
+          }
+        ],
+        "fpsP50DuringPlayback": 57,
+        "fpsP95DuringPlayback": 59,
+        "fpsMinDuringPlayback": 57,
+        "totalPlaybackMs": 967
+      },
+      "bakeAcceptance": {
+        "sampleCount": 7200,
+        "copyPctGe95": {
+          "frames": 0,
+          "ratio": 0
+        },
+        "uploadedOverTotal": {
+          "n": 198,
+          "p50": 0.0038880248833592537,
+          "p90": 0.007805182641273806,
+          "max": 0.41104199066874025,
+          "avg": 0.009805553643677094
+        },
+        "uploadMbEst": {
+          "n": 198,
+          "p50": 0.39,
+          "p90": 0.7,
+          "max": 22.24,
+          "avg": 0.7640404040404042
+        },
+        "bakePassesEst": {
+          "n": 198,
+          "p50": 1,
+          "p90": 1,
+          "max": 1,
+          "avg": 1
+        },
+        "worldStateFullRebuild": {
+          "frames": 0,
+          "ratio": 0
+        },
+        "dirtyForcedWorkBufferRebuild": {
+          "frames": 0,
+          "ratio": 0
+        },
+        "syncAdvance": {
+          "horizonFrames": 5,
+          "syncFrames": 138,
+          "advancedWithinHorizon": 83,
+          "advanceRatio": 0.601,
+          "worldVersionAdvanced": 83,
+          "currentLodAdvanced": 72
+        },
+        "staleLoadedNodes": {
+          "framesWithStale": 542,
+          "maxConsecutiveFrames": 33
+        }
+      },
+      "timestamp": "2026-08-05T03:27:06.769Z",
+      "comparisonGroup": "nanguangchang-v6-0.5-engine",
+      "bottleneckHint": "asset-http"
+    }
+  ]
+}

@@ -1,0 +1,262 @@
+{
+  "mode": "cpu",
+  "sampleCount": 113194,
+  "totalMs": 29424.74,
+  "gcMs": 223.331,
+  "gcPct": 0.758990563722908,
+  "modules": [
+    {
+      "module": "other",
+      "ms": 18246.763,
+      "hitCount": 70412,
+      "topFns": [
+        {
+          "fn": "(idle)",
+          "ms": 15675.009
+        },
+        {
+          "fn": "(program)",
+          "ms": 1675.279
+        },
+        {
+          "fn": "Blob",
+          "ms": 100.845
+        },
+        {
+          "fn": "writeBuffer",
+          "ms": 79.572
+        },
+        {
+          "fn": "URLSearchParams",
+          "ms": 71.645
+        }
+      ]
+    },
+    {
+      "module": "viewer-bundle",
+      "ms": 7569.098,
+      "hitCount": 29024,
+      "topFns": [
+        {
+          "fn": "countStreamingViewportBootstrapNodes",
+          "ms": 2808.31
+        },
+        {
+          "fn": "ensureStreamingBootstrapCoarseFiles",
+          "ms": 1596.3
+        },
+        {
+          "fn": "computeViewportEdgeFactor",
+          "ms": 1029.632
+        },
+        {
+          "fn": "aabbIntersectsFrustum",
+          "ms": 869.256
+        },
+        {
+          "fn": "sumAllocationSlots",
+          "ms": 273.132
+        }
+      ]
+    },
+    {
+      "module": "playcanvas",
+      "ms": 2704.256,
+      "hitCount": 10312,
+      "topFns": [
+        {
+          "fn": "set",
+          "ms": 481.45
+        },
+        {
+          "fn": "transformPoint",
+          "ms": 477.783
+        },
+        {
+          "fn": "update",
+          "ms": 75.906
+        },
+        {
+          "fn": "(anonymous)",
+          "ms": 73.002
+        },
+        {
+          "fn": "transformVec4",
+          "ms": 72.773
+        }
+      ]
+    },
+    {
+      "module": "octree-lod",
+      "ms": 561.799,
+      "hitCount": 2168,
+      "topFns": [
+        {
+          "fn": "isOctreeBootstrapPlaceableNode",
+          "ms": 525.71
+        },
+        {
+          "fn": "findAllOctreeInstances",
+          "ms": 10.149
+        },
+        {
+          "fn": "findGsplatWorldsForOctree",
+          "ms": 5.668
+        },
+        {
+          "fn": "buildPriorityFiles",
+          "ms": 5.588
+        },
+        {
+          "fn": "clearSyncedOctreesThisFrame",
+          "ms": 3.458
+        }
+      ]
+    },
+    {
+      "module": "gc",
+      "ms": 223.331,
+      "hitCount": 811,
+      "topFns": [
+        {
+          "fn": "(garbage collector)",
+          "ms": 223.331
+        }
+      ]
+    },
+    {
+      "module": "gsplat-engine",
+      "ms": 89.196,
+      "hitCount": 348,
+      "topFns": [
+        {
+          "fn": "assignSplatOffsets",
+          "ms": 57.333
+        },
+        {
+          "fn": "readGsplatBufferUploadMetrics",
+          "ms": 12.043
+        },
+        {
+          "fn": "applyWorkBufferUpdates",
+          "ms": 5.918
+        },
+        {
+          "fn": "get gsplat",
+          "ms": 2.574
+        },
+        {
+          "fn": "rebuildWorkBuffer",
+          "ms": 1.911
+        }
+      ]
+    },
+    {
+      "module": "refinement-controller",
+      "ms": 30.297,
+      "hitCount": 119,
+      "topFns": [
+        {
+          "fn": "runPriorityPrefetch",
+          "ms": 29.013
+        },
+        {
+          "fn": "syncOctreePendingPlacements",
+          "ms": 1.284
+        }
+      ]
+    }
+  ],
+  "refinementSymbols": [
+    {
+      "fn": "isOctreeBootstrapPlaceableNode",
+      "url": "http://localhost:3000/index.js",
+      "line": 101652
+    },
+    {
+      "fn": "findAllOctreeInstances",
+      "url": "http://localhost:3000/index.js",
+      "line": 101676
+    },
+    {
+      "fn": "getOctreeBootstrapLod",
+      "url": "http://localhost:3000/index.js",
+      "line": 101648
+    },
+    {
+      "fn": "getOctreeInstancesMap",
+      "url": "http://localhost:3000/index.js",
+      "line": 101657
+    },
+    {
+      "fn": "syncStreamingOctreePlacements",
+      "url": "http://localhost:3000/index.js",
+      "line": 103444
+    },
+    {
+      "fn": "syncOctreePendingPlacements",
+      "url": "http://localhost:3000/index.js",
+      "line": 103021
+    },
+    {
+      "fn": "requestOctreePlacementUpdate",
+      "url": "http://localhost:3000/index.js",
+      "line": 101767
+    },
+    {
+      "fn": "findGsplatWorldsForOctree",
+      "url": "http://localhost:3000/index.js",
+      "line": 101714
+    },
+    {
+      "fn": "worldOwnsOctree",
+      "url": "http://localhost:3000/index.js",
+      "line": 101663
+    },
+    {
+      "fn": "markSyncedOctreeThisFrame",
+      "url": "http://localhost:3000/index.js",
+      "line": 103006
+    },
+    {
+      "fn": "hasSyncedOctreeThisFrame",
+      "url": "http://localhost:3000/index.js",
+      "line": 103002
+    },
+    {
+      "fn": "runPriorityPrefetch",
+      "url": "http://localhost:3000/index.js",
+      "line": 103915
+    },
+    {
+      "fn": "buildPriorityFiles",
+      "url": "http://localhost:3000/index.js",
+      "line": 103450
+    },
+    {
+      "fn": "trackSyncOctreePendingPlacements",
+      "url": "http://localhost:3000/index.js",
+      "line": 103015
+    },
+    {
+      "fn": "ensureOctreeLeafSpatialIndex",
+      "url": "http://localhost:3000/index.js",
+      "line": 102037
+    },
+    {
+      "fn": "getOctreeUrlToFileIndex",
+      "url": "http://localhost:3000/index.js",
+      "line": 102539
+    },
+    {
+      "fn": "octree.ensureFileResource",
+      "url": "http://localhost:3000/index.js",
+      "line": 102386
+    },
+    {
+      "fn": "clearSyncedOctreesThisFrame",
+      "url": "http://localhost:3000/index.js",
+      "line": 102977
+    }
+  ]
+}

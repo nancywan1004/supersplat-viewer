@@ -1,0 +1,301 @@
+{
+  "title": "chengjian-v7 renderScaleLod vs engineOptimalLod vs targetLod",
+  "content": "https://unicity-dev2.bdnrc.org.cn/upload/scene/20260605/yunji/LOD/chengjian-school-v7/lod-meta.json",
+  "budget": 6,
+  "settings": "/assets/settings/settings-chengjian-distance-ab.json",
+  "note": "targetLod=max(renderScaleLod, engineOptimalLod). Samples: frustum-visible leaves (score>0) only; engineOptimalLod from applyLodChanges pre-merge snapshot. Also records gsplatsAtClearM / blurToClearMs / pendingPeak per waypoint.",
+  "cases": [
+    {
+      "rs": 6,
+      "waypoints": [
+        {
+          "label": "kf-0",
+          "sample": {
+            "baseRenderScale": 6,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 101,
+              "mergedChanged": 75,
+              "visualCoarser": 75,
+              "engineCoarser": 21,
+              "equal": 5,
+              "histRenderScaleLod": [
+                21,
+                4,
+                5,
+                8,
+                21,
+                28,
+                8,
+                6,
+                0
+              ],
+              "histEngineOptimalLod": [
+                0,
+                90,
+                11,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                0,
+                25,
+                5,
+                8,
+                21,
+                28,
+                8,
+                6,
+                0
+              ],
+              "meanRenderScaleLod": 3.485148514851485,
+              "meanEngineOptimalLod": 1.108910891089109,
+              "meanTargetLod": 3.6930693069306932,
+              "meanDeltaTargetMinusEngine": 2.5841584158415842
+            }
+          },
+          "gsplatsAtClearM": 0.06884,
+          "jsHeapAtClearMb": 36.1283073425293,
+          "blurToClearMs": 3542,
+          "pendingPeak": 0,
+          "refineTimedOut": false
+        },
+        {
+          "label": "kf-1",
+          "sample": {
+            "baseRenderScale": 6,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 205,
+              "mergedChanged": 169,
+              "visualCoarser": 169,
+              "engineCoarser": 13,
+              "equal": 23,
+              "histRenderScaleLod": [
+                25,
+                8,
+                12,
+                20,
+                15,
+                56,
+                48,
+                16,
+                5
+              ],
+              "histEngineOptimalLod": [
+                18,
+                50,
+                107,
+                30,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                17,
+                9,
+                17,
+                22,
+                15,
+                56,
+                48,
+                16,
+                5
+              ],
+              "meanRenderScaleLod": 4.253658536585366,
+              "meanEngineOptimalLod": 1.726829268292683,
+              "meanTargetLod": 4.336585365853659,
+              "meanDeltaTargetMinusEngine": 2.6097560975609757
+            }
+          },
+          "gsplatsAtClearM": 1.098496,
+          "jsHeapAtClearMb": 175.62940120697021,
+          "blurToClearMs": 46905,
+          "pendingPeak": 32,
+          "refineTimedOut": false
+        },
+        {
+          "label": "kf-2",
+          "sample": {
+            "baseRenderScale": 6,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 237,
+              "mergedChanged": 186,
+              "visualCoarser": 186,
+              "engineCoarser": 21,
+              "equal": 30,
+              "histRenderScaleLod": [
+                28,
+                11,
+                20,
+                17,
+                21,
+                38,
+                34,
+                42,
+                26
+              ],
+              "histEngineOptimalLod": [
+                15,
+                91,
+                79,
+                52,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                15,
+                10,
+                18,
+                33,
+                21,
+                38,
+                34,
+                42,
+                26
+              ],
+              "meanRenderScaleLod": 4.565400843881856,
+              "meanEngineOptimalLod": 1.7088607594936709,
+              "meanTargetLod": 4.746835443037975,
+              "meanDeltaTargetMinusEngine": 3.037974683544304
+            }
+          },
+          "gsplatsAtClearM": 1.201676,
+          "jsHeapAtClearMb": 204.25354099273682,
+          "blurToClearMs": 0,
+          "pendingPeak": 0,
+          "refineTimedOut": false
+        },
+        {
+          "label": "kf-3",
+          "sample": {
+            "baseRenderScale": 6,
+            "tableSource": "mixed",
+            "leafCount": 891,
+            "lodLevels": 9,
+            "pixelFactor": 1713.5093981671037,
+            "lastClampedNodes": 0,
+            "stats": {
+              "n": 113,
+              "mergedChanged": 43,
+              "visualCoarser": 43,
+              "engineCoarser": 55,
+              "equal": 15,
+              "histRenderScaleLod": [
+                40,
+                15,
+                16,
+                29,
+                9,
+                4,
+                0,
+                0,
+                0
+              ],
+              "histEngineOptimalLod": [
+                4,
+                33,
+                26,
+                50,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "histTargetLod": [
+                4,
+                3,
+                18,
+                75,
+                9,
+                4,
+                0,
+                0,
+                0
+              ],
+              "meanRenderScaleLod": 1.6814159292035398,
+              "meanEngineOptimalLod": 2.079646017699115,
+              "meanTargetLod": 2.831858407079646,
+              "meanDeltaTargetMinusEngine": 0.7522123893805309
+            }
+          },
+          "gsplatsAtClearM": 1.209269,
+          "jsHeapAtClearMb": 245.43153381347656,
+          "blurToClearMs": 14852,
+          "pendingPeak": 22,
+          "refineTimedOut": false
+        }
+      ],
+      "aggregate": {
+        "totalLeafSamples": 656,
+        "waypointsWithData": 4,
+        "visualCoarserPct": 72.1,
+        "engineCoarserPct": 16.8,
+        "equalPct": 11.1,
+        "meanRenderScaleLod": 3.496405956130562,
+        "meanEngineOptimalLod": 1.6560617341436443,
+        "meanTargetLod": 3.9020871307254934,
+        "meanDeltaTargetMinusEngine": 2.2460253965818486,
+        "histRenderScaleLod": [
+          114,
+          38,
+          53,
+          74,
+          66,
+          126,
+          90,
+          64,
+          31
+        ],
+        "histEngineOptimalLod": [
+          37,
+          264,
+          223,
+          132,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "histTargetLod": [
+          36,
+          47,
+          58,
+          138,
+          66,
+          126,
+          90,
+          64,
+          31
+        ],
+        "gsplatsAvgM": 0.8945702499999999,
+        "blurAvgMs": 21766.333333333332,
+        "pendingPeak": 32
+      }
+    }
+  ]
+}

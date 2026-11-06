@@ -1,0 +1,2632 @@
+{
+  "meta": {
+    "exportedAt": "2026-07-08T02:43:03.093Z",
+    "runtime": "spark",
+    "scene": "https://unicity-dev2.bdnrc.org.cn/upload/scene/20260605/yunji/LOD/jinanqiao-v3-x10-lod.rad",
+    "sampleCount": 44,
+    "budget": {
+      "lodSplatCount": 2500000,
+      "lodSplatScale": 1
+    },
+    "markers": [
+      {
+        "name": "calibrate_begin",
+        "timeMs": 2469.800000011921,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:idle:begin",
+        "timeMs": 2469.800000011921,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:idle:end",
+        "timeMs": 5461.699999988079,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:move_tiny:begin",
+        "timeMs": 5461.699999988079,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:move_tiny:end",
+        "timeMs": 7460.5,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:move_small:begin",
+        "timeMs": 7460.5,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:move_small:end",
+        "timeMs": 9461,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:move_medium:begin",
+        "timeMs": 9461.100000023842,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:move_medium:end",
+        "timeMs": 11461.5,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:move_large:begin",
+        "timeMs": 11461.5,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:move_large:end",
+        "timeMs": 14463.199999988079,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:yaw_small:begin",
+        "timeMs": 14463.300000011921,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:yaw_small:end",
+        "timeMs": 16460.900000035763,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:yaw_medium:begin",
+        "timeMs": 16460.900000035763,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:yaw_medium:end",
+        "timeMs": 18461.600000023842,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:yaw_large:begin",
+        "timeMs": 18461.600000023842,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:yaw_large:end",
+        "timeMs": 20461.69999998808,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:pitch_small:begin",
+        "timeMs": 20461.80000001192,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:pitch_small:end",
+        "timeMs": 22461.19999998808,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:pitch_large:begin",
+        "timeMs": 22461.19999998808,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:pitch_large:end",
+        "timeMs": 24461.80000001192,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:zoom_in_small:begin",
+        "timeMs": 24461.900000035763,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:zoom_in_small:end",
+        "timeMs": 26461.69999998808,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:zoom_in_large:begin",
+        "timeMs": 26461.69999998808,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:zoom_in_large:end",
+        "timeMs": 29461.600000023842,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:zoom_out_large:begin",
+        "timeMs": 29461.600000023842,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:zoom_out_large:end",
+        "timeMs": 32461.30000001192,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:combo_small:begin",
+        "timeMs": 32461.30000001192,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:combo_small:end",
+        "timeMs": 34461.60000002384,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:combo_large:begin",
+        "timeMs": 34461.60000002384,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:combo_large:end",
+        "timeMs": 37461.60000002384,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:idle_end:begin",
+        "timeMs": 37461.60000002384,
+        "sampleIndex": 44
+      },
+      {
+        "name": "step:idle_end:end",
+        "timeMs": 39462.40000003576,
+        "sampleIndex": 44
+      },
+      {
+        "name": "calibrate_done",
+        "timeMs": 39462.5,
+        "sampleIndex": 44
+      }
+    ],
+    "scriptMarkers": [
+      {
+        "name": "calibrate_begin",
+        "timeMs": 2469.800000011921
+      },
+      {
+        "name": "step:idle:begin",
+        "timeMs": 2469.800000011921
+      },
+      {
+        "name": "step:idle:end",
+        "timeMs": 5461.699999988079
+      },
+      {
+        "name": "step:move_tiny:begin",
+        "timeMs": 5461.699999988079
+      },
+      {
+        "name": "step:move_tiny:end",
+        "timeMs": 7460.5
+      },
+      {
+        "name": "step:move_small:begin",
+        "timeMs": 7460.5
+      },
+      {
+        "name": "step:move_small:end",
+        "timeMs": 9461
+      },
+      {
+        "name": "step:move_medium:begin",
+        "timeMs": 9461.100000023842
+      },
+      {
+        "name": "step:move_medium:end",
+        "timeMs": 11461.5
+      },
+      {
+        "name": "step:move_large:begin",
+        "timeMs": 11461.5
+      },
+      {
+        "name": "step:move_large:end",
+        "timeMs": 14463.199999988079
+      },
+      {
+        "name": "step:yaw_small:begin",
+        "timeMs": 14463.300000011921
+      },
+      {
+        "name": "step:yaw_small:end",
+        "timeMs": 16460.900000035763
+      },
+      {
+        "name": "step:yaw_medium:begin",
+        "timeMs": 16460.900000035763
+      },
+      {
+        "name": "step:yaw_medium:end",
+        "timeMs": 18461.600000023842
+      },
+      {
+        "name": "step:yaw_large:begin",
+        "timeMs": 18461.600000023842
+      },
+      {
+        "name": "step:yaw_large:end",
+        "timeMs": 20461.69999998808
+      },
+      {
+        "name": "step:pitch_small:begin",
+        "timeMs": 20461.80000001192
+      },
+      {
+        "name": "step:pitch_small:end",
+        "timeMs": 22461.19999998808
+      },
+      {
+        "name": "step:pitch_large:begin",
+        "timeMs": 22461.19999998808
+      },
+      {
+        "name": "step:pitch_large:end",
+        "timeMs": 24461.80000001192
+      },
+      {
+        "name": "step:zoom_in_small:begin",
+        "timeMs": 24461.900000035763
+      },
+      {
+        "name": "step:zoom_in_small:end",
+        "timeMs": 26461.69999998808
+      },
+      {
+        "name": "step:zoom_in_large:begin",
+        "timeMs": 26461.69999998808
+      },
+      {
+        "name": "step:zoom_in_large:end",
+        "timeMs": 29461.600000023842
+      },
+      {
+        "name": "step:zoom_out_large:begin",
+        "timeMs": 29461.600000023842
+      },
+      {
+        "name": "step:zoom_out_large:end",
+        "timeMs": 32461.30000001192
+      },
+      {
+        "name": "step:combo_small:begin",
+        "timeMs": 32461.30000001192
+      },
+      {
+        "name": "step:combo_small:end",
+        "timeMs": 34461.60000002384
+      },
+      {
+        "name": "step:combo_large:begin",
+        "timeMs": 34461.60000002384
+      },
+      {
+        "name": "step:combo_large:end",
+        "timeMs": 37461.60000002384
+      },
+      {
+        "name": "step:idle_end:begin",
+        "timeMs": 37461.60000002384
+      },
+      {
+        "name": "step:idle_end:end",
+        "timeMs": 39462.40000003576
+      },
+      {
+        "name": "calibrate_done",
+        "timeMs": 39462.5
+      }
+    ],
+    "viewport": {
+      "width": 3840,
+      "height": 1916
+    },
+    "gpuTimer": {
+      "supported": true,
+      "extension": "EXT_disjoint_timer_query_webgl2",
+      "pending": 0,
+      "reason": null,
+      "available": true,
+      "filled": 44
+    }
+  },
+  "samples": [
+    {
+      "index": 0,
+      "timeMs": 25,
+      "frameMs": 21.099999964237213,
+      "fps": 47.39336500923786,
+      "dt": 0.021099999964237212,
+      "wall": {
+        "updateMs": 0.8999999761581421,
+        "renderMs": 20.19999998807907
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1157.2192296981812,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 0,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": null,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 0,
+        "fetchInFlight": 0,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.351666,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 1,
+      "timeMs": 31.100000023841858,
+      "frameMs": 6.100000023841858,
+      "fps": 163.9344255887703,
+      "dt": 0.006100000023841858,
+      "wall": {
+        "updateMs": 0.20000004768371582,
+        "renderMs": 0.699999988079071
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1157.2192296981812,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0.0000017075472925031877,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 5.199999988079071,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": null,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 0,
+        "fetchInFlight": 0,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.315416,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 2,
+      "timeMs": 52.30000001192093,
+      "frameMs": 21.19999998807907,
+      "fps": 47.169811347278674,
+      "dt": 0.02119999998807907,
+      "wall": {
+        "updateMs": 0.10000002384185791,
+        "renderMs": 0.3999999761581421
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1157.2192296981812,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0.0000017075472925031877,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 20.69999998807907,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": null,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 0,
+        "fetchInFlight": 0,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 2.355416,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 3,
+      "timeMs": 68.69999998807907,
+      "frameMs": 16.399999976158142,
+      "fps": 60.97560984474219,
+      "dt": 0.016399999976158142,
+      "wall": {
+        "updateMs": 0.10000002384185791,
+        "renderMs": 0.3999999761581421
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1157.2192296981812,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0.0000017075472925031877,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 15.899999976158142,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": null,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 0,
+        "fetchInFlight": 0,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.323,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 4,
+      "timeMs": 72.60000002384186,
+      "frameMs": 3.900000035762787,
+      "fps": 256.4102540589884,
+      "dt": 0.0039000000357627867,
+      "wall": {
+        "updateMs": 0.10000002384185791,
+        "renderMs": 0.30000001192092896
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1157.2192296981812,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0.0000017075472925031877,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 3.5,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": null,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 0,
+        "fetchInFlight": 0,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.3185,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 5,
+      "timeMs": 81.40000003576279,
+      "frameMs": 8.800000011920929,
+      "fps": 113.63636348242602,
+      "dt": 0.008800000011920928,
+      "wall": {
+        "updateMs": 0.10000002384185791,
+        "renderMs": 0.5
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1144.0873537063599,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0.0000017075472925031877,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 8.199999988079071,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": 0,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": 0,
+        "chunksTouched": 0,
+        "chunksQueued": 1,
+        "pagesRequested": 1,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": true,
+        "lodTraversed": true,
+        "commitReasons": [
+          "viewpoint_dirty"
+        ],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.371125,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 6,
+      "timeMs": 97.90000003576279,
+      "frameMs": 16.5,
+      "fps": 60.60606060606061,
+      "dt": 0.0165,
+      "wall": {
+        "updateMs": 0.10000002384185791,
+        "renderMs": 0.30000001192092896
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1144.0873537063599,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0.0000024148365394514667,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.099999964237213,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.299041,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 7,
+      "timeMs": 114.69999998807907,
+      "frameMs": 16.799999952316284,
+      "fps": 59.52380969275693,
+      "dt": 0.016799999952316284,
+      "wall": {
+        "updateMs": 0.20000004768371582,
+        "renderMs": 0.2999999523162842
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1144.0873537063599,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0.0000024148365394514667,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.299999952316284,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.324708,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 8,
+      "timeMs": 131.30000001192093,
+      "frameMs": 16.600000023841858,
+      "fps": 60.24096376890021,
+      "dt": 0.01660000002384186,
+      "wall": {
+        "updateMs": 0.19999998807907104,
+        "renderMs": 0.30000001192092896
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1144.0873537063599,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0.0000024148365394514667,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.100000023841858,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.317708,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 9,
+      "timeMs": 148,
+      "frameMs": 16.69999998807907,
+      "fps": 59.88023956370228,
+      "dt": 0.01669999998807907,
+      "wall": {
+        "updateMs": 0.10000002384185791,
+        "renderMs": 0.3999999761581421
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1144.9449911117554,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0.0000017075472925031877,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.19999998807907,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.356875,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 10,
+      "timeMs": 164.4000000357628,
+      "frameMs": 16.400000035762787,
+      "fps": 60.97560962313062,
+      "dt": 0.016400000035762786,
+      "wall": {
+        "updateMs": 0.09999996423721313,
+        "renderMs": 0.20000004768371582
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1144.9449911117554,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.100000023841858,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.323874,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 11,
+      "timeMs": 184.69999998807907,
+      "frameMs": 20.299999952316284,
+      "fps": 49.26108385955426,
+      "dt": 0.020299999952316284,
+      "wall": {
+        "updateMs": 0,
+        "renderMs": 0.2999999523162842
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1144.9449911117554,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 20,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.327375,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 12,
+      "timeMs": 199.80000001192093,
+      "frameMs": 15.100000023841858,
+      "fps": 66.22516545834894,
+      "dt": 0.015100000023841858,
+      "wall": {
+        "updateMs": 0.09999996423721313,
+        "renderMs": 0.10000002384185791
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1154.1013345718384,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 14.900000035762787,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.407874,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 13,
+      "timeMs": 214.4000000357628,
+      "frameMs": 14.600000023841858,
+      "fps": 68.49315057308192,
+      "dt": 0.014600000023841857,
+      "wall": {
+        "updateMs": 0.09999996423721313,
+        "renderMs": 0.20000004768371582
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1154.1013345718384,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 14.300000011920929,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.315416,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 14,
+      "timeMs": 231,
+      "frameMs": 16.599999964237213,
+      "fps": 60.2409639852039,
+      "dt": 0.01659999996423721,
+      "wall": {
+        "updateMs": 0.10000002384185791,
+        "renderMs": 0.09999996423721313
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1154.1013345718384,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.399999976158142,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.342375,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 15,
+      "timeMs": 247.60000002384186,
+      "frameMs": 16.600000023841858,
+      "fps": 60.24096376890021,
+      "dt": 0.01660000002384186,
+      "wall": {
+        "updateMs": 0.10000002384185791,
+        "renderMs": 0.19999998807907104
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1154.1013345718384,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.30000001192093,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.682374,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 16,
+      "timeMs": 264.69999998807907,
+      "frameMs": 17.099999964237213,
+      "fps": 58.47953228604626,
+      "dt": 0.017099999964237212,
+      "wall": {
+        "updateMs": 0,
+        "renderMs": 0.19999998807907104
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1153.5110130310059,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.899999976158142,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.313624,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 17,
+      "timeMs": 280.80000001192093,
+      "frameMs": 16.100000023841858,
+      "fps": 62.111801150257094,
+      "dt": 0.01610000002384186,
+      "wall": {
+        "updateMs": 0.19999998807907104,
+        "renderMs": 0.30000001192092896
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1153.5110130310059,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 15.600000023841858,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.673583,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 18,
+      "timeMs": 298.19999998807907,
+      "frameMs": 17.399999976158142,
+      "fps": 57.47126444656447,
+      "dt": 0.017399999976158143,
+      "wall": {
+        "updateMs": 0.30000001192092896,
+        "renderMs": 0.19999998807907104
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1153.5110130310059,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.899999976158142,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.297374,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 19,
+      "timeMs": 314.30000001192093,
+      "frameMs": 16.100000023841858,
+      "fps": 62.111801150257094,
+      "dt": 0.01610000002384186,
+      "wall": {
+        "updateMs": 0.09999996423721313,
+        "renderMs": 0.10000002384185791
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1153.5110130310059,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 15.900000035762787,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.315124,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 20,
+      "timeMs": 330.9000000357628,
+      "frameMs": 16.600000023841858,
+      "fps": 60.24096376890021,
+      "dt": 0.01660000002384186,
+      "wall": {
+        "updateMs": 0.09999996423721313,
+        "renderMs": 0.20000004768371582
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1157.6940784454346,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.30000001192093,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.39,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 21,
+      "timeMs": 347.80000001192093,
+      "frameMs": 16.899999976158142,
+      "fps": 59.171597716613064,
+      "dt": 0.016899999976158143,
+      "wall": {
+        "updateMs": 0.19999998807907104,
+        "renderMs": 0.19999998807907104
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1157.6940784454346,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.5,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.408291,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 22,
+      "timeMs": 364.5,
+      "frameMs": 16.69999998807907,
+      "fps": 59.88023956370228,
+      "dt": 0.01669999998807907,
+      "wall": {
+        "updateMs": 0.09999996423721313,
+        "renderMs": 0.30000001192092896
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1157.6940784454346,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.30000001192093,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.78975,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 23,
+      "timeMs": 380.30000001192093,
+      "frameMs": 15.800000011920929,
+      "fps": 63.29113919275385,
+      "dt": 0.015800000011920928,
+      "wall": {
+        "updateMs": 0.09999996423721313,
+        "renderMs": 0.30000001192092896
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1157.6940784454346,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 15.400000035762787,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.282375,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 24,
+      "timeMs": 397.69999998807907,
+      "frameMs": 17.399999976158142,
+      "fps": 57.47126444656447,
+      "dt": 0.017399999976158143,
+      "wall": {
+        "updateMs": 0.09999996423721313,
+        "renderMs": 0.19999998807907104
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1158.0626049041748,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 17.100000023841858,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.44825,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 25,
+      "timeMs": 414.4000000357628,
+      "frameMs": 16.700000047683716,
+      "fps": 59.880239349981295,
+      "dt": 0.016700000047683714,
+      "wall": {
+        "updateMs": 0.09999996423721313,
+        "renderMs": 0.20000004768371582
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1158.0626049041748,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.400000035762787,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.328708,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 26,
+      "timeMs": 431.10000002384186,
+      "frameMs": 16.69999998807907,
+      "fps": 59.88023956370228,
+      "dt": 0.01669999998807907,
+      "wall": {
+        "updateMs": 0.10000002384185791,
+        "renderMs": 0.30000001192092896
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1158.0626049041748,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.299999952316284,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.333624,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 27,
+      "timeMs": 447.80000001192093,
+      "frameMs": 16.69999998807907,
+      "fps": 59.88023956370228,
+      "dt": 0.01669999998807907,
+      "wall": {
+        "updateMs": 0,
+        "renderMs": 0.30000001192092896
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1158.3366832733154,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.399999976158142,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.281249,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 28,
+      "timeMs": 464.4000000357628,
+      "frameMs": 16.600000023841858,
+      "fps": 60.24096376890021,
+      "dt": 0.01660000002384186,
+      "wall": {
+        "updateMs": 0.09999996423721313,
+        "renderMs": 0.20000004768371582
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1158.3366832733154,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.30000001192093,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.300374,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 29,
+      "timeMs": 481,
+      "frameMs": 16.599999964237213,
+      "fps": 60.2409639852039,
+      "dt": 0.01659999996423721,
+      "wall": {
+        "updateMs": 0.10000002384185791,
+        "renderMs": 0.19999998807907104
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1158.3366832733154,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.299999952316284,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.707916,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 30,
+      "timeMs": 497.69999998807907,
+      "frameMs": 16.69999998807907,
+      "fps": 59.88023956370228,
+      "dt": 0.01669999998807907,
+      "wall": {
+        "updateMs": 0.09999996423721313,
+        "renderMs": 0.19999998807907104
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1158.3366832733154,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.400000035762787,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.723458,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 31,
+      "timeMs": 514.4000000357628,
+      "frameMs": 16.700000047683716,
+      "fps": 59.880239349981295,
+      "dt": 0.016700000047683714,
+      "wall": {
+        "updateMs": 0.09999996423721313,
+        "renderMs": 0.20000004768371582
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1158.6891841888428,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.400000035762787,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.29825,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 32,
+      "timeMs": 531,
+      "frameMs": 16.599999964237213,
+      "fps": 60.2409639852039,
+      "dt": 0.01659999996423721,
+      "wall": {
+        "updateMs": 0.10000002384185791,
+        "renderMs": 0.19999998807907104
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1158.6891841888428,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.299999952316284,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.3135,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 33,
+      "timeMs": 547.6999999880791,
+      "frameMs": 16.69999998807907,
+      "fps": 59.88023956370228,
+      "dt": 0.01669999998807907,
+      "wall": {
+        "updateMs": 0.09999996423721313,
+        "renderMs": 0.19999998807907104
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1158.6891841888428,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.400000035762787,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.299875,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 34,
+      "timeMs": 564.4000000357628,
+      "frameMs": 16.700000047683716,
+      "fps": 59.880239349981295,
+      "dt": 0.016700000047683714,
+      "wall": {
+        "updateMs": 0.09999996423721313,
+        "renderMs": 0.20000004768371582
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1158.6891841888428,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.400000035762787,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.278749,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 35,
+      "timeMs": 581,
+      "frameMs": 16.599999964237213,
+      "fps": 60.2409639852039,
+      "dt": 0.01659999996423721,
+      "wall": {
+        "updateMs": 0.10000002384185791,
+        "renderMs": 0.09999996423721313
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1159.046594619751,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.399999976158142,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.447124,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 36,
+      "timeMs": 597.6999999880791,
+      "frameMs": 16.69999998807907,
+      "fps": 59.88023956370228,
+      "dt": 0.01669999998807907,
+      "wall": {
+        "updateMs": 0.09999996423721313,
+        "renderMs": 0.19999998807907104
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1159.046594619751,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.400000035762787,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.407083,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 37,
+      "timeMs": 614.3000000119209,
+      "frameMs": 16.600000023841858,
+      "fps": 60.24096376890021,
+      "dt": 0.01660000002384186,
+      "wall": {
+        "updateMs": 0,
+        "renderMs": 0.19999998807907104
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1159.046594619751,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.400000035762787,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.300249,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 38,
+      "timeMs": 630.5,
+      "frameMs": 16.19999998807907,
+      "fps": 61.72839510715184,
+      "dt": 0.01619999998807907,
+      "wall": {
+        "updateMs": 0,
+        "renderMs": 0.30000001192092896
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1159.046594619751,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 15.899999976158142,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 1,
+        "fetchInFlight": 1,
+        "residentPages": 0,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.743249,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 39,
+      "timeMs": 646.8000000119209,
+      "frameMs": 16.30000001192093,
+      "fps": 61.34969320666593,
+      "dt": 0.016300000011920928,
+      "wall": {
+        "updateMs": 0.19999998807907104,
+        "renderMs": 0.19999998807907104
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1161.4221658706665,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 15.900000035762787,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 0.40000003576278687,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 1,
+        "pagesUploaded": 0,
+        "fetchQueue": 0,
+        "fetchInFlight": 0,
+        "residentPages": 1,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [
+          "page_landed"
+        ],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.4415,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 40,
+      "timeMs": 674.6000000238419,
+      "frameMs": 27.80000001192093,
+      "fps": 35.9712230061579,
+      "dt": 0.027800000011920928,
+      "wall": {
+        "updateMs": 0.20000004768371582,
+        "renderMs": 10.199999988079071
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1161.4221658706665,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.69999998807907,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 9.400000035762787,
+          "pageCommitMs": 0.19999998807907104,
+          "gpuUploadMs": 0.5
+        },
+        "visibleNodes": 77,
+        "chunksTouched": 77,
+        "chunksQueued": 77,
+        "pagesRequested": 3,
+        "pagesCommitted": 0,
+        "pagesUploaded": 1,
+        "fetchQueue": 76,
+        "fetchInFlight": 3,
+        "residentPages": 1,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": true,
+        "lodTraversed": true,
+        "commitReasons": [
+          "viewpoint_dirty",
+          "chunks_touched",
+          "page_gpu_upload"
+        ],
+        "pageUploadBusy": 1.7985611503078949
+      },
+      "gpu": {
+        "totalMs": 96.808874,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 41,
+      "timeMs": 681.1000000238419,
+      "frameMs": 6.5,
+      "fps": 153.84615384615384,
+      "dt": 0.0065,
+      "wall": {
+        "updateMs": 0.10000002384185791,
+        "renderMs": 0.19999998807907104
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1161.4221658706665,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 6.199999988079071,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 9.400000035762787,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 76,
+        "fetchInFlight": 3,
+        "residentPages": 1,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.48975,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 42,
+      "timeMs": 699,
+      "frameMs": 17.899999976158142,
+      "fps": 55.86592186211996,
+      "dt": 0.017899999976158144,
+      "wall": {
+        "updateMs": 0.09999996423721313,
+        "renderMs": 1.5
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1162.9514465332031,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 16.30000001192093,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 9.400000035762787,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 76,
+        "fetchInFlight": 3,
+        "residentPages": 1,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.383624,
+        "source": "timer_query"
+      }
+    },
+    {
+      "index": 43,
+      "timeMs": 714.5,
+      "frameMs": 15.5,
+      "fps": 64.51612903225806,
+      "dt": 0.0155,
+      "wall": {
+        "updateMs": 0.19999998807907104,
+        "renderMs": 0.19999998807907104
+      },
+      "gsplatsM": 0,
+      "jsHeapMb": 1162.9514465332031,
+      "camera": {
+        "pos": [
+          -0.016897,
+          0.06252,
+          0.011307
+        ],
+        "moveSinceLastM": 0,
+        "rotateSinceLastDeg": 0,
+        "moveTriggersLod": false,
+        "rotateTriggersLod": false
+      },
+      "gapMs": 15.100000023841858,
+      "runtime": "spark",
+      "lod": {
+        "timingsMs": {
+          "traverseMs": 9.400000035762787,
+          "pageCommitMs": null,
+          "gpuUploadMs": 0
+        },
+        "visibleNodes": null,
+        "chunksTouched": null,
+        "chunksQueued": 0,
+        "pagesRequested": 0,
+        "pagesCommitted": 0,
+        "pagesUploaded": 0,
+        "fetchQueue": 76,
+        "fetchInFlight": 3,
+        "residentPages": 1,
+        "pagePoolCap": 256,
+        "evictions": 0,
+        "lodDirty": false,
+        "lodTraversed": false,
+        "commitReasons": [],
+        "pageUploadBusy": 0
+      },
+      "gpu": {
+        "totalMs": 0.404833,
+        "source": "timer_query"
+      }
+    }
+  ]
+}

@@ -1,0 +1,259 @@
+{
+  "benchmarkAxis": "profile",
+  "suite": "public/benchmark-suites/scene-chengjian-v7-budget-6.json",
+  "baseUrl": "http://localhost:3000/",
+  "renderer": "webgpu",
+  "runConditions": {
+    "coldStart": true,
+    "browserSession": "fresh-chromium-per-case",
+    "chromiumHttpCache": "disabled-cdp-clearBrowserCache-zero-disk-cache",
+    "warmup": {
+      "enabled": false,
+      "discarded": false,
+      "skippedReason": "cold-start-default"
+    },
+    "notes": [
+      "Cold start (default): each case launches a new Chromium, blocks service workers, disables HTTP cache via CDP, clears browser cache, and uses --disk-cache-size=0.",
+      "Playwright uses an ephemeral profile (not your daily Chrome); no cookies/storage persist after browser.close().",
+      "OS page cache, DNS, and GPU shader/pipeline cache are NOT reset by this script — cross-run comparisons on one machine may still drift."
+    ]
+  },
+  "cases": [
+    {
+      "label": "chengjian-v7-distance-budget-6",
+      "budget": 6,
+      "lodRuntime": "refinement",
+      "firstFrameMs": 14226.899999856949,
+      "settleStartMs": 14227,
+      "fpsP50": 59,
+      "fpsP95": 60,
+      "gsplatsAvgM": 3.7915272500000006,
+      "jsHeapAtFirstFrameMb": 131.23645973205566,
+      "vramTexAtFirstFrameMb": 232.25648021697998,
+      "jsHeapPeakMb": 458.0543918609619,
+      "vramTexPeakMb": 464.33167552948,
+      "rendererUsed": "compute",
+      "interactionWaypoints": [
+        {
+          "label": "kf-0",
+          "keyframeIndex": 0,
+          "animTimeSec": 0,
+          "moveMs": 0,
+          "blurToClearMs": 19400.900000095367,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 64,
+          "pendingPeakNodes": 64,
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 60,
+          "fpsP95DuringRefine": 60,
+          "fpsMinDuringRefine": 59,
+          "gsplatsAtClearM": 2.554816,
+          "jsHeapAtClearMb": 256.8226537704468,
+          "vramTexAtClearMb": 279.11542797088623,
+          "jsHeapPeakDuringRefineMb": 256.8226537704468,
+          "vramTexPeakDuringRefineMb": 301.10749340057373,
+          "screenshotPath": "screenshots/chengjian-v7-distance-budget-6/kf-0.jpg"
+        },
+        {
+          "label": "kf-1",
+          "keyframeIndex": 1,
+          "animTimeSec": 1,
+          "moveMs": 966.0999999046326,
+          "blurToClearMs": 18198.39999985695,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 28,
+          "pendingPeakNodes": 45,
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 60,
+          "fpsP95DuringRefine": 60,
+          "fpsMinDuringRefine": 58,
+          "gsplatsAtClearM": 4.619042,
+          "jsHeapAtClearMb": 284.46085834503174,
+          "vramTexAtClearMb": 366.90345287323,
+          "jsHeapPeakDuringRefineMb": 306.56136894226074,
+          "vramTexPeakDuringRefineMb": 366.90345287323,
+          "screenshotPath": "screenshots/chengjian-v7-distance-budget-6/kf-1.jpg"
+        },
+        {
+          "label": "kf-2",
+          "keyframeIndex": 2,
+          "animTimeSec": 2,
+          "moveMs": 950.0999999046326,
+          "blurToClearMs": 32200.60000014305,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 27,
+          "pendingPeakNodes": 48,
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 59,
+          "fpsP95DuringRefine": 60,
+          "fpsMinDuringRefine": 44,
+          "gsplatsAtClearM": 5.89817,
+          "jsHeapAtClearMb": 423.54971504211426,
+          "vramTexAtClearMb": 452.0437116622925,
+          "jsHeapPeakDuringRefineMb": 433.740704536438,
+          "vramTexPeakDuringRefineMb": 455.5805768966675,
+          "screenshotPath": "screenshots/chengjian-v7-distance-budget-6/kf-2.jpg"
+        },
+        {
+          "label": "kf-3",
+          "keyframeIndex": 3,
+          "animTimeSec": 3,
+          "moveMs": 962.5,
+          "blurToClearMs": 19800.700000047684,
+          "refineTimedOut": false,
+          "pendingNodesAtArrival": 33,
+          "pendingPeakNodes": 36,
+          "refinementRatioAtClear": 1,
+          "fpsP50DuringRefine": 60,
+          "fpsP95DuringRefine": 60,
+          "fpsMinDuringRefine": 53,
+          "gsplatsAtClearM": 2.094081,
+          "jsHeapAtClearMb": 345.71784496307373,
+          "vramTexAtClearMb": 400.9677839279175,
+          "jsHeapPeakDuringRefineMb": 458.0543918609619,
+          "vramTexPeakDuringRefineMb": 464.33167552948,
+          "screenshotPath": "screenshots/chengjian-v7-distance-budget-6/kf-3.jpg"
+        }
+      ],
+      "animTrackBenchmark": {
+        "keyframes": [
+          {
+            "label": "kf-0",
+            "keyframeIndex": 0,
+            "animTimeSec": 0,
+            "moveMs": 0,
+            "blurToClearMs": 19400.900000095367,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 64,
+            "pendingPeakNodes": 64,
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 60,
+            "fpsP95DuringRefine": 60,
+            "fpsMinDuringRefine": 59,
+            "gsplatsAtClearM": 2.554816,
+            "jsHeapAtClearMb": 256.8226537704468,
+            "vramTexAtClearMb": 279.11542797088623,
+            "jsHeapPeakDuringRefineMb": 256.8226537704468,
+            "vramTexPeakDuringRefineMb": 301.10749340057373,
+            "screenshotPath": "screenshots/chengjian-v7-distance-budget-6/kf-0.jpg"
+          },
+          {
+            "label": "kf-1",
+            "keyframeIndex": 1,
+            "animTimeSec": 1,
+            "moveMs": 966.0999999046326,
+            "blurToClearMs": 18198.39999985695,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 28,
+            "pendingPeakNodes": 45,
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 60,
+            "fpsP95DuringRefine": 60,
+            "fpsMinDuringRefine": 58,
+            "gsplatsAtClearM": 4.619042,
+            "jsHeapAtClearMb": 284.46085834503174,
+            "vramTexAtClearMb": 366.90345287323,
+            "jsHeapPeakDuringRefineMb": 306.56136894226074,
+            "vramTexPeakDuringRefineMb": 366.90345287323,
+            "screenshotPath": "screenshots/chengjian-v7-distance-budget-6/kf-1.jpg"
+          },
+          {
+            "label": "kf-2",
+            "keyframeIndex": 2,
+            "animTimeSec": 2,
+            "moveMs": 950.0999999046326,
+            "blurToClearMs": 32200.60000014305,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 27,
+            "pendingPeakNodes": 48,
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 59,
+            "fpsP95DuringRefine": 60,
+            "fpsMinDuringRefine": 44,
+            "gsplatsAtClearM": 5.89817,
+            "jsHeapAtClearMb": 423.54971504211426,
+            "vramTexAtClearMb": 452.0437116622925,
+            "jsHeapPeakDuringRefineMb": 433.740704536438,
+            "vramTexPeakDuringRefineMb": 455.5805768966675,
+            "screenshotPath": "screenshots/chengjian-v7-distance-budget-6/kf-2.jpg"
+          },
+          {
+            "label": "kf-3",
+            "keyframeIndex": 3,
+            "animTimeSec": 3,
+            "moveMs": 962.5,
+            "blurToClearMs": 19800.700000047684,
+            "refineTimedOut": false,
+            "pendingNodesAtArrival": 33,
+            "pendingPeakNodes": 36,
+            "refinementRatioAtClear": 1,
+            "fpsP50DuringRefine": 60,
+            "fpsP95DuringRefine": 60,
+            "fpsMinDuringRefine": 53,
+            "gsplatsAtClearM": 2.094081,
+            "jsHeapAtClearMb": 345.71784496307373,
+            "vramTexAtClearMb": 400.9677839279175,
+            "jsHeapPeakDuringRefineMb": 458.0543918609619,
+            "vramTexPeakDuringRefineMb": 464.33167552948,
+            "screenshotPath": "screenshots/chengjian-v7-distance-budget-6/kf-3.jpg"
+          }
+        ],
+        "fpsP50DuringPlayback": 59,
+        "fpsP95DuringPlayback": 60,
+        "fpsMinDuringPlayback": 50,
+        "totalPlaybackMs": 2878.699999809265
+      },
+      "bakeAcceptance": {
+        "sampleCount": 7200,
+        "copyPctGe95": {
+          "frames": 2,
+          "ratio": 0
+        },
+        "uploadedOverTotal": {
+          "n": 239,
+          "p50": 0.028058361391694726,
+          "p90": 0.051627384960718295,
+          "max": 1.0359147025813693,
+          "avg": 0.04420307209707497
+        },
+        "uploadMbEst": {
+          "n": 239,
+          "p50": 3.26,
+          "p90": 6.63,
+          "max": 231.77,
+          "avg": 4.964225941422595
+        },
+        "bakePassesEst": {
+          "n": 239,
+          "p50": 1,
+          "p90": 1,
+          "max": 1,
+          "avg": 1
+        },
+        "worldStateFullRebuild": {
+          "frames": 0,
+          "ratio": 0
+        },
+        "dirtyForcedWorkBufferRebuild": {
+          "frames": 0,
+          "ratio": 0
+        },
+        "syncAdvance": {
+          "horizonFrames": 5,
+          "syncFrames": 4308,
+          "advancedWithinHorizon": 525,
+          "advanceRatio": 0.122,
+          "worldVersionAdvanced": 522,
+          "currentLodAdvanced": 472
+        },
+        "staleLoadedNodes": {
+          "framesWithStale": 4073,
+          "maxConsecutiveFrames": 959
+        }
+      },
+      "timestamp": "2026-08-12T03:49:35.202Z",
+      "comparisonGroup": "chengjian-v7-budget",
+      "bottleneckHint": "asset-http"
+    }
+  ]
+}

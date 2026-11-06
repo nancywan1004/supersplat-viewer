@@ -1,0 +1,675 @@
+{
+  "profileFile": "docs/logs/refinement_poland_v3_finelod_gapAttr_v1.txt",
+  "meta": {
+    "exportedAt": "2026-07-15T07:34:01.312Z",
+    "scene": "http://localhost:3000/?content=https://unicity-dev2.bdnrc.org.cn/upload/scene/20260605/yunji/LOD/poland/lod-meta.json&settings=/assets/settings/settings-finland-p0-benchmark.json&webgpu&benchmarkHud&frameProfile=1&benchmark&benchmarkAnimTrack&lodRuntime=refinement&budget=2.5",
+    "lodRuntime": "refinement",
+    "fineLod": true,
+    "sampleCount": 793,
+    "traceNote": "paired with chrome-trace-*.json",
+    "animTrackSummary": {
+      "gsplatsAvgM": 1.7239223,
+      "fpsP50": 11,
+      "keyframes": [
+        {
+          "label": "kf-0",
+          "gsplatsAtClearM": 0.566978,
+          "blurToClearMs": 1706.6000000238419,
+          "refineTimedOut": false
+        },
+        {
+          "label": "kf-1",
+          "gsplatsAtClearM": 0.839569,
+          "blurToClearMs": 856,
+          "refineTimedOut": false
+        },
+        {
+          "label": "kf-2",
+          "gsplatsAtClearM": 1.31239,
+          "blurToClearMs": 0,
+          "refineTimedOut": false
+        },
+        {
+          "label": "kf-3",
+          "gsplatsAtClearM": 1.376463,
+          "blurToClearMs": 2892.2999999523163,
+          "refineTimedOut": false
+        },
+        {
+          "label": "kf-4",
+          "gsplatsAtClearM": 1.786711,
+          "blurToClearMs": 7967.5,
+          "refineTimedOut": false
+        },
+        {
+          "label": "kf-5",
+          "gsplatsAtClearM": 2.01512,
+          "blurToClearMs": 0,
+          "refineTimedOut": false
+        },
+        {
+          "label": "kf-6",
+          "gsplatsAtClearM": 2.213199,
+          "blurToClearMs": 5320.300000071526,
+          "refineTimedOut": false
+        },
+        {
+          "label": "kf-7",
+          "gsplatsAtClearM": 2.2175,
+          "blurToClearMs": 1911.7999999523163,
+          "refineTimedOut": false
+        },
+        {
+          "label": "kf-8",
+          "gsplatsAtClearM": 2.431001,
+          "blurToClearMs": 0,
+          "refineTimedOut": false
+        },
+        {
+          "label": "kf-9",
+          "gsplatsAtClearM": 2.480292,
+          "blurToClearMs": 0,
+          "refineTimedOut": false
+        }
+      ]
+    }
+  },
+  "totalSamples": 793,
+  "validFrames": 792,
+  "summaries": [
+    {
+      "label": "all",
+      "count": 792,
+      "frameMs": {
+        "n": 792,
+        "p50": 66.7,
+        "p90": 165.8,
+        "max": 350.5
+      },
+      "gapMs": {
+        "n": 792,
+        "p50": 19.4,
+        "p90": 100.5,
+        "max": 270.6
+      },
+      "copyPct": {
+        "n": 792,
+        "p50": 0,
+        "p90": 0.2,
+        "max": 113.7
+      },
+      "drawCalls": {
+        "n": 792,
+        "p50": 2,
+        "p90": 16,
+        "max": 174
+      },
+      "heap": {
+        "n": 792,
+        "p50": 1583.286943435669,
+        "p90": 2203.5801000595093,
+        "max": 2891.1818323135376
+      },
+      "deferred": {
+        "n": 792,
+        "p50": 0,
+        "p90": 0,
+        "max": 0
+      },
+      "syncTick": {
+        "n": 792,
+        "p50": 0,
+        "p90": 0,
+        "max": 0
+      },
+      "scanTick": {
+        "n": 792,
+        "p50": 1,
+        "p90": 1.2000000476837158,
+        "max": 4.399999976158142
+      },
+      "renderCpu": {
+        "n": 792,
+        "p50": 26.1,
+        "p90": 39.5,
+        "max": 109.4
+      },
+      "gpuTotal": {
+        "n": 792,
+        "p50": 17.4,
+        "p90": 31.5,
+        "max": 49.6
+      },
+      "primaries": [
+        [
+          "steady",
+          594
+        ],
+        [
+          "main_thread_gap_gc_or_untimed",
+          143
+        ],
+        [
+          "heap_pressure",
+          41
+        ],
+        [
+          "lod_gpu_buffer_upload",
+          9
+        ],
+        [
+          "refinement_sync",
+          3
+        ],
+        [
+          "slow_unclassified",
+          2
+        ]
+      ],
+      "triggers": [
+        [
+          "burst_lod_switch",
+          10
+        ],
+        [
+          "file_landed_fallback",
+          8
+        ],
+        [
+          "stale_cooldown",
+          3
+        ],
+        [
+          "stale_limit",
+          1
+        ]
+      ]
+    },
+    {
+      "label": "slow_140_200",
+      "count": 50,
+      "frameMs": {
+        "n": 50,
+        "p50": 182.4,
+        "p90": 199.4,
+        "max": 199.9
+      },
+      "gapMs": {
+        "n": 50,
+        "p50": 115.8,
+        "p90": 137.7,
+        "max": 153
+      },
+      "copyPct": {
+        "n": 50,
+        "p50": 0,
+        "p90": 6.6,
+        "max": 100
+      },
+      "drawCalls": {
+        "n": 50,
+        "p50": 19,
+        "p90": 51,
+        "max": 70
+      },
+      "heap": {
+        "n": 50,
+        "p50": 1671.5095643997192,
+        "p90": 2587.721291542053,
+        "max": 2890.8497400283813
+      },
+      "deferred": {
+        "n": 50,
+        "p50": 0,
+        "p90": 0,
+        "max": 0
+      },
+      "syncTick": {
+        "n": 50,
+        "p50": 0,
+        "p90": 0,
+        "max": 0
+      },
+      "scanTick": {
+        "n": 50,
+        "p50": 1.0999999046325684,
+        "p90": 1.3000000715255737,
+        "max": 4.399999976158142
+      },
+      "renderCpu": {
+        "n": 50,
+        "p50": 28.3,
+        "p90": 46.9,
+        "max": 93.4
+      },
+      "gpuTotal": {
+        "n": 50,
+        "p50": 26.7,
+        "p90": 43.4,
+        "max": 49.6
+      },
+      "primaries": [
+        [
+          "main_thread_gap_gc_or_untimed",
+          47
+        ],
+        [
+          "slow_unclassified",
+          2
+        ],
+        [
+          "lod_gpu_buffer_upload",
+          1
+        ]
+      ],
+      "triggers": [
+        [
+          "file_landed_fallback",
+          5
+        ]
+      ]
+    },
+    {
+      "label": "fast_40_70",
+      "count": 572,
+      "frameMs": {
+        "n": 572,
+        "p50": 66.6,
+        "p90": 67.5,
+        "max": 67.7
+      },
+      "gapMs": {
+        "n": 572,
+        "p50": 14.3,
+        "p90": 26.3,
+        "max": 56.5
+      },
+      "copyPct": {
+        "n": 572,
+        "p50": 0,
+        "p90": 0,
+        "max": 0
+      },
+      "drawCalls": {
+        "n": 572,
+        "p50": 2,
+        "p90": 3,
+        "max": 6
+      },
+      "heap": {
+        "n": 572,
+        "p50": 1591.282413482666,
+        "p90": 2117.9466438293457,
+        "max": 2891.1818323135376
+      },
+      "deferred": {
+        "n": 572,
+        "p50": 0,
+        "p90": 0,
+        "max": 0
+      },
+      "syncTick": {
+        "n": 572,
+        "p50": 0,
+        "p90": 0,
+        "max": 0
+      },
+      "scanTick": {
+        "n": 572,
+        "p50": 0.8999999761581421,
+        "p90": 1.2000000476837158,
+        "max": 3.200000047683716
+      },
+      "renderCpu": {
+        "n": 572,
+        "p50": 25.9,
+        "p90": 27.5,
+        "max": 109.4
+      },
+      "gpuTotal": {
+        "n": 572,
+        "p50": 17.2,
+        "p90": 30,
+        "max": 47.4
+      },
+      "primaries": [
+        [
+          "steady",
+          548
+        ],
+        [
+          "heap_pressure",
+          19
+        ],
+        [
+          "refinement_sync",
+          3
+        ],
+        [
+          "main_thread_gap_gc_or_untimed",
+          2
+        ]
+      ],
+      "triggers": [
+        [
+          "burst_lod_switch",
+          10
+        ],
+        [
+          "stale_cooldown",
+          3
+        ],
+        [
+          "file_landed_fallback",
+          1
+        ],
+        [
+          "stale_limit",
+          1
+        ]
+      ]
+    },
+    {
+      "label": "buffer_upload_frames",
+      "count": 9,
+      "frameMs": {
+        "n": 9,
+        "p50": 234.1,
+        "p90": 350.5,
+        "max": 350.5
+      },
+      "gapMs": {
+        "n": 9,
+        "p50": 171.4,
+        "p90": 270.6,
+        "max": 270.6
+      },
+      "copyPct": {
+        "n": 9,
+        "p50": 100.6,
+        "p90": 113.7,
+        "max": 113.7
+      },
+      "drawCalls": {
+        "n": 9,
+        "p50": 67,
+        "p90": 174,
+        "max": 174
+      },
+      "heap": {
+        "n": 9,
+        "p50": 1200.0886459350586,
+        "p90": 2096.198328971863,
+        "max": 2096.198328971863
+      },
+      "deferred": {
+        "n": 9,
+        "p50": 0,
+        "p90": 0,
+        "max": 0
+      },
+      "syncTick": {
+        "n": 9,
+        "p50": 0,
+        "p90": 0,
+        "max": 0
+      },
+      "scanTick": {
+        "n": 9,
+        "p50": 1.100000023841858,
+        "p90": 1.7000000476837158,
+        "max": 1.7000000476837158
+      },
+      "renderCpu": {
+        "n": 9,
+        "p50": 37.2,
+        "p90": 42.7,
+        "max": 42.7
+      },
+      "gpuTotal": {
+        "n": 9,
+        "p50": 15.6,
+        "p90": 41.2,
+        "max": 41.2
+      },
+      "primaries": [
+        [
+          "lod_gpu_buffer_upload",
+          9
+        ]
+      ],
+      "triggers": []
+    }
+  ],
+  "interaction": {
+    "slow": {
+      "phases": [
+        [
+          "trigger_frame_big",
+          22
+        ],
+        [
+          "steady",
+          16
+        ],
+        [
+          "burst_after_lod_trigger",
+          7
+        ],
+        [
+          "burst_idle",
+          4
+        ],
+        [
+          "post_lod_no_burst",
+          1
+        ]
+      ],
+      "moveBuckets": [
+        [
+          "静止",
+          28
+        ],
+        [
+          "大于 5m",
+          22
+        ]
+      ],
+      "rotateBuckets": [
+        [
+          "静止",
+          28
+        ],
+        [
+          "≤10°（未触发 LOD）",
+          22
+        ]
+      ],
+      "topCombos": [
+        [
+          "静止 + 静止",
+          28
+        ],
+        [
+          "大于 5m + ≤10°（未触发 LOD）",
+          22
+        ]
+      ],
+      "onTriggerFrame": 22,
+      "inBurstWindow": 33,
+      "inCalibratedWindow": 6,
+      "count": 50
+    },
+    "fast": {
+      "phases": [
+        [
+          "steady",
+          278
+        ],
+        [
+          "trigger_frame_big",
+          152
+        ],
+        [
+          "burst_after_lod_trigger",
+          106
+        ],
+        [
+          "burst_idle",
+          20
+        ],
+        [
+          "post_lod_no_burst",
+          15
+        ],
+        [
+          "trigger_frame_small",
+          1
+        ]
+      ],
+      "moveBuckets": [
+        [
+          "静止",
+          419
+        ],
+        [
+          "大于 5m",
+          124
+        ],
+        [
+          "1–5m",
+          28
+        ],
+        [
+          "3–20cm",
+          1
+        ]
+      ],
+      "rotateBuckets": [
+        [
+          "静止",
+          420
+        ],
+        [
+          "≤10°（未触发 LOD）",
+          152
+        ]
+      ],
+      "topCombos": [
+        [
+          "静止 + 静止",
+          419
+        ],
+        [
+          "大于 5m + ≤10°（未触发 LOD）",
+          124
+        ],
+        [
+          "1–5m + ≤10°（未触发 LOD）",
+          28
+        ],
+        [
+          "3–20cm + 静止",
+          1
+        ]
+      ],
+      "onTriggerFrame": 153,
+      "inBurstWindow": 279,
+      "inCalibratedWindow": 206,
+      "count": 572
+    },
+    "upload": {
+      "phases": [
+        [
+          "trigger_frame_big",
+          6
+        ],
+        [
+          "steady",
+          3
+        ]
+      ],
+      "moveBuckets": [
+        [
+          "大于 5m",
+          6
+        ],
+        [
+          "静止",
+          3
+        ]
+      ],
+      "rotateBuckets": [
+        [
+          "≤10°（未触发 LOD）",
+          6
+        ],
+        [
+          "静止",
+          3
+        ]
+      ],
+      "topCombos": [
+        [
+          "大于 5m + ≤10°（未触发 LOD）",
+          6
+        ],
+        [
+          "静止 + 静止",
+          3
+        ]
+      ],
+      "onTriggerFrame": 6,
+      "inBurstWindow": 6,
+      "inCalibratedWindow": 4,
+      "count": 9
+    },
+    "phaseLabels": {
+      "trigger_frame_big": "触发帧：大移动(>1m)或大转向(>10°)",
+      "trigger_frame_small": "触发帧：小步移动/转向（刚过 3cm/10° 阈值）",
+      "burst_after_lod_trigger": "burst 窗口：前 18 帧内有过 LOD 触发",
+      "burst_after_big_move": "burst 窗口：前 18 帧内有大平移(>20cm)",
+      "burst_after_big_rotate": "burst 窗口：前 18 帧内有大转向(>10°)",
+      "burst_idle": "burst 窗口：相机已静止（滞后切档/upload）",
+      "post_lod_no_burst": "LOD 触发后、burst 已结束",
+      "steady": "稳态（无 burst、近期无 LOD 触发）",
+      "no_camera": "无相机数据"
+    },
+    "triggerAttribution": [
+      {
+        "kind": "标定 move_5m",
+        "triggers": 247,
+        "slowIn22f": 335,
+        "uploadIn22f": 1,
+        "avgSlowPerTrigger": 1.3562753036437247,
+        "avgUploadPerTrigger": 0.004048582995951417
+      },
+      {
+        "kind": "标定 move_1m+ / combo 平移",
+        "triggers": 1,
+        "slowIn22f": 0,
+        "uploadIn22f": 0,
+        "avgSlowPerTrigger": 0,
+        "avgUploadPerTrigger": 0
+      }
+    ]
+  },
+  "codePathHints": {
+    "lod_gpu_buffer_upload": "syncOctreePendingPlacements → inst.update (WebGPU deferred) → PlayCanvas gsplatManager buffer copy",
+    "trigger:burst_lod_switch": "runPriorityPrefetch: (cameraBurst|notifyCameraMoved) && needsLodSwitch",
+    "trigger:file_landed_lod": "runPriorityPrefetch: needsLodSwitch && fileJustLanded",
+    "trigger:file_landed_fallback": "runPriorityPrefetch: fileJustLanded && syncedInstances===0 fallback",
+    "trigger:stale_limit": "runPriorityPrefetch: staleLoadedNodes >= foregroundLimit",
+    "trigger:stale_cooldown": "runPriorityPrefetch: staleLoadedNodes>0 && staleSyncCooldown<=0",
+    "trigger:frame_ready_loading_drop": "gsplat frame:ready loading count dropped",
+    "main_thread_gap_gc_or_untimed": "gapMs 高且 copyPct 低：GC 或未计入的引擎主线程工作",
+    "heap_pressure": "retainCriticalDownloadFiles / pinLoadedForegroundFiles / suspended queue 导致高 Heap",
+    "deferred_inst_update": "flushDeferredOctreeInstanceUpdates @ frameend",
+    "scan_burst": "buildPriorityFiles full scan（通常不是慢帧主因）"
+  },
+  "recommendation": [
+    "主要 sync 触发：file_landed_fallback(5)",
+    "慢帧 gapMs P50=116ms：配合 Chrome trace 查 GC / 未计时引擎路径",
+    "慢帧 66.0% 处于 burst 窗口：标定大移动/转向后的 18 帧内滞后 buffer upload 是主路径"
+  ]
+}

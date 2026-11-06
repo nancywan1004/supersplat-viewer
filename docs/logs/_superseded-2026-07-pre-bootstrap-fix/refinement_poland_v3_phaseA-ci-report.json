@@ -1,0 +1,132 @@
+{
+  "meta": {
+    "exportedAt": "2026-07-09T06:30:05.250Z",
+    "scene": "http://localhost:3000/?content=https%3A%2F%2Funicity-dev2.bdnrc.org.cn%2Fupload%2Fscene%2F20260605%2Fyunji%2FLOD%2Fpoland%2Flod-meta.json&settings=%2Fassets%2Fsettings%2Fsettings-finland-p0-benchmark.json&webgpu&benchmarkHud&budget=2.5&frameProfile=1&noanim",
+    "ciMode": true,
+    "burstPressure": {
+      "ok": true,
+      "snap": {
+        "tick": {
+          "timingsMs": {
+            "total": 2.100000023841858,
+            "scan": 2,
+            "tracked": 0,
+            "queue": 0.10000002384185791,
+            "sync": 0
+          },
+          "scanMode": "full",
+          "leavesEvaluated": 2048,
+          "visibleLeaves": 1833,
+          "scoredLeaves": 1123,
+          "candidateFileRefs": 1049,
+          "candidateUniqueFiles": 8,
+          "staleLodNodes": 1123,
+          "staleLoadedNodes": 0,
+          "lodDisplayMismatch": 280,
+          "cameraBurstFrames": 43,
+          "inFlight": 8,
+          "queueLen": 0,
+          "staleInFlight": 0,
+          "suspended": 0,
+          "idleQueueDrained": 0,
+          "idleLoadedReclaimed": 0,
+          "pinnedReleased": 0,
+          "priorityDownloadsActive": true,
+          "visibleSplatsCurrentM": 0.000322,
+          "visibleSplatsTargetM": 0.009166,
+          "boostActive": true,
+          "syncedInstances": 1,
+          "pinnedFiles": 8,
+          "integratedLoaderResources": 0,
+          "fileJustLanded": false,
+          "needsLodSwitch": true,
+          "syncTrigger": "burst_lod_switch"
+        },
+        "heap": 895.4672727584839,
+        "sampleCount": 2
+      },
+      "reason": "pinned"
+    }
+  },
+  "metrics": {
+    "burst": {
+      "sampleCount": 222,
+      "tickCount": 222,
+      "heapP50": 1822.1965246200562,
+      "heapP90": 1857.7095861434937,
+      "heapMax": 1869.2965536117554,
+      "heapMin": 870.9206342697144,
+      "heapFirst": 870.9206342697144,
+      "heapLast": 1869.0442991256714,
+      "heapDropFromPeak": 0.2522544860839844,
+      "pinnedMax": 12,
+      "candidateMax": 1049,
+      "staleMax": 1123,
+      "inflightMax": 10,
+      "pinnedReleasedSum": 0,
+      "pinnedReleasedFrames": 0,
+      "idleReclaimedSum": 0,
+      "idleReclaimedFrames": 0,
+      "idleDrainedSum": 76,
+      "tickCaptured": true
+    },
+    "idle": {
+      "sampleCount": 657,
+      "tickCount": 657,
+      "heapP50": 1677.2662391662598,
+      "heapP90": 1739.8998184204102,
+      "heapMax": 1938.1129055023193,
+      "heapMin": 690.6443357467651,
+      "heapFirst": 1868.8659048080444,
+      "heapLast": 1746.4288139343262,
+      "heapDropFromPeak": 191.68409156799316,
+      "pinnedMax": 12,
+      "candidateMax": 0,
+      "staleMax": 2,
+      "inflightMax": 8,
+      "pinnedReleasedSum": 152,
+      "pinnedReleasedFrames": 40,
+      "idleReclaimedSum": 5,
+      "idleReclaimedFrames": 4,
+      "idleDrainedSum": 259,
+      "tickCaptured": true
+    },
+    "pinnedMax": 12,
+    "pinnedReleasedSum": 152,
+    "pinnedReleasedFrames": 40,
+    "idleReclaimedSum": 5,
+    "idleReclaimedFrames": 4,
+    "idleDrainedSum": 335,
+    "tickCount": 879,
+    "sampleCount": 879,
+    "tickCaptured": true,
+    "heapMin": 690.6443357467651,
+    "heapMax": 1938.1129055023193,
+    "heapP50": 1677.2662391662598,
+    "heapFirst": 1868.8659048080444,
+    "heapLast": 1746.4288139343262,
+    "heapDropFromPeak": 191.68409156799316
+  },
+  "refCountDiagnostics": {
+    "available": true,
+    "negative": 0,
+    "min": 0,
+    "max": 1
+  },
+  "evaluation": {
+    "checks": {
+      "tickCaptured": true,
+      "idleReclaimed": true,
+      "heapObserved": true,
+      "heapReturned": true,
+      "pinPressure": true,
+      "pinReleased": true,
+      "refCountHealthy": true
+    },
+    "pass": true,
+    "heapDropRequired": 96.90564527511597,
+    "heapActionable": true,
+    "globalHeapDropToMin": 1247.4685697555542,
+    "globalHeapDropToLast": 191.68409156799316
+  }
+}

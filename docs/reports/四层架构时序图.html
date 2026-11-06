@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>四层架构时序图</title>
+  <style>
+    :root { --bg:#0f1117; --elevated:#1a1d27; --border:#2a2f3a; --text:#e8eaed; --muted:#9aa0a6; --accent:#8ab4f8; --danger:#f28b82; --warning:#fdd663; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif; background:var(--bg); color:var(--text); line-height:1.55; font-size:15px; }
+    main { max-width:960px; margin:0 auto; padding:32px 24px 64px; }
+    h1 { font-size:1.75rem; margin:0 0 8px; }
+    h2 { font-size:1.2rem; margin:32px 0 12px; border-bottom:1px solid var(--border); padding-bottom:8px; }
+    .subtitle { color:var(--muted); font-size:0.9rem; margin-bottom:20px; }
+    .nav { margin-bottom:16px; font-size:0.85rem; }
+    .nav a { color:var(--accent); margin-right:12px; }
+    .pill-row { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+    .pill { padding:4px 10px; border-radius:999px; font-size:0.8rem; border:1px solid var(--border); background:var(--elevated); }
+    .pill.v { border-color:#5b9bd5; color:#5b9bd5; }
+    .pill.n { border-color:#9b72cb; color:#9b72cb; }
+    .pill.vn { border-color:#ff984f; color:#ff984f; }
+    .callout { border-left:3px solid var(--accent); background:rgba(138,180,248,0.08); padding:12px 16px; margin:16px 0; border-radius:0 6px 6px 0; }
+    .callout.warn { border-color:var(--warning); background:rgba(253,214,99,0.08); }
+    .callout strong { display:block; margin-bottom:4px; }
+    .card { background:var(--elevated); border:1px solid var(--border); border-radius:8px; padding:16px 20px; margin:16px 0; overflow-x:auto; }
+    .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    @media(max-width:720px){ .grid-2 { grid-template-columns:1fr; } }
+    table { width:100%; border-collapse:collapse; font-size:0.88rem; margin:8px 0; }
+    th,td { border:1px solid var(--border); padding:8px 10px; text-align:left; }
+    th { background:rgba(255,255,255,0.04); color:var(--muted); }
+    svg { display:block; width:100%; max-width:720px; margin:8px auto; }
+    .mermaid { background:var(--elevated); border:1px solid var(--border); border-radius:8px; padding:16px; overflow-x:auto; }
+    code { background:rgba(255,255,255,0.06); padding:1px 5px; border-radius:3px; font-size:0.85em; }
+    footer { margin-top:48px; padding-top:16px; border-top:1px solid var(--border); font-size:0.82rem; color:var(--muted); }
+  </style>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });
+  </script>
+</head>
+<body>
+<main>
+  <p class="nav">
+    <a href="gsplat-world-data-flow.html">← 数据流总览</a>
+    <a href="Poland与金安桥场景对比.html">Poland vs Jinan</a>
+  </p>
+  <h1>四层架构时序图</h1>
+  <p class="subtitle">必须区分四层：职责不同、耗时归属不同、优化杠杆不同。Poland 慢帧瓶颈在引擎·CPU（gapMs），不是 Viewer tick，也不是 GPU 绘制。</p>
+  <div class="pill-row">
+    <span class="pill v">V = Viewer refinement</span>
+    <span class="pill n">N = PlayCanvas native</span>
+    <span class="pill vn">V+N = Viewer 调度 + 引擎执行</span>
+  </div>
+
+  <div class="callout">
+    <strong>为什么要分四层？</strong>
+    混在一起会误判瓶颈：scan 只要 1ms 却和 bake 120ms 归为一类；网络下载跨帧却和单帧 gap 混淆；writeBuffer 是 CPU 发起但数据落 GPU。四层对齐后，profiler 指标才能对上号。
+  </div>
+
+  <h2>四层职责一览</h2>
+  <div class="card"><svg viewBox="0 0 720 140" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="lbArr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#2a2f3a"/></marker></defs>
+  <g><rect x="8" y="8" width="168" height="124" rx="5" fill="rgba(91,155,213,0.1)" stroke="#5b9bd5"/><text x="92" y="28" text-anchor="middle" fill="#5b9bd5" font-size="11" font-weight="700">Viewer 侧</text><text x="92" y="42" text-anchor="middle" fill="#9aa0a6" font-size="8">决策 + 排队</text><text x="20" y="60" fill="#e8eaed" font-size="9">· 阈值检测</text><text x="20" y="76" fill="#e8eaed" font-size="9">· scan / sync</text><text x="20" y="92" fill="#e8eaed" font-size="9">· burst / pin</text></g>
+  <g><rect x="186" y="8" width="168" height="124" rx="5" fill="rgba(255,152,80,0.1)" stroke="#ff984f"/><text x="270" y="28" text-anchor="middle" fill="#ff984f" font-size="11" font-weight="700">网络层</text><text x="270" y="42" text-anchor="middle" fill="#9aa0a6" font-size="8">字节传输</text><text x="198" y="60" fill="#e8eaed" font-size="9">· HTTP fetch</text><text x="198" y="76" fill="#e8eaed" font-size="9">· CDN</text><text x="198" y="92" fill="#e8eaed" font-size="9">· 跨帧异步</text></g>
+  <g><rect x="364" y="8" width="168" height="124" rx="5" fill="rgba(155,114,203,0.1)" stroke="#9b72cb"/><text x="448" y="28" text-anchor="middle" fill="#9b72cb" font-size="11" font-weight="700">引擎·CPU</text><text x="448" y="42" text-anchor="middle" fill="#9aa0a6" font-size="8">主线程重活</text><text x="376" y="60" fill="#e8eaed" font-size="9">· SOG 解码</text><text x="376" y="76" fill="#e8eaed" font-size="9">· bake / gapMs</text><text x="376" y="92" fill="#e8eaed" font-size="9">· writeBuffer 发起</text></g>
+  <g><rect x="542" y="8" width="168" height="124" rx="5" fill="rgba(107,191,89,0.1)" stroke="#6bbf59"/><text x="626" y="28" text-anchor="middle" fill="#6bbf59" font-size="11" font-weight="700">引擎·GPU</text><text x="626" y="42" text-anchor="middle" fill="#9aa0a6" font-size="8">显存 + 绘制</text><text x="554" y="60" fill="#e8eaed" font-size="9">· Work Buffer</text><text x="554" y="76" fill="#e8eaed" font-size="9">· compaction</text><text x="554" y="92" fill="#e8eaed" font-size="9">· drawCalls</text></g>
+  <line x1="176" y1="70" x2="186" y2="70" stroke="#2a2f3a" marker-end="url(#lbArr)"/>
+  <line x1="354" y1="70" x2="364" y2="70" stroke="#2a2f3a" marker-end="url(#lbArr)"/>
+  <line x1="532" y1="70" x2="542" y2="70" stroke="#2a2f3a" marker-end="url(#lbArr)"/>
+  <text x="360" y="132" text-anchor="middle" fill="#9aa0a6" font-size="8">数据流：Viewer 决策 → 网络拉文件 → CPU 解码+bake → GPU 渲染</text>
+</svg></div>
+
+  <h2>时序图（16 步 · Mermaid）</h2>
+  <div class="card"><pre class="mermaid">sequenceDiagram
+    participant cam as 相机
+    participant viewer as Viewer
+    participant net as Network
+    participant cpu as Engine·CPU
+    participant gpu as Engine·GPU
+    cam-&gt;&gt;viewer: 1. 平移 / 转向 / 缩放 (平移&gt;3cm 或 转向&gt;10°) [V]
+    viewer-&gt;&gt;viewer: 3. burst = 18 帧 (Viewer 专属，native 无) [V]
+    viewer-&gt;&gt;viewer: 4. runPriorityPrefetch() (Viewer 总入口；native 用 GSplatWorld.updateStreaming) [V]
+    viewer-&gt;&gt;viewer: 5. scan：视锥 + LOD 评估 (Viewer buildPriorityFiles；native 用 evaluateNodeLods) [V]
+    viewer-&gt;&gt;net: 6. prioritizeFileLoad → fetch (并发 2→8，堵槽时最高 64；仅 priority URL) [V+N]
+    net-&gt;&gt;cpu: 7. SOG 字节流到达 (HTTP 完成回调) [N]
+    cpu-&gt;&gt;cpu: 8. WebP 解码 → SOG Resource (引擎 AssetLoader) [N]
+    viewer-&gt;&gt;viewer: 9. syncOctreePending() (Viewer 专属 sync 策略) [V]
+    viewer-&gt;&gt;cpu: 10. frameend: inst.update() (Viewer deferred；native 在 updateStreaming 内) [V+N]
+    cpu-&gt;&gt;cpu: 11. applyLodChanges (B 层：改 currentLod + intervals) [N]
+    cpu-&gt;&gt;cpu: 12. Allocator (C 层：free/allocate → MemBlock) [N]
+    cpu-&gt;&gt;cpu: 13. assignSplatOffsets + staging (索引表 + CPU 填数据 · gapMs 热点) [N]
+    cpu-&gt;&gt;gpu: 14. writeBuffer 上传 (staging → VRAM) [N]
+    cpu-&gt;&gt;gpu: 15. compaction → sort → forward (gpu.totalMs ~16–26ms) [N]
+    gpu-&gt;&gt;cam: 16. 画面上屏 [N]</pre></div>
+
+  <h2>时序步骤明细</h2>
+  <table><thead><tr><th>#</th><th>路径</th><th>动作</th><th>备注</th><th>归属</th></tr></thead><tbody><tr><td>1</td><td>cam → viewer</td><td>平移 / 转向 / 缩放</td><td>平移&gt;3cm 或 转向&gt;10°</td><td>V</td></tr>
+<tr><td>3</td><td>viewer → viewer</td><td>burst = 18 帧</td><td>Viewer 专属，native 无</td><td>V</td></tr>
+<tr><td>4</td><td>viewer → viewer</td><td>runPriorityPrefetch()</td><td>Viewer 总入口；native 用 GSplatWorld.updateStreaming</td><td>V</td></tr>
+<tr><td>5</td><td>viewer → viewer</td><td>scan：视锥 + LOD 评估</td><td>Viewer buildPriorityFiles；native 用 evaluateNodeLods</td><td>V</td></tr>
+<tr><td>6</td><td>viewer → net</td><td>prioritizeFileLoad → fetch</td><td>并发 2→8，堵槽时最高 64；仅 priority URL</td><td>V+N</td></tr>
+<tr><td>7</td><td>net → cpu</td><td>SOG 字节流到达</td><td>HTTP 完成回调</td><td>N</td></tr>
+<tr><td>8</td><td>cpu → cpu</td><td>WebP 解码 → SOG Resource</td><td>引擎 AssetLoader</td><td>N</td></tr>
+<tr><td>9</td><td>viewer → viewer</td><td>syncOctreePending()</td><td>Viewer 专属 sync 策略</td><td>V</td></tr>
+<tr><td>10</td><td>viewer → cpu</td><td>frameend: inst.update()</td><td>Viewer deferred；native 在 updateStreaming 内</td><td>V+N</td></tr>
+<tr><td>11</td><td>cpu → cpu</td><td>applyLodChanges</td><td>B 层：改 currentLod + intervals</td><td>N</td></tr>
+<tr><td>12</td><td>cpu → cpu</td><td>Allocator</td><td>C 层：free/allocate → MemBlock</td><td>N</td></tr>
+<tr><td>13</td><td>cpu → cpu</td><td>assignSplatOffsets + staging</td><td>索引表 + CPU 填数据 · gapMs 热点</td><td>N</td></tr>
+<tr><td>14</td><td>cpu → gpu</td><td>writeBuffer 上传</td><td>staging → VRAM</td><td>N</td></tr>
+<tr><td>15</td><td>cpu → gpu</td><td>compaction → sort → forward</td><td>gpu.totalMs ~16–26ms</td><td>N</td></tr>
+<tr><td>16</td><td>gpu → cam</td><td>画面上屏</td><td>—</td><td>N</td></tr></tbody></table>
+
+  <h2 id="bake">⑪–⑭ Bake 四步 · 是什么？</h2>
+  <div class="card"><pre class="mermaid">flowchart LR
+  s11["⑪ applyLodChanges\nB层 intervals"]
+  s12["⑫ Allocator\nMemBlock 订座"]
+  s13["⑬ assign + staging\n索引 + CPU 拷数据"]
+  s14["⑭ writeBuffer\n→ Work Buffer"]
+  s11 --> s12 --> s13 --> s14</pre></div>
+  <table><thead><tr><th>步骤</th><th>层</th><th>粒度</th><th>做什么</th><th>时序#</th></tr></thead><tbody><tr><td>applyLodChanges</td><td>B 逻辑层</td><td>叶/块</td><td>按 optimalLod 改 currentLod；更新 filePlacements.intervals（读 SOG 哪段）</td><td>⑪</td></tr>
+<tr><td>Allocator</td><td>C 物理层</td><td>MemBlock</td><td>free 旧段 + allocate 新 size → _allocationMap[allocId]={offset,size}</td><td>⑫</td></tr>
+<tr><td>assignSplatOffsets</td><td>C 物理层</td><td>splat</td><td>读 MemBlock.offset → intervalOffsets[]；needsUploadIds.add(allocId)</td><td>⑬</td></tr>
+<tr><td>staging</td><td>C 物理层</td><td>字节</td><td>CPU 从 SOG Resource 读 position/rot/scale/color 写入临时缓冲</td><td>⑬</td></tr></tbody></table>
+  <table><thead><tr><th>#</th><th>步骤</th><th>一句话</th></tr></thead><tbody><tr><td>⑪</td><td>applyLodChanges</td><td>换菜单：改读哪段 SOG</td></tr>
+<tr><td>⑫</td><td>Allocator</td><td>订座：WB 里划 slot 段</td></tr>
+<tr><td>⑬a</td><td>assignSplatOffsets</td><td>点名：每 splat 索引 + dirty 标记</td></tr>
+<tr><td>⑬b</td><td>staging</td><td>备菜：SOG → CPU 缓冲</td></tr>
+<tr><td>⑭</td><td>writeBuffer</td><td>上菜：CPU → GPU Work Buffer</td></tr></tbody></table>
+  <div class="callout warn">
+    <strong>和 Allocator 的区别</strong>
+    Allocator 按<strong>块</strong>订 WB 座位（⑫）；assignSplatOffsets 按<strong>splat</strong>建索引（⑬a）；staging 按<strong>字节</strong>拷 SOG 属性（⑬b）。Poland gapMs 主要在 ⑬，不是 ⑫。
+  </div>
+
+  <h2>Bake 实体关系（ERD）</h2>
+  <div class="card"><pre class="mermaid">erDiagram
+  GSplatOctreeInstance ||--o{ NodeInfo : nodeInfos
+  GSplatOctreeInstance ||--o{ GSplatPlacement : filePlacements
+  GSplatWorld ||--o{ MemBlock : allocationMap
+  GSplatWorld ||--|| WorkBuffer : owns
+  GSplatWorldState ||--o{ GSplatInfo : splats
+  NodeInfo ||--|| MemBlock : allocId
+  GSplatInfo }o--|| MemBlock : intervalOffsets
+  GSplatPlacement ||--o{ GSplatInfo : snapshot intervals</pre></div>
+  <p class="subtitle" style="margin-top:8px;font-size:0.85rem">⑪ 改 B 层 intervals → ⑫ _allocationMap 订 slot → ⑬ GSplatInfo 填 intervalOffsets + staging → ⑭ WorkBuffer。allocId 不变，变 MemBlock offset/size。</p>
+
+  <h2>两帧对比（按层标注）</h2>
+  <div class="card"><svg viewBox="0 0 820 220" xmlns="http://www.w3.org/2000/svg">
+  <rect x="8" y="0" width="400" height="210" rx="6" fill="#1a1d27" stroke="#5b9bd5"/>
+  <text x="20" y="22" fill="#5b9bd5" font-size="11" font-weight="700">帧 N：移动当帧 — 网络未就绪</text>
+  <text x="24" y="44" fill="#e8eaed" font-size="9">[Viewer] ②③ burst 开启 → ⑤ scan 算 target LOD</text>
+  <text x="24" y="62" fill="#e8eaed" font-size="9">[Viewer→网络] ⑥ fetch 发起</text>
+  <text x="24" y="80" fill="#e8eaed" font-size="9">[网络→CPU] ⑦⑧ 尚未完成</text>
+  <text x="24" y="98" fill="#e8eaed" font-size="9">[Viewer] ⑨ sync 跳过 → 无 bake</text>
+  <text x="24" y="116" fill="#e8eaed" font-size="9">→ 各层：仅 Viewer 有工作，CPU/GPU 无换档</text>
+  <rect x="412" y="0" width="400" height="210" rx="6" fill="#1a1d27" stroke="#f28b82"/>
+  <text x="424" y="22" fill="#f28b82" font-size="11" font-weight="700">帧 N+K：文件就绪 — CPU bake 扎堆</text>
+  <text x="428" y="44" fill="#e8eaed" font-size="9">[Viewer] ⑤ scan → ⑨ sync → needsLodUpdate</text>
+  <text x="428" y="62" fill="#e8eaed" font-size="9">[Viewer→CPU] ⑩ frameend inst.update</text>
+  <text x="428" y="80" fill="#e8eaed" font-size="9">[CPU] ⑪ apply → ⑫ allocate → ⑬ assign+staging → ⑭ writeBuffer</text>
+  <text x="428" y="98" fill="#e8eaed" font-size="9">[GPU] ⑮ compaction + draw</text>
+  <text x="428" y="116" fill="#e8eaed" font-size="9">→ 慢帧：gapMs 在 CPU 层，不是 Viewer tick</text>
+</svg></div>
+
+  <h2>⑥ fetch 并发限制</h2>
+  <table><thead><tr><th>参数</th><th>值</th><th>何时生效</th></tr></thead><tbody><tr><td>defaultConcurrent</td><td>2</td><td>静止 / 退出 boost</td></tr>
+<tr><td>boostConcurrent</td><td>8（桌面）</td><td>burst 或 needsBoost 时默认</td></tr>
+<tr><td>burstConcurrent</td><td>12</td><td>priority 被 stale 占槽时的下限</td></tr>
+<tr><td>extremeConcurrent</td><td>64（硬顶）</td><td>stale 堵槽时 maxConcurrent 上限</td></tr>
+<tr><td>priority gate</td><td>仅 priorityUrls</td><td>Viewer patch：非优先 URL 挂起</td></tr>
+<tr><td>foregroundLimit</td><td>64 个 file</td><td>单帧排队上限（tracked）</td></tr>
+<tr><td>pinLimit</td><td>12 个 file</td><td>incRef 保活上限</td></tr></tbody></table>
+  <div class="callout">
+    <strong>不是无限并发</strong>
+    同时 in-flight 的 HTTP 请求由 loader.maxConcurrentLoads 限制（默认 2，boost 8，堵槽时最高 64）。此外 Viewer 还会 gate：只有 priorityUrls 里的 URL 允许入队，其余挂到 __refinementSuspendedQueue。
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3 style="margin-top:0;color:var(--muted)">时序图步骤归属（V / N）</h3>
+      <table><thead><tr><th>步骤</th><th>归属</th><th>说明</th></tr></thead><tbody><tr><td>① 相机输入</td><td>—</td><td>—</td></tr>
+<tr><td>②③ burst / notify</td><td>V</td><td>OctreeRefinementController</td></tr>
+<tr><td>④ runPriorityPrefetch</td><td>V</td><td>native 对应 GSplatWorld.updateStreaming</td></tr>
+<tr><td>⑤ scan</td><td>V</td><td>native 对应 evaluateNodeLods（无 viewport 打分）</td></tr>
+<tr><td>⑥ fetch 排队</td><td>V+N</td><td>V：优先级/并发/ gate；N：AssetLoader HTTP</td></tr>
+<tr><td>⑦⑧ 下载+解码</td><td>N</td><td>PlayCanvas AssetLoader</td></tr>
+<tr><td>⑨ sync</td><td>V</td><td>syncOctreePending；native 在引擎内自动切档</td></tr>
+<tr><td>⑩ inst.update 触发</td><td>V+N</td><td>V：deferred 时机；N：进入 bake 链</td></tr>
+<tr><td>⑪ applyLodChanges</td><td>N</td><td>B 层：改 intervals / currentLod</td></tr>
+<tr><td>⑫ Allocator</td><td>N</td><td>C 层：MemBlock 订座 free/allocate</td></tr>
+<tr><td>⑬ assign + staging</td><td>N</td><td>索引 + CPU 拷 SOG 属性 · gapMs 热点</td></tr>
+<tr><td>⑭ writeBuffer</td><td>N</td><td>staging → GPU Work Buffer</td></tr>
+<tr><td>⑮⑯ GPU</td><td>N</td><td>compaction + draw + 上屏</td></tr></tbody></table>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;color:var(--muted)">Viewer refinement vs Native</h3>
+      <table><thead><tr><th>能力</th><th>Native（Billions）</th><th>Viewer refinement</th></tr></thead><tbody><tr><td>相机 burst 18 帧</td><td>无</td><td>有</td></tr>
+<tr><td>中心优先 scan 打分</td><td>无</td><td>buildPriorityFiles</td></tr>
+<tr><td>priority URL gate</td><td>无</td><td>patchAssetLoaderPriority</td></tr>
+<tr><td>动态 maxConcurrent</td><td>引擎默认</td><td>2→8→最高 64</td></tr>
+<tr><td>idle 冻结下载</td><td>无</td><td>静止 30 帧后 drain</td></tr>
+<tr><td>sync 策略 / cooldown</td><td>引擎内置</td><td>burst_lod_switch 等</td></tr>
+<tr><td>WebGPU deferred update</td><td>无</td><td>frameend inst.update</td></tr>
+<tr><td>work buffer bake</td><td>有</td><td>有（同引擎）</td></tr>
+<tr><td>frame:ready / loadingCount</td><td>有</td><td>有（同引擎）</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3 style="margin-top:0;color:var(--muted)">四层边界定义</h3>
+      <table><thead><tr><th>层</th><th>代码</th><th>职责</th><th>profiler</th></tr></thead><tbody><tr><td>Viewer 侧</td><td>bootstrap.ts · refinement-controller.ts</td><td>LOD 决策、burst、sync 排队、pin 文件</td><td>tick.total · scan/sync</td></tr>
+<tr><td>网络层</td><td>HTTP fetch · CDN</td><td>SOG 文件字节传输</td><td>通常不计入 frameMs（异步）</td></tr>
+<tr><td>引擎·CPU</td><td>PlayCanvas Asset + GSplatWorld</td><td>SOG 解码、inst.update、bake、writeBuffer 发起</td><td>gapMs · copyPct · jsHeap</td></tr>
+<tr><td>引擎·GPU</td><td>WebGPU passes</td><td>Work Buffer 驻留、compaction、绘制</td><td>gpu.totalMs · drawCalls · vramTexMb</td></tr></tbody></table>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;color:var(--muted)">profiler 指标归属</h3>
+      <table><thead><tr><th>指标</th><th>归属层</th><th>对应步骤</th></tr></thead><tbody><tr><td>refinement.tick.total</td><td>Viewer</td><td>scan + sync 调度</td></tr>
+<tr><td>refinement.gapMs</td><td>引擎·CPU</td><td>bake 残差（⑪–⑭ CPU 部分）</td></tr>
+<tr><td>cpu.gsplatBufferCopyPct</td><td>引擎·CPU</td><td>buffer 拷贝任务占比</td></tr>
+<tr><td>cpu.renderMs</td><td>引擎·CPU + GPU</td><td>render 阶段墙钟（混合）</td></tr>
+<tr><td>gpu.totalMs</td><td>引擎·GPU</td><td>compaction + draw</td></tr>
+<tr><td>drawCalls</td><td>引擎·GPU</td><td>渲染批次数</td></tr>
+<tr><td>jsHeapMb</td><td>引擎·CPU</td><td>SOG Resource 常驻</td></tr>
+<tr><td>vramTexMb</td><td>引擎·GPU</td><td>Work Buffer 等</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <strong>生产路径 = Native 引擎 + Viewer refinement 叠加</strong>
+    Billions / native benchmark 只跑引擎层（无 OctreeRefinementController）。主 Viewer 在 frame:ready 解锁后启动 refinement，叠加 burst、priority gate、动态并发、自定义 sync。⑥ 的「高并发」是 Viewer 动态调高引擎 loader.maxConcurrentLoads，不是无上限。
+  </div>
+
+  <footer>
+    <p>Canvas 源：<code>canvases/camera-to-workbuffer-flow.canvas.tsx</code></p>
+    <p>重新生成：<code>node scripts/export-camera-to-workbuffer-html.mjs</code></p>
+  </footer>
+</main>
+</body>
+</html>

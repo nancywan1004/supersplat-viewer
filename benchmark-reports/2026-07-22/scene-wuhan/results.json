@@ -1,0 +1,87 @@
+{
+  "benchmarkAxis": "profile",
+  "suite": "public/benchmark-suites/scene-wuhan.json",
+  "baseUrl": "http://localhost:3000/",
+  "renderer": "webgpu",
+  "runConditions": {
+    "coldStart": true,
+    "browserSession": "fresh-chromium-per-case",
+    "chromiumHttpCache": "disabled-cdp-clearBrowserCache-zero-disk-cache",
+    "warmup": {
+      "enabled": false,
+      "discarded": false,
+      "skippedReason": "cold-start-default"
+    },
+    "notes": [
+      "Cold start (default): each case launches a new Chromium, blocks service workers, disables HTTP cache via CDP, clears browser cache, and uses --disk-cache-size=0.",
+      "Playwright uses an ephemeral profile (not your daily Chrome); no cookies/storage persist after browser.close().",
+      "OS page cache, DNS, and GPU shader/pipeline cache are NOT reset by this script — cross-run comparisons on one machine may still drift."
+    ]
+  },
+  "cases": [
+    {
+      "label": "wuhan-current-profile",
+      "lodRuntime": "refinement",
+      "firstFrameMs": 3441.100000023842,
+      "settleStartMs": 3441.2000000476837,
+      "fpsP50": null,
+      "fpsP95": null,
+      "gsplatsAvgM": null,
+      "jsHeapAtFirstFrameMb": 80.27305221557617,
+      "vramTexAtFirstFrameMb": 150.02180004119873,
+      "jsHeapPeakMb": 80.27305221557617,
+      "vramTexPeakMb": 150.02180004119873,
+      "rendererUsed": "compute",
+      "bakeAcceptance": {
+        "sampleCount": 203,
+        "copyPctGe95": {
+          "frames": 1,
+          "ratio": 0.005
+        },
+        "uploadedOverTotal": {
+          "n": 16,
+          "p50": 0.01749475157452764,
+          "p90": 0.24895104895104894,
+          "max": 1,
+          "avg": 0.09747730559985796
+        },
+        "uploadMbEst": {
+          "n": 21,
+          "p50": 0.36,
+          "p90": 1.16,
+          "max": 2.67,
+          "avg": 0.6209523809523807
+        },
+        "bakePassesEst": {
+          "n": 21,
+          "p50": 1,
+          "p90": 1,
+          "max": 1,
+          "avg": 0.7619047619047619
+        },
+        "worldStateFullRebuild": {
+          "frames": 6,
+          "ratio": 0.03
+        },
+        "dirtyForcedWorkBufferRebuild": {
+          "frames": 1,
+          "ratio": 0.005
+        },
+        "syncAdvance": {
+          "horizonFrames": 5,
+          "syncFrames": 1,
+          "advancedWithinHorizon": 0,
+          "advanceRatio": 0,
+          "worldVersionAdvanced": 0,
+          "currentLodAdvanced": 0
+        },
+        "staleLoadedNodes": {
+          "framesWithStale": 11,
+          "maxConsecutiveFrames": 7
+        }
+      },
+      "timestamp": "2026-07-22T06:44:37.204Z",
+      "bottleneckHint": "scheduler"
+    }
+  ]
+}

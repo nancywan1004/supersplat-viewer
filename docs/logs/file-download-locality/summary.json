@@ -1,0 +1,488 @@
+[
+  {
+    "id": "florenz",
+    "label": "Florenz",
+    "url": "https://unicity-dev2.bdnrc.org.cn/upload/scene/20260605/yunji/LOD/florenz/lod-meta.json",
+    "lod": 0,
+    "fileCount": 258,
+    "leafCount": 1049,
+    "sceneDiag": 181.17390712463796,
+    "stats": {
+      "diagP50": 17.521609352783322,
+      "diagP90": 31.3700868007948,
+      "diagMax": 103.43298428519941,
+      "diagMean": 20.59942140482514,
+      "sprawlP50": 0.09671154986313449,
+      "sprawlP90": 0.17314903287488226,
+      "leavesPerFileP50": 4,
+      "leavesPerFileP90": 4,
+      "leavesPerFileMax": 7,
+      "centerFanoutFiles": 144,
+      "centerFanoutLeaves": 489,
+      "centerRadius": 40
+    },
+    "hist": [
+      {
+        "label": "0–10",
+        "lo": 0,
+        "hi": 10,
+        "count": 1,
+        "pct": 0.3875968992248062
+      },
+      {
+        "label": "10–20",
+        "lo": 10,
+        "hi": 20,
+        "count": 161,
+        "pct": 62.4031007751938
+      },
+      {
+        "label": "20–40",
+        "lo": 20,
+        "hi": 40,
+        "count": 84,
+        "pct": 32.55813953488372
+      },
+      {
+        "label": "40–80",
+        "lo": 40,
+        "hi": 80,
+        "count": 11,
+        "pct": 4.263565891472868
+      },
+      {
+        "label": "80–120",
+        "lo": 80,
+        "hi": 120,
+        "count": 1,
+        "pct": 0.3875968992248062
+      },
+      {
+        "label": "120–160",
+        "lo": 120,
+        "hi": 160,
+        "count": 0,
+        "pct": 0
+      },
+      {
+        "label": "160–240",
+        "lo": 160,
+        "hi": 240,
+        "count": 0,
+        "pct": 0
+      },
+      {
+        "label": "≥240",
+        "lo": 240,
+        "hi": 1000000000,
+        "count": 0,
+        "pct": 0
+      }
+    ]
+  },
+  {
+    "id": "wuhan-v6",
+    "label": "Wuhan-v6",
+    "url": "https://unicity-dev2.bdnrc.org.cn/upload/scene/20260605/yunji/LOD/wuhan-v6/lod-meta.json",
+    "lod": 0,
+    "fileCount": 171,
+    "leafCount": 1171,
+    "sceneDiag": 321.0740239422134,
+    "stats": {
+      "diagP50": 11.676509435745812,
+      "diagP90": 66.34941560986421,
+      "diagMax": 199.80291602880322,
+      "diagMean": 25.160586240079937,
+      "sprawlP50": 0.036367032413208676,
+      "sprawlP90": 0.20664834481224092,
+      "leavesPerFileP50": 3,
+      "leavesPerFileP90": 13,
+      "leavesPerFileMax": 82,
+      "centerFanoutFiles": 20,
+      "centerFanoutLeaves": 148,
+      "centerRadius": 40
+    },
+    "hist": [
+      {
+        "label": "0–10",
+        "lo": 0,
+        "hi": 10,
+        "count": 72,
+        "pct": 42.10526315789474
+      },
+      {
+        "label": "10–20",
+        "lo": 10,
+        "hi": 20,
+        "count": 56,
+        "pct": 32.748538011695906
+      },
+      {
+        "label": "20–40",
+        "lo": 20,
+        "hi": 40,
+        "count": 16,
+        "pct": 9.35672514619883
+      },
+      {
+        "label": "40–80",
+        "lo": 40,
+        "hi": 80,
+        "count": 16,
+        "pct": 9.35672514619883
+      },
+      {
+        "label": "80–120",
+        "lo": 80,
+        "hi": 120,
+        "count": 3,
+        "pct": 1.7543859649122806
+      },
+      {
+        "label": "120–160",
+        "lo": 120,
+        "hi": 160,
+        "count": 5,
+        "pct": 2.9239766081871346
+      },
+      {
+        "label": "160–240",
+        "lo": 160,
+        "hi": 240,
+        "count": 3,
+        "pct": 1.7543859649122806
+      },
+      {
+        "label": "≥240",
+        "lo": 240,
+        "hi": 1000000000,
+        "count": 0,
+        "pct": 0
+      }
+    ]
+  },
+  {
+    "id": "nanguangchang-v6-0.5",
+    "label": "南广场 v6-0.5",
+    "url": "https://unicity-dev2.bdnrc.org.cn/upload/scene/20260605/yunji/LOD/nanguangchang-v6-0.5/lod-meta.json",
+    "lod": 0,
+    "fileCount": 368,
+    "leafCount": 6430,
+    "sceneDiag": 589.590995625034,
+    "stats": {
+      "diagP50": 28.373761715314807,
+      "diagP90": 114.17385930566462,
+      "diagMax": 331.48717334089537,
+      "diagMean": 49.53620302644544,
+      "sprawlP50": 0.04812448277849862,
+      "sprawlP90": 0.19364925881309847,
+      "leavesPerFileP50": 8,
+      "leavesPerFileP90": 48,
+      "leavesPerFileMax": 121,
+      "centerFanoutFiles": 120,
+      "centerFanoutLeaves": 1175,
+      "centerRadius": 40
+    },
+    "hist": [
+      {
+        "label": "0–10",
+        "lo": 0,
+        "hi": 10,
+        "count": 33,
+        "pct": 8.967391304347826
+      },
+      {
+        "label": "10–20",
+        "lo": 10,
+        "hi": 20,
+        "count": 106,
+        "pct": 28.804347826086957
+      },
+      {
+        "label": "20–40",
+        "lo": 20,
+        "hi": 40,
+        "count": 88,
+        "pct": 23.91304347826087
+      },
+      {
+        "label": "40–80",
+        "lo": 40,
+        "hi": 80,
+        "count": 70,
+        "pct": 19.02173913043478
+      },
+      {
+        "label": "80–120",
+        "lo": 80,
+        "hi": 120,
+        "count": 37,
+        "pct": 10.054347826086957
+      },
+      {
+        "label": "120–160",
+        "lo": 120,
+        "hi": 160,
+        "count": 14,
+        "pct": 3.8043478260869565
+      },
+      {
+        "label": "160–240",
+        "lo": 160,
+        "hi": 240,
+        "count": 17,
+        "pct": 4.619565217391305
+      },
+      {
+        "label": "≥240",
+        "lo": 240,
+        "hi": 1000000000,
+        "count": 3,
+        "pct": 0.8152173913043478
+      }
+    ]
+  },
+  {
+    "id": "poland-new-0.5",
+    "label": "Poland-new-0.5",
+    "url": "https://unicity-dev2.bdnrc.org.cn/upload/scene/20260605/yunji/LOD/poland-new-0.5/lod-meta.json",
+    "lod": 0,
+    "fileCount": 1066,
+    "leafCount": 32758,
+    "sceneDiag": 4370.7356830572,
+    "stats": {
+      "diagP50": 222.14067225492593,
+      "diagP90": 427.16002736970836,
+      "diagMax": 1872.682201022576,
+      "diagMean": 264.886389732794,
+      "sprawlP50": 0.0508245495411759,
+      "sprawlP90": 0.09773183700528022,
+      "leavesPerFileP50": 31,
+      "leavesPerFileP90": 32,
+      "leavesPerFileMax": 36,
+      "centerFanoutFiles": 5,
+      "centerFanoutLeaves": 28,
+      "centerRadius": 40
+    },
+    "hist": [
+      {
+        "label": "0–10",
+        "lo": 0,
+        "hi": 10,
+        "count": 0,
+        "pct": 0
+      },
+      {
+        "label": "10–20",
+        "lo": 10,
+        "hi": 20,
+        "count": 0,
+        "pct": 0
+      },
+      {
+        "label": "20–40",
+        "lo": 20,
+        "hi": 40,
+        "count": 0,
+        "pct": 0
+      },
+      {
+        "label": "40–80",
+        "lo": 40,
+        "hi": 80,
+        "count": 0,
+        "pct": 0
+      },
+      {
+        "label": "80–120",
+        "lo": 80,
+        "hi": 120,
+        "count": 38,
+        "pct": 3.5647279549718576
+      },
+      {
+        "label": "120–160",
+        "lo": 120,
+        "hi": 160,
+        "count": 171,
+        "pct": 16.04127579737336
+      },
+      {
+        "label": "160–240",
+        "lo": 160,
+        "hi": 240,
+        "count": 386,
+        "pct": 36.210131332082554
+      },
+      {
+        "label": "≥240",
+        "lo": 240,
+        "hi": 1000000000,
+        "count": 471,
+        "pct": 44.18386491557223
+      }
+    ]
+  },
+  {
+    "id": "bda",
+    "label": "BDA",
+    "url": "https://unicity-dev2.bdnrc.org.cn/upload/scene/20260605/yunji/LOD/bda/lod-meta.json",
+    "lod": 0,
+    "fileCount": 287,
+    "leafCount": 3772,
+    "sceneDiag": 365.2056134295011,
+    "stats": {
+      "diagP50": 31.189766531721286,
+      "diagP90": 73.31087897514304,
+      "diagMax": 183.50737734468802,
+      "diagMean": 39.22990958745529,
+      "sprawlP50": 0.08540330538413841,
+      "sprawlP90": 0.20073864223145324,
+      "leavesPerFileP50": 8,
+      "leavesPerFileP90": 30,
+      "leavesPerFileMax": 65,
+      "centerFanoutFiles": 12,
+      "centerFanoutLeaves": 71,
+      "centerRadius": 40
+    },
+    "hist": [
+      {
+        "label": "0–10",
+        "lo": 0,
+        "hi": 10,
+        "count": 8,
+        "pct": 2.7874564459930316
+      },
+      {
+        "label": "10–20",
+        "lo": 10,
+        "hi": 20,
+        "count": 50,
+        "pct": 17.421602787456447
+      },
+      {
+        "label": "20–40",
+        "lo": 20,
+        "hi": 40,
+        "count": 133,
+        "pct": 46.34146341463415
+      },
+      {
+        "label": "40–80",
+        "lo": 40,
+        "hi": 80,
+        "count": 74,
+        "pct": 25.78397212543554
+      },
+      {
+        "label": "80–120",
+        "lo": 80,
+        "hi": 120,
+        "count": 18,
+        "pct": 6.2717770034843205
+      },
+      {
+        "label": "120–160",
+        "lo": 120,
+        "hi": 160,
+        "count": 2,
+        "pct": 0.6968641114982579
+      },
+      {
+        "label": "160–240",
+        "lo": 160,
+        "hi": 240,
+        "count": 2,
+        "pct": 0.6968641114982579
+      },
+      {
+        "label": "≥240",
+        "lo": 240,
+        "hi": 1000000000,
+        "count": 0,
+        "pct": 0
+      }
+    ]
+  },
+  {
+    "id": "jingdong-v2",
+    "label": "京东-v2",
+    "url": "https://unicity-dev2.bdnrc.org.cn/upload/scene/20260605/yunji/LOD/jingdong-v2/lod-meta.json",
+    "lod": 0,
+    "fileCount": 268,
+    "leafCount": 4640,
+    "sceneDiag": 731.7526287938773,
+    "stats": {
+      "diagP50": 44.170361737181565,
+      "diagP90": 104.76899348676228,
+      "diagMax": 532.3491459705822,
+      "diagMean": 60.465877559585415,
+      "sprawlP50": 0.06036242303630129,
+      "sprawlP90": 0.14317542481459808,
+      "leavesPerFileP50": 13,
+      "leavesPerFileP90": 38,
+      "leavesPerFileMax": 83,
+      "centerFanoutFiles": 49,
+      "centerFanoutLeaves": 598,
+      "centerRadius": 40
+    },
+    "hist": [
+      {
+        "label": "0–10",
+        "lo": 0,
+        "hi": 10,
+        "count": 1,
+        "pct": 0.373134328358209
+      },
+      {
+        "label": "10–20",
+        "lo": 10,
+        "hi": 20,
+        "count": 23,
+        "pct": 8.582089552238806
+      },
+      {
+        "label": "20–40",
+        "lo": 20,
+        "hi": 40,
+        "count": 86,
+        "pct": 32.08955223880597
+      },
+      {
+        "label": "40–80",
+        "lo": 40,
+        "hi": 80,
+        "count": 113,
+        "pct": 42.16417910447761
+      },
+      {
+        "label": "80–120",
+        "lo": 80,
+        "hi": 120,
+        "count": 22,
+        "pct": 8.208955223880597
+      },
+      {
+        "label": "120–160",
+        "lo": 120,
+        "hi": 160,
+        "count": 8,
+        "pct": 2.985074626865672
+      },
+      {
+        "label": "160–240",
+        "lo": 160,
+        "hi": 240,
+        "count": 9,
+        "pct": 3.3582089552238807
+      },
+      {
+        "label": "≥240",
+        "lo": 240,
+        "hi": 1000000000,
+        "count": 6,
+        "pct": 2.2388059701492535
+      }
+    ]
+  }
+]
